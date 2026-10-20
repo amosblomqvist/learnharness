@@ -8,7 +8,8 @@ import { DictationBar, joinDictation, useDictation } from "@/components/dictatio
 import { useFieldCycle } from "@/components/field-cycle";
 import { SidebarToggle } from "@/components/sidebar";
 import { SetupDialog } from "@/components/setup-dialog";
-import { useStrongKeyless, useZeroKeys, ZeroKeysPill } from "@/components/setup-cta";
+import { useModelAccess, SubscriptionPill, ZeroKeysPill } from "@/components/setup-cta";
+import { useSettingsDialog } from "@/components/settings/settings-dialog";
 import { StatsBar } from "@/components/stats-bar";
 import { ChainTableOverlay } from "@/components/chain-table.tsx";
 import { ComposerActions, NodePickerControl } from "@/components/composer-actions";
@@ -276,18 +277,26 @@ export function NewSession({ initialConfigured, mode = "teach" }: { initialConfi
 	// Save stores the slots and never sends (owner ruling 2026-10-09) —
 	// the learner sends the draft themselves.
 	const [configured, setConfigured] = useState(initialConfigured);
-	// The zero-keys truth (zero-keys wave): no provider key = the pill
-	// takes precedence over the models CTA (keys come first in the chain).
-	const zeroKeys = useZeroKeys();
-	// The strong slot's keyless truth (pre-send key guards, owner interlude
-	// 2026-09-25): keys may exist generally while the STRONG slot's pinned
-	// provider has none — the same skip-everything treatment on send.
-	const strongKeyless = useStrongKeyless();
+	// The access truth (zero-keys wave + subscription fix): a provider key
+	// and a connected subscription are independent authorization sources
+	// (no cross-source fallback). The shared hook returns which surface (if
+	// any) must guide the send — the first-key dialog for ordinary API
+	// keys, the Subscription settings section for a selected-but-not-
+	// connected subscription.
+	const access = useModelAccess();
+	const { open: openSettings } = useSettingsDialog();
 	const [setupOpen, setSetupOpen] = useState(false);
 
 	const send = useCallback(() => {
 		const draft = textRef.current.trim();
 		if (!draft || busy) return;
+		// A selected subscription that is known not-connected guides to its
+		// own login/status surface; it must never read as "missing API key".
+		if (access.blocked === "subscription_pending") return;
+		if (access.blocked === "subscription") {
+			openSettings("subscription");
+			return;
+		}
 		if (!configured) {
 			setSetupOpen(true);
 			return;
@@ -297,7 +306,7 @@ export function NewSession({ initialConfigured, mode = "teach" }: { initialConfi
 		// send would otherwise leave an orphan error-shell chat in the
 		// sidebar. Same skip-everything-and-open-setup treatment; the
 		// server's 503 gate remains the belt for /chat/[id] sessions.
-		if (zeroKeys || strongKeyless) {
+		if (access.blocked === "keys") {
 			setSetupOpen(true);
 			return;
 		}
@@ -308,7 +317,7 @@ export function NewSession({ initialConfigured, mode = "teach" }: { initialConfi
 				else setBusy(false);
 			})
 			.catch(() => setBusy(false));
-	}, [busy, router, configured, zeroKeys, strongKeyless]);
+	}, [busy, router, configured, access.blocked, openSettings]);
 
 	return (
 		<>
@@ -347,7 +356,22 @@ export function NewSession({ initialConfigured, mode = "teach" }: { initialConfi
 					/>
 				}
 				setupCta={
-					zeroKeys ? (
+					access.blocked === "subscription_pending" ? (
+						<SubscriptionPill
+							inline
+							pending
+							state={access.subscriptionState}
+							failed={access.subscriptionFailed}
+							onOpen={() => openSettings("subscription")}
+						/>
+					) : access.blocked === "subscription" ? (
+						<SubscriptionPill
+							inline
+							state={access.subscriptionState}
+							failed={access.subscriptionFailed}
+							onOpen={() => openSettings("subscription")}
+						/>
+					) : access.blocked === "keys" ? (
 						<ZeroKeysPill inline onOpen={() => setSetupOpen(true)} />
 					) : (
 						!configured && (
@@ -368,6 +392,7 @@ export function NewSession({ initialConfigured, mode = "teach" }: { initialConfi
 			<SetupDialog
 				open={setupOpen}
 				onClose={() => setSetupOpen(false)}
+				subscriptionConnected={access.subscriptionConnected}
 				onDone={() => {
 					setConfigured(true);
 					setSetupOpen(false);

@@ -4,6 +4,7 @@ import { Type } from "typebox";
 import { piEngineFor, type PiEngine, type ThinkingLevel } from "../models.ts";
 import { providerEventObserver, type ProviderEventObserver } from "../provider-events.ts";
 import type { VisualResult } from "../../core/contracts.ts";
+import { messageUsagePresence, type UsagePresence } from "../../core/contracts/chat.ts";
 import { getHeadless, type HeadlessApi } from "./headless.ts";
 
 /**
@@ -45,7 +46,7 @@ export interface VisualMakerOptions {
 	abortSignal?: AbortSignal;
 	/** Money channel: one call per loop iteration (streamSimple), folded
 	 * into JobRecord.usage. */
-	onUsage?: (usage: Usage) => void;
+	onUsage?: (usage: Usage, presence: boolean | Partial<UsagePresence>) => void;
 	/** Debug: raw provider-event recording key (LH_PROVIDER_EVENTS=1). */
 	chatId?: string;
 }
@@ -169,7 +170,7 @@ export async function runVisualMaker(input: VisualMakerInput, opts: VisualMakerO
 				opts.chatId ? providerEventObserver(opts.chatId, "job:visualMaker") : undefined,
 			);
 			// Money channel: each iteration is one model call.
-			opts.onUsage?.(result.usage);
+			opts.onUsage?.(result.usage, messageUsagePresence(result));
 			messages = [...messages, result];
 
 			const toolCalls = result.content.filter((c): c is Extract<typeof c, { type: "toolCall" }> => c.type === "toolCall");
@@ -326,7 +327,6 @@ async function streamOnce(
 	// normalizeContext is the library's only Context→TranscriptContext entry.
 	const stream = engine.streamFn(engine.model, normalizeContext({ systemPrompt, messages, tools }), {
 		reasoning: reasoning && reasoning !== "off" ? reasoning : undefined,
-		apiKey: process.env.OPENROUTER_API_KEY || undefined,
 		signal: abortSignal,
 		onProviderStreamEvent: onProviderStreamEvent as never,
 	} as never);

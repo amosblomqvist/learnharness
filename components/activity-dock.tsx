@@ -4,7 +4,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { ActivityIcon, BotIcon, FileTextIcon, PenToolIcon, PlayIcon, SearchIcon, SquareIcon, WaypointsIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { CallUsage, JobKind, JobRecord } from "@/src/core";
-import { isModelsRefusal, isProviderKeyRefusal, jobCost } from "@/src/core";
+import { isModelsRefusal, isProviderKeyRefusal, jobEstimate, type CostCoverage } from "@/src/core";
 import { formatTokens, formatUsd } from "@/components/usage-format";
 import { useServerEvent, useServerResync } from "@/components/server-events";
 
@@ -176,8 +176,10 @@ export interface ActivityBlob {
 	chatId: string;
 	/** ms epoch — blobs order oldest-first and elapsed counts from it. */
 	startedAt: number;
-	/** Inferred USD cost (jobCost) — null renders "—". */
+	/** Estimated USD cost (jobEstimate) — null renders "—", never $0. */
 	cost: number | null;
+	/** What the figure covers: complete / partial (a subtotal) / unknown. */
+	costCoverage: CostCoverage;
 	/** Last model call's footprint vs the model's limit — null renders "—". */
 	context: { used: number; limit: number } | null;
 	/** Latest human-readable activity line (""). */
@@ -213,6 +215,10 @@ export function toBlobs(feed: ActivityFeed): ActivityBlob[] {
 				limit,
 			};
 		}
+		// Money channel: the job's running usage folds into an ESTIMATED model
+		// cost with its own coverage — absent usage or an unpriced model is
+		// "unknown" (renders "—"), never a fake $0.
+		const estimate = jobEstimate(job);
 		return {
 			id: job.id,
 			process: "job",
@@ -220,7 +226,8 @@ export function toBlobs(feed: ActivityFeed): ActivityBlob[] {
 			title: job.title,
 			chatId: job.chatId,
 			startedAt: Date.parse(job.createdAt) || 0,
-			cost: jobCost(job),
+			cost: estimate.dollars,
+			costCoverage: estimate.coverage,
 			context,
 			// BYOK (owner, 2026-09-22): a refusal is info, not failure —
 			// the honest line the runner left ("failed") reads as setup
@@ -246,12 +253,29 @@ export function toBlobs(feed: ActivityFeed): ActivityBlob[] {
 			chatId: run.chatId,
 			startedAt: run.startedAt,
 			cost: null, // extraction runs don't ride the money channel (v1)
+			costCoverage: "unknown",
 			context: null,
 			activity: "",
 		});
 	}
 	blobs.sort((a, b) => a.startedAt - b.startedAt);
 	return blobs;
+}
+
+/** Fold the visible blobs' dollars + coverage for the header. One blob
+ *  with no figure OR a partial figure makes the total a subtotal; all
+ *  unknown leaves the total absent, never $0. A reported zero is complete. */
+export function foldActivityCost(
+	blobs: ReadonlyArray<Pick<ActivityBlob, "cost" | "costCoverage">>,
+): { dollars: number | null; coverage: CostCoverage } {
+	const priced = blobs.filter((blob) => blob.cost !== null);
+	if (priced.length === 0) return { dollars: null, coverage: "unknown" };
+	return {
+		dollars: priced.reduce((sum, blob) => sum + (blob.cost ?? 0), 0),
+		coverage: blobs.every((blob) => blob.cost !== null && blob.costCoverage === "complete")
+			? "complete"
+			: "partial",
+	};
 }
 
 /** Elapsed as a compact ticking string: 45s / 3m 04s / 1h 12m. */
@@ -298,10 +322,11 @@ export function ActivitySection({ feed: feedProp }: { feed?: ActivityFeed }) {
 	const abortRef = useRef({ blobs, refresh, setAbortStates });
 	abortRef.current = { blobs, refresh, setAbortStates };
 
-	const totalCost = useMemo(() => {
-		const priced = blobs.map((b) => b.cost).filter((c): c is number => c !== null);
-		return priced.length === 0 ? null : priced.reduce((a, c) => a + c, 0);
-	}, [blobs]);
+	// The header's running total: a priced SUBTOTAL plus its coverage. A blob
+	// with no dollars (absent usage, unpriced model, or an extraction run —
+	// not on the money channel in v1) or a partial figure makes the total
+	// partial, never invisible.
+	const totalCost = useMemo(() => foldActivityCost(blobs), [blobs]);
 
 	const abort = useCallback(async (blob: ActivityBlob) => {
 		const { setAbortStates: set } = abortRef.current;
@@ -347,8 +372,15 @@ export function ActivitySection({ feed: feedProp }: { feed?: ActivityFeed }) {
 				<ActivityIcon className="size-3" />
 				Background agents
 				{blobs.length > 0 && (
-					<span className="ml-auto tabular-nums" data-testid="activity-total-cost" title="Total running cost (inferred)">
-						{totalCost === null ? "—" : formatUsd(totalCost)}
+					<span
+						className="ml-auto tabular-nums"
+						data-testid="activity-total-cost"
+						title="Estimated model cost"
+					>
+						{totalCost.dollars === null ? "—" : formatUsd(totalCost.dollars)}
+						{totalCost.coverage === "partial" && (
+							<span className="text-muted-foreground"> (partial)</span>
+						)}
 				</span>
 				)}
 			</div>
@@ -423,7 +455,12 @@ function ActivityBlobRow({
 					)}
 				</span>
 				<span className="flex shrink-0 items-center gap-2 tabular-nums text-muted-foreground">
-					<span data-testid="activity-blob-cost">{blob.cost === null ? "—" : formatUsd(blob.cost)}</span>
+					<span data-testid="activity-blob-cost" title="Estimated model cost">
+						{blob.cost === null ? "—" : formatUsd(blob.cost)}
+						{blob.costCoverage === "partial" && (
+							<span className="text-muted-foreground"> (partial)</span>
+						)}
+					</span>
 					<span data-testid="activity-blob-elapsed">{formatElapsed(now - blob.startedAt)}</span>
 				</span>
 			</button>
@@ -460,9 +497,12 @@ function ActivityBlobRow({
 						</div>
 						{blob.activity && <div className="break-words">{blob.activity}</div>}
 						<div className="flex justify-between gap-2">
-							<span>Cost</span>
-							<span className="tabular-nums text-card-foreground">
+							<span>Estimated model cost</span>
+							<span className="tabular-nums text-card-foreground" title="Estimated model cost">
 								{blob.cost === null ? "—" : formatUsd(blob.cost)}
+								{blob.costCoverage === "partial" && (
+									<span className="text-muted-foreground"> (partial)</span>
+								)}
 							</span>
 						</div>
 						<div className="flex justify-between gap-2">

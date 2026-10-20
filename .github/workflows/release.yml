@@ -165,10 +165,13 @@ jobs:
         if: github.event_name == 'workflow_dispatch' && runner.os == 'macOS'
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
-        run: npx electron-builder ${{ matrix.builder_args }} --publish never -c.mac.notarize=false
+        # electron-builder.acceptance.yml extends the production config: same
+        # targets, `-acceptance` artifact names, and lhTestBuild metadata that
+        # makes the packaged shell skip electron-updater entirely.
+        run: npx electron-builder --config electron-builder.acceptance.yml ${{ matrix.builder_args }} --publish never -c.mac.notarize=false
       - name: Windows/Linux rehearsal (no publish)
         if: github.event_name == 'workflow_dispatch' && runner.os != 'macOS'
-        run: npx electron-builder ${{ matrix.builder_args }} --publish never
+        run: npx electron-builder --config electron-builder.acceptance.yml ${{ matrix.builder_args }} --publish never
       - name: Save installers and update metadata
         uses: actions/upload-artifact@v7
         with:

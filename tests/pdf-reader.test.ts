@@ -157,4 +157,33 @@ describe("pdf-reader loop (faux engine)", () => {
 		assert.deepEqual(result.pagesRead, []);
 		assert.deepEqual(result.pagesConsulted, []);
 	});
+
+	it("never forces the OpenRouter key onto the engine's provider (subscription wave, issue #8)", async () => {
+		// The engine's own provider resolves its credential. A leftover
+		// OPENROUTER_API_KEY in the process env must NOT ride along as an
+		// override: on a Codex-subscription pin it would be a foreign key.
+		const seen: Array<Record<string, unknown> | undefined> = [];
+		const inner = fauxEngine([
+			fauxAssistantMessage([fauxToolCall("pdf_info", {}, { id: "i1" })], { stopReason: "toolUse" }),
+			fauxAssistantMessage([fauxToolCall("pdf_extract", { pages: "1" }, { id: "e1" })], { stopReason: "toolUse" }),
+			fauxAssistantMessage([fauxText("The rule is on page 1 (p. 1).")]),
+		]);
+		const engine: PiEngine = {
+			model: inner.model,
+			streamFn: ((model, ctx, opts) => {
+				seen.push(opts as never);
+				return inner.streamFn(model, ctx, opts);
+			}) as PiEngine["streamFn"],
+		};
+		const previous = process.env.OPENROUTER_API_KEY;
+		process.env.OPENROUTER_API_KEY = "sk-or-test-leftover";
+		try {
+			await runPdfReaderAgent({ path: FIXTURE, question: "rule?" }, { engine });
+		} finally {
+			if (previous === undefined) delete process.env.OPENROUTER_API_KEY;
+			else process.env.OPENROUTER_API_KEY = previous;
+		}
+		assert.ok(seen.length > 0, "the loop called the model");
+		for (const opts of seen) assert.equal(opts?.apiKey, undefined, "no forced provider credential");
+	});
 });

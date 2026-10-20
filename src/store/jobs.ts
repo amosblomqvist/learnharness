@@ -37,6 +37,7 @@ function createJob(init: CreateJobInit): JobRecord {
 		toolCallId: init.toolCallId,
 		status: "running",
 		activity: init.activity ?? "starting",
+		...(init.subscriptionGeneration ? { subscriptionGeneration: init.subscriptionGeneration } : {}),
 		createdAt: now,
 		updatedAt: now,
 	};

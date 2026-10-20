@@ -136,6 +136,10 @@ export interface CreateJobInit {
 	toolCallId: string;
 	/** First activity line (defaults to "starting"). */
 	activity?: string;
+	/** The spawning scope's subscription generation (source-aware
+	 *  execution, issue #8) — stamped so the job's wake never runs under a
+	 *  newer account. Absent = no subscription session in scope. */
+	subscriptionGeneration?: string;
 }
 
 /** Mergeable fields — identity (id, kind, chatId, toolCallId, createdAt) is immutable. */

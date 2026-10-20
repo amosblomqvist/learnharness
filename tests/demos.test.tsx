@@ -764,6 +764,32 @@ describe("visual maker (fake model + fake headless)", () => {
 		assert.equal(result.svg, "");
 		assert.match(result.notes ?? "", /^FAILED: .*Chrome/);
 	});
+
+	it("never forces the OpenRouter key onto the engine's provider (subscription wave, issue #8)", async () => {
+		const seen: Array<Record<string, unknown> | undefined> = [];
+		const inner = scriptedModel([
+			{ toolCalls: [{ toolCallId: "w1", toolName: "write_svg", input: { svg: SVG_1 } }] },
+			{ toolCalls: [{ toolCallId: "r1", toolName: "render_svg", input: {} }] },
+			{ text: "A number line with the root at 0." },
+		]);
+		const engine: PiEngine = {
+			model: inner.model,
+			streamFn: ((model, ctx, opts) => {
+				seen.push(opts as never);
+				return inner.streamFn(model, ctx, opts);
+			}) as PiEngine["streamFn"],
+		};
+		const previous = process.env.OPENROUTER_API_KEY;
+		process.env.OPENROUTER_API_KEY = "sk-or-test-leftover";
+		try {
+			await runVisualMaker({ brief: "Number line." }, { engine, headless: fakeHeadless() });
+		} finally {
+			if (previous === undefined) delete process.env.OPENROUTER_API_KEY;
+			else process.env.OPENROUTER_API_KEY = previous;
+		}
+		assert.ok(seen.length > 0, "the loop called the model");
+		for (const opts of seen) assert.equal(opts?.apiKey, undefined, "no forced provider credential");
+	});
 });
 
 // ─── 5. job runners + dispatch ───────────────────────────────────────────────

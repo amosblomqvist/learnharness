@@ -51,7 +51,7 @@ fs.writeFileSync(
 process.env.OPENROUTER_API_KEY = "sk-or-v1-envvalue99";
 
 // Import AFTER env setup — module init runs the boot fill-gap + snapshot.
-const { deleteKey, initAuthEnv, keyStatuses, keyValue, resolveKeyStatuses, saveKey, isWritableAuthKey } = await import(
+const { deleteKey, initAuthEnv, keyStatuses, keyValue, providerAuthorization, providerKeyPresent, resolveKeyStatuses, saveKey, isWritableAuthKey } = await import(
 	"../src/server/keys.ts"
 );
 const { authStore } = await import("../src/store/auth.ts");
@@ -205,5 +205,24 @@ describe("resolveKeyStatuses (pure projection)", () => {
 		assert.ok(row, "the curated id is always in the projection");
 		assert.equal(row.source, "env");
 		assert.ok(!row.shadowedByEnv, "same value both places: redundant, not shadowed");
+	});
+});
+
+describe("provider authorization sources (source-aware catalog, issue #8)", () => {
+	it("openai-codex is a subscription source: no api key, presence is never a pass-through", () => {
+		assert.equal(providerAuthorization("openai-codex"), "subscription");
+		// The old keyless default was "present" — that would let a
+		// subscription model through the API-key gate and fail mid-stream.
+		assert.equal(providerKeyPresent("openai-codex"), false);
+	});
+
+	it("api-key providers keep the env-first presence truth", () => {
+		assert.equal(providerAuthorization("openrouter"), "api_key");
+		assert.equal(providerKeyPresent("openrouter"), true, "the env copy is present in this test");
+	});
+
+	it("a provider outside the catalog with no subscription routing keeps the old keyless default", () => {
+		assert.equal(providerAuthorization("github-copilot"), "api_key");
+		assert.equal(providerKeyPresent("github-copilot"), true);
 	});
 });

@@ -1597,18 +1597,50 @@ export function sumSteps(steps: readonly CallUsage[]): CallUsage {
 }
 
 /** One model call's inferred cost in USD — null when the model is unknown
- *  or the usage fields are absent (never guess a price). Cached input bills
- *  at the cache-read rate; cache writes bill separately where priced. */
+ *  or the usage fields are absent — including the cache-read split of the
+ *  input, without which fresh vs cached cannot be told apart (never guess a
+ *  price). Cached input bills
+ *  at the cache-read rate; cache writes bill separately where priced.
+ *  callEstimate is the same figure plus coverage metadata. */
 export function callCost(
+	usage: { inputTokens?: number; outputTokens?: number; cacheReadTokens?: number; cacheWriteTokens?: number },
+	model: string,
+): number | null {
+	return priceCall(usage, model);
+}
+
+/** Does the price table bill cache writes for this model (a non-zero rate)?
+ *  Only then does an unreported write count hide a dollar. */
+function billsCacheWrites(model: string): boolean {
+	const price = PRICES[model];
+	return price !== undefined && (price.cacheWrite ?? 0) > 0;
+}
+
+/** The arithmetic behind callCost — kept private so the bare number and the
+ *  coverage metadata (callEstimate) share one implementation. */
+function priceCall(
 	usage: { inputTokens?: number; outputTokens?: number; cacheReadTokens?: number; cacheWriteTokens?: number },
 	model: string,
 ): number | null {
 	const price = PRICES[model];
 	if (!price) return null;
 	if (usage.inputTokens === undefined || usage.outputTokens === undefined) return null;
-	const cacheRead = usage.cacheReadTokens ?? 0;
-	const freshInput = Math.max(0, usage.inputTokens - cacheRead);
-	const cacheWriteCost = (usage.cacheWriteTokens ?? 0) / 1e6 * (price.cacheWrite ?? 0);
+	// The cache-read report is what splits TOTAL input into fresh vs cached.
+	// Its absence is not a supplier zero: the call has no knowable price, so
+	// the numeric helper returns null too (never a fake "complete" figure).
+	// The reported tokens still live in the record.
+	if (usage.cacheReadTokens === undefined) return null;
+	// A priced write category needs the supplier's write count: absent while
+	// the table bills writes is not "zero writes" — the total cannot be
+	// proven, so the call has no dollar figure (its tokens stay recorded).
+	if (usage.cacheWriteTokens === undefined && billsCacheWrites(model)) return null;
+	const cacheRead = usage.cacheReadTokens;
+	const cacheWrite = usage.cacheWriteTokens ?? 0;
+	// inputTokens is TOTAL input (cached and written parts included) — pi's
+	// own figure is fresh, so capture restores the total. Subtract both cache
+	// parts here, once, so written tokens are billed at the write rate only.
+	const freshInput = Math.max(0, usage.inputTokens - cacheRead - cacheWrite);
+	const cacheWriteCost = cacheWrite / 1e6 * (price.cacheWrite ?? 0);
 	return (
 		(freshInput / 1e6) * price.input +
 		(cacheRead / 1e6) * (price.cacheRead ?? price.input) +
@@ -1617,29 +1649,127 @@ export function callCost(
 	);
 }
 
-/** One turn's inferred cost — the sum over its steps; null when unpriceable. */
-export function turnCost(turn: TurnUsage): number | null {
-	let total = 0;
-	for (const step of turn.steps) {
-		const c = callCost(step, turn.model);
-		if (c === null) return null;
-		total += c;
-	}
-	return total;
+// ─── Estimated model cost: figures + coverage metadata ──────────────────────
+
+/** How completely an estimated dollar figure covers its contributing calls.
+ *  "complete" — every call had a price and reported input/output (an
+ *  explicitly reported zero is complete, not unknown);
+ *  "partial" — the dollars cover SOME calls, others were unpriced or
+ *  unreported, so the figure is a subtotal, not the total;
+ *  "unknown" — nothing could be priced: the figure is ABSENT ("—"), never
+ *  zero. */
+export type CostCoverage = "complete" | "partial" | "unknown";
+
+/** One estimated figure plus what it does NOT cover. A known subtotal is
+ *  not a complete total: "partial" says dollars exist but omit calls, and
+ *  the counters say why. A fold can carry both reasons at once. */
+export interface CostEstimate {
+	/** Estimated USD over the priceable calls; null when none could be priced. */
+	dollars: number | null;
+	coverage: CostCoverage;
+	/** Calls folded into `dollars`. */
+	pricedCalls: number;
+	/** Calls whose model is missing from PRICES (usage was reported). */
+	unpricedCalls: number;
+	/** Calls that did not report the fields a price needs — input, output,
+	 *  the cache-read split of the input, or (where the table bills writes)
+	 *  the cache-write count. No price lookup can bill them. Classified
+	 *  first: a call with both a missing price and missing usage counts
+	 *  HERE, once (the capture gap is the reason). */
+	missingUsageCalls: number;
 }
 
-/** Fold a chat record's turn log: total inferred session cost. Unknown-model
- *  or partial-usage turns don't poison the total — they count as unpriced
- *  and are reported alongside, so the UI can show "n turns unpriced". */
-export function sessionCost(record: Pick<ChatRecord, "turns">): { cost: number; unpriced: number } {
-	let cost = 0;
-	let unpriced = 0;
-	for (const turn of record.turns ?? []) {
-		const c = turnCost(turn);
-		if (c === null) unpriced++;
-		else cost += c;
+/** The absent estimate: no calls, no dollars, no evidence of a $0 spend. */
+export function emptyCostEstimate(): CostEstimate {
+	return { dollars: null, coverage: "unknown", pricedCalls: 0, unpricedCalls: 0, missingUsageCalls: 0 };
+}
+
+/** One model call's estimated cost + coverage. The price and the reported
+ *  usage decide separately: an absent price is not an unreported token
+ *  field, and a reported zero is neither. */
+export function callEstimate(
+	usage: { inputTokens?: number; outputTokens?: number; cacheReadTokens?: number; cacheWriteTokens?: number },
+	model: string,
+): CostEstimate {
+	const dollars = priceCall(usage, model);
+	if (dollars !== null) {
+		return { dollars, coverage: "complete", pricedCalls: 1, unpricedCalls: 0, missingUsageCalls: 0 };
 	}
-	return { cost, unpriced };
+	if (
+		usage.inputTokens === undefined ||
+		usage.outputTokens === undefined ||
+		usage.cacheReadTokens === undefined ||
+		(usage.cacheWriteTokens === undefined && billsCacheWrites(model))
+	) {
+		return { dollars: null, coverage: "unknown", pricedCalls: 0, unpricedCalls: 0, missingUsageCalls: 1 };
+	}
+	return { dollars: null, coverage: "unknown", pricedCalls: 0, unpricedCalls: 1, missingUsageCalls: 0 };
+}
+
+/** Fold estimates into one: priced dollars sum into a subtotal, and the
+ *  coverage says whether that subtotal is the whole story. A fold is
+ *  "unknown" only when NO child could price anything; an empty stage
+ *  estimate (a true $0 for a stage that ran no calls) still counts as a
+ *  known part. An empty fold is unknown — absence of evidence, never $0. */
+export function foldCostEstimates(estimates: readonly CostEstimate[]): CostEstimate {
+	let dollars = 0;
+	let pricedCalls = 0;
+	let unpricedCalls = 0;
+	let missingUsageCalls = 0;
+	let anyKnown = false;
+	for (const estimate of estimates) {
+		if (estimate.dollars !== null) {
+			dollars += estimate.dollars;
+			pricedCalls += estimate.pricedCalls;
+			anyKnown = true;
+		}
+		unpricedCalls += estimate.unpricedCalls;
+		missingUsageCalls += estimate.missingUsageCalls;
+	}
+	const unpricedOrMissing = unpricedCalls + missingUsageCalls;
+	return {
+		dollars: anyKnown ? dollars : null,
+		coverage: !anyKnown ? "unknown" : unpricedOrMissing > 0 ? "partial" : "complete",
+		pricedCalls,
+		unpricedCalls,
+		missingUsageCalls,
+	};
+}
+
+/** One turn's estimate — the fold over its steps; null when unpriceable. */
+export function turnEstimate(turn: Pick<TurnUsage, "model" | "steps">): CostEstimate {
+	return foldCostEstimates(turn.steps.map((step) => callEstimate(step, turn.model)));
+}
+
+/** One turn's inferred cost — the sum over its steps; null when unpriceable. */
+export function turnCost(turn: TurnUsage): number | null {
+	return turnEstimate(turn).dollars;
+}
+
+/** Fold a chat record's turn log: the estimated session cost plus coverage.
+ *  Unknown-model or partial-usage turns don't poison the total — they are
+ *  reported alongside (`unpriced` = turns with no priceable call; the
+ *  estimate's coverage flags subtotals), so the UI can show "n turns
+ *  unpriced" and a partial marker. */
+export function sessionCost(record: Pick<ChatRecord, "turns">): {
+	/** Priced subtotal in USD (0 when nothing priced — never render it as $0). */
+	cost: number;
+	/** Turns with no priceable call at all. */
+	unpriced: number;
+	/** The same figure with coverage metadata for every caller/aggregate. */
+	estimate: CostEstimate;
+} {
+	const turns = record.turns ?? [];
+	const estimate = foldCostEstimates(turns.map((turn) => turnEstimate(turn)));
+	const unpriced = turns.filter((turn) => turnEstimate(turn).dollars === null).length;
+	return { cost: estimate.dollars ?? 0, unpriced, estimate };
+}
+
+/** One job's estimate (its usage is already a running total). Absent usage
+ *  is unknown — the runner has not reported anything yet. */
+export function jobEstimate(job: Pick<JobRecord, "usage">): CostEstimate {
+	const usage = job.usage;
+	return usage ? callEstimate(usage, usage.model) : emptyCostEstimate();
 }
 
 /** The session's context-window footprint: the LAST model call's

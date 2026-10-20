@@ -20,7 +20,13 @@ export const SETTINGS_SAVED_EVENT = "lh:settings-saved";
 // "keys" joined the roster (zero-keys wave, 2026-09-25): keys-section
 // dispatches it after save AND delete — deletions used to be invisible to
 // the zero-keys pill and the setup dialog's auto-advance.
-export type SettingsSection = "general" | "keys" | "agent" | "models" | "appearance" | "graph" | "compaction";
+// "subscription" joined (connected-Codex fix, 2026-10-19): the settings
+// section dispatches it after a successful connect/cancel/disconnect
+// state transition; composer gates re-read the live subscription status.
+// "chat" joined (Chat per-conversation authorization fix, 2026-10-19): a
+// chat's own model override is a different source than the strong slot;
+// the open Chat re-reads its record after a successful session write.
+export type SettingsSection = "general" | "keys" | "agent" | "models" | "appearance" | "graph" | "compaction" | "subscription" | "chat";
 
 /** Writers call this after the PUT resolves ok — never before (a failed
  *  write notifies nothing; the record is unchanged). */

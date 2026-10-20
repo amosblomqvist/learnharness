@@ -99,6 +99,33 @@ describe("the compaction service", () => {
 		assert.deepEqual(events, ["true", "record", "false"]);
 	});
 
+	it("an UNREPORTED summary call logs unknown usage, never a priced zero", async () => {
+		// A summarizer that failed or was cut off reports no usage at all —
+		// the fixture's seeded zeros are not a billed zero (subscription
+		// usage-presence wave). The turn must fold to unknown, not $0.
+		const chatId = overThresholdChat("compact: unreported usage");
+		const deps: CompactionDeps = {
+			...depsOf(chatId, 40_000),
+			summarize: async () => ({
+				summary: "PARTIAL SUMMARY.",
+				usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
+				usagePresence: false,
+			}),
+		};
+		await ensureCompacted(deps, chatId);
+		const record = chatStore.getChat(chatId)!;
+		const marker = activeCompactionOf(record.messages);
+		assert.ok(marker, "the marker landed");
+		const turn = (record.turns ?? []).find((t) => t.messageId === marker!.id);
+		assert.ok(turn, "usage keyed by the marker");
+		assert.equal(turn!.steps[0]!.inputTokens, undefined, "unreported input stays unknown");
+		assert.equal(turn!.steps[0]!.outputTokens, undefined, "unreported output stays unknown");
+		const { turnEstimate } = await import("../src/core/prices.ts");
+		const estimate = turnEstimate(turn);
+		assert.equal(estimate.dollars, null, "no fake $0");
+		assert.equal(estimate.coverage, "unknown");
+	});
+
 	it("under-threshold record → a no-op (no marker, no summary call)", async () => {
 		const chatId = overThresholdChat("compact: under");
 		const before = summarizeCalls;

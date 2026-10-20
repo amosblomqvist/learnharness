@@ -5,7 +5,8 @@ import { useChatSession } from "@/components/session";
 import { visibleQueuedSteers } from "@/components/session-core";
 import { SetupDialog } from "@/components/setup-dialog";
 import { Hint } from "@/components/ui/hint";
-import { useZeroKeys, ZeroKeysPill } from "@/components/setup-cta";
+import { useModelAccess, SubscriptionPill, ZeroKeysPill } from "@/components/setup-cta";
+import { useSettingsDialog } from "@/components/settings/settings-dialog";
 import { useStickToBottomContext, type StickToBottomContext } from "use-stick-to-bottom";
 import {
 	Conversation,
@@ -202,6 +203,7 @@ export function Chat({
 	initiallyInFlight,
 	initiallyCompacting = false,
 	initialConfigured = false,
+	initialChatSettings,
 	kind = "teach",
 }: {
 	chatId: string;
@@ -224,6 +226,11 @@ export function Chat({
 	 *  it (BYOK, owner 2026-09-22). The server gate stays the truth; this
 	 *  only decides whether the pill rides the composer. */
 	initialConfigured?: boolean;
+	/** The persisted conversation chain (chat.settings): a per-chat model
+	 *  override wins over the strong slot exactly as resolveConversationSpec
+	 *  does server-side. The authorization gate must resolve THIS source,
+	 *  not the global strong pin. */
+	initialChatSettings?: ChatSettings;
 }) {
 	// Reattach plumbing (background-turn runner wave): the hook holds the
 	// settled terminal's callback — a stable ref assigned below, once
@@ -556,14 +563,28 @@ export function Chat({
 	// refusal interception share one SetupDialog mount. `configured` is
 	// seeded server-side (slotsConfigured on the record) and flips on Save.
 	const [configured, setConfigured] = useState(initialConfigured);
-	// The zero-keys truth (zero-keys wave): no provider key = the pill
-	// takes precedence over the models CTA (keys come first in the chain).
-	// Reads once on mount, re-reads on the "keys" signal.
-	const zeroKeys = useZeroKeys();
+	// The conversation chain's model source: a per-chat override over the
+	// strong slot. Kept live through the "chat" settings signal so a pick
+	// in this chat's model menu changes the authorization gate immediately.
+	const [chatSettings, setChatSettings] = useState<ChatSettings | undefined>(initialChatSettings);
+	// The access truth (zero-keys wave + subscription fix): a provider key
+	// and a connected subscription are independent authorization sources
+	// (no cross-source fallback). The shared hook names the surface (if
+	// any) a send must guide to — Keys SetupDialog or the Subscription
+	// settings section.
+	const access = useModelAccess({ conversationSettings: chatSettings });
+	const { open: openSettings } = useSettingsDialog();
 	// Cross-surface freshness (fix wave): another surface's models write —
 	// setup save, composer pick, a settings write — re-reads the record so
 	// the setup CTA appears/disappears live (it used to lag until reload).
 	useSettingsSaved((section) => {
+		if (section === "chat") {
+			fetch(`/api/chats/${encodeURIComponent(chatId)}`)
+				.then((r) => r.json() as Promise<{ settings?: ChatSettings }>)
+				.then((body) => setChatSettings(body.settings))
+				.catch(() => {});
+			return;
+		}
 		if (section !== "models") return;
 		fetch("/api/settings")
 			.then((r) => r.json() as Promise<{ settings?: { models?: ModelsSettings } | null } | null>)
@@ -1158,6 +1179,14 @@ export function Chat({
 		if (pending || compacting) return;
 		const t = textRef.current.trim();
 		if (!t) return;
+		// A selected subscription that is known not-connected guides to its
+		// own login/status surface. Ordinary API-key refusal stays on the
+		// existing server-503 path — this branch does not touch it.
+		if (access.blocked === "subscription_pending") return;
+		if (access.blocked === "subscription") {
+			openSettings("subscription");
+			return;
+		}
 		if (busy) {
 			applyText("");
 			void steer(t);
@@ -1609,7 +1638,20 @@ export function Chat({
 					dictationCancel={dictation.cancel}
 					queuedSteers={visibleQueuedSteers(steerQueue, nativeMessages)}
 					setupCta={
-						zeroKeys ? (
+						access.blocked === "subscription_pending" ? (
+							<SubscriptionPill
+								pending
+								state={access.subscriptionState}
+								failed={access.subscriptionFailed}
+								onOpen={() => openSettings("subscription")}
+							/>
+						) : access.blocked === "subscription" ? (
+							<SubscriptionPill
+								state={access.subscriptionState}
+								failed={access.subscriptionFailed}
+								onOpen={() => openSettings("subscription")}
+							/>
+						) : access.blocked === "keys" ? (
 							<ZeroKeysPill onOpen={() => setSetupOpen(true)} />
 						) : (
 							!configured && (
@@ -1694,6 +1736,7 @@ export function Chat({
 		<SetupDialog
 			open={setupOpen}
 			onClose={() => setSetupOpen(false)}
+			subscriptionConnected={access.subscriptionConnected}
 			onDone={() => {
 				setSetupOpen(false);
 				setConfigured(true);

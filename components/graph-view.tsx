@@ -66,7 +66,7 @@
 import { useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { FileTextIcon, ListTreeIcon, Loader2Icon, SearchIcon, SettingsIcon, UploadIcon, WaypointsIcon } from "lucide-react";
-import { incrementalLayout, propositionSessionHref, type GraphCostSummary, type GraphNode, type GraphSnapshot } from "@/src/core";
+import { incrementalLayout, propositionSessionHref, type CostCoverage, type GraphCostSummary, type GraphNode, type GraphSnapshot } from "@/src/core";
 import { GraphCanvasRenderer, type GraphRenderSettings } from "./graph-canvas.ts";
 import { usePopoverDismiss } from "@/components/popover-dismiss";
 import { useActivity } from "@/components/activity-dock";
@@ -307,14 +307,30 @@ function fmtRunCost(dollars: number | null): string {
  * so the recent-runs list carries extraction runs only.)
  */
 export function displayCostTotals(costs: Pick<GraphCostSummary, "stages">): {
-	totalDollars: number;
+	/** Estimated USD over the displayed stages; null when none could price
+	 *  (render "—", never $0). */
+	totalDollars: number | null;
+	/** What the total covers — a priced subtotal is "partial", not complete. */
+	coverage: CostCoverage;
 	unpricedRuns: number;
 } {
 	// The two live stages (the spine came and went on one day,
-	// 2026-09-30 — digest-aware extraction replaced it).
+	// 2026-09-30 — digest-aware extraction replaced it). Stages that never
+	// ran are not gaps: they contribute nothing and don't mark the total
+	// partial.
+	const stages = [costs.stages.extraction, costs.stages.audit].filter((stage) => stage.runs > 0);
+	const priced = stages.filter((stage) => stage.dollars !== null);
+	const totalDollars = priced.length > 0 ? priced.reduce((sum, stage) => sum + (stage.dollars ?? 0), 0) : null;
+	const unpricedRuns = stages.reduce((sum, stage) => sum + stage.unpricedRuns, 0);
 	return {
-		totalDollars: costs.stages.extraction.dollars + costs.stages.audit.dollars,
-		unpricedRuns: costs.stages.extraction.unpricedRuns + costs.stages.audit.unpricedRuns,
+		totalDollars,
+		coverage:
+			totalDollars === null
+				? "unknown"
+				: stages.some((stage) => stage.coverage !== "complete")
+					? "partial"
+					: "complete",
+		unpricedRuns,
 	};
 }
 
@@ -333,22 +349,29 @@ export function GraphCostControl({ costs }: { costs: GraphCostSummary }) {
 	// wraps button + panel, so the toggle itself keeps working.
 	const rootRef = useRef<HTMLDivElement>(null);
 	usePopoverDismiss(rootRef, open, () => setOpen(false));
+	const totals = displayCostTotals(costs);
 	return (
 		<div ref={rootRef} className="relative">
 			<Hint
-				// Trimmed (owner, subtlety round 2026-09-25).
-				label="Graph costs — click for details"
+				// Trimmed (owner, subtlety round 2026-09-25); now names what the
+				// number IS — inferred from the price table, not a subscription bill.
+				label="Estimated model cost (graph pipeline). Click for details."
 				side="bottom"
 			>
 				<button
 				type="button"
 				aria-expanded={open}
+				aria-label="Estimated model cost"
 				onClick={() => setOpen((o) => !o)}
+				data-testid="graph-cost-pill"
 				className={`rounded-lg px-2 py-1 text-xs tabular-nums transition-colors hover:bg-accent ${
 					open ? "text-foreground" : "text-muted-foreground hover:text-foreground"
 				}`}
 			>
-				${displayCostTotals(costs).totalDollars.toFixed(2)}
+				{totals.totalDollars === null ? "—" : `$${totals.totalDollars.toFixed(2)}`}
+				{totals.coverage === "partial" && (
+					<span className="text-muted-foreground"> (partial)</span>
+				)}
 			</button>
 			</Hint>
 			{open && (
@@ -364,11 +387,14 @@ export function GraphCostControl({ costs }: { costs: GraphCostSummary }) {
  * The cost control's expanded panel: stage totals (extraction / audit —
  * dollars headline, tokens secondary) + the recent-runs list.
  * Presentational: the fold happens server-side (core/cost-summary.ts);
- * dollars are inferred read-time, never stored. Cluster naming is GONE
- * from the panel (owner refinement round, 2026-09-24): labels are session
- * titles / file names now, the namer is dead, and its historical spend is
- * not tracked anymore — the headline sums the displayed stages only and
- * naming-kind runs never reach the list.
+ * dollars are inferred read-time, never stored, and are therefore an
+ * ESTIMATED MODEL COST — the header says so, and every figure carries
+ * its coverage: "—" when nothing could be priced (never $0), "partial"
+ * when the dollars omit an unpriced model or unreported usage. Cluster
+ * naming is GONE from the panel (owner refinement round, 2026-09-24):
+ * labels are session titles / file names now, the namer is dead, and its
+ * historical spend is not tracked anymore — the headline sums the
+ * displayed stages only and naming-kind runs never reach the list.
  */
 function GraphCostPanel({ costs }: { costs: GraphCostSummary }) {
 	const stageRows: [string, GraphCostSummary["stages"]["extraction"]][] = [
@@ -377,15 +403,21 @@ function GraphCostPanel({ costs }: { costs: GraphCostSummary }) {
 	];
 	// The displayed figures come from displayCostTotals (naming excluded —
 	// the pill and this panel must agree).
-	const { totalDollars, unpricedRuns } = displayCostTotals(costs);
+	const { totalDollars, coverage, unpricedRuns } = displayCostTotals(costs);
 	return (
 		<div className="w-80 max-w-[calc(100vw-1.5rem)] rounded-xl border bg-card/95 p-3 text-xs shadow-lg backdrop-blur">
 			<div className="mb-2 flex items-baseline justify-between">
-				<span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
-					Graph pipeline costs
+				<span
+					className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground"
+					title="Estimated model cost"
+				>
+					Estimated model cost
 				</span>
-				<span className="text-foreground tabular-nums">
-					${totalDollars.toFixed(2)}
+				<span className="text-foreground tabular-nums" data-testid="graph-cost-total" title="Estimated model cost">
+					{totalDollars === null ? "—" : `$${totalDollars.toFixed(2)}`}
+					{coverage === "partial" && (
+						<span className="text-muted-foreground"> (partial)</span>
+					)}
 					{unpricedRuns > 0 && (
 						<span className="text-muted-foreground"> · {unpricedRuns} unpriced</span>
 					)}
@@ -395,10 +427,16 @@ function GraphCostPanel({ costs }: { costs: GraphCostSummary }) {
 				{stageRows.map(([label, stage]) => (
 					<div key={label} className="flex items-baseline justify-between gap-2 text-[11px]">
 						<span className="shrink-0 text-muted-foreground">{label}</span>
-						<span className="min-w-0 text-right tabular-nums">
-							{fmtRunCost(stage.runs === 0 || (stage.unpricedRuns > 0 && stage.dollars === 0) ? null : stage.dollars)}
-							{stage.unpricedRuns > 0 && stage.dollars > 0 && (
-								<span className="text-muted-foreground"> +{stage.unpricedRuns} unpriced</span>
+						<span className="min-w-0 text-right tabular-nums" title="Estimated model cost">
+							{stage.runs === 0 ? "—" : fmtRunCost(stage.dollars)}
+							{stage.coverage === "partial" && (
+								<span className="text-muted-foreground"> (partial)</span>
+							)}
+							{stage.unpricedRuns > 0 && (
+								<span className="text-muted-foreground"> · {stage.unpricedRuns} unpriced</span>
+							)}
+							{stage.missingUsageRuns > 0 && (
+								<span className="text-muted-foreground"> · {stage.missingUsageRuns} missing usage</span>
 							)}
 							<span className="text-muted-foreground">
 								{" "}
@@ -421,7 +459,12 @@ function GraphCostPanel({ costs }: { costs: GraphCostSummary }) {
 									</span>
 								)}
 							</span>
-							<span className="shrink-0 tabular-nums">{fmtRunCost(run.dollars)}</span>
+							<span className="shrink-0 tabular-nums" title="Estimated model cost">
+								{fmtRunCost(run.dollars)}
+								{run.coverage === "partial" && (
+									<span className="text-muted-foreground"> (partial)</span>
+								)}
+							</span>
 						</div>
 					))}
 			</div>

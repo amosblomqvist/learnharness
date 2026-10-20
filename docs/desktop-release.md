@@ -46,10 +46,29 @@ npx electron-builder --linux --x64 --publish never
 
 `.github/workflows/release.yml` has two deliberately separate modes:
 
-- **Manual / Run workflow:** unsigned rehearsal installers saved as workflow artifacts for 7 days. No signing secrets needed, no release created, and nothing published. macOS notarization is skipped. Use the Windows/Linux artifacts for the first human smoke pass. These are not production macOS installers.
+- **Manual / Run workflow:** unsigned rehearsal installers saved as workflow artifacts for 7 days. These builds use `electron-builder.acceptance.yml`, so every installer name carries `-acceptance` and the packaged app declares itself a test build (see [Acceptance builds](#acceptance-rehearsal-builds)). No signing secrets needed, no release created, and nothing published. macOS notarization is skipped. Use the Windows/Linux artifacts for the first human smoke pass. These are not production macOS installers.
 - **Push `v<package.json version>`:** gates first, then one job creates or reuses a **single draft GitHub Release** before the three OS jobs package/upload their artifacts and update metadata in parallel. This avoids competing draft creation. A published or ambiguous existing release fails the preparation step instead of being modified. Separate runs for the same ref are serialized, never cancelled mid-upload. The tag must match the package version. macOS must sign and notarize successfully; missing secrets fail loudly. The workflow never publishes the draft. After all three packaging jobs succeed, a final read-only **Verify draft release** job (below) fails the run unless that draft is complete and self-consistent.
 
 The three jobs upload distinct updater feeds: `latest-mac.yml`, `latest.yml`, `latest-linux.yml`, with the matching ZIP/NSIS/AppImage/deb assets and blockmaps. **A partially populated draft is never fit to publish — and the final job enforces it mechanically.** The app uses the baked GitHub feed without a token: **the repository must be public before end users can download updates.** Making the repository public and publishing the release remain the owner's actions.
+
+### Acceptance (rehearsal) builds
+
+`electron-builder.acceptance.yml` is the packaging config for unsigned rehearsal installers. It extends `electron-builder.yml`, so app id, targets, icons, asar/`extraResources` layout, and the production update feed stay inherited. It changes only two things:
+
+- **Test-build marker:** the build config sets `extraMetadata.lhTestBuild: true`, and electron-builder deep-assigns that object into the root of the packaged app's own `package.json` — so the shipped file has the root property `lhTestBuild: true` (there is no packaged `extraMetadata` wrapper). At startup `electron/main.cjs` reads that root property and, for a test build, skips electron-updater completely: no import, no feed configuration, no check/download/install, and no recurring check. The install IPC is inert too, so it cannot stop the child server. Non-packaged dev builds keep their existing separate guard; production packages have no marker and update exactly as before.
+- **Artifact names:** the root `artifactName` adds `-acceptance` (macOS DMG/ZIP), and the base config's `win.artifactName` / `linux.artifactName` are overridden explicitly because those platform values take precedence over the root name, giving Windows `…-setup-acceptance.exe` and Linux `…-acceptance.AppImage` / `.deb`.
+
+The manual workflow uses this config with `--publish never`; tag pushes never use it. To reproduce an acceptance build locally after steps 1–5:
+
+```sh
+# On Windows:
+npx electron-builder --config electron-builder.acceptance.yml --win --x64 --publish never
+
+# On Linux:
+npx electron-builder --config electron-builder.acceptance.yml --linux --x64 --publish never
+```
+
+A rehearsal build never contacts the production update feed, so it cannot replace itself with a released version while being tested. The plain local commands above still build with the production config (and no marker), but neither path publishes.
 
 ### The verification job
 

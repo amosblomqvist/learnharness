@@ -1,7 +1,7 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { ActivitySection, formatElapsed, toBlobs, type ActivityFeed, type FeedExtraction } from "../components/activity-dock.tsx";
+import { ActivitySection, foldActivityCost, formatElapsed, toBlobs, type ActivityFeed, type FeedExtraction } from "../components/activity-dock.tsx";
 import { formatTokens, formatUsd } from "../components/usage-format.ts";
 
 // The section's pure layer: folds, formatting, and blob order — then the SSR
@@ -57,7 +57,7 @@ describe("activity dock pure layer", () => {
 		assert.ok(blobs.every((b) => b.chatId === "src_a"), "abort/link identity stays source-scoped");
 	});
 
-	it("folds cost with jobCost; absent usage is null, never zero", () => {
+	it("folds cost with jobEstimate; absent usage is null, never zero", () => {
 		const priced = job({
 			usage: {
 				model: "openrouter:z-ai/glm-5.3-flash",
@@ -74,8 +74,52 @@ describe("activity dock pure layer", () => {
 		// (pi-ai catalog prices — glm-5.3-flash cacheRead corrected
 		// 0.05 → 0.03 in the pi 1.0.2 catalog refresh)
 		assert.ok(blob.cost !== null && blob.cost > 0.0013 && blob.cost < 0.0015);
+		assert.equal(blob.costCoverage, "complete");
 		const absent = toBlobs({ jobs: [job()], extractions: [] })[0]!;
 		assert.equal(absent.cost, null);
+		assert.equal(absent.costCoverage, "unknown");
+	});
+
+	it("folds blob coverage: one partial or unknown constituent makes the total partial", () => {
+		assert.deepEqual(
+			foldActivityCost([
+				{ cost: 0.002, costCoverage: "complete" },
+				{ cost: 0.001, costCoverage: "partial" },
+			]),
+			{ dollars: 0.003, coverage: "partial" },
+		);
+		assert.deepEqual(foldActivityCost([{ cost: 0, costCoverage: "complete" }]), {
+			dollars: 0,
+			coverage: "complete",
+		});
+		assert.deepEqual(foldActivityCost([{ cost: null, costCoverage: "unknown" }]), {
+			dollars: null,
+			coverage: "unknown",
+		});
+	});
+
+	it("a job that reported usage without input/output is unknown, not a priced guess", () => {
+		const halfReported = job({
+			usage: {
+				model: "openrouter:z-ai/glm-5.3-flash",
+				inputTokens: 10_000,
+				outputTokens: undefined,
+				cacheReadTokens: 0,
+				cacheWriteTokens: 0,
+				reasoningTokens: 0,
+				steps: 1,
+			},
+		});
+		const blob = toBlobs({ jobs: [halfReported], extractions: [] })[0]!;
+		assert.equal(blob.cost, null);
+		assert.equal(blob.costCoverage, "unknown");
+		// An unpriced MODEL with full usage is equally unknown — never $0.
+		const unpriced = toBlobs({
+			jobs: [job({ usage: { ...halfReported.usage!, model: "nope/unknown", outputTokens: 1000 } })],
+			extractions: [],
+		})[0]!;
+		assert.equal(unpriced.cost, null);
+		assert.equal(unpriced.costCoverage, "unknown");
 	});
 
 	it("a key-refused job reads as info — 'needs a provider key' (zero-keys wave, 66dbea9)", () => {
@@ -164,6 +208,7 @@ describe("activity dock pure layer", () => {
 			extractions: [{ id: "cx", chatId: "cx", title: "T", phase: "extracting", startedAt: NOW }],
 		})[0]!;
 		assert.equal(blob.cost, null);
+		assert.equal(blob.costCoverage, "unknown");
 		assert.equal(blob.context, null);
 	});
 
@@ -210,6 +255,7 @@ describe("activity section render", () => {
 		assert.match(html, /building sandbox…/);
 		assert.match(html, /Extraction — merging/);
 		// Unpriced job → "—", never $0.0000 (doctrine); both blobs show it.
+		assert.match(html, /activity-blob-cost[^>]*title="Estimated model cost/);
 		assert.match(html, /activity-blob-cost[^>]*>—</);
 		assert.match(html, /data-testid="activity-abort"/, "END on the blob face, popover-independent");
 		assert.match(html, /\bEnd\b/, "the explicit END button");
@@ -247,5 +293,51 @@ describe("activity section render", () => {
 		// two identical priced jobs → 2 × $0.002 = $0.0040 total (pi prices,
 		// glm-5.3-flash drifted in pi-ai 0.87.1)
 		assert.match(html, /activity-total-cost[^>]*>\$0\.0040</);
+		// The header names the figure's nature: inferred, not a bill.
+		assert.match(html, /activity-total-cost[^>]*title="Estimated model cost/);
+	});
+
+	it("marks the running total partial when an unpriced process rides along", () => {
+		const usage = {
+			model: "openrouter:z-ai/glm-5.3-flash",
+			inputTokens: 10_000,
+			outputTokens: 1000,
+			cacheReadTokens: 0,
+			cacheWriteTokens: 0,
+			reasoningTokens: 0,
+			steps: 1,
+		};
+		const html = renderToStaticMarkup(
+			<ActivitySection
+				feed={{
+					jobs: [job({ id: "priced", usage })],
+					// Extraction spend is not on the money channel (v1): the total
+					// is a known subtotal, so it must SAY partial.
+					extractions: [{ id: "cx", chatId: "cx", title: "Old lesson", phase: "merging", startedAt: NOW - 60_000 }],
+				}}
+			/>,
+		);
+		assert.match(html, /activity-total-cost[^>]*>\$0\.0020<span[^>]*> \(partial\)</);
+	});
+
+	it("keeps an explicitly reported zero as $0.0000, not unknown", () => {
+		const zero = job({
+			usage: {
+				model: "openrouter:z-ai/glm-5.3-flash",
+				inputTokens: 0,
+				outputTokens: 0,
+				cacheReadTokens: 0,
+				cacheWriteTokens: 0,
+				reasoningTokens: 0,
+				steps: 1,
+			},
+		});
+		const blob = toBlobs({ jobs: [zero], extractions: [] })[0]!;
+		assert.equal(blob.cost, 0);
+		assert.equal(blob.costCoverage, "complete");
+		const html = renderToStaticMarkup(<ActivitySection feed={{ jobs: [zero], extractions: [] }} />);
+		assert.match(html, /activity-blob-cost[^>]*>\$0\.0000</);
+		assert.match(html, /activity-total-cost[^>]*>\$0\.0000</);
+		assert.doesNotMatch(html, /activity-total-cost[^>]*>—</);
 	});
 });

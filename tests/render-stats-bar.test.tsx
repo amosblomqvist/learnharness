@@ -12,7 +12,9 @@ import type { ChatSettings, TurnUsage } from "../src/core/contracts.ts";
 // thinking control (components/model-picker.tsx — pi-ai catalog backed).
 
 function step(inputTokens: number, outputTokens: number, over: Record<string, number | undefined> = {}) {
-	return { inputTokens, outputTokens, cacheReadTokens: undefined, cacheWriteTokens: undefined, reasoningTokens: undefined, ...over };
+	// A capture from pi reports the cache-read split (the SDK seeds it), so a
+	// fixture that declares a complete estimate carries 0, not undefined.
+	return { inputTokens, outputTokens, cacheReadTokens: 0, cacheWriteTokens: 0, reasoningTokens: undefined, ...over };
 }
 
 function turn(over: Partial<TurnUsage> = {}): TurnUsage {
@@ -59,7 +61,7 @@ describe("stats bar", () => {
 		assert.match(html, /data-testid="stats-context">11k</);
 		// pi catalog price 0.15/0.5 per 1M (drifted in pi-ai 0.87.1):
 		// each turn 10k×0.15 + 1k×0.5 = $0.002 → two = $0.0040
-		assert.match(html, /data-testid="stats-cost">\$0\.0040</);
+		assert.match(html, /data-testid="stats-cost"[^>]*>\$0\.0040</);
 		// model button label: SSR (record fetch not run yet) reads "—" —
 		// the strong slot arrives client-side via GET /api/settings; the
 		// turn log below still folds the ACTUAL models billed
@@ -70,11 +72,31 @@ describe("stats bar", () => {
 		const html = renderToStaticMarkup(
 			<StatsBar turns={[turn({ model: "nope/unknown" })]} />,
 		);
-		assert.match(html, /data-testid="stats-cost">—</);
+		assert.match(html, /data-testid="stats-cost"[^>]*>—</);
 		// unknown model: no catalog limit exists, but the footprint is
 		// still an honest reading — usage-only (never "—" theater over
 		// real data, never a fake window)
 		assert.match(html, /data-testid="stats-context">11k</);
+	});
+
+	it("keeps an explicitly reported zero as $0.0000, never unknown", () => {
+		const html = renderToStaticMarkup(<StatsBar turns={[turn({ steps: [step(0, 0)] })]} />);
+		assert.match(html, /data-testid="stats-cost"[^>]*>\$0\.0000</);
+		assert.ok(!html.includes("(partial)"), "a reported zero is complete, not partial");
+	});
+
+	it("names the figure an ESTIMATED model cost and flags a partial subtotal", () => {
+		const html = renderToStaticMarkup(
+			<StatsBar turns={[turn(), turn({ id: "t2", messageId: "m2", model: "nope/unknown" })]} />,
+		);
+		// One priced turn ($0.0020) + one unpriced: the dollars are real but
+		// do not cover the whole session — the bar says BOTH things.
+		assert.match(html, /data-testid="stats-cost"[^>]*title="Estimated model cost/);
+		assert.match(html, /data-testid="stats-cost"[^>]*>\$0\.0020<span[^>]*> \(partial\)</);
+		// A fully priced session carries no partial marker (and no $0 lie).
+		const full = renderToStaticMarkup(<StatsBar turns={[turn()]} />);
+		assert.match(full, /data-testid="stats-cost"[^>]*>\$0\.0020</);
+		assert.ok(!full.includes("(partial)"), "complete coverage is not marked partial");
 	});
 
 	it("prettyModel strips vendor + date suffix, keeps dashes", () => {

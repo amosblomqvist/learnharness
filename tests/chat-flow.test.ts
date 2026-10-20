@@ -1018,6 +1018,28 @@ describe("the key-presence turn gate (provider-key interlude, 2026-09-25)", () =
 	});
 });
 
+// ─── the subscription turn gate (source-aware execution, issue #8) ────────
+
+describe("the subscription turn gate (source-aware execution, issue #8)", () => {
+	it("a chat pinned to the instance subscription refuses with 503 while logged out — the API-key envelope is NOT reused", async () => {
+		const chat = chatStore.createChat("Test: subscription provider");
+		createdChats.push(chat.id);
+		// The chat's own model override pins the provider — the same chain
+		// the strong slot rides. The source gate fires BEFORE the engine
+		// build, so the subscription factory is never reached here.
+		chatStore.saveSettings(chat.id, { model: { provider: "openai-codex", id: "gpt-6-luna" } });
+		const res = await handleChatRequest(post(chat.id, { type: "text", text: "teach me something" }), agentFactory(scriptedTeacher(defaultLesson).engine));
+
+		assert.equal(res.status, 503, "the source gate refuses before beginTurn");
+		const body = (await res.json()) as { error: string; code: string; provider: string; slots: string[] };
+		assert.equal(body.code, "subscription_needs_login", "an honest subscription code, not provider_key_missing");
+		assert.equal(body.provider, "openai-codex", "the envelope names the subscription source");
+		assert.deepEqual(body.slots, ["strong"], "the conversation tier is the affected slot");
+		assert.equal(isTurnRunning(chat.id), false, "the refusal never registers a live turn");
+		assert.equal(chatStore.getChat(chat.id)!.messages.length, 0, "no write-ahead persist before the gate");
+	});
+});
+
 describe("background-turn runner (owner ruling 2026-09-25: every turn is a server-side process, clients are views)", () => {
 	it("CONNECTION DIET B (owner, 2026-10-10): the POST acks and closes — the response never holds the turn's stream", async () => {
 		let release!: () => void;

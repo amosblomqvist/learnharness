@@ -1,6 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
+	catalogContextLimits,
 	catalogDefaultsFor,
 	catalogProviders,
 	catalogRolePins,
@@ -74,8 +75,9 @@ describe("the model catalog projection", () => {
 		assert.ok(openrouter && openrouter.keyPresent, "openrouter federated (key pinned above)");
 		assert.ok(providers.some((p) => !p.keyPresent), "keyless providers listed for discovery");
 		assert.deepEqual(Object.keys(slots), ["strong", "cheap", "vision"]);
-		// a keyless provider's models never reach the picker
-		const keyless = providers.filter((p) => !p.keyPresent).map((p) => p.id);
+		// a keyless API-key provider's models never reach the picker
+		// (subscription sources are a KNOWN keyless row — pinned below)
+		const keyless = providers.filter((p) => !p.keyPresent && p.authorization === "api_key").map((p) => p.id);
 		for (const id of keyless) {
 			assert.ok(!models.some((m) => m.provider === id), `keyless ${id} must not federate`);
 		}
@@ -182,6 +184,68 @@ describe("the model slots surface (model slots wave, 2026-09-20)", () => {
 			if (saved === undefined) delete process.env.ZAI_API_KEY;
 			else process.env.ZAI_API_KEY = saved;
 		}
+	});
+});
+
+describe("the subscription source (source-aware catalog, issue #8)", () => {
+	it("lists openai-codex as a subscription provider — no fictitious env var, keyPresent is not an auth fact", () => {
+		const codex = catalogProviders().find((p) => p.id === "openai-codex");
+		assert.ok(codex, "codex row is in the providers surface");
+		assert.deepEqual(codex, {
+			id: "openai-codex",
+			envVar: null,
+			keyPresent: false,
+			authorization: "subscription",
+		});
+		// API-key rows keep the ordinary default (absent reads as api_key)
+		for (const row of catalogProviders()) {
+			if (row.id !== "openai-codex") assert.notEqual(row.authorization, "subscription", row.id);
+		}
+	});
+
+	it("federates the known codex models with a static authorization_required state", () => {
+		const { models } = modelCatalog();
+		const codex = models.filter((m) => m.provider === "openai-codex");
+		assert.ok(codex.length > 0, "known codex candidates stay visible while disconnected");
+		for (const m of codex) {
+			// Structural metadata only — the catalog is synchronous and never
+			// claims the account is connected (status is its own endpoint).
+			assert.equal(m.authorization, "subscription", m.id);
+			assert.equal(m.availability, "authorization_required", m.id);
+		}
+		const luna = codex.find((m) => m.id === "gpt-6-luna");
+		assert.ok(luna, "gpt-6-luna is a known codex candidate");
+		assert.deepEqual(luna!.input, ["text", "image"]);
+		// api-key rows carry no subscription metadata at all
+		const glm = models.find((m) => m.provider === "openrouter")!;
+		assert.equal(glm.authorization, undefined);
+		assert.equal(glm.availability, undefined);
+	});
+
+	it("context limits include the chosen codex model (compaction denominator)", () => {
+		assert.equal(catalogContextLimits().get("openai-codex:gpt-6-luna"), 272000);
+	});
+
+	it("structural settings writes accept a codex model without a live account grant", () => {
+		assert.equal(
+			validateModelsSettings({ strong: { model: { provider: "openai-codex", id: "gpt-6-luna" } } }).ok,
+			true,
+		);
+		assert.equal(
+			validateChatSettings({ model: { provider: "openai-codex", id: "gpt-6-luna" } }).ok,
+			true,
+		);
+	});
+
+	it("the vision slot requires a REAL image-capable model (pi's input capabilities)", () => {
+		const textOnly = validateModelsSettings({
+			vision: { model: { provider: "openai-codex", id: "gpt-5.3-codex-spark" } },
+		});
+		assert.equal(textOnly.ok, false, "a text-only model cannot fill the vision slot");
+		assert.equal(
+			validateModelsSettings({ vision: { model: { provider: "openai-codex", id: "gpt-6-luna" } } }).ok,
+			true,
+		);
 	});
 });
 

@@ -246,6 +246,7 @@ export function ModelControl({ chatId }: { chatId?: string }) {
 				const stored = (await res.json().catch(() => null)) as { settings?: ChatSettings } | null;
 				setSession(stored?.settings ?? next);
 				setOpen(null);
+				notifySettingsSaved("chat");
 			} catch {
 				setError("Could not reach the server — try again.");
 			}

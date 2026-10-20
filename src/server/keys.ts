@@ -52,6 +52,7 @@ import {
 	validateKeyShape,
 } from "../core/auth-keys.ts";
 import { authStore } from "../store/auth.ts";
+import { SUBSCRIPTION_PROVIDER } from "../core/subscription.ts";
 
 // The once-per-process boot record — globalThis anchor (HMR re-imports the
 // module; the snapshot must not re-run and misread fill-gapped vars as real
@@ -193,13 +194,27 @@ export function keyValue(id: string): string | undefined {
 	return process.env[id] ?? authStore.authVars()[id];
 }
 
+/** One provider's authorization SOURCE (subscription wave, issue #8): the
+ * plain-key table's providers run on an API key; the supplier subscription
+ * provider runs on this instance's stored grant instead. ONE function, so
+ * the catalog, the preflight and the engine composition can never disagree
+ * about which source a provider is. */
+export type ProviderAuthorization = "api_key" | "subscription";
+
+export function providerAuthorization(provider: string): ProviderAuthorization {
+	return provider === SUBSCRIPTION_PROVIDER ? "subscription" : "api_key";
+}
+
 /** The key-presence truth for one model provider (provider-key interlude,
  * 2026-09-25): would this provider's key be present at request time?
  * Reads through keyValue — the SAME env-first lookup pi-ai performs
  * natively at every request — so an env-shadowed key counts as present
  * (gate by what would run). Providers absent from AUTH_PROVIDER_KEYS take
- * no key at all: nothing to gate, present by definition. */
+ * no key at all: nothing to gate, present by definition — EXCEPT the
+ * subscription source, which has no key BY CONSTRUCTION and must never be
+ * passed through this gate as authorized (its own preflight decides). */
 export function providerKeyPresent(provider: string): boolean {
+	if (providerAuthorization(provider) === "subscription") return false;
 	const info = AUTH_PROVIDER_KEYS.find((p) => p.id === provider);
 	return info ? keyValue(info.envVar) !== undefined : true;
 }

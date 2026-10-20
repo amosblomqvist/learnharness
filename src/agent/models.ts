@@ -11,6 +11,7 @@ import { builtinProviders } from "@earendil-works/pi-ai/providers/all";
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import { type ModelRole } from "../../config.ts";
 import { DEFAULT_THINKING_ORDER } from "../core/settings.ts";
+import { SUBSCRIPTION_PROVIDER, SubscriptionError } from "../core/subscription.ts";
 
 /**
  * The one engine factory every agent's model comes from (the pi-ai swap,
@@ -86,7 +87,14 @@ function defaultThinkingLevel(model: Model<Api>): ThinkingLevel {
  *  keys seam reflects file-saved keys into env), so the engine never
  *  hardcodes OpenRouter's. */
 export function piEngineForSpec(spec: ResolvedModelSpec): PiEngine {
-	const models: Models = piModels();
+	// Subscription execution must be composed by the server with a durable
+	// generation-bound credential store and protected transport.
+	if (spec.provider === SUBSCRIPTION_PROVIDER) throw new SubscriptionError("subscription_needs_login");
+	return engineForCollection(spec, piModels());
+}
+
+/** Dependency-injected catalog/engine builder. It never reads server state. */
+export function engineForCollection(spec: ResolvedModelSpec, models: Models): PiEngine {
 	const model = models.getModel(spec.provider, spec.id);
 	if (!model) {
 		throw new Error(`${spec.provider} catalog has no model ${spec.id}`);

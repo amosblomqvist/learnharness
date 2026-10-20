@@ -19,6 +19,7 @@ import { healToolRecord } from "./tools/heal.ts";
 import { quizInputObject, quizInputProblems } from "../core/question-core.ts";
 import { QUESTION_TOOLS, type EnabledTools } from "../core/pending.ts";
 import { toLlmMessages } from "../core/native-messages.ts";
+import { messageUsagePresence, type UsagePresence } from "../core/contracts/chat.ts";
 
 /**
  * The two teaching-side agents (docs/probe-teach-split.md): the PROBER and
@@ -90,8 +91,10 @@ const composedInstructions: Record<AgentKind, string> = {
 
 // Money channel (wave 4): the chat-handler passes a per-turn collector;
 // every model call's usage lands in the chat record's turns log
-// (ChatStore.appendTurnUsage). The narrow param keeps the seam honest.
-export type StepUsageCollector = (usage: Usage) => void;
+// (ChatStore.appendTurnUsage). The narrow params keep the seam honest:
+// `reported` is the supplier's usage presence (contracts/chat.ts), so the
+// collector can keep an unreported call unknown instead of a fake zero.
+export type StepUsageCollector = (usage: Usage, presence: boolean | Partial<UsagePresence>) => void;
 
 /** Per-request construction options (the handler wires all of these). */
 export interface AgentBuildOptions {
@@ -214,7 +217,7 @@ function baseAgentOptions(kind: AgentKind, opts: AgentBuildOptions, tools: Agent
 				// A cancelled call is not a billed step (partial/estimated
 				// usage on an aborted message is not money spent).
 				if (event.message.stopReason === "aborted") return;
-				opts.onUsage!(event.message.usage);
+				opts.onUsage!(event.message.usage, messageUsagePresence(event.message));
 			}
 		});
 	}

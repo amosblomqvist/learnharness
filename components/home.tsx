@@ -7,7 +7,8 @@ import { GraphView } from "@/components/graph-view";
 import { MinimalHome } from "@/components/minimal-home";
 import { SetupDialog } from "@/components/setup-dialog";
 import { ComposerActions, NodePickerControl } from "@/components/composer-actions";
-import { useStrongKeyless, useZeroKeys, ZeroKeysPill } from "@/components/setup-cta";
+import { useModelAccess, SubscriptionPill, ZeroKeysPill } from "@/components/setup-cta";
+import { useSettingsDialog } from "@/components/settings/settings-dialog";
 import { DictationBar, joinDictation, useDictation } from "@/components/dictation";
 import { useFieldCycle } from "@/components/field-cycle";
 import { SidebarToggle } from "@/components/sidebar";
@@ -43,13 +44,13 @@ export function Home({
 	// a topic opens the setup dialog WITH THE DRAFT PRESERVED (Save
 	// stores the slots and the queued message sends).
 	const [configured, setConfigured] = useState(initialConfigured);
-	// The zero-keys truth (zero-keys wave): no provider key = the pill
-	// takes precedence over the models CTA (keys come first in the chain).
-	const zeroKeys = useZeroKeys();
-	// The strong slot's keyless truth (pre-send key guards, owner interlude
-	// 2026-09-25): keys may exist generally while the STRONG slot's pinned
-	// provider has none — the same skip-everything treatment on send.
-	const strongKeyless = useStrongKeyless();
+	// The access truth (zero-keys wave + subscription fix): a provider key
+	// and a connected subscription are independent authorization sources
+	// (no cross-source fallback). The shared hook names the surface (if
+	// any) the send must guide to — keys SetupDialog or Subscription
+	// settings.
+	const access = useModelAccess();
+	const { open: openSettings } = useSettingsDialog();
 	const [setupOpen, setSetupOpen] = useState(false);
 	// Voice dictation (STT wave, 2026-09-17): finals append at the end of the
 	// topic draft; the strip lives in the stats bar's middle slot.
@@ -113,6 +114,13 @@ export function Home({
 	const begin = async () => {
 		const t = topicRef.current.trim();
 		if (!t || busy) return;
+		// A selected subscription that is known not-connected guides to its
+		// own login/status surface; it must never read as "missing API key".
+		if (access.blocked === "subscription_pending") return;
+		if (access.blocked === "subscription") {
+			openSettings("subscription");
+			return;
+		}
 		// Unconfigured: the send INTERCEPTS into the setup flow (the draft
 		// stays in the textarea; the learner sends it after Save).
 		if (!configured) {
@@ -126,7 +134,7 @@ export function Home({
 		// already created the record). Same skip-everything-and-open-setup
 		// treatment; the server's 503 gate remains the belt for /chat/[id]
 		// sessions.
-		if (zeroKeys || strongKeyless) {
+		if (access.blocked === "keys") {
 			setSetupOpen(true);
 			return;
 		}
@@ -226,20 +234,37 @@ export function Home({
 								onClear={() => setPracticeProps([])}
 							/>
 						)}
-						setup={zeroKeys ? (
-							<ZeroKeysPill inline onOpen={() => setSetupOpen(true)} />
-						) : (
-							!configured && (
-								<button
-									type="button"
-									data-testid="setup-cta"
-									onClick={() => setSetupOpen(true)}
-									className="rounded-sm border border-border bg-card px-3 py-1.5 font-ui text-xs text-foreground transition-colors hover:border-muted-foreground/50 hover:bg-accent cursor-pointer"
-								>
-									Set up your models
-								</button>
+						setup={
+							access.blocked === "subscription_pending" ? (
+								<SubscriptionPill
+									inline
+									pending
+									state={access.subscriptionState}
+									failed={access.subscriptionFailed}
+									onOpen={() => openSettings("subscription")}
+								/>
+							) : access.blocked === "subscription" ? (
+								<SubscriptionPill
+									inline
+									state={access.subscriptionState}
+									failed={access.subscriptionFailed}
+									onOpen={() => openSettings("subscription")}
+								/>
+							) : access.blocked === "keys" ? (
+								<ZeroKeysPill inline onOpen={() => setSetupOpen(true)} />
+							) : (
+								!configured && (
+									<button
+										type="button"
+										data-testid="setup-cta"
+										onClick={() => setSetupOpen(true)}
+										className="rounded-sm border border-border bg-card px-3 py-1.5 font-ui text-xs text-foreground transition-colors hover:border-muted-foreground/50 hover:bg-accent cursor-pointer"
+									>
+										Set up your models
+									</button>
+								)
 							)
-						)}
+						}
 					/>
 					<form
 						className="flex items-end gap-1.5 rounded-2xl border bg-card p-1.5 shadow-lg"
@@ -325,6 +350,7 @@ export function Home({
 			<SetupDialog
 				open={setupOpen}
 				onClose={() => setSetupOpen(false)}
+				subscriptionConnected={access.subscriptionConnected}
 				onDone={() => {
 					setConfigured(true);
 					setSetupOpen(false);

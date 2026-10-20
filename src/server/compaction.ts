@@ -45,6 +45,7 @@ import {
 	type LhMarkerMessage,
 } from "../core/index.ts";
 import { emit } from "../core/events.ts";
+import { callUsageOf, type UsagePresence } from "../core/contracts/chat.ts";
 import type { ChatStore } from "../core/ports.ts";
 import type { PiEngine } from "../agent/models.ts";
 import { runSubagent } from "../agent/subagents/pi-run.ts";
@@ -57,10 +58,10 @@ const SUMMARIZER_SYSTEM_PROMPT =
 /** The one-shot summary call: zero tools, one turn, text out. The engine
  *  is the chat's own conversation engine (owner ruling: the session's
  *  model writes its own summary). Injectable for tests. */
-export type Summarizer = (prompt: string, engine: PiEngine) => Promise<{ summary: string; usage: Usage }>;
+export type Summarizer = (prompt: string, engine: PiEngine) => Promise<{ summary: string; usage: Usage; usagePresence?: boolean | Partial<UsagePresence> }>;
 
 /** The production summarizer over the sub-agent seam. */
-async function subagentSummarizer(prompt: string, engine: PiEngine): Promise<{ summary: string; usage: Usage }> {
+async function subagentSummarizer(prompt: string, engine: PiEngine): Promise<{ summary: string; usage: Usage; usagePresence: boolean | Partial<UsagePresence> }> {
 	let usage: Usage = {
 		input: 0,
 		output: 0,
@@ -69,6 +70,9 @@ async function subagentSummarizer(prompt: string, engine: PiEngine): Promise<{ s
 		totalTokens: 0,
 		cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
 	};
+	/** Supplier usage presence (contracts/chat.ts) — a failed or truncated
+	 *  summary call reports nothing and must stay unknown, not $0. */
+	let usagePresence: boolean | Partial<UsagePresence> = false;
 	const { text } = await runSubagent([], {
 		// The engine override is always present (the chat's own conversation
 		// engine — owner ruling), so the role label never resolves an
@@ -79,11 +83,12 @@ async function subagentSummarizer(prompt: string, engine: PiEngine): Promise<{ s
 		engine,
 		systemPrompt: SUMMARIZER_SYSTEM_PROMPT,
 		maxTurns: 1,
-		onUsage: (u) => {
+		onUsage: (u, presence) => {
 			usage = u;
+			usagePresence = presence;
 		},
 	});
-	return { summary: text, usage };
+	return { summary: text, usage, usagePresence };
 }
 
 /** Everything the service needs from its host (chat-handler wires the
@@ -211,7 +216,7 @@ async function compact(deps: CompactionDeps, chatId: string): Promise<void> {
 	emit("compaction-changed", { chatId, running: true });
 	try {
 		const summarize = deps.summarize ?? subagentSummarizer;
-		const { summary, usage } = await summarize(prompt, deps.engine);
+		const { summary, usage, usagePresence = true } = await summarize(prompt, deps.engine);
 		const trimmed = summary.trim();
 		if (!trimmed) return; // an empty summary is a refusal artifact — leave the record honest
 
@@ -232,15 +237,7 @@ async function compact(deps: CompactionDeps, chatId: string): Promise<void> {
 			messageId: marker.id,
 			at: details.at,
 			model: deps.modelId,
-			steps: [
-				{
-					inputTokens: usage.input,
-					outputTokens: usage.output,
-					cacheReadTokens: usage.cacheRead,
-					cacheWriteTokens: usage.cacheWrite,
-					reasoningTokens: usage.reasoning ?? 0,
-				},
-			],
+			steps: [callUsageOf(usage, usagePresence)],
 		});
 		// Notify-then-fetch: the record gained the marker (the client's
 		// dividers appear) and the status event ends the send gate.

@@ -24,6 +24,15 @@ export interface ModelCatalogEntry {
 	cost: { input: number; output: number; cacheRead: number; cacheWrite: number };
 	contextWindow: number;
 	maxTokens: number;
+	/** The authorization SOURCE this model runs on. Absent means the ordinary
+	 *  provider API key; "subscription" means this instance's supplier
+	 *  subscription (no env key exists for it). */
+	authorization?: "subscription";
+	/** Static picker state for subscription models: a supplier grant is
+	 *  required before a call can run. This is NOT a live login fact — the
+	 *  subscription status surface (/api/subscription) owns that, so a
+	 *  connected account still reads authorization_required here. */
+	availability?: "authorization_required";
 }
 
 /** The conversation agents' resolved default (BYOK, owner 2026-09-22): the
@@ -78,8 +87,17 @@ export interface ModelCatalogResponse {
 /** One row of the providers surface. */
 export interface CatalogProvider {
 	id: string;
-	/** The env var whose presence federates this provider in. */
-	envVar: string;
-	/** Whether that var is currently present (env or auth file). */
+	/** The env var whose presence federates this provider in. NULL for a
+	 *  provider with no plain key (the subscription source) — never a
+	 *  fictitious variable name. */
+	envVar: string | null;
+	/** Whether that var is currently present (env or auth file). For a
+	 *  subscription source this is ALWAYS false: presence is not an
+	 *  authorization fact there, and the API-key gate must not read it as
+	 *  one. */
 	keyPresent: boolean;
+	/** The provider's authorization source. Absent = "api_key" (the
+	 *  ordinary key table); "subscription" = this instance's supplier
+	 *  subscription, checked through the subscription surface instead. */
+	authorization?: "api_key" | "subscription";
 }

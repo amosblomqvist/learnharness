@@ -125,7 +125,7 @@ export function ModelMenuList({
 						>
 							<span className="flex items-center justify-between gap-2">
 								<span className="truncate text-card-foreground">{m.name}</span>
-								<span className="shrink-0 tabular-nums text-muted-foreground" title="USD per 1M tokens in/out">
+								<span className="shrink-0 tabular-nums text-muted-foreground" title="Estimated model cost basis: catalog list price, USD per 1M tokens in/out; not a bill">
 									{priceLabel(m.cost)}
 								</span>
 							</span>

@@ -68,10 +68,17 @@ interface ModelsBody {
 }
 
 /** Pure: which stage the flow opens at — no keyed provider = keys first
- *  (owner's dependency ordering). Exported for tests. */
+ *  (owner's dependency ordering). A connected subscription is its own
+ *  authorization source, so it opens the pickers with zero API keys; the
+ *  fresh no-key/no-subscription path keeps the first-key screen. It does
+ *  not stand in for a provider key. Exported for tests. */
 export function setupStage(
 	providers: { id: string; keyPresent: boolean }[] | null,
+	subscriptionConnected = false,
 ): "keys" | "pickers" {
+	// A connected subscription authorizes the pickers even while the keys
+	// read is still in flight; never flash the first-key screen at it.
+	if (subscriptionConnected) return "pickers";
 	if (providers === null) return "keys"; // fetch failed → the honest fallback
 	return providers.some((p) => p.keyPresent) ? "pickers" : "keys";
 }
@@ -221,10 +228,15 @@ export function SetupDialog({
 	/** Saved: the models section landed; the caller marks configured (the
 	 *  draft stays put — save never sends). */
 	onDone,
+	/** The live subscription authorization, when the caller already reads
+	 *  it. Connected with zero API keys opens the pickers, not the
+	 *  first-key screen. */
+	subscriptionConnected = false,
 }: {
 	open: boolean;
 	onClose: () => void;
 	onDone: (models: ModelsSettings) => void;
+	subscriptionConnected?: boolean;
 }) {
 	const backdropDismiss = useBackdropDismiss(onClose);
 	const [body, setBody] = useState<ModelsBody | null>(null);
@@ -339,7 +351,7 @@ export function SetupDialog({
 
 	if (!open) return null;
 
-	const stage = failed ? "keys" : setupStage(body ? body.providers : null);
+	const stage = failed ? "keys" : setupStage(body ? body.providers : null, subscriptionConnected);
 	const allPicked = SLOT_ORDER.every((s) => picked[s]);
 
 	/** Stage 1's save: PUT the pasted key, dispatch the keys signal, and

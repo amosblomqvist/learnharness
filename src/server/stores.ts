@@ -6,6 +6,9 @@
  * file (and the adapter implementations in src/store/).
  */
 
+import path from "node:path";
+import { PATHS } from "../../config.ts";
+import { createSubscriptionStore, type SubscriptionStore } from "../store/subscription-credentials.ts";
 import { chatStore } from "../store/chats.ts";
 import { graphStore } from "../store/graph.ts";
 import { jobStore } from "../store/jobs.ts";
@@ -20,6 +23,19 @@ export const stores = {
 };
 
 export type Stores = typeof stores;
+
+/** Lazy instance-local adapter wiring; no credential files are read on import. */
+const subscriptionStores = globalThis as typeof globalThis & { __lhSubscriptionStores?: Map<string, SubscriptionStore> };
+export function subscriptionStore(): SubscriptionStore {
+	const directory = path.resolve(PATHS.data, "subscription");
+	const registry = subscriptionStores.__lhSubscriptionStores ??= new Map();
+	let store = registry.get(directory);
+	if (!store) {
+		store = createSubscriptionStore(directory);
+		registry.set(directory, store);
+	}
+	return store;
+}
 
 /**
  * The resolved view of the settings record (core/settings-resolution.ts):

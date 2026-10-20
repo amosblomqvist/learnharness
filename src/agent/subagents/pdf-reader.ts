@@ -4,6 +4,7 @@ import { Type } from "typebox";
 import { piEngineFor, type PiEngine, type ThinkingLevel } from "../models.ts";
 import { providerEventObserver, type ProviderEventObserver } from "../provider-events.ts";
 import type { PdfResult, PdfToolInput } from "../../core/contracts.ts";
+import { messageUsagePresence, type UsagePresence } from "../../core/contracts/chat.ts";
 import { getHeadless, type HeadlessApi } from "./headless.ts";
 import { pdfExtract, pdfInfo, pdfProbe, pdfSearch, type PdfSearchHit } from "./pdf-ops.ts";
 
@@ -63,7 +64,7 @@ const EXTRACT_CAP = 24_000;
 export interface PdfReaderOptions {
 	engine?: PiEngine;
 	abortSignal?: AbortSignal;
-	onUsage?: (usage: Usage) => void;
+	onUsage?: (usage: Usage, presence: boolean | Partial<UsagePresence>) => void;
 	onActivity?: (line: string) => void;
 	headless?: HeadlessApi;
 	maxIterations?: number;
@@ -212,7 +213,7 @@ export async function runPdfReaderAgent(
 				opts.chatId ? providerEventObserver(opts.chatId, "job:pdfReader") : undefined,
 			);
 			// Money channel: each iteration is one model call.
-			opts.onUsage?.(result.usage);
+			opts.onUsage?.(result.usage, messageUsagePresence(result));
 			messages = [...messages, result];
 
 			const toolCalls = result.content.filter(
@@ -404,7 +405,6 @@ async function streamOnce(
 	// normalizeContext is the library's only Context→TranscriptContext entry.
 	const stream = engine.streamFn(engine.model, normalizeContext({ systemPrompt, messages, tools }), {
 		reasoning: reasoning && reasoning !== "off" ? reasoning : undefined,
-		apiKey: process.env.OPENROUTER_API_KEY || undefined,
 		signal: abortSignal,
 		onProviderStreamEvent: onProviderStreamEvent as never,
 	} as never);

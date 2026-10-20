@@ -12,6 +12,8 @@ import {
 	type ModelSlotName,
 	type ProviderKeyMissing,
 } from "../../core/settings.ts";
+import { SubscriptionError, type SubscriptionErrorCode, type SubscriptionFailure } from "../../core/subscription.ts";
+import { callUsageOf, type UsagePresence } from "../../core/contracts/chat.ts";
 import type { PiEngine } from "../models.ts";
 import { runSubagent } from "./pi-run.ts";
 import { withBgLlmSlot } from "./bg-llm-semaphore.ts";
@@ -470,7 +472,7 @@ function runExtractor(
 	existingIds: ReadonlySet<string>,
 	batchIds: ReadonlySet<string>,
 	signal: AbortSignal | undefined,
-	onStep: (usage: Usage, model: string, step: number, finishReason: string, tools: string) => void,
+	onStep: (usage: Usage, model: string, step: number, finishReason: string, tools: string, presence: boolean | Partial<UsagePresence>) => void,
 ): Promise<SessionFindings> {
 	// Chains in (the wire), chains out (the store) — no translation seam
 	// since chains-primary. Validation runs at the submit seam (error-back)
@@ -506,7 +508,7 @@ function runNotesExtractor(
 	prompt: string,
 	existingIds: ReadonlySet<string>,
 	signal: AbortSignal | undefined,
-	onStep: (usage: Usage, model: string, step: number, finishReason: string, tools: string) => void,
+	onStep: (usage: Usage, model: string, step: number, finishReason: string, tools: string, presence: boolean | Partial<UsagePresence>) => void,
 ): Promise<NotesFindings> {
 	return runSubmitAgent<FindingsSubmit>({
 		role: "extractor",
@@ -574,7 +576,7 @@ function runAuditor(
 	sourceId: string,
 	prompt: string,
 	signal: AbortSignal | undefined,
-	onStep: (usage: Usage, model: string, step: number, finishReason: string, tools: string) => void,
+	onStep: (usage: Usage, model: string, step: number, finishReason: string, tools: string, presence: boolean | Partial<UsagePresence>) => void,
 	tools: Record<string, AgentTool<any>>,
 ): Promise<AuditVerdicts> {
 	return runSubmitAgent({
@@ -703,6 +705,20 @@ export function abortExtraction(chatId: string): boolean {
 }
 // ─── the pipeline ───────────────────────────────────────────────────────────
 
+/** A stage's subscription source is unusable in this run's captured
+ *  generation (source-aware execution, issue #8): refused BEFORE any
+ *  batch, never retried on a newer generation, never replaced by a
+ *  neighboring model. */
+export class SubscriptionSourceError extends Error {
+	constructor(
+		public readonly provider: string,
+		public readonly code: SubscriptionErrorCode,
+	) {
+		super(`The ${provider} subscription source is unavailable (${code}) — this run was refused, not retried on another model.`);
+		this.name = "SubscriptionSourceError";
+	}
+}
+
 export interface ExtractionModels {
 	/** Test seam: a scripted engine per stage — checked FIRST, ahead of the
 	 *  engineFor chain (production wires no direct values). */
@@ -722,6 +738,16 @@ export interface ExtractionModels {
 	 *  inject engines directly (test engines never owe a key). A keyless
 	 *  stage refuses with ProviderKeyMissingError BEFORE any batch runs. */
 	providerKeyMissing?: (provider: string, tier: ModelSlotName) => ProviderKeyMissing | null;
+	/** Subscription generation scope (issue #8): injected by the SERVER
+	 *  composition (the agent layer never imports the server). The public
+	 *  entries open it — nested calls (a turn's trigger) inherit the
+	 *  turn's generation, a top-level route call pins the current one.
+	 *  ABSENT in tests: runs inline, no scope. */
+	scope?: <T>(fn: () => Promise<T>, generation?: string | null) => Promise<T>;
+	/** Subscription source preflight (issue #8): null for api-key
+	 *  providers, the failure when a stage's subscription generation is
+	 *  unusable. Injected like providerKeyMissing; absent in tests. */
+	preflight?: (provider: string) => Promise<SubscriptionFailure | null>;
 }
 
 export interface ExtractionPipelineDeps extends GraphDeps, ExtractionModels {
@@ -757,16 +783,10 @@ export interface ExtractionPipeline {
  *  (the money channel's capture shape, contracts/chat.ts). Exported for
  *  the cluster namer — the same capture shape (2026-09 graph cost
  *  metrics wave). Module scope: no closure deps, pure projection. */
-export function callUsage(usage: Usage): CallUsage {
-	return {
-		inputTokens: usage.input,
-		outputTokens: usage.output,
-		cacheReadTokens: usage.cacheRead,
-		cacheWriteTokens: usage.cacheWrite,
-		// Optional in pi's Usage (providers that never emit reasoning
-		// tokens leave it unset) — persisted as 0, never dropped.
-		reasoningTokens: usage.reasoning ?? 0,
-	};
+export function callUsage(usage: Usage, presence: boolean | Partial<UsagePresence> = true): CallUsage {
+	// Unreported stays unknown on every field (contracts/chat.ts callUsageOf):
+	// the SDK's seeded zeros are not a billed zero.
+	return callUsageOf(usage, presence);
 }
 
 export function createExtractionPipeline(deps: ExtractionPipelineDeps): ExtractionPipeline {
@@ -776,17 +796,37 @@ export function createExtractionPipeline(deps: ExtractionPipelineDeps): Extracti
 	// stage call server-side) — the job runner's exact treatment. undefined
 	// = the BYOK chain came up empty; the front-door guards turn that into
 	// an honest refusal.
-	const stageEngine = (role: ModelRole, override?: PiEngine): PiEngine | undefined =>
-		override ?? deps.engineFor?.(role);
+	const stageEngine = (role: ModelRole, override?: PiEngine): PiEngine | undefined => {
+		if (override) return override;
+		try {
+			return deps.engineFor?.(role);
+		} catch (error) {
+			// Source-aware build (issue #8): a subscription stage with no usable
+			// generation refuses the BUILD — surface it as this pipeline's own
+			// source refusal (the covering label names the instance, the engine
+			// never resolved far enough to name its provider).
+			if (error instanceof SubscriptionError) throw new SubscriptionSourceError("instance", error.code);
+			throw error;
+		}
+	};
+	/** One scope per public run: no explicit generation — nested calls
+	 *  inherit the caller's, a top-level call captures the current one. */
+	const inScope = <T,>(fn: () => Promise<T>): Promise<T> => (deps.scope ? deps.scope(fn) : fn());
 	/** The per-need refusal guard: which slot tiers the pipeline's stages
 	 *  found unset (test values count as configured — they ARE engines),
 	 *  and whether a configured stage's provider key is gone (provider-key
 	 *  interlude, 2026-09-25) — both refuse BEFORE any batch runs. */
-	function refuseIfStagesUnready(): void {
-		const stages: readonly [ModelRole, PiEngine | undefined][] = [
+	function stageEngines(): readonly [ModelRole, PiEngine | undefined][] {
+		return [
 			["extractor", stageEngine("extractor", deps.extractor)],
 			["auditor", stageEngine("auditor", deps.auditor)],
 		];
+	}
+	/** The synchronous half: models configured + stage keys present. Stays
+	 *  synchronous on purpose — a run's registry entry is minted before the
+	 *  first await, and the tests pin that. */
+	function refuseIfStagesUnready(): void {
+		const stages = stageEngines();
 		const missing = new Set<ModelSlotName>();
 		for (const [role, engine] of stages) if (!engine) missing.add(ROLE_SLOT[role]);
 		if (missing.size > 0) {
@@ -803,6 +843,26 @@ export function createExtractionPipeline(deps: ExtractionPipelineDeps): Extracti
 				throw new ProviderKeyMissingError(refusal.provider, refusal.slots);
 			}
 		}
+	}
+
+	/** Subscription source parity (issue #8): a stage on the instance's
+	 *  subscription source is usable only in the generation this run
+	 *  CAPTURED — refused before any batch otherwise. Async by nature (the
+	 *  preflight reads the service); returns undefined when the seam is
+	 *  absent (tests), so the callers' sync prefix stays sync. */
+	function refuseIfSourceUnready(): Promise<void> | undefined {
+		if (!deps.preflight) return undefined;
+		const preflight = deps.preflight;
+		const stages = stageEngines();
+		return (async () => {
+			for (const [, engine] of stages) {
+				const failure = await preflight(engine!.model.provider);
+				if (failure) {
+					console.info(`[extraction] refused — subscription source unavailable (${failure.code})`);
+					throw new SubscriptionSourceError(engine!.model.provider, failure.code);
+				}
+			}
+		})();
 	}
 	// THE SHARED REGISTRIES (runs() above — globalThis): every pipeline
 	// instance (route entries in dev, tests) sees the same runs, the same
@@ -921,8 +981,8 @@ export function createExtractionPipeline(deps: ExtractionPipelineDeps): Extracti
 			new Set(graph.nodes.map((n) => n.id)),
 			batchIds,
 			signal,
-			(usage, model, step, finishReason, tools) => {
-				recordStep(jobKey, "extractor", callUsage(usage), model);
+			(usage, model, step, finishReason, tools, presence) => {
+				recordStep(jobKey, "extractor", callUsage(usage, presence), model);
 				console.info(`[extraction] extractor step ${step}: ${finishReason}, tools: ${tools}`);
 			},
 		);
@@ -964,8 +1024,8 @@ export function createExtractionPipeline(deps: ExtractionPipelineDeps): Extracti
 				)}\n\n` +
 				`The current knowledge graph has ${graph.nodes.length} node(s). Explore it with your tools and link what links.`,
 			signal,
-			(usage, model, step, finishReason, tools) => {
-				recordStep(jobKey, "auditor", callUsage(usage), model);
+			(usage, model, step, finishReason, tools, presence) => {
+				recordStep(jobKey, "auditor", callUsage(usage, presence), model);
 				console.info(`[extraction] auditor step ${step}: ${finishReason}, tools: ${tools}`);
 			},
 			auditorGraphTools({ chatStore, graphStore }),
@@ -1079,6 +1139,10 @@ export function createExtractionPipeline(deps: ExtractionPipelineDeps): Extracti
 	}
 
 	async function runExtraction(chatId: string): Promise<EmissionStats> {
+		return inScope(() => runExtractionScoped(chatId));
+	}
+
+	async function runExtractionScoped(chatId: string): Promise<EmissionStats> {
 		if (inFlight.has(chatId)) return { nodes: 0, chains: 0 };
 		inFlight.add(chatId);
 		const t0 = performance.now();
@@ -1097,6 +1161,8 @@ export function createExtractionPipeline(deps: ExtractionPipelineDeps): Extracti
 			// engines AND their providers' keys; a refusal lands BEFORE any
 			// stage runs (typed — the trigger skips, routes surface 503).
 			refuseIfStagesUnready();
+			const sourceCheck = refuseIfSourceUnready();
+			if (sourceCheck) await sourceCheck;
 			const covered = coverageOf(record.messages, graphStore.readCoverage(), chatId);
 			if (covered.uncovered.length === 0) {
 				console.info(`[extraction ${chatId}] nothing uncovered — no-op`);
@@ -1271,8 +1337,8 @@ export function createExtractionPipeline(deps: ExtractionPipelineDeps): Extracti
 			prompt,
 			new Set(graph.nodes.map((n) => n.id)),
 			signal,
-			(usage, model, step, finishReason, tools) => {
-				recordStep(jobKey, "extractor", callUsage(usage), model);
+			(usage, model, step, finishReason, tools, presence) => {
+				recordStep(jobKey, "extractor", callUsage(usage, presence), model);
 				console.info(`[extraction] extractor step ${step}: ${finishReason}, tools: ${tools}`);
 			},
 		);
@@ -1284,6 +1350,10 @@ export function createExtractionPipeline(deps: ExtractionPipelineDeps): Extracti
 	// schema now that attribution is gone) — audit() above, verbatim.
 
 	async function runNotesExtraction(input: { id: string; filePath: string; text: string; importedAt: string }): Promise<EmissionStats> {
+		return inScope(() => runNotesExtractionScoped(input));
+	}
+
+	async function runNotesExtractionScoped(input: { id: string; filePath: string; text: string; importedAt: string }): Promise<EmissionStats> {
 		const { id } = input;
 		if (inFlight.has(id)) return { nodes: 0, chains: 0 };
 		inFlight.add(id);
@@ -1293,6 +1363,8 @@ export function createExtractionPipeline(deps: ExtractionPipelineDeps): Extracti
 			// (2026-09-25): same refusal as the chat front door — no
 			// extractor/auditor engines, or a stage key gone, no run.
 			refuseIfStagesUnready();
+			const sourceCheck = refuseIfSourceUnready();
+			if (sourceCheck) await sourceCheck;
 			// CHUNKED like the chat path (owner, 2026-09-28): each chunk is a
 			// standalone extract → audit → merge, so no single call carries a
 			// whole large file. Abort mid-run keeps earlier chunks merged
@@ -1377,6 +1449,10 @@ export function createExtractionPipeline(deps: ExtractionPipelineDeps): Extracti
 	 *  no-op (the mappings ledger used to dedupe this at merge time by
 	 *  accident); changed text re-runs the whole file. */
 	async function importNotes(input: NotesImportInput): Promise<EmissionStats> {
+		return inScope(() => importNotesScoped(input));
+	}
+
+	async function importNotesScoped(input: NotesImportInput): Promise<EmissionStats> {
 		const id = `src_${crypto.createHash("sha256").update(input.filePath).digest("hex").slice(0, 12)}`;
 		const contentFp = crypto.createHash("sha256").update(input.text).digest("hex").slice(0, 16);
 		if (graphStore.readSources().find((s) => s.id === id)?.contentFp === contentFp) {

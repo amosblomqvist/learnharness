@@ -423,18 +423,51 @@ function checkForUpdates({ manual = false } = {}) {
 }
 
 function installUpdateNow() {
+	// No updater (dev or acceptance rehearsal build): the IPC channel stays
+	// registered, but it MUST be inert. Killing the child server here would
+	// strand a live window on a restart that can never happen.
+	if (!autoUpdater) {
+		log("update install requested without an updater — ignored");
+		return;
+	}
 	// Kill the server BEFORE the quit-and-install (see block comment).
 	try {
 		killServer();
 	} catch {
 		/* already dead */
 	}
-	autoUpdater?.quitAndInstall();
+	autoUpdater.quitAndInstall();
+}
+
+/** Acceptance rehearsal builds (issue #8, 2026-10-20) carry a packaging-only
+ *  flag in their OWN packaged package.json. The build config sets
+ *  `extraMetadata.lhTestBuild: true`; electron-builder deep-assigns that
+ *  extraMetadata object into the ROOT of the packaged package.json
+ *  (app-builder-lib/out/fileTransformer.js, modifyMainPackageJson), so the
+ *  shipped marker is the root property `lhTestBuild: true` — the
+ *  `extraMetadata` wrapper exists only in the build config. Read the packaged
+ *  app's own file (the dev guard above runs first), and accept ONLY a real
+ *  boolean true. An unreadable or missing file is NOT a test build:
+ *  production keeps updating exactly as before. */
+function isAcceptanceTestBuild() {
+	try {
+		const pkg = JSON.parse(fs.readFileSync(path.join(app.getAppPath(), "package.json"), "utf8"));
+		return pkg?.lhTestBuild === true;
+	} catch (err) {
+		log(`auto-update: acceptance flag unreadable (${err?.message ?? err}) — treating as production`);
+		return false;
+	}
 }
 
 function setupAutoUpdater() {
 	if (!app.isPackaged) {
 		log("auto-update: dev build — updater disabled");
+		return;
+	}
+	// Rehearsal installers never update: no electron-updater import, no feed,
+	// no check/download/install, and no interval (autoUpdater stays null).
+	if (isAcceptanceTestBuild()) {
+		log("auto-update: acceptance test build — updater disabled");
 		return;
 	}
 	try {

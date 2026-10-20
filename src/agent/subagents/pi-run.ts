@@ -2,6 +2,7 @@ import { Agent, type AgentEvent, type AgentMessage, type AgentTool } from "@eare
 import type { AssistantMessage, ToolResultMessage, Usage } from "@earendil-works/pi-ai";
 import { piEngineFor, type PiEngine } from "../models.ts";
 import { providerEventObserver } from "../provider-events.ts";
+import { messageUsagePresence, type UsagePresence } from "../../core/contracts/chat.ts";
 import type { ModelRole } from "../../../config.ts";
 
 /**
@@ -30,8 +31,9 @@ export interface SubagentRunOptions {
 	maxTurns: number;
 	/** Abort mid-model-call (the real-kill semantics). */
 	abortSignal?: AbortSignal;
-	/** Money channel: one call per model request. */
-	onUsage?: (usage: Usage) => void;
+	/** Money channel: one call per model request. `reported` is the
+	 *  supplier's usage presence (contracts/chat.ts messageUsagePresence). */
+	onUsage?: (usage: Usage, presence: boolean | Partial<UsagePresence>) => void;
 	/** Activity line per tool execution (job record progress). */
 	onToolStart?: (toolName: string, args: unknown) => void;
 	/** Per completed assistant message (extraction's step log). */
@@ -104,7 +106,7 @@ export async function runSubagent(tools: AgentTool<any, any>[], opts: SubagentRu
 							break;
 						}
 						step++;
-						opts.onUsage?.(m.usage);
+						opts.onUsage?.(m.usage, messageUsagePresence(m));
 						opts.onAssistantMessage?.(m, step);
 						if (m.stopReason === "error") errorMessage = m.errorMessage;
 					}

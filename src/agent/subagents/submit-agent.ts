@@ -14,6 +14,7 @@ import { invalidInputResult, toToolResult } from "../tool-execute.ts";
 import type { ModelRole } from "../../../config.ts";
 import type { PiEngine } from "../models.ts";
 import { runSubagent } from "./pi-run.ts";
+import { messageUsagePresence, type UsagePresence } from "../../core/contracts/chat.ts";
 import { healToolRecord } from "../tools/heal.ts";
 import { healEncodedArguments } from "../../core/argument-heal.ts";
 
@@ -57,7 +58,7 @@ export async function runSubmitAgent<T>(opts: {
 	prompt: string;
 	engine: PiEngine | undefined;
 	signal: AbortSignal | undefined;
-	onStep: (usage: Usage, model: string, step: number, finishReason: string, tools: string) => void;
+	onStep: (usage: Usage, model: string, step: number, finishReason: string, tools: string, presence: boolean | Partial<UsagePresence>) => void;
 	neverSubmitted: string;
 	/** Extra tools beside the submit call (the auditor's graph-exploration
 	 *  set, 2026-09-27): a small agentic loop instead of a bare retry. */
@@ -124,6 +125,9 @@ export async function runSubmitAgent<T>(opts: {
 					step,
 					message.stopReason,
 					message.content.filter((c) => c.type === "toolCall").map((c) => (c as { name: string }).name).join(", ") || "(none)",
+					// Usage presence (contracts/chat.ts): the capture keeps an
+					// unreported call unknown instead of a priced zero.
+					messageUsagePresence(message),
 				),
 			shouldStop: (_message, toolResults) => toolResults.some((r) => r.toolName === opts.toolName && !r.isError),
 		},

@@ -21,8 +21,9 @@ import { clampThinkingLevel, getSupportedThinkingLevels, type Api, type Model } 
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import { piModels } from "../agent/models.ts";
 import { settingsStore } from "../store/settings.ts";
+import { SUBSCRIPTION_PROVIDER } from "../core/subscription.ts";
 import { effectiveSettings } from "./stores.ts";
-import { keyValue } from "./keys.ts";
+import { keyValue, providerAuthorization } from "./keys.ts";
 import type { ChatSettings } from "../core/contracts/chat.ts";
 import type {
 	CatalogDefaults,
@@ -119,24 +120,53 @@ export function catalogSlots(): SlotPins {
 /** The providers surface (model slots wave, 2026-09-20): one row per
  *  plain-key model provider (core/auth-keys.ts's pi-ai-derived table),
  *  with keyPresent read env-wins through the keys seam, fresh per call —
- *  saving a key immediately federates the provider into the picker. */
+ *  saving a key immediately federates the provider into the picker.
+ *
+ *  SUBSCRIPTION SOURCE (issue #8): the supplier subscription provider is a
+ *  KNOWN row with no env key at all — envVar null (never a fictitious
+ *  name), keyPresent false (presence is not an authorization fact here),
+ *  authorization "subscription". Its availability is reported by the
+ *  subscription status surface, never inferred from this row. */
 export function catalogProviders(): CatalogProvider[] {
-	return AUTH_PROVIDER_KEYS.map((p) => ({
+	const rows: CatalogProvider[] = AUTH_PROVIDER_KEYS.map((p) => ({
 		id: p.id,
 		envVar: p.envVar,
 		keyPresent: keyValue(p.envVar) !== undefined,
-	})).sort((a, b) => a.id.localeCompare(b.id));
+		authorization: "api_key",
+	}));
+	rows.push({
+		id: SUBSCRIPTION_PROVIDER,
+		envVar: null,
+		keyPresent: false,
+		authorization: "subscription",
+	});
+	return rows.sort((a, b) => a.id.localeCompare(b.id));
 }
 
 /** The providers whose key is present — the picker federates exactly
- *  these (a keyless provider's models are unreachable by design; the
- *  Keys page is the discovery surface, same discipline as search). */
+ *  these (a keyless API-key provider's models are unreachable by design;
+ *  the Keys page is the discovery surface, same discipline as search). */
 function keyedProviderIds(): Set<string> {
 	return new Set(catalogProviders().filter((p) => p.keyPresent).map((p) => p.id));
 }
 
-/** Project one catalog model to the client DTO. */
-export function toModelDto(model: Model<Api>): ModelDto {
+/** Subscription-source providers are federated even while disconnected:
+ *  their models are KNOWN candidates (authorization_required), so a saved
+ *  pin survives a disconnect and the picker never hides it. */
+function subscriptionProviderIds(): Set<string> {
+	return new Set(catalogProviders().filter((p) => providerAuthorization(p.id) === "subscription").map((p) => p.id));
+}
+
+/** The providers the picker federates: present API keys ∪ subscription
+ *  sources (same set the context-limits index reads). */
+function federatedProviderIds(): Set<string> {
+	return new Set([...keyedProviderIds(), ...subscriptionProviderIds()]);
+}
+
+/** Project one catalog model to the client DTO. `subscription` stamps the
+ *  static source metadata (authorization + authorization_required); the
+ *  live grant state is the subscription status surface's business. */
+export function toModelDto(model: Model<Api>, subscription = false): ModelDto {
 	return {
 		id: model.id,
 		name: model.name,
@@ -152,6 +182,7 @@ export function toModelDto(model: Model<Api>): ModelDto {
 		},
 		contextWindow: model.contextWindow,
 		maxTokens: model.maxTokens,
+		...(subscription ? { authorization: "subscription" as const, availability: "authorization_required" as const } : {}),
 	};
 }
 
@@ -163,10 +194,10 @@ export function toModelDto(model: Model<Api>): ModelDto {
  *  server-side through this. No hardcoded fallback exists anywhere:
  *  a model missing here reads limit-null (usage-only, honest render). */
 export function catalogContextLimits(): Map<string, number> {
-	const keyed = keyedProviderIds();
+	const federated = federatedProviderIds();
 	const index = new Map<string, number>();
 	for (const provider of piModels().getProviders()) {
-		if (!keyed.has(provider.id)) continue;
+		if (!federated.has(provider.id)) continue;
 		for (const model of piModels().getModels(provider.id)) {
 			index.set(`${provider.id}:${model.id}`, model.contextWindow);
 		}
@@ -179,12 +210,12 @@ export function catalogContextLimits(): Map<string, number> {
  *  defaults a settings-less chat runs + the background roles' resolved
  *  pins (the settings UI's per-role default captions). */
 export function modelCatalog(): ModelCatalogResponse {
-	const keyed = keyedProviderIds();
+	const federated = federatedProviderIds();
+	const subscription = subscriptionProviderIds();
 	const models = piModels()
 		.getProviders()
-		.filter((p) => keyed.has(p.id))
-		.flatMap((p) => piModels().getModels(p.id))
-		.map(toModelDto)
+		.filter((p) => federated.has(p.id))
+		.flatMap((p) => piModels().getModels(p.id).map((m) => toModelDto(m, subscription.has(p.id))))
 		.sort((a, b) => (a.provider === b.provider ? a.id.localeCompare(b.id) : a.provider.localeCompare(b.provider)));
 	return {
 		models,
@@ -243,8 +274,17 @@ function validateSlotSpec(name: ModelSlotName, slot: { model?: { provider: strin
 		if (!providers.includes(provider)) {
 			return { ok: false, error: `Unknown provider "${provider}" — configured: ${providers.join(", ")}` };
 		}
-		if (!piModels().getModel(provider, id)) {
+		const model = piModels().getModel(provider, id);
+		if (!model) {
 			return { ok: false, error: `No model "${id}" in the ${provider} catalog` };
+		}
+		// CAPABILITY gate (subscription wave, issue #8): the vision slot feeds
+		// visual-maker and pdf-reader, both of which send image content parts.
+		// pi's real `input` capabilities are the truth — a text-only model
+		// would fail mid-run, so the structural write rejects it instead.
+		// Purely structural: it says nothing about live account authorization.
+		if (name === "vision" && !model.input.includes("image")) {
+			return { ok: false, error: `Model "${id}" accepts text only — the vision slot needs an image-capable model` };
 		}
 	}
 	// BYOK interlude (owner, 2026-09-22): the supported-level verdict is

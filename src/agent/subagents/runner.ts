@@ -18,6 +18,7 @@ import {
 	type VisualResult,
 	type VisualToolInput,
 } from "../../core/contracts.ts";
+import { SubscriptionError, type SubscriptionFailure } from "../../core/subscription.ts";
 import { registerJobAbort, unregisterJobAbort } from "./aborts.ts";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
@@ -86,6 +87,17 @@ export interface JobRunnerDeps {
 	 *  drop (jobTools' searchAvailable) uses the same signal — jobs already
 	 *  in flight when a key disappears still fail honestly, never crash. */
 	searchProvider?: () => SearchProvider | null;
+	/** Subscription engine scope (source-aware execution, issue #8): runs
+	 *  a job body under an explicit subscription generation (null = no
+	 *  subscription session). Injected by the server composition; absent in
+	 *  engine-injecting tests runs the body as-is. */
+	scope?: <T>(fn: () => Promise<T>, generation?: string | null) => Promise<T>;
+	/** Subscription source preflight (source-aware execution, issue #8):
+	 *  async availability of the resolved engine's provider — null for
+	 *  plain API-key sources (the synchronous key gate above stays their
+	 *  guard), a SubscriptionFailure for an unusable subscription source.
+	 *  Runs INSIDE the job's scope, so it reads the job's generation. */
+	preflight?: (provider: string) => Promise<SubscriptionFailure | null>;
 	/** Key-presence gate (provider-key interlude, 2026-09-25): given the
 	 *  resolved engine's provider + the kind's slot tier, return the
 	 *  refusal envelope when the provider's key is missing (null = run).
@@ -194,6 +206,18 @@ export function createJobRunner(deps: JobRunnerDeps): JobRunner {
 			console.error(`[job ${jobId}] not found — nothing to run`);
 			return;
 		}
+		// One subscription scope per job (source-aware execution, issue #8):
+		// the job's OWN recorded generation, or an explicit null when it has
+		// none — never a fresh capture of whatever account is current by the
+		// time a queued job starts. Nested under the spawning turn the
+		// capture is redundant; on crash recovery it is the whole point.
+		const body = () => runJobBody(job, input);
+		const generation = job.subscriptionGeneration ?? null;
+		return deps.scope ? deps.scope(body, generation) : body();
+	}
+
+	async function runJobBody(job: JobRecord, input?: JobToolInput): Promise<void> {
+		const jobId = job.id;
 		if (job.status !== "running") return; // already finished / re-run after crash recovery
 		const run = KIND_RUNNERS[job.kind];
 		if (!run) {
@@ -201,7 +225,6 @@ export function createJobRunner(deps: JobRunnerDeps): JobRunner {
 			jobStore.updateJob(jobId, { status: "error", error: `unknown kind ${job.kind}`, activity: "failed" });
 			return;
 		}
-		const engine = pickEngine(job.kind);
 		// The per-need refusal guards (BYOK 2026-09-22 / provider-key
 		// interlude 2026-09-25): no engine for the kind's tier, or the
 		// resolved engine's provider key gone — both refuse through the SAME
@@ -240,6 +263,20 @@ export function createJobRunner(deps: JobRunnerDeps): JobRunner {
 								};
 			await finishJob(jobId, failure);
 		};
+		// Source-aware engine build (issue #8): a subscription source with no
+		// usable generation refuses the BUILD — the same honest refusal family
+		// as the preflight below, never an unhandled rejection or a fallback.
+		let engine: PiEngine | undefined;
+		try {
+			engine = pickEngine(job.kind);
+		} catch (error) {
+			if (error instanceof SubscriptionError) {
+				console.info(`[job ${jobId}] refused — subscription source unavailable (${error.code})`);
+				await refuse(`${error.message} This job was stopped rather than run on a different model.`);
+				return;
+			}
+			throw error;
+		}
 		if (!engine) {
 			const tier = ROLE_SLOT[KIND_ROLE[job.kind]];
 			const envelope = modelsNotConfigured([tier]);
@@ -251,6 +288,19 @@ export function createJobRunner(deps: JobRunnerDeps): JobRunner {
 		// key may be gone — refuse the spawn BEFORE the loop, same
 		// convention (the injected check reads the key store; absent in
 		// engine-injecting tests).
+		// Subscription source parity (source-aware execution, issue #8): the
+		// resolved engine may come from the instance subscription, usable
+		// only inside the job's captured generation. Refused through the same
+		// convention BEFORE the loop, and never swapped for a neighboring
+		// model — an unavailable source is an honest failure, not a fallback.
+		const sourceFailure = await deps.preflight?.(engine.model.provider);
+		if (sourceFailure) {
+			console.info(`[job ${jobId}] refused — subscription source unavailable (${sourceFailure.code})`);
+			await refuse(
+				`The ${engine.model.provider} subscription source is unavailable (${sourceFailure.code}). This job was stopped rather than run on a different model.`,
+			);
+			return;
+		}
 		const keyRefusal =
 			deps.providerKeyMissing?.(engine.model.provider, ROLE_SLOT[KIND_ROLE[job.kind]]) ?? null;
 		if (keyRefusal) {
@@ -371,8 +421,8 @@ export function createJobRunner(deps: JobRunnerDeps): JobRunner {
 				chatId: loop.chatId,
 				// Money channel: each agent step is one model call — fold its
 				// usage into the record as it completes (progress write).
-				onUsage: (usage) => loop.onUsage(piUsageToStep(usage)),
-					onToolStart: (toolName, args) => {
+				onUsage: (usage, reported) => loop.onUsage(piUsageToStep(usage, reported)),
+				onToolStart: (toolName, args) => {
 					const input = args as { query?: string; url?: string } | undefined;
 					if (typeof input?.url === "string" && (toolName === "web_fetch" || toolName === "web_fetch_pdf")) {
 						fetchedUrls.push(input.url);
@@ -420,7 +470,7 @@ export function createJobRunner(deps: JobRunnerDeps): JobRunner {
 					engine: model,
 					abortSignal: loop.abortSignal,
 					chatId: loop.chatId,
-					onUsage: (usage) => loop.onUsage(piUsageToStep(usage)),
+					onUsage: (usage, reported) => loop.onUsage(piUsageToStep(usage, reported)),
 					onActivity: (line) => jobStore.updateJob(jobId, { activity: line }),
 				},
 			);
@@ -456,7 +506,7 @@ export function createJobRunner(deps: JobRunnerDeps): JobRunner {
 					engine: model,
 					abortSignal: loop.abortSignal,
 					chatId: loop.chatId,
-					onUsage: (usage) => loop.onUsage(piUsageToStep(usage)),
+					onUsage: (usage, reported) => loop.onUsage(piUsageToStep(usage, reported)),
 					onActivity: (line) => jobStore.updateJob(jobId, { activity: line }),
 				},
 			);
@@ -495,7 +545,7 @@ export function createJobRunner(deps: JobRunnerDeps): JobRunner {
 				engine: model,
 				abortSignal: loop.abortSignal,
 				chatId: loop.chatId,
-				onUsage: (usage) => loop.onUsage(piUsageToStep(usage)),
+				onUsage: (usage, reported) => loop.onUsage(piUsageToStep(usage, reported)),
 				onActivity: (line) => jobStore.updateJob(jobId, { activity: line }),
 			},
 			);

@@ -1,0 +1,27 @@
+# Acceptance build config (issue #8 Windows acceptance, 2026-10-20).
+#
+# ONLY for the unsigned `workflow_dispatch` rehearsal builds:
+#   npx electron-builder --config electron-builder.acceptance.yml <platform flags> --publish never
+# Tag-push production packaging keeps using electron-builder.yml untouched:
+# same app id, targets, signing/notarization policy, and update feed.
+#
+# The rehearsal installer is NOT a production build. electron-builder
+# deep-assigns this `extraMetadata` object into the ROOT of the packaged
+# package.json, so every acceptance package carries the root property
+# `lhTestBuild: true` (the wrapper is config-only). electron/main.cjs reads
+# that root flag and disables electron-updater completely (no import, feed,
+# check, download, install, or 24h schedule). A rehearsal build can therefore
+# never overwrite itself from the production feed.
+extends: ./electron-builder.yml
+extraMetadata:
+  lhTestBuild: true
+
+# Installer names must identify the build as acceptance on every platform.
+# win.artifactName and linux.artifactName in electron-builder.yml override the
+# root artifactName, so both are repeated here with the marker. macOS has no
+# platform override: the root name below covers its DMG and ZIP.
+artifactName: "${productName}-${version}-${arch}-acceptance.${ext}"
+win:
+  artifactName: "${productName}-${version}-${arch}-setup-acceptance.${ext}"
+linux:
+  artifactName: "${productName}-${version}-${arch}-acceptance.${ext}"

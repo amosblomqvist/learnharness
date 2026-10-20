@@ -3,6 +3,7 @@ import type { Usage } from "@earendil-works/pi-ai";
 import { createWebTools } from "../tools/web.ts";
 import { createPdfReadTools } from "../tools/pdf-read.ts";
 import type { SearchProvider } from "../../core/search.ts";
+import type { UsagePresence } from "../../core/contracts/chat.ts";
 import type { PiEngine } from "../models.ts";
 import { runSubagent } from "./pi-run.ts";
 
@@ -79,7 +80,7 @@ export interface ResearcherRunOptions {
 	 *  runner owns its lifecycle (mkdtemp before, rm after). */
 	pdfDir?: string;
 	abortSignal?: AbortSignal;
-	onUsage?: (usage: Usage) => void;
+	onUsage?: (usage: Usage, presence: boolean | Partial<UsagePresence>) => void;
 	onToolStart?: (toolName: string, args: unknown) => void;
 	/** Debug: raw provider-event recording key (LH_PROVIDER_EVENTS=1). */
 	chatId?: string;

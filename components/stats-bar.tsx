@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { contextWindow, sessionCost, turnCost, type ChatSettings, type TurnUsage } from "@/src/core";
+import { contextWindow, sessionCost, turnEstimate, type ChatSettings, type TurnUsage } from "@/src/core";
 import { formatTokens, formatUsd, prettyModel } from "@/components/usage-format";
 import { ModelControl, catalogLimits, useModelCatalog } from "@/components/model-picker";
 
@@ -83,11 +83,11 @@ export function StatsBar({
 	const { catalog } = useModelCatalog();
 	const limits = useMemo(() => (catalog ? catalogLimits(catalog) : undefined), [catalog]);
 	const ctx = contextWindow({ turns }, limits);
-	const { cost, unpriced } = sessionCost({ turns });
-	// Honest cost: show dollars only when at least one turn priced;
-	// otherwise "—" (never a fake $0.0000).
-	const pricedCount = turns.length - unpriced;
-	const costLabel = pricedCount > 0 ? formatUsd(cost) : "—";
+	const { estimate, unpriced } = sessionCost({ turns });
+	// Honest cost: show dollars only when at least one turn could price;
+	// otherwise "—" (never a fake $0.0000). A priced subtotal is marked
+	// "partial" so a known number is never read as the whole bill.
+	const costLabel = estimate.dollars === null ? "—" : formatUsd(estimate.dollars);
 	const lastModel = turns.at(-1)?.model;
 
 	return (
@@ -125,7 +125,15 @@ export function StatsBar({
 					{ctx ? (ctx.limit !== null ? `${formatTokens(ctx.usedTokens)} / ${formatTokens(ctx.limit)}` : formatTokens(ctx.usedTokens)) : "—"}
 				</span>
 				<span aria-hidden>·</span>
-				<span data-testid="stats-cost">{costLabel}</span>
+				<span
+					data-testid="stats-cost"
+					title="Estimated model cost"
+				>
+					{costLabel}
+					{estimate.coverage === "partial" && (
+						<span className="text-muted-foreground"> (partial)</span>
+					)}
+				</span>
 			</button>
 				{open && (
 					<div
@@ -143,13 +151,27 @@ export function StatsBar({
 								</span>
 							</div>
 							<div className="flex justify-between gap-2">
-								<span>Total cost</span>
-								<span className="tabular-nums text-card-foreground">{costLabel}</span>
+								<span>Estimated model cost</span>
+								<span
+									className="tabular-nums text-card-foreground"
+									title="Estimated model cost"
+								>
+									{costLabel}
+									{estimate.coverage === "partial" && (
+										<span className="text-muted-foreground"> (partial)</span>
+									)}
+								</span>
 							</div>
 							{unpriced > 0 && (
 								<div className="flex justify-between gap-2">
 									<span>Unpriced turns</span>
 									<span className="tabular-nums text-card-foreground">{unpriced}</span>
+								</div>
+							)}
+							{estimate.missingUsageCalls > 0 && (
+								<div className="flex justify-between gap-2">
+									<span>Missing usage calls</span>
+									<span className="tabular-nums text-card-foreground">{estimate.missingUsageCalls}</span>
 								</div>
 							)}
 						</div>
@@ -160,7 +182,7 @@ export function StatsBar({
 								</div>
 								<ul className="flex max-h-56 flex-col gap-1 overflow-y-auto">
 									{turns.map((turn, i) => {
-										const c = turnCost(turn);
+										const t = turnEstimate(turn);
 										return (
 											<li key={`${turn.messageId}-${i}`} className="flex items-center justify-between gap-2">
 												<span className="truncate text-muted-foreground">
@@ -168,7 +190,12 @@ export function StatsBar({
 												</span>
 												<span className="flex shrink-0 items-center gap-2 tabular-nums text-card-foreground">
 													<span className="text-muted-foreground">{turn.steps.length} steps</span>
-													<span>{c === null ? "—" : formatUsd(c)}</span>
+													<span title="Estimated model cost">
+														{t.dollars === null ? "—" : formatUsd(t.dollars)}
+														{t.coverage === "partial" && (
+															<span className="text-muted-foreground"> (partial)</span>
+														)}
+													</span>
 												</span>
 											</li>
 										);

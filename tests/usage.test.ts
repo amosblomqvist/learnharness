@@ -12,16 +12,143 @@ import * as fs from "node:fs";
 import { chatStore } from "../src/store/chats.ts";
 import { graphStore } from "../src/store/graph.ts";
 import { PATHS, SOURCES_FILE } from "../config.ts";
-import { callCost, contextWindow, jobCost, sessionCost, sumSteps, turnCost } from "../src/core/prices.ts";
+import {
+	callCost,
+	callEstimate,
+	contextWindow,
+	foldCostEstimates,
+	jobCost,
+	jobEstimate,
+	sessionCost,
+	sumSteps,
+	turnCost,
+	turnEstimate,
+} from "../src/core/prices.ts";
 import type { CallUsage, ExtractionRunUsage, JobRecord, TurnUsage } from "../src/core/contracts.ts";
+import { callUsageOf, messageUsagePresence, piUsageToStep, usagePresenceOf } from "../src/core/contracts.ts";
 
 const call = (over: Partial<CallUsage> = {}): CallUsage => ({
+	// A capture from pi always reports the cache-read split (the SDK seeds
+	// it); only a genuinely un-reported field is undefined. Fixtures that
+	// assert a COMPLETE estimate therefore carry 0, not undefined.
 	inputTokens: 0,
 	outputTokens: 0,
-	cacheReadTokens: undefined,
+	cacheReadTokens: 0,
 	cacheWriteTokens: undefined,
 	reasoningTokens: undefined,
 	...over,
+});
+
+test("callUsageOf: field-level presence preserves each obtained token", () => {
+	// pi's Usage as the SDK hands it over: input is FRESH (cached and written
+	// tokens already subtracted).
+	const usage = { input: 9, output: 0, cacheRead: 0, cacheWrite: 0, reasoning: 0 };
+	const inputOnly = callUsageOf(usage, { input: true, output: false, cacheRead: false, cacheWrite: false, reasoning: false });
+	assert.equal(inputOnly.inputTokens, 9, "the obtained input token survives");
+	assert.equal(inputOnly.outputTokens, undefined);
+	assert.equal(inputOnly.cacheReadTokens, undefined);
+	assert.equal(inputOnly.cacheWriteTokens, undefined);
+	assert.equal(inputOnly.reasoningTokens, undefined);
+
+	// Total input is restored: fresh + reported cache parts (the price fold
+	// subtracts them once; persisting the fresh figure would discount twice).
+	const restored = callUsageOf({ input: 100, output: 5, cacheRead: 900, cacheWrite: 50, reasoning: 3 }, {
+		input: true, output: true, cacheRead: true, cacheWrite: true, reasoning: true,
+	});
+	assert.equal(restored.inputTokens, 1_050);
+	assert.equal(restored.cacheReadTokens, 900);
+	assert.equal(restored.cacheWriteTokens, 50);
+	assert.equal(restored.reasoningTokens, 3);
+
+	// Legacy callers pass a boolean: every field reported (pre-wave behavior).
+	const legacy = callUsageOf({ input: 7, output: 2, cacheRead: 1, cacheWrite: 0 }, true);
+	assert.deepEqual(legacy, { inputTokens: 8, outputTokens: 2, cacheReadTokens: 1, cacheWriteTokens: 0, reasoningTokens: 0 });
+});
+
+test("piUsageToStep: unreported cache and reasoning stay absent, not zero", () => {
+	const step = piUsageToStep(
+		{ input: 7, output: 2, cacheRead: 0, cacheWrite: 0, reasoning: 0 },
+		{ input: true, output: true, cacheRead: false, cacheWrite: false, reasoning: false },
+	);
+	assert.equal(step.inputTokens, 7);
+	assert.equal(step.outputTokens, 2);
+	assert.equal(step.inputTokenDetails, undefined, "no fabricated cache report");
+	assert.equal(step.outputTokenDetails, undefined, "no fabricated reasoning report");
+	// A reported zero is still a report.
+	const zero = piUsageToStep({ input: 0, output: 0, cacheRead: 0, cacheWrite: 0, reasoning: 0 }, true);
+	assert.deepEqual(zero.inputTokenDetails, { cacheReadTokens: 0, cacheWriteTokens: 0 });
+	assert.deepEqual(zero.outputTokenDetails, { reasoningTokens: 0 });
+});
+
+test("usagePresenceOf: an absent marker means reported; a boolean means every field", () => {
+	assert.deepEqual(usagePresenceOf(undefined), { input: true, output: true, cacheRead: true, cacheWrite: true, reasoning: true });
+	assert.deepEqual(usagePresenceOf(false), { input: false, output: false, cacheRead: false, cacheWrite: false, reasoning: false });
+	assert.deepEqual(messageUsagePresence({}), usagePresenceOf(undefined));
+	assert.deepEqual(
+		messageUsagePresence({ diagnostics: [{ type: "usage_report", details: { reported: false } }] }),
+		usagePresenceOf(false),
+		"a first-wave boolean marker still reads field-for-field",
+	);
+});
+
+test("callEstimate: a call without its cache-read split has no complete price", () => {
+	const partial: CallUsage = {
+		inputTokens: 7,
+		outputTokens: 2,
+		cacheReadTokens: undefined,
+		cacheWriteTokens: undefined,
+		reasoningTokens: undefined,
+	};
+	assert.equal(callCost(partial, "openrouter:z-ai/glm-5.3-flash"), null, "the numeric helper refuses too");
+	assert.deepEqual(callEstimate(partial, "openrouter:z-ai/glm-5.3-flash"), {
+		dollars: null,
+		coverage: "unknown",
+		pricedCalls: 0,
+		unpricedCalls: 0,
+		missingUsageCalls: 1,
+	});
+	// An old record with the cache field absent still folds without crashing
+	// and stays honestly unknown — never a fabricated $0.
+	const turn: TurnUsage = { id: "t", messageId: "m", at: "x", model: "openrouter:z-ai/glm-5.3-flash", steps: [partial] };
+	assert.equal(turnEstimate(turn).coverage, "unknown");
+});
+
+test("callEstimate: a priced cache-write category needs the supplier's write count", () => {
+	// openai-codex:gpt-6-luna bills writes (cacheWrite: 0.125) and the Codex
+	// Responses stream never reports cache_write_tokens. Missing here is not
+	// "zero writes": the bill cannot be proven, so the call is unknown while
+	// the tokens it did report stay in the record.
+	const codex = "openai-codex:gpt-6-luna";
+	const withoutWrites: CallUsage = {
+		inputTokens: 1000,
+		outputTokens: 10,
+		cacheReadTokens: 0,
+		cacheWriteTokens: undefined,
+		reasoningTokens: undefined,
+	};
+	assert.equal(callCost(withoutWrites, codex), null, "the numeric helper refuses too");
+	assert.deepEqual(callEstimate(withoutWrites, codex), {
+		dollars: null,
+		coverage: "unknown",
+		pricedCalls: 0,
+		unpricedCalls: 0,
+		missingUsageCalls: 1,
+	});
+	assert.equal(withoutWrites.inputTokens, 1000, "reported tokens are preserved, not erased");
+
+	// The same call with an explicit write count of zero is a complete figure.
+	assert.deepEqual(callEstimate({ ...withoutWrites, cacheWriteTokens: 0 }, codex), {
+		dollars: (1000 / 1e6) * 0.1 + (10 / 1e6) * 0.5,
+		coverage: "complete",
+		pricedCalls: 1,
+		unpricedCalls: 0,
+		missingUsageCalls: 0,
+	});
+
+	// A model that does not bill writes needs no write report: its absence
+	// cannot hide a dollar.
+	const noWritePrice: CallUsage = { ...withoutWrites, cacheWriteTokens: undefined };
+	assert.equal(callEstimate(noWritePrice, "openrouter:z-ai/glm-5.3-flash").coverage, "complete");
 });
 
 test("sumSteps folds steps; absent stays absent until a value appears", () => {
@@ -50,7 +177,8 @@ test("callCost: glm-5.3-flash math — fresh input, cached read, output", () => 
 
 test("callCost: cache writes bill at the cacheWrite rate", () => {
 	const cost = callCost(
-		call({ inputTokens: 1_000_000, outputTokens: 0, cacheWriteTokens: 500_000 }),
+		// inputTokens is TOTAL input: 1M fresh + 500k written to the cache.
+		call({ inputTokens: 1_500_000, outputTokens: 0, cacheWriteTokens: 500_000 }),
 		"openrouter:qwen/qwen3.8-max-0902",
 	);
 	assert.ok(cost !== null);
@@ -201,6 +329,155 @@ test("jobCost: null without usage, computed with it", () => {
 	};
 	assert.ok(jobCost(job) !== null);
 	assert.ok(jobCost(job)! > 0);
+});
+
+// ─── Estimated model cost: completeness metadata (issue #8) ─────────────────
+
+const PRICED_MODEL = "openrouter:z-ai/glm-5.3-flash";
+const SUBSCRIPTION_MODEL = "openai-codex:gpt-6-luna";
+
+test("callEstimate: price and reported usage are separate — an explicit zero is a complete estimate", () => {
+	assert.deepEqual(callEstimate(call({ inputTokens: 0, outputTokens: 0 }), PRICED_MODEL), {
+		dollars: 0,
+		coverage: "complete",
+		pricedCalls: 1,
+		unpricedCalls: 0,
+		missingUsageCalls: 0,
+	});
+	// Cache fields are optional by contract: their absence is not a gap.
+	assert.equal(callEstimate(call({ inputTokens: 10, outputTokens: 2 }), PRICED_MODEL).coverage, "complete");
+	// A model missing from PRICES is unknown — never $0.
+	assert.deepEqual(callEstimate(call({ inputTokens: 100, outputTokens: 5 }), "not/a-model"), {
+		dollars: null,
+		coverage: "unknown",
+		pricedCalls: 0,
+		unpricedCalls: 1,
+		missingUsageCalls: 0,
+	});
+	// The provider not reporting output tokens is a different gap: same
+	// absent figure, different reason.
+	assert.deepEqual(callEstimate(call({ inputTokens: 100, outputTokens: undefined }), PRICED_MODEL), {
+		dollars: null,
+		coverage: "unknown",
+		pricedCalls: 0,
+		unpricedCalls: 0,
+		missingUsageCalls: 1,
+	});
+	// Both conditions at once: the capture gap is the reported reason (a
+	// price lookup cannot price an unreported call either way).
+	assert.deepEqual(callEstimate(call({ inputTokens: undefined, outputTokens: undefined }), "not/a-model"), {
+		dollars: null,
+		coverage: "unknown",
+		pricedCalls: 0,
+		unpricedCalls: 0,
+		missingUsageCalls: 1,
+	});
+});
+
+test("foldCostEstimates: a known subtotal is not a complete total — partial keeps the priced dollars", () => {
+	const priced = callEstimate(call({ inputTokens: 1_000_000, outputTokens: 0 }), PRICED_MODEL);
+	const unpriced = callEstimate(call({ inputTokens: 100, outputTokens: 5 }), "not/a-model");
+	const unreported = callEstimate(call({ inputTokens: 100, outputTokens: undefined }), PRICED_MODEL);
+	// One priced + one unpriced call: the dollars are a SUBTOTAL, flagged.
+	const folded = foldCostEstimates([priced, unpriced]);
+	assert.equal(folded.dollars, priced.dollars);
+	assert.equal(folded.coverage, "partial");
+	assert.deepEqual(
+		[folded.pricedCalls, folded.unpricedCalls, folded.missingUsageCalls],
+		[1, 1, 0],
+	);
+	// Nothing priceable → absent, never zero.
+	assert.deepEqual(foldCostEstimates([unpriced, unreported]), {
+		dollars: null,
+		coverage: "unknown",
+		pricedCalls: 0,
+		unpricedCalls: 1,
+		missingUsageCalls: 1,
+	});
+	// No calls at all is unknown too: no evidence of a $0 spend.
+	assert.deepEqual(foldCostEstimates([]), {
+		dollars: null,
+		coverage: "unknown",
+		pricedCalls: 0,
+		unpricedCalls: 0,
+		missingUsageCalls: 0,
+	});
+	// Every call priced (explicit zeros included) → complete.
+	const zero = callEstimate(call({ inputTokens: 0, outputTokens: 0 }), PRICED_MODEL);
+	assert.equal(foldCostEstimates([zero, priced]).coverage, "complete");
+});
+
+test("turnEstimate: one unreported step inside a priced turn makes the turn partial", () => {
+	const turn: TurnUsage = {
+		id: "t1",
+		messageId: "m1",
+		at: "2026-10-19T00:00:00Z",
+		model: PRICED_MODEL,
+		steps: [call({ inputTokens: 10_000, outputTokens: 1_000 }), call({ inputTokens: 5_000, outputTokens: undefined })],
+	};
+	const est = turnEstimate(turn);
+	assert.ok(est.dollars !== null && est.dollars > 0);
+	assert.equal(est.coverage, "partial");
+	assert.equal(est.missingUsageCalls, 1);
+	assert.equal(est.unpricedCalls, 0);
+});
+
+test("sessionCost: subscription and API-key turns fold into one estimate — subscription usage is never zeroed", () => {
+	const apiTurn: TurnUsage = {
+		id: "t1",
+		messageId: "m1",
+		at: "2026-10-19T00:00:00Z",
+		model: PRICED_MODEL,
+		steps: [call({ inputTokens: 10_000, outputTokens: 1_000 })],
+	};
+	const subscriptionTurn: TurnUsage = {
+		id: "t2",
+		messageId: "m2",
+		at: "2026-10-19T00:01:00Z",
+		model: SUBSCRIPTION_MODEL,
+		// This fixture declares complete metering: the codex row prices writes,
+		// so a complete report carries an explicit zero for them.
+		steps: [call({ inputTokens: 10_000, outputTokens: 1_000, cacheWriteTokens: 0 })],
+	};
+	assert.ok(turnCost(subscriptionTurn)! > 0, "a subscription call bills an estimated model cost, not $0");
+	const totals = sessionCost({ turns: [apiTurn, subscriptionTurn] });
+	assert.equal(totals.unpriced, 0);
+	assert.equal(totals.estimate.coverage, "complete");
+	assert.equal(totals.estimate.dollars, turnCost(apiTurn)! + turnCost(subscriptionTurn)!);
+	assert.equal(totals.cost, totals.estimate.dollars);
+	// One unpriceable turn among priced ones: subtotal kept, coverage partial,
+	// the unpriced turn still counted.
+	const mixed = sessionCost({
+		turns: [apiTurn, subscriptionTurn, { id: "t3", messageId: "m3", at: "x", model: "not/a-model", steps: [call({ inputTokens: 1, outputTokens: 1 })] }],
+	});
+	assert.equal(mixed.unpriced, 1);
+	assert.equal(mixed.estimate.coverage, "partial");
+	assert.equal(mixed.cost, totals.cost);
+});
+
+test("jobEstimate: absent usage is unknown, not $0; reported usage is complete", () => {
+	assert.deepEqual(jobEstimate({}), {
+		dollars: null,
+		coverage: "unknown",
+		pricedCalls: 0,
+		unpricedCalls: 0,
+		missingUsageCalls: 0,
+	});
+	const job: Pick<JobRecord, "usage"> = {
+		usage: {
+			model: SUBSCRIPTION_MODEL,
+			inputTokens: 1_000_000,
+			outputTokens: 100_000,
+			cacheReadTokens: 0,
+			cacheWriteTokens: 0,
+			reasoningTokens: 0,
+			steps: 4,
+		},
+	};
+	const est = jobEstimate(job);
+	assert.equal(est.coverage, "complete");
+	assert.equal(est.dollars, jobCost(job));
+	assert.ok(est.dollars !== null && est.dollars > 0);
 });
 
 // ─── the store seam ──────────────────────────────────────────────────────────

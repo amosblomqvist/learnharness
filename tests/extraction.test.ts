@@ -26,6 +26,7 @@ import * as fs from "node:fs";
 import { after, describe, it } from "node:test";
 import { createFauxCore, fauxAssistantMessage, fauxToolCall, type FauxResponseStep, type ToolCall } from "@earendil-works/pi-ai";
 import type { PiEngine } from "../src/agent/models.ts";
+import { SubscriptionError } from "../src/core/subscription.ts";
 import type { LhMessage } from "../src/core/native-messages.ts";
 import { newPlanBlockMessage } from "../src/core/native-messages.ts";
 import { projectView as projectNative } from "../src/core/view.ts";
@@ -2316,5 +2317,88 @@ describe("chain simplification (the merger's maintenance pass, owner 2026-09-30 
 		assert.equal(stats.droppedChains, 1, "the simplification pass then removed it (maintenance)");
 		const stored = ledgers.readChains();
 		assert.equal(stored.length, 2, "the ledger is back to the two lean chains");
+	});
+});
+
+// ─── subscription source gate (issue #8) ─────────────────────────────────────
+
+function subscriptionEngine(engine: PiEngine): PiEngine {
+	// The stage's recovered engine claims the subscription provider — that
+	// is the coordinate the source gate must read (pi's Model.provider).
+	return { ...engine, model: { ...engine.model, provider: "openai-codex" } };
+}
+
+describe("the subscription source gate (source-aware execution, issue #8)", () => {
+	it("refuses runExtraction when a stage's subscription generation is unusable — and opens the scope at the entry", async () => {
+		const { chatId } = fixtureChat();
+		const ledgers = memoryLedgers();
+		let calls = 0;
+		let scopes = 0;
+		const pipeline = createExtractionPipeline({
+			chatStore,
+			graphStore: ledgers,
+			extractor: subscriptionEngine(submitModel("submit_findings", FINDINGS, () => void calls++)),
+			auditor: submitModel("submit_review", { links: [] }),
+			scope: (<T,>(fn: () => Promise<T>) => {
+				scopes++;
+				return fn();
+			}) as never,
+			preflight: async (provider: string) =>
+				provider === "openai-codex" ? { code: "subscription_needs_login" as const, message: "sign in" } : null,
+		});
+		await assert.rejects(
+			() => pipeline.runExtraction(chatId),
+			(error: Error & { code?: string }) => error.code === "subscription_needs_login" && /subscription/i.test(error.message),
+		);
+		assert.equal(scopes, 1, "the public entry opens the scope (pins the generation)");
+		assert.equal(calls, 0, "no model call ran — the source gate refuses first");
+	});
+
+	it("refuses the notes front door too — the same gate before any chunk", async () => {
+		const ledgers = memoryLedgers();
+		let calls = 0;
+		const pipeline = createExtractionPipeline({
+			chatStore,
+			graphStore: ledgers,
+			extractor: subscriptionEngine(submitModel("submit_findings", FINDINGS, () => void calls++)),
+			auditor: submitModel("submit_review", { links: [] }),
+			preflight: async (provider: string) =>
+				provider === "openai-codex" ? { code: "subscription_disconnected" as never, message: "disconnected" } : null,
+		});
+		await assert.rejects(
+			() => pipeline.importNotes({ filePath: "/tmp/notes-sub.md", text: "hello" }),
+			(error: Error & { code?: string }) => error.code === "subscription_disconnected",
+		);
+		assert.equal(calls, 0, "no chunk ran");
+	});
+
+	it("a stage engine that cannot even be BUILT (no subscription session) refuses as a source error, not a crash", async () => {
+		const { chatId } = fixtureChat();
+		const ledgers = memoryLedgers();
+		const pipeline = createExtractionPipeline({
+			chatStore,
+			graphStore: ledgers,
+			engineFor: () => {
+				throw new SubscriptionError("subscription_needs_login");
+			},
+		});
+		await assert.rejects(
+			() => pipeline.runExtraction(chatId),
+			(error: Error & { code?: string }) =>
+				error.code === "subscription_needs_login" && /subscription source is unavailable/i.test(error.message),
+		);
+	});
+
+	it("an api-key stage keeps the old behavior: preflight null → the pipeline runs", async () => {
+		const { chatId } = fixtureChat();
+		const ledgers = memoryLedgers();
+		const pipeline = createExtractionPipeline({
+			chatStore,
+			graphStore: ledgers,
+			extractor: submitModel("submit_findings", FINDINGS),
+			auditor: submitModel("submit_review", { links: [] }),
+			preflight: async () => null,
+		});
+		assert.deepEqual(await pipeline.runExtraction(chatId), { nodes: 2, chains: 1 });
 	});
 });

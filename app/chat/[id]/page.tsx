@@ -30,6 +30,7 @@ export default async function ChatPage({
 				// native messages).
 				initialMessages={chat.messages}
 			initialConfigured={slotsConfigured(record?.models)}
+			initialChatSettings={chat.settings}
 			initialPrompt={prompt}
 			// A teacher turn that outlived its client: the remounted view must
 			// attach (busy shimmer + poll), never resurrect the stale record.

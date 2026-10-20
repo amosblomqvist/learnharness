@@ -68,6 +68,7 @@ import { danglingQuestionOf, endsInDismissal, type LhMessage } from "../core/nat
 import { fireJobAbort, isJobLive } from "../agent/subagents/aborts.ts";
 import { stores } from "./stores.ts";
 import { isTurnRunning } from "./turn-liveness.ts";
+import { getSubscriptionGeneration, withSubscriptionScope } from "./subscription.ts";
 import type { Agent } from "@earendil-works/pi-agent-core";
 
 /** Fires one server-side teacher turn: (chatId, input) → HTTP-ish status.
@@ -88,6 +89,25 @@ interface QueuedSteer {
 	 *  re-registered run must not re-queue what a run already holds) and is
 	 *  CLEARED at settlement for markers the dying run never injected. */
 	handedTo?: Agent;
+	/** The subscription generation this steer was produced under
+	 *  (source-aware execution, issue #8) — read off the job's result meta
+	 *  when it was queued. Absent = no subscription session: a wake for it
+	 *  runs with an explicit empty scope, never a fresh capture. */
+	subscriptionGeneration?: string;
+}
+
+/** One streaming turn's agent plus the subscription generation its run was
+ *  captured under (issue #8). Steers only ride a run of their OWN
+ *  generation: an old result must never continue on a newer account. */
+interface LiveAgent {
+	agent: Agent;
+	subscriptionGeneration?: string;
+}
+
+/** The subscription generation a marker was produced under (issue #8). */
+function steerGeneration(steer: SteerMessage): string | undefined {
+	const details = (steer as { details?: { subscriptionGeneration?: unknown } }).details;
+	return typeof details?.subscriptionGeneration === "string" ? details.subscriptionGeneration : undefined;
 }
 
 interface WakeState {
@@ -106,7 +126,7 @@ interface WakeState {
 	/** chatId → the agent of the CURRENTLY streaming turn (cleared at
 	 *  settlement, before settleSteers). The pump's live path hands
 	 *  markers to this agent's follow-up queue. */
-	liveAgents: Map<string, Agent>;
+	liveAgents: Map<string, LiveAgent>;
 	/** Chats whose pump loop is currently active (serialization per chat). */
 	pumping: Set<string>;
 	/** Throttle bookkeeping for the stale-job sweep. */
@@ -196,7 +216,7 @@ export function deliverJobResult(steer: SteerMessage): Promise<void> {
 		const s = state();
 		const chatId = chatIdOf(steer);
 		const queue = s.queues.get(chatId) ?? [];
-		queue.push({ steer, resolve, reject });
+		queue.push({ steer, resolve, reject, subscriptionGeneration: steerGeneration(steer) });
 		s.queues.set(chatId, queue);
 		void pump(chatId);
 	});
@@ -210,11 +230,23 @@ export function deliverJobResult(steer: SteerMessage): Promise<void> {
  *  beats the loop's synchronous start-poll drain and the marker rides the
  *  run's FIRST LLM call (the native equivalent of the old continuation
  *  coalescing). */
-function handOffEligible(chatId: string, agent: Agent): void {
+function handOffEligible(chatId: string, live: LiveAgent): void {
+	const agent = live.agent;
 	const queue = state().queues.get(chatId);
 	if (queue && queue.length > 0) {
 		for (const entry of queue) {
-			if (entry.handedTo !== agent && entry.steer.customType !== "probe-handoff") {
+			if (
+				entry.handedTo !== agent &&
+				entry.steer.customType !== "probe-handoff" &&
+				// Same generation only (issue #8): an old subscription result
+				// stays parked for its own wake instead of continuing a newer
+				// account's run. A steer with NO provenance is not subscription
+				// work (subscription jobs are stamped at spawn; unstamped ones
+				// are refused by the source preflight, never run) — it may ride
+				// any live run, as before.
+				(entry.subscriptionGeneration === undefined ||
+					entry.subscriptionGeneration === live.subscriptionGeneration)
+			) {
 				agent.steer(entry.steer);
 				entry.handedTo = agent;
 			}
@@ -241,9 +273,10 @@ function handOffEligible(chatId: string, agent: Agent): void {
  *  markers are steered into the run right here. The settle seam cannot
  *  beat the registration: settlement needs a streamed response, which
  *  never happens inside the constructor call. */
-export function registerLiveAgent(chatId: string, agent: Agent): void {
-	state().liveAgents.set(chatId, agent);
-	handOffEligible(chatId, agent);
+export function registerLiveAgent(chatId: string, agent: Agent, subscriptionGeneration?: string): void {
+	const s = state();
+	s.liveAgents.set(chatId, { agent, subscriptionGeneration: subscriptionGeneration ?? getSubscriptionGeneration() });
+	handOffEligible(chatId, s.liveAgents.get(chatId)!);
 }
 
 /** A parked user steer: the message plus the agent it was last handed to
@@ -263,8 +296,9 @@ export interface UserSteerEntry {
  *  termination, abort), reconcileUserSteers keeps it parked for the
  *  chat's next run. */
 export function steerLiveChat(chatId: string, message: LhMessage): boolean {
-	const agent = state().liveAgents.get(chatId);
-	if (!agent) return false;
+	const live = state().liveAgents.get(chatId);
+	if (!live) return false;
+	const agent = live.agent;
 	const entry: UserSteerEntry = { message };
 	const q = state().userSteers.get(chatId) ?? [];
 	q.push(entry);
@@ -462,7 +496,7 @@ async function pump(chatId: string): Promise<void> {
 			const live = s.liveAgents.get(chatId);
 			if (live && isTurnRunning(chatId)) {
 				handOffEligible(chatId, live);
-				const handable = stillPending.filter((e) => e.handedTo === live);
+				const handable = stillPending.filter((e) => e.handedTo === live.agent);
 				// probe-handoffs never ride a live run (owner ruling: the
 				// handoff must START the teacher's run) — if any remain
 				// pending, wait the run out and loop to the wake below.
@@ -533,20 +567,28 @@ async function pump(chatId: string): Promise<void> {
 			// the carried markers leave the registry BEFORE the turn runs —
 			// the wake run's OWN follow-up poll must never see its own cargo,
 			// and a 409 (client raced in) must be able to push them back.
+			// ONE wake turn = ONE subscription generation (issue #8). Fire the
+			// earliest cohort now; other generations stay queued for their own
+			// wakes — mixing would run old results on a newer account.
+			const generation = fire[0]!.subscriptionGeneration;
+			const cohort = fire.filter((e) => e.subscriptionGeneration === generation);
+			const rest = fire.filter((e) => e.subscriptionGeneration !== generation);
 			s.queues.delete(chatId);
-			const steers = fire.map((e) => e.steer);
+			if (rest.length > 0) s.queues.set(chatId, rest);
+			const steers = cohort.map((e) => e.steer);
 
 			// Fire the wake (every marker as the turn's input appends). A 409 =
 			// a client turn raced in between idle and firing — push the cargo
 			// back and retry after backoff (the racing turn's own settlement
 			// re-pumps if it beats us to the re-queue).
-			const status = await s.turnRunner(chatId, { type: "steers", steers }).catch((err: unknown) => {
+			const runWake = () => s.turnRunner!(chatId, { type: "steers", steers });
+			const status = await withSubscriptionScope(runWake, generation ?? null).catch((err: unknown) => {
 				console.error(`[steer ${steers.map((x) => x.id).join(",")}] wake turn crashed:`, err);
 				return -1;
 			});
 			if (status === 409) {
 				const back = s.queues.get(chatId) ?? [];
-				back.push(...fire);
+				back.push(...cohort);
 				s.queues.set(chatId, back);
 				await delay(RETRY_BACKOFF_MS[Math.min(attempt++, RETRY_BACKOFF_MS.length - 1)]!);
 				continue;
@@ -554,13 +596,13 @@ async function pump(chatId: string): Promise<void> {
 			attempt = 0;
 
 			if (status === 200) {
-				for (const entry of fire) {
+				for (const entry of cohort) {
 					finalizeSteer(entry.steer);
 					entry.resolve();
 				}
 			} else {
 				const err = new Error(`wake turn failed with status ${status}`);
-				for (const entry of fire) {
+				for (const entry of cohort) {
 					failSteer(entry.steer, err);
 					entry.reject(err);
 				}

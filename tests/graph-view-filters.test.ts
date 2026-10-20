@@ -39,10 +39,17 @@ describe("isNodeVisible (search predicate)", () => {
 });
 
 describe("displayCostTotals (naming-free cost fold)", () => {
-	const stage = (dollars: number, unpricedRuns = 0) => ({
-		runs: dollars > 0 ? 1 : 0,
+	const stage = (
+		dollars: number | null,
+		unpricedRuns = 0,
+		coverage: "complete" | "partial" | "unknown" = dollars === null ? "unknown" : unpricedRuns > 0 ? "partial" : "complete",
+	) => ({
+		runs: unpricedRuns > 0 || dollars !== null ? 1 : 0,
 		dollars,
+		coverage,
+		pricedRuns: dollars === null ? 0 : 1,
 		unpricedRuns,
+		missingUsageRuns: 0,
 		tokens: {
 			inputTokens: 0,
 			outputTokens: 0,
@@ -65,5 +72,38 @@ describe("displayCostTotals (naming-free cost fold)", () => {
 
 	it("unpriced counts fold the same two stages", () => {
 		assert.equal(displayCostTotals(costs).unpricedRuns, 1);
+	});
+
+	it("a priced subtotal with an unpriced stage is partial, never a complete total", () => {
+		assert.equal(displayCostTotals(costs).coverage, "partial");
+	});
+
+	it("nothing priced anywhere: the total is ABSENT, never $0", () => {
+		const unpriced = {
+			stages: {
+				extraction: stage(null, 1),
+				audit: stage(null, 1),
+			},
+		} as const;
+		const totals = displayCostTotals(unpriced);
+		assert.equal(totals.totalDollars, null);
+		assert.equal(totals.coverage, "unknown");
+		assert.equal(totals.unpricedRuns, 2);
+	});
+
+	it("a stage that never ran contributes nothing and does not mark the total partial", () => {
+		const oneStage = {
+			stages: {
+				extraction: stage(0.5),
+				audit: stage(null, 0, "complete"),
+			},
+		} as const;
+		assert.equal(displayCostTotals(oneStage).totalDollars, 0.5);
+		assert.equal(displayCostTotals(oneStage).coverage, "complete");
+		const noRuns = {
+			stages: { extraction: stage(null, 0, "complete"), audit: stage(null, 0, "complete") },
+		} as const;
+		assert.equal(displayCostTotals(noRuns).totalDollars, null);
+		assert.equal(displayCostTotals(noRuns).coverage, "unknown");
 	});
 });

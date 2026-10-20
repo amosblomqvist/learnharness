@@ -6,7 +6,8 @@ import {
 	type AgentBuildOptions,
 	type TeachingAgent,
 } from "../agent/teacher-agent.ts";
-import { piEngineForSpec, type PiEngine } from "../agent/models.ts";
+import { piEngineForSpec, type PiEngine, type ResolvedModelSpec } from "../agent/models.ts";
+import { SubscriptionError } from "../core/subscription.ts";
 import { createJobRunner } from "../agent/subagents/runner.ts";
 import { createExtractionPipeline } from "../agent/subagents/extraction.ts";
 import type { ModelRole } from "../../config.ts";
@@ -26,14 +27,25 @@ import { collectToolCallIds } from "./pi/call-ids.ts";
 import { providerEventNote } from "../agent/provider-events.ts";
 import { effectiveSettings, stores } from "./stores.ts";
 import { searchAvailable, searchProvider } from "./search.ts";
-import { providerKeyPresent } from "./keys.ts";
+import { providerAuthorization, providerKeyPresent } from "./keys.ts";
+import {
+	getSubscriptionGeneration,
+	subscriptionEngineForSpec,
+	subscriptionPreflight,
+	withSubscriptionScope,
+} from "./subscription.ts";
 import {
 	extractionEnabled,
 	graphToolsEnabled,
 	resolveConversationSpec,
 	resolveRoleSpec,
 } from "../core/settings-resolution.ts";
-import { modelsNotConfigured, providerKeyMissing as providerKeyMissingEnvelope, type ProviderKeyMissing } from "../core/settings.ts";
+import {
+	modelsNotConfigured,
+	providerKeyMissing as providerKeyMissingEnvelope,
+	type ModelSlotName,
+	type ProviderKeyMissing,
+} from "../core/settings.ts";
 import { beginTurn, endTurn } from "./turn-liveness.ts";
 import { applyParkedDismissal } from "./dismissal-park.ts";
 import { registerTurn, unregisterTurn } from "./turn-runs.ts";
@@ -51,8 +63,19 @@ import {
 	parseChatInput,
 	type TurnInput,
 } from "../core/input-events.ts";
-import { steerDelivered } from "../core/contracts.ts";
-import type {CallUsage, SteerMessage} from "../core/contracts.ts";
+import { callUsageOf, steerDelivered, type UsagePresence } from "../core/contracts.ts";
+import type {
+	CallUsage,
+	DemoToolInput,
+	JobRecord,
+	PdfToolInput,
+	ResearchToolInput,
+	SteerMessage,
+	VisualToolInput,
+} from "../core/contracts.ts";
+
+/** The input one sub-agent dispatch carries (fire-and-forget, mid-stream). */
+type JobSubagentInput = ResearchToolInput | DemoToolInput | VisualToolInput | PdfToolInput;
 
 /**
  * One chat turn over the server-owned native record. Framework-free (plain
@@ -86,9 +109,17 @@ const jobRunner = createJobRunner({
 	// Key-presence gate (provider-key interlude, 2026-09-25): the runner
 	// reads the resolved engine's provider and asks THIS check (the agent
 	// layer may not read the key store); a missing key refuses the spawn
-	// with the 503-envelope family instead of dying mid-run.
-	providerKeyMissing: (provider, tier) =>
-		providerKeyPresent(provider) ? null : providerKeyMissingEnvelope(provider, [tier]),
+	// with the 503-envelope family instead of dying mid-run. Subscription
+	// providers have no key by construction — providerKeyMissingFor routes
+	// them past this gate (issue #8) instead of refusing every Codex job.
+	providerKeyMissing: (provider, tier) => providerKeyMissingFor(provider, [tier]),
+	// Subscription provenance (source-aware execution, issue #8): a job runs
+	// under the generation it was spawned from (or the explicit empty scope
+	// when it had none) and preflights a subscription source before the
+	// sub-agent loop starts — a recovered job from a rotated account is
+	// refused, never replayed against the newer one.
+	scope: withSubscriptionScope,
+	preflight: subscriptionPreflight,
 	// Search port wave (2026-09-20): the researcher's web_search runs on the
 	// injected port — resolved FRESH per job (key rotations land immediately).
 	// null = honestly unavailable; the dispatch-level drop (below) uses the
@@ -109,8 +140,12 @@ export const extraction = createExtractionPipeline({
 	// Key-presence gate (provider-key interlude, 2026-09-25): same check
 	// the job runner gets — a stage engine whose provider key is gone
 	// refuses BEFORE any batch runs (the typed throw), never mid-run.
-	providerKeyMissing: (provider, tier) =>
-		providerKeyPresent(provider) ? null : providerKeyMissingEnvelope(provider, [tier]),
+	providerKeyMissing: (provider, tier) => providerKeyMissingFor(provider, [tier]),
+	// Subscription provenance (source-aware execution, issue #8): the
+	// pipeline re-enters the caller's generation (the turn stamps it) and
+	// preflights a subscription stage's source before any batch runs.
+	scope: withSubscriptionScope,
+	preflight: subscriptionPreflight,
 });
 
 
@@ -129,9 +164,47 @@ setTurnRunner(async (chatId, input) => {
  *  the chain (role override → slot → NOTHING) may end empty, and undefined
  *  flows through to the per-need refusal gates (runner/extraction), read
  *  FRESH so a settings PUT between dispatch and spawn lands. */
+/** The per-need key gate shared by the job and extraction seams (issue #8):
+ *  an instance-subscription provider has no API key of its own — its honest
+ *  gate is the live grant (the turn's source gate and each continuation's
+ *  preflight), never a fabricated env name or a phantom "missing key". */
+function providerKeyMissingFor(provider: string, tiers: ModelSlotName[]): ProviderKeyMissing | null {
+	if (providerAuthorization(provider) === "subscription") return null;
+	return providerKeyPresent(provider) ? null : providerKeyMissingEnvelope(provider, tiers);
+}
+
+/** Spawn one sub-agent job under the turn's generation (issue #8): the
+ *  record carries the provenance BEFORE the loop starts, so a queued or
+ *  recovered job runs under the account it was dispatched for — never
+ *  whichever account happens to be current later. */
+function spawnSubagent(job: JobRecord, input: JobSubagentInput, generation: string | null): void {
+	if (generation) stores.jobStore.updateJob(job.id, { subscriptionGeneration: generation });
+	void jobRunner.runJob(job.id, input);
+}
+
+/** The tier names that resolve to a provider (the refusal envelope's slots). */
+function slotsForProvider(provider: string): ModelSlotName[] {
+	const slots = effectiveSettings().models;
+	const tiers = (["strong", "cheap", "vision"] as ModelSlotName[]).filter(
+		(name) => slots[name]?.provider === provider,
+	);
+	return tiers.length > 0 ? tiers : ["strong"];
+}
+
+/** Resolve one spec's engine by SOURCE (source-aware execution, issue #8):
+ *  a subscription provider goes through the instance's generation-bound
+ *  factory (durable credential store, protected transport); every other
+ *  provider keeps the API-key path. Never swapped for a neighboring model —
+ *  the factory throws a typed SubscriptionError instead. */
+function engineForSpec(spec: ResolvedModelSpec): PiEngine {
+	return providerAuthorization(spec.provider) === "subscription"
+		? subscriptionEngineForSpec(spec)
+		: piEngineForSpec(spec);
+}
+
 function resolveEngine(role: ModelRole): PiEngine | undefined {
 	const spec = resolveRoleSpec(role, stores.settingsStore.readSettings());
-	return spec ? piEngineForSpec(spec) : undefined;
+	return spec ? engineForSpec(spec) : undefined;
 }
 
 setJobRespawn((jobId) => void jobRunner.runJob(jobId));
@@ -171,6 +244,24 @@ export async function handleChatInput(
 	input: TurnInput,
 	buildAgent?: (opts: AgentBuildOptions & { teaching: boolean }) => TeachingAgent,
 ): Promise<Response> {
+	// ONE subscription scope per turn (source-aware execution, issue #8):
+	// captured once here, before the gates, so the source preflight, every
+	// engine resolution, spawned jobs, and the onFinish continuation all
+	// read the SAME generation. A nested caller (the wake pipeline) supplies
+	// its own generation and this INHERITS instead of re-capturing — an old
+	// result never continues on a newer account.
+	return withSubscriptionScope(() => handleChatTurn(chatId, input, buildAgent));
+}
+
+async function handleChatTurn(
+	chatId: string,
+	input: TurnInput,
+	buildAgent?: (opts: AgentBuildOptions & { teaching: boolean }) => TeachingAgent,
+): Promise<Response> {
+	// The turn's generation, read inside the scope above: stream callbacks
+	// run OUTSIDE the async-local context, so every continuation re-enters
+	// explicitly with this value instead of recapturing.
+	const turnGeneration = getSubscriptionGeneration() ?? null;
 	let record = stores.chatStore.getChat(chatId);
 	if (!record) {
 		return Response.json({ error: "Unknown chat" }, { status: 404 });
@@ -201,7 +292,27 @@ export async function handleChatInput(
 	// persist (nothing durable changes); wake-pipeline turns ride the same
 	// path. The affected tier is strong — the conversation chain's own tier
 	// (a chat.model override still resolves through it).
-	if (!providerKeyPresent(conversation.provider)) {
+	// THE SOURCE GATE (source-aware execution, issue #8): an instance-
+	// subscription provider has no API key — its honest gate is the live
+	// grant in THIS turn's generation. Same placement discipline as the
+	// models/key gates, and the asynchronous grant can expire mid-turn (the
+	// engines re-check on their first operation). The refusal names the
+	// source and the tier; nothing is swapped for a neighboring model.
+	if (providerAuthorization(conversation.provider) === "subscription") {
+		const failure = await subscriptionPreflight(conversation.provider);
+		if (failure) {
+			const envelope = {
+				error: failure.message,
+				code: failure.code,
+				provider: conversation.provider,
+				slots: slotsForProvider(conversation.provider),
+			};
+			console.info(`[chat ${chatId}] turn refused — ${JSON.stringify(envelope)}`);
+			return Response.json(envelope, { status: 503 });
+		}
+	}
+
+	if (providerAuthorization(conversation.provider) !== "subscription" && !providerKeyPresent(conversation.provider)) {
 		const envelope = providerKeyMissingEnvelope(conversation.provider, ["strong"]);
 		console.info(`[chat ${chatId}] turn refused — ${JSON.stringify(envelope)}`);
 		return Response.json(envelope, { status: 503 });
@@ -216,7 +327,25 @@ export async function handleChatInput(
 	// placement mirrors the BYOK/key gates — BEFORE appends and
 	// beginTurn, no liveness effects — and the record re-reads after
 	// because compaction appends the marker.
-	const conversationEngine = piEngineForSpec(conversation);
+	let conversationEngine: PiEngine;
+	try {
+		conversationEngine = engineForSpec(conversation);
+	} catch (error) {
+		// A source that passed the async preflight can still refuse the build
+		// (a revoked grant, a storage fault) — the SAME refusal family, and
+		// never a different model.
+		if (error instanceof SubscriptionError) {
+			const envelope = {
+				error: error.message,
+				code: error.code,
+				provider: conversation.provider,
+				slots: slotsForProvider(conversation.provider),
+			};
+			console.info(`[chat ${chatId}] turn refused — ${JSON.stringify(envelope)}`);
+			return Response.json(envelope, { status: 503 });
+		}
+		throw error;
+	}
 	const modelIdForCompaction = `${conversationEngine.model.provider}:${conversationEngine.model.id}`;
 	await ensureCompacted(
 		{
@@ -304,15 +433,11 @@ export async function handleChatInput(
 	// append-only turns log at onFinish — idempotent per turn id.
 	const turnUsageId = crypto.randomUUID();
 	const steps: CallUsage[] = [];
-	const collectUsage = (usage: Usage) => {
-		steps.push({
-			inputTokens: usage.input,
-			outputTokens: usage.output,
-			cacheReadTokens: usage.cacheRead,
-			cacheWriteTokens: usage.cacheWrite,
-			// Optional in pi's Usage — persisted as 0, never dropped.
-			reasoningTokens: usage.reasoning ?? 0,
-		});
+	const collectUsage = (usage: Usage, presence: boolean | Partial<UsagePresence>) => {
+		// A call the provider never reported usage for stays unknown
+		// (contracts/chat.ts callUsageOf) — its seeded zeros are not a
+		// billed zero, and the cost fold must not price it at $0.
+		steps.push(callUsageOf(usage, presence));
 	};
 
 	// AGENT CONSTRUCTION BRANCH (docs/probe-teach-split.md §2): the transcript
@@ -376,7 +501,7 @@ export async function handleChatInput(
 						jobs: {
 							chatId,
 							jobStore: stores.jobStore,
-							spawn: (job, input) => void jobRunner.runJob(job.id, input),
+							spawn: (job, input) => spawnSubagent(job, input, turnGeneration),
 							searchAvailable,
 						},
 						...(graphToolsEnabled(effective) ? { graph: { chatStore: stores.chatStore, graphStore: stores.graphStore } } : {}),
@@ -389,7 +514,7 @@ export async function handleChatInput(
 						chatId,
 						chatStore: stores.chatStore,
 						jobStore: stores.jobStore,
-						spawn: (job, input) => void jobRunner.runJob(job.id, input),
+						spawn: (job, input) => spawnSubagent(job, input, turnGeneration),
 						// The registry drop's signal (2026-09-20): no live engine
 						// = no research tool in the teacher's registry.
 						searchAvailable,
@@ -405,7 +530,7 @@ export async function handleChatInput(
 						// dispatch (owner ruling — phase-omnipresent), so its ctx
 						// needs the same job wiring as the teacher's.
 						jobStore: stores.jobStore,
-						spawn: (job, input) => void jobRunner.runJob(job.id, input),
+						spawn: (job, input) => spawnSubagent(job, input, turnGeneration),
 						searchAvailable,
 						// The map reader (wave 7): the prober reads the learner's
 						// knowledge graph through tools when the gate opens —
@@ -432,7 +557,7 @@ export async function handleChatInput(
 		// run's first LLM call (the native replacement for continuation
 		// coalescing). Settlement still cannot beat the flow below: it needs
 		// a streamed response, which never happens inside the constructor.
-		registerLiveAgent(chatId, constructed);
+		registerLiveAgent(chatId, constructed, turnGeneration ?? undefined);
 		// Debug recorder run marker (owner, 2026-10-04): correlates the
 		// JSONL event stream with the record's turns; no-op unless
 		// LH_PROVIDER_EVENTS=1.
@@ -483,7 +608,14 @@ export async function handleChatInput(
 					// Fresh per-turn read of the graph section's chunk budget
 					// (extraction-UX redesign, 2026-09-24): the trigger compares
 					// against it and the pipeline's batches share it.
-					triggerExtraction(stores, extraction, chatId, effective.graph.extractionChunkTokens);
+					// Re-enter the TURN's generation explicitly (issue #8): this
+					// stream callback runs outside the async-local scope, and a
+					// subscription stage must never capture a newer account.
+					void withSubscriptionScope(async () => {
+						triggerExtraction(stores, extraction, chatId, effective.graph.extractionChunkTokens);
+					}, turnGeneration).catch((err: unknown) =>
+						console.error(`[chat ${chatId}] extraction trigger failed:`, err),
+					);
 				}
 				// PARKED DISMISSAL (owner, 2026-10-04): a dismissal that arrived
 				// mid-turn was parked by the dismiss route (202); now that
@@ -521,11 +653,15 @@ export async function handleChatInput(
 				// tests (the extraction precedent — scripted chats are
 				// fixtures; the service itself is pinned directly).
 				if (process.env.NODE_ENV !== "test")
-					kickCompaction(() => {
+					// Same provenance rule as extraction (issue #8): the settle
+					// kick resolves a fresh engine — it must resolve it in the
+					// TURN's generation, not whatever is current by settle time.
+					void withSubscriptionScope(async () => {
+						kickCompaction(() => {
 						const fresh = effectiveSettings();
 						const spec = resolveConversationSpec(stores.chatStore.getChat(chatId)?.settings, fresh.models.strong);
 						if (!spec) return null;
-						const kickEngine = piEngineForSpec(spec);
+						const kickEngine = engineForSpec(spec);
 						const kickModelId = `${kickEngine.model.provider}:${kickEngine.model.id}`;
 						const freshRecord = stores.chatStore.getChat(chatId);
 						if (!freshRecord) return null;
@@ -540,7 +676,10 @@ export async function handleChatInput(
 							),
 							systemPromptTokens: Math.ceil(composeInstructions(freshRecord.kind === "practice" ? "practice" : "teacher").length / 4),
 						};
-					}, chatId);
+						}, chatId);
+					}, turnGeneration).catch((err: unknown) =>
+						console.error(`[chat ${chatId}] settle compaction failed:`, err),
+					);
 			},
 		});
 		// The turn is now a live background object: register it so any view

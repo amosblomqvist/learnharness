@@ -42,3 +42,7 @@ export * from "./compaction.ts";
 export { runPiTurn, piTurnResponse, type PiTurnHandle, type PiTurnSpec } from "./pi/ui-stream.ts";
 export * from "./observability.ts";
 export * from "./model-catalog.ts";
+
+// Protected instance-subscription transport and the live singleton service.
+export * from "./subscription-http.ts";
+export { subscriptionService } from "./subscription.ts";

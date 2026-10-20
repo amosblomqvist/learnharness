@@ -10,9 +10,17 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { hasProviderKey, strongKeyless, ZeroKeysPill } from "../components/setup-cta.tsx";
-import type { ModelCatalogResponse } from "../src/core/index.ts";
-import { SetupKeysBody } from "../components/setup-dialog.tsx";
+import {
+	conversationModelProvider,
+	hasProviderKey,
+	modelAccessBlock,
+	providerKeyless,
+	strongKeyless,
+	subscriptionCtaLabel,
+	ZeroKeysPill,
+} from "../components/setup-cta.tsx";
+import { SUBSCRIPTION_PROVIDER, type ModelCatalogResponse } from "../src/core/index.ts";
+import { SetupKeysBody, setupStage } from "../components/setup-dialog.tsx";
 import { DICTATION_KEYLESS, DEEPGRAM_KEY_ID } from "../components/dictation.tsx";
 import type { AuthKeyStatus } from "../src/core/auth-keys.ts";
 import type { ProviderKeyInfo } from "../components/settings/keys-section.tsx";
@@ -160,5 +168,122 @@ describe("strongKeyless — the pre-send guard's truth (owner interlude, no-orph
 	it("no strong pin (the models guard owns that case) or catalog not loaded: false — the server gate remains the belt", () => {
 		assert.equal(strongKeyless(catalog(null, "openrouter")), false);
 		assert.equal(strongKeyless(undefined), false);
+	});
+});
+
+describe("modelAccessBlock — independent authorization sources, no fallback", () => {
+	const base = {
+		subscriptionSelected: true,
+		subscriptionState: "connected" as const,
+		subscriptionFailed: false,
+		zeroKeys: true,
+		selectedKeyless: true,
+	};
+
+	it("a connected subscription with zero API keys is not blocked", () => {
+		assert.equal(modelAccessBlock(base), null);
+	});
+
+	it("a selected subscription that is not connected guides to Subscription, not Keys", () => {
+		for (const state of ["disconnected", "reconnect_required", "error", "authorizing"] as const) {
+			assert.equal(
+				modelAccessBlock({ ...base, subscriptionState: state }),
+				"subscription",
+				state,
+			);
+		}
+	});
+
+	it("pending first read blocks creation with its own state, never a zero-key claim", () => {
+		assert.equal(
+			modelAccessBlock({ ...base, subscriptionState: null, subscriptionFailed: false }),
+			"subscription_pending",
+		);
+		// A failed read is also not "zero keys"; it is Subscription guidance.
+		assert.equal(
+			modelAccessBlock({ ...base, subscriptionState: null, subscriptionFailed: true }),
+			"subscription",
+		);
+	});
+
+	it("an ordinary API pin keeps the existing zero-keys / selected-keyless guard", () => {
+		assert.equal(
+			modelAccessBlock({ ...base, subscriptionSelected: false, subscriptionState: null }),
+			"keys",
+		);
+		assert.equal(
+			modelAccessBlock({
+				...base,
+				subscriptionSelected: false,
+				subscriptionState: null,
+				zeroKeys: false,
+				selectedKeyless: false,
+			}),
+			null,
+		);
+	});
+});
+
+describe("conversationModelProvider — the turn's actual provider source", () => {
+	it("a per-chat override wins over the strong pin and carries its own authorization", () => {
+		const c = catalog("openrouter", "openrouter");
+		const provider = conversationModelProvider(
+			{ model: { provider: SUBSCRIPTION_PROVIDER, id: "gpt-5-codex" } },
+			c,
+		);
+		assert.equal(provider, SUBSCRIPTION_PROVIDER);
+		assert.equal(providerKeyless(c, provider), true);
+		assert.equal(
+			modelAccessBlock({
+				subscriptionSelected: provider === SUBSCRIPTION_PROVIDER,
+				subscriptionState: "disconnected",
+				subscriptionFailed: false,
+				zeroKeys: false,
+				selectedKeyless: true,
+			}),
+			"subscription",
+		);
+	});
+
+	it("no override rides the strong slot (server resolveConversationSpec parity)", () => {
+		const c = catalog("openrouter", "openrouter");
+		assert.equal(conversationModelProvider(undefined, c), "openrouter");
+		assert.equal(conversationModelProvider({}, c), "openrouter");
+		assert.equal(conversationModelProvider(undefined, undefined), null);
+	});
+});
+
+describe("subscriptionCtaLabel — the guidance copy", () => {
+	it("names the subscription action, never a provider key", () => {
+		assert.equal(subscriptionCtaLabel("connected"), "Subscription connected");
+		assert.equal(subscriptionCtaLabel("authorizing"), "Finish subscription sign-in");
+		assert.equal(subscriptionCtaLabel("disconnected"), "Connect subscription");
+		assert.equal(subscriptionCtaLabel("reconnect_required"), "Reconnect subscription");
+		assert.equal(subscriptionCtaLabel("error"), "Check subscription");
+		assert.equal(subscriptionCtaLabel(null, true), "Check subscription");
+		assert.equal(subscriptionCtaLabel(null, false, true), "Checking subscription…");
+		for (const label of [
+			subscriptionCtaLabel("disconnected"),
+			subscriptionCtaLabel("reconnect_required"),
+			subscriptionCtaLabel("error"),
+		]) {
+			assert.doesNotMatch(label, /provider key/i);
+		}
+	});
+});
+
+describe("setupStage — subscription authorization opens the pickers", () => {
+	it("a connected subscription replaces the first-key prerequisite", () => {
+		assert.equal(setupStage([{ id: "openai-codex", keyPresent: false }], true), "pickers");
+		assert.equal(setupStage(null, true), "pickers", "a connected subscription must not wait on the keys read");
+	});
+
+	it("fresh zero-key / no-subscription keeps the first-key screen", () => {
+		assert.equal(setupStage([{ id: "openai-codex", keyPresent: false }], false), "keys");
+		assert.equal(setupStage([], false), "keys");
+	});
+
+	it("an unconnected pending catalog read still falls back to the honest key screen", () => {
+		assert.equal(setupStage(null, false), "keys");
 	});
 });
