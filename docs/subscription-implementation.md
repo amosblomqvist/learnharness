@@ -1,10 +1,13 @@
 # Instance Codex subscription implementation
 
 Implementation record for [issue 8](https://github.com/gzy31007/learnharness/issues/8).
-The implementation was authorized after review of the local implementation plan.
-The automated verification and subsequent real browser login-only acceptance
-are recorded separately below. Neither establishes supplier permission or full
-real-client/model acceptance.
+The implementation was authorized after review of the
+[implementation plan](subscription-implementation-plan.md).
+Historical automated verification and browser-only acceptance are recorded below.
+The final section records user-reported Windows desktop and same-instance browser
+acceptance of the identified installer. Earlier pending statements describe their
+own checkpoints. No result establishes supplier permission, a clean security
+audit, or every possible real-world model and deployment workflow.
 
 ## Implemented boundaries
 
@@ -200,3 +203,73 @@ real inference has not passed. The error alone cannot establish an account,
 model-entitlement or quota failure, or locate the network failure. Further
 network diagnosis or another real request is a separate next step; no automatic
 retry was started. Desktop and full chat/tool-loop acceptance remain outstanding.
+
+### User-reported Windows acceptance, 2026-10-20
+
+The owner completed the human-only checklist for commit
+`6c2b0b57f7d3177a777acab081411db539362416`, using the unsigned Windows x64
+acceptance installer with SHA-256
+`803d75472238f95f239f535f74a9fdb76b012ba862dbcb6e9952210ecbeb5b20`.
+The [manual build](https://github.com/gzy31007/learnharness/actions/runs/39394818664)
+and [handoff record](subscription-windows-acceptance.md)
+identify the artifact. Actual package inspection confirmed Next 16.3.8,
+sharp 0.35.5, root `lhTestBuild: true`, and selected AMD64 binaries. Windows OS
+version was not supplied. These are owner-reported UI results, not an independent
+agent reproduction, packet trace or inspection of Windows data files.
+
+- Installation and startup passed.
+- Cancelling authorization behaved normally. Starting browser sign-in did not
+  automatically launch a browser window, but `Open the sign-in page` completed
+  the path. Source inspection shows that starting only creates the attempt and
+  the subsequent link opens the supplier page. Record this as a non-blocking
+  usability observation, not automatic-launch success or a new repair.
+- The desktop model was reported as `gpt-6-luna low` and worked normally.
+  The same-machine browser behaved identically and shared the desktop state.
+  The report does not include a verbatim model answer, token counts or prices;
+  none are inferred.
+- Restart recovery passed. The owner observed a changed port. This is consistent
+  with the shell allocating a free loopback port per launch, not lost data.
+- Disconnecting the network returned the expected error. Recovery and manual
+  retry behaved as the checklist described. This bounded observation does not
+  independently prove every possible retry or fallback path.
+- Subscription disconnect behaved as expected, with data fully retained per the
+  owner's report. The checklist's post-disconnect and restart behavior was
+  accepted by the owner; no filesystem-level retention audit was performed.
+- No update-menu entry was available. Runtime manual-update observation is
+  **not tested**, not passed. Existing isolated updater guards and actual packaged
+  acceptance metadata remain the separate evidence for the disabled policy.
+- The owner reported no failing step or sanitized error.
+
+#### Reconciled automated evidence and closure scope
+
+The security-patched frozen source previously passed all 1,925 tests in 139 files,
+with no failures, skips or exclusions, plus type generation, type checking, lint
+and production build. This turn read the existing results; it did not rerun them.
+The [issue discussion](https://github.com/gzy31007/learnharness/issues/8)
+records the frozen validation and gate results. Raw validation logs remain local
+acceptance evidence and are not included in the source commit.
+The test log covers controlled browser/manual callback and device flows,
+real-SDK lifecycle and single-send error classification, late results after
+cancel/disconnect, durable journal and subprocess races, independent stores,
+source-aware catalog and role gates, background/extraction provenance, API-key
+regressions, protected HTTP and usage/cost handling. Faux-engine orchestration
+results remain distinct from actual-SDK controlled-network contracts.
+The issue discussion also records the previous fixed-base review, the approved
+repair and closure of both blocking findings. The two
+previously accepted P3 observations remain non-blocking and were not repaired.
+
+With the owner's successful minimum real-client report, the required desktop and
+same-instance browser acceptance is complete for this installer. This supports
+closing issue 8 within its agreed minimum real-acceptance scope. It does not
+assert real refresh rotation/expiry/quota exhaustion, account device-code
+availability, manual-callback use on the owner's machine, a real API-key call,
+every model-generation role, or a full learning/tool workflow. Those real-world
+scenarios were not established by this report; their controlled automated
+coverage must not be described as supplier or desktop execution.
+
+Phone/cloud real testing remains explicitly deferred. Supplier permission is
+unestablished. Remaining dependency findings stay with security map 10, unchanged
+and not represented as fixed. No new execution, installation, credential access,
+model request, dependency change, deployment, tag, Release or merge occurred in
+this receipt-and-record turn. Branch publication and feature acceptance do not
+imply that main already contains the implementation.
