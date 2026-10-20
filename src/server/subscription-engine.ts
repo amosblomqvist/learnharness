@@ -57,6 +57,49 @@ function withUsageReport(message: AssistantMessage, fields: UsagePresence): Assi
 	return { ...message, diagnostics: [...others, diagnostic] };
 }
 
+/** A delivered copy of an SDK-owned assistant message.
+ *
+ *  The SDK pushes its live partial (the `start` event carries that same
+ *  object) and keeps mutating it afterwards — its catch block writes the
+ *  supplier's prose into `errorMessage` after the event was already queued.
+ *  Consumers therefore get a snapshot with supplier diagnostics removed:
+ *  neither immediate serialization nor a retained reference can expose them
+ *  later. Intended content, reported usage and the selected provider/model
+ *  stay copied exactly as delivered. */
+function deliveredMessage(message: AssistantMessage): AssistantMessage {
+	const snapshot: AssistantMessage = {
+		...message,
+		content: message.content.map((block) => ({ ...block })),
+		usage: { ...message.usage, cost: { ...message.usage.cost } },
+	};
+	delete snapshot.diagnostics;
+	delete snapshot.errorMessage;
+	return snapshot;
+}
+
+/** Classify a failure the supplier reported inside a 200 event stream.
+ *
+ *  The SDK turns a `response.failed` event into a prose error and its own
+ *  `error` event, so the explicit machine code only survives here, on the
+ *  raw event. Only the documented machine-code shapes count: prose, HTTP
+ *  status and every other field stay out of the diagnosis, and an
+ *  unrecognized code never replaces an established one. */
+function sseFailureCode(event: unknown): SubscriptionErrorCode | undefined {
+	if (!event || typeof event !== "object") return undefined;
+	const record = event as { type?: unknown; code?: unknown; response?: unknown };
+	if (record.type === "response.failed") {
+		if (!record.response || typeof record.response !== "object") return undefined;
+		const code = subscriptionResponseCode(record.response);
+		return code === "subscription_unknown" ? undefined : code;
+	}
+	// The flat error event carries its machine code at the top level.
+	if (record.type === "error" && typeof record.code === "string") {
+		const code = subscriptionResponseCode({ error: { code: record.code } });
+		return code === "subscription_unknown" ? undefined : code;
+	}
+	return undefined;
+}
+
 /** A per-engine real SDK collection. It cannot resolve another source or generation. */
 export function createSubscriptionEngine(service: SubscriptionService, spec: ResolvedModelSpec, generation: string): PiEngine {
 	const models = createModels({ credentials: service.credentials(generation) });
@@ -73,11 +116,11 @@ export function createSubscriptionEngine(service: SubscriptionService, spec: Res
 			 *  event. */
 			let usageFields: UsagePresence = { input: false, output: false, cacheRead: false, cacheWrite: false, reasoning: false };
 			const safeError = (message?: AssistantMessage): AssistantMessage => {
-				const safe = message ?? partial ?? {
+				const safe = deliveredMessage(message ?? partial ?? {
 					role: "assistant", content: [], api: engine.model.api, provider: engine.model.provider, model: engine.model.id,
 					usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
 					stopReason: "error", timestamp: Date.now(),
-				};
+				});
 				const info = subscriptionFailure(failure);
 				const failed: AssistantMessage = { ...safe, stopReason: "error", errorMessage: `${info.code}: ${info.message}`, diagnostics: [{ type: "subscription_error", timestamp: Date.now(), details: { code: info.code } }] };
 				return withUsageReport(failed, usageFields);
@@ -125,22 +168,29 @@ export function createSubscriptionEngine(service: SubscriptionService, spec: Res
 					...options,
 					apiKey: undefined, headers: undefined, env: undefined,
 					onPayload: undefined, onResponse: undefined,
-					// Our own observer (never a caller override): presence only.
-					onProviderStreamEvent: (event) => { usageFields = usagePresenceOfEvent(event); },
+					// Our own observer (never a caller override): usage presence and
+					// the explicit failure code carried by the raw event.
+					onProviderStreamEvent: (event) => {
+						usageFields = usagePresenceOfEvent(event);
+						const classified = sseFailureCode(event);
+						if (classified) failure = classified;
+					},
 					fetch: protectedFetch, signal: lease.signal, transport: "sse", maxRetries: 0,
 				});
 				for await (const event of source) {
 					if (event.type === "error") {
 						output.push({ type: "error", reason: "error", error: safeError(event.error) });
+					} else if ("partial" in event) {
+						// A COPY, not the SDK's live partial: that object keeps
+						// mutating after this event is queued (its catch rewrites
+						// errorMessage), and a forwarded reference would expose it.
+						const snapshot = deliveredMessage(event.partial);
+						partial = snapshot;
+						output.push({ ...event, partial: snapshot });
 					} else {
-						if ("partial" in event) {
-							partial = event.partial;
-							delete partial.diagnostics;
-							delete partial.errorMessage;
-						}
 						// A completed call carries the presence marker; usage
 						// numbers stay exactly as the SDK reported them.
-						output.push(event.type === "done" ? { ...event, message: withUsageReport(event.message, usageFields) } : event);
+						output.push({ ...event, message: withUsageReport(deliveredMessage(event.message), usageFields) });
 					}
 				}
 			} catch (error) {

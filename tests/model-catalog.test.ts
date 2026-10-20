@@ -9,8 +9,11 @@ import {
 	clampChatLevel,
 	clampModelsLevels,
 	modelCatalog,
+	roleModelCapabilityError,
+	roleNeedsImageInput,
 	rolePinsFor,
 	toModelDto,
+	validateAgentModelsSettings,
 	validateChatSettings,
 	validateModelsSettings,
 } from "../src/server/model-catalog.ts";
@@ -389,5 +392,62 @@ describe("pi thinking truth (pinned against pi-ai upgrades)", () => {
 	it("the legacy piEngineFor role entry point throws honestly (BYOK: no pins)", async () => {
 		const { piEngineFor } = await import("../src/agent/models.ts");
 		assert.throws(() => piEngineFor("prober"), /no configured model for role "prober"/);
+	});
+});
+
+// Issue #8 repair B: the agent section's model OVERRIDES are a second write
+// surface that feeds the same vision roles the vision slot feeds — the
+// capability gate must live in ONE structural helper shared by the write and
+// the role-execution resolver (a write-only fix would leave pre-existing
+// records bypassing it).
+describe("the agent-section model-override capability gate", () => {
+	const spark = { provider: "openai-codex", id: "gpt-5.3-codex-spark" };
+	const luna = { provider: "openai-codex", id: "gpt-6-luna" };
+
+	it("rejects a text-only model in a writable image role (visualMaker)", () => {
+		const verdict = validateAgentModelsSettings({ models: { visualMaker: { model: spark } } });
+		assert.equal(verdict.ok, false, "a text-only model cannot fill an image role");
+		if (!verdict.ok) {
+			assert.match(verdict.error, /gpt-5\.3-codex-spark/);
+			assert.match(verdict.error, /text only/);
+			assert.match(verdict.error, /image-capable/);
+		}
+	});
+
+	it("accepts an image-capable model in the same role", () => {
+		assert.equal(validateAgentModelsSettings({ models: { visualMaker: { model: luna } } }).ok, true);
+	});
+
+	it("does NOT ban text-only models outside the image roles", () => {
+		assert.equal(validateAgentModelsSettings({ models: { researcher: { model: spark } } }).ok, true);
+		assert.equal(validateAgentModelsSettings({ models: { extractor: { model: spark } } }).ok, true);
+		assert.equal(validateAgentModelsSettings({ models: { auditor: { model: spark } } }).ok, true);
+	});
+
+	it("still requires the model to exist in the catalog (structural, no key/entitlement)", () => {
+		const missing = validateAgentModelsSettings({
+			models: { visualMaker: { model: { provider: "openrouter", id: "nope/nope" } } },
+		});
+		assert.equal(missing.ok, false);
+		if (!missing.ok) assert.match(missing.error, /No model "nope\/nope" in the openrouter catalog/);
+		// A bare thinkingLevel names no model — nothing to check structurally.
+		assert.equal(validateAgentModelsSettings({ models: { visualMaker: { thinkingLevel: "high" } } }).ok, true);
+	});
+
+	it("names exactly the roles whose engines send image content", () => {
+		assert.equal(roleNeedsImageInput("visualMaker"), true);
+		assert.equal(roleNeedsImageInput("pdfReader"), true);
+		assert.equal(roleNeedsImageInput("researcher"), false);
+		assert.equal(roleNeedsImageInput("teacher"), false);
+	});
+
+	it("the runtime gate refuses a text-only RESOLVED spec for an image role only", () => {
+		assert.equal(roleModelCapabilityError("researcher", spark), null);
+		assert.equal(roleModelCapabilityError("visualMaker", luna), null);
+		const refusal = roleModelCapabilityError("visualMaker", spark);
+		assert.ok(refusal, "a text-only visualMaker spec must be refused");
+		assert.match(refusal, /text only/);
+		assert.match(refusal, /image-capable/);
+		assert.ok(roleModelCapabilityError("pdfReader", spark));
 	});
 });

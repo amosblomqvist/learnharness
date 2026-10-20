@@ -19,7 +19,7 @@
 
 import { clampThinkingLevel, getSupportedThinkingLevels, type Api, type Model } from "@earendil-works/pi-ai";
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
-import { piModels } from "../agent/models.ts";
+import { piModels, type ResolvedModelSpec } from "../agent/models.ts";
 import { settingsStore } from "../store/settings.ts";
 import { SUBSCRIPTION_PROVIDER } from "../core/subscription.ts";
 import { effectiveSettings } from "./stores.ts";
@@ -35,7 +35,15 @@ import type {
 } from "../core/contracts/models.ts";
 import type { EffectiveModelSpec, EffectiveSlot } from "../core/settings-resolution.ts";
 import { AUTH_PROVIDER_KEYS } from "../core/auth-keys.ts";
-import { BACKGROUND_MODEL_ROLES, MODEL_SLOTS, type BackgroundModelRole, type ModelSlotName, type ModelsSettings } from "../core/settings.ts";
+import {
+	BACKGROUND_MODEL_ROLES,
+	MODEL_SLOTS,
+	type AgentSettings,
+	type BackgroundModelRole,
+	type ModelSlotName,
+	type ModelsSettings,
+} from "../core/settings.ts";
+import type { ModelRole } from "../../config.ts";
 
 /** The picker's client-safe model entry (contract: core/contracts/models.ts). */
 export type ModelDto = ModelCatalogEntry;
@@ -267,6 +275,78 @@ export function validateModelsSettings(settings: ModelsSettings): SettingsValida
 	return { ok: true };
 }
 
+// ─── shared image-capability gate (issue #8 repair B) ────────────────────────
+// The vision SLOT and the ROLE OVERRIDES are two write surfaces that feed the
+// same background roles, and the role resolver is a third reader of the same
+// truth. One structural check, three callers — a write-only fix would still
+// let a pre-existing record (or a recovered/dispatched job) run.
+
+/** The roles whose engines send image content parts: the visual maker
+ *  authors/renders figures and the PDF reader reads rendered pages. */
+const IMAGE_INPUT_ROLES: ReadonlySet<ModelRole> = new Set<ModelRole>(["visualMaker", "pdfReader"]);
+
+export function roleNeedsImageInput(role: ModelRole): boolean {
+	return IMAGE_INPUT_ROLES.has(role);
+}
+
+/** Structural catalog verdict for one provider+model pair (unknown provider
+ *  / unknown model), or null when the pair exists. */
+function catalogModelError(provider: string, id: string): string | null {
+	const providers = piModels().getProviders().map((p) => p.id);
+	if (!providers.includes(provider)) {
+		return `Unknown provider "${provider}" — configured: ${providers.join(", ")}`;
+	}
+	if (!piModels().getModel(provider, id)) {
+		return `No model "${id}" in the ${provider} catalog`;
+	}
+	return null;
+}
+
+/** The ONE image-capability verdict: null when the model accepts image input,
+ *  otherwise the user-facing reason. `consumer` selects the wording — the
+ *  vision slot keeps its historical message verbatim (other surfaces already
+ *  assert it). Structural only: no key, login or entitlement is consulted. */
+export function imageCapabilityError(
+	provider: string,
+	id: string,
+	consumer: "vision slot" | ModelRole,
+): string | null {
+	const model = piModels().getModel(provider, id);
+	if (!model || model.input.includes("image")) return null;
+	const label = consumer === "vision slot" ? "vision slot" : `${consumer} role`;
+	return `Model "${id}" accepts text only — the ${label} needs an image-capable model`;
+}
+
+/** The agent-section write gate: every model override must exist in the
+ *  catalog and — for the image roles — accept image input. Only writable
+ *  background roles are checked (pdfReader is not writable; its slot is
+ *  covered by the vision gate and by the runtime role check). */
+export function validateAgentModelsSettings(settings: AgentSettings): SettingsValidation {
+	for (const role of BACKGROUND_MODEL_ROLES) {
+		const model = settings.models?.[role]?.model;
+		if (!model) continue;
+		const structural = catalogModelError(model.provider, model.id);
+		if (structural) return { ok: false, error: structural };
+		if (!roleNeedsImageInput(role)) continue;
+		const refusal = imageCapabilityError(model.provider, model.id, role);
+		if (refusal) return { ok: false, error: refusal };
+	}
+	return { ok: true };
+}
+
+/** The ROLE-EXECUTION verdict (issue #8 repair B): a resolved spec for an
+ *  image role must name an image-capable model. Called by the chat-handler's
+ *  role resolver BEFORE any engine build or provider request, so a
+ *  pre-existing invalid record is refused instead of executed; the refusal
+ *  flows into the existing per-need "no model configured" path (never a
+ *  silent fallback to a neighboring model). */
+export function roleModelCapabilityError(role: ModelRole, spec: ResolvedModelSpec): string | null {
+	if (!roleNeedsImageInput(role)) return null;
+	const structural = catalogModelError(spec.provider, spec.id);
+	if (structural) return structural;
+	return imageCapabilityError(spec.provider, spec.id, role);
+}
+
 function validateSlotSpec(name: ModelSlotName, slot: { model?: { provider: string; id: string }; thinkingLevel?: ThinkingLevel }): SettingsValidation {
 	const providers = piModels().getProviders().map((p) => p.id);
 	if (slot.model) {
@@ -278,13 +358,17 @@ function validateSlotSpec(name: ModelSlotName, slot: { model?: { provider: strin
 		if (!model) {
 			return { ok: false, error: `No model "${id}" in the ${provider} catalog` };
 		}
-		// CAPABILITY gate (subscription wave, issue #8): the vision slot feeds
-		// visual-maker and pdf-reader, both of which send image content parts.
-		// pi's real `input` capabilities are the truth — a text-only model
-		// would fail mid-run, so the structural write rejects it instead.
-		// Purely structural: it says nothing about live account authorization.
-		if (name === "vision" && !model.input.includes("image")) {
-			return { ok: false, error: `Model "${id}" accepts text only — the vision slot needs an image-capable model` };
+		// CAPABILITY gate (subscription wave, issue #8; shared since repair B):
+		// the vision slot feeds visual-maker and pdf-reader, both of which send
+		// image content parts. pi's real `input` capabilities are the truth — a
+		// text-only model would fail mid-run, so the structural write rejects
+		// it instead. This is the SAME helper the role overrides (agent
+		// section) and the role-execution resolver use, so the write and the
+		// runtime cannot disagree. Purely structural: it says nothing about
+		// live account authorization.
+		if (name === "vision") {
+			const refusal = imageCapabilityError(provider, id, "vision slot");
+			if (refusal) return { ok: false, error: refusal };
 		}
 	}
 	// BYOK interlude (owner, 2026-09-22): the supported-level verdict is

@@ -361,3 +361,142 @@ test("a supplier-reported all-zero usage stays a real zero: priced complete at $
 		assert.deepEqual(callEstimate(capturedCallUsage(result), PRICED), { dollars: 0, coverage: "complete", pricedCalls: 1, unpricedCalls: 0, missingUsageCalls: 0 });
 	} finally { globalThis.fetch = original; await rm(f.directory, { recursive: true, force: true }); }
 });
+
+// ─── HTTP 200 SSE failures (blocking repair A) ──────────────────────────────
+// The supplier can fail the operation inside a 200 text/event-stream. The
+// explicit machine code exists only in the raw event: before the SDK turns it
+// into prose and its own `error` event. Classification reads those two
+// documented shapes and nothing else.
+
+const PROVIDER_SENTINEL = "synthetic-provider-diagnostic-do-not-leak";
+
+function sseStream(payloads: unknown | unknown[]) {
+	const events = Array.isArray(payloads) ? payloads : [payloads];
+	const body = events.map((payload) => `data: ${JSON.stringify(payload)}\n\n`).join("") + "data: [DONE]\n\n";
+	return new Response(body, { status: 200, headers: { "content-type": "text/event-stream" } });
+}
+
+async function withStreamedResponse<T>(
+	payloads: unknown | unknown[],
+	run: (subject: Awaited<ReturnType<typeof fixture>>, sent: { url: string; model: string }[]) => Promise<T>,
+): Promise<T> {
+	const f = await fixture();
+	const original = globalThis.fetch;
+	const sent: { url: string; model: string }[] = [];
+	globalThis.fetch = async (input, init) => {
+		const url = String(input);
+		// No auth refresh, paid-provider call or alternate endpoint.
+		assert.equal(url, "https://chatgpt.com/backend-api/codex/responses");
+		const headers = new Headers(init?.headers);
+		const bytes = Buffer.from(await new Response(init?.body).arrayBuffer());
+		const encoding = headers.get("content-encoding");
+		const body = (encoding === "gzip" ? gunzipSync(bytes) : encoding === "zstd" ? zstdDecompressSync(bytes) : bytes).toString("utf8");
+		sent.push({ url, model: JSON.parse(body).model });
+		return sseStream(payloads);
+	};
+	try {
+		return await run(f, sent);
+	} finally { globalThis.fetch = original; await rm(f.directory, { recursive: true, force: true }); }
+}
+
+test("a 200 SSE failure keeps each explicit machine code in both documented shapes", async () => {
+	const scenarios = [
+		{ shape: "response.failed", code: "usage_limit_reached", expected: "subscription_limit" },
+		{ shape: "response.failed", code: "model_not_found", expected: "subscription_model_unavailable" },
+		{ shape: "response.failed", code: "token_expired", expected: "subscription_needs_login" },
+		{ shape: "error", code: "usage_limit_reached", expected: "subscription_limit" },
+		{ shape: "error", code: "model_not_found", expected: "subscription_model_unavailable" },
+		{ shape: "error", code: "token_expired", expected: "subscription_needs_login" },
+	] as const;
+	for (const { shape, code, expected } of scenarios) {
+		const payload = shape === "response.failed"
+			? { type: shape, response: { id: "response-failed", status: "failed", error: { code, message: PROVIDER_SENTINEL }, output: [] } }
+			: { type: shape, code, message: PROVIDER_SENTINEL };
+		await withStreamedResponse(payload, async (f, sent) => {
+			const result = await f.engine.streamFn(f.engine.model, context()).result();
+			assert.equal(result.stopReason, "error");
+			assert.equal(result.diagnostics?.find((diagnostic) => diagnostic.type === "subscription_error")?.details?.code, expected, `${shape} ${code}`);
+			assert.doesNotMatch(JSON.stringify(result), new RegExp(PROVIDER_SENTINEL), `${shape} ${code} final result`);
+			assert.equal(sent.length, 1, `${shape} ${code} one send only`);
+			assert.equal(sent[0]!.model, "gpt-6-luna", `${shape} ${code} no model fallback`);
+		});
+	}
+});
+
+test("a failing 200 SSE stream never exposes supplier diagnostics to consumers", async () => {
+	const shapes = [
+		{ type: "response.failed", response: { id: "response-failed", status: "failed", error: { code: "usage_limit_reached", message: PROVIDER_SENTINEL }, output: [] } },
+		{ type: "error", code: "usage_limit_reached", message: PROVIDER_SENTINEL },
+	];
+	for (const payload of shapes) {
+		await withStreamedResponse(payload, async (f) => {
+			const consumed: unknown[] = [];
+			const retained: unknown[] = [];
+			const stream = f.engine.streamFn(f.engine.model, context());
+			for await (const event of stream) {
+				retained.push(event);
+				// Exactly what a forwarding consumer (SSE writer, log sink,
+				// browser payload) does at receipt: serialize before the next event.
+				consumed.push(JSON.parse(JSON.stringify(event)));
+			}
+			const result = await stream.result();
+			assert.equal(result.stopReason, "error");
+			assert.doesNotMatch(JSON.stringify(consumed), new RegExp(PROVIDER_SENTINEL), `${payload.type} consumed event snapshot`);
+			assert.doesNotMatch(JSON.stringify(retained), new RegExp(PROVIDER_SENTINEL), `${payload.type} retained event reference`);
+			assert.doesNotMatch(JSON.stringify(result), new RegExp(PROVIDER_SENTINEL), `${payload.type} final result`);
+			const forwarded = retained.filter(
+				(event): event is { type: string; partial: AssistantMessage } => typeof event === "object" && event !== null && "partial" in event,
+			);
+			assert.ok(forwarded.length > 0, `${payload.type} delivered partial events`);
+			for (const event of forwarded) {
+				assert.equal("errorMessage" in event.partial, false, `${payload.type} ${event.type} carries no errorMessage`);
+				assert.equal("diagnostics" in event.partial, false, `${payload.type} ${event.type} carries no supplier diagnostics`);
+			}
+		});
+	}
+});
+
+test("a 200 SSE failure without a supported explicit machine code stays unknown", async () => {
+	const scenarios = [
+		{ label: "unrecognized code", payload: { type: "error", code: "synthetic_unfamiliar_code", message: PROVIDER_SENTINEL } },
+		{ label: "prose only", payload: { type: "error", message: "usage_limit_reached: synthetic prose is not a machine code" } },
+		{ label: "nested code only", payload: { type: "error", message: PROVIDER_SENTINEL, error: { code: "usage_limit_reached" } } },
+		{ label: "response.failed without a code", payload: { type: "response.failed", response: { id: "response-failed", status: "failed", error: { message: PROVIDER_SENTINEL }, output: [] } } },
+	];
+	for (const { label, payload } of scenarios) {
+		await withStreamedResponse(payload, async (f, sent) => {
+			const result = await f.engine.streamFn(f.engine.model, context()).result();
+			assert.equal(result.stopReason, "error", label);
+			assert.equal(result.diagnostics?.find((diagnostic) => diagnostic.type === "subscription_error")?.details?.code, "subscription_unknown", label);
+			assert.doesNotMatch(JSON.stringify(result), new RegExp(PROVIDER_SENTINEL), label);
+			assert.equal(sent.length, 1, label);
+		});
+	}
+});
+
+test("a completed subscription stream keeps its content, source and usage in delivered snapshots", async () => {
+	const payloads = [
+		{ type: "response.output_item.added", output_index: 0, item: { type: "message", role: "assistant", content: [] } },
+		{ type: "response.output_text.delta", output_index: 0, delta: "synthetic answer" },
+		{ type: "response.completed", response: { id: "response-text", status: "completed", output: [{ type: "message", role: "assistant", content: [{ type: "output_text", text: "synthetic answer" }] }], usage: { input_tokens: 7, output_tokens: 2, total_tokens: 9, input_tokens_details: { cached_tokens: 0, cache_write_tokens: 0 } } } },
+	];
+	await withStreamedResponse(payloads, async (f, sent) => {
+		const retained: unknown[] = [];
+		const stream = f.engine.streamFn(f.engine.model, context());
+		for await (const event of stream) retained.push(event);
+		const result = await stream.result();
+		assert.equal(result.stopReason, "stop", result.errorMessage);
+		assert.equal(result.errorMessage, undefined);
+		assert.equal(result.provider, "openai-codex");
+		assert.equal(result.model, "gpt-6-luna");
+		assert.deepEqual(result.content, [{ type: "text", text: "synthetic answer" }]);
+		assert.equal(result.usage.input, 7);
+		assert.equal(result.usage.output, 2);
+		assert.equal(result.usage.totalTokens, 9);
+		assert.equal(messageUsageReported(result), true);
+		const delta = retained.find((event): event is { type: string; delta: string } => typeof event === "object" && event !== null && "delta" in event && (event as { type?: unknown }).type === "text_delta");
+		assert.equal(delta?.delta, "synthetic answer");
+		assert.equal(sent.length, 1);
+		assert.equal(sent[0]!.model, "gpt-6-luna");
+	});
+});

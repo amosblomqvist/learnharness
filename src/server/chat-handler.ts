@@ -53,7 +53,7 @@ import { persistTurn, triggerExtraction } from "./turn-service.ts";
 import { hasProbeDone, danglingQuestionOf } from "../core/native-messages.ts";
 import { composeInstructions } from "../agent/teacher-agent.ts";
 import { ensureCompacted, kickCompaction, effectiveThresholdTokens } from "./compaction.ts";
-import { catalogContextLimits } from "./model-catalog.ts";
+import { catalogContextLimits, roleModelCapabilityError } from "./model-catalog.ts";
 import { emit } from "../core/events.ts";
 import { settledTurnResponse } from "./turn-runs.ts";
 import { asAgentMessages } from "../core/native-messages.ts";
@@ -105,7 +105,7 @@ const jobRunner = createJobRunner({
 	// between dispatch and spawn lands); an empty chain flows through as
 	// undefined and the runner refuses the spawn honestly.
 	engineFor: (role) =>
-		resolveEngine(role),
+		resolveRoleEngine(role),
 	// Key-presence gate (provider-key interlude, 2026-09-25): the runner
 	// reads the resolved engine's provider and asks THIS check (the agent
 	// layer may not read the key store); a missing key refuses the spawn
@@ -136,7 +136,7 @@ export const extraction = createExtractionPipeline({
 	// chain flows through as undefined and the pipeline refuses the run
 	// with the typed ModelsNotConfiguredError. Direct test values still win.
 	engineFor: (role) =>
-		resolveEngine(role),
+		resolveRoleEngine(role),
 	// Key-presence gate (provider-key interlude, 2026-09-25): same check
 	// the job runner gets — a stage engine whose provider key is gone
 	// refuses BEFORE any batch runs (the typed throw), never mid-run.
@@ -202,9 +202,23 @@ function engineForSpec(spec: ResolvedModelSpec): PiEngine {
 		: piEngineForSpec(spec);
 }
 
-function resolveEngine(role: ModelRole): PiEngine | undefined {
+/** The capability-gated role resolver — the ONE seam the job runner and the
+ *  extraction pipeline are wired to (and the seam a recovered/dispatched job
+ *  enters). A resolved spec whose model cannot serve the role is refused
+ *  HERE, before any engine build or provider request (issue #8 repair B):
+ *  undefined flows into the existing per-need "no model configured" refusal
+ *  (visible failure, never a silent fallback to a neighboring model). The
+ *  check is structural — pi's catalog `input` capabilities, not entitlement.
+ *  Read FRESH per call so a settings PUT between dispatch and spawn lands. */
+function resolveRoleEngine(role: ModelRole): PiEngine | undefined {
 	const spec = resolveRoleSpec(role, stores.settingsStore.readSettings());
-	return spec ? engineForSpec(spec) : undefined;
+	if (!spec) return undefined;
+	const refusal = roleModelCapabilityError(role, spec);
+	if (refusal) {
+		console.warn(`[models] refusing role "${role}" before execution: ${refusal}`);
+		return undefined;
+	}
+	return engineForSpec(spec);
 }
 
 setJobRespawn((jobId) => void jobRunner.runJob(jobId));

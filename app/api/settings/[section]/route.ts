@@ -38,6 +38,7 @@ import {
 	effectiveSettings,
 	promptOverrides,
 	readSettingsRecord,
+	validateAgentModelsSettings,
 	validateChatSettings,
 	validateModelsSettings,
 	writeSettingsRecord,
@@ -83,6 +84,17 @@ export async function PUT(request: Request, ctx: { params: Promise<{ section: st
 		}
 	}
 	if (section === "agent") {
+		// Role-model capability gate (issue #8 repair B): an agent override
+		// names a model that a ROLE will execute — the image roles
+		// (visualMaker today; pdfReader is not writable here) send image
+		// content parts, so a text-only model is refused at the WRITE with
+		// the same structural verdict the runtime resolver applies. This is
+		// what keeps the record honest: refusals never persist, so the UI
+		// cannot save a configuration that would later be rejected mid-run.
+		const verdict = validateAgentModelsSettings(parsed.settings as AgentSettings);
+		if (!verdict.ok) {
+			return Response.json({ error: verdict.error, supported: verdict.supported }, { status: 400 });
+		}
 		// Orphan-heal (contract fix, interlude 2026-09-26): an ON switch
 		// whose override file is gone (or whose segment left the source
 		// tree) is healed to OFF (key dropped) inside this write — never a
