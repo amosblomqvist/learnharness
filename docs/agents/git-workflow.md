@@ -65,7 +65,7 @@ Push the branch when the task is delivered or when work pauses. The handoff repo
 
 Open the PR against the target release branch, and write its body with the `pr` skill. Authorizations split as follows:
 
-- Commit, push, and opening a PR in this repository are allowed inside an authorized task once the applicable checks pass.
+- Commit and push in this repository are allowed inside an authorized task, including a paused-work handoff that reports failed checks. Open a delivery PR once the applicable checks pass.
 - Opening a PR against upstream needs its own approval.
 - Merging a PR, publishing a release, and closing an implementation ticket each wait for user confirmation.
 - Any third-party repository needs its own approval.
