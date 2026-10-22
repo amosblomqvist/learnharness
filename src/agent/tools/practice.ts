@@ -202,8 +202,10 @@ export function concludeTool(gate: PracticeGate): AgentTool<typeof concludeInput
 		label: "conclude",
 		description:
 			"Conclude the active problem: records the outcome + verdict, reveals the committed solution, and frees " +
-			"the learner's composer. The turn CONTINUES after conclude — reveal, then pose the next problem (or wrap " +
-			"up in text). Nothing may conclude unless a problem is active.",
+			"the learner's composer. After the result, say your closing words about the learner's work if useful, then " +
+			"END YOUR TURN — no further tool calls. The next problem is NEVER posed here: it waits for the learner's " +
+			"explicit go-ahead (a *Next problem* message, or their own words asking for the next one). Between problems, " +
+			"answer their questions about the concluded one. Nothing may conclude unless a problem is active.",
 		parameters: concludeInputObject,
 		prepareArguments: (args: unknown) => healEncodedArguments(args, concludeInputObject) as never,
 		executionMode: "sequential",

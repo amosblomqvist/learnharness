@@ -116,8 +116,9 @@ const NO_CHROME_MESSAGE =
 // Demos execute JS and need a browser. PRIMARY: this very app's binary
 // spawned with --browser-service (main.cjs boots a hidden window with a CDP
 // port and prints "BROWSER_SERVICE_CDP <port>"). FALLBACK: system Chrome.
-// The helper's stdin is held open by this process; server death = EOF = the
-// helper quits — no orphans. PDFs and SVGs never come here (native now).
+// A Node IPC channel owns its lifetime: parent death/disconnect quits the
+// helper on every OS (Windows Electron stdin is synthetic EOF). No orphans.
+// PDFs and SVGs never come here (native now).
 
 /** Handshake line parser (pure; exported for tests). */
 export function parseBrowserServiceLine(line: string): number | null {
@@ -180,7 +181,7 @@ async function connectBrowserService(): Promise<import("puppeteer-core").Browser
 			// Cast: the sanitizer is pure over a loose record; NODE_ENV is
 			// always present in a real process.env.
 			env: browserServiceSpawnEnv(process.env) as NodeJS.ProcessEnv,
-			stdio: ["pipe", "pipe", "pipe"] as const,
+			stdio: ["ignore", "pipe", "pipe", "ipc"] as const,
 		});
 		browserServiceProc = proc;
 		port = await new Promise<number | null>((resolve) => {
@@ -197,7 +198,7 @@ async function connectBrowserService(): Promise<import("puppeteer-core").Browser
 					resolve(parseBrowserServiceLine(line));
 				}
 			};
-			proc.stdout.on("data", onData);
+			proc.stdout!.on("data", onData);
 			proc.once("exit", () => {
 				clearTimeout(timer);
 				resolve(null);
@@ -215,7 +216,7 @@ async function connectBrowserService(): Promise<import("puppeteer-core").Browser
 		const info = (await version.json()) as { webSocketDebuggerUrl?: string };
 		if (!info.webSocketDebuggerUrl) return null;
 		// connect ≠ launch: browser.close() below merely disconnects — the
-		// helper stays resident for the next job (stdin-held lifetime).
+		// helper stays resident for the next job (IPC-owned lifetime).
 		return await puppeteer.connect({
 			browserWSEndpoint: info.webSocketDebuggerUrl,
 			defaultViewport: null,

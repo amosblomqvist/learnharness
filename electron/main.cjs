@@ -64,13 +64,24 @@ function serverEntry() {
 //   <this binary> --browser-service
 // and connects over CDP (system Chrome stays the fallback). Handshake:
 // the helper prints "BROWSER_SERVICE_CDP <port>" on stdout once the CDP
-// endpoint listens. Lifetime: stdin stays open; parent death = EOF = quit.
+// endpoint listens. Lifetime: parent IPC disconnect/death = quit.
 // MUST run before the single-instance lock — a helper is a second
 // instance of this very binary, and before the LH_DEV_URL redirect — the
 // helper owns no user data at all.
 if (process.argv.includes("--browser-service")) {
+	const { waitForBrowserService } = require("./browser-service-readiness.cjs");
+	// Own the helper's entire startup lifetime, including the readiness wait.
+	const lifetime = new AbortController();
+	const parentClosed = () => {
+		lifetime.abort(new Error("browser-service parent IPC disconnected"));
+		app.quit();
+	};
 	(async () => {
 		try {
+			// Full Windows Electron replaces stdin with synthetic EOF. Use the
+			// real Node IPC channel, and refuse to start an unowned helper.
+			if (!process.channel || !process.connected) throw new Error("browser-service requires connected parent IPC");
+			process.once("disconnect", parentClosed);
 			app.dock?.hide();
 			const port = await freePort();
 			// Must land before app-ready for Chromium to pick it up.
@@ -80,13 +91,13 @@ if (process.argv.includes("--browser-service")) {
 			// platform (no window-all-closed handler is installed here).
 			const win = new BrowserWindow({ show: false });
 			await win.loadURL("about:blank");
-			console.log(`BROWSER_SERVICE_CDP ${port}`);
-			// Parent-tied lifetime: the server holds our stdin open.
-			process.stdin.resume();
-			process.stdin.on("end", () => app.quit());
-			process.stdin.on("close", () => app.quit());
+			// Window load is not a DevTools HTTP readiness barrier. Confirm the
+			// endpoint before both production and smoke clients see the handshake.
+			await waitForBrowserService(port, { signal: lifetime.signal });
+			if (!lifetime.signal.aborted) console.log(`BROWSER_SERVICE_CDP ${port}`);
 		} catch (err) {
-			console.error(`browser-service failed: ${err?.stack ?? err}`);
+			if (lifetime.signal.aborted) return; // Parent disconnect is normal.
+			console.error("browser-service failed:", err);
 			app.exit(1);
 		}
 	})();

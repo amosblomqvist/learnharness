@@ -325,6 +325,11 @@ const DEBRIS_RE = /[\b\t\n\v\f\r]/;
  *  `\right`/`\rho`/`\rangle` corruption is common in display math). */
 const DISPLAY_DEBRIS_RE = /[\b\t\v\f\r]/;
 
+/** Shared display-only repair. Keep raw arguments and model history unchanged. */
+export function repairMathForDisplay(text: string): string {
+	return healOverescapedCommands(restoreMathEscapes(text));
+}
+
 export function restoreMathEscapes(text: string): string {
 	if (!DEBRIS_RE.test(text)) return text;
 	return restoreDollarMathEscapes(restoreLegacyMathEscapes(text));
