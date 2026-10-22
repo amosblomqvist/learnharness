@@ -8,6 +8,7 @@
  */
 
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
 import type { AssistantMessage, ToolResultMessage } from "@earendil-works/pi-ai";
 
@@ -17,7 +18,8 @@ import {
 	PRACTICE_PROBLEM_TOOL,
 	type LhMessage,
 } from "../src/core/native-messages.ts";
-import { concludeTool, createPracticeGate, problemTool, practiceTools } from "../src/agent/tools/practice.ts";
+import { CONCLUDE_ACK_TEXT } from "../src/core/contracts/chat.ts";
+import { concludeInputObject, concludeTool, createPracticeGate, problemTool, practiceTools } from "../src/agent/tools/practice.ts";
 import { composeInstructions, createPracticeAgent } from "../src/agent/teacher-agent.ts";
 import { allSegmentPaths } from "../src/agent/prompt-segments.ts";
 
@@ -232,6 +234,92 @@ describe("the practice agent", () => {
 		assert.equal(typeof agent.prompt, "function");
 		assert.equal(typeof agent.steer, "function");
 		assert.equal(typeof agent.waitForIdle, "function");
+	});
+});
+
+// ── persistent nudges (shipped defaults, no model calls) ──────────────────────
+
+describe("persistent practice nudges", () => {
+	const doctrine = readFileSync(new URL("../src/agent/prompts/practice/10-doctrine.md", import.meta.url), "utf8");
+	const normalizeWhitespace = (text: string) => text.replace(/\s+/g, " ").trim();
+	const approvedParagraphs = [
+		"- When a nudge does not land, reassess where the learner is stuck and offer only the next necessary piece of information. Do not jump to the full solution. Tentative answers, questions, and thinking aloud remain work in progress.",
+		"**On a wrong answer**, state the verdict plainly and localize the first break without giving the correction. Give the smallest nudge that lets the learner make the next move, then wait. If that nudge does not land, give another minimal nudge based on the new thinking. A failed attempt is never a reason to reveal the correction or conclude the problem. Continue until the learner finds and completes the correct solution.",
+		"Conclude when the learner has solved the problem correctly or explicitly asks to end it. Do not infer permission to end it from mistakes, elapsed time, the number of attempts, frustration, or an apparent inability to proceed.",
+	];
+
+	it("preserves the approved paragraphs in source and the effective default prompt", () => {
+		// Pin approved wording and Markdown, but allow incidental line wrapping.
+		for (const text of [doctrine, composeInstructions("practice")]) {
+			const paragraphs = text.split(/\n\s*\n|\n(?=- )/).map(normalizeWhitespace);
+			for (const approved of approvedParagraphs) {
+				assert.ok(paragraphs.includes(approved), `missing approved paragraph: ${approved}`);
+			}
+		}
+	});
+
+	it("does not compose the retired attempt cutoff, failed-repair reveal, or automatic-abort instructions", () => {
+		for (const text of [doctrine, composeInstructions("practice")]) {
+			const normalized = normalizeWhitespace(text);
+			assert.doesNotMatch(normalized, /\b(?:one|single|1) bounded attempt\b/i);
+			assert.doesNotMatch(normalized, /If the repair attempt fails, reveal and move on/i);
+			assert.doesNotMatch(normalized, /A correction found by the learner after a confident error consolidates more/i);
+			assert.doesNotMatch(normalized, /when the trace shows genuine inability, drop straight to R5 and reveal/i);
+			assert.doesNotMatch(normalized, /when the learner surrenders or cannot proceed/i);
+			assert.doesNotMatch(normalized, /when the marginal yield of staying is exhausted/i);
+			assert.doesNotMatch(normalized, /do not withhold them past the point of exhaustion/i);
+		}
+	});
+
+	it("preserves the approved concluded-problem switch and unbounded structural repair in source and the effective default prompt", () => {
+		const approvedDifficulty = "3. **Difficulty** — from the last outcomes on this target: clean success, one notch up; success that needed hints, hold; a miss, one notch down and consider dropping a mode. Two missed concluded problems in a row on this target: switch targets for the next demand. Never switch away from an active problem because of the number of attempts.";
+		const approvedClassification = "Classify every miss: cue miss (nothing came), discrimination error (wrong candidate won), execution slip (right proposition, wrong run), careless, or structural (the retrieved proposition is itself wrong — a misconception). The first four are practice information. Structural misses call for minimal nudges toward repairing the misconception, not an immediate correction or re-teaching. Keep each nudge surgical; do not impose a one-line or one-attempt limit on the repair as a whole.";
+		for (const text of [doctrine, composeInstructions("practice")]) {
+			const normalized = normalizeWhitespace(text);
+			assert.ok(normalized.includes(approvedDifficulty), "preserve the difficulty readout and exact approved switching rule");
+			assert.ok(normalized.includes(approvedClassification), "preserve the miss taxonomy and exact approved structural-repair rule");
+			assert.doesNotMatch(normalized, /two misses in a row, switch targets/i);
+			assert.doesNotMatch(normalized, /Structural gets one surgical line/i);
+			assert.doesNotMatch(normalized, /the correction, stated once/i);
+			assert.doesNotMatch(normalized, /if a repair needs more than a line/i);
+		}
+	});
+
+	it("preserves the approved misconception introduction without an affirmative one-line repair cap", () => {
+		const approvedIntroduction = "- **Not a teaching session.** You will find misconceptions. Address them with minimal, surgical nudges, over as many exchanges as needed. A practice session that drifts into re-teaching has stopped practicing.";
+		for (const text of [doctrine, composeInstructions("practice")]) {
+			const normalized = normalizeWhitespace(text);
+			assert.ok(normalized.includes(approvedIntroduction), "preserve the exact approved introduction and the rest of the not-teaching bullet");
+			assert.doesNotMatch(normalized, /Repair them in a line, surgically, and return to practice\./i);
+		}
+	});
+
+	it("keeps the many-claims default, hint ladder, dismissal, and explicit-go-ahead pause", () => {
+		const prompt = normalizeWhitespace(composeInstructions("practice"));
+		assert.match(prompt, /A problem may take many claims; staying is the default/);
+		for (const rung of ["R0", "R1", "R2", "R3", "R4", "R5"]) {
+			assert.ok(prompt.includes(`**${rung} —`));
+		}
+		assert.match(prompt, /Concluding ends your turn; the next problem is posed only when the learner explicitly moves on/);
+		assert.match(prompt, /After the conclude's result.*END YOUR TURN: no further tool calls in that reply, never another problem/);
+		assert.match(prompt, /A clarification question is never the go-ahead; when in doubt, answer and wait/);
+		assert.match(prompt, /The learner may discard a problem without concluding it/);
+	});
+
+	it("aligns the conclude description with the canonical ack without changing outcomes or the runtime pause mechanism", async () => {
+		const tool = concludeTool(createPracticeGate(ctxOf(activeProblemRecord())));
+		const description = normalizeWhitespace(tool.description);
+		assert.match(description, /records the outcome \+ verdict, reveals the committed solution, and frees the learner's composer/);
+		assert.match(description, /After the result, say your closing words about the learner's work if useful, then END YOUR TURN — no further tool calls/);
+		assert.ok(description.includes(CONCLUDE_ACK_TEXT.slice(CONCLUDE_ACK_TEXT.indexOf("The next problem"))));
+		assert.match(description, /Nothing may conclude unless a problem is active/);
+		assert.doesNotMatch(description, /turn CONTINUES|reveal, then pose the next problem/);
+		assert.deepEqual(concludeInputObject.properties.outcome.anyOf.map((outcome) => outcome.const), [
+			"solved", "solvedWithHints", "movedOn", "surrendered", "dismissed",
+		]);
+		const result = await tool.execute("call_persistent_nudges", CONCLUDE_INPUT as never);
+		assert.equal((result.content[0] as { text: string }).text, CONCLUDE_ACK_TEXT);
+		assert.equal(result.terminate, undefined, "closing prose stays possible; the pause remains an instruction, not a new runtime gate");
 	});
 });
 

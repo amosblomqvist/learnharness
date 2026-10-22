@@ -30,7 +30,7 @@
 import { Value } from "typebox/value";
 import type { TSchema } from "typebox";
 import { quizDisplayInputSchema, askInputSchema, askOptionProblems, quizInputProblems, explainInputProblems, explainDisplayInputSchema, type AskToolInput, type QuizToolInput, type ExplainToolInput } from "./question-core.ts";
-import { restoreMathEscapes, healOverescapedCommands } from "./math-delims.ts";
+import { repairMathForDisplay } from "./math-delims.ts";
 import { healEncodedArguments } from "./argument-heal.ts";
 import { probeDoneInputSchema, type ProbeDoneInput } from "./contracts/probe.ts";
 
@@ -79,7 +79,7 @@ function boundaryParse<T>(schema: TSchema, input: unknown): T | undefined {
  *  plus "nabla" as letters), so even runs before a command start inside
  *  balanced math spans collapse to one backslash. */
 function restoreMathEscapesDeep(value: unknown): unknown {
-	if (typeof value === "string") return healOverescapedCommands(restoreMathEscapes(value));
+	if (typeof value === "string") return repairMathForDisplay(value);
 	if (Array.isArray(value)) return value.map(restoreMathEscapesDeep);
 	if (typeof value === "object" && value !== null) {
 		const out: Record<string, unknown> = {};

@@ -172,6 +172,20 @@ jobs:
       - name: Windows/Linux rehearsal (no publish)
         if: github.event_name == 'workflow_dispatch' && runner.os != 'macOS'
         run: npx electron-builder --config electron-builder.acceptance.yml ${{ matrix.builder_args }} --publish never
+      - name: Exercise packaged demo runtime (own Electron, no system Chrome)
+        run: |
+          case "$RUNNER_OS" in
+            macOS)
+              app="dist/mac-arm64/LearnHarness.app/Contents"
+              node scripts/smoke-demo-runtime.mjs --standalone "$app/Resources/server/standalone" --runtime "$app/MacOS/LearnHarness" --browser
+              ;;
+            Windows)
+              node scripts/smoke-demo-runtime.mjs --standalone dist/win-unpacked/resources/server/standalone --runtime dist/win-unpacked/LearnHarness.exe --browser
+              ;;
+            Linux)
+              xvfb-run -a node scripts/smoke-demo-runtime.mjs --standalone dist/linux-unpacked/resources/server/standalone --runtime dist/linux-unpacked/learnharness --browser
+              ;;
+          esac
       - name: Save installers and update metadata
         uses: actions/upload-artifact@v7
         with:
