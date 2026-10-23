@@ -42,6 +42,7 @@ import { ModelMenuList } from "@/components/settings/model-menu";
 import { MenuShell } from "@/components/menu-shell";
 import { notifySettingsSaved, useSettingsSaved } from "@/components/settings-signal";
 import { Hint } from "@/components/ui/hint";
+import { useSettingsDialog } from "@/components/settings/settings-dialog";
 import { type ProviderKeyInfo } from "@/components/settings/keys-section";
 import { ProviderMenuList } from "@/components/settings/model-menu";
 import { defaultOrderLevel, populateLevel, THINKING_LABEL } from "@/components/thinking-default";
@@ -127,6 +128,7 @@ export function SetupKeysBody({
 	onValue,
 	onSave,
 	menuAnchor,
+	onOpenConnections,
 }: {
 	/** The full provider roster (GET /api/keys providers) — undefined
 	 *  while it loads; the picker renders an honest empty state then. */
@@ -144,6 +146,8 @@ export function SetupKeysBody({
 	onSave: () => void;
 	/** The MenuShell anchor — wired by the wrapper (its triggerRef). */
 	menuAnchor: React.RefObject<HTMLDivElement | null>;
+	/** Opens Settings on Connections (subscriptions, custom providers). */
+	onOpenConnections?: () => void;
 }) {
 	return (
 		<div className="flex flex-col gap-3 px-6 py-5" data-testid="setup-stage-keys">
@@ -205,6 +209,20 @@ export function SetupKeysBody({
 						</button>
 					</div>
 				)}
+				{onOpenConnections && (
+					<p className="text-xs text-muted-foreground">
+						Or use a subscription or custom provider in{" "}
+						<button
+							type="button"
+							onClick={onOpenConnections}
+							data-testid="setup-open-connections"
+							className="text-foreground underline underline-offset-2"
+						>
+							Connections
+						</button>
+						.
+					</p>
+				)}
 				{error && (
 					<p role="alert" data-testid="setup-key-error" className="text-xs text-red-400">
 						{error}
@@ -227,6 +245,7 @@ export function SetupDialog({
 	onDone: (models: ModelsSettings) => void;
 }) {
 	const backdropDismiss = useBackdropDismiss(onClose);
+	const { open: openSettings } = useSettingsDialog();
 	const [body, setBody] = useState<ModelsBody | null>(null);
 	const [failed, setFailed] = useState(false);
 	const [picked, setPicked] = useState<Partial<Record<ModelSlotName, ModelCatalogEntry>>>({});
@@ -444,6 +463,10 @@ export function SetupDialog({
 								}}
 								onValue={setKeyValue}
 								onSave={() => void saveKey()}
+								onOpenConnections={() => {
+									onClose();
+									openSettings("connections");
+								}}
 							/>
 						)}
 					</div>

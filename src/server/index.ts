@@ -43,3 +43,8 @@ export * from "./compaction.ts";
 export { runPiTurn, piTurnResponse, type PiTurnHandle, type PiTurnSpec } from "./pi/ui-stream.ts";
 export * from "./observability.ts";
 export * from "./model-catalog.ts";
+
+// App-owned subscription and custom-provider connections.
+export * from "./connection-guard.ts";
+export * from "./subscriptions.ts";
+export * from "./custom-providers.ts";

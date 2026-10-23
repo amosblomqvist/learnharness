@@ -24,7 +24,9 @@ import type { ModelCatalogEntry } from "@/src/core";
 import { fuzzyScore } from "@/src/core";
 import { formatTokens } from "@/components/usage-format";
 
-function priceLabel(cost: ModelCatalogEntry["cost"]): string {
+export function priceLabel(cost: ModelCatalogEntry["cost"], pricing?: ModelCatalogEntry["pricing"]): string {
+	if (pricing === "subscription") return "Subscription";
+	if (!cost) return "Unpriced";
 	const fmt = (n: number) => `$${n < 1 ? n.toFixed(2).replace(/0$/, "") : n.toFixed(2)}`;
 	return `${fmt(cost.input)}/${fmt(cost.output)}`;
 }
@@ -126,7 +128,7 @@ export function ModelMenuList({
 							<span className="flex items-center justify-between gap-2">
 								<span className="truncate text-card-foreground">{m.name}</span>
 								<span className="shrink-0 tabular-nums text-muted-foreground" title="USD per 1M tokens in/out">
-									{priceLabel(m.cost)}
+									{priceLabel(m.cost, m.pricing)}
 								</span>
 							</span>
 							<span className="flex items-center justify-between gap-2 text-muted-foreground">

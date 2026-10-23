@@ -7,6 +7,7 @@ import {
 	type Models,
 	type StreamFunction,
 } from "@earendil-works/pi-ai";
+import { subscriptionAliases, customProvider, type ModelConnections } from "./connected-providers.ts";
 import { builtinProviders } from "@earendil-works/pi-ai/providers/all";
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import { type ModelRole } from "../../config.ts";
@@ -44,6 +45,18 @@ export interface PiEngine {
 export type { ThinkingLevel };
 
 let collection: ReturnType<typeof createModels> | undefined;
+let connections: ModelConnections | undefined;
+let customSignature = "";
+let customIds: string[] = [];
+
+/** Server composition only: the agent layer never imports filesystem adapters. */
+export function configureModelConnections(configuration: ModelConnections): void {
+	if (connections === configuration) return;
+	connections = configuration;
+	collection = undefined;
+	customSignature = "";
+	customIds = [];
+}
 
 /** The process-wide pi-ai Models collection — EVERY builtin provider's
  *  catalog (model slots wave, 2026-09-20): engines and the picker resolve
@@ -55,8 +68,18 @@ let collection: ReturnType<typeof createModels> | undefined;
  *  keyPresent. */
 export function piModels() {
 	if (!collection) {
-		collection = createModels({ identity: APP_IDENTITY });
-		for (const provider of builtinProviders()) collection.setProvider(provider);
+		collection = createModels({ identity: APP_IDENTITY, credentials: connections?.credentials });
+		const builtins = builtinProviders();
+		for (const provider of builtins) collection.setProvider(provider);
+		for (const provider of subscriptionAliases(builtins)) collection.setProvider(provider);
+	}
+	const definitions = connections?.customProviders() ?? [];
+	const signature = JSON.stringify(definitions);
+	if (signature !== customSignature) {
+		for (const id of customIds) collection.deleteProvider(id);
+		for (const definition of definitions) collection.setProvider(customProvider(definition));
+		customIds = definitions.map((p) => p.id);
+		customSignature = signature;
 	}
 	return collection;
 }
@@ -111,11 +134,16 @@ export function piEngineForSpec(spec: ResolvedModelSpec): PiEngine {
 		// bound streamSimple: the agent loop forwards state.thinkingLevel as
 		// `reasoning` (undefined = off on pi-ai's scale); the clamp above keeps
 		// the pin honest even when config or settings drift off the map.
-		streamFn: (requestModel, context, options) =>
-			models.streamSimple(requestModel, context, {
-				...options,
+		streamFn: (requestModel, context, options) => {
+			const connected = spec.provider.startsWith("subscription-") || spec.provider.startsWith("custom-");
+			const cleanOptions = connected ? { ...options, apiKey: undefined, env: undefined, headers: undefined } : options;
+			return models.streamSimple(requestModel, context, {
+				...cleanOptions,
+				// A failed subscription request must not be retried as a different billing source.
+				...(connected ? { maxRetries: 0 } : {}),
 				reasoning: level === "off" ? undefined : level,
-			}),
+			});
+		},
 	};
 }
 

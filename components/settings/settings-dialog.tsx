@@ -46,6 +46,7 @@ import type { ModelsSettings } from "@/src/core";
 import { MENU_CLOSE_EVENT, MENU_OPEN_EVENT } from "@/components/menu-shell";
 import { notifySettingsSaved } from "@/components/settings-signal";
 import { KeysSection } from "./keys-section.tsx";
+import { ConnectionsSection } from "./connections-section.tsx";
 import { Hint } from "@/components/ui/hint";
 import { AppearanceSection, GraphSection } from "./appearance-section.tsx";
 import { KeyboardSection } from "./keyboard-section.tsx";
@@ -56,6 +57,7 @@ import { KeyboardSection } from "./keyboard-section.tsx";
 const SECTIONS = [
 	{ id: "general", label: "General" },
 	{ id: "keys", label: "Keys" },
+	{ id: "connections", label: "Connections" },
 	{ id: "agent", label: "Agent" },
 	{ id: "appearance", label: "Appearance" },
 	{ id: "graph", label: "Graph" },
@@ -373,6 +375,11 @@ export function SettingsDialogBody({
 											}
 										/>
 									</SettingsRow>
+								</SettingsSection>
+							)}
+							{active === "connections" && (
+								<SettingsSection title="Connections" testid="section-connections">
+									<ConnectionsSection />
 								</SettingsSection>
 							)}
 							{active === "keys" && (

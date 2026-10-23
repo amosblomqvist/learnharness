@@ -1,3 +1,6 @@
+import { connectionAvailable } from "./provider-runtime.ts";
+import { subscriptionProvider } from "../core/provider-connections.ts";
+import { providerKeyMissing, type ModelSlotName } from "../core/settings.ts";
 /**
  * The auth/keys composition (auth-keys wave, 2026-09-19): the server-side
  * key manager behind GET/PUT/DELETE /api/keys.
@@ -200,6 +203,8 @@ export function keyValue(id: string): string | undefined {
  * (gate by what would run). Providers absent from AUTH_PROVIDER_KEYS take
  * no key at all: nothing to gate, present by definition. */
 export function providerKeyPresent(provider: string): boolean {
+	const connected = connectionAvailable(provider);
+	if (connected !== undefined) return connected;
 	const info = AUTH_PROVIDER_KEYS.find((p) => p.id === provider);
 	return info ? keyValue(info.envVar) !== undefined : true;
 }
@@ -242,3 +247,13 @@ export function deleteKey(id: string): AuthKeyStatus {
 // Reflect the file into the env at first import (idempotent; the module is
 // imported by every route/handler path that touches keys).
 initAuthEnv();
+
+/** Preserve the refusal contract while directing non-key sources to Connections. */
+export function providerAccessMissing(provider: string, slots: ModelSlotName[]) {
+	const subscription = subscriptionProvider(provider);
+	if (subscription || provider.startsWith("custom-")) {
+		return { ...providerKeyMissing(provider, slots), error: subscription ?
+			`Connect your ${subscription.name} in Settings → Connections` : "Configure this custom provider in Settings → Connections" };
+	}
+	return providerKeyMissing(provider, slots);
+}

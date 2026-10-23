@@ -21,7 +21,9 @@ export interface ModelCatalogEntry {
 	 * thinkingLevelMap — e.g. GLM-5.3-flash: low|high|max). The thinking
 	 * picker lists exactly these; anything else is a lie. */
 	supportedLevels: ThinkingLevel[];
-	cost: { input: number; output: number; cacheRead: number; cacheWrite: number };
+	/** null means unpriced or subscription access, never a zero-dollar bill. */
+	cost: { input: number; output: number; cacheRead: number; cacheWrite: number } | null;
+	pricing?: "subscription" | "unknown";
 	contextWindow: number;
 	maxTokens: number;
 }
@@ -77,6 +79,8 @@ export interface ModelCatalogResponse {
 
 /** One row of the providers surface. */
 export interface CatalogProvider {
+	name?: string;
+	source?: "subscription" | "custom";
 	id: string;
 	/** The env var whose presence federates this provider in. */
 	envVar: string;

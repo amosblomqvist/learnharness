@@ -8,8 +8,8 @@
  * keys unlock). Click opens the SetupDialog, whose stage derives to
  * the first-key screen on its own.
  *
- * Truth: GET /api/keys — a PROVIDER key present (env or file; tool keys
- * like Deepgram do not count — they unlock no models). Live updates ride
+ * Truth: GET /api/models availability (provider key, connected
+ * subscription, or keyless custom provider; tool keys do not count). Live updates ride
  * the lh:settings-saved "keys" signal (keys-section dispatches after
  * save AND delete; the setup dialog's first-key screen dispatches on
  * its own save), the same re-read pattern chat.tsx uses for "models".
@@ -34,6 +34,12 @@ export function hasProviderKey(
 	return classifyKeys(statuses, providers).providerRows.some((s) => s.present);
 }
 
+/** Pure: is any provider available (key present, subscription connected,
+ *  or keyless custom)? The catalog reports all of those as keyPresent. */
+export function hasAvailableProvider(providers: readonly { keyPresent: boolean }[]): boolean {
+	return providers.some((p) => p.keyPresent);
+}
+
 /** The zero-keys truth for the calling page: TRUE only after a
  *  successful read says no provider key exists (pending and failed
  *  reads render nothing — the pill must never flash on a gap, and a
@@ -42,10 +48,13 @@ export function hasProviderKey(
 export function useZeroKeys(): boolean {
 	const [zeroKeys, setZeroKeys] = useState(false);
 	const read = useCallback(() => {
-		fetch("/api/keys")
-			.then((r) => r.json())
-			.then((body: { keys?: AuthKeyStatus[]; providers?: ProviderKeyInfo[] }) => {
-				setZeroKeys(!hasProviderKey(body.keys ?? [], body.providers));
+		// /api/models availability covers keys, connected subscriptions and
+		// custom providers (keyless included). A failed read changes nothing.
+		fetch("/api/models")
+			.then((r) => (r.ok ? r.json() : Promise.reject(new Error("read"))))
+			.then((body: { providers?: { keyPresent: boolean }[] }) => {
+				if (!Array.isArray(body.providers)) return;
+				setZeroKeys(!hasAvailableProvider(body.providers));
 			})
 			.catch(() => {});
 	}, []);
@@ -53,7 +62,7 @@ export function useZeroKeys(): boolean {
 		read();
 	}, [read]);
 	useSettingsSaved((section) => {
-		if (section === "keys") read();
+		if (section === "keys" || section === "models") read();
 	});
 	return zeroKeys;
 }
