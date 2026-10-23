@@ -196,7 +196,9 @@ function startServer(port) {
 	return new Promise((resolve, reject) => {
 		const child = spawn(
 			process.execPath,
-			[serverEntry()],
+			// The title guard keeps Next's process.title write from checking
+			// the child in as a Dock app on macOS (server-title-guard.cjs).
+			["--require", path.join(__dirname, "server-title-guard.cjs"), serverEntry()],
 			{
 				cwd: path.dirname(serverEntry()),
 				env: {
