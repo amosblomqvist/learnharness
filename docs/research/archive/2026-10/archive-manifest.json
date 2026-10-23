@@ -1,0 +1,2044 @@
+{
+  "archive_date": "2026-10-23",
+  "timezone": "Asia/Shanghai",
+  "tracking_issue": "https://github.com/gzy31007/learnharness/issues/26",
+  "archive_base_commit": "9f6a61757eae4772d42094aa40740be367668c52",
+  "normalization": "Keep the original title and body, insert a clearly marked archive note after the title, and mechanically replace absolute local Markdown destinations with local-evidence.md anchors. Do not update historical technical conclusions or source line fragments.",
+  "evidence_limit": "Local evidence hashes are observations made during archival, not research-time hashes or proof of reproduction. Raw evidence, installed dependencies, and credentials are not published. Public counterpart links intentionally omit stale line anchors and are not assertions of historical identity.",
+  "reports": [
+    {
+      "original_path": "docs/research/dompurify-advisories.md",
+      "archive_path": "docs/research/archive/2026-10/dompurify-advisories.md",
+      "original_sha256": "457978e37c6b9c30f95368979ba79227e40450cab687a40b43eabe6768b17d29",
+      "archive_sha256": "75ce0e5107c4ddd39c400d4ef3a4c011ed12307a53f6c8b381f24ad60477ad37",
+      "research_cutoff": "2026-10-20",
+      "historical_input": "6c2b0b57f7d3177a777acab081411db539362416; observed HEAD ef38592db11d68bae3b22c175aaefc57966b039e",
+      "owning_record": "https://github.com/gzy31007/learnharness/issues/12",
+      "archive_note": "\n<!-- archive-note:start -->\n> Archived on 2026-10-23 under [workspace task 26](https://github.com/gzy31007/learnharness/issues/26). The original report follows unchanged except for mechanical local-link routing.\n>\n> Research cutoff: 2026-10-20, Asia/Shanghai. Historical input: 6c2b0b57f7d3177a777acab081411db539362416; observed HEAD ef38592db11d68bae3b22c175aaefc57966b039e.\n>\n> Later status, checked against the archive baseline: Research completed, remediation not implemented. The later owner decision selected 3.4.16; the report's unselected-version statements are historical. The archive baseline still locks 3.4.14. Issue closure is not repair or risk acceptance. [Owning record](https://github.com/gzy31007/learnharness/issues/12).\n>\n> Read the [archive guide](README.md) and [local evidence register](local-evidence.md) before reusing any present-tense statement, line number, or acceptance result. Archive publication is not a new test run, distribution approval, or general risk acceptance.\n<!-- archive-note:end -->\n",
+      "link_rewrites": [
+        {
+          "original_target": "/root/learnharness/package-lock.json#L8582-L8589",
+          "archive_target": "local-evidence.md#local-101"
+        },
+        {
+          "original_target": "/root/learnharness/node_modules/dompurify/package.json#L155-L157",
+          "archive_target": "local-evidence.md#local-065"
+        },
+        {
+          "original_target": "/root/learnharness/node_modules/mermaid/package.json#L51-L74",
+          "archive_target": "local-evidence.md#local-074"
+        },
+        {
+          "original_target": "/root/learnharness/docs/subscription-implementation-plan.md",
+          "archive_target": "local-evidence.md#local-043"
+        },
+        {
+          "original_target": "/root/learnharness/docs/subscription-implementation.md",
+          "archive_target": "local-evidence.md#local-044"
+        },
+        {
+          "original_target": "/root/learnharness/docs/subscription-windows-acceptance.md",
+          "archive_target": "local-evidence.md#local-045"
+        },
+        {
+          "original_target": "/root/learnharness/.scratch/issue12-research/audit.json#L78-L124",
+          "archive_target": "local-evidence.md#local-002"
+        },
+        {
+          "original_target": "/root/learnharness/package.json#L26-L71",
+          "archive_target": "local-evidence.md#local-102"
+        },
+        {
+          "original_target": "/root/learnharness/node_modules/@streamdown/mermaid/package.json#L1-L22",
+          "archive_target": "local-evidence.md#local-064"
+        },
+        {
+          "original_target": "/root/learnharness/node_modules/streamdown/package.json#L53-L69",
+          "archive_target": "local-evidence.md#local-089"
+        },
+        {
+          "original_target": "/root/learnharness/package-lock.json#L12662-L12690",
+          "archive_target": "local-evidence.md#local-093"
+        },
+        {
+          "original_target": "/root/learnharness/package-lock.json#L8582-L8589",
+          "archive_target": "local-evidence.md#local-101"
+        },
+        {
+          "original_target": "/root/learnharness/components/mermaid-render.ts#L12-L40",
+          "archive_target": "local-evidence.md#local-039"
+        },
+        {
+          "original_target": "/root/learnharness/node_modules/@streamdown/mermaid/dist/index.js#L1",
+          "archive_target": "local-evidence.md#local-063"
+        },
+        {
+          "original_target": "/root/learnharness/node_modules/mermaid/package.json#L6-L14",
+          "archive_target": "local-evidence.md#local-075"
+        },
+        {
+          "original_target": "/root/learnharness/node_modules/mermaid/dist/chunks/mermaid.core/chunk-DU6HZSFF.mjs#L5054-L5127",
+          "archive_target": "local-evidence.md#local-066"
+        },
+        {
+          "original_target": "/root/learnharness/node_modules/mermaid/dist/mermaid.core.mjs#L1351-L1364",
+          "archive_target": "local-evidence.md#local-073"
+        },
+        {
+          "original_target": "/root/learnharness/node_modules/mermaid/dist/chunks/mermaid.core/chunk-LCL6LL3I.mjs#L1210-L1224",
+          "archive_target": "local-evidence.md#local-068"
+        },
+        {
+          "original_target": "/root/learnharness/node_modules/mermaid/dist/chunks/mermaid.core/chunk-G27WJ6UU.mjs#L1770-L1783",
+          "archive_target": "local-evidence.md#local-067"
+        },
+        {
+          "original_target": "/root/learnharness/node_modules/mermaid/dist/chunks/mermaid.core/chunk-RHFEMEQ7.mjs#L549-L562",
+          "archive_target": "local-evidence.md#local-069"
+        },
+        {
+          "original_target": "/root/learnharness/components/md-blocks.tsx#L164-L199",
+          "archive_target": "local-evidence.md#local-038"
+        },
+        {
+          "original_target": "/root/learnharness/components/session-overlay.tsx#L90-L110",
+          "archive_target": "local-evidence.md#local-042"
+        },
+        {
+          "original_target": "/root/learnharness/components/session-overlay.tsx#L279-L286",
+          "archive_target": "local-evidence.md#local-041"
+        },
+        {
+          "original_target": "/root/learnharness/components/ai-elements/message.tsx#L345-L381",
+          "archive_target": "local-evidence.md#local-032"
+        },
+        {
+          "original_target": "/root/learnharness/node_modules/streamdown/dist/chunk-BO2N2NFS.js#L23",
+          "archive_target": "local-evidence.md#local-088"
+        },
+        {
+          "original_target": "/root/learnharness/node_modules/mermaid/dist/chunks/mermaid.esm/chunk-AHS5MEEA.mjs#L5780",
+          "archive_target": "local-evidence.md#local-071"
+        },
+        {
+          "original_target": "/root/learnharness/node_modules/mermaid/dist/chunks/mermaid.esm/chunk-AHS5MEEA.mjs#L6119-L6123",
+          "archive_target": "local-evidence.md#local-072"
+        },
+        {
+          "original_target": "/root/learnharness/node_modules/mermaid/dist/chunks/mermaid.esm.min/chunk-QJSWEUOL.mjs#L131",
+          "archive_target": "local-evidence.md#local-070"
+        },
+        {
+          "original_target": "/root/learnharness/package-lock.json#L5768-L5773",
+          "archive_target": "local-evidence.md#local-098"
+        },
+        {
+          "original_target": "/root/learnharness/.scratch/issue12-research/registry-summary.json#L53-L147",
+          "archive_target": "local-evidence.md#local-003"
+        },
+        {
+          "original_target": "/root/learnharness/components/mermaid-render.ts#L26-L41",
+          "archive_target": "local-evidence.md#local-040"
+        },
+        {
+          "original_target": "/root/learnharness/components/md-blocks.tsx#L164-L199",
+          "archive_target": "local-evidence.md#local-038"
+        },
+        {
+          "original_target": "/root/learnharness/components/session-overlay.tsx#L90-L110",
+          "archive_target": "local-evidence.md#local-042"
+        }
+      ]
+    },
+    {
+      "original_path": "docs/research/undici-advisories.md",
+      "archive_path": "docs/research/archive/2026-10/undici-advisories.md",
+      "original_sha256": "86f497db97a639a8a49fb7ab6fa420500d458f980cfee6b1b68db17b31022d05",
+      "archive_sha256": "7e25ce24e3667d59c09858050f7c066992a0ef5d3d7d8f682fd8e83a4fde1de2",
+      "research_cutoff": "2026-10-20",
+      "historical_input": "ef38592db11d68bae3b22c175aaefc57966b039e plus the report's separately recorded working-tree patch and isolated snapshot",
+      "owning_record": "https://github.com/gzy31007/learnharness/issues/13",
+      "archive_note": "\n<!-- archive-note:start -->\n> Archived on 2026-10-23 under [workspace task 26](https://github.com/gzy31007/learnharness/issues/26). The original report follows unchanged except for mechanical local-link routing.\n>\n> Research cutoff: 2026-10-20, Asia/Shanghai. Historical input: ef38592db11d68bae3b22c175aaefc57966b039e plus the report's separately recorded working-tree patch and isolated snapshot.\n>\n> Later status, checked against the archive baseline: The report already includes implementation and isolated acceptance. The archive baseline locks npm undici 7.30.1. This does not update Node/Electron embedded networking code or prove that the live installation and shipped artifacts match. [Owning record](https://github.com/gzy31007/learnharness/issues/13).\n>\n> Read the [archive guide](README.md) and [local evidence register](local-evidence.md) before reusing any present-tense statement, line number, or acceptance result. Archive publication is not a new test run, distribution approval, or general risk acceptance.\n<!-- archive-note:end -->\n",
+      "link_rewrites": [
+        {
+          "original_target": "/root/learnharness/.scratch/issue8-windows-acceptance-20261020/dependency-audit/security-advisory-triage.md#L116-L123",
+          "archive_target": "local-evidence.md#local-027"
+        },
+        {
+          "original_target": "/root/learnharness/.scratch/issue13-undici-20261020/evidence/audit-before.json#L358-L535",
+          "archive_target": "local-evidence.md#local-007"
+        },
+        {
+          "original_target": "/root/learnharness/node_modules/undici/package.json#L1-L4",
+          "archive_target": "local-evidence.md#local-090"
+        },
+        {
+          "original_target": "/root/learnharness/package-lock.json#L16649-L16657",
+          "archive_target": "local-evidence.md#local-097"
+        },
+        {
+          "original_target": "/root/learnharness/package-lock.json#L14029-L14056",
+          "archive_target": "local-evidence.md#local-096"
+        },
+        {
+          "original_target": "/root/learnharness/node_modules/openai/package.json#L288-L305",
+          "archive_target": "local-evidence.md#local-087"
+        },
+        {
+          "original_target": "/root/learnharness/package-lock.json#L669-L687",
+          "archive_target": "local-evidence.md#local-100"
+        },
+        {
+          "original_target": "/root/learnharness/package-lock.json#L13766-L13788",
+          "archive_target": "local-evidence.md#local-094"
+        },
+        {
+          "original_target": "/root/learnharness/package-lock.json#L13811-L13819",
+          "archive_target": "local-evidence.md#local-095"
+        },
+        {
+          "original_target": "/root/learnharness/node_modules/openai/client.js#L241-L243",
+          "archive_target": "local-evidence.md#local-082"
+        },
+        {
+          "original_target": "/root/learnharness/node_modules/openai/internal/shims.js#L14-L18",
+          "archive_target": "local-evidence.md#local-086"
+        },
+        {
+          "original_target": "/root/learnharness/node_modules/openai/internal/auth/x509-transport-capability.js#L7-L11",
+          "archive_target": "local-evidence.md#local-084"
+        },
+        {
+          "original_target": "/root/learnharness/node_modules/openai/internal/auth/x509-transport-capability.js#L57-L77",
+          "archive_target": "local-evidence.md#local-083"
+        },
+        {
+          "original_target": "/root/learnharness/node_modules/openai/internal/auth/x509-transport-capability.js#L79-L106",
+          "archive_target": "local-evidence.md#local-085"
+        },
+        {
+          "original_target": "/root/learnharness/node_modules/@earendil-works/pi-ai/dist/api/openai-codex-responses.js#L725-L752",
+          "archive_target": "local-evidence.md#local-062"
+        },
+        {
+          "original_target": "/root/learnharness/package-lock.json#L16649-L16657",
+          "archive_target": "local-evidence.md#local-097"
+        },
+        {
+          "original_target": "/root/learnharness/tests/undici-sdk.test.ts",
+          "archive_target": "local-evidence.md#local-120"
+        },
+        {
+          "original_target": "/root/learnharness/.scratch/issue13-undici-20261020/evidence/installed-graph.json",
+          "archive_target": "local-evidence.md#local-010"
+        },
+        {
+          "original_target": "/root/learnharness/.scratch/issue13-undici-20261020/evidence/verified-inputs.json",
+          "archive_target": "local-evidence.md#local-023"
+        },
+        {
+          "original_target": "/root/learnharness/.scratch/issue13-undici-20261020/evidence/snapshot-verification.json",
+          "archive_target": "local-evidence.md#local-013"
+        },
+        {
+          "original_target": "/root/learnharness/.scratch/issue13-undici-20261020/evidence/npm-ci.log",
+          "archive_target": "local-evidence.md#local-012"
+        },
+        {
+          "original_target": "/root/learnharness/.scratch/issue13-undici-20261020/evidence/npm-ci-retry.log",
+          "archive_target": "local-evidence.md#local-011"
+        },
+        {
+          "original_target": "/root/learnharness/.scratch/issue13-undici-20261020/evidence/validation-results.json",
+          "archive_target": "local-evidence.md#local-022"
+        },
+        {
+          "original_target": "/root/learnharness/.scratch/issue8-windows-acceptance-20261020/validation-network-guard.mjs",
+          "archive_target": "local-evidence.md#local-029"
+        },
+        {
+          "original_target": "/root/learnharness/.scratch/issue13-undici-20261020/evidence/build.log",
+          "archive_target": "local-evidence.md#local-009"
+        },
+        {
+          "original_target": "/root/learnharness/.scratch/issue13-undici-20261020/evidence/tests.log#L1648-L1654",
+          "archive_target": "local-evidence.md#local-014"
+        },
+        {
+          "original_target": "/root/learnharness/.scratch/issue13-undici-20261020/independent-verifier/report.md",
+          "archive_target": "local-evidence.md#local-024"
+        },
+        {
+          "original_target": "/root/learnharness/.scratch/issue13-undici-20261020/evidence/audit-comparison-current.json",
+          "archive_target": "local-evidence.md#local-008"
+        },
+        {
+          "original_target": "/root/learnharness/.scratch/issue13-undici-20261020/evidence/audit-before.json",
+          "archive_target": "local-evidence.md#local-006"
+        },
+        {
+          "original_target": "/root/learnharness/.scratch/issue13-undici-20261020/evidence/audit-baseline-current.json",
+          "archive_target": "local-evidence.md#local-005"
+        },
+        {
+          "original_target": "/root/learnharness/.scratch/issue13-undici-20261020/evidence/audit-after.json",
+          "archive_target": "local-evidence.md#local-004"
+        },
+        {
+          "original_target": "/root/learnharness/.scratch/issue13-undici-20261020/evidence/undici-research-repository-advisories.json",
+          "archive_target": "local-evidence.md#local-020"
+        },
+        {
+          "original_target": "/root/learnharness/.scratch/issue13-undici-20261020/evidence/undici-research-reviewed-advisories.json",
+          "archive_target": "local-evidence.md#local-021"
+        },
+        {
+          "original_target": "/root/learnharness/.scratch/issue13-undici-20261020/evidence/undici-research-release-7.29.1.json",
+          "archive_target": "local-evidence.md#local-018"
+        },
+        {
+          "original_target": "/root/learnharness/.scratch/issue13-undici-20261020/evidence/undici-research-release-7.30.1.json",
+          "archive_target": "local-evidence.md#local-019"
+        },
+        {
+          "original_target": "/root/learnharness/.scratch/issue13-undici-20261020/evidence/undici-research-package-7.30.1.json",
+          "archive_target": "local-evidence.md#local-015"
+        },
+        {
+          "original_target": "/root/learnharness/.scratch/issue13-undici-20261020/evidence/undici-research-readme-7.30.1.md",
+          "archive_target": "local-evidence.md#local-016"
+        },
+        {
+          "original_target": "/root/learnharness/.scratch/issue13-undici-20261020/evidence/undici-research-registry-7.30.1.json",
+          "archive_target": "local-evidence.md#local-017"
+        }
+      ]
+    },
+    {
+      "original_path": "docs/research/source-map-js-advisory.md",
+      "archive_path": "docs/research/archive/2026-10/source-map-js-advisory.md",
+      "original_sha256": "b58f845dcdfa82bfed48b570ef9e528eefb3ed128860a5eb96ea12026d41786b",
+      "archive_sha256": "4624291134d64d9dd0ac33b895b3076bf4d5885c1572c68428da5dd90f35c6af",
+      "research_cutoff": "2026-10-21",
+      "historical_input": "the supplied Next 16.3.8 and PostCSS baseline; this report does not independently establish a complete immutable application snapshot",
+      "owning_record": "https://github.com/gzy31007/learnharness/issues/14",
+      "archive_note": "\n<!-- archive-note:start -->\n> Archived on 2026-10-23 under [workspace task 26](https://github.com/gzy31007/learnharness/issues/26). The original report follows unchanged except for mechanical local-link routing.\n>\n> Research cutoff: 2026-10-21, Asia/Shanghai. Historical input: the supplied Next 16.3.8 and PostCSS baseline; this report does not independently establish a complete immutable application snapshot.\n>\n> Later status, checked against the archive baseline: Research was followed by the separately recorded 1.2.2 patch and acceptance in issue 14. The archive baseline locks 1.2.2. The report's proposed tests remain unexecuted by its researcher; later task results are not retroactive research results. [Owning record](https://github.com/gzy31007/learnharness/issues/14).\n>\n> Read the [archive guide](README.md) and [local evidence register](local-evidence.md) before reusing any present-tense statement, line number, or acceptance result. Archive publication is not a new test run, distribution approval, or general risk acceptance.\n<!-- archive-note:end -->\n",
+      "link_rewrites": [
+        {
+          "original_target": "/root/learnharness/.scratch/issue8-windows-acceptance-20261020/dependency-audit/security-advisory-triage.md#L110-L114",
+          "archive_target": "local-evidence.md#local-026"
+        },
+        {
+          "original_target": "/root/learnharness/node_modules/next/node_modules/postcss/lib/previous-map.js#L16-L36",
+          "archive_target": "local-evidence.md#local-079"
+        },
+        {
+          "original_target": "/root/learnharness/node_modules/next/node_modules/postcss/lib/previous-map.js#L64-L70",
+          "archive_target": "local-evidence.md#local-080"
+        },
+        {
+          "original_target": "/root/learnharness/node_modules/next/node_modules/postcss/lib/previous-map.js#L104-L146",
+          "archive_target": "local-evidence.md#local-078"
+        },
+        {
+          "original_target": "/root/learnharness/node_modules/next/node_modules/postcss/lib/previous-map.js#L87-L101",
+          "archive_target": "local-evidence.md#local-081"
+        },
+        {
+          "original_target": "/root/learnharness/node_modules/next/node_modules/postcss/lib/input.js#L70-L75",
+          "archive_target": "local-evidence.md#local-076"
+        },
+        {
+          "original_target": "/root/learnharness/node_modules/next/node_modules/postcss/lib/map-generator.js#L103-L128",
+          "archive_target": "local-evidence.md#local-077"
+        }
+      ]
+    },
+    {
+      "original_path": "docs/research/linkify-it-advisories.md",
+      "archive_path": "docs/research/archive/2026-10/linkify-it-advisories.md",
+      "original_sha256": "4514a5780aedbb3cc6aa316b0c196a8c5866243ceea91cc903195ab91c9ccda5",
+      "archive_sha256": "3b802a97c992779088072a28d6b7362ef0d93941096f1364ae51a61781a0d7f6",
+      "research_cutoff": "2026-10-21",
+      "historical_input": "the report's observed ansi-to-react 6.2.6 / linkify-it 3.0.3 working-tree graph; no complete source commit is recorded in this report",
+      "owning_record": "https://github.com/gzy31007/learnharness/issues/11",
+      "archive_note": "\n<!-- archive-note:start -->\n> Archived on 2026-10-23 under [workspace task 26](https://github.com/gzy31007/learnharness/issues/26). The original report follows unchanged except for mechanical local-link routing.\n>\n> Research cutoff: 2026-10-21, Asia/Shanghai. Historical input: the report's observed ansi-to-react 6.2.6 / linkify-it 3.0.3 working-tree graph; no complete source commit is recorded in this report.\n>\n> Later status, checked against the archive baseline: The historical scoped-override recommendation was not the selected implementation. The owner later approved removing the unused direct parent and orphaned subtree. Both packages are absent from the archive baseline manifest/lock. Old installed bytes and release artifacts are separate inventories. [Owning record](https://github.com/gzy31007/learnharness/issues/11).\n>\n> Read the [archive guide](README.md) and [local evidence register](local-evidence.md) before reusing any present-tense statement, line number, or acceptance result. Archive publication is not a new test run, distribution approval, or general risk acceptance.\n<!-- archive-note:end -->\n",
+      "link_rewrites": [
+        {
+          "original_target": "/root/learnharness/package.json#L38",
+          "archive_target": "local-evidence.md#local-104"
+        },
+        {
+          "original_target": "/root/learnharness/package-lock.json#L6452-L6464",
+          "archive_target": "local-evidence.md#local-099"
+        },
+        {
+          "original_target": "/root/learnharness/.scratch/issue8-windows-acceptance-20261020/dependency-audit/security-advisory-triage.md#L94-L100",
+          "archive_target": "local-evidence.md#local-028"
+        },
+        {
+          "original_target": "/root/learnharness/package.json#L38",
+          "archive_target": "local-evidence.md#local-104"
+        },
+        {
+          "original_target": "/root/learnharness/package-lock.json#L6452-L6464",
+          "archive_target": "local-evidence.md#local-099"
+        },
+        {
+          "original_target": "/root/learnharness/package-lock.json#L12119-L12125",
+          "archive_target": "local-evidence.md#local-092"
+        },
+        {
+          "original_target": "/root/learnharness/components/artifacts/tool-call-card.tsx#L48-L62",
+          "archive_target": "local-evidence.md#local-036"
+        },
+        {
+          "original_target": "/root/learnharness/components/artifacts/tool-call-card.tsx#L103-L110",
+          "archive_target": "local-evidence.md#local-035"
+        },
+        {
+          "original_target": "/root/learnharness/components/artifacts/live-tool-card.tsx#L57-L61",
+          "archive_target": "local-evidence.md#local-034"
+        }
+      ]
+    },
+    {
+      "original_path": "docs/research/katex-official-parent-upgrade-options.md",
+      "archive_path": "docs/research/archive/2026-10/katex-official-parent-upgrade-options.md",
+      "original_sha256": "6d4224b4be7831c58c65afd6ced5bd8666a2dd832bf3827466ab26394cf5d5c6",
+      "archive_sha256": "2d12dc27a5231a73c8a2b9787caf8153cfd27c42338bae14b0baac0e3d525ba6",
+      "research_cutoff": "2026-10-21",
+      "historical_input": "the report's declared local dependency graph and the 2026-10-21 12:17-12:23 Asia/Shanghai registry window; no newly built candidate",
+      "owning_record": "https://github.com/gzy31007/learnharness/issues/17",
+      "archive_note": "\n<!-- archive-note:start -->\n> Archived on 2026-10-23 under [workspace task 26](https://github.com/gzy31007/learnharness/issues/26). The original report follows unchanged except for mechanical local-link routing.\n>\n> Research cutoff: 2026-10-21, Asia/Shanghai. Historical input: the report's declared local dependency graph and the 2026-10-21 12:17-12:23 Asia/Shanghai registry window; no newly built candidate.\n>\n> Later status, checked against the archive baseline: This remains a deferred decision record, not completed remediation. The owner chose to wait for an official compatible chain, temporarily accepting the known KaTeX risk only for existing local personal use and suspending new external distribution. That acceptance excludes DOMPurify and other vulnerabilities. The earlier 0.18.2 out-of-range override is not the integration plan. The archive baseline still locks KaTeX 0.16.47. [Owning record](https://github.com/gzy31007/learnharness/issues/17).\n>\n> Read the [archive guide](README.md) and [local evidence register](local-evidence.md) before reusing any present-tense statement, line number, or acceptance result. Archive publication is not a new test run, distribution approval, or general risk acceptance.\n<!-- archive-note:end -->\n",
+      "link_rewrites": [
+        {
+          "original_target": "/root/learnharness/package.json#L33-L64",
+          "archive_target": "local-evidence.md#local-103"
+        },
+        {
+          "original_target": "/root/learnharness/package-lock.json#L11749-L11763",
+          "archive_target": "local-evidence.md#local-091"
+        },
+        {
+          "original_target": "/root/learnharness/components/ai-elements/message.tsx#L349-L356",
+          "archive_target": "local-evidence.md#local-033"
+        },
+        {
+          "original_target": "/root/learnharness/components/mermaid-render.ts#L12-L40",
+          "archive_target": "local-evidence.md#local-039"
+        },
+        {
+          "original_target": "/root/learnharness/components/latex-glyph.tsx#L1-L25",
+          "archive_target": "local-evidence.md#local-037"
+        },
+        {
+          "original_target": "/root/learnharness/app/layout.tsx#L3",
+          "archive_target": "local-evidence.md#local-031"
+        },
+        {
+          "original_target": "/root/learnharness/.scratch/wayfinder-katex-20261020/docs/research/katex-streamdown-security-20261020.md",
+          "archive_target": "local-evidence.md#local-030"
+        },
+        {
+          "original_target": "/root/learnharness/.scratch/issue17-katex-0182-20261021/CLOSEOUT.md",
+          "archive_target": "local-evidence.md#local-025"
+        }
+      ]
+    },
+    {
+      "original_path": "docs/research/upstream-032-desktop-impact.md",
+      "archive_path": "docs/research/archive/2026-10/upstream-032-desktop-impact.md",
+      "original_sha256": "88919be70022304d66f30ccbff1ea17a771c352daa23a07d863606383d5e2a26",
+      "archive_sha256": "23e173e6004f83e5856f59d64f1632ccb42f41f4149003f25eef5febbd1c5235",
+      "research_cutoff": "2026-10-22",
+      "historical_input": "local ef38592db11d68bae3b22c175aaefc57966b039e versus upstream 1c5024c8c280be127c0c316b3f57a3783fce471d, common ancestor 32febaaae7fea9fdf8ea59fe62d345d37298d399",
+      "owning_record": "https://github.com/gzy31007/learnharness/pull/25",
+      "archive_note": "\n<!-- archive-note:start -->\n> Archived on 2026-10-23 under [workspace task 26](https://github.com/gzy31007/learnharness/issues/26). The original report follows unchanged except for mechanical local-link routing.\n>\n> Research cutoff: 2026-10-22, Asia/Shanghai. Historical input: local ef38592db11d68bae3b22c175aaefc57966b039e versus upstream 1c5024c8c280be127c0c316b3f57a3783fce471d, common ancestor 32febaaae7fea9fdf8ea59fe62d345d37298d399.\n>\n> Later status, checked against the archive baseline: This is the pre-integration assessment. PR 25 later integrated upstream 0.3.2 and recorded its own verification boundaries. Statements that the fork lacks those fixes describe the old baseline, not the archive baseline. This archive does not repeat Windows, browser, product, or release verification. [Owning record](https://github.com/gzy31007/learnharness/pull/25).\n>\n> Read the [archive guide](README.md) and [local evidence register](local-evidence.md) before reusing any present-tense statement, line number, or acceptance result. Archive publication is not a new test run, distribution approval, or general risk acceptance.\n<!-- archive-note:end -->\n",
+      "link_rewrites": [
+        {
+          "original_target": "/root/learnharness/src/agent/subagents/demo-builder.ts#L127-L144",
+          "archive_target": "local-evidence.md#local-109"
+        },
+        {
+          "original_target": "/root/learnharness/docs/subscription-windows-acceptance.md#L44-L48",
+          "archive_target": "local-evidence.md#local-047"
+        },
+        {
+          "original_target": "/root/learnharness/next.config.ts#L56-L71",
+          "archive_target": "local-evidence.md#local-061"
+        },
+        {
+          "original_target": "/root/learnharness/scripts/smoke-server.mjs#L142-L161",
+          "archive_target": "local-evidence.md#local-108"
+        },
+        {
+          "original_target": "/root/learnharness/src/agent/subagents/headless.ts#L159-L162",
+          "archive_target": "local-evidence.md#local-111"
+        },
+        {
+          "original_target": "/root/learnharness/src/agent/subagents/headless.ts#L254-L269",
+          "archive_target": "local-evidence.md#local-114"
+        },
+        {
+          "original_target": "/root/learnharness/electron/main.cjs#L71-L92",
+          "archive_target": "local-evidence.md#local-058"
+        },
+        {
+          "original_target": "/root/learnharness/src/agent/subagents/headless.ts#L213-L257",
+          "archive_target": "local-evidence.md#local-113"
+        },
+        {
+          "original_target": "/root/learnharness/src/server/subscription-browser.ts#L21-L30",
+          "archive_target": "local-evidence.md#local-117"
+        },
+        {
+          "original_target": "/root/learnharness/src/server/subscription-browser.ts#L189-L205",
+          "archive_target": "local-evidence.md#local-116"
+        },
+        {
+          "original_target": "/root/learnharness/src/agent/subagents/headless.ts#L174-L205",
+          "archive_target": "local-evidence.md#local-112"
+        },
+        {
+          "original_target": "/root/learnharness/electron/main.cjs#L83-L90",
+          "archive_target": "local-evidence.md#local-059"
+        },
+        {
+          "original_target": "/root/learnharness/electron/main.cjs#L59-L117",
+          "archive_target": "local-evidence.md#local-057"
+        },
+        {
+          "original_target": "/root/learnharness/electron/main.cjs#L425-L472",
+          "archive_target": "local-evidence.md#local-054"
+        },
+        {
+          "original_target": "/root/learnharness/.github/workflows/release.yml#L164-L179",
+          "archive_target": "local-evidence.md#local-001"
+        },
+        {
+          "original_target": "/root/learnharness/src/agent/subagents/headless.ts",
+          "archive_target": "local-evidence.md#local-110"
+        },
+        {
+          "original_target": "/root/learnharness/next.config.ts",
+          "archive_target": "local-evidence.md#local-060"
+        },
+        {
+          "original_target": "/root/learnharness/scripts/build-server.mjs",
+          "archive_target": "local-evidence.md#local-105"
+        },
+        {
+          "original_target": "/root/learnharness/scripts/smoke-server.mjs",
+          "archive_target": "local-evidence.md#local-107"
+        },
+        {
+          "original_target": "/root/learnharness/src/server/subscription-browser.ts#L300-L378",
+          "archive_target": "local-evidence.md#local-118"
+        },
+        {
+          "original_target": "/root/learnharness/src/server/subscription-browser.ts#L97-L116",
+          "archive_target": "local-evidence.md#local-119"
+        },
+        {
+          "original_target": "/root/learnharness/src/agent/subagents/runner.ts#L266-L312",
+          "archive_target": "local-evidence.md#local-115"
+        },
+        {
+          "original_target": "/root/learnharness/src/agent/subagents/demo-builder.ts#L127-L144",
+          "archive_target": "local-evidence.md#local-109"
+        },
+        {
+          "original_target": "/root/learnharness/docs/subscription-windows-acceptance.md#L64-L72",
+          "archive_target": "local-evidence.md#local-048"
+        },
+        {
+          "original_target": "/root/learnharness/electron-builder.yml#L29-L56",
+          "archive_target": "local-evidence.md#local-051"
+        },
+        {
+          "original_target": "/root/learnharness/electron-builder.yml#L84-L96",
+          "archive_target": "local-evidence.md#local-052"
+        },
+        {
+          "original_target": "/root/learnharness/scripts/build-server.mjs#L63-L77",
+          "archive_target": "local-evidence.md#local-106"
+        },
+        {
+          "original_target": "/root/learnharness/electron-builder.acceptance.yml#L1-L27",
+          "archive_target": "local-evidence.md#local-049"
+        },
+        {
+          "original_target": "/root/learnharness/electron/main.cjs#L442-L472",
+          "archive_target": "local-evidence.md#local-055"
+        },
+        {
+          "original_target": "/root/learnharness/electron/main.cjs#L425-L439",
+          "archive_target": "local-evidence.md#local-053"
+        },
+        {
+          "original_target": "/root/learnharness/electron-builder.yml#L173-L184",
+          "archive_target": "local-evidence.md#local-050"
+        },
+        {
+          "original_target": "/root/learnharness/electron/main.cjs#L473-L498",
+          "archive_target": "local-evidence.md#local-056"
+        },
+        {
+          "original_target": "/root/learnharness/docs/subscription-windows-acceptance.md#L20-L29",
+          "archive_target": "local-evidence.md#local-046"
+        },
+        {
+          "original_target": "/root/learnharness/docs/subscription-windows-acceptance.md#L64-L72",
+          "archive_target": "local-evidence.md#local-048"
+        },
+        {
+          "original_target": "/root/learnharness/docs/subscription-windows-acceptance.md#L44-L48",
+          "archive_target": "local-evidence.md#local-047"
+        }
+      ]
+    }
+  ],
+  "local_references": [
+    {
+      "id": "local-001",
+      "original_target": "/root/learnharness/.github/workflows/release.yml#L164-L179",
+      "relative_path": ".github/workflows/release.yml",
+      "original_fragment": "L164-L179",
+      "available_at_archive": true,
+      "local_bytes_at_archive": 10963,
+      "local_sha256_at_archive": "3a6855f761015ed498c61bae30e8f69614138c5513069f7e2ed21b5d95a5dbfa",
+      "committed_counterpart": "https://github.com/gzy31007/learnharness/blob/9f6a61757eae4772d42094aa40740be367668c52/.github/workflows/release.yml",
+      "committed_counterpart_sha256": "3a6855f761015ed498c61bae30e8f69614138c5513069f7e2ed21b5d95a5dbfa",
+      "counterpart_matches_current_local_bytes": true
+    },
+    {
+      "id": "local-002",
+      "original_target": "/root/learnharness/.scratch/issue12-research/audit.json#L78-L124",
+      "relative_path": ".scratch/issue12-research/audit.json",
+      "original_fragment": "L78-L124",
+      "available_at_archive": true,
+      "local_bytes_at_archive": 14577,
+      "local_sha256_at_archive": "3763829774e94f946ee61cbb196619fb0df2d458484a4a1ebc34346d0dde02ce",
+      "committed_counterpart": null,
+      "committed_counterpart_sha256": null,
+      "counterpart_matches_current_local_bytes": null
+    },
+    {
+      "id": "local-003",
+      "original_target": "/root/learnharness/.scratch/issue12-research/registry-summary.json#L53-L147",
+      "relative_path": ".scratch/issue12-research/registry-summary.json",
+      "original_fragment": "L53-L147",
+      "available_at_archive": true,
+      "local_bytes_at_archive": 5360,
+      "local_sha256_at_archive": "c499d65c5cf66f42f8ba26ac6e034f5909f51eee0c69413b4fca4bf4eea08ffc",
+      "committed_counterpart": null,
+      "committed_counterpart_sha256": null,
+      "counterpart_matches_current_local_bytes": null
+    },
+    {
+      "id": "local-004",
+      "original_target": "/root/learnharness/.scratch/issue13-undici-20261020/evidence/audit-after.json",
+      "relative_path": ".scratch/issue13-undici-20261020/evidence/audit-after.json",
+      "original_fragment": null,
+      "available_at_archive": true,
+      "local_bytes_at_archive": 7450,
+      "local_sha256_at_archive": "38eb4071301844d24c6029a10b28c2f6a5e36691ef025de52730079569e6c207",
+      "committed_counterpart": null,
+      "committed_counterpart_sha256": null,
+      "counterpart_matches_current_local_bytes": null
+    },
+    {
+      "id": "local-005",
+      "original_target": "/root/learnharness/.scratch/issue13-undici-20261020/evidence/audit-baseline-current.json",
+      "relative_path": ".scratch/issue13-undici-20261020/evidence/audit-baseline-current.json",
+      "original_fragment": null,
+      "available_at_archive": true,
+      "local_bytes_at_archive": 13266,
+      "local_sha256_at_archive": "603a72b94edbaa83172d1c616dd36865727812a36f8a7775c2e4b3d952e00091",
+      "committed_counterpart": null,
+      "committed_counterpart_sha256": null,
+      "counterpart_matches_current_local_bytes": null
+    },
+    {
+      "id": "local-006",
+      "original_target": "/root/learnharness/.scratch/issue13-undici-20261020/evidence/audit-before.json",
+      "relative_path": ".scratch/issue13-undici-20261020/evidence/audit-before.json",
+      "original_fragment": null,
+      "available_at_archive": true,
+      "local_bytes_at_archive": 14577,
+      "local_sha256_at_archive": "3763829774e94f946ee61cbb196619fb0df2d458484a4a1ebc34346d0dde02ce",
+      "committed_counterpart": null,
+      "committed_counterpart_sha256": null,
+      "counterpart_matches_current_local_bytes": null
+    },
+    {
+      "id": "local-007",
+      "original_target": "/root/learnharness/.scratch/issue13-undici-20261020/evidence/audit-before.json#L358-L535",
+      "relative_path": ".scratch/issue13-undici-20261020/evidence/audit-before.json",
+      "original_fragment": "L358-L535",
+      "available_at_archive": true,
+      "local_bytes_at_archive": 14577,
+      "local_sha256_at_archive": "3763829774e94f946ee61cbb196619fb0df2d458484a4a1ebc34346d0dde02ce",
+      "committed_counterpart": null,
+      "committed_counterpart_sha256": null,
+      "counterpart_matches_current_local_bytes": null
+    },
+    {
+      "id": "local-008",
+      "original_target": "/root/learnharness/.scratch/issue13-undici-20261020/evidence/audit-comparison-current.json",
+      "relative_path": ".scratch/issue13-undici-20261020/evidence/audit-comparison-current.json",
+      "original_fragment": null,
+      "available_at_archive": true,
+      "local_bytes_at_archive": 658,
+      "local_sha256_at_archive": "837cf000c2c89607e1ec9ae199e33bb0a301b045ec632d2a54050ae5baec9cd8",
+      "committed_counterpart": null,
+      "committed_counterpart_sha256": null,
+      "counterpart_matches_current_local_bytes": null
+    },
+    {
+      "id": "local-009",
+      "original_target": "/root/learnharness/.scratch/issue13-undici-20261020/evidence/build.log",
+      "relative_path": ".scratch/issue13-undici-20261020/evidence/build.log",
+      "original_fragment": null,
+      "available_at_archive": true,
+      "local_bytes_at_archive": 9763,
+      "local_sha256_at_archive": "3b01a673d93319a0e4eb1d66ea35736fb527f521c19ccdbd8f27c0ce580a7afa",
+      "committed_counterpart": null,
+      "committed_counterpart_sha256": null,
+      "counterpart_matches_current_local_bytes": null
+    },
+    {
+      "id": "local-010",
+      "original_target": "/root/learnharness/.scratch/issue13-undici-20261020/evidence/installed-graph.json",
+      "relative_path": ".scratch/issue13-undici-20261020/evidence/installed-graph.json",
+      "original_fragment": null,
+      "available_at_archive": true,
+      "local_bytes_at_archive": 2697,
+      "local_sha256_at_archive": "ab99af290fcb4823066915fe4260d1b7220b7183d677e6a37a3cb7e9c6cc5ca7",
+      "committed_counterpart": null,
+      "committed_counterpart_sha256": null,
+      "counterpart_matches_current_local_bytes": null
+    },
+    {
+      "id": "local-011",
+      "original_target": "/root/learnharness/.scratch/issue13-undici-20261020/evidence/npm-ci-retry.log",
+      "relative_path": ".scratch/issue13-undici-20261020/evidence/npm-ci-retry.log",
+      "original_fragment": null,
+      "available_at_archive": true,
+      "local_bytes_at_archive": 1113,
+      "local_sha256_at_archive": "83af69efd08d4e146bf3d48d35002d6f40d55cbd831e3528d892545613906d6b",
+      "committed_counterpart": null,
+      "committed_counterpart_sha256": null,
+      "counterpart_matches_current_local_bytes": null
+    },
+    {
+      "id": "local-012",
+      "original_target": "/root/learnharness/.scratch/issue13-undici-20261020/evidence/npm-ci.log",
+      "relative_path": ".scratch/issue13-undici-20261020/evidence/npm-ci.log",
+      "original_fragment": null,
+      "available_at_archive": true,
+      "local_bytes_at_archive": 1613,
+      "local_sha256_at_archive": "da0afcbd651b5cf463eb1cb8d1a3bb0b9958e7e32903e75224b6dd1942505f5e",
+      "committed_counterpart": null,
+      "committed_counterpart_sha256": null,
+      "counterpart_matches_current_local_bytes": null
+    },
+    {
+      "id": "local-013",
+      "original_target": "/root/learnharness/.scratch/issue13-undici-20261020/evidence/snapshot-verification.json",
+      "relative_path": ".scratch/issue13-undici-20261020/evidence/snapshot-verification.json",
+      "original_fragment": null,
+      "available_at_archive": true,
+      "local_bytes_at_archive": 193,
+      "local_sha256_at_archive": "8d3d7d8fae66c612bfaa567d3396b7e795f718afdf91a0770936a265065be6df",
+      "committed_counterpart": null,
+      "committed_counterpart_sha256": null,
+      "counterpart_matches_current_local_bytes": null
+    },
+    {
+      "id": "local-014",
+      "original_target": "/root/learnharness/.scratch/issue13-undici-20261020/evidence/tests.log#L1648-L1654",
+      "relative_path": ".scratch/issue13-undici-20261020/evidence/tests.log",
+      "original_fragment": "L1648-L1654",
+      "available_at_archive": true,
+      "local_bytes_at_archive": 605957,
+      "local_sha256_at_archive": "422b6ada8ca39edf343cfc917b83a69afe0cf93d94e5ad373cf11f34628a3816",
+      "committed_counterpart": null,
+      "committed_counterpart_sha256": null,
+      "counterpart_matches_current_local_bytes": null
+    },
+    {
+      "id": "local-015",
+      "original_target": "/root/learnharness/.scratch/issue13-undici-20261020/evidence/undici-research-package-7.30.1.json",
+      "relative_path": ".scratch/issue13-undici-20261020/evidence/undici-research-package-7.30.1.json",
+      "original_fragment": null,
+      "available_at_archive": true,
+      "local_bytes_at_archive": 6333,
+      "local_sha256_at_archive": "0e62f63508558cd8bc44dbf61baee562907ff4bbd147bf837ded998c2bf62a28",
+      "committed_counterpart": null,
+      "committed_counterpart_sha256": null,
+      "counterpart_matches_current_local_bytes": null
+    },
+    {
+      "id": "local-016",
+      "original_target": "/root/learnharness/.scratch/issue13-undici-20261020/evidence/undici-research-readme-7.30.1.md",
+      "relative_path": ".scratch/issue13-undici-20261020/evidence/undici-research-readme-7.30.1.md",
+      "original_fragment": null,
+      "available_at_archive": true,
+      "local_bytes_at_archive": 28271,
+      "local_sha256_at_archive": "2c963a2f4d040fb3d18202bb3f23cf0e33f15fdbb16f0f07c5c4c9fc265b4b32",
+      "committed_counterpart": null,
+      "committed_counterpart_sha256": null,
+      "counterpart_matches_current_local_bytes": null
+    },
+    {
+      "id": "local-017",
+      "original_target": "/root/learnharness/.scratch/issue13-undici-20261020/evidence/undici-research-registry-7.30.1.json",
+      "relative_path": ".scratch/issue13-undici-20261020/evidence/undici-research-registry-7.30.1.json",
+      "original_fragment": null,
+      "available_at_archive": true,
+      "local_bytes_at_archive": 6817,
+      "local_sha256_at_archive": "1bdb8d9221dd4a6b72723d8c8144823b682015c31b4d3e91437d53ade3f8730c",
+      "committed_counterpart": null,
+      "committed_counterpart_sha256": null,
+      "counterpart_matches_current_local_bytes": null
+    },
+    {
+      "id": "local-018",
+      "original_target": "/root/learnharness/.scratch/issue13-undici-20261020/evidence/undici-research-release-7.29.1.json",
+      "relative_path": ".scratch/issue13-undici-20261020/evidence/undici-research-release-7.29.1.json",
+      "original_fragment": null,
+      "available_at_archive": true,
+      "local_bytes_at_archive": 7961,
+      "local_sha256_at_archive": "235845027d7f0cd97dd07ebe199769463957d828edb3c65c1d5d61fa2df7cf2a",
+      "committed_counterpart": null,
+      "committed_counterpart_sha256": null,
+      "counterpart_matches_current_local_bytes": null
+    },
+    {
+      "id": "local-019",
+      "original_target": "/root/learnharness/.scratch/issue13-undici-20261020/evidence/undici-research-release-7.30.1.json",
+      "relative_path": ".scratch/issue13-undici-20261020/evidence/undici-research-release-7.30.1.json",
+      "original_fragment": null,
+      "available_at_archive": true,
+      "local_bytes_at_archive": 7563,
+      "local_sha256_at_archive": "aa44e992e80d3f3b0c06fff2202bb1ce607c343a548886819f24a6020b3ca152",
+      "committed_counterpart": null,
+      "committed_counterpart_sha256": null,
+      "counterpart_matches_current_local_bytes": null
+    },
+    {
+      "id": "local-020",
+      "original_target": "/root/learnharness/.scratch/issue13-undici-20261020/evidence/undici-research-repository-advisories.json",
+      "relative_path": ".scratch/issue13-undici-20261020/evidence/undici-research-repository-advisories.json",
+      "original_fragment": null,
+      "available_at_archive": true,
+      "local_bytes_at_archive": 428774,
+      "local_sha256_at_archive": "3772e4b34e1c2312ab3e30b38d7860b2cc43a6ccefb0bc09836d219925ba029b",
+      "committed_counterpart": null,
+      "committed_counterpart_sha256": null,
+      "counterpart_matches_current_local_bytes": null
+    },
+    {
+      "id": "local-021",
+      "original_target": "/root/learnharness/.scratch/issue13-undici-20261020/evidence/undici-research-reviewed-advisories.json",
+      "relative_path": ".scratch/issue13-undici-20261020/evidence/undici-research-reviewed-advisories.json",
+      "original_fragment": null,
+      "available_at_archive": true,
+      "local_bytes_at_archive": 302268,
+      "local_sha256_at_archive": "2b146fb6cf06c70db9fd1171c39d7bced790087496679c166e2a12cfd7657c43",
+      "committed_counterpart": null,
+      "committed_counterpart_sha256": null,
+      "counterpart_matches_current_local_bytes": null
+    },
+    {
+      "id": "local-022",
+      "original_target": "/root/learnharness/.scratch/issue13-undici-20261020/evidence/validation-results.json",
+      "relative_path": ".scratch/issue13-undici-20261020/evidence/validation-results.json",
+      "original_fragment": null,
+      "available_at_archive": true,
+      "local_bytes_at_archive": 855,
+      "local_sha256_at_archive": "1e814ba3d06bc425d4af4c96927e606c93ddd83c5ba372b2373f0a038f9f7fa0",
+      "committed_counterpart": null,
+      "committed_counterpart_sha256": null,
+      "counterpart_matches_current_local_bytes": null
+    },
+    {
+      "id": "local-023",
+      "original_target": "/root/learnharness/.scratch/issue13-undici-20261020/evidence/verified-inputs.json",
+      "relative_path": ".scratch/issue13-undici-20261020/evidence/verified-inputs.json",
+      "original_fragment": null,
+      "available_at_archive": true,
+      "local_bytes_at_archive": 278,
+      "local_sha256_at_archive": "f166a109c551c82a81c4b40227022114e2d6eb88ba7cb79842c98c2d9bb3169c",
+      "committed_counterpart": null,
+      "committed_counterpart_sha256": null,
+      "counterpart_matches_current_local_bytes": null
+    },
+    {
+      "id": "local-024",
+      "original_target": "/root/learnharness/.scratch/issue13-undici-20261020/independent-verifier/report.md",
+      "relative_path": ".scratch/issue13-undici-20261020/independent-verifier/report.md",
+      "original_fragment": null,
+      "available_at_archive": true,
+      "local_bytes_at_archive": 8049,
+      "local_sha256_at_archive": "d94106ec2e426b9edca3e6284f20c9064c07a610a4bc321ef94f5fd0732d543a",
+      "committed_counterpart": null,
+      "committed_counterpart_sha256": null,
+      "counterpart_matches_current_local_bytes": null
+    },
+    {
+      "id": "local-025",
+      "original_target": "/root/learnharness/.scratch/issue17-katex-0182-20261021/CLOSEOUT.md",
+      "relative_path": ".scratch/issue17-katex-0182-20261021/CLOSEOUT.md",
+      "original_fragment": null,
+      "available_at_archive": true,
+      "local_bytes_at_archive": 2721,
+      "local_sha256_at_archive": "8aa1f670c3ce18a7f95d21c6ade0ebb3d6a84d1c969997c9201f842ea485fd91",
+      "committed_counterpart": null,
+      "committed_counterpart_sha256": null,
+      "counterpart_matches_current_local_bytes": null
+    },
+    {
+      "id": "local-026",
+      "original_target": "/root/learnharness/.scratch/issue8-windows-acceptance-20261020/dependency-audit/security-advisory-triage.md#L110-L114",
+      "relative_path": ".scratch/issue8-windows-acceptance-20261020/dependency-audit/security-advisory-triage.md",
+      "original_fragment": "L110-L114",
+      "available_at_archive": true,
+      "local_bytes_at_archive": 21848,
+      "local_sha256_at_archive": "9ba559f9d4a6e04d4654ca8ecef39af2cf61a33256fd43087b26832166645865",
+      "committed_counterpart": null,
+      "committed_counterpart_sha256": null,
+      "counterpart_matches_current_local_bytes": null
+    },
+    {
+      "id": "local-027",
+      "original_target": "/root/learnharness/.scratch/issue8-windows-acceptance-20261020/dependency-audit/security-advisory-triage.md#L116-L123",
+      "relative_path": ".scratch/issue8-windows-acceptance-20261020/dependency-audit/security-advisory-triage.md",
+      "original_fragment": "L116-L123",
+      "available_at_archive": true,
+      "local_bytes_at_archive": 21848,
+      "local_sha256_at_archive": "9ba559f9d4a6e04d4654ca8ecef39af2cf61a33256fd43087b26832166645865",
+      "committed_counterpart": null,
+      "committed_counterpart_sha256": null,
+      "counterpart_matches_current_local_bytes": null
+    },
+    {
+      "id": "local-028",
+      "original_target": "/root/learnharness/.scratch/issue8-windows-acceptance-20261020/dependency-audit/security-advisory-triage.md#L94-L100",
+      "relative_path": ".scratch/issue8-windows-acceptance-20261020/dependency-audit/security-advisory-triage.md",
+      "original_fragment": "L94-L100",
+      "available_at_archive": true,
+      "local_bytes_at_archive": 21848,
+      "local_sha256_at_archive": "9ba559f9d4a6e04d4654ca8ecef39af2cf61a33256fd43087b26832166645865",
+      "committed_counterpart": null,
+      "committed_counterpart_sha256": null,
+      "counterpart_matches_current_local_bytes": null
+    },
+    {
+      "id": "local-029",
+      "original_target": "/root/learnharness/.scratch/issue8-windows-acceptance-20261020/validation-network-guard.mjs",
+      "relative_path": ".scratch/issue8-windows-acceptance-20261020/validation-network-guard.mjs",
+      "original_fragment": null,
+      "available_at_archive": true,
+      "local_bytes_at_archive": 1300,
+      "local_sha256_at_archive": "f310e85520d7cc19c42e088c0e5500dccc3cdabc815685a3589f7f204cfa79b3",
+      "committed_counterpart": null,
+      "committed_counterpart_sha256": null,
+      "counterpart_matches_current_local_bytes": null
+    },
+    {
+      "id": "local-030",
+      "original_target": "/root/learnharness/.scratch/wayfinder-katex-20261020/docs/research/katex-streamdown-security-20261020.md",
+      "relative_path": ".scratch/wayfinder-katex-20261020/docs/research/katex-streamdown-security-20261020.md",
+      "original_fragment": null,
+      "available_at_archive": true,
+      "local_bytes_at_archive": 24258,
+      "local_sha256_at_archive": "35cf690ba1455b3b1d12c9424746bebd8bcc8dc256db235de74c5565c2599300",
+      "committed_counterpart": null,
+      "committed_counterpart_sha256": null,
+      "counterpart_matches_current_local_bytes": null
+    },
+    {
+      "id": "local-031",
+      "original_target": "/root/learnharness/app/layout.tsx#L3",
+      "relative_path": "app/layout.tsx",
+      "original_fragment": "L3",
+      "available_at_archive": true,
+      "local_bytes_at_archive": 1683,
+      "local_sha256_at_archive": "04b83c4200cdd1b257e21be27c3f8a245719a90359879f70537c30344d23d962",
+      "committed_counterpart": "https://github.com/gzy31007/learnharness/blob/9f6a61757eae4772d42094aa40740be367668c52/app/layout.tsx",
+      "committed_counterpart_sha256": "04b83c4200cdd1b257e21be27c3f8a245719a90359879f70537c30344d23d962",
+      "counterpart_matches_current_local_bytes": true
+    },
+    {
+      "id": "local-032",
+      "original_target": "/root/learnharness/components/ai-elements/message.tsx#L345-L381",
+      "relative_path": "components/ai-elements/message.tsx",
+      "original_fragment": "L345-L381",
+      "available_at_archive": true,
+      "local_bytes_at_archive": 10638,
+      "local_sha256_at_archive": "8221b1ee6e7c12a70edaca09f34cd09215c081dde322ca6ef135f73371808cdd",
+      "committed_counterpart": "https://github.com/gzy31007/learnharness/blob/9f6a61757eae4772d42094aa40740be367668c52/components/ai-elements/message.tsx",
+      "committed_counterpart_sha256": "8221b1ee6e7c12a70edaca09f34cd09215c081dde322ca6ef135f73371808cdd",
+      "counterpart_matches_current_local_bytes": true
+    },
+    {
+      "id": "local-033",
+      "original_target": "/root/learnharness/components/ai-elements/message.tsx#L349-L356",
+      "relative_path": "components/ai-elements/message.tsx",
+      "original_fragment": "L349-L356",
+      "available_at_archive": true,
+      "local_bytes_at_archive": 10638,
+      "local_sha256_at_archive": "8221b1ee6e7c12a70edaca09f34cd09215c081dde322ca6ef135f73371808cdd",
+      "committed_counterpart": "https://github.com/gzy31007/learnharness/blob/9f6a61757eae4772d42094aa40740be367668c52/components/ai-elements/message.tsx",
+      "committed_counterpart_sha256": "8221b1ee6e7c12a70edaca09f34cd09215c081dde322ca6ef135f73371808cdd",
+      "counterpart_matches_current_local_bytes": true
+    },
+    {
+      "id": "local-034",
+      "original_target": "/root/learnharness/components/artifacts/live-tool-card.tsx#L57-L61",
+      "relative_path": "components/artifacts/live-tool-card.tsx",
+      "original_fragment": "L57-L61",
+      "available_at_archive": true,
+      "local_bytes_at_archive": 2776,
+      "local_sha256_at_archive": "e349d61c1673c066be347b7fbb7b4199fac185aef4fb72d8896001c159acdb07",
+      "committed_counterpart": "https://github.com/gzy31007/learnharness/blob/9f6a61757eae4772d42094aa40740be367668c52/components/artifacts/live-tool-card.tsx",
+      "committed_counterpart_sha256": "e349d61c1673c066be347b7fbb7b4199fac185aef4fb72d8896001c159acdb07",
+      "counterpart_matches_current_local_bytes": true
+    },
+    {
+      "id": "local-035",
+      "original_target": "/root/learnharness/components/artifacts/tool-call-card.tsx#L103-L110",
+      "relative_path": "components/artifacts/tool-call-card.tsx",
+      "original_fragment": "L103-L110",
+      "available_at_archive": true,
+      "local_bytes_at_archive": 4506,
+      "local_sha256_at_archive": "ab604b460258d84317dd57c0b117ae9d9a5c551cc375c40c38ec589565dcc9b6",
+      "committed_counterpart": "https://github.com/gzy31007/learnharness/blob/9f6a61757eae4772d42094aa40740be367668c52/components/artifacts/tool-call-card.tsx",
+      "committed_counterpart_sha256": "ab604b460258d84317dd57c0b117ae9d9a5c551cc375c40c38ec589565dcc9b6",
+      "counterpart_matches_current_local_bytes": true
+    },
+    {
+      "id": "local-036",
+      "original_target": "/root/learnharness/components/artifacts/tool-call-card.tsx#L48-L62",
+      "relative_path": "components/artifacts/tool-call-card.tsx",
+      "original_fragment": "L48-L62",
+      "available_at_archive": true,
+      "local_bytes_at_archive": 4506,
+      "local_sha256_at_archive": "ab604b460258d84317dd57c0b117ae9d9a5c551cc375c40c38ec589565dcc9b6",
+      "committed_counterpart": "https://github.com/gzy31007/learnharness/blob/9f6a61757eae4772d42094aa40740be367668c52/components/artifacts/tool-call-card.tsx",
+      "committed_counterpart_sha256": "ab604b460258d84317dd57c0b117ae9d9a5c551cc375c40c38ec589565dcc9b6",
+      "counterpart_matches_current_local_bytes": true
+    },
+    {
+      "id": "local-037",
+      "original_target": "/root/learnharness/components/latex-glyph.tsx#L1-L25",
+      "relative_path": "components/latex-glyph.tsx",
+      "original_fragment": "L1-L25",
+      "available_at_archive": true,
+      "local_bytes_at_archive": 1797,
+      "local_sha256_at_archive": "5c4413fc5a7460c8f2d65e360e5f3b20a8c78cbd4fc4624ac0fd5ff777bacf6b",
+      "committed_counterpart": "https://github.com/gzy31007/learnharness/blob/9f6a61757eae4772d42094aa40740be367668c52/components/latex-glyph.tsx",
+      "committed_counterpart_sha256": "5c4413fc5a7460c8f2d65e360e5f3b20a8c78cbd4fc4624ac0fd5ff777bacf6b",
+      "counterpart_matches_current_local_bytes": true
+    },
+    {
+      "id": "local-038",
+      "original_target": "/root/learnharness/components/md-blocks.tsx#L164-L199",
+      "relative_path": "components/md-blocks.tsx",
+      "original_fragment": "L164-L199",
+      "available_at_archive": true,
+      "local_bytes_at_archive": 20116,
+      "local_sha256_at_archive": "16aacbdc7ef3d18984d2c27e3182cd447e983b3beeab395dcd8e67785235becd",
+      "committed_counterpart": "https://github.com/gzy31007/learnharness/blob/9f6a61757eae4772d42094aa40740be367668c52/components/md-blocks.tsx",
+      "committed_counterpart_sha256": "16aacbdc7ef3d18984d2c27e3182cd447e983b3beeab395dcd8e67785235becd",
+      "counterpart_matches_current_local_bytes": true
+    },
+    {
+      "id": "local-039",
+      "original_target": "/root/learnharness/components/mermaid-render.ts#L12-L40",
+      "relative_path": "components/mermaid-render.ts",
+      "original_fragment": "L12-L40",
+      "available_at_archive": true,
+      "local_bytes_at_archive": 2062,
+      "local_sha256_at_archive": "f051d0f30ab7ad43b6796629cca726b1b3c4177101d9b8511e37f8c6dd01d74b",
+      "committed_counterpart": "https://github.com/gzy31007/learnharness/blob/9f6a61757eae4772d42094aa40740be367668c52/components/mermaid-render.ts",
+      "committed_counterpart_sha256": "f051d0f30ab7ad43b6796629cca726b1b3c4177101d9b8511e37f8c6dd01d74b",
+      "counterpart_matches_current_local_bytes": true
+    },
+    {
+      "id": "local-040",
+      "original_target": "/root/learnharness/components/mermaid-render.ts#L26-L41",
+      "relative_path": "components/mermaid-render.ts",
+      "original_fragment": "L26-L41",
+      "available_at_archive": true,
+      "local_bytes_at_archive": 2062,
+      "local_sha256_at_archive": "f051d0f30ab7ad43b6796629cca726b1b3c4177101d9b8511e37f8c6dd01d74b",
+      "committed_counterpart": "https://github.com/gzy31007/learnharness/blob/9f6a61757eae4772d42094aa40740be367668c52/components/mermaid-render.ts",
+      "committed_counterpart_sha256": "f051d0f30ab7ad43b6796629cca726b1b3c4177101d9b8511e37f8c6dd01d74b",
+      "counterpart_matches_current_local_bytes": true
+    },
+    {
+      "id": "local-041",
+      "original_target": "/root/learnharness/components/session-overlay.tsx#L279-L286",
+      "relative_path": "components/session-overlay.tsx",
+      "original_fragment": "L279-L286",
+      "available_at_archive": true,
+      "local_bytes_at_archive": 13091,
+      "local_sha256_at_archive": "0afeba364fa12b2d0040ac882da2a76f2591e2f16124e9686720251530d91c04",
+      "committed_counterpart": "https://github.com/gzy31007/learnharness/blob/9f6a61757eae4772d42094aa40740be367668c52/components/session-overlay.tsx",
+      "committed_counterpart_sha256": "0afeba364fa12b2d0040ac882da2a76f2591e2f16124e9686720251530d91c04",
+      "counterpart_matches_current_local_bytes": true
+    },
+    {
+      "id": "local-042",
+      "original_target": "/root/learnharness/components/session-overlay.tsx#L90-L110",
+      "relative_path": "components/session-overlay.tsx",
+      "original_fragment": "L90-L110",
+      "available_at_archive": true,
+      "local_bytes_at_archive": 13091,
+      "local_sha256_at_archive": "0afeba364fa12b2d0040ac882da2a76f2591e2f16124e9686720251530d91c04",
+      "committed_counterpart": "https://github.com/gzy31007/learnharness/blob/9f6a61757eae4772d42094aa40740be367668c52/components/session-overlay.tsx",
+      "committed_counterpart_sha256": "0afeba364fa12b2d0040ac882da2a76f2591e2f16124e9686720251530d91c04",
+      "counterpart_matches_current_local_bytes": true
+    },
+    {
+      "id": "local-043",
+      "original_target": "/root/learnharness/docs/subscription-implementation-plan.md",
+      "relative_path": "docs/subscription-implementation-plan.md",
+      "original_fragment": null,
+      "available_at_archive": true,
+      "local_bytes_at_archive": 36815,
+      "local_sha256_at_archive": "e5b0ebfaada9edc36edfbfba536c7602573bedb637bece2b8591aaa1cc4879f7",
+      "committed_counterpart": "https://github.com/gzy31007/learnharness/blob/9f6a61757eae4772d42094aa40740be367668c52/docs/subscription-implementation-plan.md",
+      "committed_counterpart_sha256": "e5b0ebfaada9edc36edfbfba536c7602573bedb637bece2b8591aaa1cc4879f7",
+      "counterpart_matches_current_local_bytes": true
+    },
+    {
+      "id": "local-044",
+      "original_target": "/root/learnharness/docs/subscription-implementation.md",
+      "relative_path": "docs/subscription-implementation.md",
+      "original_fragment": null,
+      "available_at_archive": true,
+      "local_bytes_at_archive": 17164,
+      "local_sha256_at_archive": "f06121ad1c67844909e124799f17251115554d5263c68275a3ad6aa7013af15b",
+      "committed_counterpart": "https://github.com/gzy31007/learnharness/blob/9f6a61757eae4772d42094aa40740be367668c52/docs/subscription-implementation.md",
+      "committed_counterpart_sha256": "f06121ad1c67844909e124799f17251115554d5263c68275a3ad6aa7013af15b",
+      "counterpart_matches_current_local_bytes": true
+    },
+    {
+      "id": "local-045",
+      "original_target": "/root/learnharness/docs/subscription-windows-acceptance.md",
+      "relative_path": "docs/subscription-windows-acceptance.md",
+      "original_fragment": null,
+      "available_at_archive": true,
+      "local_bytes_at_archive": 11052,
+      "local_sha256_at_archive": "6f90282bffc13b705c0dce4773dc208180b194781a367669215f68c61d64c74c",
+      "committed_counterpart": "https://github.com/gzy31007/learnharness/blob/9f6a61757eae4772d42094aa40740be367668c52/docs/subscription-windows-acceptance.md",
+      "committed_counterpart_sha256": "6f90282bffc13b705c0dce4773dc208180b194781a367669215f68c61d64c74c",
+      "counterpart_matches_current_local_bytes": true
+    },
+    {
+      "id": "local-046",
+      "original_target": "/root/learnharness/docs/subscription-windows-acceptance.md#L20-L29",
+      "relative_path": "docs/subscription-windows-acceptance.md",
+      "original_fragment": "L20-L29",
+      "available_at_archive": true,
+      "local_bytes_at_archive": 11052,
+      "local_sha256_at_archive": "6f90282bffc13b705c0dce4773dc208180b194781a367669215f68c61d64c74c",
+      "committed_counterpart": "https://github.com/gzy31007/learnharness/blob/9f6a61757eae4772d42094aa40740be367668c52/docs/subscription-windows-acceptance.md",
+      "committed_counterpart_sha256": "6f90282bffc13b705c0dce4773dc208180b194781a367669215f68c61d64c74c",
+      "counterpart_matches_current_local_bytes": true
+    },
+    {
+      "id": "local-047",
+      "original_target": "/root/learnharness/docs/subscription-windows-acceptance.md#L44-L48",
+      "relative_path": "docs/subscription-windows-acceptance.md",
+      "original_fragment": "L44-L48",
+      "available_at_archive": true,
+      "local_bytes_at_archive": 11052,
+      "local_sha256_at_archive": "6f90282bffc13b705c0dce4773dc208180b194781a367669215f68c61d64c74c",
+      "committed_counterpart": "https://github.com/gzy31007/learnharness/blob/9f6a61757eae4772d42094aa40740be367668c52/docs/subscription-windows-acceptance.md",
+      "committed_counterpart_sha256": "6f90282bffc13b705c0dce4773dc208180b194781a367669215f68c61d64c74c",
+      "counterpart_matches_current_local_bytes": true
+    },
+    {
+      "id": "local-048",
+      "original_target": "/root/learnharness/docs/subscription-windows-acceptance.md#L64-L72",
+      "relative_path": "docs/subscription-windows-acceptance.md",
+      "original_fragment": "L64-L72",
+      "available_at_archive": true,
+      "local_bytes_at_archive": 11052,
+      "local_sha256_at_archive": "6f90282bffc13b705c0dce4773dc208180b194781a367669215f68c61d64c74c",
+      "committed_counterpart": "https://github.com/gzy31007/learnharness/blob/9f6a61757eae4772d42094aa40740be367668c52/docs/subscription-windows-acceptance.md",
+      "committed_counterpart_sha256": "6f90282bffc13b705c0dce4773dc208180b194781a367669215f68c61d64c74c",
+      "counterpart_matches_current_local_bytes": true
+    },
+    {
+      "id": "local-049",
+      "original_target": "/root/learnharness/electron-builder.acceptance.yml#L1-L27",
+      "relative_path": "electron-builder.acceptance.yml",
+      "original_fragment": "L1-L27",
+      "available_at_archive": true,
+      "local_bytes_at_archive": 1464,
+      "local_sha256_at_archive": "33acf66645ba23072df4c61ee9d56995fe602ff58f0c3ce64578c066bac3a051",
+      "committed_counterpart": "https://github.com/gzy31007/learnharness/blob/9f6a61757eae4772d42094aa40740be367668c52/electron-builder.acceptance.yml",
+      "committed_counterpart_sha256": "33acf66645ba23072df4c61ee9d56995fe602ff58f0c3ce64578c066bac3a051",
+      "counterpart_matches_current_local_bytes": true
+    },
+    {
+      "id": "local-050",
+      "original_target": "/root/learnharness/electron-builder.yml#L173-L184",
+      "relative_path": "electron-builder.yml",
+      "original_fragment": "L173-L184",
+      "available_at_archive": true,
+      "local_bytes_at_archive": 8597,
+      "local_sha256_at_archive": "3d70fcd61ffb638c49220ae2d5eea11c858680efb5c689ddeb75f7c23533a589",
+      "committed_counterpart": "https://github.com/gzy31007/learnharness/blob/9f6a61757eae4772d42094aa40740be367668c52/electron-builder.yml",
+      "committed_counterpart_sha256": "3d70fcd61ffb638c49220ae2d5eea11c858680efb5c689ddeb75f7c23533a589",
+      "counterpart_matches_current_local_bytes": true
+    },
+    {
+      "id": "local-051",
+      "original_target": "/root/learnharness/electron-builder.yml#L29-L56",
+      "relative_path": "electron-builder.yml",
+      "original_fragment": "L29-L56",
+      "available_at_archive": true,
+      "local_bytes_at_archive": 8597,
+      "local_sha256_at_archive": "3d70fcd61ffb638c49220ae2d5eea11c858680efb5c689ddeb75f7c23533a589",
+      "committed_counterpart": "https://github.com/gzy31007/learnharness/blob/9f6a61757eae4772d42094aa40740be367668c52/electron-builder.yml",
+      "committed_counterpart_sha256": "3d70fcd61ffb638c49220ae2d5eea11c858680efb5c689ddeb75f7c23533a589",
+      "counterpart_matches_current_local_bytes": true
+    },
+    {
+      "id": "local-052",
+      "original_target": "/root/learnharness/electron-builder.yml#L84-L96",
+      "relative_path": "electron-builder.yml",
+      "original_fragment": "L84-L96",
+      "available_at_archive": true,
+      "local_bytes_at_archive": 8597,
+      "local_sha256_at_archive": "3d70fcd61ffb638c49220ae2d5eea11c858680efb5c689ddeb75f7c23533a589",
+      "committed_counterpart": "https://github.com/gzy31007/learnharness/blob/9f6a61757eae4772d42094aa40740be367668c52/electron-builder.yml",
+      "committed_counterpart_sha256": "3d70fcd61ffb638c49220ae2d5eea11c858680efb5c689ddeb75f7c23533a589",
+      "counterpart_matches_current_local_bytes": true
+    },
+    {
+      "id": "local-053",
+      "original_target": "/root/learnharness/electron/main.cjs#L425-L439",
+      "relative_path": "electron/main.cjs",
+      "original_fragment": "L425-L439",
+      "available_at_archive": true,
+      "local_bytes_at_archive": 27233,
+      "local_sha256_at_archive": "d88961f87042dc09af38110bbb17f43608ae7138240a41b77cf851d0084e502a",
+      "committed_counterpart": "https://github.com/gzy31007/learnharness/blob/9f6a61757eae4772d42094aa40740be367668c52/electron/main.cjs",
+      "committed_counterpart_sha256": "d88961f87042dc09af38110bbb17f43608ae7138240a41b77cf851d0084e502a",
+      "counterpart_matches_current_local_bytes": true
+    },
+    {
+      "id": "local-054",
+      "original_target": "/root/learnharness/electron/main.cjs#L425-L472",
+      "relative_path": "electron/main.cjs",
+      "original_fragment": "L425-L472",
+      "available_at_archive": true,
+      "local_bytes_at_archive": 27233,
+      "local_sha256_at_archive": "d88961f87042dc09af38110bbb17f43608ae7138240a41b77cf851d0084e502a",
+      "committed_counterpart": "https://github.com/gzy31007/learnharness/blob/9f6a61757eae4772d42094aa40740be367668c52/electron/main.cjs",
+      "committed_counterpart_sha256": "d88961f87042dc09af38110bbb17f43608ae7138240a41b77cf851d0084e502a",
+      "counterpart_matches_current_local_bytes": true
+    },
+    {
+      "id": "local-055",
+      "original_target": "/root/learnharness/electron/main.cjs#L442-L472",
+      "relative_path": "electron/main.cjs",
+      "original_fragment": "L442-L472",
+      "available_at_archive": true,
+      "local_bytes_at_archive": 27233,
+      "local_sha256_at_archive": "d88961f87042dc09af38110bbb17f43608ae7138240a41b77cf851d0084e502a",
+      "committed_counterpart": "https://github.com/gzy31007/learnharness/blob/9f6a61757eae4772d42094aa40740be367668c52/electron/main.cjs",
+      "committed_counterpart_sha256": "d88961f87042dc09af38110bbb17f43608ae7138240a41b77cf851d0084e502a",
+      "counterpart_matches_current_local_bytes": true
+    },
+    {
+      "id": "local-056",
+      "original_target": "/root/learnharness/electron/main.cjs#L473-L498",
+      "relative_path": "electron/main.cjs",
+      "original_fragment": "L473-L498",
+      "available_at_archive": true,
+      "local_bytes_at_archive": 27233,
+      "local_sha256_at_archive": "d88961f87042dc09af38110bbb17f43608ae7138240a41b77cf851d0084e502a",
+      "committed_counterpart": "https://github.com/gzy31007/learnharness/blob/9f6a61757eae4772d42094aa40740be367668c52/electron/main.cjs",
+      "committed_counterpart_sha256": "d88961f87042dc09af38110bbb17f43608ae7138240a41b77cf851d0084e502a",
+      "counterpart_matches_current_local_bytes": true
+    },
+    {
+      "id": "local-057",
+      "original_target": "/root/learnharness/electron/main.cjs#L59-L117",
+      "relative_path": "electron/main.cjs",
+      "original_fragment": "L59-L117",
+      "available_at_archive": true,
+      "local_bytes_at_archive": 27233,
+      "local_sha256_at_archive": "d88961f87042dc09af38110bbb17f43608ae7138240a41b77cf851d0084e502a",
+      "committed_counterpart": "https://github.com/gzy31007/learnharness/blob/9f6a61757eae4772d42094aa40740be367668c52/electron/main.cjs",
+      "committed_counterpart_sha256": "d88961f87042dc09af38110bbb17f43608ae7138240a41b77cf851d0084e502a",
+      "counterpart_matches_current_local_bytes": true
+    },
+    {
+      "id": "local-058",
+      "original_target": "/root/learnharness/electron/main.cjs#L71-L92",
+      "relative_path": "electron/main.cjs",
+      "original_fragment": "L71-L92",
+      "available_at_archive": true,
+      "local_bytes_at_archive": 27233,
+      "local_sha256_at_archive": "d88961f87042dc09af38110bbb17f43608ae7138240a41b77cf851d0084e502a",
+      "committed_counterpart": "https://github.com/gzy31007/learnharness/blob/9f6a61757eae4772d42094aa40740be367668c52/electron/main.cjs",
+      "committed_counterpart_sha256": "d88961f87042dc09af38110bbb17f43608ae7138240a41b77cf851d0084e502a",
+      "counterpart_matches_current_local_bytes": true
+    },
+    {
+      "id": "local-059",
+      "original_target": "/root/learnharness/electron/main.cjs#L83-L90",
+      "relative_path": "electron/main.cjs",
+      "original_fragment": "L83-L90",
+      "available_at_archive": true,
+      "local_bytes_at_archive": 27233,
+      "local_sha256_at_archive": "d88961f87042dc09af38110bbb17f43608ae7138240a41b77cf851d0084e502a",
+      "committed_counterpart": "https://github.com/gzy31007/learnharness/blob/9f6a61757eae4772d42094aa40740be367668c52/electron/main.cjs",
+      "committed_counterpart_sha256": "d88961f87042dc09af38110bbb17f43608ae7138240a41b77cf851d0084e502a",
+      "counterpart_matches_current_local_bytes": true
+    },
+    {
+      "id": "local-060",
+      "original_target": "/root/learnharness/next.config.ts",
+      "relative_path": "next.config.ts",
+      "original_fragment": null,
+      "available_at_archive": true,
+      "local_bytes_at_archive": 4687,
+      "local_sha256_at_archive": "acfeeb468f68ab1853c1cd93993e9717542a43a34ffc64debcc4f9322932b309",
+      "committed_counterpart": "https://github.com/gzy31007/learnharness/blob/9f6a61757eae4772d42094aa40740be367668c52/next.config.ts",
+      "committed_counterpart_sha256": "acfeeb468f68ab1853c1cd93993e9717542a43a34ffc64debcc4f9322932b309",
+      "counterpart_matches_current_local_bytes": true
+    },
+    {
+      "id": "local-061",
+      "original_target": "/root/learnharness/next.config.ts#L56-L71",
+      "relative_path": "next.config.ts",
+      "original_fragment": "L56-L71",
+      "available_at_archive": true,
+      "local_bytes_at_archive": 4687,
+      "local_sha256_at_archive": "acfeeb468f68ab1853c1cd93993e9717542a43a34ffc64debcc4f9322932b309",
+      "committed_counterpart": "https://github.com/gzy31007/learnharness/blob/9f6a61757eae4772d42094aa40740be367668c52/next.config.ts",
+      "committed_counterpart_sha256": "acfeeb468f68ab1853c1cd93993e9717542a43a34ffc64debcc4f9322932b309",
+      "counterpart_matches_current_local_bytes": true
+    },
+    {
+      "id": "local-062",
+      "original_target": "/root/learnharness/node_modules/@earendil-works/pi-ai/dist/api/openai-codex-responses.js#L725-L752",
+      "relative_path": "node_modules/@earendil-works/pi-ai/dist/api/openai-codex-responses.js",
+      "original_fragment": "L725-L752",
+      "available_at_archive": true,
+      "local_bytes_at_archive": 55420,
+      "local_sha256_at_archive": "53b4abdad5f2af1e5e5c12605d96bf6651d4a4b847351d87898ebb67d04236f7",
+      "committed_counterpart": null,
+      "committed_counterpart_sha256": null,
+      "counterpart_matches_current_local_bytes": null
+    },
+    {
+      "id": "local-063",
+      "original_target": "/root/learnharness/node_modules/@streamdown/mermaid/dist/index.js#L1",
+      "relative_path": "node_modules/@streamdown/mermaid/dist/index.js",
+      "original_fragment": "L1",
+      "available_at_archive": true,
+      "local_bytes_at_archive": 489,
+      "local_sha256_at_archive": "d0b8a8fe29e526c39d3e9f0df555ec1d1454ec5a635af8c459913d620ca53737",
+      "committed_counterpart": null,
+      "committed_counterpart_sha256": null,
+      "counterpart_matches_current_local_bytes": null
+    },
+    {
+      "id": "local-064",
+      "original_target": "/root/learnharness/node_modules/@streamdown/mermaid/package.json#L1-L22",
+      "relative_path": "node_modules/@streamdown/mermaid/package.json",
+      "original_fragment": "L1-L22",
+      "available_at_archive": true,
+      "local_bytes_at_archive": 986,
+      "local_sha256_at_archive": "e3ef5731f8e8a3931112b566f034898d9fa2959d85d18f49eb5270868b75a546",
+      "committed_counterpart": null,
+      "committed_counterpart_sha256": null,
+      "counterpart_matches_current_local_bytes": null
+    },
+    {
+      "id": "local-065",
+      "original_target": "/root/learnharness/node_modules/dompurify/package.json#L155-L157",
+      "relative_path": "node_modules/dompurify/package.json",
+      "original_fragment": "L155-L157",
+      "available_at_archive": true,
+      "local_bytes_at_archive": 6670,
+      "local_sha256_at_archive": "3b33adf1d09d69dbb3174650e8e6786d55ec2a74d31ec8365a2f285e42cc04a8",
+      "committed_counterpart": null,
+      "committed_counterpart_sha256": null,
+      "counterpart_matches_current_local_bytes": null
+    },
+    {
+      "id": "local-066",
+      "original_target": "/root/learnharness/node_modules/mermaid/dist/chunks/mermaid.core/chunk-DU6HZSFF.mjs#L5054-L5127",
+      "relative_path": "node_modules/mermaid/dist/chunks/mermaid.core/chunk-DU6HZSFF.mjs",
+      "original_fragment": "L5054-L5127",
+      "available_at_archive": true,
+      "local_bytes_at_archive": 268616,
+      "local_sha256_at_archive": "3e097dc503ef753116bb327d93a8592e3dbbcaa9cc2a3696e552a982c6a41bb6",
+      "committed_counterpart": null,
+      "committed_counterpart_sha256": null,
+      "counterpart_matches_current_local_bytes": null
+    },
+    {
+      "id": "local-067",
+      "original_target": "/root/learnharness/node_modules/mermaid/dist/chunks/mermaid.core/chunk-G27WJ6UU.mjs#L1770-L1783",
+      "relative_path": "node_modules/mermaid/dist/chunks/mermaid.core/chunk-G27WJ6UU.mjs",
+      "original_fragment": "L1770-L1783",
+      "available_at_archive": true,
+      "local_bytes_at_archive": 74785,
+      "local_sha256_at_archive": "f1271a81dc26b6ed02507467f4ec66ca01aebc99fe4d720fc47d8921829968fd",
+      "committed_counterpart": null,
+      "committed_counterpart_sha256": null,
+      "counterpart_matches_current_local_bytes": null
+    },
+    {
+      "id": "local-068",
+      "original_target": "/root/learnharness/node_modules/mermaid/dist/chunks/mermaid.core/chunk-LCL6LL3I.mjs#L1210-L1224",
+      "relative_path": "node_modules/mermaid/dist/chunks/mermaid.core/chunk-LCL6LL3I.mjs",
+      "original_fragment": "L1210-L1224",
+      "available_at_archive": true,
+      "local_bytes_at_archive": 86651,
+      "local_sha256_at_archive": "55b977322fdb45c317bdf38b4dd881ad8eccbc6a0b5b18f8de1f07064fe14986",
+      "committed_counterpart": null,
+      "committed_counterpart_sha256": null,
+      "counterpart_matches_current_local_bytes": null
+    },
+    {
+      "id": "local-069",
+      "original_target": "/root/learnharness/node_modules/mermaid/dist/chunks/mermaid.core/chunk-RHFEMEQ7.mjs#L549-L562",
+      "relative_path": "node_modules/mermaid/dist/chunks/mermaid.core/chunk-RHFEMEQ7.mjs",
+      "original_fragment": "L549-L562",
+      "available_at_archive": true,
+      "local_bytes_at_archive": 107948,
+      "local_sha256_at_archive": "bf512aada27cbfe2b776c0fb751872e3a740e1be9675776ee81d2c840b23ef8b",
+      "committed_counterpart": null,
+      "committed_counterpart_sha256": null,
+      "counterpart_matches_current_local_bytes": null
+    },
+    {
+      "id": "local-070",
+      "original_target": "/root/learnharness/node_modules/mermaid/dist/chunks/mermaid.esm.min/chunk-QJSWEUOL.mjs#L131",
+      "relative_path": "node_modules/mermaid/dist/chunks/mermaid.esm.min/chunk-QJSWEUOL.mjs",
+      "original_fragment": "L131",
+      "available_at_archive": true,
+      "local_bytes_at_archive": 240059,
+      "local_sha256_at_archive": "3391f563eeeadc7ea41e174529bedf753a53d762518991e6e147de9e728758aa",
+      "committed_counterpart": null,
+      "committed_counterpart_sha256": null,
+      "counterpart_matches_current_local_bytes": null
+    },
+    {
+      "id": "local-071",
+      "original_target": "/root/learnharness/node_modules/mermaid/dist/chunks/mermaid.esm/chunk-AHS5MEEA.mjs#L5780",
+      "relative_path": "node_modules/mermaid/dist/chunks/mermaid.esm/chunk-AHS5MEEA.mjs",
+      "original_fragment": "L5780",
+      "available_at_archive": true,
+      "local_bytes_at_archive": 365205,
+      "local_sha256_at_archive": "a5e275eda942142647130c0675b4b7b666841ba6272a06d17437999506a4b791",
+      "committed_counterpart": null,
+      "committed_counterpart_sha256": null,
+      "counterpart_matches_current_local_bytes": null
+    },
+    {
+      "id": "local-072",
+      "original_target": "/root/learnharness/node_modules/mermaid/dist/chunks/mermaid.esm/chunk-AHS5MEEA.mjs#L6119-L6123",
+      "relative_path": "node_modules/mermaid/dist/chunks/mermaid.esm/chunk-AHS5MEEA.mjs",
+      "original_fragment": "L6119-L6123",
+      "available_at_archive": true,
+      "local_bytes_at_archive": 365205,
+      "local_sha256_at_archive": "a5e275eda942142647130c0675b4b7b666841ba6272a06d17437999506a4b791",
+      "committed_counterpart": null,
+      "committed_counterpart_sha256": null,
+      "counterpart_matches_current_local_bytes": null
+    },
+    {
+      "id": "local-073",
+      "original_target": "/root/learnharness/node_modules/mermaid/dist/mermaid.core.mjs#L1351-L1364",
+      "relative_path": "node_modules/mermaid/dist/mermaid.core.mjs",
+      "original_fragment": "L1351-L1364",
+      "available_at_archive": true,
+      "local_bytes_at_archive": 53265,
+      "local_sha256_at_archive": "6e261e8183fb4f0a6880059c1b32d538a368a5abb34e06cb8e8f1d375c79cc0b",
+      "committed_counterpart": null,
+      "committed_counterpart_sha256": null,
+      "counterpart_matches_current_local_bytes": null
+    },
+    {
+      "id": "local-074",
+      "original_target": "/root/learnharness/node_modules/mermaid/package.json#L51-L74",
+      "relative_path": "node_modules/mermaid/package.json",
+      "original_fragment": "L51-L74",
+      "available_at_archive": true,
+      "local_bytes_at_archive": 4738,
+      "local_sha256_at_archive": "3dfa0b40664b4d1c2e011dc0f0aaae864e2ae6497ee7f2dcfcf5c307852298a4",
+      "committed_counterpart": null,
+      "committed_counterpart_sha256": null,
+      "counterpart_matches_current_local_bytes": null
+    },
+    {
+      "id": "local-075",
+      "original_target": "/root/learnharness/node_modules/mermaid/package.json#L6-L14",
+      "relative_path": "node_modules/mermaid/package.json",
+      "original_fragment": "L6-L14",
+      "available_at_archive": true,
+      "local_bytes_at_archive": 4738,
+      "local_sha256_at_archive": "3dfa0b40664b4d1c2e011dc0f0aaae864e2ae6497ee7f2dcfcf5c307852298a4",
+      "committed_counterpart": null,
+      "committed_counterpart_sha256": null,
+      "counterpart_matches_current_local_bytes": null
+    },
+    {
+      "id": "local-076",
+      "original_target": "/root/learnharness/node_modules/next/node_modules/postcss/lib/input.js#L70-L75",
+      "relative_path": "node_modules/next/node_modules/postcss/lib/input.js",
+      "original_fragment": "L70-L75",
+      "available_at_archive": true,
+      "local_bytes_at_archive": 7274,
+      "local_sha256_at_archive": "52358502e6ea455d421d21a98fc0a3be3b974ca624b96f43b318780f3e150bc2",
+      "committed_counterpart": null,
+      "committed_counterpart_sha256": null,
+      "counterpart_matches_current_local_bytes": null
+    },
+    {
+      "id": "local-077",
+      "original_target": "/root/learnharness/node_modules/next/node_modules/postcss/lib/map-generator.js#L103-L128",
+      "relative_path": "node_modules/next/node_modules/postcss/lib/map-generator.js",
+      "original_fragment": "L103-L128",
+      "available_at_archive": true,
+      "local_bytes_at_archive": 10031,
+      "local_sha256_at_archive": "feccbc87472d5d1cc660c2bfd4958cbe5442173f03cbfa518808725f684a313c",
+      "committed_counterpart": null,
+      "committed_counterpart_sha256": null,
+      "counterpart_matches_current_local_bytes": null
+    },
+    {
+      "id": "local-078",
+      "original_target": "/root/learnharness/node_modules/next/node_modules/postcss/lib/previous-map.js#L104-L146",
+      "relative_path": "node_modules/next/node_modules/postcss/lib/previous-map.js",
+      "original_fragment": "L104-L146",
+      "available_at_archive": true,
+      "local_bytes_at_archive": 4685,
+      "local_sha256_at_archive": "5ff94015422fc77cc8b68428aa4ccf255d57d0d0be18fe81bc52590e3136433e",
+      "committed_counterpart": null,
+      "committed_counterpart_sha256": null,
+      "counterpart_matches_current_local_bytes": null
+    },
+    {
+      "id": "local-079",
+      "original_target": "/root/learnharness/node_modules/next/node_modules/postcss/lib/previous-map.js#L16-L36",
+      "relative_path": "node_modules/next/node_modules/postcss/lib/previous-map.js",
+      "original_fragment": "L16-L36",
+      "available_at_archive": true,
+      "local_bytes_at_archive": 4685,
+      "local_sha256_at_archive": "5ff94015422fc77cc8b68428aa4ccf255d57d0d0be18fe81bc52590e3136433e",
+      "committed_counterpart": null,
+      "committed_counterpart_sha256": null,
+      "counterpart_matches_current_local_bytes": null
+    },
+    {
+      "id": "local-080",
+      "original_target": "/root/learnharness/node_modules/next/node_modules/postcss/lib/previous-map.js#L64-L70",
+      "relative_path": "node_modules/next/node_modules/postcss/lib/previous-map.js",
+      "original_fragment": "L64-L70",
+      "available_at_archive": true,
+      "local_bytes_at_archive": 4685,
+      "local_sha256_at_archive": "5ff94015422fc77cc8b68428aa4ccf255d57d0d0be18fe81bc52590e3136433e",
+      "committed_counterpart": null,
+      "committed_counterpart_sha256": null,
+      "counterpart_matches_current_local_bytes": null
+    },
+    {
+      "id": "local-081",
+      "original_target": "/root/learnharness/node_modules/next/node_modules/postcss/lib/previous-map.js#L87-L101",
+      "relative_path": "node_modules/next/node_modules/postcss/lib/previous-map.js",
+      "original_fragment": "L87-L101",
+      "available_at_archive": true,
+      "local_bytes_at_archive": 4685,
+      "local_sha256_at_archive": "5ff94015422fc77cc8b68428aa4ccf255d57d0d0be18fe81bc52590e3136433e",
+      "committed_counterpart": null,
+      "committed_counterpart_sha256": null,
+      "counterpart_matches_current_local_bytes": null
+    },
+    {
+      "id": "local-082",
+      "original_target": "/root/learnharness/node_modules/openai/client.js#L241-L243",
+      "relative_path": "node_modules/openai/client.js",
+      "original_fragment": "L241-L243",
+      "available_at_archive": true,
+      "local_bytes_at_archive": 75614,
+      "local_sha256_at_archive": "4e04a73923f7186de9179b705b431ef79265db4e4acf89372cd4589b12a7dd89",
+      "committed_counterpart": null,
+      "committed_counterpart_sha256": null,
+      "counterpart_matches_current_local_bytes": null
+    },
+    {
+      "id": "local-083",
+      "original_target": "/root/learnharness/node_modules/openai/internal/auth/x509-transport-capability.js#L57-L77",
+      "relative_path": "node_modules/openai/internal/auth/x509-transport-capability.js",
+      "original_fragment": "L57-L77",
+      "available_at_archive": true,
+      "local_bytes_at_archive": 8174,
+      "local_sha256_at_archive": "dbeff64e4465c8b78ef07f50d5a92a2373b88cbbe91838178938511d244d3cae",
+      "committed_counterpart": null,
+      "committed_counterpart_sha256": null,
+      "counterpart_matches_current_local_bytes": null
+    },
+    {
+      "id": "local-084",
+      "original_target": "/root/learnharness/node_modules/openai/internal/auth/x509-transport-capability.js#L7-L11",
+      "relative_path": "node_modules/openai/internal/auth/x509-transport-capability.js",
+      "original_fragment": "L7-L11",
+      "available_at_archive": true,
+      "local_bytes_at_archive": 8174,
+      "local_sha256_at_archive": "dbeff64e4465c8b78ef07f50d5a92a2373b88cbbe91838178938511d244d3cae",
+      "committed_counterpart": null,
+      "committed_counterpart_sha256": null,
+      "counterpart_matches_current_local_bytes": null
+    },
+    {
+      "id": "local-085",
+      "original_target": "/root/learnharness/node_modules/openai/internal/auth/x509-transport-capability.js#L79-L106",
+      "relative_path": "node_modules/openai/internal/auth/x509-transport-capability.js",
+      "original_fragment": "L79-L106",
+      "available_at_archive": true,
+      "local_bytes_at_archive": 8174,
+      "local_sha256_at_archive": "dbeff64e4465c8b78ef07f50d5a92a2373b88cbbe91838178938511d244d3cae",
+      "committed_counterpart": null,
+      "committed_counterpart_sha256": null,
+      "counterpart_matches_current_local_bytes": null
+    },
+    {
+      "id": "local-086",
+      "original_target": "/root/learnharness/node_modules/openai/internal/shims.js#L14-L18",
+      "relative_path": "node_modules/openai/internal/shims.js",
+      "original_fragment": "L14-L18",
+      "available_at_archive": true,
+      "local_bytes_at_archive": 3681,
+      "local_sha256_at_archive": "86169eacb9025893f13eb27f36707aded024d72f537578de39adb6b081e251ac",
+      "committed_counterpart": null,
+      "committed_counterpart_sha256": null,
+      "counterpart_matches_current_local_bytes": null
+    },
+    {
+      "id": "local-087",
+      "original_target": "/root/learnharness/node_modules/openai/package.json#L288-L305",
+      "relative_path": "node_modules/openai/package.json",
+      "original_fragment": "L288-L305",
+      "available_at_archive": true,
+      "local_bytes_at_archive": 7323,
+      "local_sha256_at_archive": "8a855f81669a434ce894e2d1ae2f18e9050e93c57d14091f155cd543056bdc30",
+      "committed_counterpart": null,
+      "committed_counterpart_sha256": null,
+      "counterpart_matches_current_local_bytes": null
+    },
+    {
+      "id": "local-088",
+      "original_target": "/root/learnharness/node_modules/streamdown/dist/chunk-BO2N2NFS.js#L23",
+      "relative_path": "node_modules/streamdown/dist/chunk-BO2N2NFS.js",
+      "original_fragment": "L23",
+      "available_at_archive": true,
+      "local_bytes_at_archive": 67773,
+      "local_sha256_at_archive": "e34d36d49d4fcae8329a595d6128a44d7139d978e065609cc528dc1649b47ff2",
+      "committed_counterpart": null,
+      "committed_counterpart_sha256": null,
+      "counterpart_matches_current_local_bytes": null
+    },
+    {
+      "id": "local-089",
+      "original_target": "/root/learnharness/node_modules/streamdown/package.json#L53-L69",
+      "relative_path": "node_modules/streamdown/package.json",
+      "original_fragment": "L53-L69",
+      "available_at_archive": true,
+      "local_bytes_at_archive": 2278,
+      "local_sha256_at_archive": "828b00e3ef03f90704058400fb9ed824c344574504ed48a823e075bd97ea73eb",
+      "committed_counterpart": null,
+      "committed_counterpart_sha256": null,
+      "counterpart_matches_current_local_bytes": null
+    },
+    {
+      "id": "local-090",
+      "original_target": "/root/learnharness/node_modules/undici/package.json#L1-L4",
+      "relative_path": "node_modules/undici/package.json",
+      "original_fragment": "L1-L4",
+      "available_at_archive": true,
+      "local_bytes_at_archive": 6333,
+      "local_sha256_at_archive": "d2fb5736b5adad6a74c3fba9345d756258e1e953a3a2a13c03fca1bd6c9f6c52",
+      "committed_counterpart": null,
+      "committed_counterpart_sha256": null,
+      "counterpart_matches_current_local_bytes": null
+    },
+    {
+      "id": "local-091",
+      "original_target": "/root/learnharness/package-lock.json#L11749-L11763",
+      "relative_path": "package-lock.json",
+      "original_fragment": "L11749-L11763",
+      "available_at_archive": true,
+      "local_bytes_at_archive": 567432,
+      "local_sha256_at_archive": "858d7030a5b6a5e96be334594366c38e16f275d64182e58d984d1040ffc9026a",
+      "committed_counterpart": "https://github.com/gzy31007/learnharness/blob/9f6a61757eae4772d42094aa40740be367668c52/package-lock.json",
+      "committed_counterpart_sha256": "858d7030a5b6a5e96be334594366c38e16f275d64182e58d984d1040ffc9026a",
+      "counterpart_matches_current_local_bytes": true
+    },
+    {
+      "id": "local-092",
+      "original_target": "/root/learnharness/package-lock.json#L12119-L12125",
+      "relative_path": "package-lock.json",
+      "original_fragment": "L12119-L12125",
+      "available_at_archive": true,
+      "local_bytes_at_archive": 567432,
+      "local_sha256_at_archive": "858d7030a5b6a5e96be334594366c38e16f275d64182e58d984d1040ffc9026a",
+      "committed_counterpart": "https://github.com/gzy31007/learnharness/blob/9f6a61757eae4772d42094aa40740be367668c52/package-lock.json",
+      "committed_counterpart_sha256": "858d7030a5b6a5e96be334594366c38e16f275d64182e58d984d1040ffc9026a",
+      "counterpart_matches_current_local_bytes": true
+    },
+    {
+      "id": "local-093",
+      "original_target": "/root/learnharness/package-lock.json#L12662-L12690",
+      "relative_path": "package-lock.json",
+      "original_fragment": "L12662-L12690",
+      "available_at_archive": true,
+      "local_bytes_at_archive": 567432,
+      "local_sha256_at_archive": "858d7030a5b6a5e96be334594366c38e16f275d64182e58d984d1040ffc9026a",
+      "committed_counterpart": "https://github.com/gzy31007/learnharness/blob/9f6a61757eae4772d42094aa40740be367668c52/package-lock.json",
+      "committed_counterpart_sha256": "858d7030a5b6a5e96be334594366c38e16f275d64182e58d984d1040ffc9026a",
+      "counterpart_matches_current_local_bytes": true
+    },
+    {
+      "id": "local-094",
+      "original_target": "/root/learnharness/package-lock.json#L13766-L13788",
+      "relative_path": "package-lock.json",
+      "original_fragment": "L13766-L13788",
+      "available_at_archive": true,
+      "local_bytes_at_archive": 567432,
+      "local_sha256_at_archive": "858d7030a5b6a5e96be334594366c38e16f275d64182e58d984d1040ffc9026a",
+      "committed_counterpart": "https://github.com/gzy31007/learnharness/blob/9f6a61757eae4772d42094aa40740be367668c52/package-lock.json",
+      "committed_counterpart_sha256": "858d7030a5b6a5e96be334594366c38e16f275d64182e58d984d1040ffc9026a",
+      "counterpart_matches_current_local_bytes": true
+    },
+    {
+      "id": "local-095",
+      "original_target": "/root/learnharness/package-lock.json#L13811-L13819",
+      "relative_path": "package-lock.json",
+      "original_fragment": "L13811-L13819",
+      "available_at_archive": true,
+      "local_bytes_at_archive": 567432,
+      "local_sha256_at_archive": "858d7030a5b6a5e96be334594366c38e16f275d64182e58d984d1040ffc9026a",
+      "committed_counterpart": "https://github.com/gzy31007/learnharness/blob/9f6a61757eae4772d42094aa40740be367668c52/package-lock.json",
+      "committed_counterpart_sha256": "858d7030a5b6a5e96be334594366c38e16f275d64182e58d984d1040ffc9026a",
+      "counterpart_matches_current_local_bytes": true
+    },
+    {
+      "id": "local-096",
+      "original_target": "/root/learnharness/package-lock.json#L14029-L14056",
+      "relative_path": "package-lock.json",
+      "original_fragment": "L14029-L14056",
+      "available_at_archive": true,
+      "local_bytes_at_archive": 567432,
+      "local_sha256_at_archive": "858d7030a5b6a5e96be334594366c38e16f275d64182e58d984d1040ffc9026a",
+      "committed_counterpart": "https://github.com/gzy31007/learnharness/blob/9f6a61757eae4772d42094aa40740be367668c52/package-lock.json",
+      "committed_counterpart_sha256": "858d7030a5b6a5e96be334594366c38e16f275d64182e58d984d1040ffc9026a",
+      "counterpart_matches_current_local_bytes": true
+    },
+    {
+      "id": "local-097",
+      "original_target": "/root/learnharness/package-lock.json#L16649-L16657",
+      "relative_path": "package-lock.json",
+      "original_fragment": "L16649-L16657",
+      "available_at_archive": true,
+      "local_bytes_at_archive": 567432,
+      "local_sha256_at_archive": "858d7030a5b6a5e96be334594366c38e16f275d64182e58d984d1040ffc9026a",
+      "committed_counterpart": "https://github.com/gzy31007/learnharness/blob/9f6a61757eae4772d42094aa40740be367668c52/package-lock.json",
+      "committed_counterpart_sha256": "858d7030a5b6a5e96be334594366c38e16f275d64182e58d984d1040ffc9026a",
+      "counterpart_matches_current_local_bytes": true
+    },
+    {
+      "id": "local-098",
+      "original_target": "/root/learnharness/package-lock.json#L5768-L5773",
+      "relative_path": "package-lock.json",
+      "original_fragment": "L5768-L5773",
+      "available_at_archive": true,
+      "local_bytes_at_archive": 567432,
+      "local_sha256_at_archive": "858d7030a5b6a5e96be334594366c38e16f275d64182e58d984d1040ffc9026a",
+      "committed_counterpart": "https://github.com/gzy31007/learnharness/blob/9f6a61757eae4772d42094aa40740be367668c52/package-lock.json",
+      "committed_counterpart_sha256": "858d7030a5b6a5e96be334594366c38e16f275d64182e58d984d1040ffc9026a",
+      "counterpart_matches_current_local_bytes": true
+    },
+    {
+      "id": "local-099",
+      "original_target": "/root/learnharness/package-lock.json#L6452-L6464",
+      "relative_path": "package-lock.json",
+      "original_fragment": "L6452-L6464",
+      "available_at_archive": true,
+      "local_bytes_at_archive": 567432,
+      "local_sha256_at_archive": "858d7030a5b6a5e96be334594366c38e16f275d64182e58d984d1040ffc9026a",
+      "committed_counterpart": "https://github.com/gzy31007/learnharness/blob/9f6a61757eae4772d42094aa40740be367668c52/package-lock.json",
+      "committed_counterpart_sha256": "858d7030a5b6a5e96be334594366c38e16f275d64182e58d984d1040ffc9026a",
+      "counterpart_matches_current_local_bytes": true
+    },
+    {
+      "id": "local-100",
+      "original_target": "/root/learnharness/package-lock.json#L669-L687",
+      "relative_path": "package-lock.json",
+      "original_fragment": "L669-L687",
+      "available_at_archive": true,
+      "local_bytes_at_archive": 567432,
+      "local_sha256_at_archive": "858d7030a5b6a5e96be334594366c38e16f275d64182e58d984d1040ffc9026a",
+      "committed_counterpart": "https://github.com/gzy31007/learnharness/blob/9f6a61757eae4772d42094aa40740be367668c52/package-lock.json",
+      "committed_counterpart_sha256": "858d7030a5b6a5e96be334594366c38e16f275d64182e58d984d1040ffc9026a",
+      "counterpart_matches_current_local_bytes": true
+    },
+    {
+      "id": "local-101",
+      "original_target": "/root/learnharness/package-lock.json#L8582-L8589",
+      "relative_path": "package-lock.json",
+      "original_fragment": "L8582-L8589",
+      "available_at_archive": true,
+      "local_bytes_at_archive": 567432,
+      "local_sha256_at_archive": "858d7030a5b6a5e96be334594366c38e16f275d64182e58d984d1040ffc9026a",
+      "committed_counterpart": "https://github.com/gzy31007/learnharness/blob/9f6a61757eae4772d42094aa40740be367668c52/package-lock.json",
+      "committed_counterpart_sha256": "858d7030a5b6a5e96be334594366c38e16f275d64182e58d984d1040ffc9026a",
+      "counterpart_matches_current_local_bytes": true
+    },
+    {
+      "id": "local-102",
+      "original_target": "/root/learnharness/package.json#L26-L71",
+      "relative_path": "package.json",
+      "original_fragment": "L26-L71",
+      "available_at_archive": true,
+      "local_bytes_at_archive": 2948,
+      "local_sha256_at_archive": "97599bfa557c7ab54a7528f55b745d90c0fe4255c5f64c797daec9803ca4a0bf",
+      "committed_counterpart": "https://github.com/gzy31007/learnharness/blob/9f6a61757eae4772d42094aa40740be367668c52/package.json",
+      "committed_counterpart_sha256": "97599bfa557c7ab54a7528f55b745d90c0fe4255c5f64c797daec9803ca4a0bf",
+      "counterpart_matches_current_local_bytes": true
+    },
+    {
+      "id": "local-103",
+      "original_target": "/root/learnharness/package.json#L33-L64",
+      "relative_path": "package.json",
+      "original_fragment": "L33-L64",
+      "available_at_archive": true,
+      "local_bytes_at_archive": 2948,
+      "local_sha256_at_archive": "97599bfa557c7ab54a7528f55b745d90c0fe4255c5f64c797daec9803ca4a0bf",
+      "committed_counterpart": "https://github.com/gzy31007/learnharness/blob/9f6a61757eae4772d42094aa40740be367668c52/package.json",
+      "committed_counterpart_sha256": "97599bfa557c7ab54a7528f55b745d90c0fe4255c5f64c797daec9803ca4a0bf",
+      "counterpart_matches_current_local_bytes": true
+    },
+    {
+      "id": "local-104",
+      "original_target": "/root/learnharness/package.json#L38",
+      "relative_path": "package.json",
+      "original_fragment": "L38",
+      "available_at_archive": true,
+      "local_bytes_at_archive": 2948,
+      "local_sha256_at_archive": "97599bfa557c7ab54a7528f55b745d90c0fe4255c5f64c797daec9803ca4a0bf",
+      "committed_counterpart": "https://github.com/gzy31007/learnharness/blob/9f6a61757eae4772d42094aa40740be367668c52/package.json",
+      "committed_counterpart_sha256": "97599bfa557c7ab54a7528f55b745d90c0fe4255c5f64c797daec9803ca4a0bf",
+      "counterpart_matches_current_local_bytes": true
+    },
+    {
+      "id": "local-105",
+      "original_target": "/root/learnharness/scripts/build-server.mjs",
+      "relative_path": "scripts/build-server.mjs",
+      "original_fragment": null,
+      "available_at_archive": true,
+      "local_bytes_at_archive": 4015,
+      "local_sha256_at_archive": "20ab842b82d16fa89762beb1cf9fa830f4a5ceeff4fd350ccc6582943073b19e",
+      "committed_counterpart": "https://github.com/gzy31007/learnharness/blob/9f6a61757eae4772d42094aa40740be367668c52/scripts/build-server.mjs",
+      "committed_counterpart_sha256": "20ab842b82d16fa89762beb1cf9fa830f4a5ceeff4fd350ccc6582943073b19e",
+      "counterpart_matches_current_local_bytes": true
+    },
+    {
+      "id": "local-106",
+      "original_target": "/root/learnharness/scripts/build-server.mjs#L63-L77",
+      "relative_path": "scripts/build-server.mjs",
+      "original_fragment": "L63-L77",
+      "available_at_archive": true,
+      "local_bytes_at_archive": 4015,
+      "local_sha256_at_archive": "20ab842b82d16fa89762beb1cf9fa830f4a5ceeff4fd350ccc6582943073b19e",
+      "committed_counterpart": "https://github.com/gzy31007/learnharness/blob/9f6a61757eae4772d42094aa40740be367668c52/scripts/build-server.mjs",
+      "committed_counterpart_sha256": "20ab842b82d16fa89762beb1cf9fa830f4a5ceeff4fd350ccc6582943073b19e",
+      "counterpart_matches_current_local_bytes": true
+    },
+    {
+      "id": "local-107",
+      "original_target": "/root/learnharness/scripts/smoke-server.mjs",
+      "relative_path": "scripts/smoke-server.mjs",
+      "original_fragment": null,
+      "available_at_archive": true,
+      "local_bytes_at_archive": 6351,
+      "local_sha256_at_archive": "61acc5b4dcf4f913a569fc382f83f7caf61232d4773709d38abb0fad91562a08",
+      "committed_counterpart": "https://github.com/gzy31007/learnharness/blob/9f6a61757eae4772d42094aa40740be367668c52/scripts/smoke-server.mjs",
+      "committed_counterpart_sha256": "61acc5b4dcf4f913a569fc382f83f7caf61232d4773709d38abb0fad91562a08",
+      "counterpart_matches_current_local_bytes": true
+    },
+    {
+      "id": "local-108",
+      "original_target": "/root/learnharness/scripts/smoke-server.mjs#L142-L161",
+      "relative_path": "scripts/smoke-server.mjs",
+      "original_fragment": "L142-L161",
+      "available_at_archive": true,
+      "local_bytes_at_archive": 6351,
+      "local_sha256_at_archive": "61acc5b4dcf4f913a569fc382f83f7caf61232d4773709d38abb0fad91562a08",
+      "committed_counterpart": "https://github.com/gzy31007/learnharness/blob/9f6a61757eae4772d42094aa40740be367668c52/scripts/smoke-server.mjs",
+      "committed_counterpart_sha256": "61acc5b4dcf4f913a569fc382f83f7caf61232d4773709d38abb0fad91562a08",
+      "counterpart_matches_current_local_bytes": true
+    },
+    {
+      "id": "local-109",
+      "original_target": "/root/learnharness/src/agent/subagents/demo-builder.ts#L127-L144",
+      "relative_path": "src/agent/subagents/demo-builder.ts",
+      "original_fragment": "L127-L144",
+      "available_at_archive": true,
+      "local_bytes_at_archive": 11239,
+      "local_sha256_at_archive": "2114987ba730a2775caa7a06fdd8d7f499a6d57f92d24cd2fa2be8e9ac27f752",
+      "committed_counterpart": "https://github.com/gzy31007/learnharness/blob/9f6a61757eae4772d42094aa40740be367668c52/src/agent/subagents/demo-builder.ts",
+      "committed_counterpart_sha256": "2114987ba730a2775caa7a06fdd8d7f499a6d57f92d24cd2fa2be8e9ac27f752",
+      "counterpart_matches_current_local_bytes": true
+    },
+    {
+      "id": "local-110",
+      "original_target": "/root/learnharness/src/agent/subagents/headless.ts",
+      "relative_path": "src/agent/subagents/headless.ts",
+      "original_fragment": null,
+      "available_at_archive": true,
+      "local_bytes_at_archive": 21757,
+      "local_sha256_at_archive": "e5ce932af682a26d2d9750116cfe8eb6860f8d139391258b3c8e7a64ea1aabb4",
+      "committed_counterpart": "https://github.com/gzy31007/learnharness/blob/9f6a61757eae4772d42094aa40740be367668c52/src/agent/subagents/headless.ts",
+      "committed_counterpart_sha256": "e5ce932af682a26d2d9750116cfe8eb6860f8d139391258b3c8e7a64ea1aabb4",
+      "counterpart_matches_current_local_bytes": true
+    },
+    {
+      "id": "local-111",
+      "original_target": "/root/learnharness/src/agent/subagents/headless.ts#L159-L162",
+      "relative_path": "src/agent/subagents/headless.ts",
+      "original_fragment": "L159-L162",
+      "available_at_archive": true,
+      "local_bytes_at_archive": 21757,
+      "local_sha256_at_archive": "e5ce932af682a26d2d9750116cfe8eb6860f8d139391258b3c8e7a64ea1aabb4",
+      "committed_counterpart": "https://github.com/gzy31007/learnharness/blob/9f6a61757eae4772d42094aa40740be367668c52/src/agent/subagents/headless.ts",
+      "committed_counterpart_sha256": "e5ce932af682a26d2d9750116cfe8eb6860f8d139391258b3c8e7a64ea1aabb4",
+      "counterpart_matches_current_local_bytes": true
+    },
+    {
+      "id": "local-112",
+      "original_target": "/root/learnharness/src/agent/subagents/headless.ts#L174-L205",
+      "relative_path": "src/agent/subagents/headless.ts",
+      "original_fragment": "L174-L205",
+      "available_at_archive": true,
+      "local_bytes_at_archive": 21757,
+      "local_sha256_at_archive": "e5ce932af682a26d2d9750116cfe8eb6860f8d139391258b3c8e7a64ea1aabb4",
+      "committed_counterpart": "https://github.com/gzy31007/learnharness/blob/9f6a61757eae4772d42094aa40740be367668c52/src/agent/subagents/headless.ts",
+      "committed_counterpart_sha256": "e5ce932af682a26d2d9750116cfe8eb6860f8d139391258b3c8e7a64ea1aabb4",
+      "counterpart_matches_current_local_bytes": true
+    },
+    {
+      "id": "local-113",
+      "original_target": "/root/learnharness/src/agent/subagents/headless.ts#L213-L257",
+      "relative_path": "src/agent/subagents/headless.ts",
+      "original_fragment": "L213-L257",
+      "available_at_archive": true,
+      "local_bytes_at_archive": 21757,
+      "local_sha256_at_archive": "e5ce932af682a26d2d9750116cfe8eb6860f8d139391258b3c8e7a64ea1aabb4",
+      "committed_counterpart": "https://github.com/gzy31007/learnharness/blob/9f6a61757eae4772d42094aa40740be367668c52/src/agent/subagents/headless.ts",
+      "committed_counterpart_sha256": "e5ce932af682a26d2d9750116cfe8eb6860f8d139391258b3c8e7a64ea1aabb4",
+      "counterpart_matches_current_local_bytes": true
+    },
+    {
+      "id": "local-114",
+      "original_target": "/root/learnharness/src/agent/subagents/headless.ts#L254-L269",
+      "relative_path": "src/agent/subagents/headless.ts",
+      "original_fragment": "L254-L269",
+      "available_at_archive": true,
+      "local_bytes_at_archive": 21757,
+      "local_sha256_at_archive": "e5ce932af682a26d2d9750116cfe8eb6860f8d139391258b3c8e7a64ea1aabb4",
+      "committed_counterpart": "https://github.com/gzy31007/learnharness/blob/9f6a61757eae4772d42094aa40740be367668c52/src/agent/subagents/headless.ts",
+      "committed_counterpart_sha256": "e5ce932af682a26d2d9750116cfe8eb6860f8d139391258b3c8e7a64ea1aabb4",
+      "counterpart_matches_current_local_bytes": true
+    },
+    {
+      "id": "local-115",
+      "original_target": "/root/learnharness/src/agent/subagents/runner.ts#L266-L312",
+      "relative_path": "src/agent/subagents/runner.ts",
+      "original_fragment": "L266-L312",
+      "available_at_archive": true,
+      "local_bytes_at_archive": 26822,
+      "local_sha256_at_archive": "81773bd021765ae06244ab77d270d571938f1eba0d41053354f903435d0e1bf7",
+      "committed_counterpart": "https://github.com/gzy31007/learnharness/blob/9f6a61757eae4772d42094aa40740be367668c52/src/agent/subagents/runner.ts",
+      "committed_counterpart_sha256": "81773bd021765ae06244ab77d270d571938f1eba0d41053354f903435d0e1bf7",
+      "counterpart_matches_current_local_bytes": true
+    },
+    {
+      "id": "local-116",
+      "original_target": "/root/learnharness/src/server/subscription-browser.ts#L189-L205",
+      "relative_path": "src/server/subscription-browser.ts",
+      "original_fragment": "L189-L205",
+      "available_at_archive": true,
+      "local_bytes_at_archive": 14100,
+      "local_sha256_at_archive": "dc5363f59b8fd348fade931b6dd355cad055fb5f32015aa5f128c424b7afc13e",
+      "committed_counterpart": "https://github.com/gzy31007/learnharness/blob/9f6a61757eae4772d42094aa40740be367668c52/src/server/subscription-browser.ts",
+      "committed_counterpart_sha256": "dc5363f59b8fd348fade931b6dd355cad055fb5f32015aa5f128c424b7afc13e",
+      "counterpart_matches_current_local_bytes": true
+    },
+    {
+      "id": "local-117",
+      "original_target": "/root/learnharness/src/server/subscription-browser.ts#L21-L30",
+      "relative_path": "src/server/subscription-browser.ts",
+      "original_fragment": "L21-L30",
+      "available_at_archive": true,
+      "local_bytes_at_archive": 14100,
+      "local_sha256_at_archive": "dc5363f59b8fd348fade931b6dd355cad055fb5f32015aa5f128c424b7afc13e",
+      "committed_counterpart": "https://github.com/gzy31007/learnharness/blob/9f6a61757eae4772d42094aa40740be367668c52/src/server/subscription-browser.ts",
+      "committed_counterpart_sha256": "dc5363f59b8fd348fade931b6dd355cad055fb5f32015aa5f128c424b7afc13e",
+      "counterpart_matches_current_local_bytes": true
+    },
+    {
+      "id": "local-118",
+      "original_target": "/root/learnharness/src/server/subscription-browser.ts#L300-L378",
+      "relative_path": "src/server/subscription-browser.ts",
+      "original_fragment": "L300-L378",
+      "available_at_archive": true,
+      "local_bytes_at_archive": 14100,
+      "local_sha256_at_archive": "dc5363f59b8fd348fade931b6dd355cad055fb5f32015aa5f128c424b7afc13e",
+      "committed_counterpart": "https://github.com/gzy31007/learnharness/blob/9f6a61757eae4772d42094aa40740be367668c52/src/server/subscription-browser.ts",
+      "committed_counterpart_sha256": "dc5363f59b8fd348fade931b6dd355cad055fb5f32015aa5f128c424b7afc13e",
+      "counterpart_matches_current_local_bytes": true
+    },
+    {
+      "id": "local-119",
+      "original_target": "/root/learnharness/src/server/subscription-browser.ts#L97-L116",
+      "relative_path": "src/server/subscription-browser.ts",
+      "original_fragment": "L97-L116",
+      "available_at_archive": true,
+      "local_bytes_at_archive": 14100,
+      "local_sha256_at_archive": "dc5363f59b8fd348fade931b6dd355cad055fb5f32015aa5f128c424b7afc13e",
+      "committed_counterpart": "https://github.com/gzy31007/learnharness/blob/9f6a61757eae4772d42094aa40740be367668c52/src/server/subscription-browser.ts",
+      "committed_counterpart_sha256": "dc5363f59b8fd348fade931b6dd355cad055fb5f32015aa5f128c424b7afc13e",
+      "counterpart_matches_current_local_bytes": true
+    },
+    {
+      "id": "local-120",
+      "original_target": "/root/learnharness/tests/undici-sdk.test.ts",
+      "relative_path": "tests/undici-sdk.test.ts",
+      "original_fragment": null,
+      "available_at_archive": true,
+      "local_bytes_at_archive": 18591,
+      "local_sha256_at_archive": "c044d9bbe66de410fc08d36316559fb88380161dc0445a432ac01e01a7b32e42",
+      "committed_counterpart": "https://github.com/gzy31007/learnharness/blob/9f6a61757eae4772d42094aa40740be367668c52/tests/undici-sdk.test.ts",
+      "committed_counterpart_sha256": "c044d9bbe66de410fc08d36316559fb88380161dc0445a432ac01e01a7b32e42",
+      "counterpart_matches_current_local_bytes": true
+    }
+  ]
+}
