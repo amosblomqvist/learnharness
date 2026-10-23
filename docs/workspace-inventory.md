@@ -71,7 +71,7 @@ the file contents had been inspected to different depths, and most notes were
 read only at their headers and relevant references. The second batch has since
 read all six security and upstream notes in full and archived them; the next
 subsection records that outcome. The seventh research note and the four drafts
-keep their first-batch state.
+remain local and unpublished; their retention state is unchanged.
 
 | Local file | Observed association | Next review |
 | --- | --- | --- |
@@ -108,8 +108,9 @@ later state of each ticket.
 The four drafts stay local and ignored. The plan draft and
 `docs/subscription-implementation-plan.md` differ by the 8-line archived planning
 checkpoint plus one reference line, so they are not byte duplicates and neither
-is deleted. `docs/research/strong-cheap-vision-models.md` has no ticket and stays
-local until a separate scope covers it.
+is deleted. No owning ticket was established for publishing
+`docs/research/strong-cheap-vision-models.md` in this batch; it stays local until a
+separate scope covers it.
 
 ## Registered worktrees
 
@@ -133,8 +134,10 @@ A non-ancestor branch is not by itself proof of unique unmerged content. Preserv
 refs and uncommitted files until the owning task and content are checked. New
 worktrees still require individual human approval.
 
-The table records the first-batch observation at `c9b033e`. The second batch did
-not re-check worktree status, so no row here is a current claim.
+The table records the first-batch observation at `c9b033e`. Archive validation
+compared all eight worktree registrations and their captured statuses to detect
+unintended changes. That preservation check does not assess whether a worktree
+is reproducible, redundant, or ready to retire.
 
 ## Disk-use candidates, not a deletion list
 
@@ -187,9 +190,10 @@ copies that are linked at the archive baseline omit the old line anchors.
 
 1. Capture an explicit manifest of retained files, source baselines, hashes,
    unfinished work, and reference dependencies. Save unique uncommitted content
-   before retiring any worktree or source copy. The archive manifest now covers
-   the six reports; worktrees, installers, and other source copies still need
-   one.
+   before retiring any worktree or source copy. The published archive manifest
+   covers the six reports. Local preservation inventories also record worktree
+   status and final installer hashes; they are not published here and do not
+   replace the remaining retention and cleanup-readiness decisions.
 2. Review final documentation separately from drafts. Associate each retained
    report with its task and baseline. Compare suspected duplicates in full. Done
    for the six archived reports; the drafts and the seventh note remain.

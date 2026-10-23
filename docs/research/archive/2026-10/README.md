@@ -42,8 +42,9 @@ archive input. Each note states its own:
   `6c2b0b57f7d3177a777acab081411db539362416`, with `ef38592` as the observed HEAD.
 - `undici-advisories.md`: observed HEAD `ef38592` plus the working-tree patch and
   isolated snapshot that the report records separately.
-- `source-map-js-advisory.md`: the supplied Next 16.3.8 and PostCSS baseline. The
-  report states that it does not establish a complete immutable snapshot.
+- `source-map-js-advisory.md`: the supplied Next 16.3.8 and PostCSS baseline.
+  Archive provenance limit: the report does not record a complete immutable
+  application snapshot; this archive does not infer one.
 - `linkify-it-advisories.md`: the observed `ansi-to-react` 6.2.6 and `linkify-it`
   3.0.3 working-tree graph. No complete source commit is recorded.
 - `katex-official-parent-upgrade-options.md`: the declared local dependency graph
