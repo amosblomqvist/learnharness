@@ -16,3 +16,8 @@ auth.json
 
 # dev-fresh launcher scratch (fresh-user sim): disposable per launch
 .fresh-data/
+
+# Local experiments, worktrees, evidence, and unpublished proposals.
+# Keep reviewed final documentation outside these directories.
+/.scratch/
+/.drafts/
