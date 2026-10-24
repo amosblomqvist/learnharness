@@ -82,6 +82,92 @@ describe("desktop window chrome", () => {
 	});
 });
 
+/** Boot the real shell against a dev URL whose first probe is refused. */
+function bootDevShell(devUrl: string) {
+	const calls: string[] = [];
+	const fails: Array<(...args: unknown[]) => void> = [];
+	let httpHits = 0;
+	const http = {
+		get(_url: string, callback: (res: { statusCode: number; resume: () => void }) => void) {
+			httpHits++;
+			const req = {
+				on(event: string, fn: (err: Error) => void) {
+					if (event === "error" && httpHits === 1) setTimeout(() => fn(new Error("ECONNREFUSED")), 0);
+					return req;
+				},
+			};
+			calls.push(`http:${httpHits}`);
+			if (httpHits > 1) setTimeout(() => callback({ statusCode: 200, resume() {} }), 0);
+			return req;
+		},
+	};
+	class FakeWindow {
+		webContents = {
+			on(event: string, fn: (...args: unknown[]) => void) {
+				if (event === "did-fail-load") fails.push(fn);
+			},
+			setWindowOpenHandler() {},
+			getZoomFactor() { return 1; },
+			send() {},
+			setZoomFactor() {},
+		};
+		loadURL(url: string) { calls.push(`load:${url}`); }
+		once() {}
+		isDestroyed() { return false; }
+	}
+	const electron = {
+		app: {
+			setName() {},
+			setPath() {},
+			isPackaged: false,
+			name: "LearnHarness",
+			getPath() { return "/tmp/lh-dev-shell-test"; },
+			whenReady: () => Promise.resolve(),
+			on() {},
+			requestSingleInstanceLock: () => true,
+			quit() {},
+		},
+		BrowserWindow: FakeWindow,
+		Menu: { setApplicationMenu() {}, buildFromTemplate: (template: unknown) => template },
+		ipcMain: { on() {}, handle() {} },
+		session: { defaultSession: { setPermissionRequestHandler() {}, setPermissionCheckHandler() {} } },
+		shell: {},
+		dialog: {},
+	};
+	runInNewContext(mainSource, {
+		require: (id: string) => id === "electron" ? electron : id === "node:http" ? http : require(id),
+		process: { platform: "linux", argv: [], env: { LH_DEV_URL: devUrl }, on() {} },
+		__dirname: dirname(mainFile),
+		console,
+		setTimeout,
+		clearTimeout,
+	}, { filename: mainFile });
+	return { calls, fails, httpHits: () => httpHits };
+}
+
+describe("dev shell startup", () => {
+	it("does not load the window until the dev server answers", async () => {
+		const devUrl = "http://127.0.0.1:3210";
+		const shell = bootDevShell(devUrl);
+		await new Promise((resolve) => setTimeout(resolve, 50));
+		assert.equal(shell.calls.includes(`load:${devUrl}`), false, shell.calls.join(" "));
+		await new Promise((resolve) => setTimeout(resolve, 500));
+		assert.equal(shell.calls.at(-1), `load:${devUrl}`);
+		assert.ok(shell.httpHits() >= 2);
+	});
+
+	it("retries a refused load instead of staying on the empty background", async () => {
+		const devUrl = "http://127.0.0.1:3211";
+		const shell = bootDevShell(devUrl);
+		await new Promise((resolve) => setTimeout(resolve, 500));
+		assert.equal(shell.fails.length, 1);
+		const loads = shell.calls.filter((call) => call.startsWith("load:")).length;
+		shell.fails[0]({}, -102, "ERR_CONNECTION_REFUSED", devUrl, true);
+		await new Promise((resolve) => setTimeout(resolve, 700));
+		assert.equal(shell.calls.filter((call) => call.startsWith("load:")).length, loads + 1);
+	});
+});
+
 describe("desktop packaging policy", () => {
 	const yaml = require("js-yaml") as { load(source: string): Record<string, any> };
 	const config = yaml.load(readFileSync(new URL("../electron-builder.yml", import.meta.url), "utf8"));

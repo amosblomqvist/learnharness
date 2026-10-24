@@ -337,6 +337,20 @@ function createWindow(url) {
 		return { action: "deny" };
 	});
 
+	// A refused load (desktop:dev racing `next dev`, or a restart) paints
+	// nothing: the error page stays on backgroundColor and ready-to-show
+	// has already revealed that flat window. Keep asking until the port
+	// answers. ERR_ABORTED (-3) is a load we ourselves replaced.
+	let reloadTimer = null;
+	win.webContents.on("did-fail-load", (_event, code, desc, failedUrl, isMainFrame) => {
+		if (!isMainFrame || code === -3) return;
+		log(`page failed to load (${code} ${desc}) ${failedUrl}; retrying`);
+		clearTimeout(reloadTimer);
+		reloadTimer = setTimeout(() => {
+			if (!win.isDestroyed()) void win.loadURL(url);
+		}, 500);
+	});
+
 	void win.loadURL(url);
 	// Zoom truth reaches the renderer for EVERY load (reload, nav): the
 	// renderer's --lh-zoom must never go stale. The fallback catcher below
@@ -569,7 +583,19 @@ async function main() {
 		await waitUntilUp(url);
 		log(`server up: ${url}`);
 	} else {
+		// desktop:dev starts this shell and `next dev` together. Loading
+		// before the port accepts never recovers on its own, and the hidden
+		// title bar leaves backgroundColor (#141414) as a blank dark window.
+		// The packaged path already waits. A cold compile is slower than
+		// that prebuilt server, so the budget is longer; past it, the
+		// did-fail-load retry above keeps asking.
 		log(`dev mode: ${devUrl}`);
+		try {
+			await waitUntilUp(devUrl, 600);
+			log(`dev server up: ${devUrl}`);
+		} catch (err) {
+			log(`dev server not ready (${err?.message ?? err}); the window will keep retrying`);
+		}
 	}
 
 	installMenu();
