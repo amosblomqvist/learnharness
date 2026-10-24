@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { piModels } from "../src/agent/models.ts";
 import { refreshChatGPTModels, chatGPTModels, chatGPTStatus, chatGPTScope, chatGPTScopeCurrent, chatGPTLease, chatGPTAbortController } from "../src/agent/chatgpt-bridge.ts";
 const send = Object.getOwnPropertyDescriptor(process, "send"), connected = Object.getOwnPropertyDescriptor(process, "connected");
+const originalDesktopServer = process.env.LH_DESKTOP_SERVER;
 const pending: any[] = [];
 const model = piModels().getModels("openai").find((m) => m.api === "openai-responses")!;
 const ipc = (m: unknown) => (process.emit as (name: string, value: unknown) => boolean)("message", m);
@@ -10,10 +11,12 @@ const status = (account: string, background = true) => ({ available: true, pendi
 const value = (name: string, revision: number, account = "A", authorityRevision = 1) => ({ epoch: account === "A" ? 1 : 2, authorityRevision, revision, status: status(account), accountId: account, models: [{ id: model.id, name }] });
 function reply(request: any, v: unknown) { ipc({ channel: "lh:chatgpt", id: request.id, op: request.op, ok: true, value: v }); }
 before(() => {
+ process.env.LH_DESKTOP_SERVER = "1"; // the desktopBridgeActive() gate, not just raw IPC presence
  Object.defineProperty(process, "connected", { configurable: true, value: true });
  Object.defineProperty(process, "send", { configurable: true, value: (m: unknown, cb?: () => void) => { pending.push(m); cb?.(); return true; } });
 });
 after(() => {
+ if (originalDesktopServer === undefined) delete process.env.LH_DESKTOP_SERVER; else process.env.LH_DESKTOP_SERVER = originalDesktopServer;
  if (send) Object.defineProperty(process, "send", send); else delete process.send;
  if (connected) Object.defineProperty(process, "connected", connected); else delete (process as { connected?: boolean }).connected;
 });
@@ -45,4 +48,9 @@ test("account/full and catalog authority changes reject outstanding old leases w
  const newScope = chatGPTScope(model.id); assert.equal(newScope.accountId, "B");
  ipc({ channel: "lh:chatgpt", kind: "state", stamp: { epoch: 2, authorityRevision: 3, revision: 8 }, status: status("B"), invalidate: "none" });
  assert.equal(chatGPTModels().length, 0); await assert.rejects(chatGPTLease(newScope, false));
+});
+test("an IPC channel without LH_DESKTOP_SERVER (next dev's fork) never reaches the bridge", { timeout: 2000 }, async () => {
+ delete process.env.LH_DESKTOP_SERVER; const sent = pending.length;
+ try { await refreshChatGPTModels([model as never]); assert.equal(pending.length, sent); assert.equal(chatGPTModels().length, 0); }
+ finally { process.env.LH_DESKTOP_SERVER = "1"; }
 });

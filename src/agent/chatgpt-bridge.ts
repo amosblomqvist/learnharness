@@ -54,10 +54,15 @@ function acceptStatus(state: BridgeState, value: StatusValue) {
  if (value.epoch !== state.stamp.epoch || value.authorityRevision !== state.stamp.authorityRevision || value.status.activeId !== state.status.activeId) clearCatalog(state);
  state.status = value.status; state.stamp = { epoch: value.epoch, authorityRevision: value.authorityRevision, revision: value.revision };
 }
+/** Only the server Electron spawns sets LH_DESKTOP_SERVER (electron/main.cjs, beside its "ipc" stdio).
+ *  Under `next dev` the server process has an IPC channel too, but nothing on it answers "lh:chatgpt". */
+function desktopBridgeActive(): boolean {
+ return process.env.LH_DESKTOP_SERVER === "1" && !!process.send && !!process.connected;
+}
 /** Runtime-only inherited IPC. No HTTP credential route or renderer method. */
 export function chatGPTRequest<T>(op: "status" | "models" | "lease", fields: Record<string, unknown> = {}): Promise<T> {
  const state = bridge();
- if (!process.send || !process.connected) return Promise.reject(new Error("ChatGPT sign-in is available only in the desktop app with a private server connection."));
+ if (!desktopBridgeActive()) return Promise.reject(new Error("ChatGPT sign-in is available only in the desktop app with a private server connection."));
  return new Promise<T>((resolve, reject) => {
   const id = `${process.pid}:${++state.counter}`;
   const timer = setTimeout(() => { state.pending.delete(id); reject(new Error("The ChatGPT desktop connection timed out.")); }, 45000);
@@ -80,7 +85,7 @@ export function chatGPTScope(selectedModelId: string): AdmissionScope {
 }
 export function chatGPTScopeCurrent(scope: AdmissionScope): boolean {
  const s = bridge();
- return !!process.connected && chatGPTConnected() && scope.accountId === s.catalogAccount && scope.accountId === s.status.activeId && scope.epoch === s.stamp.epoch && scope.authorityRevision === s.stamp.authorityRevision && !!chatGPTModel(scope.selectedModelId);
+ return desktopBridgeActive() && chatGPTConnected() && scope.accountId === s.catalogAccount && scope.accountId === s.status.activeId && scope.epoch === s.stamp.epoch && scope.authorityRevision === s.stamp.authorityRevision && !!chatGPTModel(scope.selectedModelId);
 }
 export async function chatGPTLease(scope: AdmissionScope, background: boolean): Promise<LeaseValue> {
  if (!chatGPTScopeCurrent(scope)) throw new Error("ChatGPT catalog authority changed");
@@ -102,7 +107,7 @@ export async function chatGPTDenial(scope: AdmissionScope | undefined, controlle
 /** Preserve account order; unknown capabilities/windows are never fabricated. */
 export async function refreshChatGPTModels(supported: Model<"openai-responses">[]): Promise<void> {
  const state = bridge();
- if (!process.send || !process.connected) { clearCatalog(state); return; }
+ if (!desktopBridgeActive()) { clearCatalog(state); return; }
  const sequence = ++state.catalogRequest;
  try {
   const value = await chatGPTRequest<ModelsValue>("models");

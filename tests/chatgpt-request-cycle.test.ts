@@ -19,6 +19,7 @@ import { newUserMessage, newNextMessage, newThinkingMessage, newAnswerResult, re
 
 const originalSend = Object.getOwnPropertyDescriptor(process, "send");
 const originalConnected = Object.getOwnPropertyDescriptor(process, "connected");
+const originalDesktopServer = process.env.LH_DESKTOP_SERVER;
 const realFetch = globalThis.fetch;
 const model = piModels().getModel("openai", "gpt-5") as Model<"openai-responses">;
 let epoch = 1, revision = 1, background = true;
@@ -31,6 +32,7 @@ function revoke(full = false) {
  ipc({ channel: "lh:chatgpt", kind: "state", stamp: { epoch, authorityRevision: epoch, revision: ++revision }, status: status(), invalidate: full ? "all" : "background" });
 }
 before(() => {
+ process.env.LH_DESKTOP_SERVER = "1"; // the desktopBridgeActive() gate, not just raw IPC presence
  Object.defineProperty(process, "connected", { configurable: true, value: true });
  Object.defineProperty(process, "send", { configurable: true, value: (m: any, callback?: () => void) => {
   if (m.op === "lease") {
@@ -63,6 +65,7 @@ after(() => {
  fs.rmSync(scratch, { recursive: true, force: true });
  if (originalSend) Object.defineProperty(process, "send", originalSend); else delete process.send;
  if (originalConnected) Object.defineProperty(process, "connected", originalConnected); else delete (process as { connected?: boolean }).connected;
+ if (originalDesktopServer === undefined) delete process.env.LH_DESKTOP_SERVER; else process.env.LH_DESKTOP_SERVER = originalDesktopServer;
 });
 const automatic = (id = "auto") => ({ id, role: "custom" as const, customType: "subagent-steer" as const, content: "Automatic result", details: { jobId: "dummy-job" }, display: true, timestamp: 2 });
 async function nativeRun(where: typeof cut, staged: boolean, withLearner = true, commitThrows = false, lateAutomatic = false, withTool = false) {

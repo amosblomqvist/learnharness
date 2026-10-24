@@ -8,6 +8,7 @@ import { chatGPTHistory, chatGPTPayload } from "../src/agent/chatgpt-stream.ts";
 
 const originalSend = Object.getOwnPropertyDescriptor(process, "send");
 const originalConnected = Object.getOwnPropertyDescriptor(process, "connected");
+const originalDesktopServer = process.env.LH_DESKTOP_SERVER;
 const realFetch = globalThis.fetch;
 const originalKey = process.env.OPENAI_API_KEY;
 let leaseError: string | null = null;
@@ -19,6 +20,7 @@ const status = { available: true, pending: false, allowBackgroundUse: false, act
 before(async () => {
 	assert(model);
 	process.env.OPENAI_API_KEY = "sk-scratch-must-never-be-used";
+	process.env.LH_DESKTOP_SERVER = "1"; // the desktopBridgeActive() gate, not just raw IPC presence
 	Object.defineProperty(process, "connected", { configurable: true, value: true });
 	Object.defineProperty(process, "send", { configurable: true, value: (message: any, callback?: () => void) => {
 		queueMicrotask(() => {
@@ -40,6 +42,7 @@ after(() => {
 	if (originalSend) Object.defineProperty(process, "send", originalSend); else delete process.send;
 	if (originalConnected) Object.defineProperty(process, "connected", originalConnected); else delete (process as { connected?: boolean }).connected;
 	if (originalKey === undefined) delete process.env.OPENAI_API_KEY; else process.env.OPENAI_API_KEY = originalKey;
+	if (originalDesktopServer === undefined) delete process.env.LH_DESKTOP_SERVER; else process.env.LH_DESKTOP_SERVER = originalDesktopServer;
 });
 const usage = { input_tokens: 10, output_tokens: 4, total_tokens: 14, input_tokens_details: { cached_tokens: 0 }, output_tokens_details: { reasoning_tokens: 0 } };
 const complete = (output: unknown[] = []) => ({ type: "response.completed", response: { id: "resp_scratch", status: "completed", output, usage } });
