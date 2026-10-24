@@ -72,6 +72,8 @@ async function fixture(language: "pl" | "en" = "pl", delayedRead?: Promise<Respo
 		IS_REACT_ACT_ENVIRONMENT: true,
 		fetch: async (url: string, init?: RequestInit) => {
 			if (url === "/api/stt/token") return Response.json({ token: "test-token" });
+			// Deepgram is the selected dictation method (local models: tests/local-dictation.test.ts).
+			if (url === "/api/stt/methods") return Response.json({ selected: "deepgram", configured: ["deepgram"], device: "webgpu", deepgram: true, models: [] });
 			if (url === "/api/settings") {
 				state.reads++;
 				if (state.nextRead) { const response = state.nextRead; state.nextRead = undefined; return response; }

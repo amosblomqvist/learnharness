@@ -41,6 +41,7 @@ import { ProviderMenuList } from "./model-menu.tsx";
 import { MenuShell } from "@/components/menu-shell";
 import { notifySettingsSaved } from "@/components/settings-signal";
 import { DictationLanguageSetting } from "@/components/dictation-language";
+import { DICTATION_SETTINGS_ROW, DictationSettings } from "./dictation-group.tsx";
 
 /** One pi-ai provider with plain API-key auth (the Platform seam —
  *  derived from pi-ai's own env-key table; no drift possible). */
@@ -608,6 +609,8 @@ export function KeysSection({
 							className="underline underline-offset-2 hover:text-foreground"
 						>Deepgram API key</a> with the Member role or higher, then add it above.
 					</p>
+					{/* Local models + the one method Dictate uses (issue #15). */}
+					<DictationSettings focus={initialRow === DICTATION_SETTINGS_ROW} />
 				</>}
 			</SettingsGroup>)}
 

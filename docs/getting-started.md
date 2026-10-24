@@ -27,11 +27,17 @@ Sessions are saved locally, including earlier messages when context is compacted
 
 ## Dictation
 
+Dictate uses the one method selected under **Settings → Providers → Dictation**: Deepgram or a downloaded local model. Pressing Dictate with nothing set up opens a chooser.
+
+**Local model:** download one from the list (smallest first, with size and word error rate) and pick WebGPU or CPU. The model and its runtime are stored locally, so it works offline after download; it falls back to CPU when WebGPU cannot start.
+
+**Deepgram:**
+
 1. Create a [Deepgram API key](https://console.deepgram.com/) with the **Member role or higher**, required for [short-lived token minting](https://developers.deepgram.com/reference/auth/tokens/grant).
 2. Add it under **Settings → Providers → Dictation** and choose the language below the key. **Multilingual** supports automatic recognition and mixed-language speech.
 3. Use the microphone or **Mod+D** to start and stop. Review the text before sending. **Esc cancellation discards the pending transcript**; stop normally to keep it.
 
-Audio streams from your browser directly to Deepgram using a short-lived token. A `403 Insufficient permissions` error while obtaining that token can mean the key's role is insufficient.
+With Deepgram, audio streams from your browser directly to Deepgram using a short-lived token. A `403 Insufficient permissions` error while obtaining that token can mean the key's role is insufficient.
 
 ## Use local files in a session
 
