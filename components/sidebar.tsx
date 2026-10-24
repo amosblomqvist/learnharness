@@ -52,6 +52,15 @@ const SIDEBAR_AUTOCLOSE = 928;
 // Module scope, guarded for SSR (the server has no navigator).
 const IS_ELECTRON = typeof navigator !== "undefined" && navigator.userAgent.includes("Electron");
 
+interface ChatGPTConnectionStatus {
+	available: boolean;
+	connected: boolean;
+	connecting?: boolean;
+	phase?: "idle" | "preparing" | "waiting" | "exchanging" | "verifying" | "connected" | "error";
+	authorizationUrl?: string;
+	error?: string;
+}
+
 declare global {
 	interface Window {
 		/** Preload bridge (electron/preload.cjs) — Electron only, absent in the browser. */
@@ -62,6 +71,11 @@ declare global {
 			/** The zoom truth (owner round 7): subscribes to "lh:zoom" pushes; returns unsubscribe. */
 			onZoom?: (cb: (factor: number) => void) => () => void;
 			getZoom?: () => Promise<number>;
+			getChatGPTStatus?: () => Promise<ChatGPTConnectionStatus>;
+			chatGPTSignIn?: () => Promise<ChatGPTConnectionStatus>;
+			chatGPTCancelSignIn?: () => Promise<ChatGPTConnectionStatus>;
+			chatGPTOpenAuthorization?: () => Promise<ChatGPTConnectionStatus>;
+			chatGPTDisconnect?: () => Promise<ChatGPTConnectionStatus>;
 			/** Auto-update channel (Wave C, 2026-10-10): "lh:update-status" pushes once a staged update exists. */
 			onUpdateStatus?: (cb: (status: { status: string; version: string | null }) => void) => () => void;
 			installUpdate?: () => void;

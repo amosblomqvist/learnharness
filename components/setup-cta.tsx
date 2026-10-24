@@ -15,7 +15,6 @@
  * its own save), the same re-read pattern chat.tsx uses for "models".
  */
 
-import { useCallback, useEffect, useState } from "react";
 import type { AuthKeyStatus } from "@/src/core";
 import { classifyKeys, type ProviderKeyInfo } from "@/components/settings/keys-section";
 import { useModelCatalog } from "@/components/model-picker";
@@ -34,28 +33,17 @@ export function hasProviderKey(
 	return classifyKeys(statuses, providers).providerRows.some((s) => s.present);
 }
 
-/** The zero-keys truth for the calling page: TRUE only after a
- *  successful read says no provider key exists (pending and failed
- *  reads render nothing — the pill must never flash on a gap, and a
- *  failed read claiming "zero keys" would be a lie the CTA flow then
- *  leans on). Re-reads on the keys signal. */
+/** The zero-credentials truth for the calling page. The model catalog is
+ *  the authority because it merges ordinary API keys with desktop OAuth
+ *  providers such as openai-chatgpt. A /api/keys-only check incorrectly
+ *  treats a connected ChatGPT plan as keyless. Pending/failed catalog
+ *  reads stay false so the pill never flashes on a gap. */
 export function useZeroKeys(): boolean {
-	const [zeroKeys, setZeroKeys] = useState(false);
-	const read = useCallback(() => {
-		fetch("/api/keys")
-			.then((r) => r.json())
-			.then((body: { keys?: AuthKeyStatus[]; providers?: ProviderKeyInfo[] }) => {
-				setZeroKeys(!hasProviderKey(body.keys ?? [], body.providers));
-			})
-			.catch(() => {});
-	}, []);
-	useEffect(() => {
-		read();
-	}, [read]);
+	const { catalog, refresh } = useModelCatalog();
 	useSettingsSaved((section) => {
-		if (section === "keys") read();
+		if (section === "keys") refresh();
 	});
-	return zeroKeys;
+	return catalog ? !catalog.providers.some((provider) => provider.keyPresent) : false;
 }
 
 /** The pill itself — the models CTA's chrome and placement, the keys

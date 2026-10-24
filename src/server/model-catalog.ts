@@ -20,6 +20,12 @@
 import { clampThinkingLevel, getSupportedThinkingLevels, type Api, type Model } from "@earendil-works/pi-ai";
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import { piModels } from "../agent/models.ts";
+import {
+	CHATGPT_PROVIDER_ID,
+	CHATGPT_SOURCE_PROVIDER_ID,
+	chatGPTBrokerConfigured,
+	getChatGPTBrokerStatus,
+} from "../agent/chatgpt-broker.ts";
 import { settingsStore } from "../store/settings.ts";
 import { effectiveSettings } from "./stores.ts";
 import { keyValue } from "./keys.ts";
@@ -120,12 +126,20 @@ export function catalogSlots(): SlotPins {
  *  plain-key model provider (core/auth-keys.ts's pi-ai-derived table),
  *  with keyPresent read env-wins through the keys seam, fresh per call —
  *  saving a key immediately federates the provider into the picker. */
-export function catalogProviders(): CatalogProvider[] {
-	return AUTH_PROVIDER_KEYS.map((p) => ({
+export function catalogProviders(chatGPTConnected = false): CatalogProvider[] {
+	const providers = AUTH_PROVIDER_KEYS.map((p) => ({
 		id: p.id,
 		envVar: p.envVar,
 		keyPresent: keyValue(p.envVar) !== undefined,
-	})).sort((a, b) => a.id.localeCompare(b.id));
+	}));
+	if (chatGPTBrokerConfigured()) {
+		providers.push({
+			id: CHATGPT_PROVIDER_ID,
+			envVar: "CHATGPT_OAUTH",
+			keyPresent: chatGPTConnected,
+		});
+	}
+	return providers.sort((a, b) => a.id.localeCompare(b.id));
 }
 
 /** The providers whose key is present — the picker federates exactly
@@ -136,11 +150,11 @@ function keyedProviderIds(): Set<string> {
 }
 
 /** Project one catalog model to the client DTO. */
-export function toModelDto(model: Model<Api>): ModelDto {
+export function toModelDto(model: Model<Api>, provider = model.provider): ModelDto {
 	return {
 		id: model.id,
 		name: model.name,
-		provider: model.provider,
+		provider,
 		reasoning: model.reasoning,
 		input: [...model.input],
 		supportedLevels: getSupportedThinkingLevels(model),
@@ -171,6 +185,11 @@ export function catalogContextLimits(): Map<string, number> {
 			index.set(`${provider.id}:${model.id}`, model.contextWindow);
 		}
 	}
+	if (chatGPTBrokerConfigured()) {
+		for (const model of piModels().getModels(CHATGPT_SOURCE_PROVIDER_ID)) {
+			index.set(`${CHATGPT_PROVIDER_ID}:${model.id}`, model.contextWindow);
+		}
+	}
 	return index;
 }
 
@@ -178,21 +197,43 @@ export function catalogContextLimits(): Map<string, number> {
  *  (sorted by provider then id — stable, diff-friendly) + the config
  *  defaults a settings-less chat runs + the background roles' resolved
  *  pins (the settings UI's per-role default captions). */
-export function modelCatalog(): ModelCatalogResponse {
+export function modelCatalog(options: { chatGPTConnected?: boolean } = {}): ModelCatalogResponse {
 	const keyed = keyedProviderIds();
-	const models = piModels()
+	const keyedModels = piModels()
 		.getProviders()
 		.filter((p) => keyed.has(p.id))
 		.flatMap((p) => piModels().getModels(p.id))
-		.map(toModelDto)
+		.map((model) => toModelDto(model));
+	const chatGPTModels = options.chatGPTConnected
+		? piModels().getModels(CHATGPT_SOURCE_PROVIDER_ID).map((model) => toModelDto(model, CHATGPT_PROVIDER_ID))
+		: [];
+	const models = [...keyedModels, ...chatGPTModels]
 		.sort((a, b) => (a.provider === b.provider ? a.id.localeCompare(b.id) : a.provider.localeCompare(b.provider)));
 	return {
 		models,
 		defaults: catalogDefaults(),
 		rolePins: catalogRolePins(),
 		slots: catalogSlots(),
-		providers: catalogProviders(),
+		providers: catalogProviders(options.chatGPTConnected),
 	};
+}
+
+export async function liveModelCatalog(): Promise<ModelCatalogResponse> {
+	const chatGPT = await getChatGPTBrokerStatus();
+	return modelCatalog({ chatGPTConnected: chatGPT.connected });
+}
+
+function modelFor(provider: string, id: string): Model<Api> | undefined {
+	return piModels().getModel(
+		provider === CHATGPT_PROVIDER_ID ? CHATGPT_SOURCE_PROVIDER_ID : provider,
+		id,
+	);
+}
+
+function knownProviderIds(): string[] {
+	const providers = piModels().getProviders().map((provider) => provider.id);
+	if (chatGPTBrokerConfigured()) providers.push(CHATGPT_PROVIDER_ID);
+	return providers;
 }
 
 /** One validated outcome for a settings write. */
@@ -207,13 +248,13 @@ export type SettingsValidation =
  *    the model the picker writes against (settings.model, else config's
  *    prober/teacher pin; one controller, so the two specs share it). */
 export function validateChatSettings(settings: ChatSettings): SettingsValidation {
-	const providers = piModels().getProviders().map((p) => p.id);
+	const providers = knownProviderIds();
 	if (settings.model) {
 		const { provider, id } = settings.model;
 		if (!providers.includes(provider)) {
 			return { ok: false, error: `Unknown provider "${provider}" — configured: ${providers.join(", ")}` };
 		}
-		if (!piModels().getModel(provider, id)) {
+		if (!modelFor(provider, id)) {
 			return { ok: false, error: `No model "${id}" in the ${provider} catalog` };
 		}
 	}
@@ -237,13 +278,13 @@ export function validateModelsSettings(settings: ModelsSettings): SettingsValida
 }
 
 function validateSlotSpec(name: ModelSlotName, slot: { model?: { provider: string; id: string }; thinkingLevel?: ThinkingLevel }): SettingsValidation {
-	const providers = piModels().getProviders().map((p) => p.id);
+	const providers = knownProviderIds();
 	if (slot.model) {
 		const { provider, id } = slot.model;
 		if (!providers.includes(provider)) {
 			return { ok: false, error: `Unknown provider "${provider}" — configured: ${providers.join(", ")}` };
 		}
-		if (!piModels().getModel(provider, id)) {
+		if (!modelFor(provider, id)) {
 			return { ok: false, error: `No model "${id}" in the ${provider} catalog` };
 		}
 	}
@@ -265,7 +306,7 @@ function validateSlotSpec(name: ModelSlotName, slot: { model?: { provider: strin
  *  or the level already supported — the existence gate rejects unknown
  *  models separately, so this only ever sees real ones in practice). */
 function clampLevelFor(provider: string, id: string, level: ThinkingLevel): ThinkingLevel {
-	const model = piModels().getModel(provider, id);
+	const model = modelFor(provider, id);
 	return model ? clampThinkingLevel(model, level) : level;
 }
 

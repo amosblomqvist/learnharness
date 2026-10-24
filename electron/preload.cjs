@@ -36,6 +36,11 @@ contextBridge.exposeInMainWorld("lh", {
 		return () => ipcRenderer.removeListener("lh:zoom", listener);
 	},
 	getZoom: () => ipcRenderer.invoke("lh:zoom:get"),
+	getChatGPTStatus: () => ipcRenderer.invoke("lh:chatgpt:status"),
+	chatGPTSignIn: () => ipcRenderer.invoke("lh:chatgpt:sign-in"),
+	chatGPTCancelSignIn: () => ipcRenderer.invoke("lh:chatgpt:cancel-sign-in"),
+	chatGPTOpenAuthorization: () => ipcRenderer.invoke("lh:chatgpt:open-authorization"),
+	chatGPTDisconnect: () => ipcRenderer.invoke("lh:chatgpt:disconnect"),
 	onUpdateStatus: (cb) => {
 		const listener = (_event, status) => cb(status);
 		ipcRenderer.on("lh:update-status", listener);

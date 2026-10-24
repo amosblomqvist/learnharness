@@ -11,6 +11,11 @@ import { builtinProviders } from "@earendil-works/pi-ai/providers/all";
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import { type ModelRole } from "../../config.ts";
 import { DEFAULT_THINKING_ORDER } from "../core/settings.ts";
+import {
+	CHATGPT_PROVIDER_ID,
+	CHATGPT_SOURCE_PROVIDER_ID,
+	ChatGPTBrokerCredentialStore,
+} from "./chatgpt-broker.ts";
 import packageMetadata from "../../package.json" with { type: "json" };
 
 /** App identity is immutable and shared by Models and every native Agent.
@@ -44,6 +49,7 @@ export interface PiEngine {
 export type { ThinkingLevel };
 
 let collection: ReturnType<typeof createModels> | undefined;
+let chatGPTCollection: ReturnType<typeof createModels> | undefined;
 
 /** The process-wide pi-ai Models collection — EVERY builtin provider's
  *  catalog (model slots wave, 2026-09-20): engines and the picker resolve
@@ -59,6 +65,19 @@ export function piModels() {
 		for (const provider of builtinProviders()) collection.setProvider(provider);
 	}
 	return collection;
+}
+
+function piChatGPTModels() {
+	if (!chatGPTCollection) {
+		chatGPTCollection = createModels({
+			identity: APP_IDENTITY,
+			credentials: new ChatGPTBrokerCredentialStore(),
+		});
+		for (const provider of builtinProviders()) {
+			if (provider.id === CHATGPT_SOURCE_PROVIDER_ID) chatGPTCollection.setProvider(provider);
+		}
+	}
+	return chatGPTCollection;
 }
 
 /** OpenRouter API key (BYOK); tests never read this — they inject engines. */
@@ -94,8 +113,10 @@ function defaultThinkingLevel(model: Model<Api>): ThinkingLevel {
  *  keys seam reflects file-saved keys into env), so the engine never
  *  hardcodes OpenRouter's. */
 export function piEngineForSpec(spec: ResolvedModelSpec): PiEngine {
-	const models: Models = piModels();
-	const model = models.getModel(spec.provider, spec.id);
+	const usesChatGPT = spec.provider === CHATGPT_PROVIDER_ID;
+	const models: Models = usesChatGPT ? piChatGPTModels() : piModels();
+	const provider = usesChatGPT ? CHATGPT_SOURCE_PROVIDER_ID : spec.provider;
+	const model = models.getModel(provider, spec.id);
 	if (!model) {
 		throw new Error(`${spec.provider} catalog has no model ${spec.id}`);
 	}

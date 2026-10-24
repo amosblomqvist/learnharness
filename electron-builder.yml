@@ -81,6 +81,9 @@ files:
   - node_modules/universalify/**/*
   - node_modules/ms/**/*
   - node_modules/argparse/**/*
+  # Sign in with ChatGPT: OIDC ID-token signature/claim verification in the
+  # trusted Electron process. jose has no runtime dependencies.
+  - node_modules/jose/**/*
 extraResources:
   # Copy from the PARENT dir (.next), not .next/standalone itself:
   # electron-builder hard-excludes a copy's root node_modules and the

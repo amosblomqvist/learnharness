@@ -24,12 +24,13 @@
  *     would shadow every settings-page key change until restart.
  */
 
-const { app, BrowserWindow, Menu, ipcMain, session, shell, dialog } = require("electron");
+const { app, BrowserWindow, Menu, ipcMain, session, shell, dialog, safeStorage } = require("electron");
 const { spawn } = require("node:child_process");
 const fs = require("node:fs");
 const http = require("node:http");
 const net = require("node:net");
 const path = require("node:path");
+const { createChatGPTOAuthRuntime } = require("./chatgpt-oauth.cjs");
 
 // Mirrors SIDEBAR_AUTOCLOSE in components/sidebar.tsx — keep in sync (the
 // renderer owns the number; this is the IPC widen target).
@@ -128,6 +129,7 @@ if (process.argv.includes("--browser-service")) {
 }
 
 let serverProcess = null;
+let chatGPTOAuthRuntime = null;
 
 // A GUI shell must never die to a stray exception (EPIPE dialogs, a race
 // in an event handler): the window + child server are the product, and
@@ -201,6 +203,12 @@ function startServer(port) {
 					// (no env injection anymore: a spawn-time copy would shadow every
 					// settings-page key change until restart; env wins over file).
 					LH_AUTH_FILE: AUTH_FILE(),
+					...(chatGPTOAuthRuntime
+						? {
+								LH_CHATGPT_BROKER_URL: chatGPTOAuthRuntime.brokerUrl,
+								LH_CHATGPT_BROKER_SECRET: chatGPTOAuthRuntime.brokerSecret,
+							}
+						: {}),
 				},
 				stdio: ["ignore", "pipe", "pipe"],
 			},
@@ -551,11 +559,27 @@ async function main() {
 	});
 
 	// The child must not outlive us — cover every quit path.
-	app.on("before-quit", killServer);
+	app.on("before-quit", () => {
+		killServer();
+		chatGPTOAuthRuntime?.close();
+	});
 	process.on("exit", killServer);
 	process.on("SIGHUP", killServer);
 
 	await app.whenReady();
+
+	try {
+		chatGPTOAuthRuntime = await createChatGPTOAuthRuntime({
+			userDataDir: app.getPath("userData"),
+			safeStorage,
+			shell,
+			ipcMain,
+			log,
+		});
+		log("ChatGPT OAuth broker ready");
+	} catch (err) {
+		log(`ChatGPT OAuth unavailable: ${err?.message ?? err}`);
+	}
 
 	// Dev mode: point at a running `next dev` server (LH_DEV_URL) — no
 	// spawn, no packaging, full HMR. The rest of this shell still applies

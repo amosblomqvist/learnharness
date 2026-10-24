@@ -132,6 +132,7 @@ export function ModelControl({ chatId }: { chatId?: string }) {
 
 	useSettingsSaved((section) => {
 		if (section === "models") readRecord();
+		if (section === "keys") refresh();
 	});
 
 	// Dual-bound truth: chat mode displays the session's own record,
