@@ -1,18 +1,21 @@
 "use client";
 /**
  * The zero-keys surfaces (zero-keys wave, 2026-09-25, owner-locked over
- * Platform's 66dbea9 key-presence gate): when NO model-provider key
- * exists, chat / home / /chat/new hoist a composer pill — "Add a
- * provider key" — that takes PRECEDENCE over the models setup CTA
- * (keys come first in the chain: the model pickers list only what
- * keys unlock). Click opens the SetupDialog, whose stage derives to
- * the first-key screen on its own.
+ * Platform's 66dbea9 key-presence gate): when NO model source exists,
+ * chat / home / /chat/new hoist a composer pill — "Connect model"
+ * (local-models wave, owner 2026-10-24; was "Add a provider key") —
+ * that takes PRECEDENCE over the models setup CTA (sources come first
+ * in the chain: the model pickers list only what keys and local servers
+ * unlock). Click opens the SetupDialog, whose stage derives to the
+ * first-source screen (provider key / local model tabs) on its own.
  *
  * Truth: GET /api/keys — a PROVIDER key present (env or file; tool keys
- * like Deepgram do not count — they unlock no models). Live updates ride
- * the lh:settings-saved "keys" signal (keys-section dispatches after
- * save AND delete; the setup dialog's first-key screen dispatches on
- * its own save), the same re-read pattern chat.tsx uses for "models".
+ * like Deepgram do not count — they unlock no models) — or GET
+ * /api/local-servers — a configured local server. Live updates ride the
+ * lh:settings-saved "keys" signal (keys-section dispatches after save
+ * AND delete; the setup dialog's first-key screen and the local-server
+ * form dispatch on their own saves), the same re-read pattern chat.tsx
+ * uses for "models".
  */
 
 import { useCallback, useEffect, useState } from "react";
@@ -34,18 +37,20 @@ export function hasProviderKey(
 	return classifyKeys(statuses, providers).providerRows.some((s) => s.present);
 }
 
-/** The zero-keys truth for the calling page: TRUE only after a
- *  successful read says no provider key exists (pending and failed
- *  reads render nothing — the pill must never flash on a gap, and a
- *  failed read claiming "zero keys" would be a lie the CTA flow then
+/** The zero-keys truth for the calling page: TRUE only after successful
+ *  reads say no provider key AND no local server exists (pending and
+ *  failed reads render nothing — the pill must never flash on a gap, and
+ *  a failed read claiming "zero keys" would be a lie the CTA flow then
  *  leans on). Re-reads on the keys signal. */
 export function useZeroKeys(): boolean {
 	const [zeroKeys, setZeroKeys] = useState(false);
 	const read = useCallback(() => {
-		fetch("/api/keys")
-			.then((r) => r.json())
-			.then((body: { keys?: AuthKeyStatus[]; providers?: ProviderKeyInfo[] }) => {
-				setZeroKeys(!hasProviderKey(body.keys ?? [], body.providers));
+		Promise.all([
+			fetch("/api/keys").then((r) => r.json() as Promise<{ keys?: AuthKeyStatus[]; providers?: ProviderKeyInfo[] }>),
+			fetch("/api/local-servers").then((r) => r.json() as Promise<{ servers?: unknown[] }>),
+		])
+			.then(([keys, local]) => {
+				setZeroKeys(!hasProviderKey(keys.keys ?? [], keys.providers) && (local.servers ?? []).length === 0);
 			})
 			.catch(() => {});
 	}, []);
@@ -58,7 +63,7 @@ export function useZeroKeys(): boolean {
 	return zeroKeys;
 }
 
-/** The pill itself — the models CTA's chrome and placement, the keys
+/** The pill itself — the models CTA's chrome and placement, the sources
  *  chain's copy. testid "setup-cta-keys" (the models CTA keeps
  *  "setup-cta"; probes can tell them apart). */
 export function ZeroKeysPill({ onOpen, inline = false }: { onOpen: () => void; inline?: boolean }) {
@@ -69,7 +74,7 @@ export function ZeroKeysPill({ onOpen, inline = false }: { onOpen: () => void; i
 			onClick={onOpen}
 			className="rounded-sm border border-border bg-card px-3 py-1.5 font-ui text-xs text-foreground transition-colors hover:border-muted-foreground/50 hover:bg-accent cursor-pointer"
 		>
-			Add a provider key
+			Connect model
 		</button>
 	);
 	return inline ? button : <div className="pointer-events-auto mb-2 flex justify-center">{button}</div>;
