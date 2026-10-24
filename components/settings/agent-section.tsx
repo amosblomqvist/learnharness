@@ -72,6 +72,7 @@ import { prettyModel } from "@/components/usage-format";
 import { cn } from "@/lib/utils";
 import { SettingsGroup, SettingsRow, Toggle, CommitInput } from "./controls.tsx";
 import { ModelMenuList, ThinkingMenuList } from "./model-menu";
+import { ChatGPTBackgroundAccess } from "./chatgpt-connection";
 
 /** One slot's display identity — the tier's roster as the row hint rides
  *  with the resolved default (owner: the hint ALWAYS names the default). */
@@ -129,19 +130,6 @@ export function composeQuizMechanics(agent: AgentSettings | undefined, mechanics
  *  explicit-off record stays visible as stored. Pure — exported for tests. */
 export function composeGraphTools(agent: AgentSettings | undefined, on: boolean): AgentSettings {
 	return { ...agent, graphTools: { enabled: on } };
-}
-
-/** The research tool runs on the search port — the teacher registry DROPS
- *  it when no engine is live (chat-handler's searchAvailable, the same
- *  /api/search signal the section fetches). Pure — exported for tests.
- *  Teacher-stream flag 2026-09-22: the settings row grays on the SAME
- *  signal, so the row and the actual registry availability can never
- *  disagree. `search === null` (loading/failed) grays NOTHING. */
-export function researchToolUnavailable(
-	toolId: string,
-	search: { available: boolean } | null,
-): boolean {
-	return toolId === "research" && search !== null && !search.available;
 }
 
 /** Compose: one slot's model/thinking override. Empty model = absent
@@ -357,18 +345,23 @@ export function AgentSection({
 	// fetch each per section mount. The models read ALSO re-runs on the
 	// cross-surface signal (fix wave: another surface's write re-reads
 	// into the slot rows live).
-	const readModels = useCallback(() => {
+	const modelsRequest = useRef(0);
+	const modelsMounted = useRef(false);
+	const readModels = useCallback((connectionChanged = false) => {
+		const request = ++modelsRequest.current;
+		if (connectionChanged) setCatalog(null);
 		fetch("/api/models")
-			.then((r) => r.json())
+			.then((r) => { if (!r.ok) throw new Error("Catalog unavailable"); return r.json(); })
 			.then((body: ModelsBody) => {
+				if (!modelsMounted.current || request !== modelsRequest.current) return;
 				setCatalog(body.models);
 				setSlots(body.slots);
 			})
-			.catch(() => setCatalog(null));
+			.catch(() => { if (modelsMounted.current && request === modelsRequest.current) setCatalog(null); });
 	}, []);
 
 	useSettingsSaved((section) => {
-		if (section === "models") readModels();
+		if (section === "models" || section === "keys") readModels(section === "keys");
 		// THE state-echo root cause: the prompt switches write through the
 		// agent section, but this view (the toggles' truth) never re-read —
 		// the settings-saved law (every reader re-reads) was missing this
@@ -377,6 +370,7 @@ export function AgentSection({
 	});
 
 	useEffect(() => {
+		modelsMounted.current = true;
 		readModels();
 		fetch("/api/settings/prompts")
 			.then((r) => r.json())
@@ -393,6 +387,7 @@ export function AgentSection({
 				setEngineKeys(present);
 			})
 			.catch(() => {});
+		return () => { modelsMounted.current = false; modelsRequest.current++; };
 	}, []);
 
 	// The reason line re-reads /api/search AFTER an engine write lands —
@@ -653,6 +648,7 @@ export function AgentSection({
 								ref={thisMenuOpen ? menuAnchorRef : undefined}
 								className="relative flex items-center gap-2"
 							>
+								{slot !== "strong" && <ChatGPTBackgroundAccess provider={coord?.provider} />}
 								<MenuTrigger
 									value={modelId ? prettyModel(modelId) : ""}
 									emptyLabel="—"
@@ -792,28 +788,19 @@ export function AgentSection({
 						</SettingsRow>
 					);
 				})()}
-				{TOGGLE_TOOLS.map((id) => {
-					// Research needs a live search engine; the row + toggle gray
-					// on the same signal the registry drops the tool on (see
-					// researchToolUnavailable). The reason rides as the hint.
-					const searchDown = researchToolUnavailable(id, search);
-					return (
-						<SettingsRow
-							key={id}
-							label={`Tool · ${id}`}
-							hint={searchDown ? search?.reason : undefined}
-							testid={`tool-row-${id}`}
-							dimmed={searchDown}
-						>
-							<Toggle
-								checked={agent?.tools?.[id] ?? true}
-								disabled={searchDown}
-								label={`tool ${id}`}
-								onChange={(on) => onSectionChange(composeTool(agent, id, on))}
-							/>
-						</SettingsRow>
-					);
-				})}
+				{TOGGLE_TOOLS.map((id) => (
+					<SettingsRow
+						key={id}
+						label={`Tool · ${id}`}
+						testid={`tool-row-${id}`}
+					>
+						<Toggle
+							checked={agent?.tools?.[id] ?? true}
+							label={`tool ${id}`}
+							onChange={(on) => onSectionChange(composeTool(agent, id, on))}
+						/>
+					</SettingsRow>
+				))}
 				{(() => {
 					const engine = agent?.search?.engine ?? null;
 					const anyKey = engineKeys.tavily === true || engineKeys.brave === true;

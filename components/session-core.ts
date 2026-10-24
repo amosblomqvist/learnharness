@@ -17,6 +17,7 @@ import type { AgentEvent } from "@earendil-works/pi-agent-core";
 import type { ToolResultMessage } from "@earendil-works/pi-ai";
 import {
 	needsContinuation,
+	measuredContextTokens,
 	newAnswerResult,
 	newNextMessage,
 	newProblemDismissedMarker,
@@ -163,6 +164,8 @@ function sameDetails(a: unknown, b: unknown): boolean {
 export interface SessionState {
 	messages: LhViewMessage[];
 	nativeMessages: LhMessage[];
+	/** Completed conversation usage; null after compaction or before first usage. */
+	contextTokens: number | null;
 	status: SessionStatus;
 	error: { message: string } | null;
 	/** Steers sent but not yet drained (composer steering, 2026-10-03):
@@ -220,6 +223,7 @@ export class SessionModel {
 	// The live turn's execution layer (view model mid-turn states):
 	private executions = new Map<string, LiveExecution>();
 	private streamingIds = new Set<string>();
+	private incompleteUsageIds = new Set<string>();
 	/** The in-flight assistant message's client id (see applyWireEvent). */
 	private streamingMessageId: string | null = null;
 	private statusValue: SessionStatus = "ready";
@@ -257,6 +261,7 @@ export class SessionModel {
 		return {
 			messages: projectView([...this.base, ...this.tail], live),
 			nativeMessages: [...this.base, ...this.tail],
+			contextTokens: measuredContextTokens([...this.base, ...this.tail], this.incompleteUsageIds),
 			status: this.statusValue,
 			error: this.errorValue,
 			steerQueue: this.steerQueueValue,
@@ -364,6 +369,8 @@ export class SessionModel {
 				// the wire) still wins.
 				const id = message.id ?? this.streamingMessageId ?? localId();
 				const withId = { ...message, id } as LhMessage;
+				if (agent.type === "message_end") this.incompleteUsageIds.delete(id);
+				else this.incompleteUsageIds.add(id);
 				if (agent.type === "message_start") {
 					this.streamingMessageId = id;
 					this.streamingIds.add(id);
@@ -487,6 +494,7 @@ export class SessionModel {
 		// every path that actually replays onto a stale tail).
 		if (!refetchRecordFirst) {
 			this.mutate(() => {
+				this.incompleteUsageIds.clear();
 				this.tail = [];
 				this.streamingMessageId = null;
 			});
@@ -502,6 +510,7 @@ export class SessionModel {
 					if (Array.isArray(record.messages)) {
 						this.mutate(() => {
 							this.base = record.messages!;
+							this.incompleteUsageIds.clear();
 							this.tail = [];
 						});
 					}
@@ -509,6 +518,7 @@ export class SessionModel {
 					// The record did not land — restore the clean-slate guard
 					// before the replay (no atomic swap is coming).
 					this.mutate(() => {
+						this.incompleteUsageIds.clear();
 						this.tail = [];
 						this.streamingMessageId = null;
 					});
@@ -714,6 +724,7 @@ export class SessionModel {
 	setMessages(record: LhMessage[]): void {
 		this.mutate(() => {
 			this.base = record;
+			this.incompleteUsageIds.clear();
 			this.tail = [];
 			this.streamingMessageId = null; // the tail (and its slot) is gone
 		});

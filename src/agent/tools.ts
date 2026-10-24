@@ -268,8 +268,7 @@ export interface ProberToolContext extends ProbeDoneContext {
 	jobStore: JobStore;
 	/** Fire the background runner for a freshly created job. */
 	spawn: (job: JobRecord, input: ResearchInput | DemoInput | VisualInput | PdfInput) => void;
-	/** Search availability — the research dispatch tool's honest-disable
-	 *  signal (same gate as the teacher's). Absent = available. */
+	/** Retained search-status seam; research dispatch is available keylessly. */
 	searchAvailable?: () => boolean;
 	/** The prober's graph-map reader (wave 7): present = the two map tools
 	 *  (list_sessions / list_propositions) are registered. The composition
@@ -331,13 +330,12 @@ export function createProberTools(
 				// research + pdf are ALWAYS available in every phase — the
 				// prober can verify facts or read learner PDFs while assessing.
 				// demo/visual stay teach-phase-only (they need the lesson's plan
-				// context). Same gating as the teacher: toggle-filtered here,
-				// research subject to the searchAvailable gate (honestly absent
-				// when no engine is live).
+				// context). Same user-toggle filtering as the teacher; research
+				// remains available without a search-provider key.
 				...(jobs.research ? { research: jobs.research } : {}),
 				pdf: jobs.pdf!,
 				// The map reader (wave 7): present only when the settings gate
-				// opened — same registration-time drop as the search gate.
+				// opened.
 				...(ctx.graphStore
 					? proberGraphTools({ chatStore: ctx.chatStore, graphStore: ctx.graphStore })
 					: {}),
@@ -400,9 +398,7 @@ export interface TeacherToolContext extends PlanToolContext {
 	 *  rides along — the spawn fires mid-stream, before the tool part is
 	 *  persisted to the transcript (a transcript scan would race it). */
 	spawn: (job: JobRecord, input: ResearchInput | DemoInput | VisualInput | PdfInput) => void;
-	/** Search availability (search port wave, 2026-09-20): the research
-	 *  dispatch tool's honest-disable signal — no live engine = the tool
-	 *  drops from this registry (JobToolContext.searchAvailable). */
+	/** Retained search-status seam; research dispatch is available keylessly. */
 	searchAvailable?: () => boolean;
 }
 
@@ -462,10 +458,6 @@ export function createTeacherTools(
 			find: findTool,
 			grep: grepTool,
 			...planTools(ctx),
-			// Fix wave (2026-09-20): searchAvailable was RECEIVED here but
-			// DROPPED when building the inner JobToolContext — the drop-gate
-			// always took its ?? true default. Threaded now: the live signal
-			// reaches jobTools' research gate.
 			...jobTools({ chatId: ctx.chatId, jobStore: ctx.jobStore, spawn: ctx.spawn, searchAvailable: ctx.searchAvailable }),
 		},
 		withoutMechanics(enabled),

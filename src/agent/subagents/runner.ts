@@ -82,9 +82,8 @@ export interface JobRunnerDeps {
 	/** The search seam (search port wave, 2026-09-20): resolves the LIVE
 	 *  provider fresh per job — server/search.ts composition injected by
 	 *  the wiring; null = honestly unavailable (the researcher's web_search
-	 *  reports it). Absent seam (tests) reads the same. The dispatch-level
-	 *  drop (jobTools' searchAvailable) uses the same signal — jobs already
-	 *  in flight when a key disappears still fail honestly, never crash. */
+	 *  reports it as recoverable text). Absent seam (tests) reads the same;
+	 *  research dispatch and web_fetch do not require search credentials. */
 	searchProvider?: () => SearchProvider | null;
 	/** Key-presence gate (provider-key interlude, 2026-09-25): given the
 	 *  resolved engine's provider + the kind's slot tier, return the

@@ -10,7 +10,7 @@ import type { BackgroundModelRole, ModelSlotName } from "../settings.ts";
 
 /** One picker row: everything the UI shows about a model, projected from
  *  pi-ai's catalog. Costs are USD per 1M tokens (the same catalog, the same
- *  units core/prices.ts's generated table carries). */
+ *  units as Pi's server-side pricing calculator). */
 export interface ModelCatalogEntry {
 	id: string;
 	name: string;

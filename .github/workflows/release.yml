@@ -129,6 +129,8 @@ jobs:
           NODE_ENV: test
           ELECTRON_RUN_AS_NODE: "1"
       - run: npm run build
+      # Check the fresh trace before any static copying/curation.
+      - run: node scripts/smoke-provider-runtime.mjs
       - run: node scripts/build-server.mjs
       - run: node scripts/smoke-server.mjs --electron
       - name: Validate macOS release secrets
@@ -169,6 +171,25 @@ jobs:
       - name: Windows/Linux rehearsal (no publish)
         if: github.event_name == 'workflow_dispatch' && runner.os != 'macOS'
         run: npx electron-builder ${{ matrix.builder_args }} --publish never
+      - name: Initialize packaged providers offline (host and packaged Electron Node)
+        run: |
+          case "$RUNNER_OS" in
+            macOS)
+              app="dist/mac-arm64/LearnHarness.app/Contents"
+              payload="$app/Resources/server/standalone"
+              runtime="$app/MacOS/LearnHarness"
+              ;;
+            Windows)
+              payload="dist/win-unpacked/resources/server/standalone"
+              runtime="dist/win-unpacked/LearnHarness.exe"
+              ;;
+            Linux)
+              payload="dist/linux-unpacked/resources/server/standalone"
+              runtime="dist/linux-unpacked/learnharness"
+              ;;
+          esac
+          node scripts/smoke-provider-runtime.mjs --standalone "$payload"
+          node scripts/smoke-provider-runtime.mjs --standalone "$payload" --runtime "$runtime"
       - name: Exercise packaged demo runtime (own Electron, no system Chrome)
         run: |
           case "$RUNNER_OS" in

@@ -4,8 +4,8 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { ActivityIcon, BotIcon, FileTextIcon, PenToolIcon, PlayIcon, SearchIcon, SquareIcon, WaypointsIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { CallUsage, JobKind, JobRecord } from "@/src/core";
-import { isModelsRefusal, isProviderKeyRefusal, jobCost } from "@/src/core";
-import { formatTokens, formatUsd } from "@/components/usage-format";
+import { isModelsRefusal, isProviderKeyRefusal } from "@/src/core";
+import { formatTokens, planCostLabel } from "@/components/usage-format";
 import { useServerEvent, useServerResync } from "@/components/server-events";
 
 /**
@@ -20,7 +20,7 @@ import { useServerEvent, useServerResync } from "@/components/server-events";
  * Data: ONE feed of GET /api/activity (jobs across ALL chats, title-joined,
  * oldest-first + extraction runs), fetched when truth moves (events
  * channel, S5) and folded client-side with core/prices.ts.
- * Cost is INFERRED (jobCost); the context line is the LAST model call's
+ * Cost is INFERRED server-side through Pi; the context line is the LAST model call's
  * input+output against the model's limit (JobUsage.lastStep — pending
  * contract) — never a cumulative sum, which would be the wrong number.
  * Absent data renders "—", never zero (the doctrine).
@@ -48,6 +48,8 @@ interface FeedUsage extends NonNullable<JobRecord["usage"]> {
 }
 
 export interface FeedJob extends JobRecord {
+	/** Read-time server estimate; absent on older transport payloads. */
+	costUsd?: number | null;
 	title: string;
 	usage?: FeedUsage;
 	/** Server-joined live catalog limit (owner amendment 2026-09-23) —
@@ -200,7 +202,7 @@ export function toBlobs(feed: ActivityFeed): ActivityBlob[] {
 		// blob shape's call — here the line simply hides).
 		const limit = job.contextLimit;
 		if (usage && lastStep && limit !== null && lastStep.inputTokens !== undefined) {
-			// Same metric as the session meter (prices.ts stepFootprint — the
+			// Same metric as the session meter (four normalized buckets — the
 			// context-meter audit, owner 2026-09-23): all four directions.
 			// Provider "input" EXCLUDES cacheRead/cacheWrite, so input+output
 			// alone reads wildly low on cache-heavy jobs.
@@ -220,7 +222,7 @@ export function toBlobs(feed: ActivityFeed): ActivityBlob[] {
 			title: job.title,
 			chatId: job.chatId,
 			startedAt: Date.parse(job.createdAt) || 0,
-			cost: jobCost(job),
+			cost: job.costUsd ?? null,
 			context,
 			// BYOK (owner, 2026-09-22): a refusal is info, not failure —
 			// the honest line the runner left ("failed") reads as setup
@@ -348,7 +350,7 @@ export function ActivitySection({ feed: feedProp }: { feed?: ActivityFeed }) {
 				Background agents
 				{blobs.length > 0 && (
 					<span className="ml-auto tabular-nums" data-testid="activity-total-cost" title="Total running cost (inferred)">
-						{totalCost === null ? "—" : formatUsd(totalCost)}
+						{planCostLabel(totalCost, blobs.some((blob) => blob.model?.startsWith("chatgpt:")))}
 				</span>
 				)}
 			</div>
@@ -423,7 +425,7 @@ function ActivityBlobRow({
 					)}
 				</span>
 				<span className="flex shrink-0 items-center gap-2 tabular-nums text-muted-foreground">
-					<span data-testid="activity-blob-cost">{blob.cost === null ? "—" : formatUsd(blob.cost)}</span>
+					<span data-testid="activity-blob-cost">{planCostLabel(blob.cost, blob.model?.startsWith("chatgpt:") === true)}</span>
 					<span data-testid="activity-blob-elapsed">{formatElapsed(now - blob.startedAt)}</span>
 				</span>
 			</button>
@@ -462,7 +464,7 @@ function ActivityBlobRow({
 						<div className="flex justify-between gap-2">
 							<span>Cost</span>
 							<span className="tabular-nums text-card-foreground">
-								{blob.cost === null ? "—" : formatUsd(blob.cost)}
+								{planCostLabel(blob.cost, blob.model?.startsWith("chatgpt:") === true)}
 							</span>
 						</div>
 						<div className="flex justify-between gap-2">

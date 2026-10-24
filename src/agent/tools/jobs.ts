@@ -23,11 +23,9 @@ export interface JobToolContext {
 	 *  input rides along because the spawn happens MID-STREAM, before
 	 *  onFinish persists the tool part — a transcript scan would race it. */
 	spawn: (job: JobRecord, input: ResearchInput | DemoInput | VisualInput | PdfInput) => void;
-	/** Search availability (search port wave, 2026-09-20): the honest
-	 *  disable signal for the research dispatch tool — no live engine
-	 *  means NO research tool in the registry (owner decision: registry-
-	 *  level drop, no doomed dispatch, no silent fallback). Absent =
-	 *  available (tests + any seam without search wiring). */
+	/** Search-provider availability, retained for existing composition seams.
+	 *  Research dispatch does not depend on it: web_fetch is keyless and
+	 *  web_search reports a missing provider as a recoverable tool result. */
 	searchAvailable?: () => boolean;
 }
 
@@ -127,25 +125,20 @@ const PDF_DESCRIPTION =
  * context (chatId + jobStore + the spawn seam), so concurrent chats never
  * share state. chat-handler wires it each turn; tests wire their own.
  *
- * The research tool drops from the registry when ctx.searchAvailable reports
- * no live engine (2026-09-20) — the teacher never sees it, so a keyless
- * server can't dispatch doomed research jobs. Jobs ALREADY in flight when
- * a key disappears still run to their honest failure (runner backstop).
+ * Research remains available without a search-provider key; the role's
+ * existing user-toggle filtering still applies outside this registry.
  */
 export function jobTools(ctx: JobToolContext): Record<string, AgentTool<any>> {
-	const searchOn = ctx.searchAvailable?.() ?? true;
 	return {
-		...(searchOn && {
-			research: {
-				name: "research",
-				label: "research",
-				description: RESEARCH_DESCRIPTION,
-				parameters: researchInputSchema,
-				execute: serverExecute("research", researchInputSchema, (input, { toolCallId }) =>
-					dispatch(ctx, "research", toolCallId, RESEARCH_ACK, input),
-				),
-			},
-		}),
+		research: {
+			name: "research",
+			label: "research",
+			description: RESEARCH_DESCRIPTION,
+			parameters: researchInputSchema,
+			execute: serverExecute("research", researchInputSchema, (input, { toolCallId }) =>
+				dispatch(ctx, "research", toolCallId, RESEARCH_ACK, input),
+			),
+		},
 		demo: {
 			name: "demo",
 			label: "demo",

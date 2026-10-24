@@ -81,7 +81,12 @@ files:
   - node_modules/universalify/**/*
   - node_modules/ms/**/*
   - node_modules/argparse/**/*
+  # Main-process ID-token signature verification (no bundled OAuth implementation).
+  - node_modules/jose/**/*
 extraResources:
+  # Attribution/license for the bounded local Pi cutoff-selector port.
+  - from: docs/compaction-accounting.md
+    to: licenses/pi-compaction.md
   # Copy from the PARENT dir (.next), not .next/standalone itself:
   # electron-builder hard-excludes a copy's root node_modules and the
   # default no-filter pattern is a literal path match (empirically both

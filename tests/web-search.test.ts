@@ -1,20 +1,14 @@
-/**
- * Search rewiring (search port wave, 2026-09-20) — the web_search tool's
- * port injection + the research dispatch tool's registry-level drop.
- *
- * Google CSE is dead: the tool runs on the injected search port
- * (core/search.ts), the runner threads the seam (searchProvider — covered
- * end-to-end in jobs.test.ts), and jobTools drops the research tool when
- * ctx.searchAvailable reports no live engine (owner decision: registry
- * drop, no doomed dispatch, no silent fallback).
- *
+/** Keyless research availability + the injected search port.
  * No network, no shared data files — the jobStore fake below is in-memory.
+ * A missing search key is a recoverable tool result, not a dispatch gate.
  */
 
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { createWebTools } from "../src/agent/tools/web.ts";
 import { jobTools } from "../src/agent/tools/jobs.ts";
+import { runResearcherAgent } from "../src/agent/subagents/researcher.ts";
+import { createFauxCore, fauxAssistantMessage, fauxText, fauxToolCall, type FauxResponseStep } from "@earendil-works/pi-ai";
 import type { JobStore } from "../src/core/ports.ts";
 import type { JobRecord } from "../src/core/contracts.ts";
 import type { SearchHit, SearchProvider } from "../src/core/search.ts";
@@ -31,9 +25,13 @@ function stubProvider(hits: SearchHit[] = [{ title: "t", url: "https://e.com/", 
 describe("web_search on the injected port (web.ts)", () => {
 	it("null provider → the honest unavailability string, never a crash", async () => {
 		const { web_search } = createWebTools(() => null);
+		assert.ok(web_search, "web_search is still exposed without a provider");
 		const out = await web_search!.execute!("c1", { query: "anything" });
-		assert.match(String(out.details), /not available: no search engine is configured/);
-		assert.match(String(out.details), /Tavily or Brave/);
+		const missing = "web_search is not available: no search engine is configured. " +
+			"Set a Tavily or Brave search API key in settings. Report in your brief that web search is unavailable.";
+		assert.equal(out.details, missing);
+		assert.deepEqual(out.content, [{ type: "text", text: missing }]);
+		assert.notEqual(out.isError, true, "missing keys remain ordinary recoverable text, not a native error");
 	});
 
 	it("a live provider returns its hits (count defaults to 5)", async () => {
@@ -110,11 +108,86 @@ describe("web_search on the injected port (web.ts)", () => {
 	});
 });
 
-/** Minimal in-memory JobStore — the drop tests never touch the fs. */
+describe("keyless researcher loop", () => {
+	it("sends the exact approved missing-credentials guidance in the researcher system prompt", async () => {
+		const approved = "If web_search reports that search is unavailable because credentials are missing, do not retry it with different queries. Use web_fetch when you have source URLs, and continue with any other available sources. If the missing search capability materially limits your work, state the limitation and the missing-key setup needed in your brief. Never invent search results or sources.";
+		const faux = createFauxCore({});
+		faux.setResponses([(context) => {
+			const system = context.messages.find((m) => m.role === "system");
+			assert.ok(system && system.role === "system");
+			assert.equal(typeof system.content, "string");
+			const prompt = system.content as string;
+			assert.ok(prompt.split("\n\n").includes(approved), "approved paragraph is passed verbatim");
+			assert.match(prompt, /Break the question into 2-4 searchable facets/);
+			assert.match(prompt, /## Gaps/);
+			assert.ok(system.toolsAdded?.some((t) => t.name === "web_search"));
+			assert.ok(system.toolsAdded?.some((t) => t.name === "web_fetch"));
+			return fauxAssistantMessage([fauxText("Prompt verified; no model behavior inferred.")]);
+		}]);
+		assert.equal(await runResearcherAgent("Check the prompt only", {
+			engine: { model: faux.getModel(), streamFn: faux.streamSimple },
+		}), "Prompt verified; no model behavior inferred.");
+	});
+
+	// These scripts prove tool/loop mechanics, not real-model compliance.
+	for (const searchFirst of [true, false]) {
+		it(searchFirst ? "recovers from missing search keys by fetching a supplied URL" : "fetch-only research needs no search credentials", async () => {
+			const url = "https://example.com/supplied-source";
+			const brief = `## Summary\nVerified supplied source. [Source](${url})`;
+			const steps: FauxResponseStep[] = [];
+			const fetchCall = () => fauxAssistantMessage(
+				[fauxToolCall("web_fetch", { url }, { id: "fetch1" })], { stopReason: "toolUse" },
+			);
+			if (searchFirst) {
+				steps.push(
+					() => {
+						return fauxAssistantMessage(
+							[fauxToolCall("web_search", { query: "supplied source" }, { id: "search1" })], { stopReason: "toolUse" },
+						);
+					},
+					(context) => {
+						const result = context.messages.find((m) => m.role === "toolResult" && m.toolCallId === "search1");
+						assert.ok(result && result.role === "toolResult");
+						assert.equal(result.isError, false, "missing keys do not abort the native loop");
+						assert.match(JSON.stringify(result.content), /no search engine is configured/);
+						return fetchCall();
+					},
+				);
+			} else steps.push(fetchCall());
+			steps.push((context) => {
+				const result = context.messages.find((m) => m.role === "toolResult" && m.toolCallId === "fetch1");
+				assert.ok(result && result.role === "toolResult");
+				assert.equal(result.isError, false);
+				assert.match(JSON.stringify(result.content), /Synthetic verified source content/);
+				return fauxAssistantMessage([fauxText(brief)]);
+			});
+			const faux = createFauxCore({});
+			faux.setResponses(steps);
+			const realFetch = globalThis.fetch;
+			const fetched: string[] = [];
+			globalThis.fetch = (async (input) => {
+				fetched.push(String(input));
+				assert.equal(String(input), url, "only the supplied URL is fetched");
+				return new Response("Synthetic verified source content", { headers: { "content-type": "text/plain" } });
+			}) as typeof fetch;
+			try {
+				assert.equal(await runResearcherAgent(`Verify ${url}`, {
+					engine: { model: faux.getModel(), streamFn: faux.streamSimple },
+					// No search seam: this is the keyless backstop, not a search stub.
+				}), brief);
+				assert.deepEqual(fetched, [url]);
+			} finally {
+				globalThis.fetch = realFetch;
+			}
+		});
+	}
+});
+
+/** Minimal in-memory JobStore — registry tests never touch the fs. */
 function fakeJobStore(): JobStore {
 	const jobs = new Map<string, JobRecord>();
 	return {
-			createJob(init) {
+		createJob(init) {
 			const job: JobRecord = {
 				id: `job_${jobs.size + 1}`,
 				kind: init.kind,
@@ -149,11 +222,26 @@ function fakeCtx(available?: () => boolean) {
 	};
 }
 
-describe("the research registry drop (jobTools)", () => {
-	it("searchUnavailable: false → research drops from the registry (the other job tools stay)", () => {
+describe("keyless research dispatch (jobTools)", () => {
+	it("searchAvailable: false → research remains in the registry", () => {
 		const tools = jobTools(fakeCtx(() => false));
-		assert.equal("research" in tools, false, "no research tool — no doomed dispatch");
+		assert.ok(tools.research, "research can fetch supplied URLs without a search provider");
 		assert.ok(tools.demo && tools.visual && tools.pdf, "the search-less server keeps its other sub-agents");
+	});
+
+	it("keyless dispatch preserves the async job acknowledgement and spawn contract", async () => {
+		const ctx = fakeCtx(() => false);
+		const spawned: Array<{ job: JobRecord; input: unknown }> = [];
+		const tools = jobTools({ ...ctx, spawn: (job, input) => { spawned.push({ job, input }); } });
+		const input = { question: "Verify the supplied URL", context: "https://example.com/source" };
+		const out = await tools.research!.execute!("keyless-call", input);
+		assert.match(String(out.details), /^Dispatched \(job job_1\)\./);
+		assert.match(String(out.details), /fire-and-forget/);
+		assert.equal(spawned.length, 1);
+		assert.equal(spawned[0]!.job.kind, "research");
+		assert.equal(spawned[0]!.job.toolCallId, "keyless-call");
+		assert.equal(spawned[0]!.job.status, "running");
+		assert.deepEqual(spawned[0]!.input, input);
 	});
 
 	it("searchAvailable: true → research present", () => {
@@ -167,12 +255,8 @@ describe("the research registry drop (jobTools)", () => {
 	});
 });
 
-// ─── the threaded gate (fix wave, 2026-09-20) ────────────────────────────────
-//
-// The fix: createTeacherTools/createProberTools used to DROP searchAvailable
-// when building the inner JobToolContext, so jobTools' gate always took its
-// ?? true default even when the live wiring said unavailable. These pins
-// hold the THREADED path (the registry factories, not jobTools directly).
+// Exercise live registry factories too: search status must not override
+// the existing per-role/user-toggle policy.
 
 import { createProberTools, createTeacherTools } from "../src/agent/tools.ts";
 import type { ChatStore } from "../src/core/ports.ts";
@@ -186,19 +270,19 @@ const fakeChatStore = {
 
 const ctxBase = { chatId: "chat-gate-test", chatStore: fakeChatStore };
 
-describe("the threaded searchAvailable gate (registry factories)", () => {
-	it("createTeacherTools: unavailable drops research on the live wiring path", () => {
+describe("keyless role registries", () => {
+	it("createTeacherTools: unavailable keeps research on the live wiring path", () => {
 		const tools = createTeacherTools({
 			...ctxBase,
 			jobStore: fakeJobStore(),
 			spawn: () => {},
 			searchAvailable: () => false,
 		});
-		assert.equal("research" in tools, false, "the threaded signal reached jobTools' gate");
+		assert.ok(tools.research, "no search key is required to dispatch research");
 		assert.ok(tools.demo && tools.visual && tools.pdf, "the other job tools survive");
 	});
 
-	it("createTeacherTools: available keeps research (the gate reads the signal both ways)", () => {
+	it("createTeacherTools: available keeps research", () => {
 		const tools = createTeacherTools({
 			...ctxBase,
 			jobStore: fakeJobStore(),
@@ -208,7 +292,7 @@ describe("the threaded searchAvailable gate (registry factories)", () => {
 		assert.ok(tools.research, "a keyed server exposes research through the teacher");
 	});
 
-	it("createProberTools: research + pdf are phase-omnipresent; the gate drops research only", () => {
+	it("createProberTools: research + pdf remain phase-omnipresent with or without search keys", () => {
 		const on = createProberTools({
 			...ctxBase,
 			deliver: () => {},
@@ -225,16 +309,25 @@ describe("the threaded searchAvailable gate (registry factories)", () => {
 			spawn: () => {},
 			searchAvailable: () => false,
 		});
-		assert.equal("research" in off, false, "no engine = no research dispatch in the prober either");
+		assert.ok(off.research, "keyless research dispatch is available in the prober too");
 		assert.ok(off.pdf && off.probe_done, "pdf is keyless — it survives; probe_done always-on");
 	});
 
-	it("createProberTools: the user toggle drops research independently of the gate", () => {
+	it("createProberTools: the user toggle still drops research without search keys", () => {
 		const tools = createProberTools(
-			{ ...ctxBase, deliver: () => {}, jobStore: fakeJobStore(), spawn: () => {}, searchAvailable: () => true },
+			{ ...ctxBase, deliver: () => {}, jobStore: fakeJobStore(), spawn: () => {}, searchAvailable: () => false },
 			{ research: false },
 		);
 		assert.equal("research" in tools, false, "toggle-filtered like the teacher side");
 		assert.ok(tools.pdf, "pdf unaffected by a research toggle");
+	});
+
+	it("createTeacherTools: the user toggle still drops research without search keys", () => {
+		const tools = createTeacherTools(
+			{ ...ctxBase, jobStore: fakeJobStore(), spawn: () => {}, searchAvailable: () => false },
+			{ research: false },
+		);
+		assert.equal("research" in tools, false);
+		assert.ok(tools.pdf && tools.demo && tools.visual);
 	});
 });

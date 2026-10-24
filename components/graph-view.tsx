@@ -294,8 +294,16 @@ function timeAgo(startedAt: number): string {
 
 /** Run/stage cost at 3 decimals (pipeline pennies are real money at this
  *  scale); headline totals use 2. Null (unpriced model) renders "—". */
-function fmtRunCost(dollars: number | null): string {
+function fmtRunCost(dollars: number | null, subscription = false): string {
+	if (subscription) return dollars === null ? "ChatGPT plan" : `$${dollars.toFixed(3)} API + ChatGPT plan`;
 	return dollars === null ? "—" : `$${dollars.toFixed(3)}`;
+}
+function graphUsageLabel(costs: Pick<GraphCostSummary, "stages">): string {
+	const stages = [costs.stages.extraction, costs.stages.audit];
+	const plan = stages.some((stage) => (stage.subscriptionRuns ?? 0) > 0);
+	const priced = stages.some((stage) => stage.runs - stage.unpricedRuns - (stage.subscriptionRuns ?? 0) > 0);
+	const dollars = displayCostTotals(costs).totalDollars;
+	return plan ? (priced ? `$${dollars.toFixed(2)} API + ChatGPT plan` : "ChatGPT plan") : priced ? `$${dollars.toFixed(2)}` : "—";
 }
 
 /**
@@ -349,7 +357,7 @@ export function GraphCostControl({ costs }: { costs: GraphCostSummary }) {
 					open ? "text-foreground" : "text-muted-foreground hover:text-foreground"
 				}`}
 			>
-				${displayCostTotals(costs).totalDollars.toFixed(2)}
+				{graphUsageLabel(costs)}
 			</button>
 			</Hint>
 			{open && (
@@ -378,7 +386,7 @@ function GraphCostPanel({ costs }: { costs: GraphCostSummary }) {
 	];
 	// The displayed figures come from displayCostTotals (naming excluded —
 	// the pill and this panel must agree).
-	const { totalDollars, unpricedRuns } = displayCostTotals(costs);
+	const { unpricedRuns } = displayCostTotals(costs);
 	return (
 		<div className="w-80 max-w-[calc(100vw-1.5rem)] rounded-xl border bg-card/95 p-3 text-xs shadow-lg backdrop-blur">
 			<div className="mb-2 flex items-baseline justify-between">
@@ -386,7 +394,7 @@ function GraphCostPanel({ costs }: { costs: GraphCostSummary }) {
 					Graph pipeline costs
 				</span>
 				<span className="text-foreground tabular-nums">
-					${totalDollars.toFixed(2)}
+					{graphUsageLabel(costs)}
 					{unpricedRuns > 0 && (
 						<span className="text-muted-foreground"> · {unpricedRuns} unpriced</span>
 					)}
@@ -397,8 +405,8 @@ function GraphCostPanel({ costs }: { costs: GraphCostSummary }) {
 					<div key={label} className="flex items-baseline justify-between gap-2 text-[11px]">
 						<span className="shrink-0 text-muted-foreground">{label}</span>
 						<span className="min-w-0 text-right tabular-nums">
-							{fmtRunCost(stage.runs === 0 || (stage.unpricedRuns > 0 && stage.dollars === 0) ? null : stage.dollars)}
-							{stage.unpricedRuns > 0 && stage.dollars > 0 && (
+							{fmtRunCost(stage.runs - stage.unpricedRuns - (stage.subscriptionRuns ?? 0) <= 0 ? null : stage.dollars, (stage.subscriptionRuns ?? 0) > 0)}
+							{stage.unpricedRuns > 0 && (stage.runs - stage.unpricedRuns - (stage.subscriptionRuns ?? 0) > 0 || (stage.subscriptionRuns ?? 0) > 0) && (
 								<span className="text-muted-foreground"> +{stage.unpricedRuns} unpriced</span>
 							)}
 							<span className="text-muted-foreground">
@@ -422,7 +430,7 @@ function GraphCostPanel({ costs }: { costs: GraphCostSummary }) {
 									</span>
 								)}
 							</span>
-							<span className="shrink-0 tabular-nums">{fmtRunCost(run.dollars)}</span>
+							<span className="shrink-0 tabular-nums">{fmtRunCost(run.dollars, (run.subscriptionRuns ?? 0) > 0)}{run.dollars === null && run.subscriptionRuns === 1 ? " +1 unpriced" : ""}</span>
 						</div>
 					))}
 			</div>
