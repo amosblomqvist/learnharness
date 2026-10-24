@@ -71,6 +71,17 @@ const nextConfig: NextConfig = {
 			"node_modules/@resvg/resvg-js-*/**/*",
 			"node_modules/@earendil-works/pi-ai/dist/providers/data/**/*",
 			"node_modules/@earendil-works/pi-agent-core/dist/**/*.json",
+			// Issue #12 (2026-10-24): the tracer drops gcp-metadata and its deps
+			// json-bigint + bignumber.js even though it keeps their dependents —
+			// @google/genai (a serverExternalPackages external) statically imports
+			// google-auth-library, whose top-level require("gcp-metadata") the
+			// tracer never follows, so the packaged app 500s on the first
+			// Gemini call with MODULE_NOT_FOUND. The provider-runtime gate in
+			// scripts/smoke-demo-runtime.mjs fails the build when this subtree
+			// goes missing again.
+			"node_modules/gcp-metadata/**/*",
+			"node_modules/json-bigint/**/*",
+			"node_modules/bignumber.js/**/*",
 		],
 	},
 	// Framework-free core lives in src/ (plain TS, imported by routes and CLI alike).
