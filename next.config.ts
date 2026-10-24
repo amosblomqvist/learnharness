@@ -71,6 +71,10 @@ const nextConfig: NextConfig = {
 			"node_modules/@resvg/resvg-js-*/**/*",
 			"node_modules/@earendil-works/pi-ai/dist/providers/data/**/*",
 			"node_modules/@earendil-works/pi-agent-core/dist/**/*.json",
+			// Preserve the Google adapter's metadata dependency and its JSON parser dependencies.
+			"node_modules/gcp-metadata/**/*",
+			"node_modules/json-bigint/**/*",
+			"node_modules/bignumber.js/**/*",
 		],
 	},
 	// Framework-free core lives in src/ (plain TS, imported by routes and CLI alike).
