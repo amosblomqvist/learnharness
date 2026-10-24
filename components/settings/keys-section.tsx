@@ -15,7 +15,9 @@
  *    a paste box on a key the UI cannot make live would mislead.
  *  - OpenRouter is NOT special: one provider among 33, a row only when
  *    stored, otherwise it lives in the Add dropdown like everyone else.
- *  - Providers groups API keys, subscriptions, dictation and search.
+ *  - Providers groups API keys, local models (Ollama — owner, local-models
+ *    wave: a URL row shown in full + an optional key row), subscriptions,
+ *    dictation and search.
  *    Unknown variables stay masked/read-only at the end of Model API keys.
  *
  * API: GET /api/keys (masked statuses + the providers array), PUT
@@ -24,7 +26,7 @@
  */
 
 import { useEffect, useRef, useState } from "react";
-import { AUTH_KEYS, type AuthKeyStatus } from "@/src/core";
+import { AUTH_KEYS, OLLAMA_DEFAULT_URL, OLLAMA_URL_VAR, OLLAMA_VARS, type AuthKeyStatus } from "@/src/core";
 import { SettingsGroup } from "./controls.tsx";
 import { SubscriptionConnections } from "./subscription-connections.tsx";
 import { ProviderMenuList } from "./model-menu.tsx";
@@ -64,6 +66,9 @@ export function classifyKeys(
 	toolRows: AuthKeyStatus[];
 	/** Unknown file vars — preserved, read-only. */
 	unknownRows: AuthKeyStatus[];
+	/** The Ollama pair, URL first (synthesized when absent — the group
+	 *  always shows both rows). */
+	ollamaRows: AuthKeyStatus[];
 	/** Providers without a stored key — the Add dropdown's options. */
 	addable: ProviderKeyInfo[];
 } {
@@ -81,7 +86,7 @@ export function classifyKeys(
 	const providerRows: AuthKeyStatus[] = [];
 	const unknownRows: AuthKeyStatus[] = [];
 	for (const s of statuses) {
-		if (isTool(s.id)) continue;
+		if (isTool(s.id) || OLLAMA_VARS.includes(s.id)) continue;
 		if (providerEnv.has(s.id) || (!s.info && providers === undefined)) providerRows.push(s);
 		else if (!s.info) unknownRows.push(s);
 		// (pre-interlude catalogs: a curated-but-unclassified status still
@@ -92,6 +97,7 @@ export function classifyKeys(
 		providerRows,
 		toolRows: TOOL_IDS.map((id) => byId.get(id) ?? synth(id)),
 		unknownRows,
+		ollamaRows: OLLAMA_VARS.map((id) => byId.get(id) ?? synth(id)),
 		addable: (providers ?? []).filter((p) => !byId.has(p.envVar)),
 	};
 }
@@ -99,6 +105,7 @@ export function classifyKeys(
 /** The minimal status line, e.g. "…ab12 · 64 chars" (" · env" marks an
  *  environment-owned value — the row itself is read-only then). Pure. */
 export function keyStatusLine(status: AuthKeyStatus): string {
+	if (status.present && status.value !== undefined) return `${status.value}${status.source === "env" ? " · env" : ""}`;
 	if (!status.present || !status.masked) return "not set";
 	const tail = status.masked.replace(/ \((\d+) chars\)$/, "");
 	const chars = status.masked.match(/\((\d+) chars\)$/)?.[1] ?? "?";
@@ -118,6 +125,8 @@ function KeyTableRow({
 	onDelete,
 	onCancel,
 	testid,
+	initialValue,
+	placeholder = "Paste key…",
 }: {
 	label: string;
 	/** The "Get a key ↗" target — curated keys carry one. */
@@ -131,9 +140,16 @@ function KeyTableRow({
 	 *  must be visible — Cancel beside Save/Delete, not only Esc). */
 	onCancel: () => void;
 	testid: string;
+	/** What the editor opens holding (the Ollama URL row pre-fills). */
+	initialValue?: string;
+	placeholder?: string;
 }) {
 	const envOwned = status.source === "env";
-	const [value, setValue] = useState("");
+	const [value, setValue] = useState(initialValue ?? "");
+	// Each unfold starts from the row's initial value (saves clear it).
+	useEffect(() => {
+		if (expanded) setValue(initialValue ?? "");
+	}, [expanded, initialValue]);
 	const [error, setError] = useState<string | null>(null);
 	const [busy, setBusy] = useState(false);
 
@@ -163,7 +179,7 @@ function KeyTableRow({
 						onKeyDown={(e) => {
 							if (e.key === "Enter") void save();
 						}}
-						placeholder="Paste key…"
+						placeholder={placeholder}
 						aria-label={`${label} key`}
 						data-testid={`${testid}-input`}
 						disabled={busy}
@@ -400,7 +416,7 @@ export function KeysSection({
 		return <p className="px-6 py-5 text-xs text-muted-foreground/70">Loading keys…</p>;
 	}
 
-	const { providerRows, toolRows, unknownRows, addable } = classifyKeys(statuses, providers);
+	const { providerRows, toolRows, unknownRows, ollamaRows, addable } = classifyKeys(statuses, providers);
 
 	async function saveNewProvider(p: ProviderKeyInfo, value: string) {
 		const err = await saveKey(p.envVar, value);
@@ -453,6 +469,34 @@ export function KeysSection({
 						<span className="font-mono text-[11px] text-muted-foreground">{status.masked}</span>
 					</div>)}
 				</div>}
+			</SettingsGroup>
+
+			<SettingsGroup label="Local models" testid="group-local-models">
+				{ollamaRows.map((status) => {
+					const isUrl = status.id === OLLAMA_URL_VAR;
+					return (
+						<KeyTableRow
+							key={status.id}
+							label={isUrl ? "Ollama URL" : "Ollama API key (optional)"}
+							status={status}
+							expanded={openRow === status.id}
+							onToggle={() => setOpenRow(openRow === status.id ? null : status.id)}
+							onSave={async (v) => {
+								const err = await saveKey(status.id, v);
+								if (!err) setOpenRow(null);
+								return err;
+							}}
+							onCancel={() => setOpenRow(null)}
+							onDelete={() => deleteKey(status.id)}
+							testid={`key-${status.id.toLowerCase()}`}
+							{...(isUrl ? { initialValue: status.value ?? OLLAMA_DEFAULT_URL, placeholder: OLLAMA_DEFAULT_URL } : {})}
+						/>
+					);
+				})}
+				<p data-testid="ollama-hint" className="px-1 pt-1 text-[11px] text-muted-foreground/70">
+					Lists models that support tool calls with at least 32k context. Ollama runs models at its own context size — set{" "}
+					<code className="font-mono">OLLAMA_CONTEXT_LENGTH</code> on the Ollama server to match. The key is only needed when the server requires one.
+				</p>
 			</SettingsGroup>
 
 			<SettingsGroup label="Subscriptions" testid="group-subscriptions">
