@@ -70,6 +70,9 @@ const nextConfig: NextConfig = {
 			// per-platform-binary story as the canvas above (one per build).
 			"node_modules/@resvg/resvg-js-*/**/*",
 			"node_modules/@earendil-works/pi-ai/dist/providers/data/**/*",
+			// OAuth flows are lazy variable imports and are invisible to tracing.
+			"node_modules/@earendil-works/pi-ai/dist/auth/oauth/**/*.js",
+			"node_modules/@earendil-works/pi-ai/dist/utils/oauth-page.js",
 			"node_modules/@earendil-works/pi-agent-core/dist/**/*.json",
 		],
 	},
