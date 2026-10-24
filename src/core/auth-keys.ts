@@ -202,3 +202,34 @@ export interface AuthKeyStatus {
 	 *  settings page explains why a saved key is not the live one. */
 	shadowedByEnv: boolean;
 }
+
+/** One provider the global Pi setup supplies (GET /api/keys `pi`). */
+export interface PiProviderStatus {
+	id: string;
+	label: string;
+	/** How Pi supplies it: an api key, a login (Pi refreshes and stores
+	 *  its tokens), or models.json custom models. */
+	kind: "api_key" | "login" | "models";
+	/** Custom-model count (kind "models"). */
+	models?: number;
+	/** Pi holds a usable credential for it. */
+	usable: boolean;
+	/** The app has its own key for it, which wins — Pi's is unused. */
+	overridden: boolean;
+}
+
+/** The global Pi setup as the Keys page shows it — never secrets. */
+export interface PiSetupStatus {
+	/** A pi CLI was found (and the fresh-user switch is off) — without
+	 *  one the setup cannot be enabled. */
+	available: boolean;
+	/** In use: the user's switch (default on) AND available. */
+	enabled: boolean;
+	/** The configured directory (the default when unset). */
+	dir: string;
+	/** The agent dir actually read, while in use. */
+	resolvedDir: string | null;
+	/** The dir holds auth.json or models.json. */
+	found: boolean;
+	providers: PiProviderStatus[];
+}

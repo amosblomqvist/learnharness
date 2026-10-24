@@ -78,8 +78,9 @@ export interface ModelCatalogResponse {
 /** One row of the providers surface. */
 export interface CatalogProvider {
 	id: string;
-	/** The env var whose presence federates this provider in. */
-	envVar: string;
-	/** Whether that var is currently present (env or auth file). */
+	/** The env var whose presence federates this provider in — null for
+	 *  a provider only the global Pi setup supplies. */
+	envVar: string | null;
+	/** Whether the provider would authenticate (the app's key, else Pi's). */
 	keyPresent: boolean;
 }

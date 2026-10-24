@@ -18,6 +18,7 @@ import type {
 	AppearanceSettings,
 	BackgroundModelRole,
 	CompactionSettings,
+	PiSettings,
 	GeneralSettings,
 	GraphSettings,
 	ModelsSettings,
@@ -375,6 +376,23 @@ export function parseCompactionSettingsBody(body: unknown): SettingsBodyResult<C
 	return { ok: true, settings };
 }
 
+/** pi: { enabled?: boolean, dir?: string | null } — a blank dir clears
+ *  back to the default (null). */
+export function parsePiSettingsBody(body: unknown): SettingsBodyResult<PiSettings> {
+	const raw = asRecord(body);
+	if (!raw) return { ok: false, error: "Invalid JSON body" };
+	const settings: PiSettings = {};
+	if (raw.enabled !== undefined) {
+		if (typeof raw.enabled !== "boolean") return { ok: false, error: "enabled must be a boolean" };
+		settings.enabled = raw.enabled;
+	}
+	if (raw.dir !== undefined) {
+		if (raw.dir !== null && typeof raw.dir !== "string") return { ok: false, error: "dir must be a string or null" };
+		settings.dir = raw.dir?.trim() || null;
+	}
+	return { ok: true, settings };
+}
+
 /** The section→parser map for PUT /api/settings/[section] (the route also
  *  carries the special prompts sub-resource). */
 export const SETTINGS_SECTIONS = {
@@ -385,6 +403,7 @@ export const SETTINGS_SECTIONS = {
 	graph: parseGraphSettingsBody,
 	compaction: parseCompactionSettingsBody,
 	models: parseModelsSettingsBody,
+	pi: parsePiSettingsBody,
 } as const;
 
 export type SettingsSectionName = keyof typeof SETTINGS_SECTIONS;

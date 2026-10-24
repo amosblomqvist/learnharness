@@ -15,11 +15,15 @@
  * value comes from the environment (dev .env.local / launch env) or the
  * file, and `shadowedByEnv` explains why a saved key is not the live one
  * (env always wins).
+ *
+ * `pi` is the global Pi setup's view (src/server/pi-global.ts): whether
+ * it can be / is in use, where it reads, and the providers it supplies
+ * beside the app's own — read-only, no secrets.
  */
-import { keyStatuses, providerKeyList } from "@/src/server";
+import { keyStatuses, piSetupStatus, providerKeyList } from "@/src/server";
 
 export const dynamic = "force-dynamic";
 
 export async function GET() {
-	return Response.json({ keys: keyStatuses(), providers: providerKeyList() });
+	return Response.json({ keys: keyStatuses(), providers: providerKeyList(), pi: piSetupStatus() });
 }

@@ -43,3 +43,5 @@ export * from "./compaction.ts";
 export { runPiTurn, piTurnResponse, type PiTurnHandle, type PiTurnSpec } from "./pi/ui-stream.ts";
 export * from "./observability.ts";
 export * from "./model-catalog.ts";
+// The global Pi setup: Pi's providers and models complementing the app's.
+export { piSetupStatus, providerUsable } from "./pi-global.ts";

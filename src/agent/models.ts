@@ -1,6 +1,8 @@
 import {
 	clampThinkingLevel,
 	createModels,
+	type CredentialStore,
+	type Provider,
 	getSupportedThinkingLevels,
 	type Api,
 	type Model,
@@ -45,6 +47,30 @@ export type { ThinkingLevel };
 
 let collection: ReturnType<typeof createModels> | undefined;
 
+/**
+ * The server's injection seam into the collection — the agent layer never
+ * imports server/store, so the composition hands these in
+ * (src/server/pi-global.ts):
+ *  - `credentials`: the collection's credential store. pi-ai consults it
+ *    before the environment, so it must answer only for providers the app
+ *    has no key for.
+ *  - `extraProviders`: providers beyond pi-ai's builtins, re-read on every
+ *    piModels() call; a referentially-unchanged list is a no-op.
+ */
+export interface PiModelsHooks {
+	credentials: CredentialStore;
+	extraProviders(): readonly Provider[];
+}
+
+let hooks: PiModelsHooks | undefined;
+let extraIds: string[] = [];
+let extraSeen: readonly Provider[] | undefined;
+
+/** Install the hooks — before the first piModels() call. */
+export function configurePiModels(next: PiModelsHooks): void {
+	hooks = next;
+}
+
 /** The process-wide pi-ai Models collection — EVERY builtin provider's
  *  catalog (model slots wave, 2026-09-20): engines and the picker resolve
  *  against all of pi-ai's per-provider catalogs, so a settings slot can pin
@@ -55,8 +81,19 @@ let collection: ReturnType<typeof createModels> | undefined;
  *  keyPresent. */
 export function piModels() {
 	if (!collection) {
-		collection = createModels({ identity: APP_IDENTITY });
+		collection = createModels({
+			identity: APP_IDENTITY,
+			...(hooks ? { credentials: hooks.credentials } : {}),
+		});
 		for (const provider of builtinProviders()) collection.setProvider(provider);
+	}
+	const extra = hooks?.extraProviders() ?? [];
+	if (extra !== extraSeen) {
+		const next = new Set(extra.map((p) => p.id));
+		for (const id of extraIds) if (!next.has(id)) collection.deleteProvider(id);
+		for (const provider of extra) collection.setProvider(provider);
+		extraIds = [...next];
+		extraSeen = extra;
 	}
 	return collection;
 }

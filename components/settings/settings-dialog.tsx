@@ -37,6 +37,7 @@ import {
 	type AppearanceSettings,
 	type CompactionSettings,
 	type GraphSettings,
+	type PiSettings,
 	type UserSettings,
 } from "@/src/core";
 import { useAppearance } from "./appearance.tsx";
@@ -226,7 +227,7 @@ export function SettingsDialogBody({
 	 *  schema mistake caught by the validation surface). */
 	const write = useCallback(
 		async (
-			section: "general" | "agent" | "models" | "appearance" | "graph" | "compaction",
+			section: "general" | "agent" | "models" | "appearance" | "graph" | "compaction" | "pi",
 			body: object,
 		) => {
 			setError(null);
@@ -377,7 +378,11 @@ export function SettingsDialogBody({
 							)}
 							{active === "keys" && (
 								<SettingsSection title="Keys" testid="section-keys">
-									<KeysSection initialRow={initialRow ?? undefined} />
+									<KeysSection
+										initialRow={initialRow ?? undefined}
+										pi={record.pi}
+										onPiChange={(next: PiSettings) => write("pi", next)}
+									/>
 								</SettingsSection>
 							)}
 							{active === "agent" && (

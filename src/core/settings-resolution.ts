@@ -36,6 +36,7 @@ import {
 	type FactorySettings,
 	type GeneralSettings,
 	type CompactionSettings,
+	type PiSettings,
 	type GraphSettings,
 	type ModelSlot,
 	type ModelSlotName,
@@ -93,6 +94,8 @@ export interface EffectiveSettings {
 	/** Compaction (owner round 14): resolved concrete — absent record
 	 *  section resolves to the factory 150k. */
 	compaction: Required<CompactionSettings>;
+	/** The global Pi setup switch (default on, dir null = ~/.pi). */
+	pi: Required<PiSettings>;
 }
 
 /** The conversation pair's chain (BYOK, owner 2026-09-22): the chat's own
@@ -215,6 +218,10 @@ export function resolveSettings(record: UserSettings | null): EffectiveSettings 
 		},
 		compaction: {
 			thresholdTokens: record?.compaction?.thresholdTokens ?? FACTORY_SETTINGS.compaction.thresholdTokens,
+		},
+		pi: {
+			enabled: record?.pi?.enabled ?? FACTORY_SETTINGS.pi.enabled,
+			dir: record?.pi?.dir ?? FACTORY_SETTINGS.pi.dir,
 		},
 	};
 }
