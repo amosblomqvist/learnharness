@@ -50,6 +50,8 @@ Future teaching sessions can read the graph instead of starting from scratch. Pr
 
 Add your provider API key and choose your models, then start a session with what you want to understand. LearnHarness supports 30+ provider options, including OpenAI, Anthropic, Google, DeepSeek, and OpenRouter. Optional dictation and web search use separate service keys.
 
+App-owned Codex subscription sign-in is also available in Settings → Connections. See [Codex setup and validation](docs/codex-subscription.md).
+
 All three platforms support in-app updates.
 
 ## Your keys, your data

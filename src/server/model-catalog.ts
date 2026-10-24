@@ -1,3 +1,4 @@
+import { connectionCatalogProviders } from "./provider-runtime.ts";
 /**
  * The model catalog's server surface (model-control wave, 2026-09-12;
  * federated since the model-slots wave, 2026-09-20): pi-ai's catalog for
@@ -121,11 +122,11 @@ export function catalogSlots(): SlotPins {
  *  with keyPresent read env-wins through the keys seam, fresh per call —
  *  saving a key immediately federates the provider into the picker. */
 export function catalogProviders(): CatalogProvider[] {
-	return AUTH_PROVIDER_KEYS.map((p) => ({
+	return [...AUTH_PROVIDER_KEYS.map((p) => ({
 		id: p.id,
 		envVar: p.envVar,
 		keyPresent: keyValue(p.envVar) !== undefined,
-	})).sort((a, b) => a.id.localeCompare(b.id));
+	})), ...connectionCatalogProviders()].sort((a, b) => a.id.localeCompare(b.id));
 }
 
 /** The providers whose key is present — the picker federates exactly
@@ -137,6 +138,7 @@ function keyedProviderIds(): Set<string> {
 
 /** Project one catalog model to the client DTO. */
 export function toModelDto(model: Model<Api>): ModelDto {
+	const subscription = model.provider.startsWith("subscription-");
 	return {
 		id: model.id,
 		name: model.name,
@@ -144,7 +146,8 @@ export function toModelDto(model: Model<Api>): ModelDto {
 		reasoning: model.reasoning,
 		input: [...model.input],
 		supportedLevels: getSupportedThinkingLevels(model),
-		cost: {
+		...(subscription ? { pricing: "subscription" as const } : {}),
+		cost: subscription ? null : {
 			input: model.cost.input,
 			output: model.cost.output,
 			cacheRead: model.cost.cacheRead,
