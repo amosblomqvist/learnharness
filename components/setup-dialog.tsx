@@ -482,7 +482,7 @@ export function SetupDialog({
 												onClick={() => setOpenMenu(openMenu?.slot === slot && openMenu.kind === "model" ? null : { slot, kind: "model" })}
 												className="flex h-7 min-w-40 w-full items-center gap-1 rounded-sm border border-border bg-background px-1.5 font-ui text-xs text-foreground transition-colors hover:border-muted-foreground/50"
 											>
-												<span className="min-w-0 flex-1 truncate">{entry ? prettyModel(entry.id) : "Pick a model…"}</span>
+												<span className="min-w-0 flex-1 truncate">{entry ? prettyModel(`${entry.provider}:${entry.id}`) : "Pick a model…"}</span>
 												<span aria-hidden className="text-muted-foreground">
 													▾
 												</span>

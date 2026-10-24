@@ -654,7 +654,7 @@ export function AgentSection({
 								className="relative flex items-center gap-2"
 							>
 								<MenuTrigger
-									value={modelId ? prettyModel(modelId) : ""}
+									value={modelId ? prettyModel(`${provider}:${modelId}`) : ""}
 									emptyLabel="—"
 									ariaLabel={`${SLOT_META[slot].label} model`}
 									testid={`slot-model-${slot}`}
