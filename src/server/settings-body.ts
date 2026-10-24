@@ -19,6 +19,7 @@ import type {
 	BackgroundModelRole,
 	CompactionSettings,
 	CustomModelOverride,
+	PiSettings,
 	GeneralSettings,
 	DictationSettings,
 	GraphSettings,
@@ -435,6 +436,23 @@ export function parseCustomModelOverridesBody(
 	return { ok: true, settings: out };
 }
 
+/** pi: { enabled?: boolean, dir?: string | null } — a blank dir clears
+ *  back to the default (null). */
+export function parsePiSettingsBody(body: unknown): SettingsBodyResult<PiSettings> {
+	const raw = asRecord(body);
+	if (!raw) return { ok: false, error: "Invalid JSON body" };
+	const settings: PiSettings = {};
+	if (raw.enabled !== undefined) {
+		if (typeof raw.enabled !== "boolean") return { ok: false, error: "enabled must be a boolean" };
+		settings.enabled = raw.enabled;
+	}
+	if (raw.dir !== undefined) {
+		if (raw.dir !== null && typeof raw.dir !== "string") return { ok: false, error: "dir must be a string or null" };
+		settings.dir = raw.dir?.trim() || null;
+	}
+	return { ok: true, settings };
+}
+
 /** The section→parser map for PUT /api/settings/[section]. The custom endpoint
  *  is NOT a section — it connects via POST /api/custom-provider. */
 export const SETTINGS_SECTIONS = {
@@ -447,6 +465,7 @@ export const SETTINGS_SECTIONS = {
 	models: parseModelsSettingsBody,
 	dictation: parseDictationSettingsBody,
 	claudeCode: parseClaudeCodeSettingsBody,
+	pi: parsePiSettingsBody,
 } as const;
 
 export type SettingsSectionName = keyof typeof SETTINGS_SECTIONS;

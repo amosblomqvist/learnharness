@@ -456,6 +456,20 @@ export interface CompactionSettings {
 	thresholdTokens?: number;
 }
 
+/**
+ * THE GLOBAL PI SETUP: the user's Pi config (auth.json providers — api
+ * keys and logins — plus models.json custom models) COMPLEMENTS the app's
+ * own providers and models. The app's own always win: a provider set up
+ * in the app is never taken from Pi. Pi handles token refresh and
+ * credential storage; the app never writes Pi's files. Default on — but
+ * only takes effect where a pi CLI is found (src/server/pi-global.ts).
+ */
+export interface PiSettings {
+	enabled?: boolean;
+	/** Pi's home (or its agent dir). null = config.PI_DEFAULT_DIR (~/.pi). */
+	dir?: string | null;
+}
+
 /** THE record. Every section optional (delta); unknown top-level keys are
  *  preserved verbatim by the sanitizer (forward-compat with newer records). */
 export interface UserSettings {
@@ -472,6 +486,7 @@ export interface UserSettings {
 	appearance?: AppearanceSettings;
 	graph?: GraphSettings;
 	compaction?: CompactionSettings;
+	pi?: PiSettings;
 	[key: string]: unknown;
 }
 
@@ -498,6 +513,7 @@ export interface FactorySettings {
 	};
 	graph: Required<GraphSettings>;
 	compaction: Required<CompactionSettings>;
+	pi: Required<PiSettings>;
 }
 
 export const FACTORY_SETTINGS: FactorySettings = {
@@ -514,6 +530,7 @@ export const FACTORY_SETTINGS: FactorySettings = {
 	},
 	graph: { enabled: true, rendering: true, extractionChunkTokens: 4096 },
 	compaction: { thresholdTokens: 150_000 },
+	pi: { enabled: true, dir: null },
 };
 
 /** The chunk budget's validated floor (GraphSettings.extractionChunkTokens
@@ -781,6 +798,15 @@ function sanitizeCompaction(raw: Record<string, unknown>): CompactionSettings {
 	return out;
 }
 
+function sanitizePi(raw: Record<string, unknown>): PiSettings {
+	const out: PiSettings = {};
+	const enabled = boolOrDrop(raw.enabled);
+	if (enabled !== undefined) out.enabled = enabled;
+	if (raw.dir === null) out.dir = null;
+	else if (typeof raw.dir === "string" && raw.dir.trim()) out.dir = raw.dir.trim();
+	return out;
+}
+
 /**
  * Coerce arbitrary JSON (disk file, network body) into a valid delta record:
  * known fields validated strictly (invalid ones drop/clamp per module doc),
@@ -827,6 +853,9 @@ export function sanitizeUserSettings(raw: unknown): UserSettings | null {
 		if (r.compaction !== undefined && r.compaction !== null && typeof r.compaction === "object") {
 			out.compaction = sanitizeCompaction(r.compaction as Record<string, unknown>);
 		}
+	}
+	if (r.pi !== null && typeof r.pi === "object" && !Array.isArray(r.pi)) {
+		out.pi = sanitizePi(r.pi as Record<string, unknown>);
 	}
 	// Unknown top-level keys ride along untouched (forward-compat). One
 	// known-DEAD key is stripped instead of riding: `chat` (the old

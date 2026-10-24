@@ -80,8 +80,10 @@ export interface ModelCatalogResponse {
 /** One row of the providers surface. */
 export interface CatalogProvider {
 	id: string;
-	/** The gating env var; empty for subscription and file-configured routes. */
+	/** The gating env var; empty for subscription and file-configured routes
+	 *  (including providers only the global Pi setup supplies). */
 	envVar: string;
-	/** Whether credentials are present (and custom references resolve). */
+	/** Whether credentials are present (the app's, else Pi's) and custom
+	 *  references resolve. */
 	keyPresent: boolean;
 }
