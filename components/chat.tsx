@@ -47,6 +47,7 @@ import {
 import { PlanBlock, PlanPopup, latestTree } from "@/components/plan-block";
 import { PlanMarginalia, planExists } from "@/components/plan-window";
 import { MermaidOverlay, SessionMermaidContext } from "@/components/session-overlay";
+import { ImageLightbox } from "@/components/image-lightbox";
 import { AbortTurnDialog, type AbortMode } from "@/components/abort-turn-dialog";
 import { ArrowRightIcon, DumbbellIcon, WaypointsIcon } from "lucide-react";
 import type { PlanBlockData } from "@/src/core";
@@ -79,6 +80,15 @@ import {
 import { ReadingThinkingField } from "@/components/reading-thinking";
 import { currentUserThinkingOpen, setAllUserThinkingOpen } from "@/components/thinking-block";
 import { slotsConfigured, type ModelsSettings } from "@/src/core";
+import {
+	IMAGE_MIME_TYPES,
+	MAX_IMAGES,
+	MAX_IMAGE_BYTES,
+	MAX_TOTAL_IMAGE_BYTES,
+	imageBytes,
+	imageUrl,
+	type DraftImage,
+} from "@/src/core";
 import { useSettingsSaved } from "@/components/settings-signal";
 
 /** One width for everything: transcript, cards, and the bottom blob share this column. */
@@ -577,6 +587,90 @@ export function Chat({
 	 *  Auto-continuations (probe answers) never set it — their refusal
 	 *  opens the dialog with no replay. */
 	const draftRef = useRef<string | null>(null);
+	/* The same preserve-and-replay seam for pasted images: a refused send
+	 * puts them back in the composer with the text. */
+	const draftImagesRef = useRef<DraftImage[]>([]);
+
+	// THE COMPOSER'S IMAGE DRAFT (spec: docs/superpowers/plans/2026-10-24-chat-
+	// image-paste-spec-and-plan.md). Read from a REF for the same reason as
+	// textRef: a send that resumes after `await dictation.finish()` must see
+	// the live draft, not the render-time closure.
+	const [images, setImages] = useState<DraftImage[]>([]);
+	const imagesRef = useRef<DraftImage[]>([]);
+	const applyImages = useCallback((next: DraftImage[]) => {
+		imagesRef.current = next;
+		setImages(next);
+	}, []);
+	const [imageError, setImageError] = useState<string | null>(null);
+	/* Clipboard image reads are ASYNC (FileReader): a learner who pastes and
+	 * presses Enter at once must not lose the picture, so a send waits for
+	 * the reads in flight. Reads are tracked by promise, not by a counter. */
+	const pendingImageReads = useRef<Promise<void>[]>([]);
+
+	/** Clipboard files → draft images (the ONLY image entry point, v1: no file
+	 *  picker, no drop). The limits come from the core (images.ts), so the
+	 *  composer's kind refusal and the server's 400 cannot drift apart. */
+	const pasteImages = useCallback(
+		(files: File[]) => {
+			setImageError(null);
+			for (const file of files) {
+				if (!(IMAGE_MIME_TYPES as readonly string[]).includes(file.type)) {
+					setImageError("Images must be PNG, JPEG, WebP, or GIF.");
+					continue;
+				}
+				if (file.size > MAX_IMAGE_BYTES) {
+					setImageError(`Each image must be ${MAX_IMAGE_BYTES / (1024 * 1024)} MB or smaller.`);
+					continue;
+				}
+				// FileReader hands back a data: URL — its tail IS the base64 the
+				// native message carries, so nothing is encoded twice.
+				pendingImageReads.current.push(
+					new Promise<void>((resolve) => {
+						const reader = new FileReader();
+						reader.onload = () => {
+							const url = String(reader.result ?? "");
+							const comma = url.indexOf(",");
+							if (comma < 0) return resolve();
+							if (imagesRef.current.length >= MAX_IMAGES) {
+								setImageError(`You can attach up to ${MAX_IMAGES} images.`);
+								return resolve();
+							}
+							const next: DraftImage[] = [
+								...imagesRef.current,
+								{
+									id: `img_${crypto.randomUUID()}`,
+									type: "image",
+									mimeType: file.type,
+									data: url.slice(comma + 1),
+								},
+							];
+							if (next.reduce((n, i) => n + imageBytes(i.data), 0) > MAX_TOTAL_IMAGE_BYTES) {
+								setImageError(
+									`Those images are too large together (${MAX_TOTAL_IMAGE_BYTES / (1024 * 1024)} MB max).`,
+								);
+								return resolve();
+							}
+							applyImages(next);
+							resolve();
+						};
+						reader.onerror = () => {
+							setImageError("That image could not be read.");
+							resolve();
+						};
+						reader.readAsDataURL(file);
+					}),
+				);
+			}
+		},
+		[applyImages],
+	);
+	/** A send waits for reads already in flight — pasting and hitting Enter at
+	 *  once must not drop the picture. */
+	const settleImageReads = async () => {
+		const reads = pendingImageReads.current;
+		pendingImageReads.current = [];
+		await Promise.all(reads);
+	};
 
 	// THE BYOK REFUSAL (owner, 2026-09-22): a send that lands the server's
 	// 503 models_not_configured envelope renders as the SETUP FLOW, never
@@ -610,6 +704,10 @@ export function Chat({
 			if (draftRef.current !== null) {
 				applyText(draftRef.current);
 				draftRef.current = null;
+			}
+			if (draftImagesRef.current.length > 0) {
+				applyImages(draftImagesRef.current);
+				draftImagesRef.current = [];
 			}
 			clearError();
 			setSetupOpen(true);
@@ -680,7 +778,7 @@ export function Chat({
 	// affordance).
 	const [compacting, setCompacting] = useState(initiallyCompacting);
 	const canSend =
-		(text.trim().length > 0 || dictation.active) && !pending && !activeProblem && !compacting;
+		(text.trim().length > 0 || dictation.active || images.length > 0) && !pending && !activeProblem && !compacting;
 
 	/* THE PRACTICE PAUSE (owner round 16): between problems — practice
 	 * kind, nothing active, nothing in flight, and at least one problem
@@ -825,6 +923,10 @@ export function Chat({
 	// overlay shell as mermaid, but carrying the raw svg + the card's invert
 	// state so the fullscreen view stays faithful to the toggled card.
 	const [figureFocus, setFigureFocus] = useState<{ svg: string; inverted: boolean } | null>(null);
+	// Image focus (composer image paste): a pasted picture — draft thumbnail or
+	// sent transcript image — opened over the session area. Same overlay shell
+	// as the diagram focuses (they claim Esc themselves: one Esc, one action).
+	const [imageFocus, setImageFocus] = useState<{ url: string; alt: string } | null>(null);
 
 	// Overlay mirrors for the layered-Esc gate (owner 2026-10-04): the
 	// lh:kbd-abort-turn handler reads these at EVENT time — declared here
@@ -1129,20 +1231,33 @@ export function Chat({
 		/* FINISH DICTATION FIRST (owner, 2026-10-01): a learner who keeps
 		 * talking right through Enter must not lose the tail — stop the run,
 		 * let the last finals land in the composer, then send the REF value
-		 * (the flush lands via setState, invisible to this closure). */
+		 * (the flush lands via setState, invisible to this closure). Pasted
+		 * images have the same race (FileReader is async): settle those reads
+		 * before the same seam reads the drafts. */
 		if (!dictation.active) {
-			doSteerOrSend();
+			void settleImageReads().then(doSteerOrSend);
 			return;
 		}
-		void dictation.finish().then(doSteerOrSend);
+		void dictation.finish().then(settleImageReads).then(doSteerOrSend);
 	};
 	const doSend = () => {
 		if (busy || pending || compacting) return;
 		const t = textRef.current.trim();
-		if (!t) return;
+		const imgs = imagesRef.current;
+		if (!t && imgs.length === 0) return;
 		draftRef.current = t; // the refusal flow's preserve-and-replay seam
+		draftImagesRef.current = imgs;
 		applyText("");
-		void send({ type: "text", text: t });
+		applyImages([]);
+		setImageError(null);
+		void send({
+			type: "text",
+			text: t,
+			// Only the native fields cross the wire — the draft's client id stays here.
+			...(imgs.length > 0
+				? { images: imgs.map(({ type, data, mimeType }) => ({ type, data, mimeType })) }
+				: {}),
+		});
 	};
 
 	/* STEER VS SEND (owner arc 2026-10-03): a send while a turn runs steers
@@ -1157,8 +1272,13 @@ export function Chat({
 	const doSteerOrSend = () => {
 		if (pending || compacting) return;
 		const t = textRef.current.trim();
-		if (!t) return;
+		const imgs = imagesRef.current;
+		if (!t && imgs.length === 0) return;
 		if (busy) {
+			// Images are NOT steerable (v1 — the steer event has no images). The
+			// draft waits for the turn to settle: send/Enter is a no-op rather
+			// than a drop, and never a Stop (an Enter must not abort a turn).
+			if (imgs.length > 0) return;
 			applyText("");
 			void steer(t);
 			return;
@@ -1433,6 +1553,27 @@ export function Chat({
 												<div className="lh-prose whitespace-pre-wrap text-foreground">
 													{m.parts.filter((p) => p.type === "text").map((p) => p.text).join("\n")}
 												</div>
+												{/* Pasted images (image paste): the record's own order — the
+												    caption first, then the picture it is about. */}
+												{m.parts
+													.filter((p) => p.type === "image")
+													.map((p) => (
+														<button
+															key={p.id}
+															type="button"
+															data-testid="user-image"
+															onClick={() => setImageFocus({ url: String(p.url), alt: String(p.alt ?? "Pasted image") })}
+															aria-label="View pasted image in full"
+															className="my-1 block w-fit cursor-zoom-in"
+														>
+															{/* eslint-disable-next-line @next/next/no-img-element */}
+															<img
+																src={String(p.url)}
+																alt={String(p.alt ?? "Pasted image")}
+																className="max-h-64 w-auto rounded-[6px] border"
+															/>
+														</button>
+													))}
 											</div>
 									) : (
 									<Message from="assistant" className="max-w-full">
@@ -1635,6 +1776,11 @@ export function Chat({
 							busy={busy}
 							value={text}
 							onChange={applyText}
+							images={images}
+							onImagesChange={applyImages}
+							onPasteImages={pasteImages}
+							onOpenImage={(img) => setImageFocus({ url: imageUrl(img), alt: "Pasted image" })}
+							imageError={imageError}
 							inputRef={composerInputRef}
 							onSend={onSend}
 							onStop={abortInFlightTurn}
@@ -1678,6 +1824,9 @@ export function Chat({
 						inverted={figureFocus.inverted}
 						onClose={() => setFigureFocus(null)}
 					/>
+				)}
+				{imageFocus !== null && (
+					<ImageLightbox url={imageFocus.url} alt={imageFocus.alt} onClose={() => setImageFocus(null)} />
 				)}
 				{planOpen && <PlanPopup messages={messages} onClose={() => setPlanOpen(false)} />}
 				<AbortTurnDialog mode={abortAsk} onClose={() => setAbortAsk(null)} onConfirm={confirmAbort} busy={busy} />

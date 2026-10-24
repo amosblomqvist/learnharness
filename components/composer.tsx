@@ -1,8 +1,9 @@
 "use client";
 
-import { ArrowRightIcon, CornerDownLeftIcon, SquareIcon } from "lucide-react";
+import { ArrowRightIcon, CornerDownLeftIcon, SquareIcon, XIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Hint } from "@/components/ui/hint";
+import { imageUrl, type DraftImage } from "@/src/core";
 
 /**
  * The chat composer — content row ONLY (the persistent rounded shell lives in
@@ -49,6 +50,11 @@ export function Composer({
 	placeholder = "Ask, answer, or steer the lesson…",
 	nextProblem = false,
 	onNext,
+	images = [],
+	onImagesChange,
+	onPasteImages,
+	onOpenImage,
+	imageError = null,
 }: {
 	busy: boolean;
 	value: string;
@@ -57,6 +63,19 @@ export function Composer({
 	onStop: () => void;
 	canSend: boolean;
 	autoFocus?: boolean;
+	/** Pasted images awaiting send (composer paste, images.ts). The parent
+	 *  owns the draft; the composer only renders and removes. */
+	images?: readonly DraftImage[];
+	/** The remove button's commit (parent-held draft). */
+	onImagesChange?: (next: DraftImage[]) => void;
+	/** Clipboard images, handed off before any file reading happens: reading
+	 *  (and its failures) belong to the parent, next to the draft state. */
+	onPasteImages?: (files: File[]) => void;
+	/** A draft thumbnail was clicked: open it at full size (the parent owns
+	 *  the overlay). */
+	onOpenImage?: (image: DraftImage) => void;
+	/** The inline refusal line (unsupported format, too large, too many). */
+	imageError?: string | null;
 	/** The page's handle to the textarea — the dictation-end focus (owner,
 	 *  2026-10-01): a run ending hands the cursor to the bare composer. */
 	inputRef?: React.RefObject<HTMLTextAreaElement | null>;
@@ -84,79 +103,130 @@ export function Composer({
 	return (
 		<form
 			data-testid="composer"
-			className="flex items-end gap-1.5 p-1.5"
+			className="flex flex-col gap-1.5 p-1.5"
 			onSubmit={(e) => {
 				e.preventDefault();
 				act();
 			}}
 		>
-			<textarea
-				ref={inputRef}
-				value={value}
-				onChange={(e) => onChange(e.target.value)}
-				onKeyDown={(e) => {
-					// Esc ends dictation before anything else Esc might someday mean
-					// here (the dictate decisions: click-again or Esc to stop).
-					// stopPropagation claims the Esc (keyboard wave A): the
-					// window-level chain must not also abort a turn under us.
-					if (e.key === "Escape" && onEscape) {
+			{/* THE DRAFT STRIP (image paste): what the send will carry, with its
+			    own remove affordance and the one-line refusal. Rows above the
+			    input, never inside it — the textarea stays a text field. */}
+			{(images.length > 0 || imageError) && (
+				<div data-testid="composer-images" className="flex flex-wrap items-center gap-1.5 px-0.5">
+					{images.map((img) => (
+						<div key={img.id} className="relative">
+							{/* Click = full size (the parent's overlay); the cross at the
+							    top-right is the remove. Both are real buttons, so the
+							    keyboard reaches them in order. */}
+							<button
+								type="button"
+								aria-label="View pasted image in full"
+								onClick={() => onOpenImage?.(img)}
+								className="block cursor-zoom-in"
+							>
+								{/* eslint-disable-next-line @next/next/no-img-element */}
+								<img
+									src={imageUrl(img)}
+									alt="Pasted image"
+									className="size-16 rounded-[10px] border bg-muted object-cover"
+								/>
+							</button>
+							<button
+								type="button"
+								aria-label="Remove image"
+								onClick={() => onImagesChange?.(images.filter((i) => i.id !== img.id))}
+								className="absolute -right-1.5 -top-1.5 flex size-5 items-center justify-center rounded-full border bg-background text-muted-foreground transition-colors hover:text-foreground"
+							>
+								<XIcon className="size-3" />
+							</button>
+						</div>
+					))}
+					{imageError && <p className="font-ui text-xs text-destructive">{imageError}</p>}
+				</div>
+			)}
+			<div className="flex items-end gap-1.5">
+				<textarea
+					ref={inputRef}
+					value={value}
+					onChange={(e) => onChange(e.target.value)}
+					onPaste={(e) => {
+						// Paste is the composer's only image entry point (v1: no file
+						// picker, no drop). A clipboard that also carries plain text is a
+						// REAL text paste (a selection copied with an image in it) —
+						// leave it to the browser; screenshots carry no text.
+						if (!onPasteImages) return;
+						const data = e.clipboardData;
+						if (!data) return;
+						const files = Array.from(data.files ?? []).filter((f) => f.type.startsWith("image/"));
+						if (files.length === 0 || data.getData("text/plain").length > 0) return;
 						e.preventDefault();
-						e.stopPropagation();
-						onEscape();
-						return;
-					}
-					// Chat convention: Enter sends, Shift+Enter is a newline.
-					// ⌘/Ctrl+Enter also sends — the universal submit shortcut
-					// across every input in the app (thinking field, answers).
-					if (e.key === "Enter" && (e.metaKey || e.ctrlKey || !e.shiftKey)) {
-						e.preventDefault();
-						act();
-					}
-				}}
-				placeholder={placeholder}
-				autoFocus={autoFocus}
-				rows={1}
-				className="field-sizing-content lh-input max-h-48 min-h-10 flex-1 resize-none bg-transparent px-2.5 py-2 outline-none placeholder:text-muted-foreground"
-			/>
-			{/* The button follows the text (owner report 2026-10-03): while
-				 a turn runs WITH text typed it stays the SEND affordance
-				 (click = steer — steering must be clickable, not Enter-only);
-				 only an empty composer morphs it to Stop. ESC keeps its
-				 confirm-popup abort in every state, so stop is never
-				 unreachable. No tooltip — the ↵ glyph is the affordance
-				 (owner, subtlety round 2026-09-25).
+						onPasteImages(files);
+					}}
+					onKeyDown={(e) => {
+						// Esc ends dictation before anything else Esc might someday mean
+						// here (the dictate decisions: click-again or Esc to stop).
+						// stopPropagation claims the Esc (keyboard wave A): the
+						// window-level chain must not also abort a turn under us.
+						if (e.key === "Escape" && onEscape) {
+							e.preventDefault();
+							e.stopPropagation();
+							onEscape();
+							return;
+						}
+						// Chat convention: Enter sends, Shift+Enter is a newline.
+						// ⌘/Ctrl+Enter also sends — the universal submit shortcut
+						// across every input in the app (thinking field, answers).
+						if (e.key === "Enter" && (e.metaKey || e.ctrlKey || !e.shiftKey)) {
+							e.preventDefault();
+							act();
+						}
+					}}
+					placeholder={placeholder}
+					autoFocus={autoFocus}
+					rows={1}
+					className="field-sizing-content lh-input max-h-48 min-h-10 flex-1 resize-none bg-transparent px-2.5 py-2 outline-none placeholder:text-muted-foreground"
+				/>
+				{/* The button follows the text (owner report 2026-10-03): while
+					 a turn runs WITH text typed it stays the SEND affordance
+					 (click = steer — steering must be clickable, not Enter-only);
+					 only an empty composer morphs it to Stop. ESC keeps its
+					 confirm-popup abort in every state, so stop is never
+					 unreachable. No tooltip — the ↵ glyph is the affordance
+					 (owner, subtlety round 2026-09-25).
 
-				 THE NEXT MORPH (owner round 16 refinement, 2026-10-06): an
-				 empty composer in the practice pause morphs the button into
-				 a wide green NEXT PROBLEM — the affordance IS the button
-				 (click and Enter share one lane), and typing anything
-				 returns the regular send. The green is the app's correct-
-				 answer register (answered-card's green-500/600). */}
-				{nextProblem && !busy && !canSend ? (
-					<button
-						type="submit"
-						data-testid="next-problem-button"
-						aria-label="Next problem"
-						className="flex h-10 shrink-0 items-center justify-center gap-1.5 rounded-[10px] bg-green-600 px-4 font-ui text-xs font-medium uppercase tracking-wide text-white transition-colors hover:bg-green-500"
-					>
-						Next problem
-						<ArrowRightIcon className="size-4" />
-					</button>
-				) : (
-					<button
-						type="submit"
-						aria-label={busy && !canSend ? "Stop" : "Send"}
-						disabled={!busy && !canSend}
-						className={cn(
-							"flex size-10 shrink-0 items-center justify-center rounded-[10px] transition-colors",
-							busy && !canSend
-								? "bg-secondary text-foreground hover:bg-accent"
-								: "bg-primary text-primary-foreground hover:opacity-90 disabled:opacity-40",
-						)}
-					>
-						{busy && !canSend ? <SquareIcon className="size-4" /> : <CornerDownLeftIcon className="size-5" />}
-					</button>
-				)}
+					 THE NEXT MORPH (owner round 16 refinement, 2026-10-06): an
+					 empty composer in the practice pause morphs the button into
+					 a wide green NEXT PROBLEM — the affordance IS the button
+					 (click and Enter share one lane), and typing anything
+					 returns the regular send. The green is the app's correct-
+					 answer register (answered-card's green-500/600). */}
+					{nextProblem && !busy && !canSend ? (
+						<button
+							type="submit"
+							data-testid="next-problem-button"
+							aria-label="Next problem"
+							className="flex h-10 shrink-0 items-center justify-center gap-1.5 rounded-[10px] bg-green-600 px-4 font-ui text-xs font-medium uppercase tracking-wide text-white transition-colors hover:bg-green-500"
+						>
+							Next problem
+							<ArrowRightIcon className="size-4" />
+						</button>
+					) : (
+						<button
+							type="submit"
+							aria-label={busy && !canSend ? "Stop" : "Send"}
+							disabled={!busy && !canSend}
+							className={cn(
+								"flex size-10 shrink-0 items-center justify-center rounded-[10px] transition-colors",
+								busy && !canSend
+									? "bg-secondary text-foreground hover:bg-accent"
+									: "bg-primary text-primary-foreground hover:opacity-90 disabled:opacity-40",
+							)}
+						>
+							{busy && !canSend ? <SquareIcon className="size-4" /> : <CornerDownLeftIcon className="size-5" />}
+						</button>
+					)}
+				</div>
 		</form>
 	);
 }

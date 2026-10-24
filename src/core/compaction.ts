@@ -292,6 +292,19 @@ export function keptIndexFor(messages: readonly LhMessage[], marker: LhMarkerMes
 
 // ─── the summarizer input (pi's mirror: labeled text, truncated results) ─────
 
+/** A learner message as summary text: the words, with pasted images NAMED.
+ *  User content is a native block array once an image rides (images.ts), so
+ *  plain interpolation would have summarized it as "[object Object]". The
+ *  base64 never enters the summary — it costs tokens and says nothing. */
+function userSummaryText(content: unknown): string {
+	if (typeof content === "string") return content;
+	if (!Array.isArray(content)) return "";
+	return (content as Array<{ type?: string; text?: string; mimeType?: string }>)
+		.map((b) => (b.type === "image" ? `[image: ${b.mimeType ?? "image"}]` : (b.text ?? "")))
+		.filter((t) => t.length > 0)
+		.join("\n");
+}
+
 /** Serialize a message span as labeled text for the summarizer. Tool
  * results truncate at ~2k chars (the kept tail carries them verbatim for
  * the model; the SUMMARY only needs their gist). */
@@ -300,7 +313,7 @@ export function serializeForSummary(messages: readonly LhMessage[]): string {
 	for (const m of messages) {
 		const role = (m as { role?: string }).role;
 		if (role === "user") {
-			lines.push(`[LEARNER] ${(m as { content: string }).content}`);
+			lines.push(`[LEARNER] ${userSummaryText((m as { content: unknown }).content)}`);
 		} else if (role === "assistant") {
 			const assistant = m as AssistantMessage;
 			const blocks: string[] = [];
