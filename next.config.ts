@@ -92,6 +92,11 @@ const nextConfig: NextConfig = {
 			// evaluates their real toAuth paths without login or provider requests.
 			"node_modules/@earendil-works/pi-ai/dist/auth/oauth/{load,github-copilot,xai,device-code}.js",
 			"node_modules/@earendil-works/pi-ai/dist/utils/sleep.js",
+			// The global Pi setup derives request auth from any of Pi's logins
+			// (src/server/pi-global.ts), so it needs every flow behind that
+			// variable import and the helpers they use; all of dist's JS is
+			// ~20 files more.
+			"node_modules/@earendil-works/pi-ai/dist/**/*.js",
 			"node_modules/@earendil-works/pi-agent-core/dist/**/*.json",
 			// Next 16.3.2 native Turbopack applies unanchored excludes while
 			// traversing modules; **/data/**/* still prunes gcp-metadata and
