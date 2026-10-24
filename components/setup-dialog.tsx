@@ -43,6 +43,7 @@ import { MenuShell } from "@/components/menu-shell";
 import { notifySettingsSaved, useSettingsSaved } from "@/components/settings-signal";
 import { Hint } from "@/components/ui/hint";
 import { type ProviderKeyInfo } from "@/components/settings/keys-section";
+import { XaiSignInControl } from "@/components/xai-sign-in";
 import { ProviderMenuList } from "@/components/settings/model-menu";
 import { defaultOrderLevel, populateLevel, THINKING_LABEL } from "@/components/thinking-default";
 import { ThinkingMenuList } from "@/components/settings/model-menu";
@@ -210,6 +211,7 @@ export function SetupKeysBody({
 						{error}
 					</p>
 				)}
+				{provider?.id === "xai" ? <XaiSignInControl /> : null}
 			</div>
 		</div>
 	);
