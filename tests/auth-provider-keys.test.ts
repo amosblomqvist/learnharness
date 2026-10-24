@@ -44,7 +44,13 @@ const truthyEnv = new Proxy({} as Record<string, string>, {
 	has: () => true,
 });
 
-/** The truth, derived from pi-ai at test time. */
+/** App-registered providers that are deliberately NOT pi-ai builtins. Their
+ *  rows are part of the table but cannot be re-derived from builtinProviders. */
+const LOCAL_PROVIDERS = [
+	{ id: "commandcode", envVar: "COMMAND_CODE_API_KEY", label: "Command Code" },
+] as const;
+
+/** The truth, derived from pi-ai at test time + the one local provider. */
 function deriveProviders() {
 	const rows: Array<{ id: string; envVar: string; label: string }> = [];
 	for (const p of builtinProviders()) {
@@ -55,6 +61,7 @@ function deriveProviders() {
 		const envVar = p.id === "anthropic" ? "ANTHROPIC_API_KEY" : first;
 		rows.push({ id: p.id, envVar, label: p.name });
 	}
+	rows.push(...LOCAL_PROVIDERS);
 	rows.sort((a, b) => a.id.localeCompare(b.id));
 	return rows;
 }
@@ -82,6 +89,11 @@ describe("AUTH_PROVIDER_KEYS — the no-drift pin against pi-ai", () => {
 		const row = AUTH_PROVIDER_KEYS.find((p) => p.id === "openrouter");
 		assert.ok(row);
 		assert.equal(row.envVar, "OPENROUTER_API_KEY");
+	});
+
+	it("commandcode is the app-registered local provider row", () => {
+		const row = AUTH_PROVIDER_KEYS.find((p) => p.id === "commandcode");
+		assert.deepEqual(row, { id: "commandcode", envVar: "COMMAND_CODE_API_KEY", label: "Command Code" });
 	});
 
 	it("isProviderEnvVar: exactly the table's distinct env vars", () => {

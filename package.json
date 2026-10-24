@@ -21,6 +21,7 @@
 		"typecheck": "tsc --noEmit",
 		"desktop:dev": "concurrently -k \"next dev\" \"LH_DEV_URL=http://localhost:3000 electron .\"",
 		"dev:fresh": "bash scripts/dev-fresh.sh",
+		"sync:commandcode": "tsx scripts/sync-commandcode.ts",
 		"desktop:dist": "rm -rf dist .next/standalone && next build && node scripts/build-server.mjs && node scripts/smoke-server.mjs && DEVELOPER_DIR=${DEVELOPER_DIR:-/Applications/Xcode.app/Contents/Developer} APPLE_KEYCHAIN_PROFILE=LH_NOTARY APPLE_TEAM_ID=JS6XN22HY6 electron-builder --mac --arm64"
 	},
 	"dependencies": {
