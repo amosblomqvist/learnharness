@@ -83,12 +83,17 @@ export interface AuthProviderInfo {
  * no env-key (naturally absent). Providers sharing one env var (moonshotai
  * / moonshotai-cn, opencode / opencode-go, the qwen-token-plan pair,
  * xiaomi variants) each keep their own row — the UI groups as it wishes.
+ *
+ * LOCAL PROVIDER EXCEPTION: commandcode is app-registered (its own Provider
+ * API via src/agent/commandcode.ts), not a pi-ai builtin, so the no-drift
+ * test compares this table to builtins PLUS that one local row.
  */
 export const AUTH_PROVIDER_KEYS: readonly AuthProviderInfo[] = [
 	{ id: "ant-ling", envVar: "ANT_LING_API_KEY", label: "Ant Ling" },
 	{ id: "anthropic", envVar: "ANTHROPIC_API_KEY", label: "Anthropic" },
 	{ id: "baseten", envVar: "BASETEN_API_KEY", label: "Baseten" },
 	{ id: "cerebras", envVar: "CEREBRAS_API_KEY", label: "Cerebras" },
+	{ id: "commandcode", envVar: "COMMAND_CODE_API_KEY", label: "Command Code" },
 	{ id: "deepseek", envVar: "DEEPSEEK_API_KEY", label: "DeepSeek" },
 	{ id: "fireworks", envVar: "FIREWORKS_API_KEY", label: "Fireworks" },
 	{ id: "google", envVar: "GEMINI_API_KEY", label: "Google" },
