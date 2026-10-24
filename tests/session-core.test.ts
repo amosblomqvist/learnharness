@@ -465,6 +465,19 @@ it("Wave C: markers injected mid-run (custom role, follow-up delivery) append to
 	assert.equal(again.messages.length, state.messages.length, "same id upserts, never appends a second copy");
 });
 
+	it("surfaces a saved provider error on load and settled-record sync, but not after a newer message", () => {
+		const errorMessage = "Google 500: Internal error encountered.";
+		const failed = { ...assistantMsg("failed", ""), stopReason: "error", errorMessage } as LhMessage;
+		const m = new SessionModel({ chatId: "chat_x", initialMessages: [failed] });
+		assert.equal(m.getState().error?.message, errorMessage);
+		m.setMessages([newUserMessage("retry")]);
+		assert.equal(m.getState().error, null);
+		m.setMessages([newUserMessage("retry"), failed]);
+		assert.equal(m.getState().error?.message, errorMessage);
+		m.setMessages([failed, assistantMsg("success", "Hello")]);
+		assert.equal(m.getState().error, null);
+	});
+
 	it("a provider error rides VERBATIM (owner ruling) — no masking anywhere", async () => {
 		globalThis.fetch = dietFetch({
 			userText: "q",

@@ -250,6 +250,7 @@ export class SessionModel {
 	}
 
 	getState(): SessionState {
+		const latest = [...this.base, ...this.tail].at(-1);
 		const live =
 			this.statusValue === "submitted" || this.statusValue === "streaming"
 				? { executions: this.executions, inFlight: true, streamingIds: this.streamingIds }
@@ -258,7 +259,10 @@ export class SessionModel {
 			messages: projectView([...this.base, ...this.tail], live),
 			nativeMessages: [...this.base, ...this.tail],
 			status: this.statusValue,
-			error: this.errorValue,
+			// A finished turn may be loaded from disk without its live error event.
+			error: this.errorValue ?? (latest?.role === "assistant" && latest.stopReason === "error"
+				? { message: latest.errorMessage ?? "An error occurred." }
+				: null),
 			steerQueue: this.steerQueueValue,
 		};
 	}
