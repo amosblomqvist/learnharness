@@ -5,7 +5,7 @@
 import { calculateCost, type Usage } from "@earendil-works/pi-ai";
 import { piModels } from "../agent/models.ts";
 import type { CallUsage, ChatRecord, JobRecord, TurnUsage } from "../core/contracts.ts";
-import { isSubscriptionModel, sessionCost as foldSessionCost, turnCost as foldTurnCost, jobCost as foldJobCost } from "../core/prices.ts";
+import { isOllamaLocal, isSubscriptionModel, sessionCost as foldSessionCost, turnCost as foldTurnCost, jobCost as foldJobCost } from "../core/prices.ts";
 
 function catalogModel(id: string) {
 	const colon = id.indexOf(":");
@@ -14,6 +14,8 @@ function catalogModel(id: string) {
 }
 
 export function callCost(call: Partial<CallUsage>, modelId: string): number | null {
+	// Local runs cost nothing — even when the server's list is not loaded.
+	if (isOllamaLocal(modelId)) return 0;
 	const model = catalogModel(modelId);
 	if (!model || call.inputTokens === undefined || call.outputTokens === undefined) return null;
 	const input = call.inputTokens;
