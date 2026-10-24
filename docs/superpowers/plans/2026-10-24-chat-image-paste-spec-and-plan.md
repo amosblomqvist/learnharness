@@ -9,7 +9,7 @@ This document follows the /to-spec template. The user requested a local Markdown
 
 Owner instruction ("create a new branch and make the changes") resolved the gates below to the MINIMUM scope. What ships on `feat/composer-image-paste`:
 
-- **Surface:** the composer of an EXISTING session (teach and practice). New-session drafts and active-turn steering are NOT included. A pasted image in the draft composer is ignored, and a draft holding an image cannot steer a running turn: the send is a no-op until the turn settles (Enter never aborts the turn).
+- **Surface:** all three sending surfaces — home, the `/chat/new` draft, and a live session (teach and practice). A first message that carries images cannot ride `?prompt=`, so the draft surfaces create the session and hand the pictures to the chat page in memory (draft-images.ts), which delivers them through the normal send path (refusal restore included). Active-turn steering still takes no images: a draft holding one waits for the turn to settle (the send is a no-op, and Enter never aborts the turn).
 - **Storage:** bounded inline base64 inside the native user message (no attachment store).
 - **Limits:** PNG, JPEG, WebP or GIF; 4 images; 5 MB per image; 10 MB per message. The client refuses early and the server re-validates and answers 400 before the write-ahead appends anything.
 - **Draft UX:** thumbnails above the input, a cross at the thumbnail's TOP-RIGHT removes one, and CLICKING a thumbnail (or a sent image) opens it full size in a session-scoped lightbox (Esc or backdrop closes). One-line inline refusal for a bad paste. A caption is optional.

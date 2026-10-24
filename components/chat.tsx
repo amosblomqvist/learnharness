@@ -48,6 +48,7 @@ import { PlanBlock, PlanPopup, latestTree } from "@/components/plan-block";
 import { PlanMarginalia, planExists } from "@/components/plan-window";
 import { MermaidOverlay, SessionMermaidContext } from "@/components/session-overlay";
 import { ImageLightbox } from "@/components/image-lightbox";
+import { takeFirstMessage, useImageDraft } from "@/components/draft-images";
 import { AbortTurnDialog, type AbortMode } from "@/components/abort-turn-dialog";
 import { ArrowRightIcon, DumbbellIcon, WaypointsIcon } from "lucide-react";
 import type { PlanBlockData } from "@/src/core";
@@ -80,15 +81,7 @@ import {
 import { ReadingThinkingField } from "@/components/reading-thinking";
 import { currentUserThinkingOpen, setAllUserThinkingOpen } from "@/components/thinking-block";
 import { slotsConfigured, type ModelsSettings } from "@/src/core";
-import {
-	IMAGE_MIME_TYPES,
-	MAX_IMAGES,
-	MAX_IMAGE_BYTES,
-	MAX_TOTAL_IMAGE_BYTES,
-	imageBytes,
-	imageUrl,
-	type DraftImage,
-} from "@/src/core";
+import { imageUrl, type DraftImage } from "@/src/core";
 import { useSettingsSaved } from "@/components/settings-signal";
 
 /** One width for everything: transcript, cards, and the bottom blob share this column. */
@@ -255,6 +248,28 @@ export function Chat({
 
 	// The reattach settled terminal → the sync-and-continue seam (below).
 	setReattachSettled(() => reattachSettledRef.current());
+
+	/* THE IMAGE HANDOFF (composer paste): the draft and home surfaces create
+	 * the session, stash a first message that carried pictures (a URL cannot),
+	 * and push /chat/<id>. Take it ONCE, into the normal send path — so a
+	 * refusal restores the draft exactly like any other send. */
+	const tookStash = useRef(false);
+	useEffect(() => {
+		if (tookStash.current) return;
+		tookStash.current = true;
+		if (initialPrompt) return; // the ?prompt= path owns that first send
+		const stashed = takeFirstMessage(chatId);
+		if (!stashed) return;
+		draftRef.current = stashed.text;
+		draftImagesRef.current = stashed.images;
+		void send({
+			type: "text",
+			text: stashed.text,
+			...(stashed.images.length > 0
+				? { images: stashed.images.map(({ type, data, mimeType }) => ({ type, data, mimeType })) }
+				: {}),
+		});
+	}, [chatId, initialPrompt, send]);
 
 	// New chat with a topic: send the first message exactly once
 	// (initialPromptOwed — the pure gate, pinned in the test suite).
@@ -587,90 +602,21 @@ export function Chat({
 	 *  Auto-continuations (probe answers) never set it — their refusal
 	 *  opens the dialog with no replay. */
 	const draftRef = useRef<string | null>(null);
-	/* The same preserve-and-replay seam for pasted images: a refused send
-	 * puts them back in the composer with the text. */
+	/* The same preserve-and-replay seam for pasted images: a refused send puts
+	 * them back in the composer with the text. */
 	const draftImagesRef = useRef<DraftImage[]>([]);
-
-	// THE COMPOSER'S IMAGE DRAFT (spec: docs/superpowers/plans/2026-10-24-chat-
-	// image-paste-spec-and-plan.md). Read from a REF for the same reason as
-	// textRef: a send that resumes after `await dictation.finish()` must see
-	// the live draft, not the render-time closure.
-	const [images, setImages] = useState<DraftImage[]>([]);
-	const imagesRef = useRef<DraftImage[]>([]);
-	const applyImages = useCallback((next: DraftImage[]) => {
-		imagesRef.current = next;
-		setImages(next);
-	}, []);
-	const [imageError, setImageError] = useState<string | null>(null);
-	/* Clipboard image reads are ASYNC (FileReader): a learner who pastes and
-	 * presses Enter at once must not lose the picture, so a send waits for
-	 * the reads in flight. Reads are tracked by promise, not by a counter. */
-	const pendingImageReads = useRef<Promise<void>[]>([]);
-
-	/** Clipboard files → draft images (the ONLY image entry point, v1: no file
-	 *  picker, no drop). The limits come from the core (images.ts), so the
-	 *  composer's kind refusal and the server's 400 cannot drift apart. */
-	const pasteImages = useCallback(
-		(files: File[]) => {
-			setImageError(null);
-			for (const file of files) {
-				if (!(IMAGE_MIME_TYPES as readonly string[]).includes(file.type)) {
-					setImageError("Images must be PNG, JPEG, WebP, or GIF.");
-					continue;
-				}
-				if (file.size > MAX_IMAGE_BYTES) {
-					setImageError(`Each image must be ${MAX_IMAGE_BYTES / (1024 * 1024)} MB or smaller.`);
-					continue;
-				}
-				// FileReader hands back a data: URL — its tail IS the base64 the
-				// native message carries, so nothing is encoded twice.
-				pendingImageReads.current.push(
-					new Promise<void>((resolve) => {
-						const reader = new FileReader();
-						reader.onload = () => {
-							const url = String(reader.result ?? "");
-							const comma = url.indexOf(",");
-							if (comma < 0) return resolve();
-							if (imagesRef.current.length >= MAX_IMAGES) {
-								setImageError(`You can attach up to ${MAX_IMAGES} images.`);
-								return resolve();
-							}
-							const next: DraftImage[] = [
-								...imagesRef.current,
-								{
-									id: `img_${crypto.randomUUID()}`,
-									type: "image",
-									mimeType: file.type,
-									data: url.slice(comma + 1),
-								},
-							];
-							if (next.reduce((n, i) => n + imageBytes(i.data), 0) > MAX_TOTAL_IMAGE_BYTES) {
-								setImageError(
-									`Those images are too large together (${MAX_TOTAL_IMAGE_BYTES / (1024 * 1024)} MB max).`,
-								);
-								return resolve();
-							}
-							applyImages(next);
-							resolve();
-						};
-						reader.onerror = () => {
-							setImageError("That image could not be read.");
-							resolve();
-						};
-						reader.readAsDataURL(file);
-					}),
-				);
-			}
-		},
-		[applyImages],
-	);
-	/** A send waits for reads already in flight — pasting and hitting Enter at
-	 *  once must not drop the picture. */
-	const settleImageReads = async () => {
-		const reads = pendingImageReads.current;
-		pendingImageReads.current = [];
-		await Promise.all(reads);
-	};
+	/* THE COMPOSER'S IMAGE DRAFT (composer paste): the shared paste → validate
+	 * → read hook. Its own ref mirror is why a send that resumes after an
+	 * await (dictation finish, image reads) still sees the live images. */
+	const {
+		images,
+		imagesRef,
+		error: imageError,
+		setError: setImageError,
+		addFiles: pasteImages,
+		apply: applyImages,
+		settle: settleImageReads,
+	} = useImageDraft();
 
 	// THE BYOK REFUSAL (owner, 2026-09-22): a send that lands the server's
 	// 503 models_not_configured envelope renders as the SETUP FLOW, never

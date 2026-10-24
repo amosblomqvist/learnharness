@@ -1,9 +1,11 @@
 "use client";
 
-import { ArrowRightIcon, CornerDownLeftIcon, SquareIcon, XIcon } from "lucide-react";
+import { ArrowRightIcon, CornerDownLeftIcon, SquareIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Hint } from "@/components/ui/hint";
-import { imageUrl, type DraftImage } from "@/src/core";
+import type { DraftImage } from "@/src/core";
+import { DraftImageStrip } from "@/components/draft-image-strip";
+import { clipboardImageFiles } from "@/components/draft-images";
 
 /**
  * The chat composer — content row ONLY (the persistent rounded shell lives in
@@ -109,42 +111,12 @@ export function Composer({
 				act();
 			}}
 		>
-			{/* THE DRAFT STRIP (image paste): what the send will carry, with its
-			    own remove affordance and the one-line refusal. Rows above the
-			    input, never inside it — the textarea stays a text field. */}
-			{(images.length > 0 || imageError) && (
-				<div data-testid="composer-images" className="flex flex-wrap items-center gap-1.5 px-0.5">
-					{images.map((img) => (
-						<div key={img.id} className="relative">
-							{/* Click = full size (the parent's overlay); the cross at the
-							    top-right is the remove. Both are real buttons, so the
-							    keyboard reaches them in order. */}
-							<button
-								type="button"
-								aria-label="View pasted image in full"
-								onClick={() => onOpenImage?.(img)}
-								className="block cursor-zoom-in"
-							>
-								{/* eslint-disable-next-line @next/next/no-img-element */}
-								<img
-									src={imageUrl(img)}
-									alt="Pasted image"
-									className="size-16 rounded-[10px] border bg-muted object-cover"
-								/>
-							</button>
-							<button
-								type="button"
-								aria-label="Remove image"
-								onClick={() => onImagesChange?.(images.filter((i) => i.id !== img.id))}
-								className="absolute -right-1.5 -top-1.5 flex size-5 items-center justify-center rounded-full border bg-background text-muted-foreground transition-colors hover:text-foreground"
-							>
-								<XIcon className="size-3" />
-							</button>
-						</div>
-					))}
-					{imageError && <p className="font-ui text-xs text-destructive">{imageError}</p>}
-				</div>
-			)}
+			<DraftImageStrip
+				images={images}
+				error={imageError}
+				onRemove={(id) => onImagesChange?.(images.filter((i) => i.id !== id))}
+				onOpen={onOpenImage}
+			/>
 			<div className="flex items-end gap-1.5">
 				<textarea
 					ref={inputRef}
@@ -152,15 +124,14 @@ export function Composer({
 					onChange={(e) => onChange(e.target.value)}
 					onPaste={(e) => {
 						// Paste is the composer's only image entry point (v1: no file
-						// picker, no drop). A clipboard that also carries plain text is a
-						// REAL text paste (a selection copied with an image in it) —
-						// leave it to the browser; screenshots carry no text.
+						// picker, no drop). Files OR item entries (clipboards differ);
+						// a clipboard that also carries plain text keeps its text —
+						// the picture attaches alongside instead of replacing it.
 						if (!onPasteImages) return;
 						const data = e.clipboardData;
-						if (!data) return;
-						const files = Array.from(data.files ?? []).filter((f) => f.type.startsWith("image/"));
-						if (files.length === 0 || data.getData("text/plain").length > 0) return;
-						e.preventDefault();
+						const files = clipboardImageFiles(data);
+						if (files.length === 0) return;
+						if (!data || data.getData("text/plain").length === 0) e.preventDefault();
 						onPasteImages(files);
 					}}
 					onKeyDown={(e) => {

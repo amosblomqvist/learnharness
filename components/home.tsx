@@ -7,6 +7,10 @@ import { GraphView } from "@/components/graph-view";
 import { MinimalHome } from "@/components/minimal-home";
 import { SetupDialog } from "@/components/setup-dialog";
 import { ComposerActions, NodePickerControl } from "@/components/composer-actions";
+import { DraftImageStrip } from "@/components/draft-image-strip";
+import { clipboardImageFiles, stashFirstMessage, useImageDraft } from "@/components/draft-images";
+import { ImageLightbox } from "@/components/image-lightbox";
+import { imageUrl } from "@/src/core";
 import { useStrongKeyless, useZeroKeys, ZeroKeysPill } from "@/components/setup-cta";
 import { DictationBar, joinDictation, useDictation } from "@/components/dictation";
 import { useFieldCycle } from "@/components/field-cycle";
@@ -63,6 +67,11 @@ export function Home({
 		},
 	});
 	const [busy, setBusy] = useState(false);
+	/* THE IMAGE DRAFT (composer paste): a first message may be a picture. The
+	 * `?prompt=` handoff is text-only, so images are stashed for the chat page
+	 * (draft-images.ts) and the push carries only the session id. */
+	const imageDraft = useImageDraft();
+	const [imageFocus, setImageFocus] = useState<{ url: string; alt: string } | null>(null);
 	/* Run end focuses the topic input (owner, 2026-10-01): the hands are on
 	 * the keyboard from the stop. Falling edge only; this surface's only
 	 * dictation target IS this textarea, so no case-split is needed. */
@@ -111,8 +120,10 @@ export function Home({
 		void dictation.finish().then(() => begin());
 	};
 	const begin = async () => {
+		await imageDraft.settle(); // a paste followed by Enter must not race its read
 		const t = topicRef.current.trim();
-		if (!t || busy) return;
+		const images = imageDraft.imagesRef.current;
+		if ((!t && images.length === 0) || busy) return;
 		// Unconfigured: the send INTERCEPTS into the setup flow (the draft
 		// stays in the textarea; the learner sends it after Save).
 		if (!configured) {
@@ -150,7 +161,14 @@ export function Home({
 			// No settings PUT on create (per-session models, owner
 			// 2026-09-28): the SERVER stamps the newborn from the strong
 			// slot — the same default this surface's model control edits.
-			router.push(`/chat/${id}?prompt=${encodeURIComponent(t)}`);
+			// A first message with pictures cannot ride ?prompt= — stash it and
+			// let the chat page deliver it through its normal send path.
+			if (images.length > 0) {
+				stashFirstMessage(id, { text: t, images });
+				router.push(`/chat/${id}`);
+			} else {
+				router.push(`/chat/${id}?prompt=${encodeURIComponent(t)}`);
+			}
 		} catch {
 			setBusy(false);
 		}
@@ -205,6 +223,11 @@ export function Home({
 				</div>
 			</header>
 
+			{/* A pasted picture at full size (composer paste). */}
+			{imageFocus !== null && (
+				<ImageLightbox url={imageFocus.url} alt={imageFocus.alt} onClose={() => setImageFocus(null)} />
+			)}
+
 			{/* New session — same floating blob as the chat composer, docked
 			    OVER the graph (no gradient: the graph runs clean under it to the
 			    bottom edge). Matches chat.tsx's DOCK geometry (max-w-[46rem]
@@ -242,18 +265,31 @@ export function Home({
 						)}
 					/>
 					<form
-						className="flex items-end gap-1.5 rounded-2xl border bg-card p-1.5 shadow-lg"
+						className="flex flex-col gap-1.5 rounded-2xl border bg-card p-1.5 shadow-lg"
 					onSubmit={(e) => {
 						e.preventDefault();
 						void start();
 					}}
 				>
+					<DraftImageStrip
+						images={imageDraft.images}
+						error={imageDraft.error}
+						onRemove={(id) => imageDraft.apply(imageDraft.images.filter((i) => i.id !== id))}
+						onOpen={(img) => setImageFocus({ url: imageUrl(img), alt: "Pasted image" })}
+					/>
+					<div className="flex items-end gap-1.5">
 					<textarea
 						ref={topicInputRef}
 						value={topic}
 						onChange={(e) => {
 							topicRef.current = e.target.value;
 							setTopic(e.target.value);
+						}}
+						onPaste={(e) => {
+							const files = clipboardImageFiles(e.clipboardData);
+							if (files.length === 0) return;
+							if (!e.clipboardData || e.clipboardData.getData("text/plain").length === 0) e.preventDefault();
+							imageDraft.addFiles(files);
 						}}
 						onKeyDown={(e) => {
 							// Esc ends dictation (the dictate decisions: click-again or
@@ -280,11 +316,12 @@ export function Home({
 					<button
 						type="submit"
 						aria-label="Start session"
-						disabled={(!topic.trim() && !dictation.active) || busy}
+						disabled={(!topic.trim() && !dictation.active && imageDraft.images.length === 0) || busy}
 						className="flex size-10 shrink-0 items-center justify-center rounded-[10px] bg-primary text-primary-foreground transition-colors hover:opacity-90 disabled:opacity-40"
 					>
 						<CornerDownLeftIcon className="size-5" />
 					</button>
+					</div>
 					</form>
 					{/* Same as the chat view's under-composer stats bar (owner) — no
 					    session yet, so the LEFT side renders nothing (wave 7 sweep)

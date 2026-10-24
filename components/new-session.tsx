@@ -12,6 +12,9 @@ import { useStrongKeyless, useZeroKeys, ZeroKeysPill } from "@/components/setup-
 import { StatsBar } from "@/components/stats-bar";
 import { ChainTableOverlay } from "@/components/chain-table.tsx";
 import { ComposerActions, NodePickerControl } from "@/components/composer-actions";
+import { ImageLightbox } from "@/components/image-lightbox";
+import { stashFirstMessage, useImageDraft } from "@/components/draft-images";
+import { imageUrl, type DraftImage } from "@/src/core";
 import type { ChatSettings, GraphSnapshot } from "@/src/core";
 
 /** The draft's pick set (owner round 10): the SAME shape the home pick
@@ -45,9 +48,10 @@ export async function startDraftSession(
 	fetchLike: typeof fetch,
 	mode?: "practice",
 	picks?: readonly DraftPick[],
+	images: readonly DraftImage[] = [],
 ): Promise<string | null> {
 	const t = text.trim();
-	if (!t) return null;
+	if (!t && images.length === 0) return null;
 	// THE PICKS RIDE THE CREATE (owner round 10): a practice draft seeded
 	// from the pick bar creates its session WITH the graph context — the
 	// same contract as the home screen's practice send (the marker with
@@ -64,6 +68,13 @@ export async function startDraftSession(
 	const { id } = (await res.json()) as { id: string };
 	// No settings PUT on create (per-session models, owner 2026-09-28):
 	// the SERVER stamps the newborn from the strong slot.
+	// THE IMAGE HANDOFF (composer paste): `?prompt=` is text-only, so a
+	// first message with pictures is stashed for the chat page to send
+	// through its normal path (refusal restore included).
+	if (images.length > 0) {
+		stashFirstMessage(id, { text: t, images });
+		return `/chat/${id}`;
+	}
 	return `/chat/${id}?prompt=${encodeURIComponent(t)}`;
 }
 
@@ -83,6 +94,11 @@ export function DraftShell({
 	onOpenPicker,
 	onClearPicks,
 	overlay,
+	images = [],
+	onImagesChange,
+	onPasteImages,
+	onOpenImage,
+	imageError = null,
 }: {
 	busy: boolean;
 	text: string;
@@ -104,6 +120,12 @@ export function DraftShell({
 	picks?: DraftPick[];
 	onOpenPicker?: () => void;
 	onClearPicks?: () => void;
+	/** Pasted images awaiting send (composer paste) — parent-held. */
+	images?: readonly DraftImage[];
+	onImagesChange?: (next: DraftImage[]) => void;
+	onPasteImages?: (files: File[]) => void;
+	onOpenImage?: (image: DraftImage) => void;
+	imageError?: string | null;
 	/** THE PICKER SLOT (owner round 10b): the chain-table overlay hosts
 	 *  INSIDE the content column's relative container — the same law as
 	 *  the graph view (the overlay fills its column, never the sidebar).
@@ -126,7 +148,7 @@ export function DraftShell({
 	// round, owner 2026-10-01): the spoken text is deferred in the run's
 	// buffer — Enter must reach the finish-first send, not be gated out by
 	// an empty textarea. Nothing said → the send no-ops.
-	const canSend = text.trim().length > 0 || dictation.active;
+	const canSend = text.trim().length > 0 || dictation.active || images.length > 0;
 	/* FINISH DICTATION FIRST (owner, 2026-10-01): stop the run, let the
 	 * last finals land through onChange, THEN call the parent's send —
 	 * which reads its REF mirror, so the post-await timing of React's
@@ -198,6 +220,11 @@ export function DraftShell({
 										onSend={handleSend}
 										onStop={() => {}}
 										canSend={canSend}
+										images={images}
+										onImagesChange={onImagesChange}
+										onPasteImages={onPasteImages}
+										onOpenImage={onOpenImage}
+										imageError={imageError}
 										inputRef={composerInputRef}
 										autoFocus
 										onEscape={dictation.active ? dictation.cancel : undefined}
@@ -243,6 +270,11 @@ export function NewSession({ initialConfigured, mode = "teach" }: { initialConfi
 		setText(v);
 	};
 	const [busy, setBusy] = useState(false);
+	/* THE IMAGE DRAFT (composer paste): the pasted pictures ride the first
+	 * message. `?prompt=` cannot carry them, so a send with images stashes
+	 * them for the chat page (draft-images.ts) and pushes the plain URL. */
+	const imageDraft = useImageDraft();
+	const [imageFocus, setImageFocus] = useState<{ url: string; alt: string } | null>(null);
 	// THE PICK BAR (owner round 10): the draft's lifted pick set + the
 	// snapshot the standalone chain-table picker reads. Lazy — the graph
 	// is fetched on FIRST open only, then reused.
@@ -287,7 +319,7 @@ export function NewSession({ initialConfigured, mode = "teach" }: { initialConfi
 
 	const send = useCallback(() => {
 		const draft = textRef.current.trim();
-		if (!draft || busy) return;
+		if ((!draft && imageDraft.imagesRef.current.length === 0) || busy) return;
 		if (!configured) {
 			setSetupOpen(true);
 			return;
@@ -302,13 +334,24 @@ export function NewSession({ initialConfigured, mode = "teach" }: { initialConfi
 			return;
 		}
 		setBusy(true);
-		void startDraftSession(draft, fetch, mode === "practice" ? "practice" : undefined, mode === "practice" ? picksRef.current : undefined)
+		// A paste followed by Enter must not race its own file read.
+		void imageDraft
+			.settle()
+			.then(() =>
+				startDraftSession(
+					draft,
+					fetch,
+					mode === "practice" ? "practice" : undefined,
+					mode === "practice" ? picksRef.current : undefined,
+					imageDraft.imagesRef.current,
+				),
+			)
 			.then((target) => {
 				if (target) router.push(target);
 				else setBusy(false);
 			})
 			.catch(() => setBusy(false));
-	}, [busy, router, configured, zeroKeys, strongKeyless]);
+	}, [busy, router, configured, zeroKeys, strongKeyless, imageDraft]);
 
 	return (
 		<>
@@ -321,6 +364,11 @@ export function NewSession({ initialConfigured, mode = "teach" }: { initialConfi
 				picks={picks}
 				onOpenPicker={openPicker}
 				onClearPicks={() => applyPicks([])}
+				images={imageDraft.images}
+				onImagesChange={imageDraft.apply}
+				onPasteImages={imageDraft.addFiles}
+				imageError={imageDraft.error}
+				onOpenImage={(img) => setImageFocus({ url: imageUrl(img), alt: "Pasted image" })}
 				overlay={
 					// THE PICKER (owner round 10b): hosted INSIDE the content
 					// column — absolute inset-0 resolves to the column's relative
@@ -363,6 +411,11 @@ export function NewSession({ initialConfigured, mode = "teach" }: { initialConfi
 					)
 				}
 			/>
+			{/* The pasted picture at full size (composer paste): a session-scoped
+			    overlay over the draft column, the same shell the session uses. */}
+			{imageFocus !== null && (
+				<ImageLightbox url={imageFocus.url} alt={imageFocus.alt} onClose={() => setImageFocus(null)} />
+			)}
 			{/* First-run setup: the send interception's landing surface — stage
 			    1 is the self-contained first-key screen (zero-keys wave). */}
 			<SetupDialog
