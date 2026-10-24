@@ -228,11 +228,19 @@ export const ROLE_SLOT: Readonly<Record<ModelRole, ModelSlotName>> = {
 	pdfReader: "vision",
 };
 
+/** The languages the agents can be told to speak (language wave,
+ *  2026-10-24). Prompts stay English; a directive appended at composition
+ *  (src/agent/language.ts) steers the user-visible output. */
+export const OUTPUT_LANGUAGES = ["pt-BR", "en"] as const;
+export type OutputLanguage = (typeof OUTPUT_LANGUAGES)[number];
+
 /** General settings — app-level behavior. Version DISPLAY and plans login
  *  live outside the record (package.json / auth.json) by owner decision. */
 export interface GeneralSettings {
 	/** Auto-update the app (default ON). Mechanism ships in a later wave. */
 	autoUpdate?: boolean;
+	/** Language of everything the agents write for the user (default pt-BR). */
+	language?: OutputLanguage;
 }
 
 /** Agent settings — everything about the non-conversation machinery. */
@@ -396,7 +404,7 @@ export interface FactorySettings {
 
 export const FACTORY_SETTINGS: FactorySettings = {
 	version: CURRENT_SETTINGS_VERSION,
-	general: { autoUpdate: true },
+	general: { autoUpdate: true, language: "pt-BR" },
 	appearance: {
 		mode: "dark",
 		background: null, // the dark default (#141414) lives in the mode's derivation curve
@@ -441,6 +449,7 @@ function sanitizeGeneral(raw: Record<string, unknown>): GeneralSettings {
 	const out: GeneralSettings = {};
 	const autoUpdate = boolOrDrop(raw.autoUpdate);
 	if (autoUpdate !== undefined) out.autoUpdate = autoUpdate;
+	if ((OUTPUT_LANGUAGES as readonly unknown[]).includes(raw.language)) out.language = raw.language as OutputLanguage;
 	return out;
 }
 

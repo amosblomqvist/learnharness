@@ -3,6 +3,7 @@ import type { AssistantMessage, ToolResultMessage, Usage } from "@earendil-works
 import { randomUUID } from "node:crypto";
 import { APP_IDENTITY, piEngineFor, type PiEngine } from "../models.ts";
 import { providerEventObserver } from "../provider-events.ts";
+import { localizedPrompt } from "../language.ts";
 import type { ModelRole } from "../../../config.ts";
 
 /**
@@ -69,7 +70,7 @@ export async function runSubagent(tools: AgentTool<any, any>[], opts: SubagentRu
 		// One unsaved conversation per invocation, stable through every turn.
 		sessionId: randomUUID(),
 		initialState: {
-			systemPrompt: opts.systemPrompt,
+			systemPrompt: localizedPrompt(opts.systemPrompt),
 			model: engine.model,
 			thinkingLevel: engine.level,
 			tools,
