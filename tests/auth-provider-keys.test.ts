@@ -20,7 +20,7 @@
 
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { AUTH_PROVIDER_KEYS, isProviderEnvVar } from "../src/core/auth-keys.ts";
+import { AUTH_PROVIDER_KEYS, isAuthProviderId, isProviderEnvVar } from "../src/core/auth-keys.ts";
 import { builtinProviders } from "../node_modules/@earendil-works/pi-ai/dist/providers/all.js";
 import { findEnvKeys } from "../node_modules/@earendil-works/pi-ai/dist/env-api-keys.js";
 
@@ -88,5 +88,11 @@ describe("AUTH_PROVIDER_KEYS — the no-drift pin against pi-ai", () => {
 		for (const p of AUTH_PROVIDER_KEYS) assert.ok(isProviderEnvVar(p.envVar), `${p.envVar} is a provider var`);
 		assert.ok(!isProviderEnvVar("OPENROUTER_API_KEYS"), "typo'd name is not one");
 		assert.ok(!isProviderEnvVar("DEEPGRAM_API_KEY"), "curated ≠ provider — separate surfaces");
+	});
+
+	it("isAuthProviderId: exactly the table's ids", () => {
+		for (const p of AUTH_PROVIDER_KEYS) assert.ok(isAuthProviderId(p.id), `${p.id} is a provider id`);
+		assert.ok(!isAuthProviderId("github-copilot"), "OAuth providers are not in the table");
+		assert.ok(!isAuthProviderId("OPENAI_API_KEY"), "an env var is not a provider id");
 	});
 });

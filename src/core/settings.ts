@@ -28,7 +28,7 @@
  */
 
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
-import { AUTH_PROVIDER_KEYS } from "./auth-keys.ts";
+import { AUTH_PROVIDER_KEYS, isAuthProviderId } from "./auth-keys.ts";
 import type { ModelRole } from "../../config.ts";
 import type { ChatSettings } from "./contracts/chat.ts";
 import type { SearchEngineId } from "./search.ts";
@@ -356,6 +356,23 @@ export interface CompactionSettings {
 	thresholdTokens?: number;
 }
 
+/** Base-URL overrides keyed by plain-key provider id (absent = pi-ai's catalog URL); applied by piEngineForSpec in src/agent/models.ts. */
+export type ProvidersSettings = Record<string, { baseUrl: string }>;
+
+/** Trimmed http(s) URL, no query/hash, no trailing slash — the one stored base-URL shape (a model's path suffix appends to it); null = unusable. */
+export function normalizeBaseUrl(value: string): string | null {
+	const trimmed = value.trim();
+	let url: URL;
+	try {
+		url = new URL(trimmed);
+	} catch {
+		return null;
+	}
+	if (url.protocol !== "http:" && url.protocol !== "https:") return null;
+	if (url.search || url.hash) return null;
+	return trimmed.replace(/\/+$/, "");
+}
+
 /** THE record. Every section optional (delta); unknown top-level keys are
  *  preserved verbatim by the sanitizer (forward-compat with newer records). */
 export interface UserSettings {
@@ -367,6 +384,7 @@ export interface UserSettings {
 	appearance?: AppearanceSettings;
 	graph?: GraphSettings;
 	compaction?: CompactionSettings;
+	providers?: ProvidersSettings;
 	[key: string]: unknown;
 }
 
@@ -600,6 +618,18 @@ function sanitizeCompaction(raw: Record<string, unknown>): CompactionSettings {
 	return out;
 }
 
+function sanitizeProviders(raw: Record<string, unknown>): ProvidersSettings {
+	const out: ProvidersSettings = {};
+	for (const [id, entry] of Object.entries(raw)) {
+		if (!isAuthProviderId(id)) continue;
+		if (entry === null || typeof entry !== "object" || Array.isArray(entry)) continue;
+		const baseUrl = (entry as Record<string, unknown>).baseUrl;
+		const normalized = typeof baseUrl === "string" ? normalizeBaseUrl(baseUrl) : null;
+		if (normalized) out[id] = { baseUrl: normalized };
+	}
+	return out;
+}
+
 /**
  * Coerce arbitrary JSON (disk file, network body) into a valid delta record:
  * known fields validated strictly (invalid ones drop/clamp per module doc),
@@ -630,6 +660,10 @@ export function sanitizeUserSettings(raw: unknown): UserSettings | null {
 		if (r.compaction !== undefined && r.compaction !== null && typeof r.compaction === "object") {
 			out.compaction = sanitizeCompaction(r.compaction as Record<string, unknown>);
 		}
+	}
+	// Assigned even when empty: the unknown-key pass below would otherwise copy an all-invalid map back.
+	if (r.providers !== null && typeof r.providers === "object" && !Array.isArray(r.providers)) {
+		out.providers = sanitizeProviders(r.providers as Record<string, unknown>);
 	}
 	// Unknown top-level keys ride along untouched (forward-compat). One
 	// known-DEAD key is stripped instead of riding: `chat` (the old

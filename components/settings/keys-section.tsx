@@ -10,9 +10,7 @@
  * 33 pi-ai providers).
  *
  * Owner rulings carried in:
- *  - Env-owned rows (a real environment variable owns the name — dev
- *    .env.local or launch env) render READ-ONLY + dimmed, no paste field:
- *    a paste box on a key the UI cannot make live would mislead.
+ *  - Env-owned rows (a real environment variable owns the name — dev .env.local or launch env) show no paste field: a paste box on a key the UI cannot make live would mislead. They still unfold to their base-URL lines (settings.json, so those CAN go live).
  *  - OpenRouter is NOT special: one provider among 33, a row only when
  *    stored, otherwise it lives in the Add dropdown like everyone else.
  *  - Tools & services (Deepgram, the Google pair) keep their own group,
@@ -23,8 +21,8 @@
  * effect immediately. Plaintext never returns from the store.
  */
 
-import { useEffect, useRef, useState } from "react";
-import { AUTH_KEYS, type AuthKeyStatus } from "@/src/core";
+import { useEffect, useRef, useState, type ReactNode } from "react";
+import { AUTH_KEYS, normalizeBaseUrl, type AuthKeyStatus, type ProvidersSettings } from "@/src/core";
 import { SettingsGroup } from "./controls.tsx";
 import { ProviderMenuList } from "./model-menu.tsx";
 import { MenuShell } from "@/components/menu-shell";
@@ -36,6 +34,7 @@ export interface ProviderKeyInfo {
 	id: string;
 	envVar: string;
 	label: string;
+	defaultBaseUrl?: string;
 }
 
 interface KeysResponse {
@@ -104,9 +103,21 @@ export function keyStatusLine(status: AuthKeyStatus): string {
 	return `${tail} · ${chars}${status.source === "env" ? " · env" : ""}`;
 }
 
-/** One table row: label left, tiny docs link + status right. Writable
- *  rows click-unfold an editor beneath (owner interaction); env-owned
- *  rows are dimmed and read-only (a paste box there would mislead). */
+export const BASE_URL_INVALID = "Base URL must be an http(s) URL with no query or hash";
+
+/** Compose: one provider's base URL set (null drops it), the rest carried verbatim. Pure — exported for tests. */
+export function composeBaseUrl(
+	current: ProvidersSettings | undefined,
+	providerId: string,
+	baseUrl: string | null,
+): ProvidersSettings {
+	const next = { ...current };
+	if (baseUrl === null) delete next[providerId];
+	else next[providerId] = { baseUrl };
+	return next;
+}
+
+/** One table row: label left, tiny docs link + status right. Writable rows click-unfold an editor beneath (owner interaction); env-owned rows unfold only to their base-URL lines, else stay dimmed and read-only. */
 function KeyTableRow({
 	label,
 	docsUrl,
@@ -116,6 +127,8 @@ function KeyTableRow({
 	onSave,
 	onDelete,
 	onCancel,
+	baseUrlLines = [],
+	customUrl = false,
 	testid,
 }: {
 	label: string;
@@ -129,9 +142,12 @@ function KeyTableRow({
 	/** Folds the editor (owner, fix wave: the way OUT of a paste prompt
 	 *  must be visible — Cancel beside Save/Delete, not only Esc). */
 	onCancel: () => void;
+	baseUrlLines?: ReactNode[];
+	customUrl?: boolean;
 	testid: string;
 }) {
 	const envOwned = status.source === "env";
+	const editable = !envOwned || baseUrlLines.length > 0;
 	const [value, setValue] = useState("");
 	const [error, setError] = useState<string | null>(null);
 	const [busy, setBusy] = useState(false);
@@ -150,34 +166,42 @@ function KeyTableRow({
 	// table-like"): the expanded row becomes the editor itself — label
 	// left, the paste field filling the middle, Save | Cancel (| Delete)
 	// right — instead of a second line beneath the row.
-	if (expanded && !envOwned) {
+	if (expanded && editable) {
 		return (
 			<div data-testid={testid}>
 				<div className="flex items-center gap-2 rounded-sm px-1 py-1.5" data-testid={`${testid}-editor`}>
 					<span className="shrink-0 font-ui text-xs text-foreground">{label}</span>
-					<input
-						type="text"
-						value={value}
-						onChange={(e) => setValue(e.target.value)}
-						onKeyDown={(e) => {
-							if (e.key === "Enter") void save();
-						}}
-						placeholder="Paste key…"
-						aria-label={`${label} key`}
-						data-testid={`${testid}-input`}
-						disabled={busy}
-						autoFocus
-						className="h-7 min-w-0 flex-1 rounded-sm border border-border bg-background px-1.5 font-mono text-xs text-foreground outline-none placeholder:text-muted-foreground/60 focus:border-muted-foreground/50"
-					/>
-					<button
-						type="button"
-						onClick={() => void save()}
-						disabled={busy || !value.trim()}
-						data-testid={`${testid}-save`}
-						className="shrink-0 text-xs text-foreground underline-offset-2 hover:underline disabled:text-muted-foreground/40 disabled:no-underline"
-					>
-						Save
-					</button>
+					{envOwned ? (
+						<span data-testid={`${testid}-env-note`} className="min-w-0 flex-1 text-xs text-muted-foreground/70">
+							key comes from the environment
+						</span>
+					) : (
+						<>
+							<input
+								type="text"
+								value={value}
+								onChange={(e) => setValue(e.target.value)}
+								onKeyDown={(e) => {
+									if (e.key === "Enter") void save();
+								}}
+								placeholder="Paste key…"
+								aria-label={`${label} key`}
+								data-testid={`${testid}-input`}
+								disabled={busy}
+								autoFocus
+								className="h-7 min-w-0 flex-1 rounded-sm border border-border bg-background px-1.5 font-mono text-xs text-foreground outline-none placeholder:text-muted-foreground/60 focus:border-muted-foreground/50"
+							/>
+							<button
+								type="button"
+								onClick={() => void save()}
+								disabled={busy || !value.trim()}
+								data-testid={`${testid}-save`}
+								className="shrink-0 text-xs text-foreground underline-offset-2 hover:underline disabled:text-muted-foreground/40 disabled:no-underline"
+							>
+								Save
+							</button>
+						</>
+					)}
 					<button
 						type="button"
 						onClick={onCancel}
@@ -204,19 +228,20 @@ function KeyTableRow({
 						{error}
 					</p>
 				)}
+				{baseUrlLines}
 			</div>
 		);
 	}
 
 	return (
-		<div data-testid={testid} className={envOwned ? "opacity-40" : undefined}>
+		<div data-testid={testid} className={editable ? undefined : "opacity-40"}>
 			<button
 				type="button"
 				aria-expanded={expanded}
 				data-testid={`${testid}-row`}
-				onClick={() => !envOwned && onToggle()}
+				onClick={() => editable && onToggle()}
 				className={`flex w-full items-center justify-between gap-3 rounded-sm px-1 py-1.5 text-left ${
-					envOwned ? "cursor-default" : "cursor-pointer transition-colors hover:bg-accent/50"
+					editable ? "cursor-pointer transition-colors hover:bg-accent/50" : "cursor-default"
 				}`}
 			>
 				<span className="font-ui text-xs text-foreground">{label}</span>
@@ -234,11 +259,91 @@ function KeyTableRow({
 					)}
 					<span data-testid={`${testid}-status`} className="font-mono text-[11px] text-muted-foreground">
 						{keyStatusLine(status)}
+						{customUrl && " · custom URL"}
 					</span>
 				</span>
 			</button>
 			{error && (
 				<p role="alert" data-testid={`${testid}-error`} className="pl-6 text-xs text-red-500">
+					{error}
+				</p>
+			)}
+		</div>
+	);
+}
+
+/** One provider's base-URL line in an unfolded row. The parent keys it on the saved value, so a landed write re-seeds the field. */
+function BaseUrlLine({
+	label,
+	placeholder,
+	saved,
+	onSave,
+	testid,
+}: {
+	label: string;
+	placeholder: string;
+	saved: string | undefined;
+	onSave: (baseUrl: string | null) => Promise<void>;
+	testid: string;
+}) {
+	const [value, setValue] = useState(saved ?? "");
+	const [error, setError] = useState<string | null>(null);
+	const [busy, setBusy] = useState(false);
+	const dirty = value.trim() !== "" && value.trim() !== saved;
+
+	async function save(next: string | null) {
+		if (busy) return;
+		const baseUrl = next === null ? null : normalizeBaseUrl(next);
+		if (next !== null && baseUrl === null) {
+			setError(BASE_URL_INVALID);
+			return;
+		}
+		setBusy(true);
+		setError(null);
+		await onSave(baseUrl);
+		setBusy(false);
+	}
+
+	return (
+		<div data-testid={testid}>
+			<div className="flex items-center gap-2 rounded-sm px-1 py-1.5">
+				<span className="shrink-0 font-ui text-xs text-muted-foreground">{label}</span>
+				<input
+					type="text"
+					value={value}
+					onChange={(e) => setValue(e.target.value)}
+					onKeyDown={(e) => {
+						if (e.key === "Enter" && dirty) void save(value);
+					}}
+					placeholder={placeholder}
+					aria-label={`${label} base URL`}
+					data-testid={`${testid}-input`}
+					disabled={busy}
+					className="h-7 min-w-0 flex-1 rounded-sm border border-border bg-background px-1.5 font-mono text-xs text-foreground outline-none placeholder:text-muted-foreground/60 focus:border-muted-foreground/50"
+				/>
+				<button
+					type="button"
+					onClick={() => void save(value)}
+					disabled={busy || !dirty}
+					data-testid={`${testid}-save`}
+					className="shrink-0 text-xs text-foreground underline-offset-2 hover:underline disabled:text-muted-foreground/40 disabled:no-underline"
+				>
+					Save
+				</button>
+				{saved !== undefined && (
+					<button
+						type="button"
+						onClick={() => void save(null)}
+						disabled={busy}
+						data-testid={`${testid}-reset`}
+						className="shrink-0 text-xs text-muted-foreground/70 underline-offset-2 hover:text-foreground hover:underline"
+					>
+						Reset
+					</button>
+				)}
+			</div>
+			{error && (
+				<p role="alert" data-testid={`${testid}-error`} className="px-1 text-xs text-red-500">
 					{error}
 				</p>
 			)}
@@ -320,8 +425,12 @@ export function KeysSection({
 	 *  while mounted too — the settings dialog's while-open retarget
 	 *  pattern. undefined = nothing seeded. */
 	initialRow,
+	baseUrls,
+	onBaseUrlsChange,
 }: {
 	initialRow?: string;
+	baseUrls: ProvidersSettings | undefined;
+	onBaseUrlsChange: (next: ProvidersSettings) => Promise<void>;
 }) {
 	const [statuses, setStatuses] = useState<AuthKeyStatus[] | null>(null);
 	const [providers, setProviders] = useState<ProviderKeyInfo[] | undefined>(undefined);
@@ -401,7 +510,13 @@ export function KeysSection({
 
 	const { providerRows, toolRows, unknownRows, addable } = classifyKeys(statuses, providers);
 
-	async function saveNewProvider(p: ProviderKeyInfo, value: string) {
+	async function saveNewProvider(p: ProviderKeyInfo, value: string, baseUrlInput: string) {
+		const baseUrl = baseUrlInput.trim() ? normalizeBaseUrl(baseUrlInput) : null;
+		if (baseUrlInput.trim() && !baseUrl) {
+			setAddError(BASE_URL_INVALID);
+			return;
+		}
+		if (baseUrl) await onBaseUrlsChange(composeBaseUrl(baseUrls, p.id, baseUrl));
 		const err = await saveKey(p.envVar, value);
 		if (err) setAddError(err);
 		else {
@@ -413,24 +528,38 @@ export function KeysSection({
 	return (
 		<>
 			<SettingsGroup label="Model providers" testid="group-provider-keys">
-				{providerRows.map((status) => (
-					<KeyTableRow
-						key={status.id}
-						label={providers?.find((p) => p.envVar === status.id)?.label ?? status.info?.label ?? status.id}
-						docsUrl={status.info?.docsUrl}
-						status={status}
-						expanded={openRow === status.id}
-						onToggle={() => setOpenRow(openRow === status.id ? null : status.id)}
-						onSave={async (v) => {
-							const err = await saveKey(status.id, v);
-							if (!err) setOpenRow(null); // fold on success — rest state
-							return err;
-						}}
-						onCancel={() => setOpenRow(null)}
-						onDelete={() => deleteKey(status.id)}
-						testid={`key-${status.id.toLowerCase()}`}
-					/>
-				))}
+				{providerRows.map((status) => {
+					const urlProviders = (providers ?? []).filter((p) => p.envVar === status.id && p.defaultBaseUrl);
+					return (
+						<KeyTableRow
+							key={status.id}
+							label={providers?.find((p) => p.envVar === status.id)?.label ?? status.info?.label ?? status.id}
+							docsUrl={status.info?.docsUrl}
+							status={status}
+							expanded={openRow === status.id}
+							onToggle={() => setOpenRow(openRow === status.id ? null : status.id)}
+							onSave={async (v) => {
+								const err = await saveKey(status.id, v);
+								if (!err) setOpenRow(null); // fold on success — rest state
+								return err;
+							}}
+							onCancel={() => setOpenRow(null)}
+							onDelete={() => deleteKey(status.id)}
+							customUrl={urlProviders.some((p) => baseUrls?.[p.id]?.baseUrl !== undefined)}
+							baseUrlLines={urlProviders.map((p) => (
+								<BaseUrlLine
+									key={`${p.id}:${baseUrls?.[p.id]?.baseUrl ?? ""}`}
+									label={urlProviders.length > 1 ? p.label : "Base URL"}
+									placeholder={p.defaultBaseUrl!}
+									saved={baseUrls?.[p.id]?.baseUrl}
+									onSave={(baseUrl) => onBaseUrlsChange(composeBaseUrl(baseUrls, p.id, baseUrl))}
+									testid={`base-url-${p.id}`}
+								/>
+							))}
+							testid={`key-${status.id.toLowerCase()}`}
+						/>
+					);
+				})}
 				{providers !== undefined && (
 					<AddProviderRow
 						addable={addable}
@@ -441,10 +570,7 @@ export function KeysSection({
 					/>
 				)}
 				{adding && (
-					<div className="flex items-center gap-2 rounded-sm px-1 py-1.5" data-testid={`key-${adding.id}-editor`}>
-						<span className="shrink-0 font-ui text-xs text-foreground">{adding.label}</span>
-						<AddProviderEditor provider={adding} onSave={(v) => void saveNewProvider(adding, v)} onCancel={() => setAdding(null)} error={addError} />
-					</div>
+					<AddProviderEditor provider={adding} onSave={(v, baseUrl) => void saveNewProvider(adding, v, baseUrl)} onCancel={() => setAdding(null)} error={addError} />
 				)}
 			</SettingsGroup>
 
@@ -496,48 +622,69 @@ function AddProviderEditor({
 	error,
 }: {
 	provider: ProviderKeyInfo;
-	onSave: (value: string) => void;
+	onSave: (value: string, baseUrl: string) => void;
 	onCancel: () => void;
 	error: string | null;
 }) {
 	const [value, setValue] = useState("");
+	const [baseUrl, setBaseUrl] = useState("");
 	return (
-		<>
-			<input
-				type="text"
-				value={value}
-				onChange={(e) => setValue(e.target.value)}
-				onKeyDown={(e) => {
-					if (e.key === "Enter" && value.trim()) onSave(value);
-				}}
-				placeholder="Paste key…"
-				aria-label={`${provider.label} key`}
-				data-testid={`key-${provider.id}-input`}
-				autoFocus
-				className="h-7 min-w-0 flex-1 rounded-sm border border-border bg-background px-1.5 font-mono text-xs text-foreground outline-none placeholder:text-muted-foreground/60 focus:border-muted-foreground/50"
-			/>
-			<button
-				type="button"
-				onClick={() => value.trim() && onSave(value)}
-				disabled={!value.trim()}
-				data-testid={`key-${provider.id}-save`}
-				className="shrink-0 text-xs text-foreground underline-offset-2 hover:underline disabled:text-muted-foreground/40 disabled:no-underline"
-			>
-				Save
-			</button>
-			<button
-				type="button"
-				onClick={onCancel}
-				data-testid={`key-${provider.id}-cancel`}
-				className="shrink-0 text-xs text-muted-foreground/70 underline-offset-2 hover:text-foreground hover:underline"
-			>
-				Cancel
-			</button>
+		<div data-testid={`key-${provider.id}-editor`}>
+			<div className="flex items-center gap-2 rounded-sm px-1 py-1.5">
+				<span className="shrink-0 font-ui text-xs text-foreground">{provider.label}</span>
+				<input
+					type="text"
+					value={value}
+					onChange={(e) => setValue(e.target.value)}
+					onKeyDown={(e) => {
+						if (e.key === "Enter" && value.trim()) onSave(value, baseUrl);
+					}}
+					placeholder="Paste key…"
+					aria-label={`${provider.label} key`}
+					data-testid={`key-${provider.id}-input`}
+					autoFocus
+					className="h-7 min-w-0 flex-1 rounded-sm border border-border bg-background px-1.5 font-mono text-xs text-foreground outline-none placeholder:text-muted-foreground/60 focus:border-muted-foreground/50"
+				/>
+				<button
+					type="button"
+					onClick={() => value.trim() && onSave(value, baseUrl)}
+					disabled={!value.trim()}
+					data-testid={`key-${provider.id}-save`}
+					className="shrink-0 text-xs text-foreground underline-offset-2 hover:underline disabled:text-muted-foreground/40 disabled:no-underline"
+				>
+					Save
+				</button>
+				<button
+					type="button"
+					onClick={onCancel}
+					data-testid={`key-${provider.id}-cancel`}
+					className="shrink-0 text-xs text-muted-foreground/70 underline-offset-2 hover:text-foreground hover:underline"
+				>
+					Cancel
+				</button>
+			</div>
+			{provider.defaultBaseUrl && (
+				<div className="flex items-center gap-2 rounded-sm px-1 py-1.5">
+					<span className="shrink-0 font-ui text-xs text-muted-foreground">Base URL (optional)</span>
+					<input
+						type="text"
+						value={baseUrl}
+						onChange={(e) => setBaseUrl(e.target.value)}
+						onKeyDown={(e) => {
+							if (e.key === "Enter" && value.trim()) onSave(value, baseUrl);
+						}}
+						placeholder={provider.defaultBaseUrl}
+						aria-label={`${provider.label} base URL`}
+						data-testid={`key-${provider.id}-base-url`}
+						className="h-7 min-w-0 flex-1 rounded-sm border border-border bg-background px-1.5 font-mono text-xs text-foreground outline-none placeholder:text-muted-foreground/60 focus:border-muted-foreground/50"
+					/>
+				</div>
+			)}
 			{error && (
-				<p role="alert" className="w-full pl-0 text-xs text-red-500" data-testid={`key-${provider.id}-error`}>
+				<p role="alert" className="px-1 text-xs text-red-500" data-testid={`key-${provider.id}-error`}>
 					{error}
 				</p>
 			)}
-		</>
+		</div>
 	);
 }

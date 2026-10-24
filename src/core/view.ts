@@ -34,7 +34,7 @@
 
 import type { AssistantMessage, ToolResultMessage } from "@earendil-works/pi-ai";
 import type { LhMarkerMessage, LhMessage } from "./native-messages.ts";
-import { modelSolutionForConclude, PRACTICE_CONCLUDE_TOOL, problemInputForConclude } from "./native-messages.ts";
+import { endedEarly, modelSolutionForConclude, PRACTICE_CONCLUDE_TOOL, problemInputForConclude, SEND_TO_USER_TOOL, sentMessageOf } from "./native-messages.ts";
 import { activeCompactionOf, type CompactionDetails } from "./compaction.ts";
 import { QUESTION_TOOLS } from "./pending.ts";
 import type { SubagentArtifactData, SubagentResultMeta } from "./contracts/jobs.ts";
@@ -216,8 +216,11 @@ export function projectView(messages: readonly LhMessage[], live?: LiveTurnState
 					rest.push({ type: "text", id: `${m.id}-t${textN++}`, text: block.text, state: "done" });
 				} else if (block.type === "thinking") {
 					reasoning.push({ type: "reasoning", id: `${m.id}-r${reasoningN++}`, text: block.thinking, state: "done" });
+				} else if (block.type === "toolCall" && block.name === SEND_TO_USER_TOOL) {
+					const text = sentMessageOf(block);
+					if (text) rest.push({ type: "text", id: `${m.id}-t${textN++}`, text, state: "done" });
 				} else if (block.type === "toolCall") {
-					const part = toolPartOf(block, live, streamingMessage);
+					const part = toolPartOf(block, live, streamingMessage, endedEarly(assistant));
 					// The conclusion's reveal join (owner round, 2026-10-05): the
 					// hero of a conclude card is the modelSolution committed at POSE
 					// time — a record fold, enriched here so the card renders pure.
@@ -279,6 +282,7 @@ function toolPartOf(
 	block: { id: string; name: string; arguments?: unknown },
 	live: LiveTurnState | undefined,
 	streamingMessage: boolean,
+	stoppedMessage: boolean,
 ): LhViewPart {
 	const part: LhViewPart = {
 		type: `tool-${block.name}`,
@@ -304,6 +308,10 @@ function toolPartOf(
 			part.state = "output-available";
 			part.output = exec.output;
 		}
+	} else if (stoppedMessage) {
+		// A stopped turn's call never ran — aborted (silent), never a pending question.
+		part.state = "output-error";
+		part.errorText = "Operation aborted";
 	} else {
 		// No execution yet: live ONLY on positive evidence — the call's own
 		// message is streaming this turn (its arguments may literally be

@@ -308,7 +308,7 @@ export function createJobRunner(deps: JobRunnerDeps): JobRunner {
 		// the loop unwinds): no result write, no steer — the abort path owns
 		// the record and queues the abort steer itself.
 		if (job.status !== "running") return;
-		jobStore.updateJob(jobId, { result, activity: "delivering result" });
+		jobStore.updateJob(jobId, { result, activity: "result ready" });
 		const steer = buildSubagentSteer(job, result);
 		try {
 			await deliver(steer);

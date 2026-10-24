@@ -62,12 +62,14 @@ describe("ZeroKeysPill — the composer-hoisted notice", () => {
 describe("SetupKeysBody — stage 1's self-contained first-key screen", () => {
 	const base = {
 		value: "",
+		baseUrl: "",
 		saving: false,
 		error: null,
 		menuOpen: false,
 		onToggleMenu: () => {},
 		onPick: () => {},
 		onValue: () => {},
+		onBaseUrl: () => {},
 		onSave: () => {},
 		menuAnchor: { current: null },
 	};
@@ -92,6 +94,15 @@ describe("SetupKeysBody — stage 1's self-contained first-key screen", () => {
 		assert.ok(html.includes('data-testid="setup-key-save"'));
 		assert.ok(html.includes("Save key"));
 		assert.ok(html.includes("OpenRouter"), "the chosen provider's label rides the trigger");
+	});
+
+	it("after a pick: the optional base-URL field shows the provider's default URL as its placeholder", () => {
+		const provider = { ...PROVIDERS[0]!, defaultBaseUrl: "https://openrouter.ai/api" };
+		const html = renderToStaticMarkup(createElement(SetupKeysBody, { ...base, providers: PROVIDERS, provider }));
+		assert.ok(html.includes('data-testid="setup-key-base-url"'));
+		assert.ok(html.includes('placeholder="https://openrouter.ai/api"'));
+		const without = renderToStaticMarkup(createElement(SetupKeysBody, { ...base, providers: PROVIDERS, provider: PROVIDERS[0]! }));
+		assert.ok(!without.includes('data-testid="setup-key-base-url"'), "nothing to override → no field");
 	});
 
 	it("a shape-gate 400 keeps its line inline — no Settings round-trip chrome", () => {

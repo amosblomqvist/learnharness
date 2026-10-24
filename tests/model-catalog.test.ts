@@ -15,9 +15,9 @@ import {
 } from "../src/server/model-catalog.ts";
 import type { EffectiveSlot } from "../src/core/settings-resolution.ts";
 import type { SettingsValidation } from "../src/server/model-catalog.ts";
-import { clampThinkingLevel, getSupportedThinkingLevels } from "@earendil-works/pi-ai";
+import { clampThinkingLevel, getSupportedThinkingLevels, normalizeContext } from "@earendil-works/pi-ai";
 import { DEFAULT_THINKING_ORDER } from "../src/core/settings.ts";
-import { piEngineForSpec, piModels } from "../src/agent/models.ts";
+import { piEngineForSpec, piModels, providerBaseUrlRoot } from "../src/agent/models.ts";
 import { BACKGROUND_MODEL_ROLES } from "../src/core/settings.ts";
 import { resolveSettings } from "../src/core/settings-resolution.ts";
 import { readSettings } from "../src/store/settings.ts";
@@ -325,5 +325,52 @@ describe("pi thinking truth (pinned against pi-ai upgrades)", () => {
 	it("the legacy piEngineFor role entry point throws honestly (BYOK: no pins)", async () => {
 		const { piEngineFor } = await import("../src/agent/models.ts");
 		assert.throws(() => piEngineFor("prober"), /no configured model for role "prober"/);
+	});
+});
+
+describe("provider base-URL overrides", () => {
+	const openrouterModel = (api: string) => piModels().getModels("openrouter").find((m) => m.api === api)!;
+
+	it("providerBaseUrlRoot: the shared root — mixed-endpoint providers cut back to the common prefix", () => {
+		assert.equal(providerBaseUrlRoot("openai"), "https://api.openai.com/v1");
+		assert.equal(providerBaseUrlRoot("openrouter"), "https://openrouter.ai/api");
+		assert.equal(providerBaseUrlRoot("fireworks"), "https://api.fireworks.ai/inference");
+		assert.equal(providerBaseUrlRoot("opencode-go"), "https://opencode.ai/inference/go");
+		assert.equal(providerBaseUrlRoot("typesafe"), undefined);
+		assert.equal(providerBaseUrlRoot("no-such-provider"), undefined);
+	});
+
+	it("the engine swaps the root and keeps each model's own suffix", () => {
+		const base = "https://proxy.example/or";
+		const completions = openrouterModel("openai-completions");
+		const messages = openrouterModel("anthropic-messages");
+		assert.equal(piEngineForSpec({ provider: "openrouter", id: completions.id, baseUrl: base }).model.baseUrl, `${base}/v1`);
+		assert.equal(piEngineForSpec({ provider: "openrouter", id: messages.id, baseUrl: base }).model.baseUrl, base);
+		const gpt = piModels().getModels("openai")[0]!;
+		assert.equal(piEngineForSpec({ provider: "openai", id: gpt.id, baseUrl: "https://proxy.example/v1" }).model.baseUrl, "https://proxy.example/v1");
+	});
+
+	it("no override = the catalog URL, untouched", () => {
+		const completions = openrouterModel("openai-completions");
+		assert.equal(piEngineForSpec({ provider: "openrouter", id: completions.id }).model.baseUrl, completions.baseUrl);
+	});
+
+	it("the override is where the request actually goes", async () => {
+		const original = globalThis.fetch;
+		const urls: string[] = [];
+		// 400, not 5xx: the SDK retries server errors with backoff
+		globalThis.fetch = (async (input: RequestInfo | URL) => {
+			urls.push(input instanceof Request ? input.url : String(input));
+			return new Response("{}", { status: 400 });
+		}) as typeof fetch;
+		try {
+			const completions = openrouterModel("openai-completions");
+			const engine = piEngineForSpec({ provider: "openrouter", id: completions.id, thinkingLevel: "off", baseUrl: "https://proxy.example/or" });
+			await engine.streamFn(engine.model, normalizeContext({ messages: [{ role: "user", content: "hi", timestamp: 0 }] }), {}).result();
+		} finally {
+			globalThis.fetch = original;
+		}
+		assert.ok(urls.length > 0, "a request was made");
+		for (const url of urls) assert.ok(url.startsWith("https://proxy.example/or/v1/"), url);
 	});
 });

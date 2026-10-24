@@ -19,7 +19,7 @@ import {
 	sectionedSegments,
 } from "../components/settings/agent-section.tsx";
 import { nextOverrides } from "../components/settings/keyboard-section.tsx";
-import { classifyKeys, keyStatusLine, type ProviderKeyInfo } from "../components/settings/keys-section.tsx";
+import { classifyKeys, composeBaseUrl, keyStatusLine, type ProviderKeyInfo } from "../components/settings/keys-section.tsx";
 import type { AgentSettings, AuthKeyStatus, ModelsSettings } from "../src/core";
 import { slotsConfigured } from "../src/core";
 import { setupStage } from "../components/setup-dialog.tsx";
@@ -288,6 +288,19 @@ describe("keyStatusLine — the minimal at-a-glance state", () => {
 
 	it("absent key reads 'not set'", () => {
 		assert.equal(keyStatusLine({ id: "X", info: null, present: false, masked: null, source: "none", shadowedByEnv: false }), "not set");
+	});
+});
+
+describe("composeBaseUrl — one provider's override, the rest of the section carried verbatim", () => {
+	it("sets, replaces, and Reset (null) drops only that provider", () => {
+		const current = { openai: { baseUrl: "https://a.example/v1" }, groq: { baseUrl: "https://b.example" } };
+		assert.deepEqual(composeBaseUrl(undefined, "openai", "https://a.example/v1"), { openai: { baseUrl: "https://a.example/v1" } });
+		assert.deepEqual(composeBaseUrl(current, "openai", "https://c.example/v1"), {
+			openai: { baseUrl: "https://c.example/v1" },
+			groq: { baseUrl: "https://b.example" },
+		});
+		assert.deepEqual(composeBaseUrl(current, "openai", null), { groq: { baseUrl: "https://b.example" } });
+		assert.deepEqual(current.openai, { baseUrl: "https://a.example/v1" }, "the input section is never mutated");
 	});
 });
 

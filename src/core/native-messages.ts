@@ -22,8 +22,7 @@
  * agent's convertToLlm — owns every model-facing decision: markers
  * flatten to their canonical user text (single-sourced in
  * core/contracts), plan blocks are UI-only and filtered, and dangling
- * tool calls (an aborted turn) get the interrupted-result synthesis the
- * provider protocol demands.
+ * tool calls get the interrupted-result synthesis the provider protocol demands.
  *
  * Answers (fork 1, owner 2026-09-26): the learner's answer IS the tool
  * call's ToolResultMessage — appended natively at answer time. The
@@ -45,9 +44,7 @@ import {
 import { compactAnswerForModel, type QuestionAnswerData } from "./question-core.ts";
 import { activeCompactionOf, keptIndexFor } from "./compaction.ts";
 
-/** The hard-invariant wording for an aborted turn's unanswered calls —
- *  carried over verbatim from the pre-native era so the model's view
- *  never drifted. */
+/** The hard-invariant wording for unanswered calls — carried over verbatim from the pre-native era so the model's view never drifted. */
 export const INTERRUPTED_TEXT =
 	"The question was interrupted — the learner never answered; continue without holding a result for it.";
 
@@ -182,6 +179,27 @@ export function newPlanBlockMessage(
 		details: { planCallId, block },
 		timestamp: Date.now(),
 	};
+}
+
+// ─── send_to_user ────────────────────────────────────────────────────────────
+
+/** The verbatim-message tool (src/agent/tools/send-to-user.ts carries the why). */
+export const SEND_TO_USER_TOOL = "send_to_user";
+
+/** The message of a send_to_user call, or undefined for any other block. */
+export function sentMessageOf(block: unknown): string | undefined {
+	const call = block as { type?: string; name?: string; arguments?: { message?: unknown } };
+	const message = call.type === "toolCall" && call.name === SEND_TO_USER_TOOL ? call.arguments?.message : undefined;
+	return typeof message === "string" ? message : undefined;
+}
+
+/** The user-facing text of a native message, in order: a string body, its text blocks, and its send_to_user messages. */
+export function userFacingTextOf(content: unknown): string[] {
+	if (typeof content === "string") return content.trim() ? [content] : [];
+	if (!Array.isArray(content)) return [];
+	return content
+		.map((c) => ((c as { type?: string }).type === "text" ? (c as { text: string }).text : sentMessageOf(c)))
+		.filter((t): t is string => typeof t === "string" && t.trim().length > 0);
 }
 
 // ─── practice sessions (owner, 2026-10-04) ───────────────────────────────────
@@ -492,6 +510,11 @@ function resultIdsFrom(messages: readonly AgentMessage[]): Set<string> {
 	return ids;
 }
 
+/** A stopped or failed turn's message: its tool calls never ran (arguments may be half-written), and pi-ai drops the whole message before sending. */
+export function endedEarly(message: AssistantMessage): boolean {
+	return message.stopReason === "aborted" || message.stopReason === "error";
+}
+
 /**
  * AgentMessage[] → the provider wire (the agent's convertToLlm — required
  * by pi-agent-core's loop config, the ONE place model-facing decisions
@@ -502,9 +525,7 @@ function resultIdsFrom(messages: readonly AgentMessage[]): Set<string> {
  * - markers flatten to a user message carrying their content (the
  *   canonical text single-sourced in core/contracts); plan blocks are
  *   UI-only and filtered.
- * - dangling tool calls (an aborted turn's unanswered questions) get the
- *   synthesized interrupted result — the provider protocol's hard
- *   invariant: a tool call must be followed by its result.
+ * - dangling tool calls get the synthesized interrupted result — the provider protocol's hard invariant: a tool call must be followed by its result (except in an endedEarly message, which pi-ai drops).
  *
  * Contract (pi-agent-core): never throws — an unknown shape passes
  * through untouched rather than killing the loop.
@@ -570,11 +591,11 @@ export function toLlmMessages(messages: readonly AgentMessage[]): Message[] {
 		// Strip the record id: the wire carries the native shape only.
 		const { id: _id, ...native } = m as LhMessage;
 		out.push(native as Message);
-		// Dangling-call synthesis: an assistant message whose toolCalls have
-		// no results in the remaining tail (abort mid-question) — the
-		// provider rejects unanswered calls outright.
+		// Dangling-call synthesis: an assistant message whose toolCalls have no results in the remaining tail — the provider rejects unanswered calls outright.
+		// An endedEarly message is dropped by pi-ai, so a result for it would be orphaned.
 		if (role === "assistant") {
 			const assistant = m as AssistantMessage;
+			if (endedEarly(assistant)) continue;
 			const calls = assistant.content.filter((b) => b.type === "toolCall");
 			if (calls.length === 0) continue;
 			const answered = resultIdsFrom(messages.slice(i + 1));
@@ -606,6 +627,7 @@ export function danglingQuestionOf(
 		const m = messages[mi]!;
 		if ((m as { role?: string }).role !== "assistant") continue;
 		const assistant = m as AssistantMessage & { id: string };
+		if (endedEarly(assistant)) return null;
 		const answered = resultIdsFrom(messages.slice(mi + 1));
 		for (const block of assistant.content) {
 			if (block.type !== "toolCall") continue;

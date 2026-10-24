@@ -132,6 +132,12 @@ export function isProviderEnvVar(envVar: string): boolean {
 	return AUTH_PROVIDER_ENV_VARS.has(envVar);
 }
 
+const AUTH_PROVIDER_IDS: ReadonlySet<string> = new Set(AUTH_PROVIDER_KEYS.map((p) => p.id));
+
+export function isAuthProviderId(id: string): boolean {
+	return AUTH_PROVIDER_IDS.has(id);
+}
+
 /** Shape-check result: ok, or a 400-ready message naming the expectation. */
 export type KeyShapeResult = { ok: true } | { ok: false; error: string };
 

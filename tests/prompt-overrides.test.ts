@@ -185,6 +185,7 @@ describe("the source-derived segment list", () => {
 				"shared/25-confidence.md",
 				"shared/30-learner-files.md",
 				"shared/40-formatting.md",
+				"shared/45-send-to-user.md",
 			],
 		);
 		assert.equal(teacher.some((s) => s.path === "teacher/05-method.md"), true);

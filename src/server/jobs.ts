@@ -659,7 +659,6 @@ export function recoverStaleJobs(): void {
 				if (job.result) {
 					// The wake never fired (or crashed mid-flight): re-deliver.
 					const steer = buildSubagentSteer(job, job.result as never);
-					stores.jobStore.updateJob(job.id, { activity: "recovering: re-delivering" });
 					void deliverJobResult(steer).catch(() => {
 						/* deliverJobResult marks the job error on failure */
 					});
