@@ -25,7 +25,7 @@ function withPayload(test: (fixture: {
 		write("server.js", "// fixture");
 		write("node_modules/puppeteer-core/package.json", JSON.stringify({ name: "puppeteer-core", type: "module", main: "lib/index.js" }));
 		write("node_modules/puppeteer-core/lib/index.js", 'import "./browser-data/browser-data.js"; export default { connect() {} };');
-		test({ root, write, run: () => spawnSync(process.execPath, [script, "--standalone", root], {
+		test({ root, write, run: () => spawnSync(process.execPath, [script, "--standalone", root, "--gate=demo"], {
 			encoding: "utf8", timeout: 10_000,
 		}) });
 	} finally {

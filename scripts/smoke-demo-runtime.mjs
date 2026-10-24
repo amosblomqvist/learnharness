@@ -5,6 +5,11 @@
  *
  * node scripts/smoke-demo-runtime.mjs --standalone <dir> --runtime <electron binary> [--browser]
  * --runtime defaults to host Node for the import-only gate.
+ *
+ * verifyProviderRuntime is the same gate for the pi engine's provider chain:
+ * the tracer misses packages that google-auth-library pulls in through plain
+ * top-level requires it never sees (issue #12: gcp-metadata, json-bigint), so
+ * the runtime import proves the payload's Google chain actually loads.
  */
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
@@ -138,6 +143,91 @@ export async function stopBrowserService(helper) {
 	}
 }
 
+export function verifyProviderRuntime(standalone, runtime = process.execPath) {
+	const home = fs.mkdtempSync(path.join(os.tmpdir(), "lh-provider-runtime-"));
+	try {
+		fs.writeFileSync(path.join(home, "auth.json"), "{}\n", { mode: 0o600 });
+		const result = spawnSync(runtime, [fileURLToPath(import.meta.url), "--provider-probe", path.resolve(standalone)], {
+			cwd: home,
+			env: { ...probeEnv(process.env, home), ELECTRON_RUN_AS_NODE: "1" },
+			encoding: "utf8", timeout: 60_000, maxBuffer: 128 * 1024,
+		});
+		if (result.status !== 0 || result.error) {
+			throw new Error(`provider runtime probe failed (${result.error?.message ?? result.status}):\n${result.stdout ?? ""}${result.stderr ?? ""}`);
+		}
+		process.stdout.write(result.stdout);
+	} finally {
+		fs.rmSync(home, { recursive: true, force: true });
+	}
+}
+
+async function importProviderPayload(standalone) {
+	const root = fs.realpathSync(standalone);
+	const inside = (file) => {
+		const relative = path.relative(root, fs.realpathSync(file));
+		assert.ok(relative !== ".." && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative),
+			`dependency escaped standalone payload: ${file}`);
+	};
+	// The provider surface: the runtime's own entry into the Google chain.
+	// The package's exports map pins ./providers/* to an "import" condition
+	// only (CJS require.resolve cannot see it), and import.meta.resolve on
+	// this Node ignores the parent override, so resolution happens through
+	// the dynamic import itself, confined by the hooks below — the same
+	// machinery the engine's own dynamic imports go through.
+	const loaded = new Set();
+	const hooks = registerHooks({
+		resolve(specifier, context, nextResolve) {
+			const result = nextResolve(specifier, context);
+			if (result.url.startsWith("file:")) {
+				inside(fileURLToPath(result.url));
+				loaded.add(result.url);
+			} else {
+				assert.ok(result.url.startsWith("node:"), `unexpected dependency URL: ${result.url}`);
+			}
+			return result;
+		},
+	});
+	try {
+		// Import the provider surface THROUGH the payload: locate the package
+		// inside the payload's own node_modules (never the checkout's), then
+		// import its provider registry file directly. builtinProviders()
+		// constructs the Google provider, and driving its stream ONCE with an
+		// empty key forces the lazy api load — the dynamic import chain
+		// (@google/genai -> google-auth-library -> gcp-metadata) loads exactly
+		// as a session would; a payload the tracer clipped (issue #12) fails
+		// here with MODULE_NOT_FOUND long before packaging (the no-key call
+		// itself ends in a clean setup-error event, which we allow).
+		const surface = path.join(root, "node_modules", "@earendil-works", "pi-ai", "dist", "providers", "all.js");
+		assert.ok(fs.existsSync(surface), `pi-ai provider surface missing from payload: ${surface}`);
+		const { builtinProviders } = await import(pathToFileURL(surface).href);
+		const google = builtinProviders().find((provider) => provider.id === "google");
+		assert.ok(google, "the Google provider is registered");
+		const events = google.stream({ id: "smoke", api: "google-generative-ai" }, { apiKey: "" }, {});
+		let sawEvent = false;
+		for await (const event of events) {
+			// Any event proves the lazy api module loaded; the expected no-key
+			// outcome is a single setup-error event. But the same path also
+			// converts a MISSING PAYLOAD MODULE into a clean error event — the
+			// exact issue #12 failure — so the message is inspected: a module
+			// load failure OR an escape caught by the confinement hook is a
+			// payload defect, never a valid setup error.
+			assert.equal(event?.type === "error" || event?.type === "assistant" || event?.type === "text", true,
+				`unexpected stream event: ${JSON.stringify(event)?.slice(0, 200)}`);
+			const message = String(event?.error?.errorMessage ?? "");
+			assert.ok(!/Cannot find module|MODULE_NOT_FOUND|ERR_MODULE_NOT_FOUND|escaped standalone payload/i.test(message),
+				`the Google chain is missing from the payload: ${message.split("\n")[0]}`);
+			sawEvent = true;
+			break; // the first event is enough — the load already happened
+		}
+		assert.ok(sawEvent, "the Google stream produced no events (the lazy api never loaded)");
+		console.log(`[smoke-demo-runtime] provider import ok; ${loaded.size} modules confined to ${root}`);
+		return { hooks };
+	} catch (error) {
+		hooks.deregister();
+		throw error;
+	}
+}
+
 async function browserProbe(puppeteer) {
 	assert.ok(process.versions.electron, "--browser requires a packaged Electron --runtime binary");
 	const home = process.env.HOME;
@@ -220,13 +310,23 @@ async function main() {
 		} finally { hooks.deregister(); }
 		return;
 	}
+	if (args[0] === "--provider-probe") {
+		const { hooks } = await importProviderPayload(args[1]);
+		hooks.deregister();
+		return;
+	}
 	const value = (name, fallback) => {
 		const index = args.indexOf(name);
 		if (index < 0) return fallback;
 		assert.ok(args[index + 1] && !args[index + 1].startsWith("--"), `${name} requires a path`);
 		return path.resolve(args[index + 1]);
 	};
-	verifyDemoRuntime(value("--standalone", path.resolve(import.meta.dirname, "../.next/standalone")), value("--runtime", process.execPath), args.includes("--browser"));
+	const standalone = value("--standalone", path.resolve(import.meta.dirname, "../.next/standalone"));
+	const runtime = value("--runtime", process.execPath);
+	const gates = args.filter((arg) => arg.startsWith("--gate=")).map((arg) => arg.slice(7));
+	const selected = (gate) => gates.length === 0 || gates.includes(gate);
+	if (selected("demo")) verifyDemoRuntime(standalone, runtime, args.includes("--browser"));
+	if (selected("provider")) verifyProviderRuntime(standalone, runtime);
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
