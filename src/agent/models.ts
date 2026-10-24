@@ -11,6 +11,8 @@ import { builtinProviders } from "@earendil-works/pi-ai/providers/all";
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import { type ModelRole } from "../../config.ts";
 import { DEFAULT_THINKING_ORDER } from "../core/settings.ts";
+import { localServerKeyVar, type LocalServer } from "../core/local-servers.ts";
+import { buildLocalModel, localProvider, type DiscoveredModel } from "./local-models.ts";
 import packageMetadata from "../../package.json" with { type: "json" };
 
 /** App identity is immutable and shared by Models and every native Agent.
@@ -61,6 +63,47 @@ export function piModels() {
 	return collection;
 }
 
+// ─── Local model servers (local-models wave, 2026-10-24) ─────────────────────
+// The server layer (src/server/local-servers.ts) owns WHICH servers exist
+// (the settings record) and when to ask them for models; it pushes each
+// into the collection here. This registry remembers the configs so an
+// engine can still be built for a pinned local model before its server
+// has been asked (a cold process, an unreachable server).
+
+const localServers = new Map<string, LocalServer>();
+
+/** Register (or replace) one local server's provider with its discovered
+ *  models — called again after every successful discovery. */
+export function registerLocalServer(server: LocalServer, models: readonly DiscoveredModel[]): void {
+	localServers.set(server.id, server);
+	piModels().setProvider(localProvider(server, models, localServerKeyVar(server.id)));
+}
+
+export function unregisterLocalServer(id: string): void {
+	if (!localServers.delete(id)) return;
+	piModels().deleteProvider(id);
+}
+
+/** The registered local server for a provider id (undefined = not local). */
+export function registeredLocalServer(id: string): LocalServer | undefined {
+	return localServers.get(id);
+}
+
+export function registeredLocalServers(): LocalServer[] {
+	return [...localServers.values()];
+}
+
+/** The catalog model for a pin — and, for a registered LOCAL provider whose
+ *  list does not (yet) hold the id, the model built from the server's
+ *  config alone (default context, text-only): the pin stays runnable and
+ *  the server itself answers honestly if the model is gone. */
+export function resolveModel(provider: string, id: string): Model<Api> | undefined {
+	const model = piModels().getModel(provider, id);
+	if (model) return model;
+	const server = localServers.get(provider);
+	return server ? buildLocalModel(server, { id }) : undefined;
+}
+
 /** OpenRouter API key (BYOK); tests never read this — they inject engines. */
 export function openRouterApiKey(): string | undefined {
 	return process.env.OPENROUTER_API_KEY || undefined;
@@ -95,7 +138,7 @@ function defaultThinkingLevel(model: Model<Api>): ThinkingLevel {
  *  hardcodes OpenRouter's. */
 export function piEngineForSpec(spec: ResolvedModelSpec): PiEngine {
 	const models: Models = piModels();
-	const model = models.getModel(spec.provider, spec.id);
+	const model = resolveModel(spec.provider, spec.id);
 	if (!model) {
 		throw new Error(`${spec.provider} catalog has no model ${spec.id}`);
 	}

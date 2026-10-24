@@ -24,6 +24,9 @@ export interface ModelCatalogEntry {
 	cost: { input: number; output: number; cacheRead: number; cacheWrite: number };
 	contextWindow: number;
 	maxTokens: number;
+	/** Served by one of the user's local servers (core/local-servers.ts) —
+	 *  the picker shows "local" where a price would be. Absent otherwise. */
+	local?: boolean;
 }
 
 /** The conversation agents' resolved default (BYOK, owner 2026-09-22): the
@@ -80,6 +83,9 @@ export interface CatalogProvider {
 	id: string;
 	/** The env var whose presence federates this provider in. */
 	envVar: string;
-	/** Whether that var is currently present (env or auth file). */
+	/** Whether that var is currently present (env or auth file). A local
+	 *  server's key is optional, so a local row is always present. */
 	keyPresent: boolean;
+	/** A local server (core/local-servers.ts), not a hosted provider. */
+	local?: boolean;
 }

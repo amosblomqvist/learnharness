@@ -19,7 +19,7 @@
 
 import { clampThinkingLevel, getSupportedThinkingLevels, type Api, type Model } from "@earendil-works/pi-ai";
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
-import { piModels } from "../agent/models.ts";
+import { piModels, registeredLocalServer, registeredLocalServers, resolveModel } from "../agent/models.ts";
 import { settingsStore } from "../store/settings.ts";
 import { effectiveSettings } from "./stores.ts";
 import { keyValue } from "./keys.ts";
@@ -34,6 +34,7 @@ import type {
 } from "../core/contracts/models.ts";
 import type { EffectiveModelSpec, EffectiveSlot } from "../core/settings-resolution.ts";
 import { AUTH_PROVIDER_KEYS } from "../core/auth-keys.ts";
+import { localServerKeyVar } from "../core/local-servers.ts";
 import { BACKGROUND_MODEL_ROLES, MODEL_SLOTS, type BackgroundModelRole, type ModelSlotName, type ModelsSettings } from "../core/settings.ts";
 
 /** The picker's client-safe model entry (contract: core/contracts/models.ts). */
@@ -119,13 +120,23 @@ export function catalogSlots(): SlotPins {
 /** The providers surface (model slots wave, 2026-09-20): one row per
  *  plain-key model provider (core/auth-keys.ts's pi-ai-derived table),
  *  with keyPresent read env-wins through the keys seam, fresh per call —
- *  saving a key immediately federates the provider into the picker. */
+ *  saving a key immediately federates the provider into the picker.
+ *  Local servers (local-models wave, 2026-10-24) join as rows of their
+ *  own: their key is optional, so a registered server is always present —
+ *  connecting one federates its models exactly like saving a key. */
 export function catalogProviders(): CatalogProvider[] {
-	return AUTH_PROVIDER_KEYS.map((p) => ({
+	const hosted: CatalogProvider[] = AUTH_PROVIDER_KEYS.map((p) => ({
 		id: p.id,
 		envVar: p.envVar,
 		keyPresent: keyValue(p.envVar) !== undefined,
-	})).sort((a, b) => a.id.localeCompare(b.id));
+	}));
+	const local: CatalogProvider[] = registeredLocalServers().map((s) => ({
+		id: s.id,
+		envVar: localServerKeyVar(s.id),
+		keyPresent: true,
+		local: true,
+	}));
+	return [...hosted, ...local].sort((a, b) => a.id.localeCompare(b.id));
 }
 
 /** The providers whose key is present — the picker federates exactly
@@ -152,6 +163,7 @@ export function toModelDto(model: Model<Api>): ModelDto {
 		},
 		contextWindow: model.contextWindow,
 		maxTokens: model.maxTokens,
+		...(registeredLocalServer(model.provider) ? { local: true } : {}),
 	};
 }
 
@@ -213,7 +225,7 @@ export function validateChatSettings(settings: ChatSettings): SettingsValidation
 		if (!providers.includes(provider)) {
 			return { ok: false, error: `Unknown provider "${provider}" — configured: ${providers.join(", ")}` };
 		}
-		if (!piModels().getModel(provider, id)) {
+		if (!resolveModel(provider, id)) {
 			return { ok: false, error: `No model "${id}" in the ${provider} catalog` };
 		}
 	}
@@ -243,7 +255,7 @@ function validateSlotSpec(name: ModelSlotName, slot: { model?: { provider: strin
 		if (!providers.includes(provider)) {
 			return { ok: false, error: `Unknown provider "${provider}" — configured: ${providers.join(", ")}` };
 		}
-		if (!piModels().getModel(provider, id)) {
+		if (!resolveModel(provider, id)) {
 			return { ok: false, error: `No model "${id}" in the ${provider} catalog` };
 		}
 	}
@@ -265,7 +277,7 @@ function validateSlotSpec(name: ModelSlotName, slot: { model?: { provider: strin
  *  or the level already supported — the existence gate rejects unknown
  *  models separately, so this only ever sees real ones in practice). */
 function clampLevelFor(provider: string, id: string, level: ThinkingLevel): ThinkingLevel {
-	const model = piModels().getModel(provider, id);
+	const model = resolveModel(provider, id);
 	return model ? clampThinkingLevel(model, level) : level;
 }
 

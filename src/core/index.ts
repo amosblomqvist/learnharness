@@ -68,6 +68,7 @@ export * from "./session-navigation.ts";
 // shape rules + masking — pure, browser-safe (the auth page binds to the
 // /api/keys routes built on it).
 export * from "./auth-keys.ts";
+export * from "./local-servers.ts";
 // keyboard.ts: the shortcut registry + binding normalization (pure, browser-safe).
 export * from "./keyboard.ts";
 export * from "./coverage.ts";
