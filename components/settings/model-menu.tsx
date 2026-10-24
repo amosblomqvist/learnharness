@@ -125,9 +125,15 @@ export function ModelMenuList({
 						>
 							<span className="flex items-center justify-between gap-2">
 								<span className="truncate text-card-foreground">{m.name}</span>
-								<span className="shrink-0 tabular-nums text-muted-foreground" title="USD per 1M tokens in/out">
-									{priceLabel(m.cost)}
-								</span>
+								{m.local ? (
+									<span className="shrink-0 text-muted-foreground" title="Runs on your local server">
+										local
+									</span>
+								) : (
+									<span className="shrink-0 tabular-nums text-muted-foreground" title="USD per 1M tokens in/out">
+										{priceLabel(m.cost)}
+									</span>
+								)}
 							</span>
 							<span className="flex items-center justify-between gap-2 text-muted-foreground">
 								<span className="truncate">{m.provider} · {m.id}</span>

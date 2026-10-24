@@ -17,6 +17,8 @@
  *    stored, otherwise it lives in the Add dropdown like everyone else.
  *  - Tools & services (Deepgram, the Google pair) keep their own group,
  *    same look, same interaction.
+ *  - Local models (local-models wave, 2026-10-24) sit between the two:
+ *    self-hosted servers, one row each (./local-servers.tsx).
  *
  * API: GET /api/keys (masked statuses + the providers array), PUT
  * /api/keys/:id (shape-gated 400s land inline), DELETE. Saves take
@@ -24,8 +26,9 @@
  */
 
 import { useEffect, useRef, useState } from "react";
-import { AUTH_KEYS, type AuthKeyStatus } from "@/src/core";
+import { AUTH_KEYS, isLocalServerKeyVar, type AuthKeyStatus } from "@/src/core";
 import { SettingsGroup } from "./controls.tsx";
+import { LocalServersGroup } from "./local-servers.tsx";
 import { ProviderMenuList } from "./model-menu.tsx";
 import { MenuShell } from "@/components/menu-shell";
 import { notifySettingsSaved } from "@/components/settings-signal";
@@ -81,6 +84,9 @@ export function classifyKeys(
 	const unknownRows: AuthKeyStatus[] = [];
 	for (const s of statuses) {
 		if (isTool(s.id)) continue;
+		// A local server's key belongs to its server row (Local models
+		// group), never to the providers or the unknown-variables list.
+		if (isLocalServerKeyVar(s.id)) continue;
 		if (providerEnv.has(s.id) || (!s.info && providers === undefined)) providerRows.push(s);
 		else if (!s.info) unknownRows.push(s);
 		// (pre-interlude catalogs: a curated-but-unclassified status still
@@ -447,6 +453,8 @@ export function KeysSection({
 					</div>
 				)}
 			</SettingsGroup>
+
+			<LocalServersGroup />
 
 			<SettingsGroup label="Tools & services" testid="group-tool-keys">
 				{toolRows.map((status) => (

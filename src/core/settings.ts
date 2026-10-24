@@ -29,6 +29,7 @@
 
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import { AUTH_PROVIDER_KEYS } from "./auth-keys.ts";
+import { sanitizeLocalServers, type LocalServer } from "./local-servers.ts";
 import type { ModelRole } from "../../config.ts";
 import type { ChatSettings } from "./contracts/chat.ts";
 import type { SearchEngineId } from "./search.ts";
@@ -367,6 +368,10 @@ export interface UserSettings {
 	appearance?: AppearanceSettings;
 	graph?: GraphSettings;
 	compaction?: CompactionSettings;
+	/** Self-hosted model servers (local-models wave, 2026-10-24 —
+	 *  core/local-servers.ts). Written only by the connect/remove routes,
+	 *  which probe the server first; their API keys live in auth.json. */
+	localServers?: LocalServer[];
 	[key: string]: unknown;
 }
 
@@ -631,13 +636,17 @@ export function sanitizeUserSettings(raw: unknown): UserSettings | null {
 			out.compaction = sanitizeCompaction(r.compaction as Record<string, unknown>);
 		}
 	}
+	const localServers = sanitizeLocalServers(r.localServers);
+	if (localServers) out.localServers = localServers;
 	// Unknown top-level keys ride along untouched (forward-compat). One
 	// known-DEAD key is stripped instead of riding: `chat` (the old
 	// default-settings section) died with per-session models (owner,
 	// 2026-09-28) — a fossil copy on disk must never resurrect through
 	// reads (and any later write flushes it from the file for good).
+	// `localServers` is skipped too: it was sanitized above, and an entry
+	// list with nothing valid left must not ride back in raw.
 	for (const [key, value] of Object.entries(r)) {
-		if (key === "chat") continue;
+		if (key === "chat" || key === "localServers") continue;
 		if (!(key in out)) out[key] = value;
 	}
 	return out;

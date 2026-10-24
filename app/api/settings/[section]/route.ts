@@ -38,6 +38,7 @@ import {
 	effectiveSettings,
 	promptOverrides,
 	readSettingsRecord,
+	refreshLocalServers,
 	validateChatSettings,
 	validateModelsSettings,
 	writeSettingsRecord,
@@ -66,7 +67,10 @@ export async function PUT(request: Request, ctx: { params: Promise<{ section: st
 	let agentHealed: AgentSettings | undefined;
 
 	// Section-specific cross-validation (against the catalog / the prompt
-	// store) — the parsers only see shapes.
+	// store) — the parsers only see shapes. A local server never asked in
+	// this process is asked first (local-models wave): the clamp below
+	// must see its models' real thinking support, not the bare fallback.
+	if (section === "chat" || section === "models") await refreshLocalServers({ maxAgeMs: Infinity });
 	if (section === "chat") {
 		const verdict = validateChatSettings(parsed.settings as ChatSettings);
 		if (!verdict.ok) {

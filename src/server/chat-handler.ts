@@ -27,6 +27,7 @@ import { providerEventNote } from "../agent/provider-events.ts";
 import { effectiveSettings, stores } from "./stores.ts";
 import { searchAvailable, searchProvider } from "./search.ts";
 import { providerKeyPresent } from "./keys.ts";
+import { ensureLocalServerDiscovered } from "./local-servers.ts";
 import {
 	extractionEnabled,
 	graphToolsEnabled,
@@ -206,6 +207,11 @@ export async function handleChatInput(
 		console.info(`[chat ${chatId}] turn refused — ${JSON.stringify(envelope)}`);
 		return Response.json(envelope, { status: 503 });
 	}
+
+	// LOCAL SERVERS (local-models wave, 2026-10-24): a cold process has
+	// registered the server but never asked it for its models — learn the
+	// real context window before compaction and max-token math read it.
+	await ensureLocalServerDiscovered(conversation.provider);
 
 	// THE COMPACTION GATE (owner round 14, 2026-10-05 — the structural
 	// ruling: NOTHING model-facing for this chat interleaves with a

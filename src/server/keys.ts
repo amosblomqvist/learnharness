@@ -48,9 +48,11 @@ import {
 	genericProviderKeyGuard,
 	isKnownAuthKey,
 	isProviderEnvVar,
+	localServerKeyGuard,
 	maskKey,
 	validateKeyShape,
 } from "../core/auth-keys.ts";
+import { isLocalServerKeyVar } from "../core/local-servers.ts";
 import { authStore } from "../store/auth.ts";
 
 // The once-per-process boot record — globalThis anchor (HMR re-imports the
@@ -72,7 +74,9 @@ function boot(): AuthBoot {
 }
 
 /** Is `id` a WRITABLE key name — curated catalog or model-provider env
- *  var (provider-keys interlude: PUT/DELETE accept both). */
+ *  var (provider-keys interlude: PUT/DELETE accept both). Local server
+ *  keys are deliberately NOT: only the local-servers composition writes
+ *  them, alongside the server they belong to (src/server/local-servers.ts). */
 export function isWritableAuthKey(id: string): boolean {
 	return isKnownAuthKey(id) || isProviderEnvVar(id);
 }
@@ -211,7 +215,11 @@ export function providerKeyPresent(provider: string): boolean {
  * reports shadowedByEnv so the page can explain it).
  */
 export function saveKey(id: string, value: string): { ok: true; status: AuthKeyStatus } | { ok: false; error: string } {
-	const shape = isProviderEnvVar(id) ? genericProviderKeyGuard(id, value) : validateKeyShape(id, value);
+	const shape = isProviderEnvVar(id)
+		? genericProviderKeyGuard(id, value)
+		: isLocalServerKeyVar(id)
+			? localServerKeyGuard(id, value)
+			: validateKeyShape(id, value);
 	if (!shape.ok) return { ok: false, error: shape.error };
 	const trimmed = value.trim();
 	authStore.setAuthVar(id, trimmed);

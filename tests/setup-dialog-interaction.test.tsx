@@ -175,7 +175,26 @@ describe("setup polish interactions", () => {
 	it("the empty vision list gives the approved next action without an em dash", async () => {
 		await mount({ keyed: true });
 		await click(element('[data-testid="setup-trigger-vision"]'));
-		assert.ok(element('[data-testid="setup-menu-vision"]').textContent?.includes("No image-capable models. Add a provider key with access to a vision model."));
+		assert.ok(element('[data-testid="setup-menu-vision"]').textContent?.includes("No image-capable models. Add a provider key with access to a vision model, or connect a local one."));
+	});
+
+	it("the first screen offers two model sources; the local tab is the connect form, opened without a request", async () => {
+		await mount();
+		assert.equal(element('[data-testid="setup-tab-keys"]').getAttribute("aria-selected"), "true");
+		assert.equal(element('[data-testid="setup-tab-keys"]').textContent, "Provider API keys");
+		assert.equal(element('[data-testid="setup-tab-local"]').textContent, "Local model");
+		assert.ok(document.querySelector('[data-testid="setup-stage-keys"]'));
+		await click(element('[data-testid="setup-tab-local"]'));
+		assert.equal(document.querySelector('[data-testid="setup-stage-keys"]'), null);
+		assert.ok(document.querySelector('[data-testid="setup-stage-local"]'));
+		for (const field of ["address", "api", "key", "context", "vision", "connect"]) {
+			assert.ok(document.querySelector(`[data-testid="setup-local-${field}"]`), field);
+		}
+		await click(element('[data-testid="setup-local-preset-ollama"]'));
+		assert.equal((element('[data-testid="setup-local-address"]') as HTMLInputElement).value, "localhost:11434");
+		await click(element('[data-testid="setup-tab-keys"]'));
+		assert.ok(document.querySelector('[data-testid="setup-stage-keys"]'));
+		assert.equal(closed, 0);
 	});
 
 	it("catalog failure uses the approved two-sentence error", async () => {

@@ -20,6 +20,7 @@ import {
 } from "../components/settings/agent-section.tsx";
 import { nextOverrides } from "../components/settings/keyboard-section.tsx";
 import { classifyKeys, keyStatusLine, type ProviderKeyInfo } from "../components/settings/keys-section.tsx";
+import { localServerBody, localServerStatusLine, type LocalServerFields } from "../components/settings/local-servers.tsx";
 import type { AgentSettings, AuthKeyStatus, ModelsSettings } from "../src/core";
 import { slotsConfigured } from "../src/core";
 import { setupStage } from "../components/setup-dialog.tsx";
@@ -268,6 +269,62 @@ describe("classifyKeys — the Keys section's two-group projection", () => {
 	it("providers seam absent = addable empty, nothing crashes", () => {
 		const out = classifyKeys([], undefined);
 		assert.deepEqual(out.addable, []);
+	});
+
+	it("a local server's key belongs to its server row — never a provider or unknown row", () => {
+		const out = classifyKeys([synth("LOCAL_SERVER_OLLAMA_API_KEY", true)], providers);
+		assert.equal(out.providerRows.length, 0);
+		assert.equal(out.unknownRows.length, 0);
+		assert.equal(classifyKeys([synth("LOCAL_SERVER_VLLM_2_API_KEY", true)], undefined).providerRows.length, 0);
+	});
+});
+
+describe("the local server form's pure seams (local-models wave)", () => {
+	const fields: LocalServerFields = {
+		address: " localhost:11434 ",
+		api: "openai-completions",
+		apiKey: "",
+		forgetKey: false,
+		contextWindow: "",
+		vision: "auto",
+		models: "",
+	};
+
+	it("a new server sends only what was given", () => {
+		assert.deepEqual(localServerBody(fields), { ok: true, body: { address: "localhost:11434", api: "openai-completions" } });
+		assert.deepEqual(localServerBody({ ...fields, apiKey: " tok ", contextWindow: "16384", vision: "yes" }), {
+			ok: true,
+			body: { address: "localhost:11434", api: "openai-completions", apiKey: "tok", contextWindow: 16384, vision: true },
+		});
+	});
+
+	it("an edit sends cleared overrides as null, a forgotten key as null, an untouched key not at all", () => {
+		assert.deepEqual(localServerBody({ ...fields, forgetKey: true }, "ollama"), {
+			ok: true,
+			body: { address: "localhost:11434", api: "openai-completions", id: "ollama", apiKey: null, contextWindow: null, vision: null, models: null },
+		});
+		const kept = localServerBody({ ...fields, vision: "no" }, "ollama");
+		assert.ok(kept.ok && !("apiKey" in kept.body) && kept.body.vision === false);
+	});
+
+	it("named model ids: comma/space separated, deduped; empty = the server's list", () => {
+		const named = localServerBody({ ...fields, models: " my-model, other-model  my-model\nthird " });
+		assert.ok(named.ok);
+		assert.deepEqual(named.body.models, ["my-model", "other-model", "third"]);
+	});
+
+	it("a context window that is not a whole number above the floor never leaves the form", () => {
+		assert.equal(localServerBody({ ...fields, contextWindow: "8k" }).ok, false);
+		assert.equal(localServerBody({ ...fields, contextWindow: "100" }).ok, false);
+	});
+
+	it("the row's status line", () => {
+		const model = { id: "m", contextWindow: 8192, vision: false, reasoning: false };
+		assert.equal(localServerStatusLine(null), "not checked");
+		assert.equal(localServerStatusLine({ ok: true, engine: "ollama", models: [model], hidden: [], checkedAt: 1 }), "1 model");
+		assert.equal(localServerStatusLine({ ok: true, engine: null, models: [model, model], hidden: [], checkedAt: 1 }), "2 models");
+		assert.equal(localServerStatusLine({ ok: false, engine: null, models: [], hidden: [], error: "x", checkedAt: 1 }), "unreachable");
+		assert.equal(localServerStatusLine({ ok: false, engine: null, models: [model], hidden: [], error: "x", checkedAt: 1 }), "unreachable · 1 known");
 	});
 });
 

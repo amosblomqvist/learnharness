@@ -43,3 +43,6 @@ export * from "./compaction.ts";
 export { runPiTurn, piTurnResponse, type PiTurnHandle, type PiTurnSpec } from "./pi/ui-stream.ts";
 export * from "./observability.ts";
 export * from "./model-catalog.ts";
+// Local model servers (local-models wave, 2026-10-24): importing this
+// registers every configured server as an engine provider.
+export * from "./local-servers.ts";

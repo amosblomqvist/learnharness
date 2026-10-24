@@ -19,7 +19,10 @@
  *     saving dispatches the "keys" signal, the fetch effect re-runs on
  *     it, and the stage flips to the pickers on its own. No Settings
  *     round-trip anymore; the draft lives in the caller's state,
- *     untouched throughout.
+ *     untouched throughout. Two tabs (local-models wave, owner
+ *     2026-10-24): "Provider API keys" (the above) and "Local model" —
+ *     the local-server connect form, which lands through the same
+ *     "keys" signal: a connected server is a model source like a key.
  *   Stage 2 — Strong → Cheap → Vision pickers over the FEDERATED catalog
  *     (keyed providers only), the vision slot filtered to image-capable
  *     models, in the app's shared dropdown language (ModelMenuList).
@@ -46,6 +49,7 @@ import { type ProviderKeyInfo } from "@/components/settings/keys-section";
 import { ProviderMenuList } from "@/components/settings/model-menu";
 import { defaultOrderLevel, populateLevel, THINKING_LABEL } from "@/components/thinking-default";
 import { ThinkingMenuList } from "@/components/settings/model-menu";
+import { LocalServerForm } from "@/components/settings/local-servers";
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 
 /** The pickers' slot identity — same roster language as the Agent
@@ -215,6 +219,55 @@ export function SetupKeysBody({
 	);
 }
 
+/** Stage 1's two model sources (local-models wave, owner 2026-10-24): a
+ *  hosted provider's API key, or a model server of your own. */
+export type SetupSource = "keys" | "local";
+
+const SOURCE_TABS: readonly { id: SetupSource; label: string }[] = [
+	{ id: "keys", label: "Provider API keys" },
+	{ id: "local", label: "Local model" },
+];
+
+export function SetupSourceTabs({ tab, onTab }: { tab: SetupSource; onTab: (tab: SetupSource) => void }) {
+	return (
+		<div role="tablist" aria-label="Model source" className="mx-6 flex gap-4 border-b border-border">
+			{SOURCE_TABS.map((t) => (
+				<button
+					key={t.id}
+					type="button"
+					role="tab"
+					aria-selected={tab === t.id}
+					data-testid={`setup-tab-${t.id}`}
+					onClick={() => onTab(t.id)}
+					className={`-mb-px border-b-2 pb-2 font-ui text-xs transition-colors ${
+						tab === t.id
+							? "border-foreground text-foreground"
+							: "border-transparent text-muted-foreground hover:text-foreground"
+					}`}
+				>
+					{t.label}
+				</button>
+			))}
+		</div>
+	);
+}
+
+/** Stage 1's local tab: the shared connect form. A successful connect
+ *  dispatches the "keys" signal (the form does), the fetch effect re-runs,
+ *  and the stage flips to the pickers with the server's models — the same
+ *  path a saved key takes. */
+export function SetupLocalBody() {
+	return (
+		<div className="flex flex-col gap-3 px-6 py-5" data-testid="setup-stage-local">
+			<p className="text-sm text-foreground">Connect a local model.</p>
+			<p className="text-xs text-muted-foreground">
+				Point LearnHarness at the server running your models — Ollama, llama.cpp, vLLM, LM Studio, or any compatible server. You’ll pick your models next.
+			</p>
+			<LocalServerForm testid="setup-local" />
+		</div>
+	);
+}
+
 export function SetupDialog({
 	open,
 	onClose,
@@ -246,6 +299,9 @@ export function SetupDialog({
 	const [keySaving, setKeySaving] = useState(false);
 	const [keyError, setKeyError] = useState<string | null>(null);
 	const [keyMenuOpen, setKeyMenuOpen] = useState(false);
+	// Stage 1's model source (local-models wave): a hosted provider's key or
+	// a local server — either one flips the stage to the pickers.
+	const [sourceTab, setSourceTab] = useState<SetupSource>("keys");
 	// Stage 1's provider-picker trigger wrapper — the shared shell's anchor.
 	// Declared with the other hooks: the early `if (!open) return null` sits
 	// below them all. (Stage 2's slot menus anchor by anchorTestid instead —
@@ -422,29 +478,36 @@ export function SetupDialog({
 				</header>
 
 				{stage === "keys" ? (
-					<div className="flex flex-col px-6 py-5">
+					<div className="flex flex-col overflow-y-auto pt-4">
 						{failed ? (
-							<p className="text-sm text-foreground">
+							<p className="px-6 text-sm text-foreground">
 								Model catalog could not be loaded. Check the connection and retry.
 							</p>
 						) : (
-							<SetupKeysBody
-								providers={keyProviders}
-								provider={keyProvider}
-								value={keyValue}
-								saving={keySaving}
-								error={keyError}
-								menuOpen={keyMenuOpen}
-								menuAnchor={keyTriggerRef}
-								onToggleMenu={() => setKeyMenuOpen((v) => !v)}
-								onPick={(p) => {
-									setKeyProvider(p);
-									setKeyMenuOpen(false);
-									setKeyError(null);
-								}}
-								onValue={setKeyValue}
-								onSave={() => void saveKey()}
-							/>
+							<>
+								<SetupSourceTabs tab={sourceTab} onTab={setSourceTab} />
+								{sourceTab === "keys" ? (
+									<SetupKeysBody
+										providers={keyProviders}
+										provider={keyProvider}
+										value={keyValue}
+										saving={keySaving}
+										error={keyError}
+										menuOpen={keyMenuOpen}
+										menuAnchor={keyTriggerRef}
+										onToggleMenu={() => setKeyMenuOpen((v) => !v)}
+										onPick={(p) => {
+											setKeyProvider(p);
+											setKeyMenuOpen(false);
+											setKeyError(null);
+										}}
+										onValue={setKeyValue}
+										onSave={() => void saveKey()}
+									/>
+								) : (
+									<SetupLocalBody />
+								)}
+							</>
 						)}
 					</div>
 				) : (
@@ -482,7 +545,7 @@ export function SetupDialog({
 												onClick={() => setOpenMenu(openMenu?.slot === slot && openMenu.kind === "model" ? null : { slot, kind: "model" })}
 												className="flex h-7 min-w-40 w-full items-center gap-1 rounded-sm border border-border bg-background px-1.5 font-ui text-xs text-foreground transition-colors hover:border-muted-foreground/50"
 											>
-												<span className="min-w-0 flex-1 truncate">{entry ? prettyModel(entry.id) : "Pick a model…"}</span>
+												<span className="min-w-0 flex-1 truncate">{entry ? prettyModel(`${entry.provider}:${entry.id}`) : "Pick a model…"}</span>
 												<span aria-hidden className="text-muted-foreground">
 													▾
 												</span>
@@ -520,7 +583,7 @@ export function SetupDialog({
 															}));
 															setOpenMenu(null);
 														}}
-														footer={catalog && catalog.length === 0 ? "No image-capable models. Add a provider key with access to a vision model." : undefined}
+														footer={catalog && catalog.length === 0 ? "No image-capable models. Add a provider key with access to a vision model, or connect a local one." : undefined}
 													/>
 												</MenuShell>
 											)}

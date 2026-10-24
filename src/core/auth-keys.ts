@@ -177,6 +177,16 @@ export function genericProviderKeyGuard(id: string, rawValue: string): KeyShapeR
 	return { ok: false, error: `${id} must be at least 12 characters with no whitespace` };
 }
 
+/** The guard for a LOCAL SERVER's optional key (local-models wave): a
+ *  self-hosted server accepts whatever token it was started with (vLLM /
+ *  llama.cpp --api-key), so only paste hygiene applies — non-empty, no
+ *  whitespace, no length floor. */
+export function localServerKeyGuard(id: string, rawValue: string): KeyShapeResult {
+	const value = rawValue.trim();
+	if (value.length > 0 && !/\s/.test(value)) return { ok: true };
+	return { ok: false, error: `${id} must be non-empty with no whitespace` };
+}
+
 /** A masked key never leaves the server as plaintext (owner decision:
  *  last 4 chars + length — enough to identify which key is stored after
  *  rotating between several, and to spot a mis-pasted family). */

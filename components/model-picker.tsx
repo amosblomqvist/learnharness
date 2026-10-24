@@ -341,7 +341,7 @@ export function ModelControl({ chatId }: { chatId?: string }) {
 				// graph no longer bleeds through these pills.
 				className="flex items-center gap-1.5 rounded-full border bg-card/85 px-2.5 py-1 shadow-lg backdrop-blur transition-colors hover:border-border hover:bg-muted"
 			>
-				<span className="text-card-foreground">{effectiveId ? prettyModel(effectiveId) : "—"}</span>
+				<span className="text-card-foreground">{effectiveId ? prettyModel(`${effectiveProvider}:${effectiveId}`) : "—"}</span>
 				<span aria-hidden className="text-xs text-muted-foreground">▾</span>
 			</button>
 			</Hint>
@@ -416,7 +416,7 @@ export function ModelControl({ chatId }: { chatId?: string }) {
 						levels={catalog ? levels : []}
 						effectiveLevel={effectiveLevel}
 						onPick={(level) => apply(effectiveProvider ?? "", effectiveId ?? "", level as ThinkingLevel)}
-						empty={catalog ? (effectiveId ? `${prettyModel(effectiveId)} has no thinking levels.` : "Pick a model first.") : "Loading…"}
+						empty={catalog ? (effectiveId ? `${prettyModel(`${effectiveProvider}:${effectiveId}`)} has no thinking levels.` : "Pick a model first.") : "Loading…"}
 						footer="Levels this model actually supports"
 					/>
 					{error && <div className="mt-1 text-destructive">{error}</div>}
