@@ -42,6 +42,7 @@
 import {
 	AUTH_KEYS,
 	AUTH_PROVIDER_KEYS,
+	CUSTOM_PROVIDER_KEY,
 	AUTH_PROVIDER_ENV_VARS,
 	type AuthKeyInfo,
 	type AuthKeyStatus,
@@ -53,6 +54,7 @@ import {
 } from "../core/auth-keys.ts";
 import { authStore } from "../store/auth.ts";
 import { chatGPTConnected } from "../agent/chatgpt-bridge.ts";
+import { readEndpoint } from "../store/endpoint.ts";
 
 // The once-per-process boot record — globalThis anchor (HMR re-imports the
 // module; the snapshot must not re-run and misread fill-gapped vars as real
@@ -83,7 +85,12 @@ export function isWritableAuthKey(id: string): boolean {
  *  in core/auth-keys.ts and tests/auth-provider-keys.test.ts). Sorted by
  *  id for a stable payload. */
 export function providerKeyList() {
-	return [...AUTH_PROVIDER_KEYS].sort((a, b) => a.id.localeCompare(b.id));
+	// The custom endpoint joins the roster too (fork addition): its key is
+	// writable through the same seam, so it must also be shape-provable —
+	// but it is only OFFERED once an endpoint URL is saved (a key alone
+	// configures nothing). providerKeyPresent's absent-provider rule would
+	// otherwise let the Add dropdown mint a key with no URL behind it.
+	return [...AUTH_PROVIDER_KEYS, ...(readEndpoint().baseUrl ? [CUSTOM_PROVIDER_KEY] : [])].sort((a, b) => a.id.localeCompare(b.id));
 }
 
 /** The fresh-user switch (owner, interlude 2026-09-22): env keys are

@@ -50,6 +50,8 @@ Future teaching sessions can read the graph instead of starting from scratch. Pr
 
 Add your provider API key and choose your models, then start a session with what you want to understand. LearnHarness supports 30+ provider options, including OpenAI, Anthropic, Google, DeepSeek, and OpenRouter. Optional dictation and web search use separate service keys.
 
+**Custom endpoint (fork addition).** Settings → Providers → Custom endpoint takes any OpenAI-compatible base URL — your own LLM router, LiteLLM, vLLM, Ollama, or a gateway. Paste the URL and its key, hit Connect: the harness fetches `{base}/models`, and those models show up in every model picker as the "Custom endpoint" provider (slots, per-session, and the background roles). A wrong URL or key fails right there with the endpoint's own message and nothing is saved. The URL lives in `data/endpoint.json`, the key in the usual key store (env var `CUSTOM_ENDPOINT_API_KEY`).
+
 All three platforms support in-app updates.
 
 ## Your keys, your data

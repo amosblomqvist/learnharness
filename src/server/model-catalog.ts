@@ -42,7 +42,9 @@ import type {
 	SlotPins,
 } from "../core/contracts/models.ts";
 import type { EffectiveModelSpec, EffectiveSlot } from "../core/settings-resolution.ts";
-import { AUTH_PROVIDER_KEYS } from "../core/auth-keys.ts";
+import { AUTH_PROVIDER_KEYS, CUSTOM_PROVIDER_KEY } from "../core/auth-keys.ts";
+import { customEndpointConfigured } from "../agent/custom-endpoint.ts";
+import { readEndpoint } from "../store/endpoint.ts";
 import { BACKGROUND_MODEL_ROLES, MODEL_SLOTS, type BackgroundModelRole, type ModelSlotName, type ModelsSettings } from "../core/settings.ts";
 
 /** The picker's client-safe model entry (contract: core/contracts/models.ts). */
@@ -134,7 +136,13 @@ export function catalogProviders(): CatalogProvider[] {
 		id: p.id,
 		envVar: p.envVar,
 		keyPresent: keyValue(p.envVar) !== undefined,
-	})).concat([{ id: "chatgpt", envVar: "", keyPresent: chatGPTConnected() }]).sort((a, b) => a.id.localeCompare(b.id));
+	})).concat(
+		// The user's own endpoint (fork addition): federated only once a URL
+		// AND at least one discovered model exist — an unconfigured row would
+		// just be an empty provider in the picker.
+		customEndpointConfigured(readEndpoint()) ? [{ id: CUSTOM_PROVIDER_KEY.id, envVar: CUSTOM_PROVIDER_KEY.envVar, keyPresent: keyValue(CUSTOM_PROVIDER_KEY.envVar) !== undefined }] : [],
+		[{ id: "chatgpt", envVar: "", keyPresent: chatGPTConnected() }],
+	).sort((a, b) => a.id.localeCompare(b.id));
 }
 
 /** The providers whose key is present — the picker federates exactly

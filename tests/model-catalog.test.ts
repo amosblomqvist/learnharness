@@ -60,7 +60,10 @@ describe("the model catalog projection", () => {
 			assert.equal(typeof m.name, "string");
 			assert.ok(Array.isArray(m.supportedLevels));
 			assert.ok(typeof m.cost.input === "number" && typeof m.cost.output === "number");
-			assert.ok(m.contextWindow > 0);
+			// A custom-endpoint model (fork addition) reports an unknown
+			// window as 0 when its endpoint declares none — that is the
+			// honest usage-only meter, not a gap in pi's catalog.
+			if (m.provider !== "custom") assert.ok(m.contextWindow > 0);
 		}
 		const glm = models.find((m) => m.id === "z-ai/glm-5.3-flash");
 		assert.ok(glm, "glm-5.3-flash in catalog");

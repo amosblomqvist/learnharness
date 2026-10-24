@@ -8,12 +8,15 @@ import {
 	type StreamFunction,
 } from "@earendil-works/pi-ai";
 import { builtinProviders } from "@earendil-works/pi-ai/providers/all";
+import { createProvider, envApiKeyAuth } from "@earendil-works/pi-ai";
+import { openAICompletionsApi } from "@earendil-works/pi-ai/api/openai-completions.lazy";
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import { type ModelRole } from "../../config.ts";
 import { DEFAULT_THINKING_ORDER } from "../core/settings.ts";
 import packageMetadata from "../../package.json" with { type: "json" };
 import { chatGPTModel } from "./chatgpt-bridge.ts";
 import { chatGPTStream } from "./chatgpt-stream.ts";
+import { CUSTOM_ENDPOINT_KEY_VAR, CUSTOM_PROVIDER_ID, CUSTOM_PROVIDER_LABEL, currentEndpoint } from "./custom-endpoint.ts";
 import type { ChatGPTDispatchLifecycle } from "./chatgpt-request-cycle.ts";
 
 /** App identity is immutable and shared by Models and every native Agent.
@@ -61,7 +64,46 @@ export function piModels() {
 		collection = createModels({ identity: APP_IDENTITY });
 		for (const provider of builtinProviders()) collection.setProvider(provider);
 	}
+	// The user's own OpenAI-compatible endpoint (fork addition) is ALWAYS
+	// registered — the provider reads the live endpoint record per call, so
+	// saving, changing or clearing the URL on the settings page applies to
+	// the very next request with no restart and no re-registration (an
+	// empty record just lists no models).
+	collection.setProvider(customProvider());
 	return collection;
+}
+
+/**
+ * The `custom` provider: one user-configured base URL speaking the OpenAI
+ * chat-completions protocol (router / LiteLLM / vLLM / Ollama / gateway).
+ * Every model is a plain openai-completions model pinned to that base URL;
+ * unknown metadata takes pi's honest defaults (0 context = usage-only
+ * meter, no reasoning levels, zero cost) and the endpoint's own declared
+ * context window when it advertises one.
+ */
+function customProvider() {
+	const endpoint = currentEndpoint();
+	return createProvider({
+		id: CUSTOM_PROVIDER_ID,
+		name: CUSTOM_PROVIDER_LABEL,
+		baseUrl: endpoint.baseUrl || undefined,
+		auth: { apiKey: envApiKeyAuth(`${CUSTOM_PROVIDER_LABEL} API key`, [CUSTOM_ENDPOINT_KEY_VAR]) },
+		models: endpoint.baseUrl
+			? endpoint.models.map((m) => ({
+					id: m.id,
+					name: m.name,
+					api: "openai-completions" as const,
+					provider: CUSTOM_PROVIDER_ID,
+					baseUrl: endpoint.baseUrl,
+					input: (m.vision ? ["text", "image"] : ["text"]) as ("text" | "image")[],
+					cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+					reasoning: false,
+					contextWindow: m.contextWindow ?? 0,
+					maxTokens: Math.min(m.contextWindow ?? 8192, 8192),
+				}))
+			: [],
+		api: openAICompletionsApi(),
+	});
 }
 
 /** OpenRouter API key (BYOK); tests never read this — they inject engines. */

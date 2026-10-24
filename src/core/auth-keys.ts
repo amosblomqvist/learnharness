@@ -125,7 +125,20 @@ export const AUTH_PROVIDER_KEYS: readonly AuthProviderInfo[] = [
 /** Every distinct env var a model-provider key rides in (the write side's
  *  writability check — see isProviderEnvVar below; also drives which
  *  PRESENT provider vars surface as status rows). */
-export const AUTH_PROVIDER_ENV_VARS: ReadonlySet<string> = new Set(AUTH_PROVIDER_KEYS.map((p) => p.envVar));
+/**
+ * FORK ADDITION: the custom OpenAI-compatible endpoint's key. It has no
+ * pi-ai provider row behind it (the `custom` provider is user-defined, see
+ * src/agent/custom-endpoint.ts), so it is appended here by hand — the one
+ * deliberate exception to the no-drift pin, which derives builtin providers
+ * only (tests/auth-provider-keys.test.ts asserts this extra row exactly).
+ */
+export const CUSTOM_PROVIDER_KEY: AuthProviderInfo = {
+	id: "custom",
+	envVar: "CUSTOM_ENDPOINT_API_KEY",
+	label: "Custom endpoint",
+};
+
+export const AUTH_PROVIDER_ENV_VARS: ReadonlySet<string> = new Set([...AUTH_PROVIDER_KEYS.map((p) => p.envVar), CUSTOM_PROVIDER_KEY.envVar]);
 
 /** Is this env-var name the key of SOME pi-ai model provider? */
 export function isProviderEnvVar(envVar: string): boolean {

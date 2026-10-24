@@ -28,6 +28,7 @@ import { AUTH_KEYS, type AuthKeyStatus } from "@/src/core";
 import { SettingsGroup } from "./controls.tsx";
 import { ChatGPTConnection } from "./chatgpt-connection.tsx";
 import { ProviderMenuList } from "./model-menu.tsx";
+import { CustomEndpointSection } from "./custom-endpoint-section.tsx";
 import { MenuShell } from "@/components/menu-shell";
 import { notifySettingsSaved } from "@/components/settings-signal";
 
@@ -454,6 +455,8 @@ export function KeysSection({
 					</div>)}
 				</div>}
 			</SettingsGroup>
+
+			<CustomEndpointSection />
 
 			<SettingsGroup label="Subscriptions" testid="group-subscriptions">
 				<div data-testid="group-chatgpt"><ChatGPTConnection /></div>
