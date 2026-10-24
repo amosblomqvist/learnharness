@@ -15,7 +15,95 @@ function actionLabel(action: XaiSignInAction, phase: XaiSignInView["phase"]): st
 const buttonClass =
 	"shrink-0 rounded-sm border border-border bg-background px-3 py-1.5 font-ui text-xs text-foreground transition-colors hover:border-muted-foreground/50 disabled:cursor-not-allowed disabled:opacity-40";
 
-export function XaiSignInControl() {
+export const XAI_OAUTH_ROW_LABEL = "Xai Oauth";
+
+export type XaiSignInLayout = "stack" | "row";
+
+export function XaiSignInBody({
+	view,
+	busy,
+	layout,
+	onAction,
+}: {
+	view: XaiSignInView;
+	busy: boolean;
+	layout: XaiSignInLayout;
+	onAction: (action: XaiSignInAction) => void;
+}) {
+	const line = xaiSignInLine(view);
+	const buttons = (
+		<div className={layout === "row" ? "ml-auto flex flex-wrap justify-end gap-2" : "flex flex-wrap gap-2"}>
+			{view.actions.map((action) => (
+				<button
+					key={action}
+					type="button"
+					data-testid={`xai-sign-in-${action}`}
+					disabled={busy}
+					onClick={() => onAction(action)}
+					className={buttonClass}
+				>
+					{actionLabel(action, view.phase)}
+				</button>
+			))}
+		</div>
+	);
+	const detail = (
+		<>
+			{line ? (
+				<p data-testid="xai-sign-in-line" className="text-xs text-muted-foreground">
+					{line}
+				</p>
+			) : null}
+			{view.phase === "pending" ? (
+				<div className="flex flex-wrap items-center gap-2">
+					<code data-testid="xai-sign-in-code" className="font-mono text-xs text-foreground">
+						{view.userCode}
+					</code>
+					<button
+						type="button"
+						data-testid="xai-sign-in-copy"
+						className={buttonClass}
+						onClick={() => {
+							void navigator.clipboard.writeText(view.userCode).catch(() => {});
+						}}
+					>
+						Copy code
+					</button>
+					<a
+						data-testid="xai-sign-in-link"
+						href={view.verificationUri}
+						target="_blank"
+						rel="noopener noreferrer"
+						className="text-xs text-foreground underline"
+					>
+						Open the xAI page
+					</a>
+				</div>
+			) : null}
+		</>
+	);
+
+	if (layout === "row") {
+		return (
+			<div data-testid="xai-sign-in" className="flex flex-col gap-2 px-1 py-1.5">
+				<div className="flex flex-wrap items-center justify-between gap-3">
+					<span className="font-ui text-xs text-foreground">{XAI_OAUTH_ROW_LABEL}</span>
+					{buttons}
+				</div>
+				{detail}
+			</div>
+		);
+	}
+
+	return (
+		<div data-testid="xai-sign-in" className="flex flex-col gap-2 px-1 py-1.5">
+			{detail}
+			{buttons}
+		</div>
+	);
+}
+
+export function XaiSignInControl({ layout = "stack" }: { layout?: XaiSignInLayout }) {
 	const [view, setView] = useState<XaiSignInView | null>(null);
 	const [busy, setBusy] = useState(false);
 	const openedCode = useRef<string | null>(null);
@@ -71,54 +159,5 @@ export function XaiSignInControl() {
 	}
 
 	if (!view) return null;
-	const line = xaiSignInLine(view);
-	return (
-		<div data-testid="xai-sign-in" className="flex flex-col gap-2 px-1 py-1.5">
-			{line ? (
-				<p data-testid="xai-sign-in-line" className="text-xs text-muted-foreground">
-					{line}
-				</p>
-			) : null}
-			{view.phase === "pending" ? (
-				<div className="flex flex-wrap items-center gap-2">
-					<code data-testid="xai-sign-in-code" className="font-mono text-xs text-foreground">
-						{view.userCode}
-					</code>
-					<button
-						type="button"
-						data-testid="xai-sign-in-copy"
-						className={buttonClass}
-						onClick={() => {
-							void navigator.clipboard.writeText(view.userCode).catch(() => {});
-						}}
-					>
-						Copy code
-					</button>
-					<a
-						data-testid="xai-sign-in-link"
-						href={view.verificationUri}
-						target="_blank"
-						rel="noopener noreferrer"
-						className="text-xs text-foreground underline"
-					>
-						Open the xAI page
-					</a>
-				</div>
-			) : null}
-			<div className="flex flex-wrap gap-2">
-				{view.actions.map((action) => (
-					<button
-						key={action}
-						type="button"
-						data-testid={`xai-sign-in-${action}`}
-						disabled={busy}
-						onClick={() => void run(action)}
-						className={buttonClass}
-					>
-						{actionLabel(action, view.phase)}
-					</button>
-				))}
-			</div>
-		</div>
-	);
+	return <XaiSignInBody view={view} busy={busy} layout={layout} onAction={(action) => void run(action)} />;
 }

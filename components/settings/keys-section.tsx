@@ -432,6 +432,7 @@ export function KeysSection({
 						testid={`key-${status.id.toLowerCase()}`}
 					/>
 				))}
+				<XaiSignInControl layout="row" />
 				{providers !== undefined && (
 					<AddProviderRow
 						addable={addable}
@@ -447,7 +448,6 @@ export function KeysSection({
 						<AddProviderEditor provider={adding} onSave={(v) => void saveNewProvider(adding, v)} onCancel={() => setAdding(null)} error={addError} />
 					</div>
 				)}
-				<XaiSignInControl />
 			</SettingsGroup>
 
 			<SettingsGroup label="Tools & services" testid="group-tool-keys">
