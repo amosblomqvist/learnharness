@@ -47,8 +47,9 @@ import {
 import { PlanBlock, PlanPopup, latestTree } from "@/components/plan-block";
 import { PlanMarginalia, planExists } from "@/components/plan-window";
 import { MermaidOverlay, SessionMermaidContext } from "@/components/session-overlay";
-import { ImageLightbox } from "@/components/image-lightbox";
+import { useImageLightbox } from "@/components/image-lightbox";
 import { takeFirstMessage, useImageDraft } from "@/components/draft-images";
+import { UserMessageParts } from "@/components/user-message-parts";
 import { AbortTurnDialog, type AbortMode } from "@/components/abort-turn-dialog";
 import { ArrowRightIcon, DumbbellIcon, WaypointsIcon } from "lucide-react";
 import type { PlanBlockData } from "@/src/core";
@@ -81,7 +82,7 @@ import {
 import { ReadingThinkingField } from "@/components/reading-thinking";
 import { currentUserThinkingOpen, setAllUserThinkingOpen } from "@/components/thinking-block";
 import { slotsConfigured, type ModelsSettings } from "@/src/core";
-import { imageUrl, type DraftImage } from "@/src/core";
+import { MODEL_CANNOT_READ_IMAGES_CODE, wireImages, type DraftImage } from "@/src/core";
 import { useSettingsSaved } from "@/components/settings-signal";
 
 /** One width for everything: transcript, cards, and the bottom blob share this column. */
@@ -162,6 +163,19 @@ export function parseProviderKeyRefusal(message: string | undefined): boolean {
 		return body.code === "provider_key_missing" && typeof body.error === "string" && isProviderKeyRefusal(body.error);
 	} catch {
 		return false;
+	}
+}
+
+/** The image refusal's transport seam (composer paste): same discipline as
+ *  the two parsers above. Returns the server's own wording (it names the
+ *  model), or null for any other error. */
+function parseImageRefusal(message: string | undefined): string | null {
+	if (!message) return null;
+	try {
+		const body = JSON.parse(message) as { code?: unknown; error?: unknown };
+		return body.code === MODEL_CANNOT_READ_IMAGES_CODE && typeof body.error === "string" ? body.error : null;
+	} catch {
+		return null;
 	}
 }
 
@@ -248,28 +262,6 @@ export function Chat({
 
 	// The reattach settled terminal → the sync-and-continue seam (below).
 	setReattachSettled(() => reattachSettledRef.current());
-
-	/* THE IMAGE HANDOFF (composer paste): the draft and home surfaces create
-	 * the session, stash a first message that carried pictures (a URL cannot),
-	 * and push /chat/<id>. Take it ONCE, into the normal send path — so a
-	 * refusal restores the draft exactly like any other send. */
-	const tookStash = useRef(false);
-	useEffect(() => {
-		if (tookStash.current) return;
-		tookStash.current = true;
-		if (initialPrompt) return; // the ?prompt= path owns that first send
-		const stashed = takeFirstMessage(chatId);
-		if (!stashed) return;
-		draftRef.current = stashed.text;
-		draftImagesRef.current = stashed.images;
-		void send({
-			type: "text",
-			text: stashed.text,
-			...(stashed.images.length > 0
-				? { images: stashed.images.map(({ type, data, mimeType }) => ({ type, data, mimeType })) }
-				: {}),
-		});
-	}, [chatId, initialPrompt, send]);
 
 	// New chat with a topic: send the first message exactly once
 	// (initialPromptOwed — the pure gate, pinned in the test suite).
@@ -605,18 +597,35 @@ export function Chat({
 	/* The same preserve-and-replay seam for pasted images: a refused send puts
 	 * them back in the composer with the text. */
 	const draftImagesRef = useRef<DraftImage[]>([]);
-	/* THE COMPOSER'S IMAGE DRAFT (composer paste): the shared paste → validate
-	 * → read hook. Its own ref mirror is why a send that resumes after an
+	/* THE COMPOSER'S IMAGE DRAFT (composer paste): the shared paste, validate,
+	 * read hook. Its own ref mirror is why a send that resumes after an
 	 * await (dictation finish, image reads) still sees the live images. */
-	const {
-		images,
-		imagesRef,
-		error: imageError,
-		setError: setImageError,
-		addFiles: pasteImages,
-		apply: applyImages,
-		settle: settleImageReads,
-	} = useImageDraft();
+	const imageDraft = useImageDraft();
+	const lightbox = useImageLightbox();
+
+	/** ONE learner message out: remembers the draft for the refusal flow's
+	 *  restore, then sends text plus any pictures as one input event. */
+	const sendDraft = useCallback(
+		(text: string, images: readonly DraftImage[]) => {
+			draftRef.current = text;
+			draftImagesRef.current = [...images];
+			void send({ type: "text", text, ...(images.length > 0 ? { images: wireImages(images) } : {}) });
+		},
+		[send],
+	);
+
+	/* THE IMAGE HANDOFF (composer paste): home and the draft create the
+	 * session, stash a first message that carried pictures (a URL cannot),
+	 * and push /chat/<id>. Take it ONCE, into the normal send path, so a
+	 * refusal restores the draft exactly like any other send. */
+	const tookStash = useRef(false);
+	useEffect(() => {
+		if (tookStash.current) return;
+		tookStash.current = true;
+		if (initialPrompt) return; // the ?prompt= path owns that first send
+		const stashed = takeFirstMessage(chatId);
+		if (stashed) sendDraft(stashed.text, stashed.images);
+	}, [chatId, initialPrompt, sendDraft]);
 
 	// THE BYOK REFUSAL (owner, 2026-09-22): a send that lands the server's
 	// 503 models_not_configured envelope renders as the SETUP FLOW, never
@@ -634,7 +643,11 @@ export function Chat({
 		// provider key is gone gets the SAME treatment — revert-draft and
 		// open setup (the dialog derives to its first-key stage on its own).
 		const keyRefused = parseProviderKeyRefusal(error.message);
-		if (!missing && !keyRefused) return; // a real error keeps the honest banner
+		// The image twin (composer paste): the model cannot read pictures.
+		// Same revert-draft, but the reason shows on the draft strip, not
+		// the setup dialog (no setup step fixes it; a model swap does).
+		const imageRefusal = parseImageRefusal(error.message);
+		if (!missing && !keyRefused && !imageRefusal) return; // a real error keeps the honest banner
 		// ORDER MATTERS: clearError() flips this effect's own dep (`error`)
 		// and would cancel the in-flight work below — so the banner dismiss,
 		// the draft restore, and the dialog open all land TOGETHER after the
@@ -651,12 +664,12 @@ export function Chat({
 				applyText(draftRef.current);
 				draftRef.current = null;
 			}
-			if (draftImagesRef.current.length > 0) {
-				applyImages(draftImagesRef.current);
-				draftImagesRef.current = [];
-			}
+			// Merged, never replaced: pictures pasted since the send stay.
+			imageDraft.restore(draftImagesRef.current);
+			draftImagesRef.current = [];
 			clearError();
-			setSetupOpen(true);
+			if (imageRefusal) imageDraft.setError(imageRefusal);
+			else setSetupOpen(true);
 		})();
 		return () => {
 			cancelled = true;
@@ -724,7 +737,7 @@ export function Chat({
 	// affordance).
 	const [compacting, setCompacting] = useState(initiallyCompacting);
 	const canSend =
-		(text.trim().length > 0 || dictation.active || images.length > 0) && !pending && !activeProblem && !compacting;
+		(text.trim().length > 0 || dictation.active || imageDraft.hasImages) && !pending && !activeProblem && !compacting;
 
 	/* THE PRACTICE PAUSE (owner round 16): between problems — practice
 	 * kind, nothing active, nothing in flight, and at least one problem
@@ -869,10 +882,6 @@ export function Chat({
 	// overlay shell as mermaid, but carrying the raw svg + the card's invert
 	// state so the fullscreen view stays faithful to the toggled card.
 	const [figureFocus, setFigureFocus] = useState<{ svg: string; inverted: boolean } | null>(null);
-	// Image focus (composer image paste): a pasted picture — draft thumbnail or
-	// sent transcript image — opened over the session area. Same overlay shell
-	// as the diagram focuses (they claim Esc themselves: one Esc, one action).
-	const [imageFocus, setImageFocus] = useState<{ url: string; alt: string } | null>(null);
 
 	// Overlay mirrors for the layered-Esc gate (owner 2026-10-04): the
 	// lh:kbd-abort-turn handler reads these at EVENT time — declared here
@@ -1181,29 +1190,20 @@ export function Chat({
 		 * images have the same race (FileReader is async): settle those reads
 		 * before the same seam reads the drafts. */
 		if (!dictation.active) {
-			void settleImageReads().then(doSteerOrSend);
+			void imageDraft.settle().then(doSteerOrSend);
 			return;
 		}
-		void dictation.finish().then(settleImageReads).then(doSteerOrSend);
+		void dictation.finish().then(imageDraft.settle).then(doSteerOrSend);
 	};
 	const doSend = () => {
 		if (busy || pending || compacting) return;
 		const t = textRef.current.trim();
-		const imgs = imagesRef.current;
+		const imgs = imageDraft.imagesRef.current;
 		if (!t && imgs.length === 0) return;
-		draftRef.current = t; // the refusal flow's preserve-and-replay seam
-		draftImagesRef.current = imgs;
 		applyText("");
-		applyImages([]);
-		setImageError(null);
-		void send({
-			type: "text",
-			text: t,
-			// Only the native fields cross the wire — the draft's client id stays here.
-			...(imgs.length > 0
-				? { images: imgs.map(({ type, data, mimeType }) => ({ type, data, mimeType })) }
-				: {}),
-		});
+		imageDraft.apply([]);
+		imageDraft.setError(null);
+		sendDraft(t, imgs); // keeps the draft for the refusal flow's restore
 	};
 
 	/* STEER VS SEND (owner arc 2026-10-03): a send while a turn runs steers
@@ -1218,10 +1218,10 @@ export function Chat({
 	const doSteerOrSend = () => {
 		if (pending || compacting) return;
 		const t = textRef.current.trim();
-		const imgs = imagesRef.current;
+		const imgs = imageDraft.imagesRef.current;
 		if (!t && imgs.length === 0) return;
 		if (busy) {
-			// Images are NOT steerable (v1 — the steer event has no images). The
+			// Images are NOT steerable (v1, the steer event has no images). The
 			// draft waits for the turn to settle: send/Enter is a no-op rather
 			// than a drop, and never a Stop (an Enter must not abort a turn).
 			if (imgs.length > 0) return;
@@ -1496,30 +1496,7 @@ export function Chat({
 												    sits INSIDE the rail, same mono-xs register and same 1ch
 												    rail as the thinking rows — one quote geometry. */}
 												<div className="font-medium uppercase tracking-wide text-muted-foreground">You</div>
-												<div className="lh-prose whitespace-pre-wrap text-foreground">
-													{m.parts.filter((p) => p.type === "text").map((p) => p.text).join("\n")}
-												</div>
-												{/* Pasted images (image paste): the record's own order — the
-												    caption first, then the picture it is about. */}
-												{m.parts
-													.filter((p) => p.type === "image")
-													.map((p) => (
-														<button
-															key={p.id}
-															type="button"
-															data-testid="user-image"
-															onClick={() => setImageFocus({ url: String(p.url), alt: String(p.alt ?? "Pasted image") })}
-															aria-label="View pasted image in full"
-															className="my-1 block w-fit cursor-zoom-in"
-														>
-															{/* eslint-disable-next-line @next/next/no-img-element */}
-															<img
-																src={String(p.url)}
-																alt={String(p.alt ?? "Pasted image")}
-																className="max-h-64 w-auto rounded-[6px] border"
-															/>
-														</button>
-													))}
+												<UserMessageParts parts={m.parts} onOpenImage={lightbox.open} />
 											</div>
 									) : (
 									<Message from="assistant" className="max-w-full">
@@ -1722,11 +1699,7 @@ export function Chat({
 							busy={busy}
 							value={text}
 							onChange={applyText}
-							images={images}
-							onImagesChange={applyImages}
-							onPasteImages={pasteImages}
-							onOpenImage={(img) => setImageFocus({ url: imageUrl(img), alt: "Pasted image" })}
-							imageError={imageError}
+							imageDraft={{ ...imageDraft.props, onOpen: lightbox.open }}
 							inputRef={composerInputRef}
 							onSend={onSend}
 							onStop={abortInFlightTurn}
@@ -1771,9 +1744,7 @@ export function Chat({
 						onClose={() => setFigureFocus(null)}
 					/>
 				)}
-				{imageFocus !== null && (
-					<ImageLightbox url={imageFocus.url} alt={imageFocus.alt} onClose={() => setImageFocus(null)} />
-				)}
+				{lightbox.lightbox}
 				{planOpen && <PlanPopup messages={messages} onClose={() => setPlanOpen(false)} />}
 				<AbortTurnDialog mode={abortAsk} onClose={() => setAbortAsk(null)} onConfirm={confirmAbort} busy={busy} />
 				</div>

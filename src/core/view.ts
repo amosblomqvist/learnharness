@@ -32,7 +32,7 @@
  * Pure and deterministic: client-safe (no node deps), same input → same view.
  */
 
-import type { AssistantMessage, ToolResultMessage } from "@earendil-works/pi-ai";
+import type { AssistantMessage, ImageContent, ToolResultMessage, UserMessage } from "@earendil-works/pi-ai";
 import type { LhMarkerMessage, LhMessage } from "./native-messages.ts";
 import { modelSolutionForConclude, PRACTICE_CONCLUDE_TOOL, problemInputForConclude } from "./native-messages.ts";
 import { activeCompactionOf, type CompactionDetails } from "./compaction.ts";
@@ -95,6 +95,13 @@ export interface LiveTurnState {
 
 function textPart(text: string): LhViewPart {
 	return { type: "text", text, state: "done" };
+}
+
+/** Alt text for a learner's pasted picture (the transcript knows no more). */
+const PASTED_ALT = "Pasted from the clipboard";
+
+function imagePart(image: ImageContent, id: string): LhViewPart {
+	return { type: "image", id, url: imageUrl(image), alt: PASTED_ALT };
 }
 
 /** The result a tool part should show, from a native toolResult. */
@@ -172,29 +179,14 @@ export function projectView(messages: readonly LhMessage[], live?: LiveTurnState
 		}
 
 		if (role === "user") {
-			const content = m.content as
-				| string
-				| Array<{ type: string; text?: string; data?: string; mimeType?: string }>;
-			if (typeof content === "string") {
-				out.push({ id: m.id, role: "user", parts: [textPart(content)] });
-				continue;
-			}
-			// Pasted images (images.ts): keep the block ORDER — the learner's
-			// picture and its caption read as they were sent. Only these two
-			// block kinds ever appear on a user message.
-			const userParts: LhViewPart[] = [];
-			content.forEach((c, i) => {
-				if (c.type === "text") userParts.push(textPart(c.text ?? ""));
-				else if (c.type === "image" && c.data && c.mimeType) {
-					userParts.push({
-						type: "image",
-						id: `${m.id}-i${i}`,
-						url: imageUrl({ type: "image", data: c.data, mimeType: c.mimeType }),
-						alt: "Pasted image",
-					});
-				}
-			});
-			out.push({ id: m.id, role: "user", parts: userParts });
+			// Pasted images (images.ts) keep the block ORDER: the picture and
+			// its caption read as they were sent.
+			const content = (m as UserMessage).content;
+			const blocks = typeof content === "string" ? [{ type: "text" as const, text: content }] : content;
+			const parts = blocks.map((c, i) =>
+				c.type === "text" ? { ...textPart(c.text), id: `${m.id}-t${i}` } : imagePart(c, `${m.id}-i${i}`),
+			);
+			out.push({ id: m.id, role: "user", parts });
 			continue;
 		}
 

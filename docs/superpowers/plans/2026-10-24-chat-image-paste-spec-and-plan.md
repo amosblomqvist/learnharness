@@ -9,12 +9,15 @@ This document follows the /to-spec template. The user requested a local Markdown
 
 Owner instruction ("create a new branch and make the changes") resolved the gates below to the MINIMUM scope. What ships on `feat/composer-image-paste`:
 
-- **Surface:** all three sending surfaces — home, the `/chat/new` draft, and a live session (teach and practice). A first message that carries images cannot ride `?prompt=`, so the draft surfaces create the session and hand the pictures to the chat page in memory (draft-images.ts), which delivers them through the normal send path (refusal restore included). Active-turn steering still takes no images: a draft holding one waits for the turn to settle (the send is a no-op, and Enter never aborts the turn).
+- **Surface:** all three sending surfaces: home, the `/chat/new` draft, and a live session (teach and practice). A first message that carries images cannot ride `?prompt=`, so the draft surfaces create the session and hand the pictures to the chat page in memory (draft-images.ts), which delivers them through the normal send path (refusal restore included). Active-turn steering still takes no images: a draft holding one waits for the turn to settle (the send is a no-op, and Enter never aborts the turn).
 - **Storage:** bounded inline base64 inside the native user message (no attachment store).
 - **Limits:** PNG, JPEG, WebP or GIF; 4 images; 5 MB per image; 10 MB per message. The client refuses early and the server re-validates and answers 400 before the write-ahead appends anything.
 - **Draft UX:** thumbnails above the input, a cross at the thumbnail's TOP-RIGHT removes one, and CLICKING a thumbnail (or a sent image) opens it full size in a session-scoped lightbox (Esc or backdrop closes). One-line inline refusal for a bad paste. A caption is optional.
-- **Tests:** the browser suite `tests/e2e/image-paste.e2e.mjs` (`npm run test:e2e`, real Next server + Chrome) is the acceptance gate for the composer UX. The protocol and storage seams keep focused coverage in `tests/image-paste.test.ts` and the handler cases in `tests/chat-flow.test.ts`.
-- **Known limits:** the compaction estimator counts no tokens for images (summaries name them, never inline them); the markdown export renders no images; a text-only model surfaces the provider's own error.
+- **Content check:** the server (and the composer, with the same core function) reads each image's leading bytes and refuses a file whose real format does not match its declared type.
+- **Model capability:** a NEW picture is refused (422, `model_cannot_read_images`) before any append when the conversation model cannot read images; the composer gets the draft back with the reason. Pictures already in the history need no gate: pi-ai replaces them with a text placeholder for a text-only model, so a later model change keeps the session usable.
+- **Image-only title:** a session born from a picture with no words is titled "Pasted image" (implementer's call, after "fix all findings"; change `IMAGE_ONLY_TITLE` to adjust).
+- **Tests:** browser end-to-end only (`tests/e2e/image-paste.e2e.mjs`, `npm run test:e2e`, real Next server + Chrome), per the owner's "e2e instead of unit tests". It covers the Review Focus cases: refused-send restore that keeps newer pastes, the 409 retry with no second copy, and the paste-then-Enter race.
+- **Known limits:** the compaction estimator counts no tokens for images (summaries name them, never inline them); the markdown export renders no images.
 
 # Part 1: Specification
 

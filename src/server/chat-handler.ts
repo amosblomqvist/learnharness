@@ -48,6 +48,7 @@ import { composeInstructions } from "../agent/teacher-agent.ts";
 import { ensureCompacted, kickCompaction, effectiveThresholdTokens } from "./compaction.ts";
 import { catalogContextLimits, refreshConnectionCatalog } from "./model-catalog.ts";
 import { emit } from "../core/events.ts";
+import { MODEL_CANNOT_READ_IMAGES_CODE } from "../core/images.ts";
 import { settledTurnResponse } from "./turn-runs.ts";
 import { asAgentMessages } from "../core/native-messages.ts";
 import {
@@ -237,6 +238,17 @@ export async function handleChatInput(
 	let conversationEngine: PiEngine;
 	try { conversationEngine = piEngineForSpec(conversation, () => callPurpose.background, lifecycle); }
 	catch { return Response.json({ error: conversation.provider === "chatgpt" ? chatGPTStreamError("model catalog") : "The selected model is unavailable." }, { status: 503 }); }
+	// THE IMAGE GATE (composer paste): a NEW picture is refused, before any
+	// append, when the conversation model cannot read images. Pictures
+	// already in the history need no gate: pi-ai downgrades them to a text
+	// placeholder for a text-only model (transform-messages), so a later
+	// model change keeps the session usable.
+	if (input.type === "text" && input.images && input.images.length > 0 && !conversationEngine.model.input.includes("image")) {
+		return Response.json(
+			{ error: `${conversationEngine.model.name ?? conversationEngine.model.id} cannot read images. Pick a model that can, or send text only.`, code: MODEL_CANNOT_READ_IMAGES_CODE },
+			{ status: 422 },
+		);
+	}
 	const modelIdForCompaction = `${conversationEngine.model.provider}:${conversationEngine.model.id}`;
 	await ensureCompacted(
 		{

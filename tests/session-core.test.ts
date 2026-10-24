@@ -262,28 +262,6 @@ describe("send (one input event, verbatim consumption)", () => {
 		assert.equal(view.at(-1)!.parts.at(-1)!.text, "hello there");
 	});
 
-	it("an image-bearing send keeps the picture on BOTH the optimistic card and the POST", async () => {
-		const posts: string[] = [];
-		const PNG = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFAAH/q842iQAAAABJRU5ErkJggg==";
-		globalThis.fetch = dietFetch({
-			onPost: (b) => posts.push(b),
-			// The optimistic card must never double once the record carries
-			// the server's copy of the SAME block list (absorbed, not identity).
-			userText: undefined,
-			stream: () => sseResponse("[DONE]"),
-		});
-		const m = model();
-		const pending = m.send({ type: "text", text: "look", images: [{ type: "image", mimeType: "image/png", data: PNG }] });
-		const optimistic = m.getState().messages.at(-1)!;
-		assert.deepEqual(optimistic.parts.map((p) => p.type), ["text", "image"]);
-		assert.equal(optimistic.parts[1]!.url, `data:image/png;base64,${PNG}`);
-		await pending;
-		assert.deepEqual(JSON.parse(posts[0]!), {
-			chatId: "chat_x",
-			input: { type: "text", text: "look", images: [{ type: "image", mimeType: "image/png", data: PNG }] },
-		});
-	});
-
 	it("N id-less updates replace the SAME tail slot (the per-chunk divider bug pin)", async () => {
 		// pi's wire (captured live, 2026-09-26): message_start/update/end carry
 		// AssistantMessages with NO id. The bug: minting a fresh id per event

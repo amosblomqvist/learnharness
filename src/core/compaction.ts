@@ -295,7 +295,7 @@ export function keptIndexFor(messages: readonly LhMessage[], marker: LhMarkerMes
 /** A learner message as summary text: the words, with pasted images NAMED.
  *  User content is a native block array once an image rides (images.ts), so
  *  plain interpolation would have summarized it as "[object Object]". The
- *  base64 never enters the summary — it costs tokens and says nothing. */
+ *  base64 never enters the summary, it costs tokens and says nothing. */
 function userSummaryText(content: unknown): string {
 	if (typeof content === "string") return content;
 	if (!Array.isArray(content)) return "";

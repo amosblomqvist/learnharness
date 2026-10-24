@@ -125,7 +125,7 @@ export function absorbed(m: LhMessage, record: readonly LhMessage[]): boolean {
 	if (role === "user") {
 		const content = (m as { content?: unknown }).content;
 		return record.some(
-			(r) => (r as { role?: string }).role === "user" && sameContent((r as { content?: unknown }).content, content),
+			(r) => (r as { role?: string }).role === "user" && sameJson((r as { content?: unknown }).content, content),
 		);
 	}
 	if (role === "toolResult") {
@@ -148,23 +148,17 @@ export function absorbed(m: LhMessage, record: readonly LhMessage[]): boolean {
 			(r) =>
 				(r as { role?: string }).role === "custom" &&
 				(r as LhMarkerMessage).customType === marker.customType &&
-				sameDetails((r as LhMarkerMessage).details, marker.details),
+				sameJson((r as LhMarkerMessage).details, marker.details),
 		);
 	}
 	return false;
 }
 
-/** Structural deep-equal for marker details (JSON-stable payloads — the
+/** Structural deep-equal for JSON-stable payloads (marker details, and user
+ *  content, which is a string or, with pasted images, a block array: the
  *  constructors mint plain data). */
-function sameDetails(a: unknown, b: unknown): boolean {
+function sameJson(a: unknown, b: unknown): boolean {
 	return JSON.stringify(a) === JSON.stringify(b);
-}
-
-/** Message content identity: plain strings compare directly; an image-bearing
- *  user message carries a native block ARRAY (image paste), so it compares
- *  structurally — the server's write-ahead copy is the same plain data. */
-function sameContent(a: unknown, b: unknown): boolean {
-	return a === b || (Array.isArray(a) && Array.isArray(b) && sameDetails(a, b));
 }
 
 export interface SessionState {
