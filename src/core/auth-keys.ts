@@ -132,6 +132,42 @@ export function isProviderEnvVar(envVar: string): boolean {
 	return AUTH_PROVIDER_ENV_VARS.has(envVar);
 }
 
+/**
+ * OLLAMA (local-models wave, owner 2026-10-25): one server, reached by a
+ * base URL plus an OPTIONAL bearer key. Both ride the same flat auth.json
+ * map + env seam as every other key (env wins; the agent layer reads them
+ * from process.env). Ollama stays OFF until a URL is saved — the default
+ * below only pre-fills the settings field. Not in AUTH_PROVIDER_KEYS: that
+ * table is pinned to pi-ai's plain-key providers, and Ollama is not one.
+ * The names avoid OLLAMA_HOST, which the Ollama server reads as its bind
+ * address.
+ */
+export const OLLAMA_URL_VAR = "OLLAMA_BASE_URL";
+export const OLLAMA_KEY_VAR = "OLLAMA_API_KEY";
+export const OLLAMA_DEFAULT_URL = "http://localhost:11434";
+export const OLLAMA_VARS: readonly string[] = [OLLAMA_URL_VAR, OLLAMA_KEY_VAR];
+
+export function isOllamaVar(id: string): boolean {
+	return OLLAMA_VARS.includes(id);
+}
+
+/** The URL write gate: http(s) only, trimmed, trailing slashes and a
+ *  pasted OpenAI-compat "/v1" suffix dropped (the provider appends /v1
+ *  itself). Returns the normalized value to store. */
+export function normalizeOllamaUrl(rawValue: string): { ok: true; value: string } | { ok: false; error: string } {
+	const value = rawValue.trim().replace(/\/+$/, "").replace(/\/v1$/, "");
+	let url: URL;
+	try {
+		url = new URL(value);
+	} catch {
+		return { ok: false, error: `${OLLAMA_URL_VAR} must be a URL like ${OLLAMA_DEFAULT_URL}` };
+	}
+	if (url.protocol !== "http:" && url.protocol !== "https:") {
+		return { ok: false, error: `${OLLAMA_URL_VAR} must start with http:// or https://` };
+	}
+	return { ok: true, value };
+}
+
 /** Shape-check result: ok, or a 400-ready message naming the expectation. */
 export type KeyShapeResult = { ok: true } | { ok: false; error: string };
 
@@ -196,6 +232,8 @@ export interface AuthKeyStatus {
 	present: boolean;
 	/** The masked tail + character count, e.g. "…ab12 (64 chars)". */
 	masked: string | null;
+	/** The full live value — ONLY for non-secret entries (the Ollama URL). */
+	value?: string;
 	/** Where the live value comes from, given env-wins precedence. */
 	source: "env" | "file" | "none";
 	/** True when the file holds a value that the environment shadows — the
