@@ -6,7 +6,7 @@ import {
 	type AgentBuildOptions,
 	type TeachingAgent,
 } from "../agent/teacher-agent.ts";
-import { piEngineForSpec, type PiEngine } from "../agent/models.ts";
+import { noteXaiProviderError, piEngineForSpec, type PiEngine } from "../agent/models.ts";
 import { createJobRunner } from "../agent/subagents/runner.ts";
 import { createExtractionPipeline } from "../agent/subagents/extraction.ts";
 import type { ModelRole } from "../../config.ts";
@@ -454,6 +454,8 @@ export async function handleChatInput(
 			// route through here: they ride the error-result path and reach the
 			// transcript directly (the retry context the model saw).
 			onError: (error) => {
+				const raw = error instanceof Error ? error.message : undefined;
+				if (raw) noteXaiProviderError(engine.model.provider, raw);
 				console.error(`[chat ${chatId}] turn error:`, error);
 				return "An error occurred.";
 			},

@@ -46,6 +46,11 @@ describe("hasProviderKey — the zero-keys pill's truth", () => {
 		assert.equal(hasProviderKey([status("OPENROUTER_API_KEY", false)], PROVIDERS), false);
 		assert.equal(hasProviderKey([], PROVIDERS), false);
 	});
+
+	it("a stored xAI sign-in counts when no provider row is present", () => {
+		assert.equal(hasProviderKey([], undefined, true), true);
+		assert.equal(hasProviderKey([], PROVIDERS, false), false);
+	});
 });
 
 describe("ZeroKeysPill — the composer-hoisted notice", () => {

@@ -3,6 +3,7 @@ import {
 	createModels,
 	getSupportedThinkingLevels,
 	type Api,
+	type CredentialStore,
 	type Model,
 	type Models,
 	type StreamFunction,
@@ -43,22 +44,83 @@ export interface PiEngine {
 
 export type { ThinkingLevel };
 
-let collection: ReturnType<typeof createModels> | undefined;
+interface PiSlot {
+	store?: CredentialStore;
+	collection?: {
+		models: ReturnType<typeof createModels>;
+		store: CredentialStore | null;
+	};
+}
+
+const PI_KEY = Symbol.for("lh.piModels");
+
+function piSlot(): PiSlot {
+	const g = globalThis as Record<symbol, PiSlot | undefined>;
+	if (!g[PI_KEY]) g[PI_KEY] = {};
+	return g[PI_KEY];
+}
+
+export function bindPiCredentials(credentials: CredentialStore): void {
+	const slot = piSlot();
+	if (slot.store === credentials) {
+		if (slot.collection && slot.collection.store !== credentials) {
+			throw new Error("piModels() was already created without this credential store");
+		}
+		return;
+	}
+	if (slot.collection) {
+		throw new Error("piModels() was already created without this credential store");
+	}
+	if (slot.store && slot.store !== credentials) {
+		throw new Error("A different credential store is already bound");
+	}
+	slot.store = credentials;
+}
+
+export interface XaiAuthHooks {
+	onProviderError(providerId: string, rawMessage: string): string | undefined;
+	onProviderSuccess(providerId: string): void;
+}
+
+const HOOKS_KEY = Symbol.for("lh.xaiAuthHooks");
+
+export function bindXaiAuthHooks(hooks: XaiAuthHooks): void {
+	(globalThis as Record<symbol, XaiAuthHooks>)[HOOKS_KEY] = hooks;
+}
+
+export function settleXaiProviderMessage(message: { provider: string; stopReason: string; errorMessage?: string }): void {
+	const hooks = (globalThis as Record<symbol, XaiAuthHooks | undefined>)[HOOKS_KEY];
+	if (!hooks) return;
+	if (message.stopReason === "aborted") return;
+	if (message.stopReason === "error") {
+		if (message.errorMessage === undefined) return;
+		const rewritten = hooks.onProviderError(message.provider, message.errorMessage);
+		if (rewritten !== undefined) message.errorMessage = rewritten;
+		return;
+	}
+	hooks.onProviderSuccess(message.provider);
+}
+
+export function noteXaiProviderError(providerId: string, rawMessage: string): void {
+	const hooks = (globalThis as Record<symbol, XaiAuthHooks | undefined>)[HOOKS_KEY];
+	hooks?.onProviderError(providerId, rawMessage);
+}
 
 /** The process-wide pi-ai Models collection — EVERY builtin provider's
  *  catalog (model slots wave, 2026-09-20): engines and the picker resolve
  *  against all of pi-ai's per-provider catalogs, so a settings slot can pin
- *  any native model id. Auth is resolved per request by pi-ai itself from
- *  the environment (the keys seam reflects file-saved keys into env), and
- *  a provider with no key simply fails its stream with "not configured" —
- *  honest, late, and unreachable through the picker, which gates on
- *  keyPresent. */
+ *  any native model id. */
 export function piModels() {
-	if (!collection) {
-		collection = createModels({ identity: APP_IDENTITY });
-		for (const provider of builtinProviders()) collection.setProvider(provider);
+	const slot = piSlot();
+	if (!slot.collection) {
+		const store = slot.store ?? null;
+		const models = store
+			? createModels({ identity: APP_IDENTITY, credentials: store })
+			: createModels({ identity: APP_IDENTITY });
+		for (const provider of builtinProviders()) models.setProvider(provider);
+		slot.collection = { models, store };
 	}
-	return collection;
+	return slot.collection.models;
 }
 
 /** OpenRouter API key (BYOK); tests never read this — they inject engines. */
