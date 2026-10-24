@@ -48,6 +48,7 @@ import { asAgentMessages } from "../core/native-messages.ts";
 import {
 	ChatInputError,
 	inputAppends,
+	retryBase,
 	parseChatInput,
 	type TurnInput,
 } from "../core/input-events.ts";
@@ -235,6 +236,20 @@ export async function handleChatInput(
 	const compactedRecord = stores.chatStore.getChat(chatId);
 	if (compactedRecord) record = compactedRecord;
 
+	// RETRY (owner, 2026-10-24): cut the record right after the learner's
+	// last text prompt so the turn below re-answers it. The cut is only
+	// held in memory here; the write-ahead persist further down makes it
+	// durable once the turn claim succeeds (a refused/racing retry never
+	// touches the file). Side effects of the dropped response (plan tree,
+	// jobs, extracted graph facts) are not undone.
+	if (input.type === "retry") {
+		const base = retryBase(record.messages);
+		if (!base) {
+			return Response.json({ error: "Nothing to retry — the last input is not a text prompt" }, { status: 400 });
+		}
+		record = { ...record, messages: base };
+	}
+
 	// The input's native appends (pure; the honest 400 for an answer with no
 	// pending question call). Computed BEFORE beginTurn so a refused input
 	// leaves no liveness effects; read against the CURRENT record. Wave C:
@@ -351,6 +366,7 @@ export async function handleChatInput(
 		// point as the tool delta — the agent layer composes the system
 		// prompt fresh per turn, swapping in any enabled override segments.
 		promptSwitches: effective.agent.prompts,
+		language: effective.general.language,
 	};
 	// PRACTICE BRANCH (owner design, 2026-10-04): a kind:"practice"
 	// session builds the practitioner from turn 1 — no prober→teacher
