@@ -51,7 +51,9 @@ import {
 	maskKey,
 	validateKeyShape,
 } from "../core/auth-keys.ts";
+import { bindPiCredentials } from "../agent/models.ts";
 import { authStore } from "../store/auth.ts";
+import { credentialStore } from "../store/credentials.ts";
 
 // The once-per-process boot record — globalThis anchor (HMR re-imports the
 // module; the snapshot must not re-run and misread fill-gapped vars as real
@@ -195,13 +197,16 @@ export function keyValue(id: string): string | undefined {
 
 /** The key-presence truth for one model provider (provider-key interlude,
  * 2026-09-25): would this provider's key be present at request time?
- * Reads through keyValue — the SAME env-first lookup pi-ai performs
- * natively at every request — so an env-shadowed key counts as present
- * (gate by what would run). Providers absent from AUTH_PROVIDER_KEYS take
- * no key at all: nothing to gate, present by definition. */
+ * Providers absent from AUTH_PROVIDER_KEYS take no key at all: nothing
+ * to gate, present by definition. */
 export function providerKeyPresent(provider: string): boolean {
 	const info = AUTH_PROVIDER_KEYS.find((p) => p.id === provider);
-	return info ? keyValue(info.envVar) !== undefined : true;
+	if (!info) return true;
+	return keyValue(info.envVar) !== undefined || credentialStore.facts(provider).oauth;
+}
+
+export function xaiSignedIn(): boolean {
+	return credentialStore.facts("xai").oauth;
 }
 
 /**
@@ -242,3 +247,4 @@ export function deleteKey(id: string): AuthKeyStatus {
 // Reflect the file into the env at first import (idempotent; the module is
 // imported by every route/handler path that touches keys).
 initAuthEnv();
+bindPiCredentials(credentialStore);
