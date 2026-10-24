@@ -1,5 +1,6 @@
 import type { Agent, AgentEvent, AgentMessage } from "@earendil-works/pi-agent-core";
 import type { SteerMessage } from "../../core/contracts.ts";
+import { settleXaiProviderMessage } from "../../agent/models.ts";
 import { noteSteerVisible } from "../jobs.ts";
 import { ToolCallIdUniquifier } from "./call-ids.ts";
 
@@ -224,6 +225,12 @@ export function runPiTurn(spec: PiTurnSpec): PiTurnHandle {
 	};
 
 	const handle = (event: AgentEvent) => {
+		if (event.type === "message_end") {
+			const settled = event.message as { role?: string; provider?: string; stopReason?: string; errorMessage?: string };
+			if (settled.role === "assistant" && settled.provider && settled.stopReason) {
+				settleXaiProviderMessage(settled as { provider: string; stopReason: string; errorMessage?: string });
+			}
+		}
 		// THE LACAN FIX: ids uniquify HERE, before any view — the one seam
 		// every consumer downstream shares. No uniquifier → verbatim.
 		const uniqued = uniquifier ? uniquifier.event(event) : event;

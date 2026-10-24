@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { AssistantMessage, Message, ToolResultMessage, Usage, Tool } from "@earendil-works/pi-ai";
 import { normalizeContext } from "@earendil-works/pi-ai";
 import { Type } from "typebox";
-import { piEngineFor, type PiEngine, type ThinkingLevel } from "../models.ts";
+import { piEngineFor, settleXaiProviderMessage, type PiEngine, type ThinkingLevel } from "../models.ts";
 import { providerEventObserver, type ProviderEventObserver } from "../provider-events.ts";
 import type { PdfResult, PdfToolInput } from "../../core/contracts.ts";
 import { getHeadless, type HeadlessApi } from "./headless.ts";
@@ -413,7 +413,10 @@ async function streamOnce(
 		onProviderStreamEvent: onProviderStreamEvent as never,
 	} as never);
 	for await (const event of stream) {
-		if (event.type === "done") return event.message;
+		if (event.type === "done") {
+			settleXaiProviderMessage(event.message);
+			return event.message;
+		}
 		if (event.type === "error") {
 			if (event.reason === "aborted") {
 				const err = new Error("aborted");
@@ -421,6 +424,7 @@ async function streamOnce(
 				abortedErr.name = "AbortError";
 				throw abortedErr;
 			}
+			settleXaiProviderMessage(event.error);
 			throw new Error(event.error.errorMessage ?? "the model call failed");
 		}
 	}
