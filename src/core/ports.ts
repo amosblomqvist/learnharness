@@ -136,6 +136,8 @@ export interface CreateJobInit {
 	toolCallId: string;
 	/** First activity line (defaults to "starting"). */
 	activity?: string;
+	/** The dispatch-time tool input, persisted on the record (see JobRecord.input). */
+	input?: unknown;
 }
 
 /** Mergeable fields — identity (id, kind, chatId, toolCallId, createdAt) is immutable. */

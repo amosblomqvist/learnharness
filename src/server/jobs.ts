@@ -200,6 +200,23 @@ export function deliverJobResult(steer: SteerMessage): Promise<void> {
 		const s = state();
 		const chatId = chatIdOf(steer);
 		const queue = s.queues.get(chatId) ?? [];
+		// One queue entry per steer id: the recovery sweep re-delivers a
+		// stranded result on every pass (e.g. while a question is pending),
+		// and each duplicate entry used to land in the record as another
+		// copy of the same steer. Piggyback on the queued entry instead.
+		const queued = queue.find((e) => e.steer.id === steer.id);
+		if (queued) {
+			const { resolve: prevResolve, reject: prevReject } = queued;
+			queued.resolve = () => {
+				prevResolve();
+				resolve();
+			};
+			queued.reject = (err) => {
+				prevReject(err);
+				reject(err);
+			};
+			return;
+		}
 		queue.push({ steer, resolve, reject });
 		s.queues.set(chatId, queue);
 		void pump(chatId);

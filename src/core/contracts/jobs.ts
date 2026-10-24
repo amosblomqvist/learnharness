@@ -21,6 +21,11 @@ export interface JobRecord {
 	chatId: string;
 	/** The tool part this job fulfills. */
 	toolCallId: string;
+	/** The dispatch-time tool input. A crash-recovery re-spawn reads it
+	 *  first: the turn that dispatched the job may not have been persisted
+	 *  yet when the process died, so the transcript can lack the call.
+	 *  Absent on jobs created before this field existed. */
+	input?: unknown;
 	status: JobStatus;
 	/** Latest human-readable activity line, e.g. `web_search: "sigma.js v3"`. */
 	activity: string;

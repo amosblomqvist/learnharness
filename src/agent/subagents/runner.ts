@@ -278,6 +278,7 @@ export function createJobRunner(deps: JobRunnerDeps): JobRunner {
 		input: JobToolInput | undefined,
 	): JobToolInput | undefined {
 		if (input) return input;
+		if (job.input) return job.input as JobToolInput;
 		const chat = chatStore.getChat(job.chatId);
 		if (!chat) return undefined;
 		// Wave D: the record is native history — the scan reads the native
@@ -343,7 +344,18 @@ export function createJobRunner(deps: JobRunnerDeps): JobRunner {
 		const { job } = ctx;
 
 		const input = (passedInput ?? resolveInput(job, passedInput)) as ResearchToolInput | undefined;
-		const question = typeof input?.question === "string" && input.question.trim() ? input.question : "(no question)";
+		// No question (a re-spawn whose input is on neither the job nor the
+		// transcript): fail honestly instead of running the researcher on
+		// "(no question)" and delivering a brief that says so.
+		if (!(typeof input?.question === "string" && input.question.trim())) {
+			jobStore.updateJob(jobId, { error: "research question unavailable", activity: "failed" });
+			await finishJob(jobId, {
+				brief: "Research failed: the research question was lost (the server restarted before the lesson was saved). Dispatch the research call again if you still need it.",
+				sources: [],
+			});
+			return;
+		}
+		const question = input.question;
 		const context = typeof input?.context === "string" && input.context.trim() ? input.context : undefined;
 
 		const prompt = [

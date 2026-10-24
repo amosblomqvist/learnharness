@@ -709,6 +709,61 @@ describe("research runner (async protocol §3)", () => {
 		assert.equal(done.status, "done", "the researcher ran from the transcript-resolved input");
 		assert.equal((done.result as ResearchResult).brief, BRIEF);
 	});
+
+	it("runJob re-spawns from the input saved on the job when the transcript lacks the call (turn not yet persisted)", async () => {
+		const chat = chatStore.createChat("Test: job-record input fallback");
+		trackChat(chat.id);
+		// The dispatching turn never reached the record (the process died first).
+		const job = jobStore.createJob({ kind: "research", chatId: chat.id, toolCallId: "call-unpersisted", input: RESEARCH_INPUT });
+		trackJob(job.id);
+
+		const delivery = fakeDeliver();
+		const runner = createJobRunner({ chatStore, jobStore, deliver: delivery.deliver, searchProvider: () => stubSearch() });
+		let prompt = "";
+		researchModelOverride.current = fauxEngine([
+			(context) => {
+				prompt = JSON.stringify(context.messages.find((m) => m.role === "user")?.content ?? "");
+				return fauxAssistantMessage([fauxText(BRIEF)]);
+			},
+		]);
+		try {
+			await runner.runJob(job.id);
+		} finally {
+			researchModelOverride.current = undefined;
+		}
+
+		assert.ok(prompt.includes(RESEARCH_INPUT.question), "the researcher received the saved question");
+		const done = jobStore.getJob(job.id)!;
+		assert.equal(done.status, "done", "the researcher ran from the job-record input");
+	});
+
+	it("runJob with no resolvable question fails honestly instead of researching \"(no question)\"", async () => {
+		const chat = chatStore.createChat("Test: lost research input");
+		trackChat(chat.id);
+		const job = jobStore.createJob({ kind: "research", chatId: chat.id, toolCallId: "call-lost" });
+		trackJob(job.id);
+
+		const delivery = fakeDeliver();
+		const runner = createJobRunner({ chatStore, jobStore, deliver: delivery.deliver, searchProvider: () => stubSearch() });
+		let modelCalled = false;
+		researchModelOverride.current = fauxEngine([
+			() => {
+				modelCalled = true;
+				return fauxAssistantMessage([fauxText(BRIEF)]);
+			},
+		]);
+		try {
+			await runner.runJob(job.id);
+		} finally {
+			researchModelOverride.current = undefined;
+		}
+
+		assert.equal(modelCalled, false, "the researcher never runs without a question");
+		const steer = delivery.steers[0]!;
+		assert.ok(steer, "the teacher still learns the outcome");
+		assert.match(steer.content, /Research failed: the research question was lost/);
+		assert.equal(jobStore.getJob(job.id)!.error, "research question unavailable");
+	});
 });
 
 // ─── the researcher agent construction (model resolution seam) ──────────────
@@ -1204,6 +1259,23 @@ describe("Wave C: live steering handoff + settlement reconciliation", () => {
 		assert.equal(fired[0]!.length, 2, "both markers ride the same turn");
 		const ids = fired[0]!.map((s) => s.id).sort();
 		assert.deepEqual(ids, [steer.id, steer2.id].sort());
+	});
+
+	it("re-delivering the same steer while it is queued does not duplicate it (recovery sweep re-delivery)", async () => {
+		const { steer } = setup();
+		const fired: SteerMessage[][] = [];
+		setTurnRunner(async (_cid, input) => {
+			fired.push((input as SteerInput).steers as SteerMessage[]);
+			return 200;
+		});
+
+		await Promise.all([deliverJobResult(steer), deliverJobResult(steer), deliverJobResult(steer)]);
+		assert.equal(fired.length, 1, "one wake");
+		assert.deepEqual(
+			fired[0]!.map((s) => s.id),
+			[steer.id],
+			"the marker rides the turn exactly once",
+		);
 	});
 });
 
