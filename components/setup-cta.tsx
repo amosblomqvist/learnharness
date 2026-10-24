@@ -30,8 +30,9 @@ import { useSettingsSaved } from "@/components/settings-signal";
 export function hasProviderKey(
 	statuses: readonly AuthKeyStatus[],
 	providers: readonly ProviderKeyInfo[] | undefined,
+	xaiSignedIn = false,
 ): boolean {
-	return classifyKeys(statuses, providers).providerRows.some((s) => s.present);
+	return xaiSignedIn || classifyKeys(statuses, providers).providerRows.some((s) => s.present);
 }
 
 /** The zero-keys truth for the calling page: TRUE only after a
@@ -44,8 +45,8 @@ export function useZeroKeys(): boolean {
 	const read = useCallback(() => {
 		fetch("/api/keys")
 			.then((r) => r.json())
-			.then((body: { keys?: AuthKeyStatus[]; providers?: ProviderKeyInfo[] }) => {
-				setZeroKeys(!hasProviderKey(body.keys ?? [], body.providers));
+			.then((body: { keys?: AuthKeyStatus[]; providers?: ProviderKeyInfo[]; xaiSignedIn?: boolean }) => {
+				setZeroKeys(!hasProviderKey(body.keys ?? [], body.providers, body.xaiSignedIn === true));
 			})
 			.catch(() => {});
 	}, []);
