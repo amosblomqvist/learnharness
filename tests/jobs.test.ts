@@ -1285,6 +1285,49 @@ describe("persistTurn (native history, Wave B)", () => {
 		assert.equal(record.messages.length, 2);
 		assert.equal((record.messages[1] as { isError: boolean }).isError, true);
 	});
+
+	it("THROWS on a failed write (the silent-turn fix: a lost reply is never a finished turn)", () => {
+		const chat = chatStore.createChat("Test: persist failure is not silent");
+		trackChat(chat.id);
+		const realSave = chatStore.saveMessages;
+		chatStore.saveMessages = () => {
+			throw new Error("EACCES: the record is not writable");
+		};
+		const quiet = console.error;
+		console.error = () => {}; // the seam logs its own failure; keep the run clean
+		try {
+			// The turn ran, the teacher replied, and the write that would keep
+			// the reply failed. Returning [] here is what made the turn settle
+			// exactly like a successful one, with an empty transcript to show
+			// for it — the caller must be able to tell, and report it.
+			assert.throws(
+				() =>
+					persistTurn(
+						chatStore,
+						chat.id,
+						0,
+						[
+							{
+								id: "",
+								role: "assistant",
+								content: [{ type: "text", text: "Mercury." }],
+								api: "openai-completions",
+								provider: "openrouter",
+								model: "test",
+								usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+								stopReason: "stop",
+								timestamp: 1,
+							} as never,
+						],
+						false,
+					),
+				/EACCES/,
+			);
+		} finally {
+			chatStore.saveMessages = realSave;
+			console.error = quiet;
+		}
+	});
 });
 
 // ─── prompt composition hygiene (the README leak) ─────────────────────────────

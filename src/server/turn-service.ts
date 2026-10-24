@@ -6,7 +6,10 @@
  *
  *   persistTurn        — the canonical state write (Wave B: native history;
  *                        id stamping, placeholder filtering, plan-block
- *                        emission, abort-partial persistence)
+ *                        emission, abort-partial persistence); THROWS on a
+ *                        failed write, so the caller can report it (see the
+ *                        function's own note — silence here is what made a
+ *                        lost reply look like a finished turn)
  *   triggerExtraction  — the graph write channel: fires the extraction
  *                        pipeline (the sole graph writer) once a chat
  *                        crosses the token-budget threshold.
@@ -46,6 +49,14 @@ import { ModelsNotConfiguredError, ProviderKeyMissingError } from "../core/setti
  *   idempotent (persist replays are safe).
  *
  * Returns the stamped new messages (usage provenance reads them).
+ *
+ * THROWS on a failed write (owner-visible bug fix: a turn whose record write
+ * failed used to log one line and then settle exactly like a successful one —
+ * the reply the learner was watching never reached disk, the turn ended on a
+ * clean [DONE], and the refetch that followed showed nothing at all, with no
+ * warning anywhere). The throw travels out of the caller's onFinish into the
+ * settle seam (pi/ui-stream.ts), which clears the turn's liveness through
+ * onSettleFailure and puts the failure on the wire BEFORE the terminal.
  */
 export function persistTurn(
 	chatStore: ChatStore,
@@ -79,7 +90,7 @@ export function persistTurn(
 		return stamped;
 	} catch (err) {
 		console.error(`[chat ${chatId}] persist failed:`, err, { isAborted });
-		return [];
+		throw err;
 	}
 }
 

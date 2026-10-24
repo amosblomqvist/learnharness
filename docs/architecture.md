@@ -307,7 +307,7 @@ sequenceDiagram
 - **The prober→teacher handoff**: the first turn(s) run the prober (floor/ceiling via quiz, goal via ask); `probe_done` (server-executed) files the assessment and queues a handoff steer; from the first `tool-probe_done` part in the transcript, the handler builds the teacher agent for every later turn. Phases (`core/phases.ts`) fold strictly: probe → plan → teach.
 - **The formal plan tree is author-once**: the teacher authors the session's dependency map with a single schema-validated `plan_init` tool (a mermaid-subset graph, parsed deterministically with line-numbered errors, validated as a DAG). Progress is never mutated — statuses (`current`/`visited`/upcoming) are **derived** from tagged quiz calls in the transcript; the tree panel and the plan blocks render that derivation.
 - **Job tools are server-executed, ack-and-steer**: `research`/`demo`/`visual` resolve immediately mid-turn with a fire-and-forget ack (the teacher keeps teaching); `spawn(job, input)` fires the background runner.
-- Each turn service is a named, error-contained seam taking explicit deps; failures log one `[chat <id>]` line and never touch the response. Swapping any of them touches nothing else.
+- Each turn service is a named seam taking explicit deps, and swapping any of them touches nothing else. All are error-contained — one `[chat <id>]` log line, response untouched — **except `persistTurn`**: the canonical write THROWS on failure, because a reply that never reached disk must not settle exactly like a saved one. The throw travels out of `onFinish` into the settle seam (`pi/ui-stream.ts`), which clears the turn's liveness (`onSettleFailure`) and reports the failure through `onSettleError` BEFORE the terminal (`[DONE]` follows the settle seam, never precedes it — see §9).
 
 ### 5.1 The wake pipeline (Workbench → Classroom)
 
@@ -451,6 +451,7 @@ The Electron main is a launcher + security guard, never a host for app logic: si
 | **LLMs judge; code mechanizes** — grading, merging, fingerprints, layout are deterministic; a failed LLM stage checkpoints nothing |
 | **The persisted record is the only source of truth** — agents are stateless per-turn rebuilds; no unanswered tool call reaches a provider |
 | **Failure containment** — side channels (context, extraction, usage, naming) are fire-and-forget behind try/catch seams; a side-channel failure never touches the response or the persist; the turn registry clears on every path |
+| **The terminal is last, in fact** — `[DONE]` follows the settle seam, never precedes it: views are closed to new events once it lands, so a settle failure could not otherwise be reported. A throwing settle emits its error, then the terminal; a failed canonical write throws rather than settling a lost reply as a finished turn |
 | **Absence is not zero** — unreported tokens, absent prices, absent levels render as absent, never fabricated |
 | **Schema-valid ⇔ parseable** — boundary zod schemas are shared verbatim by producer and consumer |
 

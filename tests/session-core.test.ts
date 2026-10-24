@@ -1113,3 +1113,88 @@ describe("absorbed — the custom role (the doubled thinking card)", () => {
 		assert.equal((customs[0] as { id?: string }).id, "srv_1");
 	});
 });
+
+// ── the silent-turn bug: a body that closes without [DONE] is a truncation ──
+//
+// Issue #23: a prompt is accepted, then nothing happens and nothing is said.
+// The transport cannot tell "the turn finished" from "the connection died" —
+// only the [DONE] terminal can — and the view used to treat both as success,
+// so a dead turn settled to "ready" exactly like a completed one.
+
+describe("consumeStream — truncation is never a finished turn", () => {
+	/** A body that carries a partial assistant message and then CLOSES with no
+	 *  [DONE]: the dropped-connection shape. */
+	function truncatedStream(): Response {
+		return sseResponse(partial([{ type: "text", text: "The planet clo" }]));
+	}
+
+	/** The healthy terminal: a message, its end, agent_end, [DONE]. */
+	function healthyStream(): Response {
+		return sseResponse(
+			{ type: "message_start", message: { role: "assistant", content: [{ type: "text", text: "Mercury." }] } },
+			{
+				type: "message_end",
+				message: { role: "assistant", content: [{ type: "text", text: "Mercury." }], stopReason: "stop" },
+			},
+			{ type: "agent_end", messages: [] },
+			"[DONE]",
+		);
+	}
+
+	it("reattaches ONCE and keeps the turn when the reattach succeeds", async () => {
+		let streams = 0;
+		globalThis.fetch = dietFetch({
+			stream: () => {
+				streams += 1;
+				return streams === 1 ? truncatedStream() : healthyStream();
+			},
+		});
+		const m = model();
+		await m.send({ type: "text", text: "which planet?" });
+		assert.equal(streams, 2, "exactly one recovery attempt");
+		assert.equal(m.getState().status, "ready", "the recovered turn finished normally");
+		assert.equal(m.getState().error, null, "a recovered turn is not an error");
+	});
+
+	it("surfaces the failure when the recovery truncates too — never a silent ready", async () => {
+		let streams = 0;
+		globalThis.fetch = dietFetch({
+			stream: () => {
+				streams += 1;
+				return truncatedStream();
+			},
+		});
+		const m = model();
+		await m.send({ type: "text", text: "which planet?" });
+		assert.equal(streams, 2, "the budget is ONE attempt — no retry loop");
+		assert.equal(m.getState().status, "error", "a dead turn must not report ready");
+		assert.match(
+			String(m.getState().error?.message),
+			/connection dropped/,
+			"the learner is told what happened",
+		);
+	});
+
+	it("takes the turn-settled terminal as success (the turn finished while we were away)", async () => {
+		let streams = 0;
+		let settled = 0;
+		globalThis.fetch = dietFetch({
+			stream: () => {
+				streams += 1;
+				return streams === 1 ? truncatedStream() : sseResponse({ type: "turn-settled" }, "[DONE]");
+			},
+		});
+		const m = model({ onReattachSettled: () => void (settled += 1) });
+		await m.send({ type: "text", text: "which planet?" });
+		assert.equal(settled, 1, "the settle hook ran — the record refetch lands the reply");
+		assert.equal(m.getState().error, null, "a turn that really did finish is not an error");
+	});
+
+	it("a normal turn still settles to ready with no error (the regression)", async () => {
+		globalThis.fetch = dietFetch({ stream: healthyStream });
+		const m = model();
+		await m.send({ type: "text", text: "which planet?" });
+		assert.equal(m.getState().status, "ready");
+		assert.equal(m.getState().error, null);
+	});
+});

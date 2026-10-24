@@ -457,6 +457,22 @@ export async function handleChatInput(
 				console.error(`[chat ${chatId}] turn error:`, error);
 				return "An error occurred.";
 			},
+			// A settle failure is not "the loop broke" — the teacher DID reply,
+			// the turn just could not be made durable. Retrying would burn
+			// another turn on a chat whose record is already suspect, so the
+			// honest instruction is to reload and read the real transcript.
+			onSettleError: () => "The reply could not be saved. Reload the page to see the transcript.",
+			// THE LIVENESS SAFETY NET: onFinish's own body clears these on the
+			// happy path, and a throw anywhere inside it used to skip endTurn —
+			// leaving the chat "in flight" for the 30-minute TTL, so every later
+			// send got a bogus 409 for a turn that was already dead. endTurn is
+			// idempotent (a missing entry emits nothing), so running it again is
+			// free.
+			onSettleFailure: () => {
+				endTurn(chatId);
+				unregisterTurn(chatId);
+				unregisterLiveAgent(chatId);
+			},
 			onFinish: (turnMessages, isAborted) => {
 				// Wave B: the record write is the agent's own final state —
 				// the new messages are the slice past the merged base.

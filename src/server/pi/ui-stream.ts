@@ -38,6 +38,12 @@ import { ToolCallIdUniquifier } from "./call-ids.ts";
  *   {"type":"turn-settled"} (served by turn-runs when no turn is running) and
  *   the loop-level {"type":"error","errorText"} (agent.continue() threw
  *   outside the event stream — mapped through the handler's masking policy).
+ * - THE TERMINAL IS LAST IN FACT, NOT JUST IN NAME: [DONE] follows the settle
+ *   seam (onFinish), never precedes it, because the seam may need to report a
+ *   failure and every view is closed to new events once the terminal lands.
+ *   A turn whose record write throws emits its error and then [DONE] — the
+ *   learner is told, instead of watching a clean end produce an empty
+ *   transcript.
  * - Stream-level provider errors ride their message verbatim
  *   (message_end with stopReason "error" + errorMessage).
  *
@@ -77,6 +83,18 @@ export interface PiTurnSpec {
 	 *  event stream itself is verbatim — provider errors ride their
 	 *  message's stopReason/errorMessage through untouched). */
 	onError?: (error: unknown) => string;
+	/** The learner-facing text for a SETTLE failure — the seam below the
+	 *  model, where a turn that ran fine still fails to become durable (a
+	 *  record write, a usage append, a registry reconcile). Separate from
+	 *  `onError` on purpose: "the loop broke" and "the reply could not be
+	 *  saved" are different truths, and the second one is the learner's
+	 *  cue to reload rather than retry. Falls back to a generic line. */
+	onSettleError?: (error: unknown) => string;
+	/** Cleanup for a settle that threw, run BEFORE the error reaches the
+	 *  views: the caller's own liveness bookkeeping (endTurn, the running-
+	 *  turn registry) is part of the seam that just failed, and skipping it
+	 *  is what leaves a dead turn looking permanently in flight. */
+	onSettleFailure?: () => void;
 	/** The canonical end-of-turn seam: persist + usage + extraction + endTurn.
 	 *  Receives the agent's FULL final state (native messages) — the caller
 	 *  persists the slice past its own base count. */
@@ -117,7 +135,7 @@ export interface PiTurnHandle {
 }
 
 export function runPiTurn(spec: PiTurnSpec): PiTurnHandle {
-	const { agent, onError, onFinish, usedToolCallIds, updateFlushMs = 100 } = spec;
+	const { agent, onError, onSettleError, onSettleFailure, onFinish, usedToolCallIds, updateFlushMs = 100 } = spec;
 	const uniquifier = usedToolCallIds ? new ToolCallIdUniquifier(usedToolCallIds) : undefined;
 
 	let settled = false;
@@ -208,6 +226,11 @@ export function runPiTurn(spec: PiTurnSpec): PiTurnHandle {
 		for (const sub of subscribers) sub.done();
 		subscribers.clear();
 	};
+	// Whether an error already went on the wire for this turn: the loop-level
+	// catch may have reported one before the seam ran, and a settle failure
+	// must not announce a second, contradictory failure on top of it.
+	let errorSent = false;
+
 	// The settle seam: the record write is the agent's OWN final state
 	// (native history — signatures, usage, provider stamps all real).
 	// Copy the array: the agent may outlive this call's read.
@@ -218,9 +241,34 @@ export function runPiTurn(spec: PiTurnSpec): PiTurnHandle {
 	// suppressing the fresh per-turn re-seed). Our app mints no system
 	// messages of its own (the prompt is composed per turn), so dropping
 	// the role wholesale is exact; revisit if prompt-updates ever land.
+	//
+	// THE SETTLE SEAM IS UNGUARDED BY pi (agent.js awaits listeners in a plain
+	// loop, with no try/catch): a throw from onFinish — the record write, the
+	// usage append, endTurn — rejects agent.continue() and lands in the
+	// loop-level catch below, where `settled` used to swallow it silently, and
+	// AFTER closeAll had already told every view the turn ended cleanly.
+	// Catching it HERE keeps the views open long enough to say otherwise: a turn
+	// that never became durable must not be announced as a finished one.
 	const settleWith = () => {
-		const settled_ = [...agent.state.messages].filter((m) => (m as { role?: string }).role !== "system");
-		onFinish((uniquifier?.remapSettled(settled_) as AgentMessage[]) ?? settled_, sawAbort);
+		try {
+			const settled_ = [...agent.state.messages].filter((m) => (m as { role?: string }).role !== "system");
+			onFinish((uniquifier?.remapSettled(settled_) as AgentMessage[]) ?? settled_, sawAbort);
+		} catch (err) {
+			console.error("[turn] settle seam failed:", err);
+			// The caller's liveness bookkeeping lives inside the seam that just
+			// threw, so it must be cleared before the views are told anything.
+			try {
+				onSettleFailure?.();
+			} catch (cleanupErr) {
+				console.error("[turn] settle cleanup failed:", cleanupErr);
+			}
+			if (errorSent) return;
+			errorSent = true;
+			send({
+				type: "error",
+				errorText: onSettleError?.(err) ?? "The turn ended before it could be saved.",
+			});
+		}
 	};
 
 	const handle = (event: AgentEvent) => {
@@ -244,8 +292,12 @@ export function runPiTurn(spec: PiTurnSpec): PiTurnHandle {
 			if (m?.role === "custom") noteSteerVisible(event.message as SteerMessage);
 		}
 		if (event.type === "agent_end") {
-			closeAll();
+			// SETTLE BEFORE THE TERMINAL (the silent-turn bug): closeAll flips
+			// `settled`, after which send() is a no-op — so anything that went
+			// wrong in the settle could never reach a view again. The record
+			// write, and the failure it may report, must precede [DONE].
 			settleWith();
+			closeAll();
 		}
 	};
 	agent.subscribe(handle);
@@ -258,11 +310,19 @@ export function runPiTurn(spec: PiTurnSpec): PiTurnHandle {
 			// stream as stopReason "error"): surface, close, persist. If the
 			// agent already settled (agent_end reached before the throw),
 			// the seam has run — never settle twice.
-			if (settled) return;
+			if (settled) {
+				// A throw from AFTER the seam: the turn was already reported as
+				// complete, so the log is the only place left to say otherwise.
+				// The old early return discarded it before the console.error,
+				// which is exactly how this class of failure stayed invisible.
+				console.error("[turn] error after settle:", err);
+				return;
+			}
 			console.error("[turn] agent loop failed:", err);
+			errorSent = true;
 			send({ type: "error", errorText: onError?.(err) ?? "An error occurred." });
-			closeAll();
 			settleWith();
+			closeAll();
 		}
 	})();
 
