@@ -120,7 +120,7 @@ export function Home({
 		void dictation.finish().then(() => begin());
 	};
 	const begin = async () => {
-		await imageDraft.settle(); // a paste followed by Enter must not race its read
+		await imageDraft.awaitReads(); // a paste followed by Enter must not race its read
 		const t = topicRef.current.trim();
 		const images = imageDraft.imagesRef.current;
 		if ((!t && images.length === 0) || busy) return;
@@ -271,7 +271,7 @@ export function Home({
 							topicRef.current = e.target.value;
 							setTopic(e.target.value);
 						}}
-						onPaste={(e) => handleImagePaste(e, imageDraft.addFiles)}
+						onPaste={(e) => handleImagePaste(e, imageDraft.props.onPaste)}
 						onKeyDown={(e) => {
 							// Esc ends dictation (the dictate decisions: click-again or
 							// Esc) — stopPropagation claims it (keyboard wave A) so

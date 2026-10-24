@@ -35,7 +35,7 @@
 
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { AssistantMessage, Message, ToolResultMessage, UserMessage } from "@earendil-works/pi-ai";
-import type { ComposerImage } from "./images.ts";
+import { imageBlock, type ComposerImage } from "./images.ts";
 import { QUESTION_TOOLS } from "./pending.ts";
 import {
 	CONCLUDE_ACK_TEXT,
@@ -119,7 +119,7 @@ export function newUserMessage(text: string, images?: readonly ComposerImage[]):
 		role: "user",
 		content:
 			images && images.length > 0
-				? [...(text.length > 0 ? [{ type: "text" as const, text }] : []), ...images.map((i) => ({ ...i }))]
+				? [...(text.length > 0 ? [{ type: "text" as const, text }] : []), ...images.map((i) => imageBlock(i.mimeType, i.data))]
 				: text,
 		timestamp: Date.now(),
 	};

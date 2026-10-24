@@ -665,7 +665,7 @@ export function Chat({
 				draftRef.current = null;
 			}
 			// Merged, never replaced: pictures pasted since the send stay.
-			imageDraft.restore(draftImagesRef.current);
+			imageDraft.restoreSent(draftImagesRef.current);
 			draftImagesRef.current = [];
 			clearError();
 			if (imageRefusal) imageDraft.setError(imageRefusal);
@@ -1190,10 +1190,10 @@ export function Chat({
 		 * images have the same race (FileReader is async): settle those reads
 		 * before the same seam reads the drafts. */
 		if (!dictation.active) {
-			void imageDraft.settle().then(doSteerOrSend);
+			void imageDraft.awaitReads().then(doSteerOrSend);
 			return;
 		}
-		void dictation.finish().then(imageDraft.settle).then(doSteerOrSend);
+		void dictation.finish().then(imageDraft.awaitReads).then(doSteerOrSend);
 	};
 	const doSend = () => {
 		if (busy || pending || compacting) return;
@@ -1201,7 +1201,7 @@ export function Chat({
 		const imgs = imageDraft.imagesRef.current;
 		if (!t && imgs.length === 0) return;
 		applyText("");
-		imageDraft.apply([]);
+		imageDraft.setImages([]);
 		imageDraft.setError(null);
 		sendDraft(t, imgs); // keeps the draft for the refusal flow's restore
 	};

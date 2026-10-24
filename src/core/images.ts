@@ -63,10 +63,17 @@ export const IMAGE_ERRORS = {
  *  ChatInputError) and the composer's inline hint. */
 export class ImageInputError extends ChatInputError {}
 
+/** THE image block constructor. One key order everywhere: the optimistic
+ *  transcript copy is matched to the server's write-ahead copy by JSON
+ *  (session-core absorbed), so every block must be built here. */
+export function imageBlock(mimeType: string, data: string): ComposerImage {
+	return { type: "image", data, mimeType };
+}
+
 /** The wire shape of draft images: only the native fields cross the wire
  *  (the draft's client id stays in the browser). */
 export function wireImages(images: readonly ComposerImage[]): ComposerImage[] {
-	return images.map(({ type, data, mimeType }) => ({ type, data, mimeType }));
+	return images.map((i) => imageBlock(i.mimeType, i.data));
 }
 
 /** The preview / transcript src for an image block. */
@@ -97,7 +104,7 @@ function checkImage(value: unknown): ComposerImage {
 	if (!isImageBlock(value)) throw new ImageInputError(IMAGE_ERRORS.shape);
 	checkImageMeta(value.mimeType, decodedBytes(value.data));
 	if (!startsWithSignature(value.mimeType, value.data)) throw new ImageInputError(IMAGE_ERRORS.content);
-	return { type: "image", mimeType: value.mimeType, data: value.data };
+	return imageBlock(value.mimeType, value.data);
 }
 
 function isImageBlock(value: unknown): value is ComposerImage {

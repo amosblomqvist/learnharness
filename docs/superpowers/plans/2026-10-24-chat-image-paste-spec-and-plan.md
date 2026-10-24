@@ -1,7 +1,7 @@
 # Image Paste in the Chat Composer: Spec and Implementation Plan
 
 Date: 2026-10-24
-Status: Draft for approval. Documentation only, not ready for implementation.
+Status: Implemented on `feat/composer-image-paste` (PR #56). The owner directed implementation ("create a new branch and make the changes"), asked for browser e2e tests instead of unit tests, and asked for all review findings fixed. The gates below are resolved as recorded in the Implementation Status; Parts 1 and 2 keep the original draft for history.
 
 This document follows the /to-spec template. The user requested a local Markdown file, so no issue is published. Product choices that the conversation has not resolved remain explicit approval gates.
 
@@ -125,7 +125,7 @@ Tests must assert user-visible or protocol-visible results, not private React st
 
 The existing test suite uses node:test, node:assert/strict, tsx, injectable fetch, and React static rendering. Keep those patterns. Do not introduce a separate browser-test framework for this change without approval.
 
-The proposed seams are documented for review; they have not yet been approved by the user.
+Resolved: the owner chose browser end-to-end tests (`tests/e2e/`, puppeteer-core with real Chrome) as the test seam for this feature.
 
 ## Out of Scope
 

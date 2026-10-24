@@ -298,9 +298,9 @@ export function NewSession({ initialConfigured, mode = "teach" }: { initialConfi
 	const strongKeyless = useStrongKeyless();
 	const [setupOpen, setSetupOpen] = useState(false);
 
-	const { settle: settleImages, imagesRef } = imageDraft;
+	const { awaitReads, imagesRef } = imageDraft;
 	const send = useCallback(async () => {
-		await settleImages(); // a paste followed by Enter must not race its own read
+		await awaitReads(); // a paste followed by Enter must not race its own read
 		const draft = textRef.current.trim();
 		if ((!draft && imagesRef.current.length === 0) || busy) return;
 		if (!configured) {
@@ -329,7 +329,7 @@ export function NewSession({ initialConfigured, mode = "teach" }: { initialConfi
 				else setBusy(false);
 			})
 			.catch(() => setBusy(false));
-	}, [busy, router, configured, zeroKeys, strongKeyless, settleImages, imagesRef]);
+	}, [busy, router, configured, zeroKeys, strongKeyless, awaitReads, imagesRef]);
 
 	return (
 		<>

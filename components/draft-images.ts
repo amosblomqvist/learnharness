@@ -37,19 +37,19 @@ export function useImageDraft() {
 	// reach the send (which awaits them), not be gated out as "empty".
 	const [reading, setReading] = useState(0);
 
-	const apply = useCallback((next: DraftImage[]) => {
+	const setDraftImages = useCallback((next: DraftImage[]) => {
 		imagesRef.current = next;
 		setImages(next);
 	}, []);
 
 	/** Put images back after a refused send WITHOUT dropping the ones pasted
 	 *  since: the restored images go first (they were sent first). */
-	const restore = useCallback(
+	const restoreSent = useCallback(
 		(sent: readonly DraftImage[]) => {
 			const ids = new Set(sent.map((i) => i.id));
-			apply([...sent, ...imagesRef.current.filter((i) => !ids.has(i.id))]);
+			setDraftImages([...sent, ...imagesRef.current.filter((i) => !ids.has(i.id))]);
 		},
-		[apply],
+		[setDraftImages],
 	);
 
 	const addFiles = useCallback(
@@ -86,7 +86,7 @@ export function useImageDraft() {
 								// The server's own rules: count, sizes, and the bytes'
 								// real format (a renamed file is refused here, not later).
 								parseComposerImages(next);
-								apply(next);
+								setDraftImages(next);
 							} catch (err) {
 								setError(err instanceof ImageInputError ? err.message : IMAGE_ERRORS.unreadable);
 							}
@@ -101,11 +101,11 @@ export function useImageDraft() {
 				);
 			}
 		},
-		[apply],
+		[setDraftImages],
 	);
 
 	/** Await the reads already in flight (a send never races a paste). */
-	const settle = useCallback(async () => {
+	const awaitReads = useCallback(async () => {
 		const reads = pending.current;
 		pending.current = [];
 		await Promise.all(reads);
@@ -115,11 +115,11 @@ export function useImageDraft() {
 	const hasImages = images.length > 0 || reading > 0;
 
 	const props = useMemo<Omit<ImageDraftProps, "onOpen">>(
-		() => ({ images, hasImages, error, onChange: apply, onPaste: addFiles }),
-		[images, hasImages, error, apply, addFiles],
+		() => ({ images, hasImages, error, onChange: setDraftImages, onPaste: addFiles }),
+		[images, hasImages, error, setDraftImages, addFiles],
 	);
 
-	return { images, imagesRef, hasImages, error, setError, addFiles, apply, restore, settle, props };
+	return { images, imagesRef, hasImages, error, setError, addFiles, setImages: setDraftImages, restoreSent, awaitReads, props };
 }
 
 /**

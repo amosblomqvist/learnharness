@@ -177,6 +177,10 @@ describe("composer image paste (e2e)", () => {
 		assert.ok(box.width > 0 && box.height > 0, "the preview has real size");
 		assert.ok(cbox.x > box.x + box.width / 2, "cross on the RIGHT half");
 		assert.ok(cbox.y < box.y + box.height / 2, "cross on the TOP half");
+		await page.click('[data-testid="composer-images"] button[aria-label="View pasted image in full"]');
+		await page.waitForSelector('[data-testid="image-lightbox"] img');
+		await page.keyboard.press("Escape");
+		await page.waitForFunction(() => !document.querySelector('[data-testid="image-lightbox"]'));
 	});
 
 	it("session: click opens the picture full size, Esc closes it", async () => {
@@ -220,6 +224,17 @@ describe("composer image paste (e2e)", () => {
 		await page.keyboard.press("Enter");
 		await page.waitForSelector('[data-testid="user-image"]', { timeout: 20_000 });
 		assert.equal(await thumbs(), 0, "the draft clears on send");
+		// After the turn settles and the record is adopted, the optimistic row
+		// must have merged with the server's copy: one row, not two.
+		await page.waitForFunction(() => !document.querySelector('[aria-label="Stop"]'), { timeout: 20_000 });
+		await new Promise((r) => setTimeout(r, 1000));
+		assert.equal(await page.$$eval('[data-testid="user-message"]', (els) => els.length), 1, "no doubled learner row");
+		await page.click('[data-testid="user-image"]');
+		await page.waitForSelector('[data-testid="image-lightbox"] img');
+		await page.keyboard.press("Escape");
+		const markdown = await (await fetch(`${BASE}/api/chats/${chatId}/markdown`)).text();
+		assert.match(markdown, /what is this\?/, "the export keeps the words");
+		assert.ok(!markdown.includes(PNG.slice(0, 24)), "the export never carries base64");
 		await page.reload({ waitUntil: "domcontentloaded" });
 		await page.waitForSelector('[data-testid="user-image"]', { timeout: 20_000 });
 		const order = await page.$eval('[data-testid="user-message"]', (row) =>
@@ -293,6 +308,28 @@ describe("composer image paste (e2e)", () => {
 		await page.waitForFunction(() => /cannot read images/.test(document.querySelector('[data-testid="composer-images"] p')?.textContent ?? ""), { timeout: 20_000 });
 		assert.equal(await thumbs(), 1, "the picture is back in the draft");
 		assert.equal((await userMessages(chatId)).length, 0, "nothing was persisted");
+	});
+
+	it("session: switching to a text-only model keeps an image history usable for text", async () => {
+		const chatId = await openSession("e2e history downgrade");
+		await pasteFiles(COMPOSER, png());
+		await page.waitForSelector('[data-testid="composer-images"] img');
+		await page.keyboard.press("Enter");
+		await page.waitForSelector('[data-testid="user-image"]', { timeout: 20_000 });
+		await page.waitForFunction(() => !document.querySelector('[aria-label="Stop"]'), { timeout: 20_000 });
+		await fetch(`${BASE}/api/chats/${chatId}/settings`, {
+			method: "PUT",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({ model: TEXT_ONLY_MODEL }),
+		});
+		// The image gate applies to NEW pictures only; pi-ai downgrades the
+		// history's picture to a text placeholder for this model.
+		const res = await fetch(`${BASE}/api/chat`, {
+			method: "POST",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({ chatId, input: { type: "text", text: "and now in words?" } }),
+		});
+		assert.equal(res.status, 200, await res.clone().text());
 	});
 
 	it("home: an image-only first message opens a session titled for it, with the picture in it", async () => {
