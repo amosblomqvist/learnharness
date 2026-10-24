@@ -30,6 +30,7 @@ import { ChatGPTConnection } from "./chatgpt-connection.tsx";
 import { ProviderMenuList } from "./model-menu.tsx";
 import { MenuShell } from "@/components/menu-shell";
 import { notifySettingsSaved } from "@/components/settings-signal";
+import { DICTATION_SETTINGS_ROW, DictationSettings } from "./dictation-group.tsx";
 
 /** One pi-ai provider with plain API-key auth (the Platform seam —
  *  derived from pi-ai's own env-key table; no drift possible). */
@@ -478,6 +479,8 @@ export function KeysSection({
 						testid={`key-${status.id.toLowerCase()}`}
 					/>
 				))}
+				{/* Local models + the one method Dictate uses (issue #15). */}
+				{label === "Dictation" && <DictationSettings focus={initialRow === DICTATION_SETTINGS_ROW} />}
 			</SettingsGroup>)}
 
 		</>

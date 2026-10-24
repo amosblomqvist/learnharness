@@ -27,6 +27,7 @@ import type {
 	NotesSource,
 } from "./contracts.ts";
 import type { UserSettings } from "./settings.ts";
+import type { DictationState } from "./dictation.ts";
 
 // ─── ChatStore — the session record's home (data/chats) ─────────────────────
 
@@ -220,3 +221,56 @@ export interface AuthStore {
 	deleteAuthVar(name: string): void;
 }
 
+
+// ─── DictationStore — local dictation (issue #15, PR #50) ──────────────────
+
+/**
+ * Everything local dictation keeps under config.DICTATION_DIR: the
+ * selection record (state.json), downloaded models (models/<id>/, repo
+ * layout kept) and the ONNX runtime files (runtime/<version>/). Bytes in,
+ * bytes out — what to download, which method counts as selected, and
+ * which files a model needs are server-band/core concerns
+ * (src/server/dictation.ts, core/dictation.ts).
+ *
+ * Writes into a model go to a staging folder first; commitModel swaps it
+ * in whole, so a folder that exists is a complete download (and an update
+ * leaves the old one usable until then).
+ */
+export interface DictationStore {
+	/** The record, sanitized — absent or corrupt = the defaults. Never throws. */
+	readState(): DictationState;
+	writeState(state: DictationState): DictationState;
+	/** A complete model folder exists (its config.json is there). */
+	modelExists(id: string): boolean;
+	/** One repo file is present in the model folder. */
+	modelHasFile(id: string, repoPath: string): boolean;
+	/** When the model folder landed (setup order); 0 when absent. */
+	modelTime(id: string): number;
+	/** Absolute path of a model file, or null when absent or outside the
+	 *  model's folder (traversal-checked). */
+	modelFilePath(id: string, repoPath: string[]): string | null;
+	/** Clear the staging folder before a download starts. */
+	beginModel(id: string): void;
+	/** Stream one repo file into the staging folder. */
+	writeModelFile(
+		id: string,
+		repoPath: string,
+		body: ReadableStream<Uint8Array>,
+		onBytes?: (n: number) => void,
+	): Promise<void>;
+	/** Swap the staged folder in for the model (synchronous). */
+	commitModel(id: string): void;
+	/** Drop a staged download (the model folder, if any, stays). */
+	discardStaged(id: string): void;
+	/** Delete the model folder and anything staged. */
+	removeModel(id: string): void;
+	/** Absolute path of a cached runtime file, or null when absent. */
+	runtimeFilePath(version: string, file: string): string | null;
+	/** Stream one runtime file into the cache (renamed into place when complete). */
+	writeRuntimeFile(
+		version: string,
+		file: string,
+		body: ReadableStream<Uint8Array>,
+		onBytes?: (n: number) => void,
+	): Promise<void>;
+}

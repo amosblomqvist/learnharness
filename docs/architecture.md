@@ -61,9 +61,9 @@ Dependency arrows point **down only**. Each layer may import the core barrel; no
 │            but node-bound, hence kept out of the barrel)      │
 ├──────────────────────────────────────────────────────────────┤
 │ STORE      src/store       fs adapters: chats · graph        │
-│            ledgers · jobs (implement core ports) + two       │
-│            portless settings adapters. The ONLY modules     │
-│            that touch data/                                   │
+│            ledgers · jobs · dictation (implement core ports) │
+│            + two portless settings adapters. The ONLY        │
+│            modules that touch data/                          │
 └──────────────────────────────────────────────────────────────┘
 ```
 
@@ -79,7 +79,7 @@ Dependency arrows point **down only**. Each layer may import the core barrel; no
 ```mermaid
 flowchart TB
     subgraph SHELL["SHELL — render + transport, no domain logic"]
-        APP["app/ — pages + 28 API route handlers"]
+        APP["app/ — pages + 34 API route handlers"]
         COMP["components/ — session + home UI, graph canvas"]
     end
 
@@ -104,7 +104,7 @@ flowchart TB
     end
 
     subgraph STORE["STORE — src/store — fs adapters, only data/ writers"]
-        ADP["chats.ts · graph.ts · jobs.ts (implement core ports)"]
+        ADP["chats.ts · graph.ts · jobs.ts · dictation.ts (implement core ports)"]
         PORTLESS["render-settings.ts (portless)"]
     end
 
@@ -158,7 +158,7 @@ flowchart TB
 
 ## 3. Ports, adapters, and the composition roots
 
-Storage is **per-entity semantic ports**, never one generic interface: `ChatStore`, `GraphStore`, `JobStore`, `PracticeStore` (`src/core/ports.ts` — types only). The fs adapters (`src/store/{chats,graph,jobs,practice}.ts`) implement them and contain persistence and nothing else. One more adapter (`src/store/render-settings.ts`) is a portless free function re-exported through the server barrel — a deliberate pragmatic bypass, documented here so nobody mistakes it for the pattern.
+Storage is **per-entity semantic ports**, never one generic interface: `ChatStore`, `GraphStore`, `JobStore`, `PracticeStore`, `DictationStore` (`src/core/ports.ts` — types only). The fs adapters (`src/store/{chats,graph,jobs,practice,dictation}.ts`) implement them and contain persistence and nothing else. One more adapter (`src/store/render-settings.ts`) is a portless free function re-exported through the server barrel — a deliberate pragmatic bypass, documented here so nobody mistakes it for the pattern.
 
 **Idioms.** Graph evidence lives in **append-only JSONL ledgers** (corrupt-line-tolerant reads; strict shape guards drop invalid lines, never guess). Chats, jobs, positions, sources, and the settings blobs are whole-file read-modify-write JSON. All writes are synchronous, single-process (atomicity rides the Node event loop). Merge/dedup/derivation semantics are **reader-side, in core** — the store never decides.
 
@@ -172,7 +172,7 @@ The engine side is adapted too: `src/agent/models.ts` (`piEngineFor`) resolves e
 flowchart LR
     subgraph DRIVING["DRIVING ADAPTERS — inbound"]
         BROWSER["Browser UI — components/: question dock (addToolOutput) · graph canvas · docks"]
-        HTTP["HTTP transport — app/api/*: 28 route handlers"]
+        HTTP["HTTP transport — app/api/*: 34 route handlers"]
         NOTES["Notes front door — POST /api/graph/import"]
         ELEC["Electron main — thin launcher, spawns server, LH_DATA_DIR + BYOK env"]
     end
@@ -181,7 +181,7 @@ flowchart LR
         direction TB
         SESS["session brain: phases · plan-tree · question-core · pending · steer builders"]
         GBRAIN["graph brain: merger + derivation · coverage · clusters · layout"]
-        PORTSBOX["PORTS (types only): ChatStore · GraphStore · JobStore · PracticeStore"]
+        PORTSBOX["PORTS (types only): ChatStore · GraphStore · JobStore · PracticeStore · DictationStore"]
     end
 
     subgraph DRIVEN["DRIVEN ADAPTERS — outbound"]
@@ -189,6 +189,7 @@ flowchart LR
         LLM["LLM engines — pi-ai/OpenRouter via piEngineFor"]
         HEAD["headless Chrome — demo verify · SVG render"]
         DEEP["Deepgram STT — token-minting route, browser-side WebSocket"]
+        LSTT["On-device STT — transformers.js Web Worker (WebGPU/CPU); models + ONNX runtime downloaded server-side into data/dictation, served by /api/stt/*"]
         WEB["web tools — Google CSE + Readability/Jina (researcher)"]
     end
 
@@ -205,6 +206,7 @@ flowchart LR
     SESS --> HEAD
     SESS --> WEB
     BROWSER --> DEEP
+    BROWSER --> LSTT
 ```
 
 ---
@@ -405,6 +407,7 @@ flowchart LR
     subgraph OUTSIDE["outside the process"]
         OR["OpenRouter (BYOK key from auth.json, env-injected — never argv)"]
         DG["Deepgram STT (browser-direct WebSocket)"]
+        HF["Hugging Face · jsdelivr (dictation model + ONNX runtime downloads)"]
         GCSE["Google CSE / Jina (researcher tools)"]
         CHROME["system Chrome (headless: demo verify · SVG render)"]
         DISK["data/ ledgers (via LH_DATA_DIR seam)"]
@@ -413,6 +416,7 @@ flowchart LR
     NEXT --> GCSE
     NEXT --> CHROME
     NEXT --> DISK
+    NEXT --> HF
     REND --> DG
     REND -->|"fetch /api/*"| NEXT
 ```
@@ -502,6 +506,7 @@ The bus itself is a `globalThis`-backed listener set (the Next per-entry-module 
 - **Extraction-coverage ×2** (session menu block + ring) — bounded, run-scoped 2s reads: the ring drains **per fold**, and the events channel is per **phase**; that granularity gap is accepted by design (owner, 2026-10-02).
 - **The 409-retry poll** (`session-core.ts`, 500ms→5s ramp) — a racing client's bounded backoff while a turn it tried to start is already running; not standing.
 - **Dock clock ticker** (1s `setNow`) and **dictation audio meter** — local rendering, no network.
+- **Dictation model downloads** (Settings → Providers → Dictation) — bounded, run-scoped 1s reads of `GET /api/stt/methods` while a download runs, stopping when none does. Byte-level progress is finer than any event worth putting on the bus; the same granularity-gap reasoning as the extraction ring.
 - **Mount fast-paths kept** — `initiallyInFlight` (attach on render-time snapshot), the mount-time `needsContinuation` check, and the `lh:chat-renamed`/`lh:turn-state` **local window broadcasts** (instant same-tab patching; the channel is for cross-window and server-initiated truth).
 
 ---
@@ -537,6 +542,7 @@ Every place the architecture is designed to be cut — the "one file" a future c
 | Sub-agent verification | `sub-agents/headless.ts` (`headlessOverride`) | demo/SVG verification, no Chrome |
 | Data location (Electron) | `LH_DATA_DIR` env (`config.ts` PATHS) | where data/ lives, nothing else |
 | Desktop host | `electron/main.cjs` | launcher/security shell only |
+| Speech-to-text | `src/core/dictation.ts` (methods + model catalog) + `components/dictation.tsx` (`startEngine`) | the dictation engines, behind one selection |
 
 ---
 

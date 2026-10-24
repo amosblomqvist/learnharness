@@ -20,7 +20,9 @@ export const SETTINGS_SAVED_EVENT = "lh:settings-saved";
 // "keys" joined the roster (zero-keys wave, 2026-09-25): keys-section
 // dispatches it after save AND delete — deletions used to be invisible to
 // the zero-keys pill and the setup dialog's auto-advance.
-export type SettingsSection = "general" | "keys" | "agent" | "models" | "appearance" | "graph" | "compaction";
+// "dictation" (issue #15, PR #50): the Providers → Dictation settings
+// (method pick, device, downloads) — the Dictate button re-reads its methods.
+export type SettingsSection = "general" | "keys" | "agent" | "models" | "appearance" | "graph" | "compaction" | "dictation";
 
 /** Writers call this after the PUT resolves ok — never before (a failed
  *  write notifies nothing; the record is unchanged). */

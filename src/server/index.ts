@@ -44,3 +44,7 @@ export { runPiTurn, piTurnResponse, type PiTurnHandle, type PiTurnSpec } from ".
 export * from "./observability.ts";
 export * from "./model-catalog.ts";
 export { sessionCost } from "./pricing.ts";
+
+// Local dictation (issue #15, PR #50): method selection, curated
+// model downloads, model/runtime file serving.
+export * from "./dictation.ts";
