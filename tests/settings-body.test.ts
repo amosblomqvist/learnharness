@@ -16,6 +16,7 @@ import {
 	parseGeneralSettingsBody,
 	parseCompactionSettingsBody,
 	parseGraphSettingsBody,
+	parsePiSettingsBody,
 	SETTINGS_SECTIONS,
 } from "../src/server/settings-body.ts";
 
@@ -234,12 +235,12 @@ describe("parseCompactionSettingsBody (owner round 14)", () => {
 });
 
 describe("SETTINGS_SECTIONS (the route's section map)", () => {
-	it("maps exactly the seven record sections", () => {
+	it("maps exactly the eight record sections", () => {
 		// compaction joined (owner round 14): its own section PUT — the
 		// threshold is engine behavior, not an agent-section key.
 		assert.deepEqual(
 			Object.keys(SETTINGS_SECTIONS),
-			["general", "chat", "agent", "appearance", "graph", "compaction", "models"],
+			["general", "chat", "agent", "appearance", "graph", "compaction", "models", "pi"],
 		);
 	});
 });
@@ -287,5 +288,23 @@ describe("parseModelsSettingsBody (model slots wave, 2026-09-20)", () => {
 		assert.equal(parseModelsSettingsBody({ cheap: { model: { provider: "x" } } }).ok, false);
 		assert.equal(parseModelsSettingsBody({ vision: { thinkingLevel: 7 } }).ok, false);
 		assert.equal(parseModelsSettingsBody("nope").ok, false);
+	});
+});
+
+describe("parsePiSettingsBody", () => {
+	it("parses the switch and directory; a blank directory clears to the default", () => {
+		const r = parsePiSettingsBody({ enabled: false, dir: "  ~/work/.pi  " });
+		assert.ok(r.ok);
+		assert.deepEqual(r.settings, { enabled: false, dir: "~/work/.pi" });
+		const cleared = parsePiSettingsBody({ dir: "   " });
+		assert.ok(cleared.ok);
+		assert.deepEqual(cleared.settings, { dir: null });
+		assert.equal(SETTINGS_SECTIONS.pi, parsePiSettingsBody);
+	});
+
+	it("rejects wrong types", () => {
+		assert.equal(parsePiSettingsBody({ enabled: "yes" }).ok, false);
+		assert.equal(parsePiSettingsBody({ dir: 3 }).ok, false);
+		assert.equal(parsePiSettingsBody([]).ok, false);
 	});
 });
