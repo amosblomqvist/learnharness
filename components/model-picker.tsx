@@ -9,7 +9,7 @@ import { composeSlotModel } from "@/components/settings/agent-section";
 import { MenuShell } from "@/components/menu-shell";
 import { Hint } from "@/components/ui/hint";
 import { notifySettingsSaved, onSettingsSaved, useSettingsSaved } from "@/components/settings-signal";
-import { defaultOrderLevel, populateLevel, THINKING_LABEL } from "@/components/thinking-default";
+import { modelThinkingLevel, THINKING_LABEL } from "@/components/thinking-default";
 
 /** GET /api/models is cached per page load for instant menu opens, but
  *  the federation is LIVE per call — keys saved mid-session widen the
@@ -40,7 +40,7 @@ export function useModelCatalog(): { catalog: ModelCatalogResponse | undefined; 
 		catalogReaders.add(read);
 		if (first) {
 			stopCatalogSignals = onSettingsSaved((section) => {
-				if (section === "keys") {
+				if (section === "keys" || section === "acp") {
 					catalogGeneration++; catalogInflight = undefined; catalogCache = undefined;
 					publishCatalog(); fetchCatalog();
 				} else if (section === "models") fetchCatalog(true);
@@ -62,7 +62,7 @@ export function useModelCatalog(): { catalog: ModelCatalogResponse | undefined; 
  *  the honest-render precedent). Consumed by the stats bar: the same
  *  cached /api/models fetch the picker rides feeds the denominator. */
 export function catalogLimits(catalog: Pick<ModelCatalogResponse, "models">): Map<string, number> {
-	return new Map(catalog.models.map((m) => [`${m.provider}:${m.id}`, m.contextWindow]));
+	return new Map(catalog.models.filter((m) => m.contextWindow > 0).map((m) => [`${m.provider}:${m.id}`, m.contextWindow]));
 }
 
 /**
@@ -148,7 +148,7 @@ export function ModelControl({ chatId, onModelChange }: { chatId?: string; onMod
 	// stored level shows the RESOLVED level — the ordering's first supported
 	// — because that is exactly what the engine build would run. Display-
 	// only: the record stays unset until a fresh pick populates it.
-	const effectiveLevel = storedLevel ?? (entry ? defaultOrderLevel(levels) : undefined);
+	const effectiveLevel = entry ? modelThinkingLevel(storedLevel, entry) : storedLevel;
 
 	// The intuitive dropdown contract (owner, stats-control round 1): any
 	// click outside the open menu — or an Esc keypress — closes it. The
@@ -285,7 +285,7 @@ export function ModelControl({ chatId, onModelChange }: { chatId?: string; onMod
 		};
 		window.addEventListener("lh:kbd-cycle-thinking", onCycleThinking);
 		return () => window.removeEventListener("lh:kbd-cycle-thinking", onCycleThinking);
-	}, [levels, effectiveLevel, effectiveProvider, effectiveId, apply]);
+	}, [levels, effectiveLevel, effectiveProvider, effectiveId, apply, entry?.billing]);
 
 	// Selecting a model (click and Enter share one path): keep the
 	// thinking level only when the new model supports it — otherwise
@@ -299,7 +299,7 @@ export function ModelControl({ chatId, onModelChange }: { chatId?: string; onMod
 		// never re-enter through this door. (The DERIVED display level never
 		// rides — it belongs to the OLD model; the fresh pick's level comes
 		// from the fresh model's own ladder.)
-		const nextLevel = populateLevel(storedLevel, m.supportedLevels);
+		const nextLevel = modelThinkingLevel(storedLevel, m);
 		apply(m.provider, m.id, nextLevel);
 	};
 
@@ -333,7 +333,7 @@ export function ModelControl({ chatId, onModelChange }: { chatId?: string; onMod
 				// graph no longer bleeds through these pills.
 				className="flex items-center gap-1.5 rounded-full border bg-card/85 px-2.5 py-1 shadow-lg backdrop-blur transition-colors hover:border-border hover:bg-muted"
 			>
-				<span className="text-card-foreground">{effectiveId ? prettyModel(effectiveId) : "—"}</span>
+				<span className="text-card-foreground">{entry?.billing === "subscription" ? entry.name : effectiveId ? prettyModel(`${effectiveProvider}:${effectiveId}`) : "—"}</span>
 				<span aria-hidden className="text-xs text-muted-foreground">▾</span>
 			</button>
 			</Hint>
@@ -351,10 +351,11 @@ export function ModelControl({ chatId, onModelChange }: { chatId?: string; onMod
 				onClick={() => {
 					// No model picked → nothing to set a level FOR: the click
 					// is a no-op, never an empty menu.
-					if (entry === undefined) return;
+					if (entry === undefined || levels.length === 0) return;
 					openMenu("thinking");
 				}}
 				aria-expanded={open === "thinking"}
+				disabled={entry?.billing === "subscription" && levels.length === 0}
 				// Chrome look (owner, fix wave round 3): matches the graph
 				// view's floating top-right buttons (import notes, gear,
 				// coverage) — blurred, fuller opacity, shadowed — so the
@@ -364,7 +365,7 @@ export function ModelControl({ chatId, onModelChange }: { chatId?: string; onMod
 				{/* Just the level — the button reads like the model button reads
 				   the model name (owner, stats-control round 1). */}
 				<span className="text-card-foreground">
-					{effectiveLevel === undefined ? "—" : (THINKING_LABEL[effectiveLevel] ?? effectiveLevel)}
+					{effectiveLevel === undefined ? entry?.billing === "subscription" ? "Agent default" : "—" : (THINKING_LABEL[effectiveLevel] ?? effectiveLevel)}
 				</span>
 				<span aria-hidden className="text-xs text-muted-foreground">▾</span>
 			</button>
@@ -388,7 +389,7 @@ export function ModelControl({ chatId, onModelChange }: { chatId?: string; onMod
 						onPick={pickModel}
 						footer={
 							catalog && catalog.models.length === 0
-								? "No models — add a provider key in Keys"
+								? "No models — add a key or connect a subscription in Settings"
 								: chatId
 									? "This session's model"
 									: "Strong tier — the default for new sessions"
@@ -407,6 +408,8 @@ export function ModelControl({ chatId, onModelChange }: { chatId?: string; onMod
 					<ThinkingMenuList
 						levels={catalog ? levels : []}
 						effectiveLevel={effectiveLevel}
+						onPickDefault={entry?.billing === "subscription" ? () => apply(effectiveProvider ?? "", effectiveId ?? "", undefined) : undefined}
+						defaultLabel={chatId && strong?.thinkingLevel !== undefined ? "Use slot default" : "Agent default"}
 						onPick={(level) => apply(effectiveProvider ?? "", effectiveId ?? "", level as ThinkingLevel)}
 						empty={catalog ? (effectiveId ? `${prettyModel(effectiveId)} has no thinking levels.` : "Pick a model first.") : "Loading…"}
 						footer="Levels this model actually supports"

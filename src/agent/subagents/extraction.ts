@@ -1,5 +1,6 @@
 import * as crypto from "node:crypto";
 import type { Usage } from "@earendil-works/pi-ai";
+import { usageToCallUsage } from "../../core/usage.ts";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { Type, type Static, type TSchema } from "typebox";
 import { toToolResult } from "../tool-execute.ts";
@@ -772,16 +773,7 @@ export interface ExtractionPipeline {
  *  the cluster namer — the same capture shape (2026-09 graph cost
  *  metrics wave). Module scope: no closure deps, pure projection. */
 export function callUsage(usage: Usage): CallUsage {
-	return {
-		inputTokens: usage.input,
-		outputTokens: usage.output,
-		cacheReadTokens: usage.cacheRead,
-		cacheWriteTokens: usage.cacheWrite,
-		cacheWrite1hTokens: usage.cacheWrite1h ?? 0,
-		// Optional in pi's Usage (providers that never emit reasoning
-		// tokens leave it unset) — persisted as 0, never dropped.
-		reasoningTokens: usage.reasoning ?? 0,
-	};
+	return usageToCallUsage(usage);
 }
 
 export function createExtractionPipeline(deps: ExtractionPipelineDeps): ExtractionPipeline {

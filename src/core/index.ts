@@ -72,9 +72,11 @@ export * from "./session-navigation.ts";
 // shape rules + masking — pure, browser-safe (the auth page binds to the
 // /api/keys routes built on it).
 export * from "./auth-keys.ts";
+export * from "./acp.ts";
 // keyboard.ts: the shortcut registry + binding normalization (pure, browser-safe).
 export * from "./keyboard.ts";
-export * from "./coverage.ts";
+// Coverage fingerprints use node:crypto; server consumers import that module
+// directly so the public browser barrel stays free of Node builtins.
 // session-markdown.ts (2026-09-27 engine; first consumer 2026-10-06): the
 // ONE session→markdown formatter — the extractor's view and the user-facing
 // export share it. Pure, browser-safe.

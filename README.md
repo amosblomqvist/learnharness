@@ -48,13 +48,17 @@ Future teaching sessions can read the graph instead of starting from scratch. Pr
 - **Windows (x64):** run the installer. It is currently unsigned; Windows may show an “unknown publisher” or SmartScreen warning.
 - **Linux (x64):** make the AppImage executable and open it, or install the Debian/Ubuntu `.deb`.
 
-Add your provider API key and choose your models, then start a session with what you want to understand. LearnHarness supports 30+ provider options, including OpenAI, Anthropic, Google, DeepSeek, and OpenRouter. Optional dictation and web search use separate service keys.
+Connect your Codex or Claude Code subscription in **Settings → Subscriptions**, or add a provider API key, then choose your models and start a session. [Subscription setup](docs/acp-subscriptions.md) uses local ACP adapters and your existing CLI sign-in. LearnHarness also supports 30+ API provider options, including OpenAI, Anthropic, Google, DeepSeek, and OpenRouter. Optional dictation and web search use separate service keys.
+
+Running a built checkout locally: `npm run app` starts it at [127.0.0.1:3005](http://127.0.0.1:3005/chat/new). Keep the terminal open; Ctrl+C stops it. See [first build, model selection and ACP testing](docs/acp-manual-test.md).
+
+ACP support is available in source builds; packaged downloads need a release containing these changes.
 
 All three platforms support in-app updates.
 
 ## Your keys, your data
 
-- **Your keys and models.** No LearnHarness subscription or markup. You pay your providers for usage; a live cost meter shows model costs.
+- **Your subscriptions, keys, and models.** No LearnHarness subscription or markup. Use your Codex or Claude Code plan through ACP, subject to its limits, or pay your API providers for usage. The live meter distinguishes subscription use from API costs.
 - **Local storage.** Your chats, graph, settings, and API keys live on your machine. Learning records are plain files you can inspect.
 - **External services.** Models run through your configured providers. Model requests send the context needed for the task; web research and dictation also contact external services. Local storage does not mean offline processing.
 - **Inspectable behavior.** System prompts are visible and editable. The app is open source under the AGPL-3.0 license.

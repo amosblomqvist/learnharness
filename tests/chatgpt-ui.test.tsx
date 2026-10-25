@@ -48,6 +48,28 @@ test("shared ChatGPT-only readiness admits without API keys; connection invalida
  assert(!document.body.textContent?.includes("chatgpt:A"));
 });
 
+test("ACP readiness reaches every picker and setup reader; disconnect fences a stale connection catalog", async () => {
+ const requests: ReturnType<typeof deferred<Response>>[] = [];
+ globalThis.fetch = async () => { const request = deferred<Response>(); requests.push(request); return request.promise; };
+ const acpBody = (ready: boolean): ModelCatalogResponse => {
+  const catalog = body("model/fixture", ready);
+  catalog.providers = [{ id: "acp-claude", envVar: "", keyPresent: false, connectionReady: ready, billing: "subscription" }];
+  catalog.slots.strong = { model: { provider: "acp-claude", id: "model/fixture" } };
+  catalog.models = catalog.models.map((model) => ({ ...model, provider: "acp-claude", billing: "subscription", contextWindow: 0 }));
+  return catalog;
+ };
+ await mount(<><Reader id="first" /><Reader id="second" /></>);
+ await act(async () => requests[0]!.resolve(Response.json(acpBody(true))));
+ for (const value of Object.values(snapshots)) { assert.equal(value.zero, false); assert.equal(value.strong, false); assert.equal(value.catalog?.models[0]?.provider, "acp-claude"); }
+ await act(async () => notifySettingsSaved("acp"));
+ for (const value of Object.values(snapshots)) assert.equal(value.catalog, undefined);
+ await act(async () => notifySettingsSaved("acp"));
+ assert.equal(requests.length, 3);
+ await act(async () => requests[2]!.resolve(Response.json(acpBody(false))));
+ await act(async () => requests[1]!.resolve(Response.json(acpBody(true))));
+ for (const value of Object.values(snapshots)) { assert.equal(value.catalog?.models.length, 0); assert.equal(value.zero, true); assert.equal(value.strong, true); }
+});
+
 test("plan plus unknown graph rows keep the existing unknown suffix without fabricating API dollars", async () => {
  const step = { inputTokens: 100, outputTokens: 20, cacheReadTokens: 0, cacheWriteTokens: 0, reasoningTokens: 0 };
  const plan = { model: "chatgpt:gpt-5", steps: [step] };

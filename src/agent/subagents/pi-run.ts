@@ -65,10 +65,11 @@ export async function runSubagent(tools: AgentTool<any, any>[], opts: SubagentRu
 	let turns = 0;
 	// Debug recorder (owner, 2026-10-04): raw provider events per job run.
 	const providerEvents = opts.chatId ? providerEventObserver(opts.chatId, `job:${opts.role}`) : undefined;
+	const sessionId = randomUUID();
 	const agent = new Agent({
 		identity: APP_IDENTITY,
 		// One unsaved conversation per invocation, stable through every turn.
-		sessionId: randomUUID(),
+		sessionId,
 		initialState: {
 			systemPrompt: opts.systemPrompt,
 			model: engine.model,
@@ -128,6 +129,7 @@ export async function runSubagent(tools: AgentTool<any, any>[], opts: SubagentRu
 		else await agent.continue();
 	} finally {
 		opts.abortSignal?.removeEventListener("abort", onAbort);
+		await engine.closeSession?.(sessionId);
 	}
 
 	if (aborted || opts.abortSignal?.aborted) {

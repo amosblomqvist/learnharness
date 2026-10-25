@@ -44,18 +44,24 @@ let host: HTMLDivElement | null = null;
 let closed = 0;
 let completed = 0;
 
-async function mount({ keyed = false, catalogFails = false } = {}) {
+async function mount({ keyed = false, catalogFails = false, connectableSubscription = false } = {}) {
 	closed = 0;
 	completed = 0;
+	let connected = false;
 	globalThis.fetch = async (input, init) => {
-		assert.equal(init?.method ?? "GET", "GET", "interaction tests must not write data");
 		const path = new URL(String(input), "http://localhost").pathname;
+		if (connectableSubscription && path === "/api/acp/codex" && init?.method === "POST") {
+			connected = true;
+			return Response.json({ ok: true });
+		}
+		assert.equal(init?.method ?? "GET", "GET", "unexpected write outside the stubbed subscription connection");
 		if (path === "/api/keys") return Response.json({ providers: [provider], keys: [] });
+		if (path === "/api/acp") return Response.json({ connections: [] });
 		assert.equal(path, "/api/models");
 		if (catalogFails) throw new Error("fixture catalog failure");
 		return Response.json({
-			providers: [{ ...provider, keyPresent: keyed }],
-			models: keyed ? [model] : [],
+			providers: connected ? [{ id: "acp-codex", keyPresent: false, connectionReady: true }] : [{ ...provider, keyPresent: keyed }],
+			models: connected ? [{ ...model, id: "default", provider: "acp-codex", input: ["text", "image"], billing: "subscription" }] : keyed ? [model] : [],
 			slots: { strong: null, cheap: null, vision: null },
 		});
 	};
@@ -105,6 +111,14 @@ afterEach(async () => {
 });
 
 describe("setup polish interactions", () => {
+	it("connecting a subscription advances first-run setup without an API-key write or sending a message", async () => {
+		await mount({ connectableSubscription: true });
+		assert.ok(document.querySelector('[data-testid="subscription-codex"]'));
+		await click(element('[data-testid="subscription-codex"] button'));
+		assert.ok(document.querySelector('[data-testid="setup-stage-pickers"]'));
+		assert.equal(document.querySelector('[data-testid="setup-stage-keys"]'), null);
+		assert.equal(completed, 0);
+	});
 	it("provider dropdown closes on a click elsewhere inside the dialog without closing setup", async () => {
 		await mount();
 		await click(element('[data-testid="setup-key-provider"]'));

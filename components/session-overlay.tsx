@@ -1,4 +1,5 @@
 "use client";
+import { SvgImage } from "./artifacts/svg-image";
 
 import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { MaximizeIcon, MinusIcon, PlusIcon, XIcon } from "lucide-react";
@@ -276,15 +277,13 @@ export function MermaidOverlay({
 							    backing law — models draw for a white page) with the
 							    caller's invert filter riding it, exactly like the
 							    in-card holder. */}
-							<div
+							{rawSvg !== undefined ? <div data-lh-overlay-chart className="bg-white" style={inverted ? { filter: "invert(1) hue-rotate(180deg)" } : undefined}>
+								<SvgImage svg={svg} className="block h-auto w-full" />
+							</div> : <div
 								data-lh-overlay-chart
-								className={cn(
-									"[&_svg]:h-auto [&_svg]:w-full",
-									rawSvg !== undefined && "bg-white",
-								)}
-								style={rawSvg !== undefined && inverted ? { filter: "invert(1) hue-rotate(180deg)" } : undefined}
+								className="[&_svg]:h-auto [&_svg]:w-full"
 								dangerouslySetInnerHTML={{ __html: svg }}
-							/>
+							/>}
 						</div>
 						<div className="pointer-events-none absolute inset-x-0 bottom-0 flex items-end justify-between p-2">
 							<span className="text-xs text-muted-foreground/60">Drag to pan · scroll to zoom</span>

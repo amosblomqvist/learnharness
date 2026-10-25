@@ -44,6 +44,8 @@ export interface PiEngine {
 	/** The resolved (config-or-settings, CLAMPED) thinking level —
 	 *  observability + tests; the streamFn pins it anyway. */
 	level?: ThinkingLevel;
+	/** Release retained native state when a finite agent run ends. */
+	closeSession?: (sessionId: string) => Promise<void>;
 }
 
 export type { ThinkingLevel };

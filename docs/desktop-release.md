@@ -21,11 +21,13 @@ Each OS installs its own dependencies and builds its own Next standalone tree:
 1. `npm ci`
 2. Native PDF/SVG renderer tests for that OS, running in Electron's bundled Node (no display needed).
 3. `npm run build` (`output: "standalone"`).
-4. `node scripts/build-server.mjs` — copy static assets, refuse leaked data/keys, remove only standalone-root `dist/` and `node_modules/electron/` (old installers and the development runtime), check prompt assets. Runtime dependencies' own `dist/` directories and native renderer binaries stay intact.
+4. `node scripts/build-server.mjs` — repair standalone traces, copy static assets, refuse leaked data/keys, remove only standalone-root `dist/` and `node_modules/electron/` (old installers and the development runtime), check prompt assets. Runtime dependencies' own `dist/` directories and native renderer binaries stay intact.
 5. `node scripts/smoke-server.mjs --electron` — boot the standalone server in Electron's bundled Node, using empty temporary data/auth, then check the home route and GET-only APIs.
 6. `npx electron-builder <platform flags> --publish <policy>`.
 
 The shell/updater live in `app.asar`; the standalone server and native renderer binaries ship unpacked as `extraResources`. **Do not cross-build the server payload.** Next traces the build machine's native binaries, so a macOS-built standalone tree is not a Windows/Linux payload.
+
+The trace repair compensates for Next 16's Windows exclusion matching and missing metadata bootstrap dependency. It normalizes trace paths, removes project-root `data/`, `auth.json`, and `.env*` entries plus their explicitly traced standalone copies, and traces/copies the metadata module's runtime dependency closure. Source data stays untouched; symlink escapes and untraced private files still fail packaging. The repaired manifests are saved for subsequent payload audits. The Next config explicitly includes the runtime-discovered prompt fragments. Keep this step before the smoke check and installer build.
 
 `npm run desktop:dist` remains the local macOS signing path, using the `LH_NOTARY` keychain profile. For a local Windows/Linux build, run steps 1–5 above, then:
 

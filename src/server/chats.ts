@@ -5,6 +5,7 @@ import { titleFromPrompt } from "../core/contracts.ts";
 import { graphRevision } from "./graph.ts";
 import { stores } from "./stores.ts";
 import { isTurnRunning } from "./turn-liveness.ts";
+import { closeAcpSessions } from "../agent/acp/engine.ts";
 
 /**
  * Server-side chat entries for the transport layer (app/api/chats*,
@@ -54,7 +55,7 @@ export type ChatDeleteOutcome =
  *      CANCELLED (abortExtraction: spend stops, nothing merges), then
  *      awaited off the registry. A timeout is a retryable 503, never a
  *      forced race.
- *   3. THE SYNC BLOCK — everything below runs without a single await:
+ *   3. THE SYNC BLOCK — ledger, job and chat deletion run without an await:
  *      no extraction append can interleave (the event loop never yields
  *      mid-block), so the read-filter-write of the ledger rewrites is
  *      atomic against the pipeline. Ledgers first, jobs next, the chat
@@ -64,6 +65,8 @@ export type ChatDeleteOutcome =
  *      (extraction.ts) closes the last window: a run that slipped past
  *      the wind-down finds the chat gone at its merge and aborts with
  *      nothing merged.
+ *   4. NATIVE CLEANUP — after deletion, release retained ACP state. This
+ *      wait does not split the synchronous record/ledger deletion block.
  */
 export async function deleteChatSession(chatId: string, mode: ChatDeleteMode): Promise<ChatDeleteOutcome> {
 	if (!stores.chatStore.getChat(chatId)) {
@@ -104,11 +107,12 @@ export async function deleteChatSession(chatId: string, mode: ChatDeleteMode): P
 		}
 	}
 
-	// THE SYNC BLOCK — no awaits below (see the doc comment). Order:
+	// THE SYNC BLOCK — no awaits through deleteChat (see the doc comment). Order:
 	// ledgers → jobs → the chat record.
 	const stats = deleteChatTraces(stores.graphStore, chatId, mode);
 	const jobsRemoved = stores.jobStore.deleteJobsForChat(chatId);
 	stores.chatStore.deleteChat(chatId);
+	await closeAcpSessions(undefined, chatId);
 	return { ok: true, mode, stats, jobsRemoved, graphRevision: graphRevision() };
 }
 

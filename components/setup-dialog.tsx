@@ -45,9 +45,10 @@ import { Hint } from "@/components/ui/hint";
 import { type ProviderKeyInfo } from "@/components/settings/keys-section";
 import { ProviderMenuList } from "@/components/settings/model-menu";
 import { ChatGPTBackgroundAccess } from "@/components/settings/chatgpt-connection";
-import { NativeSubscriptionBackgroundAccess, SubscriptionConnections } from "@/components/settings/subscription-connections";
-import { defaultOrderLevel, populateLevel, THINKING_LABEL } from "@/components/thinking-default";
+import { NativeSubscriptionBackgroundAccess, SubscriptionConnections as NativeSubscriptionConnections } from "@/components/settings/subscription-connections";
+import { modelThinkingLevel, THINKING_LABEL } from "@/components/thinking-default";
 import { ThinkingMenuList } from "@/components/settings/model-menu";
+import { SubscriptionConnections } from "@/components/settings/subscriptions-section";
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 
 /** The pickers' slot identity — same roster language as the Agent
@@ -62,7 +63,7 @@ const SLOT_ORDER: readonly ModelSlotName[] = ["strong", "cheap", "vision"];
 /** The GET /api/models response fields the flow consumes. */
 interface ModelsBody {
 	models: ModelCatalogEntry[];
-	providers: { id: string; keyPresent: boolean }[];
+	providers: { id: string; keyPresent: boolean; connectionReady?: boolean }[];
 	/** The three tiers' RESOLVED pins (BYOK: NULL per unset tier) — the
 	 *  PREFILL + "needed" marks (owner, 2026-09-22): pinned tiers open
 	 *  with their pick, unpinned tiers carry the mark. */
@@ -72,10 +73,10 @@ interface ModelsBody {
 /** Pure: which stage the flow opens at — no keyed provider = keys first
  *  (owner's dependency ordering). Exported for tests. */
 export function setupStage(
-	providers: { id: string; keyPresent: boolean }[] | null,
+	providers: { id: string; keyPresent: boolean; connectionReady?: boolean }[] | null,
 ): "keys" | "pickers" {
 	if (providers === null) return "keys"; // fetch failed → the honest fallback
-	return providers.some((p) => p.keyPresent) ? "pickers" : "keys";
+	return providers.some((p) => p.keyPresent || p.connectionReady) ? "pickers" : "keys";
 }
 
 /** Prefill (owner, BYOK wave 2026-09-22): each pinned tier opens with its
@@ -106,8 +107,8 @@ export function prefillFromSlots(
 export function prefillLevelFromPin(
 	entry: ModelCatalogEntry,
 	pin: { thinkingLevel?: ThinkingLevel } | null | undefined,
-): ThinkingLevel {
-	return populateLevel(pin?.thinkingLevel, entry.supportedLevels);
+): ThinkingLevel | undefined {
+	return modelThinkingLevel(pin?.thinkingLevel, entry);
 }
 
 /** Stage 1's pure body — exported for SSR pins (the delete/settings
@@ -212,7 +213,7 @@ export function SetupKeysBody({
 					</p>
 				)}
 			</div>
-			<div className="mt-2 border-t border-border/60 pt-4"><h3 className="mb-3 font-ui text-xs text-muted-foreground">Subscriptions</h3><SubscriptionConnections setup /></div>
+			<div className="mt-2 border-t border-border/60 pt-4"><h3 className="mb-3 font-ui text-xs text-muted-foreground">Subscriptions</h3><NativeSubscriptionConnections setup /></div>
 		</div>
 	);
 }
@@ -260,7 +261,7 @@ export function SetupDialog({
 	// the widened catalog — no restart, no Settings round-trip.
 	const [keysTick, setKeysTick] = useState(0);
 	useSettingsSaved((section) => {
-		if (section === "keys") setKeysTick((t) => t + 1);
+		if (section === "keys" || section === "acp") setKeysTick((t) => t + 1);
 	});
 
 	// Fresh /api/models per open AND per keys change — a key saved a
@@ -428,12 +429,15 @@ export function SetupDialog({
 				</header>
 
 				{stage === "keys" ? (
-					<div className="flex flex-col px-6 py-5">
+					<div className="flex flex-col overflow-y-auto px-6 py-5">
 						{failed ? (
 							<p className="text-sm text-foreground">
 								Model catalog could not be loaded. Check the connection and retry.
 							</p>
 						) : (
+							<>
+								<SubscriptionConnections />
+								<p className="mt-5 border-t border-border pt-4 text-xs text-muted-foreground">Or use a provider API key.</p>
 							<SetupKeysBody
 								providers={keyProviders}
 								provider={keyProvider}
@@ -451,6 +455,7 @@ export function SetupDialog({
 								onValue={setKeyValue}
 								onSave={() => void saveKey()}
 							/>
+							</>
 						)}
 					</div>
 				) : (
@@ -489,7 +494,7 @@ export function SetupDialog({
 												onClick={() => setOpenMenu(openMenu?.slot === slot && openMenu.kind === "model" ? null : { slot, kind: "model" })}
 												className="flex h-7 min-w-40 w-full items-center gap-1 rounded-sm border border-border bg-background px-1.5 font-ui text-xs text-foreground transition-colors hover:border-muted-foreground/50"
 											>
-												<span className="min-w-0 flex-1 truncate">{entry ? prettyModel(entry.id) : "Pick a model…"}</span>
+												<span className="min-w-0 flex-1 truncate">{entry ? prettyModel(`${entry.provider}:${entry.id}`) : "Pick a model…"}</span>
 												<span aria-hidden className="text-muted-foreground">
 													▾
 												</span>
@@ -523,7 +528,7 @@ export function SetupDialog({
 															// explicit one rides (Save clamps server-side).
 															setLevels((prev) => ({
 																...prev,
-																[slot]: populateLevel(prev[slot], m.supportedLevels),
+																[slot]: modelThinkingLevel(prev[slot], m),
 															}));
 															setOpenMenu(null);
 														}}
@@ -540,12 +545,12 @@ export function SetupDialog({
 												aria-label={`${SLOT_META[slot].label} thinking`}
 												data-testid={`setup-thinking-${slot}`}
 												aria-expanded={openMenu?.slot === slot && openMenu.kind === "thinking"}
-												disabled={!entry}
+												disabled={!entry || (entry.billing === "subscription" && levelsForEntry.length === 0)}
 												onClick={() => setOpenMenu(openMenu?.slot === slot && openMenu.kind === "thinking" ? null : { slot, kind: "thinking" })}
 												className="flex h-7 w-24 items-center gap-1 rounded-sm border border-border bg-background px-1.5 font-ui text-xs text-foreground transition-colors hover:border-muted-foreground/50 disabled:cursor-not-allowed disabled:opacity-40"
 											>
 												<span className="min-w-0 flex-1 truncate text-left">
-													{entry ? (level ? THINKING_LABEL[level] ?? level : "…") : "—"}
+													{level ? THINKING_LABEL[level] ?? level : entry?.billing === "subscription" ? "Agent default" : entry ? "…" : "—"}
 												</span>
 												<span aria-hidden className="text-muted-foreground">
 													▾
@@ -562,6 +567,7 @@ export function SetupDialog({
 													<ThinkingMenuList
 														levels={levelsForEntry.map(String)}
 														effectiveLevel={level}
+														onPickDefault={entry?.billing === "subscription" ? () => { setLevels((prev) => ({ ...prev, [slot]: undefined })); setOpenMenu(null); } : undefined}
 														onPick={(lv) => {
 															setLevels((prev) => ({ ...prev, [slot]: lv as ThinkingLevel }));
 															setOpenMenu(null);

@@ -54,7 +54,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { MenuShell } from "@/components/menu-shell";
 import { useSettingsSaved } from "@/components/settings-signal";
-import { defaultOrderLevel, populateLevel } from "@/components/thinking-default";
+import { defaultOrderLevel, modelThinkingLevel } from "@/components/thinking-default";
 import type React from "react";
 import {
 	COMPACTION_THRESHOLD_FLOOR,
@@ -362,7 +362,7 @@ export function AgentSection({
 	}, []);
 
 	useSettingsSaved((section) => {
-		if (section === "models" || section === "keys") readModels(section === "keys");
+		if (section === "models" || section === "keys" || section === "acp") readModels(section === "keys" || section === "acp");
 		// THE state-echo root cause: the prompt switches write through the
 		// agent section, but this view (the toggles' truth) never re-read —
 		// the settings-saved law (every reader re-reads) was missing this
@@ -619,7 +619,7 @@ export function AgentSection({
 					const override = models?.[slot];
 					const modelId = override?.model?.id ?? "";
 					const provider = override?.model?.provider ?? "";
-					const thinking = override?.thinkingLevel ?? "";
+					const storedThinking = override?.thinkingLevel;
 					// The tier's resolved pin is machinery only now (owner, fix
 					// wave): the UI never names the factory fallback — the hint
 					// carries the roster, the triggers read "—" when unpicked — but
@@ -631,6 +631,7 @@ export function AgentSection({
 					// catalog); the standard ladder as the last fallback.
 					const coord = override?.model ?? pin?.model;
 					const chosen = coord ? catalog?.find((m) => m.id === coord.id && m.provider === coord.provider) : undefined;
+					const thinking = (chosen?.billing === "subscription" ? modelThinkingLevel(storedThinking, chosen) : storedThinking) ?? "";
 					const levels = chosen ? chosen.supportedLevels : THINKING_LEVELS;
 					const thisMenuOpen = openMenu?.target === slot ? openMenu.kind : null;
 					// Vision slots pick from image-capable models only.
@@ -651,7 +652,7 @@ export function AgentSection({
 							>
 								{slot !== "strong" && <><ChatGPTBackgroundAccess provider={coord?.provider} /><NativeSubscriptionBackgroundAccess provider={coord?.provider} /></>}
 								<MenuTrigger
-									value={modelId ? prettyModel(modelId) : ""}
+									value={modelId ? prettyModel(`${provider}:${modelId}`) : ""}
 									emptyLabel="—"
 									ariaLabel={`${SLOT_META[slot].label} model`}
 									testid={`slot-model-${slot}`}
@@ -663,7 +664,8 @@ export function AgentSection({
 									// Legacy display (chunk 2 item 4): no stored level + a known
 									// model → the RESOLVED level (the ordering's first supported —
 									// what the engine build runs). Display-only until a pick writes.
-									value={thinking || (chosen ? defaultOrderLevel(levels) : "")}
+									value={thinking || (chosen?.billing === "subscription" ? "Agent default" : chosen ? defaultOrderLevel(levels) : "")}
+									disabled={chosen?.billing === "subscription" && levels.length === 0}
 									emptyLabel="—"
 									ariaLabel={`${SLOT_META[slot].label} thinking`}
 									testid={`slot-thinking-${slot}`}
@@ -686,13 +688,13 @@ export function AgentSection({
 												// Auto-populate (chunk 2, owner: "populate everywhere"): the
 												// fresh pick writes a level — the stored one rides as-is
 												// (the write clamps server-side), else the ordering's level.
-												const next = populateLevel(thinking || undefined, entry.supportedLevels);
-												onModelsChange(composeSlotModel(models, slot, entry.provider, entry.id, next));
+												const next = modelThinkingLevel(thinking || undefined, entry);
+												onModelsChange(composeSlotModel(models, slot, entry.provider, entry.id, next ?? ""));
 												setOpenMenu(null);
 											}}
 											footer={
 												catalog && catalog.length === 0
-													? "No models — add a provider key in Keys"
+													? "No models — add a key or connect a subscription in Settings"
 													: "Runs every agent of this tier"
 											}
 										/>
@@ -709,7 +711,8 @@ export function AgentSection({
 											levels={levels.map(String)}
 											// The ✓ sits on the RESOLVED level for legacy unset records —
 											// the same one the trigger shows.
-											effectiveLevel={thinking || (chosen ? defaultOrderLevel(levels) : undefined)}
+												effectiveLevel={thinking || (chosen ? modelThinkingLevel(undefined, chosen) : undefined)}
+												onPickDefault={chosen?.billing === "subscription" ? () => { onModelsChange(composeSlotModel(models, slot, provider, modelId, "")); setOpenMenu(null); } : undefined}
 											onPick={(level) => {
 												onModelsChange(composeSlotModel(models, slot, provider, modelId, level));
 												setOpenMenu(null);

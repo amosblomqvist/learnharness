@@ -28,7 +28,7 @@ import {
 import { createTeacherAgent } from "../src/agent/teacher-agent.ts";
 import { createTeacherTools } from "../src/agent/tools.ts";
 import { handleChatInput, handleChatRequest } from "../src/server/chat-handler.ts";
-import { effectiveSettings } from "../src/server/stores.ts";
+import { effectiveSettings, stores } from "../src/server/stores.ts";
 import { isTurnRunning } from "../src/server/turn-liveness.ts";
 import { deliverJobResult, setTurnRunner } from "../src/server/jobs.ts";
 import { buildSubagentSteer } from "../src/core/contracts.ts";
@@ -222,6 +222,21 @@ function post(chatId: string, input: unknown): Request {
 		body: JSON.stringify({ chatId, input }),
 	});
 }
+
+it("a failed usage append still persists the answer and clears turn liveness", async (test) => {
+	const chat = createConfiguredChat("Test: unavailable usage log");
+	createdChats.push(chat.id);
+	const { engine } = scriptedTeacher(() => [fauxAssistantMessage([fauxText("A persisted answer.")])]);
+	const append = test.mock.method(stores.chatStore, "appendTurnUsage", () => { throw new Error("fixture: usage disk write failed"); });
+	await drainTurn(post(chat.id, { type: "text", text: "hello" }), (opts) => createTeacherAgent(undefined, { ...opts, engine }));
+	assert.equal(append.mock.callCount(), 1);
+	assert.equal(isTurnRunning(chat.id), false);
+	assert.equal(runningTurn(chat.id), undefined);
+	assert.match(JSON.stringify(chatStore.getChat(chat.id)?.messages), /A persisted answer/);
+	const next = scriptedTeacher(() => [fauxAssistantMessage([fauxText("The next answer.")])]);
+	await drainTurn(post(chat.id, { type: "text", text: "continue" }), agentFactory(next.engine));
+	assert.match(JSON.stringify(chatStore.getChat(chat.id)?.messages), /The next answer/);
+});
 
 /** The silent-dismissal route POST (module scope — the parallel-rounds
  *  pins drive it too). */

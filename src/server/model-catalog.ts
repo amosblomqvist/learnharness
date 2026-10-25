@@ -20,6 +20,8 @@
 import { clampThinkingLevel, getSupportedThinkingLevels, type Api, type Model } from "@earendil-works/pi-ai";
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import { piModels } from "../agent/models.ts";
+import { acpModel } from "../agent/acp/engine.ts";
+import { ACP_AGENTS, acpAgentForProvider } from "../core/acp.ts";
 import { chatGPTConnected, chatGPTModel, chatGPTModels, refreshChatGPTModels } from "../agent/chatgpt-bridge.ts";
 import { NATIVE_SUBSCRIPTIONS } from "../core/contracts/subscriptions.ts";
 import { nativeSubscriptionId, nativeSubscriptionConnected, nativeSubscriptionModel, nativeSubscriptionModels, refreshSubscriptionModels } from "../agent/subscription-bridge.ts";
@@ -31,12 +33,18 @@ export async function refreshConnectionCatalog(provider?: string): Promise<void>
 	]);
 }
 function connectionModel(provider: string, id: string): Model<Api> | undefined {
+	const agent = acpAgentForProvider(provider);
+	if (agent) {
+		const info = settingsStore.readSettings()?.acp?.[agent.id]?.models?.find((model) => model.id === id);
+		return info || id === "default" ? acpModel(agent.id, info) : undefined;
+	}
 	return provider === "chatgpt" ? chatGPTModel(id) : nativeSubscriptionId(provider) ? nativeSubscriptionModel(provider, id) : piModels().getModel(provider, id);
 }
-function connectionProviderIds(): string[] { return [...piModels().getProviders().map((p) => p.id), "chatgpt", ...NATIVE_SUBSCRIPTIONS.map((p) => p.logicalId)]; }
+function connectionProviderIds(): string[] { return [...piModels().getProviders().map((p) => p.id), "chatgpt", ...NATIVE_SUBSCRIPTIONS.map((p) => p.logicalId), ...ACP_AGENTS.map((agent) => agent.provider)]; }
 import { settingsStore } from "../store/settings.ts";
 import { effectiveSettings } from "./stores.ts";
 import { keyValue } from "./keys.ts";
+import { localAcpEnabled } from "./acp-host.ts";
 import type { ChatSettings } from "../core/contracts/chat.ts";
 import type {
 	CatalogDefaults,
@@ -135,14 +143,20 @@ export function catalogSlots(): SlotPins {
  *  with keyPresent read env-wins through the keys seam, fresh per call —
  *  saving a key immediately federates the provider into the picker. */
 export function catalogProviders(): CatalogProvider[] {
-	return AUTH_PROVIDER_KEYS.map((p) => ({
+	const keyed: CatalogProvider[] = AUTH_PROVIDER_KEYS.map((p) => ({
 		id: p.id,
 		envVar: p.envVar,
 		keyPresent: keyValue(p.envVar) !== undefined,
-	})).concat([
+	}));
+	keyed.push(
 		{ id: "chatgpt", envVar: "", keyPresent: chatGPTConnected() },
 		...NATIVE_SUBSCRIPTIONS.map((p) => ({ id: p.logicalId, envVar: "", keyPresent: nativeSubscriptionConnected(p.providerId) })),
-	]).sort((a, b) => a.id.localeCompare(b.id));
+	);
+	const connections = settingsStore.readSettings()?.acp;
+	for (const agent of ACP_AGENTS) {
+		if (localAcpEnabled() && connections?.[agent.id]?.enabled) keyed.push({ id: agent.provider, envVar: "", keyPresent: false, connectionReady: true, billing: "subscription" });
+	}
+	return keyed.sort((a, b) => a.id.localeCompare(b.id));
 }
 
 /** The providers whose key is present — the picker federates exactly
@@ -155,12 +169,13 @@ function keyedProviderIds(): Set<string> {
 /** Project one catalog model to the client DTO. */
 export function toModelDto(model: Model<Api>): ModelDto {
 	return {
+		...(model.api === "acp" ? { billing: "subscription" as const } : {}),
 		id: model.id,
 		name: model.name,
 		provider: model.provider,
 		reasoning: model.reasoning,
 		input: [...model.input],
-		supportedLevels: getSupportedThinkingLevels(model),
+		supportedLevels: model.api === "acp" && !model.reasoning ? [] : getSupportedThinkingLevels(model),
 		cost: {
 			input: model.cost.input,
 			output: model.cost.output,
@@ -198,13 +213,22 @@ export function catalogContextLimits(): Map<string, number> {
  *  pins (the settings UI's per-role default captions). */
 export function modelCatalog(): ModelCatalogResponse {
 	const keyed = keyedProviderIds();
-	const models = piModels()
+	const connections = settingsStore.readSettings()?.acp;
+	const nativeModels = piModels()
 		.getProviders()
 		.filter((p) => keyed.has(p.id))
-		.flatMap((p) => piModels().getModels(p.id))
+		.flatMap((p) => piModels().getModels(p.id));
+	const models = [
+		...nativeModels,
+		...chatGPTModels(),
+		...nativeSubscriptionModels(),
+		...ACP_AGENTS.filter((agent) => localAcpEnabled() && connections?.[agent.id]?.enabled).flatMap((agent) => {
+			const models = connections?.[agent.id]?.models;
+			return models?.length ? models.map((model) => acpModel(agent.id, model)) : [acpModel(agent.id)];
+		}),
+	]
 		.map(toModelDto)
-		.sort((a, b) => (a.provider === b.provider ? a.id.localeCompare(b.id) : a.provider.localeCompare(b.provider)))
-		.concat([...chatGPTModels(), ...nativeSubscriptionModels()].map(toModelDto));
+		.sort((a, b) => (a.provider === b.provider ? a.id.localeCompare(b.id) : a.provider.localeCompare(b.provider)));
 	return {
 		models,
 		defaults: catalogDefaults(),
@@ -283,8 +307,10 @@ function validateSlotSpec(name: ModelSlotName, slot: { model?: { provider: strin
 /** Clamp one level against one model (identity when the model is unknown
  *  or the level already supported — the existence gate rejects unknown
  *  models separately, so this only ever sees real ones in practice). */
-function clampLevelFor(provider: string, id: string, level: ThinkingLevel): ThinkingLevel {
+function clampLevelFor(provider: string, id: string, level: ThinkingLevel): ThinkingLevel | undefined {
 	const model = connectionModel(provider, id);
+	if (model?.api === "acp" && id === "default" && level === "off" && model.thinkingLevelMap?.off === null) return undefined;
+	if (model?.api === "acp" && !model.reasoning) return undefined;
 	return model ? clampThinkingLevel(model, level) : level;
 }
 

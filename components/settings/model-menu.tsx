@@ -131,7 +131,7 @@ export function ModelMenuList({
 							</span>
 							<span className="flex items-center justify-between gap-2 text-muted-foreground">
 								<span className="truncate">{subscriptionLabel(`${m.provider}:${m.id}`) ? `${subscriptionLabel(`${m.provider}:${m.id}`)} (subscription)` : m.provider} · {m.id}</span>
-								<span className="shrink-0 tabular-nums">{formatTokens(m.contextWindow)}</span>
+								<span className="shrink-0 tabular-nums">{m.contextWindow > 0 ? formatTokens(m.contextWindow) : "Agent default"}</span>
 							</span>
 						</button>
 					</li>
@@ -152,6 +152,8 @@ export function ThinkingMenuList({
 	onPick,
 	empty,
 	footer,
+	onPickDefault,
+	defaultLabel = "Agent default",
 }: {
 	levels: string[];
 	effectiveLevel: string | undefined;
@@ -159,9 +161,14 @@ export function ThinkingMenuList({
 	/** Shown instead of the list when there are no levels. */
 	empty?: string;
 	footer?: string;
+	onPickDefault?: () => void;
+	defaultLabel?: string;
 }) {
 	return (
 		<>
+			{onPickDefault && <button type="button" data-testid="thinking-option-default" onClick={onPickDefault} className="flex items-center justify-between rounded-lg px-2 py-1.5 text-left hover:bg-muted">
+				<span>{defaultLabel}</span>{effectiveLevel === undefined && <span aria-hidden>✓</span>}
+			</button>}
 			{levels.length === 0 ? (
 				<div className="px-2 py-3 text-center text-muted-foreground">{empty ?? "No thinking levels."}</div>
 			) : (

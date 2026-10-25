@@ -1,4 +1,5 @@
 import type { Usage } from "@earendil-works/pi-ai";
+import { usageToCallUsage } from "../core/usage.ts";
 import {
 	createPracticeAgent,
 	createProberAgent,
@@ -6,7 +7,8 @@ import {
 	type AgentBuildOptions,
 	type TeachingAgent,
 } from "../agent/teacher-agent.ts";
-import { piEngineForSpec, type PiEngine } from "../agent/models.ts";
+import type { PiEngine } from "../agent/models.ts";
+import { AcpConnectionUnavailable, engineForSpec } from "./acp.ts";
 import { connectionBackgroundAllowed, connectionScopeCurrent, isSubscriptionProvider } from "../agent/subscription-connections.ts";
 import { nativeSubscriptionError } from "../agent/subscription-stream.ts";
 import { chatGPTStreamError } from "../agent/chatgpt-stream.ts";
@@ -137,7 +139,7 @@ setTurnRunner(async (chatId, input) => {
  *  FRESH so a settings PUT between dispatch and spawn lands. */
 function resolveEngine(role: ModelRole): PiEngine | undefined {
 	const spec = resolveRoleSpec(role, stores.settingsStore.readSettings());
-	return spec ? piEngineForSpec(spec) : undefined;
+	return spec ? engineForSpec(spec) : undefined;
 }
 
 setJobRespawn((jobId) => void jobRunner.runJob(jobId));
@@ -236,13 +238,15 @@ export async function handleChatInput(
 		noDispatch: (kind) => requestCycle?.noDispatch(kind),
 	};
 	let conversationEngine: PiEngine;
-	try { conversationEngine = piEngineForSpec(conversation, () => callPurpose.background, lifecycle); }
-	catch { return Response.json({ error: conversation.provider === "chatgpt" ? chatGPTStreamError("model catalog") : isSubscriptionProvider(conversation.provider) ? nativeSubscriptionError(conversation.provider, "model catalog") : "The selected model is unavailable." }, { status: 503 }); }
+	try { conversationEngine = engineForSpec(conversation, () => callPurpose.background, lifecycle); }
+	catch (error) {
+		if (error instanceof AcpConnectionUnavailable) return Response.json({ code: "acp_connection_unavailable", error: error.message }, { status: 503 });
+		return Response.json({ error: conversation.provider === "chatgpt" ? chatGPTStreamError("model catalog") : isSubscriptionProvider(conversation.provider) ? nativeSubscriptionError(conversation.provider, "model catalog") : "The selected model is unavailable." }, { status: 503 }); }
 	const modelIdForCompaction = `${conversationEngine.model.provider}:${conversationEngine.model.id}`;
 	await ensureCompacted(
 		{
 			chatStore: stores.chatStore,
-			engine: piEngineForSpec(conversation, true),
+			engine: engineForSpec(conversation, true),
 			canStart: () => connectionBackgroundAllowed(conversation.provider),
 			modelId: modelIdForCompaction,
 			kind: record.kind === "practice" ? "practice" : hasProbeDone(record.messages) ? "teach" : "probe",
@@ -329,15 +333,7 @@ export async function handleChatInput(
 	const turnUsageId = crypto.randomUUID();
 	const steps: CallUsage[] = [];
 	const collectUsage = (usage: Usage) => {
-		steps.push({
-			inputTokens: usage.input,
-			outputTokens: usage.output,
-			cacheReadTokens: usage.cacheRead,
-			cacheWriteTokens: usage.cacheWrite,
-			cacheWrite1hTokens: usage.cacheWrite1h ?? 0,
-			// Optional in pi's Usage — persisted as 0, never dropped.
-			reasoningTokens: usage.reasoning ?? 0,
-		});
+		steps.push(usageToCallUsage(usage));
 	};
 
 	// AGENT CONSTRUCTION BRANCH (docs/probe-teach-split.md §2): the transcript
@@ -500,56 +496,62 @@ export async function handleChatInput(
 				// Wave B: the record write is the agent's own final state —
 				// the new messages are the slice past the merged base.
 				const stamped = persistTurn(stores.chatStore, chatId, persistBaseCount, turnMessages, isAborted);
-				// usage log append (idempotent per turn id) — the stats bar
-				// refolds this on the client after the turn settles. The
-				// provenance message is the turn's FIRST new assistant message.
-				const response = stamped.find((m) => (m as { role?: string }).role === "assistant");
-				if (response && steps.length > 0) {
-					stores.chatStore.appendTurnUsage(chatId, {
-						id: turnUsageId,
-						messageId: response.id,
-						at: new Date().toISOString(),
-						model: modelId,
-						steps,
-					});
+				try {
+					// usage log append (idempotent per turn id) — the stats bar
+					// refolds this on the client after the turn settles. The
+					// provenance message is the turn's FIRST new assistant message.
+					const response = stamped.find((m) => (m as { role?: string }).role === "assistant");
+					if (response && steps.length > 0) {
+						try {
+							stores.chatStore.appendTurnUsage(chatId, {
+								id: turnUsageId, messageId: response.id,
+								at: new Date().toISOString(), model: modelId, steps,
+							});
+						} catch (error) {
+							// Accounting is secondary to the persisted conversation. A
+							// failed append must never strand the live-turn registries.
+							console.error(`[chat ${chatId}] could not save turn usage`, error);
+						}
+					}
+					// GRAPH GATE (settings-storage wave, 2026-09-19): the write channel —
+					// extraction, its auditor — dies with the master switch.
+					// PRACTICE (owner, 2026-10-04): practice sessions write nothing —
+					// no extraction, no graph, no coverage (v1: the session itself
+					// is the deliverable).
+					if ((!requestCycle || requestCycle.dispatched) && record.kind !== "practice" && extractionEnabled(effective.graph)) {
+						// Fresh per-turn read of the graph section's chunk budget
+						// (extraction-UX redesign, 2026-09-24): the trigger compares
+						// against it and the pipeline's batches share it.
+						triggerExtraction(stores, extraction, chatId, effective.graph.extractionChunkTokens);
+					}
+					// PARKED DISMISSAL (owner, 2026-10-04): a dismissal that arrived
+					// mid-turn was parked by the dismiss route (202); now that
+					// persistTurn has landed the turn's messages, apply it against
+					// real truth — BEFORE endTurn, so "turn-settled" guarantees a
+					// subsequent fetch reads the dismissal already in the record
+					// (the same ordering law as persistTurn itself).
+					applyParkedDismissal(stores.chatStore, chatId);
+				} finally {
+					// LAST: a poller that sees not-in-flight must read an already-persisted
+					// record — endTurn only after persistTurn has done its job.
+					endTurn(chatId);
+					// And only then does the turn stop being a running object
+					// (background-turn wave, 2026-09-25): a reattach that finds
+					// nothing must find the persisted record current — the same
+					// ordering rule as endTurn.
+					unregisterTurn(chatId);
+					// Wave C steer settlement: the live agent is dead (no more
+					// followUp handoffs) - reconcile the steer registry against
+					// what this run actually persisted (in-run injections
+					// resolve; stranded markers return to pending), then let
+					// the pump take any stragglers down the idle wake.
+					unregisterLiveAgent(chatId);
+					settleSteers(chatId, stamped);
+					// Composer steers (2026-10-03): delivered ids dropped, stranded
+					// ones stay parked for the chat's next run (the registry is the
+					// stranding safety net — the agent's undrained copy died above).
+					reconcileUserSteers(chatId, stamped);
 				}
-				// GRAPH GATE (settings-storage wave, 2026-09-19): the write channel —
-				// extraction, its auditor — dies with the master switch.
-				// PRACTICE (owner, 2026-10-04): practice sessions write nothing —
-				// no extraction, no graph, no coverage (v1: the session itself
-				// is the deliverable).
-				if ((!requestCycle || requestCycle.dispatched) && record.kind !== "practice" && extractionEnabled(effective.graph)) {
-					// Fresh per-turn read of the graph section's chunk budget
-					// (extraction-UX redesign, 2026-09-24): the trigger compares
-					// against it and the pipeline's batches share it.
-					triggerExtraction(stores, extraction, chatId, effective.graph.extractionChunkTokens);
-				}
-				// PARKED DISMISSAL (owner, 2026-10-04): a dismissal that arrived
-				// mid-turn was parked by the dismiss route (202); now that
-				// persistTurn has landed the turn's messages, apply it against
-				// real truth — BEFORE endTurn, so "turn-settled" guarantees a
-				// subsequent fetch reads the dismissal already in the record
-				// (the same ordering law as persistTurn itself).
-				applyParkedDismissal(stores.chatStore, chatId);
-				// LAST: a poller that sees not-in-flight must read an already-persisted
-				// record — endTurn only after persistTurn has done its job.
-				endTurn(chatId);
-				// And only then does the turn stop being a running object
-				// (background-turn wave, 2026-09-25): a reattach that finds
-				// nothing must find the persisted record current — the same
-				// ordering rule as endTurn.
-				unregisterTurn(chatId);
-				// Wave C steer settlement: the live agent is dead (no more
-				// followUp handoffs) - reconcile the steer registry against
-				// what this run actually persisted (in-run injections
-				// resolve; stranded markers return to pending), then let
-				// the pump take any stragglers down the idle wake.
-				unregisterLiveAgent(chatId);
-				settleSteers(chatId, stamped);
-				// Composer steers (2026-10-03): delivered ids dropped, stranded
-				// ones stay parked for the chat's next run (the registry is the
-				// stranding safety net — the agent's undrained copy died above).
-				reconcileUserSteers(chatId, stamped);
 				// THE SETTLE KICK (owner round 14): the turn settled — if the
 				// projection is now over threshold, the summary starts in the
 				// background, INSIDE the learner's reading/answering pause
@@ -565,7 +567,7 @@ export async function handleChatInput(
 						const spec = resolveConversationSpec(stores.chatStore.getChat(chatId)?.settings, fresh.models.strong);
 						if (!spec || !connectionBackgroundAllowed(spec.provider)) return null;
 						let kickEngine: PiEngine;
-						try { kickEngine = piEngineForSpec(spec, true); } catch { return null; }
+						try { kickEngine = engineForSpec(spec, true); } catch { return null; }
 						const kickModelId = `${kickEngine.model.provider}:${kickEngine.model.id}`;
 						const freshRecord = stores.chatStore.getChat(chatId);
 						if (!freshRecord) return null;

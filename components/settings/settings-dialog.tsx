@@ -49,6 +49,7 @@ import { KeysSection } from "./keys-section.tsx";
 import { Hint } from "@/components/ui/hint";
 import { AppearanceSection, GraphSection } from "./appearance-section.tsx";
 import { KeyboardSection } from "./keyboard-section.tsx";
+import { SubscriptionConnections } from "./subscriptions-section.tsx";
 import { ChatGPTUIProvider } from "./chatgpt-connection.tsx";
 import { NativeSubscriptionUIProvider } from "./subscription-connections.tsx";
 
@@ -57,6 +58,7 @@ import { NativeSubscriptionUIProvider } from "./subscription-connections.tsx";
  *  real question users ask). */
 const SECTIONS = [
 	{ id: "keys", label: "Providers" },
+	{ id: "subscriptions", label: "Subscriptions" },
 	{ id: "agent", label: "Agent" },
 	{ id: "appearance", label: "Appearance" },
 	{ id: "graph", label: "Graph" },
@@ -380,6 +382,11 @@ export function SettingsDialogBody({
 							{active === "keys" && (
 								<SettingsSection title="Providers" testid="section-keys">
 									<KeysSection initialRow={initialRow ?? undefined} />
+								</SettingsSection>
+							)}
+							{active === "subscriptions" && (
+								<SettingsSection title="Subscriptions" testid="section-subscriptions">
+									<SubscriptionConnections />
 								</SettingsSection>
 							)}
 							{active === "agent" && (

@@ -2,7 +2,7 @@
 
 The developer README (split out of the storefront README, 2026-10-10). Everything below is for people working ON LearnHarness, not using it.
 
-A standalone learning app (web + Electron desktop): a **teacher agent** (Next.js; the Vercel AI SDK's `UIMessage` protocol end-to-end, LLM engine [pi-ai](docs/pi-engine-swap.md) via OpenRouter), probe→teach lessons with graded quiz/ask interactions, a formal **session plan tree** the teacher authors once (`plan_init`) and whose progress is derived from tagged quiz calls, and a persistent cross-session **knowledge graph** of what the learner knows — the graph is the app's home page.
+A standalone learning app (web + Electron desktop): a **teacher agent** (Next.js; the Vercel AI SDK's `UIMessage` protocol end-to-end, [pi-ai](pi-engine-swap.md) engines through configured API providers or local ACP subscription agents), probe→teach lessons with graded quiz/ask interactions, a formal **session plan tree** the teacher authors once (`plan_init`) and whose progress is derived from tagged quiz calls, and a persistent cross-session **knowledge graph** of what the learner knows — the graph is the app's home page.
 
 Not a chat app with a graph bolted on: sessions are probe→teach lessons, the plan tree is a structured, schema-validated object, sessions accumulate into the graph through the extraction pipeline (propositions + reasoning chains — the stored truth; the canvas renders a derived image), and the teacher reaches back into the graph through read-only prober tools on its own judgment so probing compounds across sessions.
 
@@ -18,12 +18,13 @@ npm install          # once
 npm run dev          # http://localhost:3000
 npm run build        # production build (standalone output)
 npm start            # serve the production build
+npm run app          # curated standalone, local ACP profile, 127.0.0.1:3005
 
 npm test             # the full suite (node:test via tsx; deterministic, no LLM, no network)
 npm run lint         # eslint — includes the import law (architecture §2)
 npm run typecheck    # tsc --noEmit
 
-npm run desktop:dev    # next dev + Electron shell pointed at it
+npm run desktop:dev    # loopback Webpack dev server + Electron, portable env setup
 npm run desktop:dist   # local signed/notarized macOS arm64 build (LH_NOTARY keychain)
 
 # one-shot data scripts (run from the master tree only — data never crosses trees)
@@ -31,6 +32,8 @@ npx tsx --env-file=.env.local scripts/import-notes.ts <dir>   # bulk-import note
 npx tsx --env-file=.env.local scripts/backfill-graph.ts       # wipe + re-extract every chat
 npx tsx --env-file=.env.local scripts/replay-layout.ts        # re-derive layout from the ledgers
 ```
+
+For the Windows build/start commands, persistent ACP profile and local adapter paths, see [open the local app](acp-manual-test.md). Both `npm test` and `npm run desktop:dev` use Node launchers rather than shell-specific environment assignment.
 
 For Windows/Linux packages and the three-OS CI/release flow, see [`desktop-release.md`](desktop-release.md). Native renderer binaries are traced per platform, so release builds run on the target OS, not as cross-builds from macOS.
 
@@ -40,12 +43,14 @@ Secrets and machine-specific paths only. Model choice and thinking budgets are t
 
 | Variable | Purpose |
 |---|---|
-| `OPENROUTER_API_KEY` | required — all LLM calls go through OpenRouter |
+| Provider API keys (for example `OPENROUTER_API_KEY`) | optional — API-backed model providers; subscription ACP agents use native CLI sign-in instead |
 | `GOOGLE_SEARCH_API_KEY` + `GOOGLE_CSE_ID` | researcher's `web_search` (Google Custom Search) |
 | `DEEPGRAM_API_KEY` | optional — dictation (STT token minting; audio streams browser→Deepgram, never through the server) |
 | `CHROME_PATH` | optional system Chrome fallback for demo verification; the app's own browser helper is primary (nothing is downloaded) |
 
 The packaged desktop app takes keys from `userData/auth.json` (BYOK, mode 0600, read/written directly by the server via `LH_AUTH_FILE`). PDFs render natively with pdfjs/Skia; SVGs use resvg.
+
+Codex and Claude Code subscriptions use local ACP adapters instead of API keys. The server's `engineForSpec` seam selects ACP for `acp-codex` / `acp-claude` specs (agent default or a discovered named model), and delegates API specs to `piEngineForSpec`. See [ACP subscription setup and implementation](acp-subscriptions.md). The adapters are installed separately on the local server machine; their authentication stays in the native CLI. `npm run app` ignores inherited API-key environment variables by default; keys explicitly saved in the app still work.
 
 ## Architecture
 

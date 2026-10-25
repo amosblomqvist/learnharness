@@ -39,7 +39,7 @@ export function hasProviderKey(
  *  leans on). Re-reads on the keys signal. */
 export function useZeroKeys(): boolean {
 	const { catalog } = useModelCatalog();
-	return catalog ? !catalog.providers.some((provider) => provider.keyPresent) : false;
+	return catalog ? !catalog.providers.some((provider) => provider.keyPresent || provider.connectionReady) : false;
 }
 
 /** The pill itself — the models CTA's chrome and placement, the keys
@@ -53,7 +53,7 @@ export function ZeroKeysPill({ onOpen, inline = false }: { onOpen: () => void; i
 			onClick={onOpen}
 			className="rounded-sm border border-border bg-card px-3 py-1.5 font-ui text-xs text-foreground transition-colors hover:border-muted-foreground/50 hover:bg-accent cursor-pointer"
 		>
-			Add a provider key
+			Connect a subscription or add a key
 		</button>
 	);
 	return inline ? button : <div className="pointer-events-auto mb-2 flex justify-center">{button}</div>;
@@ -69,7 +69,7 @@ export function ZeroKeysPill({ onOpen, inline = false }: { onOpen: () => void; i
 export function strongKeyless(catalog: ModelCatalogResponse | undefined): boolean {
 	const strong = catalog?.slots.strong;
 	if (!strong) return false;
-	return !catalog.providers.some((p) => p.id === strong.model.provider && p.keyPresent);
+	return !catalog.providers.some((p) => p.id === strong.model.provider && (p.keyPresent || p.connectionReady));
 }
 
 /** The strong-slot keyless truth for the PRE-SEND guard (home / /chat/new):

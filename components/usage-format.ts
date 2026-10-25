@@ -2,6 +2,7 @@
  * Money/token presentation helpers (wave-4 observability UI) — shared by the
  * activity dock and the stats bar. Pure; exported for tests.
  */
+import { acpAgentForProvider } from "@/src/core";
 
 /** USD for cent-scale money: >= $1 keeps two decimals, smaller keeps four. */
 export function formatUsd(c: number): string {
@@ -43,6 +44,8 @@ export function splitQualified(id: string): { provider: string | null; id: strin
  */
 export function prettyModel(id: string, qualified = false): string {
 	const { provider, id: bare } = splitQualified(id);
+	const subscription = provider ? acpAgentForProvider(provider) : undefined;
+	if (subscription && bare === "default") return qualified ? `${subscription.label} · subscription` : subscription.label;
 	const short = bare.includes("/") ? bare.slice(bare.lastIndexOf("/") + 1) : bare;
 	const parts = short.split("-");
 	const trimmed = /^\d+$/.test(parts[parts.length - 1] ?? "") ? parts.slice(0, -1) : parts;

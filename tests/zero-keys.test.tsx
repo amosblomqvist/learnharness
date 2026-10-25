@@ -52,7 +52,7 @@ describe("ZeroKeysPill — the composer-hoisted notice", () => {
 	it("the pill takes the CTA's chrome with its own testid and copy", () => {
 		const html = renderToStaticMarkup(createElement(ZeroKeysPill, { onOpen: () => {} }));
 		assert.ok(html.includes('data-testid="setup-cta-keys"'));
-		assert.match(html, />Add a provider key<\/button>/);
+		assert.match(html, />Connect a subscription or add a key<\/button>/);
 		assert.doesNotMatch(html, /chats start|—/);
 		// the models CTA's testid must not appear on the keys pill
 		assert.ok(!html.includes('data-testid="setup-cta"'));

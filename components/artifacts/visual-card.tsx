@@ -9,6 +9,7 @@ import { useSessionMermaid } from "@/components/session-overlay";
 import { downloadFile } from "@/components/artifacts/download";
 import { DispatchCard } from "@/components/artifacts/dispatch-card";
 import type { ArtifactPartProps, VisualResult } from "@/src/core";
+import { SvgImage } from "./svg-image";
 
 /**
  * Visual artifact card (W6 → ack protocol): the tool part's output is the
@@ -16,21 +17,8 @@ import type { ArtifactPartProps, VisualResult } from "@/src/core";
  * the chat view's jobs feed). The SVG itself renders from the steer message
  * (sub-agent result delivery) via VisualOutputCard.
  *
- * The SVG is model-authored for the learner's own machine (their own teacher
- * wrote it, verified by looking) — dangerouslySetInnerHTML is acceptable
- * here, with a cheap hygiene pass (sanitizeSvg: strip <script> blocks, on*
- * handlers, and javascript:/data:text/html URLs) since it lands in the
- * app's DOM.
+ * Model-authored SVG is an inert image document in both display modes.
  */
-
-/** Cheap SVG hygiene — not a full sanitizer, just removing the obvious exec vectors. */
-export function sanitizeSvg(svg: string): string {
-	return svg
-		.replace(/<script[\s\S]*?<\/script\s*>/gi, "")
-		.replace(/<script[^>]*\/?>/gi, "")
-		.replace(/\son[a-z]+\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi, "")
-		.replace(/(href|xlink:href)\s*=\s*(?:"\s*(?:javascript|data:text\/html)[^"]*"|'\s*(?:javascript|data:text\/html)[^']*'|(?:javascript|data:text\/html)[^\s>]*)/gi, "");
-}
 
 /** The svg root's DECLARED width in px, when there is one — the natural
  *  size the card displays at instead of stretching to full width (owner,
@@ -122,13 +110,14 @@ export function VisualOutputCard({
 			<div
 				className={
 					natural !== null
-						? "w-fit max-w-full overflow-hidden rounded-lg bg-white [&_svg]:h-auto [&_svg]:max-w-full"
-						: "w-full overflow-hidden rounded-lg bg-white [&_svg]:h-auto [&_svg]:w-full"
+						? "w-fit max-w-full overflow-hidden rounded-lg bg-white"
+						: "w-full overflow-hidden rounded-lg bg-white"
 				}
 				style={{ filter: inverted ? "invert(1) hue-rotate(180deg)" : undefined }}
-				dangerouslySetInnerHTML={{ __html: sanitizeSvg(result.svg) }}
 				data-testid="visual-svg"
-			/>
+			>
+				<SvgImage svg={result.svg} width={natural ?? undefined} className={natural !== null ? "block h-auto max-w-full" : "block h-auto w-full"} />
+			</div>
 			<div className="mt-2 flex items-center justify-between gap-2">
 				<div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Figure</div>
 				<div className="flex items-center gap-1.5">

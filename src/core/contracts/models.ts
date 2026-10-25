@@ -12,6 +12,7 @@ import type { BackgroundModelRole, ModelSlotName } from "../settings.ts";
  *  pi-ai's catalog. Costs are USD per 1M tokens (the same catalog, the same
  *  units as Pi's server-side pricing calculator). */
 export interface ModelCatalogEntry {
+	billing?: "subscription";
 	id: string;
 	name: string;
 	provider: string;
@@ -78,6 +79,9 @@ export interface ModelCatalogResponse {
 /** One row of the providers surface. */
 export interface CatalogProvider {
 	id: string;
+	/** Local subscription connections do not have an API key. */
+	connectionReady?: boolean;
+	billing?: "subscription";
 	/** The env var whose presence federates this provider in. */
 	envVar: string;
 	/** Whether that var is currently present (env or auth file). */

@@ -67,3 +67,7 @@ jobs:
       - run: node scripts/smoke-provider-runtime.mjs
       - run: node scripts/build-server.mjs
       - run: node scripts/smoke-server.mjs --electron
+      - name: ACP question, answer and cleanup with host Node
+        run: node scripts/smoke-acp-reuse.mjs
+      - name: ACP question, answer and cleanup with Electron
+        run: node scripts/smoke-acp-reuse.mjs --electron

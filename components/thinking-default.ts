@@ -14,6 +14,14 @@
  */
 import { DEFAULT_THINKING_ORDER } from "@/src/core";
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
+import type { ModelCatalogEntry } from "@/src/core";
+
+/** An unset subscription level delegates to the agent's own configuration. */
+export function modelThinkingLevel(explicit: ThinkingLevel | undefined, model: Pick<ModelCatalogEntry, "id" | "billing" | "supportedLevels">): ThinkingLevel | undefined {
+	// The first ACP setup UI saved off even though its control was disabled.
+	if (model.billing === "subscription" && model.id === "default" && explicit === "off" && !model.supportedLevels.includes("off")) return undefined;
+	return model.billing === "subscription" ? explicit : populateLevel(explicit, model.supportedLevels);
+}
 
 /** Display labels for the levels (shared by every trigger that shows
  *  one). Lowercase, always (owner refinement round, 2026-09-24): the

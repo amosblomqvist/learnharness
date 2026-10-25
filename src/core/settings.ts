@@ -32,6 +32,7 @@ import { AUTH_PROVIDER_KEYS } from "./auth-keys.ts";
 import type { ModelRole } from "../../config.ts";
 import type { ChatSettings } from "./contracts/chat.ts";
 import type { SearchEngineId } from "./search.ts";
+import { ACP_AGENTS, parseAcpConfig, type AcpSettings } from "./acp.ts";
 
 /** The schema version this code understands. Bump ONLY for breaking shape
  *  changes (a field renamed/meaning changed); pure additions never bump. */
@@ -360,6 +361,7 @@ export interface CompactionSettings {
  *  preserved verbatim by the sanitizer (forward-compat with newer records). */
 export interface UserSettings {
 	version: number;
+	acp?: AcpSettings;
 	general?: GeneralSettings;
 	agent?: AgentSettings;
 	/** The strong/cheap/vision model slots (model slots wave, 2026-09-20). */
@@ -612,6 +614,15 @@ export function sanitizeUserSettings(raw: unknown): UserSettings | null {
 	const out: UserSettings = {
 		version: typeof r.version === "number" && Number.isInteger(r.version) && r.version >= 1 ? r.version : CURRENT_SETTINGS_VERSION,
 	};
+	if (r.acp !== undefined) {
+		out.acp = {};
+		if (r.acp && typeof r.acp === "object" && !Array.isArray(r.acp)) {
+			for (const { id } of ACP_AGENTS) {
+				const parsed = parseAcpConfig((r.acp as Record<string, unknown>)[id]);
+				if (parsed.ok) out.acp[id] = parsed.config;
+			}
+		}
+	}
 	if (r.general !== null && typeof r.general === "object" && !Array.isArray(r.general)) {
 		out.general = sanitizeGeneral(r.general as Record<string, unknown>);
 	}

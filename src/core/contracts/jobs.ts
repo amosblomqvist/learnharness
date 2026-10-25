@@ -9,6 +9,7 @@
 import type { CallUsage } from "./chat.ts";
 import type { LhMessage, LhMarkerMessage } from "../native-messages.ts";
 import { newHandoffMessage } from "../native-messages.ts";
+import { usageToCallUsage, type PiUsageLike } from "../usage.ts";
 
 // ─── Async sub-agent jobs (vision §2.5; plan.md Wave 0 protocol) ────────────
 
@@ -79,19 +80,13 @@ export interface UsageStepLike {
 /** pi-ai's Usage shape (input/output/cacheRead/cacheWrite/reasoning?) →
  * UsageStepLike. Structural — no pi import here; the engine band maps at
  * its boundaries. */
-export function piUsageToStep(usage: {
-	input: number;
-	output: number;
-	cacheRead: number;
-	cacheWrite: number;
-	cacheWrite1h?: number;
-	reasoning?: number;
-}): UsageStepLike {
+export function piUsageToStep(usage: PiUsageLike): UsageStepLike {
+	const call = usageToCallUsage(usage);
 	return {
-		inputTokens: usage.input,
-		outputTokens: usage.output,
-		inputTokenDetails: { cacheReadTokens: usage.cacheRead, cacheWriteTokens: usage.cacheWrite, cacheWrite1hTokens: usage.cacheWrite1h ?? 0 },
-		outputTokenDetails: usage.reasoning !== undefined ? { reasoningTokens: usage.reasoning } : undefined,
+		inputTokens: call.inputTokens,
+		outputTokens: call.outputTokens,
+		inputTokenDetails: { cacheReadTokens: call.cacheReadTokens, cacheWriteTokens: call.cacheWriteTokens, cacheWrite1hTokens: call.cacheWrite1hTokens },
+		outputTokenDetails: usage.reasoning !== undefined || usage.lhReportedUsage !== undefined ? { reasoningTokens: call.reasoningTokens } : undefined,
 	};
 }
 

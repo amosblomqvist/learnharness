@@ -1686,6 +1686,19 @@ describe("stale-job recovery sweep (liveness-gated)", () => {
 // ─── BYOK: the unresolvable-engine refusal (owner, 2026-09-22) ──────────────
 
 describe("BYOK job refusal (no factory floor)", () => {
+	it("a disconnected ACP engine produces a failure steer and settles the job", async () => {
+		const chat = chatStore.createChat("Test: disconnected ACP spawn");
+		trackChat(chat.id);
+		const job = jobStore.createJob({ kind: "research", chatId: chat.id, toolCallId: "call-acp-disconnected" });
+		trackJob(job.id);
+		const delivery = fakeDeliver();
+		const runner = createJobRunner({ chatStore, jobStore, deliver: delivery.deliver, engineFor: () => { throw new Error("Codex is disconnected. Connect it in Settings → Subscriptions."); } });
+		await runner.runJob(job.id, RESEARCH_INPUT);
+		assert.equal(jobStore.getJob(job.id)?.status, "error");
+		assert.match(jobStore.getJob(job.id)?.error ?? "", /Codex is disconnected/);
+		assert.equal(delivery.steers.length, 1);
+		assert.match(delivery.steers[0]!.content, /Research failed: Codex is disconnected/);
+	});
 	it("runJob with NO resolvable engine lands the job as error — the envelope wording, no phantom run", async () => {
 		const chat = chatStore.createChat("Test: unconfigured spawn");
 		trackChat(chat.id);
