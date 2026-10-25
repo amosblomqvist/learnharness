@@ -6,6 +6,7 @@
  */
 import assert from "node:assert/strict";
 import * as path from "node:path";
+import * as os from "node:os";
 import { describe, it } from "node:test";
 import { createFauxCore, fauxAssistantMessage, fauxText, fauxToolCall, type FauxResponseStep } from "@earendil-works/pi-ai";
 import type { PiEngine } from "../src/agent/models.ts";
@@ -49,24 +50,29 @@ function fakeHeadless(rendered: { pages: number[] } = { pages: [] }): HeadlessAp
 }
 
 describe("pdf-reader loop (faux engine)", () => {
-	it("triage → extract → final brief: pagesConsulted tracks the extract", async () => {
-		const engine = fauxEngine([
-			fauxAssistantMessage([fauxToolCall("pdf_info", {}, { id: "i1" })], { stopReason: "toolUse" }),
-			fauxAssistantMessage(
-				[fauxToolCall("pdf_extract", { pages: "1-2" }, { id: "e1" })],
-				{ stopReason: "toolUse" },
-			),
-			fauxAssistantMessage([fauxText("The integral rule appears on page 1 (p. 1). Pages consulted: 1, 2")]),
-		]);
-		const result = await runPdfReaderAgent(
-			{ path: FIXTURE, question: "what is the integral of x?" },
-			{ engine },
-		);
-		assert.equal(result.path, FIXTURE);
-		assert.match(result.brief, /integral rule/);
-		assert.deepEqual(result.pagesRead, [1, 2], "extracted pages are read pages");
-		assert.deepEqual(result.pagesConsulted, [1, 2]);
-	});
+	for (const [kind, inputPath] of [
+		["absolute", FIXTURE],
+		["home-relative", path.relative(os.homedir(), FIXTURE)],
+	] as const) {
+		it(`triage → extract → final brief with ${kind} path`, async () => {
+			const engine = fauxEngine([
+				fauxAssistantMessage([fauxToolCall("pdf_info", {}, { id: "i1" })], { stopReason: "toolUse" }),
+				fauxAssistantMessage(
+					[fauxToolCall("pdf_extract", { pages: "1-2" }, { id: "e1" })],
+					{ stopReason: "toolUse" },
+				),
+				fauxAssistantMessage([fauxText("The integral rule appears on page 1 (p. 1). Pages consulted: 1, 2")]),
+			]);
+			const result = await runPdfReaderAgent(
+				{ path: inputPath, question: "what is the integral of x?" },
+				{ engine },
+			);
+			assert.equal(result.path, FIXTURE);
+			assert.match(result.brief, /integral rule/);
+			assert.deepEqual(result.pagesRead, [1, 2], "extracted pages are read pages");
+			assert.deepEqual(result.pagesConsulted, [1, 2]);
+		});
+	}
 
 	it("the unread-finish gate: a brief with zero consultation is bounced, not delivered", async () => {
 		let nudged = false;
