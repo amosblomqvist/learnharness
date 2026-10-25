@@ -29,3 +29,6 @@ xai-credentials.json*
 
 # dev-fresh launcher scratch (fresh-user sim): disposable per launch
 .fresh-data/
+
+# Apple dictation helper build output (scripts/build-apple-speech.sh)
+native/apple-speech/build/

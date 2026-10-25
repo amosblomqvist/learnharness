@@ -105,6 +105,11 @@ mac:
   extraResources:
     - from: electron/server-title-guard.cjs
       to: server-title-guard.cjs
+    # Apple on-device dictation helper (scripts/build-apple-speech.sh, macOS
+    # 26+ at runtime). A plain Mach-O; signing covers it with the app's
+    # identity and hardened runtime.
+    - from: native/apple-speech/build/apple-speech
+      to: apple-speech
   icon: build/icon.icon
   # zip rides next to dmg (flipped 2026-10-08): Squirrel.Mac — Electron's
   # macOS auto-updater — installs from ZIP and cannot read DMGs. DMG is
@@ -126,6 +131,7 @@ mac:
   # reads this string; macOS asks regardless of Electron's own handlers.
   extendInfo:
     NSMicrophoneUsageDescription: "LearnHarness uses the microphone only for speech-to-text input into your sessions."
+    NSSpeechRecognitionUsageDescription: "LearnHarness transcribes your dictation on this Mac with Apple's on-device speech model."
   hardenedRuntime: true
   entitlements: build/entitlements.mac.plist
   # Signing + notarization (flipped 2026-10-08): identity auto-detects the

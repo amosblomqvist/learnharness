@@ -32,6 +32,7 @@ const { createSubscriptions, loadSubscriptionSDK } = require("./subscriptions.cj
 const { attachSubscriptionChild, subscriptionControl } = require("./subscription-ipc.cjs");
 const { desktopAPIHeaders } = require("./desktop-api.cjs");
 const { openWebSubscriptionBrowser } = require("./web-subscription-browser.cjs");
+const { createAppleSpeech, appleSpeechControl } = require("./apple-speech.cjs");
 const { randomBytes } = require("node:crypto");
 const { spawn } = require("node:child_process");
 const fs = require("node:fs");
@@ -74,6 +75,14 @@ function serverEntry() {
 	// extraResources ships the whole .next payload under server/standalone/
 	// (copied from .next with an explicit filter — see electron-builder.yml).
 	return path.join(process.resourcesPath, "server", "standalone", "server.js");
+}
+
+/** The Apple dictation helper: packaged → Resources/apple-speech (mac
+ *  extraResources); dev → scripts/build-apple-speech.sh's output. */
+function appleSpeechHelper() {
+	return app.isPackaged
+		? path.join(process.resourcesPath, "apple-speech")
+		: path.join(__dirname, "..", "native", "apple-speech", "build", "apple-speech");
 }
 
 // ─── Single instance: two instances would fight over the data dir ─────────
@@ -769,6 +778,27 @@ async function main() {
 	ipcMain.handle("lh:attachment:pick", (event, mode) => pickAttachmentPath(event, mode, {
 		BrowserWindow, dialog, trustedAppWindows, origin: new URL(url).origin,
 	}));
+	// Apple on-device dictation (macOS 26+). Same trust gate as the
+	// controls above; audio frames ride a fire-and-forget channel.
+	const appleSpeech = createAppleSpeech({
+		helperPath: appleSpeechHelper(),
+		broadcast: (value) => {
+			for (const win of BrowserWindow.getAllWindows()) win.webContents.send("lh:apple-speech:install", value);
+		},
+	});
+	const appleSpeechTrusted = (event) => trustedAppWindows.has(BrowserWindow.fromWebContents(event.sender)) && trustedSender(event, new URL(url).origin, BrowserWindow);
+	ipcMain.handle("lh:apple-speech:control", async (event, command) => {
+		if (!appleSpeechTrusted(event)) throw new Error("Untrusted desktop request.");
+		const sender = event.sender;
+		return appleSpeechControl(command, appleSpeech, (value) => {
+			if (!sender.isDestroyed()) sender.send("lh:apple-speech:event", value);
+		});
+	});
+	ipcMain.on("lh:apple-speech:audio", (event, session, buffer) => {
+		if (!appleSpeechTrusted(event) || !Number.isInteger(session) || !(buffer instanceof ArrayBuffer || ArrayBuffer.isView(buffer))) return;
+		appleSpeech.audio(session, buffer);
+	});
+	app.on("before-quit", () => appleSpeech.cancel());
 
 	installMenu();
 

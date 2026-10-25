@@ -56,6 +56,7 @@ const STORAGE_KEY = "lh:sidebar-open";
 import type { ChatGPTControlBridge, NativeSubscriptionControlBridge } from "@/src/core";
 import type { UpdateState } from "@/components/settings/update-settings.tsx";
 import { FilePathDropZone } from "@/components/file-path-drop-zone";
+import type { AppleSpeechBridge } from "@/components/apple-speech";
 const SIDEBAR_AUTOCLOSE = 928;
 
 // Module scope, guarded for SSR (the server has no navigator).
@@ -76,6 +77,8 @@ declare global {
 			openSubscriptionBrowser?: (action: string) => Promise<void>;
 			chatgpt?: ChatGPTControlBridge;
 			subscriptions?: NativeSubscriptionControlBridge;
+			/** Apple on-device dictation (macOS 26+) — components/apple-speech.ts. */
+			appleSpeech?: AppleSpeechBridge;
 			expandWindow: () => void;
 			/** Native chrome follows the active theme (theme wave): main sets
 			 *  themeSource and repaints the window background / overlay. */

@@ -32,6 +32,8 @@ npm start              # serve the production build with Next
 
 `npm run desktop:dist` is the local **signed macOS** packaging path, not a portable unsigned shortcut. Prerequisites and Windows/Linux instructions are in [Desktop builds and releases](desktop-release.md).
 
+On macOS, `desktop:dist` and the release workflow also build the Apple dictation helper (`native/apple-speech/main.swift`) with `scripts/build-apple-speech.sh`. It needs Xcode 26 or later.
+
 ### Other devices on your network
 
 `npm run dev`, `npm start`, and `desktop:dev` listen on `localhost` only. Browser-only mode has **no login**: anyone who can reach the port can read every chat and setting, change saved keys, and start agent turns. To open it from another device on a network you trust, pass a later host flag:

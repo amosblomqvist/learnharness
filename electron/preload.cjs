@@ -31,6 +31,11 @@
  *   (theme wave, 2026-11-04): main sets nativeTheme.themeSource and
  *   repaints the native window background / control overlay to match.
  *
+ *   window.lh.appleSpeech — Apple on-device dictation (macOS 26+): model
+ *   status/install/release, and a transcription session whose PCM frames
+ *   go out on "lh:apple-speech:audio" and whose results come back on
+ *   "lh:apple-speech:event".
+ *
  * Channel names are mirrored in electron/main.cjs — keep them in sync.
  */
 const { contextBridge, ipcRenderer, webUtils } = require("electron");
@@ -79,6 +84,27 @@ contextBridge.exposeInMainWorld("lh", {
 			const listener = () => cb();
 			ipcRenderer.on("lh:subscriptions:changed", listener);
 			return () => ipcRenderer.removeListener("lh:subscriptions:changed", listener);
+		},
+	},
+	// Apple on-device dictation (electron/apple-speech.cjs). status() reports
+	// { available: false } on hosts without macOS 26+ / Apple silicon.
+	appleSpeech: {
+		status: () => ipcRenderer.invoke("lh:apple-speech:control", { op: "status" }),
+		install: () => ipcRenderer.invoke("lh:apple-speech:control", { op: "install" }),
+		release: () => ipcRenderer.invoke("lh:apple-speech:control", { op: "release" }),
+		start: () => ipcRenderer.invoke("lh:apple-speech:control", { op: "start" }),
+		stop: (session) => ipcRenderer.invoke("lh:apple-speech:control", { op: "stop", session }),
+		cancel: (session) => ipcRenderer.invoke("lh:apple-speech:control", { op: "cancel", session }),
+		audio: (session, buffer) => ipcRenderer.send("lh:apple-speech:audio", session, buffer),
+		onEvent: (cb) => {
+			const listener = (_event, value) => cb(value);
+			ipcRenderer.on("lh:apple-speech:event", listener);
+			return () => ipcRenderer.removeListener("lh:apple-speech:event", listener);
+		},
+		onInstall: (cb) => {
+			const listener = (_event, value) => cb(value);
+			ipcRenderer.on("lh:apple-speech:install", listener);
+			return () => ipcRenderer.removeListener("lh:apple-speech:install", listener);
 		},
 	},
 	expandWindow: () => ipcRenderer.send("lh:expand-window"),
