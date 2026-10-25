@@ -24,6 +24,8 @@ import {
 	newThinkingMessage,
 	newUserMessage,
 	projectView,
+	regenerateCut,
+	regenerateRefusal,
 	type ChatInput,
 	type LhMarkerMessage,
 	type LhMessage,
@@ -630,6 +632,71 @@ export class SessionModel {
 			await this.resumeStream(true);
 		} catch (err) {
 			if ((err as Error).name === "AbortError") return; // stop() or a newer consume won
+			this.setError((err as Error).message);
+			this.setStatus("error");
+		}
+	}
+
+	/**
+	 * REGENERATE (retry the agent's last message, #122): ask the server to
+	 * cut the record back to the last learner input and rerun. The agent
+	 * span is dropped LOCALLY first (the same pure regenerateCut the server
+	 * applies, so the view never shows the old reply beside the new one);
+	 * no optimistic messages — the reattach refetch lands the server's
+	 * canon. Gated like send, except that an `error` status (a failed
+	 * request, whose readyRef is false) may still retry; a refused retry
+	 * restores the pre-cut view.
+	 */
+	async regenerate(): Promise<void> {
+		if (this.statusValue === "submitted" || this.statusValue === "streaming") return;
+		const messages = [...this.base, ...this.tail];
+		const cut = regenerateCut(messages);
+		if (cut < 0) return;
+		const refusal = regenerateRefusal(messages, cut);
+		if (refusal) {
+			this.setError(refusal);
+			return;
+		}
+		const prior = { base: this.base, tail: this.tail };
+		const restore = () =>
+			this.mutate(() => {
+				this.base = prior.base;
+				this.tail = prior.tail;
+			});
+		this.consumeAbort?.abort();
+		const controller = new AbortController();
+		this.consumeAbort = controller;
+		this.setError(null);
+		this.setStatus("submitted");
+		this.mutate(() => {
+			this.base = messages.slice(0, cut);
+			this.tail = [];
+			this.incompleteUsageIds.clear();
+			this.streamingMessageId = null;
+		});
+		let acked = false;
+		try {
+			const res = await this.postInputEvent({ type: "regenerate", lastMessageId: messages.at(-1)?.id ?? null });
+			if (res.status === 409) {
+				restore();
+				this.setError("A turn is already running — try again in a moment.");
+				this.setStatus("error");
+				return;
+			}
+			if (!res.ok) {
+				restore();
+				throw new Error((await res.text()) || `The retry failed (${res.status}).`);
+			}
+			acked = true;
+			await res.text().catch(() => {}); // drain the tiny ack; release the socket
+			if (this.consumeAbort !== controller) return;
+			await this.resumeStream(true);
+		} catch (err) {
+			if ((err as Error).name === "AbortError") return; // stop() or a newer consume won
+			// A failure BEFORE the ack (network, or the !ok throw above, whose
+			// restore already ran) left the server record untouched: put the
+			// old reply back.
+			if (!acked && this.consumeAbort === controller) restore();
 			this.setError((err as Error).message);
 			this.setStatus("error");
 		}

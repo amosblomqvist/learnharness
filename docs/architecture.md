@@ -288,7 +288,7 @@ sequenceDiagram
     B->>R: messages (+ graded question output via addToolOutput)
     R->>H: handleChatRequest(req)
     H->>L: beginTurn(chatId)
-    Note over H,L: already running → 409; retryingFetch waits, re-fetches<br/>the record, merges unsent client messages by id, re-POSTs
+    Note over H,L: already running → 409; the client waits out the turn<br/>and re-POSTs the SAME input event (nothing was appended when refused)
     H->>H: claimSteers — coalesce queued steers into outgoing
     H->>CS: saveMessages (write-ahead: persist even before the stream)
     H->>A: build agent from record (probe_done part in transcript ⇒ teacher)
@@ -304,6 +304,7 @@ sequenceDiagram
 ```
 
 - **Client-side question tools** (`quiz`, `ask_user_question`) have no server execute: the call streams to the browser, the learner answers in the dock, the client grades via `question-core` and returns the verdict with `addToolOutput`, which fires the continuation. A pending quiz persisted in the record is exactly what makes **resume mid-question free**. Deterministic seeded shuffling (keyed by toolCallId) keeps server and client renders identical.
+- **Retry the agent's last message** (`regenerate` input event, #122): the client sends `{type:"regenerate", lastMessageId}` and the server — still the record's single writer — cuts the stored transcript back to the last learner input (`regenerateCut`, pure, in `core/native-messages.ts`: the boundaries are a user message, a steer/wake or practice marker, graph-context, and a question's answer/dismissal result) and reruns the turn as a normal foreground turn through the same gate order (model chain, key, `ensureCompacted`, `beginTurn` → 409). The old reply is DISCARDED (no versions, no new stored fields); `lastMessageId` is the staleness guard (400 when it is not the record's actual last message), and a span containing a compaction marker (or the active marker's kept boundary) is refused with 400 rather than leave a dangling cut pointer. A pending question in the span goes with it; jobs the discarded span spawned keep running and their steers still arrive; `record.tree` and the graph are not reverted. An empty span (an errored turn that saved nothing) reruns from the input with no cut.
 - **The prober→teacher handoff**: the first turn(s) run the prober (floor/ceiling via quiz, goal via ask); `probe_done` (server-executed) files the assessment and queues a handoff steer; from the first `tool-probe_done` part in the transcript, the handler builds the teacher agent for every later turn. Phases (`core/phases.ts`) fold strictly: probe → plan → teach.
 - **The formal plan tree is author-once**: the teacher authors the session's dependency map with a single schema-validated `plan_init` tool (a mermaid-subset graph, parsed deterministically with line-numbered errors, validated as a DAG). Progress is never mutated — statuses (`current`/`visited`/upcoming) are **derived** from tagged quiz calls in the transcript; the tree panel and the plan blocks render that derivation.
 - **Job tools are server-executed, ack-and-steer**: `research`/`demo`/`visual` resolve immediately mid-turn with a fire-and-forget ack (the teacher keeps teaching); `spawn(job, input)` fires the background runner.

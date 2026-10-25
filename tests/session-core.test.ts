@@ -1314,3 +1314,131 @@ describe("absorbed — the custom role (the doubled thinking card)", () => {
 		assert.equal((customs[0] as { id?: string }).id, "srv_1");
 	});
 });
+
+describe("regenerate (retry the agent's last message, #122)", () => {
+	const seeded = (): LhMessage[] => [
+		newUserMessage("teach me"),
+		assistantMsg("a1", "first reply"),
+		newUserMessage("go on"),
+		assistantMsg("a2", "second reply"),
+	];
+
+	/** POST ack + record refetch + an empty stream; `post` overrides the ack. */
+	function regenFetch(opts: {
+		post?: () => Response;
+		onPost?: (body: string) => void;
+		onPostPending?: () => void;
+		record?: LhMessage[];
+	}): typeof globalThis.fetch {
+		return (async (input: RequestInfo | URL, init?: RequestInit) => {
+			const url = String(input);
+			if (url === "/api/chat") {
+				if (typeof init?.body === "string") opts.onPost?.(init.body);
+				opts.onPostPending?.();
+				return opts.post?.() ?? Response.json({ ok: true });
+			}
+			if (url === "/api/chats/chat_x") return Response.json({ messages: opts.record ?? [] });
+			if (url === "/api/chats/chat_x/stream") return sseResponse("[DONE]");
+			throw new Error(`unexpected fetch: ${url}`);
+		}) as typeof globalThis.fetch;
+	}
+
+	it("POSTs {type:'regenerate', lastMessageId} and drops the span locally before the ack", async () => {
+		const messages = seeded();
+		let body = "";
+		let duringPost: LhMessage[] = [];
+		const m = model({ initialMessages: messages });
+		globalThis.fetch = regenFetch({
+			onPost: (b) => (body = b),
+			onPostPending: () => (duringPost = m.getState().nativeMessages),
+			record: messages.slice(0, 3),
+		});
+		m.fetch = (...args) => globalThis.fetch(...args);
+
+		await m.regenerate();
+
+		assert.deepEqual(JSON.parse(body), {
+			chatId: "chat_x",
+			input: { type: "regenerate", lastMessageId: messages[3]!.id },
+		});
+		assert.deepEqual(
+			duringPost.map((x) => x.id),
+			messages.slice(0, 3).map((x) => x.id),
+			"the old reply was cut locally, with no optimistic message in its place",
+		);
+		assert.equal(m.status, "ready");
+		assert.equal(m.getState().error, null);
+	});
+
+	it("is a no-op while a turn runs, and when there is no learner input to rerun from", async () => {
+		let posts = 0;
+		globalThis.fetch = regenFetch({ onPost: () => posts++ });
+		const idle = model({ initialMessages: [assistantMsg("a1", "orphan")] });
+		idle.fetch = (...args) => globalThis.fetch(...args);
+		await idle.regenerate();
+		assert.equal(posts, 0, "no boundary, no POST");
+
+		const busy = model({ initialMessages: seeded() });
+		busy.fetch = (...args) => globalThis.fetch(...args);
+		(busy as unknown as { statusValue: string }).statusValue = "streaming";
+		await busy.regenerate();
+		assert.equal(posts, 0, "gated while streaming");
+	});
+
+	it("a refused retry restores the pre-cut view and surfaces the error", async () => {
+		const messages = seeded();
+		const m = model({ initialMessages: messages });
+		globalThis.fetch = regenFetch({ post: () => new Response("regenerate input is stale", { status: 400 }) });
+		m.fetch = (...args) => globalThis.fetch(...args);
+
+		await m.regenerate();
+
+		assert.deepEqual(m.getState().nativeMessages.map((x) => x.id), messages.map((x) => x.id), "the old reply is back");
+		assert.equal(m.status, "error");
+		assert.match(m.getState().error?.message ?? "", /stale/);
+	});
+
+	it("an error status may still retry (a failed request's readyRef is false)", async () => {
+		const messages = seeded().slice(0, 1);
+		const m = model({ initialMessages: messages });
+		let n = 0;
+		globalThis.fetch = regenFetch({
+			post: () => (n++ === 0 ? new Response("boom", { status: 500 }) : Response.json({ ok: true })),
+			record: messages,
+		});
+		m.fetch = (...args) => globalThis.fetch(...args);
+
+		await m.regenerate(); // nothing cut (empty span), the server refuses once
+		assert.equal(m.status, "error");
+		await m.regenerate();
+		assert.equal(n, 2, "the second retry was allowed through");
+		assert.equal(m.status, "ready");
+	});
+
+	it("a network failure before the ack restores the old reply", async () => {
+		const messages = seeded();
+		const m = model({ initialMessages: messages });
+		globalThis.fetch = (async () => {
+			throw new Error("connection reset");
+		}) as typeof globalThis.fetch;
+		m.fetch = (...args) => globalThis.fetch(...args);
+
+		await m.regenerate();
+
+		assert.deepEqual(m.getState().nativeMessages.map((x) => x.id), messages.map((x) => x.id), "the old reply is back");
+		assert.equal(m.status, "error");
+		assert.match(m.getState().error?.message ?? "", /connection reset/);
+	});
+
+	it("a cut that would discard a compaction is refused locally (no POST)", async () => {
+		const input = newUserMessage("hi");
+		const marker = newCompactionMarker("s", { firstKeptMessageId: input.id, tokensBefore: 1, at: new Date().toISOString() }) as unknown as LhMessage;
+		let posts = 0;
+		globalThis.fetch = regenFetch({ onPost: () => posts++ });
+		const m = model({ initialMessages: [input, assistantMsg("a1", "x"), marker] });
+		m.fetch = (...args) => globalThis.fetch(...args);
+		await m.regenerate();
+		assert.equal(posts, 0);
+		assert.match(m.getState().error?.message ?? "", /compaction/);
+	});
+});

@@ -26,6 +26,7 @@ import { Composer } from "@/components/composer";
 import { useEnterSubmits } from "@/components/enter-submits";
 import { blurAfterPointerClick } from "@/components/focus-hygiene";
 import { dockStateKey } from "@/components/dock-state-key";
+import { RetryAction, retryPlacement } from "@/components/retry-action";
 import { QueuedSteersBody, type QueuedSteerLine } from "@/components/queued-steers";
 import { DictationBar, finishDictation, joinDictation, useDictation } from "@/components/dictation";
 import { useFieldCycle } from "@/components/field-cycle";
@@ -236,7 +237,7 @@ export function Chat({
 	// (core/view.ts projectView); sends are ONE explicit input event each
 	// ({chatId, input} — the stash indirection died with the SDK), and the
 	// turn stream is the VERBATIM AgentEvent passthrough the server emits.
-	const { messages, nativeMessages, contextTokens, send, steer, steerQueue, submitAnswer, dismissQuestion, dismissProblem, setMessages, adoptRecord, status, error, stop, clearError, resumeStream, setReattachSettled } =
+	const { messages, nativeMessages, contextTokens, send, regenerate, steer, steerQueue, submitAnswer, dismissQuestion, dismissProblem, setMessages, adoptRecord, status, error, stop, clearError, resumeStream, setReattachSettled } =
 		useChatSession({ chatId, initialMessages, initiallyInFlight });
 
 	const sessionFindScopeRef = useRef<HTMLDivElement | null>(null);
@@ -679,6 +680,14 @@ export function Chat({
 	// server's registry mutex is the structural gate; this is the
 	// affordance).
 	const [compacting, setCompacting] = useState(initiallyCompacting);
+	// Retry the agent's last message (#122) — see retry-action.tsx.
+	const retry = retryPlacement({
+		messages,
+		busy,
+		compacting,
+		hasError: error !== null,
+		lastServerStamped: !(nativeMessages.at(-1)?.id ?? "c_").startsWith("c_"),
+	});
 	const canSend =
 		(text.trim().length > 0 || dictation.active) && !pending && !activeProblem && !compacting;
 
@@ -1438,6 +1447,7 @@ export function Chat({
 												</div>
 											</div>
 									) : (
+									<>
 									<Message from="assistant" className="max-w-full">
 									<MessageContent className="w-full">
 											{m.parts.map((part, pi) => {
@@ -1536,6 +1546,9 @@ export function Chat({
 											})}
 										</MessageContent>
 									</Message>
+									{/* RETRY (#122): under the LAST assistant group only. */}
+									{retry === "group" && mi === messages.length - 1 ? <RetryAction onRetry={regenerate} /> : null}
+									</>
 									)}
 								</Fragment>
 							))}
@@ -1579,6 +1592,7 @@ export function Chat({
 									Something went wrong: {error.message}
 								</div>
 							)}
+							{error && retry === "error" ? <RetryAction onRetry={regenerate} /> : null}
 						</div>
 
 						{/* The dock's reserved tail (DockOverlay reports its height):

@@ -769,3 +769,76 @@ export function needsContinuation(messages: readonly LhMessage[]): boolean {
 	);
 	return calls.length > 0 && calls.every((b) => answered.has(b.id!));
 }
+
+// ─── regenerate (retry the agent's last message, #122) ───────────────────────
+
+/** Does this record message BEGIN an agent span — i.e. is it a learner or
+ *  server-delivered input the agent reacts to? The set mirrors what
+ *  projectView treats as a group boundary (every user-role view message:
+ *  user text, graph-context, probe-handoff, steers, practice markers), plus
+ *  ONE deliberate difference: a question's answer/dismissal toolResult. The
+ *  view attaches it to its call's part (the quiz→answer→reaction run is one
+ *  bubble), but it IS the learner's input, so a retry reruns from it and
+ *  only discards the reaction. Compaction, plan-block and problem-dismissed
+ *  markers are never boundaries (compaction is refused, the others ride
+ *  inside the span). */
+function startsAgentSpan(m: LhMessage): boolean {
+	const role = (m as { role?: string }).role;
+	if (role === "user") return true;
+	if (role === "custom") {
+		return [
+			"graph-context",
+			"probe-handoff",
+			"subagent-steer",
+			"subagent-abort",
+			"practice-thinking",
+			"practice-next",
+		].includes((m as LhMarkerMessage).customType);
+	}
+	if (role === "toolResult") {
+		const result = m as ToolResultMessage;
+		return (QUESTION_TOOLS as readonly string[]).includes(result.toolName) && !result.isError && result.details != null;
+	}
+	return false;
+}
+
+/**
+ * The retry cut (pure): the index just AFTER the last learner-input
+ * boundary — everything from there on is the agent span a retry discards
+ * (every assistant record, tool call and tool result since that input).
+ * An empty span (the record already ends on the boundary — an errored turn
+ * that saved nothing) returns `messages.length`: nothing is cut and the
+ * turn reruns from that input. Returns -1 when the record holds no
+ * boundary at all (nothing to rerun from).
+ */
+export function regenerateCut(messages: readonly LhMessage[]): number {
+	for (let i = messages.length - 1; i >= 0; i--) {
+		if (startsAgentSpan(messages[i]!)) return i + 1;
+	}
+	return -1;
+}
+
+/** Why a retry cut cannot proceed, or null. Cutting a span that holds a
+ *  compaction marker (or the kept-boundary the active marker points at)
+ *  would leave a dangling compaction pointer. */
+export function regenerateRefusal(messages: readonly LhMessage[], cut: number): string | null {
+	if (cut < 0) return "regenerate input has no learner input to rerun from";
+	// A partially answered parallel batch ([user, A(q1,q2), ans(q1)]) cuts at
+	// its answer, leaving q2 dangling: a turn on that base breaks the
+	// provider shape law (the parallel-question gate). Refuse rather than
+	// guess whether to discard the partial answers.
+	if (danglingQuestionOf(messages.slice(0, cut)) !== null) {
+		return "regenerate input cannot rerun while a sibling question in the batch is unanswered";
+	}
+	const active = activeCompactionOf(messages);
+	for (let i = cut; i < messages.length; i++) {
+		const m = messages[i]!;
+		if ((m as { role?: string }).role === "custom" && (m as LhMarkerMessage).customType === "compaction") {
+			return "regenerate input cannot discard a span that contains a compaction";
+		}
+		if (active && m.id === active.details.firstKeptMessageId) {
+			return "regenerate input cannot discard a span that contains a compaction";
+		}
+	}
+	return null;
+}

@@ -44,7 +44,7 @@ import { beginTurn, endTurn } from "./turn-liveness.ts";
 import { applyParkedDismissal } from "./dismissal-park.ts";
 import { registerTurn, unregisterTurn } from "./turn-runs.ts";
 import { persistTurn, triggerExtraction } from "./turn-service.ts";
-import { hasProbeDone, danglingQuestionOf } from "../core/native-messages.ts";
+import { hasProbeDone, danglingQuestionOf, regenerateCut, regenerateRefusal, type LhMessage } from "../core/native-messages.ts";
 import { composeInstructions } from "../agent/teacher-agent.ts";
 import { ensureCompacted, kickCompaction, effectiveThresholdTokens } from "./compaction.ts";
 import { catalogContextLimits, refreshConnectionCatalog } from "./model-catalog.ts";
@@ -265,7 +265,22 @@ export async function handleChatInput(
 	// input is the only steer appender; in-run delivery rides pi's own
 	// follow-up queue and never builds an input event at all.
 	let appends;
+	// THE RETRY CUT (#122): a regenerate appends nothing — it discards the
+	// agent span after the last learner input (regenerateCut) and reruns
+	// from what remains. The staleness guard (the client's last message id
+	// must be the record's actual last) and the compaction refusal are the
+	// same honest 400s as any refused input: nothing durable has changed.
+	let regenerateBase: LhMessage[] | undefined;
 	try {
+		if (input.type === "regenerate") {
+			if (input.lastMessageId !== (record.messages.at(-1)?.id ?? null)) {
+				throw new ChatInputError("regenerate input is stale: the record has moved past lastMessageId");
+			}
+			const cut = regenerateCut(record.messages);
+			const refusal = regenerateRefusal(record.messages, cut);
+			if (refusal) throw new ChatInputError(refusal);
+			regenerateBase = record.messages.slice(0, cut);
+		}
 		appends =
 			input.type === "steers"
 				? input.steers.filter((s) => !steerDelivered(record.messages, s.id))
@@ -308,7 +323,7 @@ export async function handleChatInput(
 	// truth instead of the pre-answer record. (Wave C: the wake's markers
 	// ride this same write-ahead - the pump de-queued them at fire, so this
 	// is the ONLY copy ever appended.)
-	const merged = [...record.messages, ...appends];
+	const merged = [...(regenerateBase ?? record.messages), ...appends];
 	const stagedAutomatic = isSubscriptionProvider(conversation.provider) && input.type === "steers";
 	let persistBaseCount = stagedAutomatic ? record.messages.length : merged.length;
 	try {

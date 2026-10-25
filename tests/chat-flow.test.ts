@@ -36,7 +36,8 @@ import { abortTurn, runningTurn, settledTurnResponse } from "../src/server/turn-
 import { chatStore } from "../src/store/chats.ts";
 import { jobStore } from "../src/store/jobs.ts";
 import { buildAnswer, dismissedAnswer, normalizeOptions, resolveCorrect, type QuestionData } from "../src/core/question-core.ts";
-import { danglingQuestionOf, endsInDismissal, needsContinuation, newAnswerResult } from "../src/core/native-messages.ts";
+import { danglingQuestionOf, endsInDismissal, needsContinuation, newAnswerResult, newUserMessage } from "../src/core/native-messages.ts";
+import { newCompactionMarker } from "../src/core/compaction.ts";
 import { projectView } from "../src/core/view.ts";
 import type { PiEngine } from "../src/agent/models.ts";
 import type { LhMessage } from "../src/core/native-messages.ts";
@@ -817,6 +818,33 @@ describe("teacher chat flow (scripted model)", () => {
 		const answered = [...saved.messages, newAnswerResult("call-a", "quiz", gradedAnswer(QUIZ_A, ["Mercury"]))];
 		const next = danglingQuestionOf(answered);
 		assert.equal(next?.toolCallId, "call-b", "the SECOND question becomes the dock subject only after the first is answered");
+	});
+});
+
+describe("regenerate: partial parallel batch (#122)", () => {
+	it("refuses (400) while a sibling question in the batch is unanswered", async () => {
+		const { engine } = scriptedTeacher(() => [
+			() =>
+				fauxAssistantMessage(
+					[fauxToolCall("quiz", QUIZ_INPUT, { id: "call-a" }), fauxToolCall("quiz", QUIZ_INPUT, { id: "call-b" })],
+					{ stopReason: "toolUse" },
+				),
+		]);
+		const chat = createConfiguredChat("Test: regenerate partial batch");
+		createdChats.push(chat.id);
+		await drainTurn(post(chat.id, { type: "text", text: "quiz me twice" }), agentFactory(engine));
+		// The parallel-question gate saved shape: one answer, no turn.
+		const partial = [...chatStore.getChat(chat.id)!.messages, newAnswerResult("call-a", "quiz", gradedAnswer(QUIZ_INPUT, ["Mercury"]))];
+		chatStore.saveMessages(chat.id, partial);
+
+		const res = await handleChatRequest(
+			post(chat.id, { type: "regenerate", lastMessageId: partial.at(-1)!.id }),
+			agentFactory(scriptedTeacher(() => []).engine),
+		);
+		assert.equal(res.status, 400);
+		assert.match(((await res.json()) as { error: string }).error, /sibling question/);
+		assert.deepEqual(chatStore.getChat(chat.id)!.messages.map((m) => m.id), partial.map((m) => m.id), "nothing was cut");
+		assert.equal(isTurnRunning(chat.id), false);
 	});
 });
 
@@ -1640,5 +1668,178 @@ describe("duplicate provider tool-call ids (the Lacan fix)", () => {
 		assert.equal(askPart?.output?.kind, "ask", "the ask card keeps its own answer");
 		assert.equal(quizPart?.state, "output-available");
 		assert.equal(quizPart?.output?.kind, "quiz", "the quiz card got ITS answer (the pre-fix bug: it landed on the ask card)");
+	});
+});
+
+describe("regenerate: retry the agent's last message (#122)", () => {
+	/** A one-reply teacher: every turn answers `reply`. */
+	function replyer(reply: string): { engine: PiEngine; calls: string[][] } {
+		return scriptedTeacher((calls) => [
+			(context) => {
+				calls.push(context.messages.map((m) => JSON.stringify((m as { content: unknown }).content)));
+				return fauxAssistantMessage([fauxText(reply)]);
+			},
+		]);
+	}
+	const lastId = (chatId: string) => chatStore.getChat(chatId)!.messages.at(-1)!.id;
+	const replyTexts = (chatId: string) =>
+		chatStore
+			.getChat(chatId)!
+			.messages.filter((m) => (m as { role?: string }).role === "assistant")
+			.map((m) => JSON.stringify((m as { content: unknown }).content));
+
+	it("keeps the prefix and replaces the tail with the rerun", async () => {
+		const chat = createConfiguredChat("Test: regenerate replaces the tail");
+		createdChats.push(chat.id);
+		await drainTurn(post(chat.id, { type: "text", text: "first" }), agentFactory(replyer("one").engine));
+		await drainTurn(post(chat.id, { type: "text", text: "second" }), agentFactory(replyer("two").engine));
+		const before = chatStore.getChat(chat.id)!.messages;
+		assert.equal(before.length, 4);
+
+		const again = replyer("two, take two");
+		await drainTurn(post(chat.id, { type: "regenerate", lastMessageId: lastId(chat.id) }), agentFactory(again.engine));
+
+		const after = chatStore.getChat(chat.id)!.messages;
+		assert.equal(after.length, 4, "the old reply was replaced, not appended to");
+		assert.deepEqual(
+			after.slice(0, 3).map((m) => m.id),
+			before.slice(0, 3).map((m) => m.id),
+			"the prefix is untouched (same ids)",
+		);
+		assert.notEqual(after[3]!.id, before[3]!.id, "the tail is the new reply");
+		assert.match(replyTexts(chat.id).at(-1)!, /two, take two/);
+		assert.doesNotMatch(replyTexts(chat.id).join(""), /"two"/, "the discarded reply is gone from the record");
+		assert.equal(again.calls[0]!.at(-1), JSON.stringify("second"), "the model reran from the learner's input");
+		assert.ok(!again.calls[0]!.some((c) => c.includes('"text":"two"')), "the discarded reply never reached the model");
+		assert.equal(isTurnRunning(chat.id), false);
+	});
+
+	it("a pending quiz at the end is removed with the span", async () => {
+		const chat = createConfiguredChat("Test: regenerate drops a pending quiz");
+		createdChats.push(chat.id);
+		await drainTurn(post(chat.id, { type: "text", text: "teach me" }), agentFactory(scriptedTeacher(defaultLesson).engine));
+		assert.ok(danglingQuestionOf(chatStore.getChat(chat.id)!.messages), "precondition: a quiz is pending");
+
+		await drainTurn(post(chat.id, { type: "regenerate", lastMessageId: lastId(chat.id) }), agentFactory(replyer("no quiz this time").engine));
+
+		const after = chatStore.getChat(chat.id)!.messages;
+		assert.equal(danglingQuestionOf(after), null, "the unanswered question went with the span");
+		assert.equal(after.length, 2);
+		assert.equal((after[0] as { role?: string }).role, "user");
+	});
+
+	it("an answered quiz keeps its answer: only the reaction is regenerated", async () => {
+		const chat = createConfiguredChat("Test: regenerate after an answer");
+		createdChats.push(chat.id);
+		const { engine } = scriptedTeacher(defaultLesson);
+		await drainTurn(post(chat.id, { type: "text", text: "teach me" }), agentFactory(engine));
+		await drainTurn(
+			post(chat.id, { type: "answer", toolCallId: "call-1", answer: gradedAnswer(QUIZ_INPUT, ["Mercury"]) }),
+			agentFactory(engine),
+		);
+		assert.equal(chatStore.getChat(chat.id)!.messages.length, 4);
+
+		await drainTurn(post(chat.id, { type: "regenerate", lastMessageId: lastId(chat.id) }), agentFactory(replyer("a better reaction").engine));
+
+		const after = chatStore.getChat(chat.id)!.messages;
+		assert.deepEqual(
+			after.map((m) => (m as { role?: string }).role),
+			["user", "assistant", "toolResult", "assistant"],
+			"quiz and answer survive; the reaction was replaced",
+		);
+		assert.match(replyTexts(chat.id).at(-1)!, /a better reaction/);
+	});
+
+	it("a stale lastMessageId is a 400 and changes nothing", async () => {
+		const chat = createConfiguredChat("Test: regenerate stale guard");
+		createdChats.push(chat.id);
+		await drainTurn(post(chat.id, { type: "text", text: "hi" }), agentFactory(replyer("hello").engine));
+		const before = chatStore.getChat(chat.id)!.messages;
+
+		const res = await handleChatRequest(
+			post(chat.id, { type: "regenerate", lastMessageId: before[0]!.id }),
+			agentFactory(replyer("never").engine),
+		);
+		assert.equal(res.status, 400);
+		assert.match(((await res.json()) as { error: string }).error, /stale/);
+		const none = await handleChatRequest(post(chat.id, { type: "regenerate", lastMessageId: null }), agentFactory(replyer("never").engine));
+		assert.equal(none.status, 400, "null against a non-empty record is stale too");
+		assert.deepEqual(chatStore.getChat(chat.id)!.messages, before, "the record is untouched");
+		assert.equal(isTurnRunning(chat.id), false, "no liveness effects");
+	});
+
+	it("a turn in flight is a 409", async () => {
+		const chat = createConfiguredChat("Test: regenerate during a turn");
+		createdChats.push(chat.id);
+		await drainTurn(post(chat.id, { type: "text", text: "hi" }), agentFactory(replyer("hello").engine));
+
+		let release!: () => void;
+		const gate = new Promise<void>((r) => (release = r));
+		await handleChatRequest(post(chat.id, { type: "text", text: "again" }), agentFactory(gatedTeacher(gate)));
+		assert.equal(isTurnRunning(chat.id), true);
+		const view = drainRunning(chat.id);
+
+		const res = await handleChatRequest(
+			post(chat.id, { type: "regenerate", lastMessageId: lastId(chat.id) }),
+			agentFactory(replyer("never").engine),
+		);
+		assert.equal(res.status, 409);
+
+		release();
+		await view;
+		assert.equal(isTurnRunning(chat.id), false);
+	});
+
+	it("a model change in settings is honored by the regenerated turn", async () => {
+		const chat = createConfiguredChat("Test: regenerate reads the model fresh");
+		createdChats.push(chat.id);
+		await drainTurn(post(chat.id, { type: "text", text: "hi" }), agentFactory(replyer("hello").engine));
+
+		chatStore.saveSettings(chat.id, { model: { provider: "openrouter", id: "deepseek/deepseek-v3.2" } });
+		const seen: string[] = [];
+		const engine = replyer("switched").engine;
+		await drainTurn(
+			post(chat.id, { type: "regenerate", lastMessageId: lastId(chat.id) }),
+			(opts) => {
+				seen.push(opts.engine!.model.id);
+				return createTeacherAgent(undefined, { engine, messages: opts.messages });
+			},
+		);
+		assert.deepEqual(seen, ["deepseek/deepseek-v3.2"], "the turn was built for the model now in settings");
+	});
+
+	it("an empty span reruns from the learner's input with nothing cut", async () => {
+		const chat = createConfiguredChat("Test: regenerate an errored turn that saved nothing");
+		createdChats.push(chat.id);
+		const input = newUserMessage("teach me");
+		chatStore.saveMessages(chat.id, [input]);
+
+		const again = replyer("here we go");
+		await drainTurn(post(chat.id, { type: "regenerate", lastMessageId: input.id }), agentFactory(again.engine));
+
+		const after = chatStore.getChat(chat.id)!.messages;
+		assert.equal(after.length, 2);
+		assert.equal(after[0]!.id, input.id, "the learner's input is the untouched base");
+		assert.match(replyTexts(chat.id).at(-1)!, /here we go/);
+	});
+
+	it("refuses (400) when the span holds a compaction — no dangling pointer", async () => {
+		const chat = createConfiguredChat("Test: regenerate compaction refusal");
+		createdChats.push(chat.id);
+		const input = newUserMessage("hi");
+		const reply = { ...newUserMessage("x"), role: "assistant", content: [{ type: "text", text: "hello" }] } as unknown as LhMessage;
+		const marker = newCompactionMarker("summary", {
+			firstKeptMessageId: input.id,
+			tokensBefore: 1,
+			at: new Date().toISOString(),
+		}) as unknown as LhMessage;
+		const seeded = [input, reply, marker];
+		chatStore.saveMessages(chat.id, seeded);
+
+		const res = await handleChatRequest(post(chat.id, { type: "regenerate", lastMessageId: marker.id }), agentFactory(replyer("never").engine));
+		assert.equal(res.status, 400);
+		assert.match(((await res.json()) as { error: string }).error, /compaction/);
+		assert.deepEqual(chatStore.getChat(chat.id)!.messages.map((m) => m.id), seeded.map((m) => m.id), "nothing was cut");
+		assert.equal(isTurnRunning(chat.id), false);
 	});
 });
