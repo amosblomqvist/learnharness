@@ -234,6 +234,14 @@ export function questionNeedsReveal(tool: string, rawInput: unknown, phase: stri
 	return normalizeQuizType((rawInput as { type?: unknown } | null)?.type) !== "predict";
 }
 
+/** Ask-before is a teach-phase quiz or explain: a check still closed
+ *  behind the reveal, or a prediction (the dock open or folded). Probe
+ *  questions and ask_user_question stay gated — a user message must not
+ *  land ahead of those calls. */
+export function questionAllowsAskBefore(tool: string, phase: string): boolean {
+	return (tool === "quiz" || tool === "explain") && phase === "teach";
+}
+
 /** The teaching-cycle role field, shared VERBATIM by both teach quizzing
  *  tools (owner, 2026-10-09: explain gains the cycle's types — a
  *  free-recall check collapses behind the reveal exactly like a quiz
@@ -468,6 +476,10 @@ export interface QuestionAnswerData {
 	committed?: string; // explain only (rendering): the model's committed answer
 	explanation?: string; // quiz only (rendering)
 	dismissed?: boolean;
+	/** The learner asked about the teaching before taking this question
+	 *  (ask-before-check): a closed check or a prediction. Not a skip, not
+	 *  a grade. The same question is posed again after the teacher answers. */
+	notYet?: boolean;
 	answeredAt: string;
 }
 
@@ -761,7 +773,23 @@ export function dismissedAnswer(kind: QuestionKind, questionText: string): Quest
 	};
 }
 
+/** The ask-before-check record: a closed check or a prediction was waiting
+ *  and he asked about the teaching instead of taking it. The model sees
+ *  {kind, notYet:true}; the transcript shows his message, not a skipped
+ *  card. The teacher answers, then poses the same question again. */
+export function notYetAnswer(kind: QuestionKind, questionText: string): QuestionAnswerData {
+	return {
+		kind,
+		questionText,
+		dontKnow: false,
+		answers: [],
+		notYet: true,
+		answeredAt: new Date().toISOString(),
+	};
+}
+
 export function compactAnswerForModel(ad: QuestionAnswerData): Record<string, unknown> {
+	if (ad.notYet) return { kind: ad.kind, notYet: true };
 	if (ad.dismissed) return { kind: ad.kind, dismissed: true };
 	const out: Record<string, unknown> = { kind: ad.kind };
 	if (ad.dontKnow) out.dontKnow = true;

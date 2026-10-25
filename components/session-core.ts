@@ -16,6 +16,7 @@
 import type { AgentEvent } from "@earendil-works/pi-agent-core";
 import type { ToolResultMessage } from "@earendil-works/pi-ai";
 import {
+	danglingQuestionOf,
 	needsContinuation,
 	measuredContextTokens,
 	newAnswerResult,
@@ -23,7 +24,9 @@ import {
 	newProblemDismissedMarker,
 	newThinkingMessage,
 	newUserMessage,
+	notYetAnswer,
 	projectView,
+	toolQuestionKind,
 	type ChatInput,
 	type LhMarkerMessage,
 	type LhMessage,
@@ -586,6 +589,16 @@ export class SessionModel {
 		} else if (input.type === "answer") {
 			const tool = pendingCallTool([...this.base, ...this.tail], input.toolCallId) ?? "quiz";
 			optimistic.push({ ...newAnswerResult(input.toolCallId, tool, input.answer), id: localId() });
+		} else if (input.type === "ask-before-check") {
+			const native = [...this.base, ...this.tail];
+			const pending = danglingQuestionOf(native);
+			const tool = pendingCallTool(native, input.toolCallId) ?? pending?.tool ?? "quiz";
+			const raw = pending?.toolCallId === input.toolCallId ? (pending.input as { question?: unknown } | null) : null;
+			const question = typeof raw?.question === "string" ? raw.question : "";
+			optimistic.push(
+				{ ...newAnswerResult(input.toolCallId, tool, notYetAnswer(toolQuestionKind(tool), question)), id: localId() },
+				{ ...newUserMessage(input.text), id: localId() },
+			);
 		}
 		if (optimistic.length > 0) this.mutate(() => {
 			this.tail = [...this.tail, ...optimistic];
