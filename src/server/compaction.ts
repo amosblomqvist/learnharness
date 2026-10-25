@@ -175,7 +175,7 @@ async function compact(deps: CompactionDeps, chatId: string): Promise<void> {
 	if (tokensBefore <= deps.thresholdTokens) return; // settled beneath while we waited
 
 	const cut = compactionCutIndex(messages);
-	if (cut >= messages.length) return; // nothing to drop (defensive)
+	if (cut <= 0 || cut >= messages.length) return; // no history can be dropped
 
 	// The previous compaction's kept boundary (chained compactions
 	// summarize the old summary + what rode after it).
@@ -240,6 +240,7 @@ async function compact(deps: CompactionDeps, chatId: string): Promise<void> {
 					outputTokens: usage.output,
 					cacheReadTokens: usage.cacheRead,
 					cacheWriteTokens: usage.cacheWrite,
+					cacheWrite1hTokens: usage.cacheWrite1h ?? 0,
 					reasoningTokens: usage.reasoning ?? 0,
 				},
 			],

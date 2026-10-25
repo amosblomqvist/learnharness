@@ -156,7 +156,7 @@ describe("compactionCutIndex", () => {
 		assert.equal((messages[cut] as { content: string }).content.startsWith("m2"), true, "the oldest kept message sits at the cut");
 	});
 
-	it("NEVER separates a tool result from its call — the cut extends to the call's assistant message", () => {
+	it("native cut after an oversized result drops both call and result, never keeps an orphan", () => {
 		const messages = [
 			big("m1"),
 			big("m2"),
@@ -165,13 +165,13 @@ describe("compactionCutIndex", () => {
 			big("m3"),
 			big("m4"),
 		];
-		// Budget lands such that the naive stop is ON the toolResult (m2 kept,
-		// result next): the walk must extend to a1's assistant message.
+		// Budget lands on the result. Pi chooses the next valid cut AT OR
+		// AFTER it, dropping the complete exchange rather than extending.
 		const cut = compactionCutIndex(messages, estimateTokens([big("m3"), big("m4")]) + 1);
-		assert.ok(cut <= 2, `the cut must not sit between the call (idx 2) and its result (idx 3) — got ${cut}`);
-		const kept = messages.slice(cut);
-		const keptIds = new Set(kept.map((m) => m.id));
-		assert.ok(keptIds.has("a1") && keptIds.has("r_call_1"), "call and result stay together");
+		assert.equal(cut, 4);
+		const keptIds = new Set(messages.slice(cut).map((m) => m.id));
+		assert.equal(keptIds.has("a1"), false);
+		assert.equal(keptIds.has("r_call_1"), false);
 	});
 
 	it("a PENDING question call (no result — the pose→answer window) always survives", () => {
@@ -181,7 +181,7 @@ describe("compactionCutIndex", () => {
 		assert.ok(kept.some((m) => m.id === "a_pending"), "the pending pose is never dropped");
 	});
 
-	it("zero budget summarizes everything; whole-history-in-budget returns 0 only when nothing precedes", () => {
+	it("whole history within budget keeps everything (zero cut)", () => {
 		assert.equal(compactionCutIndex([newUserMessage("hi")], 100), 0);
 	});
 });

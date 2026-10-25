@@ -44,7 +44,8 @@ import { notifySettingsSaved, useSettingsSaved } from "@/components/settings-sig
 import { Hint } from "@/components/ui/hint";
 import { type ProviderKeyInfo } from "@/components/settings/keys-section";
 import { ProviderMenuList } from "@/components/settings/model-menu";
-import { ChatGPTBackgroundAccess, ChatGPTConnection } from "@/components/settings/chatgpt-connection";
+import { ChatGPTBackgroundAccess } from "@/components/settings/chatgpt-connection";
+import { NativeSubscriptionBackgroundAccess, SubscriptionConnections } from "@/components/settings/subscription-connections";
 import { defaultOrderLevel, populateLevel, THINKING_LABEL } from "@/components/thinking-default";
 import { ThinkingMenuList } from "@/components/settings/model-menu";
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
@@ -211,7 +212,7 @@ export function SetupKeysBody({
 					</p>
 				)}
 			</div>
-			<div className="mt-2 border-t border-border/60 pt-4"><ChatGPTConnection setup /></div>
+			<div className="mt-2 border-t border-border/60 pt-4"><h3 className="mb-3 font-ui text-xs text-muted-foreground">Subscriptions</h3><SubscriptionConnections setup /></div>
 		</div>
 	);
 }
@@ -477,7 +478,7 @@ export function SetupDialog({
 										)}
 									</span>
 									<span className="text-xs text-muted-foreground/70">{SLOT_META[slot].roster}</span>
-									{slot !== "strong" && <ChatGPTBackgroundAccess provider={entry?.provider} />}
+									{slot !== "strong" && <><ChatGPTBackgroundAccess provider={entry?.provider} /><NativeSubscriptionBackgroundAccess provider={entry?.provider} /></>}
 									<div className="flex items-center gap-2">
 										<div className="relative flex-1">
 											<button

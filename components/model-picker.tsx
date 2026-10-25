@@ -81,7 +81,7 @@ export function catalogLimits(catalog: Pick<ModelCatalogResponse, "models">): Ma
  * changing the new-session default. Unpicked reads "—" (the
  * no-factory-fallback language: the UI never presents a default model).
  */
-export function ModelControl({ chatId }: { chatId?: string }) {
+export function ModelControl({ chatId, onModelChange }: { chatId?: string; onModelChange?: (model: string | undefined) => void }) {
 	const { catalog, refresh } = useModelCatalog();
 	const [models, setModels] = useState<ModelsSettings | undefined>();
 	const [session, setSession] = useState<ChatSettings | undefined>();
@@ -136,6 +136,9 @@ export function ModelControl({ chatId }: { chatId?: string }) {
 		: strong;
 	const effectiveId = override?.model?.id;
 	const effectiveProvider = override?.model?.provider;
+	useEffect(() => {
+		onModelChange?.(effectiveProvider && effectiveId ? `${effectiveProvider}:${effectiveId}` : undefined);
+	}, [effectiveProvider, effectiveId, onModelChange]);
 	const storedLevel = override?.thinkingLevel;
 	const entry = catalog?.models.find(
 		(m) => m.id === effectiveId && m.provider === effectiveProvider,

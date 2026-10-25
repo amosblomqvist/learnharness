@@ -25,7 +25,7 @@ import { absorbed, pendingCallTool, SessionModel } from "../components/session-c
 import type { ChatInput } from "../src/core/input-events.ts";
 import type { LhMessage } from "../src/core/native-messages.ts";
 import { newUserMessage, newAnswerResult, newThinkingMessage, needsContinuation, endsInDismissal } from "../src/core/native-messages.ts";
-import { projectView } from "../src/core/index.ts";
+import { newCompactionMarker, newPlanBlockMessage, projectView } from "../src/core/index.ts";
 import { dismissedAnswer } from "../src/core/question-core.ts";
 import { buildAnswer, type QuestionData } from "../src/core/question-core.ts";
 
@@ -480,6 +480,207 @@ it("Wave C: markers injected mid-run (custom role, follow-up delivery) append to
 		await m.send({ type: "text", text: "q" });
 		assert.equal(m.getState().status, "ready");
 		assert.equal(m.getState().error!.message, "OpenRouter 429: rate limited");
+	});
+});
+
+// ─── provider failures: one final-entry rule for live and saved records ──────
+
+describe("provider-error banner (live and saved)", () => {
+	function failed(id = "failed", errorMessage: string | undefined = "Google 500: fixture failure"): LhMessage {
+		return { ...assistantMsg(id, ""), content: [], stopReason: "error", errorMessage } as LhMessage;
+	}
+
+	it("restores an empty failed response on load and full sync without adding a transcript card", () => {
+		const record = [newUserMessage("topic"), failed()];
+		const m = model({ initialMessages: record });
+		assert.equal(m.getState().error?.message, "Google 500: fixture failure");
+		assert.equal(m.getState().status, "ready");
+		assert.equal(m.readyRef, true, "a restored provider failure does not block retry");
+		assert.deepEqual(m.getState().nativeMessages, record, "diagnostic history stays intact");
+		assert.equal(m.getState().messages.length, 1, "only the user bubble, no permanent error card");
+		const synced = model();
+		synced.setMessages(record);
+		assert.equal(synced.getState().error?.message, m.getState().error?.message);
+		const adopted = model({ initialMessages: record.slice(0, 1) });
+		adopted.adoptRecord(record);
+		assert.equal(adopted.getState().error?.message, m.getState().error?.message);
+	});
+
+	it("uses the existing fallback wording when the saved failure has no error text", () => {
+		const withoutText = { ...failed(), errorMessage: undefined } as LhMessage;
+		assert.equal(model({ initialMessages: [withoutText] }).getState().error?.message, "An error occurred.");
+		assert.equal(model().getState().error, null);
+	});
+
+	it("any later entry supersedes the failure, including plan/compaction markers and aborts", () => {
+		const failure = failed();
+		const later: LhMessage[] = [
+			newUserMessage("retry"),
+			assistantMsg("success", "Hello"),
+			{ ...assistantMsg("aborted", ""), stopReason: "aborted", errorMessage: "Aborted" } as LhMessage,
+			newThinkingMessage("problem", "my attempt"),
+			resultMsg("call"),
+			newPlanBlockMessage("plan", { kind: "full", nodes: [], edges: [], current: null }),
+			newCompactionMarker("summary", { firstKeptMessageId: failure.id, tokensBefore: 100, model: "fixture", at: "2026-01-01T00:00:00Z" }),
+		];
+		for (const entry of later) {
+			const m = model({ initialMessages: [failure] });
+			m.applyWireEvent({ type: "message_end", message: failure });
+			assert.ok(m.getState().error, "the live failure is initially visible");
+			m.setMessages([failure, entry]);
+			assert.equal(m.getState().error, null, `live banner superseded by ${entry.role}`);
+			assert.equal(model({ initialMessages: [failure, entry] }).getState().error, null, "reopened view agrees");
+		}
+	});
+
+	it("a newer live message supersedes the failure before its response finishes", () => {
+		const m = model();
+		m.applyWireEvent({ type: "message_end", message: failed() });
+		assert.ok(m.getState().error);
+		m.applyWireEvent({ type: "message_start", message: assistantMsg("next", "") });
+		assert.equal(m.getState().error, null);
+		m.applyWireEvent({ type: "message_end", message: assistantMsg("next", "Hello") });
+		assert.equal(m.getState().error, null);
+	});
+
+	it("does not treat an unfinished assistant's error-shaped partial as a completed failure", () => {
+		const m = model();
+		const failure = failed();
+		m.applyWireEvent({ type: "message_start", message: failure });
+		assert.equal(m.getState().error, null);
+		m.applyWireEvent({ type: "message_update", message: failure });
+		assert.equal(m.getState().error, null);
+		m.applyWireEvent({ type: "message_end", message: failure });
+		assert.equal(m.getState().error?.message, "Google 500: fixture failure");
+	});
+
+	for (const input of [{ type: "text", text: "retry" }, { type: "continue" }] as const) {
+		it(`hides the old failure during the optimistic ${input.type} wait, then shows a new live failure`, async () => {
+			let acknowledge!: (response: Response) => void;
+			const ack = new Promise<Response>((resolve) => { acknowledge = resolve; });
+			const old = failed("old", "old failure");
+			const fresh = failed("fresh", "new failure");
+			let finish!: () => void;
+			const stream = new ReadableStream<Uint8Array>({ start(controller) {
+				finish = () => {
+					controller.enqueue(new TextEncoder().encode(sse("[DONE]")));
+					controller.close();
+				};
+			} });
+			const m = model({ initialMessages: [old], fetch: async (url) => {
+				if (url === "/api/chat") return ack;
+				if (url === "/api/chats/chat_x") return Response.json({ messages: [old] });
+				if (url === "/api/chats/chat_x/stream") return new Response(stream);
+				throw new Error(`unexpected fetch: ${url}`);
+			} });
+			assert.equal(m.getState().error?.message, "old failure");
+			const sending = m.send(input);
+			assert.equal(m.getState().status, "submitted");
+			assert.equal(m.getState().error, null, "hidden even before the acknowledgement");
+			acknowledge(Response.json({ ok: true }));
+			await new Promise((resolve) => setTimeout(resolve, 0));
+			assert.equal(m.getState().error, null, "refetching the old failed record does not resurrect it");
+			m.applyWireEvent({ type: "message_start", message: fresh });
+			assert.equal(m.getState().error, null, "no error from an unfinished partial");
+			m.applyWireEvent({ type: "message_end", message: fresh });
+			assert.equal(m.getState().status, "submitted");
+			assert.equal(m.getState().error?.message, "new failure", "new failure appears before stream closure");
+			finish();
+			await sending;
+			assert.equal(m.getState().error?.message, "new failure");
+		});
+	}
+
+	it("hides the old failure immediately on fresh-mount reattach, and restores final-entry truth at idle", async () => {
+		let settle!: (response: Response) => void;
+		const response = new Promise<Response>((resolve) => { settle = resolve; });
+		const m = model({ initialMessages: [failed()], fetch: async () => response });
+		const attaching = m.resumeStream(false);
+		assert.equal(m.getState().status, "submitted");
+		assert.equal(m.getState().error, null);
+		settle(sseResponse({ type: "turn-settled" }, "[DONE]"));
+		await attaching;
+		assert.equal(m.getState().error?.message, "Google 500: fixture failure", "no newer entry superseded it");
+	});
+
+	it("recovers a failure that settled before the submitter could attach to its stream", async () => {
+		const record = [newUserMessage("topic"), failed()];
+		const m = model({ fetch: async (url) => {
+			if (url === "/api/chat") return Response.json({ ok: true });
+			if (url === "/api/chats/chat_x") return Response.json({ messages: record });
+			if (url === "/api/chats/chat_x/stream") return sseResponse({ type: "turn-settled" }, "[DONE]");
+			throw new Error(`unexpected fetch: ${url}`);
+		} });
+		m.setReattachSettled(() => m.setMessages(record));
+		await m.send({ type: "text", text: "topic" });
+		assert.equal(m.getState().status, "ready");
+		assert.equal(m.getState().error?.message, "Google 500: fixture failure");
+	});
+
+	it("a newer live provider failure replaces an earlier attachment error immediately", async () => {
+		let attempts = 0;
+		const seen: Array<{ status: string; error: string | undefined }> = [];
+		const m = model({ fetch: async () => {
+			if (++attempts === 1) return new Response("earlier attach failure", { status: 500 });
+			return sseResponse(
+				{ type: "message_start", message: failed("new", "new provider failure") },
+				{ type: "message_end", message: failed("new", "new provider failure") },
+				"[DONE]",
+			);
+		} });
+		await m.resumeStream(false);
+		assert.equal(m.getState().error?.message, "earlier attach failure");
+		m.onChange = () => { seen.push({ status: m.status, error: m.getState().error?.message }); };
+		await m.resumeStream(false);
+		assert.ok(seen.some((s) => s.status === "streaming" && s.error === "new provider failure"), "new failure wins before stream closure");
+		assert.equal(m.getState().error?.message, "new provider failure");
+		assert.equal(model({ initialMessages: m.getState().nativeMessages }).getState().error?.message, "new provider failure", "live and reopened views agree");
+	});
+
+	it("an aborted older consume cannot restore the old banner during a replacement reattach", async () => {
+		let attempts = 0;
+		let firstRead!: () => void;
+		const reading = new Promise<void>((resolve) => { firstRead = resolve; });
+		let settleReplacement!: (response: Response) => void;
+		const replacement = new Promise<Response>((resolve) => { settleReplacement = resolve; });
+		const m = model({ initialMessages: [failed()], fetch: async (_url, init) => {
+			if (++attempts > 1) return replacement;
+			return new Response(new ReadableStream<Uint8Array>({
+				start(controller) {
+					controller.enqueue(new TextEncoder().encode(sse({ type: "agent_start" })));
+					init?.signal?.addEventListener("abort", () => controller.error(new DOMException("Aborted", "AbortError")), { once: true });
+				},
+				pull() { firstRead(); },
+			}));
+		} });
+		const first = m.resumeStream(false);
+		await reading;
+		const second = m.resumeStream(false);
+		await first;
+		assert.equal(m.getState().status, "submitted", "old cleanup must not settle the replacement attempt");
+		assert.equal(m.getState().error, null, "old saved failure stays hidden during the replacement's Thinking wait");
+		settleReplacement(sseResponse(
+			{ type: "message_start", message: failed("new", "replacement failure") },
+			{ type: "message_end", message: failed("new", "replacement failure") },
+			"[DONE]",
+		));
+		await second;
+		assert.equal(m.getState().error?.message, "replacement failure");
+	});
+
+	it("keeps loop/request errors transient, with the existing precedence and clearError behavior", async () => {
+		const m = model({ initialMessages: [failed()] });
+		m.applyWireEvent({ type: "error", errorText: "loop failure" });
+		assert.equal(m.getState().error?.message, "loop failure");
+		assert.equal(model({ initialMessages: m.getState().nativeMessages }).getState().error?.message, "Google 500: fixture failure");
+		m.clearError();
+		assert.equal(m.getState().error?.message, "Google 500: fixture failure");
+		m.fetch = async () => new Response("request refused", { status: 500 });
+		await m.send({ type: "text", text: "retry" });
+		assert.equal(m.getState().error?.message, "request refused");
+		assert.equal(model({ initialMessages: m.getState().nativeMessages }).getState().error, null, "request errors are not fabricated as saved messages");
+		m.clearError();
+		assert.equal(m.getState().error, null);
 	});
 });
 

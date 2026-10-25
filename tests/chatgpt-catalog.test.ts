@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { piModels } from "../src/agent/models.ts";
 import { refreshChatGPTModels, chatGPTModels, chatGPTStatus, chatGPTScope, chatGPTScopeCurrent, chatGPTLease, chatGPTAbortController } from "../src/agent/chatgpt-bridge.ts";
 const send = Object.getOwnPropertyDescriptor(process, "send"), connected = Object.getOwnPropertyDescriptor(process, "connected");
+const desktopMarker = process.env.LH_DESKTOP_SERVER, desktopSecret = process.env.LH_DESKTOP_API_SECRET;
 const pending: any[] = [];
 const model = piModels().getModels("openai").find((m) => m.api === "openai-responses")!;
 const ipc = (m: unknown) => (process.emit as (name: string, value: unknown) => boolean)("message", m);
@@ -10,10 +11,13 @@ const status = (account: string, background = true) => ({ available: true, pendi
 const value = (name: string, revision: number, account = "A", authorityRevision = 1) => ({ epoch: account === "A" ? 1 : 2, authorityRevision, revision, status: status(account), accountId: account, models: [{ id: model.id, name }] });
 function reply(request: any, v: unknown) { ipc({ channel: "lh:chatgpt", id: request.id, op: request.op, ok: true, value: v }); }
 before(() => {
+ process.env.LH_DESKTOP_SERVER = "1"; process.env.LH_DESKTOP_API_SECRET = "d".repeat(64);
  Object.defineProperty(process, "connected", { configurable: true, value: true });
  Object.defineProperty(process, "send", { configurable: true, value: (m: unknown, cb?: () => void) => { pending.push(m); cb?.(); return true; } });
 });
 after(() => {
+ if (desktopMarker === undefined) delete process.env.LH_DESKTOP_SERVER; else process.env.LH_DESKTOP_SERVER = desktopMarker;
+ if (desktopSecret === undefined) delete process.env.LH_DESKTOP_API_SECRET; else process.env.LH_DESKTOP_API_SECRET = desktopSecret;
  if (send) Object.defineProperty(process, "send", send); else delete process.send;
  if (connected) Object.defineProperty(process, "connected", connected); else delete (process as { connected?: boolean }).connected;
 });

@@ -10,7 +10,8 @@ import { notifySettingsSaved } from "../components/settings-signal.ts";
 import { SidebarProvider } from "../components/sidebar.tsx";
 import { ChatGPTConnection, ChatGPTUIProvider } from "../components/settings/chatgpt-connection.tsx";
 import { GraphCostControl } from "../components/graph-view.tsx";
-import { graphCostSummary } from "../src/core/cost-summary.ts";
+import { graphCostSummary as foldGraphCostSummary, type CostSummaryInput } from "../src/core/cost-summary.ts";
+const graphCostSummary = (input: CostSummaryInput) => foldGraphCostSummary(input, () => null);
 import type { ModelCatalogResponse, ChatGPTStatus } from "../src/core/index.ts";
 const dom = parseHTML("<html><body></body></html>");
 Object.assign(globalThis, { window: dom.window, document: dom.document, Element: dom.window.Element, HTMLElement: dom.window.HTMLElement, CustomEvent: dom.window.CustomEvent, IS_REACT_ACT_ENVIRONMENT: true, localStorage: { getItem: () => null, setItem() {} } });
@@ -56,7 +57,7 @@ test("plan plus unknown graph rows keep the existing unknown suffix without fabr
  await act(async () => { document.querySelector("button")!.click(); });
  const recent = [...document.querySelectorAll(".border-t .shrink-0.tabular-nums")];
  assert.equal(recent.length, 2);
- for (const row of recent) assert.equal(row.textContent, "ChatGPT plan +1 unpriced", "both recent two-stage runs disclose their unknown stage");
+ for (const row of recent) assert.equal(row.textContent, "ChatGPT +1 unpriced", "both recent two-stage runs disclose their unknown stage");
  assert.equal((document.body.textContent?.match(/\+1 unpriced/g) ?? []).length, 4, "both mixed stage rows also retain their unknown suffix");
  assert(!document.body.textContent?.includes("$0.00"));
 });

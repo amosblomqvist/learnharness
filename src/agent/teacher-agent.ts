@@ -20,6 +20,7 @@ import { quizInputObject, quizInputProblems } from "../core/question-core.ts";
 import { QUESTION_TOOLS, type EnabledTools } from "../core/pending.ts";
 import { toLlmMessages, nativeInputCause } from "../core/native-messages.ts";
 import type { ChatGPTRequestCycle } from "./chatgpt-request-cycle.ts";
+import { usageWasAdmitted } from "./subscription-request-cycle.ts";
 
 /**
  * The two teaching-side agents (docs/probe-teach-split.md): the PROBER and
@@ -239,7 +240,7 @@ function baseAgentOptions(kind: AgentKind, opts: AgentBuildOptions, tools: Agent
 			if (event.type === "message_end" && event.message.role === "assistant" && "usage" in event.message) {
 				// A cancelled call is not a billed step (partial/estimated
 				// usage on an aborted message is not money spent).
-				if (event.message.stopReason === "aborted" || (opts.requestCycle && !opts.requestCycle.acceptsUsage(event.message))) return;
+				if (event.message.stopReason === "aborted" || !usageWasAdmitted(event.message.usage) || (opts.requestCycle && !opts.requestCycle.acceptsUsage(event.message))) return;
 				opts.onUsage!(event.message.usage);
 			}
 		});

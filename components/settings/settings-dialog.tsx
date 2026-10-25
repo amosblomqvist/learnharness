@@ -50,6 +50,7 @@ import { Hint } from "@/components/ui/hint";
 import { AppearanceSection, GraphSection } from "./appearance-section.tsx";
 import { KeyboardSection } from "./keyboard-section.tsx";
 import { ChatGPTUIProvider } from "./chatgpt-connection.tsx";
+import { NativeSubscriptionUIProvider } from "./subscription-connections.tsx";
 
 /** Owner (2026-09-20): hints earn their place — mechanics-explaining
  *  prose is out; only the keyboard note stays (storage location is a
@@ -92,12 +93,12 @@ export function SettingsDialogProvider({
 		setShow(true);
 	}, []);
 	return (
-		<ChatGPTUIProvider><DialogContext.Provider value={{ open }}>
+		<ChatGPTUIProvider><NativeSubscriptionUIProvider><DialogContext.Provider value={{ open }}>
 			{children}
 			{show && (
 				<SettingsDialog onClose={() => setShow(false)} initialSection={landOn} initialRow={landOnRow} />
 			)}
-		</DialogContext.Provider></ChatGPTUIProvider>
+		</DialogContext.Provider></NativeSubscriptionUIProvider></ChatGPTUIProvider>
 	);
 }
 

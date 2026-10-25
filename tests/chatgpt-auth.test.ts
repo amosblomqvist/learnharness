@@ -7,7 +7,7 @@ import os from "node:os";
 import path from "node:path";
 import { exportJWK, generateKeyPair, SignJWT } from "jose";
 const require = createRequire(import.meta.url);
-const { createChatGPT, encryptedStore, allowedAuthEndpoint, SCOPES } = require("../electron/chatgpt.cjs");
+const { createChatGPT, fileStore, allowedAuthEndpoint, SCOPES } = require("../electron/chatgpt.cjs");
 const { privateKey, publicKey } = await generateKeyPair("RS256");
 const jwk = { ...await exportJWK(publicKey), kid: "scratch-key", alg: "RS256", use: "sig" };
 const tokenUrl = "https://auth.openai.com/api/accounts/oauth/token";
@@ -16,14 +16,14 @@ async function signed(client: string, nonce: string, subject = "scratch-user", o
 	return new SignJWT({ nonce, email: "dummy@example.invalid", ...overrides }).setProtectedHeader({ alg: "RS256", kid: "scratch-key" }).setIssuer("https://auth.openai.com").setSubject(subject).setAudience(client).setIssuedAt().setExpirationTime("1h").sign(privateKey);
 }
 function deferred<T = void>() { let resolve!: (value: T) => void; const promise = new Promise<T>((done) => { resolve = done; }); return { resolve, promise }; }
-function fixture(options: { state?: any; expires?: number; timeoutMs?: number; token?: (form: URLSearchParams, url: URL) => Promise<Response>; write?: (next: any) => Promise<void>; secure?: () => void; change?: (push: any) => void; provider?: (target: string, init: RequestInit) => Promise<Response | undefined> } = {}) {
+function fixture(options: { state?: any; expires?: number; timeoutMs?: number; token?: (form: URLSearchParams, url: URL) => Promise<Response>; write?: (next: any) => Promise<void>; read?: () => void; change?: (push: any) => void; provider?: (target: string, init: RequestInit) => Promise<Response | undefined> } = {}) {
 	let saved = structuredClone(options.state ?? initial());
 	let url!: URL;
 	let writeCount = 0;
 	const changed = deferred();
 	const requests: { url: string; form?: URLSearchParams }[] = [];
 	const service = createChatGPT({
-		store: { secure() { options.secure?.(); }, async read() { return structuredClone(saved); }, async write(next: any) { writeCount++; await options.write?.(next); saved = structuredClone(next); } },
+		store: { async read() { options.read?.(); return structuredClone(saved); }, async write(next: any) { writeCount++; await options.write?.(next); saved = structuredClone(next); } },
 		openExternal: async (value: string) => { url = new URL(value); },
 		timeoutMs: options.timeoutMs ?? 5000,
 		onChange: (push: any) => { options.change?.(push); if (!push.status.pending) changed.resolve(); },
@@ -153,12 +153,46 @@ test("missing plan scope retains verified registration but refuses inference and
 	} finally { f.service.close(); }
 });
 
-test("durable encrypted save failure never activates a pending login", async () => {
+test("durable file save failure never activates a pending login", async () => {
 	const f = fixture({ write: async () => { throw new Error("scratch disk failure containing no real data"); } });
 	try {
 		await f.service.login(); await f.callback(); await f.changed.promise;
 		assert.equal(f.saved.activeId, null);
 		await assert.rejects(f.service.lease(false), /disconnected/);
+	} finally { f.service.close(); }
+});
+
+test("rotated-token persistence failure invalidates existing leases and never reloads the stale saved token", async () => {
+	let failWrite = false, reads = 0, refreshes = 0;
+	const pushes: any[] = [];
+	const f = await loggedIn({ read: () => { reads++; }, change: (push) => pushes.push(push),
+		write: async () => { if (failWrite) throw Object.assign(new Error("storage"), { code: "storage" }); },
+		token: async (form, url) => {
+			if (form.get("grant_type") === "refresh_token") {
+				refreshes++;
+				return Response.json({ access_token: "rotated-access", refresh_token: "rotated-refresh", token_type: "Bearer", expires_in: 3600 });
+			}
+			return Response.json({ access_token: "old-access", refresh_token: "old-refresh", id_token: await signed(form.get("client_id")!, url.searchParams.get("nonce")!), token_type: "Bearer", expires_in: 3600, scope: SCOPES.join(" ") });
+		},
+	});
+	try {
+		const catalog = await f.service.models();
+		const expected = { expectedAccountId: catalog.accountId, expectedAuthorityRevision: catalog.authorityRevision, selectedModelId: "gpt-5" };
+		await f.rawLease(false, expected);
+		// Advance time rather than mutating the service's private state.
+		const now = Date.now; Date.now = () => now() + 3600000;
+		try {
+			failWrite = true;
+			await assert.rejects(f.rawLease(false, expected), /storage/);
+		} finally { Date.now = now; }
+		assert.equal(refreshes, 1);
+		assert.equal(f.saved.registrations[0].tokens.refreshToken, "old-refresh", "failed write leaves only the stale predecessor on disk");
+		assert(pushes.some((push) => push.invalidate === "all" && push.stamp.epoch > catalog.epoch));
+		failWrite = false;
+		await f.service.status(); await f.service.models(); f.service.resume(); await f.service.consent(true);
+		await assert.rejects(f.rawLease(false, expected)); await assert.rejects(f.rawLease(true, expected));
+		assert.equal((await f.service.status()).accounts[0].connected, false);
+		assert.equal(reads, 1); assert.equal(refreshes, 1, "no stale-token retry after storage recovers");
 	} finally { f.service.close(); }
 });
 
@@ -208,29 +242,34 @@ test("account catalog is scoped, visibility filtered, and cleared on disconnect"
 	} finally { f.service.close(); }
 });
 
-test("safeStorage refuses basic_text/unavailable; encrypted file owner-only, atomic, no plaintext fallback", async () => {
+test("private JSON file round-trips global state; creation and atomic replacement are owner-only", async () => {
 	const dir = await fs.mkdtemp(path.join(os.tmpdir(), "lh-chatgpt-storage-"));
-	const file = path.join(dir, "credentials.enc.json");
-	const secure = { isEncryptionAvailable: () => true, getSelectedStorageBackend: () => "keychain", encryptString: (s: string) => Buffer.from(s.split("").reverse().join("")), decryptString: (b: Buffer) => b.toString().split("").reverse().join("") };
+	const file = path.join(dir, "private", "chatgpt-credentials.json");
 	try {
-		const store = encryptedStore(file, secure);
-		const data = { ...initial(), marker: "scratch-secret-never-plaintext" };
+		const store = fileStore(file);
+		assert.equal(await store.read(), null);
+		const data = { ...initial(), allowBackgroundUse: false };
 		await store.write(data);
-		assert(!(await fs.readFile(file, "utf8")).includes(data.marker));
+		assert.deepEqual(JSON.parse(await fs.readFile(file, "utf8")), data, "ordinary JSON, not an encrypted envelope");
 		assert.deepEqual(await store.read(), data);
+		assert.equal((await fs.stat(path.dirname(file))).mode & 0o777, 0o700);
 		assert.equal((await fs.stat(file)).mode & 0o777, 0o600);
-		assert.deepEqual(await fs.readdir(dir), ["credentials.enc.json"]);
-		for (const backend of [{ ...secure, getSelectedStorageBackend: () => "basic_text" }, { ...secure, isEncryptionAvailable: () => false }]) {
-			await assert.rejects(encryptedStore(file, backend).read(), /secure_storage/);
-			await assert.rejects(encryptedStore(file, backend).write(data), /secure_storage/);
-		}
-		assert(!allowedAuthEndpoint("https://auth.openai.com.evil.invalid/revoke"));
-		assert(!allowedAuthEndpoint("http://127.0.0.1/revoke"));
-		assert(!allowedAuthEndpoint("https://auth.openai.com@evil.invalid/revoke"));
+		await fs.chmod(file, 0o644);
+		await store.write({ ...data, allowBackgroundUse: true });
+		assert.equal((await fs.stat(file)).mode & 0o777, 0o600, "replacement never inherits a permissive old mode");
+		assert.equal((await store.read()).allowBackgroundUse, true);
+		assert.deepEqual(await fs.readdir(path.dirname(file)), ["chatgpt-credentials.json"]);
 	} finally { await fs.rm(dir, { recursive: true, force: true }); }
 });
 
-test("invalid rotating replacement is durably revocation-only; verified mapping and prior validated ID survive restart", async () => {
+test("revocation endpoint remains restricted to the exact secure issuer", () => {
+	assert(allowedAuthEndpoint("https://auth.openai.com/api/accounts/oauth/revoke"));
+	assert(!allowedAuthEndpoint("https://auth.openai.com.evil.invalid/revoke"));
+	assert(!allowedAuthEndpoint("http://127.0.0.1/revoke"));
+	assert(!allowedAuthEndpoint("https://auth.openai.com@evil.invalid/revoke"));
+});
+
+for (const holdVerification of [false, true]) test(`invalid rotating replacement is durably revocation-only; verified mapping and prior validated ID survive restart${holdVerification ? " (held JWKS regression)" : ""}`, { timeout: 10000 }, async () => {
 	const f = await loggedIn({ expires: 1, token: async (form, url) => form.get("grant_type") === "refresh_token"
 		? Response.json({ access_token: "never-save-this-access", refresh_token: "likely-latest-revoke-handle", id_token: "invalid.signature.jwt", token_type: "Bearer", expires_in: 3600 })
 		: Response.json({ access_token: "old-verified-access", refresh_token: "old-refresh", id_token: await signed(form.get("client_id")!, url.searchParams.get("nonce")!), token_type: "Bearer", expires_in: 1, scope: SCOPES.join(" ") }) });
@@ -242,7 +281,22 @@ test("invalid rotating replacement is durably revocation-only; verified mapping 
 		for (const field of ["id", "issuer", "subject", "email", "clientId"]) assert.equal(restricted[field], before[field]);
 		assert.deepEqual(restricted.tokens, { ...before.tokens, refreshToken: "likely-latest-revoke-handle" });
 		assert(!JSON.stringify(f.saved).includes("never-save-this-access"));
-		const restarted = fixture({ state: f.saved });
+		const reconnectComplete = deferred<any>();
+		const verificationEntered = deferred(), verificationRelease = deferred();
+		let reconnectArmed = false, sawPending = false, completed = false;
+		const restarted = fixture({ state: f.saved,
+			change: (push) => {
+				if (!reconnectArmed) return;
+				if (push.status.pending) sawPending = true;
+				else if (sawPending) { completed = true; reconnectComplete.resolve(push.status); }
+			},
+			provider: async (url) => {
+				if (holdVerification && reconnectArmed && url.endsWith("jwks.json")) {
+					verificationEntered.resolve(); await verificationRelease.promise;
+				}
+				return undefined;
+			},
+		});
 		try {
 			await restarted.service.status();
 			await restarted.service.select(restricted.id);
@@ -254,40 +308,97 @@ test("invalid rotating replacement is durably revocation-only; verified mapping 
 			await restarted.service.logout(restricted.id);
 			assert.equal(restarted.requests.find((r) => r.form?.has("token_type_hint"))!.form!.get("token"), "likely-latest-revoke-handle");
 			assert.equal(restarted.saved.registrations[0].reconnectRequired, true);
-			await restarted.service.login(restricted.id); await restarted.callback(); await restarted.changed.promise;
-			// Wait for callback's asynchronous encrypted activation, not the prior status push.
-			for (let i = 0; i < 30 && restarted.saved.registrations[0].reconnectRequired; i++) await new Promise((resolve) => setImmediate(resolve));
+			// Earlier select/consent/logout notifications have already settled changed.
+			// Arm before this login and await its pending -> terminal transition instead.
+			reconnectArmed = true;
+			await restarted.service.login(restricted.id);
+			assert.equal(sawPending, true);
+			await restarted.callback(); // HTTP acknowledgement precedes verification/save.
+			if (holdVerification) {
+				await verificationEntered.promise;
+				assert.equal(completed, false, "the current attempt cannot complete before identity verification");
+				const held = await restarted.service.status();
+				assert.equal(held.pending, true); assert.equal(held.error, null);
+				assert.equal(held.accounts[0].connected, false); assert.equal(held.accounts[0].planEnabled, false);
+				assert.equal(restarted.saved.registrations[0].reconnectRequired, true);
+				assert.deepEqual((await restarted.service.models()).models, []);
+				const expected = { expectedAccountId: restricted.id, expectedAuthorityRevision: restarted.service.stamp().authorityRevision, selectedModelId: "gpt-5" };
+				await assert.rejects(restarted.rawLease(false, expected), /disconnected/);
+				await assert.rejects(restarted.rawLease(true, expected), /disconnected/);
+				assert.equal(completed, false, "status/catalog/lease checks cannot settle the pending attempt");
+				verificationRelease.resolve();
+			}
+			const terminal = await reconnectComplete.promise;
+			assert.equal(terminal.pending, false); assert.equal(terminal.error, null);
+			assert.equal(terminal.activeId, restricted.id);
+			assert.equal(terminal.accounts[0].connected, true);
 			assert.equal(restarted.saved.registrations[0].reconnectRequired, undefined);
-		} finally { restarted.service.close(); }
+		} finally { verificationRelease.resolve(); restarted.service.close(); }
 	} finally { f.service.close(); }
 });
 
-test("detected secure backend loss emits full invalidation, denies all leases and cannot be repaired by consent/resume", async () => {
-	let lost = false; const pushes: any[] = [];
-	const f = await loggedIn({ secure: () => { if (lost) throw Object.assign(new Error("secure_storage"), { code: "secure_storage" }); }, change: (push) => pushes.push(push) });
+for (const holdVerification of [false, true]) test(`observed file write failure invalidates all work; status, consent and resume cannot reload stale credentials or repair authority${holdVerification ? " (held JWKS regression)" : ""}`, { timeout: 10000 }, async () => {
+	let lost = false, reads = 0; const pushes: any[] = [];
+	const reconnectComplete = deferred<any>();
+	const verificationEntered = deferred(), verificationRelease = deferred();
+	let reconnectArmed = false, sawPending = false, completed = false;
+	const f = await loggedIn({ read: () => { reads++; }, write: async () => { if (lost) throw Object.assign(new Error("storage"), { code: "storage" }); },
+		change: (push) => {
+			pushes.push(push);
+			if (!reconnectArmed) return;
+			if (push.status.pending) sawPending = true;
+			else if (sawPending) { completed = true; reconnectComplete.resolve(push.status); }
+		},
+		provider: async (url) => {
+			if (holdVerification && reconnectArmed && url.endsWith("jwks.json")) {
+				verificationEntered.resolve(); await verificationRelease.promise;
+			}
+			return undefined;
+		},
+	});
 	try {
 		await f.service.lease(false); const epoch = f.service.stamp().epoch;
 		lost = true;
-		assert.equal((await f.service.status()).available, false);
+		await assert.rejects(f.service.consent(false), /storage/);
 		assert(pushes.some((p) => p.invalidate === "all" && p.stamp.epoch > epoch));
 		await assert.rejects(f.service.lease(false)); await assert.rejects(f.service.lease(true));
 		lost = false; f.service.resume(); await f.service.consent(true);
+		await f.service.status(); await f.service.models();
 		await assert.rejects(f.service.lease(false));
 		assert.equal((await f.service.status()).accounts[0].connected, false);
-	} finally { f.service.close(); }
+		assert.equal(reads, 1, "a recovered disk never causes a stale credential reload");
+		const writesBeforeReconnect = f.writeCount;
+		// The initial login already settled fixture.changed; observe this attempt instead.
+		reconnectArmed = true;
+		await f.service.login(f.saved.activeId); assert.equal(sawPending, true); await f.callback();
+		if (holdVerification) {
+			await verificationEntered.promise;
+			assert.equal(completed, false, "HTTP acknowledgement cannot complete a pending identity verification");
+			const held = await f.service.status();
+			assert.equal(held.pending, true); assert.equal(held.error, null);
+			assert.equal(held.accounts[0].connected, false);
+			assert.equal(f.writeCount, writesBeforeReconnect, "unverified recovery cannot persist credentials");
+		}
+		verificationRelease.resolve();
+		const terminal = await reconnectComplete.promise;
+		assert.equal(terminal.pending, false); assert.equal(terminal.error, null);
+		assert.equal(terminal.accounts[0].connected, true, "verified login plus durable save can explicitly reconnect");
+		assert.equal(f.writeCount, writesBeforeReconnect + 1, "recovery requires a new durable credential write");
+		assert.equal(f.saved.activeId, terminal.activeId);
+		assert.equal(reads, 1, "explicit recovery still never reloads stale credentials");
+	} finally { verificationRelease.resolve(); f.service.close(); }
 });
 
-test("strict encrypted schema rejects malformed marker/duplicates/token/active identity without changing original bytes", async () => {
+test("strict JSON schema rejects malformed marker/duplicates/token/active identity without changing original bytes", async () => {
 	const f = await loggedIn(); f.service.close();
 	const dir = await fs.mkdtemp(path.join(os.tmpdir(), "lh-chatgpt-corrupt-"));
-	const file = path.join(dir, "credentials.enc.json");
-	const secure = { isEncryptionAvailable: () => true, encryptString: (s: string) => Buffer.from(s), decryptString: (b: Buffer) => b.toString() };
+	const file = path.join(dir, "chatgpt-credentials.json");
 	try {
 		for (const mutate of [(s: any) => s.registrations[0].reconnectRequired = false, (s: any) => s.registrations[0].reconnectRequired = "true", (s: any) => s.registrations.push(s.registrations[0]), (s: any) => s.activeId = "missing", (s: any) => s.registrations[0].tokens.scopes = "not-array", (s: any) => s.registrations[0].tokens.expiresAt = -1, (s: any) => s.allowBackgroundUse = "true", (s: any) => s.allowBackgroundUse = null, (s: any) => s.registrations[0].background = "false"]) {
 			const state = structuredClone(f.saved); mutate(state);
-			const bytes = JSON.stringify({ version: 1, encrypted: Buffer.from(JSON.stringify(state)).toString("base64") });
+			const bytes = JSON.stringify(state);
 			await fs.writeFile(file, bytes);
-			const service = createChatGPT({ store: encryptedStore(file, secure), openExternal: () => assert.fail("no OAuth"), fetch: () => assert.fail("no provider") });
+			const service = createChatGPT({ store: fileStore(file), openExternal: () => assert.fail("no OAuth"), fetch: () => assert.fail("no provider") });
 			try { assert.equal((await service.status()).available, false); await assert.rejects(service.login()); assert.equal(await fs.readFile(file, "utf8"), bytes); }
 			finally { service.close(); }
 		}
@@ -459,7 +570,7 @@ test("disconnect racing refresh revokes the latest rotated handle before forgett
 	} finally { release.resolve(); f.service.close(); }
 });
 
-test("disconnect persistence failure is not reported as local forgetting and leaves encrypted state fail-closed", async () => {
+test("disconnect persistence failure is not reported as local forgetting and leaves stored state fail-closed", async () => {
 	let failWrite = false;
 	const f = await loggedIn({ write: async () => { if (failWrite) throw Object.assign(new Error("storage"), { code: "storage" }); } });
 	try {

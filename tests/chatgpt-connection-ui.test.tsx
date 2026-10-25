@@ -17,10 +17,10 @@ const dom = parseHTML("<html><body></body></html>");
 Object.assign(globalThis, { window: dom.window, document: dom.document, Element: dom.window.Element, HTMLElement: dom.window.HTMLElement, CustomEvent: dom.window.CustomEvent, IS_REACT_ACT_ENVIRONMENT: true, localStorage: { getItem: () => null, setItem() {} } });
 const originalFetch = globalThis.fetch;
 let root: Root | undefined, host: HTMLDivElement | undefined;
-const account = (id = "private-registration-id", email = "learner@example.invalid", connected = true) => ({ id, email, registration: "private-issued-client", connected, planEnabled: connected });
+const account = (id = "private-registration-id", email = "learner@example.invalid", connected = true) => ({ id, email, registration: "private-issued-client", connected, planEnabled: connected, canSignInAgain: !connected });
 const disconnected = (allowBackgroundUse = true): ChatGPTStatus => ({ available: true, pending: false, allowBackgroundUse, activeId: null, accounts: [account("signed-out-record", "signed-out@example.invalid", false)], error: null });
 const connected = (allowBackgroundUse = true): ChatGPTStatus => ({ ...disconnected(allowBackgroundUse), activeId: "private-registration-id", accounts: [account(), ...disconnected().accounts] });
-const storageError = "ChatGPT credentials could not be saved securely. Reconnect before making requests.";
+const storageError = "ChatGPT credentials could not be read or saved. Check local file access, then reconnect before making requests.";
 const warning = "Account disconnected locally. Remote revocation could not be confirmed.";
 const errorReply = () => ({ error: storageError } as ChatGPTStatus);
 function deferred<T>() { let resolve!: (v: T) => void; const promise = new Promise<T>((done) => { resolve = done; }); return { promise, resolve }; }
@@ -41,6 +41,16 @@ function fixture(initial = disconnected(), overrides: Partial<ChatGPTControlBrid
  };
  window.lh = { expandWindow() {}, chatgpt: bridge };
  return { calls, bridge, push, get status() { return status; }, complete() { push({ ...connected(status.allowBackgroundUse), pending: false }); } };
+}
+function recoveryController({ writeFails = false, tokens = "valid" }: { writeFails?: boolean; tokens?: "valid" | "missing" | "restricted" | "scope" | "expired" } = {}) {
+ const require = createRequire(import.meta.url); const { createChatGPT, SCOPES } = require("../electron/chatgpt.cjs"); const { chatGPTControl } = require("../electron/chatgpt-ipc.cjs");
+ const registration: any = { id: "fixture", clientId: "oaiapp_fixture", issuer: "https://auth.openai.com", subject: "fixture", email: "fixture@example.invalid", tokens: { accessToken: "fake-access", refreshToken: "fake-refresh", idToken: "fake-id", expiresAt: tokens === "expired" ? 0 : Date.now() + 3600000, scopes: tokens === "scope" ? ["openid"] : [...SCOPES] } };
+ if (tokens === "missing") delete registration.tokens; if (tokens === "restricted") registration.reconnectRequired = true;
+ let saved = { version: 1, hostId: "urn:uuid:offline-recovery", activeId: "fixture", allowBackgroundUse: true, registrations: [registration] };
+ let browserAttempts = 0, tokenRequests = 0; const listeners = new Set<() => void>();
+ const service = createChatGPT({ store: { read: async () => structuredClone(saved), write: async (next: typeof saved) => { if (writeFails) throw Object.assign(new Error("fake-storage-failure"), { code: "storage" }); saved = structuredClone(next); } }, openExternal: () => { browserAttempts++; throw new Error("No real browser"); }, fetch: async (url: string) => { tokenRequests++; assert.equal(tokens, "expired"); assert.equal(url, "https://auth.openai.com/api/accounts/oauth/token"); return Response.json({ error: "invalid_grant" }, { status: 401 }); }, onChange: () => { for (const cb of listeners) cb(); } });
+ window.lh = { expandWindow() {}, chatgpt: { status: () => chatGPTControl({ op: "status" }, service), consent: (enabled) => chatGPTControl({ op: "consent", enabled }, service), login: (id) => chatGPTControl({ op: "login", id }, service), cancel: () => chatGPTControl({ op: "cancel" }, service), select: (id) => chatGPTControl({ op: "select", id }, service), disconnect: (id) => chatGPTControl({ op: "disconnect", id }, service), logout: (id) => chatGPTControl({ op: "logout", id }, service), onChange: (cb) => { listeners.add(cb); return () => listeners.delete(cb); } } };
+ return { service, get saved() { return saved; }, get browserAttempts() { return browserAttempts; }, get tokenRequests() { return tokenRequests; } };
 }
 async function mount(children: React.ReactNode = <ChatGPTConnection />) {
  host = document.createElement("div"); document.body.append(host); root = createRoot(host);
@@ -82,12 +92,15 @@ test("Providers has exactly four ordered sections; unknown variables stay masked
  assert.equal(byTest("unknown-FUTURE_VAR").textContent, "FUTURE_VAR…abcd"); assert(!byTest("unknown-FUTURE_VAR").querySelector("input, button"));
 });
 
-test("disconnected row is only secondary Continue; initial default is ON; cancel discards draft without OAuth/global mutation", async () => {
+test("disconnected row uses shared Connect action; initial default is ON; cancel discards draft without OAuth/global mutation", async () => {
  const f = fixture(); await mount(<ChatGPTConnection setup />);
- assert.equal(byTest("chatgpt-connection").textContent, "Continue with ChatGPT");
+ assert.equal(byTest("chatgpt-connection").textContent, "ChatGPTConnect");
  assert(!document.body.textContent?.includes(CHATGPT_NOTICE)); const trigger = byTest("chatgpt-login");
  assert.match(trigger.className, /cursor-pointer/); assert.match(trigger.className, /hover:bg-accent/); assert.match(trigger.className, /focus-visible:ring/);
  await click(trigger); assert.equal(f.calls.login.length, 0); assert(document.body.textContent?.includes(CHATGPT_NOTICE));
+ assert.equal(byTest("chatgpt-account-dialog").querySelector("h2")?.textContent, "ChatGPT");
+ assert.equal(byTest("chatgpt-proceed").textContent, "Continue with ChatGPT"); assert(byTest("chatgpt-proceed").querySelector('img[src="/siwc/chatgpt-logo-white.svg"]'));
+ assert(!button("Continue", byTest("chatgpt-account-dialog")), "ChatGPT remains one step, with disclosure and toggle together");
  assert.equal(toggle().getAttribute("aria-checked"), "true");
  assert.equal(toggle().getAttribute("aria-label"), "Allow background use for all ChatGPT accounts");
  assert(byTest("chatgpt-global-background").textContent?.includes("Background work counts toward your ChatGPT plan usage."));
@@ -180,23 +193,33 @@ test("email-only connected selector and Manage remain responsive; account select
  assert.deepEqual([...document.querySelectorAll('select[aria-label="ChatGPT account"] option')].map((o) => o.textContent), ["learner@example.invalid", "second@example.invalid", "ChatGPT account"]);
  assert.doesNotMatch(byTest("chatgpt-connection").textContent!, /private-registration|private-issued| · active|signed-out/);
  assert.match(byTest("chatgpt-connection").firstElementChild!.className, /items-center/);
+ const row = byTest("chatgpt-connection").firstElementChild!;
+ assert.equal(row.children[0]!.textContent, "ChatGPT"); assert.equal(row.children[1]!.tagName, "SELECT"); assert.equal(row.children[2]!.textContent, "Manage…");
+ assert.match(row.children[2]!.className, /text-muted-foreground/); assert(!row.textContent?.includes("Connected"));
  await selectAccount("ChatGPT account", "second"); assert.deepEqual(f.calls.select, ["second"]); assert.equal(f.status.allowBackgroundUse, false);
  await click(button("Manage…")); assert(byTest("chatgpt-managed-identity").textContent?.includes("second@example.invalid"));
- assert.deepEqual([...byTest("chatgpt-account-footer").querySelectorAll("button")].map((b) => b.textContent), ["Add accounts", "Close"]);
+ assert.deepEqual([...byTest("chatgpt-account-footer").querySelectorAll("button")].map((b) => b.textContent), ["Disconnect", "Close"]);
  const dialog = byTest("chatgpt-account-dialog").innerHTML;
  assert(dialog.indexOf('data-testid="chatgpt-managed-identity"') < dialog.indexOf('data-testid="chatgpt-account-actions"'));
- assert(dialog.indexOf('data-testid="chatgpt-account-actions"') < dialog.indexOf('data-testid="chatgpt-global-background"'));
+ assert(dialog.indexOf('data-testid="chatgpt-global-background"') < dialog.indexOf('data-testid="chatgpt-managed-identity"'));
+ assert(!byTest("chatgpt-account-dialog").querySelector('[data-testid="chatgpt-privacy-notice"]'));
+ assert.equal(byTest("chatgpt-account-dialog").querySelector("h2")?.textContent, "ChatGPT");
+ assert(byTest("chatgpt-account-dialog").querySelector('a[href="https://openai.com/policies/privacy-policy/"]'));
+ assert(byTest("chatgpt-account-dialog").querySelector('a[href="https://chatgpt.com/settings/usage"]'));
  await click(toggle()); assert.deepEqual(f.calls.consent, [true]); assert.equal(toggle().getAttribute("aria-checked"), "true");
  await click(button("Close")); await selectAccount("ChatGPT account", "private-registration-id"); assert.equal(f.status.allowBackgroundUse, true);
  assert.equal(f.calls.logout, 0);
 });
 
-test("Disconnect account stays under identity, outside the nondestructive Manage footer; confirmation Cancel never forgets", async () => {
+test("Disconnect is the quiet red left-footer action below identity; confirmation Cancel never forgets", async () => {
  assert.deepEqual(CHATGPT_DISCONNECT_COPY, { title: "Disconnect account?", body: "This removes the saved account and its credentials from this device." });
  const f = fixture(connected()); await mount(); await click(button("Manage…"));
- assert.equal(byTest("chatgpt-account-actions").textContent, "Disconnect account"); assert.match(byTest("chatgpt-disconnect").className, /text-red/);
- assert(!byTest("chatgpt-account-footer").contains(byTest("chatgpt-disconnect")));
+ assert.equal(byTest("chatgpt-account-actions").textContent, "Disconnect"); assert.match(byTest("chatgpt-disconnect").className, /text-red/);
+ assert.equal(byTest("chatgpt-account-footer").firstElementChild, byTest("chatgpt-account-actions"));
+ assert.equal(byTest("chatgpt-account-footer").lastElementChild?.lastElementChild, button("Close"));
+ assert(!byTest("chatgpt-account-footer").contains(byTest("chatgpt-add-accounts")));
  await click(byTest("chatgpt-disconnect")); assert.equal(f.calls.disconnect.length, 0);
+ assert.equal(byTest("chatgpt-account-dialog").querySelector("h2")?.textContent, "ChatGPT");
  assert(byTest("chatgpt-disconnect-confirmation").textContent?.includes(CHATGPT_DISCONNECT_COPY.title));
  assert(byTest("chatgpt-disconnect-confirmation").textContent?.includes(CHATGPT_DISCONNECT_COPY.body));
  assert(!document.body.textContent?.includes("delete your OpenAI"));
@@ -208,8 +231,9 @@ for (const count of [1, 3]) test(`Add accounts reuses the actual add flow with $
  const initial = connected(count === 3);
  initial.accounts = [account(), ...Array.from({ length: count - 1 }, (_, i) => account(`saved-${i}`, `saved-${i}@example.invalid`))];
  const f = fixture(initial); const before = structuredClone(initial); await mount(); await click(button("Manage…"));
- assert.deepEqual([...byTest("chatgpt-account-footer").querySelectorAll("button")].map((b) => b.textContent), ["Add accounts", "Close"]);
- assert.equal(byTest("chatgpt-add-accounts").getAttribute("data-variant"), "outline");
+ assert.deepEqual([...byTest("chatgpt-account-footer").querySelectorAll("button")].map((b) => b.textContent), ["Disconnect", "Close"]);
+ assert.equal(byTest("chatgpt-add-accounts").getAttribute("data-variant"), "ghost");
+ assert.equal(byTest("chatgpt-add-accounts").parentElement, byTest("chatgpt-account-strip"));
  assert.match(byTest("chatgpt-add-accounts").className, /cursor-pointer/);
  await click(byTest("chatgpt-add-accounts"));
  assert(byTest("chatgpt-privacy-notice").textContent?.includes(CHATGPT_NOTICE)); assert(byTest("chatgpt-proceed"));
@@ -226,6 +250,68 @@ for (const count of [1, 3]) test(`Add accounts reuses the actual add flow with $
  assert.deepEqual(f.status, before); assert.equal(f.calls.cancel, 1); assert.deepEqual(f.calls.consent, []); assert.deepEqual(f.calls.disconnect, []);
 });
 
+test("ChatGPT Sign in again is reserved for a saved disconnected account and keeps its existing registration flow", async () => {
+ const f = fixture(connected(false)); await mount(); await click(button("Manage…"));
+ assert(!button("Sign in again")); await selectAccount("Manage ChatGPT account", "signed-out-record"); assert(button("Sign in again"));
+ await click(button("Sign in again")); assert.equal(byTest("chatgpt-account-dialog").querySelector("h2")?.textContent, "ChatGPT");
+ assert(byTest("chatgpt-privacy-notice")); assert(toggle()); assert.equal(toggle().getAttribute("aria-checked"), "false");
+ assert.equal(document.querySelector<HTMLSelectElement>('select[aria-label="Saved ChatGPT account"]')?.value, "signed-out-record"); assert.deepEqual(f.calls.login, []);
+ await click(byTest("chatgpt-proceed")); assert.deepEqual(f.calls.login, ["signed-out-record"]); assert.equal(f.status.activeId, "private-registration-id");
+ await click(button("Cancel", byTest("chatgpt-account-dialog"))); assert.equal(f.calls.cancel, 1); assert.deepEqual(f.calls.disconnect, []); assert.deepEqual(f.calls.consent, []);
+});
+test("actual controller storage-write failure is not ChatGPT authorization recovery even while available stays true", async () => {
+ const f = recoveryController({ writeFails: true });
+ try {
+  await mount(); await click(button("Manage…")); assert(!button("Sign in again")); await click(toggle());
+  const status = await f.service.status(); assert.equal(status.available, true); assert.equal(status.pending, false); assert.equal(status.accounts[0].connected, false); assert.equal(status.accounts[0].planEnabled, false); assert.equal(status.error, storageError);
+  assert(!button("Sign in again"), "a failed credential write must not offer reauthorization");
+  assert.equal(status.accounts[0].canSignInAgain, false); assert.equal(f.browserAttempts, 0); assert.equal(f.tokenRequests, 0);
+ } finally { await act(async () => f.service.close()); }
+});
+for (const tokens of ["missing", "restricted", "scope"] as const) test(`actual controller ${tokens} authorization permits recovery, but paused/closed state does not`, async () => {
+ const f = recoveryController({ tokens });
+ try {
+  await mount(); await click(byTest("chatgpt-login")); await selectAccount("Saved ChatGPT account", "fixture"); await click(button("Manage…"));
+  assert.equal((await f.service.status()).accounts[0].canSignInAgain, true); assert(button("Sign in again"));
+  assert.equal(f.saved.registrations[0].canSignInAgain, undefined, "eligibility is projected, never persisted");
+  await act(async () => f.service.pause()); assert.equal((await f.service.status()).accounts[0].canSignInAgain, false); assert(!button("Sign in again"));
+  await act(async () => f.service.resume()); assert.equal((await f.service.status()).accounts[0].canSignInAgain, true); assert(button("Sign in again"));
+  await act(async () => f.service.close()); assert.equal((await f.service.status()).accounts[0].canSignInAgain, false); assert(!button("Sign in again"));
+  assert.equal(f.browserAttempts, 0); assert.equal(f.tokenRequests, 0);
+ } finally { await act(async () => f.service.close()); }
+});
+test("storage denial overrides an otherwise eligible remembered ChatGPT authorization recovery", async () => {
+ const f = recoveryController({ tokens: "missing", writeFails: true });
+ try {
+  await mount(); await click(byTest("chatgpt-login")); await selectAccount("Saved ChatGPT account", "fixture"); await click(button("Manage…")); assert(button("Sign in again"));
+  await click(toggle()); const status = await f.service.status(); assert.equal(status.available, true); assert.equal(status.error, storageError); assert.equal(status.accounts[0].canSignInAgain, false); assert(!button("Sign in again"));
+  assert.equal(f.browserAttempts, 0); assert.equal(f.tokenRequests, 0);
+ } finally { await act(async () => f.service.close()); }
+});
+test("actual invalid_grant recovery preserves remembered identity and stages the existing registration flow", async () => {
+ const f = recoveryController({ tokens: "expired" });
+ try {
+  await mount(); await click(button("Manage…")); assert.equal((await f.service.status()).accounts[0].canSignInAgain, false); assert(!button("Sign in again"));
+  await act(async () => { await f.service.models(); });
+  const status = await f.service.status(); assert.equal(status.available, true); assert.equal(status.accounts[0].connected, false); assert.equal(status.accounts[0].canSignInAgain, true);
+  assert.equal(status.accounts[0].id, "fixture"); assert.equal(status.accounts[0].registration, "oaiapp_fixture"); assert.equal(f.saved.registrations[0].tokens, undefined);
+  await click(button("Sign in again")); assert(byTest("chatgpt-privacy-notice")); assert(toggle()); assert.equal(document.querySelector<HTMLSelectElement>('select[aria-label="Saved ChatGPT account"]')?.value, "fixture");
+  assert.equal(f.tokenRequests, 1, "only the injected refresh response was requested"); assert.equal(f.browserAttempts, 0, "staging recovery never starts OAuth");
+ } finally { await act(async () => f.service.close()); }
+});
+test("missing eligibility remains compatible but never implies authorization recovery; malformed eligibility is rejected", async () => {
+ const initial = connected(); initial.accounts = [account()]; const f = fixture(initial); await mount(); await click(button("Manage…"));
+ const legacy: ChatGPTStatus = { ...initial, accounts: initial.accounts.map(({ canSignInAgain: _ignored, ...a }) => ({ ...a, connected: false, planEnabled: false })) };
+ await act(async () => f.push(legacy)); assert(!button("Sign in again")); assert(!document.querySelector('[role="alert"]'));
+ for (const value of [null, "true", 1]) {
+  await act(async () => f.push({ ...legacy, accounts: legacy.accounts.map((a) => ({ ...a, canSignInAgain: value })) } as unknown as ChatGPTStatus));
+  assert(!button("Sign in again")); assert.equal(document.querySelector('[role="alert"]')?.textContent, "The ChatGPT connection could not be changed. Try again.");
+ }
+});
+test("connected setup row retains the email dropdown before muted Manage", async () => {
+ fixture(connected()); await mount(<ChatGPTConnection setup />);
+ const row = byTest("chatgpt-connection").firstElementChild!; assert.equal(row.children[1]!.tagName, "SELECT"); assert.equal(row.children[2]!.textContent, "Manage…"); assert.match(row.children[2]!.className, /text-muted-foreground/);
+});
 test("Add accounts reuses the existing dialog's initial focus for the pre-auth transition", async () => {
  const previous = HTMLElement.prototype.focus; const focused: HTMLElement[] = [];
  HTMLElement.prototype.focus = function () { focused.push(this); };
@@ -261,7 +347,7 @@ test("confirmed disconnect preserves identity/pending content until outcome, pre
 });
 
 test("signed-out legacy accounts remain manageable/forgettable without pretending selection is a usable connection", async () => {
- const f = fixture(); await mount(); assert.equal(byTest("chatgpt-connection").textContent, "Continue with ChatGPT");
+ const f = fixture(); await mount(); assert.equal(byTest("chatgpt-connection").textContent, "ChatGPTConnect");
  await click(byTest("chatgpt-login")); await selectAccount("Saved ChatGPT account", "signed-out-record"); await click(button("Manage…"));
  assert(byTest("chatgpt-managed-identity").textContent?.includes("signed-out@example.invalid"));
  assert.deepEqual(f.calls.select, []); assert.equal(f.calls.login.length, 0); await confirmDisconnect();

@@ -777,6 +777,7 @@ export function callUsage(usage: Usage): CallUsage {
 		outputTokens: usage.output,
 		cacheReadTokens: usage.cacheRead,
 		cacheWriteTokens: usage.cacheWrite,
+		cacheWrite1hTokens: usage.cacheWrite1h ?? 0,
 		// Optional in pi's Usage (providers that never emit reasoning
 		// tokens leave it unset) — persisted as 0, never dropped.
 		reasoningTokens: usage.reasoning ?? 0,

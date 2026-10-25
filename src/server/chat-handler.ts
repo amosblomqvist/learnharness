@@ -7,9 +7,10 @@ import {
 	type TeachingAgent,
 } from "../agent/teacher-agent.ts";
 import { piEngineForSpec, type PiEngine } from "../agent/models.ts";
-import { chatGPTBackgroundAllowed, chatGPTScopeCurrent } from "../agent/chatgpt-bridge.ts";
+import { connectionBackgroundAllowed, connectionScopeCurrent, isSubscriptionProvider } from "../agent/subscription-connections.ts";
+import { nativeSubscriptionError } from "../agent/subscription-stream.ts";
 import { chatGPTStreamError } from "../agent/chatgpt-stream.ts";
-import { ChatGPTRequestCycle, type ChatGPTDispatchLifecycle } from "../agent/chatgpt-request-cycle.ts";
+import { SubscriptionRequestCycle, type SubscriptionDispatchLifecycle } from "../agent/subscription-request-cycle.ts";
 import { reconstructRequestCause } from "../core/native-messages.ts";
 import { createJobRunner } from "../agent/subagents/runner.ts";
 import { createExtractionPipeline } from "../agent/subagents/extraction.ts";
@@ -207,10 +208,10 @@ export async function handleChatInput(
 	// persist (nothing durable changes); wake-pipeline turns ride the same
 	// path. The affected tier is strong — the conversation chain's own tier
 	// (a chat.model override still resolves through it).
-	if (conversation.provider === "chatgpt") {
-		await refreshConnectionCatalog();
-		if (input.type === "steers" && !chatGPTBackgroundAllowed()) {
-			return Response.json({ error: "ChatGPT background use is off in this app. Automatic follow-up remains deferred in its queue." }, { status: 403 });
+	if (isSubscriptionProvider(conversation.provider)) {
+		await refreshConnectionCatalog(conversation.provider);
+		if (input.type === "steers" && !connectionBackgroundAllowed(conversation.provider)) {
+			return Response.json({ error: "Background use is off for this connection. Automatic follow-up remains deferred in its queue." }, { status: 403 });
 		}
 	}
 	if (!providerKeyPresent(conversation.provider)) {
@@ -229,15 +230,15 @@ export async function handleChatInput(
 	// beginTurn, no liveness effects — and the record re-reads after
 	// because compaction appends the marker.
 	const callPurpose = { background: input.type === "steers" || (input.type === "continue" && reconstructRequestCause(record.messages) !== "foreground") };
-	let requestCycle: ChatGPTRequestCycle | undefined;
-	const lifecycle: ChatGPTDispatchLifecycle = {
+	let requestCycle: SubscriptionRequestCycle | undefined;
+	const lifecycle: SubscriptionDispatchLifecycle = {
 		captured: (scope) => requestCycle?.captured(scope),
 		beforeDispatch: (scope) => requestCycle?.beforeDispatch(scope),
 		noDispatch: (kind) => requestCycle?.noDispatch(kind),
 	};
 	let conversationEngine: PiEngine;
 	try { conversationEngine = piEngineForSpec(conversation, () => callPurpose.background, lifecycle); }
-	catch { return Response.json({ error: conversation.provider === "chatgpt" ? chatGPTStreamError("model catalog") : "The selected model is unavailable." }, { status: 503 }); }
+	catch { return Response.json({ error: conversation.provider === "chatgpt" ? chatGPTStreamError("model catalog") : isSubscriptionProvider(conversation.provider) ? nativeSubscriptionError(conversation.provider, "model catalog") : "The selected model is unavailable." }, { status: 503 }); }
 	// THE IMAGE GATE (composer paste): a NEW picture is refused, before any
 	// append, when the conversation model cannot read images. Pictures
 	// already in the history need no gate: pi-ai downgrades them to a text
@@ -254,7 +255,7 @@ export async function handleChatInput(
 		{
 			chatStore: stores.chatStore,
 			engine: piEngineForSpec(conversation, true),
-			canStart: () => conversation.provider !== "chatgpt" || chatGPTBackgroundAllowed(),
+			canStart: () => connectionBackgroundAllowed(conversation.provider),
 			modelId: modelIdForCompaction,
 			kind: record.kind === "practice" ? "practice" : hasProbeDone(record.messages) ? "teach" : "probe",
 			thresholdTokens: effectiveThresholdTokens(
@@ -320,7 +321,7 @@ export async function handleChatInput(
 	// ride this same write-ahead - the pump de-queued them at fire, so this
 	// is the ONLY copy ever appended.)
 	const merged = [...record.messages, ...appends];
-	const stagedAutomatic = conversation.provider === "chatgpt" && input.type === "steers";
+	const stagedAutomatic = isSubscriptionProvider(conversation.provider) && input.type === "steers";
 	let persistBaseCount = stagedAutomatic ? record.messages.length : merged.length;
 	try {
 		if (!stagedAutomatic) stores.chatStore.saveMessages(chatId, merged);
@@ -345,6 +346,7 @@ export async function handleChatInput(
 			outputTokens: usage.output,
 			cacheReadTokens: usage.cacheRead,
 			cacheWriteTokens: usage.cacheWrite,
+			cacheWrite1hTokens: usage.cacheWrite1h ?? 0,
 			// Optional in pi's Usage — persisted as 0, never dropped.
 			reasoningTokens: usage.reasoning ?? 0,
 		});
@@ -374,12 +376,12 @@ export async function handleChatInput(
 	// enabled). The definitive toggleable set is TOGGLEABLE_TOOLS — the
 	// sub-agent JOB tools (research/demo/visual/pdf; adjudicated with the
 	// user: quiz/ask/fs/plan/probe_done are always-on).
-	if (conversation.provider === "chatgpt") requestCycle = new ChatGPTRequestCycle({
+	if (isSubscriptionProvider(conversation.provider)) requestCycle = new SubscriptionRequestCycle({
 		initialMessages: asAgentMessages(merged),
 		staged: stagedAutomatic ? asAgentMessages(appends) : undefined,
 		foregroundOwed: !callPurpose.background,
 		purpose: callPurpose,
-		scopeCurrent: chatGPTScopeCurrent,
+		scopeCurrent: (scope) => connectionScopeCurrent(conversation.provider, scope),
 		commitStaged: () => { stores.chatStore.saveMessages(chatId, merged); persistBaseCount = merged.length; },
 		restoreAutomatic: (automaticIds, retainedIds) => restoreUncommittedAutomatic(chatId, constructed, automaticIds, retainedIds),
 	});
@@ -502,6 +504,7 @@ export async function handleChatInput(
 			// transcript directly (the retry context the model saw).
 			onError: (error) => {
 				if (conversation.provider === "chatgpt") return chatGPTStreamError(String(error));
+				if (isSubscriptionProvider(conversation.provider)) return nativeSubscriptionError(conversation.provider, String(error));
 				console.error(`[chat ${chatId}] turn error:`, error);
 				return "An error occurred.";
 			},
@@ -572,7 +575,7 @@ export async function handleChatInput(
 					kickCompaction(() => {
 						const fresh = effectiveSettings();
 						const spec = resolveConversationSpec(stores.chatStore.getChat(chatId)?.settings, fresh.models.strong);
-						if (!spec || (spec.provider === "chatgpt" && !chatGPTBackgroundAllowed())) return null;
+						if (!spec || !connectionBackgroundAllowed(spec.provider)) return null;
 						let kickEngine: PiEngine;
 						try { kickEngine = piEngineForSpec(spec, true); } catch { return null; }
 						const kickModelId = `${kickEngine.model.provider}:${kickEngine.model.id}`;
@@ -581,7 +584,7 @@ export async function handleChatInput(
 						return {
 							chatStore: stores.chatStore,
 							engine: kickEngine,
-							canStart: () => spec.provider !== "chatgpt" || chatGPTBackgroundAllowed(),
+							canStart: () => connectionBackgroundAllowed(spec.provider),
 							modelId: kickModelId,
 							kind: freshRecord.kind === "practice" ? "practice" : hasProbeDone(freshRecord.messages) ? "teach" : "probe",
 							thresholdTokens: effectiveThresholdTokens(

@@ -1,4 +1,4 @@
-import { test, after } from "node:test";
+import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
@@ -21,7 +21,20 @@ let revision = 1;
 function connection(background: boolean) {
 	ipc({ channel: "lh:chatgpt", kind: "state", stamp: { epoch: 1, authorityRevision: 1, revision: revision++ }, invalidate: background ? "none" : "background", status: { available: true, pending: false, allowBackgroundUse: background, activeId: "scratch-account", accounts: [{ id: "scratch-account", connected: true, planEnabled: true, background: !background }], error: null } });
 }
-after(() => { fs.rmSync(dir, { recursive: true, force: true }); });
+const originalSend = Object.getOwnPropertyDescriptor(process, "send"), originalConnected = Object.getOwnPropertyDescriptor(process, "connected");
+const desktopMarker = process.env.LH_DESKTOP_SERVER, desktopSecret = process.env.LH_DESKTOP_API_SECRET;
+before(() => {
+	process.env.LH_DESKTOP_SERVER = "1"; process.env.LH_DESKTOP_API_SECRET = "d".repeat(64);
+	Object.defineProperty(process, "connected", { configurable: true, value: true });
+	Object.defineProperty(process, "send", { configurable: true, value: (_message: unknown, callback?: (error: Error) => void) => { callback?.(new Error("unexpected fixture desktop request")); return false; } });
+});
+after(() => {
+	fs.rmSync(dir, { recursive: true, force: true });
+	if (originalSend) Object.defineProperty(process, "send", originalSend); else delete process.send;
+	if (originalConnected) Object.defineProperty(process, "connected", originalConnected); else delete (process as { connected?: boolean }).connected;
+	if (desktopMarker === undefined) delete process.env.LH_DESKTOP_SERVER; else process.env.LH_DESKTOP_SERVER = desktopMarker;
+	if (desktopSecret === undefined) delete process.env.LH_DESKTOP_API_SECRET; else process.env.LH_DESKTOP_API_SECRET = desktopSecret;
+});
 
 for (const revokedAfterQueue of [false, true]) {
 	test(`mixed learner+automatic batch: foreground runs, automatic result stays owned/deferred without consent (${revokedAfterQueue ? "revoked after handoff" : "initially off"})`, { timeout: 5000 }, async () => {

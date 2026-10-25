@@ -9,6 +9,7 @@ import { chatGPTHistory, chatGPTPayload } from "../src/agent/chatgpt-stream.ts";
 const originalSend = Object.getOwnPropertyDescriptor(process, "send");
 const originalConnected = Object.getOwnPropertyDescriptor(process, "connected");
 const realFetch = globalThis.fetch;
+const desktopMarker = process.env.LH_DESKTOP_SERVER, desktopSecret = process.env.LH_DESKTOP_API_SECRET;
 const originalKey = process.env.OPENAI_API_KEY;
 let leaseError: string | null = null;
 let requests: { authorization: string | null; body: Record<string, any>; url: string }[] = [];
@@ -17,6 +18,7 @@ const ipc = (value: unknown) => (process.emit as (name: string, value: unknown) 
 const model = piModels().getModel("openai", "gpt-5") as Model<"openai-responses">;
 const status = { available: true, pending: false, allowBackgroundUse: false, activeId: "scratch-account", accounts: [{ id: "scratch-account", email: "dummy@example.invalid", registration: "oaiapp_scratch", connected: true, planEnabled: true, background: false }], error: null };
 before(async () => {
+	process.env.LH_DESKTOP_SERVER = "1"; process.env.LH_DESKTOP_API_SECRET = "d".repeat(64);
 	assert(model);
 	process.env.OPENAI_API_KEY = "sk-scratch-must-never-be-used";
 	Object.defineProperty(process, "connected", { configurable: true, value: true });
@@ -36,6 +38,8 @@ before(async () => {
 	};
 });
 after(() => {
+	if (desktopMarker === undefined) delete process.env.LH_DESKTOP_SERVER; else process.env.LH_DESKTOP_SERVER = desktopMarker;
+	if (desktopSecret === undefined) delete process.env.LH_DESKTOP_API_SECRET; else process.env.LH_DESKTOP_API_SECRET = desktopSecret;
 	globalThis.fetch = realFetch;
 	if (originalSend) Object.defineProperty(process, "send", originalSend); else delete process.send;
 	if (originalConnected) Object.defineProperty(process, "connected", originalConnected); else delete (process as { connected?: boolean }).connected;
@@ -166,7 +170,7 @@ test("case-insensitive Authorization overrides including null are refused before
 	assert.equal(requests.length, before);
 });
 
-test("full secure-storage invalidation aborts foreground and background controllers and clears capabilities", () => {
+test("full credential-storage invalidation aborts foreground and background controllers and clears capabilities", () => {
 	const foreground = chatGPTAbortController(false), background = chatGPTAbortController(true);
 	ipc({ channel: "lh:chatgpt", kind: "state", stamp: { epoch: 2, authorityRevision: 2, revision: 3 }, status: { ...status, available: false }, invalidate: "all" });
 	assert(foreground.controller.signal.aborted); assert(background.controller.signal.aborted); assert.equal(chatGPTModels().length, 0);

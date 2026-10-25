@@ -48,7 +48,7 @@ const STORAGE_KEY = "lh:sidebar-open";
  *
  * Mirrors SIDEBAR_AUTOCLOSE in electron/main.cjs — keep in sync.
  */
-import type { ChatGPTControlBridge } from "@/src/core";
+import type { ChatGPTControlBridge, NativeSubscriptionControlBridge } from "@/src/core";
 const SIDEBAR_AUTOCLOSE = 928;
 
 // Module scope, guarded for SSR (the server has no navigator).
@@ -61,6 +61,7 @@ declare global {
 			/** Read-only host OS; determines the native-control gutter. */
 			platform?: string;
 			chatgpt?: ChatGPTControlBridge;
+			subscriptions?: NativeSubscriptionControlBridge;
 			expandWindow: () => void;
 			/** The zoom truth (owner round 7): subscribes to "lh:zoom" pushes; returns unsubscribe. */
 			onZoom?: (cb: (factor: number) => void) => () => void;

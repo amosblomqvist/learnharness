@@ -24,9 +24,11 @@
  *     would shadow every settings-page key change until restart.
  */
 
-const { app, BrowserWindow, Menu, ipcMain, session, shell, dialog, safeStorage } = require("electron");
-const { createChatGPT, encryptedStore } = require("./chatgpt.cjs");
+const { app, BrowserWindow, Menu, ipcMain, session, shell, dialog } = require("electron");
+const { createChatGPT, fileStore } = require("./chatgpt.cjs");
 const { attachChatGPTChild, trustedSender, chatGPTControl } = require("./chatgpt-ipc.cjs");
+const { createSubscriptions, loadSubscriptionSDK } = require("./subscriptions.cjs");
+const { attachSubscriptionChild, subscriptionControl } = require("./subscription-ipc.cjs");
 const { desktopAPIHeaders } = require("./desktop-api.cjs");
 const { randomBytes } = require("node:crypto");
 const { spawn } = require("node:child_process");
@@ -134,6 +136,8 @@ if (process.argv.includes("--browser-service")) {
 let serverProcess = null;
 let chatgpt = null;
 let chatgptChild = null;
+let subscriptions = null;
+let subscriptionChild = null;
 // Per-launch request capability, never OAuth tokens and never renderer state.
 let desktopAPISecret = null;
 const trustedAppWindows = new Set();
@@ -196,7 +200,11 @@ function startServer(port) {
 	return new Promise((resolve, reject) => {
 		const child = spawn(
 			process.execPath,
-			[serverEntry()],
+			// Only the macOS backend needs this: Next's native title setter
+			// otherwise checks this Node-mode process in as a foreground app.
+			process.platform === "darwin"
+				? ["--require", path.join(process.resourcesPath, "server-title-guard.cjs"), serverEntry()]
+				: [serverEntry()],
 			{
 				cwd: path.dirname(serverEntry()),
 				env: {
@@ -218,6 +226,7 @@ function startServer(port) {
 		);
 		serverProcess = child;
 		chatgptChild = attachChatGPTChild(child, chatgpt);
+		subscriptionChild = attachSubscriptionChild(child, subscriptions);
 		const fwd = (buf) => buf.toString().trimEnd().split("\n").forEach((l) => l && log(`server: ${l}`));
 		child.stdout.on("data", fwd);
 		child.stderr.on("data", fwd);
@@ -226,7 +235,10 @@ function startServer(port) {
 			serverProcess = null;
 			chatgptChild?.dispose();
 			chatgptChild = null;
+			subscriptionChild?.dispose();
+			subscriptionChild = null;
 			chatgpt?.close();
+			subscriptions?.close();
 		});
 		resolve(child);
 	});
@@ -251,6 +263,7 @@ function waitUntilUp(url, tries = 150) {
 
 function killServer() {
 	chatgpt?.close();
+	subscriptions?.close();
 	if (!serverProcess) return;
 	const child = serverProcess;
 	serverProcess = null;
@@ -565,6 +578,7 @@ function installMenu() {
 async function main() {
 	app.on("window-all-closed", () => {
 		chatgpt?.pause();
+		subscriptions?.pause();
 		// macOS convention: the app stays resident, reactivated from the Dock.
 		if (process.platform !== "darwin") app.quit();
 	});
@@ -589,13 +603,23 @@ async function main() {
 			callback({ requestHeaders: desktopAPIHeaders(details, ownedOrigin, desktopAPISecret, [...trustedAppWindows]) });
 		});
 		chatgpt = createChatGPT({
-			store: encryptedStore(path.join(app.getPath("userData"), "chatgpt-credentials.enc.json"), safeStorage),
+			store: fileStore(path.join(app.getPath("userData"), "chatgpt-credentials.json")),
 			openExternal: (target) => shell.openExternal(target),
 			onChange: (value) => {
 				chatgptChild?.send(value);
 				for (const win of BrowserWindow.getAllWindows()) win.webContents.send("lh:chatgpt:changed");
 			},
 		});
+		subscriptions = createSubscriptions({
+			directory: app.getPath("userData"),
+			loadSDK: () => loadSubscriptionSDK(path.dirname(serverEntry())),
+			openExternal: (target) => shell.openExternal(target),
+			onChange: (snapshot) => {
+				subscriptionChild?.send(snapshot);
+				for (const win of BrowserWindow.getAllWindows()) win.webContents.send("lh:subscriptions:changed");
+			},
+		});
+		await subscriptions.ready;
 		log(`starting server: ${serverEntry()}`);
 		log(`data dir: ${DATA_DIR()}${fs.existsSync(AUTH_FILE()) ? " · auth.json: present" : " · auth.json: ABSENT (no BYOK keys yet)"}`);
 		await startServer(new URL(url).port);
@@ -611,6 +635,15 @@ async function main() {
 		if (!trustedAppWindows.has(BrowserWindow.fromWebContents(event.sender)) || !trustedSender(event, new URL(url).origin, BrowserWindow)) return { error: "Untrusted desktop request." };
 		if (!chatgpt || !serverProcess?.connected) return { available: false, pending: false, activeId: null, accounts: [], error: "ChatGPT sign-in requires the desktop app's private server connection. Browser-only and externally launched development servers keep API-key connections." };
 		return chatGPTControl(command, chatgpt);
+	});
+
+	ipcMain.handle("lh:subscriptions:control", async (event, command) => {
+		if (!trustedAppWindows.has(BrowserWindow.fromWebContents(event.sender)) || !trustedSender(event, new URL(url).origin, BrowserWindow)) throw new Error("Untrusted desktop request.");
+		if (!subscriptions || !serverProcess?.connected) {
+			if (command?.op === "status") return [];
+			throw new Error("Subscription sign-in requires the desktop app's private server connection.");
+		}
+		return subscriptionControl(command, subscriptions);
 	});
 
 	installMenu();
@@ -638,7 +671,7 @@ async function main() {
 		if (width < target) win.setBounds({ x, y, width: target, height });
 	});
 	app.on("activate", () => {
-		if (BrowserWindow.getAllWindows().length === 0) { chatgpt?.resume(); createWindow(url); }
+		if (BrowserWindow.getAllWindows().length === 0) { chatgpt?.resume(); subscriptions?.resume(); createWindow(url); }
 	});
 	createWindow(url);
 	log(`window open: ${url}`);

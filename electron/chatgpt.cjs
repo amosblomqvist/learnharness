@@ -19,8 +19,7 @@ const fail = (code) => Object.assign(new Error(code), { code });
 const publicError = (err) => ({
 	cancelled: "ChatGPT sign-in cancelled.",
 	timeout: "ChatGPT sign-in timed out. Try again.",
-	secure_storage: "Secure credential storage is unavailable. ChatGPT sign-in requires the desktop app and an OS secure-storage backend.",
-	storage: "ChatGPT credentials could not be saved securely. Reconnect before making requests.",
+	storage: "ChatGPT credentials could not be read or saved. Check local file access, then reconnect before making requests.",
 	identity: "ChatGPT sign-in could not be verified. Select the intended saved account and try again.",
 	scope: "ChatGPT plan permission is missing. Reconnect and authorize ChatGPT plan use.",
 	disconnected: "This ChatGPT connection is disconnected. Reconnect in Providers.",
@@ -34,7 +33,7 @@ const publicError = (err) => ({
 
 const nonempty = (v) => typeof v === "string" && v.length > 0 && !/[\x00-\x20\x7f]/.test(v);
 const planScopes = (tokens) => !!tokens?.accessToken && SCOPES.every((scope) => tokens.scopes.includes(scope));
-/** Reject the entire encrypted record. Encryption is not schema validation. */
+/** Reject the entire credential record when its schema is invalid. */
 function validateState(state) {
 	if (!state || state.version !== 1 || !nonempty(state.hostId) || !Array.isArray(state.registrations) || !(state.activeId === null || nonempty(state.activeId))) throw fail("storage");
 	if (Object.hasOwn(state, "allowBackgroundUse") && typeof state.allowBackgroundUse !== "boolean") throw fail("storage");
@@ -51,35 +50,25 @@ function validateState(state) {
 	return state;
 }
 
-/** Encrypted envelope only, outside learning data. No plaintext fallback. */
-function encryptedStore(file, safeStorage) {
-	function secure() {
-		if (!safeStorage.isEncryptionAvailable() || safeStorage.getSelectedStorageBackend?.() === "basic_text") throw fail("secure_storage");
-	}
+/** Private, unencrypted JSON outside learning data. No OS credential-store access. */
+function fileStore(file) {
 	return {
-		secure,
 		async read() {
-			secure();
 			try {
-				const envelope = JSON.parse(await fs.readFile(file, "utf8"));
-				if (envelope.version !== 1 || typeof envelope.encrypted !== "string" || !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(envelope.encrypted) || !envelope.encrypted) throw fail("storage");
-				const state = JSON.parse(safeStorage.decryptString(Buffer.from(envelope.encrypted, "base64")));
-				return validateState(state);
+				return validateState(JSON.parse(await fs.readFile(file, "utf8")));
 			} catch (err) {
 				if (err.code === "ENOENT") return null;
 				throw fail("storage");
 			}
 		},
 		async write(state) {
-			secure();
 			validateState(state);
 			const temp = `${file}.${crypto.randomUUID()}.tmp`;
 			let handle;
 			try {
-				const encrypted = safeStorage.encryptString(JSON.stringify(state)).toString("base64");
 				await fs.mkdir(path.dirname(file), { recursive: true, mode: 0o700 });
 				handle = await fs.open(temp, "wx", 0o600);
-				await handle.writeFile(JSON.stringify({ version: 1, encrypted }));
+				await handle.writeFile(`${JSON.stringify(state)}\n`);
 				await handle.sync();
 				await handle.close();
 				handle = null;
@@ -115,7 +104,6 @@ function createChatGPT({ store, openExternal, fetch: request = globalThis.fetch,
 	let authorityRevision = 0;
 	let catalogSequence = 0;
 	let storageDenied = false;
-	let secureAvailable = true;
 	const stamp = () => ({ epoch, authorityRevision, revision });
 	let backgroundIntent;
 	let pending;
@@ -174,17 +162,13 @@ function createChatGPT({ store, openExternal, fetch: request = globalThis.fetch,
 				state = first;
 			}
 		})();
-		try { await init; checkSecure(); } catch (err) { denyStorage(err); throw err; }
+		try { await init; } catch (err) { denyStorage(err); throw err; }
 	}
 	function denyStorage(err) {
-		secureAvailable = false;
 		if (!storageDenied) { storageDenied = true; lastError = publicError(err); stop(); }
 	}
-	function checkSecure() {
-		try { store.secure(); secureAvailable = true; } catch (err) { denyStorage(err); throw err; }
-	}
 	async function save(next) {
-		try { checkSecure(); validateState(next); await store.write(next); checkSecure(); } catch (err) {
+		try { validateState(next); await store.write(next); } catch (err) {
 			// A rotated token may already have invalidated its predecessor. Fail closed.
 			denyStorage(err);
 			lastError = publicError(err);
@@ -195,7 +179,7 @@ function createChatGPT({ store, openExternal, fetch: request = globalThis.fetch,
 	}
 	function snapshot() {
 		return {
-			available: !!state && secureAvailable && !closed && !paused,
+			available: !!state && !closed && !paused,
 			pending: !!pending,
 			allowBackgroundUse: backgroundAllowed(),
 			activeId: state?.activeId ?? null,
@@ -210,6 +194,9 @@ function createChatGPT({ store, openExternal, fetch: request = globalThis.fetch,
 					registration: r.clientId,
 					connected: !storageDenied && !closed && !paused && !suspended && !r.reconnectRequired && planScopes(r.tokens),
 					planEnabled: !storageDenied && !r.reconnectRequired && planScopes(r.tokens),
+					// Recovery is authorization-only, not a response to storage failure
+					// or temporary transport suspension. Never infer it from error copy.
+					canSignInAgain: !storageDenied && !closed && !paused && (r.reconnectRequired === true || !planScopes(r.tokens)),
 				};
 			}),
 			error: lastError,
@@ -331,7 +318,7 @@ function createChatGPT({ store, openExternal, fetch: request = globalThis.fetch,
 						next.registrations = next.registrations.filter((r) => r.id !== record.id).concat(record);
 						next.activeId = record.id;
 						const previous = structuredClone(state);
-						await save(next); // Active identity changes only AFTER validation and durable encrypted persistence.
+						await save(next); // Active identity changes only AFTER validation and durable persistence.
 						if (closed || abort.signal.aborted || epoch !== attemptEpoch) {
 							await save(previous);
 							throw fail("cancelled");
@@ -365,7 +352,6 @@ function createChatGPT({ store, openExternal, fetch: request = globalThis.fetch,
 	function cancelLogin() { pending?.cancel(); return snapshot(); }
 
 	function authorized(background, expected, capturedEpoch) {
-		checkSecure();
 		const account = active();
 		if (!account || (capturedEpoch !== undefined && capturedEpoch !== epoch)) throw fail("disconnected");
 		if (!planScopes(account.tokens)) throw fail("scope");
@@ -553,4 +539,4 @@ function createChatGPT({ store, openExternal, fetch: request = globalThis.fetch,
 	return { status, login, cancelLogin, lease, models, select, consent, disconnect, logout, close, pause, resume, stamp };
 }
 
-module.exports = { createChatGPT, encryptedStore, publicError, allowedAuthEndpoint, SCOPES, validateState };
+module.exports = { createChatGPT, fileStore, publicError, allowedAuthEndpoint, SCOPES, validateState };

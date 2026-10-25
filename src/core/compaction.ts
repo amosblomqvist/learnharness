@@ -1,7 +1,8 @@
 /**
  * COMPACTION (owner round 14, 2026-10-05): the context-fitting mechanic,
- * mirroring pi's design (docs aside, this is OUR implementation — pi's
- * compaction lives in the coding-agent package we don't depend on).
+ * with a bounded local port of Pi coding-agent 1.4.0 cutoff selection.
+ * No coding-agent dependency. See docs/compaction-accounting.md for the
+ * behavior boundary, native golden fixtures, and upstream MIT notice.
  *
  * THE CONTRACT: full history stays persisted in the record — extraction
  * and the user's transcript keep reading everything. A compaction marker
@@ -38,7 +39,7 @@ import { COMPACTED_HISTORY_HEADER } from "./contracts/chat.ts";
 import type { LhMessage, LhMarkerMessage } from "./native-messages.ts";
 import { newMessageId } from "./native-messages.ts";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
-import type { AssistantMessage, ToolResultMessage } from "@earendil-works/pi-ai";
+import type { AssistantMessage, ToolResultMessage, SystemMessage } from "@earendil-works/pi-ai";
 
 // ─── constants (the tunables, owner-approved) ────────────────────────────────
 
@@ -77,9 +78,8 @@ export function calculateContextTokens(usage: {
 	);
 }
 
-/** Estimate a message's context tokens from its WIRE-relevant text only
- * (pi's estimator): text + thinking + toolCall name/args for assistants,
- * content text for user/toolResult/custom. NEVER JSON.stringify of the
+/** Pi 1.4.0's heuristic: text + thinking + toolCall name/args for
+ * assistants, content text plus a fixed image allowance for other roles. NEVER JSON.stringify of the
  * whole message — record scaffolding (ids, usage, responseId, app-side
  * details, escaped quotes/backslashes) inflates ~3x (measured on the
  * 2026-10-05 relational-databases incident: 84k estimated vs ~30k real). */
@@ -100,23 +100,32 @@ export function estimateMessageTokens(message: LhMessage | AgentMessage): number
 		}
 	} else {
 		chars += textCharsOfContent(content);
+		if (message.role === "system") {
+			const system = message as SystemMessage;
+			for (const section of Object.values(system.sections ?? {})) chars += section?.length ?? 0;
+			if (system.toolsAdded) chars += JSON.stringify(system.toolsAdded).length;
+		}
 	}
 	return Math.ceil(chars / 4);
 }
 
+// Pi coding-agent 1.4.0 estimateTokens: fixed image allowance, NOT a
+// measurement of encrypted reasoning or actual provider vision tokens.
+const ESTIMATED_IMAGE_CHARS = 4_800;
 function textCharsOfContent(content: unknown): number {
 	if (typeof content === "string") return content.length;
 	if (!Array.isArray(content)) return 0;
 	let chars = 0;
 	for (const block of content as Array<string | { type?: string; text?: string }>) {
 		if (typeof block === "string") chars += block.length;
-		else if (block?.type === "text" || "text" in block) chars += block.text?.length ?? 0;
+		else if (block?.type === "image") chars += ESTIMATED_IMAGE_CHARS;
+		else if (block?.type === "text") chars += block.text?.length ?? 0;
 	}
 	return chars;
 }
 
 /** The newest assistant message carrying VALID provider-reported usage
- * (pi's rule: skip aborted messages and all-zero usage — they carry no
+ * (pi's rule: skip aborted/error messages and all-zero usage — they carry no
  * truth about the wire). The scan STOPS at the newest compaction
  * marker: usage captured before a compaction described the pre-cut
  * context — the next request carries the summary + kept tail instead,
@@ -131,7 +140,7 @@ export function lastAssistantUsageIndex(
 		if ((m as { role?: string }).role === "custom" && (m as LhMarkerMessage).customType === "compaction") return null;
 		if ((m as { role?: string }).role !== "assistant") continue;
 		const a = m as AssistantMessage & { stopReason?: string };
-		if (a.stopReason === "aborted") continue;
+		if (a.stopReason === "aborted" || a.stopReason === "error") continue;
 		if (calculateContextTokens((a.usage ?? {}) as Parameters<typeof calculateContextTokens>[0]) === 0) continue;
 		return i;
 	}
@@ -180,51 +189,53 @@ export function estimateTokens(messages: readonly (LhMessage | AgentMessage)[]):
 
 // ─── the cut walk ────────────────────────────────────────────────────────────
 
-/**
- * Find the compaction cut index: walk BACKWARDS from the end accumulating
- * estimates until ~keepRecentTokens are kept; the cut lands there.
- *
- * HARD INVARIANT — a tool result is never separated from its call: if the
- * walk stops on a toolResult, the KEPT region extends to the assistant
- * message carrying its call (keeping the result means keeping the call).
- * This is the provider protocol's shape law: dropping a call while
- * keeping its result strands an orphan the provider rejects. A PENDING
- * question/problem call (no result yet — the pose→answer window) sits at
- * the transcript end and is always kept: the walk never crosses it.
- *
- * Returns 0 when everything must be summarized (the whole history is the
- * span — valid), or messages.length when there is nothing meaningful to
- * cut (kept budget covers everything — caller checks before compacting).
- */
-export function compactionCutIndex(messages: readonly LhMessage[], keepRecentTokens = KEEP_RECENT_TOKENS): number {
-	let kept = 0;
-	for (let i = messages.length - 1; i >= 0; i--) {
-		if (kept >= keepRecentTokens) {
-			// The cut candidate: extend past orphaned tool results to the
-			// assistant message carrying their calls.
-			let cut = i + 1;
-			while (cut < messages.length && (messages[cut] as { role?: string }).role === "toolResult") {
-				const callIndex = assistantIndexOfCall(messages, (messages[cut] as ToolResultMessage).toolCallId, cut);
-				if (callIndex === -1) break; // no call found (defensive): stop extending
-				cut = callIndex;
-			}
-			return cut;
-		}
-		kept += estimateMessageTokens(messages[i]!);
-	}
-	return 0; // the whole history fits inside the kept budget — summarize all
+/** Model-visible entry adapter for the local Pi 1.4.0 cutoff port.
+ * Compaction entries are boundaries, not ordinary cut candidates; UI-only
+ * markers have no context, just like native metadata entries. */
+function cutMessage(message: LhMessage): LhMessage | null {
+	if (message.role !== "custom") return message;
+	if (["compaction", "plan-block", "problem-dismissed"].includes(message.customType)) return null;
+	return message;
 }
 
-/** The newest assistant message at or before `before` whose content
- * carries the tool call `toolCallId` — the call a result answers. */
-function assistantIndexOfCall(messages: readonly LhMessage[], toolCallId: string, before: number): number {
-	for (let i = before - 1; i >= 0; i--) {
-		const m = messages[i]!;
-		if ((m as { role?: string }).role !== "assistant") continue;
-		const assistant = m as AssistantMessage;
-		if (assistant.content.some((b) => b.type === "toolCall" && b.id === toolCallId)) return i;
+/** Local port of pi-coding-agent 1.4.0 findCutPoint (MIT).
+ * Walk backwards to >= budget, then choose the nearest valid cut AT OR
+ * AFTER that entry. If oversized trailing results exhaust the budget,
+ * retain their preceding assistant call, not the entire session.
+ * No encrypted-signature sizing and no exact retained-token guarantee.
+ * Returns the first kept record index; a zero/no-progress cut drops nothing.
+ * Keep this and estimateMessageTokens aligned deliberately when upgrading Pi.
+ */
+export function compactionCutIndex(messages: readonly LhMessage[], keepRecentTokens = KEEP_RECENT_TOKENS): number {
+	const previous = activeCompactionOf(messages);
+	const previousKept = previous ? keptIndexFor(messages, previous) : -1;
+	const start = Math.max(0, previousKept);
+	const points: number[] = [];
+	for (let i = start; i < messages.length; i++) {
+		const message = cutMessage(messages[i]!);
+		if (message && (message.role === "user" || message.role === "assistant" || message.role === "custom")) points.push(i);
 	}
-	return -1;
+	if (!points.length) return start;
+	let cut = points[0]!;
+	let accumulated = 0;
+	for (let i = messages.length - 1; i >= start; i--) {
+		const message = cutMessage(messages[i]!);
+		const tokens = message ? estimateMessageTokens(message) : 0;
+		if (tokens === 0) continue;
+		accumulated += tokens;
+		if (accumulated >= keepRecentTokens) {
+			cut = points.find((candidate) => candidate >= i) ?? points.at(-1)!;
+			break;
+		}
+	}
+	// Native entries preserve adjacent non-context metadata, but never walk
+	// backwards across a previous compaction entry.
+	while (cut > start) {
+		const before = messages[cut - 1]!;
+		if ((before.role === "custom" && before.customType === "compaction") || cutMessage(before)) break;
+		cut--;
+	}
+	return cut;
 }
 
 // ─── the marker ──────────────────────────────────────────────────────────────

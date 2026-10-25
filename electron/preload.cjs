@@ -43,6 +43,21 @@ contextBridge.exposeInMainWorld("lh", {
 			return () => ipcRenderer.removeListener("lh:chatgpt:changed", listener);
 		},
 	},
+	subscriptions: {
+		status: () => ipcRenderer.invoke("lh:subscriptions:control", { op: "status" }),
+		login: (providerId, enabled) => ipcRenderer.invoke("lh:subscriptions:control", { op: "login", providerId, enabled }),
+		cancel: (providerId) => ipcRenderer.invoke("lh:subscriptions:control", { op: "cancel", providerId }),
+		respond: (providerId, attemptId, promptId, value) => ipcRenderer.invoke("lh:subscriptions:control", { op: "respond", providerId, attemptId, promptId, value }),
+		open: (providerId, attemptId, actionId) => ipcRenderer.invoke("lh:subscriptions:control", { op: "open", providerId, attemptId, actionId }),
+		retry: (providerId) => ipcRenderer.invoke("lh:subscriptions:control", { op: "retry", providerId }),
+		disconnect: (providerId) => ipcRenderer.invoke("lh:subscriptions:control", { op: "disconnect", providerId }),
+		consent: (providerId, enabled) => ipcRenderer.invoke("lh:subscriptions:control", { op: "consent", providerId, enabled }),
+		onChange: (cb) => {
+			const listener = () => cb();
+			ipcRenderer.on("lh:subscriptions:changed", listener);
+			return () => ipcRenderer.removeListener("lh:subscriptions:changed", listener);
+		},
+	},
 	expandWindow: () => ipcRenderer.send("lh:expand-window"),
 	onZoom: (cb) => {
 		const listener = (_event, factor) => cb(factor);

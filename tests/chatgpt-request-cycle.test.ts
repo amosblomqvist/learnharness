@@ -20,6 +20,7 @@ import { newUserMessage, newNextMessage, newThinkingMessage, newAnswerResult, re
 const originalSend = Object.getOwnPropertyDescriptor(process, "send");
 const originalConnected = Object.getOwnPropertyDescriptor(process, "connected");
 const realFetch = globalThis.fetch;
+const desktopMarker = process.env.LH_DESKTOP_SERVER, desktopSecret = process.env.LH_DESKTOP_API_SECRET;
 const model = piModels().getModel("openai", "gpt-5") as Model<"openai-responses">;
 let epoch = 1, revision = 1, background = true;
 let cut: "lease" | "payload" | "full" | "afterFetch" | "none" = "none";
@@ -31,6 +32,7 @@ function revoke(full = false) {
  ipc({ channel: "lh:chatgpt", kind: "state", stamp: { epoch, authorityRevision: epoch, revision: ++revision }, status: status(), invalidate: full ? "all" : "background" });
 }
 before(() => {
+ process.env.LH_DESKTOP_SERVER = "1"; process.env.LH_DESKTOP_API_SECRET = "d".repeat(64);
  Object.defineProperty(process, "connected", { configurable: true, value: true });
  Object.defineProperty(process, "send", { configurable: true, value: (m: any, callback?: () => void) => {
   if (m.op === "lease") {
@@ -59,6 +61,8 @@ before(() => {
  };
 });
 after(() => {
+ if (desktopMarker === undefined) delete process.env.LH_DESKTOP_SERVER; else process.env.LH_DESKTOP_SERVER = desktopMarker;
+ if (desktopSecret === undefined) delete process.env.LH_DESKTOP_API_SECRET; else process.env.LH_DESKTOP_API_SECRET = desktopSecret;
  globalThis.fetch = realFetch;
  fs.rmSync(scratch, { recursive: true, force: true });
  if (originalSend) Object.defineProperty(process, "send", originalSend); else delete process.send;

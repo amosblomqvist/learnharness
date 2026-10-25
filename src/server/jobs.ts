@@ -68,7 +68,7 @@ import { danglingQuestionOf, endsInDismissal, type LhMessage } from "../core/nat
 import { fireJobAbort, isJobLive } from "../agent/subagents/aborts.ts";
 import { stores, effectiveSettings } from "./stores.ts";
 import { resolveConversationSpec } from "../core/settings-resolution.ts";
-import { chatGPTBackgroundAllowed, onChatGPTChange } from "../agent/chatgpt-bridge.ts";
+import { connectionBackgroundAllowed, isSubscriptionProvider, onSubscriptionChange } from "../agent/subscription-connections.ts";
 import { isTurnRunning } from "./turn-liveness.ts";
 import type { Agent } from "@earendil-works/pi-agent-core";
 
@@ -217,7 +217,7 @@ export function deliverJobResult(steer: SteerMessage): Promise<void> {
 export function automaticFollowUpAllowed(chatId: string, agent?: Agent): boolean {
 	if (agent && state().automaticDeferred.has(agent)) return false;
 	const provider = agent?.state?.model?.provider ?? resolveConversationSpec(stores.chatStore.getChat(chatId)?.settings, effectiveSettings().models.strong)?.provider;
-	return provider !== "chatgpt" || chatGPTBackgroundAllowed();
+	return connectionBackgroundAllowed(provider);
 }
 
 function handOffEligible(chatId: string, agent: Agent): void {
@@ -621,10 +621,10 @@ async function pump(chatId: string): Promise<void> {
 // Connection changes are the only wake for consent-deferred automatic work.
 // No retry timer, inference, or API-key fallback is started while consent is off.
 state().stopConnectionWatch?.();
-state().stopConnectionWatch = onChatGPTChange(() => {
+state().stopConnectionWatch = onSubscriptionChange(() => {
 	const s = state();
 	for (const [chatId, agent] of s.liveAgents) {
-		if (agent.state?.model?.provider !== "chatgpt" || automaticFollowUpAllowed(chatId, agent)) continue;
+		if (!isSubscriptionProvider(agent.state?.model?.provider) || automaticFollowUpAllowed(chatId, agent)) continue;
 		const consumed = new Set(agent.state.messages.map((m) => (m as { id?: string }).id));
 		const pending = (s.queues.get(chatId) ?? []).filter((entry) => entry.handedTo === agent && !consumed.has(entry.steer.id));
 		if (pending.length === 0) continue;

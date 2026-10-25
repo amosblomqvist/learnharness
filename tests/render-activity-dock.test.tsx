@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { ActivitySection, formatElapsed, toBlobs, type ActivityFeed, type FeedExtraction } from "../components/activity-dock.tsx";
 import { formatTokens, formatUsd } from "../components/usage-format.ts";
+import { jobCost } from "../src/server/pricing.ts";
 
 // The section's pure layer: folds, formatting, and blob order — then the SSR
 // render (blobs, "—" doctrine, the abort affordance, the always-present
@@ -27,6 +28,7 @@ function job(over: Partial<ActivityFeed["jobs"][number]> = {}): ActivityFeed["jo
 		updatedAt: new Date(NOW - 1000).toISOString(),
 		title: "Limits lesson",
 		contextLimit: null,
+		costUsd: jobCost({ usage: over.usage }),
 		...over,
 	};
 }
@@ -57,7 +59,7 @@ describe("activity dock pure layer", () => {
 		assert.ok(blobs.every((b) => b.chatId === "src_a"), "abort/link identity stays source-scoped");
 	});
 
-	it("folds cost with jobCost; absent usage is null, never zero", () => {
+	it("uses the server's Pi price projection; absent pricing is null, never zero", () => {
 		const priced = job({
 			usage: {
 				model: "openrouter:z-ai/glm-5.3-flash",
@@ -70,10 +72,10 @@ describe("activity dock pure layer", () => {
 			},
 		});
 		const blob = toBlobs({ jobs: [priced], extractions: [] })[0]!;
-		// (10000-5000)/1e6*0.15 + 5000/1e6*0.03 + 1000/1e6*0.5 = 0.0014
-		// (pi-ai catalog prices — glm-5.3-flash cacheRead corrected
-		// 0.05 → 0.03 in the pi 1.0.2 catalog refresh)
-		assert.ok(blob.cost !== null && blob.cost > 0.0013 && blob.cost < 0.0015);
+		// Pi-normalized fresh input is priced directly, never reduced by reads.
+		assert.equal(blob.cost, 0.00215);
+		const missingProjection = toBlobs({ jobs: [{ ...priced, costUsd: undefined }], extractions: [] })[0]!;
+		assert.equal(missingProjection.cost, null, "the browser must not invent a fallback price");
 		const absent = toBlobs({ jobs: [job()], extractions: [] })[0]!;
 		assert.equal(absent.cost, null);
 	});

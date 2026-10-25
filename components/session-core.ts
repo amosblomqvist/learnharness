@@ -17,6 +17,7 @@ import type { AgentEvent } from "@earendil-works/pi-agent-core";
 import type { ToolResultMessage } from "@earendil-works/pi-ai";
 import {
 	needsContinuation,
+	measuredContextTokens,
 	newAnswerResult,
 	newNextMessage,
 	newProblemDismissedMarker,
@@ -164,6 +165,8 @@ function sameJson(a: unknown, b: unknown): boolean {
 export interface SessionState {
 	messages: LhViewMessage[];
 	nativeMessages: LhMessage[];
+	/** Completed conversation usage; null after compaction or before first usage. */
+	contextTokens: number | null;
 	status: SessionStatus;
 	error: { message: string } | null;
 	/** Steers sent but not yet drained (composer steering, 2026-10-03):
@@ -221,10 +224,14 @@ export class SessionModel {
 	// The live turn's execution layer (view model mid-turn states):
 	private executions = new Map<string, LiveExecution>();
 	private streamingIds = new Set<string>();
+	private incompleteUsageIds = new Set<string>();
 	/** The in-flight assistant message's client id (see applyWireEvent). */
 	private streamingMessageId: string | null = null;
 	private statusValue: SessionStatus = "ready";
+	/** Request/loop failures are transient; provider failures derive from messages. */
 	private errorValue: { message: string } | null = null;
+	/** A completed failure from THIS consume, not the previous attempt's record. */
+	private liveFailureId: string | null = null;
 	// The single live consume (POST response or reattach stream): a newer
 	// consume cancels the older — one reader at a time.
 	private consumeAbort: AbortController | null = null;
@@ -255,11 +262,22 @@ export class SessionModel {
 			this.statusValue === "submitted" || this.statusValue === "streaming"
 				? { executions: this.executions, inFlight: true, streamingIds: this.streamingIds }
 				: undefined;
+		const messages = [...this.base, ...this.tail];
+		const latest = messages.at(-1);
+		// One rule for live and restored failures: only the final completed
+		// assistant can own the banner. While trying again, hide the old
+		// failure from the first Thinking frame, but show a new failure at end.
+		const providerError =
+			latest?.role === "assistant" && latest.stopReason === "error" &&
+			!this.incompleteUsageIds.has(latest.id) && (!live || latest.id === this.liveFailureId)
+				? { message: latest.errorMessage ?? "An error occurred." }
+				: null;
 		return {
-			messages: projectView([...this.base, ...this.tail], live),
-			nativeMessages: [...this.base, ...this.tail],
+			messages: projectView(messages, live),
+			nativeMessages: messages,
+			contextTokens: measuredContextTokens(messages, this.incompleteUsageIds),
 			status: this.statusValue,
-			error: this.errorValue,
+			error: this.errorValue ?? providerError,
 			steerQueue: this.steerQueueValue,
 		};
 	}
@@ -275,6 +293,7 @@ export class SessionModel {
 	}
 
 	private setStatus(status: SessionStatus): void {
+		if (status === "submitted") this.liveFailureId = null;
 		this.statusValue = status;
 		this.readyRef = status === "ready";
 		this.onChange?.();
@@ -365,6 +384,15 @@ export class SessionModel {
 				// the wire) still wins.
 				const id = message.id ?? this.streamingMessageId ?? localId();
 				const withId = { ...message, id } as LhMessage;
+				if (agent.type === "message_end") {
+					this.incompleteUsageIds.delete(id);
+					if (message.role === "assistant" && message.stopReason === "error") {
+						this.liveFailureId = id;
+						// A newer provider failure replaces an earlier connection/loop
+						// error, just as the live message_end did before restoration.
+						this.errorValue = null;
+					}
+				} else this.incompleteUsageIds.add(id);
 				if (agent.type === "message_start") {
 					this.streamingMessageId = id;
 					this.streamingIds.add(id);
@@ -379,15 +407,6 @@ export class SessionModel {
 				}
 				if (agent.type === "message_end") {
 					this.streamingMessageId = null; // slot done — next start mints fresh
-					// (fallthrough: returns true below — the message landed)
-					const stop = (message as { stopReason?: string }).stopReason;
-					if (stop === "error") {
-						// Provider error, verbatim (owner ruling) — the record
-						// persists the same message; no masking anywhere.
-						this.setError(
-							String((message as { errorMessage?: string }).errorMessage ?? "An error occurred."),
-						);
-					}
 				}
 				return true; // a message event is view work, even empty content
 			}
@@ -427,17 +446,18 @@ export class SessionModel {
 
 	/** Consume one SSE body to its [DONE] terminal. The turn-settled
 	 *  terminal (stream-route only) fires the settle hook and ends. */
-	async consumeStream(res: Response): Promise<void> {
+	async consumeStream(res: Response, controller = this.consumeAbort): Promise<void> {
 		if (!res.body) throw new Error("The turn stream body is empty.");
 		const reader = res.body.getReader();
 		let sawEvent = false;
 		try {
 			for await (const event of sseEvents(reader)) {
+				if (this.consumeAbort !== controller) return;
 				if (event.type === "turn-settled") {
 					// The raced-settle terminal: no turn to attach to — the
 					// record is current; the settle hook refetches.
 					await reader.cancel().catch(() => {});
-					this.onReattachSettled?.();
+					if (this.consumeAbort === controller) this.onReattachSettled?.();
 					return;
 				}
 				const acted = this.applyWireEvent(event);
@@ -447,9 +467,13 @@ export class SessionModel {
 				}
 			}
 		} finally {
-			this.streamingIds = new Set();
-			this.executions = new Map();
-			if (this.statusValue !== "error") this.setStatus("ready");
+			// A cancelled consume may finish after its replacement has entered
+			// Thinking. Only the current owner can settle shared state.
+			if (this.consumeAbort === controller) {
+				this.streamingIds = new Set();
+				this.executions = new Map();
+				if (this.statusValue !== "error") this.setStatus("ready");
+			}
 		}
 	}
 
@@ -488,6 +512,7 @@ export class SessionModel {
 		// every path that actually replays onto a stale tail).
 		if (!refetchRecordFirst) {
 			this.mutate(() => {
+				this.incompleteUsageIds.clear();
 				this.tail = [];
 				this.streamingMessageId = null;
 			});
@@ -498,11 +523,14 @@ export class SessionModel {
 				const recordRes = await this.fetch(`/api/chats/${encodeURIComponent(this.chatId)}`, {
 					signal: controller.signal,
 				});
+				if (this.consumeAbort !== controller) return;
 				if (recordRes.ok) {
 					const record = (await recordRes.json()) as { messages?: LhMessage[] };
+					if (this.consumeAbort !== controller) return;
 					if (Array.isArray(record.messages)) {
 						this.mutate(() => {
 							this.base = record.messages!;
+							this.incompleteUsageIds.clear();
 							this.tail = [];
 						});
 					}
@@ -510,6 +538,7 @@ export class SessionModel {
 					// The record did not land — restore the clean-slate guard
 					// before the replay (no atomic swap is coming).
 					this.mutate(() => {
+						this.incompleteUsageIds.clear();
 						this.tail = [];
 						this.streamingMessageId = null;
 					});
@@ -518,10 +547,11 @@ export class SessionModel {
 			const res = await this.fetch(`/api/chats/${encodeURIComponent(this.chatId)}/stream`, {
 				signal: controller.signal,
 			});
+			if (this.consumeAbort !== controller) return;
 			if (!res.ok) throw new Error((await res.text()) || "Failed to attach to the running turn.");
-			await this.consumeStream(res);
+			await this.consumeStream(res, controller);
 		} catch (err) {
-			if ((err as Error).name === "AbortError") return; // a newer consume won
+			if (this.consumeAbort !== controller || (err as Error).name === "AbortError") return; // a newer consume won
 			this.setError((err as Error).message);
 			this.setStatus("error");
 		}
@@ -715,6 +745,7 @@ export class SessionModel {
 	setMessages(record: LhMessage[]): void {
 		this.mutate(() => {
 			this.base = record;
+			this.incompleteUsageIds.clear();
 			this.tail = [];
 			this.streamingMessageId = null; // the tail (and its slot) is gone
 		});

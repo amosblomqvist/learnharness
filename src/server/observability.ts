@@ -24,6 +24,7 @@ import { chatStore } from "../store/chats.ts";
 import { graphRevision } from "./graph.ts";
 import { catalogContextLimits } from "./model-catalog.ts";
 import { listJobs } from "./jobs.ts";
+import { jobCost } from "./pricing.ts";
 import type { JobRecord } from "../core/contracts.ts";
 
 export { abortExtraction, extractionStatuses, type ExtractionPhase, type RunningExtraction } from "../agent/subagents/extraction.ts";
@@ -36,6 +37,7 @@ export { chatStore } from "../store/chats.ts";
  *  model is missing from the catalog (the blob then renders no context
  *  line — never a fake window). */
 export interface ActivityJob extends JobRecord {
+	costUsd: number | null;
 	title: string;
 	contextLimit: number | null;
 }
@@ -56,9 +58,8 @@ export interface ActivityExtraction {
 
 /** The dock's whole world in one payload: every running process, every view.
  *  Jobs are RUNNING-ONLY — finished jobs belong to their chat's transcript;
- *  the blob disappears when the process ends. Cost math is NOT done here:
- *  raw usage rides on the records and the client folds it with the pure
- *  helpers in core/prices.ts (transport stays thin). */
+ *  the blob disappears when the process ends. Costs are joined here through
+ *  the server-side Pi pricing adapter; clients never reconstruct rates. */
 /** The dock's whole world + the graph's version stamp (wave 6 session
  *  deletion): the payload carries graphRevision (max mtime across the
  *  graph data files — see server/graph.ts) so any view can detect "the
@@ -78,6 +79,7 @@ export function activityFeed(): {
 			if (job.status === "running") {
 				jobs.push({
 					...job,
+					costUsd: jobCost(job),
 					title: chat.title ?? chat.id,
 					contextLimit: job.usage ? (limits.get(job.usage.model) ?? null) : null,
 				});

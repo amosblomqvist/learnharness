@@ -399,7 +399,7 @@ Practice turns the graph into problem sets the learner reasons through out loud.
 ```mermaid
 flowchart LR
     subgraph DESKTOP["Electron app (production)"]
-        MAIN["Electron main (electron/main.cjs)<br/>thin launcher + security guard<br/>1 IPC channel: lh:expand-window"] -->|"spawn: ELECTRON_RUN_AS_NODE,<br/>loopback port, LH_DATA_DIR=userData/data"| NEXT["standalone Next server (child)<br/>ALL app logic: turns · extraction · jobs · graph"]
+        MAIN["Electron main (electron/main.cjs)<br/>launcher + credential/security owner<br/>origin-pinned controls · private child IPC"] -->|"spawn: ELECTRON_RUN_AS_NODE,<br/>loopback port, LH_DATA_DIR=userData/data"| NEXT["standalone Next server (child)<br/>ALL app logic: turns · extraction · jobs · graph"]
         MAIN -->|"loadURL, sandboxed renderer"| REND["Browser renderer (components/)<br/>fetch/WebSocket to own origin only"]
     end
     subgraph OUTSIDE["outside the process"]
@@ -417,9 +417,17 @@ flowchart LR
     REND -->|"fetch /api/*"| NEXT
 ```
 
-The Electron main is a launcher + security guard, never a host for app logic: single-instance lock, deny-by-default permissions, origin-pinned navigation, sandboxed renderer. All Next.js code runs unchanged in a child process (`output: "standalone"`), relocated by the `LH_DATA_DIR` seam (also the test seam — `data-dir-seam.test.ts` covers it, including a fresh-child-process case). The build hard-fails if repo `data/` would leak into the bundle or if prompt assets fall out of the trace (`scripts/build-server.mjs`).
+The Electron main is a launcher + credential/security guard, never a host for teaching or inference logic: single-instance lock, deny-by-default permissions, origin-pinned navigation, sandboxed renderer. All Next.js code runs unchanged in a child process (`output: "standalone"`), relocated by the `LH_DATA_DIR` seam (also the test seam — `data-dir-seam.test.ts` covers it, including a fresh-child-process case). The build hard-fails if repo `data/` would leak into the bundle or if prompt assets fall out of the trace (`scripts/build-server.mjs`).
 
 ---
+
+### 8.1 Subscription connection boundary
+
+`electron/chatgpt.cjs` retains the existing verified-account ChatGPT authentication, storage and revocation behavior. `electron/subscriptions.cjs` delegates GitHub Copilot/Grok login and refresh to the installed Pi SDK through its public provider/Models interfaces. Their single saved connections live independently in owner-only, atomically written `github-copilot-credentials.json` / `xai-credentials.json` beside the existing app credential files. Electron main alone owns durable OAuth credentials and serialized refresh; no global Pi files or API-key credential precedence are involved.
+
+The renderer gets projected status, public device user codes, prompts and controls over origin-pinned IPC. The privately launched server child receives credential-free catalogs and scoped request auth (including native headers/account endpoints), never refresh tokens. `src/agent/subscription-bridge.ts` rejects framework-only IPC and invalidates stale connection/catalog scopes. `subscription-stream.ts` dispatches directly through native providers, retaining native protocol identity on the wire and restoring logical app identity in assistant history. Persisted routes `chatgpt`, `github-copilot-subscription` and `xai-subscription` are distinct from ordinary API routes and never fall back to them.
+
+`subscription-request-cycle.ts` is the shared admission/automatic-input recovery state machine; the old ChatGPT module is its compatibility export. Background consent is independent per provider, default ON, with foreground-preserving cancellation and queue ownership retained on no-dispatch. Native usage rejected before dispatch is transiently excluded from helper usage collectors, without adding persisted provenance fields. Catalogs and read-time pricing preserve the selected connection: subscription use displays compact provider labels, API dollars remain dollars, and mixed usage joins both without estimating subscription dollars or claiming detected tiers/allowances.
 
 ## 9. The foundational invariants — what ALWAYS holds
 

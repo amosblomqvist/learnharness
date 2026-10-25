@@ -4,7 +4,7 @@
  * three usage channels (chat extraction runs, notes-source runs,
  * cluster-naming runs). Thin transport over src/server's graphCosts();
  * the fold itself is pure core (core/cost-summary.ts). Dollars are
- * inferred from PRICES at read time — never stored, so a price sync
+ * inferred from Pi's catalog/calculator at read time — never stored, so a catalog update
  * re-prices the whole history for free.
  *
  * Scope (user-decided): the graph pipeline ONLY — teaching turns and
