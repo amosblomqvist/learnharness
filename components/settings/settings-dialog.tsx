@@ -33,6 +33,9 @@ import { createPortal } from "react-dom";
 import { useBackdropDismiss } from "@/components/backdrop-dismiss";
 import {
 	CURRENT_SETTINGS_VERSION,
+	DICTATION_LANGUAGES,
+	FACTORY_SETTINGS,
+	isDictationLanguage,
 	type AgentSettings,
 	type AppearanceSettings,
 	type CompactionSettings,
@@ -40,7 +43,7 @@ import {
 	type UserSettings,
 } from "@/src/core";
 import { useAppearance } from "./appearance.tsx";
-import { SettingsSection, SettingsRow, Toggle } from "./controls.tsx";
+import { SettingsSection, SettingsRow, ThinSelect, Toggle } from "./controls.tsx";
 import { AgentSection } from "./agent-section.tsx";
 import type { ModelsSettings } from "@/src/core";
 import { MENU_CLOSE_EVENT, MENU_OPEN_EVENT } from "@/components/menu-shell";
@@ -78,6 +81,7 @@ const DialogContext = createContext<{ open: (section?: string, row?: string) => 
 /** The auto-update row's hint (tooltip wave): honest user language — no
  *  stream vocabulary. Exported for the copy pin (tooltip-mechanism test). */
 export const AUTO_UPDATE_HINT = "Automatic updates arrive in an upcoming release";
+export const DICTATION_LANGUAGE_HINT = "The language you speak when dictating — Multilingual detects it and handles mixed speech";
 
 export function SettingsDialogProvider({
 	children,
@@ -371,9 +375,30 @@ export function SettingsDialogBody({
 											checked={record.general?.autoUpdate ?? true}
 											label="auto update"
 											onChange={(on) =>
-												void write("general", { autoUpdate: on })
+												void write("general", { ...record.general, autoUpdate: on })
 											}
 										/>
+									</SettingsRow>
+									<SettingsRow
+										label="Dictation language"
+										hint={DICTATION_LANGUAGE_HINT}
+										testid="row-dictation-language"
+									>
+										<ThinSelect
+											value={record.general?.dictationLanguage ?? FACTORY_SETTINGS.general.dictationLanguage}
+											ariaLabel="dictation language"
+											testid="select-dictation-language"
+											onChange={(next) => {
+												if (isDictationLanguage(next))
+													void write("general", { ...record.general, dictationLanguage: next });
+											}}
+										>
+											{DICTATION_LANGUAGES.map((lang) => (
+												<option key={lang.id} value={lang.id}>
+													{lang.label}
+												</option>
+											))}
+										</ThinSelect>
 									</SettingsRow>
 								</SettingsSection>
 							)}

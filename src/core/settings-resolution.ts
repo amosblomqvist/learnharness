@@ -175,6 +175,7 @@ export function resolveSettings(record: UserSettings | null): EffectiveSettings 
 	return {
 		general: {
 			autoUpdate: record?.general?.autoUpdate ?? FACTORY_SETTINGS.general.autoUpdate,
+			dictationLanguage: record?.general?.dictationLanguage ?? FACTORY_SETTINGS.general.dictationLanguage,
 		},
 		agent: {
 			models,

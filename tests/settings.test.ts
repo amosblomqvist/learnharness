@@ -20,7 +20,7 @@ import {
 describe("FACTORY_SETTINGS (the compiled factory layer)", () => {
 	it("pins the owner-decided defaults", () => {
 		assert.equal(CURRENT_SETTINGS_VERSION, 1);
-		assert.deepEqual(FACTORY_SETTINGS.general, { autoUpdate: true });
+		assert.deepEqual(FACTORY_SETTINGS.general, { autoUpdate: true, dictationLanguage: "en" });
 		// wave 7 collapse: the master switch ONLY + the extraction-UX
 		// redesign's chunk budget (2026-09-24); doubled to 8192 with the
 		// digest-aware redesign (2026-09-30), then HALVED BACK to 4096
@@ -99,7 +99,7 @@ describe("sanitizeUserSettings", () => {
 
 	it("wrong-typed fields DROP (resolve to factory), never crash", () => {
 		const out = sanitizeUserSettings({
-			general: { autoUpdate: "yes" },
+			general: { autoUpdate: "yes", dictationLanguage: "klingon" },
 			agent: { tools: { research: "no" }, prompts: { "system-prompt.md": 1 }, models: { researcher: "fast" } },
 			appearance: { mode: "sepia", sessionNameSerif: "true" },
 			graph: { enabled: 0 },

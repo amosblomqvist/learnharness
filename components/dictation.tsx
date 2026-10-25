@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Loader2Icon, MicIcon } from "lucide-react";
 import { useSettingsDialog } from "@/components/settings/settings-dialog";
+import { useSettingsSaved } from "@/components/settings-signal";
+import { FACTORY_SETTINGS, resolveSettings, type DictationLanguage, type UserSettings } from "@/src/core";
 import { Hint } from "@/components/ui/hint";
 
 /**
@@ -84,7 +86,8 @@ import { Hint } from "@/components/ui/hint";
 /*
  * Deepgram streaming params (the owner's live-tuned dictate config): nova-3,
  * endpointing=300, no interims. Silence streams too (the worklet never
- * pauses), so the socket never idles — no KeepAlive needed.
+ * pauses), so the socket never idles — no KeepAlive needed. The language
+ * comes from settings (general.dictationLanguage, default "en").
  */
 const DG_URL =
 	"wss://api.deepgram.com/v1/listen" +
@@ -95,6 +98,24 @@ const DG_URL =
 	"&smart_format=true" +
 	"&punctuate=true" +
 	"&endpointing=300";
+
+export function deepgramUrl(language: DictationLanguage): string {
+	return `${DG_URL}&language=${language}`;
+}
+
+/** The resolved dictation language — module-level like the warm token, so
+ *  the click path never waits on a settings read. Re-read at page mount
+ *  and on every general-section save; a failed read keeps the last value. */
+let dictationLanguage: DictationLanguage = FACTORY_SETTINGS.general.dictationLanguage;
+
+function refreshDictationLanguage(): void {
+	fetch("/api/settings")
+		.then((r) => r.json() as Promise<{ settings?: UserSettings | null }>)
+		.then((body) => {
+			dictationLanguage = resolveSettings(body.settings ?? null).general.dictationLanguage;
+		})
+		.catch(() => {});
+}
 
 /** Meter tuning — the owner's tested values, see the file header. */
 const METER_FLOOR_DB = -50;
@@ -366,7 +387,7 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 			// Minted JWTs authenticate via the "bearer" subprotocol — ["token",
 			// jwt] is rejected at the handshake (verified live; "token" is for
 			// raw API keys only, as in the owner's pi dictate extension).
-			const ws = new WebSocket(DG_URL, ["bearer", token]);
+			const ws = new WebSocket(deepgramUrl(dictationLanguage), ["bearer", token]);
 			wsRef.current = ws;
 
 			ws.addEventListener("open", () => {
@@ -586,7 +607,11 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 	// attached.
 	useEffect(() => {
 		warmTokens.refresh(); // pre-mint at mount (mitigation D) — silent if keyless
+		refreshDictationLanguage();
 	}, []);
+	useSettingsSaved((section) => {
+		if (section === "general") refreshDictationLanguage();
+	});
 	useEffect(() => {
 		window.addEventListener("lh:kbd-toggle-dictation", toggle);
 		return () => window.removeEventListener("lh:kbd-toggle-dictation", toggle);
