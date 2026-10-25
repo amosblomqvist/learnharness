@@ -1,0 +1,701 @@
+{
+  "schemaVersion": 1,
+  "name": "LearnHarness — periodic flashcards + spaced review",
+  "description": "Source-backed slice at upstream b277ee3. No flashcard system currently exists. Runtime/data-flow ownership differs from the canvas caller-to-provider arrows.",
+  "provenance": "Direct inspection of TypeScript/Electron sources at b277ee3e0fa24249c1b2d0f9b7fd6ed485f484b9. Captured excerpts carry full-file hashes; Python index does not verify TypeScript.",
+  "modules": [
+    {
+      "id": "sessions",
+      "name": "Session records",
+      "path": "src/store/chats.ts",
+      "responsibility": "Provide persisted native messages and session identity.",
+      "implementation": "ChatStore adapter, schema-version refusal and native record loading.",
+      "x": 30,
+      "y": 40,
+      "interfaces": [
+        {
+          "id": "read",
+          "name": "Read saved sessions",
+          "signature": "ChatStore.listChats(); ChatStore.getChat(id)",
+          "transport": "In-process TypeScript port",
+          "input": {
+            "id": "Persisted session ID"
+          },
+          "output": {
+            "summaries": "ChatSummary[]",
+            "record": "ChatRecord | null; native LhMessage[]"
+          },
+          "guarantees": [
+            "getChat may return null for missing, corrupt or unsupported-version records.",
+            "Teach/practice kind is stored; absent kind means teach."
+          ],
+          "errors": [],
+          "effects": "Read-only.",
+          "implementationRefs": [
+            "store",
+            "contract"
+          ],
+          "source": "src/core/ports.ts:33–65; src/store/chats.ts:61–90"
+        }
+      ],
+      "internals": [
+        {
+          "id": "contract",
+          "name": "ChatStore port",
+          "kind": "file",
+          "parentId": null,
+          "path": "src/core/ports.ts",
+          "startLine": 33,
+          "endLine": 65,
+          "description": "Existing persistence interface to inject; no direct store imports in agents.",
+          "source": "export interface ChatStore {\n\t/** Create a session record (persisted immediately). */\n\t/** Create a session record; kind \"practice\" marks a practice session\n\t *  (absent = teach, the default). */\n\tcreateChat(title: string, kind?: \"practice\"): ChatRecord;\n\t/** The full record, or null if unknown id / corrupt file. */\n\tgetChat(id: string): ChatRecord | null;\n\t/** All sessions, newest activity first (the sidebar's list view). */\n\tlistChats(): ChatSummary[];\n\t/** Persist the full native message list (the record IS the agent\n\t * state — Wave B, owner-approved 2026-09-26). */\n\tsaveMessages(id: string, messages: LhMessage[]): void;\n\t/** Persist the session plan tree (plan tools call this in execute). */\n\tsaveTree(id: string, tree: PlanTree): void;\n\t/** Append one usage entry to the record's turn log (the money channel,\n\t * 2026-09): idempotent per turn id — each request carries its own, so\n\t * a turn persisted twice appends once while continuation turns (which\n\t * share a response message id) each keep their usage. */\n\tappendTurnUsage(id: string, entry: TurnUsage): void;\n\t/** Append one extraction-run usage entry — idempotent per startedAt. */\n\tappendExtractionUsage(id: string, entry: ExtractionRunUsage): void;\n\t/** Persist the per-chat model/thinking settings (the model control).\n\t *  Replace-whole: the picker sends the complete settings object. */\n\tsaveSettings(id: string, settings: ChatSettings): void;\n\t/** Rename a session (the header's click-to-edit title, 2026-09-17).\n\t * Like saveSettings: a rename is NOT conversation activity — updatedAt\n\t * stays put, so sidebar order never churns on a rename. */\n\trenameChat(id: string, title: string): ChatRecord;\n\t/** Delete the session record entirely (session-deletion wave 6, owner\n\t *  2026-09-22). False when the id is unknown. The graph-ledger purge and\n\t *  job cleanup are the caller's choreography (core/graph-deletion.ts +\n\t *  the DELETE route), not the store's. */\n\tdeleteChat(id: string): boolean;",
+          "sourceHash": "ecb2b25df975fda0614a5a573337ac69adfa625801ee0ed7ad70bedba9e6fce7"
+        },
+        {
+          "id": "store",
+          "name": "getChat / listChats",
+          "kind": "file",
+          "parentId": null,
+          "path": "src/store/chats.ts",
+          "startLine": 61,
+          "endLine": 90,
+          "description": "Current schema-aware reader.",
+          "source": "function getChat(id: string): ChatRecord | null {\n\tlet parsed: unknown;\n\ttry {\n\t\tparsed = JSON.parse(fs.readFileSync(chatFile(id), \"utf-8\"));\n\t} catch {\n\t\treturn null;\n\t}\n\t// Honest refusal (owner ruling 2026-10-10): a record stamped NEWER than\n\t// this build (the downgrade scenario) reads as absent, never misparsed —\n\t// the next read-modify-write must not rewrite what it doesn't understand.\n\tconst v = (parsed as { version?: unknown }).version;\n\tif (typeof v === \"number\" && v > CURRENT_CHAT_VERSION) {\n\t\tconsole.error(`[chat ${id}] record stamped with schema version ${v} > ${CURRENT_CHAT_VERSION} — this app build is older; refusing to read it`);\n\t\treturn null;\n\t}\n\treturn parsed as ChatRecord;\n}\n\nfunction listChats(): ChatSummary[] {\n\ttry {\n\t\tfs.mkdirSync(PATHS.chats, { recursive: true });\n\t\treturn fs\n\t\t\t.readdirSync(PATHS.chats)\n\t\t\t.filter((f) => f.endsWith(\".json\"))\n\t\t\t.map((f) => getChat(f.slice(0, -5)))\n\t\t\t.filter((r): r is ChatRecord => r !== null)\n\t\t\t.map(({ messages, tree, turns, extractions, ...summary }) => {\n\t\t\t\t// Per-record isolation (Wave B): a record whose messages fail the\n\t\t\t\t// projection (e.g. pre-Wave-B UIMessage-format scratch — the\n\t\t\t\t// zero-back-compat wipe makes these \"corrupt\") must not blank the",
+          "sourceHash": "4db15a7dc1377478bc0ca712467ac6092eaeea387e7d31e8f9d79d3399402580"
+        },
+        {
+          "id": "projection",
+          "name": "Existing teacher-only projection",
+          "kind": "file",
+          "parentId": null,
+          "path": "src/core/coverage.ts",
+          "startLine": 1,
+          "endLine": 84,
+          "description": "Existing graph coverage MUST NOT be reused unchanged for learner-answer flashcards.",
+          "source": "/**\n * Extraction coverage — the pure core. THE TEACHER'S PROSE IS THE UNIT\n * (owner ruling, 2026-09-28): the extractor sees ONLY the teacher agent's\n * text blocks — no learner messages, no thinking, no tool calls or\n * results, no quiz blocks. Everything else is INVISIBLE to coverage: it\n * neither opens nor joins a run, so answering a quiz or editing a learner\n * message triggers nothing. \"Covered\" is by construction exactly \"what\n * the extractor saw\": the fingerprint (sha256 of a message's view lines)\n * and the extractor's prompt share ONE selection — the teacher prose.\n *\n * A per-chat append-only ledger records which messages have been\n * extracted by CONTENT FINGERPRINT; \"uncovered\" is DERIVED at read time\n * (fingerprint the current transcript, diff against the ledger) — never\n * dual-tracked. Runs are token-budgeted batches of the oldest uncovered\n * teacher-prose messages: greedy consecutive fill, a message is never\n * split, a single over-budget message rides alone. (The old\n * inseparability bond — call + results in one chunk — died with the\n * ruling: tool results are invisible now, so nothing needs keeping\n * together.)\n */\n\nimport { createHash } from \"node:crypto\";\n\nimport type { CoverageEntry } from \"./contracts/graph.ts\";\nimport type { LhMessage } from \"./native-messages.ts\";\n\nexport type { CoverageEntry };\n\n/** The user-facing text of a native message (string or text blocks). */\nfunction textOf(content: unknown): string[] {\n\tif (typeof content === \"string\") return content.trim() ? [content] : [];\n\tif (!Array.isArray(content)) return [];\n\treturn content\n\t\t.filter((c): c is { type: \"text\"; text: string } => (c as { type?: string }).type === \"text\")\n\t\t.map((c) => c.text)\n\t\t.filter((t) => t.trim().length > 0);\n}\n\n/**\n * The extraction-relevant lines of ONE native message — the shared seam\n * between the extractor's prompt and messageFingerprint (coverage).\n * TEACHER PROSE ONLY (owner, 2026-09-28): an assistant message yields one\n * line per text block; everything else (user messages, tool results,\n * markers) yields NOTHING and is invisible to coverage. `mid` is the\n * message id — part of the hash input, so the same prose in two messages\n * is two slots (per-message coverage).\n */\nexport function messageViewLines(message: LhMessage, mid: string): string[] {\n\tconst lines: string[] = [];\n\tif ((message as { role?: string }).role !== \"assistant\") return lines;\n\tfor (const text of textOf((message as { content: unknown }).content)) {\n\t\tlines.push(`TEACHER [${mid}] ${text.trim()}`);\n\t}\n\treturn lines;\n}\n\n/**\n * The teacher's prose blocks of a transcript, in order — the extractor's\n * prompt material. SAME selection as messageViewLines (the parity\n * doctrine survives the ruling in this one function pair), rendered\n * without the provenance prefix: plain paragraphs.\n */\nexport function teacherProseBlocks(messages: ReadonlyArray<LhMessage>): string[] {\n\tconst out: string[] = [];\n\tfor (const message of messages) {\n\t\tif ((message as { role?: string }).role !== \"assistant\") continue;\n\t\tfor (const text of textOf((message as { content: unknown }).content)) out.push(text.trim());\n\t}\n\treturn out;\n}\n\n/** Tokens of a message's view — chars/4, ceil, the app-wide estimate. */\nexport function viewTokens(lines: string[]): number {\n\treturn Math.ceil(lines.join(\"\\n\").length / 4);\n}\n\n/**\n * A message's coverage fingerprint: sha256 of role + its view lines (the\n * teacher prose, with the message id as the tag). Changes exactly when\n * the teacher prose of the message changes — nothing else can re-open it.\n */\nexport function messageFingerprint(message: LhMessage): string {\n\tconst h = createHash(\"sha256\");\n\th.update(JSON.stringify([(message as { role?: string }).role, messageViewLines(message, message.id)]));",
+          "sourceHash": "89cafe144dffb72493d49754d00f789007b4f9ac6c38b8f3a53d76f608a8f5aa"
+        }
+      ],
+      "status": "existing"
+    },
+    {
+      "id": "host",
+      "name": "Open-window lifecycle",
+      "path": "src/server/events-stream.ts",
+      "responsibility": "Deliver server events to each open app window.",
+      "implementation": "SSE subscriptions and cleanup; desktop host owns server shutdown.",
+      "x": 30,
+      "y": 360,
+      "interfaces": [
+        {
+          "id": "events",
+          "name": "Existing notification stream",
+          "signature": "eventsResponse() -> Response",
+          "transport": "HTTP / SSE",
+          "input": {},
+          "output": {
+            "stream": "text/event-stream; named event + small payload"
+          },
+          "guarantees": [
+            "One window has its own subscription.",
+            "Cancellation drops that subscription and heartbeat.",
+            "No app-presence extraction scheduler exists here today."
+          ],
+          "errors": [],
+          "effects": "Subscribe/unsubscribe; heartbeat timer.",
+          "implementationRefs": [
+            "events"
+          ],
+          "source": "src/server/events-stream.ts:33–81"
+        }
+      ],
+      "internals": [
+        {
+          "id": "events",
+          "name": "eventsResponse lifecycle",
+          "kind": "file",
+          "parentId": null,
+          "path": "src/server/events-stream.ts",
+          "startLine": 33,
+          "endLine": 81,
+          "description": "Candidate presence registration/teardown seam.",
+          "source": "\tconst stream = new ReadableStream<Uint8Array>({\n\t\tstart(controller) {\n\t\t\tlet closed = false;\n\t\t\tlet heartbeat: ReturnType<typeof setInterval> | undefined;\n\t\t\tlet unsubscribe: (() => void) | undefined;\n\n\t\t\tconst stop = () => {\n\t\t\t\tif (closed) return;\n\t\t\t\tclosed = true;\n\t\t\t\tunsubscribe?.();\n\t\t\t\tif (heartbeat) clearInterval(heartbeat);\n\t\t\t};\n\t\t\t// Enqueue is the ONLY place the socket can reject us (the reader\n\t\t\t// died) — any failure routes through stop() so the listener and\n\t\t\t// the heartbeat never outlive the connection.\n\t\t\tconst frame = (chunk: string) => {\n\t\t\t\tif (closed) return;\n\t\t\t\ttry {\n\t\t\t\t\tcontroller.enqueue(encoder.encode(chunk));\n\t\t\t\t} catch {\n\t\t\t\t\tstop();\n\t\t\t\t}\n\t\t\t};\n\n\t\t\t// Attach FIRST, synchronously: no event can fall between\n\t\t\t// construction and subscription (single-threaded — the same\n\t\t\t// attach-then-replay law as ui-stream's subscribe()).\n\t\t\tunsubscribe = subscribe((event: ServerEvent) => {\n\t\t\t\tconst { type, ...payload } = event;\n\t\t\t\tframe(`event: ${type}\\ndata: ${JSON.stringify(payload)}\\n\\n`);\n\t\t\t});\n\t\t\theartbeat = setInterval(() => frame(\": ping\\n\\n\"), 25_000);\n\n\t\t\tteardown = stop;\n\t\t},\n\t\tcancel() {\n\t\t\t// The view went away: drop the listener + timer. The bus keeps\n\t\t\t// serving every other window untouched.\n\t\t\tteardown?.();\n\t\t},\n\t});\n\treturn new Response(stream, {\n\t\theaders: {\n\t\t\t\"Content-Type\": \"text/event-stream\",\n\t\t\t\"Cache-Control\": \"no-cache, no-transform\",\n\t\t\t\"X-Accel-Buffering\": \"no\",\n\t\t},\n\t});\n}",
+          "sourceHash": "5a4fe1fa19b63313bfdc4ac9f9d46ca24d44387d16bb9daff4cbf669bd98239a"
+        },
+        {
+          "id": "client",
+          "name": "Window event-channel owner",
+          "kind": "file",
+          "parentId": null,
+          "path": "components/server-events.tsx",
+          "startLine": 1,
+          "endLine": 22,
+          "description": "Existing one-connection-per-window contract.",
+          "source": "\"use client\";\n\n/**\n * THE NOTIFICATION CHANNEL'S CLIENT HALF (push-architecture slice 3,\n * 2026-10-02): ONE EventSource(\"/api/events\") per open window, held for\n * the window's lifetime — the channel that retires the app's poll\n * lattice. Every server-initiated change arrives as a named SSE frame;\n * consumers respond by fetching truth (notify → fetch, the architecture's\n * whole trick — see src/core/events.ts and server/events-stream.ts).\n *\n * This file is the ONE place in the app that knows EventSource exists.\n * Auto-reconnect is EventSource's own — never fought, always exploited:\n * every (re)open fires the resync callbacks, so a reconnect heals with\n * one ordinary fetch per consumer (a dev-server restart self-heals here).\n *\n * Shape: the provider holds a hub (window-local fan-out — the client twin\n * of the server bus; per-window, NOT globalThis: each window's connection\n * is its own) and wires ONE source into it. The hooks are thin: latest-ref\n * callbacks (events fire between renders — never trust a stale closure)\n * plus hub membership for the component's lifetime.\n *\n * TEST SEAM: `connect` injects the source factory — the hub + wiring are",
+          "sourceHash": "d4fdab7cee1a67bd22a7c55a267bfd629715d27d75e7746b21b33e022c2ab91f"
+        },
+        {
+          "id": "host-close",
+          "name": "Window-close and quit behavior",
+          "kind": "file",
+          "parentId": null,
+          "path": "electron/main.cjs",
+          "startLine": 575,
+          "endLine": 587,
+          "description": "macOS retains its process after all windows close; process liveness is insufficient.",
+          "source": "\tMenu.setApplicationMenu(Menu.buildFromTemplate(template));\n}\n\nasync function main() {\n\tapp.on(\"window-all-closed\", () => {\n\t\tchatgpt?.pause();\n\t\tsubscriptions?.pause();\n\t\t// macOS convention: the app stays resident, reactivated from the Dock.\n\t\tif (process.platform !== \"darwin\") app.quit();\n\t});\n\n\t// The child must not outlive us — cover every quit path.\n\tapp.on(\"before-quit\", killServer);",
+          "sourceHash": "f0ddb74210f392848578dedcde060a056cff982b6e6ba55d64786409ef2a6c46"
+        }
+      ],
+      "status": "existing",
+      "change": {
+        "action": "modify",
+        "summary": "Expose authenticated app-window lifecycle to the single extraction coordinator and extend notifications after card writes.",
+        "location": "src/server/events-stream.ts; components/server-events.tsx; electron/main.cjs; src/core/events.ts",
+        "rationale": "App-open extraction must stop even when macOS keeps a resident process.",
+        "contractChange": "Window presence/lease registration and teardown; proposed flashcards-changed event.",
+        "acceptance": [
+          "Two subscribers retain one scheduler.",
+          "Last-window shutdown or lease expiry cancels generation.",
+          "Existing notifications and reconnect refetch behavior remain intact."
+        ],
+        "questions": [
+          "Approve heartbeat lease and minimized/hidden-window interpretation."
+        ],
+        "constraints": [
+          "Preserve layer/import boundaries and one semantic writer per store.",
+          "Review actions must not invoke agents, teacher wake or graph writes."
+        ],
+        "uncertainty": "Draft design, not an exact diff. Product defaults and final names require approval; see flashcards.md."
+      }
+    },
+    {
+      "id": "runtime",
+      "name": "Single-submit agent runtime",
+      "path": "src/agent/subagents/submit-agent.ts",
+      "responsibility": "Run a bounded structured-output subagent with injected engine and validation.",
+      "implementation": "Submit tool, schema checks, semantic retry, AbortSignal and usage callback.",
+      "x": 910,
+      "y": 360,
+      "interfaces": [
+        {
+          "id": "submit",
+          "name": "Run structured subagent",
+          "signature": "runSubmitAgent<T>(options) -> Promise<T>",
+          "transport": "In-process TypeScript port",
+          "input": {
+            "role": "ModelRole",
+            "engine": "PiEngine | undefined",
+            "parameters": "TypeBox submit schema",
+            "prompt": "Selected bounded source",
+            "signal": "AbortSignal",
+            "onStep": "Usage callback",
+            "validate": "Optional semantic validator"
+          },
+          "output": {
+            "result": "Schema/semantic-accepted T"
+          },
+          "guarantees": [
+            "Supports bounded turns and semantic validation.",
+            "Default role vocabulary has no flashcard role yet; mapping needs review."
+          ],
+          "errors": [
+            "Provider error, invalid output, missing submit, cancellation."
+          ],
+          "effects": "Calls configured model provider and reports usage.",
+          "implementationRefs": [
+            "submit"
+          ],
+          "source": "src/agent/subagents/submit-agent.ts:48–83"
+        }
+      ],
+      "internals": [
+        {
+          "id": "submit",
+          "name": "runSubmitAgent options",
+          "kind": "file",
+          "parentId": null,
+          "path": "src/agent/subagents/submit-agent.ts",
+          "startLine": 48,
+          "endLine": 83,
+          "description": "Existing worker factory seam; does not itself mean a teacher-waking job.",
+          "source": "export async function runSubmitAgent<T>(opts: {\n\trole: ModelRole;\n\ttoolName: string;\n\ttoolDescription: string;\n\tparameters: TSchema;\n\t/** Weak-model tolerance: the old zod `.default()`s, applied to the\n\t *  schema-valid raw input at the submit seam. */\n\tfill: (input: any) => T;\n\tsystemPrompt: string;\n\tprompt: string;\n\tengine: PiEngine | undefined;\n\tsignal: AbortSignal | undefined;\n\tonStep: (usage: Usage, model: string, step: number, finishReason: string, tools: string) => void;\n\tneverSubmitted: string;\n\t/** Extra tools beside the submit call (the auditor's graph-exploration\n\t *  set, 2026-09-27): a small agentic loop instead of a bare retry. */\n\textraTools?: Record<string, AgentTool<any>>;\n\t/** Turn budget for the loop (default 4 = retry-only; the auditor runs\n\t *  an exploration loop instead — 16). */\n\tmaxTurns?: number;\n\t/** Debug: raw provider-event recording key (LH_PROVIDER_EVENTS=1). */\n\tchatId?: string;\n\t/** Weak-model argument heal at pi's prepareArguments seam (runs BEFORE\n\t *  TypeBox validation — the sanctioned shim point). Identity by\n\t *  default; extraction wires healStringifiedArrays here. */\n\tprepareArguments?: (args: unknown) => unknown;\n\t/** Semantic validation at the submit seam: the value is schema-valid\n\t *  but may violate a PIPELINE law (coverage, echo-equality). Returning\n\t *  a problem string yields an isError result (invalidInputResult) →\n\t *  the model retries within maxTurns. null = accept. */\n\tvalidate?: (value: T) => string | null;\n}): Promise<T> {\n\tlet submitted: T | undefined;\n\tconst result = await runSubagent(\n\t\t[\n\t\t\t// healToolRecord (owner, 2026-10-09): the standard argument heal",
+          "sourceHash": "fcff84c35c6e877cf1f4d4f4c70c09f9d3a3d72daec3b3ec1e21bbb1630972c2"
+        },
+        {
+          "id": "roles",
+          "name": "Background model roles",
+          "kind": "file",
+          "parentId": null,
+          "path": "src/core/settings.ts",
+          "startLine": 39,
+          "endLine": 51,
+          "description": "Candidate change if a dedicated extraction role is approved.",
+          "source": "\n/** The background-agent roles whose models the Agent settings expose.\n *  The conversation pair (prober/teacher) stays out — chat-controlled via\n *  the strong slot (one controller, the model picker). Tests pin the set. */\nexport const BACKGROUND_MODEL_ROLES = [\n\t\"researcher\",\n\t\"demoBuilder\",\n\t\"visualMaker\",\n\t\"extractor\",\n\t\"auditor\",\n] as const;\n\nexport type BackgroundModelRole = (typeof BACKGROUND_MODEL_ROLES)[number];",
+          "sourceHash": "58bf8463925eef0e1b867450829f662d5cf1bf3981a971b446d4f2e4da5dc195"
+        }
+      ],
+      "status": "existing"
+    },
+    {
+      "id": "coordinator",
+      "name": "Periodic extraction coordinator",
+      "path": "src/server/flashcard-extraction.ts",
+      "responsibility": "Admit bounded extraction only while app-window presence is live.",
+      "implementation": "Cadence, leases, immutable source batches, claims, cancellation, retries and completion receipts.",
+      "x": 470,
+      "y": 360,
+      "interfaces": [
+        {
+          "id": "tick",
+          "name": "Tick / stop extraction",
+          "signature": "tick(now, presence); stop(reason)",
+          "transport": "In-process TypeScript port",
+          "input": {
+            "now": "Injected clock",
+            "presence": "Live window lease state",
+            "settings": "Approved cadence, budget and model configuration"
+          },
+          "output": {
+            "outcome": "started | idle | blocked + reason"
+          },
+          "guarantees": [
+            "One coordinator across windows/module reloads.",
+            "No model admission while closed, disabled or unconfigured.",
+            "Extraction completion commits cards directly; never teacher wake."
+          ],
+          "errors": [
+            "Blocked model, stale source, budget cap or aborted run."
+          ],
+          "effects": "May invoke bounded worker; owns cancellation and usage accounting.",
+          "implementationRefs": [],
+          "source": "PROPOSED interface; subject to design approval."
+        }
+      ],
+      "internals": [],
+      "status": "proposed",
+      "change": {
+        "action": "add",
+        "summary": "Add a single periodic, app-open extraction coordinator with independent flashcard coverage.",
+        "location": "src/server/flashcard-extraction.ts; server composition and settings",
+        "rationale": "Current background jobs may wake a teacher, and process lifetime does not match app-window lifetime.",
+        "contractChange": "tick/stop admission + source batch claim + idempotent result commit; no steer delivery.",
+        "acceptance": [
+          "Two windows do not double-extract one batch.",
+          "Last-window close/lease expiry stops new work and cancels in-flight calls.",
+          "Restart catches up in bounded batches without replaying processed source.",
+          "Failed/invalid extraction never advances coverage."
+        ],
+        "questions": [
+          "Approve interval, settle delay, window lease semantics, budgets, source-session kinds and activation policy."
+        ],
+        "constraints": [
+          "Preserve layer/import boundaries and one semantic writer per store.",
+          "Review actions must not invoke agents, teacher wake or graph writes."
+        ],
+        "uncertainty": "Draft design, not an exact diff. Product defaults and final names require approval; see flashcards.md."
+      }
+    },
+    {
+      "id": "extractor",
+      "name": "Flashcard extraction worker",
+      "path": "src/agent/subagents/flashcards.ts",
+      "responsibility": "Generate supported flashcards from teacher explanations and learner answers.",
+      "implementation": "Dedicated visible-content projection, question/answer pairing, prompt, output schema and anchor validation.",
+      "x": 910,
+      "y": 700,
+      "interfaces": [
+        {
+          "id": "extract",
+          "name": "Extract anchored candidates",
+          "signature": "extract(batch, signal, onUsage) -> Promise<CandidateBatch>",
+          "transport": "In-process TypeScript port",
+          "input": {
+            "batch": "Immutable source units with session/message IDs, roles, visible content, fingerprints and versions",
+            "dedupContext": "Bounded existing-card summaries",
+            "signal": "AbortSignal"
+          },
+          "output": {
+            "candidates": "front/back + sourceRefs + supportingEvidence",
+            "disposition": "completed | completed-empty; failures are not empty success",
+            "usage": "Reported separately even on failure"
+          },
+          "guarantees": [
+            "Learner answers guide misconceptions; they are not presumed factual answers.",
+            "Structured answer/question fields are allowlisted; hidden thinking and unrelated tools excluded.",
+            "No file writes, web/shell tools, teacher wake or scheduling authority."
+          ],
+          "errors": [
+            "Invalid anchor, unsupported answer, schema failure, cancellation or provider error."
+          ],
+          "effects": "Model calls through injected single-submit runtime only.",
+          "implementationRefs": [],
+          "source": "PROPOSED interface; subject to design approval."
+        }
+      ],
+      "internals": [],
+      "status": "proposed",
+      "change": {
+        "action": "add",
+        "summary": "Use a dedicated worker and source projection that includes learner answers without changing graph extraction.",
+        "location": "src/agent/subagents/flashcards.ts; proposed pure projection helpers",
+        "rationale": "Existing teacher-only graph projection would silently omit half the requested input.",
+        "contractChange": "Bounded candidates with distinct answer-support and misconception-selection evidence.",
+        "acceptance": [
+          "Synthetic misconceptions never become unsupported card answers.",
+          "Structured quiz answers are represented without arbitrary tool payloads.",
+          "Unknown anchors rejected; zero supported candidates is valid.",
+          "No agent/store imports across forbidden boundaries."
+        ],
+        "questions": [
+          "Approve prompt wording, card format, acceptance threshold and model-role mapping."
+        ],
+        "constraints": [
+          "Preserve layer/import boundaries and one semantic writer per store.",
+          "Review actions must not invoke agents, teacher wake or graph writes."
+        ],
+        "uncertainty": "Draft design, not an exact diff. Product defaults and final names require approval; see flashcards.md."
+      }
+    },
+    {
+      "id": "library",
+      "name": "Flashcard library and reviews",
+      "path": "src/server/flashcards.ts",
+      "responsibility": "Own card content, source provenance, extraction receipts and review history.",
+      "implementation": "Semantic service over an injected FlashcardStore; append-only evidence, versioned schema, conflict checks and notify-after-write.",
+      "x": 470,
+      "y": 700,
+      "interfaces": [
+        {
+          "id": "commit",
+          "name": "Commit extracted batch",
+          "signature": "commitExtraction(runKey, expectedSources, candidates)",
+          "transport": "In-process TypeScript port",
+          "input": {
+            "runKey": "Source fingerprints + projection/prompt/schema version",
+            "expectedSources": "Immutable revision expectations",
+            "candidates": "Validated bounded card candidates"
+          },
+          "output": {
+            "receipt": "Stable card IDs + committed coverage; prior receipt on retry"
+          },
+          "guarantees": [
+            "Cards and receipt/coverage commit as one recoverable unit.",
+            "Stale/deleted source refuses; no late resurrection.",
+            "Extraction does not overwrite user edits or review history."
+          ],
+          "errors": [
+            "Stale source, storage corruption/newer schema, conflicting retry."
+          ],
+          "effects": "Durable flashcard evidence write; notify after commit.",
+          "implementationRefs": [],
+          "source": "PROPOSED interface; subject to design approval."
+        },
+        {
+          "id": "due",
+          "name": "Fetch due cards",
+          "signature": "listDue(now, cursor, limit)",
+          "transport": "In-process TypeScript port",
+          "input": {
+            "now": "Injected absolute timestamp",
+            "cursor": "Stable pagination token",
+            "limit": "Bounded result count"
+          },
+          "output": {
+            "cards": "Saved prompt/answer, provenance, contentVersion, scheduleRevision, dueAt"
+          },
+          "guarantees": [
+            "No model calls or credential checks needed for existing cards.",
+            "Due state derives from versioned review evidence."
+          ],
+          "errors": [
+            "Invalid query or unavailable storage."
+          ],
+          "effects": "Read-only.",
+          "implementationRefs": [],
+          "source": "PROPOSED interface; subject to design approval."
+        },
+        {
+          "id": "review",
+          "name": "Record recall rating",
+          "signature": "recordReview(cardId, cardVersion, scheduleRevision, reviewId, rating)",
+          "transport": "In-process TypeScript port",
+          "input": {
+            "cardId": "Stable stored identity",
+            "cardVersion": "Content version actually reviewed",
+            "scheduleRevision": "Optimistic concurrency precondition",
+            "reviewId": "Stable idempotency key",
+            "rating": "Approved SRS rating vocabulary"
+          },
+          "output": {
+            "result": "Durable event + next due state"
+          },
+          "guarantees": [
+            "Idempotent retry; changed payload or stale revision conflicts.",
+            "No graph knowledge writes, teacher wake or LLM grading."
+          ],
+          "errors": [
+            "Missing card, bad rating, stale content/schedule, storage failure."
+          ],
+          "effects": "Append review evidence; update rebuildable schedule cache; notify after write.",
+          "implementationRefs": [],
+          "source": "PROPOSED interface; subject to design approval."
+        },
+        {
+          "id": "extraction-state",
+          "name": "Read extraction progress",
+          "signature": "readExtractionState(sessionId, sourceKeys, limit)",
+          "transport": "In-process FlashcardStore/service port",
+          "input": {
+            "sessionId": "Source session ID",
+            "sourceKeys": "Projected message fingerprints + policy version",
+            "limit": "Bounded dedup context size"
+          },
+          "output": {
+            "coverage": "Durable committed source keys and receipts",
+            "cards": "Existing card summaries and immutable IDs"
+          },
+          "guarantees": [
+            "Independent of graph extraction coverage.",
+            "No model call; incomplete runs are not covered."
+          ],
+          "errors": [
+            "Unavailable, corrupt or unsupported-version store."
+          ],
+          "effects": "Read-only.",
+          "implementationRefs": [],
+          "source": "PROPOSED interface; subject to design approval."
+        }
+      ],
+      "internals": [],
+      "status": "proposed",
+      "change": {
+        "action": "add",
+        "summary": "Add a dedicated semantic owner and persistence adapter for cards, extraction receipts and reviews.",
+        "location": "src/core/contracts/flashcards.ts; src/core/ports.ts; src/store/flashcards.ts; src/server/flashcards.ts; stores.ts composition",
+        "rationale": "Keep worker writes and learner reviews consistent without embedding cards in chat messages or graph ledgers.",
+        "contractChange": "FlashcardStore behind commitExtraction/listDue/recordReview; API routes delegate to server barrel.",
+        "acceptance": [
+          "Duplicate review request grades once; same ID/different payload conflicts.",
+          "Concurrent grading and extraction preserve both histories.",
+          "Crash recovery cannot leave processed coverage without cards.",
+          "Corrupt/newer data is explicit failure, not an empty deck."
+        ],
+        "questions": [
+          "Approve storage commit protocol, dedup identity, edit semantics, candidate activation and session-deletion policy."
+        ],
+        "constraints": [
+          "Preserve layer/import boundaries and one semantic writer per store.",
+          "Review actions must not invoke agents, teacher wake or graph writes."
+        ],
+        "uncertainty": "Draft design, not an exact diff. Product defaults and final names require approval; see flashcards.md."
+      }
+    },
+    {
+      "id": "srs",
+      "name": "Spaced-repetition core",
+      "path": "src/core/flashcards.ts",
+      "responsibility": "Calculate the next due state from saved review evidence.",
+      "implementation": "Pure algorithm with explicit time, versioned parameters and deterministic replay.",
+      "x": 910,
+      "y": 1040,
+      "interfaces": [
+        {
+          "id": "schedule",
+          "name": "Schedule next review",
+          "signature": "schedule(previous, rating, now, algorithmVersion) -> next",
+          "transport": "In-process TypeScript port",
+          "input": {
+            "previous": "Prior state reconstructed from evidence",
+            "rating": "Approved recall rating",
+            "now": "Explicit absolute time",
+            "algorithmVersion": "Pinned algorithm + parameters"
+          },
+          "output": {
+            "next": "Next due timestamp and algorithm state"
+          },
+          "guarantees": [
+            "No LLM, IO, hidden clock, server imports or provider keys.",
+            "Same evidence and version reproduce the same result."
+          ],
+          "errors": [
+            "Invalid transition, unsupported algorithm version or invalid time input."
+          ],
+          "effects": "Read-only.",
+          "implementationRefs": [],
+          "source": "PROPOSED interface; subject to design approval."
+        }
+      ],
+      "internals": [],
+      "status": "proposed",
+      "change": {
+        "action": "add",
+        "summary": "Introduce a versioned pure spaced-repetition transition for v1.",
+        "location": "src/core/flashcards.ts; browser-safe types exported through core barrel",
+        "rationale": "Reviews must keep working offline and produce reproducible due dates.",
+        "contractChange": "Pure scheduling port; algorithm is not selected by this proposal.",
+        "acceptance": [
+          "Pinned reference vectors cover first review, lapse, long gap and repeat success.",
+          "No provider calls when reviewing with all model adapters disabled.",
+          "Time rollback, timezone changes and algorithm migration have explicit tests."
+        ],
+        "questions": [
+          "Approve algorithm/library, rating vocabulary, retention target and migration policy before implementation."
+        ],
+        "constraints": [
+          "Preserve layer/import boundaries and one semantic writer per store.",
+          "Review actions must not invoke agents, teacher wake or graph writes."
+        ],
+        "uncertainty": "Draft design, not an exact diff. Product defaults and final names require approval; see flashcards.md."
+      }
+    },
+    {
+      "id": "review-ui",
+      "name": "Flashcard review UI",
+      "path": "app/flashcards/page.tsx",
+      "responsibility": "Let the learner review due cards without an agent.",
+      "implementation": "Due queue, reveal, rating, source links, stable active-card version and event-driven refetch.",
+      "x": 30,
+      "y": 1040,
+      "interfaces": [
+        {
+          "id": "page",
+          "name": "Review page",
+          "signature": "GET /flashcards",
+          "transport": "Local HTML/React + HTTP JSON",
+          "input": {},
+          "output": {
+            "view": "Due queue and persisted-card review interaction"
+          },
+          "guarantees": [
+            "Prompt → reveal saved answer → self-rate → next due date.",
+            "No chat composer, teacher session or model dependency.",
+            "New extraction does not reset a card currently being reviewed."
+          ],
+          "errors": [
+            "Empty deck, loading, storage failure and stale-review conflict are distinct states."
+          ],
+          "effects": "Read-only.",
+          "implementationRefs": [],
+          "source": "PROPOSED interface; subject to design approval."
+        }
+      ],
+      "internals": [],
+      "status": "proposed",
+      "change": {
+        "action": "add",
+        "summary": "Add a first-class due-card review surface and ordinary local routes.",
+        "location": "app/flashcards/page.tsx; components/flashcards/; app/api/flashcards/; shell navigation",
+        "rationale": "Learner interaction is separate from generation and remains useful when providers are unavailable.",
+        "contractChange": "Proposed GET cards / POST reviews endpoints and flashcards-changed notify→fetch.",
+        "acceptance": [
+          "Reveal and grade work with no keys/network/model runtime.",
+          "Keyboard interaction and focus are usable.",
+          "Stale rating conflict prompts refetch rather than grading twice.",
+          "Desktop capability guard still protects every endpoint."
+        ],
+        "questions": [
+          "Approve navigation placement, card formats, rating labels and manual edit/suspend scope."
+        ],
+        "constraints": [
+          "Preserve layer/import boundaries and one semantic writer per store.",
+          "Review actions must not invoke agents, teacher wake or graph writes."
+        ],
+        "uncertainty": "Draft design, not an exact diff. Product defaults and final names require approval; see flashcards.md."
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "host-coordinator",
+      "fromModule": "host",
+      "toModule": "coordinator",
+      "interfaceId": "tick",
+      "label": "Window lifetime → admission",
+      "sent": "Live window presence, now, stop reason",
+      "received": "started / idle / blocked",
+      "status": "proposed"
+    },
+    {
+      "id": "coordinator-sessions",
+      "fromModule": "coordinator",
+      "toModule": "sessions",
+      "interfaceId": "read",
+      "label": "Read eligible source snapshot",
+      "sent": "Session ID; list of changed source candidates",
+      "received": "Saved native teacher/learner messages",
+      "status": "proposed"
+    },
+    {
+      "id": "coordinator-extractor",
+      "fromModule": "coordinator",
+      "toModule": "extractor",
+      "interfaceId": "extract",
+      "label": "Run bounded extraction",
+      "sent": "Frozen source units + dedup context + AbortSignal",
+      "received": "Validated candidate batch + usage",
+      "status": "proposed"
+    },
+    {
+      "id": "extractor-runtime",
+      "fromModule": "extractor",
+      "toModule": "runtime",
+      "interfaceId": "submit",
+      "label": "Structured model submit",
+      "sent": "Approved role, prompt, schema, semantic validation and abort signal",
+      "received": "CandidateBatch or error",
+      "status": "proposed"
+    },
+    {
+      "id": "coordinator-library",
+      "fromModule": "coordinator",
+      "toModule": "library",
+      "interfaceId": "commit",
+      "label": "Commit supported candidates",
+      "sent": "runKey + expectedSources + candidates",
+      "received": "Durable idempotent receipt or stale-source failure",
+      "status": "proposed"
+    },
+    {
+      "id": "ui-library-due",
+      "fromModule": "review-ui",
+      "toModule": "library",
+      "interfaceId": "due",
+      "label": "Fetch due cards",
+      "sent": "now + cursor + limit via GET API",
+      "received": "Saved cards, provenance and revisions",
+      "status": "proposed"
+    },
+    {
+      "id": "ui-library-review",
+      "fromModule": "review-ui",
+      "toModule": "library",
+      "interfaceId": "review",
+      "label": "Submit learner rating",
+      "sent": "Card/content/schedule versions + reviewId + rating via POST API",
+      "received": "Recorded event + next due state or conflict",
+      "status": "proposed"
+    },
+    {
+      "id": "library-srs",
+      "fromModule": "library",
+      "toModule": "srs",
+      "interfaceId": "schedule",
+      "label": "Calculate due transition",
+      "sent": "Previous state + rating + explicit time + algorithm version",
+      "received": "Deterministic next state and dueAt",
+      "status": "proposed"
+    },
+    {
+      "id": "coordinator-progress",
+      "fromModule": "coordinator",
+      "toModule": "library",
+      "interfaceId": "extraction-state",
+      "label": "Read coverage and dedup context",
+      "sent": "Session ID + projected source fingerprints + bounded limit",
+      "received": "Committed extraction receipts and saved-card summaries",
+      "status": "proposed"
+    }
+  ],
+  "goal": "Extract flashcards from teacher and learner sessions while the app is open; review them with agent-independent spaced repetition."
+}

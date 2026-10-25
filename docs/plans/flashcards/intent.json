@@ -1,0 +1,492 @@
+{
+  "version": 1,
+  "name": "LearnHarness — periodic flashcards + spaced review",
+  "goal": "Extract flashcards from teacher and learner sessions while the app is open; review them with agent-independent spaced repetition.",
+  "changes": [
+    {
+      "module": "host",
+      "change": {
+        "action": "modify",
+        "summary": "Expose authenticated app-window lifecycle to the single extraction coordinator and extend notifications after card writes.",
+        "location": "src/server/events-stream.ts; components/server-events.tsx; electron/main.cjs; src/core/events.ts",
+        "rationale": "App-open extraction must stop even when macOS keeps a resident process.",
+        "contractChange": "Window presence/lease registration and teardown; proposed flashcards-changed event.",
+        "acceptance": [
+          "Two subscribers retain one scheduler.",
+          "Last-window shutdown or lease expiry cancels generation.",
+          "Existing notifications and reconnect refetch behavior remain intact."
+        ],
+        "questions": [
+          "Approve heartbeat lease and minimized/hidden-window interpretation."
+        ],
+        "constraints": [
+          "Preserve layer/import boundaries and one semantic writer per store.",
+          "Review actions must not invoke agents, teacher wake or graph writes."
+        ],
+        "uncertainty": "Draft design, not an exact diff. Product defaults and final names require approval; see flashcards.md."
+      }
+    }
+  ],
+  "proposedModules": [
+    {
+      "id": "coordinator",
+      "name": "Periodic extraction coordinator",
+      "path": "src/server/flashcard-extraction.ts",
+      "responsibility": "Admit bounded extraction only while app-window presence is live.",
+      "implementation": "Cadence, leases, immutable source batches, claims, cancellation, retries and completion receipts.",
+      "x": 470,
+      "y": 360,
+      "interfaces": [
+        {
+          "id": "tick",
+          "name": "Tick / stop extraction",
+          "signature": "tick(now, presence); stop(reason)",
+          "transport": "In-process TypeScript port",
+          "input": {
+            "now": "Injected clock",
+            "presence": "Live window lease state",
+            "settings": "Approved cadence, budget and model configuration"
+          },
+          "output": {
+            "outcome": "started | idle | blocked + reason"
+          },
+          "guarantees": [
+            "One coordinator across windows/module reloads.",
+            "No model admission while closed, disabled or unconfigured.",
+            "Extraction completion commits cards directly; never teacher wake."
+          ],
+          "errors": [
+            "Blocked model, stale source, budget cap or aborted run."
+          ],
+          "effects": "May invoke bounded worker; owns cancellation and usage accounting.",
+          "implementationRefs": [],
+          "source": "PROPOSED interface; subject to design approval."
+        }
+      ],
+      "internals": [],
+      "status": "proposed",
+      "change": {
+        "action": "add",
+        "summary": "Add a single periodic, app-open extraction coordinator with independent flashcard coverage.",
+        "location": "src/server/flashcard-extraction.ts; server composition and settings",
+        "rationale": "Current background jobs may wake a teacher, and process lifetime does not match app-window lifetime.",
+        "contractChange": "tick/stop admission + source batch claim + idempotent result commit; no steer delivery.",
+        "acceptance": [
+          "Two windows do not double-extract one batch.",
+          "Last-window close/lease expiry stops new work and cancels in-flight calls.",
+          "Restart catches up in bounded batches without replaying processed source.",
+          "Failed/invalid extraction never advances coverage."
+        ],
+        "questions": [
+          "Approve interval, settle delay, window lease semantics, budgets, source-session kinds and activation policy."
+        ],
+        "constraints": [
+          "Preserve layer/import boundaries and one semantic writer per store.",
+          "Review actions must not invoke agents, teacher wake or graph writes."
+        ],
+        "uncertainty": "Draft design, not an exact diff. Product defaults and final names require approval; see flashcards.md."
+      }
+    },
+    {
+      "id": "extractor",
+      "name": "Flashcard extraction worker",
+      "path": "src/agent/subagents/flashcards.ts",
+      "responsibility": "Generate supported flashcards from teacher explanations and learner answers.",
+      "implementation": "Dedicated visible-content projection, question/answer pairing, prompt, output schema and anchor validation.",
+      "x": 910,
+      "y": 700,
+      "interfaces": [
+        {
+          "id": "extract",
+          "name": "Extract anchored candidates",
+          "signature": "extract(batch, signal, onUsage) -> Promise<CandidateBatch>",
+          "transport": "In-process TypeScript port",
+          "input": {
+            "batch": "Immutable source units with session/message IDs, roles, visible content, fingerprints and versions",
+            "dedupContext": "Bounded existing-card summaries",
+            "signal": "AbortSignal"
+          },
+          "output": {
+            "candidates": "front/back + sourceRefs + supportingEvidence",
+            "disposition": "completed | completed-empty; failures are not empty success",
+            "usage": "Reported separately even on failure"
+          },
+          "guarantees": [
+            "Learner answers guide misconceptions; they are not presumed factual answers.",
+            "Structured answer/question fields are allowlisted; hidden thinking and unrelated tools excluded.",
+            "No file writes, web/shell tools, teacher wake or scheduling authority."
+          ],
+          "errors": [
+            "Invalid anchor, unsupported answer, schema failure, cancellation or provider error."
+          ],
+          "effects": "Model calls through injected single-submit runtime only.",
+          "implementationRefs": [],
+          "source": "PROPOSED interface; subject to design approval."
+        }
+      ],
+      "internals": [],
+      "status": "proposed",
+      "change": {
+        "action": "add",
+        "summary": "Use a dedicated worker and source projection that includes learner answers without changing graph extraction.",
+        "location": "src/agent/subagents/flashcards.ts; proposed pure projection helpers",
+        "rationale": "Existing teacher-only graph projection would silently omit half the requested input.",
+        "contractChange": "Bounded candidates with distinct answer-support and misconception-selection evidence.",
+        "acceptance": [
+          "Synthetic misconceptions never become unsupported card answers.",
+          "Structured quiz answers are represented without arbitrary tool payloads.",
+          "Unknown anchors rejected; zero supported candidates is valid.",
+          "No agent/store imports across forbidden boundaries."
+        ],
+        "questions": [
+          "Approve prompt wording, card format, acceptance threshold and model-role mapping."
+        ],
+        "constraints": [
+          "Preserve layer/import boundaries and one semantic writer per store.",
+          "Review actions must not invoke agents, teacher wake or graph writes."
+        ],
+        "uncertainty": "Draft design, not an exact diff. Product defaults and final names require approval; see flashcards.md."
+      }
+    },
+    {
+      "id": "library",
+      "name": "Flashcard library and reviews",
+      "path": "src/server/flashcards.ts",
+      "responsibility": "Own card content, source provenance, extraction receipts and review history.",
+      "implementation": "Semantic service over an injected FlashcardStore; append-only evidence, versioned schema, conflict checks and notify-after-write.",
+      "x": 470,
+      "y": 700,
+      "interfaces": [
+        {
+          "id": "commit",
+          "name": "Commit extracted batch",
+          "signature": "commitExtraction(runKey, expectedSources, candidates)",
+          "transport": "In-process TypeScript port",
+          "input": {
+            "runKey": "Source fingerprints + projection/prompt/schema version",
+            "expectedSources": "Immutable revision expectations",
+            "candidates": "Validated bounded card candidates"
+          },
+          "output": {
+            "receipt": "Stable card IDs + committed coverage; prior receipt on retry"
+          },
+          "guarantees": [
+            "Cards and receipt/coverage commit as one recoverable unit.",
+            "Stale/deleted source refuses; no late resurrection.",
+            "Extraction does not overwrite user edits or review history."
+          ],
+          "errors": [
+            "Stale source, storage corruption/newer schema, conflicting retry."
+          ],
+          "effects": "Durable flashcard evidence write; notify after commit.",
+          "implementationRefs": [],
+          "source": "PROPOSED interface; subject to design approval."
+        },
+        {
+          "id": "due",
+          "name": "Fetch due cards",
+          "signature": "listDue(now, cursor, limit)",
+          "transport": "In-process TypeScript port",
+          "input": {
+            "now": "Injected absolute timestamp",
+            "cursor": "Stable pagination token",
+            "limit": "Bounded result count"
+          },
+          "output": {
+            "cards": "Saved prompt/answer, provenance, contentVersion, scheduleRevision, dueAt"
+          },
+          "guarantees": [
+            "No model calls or credential checks needed for existing cards.",
+            "Due state derives from versioned review evidence."
+          ],
+          "errors": [
+            "Invalid query or unavailable storage."
+          ],
+          "effects": "Read-only.",
+          "implementationRefs": [],
+          "source": "PROPOSED interface; subject to design approval."
+        },
+        {
+          "id": "review",
+          "name": "Record recall rating",
+          "signature": "recordReview(cardId, cardVersion, scheduleRevision, reviewId, rating)",
+          "transport": "In-process TypeScript port",
+          "input": {
+            "cardId": "Stable stored identity",
+            "cardVersion": "Content version actually reviewed",
+            "scheduleRevision": "Optimistic concurrency precondition",
+            "reviewId": "Stable idempotency key",
+            "rating": "Approved SRS rating vocabulary"
+          },
+          "output": {
+            "result": "Durable event + next due state"
+          },
+          "guarantees": [
+            "Idempotent retry; changed payload or stale revision conflicts.",
+            "No graph knowledge writes, teacher wake or LLM grading."
+          ],
+          "errors": [
+            "Missing card, bad rating, stale content/schedule, storage failure."
+          ],
+          "effects": "Append review evidence; update rebuildable schedule cache; notify after write.",
+          "implementationRefs": [],
+          "source": "PROPOSED interface; subject to design approval."
+        },
+        {
+          "id": "extraction-state",
+          "name": "Read extraction progress",
+          "signature": "readExtractionState(sessionId, sourceKeys, limit)",
+          "transport": "In-process FlashcardStore/service port",
+          "input": {
+            "sessionId": "Source session ID",
+            "sourceKeys": "Projected message fingerprints + policy version",
+            "limit": "Bounded dedup context size"
+          },
+          "output": {
+            "coverage": "Durable committed source keys and receipts",
+            "cards": "Existing card summaries and immutable IDs"
+          },
+          "guarantees": [
+            "Independent of graph extraction coverage.",
+            "No model call; incomplete runs are not covered."
+          ],
+          "errors": [
+            "Unavailable, corrupt or unsupported-version store."
+          ],
+          "effects": "Read-only.",
+          "implementationRefs": [],
+          "source": "PROPOSED interface; subject to design approval."
+        }
+      ],
+      "internals": [],
+      "status": "proposed",
+      "change": {
+        "action": "add",
+        "summary": "Add a dedicated semantic owner and persistence adapter for cards, extraction receipts and reviews.",
+        "location": "src/core/contracts/flashcards.ts; src/core/ports.ts; src/store/flashcards.ts; src/server/flashcards.ts; stores.ts composition",
+        "rationale": "Keep worker writes and learner reviews consistent without embedding cards in chat messages or graph ledgers.",
+        "contractChange": "FlashcardStore behind commitExtraction/listDue/recordReview; API routes delegate to server barrel.",
+        "acceptance": [
+          "Duplicate review request grades once; same ID/different payload conflicts.",
+          "Concurrent grading and extraction preserve both histories.",
+          "Crash recovery cannot leave processed coverage without cards.",
+          "Corrupt/newer data is explicit failure, not an empty deck."
+        ],
+        "questions": [
+          "Approve storage commit protocol, dedup identity, edit semantics, candidate activation and session-deletion policy."
+        ],
+        "constraints": [
+          "Preserve layer/import boundaries and one semantic writer per store.",
+          "Review actions must not invoke agents, teacher wake or graph writes."
+        ],
+        "uncertainty": "Draft design, not an exact diff. Product defaults and final names require approval; see flashcards.md."
+      }
+    },
+    {
+      "id": "srs",
+      "name": "Spaced-repetition core",
+      "path": "src/core/flashcards.ts",
+      "responsibility": "Calculate the next due state from saved review evidence.",
+      "implementation": "Pure algorithm with explicit time, versioned parameters and deterministic replay.",
+      "x": 910,
+      "y": 1040,
+      "interfaces": [
+        {
+          "id": "schedule",
+          "name": "Schedule next review",
+          "signature": "schedule(previous, rating, now, algorithmVersion) -> next",
+          "transport": "In-process TypeScript port",
+          "input": {
+            "previous": "Prior state reconstructed from evidence",
+            "rating": "Approved recall rating",
+            "now": "Explicit absolute time",
+            "algorithmVersion": "Pinned algorithm + parameters"
+          },
+          "output": {
+            "next": "Next due timestamp and algorithm state"
+          },
+          "guarantees": [
+            "No LLM, IO, hidden clock, server imports or provider keys.",
+            "Same evidence and version reproduce the same result."
+          ],
+          "errors": [
+            "Invalid transition, unsupported algorithm version or invalid time input."
+          ],
+          "effects": "Read-only.",
+          "implementationRefs": [],
+          "source": "PROPOSED interface; subject to design approval."
+        }
+      ],
+      "internals": [],
+      "status": "proposed",
+      "change": {
+        "action": "add",
+        "summary": "Introduce a versioned pure spaced-repetition transition for v1.",
+        "location": "src/core/flashcards.ts; browser-safe types exported through core barrel",
+        "rationale": "Reviews must keep working offline and produce reproducible due dates.",
+        "contractChange": "Pure scheduling port; algorithm is not selected by this proposal.",
+        "acceptance": [
+          "Pinned reference vectors cover first review, lapse, long gap and repeat success.",
+          "No provider calls when reviewing with all model adapters disabled.",
+          "Time rollback, timezone changes and algorithm migration have explicit tests."
+        ],
+        "questions": [
+          "Approve algorithm/library, rating vocabulary, retention target and migration policy before implementation."
+        ],
+        "constraints": [
+          "Preserve layer/import boundaries and one semantic writer per store.",
+          "Review actions must not invoke agents, teacher wake or graph writes."
+        ],
+        "uncertainty": "Draft design, not an exact diff. Product defaults and final names require approval; see flashcards.md."
+      }
+    },
+    {
+      "id": "review-ui",
+      "name": "Flashcard review UI",
+      "path": "app/flashcards/page.tsx",
+      "responsibility": "Let the learner review due cards without an agent.",
+      "implementation": "Due queue, reveal, rating, source links, stable active-card version and event-driven refetch.",
+      "x": 30,
+      "y": 1040,
+      "interfaces": [
+        {
+          "id": "page",
+          "name": "Review page",
+          "signature": "GET /flashcards",
+          "transport": "Local HTML/React + HTTP JSON",
+          "input": {},
+          "output": {
+            "view": "Due queue and persisted-card review interaction"
+          },
+          "guarantees": [
+            "Prompt → reveal saved answer → self-rate → next due date.",
+            "No chat composer, teacher session or model dependency.",
+            "New extraction does not reset a card currently being reviewed."
+          ],
+          "errors": [
+            "Empty deck, loading, storage failure and stale-review conflict are distinct states."
+          ],
+          "effects": "Read-only.",
+          "implementationRefs": [],
+          "source": "PROPOSED interface; subject to design approval."
+        }
+      ],
+      "internals": [],
+      "status": "proposed",
+      "change": {
+        "action": "add",
+        "summary": "Add a first-class due-card review surface and ordinary local routes.",
+        "location": "app/flashcards/page.tsx; components/flashcards/; app/api/flashcards/; shell navigation",
+        "rationale": "Learner interaction is separate from generation and remains useful when providers are unavailable.",
+        "contractChange": "Proposed GET cards / POST reviews endpoints and flashcards-changed notify→fetch.",
+        "acceptance": [
+          "Reveal and grade work with no keys/network/model runtime.",
+          "Keyboard interaction and focus are usable.",
+          "Stale rating conflict prompts refetch rather than grading twice.",
+          "Desktop capability guard still protects every endpoint."
+        ],
+        "questions": [
+          "Approve navigation placement, card formats, rating labels and manual edit/suspend scope."
+        ],
+        "constraints": [
+          "Preserve layer/import boundaries and one semantic writer per store.",
+          "Review actions must not invoke agents, teacher wake or graph writes."
+        ],
+        "uncertainty": "Draft design, not an exact diff. Product defaults and final names require approval; see flashcards.md."
+      }
+    }
+  ],
+  "proposedInternals": [],
+  "proposedEdges": [
+    {
+      "id": "host-coordinator",
+      "fromModule": "host",
+      "toModule": "coordinator",
+      "interfaceId": "tick",
+      "label": "Window lifetime → admission",
+      "sent": "Live window presence, now, stop reason",
+      "received": "started / idle / blocked",
+      "status": "proposed"
+    },
+    {
+      "id": "coordinator-sessions",
+      "fromModule": "coordinator",
+      "toModule": "sessions",
+      "interfaceId": "read",
+      "label": "Read eligible source snapshot",
+      "sent": "Session ID; list of changed source candidates",
+      "received": "Saved native teacher/learner messages",
+      "status": "proposed"
+    },
+    {
+      "id": "coordinator-extractor",
+      "fromModule": "coordinator",
+      "toModule": "extractor",
+      "interfaceId": "extract",
+      "label": "Run bounded extraction",
+      "sent": "Frozen source units + dedup context + AbortSignal",
+      "received": "Validated candidate batch + usage",
+      "status": "proposed"
+    },
+    {
+      "id": "extractor-runtime",
+      "fromModule": "extractor",
+      "toModule": "runtime",
+      "interfaceId": "submit",
+      "label": "Structured model submit",
+      "sent": "Approved role, prompt, schema, semantic validation and abort signal",
+      "received": "CandidateBatch or error",
+      "status": "proposed"
+    },
+    {
+      "id": "coordinator-library",
+      "fromModule": "coordinator",
+      "toModule": "library",
+      "interfaceId": "commit",
+      "label": "Commit supported candidates",
+      "sent": "runKey + expectedSources + candidates",
+      "received": "Durable idempotent receipt or stale-source failure",
+      "status": "proposed"
+    },
+    {
+      "id": "ui-library-due",
+      "fromModule": "review-ui",
+      "toModule": "library",
+      "interfaceId": "due",
+      "label": "Fetch due cards",
+      "sent": "now + cursor + limit via GET API",
+      "received": "Saved cards, provenance and revisions",
+      "status": "proposed"
+    },
+    {
+      "id": "ui-library-review",
+      "fromModule": "review-ui",
+      "toModule": "library",
+      "interfaceId": "review",
+      "label": "Submit learner rating",
+      "sent": "Card/content/schedule versions + reviewId + rating via POST API",
+      "received": "Recorded event + next due state or conflict",
+      "status": "proposed"
+    },
+    {
+      "id": "library-srs",
+      "fromModule": "library",
+      "toModule": "srs",
+      "interfaceId": "schedule",
+      "label": "Calculate due transition",
+      "sent": "Previous state + rating + explicit time + algorithm version",
+      "received": "Deterministic next state and dueAt",
+      "status": "proposed"
+    },
+    {
+      "id": "coordinator-progress",
+      "fromModule": "coordinator",
+      "toModule": "library",
+      "interfaceId": "extraction-state",
+      "label": "Read coverage and dedup context",
+      "sent": "Session ID + projected source fingerprints + bounded limit",
+      "received": "Committed extraction receipts and saved-card summaries",
+      "status": "proposed"
+    }
+  ]
+}
