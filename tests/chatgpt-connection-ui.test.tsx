@@ -85,7 +85,9 @@ test("Providers has exactly five ordered sections; unknown variables stay masked
  const headings = [...document.querySelectorAll('[data-testid^="group-"] > p')].map((el) => el.textContent);
  assert.deepEqual(headings, ["Model API keys", "Local models", "Subscriptions", "Dictation", "Search"]);
  assert(byTest("key-ollama_base_url").closest('[data-testid="group-local-models"]'));
- assert(byTest("key-ollama_api_key").closest('[data-testid="group-local-models"]'));
+  assert(byTest("key-ollama_api_key").closest('[data-testid="group-local-models"]'));
+  assert(byTest("key-ollama_api_key-search").closest('[data-testid="group-search"]'));
+  assert.equal(byTest("key-ollama_api_key-search-status").textContent, byTest("key-ollama_api_key-status").textContent);
  assert(byTest("key-deepgram_api_key").closest('[data-testid="group-dictation"]'));
  assert(byTest("key-tavily_api_key").closest('[data-testid="group-search"]'));
  assert(byTest("key-brave_api_key").closest('[data-testid="group-search"]'));

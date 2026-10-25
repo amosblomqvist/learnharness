@@ -84,7 +84,7 @@ const SLOT_META: Record<ModelSlotName, { label: string; roster: string }> = {
 };
 
 /** The search engines this wave ships (src/core/search.ts) + their labels. */
-const SEARCH_ENGINES = ["tavily", "brave"] as const;
+const SEARCH_ENGINES = ["tavily", "brave", "ollama"] as const;
 
 /** The owner's final toggleable-tool list (confirm with the user before
  *  changing — the Teacher stream settled this 2026-09-19). */
@@ -326,6 +326,18 @@ export function AgentSection({
 			.then((r) => r.json())
 			.then((body: { available: boolean; engine: string | null; reason: string }) => setSearch(body))
 			.catch(() => setSearch(null));
+	const refreshEngineKeys = () =>
+		fetch("/api/keys")
+			.then((r) => r.json())
+			.then((body: { keys: { id: string; present: boolean }[] }) => {
+				const present: Partial<Record<(typeof SEARCH_ENGINES)[number], boolean>> = {};
+				for (const id of SEARCH_ENGINES) {
+					const envVar = id === "tavily" ? "TAVILY_API_KEY" : id === "brave" ? "BRAVE_API_KEY" : "OLLAMA_API_KEY";
+					present[id] = body.keys.some((k) => k.id === envVar && k.present);
+				}
+				setEngineKeys(present);
+			})
+			.catch(() => {});
 
 	/** Re-read the prompt-segment view — the signal seam for the
 	 *  2026-09-26 state-echo fix: the view's `enabled` flags DERIVE from
@@ -363,6 +375,7 @@ export function AgentSection({
 
 	useSettingsSaved((section) => {
 		if (section === "models" || section === "keys") readModels(section === "keys");
+		if (section === "keys") { refreshEngineKeys(); refreshSearch(); }
 		// THE state-echo root cause: the prompt switches write through the
 		// agent section, but this view (the toggles' truth) never re-read —
 		// the settings-saved law (every reader re-reads) was missing this
@@ -377,17 +390,7 @@ export function AgentSection({
 			.then((r) => r.json())
 			.then((body: { prober: SegmentInfo[]; teacher: SegmentInfo[] }) => setPrompts(body))
 			.catch(() => setPrompts(null));
-		fetch("/api/keys")
-			.then((r) => r.json())
-			.then((body: { keys: { id: string; present: boolean }[] }) => {
-				const present: Partial<Record<(typeof SEARCH_ENGINES)[number], boolean>> = {};
-				for (const id of SEARCH_ENGINES) {
-					const envVar = id === "tavily" ? "TAVILY_API_KEY" : "BRAVE_API_KEY";
-					present[id] = body.keys.some((k) => k.id === envVar && k.present);
-				}
-				setEngineKeys(present);
-			})
-			.catch(() => {});
+		refreshEngineKeys();
 		return () => { modelsMounted.current = false; modelsRequest.current++; };
 	}, []);
 
@@ -804,7 +807,7 @@ export function AgentSection({
 				))}
 				{(() => {
 					const engine = agent?.search?.engine ?? null;
-					const anyKey = engineKeys.tavily === true || engineKeys.brave === true;
+					const anyKey = SEARCH_ENGINES.some((id) => engineKeys[id] === true);
 					const open = openMenu?.target === "search";
 					return (
 						<SettingsRow
@@ -815,7 +818,7 @@ export function AgentSection({
 						>
 							<span ref={open ? menuAnchorRef : undefined} className="relative flex items-center gap-2">
 								<MenuTrigger
-									value={engine === "tavily" ? "Tavily" : engine === "brave" ? "Brave" : ""}
+									value={engine === "tavily" ? "Tavily" : engine === "brave" ? "Brave" : engine === "ollama" ? "Ollama" : ""}
 									emptyLabel="Automatic"
 									ariaLabel="Search engine"
 									testid="search-engine-trigger"
@@ -836,7 +839,7 @@ export function AgentSection({
 											setOpenMenu(null);
 										})}
 										{SEARCH_ENGINES.map((id) =>
-											engineOption(id, id === "tavily" ? "Tavily" : "Brave", engine === id, engineKeys[id] ?? false, () => {
+											engineOption(id, id === "tavily" ? "Tavily" : id === "brave" ? "Brave" : "Ollama", engine === id, engineKeys[id] ?? false, () => {
 												onSectionChange(composeSearchEngine(agent, id));
 												setOpenMenu(null);
 											}),

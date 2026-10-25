@@ -417,6 +417,7 @@ export function KeysSection({
 	}
 
 	const { providerRows, toolRows, unknownRows, ollamaRows, addable } = classifyKeys(statuses, providers);
+	const ollamaSearch = ollamaRows[1]!;
 
 	async function saveNewProvider(p: ProviderKeyInfo, value: string) {
 		const err = await saveKey(p.envVar, value);
@@ -477,7 +478,7 @@ export function KeysSection({
 					return (
 						<KeyTableRow
 							key={status.id}
-							label={isUrl ? "Ollama URL" : "Ollama API key (optional)"}
+							label={isUrl ? "Ollama URL" : "Ollama API key (optional for models)"}
 							status={status}
 							expanded={openRow === status.id}
 							onToggle={() => setOpenRow(openRow === status.id ? null : status.id)}
@@ -495,7 +496,7 @@ export function KeysSection({
 				})}
 				<p data-testid="ollama-hint" className="px-1 pt-1 text-[11px] text-muted-foreground/70">
 					Lists models that support tool calls with at least 32k context. Ollama runs models at its own context size — set{" "}
-					<code className="font-mono">OLLAMA_CONTEXT_LENGTH</code> on the Ollama server to match. The key is only needed when the server requires one.
+					<code className="font-mono">OLLAMA_CONTEXT_LENGTH</code> on the Ollama server to match. Key optional for models; required for Ollama Web Search and Web Fetch.
 				</p>
 			</SettingsGroup>
 
@@ -504,6 +505,21 @@ export function KeysSection({
 			</SettingsGroup>
 
 			{(["Dictation", "Search"] as const).map((label) => <SettingsGroup key={label} label={label} testid={label === "Dictation" ? "group-dictation" : "group-search"}>
+				{label === "Search" && <KeyTableRow
+						label="Ollama Web Search / Fetch"
+						docsUrl="https://ollama.com/settings/keys"
+						status={ollamaSearch}
+						expanded={openRow === "ollama-search"}
+						onToggle={() => setOpenRow(openRow === "ollama-search" ? null : "ollama-search")}
+						onSave={async (v) => {
+							const err = await saveKey(ollamaSearch.id, v);
+							if (!err) setOpenRow(null);
+							return err;
+						}}
+						onCancel={() => setOpenRow(null)}
+						onDelete={() => deleteKey(ollamaSearch.id)}
+						testid="key-ollama_api_key-search"
+				/>}
 				{toolRows.filter((status) => label === "Dictation" ? status.id === "DEEPGRAM_API_KEY" : status.id !== "DEEPGRAM_API_KEY").map((status) => (
 					<KeyTableRow
 						key={status.id}

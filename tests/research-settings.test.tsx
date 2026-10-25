@@ -60,6 +60,13 @@ it("keyless settings keep Research interactive while search-engine setup retains
 		act(() => { engine.click(); });
 		assert.equal(document.querySelector('[data-testid="search-engine-menu"]'), null, "keyless engine preference does not open");
 		assert.ok(document.querySelector('[data-testid="search-engine-row"]')?.textContent?.includes(reason));
+		bodies["/api/keys"] = { keys: [{ id: "OLLAMA_API_KEY", present: true }] };
+		bodies["/api/search"] = { available: true, engine: "ollama", reason: "search engine: ollama (auto)" };
+		await act(async () => {
+			window.dispatchEvent(new window.CustomEvent("lh:settings-saved", { detail: { section: "keys" } }));
+		});
+		assert.ok(!engine.className.includes("cursor-not-allowed"), "Ollama key alone enables engine selection");
+		assert.ok(document.querySelector('[data-testid="search-engine-row"]')?.textContent?.includes("ollama (auto)"));
 	} finally {
 		act(() => { root.unmount(); });
 		for (const [key, descriptor] of previous) {
