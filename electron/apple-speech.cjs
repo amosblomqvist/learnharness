@@ -116,12 +116,6 @@ function createAppleSpeech({
 		return state.promise;
 	}
 
-	async function releaseModel() {
-		if (!supported()) return;
-		await run("release");
-		broadcast({ type: "released" });
-	}
-
 	/** Kill the live session's helper (no flush). */
 	function cancel(id) {
 		if (!session || (id !== undefined && session.id !== id)) return;
@@ -171,7 +165,7 @@ function createAppleSpeech({
 		session.child.stdin.end();
 	}
 
-	return { supported, status, install: installModel, release: releaseModel, start, audio, stop, cancel };
+	return { supported, status, install: installModel, start, audio, stop, cancel };
 }
 
 /** Validate one renderer control command and run it. */
@@ -179,7 +173,6 @@ async function appleSpeechControl(command, speech, send) {
 	switch (command?.op) {
 		case "status": return speech.status();
 		case "install": await speech.install(); return { ok: true };
-		case "release": await speech.release(); return { ok: true };
 		case "start": return { session: speech.start(send) };
 		case "stop": if (Number.isInteger(command.session)) speech.stop(command.session); return { ok: true };
 		case "cancel": if (Number.isInteger(command.session)) speech.cancel(command.session); return { ok: true };

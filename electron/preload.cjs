@@ -91,7 +91,6 @@ contextBridge.exposeInMainWorld("lh", {
 	appleSpeech: {
 		status: () => ipcRenderer.invoke("lh:apple-speech:control", { op: "status" }),
 		install: () => ipcRenderer.invoke("lh:apple-speech:control", { op: "install" }),
-		release: () => ipcRenderer.invoke("lh:apple-speech:control", { op: "release" }),
 		start: () => ipcRenderer.invoke("lh:apple-speech:control", { op: "start" }),
 		stop: (session) => ipcRenderer.invoke("lh:apple-speech:control", { op: "stop", session }),
 		cancel: (session) => ipcRenderer.invoke("lh:apple-speech:control", { op: "cancel", session }),

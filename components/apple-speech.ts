@@ -32,13 +32,12 @@ export type AppleSpeechEvent =
 
 export type AppleInstallEvent =
 	| { type: "progress"; fraction: number }
-	| { type: "done" | "released" }
+	| { type: "done" }
 	| { type: "error"; message: string };
 
 export type AppleSpeechBridge = {
 	status: () => Promise<AppleSpeechStatus>;
 	install: () => Promise<unknown>;
-	release: () => Promise<unknown>;
 	start: () => Promise<{ session: number }>;
 	stop: (session: number) => Promise<unknown>;
 	cancel: (session: number) => Promise<unknown>;
@@ -51,8 +50,6 @@ export type AppleSpeechBridge = {
  *  on disk); Apple publishes no size. */
 export const APPLE_MODEL_SIZE = "about 150–400 MB";
 
-export const APPLE_REMOVE_NOTE = "macOS deletes it when space is needed, unless another app uses it.";
-
 export function appleSpeechBridge(): AppleSpeechBridge | undefined {
 	if (typeof window === "undefined") return undefined;
 	return window.lh?.appleSpeech;
@@ -63,10 +60,10 @@ export function appleUsable(status: AppleSpeechStatus | null): status is Extract
 	return !!status && status.available && status.model !== "unsupported";
 }
 
-/** Ready to transcribe without asking: installed AND reserved by this app
- *  (after Remove, the next dictation asks again). */
+/** Ready to transcribe without asking: the model is on the Mac. The helper
+ *  reserves the locale itself when it transcribes. */
 export function appleModelReady(status: AppleSpeechStatus | null): boolean {
-	return appleUsable(status) && status.model === "installed" && status.reserved;
+	return appleUsable(status) && status.model === "installed";
 }
 
 export type DictationEngine = "deepgram" | "apple" | "keyless";

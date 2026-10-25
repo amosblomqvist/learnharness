@@ -55,12 +55,19 @@ func status() async {
 		return
 	}
 	let locale = await resolveLocale()
+	// AssetInventory.status reports this app's reservation, not the disk: a
+	// released model reads .supported while macOS still keeps it (shared
+	// with other apps). installedLocales is what is actually on the Mac.
 	let model: String
-	switch await AssetInventory.status(forModules: [makeTranscriber(locale)]) {
-	case .installed: model = "installed"
-	case .downloading: model = "downloading"
-	case .supported: model = "supported"
-	default: model = "unsupported"
+	if await SpeechTranscriber.installedLocales.contains(where: { sameLocale($0, locale) }) {
+		model = "installed"
+	} else {
+		switch await AssetInventory.status(forModules: [makeTranscriber(locale)]) {
+		case .installed: model = "installed"
+		case .downloading: model = "downloading"
+		case .supported: model = "supported"
+		default: model = "unsupported"
+		}
 	}
 	emit([
 		"available": true,
@@ -93,18 +100,12 @@ func install() async {
 	}
 }
 
-func release() async {
-	let locale = await resolveLocale()
-	var released = false
-	for reserved in await AssetInventory.reservedLocales where sameLocale(reserved, locale) {
-		if await AssetInventory.release(reservedLocale: reserved) { released = true }
-	}
-	emit(["type": "done", "released": released])
-}
-
 func transcribe() async {
 	let locale = await resolveLocale()
 	let transcriber = makeTranscriber(locale)
+	// Hold a reservation while in use, so macOS keeps the model. Best effort:
+	// at the reservation cap this fails and transcription still runs.
+	if !(await isReserved(locale)) { _ = try? await AssetInventory.reserve(locale: locale) }
 	// nil = the model is not installed.
 	guard let analyzerFormat = await SpeechAnalyzer.bestAvailableAudioFormat(compatibleWith: [transcriber]) else {
 		fail("model-missing")
@@ -200,7 +201,6 @@ func convert(_ input: AVAudioPCMBuffer, with converter: AVAudioConverter?, to fo
 switch CommandLine.arguments.dropFirst().first {
 case "status": await status()
 case "install": await install()
-case "release": await release()
 case "transcribe": await transcribe()
 default: fail("usage: apple-speech status|install|release|transcribe")
 }

@@ -193,15 +193,16 @@ describe("dictation engine choice", () => {
 		assert.equal(chooseEngine(false, null), "keyless");
 	});
 
-	it("the model is ready only when installed AND reserved by this app", () => {
+	it("the model is ready when it is on the Mac, reserved by this app or not", () => {
 		assert.equal(appleModelReady(ready), true);
-		assert.equal(appleModelReady({ ...ready, reserved: false }), false); // after Remove: ask again
+		assert.equal(appleModelReady({ ...ready, reserved: false }), true); // macOS keeps a released model until it purges it
 		assert.equal(appleModelReady({ ...ready, model: "supported" }), false);
 	});
 
 	it("the Settings status line", () => {
 		assert.equal(appleRowStatus(ready), "installed");
-		assert.equal(appleRowStatus({ ...ready, reserved: false }), "not installed");
+		assert.equal(appleRowStatus({ ...ready, reserved: false }), "installed");
+		assert.equal(appleRowStatus({ ...ready, model: "supported" }), "not installed");
 		assert.equal(appleRowStatus({ ...ready, model: "downloading", progress: 0.42 }), "downloading 42%");
 	});
 });
