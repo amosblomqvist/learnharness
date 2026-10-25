@@ -26,6 +26,7 @@ import { AnsweredCard } from "../components/answered-card.tsx";
 import {
 	buildAnswer,
 	normalizeOptions,
+	notYetAnswer,
 	resolveCorrect,
 	questionNeedsReveal,
 	type QuestionData,
@@ -337,6 +338,11 @@ describe("render smoke tests", () => {
 		const answer = { ...buildAnswer(quizQD(), { dontKnow: true }), dismissed: true };
 		const html = renderToStaticMarkup(<AnsweredCard answer={answer} />);
 		assert.match(html, /skipped/);
+	});
+
+	it("AnsweredCard renders nothing when he asked before the check", () => {
+		const html = renderToStaticMarkup(<AnsweredCard answer={notYetAnswer("quiz", "What carries the tense?")} />);
+		assert.equal(html, "");
 	});
 });
 

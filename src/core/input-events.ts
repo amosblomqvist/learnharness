@@ -25,11 +25,13 @@
  * turn rides one composition.
  */
 
-import type { QuestionAnswerData } from "./question-core.ts";
+import { notYetAnswer, questionNeedsReveal, type QuestionAnswerData } from "./question-core.ts";
+import { phaseAt3Lh } from "./phases.ts";
 import type { LhMessage } from "./native-messages.ts";
 import {
 	activeProblemOf,
 	concludedByDismissalPair,
+	danglingQuestionCount,
 	danglingQuestionOf,
 	newAnswerResult,
 	newNextMessage,
@@ -54,7 +56,12 @@ export type ChatInput =
 	 *  explicit go-ahead during the between-problems pause — the Next
 	 *  chip or Enter on an empty composer. Practice sessions only, and
 	 *  only with nothing active (mid-problem input rides the dock). */
-	| { type: "next" };
+	| { type: "next" }
+	/** The learner asks about the teaching while a teach-phase check sits
+	 *  closed. Closes that one call as notYet, then appends his message —
+	 *  the result stays adjacent to the call. Refused when it is not the
+	 *  only open question. */
+	| { type: "ask-before-check"; toolCallId: string; text: string };
 
 /** A wake-pipeline steer delivery — same turn composition, server-origin.
  *  Wave C (2026-09-26): the idle wake carries EVERY queued marker as its
@@ -180,6 +187,14 @@ export function parseChatInput(input: unknown): ChatInput {
 			return { type: "thinking", problemCallId: i.problemCallId, text: i.text };
 		case "next":
 			return { type: "next" };
+		case "ask-before-check":
+			if (typeof i.toolCallId !== "string" || i.toolCallId.length === 0) {
+				throw new ChatInputError("ask-before-check input requires toolCallId");
+			}
+			if (typeof i.text !== "string" || i.text.trim().length === 0) {
+				throw new ChatInputError("ask-before-check input requires non-empty text");
+			}
+			return { type: "ask-before-check", toolCallId: i.toolCallId, text: i.text };
 		default:
 			throw new ChatInputError(`unknown input type: ${String(i.type)}`);
 	}
@@ -229,6 +244,24 @@ export function inputAppends(
 				throw new ChatInputError("next input requires no active problem");
 			}
 			return [...dismissalConclusion(record), newNextMessage()];
+		}
+		case "ask-before-check": {
+			const pending = danglingQuestionOf(record.messages);
+			if (!pending || pending.toolCallId !== input.toolCallId) {
+				throw new ChatInputError("ask-before-check targets no pending question call");
+			}
+			if (danglingQuestionCount(record.messages) !== 1) {
+				throw new ChatInputError("ask-before-check requires the only open question");
+			}
+			if (!questionNeedsReveal(pending.tool, pending.input, phaseAt3Lh(record.messages))) {
+				throw new ChatInputError("ask-before-check is only for a teach-phase check");
+			}
+			const raw = pending.input as { question?: unknown } | null;
+			const question = typeof raw?.question === "string" ? raw.question : "";
+			return [
+				newAnswerResult(input.toolCallId, pending.tool, notYetAnswer(toolQuestionKind(pending.tool), question)),
+				newUserMessage(input.text),
+			];
 		}
 	}
 }

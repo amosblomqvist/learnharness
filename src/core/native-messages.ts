@@ -618,6 +618,27 @@ export function danglingQuestionOf(
 	return null;
 }
 
+/** Unanswered question calls on the newest assistant message. Zero when
+ *  that message has none — older messages are not consulted, matching
+ *  danglingQuestionOf. ask-before-check requires exactly one. */
+export function danglingQuestionCount(messages: readonly LhMessage[]): number {
+	for (let mi = messages.length - 1; mi >= 0; mi--) {
+		const m = messages[mi]!;
+		if ((m as { role?: string }).role !== "assistant") continue;
+		const assistant = m as AssistantMessage & { id: string };
+		const answered = resultIdsFrom(messages.slice(mi + 1));
+		let n = 0;
+		for (const block of assistant.content) {
+			if (block.type !== "toolCall") continue;
+			if (!(QUESTION_TOOLS as readonly string[]).includes(block.name)) continue;
+			if (answered.has(block.id)) continue;
+			n++;
+		}
+		return n;
+	}
+	return 0;
+}
+
 /** The probe→teach construction seam (chat-handler): a probe_done call in
  *  the transcript — any state — means the probe is concluded: teach. */
 export function hasProbeDone(messages: readonly LhMessage[]): boolean {

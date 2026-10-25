@@ -125,6 +125,26 @@ export function findPendingToolCall(messages: UIMessage[]): PendingToolCall | nu
 	return findPending(messages, QUESTION_TOOLS);
 }
 
+/** Every open question in the view. The ask-before-check composer appears
+ *  only when this is 1: a user message cannot sit ahead of a sibling
+ *  question's result. */
+export function pendingQuestionCount(messages: UIMessage[]): number {
+	let n = 0;
+	for (const msg of messages) {
+		for (const part of msg.parts) {
+			if (!isToolUIPart(part) || part.state !== "input-available") continue;
+			const tool = part.type.slice("tool-".length);
+			if ((QUESTION_TOOLS as readonly string[]).includes(tool)) n++;
+		}
+	}
+	return n;
+}
+
+/** The ask box between the reading notes and a closed teach check. */
+export function askBeforeCheckVisible(revealPending: boolean, openQuestions: number): boolean {
+	return revealPending && openQuestions === 1;
+}
+
 // ─── Turn activity label (2026-09-19, the “Writing a question…” fix) ──────
 
 /**

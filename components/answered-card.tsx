@@ -21,6 +21,7 @@ import { parseAskInput, parseQuizInput } from "@/src/core";
  */
 export function AnsweredCard({ answer, input }: { answer: QuestionAnswerData; input?: unknown }) {
 	const [whyOpen, setWhyOpen] = useState(false); // the tucked explanation (predictions, owner 2026-10-03)
+	if (answer.notYet) return null;
 	if (answer.dismissed) {
 		return (
 			<div className="rounded-xl border bg-card p-4 text-sm text-muted-foreground">

@@ -91,6 +91,16 @@ describe("messageMarkdown", () => {
 		assert.match(md, /\*\(his thinking: mixed up signs\)\*/);
 	});
 
+	it("a check he asked before is not a skip or a grade", () => {
+		const md = messageMarkdown(
+			result("r1", "q1", "quiz", { questionText: "What carries the tense?", notYet: true, dontKnow: false }),
+			"r1",
+		)!;
+		assert.match(md, /The learner asked something before taking this check\./);
+		assert.ok(!md.includes("skipped"));
+		assert.ok(!md.includes("incorrectly"));
+	});
+
 	it("explain results: the learner's own words are shown", () => {
 		const md = messageMarkdown(
 			result("r1", "e1", "explain", { questionText: "Why does Mercury stay near the Sun?", text: "it never strays far" }),
