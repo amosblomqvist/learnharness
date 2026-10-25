@@ -3,6 +3,9 @@ import * as path from "node:path";
 import { Type } from "typebox";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { serverExecute, type ImageFileResult } from "../tool-execute.ts";
+import { MAX_SOURCE_IMAGE_BYTES } from "../../core/images.ts";
+import { inspectImageBytes } from "../../core/images.ts";
+import { normalizeImage, readBoundedImageFile } from "../image-media.ts";
 import { resolveSourcePath } from "./fs-shared.ts";
 
 /**
@@ -16,7 +19,8 @@ import { resolveSourcePath } from "./fs-shared.ts";
  * - text files: utf-8, offset (1-indexed) / limit slicing, and the
  *   2000-line / 50KB truncation ceiling with actionable "use offset=N"
  *   continuation notices — a huge file never silently floods the context.
- * - image files (jpg/png/gif/webp/bmp): returned as native image content
+ * - image files (jpg/png/gif/webp/bmp, detected by bytes, normalized to PNG
+ *   within 20MiB source / 25MP / 2048px / 5MiB): returned as native image content
  *   parts so the vision-capable model actually SEES them (teacher's
  *   glm-5.3-flash accepts image input per pi's zai catalog; tool-execute's
  *   toToolResult maps ImageFileResult to pi's ImageContent).
@@ -31,16 +35,30 @@ import { resolveSourcePath } from "./fs-shared.ts";
 const MAX_LINES = 2000;
 const MAX_BYTES = 50 * 1024;
 
-/** Extension map for v0 (pi sniffs magic bytes; extensions suffice here —
- *  learner files are pasted paths, not adversarial uploads). */
-const IMAGE_MIME: Record<string, string> = {
-	".jpg": "image/jpeg",
-	".jpeg": "image/jpeg",
-	".png": "image/png",
-	".gif": "image/gif",
-	".webp": "image/webp",
-	".bmp": "image/bmp",
-};
+/** Extensions that CLAIM an image. The bytes decide: a claimed image that
+ *  does not sniff as one is an error, and an image with a wrong or missing
+ *  extension is still read as an image (magic bytes, below). */
+const IMAGE_EXTENSIONS = new Set([".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp"]);
+
+/** Magic bytes of the formats we can sniff without an extension. BMP's
+ *  two-byte "BM" is too weak for text files, so it needs the extension. */
+function hasImageMagic(head: Buffer): boolean {
+	if (head.length >= 8 && head.readUInt32BE(0) === 0x89504e47 && head.readUInt32BE(4) === 0x0d0a1a0a) return true;
+	if (head.length >= 3 && head[0] === 0xff && head[1] === 0xd8 && head[2] === 0xff) return true;
+	if (head.length >= 4 && head.toString("ascii", 0, 4) === "GIF8") return true;
+	return head.length >= 12 && head.toString("ascii", 0, 4) === "RIFF" && head.toString("ascii", 8, 12) === "WEBP";
+}
+
+async function readHead(file: string, n = 12): Promise<Buffer> {
+	const handle = await fs.open(file, "r");
+	try {
+		const buf = Buffer.alloc(n);
+		const { bytesRead } = await handle.read(buf, 0, n, 0);
+		return buf.subarray(0, bytesRead);
+	} finally {
+		await handle.close();
+	}
+}
 
 const readInput = Type.Object({
 	path: Type.String({ minLength: 1, description: "Path to the file to read (relative or absolute)" }),
@@ -98,22 +116,29 @@ function readTextSlice(text: string, offset: number | undefined, limit: number |
 export const readTool: AgentTool<typeof readInput> = {
 	name: "read",
 	label: "read",
-	description: `Read the contents of a file. Supports text files and images (jpg, png, gif, webp, bmp). Images are sent as attachments. For text files, output is truncated to 2000 lines or 50.0KB (whichever is hit first). Use offset/limit for large files. When you need the full file, continue with offset until complete.`,
+	description: `Read the contents of a file. Supports text files and images (jpg, png, gif, webp, bmp). Images are sent as attachments, normalized to PNG (max 2048px, 5MiB). For text files, output is truncated to 2000 lines or 50.0KB (whichever is hit first). Use offset/limit for large files. When you need the full file, continue with offset until complete.`,
 	parameters: readInput,
-	execute: serverExecute("read", readInput, async ({ path: rawPath, offset, limit }): Promise<string | ImageFileResult> => {
+	execute: serverExecute("read", readInput, async ({ path: rawPath, offset, limit }, { signal }): Promise<string | ImageFileResult> => {
 		const absolute = resolveSourcePath(rawPath);
 		const ext = path.extname(absolute).toLowerCase();
-		const mime = IMAGE_MIME[ext];
-		const buffer = await fs.readFile(absolute); // ENOENT/EACCES → error result the model sees
-		if (mime) {
-			// NOTE v0: no resize — raw bytes as base64. Learner files are study
-			// material (screenshots, figures), not adversarial payloads; a resize
-			// step (sharp) can land later if large images prove wasteful.
+		const stat = await fs.stat(absolute); // ENOENT/EACCES → error result the model sees
+		const head = stat.isFile() ? await readHead(absolute) : Buffer.alloc(0);
+		const claimsImage = IMAGE_EXTENSIONS.has(ext);
+		if (claimsImage || hasImageMagic(head)) {
+			// Bound BEFORE allocating the file buffer.
+			if (stat.size > MAX_SOURCE_IMAGE_BYTES) {
+				throw new Error(`Image file is too large (${formatSize(stat.size)}; max ${MAX_SOURCE_IMAGE_BYTES / (1024 * 1024)}MiB).`);
+			}
+			const bytes = await readBoundedImageFile(absolute, signal);
+			const sniffed = inspectImageBytes(bytes);
+			if (!sniffed) throw new Error(`${path.basename(absolute)} is not a readable PNG, JPEG, GIF, WebP or BMP image.`);
+			const image = await normalizeImage(bytes, signal);
 			return {
-				text: `Read image file [${mime}] — ${path.basename(absolute)} (${formatSize(buffer.byteLength)}), attached as an image.`,
-				images: [{ data: buffer.toString("base64"), mimeType: mime }],
+				text: `Read image file [${image.mimeType}] — ${path.basename(absolute)} (${formatSize(bytes.byteLength)}), attached as an image.`,
+				images: [{ data: image.data, mimeType: image.mimeType }],
 			};
 		}
+		const buffer = await fs.readFile(absolute);
 		const text = buffer.toString("utf-8");
 		return readTextSlice(text, offset, limit);
 	}),

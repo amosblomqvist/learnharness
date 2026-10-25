@@ -49,6 +49,7 @@ import { composeInstructions } from "../agent/teacher-agent.ts";
 import { ensureCompacted, kickCompaction, effectiveThresholdTokens } from "./compaction.ts";
 import { catalogContextLimits, refreshConnectionCatalog } from "./model-catalog.ts";
 import { emit } from "../core/events.ts";
+import { MODEL_CANNOT_READ_IMAGES_CODE } from "../core/images.ts";
 import { settledTurnResponse } from "./turn-runs.ts";
 import { asAgentMessages } from "../core/native-messages.ts";
 import {
@@ -142,6 +143,32 @@ function resolveEngine(role: ModelRole): PiEngine | undefined {
 
 setJobRespawn((jobId) => void jobRunner.runJob(jobId));
 
+/** Wire ceiling for a chat POST: the decoded image cap as base64 (4/3) plus
+ *  generous room for text and JSON framing. Text-only sends sit far below. */
+const MAX_CHAT_BODY_BYTES = 16 * 1024 * 1024;
+
+/** Read a request body as text, null when it exceeds `max` bytes (declared
+ *  length first, then counted while streaming, so nothing huge is buffered). */
+async function readBoundedText(req: Request, max: number): Promise<string | null> {
+	const declared = Number(req.headers.get("content-length"));
+	if (Number.isFinite(declared) && declared > max) return null;
+	if (!req.body) return "";
+	const reader = req.body.getReader();
+	const chunks: Uint8Array[] = [];
+	let size = 0;
+	for (;;) {
+		const { done, value } = await reader.read();
+		if (done) break;
+		size += value.byteLength;
+		if (size > max) {
+			await reader.cancel();
+			return null;
+		}
+		chunks.push(value);
+	}
+	return new TextDecoder().decode(Buffer.concat(chunks));
+}
+
 /** The route-facing entry: parse {chatId, input} and run one turn. */
 export async function handleChatRequest(
 	req: Request,
@@ -149,7 +176,13 @@ export async function handleChatRequest(
 ): Promise<Response> {
 	let body: { chatId?: unknown; input?: unknown };
 	try {
-		body = await req.json();
+		const raw = await readBoundedText(req, MAX_CHAT_BODY_BYTES);
+		if (raw === null) {
+			return Response.json({ error: "That message is too large.", code: "request_too_large" }, { status: 413 });
+		}
+		const parsed: unknown = JSON.parse(raw);
+		if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) throw new Error("not an object");
+		body = parsed as typeof body;
 	} catch {
 		return Response.json({ error: "Invalid JSON body" }, { status: 400 });
 	}
@@ -158,6 +191,13 @@ export async function handleChatRequest(
 	let input: TurnInput;
 	try {
 		input = parseChatInput(body.input);
+		// The agent-side decode check (signature guard, not a full decoder):
+		// BEFORE the write-ahead. Lazy: text-only sends never load it. The
+		// bytes stay exactly as parsed (no re-encode, no dedupe).
+		if (input.type === "text" && input.images && input.images.length > 0) {
+			const { validateInputImages } = await import("../agent/image-media.ts");
+			await validateInputImages(input.images);
+		}
 	} catch (err) {
 		if (err instanceof ChatInputError) {
 			return Response.json({ error: err.message }, { status: 400 });
@@ -238,6 +278,17 @@ export async function handleChatInput(
 	let conversationEngine: PiEngine;
 	try { conversationEngine = piEngineForSpec(conversation, () => callPurpose.background, lifecycle); }
 	catch { return Response.json({ error: conversation.provider === "chatgpt" ? chatGPTStreamError("model catalog") : isSubscriptionProvider(conversation.provider) ? nativeSubscriptionError(conversation.provider, "model catalog") : "The selected model is unavailable." }, { status: 503 }); }
+	// THE IMAGE GATE (composer paste): a NEW picture is refused, before any
+	// append, when the conversation model cannot read images. Pictures
+	// already in the history need no gate: pi-ai downgrades them to a text
+	// placeholder for a text-only model (transform-messages), so a later
+	// model change keeps the session usable.
+	if (input.type === "text" && input.images && input.images.length > 0 && !conversationEngine.model.input.includes("image")) {
+		return Response.json(
+			{ error: `${conversationEngine.model.name ?? conversationEngine.model.id} cannot read images. Pick a model that can, or send text only.`, code: MODEL_CANNOT_READ_IMAGES_CODE },
+			{ status: 422 },
+		);
+	}
 	const modelIdForCompaction = `${conversationEngine.model.provider}:${conversationEngine.model.id}`;
 	await ensureCompacted(
 		{

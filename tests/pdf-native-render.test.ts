@@ -81,4 +81,21 @@ describe("native pdf_render (pdfjs paints, @napi-rs/canvas hosts)", () => {
 		const pages = await realHeadless.renderPdfPages(FIXTURE, [1], { dpi: 72 });
 		assert.equal(pages.length, 1);
 	});
+
+	it("crop renders only the region and rejects bad crops / too many pages", async () => {
+		const [full] = await realHeadless.renderPdfPages(FIXTURE, [1], { dpi: 72 });
+		const [part] = await realHeadless.renderPdfPages(FIXTURE, [1], { dpi: 72, crop: { x: 0, y: 0, width: 0.5, height: 0.5 } });
+		const f = pngFacts(full!.png);
+		const c = pngFacts(part!.png);
+		assert.ok(Math.abs(c.w - f.w / 2) <= 1 && Math.abs(c.h - f.h / 2) <= 1);
+		await assert.rejects(realHeadless.renderPdfPages(FIXTURE, [1], { crop: { x: 0, y: 0, width: 1.5, height: 1 } }));
+		await assert.rejects(realHeadless.renderPdfPages(FIXTURE, [1, 2, 3, 4, 5, 6, 7]), /at most 6/);
+		await assert.rejects(realHeadless.renderPdfPages(FIXTURE, [99], { strict: true }), /out of range/);
+	});
+
+	it("caps output at 2048px on the longest side", async () => {
+		const [p] = await realHeadless.renderPdfPages(FIXTURE, [1], { dpi: 300 });
+		const f = pngFacts(p!.png);
+		assert.ok(Math.max(f.w, f.h) <= 2048);
+	});
 });

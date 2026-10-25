@@ -12,6 +12,11 @@ import { useStrongKeyless, useZeroKeys, ZeroKeysPill } from "@/components/setup-
 import { StatsBar } from "@/components/stats-bar";
 import { ChainTableOverlay } from "@/components/chain-table.tsx";
 import { ComposerActions, NodePickerControl } from "@/components/composer-actions";
+import { useImageLightbox } from "@/components/image-lightbox";
+import { useImageDraft, type ImageDraftProps } from "@/components/draft-images";
+import { modelCannotReadImages, modelKeyOf, startFirstMessage, StartSessionError, type StartReuse } from "@/components/start-image-session";
+import { useModelCatalog } from "@/components/model-picker";
+import { IMAGE_ONLY_TITLE, type DraftImage } from "@/src/core";
 import type { ChatSettings, GraphSnapshot } from "@/src/core";
 
 /** The draft's pick set (owner round 10): the SAME shape the home pick
@@ -45,26 +50,32 @@ export async function startDraftSession(
 	fetchLike: typeof fetch,
 	mode?: "practice",
 	picks?: readonly DraftPick[],
+	images: readonly DraftImage[] = [],
+	reuse?: StartReuse | null,
+	modelKey?: string,
 ): Promise<string | null> {
 	const t = text.trim();
-	if (!t) return null;
+	if (!t && images.length === 0) return null;
 	// THE PICKS RIDE THE CREATE (owner round 10): a practice draft seeded
 	// from the pick bar creates its session WITH the graph context — the
 	// same contract as the home screen's practice send (the marker with
 	// [id] name: statement lines, target validation's truth set).
-	const res = await fetchLike("/api/chats", {
-		method: "POST",
-		headers: { "Content-Type": "application/json" },
-		body: JSON.stringify(
+	// Pictures never ride the URL: with images the first turn is POSTed to
+	// /api/chat and its ACK awaited before the plain /chat/<id> is returned
+	// (start-image-session.ts). Failure throws StartSessionError.
+	const result = await startFirstMessage({
+		createBody:
 			mode === "practice"
-				? { title: t, kind: "practice", ...(picks && picks.length > 0 ? { graphContext: { propositions: picks } } : {}) }
-				: { title: t },
-		),
+				? { title: t || IMAGE_ONLY_TITLE, kind: "practice", ...(picks && picks.length > 0 ? { graphContext: { propositions: picks } } : {}) }
+				: { title: t || IMAGE_ONLY_TITLE },
+		text: t,
+		images,
+		fetchLike,
+		reuse,
+		modelKey,
 	});
-	const { id } = (await res.json()) as { id: string };
-	// No settings PUT on create (per-session models, owner 2026-09-28):
-	// the SERVER stamps the newborn from the strong slot.
-	return `/chat/${id}?prompt=${encodeURIComponent(t)}`;
+	if (!result.ok) throw new StartSessionError(result.error, result.reuse);
+	return result.target;
 }
 
 /** The pure shell (no router) — the render-test seam: the draft view's
@@ -83,6 +94,7 @@ export function DraftShell({
 	onOpenPicker,
 	onClearPicks,
 	overlay,
+	imageDraft,
 }: {
 	busy: boolean;
 	text: string;
@@ -104,6 +116,8 @@ export function DraftShell({
 	picks?: DraftPick[];
 	onOpenPicker?: () => void;
 	onClearPicks?: () => void;
+	/** The pasted-image draft (composer paste), parent-held. */
+	imageDraft?: ImageDraftProps;
 	/** THE PICKER SLOT (owner round 10b): the chain-table overlay hosts
 	 *  INSIDE the content column's relative container — the same law as
 	 *  the graph view (the overlay fills its column, never the sidebar).
@@ -126,7 +140,7 @@ export function DraftShell({
 	// round, owner 2026-10-01): the spoken text is deferred in the run's
 	// buffer — Enter must reach the finish-first send, not be gated out by
 	// an empty textarea. Nothing said → the send no-ops.
-	const canSend = text.trim().length > 0 || dictation.active;
+	const canSend = text.trim().length > 0 || dictation.active || Boolean(imageDraft?.hasImages);
 	/* FINISH DICTATION FIRST (owner, 2026-10-01): stop the run, let the
 	 * last finals land through onChange, THEN call the parent's send —
 	 * which reads its REF mirror, so the post-await timing of React's
@@ -198,6 +212,7 @@ export function DraftShell({
 										onSend={handleSend}
 										onStop={() => {}}
 										canSend={canSend}
+										imageDraft={imageDraft}
 										inputRef={composerInputRef}
 										autoFocus
 										onEscape={dictation.active ? dictation.cancel : undefined}
@@ -243,6 +258,15 @@ export function NewSession({ initialConfigured, mode = "teach" }: { initialConfi
 		setText(v);
 	};
 	const [busy, setBusy] = useState(false);
+	/* THE IMAGE DRAFT (composer paste): the pasted pictures ride the first
+	 * message. A URL cannot carry them, so a send with images POSTs the first
+	 * turn itself and navigates to the plain URL after the ACK
+	 * (start-image-session.ts). */
+	const imageDraft = useImageDraft();
+	const { catalog } = useModelCatalog();
+	/** A failed image start keeps its fresh chat for the retry. */
+	const retryChat = useRef<StartReuse | null>(null);
+	const lightbox = useImageLightbox();
 	// THE PICK BAR (owner round 10): the draft's lifted pick set + the
 	// snapshot the standalone chain-table picker reads. Lazy — the graph
 	// is fetched on FIRST open only, then reused.
@@ -285,12 +309,14 @@ export function NewSession({ initialConfigured, mode = "teach" }: { initialConfi
 	const strongKeyless = useStrongKeyless();
 	const [setupOpen, setSetupOpen] = useState(false);
 
-	const send = useCallback(() => {
+	const { awaitReads, imagesRef } = imageDraft;
+	const sendInner = useCallback(async (): Promise<boolean> => {
+		await awaitReads(); // a paste followed by Enter must not race its own read
 		const draft = textRef.current.trim();
-		if (!draft || busy) return;
+		if ((!draft && imagesRef.current.length === 0) || busy) return false;
 		if (!configured) {
 			setSetupOpen(true);
-			return;
+			return false;
 		}
 		// The pre-send KEY guards (owner interlude, no-orphan-chats): guard
 		// BEFORE startDraftSession creates the record — a refused first
@@ -299,16 +325,60 @@ export function NewSession({ initialConfigured, mode = "teach" }: { initialConfi
 		// server's 503 gate remains the belt for /chat/[id] sessions.
 		if (zeroKeys || strongKeyless) {
 			setSetupOpen(true);
-			return;
+			return false;
+		}
+		// Vision guard BEFORE any chat is created (no empty-chat piles).
+		if (imagesRef.current.length > 0) {
+			const refusal = modelCannotReadImages(catalog);
+			if (refusal) {
+				imageDraft.setError(refusal);
+				return false;
+			}
 		}
 		setBusy(true);
-		void startDraftSession(draft, fetch, mode === "practice" ? "practice" : undefined, mode === "practice" ? picksRef.current : undefined)
-			.then((target) => {
-				if (target) router.push(target);
-				else setBusy(false);
-			})
-			.catch(() => setBusy(false));
-	}, [busy, router, configured, zeroKeys, strongKeyless]);
+		try {
+			const target = await startDraftSession(
+				draft,
+				fetch,
+				mode === "practice" ? "practice" : undefined,
+				mode === "practice" ? picksRef.current : undefined,
+				imagesRef.current,
+				retryChat.current,
+				modelKeyOf(catalog),
+			);
+			if (!target) {
+				setBusy(false);
+				return false;
+			}
+			retryChat.current = null;
+			router.push(target);
+			return true;
+		} catch (err: unknown) {
+			// The draft (text + images) stays; the reason shows on its strip.
+			if (err instanceof StartSessionError) {
+				retryChat.current = err.reuse ?? null;
+				imageDraft.setError(err.message);
+			}
+			setBusy(false);
+			return false;
+		}
+	}, [busy, router, configured, zeroKeys, strongKeyless, awaitReads, imagesRef, catalog, imageDraft.setError, mode]);
+
+	/* START LOCK: taken BEFORE awaitReads (repeated Enter while a read is
+	 * unresolved must not resume two closures with busy=false and create two
+	 * chats); held through the start, kept after a navigation, released on
+	 * refusal, failure or an early return. */
+	const startLock = useRef(false);
+	const send = useCallback(async () => {
+		if (startLock.current) return;
+		startLock.current = true;
+		let navigated = false;
+		try {
+			navigated = await sendInner();
+		} finally {
+			if (!navigated) startLock.current = false;
+		}
+	}, [sendInner]);
 
 	return (
 		<>
@@ -321,6 +391,7 @@ export function NewSession({ initialConfigured, mode = "teach" }: { initialConfi
 				picks={picks}
 				onOpenPicker={openPicker}
 				onClearPicks={() => applyPicks([])}
+				imageDraft={{ ...imageDraft.props, onOpen: lightbox.open }}
 				overlay={
 					// THE PICKER (owner round 10b): hosted INSIDE the content
 					// column — absolute inset-0 resolves to the column's relative
@@ -363,6 +434,9 @@ export function NewSession({ initialConfigured, mode = "teach" }: { initialConfi
 					)
 				}
 			/>
+			{/* The pasted picture at full size (composer paste): a session-scoped
+			    overlay over the draft column, the same shell the session uses. */}
+			{lightbox.lightbox}
 			{/* First-run setup: the send interception's landing surface — stage
 			    1 is the self-contained first-key screen (zero-keys wave). */}
 			<SetupDialog

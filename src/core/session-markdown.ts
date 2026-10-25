@@ -27,6 +27,39 @@ import {
 	problemInputForConclude,
 } from "./native-messages.ts";
 import type { ToolResultMessage } from "@earendil-works/pi-ai";
+import { imageDataUrlMarkdown, imageMarker } from "./images.ts";
+
+/** How images render: "describe" (default) is the base64-free `[Image mime]`
+ *  marker, safe for any LLM/background prompt; "embed" inlines the data URL
+ *  and is for the explicit user export only. */
+export type ImageMode = "describe" | "embed";
+
+function renderImage(c: unknown, n: number, mode: ImageMode): string {
+	const block = c as { mimeType?: unknown; data?: unknown };
+	return mode === "embed" ? imageDataUrlMarkdown(block, `Image ${n}`) : imageMarker(block);
+}
+
+/** Image blocks of a native content array as markdown, in block order. */
+function imagesOf(content: unknown, mode: ImageMode): string[] {
+	if (!Array.isArray(content)) return [];
+	return content
+		.filter((c) => (c as { type?: string } | null)?.type === "image")
+		.map((c, i) => renderImage(c, i + 1, mode));
+}
+
+/** Text and images of one content array in their ORIGINAL block order
+ *  (a picture between two paragraphs stays between them). */
+function orderedParts(content: unknown, mode: ImageMode): string[] {
+	if (typeof content === "string") return content.trim() ? [content.trim()] : [];
+	if (!Array.isArray(content)) return [];
+	let n = 0;
+	const out: string[] = [];
+	for (const c of content as Array<{ type?: string; text?: string }>) {
+		if (c?.type === "text" && typeof c.text === "string" && c.text.trim()) out.push(c.text.trim());
+		else if (c?.type === "image") out.push(renderImage(c, ++n, mode));
+	}
+	return out;
+}
 
 /** The user-facing text blocks of a native message (string or text parts). */
 function textOf(content: unknown): string[] {
@@ -166,15 +199,15 @@ export function messageMarkdown(
 	mid: string,
 	anchors = true,
 	ctx?: MarkdownContext,
+	imageMode: ImageMode = "describe",
 ): string | null {
 	const role = (message as { role?: string }).role;
 	const anchor = anchors ? ` · ${mid}` : "";
 	const parts: string[] = [];
 
 	if (role === "user") {
-		for (const text of textOf((message as { content: unknown }).content)) {
-			parts.push(`### Learner${anchor}\n\n${text.trim()}`);
-		}
+		const blocks = orderedParts((message as { content: unknown }).content, imageMode);
+		if (blocks.length > 0) parts.push(`### Learner${anchor}\n\n${blocks.join("\n\n")}`);
 	} else if (role === "assistant") {
 		for (const text of textOf((message as { content: unknown }).content)) {
 			parts.push(`### Teacher${anchor}\n\n${text.trim()}`);
@@ -183,7 +216,8 @@ export function messageMarkdown(
 		const result = message as ToolResultMessage;
 		if (result.isError) return null; // retry context, not learning evidence
 		const { heading, body } = toolResultBody(result, ctx);
-		parts.push(`### ${heading}${anchor}\n\n${body.join("\n\n")}`);
+		// Result images ride along whatever the details say (even null details).
+		parts.push(`### ${heading}${anchor}\n\n${[...body, ...imagesOf(result.content, imageMode)].join("\n\n")}`);
 	}
 
 	// custom markers are invisible, same as the extraction view.
@@ -198,13 +232,13 @@ export function messageMarkdown(
  */
 export function sessionMarkdown(
 	messages: ReadonlyArray<LhMessage>,
-	opts: { title?: string; anchors?: boolean } = {},
+	opts: { title?: string; anchors?: boolean; imageMode?: ImageMode } = {},
 ): string {
 	const blocks: string[] = [];
 	if (opts.title !== undefined && opts.title.length > 0) blocks.push(`# ${opts.title}`);
 	const ctx = markdownContext(messages);
 	for (const message of messages) {
-		const block = messageMarkdown(message, (message as { id?: string }).id ?? "", opts.anchors ?? true, ctx);
+		const block = messageMarkdown(message, (message as { id?: string }).id ?? "", opts.anchors ?? true, ctx, opts.imageMode ?? "describe");
 		if (block !== null) blocks.push(block);
 	}
 	return blocks.join("\n\n");

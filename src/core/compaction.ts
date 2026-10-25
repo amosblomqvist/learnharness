@@ -38,6 +38,7 @@ import { derivePlanStatusesLh, derivedNodeStatus } from "./contracts/plan.ts";
 import { COMPACTED_HISTORY_HEADER } from "./contracts/chat.ts";
 import type { LhMessage, LhMarkerMessage } from "./native-messages.ts";
 import { newMessageId } from "./native-messages.ts";
+import { imageMarker } from "./images.ts";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { AssistantMessage, ToolResultMessage, SystemMessage } from "@earendil-works/pi-ai";
 
@@ -303,6 +304,19 @@ export function keptIndexFor(messages: readonly LhMessage[], marker: LhMarkerMes
 
 // ─── the summarizer input (pi's mirror: labeled text, truncated results) ─────
 
+/** A learner message as summary text: the words, with pasted images NAMED.
+ *  User content is a native block array once an image rides (images.ts), so
+ *  plain interpolation would have summarized it as "[object Object]". The
+ *  base64 never enters the summary, it costs tokens and says nothing. */
+function userSummaryText(content: unknown): string {
+	if (typeof content === "string") return content;
+	if (!Array.isArray(content)) return "";
+	return (content as Array<{ type?: string; text?: string; mimeType?: string }>)
+		.map((b) => (b.type === "image" ? imageMarker(b) : (b.text ?? "")))
+		.filter((t) => t.length > 0)
+		.join("\n");
+}
+
 /** Serialize a message span as labeled text for the summarizer. Tool
  * results truncate at ~2k chars (the kept tail carries them verbatim for
  * the model; the SUMMARY only needs their gist). */
@@ -311,7 +325,7 @@ export function serializeForSummary(messages: readonly LhMessage[]): string {
 	for (const m of messages) {
 		const role = (m as { role?: string }).role;
 		if (role === "user") {
-			lines.push(`[LEARNER] ${(m as { content: string }).content}`);
+			lines.push(`[LEARNER] ${userSummaryText((m as { content: unknown }).content)}`);
 		} else if (role === "assistant") {
 			const assistant = m as AssistantMessage;
 			const blocks: string[] = [];
@@ -324,8 +338,9 @@ export function serializeForSummary(messages: readonly LhMessage[]): string {
 			if (blocks.length > 0) lines.push(`[TUTOR] ${blocks.join("\n")}`);
 		} else if (role === "toolResult") {
 			const result = m as ToolResultMessage;
-			const text = result.content
-				.map((c) => (c.type === "text" ? c.text : JSON.stringify(c)))
+			// Images become the base64-free marker, in block order.
+			const text = (result.content as Array<{ type: string; text?: string; mimeType?: string }>)
+				.map((c) => (c.type === "text" ? (c.text ?? "") : c.type === "image" ? imageMarker(c) : JSON.stringify(c)))
 				.join("\n");
 			lines.push(
 				`[RESULT for ${result.toolName}${result.isError ? " (error)" : ""}] ${

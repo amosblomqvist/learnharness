@@ -2,16 +2,14 @@
 
 import { ChevronRight } from "lucide-react";
 import type { ArtifactPartProps } from "@/src/core";
+import { ImageGallery, galleryItemsFromBlocks } from "@/components/image-gallery";
 
 /**
  * The generic tool-call card (sources v1, 2026-09-19): a quiet, collapsed
  * one-liner per synchronous tool call — the tool name plus the headline
  * argument — expandable to the full input and output. The user's spec:
  * "at least the tool name; for read, the file name; everything collapsed
- * by default; not distracting — background stuff." Unregistered tools
- * still render nothing (chat.tsx's registry default); this card is only
- * for the learner-filesystem set (read/ls/find/grep) where the call IS
- * worth a trace in the transcript.
+ * by default; not distracting — background stuff." Tools with native images also use this card as a registry fallback.
  */
 
 interface ToolCallPart {
@@ -28,7 +26,7 @@ interface ToolCallPart {
  *  the expanded view when present in the output). */
 function headlineArg(tool: string, input: unknown): string {
 	const inp = (input ?? {}) as Record<string, unknown>;
-	if (tool === "read" || tool === "ls") {
+	if (tool === "read" || tool === "ls" || tool === "pdf_view") {
 		const p = typeof inp.path === "string" && inp.path.length > 0 ? inp.path : "~";
 		return p;
 	}
@@ -42,9 +40,27 @@ function headlineArg(tool: string, input: unknown): string {
 	return "";
 }
 
-/** Render a tool result body: plain strings verbatim, image-bearing read
- *  results show their text + an attachment note (the image itself is the
- *  model's — the learner sees only that it happened). */
+/** The caption under a tool's pictures: the input's path (+ page / crop),
+ *  else the first line of the output text. Always short plain text. */
+function imageCaption(input: unknown, output: unknown): string | undefined {
+	const inp = (input ?? {}) as Record<string, unknown>;
+	const bits: string[] = [];
+	if (typeof inp.path === "string" && inp.path) bits.push(inp.path);
+	if (typeof inp.page === "number" || typeof inp.page === "string") bits.push(`p. ${inp.page}`);
+	if (inp.crop != null && typeof inp.crop !== "function") {
+		try {
+			bits.push(`crop ${typeof inp.crop === "string" ? inp.crop : JSON.stringify(inp.crop)}`);
+		} catch {
+			/* unprintable crop */
+		}
+	}
+	if (bits.length > 0) return bits.join(" · ").slice(0, 200);
+	const text = typeof output === "string" ? output : (output as { text?: unknown } | null)?.text;
+	return typeof text === "string" && text ? text.split("\n")[0]!.slice(0, 200) : undefined;
+}
+
+/** Plain output text and legacy attachment notes. Native result images
+ *  render separately in the shared gallery, including with null details. */
 function outputText(output: unknown): string | null {
 	if (output == null) return null;
 	if (typeof output === "string") return output;
@@ -67,7 +83,9 @@ export function ToolCallCard({ part }: ArtifactPartProps) {
 	const arg = headlineArg(tool, p.input);
 	const out = outputText(p.output);
 	const failed = p.state === "output-error" || typeof p.errorText === "string";
+	const images = galleryItemsFromBlocks(part.images, imageCaption(p.input, p.output));
 	return (
+		<>
 		<details
 			data-testid="tool-call-card"
 			data-tool={tool}
@@ -116,5 +134,8 @@ export function ToolCallCard({ part }: ArtifactPartProps) {
 				)}
 			</div>
 		</details>
+		{/* The pictures a tool returned stay visible after the collapsed trace. */}
+		{images.length > 0 && <ImageGallery items={images} showCaptions />}
+		</>
 	);
 }

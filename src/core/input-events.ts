@@ -39,10 +39,14 @@ import {
 	pendingProblemDismissalOf,
 } from "./native-messages.ts";
 import { QUESTION_TOOLS, toolQuestionKind } from "./pending.ts";
+import { ChatInputError } from "./input-error.ts";
+import { parseComposerImages, type ComposerImage } from "./images.ts";
 
 /** One client-originated input event (the POST body's `input`). */
 export type ChatInput =
-	| { type: "text"; text: string }
+	/** Images ride the text event (composer paste): `text` may be empty when
+	 *  the learner sent a picture alone. */
+	| { type: "text"; text: string; images?: ComposerImage[] }
 	| { type: "answer"; toolCallId: string; answer: QuestionAnswerData }
 	| { type: "continue" }
 	/** The practice dock's two buttons (owner, 2026-10-04): the learner's
@@ -147,42 +151,54 @@ export function dismissAppends(record: { messages: LhMessage[] }, input: Dismiss
 	return [newAnswerResult(input.toolCallId, pending.tool, input.answer)];
 }
 
-/** A malformed input event (the honest 400 — the orphan-trap discipline). */
-export class ChatInputError extends Error {}
+export { ChatInputError };
+
+/** The text event: words, pictures (composer paste), or both. The image
+ *  rules are the core's (images.ts); an ImageInputError IS a ChatInputError,
+ *  so its refusal is the same honest 400. */
+function parseTextInput(i: Record<string, unknown>): ChatInput {
+	const text = typeof i.text === "string" ? i.text : "";
+	const images: ComposerImage[] = i.images === undefined ? [] : parseComposerImages(i.images);
+	if (text.trim().length === 0 && images.length === 0) throw new ChatInputError("text input requires non-empty text");
+	return { type: "text", text, ...(images.length > 0 ? { images } : {}) };
+}
+
+function parseAnswerInput(i: Record<string, unknown>): ChatInput {
+	if (typeof i.toolCallId !== "string" || i.toolCallId.length === 0) {
+		throw new ChatInputError("answer input requires toolCallId");
+	}
+	if (typeof i.answer !== "object" || i.answer === null) {
+		throw new ChatInputError("answer input requires the graded answer object");
+	}
+	return { type: "answer", toolCallId: i.toolCallId, answer: i.answer as QuestionAnswerData };
+}
+
+function parseThinkingInput(i: Record<string, unknown>): ChatInput {
+	if (typeof i.problemCallId !== "string" || i.problemCallId.length === 0) {
+		throw new ChatInputError("thinking input requires problemCallId");
+	}
+	if (typeof i.text !== "string" || i.text.trim().length === 0) {
+		throw new ChatInputError("thinking input requires non-empty text");
+	}
+	return { type: "thinking", problemCallId: i.problemCallId, text: i.text };
+}
+
+/** One validating parser per client input type (a Map: no prototype keys). */
+const INPUT_PARSERS = new Map<unknown, (i: Record<string, unknown>) => ChatInput>([
+	["text", parseTextInput],
+	["answer", parseAnswerInput],
+	["continue", () => ({ type: "continue" })],
+	["thinking", parseThinkingInput],
+	["next", () => ({ type: "next" })],
+]);
 
 /** Parse and validate an input event off a request body. */
 export function parseChatInput(input: unknown): ChatInput {
 	if (typeof input !== "object" || input === null) throw new ChatInputError("input must be an object");
 	const i = input as Record<string, unknown>;
-	switch (i.type) {
-		case "text":
-			if (typeof i.text !== "string" || (i.text as string).trim().length === 0) {
-				throw new ChatInputError("text input requires non-empty text");
-			}
-			return { type: "text", text: i.text };
-		case "answer":
-			if (typeof i.toolCallId !== "string" || i.toolCallId.length === 0) {
-				throw new ChatInputError("answer input requires toolCallId");
-			}
-			if (typeof i.answer !== "object" || i.answer === null) {
-				throw new ChatInputError("answer input requires the graded answer object");
-			}
-			return { type: "answer", toolCallId: i.toolCallId, answer: i.answer as QuestionAnswerData };
-		case "continue":
-			return { type: "continue" };
-		case "thinking":
-			if (typeof i.problemCallId !== "string" || i.problemCallId.length === 0) {
-				throw new ChatInputError("thinking input requires problemCallId");
-			}
-			if (typeof i.text !== "string" || i.text.trim().length === 0) {
-				throw new ChatInputError("thinking input requires non-empty text");
-			}
-			return { type: "thinking", problemCallId: i.problemCallId, text: i.text };
-		case "next":
-			return { type: "next" };
-		default:
-			throw new ChatInputError(`unknown input type: ${String(i.type)}`);
-	}
+	const parse = INPUT_PARSERS.get(i.type);
+	if (!parse) throw new ChatInputError(`unknown input type: ${String(i.type)}`);
+	return parse(i);
 }
 
 /**
@@ -200,7 +216,7 @@ export function inputAppends(
 ): LhMessage[] {
 	switch (input.type) {
 		case "text":
-			return [...dismissalConclusion(record), newUserMessage(input.text)];
+			return [...dismissalConclusion(record), newUserMessage(input.text, input.images)];
 		case "answer": {
 			const pending = danglingQuestionOf(record.messages);
 			if (!pending || pending.toolCallId !== input.toolCallId) {

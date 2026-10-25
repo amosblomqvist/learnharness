@@ -3,6 +3,8 @@ import { createRequire } from "node:module";
 import * as os from "node:os";
 import * as path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { MAX_IMAGE_DIMENSION, MAX_IMAGE_PIXELS } from "../../core/images.ts";
+import { providerSafePng, readBoundedFile } from "../image-media.ts";
 import { standardFontsDir } from "./pdf-ops";
 
 /**
@@ -49,7 +51,28 @@ export interface RenderSvgOptions {
 export interface RenderPdfOptions {
 	/** Render DPI — 72 is 100% zoom; the skill's guidance is 100/150/200. */
 	dpi?: number;
+	/** Normalized 0..1 crop rectangle, top-left origin, applied AFTER the
+	 *  page's rotation. Only the crop is rasterized (no full-page canvas). */
+	crop?: PdfCrop;
+	/** Reject out-of-range pages and out-of-range dpi instead of skipping /
+	 *  clamping (pdf_view). Legacy callers keep the lenient semantics. */
+	strict?: boolean;
+	signal?: AbortSignal;
 }
+
+export interface PdfCrop {
+	x: number;
+	y: number;
+	width: number;
+	height: number;
+}
+
+/** PDF render bounds (render-time, before any canvas is allocated). */
+export const MAX_PDF_BYTES = 100 * 1024 * 1024;
+export const MAX_PDF_RENDER_PAGES = 6;
+export const MAX_PDF_DOC_PAGES = 5000;
+export const MIN_PDF_DPI = 72;
+export const MAX_PDF_DPI = 300;
 
 export interface RenderedPdfPage {
 	page: number;
@@ -344,73 +367,7 @@ function svgViewport(svg: string, opts: RenderSvgOptions): { width: number; heig
 	};
 }
 
-/** Canonicalize a raw Chrome screenshot for the model's eyes (2026-09-19 fix).
- *
- *  WHY: Chrome writes PNGs with a SPLIT IDAT stream (4KB chunks) — and
- *  Alibaba's vision decoder (behind OpenRouter's qwen3.8-flash, the
- *  visual-maker's look-model) rejected those outright during the
- *  2026-09-18/19 window: "The image format is illegal and cannot be opened",
- *  deterministically, at every size (50–800px) — while every single-IDAT
- *  form passed (a handcrafted 1×1, and sharp re-encodes). On a later re-test
- *  raw Chrome PNGs passed too (the upstream decoder was fixed or is flaky
- *  per backend), but the canonical form stays: PNG spec says the IDAT chunks
- *  are an arbitrary SPLIT of one zlib stream, so merging them is the more
- *  standard shape, byte-identical stream, zero re-encoding.
- *
- *  Pure Node on purpose (no sharp): historically the process already carried
- *  a native image lib via @huggingface/transformers' nested sharp + libvips,
- *  and importing the root sharp (Next's optional dependency) put a SECOND
- *  libvips into the process — macOS's ObjC runtime warns (duplicate
- *  GNotificationCenterDelegate, "mysterious crashes"). The transformers
- *  embedder died with wave 6 (2026-09-23) but the rule lives on: one native
- *  image lib per process; app code carries none. */
-export function providerSafePng(png: Buffer): Buffer {
-	const SIG_LEN = 8;
-	if (png.length < SIG_LEN + 12 || png.subarray(0, SIG_LEN).toString("hex") !== "89504e470d0a1a0a") return png;
-	// Walk the chunks once, merging the IDAT split into its canonical
-	// single-chunk form (first IDAT's position, concatenated payload).
-	const parts: Array<{ type: string; data: Buffer }> = [];
-	let off = SIG_LEN;
-	while (off + 12 <= png.length) {
-		const len = png.readUInt32BE(off);
-		if (off + 12 + len > png.length) break; // truncated tail — leave as-is
-		parts.push({ type: png.subarray(off + 4, off + 8).toString("ascii"), data: png.subarray(off + 8, off + 8 + len) });
-		off += 12 + len;
-	}
-	const idats = parts.filter((p) => p.type === "IDAT");
-	if (idats.length < 2) return png; // already canonical
-	const merged = Buffer.concat(idats.map((p) => p.data));
-	let emittedIdat = false;
-	const out: Buffer[] = [png.subarray(0, SIG_LEN)];
-	for (const p of parts) {
-		if (p.type !== "IDAT") out.push(chunk(p.type, p.data));
-		else if (!emittedIdat) {
-			out.push(chunk("IDAT", merged));
-			emittedIdat = true;
-		}
-	}
-	return Buffer.concat(out);
-}
-
-/** One PNG chunk (length + type + data + CRC32) — the spec's exact layout. */
-function chunk(type: string, data: Buffer): Buffer {
-	const out = Buffer.alloc(12 + data.length);
-	out.writeUInt32BE(data.length, 0);
-	out.write(type, 4, "ascii");
-	data.copy(out, 8);
-	out.writeUInt32BE(crc32(out.subarray(4, 8 + data.length)), 8 + data.length);
-	return out;
-}
-
-/** CRC-32 (PNG's polynomial, table-less) for chunk checksums. */
-function crc32(buf: Buffer): number {
-	let c = ~0;
-	for (const byte of buf) {
-		c ^= byte;
-		for (let k = 0; k < 8; k++) c = (c >>> 1) ^ (0xedb88320 & -(c & 1));
-	}
-	return ~c >>> 0;
-}
+export { providerSafePng };
 
 async function renderSvg(svg: string, opts: RenderSvgOptions = {}): Promise<Buffer> {
 	// NATIVE FIRST (Wave E stage 2, owner 2026-10-10): resvg rasterizes
@@ -474,46 +431,88 @@ async function renderPdfPages(
 	pages: number[],
 	opts: RenderPdfOptions = {},
 ): Promise<RenderedPdfPage[]> {
-	const dpi = opts.dpi ?? 150;
+	const signal = opts.signal;
+	const aborted = () => {
+		if (signal?.aborted) throw signal.reason instanceof Error ? signal.reason : new Error("aborted");
+	};
+	aborted();
+	let dpi = opts.dpi ?? 150;
+	if (typeof dpi !== "number" || !Number.isFinite(dpi)) throw new Error("dpi must be a finite number");
+	if (dpi < MIN_PDF_DPI || dpi > MAX_PDF_DPI) {
+		if (opts.strict) throw new Error(`dpi must be between ${MIN_PDF_DPI} and ${MAX_PDF_DPI}`);
+		dpi = Math.min(MAX_PDF_DPI, Math.max(MIN_PDF_DPI, dpi));
+	}
+	const crop = opts.crop;
+	if (crop) {
+		const { x, y, width, height } = crop;
+		const eps = 1e-9;
+		if (![x, y, width, height].every((v) => typeof v === "number" && Number.isFinite(v))) throw new Error("crop values must be finite numbers");
+		if (width <= 0 || height <= 0) throw new Error("crop width and height must be greater than 0");
+		if (x < 0 || y < 0 || x + width > 1 + eps || y + height > 1 + eps) throw new Error("crop must lie inside the page (normalized 0..1)");
+	}
+	const wanted = [...new Set(pages)];
+	if (wanted.length > MAX_PDF_RENDER_PAGES) throw new Error(`at most ${MAX_PDF_RENDER_PAGES} pages can be rendered per call`);
+	const absolute = path.resolve(pdfPath);
+	const stat = fs.statSync(absolute);
+	if (stat.size > MAX_PDF_BYTES) throw new Error(`PDF is too large (${MAX_PDF_BYTES / (1024 * 1024)} MiB max)`);
 	// NATIVE CANVAS (Wave E, owner 2026-10-10): pdfjs paints into
-	// @napi-rs/canvas in this process — no browser involved. pdfjs-dist v6's
-	// own Node integration IS @napi-rs/canvas (its optionalDependency: the
-	// NodeCanvasFactory requires it), so the paint engine is the exact code
-	// that used to run in the Chrome shim tab; only the canvas host changed
-	// (Skia in-process instead of a DOM canvas). Text-side pdf tools never
-	// needed a browser; now renders don't either.
+	// @napi-rs/canvas in this process, no browser. Local render only.
 	const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
 	const { createCanvas } = await import("@napi-rs/canvas");
-	const data = new Uint8Array(fs.readFileSync(path.resolve(pdfPath)));
-	// Standard-font data as a directory path (live-smoke finding 2026-09-19:
-	// without it pdfjs renders non-embedded standard fonts via fallback);
-	// verbosity 0 = errors only (JBIG2 noise on scanned PDFs).
+	const data = new Uint8Array(
+		await readBoundedFile(absolute, MAX_PDF_BYTES, () => new Error(`PDF is too large (${MAX_PDF_BYTES / (1024 * 1024)} MiB max)`), signal),
+	);
+	aborted();
+	// pdfjs-dist v6 has no eval/new Function path and no isEvalSupported
+	// option (verified: none in pdf.mjs / pdf.worker.mjs), so eval is off by
+	// construction; standard-font data as a directory path (2026-09-19);
+	// verbosity 0 = errors only.
 	const loadingTask = pdfjs.getDocument({ data, standardFontDataUrl: standardFontsDir(), verbosity: 0 });
-	const doc = await loadingTask.promise;
+	const onAbort = () => void loadingTask.destroy().catch(() => {});
+	signal?.addEventListener("abort", onAbort, { once: true });
 	try {
+		const doc = await loadingTask.promise;
+		aborted();
+		if (doc.numPages > MAX_PDF_DOC_PAGES) throw new Error(`PDF has too many pages (${MAX_PDF_DOC_PAGES} max)`);
 		const out: RenderedPdfPage[] = [];
-		for (const pageNo of pages) {
-			if (pageNo < 1 || pageNo > doc.numPages) continue;
+		for (const pageNo of wanted) {
+			aborted();
+			if (!Number.isInteger(pageNo) || pageNo < 1 || pageNo > doc.numPages) {
+				if (opts.strict) throw new Error(`page ${pageNo} is out of range (document has ${doc.numPages} pages)`);
+				continue;
+			}
 			const pg = await doc.getPage(pageNo);
-			const vp = pg.getViewport({ scale: dpi / 72 });
-			const canvas = createCanvas(Math.ceil(vp.width), Math.ceil(vp.height));
+			const c = crop ?? { x: 0, y: 0, width: 1, height: 1 };
+			// Page size in points AFTER rotation; the output is capped by
+			// longest side and pixel count before any canvas exists.
+			const base = pg.getViewport({ scale: 1 });
+			const cropW = base.width * c.width;
+			const cropH = base.height * c.height;
+			const scale = Math.min(
+				dpi / 72,
+				MAX_IMAGE_DIMENSION / Math.max(cropW, cropH),
+				Math.sqrt(MAX_IMAGE_PIXELS / (cropW * cropH)),
+			);
+			const vp = pg.getViewport({ scale });
+			const w = Math.max(1, Math.min(MAX_IMAGE_DIMENSION, Math.ceil(vp.width * c.width - 1e-6)));
+			const h = Math.max(1, Math.min(MAX_IMAGE_DIMENSION, Math.ceil(vp.height * c.height - 1e-6)));
+			const canvas = createCanvas(w, h);
 			const ctx = canvas.getContext("2d");
 			// pdfjs's render types speak the DOM context; @napi-rs/canvas's
-			// context is the same 2D API implemented over Skia.
+			// context is the same 2D API over Skia. The transform shifts the
+			// crop's top-left to the canvas origin.
 			await pg.render({
 				canvasContext: ctx as unknown as CanvasRenderingContext2D,
 				canvas: canvas as unknown as HTMLCanvasElement,
 				viewport: vp,
+				transform: [1, 0, 0, 1, -vp.width * c.x, -vp.height * c.y],
 			}).promise;
-			out.push({
-				page: pageNo,
-				// Skia-encoded PNG → providerSafePng for the same single-IDAT
-				// canonical form every other vision-model image gets.
-				png: providerSafePng(canvas.toBuffer("image/png")),
-			});
+			aborted();
+			out.push({ page: pageNo, png: providerSafePng(canvas.toBuffer("image/png")) });
 		}
 		return out;
 	} finally {
+		signal?.removeEventListener("abort", onAbort);
 		await loadingTask.destroy().catch(() => {});
 	}
 }

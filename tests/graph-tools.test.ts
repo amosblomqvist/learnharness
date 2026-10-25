@@ -98,6 +98,7 @@ describe("prober graph tools — registration", () => {
 			"list_sessions",
 			"ls",
 			"pdf",
+			"pdf_view",
 			"probe",
 			"probe_done",
 			"read",

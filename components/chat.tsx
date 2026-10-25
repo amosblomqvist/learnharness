@@ -21,6 +21,7 @@ import { LiveToolCard } from "@/components/artifacts/live-tool-card";
 import { Separator } from "@/components/ui/separator";
 import { AnsweredCard } from "@/components/answered-card";
 import { artifactRenderers } from "@/components/artifacts";
+import { ToolCallCard } from "@/components/artifacts/tool-call-card";
 import { SubagentSteerCard } from "@/components/artifacts/steer-card";
 import { Composer } from "@/components/composer";
 import { useEnterSubmits } from "@/components/enter-submits";
@@ -47,6 +48,9 @@ import {
 import { PlanBlock, PlanPopup, latestTree } from "@/components/plan-block";
 import { PlanMarginalia, planExists } from "@/components/plan-window";
 import { MermaidOverlay, SessionMermaidContext } from "@/components/session-overlay";
+import { useImageLightbox } from "@/components/image-lightbox";
+import { useImageDraft } from "@/components/draft-images";
+import { UserMessageParts } from "@/components/user-message-parts";
 import { AbortTurnDialog, type AbortMode } from "@/components/abort-turn-dialog";
 import { ArrowRightIcon, DumbbellIcon, WaypointsIcon } from "lucide-react";
 import type { PlanBlockData } from "@/src/core";
@@ -79,6 +83,7 @@ import {
 import { ReadingThinkingField } from "@/components/reading-thinking";
 import { currentUserThinkingOpen, setAllUserThinkingOpen } from "@/components/thinking-block";
 import { slotsConfigured, type ModelsSettings } from "@/src/core";
+import { MODEL_CANNOT_READ_IMAGES_CODE, wireImages, type DraftImage } from "@/src/core";
 import { useSettingsSaved } from "@/components/settings-signal";
 
 /** One width for everything: transcript, cards, and the bottom blob share this column. */
@@ -159,6 +164,19 @@ export function parseProviderKeyRefusal(message: string | undefined): boolean {
 		return body.code === "provider_key_missing" && typeof body.error === "string" && isProviderKeyRefusal(body.error);
 	} catch {
 		return false;
+	}
+}
+
+/** The image refusal's transport seam (composer paste): same discipline as
+ *  the two parsers above. Returns the server's own wording (it names the
+ *  model), or null for any other error. */
+function parseImageRefusal(message: string | undefined): string | null {
+	if (!message) return null;
+	try {
+		const body = JSON.parse(message) as { code?: unknown; error?: unknown };
+		return body.code === MODEL_CANNOT_READ_IMAGES_CODE && typeof body.error === "string" ? body.error : null;
+	} catch {
+		return null;
 	}
 }
 
@@ -571,12 +589,26 @@ export function Chat({
 			.catch(() => {});
 	});
 	const [setupOpen, setSetupOpen] = useState(false);
-	/** The last explicitly-sent draft (composer send): the
-	 *  refusal flow restores it into the composer, where it waits for the
-	 *  learner to re-send (Save never auto-sends, owner 2026-10-09).
-	 *  Auto-continuations (probe answers) never set it — their refusal
-	 *  opens the dialog with no replay. */
-	const draftRef = useRef<string | null>(null);
+	/** Pending composer send; images remain in the strip until its ACK. */
+	const draftRef = useRef<{ text: string; images: DraftImage[]; awaitingAck: boolean } | null>(null);
+	/* THE COMPOSER'S IMAGE DRAFT (composer paste): the shared paste, validate,
+	 * read hook. Its own ref mirror is why a send that resumes after an
+	 * await (dictation finish, image reads) still sees the live images. */
+	const imageDraft = useImageDraft();
+	const lightbox = useImageLightbox();
+	const removeImages = imageDraft.removeImages;
+
+	const sendDraft = useCallback(
+		(text: string, images: readonly DraftImage[]) => {
+			const draft = { text, images: [...images], awaitingAck: images.length > 0 };
+			draftRef.current = draft;
+			void send({ type: "text", text, ...(images.length ? { images: wireImages(images) } : {}) }, () => {
+				if (draft.images.length) removeImages(draft.images.map((i) => i.id));
+				if (draftRef.current === draft) draftRef.current = null;
+			});
+		},
+		[send, removeImages],
+	);
 
 	// THE BYOK REFUSAL (owner, 2026-09-22): a send that lands the server's
 	// 503 models_not_configured envelope renders as the SETUP FLOW, never
@@ -589,12 +621,23 @@ export function Chat({
 	// re-sends it (owner ruling 2026-10-09).
 	useEffect(() => {
 		if (!error) return;
+		if (draftRef.current) draftRef.current.awaitingAck = false;
 		const missing = parseModelsRefusal(error.message);
 		// The key-refusal twin (zero-keys wave): a pinned model whose
 		// provider key is gone gets the SAME treatment — revert-draft and
 		// open setup (the dialog derives to its first-key stage on its own).
 		const keyRefused = parseProviderKeyRefusal(error.message);
-		if (!missing && !keyRefused) return; // a real error keeps the honest banner
+		// The image twin (composer paste): the model cannot read pictures.
+		// Same revert-draft, but the reason shows on the draft strip, not
+		// the setup dialog (no setup step fixes it; a model swap does).
+		const imageRefusal = parseImageRefusal(error.message);
+		if (!missing && !keyRefused && !imageRefusal) {
+			// Before ACK the attachments are still in the strip. Keep the
+			// text too, without replacing anything typed since this send.
+			if (draftRef.current && !textRef.current) applyText(draftRef.current.text);
+			draftRef.current = null;
+			return; // a real error keeps the honest banner
+		}
 		// ORDER MATTERS: clearError() flips this effect's own dep (`error`)
 		// and would cancel the in-flight work below — so the banner dismiss,
 		// the draft restore, and the dialog open all land TOGETHER after the
@@ -607,12 +650,14 @@ export function Chat({
 				if (Array.isArray(record?.messages)) setMessages(record.messages);
 			}
 			if (cancelled) return;
-			if (draftRef.current !== null) {
-				applyText(draftRef.current);
+			if (draftRef.current) {
+				applyText(draftRef.current.text);
+				imageDraft.restoreSent(draftRef.current.images);
 				draftRef.current = null;
 			}
 			clearError();
-			setSetupOpen(true);
+			if (imageRefusal) imageDraft.setError(imageRefusal);
+			else setSetupOpen(true);
 		})();
 		return () => {
 			cancelled = true;
@@ -680,7 +725,7 @@ export function Chat({
 	// affordance).
 	const [compacting, setCompacting] = useState(initiallyCompacting);
 	const canSend =
-		(text.trim().length > 0 || dictation.active) && !pending && !activeProblem && !compacting;
+		(text.trim().length > 0 || dictation.active || imageDraft.hasImages) && !pending && !activeProblem && !compacting;
 
 	/* THE PRACTICE PAUSE (owner round 16): between problems — practice
 	 * kind, nothing active, nothing in flight, and at least one problem
@@ -1132,20 +1177,27 @@ export function Chat({
 		/* FINISH DICTATION FIRST (owner, 2026-10-01): a learner who keeps
 		 * talking right through Enter must not lose the tail — stop the run,
 		 * let the last finals land in the composer, then send the REF value
-		 * (the flush lands via setState, invisible to this closure). */
+		 * (the flush lands via setState, invisible to this closure). Pasted
+		 * images have the same race (FileReader is async): settle those reads
+		 * before the same seam reads the drafts. */
 		if (!dictation.active) {
-			doSteerOrSend();
+			void imageDraft.awaitReads().then(doSteerOrSend);
 			return;
 		}
-		void dictation.finish().then(doSteerOrSend);
+		void dictation.finish().then(imageDraft.awaitReads).then(doSteerOrSend);
 	};
 	const doSend = () => {
 		if (busy || pending || compacting) return;
 		const t = textRef.current.trim();
-		if (!t) return;
-		draftRef.current = t; // the refusal flow's preserve-and-replay seam
+		const imgs = imageDraft.imagesRef.current;
+		if (!t && imgs.length === 0) return;
+		// An image send still awaiting its ACK owns these images already.
+		if (draftRef.current?.awaitingAck) return;
+		// An explicit retry must re-arm the model after a prior send error.
+		if (error) clearError();
 		applyText("");
-		void send({ type: "text", text: t });
+		imageDraft.setError(null);
+		sendDraft(t, imgs); // images stay in the strip until the ACK; keeps the draft for the refusal flow's restore
 	};
 
 	/* STEER VS SEND (owner arc 2026-10-03): a send while a turn runs steers
@@ -1160,8 +1212,16 @@ export function Chat({
 	const doSteerOrSend = () => {
 		if (pending || compacting) return;
 		const t = textRef.current.trim();
-		if (!t) return;
+		const imgs = imageDraft.imagesRef.current;
+		if (!t && imgs.length === 0) return;
 		if (busy) {
+			// Images are NOT steerable (v1, the steer event has no images). The
+			// draft waits for the turn to settle: send/Enter is a no-op rather
+			// than a drop, and never a Stop (an Enter must not abort a turn).
+			if (imgs.length > 0) {
+				imageDraft.setError("Images can be sent once the current response finishes. Your draft is kept.");
+				return;
+			}
 			applyText("");
 			void steer(t);
 			return;
@@ -1184,6 +1244,7 @@ export function Chat({
 			value={{
 				openMermaid: setMermaidFocus,
 				openFigure: (svg, inverted) => setFigureFocus({ svg, inverted }),
+				openImage: lightbox.open,
 			}}
 		>
 		<JobsContext.Provider value={jobs}>
@@ -1433,9 +1494,7 @@ export function Chat({
 												    sits INSIDE the rail, same mono-xs register and same 1ch
 												    rail as the thinking rows — one quote geometry. */}
 												<div className="font-medium uppercase tracking-wide text-muted-foreground">You</div>
-												<div className="lh-prose whitespace-pre-wrap text-foreground">
-													{m.parts.filter((p) => p.type === "text").map((p) => p.text).join("\n")}
-												</div>
+												<UserMessageParts parts={m.parts} onOpenImage={lightbox.open} />
 											</div>
 									) : (
 									<Message from="assistant" className="max-w-full">
@@ -1527,7 +1586,11 @@ export function Chat({
 														// parts and future artifacts render via the
 														// registry — add renderers there, not here.
 														if (part.type.startsWith("tool-")) {
-															const Renderer = artifactRenderers[part.type.slice("tool-".length)];
+															const Renderer =
+																artifactRenderers[part.type.slice("tool-".length)] ??
+																(Array.isArray((part as { images?: unknown }).images) && (part as { images: unknown[] }).images.length > 0
+																	? ToolCallCard
+																	: undefined);
 															if (Renderer) return <Renderer key={pi} part={part as ArtifactPartProps["part"]} />;
 														}
 														return null;
@@ -1640,6 +1703,7 @@ export function Chat({
 							busy={busy}
 							value={text}
 							onChange={applyText}
+							imageDraft={{ ...imageDraft.props, onOpen: lightbox.open }}
 							inputRef={composerInputRef}
 							onSend={onSend}
 							onStop={abortInFlightTurn}
@@ -1684,6 +1748,7 @@ export function Chat({
 						onClose={() => setFigureFocus(null)}
 					/>
 				)}
+				{lightbox.lightbox}
 				{planOpen && <PlanPopup messages={messages} onClose={() => setPlanOpen(false)} />}
 				<AbortTurnDialog mode={abortAsk} onClose={() => setAbortAsk(null)} onConfirm={confirmAbort} busy={busy} />
 				</div>

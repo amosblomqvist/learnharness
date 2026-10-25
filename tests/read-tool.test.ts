@@ -100,8 +100,8 @@ describe("read tool — text semantics", () => {
 describe("read tool — image semantics (native content parts)", () => {
 	it("returns native text + image parts for image files, details null (output-less part)", async () => {
 		const file = path.join(tmp, "dot.png");
-		// minimal valid PNG header bytes are enough — detection is by extension
-		fs.writeFileSync(file, Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
+		// a real 1x1 PNG: the bytes are decoded and normalized now
+		fs.writeFileSync(file, Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==", "base64"));
 		const result = await readTool.execute!("test", { path: file });
 		assert.equal(result.content.length, 2);
 		const parts = result.content as Array<{ type: string; text?: string; data?: string; mimeType?: string }>;
@@ -113,6 +113,23 @@ describe("read tool — image semantics (native content parts)", () => {
 		assert.equal(imagePart.mimeType, "image/png");
 		assert.match(imagePart.data!, /^[A-Za-z0-9+/]+={0,2}$/);
 		assert.equal(result.details, null, "image reads keep the record part output-less");
+	});
+
+	it("sniffs bytes, not extensions: a PNG named .txt is an image, a fake .png is an error", async () => {
+		const real = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==", "base64");
+		const odd = path.join(tmp, "image.txt");
+		fs.writeFileSync(odd, real);
+		assert.equal((await readTool.execute!("test", { path: odd })).content[1]!.type, "image");
+		const fake = write("fake.png", "just text pretending");
+		await assert.rejects(readTool.execute!("test", { path: fake }), /not a readable/);
+	});
+
+	it("bounds image files before reading them (20MiB)", async () => {
+		const big = path.join(tmp, "big.png");
+		const fd = fs.openSync(big, "w");
+		fs.ftruncateSync(fd, 21 * 1024 * 1024);
+		fs.closeSync(fd);
+		await assert.rejects(readTool.execute!("test", { path: big }), /too large/);
 	});
 
 	it("plain string results map to a single text part (parity)", async () => {
