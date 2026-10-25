@@ -28,7 +28,7 @@ describe("web_search on the injected port (web.ts)", () => {
 		assert.ok(web_search, "web_search is still exposed without a provider");
 		const out = await web_search!.execute!("c1", { query: "anything" });
 		const missing = "web_search is not available: no search engine is configured. " +
-			"Set a Tavily or Brave search API key in settings. Report in your brief that web search is unavailable.";
+			"Set a Tavily, Brave, or Ollama search API key in settings. Report in your brief that web search is unavailable.";
 		assert.equal(out.details, missing);
 		assert.deepEqual(out.content, [{ type: "text", text: missing }]);
 		assert.notEqual(out.isError, true, "missing keys remain ordinary recoverable text, not a native error");
@@ -105,6 +105,49 @@ describe("web_search on the injected port (web.ts)", () => {
 		} finally {
 			globalThis.fetch = realFetch;
 		}
+	});
+
+	it("Ollama fetches pages; PDF content types and .pdf URLs retain the PDF-reader handoff", async () => {
+		const fetched: string[] = [];
+		const provider: SearchProvider = {
+			id: "ollama",
+			search: async () => [],
+			async fetchPage(url) { fetched.push(url); return { title: "Ollama page", content: "Page content" }; },
+		};
+		const { web_fetch } = createWebTools(() => provider);
+		const original = globalThis.fetch;
+		const requests: string[] = [];
+		globalThis.fetch = (async (url, init) => {
+			const pathname = new URL(String(url)).pathname;
+			requests.push(`${init?.method ?? "GET"} ${pathname}`);
+			if (init?.method === "HEAD") return new Response(null, { headers: { "content-type": pathname === "/paper" ? "application/pdf" : "text/html" } });
+			return new Response("PDF data", { headers: { "content-type": "application/pdf" } });
+		}) as typeof fetch;
+		try {
+			const page = await web_fetch!.execute!("p", { url: "https://example.com/page" });
+			assert.match(String(page.details), /# Ollama page\n\nSource: https:\/\/example.com\/page/);
+			const pdf = await web_fetch!.execute!("d", { url: "https://example.com/paper" });
+			assert.match(String(pdf.details), /call web_fetch_pdf/);
+			const suffix = await web_fetch!.execute!("s", { url: "https://example.com/file.pdf" });
+			assert.match(String(suffix.details), /call web_fetch_pdf/);
+			assert.deepEqual(fetched, ["https://example.com/page"]);
+			assert.deepEqual(requests, ["HEAD /page", "HEAD /paper", "GET /paper", "GET /file.pdf"]);
+		} finally { globalThis.fetch = original; }
+	});
+
+	it("failed HEAD still tries Ollama; Ollama failures do not silently fall back", async () => {
+		let fetches = 0;
+		const original = globalThis.fetch;
+		globalThis.fetch = (async () => { fetches++; throw new Error("HEAD rejected"); }) as typeof fetch;
+		const provider: SearchProvider = {
+			id: "ollama", search: async () => [],
+			fetchPage: async () => { throw new Error("Ollama web_fetch API 429: rate limited"); },
+		};
+		try {
+			const result = await createWebTools(() => provider).web_fetch!.execute!("f", { url: "https://example.com/page" });
+			assert.match(String(result.details), /web_fetch failed for https:\/\/example.com\/page: Ollama web_fetch API 429/);
+			assert.equal(fetches, 1, "only HEAD was attempted; no direct-reader fallback");
+		} finally { globalThis.fetch = original; }
 	});
 });
 

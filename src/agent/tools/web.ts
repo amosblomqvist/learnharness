@@ -20,7 +20,7 @@ import TurndownService from "turndown";
  *
  * SEARCH REWIRING (search port wave, 2026-09-20): the Google CSE backend is
  * retired — web_search now runs on the injected search port (core/search.ts).
- * The live adapter (Tavily/Brave — server/search.ts) arrives as a DEPENDENCY
+ * The live adapter (Tavily/Brave/Ollama — server/search.ts) arrives as a DEPENDENCY
  * (import law: this tool depends on the core port, never server code). NO
  * silent fallback (owner decision): provider absent → search is honestly
  * unavailable, and the composition root drops the research dispatch tool on
@@ -148,7 +148,7 @@ export function createWebTools(search: () => SearchProvider | null): Record<stri
 				if (!provider) {
 					return (
 						"web_search is not available: no search engine is configured. " +
-						"Set a Tavily or Brave search API key in settings. Report in your brief that web search is unavailable."
+						"Set a Tavily, Brave, or Ollama search API key in settings. Report in your brief that web search is unavailable."
 					);
 				}
 				try {
@@ -163,8 +163,8 @@ export function createWebTools(search: () => SearchProvider | null): Record<stri
 			name: "web_fetch",
 			label: "web_fetch",
 			description:
-				"Fetch a web page and extract its readable content as markdown (Readability). " +
-				"Handles HTML pages and plain text; JS-rendered pages fall back to a reader service.",
+				"Fetch a web page as readable content. Ollama Web Fetch is used when Ollama search is active; " +
+				"otherwise HTML pages use Readability with a reader-service fallback.",
 			parameters: webFetchInput,
 			execute: serverExecute("web_fetch", webFetchInput, async ({ url }): Promise<string> => {
 				try {
@@ -179,6 +179,18 @@ export function createWebTools(search: () => SearchProvider | null): Record<stri
 					return `web_fetch failed: invalid URL "${url}"`;
 				}
 				try {
+					const provider = search();
+					if (provider?.id === "ollama" && provider.fetchPage) {
+						// PDF URLs still go through the existing PDF handoff. Probe other
+						// URLs for extensionless PDFs; failed HEAD requests do not block pages.
+						if (/\.pdf$/i.test(new URL(url).pathname)) return await fetchAndExtract(url);
+						try {
+							const probe = await fetch(url, { method: "HEAD", signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
+							if (probe.headers.get("content-type")?.includes("application/pdf")) return await fetchAndExtract(url);
+						} catch { /* Try Ollama for sites that reject HEAD. */ }
+						const page = await provider.fetchPage(url);
+						return `${page.title ? `# ${page.title}\n\n` : ""}Source: ${url}\n\n---\n\n${truncate(page.content)}`;
+					}
 					return await fetchAndExtract(url);
 				} catch (err) {
 					return `web_fetch failed for ${url}: ${err instanceof Error ? err.message : String(err)}`;

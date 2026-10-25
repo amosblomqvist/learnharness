@@ -1,6 +1,6 @@
 /**
  * The search engines' server composition (search port + model slots wave,
- * 2026-09-20): the Tavily + Brave adapters behind the core port
+ * 2026-09-20): the Tavily, Brave, and Ollama adapters behind the core port
  * (core/search.ts) + the live-engine resolution the settings UI and the
  * agent-layer tool both read.
  *
@@ -9,7 +9,7 @@
  *    store or env — env wins, keyed via server/keys.ts keyValue).
  *  - Setting a key is ALL the user does — auto-detection: explicit
  *    agent.search.engine pins the preference (when BOTH keys are present
- *    the preference order is Tavily → Brave); without a pin, whichever
+ *    the preference order is Tavily → Brave → Ollama); without a pin, whichever
  *    engine has a key is the engine.
  *  - An explicit choice does NOT silently fall back to the other engine:
  *    engine pinned but its key missing = honestly unavailable (reason
@@ -20,6 +20,7 @@
  */
 
 import type { SearchEngineId, SearchHit, SearchProvider, SearchStatus } from "../core/search.ts";
+import { OLLAMA_KEY_VAR } from "../core/auth-keys.ts";
 import { keyValue } from "./keys.ts";
 import { effectiveSettings } from "./stores.ts";
 
@@ -108,12 +109,41 @@ export function braveProvider(apiKey: string, fetchFn: FetchLike = fetch): Searc
 	};
 }
 
-/** The engines this wave ships, in PREFERENCE order (both keys present,
+/** Ollama's hosted search/fetch APIs are independent of the local model URL. */
+export function ollamaProvider(apiKey: string, fetchFn: FetchLike = fetch): SearchProvider {
+	async function post<T>(path: string, body: object): Promise<T> {
+		const resp = await fetchFn(`https://ollama.com/api/${path}`, {
+			method: "POST",
+			headers: { "content-type": "application/json", authorization: `Bearer ${apiKey}` },
+			body: JSON.stringify(body),
+			signal: AbortSignal.timeout(30_000),
+		});
+		if (!resp.ok) throw new Error(`Ollama ${path} API ${resp.status}: ${(await resp.text()).slice(0, 200)}`);
+		return await resp.json() as T;
+	}
+	return {
+		id: "ollama",
+		async search(query, count) {
+			const data = await post<{ results?: Array<{ title?: string; url?: string; content?: string }> }>("web_search", {
+				query, max_results: Math.min(count, 10),
+			});
+			return (data.results ?? [])
+				.filter((r) => typeof r.url === "string" && r.url)
+				.map((r) => ({ title: r.title ?? r.url ?? "", url: r.url ?? "", snippet: (r.content ?? "").replace(/\n/g, " ").slice(0, 500) }));
+		},
+		async fetchPage(url) {
+			return post<{ title: string; content: string }>("web_fetch", { url });
+		},
+	};
+}
+
+/** The engines this wave ships, in PREFERENCE order (multiple keys present,
  *  no explicit pin → the first live engine wins; owner decision
  *  2026-09-20: Tavily first — the AI-native search API the wave chose). */
 const ENGINE_ORDER: ReadonlyArray<{ id: SearchEngineId; envVar: string }> = [
 	{ id: "tavily", envVar: "TAVILY_API_KEY" },
 	{ id: "brave", envVar: "BRAVE_API_KEY" },
+	{ id: "ollama", envVar: OLLAMA_KEY_VAR },
 ];
 
 /** The engine's key (env-or-file; env wins) — null when the engine is
@@ -138,7 +168,7 @@ export function resolveSearchEngineFor(
 			return {
 				available: false,
 				engine: null,
-				reason: `search engine is set to "${pinned}" but its API key is missing — set the ${pinned === "tavily" ? "TAVILY_API_KEY" : "BRAVE_API_KEY"} key`,
+				reason: `search engine is set to "${pinned}" but its API key is missing — set the ${ENGINE_ORDER.find((e) => e.id === pinned)?.envVar ?? pinned} key`,
 				key: null,
 			};
 		}
@@ -151,7 +181,7 @@ export function resolveSearchEngineFor(
 	return {
 		available: false,
 		engine: null,
-		reason: "no search engine configured — set a Tavily or Brave search API key",
+		reason: "no search engine configured — set a Tavily, Brave, or Ollama search API key",
 		key: null,
 	};
 }
@@ -165,6 +195,7 @@ export function searchStatus(): SearchStatus {
 		{
 			tavily: engineKey("tavily") ?? undefined,
 			brave: engineKey("brave") ?? undefined,
+			ollama: engineKey("ollama") ?? undefined,
 		},
 	);
 	return { available, engine, reason };
@@ -183,7 +214,9 @@ export function searchProvider(): SearchProvider | null {
 	const resolved = resolveSearchEngineFor(effectiveSettings().agent.search?.engine, {
 		tavily: engineKey("tavily") ?? undefined,
 		brave: engineKey("brave") ?? undefined,
+		ollama: engineKey("ollama") ?? undefined,
 	});
 	if (!resolved.available || !resolved.key) return null;
-	return resolved.engine === "tavily" ? tavilyProvider(resolved.key) : braveProvider(resolved.key);
+	return resolved.engine === "tavily" ? tavilyProvider(resolved.key) :
+		resolved.engine === "brave" ? braveProvider(resolved.key) : ollamaProvider(resolved.key);
 }
