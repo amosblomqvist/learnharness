@@ -24,7 +24,7 @@
  *     would shadow every settings-page key change until restart.
  */
 
-const { app, BrowserWindow, Menu, ipcMain, session, shell, dialog } = require("electron");
+const { app, BrowserWindow, Menu, ipcMain, session, shell, dialog, safeStorage } = require("electron");
 const { createChatGPT, fileStore } = require("./chatgpt.cjs");
 const { attachChatGPTChild, trustedSender, chatGPTControl } = require("./chatgpt-ipc.cjs");
 const { createSubscriptions, loadSubscriptionSDK } = require("./subscriptions.cjs");
@@ -603,7 +603,7 @@ async function main() {
 			callback({ requestHeaders: desktopAPIHeaders(details, ownedOrigin, desktopAPISecret, [...trustedAppWindows]) });
 		});
 		chatgpt = createChatGPT({
-			store: fileStore(path.join(app.getPath("userData"), "chatgpt-credentials.json")),
+			store: fileStore(path.join(app.getPath("userData"), "chatgpt-credentials.json"), safeStorage),
 			openExternal: (target) => shell.openExternal(target),
 			onChange: (value) => {
 				chatgptChild?.send(value);
@@ -611,6 +611,7 @@ async function main() {
 			},
 		});
 		subscriptions = createSubscriptions({
+			safeStorage,
 			directory: app.getPath("userData"),
 			loadSDK: () => loadSubscriptionSDK(path.dirname(serverEntry())),
 			openExternal: (target) => shell.openExternal(target),

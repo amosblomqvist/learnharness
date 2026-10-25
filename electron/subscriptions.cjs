@@ -50,7 +50,7 @@ function createSubscriptions(options) {
 	let sdk;
 	let closed = false, paused = false;
 	const entries = new Map(PROVIDERS.map((providerId) => [providerId, {
-		providerId, state: { version: 1, allowBackgroundUse: true }, disk: options.stores?.[providerId] ?? fileStore(path.join(options.directory, `${providerId}-credentials.json`), providerId),
+		providerId, state: { version: 1, allowBackgroundUse: true }, disk: options.stores?.[providerId] ?? fileStore(path.join(options.directory, `${providerId}-credentials.json`), providerId, undefined, options.safeStorage),
 		epoch: 0, authorityRevision: 0, revision: 0, tail: Promise.resolve(), fatal: false, blocked: false, ready: false, error: undefined, authFailed: false, attempt: null, catalog: [], endpoint: null,
 	}]));
 	const entryFor = (id) => { const entry = entries.get(id); if (!entry) throw failure("unavailable"); return entry; };
@@ -87,6 +87,9 @@ function createSubscriptions(options) {
 		if (entry.endpoint !== endpoint) { entry.endpoint = endpoint; entry.authorityRevision++; }
 	}
 	function storageFailed(entry) { entry.fatal = true; entry.blocked = true; entry.epoch++; entry.error = MESSAGES.storage; changed(entry); }
+	function checkStorage(entry) {
+		try { entry.disk.secure?.(); } catch { storageFailed(entry); throw failure("storage"); }
+	}
 	async function save(entry, state) {
 		try { await entry.disk.write(state); } catch { storageFailed(entry); throw failure("storage"); }
 		entry.state = clone(state);
@@ -138,6 +141,7 @@ function createSubscriptions(options) {
 	async function login(providerId, enabled) {
 		await ready; const entry = entryFor(providerId);
 		if ((enabled !== undefined && typeof enabled !== "boolean") || entry.fatal || closed || paused || !entry.ready) throw failure("unavailable");
+		checkStorage(entry);
 		if ([...entries.values()].some((e) => e.attempt)) throw failure("interaction");
 		const abort = new AbortController();
 		const attempt = { id: randomUUID(), abort, committing: false, actions: new Map(), prompt: null, public: {} };
@@ -187,6 +191,7 @@ function createSubscriptions(options) {
 	function cancel(providerId) { const entry = entryFor(providerId); if (entry.attempt && !entry.attempt.committing) { entry.attempt.abort.abort(); entry.attempt = null; if (entry.authFailed && !entry.error) entry.error = MESSAGES.refresh; changed(entry); } }
 	async function resolveAuth(entry, modelId) {
 		if (entry.fatal || closed || paused || !entry.state.credential) throw failure("unavailable");
+		checkStorage(entry);
 		const connectionId = entry.state.connectionId, epoch = entry.epoch;
 		const unchanged = () => connectionId === entry.state.connectionId && epoch === entry.epoch && !entry.blocked && !closed && !paused;
 		try {

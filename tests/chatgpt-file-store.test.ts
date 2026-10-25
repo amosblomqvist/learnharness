@@ -5,7 +5,9 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 const require = createRequire(import.meta.url);
-const { createChatGPT, fileStore } = require("../electron/chatgpt.cjs");
+const { syntheticSafeStorage } = require("./fixtures/synthetic-safe-storage.cjs");
+const fileStore = (file: string) => rawFileStore(file, syntheticSafeStorage);
+const { createChatGPT, fileStore: rawFileStore } = require("../electron/chatgpt.cjs");
 const initial = () => ({ version: 1, hostId: "urn:uuid:scratch-host", activeId: null, registrations: [] });
 const account = (id: string, subject: string) => ({
 	id, clientId: `oaiapp_${id}`, issuer: "https://auth.openai.com", subject, email: `${subject}@example.invalid`,
@@ -15,7 +17,7 @@ function service(store: unknown) {
 	return createChatGPT({ store, openExternal: () => assert.fail("no browser sign-in expected"), fetch: () => assert.fail("no provider request expected") });
 }
 
-test("ordinary startup restores saved accounts and global OFF from JSON without OAuth or native storage", async () => {
+test("startup restores protected accounts and global OFF without OAuth", async () => {
 	const dir = await fs.mkdtemp(path.join(os.tmpdir(), "lh-chatgpt-restore-"));
 	const file = path.join(dir, "chatgpt-credentials.json");
 	const state = { ...initial(), activeId: "B", registrations: [account("A", "first"), account("B", "second")], allowBackgroundUse: false };
@@ -117,9 +119,10 @@ test("file read/write failures are sanitized and cannot leak credential or path 
 	} finally { await fs.rm(dir, { recursive: true, force: true }); }
 });
 
-test("desktop wiring uses only the private JSON path, with no Electron safeStorage dependency", async () => {
+test("desktop wiring supplies safeStorage without changing the private profile path", async () => {
 	const main = await fs.readFile(new URL("../electron/main.cjs", import.meta.url), "utf8");
 	const auth = await fs.readFile(new URL("../electron/chatgpt.cjs", import.meta.url), "utf8");
-	assert.match(main, /store: fileStore\(path\.join\(app\.getPath\("userData"\), "chatgpt-credentials\.json"\)\)/);
-	assert.doesNotMatch(main + auth, /safeStorage|encryptedStore|chatgpt-credentials\.enc\.json/);
+	assert.match(main, /store: fileStore\(path\.join\(app\.getPath\("userData"\), "chatgpt-credentials\.json"\), safeStorage\)/);
+	assert.match(main, /safeStorage/);
+	assert.match(auth, /protectedStore/);
 });

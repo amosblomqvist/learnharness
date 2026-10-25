@@ -7,7 +7,9 @@ import os from "node:os";
 import path from "node:path";
 import { exportJWK, generateKeyPair, SignJWT } from "jose";
 const require = createRequire(import.meta.url);
-const { createChatGPT, fileStore, allowedAuthEndpoint, SCOPES } = require("../electron/chatgpt.cjs");
+const { syntheticSafeStorage } = require("./fixtures/synthetic-safe-storage.cjs");
+const fileStore = (file: string) => rawFileStore(file, syntheticSafeStorage);
+const { createChatGPT, fileStore: rawFileStore, allowedAuthEndpoint, SCOPES } = require("../electron/chatgpt.cjs");
 const { privateKey, publicKey } = await generateKeyPair("RS256");
 const jwk = { ...await exportJWK(publicKey), kid: "scratch-key", alg: "RS256", use: "sig" };
 const tokenUrl = "https://auth.openai.com/api/accounts/oauth/token";
@@ -242,7 +244,7 @@ test("account catalog is scoped, visibility filtered, and cleared on disconnect"
 	} finally { f.service.close(); }
 });
 
-test("private JSON file round-trips global state; creation and atomic replacement are owner-only", async () => {
+test("protected file round-trips global state; creation and atomic replacement retain permissions", async () => {
 	const dir = await fs.mkdtemp(path.join(os.tmpdir(), "lh-chatgpt-storage-"));
 	const file = path.join(dir, "private", "chatgpt-credentials.json");
 	try {
@@ -250,13 +252,13 @@ test("private JSON file round-trips global state; creation and atomic replacemen
 		assert.equal(await store.read(), null);
 		const data = { ...initial(), allowBackgroundUse: false };
 		await store.write(data);
-		assert.deepEqual(JSON.parse(await fs.readFile(file, "utf8")), data, "ordinary JSON, not an encrypted envelope");
+		assert.equal(JSON.parse(await fs.readFile(file, "utf8")).format, "learnharness.safeStorage");
 		assert.deepEqual(await store.read(), data);
-		assert.equal((await fs.stat(path.dirname(file))).mode & 0o777, 0o700);
-		assert.equal((await fs.stat(file)).mode & 0o777, 0o600);
+		if (process.platform !== "win32") assert.equal((await fs.stat(path.dirname(file))).mode & 0o777, 0o700);
+		if (process.platform !== "win32") assert.equal((await fs.stat(file)).mode & 0o777, 0o600);
 		await fs.chmod(file, 0o644);
 		await store.write({ ...data, allowBackgroundUse: true });
-		assert.equal((await fs.stat(file)).mode & 0o777, 0o600, "replacement never inherits a permissive old mode");
+		if (process.platform !== "win32") assert.equal((await fs.stat(file)).mode & 0o777, 0o600, "replacement never inherits a permissive old mode");
 		assert.equal((await store.read()).allowBackgroundUse, true);
 		assert.deepEqual(await fs.readdir(path.dirname(file)), ["chatgpt-credentials.json"]);
 	} finally { await fs.rm(dir, { recursive: true, force: true }); }

@@ -4,8 +4,7 @@
 // This module is main-process-only; dependencies are injectable for scratch tests.
 const crypto = require("node:crypto");
 const http = require("node:http");
-const fs = require("node:fs/promises");
-const path = require("node:path");
+const { protectedStore } = require("./protected-store.cjs");
 
 const ISSUER = "https://auth.openai.com";
 const RESOURCE = "https://api.openai.com/v1";
@@ -50,42 +49,9 @@ function validateState(state) {
 	return state;
 }
 
-/** Private, unencrypted JSON outside learning data. No OS credential-store access. */
-function fileStore(file) {
-	return {
-		async read() {
-			try {
-				return validateState(JSON.parse(await fs.readFile(file, "utf8")));
-			} catch (err) {
-				if (err.code === "ENOENT") return null;
-				throw fail("storage");
-			}
-		},
-		async write(state) {
-			validateState(state);
-			const temp = `${file}.${crypto.randomUUID()}.tmp`;
-			let handle;
-			try {
-				await fs.mkdir(path.dirname(file), { recursive: true, mode: 0o700 });
-				handle = await fs.open(temp, "wx", 0o600);
-				await handle.writeFile(`${JSON.stringify(state)}\n`);
-				await handle.sync();
-				await handle.close();
-				handle = null;
-				await fs.rename(temp, file);
-				// Directory fsync is supported on Unix; the file fsync above is mandatory.
-				if (process.platform !== "win32") {
-					const dir = await fs.open(path.dirname(file), "r");
-					try { await dir.sync(); } finally { await dir.close(); }
-				}
-			} catch {
-				throw fail("storage");
-			} finally {
-				await handle?.close().catch(() => {});
-				await fs.unlink(temp).catch(() => {});
-			}
-		},
-	};
+/** Main-process OS-protected state; same-app plaintext conversion is atomic. */
+function fileStore(file, safeStorage) {
+	return protectedStore(file, { safeStorage, validate: validateState, kind: "chatgpt" });
 }
 
 function allowedAuthEndpoint(value) {
@@ -162,7 +128,7 @@ function createChatGPT({ store, openExternal, fetch: request = globalThis.fetch,
 				state = first;
 			}
 		})();
-		try { await init; } catch (err) { denyStorage(err); throw err; }
+		try { await init; store.secure?.(); } catch (err) { denyStorage(err); throw err; }
 	}
 	function denyStorage(err) {
 		if (!storageDenied) { storageDenied = true; lastError = publicError(err); stop(); }
@@ -352,6 +318,7 @@ function createChatGPT({ store, openExternal, fetch: request = globalThis.fetch,
 	function cancelLogin() { pending?.cancel(); return snapshot(); }
 
 	function authorized(background, expected, capturedEpoch) {
+		try { store.secure?.(); } catch (err) { denyStorage(err); throw err; }
 		const account = active();
 		if (!account || (capturedEpoch !== undefined && capturedEpoch !== epoch)) throw fail("disconnected");
 		if (!planScopes(account.tokens)) throw fail("scope");
