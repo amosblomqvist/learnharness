@@ -29,11 +29,21 @@
  *   manual check (always runs, whatever the Automatic updates toggle says).
  *
  *   window.lh.onOpenSettings(cb) — the menu's "Check for Updates…" asks
- *   the renderer to open Settings on a section ("general").
+ *   the renderer to open Settings on a section ("general"). Buffered
+ *   here: a reopened window gets the request at did-finish-load, before
+ *   React has subscribed, so the last unclaimed request is handed to the
+ *   first subscriber.
  *
  * Channel names are mirrored in electron/main.cjs — keep them in sync.
  */
 const { contextBridge, ipcRenderer } = require("electron");
+
+let openSettingsListener = null;
+let pendingOpenSettings = null;
+ipcRenderer.on("lh:open-settings", (_event, section) => {
+	if (openSettingsListener) openSettingsListener(section);
+	else pendingOpenSettings = section;
+});
 
 contextBridge.exposeInMainWorld("lh", {
 	platform: process.platform,
@@ -82,8 +92,14 @@ contextBridge.exposeInMainWorld("lh", {
 	getUpdateState: () => ipcRenderer.invoke("lh:update:get"),
 	checkForUpdates: () => ipcRenderer.invoke("lh:update:check"),
 	onOpenSettings: (cb) => {
-		const listener = (_event, section) => cb(section);
-		ipcRenderer.on("lh:open-settings", listener);
-		return () => ipcRenderer.removeListener("lh:open-settings", listener);
+		openSettingsListener = cb;
+		if (pendingOpenSettings !== null) {
+			const section = pendingOpenSettings;
+			pendingOpenSettings = null;
+			cb(section);
+		}
+		return () => {
+			if (openSettingsListener === cb) openSettingsListener = null;
+		};
 	},
 });

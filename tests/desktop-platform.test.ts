@@ -72,7 +72,7 @@ describe("desktop window chrome", () => {
 						bridge = api;
 					},
 				},
-				ipcRenderer: {},
+				ipcRenderer: { on() {} },
 			}),
 		};
 		runInNewContext(readFileSync(new URL("../electron/preload.cjs", import.meta.url), "utf8"), context);
@@ -81,6 +81,28 @@ describe("desktop window chrome", () => {
 			"chatgpt", "checkForUpdates", "expandWindow", "getUpdateState", "getZoom", "installUpdate", "onOpenSettings", "onUpdateStatus", "onZoom", "platform", "subscriptions",
 		]);
 		assert.deepEqual(Object.keys(bridge.subscriptions as object).sort(), ["cancel", "consent", "disconnect", "login", "onChange", "open", "respond", "retry", "status"]);
+	});
+
+	it("an open-settings request that lands before the renderer subscribes is handed over on subscribe", () => {
+		let bridge: { onOpenSettings: (cb: (section: string) => void) => () => void } | null = null;
+		const handlers = new Map<string, (event: unknown, arg: unknown) => void>();
+		const context = {
+			process: { platform: "darwin" },
+			require: () => ({
+				contextBridge: { exposeInMainWorld: (_: string, api: typeof bridge) => { bridge = api; } },
+				ipcRenderer: { on: (channel: string, fn: (event: unknown, arg: unknown) => void) => handlers.set(channel, fn) },
+			}),
+		};
+		runInNewContext(readFileSync(new URL("../electron/preload.cjs", import.meta.url), "utf8"), context);
+		handlers.get("lh:open-settings")!({}, "general"); // reopened window, React not mounted yet
+		const seen: string[] = [];
+		const off = bridge!.onOpenSettings((s) => seen.push(s));
+		assert.deepEqual(seen, ["general"], "the buffered request is delivered once");
+		handlers.get("lh:open-settings")!({}, "general");
+		assert.deepEqual(seen, ["general", "general"], "later requests go straight through");
+		off();
+		handlers.get("lh:open-settings")!({}, "general");
+		assert.equal(seen.length, 2, "unsubscribed listeners hear nothing");
 	});
 });
 

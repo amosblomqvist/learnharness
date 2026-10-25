@@ -141,6 +141,7 @@ let subscriptions = null;
 let subscriptionChild = null;
 // Per-launch request capability, never OAuth tokens and never renderer state.
 let desktopAPISecret = null;
+let reopenWindow = null; // set by main(): the Dock-click reopen, reused by the menu
 const trustedAppWindows = new Set();
 
 // A GUI shell must never die to a stray exception (EPIPE dialogs, a race
@@ -534,13 +535,18 @@ function setupAutoUpdater() {
 }
 
 /** Menu "Check for Updates…": the answer lives in Settings → General, so
- *  open it there and check — one surface for update state. */
+ *  open it there and check — one surface for update state. With every
+ *  window closed (macOS keeps the app in the Dock) a window opens first;
+ *  the preload holds the request until the renderer subscribes. */
 function checkForUpdatesFromMenu() {
-	const win = BrowserWindow.getAllWindows()[0];
-	if (win) {
-		if (win.isMinimized()) win.restore();
-		win.focus();
-		win.webContents.send("lh:open-settings", "general");
+	const open = BrowserWindow.getAllWindows()[0];
+	if (open) {
+		if (open.isMinimized()) open.restore();
+		open.focus();
+		open.webContents.send("lh:open-settings", "general");
+	} else {
+		const fresh = reopenWindow?.();
+		fresh?.webContents.once("did-finish-load", () => fresh.webContents.send("lh:open-settings", "general"));
 	}
 	checkForUpdates({ manual: true });
 }
@@ -712,8 +718,9 @@ async function main() {
 		const target = SIDEBAR_AUTOCLOSE;
 		if (width < target) win.setBounds({ x, y, width: target, height });
 	});
+	reopenWindow = () => { chatgpt?.resume(); subscriptions?.resume(); return createWindow(url); };
 	app.on("activate", () => {
-		if (BrowserWindow.getAllWindows().length === 0) { chatgpt?.resume(); subscriptions?.resume(); createWindow(url); }
+		if (BrowserWindow.getAllWindows().length === 0) reopenWindow();
 	});
 	createWindow(url);
 	log(`window open: ${url}`);
