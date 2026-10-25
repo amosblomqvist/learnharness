@@ -1,9 +1,14 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { contextWindow, sessionCost, turnCost, type ChatSettings, type TurnUsage } from "@/src/core";
-import { formatTokens, formatUsd, prettyModel } from "@/components/usage-format";
+import { subscriptionLabels, subscriptionLabel, type SessionPricing, type TurnUsage } from "@/src/core";
+import { formatTokens, formatUsd, planCostLabel, prettyModel } from "@/components/usage-format";
 import { ModelControl, catalogLimits, useModelCatalog } from "@/components/model-picker";
+
+export function formatContextMeasurement(tokens: number | null, limit: number | null): string {
+	const numerator = tokens === null ? "?" : formatTokens(tokens);
+	return limit === null ? numerator : `${numerator} / ${formatTokens(limit)}`;
+}
 
 /**
  * The below-composer stats bar (wave 4 observability): the session's
@@ -16,23 +21,23 @@ import { ModelControl, catalogLimits, useModelCatalog } from "@/components/model
  *  there died with the injection; a "— · —" summary over an empty
  *  popover is pure noise) — the dictation strip's middle simply widens.
  *
- * All folds come from core/prices.ts (sessionCost, contextWindow, turnCost)
- * — no cost math lives here. Absent data renders "—", never zero (the
- * doctrine): no turns yet → every figure is "—"; turns the price table
- * can't price count as unpriced, shown in the popover, never folded into
- * a fake $0. The RIGHT side is the model + thinking control (components/
- * model-picker.tsx): one controller for the conversation agents, backed by
- * pi-ai's catalog; the buttons show the EFFECTIVE model (the record's
- * settings, else config's pin), while the left-side figures still fold the
- * turn log's actual billed models.
+ * Spending arrives already priced by the server through Pi's catalog and
+ * calculator. Missing cost stays "—", never fake zero. Context is a separate
+ * completed-conversation measurement, never a money-log/summarizer fold or
+ * transcript estimate. Its catalog denominator follows the selected model;
+ * model changes preserve the numerator. Successful compaction clears it to ?.
  */
 export function StatsBar({
 	turns,
+	contextTokens = null,
+	pricing,
 	dictationSlot,
 	chatId,
 	leadingSlot,
 }: {
 	turns: TurnUsage[];
+	contextTokens?: number | null;
+	pricing?: SessionPricing;
 	/** The bound session (per-session models, owner 2026-09-28): present
 	 *  on the in-session bar — the model control binds THE SESSION'S own
 	 *  record; absent on the draft surfaces, where it binds the strong
@@ -49,6 +54,7 @@ export function StatsBar({
 	leadingSlot?: ReactNode;
 }) {
 	const [open, setOpen] = useState(false);
+	const [selectedModel, setSelectedModel] = useState<string | undefined>();
 	// Same dropdown discipline as the model control (owner, df4433f treatment,
 	// stats round 1): close on any pointerdown outside the bar or on Escape.
 	const barRef = useRef<HTMLDivElement>(null);
@@ -73,22 +79,18 @@ export function StatsBar({
 			document.removeEventListener("keydown", onKeyDown);
 		};
 	}, [open]);
-	// The live-limits join (context-meter amendment, owner 2026-09-23):
-	// contextWindow's denominator resolves ONLY from pi's live catalog —
-	// built client-side over the picker's cached /api/models fetch (the
-	// same fetch ModelControl below rides; module-level dedupe). Catalog
-	// pending or failed → undefined index → limit null → USAGE-ONLY (the
-	// honest-render precedent, never a fake window); the usage-only render
-	// IS the null path.
+	// Catalog-only denominator; the picker reports its effective selection.
+	// Missing/pending catalog means usage-only, never a hardcoded maximum.
 	const { catalog } = useModelCatalog();
 	const limits = useMemo(() => (catalog ? catalogLimits(catalog) : undefined), [catalog]);
-	const ctx = contextWindow({ turns }, limits);
-	const { cost, unpriced } = sessionCost({ turns });
+	const limit = selectedModel ? limits?.get(selectedModel) ?? null : null;
+	const contextLabel = formatContextMeasurement(contextTokens, limit);
+	const { cost = 0, unpriced = turns.length, subscription = 0 } = pricing ?? {};
 	// Honest cost: show dollars only when at least one turn priced;
 	// otherwise "—" (never a fake $0.0000).
-	const pricedCount = turns.length - unpriced;
-	const costLabel = pricedCount > 0 ? formatUsd(cost) : "—";
-	const lastModel = turns.at(-1)?.model;
+	const pricedCount = turns.length - unpriced - subscription;
+	const providers = pricing?.subscriptionProviders ?? subscriptionLabels(turns.map((turn) => turn.model));
+	const costLabel = planCostLabel(pricedCount > 0 ? cost : null, providers);
 
 	return (
 		<div
@@ -110,7 +112,7 @@ export function StatsBar({
 			{leadingSlot}
 			{/* The left side: the session-data summary — only once a session
 			    exists (turns). Pre-chat renders nothing (see the header). */}
-			{turns.length > 0 && (
+			{(chatId || turns.length > 0) && (
 			<div ref={barRef} className="relative">
 				{/* No tooltip — the numbers describe themselves and the popover
 			    speaks on click (owner, subtlety round 2026-09-25). */}
@@ -122,7 +124,7 @@ export function StatsBar({
 				className="flex items-center gap-1.5 tabular-nums transition-colors hover:text-foreground"
 			>
 				<span data-testid="stats-context">
-					{ctx ? (ctx.limit !== null ? `${formatTokens(ctx.usedTokens)} / ${formatTokens(ctx.limit)}` : formatTokens(ctx.usedTokens)) : "—"}
+					{contextLabel}
 				</span>
 				<span aria-hidden>·</span>
 				<span data-testid="stats-cost">{costLabel}</span>
@@ -139,13 +141,14 @@ export function StatsBar({
 							<div className="flex justify-between gap-2">
 								<span>Context (last call)</span>
 								<span className="tabular-nums text-card-foreground">
-									{ctx ? (ctx.limit !== null ? `${formatTokens(ctx.usedTokens)} / ${formatTokens(ctx.limit)}` : formatTokens(ctx.usedTokens)) : "—"}
+									{contextLabel}
 								</span>
 							</div>
 							<div className="flex justify-between gap-2">
-								<span>Total cost</span>
+								<span>{subscription ? "Usage" : "Total cost"}</span>
 								<span className="tabular-nums text-card-foreground">{costLabel}</span>
 							</div>
+							{providers.includes("ChatGPT") && <a href="https://chatgpt.com/settings/usage" target="_blank" rel="noreferrer" className="underline underline-offset-2">Manage ChatGPT usage</a>}
 							{unpriced > 0 && (
 								<div className="flex justify-between gap-2">
 									<span>Unpriced turns</span>
@@ -160,7 +163,7 @@ export function StatsBar({
 								</div>
 								<ul className="flex max-h-56 flex-col gap-1 overflow-y-auto">
 									{turns.map((turn, i) => {
-										const c = turnCost(turn);
+										const c = pricing?.turnCosts[turn.id] ?? null;
 										return (
 											<li key={`${turn.messageId}-${i}`} className="flex items-center justify-between gap-2">
 												<span className="truncate text-muted-foreground">
@@ -168,7 +171,7 @@ export function StatsBar({
 												</span>
 												<span className="flex shrink-0 items-center gap-2 tabular-nums text-card-foreground">
 													<span className="text-muted-foreground">{turn.steps.length} steps</span>
-													<span>{c === null ? "—" : formatUsd(c)}</span>
+													<span>{subscriptionLabel(turn.model) ?? (c === null ? "—" : formatUsd(c))}</span>
 												</span>
 											</li>
 										);
@@ -189,7 +192,7 @@ export function StatsBar({
 			{/* The model + thinking control — one controller for the conversation
 			    agents (prober/teacher); the record's `turns` above still folds
 			    the ACTUAL models billed, regardless of what the picker says. */}
-			<ModelControl chatId={chatId} />
+			<ModelControl chatId={chatId} onModelChange={setSelectedModel} />
 		</div>
 	);
 }

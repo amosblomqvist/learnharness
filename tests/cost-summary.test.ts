@@ -8,16 +8,17 @@
 import assert from "node:assert/strict";
 import { describe, it as test } from "node:test";
 import {
-	graphCostSummary,
+	graphCostSummary as foldGraphCostSummary,
 	type CostSummaryInput,
 	type GraphCostSummary,
 } from "../src/core/cost-summary.ts";
 import type { CallUsage, ExtractionRunUsage } from "../src/core/contracts.ts";
-import { PRICES, callCost } from "../src/core/prices.ts";
+import { callCost } from "../src/server/pricing.ts";
+const graphCostSummary = (input: CostSummaryInput) => foldGraphCostSummary(input, callCost);
 
 /** A model with full published pricing (from the generated registry). */
 const PRICED = "openrouter:z-ai/glm-5.3-flash";
-assert.ok(PRICES[PRICED], "fixture model must exist in PRICES");
+assert.notEqual(callCost({ inputTokens: 1, outputTokens: 1 }, PRICED), null);
 
 const step = (input: number, output: number): CallUsage => ({
 	inputTokens: input,

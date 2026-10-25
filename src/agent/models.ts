@@ -17,6 +17,11 @@ import {
 import { type ModelRole } from "../../config.ts";
 import { DEFAULT_THINKING_ORDER } from "../core/settings.ts";
 import packageMetadata from "../../package.json" with { type: "json" };
+import { chatGPTModel } from "./chatgpt-bridge.ts";
+import { chatGPTStream } from "./chatgpt-stream.ts";
+import type { ChatGPTDispatchLifecycle } from "./chatgpt-request-cycle.ts";
+import { nativeSubscriptionId, nativeSubscriptionModel } from "./subscription-bridge.ts";
+import { nativeSubscriptionStream } from "./subscription-stream.ts";
 
 /** App identity is immutable and shared by Models and every native Agent.
  * Agent's default Pi attribution otherwise overrides the Models identity. */
@@ -127,9 +132,10 @@ function defaultThinkingLevel(model: Model<Api>): ThinkingLevel {
  *  key is resolved by pi-ai itself from the environment per request (the
  *  keys seam reflects file-saved keys into env), so the engine never
  *  hardcodes OpenRouter's. */
-export function piEngineForSpec(spec: ResolvedModelSpec): PiEngine {
+export function piEngineForSpec(spec: ResolvedModelSpec, background: boolean | (() => boolean) = true, lifecycle?: ChatGPTDispatchLifecycle): PiEngine {
 	const models: Models = piModels();
-	const model = models.getModel(spec.provider, spec.id);
+	const nativeId = nativeSubscriptionId(spec.provider);
+	const model = spec.provider === "chatgpt" ? chatGPTModel(spec.id) : nativeId ? nativeSubscriptionModel(spec.provider, spec.id) : models.getModel(spec.provider, spec.id);
 	if (!model) {
 		throw new Error(`${spec.provider} catalog has no model ${spec.id}`);
 	}
@@ -145,11 +151,11 @@ export function piEngineForSpec(spec: ResolvedModelSpec): PiEngine {
 		// bound streamSimple: the agent loop forwards state.thinkingLevel as
 		// `reasoning` (undefined = off on pi-ai's scale); the clamp above keeps
 		// the pin honest even when config or settings drift off the map.
-		streamFn: (requestModel, context, options) =>
-			models.streamSimple(requestModel, context, {
-				...options,
-				reasoning: level === "off" ? undefined : level,
-			}),
+		streamFn: (requestModel, context, options) => {
+			const purpose = typeof background === "function" ? background : () => background;
+			const stream = spec.provider === "chatgpt" ? chatGPTStream(purpose, lifecycle) : nativeId ? nativeSubscriptionStream(models.getProvider(nativeId)!, purpose, lifecycle) : models.streamSimple.bind(models);
+			return stream(requestModel, context, { ...options, reasoning: level === "off" ? undefined : level });
+		},
 	};
 }
 

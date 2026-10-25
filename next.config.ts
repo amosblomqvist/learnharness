@@ -17,7 +17,8 @@ const nextConfig: NextConfig = {
 	// into the DMG (the packaged app never reads it: the shell passes
 	// LH_AUTH_FILE → userData). Excluded here; build-server.mjs also REFUSES
 	// to package any standalone still containing it. .env* belt-and-braces
-	// the same class (not observed swept, same seam).
+	// the same class. Next also copies loaded bare .env after tracing;
+	// the build-server refusal remains required even with these excludes.
 	//
 	// ⚠ EXCLUDE PATTERNS ARE LOAD-BEARING IN WAYS THE DOCS DON'T DESCRIBE
 	// (empirically established 2026-10-08): adding dir excludes like
@@ -26,8 +27,11 @@ const nextConfig: NextConfig = {
 	// under their dist/ — the traced copy collapsed to a bare package.json
 	// and the packaged server died on ERR_MODULE_NOT_FOUND; openai/
 	// @anthropic-ai — pi-ai's deps — vanished from the trace entirely).
-	// Anchored "./"-prefixed forms behave the same. Only the three entries
-	// below are verified safe (complete externals trace + clean payload).
+	// Anchored "./"-prefixed forms behave the same. **/data/**/* fixes
+	// suffix matching in Next's JavaScript collector, but NOT its native
+	// Turbopack tracer: that still prunes gcp-metadata and its private deps.
+	// Keep the narrow closure workaround below AND the native runtime gate.
+	// Real SDK data/ directories still need their explicit includes too.
 	// The recursive-DMG payload (repo dist/ swept into the bundle, shipping
 	// the previous build inside the next) is instead prevented by the
 	// desktop:dist clean step AND targeted post-trace curation in
@@ -37,7 +41,7 @@ const nextConfig: NextConfig = {
 	// stay intact, and the script guards against leaked data/keys.
 	outputFileTracingExcludes: {
 		"*": [
-			"data/**/*",
+			"**/data/**/*",
 			"auth.json",
 			".env*",
 		],
@@ -70,7 +74,20 @@ const nextConfig: NextConfig = {
 			// per-platform-binary story as the canvas above (one per build).
 			"node_modules/@resvg/resvg-js-*/**/*",
 			"node_modules/@earendil-works/pi-ai/dist/providers/data/**/*",
+			// Public native OAuth factories load these flows through variable imports.
+			// Electron main uses the same standalone SDK; the offline runtime gate
+			// evaluates their real toAuth paths without login or provider requests.
+			"node_modules/@earendil-works/pi-ai/dist/auth/oauth/{load,github-copilot,xai,device-code}.js",
+			"node_modules/@earendil-works/pi-ai/dist/utils/sleep.js",
 			"node_modules/@earendil-works/pi-agent-core/dist/**/*.json",
+			// Next 16.3.2 native Turbopack applies unanchored excludes while
+			// traversing modules; **/data/**/* still prunes gcp-metadata and
+			// its private runtime chain. Includes are applied after traversal.
+			// This is the verified GoogleAuth closure, not a general dep copy;
+			// the offline native Pi gate must catch future SDK closure changes.
+			"node_modules/gcp-metadata/**/*",
+			"node_modules/json-bigint/**/*",
+			"node_modules/bignumber.js/**/*",
 		],
 	},
 	// Framework-free core lives in src/ (plain TS, imported by routes and CLI alike).

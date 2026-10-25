@@ -63,5 +63,7 @@ jobs:
           NODE_ENV: test
           ELECTRON_RUN_AS_NODE: "1"
       - run: npm run build
+      # Check the fresh trace before any static copying/curation.
+      - run: node scripts/smoke-provider-runtime.mjs
       - run: node scripts/build-server.mjs
       - run: node scripts/smoke-server.mjs --electron

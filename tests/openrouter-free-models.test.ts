@@ -4,7 +4,7 @@ import { normalizeContext } from "@earendil-works/pi-ai";
 import { Type } from "typebox";
 import { piEngineForSpec, piModels } from "../src/agent/models.ts";
 import { modelCatalog, validateChatSettings, validateModelsSettings } from "../src/server/model-catalog.ts";
-import { callCost } from "../src/core/prices.ts";
+import { callCost } from "../src/server/pricing.ts";
 
 const specimens = [
 	{ id: "recursive/flint-v1.0:free", input: ["text"] },

@@ -49,6 +49,8 @@ Tool outputs may be error strings (e.g. search unconfigured, a page that failed 
 Adapt: try another URL or another search angle; if research is genuinely impossible, say so
 in the brief instead of inventing facts.
 
+If web_search reports that search is unavailable because credentials are missing, do not retry it with different queries. Use web_fetch when you have source URLs, and continue with any other available sources. If the missing search capability materially limits your work, state the limitation and the missing-key setup needed in your brief. Never invent search results or sources.
+
 Your FINAL assistant message is your entire deliverable — it must stand alone, using this format:
 
 ## Summary
@@ -70,8 +72,7 @@ export interface ResearcherRunOptions {
 	/** The search seam (search port wave, 2026-09-20): resolves the LIVE
 	 *  provider per call, null = honestly unavailable (the web_search tool
 	 *  reports that in its output — no crash, no silent fallback). Absent
-	 *  seam reads as unavailable: the server wiring always injects one; the
-	 *  dispatch-level drop (jobTools) keeps doomed jobs from even starting. */
+	 *  seam reads as unavailable; web_fetch remains usable without it. */
 	search?: () => SearchProvider | null;
 	/** The researcher's PDF dir (PDF wave, 2026-10-07): when present, the
 	 *  toolset gains web_fetch_pdf + pdf_info/pdf_extract/pdf_search scoped

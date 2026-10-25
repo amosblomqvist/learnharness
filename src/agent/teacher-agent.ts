@@ -18,7 +18,9 @@ import { practiceTools, type PracticeToolContext } from "./tools/practice.ts";
 import { healToolRecord } from "./tools/heal.ts";
 import { quizInputObject, quizInputProblems } from "../core/question-core.ts";
 import { QUESTION_TOOLS, type EnabledTools } from "../core/pending.ts";
-import { toLlmMessages } from "../core/native-messages.ts";
+import { toLlmMessages, nativeInputCause } from "../core/native-messages.ts";
+import type { ChatGPTRequestCycle } from "./chatgpt-request-cycle.ts";
+import { usageWasAdmitted } from "./subscription-request-cycle.ts";
 
 /**
  * The two teaching-side agents (docs/probe-teach-split.md): the PROBER and
@@ -97,6 +99,8 @@ export type StepUsageCollector = (usage: Usage) => void;
 export interface AgentBuildOptions {
 	/** Model + stream function — tests inject a scripted faux engine. */
 	engine?: PiEngine;
+	callPurpose?: { background: boolean };
+	requestCycle?: ChatGPTRequestCycle;
 	/** The initial transcript, as pi messages (the record IS agent state). */
 	messages?: AgentMessage[];
 	/** Money channel: one call per model request. */
@@ -178,6 +182,7 @@ function baseAgentOptions(kind: AgentKind, opts: AgentBuildOptions, tools: Agent
 	// LH_PROVIDER_EVENTS=1 and the caller handed a chatId; undefined is
 	// the normal no-observer path (tests, env-off).
 	const providerEvents = opts.chatId ? providerEventObserver(opts.chatId, kind) : undefined;
+	const seenInputs = new Set((opts.messages ?? []).map((m) => (m as { id?: string }).id).filter(Boolean));
 	const agent = new Agent({
 		identity: APP_IDENTITY,
 		sessionId: opts.chatId,
@@ -211,13 +216,31 @@ function baseAgentOptions(kind: AgentKind, opts: AgentBuildOptions, tools: Agent
 		// an abort's dangling question call gets its INTERRUPTED result. It
 		// must never throw (pi's convertToLlm contract).
 		convertToLlm: toLlmMessages,
+		prepareRequest: (request) => {
+			if (opts.callPurpose) {
+				let learner = false, automatic = false;
+				const messages = request.context.messages;
+				for (const message of messages) {
+					const id = (message as { id?: string }).id;
+					const cause = nativeInputCause(message, messages.slice(0, messages.indexOf(message)));
+					if (cause === "neutral") continue;
+					if (id && seenInputs.has(id)) continue;
+					if (id) seenInputs.add(id);
+					if (cause === "learner" && id) learner = true;
+					else automatic = true; // missing/unrecognized identity never grants foreground
+				}
+				if (automatic) opts.callPurpose.background = true;
+				else if (learner) opts.callPurpose.background = false;
+			}
+			opts.requestCycle?.prepare(request);
+		},
 	});
 	if (opts.onUsage) {
 		agent.subscribe((event: AgentEvent) => {
 			if (event.type === "message_end" && event.message.role === "assistant" && "usage" in event.message) {
 				// A cancelled call is not a billed step (partial/estimated
 				// usage on an aborted message is not money spent).
-				if (event.message.stopReason === "aborted") return;
+				if (event.message.stopReason === "aborted" || !usageWasAdmitted(event.message.usage) || (opts.requestCycle && !opts.requestCycle.acceptsUsage(event.message))) return;
 				opts.onUsage!(event.message.usage);
 			}
 		});

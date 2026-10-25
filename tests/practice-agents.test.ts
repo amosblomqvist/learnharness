@@ -208,14 +208,15 @@ describe("the practice agent", () => {
 		const jobs = { chatId: "c1", jobStore: null as never, spawn: (() => {}) as never, searchAvailable: () => false };
 		const graph = { chatStore: null as never, graphStore: null as never };
 		const tools = practiceTools({ ...ctxOf([]), jobs, graph });
-		// research honestly absent (no search engine live); pdf always; the
-		// prober's two map readers behind the settings gate.
+		// Both jobs remain available keylessly; the prober's two map
+		// readers stay behind their existing settings gate. Practice does
+		// not apply the teacher/prober user tool-toggle filter.
 		assert.deepEqual(
 			Object.keys(tools).sort(),
-			["conclude", "find", "grep", "list_propositions", "list_sessions", "ls", "pdf", "problem", "read"],
+			["conclude", "find", "grep", "list_propositions", "list_sessions", "ls", "pdf", "problem", "read", "research"],
 		);
 		const withSearch = practiceTools({ ...ctxOf([]), jobs: { ...jobs, searchAvailable: () => true }, graph });
-		assert.ok(withSearch.research, "a live engine adds research");
+		assert.ok(withSearch.research, "a live engine also keeps research");
 	});
 
 	it("constructs with exactly the two practice tools", () => {

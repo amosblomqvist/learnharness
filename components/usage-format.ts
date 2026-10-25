@@ -8,6 +8,11 @@ export function formatUsd(c: number): string {
 	return c >= 1 ? `$${c.toFixed(2)}` : `$${c.toFixed(4)}`;
 }
 
+export function planCostLabel(dollars: number | null, subscription: boolean | string | readonly string[] | undefined, format = formatUsd): string {
+	const labels = subscription === true ? ["ChatGPT"] : typeof subscription === "string" ? [subscription] : Array.isArray(subscription) ? [...new Set(subscription)] : [];
+	return [...(dollars === null ? [] : [format(dollars)]), ...labels].join(" + ") || "—";
+}
+
 /** 38000 → "38k", 1234567 → "1.2M" — trimmed, never "38.0k". */
 export function formatTokens(n: number): string {
 	if (n >= 1e6) return `${+(n / 1e6).toFixed(1)}M`;

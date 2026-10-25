@@ -20,6 +20,20 @@
 import { clampThinkingLevel, getSupportedThinkingLevels, type Api, type Model } from "@earendil-works/pi-ai";
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import { piModels } from "../agent/models.ts";
+import { chatGPTConnected, chatGPTModel, chatGPTModels, refreshChatGPTModels } from "../agent/chatgpt-bridge.ts";
+import { NATIVE_SUBSCRIPTIONS } from "../core/contracts/subscriptions.ts";
+import { nativeSubscriptionId, nativeSubscriptionConnected, nativeSubscriptionModel, nativeSubscriptionModels, refreshSubscriptionModels } from "../agent/subscription-bridge.ts";
+
+export async function refreshConnectionCatalog(provider?: string): Promise<void> {
+	await Promise.all([
+		!provider || provider === "chatgpt" ? refreshChatGPTModels(piModels().getModels("openai").filter((m): m is Model<"openai-responses"> => m.api === "openai-responses")) : Promise.resolve(),
+		!provider || nativeSubscriptionId(provider) ? refreshSubscriptionModels() : Promise.resolve(),
+	]);
+}
+function connectionModel(provider: string, id: string): Model<Api> | undefined {
+	return provider === "chatgpt" ? chatGPTModel(id) : nativeSubscriptionId(provider) ? nativeSubscriptionModel(provider, id) : piModels().getModel(provider, id);
+}
+function connectionProviderIds(): string[] { return [...piModels().getProviders().map((p) => p.id), "chatgpt", ...NATIVE_SUBSCRIPTIONS.map((p) => p.logicalId)]; }
 import { settingsStore } from "../store/settings.ts";
 import { effectiveSettings } from "./stores.ts";
 import { keyValue } from "./keys.ts";
@@ -125,7 +139,10 @@ export function catalogProviders(): CatalogProvider[] {
 		id: p.id,
 		envVar: p.envVar,
 		keyPresent: keyValue(p.envVar) !== undefined,
-	})).sort((a, b) => a.id.localeCompare(b.id));
+	})).concat([
+		{ id: "chatgpt", envVar: "", keyPresent: chatGPTConnected() },
+		...NATIVE_SUBSCRIPTIONS.map((p) => ({ id: p.logicalId, envVar: "", keyPresent: nativeSubscriptionConnected(p.providerId) })),
+	]).sort((a, b) => a.id.localeCompare(b.id));
 }
 
 /** The providers whose key is present — the picker federates exactly
@@ -171,6 +188,7 @@ export function catalogContextLimits(): Map<string, number> {
 			index.set(`${provider.id}:${model.id}`, model.contextWindow);
 		}
 	}
+	for (const model of [...chatGPTModels(), ...nativeSubscriptionModels()]) index.set(`${model.provider}:${model.id}`, model.contextWindow);
 	return index;
 }
 
@@ -185,7 +203,8 @@ export function modelCatalog(): ModelCatalogResponse {
 		.filter((p) => keyed.has(p.id))
 		.flatMap((p) => piModels().getModels(p.id))
 		.map(toModelDto)
-		.sort((a, b) => (a.provider === b.provider ? a.id.localeCompare(b.id) : a.provider.localeCompare(b.provider)));
+		.sort((a, b) => (a.provider === b.provider ? a.id.localeCompare(b.id) : a.provider.localeCompare(b.provider)))
+		.concat([...chatGPTModels(), ...nativeSubscriptionModels()].map(toModelDto));
 	return {
 		models,
 		defaults: catalogDefaults(),
@@ -207,13 +226,13 @@ export type SettingsValidation =
  *    the model the picker writes against (settings.model, else config's
  *    prober/teacher pin; one controller, so the two specs share it). */
 export function validateChatSettings(settings: ChatSettings): SettingsValidation {
-	const providers = piModels().getProviders().map((p) => p.id);
+	const providers = connectionProviderIds();
 	if (settings.model) {
 		const { provider, id } = settings.model;
 		if (!providers.includes(provider)) {
 			return { ok: false, error: `Unknown provider "${provider}" — configured: ${providers.join(", ")}` };
 		}
-		if (!piModels().getModel(provider, id)) {
+		if (!connectionModel(provider, id)) {
 			return { ok: false, error: `No model "${id}" in the ${provider} catalog` };
 		}
 	}
@@ -237,13 +256,13 @@ export function validateModelsSettings(settings: ModelsSettings): SettingsValida
 }
 
 function validateSlotSpec(name: ModelSlotName, slot: { model?: { provider: string; id: string }; thinkingLevel?: ThinkingLevel }): SettingsValidation {
-	const providers = piModels().getProviders().map((p) => p.id);
+	const providers = connectionProviderIds();
 	if (slot.model) {
 		const { provider, id } = slot.model;
 		if (!providers.includes(provider)) {
 			return { ok: false, error: `Unknown provider "${provider}" — configured: ${providers.join(", ")}` };
 		}
-		if (!piModels().getModel(provider, id)) {
+		if (!connectionModel(provider, id)) {
 			return { ok: false, error: `No model "${id}" in the ${provider} catalog` };
 		}
 	}
@@ -265,7 +284,7 @@ function validateSlotSpec(name: ModelSlotName, slot: { model?: { provider: strin
  *  or the level already supported — the existence gate rejects unknown
  *  models separately, so this only ever sees real ones in practice). */
 function clampLevelFor(provider: string, id: string, level: ThinkingLevel): ThinkingLevel {
-	const model = piModels().getModel(provider, id);
+	const model = connectionModel(provider, id);
 	return model ? clampThinkingLevel(model, level) : level;
 }
 

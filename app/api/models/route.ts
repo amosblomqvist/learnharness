@@ -1,4 +1,5 @@
 import { modelCatalog, refreshCommandCodeCatalog } from "@/src/server";
+import { modelCatalog, refreshConnectionCatalog } from "@/src/server";
 
 /**
  * The model picker's data (model-control wave): pi-ai's configured-provider
@@ -12,4 +13,6 @@ import { modelCatalog, refreshCommandCodeCatalog } from "@/src/server";
 export async function GET() {
 	refreshCommandCodeCatalog();
 	return Response.json(modelCatalog());
+	await refreshConnectionCatalog();
+	return Response.json(modelCatalog(), { headers: { "Cache-Control": "no-store" } });
 }

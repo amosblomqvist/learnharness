@@ -76,7 +76,8 @@ describe("SetupKeysBody — stage 1's self-contained first-key screen", () => {
 		const html = renderToStaticMarkup(
 			createElement(SetupKeysBody, { ...base, providers: PROVIDERS, provider: null }),
 		);
-		assert.match(html, /Add a provider key\./);
+		assert.ok(html.indexOf('data-testid="setup-key-provider"') < html.indexOf('data-testid="chatgpt-login"'), "API keys remain primary, ChatGPT is secondary");
+		assert.doesNotMatch(html, /chatgpt-privacy-notice|OpenAI privacy|Manage usage/);
 		assert.ok(html.includes("Choose your AI provider and paste its API key. You’ll pick your models next."));
 		assert.doesNotMatch(html, /First, add|keys unlock|—/);
 		assert.ok(html.includes('data-testid="setup-key-provider"'));

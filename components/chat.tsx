@@ -57,7 +57,7 @@ import { PracticeDock } from "@/components/practice-dock";
 import { ThinkingCard, type PracticeThinkingData } from "@/components/practice-cards";
 import { GraphContextCard, type GraphContextData } from "@/components/graph-context-card";
 import { TopBar } from "@/components/top-bar";
-import type { ArtifactPartProps, JobRecord, Phase3, QuestionAnswerData, TurnUsage } from "@/src/core";
+import type { ArtifactPartProps, JobRecord, Phase3, QuestionAnswerData, TurnUsage, SessionPricing } from "@/src/core";
 import type { LhViewMessage } from "@/src/core";
 import { PhaseChip, PhaseDivider } from "@/components/phase-divider";
 import {
@@ -236,7 +236,7 @@ export function Chat({
 	// (core/view.ts projectView); sends are ONE explicit input event each
 	// ({chatId, input} — the stash indirection died with the SDK), and the
 	// turn stream is the VERBATIM AgentEvent passthrough the server emits.
-	const { messages, nativeMessages, send, steer, steerQueue, submitAnswer, dismissQuestion, dismissProblem, setMessages, adoptRecord, status, error, stop, clearError, resumeStream, setReattachSettled } =
+	const { messages, nativeMessages, contextTokens, send, steer, steerQueue, submitAnswer, dismissQuestion, dismissProblem, setMessages, adoptRecord, status, error, stop, clearError, resumeStream, setReattachSettled } =
 		useChatSession({ chatId, initialMessages, initiallyInFlight });
 
 	const sessionFindScopeRef = useRef<HTMLDivElement | null>(null);
@@ -717,8 +717,9 @@ export function Chat({
 	const syncFromServer = useCallback(async () => {
 		const res = await fetch(`/api/chats/${chatId}`);
 		if (!res.ok) return;
-		const record = (await res.json()) as { messages?: LhMessage[]; turns?: TurnUsage[] };
+		const record = (await res.json()) as { messages?: LhMessage[]; turns?: TurnUsage[]; pricing?: SessionPricing };
 		if (Array.isArray(record.turns)) setTurns(record.turns);
+		setPricing(record.pricing);
 		if (!Array.isArray(record.messages)) return;
 		setMessages(record.messages);
 		// The continuation seam (contracts.ts protocol §4): a job result
@@ -845,12 +846,13 @@ export function Chat({
 	const planTree = useMemo(() => latestTree(messages), [messages]);
 
 	// ── Session usage (wave-4 stats bar) ──
-	// The money channel: the record's turns log, folded client-side by
-	// core/prices.ts. Seeded once on mount (the page doesn't carry turns),
+	// The money channel: the record's turns log and read-time server Pi
+	// pricing projection. Seeded once on mount (the page doesn't carry turns),
 	// refreshed when the local stream settles (each turn appends to the log
 	// server-side), and kept fresh by syncFromServer whenever it already
 	// fetches the record. No turns yet → the bar renders "—" everywhere.
 	const [turns, setTurns] = useState<TurnUsage[]>([]);
+	const [pricing, setPricing] = useState<SessionPricing | undefined>();
 	// The per-chat model control state (model-picker writes via PUT; the
 	// record is the source of truth, lifted here so the stats bar re-renders).
 	// The dock's reserved tail height (DockOverlay reports it; the spacer at
@@ -864,8 +866,9 @@ export function Chat({
 		try {
 			const res = await fetch(`/api/chats/${chatId}`);
 			if (!res.ok) return;
-			const record = (await res.json()) as { turns?: TurnUsage[] };
+			const record = (await res.json()) as { turns?: TurnUsage[]; pricing?: SessionPricing };
 			if (Array.isArray(record.turns)) setTurns(record.turns);
+			setPricing(record.pricing);
 		} catch {
 			// transient blip: stats stay on the last known figures
 		}
@@ -1604,6 +1607,8 @@ export function Chat({
 					onReadingThinking={applyReadingThinking}
 					phase={phases.at(-1) ?? "probe"}
 					turns={turns}
+					contextTokens={contextTokens}
+					pricing={pricing}
 					onReserve={setDockReserve}
 					dictationSlot={<DictationBar dictation={dictation} />}
 					dictationCancel={dictation.cancel}
@@ -1824,6 +1829,8 @@ function DockOverlay({
 	onReadingThinking,
 	phase,
 	turns,
+	contextTokens,
+	pricing,
 	composer,
 	onSubmitAnswer,
 	chatId,
@@ -1855,6 +1862,8 @@ function DockOverlay({
 	phase: Phase3;
 	/** The session's usage log — the stats bar beneath the composer folds it. */
 	turns: TurnUsage[];
+	contextTokens: number | null;
+	pricing?: SessionPricing;
 	composer: React.ReactNode;
 	onSubmitAnswer: (output: QuestionAnswerData) => void;
 	/** The model control's pass-through (the stats bar hosts it). */
@@ -2327,6 +2336,8 @@ function DockOverlay({
 					    morphing shell so it never joins a height animation. */}
 					<StatsBar
 						turns={turns}
+						contextTokens={contextTokens}
+						pricing={pricing}
 						dictationSlot={dictationSlot}
 						chatId={chatId}
 					/>

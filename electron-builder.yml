@@ -81,7 +81,12 @@ files:
   - node_modules/universalify/**/*
   - node_modules/ms/**/*
   - node_modules/argparse/**/*
+  # Main-process ID-token signature verification (no bundled OAuth implementation).
+  - node_modules/jose/**/*
 extraResources:
+  # Attribution/license for the bounded local Pi cutoff-selector port.
+  - from: docs/compaction-accounting.md
+    to: licenses/pi-compaction.md
   # Copy from the PARENT dir (.next), not .next/standalone itself:
   # electron-builder hard-excludes a copy's root node_modules and the
   # default no-filter pattern is a literal path match (empirically both
@@ -95,6 +100,11 @@ extraResources:
     filter:
       - "standalone/**/*"
 mac:
+  # The backend's --require runs before Next loads. Keep this resource
+  # outside app.asar so early Node-mode loading needs no ASAR support.
+  extraResources:
+    - from: electron/server-title-guard.cjs
+      to: server-title-guard.cjs
   icon: build/icon.icon
   # zip rides next to dmg (flipped 2026-10-08): Squirrel.Mac — Electron's
   # macOS auto-updater — installs from ZIP and cannot read DMGs. DMG is

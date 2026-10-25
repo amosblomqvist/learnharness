@@ -1,7 +1,8 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { StatsBar } from "../components/stats-bar.tsx";
+import { StatsBar, formatContextMeasurement } from "../components/stats-bar.tsx";
+import { sessionCost } from "../src/server/pricing.ts";
 import { catalogLimits } from "../components/model-picker.tsx";
 import type { ModelCatalogEntry, ModelCatalogResponse } from "../src/core/contracts.ts";
 import { prettyModel } from "../components/usage-format.ts";
@@ -50,7 +51,7 @@ describe("stats bar", () => {
 
 	it("folds context + cost from the turns log (core/prices, no local math)", () => {
 		const html = renderToStaticMarkup(
-			<StatsBar turns={[turn(), turn()]} />,
+			<StatsBar turns={[turn(), turn()]} contextTokens={11_000} pricing={sessionCost({ turns: [turn(), turn()] })} />,
 		);
 		// last turn's last call: 10k in + 1k out = 11k. The LIMIT is the
 		// live catalog's — and the bar doesn't hold the index yet (the
@@ -68,13 +69,24 @@ describe("stats bar", () => {
 
 	it("shows — for cost when every turn is unpriceable, never a fake $0", () => {
 		const html = renderToStaticMarkup(
-			<StatsBar turns={[turn({ model: "nope/unknown" })]} />,
+			<StatsBar turns={[turn({ model: "nope/unknown" })]} contextTokens={11_000} pricing={sessionCost({ turns: [turn({ model: "nope/unknown" })] })} />,
 		);
 		assert.match(html, /data-testid="stats-cost">—</);
 		// unknown model: no catalog limit exists, but the footprint is
 		// still an honest reading — usage-only (never "—" theater over
 		// real data, never a fake window)
 		assert.match(html, /data-testid="stats-context">11k</);
+	});
+
+	it("unknown context is explicit; changing the selected limit preserves the measurement", () => {
+		assert.equal(formatContextMeasurement(null, 100_000), "? / 100k");
+		assert.equal(formatContextMeasurement(83_000, 100_000), "83k / 100k");
+		assert.equal(formatContextMeasurement(83_000, 200_000), "83k / 200k");
+		assert.equal(formatContextMeasurement(83_000, null), "83k");
+		const html = renderToStaticMarkup(<StatsBar chatId="fixture" turns={[turn()]} contextTokens={null} />);
+		assert.match(html, /data-testid="stats-context">\?</);
+		const empty = renderToStaticMarkup(<StatsBar chatId="fixture" turns={[]} />);
+		assert.match(empty, /data-testid="stats-context">\?</);
 	});
 
 	it("prettyModel strips vendor + date suffix, keeps dashes", () => {

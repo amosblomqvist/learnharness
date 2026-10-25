@@ -43,7 +43,7 @@ export interface JobRecord {
  * money-channel doctrine; cost renders "—", never $0). */
 export interface JobUsage {
 	/** The model that ran the sub-agent, provider-qualified ("provider:id" —
-	 *  model slots wave, 2026-09-20; matches PRICES' uniform keys). */
+	 *  model slots wave, 2026-09-20; matches Pi catalog lookup keys). */
 	model: string;
 	/** Running totals summed over the run's model calls so far. */
 	inputTokens: number | undefined;
@@ -51,6 +51,10 @@ export interface JobUsage {
 	cacheReadTokens: number | undefined;
 	cacheWriteTokens: number | undefined;
 	reasoningTokens: number | undefined;
+	cacheWrite1hTokens?: number;
+	/** Individual calls for current-catalog per-call tier pricing. Absent on
+	 * older jobs; never backfill them from cumulative totals. */
+	calls?: CallUsage[];
 	/** How many model calls the run has made (each bills separately). */
 	steps: number;
 	/** The MOST RECENT model call's accounting (2026-09 dock contract): the
@@ -67,7 +71,7 @@ export interface JobUsage {
  * object with these fields folds, including the real thing and test fakes). */
 export interface UsageStepLike {
 	inputTokens?: number | undefined;
-	inputTokenDetails?: { cacheReadTokens?: number; cacheWriteTokens?: number } | undefined;
+	inputTokenDetails?: { cacheReadTokens?: number; cacheWriteTokens?: number; cacheWrite1hTokens?: number } | undefined;
 	outputTokens?: number | undefined;
 	outputTokenDetails?: { reasoningTokens?: number } | undefined;
 }
@@ -80,12 +84,13 @@ export function piUsageToStep(usage: {
 	output: number;
 	cacheRead: number;
 	cacheWrite: number;
+	cacheWrite1h?: number;
 	reasoning?: number;
 }): UsageStepLike {
 	return {
 		inputTokens: usage.input,
 		outputTokens: usage.output,
-		inputTokenDetails: { cacheReadTokens: usage.cacheRead, cacheWriteTokens: usage.cacheWrite },
+		inputTokenDetails: { cacheReadTokens: usage.cacheRead, cacheWriteTokens: usage.cacheWrite, cacheWrite1hTokens: usage.cacheWrite1h ?? 0 },
 		outputTokenDetails: usage.reasoning !== undefined ? { reasoningTokens: usage.reasoning } : undefined,
 	};
 }
@@ -101,6 +106,14 @@ export function accumulateJobUsage(
 ): JobUsage {
 	const add = (a: number | undefined, b: number | undefined): number | undefined =>
 		a === undefined && b === undefined ? undefined : (a ?? 0) + (b ?? 0);
+	const call: CallUsage = {
+		inputTokens: step.inputTokens,
+		outputTokens: step.outputTokens,
+		cacheReadTokens: step.inputTokenDetails?.cacheReadTokens,
+		cacheWriteTokens: step.inputTokenDetails?.cacheWriteTokens,
+		cacheWrite1hTokens: step.inputTokenDetails?.cacheWrite1hTokens,
+		reasoningTokens: step.outputTokenDetails?.reasoningTokens,
+	};
 	return {
 		model,
 		inputTokens: add(total?.inputTokens, step.inputTokens),
@@ -108,14 +121,12 @@ export function accumulateJobUsage(
 		cacheReadTokens: add(total?.cacheReadTokens, step.inputTokenDetails?.cacheReadTokens),
 		cacheWriteTokens: add(total?.cacheWriteTokens, step.inputTokenDetails?.cacheWriteTokens),
 		reasoningTokens: add(total?.reasoningTokens, step.outputTokenDetails?.reasoningTokens),
+		cacheWrite1hTokens: ((total?.cacheWriteTokens ?? 0) > 0 && total?.cacheWrite1hTokens === undefined) ||
+			((call.cacheWriteTokens ?? 0) > 0 && call.cacheWrite1hTokens === undefined)
+			? undefined : add(total?.cacheWrite1hTokens, call.cacheWrite1hTokens),
 		steps: (total?.steps ?? 0) + 1,
-		lastStep: {
-			inputTokens: step.inputTokens,
-			outputTokens: step.outputTokens,
-			cacheReadTokens: step.inputTokenDetails?.cacheReadTokens,
-			cacheWriteTokens: step.inputTokenDetails?.cacheWriteTokens,
-			reasoningTokens: step.outputTokenDetails?.reasoningTokens,
-		},
+		...(!total || total.calls ? { calls: [...(total?.calls ?? []), call] } : {}),
+		lastStep: call,
 	};
 }
 
