@@ -140,9 +140,15 @@ export function pendingQuestionCount(messages: UIMessage[]): number {
 	return n;
 }
 
-/** The ask box between the reading notes and a closed teach check. */
-export function askBeforeCheckVisible(revealPending: boolean, openQuestions: number): boolean {
-	return revealPending && openQuestions === 1;
+/** The ask box above the only open teach question. A check shows it while
+ *  the check is still closed. A prediction shows it whether the dock is
+ *  open or folded. */
+export function askBeforeCheckVisible(
+	revealPending: boolean,
+	predictionPending: boolean,
+	openQuestions: number,
+): boolean {
+	return openQuestions === 1 && (revealPending || predictionPending);
 }
 
 // ─── Turn activity label (2026-09-19, the “Writing a question…” fix) ──────

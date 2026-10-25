@@ -101,6 +101,16 @@ describe("messageMarkdown", () => {
 		assert.ok(!md.includes("incorrectly"));
 	});
 
+	it("a prediction he asked before is not a skip or a grade", () => {
+		const md = sessionMarkdown([
+			callMsg("a1", "q1", "quiz", { question: "Which form?", type: "predict", nodeId: "n1" }),
+			result("r1", "q1", "quiz", { questionText: "Which form?", notYet: true, dontKnow: false }),
+		])!;
+		assert.match(md, /The learner asked something before taking this prediction\./);
+		assert.ok(!md.includes("skipped"));
+		assert.ok(!md.includes("incorrectly"));
+	});
+
 	it("explain results: the learner's own words are shown", () => {
 		const md = messageMarkdown(
 			result("r1", "e1", "explain", { questionText: "Why does Mercury stay near the Sun?", text: "it never strays far" }),

@@ -25,7 +25,7 @@
  * turn rides one composition.
  */
 
-import { notYetAnswer, questionNeedsReveal, type QuestionAnswerData } from "./question-core.ts";
+import { notYetAnswer, questionAllowsAskBefore, type QuestionAnswerData } from "./question-core.ts";
 import { phaseAt3Lh } from "./phases.ts";
 import type { LhMessage } from "./native-messages.ts";
 import {
@@ -58,9 +58,10 @@ export type ChatInput =
 	 *  only with nothing active (mid-problem input rides the dock). */
 	| { type: "next" }
 	/** The learner asks about the teaching while a teach-phase check sits
-	 *  closed. Closes that one call as notYet, then appends his message —
-	 *  the result stays adjacent to the call. Refused when it is not the
-	 *  only open question. */
+	 *  closed, or while a prediction owns the dock. Closes that one call as
+	 *  notYet, then appends his message — the result stays adjacent to the
+	 *  call. Refused when it is not the only open question, or when the
+	 *  call is not a teach-phase quiz or explain. */
 	| { type: "ask-before-check"; toolCallId: string; text: string };
 
 /** A wake-pipeline steer delivery — same turn composition, server-origin.
@@ -253,8 +254,8 @@ export function inputAppends(
 			if (danglingQuestionCount(record.messages) !== 1) {
 				throw new ChatInputError("ask-before-check requires the only open question");
 			}
-			if (!questionNeedsReveal(pending.tool, pending.input, phaseAt3Lh(record.messages))) {
-				throw new ChatInputError("ask-before-check is only for a teach-phase check");
+			if (!questionAllowsAskBefore(pending.tool, phaseAt3Lh(record.messages))) {
+				throw new ChatInputError("ask-before-check is only for a teach-phase question");
 			}
 			const raw = pending.input as { question?: unknown } | null;
 			const question = typeof raw?.question === "string" ? raw.question : "";

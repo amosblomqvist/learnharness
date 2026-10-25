@@ -287,8 +287,9 @@ export async function handleChatInput(
 	// the sibling question permanently pre-fix). Nothing else can generate
 	// while a question dangles (job wakes wait, continuation folds refuse,
 	// the composer gates). ask-before-check is the exception that closes
-	// the one open call as notYet before the user message; inputAppends
-	// refuses it when a sibling would still dangle, so adjacency holds.
+	// the one open call as notYet before the user message — a closed
+	// check or a prediction. inputAppends refuses it when a sibling would
+	// still dangle, so adjacency holds.
 	if (input.type === "answer" && danglingQuestionOf([...record.messages, ...appends]) !== null) {
 		const merged = [...record.messages, ...appends];
 		stores.chatStore.saveMessages(chatId, merged);

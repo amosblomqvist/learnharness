@@ -1,8 +1,8 @@
 /**
- * Ask before the check: while a teach-phase check is the only open
- * question, the learner's message closes it as notYet and follows the
- * result. A sibling, a probe question, or a prediction is refused — a
- * user message must not land ahead of an unanswered call.
+ * Ask before the question: while a teach-phase check or a prediction is
+ * the only open question, the learner's message closes it as notYet and
+ * follows the result. A sibling, a probe question, or ask_user_question
+ * is refused — a user message must not land ahead of an unanswered call.
  */
 
 import assert from "node:assert/strict";
@@ -76,22 +76,49 @@ describe("ask-before-check appends", () => {
 		assert.equal(danglingQuestionCount([...teachCheck(), ...appends]), 0);
 	});
 
-	it("refuses a sibling, a probe question, and a prediction", () => {
+	it("closes a prediction, then appends his message", () => {
+		const appends = inputAppends(
+			{ messages: teachCheck([{ id: "c1", arguments: { question: "Guess?", type: "predict", nodeId: "n1" } }]) },
+			{ type: "ask-before-check", toolCallId: "c1", text: "why those three?" },
+		);
+		assert.equal(appends.length, 2);
+		const result = appends[0] as { role: string; toolCallId: string; content: { text: string }[] };
+		assert.equal(result.role, "toolResult");
+		assert.equal(result.toolCallId, "c1");
+		assert.deepEqual(JSON.parse(result.content[0]!.text), { kind: "quiz", notYet: true });
+		assert.equal((appends[1] as { role: string; content: string }).content, "why those three?");
+		assert.equal(danglingQuestionCount([...teachCheck([{ id: "c1", arguments: { question: "Guess?", type: "predict", nodeId: "n1" } }]), ...appends]), 0);
+	});
+
+	it("closes an explain prediction the same way", () => {
+		const appends = inputAppends(
+			{
+				messages: teachCheck([
+					{ id: "c1", name: "explain", arguments: { question: "What gives?", type: "predict", nodeId: "n1" } },
+				]),
+			},
+			{ type: "ask-before-check", toolCallId: "c1", text: "before I guess" },
+		);
+		const result = appends[0] as { content: { text: string }[] };
+		assert.deepEqual(JSON.parse(result.content[0]!.text), { kind: "explain", notYet: true });
+	});
+
+	it("refuses a sibling, a probe question, and ask_user_question", () => {
 		assert.throws(
 			() => inputAppends({ messages: teachCheck([{ id: "c1" }, { id: "c2" }]) }, { type: "ask-before-check", toolCallId: "c1", text: "huh?" }),
 			/only open question/,
 		);
 		assert.throws(
 			() => inputAppends({ messages: [assistant("a", [{ id: "c1", name: "quiz", arguments: { question: "Q?" } }])] }, { type: "ask-before-check", toolCallId: "c1", text: "huh?" }),
-			/teach-phase check/,
+			/teach-phase question/,
 		);
 		assert.throws(
 			() =>
 				inputAppends(
-					{ messages: teachCheck([{ id: "c1", arguments: { question: "Guess?", type: "predict", nodeId: "n1" } }]) },
+					{ messages: teachCheck([{ id: "c1", name: "ask_user_question", arguments: { question: "Which way?" } }]) },
 					{ type: "ask-before-check", toolCallId: "c1", text: "huh?" },
 				),
-			/teach-phase check/,
+			/teach-phase question/,
 		);
 		assert.throws(
 			() => inputAppends({ messages: [] }, { type: "ask-before-check", toolCallId: "c1", text: "huh?" }),
@@ -102,10 +129,12 @@ describe("ask-before-check appends", () => {
 });
 
 describe("ask composer gate", () => {
-	it("shows only while one check is still closed", () => {
-		assert.equal(askBeforeCheckVisible(true, 1), true);
-		assert.equal(askBeforeCheckVisible(false, 1), false);
-		assert.equal(askBeforeCheckVisible(true, 2), false);
+	it("shows for one closed check or one prediction", () => {
+		assert.equal(askBeforeCheckVisible(true, false, 1), true);
+		assert.equal(askBeforeCheckVisible(false, true, 1), true);
+		assert.equal(askBeforeCheckVisible(false, false, 1), false);
+		assert.equal(askBeforeCheckVisible(true, false, 2), false);
+		assert.equal(askBeforeCheckVisible(false, true, 2), false);
 		const view = projectView(teachCheck());
 		assert.equal(pendingQuestionCount(view), 1);
 		const two = projectView(teachCheck([{ id: "c1" }, { id: "c2" }]));
