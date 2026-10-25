@@ -38,6 +38,52 @@ function windowOptions(platform: string) {
 	return JSON.parse(JSON.stringify(win.options));
 }
 
+describe("desktop ChatGPT transport", () => {
+	it("uses the Electron session without cookies and preserves request controls", async () => {
+		let transport: typeof fetch | undefined;
+		const configured = new Error("ChatGPT configured");
+		const requests: { input: unknown; init: RequestInit }[] = [];
+		const response = Response.json({ ok: true });
+		const failure = new Error("proxy connection failed");
+		const defaultSession = {
+			webRequest: { onBeforeSendHeaders() {} },
+			async fetch(input: unknown, init: RequestInit) {
+				assert.equal(this, defaultSession);
+				requests.push({ input, init });
+				if (init.signal?.aborted) throw init.signal.reason;
+				if (requests.length > 1) throw failure;
+				return response;
+			},
+		};
+		const context = {
+			require: (id: string) => id === "electron" ? {
+				app: { setName() {}, requestSingleInstanceLock: () => false, quit() {}, on() {}, whenReady: async () => {}, getPath: () => "/fixture/user-data" },
+				session: { defaultSession },
+			} : id === "./chatgpt.cjs" ? {
+				...mainRequire(id),
+				createChatGPT(options: { fetch?: typeof fetch }) { transport = options.fetch; throw configured; },
+			} : mainRequire(id),
+			process: { platform: "win32", argv: [], env: {}, on() {} },
+			__dirname: dirname(mainFile), URL,
+		};
+		runInNewContext(mainSource, context, { filename: mainFile });
+		runInNewContext("freePort = async () => 9000", context);
+		await assert.rejects(runInNewContext("main()", context), (error) => error === configured);
+		assert.equal(typeof transport, "function", "ChatGPT must use the system-proxy-aware Electron session");
+		const signal = new AbortController().signal;
+		const input = "https://auth.openai.com/api/accounts/oauth/token";
+		const init: RequestInit = { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" }, body: new URLSearchParams({ code: "scratch-code" }), redirect: "error", signal };
+		assert.equal(await transport!(input, init), response);
+		const request = requests[0]!;
+		assert.equal(request.input, input);
+		for (const key of ["method", "headers", "body", "redirect", "signal"] as const) assert.equal(request.init[key], init[key]);
+		assert.equal(request.init.credentials, "omit");
+		await assert.rejects(transport!(input, init), (error) => error === failure);
+		const aborted = AbortSignal.abort(new Error("cancelled"));
+		await assert.rejects(transport!(input, { ...init, signal: aborted }), (error) => error === aborted.reason);
+	});
+});
+
 describe("desktop window chrome", () => {
 	it("macOS keeps the proven traffic lights and does not enable WCO", () => {
 		const options = windowOptions("darwin");
