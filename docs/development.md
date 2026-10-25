@@ -42,7 +42,7 @@ Secrets and machine-specific paths only. Model choice and thinking budgets are t
 |---|---|
 | `OPENROUTER_API_KEY` | required — all LLM calls go through OpenRouter |
 | `GOOGLE_SEARCH_API_KEY` + `GOOGLE_CSE_ID` | researcher's `web_search` (Google Custom Search) |
-| `DEEPGRAM_API_KEY` | optional — dictation (STT token minting; audio streams browser→Deepgram, never through the server) |
+| `DEEPGRAM_API_KEY` | optional — cloud dictation (STT token minting; audio streams browser→Deepgram, never through the server). Local dictation models need no key |
 | `CHROME_PATH` | optional system Chrome fallback for demo verification; the app's own browser helper is primary (nothing is downloaded) |
 
 The packaged desktop app takes keys from `userData/auth.json` (BYOK, mode 0600, read/written directly by the server via `LH_AUTH_FILE`). PDFs render natively with pdfjs/Skia; SVGs use resvg.
@@ -101,7 +101,7 @@ flowchart TB
 ## Layout
 
 ```
-app/                            Next.js App Router — pages + 16 thin API route handlers
+app/                            Next.js App Router — pages + 34 thin API route handlers
 components/                     session + home UI, question dock, plan panel, graph
                                 canvas + view, artifact renderers (registry: artifacts/),
                                 dictation, activity dock, keyboard machine
@@ -139,14 +139,16 @@ src/
                                 prices, tool-parts — all pure: storage
                                 arrives as parameters
   store/                        fs adapters implementing the ports: chats · graph
-                                ledgers · jobs (+ render-settings, default-settings)
+                                ledgers · jobs · dictation (+ render-settings,
+                                default-settings)
 electron/                       desktop launcher + security guard (spawns the standalone
                                 server; 1 IPC channel; LH_DATA_DIR + BYOK env)
 scripts/                        build-server.mjs (packaging guards), import-notes,
                                 backfill-graph, replay-layout
 data/                           chats/ · graph/ (nodes/chains/sessions/coverage
                                 ledgers + positions/sources/render-settings maps) ·
-                                jobs/ · settings.json — runtime state, git-ignored
+                                jobs/ · dictation/ (models, ONNX runtime, state.json) ·
+                                settings.json — runtime state, git-ignored
 ```
 
 ## Key mechanisms
@@ -165,7 +167,7 @@ pricing-generation step: Pi AI's catalog and public calculator are the authority
 
 **Practice (problem sets).** A node selection resolves to the STORED reasoning chains it fully contains (a chain rides iff every member is selected; unchained nodes ride as singletons); the `/practice` creation dialog picks a birth-session cluster (the graph view's own groups) and freezes its propositions + chains into a self-contained `ProblemSet`. Three named-level axes steer generation (ladder rung 0–4, cue distance 0–2, Theory|Application — never a number to interpolate; defaults Direct exercise · Adjacent context · Theory), plus an optional free-form note the agents weigh but need not follow. Creation has two entries: the cluster picker on `/practice`, or the graph view's chain table — a full-bleed sortable table of every reasoning chain, grouped by birth cluster under the shared top bar, selecting chips, chains, or whole clusters, whose floating selection bar shows the exact `N nodes → M chains` the agents will receive — handing a free-form node selection to the same dialog — and carries the fenced Delete action, making it the graph's management view (whole-cluster cleanup through the same full-death confirm dialog). A partitioner agent covers every chain exactly once, one generator per partition writes problems against the owner's problem-engineering framework (commit-before-pose: statement + solution + rubric together), and grading is **strengthening, not assessment** — one attempt per problem with its own submit button, instant solution/rubric reveal, then a score 0–10 with brief reasoning landing live; nothing ever written back to the graph. Runs are registry-backed background jobs on the activity dock (no steer, never wakes the teacher); sets live in `data/practice`, crash-swept on boot.
 
-**Dictation.** Optional speech-to-text: the server mints short-lived Deepgram tokens; audio streams browser→Deepgram over WebSocket, never through the server.
+**Dictation.** Optional speech-to-text with exactly one selected method (Settings → Providers → Dictation; no automatic fallback between methods — a failure names the selected engine). **Deepgram**: the server mints short-lived tokens; audio streams browser→Deepgram over WebSocket, never through the server. **Local models**: a curated catalog (Moonshine/Whisper, size + Open ASR Leaderboard WER) downloaded server-side from Hugging Face into `data/dictation/` together with the ONNX runtime, so a downloaded model runs offline; transformers.js runs them in a Web Worker on WebGPU (default) or CPU, and the same model drops to CPU when WebGPU can't start. The worker's `/api/stt/*` reads go through the page, which carries the desktop API capability. A pause segmenter transcribes each utterance while the learner keeps talking; both engines share the deferred transcript (one insert when the run ends). First press with nothing set up opens a chooser card (Deepgram key | local model).
 
 ## Testing
 

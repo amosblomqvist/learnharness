@@ -1,8 +1,14 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Loader2Icon, MicIcon } from "lucide-react";
+import { createPortal } from "react-dom";
+import { CpuIcon, KeyRoundIcon, Loader2Icon, MicIcon } from "lucide-react";
+import { DEEPGRAM_METHOD_ID, localModelOf, localRunSpec, type DictationStatus, type LocalModelEntry } from "@/src/core";
+import { useBackdropDismiss } from "@/components/backdrop-dismiss";
+import { createSegmenter, loadLocalModel, transcribeLocal, type LocalRun, type Segmenter } from "@/components/local-dictation";
+import { DICTATION_SETTINGS_ROW } from "@/components/settings/dictation-group";
 import { useSettingsDialog } from "@/components/settings/settings-dialog";
+import { useSettingsSaved } from "@/components/settings-signal";
 import { Hint } from "@/components/ui/hint";
 
 /**
@@ -79,6 +85,16 @@ import { Hint } from "@/components/ui/hint";
  *     path, which always mints FRESH.
  *   - The honest floor stays: getUserMedia can't be pre-warmed (the mic
  *     indicator would stay lit) — hence the owner's optimistic meter.
+ *
+ * Local dictation (issue #15, PR #50): dictation has METHODS — Deepgram and on-device models
+ * (components/local-dictation.ts) — and exactly ONE is selected in
+ * Settings → Providers → Dictation (src/core/dictation.ts). A run
+ * starts that method (token mint / model load) concurrently with the
+ * mic; when it can't, the error names it — no automatic fallback to
+ * another method. The capture graph is shared: frames go to the Deepgram
+ * socket or the local pause segmenter. With nothing set up, a press opens
+ * the CHOOSER (DictationChooser: API key | local model); anything set up
+ * just dictates.
  */
 
 /*
@@ -167,6 +183,69 @@ export function createWarmMinter(
 }
 
 const warmTokens = createWarmMinter(mintFreshToken);
+
+/** The selected method + device (GET /api/stt/methods), cached for
+ *  the click path — pre-read at mount, dropped whenever Keys or the
+ *  Providers dictation settings save. A failed read resets the cache. */
+let statusCache: Promise<DictationStatus> | null = null;
+
+function readDictationStatus(): Promise<DictationStatus> {
+	if (!statusCache) {
+		statusCache = fetch("/api/stt/methods")
+			.then((r) => (r.ok ? (r.json() as Promise<DictationStatus>) : Promise.reject(new Error(`methods ${r.status}`))))
+			.catch((e: unknown) => {
+				statusCache = null;
+				throw e;
+			});
+	}
+	return statusCache;
+}
+
+/** How the selected local model runs: its files on the picked device. */
+function localRunFor(status: DictationStatus, model: LocalModelEntry): LocalRun {
+	return localRunSpec(model, status.device);
+}
+
+/** Warm the selected method (mitigation D, generalized): mint a Deepgram
+ *  token, or load the local model into the worker so the first click
+ *  doesn't pay its compile. */
+function warmDictation(): void {
+	readDictationStatus()
+		.then((s) => {
+			if (s.selected === DEEPGRAM_METHOD_ID) warmTokens.refresh();
+			const model = s.selected ? localModelOf(s.selected) : undefined;
+			if (model) loadLocalModel(model, localRunFor(s, model)).catch(() => {});
+		})
+		.catch(() => {});
+}
+
+type Engine = { kind: "deepgram"; token: string } | { kind: "local"; model: LocalModelEntry; run: LocalRun };
+
+/** Start the SELECTED method — no fallback (issue #15: "errors identify
+ *  the selected engine"). Deepgram's lines already say "Deepgram"; a
+ *  local model's failure is named after the model (detail → console). */
+async function startEngine(method: string): Promise<Engine> {
+	if (method === DEEPGRAM_METHOD_ID) {
+		try {
+			return { kind: "deepgram", token: await warmTokens.mint() };
+		} catch (e) {
+			const msg = e instanceof Error ? e.message : "token unavailable";
+			throw new Error(msg.includes("Deepgram") ? msg : `Deepgram: ${msg}`);
+		}
+	}
+	const model = localModelOf(method);
+	if (!model) throw new Error("Dictation isn't set up");
+	// WebGPU that can't start runs the same files on CPU (worker-side) —
+	// same model, so not a cross-engine fallback.
+	const run = localRunFor(await readDictationStatus(), model);
+	try {
+		await loadLocalModel(model, run);
+	} catch (e) {
+		console.warn(`[dictation] ${model.name} failed to load`, e);
+		throw new Error(`${model.name} couldn't load`);
+	}
+	return { kind: "local", model, run };
+}
 
 /* Persistent capture graph (mitigation C, owner 2026-09-27): one
  * app-lifetime AudioContext + a module-load memo. Created under the
@@ -277,6 +356,9 @@ export type Dictation = {
 	 * the keyless click leaves for Settings and the surface must come
 	 * back clean. */
 	clearError: () => void;
+	/** The last press found nothing set up: the chooser is open. */
+	chooser: boolean;
+	closeChooser: () => void;
 };
 
 /**
@@ -287,6 +369,7 @@ export type Dictation = {
 export function useDictation({ append }: { append: (text: string) => void }): Dictation {
 	const [phase, setPhase] = useState<DictationPhase>("idle");
 	const [error, setError] = useState<string | null>(null);
+	const [chooser, setChooser] = useState(false);
 	/** Latest RMS from the worklet — the meter samples this (dictate pattern). */
 	const levelRef = useRef(0);
 	/** The page's fallback append — kept fresh per render so a mid-recording
@@ -315,6 +398,16 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 	/** Resolvers waiting for the run to fully end (finish(), owner
 	 *  2026-10-01): released by cleanup() — every terminal path runs it. */
 	const waitersRef = useRef<Array<() => void>>([]);
+	/** The method this run settled on (null while it is still being picked). */
+	const engineRef = useRef<Engine | null>(null);
+	/** Local runs: the pause segmenter fed by the worklet, and the chain of
+	 *  utterance transcriptions (sequential; the stop waits on its tail). */
+	const segmenterRef = useRef<Segmenter | null>(null);
+	const queueRef = useRef<Promise<void>>(Promise.resolve());
+	/** Stop pressed while the method was still being picked (a local model
+	 *  loading) with the mic live: the run finishes once the pick lands,
+	 *  so speech captured meanwhile is still transcribed. */
+	const stopPendingRef = useRef(false);
 
 	/** Flush the buffered transcript into the primary input — question claim
 	 *  first, composer fallback. Called exactly once per run, at cleanup; the
@@ -336,6 +429,9 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 			safetyRef.current = null;
 		}
 		pendingRef.current = [];
+		engineRef.current = null;
+		segmenterRef.current = null;
+		stopPendingRef.current = false;
 		for (const track of streamRef.current?.getTracks() ?? []) track.stop();
 		streamRef.current = null;
 		sourceRef.current?.disconnect();
@@ -355,10 +451,50 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 		// a submit path resuming after `await finishDictation()` reads the
 		// target field with the dictated tail already in it.
 		for (const w of waitersRef.current.splice(0)) w();
-		// Pre-mint for the next run (mitigation D) — best-effort; a keyless
-		// page just doesn't warm.
-		warmTokens.refresh();
+		// Pre-mint for the next run (mitigation D) — only when Deepgram is
+		// the selected method.
+		readDictationStatus()
+			.then((s) => s.selected === DEEPGRAM_METHOD_ID && warmTokens.refresh())
+			.catch(() => {});
 	}, []);
+
+	/** A local run: from here frames feed the pause segmenter, and each
+	 *  utterance is transcribed in the background while the user keeps
+	 *  talking — finals buffer exactly like Deepgram's (deferred). */
+	const beginLocal = useCallback((gen: number, model: LocalModelEntry, run: LocalRun) => {
+		const segmenter = createSegmenter((audio) => {
+			queueRef.current = queueRef.current
+				.then(() => transcribeLocal(model, run, audio))
+				.then(
+					(text) => {
+						if (gen === genRef.current && text) bufferRef.current.push(text);
+					},
+					(e: unknown) => {
+						if (gen !== genRef.current) return;
+						console.warn(`[dictation] ${model.name} transcription failed`, e);
+						setError(`${model.name} couldn't transcribe`);
+					},
+				);
+		});
+		segmenterRef.current = segmenter;
+		// Everything captured while the method was being picked (mitigation A).
+		for (const frame of pendingRef.current) segmenter.push(new Int16Array(frame));
+		pendingRef.current = [];
+		setPhase("recording");
+	}, []);
+
+	/** End a local run: cut the last utterance, let the transcription
+	 *  chain drain, then finalize (cancel/Esc still tears down at once). */
+	const drainLocal = useCallback(
+		(gen: number) => {
+			segmenterRef.current?.flush();
+			segmenterRef.current = null;
+			void queueRef.current.then(() => {
+				if (gen === genRef.current) cleanup();
+			});
+		},
+		[cleanup],
+	);
 
 	/** Open the Deepgram socket and wire its messages. `gen` guards staleness. */
 	const openSocket = useCallback(
@@ -425,23 +561,27 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 		[cleanup],
 	);
 
-	const start = useCallback(async () => {
+	const start = useCallback(async (method: string) => {
 		dictationActiveFlag = true;
 		setError(null);
 		setPhase("connecting");
 		reconnectsRef.current = 0;
 		bufferRef.current = []; // fresh run, fresh buffer (round 2)
 		pendingRef.current = []; // fresh run, fresh queue (mitigation A)
+		engineRef.current = null;
+		segmenterRef.current = null;
+		stopPendingRef.current = false;
+		queueRef.current = Promise.resolve();
 		const gen = ++genRef.current;
 
 		// Mitigation D: the warm token (pre-minted at mount / after the last
 		// run) resolves ~instantly; a cold/keyless mint surfaces below. The
 		// mic is the long pole (macOS HAL + APM init) and gates everything —
-		// the token runs concurrently with it. 127.0.0.1 is a secure
-		// context, so getUserMedia works without TLS; macOS TCC prompts on
-		// first use.
-		const tokenPromise = warmTokens.mint();
-		tokenPromise.catch(() => {}); // surfaced below; no unhandled rejection
+		// the selected method's start (token mint / local model load) runs
+		// concurrently with it. 127.0.0.1 is a secure context, so
+		// getUserMedia works without TLS; macOS TCC prompts on first use.
+		const enginePromise = startEngine(method);
+		enginePromise.catch(() => {}); // surfaced below; no unhandled rejection
 		const micPromise = navigator.mediaDevices.getUserMedia({
 			audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true },
 		});
@@ -469,7 +609,8 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 					levelRef.current = msg.rms ?? 0; // never reset to zero (dictate pattern)
 				} else if (msg.type === "audio") {
 					const ws = wsRef.current;
-					if (ws && ws.readyState === WebSocket.OPEN) ws.send(msg.buffer!);
+					if (segmenterRef.current) segmenterRef.current.push(new Int16Array(msg.buffer!));
+					else if (ws && ws.readyState === WebSocket.OPEN) ws.send(msg.buffer!);
 					// Mitigation A: not OPEN yet (handshake or reconnect gap) —
 					// queue, capped; the open handler flushes in order.
 					else {
@@ -497,25 +638,38 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 			return;
 		}
 		if (gen !== genRef.current) return;
-		let token: string;
+		let engine: Engine;
 		try {
-			token = await tokenPromise;
+			engine = await enginePromise;
 		} catch (e) {
 			if (gen !== genRef.current) return;
-			setError(e instanceof Error ? e.message : "token unavailable");
+			setError(e instanceof Error ? e.message : "dictation unavailable");
 			cleanup();
 			return;
 		}
 		if (gen !== genRef.current) return;
+		engineRef.current = engine;
+		if (stopPendingRef.current) {
+			// Stopped while the pick was in flight: a local run transcribes
+			// what was captured; Deepgram ends as before (nothing was sent).
+			if (engine.kind === "local") {
+				beginLocal(gen, engine.model, engine.run);
+				setPhase("stopping");
+				drainLocal(gen);
+			} else cleanup();
+			return;
+		}
 		// Mitigation B: the handshake fires the moment the graph is live,
 		// overlapping any remaining token wait — mic-gated, never before it.
-		openSocket(gen, token);
-	}, [openSocket, cleanup]);
+		if (engine.kind === "deepgram") openSocket(gen, engine.token);
+		else beginLocal(gen, engine.model, engine.run);
+	}, [openSocket, cleanup, beginLocal, drainLocal]);
 
 	const stop = useCallback(() => {
 		const gen = genRef.current;
 		if (phase !== "recording" && phase !== "connecting") return;
 		setPhase("stopping");
+		const micLive = streamRef.current !== null;
 
 		// Mic dies FIRST — no more audio enqueues (dictate pattern). The
 		// per-run nodes die with it; the AudioContext stays (mitigation C).
@@ -525,6 +679,17 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 		sourceRef.current = null;
 		workletRef.current?.disconnect();
 		workletRef.current = null;
+
+		if (segmenterRef.current) {
+			drainLocal(gen);
+			return;
+		}
+		// The method is still being picked (a local model loading) — finish
+		// when it lands instead of dropping the captured speech.
+		if (micLive && !engineRef.current) {
+			stopPendingRef.current = true;
+			return;
+		}
 
 		const ws = wsRef.current;
 		if (ws && ws.readyState === WebSocket.OPEN) {
@@ -542,7 +707,7 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 		} else {
 			cleanup();
 		}
-	}, [phase, cleanup]);
+	}, [phase, cleanup, drainLocal]);
 
 	const cancel = useCallback(() => {
 		if (phase === "idle") return;
@@ -574,19 +739,48 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 		};
 	}, [finish]);
 
+	/** A press from idle: read the selection (cached — pre-read at mount), open
+	 *  the chooser when nothing is set up, else start. One press in flight
+	 *  at a time — a double-click can't start two runs. */
+	const beginningRef = useRef(false);
+	const begin = useCallback(async () => {
+		if (beginningRef.current) return;
+		beginningRef.current = true;
+		let status: DictationStatus | null = null;
+		try {
+			status = await readDictationStatus();
+		} catch {
+			// Methods unreadable (server hiccup) — no guessing an engine.
+		} finally {
+			beginningRef.current = false;
+		}
+		if (!status) return setError("Couldn't read dictation settings");
+		if (status.selected === null) return setChooser(true);
+		void start(status.selected);
+	}, [start]);
+
 	const toggle = useCallback(() => {
-		if (phase === "idle") void start();
+		if (chooser) return; // the chooser owns the next step
+		if (phase === "idle") void begin();
 		else if (phase === "recording" || phase === "connecting") stop();
 		// "stopping" presses are ignored — the flush is in flight.
-	}, [phase, start, stop]);
+	}, [chooser, phase, begin, stop]);
+
+	const closeChooser = useCallback(() => setChooser(false), []);
 
 	// Shortcut seams (keyboard wave A): ⌘D toggles from anywhere on the
 	// page; the Esc chain lands here as a CANCEL (owner, round 3). Each
 	// page owns ONE hook instance, and only the mounted page's listener is
 	// attached.
 	useEffect(() => {
-		warmTokens.refresh(); // pre-mint at mount (mitigation D) — silent if keyless
+		warmDictation(); // pre-mint / pre-load at mount (mitigation D)
 	}, []);
+	// A key saved or the selection changed: re-read the methods and re-warm.
+	useSettingsSaved((section) => {
+		if (section !== "keys" && section !== "dictation") return;
+		statusCache = null;
+		warmDictation();
+	});
 	useEffect(() => {
 		window.addEventListener("lh:kbd-toggle-dictation", toggle);
 		return () => window.removeEventListener("lh:kbd-toggle-dictation", toggle);
@@ -606,6 +800,8 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 		finish,
 		cancel,
 		clearError: () => setError(null),
+		chooser,
+		closeChooser,
 	};
 }
 
@@ -622,7 +818,7 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
  *             (full text in the tooltip), cleared on the next click.
  */
 export function DictationBar({ dictation }: { dictation: Dictation }) {
-	const { phase, error, levelRef, toggle, active, clearError } = dictation;
+	const { phase, error, levelRef, toggle, active, clearError, chooser, closeChooser } = dictation;
 	const { open: openSettings } = useSettingsDialog();
 	/** The keyless click (zero-keys wave, owner dictation trio): the errored
 	 *  idle button deep-links Settings → Keys → the Deepgram row and clears
@@ -673,6 +869,20 @@ export function DictationBar({ dictation }: { dictation: Dictation }) {
 
 	if (!active) {
 		return (
+			<>
+			{chooser && (
+				<DictationChooser
+					onClose={closeChooser}
+					onKey={() => {
+						closeChooser();
+						openSettings("keys", DEEPGRAM_KEY_ID);
+					}}
+					onLocal={() => {
+						closeChooser();
+						openSettings("keys", DICTATION_SETTINGS_ROW);
+					}}
+				/>
+			)}
 			<Hint
 				// Errored: the button span truncates the line — the tooltip is its
 				// full reveal (the keyless line KEEPS "Deepgram" — owner overrule:
@@ -702,6 +912,7 @@ export function DictationBar({ dictation }: { dictation: Dictation }) {
 					<span className="max-w-full truncate">{error ?? "Dictate"}</span>
 				</button>
 			</Hint>
+			</>
 		);
 	}
 
@@ -743,5 +954,112 @@ export function DictationBar({ dictation }: { dictation: Dictation }) {
 				))}
 			</div>
 		</div>
+	);
+}
+
+
+/**
+ * The setup chooser (issue #15, PR #50): centered over the app in the
+ * settings-dialog language, reachable ONLY from a Dictate press with
+ * nothing set up — no settings entry. Two halves: API key (Deepgram → the
+ * Providers key row) | local dictation model (→ Providers → Dictation).
+ */
+function DictationChooser({
+	onClose,
+	onKey,
+	onLocal,
+}: {
+	onClose: () => void;
+	onKey: () => void;
+	onLocal: () => void;
+}) {
+	const backdropDismiss = useBackdropDismiss(onClose);
+	useEffect(() => {
+		const onKeyDown = (e: KeyboardEvent) => {
+			if (e.key !== "Escape") return;
+			// The one-Esc law: the card claims it; the window chain must not act.
+			e.preventDefault();
+			e.stopPropagation();
+			onClose();
+		};
+		document.addEventListener("keydown", onKeyDown);
+		return () => document.removeEventListener("keydown", onKeyDown);
+	}, [onClose]);
+
+	const title = "Set up dictation";
+	return createPortal(
+		<div
+			className="fixed inset-0 z-50 flex items-center justify-center bg-background/80"
+			data-testid="dictation-card-backdrop"
+			{...backdropDismiss}
+		>
+			<div
+				role="dialog"
+				aria-modal="true"
+				aria-label={title}
+				data-testid="dictation-chooser"
+				className="settings-dialog-pop flex w-[560px] max-w-[90vw] flex-col overflow-hidden rounded-md border border-border bg-card shadow-xl"
+				onClick={(e) => e.stopPropagation()}
+			>
+				<header className="flex h-15 shrink-0 items-center gap-3 border-b border-border px-5">
+					<h2 className="font-title text-2xl tracking-tight">{title}</h2>
+					<Hint label="Close" binding="escape" side="left">
+						<button
+							type="button"
+							aria-label="Close"
+							data-testid="dictation-card-close"
+							onClick={onClose}
+							className="ml-auto text-muted-foreground transition-colors hover:text-foreground"
+						>
+							✕
+						</button>
+					</Hint>
+				</header>
+				<div className="grid grid-cols-2 divide-x divide-border">
+					<ChooserHalf
+						icon={<KeyRoundIcon className="size-5" />}
+						title="API key"
+						line="700+ hours of free dictation with Deepgram in the cloud"
+						onClick={onKey}
+						testid="dictation-choose-key"
+					/>
+					<ChooserHalf
+						icon={<CpuIcon className="size-5" />}
+						title="Local dictation model"
+						line="Private & on this device"
+						onClick={onLocal}
+						testid="dictation-choose-local"
+					/>
+				</div>
+			</div>
+		</div>,
+		document.body,
+	);
+}
+
+function ChooserHalf({
+	icon,
+	title,
+	line,
+	onClick,
+	testid,
+}: {
+	icon: React.ReactNode;
+	title: string;
+	line: string;
+	onClick: () => void;
+	testid: string;
+}) {
+	return (
+		<button
+			type="button"
+			onClick={onClick}
+			data-testid={testid}
+			className="flex flex-col items-start gap-2 px-6 py-6 text-left transition-colors hover:bg-accent"
+		>
+			<span className="text-muted-foreground">{icon}</span>
+			<span className="font-ui text-sm text-foreground">{title}</span>
+			<span className="text-xs text-muted-foreground">{line}</span>
+		</button>
 	);
 }

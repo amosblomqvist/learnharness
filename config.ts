@@ -112,6 +112,16 @@ export const GRAPH_FORMAT_FILE = path.join(PATHS.graph, "format.json");
 export const SETTINGS_FILE = path.join(DATA_ROOT, "settings.json");
 
 /**
+ * LOCAL DICTATION (issue #15, PR #50): downloaded speech models
+ * (dictation/models/<id>/), the ONNX runtime files the in-app engine
+ * loads (dictation/runtime/<version>/), and the method-selection record
+ * (dictation/state.json). Server-side on purpose: browser storage is
+ * per-origin and the desktop shell picks a fresh loopback port on every
+ * launch, so a renderer cache would be wiped each time.
+ */
+export const DICTATION_DIR = path.join(DATA_ROOT, "dictation");
+
+/**
  * User prompt-override files (settings-storage wave, 2026-09-19): the
  * per-segment system-prompt overrides mirroring the SOURCE layout
  * (src/agent/prompts/) — the shared base as prompts/system-prompt.md,
