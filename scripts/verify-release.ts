@@ -22,13 +22,14 @@
  *   win (nsis x64; artifactName "${productName}-${version}-${arch}-setup.${ext}"):
  *     exe    LearnHarness-<v>-x64-setup.exe   + .blockmap (createBlockmap)
  *     feed   latest.yml — a single file entry, the exe.
- *   linux (AppImage + deb, x64; artifactName "${productName}-${version}-${arch}.${ext}"
- *            is user-forced at the linux level, so it overrides BOTH targets'
- *            default name formats, and ${arch} expands per target ext:
- *            x64→x86_64 for AppImage, x64→amd64 for deb):
+ *   linux (AppImage + deb + rpm, x64; artifactName "${productName}-${version}-${arch}.${ext}"
+ *            is user-forced at the linux level, so it overrides ALL THREE
+ *            targets' default name formats, and ${arch} expands per target ext:
+ *            x64→x86_64 for AppImage and rpm, x64→amd64 for deb):
  *     image  LearnHarness-<v>-x86_64.AppImage (no blockmap in 26.15.3)
  *     deb    LearnHarness-<v>-amd64.deb       (no blockmap)
- *     feed   latest-linux.yml — the AppImage and deb entries merged by
+ *     rpm    LearnHarness-<v>-x86_64.rpm      (no blockmap; 26.16.1)
+ *     feed   latest-linux.yml — the AppImage, deb and rpm entries merged by
  *            writeUpdateInfoFiles (order not deterministic; checked as a set).
  *
  * GitHub asset names equal these file names (all are already "safe" GitHub
@@ -87,12 +88,12 @@ export type DraftSelection =
 	| { ok: true; release: ReleaseRecord; warnings: string[] }
 	| Failures;
 
-/** The full expected asset inventory for one version (11 files). */
+/** The full expected asset inventory for one version (12 files). */
 export type ExpectedAssets = {
 	version: string;
 	mac: { dmg: string; zip: string; feed: string };
 	win: { exe: string; feed: string };
-	linux: { appImage: string; deb: string; feed: string };
+	linux: { appImage: string; deb: string; rpm: string; feed: string };
 	/** Every asset name the draft must hold, and no others. */
 	files: string[];
 };
@@ -130,17 +131,19 @@ export function expectedAssets(version: string): ExpectedAssets {
 	const linux = {
 		appImage: `${PRODUCT_NAME}-${version}-x86_64.AppImage`,
 		deb: `${PRODUCT_NAME}-${version}-amd64.deb`,
+		rpm: `${PRODUCT_NAME}-${version}-x86_64.rpm`,
 		feed: "latest-linux.yml",
 	};
 	// Sidecar differential-update blockmaps: emitted for dmg, mac zip and
-	// NSIS exe (createBlockmap); AppImage/deb have none in app-builder-lib 26.15.3.
+	// NSIS exe (createBlockmap); AppImage/deb have none in app-builder-lib 26.15.3,
+	// and rpm has none in 26.16.1.
 	const blockmaps = [mac.dmg, mac.zip, win.exe].map((name) => `${name}.blockmap`);
 	return {
 		version,
 		mac,
 		win,
 		linux,
-		files: [mac.dmg, mac.zip, win.exe, linux.appImage, linux.deb, ...blockmaps, mac.feed, win.feed, linux.feed],
+		files: [mac.dmg, mac.zip, win.exe, linux.appImage, linux.deb, linux.rpm, ...blockmaps, mac.feed, win.feed, linux.feed],
 	};
 }
 
@@ -288,7 +291,7 @@ export function verifyConfigAssumptions(config: unknown, pkg: unknown): { ok: tr
 		if (config.linux.artifactName !== "${productName}-${version}-${arch}.${ext}") {
 			bad(`linux.artifactName changed (${JSON.stringify(config.linux.artifactName)}) — expected names no longer hold`);
 		}
-		if (!sameTargets(config.linux.target, [{ target: "AppImage", arch: ["x64"] }, { target: "deb", arch: ["x64"] }])) {
+		if (!sameTargets(config.linux.target, [{ target: "AppImage", arch: ["x64"] }, { target: "deb", arch: ["x64"] }, { target: "rpm", arch: ["x64"] }])) {
 			bad(`linux.target changed (${JSON.stringify(config.linux.target)}) — expected names no longer hold`);
 		}
 	}
@@ -343,7 +346,7 @@ export function feedExpectations(expected: ExpectedAssets): FeedExpectation[] {
 	return [
 		{ file: expected.mac.feed, urls: [expected.mac.zip, expected.mac.dmg], first: expected.mac.zip },
 		{ file: expected.win.feed, urls: [expected.win.exe] },
-		{ file: expected.linux.feed, urls: [expected.linux.appImage, expected.linux.deb] },
+		{ file: expected.linux.feed, urls: [expected.linux.appImage, expected.linux.deb, expected.linux.rpm] },
 	];
 }
 

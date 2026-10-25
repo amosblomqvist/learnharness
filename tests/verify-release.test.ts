@@ -3,7 +3,7 @@
  * plus CLI end-to-end runs, all offline against fixtures. The expected asset
  * names asserted here are the ones verified against the INSTALLED
  * app-builder-lib 26.15.3 (see the script header for the derivation):
- * 11 assets — 4 installers (dmg / NSIS exe / AppImage / deb), the mac
+ * 12 assets — 5 installers (dmg / NSIS exe / AppImage / deb / rpm), the mac
  * updater ZIP, its/exe/dmg blockmaps, and the three latest*.yml feeds.
  */
 import assert from "node:assert/strict";
@@ -34,7 +34,7 @@ function asset(id: number, name: string, overrides: Partial<ReleaseAsset> = {}):
 	return { id, name, size: 5000, state: "uploaded", ...overrides };
 }
 
-/** The complete, healthy 11-asset draft for a version. */
+/** The complete, healthy 12-asset draft for a version. */
 function healthyRelease(version: string, tagForm: "v" | "bare" = "v"): ReleaseRecord {
 	const e = expectedAssets(version);
 	return {
@@ -64,13 +64,14 @@ function healthyFeeds(version: string, release: ReleaseRecord): Record<string, s
 }
 
 describe("release gate — expected asset inventory", () => {
-	it("is exactly the 11 verified builder outputs for the version", () => {
+	it("is exactly the 12 verified builder outputs for the version", () => {
 		assert.deepEqual(expectedAssets(VERSION).files, [
 			"LearnHarness-0.2.0-arm64.dmg",
 			"LearnHarness-0.2.0-arm64-mac.zip",
 			"LearnHarness-0.2.0-x64-setup.exe",
 			"LearnHarness-0.2.0-x86_64.AppImage",
 			"LearnHarness-0.2.0-amd64.deb",
+			"LearnHarness-0.2.0-x86_64.rpm",
 			"LearnHarness-0.2.0-arm64.dmg.blockmap",
 			"LearnHarness-0.2.0-arm64-mac.zip.blockmap",
 			"LearnHarness-0.2.0-x64-setup.exe.blockmap",
@@ -166,6 +167,7 @@ describe("release gate — packaging-config drift guard", () => {
 		["mac targets", (config) => { (config.mac as Record<string, unknown>).target = [{ target: "dmg", arch: ["arm64"] }]; }],
 		["win target", (config) => { (config.win as Record<string, unknown>).target = [{ target: "appx", arch: ["x64"] }]; }],
 		["linux targets", (config) => { (config.linux as Record<string, unknown>).target = [{ target: "AppImage", arch: ["x64"] }]; }],
+		["linux targets without rpm", (config) => { (config.linux as Record<string, unknown>).target = [{ target: "AppImage", arch: ["x64"] }, { target: "deb", arch: ["x64"] }]; }],
 		["publish provider", (config) => { config.publish = [{ provider: "github", releaseType: "prerelease" }]; }],
 		["package name", () => { /* pkg checked below */ }],
 	];
@@ -219,17 +221,21 @@ describe("release gate — update feeds", () => {
 		assert.ok(verdict.ok, JSON.stringify(verdict, null, 2));
 	});
 
-	it("accepts either AppImage/deb order in latest-linux.yml (builder order is not deterministic)", () => {
+	it("accepts any AppImage/deb/rpm order in latest-linux.yml (builder order is not deterministic)", () => {
 		const release = healthyRelease(VERSION);
 		const e = expectedAssets(VERSION);
 		const feeds = healthyFeeds(VERSION, release);
-		// Same content, deb entry first (writeUpdateInfoFiles keeps whichever
-		// target finished first; the gate must accept both).
+		// Same content, deb entry first and rpm before AppImage
+		// (writeUpdateInfoFiles keeps whichever target finished first; the gate
+		// must accept any order).
 		feeds["latest-linux.yml"] = [
 			`version: ${VERSION}`,
 			"files:",
 			`  - url: ${e.linux.deb}`,
 			`    sha512: ${sha512(e.linux.deb)}`,
+			"    size: 5000",
+			`  - url: ${e.linux.rpm}`,
+			`    sha512: ${sha512(e.linux.rpm)}`,
 			"    size: 5000",
 			`  - url: ${e.linux.appImage}`,
 			`    sha512: ${sha512(e.linux.appImage)}`,
@@ -282,6 +288,12 @@ describe("release gate — update feeds", () => {
 			feeds["latest-linux.yml"] = feeds["latest-linux.yml"]!.replace(
 				`  - url: ${e.linux.deb}\n    sha512: ${sha512(e.linux.deb)}\n    size: 5000\n`, "",
 			).replace(`path: ${e.linux.appImage}`, `path: ${e.linux.appImage}`);
+		}, /must reference exactly/],
+		["missing rpm entry in latest-linux.yml", (feeds) => {
+			const e = expectedAssets(VERSION);
+			feeds["latest-linux.yml"] = feeds["latest-linux.yml"]!.replace(
+				`  - url: ${e.linux.rpm}\n    sha512: ${sha512(e.linux.rpm)}\n    size: 5000\n`, "",
+			);
 		}, /must reference exactly/],
 		["extra entry in latest.yml", (feeds) => {
 			const e = expectedAssets(VERSION);
@@ -408,7 +420,7 @@ describe("release gate — CLI (offline, repo config)", () => {
 		try {
 			const result = run(["verify", path.join(root, "releases.json"), path.join(root, "metadata"), "--tag", TAG]);
 			assert.equal(result.status, 0, String(result.stderr));
-			assert.match(result.stdout, /11\/11 expected files present/);
+			assert.match(result.stdout, /12\/12 expected files present/);
 			assert.ok(result.stdout.includes(`OK: draft for ${TAG} is complete`));
 		} finally {
 			fs.rmSync(root, { recursive: true, force: true });
