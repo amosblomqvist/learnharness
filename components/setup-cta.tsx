@@ -8,8 +8,8 @@
  * keys unlock). Click opens the SetupDialog, whose stage derives to
  * the first-key screen on its own.
  *
- * Truth: GET /api/keys — a PROVIDER key present (env or file; tool keys
- * like Deepgram do not count — they unlock no models). Live updates ride
+ * Truth: GET /api/models availability (provider key, connected
+ * subscription, or keyless custom provider; tool keys do not count). Live updates ride
  * the lh:settings-saved "keys" signal (keys-section dispatches after
  * save AND delete; the setup dialog's first-key screen dispatches on
  * its own save), the same re-read pattern chat.tsx uses for "models".
@@ -32,6 +32,12 @@ export function hasProviderKey(
 	return classifyKeys(statuses, providers).providerRows.some((s) => s.present);
 }
 
+/** Pure: is any provider available (key present, subscription connected,
+ *  or keyless custom)? The catalog reports all of those as keyPresent. */
+export function hasAvailableProvider(providers: readonly { keyPresent: boolean }[]): boolean {
+	return providers.some((p) => p.keyPresent);
+}
+
 /** The zero-keys truth for the calling page: TRUE only after a
  *  successful read says no provider key exists (pending and failed
  *  reads render nothing — the pill must never flash on a gap, and a
@@ -39,7 +45,7 @@ export function hasProviderKey(
  *  leans on). Re-reads on the keys signal. */
 export function useZeroKeys(): boolean {
 	const { catalog } = useModelCatalog();
-	return catalog ? !catalog.providers.some((provider) => provider.keyPresent) : false;
+	return catalog ? !hasAvailableProvider(catalog.providers) : false;
 }
 
 /** The pill itself — the models CTA's chrome and placement, the keys

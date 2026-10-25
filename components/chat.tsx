@@ -147,16 +147,21 @@ export function parseModelsRefusal(message: string | undefined): ModelSlotName[]
 	}
 }
 
-/** The provider-key refusal's transport seam (zero-keys wave, Platform's
- *  66dbea9): same discipline as parseModelsRefusal — the 503 body rides
- *  the thrown error message verbatim, so the envelope's own matcher
- *  (core, invariant-tail) decides; the wording can never drift client-
- *  side. Exported pure for tests. */
+/** Structured provider-key refusals reopen setup regardless of display wording.
+ * The invariant wording matcher is only a fallback for older envelopes. */
 export function parseProviderKeyRefusal(message: string | undefined): boolean {
 	if (!message) return false;
 	try {
-		const body = JSON.parse(message) as { code?: unknown; error?: unknown };
-		return body.code === "provider_key_missing" && typeof body.error === "string" && isProviderKeyRefusal(body.error);
+		const body = JSON.parse(message) as { code?: unknown; error?: unknown; provider?: unknown; slots?: unknown };
+		if (body === null || typeof body !== "object" || body.code !== "provider_key_missing") return false;
+		// The structured envelope decides: subscription disconnects word the
+		// error differently ("... disconnected"), so the wording can't gate it.
+		if (typeof body.provider === "string" && body.provider !== ""
+			&& Array.isArray(body.slots) && body.slots.every((s) => typeof s === "string")) {
+			return true;
+		}
+		// Legacy servers: code plus the invariant wording tail, no provider/slots.
+		return typeof body.error === "string" && isProviderKeyRefusal(body.error);
 	} catch {
 		return false;
 	}

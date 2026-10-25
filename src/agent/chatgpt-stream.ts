@@ -3,6 +3,7 @@ import { streamSimple } from "@earendil-works/pi-ai/api/openai-responses";
 import { AssistantMessageEventStream } from "@earendil-works/pi-ai/utils/event-stream";
 import { transformMessages } from "@earendil-works/pi-ai/api/transform-messages";
 import { chatGPTAbortController, chatGPTScope, chatGPTScopeCurrent, chatGPTLease, chatGPTDenial } from "./chatgpt-bridge.ts";
+import { supportsCodexFastMode, type ModelServiceTier } from "../core/model-speed.ts";
 import type { AdmissionScope, ChatGPTDispatchLifecycle } from "./chatgpt-request-cycle.ts";
 
 const USAGE = "https://chatgpt.com/settings/usage";
@@ -19,12 +20,14 @@ export function chatGPTStreamError(message: string): string {
 }
 
 /** Restrict the body at the final payload seam, even if caller samplingParams add fields. */
-export function chatGPTPayload(raw: unknown, selectedModelId: string): Record<string, unknown> {
+export function chatGPTPayload(raw: unknown, selectedModelId: string, serviceTier?: ModelServiceTier): Record<string, unknown> {
 	const payload = raw as Record<string, unknown>;
 	const out: Record<string, unknown> = { model: selectedModelId, store: false, stream: true };
 	for (const key of ["instructions", "reasoning", "include", "text", "tool_choice", "parallel_tool_calls", "prompt_cache_key"]) {
 		if (payload[key] !== undefined) out[key] = payload[key];
 	}
+	// Caller-supplied service_tier is never copied; only the validated app tier on a known model enables Fast.
+	if (serviceTier === "priority" && supportsCodexFastMode("chatgpt", selectedModelId)) out.service_tier = "priority";
 	if (!Array.isArray(payload.input)) throw new Error("ChatGPT requires stateless input history");
 	out.input = payload.input.map((item) => item?.role === "system" ? { ...item, role: "developer" } : item);
 	if (Array.isArray(payload.tools) && payload.tools.length) {
@@ -44,7 +47,7 @@ export function chatGPTHistory(context: TranscriptContext, logicalModel: Model<A
 function empty(model: Model<Api>): AssistantMessage {
 	return { role: "assistant", api: model.api, provider: "chatgpt", model: model.id, content: [], stopReason: "error", timestamp: Date.now(), usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } } };
 }
-export function chatGPTStream(background: () => boolean, lifecycle?: ChatGPTDispatchLifecycle): StreamFunction<Api, SimpleStreamOptions> {
+export function chatGPTStream(background: () => boolean, lifecycle?: ChatGPTDispatchLifecycle, serviceTier?: ModelServiceTier): StreamFunction<Api, SimpleStreamOptions> {
 	return (logicalModel, context, options) => {
 		const output = new AssistantMessageEventStream();
 		const purpose = background();
@@ -83,7 +86,7 @@ export function chatGPTStream(background: () => boolean, lifecycle?: ChatGPTDisp
 					},
 					onPayload: async (raw, model) => {
 						const replacement = await options?.onPayload?.(raw, model);
-						const payload = chatGPTPayload(replacement === undefined ? raw : replacement, logicalModel.id);
+						const payload = chatGPTPayload(replacement === undefined ? raw : replacement, logicalModel.id, serviceTier);
 						check();
 						return payload;
 					},

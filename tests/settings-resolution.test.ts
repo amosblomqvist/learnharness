@@ -20,6 +20,7 @@ import {
 	resolveSlot,
 } from "../src/core/settings-resolution.ts";
 import { BACKGROUND_MODEL_ROLES, type UserSettings } from "../src/core/settings.ts";
+import { connectionBackgroundAllowed, isSubscriptionProvider } from "../src/agent/subscription-connections.ts";
 
 describe("resolveSettings", () => {
 	it("null record (first boot): non-model knobs land on factory defaults; every model view is EMPTY", () => {
@@ -236,6 +237,16 @@ describe("resolveConversationSpec (the turn gate's chain)", () => {
 			id: "c",
 			thinkingLevel: undefined,
 		});
+	});
+});
+
+describe("subscription routing compatibility", () => {
+	it("legacy Grok resolves to upstream routing and Claude remains on its legacy consent path", () => {
+		assert.deepEqual(resolveConversationSpec({ model: { provider: "subscription-xai", id: "grok-4" } }, null), { provider: "xai-subscription", id: "grok-4", thinkingLevel: undefined });
+		assert.deepEqual(resolveConversationSpec({ model: { provider: "subscription-anthropic", id: "claude-sonnet" } }, null), { provider: "subscription-anthropic", id: "claude-sonnet", thinkingLevel: undefined });
+		assert.equal(isSubscriptionProvider("xai-subscription"), true);
+		assert.equal(isSubscriptionProvider("subscription-anthropic"), false);
+		assert.equal(connectionBackgroundAllowed("subscription-anthropic"), false);
 	});
 });
 

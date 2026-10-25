@@ -12,7 +12,7 @@
  */
 
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
-import { isHexColor, type ChatSettings } from "../core";
+import { isHexColor, isModelServiceTier, type ChatSettings } from "../core";
 import type {
 	AgentSettings,
 	AppearanceSettings,
@@ -38,6 +38,7 @@ export function parseSettingsBody(body: unknown): SettingsBodyResult<ChatSetting
 	const raw = body as {
 		model?: { provider?: unknown; id?: unknown };
 		thinkingLevel?: unknown;
+		serviceTier?: unknown;
 	};
 	const settings: ChatSettings = {};
 	if (raw.model !== undefined) {
@@ -56,6 +57,10 @@ export function parseSettingsBody(body: unknown): SettingsBodyResult<ChatSetting
 			return { ok: false, error: "thinkingLevel must be a string" };
 		}
 		settings.thinkingLevel = raw.thinkingLevel as ThinkingLevel;
+	}
+	if (raw.serviceTier !== undefined) {
+		if (!isModelServiceTier(raw.serviceTier)) return { ok: false, error: 'serviceTier must be "default" or "priority"' };
+		settings.serviceTier = raw.serviceTier;
 	}
 	// Wave 7 killed the graph-context injection (owner: zero configuration
 	// beyond chat models — the prober reads its map through tools now); its
@@ -114,6 +119,10 @@ function parseRoleOverride(value: unknown, role: string): { ok: true; override: 
 			return { ok: false, error: `${role}.thinkingLevel must be a string` };
 		}
 		override.thinkingLevel = raw.thinkingLevel as ThinkingLevel;
+	}
+	if (raw.serviceTier !== undefined) {
+		if (!isModelServiceTier(raw.serviceTier)) return { ok: false, error: `${role}.serviceTier must be "default" or "priority"` };
+		override.serviceTier = raw.serviceTier;
 	}
 	return { ok: true, override };
 }

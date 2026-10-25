@@ -43,6 +43,20 @@ contextBridge.exposeInMainWorld("lh", {
 			return () => ipcRenderer.removeListener("lh:chatgpt:changed", listener);
 		},
 	},
+	legacySubscriptions: {
+		status: (provider) => ipcRenderer.invoke("lh:legacy-subscriptions:control", { provider, op: "status" }),
+		login: (provider, id, allowBackgroundUse) => ipcRenderer.invoke("lh:legacy-subscriptions:control", { provider, op: "login", id, allowBackgroundUse }),
+		cancel: (provider) => ipcRenderer.invoke("lh:legacy-subscriptions:control", { provider, op: "cancel" }),
+		select: (provider, id) => ipcRenderer.invoke("lh:legacy-subscriptions:control", { provider, op: "select", id }),
+		disconnect: (provider, id) => ipcRenderer.invoke("lh:legacy-subscriptions:control", { provider, op: "disconnect", id }),
+		logout: (provider, id) => ipcRenderer.invoke("lh:legacy-subscriptions:control", { provider, op: "logout", id }),
+		consent: (provider, enabled) => ipcRenderer.invoke("lh:legacy-subscriptions:control", { provider, op: "consent", enabled }),
+		onChange: (cb) => {
+			const listener = () => cb();
+			ipcRenderer.on("lh:legacy-subscriptions:changed", listener);
+			return () => ipcRenderer.removeListener("lh:legacy-subscriptions:changed", listener);
+		},
+	},
 	subscriptions: {
 		status: () => ipcRenderer.invoke("lh:subscriptions:control", { op: "status" }),
 		login: (providerId, enabled) => ipcRenderer.invoke("lh:subscriptions:control", { op: "login", providerId, enabled }),

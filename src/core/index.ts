@@ -79,3 +79,9 @@ export * from "./coverage.ts";
 // ONE session→markdown formatter — the extractor's view and the user-facing
 // export share it. Pure, browser-safe.
 export * from "./session-markdown.ts";
+
+export * from "./provider-connections.ts";
+
+export * from "./model-speed.ts";
+
+export type { NativeSubscriptionProviderId as LegacySubscriptionProviderId, NativeSubscriptionStatus as LegacySubscriptionStatus, NativeSubscriptionControlBridge as LegacySubscriptionControlBridge } from "./contracts/native-subscriptions.ts";

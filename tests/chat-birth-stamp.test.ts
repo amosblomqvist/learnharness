@@ -106,3 +106,22 @@ describe("POST /api/chats — the birth stamp", () => {
 		assert.equal(secondRecord.settings?.model?.id, "gpt-6-luna");
 	});
 });
+
+
+describe("POST /api/chats — Codex speed birth stamp", () => {
+ it("copies Fast and explicit Standard defaults without changing existing sessions", async () => {
+  const model = { provider: "subscription-openai-codex", id: "gpt-6.1-sol" };
+  writeSettings({ version: 1, models: { strong: { model, thinkingLevel: "high", serviceTier: "priority" } } });
+  const first = await (await post()).json() as { id: string };
+  assert.equal(chatStore.getChat(first.id)?.settings?.serviceTier, "priority");
+  writeSettings({ version: 1, models: { strong: { model, thinkingLevel: "high", serviceTier: "default" } } });
+  const second = await (await post()).json() as { id: string };
+  assert.equal(chatStore.getChat(second.id)?.settings?.serviceTier, "default");
+  assert.equal(chatStore.getChat(first.id)?.settings?.serviceTier, "priority");
+ });
+ it("never stamps a stale Codex speed onto an API-key model", async () => {
+  writeSettings({ version: 1, models: { strong: { model: { provider: "openai", id: "gpt-6-luna" }, serviceTier: "priority" } } });
+  const { id } = await (await post()).json() as { id: string };
+  assert.equal(chatStore.getChat(id)?.settings?.serviceTier, undefined);
+ });
+});

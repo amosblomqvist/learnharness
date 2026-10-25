@@ -1,3 +1,4 @@
+import { isModelServiceTier, type ModelServiceTier } from "./model-speed.ts";
 /**
  * THE USER SETTINGS RECORD's shape + sanitizer (settings-storage wave,
  * 2026-09-19): one versioned, DELTA-shaped record at the data-dir seam
@@ -57,6 +58,8 @@ export interface RoleModelOverride {
 	model?: { provider: string; id: string };
 	/** The thinking budget swap. */
 	thinkingLevel?: ThinkingLevel;
+	/** Requested Codex speed; absent means Standard (or inherited for role overrides). */
+	serviceTier?: ModelServiceTier;
 }
 
 // ─── Model slots (model slots wave, 2026-09-20) ──────────────────────────────
@@ -193,6 +196,8 @@ export interface ModelSlot {
 	model?: { provider: string; id: string };
 	/** The thinking budget swap. */
 	thinkingLevel?: ThinkingLevel;
+	/** Requested Codex speed; absent means Standard (or inherited for role overrides). */
+	serviceTier?: ModelServiceTier;
 }
 
 /** The `models` settings section (owner decision 2026-09-20: a dedicated
@@ -473,6 +478,7 @@ function sanitizeRoleOverride(raw: unknown): RoleModelOverride | undefined {
 	if (typeof r.thinkingLevel === "string" && THINKING_LEVELS.includes(r.thinkingLevel as ThinkingLevel)) {
 		out.thinkingLevel = r.thinkingLevel as ThinkingLevel;
 	}
+	if (isModelServiceTier(r.serviceTier)) out.serviceTier = r.serviceTier;
 	return Object.keys(out).length ? out : undefined;
 }
 

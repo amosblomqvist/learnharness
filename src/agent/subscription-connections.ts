@@ -1,4 +1,5 @@
 import { chatGPTBackgroundAllowed, chatGPTConnected, chatGPTScopeCurrent, onChatGPTChange } from "./chatgpt-bridge.ts";
+import { nativeSubscriptionBackgroundAllowed as legacyBackgroundAllowed } from "./native-subscription-bridge.ts";
 import { nativeSubscriptionId, nativeSubscriptionConnected, nativeSubscriptionBackgroundAllowed, nativeAdmissionCurrent, onNativeSubscriptionChange } from "./subscription-bridge.ts";
 import type { AdmissionScope } from "./subscription-request-cycle.ts";
 
@@ -10,6 +11,7 @@ export function subscriptionConnected(provider: string): boolean {
 /** Ordinary API connections have no subscription background-consent gate. */
 export function connectionBackgroundAllowed(provider: string | undefined): boolean {
 	if (provider === "chatgpt") return chatGPTBackgroundAllowed();
+	if (provider === "subscription-anthropic") return legacyBackgroundAllowed("subscription-anthropic");
 	const native = provider ? nativeSubscriptionId(provider) : undefined;
 	return native ? nativeSubscriptionBackgroundAllowed(native) : true;
 }

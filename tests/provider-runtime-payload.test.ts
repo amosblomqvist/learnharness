@@ -18,6 +18,7 @@ describe("offline native Pi Google initialization gate", () => {
 		assert.equal(result.status, 0, String(result.stderr));
 		for (const provider of ["google", "opencode", "opencode-go"]) assert.ok(String(result.stdout).includes(`${provider}: native lazy Google adapter reached onPayload`));
 		assert.match(String(result.stdout), /zero network attempts/);
+		assert.match(String(result.stdout), /native subscription OAuth modules and callback helpers loaded/);
 	});
 	it("rejects a missing Pi entry instead of treating any error as success", () => {
 		const root = fs.mkdtempSync(path.join(os.tmpdir(), "lh-provider-missing-"));

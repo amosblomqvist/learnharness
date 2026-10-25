@@ -126,6 +126,20 @@ async function probe(standalone) {
 			noNetwork();
 			console.log(`[smoke-provider-runtime] ${name}: public native OAuth and ${seenApis.size} transport APIs initialized offline`);
 		}
+		// Main uses these factories; import lazy OAuth modules without signing in.
+		for (const [name, factory, oauthName] of [["anthropic", "anthropicProvider", "anthropicOAuth"]]) {
+			const provider = (await import(new URL(`providers/${name}.js`, entry).href))[factory]();
+			assert.equal(typeof provider.auth.oauth.login, "function");
+			assert.ok(provider.getModels().length > 0);
+			const oauth = (await import(new URL(`auth/oauth/${name}.js`, entry).href))[oauthName];
+			assert.equal(typeof oauth.login, "function");
+			assert.equal(typeof oauth.refresh, "function");
+		}
+		const pages = await import(new URL("utils/oauth-page.js", entry).href);
+		assert.match(pages.oauthSuccessHtml("Offline callback check"), /Offline callback check/);
+		assert.match(pages.oauthErrorHtml("Offline callback check"), /Offline callback check/);
+		noNetwork();
+		console.log("[smoke-provider-runtime] native subscription OAuth modules and callback helpers loaded; no sign-in attempted");
 		// Resolution/evaluation, not folder-exists checks. This also covers the
 		// previously missing transitive edge and permits legitimate nested deps.
 		for (const name of ["@google/genai", "google-auth-library", "gcp-metadata", "json-bigint", "bignumber.js"]) {

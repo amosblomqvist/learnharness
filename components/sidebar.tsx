@@ -48,7 +48,7 @@ const STORAGE_KEY = "lh:sidebar-open";
  *
  * Mirrors SIDEBAR_AUTOCLOSE in electron/main.cjs — keep in sync.
  */
-import type { ChatGPTControlBridge, NativeSubscriptionControlBridge } from "@/src/core";
+import type { ChatGPTControlBridge, NativeSubscriptionControlBridge, LegacySubscriptionControlBridge } from "@/src/core";
 const SIDEBAR_AUTOCLOSE = 928;
 
 // Module scope, guarded for SSR (the server has no navigator).
@@ -62,6 +62,7 @@ declare global {
 			platform?: string;
 			chatgpt?: ChatGPTControlBridge;
 			subscriptions?: NativeSubscriptionControlBridge;
+			legacySubscriptions?: LegacySubscriptionControlBridge;
 			expandWindow: () => void;
 			/** The zoom truth (owner round 7): subscribes to "lh:zoom" pushes; returns unsubscribe. */
 			onZoom?: (cb: (factor: number) => void) => () => void;
@@ -84,11 +85,11 @@ export function useSidebar() {
 
 export function SidebarProvider({ children }: { children: React.ReactNode }) {
 	useEffect(() => {
-		const bridge = window.lh?.chatgpt;
-		if (!bridge) return;
-		const off = bridge.onChange(() => notifySettingsSaved("keys"));
+		const bridges = [window.lh?.chatgpt, window.lh?.subscriptions, window.lh?.legacySubscriptions].filter((b) => !!b);
+		if (!bridges.length) return;
+		const offs = bridges.map((b) => b.onChange(() => notifySettingsSaved("keys")));
 		notifySettingsSaved("keys"); // cover changes missed before this root-lifetime subscription
-		return off;
+		return () => offs.forEach((off) => off());
 	}, []);
 	// Start closed so server and client first-render agree (no hydration
 	// mismatch); the stored value is applied after mount.

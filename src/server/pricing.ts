@@ -9,7 +9,8 @@ import { isSubscriptionModel, sessionCost as foldSessionCost, turnCost as foldTu
 
 function catalogModel(id: string) {
 	const colon = id.indexOf(":");
-	if (colon < 0 || isSubscriptionModel(id)) return undefined;
+	// Subscription allowance is not API-dollar billing; custom rates remain picker metadata.
+	if (colon < 0 || isSubscriptionModel(id) || id.startsWith("subscription-") || id.startsWith("custom-")) return undefined;
 	return piModels().getModel(id.slice(0, colon), id.slice(colon + 1));
 }
 
