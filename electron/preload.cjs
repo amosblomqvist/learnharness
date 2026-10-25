@@ -19,9 +19,17 @@
  *
  *   window.lh.onUpdateStatus(cb) / window.lh.installUpdate() — the
  *   auto-update channel (Wave C, 2026-10-10): "lh:update-status" pushes
- *   {status:"downloaded", version} once an update is staged; installUpdate
- *   asks main to kill the server and quit-and-install. Browser builds:
- *   both absent, the banner never renders.
+ *   the whole update state {status, version, error, manual} on every
+ *   change (electron/update-state.cjs); installUpdate asks main to kill
+ *   the server and quit-and-install. Browser builds: all absent, the
+ *   banner never renders and Settings shows the version only.
+ *
+ *   window.lh.getUpdateState() / window.lh.checkForUpdates() — Settings →
+ *   General (owner 2026-10-25): read the current state on mount, start a
+ *   manual check (always runs, whatever the Automatic updates toggle says).
+ *
+ *   window.lh.onOpenSettings(cb) — the menu's "Check for Updates…" asks
+ *   the renderer to open Settings on a section ("general").
  *
  * Channel names are mirrored in electron/main.cjs — keep them in sync.
  */
@@ -71,4 +79,11 @@ contextBridge.exposeInMainWorld("lh", {
 		return () => ipcRenderer.removeListener("lh:update-status", listener);
 	},
 	installUpdate: () => ipcRenderer.send("lh:update-install"),
+	getUpdateState: () => ipcRenderer.invoke("lh:update:get"),
+	checkForUpdates: () => ipcRenderer.invoke("lh:update:check"),
+	onOpenSettings: (cb) => {
+		const listener = (_event, section) => cb(section);
+		ipcRenderer.on("lh:open-settings", listener);
+		return () => ipcRenderer.removeListener("lh:open-settings", listener);
+	},
 });

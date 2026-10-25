@@ -17,7 +17,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { Hint, hintText } from "../components/ui/hint.tsx";
 import { TOOLTIP_DELAY_MS } from "../components/ui/tooltip.tsx";
-import { AUTO_UPDATE_HINT } from "../components/settings/settings-dialog.tsx";
+import { AUTO_UPDATE_HINT } from "../components/settings/update-settings.tsx";
 import { IS_MAC } from "../src/core/keyboard.ts";
 
 describe("hintText — the parenthesized composition", () => {
@@ -46,7 +46,7 @@ describe("subtlety round pins (owner 2026-09-25)", () => {
 
 describe("spot-pins: the dev-speak cull (owner copy review at merge)", () => {
 	it("the auto-update hint is honest user language — no stream jargon", () => {
-		assert.equal(AUTO_UPDATE_HINT, "Automatic updates arrive in an upcoming release");
+		assert.equal(AUTO_UPDATE_HINT, "Turn this off to prevent the app from checking for updates.");
 		assert.ok(!AUTO_UPDATE_HINT.includes("wave"), "no stream vocabulary");
 	});
 });

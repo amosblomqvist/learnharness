@@ -24,12 +24,13 @@
  *     would shadow every settings-page key change until restart.
  */
 
-const { app, BrowserWindow, Menu, ipcMain, session, shell, dialog } = require("electron");
+const { app, BrowserWindow, Menu, ipcMain, session, shell } = require("electron");
 const { createChatGPT, fileStore } = require("./chatgpt.cjs");
 const { attachChatGPTChild, trustedSender, chatGPTControl } = require("./chatgpt-ipc.cjs");
 const { createSubscriptions, loadSubscriptionSDK } = require("./subscriptions.cjs");
 const { attachSubscriptionChild, subscriptionControl } = require("./subscription-ipc.cjs");
 const { desktopAPIHeaders } = require("./desktop-api.cjs");
+const { INITIAL_UPDATE_STATE, nextUpdateState, readAutoUpdateSetting } = require("./update-state.cjs");
 const { randomBytes } = require("node:crypto");
 const { spawn } = require("node:child_process");
 const fs = require("node:fs");
@@ -427,6 +428,9 @@ const ZOOM_LADDER = [0.75, 0.9, 1, 1.1, 1.25, 1.5, 1.75, 2];
  *    local server — the pre-release verification drill (serve
  *    latest-mac.yml + zip + blockmap from any localhost HTTP dir and
  *    watch a real installed copy find/download/restart). Test-only seam.
+ *  - SETTINGS → GENERAL (owner 2026-10-25): "Automatic updates" off skips
+ *    the startup + 24h checks (read from data/settings.json at check
+ *    time — no restart); manual checks always run and download.
  *
  * Install path: the downloaded update applies on quit (autoInstallOnAppQuit
  * — Squirrel.Mac stages natively and swaps on relaunch). The renderer
@@ -436,31 +440,46 @@ const ZOOM_LADDER = [0.75, 0.9, 1, 1.1, 1.25, 1.5, 1.75, 2];
  * and before-quit alone would race the swap. */
 const UPDATE_CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000;
 let autoUpdater = null; // electron-updater's, packaged builds only
+// ONE update state (in-app update controls, owner 2026-10-25): folded from
+// the updater's events (electron/update-state.cjs), pushed on every change,
+// and readable via "lh:update:get" for a Settings opened later.
+let updateState = INITIAL_UPDATE_STATE;
 
-function broadcastUpdateStatus(status) {
+function setUpdateState(event) {
+	const next = nextUpdateState(updateState, event);
+	if (next === updateState) return;
+	updateState = next;
 	for (const win of BrowserWindow.getAllWindows()) {
 		try {
-			win.webContents.send("lh:update-status", status);
+			win.webContents.send("lh:update-status", updateState);
 		} catch {
 			/* window mid-teardown — the next push retries */
 		}
 	}
 }
 
+/** One check. Automatic checks (startup, 24h) honor Settings → General →
+ *  Automatic updates; manual ones (Settings button, menu) always run. A
+ *  check or download already in flight swallows the request. The result
+ *  reaches the renderer through the state, never a native dialog. */
 function checkForUpdates({ manual = false } = {}) {
 	if (!autoUpdater) return;
+	if (!manual && !readAutoUpdateSetting(DATA_DIR())) {
+		log("auto-update: automatic check skipped (turned off in Settings)");
+		return;
+	}
+	if (updateState.status === "checking" || updateState.status === "downloading") return;
+	setUpdateState({ type: "checking", manual });
 	autoUpdater
 		.checkForUpdates()
 		.then((result) => {
-			// The download itself is silent (autoDownload); the banner fires on
-			// update-downloaded. Manual checks additionally answer directly.
-			if (!manual) return;
-			const version = result?.updateInfo?.version;
-			if (!version) dialog.showMessageBox({ type: "info", message: "You're up to date.", detail: `LearnHarness ${app.getVersion()} is the latest version.` });
+			// null = the updater declined to run (not packaged / no feed): the
+			// events never fire, so settle the state here.
+			if (!result) setUpdateState({ type: "not-available" });
 		})
 		.catch((err) => {
 			log(`update check failed: ${err?.message ?? err}`);
-			if (manual) dialog.showMessageBox({ type: "warning", message: "Couldn't check for updates.", detail: String(err?.message ?? err) });
+			setUpdateState({ type: "error", message: err?.message ?? err });
 		});
 }
 
@@ -477,12 +496,14 @@ function installUpdateNow() {
 function setupAutoUpdater() {
 	if (!app.isPackaged) {
 		log("auto-update: dev build — updater disabled");
+		setUpdateState({ type: "disabled" });
 		return;
 	}
 	try {
 		autoUpdater = require("electron-updater").autoUpdater;
 	} catch (err) {
 		log(`auto-update: electron-updater unavailable (${err?.message ?? err}) — updates disabled`);
+		setUpdateState({ type: "disabled" });
 		return;
 	}
 	const feed = process.env.LH_UPDATE_FEED;
@@ -500,11 +521,28 @@ function setupAutoUpdater() {
 		debug: (m) => {}, // too chatty for the persistent log
 		error: (m) => log(`updater error: ${m}`),
 	};
+	autoUpdater.on("update-available", (info) => setUpdateState({ type: "available", version: info?.version }));
+	autoUpdater.on("update-not-available", () => setUpdateState({ type: "not-available" }));
 	autoUpdater.on("update-downloaded", (info) => {
 		log(`update downloaded: ${info?.version} — banner shown`);
-		broadcastUpdateStatus({ status: "downloaded", version: info?.version ?? null });
+		setUpdateState({ type: "downloaded", version: info?.version });
 	});
-	autoUpdater.on("error", (err) => log(`updater error: ${err?.message ?? err}`));
+	autoUpdater.on("error", (err) => {
+		log(`updater error: ${err?.message ?? err}`);
+		setUpdateState({ type: "error", message: err?.message ?? err });
+	});
+}
+
+/** Menu "Check for Updates…": the answer lives in Settings → General, so
+ *  open it there and check — one surface for update state. */
+function checkForUpdatesFromMenu() {
+	const win = BrowserWindow.getAllWindows()[0];
+	if (win) {
+		if (win.isMinimized()) win.restore();
+		win.focus();
+		win.webContents.send("lh:open-settings", "general");
+	}
+	checkForUpdates({ manual: true });
 }
 
 function zoomStep(win, dir) {
@@ -530,9 +568,8 @@ function installMenu() {
 			label: app.name,
 			submenu: [
 				{ role: "about" },
-				// Manual check (Wave C): answers via native dialog — no renderer
-				// round-trip. The 24h automatic checks stay silent.
-				{ label: "Check for Updates…", click: () => checkForUpdates({ manual: true }) },
+				// Manual check: opens Settings → General, where the result shows.
+				{ label: "Check for Updates…", click: () => checkForUpdatesFromMenu() },
 				{ type: "separator" },
 				{ role: "hide" },
 				{ role: "hideOthers" },
@@ -654,6 +691,11 @@ async function main() {
 	// are log lines — this can never block boot.
 	setupAutoUpdater();
 	ipcMain.on("lh:update-install", () => installUpdateNow());
+	ipcMain.handle("lh:update:get", () => updateState);
+	ipcMain.handle("lh:update:check", () => {
+		checkForUpdates({ manual: true });
+		return updateState;
+	});
 
 	// Sidebar-at-narrow-window (owner, 2026-09-17): the renderer auto-closes
 	// the sidebar below SIDEBAR_AUTOCLOSE (928px); opening it again at that

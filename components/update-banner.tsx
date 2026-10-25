@@ -12,14 +12,13 @@
  */
 
 import { useEffect, useState } from "react";
+import type { UpdateState } from "@/components/settings/update-settings.tsx";
 
 // The window.lh bridge type lives in components/sidebar.tsx (the incumbent
 // declare-global) — onUpdateStatus/installUpdate are declared there too.
 
-type UpdateStatus = { status: string; version: string | null };
-
 export default function UpdateBanner() {
-	const [ready, setReady] = useState<UpdateStatus | null>(null);
+	const [ready, setReady] = useState<UpdateState | null>(null);
 
 	useEffect(() => {
 		// Absent bridge (browser / dev) → stays hidden forever.

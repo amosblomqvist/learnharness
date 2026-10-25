@@ -13,6 +13,7 @@ import { LhMark } from "@/components/lh-mark";
 import { BrailleSpinner } from "@/components/braille-spinner";
 import { KeyboardShortcuts } from "@/components/keyboard-shortcuts";
 import { SettingsDialogProvider, useSettingsDialog } from "@/components/settings/settings-dialog.tsx";
+import type { UpdateState } from "@/components/settings/update-settings.tsx";
 import { Hint } from "@/components/ui/hint";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -66,9 +67,14 @@ declare global {
 			/** The zoom truth (owner round 7): subscribes to "lh:zoom" pushes; returns unsubscribe. */
 			onZoom?: (cb: (factor: number) => void) => () => void;
 			getZoom?: () => Promise<number>;
-			/** Auto-update channel (Wave C, 2026-10-10): "lh:update-status" pushes once a staged update exists. */
-			onUpdateStatus?: (cb: (status: { status: string; version: string | null }) => void) => () => void;
+			/** Auto-update channel (Wave C, 2026-10-10): "lh:update-status" pushes the update state on every change. */
+			onUpdateStatus?: (cb: (status: UpdateState) => void) => () => void;
 			installUpdate?: () => void;
+			/** Settings → General (2026-10-25): current state on mount; a manual check. */
+			getUpdateState?: () => Promise<UpdateState>;
+			checkForUpdates?: () => Promise<UpdateState>;
+			/** The menu's "Check for Updates…" opens Settings on a section. */
+			onOpenSettings?: (cb: (section: string) => void) => () => void;
 		};
 	}
 }

@@ -1,6 +1,16 @@
+import fs from "node:fs";
 import type { NextConfig } from "next";
 
+const pkg = JSON.parse(fs.readFileSync(new URL("./package.json", import.meta.url), "utf-8")) as { version: string; homepage: string };
+
 const nextConfig: NextConfig = {
+	// Settings → General shows the version + its release notes (owner
+	// 2026-10-25). Inlined at build time, so browser, dev and desktop all
+	// read the same package.json the shell was built from.
+	env: {
+		LH_VERSION: pkg.version,
+		LH_HOMEPAGE: pkg.homepage,
+	},
 	// Desktop target (Electron wrapper, 2026-09-17): standalone output = a
 	// self-contained .next/standalone/server.js the Electron shell spawns
 	// on 127.0.0.1. Harmless for plain web deploys (extra build output).

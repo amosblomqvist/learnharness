@@ -63,7 +63,9 @@ export function SettingsRow({
 	dimmed,
 }: {
 	label: string;
-	hint?: string;
+	/** Muted line(s) under the label — usually text; the version row puts a
+	 *  status line and a link here. */
+	hint?: ReactNode;
 	children: React.ReactNode;
 	testid?: string;
 	/** Dependency graying, graph-view style: the whole row dims when the
