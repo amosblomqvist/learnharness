@@ -218,6 +218,10 @@ function startServer(port) {
 					// (no env injection anymore: a spawn-time copy would shadow every
 					// settings-page key change until restart; env wins over file).
 					LH_AUTH_FILE: AUTH_FILE(),
+					// The bundled local dictation helper (mac extraResources);
+					// absent on other platforms, where the server reports it
+					// unavailable and dictation stays on Deepgram.
+					LH_LOCAL_STT_BIN: path.join(process.resourcesPath, "bin", "lh-parakeet-stt"),
 					LH_DESKTOP_SERVER: "1",
 					LH_DESKTOP_API_SECRET: desktopAPISecret,
 				},

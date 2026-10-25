@@ -6,7 +6,12 @@ import { useSettingsDialog } from "@/components/settings/settings-dialog";
 import { Hint } from "@/components/ui/hint";
 
 /**
- * Voice dictation — the cloud engine (STT wave 1, 2026-09-17).
+ * Voice dictation — the cloud engine (STT wave 1, 2026-09-17), plus the
+ * keyless LOCAL engine (macOS Apple Silicon): with no Deepgram key, the run
+ * captures the same frames, holds them, and uploads the whole utterance to
+ * /api/stt/local at stop — Parakeet on the Neural Engine, see
+ * src/server/local-stt.ts and resolveEngine below. Everything else in this
+ * file (deferred flush, meter, finish/cancel) is shared by both engines.
  *
  * Architecture (docs/research/stt.md): the renderer captures mic audio in
  * an AudioWorklet (public/worklets/pcm-capture.js → linear16 16kHz mono),
@@ -168,6 +173,49 @@ export function createWarmMinter(
 
 const warmTokens = createWarmMinter(mintFreshToken);
 
+/**
+ * Engine choice (local dictation): a Deepgram key, when present, keeps
+ * winning — existing setups behave exactly as before. KEYLESS, the local
+ * engine (/api/stt/local: Parakeet on the Neural Engine, macOS Apple
+ * Silicon) takes the run when this machine has it; otherwise the keyless
+ * error stands. The local probe also warms the helper, so its model loads
+ * while the learner is still talking.
+ */
+export type DictationEngine = { kind: "deepgram"; token: string } | { kind: "local" };
+
+export async function resolveEngine(
+	mint: () => Promise<string>,
+	localAvailable: () => Promise<boolean>,
+): Promise<DictationEngine> {
+	try {
+		return { kind: "deepgram", token: await mint() };
+	} catch (e) {
+		if (!(e instanceof Error) || e.message !== DICTATION_KEYLESS) throw e;
+		if (await localAvailable().catch(() => false)) return { kind: "local" };
+		throw e;
+	}
+}
+
+async function probeLocal(): Promise<boolean> {
+	const res = await fetch("/api/stt/local");
+	if (!res.ok) return false;
+	const data = (await res.json()) as { available?: boolean };
+	return data.available === true;
+}
+
+/** Concatenate a run's captured linear16 frames into one upload body. The
+ *  worklet posts each frame as an Int16Array (typed below as ArrayBuffer —
+ *  WebSocket.send takes either), so copy BYTES, never element values. */
+export function joinPcm(frames: Array<ArrayBuffer | ArrayBufferView>): Uint8Array<ArrayBuffer> {
+	const out = new Uint8Array(frames.reduce((n, f) => n + f.byteLength, 0));
+	let offset = 0;
+	for (const f of frames) {
+		out.set(ArrayBuffer.isView(f) ? new Uint8Array(f.buffer, f.byteOffset, f.byteLength) : new Uint8Array(f), offset);
+		offset += f.byteLength;
+	}
+	return out;
+}
+
 /* Persistent capture graph (mitigation C, owner 2026-09-27): one
  * app-lifetime AudioContext + a module-load memo. Created under the
  * click gesture (autoplay policy) and NEVER closed — per-run nodes
@@ -315,6 +363,13 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 	/** Resolvers waiting for the run to fully end (finish(), owner
 	 *  2026-10-01): released by cleanup() — every terminal path runs it. */
 	const waitersRef = useRef<Array<() => void>>([]);
+	/** The run's engine once resolved — null while still deciding. */
+	const engineRef = useRef<DictationEngine["kind"] | null>(null);
+	/** LOCAL runs: every captured frame, uploaded once at stop (no cap —
+	 *  the server bounds a run at 30 min). */
+	const localFramesRef = useRef<ArrayBuffer[]>([]);
+	/** LOCAL runs: the in-flight transcription upload (cancel aborts it). */
+	const uploadRef = useRef<AbortController | null>(null);
 
 	/** Flush the buffered transcript into the primary input — question claim
 	 *  first, composer fallback. Called exactly once per run, at cleanup; the
@@ -336,6 +391,10 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 			safetyRef.current = null;
 		}
 		pendingRef.current = [];
+		engineRef.current = null;
+		localFramesRef.current = [];
+		uploadRef.current?.abort();
+		uploadRef.current = null;
 		for (const track of streamRef.current?.getTracks() ?? []) track.stop();
 		streamRef.current = null;
 		sourceRef.current?.disconnect();
@@ -440,8 +499,8 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 		// the token runs concurrently with it. 127.0.0.1 is a secure
 		// context, so getUserMedia works without TLS; macOS TCC prompts on
 		// first use.
-		const tokenPromise = warmTokens.mint();
-		tokenPromise.catch(() => {}); // surfaced below; no unhandled rejection
+		const enginePromise = resolveEngine(warmTokens.mint, probeLocal);
+		enginePromise.catch(() => {}); // surfaced below; no unhandled rejection
 		const micPromise = navigator.mediaDevices.getUserMedia({
 			audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true },
 		});
@@ -468,6 +527,11 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 				if (msg.type === "level") {
 					levelRef.current = msg.rms ?? 0; // never reset to zero (dictate pattern)
 				} else if (msg.type === "audio") {
+					// LOCAL: hold the whole run; it uploads once, at stop.
+					if (engineRef.current === "local") {
+						localFramesRef.current.push(msg.buffer!);
+						return;
+					}
 					const ws = wsRef.current;
 					if (ws && ws.readyState === WebSocket.OPEN) ws.send(msg.buffer!);
 					// Mitigation A: not OPEN yet (handshake or reconnect gap) —
@@ -497,9 +561,9 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 			return;
 		}
 		if (gen !== genRef.current) return;
-		let token: string;
+		let engine: DictationEngine;
 		try {
-			token = await tokenPromise;
+			engine = await enginePromise;
 		} catch (e) {
 			if (gen !== genRef.current) return;
 			setError(e instanceof Error ? e.message : "token unavailable");
@@ -507,9 +571,19 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 			return;
 		}
 		if (gen !== genRef.current) return;
+		if (engine.kind === "local") {
+			// Frames captured while the engine resolved move into the run's
+			// buffer — nothing spoken before this point is lost.
+			engineRef.current = "local";
+			localFramesRef.current = pendingRef.current;
+			pendingRef.current = [];
+			setPhase("recording");
+			return;
+		}
+		engineRef.current = "deepgram";
 		// Mitigation B: the handshake fires the moment the graph is live,
 		// overlapping any remaining token wait — mic-gated, never before it.
-		openSocket(gen, token);
+		openSocket(gen, engine.token);
 	}, [openSocket, cleanup]);
 
 	const stop = useCallback(() => {
@@ -525,6 +599,37 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 		sourceRef.current = null;
 		workletRef.current?.disconnect();
 		workletRef.current = null;
+
+		if (engineRef.current === "local") {
+			// One batch pass over the whole run; the text joins the deferred
+			// buffer and cleanup() flushes it, exactly like Deepgram's finals.
+			const body = joinPcm(localFramesRef.current);
+			localFramesRef.current = [];
+			const upload = new AbortController();
+			uploadRef.current = upload;
+			fetch("/api/stt/local", {
+				method: "POST",
+				headers: { "Content-Type": "application/octet-stream" },
+				body,
+				signal: upload.signal,
+			})
+				.then(async (res) => {
+					const data = (await res.json()) as { text?: string; message?: string };
+					if (!res.ok) throw new Error(data.message ?? `local dictation ${res.status}`);
+					return data.text ?? "";
+				})
+				.then((text) => {
+					if (gen !== genRef.current) return;
+					if (text) bufferRef.current.push(text);
+					cleanup();
+				})
+				.catch((e: unknown) => {
+					if (gen !== genRef.current) return; // cancelled — cleanup already ran
+					setError(e instanceof Error ? e.message : "local dictation failed");
+					cleanup();
+				});
+			return;
+		}
 
 		const ws = wsRef.current;
 		if (ws && ws.readyState === WebSocket.OPEN) {
@@ -617,7 +722,8 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
  *             whole middle is the affordance, per the owner).
  *   active    optimistic from the CLICK: red stop pill + the fixed-width
  *             meter (no interim text ever shifts it). Spinner while
- *             Deepgram flushes the last final.
+ *             Deepgram flushes the last final (or the local engine
+ *             transcribes the run).
  *   error     the wide button again, label swapped for the failure reason
  *             (full text in the tooltip), cleared on the next click.
  */

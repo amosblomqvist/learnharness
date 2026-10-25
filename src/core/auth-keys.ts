@@ -33,7 +33,8 @@ export const AUTH_KEYS: readonly AuthKeyInfo[] = [
 	{
 		id: "DEEPGRAM_API_KEY",
 		label: "Deepgram",
-		description: "Speech-to-text key for dictation — needs ≥ Member permission in the Deepgram console to mint tokens.",
+		description:
+			"Speech-to-text key for dictation — needs ≥ Member permission in the Deepgram console to mint tokens. Optional on Apple Silicon Macs: without it, dictation runs on-device.",
 		docsUrl: "https://console.deepgram.com/",
 	},
 	{

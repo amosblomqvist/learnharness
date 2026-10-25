@@ -133,6 +133,11 @@ jobs:
       - run: node scripts/smoke-provider-runtime.mjs
       - run: node scripts/build-server.mjs
       - run: node scripts/smoke-server.mjs --electron
+      # The local dictation helper (mac extraResources in
+      # electron-builder.yml) — a Swift build against FluidAudio.
+      - name: Build local dictation helper
+        if: runner.os == 'macOS'
+        run: npm run stt:build
       - name: Validate macOS release secrets
         if: github.event_name == 'push' && runner.os == 'macOS'
         env:
