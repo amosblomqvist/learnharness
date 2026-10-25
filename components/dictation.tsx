@@ -1047,8 +1047,8 @@ export function DictationBar({ dictation, disabled = false }: { dictation: Dicta
 						Cancel
 					</button>
 				</Hint>
-				<span className="shrink-0 text-xs text-muted-foreground">Downloading speech model {percent}%</span>
-				<div className="h-1 min-w-0 flex-1 overflow-hidden rounded-full bg-foreground/10" role="progressbar" aria-valuenow={percent} aria-valuemin={0} aria-valuemax={100}>
+				<span className="shrink-0 text-xs tabular-nums text-muted-foreground">{percent}%</span>
+				<div className="h-1 min-w-0 flex-1 overflow-hidden rounded-full bg-foreground/10" role="progressbar" aria-label="Downloading speech model" aria-valuenow={percent} aria-valuemin={0} aria-valuemax={100}>
 					<div className="h-full rounded-full bg-foreground/40 transition-[width]" style={{ width: `${percent}%` }} />
 				</div>
 			</div>
