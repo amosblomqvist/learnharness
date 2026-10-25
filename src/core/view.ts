@@ -34,7 +34,7 @@
 
 import type { AssistantMessage, ToolResultMessage } from "@earendil-works/pi-ai";
 import type { LhMarkerMessage, LhMessage } from "./native-messages.ts";
-import { modelSolutionForConclude, PRACTICE_CONCLUDE_TOOL, problemInputForConclude } from "./native-messages.ts";
+import { modelSolutionForConclude, PRACTICE_CONCLUDE_TOOL, problemInputForConclude, proseOf, SAY_TOOL } from "./native-messages.ts";
 import { activeCompactionOf, type CompactionDetails } from "./compaction.ts";
 import { QUESTION_TOOLS } from "./pending.ts";
 import type { SubagentArtifactData, SubagentResultMeta } from "./contracts/jobs.ts";
@@ -216,6 +216,9 @@ export function projectView(messages: readonly LhMessage[], live?: LiveTurnState
 					rest.push({ type: "text", id: `${m.id}-t${textN++}`, text: block.text, state: "done" });
 				} else if (block.type === "thinking") {
 					reasoning.push({ type: "reasoning", id: `${m.id}-r${reasoningN++}`, text: block.thinking, state: "done" });
+				} else if (block.type === "toolCall" && block.name === SAY_TOOL) {
+					const [text] = proseOf([block]);
+					if (text !== undefined) rest.push({ type: "text", id: `${m.id}-t${textN++}`, text, state: "done" });
 				} else if (block.type === "toolCall") {
 					const part = toolPartOf(block, live, streamingMessage);
 					// The conclusion's reveal join (owner round, 2026-10-05): the

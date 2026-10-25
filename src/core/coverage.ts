@@ -23,32 +23,24 @@ import { createHash } from "node:crypto";
 
 import type { CoverageEntry } from "./contracts/graph.ts";
 import type { LhMessage } from "./native-messages.ts";
+import { proseOf } from "./native-messages.ts";
 
 export type { CoverageEntry };
-
-/** The user-facing text of a native message (string or text blocks). */
-function textOf(content: unknown): string[] {
-	if (typeof content === "string") return content.trim() ? [content] : [];
-	if (!Array.isArray(content)) return [];
-	return content
-		.filter((c): c is { type: "text"; text: string } => (c as { type?: string }).type === "text")
-		.map((c) => c.text)
-		.filter((t) => t.trim().length > 0);
-}
 
 /**
  * The extraction-relevant lines of ONE native message — the shared seam
  * between the extractor's prompt and messageFingerprint (coverage).
  * TEACHER PROSE ONLY (owner, 2026-09-28): an assistant message yields one
- * line per text block; everything else (user messages, tool results,
- * markers) yields NOTHING and is invisible to coverage. `mid` is the
+ * line per prose block (text or say call); everything else (user
+ * messages, tool results, markers) yields NOTHING and is invisible to
+ * coverage. `mid` is the
  * message id — part of the hash input, so the same prose in two messages
  * is two slots (per-message coverage).
  */
 export function messageViewLines(message: LhMessage, mid: string): string[] {
 	const lines: string[] = [];
 	if ((message as { role?: string }).role !== "assistant") return lines;
-	for (const text of textOf((message as { content: unknown }).content)) {
+	for (const text of proseOf((message as { content: unknown }).content)) {
 		lines.push(`TEACHER [${mid}] ${text.trim()}`);
 	}
 	return lines;
@@ -64,7 +56,7 @@ export function teacherProseBlocks(messages: ReadonlyArray<LhMessage>): string[]
 	const out: string[] = [];
 	for (const message of messages) {
 		if ((message as { role?: string }).role !== "assistant") continue;
-		for (const text of textOf((message as { content: unknown }).content)) out.push(text.trim());
+		for (const text of proseOf((message as { content: unknown }).content)) out.push(text.trim());
 	}
 	return out;
 }

@@ -39,7 +39,7 @@ describe("AgentBuildOptions.toolToggles (the P2 bridge)", () => {
 		// No ctx → bare agent: quiz/ask only. A job-tool delta names tools
 		// that don't exist there — the bridge must not crash on it.
 		const bare = createTeacherAgent(undefined, { engine: fauxEngine(), toolToggles: { research: false } });
-		assert.deepEqual(toolNames(bare), ["ask_user_question", "quiz"]);
+		assert.deepEqual(toolNames(bare), ["ask_user_question", "quiz", "say"]);
 	});
 
 	it("flows into the prober's registry; probe_done survives everything", () => {
