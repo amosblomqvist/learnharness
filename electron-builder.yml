@@ -165,6 +165,13 @@ win:
 nsis:
   oneClick: true
   perMachine: false
+# Static AppImage runtime (AppImage/type2-runtime). The default "0.0.0"
+# toolset embeds the legacy AppImageKit runtime, which dlopen()s
+# libfuse.so.2 at startup; Fedora and Ubuntu 22.04+ don't ship that by
+# default, so the AppImage exited before the app started (#84). The static
+# runtime needs no libfuse2. The payload compression defaults to zstd.
+toolsets:
+  appimage: "1.0.3"
 linux:
   icon: build/icon.png
   target:
