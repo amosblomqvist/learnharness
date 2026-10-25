@@ -34,8 +34,8 @@
       "path": "src/server/flashcard-extraction.ts",
       "responsibility": "Admit bounded extraction only while app-window presence is live.",
       "implementation": "Cadence, leases, immutable source batches, claims, cancellation, retries and completion receipts.",
-      "x": 470,
-      "y": 360,
+      "x": 0,
+      "y": 4250,
       "interfaces": [
         {
           "id": "tick",
@@ -93,8 +93,8 @@
       "path": "src/agent/subagents/flashcards.ts",
       "responsibility": "Generate supported flashcards from teacher explanations and learner answers.",
       "implementation": "Dedicated visible-content projection, question/answer pairing, prompt, output schema and anchor validation.",
-      "x": 910,
-      "y": 700,
+      "x": 650,
+      "y": 4250,
       "interfaces": [
         {
           "id": "extract",
@@ -154,8 +154,8 @@
       "path": "src/server/flashcards.ts",
       "responsibility": "Own card content, source provenance, extraction receipts and review history.",
       "implementation": "Semantic service over an injected FlashcardStore; append-only evidence, versioned schema, conflict checks and notify-after-write.",
-      "x": 470,
-      "y": 700,
+      "x": 1300,
+      "y": 4250,
       "interfaces": [
         {
           "id": "commit",
@@ -288,8 +288,8 @@
       "path": "src/core/flashcards.ts",
       "responsibility": "Calculate the next due state from saved review evidence.",
       "implementation": "Pure algorithm with explicit time, versioned parameters and deterministic replay.",
-      "x": 910,
-      "y": 1040,
+      "x": 1950,
+      "y": 4250,
       "interfaces": [
         {
           "id": "schedule",
@@ -346,8 +346,8 @@
       "path": "app/flashcards/page.tsx",
       "responsibility": "Let the learner review due cards without an agent.",
       "implementation": "Due queue, reveal, rating, source links, stable active-card version and event-driven refetch.",
-      "x": 30,
-      "y": 1040,
+      "x": 0,
+      "y": 5100,
       "interfaces": [
         {
           "id": "page",

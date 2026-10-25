@@ -137,11 +137,12 @@ These are intentionally unresolved per AGENTS.md. The confirmed requirements at 
 
 ## Review artifacts and validation
 
-- [Current architecture slice](flashcards/architecture.json)
+- [Full current architecture map](flashcards/architecture.json)
+- [Coverage, module inventory and navigation](flashcards/coverage.md)
 - [Proposed task intent](flashcards/intent.json)
 - [Composed navigable plan](flashcards/plan.json)
 
-The JSON artifacts use planning-harness schema v1; existing vs proposed nodes and API edges are labeled. Source excerpts are captured from the pinned upstream revision, with hashes. TypeScript was inspected directly: the harness's Python syntax index cannot establish TypeScript coverage. No user sessions, credentials, generated flashcards or source index cache are included.
+The JSON artifacts use planning-harness schema v1; existing vs proposed nodes are labeled. Existing static-import edges are explicitly distinguished from proposed API contracts. Source excerpts are captured from the pinned upstream revision, with hashes. TypeScript was inspected directly: the harness's Python syntax index cannot establish TypeScript coverage. No user sessions, credentials, generated flashcards or source index cache are included.
 
 A planning-harness checkout can validate with `node scripts/plan.mjs validate /path/to/learnharness/docs/plans/flashcards/plan.json` and compose from the map + intent. The agent opens the viewer; the reviewer does not need to run terminal setup commands. See the PR evidence for the checks actually executed.
 
@@ -150,7 +151,9 @@ A planning-harness checkout can validate with `node scripts/plan.mjs validate /p
 - Shared planning-harness schema validation: passed.
 - Composing `architecture.json` + `intent.json` reproduces `plan.json`: passed.
 - Existing-node source excerpt ranges and full-file SHA-256 hashes match the inspected checkout: passed.
-- Canvas: 8 modules, 9 contracts, every connection routed.
+- Canvas: 24 modules (19 existing + 5 proposed), 107 static dependency edges and 9 proposed API contracts. Full-map and relevant-slice routing checked.
+- Coverage: all 533 tracked upstream files assigned exactly once; inventory and captured excerpt hashes checked against source.
+- Full/relevant toggle, contract inspection and restoring the full view exercised in the Textual viewer.
 - Textual headless smoke at 140×45: loaded the plan, selected a contract, opened its inspector and viewed proposed intent successfully.
 - Agent launcher opened this plan in Kitty and returned readiness.
 
