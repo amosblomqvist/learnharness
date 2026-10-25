@@ -16,3 +16,6 @@ auth.json
 
 # dev-fresh launcher scratch (fresh-user sim): disposable per launch
 .fresh-data/
+
+# local dictation helper build output (npm run stt:build)
+native/parakeet-stt/.build/

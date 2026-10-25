@@ -123,6 +123,13 @@ mac:
     NSMicrophoneUsageDescription: "LearnHarness uses the microphone only for speech-to-text input into your sessions."
   hardenedRuntime: true
   entitlements: build/entitlements.mac.plist
+  # Local dictation helper (native/parakeet-stt, built by `npm run
+  # stt:build` inside desktop:dist): a standalone Mach-O beside the server,
+  # signed with the app like every nested binary. electron/main.cjs hands
+  # its path to the server as LH_LOCAL_STT_BIN.
+  extraResources:
+    - from: native/parakeet-stt/.build/release/lh-parakeet-stt
+      to: bin/lh-parakeet-stt
   # Signing + notarization (flipped 2026-10-08): identity auto-detects the
   # Developer ID Application certificate from the login keychain;
   # notarize: true makes electron-builder sign → submit to Apple's notary

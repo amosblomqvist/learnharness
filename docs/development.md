@@ -24,6 +24,7 @@ npm run lint         # eslint — includes the import law (architecture §2)
 npm run typecheck    # tsc --noEmit
 
 npm run desktop:dev    # next dev + Electron shell pointed at it
+npm run stt:build      # macOS: build the local dictation helper (native/parakeet-stt, Swift 6 / Xcode)
 npm run desktop:dist   # local signed/notarized macOS arm64 build (LH_NOTARY keychain)
 
 # one-shot data scripts (run from the master tree only — data never crosses trees)
@@ -43,6 +44,8 @@ Secrets and machine-specific paths only. Model choice and thinking budgets are t
 | `OPENROUTER_API_KEY` | required — all LLM calls go through OpenRouter |
 | `GOOGLE_SEARCH_API_KEY` + `GOOGLE_CSE_ID` | researcher's `web_search` (Google Custom Search) |
 | `DEEPGRAM_API_KEY` | optional — dictation (STT token minting; audio streams browser→Deepgram, never through the server) |
+| `LH_LOCAL_STT_BIN` | optional — path to the local dictation helper (the desktop app sets it to its bundled copy; dev defaults to `native/parakeet-stt/.build/release/lh-parakeet-stt`) |
+| `LH_PARAKEET_MODEL` | optional — `v2` (English) or `v3` (multilingual) to pin the local Parakeet model; default: whichever is already cached, else v3 |
 | `CHROME_PATH` | optional system Chrome fallback for demo verification; the app's own browser helper is primary (nothing is downloaded) |
 
 The packaged desktop app takes keys from `userData/auth.json` (BYOK, mode 0600, read/written directly by the server via `LH_AUTH_FILE`). PDFs render natively with pdfjs/Skia; SVGs use resvg.
@@ -165,7 +168,7 @@ pricing-generation step: Pi AI's catalog and public calculator are the authority
 
 **Practice (problem sets).** A node selection resolves to the STORED reasoning chains it fully contains (a chain rides iff every member is selected; unchained nodes ride as singletons); the `/practice` creation dialog picks a birth-session cluster (the graph view's own groups) and freezes its propositions + chains into a self-contained `ProblemSet`. Three named-level axes steer generation (ladder rung 0–4, cue distance 0–2, Theory|Application — never a number to interpolate; defaults Direct exercise · Adjacent context · Theory), plus an optional free-form note the agents weigh but need not follow. Creation has two entries: the cluster picker on `/practice`, or the graph view's chain table — a full-bleed sortable table of every reasoning chain, grouped by birth cluster under the shared top bar, selecting chips, chains, or whole clusters, whose floating selection bar shows the exact `N nodes → M chains` the agents will receive — handing a free-form node selection to the same dialog — and carries the fenced Delete action, making it the graph's management view (whole-cluster cleanup through the same full-death confirm dialog). A partitioner agent covers every chain exactly once, one generator per partition writes problems against the owner's problem-engineering framework (commit-before-pose: statement + solution + rubric together), and grading is **strengthening, not assessment** — one attempt per problem with its own submit button, instant solution/rubric reveal, then a score 0–10 with brief reasoning landing live; nothing ever written back to the graph. Runs are registry-backed background jobs on the activity dock (no steer, never wakes the teacher); sets live in `data/practice`, crash-swept on boot.
 
-**Dictation.** Optional speech-to-text: the server mints short-lived Deepgram tokens; audio streams browser→Deepgram over WebSocket, never through the server.
+**Dictation.** Optional speech-to-text: the server mints short-lived Deepgram tokens; audio streams browser→Deepgram over WebSocket, never through the server. Without a Deepgram key, Apple Silicon Macs dictate on-device instead: the run's audio is uploaded once at stop to `/api/stt/local`, where a long-lived Swift helper (`native/parakeet-stt`, FluidAudio) transcribes it with Parakeet TDT on the Neural Engine. Models come from FluidAudio's shared cache (`~/Library/Application Support/FluidAudio/Models`), so an existing FluidAudio app's download (FluidVoice, VoiceInk, …) is reused; otherwise ~600 MB downloads on first use.
 
 ## Testing
 
