@@ -54,7 +54,11 @@ export type ChatInput =
 	 *  explicit go-ahead during the between-problems pause — the Next
 	 *  chip or Enter on an empty composer. Practice sessions only, and
 	 *  only with nothing active (mid-problem input rides the dock). */
-	| { type: "next" };
+	| { type: "next" }
+	/** Retry (owner, 2026-10-24): redo the learner's LAST text prompt —
+	 *  the server cuts the record right after that prompt (dropping the
+	 *  failed/unwanted response) and runs the turn again, no new message. */
+	| { type: "retry" };
 
 /** A wake-pipeline steer delivery — same turn composition, server-origin.
  *  Wave C (2026-09-26): the idle wake carries EVERY queued marker as its
@@ -180,6 +184,8 @@ export function parseChatInput(input: unknown): ChatInput {
 			return { type: "thinking", problemCallId: i.problemCallId, text: i.text };
 		case "next":
 			return { type: "next" };
+		case "retry":
+			return { type: "retry" };
 		default:
 			throw new ChatInputError(`unknown input type: ${String(i.type)}`);
 	}
@@ -210,6 +216,10 @@ export function inputAppends(
 		}
 		case "continue":
 			return dismissalConclusion(record);
+		case "retry":
+			// The cut happens on the record itself (handleChatInput); the
+			// prompt is already in it — nothing to append.
+			return [];
 		case "thinking": {
 			const active = activeProblemOf(record.messages);
 			if (!active || active.toolCallId !== input.problemCallId) {
@@ -246,4 +256,43 @@ function dismissalConclusion(record: { messages: LhMessage[] }): LhMessage[] {
 /** Is this tool name a question tool (dock-owned, answer-gated)? */
 export function isQuestionTool(name: string): boolean {
 	return (QUESTION_TOOLS as readonly string[]).includes(name);
+}
+
+/** Markers a retry must never cut across: compaction summaries and
+ *  sub-agent deliveries/aborts (server-origin events whose loss would be
+ *  silent). A dismissed problem marker rides the learner's next input and
+ *  is likewise left alone. */
+const RETRY_BLOCKING_MARKERS = new Set(["problem-dismissed", "compaction", "subagent-steer", "subagent-abort"]);
+
+/** Learner-origin messages a retry can redo: a text prompt, a question
+ *  answer (the question call's tool result), or a practice submission. */
+function isLearnerInput(m: LhMessage): boolean {
+	if (m.role === "user") return true;
+	if (m.role === "toolResult") return (QUESTION_TOOLS as readonly string[]).includes(m.toolName);
+	return m.role === "custom" && (m.customType === "practice-thinking" || m.customType === "practice-next");
+}
+
+/** The index of the learner input a retry would redo (the LAST one), or
+ *  null when a retry is not allowed: no input at all, a blocking marker
+ *  after it, or a sibling question still dangling (parallel questions —
+ *  the response is deferred until the last answer, so there is nothing to
+ *  redo yet). The input itself is KEPT; only what the assistant produced
+ *  after it is dropped. Pure; shared by the server's cut and the client's
+ *  optimistic trim. */
+export function retryPromptIndex(messages: readonly LhMessage[]): number | null {
+	for (let i = messages.length - 1; i >= 0; i--) {
+		const m = messages[i]!;
+		if (m.role === "custom" && RETRY_BLOCKING_MARKERS.has(m.customType)) return null;
+		if (isLearnerInput(m)) {
+			return danglingQuestionOf(messages.slice(0, i + 1) as LhMessage[]) === null ? i : null;
+		}
+	}
+	return null;
+}
+
+/** The record as a retry leaves it: everything up to and including the
+ *  last learner input. Null when a retry is not allowed. */
+export function retryBase(messages: readonly LhMessage[]): LhMessage[] | null {
+	const idx = retryPromptIndex(messages);
+	return idx === null ? null : messages.slice(0, idx + 1);
 }

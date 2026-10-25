@@ -1,3 +1,4 @@
+import { localizedPrompt } from "../language.ts";
 import { randomUUID } from "node:crypto";
 import type { AssistantMessage, Message, Tool, ToolResultMessage, Usage } from "@earendil-works/pi-ai";
 import { normalizeContext } from "@earendil-works/pi-ai";
@@ -328,7 +329,7 @@ async function streamOnce(
 	// 0.87.1: provider-facing contexts are TranscriptContexts — the prompt
 	// and tool declarations fold into a leading system message.
 	// normalizeContext is the library's only Context→TranscriptContext entry.
-	const stream = engine.streamFn(engine.model, normalizeContext({ systemPrompt, messages, tools }), {
+	const stream = engine.streamFn(engine.model, normalizeContext({ systemPrompt: localizedPrompt(systemPrompt), messages, tools }), {
 		sessionId,
 		reasoning: reasoning && reasoning !== "off" ? reasoning : undefined,
 		signal: abortSignal,

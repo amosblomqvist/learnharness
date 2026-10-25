@@ -6,6 +6,8 @@ import type { Usage } from "@earendil-works/pi-ai";
 import { PATHS } from "../../config.ts";
 import { APP_IDENTITY, piEngineFor, type PiEngine } from "./models.ts";
 import { effectivePromptSegments } from "./prompt-segments.ts";
+import { withLanguage } from "./language.ts";
+import type { OutputLanguage } from "../core/settings.ts";
 import {
 	askUserQuestionTool,
 	createProberTools,
@@ -71,13 +73,19 @@ export type AgentKind = "prober" | "teacher" | "practice";
  *  tests/prompt-overrides.test.ts). Overrides are a static-file read
  *  through config paths, not request state — the store import carries no
  *  chat/job machinery. */
-export function composeInstructions(kind: AgentKind, switches?: Record<string, boolean>): string {
+export function composeInstructions(
+	kind: AgentKind,
+	switches?: Record<string, boolean>,
+	language?: OutputLanguage,
+): string {
 	const segments = effectivePromptSegments(kind, switches ?? {});
-	return segments
+	const composed = segments
 		.map((s) => (s.enabled ? s.overrideText! : s.sourceText))
 		.map((t) => t.trim())
 		.filter(Boolean)
 		.join("\n\n---\n\n");
+	// The language directive trails every override and fragment (language wave).
+	return withLanguage(composed, language);
 }
 
 // The switch-free source composition, cached per kind (module-load once).
@@ -120,6 +128,9 @@ export interface AgentBuildOptions {
 	 *  fresh per turn, honoring enabled overrides (switch on + file
 	 *  exists); absent → the cached pure-source composition. */
 	promptSwitches?: Record<string, boolean>;
+	/** The learner-facing output language (settings general.language);
+	 *  absent/"en" composes the pure English prompt. */
+	language?: OutputLanguage;
 	/** Native conversation identity: the existing persisted chat id, reused
 	 * across reconstructed prober, teacher, and practice Agents.
 	 * Debug: when set AND LH_PROVIDER_EVENTS=1, raw provider stream events
@@ -175,9 +186,10 @@ function baseAgentOptions(kind: AgentKind, opts: AgentBuildOptions, tools: Agent
 	// ("practice" is not a ModelRole) honest about that.
 	const engine = opts.engine ?? piEngineFor(kind as "prober" | "teacher");
 	const stopper = makeQuestionStopper();
-	const systemPrompt = opts.promptSwitches
-		? composeInstructions(kind, opts.promptSwitches)
-		: composedInstructions[kind]!;
+	const systemPrompt =
+		opts.promptSwitches || opts.language
+			? composeInstructions(kind, opts.promptSwitches, opts.language)
+			: composedInstructions[kind]!;
 	// Debug recorder (owner, 2026-10-04): raw provider events when
 	// LH_PROVIDER_EVENTS=1 and the caller handed a chatId; undefined is
 	// the normal no-observer path (tests, env-off).

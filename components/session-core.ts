@@ -24,6 +24,7 @@ import {
 	newThinkingMessage,
 	newUserMessage,
 	projectView,
+	retryBase,
 	type ChatInput,
 	type LhMarkerMessage,
 	type LhMessage,
@@ -563,7 +564,9 @@ export class SessionModel {
 	 * server's 409 + identity retry covers the wake-race window).
 	 */
 	async send(input: ChatInput): Promise<void> {
-		if (!this.readyRef) return;
+		// A retry is also the way OUT of a failed state (the server's 409
+		// still guards a genuinely running turn).
+		if (!this.readyRef && !(input.type === "retry" && this.statusValue === "error")) return;
 		this.consumeAbort?.abort();
 		const controller = new AbortController();
 		this.consumeAbort = controller;
@@ -586,6 +589,18 @@ export class SessionModel {
 		} else if (input.type === "answer") {
 			const tool = pendingCallTool([...this.base, ...this.tail], input.toolCallId) ?? "quiz";
 			optimistic.push({ ...newAnswerResult(input.toolCallId, tool, input.answer), id: localId() });
+		}
+		if (input.type === "retry") {
+			// The dropped response disappears at once; the refetch-first
+			// reattach below lands the server's cut record on top.
+			const kept = retryBase([...this.base, ...this.tail]);
+			if (kept) {
+				this.mutate(() => {
+					this.base = kept;
+					this.tail = [];
+					this.streamingMessageId = null;
+				});
+			}
 		}
 		if (optimistic.length > 0) this.mutate(() => {
 			this.tail = [...this.tail, ...optimistic];

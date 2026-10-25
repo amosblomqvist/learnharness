@@ -23,7 +23,7 @@ import type {
 	ModelsSettings,
 	RoleModelOverride,
 } from "../core/settings.ts";
-import { BACKGROUND_MODEL_ROLES, COMPACTION_THRESHOLD_FLOOR, EXTRACTION_CHUNK_TOKENS_FLOOR, MODEL_SLOTS } from "../core/settings.ts";
+import { BACKGROUND_MODEL_ROLES, COMPACTION_THRESHOLD_FLOOR, EXTRACTION_CHUNK_TOKENS_FLOOR, MODEL_SLOTS, OUTPUT_LANGUAGES, type OutputLanguage } from "../core/settings.ts";
 import { WRITABLE_TOOL_KEYS } from "../core/pending.ts";
 
 /** Parsed-or-rejected — `ok: false` carries the 400's error message. */
@@ -75,7 +75,7 @@ function asRecord(body: unknown): Record<string, unknown> | null {
 	return body as Record<string, unknown>;
 }
 
-/** general: { autoUpdate?: boolean } */
+/** general: { autoUpdate?: boolean, language?: "pt-BR" | "en" } */
 export function parseGeneralSettingsBody(body: unknown): SettingsBodyResult<GeneralSettings> {
 	const raw = asRecord(body);
 	if (!raw) return { ok: false, error: "Invalid JSON body" };
@@ -85,6 +85,12 @@ export function parseGeneralSettingsBody(body: unknown): SettingsBodyResult<Gene
 			return { ok: false, error: "autoUpdate must be a boolean" };
 		}
 		settings.autoUpdate = raw.autoUpdate;
+	}
+	if (raw.language !== undefined) {
+		if (!(OUTPUT_LANGUAGES as readonly unknown[]).includes(raw.language)) {
+			return { ok: false, error: `language must be one of: ${OUTPUT_LANGUAGES.join(", ")}` };
+		}
+		settings.language = raw.language as OutputLanguage;
 	}
 	return { ok: true, settings };
 }

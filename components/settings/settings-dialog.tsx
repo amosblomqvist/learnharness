@@ -40,7 +40,7 @@ import {
 	type UserSettings,
 } from "@/src/core";
 import { useAppearance } from "./appearance.tsx";
-import { SettingsSection, SettingsRow, Toggle } from "./controls.tsx";
+import { SettingsSection, SettingsRow, Toggle, ThinSelect } from "./controls.tsx";
 import { AgentSection } from "./agent-section.tsx";
 import type { ModelsSettings } from "@/src/core";
 import { MENU_CLOSE_EVENT, MENU_OPEN_EVENT } from "@/components/menu-shell";
@@ -77,6 +77,7 @@ const DialogContext = createContext<{ open: (section?: string, row?: string) => 
  *  setup flow deep-links to Keys when no provider key exists yet). */
 /** The auto-update row's hint (tooltip wave): honest user language — no
  *  stream vocabulary. Exported for the copy pin (tooltip-mechanism test). */
+export const LANGUAGE_HINT = "Language the agents write in: replies, questions, and generated content";
 export const AUTO_UPDATE_HINT = "Automatic updates arrive in an upcoming release";
 
 export function SettingsDialogProvider({
@@ -371,9 +372,32 @@ export function SettingsDialogBody({
 											checked={record.general?.autoUpdate ?? true}
 											label="auto update"
 											onChange={(on) =>
-												void write("general", { autoUpdate: on })
+												void write("general", {
+													...record.general,
+													autoUpdate: on,
+												})
 											}
 										/>
+									</SettingsRow>
+									<SettingsRow
+										label="Language"
+										hint={LANGUAGE_HINT}
+										testid="row-language"
+									>
+										<ThinSelect
+											value={record.general?.language ?? "pt-BR"}
+											ariaLabel="language"
+											testid="select-language"
+											onChange={(language) =>
+												void write("general", {
+													...record.general,
+													language,
+												})
+											}
+										>
+											<option value="pt-BR">Português (Brasil)</option>
+											<option value="en">English</option>
+										</ThinSelect>
 									</SettingsRow>
 								</SettingsSection>
 							)}

@@ -1,7 +1,9 @@
 "use client";
 
+import { providerErrorHint } from "./provider-error-hint.ts";
 import { createContext, Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useChatSession } from "@/components/session";
+import { retryPromptIndex } from "@/src/core";
 import { visibleQueuedSteers } from "@/components/session-core";
 import { SetupDialog } from "@/components/setup-dialog";
 import { Hint } from "@/components/ui/hint";
@@ -48,7 +50,7 @@ import { PlanBlock, PlanPopup, latestTree } from "@/components/plan-block";
 import { PlanMarginalia, planExists } from "@/components/plan-window";
 import { MermaidOverlay, SessionMermaidContext } from "@/components/session-overlay";
 import { AbortTurnDialog, type AbortMode } from "@/components/abort-turn-dialog";
-import { ArrowRightIcon, DumbbellIcon, WaypointsIcon } from "lucide-react";
+import { ArrowRightIcon, DumbbellIcon, RotateCcwIcon, WaypointsIcon } from "lucide-react";
 import type { PlanBlockData } from "@/src/core";
 import { QuestionDock } from "@/components/question-dock";
 import { SessionFind } from "@/components/session-find";
@@ -541,6 +543,30 @@ export function Chat({
 	// color-coded dotted divider at each boundary; the header chip reads the
 	// session's current phase.
 	const phases = useMemo(() => phaseTimeline(messages), [messages]);
+	// The input a retry would redo (owner, 2026-10-24): the learner's LAST
+	// input — text prompt, question answer, or practice submission. Null
+	// when retry is not allowed (see retryPromptIndex). The "Try again"
+	// button hangs under that input's card; the input itself is kept.
+	const retryTarget = useMemo(() => {
+		const idx = retryPromptIndex(nativeMessages);
+		if (idx === null) return null;
+		const m = nativeMessages[idx]!;
+		return { id: m.id, toolCallId: m.role === "toolResult" ? m.toolCallId : null };
+	}, [nativeMessages]);
+	const retryButton = (
+		<button
+			type="button"
+			data-testid="retry-prompt"
+			onClick={() => {
+				clearError();
+				void send({ type: "retry" });
+			}}
+			className="mt-1 flex items-center gap-1 font-ui text-xs text-muted-foreground transition-colors hover:text-foreground"
+		>
+			<RotateCcwIcon className="size-3" />
+			Try again
+		</button>
+	);
 
 	const [text, setText] = useState("");
 	/* The composer's value MIRROR ("nothing gets lost" round, owner
@@ -1362,19 +1388,28 @@ export function Chat({
 											case "data-compaction-cut":
 												return <CompactionCutDivider key={pi} data={part.data as CompactionDividerData} />;
 											case "data-practice-thinking":
-												return <ThinkingCard key={pi} data={part.data as PracticeThinkingData} />;
+												return (
+													<Fragment key={pi}>
+														<ThinkingCard data={part.data as PracticeThinkingData} />
+														{!busy && m.id === retryTarget?.id && retryButton}
+													</Fragment>
+												);
 											case "data-practice-next":
 												// The learner's move-on signal (owner round 16): a compact
 												// centered mono-caps line — chrome, the dismissal register.
 												return (
-													<div
-														key={pi}
-														data-testid="practice-next-line"
-														className="my-4 flex items-center justify-center gap-1.5 font-ui text-xs font-medium uppercase tracking-wide text-muted-foreground"
-													>
-														<ArrowRightIcon className="size-3" />
-														Next problem
-													</div>
+													<Fragment key={pi}>
+														<div
+															data-testid="practice-next-line"
+															className="my-4 flex items-center justify-center gap-1.5 font-ui text-xs font-medium uppercase tracking-wide text-muted-foreground"
+														>
+															<ArrowRightIcon className="size-3" />
+															Next problem
+														</div>
+														{!busy && m.id === retryTarget?.id && (
+															<div className="flex justify-center">{retryButton}</div>
+														)}
+													</Fragment>
 												);
 											default:
 												return null;
@@ -1436,6 +1471,7 @@ export function Chat({
 												<div className="lh-prose whitespace-pre-wrap text-foreground">
 													{m.parts.filter((p) => p.type === "text").map((p) => p.text).join("\n")}
 												</div>
+												{!busy && m.id === retryTarget?.id && retryButton}
 											</div>
 									) : (
 									<Message from="assistant" className="max-w-full">
@@ -1509,7 +1545,10 @@ export function Chat({
 														// transcript; answered ones render as graded records.
 														if (part.state === "output-available") {
 															return (
-																<AnsweredCard key={pi} answer={part.output as QuestionAnswerData} input={part.input} />
+																<Fragment key={pi}>
+																	<AnsweredCard answer={part.output as QuestionAnswerData} input={part.input} />
+																	{!busy && retryTarget?.toolCallId === part.toolCallId && retryButton}
+																</Fragment>
 															);
 														}
 														return null;
@@ -1577,6 +1616,11 @@ export function Chat({
 							{error && (
 								<div className="rounded-lg border border-destructive/50 bg-destructive/10 px-3 py-2 text-sm">
 									Something went wrong: {error.message}
+									{providerErrorHint(error.message) && (
+										<p className="mt-1 text-xs text-muted-foreground">
+											{providerErrorHint(error.message)}
+										</p>
+									)}
 								</div>
 							)}
 						</div>
