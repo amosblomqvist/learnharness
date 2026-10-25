@@ -15,15 +15,15 @@ function deferred() { let resolve!: () => void; const promise = new Promise<void
 function fixture(connected = false) {
 	let statuses: NativeSubscriptionStatus[] = ["github-copilot", "xai"].map((id) => ({ ...emptySubscriptionStatus(id as NativeSubscriptionProviderId), available: true, connected, connectionId: connected ? `local-${id}` : null }));
 	const listeners = new Set<() => void>(), login = deferred();
-	const calls = { login: [] as unknown[][], cancel: 0, open: [] as unknown[][], consent: [] as unknown[][], disconnect: [] as string[], retry: [] as string[] };
+	const calls = { login: [] as unknown[][], cancel: 0, open: [] as unknown[][], consent: [] as unknown[][], disconnect: [] as string[], retry: [] as string[], respond: [] as unknown[][] };
 	function push(id: NativeSubscriptionProviderId, next: Partial<NativeSubscriptionStatus>) {
 		statuses = statuses.map((s) => s.providerId === id ? { ...s, revision: s.revision + 1, ...next } : s); for (const listener of listeners) listener();
 	}
 	const bridge: NativeSubscriptionControlBridge = {
 		status: async () => structuredClone(statuses),
 		login: async (id, enabled) => { calls.login.push([id, enabled]); push(id, { pending: true, interaction: { attemptId: "attempt", userCode: "PUBLIC-CODE", browser: { id: "opaque-action", url: "https://auth.example/device" }, progress: "Complete sign-in in your browser." } }); await login.promise; },
-		cancel: async (id) => { calls.cancel++; push(id, { pending: false, interaction: undefined }); },
-		respond: async () => {}, open: async (...args) => { calls.open.push(args); }, retry: async (id) => { calls.retry.push(id); },
+		cancel: async (id) => { calls.cancel++; push(id, { pending: false, interaction: undefined }); login.resolve(); },
+		respond: async (...args) => { calls.respond.push(args); }, open: async (...args) => { calls.open.push(args); }, retry: async (id) => { calls.retry.push(id); },
 		disconnect: async (id) => { calls.disconnect.push(id); push(id, { connected: false, connectionId: null }); },
 		consent: async (id, enabled) => { calls.consent.push([id, enabled]); push(id, { allowBackgroundUse: enabled }); },
 		onChange: (listener) => { listeners.add(listener); return () => { listeners.delete(listener); }; },
@@ -130,4 +130,49 @@ test("required native prompts render and commit cannot be cancelled through butt
 		for (const type of ["pointerdown", "pointerup", "click"]) { const event = new window.Event(type, { bubbles: true }); Object.defineProperties(event, { pointerId: { value: 1 }, isPrimary: { value: true }, button: { value: 0 } }); backdrop.dispatchEvent(event); }
 	});
 	assert(dialog()); assert.equal(f.calls.cancel, 0); await act(async () => f.login.resolve());
+});
+test("a renderer reload during a pending native sign-in reopens the live attempt so it can be continued or cancelled", async () => {
+	const f = fixture(); f.push("github-copilot", { pending: true, interaction: { attemptId: "attempt", allowBackgroundUse: false, prompt: { id: "enterprise", type: "text", message: "Enterprise domain (leave blank for github.com)", placeholder: "company.ghe.com" } } });
+	await mount(); assert.equal(dialog().querySelector("h2")?.textContent, "GitHub Copilot");
+	assert(dialog().querySelector('[data-testid="subscription-login-interaction"]')); assert(!dialog().querySelector('[data-testid="subscription-privacy-notice"]'));
+	const input = dialog().querySelector<HTMLInputElement>("input")!; assert.equal(input.getAttribute("placeholder"), "company.ghe.com");
+	assert.equal(toggle().getAttribute("aria-checked"), "false"); assert(toggle().hasAttribute("disabled")); assert(button("Connect", dialog()).disabled); assert(button("Connect", row("xai")).disabled); assert.deepEqual(f.calls.login, []);
+	// React DOM loads before this DOM exists, so text input events are not observed; a blank domain is a valid answer, and linkedom has no implicit form submission.
+	await act(async () => { button("Continue", dialog()).closest("form")!.dispatchEvent(new window.Event("submit", { bubbles: true, cancelable: true })); }); assert.deepEqual(f.calls.respond, [["github-copilot", "attempt", "enterprise", ""]]);
+	await act(async () => f.push("github-copilot", { interaction: { attemptId: "attempt", allowBackgroundUse: false, userCode: "PUBLIC-CODE", browser: { id: "opaque-action", url: "https://auth.example/device" }, progress: "Complete sign-in in your browser." } }));
+	assert(dialog().textContent?.includes("PUBLIC-CODE")); await click(button("Open browser", dialog())); assert.deepEqual(f.calls.open, [["github-copilot", "attempt", "opaque-action"]]);
+	await click(button("Cancel", dialog())); assert.equal(f.calls.cancel, 1); assert(!dialog()); assert(!button("Connect", row("github-copilot")).disabled); assert(!button("Connect", row("xai")).disabled);
+});
+test("an adopted sign-in closes its dialog on success and stays open with the error on failure", async () => {
+	const f = fixture(); f.push("xai", { pending: true, interaction: { attemptId: "attempt", allowBackgroundUse: true, userCode: "PUBLIC-CODE", browser: { id: "opaque-action", url: "https://auth.example/device" }, progress: "Complete sign-in in your browser." } });
+	await mount(); assert.equal(dialog().querySelector("h2")?.textContent, "Grok");
+	await act(async () => f.push("xai", { pending: false, connected: true, connectionId: "local-xai", interaction: undefined }));
+	assert(!dialog()); assert(!button("Manage…", row("xai")).disabled); assert.equal(f.calls.cancel, 0);
+	await act(async () => f.push("github-copilot", { pending: true, interaction: { attemptId: "attempt-2", allowBackgroundUse: true, userCode: "SECOND-CODE", browser: { id: "opaque-action", url: "https://auth.example/device" } } }));
+	assert.equal(dialog().querySelector("h2")?.textContent, "GitHub Copilot");
+	await act(async () => f.push("github-copilot", { pending: false, interaction: undefined, error: "Sign-in did not complete. Try connecting again." }));
+	assert(dialog()); assert(dialog().querySelector('[role="alert"]')?.textContent?.includes("Sign-in did not complete")); assert(!button("Connect", dialog()).disabled);
+	assert(!dialog().querySelector('[data-testid="subscription-login-interaction"]'));
+	await click(button("Cancel", dialog())); assert(!dialog()); assert.equal(f.calls.cancel, 0);
+});
+test("cancelling a sign-in this window started never brings its dialog back through a superseded refresh", async () => {
+	const f = fixture(), status = f.bridge.status, wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+	const until = async (ready: () => boolean) => { for (let i = 0; i < 200 && !ready(); i++) await act(() => wait(5)); assert(ready()); };
+	// Main replies to cancel, then the abandoned login IPC resolves; status replies have IPC latency, so the login's refresh supersedes the cancel's.
+	// act() renders only when its scope ends, so the Cancel scope ends after the cancel's refresh returns and before the login's lands.
+	f.bridge.status = async () => { const values = await status(); await wait(20); return values; };
+	f.bridge.cancel = async (id) => { f.calls.cancel++; f.push(id, { pending: false, interaction: undefined }); setTimeout(() => f.login.resolve(), 10); };
+	await mount(); await until(() => !button("Connect", row("xai")).disabled); await connectionStep("xai"); await click(button("Connect", dialog()));
+	await until(() => !!dialog()?.textContent?.includes("PUBLIC-CODE"));
+	await act(async () => { button("Cancel", dialog()).click(); await wait(25); });
+	await until(() => !button("Connect", row("xai")).disabled);
+	assert(!dialog(), "a cancelled attempt's stale pending status reopened its dialog"); assert.equal(f.calls.cancel, 1); assert(!button("Connect", row("github-copilot")).disabled);
+});
+test("retrying after an adopted sign-in fails keeps the background choice the dialog showed", async () => {
+	const f = fixture(); f.push("xai", { pending: true, interaction: { attemptId: "attempt", allowBackgroundUse: false, userCode: "PUBLIC-CODE", browser: { id: "opaque-action", url: "https://auth.example/device" } } });
+	await mount(); assert.equal(toggle().getAttribute("aria-checked"), "false");
+	await act(async () => f.push("xai", { pending: false, interaction: undefined, error: "Sign-in did not complete. Try connecting again." }));
+	assert(dialog()); assert.equal(toggle().getAttribute("aria-checked"), "false");
+	await click(button("Connect", dialog())); assert.deepEqual(f.calls.login, [["xai", false]]);
+	await act(async () => f.login.resolve());
 });

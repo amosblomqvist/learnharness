@@ -141,7 +141,7 @@ function createSubscriptions(options) {
 		if ([...entries.values()].some((e) => e.attempt)) throw failure("interaction");
 		const abort = new AbortController();
 		const attempt = { id: randomUUID(), abort, committing: false, actions: new Map(), prompt: null, public: {} };
-		attempt.public = { attemptId: attempt.id }; entry.attempt = attempt; entry.error = undefined; changed(entry);
+		attempt.public = { attemptId: attempt.id, allowBackgroundUse: enabled ?? entry.state.allowBackgroundUse }; entry.attempt = attempt; entry.error = undefined; changed(entry);
 		const active = () => entry.attempt === attempt && !abort.signal.aborted && !closed && !paused;
 		const addBrowser = (value) => {
 			if (!safeHttps(value)) throw failure("interaction");
