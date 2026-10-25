@@ -13,7 +13,6 @@ import { AppleModelDialog } from "@/components/apple-model-dialog";
 import {
 	appleModelReady,
 	appleSpeechBridge,
-	appleStatus,
 	chooseEngine,
 	refreshAppleStatus,
 	subscribeAppleStatus,
@@ -598,17 +597,22 @@ export function useDictation({ append, destination = "primary", disabled = false
 					setPhase("recording");
 				} else if (ev.type === "final") {
 					bufferRef.current.push(ev.text); // deferred, as with Deepgram
-				} else if (ev.type === "error" && ev.message === "model-missing") {
-					// macOS dropped the model since the status check: ask again.
-					bufferRef.current = [];
+				} else if (ev.type === "error") {
+					// macOS can delete the model between the status check and the
+					// helper start. "model-missing" says so; any other failure might
+					// mean the same, so a fresh status decides: offer the download
+					// rather than an error the user cannot act on.
+					const missing = ev.message === "model-missing";
+					if (missing) bufferRef.current = [];
+					else setError(`Apple dictation failed: ${ev.message}`);
 					promptDestinationRef.current = destinationRef.current ?? undefined;
 					cleanup();
 					void refreshAppleStatus().then((status) => {
-						if (status.available) setModelPrompt(status.language);
+						if (status.available && (missing || !appleModelReady(status))) {
+							setError(null);
+							setModelPrompt(status.language);
+						}
 					});
-				} else if (ev.type === "error") {
-					setError(`Apple dictation failed: ${ev.message}`);
-					cleanup();
 				} else {
 					cleanup(); // "end": the helper finalized and exited
 				}
@@ -676,9 +680,10 @@ export function useDictation({ append, destination = "primary", disabled = false
 		tokenPromise.catch(() => {}); // surfaced below; no unhandled rejection
 		engineRef.current = "deepgram";
 		if (appleSpeechBridge()) {
-			// Engine BEFORE mic: both inputs are warm, and the download
-			// prompt must not light the mic.
-			const apple = await appleStatus();
+			// Engine BEFORE mic: the download prompt must not light the mic.
+			// The status is re-queried (~50 ms, overlapping the token), not
+			// cached: macOS may have deleted the model since the last check.
+			const apple = await refreshAppleStatus();
 			const hasKey = await tokenPromise.then(
 				() => true,
 				// Only the keyless 503 means "no key"; other failures stay
