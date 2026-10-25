@@ -25,18 +25,10 @@ import {
 	PRACTICE_CONCLUDE_TOOL,
 	PRACTICE_PROBLEM_TOOL,
 	problemInputForConclude,
+	proseOf,
+	SAY_TOOL,
 } from "./native-messages.ts";
 import type { ToolResultMessage } from "@earendil-works/pi-ai";
-
-/** The user-facing text blocks of a native message (string or text parts). */
-function textOf(content: unknown): string[] {
-	if (typeof content === "string") return content.trim() ? [content] : [];
-	if (!Array.isArray(content)) return [];
-	return content
-		.filter((c): c is { type: "text"; text: string } => (c as { type?: string }).type === "text")
-		.map((c) => c.text)
-		.filter((t) => t.trim().length > 0);
-}
 
 /** The practice join context (owner-approved, 2026-10-06 export round):
  *  practice tool RESULTS are acks — the statement, outcome, and verdict
@@ -172,16 +164,17 @@ export function messageMarkdown(
 	const parts: string[] = [];
 
 	if (role === "user") {
-		for (const text of textOf((message as { content: unknown }).content)) {
+		for (const text of proseOf((message as { content: unknown }).content)) {
 			parts.push(`### Learner${anchor}\n\n${text.trim()}`);
 		}
 	} else if (role === "assistant") {
-		for (const text of textOf((message as { content: unknown }).content)) {
+		for (const text of proseOf((message as { content: unknown }).content)) {
 			parts.push(`### Teacher${anchor}\n\n${text.trim()}`);
 		}
 	} else if (role === "toolResult") {
 		const result = message as ToolResultMessage;
 		if (result.isError) return null; // retry context, not learning evidence
+		if (result.toolName === SAY_TOOL) return null; // the prose renders from the call
 		const { heading, body } = toolResultBody(result, ctx);
 		parts.push(`### ${heading}${anchor}\n\n${body.join("\n\n")}`);
 	}

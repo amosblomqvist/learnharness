@@ -191,6 +191,31 @@ export function newPlanBlockMessage(
 export const PRACTICE_PROBLEM_TOOL = "problem";
 export const PRACTICE_CONCLUDE_TOOL = "conclude";
 
+/** The learner-facing prose tool (every agent). Claude Opus 5.5 returns
+ *  prose written between tool calls as a summarized thinking block, so a
+ *  lesson written as text before a question call never reaches the
+ *  learner; tool inputs arrive verbatim, so prose travels in say's
+ *  `markdown` argument. */
+export const SAY_TOOL = "say";
+
+/** The learner-facing prose of a message's content, in order: a string,
+ *  text blocks, and say calls alike. Empty entries are dropped. */
+export function proseOf(content: unknown): string[] {
+	if (typeof content === "string") return content.trim() ? [content] : [];
+	if (!Array.isArray(content)) return [];
+	const out: string[] = [];
+	for (const block of content as Array<{ type?: string; text?: unknown; name?: unknown; arguments?: unknown }>) {
+		const text =
+			block.type === "text"
+				? block.text
+				: block.type === "toolCall" && block.name === SAY_TOOL
+					? (block.arguments as { markdown?: unknown } | undefined)?.markdown
+					: undefined;
+		if (typeof text === "string" && text.trim().length > 0) out.push(text);
+	}
+	return out;
+}
+
 /** One picked proposition of the graph-context marker (the learner's map
  *  pick — name + statement as the learner SAW them at pick time). */
 export interface GraphContextPick {

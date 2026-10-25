@@ -15,10 +15,11 @@ import {
 	type TeacherToolContext,
 } from "./tools.ts";
 import { practiceTools, type PracticeToolContext } from "./tools/practice.ts";
+import { sayTool } from "./tools/say.ts";
 import { healToolRecord } from "./tools/heal.ts";
 import { quizInputObject, quizInputProblems } from "../core/question-core.ts";
 import { QUESTION_TOOLS, type EnabledTools } from "../core/pending.ts";
-import { toLlmMessages, nativeInputCause } from "../core/native-messages.ts";
+import { toLlmMessages, nativeInputCause, PRACTICE_PROBLEM_TOOL } from "../core/native-messages.ts";
 import type { ChatGPTRequestCycle } from "./chatgpt-request-cycle.ts";
 import { usageWasAdmitted } from "./subscription-request-cycle.ts";
 
@@ -129,6 +130,10 @@ export interface AgentBuildOptions {
 	chatId?: string;
 }
 
+/** A cleanly posed practice problem ends the turn like a question: `say`
+ *  beside it carries no terminate flag, so pi's own batch check runs on. */
+const TURN_ENDING_TOOLS: readonly string[] = [...QUESTION_TOOLS, PRACTICE_PROBLEM_TOOL];
+
 /**
  * The turn's question-stop rule (docs/pi-engine-swap.md §2; Wave A
  * 2026-09-26, owner Option A): a question tool call (quiz /
@@ -149,14 +154,14 @@ export interface AgentBuildOptions {
  * (owner ruling 2026-09-25: no maximum-agent-turns net on the teaching
  * turn).
  */
-function makeQuestionStopper() {
+export function makeQuestionStopper() {
 	return (context: {
 		message: { content: Array<{ type: string; id?: string; name?: string }> };
 		toolResults: Array<{ toolCallId: string; isError?: boolean }>;
 	}): boolean => {
 		const called = new Set(
 			context.message.content
-				.filter((c) => c.type === "toolCall" && c.name !== undefined && (QUESTION_TOOLS as readonly string[]).includes(c.name!))
+				.filter((c) => c.type === "toolCall" && c.name !== undefined && TURN_ENDING_TOOLS.includes(c.name))
 				.map((c) => c.id!),
 		);
 		if (called.size === 0) return false;
@@ -304,6 +309,7 @@ export function bareQuestionTools(): Record<string, AgentTool<any>> {
 	return healToolRecord({
 		quiz,
 		ask_user_question: askUserQuestionTool,
+		say: sayTool,
 	});
 }
 
