@@ -3,6 +3,8 @@
   buildNpmPackage,
   electron,
   makeWrapper,
+  copyDesktopItems,
+    makeDesktopItem,
 }:
 
 buildNpmPackage rec {
@@ -15,6 +17,7 @@ buildNpmPackage rec {
 
   nativeBuildInputs = [
     makeWrapper
+    copyDesktopItems
   ];
 
   # Runs `npm run build` (= next build), which the app needs.
@@ -28,6 +31,18 @@ buildNpmPackage rec {
   postBuild = ''
     node scripts/build-server.mjs
   '';
+
+  desktopItems = [
+      (makeDesktopItem {
+        name = "learnharness";
+        desktopName = "LearnHarness";
+        comment = "An agent harness for efficient learning";
+        exec = "learnharness";
+        icon = "learnharness";
+        categories = [ "Education" ];
+        startupWMClass = "learnharness";
+      })
+    ];
 
   installPhase = ''
     runHook preInstall
@@ -48,6 +63,10 @@ buildNpmPackage rec {
     makeWrapper ${electron}/bin/electron $out/bin/${pname} \
       --add-flags $out/share/${pname} \
       --set NODE_ENV production
+
+      # TODO: build .desktop file
+    install -Dm444 build/icon.png \
+        $out/share/icons/hicolor/512x512/apps/learnharness.png
 
     runHook postInstall
   '';
