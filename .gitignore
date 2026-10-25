@@ -16,3 +16,6 @@ auth.json
 
 # dev-fresh launcher scratch (fresh-user sim): disposable per launch
 .fresh-data/
+
+# for people who use the nix devshell
+.direnv/
