@@ -14,6 +14,9 @@ const originalKey = process.env.OPENAI_API_KEY;
 let leaseError: string | null = null;
 let requests: { authorization: string | null; body: Record<string, any>; url: string }[] = [];
 let responseEvents: unknown[] = [];
+/** Transport-level failure injected AFTER the scripted events were read (the
+ *  real socket drop: SSE bytes already consumed, then `terminated`). */
+let transportError: Error | null = null;
 const ipc = (value: unknown) => (process.emit as (name: string, value: unknown) => boolean)("message", value);
 const model = piModels().getModel("openai", "gpt-5") as Model<"openai-responses">;
 const status = { available: true, pending: false, allowBackgroundUse: false, activeId: "scratch-account", accounts: [{ id: "scratch-account", email: "dummy@example.invalid", registration: "oaiapp_scratch", connected: true, planEnabled: true, background: false }], error: null };
@@ -34,7 +37,22 @@ before(async () => {
 	globalThis.fetch = async (input, init) => {
 		const req = new Request(input, init);
 		requests.push({ authorization: req.headers.get("authorization"), body: JSON.parse(await req.text()), url: req.url });
-		return new Response(responseEvents.map((event) => `data: ${JSON.stringify(event)}\n\n`).join(""), { headers: { "content-type": "text/event-stream" } });
+		const encoder = new TextEncoder();
+		const failure = transportError;
+		let index = 0;
+		// Pull-driven, one scripted event per read: events the consumer already
+		// read survive a later failure, exactly like a dropped socket.
+		return new Response(new ReadableStream<Uint8Array>({
+			pull(controller) {
+				const event = responseEvents[index++];
+				if (event === undefined) {
+					if (failure) controller.error(failure);
+					else controller.close();
+					return;
+				}
+				controller.enqueue(encoder.encode(`data: ${JSON.stringify(event)}\n\n`));
+			},
+		}), { headers: { "content-type": "text/event-stream" } });
 	};
 });
 after(() => {
@@ -109,6 +127,122 @@ test("no terminal completed is never success; late quota/incomplete streams are 
 	}
 });
 
+const textItem = (text: string) => ({ id: "msg_scratch", type: "message", role: "assistant", status: "completed", content: [{ type: "output_text", text, annotations: [] }] });
+const callItem = (callId: string, name: string, args: string) => ({ type: "function_call", id: `fc_${callId}`, call_id: callId, name, namespace: "learnharness", arguments: args, status: "completed" });
+
+test("a conclusively ended text block followed by transport 'terminated' salvages a successful stop", async () => {
+	const engine = piEngineForSpec({ provider: "chatgpt", id: model.id }, false);
+	responseEvents = [
+		{ type: "response.created", response: { id: "resp_scratch" } },
+		{ type: "response.output_item.added", output_index: 0, item: { ...textItem(""), content: [] } },
+		{ type: "response.content_part.added", output_index: 0, content_index: 0, part: { type: "output_text", text: "", annotations: [] } },
+		{ type: "response.output_text.delta", output_index: 0, content_index: 0, delta: "Complete answer" },
+		{ type: "response.output_item.done", output_index: 0, item: textItem("Complete answer") },
+	];
+	transportError = new TypeError("terminated");
+	const admitted = requests.length;
+	const stream = engine.streamFn(engine.model, context());
+	const events: { type: string }[] = []; for await (const event of stream) events.push(event);
+	const result = await stream.result();
+	transportError = null;
+	assert.equal(result.stopReason, "stop");
+	assert.equal(result.errorMessage, undefined, "salvaged output never carries an error banner");
+	assert.equal(result.content.length, 1);
+	const text = result.content[0];
+	assert.equal(text?.type, "text");
+	assert.equal(text?.type === "text" ? text.text : undefined, "Complete answer");
+	assert.equal(events.filter((e) => e.type === "done").length, 1);
+	assert.equal(events.filter((e) => e.type === "error").length, 0);
+	assert.equal(requests.length, admitted + 1, "an admitted request is never retried");
+});
+
+test("a conclusively ended tool call with no terminal response salvages a successful toolUse", async () => {
+	const engine = piEngineForSpec({ provider: "chatgpt", id: model.id }, false);
+	responseEvents = [
+		{ type: "response.created", response: { id: "resp_scratch" } },
+		{ type: "response.output_item.added", output_index: 0, item: { ...callItem("call_scratch", "scratch_tool", ""), arguments: "" } },
+		{ type: "response.function_call_arguments.delta", output_index: 0, delta: '{"value":"yes"}' },
+		{ type: "response.output_item.done", output_index: 0, item: callItem("call_scratch", "scratch_tool", '{"value":"yes"}') },
+	];
+	const engineRequests = requests.length;
+	const stream = engine.streamFn(engine.model, context());
+	const events: { type: string }[] = []; for await (const event of stream) events.push(event);
+	const result = await stream.result();
+	assert.equal(result.stopReason, "toolUse");
+	assert.equal(result.errorMessage, undefined);
+	const call = result.content.find((block) => block.type === "toolCall");
+	assert.equal(call?.id, "call_scratch|fc_call_scratch");
+	assert.deepEqual(call?.arguments, { value: "yes" });
+	assert.equal(events.filter((e) => e.type === "done").length, 1);
+	assert.equal(events.filter((e) => e.type === "error").length, 0);
+	assert.equal(requests.length, engineRequests + 1, "exactly one admitted dispatch");
+});
+
+test("a text delta without text_end stays an error through transport 'terminated'", async () => {
+	const engine = piEngineForSpec({ provider: "chatgpt", id: model.id }, false);
+	responseEvents = [
+		{ type: "response.created", response: { id: "resp_scratch" } },
+		{ type: "response.output_item.added", output_index: 0, item: { ...textItem(""), content: [] } },
+		{ type: "response.output_text.delta", output_index: 0, content_index: 0, delta: "Partial answer" },
+	];
+	transportError = new TypeError("terminated");
+	const stream = engine.streamFn(engine.model, context());
+	const events: { type: string }[] = []; for await (const event of stream) events.push(event);
+	const result = await stream.result();
+	transportError = null;
+	assert.equal(result.stopReason, "error");
+	assert(result.errorMessage?.includes("No API-key fallback was used"));
+	assert.equal(events.filter((e) => e.type === "done").length, 0);
+	assert.equal(events.filter((e) => e.type === "error").length, 1);
+});
+
+test("an unfinished tool call is dropped from the persisted error so replay cannot execute it", async () => {
+	const engine = piEngineForSpec({ provider: "chatgpt", id: model.id }, false);
+	responseEvents = [
+		{ type: "response.created", response: { id: "resp_scratch" } },
+		{ type: "response.output_item.added", output_index: 0, item: { ...callItem("call_scratch", "scratch_tool", ""), arguments: "" } },
+		{ type: "response.function_call_arguments.delta", output_index: 0, delta: '{"value":' },
+	];
+	transportError = new TypeError("terminated");
+	const stream = engine.streamFn(engine.model, context());
+	await stream.result();
+	transportError = null;
+	const result = await stream.result();
+	assert.equal(result.stopReason, "error");
+	assert.deepEqual(result.content, [], "no half-streamed call survives into the record");
+});
+
+test("a completed block followed by an explicit response.failed stays an error", async () => {
+	const engine = piEngineForSpec({ provider: "chatgpt", id: model.id }, false);
+	responseEvents = [
+		{ type: "response.created", response: { id: "resp_scratch" } },
+		{ type: "response.output_item.added", output_index: 0, item: { ...textItem(""), content: [] } },
+		{ type: "response.output_text.delta", output_index: 0, content_index: 0, delta: "Complete answer" },
+		{ type: "response.output_item.done", output_index: 0, item: textItem("Complete answer") },
+		{ type: "response.failed", response: { status: "failed", error: { code: "server_error", message: "provider exploded" } } },
+	];
+	const stream = engine.streamFn(engine.model, context());
+	const events: { type: string }[] = []; for await (const event of stream) events.push(event);
+	const result = await stream.result();
+	assert.equal(result.stopReason, "error");
+	assert(!result.errorMessage?.includes("provider exploded"), "provider diagnostics stay sanitized");
+	assert.equal(events.filter((e) => e.type === "done").length, 0);
+	assert.equal(events.filter((e) => e.type === "error").length, 1);
+});
+
+test("a normal response.completed is unchanged (done, reason stop, no salvage path)", async () => {
+	const engine = piEngineForSpec({ provider: "chatgpt", id: model.id }, false);
+	responseEvents = [{ type: "response.created", response: { id: "resp_scratch" } }, { type: "response.output_item.added", output_index: 0, item: { ...textItem(""), content: [] } }, { type: "response.output_text.delta", output_index: 0, content_index: 0, delta: "Complete answer" }, { type: "response.output_item.done", output_index: 0, item: textItem("Complete answer") }, complete([textItem("Complete answer")])];
+	const stream = engine.streamFn(engine.model, context());
+	const events: { type: string }[] = []; for await (const event of stream) events.push(event);
+	const result = await stream.result();
+	assert.equal(result.stopReason, "stop");
+	assert.equal(result.errorMessage, undefined);
+	assert.equal(result.usage.totalTokens, usage.total_tokens, "terminal usage still wins");
+	assert.deepEqual(result.content.map((b) => b.type === "text" ? b.text : b.type), ["Complete answer"]);
+	assert.equal(events.filter((e) => e.type === "done").length, 1);
+});
+
 test("OAuth failure and background denial NEVER use ambient OPENAI_API_KEY", async () => {
 	requests = [];
 	for (const error of ["expired ChatGPT session", "Background use is off", "catalog unavailable", "quota exceeded"]) {
@@ -119,7 +253,6 @@ test("OAuth failure and background denial NEVER use ambient OPENAI_API_KEY", asy
 	leaseError = null;
 	assert.equal(requests.length, 0);
 });
-
 test("consent revocation cancels only applicable background streams and preserves foreground", () => {
 	const foreground = chatGPTAbortController(false);
 	const background = chatGPTAbortController(true);

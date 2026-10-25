@@ -15,9 +15,11 @@ export interface ProbeDoneContext {
 	deliver: (steer: SteerMessage) => void;
 }
 
-/** Does the transcript already carry a concluded probe (any state)?
- *  Wave B: the native scan (any probe_done tool call, any state) — same
- *  semantics the UIMessage part scan had. */
+/** Does the transcript already carry a CONCLUDED probe? A call alone is not
+ *  a conclusion — the scan requires its clean (non-errored) toolResult, the
+ *  same seam the phase fold and the chat-handler construction branch read.
+ *  An unmatched or refused call therefore leaves the probe open (recoverable
+ *  histories included: the prober simply calls probe_done again). */
 function probeConcluded(messages: readonly LhMessage[]): boolean {
 	return hasProbeDone(messages);
 }

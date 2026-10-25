@@ -57,7 +57,27 @@ export function chatGPTStream(background: () => boolean, lifecycle?: ChatGPTDisp
 			let scope: AdmissionScope | undefined;
 			let committed = false;
 			let terminal = false;
+			// contentIndex of every output block the provider CONCLUSIVELY ended
+			// (text_end / thinking_end / toolcall_end). response.completed is not
+			// the only proof a response is whole: an SSE body that dies after the
+			// last output_item.done left fully delivered, replayable content.
+			const finished = new Set<number>();
 			const check = () => { if (signal.aborted || !scope || !chatGPTScopeCurrent(scope)) throw new Error("cancelled or catalog authority changed"); };
+			/** Salvage a response whose transport ended without response.completed.
+			 *  Only when every persisted block finished conclusively and nothing
+			 *  failed: a partially streamed text/reasoning/tool-argument block is
+			 *  never handed over as success (its tail may be missing). The
+			 *  request is NOT retried — it was admitted, so tool execution could
+			 *  already have been in flight (agent-loop executes on the message). */
+			const salvage = (): { reason: "stop" | "toolUse"; message: AssistantMessage } | null => {
+				if (terminal || completed || failure || signal.aborted) return null;
+				const content = partial.content;
+				if (content.length === 0) return null;
+				for (let index = 0; index < content.length; index++) if (!finished.has(index)) return null;
+				const { errorMessage: _stale, ...kept } = partial;
+				const reason = content.some((block) => block.type === "toolCall") ? "toolUse" : "stop";
+				return { reason, message: { ...kept, stopReason: reason } };
+			};
 			try {
 				if (logicalModel.provider !== "chatgpt") throw new Error("ChatGPT account catalog has no selected model");
 				if (Object.keys(options?.headers ?? {}).some((key) => key.toLowerCase() === "authorization")) throw new Error("Authorization override is forbidden");
@@ -98,6 +118,7 @@ export function chatGPTStream(background: () => boolean, lifecycle?: ChatGPTDisp
 					const message = "partial" in event ? event.partial : event.type === "done" ? event.message : event.error;
 					// Copy the message, not its tool/reasoning blocks: IDs/signatures remain byte-for-byte intact.
 					partial = { ...message, provider: "chatgpt" };
+					if (event.type === "text_end" || event.type === "thinking_end" || event.type === "toolcall_end") finished.add(event.contentIndex);
 					if (event.type === "done") {
 						if (!completed || failure) throw new Error(failure || "missing terminal response.completed");
 						terminal = true;
@@ -108,8 +129,17 @@ export function chatGPTStream(background: () => boolean, lifecycle?: ChatGPTDisp
 				}
 			} catch (err) {
 				if (terminal) return;
+				const rescued = salvage();
+				if (rescued) {
+					terminal = true;
+					output.push({ type: "done", reason: rescued.reason, message: rescued.message });
+					return;
+				}
 				if (!committed) lifecycle?.noDispatch(await chatGPTDenial(scope, controller, options?.signal?.aborted === true, purpose));
-				partial = { ...partial, stopReason: signal.aborted ? "aborted" : "error", errorMessage: chatGPTStreamError(err instanceof Error ? err.message : "") };
+				// A persisted assistant error must never carry an executable call
+				// whose arguments never finished streaming: replay would run it.
+				const persisted = partial.content.filter((block, index) => block.type !== "toolCall" || finished.has(index));
+				partial = { ...partial, content: persisted, stopReason: signal.aborted ? "aborted" : "error", errorMessage: chatGPTStreamError(err instanceof Error ? err.message : "") };
 				output.push({ type: "error", reason: partial.stopReason as "error" | "aborted", error: partial });
 			} finally { release(); output.end(); }
 		})();

@@ -21,7 +21,8 @@ philosophy so they share a view of the whole process).
   field it must not use. No plan tools, no jobs, no demos.
 - **The teacher** runs everything from planning onward: full tool set
   (teach quiz with nodeId, plan_init, jobs, demos). Constructed the moment the
-  transcript carries a `probe_done`.
+  transcript carries a CONCLUDED `probe_done` (the call plus its clean
+  toolResult — a call alone never concludes; see §2).
 - **The swap happens between probing and planning** — the planning phase
   needs full knowledge of how teaching is done, so the teacher agent starts
   at planning.
@@ -43,6 +44,14 @@ The prober concludes explicitly:
 - **Refuses while a question is open** ("resolve the open question first") —
   same doctrine as nodeId validation.
 - **Refuses a second conclusion** (idempotent: the probe concludes once).
+- **Concluded means CALL + CLEAN RESULT.** Every consumer of the seam (the
+  chat-handler's teacher construction, the tool's own already-concluded
+  guard, `phaseAt3Lh`) reads a concluded probe as a `probe_done` call whose
+  matching toolResult exists and is not an error. A call alone — a refusal, a
+  turn that died before its result, an orphan kept in a corrupted history —
+  concludes nothing, so the prober can call `probe_done` again and repair that
+  history. (Before 2026-10-25 any call counted, so one orphaned call flipped
+  the chat to the teacher and could never be undone.)
 - The assessment is the tool call's input, so it streams to the learner live
   and is durable in the transcript by the tool result itself. A dedicated
   assessment card/viewer comes later (UI).

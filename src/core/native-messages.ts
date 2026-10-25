@@ -618,13 +618,28 @@ export function danglingQuestionOf(
 	return null;
 }
 
-/** The probe→teach construction seam (chat-handler): a probe_done call in
- *  the transcript — any state — means the probe is concluded: teach. */
+/** The probe→teach construction seam (chat-handler): a probe_done call
+ *  whose SUCCESSFUL result is in the transcript means the probe is
+ *  concluded: teach.
+ *
+ *  A CALL is not a conclusion. The seam tool refuses while a question is
+ *  open and after the probe already concluded, so before this rule a
+ *  completed-but-refused call (or a call whose turn died before its
+ *  result) flipped the whole chat to the teacher with the assessment
+ *  never recorded. Unmatched and errored calls therefore conclude
+ *  nothing: the prober keeps probing and can call probe_done again, which
+ *  is exactly how a history corrupted by the old rule recovers. */
 export function hasProbeDone(messages: readonly LhMessage[]): boolean {
+	const concluded = cleanToolCallIds(messages);
 	for (const m of messages) {
 		if ((m as { role?: string }).role !== "assistant") continue;
 		const assistant = m as AssistantMessage;
-		if (assistant.content.some((b) => b.type === "toolCall" && b.name === "probe_done")) return true;
+		if (
+			assistant.content.some(
+				(b) => b.type === "toolCall" && b.name === "probe_done" && concluded.has(b.id),
+			)
+		)
+			return true;
 	}
 	return false;
 }
