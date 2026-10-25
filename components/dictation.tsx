@@ -636,7 +636,9 @@ export function useDictation({ append, destination = "primary", disabled = false
 	);
 
 	const start = useCallback(async (destination?: DictationDestination) => {
-		if (disabledRef.current || phaseRef.current !== "idle") return;
+		// The phase stays idle until the engine pick; the owner marks a run
+		// that is still choosing, so a second press cannot start another.
+		if (disabledRef.current || phaseRef.current !== "idle" || recordingOwner === owner) return;
 		if (recordingOwner !== null && recordingOwner !== owner) {
 			setError(DICTATION_ACTIVE_ELSEWHERE);
 			return;
@@ -649,7 +651,6 @@ export function useDictation({ append, destination = "primary", disabled = false
 		setDictationActive(true);
 		setError(null);
 		appendFailureRef.current = null;
-		setPhase("connecting");
 		reconnectsRef.current = 0;
 		bufferRef.current = []; // fresh run, fresh buffer (round 2)
 		pendingRef.current = []; // fresh run, fresh queue (mitigation A)
@@ -695,6 +696,9 @@ export function useDictation({ append, destination = "primary", disabled = false
 				engineRef.current = "apple";
 			}
 		}
+		// Only now: setting it before the engine pick flashed the bar open
+		// and shut again whenever the run ended in the download prompt.
+		setPhase("connecting");
 		const micPromise = navigator.mediaDevices.getUserMedia({
 			audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true },
 		});
@@ -883,8 +887,7 @@ export function useDictation({ append, destination = "primary", disabled = false
 			.then(() => refreshAppleStatus())
 			.then(() => {
 				if (gen !== genRef.current) return;
-				setDownloadProgress(null);
-				setPhase("idle");
+				cleanup(false); // release the download wait; start() takes the owner again
 				void start(destination);
 			})
 			.catch((e: unknown) => {
