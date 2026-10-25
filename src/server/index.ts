@@ -43,7 +43,4 @@ export * from "./compaction.ts";
 export { runPiTurn, piTurnResponse, type PiTurnHandle, type PiTurnSpec } from "./pi/ui-stream.ts";
 export * from "./observability.ts";
 export * from "./model-catalog.ts";
-// Command Code's live-catalog refresh is an agent-layer concern; the models
-// route reaches it through this barrel (app/ never imports src/agent).
-export { refreshCommandCodeCatalog } from "../agent/models.ts";
 export { sessionCost } from "./pricing.ts";

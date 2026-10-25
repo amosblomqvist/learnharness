@@ -1,4 +1,3 @@
-import { modelCatalog, refreshCommandCodeCatalog } from "@/src/server";
 import { modelCatalog, refreshConnectionCatalog } from "@/src/server";
 
 /**
@@ -11,8 +10,6 @@ import { modelCatalog, refreshConnectionCatalog } from "@/src/server";
  * snapshot and the next one sees the update.
  */
 export async function GET() {
-	refreshCommandCodeCatalog();
-	return Response.json(modelCatalog());
 	await refreshConnectionCatalog();
 	return Response.json(modelCatalog(), { headers: { "Cache-Control": "no-store" } });
 }

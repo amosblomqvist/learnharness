@@ -19,12 +19,17 @@
 
 import { clampThinkingLevel, getSupportedThinkingLevels, type Api, type Model } from "@earendil-works/pi-ai";
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
-import { piModels } from "../agent/models.ts";
+import { piModels, refreshCommandCodeCatalog } from "../agent/models.ts";
+import { COMMANDCODE_PROVIDER_ID } from "../agent/commandcode.ts";
 import { chatGPTConnected, chatGPTModel, chatGPTModels, refreshChatGPTModels } from "../agent/chatgpt-bridge.ts";
 import { NATIVE_SUBSCRIPTIONS } from "../core/contracts/subscriptions.ts";
 import { nativeSubscriptionId, nativeSubscriptionConnected, nativeSubscriptionModel, nativeSubscriptionModels, refreshSubscriptionModels } from "../agent/subscription-bridge.ts";
 
 export async function refreshConnectionCatalog(provider?: string): Promise<void> {
+	// Command Code refreshes in the background (TTL-gated): the caller keeps
+	// serving the last-known snapshot, matching the bridge refreshes below
+	// on their failure paths.
+	if (!provider || provider === COMMANDCODE_PROVIDER_ID) void refreshCommandCodeCatalog();
 	await Promise.all([
 		!provider || provider === "chatgpt" ? refreshChatGPTModels(piModels().getModels("openai").filter((m): m is Model<"openai-responses"> => m.api === "openai-responses")) : Promise.resolve(),
 		!provider || nativeSubscriptionId(provider) ? refreshSubscriptionModels() : Promise.resolve(),

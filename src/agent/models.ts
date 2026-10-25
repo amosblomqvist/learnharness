@@ -76,7 +76,7 @@ export function piModels() {
 
 const COMMANDCODE_REFRESH_MS = 15 * 60_000;
 let commandCodeRefreshAt = 0;
-let commandCodeRefreshInFlight: Promise<unknown> | undefined;
+let commandCodeRefreshInFlight: Promise<void> | undefined;
 
 /**
  * Refresh Command Code's live catalog overlay (settings picker + engine).
@@ -86,18 +86,22 @@ let commandCodeRefreshInFlight: Promise<unknown> | undefined;
  * deterministic and offline, and when no key is configured (pi's refresh
  * would skip it anyway, but this avoids resolving auth work on every call).
  */
-export function refreshCommandCodeCatalog(): void {
-	if (process.env.NODE_ENV === "test") return;
-	if (!process.env[COMMANDCODE_API_KEY_ENV]) return;
+export function refreshCommandCodeCatalog(): Promise<void> {
+	if (process.env.NODE_ENV === "test") return Promise.resolve();
+	if (!process.env[COMMANDCODE_API_KEY_ENV]) return Promise.resolve();
 	const now = Date.now();
-	if (commandCodeRefreshInFlight || now - commandCodeRefreshAt < COMMANDCODE_REFRESH_MS) return;
+	if (commandCodeRefreshInFlight || now - commandCodeRefreshAt < COMMANDCODE_REFRESH_MS) {
+		return commandCodeRefreshInFlight ?? Promise.resolve();
+	}
 	commandCodeRefreshAt = now;
 	commandCodeRefreshInFlight = piModels()
 		.refresh({ providers: [COMMANDCODE_PROVIDER_ID] })
 		.catch(() => undefined)
+		.then(() => undefined)
 		.finally(() => {
 			commandCodeRefreshInFlight = undefined;
 		});
+	return commandCodeRefreshInFlight;
 }
 
 /** OpenRouter API key (BYOK); tests never read this — they inject engines. */
