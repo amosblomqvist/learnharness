@@ -15,6 +15,7 @@ import { describe, it } from "node:test";
 import { renderToStaticMarkup } from "react-dom/server";
 import { MessageResponse } from "../components/ai-elements/message.tsx";
 import { MermaidError } from "../components/mermaid-error.tsx";
+import { parseQuizInput, parseAskInput, parseExplainInput } from "../src/core/tool-parts.ts";
 import { transformMathDelimiters, healOverescapedCommands } from "../src/core/math-delims.ts";
 
 /** Render through MessageResponse in static mode (no streaming/remend artifacts). */
@@ -444,3 +445,56 @@ describe("over-escaped command heal — doubled backslashes in tool args (owner 
 	});
 });
 
+describe("question code blocks", () => {
+	const markdown = [
+		"In C++, what does this program do?", "", "```cpp",
+		"#include <string>", "#include <iostream>", "", "int main() {",
+		'    std::string s = "hello";',
+		String.raw`    std::cout << s << "\n";`,
+		String.raw`    auto path = "C:\\new\\test";`,
+		"}", "```",
+	].join("\n");
+	const quiz = { question: markdown, options: [{ label: "Prints hello", value: "yes" }, { label: "Compile error", value: "no" }], correctAnswer: "yes", explanation: "It prints the string." };
+
+	it("repairs a double-escaped question from the saved tool call and renders a code block", () => {
+		const raw = { ...quiz, question: JSON.stringify(markdown).slice(1, -1) };
+		const parsed = parseQuizInput(raw);
+		assert.ok(parsed);
+		assert.equal(parsed.question, markdown);
+		assert.notEqual(raw.question, parsed.question, "the persisted input remains untouched");
+		const html = render(parsed.question);
+		assert.ok(html.includes('data-streamdown="code-block"'));
+		assert.ok(html.includes("#include &lt;string&gt;"));
+		assert.ok(!html.includes("```cpp"), "the fence is not shown as text");
+	});
+
+	it("repairs code questions in ask and free-recall tools too", () => {
+		const question = JSON.stringify(markdown).slice(1, -1);
+		assert.equal(parseAskInput({ question })?.question, markdown);
+		assert.equal(parseExplainInput({ question, correctAnswer: "It prints hello." })?.question, markdown);
+	});
+
+	it("repairs before math processing and leaves answer identities untouched", () => {
+		const question = markdown + "\n\nWhat is $\\nu$?";
+		const encoded = JSON.stringify(question).slice(1, -1);
+		const value = JSON.stringify(markdown).slice(1, -1);
+		const raw = { ...quiz, question: encoded, options: [{ label: "Yes", value }, { label: "No", value: "no" }], correctAnswer: value };
+		const parsed = parseQuizInput(raw);
+		assert.ok(parsed);
+		assert.equal(parsed.question, question);
+		assert.equal(parsed.options[0]?.value, value);
+		assert.equal(parsed.correctAnswer, value);
+		const html = render(parsed.question);
+		assert.ok(html.includes('data-streamdown="code-block"'));
+		assert.ok(html.includes("katex"));
+		assert.ok(html.includes("ν"), "the LaTeX command survives decoding");
+		assert.ok(!html.includes("katex-error"));
+	});
+
+	it("preserves correctly encoded code, string escapes, paths, inline code, and math", () => {
+		assert.equal(parseQuizInput(quiz)?.question, markdown);
+		for (const question of [String.raw`What does \n mean in C++?`, String.raw`Read C:\new\test and $\nu$.`, 'Explain the inline code `print("\\n")`.']) {
+			assert.equal(parseQuizInput({ ...quiz, question })?.question, question);
+		}
+	});
+});
