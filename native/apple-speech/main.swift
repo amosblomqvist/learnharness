@@ -75,7 +75,7 @@ func install() async {
 	let locale = await resolveLocale()
 	// Reservations are capped per app: free the oldest one for a new locale.
 	let reserved = await AssetInventory.reservedLocales
-	if !reserved.contains(where: { sameLocale($0, locale) }), reserved.count >= (await AssetInventory.maximumReservedLocales), let oldest = reserved.first {
+	if !reserved.contains(where: { sameLocale($0, locale) }), reserved.count >= AssetInventory.maximumReservedLocales, let oldest = reserved.first {
 		_ = await AssetInventory.release(reservedLocale: oldest)
 	}
 	do {
