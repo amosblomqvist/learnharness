@@ -6,7 +6,7 @@
  * like. The 409 merge-retry died with the full-list body (an input event
  * retries idempotently: nothing was appended when a POST is refused).
  *
- * The four events (the complete client-originated input taxonomy):
+ * The events (the complete client-originated input taxonomy):
  *   text    — a learner-authored user message (composer send, initial
  *             topic, the demo error-fix loop)
  *   answer  — the pending question's graded result (QuestionAnswerData,
@@ -16,6 +16,12 @@
  *   continue — run the next turn on the current record (mount
  *             continuations, job-settle re-syncs: the record ends at an
  *             answered question with no teacher reaction yet).
+ *   regenerate — retry the agent's last message (#122): the server CUTS
+ *             the record back to the last learner input (regenerateCut —
+ *             the old reply is discarded) and reruns the turn from there.
+ *             `lastMessageId` is the id of the last record message the
+ *             client holds — the staleness guard (400 when it is not the
+ *             record's actual last message; null for an empty record).
  *
  * (The plan verdict input died 2026-09-26 with the verdict itself — the
  * learner's post-plan reply is a natural text message.)
@@ -54,7 +60,10 @@ export type ChatInput =
 	 *  explicit go-ahead during the between-problems pause — the Next
 	 *  chip or Enter on an empty composer. Practice sessions only, and
 	 *  only with nothing active (mid-problem input rides the dock). */
-	| { type: "next" };
+	| { type: "next" }
+	/** Retry the agent's last message (#122): cut the record to the last
+	 *  learner input and rerun. `lastMessageId` is the staleness guard. */
+	| { type: "regenerate"; lastMessageId: string | null };
 
 /** A wake-pipeline steer delivery — same turn composition, server-origin.
  *  Wave C (2026-09-26): the idle wake carries EVERY queued marker as its
@@ -180,6 +189,11 @@ export function parseChatInput(input: unknown): ChatInput {
 			return { type: "thinking", problemCallId: i.problemCallId, text: i.text };
 		case "next":
 			return { type: "next" };
+		case "regenerate":
+			if (i.lastMessageId !== null && (typeof i.lastMessageId !== "string" || i.lastMessageId.length === 0)) {
+				throw new ChatInputError("regenerate input requires lastMessageId (a message id, or null)");
+			}
+			return { type: "regenerate", lastMessageId: i.lastMessageId };
 		default:
 			throw new ChatInputError(`unknown input type: ${String(i.type)}`);
 	}
@@ -230,6 +244,10 @@ export function inputAppends(
 			}
 			return [...dismissalConclusion(record), newNextMessage()];
 		}
+		case "regenerate":
+			// Appends nothing: a retry CUTS the record (regenerateCut, applied
+			// by the turn composition) and reruns from what remains.
+			return [];
 	}
 }
 

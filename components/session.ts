@@ -101,6 +101,7 @@ export function useChatSession({ chatId, initialMessages, initiallyInFlight }: U
 	);
 
 	const send = useCallback((input: ChatInput) => void model.send(input), [model]);
+	const regenerate = useCallback(() => void model.regenerate(), [model]);
 	const steer = useCallback((text: string) => void model.steer(text), [model]);
 	const submitAnswer = useCallback(
 		(tool: string, toolCallId: string, output: QuestionAnswerData) =>
@@ -129,6 +130,7 @@ export function useChatSession({ chatId, initialMessages, initiallyInFlight }: U
 		error: state.error,
 		steerQueue: state.steerQueue,
 		send,
+		regenerate,
 		steer,
 		submitAnswer,
 		dismissQuestion,
