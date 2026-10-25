@@ -202,6 +202,6 @@ switch CommandLine.arguments.dropFirst().first {
 case "status": await status()
 case "install": await install()
 case "transcribe": await transcribe()
-default: fail("usage: apple-speech status|install|release|transcribe")
+default: fail("usage: apple-speech status|install|transcribe")
 }
 exit(0)

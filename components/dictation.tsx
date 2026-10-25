@@ -835,13 +835,15 @@ export function useDictation({ append, destination = "primary", disabled = false
 	}, [cleanup, setPhase]);
 
 	const cancel = useCallback(() => {
-		if (phaseRef.current === "idle") return;
+		// The owner also covers a run still choosing its engine (the phase
+		// stays idle until the pick).
+		if (phaseRef.current === "idle" && recordingOwner !== owner) return;
 		// Discard first, teardown second — cleanup() flushes, and the now-empty
 		// buffer makes that flush a no-op. Also kills a "stopping" run: the
 		// flush already underway is abandoned (its timer is cleared inside).
 		bufferRef.current = [];
 		cleanup();
-	}, [cleanup]);
+	}, [cleanup, owner]);
 
 	const finishCurrent = useCallback((): Promise<void> => {
 		return new Promise((resolve, reject) => {
