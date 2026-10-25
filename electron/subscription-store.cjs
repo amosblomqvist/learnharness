@@ -3,7 +3,7 @@ const fs = require("node:fs/promises");
 const path = require("node:path");
 const { randomUUID } = require("node:crypto");
 
-const PROVIDERS = ["github-copilot", "xai"];
+const PROVIDERS = ["github-copilot", "xai", "anthropic"];
 const failure = (code) => Object.assign(new Error(code), { code });
 const nonempty = (value) => typeof value === "string" && value.length > 0 && !/[\x00-\x20\x7f]/.test(value);
 function validateCredential(providerId, credential) {
@@ -12,6 +12,7 @@ function validateCredential(providerId, credential) {
 		if (credential.enterpriseUrl !== undefined && !safeDomain(credential.enterpriseUrl)) throw failure("storage");
 		if (credential.availableModelIds !== undefined && (!Array.isArray(credential.availableModelIds) || !credential.availableModelIds.every(nonempty))) throw failure("storage");
 	}
+	if (providerId === "anthropic" && !/^sk-ant-oat/.test(credential.access)) throw failure("storage");
 	return credential;
 }
 function safeDomain(value) {

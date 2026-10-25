@@ -5,7 +5,7 @@ import { afterEach, test } from "node:test";
 import { createRoot, type Root } from "react-dom/client";
 import { renderToStaticMarkup } from "react-dom/server";
 import { parseHTML } from "linkedom";
-import { NativeSubscriptionConnection, NativeSubscriptionUIProvider, SubscriptionConnections, COPILOT_POLICY_NOTICE, emptySubscriptionStatus } from "../components/settings/subscription-connections.tsx";
+import { NativeSubscriptionConnection, NativeSubscriptionUIProvider, SubscriptionConnections, COPILOT_POLICY_NOTICE, CLAUDE_SIGN_IN_NOTICE, emptySubscriptionStatus } from "../components/settings/subscription-connections.tsx";
 import { ChatGPTUIProvider } from "../components/settings/chatgpt-connection.tsx";
 import type { NativeSubscriptionControlBridge, NativeSubscriptionProviderId, NativeSubscriptionStatus } from "../src/core/contracts/subscriptions.ts";
 const dom = parseHTML("<html><body></body></html>");
@@ -13,9 +13,9 @@ Object.assign(globalThis, { window: dom.window, document: dom.document, Element:
 let root: Root | undefined, host: HTMLDivElement | undefined;
 function deferred() { let resolve!: () => void; const promise = new Promise<void>((done) => { resolve = done; }); return { promise, resolve }; }
 function fixture(connected = false) {
-	let statuses: NativeSubscriptionStatus[] = ["github-copilot", "xai"].map((id) => ({ ...emptySubscriptionStatus(id as NativeSubscriptionProviderId), available: true, connected, connectionId: connected ? `local-${id}` : null }));
+	let statuses: NativeSubscriptionStatus[] = ["github-copilot", "xai", "anthropic"].map((id) => ({ ...emptySubscriptionStatus(id as NativeSubscriptionProviderId), available: true, connected, connectionId: connected ? `local-${id}` : null }));
 	const listeners = new Set<() => void>(), login = deferred();
-	const calls = { login: [] as unknown[][], cancel: 0, open: [] as unknown[][], consent: [] as unknown[][], disconnect: [] as string[], retry: [] as string[] };
+	const calls = { login: [] as unknown[][], cancel: 0, respond: [] as unknown[][], open: [] as unknown[][], consent: [] as unknown[][], disconnect: [] as string[], retry: [] as string[] };
 	function push(id: NativeSubscriptionProviderId, next: Partial<NativeSubscriptionStatus>) {
 		statuses = statuses.map((s) => s.providerId === id ? { ...s, revision: s.revision + 1, ...next } : s); for (const listener of listeners) listener();
 	}
@@ -23,7 +23,7 @@ function fixture(connected = false) {
 		status: async () => structuredClone(statuses),
 		login: async (id, enabled) => { calls.login.push([id, enabled]); push(id, { pending: true, interaction: { attemptId: "attempt", userCode: "PUBLIC-CODE", browser: { id: "opaque-action", url: "https://auth.example/device" }, progress: "Complete sign-in in your browser." } }); await login.promise; },
 		cancel: async (id) => { calls.cancel++; push(id, { pending: false, interaction: undefined }); },
-		respond: async () => {}, open: async (...args) => { calls.open.push(args); }, retry: async (id) => { calls.retry.push(id); },
+		respond: async (...args) => { calls.respond.push(args); }, open: async (...args) => { calls.open.push(args); }, retry: async (id) => { calls.retry.push(id); },
 		disconnect: async (id) => { calls.disconnect.push(id); push(id, { connected: false, connectionId: null }); },
 		consent: async (id, enabled) => { calls.consent.push([id, enabled]); push(id, { allowBackgroundUse: enabled }); },
 		onChange: (listener) => { listeners.add(listener); return () => { listeners.delete(listener); }; },
@@ -33,7 +33,7 @@ function fixture(connected = false) {
 }
 async function mount() {
 	host = document.createElement("div"); document.body.append(host); root = createRoot(host);
-	await act(async () => root!.render(<NativeSubscriptionUIProvider><NativeSubscriptionConnection providerId="github-copilot" /><NativeSubscriptionConnection providerId="xai" /></NativeSubscriptionUIProvider>));
+	await act(async () => root!.render(<NativeSubscriptionUIProvider><NativeSubscriptionConnection providerId="github-copilot" /><NativeSubscriptionConnection providerId="xai" /><NativeSubscriptionConnection providerId="anthropic" /></NativeSubscriptionUIProvider>));
 }
 function maybeButton(text: string, scope: ParentNode = document) { return [...scope.querySelectorAll<HTMLButtonElement>("button")].find((element) => element.textContent === text); }
 function button(text: string, scope: ParentNode = document) { const found = maybeButton(text, scope); assert(found, `missing button ${text}`); return found; }
@@ -43,25 +43,35 @@ const toggle = () => dialog().querySelector<HTMLElement>('[role="switch"]')!;
 const footer = () => dialog().querySelector<HTMLElement>('[data-testid="subscription-connection-footer"]')!;
 async function click(element: HTMLElement) { assert(element); await act(async () => element.click()); }
 async function connectionStep(id: string) { await click(button("Connect", row(id))); await click(button("Continue", dialog())); }
+async function submit() { const form = dialog().querySelector("form")!; assert(form); await act(async () => { form.dispatchEvent(new window.Event("submit", { bubbles: true, cancelable: true })); }); }
+async function choose(select: HTMLSelectElement, value: string) { assert(select); await act(async () => { Object.defineProperty(select, "value", { configurable: true, writable: true, value }); select.dispatchEvent(new window.Event("change", { bubbles: true })); }); }
+// react-dom loads before the linkedom globals exist, so text inputs report changes through React's focusin/keyup value polyfill.
+async function type(input: HTMLInputElement, value: string) {
+	assert(input); Object.assign(input, { attachEvent() {}, detachEvent() {} });
+	await act(async () => { input.dispatchEvent(new window.Event("focusin", { bubbles: true })); Object.defineProperty(input, "value", { configurable: true, writable: true, value }); input.dispatchEvent(new window.Event("keyup", { bubbles: true })); });
+}
 afterEach(async () => { await act(async () => root?.unmount()); host?.remove(); root = undefined; host = undefined; delete window.lh; });
 
-test("three compact rows render in approved order with no browser-only sign-in or fabricated identities", () => {
+test("four compact rows render in approved order with no browser-only sign-in or fabricated identities", () => {
 	const html = renderToStaticMarkup(<ChatGPTUIProvider><NativeSubscriptionUIProvider><SubscriptionConnections /></NativeSubscriptionUIProvider></ChatGPTUIProvider>);
 	assert(html.indexOf('data-testid="chatgpt-connection"') < html.indexOf('data-testid="github-copilot-connection"'));
 	assert(html.indexOf('data-testid="github-copilot-connection"') < html.indexOf('data-testid="xai-connection"'));
-	assert.equal((html.match(/>Connect<\/button>/g) ?? []).length, 3);
+	assert(html.indexOf('data-testid="xai-connection"') < html.indexOf('data-testid="anthropic-connection"'));
+	assert.equal((html.match(/>Connect<\/button>/g) ?? []).length, 4);
 	assert(!html.includes("@")); assert(!html.includes("Add accounts"));
 });
-for (const [id, label] of [["github-copilot", "GitHub Copilot"], ["xai", "Grok"]] as const) test(`${id}: disclosure and connection are separate steps with no duplicated content or early authorization`, async () => {
+for (const [id, label] of [["github-copilot", "GitHub Copilot"], ["xai", "Grok"], ["anthropic", "Claude"]] as const) test(`${id}: disclosure and connection are separate steps with no duplicated content or early authorization`, async () => {
 	const f = fixture(); await mount(); await click(button("Connect", row(id)));
 	assert.equal(dialog().querySelector("h2")?.textContent, label);
 	assert(dialog().querySelector('[data-testid="subscription-privacy-notice"]')); assert(!toggle());
 	assert.equal(!!dialog().querySelector('[data-testid="copilot-policy-notice"]'), id === "github-copilot");
 	if (id === "github-copilot") assert(dialog().textContent?.includes(COPILOT_POLICY_NOTICE));
+	assert.equal(!!dialog().querySelector('[data-testid="claude-signin-notice"]'), id === "anthropic");
+	if (id === "anthropic") assert(dialog().textContent?.includes(CLAUDE_SIGN_IN_NOTICE));
 	assert(!maybeButton("Connect", dialog())); assert.deepEqual(f.calls.login, []); assert.deepEqual(f.calls.consent, []);
 	await click(button("Continue", dialog()));
 	assert.equal(dialog().querySelector("h2")?.textContent, label); assert.equal(toggle().getAttribute("aria-checked"), "true");
-	assert(!dialog().querySelector('[data-testid="subscription-privacy-notice"], [data-testid="copilot-policy-notice"]'));
+	assert(!dialog().querySelector('[data-testid="subscription-privacy-notice"], [data-testid="copilot-policy-notice"], [data-testid="claude-signin-notice"]'));
 	assert.equal(f.calls.login.length, 0); await click(toggle()); assert.deepEqual(f.calls.consent, []);
 	await click(button("Connect", dialog())); assert.deepEqual(f.calls.login, [[id, false]]);
 	assert(dialog().textContent?.includes("PUBLIC-CODE")); assert(!dialog().querySelector('[data-testid="subscription-privacy-notice"]'));
@@ -130,4 +140,21 @@ test("required native prompts render and commit cannot be cancelled through butt
 		for (const type of ["pointerdown", "pointerup", "click"]) { const event = new window.Event(type, { bubbles: true }); Object.defineProperties(event, { pointerId: { value: 1 }, isPrimary: { value: true }, button: { value: 0 } }); backdrop.dispatchEvent(event); }
 	});
 	assert(dialog()); assert.equal(f.calls.cancel, 0); await act(async () => f.login.resolve());
+});
+test("Claude login-method select gates Continue and its manual code prompt renders a text field beside Open browser", async () => {
+	const f = fixture(); await mount(); await connectionStep("anthropic"); await click(button("Connect", dialog()));
+	await act(async () => f.push("anthropic", { interaction: { attemptId: "attempt", prompt: { id: "method", type: "select", message: "Select Anthropic login method:", options: [{ id: "browser", label: "Browser login (default)" }, { id: "copy_code", label: "Copy code login (headless)" }] } } }));
+	const select = dialog().querySelector("select")!; assert(select); assert(dialog().textContent?.includes("Select Anthropic login method:"));
+	assert.deepEqual([...select.querySelectorAll("option")].filter((option) => !option.hasAttribute("disabled")).map((option) => [option.getAttribute("value"), option.textContent]), [["browser", "Browser login (default)"], ["copy_code", "Copy code login (headless)"]]);
+	assert(button("Continue", dialog()).disabled); assert.deepEqual(f.calls.respond, []);
+	await choose(select, "browser"); assert(!button("Continue", dialog()).disabled);
+	await submit(); assert.deepEqual(f.calls.respond, [["anthropic", "attempt", "method", "browser"]]);
+	await act(async () => f.push("anthropic", { interaction: { attemptId: "attempt", browser: { id: "opaque-action", url: "https://claude.ai/oauth/authorize?fixture" }, prompt: { id: "code", type: "manual_code", message: "Complete login in your browser, or paste the authorization code / redirect URL here:", placeholder: "http://localhost:53692/callback" } } }));
+	const input = dialog().querySelector<HTMLInputElement>("input#subscription-auth-prompt")!; assert(input); assert(!dialog().querySelector("select"));
+	assert.equal(input.getAttribute("type"), "text"); assert.equal(input.getAttribute("placeholder"), "http://localhost:53692/callback"); assert(button("Open browser", dialog()));
+	assert(dialog().textContent?.includes("Complete login in your browser, or paste the authorization code / redirect URL here:"));
+	assert(button("Continue", dialog()).disabled); await submit(); assert.equal(f.calls.respond.length, 1);
+	await type(input, "fixture-code#fixture-state"); assert(!button("Continue", dialog()).disabled); await submit();
+	assert.deepEqual(f.calls.respond, [["anthropic", "attempt", "method", "browser"], ["anthropic", "attempt", "code", "fixture-code#fixture-state"]]);
+	await act(async () => f.login.resolve());
 });

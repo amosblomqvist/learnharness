@@ -1,12 +1,13 @@
 import type { Api, Model } from "@earendil-works/pi-ai";
 
 /** Native SDK IDs stay distinct from the app's persisted connection routes. */
-export type NativeSubscriptionProviderId = "github-copilot" | "xai";
-export type NativeSubscriptionLogicalId = "github-copilot-subscription" | "xai-subscription";
+export type NativeSubscriptionProviderId = "github-copilot" | "xai" | "anthropic";
+export type NativeSubscriptionLogicalId = "github-copilot-subscription" | "xai-subscription" | "anthropic-subscription";
 
 export const NATIVE_SUBSCRIPTIONS = [
 	{ providerId: "github-copilot", logicalId: "github-copilot-subscription", label: "GitHub Copilot" },
 	{ providerId: "xai", logicalId: "xai-subscription", label: "Grok" },
+	{ providerId: "anthropic", logicalId: "anthropic-subscription", label: "Claude" },
 ] as const;
 
 export interface SubscriptionPrompt {

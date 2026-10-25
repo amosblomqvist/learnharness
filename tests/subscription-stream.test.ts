@@ -9,7 +9,8 @@ import { runSubagent } from "../src/agent/subagents/pi-run.ts";
 
 const originalSend = Object.getOwnPropertyDescriptor(process, "send"), originalConnected = Object.getOwnPropertyDescriptor(process, "connected");
 const marker = process.env.LH_DESKTOP_SERVER, secret = process.env.LH_DESKTOP_API_SECRET;
-const xaiKey = process.env.XAI_API_KEY, copilotKey = process.env.COPILOT_GITHUB_TOKEN;
+const xaiKey = process.env.XAI_API_KEY, copilotKey = process.env.COPILOT_GITHUB_TOKEN, anthropicKey = process.env.ANTHROPIC_API_KEY;
+const leasedKey = (providerId: string) => providerId === "anthropic" ? "sk-ant-oat01-fixture-oauth-only" : "fixture-oauth-only";
 let revision = 1, denied = false, sends = 0;
 const context = normalizeContext({ messages: [{ role: "user", content: "Offline fixture", timestamp: 0 }] });
 function snapshot(background = true): NativeSubscriptionSnapshot {
@@ -21,10 +22,10 @@ function snapshot(background = true): NativeSubscriptionSnapshot {
 const emit = (value: unknown) => (process.emit as (event: string, value: unknown) => boolean)("message", value);
 before(async () => {
 	process.env.LH_DESKTOP_SERVER = "1"; process.env.LH_DESKTOP_API_SECRET = "d".repeat(64);
-	process.env.XAI_API_KEY = "fixture-must-never-be-used"; process.env.COPILOT_GITHUB_TOKEN = "fixture-api-route-only";
+	process.env.XAI_API_KEY = "fixture-must-never-be-used"; process.env.COPILOT_GITHUB_TOKEN = "fixture-api-route-only"; process.env.ANTHROPIC_API_KEY = "fixture-must-never-be-used";
 	Object.defineProperty(process, "connected", { configurable: true, value: true });
 	Object.defineProperty(process, "send", { configurable: true, value: (message: any, callback?: () => void) => {
-		sends++; queueMicrotask(() => emit({ channel: "lh:subscriptions", id: message.id, op: message.op, ...(denied && message.op === "lease" ? { ok: false, error: "fixture expired refresh" } : { ok: true, value: message.op === "snapshot" ? snapshot() : { scope: message.scope, auth: { apiKey: "fixture-oauth-only", ...(message.scope.providerId === "github-copilot" ? { baseUrl: "https://api.business.githubcopilot.com", headers: { "x-fixture-auth": "native-retained" } } : {}) } } }) }));
+		sends++; queueMicrotask(() => emit({ channel: "lh:subscriptions", id: message.id, op: message.op, ...(denied && message.op === "lease" ? { ok: false, error: "fixture expired refresh" } : { ok: true, value: message.op === "snapshot" ? snapshot() : { scope: message.scope, auth: { apiKey: leasedKey(message.scope.providerId), ...(message.scope.providerId === "github-copilot" ? { baseUrl: "https://api.business.githubcopilot.com", headers: { "x-fixture-auth": "native-retained" } } : {}) } } }) }));
 		callback?.(); return true;
 	} });
 	await refreshSubscriptionModels();
@@ -32,7 +33,7 @@ before(async () => {
 after(() => {
 	if (originalSend) Object.defineProperty(process, "send", originalSend); else delete process.send;
 	if (originalConnected) Object.defineProperty(process, "connected", originalConnected); else delete (process as { connected?: boolean }).connected;
-	for (const [key, value] of [["LH_DESKTOP_SERVER", marker], ["LH_DESKTOP_API_SECRET", secret], ["XAI_API_KEY", xaiKey], ["COPILOT_GITHUB_TOKEN", copilotKey]]) { if (value === undefined) delete process.env[key!]; else process.env[key!] = value; }
+	for (const [key, value] of [["LH_DESKTOP_SERVER", marker], ["LH_DESKTOP_API_SECRET", secret], ["XAI_API_KEY", xaiKey], ["COPILOT_GITHUB_TOKEN", copilotKey], ["ANTHROPIC_API_KEY", anthropicKey]]) { if (value === undefined) delete process.env[key!]; else process.env[key!] = value; }
 });
 test("logical subscription routes are separate catalog entries without rewriting native API models", () => {
 	for (const p of NATIVE_SUBSCRIPTIONS) {
@@ -45,18 +46,22 @@ for (const p of NATIVE_SUBSCRIPTIONS) test(`${p.providerId}: every SDK transport
 	for (const native of piModels().getModels(p.providerId)) {
 		if (apis.has(native.api)) continue; apis.add(native.api);
 		const engine = piEngineForSpec({ provider: p.logicalId, id: native.id }, false);
-		let requests = 0, payloadObserved = false;
+		let requests = 0, payloadObserved = false, mismatch: unknown;
 		const result = await engine.streamFn(engine.model, context, {
 			onPayload: (raw, selected) => { payloadObserved = true; assert.equal(selected.provider, p.providerId); return { ...raw as object, model: "caller-cannot-replace-selected" }; },
 			fetch: async (input, init) => {
 				requests++; const request = new Request(input, init), body = await request.json();
-				assert.equal(request.headers.get("authorization"), "Bearer fixture-oauth-only");
-				assert.equal(body.model, native.id);
-				if (p.providerId === "github-copilot") { assert.equal(new URL(request.url).origin, "https://api.business.githubcopilot.com"); assert.equal(request.headers.get("x-fixture-auth"), "native-retained"); }
-				else assert.equal(new URL(request.url).origin, "https://api.x.ai");
+				try {
+					assert.equal(request.headers.get("authorization"), `Bearer ${leasedKey(p.providerId)}`);
+					assert.equal(body.model, native.id);
+					if (p.providerId === "github-copilot") { assert.equal(new URL(request.url).origin, "https://api.business.githubcopilot.com"); assert.equal(request.headers.get("x-fixture-auth"), "native-retained"); }
+					else if (p.providerId === "anthropic") { assert.equal(new URL(request.url).origin, "https://api.anthropic.com"); assert.equal(request.headers.get("x-api-key"), null); }
+					else assert.equal(new URL(request.url).origin, "https://api.x.ai");
+				} catch (error) { mismatch = error; }
 				return new Response('{"error":{"message":"private-fixture-provider-detail"}}', { status: 401, headers: { "content-type": "application/json" } });
 			},
 		}).result();
+		if (mismatch) throw mismatch;
 		assert(payloadObserved); assert.equal(requests, 1); assert.equal(result.provider, p.logicalId); assert.equal(result.stopReason, "error");
 		assert(!result.errorMessage?.includes("private-fixture-provider-detail")); assert(result.errorMessage?.includes("No API-key fallback"));
 	}

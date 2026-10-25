@@ -7,22 +7,23 @@ import { createRequire } from "node:module";
 import { createModels, type OAuthCredential, type ProviderAuthInteraction } from "@earendil-works/pi-ai";
 import { githubCopilotProvider } from "@earendil-works/pi-ai/providers/github-copilot";
 import { xaiProvider } from "@earendil-works/pi-ai/providers/xai";
+import { anthropicProvider } from "@earendil-works/pi-ai/providers/anthropic";
 import type { NativeSubscriptionScope } from "../src/core/contracts/subscriptions.ts";
 const require = createRequire(import.meta.url);
 const { createSubscriptions, loadSubscriptionSDK, validEndpoint, publicError } = require("../electron/subscriptions.cjs");
-const { fileStore, validateState } = require("../electron/subscription-store.cjs");
+const { fileStore, validateState, validateCredential } = require("../electron/subscription-store.cjs");
 const { subscriptionControl } = require("../electron/subscription-ipc.cjs");
-const ids = ["github-copilot", "xai"] as const;
-const credential = (id: string, expires = Date.now() + 3600000): OAuthCredential => ({ type: "oauth", access: id === "xai" ? "fixture-xai-access" : "tid=fixture;proxy-ep=proxy.individual.githubcopilot.com;", refresh: "fixture-refresh", expires, ...(id === "github-copilot" ? { availableModelIds: [githubCopilotProvider().getModels()[0]!.id] } : {}) });
+const ids = ["github-copilot", "xai", "anthropic"] as const;
+const credential = (id: string, expires = Date.now() + 3600000): OAuthCredential => ({ type: "oauth", access: id === "xai" ? "fixture-xai-access" : id === "anthropic" ? "sk-ant-oat01-fixture-access" : "tid=fixture;proxy-ep=proxy.individual.githubcopilot.com;", refresh: "fixture-refresh", expires, ...(id === "github-copilot" ? { availableModelIds: [githubCopilotProvider().getModels()[0]!.id] } : {}) });
 function deferred<T>() { let resolve!: (value: T) => void; const promise = new Promise<T>((done) => { resolve = done; }); return { resolve, promise }; }
 async function fixture(options: { login?: (id: string, interaction: ProviderAuthInteraction) => Promise<OAuthCredential>; refresh?: (id: string, value: OAuthCredential, signal: AbortSignal) => Promise<OAuthCredential>; stores?: Record<string, unknown> } = {}) {
 	const directory = await fs.mkdtemp(path.join(os.tmpdir(), "lh-subscription-auth-"));
 	let refreshes = 0;
 	const factory = (id: string) => {
-		const native = id === "xai" ? xaiProvider() : githubCopilotProvider();
+		const native = id === "xai" ? xaiProvider() : id === "anthropic" ? anthropicProvider() : githubCopilotProvider();
 		return { ...native, auth: { ...native.auth, oauth: { ...native.auth.oauth!, login: (interaction: ProviderAuthInteraction) => options.login?.(id, interaction) ?? Promise.resolve(credential(id)), refresh: async (value: OAuthCredential, signal: AbortSignal) => { refreshes++; return options.refresh?.(id, value, signal) ?? { ...credential(id), refresh: "fixture-rotated" }; } } } };
 	};
-	const sdk = { createModels, githubCopilotProvider: () => factory("github-copilot"), xaiProvider: () => factory("xai") };
+	const sdk = { createModels, githubCopilotProvider: () => factory("github-copilot"), xaiProvider: () => factory("xai"), anthropicProvider: () => factory("anthropic") };
 	const updates: any[] = [], opened: string[] = [];
 	const controller = createSubscriptions({ directory, sdk, stores: options.stores, openExternal: async (url: string) => { opened.push(url); }, onChange: (snapshot: unknown) => updates.push(snapshot) });
 	await controller.ready;
@@ -35,7 +36,7 @@ async function fixture(options: { login?: (id: string, interaction: ProviderAuth
 test("main loader resolves Pi's import-only PUBLIC package exports and native OAuth without a CLI or network", async () => {
 	const sdk = await loadSubscriptionSDK(path.resolve(import.meta.dirname, ".."));
 	assert.equal(typeof sdk.createModels, "function");
-	for (const [id, factory] of [["github-copilot", sdk.githubCopilotProvider], ["xai", sdk.xaiProvider]] as const) {
+	for (const [id, factory] of [["github-copilot", sdk.githubCopilotProvider], ["xai", sdk.xaiProvider], ["anthropic", sdk.anthropicProvider]] as const) {
 		const provider = factory(), store = new sdk.InMemoryCredentialStore(); await store.modify(id, () => credential(id));
 		const models = sdk.createModels({ credentials: store }); models.setProvider({ ...provider, auth: { oauth: provider.auth.oauth } });
 		const resolved = await models.getAuth(provider.getModels()[0]); assert.equal(resolved.auth.apiKey, credential(id).access);
@@ -135,6 +136,54 @@ test("Copilot native enterprise prompt is answered only through the current opaq
 		const saved = JSON.parse(await fs.readFile(path.join(f.directory, "github-copilot-credentials.json"), "utf8")); assert.equal(saved.credential.enterpriseUrl, "company.ghe.com"); assert.equal(saved.allowBackgroundUse, false);
 		assert(!(await f.controller.status()).find((s: any) => s.providerId === "github-copilot").interaction);
 	} finally { await f.cleanup(); }
+});
+test("Claude native login-method select and pasted code are answered only through the current opaque prompt action", async () => {
+	const answers: string[] = [];
+	const f = await fixture({ login: async (id, interaction) => {
+		answers.push(await interaction.prompt({ type: "select", message: "Select Anthropic login method:", options: [{ id: "browser", label: "Browser login (default)" }, { id: "copy_code", label: "Copy code login (headless)" }] }));
+		answers.push(await interaction.prompt({ type: "manual_code", message: "Complete login in your browser, or paste the authorization code / redirect URL here:", placeholder: "http://localhost:53692/callback" }));
+		return credential(id);
+	} });
+	try {
+		const pending = f.controller.login("anthropic", false); await new Promise((resolve) => setImmediate(resolve));
+		const method = (await f.controller.status()).find((s: any) => s.providerId === "anthropic").interaction;
+		assert.equal(method.prompt.type, "select"); assert.deepEqual(method.prompt.options.map((option: any) => option.id), ["browser", "copy_code"]);
+		await assert.rejects(f.controller.respond("anthropic", "stale", method.prompt.id, "browser"), (error: any) => error.code === "interaction");
+		await assert.rejects(f.controller.respond("anthropic", method.attemptId, method.prompt.id, "api_key"), (error: any) => error.code === "interaction");
+		assert.deepEqual(answers, []);
+		await f.controller.respond("anthropic", method.attemptId, method.prompt.id, "browser"); await new Promise((resolve) => setImmediate(resolve));
+		const code = (await f.controller.status()).find((s: any) => s.providerId === "anthropic").interaction;
+		assert.equal(code.attemptId, method.attemptId); assert.notEqual(code.prompt.id, method.prompt.id);
+		assert.equal(code.prompt.type, "manual_code"); assert.equal(code.prompt.placeholder, "http://localhost:53692/callback"); assert.equal(code.prompt.options, undefined);
+		await assert.rejects(f.controller.respond("anthropic", method.attemptId, method.prompt.id, "fixture-code#fixture-state"), (error: any) => error.code === "interaction");
+		for (const blank of ["", " \t"]) await assert.rejects(f.controller.respond("anthropic", code.attemptId, code.prompt.id, blank), (error: any) => error.code === "interaction");
+		assert.equal((await f.controller.status()).find((s: any) => s.providerId === "anthropic").interaction.prompt.id, code.prompt.id);
+		await f.controller.respond("anthropic", code.attemptId, code.prompt.id, "fixture-code#fixture-state"); await pending;
+		assert.deepEqual(answers, ["browser", "fixture-code#fixture-state"]);
+		const saved = JSON.parse(await fs.readFile(path.join(f.directory, "anthropic-credentials.json"), "utf8")); assert.equal(saved.credential.access, credential("anthropic").access); assert.equal(saved.allowBackgroundUse, false);
+		assert(!(await f.controller.status()).find((s: any) => s.providerId === "anthropic").interaction);
+	} finally { await f.cleanup(); }
+});
+test("Claude connections accept only OAuth-shaped access tokens and never persist an API key", async () => {
+	const connectionId = "b5ac22b7-dfe3-4e52-ae0a-6da2990d4aef";
+	validateState("anthropic", { version: 1, allowBackgroundUse: true, connectionId, credential: credential("anthropic") });
+	for (const access of ["sk-ant-api03-fixture-api-key", "fixture", "fixture-sk-ant-oat01-access"]) {
+		assert.throws(() => validateCredential("anthropic", { ...credential("anthropic"), access }), (error: any) => error.code === "storage");
+		assert.throws(() => validateState("anthropic", { version: 1, allowBackgroundUse: true, connectionId, credential: { ...credential("anthropic"), access } }), (error: any) => error.code === "storage");
+	}
+	const f = await fixture({ login: async (id) => ({ ...credential(id), access: "sk-ant-api03-fixture-api-key" }) });
+	try {
+		await assert.rejects(f.controller.login("anthropic", true), (error: any) => error.code === "login");
+		await assert.rejects(fs.readFile(path.join(f.directory, "anthropic-credentials.json")), (error: any) => error.code === "ENOENT");
+		const status = (await f.controller.status()).find((s: any) => s.providerId === "anthropic");
+		assert.equal(status.connected, false); assert.equal(status.available, true); assert.equal(status.error, "Sign-in did not complete. Try connecting again.");
+	} finally { await f.cleanup(); }
+});
+test("Claude requests are pinned to the default Anthropic API origin", () => {
+	const value = credential("anthropic");
+	assert(validEndpoint("anthropic", { apiKey: value.access }, value));
+	for (const baseUrl of ["https://api.anthropic.com", "https://api.anthropic.com/"]) assert(validEndpoint("anthropic", { apiKey: value.access, baseUrl }, value), baseUrl);
+	for (const baseUrl of ["http://api.anthropic.com", "https://api.anthropic.com/v1", "https://api.anthropic.com:8443", "https://user:pw@api.anthropic.com", "https://attacker.example/", "https://api.anthropic.com/?fixture=1", "https://api.anthropic.com/#fixture"]) assert(!validEndpoint("anthropic", { apiKey: value.access, baseUrl }, value), baseUrl);
 });
 test("account endpoint rotation invalidates older scopes without losing the durable refreshed credential", async () => {
 	const next = { ...credential("github-copilot"), access: "tid=fixture;proxy-ep=proxy.business.githubcopilot.com;" };

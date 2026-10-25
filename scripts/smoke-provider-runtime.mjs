@@ -105,9 +105,9 @@ async function probe(standalone) {
 		}
 		// Exercise the public lazy OAuth surface offline. toAuth evaluates the
 		// real flow module and its imports but neither logs in nor refreshes.
-		for (const [name, factory] of [["github-copilot", "githubCopilotProvider"], ["xai", "xaiProvider"]]) {
+		for (const [name, factory] of [["github-copilot", "githubCopilotProvider"], ["xai", "xaiProvider"], ["anthropic", "anthropicProvider"]]) {
 			const provider = (await import(new URL(`providers/${name}.js`, entry).href))[factory]();
-			const credential = { type: "oauth", access: name === "github-copilot" ? "tid=offline;proxy-ep=proxy.individual.githubcopilot.com;" : "offline-xai-oauth-not-a-token", refresh: "offline-refresh-not-a-token", expires: Date.now() + 3600000, availableModelIds: provider.getModels().map((model) => model.id) };
+			const credential = { type: "oauth", access: name === "github-copilot" ? "tid=offline;proxy-ep=proxy.individual.githubcopilot.com;" : name === "anthropic" ? "sk-ant-oat01-offline-not-a-token" : "offline-xai-oauth-not-a-token", refresh: "offline-refresh-not-a-token", expires: Date.now() + 3600000, availableModelIds: provider.getModels().map((model) => model.id) };
 			const auth = await provider.auth.oauth.toAuth(credential);
 			assert.equal(auth.apiKey, credential.access);
 			if (name === "github-copilot") assert.equal(auth.baseUrl, "https://api.individual.githubcopilot.com");

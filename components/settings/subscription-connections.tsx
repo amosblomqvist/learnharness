@@ -8,6 +8,7 @@ import { ChatGPTConnection } from "./chatgpt-connection";
 import { Toggle } from "./controls";
 
 export const COPILOT_POLICY_NOTICE = "Pi's native Copilot sign-in may enable additional models whose policy is not yet configured. Models explicitly disabled by policy are not enabled. Organization restrictions still apply.";
+export const CLAUDE_SIGN_IN_NOTICE = "Sign-in uses Anthropic's Claude Code authorization, so the browser consent page names Claude Code. A Claude Pro or Max plan is required. This connection never uses an Anthropic API key.";
 export const SUBSCRIPTION_BACKGROUND_HINT = "Allow LearnHarness helper agents and automatic follow-ups to use this connection.";
 export function subscriptionNotice(label: string): string { return `Your prompts, tool results, and relevant session context are sent to ${label} to run the work you select. Credentials are stored locally in an owner-only plaintext file. Provider terms, data-use policies, and plan limits apply. This connection never falls back to an API key.`; }
 export function subscriptionDisconnectCopy(label: string): string { return `Disconnect ${label} from LearnHarness? This stops work using this connection and removes its saved credentials from this device. It does not cancel your subscription or revoke access at the provider. Saved model choices will remain unavailable until you reconnect or change them.`; }
@@ -89,6 +90,7 @@ export function NativeSubscriptionUIProvider({ children }: { children: React.Rea
 			</> : view === "notice" ? <>
 				<p className="mt-3 text-xs leading-relaxed text-muted-foreground" data-testid="subscription-privacy-notice">{subscriptionNotice(descriptor.label)}</p>
 				{dialog === "github-copilot" && <p className="mt-3 text-xs leading-relaxed text-muted-foreground" data-testid="copilot-policy-notice">{COPILOT_POLICY_NOTICE}</p>}
+				{dialog === "anthropic" && <p className="mt-3 text-xs leading-relaxed text-muted-foreground" data-testid="claude-signin-notice">{CLAUDE_SIGN_IN_NOTICE}</p>}
 			</> : <>
 				<div className="mt-4 flex items-center gap-3 text-xs text-foreground">
 					<Toggle label="Allow background use" checked={management ? status.allowBackgroundUse : background} disabled={busy || !!operation || status.pending || !status.available} onChange={(enabled) => { setBackground(enabled); if (management && bridge) void control(() => bridge.consent(dialog, enabled)); else setBackgroundDirty(true); }} />
@@ -99,10 +101,10 @@ export function NativeSubscriptionUIProvider({ children }: { children: React.Rea
 					{interaction.progress && <p role="status" className="text-muted-foreground">{interaction.progress}</p>}
 					{interaction.userCode && <p>Device code: <code className="select-text font-mono">{interaction.userCode}</code></p>}
 					{interaction.browser && <Button variant="outline" size="sm" disabled={busy} onClick={() => bridge && void bridge.open(dialog, interaction.attemptId, interaction.browser!.id).catch(() => setError("The browser could not be opened. Try again."))}>Open browser</Button>}
-					{prompt && <form className="space-y-2" onSubmit={(event) => { event.preventDefault(); if (bridge) void bridge.respond(dialog, interaction.attemptId, prompt.id, promptValue).catch(() => setError(CONTROL_ERROR)); }}>
+					{prompt && <form className="space-y-2" onSubmit={(event) => { event.preventDefault(); if (prompt.type === "manual_code" && !promptValue.trim()) return; if (bridge) void bridge.respond(dialog, interaction.attemptId, prompt.id, promptValue).catch(() => setError(CONTROL_ERROR)); }}>
 						<label className="block" htmlFor="subscription-auth-prompt">{prompt.message}</label>
 						{prompt.type === "select" ? <select id="subscription-auth-prompt" value={promptValue} onChange={(event) => setPromptValue(event.target.value)} className="w-full rounded-sm border border-border bg-background px-2 py-1.5"><option value="" disabled>Select…</option>{prompt.options?.map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}</select> : <input id="subscription-auth-prompt" type={prompt.type === "secret" ? "password" : "text"} autoComplete="off" value={promptValue} placeholder={prompt.placeholder} onChange={(event) => setPromptValue(event.target.value)} className="w-full rounded-sm border border-border bg-background px-2 py-1.5" />}
-						<Button type="submit" variant="outline" size="sm" disabled={busy || (prompt.type === "select" && !promptValue)}>Continue</Button>
+						<Button type="submit" variant="outline" size="sm" disabled={busy || (prompt.type === "select" && !promptValue) || (prompt.type === "manual_code" && !promptValue.trim())}>Continue</Button>
 					</form>}
 				</div>}
 			</>}
