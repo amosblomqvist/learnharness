@@ -98,6 +98,10 @@ describe("AgentSection (thin SSR)", () => {
 			<AgentSection agent={{ search: { engine: "tavily" } }} models={undefined} graph={undefined} onSectionChange={() => {}} onModelsChange={() => {}} />,
 		);
 		assert.ok(html2.includes("Tavily"), "pinned engine visible in the trigger");
+		const ollama = renderToStaticMarkup(
+			<AgentSection agent={{ search: { engine: "ollama" } }} models={undefined} graph={undefined} onSectionChange={() => {}} onModelsChange={() => {}} />,
+		);
+		assert.ok(ollama.includes("Ollama"), "Ollama preference visible in the trigger");
 	});
 
 	it("the prober graph-tools row: FIRST in the Tools group, default ON, its own key (wave 7)", () => {

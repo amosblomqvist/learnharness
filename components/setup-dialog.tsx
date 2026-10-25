@@ -36,7 +36,7 @@ import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useBackdropDismiss } from "@/components/backdrop-dismiss";
 import type React from "react";
-import { type ModelCatalogEntry, type ModelSlotName, type ModelsSettings } from "@/src/core";
+import { OLLAMA_DEFAULT_URL, OLLAMA_URL_VAR, type ModelCatalogEntry, type ModelSlotName, type ModelsSettings } from "@/src/core";
 import { prettyModel } from "@/components/usage-format";
 import { ModelMenuList } from "@/components/settings/model-menu";
 import { MenuShell } from "@/components/menu-shell";
@@ -274,7 +274,8 @@ export function SetupDialog({
 		setError(null);
 		fetch("/api/keys")
 			.then((r) => r.json())
-			.then((b: { providers?: ProviderKeyInfo[] }) => { if (!cancelled) setKeyProviders(b.providers ?? []); })
+			// Ollama rides the same picker: its "key" is the URL (local-models wave).
+			.then((b: { providers?: ProviderKeyInfo[] }) => { if (!cancelled) setKeyProviders([...(b.providers ?? []), { id: "ollama", envVar: OLLAMA_URL_VAR, label: "Ollama" }]); })
 			.catch(() => { if (!cancelled) setKeyProviders([]); });
 		fetch("/api/models")
 			.then((r) => { if (!r.ok) throw new Error("Catalog unavailable"); return r.json(); })
@@ -445,6 +446,7 @@ export function SetupDialog({
 								onToggleMenu={() => setKeyMenuOpen((v) => !v)}
 								onPick={(p) => {
 									setKeyProvider(p);
+									if (p.envVar === OLLAMA_URL_VAR) setKeyValue(OLLAMA_DEFAULT_URL);
 									setKeyMenuOpen(false);
 									setKeyError(null);
 								}}

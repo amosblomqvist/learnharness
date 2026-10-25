@@ -47,8 +47,12 @@ import {
 	type AuthKeyStatus,
 	genericProviderKeyGuard,
 	isKnownAuthKey,
+	isOllamaVar,
 	isProviderEnvVar,
 	maskKey,
+	normalizeOllamaUrl,
+	OLLAMA_URL_VAR,
+	OLLAMA_VARS,
 	validateKeyShape,
 } from "../core/auth-keys.ts";
 import { authStore } from "../store/auth.ts";
@@ -72,10 +76,11 @@ function boot(): AuthBoot {
 	return g[BOOT_KEY];
 }
 
-/** Is `id` a WRITABLE key name — curated catalog or model-provider env
- *  var (provider-keys interlude: PUT/DELETE accept both). */
+/** Is `id` a WRITABLE key name — curated catalog, model-provider env
+ *  var (provider-keys interlude: PUT/DELETE accept both), or one of the
+ *  Ollama pair (local-models wave). */
 export function isWritableAuthKey(id: string): boolean {
-	return isKnownAuthKey(id) || isProviderEnvVar(id);
+	return isKnownAuthKey(id) || isProviderEnvVar(id) || isOllamaVar(id);
 }
 
 /** The settings page's provider dropdown: every pi-ai provider that takes
@@ -109,6 +114,7 @@ export function initAuthEnv(): void {
 		// an env-exported OPENAI_API_KEY with a file copy gets honest shadow
 		// semantics, exactly like the curated vars.
 		...AUTH_PROVIDER_KEYS.map((p) => p.envVar),
+		...OLLAMA_VARS,
 	]);
 	if (envKeysIgnored()) {
 		// THE FRESH-USER SWITCH: delete every managed env var (re-run on
@@ -152,7 +158,9 @@ export function resolveKeyStatuses(
 	 *  discovery surface). Curated keys always get rows, present or not. */
 	providerEnvVars: ReadonlySet<string> = new Set(),
 ): AuthKeyStatus[] {
-	const ids = new Set<string>([...AUTH_KEYS.map((k) => k.id), ...Object.keys(fileVars)]);
+	// The Ollama pair always gets rows (its settings group shows them set
+	// or not), like the curated keys.
+	const ids = new Set<string>([...AUTH_KEYS.map((k) => k.id), ...OLLAMA_VARS, ...Object.keys(fileVars)]);
 	for (const envVar of providerEnvVars) {
 		if (env[envVar] !== undefined || fileVars[envVar] !== undefined) ids.add(envVar);
 	}
@@ -170,6 +178,8 @@ export function resolveKeyStatuses(
 			info: AUTH_KEYS.find((k) => k.id === id) ?? null,
 			present: live !== undefined,
 			masked: live !== undefined ? `${maskKey(live)} (${live.trim().length} chars)` : null,
+			// The Ollama URL is not a secret — the page shows it in full.
+			...(id === OLLAMA_URL_VAR && live !== undefined ? { value: live } : {}),
 			source: isRealEnv ? "env" : live !== undefined ? "file" : "none",
 			shadowedByEnv: isRealEnv && fileValue !== undefined && envValue !== fileValue,
 		});
@@ -202,6 +212,8 @@ export function keyValue(id: string): string | undefined {
  * no key at all: nothing to gate, present by definition. */
 export function providerKeyPresent(provider: string): boolean {
 	if (isSubscriptionProvider(provider)) return subscriptionConnected(provider);
+	// Ollama is configured by its URL; the key is optional.
+	if (provider === "ollama") return keyValue(OLLAMA_URL_VAR) !== undefined;
 	const info = AUTH_PROVIDER_KEYS.find((p) => p.id === provider);
 	return info ? keyValue(info.envVar) !== undefined : true;
 }
@@ -213,9 +225,18 @@ export function providerKeyPresent(provider: string): boolean {
  * reports shadowedByEnv so the page can explain it).
  */
 export function saveKey(id: string, value: string): { ok: true; status: AuthKeyStatus } | { ok: false; error: string } {
-	const shape = isProviderEnvVar(id) ? genericProviderKeyGuard(id, value) : validateKeyShape(id, value);
-	if (!shape.ok) return { ok: false, error: shape.error };
-	const trimmed = value.trim();
+	// The Ollama URL normalizes on write (its gate returns the value to
+	// store); every other name is shape-checked and stored trimmed.
+	let trimmed: string;
+	if (id === OLLAMA_URL_VAR) {
+		const url = normalizeOllamaUrl(value);
+		if (!url.ok) return { ok: false, error: url.error };
+		trimmed = url.value;
+	} else {
+		const shape = isProviderEnvVar(id) || isOllamaVar(id) ? genericProviderKeyGuard(id, value) : validateKeyShape(id, value);
+		if (!shape.ok) return { ok: false, error: shape.error };
+		trimmed = value.trim();
+	}
 	authStore.setAuthVar(id, trimmed);
 	const record = boot();
 	if (!record.realEnv.has(id)) {

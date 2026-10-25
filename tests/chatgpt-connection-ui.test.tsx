@@ -76,14 +76,18 @@ test("Providers is the first/default page; General is last and other pages keep 
  assert.doesNotMatch(html, />Model providers<\/button>/);
 });
 
-test("Providers has exactly four ordered sections; unknown variables stay masked/read-only at the end of Model API keys", async () => {
+test("Providers has exactly five ordered sections; unknown variables stay masked/read-only at the end of Model API keys", async () => {
  globalThis.fetch = async (url) => {
   assert.equal(url, "/api/keys");
   return Response.json({ providers: [{ id: "openai", envVar: "OPENAI_API_KEY", label: "OpenAI" }], keys: [{ id: "FUTURE_VAR", info: null, present: true, masked: "…abcd", source: "file", shadowedByEnv: false }] });
  };
  fixture(); await mount(<KeysSection />);
  const headings = [...document.querySelectorAll('[data-testid^="group-"] > p')].map((el) => el.textContent);
- assert.deepEqual(headings, ["Model API keys", "Subscriptions", "Dictation", "Search"]);
+ assert.deepEqual(headings, ["Model API keys", "Local models", "Subscriptions", "Dictation", "Search"]);
+ assert(byTest("key-ollama_base_url").closest('[data-testid="group-local-models"]'));
+  assert(byTest("key-ollama_api_key").closest('[data-testid="group-local-models"]'));
+  assert(byTest("key-ollama_api_key-search").closest('[data-testid="group-search"]'));
+  assert.equal(byTest("key-ollama_api_key-search-status").textContent, byTest("key-ollama_api_key-status").textContent);
  assert(byTest("key-deepgram_api_key").closest('[data-testid="group-dictation"]'));
  assert(byTest("key-tavily_api_key").closest('[data-testid="group-search"]'));
  assert(byTest("key-brave_api_key").closest('[data-testid="group-search"]'));

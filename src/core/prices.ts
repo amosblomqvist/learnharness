@@ -25,6 +25,12 @@ export function subscriptionLabels(models: readonly (string | undefined)[]): str
 	return [...new Set(models.flatMap((model) => { const label = subscriptionLabel(model); return label ? [label] : []; }))];
 }
 
+/** Ollama runs are Local (owner, local-models wave): priced at $0 in
+ *  totals, labelled "Local" on their own rows. */
+export function isOllamaLocal(model: string | undefined): boolean {
+	return model?.startsWith("ollama:") === true;
+}
+
 /** Absent stays absent. Long-cache precision is unknown if any write-bearing
  * step lacks the split; never silently turn that missing detail into zero. */
 export function sumSteps(steps: readonly CallUsage[]): CallUsage {

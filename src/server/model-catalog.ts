@@ -23,12 +23,25 @@ import { piModels } from "../agent/models.ts";
 import { chatGPTConnected, chatGPTModel, chatGPTModels, refreshChatGPTModels } from "../agent/chatgpt-bridge.ts";
 import { NATIVE_SUBSCRIPTIONS } from "../core/contracts/subscriptions.ts";
 import { nativeSubscriptionId, nativeSubscriptionConnected, nativeSubscriptionModel, nativeSubscriptionModels, refreshSubscriptionModels } from "../agent/subscription-bridge.ts";
+import { OLLAMA_PROVIDER, refreshOllamaModels } from "../agent/ollama.ts";
 
 export async function refreshConnectionCatalog(provider?: string): Promise<void> {
 	await Promise.all([
 		!provider || provider === "chatgpt" ? refreshChatGPTModels(piModels().getModels("openai").filter((m): m is Model<"openai-responses"> => m.api === "openai-responses")) : Promise.resolve(),
 		!provider || nativeSubscriptionId(provider) ? refreshSubscriptionModels() : Promise.resolve(),
+		!provider || provider === OLLAMA_PROVIDER ? refreshOllamaCatalog() : Promise.resolve(),
 	]);
+}
+/** Re-read the configured Ollama server's model list (no-op when off;
+ *  bounded and non-throwing — see src/agent/ollama.ts). */
+export async function refreshOllamaCatalog(): Promise<void> {
+	await refreshOllamaModels(piModels());
+}
+/** The settings writes' pre-validation hook: refresh Ollama only when a
+ *  write names an Ollama model the last-known list lacks (a just-pulled
+ *  model) — every other write skips the network entirely. */
+export async function refreshOllamaForSpecs(specs: readonly ({ provider: string; id: string } | undefined)[]): Promise<void> {
+	if (specs.some((m) => m?.provider === OLLAMA_PROVIDER && !piModels().getModel(m.provider, m.id))) await refreshOllamaCatalog();
 }
 function connectionModel(provider: string, id: string): Model<Api> | undefined {
 	return provider === "chatgpt" ? chatGPTModel(id) : nativeSubscriptionId(provider) ? nativeSubscriptionModel(provider, id) : piModels().getModel(provider, id);
@@ -47,7 +60,7 @@ import type {
 	SlotPins,
 } from "../core/contracts/models.ts";
 import type { EffectiveModelSpec, EffectiveSlot } from "../core/settings-resolution.ts";
-import { AUTH_PROVIDER_KEYS } from "../core/auth-keys.ts";
+import { AUTH_PROVIDER_KEYS, OLLAMA_URL_VAR } from "../core/auth-keys.ts";
 import { BACKGROUND_MODEL_ROLES, MODEL_SLOTS, type BackgroundModelRole, type ModelSlotName, type ModelsSettings } from "../core/settings.ts";
 
 /** The picker's client-safe model entry (contract: core/contracts/models.ts). */
@@ -142,6 +155,8 @@ export function catalogProviders(): CatalogProvider[] {
 	})).concat([
 		{ id: "chatgpt", envVar: "", keyPresent: chatGPTConnected() },
 		...NATIVE_SUBSCRIPTIONS.map((p) => ({ id: p.logicalId, envVar: "", keyPresent: nativeSubscriptionConnected(p.providerId) })),
+		// Ollama federates by its URL (the key is optional).
+		{ id: OLLAMA_PROVIDER, envVar: OLLAMA_URL_VAR, keyPresent: keyValue(OLLAMA_URL_VAR) !== undefined },
 	]).sort((a, b) => a.id.localeCompare(b.id));
 }
 

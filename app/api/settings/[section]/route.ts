@@ -36,6 +36,7 @@ import {
 	clampChatLevel,
 	clampModelsLevels,
 	effectiveSettings,
+	refreshOllamaForSpecs,
 	promptOverrides,
 	readSettingsRecord,
 	validateChatSettings,
@@ -66,7 +67,13 @@ export async function PUT(request: Request, ctx: { params: Promise<{ section: st
 	let agentHealed: AgentSettings | undefined;
 
 	// Section-specific cross-validation (against the catalog / the prompt
-	// store) — the parsers only see shapes.
+	// store) — the parsers only see shapes. Ollama's catalog is dynamic: a
+	// just-pulled model is re-read before the gate judges it.
+	if (section === "chat") await refreshOllamaForSpecs([(parsed.settings as ChatSettings).model]);
+	if (section === "models") {
+		const models = parsed.settings as ModelsSettings;
+		await refreshOllamaForSpecs([models.strong?.model, models.cheap?.model, models.vision?.model]);
+	}
 	if (section === "chat") {
 		const verdict = validateChatSettings(parsed.settings as ChatSettings);
 		if (!verdict.ok) {

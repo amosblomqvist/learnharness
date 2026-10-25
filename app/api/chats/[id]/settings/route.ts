@@ -3,6 +3,7 @@ import {
 	effectiveSettings,
 	getChat,
 	parseSettingsBody,
+	refreshOllamaForSpecs,
 	stores,
 	validateChatSettings,
 } from "@/src/server";
@@ -32,6 +33,7 @@ export async function PUT(req: Request, { params }: { params: Promise<{ id: stri
 	const parsed = parseSettingsBody(body);
 	if (!parsed.ok) return Response.json({ error: parsed.error }, { status: 400 });
 
+	await refreshOllamaForSpecs([parsed.settings.model]);
 	const verdict = validateChatSettings(parsed.settings);
 	if (!verdict.ok) {
 		return Response.json({ error: verdict.error, supported: verdict.supported }, { status: 400 });

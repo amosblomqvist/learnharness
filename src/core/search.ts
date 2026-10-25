@@ -3,9 +3,10 @@
  *
  * Search engines are pluggable behind ONE seam: the settings record names a
  * preferred engine (agent.search.engine — optional), keys live in the auth
- * store (TAVILY_API_KEY / BRAVE_API_KEY — curated catalog), and the server
+ * store (TAVILY_API_KEY / BRAVE_API_KEY / OLLAMA_API_KEY), and the server
  * composes the live adapter. The Google CSE engine retired with this wave
- * (closed to new customers; dies Jan 2027) — replaced by Tavily + Brave.
+ * (closed to new customers; dies Jan 2027) — replaced by Tavily + Brave;
+ * Ollama's hosted search and fetch now share the same port.
  *
  * Owner decisions baked here:
  *  - NO default engine in the factory record: an engine is live iff its
@@ -31,7 +32,7 @@ export interface SearchHit {
 }
 
 /** The engine ids this wave ships (the catalog: curated keys + adapters). */
-export type SearchEngineId = "tavily" | "brave";
+export type SearchEngineId = "tavily" | "brave" | "ollama";
 
 /** A live search engine: an id (for status/labels) + one operation. The
  *  adapters own their wire protocol (fetch, timeouts, error mapping) —
@@ -40,6 +41,8 @@ export type SearchEngineId = "tavily" | "brave";
 export interface SearchProvider {
 	id: SearchEngineId;
 	search(query: string, count: number): Promise<SearchHit[]>;
+	/** Ollama's paired page reader; other engines use the existing web_fetch path. */
+	fetchPage?(url: string): Promise<{ title: string; content: string }>;
 }
 
 /** Why search is (un)available — the honest status the UI and the tool

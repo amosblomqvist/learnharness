@@ -14,6 +14,7 @@ import { DEFAULT_THINKING_ORDER } from "../core/settings.ts";
 import packageMetadata from "../../package.json" with { type: "json" };
 import { chatGPTModel } from "./chatgpt-bridge.ts";
 import { chatGPTStream } from "./chatgpt-stream.ts";
+import { refreshOllamaModels, syncOllamaProvider } from "./ollama.ts";
 import type { ChatGPTDispatchLifecycle } from "./chatgpt-request-cycle.ts";
 import { nativeSubscriptionId, nativeSubscriptionModel } from "./subscription-bridge.ts";
 import { nativeSubscriptionStream } from "./subscription-stream.ts";
@@ -62,7 +63,12 @@ export function piModels() {
 	if (!collection) {
 		collection = createModels({ identity: APP_IDENTITY });
 		for (const provider of builtinProviders()) collection.setProvider(provider);
+		// Ollama's list is dynamic (src/agent/ollama.ts): kick one boot
+		// refresh so engines resolved before the first picker load (crash
+		// recovery, background jobs) find its models.
+		void refreshOllamaModels(collection);
 	}
+	syncOllamaProvider(collection);
 	return collection;
 }
 

@@ -11,7 +11,7 @@
 
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { resolveSearchEngineFor, tavilyProvider, braveProvider } from "../src/server/search.ts";
+import { resolveSearchEngineFor, tavilyProvider, braveProvider, ollamaProvider } from "../src/server/search.ts";
 
 describe("resolveSearchEngineFor (the auto-detect decision)", () => {
 	it("no keys: honestly unavailable, no default", () => {
@@ -57,6 +57,17 @@ describe("resolveSearchEngineFor (the auto-detect decision)", () => {
 		assert.equal(out.engine, null);
 		assert.match(out.reason, /tavily/);
 		assert.match(out.reason, /API key is missing/);
+	});
+
+	it("Ollama key alone enables search, without a model URL; existing engines keep priority", () => {
+		const key = "ollama-cloud-key";
+		assert.equal(resolveSearchEngineFor(undefined, { ollama: key }).engine, "ollama");
+		assert.equal(resolveSearchEngineFor(undefined, { brave: "brave-key", ollama: key }).engine, "brave");
+		assert.equal(resolveSearchEngineFor(undefined, { tavily: "tavily-key", brave: "brave-key", ollama: key }).engine, "tavily");
+		assert.equal(resolveSearchEngineFor("ollama", { tavily: "tavily-key", ollama: key }).engine, "ollama");
+		const missing = resolveSearchEngineFor("ollama", { tavily: "tavily-key" });
+		assert.equal(missing.available, false);
+		assert.match(missing.reason, /OLLAMA_API_KEY/);
 	});
 });
 
@@ -129,5 +140,28 @@ describe("braveProvider (wire shape per Brave's dashboard docs, verified 2026-09
 			new Response("rate limited", { status: 429 }),
 		);
 		await assert.rejects(provider.search("q", 5), /Brave search API 429/);
+	});
+});
+
+describe("ollamaProvider (hosted Web Search and Web Fetch)", () => {
+	it("calls ollama.com with bearer key, returns normalized hits and page content", async () => {
+		const seen: Array<{ url: string; init: RequestInit }> = [];
+		const provider = ollamaProvider("ollama-cloud-key", async (url, init) => {
+			seen.push({ url, init });
+			return Response.json(url.endsWith("web_search") ? {
+				results: [{ title: "Example", url: "https://example.com", content: "first\nsecond" }, { title: "Missing URL" }],
+			} : { title: "Example page", content: "# Page body" });
+		});
+		assert.deepEqual(await provider.search("test query", 5), [{ title: "Example", url: "https://example.com", snippet: "first second" }]);
+		assert.deepEqual(await provider.fetchPage!("https://example.com"), { title: "Example page", content: "# Page body" });
+		assert.deepEqual(seen.map(({ url, init }) => [url, init.method, (init.headers as Record<string, string>).authorization, JSON.parse(init.body as string)]), [
+			["https://ollama.com/api/web_search", "POST", "Bearer ollama-cloud-key", { query: "test query", max_results: 5 }],
+			["https://ollama.com/api/web_fetch", "POST", "Bearer ollama-cloud-key", { url: "https://example.com" }],
+		]);
+	});
+
+	it("surfaces a failed Ollama call", async () => {
+		const provider = ollamaProvider("ollama-cloud-key", async () => new Response("rate limited", { status: 429 }));
+		await assert.rejects(provider.search("q", 5), /Ollama web_search API 429: rate limited/);
 	});
 });

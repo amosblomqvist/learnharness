@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { subscriptionLabels, subscriptionLabel, type SessionPricing, type TurnUsage } from "@/src/core";
+import { isOllamaLocal, subscriptionLabels, subscriptionLabel, type SessionPricing, type TurnUsage } from "@/src/core";
 import { formatTokens, formatUsd, planCostLabel, prettyModel } from "@/components/usage-format";
 import { ModelControl, catalogLimits, useModelCatalog } from "@/components/model-picker";
 
@@ -171,7 +171,7 @@ export function StatsBar({
 												</span>
 												<span className="flex shrink-0 items-center gap-2 tabular-nums text-card-foreground">
 													<span className="text-muted-foreground">{turn.steps.length} steps</span>
-													<span>{subscriptionLabel(turn.model) ?? (c === null ? "—" : formatUsd(c))}</span>
+													<span>{subscriptionLabel(turn.model) ?? (isOllamaLocal(turn.model) ? "Local" : c === null ? "—" : formatUsd(c))}</span>
 												</span>
 											</li>
 										);
