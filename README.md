@@ -48,7 +48,7 @@ Future teaching sessions can read the graph instead of starting from scratch. Pr
 - **Windows (x64):** run the installer. It is currently unsigned; Windows may show an “unknown publisher” or SmartScreen warning.
 - **Linux (x64):** make the AppImage executable and open it, or install the Debian/Ubuntu `.deb`.
 
-Add your provider API key and choose your models, then start a session with what you want to understand. LearnHarness supports 30+ provider options, including OpenAI, Anthropic, Google, DeepSeek, and OpenRouter. For dictation, choose Deepgram or OpenAI API under Settings → General. OpenAI dictation uses an OpenAI Platform API key and is billed separately from a ChatGPT subscription. Optional web search uses a separate service key.
+Add your provider API key and choose your models, then start a session with what you want to understand. LearnHarness supports 30+ provider options, including OpenAI, Anthropic, Google, DeepSeek, and OpenRouter. Optional dictation and web search use separate service keys.
 
 All three platforms support in-app updates.
 
@@ -58,6 +58,8 @@ All three platforms support in-app updates.
 - **Local storage.** Your chats, graph, settings, and API keys live on your machine. Learning records are plain files you can inspect.
 - **External services.** Models run through your configured providers. Model requests send the context needed for the task; web research and dictation also contact external services. Local storage does not mean offline processing.
 - **Inspectable behavior.** System prompts are visible and editable. The app is open source under the AGPL-3.0 license.
+
+Choose Deepgram or OpenAI API under Settings → General for dictation. OpenAI dictation uses an OpenAI Platform API key and is billed separately from a ChatGPT subscription.
 
 ## Development and support
 

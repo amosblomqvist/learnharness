@@ -32,7 +32,6 @@ import { AUTH_PROVIDER_KEYS } from "./auth-keys.ts";
 import type { ModelRole } from "../../config.ts";
 import type { ChatSettings } from "./contracts/chat.ts";
 import type { SearchEngineId } from "./search.ts";
-import type { DictationProvider } from "./dictation.ts";
 
 /** The schema version this code understands. Bump ONLY for breaking shape
  *  changes (a field renamed/meaning changed); pure additions never bump. */
@@ -235,7 +234,7 @@ export interface GeneralSettings {
 	/** Automatic startup/24h update checks (default ON). Manual checks bypass this. */
 	autoUpdate?: boolean;
 	/** The explicit speech-to-text provider. OpenAI uses the Platform API key. */
-	dictationProvider?: DictationProvider;
+	dictationProvider?: "deepgram" | "openai";
 }
 
 /** Agent settings — everything about the non-conversation machinery. */
