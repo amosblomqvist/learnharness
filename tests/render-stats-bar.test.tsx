@@ -92,6 +92,10 @@ describe("stats bar", () => {
 	it("prettyModel strips vendor + date suffix, keeps dashes", () => {
 		assert.equal(prettyModel("z-ai/glm-5.3-flash"), "glm-5.3-flash"); // dashes kept (owner round 5)
 		assert.equal(prettyModel("qwen/qwen3.8-max-0902"), "qwen3.8-max");
+		// A short numeric tail is a version, not a date suffix.
+		assert.equal(prettyModel("claude-opus-5-5"), "claude-opus-5-5");
+		assert.equal(prettyModel("subscription-anthropic:claude-opus-5-5", true), "claude-opus-5-5 · subscription-anthropic");
+		assert.equal(prettyModel("claude-sonnet-4-5-20250929"), "claude-sonnet-4-5");
 	});
 
 	it("provider-qualified stamps (usage contract, model-slots wave)", () => {

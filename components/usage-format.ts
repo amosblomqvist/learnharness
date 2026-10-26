@@ -45,7 +45,9 @@ export function prettyModel(id: string, qualified = false): string {
 	const { provider, id: bare } = splitQualified(id);
 	const short = bare.includes("/") ? bare.slice(bare.lastIndexOf("/") + 1) : bare;
 	const parts = short.split("-");
-	const trimmed = /^\d+$/.test(parts[parts.length - 1] ?? "") ? parts.slice(0, -1) : parts;
+	// Date suffixes are 4+ digits ("0902", "20250514"); a 1-2 digit tail is a
+	// version ("claude-opus-5-5" is Opus 5.5, not a dated Opus 5).
+	const trimmed = /^\d{4,}$/.test(parts[parts.length - 1] ?? "") ? parts.slice(0, -1) : parts;
 	// No auto-capitalization, dashes KEPT (owner rounds 4-5, 2026-10-05):
 	// model names render exactly as their providers write them.
 	const pretty = trimmed.join("-");
