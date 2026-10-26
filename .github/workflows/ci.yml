@@ -17,6 +17,21 @@ env:
   NEXT_TELEMETRY_DISABLED: "1"
 
 jobs:
+  nix_flake_check:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: cachix/install-nix-action@v7
+      - uses: cachix/cachix-action@v7
+        with:
+          name: learnharness
+          skipPush: true
+      - name: check flake
+        run: nix flake check --all-systems -L
   quality:
     name: Typecheck, tests, lint
     runs-on: ubuntu-24.04
