@@ -1,0 +1,7 @@
+Tutor
+Copyright 2026 windeckersoftware
+
+This project started as a fork of free-cluely by Prat011
+(https://github.com/Prat011/free-cluely), licensed under the Apache License 2.0.
+The window/overlay approach comes from that project; the AI layer, UI and
+tutor/writer features were rewritten.

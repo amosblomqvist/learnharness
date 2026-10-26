@@ -1,0 +1,32 @@
+{
+  "start": "gate",
+  "torch": 8,
+  "win": "vault",
+  "rooms": {
+    "gate": {
+      "name": "The Gate",
+      "desc": "A cold wind follows you in. A hall lies north.",
+      "exits": {"north": "hall"},
+      "items": []
+    },
+    "hall": {
+      "name": "The Hall",
+      "desc": "Dust covers the floor. A vault door is east, and a tower stair is north.",
+      "exits": {"south": "gate", "north": "tower", "east": "vault"},
+      "items": ["key"],
+      "locked": {"east": "vault"}
+    },
+    "tower": {
+      "name": "The Tower",
+      "desc": "A narrow stair climbs into the dark. Nothing else is here.",
+      "exits": {"south": "hall"},
+      "items": []
+    },
+    "vault": {
+      "name": "The Vault",
+      "desc": "Gold heaps around a stone chest.",
+      "exits": {"west": "hall"},
+      "items": ["treasure"]
+    }
+  }
+}

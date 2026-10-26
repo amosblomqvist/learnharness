@@ -10,6 +10,9 @@ SCOPE.md
 # raw real-data import sources (user directive 2026-09-13: never commit)
 real-data-extraction/
 dist/
+# Nested Tutor app build outputs. The curriculum markdown stays tracked.
+tutor/dist-electron/
+tutor/release/
 
 # dev auth/keys store (auth-keys wave): repo-root auth.json — secrets never committed
 auth.json

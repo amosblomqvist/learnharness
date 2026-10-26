@@ -1,0 +1,15 @@
+{
+  "id": "p01-quest-log",
+  "title": "Project: the quest log",
+  "tier": "tools",
+  "needs": ["quest/guild-save"],
+  "minutes": 180,
+  "story": "The guild wants its quest board on the command line: add quests, mark them done, count the gold.",
+  "folder": "quest-log",
+  "sources": [
+    ["Python docs: argparse tutorial", "https://docs.python.org/3/howto/argparse.html"],
+    ["Python docs: json", "https://docs.python.org/3/library/json.html"],
+    ["Python docs: sys.exit()", "https://docs.python.org/3/library/sys.html#sys.exit"]
+  ],
+  "hint": "Start with load() and save() for the JSON file, then one function per command. argparse with subparsers gives you the usage message and exit code 2 for free."
+}

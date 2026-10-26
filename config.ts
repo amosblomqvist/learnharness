@@ -22,6 +22,13 @@ export const PATHS = {
 	root: ROOT,
 	/** Teacher system prompt — the agent's instructions (src/agent/). */
 	teacherPrompt: path.join(ROOT, "src", "agent", "system-prompt.md"),
+	/**
+	 * Tutor lesson markdown the teacher reads (Apache-2.0, tutor/LICENSE).
+	 * ROOT-anchored like the prompts: it ships in the app, and the learner
+	 * filesystem tools must not be asked to find it (they resolve against
+	 * the home directory). Mutable learner state stays under DATA_ROOT.
+	 */
+	curriculum: path.join(ROOT, "tutor", "src", "study", "content"),
 	data: DATA_ROOT,
 	/** Chat sessions (AI SDK UIMessage transcripts, one JSON file per chat). */
 	chats: path.join(DATA_ROOT, "chats"),

@@ -1,0 +1,16 @@
+{
+  "id": "p02-dungeon",
+  "title": "Project: the dungeon",
+  "tier": "games",
+  "needs": ["quest/guild-play", "quest/file-json", "quest/class-dataclass"],
+  "minutes": 240,
+  "story": "The Guild found a dungeon with a locked vault. Build the text adventure Sam explores it in.",
+  "folder": "dungeon",
+  "sources": [
+    ["Python tutorial: Input and output", "https://docs.python.org/3/tutorial/inputoutput.html"],
+    ["Python docs: json", "https://docs.python.org/3/library/json.html"],
+    ["Python docs: argparse", "https://docs.python.org/3/howto/argparse.html"],
+    ["Python docs: sys.exit()", "https://docs.python.org/3/library/sys.html#sys.exit"]
+  ],
+  "hint": "Keep the world in a dict, the player's state in a small class, and one method per command. Read commands with input(\"> \") until quit, a win or the torch dies."
+}
