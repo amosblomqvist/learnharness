@@ -52,6 +52,22 @@ Add your provider API key and choose your models, then start a session with what
 
 All three platforms support in-app updates.
 
+### Nix
+
+We provide a `flake.nix` to give Nix users access to the latest development build. Add the following input to your `flake.nix` file:
+
+```nix
+inputs.learnharness.url = "github:amosblomqvist/learnharness";
+```
+
+Then, add the following to `environment.systemPackages`, and rebuild:
+
+```nix
+environment.systemPackages = [
+    inputs.learnharness.packages.${pkgs.stdenv.hostPlatform.system}.default
+];
+```
+
 ## Your keys, your data
 
 - **Your keys and models.** No LearnHarness subscription or markup. You pay your providers for usage; a live cost meter shows model costs.
