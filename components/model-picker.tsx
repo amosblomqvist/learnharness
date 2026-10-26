@@ -43,7 +43,7 @@ export function useModelCatalog(): { catalog: ModelCatalogResponse | undefined; 
 				if (section === "keys") {
 					catalogGeneration++; catalogInflight = undefined; catalogCache = undefined;
 					publishCatalog(); fetchCatalog();
-				} else if (section === "models") fetchCatalog(true);
+				} else if (section === "models" || section === "compaction") fetchCatalog(true);
 			});
 			fetchCatalog(true);
 		} else fetchCatalog();
@@ -56,8 +56,7 @@ export function useModelCatalog(): { catalog: ModelCatalogResponse | undefined; 
 
 /** provider:id → contextWindow over the cached catalog — the client-side
  *  twin of the server's catalogContextLimits join (context-meter
- *  amendment, owner 2026-09-23: pi's live catalog is the ONLY limit
- *  source — no hardcoded fallback exists anywhere, so a model missing
+ *  amendment: the resolved catalog is the limit source, so a model missing
  *  from the index reads limit-null and the meter renders usage-only,
  *  the honest-render precedent). Consumed by the stats bar: the same
  *  cached /api/models fetch the picker rides feeds the denominator. */

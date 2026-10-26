@@ -32,6 +32,7 @@ const publicError = (err) => ({
 }[err?.code] || "ChatGPT sign-in failed. Try again; no API-key fallback was used.");
 
 const nonempty = (v) => typeof v === "string" && v.length > 0 && !/[\x00-\x20\x7f]/.test(v);
+const contextLimit = (v) => Number.isSafeInteger(v) && v > 0 && v <= 10_000_000;
 const planScopes = (tokens) => !!tokens?.accessToken && SCOPES.every((scope) => tokens.scopes.includes(scope));
 /** Reject the entire credential record when its schema is invalid. */
 function validateState(state) {
@@ -423,7 +424,14 @@ function createChatGPT({ store, openExternal, fetch: request = globalThis.fetch,
 			const body = await json(`${RESOURCE}/models`, { headers: { Authorization: `Bearer ${token.accessToken}` }, signal: AbortSignal.any([transportAbort.signal, AbortSignal.timeout(15000)]) });
 			authorized(false, undefined, token.epoch);
 			if (sequence !== catalogSequence || active()?.id !== token.accountId || !Array.isArray(body.models)) throw fail("catalog");
-			const visible = body.models.filter((m) => m && m.visibility === "list" && nonempty(m.slug) && typeof m.display_name === "string").map((m) => ({ id: m.slug, name: m.display_name }));
+			// OpenAI's account catalog distinguishes a default context window
+			// from the maximum permitted for an explicit override. Ignore
+			// malformed values instead of borrowing limits from another account.
+			const visible = body.models.filter((m) => m && m.visibility === "list" && nonempty(m.slug) && typeof m.display_name === "string").map((m) => {
+				const contextWindow = contextLimit(m.context_window) ? m.context_window : undefined;
+				const maxContextWindow = contextWindow !== undefined && contextLimit(m.max_context_window) && m.max_context_window >= contextWindow ? m.max_context_window : undefined;
+				return { id: m.slug, name: m.display_name, ...(contextWindow !== undefined ? { contextWindow } : {}), ...(maxContextWindow !== undefined ? { maxContextWindow } : {}) };
+			});
 			const changed = JSON.stringify(visible) !== JSON.stringify(catalog);
 			catalog = visible;
 			if (changed) authorityRevision++;

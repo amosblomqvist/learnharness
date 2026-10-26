@@ -242,6 +242,27 @@ test("account catalog is scoped, visibility filtered, and cleared on disconnect"
 	} finally { f.service.close(); }
 });
 
+test("account catalog carries validated context metadata and changes its authority when limits change", async () => {
+	let context = 500_000;
+	let maximum: unknown = 872_000;
+	const f = await loggedIn({ provider: async (url) => url.endsWith("/models") ? Response.json({ models: [
+		{ slug: "gpt-5", display_name: "Scratch", visibility: "list", context_window: context, max_context_window: maximum },
+		{ slug: "hidden", display_name: "Hidden", visibility: "hide", context_window: 100 },
+	] }) : undefined });
+	try {
+		const first = await f.service.models();
+		assert.deepEqual(first.models, [{ id: "gpt-5", name: "Scratch", contextWindow: 500_000, maxContextWindow: 872_000 }]);
+		context = 272_000; maximum = 600_000;
+		const changed = await f.service.models();
+		assert.ok(changed.authorityRevision > first.authorityRevision);
+		assert.deepEqual(changed.models[0], { id: "gpt-5", name: "Scratch", contextWindow: 272_000, maxContextWindow: 600_000 });
+		maximum = 200_000;
+		assert.deepEqual((await f.service.models()).models[0], { id: "gpt-5", name: "Scratch", contextWindow: 272_000 });
+		maximum = "872000";
+		assert.deepEqual((await f.service.models()).models[0], { id: "gpt-5", name: "Scratch", contextWindow: 272_000 });
+	} finally { f.service.close(); }
+});
+
 test("private JSON file round-trips global state; creation and atomic replacement are owner-only", async () => {
 	const dir = await fs.mkdtemp(path.join(os.tmpdir(), "lh-chatgpt-storage-"));
 	const file = path.join(dir, "private", "chatgpt-credentials.json");

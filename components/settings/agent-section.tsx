@@ -58,6 +58,7 @@ import { defaultOrderLevel, populateLevel } from "@/components/thinking-default"
 import type React from "react";
 import {
 	COMPACTION_THRESHOLD_FLOOR,
+	COMPACTION_RESERVE_TOKENS,
 	MODEL_SLOTS,
 	resolveSettings,
 	type AgentSettings,
@@ -170,6 +171,18 @@ export function composeSearchEngine(
 		return { ...rest } as AgentSettings;
 	}
 	return { ...agent, search: { engine } };
+}
+
+/** Write an account/model window choice without disturbing other settings. */
+export function composeContextWindow(compaction: CompactionSettings | undefined, key: string, value: string, max: number): CompactionSettings | null {
+	const windows = { ...compaction?.contextWindows };
+	if (!value) delete windows[key];
+	else {
+		const n = Number(value);
+		if (!Number.isFinite(n) || n <= 0) return null;
+		windows[key] = Math.min(max, Math.max(COMPACTION_THRESHOLD_FLOOR, Math.floor(n)));
+	}
+	return { ...compaction, contextWindows: Object.keys(windows).length ? windows : undefined };
 }
 
 /** The indicator under a row whose override IS the version in use (owner
@@ -307,6 +320,7 @@ export function AgentSection({
 	/** The three tiers' resolved pins — GET /api/models `slots`. The rows'
 	 *  Default hints and thinking lists resolve from it. */
 	const [slots, setSlots] = useState<ModelsBody["slots"] | null>(null);
+	const [contextSelection, setContextSelection] = useState("");
 	/** The live search state (/api/search) — the row's reason line. */
 	const [search, setSearch] = useState<{ available: boolean; engine: string | null; reason: string } | null>(null);
 	/** Which search engines have a key (/api/keys) — the no-keys-anywhere
@@ -362,7 +376,7 @@ export function AgentSection({
 	}, []);
 
 	useSettingsSaved((section) => {
-		if (section === "models" || section === "keys") readModels(section === "keys");
+		if (section === "models" || section === "keys" || section === "compaction") readModels(section === "keys");
 		// THE state-echo root cause: the prompt switches write through the
 		// agent section, but this view (the toggles' truth) never re-read —
 		// the settings-saved law (every reader re-reads) was missing this
@@ -850,9 +864,46 @@ export function AgentSection({
 			</SettingsGroup>
 
 			<SettingsGroup label="Context" testid="group-context">
+				{(() => {
+					const candidates = catalog?.filter((m) => m.provider === "chatgpt" && m.contextWindowKey && (m.maxContextWindow ?? 0) >= COMPACTION_THRESHOLD_FLOOR) ?? [];
+					const strong = slots?.strong?.model;
+					const selected = candidates.find((m) => m.contextWindowKey === contextSelection)
+						?? candidates.find((m) => m.provider === strong?.provider && m.id === strong.id)
+						?? candidates[0];
+					if (!selected?.contextWindowKey || selected.maxContextWindow === undefined) return null;
+					const key = selected.contextWindowKey;
+					const max = selected.maxContextWindow;
+					return (
+						<SettingsRow label="Model context window" testid="context-window-row"
+							hint={`Account default ${selected.defaultContextWindow ?? selected.contextWindow}; maximum ${max}; effective ${selected.contextWindow}. Applies only to this account and model.`}>
+							<span className="flex items-center gap-2">
+								<select aria-label="Context model" data-testid="context-model" value={key}
+									onChange={(event) => setContextSelection(event.target.value)}
+									className="max-w-44 rounded-md border border-border bg-card px-2 py-1 text-xs text-foreground">
+									{candidates.map((model) => <option key={model.contextWindowKey} value={model.contextWindowKey}>{model.name}</option>)}
+								</select>
+								<CommitInput type="number" ariaLabel="model context window" testid="input-context-window"
+									value={String(compaction?.contextWindows?.[key] ?? "")}
+									placeholder={String(selected.defaultContextWindow ?? selected.contextWindow)}
+									onCommit={(value) => {
+										const next = composeContextWindow(compaction, key, value, max);
+										if (next) onCompactionChange(next);
+									}} />
+							</span>
+						</SettingsRow>
+					);
+				})()}
 				<SettingsRow
 					label="Compaction threshold"
-					hint={`${resolvedCompaction.thresholdTokens} tok`}
+					hint={(() => {
+						const candidates = catalog?.filter((m) => m.provider === "chatgpt" && m.contextWindowKey && (m.maxContextWindow ?? 0) >= COMPACTION_THRESHOLD_FLOOR) ?? [];
+						const strong = slots?.strong?.model;
+						const model = candidates.find((m) => m.contextWindowKey === contextSelection)
+							?? candidates.find((m) => m.provider === strong?.provider && m.id === strong?.id)
+							?? candidates[0];
+						const effective = model ? Math.min(resolvedCompaction.thresholdTokens, Math.max(model.contextWindow - COMPACTION_RESERVE_TOKENS, 1)) : resolvedCompaction.thresholdTokens;
+						return model ? `${effective} tok effective for ${model.name} (${COMPACTION_RESERVE_TOKENS} reserved)` : `${effective} tok`;
+					})()}
 					testid="compaction-row-threshold"
 				>
 					<CommitInput

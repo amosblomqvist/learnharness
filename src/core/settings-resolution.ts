@@ -215,6 +215,7 @@ export function resolveSettings(record: UserSettings | null): EffectiveSettings 
 		},
 		compaction: {
 			thresholdTokens: record?.compaction?.thresholdTokens ?? FACTORY_SETTINGS.compaction.thresholdTokens,
+			contextWindows: record?.compaction?.contextWindows ?? FACTORY_SETTINGS.compaction.contextWindows,
 		},
 	};
 }

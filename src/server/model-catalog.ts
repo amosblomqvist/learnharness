@@ -6,10 +6,9 @@
  * /api/settings/* — the per-chat settings PUT is retired from the UI;
  * legacy records' per-chat overrides still resolve server-side).
  *
- * pi-ai owns ALL the data: the catalog (id/name/cost/context/modality/
- * thinkingLevelMap) and the per-model thinking truth
- * (getSupportedThinkingLevels / clampThinkingLevel). This module only
- * projects and validates — no second registry to drift out of sync.
+ * pi-ai owns the capabilities and model registry. The ChatGPT account
+ * catalog additionally supplies its own default and maximum context window;
+ * an explicit local choice is capped at that account's current maximum.
  *
  * Federation: `getModels()` is called per keyed provider (federated, the
  * model-slots wave), so a provider appears in the picker exactly when its
@@ -20,7 +19,7 @@
 import { clampThinkingLevel, getSupportedThinkingLevels, type Api, type Model } from "@earendil-works/pi-ai";
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import { piModels } from "../agent/models.ts";
-import { chatGPTConnected, chatGPTModel, chatGPTModels, refreshChatGPTModels } from "../agent/chatgpt-bridge.ts";
+import { chatGPTCatalogScope, chatGPTConnected, chatGPTModel, chatGPTModels, refreshChatGPTModels } from "../agent/chatgpt-bridge.ts";
 import { NATIVE_SUBSCRIPTIONS } from "../core/contracts/subscriptions.ts";
 import { nativeSubscriptionId, nativeSubscriptionConnected, nativeSubscriptionModel, nativeSubscriptionModels, refreshSubscriptionModels } from "../agent/subscription-bridge.ts";
 
@@ -48,7 +47,7 @@ import type {
 } from "../core/contracts/models.ts";
 import type { EffectiveModelSpec, EffectiveSlot } from "../core/settings-resolution.ts";
 import { AUTH_PROVIDER_KEYS } from "../core/auth-keys.ts";
-import { BACKGROUND_MODEL_ROLES, MODEL_SLOTS, type BackgroundModelRole, type ModelSlotName, type ModelsSettings } from "../core/settings.ts";
+import { BACKGROUND_MODEL_ROLES, COMPACTION_THRESHOLD_FLOOR, MODEL_SLOTS, type BackgroundModelRole, type ModelSlotName, type ModelsSettings } from "../core/settings.ts";
 
 /** The picker's client-safe model entry (contract: core/contracts/models.ts). */
 export type ModelDto = ModelCatalogEntry;
@@ -152,8 +151,25 @@ function keyedProviderIds(): Set<string> {
 	return new Set(catalogProviders().filter((p) => p.keyPresent).map((p) => p.id));
 }
 
+/** Resolve an explicit choice only against the current account's advertised
+ * ceiling. Account switches and lower ceilings cannot inherit an unsafe limit. */
+export function resolveModelContext(model: Model<Api>, windows: Readonly<Record<string, number>> = {}): Pick<ModelDto, "contextWindow" | "defaultContextWindow" | "maxContextWindow" | "contextWindowSource" | "contextWindowKey"> {
+	const metadata = model as Model<Api> & { contextWindowSource?: "account"; maxContextWindow?: number };
+	if (model.provider !== "chatgpt" || metadata.contextWindowSource !== "account") return { contextWindow: model.contextWindow };
+	const max = metadata.maxContextWindow;
+	const scope = chatGPTCatalogScope(model);
+	if (typeof max !== "number" || !Number.isSafeInteger(max) || max < model.contextWindow || !scope) {
+		return { contextWindow: model.contextWindow, defaultContextWindow: model.contextWindow, contextWindowSource: "account" };
+	}
+	const key = `chatgpt:${encodeURIComponent(scope.accountId)}:${encodeURIComponent(model.id)}`;
+	const requested = windows[key];
+	const contextWindow = typeof requested === "number" && Number.isSafeInteger(requested) && requested >= COMPACTION_THRESHOLD_FLOOR
+		? Math.min(requested, max) : model.contextWindow;
+	return { contextWindow, defaultContextWindow: model.contextWindow, contextWindowSource: "account", maxContextWindow: max, contextWindowKey: key };
+}
+
 /** Project one catalog model to the client DTO. */
-export function toModelDto(model: Model<Api>): ModelDto {
+export function toModelDto(model: Model<Api>, windows: Readonly<Record<string, number>> = {}): ModelDto {
 	return {
 		id: model.id,
 		name: model.name,
@@ -167,7 +183,7 @@ export function toModelDto(model: Model<Api>): ModelDto {
 			cacheRead: model.cost.cacheRead,
 			cacheWrite: model.cost.cacheWrite,
 		},
-		contextWindow: model.contextWindow,
+		...resolveModelContext(model, windows),
 		maxTokens: model.maxTokens,
 	};
 }
@@ -181,14 +197,15 @@ export function toModelDto(model: Model<Api>): ModelDto {
  *  a model missing here reads limit-null (usage-only, honest render). */
 export function catalogContextLimits(): Map<string, number> {
 	const keyed = keyedProviderIds();
+	const windows = effectiveSettings().compaction.contextWindows;
 	const index = new Map<string, number>();
 	for (const provider of piModels().getProviders()) {
 		if (!keyed.has(provider.id)) continue;
 		for (const model of piModels().getModels(provider.id)) {
-			index.set(`${provider.id}:${model.id}`, model.contextWindow);
+			index.set(`${provider.id}:${model.id}`, resolveModelContext(model, windows).contextWindow);
 		}
 	}
-	for (const model of [...chatGPTModels(), ...nativeSubscriptionModels()]) index.set(`${model.provider}:${model.id}`, model.contextWindow);
+	for (const model of [...chatGPTModels(), ...nativeSubscriptionModels()]) index.set(`${model.provider}:${model.id}`, resolveModelContext(model, windows).contextWindow);
 	return index;
 }
 
@@ -198,13 +215,14 @@ export function catalogContextLimits(): Map<string, number> {
  *  pins (the settings UI's per-role default captions). */
 export function modelCatalog(): ModelCatalogResponse {
 	const keyed = keyedProviderIds();
+	const windows = effectiveSettings().compaction.contextWindows;
 	const models = piModels()
 		.getProviders()
 		.filter((p) => keyed.has(p.id))
 		.flatMap((p) => piModels().getModels(p.id))
-		.map(toModelDto)
+		.map((model) => toModelDto(model, windows))
 		.sort((a, b) => (a.provider === b.provider ? a.id.localeCompare(b.id) : a.provider.localeCompare(b.provider)))
-		.concat([...chatGPTModels(), ...nativeSubscriptionModels()].map(toModelDto));
+		.concat([...chatGPTModels(), ...nativeSubscriptionModels()].map((model) => toModelDto(model, windows)));
 	return {
 		models,
 		defaults: catalogDefaults(),

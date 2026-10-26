@@ -2,7 +2,7 @@ import type { Api, AssistantMessage, Model, SimpleStreamOptions, StreamFunction,
 import { streamSimple } from "@earendil-works/pi-ai/api/openai-responses";
 import { AssistantMessageEventStream } from "@earendil-works/pi-ai/utils/event-stream";
 import { transformMessages } from "@earendil-works/pi-ai/api/transform-messages";
-import { chatGPTAbortController, chatGPTScope, chatGPTScopeCurrent, chatGPTLease, chatGPTDenial } from "./chatgpt-bridge.ts";
+import { chatGPTAbortController, chatGPTCatalogScope, chatGPTScope, chatGPTScopeCurrent, chatGPTLease, chatGPTDenial } from "./chatgpt-bridge.ts";
 import type { AdmissionScope, ChatGPTDispatchLifecycle } from "./chatgpt-request-cycle.ts";
 
 const USAGE = "https://chatgpt.com/settings/usage";
@@ -62,6 +62,10 @@ export function chatGPTStream(background: () => boolean, lifecycle?: ChatGPTDisp
 				if (logicalModel.provider !== "chatgpt") throw new Error("ChatGPT account catalog has no selected model");
 				if (Object.keys(options?.headers ?? {}).some((key) => key.toLowerCase() === "authorization")) throw new Error("Authorization override is forbidden");
 				scope = chatGPTScope(logicalModel.id);
+				const catalogScope = chatGPTCatalogScope(logicalModel);
+				if (!catalogScope || catalogScope.accountId !== scope.accountId || catalogScope.epoch !== scope.epoch || catalogScope.authorityRevision !== scope.authorityRevision || catalogScope.selectedModelId !== scope.selectedModelId) {
+					throw new Error("ChatGPT catalog authority changed");
+				}
 				lifecycle?.captured(scope);
 				const credentials = await chatGPTLease(scope, purpose);
 				check();

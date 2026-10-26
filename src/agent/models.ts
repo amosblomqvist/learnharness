@@ -80,6 +80,8 @@ export interface ResolvedModelSpec {
 	provider: string;
 	id: string;
 	thinkingLevel?: ThinkingLevel;
+	/** Server-resolved, account-scoped context limit. */
+	contextWindow?: number;
 }
 
 /** The first entry of the baked default order the model supports (owner,
@@ -101,10 +103,12 @@ function defaultThinkingLevel(model: Model<Api>): ThinkingLevel {
 export function piEngineForSpec(spec: ResolvedModelSpec, background: boolean | (() => boolean) = true, lifecycle?: ChatGPTDispatchLifecycle): PiEngine {
 	const models: Models = piModels();
 	const nativeId = nativeSubscriptionId(spec.provider);
-	const model = spec.provider === "chatgpt" ? chatGPTModel(spec.id) : nativeId ? nativeSubscriptionModel(spec.provider, spec.id) : models.getModel(spec.provider, spec.id);
-	if (!model) {
+	const selected = spec.provider === "chatgpt" ? chatGPTModel(spec.id) : nativeId ? nativeSubscriptionModel(spec.provider, spec.id) : models.getModel(spec.provider, spec.id);
+	if (!selected) {
 		throw new Error(`${spec.provider} catalog has no model ${spec.id}`);
 	}
+	const model = typeof spec.contextWindow === "number" && Number.isSafeInteger(spec.contextWindow) && spec.contextWindow > 0
+		? { ...selected, contextWindow: spec.contextWindow } : selected;
 	// UNSET level → the baked default order (first entry the model
 	// supports); SET level → pi's native nearest-clamp (model swaps keep
 	// the user's intent and adapt honestly).

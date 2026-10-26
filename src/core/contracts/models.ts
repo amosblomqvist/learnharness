@@ -23,6 +23,12 @@ export interface ModelCatalogEntry {
 	supportedLevels: ThinkingLevel[];
 	cost: { input: number; output: number; cacheRead: number; cacheWrite: number };
 	contextWindow: number;
+	/** Account-advertised default and optional ceiling for explicit opt-in. */
+	defaultContextWindow?: number;
+	maxContextWindow?: number;
+	contextWindowSource?: "account";
+	/** Opaque account-and-model key for a persisted explicit window choice. */
+	contextWindowKey?: string;
 	maxTokens: number;
 }
 
