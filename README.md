@@ -57,6 +57,22 @@ All three platforms support in-app updates.
 
 **Dictation:** Create a [Deepgram API key](https://console.deepgram.com/) with the **Member role or higher** ([required for token minting](https://developers.deepgram.com/reference/auth/tokens/grant)) and add it under **Settings → Providers → Dictation**. Choose the language below the key; **Multilingual** supports automatic recognition and mixed-language speech. A `403 Insufficient permissions` error during token minting can indicate an insufficient key role.
 
+### Nix
+
+We provide a `flake.nix` to give Nix users access to the latest development build. Add the following input to your `flake.nix` file:
+
+```nix
+inputs.learnharness.url = "github:amosblomqvist/learnharness";
+```
+
+Then, add the following to `environment.systemPackages`, and rebuild:
+
+```nix
+environment.systemPackages = [
+    inputs.learnharness.packages.${pkgs.stdenv.hostPlatform.system}.default
+];
+```
+
 ## Your keys, your data
 
 - **Your keys and models.** No LearnHarness subscription or markup. Billing depends on your provider, CLI configuration, subscription, or local setup. The live cost meter estimates known API costs, not subscription, CLI, or custom-endpoint charges.
