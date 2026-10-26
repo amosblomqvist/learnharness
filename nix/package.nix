@@ -4,7 +4,7 @@
   electron,
   makeWrapper,
   copyDesktopItems,
-    makeDesktopItem,
+  makeDesktopItem,
 }:
 
 buildNpmPackage rec {
@@ -33,16 +33,16 @@ buildNpmPackage rec {
   '';
 
   desktopItems = [
-      (makeDesktopItem {
-        name = "learnharness";
-        desktopName = "LearnHarness";
-        comment = "An agent harness for efficient learning";
-        exec = "learnharness";
-        icon = "learnharness";
-        categories = [ "Education" ];
-        startupWMClass = "learnharness";
-      })
-    ];
+    (makeDesktopItem {
+      name = "learnharness";
+      desktopName = "LearnHarness";
+      comment = "An agent harness for efficient learning";
+      exec = "learnharness";
+      icon = "learnharness";
+      categories = [ "Education" ];
+      startupWMClass = "learnharness";
+    })
+  ];
 
   installPhase = ''
     runHook preInstall

@@ -40,7 +40,8 @@
           };
         }
       );
-      formatter = forEachSupportedSystem ({ pkgs, ... }: pkgs.nixfmt);
+      formatter = forEachSupportedSystem ({ pkgs, ... }: pkgs.nixfmt-tree);
+
       packages = inputs.nixpkgs.lib.genAttrs [ "x86_64-linux" ] (
         system:
         let
@@ -48,6 +49,21 @@
         in
         {
           default = pkgs.callPackage ./nix/package.nix { };
+        }
+      );
+      checks = inputs.nixpkgs.lib.genAttrs [ "x86_64-linux" ] (
+        system:
+        let
+          pkgs = import inputs.nixpkgs { inherit system; };
+        in
+        {
+          package = self.packages.${system}.default;
+          formatting =
+            pkgs.runCommandLocal "check-formatting" { nativeBuildInputs = [ self.formatter.${system} ]; }
+              ''
+                treefmt --ci ${self}
+                touch $out
+              '';
         }
       );
     };
