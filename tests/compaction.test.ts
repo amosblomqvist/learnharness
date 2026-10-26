@@ -256,6 +256,21 @@ describe("toLlmMessages honors the cut", () => {
 		assert.equal(JSON.stringify(out).indexOf("COMPACTED]"), JSON.stringify(out).lastIndexOf("COMPACTED]"), "header appears exactly once");
 	});
 
+	it("skips superseded summaries inside the retained tail without changing the record", () => {
+		const kept = newUserMessage("recent exchange");
+		const details = { firstKeptMessageId: kept.id, tokensBefore: 200_000, at: "t" };
+		const old = newCompactionMarker("OLD SUMMARY", details);
+		const fresh = newCompactionMarker("LATEST SUMMARY", details);
+		const later = newUserMessage("latest reply");
+		const messages = [newUserMessage("discarded"), kept, old, later, fresh];
+		const original = JSON.stringify(messages);
+		const out = toLlmMessages(messages);
+		assert.equal(out.length, 3, "latest summary + retained exchange + latest reply");
+		assert.ok(JSON.stringify(out).includes("LATEST SUMMARY"));
+		assert.ok(!JSON.stringify(out).includes("OLD SUMMARY"));
+		assert.equal(JSON.stringify(messages), original, "full history remains persisted");
+	});
+
 	it("a pending (dangling) question call in the KEPT tail still gets the interrupted synthesis", () => {
 		const kept = [assistantWithCall("a1", "call_1")];
 		const marker = newCompactionMarker("S", { firstKeptMessageId: "a1", tokensBefore: 1, at: "t" });
@@ -301,6 +316,12 @@ describe("serializeForSummary + buildCompactionPrompt", () => {
 		assert.ok(text.includes("…[truncated]"));
 		assert.ok(!text.includes("yyyyy".repeat(1000)), "truncation bounded the result");
 		assert.ok(!text.toLowerCase().includes("plan-block"), "UI-only markers never serialize");
+	});
+
+	it("excludes compaction markers from the span because the caller supplies the prior summary separately", () => {
+		const message = newUserMessage("recent exchange");
+		const marker = newCompactionMarker("OLD SUMMARY", { firstKeptMessageId: message.id, tokensBefore: 1, at: "t" });
+		assert.equal(serializeForSummary([message, marker]), "[LEARNER] recent exchange");
 	});
 
 	it("the prompt demands the four sections in order and carries the plan tree verbatim", () => {
