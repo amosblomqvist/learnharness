@@ -1,6 +1,6 @@
 import * as fs from "node:fs/promises";
-import * as os from "node:os";
 import * as path from "node:path";
+import { isRefused, resolvePolicy, sourceAnchor } from "./file-access.ts";
 
 /**
  * Shared plumbing for the learner-filesystem tools (ls / find / grep) —
@@ -37,10 +37,13 @@ const EXCLUDED_DIR_NAMES = new Set(["node_modules", ".git", "Library", ".Trash"]
 
 /** Resolve a tool path argument: absolute stays, relative/absent → home.
  *  (pi resolves against the project cwd; the harness's "project" is the
- *  learner's life, so the home directory is the anchor.) */
+ *  learner's life, so the home directory is the anchor.) With allowed
+ *  folders set (file-access.ts), the first allowed folder is the anchor.
+ *  Resolution only — every tool still gates the result (guardSourcePath). */
 export function resolveSourcePath(p?: string): string {
-	if (!p) return os.homedir();
-	return path.isAbsolute(p) ? p : path.join(os.homedir(), p);
+	const anchor = sourceAnchor();
+	if (!p) return anchor;
+	return path.isAbsolute(p) ? p : path.join(anchor, p);
 }
 
 /** pi's formatSize idiom (50KB prints as "50.0KB"). */
@@ -127,7 +130,9 @@ export function matchGlob(relativePath: string, pattern: string): boolean {
 }
 
 /**
- * Depth-first walk under `root`, never entering EXCLUDED_DIR_NAMES.
+ * Depth-first walk under `root`, never entering EXCLUDED_DIR_NAMES or any
+ * path the file-access policy refuses (the app's private data under a
+ * home-wide walk).
  * `visit` receives absolute file paths; returning true STOPS the walk
  * (find's result limit). The deadline bounds a home-dir walk to
  * WALK_TIMEOUT_MS — partial results are the graceful degradation.
@@ -141,6 +146,7 @@ export async function walkFiles(
 	let timedOut = false;
 	let aborted = false;
 	if (signal?.aborted) return { timedOut: false, aborted: true };
+	const policy = await resolvePolicy();
 
 	const walkDir = async (dir: string): Promise<boolean> => {
 		if (Date.now() > deadline) {
@@ -167,6 +173,7 @@ export async function walkFiles(
 				return true;
 			}
 			const full = path.join(dir, entry.name);
+			if (isRefused(full, policy)) continue;
 			if (entry.isDirectory()) {
 				if (EXCLUDED_DIR_NAMES.has(entry.name)) continue;
 				if (await walkDir(full)) return true;

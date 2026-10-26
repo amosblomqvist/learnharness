@@ -28,6 +28,8 @@ import {
 	unregisterLiveAgent,
 } from "./jobs.ts";
 import { runPiTurn } from "./pi/ui-stream.ts";
+import { setFileAccessPolicy } from "../agent/tools/file-access.ts";
+import { fileAccessPolicy } from "./file-access.ts";
 import { collectToolCallIds } from "./pi/call-ids.ts";
 import { providerEventNote } from "../agent/provider-events.ts";
 import { effectiveSettings, stores } from "./stores.ts";
@@ -141,6 +143,10 @@ function resolveEngine(role: ModelRole): PiEngine | undefined {
 }
 
 setJobRespawn((jobId) => void jobRunner.runJob(jobId));
+// The learner-filesystem policy (file-access wave): every tool registry is
+// built in this composition root, so the seam is installed here — the
+// tools read it fresh per call (allowed folders + the app's private paths).
+setFileAccessPolicy(fileAccessPolicy);
 
 /** The route-facing entry: parse {chatId, input} and run one turn. */
 export async function handleChatRequest(

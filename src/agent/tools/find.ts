@@ -11,6 +11,7 @@ import {
 	resolveSourcePath,
 	walkFiles,
 } from "./fs-shared.ts";
+import { guardSourcePath } from "./file-access.ts";
 
 /**
  * The find tool — sources v1 (2026-09-19): pi's dist/core/tools/find.js
@@ -40,7 +41,7 @@ export const findTool: AgentTool<typeof findInput> = {
 	parameters: findInput,
 	execute: serverExecute("find", findInput, async (input, ctx) => {
 		if (ctx?.signal?.aborted) return "Operation aborted";
-		const searchPath = resolveSourcePath(input.path);
+		const searchPath = await guardSourcePath(resolveSourcePath(input.path));
 		let stat;
 		try {
 			stat = await fs.stat(searchPath);

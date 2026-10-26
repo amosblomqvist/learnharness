@@ -262,6 +262,13 @@ export interface AgentSettings {
 	 *  route); the switch is explicit so users keep a file on disk but run
 	 *  the source default to compare (owner decision 2026-09-19). */
 	prompts?: Record<string, boolean>;
+	/** Learner-filesystem scope (file-access wave): the folders the
+	 *  read/ls/find/grep tools and the pdf job may read inside. Absent or
+	 *  empty = the whole home directory (the sources-v1 scope). Paths are
+	 *  absolute or "~/"-anchored; the server expands them at call time.
+	 *  The app's own private files (keys, credentials, data dir) are
+	 *  refused whatever this says (src/server/file-access.ts). */
+	fileAccess?: { folders?: string[] };
 }
 
 /** Markdown-rendering knobs — the bare-bones set (owner decision). */
@@ -527,6 +534,14 @@ function sanitizeAgent(raw: Record<string, unknown>): AgentSettings {
 		const enabled = (raw.graphTools as Record<string, unknown>).enabled;
 		if (enabled === undefined) out.graphTools = {};
 		else if (typeof enabled === "boolean") out.graphTools = { enabled };
+	}
+	// File-access folders: lenient read side (non-string / blank entries
+	// drop; the write side's parser is strict).
+	if (raw.fileAccess !== null && typeof raw.fileAccess === "object" && !Array.isArray(raw.fileAccess)) {
+		const folders = (raw.fileAccess as Record<string, unknown>).folders;
+		out.fileAccess = Array.isArray(folders)
+			? { folders: folders.filter((f): f is string => typeof f === "string" && f.trim() !== "") }
+			: {};
 	}
 	return out;
 }

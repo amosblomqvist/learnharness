@@ -4,6 +4,7 @@ import { Type } from "typebox";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { serverExecute, type ImageFileResult } from "../tool-execute.ts";
 import { resolveSourcePath } from "./fs-shared.ts";
+import { guardSourcePath } from "./file-access.ts";
 
 /**
  * The read tool — sources v0 (2026-09): a Node port of pi's read semantics
@@ -101,7 +102,7 @@ export const readTool: AgentTool<typeof readInput> = {
 	description: `Read the contents of a file. Supports text files and images (jpg, png, gif, webp, bmp). Images are sent as attachments. For text files, output is truncated to 2000 lines or 50.0KB (whichever is hit first). Use offset/limit for large files. When you need the full file, continue with offset until complete.`,
 	parameters: readInput,
 	execute: serverExecute("read", readInput, async ({ path: rawPath, offset, limit }): Promise<string | ImageFileResult> => {
-		const absolute = resolveSourcePath(rawPath);
+		const absolute = await guardSourcePath(resolveSourcePath(rawPath));
 		const ext = path.extname(absolute).toLowerCase();
 		const mime = IMAGE_MIME[ext];
 		const buffer = await fs.readFile(absolute); // ENOENT/EACCES → error result the model sees

@@ -116,6 +116,28 @@ export function composeTool(agent: AgentSettings | undefined, id: string, on: bo
 	return { ...agent, tools: { ...agent?.tools, [id]: on } };
 }
 
+/** A file-access folder entry the server will accept: absolute (POSIX or
+ *  Windows drive/UNC) or "~"-anchored. Pure — exported for tests. */
+export function isFolderEntry(folder: string): boolean {
+	return folder === "~" || folder.startsWith("~/") || folder.startsWith("/") || /^[A-Za-z]:[\\/]/.test(folder) || folder.startsWith("\\\\");
+}
+
+/** Compose: add one allowed folder (trimmed; duplicates and invalid entries
+ *  are no-ops). Pure — exported for tests. */
+export function composeAddFolder(agent: AgentSettings | undefined, folder: string): AgentSettings {
+	const next = folder.trim();
+	const folders = agent?.fileAccess?.folders ?? [];
+	if (!isFolderEntry(next) || folders.includes(next)) return { ...agent, fileAccess: { folders } };
+	return { ...agent, fileAccess: { folders: [...folders, next] } };
+}
+
+/** Compose: remove one allowed folder. Removing the last one returns the
+ *  tutor to the whole home directory (absent/empty = unrestricted). Pure —
+ *  exported for tests. */
+export function composeRemoveFolder(agent: AgentSettings | undefined, folder: string): AgentSettings {
+	return { ...agent, fileAccess: { folders: (agent?.fileAccess?.folders ?? []).filter((f) => f !== folder) } };
+}
+
 /** The quizzing mechanics (owner 2026-09-27): a segmented control, not a
  *  toggle — exactly one mechanic is ever active. `explain: true` arms
  *  free-recall (explain in, quiz out); anything else is multiple choice.
@@ -802,6 +824,45 @@ export function AgentSection({
 						/>
 					</SettingsRow>
 				))}
+				{/* File access (file-access wave): which folders the tutor's
+				    read/ls/find/grep tools and the pdf job may read. None listed
+				    = the whole home folder. The app's own keys, credentials and
+				    records are refused either way (server-side policy). */}
+				{(() => {
+					const folders = agent?.fileAccess?.folders ?? [];
+					return (
+						<div data-testid="file-access-row" className="flex flex-col gap-1">
+							<SettingsRow
+								label="File access"
+								hint={folders.length ? "The tutor can read only these folders" : "The tutor can read your whole home folder — add folders to limit it"}
+							>
+								<CommitInput
+									value=""
+									placeholder="Add folder, e.g. ~/Study"
+									ariaLabel="Add allowed folder"
+									testid="file-access-add"
+									onCommit={(next) => {
+										if (next) onSectionChange(composeAddFolder(agent, next));
+									}}
+								/>
+							</SettingsRow>
+							{folders.map((folder) => (
+								<div key={folder} data-testid="file-access-folder" className="flex items-center justify-between gap-4 pl-3 text-xs">
+									<span className="min-w-0 truncate font-ui text-muted-foreground">{folder}</span>
+									<button
+										type="button"
+										aria-label={`Remove ${folder}`}
+										data-testid="file-access-remove"
+										onClick={() => onSectionChange(composeRemoveFolder(agent, folder))}
+										className="rounded-sm px-1.5 text-muted-foreground hover:text-foreground"
+									>
+										Remove
+									</button>
+								</div>
+							))}
+						</div>
+					);
+				})()}
 				{(() => {
 					const engine = agent?.search?.engine ?? null;
 					const anyKey = engineKeys.tavily === true || engineKeys.brave === true;
