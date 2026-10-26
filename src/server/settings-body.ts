@@ -11,6 +11,7 @@
  * a different concern and are preserved by the sanitizer (core/settings.ts).
  */
 
+import path from "node:path";
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import { isHexColor, type ChatSettings } from "../core";
 import type {
@@ -194,6 +195,26 @@ export function parseAgentSettingsBody(body: unknown): SettingsBodyResult<AgentS
 			return { ok: false, error: "graphTools.enabled must be a boolean" };
 		}
 		settings.graphTools = graphTools.enabled === undefined ? {} : { enabled: graphTools.enabled };
+	}
+	// File-access folders (file-access wave): strict write side — an array
+	// of absolute or "~/"-anchored paths, trimmed and de-duplicated.
+	if (raw.fileAccess !== undefined) {
+		const fileAccess = asRecord(raw.fileAccess);
+		if (!fileAccess) return { ok: false, error: "fileAccess must be an object" };
+		if (fileAccess.folders !== undefined) {
+			if (!Array.isArray(fileAccess.folders)) return { ok: false, error: "fileAccess.folders must be an array" };
+			const folders: string[] = [];
+			for (const entry of fileAccess.folders) {
+				const folder = typeof entry === "string" ? entry.trim() : "";
+				if (!folder || !(folder === "~" || folder.startsWith("~/") || path.isAbsolute(folder))) {
+					return { ok: false, error: "fileAccess.folders entries must be absolute paths (or start with ~/)" };
+				}
+				if (!folders.includes(folder)) folders.push(folder);
+			}
+			settings.fileAccess = { folders };
+		} else {
+			settings.fileAccess = {};
+		}
 	}
 	return { ok: true, settings };
 }
