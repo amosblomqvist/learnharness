@@ -56,6 +56,7 @@ import { MenuShell } from "@/components/menu-shell";
 import { useSettingsSaved } from "@/components/settings-signal";
 import { defaultOrderLevel, populateLevel } from "@/components/thinking-default";
 import type React from "react";
+import { useModelCatalog } from "@/components/model-picker";
 import {
 	COMPACTION_THRESHOLD_FLOOR,
 	MODEL_SLOTS,
@@ -303,10 +304,11 @@ export function AgentSection({
 	/** Writes the whole compaction section (replace-PUT discipline). */
 	onCompactionChange: (next: CompactionSettings) => void;
 }) {
-	const [catalog, setCatalog] = useState<ModelCatalogEntry[] | null>(null);
+	const seed = useModelCatalog().catalog;
+	const [catalog, setCatalog] = useState<ModelCatalogEntry[] | null>(() => seed?.models ?? null);
 	/** The three tiers' resolved pins — GET /api/models `slots`. The rows'
 	 *  Default hints and thinking lists resolve from it. */
-	const [slots, setSlots] = useState<ModelsBody["slots"] | null>(null);
+	const [slots, setSlots] = useState<ModelsBody["slots"] | null>(() => seed?.slots ?? null);
 	/** The live search state (/api/search) — the row's reason line. */
 	const [search, setSearch] = useState<{ available: boolean; engine: string | null; reason: string } | null>(null);
 	/** Which search engines have a key (/api/keys) — the no-keys-anywhere
