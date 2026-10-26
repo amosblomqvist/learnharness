@@ -387,7 +387,7 @@ function QuestionDockForm({
 			doSubmit();
 			return;
 		}
-		void finishDictation().then(doSubmit);
+		void finishDictation().then((ok) => { if (ok) doSubmit(); });
 	};
 	const doSubmit = () => {
 		if (!canSubmit) return;

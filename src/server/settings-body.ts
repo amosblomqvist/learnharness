@@ -86,6 +86,12 @@ export function parseGeneralSettingsBody(body: unknown): SettingsBodyResult<Gene
 		}
 		settings.autoUpdate = raw.autoUpdate;
 	}
+	if (raw.dictationProvider !== undefined) {
+		if (raw.dictationProvider !== "deepgram" && raw.dictationProvider !== "openai") {
+			return { ok: false, error: 'dictationProvider must be "deepgram" or "openai"' };
+		}
+		settings.dictationProvider = raw.dictationProvider;
+	}
 	return { ok: true, settings };
 }
 

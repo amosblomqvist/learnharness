@@ -190,6 +190,28 @@ describe("General update rows", () => {
 });
 
 describe("Settings integration", () => {
+	it("selects OpenAI dictation without losing the other General settings", async () => {
+		bridge();
+		const record = { version: 1, general: { autoUpdate: false } };
+		const puts: unknown[] = [];
+		globalThis.fetch = async (_input, init) => {
+			if (init?.method === "PUT") {
+				const body = JSON.parse(String(init.body)); puts.push(body);
+				return Response.json({ settings: { ...record, general: body } });
+			}
+			return Response.json({ settings: record });
+		};
+		const host = await mount(<SettingsDialogBody initialSection="general" onClose={() => {}} />);
+		const select = q(host, "dictation-provider") as HTMLSelectElement;
+		assert.ok(select);
+		assert.match(host.textContent ?? "", /billed separately/);
+		await act(async () => {
+			Object.defineProperty(select, "value", { configurable: true, writable: true, value: "openai" });
+			select.dispatchEvent(new window.Event("change", { bubbles: true }));
+		});
+		assert.deepEqual(puts, [{ autoUpdate: false, dictationProvider: "openai" }]);
+	});
+
 	it("the toggle sends the complete General section and follows stored server truth", async () => {
 		bridge();
 		// A synthetic future sibling exercises the caller's section-preserving

@@ -40,7 +40,7 @@ import {
 	type UserSettings,
 } from "@/src/core";
 import { useAppearance } from "./appearance.tsx";
-import { SettingsSection } from "./controls.tsx";
+import { SettingsGroup, SettingsRow, SettingsSection } from "./controls.tsx";
 import { UpdateSettings } from "./update-settings.tsx";
 import { AgentSection } from "./agent-section.tsx";
 import type { ModelsSettings } from "@/src/core";
@@ -366,6 +366,20 @@ export function SettingsDialogBody({
 											void write("general", { ...record.general, autoUpdate: on })
 										}
 									/>
+									<SettingsGroup label="Dictation" testid="group-dictation-settings">
+										<SettingsRow label="Speech provider" hint="OpenAI dictation uses your OpenAI API key and is billed separately from your ChatGPT plan.">
+											<select
+												aria-label="Speech provider"
+												data-testid="dictation-provider"
+												value={record.general?.dictationProvider ?? "deepgram"}
+												onChange={(event) => void write("general", { ...record.general, dictationProvider: event.target.value })}
+												className="rounded-md border border-border bg-card px-2 py-1 text-sm text-foreground"
+											>
+												<option value="deepgram">Deepgram</option>
+												<option value="openai">OpenAI API</option>
+											</select>
+										</SettingsRow>
+									</SettingsGroup>
 								</SettingsSection>
 							)}
 							{active === "keys" && (
