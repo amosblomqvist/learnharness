@@ -5,6 +5,8 @@ import { Type } from "typebox";
 import { piEngineFor, type PiEngine, type ThinkingLevel } from "../models.ts";
 import { providerEventObserver, type ProviderEventObserver } from "../provider-events.ts";
 import type { VisualResult } from "../../core/contracts.ts";
+import type { AppLanguage } from "../../core/i18n.ts";
+import { workerPrompt } from "./worker-prompts.ts";
 import { getHeadless, type HeadlessApi } from "./headless.ts";
 
 /**
@@ -49,6 +51,8 @@ export interface VisualMakerOptions {
 	onUsage?: (usage: Usage) => void;
 	/** Debug: raw provider-event recording key (LH_PROVIDER_EVENTS=1). */
 	chatId?: string;
+	/** The app language the instructions are in (absent = English). */
+	language?: AppLanguage;
 }
 
 const INSTRUCTIONS = `You are a visual maker — a diagram author + renderer for precise, spatial figures. You
@@ -163,7 +167,7 @@ export async function runVisualMaker(input: VisualMakerInput, opts: VisualMakerO
 			// loop owns tool execution and the image-in-the-loop injection).
 			const result = await streamOnce(
 				engine,
-				INSTRUCTIONS,
+				workerPrompt("visualMaker", INSTRUCTIONS, opts.language),
 				messages,
 				toolDeclarations,
 				sessionId,

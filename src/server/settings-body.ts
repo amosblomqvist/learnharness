@@ -23,8 +23,9 @@ import type {
 	ModelsSettings,
 	RoleModelOverride,
 } from "../core/settings.ts";
-import { BACKGROUND_MODEL_ROLES, COMPACTION_THRESHOLD_FLOOR, EXTRACTION_CHUNK_TOKENS_FLOOR, MODEL_SLOTS } from "../core/settings.ts";
+import { BACKGROUND_MODEL_ROLES, COMPACTION_THRESHOLD_FLOOR, EXTRACTION_CHUNK_TOKENS_FLOOR, MODEL_SLOTS, isDictationLanguage } from "../core/settings.ts";
 import { WRITABLE_TOOL_KEYS } from "../core/pending.ts";
+import { isAppLanguage } from "../core/i18n.ts";
 
 /** Parsed-or-rejected — `ok: false` carries the 400's error message. */
 export type SettingsBodyResult<T> =
@@ -75,7 +76,7 @@ function asRecord(body: unknown): Record<string, unknown> | null {
 	return body as Record<string, unknown>;
 }
 
-/** general: { autoUpdate?: boolean } */
+/** general: { autoUpdate?: boolean, language?: AppLanguage, dictationOverride?: boolean, dictationLanguage?: DictationLanguage } */
 export function parseGeneralSettingsBody(body: unknown): SettingsBodyResult<GeneralSettings> {
 	const raw = asRecord(body);
 	if (!raw) return { ok: false, error: "Invalid JSON body" };
@@ -85,6 +86,24 @@ export function parseGeneralSettingsBody(body: unknown): SettingsBodyResult<Gene
 			return { ok: false, error: "autoUpdate must be a boolean" };
 		}
 		settings.autoUpdate = raw.autoUpdate;
+	}
+	if (raw.language !== undefined) {
+		if (!isAppLanguage(raw.language)) {
+			return { ok: false, error: "language must be a supported app language" };
+		}
+		settings.language = raw.language;
+	}
+	if (raw.dictationOverride !== undefined) {
+		if (typeof raw.dictationOverride !== "boolean") {
+			return { ok: false, error: "dictationOverride must be a boolean" };
+		}
+		settings.dictationOverride = raw.dictationOverride;
+	}
+	if (raw.dictationLanguage !== undefined) {
+		if (!isDictationLanguage(raw.dictationLanguage)) {
+			return { ok: false, error: "dictationLanguage must be a supported dictation language" };
+		}
+		settings.dictationLanguage = raw.dictationLanguage;
 	}
 	return { ok: true, settings };
 }

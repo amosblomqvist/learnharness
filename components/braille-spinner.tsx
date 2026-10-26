@@ -1,3 +1,4 @@
+import { useT } from "@/components/i18n";
 import { cn } from "@/lib/utils";
 
 /**
@@ -36,19 +37,20 @@ export const SPINNER_FRAMES = FRAMES.length;
 
 export function BrailleSpinner({
 	className,
-	label = "Working",
+	label,
 }: {
 	/** Sizing/position classes; height drives the scale (width is the cell's 1:2 aspect). */
 	className?: string;
 	/** The accessible name of the state this spinner announces. */
 	label?: string;
 }) {
+	const t = useT();
 	return (
 		<svg
 			viewBox="0 0 4 8"
 			data-testid="braille-spinner"
 			role="status"
-			aria-label={label}
+			aria-label={label ?? t("chat.spinner.working")}
 			className={cn("h-3 w-auto shrink-0 text-foreground", className)}
 		>
 			{FRAMES.map((frame, k) => (

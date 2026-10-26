@@ -1,23 +1,38 @@
 "use client";
 
 import { createContext, useContext, useEffect, useRef, useState } from "react";
-import type { ChatGPTStatus } from "@/src/core";
+import { DEFAULT_LANGUAGE, translate, type AppLanguage, type ChatGPTStatus, type TranslationKey } from "@/src/core";
+import { useLanguage, useT, type Translate } from "@/components/i18n";
 import { ConnectionDialog, ConnectionFooter, ConnectionRow } from "./connection-controls";
 import { Button } from "@/components/ui/button";
-import { Toggle } from "./controls";
+import { Toggle, toggleTestid } from "./controls";
 import { useChatGPTBridge } from "./subscription-client";
 
-export const CHATGPT_NOTICE = "LearnHarness stores your ChatGPT account details and credentials in an unencrypted local file on this device. When this connection is used, relevant conversation context, learning material, and tool results are sent directly to OpenAI. ChatGPT plan limits apply; any additional credits are authorized and managed in ChatGPT, not LearnHarness.";
-export function chatGPTNotice(web = false): string { return web ? `${CHATGPT_NOTICE.replace("on this device", "on the machine running LearnHarness")} Complete ChatGPT sign-in in a browser on that same machine.` : CHATGPT_NOTICE; }
-export const CHATGPT_BACKGROUND_HINT = "Background work counts toward your ChatGPT plan usage.";
-const BACKGROUND_LABEL = "Allow background use for all ChatGPT accounts";
+export const CHATGPT_NOTICE = translate("en", "settings.chatgpt.notice");
+export function chatGPTNotice(web = false, language: AppLanguage = DEFAULT_LANGUAGE): string {
+	return translate(language, web ? "settings.chatgpt.notice.web" : "settings.chatgpt.notice");
+}
+export const CHATGPT_BACKGROUND_HINT = translate("en", "settings.chatgpt.backgroundHint");
+const BACKGROUND_LABEL = translate("en", "settings.chatgpt.backgroundLabel");
+/** Matches the backend's status.error verbatim. */
 const REVOCATION_WARNING = "Account disconnected locally. Remote revocation could not be confirmed.";
-export const CHATGPT_DISCONNECT_COPY = { title: "Disconnect account?", body: "This removes the saved account and its credentials from this device." };
+export const CHATGPT_DISCONNECT_COPY = { title: translate("en", "settings.chatgpt.disconnectTitle"), body: translate("en", "settings.chatgpt.disconnectBody") };
 const empty: ChatGPTStatus = { available: false, pending: false, allowBackgroundUse: true, activeId: null, accounts: [], error: null };
 type Account = ChatGPTStatus["accounts"][number];
 type Dialog = { kind: "connect" } | { kind: "manage"; accountId: string; account: Account; confirm?: boolean } | { kind: "warning" };
 type LoginAttempt = { generation: number; dialog: Dialog; registration: string; background: boolean; backgroundDirty: boolean; pending: boolean; accountId?: string; phase: "starting" | "pending" | "consent" };
-const CONTROL_ERROR = "The ChatGPT connection could not be changed. Try again.";
+const CONTROL_ERROR = translate("en", "settings.chatgpt.controlError");
+const DESKTOP_UNAVAILABLE = translate("en", "settings.connection.desktopUnavailable");
+const LOCAL_MESSAGES = new Map<string, TranslationKey>([
+	[CONTROL_ERROR, "settings.chatgpt.controlError"],
+	[DESKTOP_UNAVAILABLE, "settings.connection.desktopUnavailable"],
+	[REVOCATION_WARNING, "settings.chatgpt.revocationWarning"],
+]);
+/** This module's own messages in the UI language; backend messages pass through. */
+function localMessage(t: Translate, message: string): string {
+	const key = LOCAL_MESSAGES.get(message);
+	return key ? t(key) : message;
+}
 function isStatus(value: unknown): value is ChatGPTStatus {
 	if (!value || typeof value !== "object") return false;
 	const s = value as ChatGPTStatus;
@@ -43,6 +58,8 @@ const Context = createContext({
 /** UI lifetime spans setup's keys → models transition. Only existing safe controls
  * are used; account IDs remain control values, never displayed account labels. */
 export function ChatGPTUIProvider({ children }: { children: React.ReactNode }) {
+	const t = useT();
+	const language = useLanguage();
 	const bridge = useChatGPTBridge();
 	const web = typeof window !== "undefined" && bridge !== window.lh?.chatgpt;
 	const [status, setStatus] = useState<ChatGPTStatus>(empty);
@@ -129,7 +146,7 @@ export function ChatGPTUIProvider({ children }: { children: React.ReactNode }) {
 			try {
 				const next: unknown = await bridge?.status();
 				if (next && mounted.current && request === statusSequence.current) receive.current(next);
-			} catch { if (mounted.current && request === statusSequence.current) setError("The desktop connection is unavailable. Retry when the app is ready."); }
+			} catch { if (mounted.current && request === statusSequence.current) setError(DESKTOP_UNAVAILABLE); }
 		};
 		void refresh();
 		const off = bridge?.onChange(() => void refresh());
@@ -258,55 +275,55 @@ export function ChatGPTUIProvider({ children }: { children: React.ReactNode }) {
 		{dialog && <AccountDialog key={`${dialog.kind}:${dialog.kind === "manage" && !!dialog.confirm}`} onClose={close} busy={busy && operation.current !== "login"}>
 			<h2 className="text-sm font-semibold text-foreground">ChatGPT</h2>
 			{dialog.kind === "warning" ? <>
-				<p role="alert" className="rounded-sm border border-border px-3 py-2 text-xs text-foreground" data-testid="chatgpt-revocation-warning">{REVOCATION_WARNING}</p>
-				<div className="mt-4 flex justify-end"><Button variant="outline" size="sm" onClick={() => { context.dismissWarning(); showDialog(null); }}>Dismiss</Button></div>
+				<p role="alert" className="rounded-sm border border-border px-3 py-2 text-xs text-foreground" data-testid="chatgpt-revocation-warning">{t("settings.chatgpt.revocationWarning")}</p>
+				<div className="mt-4 flex justify-end"><Button variant="outline" size="sm" onClick={() => { context.dismissWarning(); showDialog(null); }}>{t("settings.action.dismiss")}</Button></div>
 			</> : dialog.kind === "manage" && dialog.confirm ? <div data-testid="chatgpt-disconnect-confirmation">
-				<p className="mt-3 text-sm font-semibold text-red-400">{CHATGPT_DISCONNECT_COPY.title}</p>
-				<p className="mt-3 text-xs text-foreground">{managed?.email || "ChatGPT account"}</p>
-				<p className="mt-3 text-xs text-muted-foreground">{web ? CHATGPT_DISCONNECT_COPY.body.replace("from this device", "from the machine running LearnHarness") : CHATGPT_DISCONNECT_COPY.body}</p>
-				{context.error && <p role="alert" className="mt-3 text-xs text-red-400">{context.error}</p>}
+				<p className="mt-3 text-sm font-semibold text-red-400">{t("settings.chatgpt.disconnectTitle")}</p>
+				<p className="mt-3 text-xs text-foreground">{managed?.email || t("settings.chatgpt.account")}</p>
+				<p className="mt-3 text-xs text-muted-foreground">{web ? t("settings.chatgpt.disconnectBody.web") : t("settings.chatgpt.disconnectBody")}</p>
+				{context.error && <p role="alert" className="mt-3 text-xs text-red-400">{localMessage(t, context.error)}</p>}
 				<div className="mt-4 flex items-center justify-end gap-2">
-					<Button variant="ghost" size="sm" disabled={busy} onClick={close}>Cancel</Button>
-					<Button variant="destructive" size="sm" data-testid="chatgpt-confirm-disconnect" disabled={busy || !managedPresent} onClick={() => bridge && managed && void control("disconnect", () => bridge.disconnect(managed.id), managed.id)}>Disconnect account</Button>
+					<Button variant="ghost" size="sm" disabled={busy} onClick={close}>{t("settings.action.cancel")}</Button>
+					<Button variant="destructive" size="sm" data-testid="chatgpt-confirm-disconnect" disabled={busy || !managedPresent} onClick={() => bridge && managed && void control("disconnect", () => bridge.disconnect(managed.id), managed.id)}>{t("settings.chatgpt.disconnectAccount")}</Button>
 				</div>
 			</div> : <>
 				{dialog.kind === "connect" ? <>
 					{status.accounts.length > 0 && <div className="mt-3 flex items-center gap-2 text-xs text-muted-foreground">
-						<select aria-label="Saved ChatGPT account" value={registration} onChange={(event) => setRegistration(event.target.value)} disabled={busy || status.pending} className="min-w-0 rounded-sm border border-border bg-background px-2 py-1.5 text-foreground">
-							<option value="">Add another account or workspace</option>
-							{status.accounts.map((a) => <option key={a.id} value={a.id}>{a.email || "ChatGPT account"}</option>)}
+						<select aria-label={t("settings.chatgpt.savedAccountAria")} value={registration} onChange={(event) => setRegistration(event.target.value)} disabled={busy || status.pending} className="min-w-0 rounded-sm border border-border bg-background px-2 py-1.5 text-foreground">
+							<option value="">{t("settings.chatgpt.addAnother")}</option>
+							{status.accounts.map((a) => <option key={a.id} value={a.id}>{a.email || t("settings.chatgpt.account")}</option>)}
 						</select>
-						{registration && <Button variant="ghost" size="xs" disabled={busy} onClick={() => context.manage(registration)}>Manage…</Button>}
+						{registration && <Button variant="ghost" size="xs" disabled={busy} onClick={() => context.manage(registration)}>{t("settings.action.manage")}</Button>}
 					</div>}
-					<p className="mt-3 text-xs leading-relaxed text-muted-foreground" data-testid="chatgpt-privacy-notice">{chatGPTNotice(web)}</p>
+					<p className="mt-3 text-xs leading-relaxed text-muted-foreground" data-testid="chatgpt-privacy-notice">{chatGPTNotice(web, language)}</p>
 				</> : null}
 				<div className={`mt-4 flex items-center gap-3 text-xs text-foreground ${busy && operation.current === "change" && status.available && !status.pending ? "[&>button:disabled]:cursor-auto" : ""}`} data-testid="chatgpt-global-background">
-					<Toggle label={BACKGROUND_LABEL} checked={dialog.kind === "connect" ? background : status.allowBackgroundUse} disabled={busy || status.pending || !status.available} onChange={(enabled) => {
+					<Toggle label={t("settings.chatgpt.backgroundLabel")} testid={toggleTestid(BACKGROUND_LABEL)} checked={dialog.kind === "connect" ? background : status.allowBackgroundUse} disabled={busy || status.pending || !status.available} onChange={(enabled) => {
 						if (dialog.kind === "connect") { setBackground(enabled); setBackgroundDirty(true); }
 						else if (bridge) void control("change", () => bridge.consent(enabled));
 					}} />
-					<span>{BACKGROUND_LABEL}<span className="mt-1 block leading-relaxed text-muted-foreground">{CHATGPT_BACKGROUND_HINT}</span></span>
+					<span>{t("settings.chatgpt.backgroundLabel")}<span className="mt-1 block leading-relaxed text-muted-foreground">{t("settings.chatgpt.backgroundHint")}</span></span>
 				</div>
 				<div className="mt-3 flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
-					<a href="https://openai.com/policies/privacy-policy/" target="_blank" rel="noreferrer" className="underline underline-offset-2">OpenAI privacy</a>
-					<a href="https://chatgpt.com/settings/usage" target="_blank" rel="noreferrer" className="underline underline-offset-2">Manage usage</a>
+					<a href="https://openai.com/policies/privacy-policy/" target="_blank" rel="noreferrer" className="underline underline-offset-2">{t("settings.chatgpt.privacy")}</a>
+					<a href="https://chatgpt.com/settings/usage" target="_blank" rel="noreferrer" className="underline underline-offset-2">{t("settings.chatgpt.manageUsage")}</a>
 				</div>
-				{!status.available && <p className="mt-3 text-xs text-muted-foreground">ChatGPT sign-in is available only in the desktop app. API-key connections remain available here.</p>}
-				{status.pending && <p role="status" className="mt-3 text-xs text-muted-foreground">Waiting for browser sign-in…</p>}
-				{context.error && <p role="alert" className="mt-3 text-xs text-red-400">{context.error}</p>}
+				{!status.available && <p className="mt-3 text-xs text-muted-foreground">{t("settings.chatgpt.desktopOnly")}</p>}
+				{status.pending && <p role="status" className="mt-3 text-xs text-muted-foreground">{t("settings.chatgpt.waiting")}</p>}
+				{context.error && <p role="alert" className="mt-3 text-xs text-red-400">{localMessage(t, context.error)}</p>}
 				{dialog.kind === "manage" && managed && <div className="mt-4 flex flex-wrap items-center justify-between gap-3" data-testid="chatgpt-account-strip">
 					<div data-testid="chatgpt-managed-identity" className="flex min-w-0 items-center gap-2 text-xs text-foreground">
-						{status.accounts.length > 1 && managedPresent && !busy ? <select aria-label="Manage ChatGPT account" value={managed.id} onChange={(event) => context.manage(event.target.value)} className="min-w-0 rounded-sm border border-border bg-background px-2 py-1.5">
-							{status.accounts.map((a) => <option key={a.id} value={a.id}>{a.email || "ChatGPT account"}</option>)}
-						</select> : <span className="break-all">{managed.email || "ChatGPT account"}</span>}
+						{status.accounts.length > 1 && managedPresent && !busy ? <select aria-label={t("settings.chatgpt.manageAccountAria")} value={managed.id} onChange={(event) => context.manage(event.target.value)} className="min-w-0 rounded-sm border border-border bg-background px-2 py-1.5">
+							{status.accounts.map((a) => <option key={a.id} value={a.id}>{a.email || t("settings.chatgpt.account")}</option>)}
+						</select> : <span className="break-all">{managed.email || t("settings.chatgpt.account")}</span>}
 					</div>
-					<Button variant="ghost" size="sm" data-testid="chatgpt-add-accounts" className="cursor-pointer text-muted-foreground disabled:cursor-not-allowed" onClick={() => openConnect()} disabled={busy || status.pending || !status.available}>Add accounts</Button>
+					<Button variant="ghost" size="sm" data-testid="chatgpt-add-accounts" className="cursor-pointer text-muted-foreground disabled:cursor-not-allowed" onClick={() => openConnect()} disabled={busy || status.pending || !status.available}>{t("settings.chatgpt.addAccounts")}</Button>
 				</div>}
 				<ConnectionFooter testid="chatgpt-account-footer" leading={dialog.kind === "manage" && <div data-testid="chatgpt-account-actions">
-					<Button variant="ghost" size="sm" className="cursor-pointer text-red-400 hover:bg-red-500/10 hover:text-red-300" data-testid="chatgpt-disconnect" disabled={busy || status.pending || !managedPresent} onClick={() => showDialog({ ...dialog, confirm: true })}>Disconnect</Button>
+					<Button variant="ghost" size="sm" className="cursor-pointer text-red-400 hover:bg-red-500/10 hover:text-red-300" data-testid="chatgpt-disconnect" disabled={busy || status.pending || !managedPresent} onClick={() => showDialog({ ...dialog, confirm: true })}>{t("settings.action.disconnect")}</Button>
 				</div>}>
-					{dialog.kind === "manage" && managedPresent && managed && !managed.connected && managed.canSignInAgain === true && status.available && <Button variant="outline" size="sm" disabled={busy || status.pending || !status.available} onClick={() => openConnect(managed.id)}>Sign in again</Button>}
-					<Button variant={dialog.kind === "manage" ? "outline" : "ghost"} size="sm" onClick={close} disabled={busy && operation.current !== "login"}>{dialog.kind === "connect" ? "Cancel" : "Close"}</Button>
+					{dialog.kind === "manage" && managedPresent && managed && !managed.connected && managed.canSignInAgain === true && status.available && <Button variant="outline" size="sm" disabled={busy || status.pending || !status.available} onClick={() => openConnect(managed.id)}>{t("settings.action.signInAgain")}</Button>}
+					<Button variant={dialog.kind === "manage" ? "outline" : "ghost"} size="sm" onClick={close} disabled={busy && operation.current !== "login"}>{dialog.kind === "connect" ? t("settings.action.cancel") : t("settings.action.close")}</Button>
 					{dialog.kind === "connect" && <ContinueButton onClick={() => void login()} disabled={!status.available || busy || status.pending} testid="chatgpt-proceed" />}
 				</ConnectionFooter>
 			</>}
@@ -315,38 +332,42 @@ export function ChatGPTUIProvider({ children }: { children: React.ReactNode }) {
 }
 
 function ContinueButton({ onClick, disabled, testid = "chatgpt-login" }: { onClick: () => void; disabled: boolean; testid?: string }) {
+	const t = useT();
 	return <Button type="button" variant="outline" size="sm" data-testid={testid} onClick={onClick} disabled={disabled} className="cursor-pointer disabled:cursor-not-allowed">
 		{/* Official unmodified mark; existing secondary button hover/focus treatment. */}
 		{/* eslint-disable-next-line @next/next/no-img-element */}
 		<img src="/siwc/chatgpt-logo-white.svg" width="16" height="16" alt="" aria-hidden="true" />
-		Continue with ChatGPT
+		{t("settings.chatgpt.continueWith")}
 	</Button>;
 }
 
 function AccountDialog({ children, onClose, busy }: { children: React.ReactNode; onClose: () => void; busy: boolean }) {
-	return <ConnectionDialog label="ChatGPT account" testid="chatgpt-account-dialog" backdropTestid="chatgpt-dialog-backdrop" onClose={onClose} busy={busy}>{children}</ConnectionDialog>;
+	const t = useT();
+	return <ConnectionDialog label={t("settings.chatgpt.account")} testid="chatgpt-account-dialog" backdropTestid="chatgpt-dialog-backdrop" onClose={onClose} busy={busy}>{children}</ConnectionDialog>;
 }
 
 /** Shared compact settings/setup row; account selection precedes the quiet action. */
 export function ChatGPTConnection(_props: { setup?: boolean } = {}) {
 	const ui = useContext(Context);
+	const t = useT();
 	const active = ui.status.accounts.find((a) => a.id === ui.status.activeId && a.connected);
 	const accounts = ui.status.accounts.filter((a) => a.connected);
 	return <div className="flex flex-col gap-2" data-testid="chatgpt-connection">
-		<ConnectionRow label="ChatGPT" actionTestid={active ? undefined : "chatgpt-login"} action={active ? "Manage…" : "Connect"} disabled={!ui.status.available || ui.busy || ui.status.pending} onAction={() => active ? ui.manage(active.id) : ui.connect()}>
-			{active && <select aria-label="ChatGPT account" value={active.id} disabled={ui.busy || ui.status.pending} onChange={(event) => ui.select(event.target.value)} className="min-w-0 rounded-sm border border-border bg-background px-2 py-1 text-xs text-foreground">
-				{accounts.map((a) => <option key={a.id} value={a.id}>{a.email || "ChatGPT account"}</option>)}
+		<ConnectionRow label="ChatGPT" actionTestid={active ? undefined : "chatgpt-login"} action={active ? "manage" : "connect"} disabled={!ui.status.available || ui.busy || ui.status.pending} onAction={() => active ? ui.manage(active.id) : ui.connect()}>
+			{active && <select aria-label={t("settings.chatgpt.account")} value={active.id} disabled={ui.busy || ui.status.pending} onChange={(event) => ui.select(event.target.value)} className="min-w-0 rounded-sm border border-border bg-background px-2 py-1 text-xs text-foreground">
+				{accounts.map((a) => <option key={a.id} value={a.id}>{a.email || t("settings.chatgpt.account")}</option>)}
 			</select>}
 		</ConnectionRow>
-		{ui.inlineError && <p role="alert" className="text-xs text-red-400">{ui.inlineError}</p>}
-		{ui.warning && <div role="alert" data-testid="chatgpt-revocation-warning" className="rounded-sm border border-border px-3 py-2 text-xs text-muted-foreground">{ui.warning}<button type="button" className="ml-2 cursor-pointer underline underline-offset-2" onClick={ui.dismissWarning}>Dismiss</button></div>}
+		{ui.inlineError && <p role="alert" className="text-xs text-red-400">{localMessage(t, ui.inlineError)}</p>}
+		{ui.warning && <div role="alert" data-testid="chatgpt-revocation-warning" className="rounded-sm border border-border px-3 py-2 text-xs text-muted-foreground">{localMessage(t, ui.warning)}<button type="button" className="ml-2 cursor-pointer underline underline-offset-2" onClick={ui.dismissWarning}>{t("settings.action.dismiss")}</button></div>}
 	</div>;
 }
 
 /** Contextual consent discovery belongs beside background model choices only. */
 export function ChatGPTBackgroundAccess({ provider }: { provider: string | undefined }) {
 	const ui = useContext(Context);
+	const t = useT();
 	const account: Account | undefined = ui.status.accounts.find((a) => a.id === ui.status.activeId && a.connected);
 	if (provider !== "chatgpt" || !account || ui.status.allowBackgroundUse) return null;
-	return <Button type="button" size="xs" variant="ghost" className="cursor-pointer" disabled={ui.busy} onClick={() => ui.manage(account.id)}>Enable background use</Button>;
+	return <Button type="button" size="xs" variant="ghost" className="cursor-pointer" disabled={ui.busy} onClick={() => ui.manage(account.id)}>{t("settings.action.enableBackground")}</Button>;
 }

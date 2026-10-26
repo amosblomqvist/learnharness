@@ -1,0 +1,125 @@
+/** The knowledge graph surfaces: graph view, context card, coverage, notes import, delete dialogs. */
+export const graph = {
+	// Graph view: empty state, node card, context menu, pipeline chips
+	"graph.empty.title": "Knowledge graph",
+	"graph.empty.body": "Start a session or import notes to build your graph.",
+	"graph.card.sessions": "Sessions",
+	"graph.card.noSessions": "No sessions recorded.",
+	"graph.menu.delete": "Delete",
+	"graph.pipeline.phase.waiting": "Waiting",
+	"graph.pipeline.phase.queued": "Queued",
+	"graph.pipeline.phase.extracting": "Extracting",
+	"graph.pipeline.phase.auditing": "Auditing",
+	"graph.pipeline.phase.merging": "Merging",
+	"graph.pipeline.elapsed": "{n}s",
+
+	// Top chrome row
+	"graph.chrome.search": "Search nodes",
+	"graph.chrome.searchPlaceholder": "Search nodes…",
+	"graph.chrome.noMatch": "No matching nodes.",
+	"graph.chrome.chainsHint": "Every reasoning chain",
+	"graph.chrome.chains": "Chains",
+	"graph.chrome.importHint": "Import notes into the graph",
+	"graph.chrome.importing": "Importing…",
+	"graph.chrome.import": "Import notes…",
+
+	// Pipeline costs
+	"graph.costs.hint": "Graph costs — click for details",
+	"graph.costs.title": "Graph pipeline costs",
+	"graph.costs.unpriced": "{n} unpriced",
+	"graph.costs.plusUnpriced": "+{n} unpriced",
+	"graph.costs.tokensInOut": "{input} in / {output} out",
+	"graph.costs.stage.extraction": "Extraction",
+	"graph.costs.stage.audit": "Audit",
+	"graph.costs.ago.now": "now",
+	"graph.costs.ago.minutes": "{n}m",
+	"graph.costs.ago.hours": "{n}h",
+	"graph.costs.ago.days": "{n}d",
+
+	// Display settings panel
+	"graph.settings.hint": "Graph display settings",
+	"graph.settings.nodeSize": "Node size",
+	"graph.settings.edgeWidth": "Edge width",
+	"graph.settings.arrowSize": "Arrowhead size",
+	"graph.settings.labelSize": "Label size",
+	"graph.settings.labelZoom": "Labels until zoom",
+	"graph.settings.regions": "Regions",
+	"graph.settings.backgroundColors": "Background colors",
+	"graph.settings.dilation": "Dilation",
+	"graph.settings.blur": "Blur",
+	"graph.settings.edgeAlpha": "Edge alpha",
+	"graph.settings.bitmapResolution": "Bitmap resolution",
+	"graph.settings.clusterLabels": "Cluster labels",
+	"graph.settings.clusterLabelSize": "Cluster label size",
+	"graph.settings.physics": "Physics",
+	"graph.settings.nodeRepulsion": "Node repulsion",
+	"graph.settings.edgeAttraction": "Edge attraction",
+	"graph.settings.edgeLength": "Edge length",
+	"graph.settings.centralPull": "Central pull",
+	"graph.settings.clusterPull": "Cluster pull",
+	"graph.settings.off": "off",
+	"graph.settings.friction": "Friction",
+	"graph.settings.depthAnchor": "Depth anchor",
+	"graph.settings.depthMode.off": "Off",
+	"graph.settings.depthMode.vertical": "Vertical (up)",
+	"graph.settings.depthMode.radial": "Radial (outward)",
+	"graph.settings.depthStrength": "Depth strength",
+	"graph.settings.depthSpacing": "Depth spacing",
+	"graph.settings.baseRingRadius": "Base ring radius",
+
+	// Graph-context card (a session's map pick)
+	"graph.context.title": "Graph context",
+	"graph.context.propositions.one": "{n} proposition",
+	"graph.context.propositions.other": "{n} propositions",
+	"graph.context.chains.one": "{n} chain",
+	"graph.context.chains.other": "{n} chains",
+
+	// Extraction coverage (session menu block + ring meter)
+	"graph.coverage.extracting": "extracting…",
+	"graph.coverage.complete": "fully extracted",
+	"graph.coverage.uncoveredTok": "{tokens} tok uncovered",
+	"graph.coverage.unextracted.one": "{n} message unextracted",
+	"graph.coverage.unextracted.other": "{n} messages unextracted",
+	"graph.coverage.running": "Running",
+	"graph.coverage.extract": "Extract",
+	"graph.coverage.ringHint": "How much of this session isn't mapped yet",
+	"graph.coverage.title": "Extraction coverage",
+	"graph.coverage.uncovered": "Uncovered",
+	"graph.coverage.covered": "Covered",
+	"graph.coverage.messages": "Messages",
+	"graph.coverage.chunkThreshold": "Chunk threshold",
+	"graph.coverage.lastExtraction": "Last extraction",
+	"graph.coverage.status": "Status",
+	"graph.coverage.tokens": "{tokens} tokens",
+
+	// Notes import errors
+	"graph.import.invalidResponse": "Invalid import response. Please retry the file.",
+	"graph.import.requestFailed": "Import request failed (HTTP {status}). Please retry the file.",
+	"graph.import.requestFailedDetail": "Import request failed (HTTP {status}): {detail}. Please retry the file.",
+
+	// Delete dialogs (shared)
+	"graph.delete.cancel": "Cancel",
+	"graph.delete.confirm": "Delete",
+	"graph.delete.deleting": "Deleting…",
+	"graph.delete.retry": "Try again",
+	"graph.delete.failed": "Delete failed ({status})",
+	"graph.delete.networkError": "Delete failed — network error. Try again.",
+
+	// Delete session dialog
+	"graph.deleteSession.aria": "Delete session",
+	"graph.deleteSession.title": "Delete session?",
+	"graph.deleteSession.body":
+		"This permanently removes the session — its messages, background jobs, and extraction records. Everything it added to the graph stays unless you check below. This cannot be undone.",
+	"graph.deleteSession.traces.title": "Also remove its graph traces",
+	"graph.deleteSession.traces.body":
+		"This session’s topics, links, and events leave the graph too. Topics other sessions or imported notes also cover survive; topics only this session created are removed entirely.",
+
+	// Delete node dialog
+	"graph.deleteNode.aria": "Delete node",
+	"graph.deleteNode.title.one": "Delete node?",
+	"graph.deleteNode.title.other": "Delete {n} nodes?",
+	"graph.deleteNode.andMore": ", and {n} more",
+	"graph.deleteNode.permanence.one": "This permanently deletes the node — this cannot be undone.",
+	"graph.deleteNode.permanence.other": "This permanently deletes all {n} nodes — this cannot be undone.",
+	"graph.deleteNode.extractionRunning": "An extraction is running — try again when the activity dock drains.",
+} as const;

@@ -33,6 +33,21 @@ describe("parseGeneralSettingsBody", () => {
 		assert.equal(parseGeneralSettingsBody("x").ok, false);
 		assert.equal(parseGeneralSettingsBody({ autoUpdate: "yes" }).ok, false);
 	});
+
+	it("dictationLanguage: a supported language passes, anything else is a 400", () => {
+		const es = parseGeneralSettingsBody({ autoUpdate: true, dictationLanguage: "es" });
+		assert.ok(es.ok);
+		assert.deepEqual(es.settings, { autoUpdate: true, dictationLanguage: "es" });
+		assert.equal(parseGeneralSettingsBody({ dictationLanguage: "klingon" }).ok, false);
+		assert.equal(parseGeneralSettingsBody({ dictationLanguage: 3 }).ok, false);
+	});
+
+	it("dictationOverride: a boolean passes, anything else is a 400", () => {
+		const on = parseGeneralSettingsBody({ dictationOverride: true, dictationLanguage: "multi" });
+		assert.ok(on.ok);
+		assert.deepEqual(on.settings, { dictationOverride: true, dictationLanguage: "multi" });
+		assert.equal(parseGeneralSettingsBody({ dictationOverride: "on" }).ok, false);
+	});
 });
 
 describe("parseAgentSettingsBody", () => {

@@ -81,6 +81,11 @@ export function SettingsRow({
 	);
 }
 
+/** The testid a Toggle derives from an (English) label. */
+export function toggleTestid(label: string): string {
+	return `toggle-${label.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`;
+}
+
 /** The on/off switch — a plain button in the switch role. */
 export function Toggle({
 	checked,
@@ -89,6 +94,7 @@ export function Toggle({
 	label,
 	discIcon,
 	title,
+	testid,
 }: {
 	checked: boolean;
 	disabled?: boolean;
@@ -101,6 +107,8 @@ export function Toggle({
 	discIcon?: ReactNode;
 	/** Optional native tooltip on the switch. */
 	title?: string;
+	/** Stable testid when `label` is translated (defaults to one derived from `label`). */
+	testid?: string;
 }) {
 	return (
 		<button
@@ -110,7 +118,7 @@ export function Toggle({
 			aria-label={label}
 			{...(title ? { title } : {})}
 			disabled={disabled}
-			data-testid={`toggle-${label.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`}
+			data-testid={testid ?? toggleTestid(label)}
 			onClick={() => onChange(!checked)}
 			className={cn(
 				"relative h-4.5 w-8 shrink-0 rounded-full border border-border transition-colors",

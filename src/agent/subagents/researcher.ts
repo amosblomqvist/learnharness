@@ -3,6 +3,8 @@ import type { Usage } from "@earendil-works/pi-ai";
 import { createWebTools } from "../tools/web.ts";
 import { createPdfReadTools } from "../tools/pdf-read.ts";
 import type { SearchProvider } from "../../core/search.ts";
+import type { AppLanguage } from "../../core/i18n.ts";
+import { workerPrompt } from "./worker-prompts.ts";
 import type { PiEngine } from "../models.ts";
 import { runSubagent } from "./pi-run.ts";
 
@@ -84,6 +86,8 @@ export interface ResearcherRunOptions {
 	onToolStart?: (toolName: string, args: unknown) => void;
 	/** Debug: raw provider-event recording key (LH_PROVIDER_EVENTS=1). */
 	chatId?: string;
+	/** The app language the instructions are in (absent = English). */
+	language?: AppLanguage;
 }
 
 /**
@@ -98,7 +102,7 @@ export async function runResearcherAgent(prompt: string, opts: ResearcherRunOpti
 		role: "researcher",
 		prompt,
 		engine: opts.engine,
-		systemPrompt: INSTRUCTIONS,
+		systemPrompt: workerPrompt("researcher", INSTRUCTIONS, opts.language),
 		maxTurns: 12,
 		abortSignal: opts.abortSignal,
 		onUsage: opts.onUsage,

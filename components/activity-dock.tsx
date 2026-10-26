@@ -4,9 +4,12 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { ActivityIcon, BotIcon, FileTextIcon, PenToolIcon, PlayIcon, SearchIcon, SquareIcon, WaypointsIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { CallUsage, JobKind, JobRecord } from "@/src/core";
-import { isModelsRefusal, isProviderKeyRefusal, subscriptionLabel, subscriptionLabels } from "@/src/core";
+import { isModelsRefusal, isProviderKeyRefusal, subscriptionLabel, subscriptionLabels, translate } from "@/src/core";
 import { formatTokens, planCostLabel } from "@/components/usage-format";
 import { useServerEvent, useServerResync } from "@/components/server-events";
+import { useT, type Translate } from "@/components/i18n";
+
+const englishT: Translate = (key, vars) => translate("en", key, vars);
 
 /**
  * THE BACKGROUND-AGENTS SECTION (owner, sidebar round — the successor of
@@ -191,7 +194,7 @@ export interface ActivityBlob {
 }
 
 /** Merge the feed into one oldest-first blob list (the stable blob order). */
-export function toBlobs(feed: ActivityFeed): ActivityBlob[] {
+export function toBlobs(feed: ActivityFeed, t: Translate = englishT): ActivityBlob[] {
 	const blobs: ActivityBlob[] = feed.jobs.map((job) => {
 		const usage = job.usage;
 		let context: ActivityBlob["context"] = null;
@@ -231,9 +234,9 @@ export function toBlobs(feed: ActivityFeed): ActivityBlob[] {
 			// 66dbea9): a pinned model whose key is gone reads as the key
 			// being needed, same quiet tone.
 			activity: isModelsRefusal(job.error)
-				? "needs model setup"
+				? t("artifacts.refusal.needsModelSetup")
 				: isProviderKeyRefusal(job.error)
-					? "needs a provider key"
+					? t("artifacts.refusal.needsProviderKey")
 					: (job.activity ?? ""),
 			model: usage?.model,
 			steps: usage?.steps,
@@ -289,10 +292,11 @@ const KIND_ICON: Record<JobKind, typeof SearchIcon> = {
 type AbortState = "pending" | "failed";
 
 export function ActivitySection({ feed: feedProp }: { feed?: ActivityFeed }) {
+	const t = useT();
 	const ctx = useContext(ActivityContext);
 	const feed = feedProp ?? ctx.feed;
 	const refresh = ctx.refresh;
-	const blobs = useMemo(() => toBlobs(feed), [feed]);
+	const blobs = useMemo(() => toBlobs(feed, t), [feed, t]);
 	const [openBlob, setOpenBlob] = useState<string | null>(null); // detail, inline-expanded
 	const [abortStates, setAbortStates] = useState<Record<string, AbortState>>({});
 	const now = useNow(blobs.length > 0);
@@ -347,9 +351,9 @@ export function ActivitySection({ feed: feedProp }: { feed?: ActivityFeed }) {
 		<section data-testid="activity-section" className="border-t border-border px-3 pb-3 pt-2">
 			<div className="mb-1 flex items-center gap-1.5 text-xs uppercase tracking-widest text-muted-foreground/70">
 				<ActivityIcon className="size-3" />
-				Background agents
+				{t("artifacts.activity.title")}
 				{blobs.length > 0 && (
-					<span className="ml-auto tabular-nums" data-testid="activity-total-cost" title="Total running cost (inferred)">
+					<span className="ml-auto tabular-nums" data-testid="activity-total-cost" title={t("artifacts.activity.totalCostTitle")}>
 						{planCostLabel(totalCost, subscriptionLabels(blobs.map((blob) => blob.model)))}
 				</span>
 				)}
@@ -389,19 +393,20 @@ function ActivityBlobRow({
 	abortState: AbortState | undefined;
 	onAbort: () => void;
 }) {
+	const t = useT();
 	const Icon = blob.process === "extraction" ? WaypointsIcon : (blob.jobKind && KIND_ICON[blob.jobKind]) || BotIcon;
 	const label =
 		blob.process === "extraction"
-			? `Extraction — ${blob.phase ?? "running"}`
+			? t("artifacts.activity.extraction", { phase: blob.phase ?? t("artifacts.activity.phaseRunning") })
 			: blob.jobKind === "research"
-				? "Researcher"
+				? t("artifacts.activity.researcher")
 				: blob.jobKind === "demo"
-					? "Demo builder"
+					? t("artifacts.activity.demoBuilder")
 					: blob.jobKind === "visual"
-						? "Figure maker"
+						? t("artifacts.activity.figureMaker")
 						: blob.jobKind === "pdf"
-							? "PDF reader"
-							: "Sub-agent";
+							? t("artifacts.activity.pdfReader")
+							: t("artifacts.activity.subAgent");
 	return (
 		<div
 			data-testid={`activity-blob-${blob.process}`}
@@ -437,8 +442,8 @@ function ActivityBlobRow({
 				data-testid="activity-abort"
 				onClick={onAbort}
 				disabled={abortState !== undefined}
-				title={abortState === "failed" ? "Abort failed — try again" : "End this background process"}
-				aria-label={`End ${label} in ${blob.title}`}
+				title={abortState === "failed" ? t("artifacts.activity.abortFailed") : t("artifacts.activity.endProcess")}
+				aria-label={t("artifacts.activity.endAria", { label, title: blob.title })}
 				className="absolute right-1 top-1/2 -translate-y-1/2 rounded-md p-1 text-muted-foreground/70 transition-colors hover:bg-destructive/10 hover:text-destructive disabled:opacity-50"
 			>
 				<SquareIcon className="size-3" />
@@ -462,13 +467,13 @@ function ActivityBlobRow({
 						</div>
 						{blob.activity && <div className="break-words">{blob.activity}</div>}
 						<div className="flex justify-between gap-2">
-							<span>Cost</span>
+							<span>{t("artifacts.activity.cost")}</span>
 							<span className="tabular-nums text-card-foreground">
 								{planCostLabel(blob.cost, subscriptionLabel(blob.model))}
 							</span>
 						</div>
 						<div className="flex justify-between gap-2">
-							<span>Context</span>
+							<span>{t("artifacts.activity.context")}</span>
 							<span className="tabular-nums text-card-foreground" data-testid="activity-blob-context">
 								{blob.context === null
 									? "—"
@@ -477,23 +482,23 @@ function ActivityBlobRow({
 						</div>
 						{blob.model && (
 							<div className="flex justify-between gap-2">
-								<span>Model</span>
+								<span>{t("artifacts.activity.model")}</span>
 								<span className="truncate text-card-foreground">{blob.model}</span>
 							</div>
 						)}
 						{blob.steps !== undefined && (
 							<div className="flex justify-between gap-2">
-								<span>Steps</span>
+								<span>{t("artifacts.activity.steps")}</span>
 								<span className="tabular-nums text-card-foreground">{blob.steps}</span>
 							</div>
 						)}
 						<a href={`/chat/${blob.chatId}`} className="text-primary hover:underline">
-							Open session →
+							{t("artifacts.activity.openSession")}
 						</a>
 					</div>
 					<div className="mt-2 text-muted-foreground/80">
-					{abortState === "failed" && "Abort failed — try again"}
-					{abortState === "pending" && "Stopping…"}
+					{abortState === "failed" && t("artifacts.activity.abortFailed")}
+					{abortState === "pending" && t("artifacts.activity.stopping")}
 				</div>
 				</div>
 			)}

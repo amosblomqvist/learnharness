@@ -31,8 +31,27 @@ import fs from "node:fs";
 import path from "node:path";
 import { PATHS, PROMPTS_OVERRIDE_DIR } from "../../config.ts";
 import { FRAGMENT_RE, isValidSegmentPath, type PromptAgent, type PromptSegmentInfo } from "../core/prompt-segments.ts";
+import { DEFAULT_LANGUAGE, type AppLanguage } from "../core/i18n.ts";
 
 const PROMPTS_DIR = path.join(PATHS.root, "src", "agent", "prompts");
+
+/** Translated segments mirror the English layout under locales/<language>/
+ *  ("system-prompt.md" at its root, then shared/, teacher/, …). Discovery
+ *  and order stay driven by the English tree. */
+const LOCALES_DIR = path.join(PROMPTS_DIR, "locales");
+
+/** The file a segment composes from in `language`: its translation when
+ *  one exists, else the English source. */
+export function resolveSegmentFile(
+	segmentPath: string,
+	englishFile: string,
+	language: AppLanguage,
+	localesDir: string = LOCALES_DIR,
+): string {
+	if (language === DEFAULT_LANGUAGE) return englishFile;
+	const translated = path.join(localesDir, language, ...segmentPath.split("/"));
+	return fs.existsSync(translated) ? translated : englishFile;
+}
 
 /** Shared fragments the PRACTICE agent composes: the VOICE, ACCURACY,
  *  and MENTAL-MODEL chunks joined the formatting guide (owner rounds 13
@@ -63,8 +82,12 @@ export function readPromptOverride(segmentPath: string): string | null {
  *  shared base, then the agent's own fragments sorted by filename, then
  *  the shared/ fragments (the 2026-09-27 reorder: the agent's job and
  *  method lead; the shared tool/file/format mechanics are an appendix).
- *  The exact order composeInstructions composes them in. */
-export function listSourceSegments(agent: PromptAgent): Array<{ path: string; shared: boolean; file: string }> {
+ *  The exact order composeInstructions composes them in. Each `file` is
+ *  the segment's `language` translation when present (resolveSegmentFile). */
+export function listSourceSegments(
+	agent: PromptAgent,
+	language: AppLanguage = DEFAULT_LANGUAGE,
+): Array<{ path: string; shared: boolean; file: string }> {
 	// PRACTICE (owner, 2026-10-04): its own directory plus a CURATED
 	// shared appendix — the teaching base and the question/confidence/
 	// file mechanics stay out (the doctrine contradicts them; 00-base.md
@@ -93,20 +116,22 @@ export function listSourceSegments(agent: PromptAgent): Array<{ path: string; sh
 			segments.push({ path: `shared/${f}`, shared: true, file: path.join(sharedDir, f) });
 		}
 	}
-	return segments;
+	return segments.map((s) => ({ ...s, file: resolveSegmentFile(s.path, s.file, language) }));
 }
 
 /**
  * The effective segment view for one agent — every segment with its source
  * text, override text, and effective switch state. `switches` is the
  * settings record's agent.prompts map (absent key = off); enabled =
- * switch on AND the override file exists.
+ * switch on AND the override file exists. Source text is the `language`
+ * translation (English fallback); overrides apply in every language.
  */
 export function effectivePromptSegments(
 	agent: PromptAgent,
 	switches: Record<string, boolean>,
+	language: AppLanguage = DEFAULT_LANGUAGE,
 ): PromptSegmentInfo[] {
-	return listSourceSegments(agent).map((segment) => {
+	return listSourceSegments(agent, language).map((segment) => {
 		let sourceText: string;
 		try {
 			sourceText = fs.readFileSync(segment.file, "utf-8");

@@ -176,7 +176,17 @@ pricing-generation step: Pi AI's catalog and public calculator are the authority
 
 **Practice (problem sets).** A node selection resolves to the STORED reasoning chains it fully contains (a chain rides iff every member is selected; unchained nodes ride as singletons); the `/practice` creation dialog picks a birth-session cluster (the graph view's own groups) and freezes its propositions + chains into a self-contained `ProblemSet`. Three named-level axes steer generation (ladder rung 0–4, cue distance 0–2, Theory|Application — never a number to interpolate; defaults Direct exercise · Adjacent context · Theory), plus an optional free-form note the agents weigh but need not follow. Creation has two entries: the cluster picker on `/practice`, or the graph view's chain table — a full-bleed sortable table of every reasoning chain, grouped by birth cluster under the shared top bar, selecting chips, chains, or whole clusters, whose floating selection bar shows the exact `N nodes → M chains` the agents will receive — handing a free-form node selection to the same dialog — and carries the fenced Delete action, making it the graph's management view (whole-cluster cleanup through the same full-death confirm dialog). A partitioner agent covers every chain exactly once, one generator per partition writes problems against the owner's problem-engineering framework (commit-before-pose: statement + solution + rubric together), and grading is **strengthening, not assessment** — one attempt per problem with its own submit button, instant solution/rubric reveal, then a score 0–10 with brief reasoning landing live; nothing ever written back to the graph. Runs are registry-backed background jobs on the activity dock (no steer, never wakes the teacher); sets live in `data/practice`, crash-swept on boot.
 
-**Dictation.** Optional speech-to-text: the server mints short-lived Deepgram tokens; audio streams browser→Deepgram over WebSocket, never through the server.
+**Dictation.** Optional speech-to-text: the server mints short-lived Deepgram tokens; audio streams browser→Deepgram over WebSocket, never through the server. It streams in the app language unless Settings → General overrides it (`effectiveDictationLanguage`).
+
+## Adding a language
+
+English is the source of truth; anything untranslated falls back to it.
+
+1. **Register it** in `APP_LANGUAGES` (`src/core/i18n.ts`): id, native label, Deepgram dictation code.
+2. **UI copy** — copy `src/core/i18n/es/` to `src/core/i18n/<id>/` (one file per surface, typed against the English keys) and add it to `DICTIONARIES`.
+3. **Teacher prompts** — mirror `src/agent/prompts/` under `src/agent/prompts/locales/<id>/` (plus `system-prompt.md`). Translate prose only: tool names, backticked identifiers and markers stay verbatim.
+4. **Worker prompts** — add `src/agent/subagents/locales/<id>.ts` and register it in `worker-prompts.ts`; add an `<id>` entry to the `Localized` maps (compaction prompts in `src/core/compaction.ts` and `src/server/compaction.ts`).
+5. **Run `npm test`** — the dictionary and prompt-coverage tests list anything missing or any identifier lost in translation.
 
 ## Testing
 

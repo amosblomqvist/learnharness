@@ -31,6 +31,8 @@ import { batchRuns, coverageOf, messageViewLines } from "../../core/coverage.ts"
 import { failedOutputCallIds, type LhMessage } from "../../core/native-messages.ts";
 import { auditorGraphTools } from "../tools/graph.ts";
 import { runSubmitAgent, healStringifiedArrays } from "./submit-agent.ts";
+import type { AppLanguage } from "../../core/i18n.ts";
+import { workerPrompt } from "./worker-prompts.ts";
 
 /**
  * The extraction pipeline (vision §1 construction, 2026-09-02 redesign;
@@ -435,6 +437,20 @@ arguments. The tool's field descriptions carry the details.`;
 export const EXTRACTOR_INSTRUCTIONS = `${SESSION_PREAMBLE}\n\n${EXTRACTION_CORE}\n\n${SESSION_MESSAGE_ID_RULE}`;
 export const NOTES_EXTRACTOR_INSTRUCTIONS = `${NOTES_PREAMBLE}\n\n${EXTRACTION_CORE}`;
 
+/** The session extractor's instructions in `language` (English = EXTRACTOR_INSTRUCTIONS). */
+export function extractorInstructions(language?: AppLanguage): string {
+	return [
+		workerPrompt("sessionPreamble", SESSION_PREAMBLE, language),
+		workerPrompt("extractionCore", EXTRACTION_CORE, language),
+		workerPrompt("sessionMessageIdRule", SESSION_MESSAGE_ID_RULE, language),
+	].join("\n\n");
+}
+
+/** The notes extractor's instructions in `language` (English = NOTES_EXTRACTOR_INSTRUCTIONS). */
+export function notesExtractorInstructions(language?: AppLanguage): string {
+	return [workerPrompt("notesPreamble", NOTES_PREAMBLE, language), workerPrompt("extractionCore", EXTRACTION_CORE, language)].join("\n\n");
+}
+
 // ── the same-source digest (owner, 2026-09-30 evening) ──
 //
 // Serialized digest-aware extraction REPLACED the spine stage (owner
@@ -475,6 +491,7 @@ function runExtractor(
 	batchIds: ReadonlySet<string>,
 	signal: AbortSignal | undefined,
 	onStep: (usage: Usage, model: string, step: number, finishReason: string, tools: string) => void,
+	language: AppLanguage | undefined,
 ): Promise<SessionFindings> {
 	// Chains in (the wire), chains out (the store) — no translation seam
 	// since chains-primary. Validation runs at the submit seam (error-back)
@@ -490,7 +507,7 @@ function runExtractor(
 		parameters: sessionFindingsSchema,
 		fill: fillFindings,
 		validate: (value) => validateSessionAnchors(value, batchIds) ?? validateFindingsChains(value, existingIds),
-		systemPrompt: EXTRACTOR_INSTRUCTIONS,
+		systemPrompt: extractorInstructions(language),
 		prompt,
 		engine,
 		signal,
@@ -511,6 +528,7 @@ function runNotesExtractor(
 	existingIds: ReadonlySet<string>,
 	signal: AbortSignal | undefined,
 	onStep: (usage: Usage, model: string, step: number, finishReason: string, tools: string) => void,
+	language: AppLanguage | undefined,
 ): Promise<NotesFindings> {
 	return runSubmitAgent<FindingsSubmit>({
 		role: "extractor",
@@ -521,7 +539,7 @@ function runNotesExtractor(
 		parameters: findingsSchema,
 		fill: fillNotesFindings,
 		validate: (value) => validateFindingsChains(value, existingIds),
-		systemPrompt: NOTES_EXTRACTOR_INSTRUCTIONS,
+		systemPrompt: notesExtractorInstructions(language),
 		prompt,
 		engine,
 		signal,
@@ -580,6 +598,7 @@ function runAuditor(
 	signal: AbortSignal | undefined,
 	onStep: (usage: Usage, model: string, step: number, finishReason: string, tools: string) => void,
 	tools: Record<string, AgentTool<any>>,
+	language: AppLanguage | undefined,
 ): Promise<AuditVerdicts> {
 	return runSubmitAgent({
 		role: "auditor",
@@ -589,7 +608,7 @@ function runAuditor(
 		toolDescription: "Submit the identity verdicts ONLY (links) — never the propositions themselves.",
 		parameters: auditSchema,
 		fill: fillAudit,
-		systemPrompt: AUDITOR_INSTRUCTIONS,
+		systemPrompt: workerPrompt("auditor", AUDITOR_INSTRUCTIONS, language),
 		prompt,
 		engine,
 		signal,
@@ -736,6 +755,9 @@ export interface ExtractionPipelineDeps extends GraphDeps, ExtractionModels {
 	 *  callers wire the live effective settings (extraction-UX redesign,
 	 *  2026-09-24). */
 	getChunkTokens?: () => number;
+	/** The app language the stages' instructions are in — read FRESH per
+	 *  stage call like engineFor; absent = English. */
+	language?: () => AppLanguage;
 }
 
 export interface NotesImportInput {
@@ -944,6 +966,7 @@ export function createExtractionPipeline(deps: ExtractionPipelineDeps): Extracti
 				recordStep(jobKey, "extractor", callUsage(usage), model);
 				console.info(`[extraction] extractor step ${step}: ${finishReason}, tools: ${tools}`);
 			},
+			deps.language?.(),
 		);
 		console.info(`[extraction ${jobKey}] extractor done in ${Math.round(performance.now() - t0)}ms`);
 		return findings;
@@ -988,6 +1011,7 @@ export function createExtractionPipeline(deps: ExtractionPipelineDeps): Extracti
 				console.info(`[extraction] auditor step ${step}: ${finishReason}, tools: ${tools}`);
 			},
 			auditorGraphTools({ chatStore, graphStore }),
+			deps.language?.(),
 		);
 		console.info(
 			`[extraction ${jobKey}] audit: ${findings.propositions.length} propositions through, ` +
@@ -1295,6 +1319,7 @@ export function createExtractionPipeline(deps: ExtractionPipelineDeps): Extracti
 				recordStep(jobKey, "extractor", callUsage(usage), model);
 				console.info(`[extraction] extractor step ${step}: ${finishReason}, tools: ${tools}`);
 			},
+			deps.language?.(),
 		);
 		console.info(`[extraction ${jobKey}] notes extractor done in ${Math.round(performance.now() - t0)}ms`);
 		return findings;

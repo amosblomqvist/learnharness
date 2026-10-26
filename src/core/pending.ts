@@ -5,6 +5,8 @@
  * toolCallId. The server-side record scans (danglingQuestionOf over native
  * LhMessage[]) live in native-messages.ts.
  */
+import { DEFAULT_LANGUAGE, translate, type AppLanguage, type TranslationKey } from "./i18n.ts";
+
 interface UIMessage {
 	role?: string;
 	parts: Array<Record<string, unknown> & { type: string }>;
@@ -137,17 +139,17 @@ export function findPendingToolCall(messages: UIMessage[]): PendingToolCall | nu
  * now names the actual activity; chat.tsx gates it on `!pending` and
  * renders it as the quiet transcript shimmer.
  */
-const ACTIVITY_LABELS: Record<string, string> = {
-	read: "Reading a file…",
-	ls: "Listing a directory…",
-	find: "Finding files…",
-	grep: "Searching file contents…",
-	research: "Dispatching research…",
-	demo: "Building a demo…",
-	visual: "Making a visual…",
-	pdf: "Reading a PDF…",
-	plan_init: "Drawing up the plan…",
-	probe_done: "Concluding the assessment…",
+const ACTIVITY_LABELS: Record<string, TranslationKey> = {
+	read: "artifacts.activity.read",
+	ls: "artifacts.activity.ls",
+	find: "artifacts.activity.find",
+	grep: "artifacts.activity.grep",
+	research: "artifacts.activity.research",
+	demo: "artifacts.activity.demo",
+	visual: "artifacts.activity.visual",
+	pdf: "artifacts.activity.pdf",
+	plan_init: "artifacts.activity.planInit",
+	probe_done: "artifacts.activity.probeDone",
 };
 
 /** The activity label for ONE running tool (owner, streaming round
@@ -155,17 +157,17 @@ const ACTIVITY_LABELS: Record<string, string> = {
  *  shimmered label on the card itself, replacing the retired transcript
  *  bottom line. Question tools are excluded here: their input-streaming
  *  part renders in the dock, never a live card. */
-export function toolActivityLabel(tool: string): string {
-	if ((QUESTION_TOOLS as readonly string[]).includes(tool)) return "Writing a question…";
-	return ACTIVITY_LABELS[tool] ?? "Working…";
+export function toolActivityLabel(tool: string, language: AppLanguage = DEFAULT_LANGUAGE): string {
+	if ((QUESTION_TOOLS as readonly string[]).includes(tool)) return translate(language, "artifacts.activity.question");
+	return translate(language, ACTIVITY_LABELS[tool] ?? "artifacts.activity.working");
 }
 
-export function streamingToolActivity(messages: UIMessage[]): string | null {
+export function streamingToolActivity(messages: UIMessage[], language: AppLanguage = DEFAULT_LANGUAGE): string | null {
 	const last = messages.at(-1);
 	if (!last || last.role !== "assistant") return null;
 	for (const part of last.parts) {
 		if (isToolUIPart(part) && part.state === "input-streaming") {
-			return toolActivityLabel(part.type.slice("tool-".length));
+			return toolActivityLabel(part.type.slice("tool-".length), language);
 		}
 	}
 	return null;

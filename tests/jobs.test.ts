@@ -629,6 +629,30 @@ describe("research runner (async protocol §3)", () => {
 		assert.deepEqual(search.queries, ["sigma.js latest version (5)"]);
 	});
 
+	it("runJob hands the injected app language's prompt to the researcher", async () => {
+		const chat = chatStore.createChat("Test: runner language");
+		trackChat(chat.id);
+		chatStore.saveMessages(chat.id, nativeToolMessages("¿qué versión de sigma?", "research", "call-lang1", RESEARCH_INPUT));
+		const job = jobStore.createJob({ kind: "research", chatId: chat.id, toolCallId: "call-lang1" });
+		trackJob(job.id);
+
+		let system = "";
+		const faux = createFauxCore({});
+		faux.setResponses([(context) => {
+			const msg = context.messages.find((m) => m.role === "system");
+			system = msg?.role === "system" ? String(msg.content) : "";
+			return fauxAssistantMessage([fauxText(BRIEF)]);
+		}]);
+		const runner = createJobRunner({ chatStore, jobStore, deliver: fakeDeliver().deliver, language: () => "es" });
+		researchModelOverride.current = { model: faux.getModel(), streamFn: faux.streamSimple };
+		try {
+			await runner.runJob(job.id);
+		} finally {
+			researchModelOverride.current = undefined;
+		}
+		assert.match(system, /español/i);
+	});
+
 	it("a keyless fetch-only researcher still completes and delivers a sourced job result", async () => {
 		const url = "https://example.com/supplied-source";
 		const brief = `## Summary\nVerified supplied source. [Source](${url})\n\n## Sources\n- Source (${url})`;

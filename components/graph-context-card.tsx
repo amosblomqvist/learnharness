@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { ChevronRightIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useT } from "@/components/i18n";
 
 /**
  * The graph-context card (owner, 2026-10-04): the session's map pick —
@@ -21,9 +22,11 @@ export interface GraphContextData {
 }
 
 export function GraphContextCard({ data }: { data: GraphContextData }) {
+	const t = useT();
 	const [open, setOpen] = useState(false);
 	const { propositions = [], chains = [] } = data ?? {};
-	const noun = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
+	const propositionCount = t(propositions.length === 1 ? "graph.context.propositions.one" : "graph.context.propositions.other", { n: propositions.length });
+	const chainCount = t(chains.length === 1 ? "graph.context.chains.one" : "graph.context.chains.other", { n: chains.length });
 	return (
 		<div data-testid="graph-context-card" className="my-1">
 			<button
@@ -33,10 +36,10 @@ export function GraphContextCard({ data }: { data: GraphContextData }) {
 				className="flex w-full cursor-pointer items-center gap-2 rounded-lg border border-dashed border-border/70 px-3 py-2 text-left text-xs text-muted-foreground transition-colors hover:text-foreground"
 			>
 				<ChevronRightIcon aria-hidden="true" className={cn("size-3.5 shrink-0 transition-transform", open && "rotate-90")} />
-				<span className="font-medium">Graph context</span>
+				<span className="font-medium">{t("graph.context.title")}</span>
 				<span className="min-w-0 flex-1 truncate">
-					{noun(propositions.length, "proposition", "propositions")}
-					{chains.length > 0 ? ` · ${noun(chains.length, "chain", "chains")}` : ""}
+					{propositionCount}
+					{chains.length > 0 ? ` · ${chainCount}` : ""}
 				</span>
 			</button>
 			{open && (

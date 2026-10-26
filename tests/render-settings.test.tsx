@@ -16,8 +16,8 @@ import { TOGGLE_TOOLS, AgentSection } from "../components/settings/agent-section
 import { AppearanceSection, GraphSection } from "../components/settings/appearance-section.tsx";
 import { KeysSection } from "../components/settings/keys-section.tsx";
 import { KeyboardSection } from "../components/settings/keyboard-section.tsx";
-import type { GraphSettings } from "../src/core/index.ts";
-import { SettingsDialogBody, SettingsDialogProvider } from "../components/settings/settings-dialog.tsx";
+import type { GeneralSettings, GraphSettings } from "../src/core/index.ts";
+import { GeneralSection, SettingsDialogBody, SettingsDialogProvider } from "../components/settings/settings-dialog.tsx";
 import { KEYBOARD_ACTIONS } from "../src/core/index.ts";
 
 /** The full opening tag of the element carrying a testid — attribute
@@ -215,6 +215,33 @@ describe("GraphSection — master switch + chunk budget (wave 7 + 2026-10-02)", 
 		);
 		assert.ok(tagOf(html, "input-chunk-tokens").includes('value="6000"'));
 		assert.ok(html.includes(">6000 tok</"));
+	});
+});
+
+describe("GeneralSection — dictation language override", () => {
+	const render = (general: GeneralSettings | undefined) =>
+		renderToStaticMarkup(<GeneralSection general={general} onChange={() => {}} />);
+	const selected = (html: string) => /<option value="([^"]+)" selected="">/.exec(html.slice(html.indexOf('data-testid="select-dictation-language"')))?.[1];
+
+	it("override off (factory): the picker is greyed out and shows the app language", () => {
+		const html = render({ language: "es" });
+		assert.ok(tagOf(html, "toggle-dictation-override").includes('aria-checked="false"'));
+		assert.ok(tagOf(html, "select-dictation-language").includes("disabled"));
+		assert.ok(tagOf(html, "row-dictation-language").includes("opacity-40"));
+		assert.equal(selected(html), "es");
+	});
+
+	it("override off keeps showing the app language even with a remembered pick", () => {
+		assert.equal(selected(render({ language: "en", dictationOverride: false, dictationLanguage: "fr" })), "en");
+	});
+
+	it("override on: the picker is live and shows the pick", () => {
+		const html = render({ language: "en", dictationOverride: true, dictationLanguage: "multi" });
+		assert.ok(tagOf(html, "toggle-dictation-override").includes('aria-checked="true"'));
+		assert.ok(!tagOf(html, "select-dictation-language").includes("disabled"));
+		assert.ok(!tagOf(html, "row-dictation-language").includes("opacity-40"));
+		assert.equal(selected(html), "multi");
+		assert.ok(html.includes("Multilingual (auto-detect)"));
 	});
 });
 

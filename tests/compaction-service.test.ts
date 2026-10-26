@@ -91,6 +91,22 @@ describe("the compaction service", () => {
 		await Promise.resolve(); assert.equal(finished, false);
 		release(); await waiter; assert.equal(finished, true);
 	});
+	it("the summarizer receives the app language's prompt", async () => {
+		const chatId = overThresholdChat("compact: spanish");
+		const seen: { prompt?: string; language?: string } = {};
+		const deps: CompactionDeps = {
+			...depsOf(chatId, 40_000),
+			language: "es",
+			summarize: async (prompt, engine, language) => {
+				Object.assign(seen, { prompt, language });
+				return depsOf(chatId, 40_000).summarize!(prompt, engine);
+			},
+		};
+		await ensureCompacted(deps, chatId);
+		assert.match(seen.prompt ?? "", /La comprensión del aprendiz/);
+		assert.equal(seen.language, "es");
+	});
+
 	it("over-threshold record → marker appended, usage logged, both events emitted", async () => {
 		const chatId = overThresholdChat("compact: basic");
 		const events: string[] = [];

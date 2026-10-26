@@ -6,6 +6,8 @@ System prompts are composed at agent construction (src/agent/teacher-agent.ts), 
 2. Every numeric-prefix `*.md` fragment in the agent's directory (`prober/` or `teacher/`), in **sorted filename order**, joined with `---` separators. The agent's own job and method LEAD the composition (the 2026-09-27 reorder). The loader enforces the numeric prefix (`\d*-*.md`) — other files (like this README) never enter the model's prompt.
 3. The `shared/` fragments, as a trailing appendix (tool/file/format mechanics).
 
+Translations live in `locales/<language>/`, mirroring this layout (`system-prompt.md` at its root, then `shared/`, `prober/`, `teacher/`, `practice/`). The English tree drives which segments exist and their order; each segment composes from its translation for the app language when the file exists, else from English. Never translate tool names, tool input field names, JSON keys or markers — they must match the zod schemas verbatim.
+
 Rules for adding a fragment:
 
 - Name it with a numeric order prefix, inside the right agent directory.

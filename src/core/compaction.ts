@@ -38,6 +38,7 @@ import { derivePlanStatusesLh, derivedNodeStatus } from "./contracts/plan.ts";
 import { COMPACTED_HISTORY_HEADER } from "./contracts/chat.ts";
 import type { LhMessage, LhMarkerMessage } from "./native-messages.ts";
 import { newMessageId } from "./native-messages.ts";
+import { pickLocalized, type AppLanguage, type Localized } from "./i18n.ts";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { AssistantMessage, ToolResultMessage, SystemMessage } from "@earendil-works/pi-ai";
 
@@ -377,9 +378,21 @@ export function buildCompactionPrompt(input: {
 	planTreeText: string | null;
 	/** The session kind (wording: tutor vs practice agent). */
 	kind: "teach" | "practice" | "probe";
+	/** The app language the instructions are in (absent = English). */
+	language?: AppLanguage;
 }): string {
-	const planSection =
-		input.planTreeText ?? "No plan tree exists in this session (nothing was persisted).";
+	return pickLocalized(COMPACTION_PROMPTS, input.language)(input.spanText, input.planTreeText);
+}
+
+type CompactionPromptTemplate = (spanText: string, planTreeText: string | null) => string;
+
+const COMPACTION_PROMPTS: Localized<CompactionPromptTemplate> = {
+	en: englishCompactionPrompt,
+	es: spanishCompactionPrompt,
+};
+
+function englishCompactionPrompt(spanText: string, planTreeText: string | null): string {
+	const planSection = planTreeText ?? "No plan tree exists in this session (nothing was persisted).";
 	return `You are compacting the earlier part of a tutoring session — writing the summary your future self will read INSTEAD of that transcript. Everything before the cut is replaced by what you write; everything after stays verbatim. The learner's transcript below labels the learner as [LEARNER], the tutoring agent as [TUTOR], tool traffic as [RESULT …]/[SYSTEM NOTE].
 
 Write the summary with EXACTLY these sections, in this order:
@@ -402,5 +415,32 @@ Rules: no praise, no filler, no speculation beyond the transcript. Every claim a
 
 TRANSCRIPT TO SUMMARIZE:
 
-${input.spanText}`;
+${spanText}`;
+}
+
+function spanishCompactionPrompt(spanText: string, planTreeText: string | null): string {
+	const planSection = planTreeText ?? "No existe un árbol de plan en esta sesión (no se guardó nada).";
+	return `Estás compactando la primera parte de una sesión de tutoría — escribiendo el resumen que tu yo futuro leerá EN LUGAR de esa transcripción. Todo lo anterior al corte se reemplaza por lo que escribas; todo lo posterior se conserva palabra por palabra. La transcripción de abajo etiqueta al aprendiz como [LEARNER], al agente tutor como [TUTOR] y el tráfico de herramientas como [RESULT …]/[SYSTEM NOTE].
+
+Escribe el resumen en español con EXACTAMENTE estas secciones, en este orden:
+
+## La comprensión del aprendiz
+La imagen más detallada que puedas dar de lo que este aprendiz sabe y de cómo EVOLUCIONÓ a lo largo de la sesión: qué respondió y qué tan bien (resultados de los quizzes, razonamiento correcto, errores), la confianza que declaró o mostró, los conceptos erróneos que surgieron, cuáles se corrigieron y cuáles siguen en pie. Esta sección es la que más pesa — las decisiones de enseñanza futuras dependen de ella.
+
+## El arco de enseñanza
+Cómo avanzó la sesión: qué se cubrió y en qué orden, qué explicaciones funcionaron y cuáles no, cómo respondió el aprendiz, hacia dónde fue el impulso. Incluye los hallazgos de la fase de sondeo si los hay.
+
+## El árbol de dependencias del plan
+Reproduce el árbol del plan actual de la sesión, tal cual, a partir de la estructura de abajo — no omitas nodos, aristas ni estados.
+
+${planSection}
+
+## El momento actual
+Qué está pasando AHORA MISMO en el corte: cualquier pregunta o problema que espera la respuesta del aprendiz, cualquier compromiso que el agente haya hecho y que un turno posterior deba cumplir, y el siguiente paso inmediato.
+
+Reglas: nada de elogios, nada de relleno, nada de especulación más allá de la transcripción. Toda afirmación sobre el aprendiz debe poder rastrearse a lo que realmente dijo o respondió. Conserva exactos todos los identificadores (ids de proposiciones, ids de nodos, rutas de archivos).
+
+TRANSCRIPCIÓN A RESUMIR:
+
+${spanText}`;
 }

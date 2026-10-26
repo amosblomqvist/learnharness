@@ -37,10 +37,13 @@ import {
 	estimateContextTokens,
 	estimateTokens,
 	newCompactionMarker,
+	pickLocalized,
 	planTreeToText,
 	serializeForSummary,
 	toLlmMessages,
+	type AppLanguage,
 	type CompactionDetails,
+	type Localized,
 	type LhMessage,
 	type LhMarkerMessage,
 } from "../core/index.ts";
@@ -51,16 +54,18 @@ import { runSubagent } from "../agent/subagents/pi-run.ts";
 
 /** The summarizer's system prompt — server-owned operational framing,
  *  not model-facing doctrine (buildCompactionPrompt carries the shape). */
-const SUMMARIZER_SYSTEM_PROMPT =
-	"You are the session-compaction summarizer for a tutoring agent. You receive the transcript span to summarize and write exactly the summary the instructions demand — nothing else, no preamble, no meta-commentary.";
+const SUMMARIZER_SYSTEM_PROMPT: Localized<string> = {
+	en: "You are the session-compaction summarizer for a tutoring agent. You receive the transcript span to summarize and write exactly the summary the instructions demand — nothing else, no preamble, no meta-commentary.",
+	es: "Eres el resumidor de compactación de sesiones de un agente tutor. Recibes el tramo de transcripción a resumir y escribes exactamente el resumen que piden las instrucciones — nada más, sin preámbulo, sin metacomentarios.",
+};
 
 /** The one-shot summary call: zero tools, one turn, text out. The engine
  *  is the chat's own conversation engine (owner ruling: the session's
  *  model writes its own summary). Injectable for tests. */
-export type Summarizer = (prompt: string, engine: PiEngine) => Promise<{ summary: string; usage: Usage }>;
+export type Summarizer = (prompt: string, engine: PiEngine, language?: AppLanguage) => Promise<{ summary: string; usage: Usage }>;
 
 /** The production summarizer over the sub-agent seam. */
-async function subagentSummarizer(prompt: string, engine: PiEngine): Promise<{ summary: string; usage: Usage }> {
+async function subagentSummarizer(prompt: string, engine: PiEngine, language?: AppLanguage): Promise<{ summary: string; usage: Usage }> {
 	let usage: Usage = {
 		input: 0,
 		output: 0,
@@ -77,7 +82,7 @@ async function subagentSummarizer(prompt: string, engine: PiEngine): Promise<{ s
 		role: "researcher" as never,
 		prompt,
 		engine,
-		systemPrompt: SUMMARIZER_SYSTEM_PROMPT,
+		systemPrompt: pickLocalized(SUMMARIZER_SYSTEM_PROMPT, language),
 		maxTurns: 1,
 		onUsage: (u) => {
 			usage = u;
@@ -108,6 +113,8 @@ export interface CompactionDeps {
 	systemPromptTokens: number;
 	/** Injectable summarizer (tests); default = the sub-agent one-shot. */
 	summarize?: Summarizer;
+	/** The app language the summary instructions are in (absent = English). */
+	language?: AppLanguage;
 }
 
 // ─── the registry (module-global on globalThis, jobs.ts's pattern) ─────────
@@ -208,12 +215,13 @@ async function compact(deps: CompactionDeps, chatId: string): Promise<void> {
 		spanText: fullSpan,
 		planTreeText: planTreeToText(record.tree, messages),
 		kind: deps.kind,
+		language: deps.language,
 	});
 
 	emit("compaction-changed", { chatId, running: true });
 	try {
 		const summarize = deps.summarize ?? subagentSummarizer;
-		const { summary, usage } = await summarize(prompt, deps.engine);
+		const { summary, usage } = await summarize(prompt, deps.engine, deps.language);
 		const trimmed = summary.trim();
 		if (!trimmed) return; // an empty summary is a refusal artifact — leave the record honest
 

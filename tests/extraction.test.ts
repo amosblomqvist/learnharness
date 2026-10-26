@@ -422,6 +422,34 @@ describe("the extraction pipeline (extractor → auditor → merger)", () => {
 		off();
 	});
 
+	it("the injected app language selects the stages' instructions", async () => {
+		const { chatId } = fixtureChat();
+		const systems: Record<string, string> = {};
+		const capture = (stage: string, name: string, input: unknown): PiEngine =>
+			fauxEngine([
+				(context) => {
+					const system = context.messages.find((m) => m.role === "system");
+					systems[stage] = system?.role === "system" ? String(system.content) : "";
+					return fauxAssistantMessage(
+						[fauxToolCall(name, input as ToolCall["arguments"], { id: `${name}-call` })],
+						{ stopReason: "toolUse" },
+					);
+				},
+			]);
+		const pipeline = createExtractionPipeline({
+			chatStore,
+			graphStore: memoryLedgers(),
+			extractor: capture("extractor", "submit_findings", FINDINGS),
+			auditor: capture("auditor", "submit_review", { links: [] }),
+			language: () => "es",
+		});
+		await pipeline.runExtraction(chatId);
+		assert.match(systems.extractor ?? "", /español/i);
+		assert.match(systems.extractor ?? "", /submit_findings/);
+		assert.doesNotMatch(systems.auditor ?? "", /^You are the linking stage/);
+		assert.match(systems.auditor ?? "", /submit_review/);
+	});
+
 	it("stringified-payload heal (owner, 2026-09-28): propositions arriving as ONE JSON string still validate and merge", async () => {
 		const { chatId } = fixtureChat();
 		const ledgers = memoryLedgers();

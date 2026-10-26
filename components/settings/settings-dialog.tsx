@@ -32,15 +32,24 @@ import {
 import { createPortal } from "react-dom";
 import { useBackdropDismiss } from "@/components/backdrop-dismiss";
 import {
+	APP_LANGUAGES,
 	CURRENT_SETTINGS_VERSION,
+	DICTATION_LANGUAGES,
+	effectiveDictationLanguage,
+	isAppLanguage,
+	isDictationLanguage,
+	resolveSettings,
+	translate,
 	type AgentSettings,
 	type AppearanceSettings,
 	type CompactionSettings,
 	type GraphSettings,
+	type GeneralSettings,
 	type UserSettings,
 } from "@/src/core";
 import { useAppearance } from "./appearance.tsx";
-import { SettingsSection } from "./controls.tsx";
+import { useT } from "@/components/i18n";
+import { SettingsSection, SettingsRow, ThinSelect, Toggle } from "./controls.tsx";
 import { UpdateSettings } from "./update-settings.tsx";
 import { AgentSection } from "./agent-section.tsx";
 import type { ModelsSettings } from "@/src/core";
@@ -57,12 +66,12 @@ import { NativeSubscriptionUIProvider } from "./subscription-connections.tsx";
  *  prose is out; only the keyboard note stays (storage location is a
  *  real question users ask). */
 const SECTIONS = [
-	{ id: "keys", label: "Providers" },
-	{ id: "agent", label: "Agent" },
-	{ id: "appearance", label: "Appearance" },
-	{ id: "graph", label: "Graph" },
-	{ id: "keyboard", label: "Keyboard", hint: "Stored on this device" },
-	{ id: "general", label: "General" },
+	{ id: "keys", label: "settings.section.keys" },
+	{ id: "agent", label: "settings.section.agent" },
+	{ id: "appearance", label: "settings.section.appearance" },
+	{ id: "graph", label: "settings.section.graph" },
+	{ id: "keyboard", label: "settings.section.keyboard" },
+	{ id: "general", label: "settings.section.general" },
 ] as const;
 type SectionId = (typeof SECTIONS)[number]["id"];
 
@@ -76,6 +85,8 @@ const DialogContext = createContext<{ open: (section?: string, row?: string) => 
 /** AppShell-level mount: the sidebar row and the mod+, chord call this.
  *  `open(section)` lands the dialog on a specific section (the first-run
  *  setup flow deep-links to Keys when no provider key exists yet). */
+export const DICTATION_LANGUAGE_HINT = translate("en", "settings.general.dictationLanguage.hint");
+
 export function SettingsDialogProvider({
 	children,
 }: {
@@ -143,6 +154,7 @@ export function SettingsDialogBody({
 	initialRow?: string | null;
 }) {
 	const { onAppearanceChange } = useAppearance();
+	const t = useT();
 	const [record, setRecord] = useState<UserSettings | null | undefined>(
 		undefined,
 	);
@@ -239,7 +251,7 @@ export function SettingsDialogBody({
 				const detail = (await res.json().catch(() => ({}))) as {
 					error?: string;
 				};
-				setError(`${section}: ${detail.error ?? res.status}`);
+				setError(t("common.errorIn", { section, error: detail.error ?? res.status }));
 				return;
 			}
 			// Server truth, never the request body (fix wave, owner repro):
@@ -258,30 +270,30 @@ export function SettingsDialogBody({
 			if (section === "appearance")
 				onAppearanceChange(body as AppearanceSettings);
 		},
-		[onAppearanceChange],
+		[onAppearanceChange, t],
 	);
 
 	return (
 		<div
 			role="dialog"
 			aria-modal="true"
-			aria-label="Settings"
+			aria-label={t("settings.title")}
 			data-testid="settings-dialog"
 			className="settings-dialog-pop flex h-[620px] max-h-[85vh] w-[920px] max-w-[90vw] flex-col overflow-hidden rounded-md border border-border bg-card shadow-xl"
 			onClick={(e) => e.stopPropagation()}
 		>
 			{/* Header — the app's quiet CMU title language. */}
 			<header className="flex h-15 shrink-0 items-center gap-3 border-b border-border px-5">
-				<h2 className="font-title text-2xl tracking-tight">Settings</h2>
+				<h2 className="font-title text-2xl tracking-tight">{t("settings.title")}</h2>
 				<Hint
 						// Esc closes the dialog (its own listener) — surface it.
-						label="Close"
+						label={t("common.close")}
 						binding="escape"
 						side="left"
 					>
 						<button
 					type="button"
-					aria-label="Close settings"
+					aria-label={t("settings.close")}
 					data-testid="settings-close"
 					className="ml-auto size-7 rounded-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
 					onClick={onClose}
@@ -303,7 +315,7 @@ export function SettingsDialogBody({
 				{/* Left nav — text-only, the session-list mono language,
 					    active = bg-accent. */}
 				<nav
-					aria-label="Settings sections"
+					aria-label={t("settings.nav")}
 					data-testid="settings-nav"
 					className="flex w-44 shrink-0 flex-col gap-1 border-r border-border p-2"
 				>
@@ -320,7 +332,7 @@ export function SettingsDialogBody({
 							}`}
 							onClick={() => setActive(s.id)}
 						>
-							{s.label}
+							{t(s.label)}
 						</button>
 					))}
 				</nav>
@@ -347,17 +359,17 @@ export function SettingsDialogBody({
 					)}
 					{record === undefined ? (
 						<p className="px-6 py-5 text-xs text-muted-foreground/70">
-							Loading settings…
+							{t("settings.loading")}
 						</p>
 					) : record === null ? (
 						<p className="px-6 py-5 text-xs text-muted-foreground/70">
-							Settings could not be loaded — refresh to retry.
+							{t("settings.loadFailed")}
 						</p>
 					) : (
 						<div>
 							{active === "general" && (
 								<SettingsSection
-									title="General"
+									title={t("settings.section.general")}
 									testid="section-general"
 								>
 									<UpdateSettings
@@ -366,16 +378,17 @@ export function SettingsDialogBody({
 											void write("general", { ...record.general, autoUpdate: on })
 										}
 									/>
+									<GeneralSection general={record.general} onChange={(next) => void write("general", next)} />
 								</SettingsSection>
 							)}
 							{active === "keys" && (
-								<SettingsSection title="Providers" testid="section-keys">
+								<SettingsSection title={t("settings.section.keys")} testid="section-keys">
 									<KeysSection initialRow={initialRow ?? undefined} />
 								</SettingsSection>
 							)}
 							{active === "agent" && (
 								<SettingsSection
-									title="Agent"
+									title={t("settings.section.agent")}
 									testid="section-agent"
 								>
 									<AgentSection
@@ -397,7 +410,7 @@ export function SettingsDialogBody({
 							)}
 							{active === "appearance" && (
 								<SettingsSection
-									title="Appearance"
+									title={t("settings.section.appearance")}
 									testid="section-appearance"
 								>
 									<AppearanceSection
@@ -410,7 +423,7 @@ export function SettingsDialogBody({
 							)}
 							{active === "graph" && (
 								<SettingsSection
-									title="Graph"
+									title={t("settings.section.graph")}
 									testid="section-graph"
 								>
 									<GraphSection
@@ -423,8 +436,8 @@ export function SettingsDialogBody({
 							)}
 							{active === "keyboard" && (
 								<SettingsSection
-									title="Keyboard"
-									hint="Stored on this device"
+									title={t("settings.section.keyboard")}
+									hint={t("settings.section.keyboard.hint")}
 									testid="section-keyboard"
 								>
 									<KeyboardSection />
@@ -435,5 +448,76 @@ export function SettingsDialogBody({
 				</div>
 			</div>
 		</div>
+	);
+}
+
+/** Settings → General. Every write sends the whole section (the PUT
+ *  replaces it), so each control spreads the current record. */
+export function GeneralSection({
+	general: record,
+	onChange,
+}: {
+	general: GeneralSettings | undefined;
+	onChange: (next: GeneralSettings) => void;
+}) {
+	const t = useT();
+	const general = resolveSettings({ version: CURRENT_SETTINGS_VERSION, ...(record ? { general: record } : {}) }).general;
+	/** What the dictation picker shows: the pick while overriding, else the app language's code. */
+	const dictationLanguage = effectiveDictationLanguage(general);
+	return (
+		<>
+			<SettingsRow label={t("settings.general.language")} testid="row-language">
+				<ThinSelect
+					value={general.language}
+					ariaLabel={t("settings.general.language.aria")}
+					testid="select-language"
+					onChange={(next) => {
+						if (isAppLanguage(next)) onChange({ ...record, language: next });
+					}}
+				>
+					{APP_LANGUAGES.map((lang) => (
+						<option key={lang.id} value={lang.id}>
+							{lang.label}
+						</option>
+					))}
+				</ThinSelect>
+			</SettingsRow>
+			<SettingsRow label={t("settings.general.dictationOverride")} testid="row-dictation-override">
+				<Toggle
+					checked={general.dictationOverride}
+					label={t("settings.general.dictationOverride.aria")}
+					testid="toggle-dictation-override"
+					onChange={(on) =>
+						onChange({
+							...record,
+							dictationOverride: on,
+							dictationLanguage: general.dictationLanguage ?? dictationLanguage,
+						})
+					}
+				/>
+			</SettingsRow>
+			<SettingsRow
+				label={t("settings.general.dictationLanguage")}
+				hint={t("settings.general.dictationLanguage.hint")}
+				testid="row-dictation-language"
+				dimmed={!general.dictationOverride}
+			>
+				<ThinSelect
+					value={dictationLanguage}
+					ariaLabel={t("settings.general.dictationLanguage.aria")}
+					testid="select-dictation-language"
+					disabled={!general.dictationOverride}
+					onChange={(next) => {
+						if (isDictationLanguage(next)) onChange({ ...record, dictationLanguage: next });
+					}}
+				>
+					{DICTATION_LANGUAGES.map((lang) => (
+						<option key={lang.id} value={lang.id}>
+							{lang.id === "multi" ? t("settings.general.dictationLanguage.multi") : lang.label}
+						</option>
+					))}
+				</ThinSelect>
+			</SettingsRow>
+		</>
 	);
 }
