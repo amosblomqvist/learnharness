@@ -76,8 +76,11 @@ const DialogContext = createContext<{ open: (section?: string, row?: string) => 
  *  `open(section)` lands the dialog on a specific section (the first-run
  *  setup flow deep-links to Keys when no provider key exists yet). */
 /** The auto-update row's hint (tooltip wave): honest user language — no
- *  stream vocabulary. Exported for the copy pin (tooltip-mechanism test). */
-export const AUTO_UPDATE_HINT = "Automatic updates arrive in an upcoming release";
+ *  stream vocabulary. Exported for the copy pin (tooltip-mechanism test).
+ *  Rewritten for #104: the old copy ("arrive in an upcoming release") was a
+ *  placeholder from before Wave C shipped the updater, and read as a lie once
+ *  updates did arrive — and again once this toggle started gating them. */
+export const AUTO_UPDATE_HINT = "Check for updates automatically. Turn off to update only from the menu.";
 
 export function SettingsDialogProvider({
 	children,

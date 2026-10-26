@@ -231,7 +231,10 @@ export const ROLE_SLOT: Readonly<Record<ModelRole, ModelSlotName>> = {
 /** General settings — app-level behavior. Version DISPLAY and plans login
  *  live outside the record (package.json / auth.json) by owner decision. */
 export interface GeneralSettings {
-	/** Auto-update the app (default ON). Mechanism ships in a later wave. */
+	/** Auto-update the app (default ON). Gates the shell's AUTOMATIC update
+	 *  checks — the startup check and the 24h timer (issue #104; enforced in
+	 *  electron/main.cjs). The menu's explicit "Check for Updates…" is a
+	 *  request rather than background activity, so it is unaffected. */
 	autoUpdate?: boolean;
 }
 

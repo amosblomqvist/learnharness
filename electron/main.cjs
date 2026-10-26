@@ -427,6 +427,12 @@ const ZOOM_LADDER = [0.75, 0.9, 1, 1.1, 1.25, 1.5, 1.75, 2];
  *    local server — the pre-release verification drill (serve
  *    latest-mac.yml + zip + blockmap from any localhost HTTP dir and
  *    watch a real installed copy find/download/restart). Test-only seam.
+ *  - THE SETTING WINS (issue #104): automatic checks — startup and the 24h
+ *    timer — are skipped when settings.json says general.autoUpdate: false.
+ *    The menu item still checks, because that is an explicit request. The
+ *    setting is re-read per check, so no IPC channel and no restart are
+ *    needed. An already-downloaded update stays staged and still applies on
+ *    quit; the setting stops new automatic checks, it does not un-stage.
  *
  * Install path: the downloaded update applies on quit (autoInstallOnAppQuit
  * — Squirrel.Mac stages natively and swaps on relaunch). The renderer
@@ -447,8 +453,36 @@ function broadcastUpdateStatus(status) {
 	}
 }
 
+/** Is automatic updating on? (general.autoUpdate, default ON — issue #104.)
+ *
+ *  Read FRESH per check from the same settings record the UI writes, so the
+ *  toggle needs no IPC channel and needs no restart: the shell already owns
+ *  the data dir, and the record is a versioned JSON blob whose `general`
+ *  section sits at the top level.
+ *
+ *  TOLERANT BY DESIGN: a missing, unreadable, or corrupt record resolves to
+ *  the factory default (ON) — the same answer src/core/settings.ts gives for
+ *  an absent key — because an unreadable settings file must never take the
+ *  app down (the block's hard rule: the updater can never take the app down).
+ *  Only an explicit `false` stops the automatic checks. */
+function autoUpdateEnabled() {
+	try {
+		const raw = fs.readFileSync(path.join(DATA_DIR(), "settings.json"), "utf-8");
+		return JSON.parse(raw)?.general?.autoUpdate !== false;
+	} catch {
+		return true;
+	}
+}
+
 function checkForUpdates({ manual = false } = {}) {
 	if (!autoUpdater) return;
+	// THE SETTING WINS FOR AUTOMATIC CHECKS, THE USER WINS FOR EXPLICIT ONES:
+	// the startup check and the 24h timer are background activity the learner
+	// switched off; the menu item is a request and always goes through.
+	if (!manual && !autoUpdateEnabled()) {
+		log("auto-update: off in settings — automatic check skipped");
+		return;
+	}
 	autoUpdater
 		.checkForUpdates()
 		.then((result) => {

@@ -46,7 +46,10 @@ describe("subtlety round pins (owner 2026-09-25)", () => {
 
 describe("spot-pins: the dev-speak cull (owner copy review at merge)", () => {
 	it("the auto-update hint is honest user language — no stream jargon", () => {
-		assert.equal(AUTO_UPDATE_HINT, "Automatic updates arrive in an upcoming release");
+		// #104: the old text promised updates "in an upcoming release", which
+		// stopped being true when Wave C shipped the updater — and the toggle it
+		// describes now really does gate the automatic checks.
+		assert.equal(AUTO_UPDATE_HINT, "Check for updates automatically. Turn off to update only from the menu.");
 		assert.ok(!AUTO_UPDATE_HINT.includes("wave"), "no stream vocabulary");
 	});
 });
