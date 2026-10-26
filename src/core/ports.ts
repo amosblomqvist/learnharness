@@ -27,6 +27,7 @@ import type {
 	NotesSource,
 } from "./contracts.ts";
 import type { UserSettings } from "./settings.ts";
+import type { LocalAgentPreferences, LocalAgentProviderId } from "./contracts/local-agents.ts";
 
 // ─── ChatStore — the session record's home (data/chats) ─────────────────────
 
@@ -222,3 +223,16 @@ export interface AuthStore {
 	deleteAuthVar(name: string): void;
 }
 
+
+// ─── LocalAgentPreferenceStore — local agent connections (§8.2) ─────────────
+
+/**
+ * The learner's per-connection choices for locally installed agent
+ * runtimes (enabled, background use) — the ONLY state LearnHarness keeps
+ * for them; the runtimes own their sign-in. Absent or corrupt file = no
+ * choices yet (every connection off). Never throws on read.
+ */
+export interface LocalAgentPreferenceStore {
+	read(): Partial<Record<LocalAgentProviderId, LocalAgentPreferences>>;
+	write(providerId: LocalAgentProviderId, preferences: LocalAgentPreferences): void;
+}

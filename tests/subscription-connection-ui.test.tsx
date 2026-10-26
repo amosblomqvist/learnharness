@@ -45,11 +45,14 @@ async function click(element: HTMLElement) { assert(element); await act(async ()
 async function connectionStep(id: string) { await click(button("Connect", row(id))); await click(button("Continue", dialog())); }
 afterEach(async () => { await act(async () => root?.unmount()); host?.remove(); root = undefined; host = undefined; delete window.lh; });
 
-test("three compact rows render in approved order with no browser-only sign-in or fabricated identities", () => {
+test("compact rows render in approved order with no browser-only sign-in or fabricated identities", () => {
 	const html = renderToStaticMarkup(<ChatGPTUIProvider><NativeSubscriptionUIProvider><SubscriptionConnections /></NativeSubscriptionUIProvider></ChatGPTUIProvider>);
 	assert(html.indexOf('data-testid="chatgpt-connection"') < html.indexOf('data-testid="github-copilot-connection"'));
 	assert(html.indexOf('data-testid="github-copilot-connection"') < html.indexOf('data-testid="xai-connection"'));
-	assert.equal((html.match(/>Connect<\/button>/g) ?? []).length, 3);
+	// Local agent connections (§8.2) follow the app-owned sign-ins.
+	assert(html.indexOf('data-testid="xai-connection"') < html.indexOf('data-testid="claude-code-connection"'));
+	assert(html.indexOf('data-testid="claude-code-connection"') < html.indexOf('data-testid="antigravity-connection"'));
+	assert.equal((html.match(/>Connect<\/button>/g) ?? []).length, 5);
 	assert(!html.includes("@")); assert(!html.includes("Add accounts"));
 });
 for (const [id, label] of [["github-copilot", "GitHub Copilot"], ["xai", "Grok"]] as const) test(`${id}: disclosure and connection are separate steps with no duplicated content or early authorization`, async () => {

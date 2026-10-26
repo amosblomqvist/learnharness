@@ -53,6 +53,8 @@ export * from "./context-usage.ts";
 export type { ChatGPTStatus, ChatGPTControlBridge } from "./contracts/chatgpt.ts";
 export { NATIVE_SUBSCRIPTIONS } from "./contracts/subscriptions.ts";
 export type { NativeSubscriptionProviderId, NativeSubscriptionLogicalId, NativeSubscriptionStatus, NativeSubscriptionSnapshot, NativeSubscriptionScope, NativeSubscriptionControlBridge, SubscriptionInteraction, SubscriptionPrompt } from "./contracts/subscriptions.ts";
+export { LOCAL_AGENTS, DEFAULT_LOCAL_AGENT_PREFERENCES, localAgentDescriptor } from "./contracts/local-agents.ts";
+export type { LocalAgentProviderId, LocalAgentDescriptor, LocalAgentPreferences, LocalAgentStatus, LocalAgentAction } from "./contracts/local-agents.ts";
 export * from "./cost-summary.ts";
 export * from "./fuzzy.ts";
 // settings.ts + settings-resolution.ts (settings-storage wave, 2026-09-19):

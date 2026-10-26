@@ -112,6 +112,13 @@ export const GRAPH_FORMAT_FILE = path.join(PATHS.graph, "format.json");
 export const SETTINGS_FILE = path.join(DATA_ROOT, "settings.json");
 
 /**
+ * Local agent connections (docs/architecture.md §8.2): the learner's
+ * enabled/background-use choices for locally installed agent runtimes.
+ * Not a secret — the runtimes keep their own sign-in.
+ */
+export const LOCAL_AGENTS_FILE = path.join(DATA_ROOT, "local-agents.json");
+
+/**
  * User prompt-override files (settings-storage wave, 2026-09-19): the
  * per-segment system-prompt overrides mirroring the SOURCE layout
  * (src/agent/prompts/) — the shared base as prompts/system-prompt.md,
