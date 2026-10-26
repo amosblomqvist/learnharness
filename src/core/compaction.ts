@@ -334,7 +334,7 @@ export function serializeForSummary(messages: readonly LhMessage[]): string {
 			);
 		} else if (role === "custom") {
 			const marker = m as LhMarkerMessage;
-			if (marker.customType === "plan-block") continue; // UI-only
+			if (marker.customType === "plan-block" || marker.customType === "compaction") continue; // Prior summary is supplied separately.
 			lines.push(`[SYSTEM NOTE] ${marker.content}`);
 		}
 	}

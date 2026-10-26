@@ -167,6 +167,7 @@ describe("the compaction service", () => {
 		await ensureCompacted(deps, chatId);
 		assert.ok(seenPrompt.includes("prior compaction summary"), "the prior summary rides the span");
 		assert.ok(seenPrompt.includes(COMPACTED_HISTORY_HEADER), "as the marker's canonical text");
+		assert.equal(seenPrompt.split(COMPACTED_HISTORY_HEADER).length - 1, 1, "the prior summary is supplied exactly once");
 		const record = chatStore.getChat(chatId)!;
 		const markers = record.messages.filter((m) => (m as { customType?: string }).customType === "compaction");
 		assert.equal(markers.length, 2, "both markers persist (history is never rewritten)");
