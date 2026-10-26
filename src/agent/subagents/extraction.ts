@@ -28,7 +28,7 @@ import type { GraphStore } from "../../core/ports.ts";
 import { emit } from "../../core/events.ts";
 import { settleGraphLayout } from "../../core/layout-settle.ts";
 import { batchRuns, coverageOf, messageViewLines } from "../../core/coverage.ts";
-import type { LhMessage } from "../../core/native-messages.ts";
+import { failedOutputCallIds, type LhMessage } from "../../core/native-messages.ts";
 import { auditorGraphTools } from "../tools/graph.ts";
 import { runSubmitAgent, healStringifiedArrays } from "./submit-agent.ts";
 
@@ -124,16 +124,20 @@ export function transcriptView(record: ChatRecord): string {
 }
 
 /** The extraction view under the teacher-prose ruling (owner, 2026-09-28):
- *  ONLY the teacher agent's text blocks — no learner messages, no
- *  thinking, no tool calls or results, no quiz blocks — each labeled with
+ *  ONLY learner-facing teacher prose (text or send_to_user) — no learner
+ *  messages, thinking, other tool calls/results, or quiz blocks — labeled with
  *  its ACTUAL message id (owner, 2026-10-13): the view lines ARE
  *  core/coverage.ts messageViewLines ("TEACHER [id] text"), the exact
  *  lines the coverage fingerprints hash, so the extractor can anchor
  *  every proposition to the passage it came from (the session submit's
  *  required messageId). The shared markdown engine stays reserved for the
  *  future user-facing export. */
-function proseView(messages: ReadonlyArray<LhMessage>, title?: string): string {
-	const lines = messages.flatMap((message) => messageViewLines(message, message.id));
+function proseView(
+	messages: ReadonlyArray<LhMessage>,
+	title?: string,
+	failedOutputCalls: ReadonlySet<string> = failedOutputCallIds(messages),
+): string {
+	const lines = messages.flatMap((message) => messageViewLines(message, message.id, failedOutputCalls));
 	const head = title && title.length > 0 ? `# ${title}\n\n` : "";
 	return head + lines.join("\n\n");
 }
@@ -1113,6 +1117,7 @@ export function createExtractionPipeline(deps: ExtractionPipelineDeps): Extracti
 			// stage runs (typed — the trigger skips, routes surface 503).
 			refuseIfStagesUnready();
 			const covered = coverageOf(record.messages, graphStore.readCoverage(), chatId);
+			const failedOutputCalls = failedOutputCallIds(record.messages);
 			if (covered.uncovered.length === 0) {
 				console.info(`[extraction ${chatId}] nothing uncovered — no-op`);
 				return { nodes: 0, chains: 0 };
@@ -1148,14 +1153,14 @@ export function createExtractionPipeline(deps: ExtractionPipelineDeps): Extracti
 							// fingerprints' messageViewLines ("TEACHER [id] text"), one
 							// shared seam.
 							const messages = batch.map((slot) => slot.message);
-							const view = proseView(messages, record.title);
+							const view = proseView(messages, record.title, failedOutputCalls);
 							// The batch's teacher-prose ids — the ONLY anchors this
 							// job's submit may name (validateSessionAnchors at the
 							// submit seam refuses anything else: ids from other
 							// batches — even real ones of this chat — other chats,
 							// and non-prose messages).
 							const batchIds = new Set(
-								messages.filter((m) => messageViewLines(m, m.id).length > 0).map((m) => m.id),
+								messages.filter((m) => messageViewLines(m, m.id, failedOutputCalls).length > 0).map((m) => m.id),
 							);
 							setPhase(jobKey, "queued", "chat", undefined, part);
 							const findings = await withExtractSlot(jobKey, async () => {
@@ -1188,7 +1193,7 @@ export function createExtractionPipeline(deps: ExtractionPipelineDeps): Extracti
 								const batchStats = mergeFindings(chatId, findings, auditResult, { chatStore, graphStore }, {
 									foldedAt,
 									coverage: batch
-										.filter((slot) => messageViewLines(slot.message, slot.message.id).length > 0)
+										.filter((slot) => slot.tokens > 0)
 										.map((slot) => ({ chatId, fp: slot.fp, tokens: slot.tokens, foldedAt })),
 								});
 								// The layout ledger evolves with the merge (sync — the

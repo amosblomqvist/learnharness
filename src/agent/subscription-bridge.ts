@@ -1,4 +1,5 @@
 import type { Api, Model, ModelAuth } from "@earendil-works/pi-ai";
+import { onWebSubscriptionPacket, webSubscriptionRequest, webSubscriptionsEnabled } from "./subscription-runtime.ts";
 import { NATIVE_SUBSCRIPTIONS, type NativeSubscriptionProviderId, type NativeSubscriptionScope, type NativeSubscriptionSnapshot, type NativeSubscriptionStatus } from "../core/contracts/subscriptions.ts";
 import type { AdmissionScope, NoDispatchKind } from "./chatgpt-request-cycle.ts";
 
@@ -18,6 +19,7 @@ export function nativeSubscriptionId(logicalId: string): NativeSubscriptionProvi
 function desktopConnected(): boolean {
 	return process.env.LH_DESKTOP_SERVER === "1" && (process.env.LH_DESKTOP_API_SECRET?.length ?? 0) >= 64 && typeof process.send === "function" && process.connected === true;
 }
+function runtimeConnected(): boolean { return desktopConnected() || webSubscriptionsEnabled(); }
 function notify(state: State) { for (const listener of state.listeners) { try { listener(); } catch { /* observer isolation */ } } }
 function invalidate(state: State, providerId?: NativeSubscriptionProviderId) {
 	for (const [controller, owner] of state.controllers) if (!providerId || owner.providerId === providerId) controller.abort("all");
@@ -60,7 +62,11 @@ function bridge(): State {
 			if (message.ok) pending.resolve(message.value);
 			else pending.reject(new Error(message.error ?? "Subscription connection failed."));
 		});
+		onWebSubscriptionPacket("lh:subscriptions", (packet) => {
+			if (webSubscriptionsEnabled() && packet.snapshot) accept(state, packet.snapshot as NativeSubscriptionSnapshot);
+		});
 		process.on("disconnect", () => {
+			if (webSubscriptionsEnabled()) return;
 			invalidate(state);
 			for (const pending of state.pending.values()) { clearTimeout(pending.timer); pending.reject(new Error("The desktop connection closed.")); }
 			state.pending.clear(); notify(state);
@@ -70,6 +76,7 @@ function bridge(): State {
 }
 export function subscriptionRequest<T>(op: "snapshot" | "lease", fields: Record<string, unknown> = {}): Promise<T> {
 	const state = bridge();
+	if (webSubscriptionsEnabled()) return webSubscriptionRequest<T>("lh:subscriptions", op, fields);
 	if (!desktopConnected()) return Promise.reject(new Error("Subscription sign-in is available only in the desktop app with a private server connection."));
 	return new Promise<T>((resolve, reject) => {
 		const id = `${process.pid}:${++state.counter}`;
@@ -82,17 +89,17 @@ export function subscriptionRequest<T>(op: "snapshot" | "lease", fields: Record<
 }
 export async function refreshSubscriptionModels(): Promise<void> {
 	const state = bridge();
-	if (!desktopConnected()) { invalidate(state); return; }
+	if (!runtimeConnected()) { invalidate(state); return; }
 	try { accept(state, await subscriptionRequest<NativeSubscriptionSnapshot>("snapshot")); }
 	catch { invalidate(state); notify(state); }
 }
 export function nativeSubscriptionStatus(providerId: NativeSubscriptionProviderId): NativeSubscriptionStatus | undefined { return bridge().statuses.get(providerId); }
 export function nativeSubscriptionConnected(providerId: NativeSubscriptionProviderId): boolean {
 	const status = nativeSubscriptionStatus(providerId);
-	return desktopConnected() && status?.available === true && status.connected && !!status.connectionId;
+	return runtimeConnected() && status?.available === true && status.connected && !!status.connectionId;
 }
 export function nativeSubscriptionBackgroundAllowed(providerId: NativeSubscriptionProviderId): boolean { return nativeSubscriptionConnected(providerId) && nativeSubscriptionStatus(providerId)?.allowBackgroundUse === true; }
-export function nativeSubscriptionModels(): Model<Api>[] { return desktopConnected() ? [...bridge().models.values()].flat() : []; }
+export function nativeSubscriptionModels(): Model<Api>[] { return runtimeConnected() ? [...bridge().models.values()].flat() : []; }
 export function nativeSubscriptionModel(logicalId: string, modelId: string): Model<Api> | undefined { return nativeSubscriptionModels().find((m) => m.provider === logicalId && m.id === modelId); }
 export function onNativeSubscriptionChange(listener: () => void): () => void { const state = bridge(); state.listeners.add(listener); return () => { state.listeners.delete(listener); }; }
 export function subscriptionScope(providerId: NativeSubscriptionProviderId, selectedModelId: string): NativeSubscriptionScope {

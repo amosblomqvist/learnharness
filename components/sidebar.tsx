@@ -49,6 +49,7 @@ const STORAGE_KEY = "lh:sidebar-open";
  * Mirrors SIDEBAR_AUTOCLOSE in electron/main.cjs — keep in sync.
  */
 import type { ChatGPTControlBridge, NativeSubscriptionControlBridge } from "@/src/core";
+import type { UpdateState } from "@/components/settings/update-settings.tsx";
 const SIDEBAR_AUTOCLOSE = 928;
 
 // Module scope, guarded for SSR (the server has no navigator).
@@ -60,15 +61,22 @@ declare global {
 		lh?: {
 			/** Read-only host OS; determines the native-control gutter. */
 			platform?: string;
+			/** External Next desktop-dev uses the server's web connections. */
+			subscriptionTransport?: "desktop" | "web";
+			openSubscriptionBrowser?: (action: string) => Promise<void>;
 			chatgpt?: ChatGPTControlBridge;
 			subscriptions?: NativeSubscriptionControlBridge;
 			expandWindow: () => void;
 			/** The zoom truth (owner round 7): subscribes to "lh:zoom" pushes; returns unsubscribe. */
 			onZoom?: (cb: (factor: number) => void) => () => void;
 			getZoom?: () => Promise<number>;
-			/** Auto-update channel (Wave C, 2026-10-10): "lh:update-status" pushes once a staged update exists. */
-			onUpdateStatus?: (cb: (status: { status: string; version: string | null }) => void) => () => void;
+			/** Observational update events and a snapshot for late subscribers. */
+			onUpdateStatus?: (cb: (status: UpdateState) => void) => () => void;
+			getUpdateState?: () => Promise<UpdateState>;
+			/** Explicit manual check also downloads and stages available updates. */
+			checkForUpdates?: () => Promise<void>;
 			installUpdate?: () => void;
+			onOpenSettings?: (cb: (section: string) => void) => () => void;
 		};
 	}
 }

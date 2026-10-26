@@ -78,6 +78,31 @@ function renderDock(props: {
 	);
 }
 
+describe("question submission draft restoration", () => {
+	const draft = {
+		selection: { selected: new Set([0]), otherSelected: true, dontKnow: false },
+		thinking: "preserved reasoning",
+		other: "preserved custom answer",
+		text: "preserved free-text answer",
+		confidenceIndex: 4,
+	};
+
+	it("restores a quiz selection, thinking, and confidence when its form remounts", () => {
+		const html = renderToStaticMarkup(<QuestionDock toolName="quiz" toolCallId="q1" input={quizInput} expanded onExpand={() => {}} onSubmit={() => {}} initialDraft={draft} />);
+		assert.match(html, /role="radio" aria-checked="true" data-kbdrow="0"/);
+		assert.ok(html.includes("preserved reasoning"));
+		assert.ok(html.includes("90%"));
+	});
+
+	it("restores an ask's custom answer and a free-text answer", () => {
+		const custom = renderToStaticMarkup(<QuestionDock toolName="ask_user_question" toolCallId="ask1" input={{ question: "Fixture?", options: [{ label: "Listed answer" }, { label: "Another answer" }], multiSelect: true }} expanded onExpand={() => {}} onSubmit={() => {}} initialDraft={draft} />);
+		assert.ok(custom.includes('value="preserved custom answer"'));
+		assert.match(custom, /aria-checked="true" data-testid="other-option"/);
+		const text = renderToStaticMarkup(<QuestionDock toolName="ask_user_question" toolCallId="ask2" input={{ question: "Fixture?" }} expanded onExpand={() => {}} onSubmit={() => {}} initialDraft={draft} />);
+		assert.ok(text.includes("preserved free-text answer"));
+	});
+});
+
 describe("DispatchCard — the BYOK refusal tone (owner, 2026-09-22)", () => {
 	const job = (over: Partial<JobRecord>): JobRecord => ({
 		id: "j1",
@@ -131,9 +156,9 @@ describe("DispatchCard — the BYOK refusal tone (owner, 2026-09-22)", () => {
 		assert.ok(!html.includes("dispatch-refused"));
 	});
 
-	it("a delivered job reads delivered, untouched by the wave", () => {
+	it("a finished worker reads finished, independently of delivery", () => {
 		const html = renderToStaticMarkup(inJobs([job({ status: "done", error: undefined })]));
-		assert.ok(html.includes("delivered"));
+		assert.ok(html.includes("finished"));
 	});
 });
 

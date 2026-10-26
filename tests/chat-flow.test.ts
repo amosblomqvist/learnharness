@@ -30,13 +30,14 @@ import { createTeacherTools } from "../src/agent/tools.ts";
 import { handleChatInput, handleChatRequest } from "../src/server/chat-handler.ts";
 import { effectiveSettings } from "../src/server/stores.ts";
 import { isTurnRunning } from "../src/server/turn-liveness.ts";
-import { deliverJobResult, setTurnRunner } from "../src/server/jobs.ts";
+import { deliverJobResult, registerLiveAgent, setTurnRunner, steerLiveChat, unregisterLiveAgent } from "../src/server/jobs.ts";
+import { SessionModel } from "../components/session-core.ts";
 import { buildSubagentSteer } from "../src/core/contracts.ts";
 import { abortTurn, runningTurn, settledTurnResponse } from "../src/server/turn-runs.ts";
 import { chatStore } from "../src/store/chats.ts";
 import { jobStore } from "../src/store/jobs.ts";
 import { buildAnswer, dismissedAnswer, normalizeOptions, resolveCorrect, type QuestionData } from "../src/core/question-core.ts";
-import { danglingQuestionOf, endsInDismissal, needsContinuation, newAnswerResult } from "../src/core/native-messages.ts";
+import { danglingQuestionOf, endsInDismissal, needsContinuation, newAnswerResult, newUserMessage } from "../src/core/native-messages.ts";
 import { projectView } from "../src/core/view.ts";
 import type { PiEngine } from "../src/agent/models.ts";
 import type { LhMessage } from "../src/core/native-messages.ts";
@@ -46,6 +47,8 @@ import type { LhMessage } from "../src/core/native-messages.ts";
 // store imports already resolved under).
 const dismissRoute = await import("../app/api/chats/[id]/dismiss/route.ts");
 const steerRoute = await import("../app/api/chats/[id]/steer/route.ts");
+const streamRoute = await import("../app/api/chats/[id]/stream/route.ts");
+const recordRoute = await import("../app/api/chats/[id]/route.ts");
 import { PATHS } from "../config.ts";
 
 // The key-presence turn gate (provider-key interlude, 2026-09-25): scripted
@@ -519,7 +522,7 @@ describe("teacher chat flow (scripted model)", () => {
 		const job = jobStore.createJob({ kind: "research", chatId: chat.id, toolCallId: "call-mid" });
 		jobIdMid = job.id;
 		// The runner stores the result BEFORE delivery (finalizeJob reads it).
-		jobStore.updateJob(job.id, { result: { brief: "Mid-run brief.", sources: [] } });
+		jobStore.updateJob(job.id, { status: "done", result: { brief: "Mid-run brief.", sources: [] }, delivery: { kind: "result", status: "pending" } });
 		const steer = buildSubagentSteer(job, { brief: "Mid-run brief.", sources: [] });
 		const delivery = deliverJobResult(steer);
 		await new Promise((r) => setTimeout(r, 300)); // vehicle 1 hands off
@@ -531,7 +534,7 @@ describe("teacher chat flow (scripted model)", () => {
 		release2();
 		await drain(await res);
 		await delivery; // resolves at settleSteers (the run persisted the marker)
-		assert.equal(jobFlippedMidTurn, "done", "the job flipped at the marker's message_end — WHILE the turn still streamed");
+		assert.equal(jobFlippedMidTurn, "done", "worker completion is independent of the streaming teacher turn");
 
 		// Record shape: the marker sits BETWEEN completed turn units — after
 		// the toolResult it must never split, adjacent to it.
@@ -842,6 +845,103 @@ describe("chat store", () => {
 		// object persists — every field absent = config defaults)
 		chatStore.saveSettings(chat.id, {});
 		assert.deepEqual(chatStore.getChat(chat.id)!.settings, {});
+	});
+});
+
+describe("canonical persistence failures", () => {
+	it("refuses a failed input save without building an agent or leaving a live turn", async () => {
+		const { engine } = scriptedTeacher(defaultLesson);
+		const chat = createConfiguredChat("Test: failed answer write-ahead");
+		createdChats.push(chat.id);
+		await drainTurn(post(chat.id, { type: "text", text: "quiz me" }), agentFactory(engine));
+		const before = chatStore.getChat(chat.id)!.messages;
+		const save = chatStore.saveMessages;
+		let builds = 0;
+		chatStore.saveMessages = () => { throw new Error("synthetic write-ahead failure"); };
+		try {
+			const res = await handleChatRequest(post(chat.id, { type: "answer", toolCallId: "call-1", answer: gradedAnswer(QUIZ_INPUT, ["Mercury"]) }), (opts) => {
+				builds++;
+				return agentFactory(engine)!(opts);
+			});
+			const running = runningTurn(chat.id);
+			if (running) await new Response(running.subscribe()).text();
+			assert.equal(res.status, 500);
+			const client = new SessionModel({ chatId: chat.id, initialMessages: before, fetch: async () => res.clone() });
+			await client.submitAnswer("quiz", "call-1", gradedAnswer(QUIZ_INPUT, ["Mercury"]));
+			assert.equal(client.getState().error?.message, "Your input could not be saved. Please try again.");
+			assert.equal(await res.text(), "Your input could not be saved. Please try again.");
+			assert.equal(builds, 0);
+			assert.equal(isTurnRunning(chat.id), false);
+			assert.equal(runningTurn(chat.id), undefined);
+			assert.deepEqual(chatStore.getChat(chat.id)!.messages, before);
+		} finally { chatStore.saveMessages = save; }
+	});
+
+	it("reports a failed reply save before DONE while keeping the accepted answer durable", async () => {
+		const { engine } = scriptedTeacher(defaultLesson);
+		const chat = createConfiguredChat("Test: failed reply persistence");
+		createdChats.push(chat.id);
+		await drainTurn(post(chat.id, { type: "text", text: "quiz me" }), agentFactory(engine));
+		const save = chatStore.saveMessages;
+		let writes = 0;
+		chatStore.saveMessages = (id, messages) => {
+			if (++writes === 2) throw new Error("synthetic reply save failure");
+			return save(id, messages);
+		};
+		try {
+			const body = await drainTurn(post(chat.id, { type: "answer", toolCallId: "call-1", answer: gradedAnswer(QUIZ_INPUT, ["Mercury"]) }), agentFactory(engine));
+			const errors = eventsOf(body).filter(e => e.type === "error");
+			assert.equal(errors.length, 1);
+			assert.equal(errors[0]!.errorText, "The reply could not be saved.");
+			assert.ok(body.indexOf("The reply could not be saved.") < body.indexOf("[DONE]"));
+			assert.equal(isTurnRunning(chat.id), false);
+			assert.equal(runningTurn(chat.id), undefined);
+			assert.equal(chatStore.getChat(chat.id)!.messages.at(-1)?.role, "toolResult");
+			// The normal submitter may not reach GET /stream until AFTER the
+			// failing turn has left the live registry. It must still see it.
+			const late = await streamRoute.GET(new Request("http://test/stream"), { params: Promise.resolve({ id: chat.id }) });
+			assert.equal(eventsOf(await late.text()).find(e => e.type === "error")?.errorText, "The reply could not be saved.");
+			// An already-open idle view can miss both the start and the wire
+			// error, then learn of settlement only via a record synchronization.
+			const snapshot = await (await recordRoute.GET(new Request("http://test/record"), { params: Promise.resolve({ id: chat.id }) })).json();
+			assert.equal(needsContinuation(snapshot.messages), true, "the durable answer alone looks like an owed continuation");
+			let automaticPosts = 0;
+			const missedView = new SessionModel({ chatId: chat.id, initialMessages: [], fetch: async () => {
+				automaticPosts++;
+				return new Response("unexpected automatic retry", { status: 500 });
+			} });
+			missedView.setMessages(snapshot.messages, snapshot.turnError);
+			await missedView.continueIfOwed(snapshot.messages);
+			assert.equal(automaticPosts, 0, "the record notice must block replacement even without a stream attachment");
+			assert.equal(missedView.getState().error?.message, "The reply could not be saved.");
+		} finally { chatStore.saveMessages = save; }
+	});
+
+	it("does not redeliver a persisted learner steer after usage bookkeeping fails", async () => {
+		const { engine } = scriptedTeacher(() => [() => fauxAssistantMessage([fauxText("Synthetic response")])]);
+		const chat = createConfiguredChat("Test: post-save bookkeeping failure");
+		createdChats.push(chat.id);
+		const steer = newUserMessage("Synthetic learner steer");
+		const appendUsage = chatStore.appendTurnUsage;
+		chatStore.appendTurnUsage = () => { throw new Error("synthetic usage write failure"); };
+		try {
+			const body = await drainTurn(post(chat.id, { type: "text", text: "go" }), opts => {
+				const agent = createTeacherAgent(undefined, { engine, messages: opts.messages, onUsage: opts.onUsage });
+				agent.subscribe(event => {
+					if (event.type === "agent_start") assert.equal(steerLiveChat(chat.id, steer), true);
+				});
+				return agent;
+			});
+			assert.equal(eventsOf(body).find(e => e.type === "error")?.errorText, "An error occurred.");
+			assert.ok(chatStore.getChat(chat.id)!.messages.some(m => m.id === steer.id), "the steer was saved before bookkeeping failed");
+			const delivered: LhMessage[] = [];
+			const next = { steer: (message: LhMessage) => delivered.push(message), state: { model: { provider: "faux" } } } as unknown as Parameters<typeof registerLiveAgent>[1];
+			registerLiveAgent(chat.id, next);
+			assert.deepEqual(delivered, [], "an already-saved learner steer must not reach another agent");
+		} finally {
+			chatStore.appendTurnUsage = appendUsage;
+			unregisterLiveAgent(chat.id);
+		}
 	});
 });
 

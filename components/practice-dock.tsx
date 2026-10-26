@@ -2,12 +2,11 @@
 
 import { useCallback, useRef, useState } from "react";
 import { ChevronRightIcon } from "lucide-react";
-import { MessageResponse } from "@/components/ai-elements/message";
+import { ToolContentResponse } from "@/components/ai-elements/message";
 import { Button } from "@/components/ui/button";
 import { joinDictation, useDictationTarget } from "@/components/dictation";
 import { useEnterSubmits } from "@/components/enter-submits";
 import { cn } from "@/lib/utils";
-import { repairMathForDisplay } from "@/src/core";
 
 /**
  * The practice dock (practice sessions, owner design 2026-10-04): an
@@ -109,7 +108,7 @@ export function PracticeDock({ problemCallId, input, expanded, onExpand, onSubmi
 			<div className="max-h-[var(--dock-max-h,40vh)] overflow-y-auto px-4 pt-3 pb-2">
 				<div className="mb-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">Problem</div>
 				<div className="lh-prose text-[15px]">
-					<MessageResponse>{typeof input.statement === "string" ? repairMathForDisplay(input.statement) : input.statement}</MessageResponse>
+					<ToolContentResponse>{input.statement}</ToolContentResponse>
 				</div>
 			</div>
 

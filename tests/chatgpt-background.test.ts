@@ -43,7 +43,7 @@ for (const revokedAfterQueue of [false, true]) {
 		stores.chatStore.saveSettings(chat.id, { model: { provider: "chatgpt", id: "gpt-5" } });
 		const job = stores.jobStore.createJob({ kind: "research", chatId: chat.id, toolCallId: "scratch-job-call" });
 		const result = { brief: "Scratch completed job result", sources: [] };
-		stores.jobStore.updateJob(job.id, { status: "running", result });
+		stores.jobStore.updateJob(job.id, { status: "done", result, delivery: { kind: "result", status: "pending" } });
 		const marker = buildSubagentSteer(job, result);
 		const contexts: string[] = [];
 		const native = piModels().getModel("openai", "gpt-5")!;
@@ -83,7 +83,8 @@ for (const revokedAfterQueue of [false, true]) {
 		unregisterLiveAgent(chat.id); endTurn(chat.id); settleSteers(chat.id, persisted);
 		await new Promise((resolve) => setImmediate(resolve));
 		assert.equal(wakes, 0, "no background spin or spend while consent is absent");
-		assert.equal(stores.jobStore.getJob(job.id)!.status, "running", "delivery ownership must not be finalized or failed by deferral");
+		assert.equal(stores.jobStore.getJob(job.id)!.delivery?.status, "pending", "delivery ownership must not be finalized or failed by deferral");
+		assert.equal(stores.jobStore.getJob(job.id)!.status, "done", "worker completion is independent of consent deferral");
 		assert.deepEqual(stores.jobStore.getJob(job.id)!.result, result);
 		connection(true);
 		await delivered;

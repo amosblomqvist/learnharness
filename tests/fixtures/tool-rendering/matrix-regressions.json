@@ -1,0 +1,135 @@
+{
+  "notice": "Unmodified model-authored fields from the frozen multilingual corpus. oldDisplay records the diagnosed application damage, not an expected output.",
+  "cases": [
+    {
+      "run": "pilot-20261025-01",
+      "model": "openai/gpt-6-luna",
+      "language": "en",
+      "replicate": 1,
+      "chatId": "chat_mvo1rzjs_056eac45",
+      "source": "messages.5.content.1.arguments.explanation",
+      "raw": "For a $2\\times2$ matrix, $\\det\\begin{bmatrix}a&b\\\\c&d\\end{bmatrix}=ad-bc$. Here $3\\cdot2-6\\cdot1=0$. A square matrix is invertible exactly when its determinant is nonzero, so $M$ is singular. Its columns are also proportional, which matches the determinant-zero result.",
+      "oldDisplay": "For a $2\\times2$ matrix, $\\det\\begin{bmatrix}a&b\\c&d\\end{bmatrix}=ad-bc$. Here $3\\cdot2-6\\cdot1=0$. A square matrix is invertible exactly when its determinant is nonzero, so $M$ is singular. Its columns are also proportional, which matches the determinant-zero result."
+    },
+    {
+      "run": "pilot-20261025-01",
+      "model": "openai/gpt-6-luna",
+      "language": "en",
+      "replicate": 1,
+      "chatId": "chat_mvo1sdnj_8f2d8c5e",
+      "source": "messages.9.content.1.arguments.explanation",
+      "raw": "The Jacobian has one row per output and one column per input: $J_F=\\begin{pmatrix}2x&1\\\\y&x\\end{pmatrix}$. At $(1,2)$ this is $\\begin{pmatrix}2&1\\\\2&1\\end{pmatrix}$.",
+      "oldDisplay": "The Jacobian has one row per output and one column per input: $J_F=\\begin{pmatrix}2x&1\\y&x\\end{pmatrix}$. At $(1,2)$ this is $\\begin{pmatrix}2&1\\\\2&1\\end{pmatrix}$."
+    },
+    {
+      "run": "pilot-20261025-01",
+      "model": "anthropic/claude-haiku-5.5",
+      "language": "en",
+      "replicate": 1,
+      "chatId": "chat_mvo30cfe_57114723",
+      "source": "messages.3.content.1.arguments.explanation",
+      "raw": "$A-\\lambda I=\\begin{pmatrix}2-\\lambda&1\\\\1&2-\\lambda\\end{pmatrix}$, and for a $2\\times2$ matrix $\\det\\begin{pmatrix}p&q\\\\r&s\\end{pmatrix}=ps-qr$. So $$\\det(A-\\lambda I)=(2-\\lambda)^2-1\\cdot1=\\lambda^2-4\\lambda+3.$$ Its roots $\\lambda=1,3$ are the eigenvalues. Option $b$ drops the minus sign in $ps-qr$; $c$ subtracts the constant incorrectly; $d$ flips the sign of the linear term.",
+      "oldDisplay": "$A-\\lambda I=\\begin{pmatrix}2-\\lambda&1\\\\1&2-\\lambda\\end{pmatrix}$, and for a $2\\times2$ matrix $\\det\\begin{pmatrix}p&q\\r&s\\end{pmatrix}=ps-qr$. So $$\\det(A-\\lambda I)=(2-\\lambda)^2-1\\cdot1=\\lambda^2-4\\lambda+3.$$ Its roots $\\lambda=1,3$ are the eigenvalues. Option $b$ drops the minus sign in $ps-qr$; $c$ subtracts the constant incorrectly; $d$ flips the sign of the linear term."
+    },
+    {
+      "run": "multilingual-20261025-01-zh-Hans-r1",
+      "model": "openai/gpt-6-luna",
+      "language": "zh-Hans",
+      "replicate": 1,
+      "chatId": "chat_mvo60bsn_1cbbe884",
+      "source": "messages.3.content.1.arguments.question",
+      "raw": "对 $2\\times2$ 矩阵 $A=\\begin{pmatrix}a&b\\\\c&d\\end{pmatrix}$，以下哪组关于行列式的说法全都正确？",
+      "oldDisplay": "对 $2\\times2$ 矩阵 $A=\\begin{pmatrix}a&b\\c&d\\end{pmatrix}$，以下哪组关于行列式的说法全都正确？"
+    },
+    {
+      "run": "multilingual-20261025-01-zh-Hans-r1",
+      "model": "xiaomi/mimo-v2.6-flash",
+      "language": "zh-Hans",
+      "replicate": 1,
+      "chatId": "chat_mvo66u6w_a233fc16",
+      "source": "messages.9.content.2.arguments.explanation",
+      "raw": "雅可比矩阵按“第 $i$ 行 = 第 $i$ 个分量对所有自变量的偏导”排布：\n$$\nJ_{\\mathbf F}=\n\\begin{pmatrix}\n\\dfrac{\\partial (xy)}{\\partial x} & \\dfrac{\\partial (xy)}{\\partial y}\\\\[6pt]\n\\dfrac{\\partial (x+y^2)}{\\partial x} & \\dfrac{\\partial (x+y^2)}{\\partial y}\n\\end{pmatrix}\n=\n\\begin{pmatrix}\ny & x\\\\\n1 & 2y\n\\end{pmatrix}.\n$$\n注意 $\\partial(xy)/\\partial x=y$（$y$ 当常数），$\\partial(xy)/\\partial y=x$。转置形式 $\\begin{pmatrix}y&1\\\\x&2y\\end{pmatrix}$ 把偏导排成了列；$\\begin{pmatrix}y&x\\\\2y&1\\end{pmatrix}$ 把第二行的两个分量次序调换了；$\\begin{pmatrix}x&y\\\\1&2y\\end{pmatrix}$ 把第一行的 $x,y$ 位置写反了。",
+      "oldDisplay": "雅可比矩阵按“第 $i$ 行 = 第 $i$ 个分量对所有自变量的偏导”排布：\n$$\nJ_{\\mathbf F}=\n\\begin{pmatrix}\n\\dfrac{\\partial (xy)}{\\partial x} & \\dfrac{\\partial (xy)}{\\partial y}\\\\[6pt]\n\\dfrac{\\partial (x+y^2)}{\\partial x} & \\dfrac{\\partial (x+y^2)}{\\partial y}\n\\end{pmatrix}\n=\n\\begin{pmatrix}\ny & x\\\\\n1 & 2y\n\\end{pmatrix}.\n$$\n注意 $\\partial(xy)/\\partial x=y$（$y$ 当常数），$\\partial(xy)/\\partial y=x$。转置形式 $\\begin{pmatrix}y&1\\x&2y\\end{pmatrix}$ 把偏导排成了列；$\\begin{pmatrix}y&x\\\\2y&1\\end{pmatrix}$ 把第二行的两个分量次序调换了；$\\begin{pmatrix}x&y\\\\1&2y\\end{pmatrix}$ 把第一行的 $x,y$ 位置写反了。"
+    },
+    {
+      "run": "multilingual-20261025-01-id-r1",
+      "model": "openai/gpt-6-luna",
+      "language": "id",
+      "replicate": 1,
+      "chatId": "chat_mvo6q2lq_6af14437",
+      "source": "messages.7.content.1.arguments.explanation",
+      "raw": "Pada $(x,y)=(1,0)$, $H=(1,1)$. Jacobian $G$ di $(1,1)$ adalah $\\begin{pmatrix}2u&1\\\\v&u\\end{pmatrix}=\\begin{pmatrix}2&1\\\\1&1\\end{pmatrix}$, sedangkan $J_H=\\begin{pmatrix}1&1\\\\1&-1\\end{pmatrix}$. Aturan rantai dengan konvensi ini memberi $J_{G\\circ H}=J_G(H(x,y))J_H(x,y)$, yakni $\\begin{pmatrix}3&1\\\\2&0\\end{pmatrix}$.",
+      "oldDisplay": "Pada $(x,y)=(1,0)$, $H=(1,1)$. Jacobian $G$ di $(1,1)$ adalah $\\begin{pmatrix}2u&1\\v&u\\end{pmatrix}=\\begin{pmatrix}2&1\\\\1&1\\end{pmatrix}$, sedangkan $J_H=\\begin{pmatrix}1&1\\\\1&-1\\end{pmatrix}$. Aturan rantai dengan konvensi ini memberi $J_{G\\circ H}=J_G(H(x,y))J_H(x,y)$, yakni $\\begin{pmatrix}3&1\\\\2&0\\end{pmatrix}$."
+    },
+    {
+      "run": "multilingual-20261025-01-id-r1",
+      "model": "z-ai/glm-5.3-flash",
+      "language": "id",
+      "replicate": 1,
+      "chatId": "chat_mvo77f3x_135f8d66",
+      "source": "messages.7.content.2.arguments.explanation",
+      "raw": "Vektor eigen memenuhi $(A-\\lambda I)v=0$. Untuk $\\lambda=2$:\n$$(A-2I)v=\\begin{pmatrix}1&1\\\\0&0\\end{pmatrix}\\begin{pmatrix}v_1\\\\v_2\\end{pmatrix}=0\\;\\Rightarrow\\;v_1+v_2=0\\;\\Rightarrow\\;v=\\begin{pmatrix}1\\\\-1\\end{pmatrix}$$\n(bisa dikali skalar berapa pun). Cek: $Av=\\begin{pmatrix}3-1\\\\-2\\end{pmatrix}=\\begin{pmatrix}2\\\\-2\\end{pmatrix}=2v$. Perhatikan $v=(1,0)$ adalah vektor eigen untuk $\\lambda=3$, bukan $\\lambda=2$.",
+      "oldDisplay": "Vektor eigen memenuhi $(A-\\lambda I)v=0$. Untuk $\\lambda=2$:\n$$(A-2I)v=\\begin{pmatrix}1&1\\\\0&0\\end{pmatrix}\\begin{pmatrix}v_1\\v_2\\end{pmatrix}=0\\;\\Rightarrow\\;v_1+v_2=0\\;\\Rightarrow\\;v=\\begin{pmatrix}1\\\\-1\\end{pmatrix}$$\n(bisa dikali skalar berapa pun). Cek: $Av=\\begin{pmatrix}3-1\\\\-2\\end{pmatrix}=\\begin{pmatrix}2\\\\-2\\end{pmatrix}=2v$. Perhatikan $v=(1,0)$ adalah vektor eigen untuk $\\lambda=3$, bukan $\\lambda=2$."
+    },
+    {
+      "run": "multilingual-20261025-01-en-r2",
+      "model": "openai/gpt-6-luna",
+      "language": "en",
+      "replicate": 2,
+      "chatId": "chat_mvo7ei0l_9263330e",
+      "source": "messages.3.content.1.arguments.question",
+      "raw": "For a $2\\times2$ matrix $A=\\begin{pmatrix}a&b\\\\c&d\\end{pmatrix}$, which statement correctly links its determinant to area scaling and invertibility?",
+      "oldDisplay": "For a $2\\times2$ matrix $A=\\begin{pmatrix}a&b\\c&d\\end{pmatrix}$, which statement correctly links its determinant to area scaling and invertibility?"
+    },
+    {
+      "run": "multilingual-20261025-01-en-r2",
+      "model": "openai/gpt-6-luna",
+      "language": "en",
+      "replicate": 2,
+      "chatId": "chat_mvo7exl3_e1fe93cd",
+      "source": "messages.1.content.1.arguments.explanation",
+      "raw": "First evaluate the Jacobian of $F$ at $(1,2)$:\n$$\nJ_F(x,y)=\\begin{pmatrix}2x&1\\\\y&x\\end{pmatrix},\\qquad J_F(1,2)=\\begin{pmatrix}2&1\\\\2&1\\end{pmatrix}.\n$$\nThe velocity is $\\gamma'(1)=(1,2)$. The chain rule gives\n$$\n\\frac{d}{dt}F(\\gamma(t))\\bigg|_{t=1}=J_F(1,2)\\begin{pmatrix}1\\\\2\\end{pmatrix}=\\begin{pmatrix}4\\\\4\\end{pmatrix}.\n$$\nWait, recomputing the component derivatives directly: $F(\\gamma(t))=(t^2+(1+t^2),\\ t(1+t^2))=(1+2t^2,t+t^3)$, whose derivative at $1$ is $(4,4)$. The listed options do not include this value, so this question is invalid.",
+      "oldDisplay": "First evaluate the Jacobian of $F$ at $(1,2)$:\n$$\nJ_F(x,y)=\\begin{pmatrix}2x&1\\y&x\\end{pmatrix},\\qquad J_F(1,2)=\\begin{pmatrix}2&1\\\\2&1\\end{pmatrix}.\n$$\nThe velocity is $\\gamma'(1)=(1,2)$. The chain rule gives\n$$\n\\frac{d}{dt}F(\\gamma(t))\\bigg|_{t=1}=J_F(1,2)\\begin{pmatrix}1\\\\2\\end{pmatrix}=\\begin{pmatrix}4\\\\4\\end{pmatrix}.\n$$\nWait, recomputing the component derivatives directly: $F(\\gamma(t))=(t^2+(1+t^2),\\ t(1+t^2))=(1+2t^2,t+t^3)$, whose derivative at $1$ is $(4,4)$. The listed options do not include this value, so this question is invalid."
+    },
+    {
+      "run": "multilingual-20261025-01-en-r2",
+      "model": "openai/gpt-6-luna",
+      "language": "en",
+      "replicate": 2,
+      "chatId": "chat_mvo7exl3_e1fe93cd",
+      "source": "messages.3.content.1.arguments.explanation",
+      "raw": "For $F=(F_1,F_2)$, each row contains the partial derivatives of one output component: $J_F=\\begin{pmatrix}\\partial F_1/\\partial x&\\partial F_1/\\partial y\\\\\\partial F_2/\\partial x&\\partial F_2/\\partial y\\end{pmatrix}=\\begin{pmatrix}2x&1\\\\y&x\\end{pmatrix}$. Substituting $(x,y)=(1,2)$ gives $\\begin{pmatrix}2&1\\\\2&1\\end{pmatrix}$.",
+      "oldDisplay": "For $F=(F_1,F_2)$, each row contains the partial derivatives of one output component: $J_F=\\begin{pmatrix}\\partial F_1/\\partial x&\\partial F_1/\\partial y\\\\\\partial F_2/\\partial x&\\partial F_2/\\partial y\\end{pmatrix}=\\begin{pmatrix}2x&1\\y&x\\end{pmatrix}$. Substituting $(x,y)=(1,2)$ gives $\\begin{pmatrix}2&1\\\\2&1\\end{pmatrix}$."
+    },
+    {
+      "run": "multilingual-20261025-01-pt-r2",
+      "model": "openai/gpt-6-luna",
+      "language": "pt",
+      "replicate": 2,
+      "chatId": "chat_mvo7wn6c_d63ef3f1",
+      "source": "messages.7.content.1.arguments.explanation",
+      "raw": "Para uma matriz $2\\times2$, $\\det\\begin{pmatrix}a&b\\\\c&d\\end{pmatrix}=ad-bc$. Logo, $\\det(C)=2\\cdot3-1\\cdot5=1$. O determinante é o fator assinado de escala de área: valor absoluto $1$ preserva área, e sinal positivo indica que a orientação não é invertida. Como o determinante é diferente de zero, $C$ é invertível.",
+      "oldDisplay": "Para uma matriz $2\\times2$, $\\det\\begin{pmatrix}a&b\\c&d\\end{pmatrix}=ad-bc$. Logo, $\\det(C)=2\\cdot3-1\\cdot5=1$. O determinante é o fator assinado de escala de área: valor absoluto $1$ preserva área, e sinal positivo indica que a orientação não é invertida. Como o determinante é diferente de zero, $C$ é invertível."
+    },
+    {
+      "run": "multilingual-20261025-01-es-r2",
+      "model": "openai/gpt-6-luna",
+      "language": "es",
+      "replicate": 2,
+      "chatId": "chat_mvo8j89a_f6fc1cc0",
+      "source": "messages.3.content.1.arguments.explanation",
+      "raw": "La regla de la cadena es $D(F\\circ g)=DF(g(s,t))Dg(s,t)$. Aquí $g(1,2)=(3,2)$, $DF(u,v)=\\begin{pmatrix}2u&1\\\\v&u\\end{pmatrix}$ y $Dg(s,t)=\\begin{pmatrix}1&1\\\\t&s\\end{pmatrix}$. Así, $\\begin{pmatrix}6&1\\\\2&3\\end{pmatrix}\\begin{pmatrix}1&1\\\\2&1\\end{pmatrix}=\\begin{pmatrix}8&7\\\\8&5\\end{pmatrix}$.",
+      "oldDisplay": "La regla de la cadena es $D(F\\circ g)=DF(g(s,t))Dg(s,t)$. Aquí $g(1,2)=(3,2)$, $DF(u,v)=\\begin{pmatrix}2u&1\\v&u\\end{pmatrix}$ y $Dg(s,t)=\\begin{pmatrix}1&1\\t&s\\end{pmatrix}$. Así, $\\begin{pmatrix}6&1\\\\2&3\\end{pmatrix}\\begin{pmatrix}1&1\\\\2&1\\end{pmatrix}=\\begin{pmatrix}8&7\\\\8&5\\end{pmatrix}$."
+    },
+    {
+      "run": "multilingual-20261025-01-id-r2",
+      "model": "openai/gpt-6-luna",
+      "language": "id",
+      "replicate": 2,
+      "chatId": "chat_mvo9mesu_dbb56f1f",
+      "source": "messages.9.content.1.arguments.explanation",
+      "raw": "Untuk $\\begin{pmatrix}a&b\\\\c&d\\end{pmatrix}$, determinannya $ad-bc$. Jadi $\\det(C)=2\\cdot3-5\\cdot1=1$.",
+      "oldDisplay": "Untuk $\\begin{pmatrix}a&b\\c&d\\end{pmatrix}$, determinannya $ad-bc$. Jadi $\\det(C)=2\\cdot3-5\\cdot1=1$."
+    }
+  ]
+}

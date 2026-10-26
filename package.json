@@ -1,6 +1,6 @@
 {
 	"name": "learnharness",
-	"version": "0.3.7",
+	"version": "0.3.8",
 	"license": "AGPL-3.0-only",
 	"author": {
 		"name": "Amos Blomqvist",
@@ -50,7 +50,10 @@
 		"katex": "0.18.2",
 		"linkedom": "^0.18.13",
 		"lucide-react": "^1.33.0",
+		"mdast-util-from-markdown": "2.0.3",
+		"mdast-util-math": "3.0.0",
 		"media-chrome": "^4.19.2",
+		"micromark-extension-math": "3.1.0",
 		"mermaid": "^11.17.0",
 		"motion": "^13.1.1",
 		"nanoid": "^6.0.1",
@@ -83,7 +86,7 @@
 		"@types/turndown": "^5.0.6",
 		"@typescript-eslint/parser": "^8.68.0",
 		"concurrently": "^10.0.5",
-		"electron": "^44.4.1",
+		"electron": "^44.9.3",
 		"electron-builder": "26.16.1",
 		"eslint": "^9.39.5",
 		"eslint-import-resolver-typescript": "^4.4.5",
