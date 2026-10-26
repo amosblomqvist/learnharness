@@ -54,6 +54,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { MenuShell } from "@/components/menu-shell";
 import { useSettingsSaved } from "@/components/settings-signal";
+import { useNotifyHub } from "@/components/server-events";
 import { defaultOrderLevel, populateLevel } from "@/components/thinking-default";
 import type React from "react";
 import {
@@ -84,7 +85,7 @@ const SLOT_META: Record<ModelSlotName, { label: string; roster: string }> = {
 };
 
 /** The search engines this wave ships (src/core/search.ts) + their labels. */
-const SEARCH_ENGINES = ["tavily", "brave"] as const;
+const SEARCH_ENGINES = ["tavily", "brave", "chatgpt"] as const;
 
 /** The owner's final toggleable-tool list (confirm with the user before
  *  changing — the Teacher stream settled this 2026-09-19). */
@@ -308,7 +309,7 @@ export function AgentSection({
 	 *  Default hints and thinking lists resolve from it. */
 	const [slots, setSlots] = useState<ModelsBody["slots"] | null>(null);
 	/** The live search state (/api/search) — the row's reason line. */
-	const [search, setSearch] = useState<{ available: boolean; engine: string | null; reason: string } | null>(null);
+	const [search, setSearch] = useState<{ available: boolean; chatgptAvailable: boolean; engine: string | null; reason: string } | null>(null);
 	/** Which search engines have a key (/api/keys) — the no-keys-anywhere
 	 *  state grays the row; per-engine marks ride the menu rows. */
 	const [engineKeys, setEngineKeys] = useState<Partial<Record<(typeof SEARCH_ENGINES)[number], boolean>>>({});
@@ -320,12 +321,19 @@ export function AgentSection({
 	 *  row), which kind. */
 	const [openMenu, setOpenMenu] = useState<{ target: ModelSlotName | "search"; kind: "model" | "thinking" | "engine" } | null>(null);
 	const menuAnchorRef = useRef<HTMLSpanElement>(null);
+	const events = useNotifyHub();
 
-	const refreshSearch = () =>
+	const searchRequest = useRef(0);
+	const searchPin = useRef(agent?.search?.engine);
+	const refreshSearch = () => {
+		const request = ++searchRequest.current;
 		fetch("/api/search")
 			.then((r) => r.json())
-			.then((body: { available: boolean; engine: string | null; reason: string }) => setSearch(body))
-			.catch(() => setSearch(null));
+			.then((body: { available: boolean; chatgptAvailable: boolean; engine: string | null; reason: string }) => {
+				if (request === searchRequest.current) setSearch(body);
+			})
+			.catch(() => { if (request === searchRequest.current) setSearch(null); });
+	};
 
 	/** Re-read the prompt-segment view — the signal seam for the
 	 *  2026-09-26 state-echo fix: the view's `enabled` flags DERIVE from
@@ -348,21 +356,23 @@ export function AgentSection({
 	// into the slot rows live).
 	const modelsRequest = useRef(0);
 	const modelsMounted = useRef(false);
-	const readModels = useCallback((connectionChanged = false) => {
+	const readModels = useCallback((connectionChanged = false): Promise<void> => {
 		const request = ++modelsRequest.current;
 		if (connectionChanged) setCatalog(null);
-		fetch("/api/models")
+		return fetch("/api/models")
 			.then((r) => { if (!r.ok) throw new Error("Catalog unavailable"); return r.json(); })
 			.then((body: ModelsBody) => {
 				if (!modelsMounted.current || request !== modelsRequest.current) return;
 				setCatalog(body.models);
 				setSlots(body.slots);
 			})
-			.catch(() => { if (modelsMounted.current && request === modelsRequest.current) setCatalog(null); });
+			.catch(() => { if (modelsMounted.current && request === modelsRequest.current) setCatalog(null); })
+			.then(() => { if (modelsMounted.current && request === modelsRequest.current) refreshSearch(); });
 	}, []);
 
 	useSettingsSaved((section) => {
-		if (section === "models" || section === "keys") readModels(section === "keys");
+		if (section === "agent") refreshSearch();
+		if (section === "models" || section === "keys") void readModels(section === "keys");
 		// THE state-echo root cause: the prompt switches write through the
 		// agent section, but this view (the toggles' truth) never re-read —
 		// the settings-saved law (every reader re-reads) was missing this
@@ -380,15 +390,15 @@ export function AgentSection({
 		fetch("/api/keys")
 			.then((r) => r.json())
 			.then((body: { keys: { id: string; present: boolean }[] }) => {
-				const present: Partial<Record<(typeof SEARCH_ENGINES)[number], boolean>> = {};
-				for (const id of SEARCH_ENGINES) {
+				const present: Partial<Record<Exclude<(typeof SEARCH_ENGINES)[number], "chatgpt">, boolean>> = {};
+				for (const id of ["tavily", "brave"] as const) {
 					const envVar = id === "tavily" ? "TAVILY_API_KEY" : "BRAVE_API_KEY";
 					present[id] = body.keys.some((k) => k.id === envVar && k.present);
 				}
 				setEngineKeys(present);
 			})
 			.catch(() => {});
-		return () => { modelsMounted.current = false; modelsRequest.current++; };
+		return () => { modelsMounted.current = false; modelsRequest.current++; searchRequest.current++; };
 	}, []);
 
 	// The reason line re-reads /api/search AFTER an engine write lands —
@@ -396,8 +406,16 @@ export function AgentSection({
 	// keying on the pin avoids the race where the fetch beat the PUT and
 	// the hint contradicted the trigger it sits under.
 	useEffect(() => {
+		if (searchPin.current === agent?.search?.engine) return;
+		searchPin.current = agent?.search?.engine;
 		refreshSearch();
 	}, [agent?.search?.engine]);
+
+	useEffect(() => {
+		if (!events) return;
+		const unsubscribe = events.subscribe("subscriptions-changed", () => { void readModels(true); });
+		return () => { unsubscribe(); };
+	}, [events, readModels]);
 
 	// The dropdown contract (the chat model selector's, mirrored): any
 	// click outside the open menu — or an Esc — closes it. Esc is CLAIMED
@@ -492,7 +510,7 @@ export function AgentSection({
 		>
 			<span>{label}</span>
 			<span className="text-muted-foreground">
-				{live === null ? (active && <span aria-hidden>✓</span>) : live ? <span aria-hidden>✓ key</span> : <span aria-hidden>· no key</span>}
+				{live === null ? (active && <span aria-hidden>✓</span>) : live ? <span aria-hidden>{id === "chatgpt" ? "✓ ready" : "✓ key"}</span> : <span aria-hidden>{id === "chatgpt" ? "· unavailable" : "· no key"}</span>}
 			</span>
 		</button>
 	);
@@ -804,7 +822,7 @@ export function AgentSection({
 				))}
 				{(() => {
 					const engine = agent?.search?.engine ?? null;
-					const anyKey = engineKeys.tavily === true || engineKeys.brave === true;
+					const anyKey = engine === "chatgpt" || engineKeys.tavily === true || engineKeys.brave === true || search?.chatgptAvailable === true;
 					const open = openMenu?.target === "search";
 					return (
 						<SettingsRow
@@ -815,7 +833,7 @@ export function AgentSection({
 						>
 							<span ref={open ? menuAnchorRef : undefined} className="relative flex items-center gap-2">
 								<MenuTrigger
-									value={engine === "tavily" ? "Tavily" : engine === "brave" ? "Brave" : ""}
+									value={engine === "tavily" ? "Tavily" : engine === "brave" ? "Brave" : engine === "chatgpt" ? "ChatGPT" : ""}
 									emptyLabel="Automatic"
 									ariaLabel="Search engine"
 									testid="search-engine-trigger"
@@ -836,7 +854,7 @@ export function AgentSection({
 											setOpenMenu(null);
 										})}
 										{SEARCH_ENGINES.map((id) =>
-											engineOption(id, id === "tavily" ? "Tavily" : "Brave", engine === id, engineKeys[id] ?? false, () => {
+											engineOption(id, id === "tavily" ? "Tavily" : id === "brave" ? "Brave" : "ChatGPT", engine === id, id === "chatgpt" ? (search?.chatgptAvailable ?? false) : (engineKeys[id] ?? false), () => {
 												onSectionChange(composeSearchEngine(agent, id));
 												setOpenMenu(null);
 											}),

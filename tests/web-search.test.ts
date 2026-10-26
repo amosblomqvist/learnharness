@@ -49,6 +49,25 @@ describe("web_search on the injected port (web.ts)", () => {
 		assert.deepEqual(out.details, [{ title: "sigma.js", url: "https://www.sigmajs.org/", snippet: "v3 released" }]);
 	});
 
+	it("forwards the tool abort signal to the search provider", async () => {
+		const controller = new AbortController();
+		let received: AbortSignal | undefined;
+		const provider: SearchProvider = {
+			id: "tavily",
+			async search(_query, _count, signal) {
+				received = signal;
+				return new Promise((resolve) => signal?.addEventListener("abort", () => resolve([]), { once: true }));
+			},
+		};
+		const { web_search } = createWebTools(() => provider);
+		const result = web_search!.execute!("signal-call", { query: "q" }, controller.signal);
+		await new Promise((resolve) => setImmediate(resolve));
+		controller.abort();
+		await result;
+		assert.ok(received, "provider received a signal");
+		assert.equal(received.aborted, true, "tool abort propagated into provider request");
+	});
+
 	it("provider errors surface as error strings, never thrown", async () => {
 		const provider: SearchProvider = {
 			id: "brave",

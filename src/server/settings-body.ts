@@ -12,6 +12,7 @@
  */
 
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
+import { SEARCH_ENGINE_IDS, type SearchEngineId } from "../core/search.ts";
 import { isHexColor, type ChatSettings } from "../core";
 import type {
 	AgentSettings,
@@ -177,10 +178,10 @@ export function parseAgentSettingsBody(body: unknown): SettingsBodyResult<AgentS
 		const search = asRecord(raw.search);
 		if (!search) return { ok: false, error: "search must be an object" };
 		if (search.engine !== undefined) {
-			if (search.engine !== "tavily" && search.engine !== "brave") {
-				return { ok: false, error: 'search.engine must be "tavily" or "brave"' };
+			if (typeof search.engine !== "string" || !(SEARCH_ENGINE_IDS as readonly string[]).includes(search.engine)) {
+				return { ok: false, error: `search.engine must be one of ${SEARCH_ENGINE_IDS.map((id) => `"${id}"`).join(", ")}` };
 			}
-			settings.search = { engine: search.engine };
+			settings.search = { engine: search.engine as SearchEngineId };
 		}
 	}
 	// Prober graph tools (wave 7, owner ruling 2026-09-23): an agent-section

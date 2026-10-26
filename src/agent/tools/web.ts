@@ -18,9 +18,8 @@ import TurndownService from "turndown";
  *                                                          Jina Reader fallback for
  *                                                          JS-rendered pages)
  *
- * SEARCH REWIRING (search port wave, 2026-09-20): the Google CSE backend is
- * retired — web_search now runs on the injected search port (core/search.ts).
- * The live adapter (Tavily/Brave — server/search.ts) arrives as a DEPENDENCY
+ * SEARCH REWIRING: web_search runs on the injected search port (core/search.ts).
+ * The live adapter arrives as a DEPENDENCY
  * (import law: this tool depends on the core port, never server code). NO
  * silent fallback (owner decision): provider absent → search is honestly
  * unavailable, and the composition root drops the research dispatch tool on
@@ -143,7 +142,7 @@ export function createWebTools(search: () => SearchProvider | null): Record<stri
 			description: "Search the web. One search per call — use one call per search angle. " +
 				"Returns an array of results with title, url, and snippet.",
 			parameters: webSearchInput,
-			execute: serverExecute("web_search", webSearchInput, async ({ query, count }): Promise<WebSearchResult[] | string> => {
+			execute: serverExecute("web_search", webSearchInput, async ({ query, count }, { signal }): Promise<WebSearchResult[] | string> => {
 				const provider = search();
 				if (!provider) {
 					return (
@@ -152,7 +151,7 @@ export function createWebTools(search: () => SearchProvider | null): Record<stri
 					);
 				}
 				try {
-					return await provider.search(query, count ?? 5);
+					return await provider.search(query, count ?? 5, signal);
 				} catch (err) {
 					return `web_search failed: ${err instanceof Error ? err.message : String(err)}`;
 				}

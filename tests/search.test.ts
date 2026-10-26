@@ -51,6 +51,25 @@ describe("resolveSearchEngineFor (the auto-detect decision)", () => {
 		assert.match(out.reason, /chosen/);
 	});
 
+	it("Automatic with a selected ChatGPT researcher never falls back when authority is unavailable", () => {
+		const unavailable = resolveSearchEngineFor(undefined, { tavily: "tvly-throwaway-key-00001", brave: "brave-throwaway-key-00001" }, {
+			selected: true, ready: false, connected: false, backgroundAllowed: false,
+		});
+		assert.equal(unavailable.available, false);
+		assert.equal(unavailable.engine, null);
+		assert.equal(unavailable.chatgptAvailable, false);
+	});
+
+	it("ChatGPT pin requires all readiness and authorization signals", () => {
+		const args = { selected: true, ready: true, connected: true, backgroundAllowed: true };
+		const ready = resolveSearchEngineFor("chatgpt", { tavily: "tvly-throwaway-key-00001" }, args);
+		assert.equal(ready.engine, "chatgpt");
+		assert.equal(ready.available, true);
+		assert.equal(ready.chatgptAvailable, true);
+		const denied = resolveSearchEngineFor("chatgpt", { tavily: "tvly-throwaway-key-00001" }, { ...args, backgroundAllowed: false });
+		assert.equal(denied.available, false);
+	});
+
 	it("the explicit pin does NOT silently fall back to the other engine", () => {
 		const out = resolveSearchEngineFor("tavily", { brave: "brave-throwaway-key-00001" });
 		assert.ok(!out.available);

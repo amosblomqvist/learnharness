@@ -31,7 +31,8 @@ export interface SearchHit {
 }
 
 /** The engine ids this wave ships (the catalog: curated keys + adapters). */
-export type SearchEngineId = "tavily" | "brave";
+export const SEARCH_ENGINE_IDS = ["tavily", "brave", "chatgpt"] as const;
+export type SearchEngineId = (typeof SEARCH_ENGINE_IDS)[number];
 
 /** A live search engine: an id (for status/labels) + one operation. The
  *  adapters own their wire protocol (fetch, timeouts, error mapping) —
@@ -39,13 +40,15 @@ export type SearchEngineId = "tavily" | "brave";
  *  errors to clear Error messages); the tool layer catches and reports. */
 export interface SearchProvider {
 	id: SearchEngineId;
-	search(query: string, count: number): Promise<SearchHit[]>;
+	search(query: string, count: number, signal?: AbortSignal): Promise<SearchHit[]>;
 }
 
 /** Why search is (un)available — the honest status the UI and the tool
  *  layer explain from. `engine` is the ACTIVE engine when live. */
 export interface SearchStatus {
 	available: boolean;
+	/** Candidate ChatGPT readiness is independent of the active preference. */
+	chatgptAvailable: boolean;
 	/** The active engine (null when unavailable). */
 	engine: SearchEngineId | null;
 	/** The one-line reason for the state (status text for the UI). */
