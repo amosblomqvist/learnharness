@@ -47,6 +47,7 @@ import { persistTurn, triggerExtraction, TurnPersistenceError } from "./turn-ser
 import { hasProbeDone, danglingQuestionOf } from "../core/native-messages.ts";
 import { composeInstructions } from "../agent/teacher-agent.ts";
 import { ensureCompacted, kickCompaction, effectiveThresholdTokens } from "./compaction.ts";
+import { beginPromptCacheTurn, type PromptCacheTurn } from "./prompt-cache.ts";
 import { catalogContextLimits, refreshConnectionCatalog } from "./model-catalog.ts";
 import { emit } from "../core/events.ts";
 import { settledTurnResponse } from "./turn-runs.ts";
@@ -340,6 +341,18 @@ export async function handleChatInput(
 	// append-only turns log at onFinish — idempotent per turn id.
 	const turnUsageId = crypto.randomUUID();
 	const steps: CallUsage[] = [];
+	// Prefix-cache telemetry (DeepSeek automatic context caching) and the
+	// per-turn spend guard. Both are fed by the same message_end stream; the
+	// cache observer is created below once the model id is stamped.
+	let cacheTurn: PromptCacheTurn | undefined;
+	let liveAgent: TeachingAgent | undefined;
+	let spentUsd = 0;
+	let capHit = false;
+	// $5 is a runaway guard, not a budget: a legitimate long tool turn on a
+	// 100k-token context costs cents-to-dollars. A single message that crosses
+	// this is a loop/cache miss, and stopping is cheaper than finishing it.
+	// Override with LH_MAX_TURN_USD (0 disables).
+	const maxTurnUsd = Number(process.env.LH_MAX_TURN_USD ?? 5);
 	const collectUsage = (usage: Usage) => {
 		steps.push({
 			inputTokens: usage.input,
@@ -350,6 +363,18 @@ export async function handleChatInput(
 			// Optional in pi's Usage — persisted as 0, never dropped.
 			reasoningTokens: usage.reasoning ?? 0,
 		});
+		cacheTurn?.recordUsage(usage);
+		const cost = usage.cost?.total;
+		if (Number.isFinite(cost) && cost > 0) {
+			spentUsd += cost;
+			if (!capHit && maxTurnUsd > 0 && spentUsd > maxTurnUsd) {
+				capHit = true;
+				console.warn(
+					`[chat ${chatId}] turn spend cap hit ($${spentUsd.toFixed(2)} > $${maxTurnUsd.toFixed(2)}) — aborting the run`,
+				);
+				try { liveAgent?.abort(); } catch { /* already settled */ }
+			}
+		}
 	};
 
 	// AGENT CONSTRUCTION BRANCH (docs/probe-teach-split.md §2): the transcript
@@ -367,6 +392,9 @@ export async function handleChatInput(
 	// Provider-qualified stamp (model slots wave): matches the price table's
 	// provider:id keys.
 	const modelId = `${engine.model.provider}:${engine.model.id}`;
+	// One prefix-cache observer per turn: the first model call compares against
+	// the previous turn's last request, later calls against the previous step.
+	cacheTurn = beginPromptCacheTurn(chatId, modelId);
 	// Tests inject a factory: the agent is stateless per turn, so each
 	// request builds a fresh one off the record — the factory mirrors that
 	// seam exactly. Wave B: the record IS the agent state (native messages;
@@ -395,6 +423,7 @@ export async function handleChatInput(
 		requestCycle,
 		messages: asAgentMessages(merged),
 		onUsage: collectUsage,
+		promptCache: cacheTurn,
 		toolToggles: effective.agent.tools,
 		// Debug (owner, 2026-10-04): teacher/prober raw provider events under
 		// LH_PROVIDER_EVENTS=1 (provider-events.ts); no-op otherwise.
@@ -470,6 +499,7 @@ export async function handleChatInput(
 	// A test-injected agent gets no usage collector (tests assert the
 	// transcript, not the money channel); when it's ours, usage flows through
 	// the factory's subscription (wired above via onUsage).
+	liveAgent = constructed;
 	try {
 		// THE TURN AS A BACKGROUND OBJECT (owner ruling, 2026-09-25):
 		// runPiTurn executes decoupled from this response — the POST stream
@@ -529,6 +559,10 @@ export async function handleChatInput(
 				settleSteers(chatId, persisted, true, constructed);
 			},
 			onFinish: (turnMessages, isAborted) => {
+				// Prefix-cache summary for this turn (predicted reuse vs the
+				// provider's reported hits, dollars saved). Emitted before the
+				// persistence seams so it survives a later failure.
+				cacheTurn?.finish();
 				// Wave B: the record write is the agent's own final state —
 				// the new messages are the slice past the merged base.
 				const stamped = persistTurn(stores.chatStore, chatId, persistBaseCount, turnMessages, isAborted);
@@ -637,6 +671,7 @@ export async function handleChatInput(
 	} catch (err) {
 		// The stream never started, so no onFinish will fire — clear the registry
 		// or a malformed request would lock the chat until the TTL eviction.
+		cacheTurn?.finish();
 		endTurn(chatId);
 		// Wave C: the live-agent registration (if it happened) dies with the
 		// turn here too - nothing was handed (the loop never ticked).

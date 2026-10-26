@@ -55,7 +55,10 @@ Your FINAL assistant message is your entire deliverable — it must stand alone,
 claim cited as (p. N). End with a line "Pages consulted: N, N, …" listing every page you
 extracted or rendered.`;
 
-const MAX_ITERATIONS = 14;
+// 24 (was 14): a book-scale question legitimately spans a table-of-contents
+// pass plus several selective page batches. The old budget ended runs that
+// had read everything and were one call away from writing the brief.
+const MAX_ITERATIONS = 24;
 /** Rendered pages per pdf_render call — the skill renders selectively; a
  *  batch cap keeps one over-eager call from flooding the vision context. */
 const RENDER_BATCH_CAP = 6;

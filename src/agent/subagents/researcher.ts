@@ -99,7 +99,10 @@ export async function runResearcherAgent(prompt: string, opts: ResearcherRunOpti
 		prompt,
 		engine: opts.engine,
 		systemPrompt: INSTRUCTIONS,
-		maxTurns: 12,
+		// 16 (was 12): search + fetch + extract + synthesize is often more
+		// than a dozen turns on a broad question. The researcher still stops
+		// as soon as it has enough; this is headroom, not a target.
+		maxTurns: 16,
 		abortSignal: opts.abortSignal,
 		onUsage: opts.onUsage,
 		onToolStart: opts.onToolStart,

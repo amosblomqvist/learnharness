@@ -201,7 +201,19 @@ export function createJobRunner(deps: JobRunnerDeps): JobRunner {
 			jobStore.updateJob(jobId, { status: "error", error: `unknown kind ${job.kind}`, activity: "failed" });
 			return;
 		}
-		const engine = pickEngine(job.kind);
+		// Resolve the engine defensively: a stale role pin (a catalog model
+		// that disappeared, e.g. a subscription model removed upstream) throws
+		// here. The respawn path calls runJob fire-and-forget, so an escaping
+		// throw becomes an unhandledRejection loop that never lands the job —
+		// catch it and route it through the SAME refusal convention below.
+		let engine: PiEngine | undefined;
+		let engineFailure: string | null = null;
+		try {
+			engine = pickEngine(job.kind);
+		} catch (err) {
+			engineFailure = err instanceof Error ? err.message : String(err);
+			console.error(`[job ${jobId}] engine resolution failed: ${engineFailure}`);
+		}
 		// The per-need refusal guards (BYOK 2026-09-22 / provider-key
 		// interlude 2026-09-25): no engine for the kind's tier, or the
 		// resolved engine's provider key gone — both refuse through the SAME
@@ -241,6 +253,10 @@ export function createJobRunner(deps: JobRunnerDeps): JobRunner {
 			await finishJob(jobId, failure);
 		};
 		if (!engine) {
+			if (engineFailure !== null) {
+				await refuse(`model resolution failed: ${engineFailure}`);
+				return;
+			}
 			const tier = ROLE_SLOT[KIND_ROLE[job.kind]];
 			const envelope = modelsNotConfigured([tier]);
 			console.info(`[job ${jobId}] refused — ${JSON.stringify(envelope)}`);

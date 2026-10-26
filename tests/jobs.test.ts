@@ -1805,9 +1805,36 @@ describe("BYOK job refusal (no factory floor)", () => {
 		const result = done.result as ResearchResult;
 		assert.equal(result.sources.length, 0, "the failure result matches the research convention");
 	});
-});
 
-// ─── provider-key: the key-presence job refusal (owner, 2026-09-25) ─────────
+	it("a THROWING engineFor refuses the job instead of escaping as an unhandled rejection", async () => {
+		const chat = chatStore.createChat("Test: stale role pin");
+		trackChat(chat.id);
+		chatStore.saveMessages(chat.id, nativeToolMessages("hi", "research", "call-sp1", RESEARCH_INPUT));
+
+		const job = jobStore.createJob({ kind: "research", chatId: chat.id, toolCallId: "call-sp1" });
+		trackJob(job.id);
+
+		const delivery = fakeDeliver();
+		// The exact live failure: a role pin survives a catalog change
+		// (github-copilot-subscription lost gpt-5.6-luna), and piEngineForSpec
+		// throws while the job is being respawned.
+		const runner = createJobRunner({
+			chatStore,
+			jobStore,
+			deliver: delivery.deliver,
+			engineFor: () => {
+				throw new Error('github-copilot-subscription catalog has no model gpt-5.6-luna');
+			},
+		});
+		await runner.runJob(job.id);
+
+		const done = jobStore.getJob(job.id)!;
+		assert.equal(done.status, "error", "the job lands error, never a phantom run");
+		assert.match(done.error ?? "", /model resolution failed/);
+		assert.match(done.error ?? "", /gpt-5\.6-luna/);
+		assert.equal(delivery.steers.length, 1, "the refusal STEERED — the teacher is not stranded");
+	});
+});
 
 describe("provider-key job refusal (key-presence interlude)", () => {
 	it("an engine whose provider key is gone refuses the spawn — envelope wording, no phantom run", async () => {

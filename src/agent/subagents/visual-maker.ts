@@ -130,7 +130,10 @@ const UNLOOKED_FINISH_MESSAGE =
 export async function runVisualMaker(input: VisualMakerInput, opts: VisualMakerOptions = {}): Promise<VisualResult> {
 	const headless = opts.headless ?? getHeadless();
 	const brief = input.brief.trim() || "(no brief)";
-	const maxIterations = opts.maxIterations ?? 8;
+	// 12 (was 8): a reasoning model spends several iterations on a first
+	// draft + render + fix cycle; the old budget failed after the final
+	// render without a chance to accept it. Explicit test seams still win.
+	const maxIterations = opts.maxIterations ?? 12;
 
 	const reason = headless.unavailableReason();
 	if (reason) {

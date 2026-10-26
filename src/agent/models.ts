@@ -48,6 +48,17 @@ export interface PiEngine {
 
 export type { ThinkingLevel };
 
+/** Optional per-call output ceiling (`LH_MAX_OUTPUT_TOKENS`). DEFAULT OFF:
+ *  the provider's own model limit applies (DeepSeek advertises 384k). A low
+ *  ceiling is actively harmful on reasoning models — reasoning tokens count
+ *  against it, so a 32k cap can truncate a `thinkingLevel: max` call before
+ *  it emits its tool call. Set a positive value to opt into a cap; the
+ *  per-turn spend guard is the safer runaway control. */
+const MAX_OUTPUT_TOKENS = (() => {
+	const raw = Number(process.env.LH_MAX_OUTPUT_TOKENS ?? 0);
+	return Number.isFinite(raw) && raw > 0 ? Math.max(1_024, Math.floor(raw)) : 0;
+})();
+
 let collection: ReturnType<typeof createModels> | undefined;
 
 /** The process-wide pi-ai Models collection — EVERY builtin provider's
@@ -120,7 +131,18 @@ export function piEngineForSpec(spec: ResolvedModelSpec, background: boolean | (
 		streamFn: (requestModel, context, options) => {
 			const purpose = typeof background === "function" ? background : () => background;
 			const stream = spec.provider === "chatgpt" ? chatGPTStream(purpose, lifecycle) : nativeId ? nativeSubscriptionStream(models.getProvider(nativeId)!, purpose, lifecycle) : models.streamSimple.bind(models);
-			return stream(requestModel, context, { ...options, reasoning: level === "off" ? undefined : level });
+			// Optional output ceiling (default off; see MAX_OUTPUT_TOKENS).
+			// Applied only to native API routes; subscription streams own their
+			// own limits. When enabled it may lower an explicit maxTokens too.
+			const nativeRoute = spec.provider !== "chatgpt" && !nativeId;
+			const maxTokens = MAX_OUTPUT_TOKENS > 0
+				? Math.min(options?.maxTokens ?? MAX_OUTPUT_TOKENS, MAX_OUTPUT_TOKENS)
+				: undefined;
+			return stream(requestModel, context, {
+				...options,
+				...(nativeRoute && maxTokens !== undefined ? { maxTokens } : {}),
+				reasoning: level === "off" ? undefined : level,
+			});
 		},
 	};
 }

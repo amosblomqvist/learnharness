@@ -91,6 +91,14 @@ export function StatsBar({
 	const pricedCount = turns.length - unpriced - subscription;
 	const providers = pricing?.subscriptionProviders ?? subscriptionLabels(turns.map((turn) => turn.model));
 	const costLabel = planCostLabel(pricedCount > 0 ? cost : null, providers);
+	// Prefix-cache economics (DeepSeek automatic context caching): provider-
+	// reported token counts, so the percentage is real even before any rate
+	// resolves. Hidden until the session has actually reused something.
+	const cache = pricing?.cache;
+	const cachePct = cache && cache.promptTokens > 0 && cache.cacheReadTokens > 0
+		? Math.round(cache.hitRate * 100)
+		: null;
+	const cacheSaved = cache && cache.savedUsd >= 0.0001 ? cache.savedUsd : null;
 
 	return (
 		<div
@@ -128,6 +136,14 @@ export function StatsBar({
 				</span>
 				<span aria-hidden>·</span>
 				<span data-testid="stats-cost">{costLabel}</span>
+				{cachePct !== null && (
+					<>
+						<span aria-hidden>·</span>
+						<span data-testid="stats-cache" title="Provider-reported prefix-cache reuse">
+							{cachePct}% cached
+						</span>
+					</>
+				)}
 			</button>
 				{open && (
 					<div
@@ -148,6 +164,22 @@ export function StatsBar({
 								<span>{subscription ? "Usage" : "Total cost"}</span>
 								<span className="tabular-nums text-card-foreground">{costLabel}</span>
 							</div>
+							{cachePct !== null && (
+								<div className="flex justify-between gap-2">
+									<span>Prefix cache</span>
+									<span className="tabular-nums text-card-foreground">
+										{cachePct}% · {cacheSaved !== null ? `${formatUsd(cacheSaved)} saved` : "reused"}
+									</span>
+								</div>
+							)}
+							{cachePct !== null && (
+								<div className="flex justify-between gap-2 text-[11px]">
+									<span>Cache tokens</span>
+									<span className="tabular-nums">
+										{formatTokens(cache!.cacheReadTokens)} / {formatTokens(cache!.promptTokens)}
+									</span>
+								</div>
+							)}
 							{providers.includes("ChatGPT") && <a href="https://chatgpt.com/settings/usage" target="_blank" rel="noreferrer" className="underline underline-offset-2">Manage ChatGPT usage</a>}
 							{unpriced > 0 && (
 								<div className="flex justify-between gap-2">

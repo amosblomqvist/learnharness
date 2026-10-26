@@ -128,6 +128,14 @@ export interface AgentBuildOptions {
 	 *  <chatId>.jsonl via providerEventObserver — the GLM-truncation /
 	 *  DeepSeek-id incident layer. Absent or env-off → no observer. */
 	chatId?: string;
+	/** DeepSeek prefix-cache telemetry (server/prompt-cache.ts): called
+	 *  before EVERY conversational model call with the agent's live
+	 *  message list (leading system message included) and the step index.
+	 *  The server layer owns projection + logging; this layer only hands
+	 *  over the seam. Optional: tests and one-shot agents omit it. */
+	promptCache?: {
+		observe(input: { model: string; messages: readonly AgentMessage[]; step: number }): void;
+	};
 }
 
 /**
@@ -189,6 +197,11 @@ function baseAgentOptions(kind: AgentKind, opts: AgentBuildOptions, tools: Agent
 	// the normal no-observer path (tests, env-off).
 	const providerEvents = opts.chatId ? providerEventObserver(opts.chatId, kind) : undefined;
 	const seenInputs = new Set((opts.messages ?? []).map((m) => (m as { id?: string }).id).filter(Boolean));
+	// DeepSeek prefix-cache telemetry (server/prompt-cache.ts): one step
+	// number per conversational request in this turn. The server projects
+	// the SAME live messages the loop is about to convert, so the audit can
+	// never disagree with what the provider receives.
+	let promptStep = 0;
 	const agent = new Agent({
 		identity: APP_IDENTITY,
 		sessionId: opts.chatId,
@@ -246,6 +259,19 @@ function baseAgentOptions(kind: AgentKind, opts: AgentBuildOptions, tools: Agent
 				}
 				if (automatic) opts.callPurpose.background = true;
 				else if (learner) opts.callPurpose.background = false;
+			}
+			// Cache audit BEFORE request-cycle bookkeeping: this is the exact
+			// message list the loop will hand the provider.
+			if (opts.promptCache) {
+				try {
+					opts.promptCache.observe({
+						model: `${engine.model.provider}:${engine.model.id}`,
+						messages: request.context.messages,
+						step: promptStep++,
+					});
+				} catch {
+					// Telemetry never breaks a turn.
+				}
 			}
 			opts.requestCycle?.prepare(request);
 		},

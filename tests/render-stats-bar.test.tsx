@@ -67,6 +67,31 @@ describe("stats bar", () => {
 		assert.match(html, /data-testid="stats-model"[^>]*>\s*<span[^>]*>—<\/span>/);
 	});
 
+	it("shows provider-reported prefix-cache reuse (the DeepSeek caching wave)", () => {
+		const base = sessionCost({ turns: [turn()] });
+		const html = renderToStaticMarkup(
+			<StatsBar
+				turns={[turn()]}
+				pricing={{
+					...base,
+					cache: {
+						promptTokens: 10_000,
+						cacheReadTokens: 9_000,
+						cacheWriteTokens: 0,
+						hitRate: 0.9,
+						savedUsd: 0.42,
+						pricedCalls: 1,
+						unpricedCalls: 0,
+					},
+				}}
+			/>,
+		);
+		assert.match(html, /data-testid="stats-cache"[^>]*>90% cached</);
+		// No reuse → no chip (never a fake "0% cached" on a fresh session).
+		const fresh = renderToStaticMarkup(<StatsBar turns={[turn()]} pricing={base} />);
+		assert.ok(!fresh.includes('data-testid="stats-cache"'));
+	});
+
 	it("shows — for cost when every turn is unpriceable, never a fake $0", () => {
 		const html = renderToStaticMarkup(
 			<StatsBar turns={[turn({ model: "nope/unknown" })]} contextTokens={11_000} pricing={sessionCost({ turns: [turn({ model: "nope/unknown" })] })} />,

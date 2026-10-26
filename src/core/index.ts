@@ -41,6 +41,10 @@ export * from "./math-delims.ts";
 // pure logic, browser-safe.
 export * from "./native-messages.ts";
 export * from "./compaction.ts";
+// DeepSeek-style prefix-cache measurement (2026-10 caching wave): pure
+// prefix projection + audit + provider-usage economics. Browser-safe; the
+// server telemetry seam (src/server/prompt-cache.ts) builds on it.
+export * from "./prompt-cache.ts";
 export * from "./input-events.ts";
 // Wave D (owner-approved 2026-09-26): the client view model — the grouping
 // canon (one continuous assistant document, step separators) ported from
