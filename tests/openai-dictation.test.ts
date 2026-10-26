@@ -4,6 +4,7 @@ import vm from "node:vm";
 import { describe, it } from "node:test";
 import { MAX_DICTATION_WAV_BYTES, pcm16Wav } from "../src/core/dictation.ts";
 import { transcribeOpenAIDictation } from "../src/server/openai-dictation.ts";
+import nextConfig from "../next.config.ts";
 
 const key = "sk-test-openai-only";
 const makeWav = () => pcm16Wav([new Uint8Array([1, 2, 3, 4]), new Uint8Array([5, 6])]);
@@ -12,6 +13,9 @@ const request = (body: Blob, contentType = "audio/wav") => new Request("http://l
 });
 
 describe("OpenAI dictation audio", () => {
+	it("allows the full bounded recording through the Next proxy", () => {
+		assert.equal(nextConfig.experimental?.proxyClientMaxBodySize, MAX_DICTATION_WAV_BYTES);
+	});
 	it("encodes all PCM frames in a mono 16 kHz WAV", async () => {
 		const blob = makeWav();
 		assert.equal(blob.type, "audio/wav");

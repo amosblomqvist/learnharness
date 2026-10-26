@@ -1,9 +1,13 @@
 import { readFileSync } from "node:fs";
 import type { NextConfig } from "next";
+import { MAX_DICTATION_WAV_BYTES } from "./src/core/dictation.ts";
 
 const pkg = JSON.parse(readFileSync(new URL("./package.json", import.meta.url), "utf8")) as { version: string; homepage: string };
 
 const nextConfig: NextConfig = {
+	// Proxy clones API request bodies. Its 10 MB default would truncate a
+	// valid longer dictation before the route can validate and transcribe it.
+	experimental: { proxyClientMaxBodySize: MAX_DICTATION_WAV_BYTES },
 	// Public build metadata only; no new runtime Electron version API.
 	env: { LH_VERSION: pkg.version, LH_HOMEPAGE: pkg.homepage },
 	// Desktop target (Electron wrapper, 2026-09-17): standalone output = a
