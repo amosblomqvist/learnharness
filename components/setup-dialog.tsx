@@ -46,6 +46,7 @@ import { type ProviderKeyInfo } from "@/components/settings/keys-section";
 import { ProviderMenuList } from "@/components/settings/model-menu";
 import { ChatGPTBackgroundAccess } from "@/components/settings/chatgpt-connection";
 import { NativeSubscriptionBackgroundAccess, SubscriptionConnections } from "@/components/settings/subscription-connections";
+import { useModelCatalog } from "@/components/model-picker";
 import { defaultOrderLevel, populateLevel, THINKING_LABEL } from "@/components/thinking-default";
 import { ThinkingMenuList } from "@/components/settings/model-menu";
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
@@ -265,12 +266,36 @@ export function SetupDialog({
 
 	// Fresh /api/models per open AND per keys change — a key saved a
 	// moment ago (stage 1's own screen) widens the pickers immediately.
+	// The page's shared catalog seeds the first frame, so a keyed reopen
+	// never flashes the key screen while the fresh read is in flight.
+	const { catalog } = useModelCatalog();
 	useEffect(() => {
 		if (!open) return;
 		let cancelled = false;
-		setBody(null);
-		setPicked({});
-		setLevels({});
+		const apply = (b: ModelsBody) => {
+			setBody(b);
+			setFailed(false);
+			// Prefill (owner, 2026-09-22): each pinned tier opens with its
+			// pick (matched in the FEDERATED catalog — a lapsed key's pin
+			// does not prefill); unpinned tiers stay empty and carry the
+			// "needed" mark. First-run = nothing pinned → all three marked.
+			const pre = prefillFromSlots(b.models, b.slots);
+			setPicked(pre);
+			// Levels prefill with the pins (chunk 2): stored level if still
+			// supported, else the ordering's level for the pinned model.
+			const preLevels: Partial<Record<ModelSlotName, ThinkingLevel>> = {};
+			for (const slot of SLOT_ORDER) {
+				const entry = pre[slot];
+				if (entry) preLevels[slot] = prefillLevelFromPin(entry, b.slots?.[slot]);
+			}
+			setLevels(preLevels);
+		};
+		if (catalog) apply(catalog);
+		else {
+			setBody(null);
+			setPicked({});
+			setLevels({});
+		}
 		setError(null);
 		fetch("/api/keys")
 			.then((r) => r.json())
@@ -278,27 +303,11 @@ export function SetupDialog({
 			.catch(() => { if (!cancelled) setKeyProviders([]); });
 		fetch("/api/models")
 			.then((r) => { if (!r.ok) throw new Error("Catalog unavailable"); return r.json(); })
-			.then((b: ModelsBody) => {
-				if (cancelled) return;
-				setBody(b);
-				setFailed(false);
-				// Prefill (owner, 2026-09-22): each pinned tier opens with its
-				// pick (matched in the FEDERATED catalog — a lapsed key's pin
-				// does not prefill); unpinned tiers stay empty and carry the
-				// "needed" mark. First-run = nothing pinned → all three marked.
-				const pre = prefillFromSlots(b.models, b.slots);
-				setPicked(pre);
-				// Levels prefill with the pins (chunk 2): stored level if still
-				// supported, else the ordering's level for the pinned model.
-				const preLevels: Partial<Record<ModelSlotName, ThinkingLevel>> = {};
-				for (const slot of SLOT_ORDER) {
-					const entry = pre[slot];
-					if (entry) preLevels[slot] = prefillLevelFromPin(entry, b.slots?.[slot]);
-				}
-				setLevels(preLevels);
-			})
+			.then((b: ModelsBody) => { if (!cancelled) apply(b); })
 			.catch(() => { if (!cancelled) setFailed(true); });
 		return () => { cancelled = true; };
+		// The shared catalog only seeds an open; its later updates must not
+		// re-run the fetch or wipe picks made in the open dialog.
 	}, [open, keysTick]);
 
 	// Esc + outside-click — layered dismissal, closable WITHOUT
