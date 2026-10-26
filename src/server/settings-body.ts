@@ -208,7 +208,7 @@ function parseHexOrNull(value: unknown, field: string): { color?: string | null;
 }
 
 /** appearance: { mode?, background?, fontFamily?, proseFontSize?,
- *  sessionNameSerif?, mdRendering? } */
+ *  sessionNameSerif?, autoCollapseQuestions?, mdRendering? } */
 export function parseAppearanceSettingsBody(body: unknown): SettingsBodyResult<AppearanceSettings> {
 	const raw = asRecord(body);
 	if (!raw) return { ok: false, error: "Invalid JSON body" };
@@ -246,6 +246,12 @@ export function parseAppearanceSettingsBody(body: unknown): SettingsBodyResult<A
 			return { ok: false, error: "sessionNameSerif must be a boolean" };
 		}
 		settings.sessionNameSerif = raw.sessionNameSerif;
+	}
+	if (raw.autoCollapseQuestions !== undefined) {
+		if (typeof raw.autoCollapseQuestions !== "boolean") {
+			return { ok: false, error: "autoCollapseQuestions must be a boolean" };
+		}
+		settings.autoCollapseQuestions = raw.autoCollapseQuestions;
 	}
 	if (raw.mdRendering !== undefined) {
 		const md = asRecord(raw.mdRendering);

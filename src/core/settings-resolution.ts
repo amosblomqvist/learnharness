@@ -194,6 +194,7 @@ export function resolveSettings(record: UserSettings | null): EffectiveSettings 
 			fontFamily: appearance.fontFamily ?? factoryAppearance.fontFamily,
 			proseFontSize: appearance.proseFontSize ?? factoryAppearance.proseFontSize,
 			sessionNameSerif: appearance.sessionNameSerif ?? factoryAppearance.sessionNameSerif,
+			autoCollapseQuestions: appearance.autoCollapseQuestions ?? factoryAppearance.autoCollapseQuestions,
 			mdRendering: {
 				headingWeight: md.headingWeight ?? factoryMd.headingWeight,
 				boldColor: md.boldColor ?? factoryMd.boldColor,

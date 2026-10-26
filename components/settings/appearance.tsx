@@ -31,6 +31,7 @@ export function resolveAppearance(delta: AppearanceSettings | undefined) {
 		fontFamily: delta?.fontFamily ?? f.fontFamily,
 		proseFontSize: delta?.proseFontSize ?? f.proseFontSize,
 		sessionNameSerif: delta?.sessionNameSerif ?? f.sessionNameSerif,
+		autoCollapseQuestions: delta?.autoCollapseQuestions ?? f.autoCollapseQuestions,
 		mdRendering: {
 			headingWeight: delta?.mdRendering?.headingWeight ?? f.mdRendering.headingWeight,
 			boldColor: delta?.mdRendering?.boldColor ?? f.mdRendering.boldColor,

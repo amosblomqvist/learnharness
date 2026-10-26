@@ -295,6 +295,13 @@ export function AppearanceSection({
 					onChange={(on) => onSectionChange({ ...appearance, sessionNameSerif: on })}
 				/>
 			</SettingsRow>
+			<SettingsRow label="Auto-collapse questions" testid="row-auto-collapse-questions">
+				<Toggle
+					checked={appearance?.autoCollapseQuestions ?? true}
+					label="auto collapse questions"
+					onChange={(on) => onSectionChange({ ...appearance, autoCollapseQuestions: on })}
+				/>
+			</SettingsRow>
 			<SettingsRow label="Heading weight" hint={`${resolved.mdRendering.headingWeight}`} testid="row-heading-weight">
 				<CommitInput
 					type="number"
