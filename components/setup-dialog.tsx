@@ -36,13 +36,13 @@ import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useBackdropDismiss } from "@/components/backdrop-dismiss";
 import type React from "react";
-import { type ModelCatalogEntry, type ModelSlotName, type ModelsSettings } from "@/src/core";
+import { normalizeBaseUrl, type ModelCatalogEntry, type ModelSlotName, type ModelsSettings, type UserSettings } from "@/src/core";
 import { prettyModel } from "@/components/usage-format";
 import { ModelMenuList } from "@/components/settings/model-menu";
 import { MenuShell } from "@/components/menu-shell";
 import { notifySettingsSaved, useSettingsSaved } from "@/components/settings-signal";
 import { Hint } from "@/components/ui/hint";
-import { type ProviderKeyInfo } from "@/components/settings/keys-section";
+import { BASE_URL_INVALID, composeBaseUrl, type ProviderKeyInfo } from "@/components/settings/keys-section";
 import { ProviderMenuList } from "@/components/settings/model-menu";
 import { ChatGPTBackgroundAccess } from "@/components/settings/chatgpt-connection";
 import { NativeSubscriptionBackgroundAccess, SubscriptionConnections } from "@/components/settings/subscription-connections";
@@ -121,12 +121,14 @@ export function SetupKeysBody({
 	providers,
 	provider,
 	value,
+	baseUrl,
 	saving,
 	error,
 	menuOpen,
 	onToggleMenu,
 	onPick,
 	onValue,
+	onBaseUrl,
 	onSave,
 	menuAnchor,
 }: {
@@ -137,12 +139,14 @@ export function SetupKeysBody({
 	 *  provider…". */
 	provider: ProviderKeyInfo | null;
 	value: string;
+	baseUrl: string;
 	saving: boolean;
 	error: string | null;
 	menuOpen: boolean;
 	onToggleMenu: () => void;
 	onPick: (p: ProviderKeyInfo) => void;
 	onValue: (v: string) => void;
+	onBaseUrl: (v: string) => void;
 	onSave: () => void;
 	/** The MenuShell anchor — wired by the wrapper (its triggerRef). */
 	menuAnchor: React.RefObject<HTMLDivElement | null>;
@@ -206,6 +210,24 @@ export function SetupKeysBody({
 						</button>
 					</div>
 				)}
+				{provider?.defaultBaseUrl && (
+					<div className="flex max-w-96 items-center gap-2">
+						<span className="shrink-0 font-ui text-xs text-muted-foreground">Base URL (optional)</span>
+						<input
+							type="text"
+							value={baseUrl}
+							onChange={(e) => onBaseUrl(e.target.value)}
+							onKeyDown={(e) => {
+								if (e.key === "Enter" && value.trim()) onSave();
+							}}
+							placeholder={provider.defaultBaseUrl}
+							aria-label={`${provider.label} base URL`}
+							data-testid="setup-key-base-url"
+							disabled={saving}
+							className="h-7 min-w-0 flex-1 rounded-sm border border-border bg-background px-1.5 font-mono text-xs text-foreground outline-none placeholder:text-muted-foreground/60 focus:border-muted-foreground/50"
+						/>
+					</div>
+				)}
 				{error && (
 					<p role="alert" data-testid="setup-key-error" className="text-xs text-red-400">
 						{error}
@@ -245,6 +267,7 @@ export function SetupDialog({
 	const [keyProviders, setKeyProviders] = useState<ProviderKeyInfo[] | undefined>(undefined);
 	const [keyProvider, setKeyProvider] = useState<ProviderKeyInfo | null>(null);
 	const [keyValue, setKeyValue] = useState("");
+	const [keyBaseUrl, setKeyBaseUrl] = useState("");
 	const [keySaving, setKeySaving] = useState(false);
 	const [keyError, setKeyError] = useState<string | null>(null);
 	const [keyMenuOpen, setKeyMenuOpen] = useState(false);
@@ -354,8 +377,31 @@ export function SetupDialog({
 	 *  the whole way. Shape-gate 400s keep their user-facing line inline. */
 	async function saveKey() {
 		if (!keyProvider || !keyValue.trim() || keySaving) return;
+		const baseUrl = keyBaseUrl.trim() ? normalizeBaseUrl(keyBaseUrl) : null;
+		if (keyBaseUrl.trim() && !baseUrl) {
+			setKeyError(BASE_URL_INVALID);
+			return;
+		}
 		setKeySaving(true);
 		setKeyError(null);
+		// The base URL lands first: the key save flips the stage to the pickers.
+		if (baseUrl) {
+			const current = await fetch("/api/settings")
+				.then((r) => r.json())
+				.then((b: { settings?: UserSettings | null }) => b.settings?.providers)
+				.catch(() => undefined);
+			const saved = await fetch("/api/settings/providers", {
+				method: "PUT",
+				headers: { "content-type": "application/json" },
+				body: JSON.stringify(composeBaseUrl(current, keyProvider.id, baseUrl)),
+			}).catch(() => null);
+			if (!saved || !saved.ok) {
+				setKeySaving(false);
+				setKeyError("Base URL save failed. Check your connection and try again.");
+				return;
+			}
+			notifySettingsSaved("providers");
+		}
 		const res = await fetch(`/api/keys/${encodeURIComponent(keyProvider.envVar)}`, {
 			method: "PUT",
 			headers: { "content-type": "application/json" },
@@ -369,6 +415,7 @@ export function SetupDialog({
 		}
 		setKeyProvider(null);
 		setKeyValue("");
+		setKeyBaseUrl("");
 		notifySettingsSaved("keys");
 	}
 
@@ -438,6 +485,7 @@ export function SetupDialog({
 								providers={keyProviders}
 								provider={keyProvider}
 								value={keyValue}
+								baseUrl={keyBaseUrl}
 								saving={keySaving}
 								error={keyError}
 								menuOpen={keyMenuOpen}
@@ -449,6 +497,7 @@ export function SetupDialog({
 									setKeyError(null);
 								}}
 								onValue={setKeyValue}
+								onBaseUrl={setKeyBaseUrl}
 								onSave={() => void saveKey()}
 							/>
 						)}

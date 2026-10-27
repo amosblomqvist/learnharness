@@ -16,6 +16,7 @@ import {
 	parseGeneralSettingsBody,
 	parseCompactionSettingsBody,
 	parseGraphSettingsBody,
+	parseProvidersSettingsBody,
 	SETTINGS_SECTIONS,
 } from "../src/server/settings-body.ts";
 
@@ -234,13 +235,48 @@ describe("parseCompactionSettingsBody (owner round 14)", () => {
 });
 
 describe("SETTINGS_SECTIONS (the route's section map)", () => {
-	it("maps exactly the seven record sections", () => {
+	it("maps exactly the eight record sections", () => {
 		// compaction joined (owner round 14): its own section PUT — the
 		// threshold is engine behavior, not an agent-section key.
 		assert.deepEqual(
 			Object.keys(SETTINGS_SECTIONS),
-			["general", "chat", "agent", "appearance", "graph", "compaction", "models"],
+			["general", "chat", "agent", "appearance", "graph", "compaction", "models", "providers"],
 		);
+	});
+});
+
+describe("parseProvidersSettingsBody (provider base-URL overrides)", () => {
+	it("parses per-provider base URLs — the NORMALIZED URL is what lands", () => {
+		const r = parseProvidersSettingsBody({
+			openai: { baseUrl: " https://proxy.example/v1/ " },
+			openrouter: { baseUrl: "https://proxy.example/api" },
+		});
+		assert.ok(r.ok);
+		assert.deepEqual(r.settings, {
+			openai: { baseUrl: "https://proxy.example/v1" },
+			openrouter: { baseUrl: "https://proxy.example/api" },
+		});
+	});
+
+	it("{} is the legal reset-everything write", () => {
+		const r = parseProvidersSettingsBody({});
+		assert.ok(r.ok);
+		assert.deepEqual(r.settings, {});
+	});
+
+	it("unknown provider ids are 400s (only the plain-key providers take an override)", () => {
+		const bad = parseProvidersSettingsBody({ "github-copilot": { baseUrl: "https://proxy.example" } });
+		assert.equal(bad.ok, false);
+		if (!bad.ok) assert.match(bad.error, /unknown provider "github-copilot"/);
+	});
+
+	it("a present entry must carry a usable http(s) URL (absent entry = catalog URL; say what you mean)", () => {
+		for (const entry of [{}, { baseUrl: "" }, { baseUrl: "ftp://proxy.example" }, { baseUrl: "https://proxy.example/v1?x=1" }, { baseUrl: 7 }, "https://proxy.example"]) {
+			const bad = parseProvidersSettingsBody({ openai: entry });
+			assert.equal(bad.ok, false, JSON.stringify(entry));
+			if (!bad.ok) assert.match(bad.error, /provider "openai" baseUrl must be an http\(s\) URL/);
+		}
+		assert.equal(parseProvidersSettingsBody("nope").ok, false);
 	});
 });
 

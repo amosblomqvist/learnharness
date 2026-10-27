@@ -14,6 +14,7 @@ import {
 	FACTORY_SETTINGS,
 	BACKGROUND_MODEL_ROLES,
 	isHexColor,
+	normalizeBaseUrl,
 	sanitizeUserSettings,
 } from "../src/core/settings.ts";
 
@@ -48,6 +49,20 @@ describe("isHexColor", () => {
 		for (const good of ["#fff", "#FFF", "#141414", "#8B5CF6"]) assert.equal(isHexColor(good), true, good);
 		for (const bad of ["fff", "#ffff", "#gggggg", "141414", "#12345", "", "white"]) {
 			assert.equal(isHexColor(bad), false, bad);
+		}
+	});
+});
+
+describe("normalizeBaseUrl (the one stored base-URL shape)", () => {
+	it("trims and strips trailing slashes — a model's path suffix appends to it as-is", () => {
+		assert.equal(normalizeBaseUrl("  https://proxy.example/v1/ "), "https://proxy.example/v1");
+		assert.equal(normalizeBaseUrl("http://localhost:8080//"), "http://localhost:8080");
+		assert.equal(normalizeBaseUrl("https://openrouter.ai/api"), "https://openrouter.ai/api");
+	});
+
+	it("unusable URLs → null (http(s) only; a query or hash would swallow the suffix)", () => {
+		for (const bad of ["", "proxy.example/v1", "ftp://proxy.example", "https://", "https://proxy.example/v1?key=1", "https://proxy.example/v1#x", "javascript:alert(1)"]) {
+			assert.equal(normalizeBaseUrl(bad), null, bad);
 		}
 	});
 });
@@ -124,6 +139,21 @@ describe("sanitizeUserSettings", () => {
 			const dropped = sanitizeUserSettings({ version: 1, graph: { extractionChunkTokens: junk } });
 			assert.equal(dropped?.graph?.extractionChunkTokens, undefined, `junk ${String(junk)} drops`);
 		}
+	});
+
+	it("providers: kept base URLs come back normalized; unknown ids and unusable URLs DROP", () => {
+		const out = sanitizeUserSettings({
+			version: 1,
+			providers: {
+				openai: { baseUrl: "https://proxy.example/v1/" },
+				openrouter: { baseUrl: "not a url" },
+				"no-such-provider": { baseUrl: "https://proxy.example" },
+				groq: "https://proxy.example",
+			},
+		});
+		assert.deepEqual(out?.providers, { openai: { baseUrl: "https://proxy.example/v1" } });
+		const junk = sanitizeUserSettings({ version: 1, providers: { openai: { baseUrl: 7 } } });
+		assert.deepEqual(junk?.providers, {});
 	});
 
 	it("out-of-range numbers CLAMP (proseFontSize, headingWeight)", () => {

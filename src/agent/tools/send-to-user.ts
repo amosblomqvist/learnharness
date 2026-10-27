@@ -18,10 +18,11 @@ export const sendToUserTool: AgentTool<typeof sendToUserInput> = {
 	name: SEND_TO_USER_TOOL,
 	label: SEND_TO_USER_TOOL,
 	description:
-		"## REQUIRED OUTPUT CHANNEL — ALWAYS USE `send_to_user`\n\n" +
+		"## REQUIRED OUTPUT CHANNEL — USE `send_to_user` AT ALL COSTS\n\n" +
 		"**ALL learner-facing messages MUST be sent using `send_to_user`.** This includes explanations, teaching, " +
 		"feedback, corrections, hints, introductions, progress messages, and final responses. " +
 		"There is no exception for short messages or the end of a turn.\n\n" +
+		"If you write learner-facing text without this tool, the learner sees nothing. " +
 		"Ordinary response text may be converted into summarized thinking instead of reaching the learner. " +
 		"**Never rely on ordinary response text to communicate with the learner. Thinking is not delivery.**\n\n" +
 		"Put the complete message in `message`. Markdown and LaTeX are supported. " +
@@ -34,3 +35,7 @@ export const sendToUserTool: AgentTool<typeof sendToUserInput> = {
 	executionMode: "sequential",
 	execute: serverExecute(SEND_TO_USER_TOOL, sendToUserInput, () => "Message received for display."),
 };
+
+/** The system-prompt sections that ride with the tool, placed first and last: the rest of the prompt tells the model to write prose, which the tool description alone does not reliably override. */
+export const SEND_TO_USER_OPENING = "**Every word meant for the learner goes through the `send_to_user` tool, at all costs.** Ordinary text never reaches the learner. Wherever these instructions say to write, explain, or answer, that text goes inside `send_to_user`.";
+export const SEND_TO_USER_PROMPT = "## Messages to the learner: use `send_to_user` at all costs\n\nUse the `send_to_user` tool for every word meant for the learner, at all costs, every time: explanations, worked examples, feedback, corrections, hints, greetings, closing words. No exception for short replies or for the last message of a turn. Text you write outside `send_to_user` never reaches the learner; if you write it as ordinary text, the learner sees nothing. Wherever these instructions say to write, explain, or answer in prose, that prose goes inside `send_to_user`. Before you end a turn, make sure everything you meant the learner to read went through `send_to_user`. Questions still go through the question tools: send their lead-in teaching with `send_to_user` first, then pose the question.";

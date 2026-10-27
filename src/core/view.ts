@@ -34,7 +34,7 @@
 
 import type { AssistantMessage, ToolResultMessage } from "@earendil-works/pi-ai";
 import type { LhMarkerMessage, LhMessage } from "./native-messages.ts";
-import { modelSolutionForConclude, PRACTICE_CONCLUDE_TOOL, problemInputForConclude, SEND_TO_USER_TOOL, sendToUserText } from "./native-messages.ts";
+import { endedEarly, modelSolutionForConclude, PRACTICE_CONCLUDE_TOOL, problemInputForConclude, SEND_TO_USER_TOOL, sendToUserText } from "./native-messages.ts";
 import { activeCompactionOf, type CompactionDetails } from "./compaction.ts";
 import { QUESTION_TOOLS } from "./pending.ts";
 import type { SubagentArtifactData, SubagentResultMeta } from "./contracts/jobs.ts";
@@ -225,7 +225,7 @@ export function projectView(messages: readonly LhMessage[], live?: LiveTurnState
 				} else if (block.type === "thinking") {
 					reasoning.push({ type: "reasoning", id: `${m.id}-r${reasoningN++}`, text: block.thinking, state: "done" });
 				} else if (block.type === "toolCall") {
-					const part = toolPartOf(block, live, streamingMessage);
+					const part = toolPartOf(block, live, streamingMessage, endedEarly(assistant));
 					if (block.name === SEND_TO_USER_TOOL) {
 						// Failed/aborted generations never execute their calls;
 						// the provider error/abort UI already owns that outcome.
@@ -305,6 +305,7 @@ function toolPartOf(
 	block: { id: string; name: string; arguments?: unknown },
 	live: LiveTurnState | undefined,
 	streamingMessage: boolean,
+	stoppedMessage: boolean,
 ): LhViewPart {
 	const part: LhViewPart = {
 		type: `tool-${block.name}`,
@@ -330,6 +331,10 @@ function toolPartOf(
 			part.state = "output-available";
 			part.output = exec.output;
 		}
+	} else if (stoppedMessage) {
+		// A stopped turn's call never ran — aborted (silent), never a pending question.
+		part.state = "output-error";
+		part.errorText = "Operation aborted";
 	} else {
 		// No execution yet: live ONLY on positive evidence — the call's own
 		// message is streaming this turn (its arguments may literally be

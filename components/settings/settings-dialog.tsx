@@ -37,6 +37,7 @@ import {
 	type AppearanceSettings,
 	type CompactionSettings,
 	type GraphSettings,
+	type ProvidersSettings,
 	type UserSettings,
 } from "@/src/core";
 import { useAppearance } from "./appearance.tsx";
@@ -226,7 +227,7 @@ export function SettingsDialogBody({
 	 *  schema mistake caught by the validation surface). */
 	const write = useCallback(
 		async (
-			section: "general" | "agent" | "models" | "appearance" | "graph" | "compaction",
+			section: "general" | "agent" | "models" | "appearance" | "graph" | "compaction" | "providers",
 			body: object,
 		) => {
 			setError(null);
@@ -370,7 +371,13 @@ export function SettingsDialogBody({
 							)}
 							{active === "keys" && (
 								<SettingsSection title="Providers" testid="section-keys">
-									<KeysSection initialRow={initialRow ?? undefined} />
+									<KeysSection
+										initialRow={initialRow ?? undefined}
+										baseUrls={record.providers}
+										onBaseUrlsChange={(next: ProvidersSettings) =>
+											write("providers", next)
+										}
+									/>
 								</SettingsSection>
 							)}
 							{active === "agent" && (

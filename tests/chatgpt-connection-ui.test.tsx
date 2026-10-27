@@ -81,7 +81,7 @@ test("Providers has exactly four ordered sections; unknown variables stay masked
   assert.equal(url, "/api/keys");
   return Response.json({ providers: [{ id: "openai", envVar: "OPENAI_API_KEY", label: "OpenAI" }], keys: [{ id: "FUTURE_VAR", info: null, present: true, masked: "…abcd", source: "file", shadowedByEnv: false }] });
  };
- fixture(); await mount(<KeysSection />);
+ fixture(); await mount(<KeysSection baseUrls={undefined} onBaseUrlsChange={async () => {}} />);
  const headings = [...document.querySelectorAll('[data-testid^="group-"] > p')].map((el) => el.textContent);
  assert.deepEqual(headings, ["Model API keys", "Subscriptions", "Dictation", "Search"]);
  assert(byTest("key-deepgram_api_key").closest('[data-testid="group-dictation"]'));

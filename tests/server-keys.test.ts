@@ -51,7 +51,7 @@ fs.writeFileSync(
 process.env.OPENROUTER_API_KEY = "sk-or-v1-envvalue99";
 
 // Import AFTER env setup — module init runs the boot fill-gap + snapshot.
-const { deleteKey, initAuthEnv, keyStatuses, keyValue, resolveKeyStatuses, saveKey, isWritableAuthKey } = await import(
+const { deleteKey, initAuthEnv, keyStatuses, keyValue, resolveKeyStatuses, saveKey, isWritableAuthKey, providerKeyList } = await import(
 	"../src/server/keys.ts"
 );
 const { authStore } = await import("../src/store/auth.ts");
@@ -205,5 +205,14 @@ describe("resolveKeyStatuses (pure projection)", () => {
 		assert.ok(row, "the curated id is always in the projection");
 		assert.equal(row.source, "env");
 		assert.ok(!row.shadowedByEnv, "same value both places: redundant, not shadowed");
+	});
+});
+
+describe("providerKeyList (the Keys page's provider roster)", () => {
+	it("each row carries its defaultBaseUrl — the catalog root a base-URL override replaces", () => {
+		const list = providerKeyList();
+		assert.equal(list.find((p) => p.id === "openai")?.defaultBaseUrl, "https://api.openai.com/v1");
+		assert.equal(list.find((p) => p.id === "openrouter")?.defaultBaseUrl, "https://openrouter.ai/api");
+		assert.equal(list.find((p) => p.id === "typesafe")?.defaultBaseUrl, undefined);
 	});
 });

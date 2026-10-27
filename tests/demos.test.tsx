@@ -43,7 +43,7 @@ import {
 import { svgNaturalWidth, VisualCard, VisualOutputCard } from "../components/artifacts/visual-card.tsx";
 import { slugFilename } from "../components/artifacts/download.ts";
 import { chartSize } from "../components/session-overlay.tsx";
-import { SubagentSteerCard } from "../components/artifacts/steer-card.tsx";
+import { HeldArtifacts, SubagentSteerCard } from "../components/artifacts/steer-card.tsx";
 import { DispatchCard } from "../components/artifacts/dispatch-card.tsx";
 import { JobCard, PdfJobCard } from "../components/artifacts/job-card.tsx";
 import { ToolCallCard } from "../components/artifacts/tool-call-card.tsx";
@@ -481,6 +481,16 @@ describe("steer card rendering (the delivered artifact)", () => {
 	});
 });
 
+
+describe("held artifacts rendering (a finished result whose steer has not landed)", () => {
+	it("renders a finished figure until its steer lands", () => {
+		const svg = '<svg xmlns="http://www.w3.org/2000/svg"><circle r="20"/></svg>';
+		const job = { id: "jv", kind: "visual", chatId: "c", toolCallId: "cv", status: "running", result: { svg } } as JobRecord;
+		const steer = buildSubagentSteer(job, { svg });
+		assert.ok(renderToStaticMarkup(<HeldArtifacts jobs={[job]} messages={[]} />).includes("circle"));
+		assert.equal(renderToStaticMarkup(<HeldArtifacts jobs={[job]} messages={projectNative([steer])} />), "");
+	});
+});
 
 describe("artifact chrome — scrollbar, invert toggles, downloads (release polish 2026-10-07)", () => {
 	it("demo iframe: scrolling OFF (the bridge auto-sizes; a scrollable iframe traps the wheel) and the invert + download buttons render", () => {

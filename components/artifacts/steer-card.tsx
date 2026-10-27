@@ -1,7 +1,7 @@
 "use client";
 
 import { CheckIcon, CircleX } from "lucide-react";
-import type { PdfResult, ResearchResult, SubagentArtifactData } from "@/src/core";
+import type { JobRecord, PdfResult, ResearchResult, SubagentArtifactData, SubagentResultMeta } from "@/src/core";
 import type { LhViewMessage } from "@/src/core";
 import { isSubagentFailure } from "@/src/core";
 import { DemoOutputCard } from "@/components/artifacts/demo-card";
@@ -60,6 +60,14 @@ export function SubagentSteerCard({ message }: { message: LhViewMessage }) {
 		case "visual":
 			return <VisualOutputCard output={data.result} messageId={message.id} initialInverted={data.ui?.inverted ?? false} />;
 	}
+}
+
+/** Finished figures and demos whose steer is still waiting behind an open question, drawn at the transcript's end where the steer will land. */
+export function HeldArtifacts({ jobs, messages }: { jobs: readonly JobRecord[]; messages: readonly LhViewMessage[] }) {
+	const delivered = new Set(messages.map((m) => (m.metadata as { subagentResult?: SubagentResultMeta } | undefined)?.subagentResult?.toolCallId));
+	return jobs
+		.filter((j) => (j.kind === "visual" || j.kind === "demo") && j.result !== undefined && !delivered.has(j.toolCallId))
+		.map((j) => (j.kind === "demo" ? <DemoOutputCard key={j.id} output={j.result} /> : <VisualOutputCard key={j.id} output={j.result} />));
 }
 
 /** The aborted-job chip: mirrors the complete-badge one-liner — the

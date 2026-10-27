@@ -16,7 +16,7 @@ import {
 } from "./tools.ts";
 import { practiceTools, type PracticeToolContext } from "./tools/practice.ts";
 import { healToolRecord, withArgumentHeal } from "./tools/heal.ts";
-import { sendToUserTool } from "./tools/send-to-user.ts";
+import { SEND_TO_USER_OPENING, SEND_TO_USER_PROMPT, sendToUserTool } from "./tools/send-to-user.ts";
 import { quizInputObject, quizInputProblems } from "../core/question-core.ts";
 import { QUESTION_TOOLS, type EnabledTools } from "../core/pending.ts";
 import { toLlmMessages, nativeInputCause, PRACTICE_PROBLEM_TOOL } from "../core/native-messages.ts";
@@ -181,6 +181,7 @@ function baseAgentOptions(kind: AgentKind, opts: AgentBuildOptions, tools: Agent
 	// ("practice" is not a ModelRole) honest about that.
 	const engine = opts.engine ?? piEngineFor(kind as "prober" | "teacher");
 	const stopper = makeQuestionStopper(kind);
+	const sendsToUser = opts.tools === undefined && engine.model.id.toLowerCase().includes("claude");
 	const systemPrompt = opts.promptSwitches
 		? composeInstructions(kind, opts.promptSwitches)
 		: composedInstructions[kind]!;
@@ -193,19 +194,14 @@ function baseAgentOptions(kind: AgentKind, opts: AgentBuildOptions, tools: Agent
 		identity: APP_IDENTITY,
 		sessionId: opts.chatId,
 		initialState: {
-			systemPrompt,
+			systemPrompt: sendsToUser ? `${SEND_TO_USER_OPENING}\n\n---\n\n${systemPrompt}\n\n---\n\n${SEND_TO_USER_PROMPT}` : systemPrompt,
 			model: engine.model,
 			thinkingLevel: engine.level,
 			// Conditional registry inclusion, like the graph-tool gates: when
 			// closed, neither the tool nor its usage instructions reach the model.
 			// Match Claude across providers (including OpenRouter), not the API
 			// transport. Explicit test registries remain caller-owned.
-			tools: [
-				...tools,
-				...(opts.tools === undefined && engine.model.id.toLowerCase().includes("claude")
-					? [withArgumentHeal(sendToUserTool)]
-					: []),
-			],
+			tools: [...tools, ...(sendsToUser ? [withArgumentHeal(sendToUserTool)] : [])],
 			messages: opts.messages ?? [],
 		},
 		streamFn: engine.streamFn,

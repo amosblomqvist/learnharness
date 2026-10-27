@@ -21,7 +21,7 @@ import { LiveToolCard } from "@/components/artifacts/live-tool-card";
 import { Separator } from "@/components/ui/separator";
 import { AnsweredCard } from "@/components/answered-card";
 import { artifactRenderers } from "@/components/artifacts";
-import { SubagentSteerCard } from "@/components/artifacts/steer-card";
+import { HeldArtifacts, SubagentSteerCard } from "@/components/artifacts/steer-card";
 import { Composer } from "@/components/composer";
 import { useEnterSubmits } from "@/components/enter-submits";
 import { blurAfterPointerClick } from "@/components/focus-hygiene";
@@ -1541,6 +1541,7 @@ export function Chat({
 									)}
 								</Fragment>
 							))}
+							<HeldArtifacts jobs={jobs} messages={messages} />
 
 							{/* THE placeholder, ACTION-gated (owner, optimistic round
 							    3, 2026-10-02): spinner + shimmered Thinking… from the

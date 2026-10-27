@@ -19,6 +19,9 @@ import {
 	type ToolExecuteContext,
 } from "../src/agent/tool-execute.ts";
 import { askUserQuestionTool } from "../src/agent/tools.ts";
+import { danglingQuestionOf, newAnswerResult, toLlmMessages, type LhMessage } from "../src/core/native-messages.ts";
+import { projectView } from "../src/core/view.ts";
+import { transformMessages } from "@earendil-works/pi-ai/api/transform-messages";
 
 const DEFAULT_TIMEOUT_MS = 30_000;
 
@@ -152,5 +155,52 @@ describe("serverExecute: cooperative settle, mapping parity, question bypass", (
 		assert.deepEqual(img.details, { page: 2 });
 		const imgNoDetails = toToolResult({ text: "t", images: [{ data: "AAAA", mimeType: "image/png" }] });
 		assert.equal(imgNoDetails.details, null, "image reads keep the record part output-less (null details)");
+	});
+});
+
+describe("a turn stopped mid-question", () => {
+	const stoppedRecord = (stopReason = "aborted"): LhMessage[] =>
+		[
+			{ id: "u1", role: "user", content: "teach me probability", timestamp: 0 },
+			{
+				id: "a1",
+				role: "assistant",
+				content: [{ type: "toolCall", id: "call-q1", name: "probe", arguments: { question: "Q?", options: ["a", "b"], correctAnswer: "a" } }],
+				stopReason: "toolUse",
+				timestamp: 0,
+			},
+			{ ...newAnswerResult("call-q1", "probe", { ok: true } as never), id: "r1" },
+			{
+				id: "a2",
+				role: "assistant",
+				content: [
+					{ type: "thinking", thinking: "test notation next" },
+					{ type: "toolCall", id: "call-q2", name: "probe", arguments: { correctAnswer: "c", explanation: "union" } },
+				],
+				stopReason,
+				timestamp: 0,
+			},
+		] as unknown as LhMessage[];
+
+	it("the half-written question is not pending — the server stops waiting for an answer", () => {
+		assert.equal(danglingQuestionOf(stoppedRecord()), null);
+		assert.equal(danglingQuestionOf(stoppedRecord("error")), null);
+		assert.equal(danglingQuestionOf(stoppedRecord("toolUse"))?.toolCallId, "call-q2", "a finished question still waits");
+	});
+
+	it("the view marks the call aborted, so the dock never mounts and the transcript stays silent", () => {
+		const part = projectView(stoppedRecord()).flatMap((m) => m.parts).find((p) => p.toolCallId === "call-q2");
+		assert.equal(part?.state, "output-error");
+		assert.equal(part?.errorText, "Operation aborted");
+	});
+
+	it("the next turn sends no result for the dropped call (pi-ai skips the stopped message)", () => {
+		const model = { provider: "anthropic", api: "anthropic-messages", id: "test", input: ["text"] } as never;
+		const wire = transformMessages(toLlmMessages(stoppedRecord()), model);
+		const callIds = new Set(wire.flatMap((m) => (m.role === "assistant" ? m.content.filter((b) => b.type === "toolCall").map((b) => b.id) : [])));
+		for (const m of wire) {
+			if (m.role === "toolResult") assert.ok(callIds.has(m.toolCallId), `result ${m.toolCallId} has its call`);
+		}
+		assert.ok(!wire.some((m) => m.role === "toolResult" && m.toolCallId === "call-q2"));
 	});
 });

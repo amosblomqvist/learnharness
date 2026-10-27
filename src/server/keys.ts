@@ -52,6 +52,7 @@ import {
 	validateKeyShape,
 } from "../core/auth-keys.ts";
 import { authStore } from "../store/auth.ts";
+import { providerBaseUrlRoot } from "../agent/models.ts";
 import { isSubscriptionProvider, subscriptionConnected } from "../agent/subscription-connections.ts";
 
 // The once-per-process boot record — globalThis anchor (HMR re-imports the
@@ -78,12 +79,9 @@ export function isWritableAuthKey(id: string): boolean {
 	return isKnownAuthKey(id) || isProviderEnvVar(id);
 }
 
-/** The settings page's provider dropdown: every pi-ai provider that takes
- *  a plain key ({id, envVar, label} — no-drift-pinned, see the table's doc
- *  in core/auth-keys.ts and tests/auth-provider-keys.test.ts). Sorted by
- *  id for a stable payload. */
+/** The settings page's provider dropdown: every pi-ai provider that takes a plain key ({id, envVar, label} — no-drift-pinned, see the table's doc in core/auth-keys.ts and tests/auth-provider-keys.test.ts) plus its defaultBaseUrl (providerBaseUrlRoot). Sorted by id for a stable payload. */
 export function providerKeyList() {
-	return [...AUTH_PROVIDER_KEYS].sort((a, b) => a.id.localeCompare(b.id));
+	return AUTH_PROVIDER_KEYS.map((p) => ({ ...p, defaultBaseUrl: providerBaseUrlRoot(p.id) })).sort((a, b) => a.id.localeCompare(b.id));
 }
 
 /** The fresh-user switch (owner, interlude 2026-09-22): env keys are

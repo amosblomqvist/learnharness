@@ -21,9 +21,11 @@ import type {
 	GeneralSettings,
 	GraphSettings,
 	ModelsSettings,
+	ProvidersSettings,
 	RoleModelOverride,
 } from "../core/settings.ts";
-import { BACKGROUND_MODEL_ROLES, COMPACTION_THRESHOLD_FLOOR, EXTRACTION_CHUNK_TOKENS_FLOOR, MODEL_SLOTS } from "../core/settings.ts";
+import { BACKGROUND_MODEL_ROLES, COMPACTION_THRESHOLD_FLOOR, EXTRACTION_CHUNK_TOKENS_FLOOR, MODEL_SLOTS, normalizeBaseUrl } from "../core/settings.ts";
+import { isAuthProviderId } from "../core/auth-keys.ts";
 import { WRITABLE_TOOL_KEYS } from "../core/pending.ts";
 
 /** Parsed-or-rejected — `ok: false` carries the 400's error message. */
@@ -375,6 +377,25 @@ export function parseCompactionSettingsBody(body: unknown): SettingsBodyResult<C
 	return { ok: true, settings };
 }
 
+/** providers: { [providerId]: { baseUrl } } — plain-key provider ids only; a present entry must carry a usable http(s) URL, stored normalized. */
+export function parseProvidersSettingsBody(body: unknown): SettingsBodyResult<ProvidersSettings> {
+	const raw = asRecord(body);
+	if (!raw) return { ok: false, error: "Invalid JSON body" };
+	const settings: ProvidersSettings = {};
+	for (const [id, entry] of Object.entries(raw)) {
+		if (!isAuthProviderId(id)) {
+			return { ok: false, error: `unknown provider "${id}"` };
+		}
+		const baseUrl = asRecord(entry)?.baseUrl;
+		const normalized = typeof baseUrl === "string" ? normalizeBaseUrl(baseUrl) : null;
+		if (!normalized) {
+			return { ok: false, error: `provider "${id}" baseUrl must be an http(s) URL with no query or hash` };
+		}
+		settings[id] = { baseUrl: normalized };
+	}
+	return { ok: true, settings };
+}
+
 /** The section→parser map for PUT /api/settings/[section] (the route also
  *  carries the special prompts sub-resource). */
 export const SETTINGS_SECTIONS = {
@@ -385,6 +406,7 @@ export const SETTINGS_SECTIONS = {
 	graph: parseGraphSettingsBody,
 	compaction: parseCompactionSettingsBody,
 	models: parseModelsSettingsBody,
+	providers: parseProvidersSettingsBody,
 } as const;
 
 export type SettingsSectionName = keyof typeof SETTINGS_SECTIONS;

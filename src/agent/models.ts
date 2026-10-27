@@ -80,6 +80,29 @@ export interface ResolvedModelSpec {
 	provider: string;
 	id: string;
 	thinkingLevel?: ThinkingLevel;
+	baseUrl?: string;
+}
+
+/** The URL prefix all a provider's catalog models share — what a base-URL override replaces. Some providers split by API (OpenRouter: `/api` and `/api/v1`). */
+export function providerBaseUrlRoot(provider: string): string | undefined {
+	const urls = piModels().getModels(provider).map((m) => m.baseUrl);
+	if (urls.length === 0) return undefined;
+	let root = urls[0]!;
+	for (const url of urls) {
+		while (url !== root && !url.startsWith(`${root}/`)) {
+			const cut = root.lastIndexOf("/");
+			// never cut into the scheme's "//" — different hosts share no root
+			if (cut <= root.indexOf("//") + 1) return undefined;
+			root = root.slice(0, cut);
+		}
+	}
+	return root;
+}
+
+function withBaseUrl(model: Model<Api>, baseUrl: string): Model<Api> {
+	const root = providerBaseUrlRoot(model.provider);
+	if (root === undefined) return model;
+	return { ...model, baseUrl: `${baseUrl}${model.baseUrl.slice(root.length)}` };
 }
 
 /** The first entry of the baked default order the model supports (owner,
@@ -101,10 +124,11 @@ function defaultThinkingLevel(model: Model<Api>): ThinkingLevel {
 export function piEngineForSpec(spec: ResolvedModelSpec, background: boolean | (() => boolean) = true, lifecycle?: ChatGPTDispatchLifecycle): PiEngine {
 	const models: Models = piModels();
 	const nativeId = nativeSubscriptionId(spec.provider);
-	const model = spec.provider === "chatgpt" ? chatGPTModel(spec.id) : nativeId ? nativeSubscriptionModel(spec.provider, spec.id) : models.getModel(spec.provider, spec.id);
-	if (!model) {
+	const catalogModel = spec.provider === "chatgpt" ? chatGPTModel(spec.id) : nativeId ? nativeSubscriptionModel(spec.provider, spec.id) : models.getModel(spec.provider, spec.id);
+	if (!catalogModel) {
 		throw new Error(`${spec.provider} catalog has no model ${spec.id}`);
 	}
+	const model = spec.baseUrl ? withBaseUrl(catalogModel, spec.baseUrl) : catalogModel;
 	// UNSET level → the baked default order (first entry the model
 	// supports); SET level → pi's native nearest-clamp (model swaps keep
 	// the user's intent and adapt honestly).
