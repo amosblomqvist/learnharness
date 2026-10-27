@@ -2018,19 +2018,36 @@ function DockOverlay({
 	// 2026-10-05): the old fixed fractions (55dvh / 40vh) cut long problems
 	// off absurdly short — the cap is now the AVAILABLE COLUMN (the
 	// scroller already starts below the top bar) minus a 2rem breathing
-	// gap, carried as --dock-max-h for the docks' scroll areas.
+	// gap, carried as --dock-max-h for the docks' scroll areas. The cap also
+	// subtracts the dock's own CHROME (confidence row, thinking field, footer —
+	// everything in the block but the scroll area): capping the scroll area
+	// alone at the column let the whole block overflow the top, and the hidden
+	// head of a long question could only be reached by scrolling the
+	// transcript, which folds the dock. Stable: the cap moves the scroll area
+	// and the block by the same amount, so the chrome reading doesn't change.
 	const [sbInset, setSbInset] = useState(0);
 	const [dockMaxH, setDockMaxH] = useState<number | null>(null);
 	useEffect(() => {
 		const el = scrollRef.current;
+		const block = blockRef.current;
 		if (!el) return;
+		let chrome = 0;
 		const measure = () => {
 			setSbInset(Math.round((el.offsetWidth - el.clientWidth) / 2));
-			setDockMaxH(Math.max(el.clientHeight - 32, 160));
+			const area = block?.querySelector<HTMLElement>("[data-dock-scroll]");
+			// Only a rendered scroll area gives a true reading (collapsed, the
+			// form is hidden) — otherwise keep the last chrome.
+			if (block && area && area.offsetParent !== null) chrome = block.offsetHeight - area.offsetHeight;
+			setDockMaxH(Math.max(el.clientHeight - 32 - chrome, 160));
 		};
 		measure();
 		window.addEventListener("resize", measure);
-		return () => window.removeEventListener("resize", measure);
+		const ro = block ? new ResizeObserver(measure) : null;
+		if (block) ro?.observe(block);
+		return () => {
+			window.removeEventListener("resize", measure);
+			ro?.disconnect();
+		};
 	}, [scrollRef]);
 
 	// GROWTH MUTE (owner round, 2026-10-05 — the generation churn): during a
