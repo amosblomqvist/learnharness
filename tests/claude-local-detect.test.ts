@@ -471,3 +471,24 @@ describe("external review (P1, P2)", () => {
 		delete (globalThis as Record<symbol, unknown>)[Symbol.for("lh.claudeLocal.sdk")];
 	});
 });
+
+describe("external review: the probe never logs the child's stderr (P1)", () => {
+	it("a probe failure whose SDK error carries a stderr tail logs only the part before it", { skip: !posix }, async () => {
+		const SECRET = "sk-ant-oat01-NEVER-LOG-THIS";
+		writeSettings({ version: 1, claudeLocal: { enabled: true, binaryPath: fakeBinary(path.join(directory, "p1-stderr")) } });
+		const failing = Object.assign(new Error(`Claude Code process exited with code 2. stderr: oauth refresh failed: ${SECRET}`), { errorClass: "process_exited_nonzero", exitCode: 2 });
+		setClaudeQueryForTests(fakeQuery({ reject: failing }).query);
+		const lines: string[] = [];
+		const original = { error: console.error, info: console.info, warn: console.warn, log: console.log };
+		const capture = (...args: unknown[]) => { lines.push(args.map(String).join(" ")); };
+		Object.assign(console, { error: capture, info: capture, warn: capture, log: capture });
+		let status;
+		try { status = await server.refreshClaudeLocal({ force: true }); } finally { Object.assign(console, original); }
+		assert.equal(status.state, "unavailable");
+		const logged = lines.join("\n");
+		assert.match(logged, /probe failed: Claude Code process exited with code 2/);
+		assert.ok(!logged.includes(SECRET) && !logged.includes("oauth refresh"), logged);
+		assert.ok(!JSON.stringify(status).includes(SECRET));
+		assert.equal(server.claudeLocalStatusNow().error?.includes(SECRET), false);
+	});
+});

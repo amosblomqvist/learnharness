@@ -39,12 +39,19 @@ export function claudeLaunchOptions(launch: ClaudeLocalLaunch, base: NodeJS.Proc
 				windowsHide: true,
 			});
 			// Debug aid (LH_CLAUDE_LOCAL_DEBUG=1, the LH_PROVIDER_EVENTS idiom): the
-			// exact command line and the child's stderr on the server log.
-			if (base.LH_CLAUDE_LOCAL_DEBUG === "1") {
-				console.error(`[claude-local] spawn ${child.spawnfile} ${options.args.join(" ")}`);
-				child.stderr?.on("data", (chunk) => process.stderr.write(`[claude-local stderr] ${chunk}`));
-			}
+			// exact command line on the server log. Never the child's stderr: it
+			// may carry anything Claude Code prints about its login.
+			if (base.LH_CLAUDE_LOCAL_DEBUG === "1") console.error(`[claude-local] spawn ${child.spawnfile} ${options.args.join(" ")}`);
 			return child;
 		},
 	};
+}
+
+/** The SDK appends the child's stderr tail to its process errors
+ *  (". stderr: …"). That tail may carry anything Claude Code prints about
+ *  its login, so it is cut before a message is logged, classified or
+ *  recorded — nothing from the child's stderr is ever persisted. */
+export function withoutStderr(message: string): string {
+	const index = message.indexOf(". stderr:");
+	return index < 0 ? message : message.slice(0, index);
 }

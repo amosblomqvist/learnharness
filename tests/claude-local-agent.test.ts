@@ -582,3 +582,28 @@ describe("external review (P0–P3)", () => {
 		assert.deepEqual(roles(messages), ["user", "assistant", "assistant", "toolResult"]);
 	});
 });
+
+describe("external review: the child's stderr is never persisted (P1)", () => {
+	const SECRET = "sk-ant-oat01-NEVER-LOG-THIS";
+	async function captured<T>(run: () => Promise<T>): Promise<{ value: T; logged: string }> {
+		const lines: string[] = [];
+		const original = { error: console.error, info: console.info, warn: console.warn, log: console.log };
+		const capture = (...args: unknown[]) => { lines.push(args.map((a) => a instanceof Error ? `${a.message} ${a.stack}` : typeof a === "string" ? a : JSON.stringify(a)).join(" ")); };
+		Object.assign(console, { error: capture, info: capture, warn: capture, log: capture });
+		try { return { value: await run(), logged: lines.join("\n") }; } finally { Object.assign(console, original); }
+	}
+	it("a crash whose SDK error carries a stderr tail logs and records none of it; no stderr callback is passed", async () => {
+		const { value, logged } = await captured(() => runAgent([{ emitStderr: `token=${SECRET}\n` }, { crash: "Claude Code process exited with code 2", stderr: `oauth refresh failed: ${SECRET}` }]));
+		assert.match(logged, /\[claude-local\] .*exited with code 2/, "the cause is still logged");
+		assert.ok(!logged.includes(SECRET) && !logged.includes("oauth refresh"), logged);
+		assert.ok(!JSON.stringify(value.messages).includes(SECRET));
+		assert.ok(!JSON.stringify(value.events).includes(SECRET));
+		assert.equal(value.fake.turns[0]!.options.stderr, undefined, "the app never asks for the child's stderr");
+	});
+	it("the tool-less stream masks and logs nothing of the stderr tail either", async () => {
+		const fake = fakeClaude([{ crash: "Claude Code process exited with code 1", stderr: SECRET }]);
+		const { value, logged } = await captured(async () => claudeLocalStream(() => false, undefined, runtimeFor(async () => fake.query))(model, normalizeContext({ messages: [{ role: "user", content: "x", timestamp: 1 }] })).result());
+		assert.equal(value.stopReason, "error");
+		assert.ok(!logged.includes(SECRET) && !JSON.stringify(value).includes(SECRET));
+	});
+});

@@ -11,6 +11,7 @@ import { AssistantMessageEventStream } from "@earendil-works/pi-ai/utils/event-s
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import { markUnadmittedUsage, type SubscriptionDispatchLifecycle } from "../subscription-request-cycle.ts";
 import { productionRuntime, type ClaudeLocalRuntime } from "./agent.ts";
+import { withoutStderr } from "./launch.ts";
 import { claudeLocalError, runClaudeTurn } from "./run.ts";
 import { emptyAssistant } from "./stream-mapper.ts";
 import { flattenTranscript } from "./transcript.ts";
@@ -62,7 +63,7 @@ export function claudeLocalStream(background: () => boolean, lifecycle?: Subscri
 				if (!done) throw new Error(signal.aborted ? "aborted" : "Claude Code ended without a response");
 				output.push(done);
 			} catch (error) {
-				const message = error instanceof Error ? error.message : String(error);
+				const message = withoutStderr(error instanceof Error ? error.message : String(error));
 				const failed = { ...emptyAssistant(model, signal.aborted ? "aborted" : "error"), errorMessage: claudeLocalError(message) };
 				if (!committed) { markUnadmittedUsage(failed.usage); lifecycle?.noDispatch(runtime.denial(scope, controller, options?.signal?.aborted === true, purpose)); }
 				output.push({ type: "error", reason: failed.stopReason as "error" | "aborted", error: failed });

@@ -30,7 +30,7 @@ import type { AgentToolResult, AgentTool, ThinkingLevel } from "@earendil-works/
 import type { AssistantMessage, AssistantMessageEvent, Model } from "@earendil-works/pi-ai";
 import { CLAUDE_LOCAL, type ClaudeLocalSystemPromptMode, type ClaudeLocalUsageReport } from "../../core/contracts/claude-local.ts";
 import type { ClaudeLocalLaunch } from "./bridge.ts";
-import { claudeLaunchOptions } from "./launch.ts";
+import { claudeLaunchOptions, withoutStderr } from "./launch.ts";
 import { ClaudeStreamMapper } from "./stream-mapper.ts";
 import { createToolBridge } from "./tools.ts";
 import { toolPrefixNote } from "./transcript.ts";
@@ -65,8 +65,6 @@ export interface ClaudeTurnParams {
 	shouldStopAfterBatch?: (calls: BatchCall[]) => boolean;
 	/** Called right before the child is spawned (the admission commit). */
 	beforeDispatch?: () => void;
-	/** The child's stderr tail (diagnostics in error messages). */
-	onStderr?: (line: string) => void;
 	/** Every raw SDK message, as it arrives (the LH_PROVIDER_EVENTS recorder). */
 	onProviderEvent?: (message: SDKMessage) => void;
 	/** Claude Code reported (system/init) that it would bill an API key: the
@@ -162,7 +160,6 @@ export async function* runClaudeTurn(params: ClaudeTurnParams): AsyncGenerator<C
 			return {};
 		}) satisfies HookCallback] }],
 	};
-	let stderr = "";
 	const options: ClaudeQueryOptions = {
 		...claudeLaunchOptions(params.launch),
 		tools: [],
@@ -183,7 +180,8 @@ export async function* runClaudeTurn(params: ClaudeTurnParams): AsyncGenerator<C
 		...(bridge ? { mcpServers: { [serverName]: bridge } } : {}),
 		hooks,
 		abortController: abort,
-		stderr: (data) => { stderr = (stderr + data).slice(-2000); params.onStderr?.(data); },
+		// No `stderr` callback: the child's stderr may carry anything Claude Code
+		// prints about its login, so the app never reads, keeps or logs it.
 	};
 	// Aborted before the spawn: nothing is committed or started (the
 	// caller's no-dispatch path reports it).
@@ -197,8 +195,9 @@ export async function* runClaudeTurn(params: ClaudeTurnParams): AsyncGenerator<C
 	try { handle = params.query({ prompt: promptOf(params.blocks, AbortSignal.any([abort.signal, promptDone.signal])), options }); }
 	catch (error) {
 		signal.removeEventListener("abort", onAbort);
-		yield { type: "assistant", event: mapper.finish({ reason: "error", message: error instanceof Error ? error.message : String(error) }) };
-		yield { type: "result", ok: false, errors: [error instanceof Error ? error.message : String(error)] };
+		const detail = withoutStderr(error instanceof Error ? error.message : String(error));
+		yield { type: "assistant", event: mapper.finish({ reason: "error", message: detail }) };
+		yield { type: "result", ok: false, errors: [detail] };
 		return;
 	}
 	// Pump the SDK's iterator into the same queue as the bridge's events.
@@ -320,7 +319,7 @@ export async function* runClaudeTurn(params: ClaudeTurnParams): AsyncGenerator<C
 		if (!sawResult) {
 			const cause = failure instanceof Error ? failure.message : failure ? String(failure) : signal.aborted ? "aborted" : "Claude Code exited without a result";
 			const reason = signal.aborted ? "aborted" : "error";
-			const detail = stderr.trim() ? `${cause} — ${stderr.trim().split("\n").slice(-3).join(" ")}` : cause;
+			const detail = withoutStderr(cause);
 			if (reason === "error") console.error(`[claude-local] Claude Code turn ended without a result: ${detail}`);
 			if (mapper.started && !mapper.stopped) yield { type: "assistant", event: mapper.finish({ reason, message: detail }) };
 			else if (reason === "error" && !stopRequested) {

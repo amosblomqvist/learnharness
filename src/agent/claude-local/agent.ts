@@ -29,6 +29,7 @@ import type { AdmissionScope, NoDispatchKind, SubscriptionDispatchLifecycle } fr
 import { markUnadmittedUsage } from "../subscription-request-cycle.ts";
 import * as bridge from "./bridge.ts";
 import type { ClaudeLocalLaunch } from "./bridge.ts";
+import { withoutStderr } from "./launch.ts";
 import { claudeLocalError, runClaudeTurn } from "./run.ts";
 import { loadClaudeQuery, type ClaudeQuery, type SDKMessage } from "./sdk.ts";
 import { emptyAssistant } from "./stream-mapper.ts";
@@ -177,7 +178,7 @@ export class ClaudeLocalAgent implements LiveAgent {
 		// The failure path: an assistant error message (pi's hard exit).
 		const fail = async (message: string, reason: "error" | "aborted" = "error") => {
 			// The raw cause goes to the server log (the learner sees the masked text).
-			if (reason === "error") console.error(`[claude-local] turn failed: ${message}`);
+			if (reason === "error") console.error(`[claude-local] turn failed: ${withoutStderr(message)}`);
 			const error: AssistantMessage = { ...emptyAssistant(model, reason), thinkingLevel: this.state.thinkingLevel, errorMessage: claudeLocalError(message) };
 			if (!committed) { markUnadmittedUsage(error.usage); options.lifecycle?.noDispatch(runtime.denial(scope, controller, signal.aborted, background)); }
 			await emit({ type: "message_start", message: error });

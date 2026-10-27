@@ -35,7 +35,12 @@ export type FakeStep =
 	| { apiError: string; text: string }
 	/** Claude Code's `system/api_retry` notice (a retryable API failure it retries itself). */
 	| { apiRetry: string }
-	| { crash: string };
+	/** The child crashes; `stderr` is what it printed first: delivered to an
+	 *  `options.stderr` callback when one is set and appended to the error as
+	 *  the SDK does (". stderr: <tail>"). */
+	| { crash: string; stderr?: string }
+	/** The child prints to stderr (reaches only an `options.stderr` callback, as in the SDK). */
+	| { emitStderr: string };
 
 export interface FakeTurn {
 	blocks: string[]; options: Record<string, unknown>; toolCalls: { id: string; name: string; args: unknown; result: unknown; isError: boolean }[]; hookDenials: string[];
@@ -102,7 +107,11 @@ export function fakeClaude(script: FakeStep[] | ((blocks: string[], turn: number
 			};
 			for (const step of steps) {
 				if (stopped()) return;
-				if ("crash" in step) throw new Error(step.crash);
+				if ("emitStderr" in step) { (options.stderr as ((data: string) => void) | undefined)?.(step.emitStderr); continue; }
+				if ("crash" in step) {
+					if (step.stderr) (options.stderr as ((data: string) => void) | undefined)?.(step.stderr);
+					throw new Error(step.stderr ? `${step.crash}. stderr: ${step.stderr}` : step.crash);
+				}
 				if ("apiRetry" in step) {
 					yield { type: "system", subtype: "api_retry", attempt: 1, max_retries: 10, retry_delay_ms: 1, error_status: 529, error: step.apiRetry, uuid: `u-${++counter}`, session_id: sessionId } as unknown as SDKMessage;
 					continue;

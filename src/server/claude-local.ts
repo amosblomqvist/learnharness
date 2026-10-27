@@ -23,7 +23,7 @@ import { CLAUDE_LOCAL, type ClaudeLocalState, type ClaudeLocalStatus } from "../
 import { emit } from "../core/events.ts";
 import { piModels } from "../agent/models.ts";
 import { claudeChildEnv } from "../agent/claude-local/env.ts";
-import { claudeCommand, claudeLaunchOptions } from "../agent/claude-local/launch.ts";
+import { claudeCommand, claudeLaunchOptions, withoutStderr } from "../agent/claude-local/launch.ts";
 import { acceptClaudeLocalSnapshot, claudeLocalStatus as bridgeStatus, claudeLocalUsage, type ClaudeLocalLaunch } from "../agent/claude-local/bridge.ts";
 import { loadClaudeQuery, type AccountInfo, type ClaudeQuery, type ModelInfo } from "../agent/claude-local/sdk.ts";
 import type { EffectiveSettings } from "../core/settings-resolution.ts";
@@ -358,7 +358,7 @@ async function runProbe(settings: EffectiveSettings["claudeLocal"], state: Owner
 				}
 			}
 		} catch (error) {
-			console.info(`[claude-local] probe failed: ${error instanceof Error ? error.message : String(error)}`);
+			console.info(`[claude-local] probe failed: ${withoutStderr(error instanceof Error ? error.message : String(error))}`);
 			const failure = classifyProbeFailure(error);
 			next = { ...next, state: failure.state, error: failure.error };
 			launch = null; models = [];
