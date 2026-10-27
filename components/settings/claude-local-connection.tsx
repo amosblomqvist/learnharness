@@ -156,13 +156,17 @@ export function ClaudeLocalConnection({ initialStatus }: { initialStatus?: Claud
 		finally { if (mounted.current) setBusy(false); }
 	}
 	const change = (next: { enabled?: boolean; allowBackgroundUse?: boolean; systemPromptMode?: ClaudeLocalSystemPromptMode; binaryPath?: string }) => run(async () => {
-		await putSettings({
+		const savedPath = status.binary?.source === "override" ? status.binary.path : "";
+		const settings = {
 			enabled: next.enabled ?? status.enabled,
 			allowBackgroundUse: next.allowBackgroundUse ?? status.allowBackgroundUse,
 			systemPromptMode: next.systemPromptMode ?? status.systemPromptMode,
-			binaryPath: next.binaryPath ?? (status.binary?.source === "override" ? status.binary.path : ""),
-		});
-		return probe();
+			binaryPath: next.binaryPath ?? savedPath,
+		};
+		await putSettings(settings);
+		// A probe boots Claude Code twice; only the opt-in or the path can change
+		// what it finds. Other preferences apply on save — `run` re-reads status.
+		if (settings.enabled !== status.enabled || settings.binaryPath !== savedPath) return probe();
 	});
 	return <div className="flex flex-col gap-2" data-testid="claude-local-connection">
 		<ConnectionRow label={CLAUDE_LOCAL.title} action={status.enabled ? "Manage…" : "Set up…"} disabled={false} onAction={() => setOpen(true)}>

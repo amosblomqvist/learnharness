@@ -1,16 +1,25 @@
 /** Local Claude route (2026-10-27): the Providers card — every probe state
  *  renders its own line and the approved copy; no sign-in control exists;
- *  helper-tier pickers never list the provider. SSR only (no DOM). */
-import React from "react";
+ *  helper-tier pickers never list the provider; a preference flip probes
+ *  only when the opt-in or path changed (linkedom DOM, fetch mocked). */
+import React, { act } from "react";
 (globalThis as Record<string, unknown>).React = React;
 import assert from "node:assert/strict";
-import test from "node:test";
+import test, { afterEach } from "node:test";
+import { createRoot, type Root } from "react-dom/client";
 import { renderToStaticMarkup } from "react-dom/server";
+import { parseHTML } from "linkedom";
 import { ClaudeLocalConnection, ClaudeLocalDialogBody, CLAUDE_LOCAL_DISCLOSURE, claudeLocalStateLine, claudeLocalUsageLine, emptyClaudeLocalStatus } from "../components/settings/claude-local-connection.tsx";
 import { ModelMenuList } from "../components/settings/model-menu.tsx";
 import { toModelDto } from "../src/server/model-catalog.ts";
 import { piModels } from "../src/agent/models.ts";
 import type { ClaudeLocalStatus } from "../src/core/contracts/claude-local.ts";
+
+const dom = parseHTML("<html><body></body></html>");
+Object.assign(globalThis, { window: dom.window, document: dom.document, Element: dom.window.Element, HTMLElement: dom.window.HTMLElement, CustomEvent: dom.window.CustomEvent, IS_REACT_ACT_ENVIRONMENT: true });
+const originalFetch = globalThis.fetch;
+let root: Root | undefined, host: HTMLDivElement | undefined;
+afterEach(async () => { await act(async () => root?.unmount()); host?.remove(); root = undefined; host = undefined; globalThis.fetch = originalFetch; });
 
 const base = emptyClaudeLocalStatus();
 const ready: ClaudeLocalStatus = { ...base, enabled: true, state: "ready", binary: { path: "/opt/homebrew/bin/claude", version: "2.1.311", source: "path" }, account: { subscriptionType: "max", apiProvider: "firstParty" }, models: 4, probedAt: "2026-10-27T00:00:00Z", revision: 3 };
@@ -53,4 +62,31 @@ test("the model menu shows the Local Claude label instead of a price", () => {
 	const native = piModels().getModel("anthropic", "claude-opus-5-5")!;
 	const html = renderToStaticMarkup(<ModelMenuList models={[toModelDto({ ...native, provider: "claude-local" })]} effectiveId={undefined} onPick={() => {}} />);
 	assert(html.includes("Local Claude (subscription)")); assert(html.includes(">Local Claude</span>")); assert(!html.includes("USD per 1M")); assert(!html.includes("$"));
+});
+
+/** Mounts the card over a mocked fetch that records every request, opens the
+ *  dialog, clicks one toggle, and returns the requests that click made. */
+async function flip(toggleTestid: string, initial: ClaudeLocalStatus) {
+	const requests: string[] = [];
+	globalThis.fetch = async (url, init) => {
+		const method = init?.method ?? "GET";
+		requests.push(`${method} ${String(url)}${method === "POST" ? ` ${String(init?.body)}` : ""}`);
+		return method === "PUT" ? Response.json({ ok: true }) : Response.json(initial);
+	};
+	host = document.createElement("div"); document.body.append(host); root = createRoot(host);
+	await act(async () => root!.render(<ClaudeLocalConnection initialStatus={initial} />));
+	const manage = [...document.querySelectorAll<HTMLButtonElement>("button")].find((el) => el.textContent === (initial.enabled ? "Manage…" : "Set up…"));
+	assert(manage); await act(async () => manage.click());
+	requests.length = 0;
+	const toggle = document.querySelector<HTMLElement>(`[data-testid="${toggleTestid}"]`);
+	assert(toggle, toggleTestid); await act(async () => toggle.click());
+	return requests;
+}
+
+test("flipping background use saves and re-reads status with a GET — no forced probe", async () => {
+	assert.deepEqual(await flip("toggle-allow-background-use", ready), ["PUT /api/settings/claudeLocal", "GET /api/claude-local"]);
+});
+
+test("flipping the opt-in saves and then forces a probe", async () => {
+	assert.deepEqual(await flip("toggle-use-my-local-claude-code", ready), ["PUT /api/settings/claudeLocal", 'POST /api/claude-local {"op":"probe"}']);
 });
