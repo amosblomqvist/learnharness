@@ -18,11 +18,11 @@ import { useNotifyHub } from "@/components/server-events";
 import { ConnectionDialog, ConnectionFooter, ConnectionRow } from "./connection-controls";
 import { CommitInput, ThinSelect, Toggle } from "./controls";
 
-export const CLAUDE_LOCAL_DISCLOSURE = "Runs lesson turns through the Claude Code you installed and signed in to yourself. LearnHarness only starts your own claude program and reads its replies; it never sees, stores or sends your Claude login. Usage counts against your Claude plan. Anthropic permits using your own unmodified Claude Code with your subscription but asks third-party apps to use API keys, and may restrict this at any time. This route never falls back to an API key.";
+export const CLAUDE_LOCAL_DISCLOSURE = "Runs lesson turns through the Claude Code you installed and signed in to yourself. LearnHarness only starts your own claude program and reads its replies; it never sees, stores or sends your Claude login. Usage counts against your Claude plan. Anthropic's published terms do not allow third-party apps, including ones built on the Claude Agent SDK, to use claude.ai logins or plan limits; they do allow you to sign in to your own unmodified Claude Code. This route runs only that. Anthropic may restrict it without notice. This route never falls back to an API key.";
 export const CLAUDE_LOCAL_BACKGROUND_HINT = "Allow automatic follow-ups (a finished research or demo job waking the lesson) to use your Claude plan.";
 export const CLAUDE_LOCAL_PROMPT_HINT: Record<ClaudeLocalSystemPromptMode, string> = {
 	custom: "LearnHarness's own teaching instructions (default).",
-	preset: "Claude Code's own instructions with LearnHarness's appended — a larger prompt every turn; use it only if Anthropic bills the default as extra usage.",
+	preset: "Claude Code's own instructions with LearnHarness's appended — a larger prompt every turn.",
 };
 const SHARED_SERVER_NOTE = "Everyone using this server shares its Claude Code login and this background setting.";
 const PATH = "/api/claude-local";

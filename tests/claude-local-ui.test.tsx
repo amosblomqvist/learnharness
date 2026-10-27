@@ -39,11 +39,14 @@ test("the state line and usage line read honestly for every probe outcome", () =
 
 test("the dialog carries the approved disclosure, the three preferences, the path field, Re-check — and no sign-in, token or email", () => {
 	const html = renderToStaticMarkup(<ClaudeLocalDialogBody status={ready} busy={false} error={null} web={false} onChange={() => {}} onProbe={() => {}} />);
-	assert(html.includes(CLAUDE_LOCAL_DISCLOSURE));
+	const disclosure = CLAUDE_LOCAL_DISCLOSURE.replace(/'/g, "&#x27;"); // as React escapes it
+	assert(html.includes(disclosure));
 	assert(html.includes("Claude (via your Claude Code install)"));
 	for (const testid of ["toggle-use-my-local-claude-code", "toggle-allow-background-use", "claude-local-prompt-mode", "claude-local-binary-path", "claude-local-state", "claude-local-path"]) assert(html.includes(`data-testid="${testid}"`), testid);
 	assert(html.includes(">Re-check</button>")); assert(html.includes("/opt/homebrew/bin/claude"));
-	assert(!/Sign in|Log in|Connect<|token|@/i.test(html.replace(/Claude Code/g, "")), "no sign-in affordance, no credential wording");
+	// The approved disclosure quotes the terms ("sign in to your own unmodified
+	// Claude Code"); everything else must carry no sign-in or credential wording.
+	assert(!/Sign in|Log in|Connect<|token|@/i.test(html.replace(disclosure, "").replace(/Claude Code/g, "")), "no sign-in affordance, no credential wording");
 	const web = renderToStaticMarkup(<ClaudeLocalDialogBody status={ready} busy={false} error={null} web onChange={() => {}} onProbe={() => {}} />);
 	assert(web.includes("Everyone using this server shares its Claude Code login"));
 	const failed = renderToStaticMarkup(<ClaudeLocalDialogBody status={{ ...ready, state: "api-key", error: "Claude Code is signed in to a Claude API (Console) account; this route only runs on a Claude plan login." }} busy={false} error={null} web={false} onChange={() => {}} onProbe={() => {}} />);

@@ -32,8 +32,7 @@ export type ClaudeLocalProviderId = typeof CLAUDE_LOCAL.providerId;
 
 /** How the system prompt reaches Claude Code: the app's composed prompt
  *  as a custom string (default), or Claude Code's own preset with the app's
- *  prompt appended (the hedge pi-claude-bridge uses against third-party
- *  classification; costs a coding-agent preamble every turn). */
+ *  prompt appended (costs Claude Code's coding-agent preamble every turn). */
 export type ClaudeLocalSystemPromptMode = "custom" | "preset";
 
 /** The probe's verdict. Every non-ready state is recoverable by fixing the
