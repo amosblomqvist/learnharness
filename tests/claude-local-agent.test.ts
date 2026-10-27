@@ -667,3 +667,33 @@ describe("external review: fake fidelity and the MCP handshake (P2)", () => {
 		assert.ok(!JSON.stringify(messages).includes(String(FAKE_COST_USD)));
 	});
 });
+
+describe("fake fidelity: malformed tool arguments and sub-agent output (second review gaps)", () => {
+	const roles = (messages: unknown[]) => messages.map((m) => (m as { role: string }).role);
+
+	it("a malformed input_json_delta body is recorded as pi's argumentsError; the call gets the retryable validation error and the turn continues", async () => {
+		for (const [rawJson, error] of [["{oops", /not valid JSON: \{oops/], ["[1]", /not a JSON object: \[1\]/]] as const) {
+			const { messages, fake } = await runAgent([{ tools: [{ name: "lookup_weather", args: {}, rawJson }] }, { text: "Retrying." }]);
+			assert.deepEqual(roles(messages), ["user", "assistant", "toolResult", "assistant"], rawJson);
+			const call = (messages[1] as AssistantMessage).content[0] as { type: string; arguments: unknown; argumentsError?: string };
+			assert.equal(call.type, "toolCall"); assert.deepEqual(call.arguments, {}); assert.match(call.argumentsError ?? "", error);
+			const result = messages[2] as ToolResultMessage;
+			assert.equal(result.isError, true); assert.match((result.content[0] as { text: string }).text, /Validation failed for tool "lookup_weather"/);
+			assert.deepEqual(fake.turns[0]!.toolCalls.map((c) => [c.name, c.isError]), [["lookup_weather", true]]);
+			assert.deepEqual((messages.at(-1) as AssistantMessage).content, [{ type: "text", text: "Retrying." }]);
+		}
+	});
+
+	it("a sub-agent's output (parent_tool_use_id), streamed or echo-only, never reaches the record, the events or the tool bridge", async () => {
+		const { messages, events, fake } = await runAgent([
+			{ text: "Sub-agent says hi.", tools: [{ name: "lookup_weather", args: { city: "X" } }], parentToolUseId: "toolu_task_1" },
+			{ text: "Sub-agent echo only.", unstreamed: true, parentToolUseId: "toolu_task_1" },
+			{ text: "Main reply." },
+		]);
+		assert.deepEqual(roles(messages), ["user", "assistant"]);
+		assert.deepEqual((messages[1] as AssistantMessage).content, [{ type: "text", text: "Main reply." }]);
+		assert.ok(!JSON.stringify(events).includes("Sub-agent"), "no event carries the sub-agent's text");
+		assert.deepEqual(record(events), ["agent_start", "turn_start", "message_start:assistant", "message_end:assistant", "turn_end", "agent_end"]);
+		assert.deepEqual(fake.turns[0]!.toolCalls, []);
+	});
+});

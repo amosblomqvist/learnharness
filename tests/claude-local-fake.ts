@@ -21,7 +21,9 @@
  * canUseTool allows it), reports the tool server's status at init
  * (`mcpStatus`), delivers stderr (`{ emitStderr }`, a crash's `stderr`) the
  * way the SDK does, and prices every result (FAKE_COST_USD) so a reader of
- * total_cost_usd would show.
+ * total_cost_usd would show. A call's `rawJson` streams a verbatim (possibly
+ * malformed) argument body, and a step's `parentToolUseId` makes it a
+ * sub-agent's output (stamped with that parent id, its calls never run).
  */
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
@@ -31,7 +33,13 @@ import type { ClaudeQuery, HookCallback, SDKMessage } from "../src/agent/claude-
  *  app must never read it (plan usage is labelled, never priced). */
 export const FAKE_COST_USD = 0.0421;
 
-export interface FakeToolCall { name: string; args: Record<string, unknown>; id?: string; /** A Claude Code built-in: its name reaches the hook unprefixed. */ raw?: boolean }
+export interface FakeToolCall {
+	name: string; args: Record<string, unknown>; id?: string;
+	/** A Claude Code built-in: its name reaches the hook unprefixed. */ raw?: boolean;
+	/** The input_json_delta body streamed for this call, verbatim (a malformed
+	 *  body models a broken stream); Claude Code's own echo, hooks and MCP call
+	 *  still carry `args` (what it parsed itself). */ rawJson?: string;
+}
 export type FakeStep =
 	| {
 		text?: string; thinking?: string; tools?: FakeToolCall[]; model?: string;
@@ -43,6 +51,9 @@ export type FakeStep =
 		/** How Claude Code echoes the message as `assistant` messages: one block
 		 *  each (default), each echo carrying every block so far (cumulative), or
 		 *  one echo of the whole message after its last block (full). */ echo?: "block" | "cumulative" | "full";
+		/** The message is a sub-agent's output: every stream_event and echo
+		 *  carries this parent_tool_use_id, and its tool calls never run here
+		 *  (the sub-agent's own loop would run them). */ parentToolUseId?: string;
 	}
 	| { error: string }
 	/** Claude Code's synthetic API-failure assistant message (e.g. rate_limit) followed by an is_error result. */
@@ -166,12 +177,13 @@ export function fakeClaude(script: FakeStep[] | ((blocks: string[], turn: number
 				// controlAhead: the message's own events wait until its batch ran.
 				const held: SDKMessage[] = [];
 				const send = (message: SDKMessage | undefined): SDKMessage | undefined => { if (message && step.controlAhead) { held.push(message); return undefined; } return message; };
-				const event = (e: unknown): SDKMessage | undefined => unstreamed ? undefined : send({ type: "stream_event", event: e, parent_tool_use_id: null, uuid: `u-${++counter}`, session_id: sessionId } as unknown as SDKMessage);
+				const parent = step.parentToolUseId ?? null;
+				const event = (e: unknown): SDKMessage | undefined => unstreamed ? undefined : send({ type: "stream_event", event: e, parent_tool_use_id: parent, uuid: `u-${++counter}`, session_id: sessionId } as unknown as SDKMessage);
 				const blocks: unknown[] = [];
 				yield* one(event({ type: "message_start", message: { id, type: "message", role: "assistant", model, content: [], stop_reason: null, stop_sequence: null, usage: { input_tokens: 10, output_tokens: 1, cache_creation_input_tokens: 5, cache_read_input_tokens: 3 } } }));
 				let index = 0;
 				const echoMode = step.echo ?? "block";
-				const echoOf = (content: unknown[]): SDKMessage | undefined => send({ type: "assistant", message: { id, type: "message", role: "assistant", model, content, stop_reason: null, stop_sequence: null, usage: { input_tokens: 10, output_tokens: 1 } }, parent_tool_use_id: null, uuid: `u-${++counter}`, session_id: sessionId } as unknown as SDKMessage);
+				const echoOf = (content: unknown[]): SDKMessage | undefined => send({ type: "assistant", message: { id, type: "message", role: "assistant", model, content, stop_reason: null, stop_sequence: null, usage: { input_tokens: 10, output_tokens: 1 } }, parent_tool_use_id: parent, uuid: `u-${++counter}`, session_id: sessionId } as unknown as SDKMessage);
 				const echo = (block: unknown): SDKMessage | undefined => echoMode === "full" ? undefined : echoOf(echoMode === "cumulative" ? [...blocks] : [block]);
 				if (step.thinking) {
 					yield* one(event({ type: "content_block_start", index, content_block: { type: "thinking", thinking: "", signature: "" } }));
@@ -193,25 +205,27 @@ export function fakeClaude(script: FakeStep[] | ((blocks: string[], turn: number
 					yield* one(echo(blocks[blocks.length - 1]));
 					index++;
 				}
-				const calls = (step.tools ?? []).map((tool) => ({ ...tool, id: tool.id ?? `toolu_${++counter}` }));
+				const streamedCalls = (step.tools ?? []).map((tool) => ({ ...tool, id: tool.id ?? `toolu_${++counter}` }));
+				// A sub-agent's calls are its own loop's business, never this batch's.
+				const calls = parent ? [] : streamedCalls;
 				const inflight: Promise<void>[] = [];
-				for (const call of calls) {
+				for (const call of streamedCalls) {
 					yield* one(event({ type: "content_block_start", index, content_block: { type: "tool_use", id: call.id, name: call.raw ? call.name : `mcp__learnharness__${call.name}`, input: {} } }));
-					const json = JSON.stringify(call.args);
+					const json = call.rawJson ?? JSON.stringify(call.args);
 					yield* one(event({ type: "content_block_delta", index, delta: { type: "input_json_delta", partial_json: json.slice(0, 3) } }));
 					yield* one(event({ type: "content_block_delta", index, delta: { type: "input_json_delta", partial_json: json.slice(3) } }));
 					yield* one(event({ type: "content_block_stop", index }));
 					blocks.push({ type: "tool_use", id: call.id, name: call.raw ? call.name : `mcp__learnharness__${call.name}`, input: call.args });
 					yield* one(echo(blocks[blocks.length - 1]));
 					index++;
-					if (step.toolsDuringStream) {
+					if (step.toolsDuringStream && !parent) {
 						// The call starts now; give it a tick to reach the bridge while the message still streams.
 						inflight.push(runCall(call));
 						await new Promise<void>((resolve) => setImmediate(resolve));
 					}
 				}
 				if (echoMode === "full") yield* one(echoOf([...blocks]));
-				yield* one(event({ type: "message_delta", delta: { stop_reason: step.stopReason ?? (calls.length ? "tool_use" : "end_turn"), stop_sequence: null }, usage: { output_tokens: 20, input_tokens: 10, cache_creation_input_tokens: 5, cache_read_input_tokens: 3 } }));
+				yield* one(event({ type: "message_delta", delta: { stop_reason: step.stopReason ?? (streamedCalls.length ? "tool_use" : "end_turn"), stop_sequence: null }, usage: { output_tokens: 20, input_tokens: 10, cache_creation_input_tokens: 5, cache_read_input_tokens: 3 } }));
 				yield* one(event({ type: "message_stop" }));
 				if (!usageReported) { usageReported = true; yield* one(send({ type: "rate_limit_event", rate_limit_info: { status: "allowed", utilization: 0.25, resetsAt: 1700000000, rateLimitType: "five_hour", isUsingOverage: false }, uuid: `u-${++counter}`, session_id: sessionId } as unknown as SDKMessage)); }
 				// Claude Code runs the batch: PreToolUse per call, the MCP call, PostToolBatch once.
