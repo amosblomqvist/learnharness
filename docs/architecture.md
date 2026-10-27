@@ -439,6 +439,10 @@ For ordinary Next web/dev, `src/server/web-subscriptions.ts` composes these same
 
 `subscription-request-cycle.ts` is the shared admission/automatic-input recovery state machine; the old ChatGPT module is its compatibility export. Background consent is independent per provider, default ON, with foreground-preserving cancellation and queue ownership retained on no-dispatch. Native usage rejected before dispatch is transiently excluded from helper usage collectors, without adding persisted provenance fields. Catalogs and read-time pricing preserve the selected connection: subscription use displays compact provider labels, API dollars remain dollars, and mixed usage joins both without estimating subscription dollars or claiming detected tiers/allowances.
 
+### 8.2 Cursor connection
+
+Cursor is a subscription label in the cost meter and a keyless row in the provider catalog, but it is not an OAuth connection and it does not enter `isSubscriptionProvider`. There is no credential file. `src/agent/cursor/` registers the provider on the pi-ai collection after `builtinProviders()`, spawns `cursor-agent` in ask mode, and bridges LearnHarness tools through a JSON envelope on a loopback chat-completions proxy. The turn gate calls `cursorConnected()` (`agent status`) instead of reading an env key. See [cursor.md](cursor.md).
+
 ## 9. The foundational invariants — what ALWAYS holds
 
 ### Tier A — machine-enforced (`eslint.config.mjs`; lint fails the build)

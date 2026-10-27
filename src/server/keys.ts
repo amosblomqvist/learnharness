@@ -52,7 +52,9 @@ import {
 	validateKeyShape,
 } from "../core/auth-keys.ts";
 import { authStore } from "../store/auth.ts";
+import { cursorConnected } from "../agent/cursor/login.ts";
 import { isSubscriptionProvider, subscriptionConnected } from "../agent/subscription-connections.ts";
+import { CURSOR_PROVIDER_ID } from "../core/cursor.ts";
 
 // The once-per-process boot record — globalThis anchor (HMR re-imports the
 // module; the snapshot must not re-run and misread fill-gapped vars as real
@@ -201,6 +203,9 @@ export function keyValue(id: string): string | undefined {
  * (gate by what would run). Providers absent from AUTH_PROVIDER_KEYS take
  * no key at all: nothing to gate, present by definition. */
 export function providerKeyPresent(provider: string): boolean {
+	// Before the "no key, so present" fallback. Cursor has no env var; a
+	// missing CLI login must hide it, not leave the picker always open.
+	if (provider === CURSOR_PROVIDER_ID) return cursorConnected();
 	if (isSubscriptionProvider(provider)) return subscriptionConnected(provider);
 	const info = AUTH_PROVIDER_KEYS.find((p) => p.id === provider);
 	return info ? keyValue(info.envVar) !== undefined : true;

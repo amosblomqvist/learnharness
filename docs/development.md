@@ -41,10 +41,13 @@ Secrets and machine-specific paths only. Model choice and thinking budgets are t
 
 | Variable | Purpose |
 |---|---|
-| `OPENROUTER_API_KEY` | required — all LLM calls go through OpenRouter |
+| `OPENROUTER_API_KEY` | OpenRouter provider. Cursor and the subscription connections do not use it |
 | `GOOGLE_SEARCH_API_KEY` + `GOOGLE_CSE_ID` | researcher's `web_search` (Google Custom Search) |
 | `DEEPGRAM_API_KEY` | optional — dictation (STT token minting; audio streams browser→Deepgram, never through the server) |
 | `CHROME_PATH` | optional system Chrome fallback for demo verification; the app's own browser helper is primary (nothing is downloaded) |
+| `CURSOR_AGENT_BIN` | optional path to the Cursor CLI (`agent`). Default: `~/.local/bin/agent`, then `/usr/local/bin/agent`, `/usr/bin/agent`, then `agent` on PATH |
+| `LEARNHARNESS_CURSOR_PORT` | optional loopback proxy port (default 32124). Read when the provider list is first built; restart after changing it |
+| `LH_CURSOR_CONNECTED` | tests only. `1` pretends `agent status` is logged in. `npm test` never spawns the CLI |
 
 The packaged desktop app takes keys from `userData/auth.json` (BYOK, mode 0600, read/written directly by the server via `LH_AUTH_FILE`). PDFs render natively with pdfjs/Skia; SVGs use resvg.
 
@@ -57,6 +60,10 @@ Web/dev saves `chatgpt-credentials.json`, `github-copilot-credentials.json` and 
 Sign-in opens a new tab in the browser that initiated it; permit that tab if your browser blocks popups. **ChatGPT sign-in must be completed in a browser on the server's machine**, because its callback listener remains `127.0.0.1` on that machine. Copilot/Grok use device codes. In the Electron dev shell, provider pages open in the system browser instead. Once connected, credentials and refresh remain server-owned; other browsers using that server share its connections and background-use consent, just as they share its API keys. Disconnect, storage-failure handling, and provider-specific background consent retain the existing behavior; subscription routes never fall back to API-key billing.
 
 This remains a **trusted developer/shared-server mode**, not multi-user hosting. Subscription controls require same-origin JSON/custom-header requests; browser-opening actions are short-lived, origin-bound and one-use. These checks prevent ordinary cross-origin browser controls, **not user authentication or DNS-rebinding protection**. Do not expose an unprotected dev/server instance to untrusted users or the public Internet; a public deployment needs an independent access/host gate. Remote ChatGPT callback routing, per-user accounts and credential import are not implemented.
+
+### Cursor
+
+Cursor is a local CLI connection, not an OAuth subscription and not an `AUTH_PROVIDER_KEYS` row. Sign-in is `agent login` on the machine running the server. The app spawns that CLI in ask mode and speaks to it through a loopback chat-completions proxy. Details, the trust boundary, and the test switch are in [`cursor.md`](cursor.md).
 
 ## Architecture
 

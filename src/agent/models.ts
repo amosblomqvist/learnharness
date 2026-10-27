@@ -15,6 +15,9 @@ import packageMetadata from "../../package.json" with { type: "json" };
 import { chatGPTModel } from "./chatgpt-bridge.ts";
 import { chatGPTStream } from "./chatgpt-stream.ts";
 import type { ChatGPTDispatchLifecycle } from "./chatgpt-request-cycle.ts";
+import { CURSOR_PROVIDER_ID } from "../core/cursor.ts";
+import { cursorProvider } from "./cursor/provider.ts";
+import { cursorStream } from "./cursor/stream.ts";
 import { nativeSubscriptionId, nativeSubscriptionModel } from "./subscription-bridge.ts";
 import { nativeSubscriptionStream } from "./subscription-stream.ts";
 
@@ -62,6 +65,9 @@ export function piModels() {
 	if (!collection) {
 		collection = createModels({ identity: APP_IDENTITY });
 		for (const provider of builtinProviders()) collection.setProvider(provider);
+		// Beside the builtins, not inside them: AUTH_PROVIDER_KEYS stays pinned
+		// to pi-ai's env-key table. Cursor's "key" is a local CLI login.
+		collection.setProvider(cursorProvider());
 	}
 	return collection;
 }
@@ -111,17 +117,19 @@ export function piEngineForSpec(spec: ResolvedModelSpec, background: boolean | (
 	const level = spec.thinkingLevel
 		? clampThinkingLevel(model, spec.thinkingLevel)
 		: defaultThinkingLevel(model);
+	// bound streamSimple: the agent loop forwards state.thinkingLevel as
+	// `reasoning` (undefined = off on pi-ai's scale); the clamp above keeps
+	// the pin honest even when config or settings drift off the map.
+	const streamFn = (requestModel: Model<Api>, context: Parameters<StreamFunction>[1], options: Parameters<StreamFunction>[2]) => {
+		const purpose = typeof background === "function" ? background : () => background;
+		const stream = spec.provider === "chatgpt" ? chatGPTStream(purpose, lifecycle) : nativeId ? nativeSubscriptionStream(models.getProvider(nativeId)!, purpose, lifecycle) : models.streamSimple.bind(models);
+		return stream(requestModel, context, { ...options, reasoning: level === "off" ? undefined : level });
+	};
 	return {
 		model,
 		level,
-		// bound streamSimple: the agent loop forwards state.thinkingLevel as
-		// `reasoning` (undefined = off on pi-ai's scale); the clamp above keeps
-		// the pin honest even when config or settings drift off the map.
-		streamFn: (requestModel, context, options) => {
-			const purpose = typeof background === "function" ? background : () => background;
-			const stream = spec.provider === "chatgpt" ? chatGPTStream(purpose, lifecycle) : nativeId ? nativeSubscriptionStream(models.getProvider(nativeId)!, purpose, lifecycle) : models.streamSimple.bind(models);
-			return stream(requestModel, context, { ...options, reasoning: level === "off" ? undefined : level });
-		},
+		// Cursor waits for the loopback proxy, then uses the same completions stream.
+		streamFn: spec.provider === CURSOR_PROVIDER_ID ? cursorStream(streamFn) : streamFn,
 	};
 }
 

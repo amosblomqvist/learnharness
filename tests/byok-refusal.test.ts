@@ -146,6 +146,8 @@ describe("isProviderKeyRefusal — the job-record matcher (provider-key interlud
 	it("matches the envelope wording regardless of provider label, not real failures", () => {
 		assert.equal(isProviderKeyRefusal(providerKeyMissing("together", ["cheap"]).error), true);
 		assert.equal(isProviderKeyRefusal(providerKeyMissing("openai", ["strong"]).error), true);
+		assert.equal(isProviderKeyRefusal(providerKeyMissing("cursor", ["strong"]).error), true);
+		assert.match(providerKeyMissing("cursor", ["strong"]).error, /cursor-agent login/);
 		assert.equal(isProviderKeyRefusal(""), false);
 		assert.equal(isProviderKeyRefusal(undefined), false);
 		assert.equal(isProviderKeyRefusal("FAILED: headless crashed"), false);
