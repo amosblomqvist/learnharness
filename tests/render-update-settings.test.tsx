@@ -190,6 +190,151 @@ describe("General update rows", () => {
 });
 
 describe("Settings integration", () => {
+	for (const first of ["provider", "updates"] as const) {
+		it(`preserves both General edits when ${first} is saved first and its response is delayed`, async () => {
+			bridge();
+			let saved = { version: 1, general: { autoUpdate: true, futureSibling: "keep" } as Record<string, unknown> };
+			const requests: { body: Record<string, unknown>; finish: () => void }[] = [];
+			globalThis.fetch = async (_input, init) => {
+				if (init?.method !== "PUT") return Response.json({ settings: saved });
+				const body = JSON.parse(String(init.body)) as Record<string, unknown>;
+				return new Promise<Response>((resolve) => requests.push({ body, finish: () => {
+					saved = { ...saved, general: body };
+					resolve(Response.json({ settings: saved }));
+				} }));
+			};
+			const host = await mount(<SettingsDialogBody initialSection="general" onClose={() => {}} />);
+			const select = q(host, "dictation-provider") as HTMLSelectElement;
+			const editProvider = () => act(async () => {
+				Object.defineProperty(select, "value", { configurable: true, writable: true, value: "openai" });
+				select.dispatchEvent(new window.Event("change", { bubbles: true }));
+			});
+			const editUpdates = () => click(q(host, "toggle-auto-update"));
+			if (first === "provider") { await editProvider(); await editUpdates(); }
+			else { await editUpdates(); await editProvider(); }
+
+			assert.equal(requests.length, 1, "the second section write waits for the first");
+			assert.equal(q(host, "toggle-auto-update")!.getAttribute("aria-checked"), "false");
+			await act(async () => { requests[0]!.finish(); });
+			assert.equal(requests.length, 2);
+			assert.deepEqual(requests[1]!.body, { autoUpdate: false, futureSibling: "keep", dictationProvider: "openai" });
+			await act(async () => { requests[1]!.finish(); });
+			assert.deepEqual(saved.general, { autoUpdate: false, futureSibling: "keep", dictationProvider: "openai" });
+			assert.equal(q(host, "toggle-auto-update")!.getAttribute("aria-checked"), "false");
+		});
+	}
+
+	it("keeps a later General edit after a failed save and reports the failure", async () => {
+		bridge();
+		let saved = { version: 1, general: { autoUpdate: true } as Record<string, unknown> };
+		const requests: { body: Record<string, unknown>; finish: (ok: boolean) => void }[] = [];
+		globalThis.fetch = async (_input, init) => {
+			if (init?.method !== "PUT") return Response.json({ settings: saved });
+			const body = JSON.parse(String(init.body)) as Record<string, unknown>;
+			return new Promise<Response>((resolve) => requests.push({ body, finish: (ok) => {
+				if (ok) saved = { ...saved, general: body };
+				resolve(ok ? Response.json({ settings: saved }) : Response.json({ error: "save failed" }, { status: 500 }));
+			} }));
+		};
+		const host = await mount(<SettingsDialogBody initialSection="general" onClose={() => {}} />);
+		const select = q(host, "dictation-provider") as HTMLSelectElement;
+		await act(async () => {
+			Object.defineProperty(select, "value", { configurable: true, writable: true, value: "openai" });
+			select.dispatchEvent(new window.Event("change", { bubbles: true }));
+		});
+		await click(q(host, "toggle-auto-update"));
+		assert.equal(requests.length, 1);
+		await act(async () => { requests[0]!.finish(false); });
+		assert.equal(requests.length, 2);
+		assert.deepEqual(requests[1]!.body, { autoUpdate: false });
+		await act(async () => { requests[1]!.finish(true); });
+		assert.deepEqual(saved.general, { autoUpdate: false });
+		assert.match(q(host, "settings-error")!.textContent ?? "", /general: save failed/);
+	});
+
+	it("tracks two rapid toggles while the first update is pending", async () => {
+		bridge();
+		const requests: { body: Record<string, unknown>; finish: () => void }[] = [];
+		globalThis.fetch = async (_input, init) => {
+			if (init?.method !== "PUT") return Response.json({ settings: { version: 1, general: { autoUpdate: true } } });
+			const body = JSON.parse(String(init.body)) as Record<string, unknown>;
+			return new Promise<Response>((resolve) => requests.push({ body, finish: () => resolve(Response.json({ settings: { version: 1, general: body } })) }));
+		};
+		const host = await mount(<SettingsDialogBody initialSection="general" onClose={() => {}} />);
+		await click(q(host, "toggle-auto-update"));
+		await click(q(host, "toggle-auto-update"));
+		assert.equal(requests.length, 1);
+		assert.equal(q(host, "toggle-auto-update")!.getAttribute("aria-checked"), "true");
+		await act(async () => { requests[0]!.finish(); });
+		assert.deepEqual(requests[1]!.body, { autoUpdate: true });
+		await act(async () => { requests[1]!.finish(); });
+	});
+
+	it("waits for a closed dialog's pending General writes before reopening", async () => {
+		bridge();
+		let reads = 0;
+		let saved = { version: 1, general: { autoUpdate: true } as Record<string, unknown> };
+		const requests: { body: Record<string, unknown>; finish: () => void }[] = [];
+		globalThis.fetch = async (_input, init) => {
+			if (init?.method !== "PUT") { reads++; return Response.json({ settings: saved }); }
+			const body = JSON.parse(String(init.body)) as Record<string, unknown>;
+			return new Promise<Response>((resolve) => requests.push({ body, finish: () => {
+				saved = { ...saved, general: body };
+				resolve(Response.json({ settings: saved }));
+			} }));
+		};
+		const host = await mount(<SettingsDialogBody initialSection="general" onClose={() => {}} />);
+		const select = q(host, "dictation-provider") as HTMLSelectElement;
+		await act(async () => {
+			Object.defineProperty(select, "value", { configurable: true, writable: true, value: "openai" });
+			select.dispatchEvent(new window.Event("change", { bubbles: true }));
+		});
+		await click(q(host, "toggle-auto-update"));
+		const old = roots.pop()!;
+		await act(async () => { old.root.unmount(); }); old.host.remove();
+		const reopened = await mount(<SettingsDialogBody initialSection="general" onClose={() => {}} />);
+		assert.equal(reads, 1, "the reopened dialog must not read a stale record");
+		assert.match(reopened.textContent ?? "", /Loading settings/);
+		await act(async () => { requests[0]!.finish(); });
+		assert.equal(reads, 1);
+		await act(async () => { requests[1]!.finish(); });
+		assert.equal(reads, 2);
+		assert.equal(q(reopened, "toggle-auto-update")!.getAttribute("aria-checked"), "false");
+		await click(q(reopened, "toggle-auto-update"));
+		assert.deepEqual(requests[2]!.body, { autoUpdate: true, dictationProvider: "openai" });
+		await act(async () => { requests[2]!.finish(); });
+	});
+
+	it("keeps newer General state when an older response for another section arrives", async () => {
+		bridge();
+		let saved: Record<string, unknown> = { version: 1, general: { autoUpdate: true }, graph: { enabled: true } };
+		const requests: { section: string; body: Record<string, unknown>; finish: () => void }[] = [];
+		globalThis.fetch = async (input, init) => {
+			if (init?.method !== "PUT") return Response.json({ settings: saved });
+			const section = String(input).split("/").pop()!;
+			const body = JSON.parse(String(init.body)) as Record<string, unknown>;
+			saved = { ...saved, [section]: body };
+			const snapshot = structuredClone(saved);
+			return new Promise<Response>((resolve) => requests.push({ section, body, finish: () => resolve(Response.json({ settings: snapshot })) }));
+		};
+		const host = await mount(<SettingsDialogBody initialSection="graph" onClose={() => {}} />);
+		await click(q(host, "toggle-extraction-enabled"));
+		await click(q(host, "settings-nav-general"));
+		const select = q(host, "dictation-provider") as HTMLSelectElement;
+		await act(async () => {
+			Object.defineProperty(select, "value", { configurable: true, writable: true, value: "openai" });
+			select.dispatchEvent(new window.Event("change", { bubbles: true }));
+		});
+		assert.deepEqual(requests.map((request) => request.section), ["graph", "general"]);
+		await act(async () => { requests[1]!.finish(); });
+		await act(async () => { requests[0]!.finish(); });
+		await click(q(host, "toggle-auto-update"));
+		assert.deepEqual(requests[2]!.body, { autoUpdate: false, dictationProvider: "openai" });
+		await act(async () => { requests[2]!.finish(); });
+		await click(q(host, "settings-nav-graph"));
+		assert.equal(q(host, "toggle-extraction-enabled")!.getAttribute("aria-checked"), "false");
+	});
+
 	it("selects OpenAI dictation without losing the other General settings", async () => {
 		bridge();
 		const record = { version: 1, general: { autoUpdate: false } };
