@@ -93,3 +93,20 @@ test("flipping background use saves and re-reads status with a GET — no forced
 test("flipping the opt-in saves and then forces a probe", async () => {
 	assert.deepEqual(await flip("toggle-use-my-local-claude-code", ready), ["PUT /api/settings/claudeLocal", 'POST /api/claude-local {"op":"probe"}']);
 });
+
+test("review P2: a toggle while the saved override is not found keeps the path (no write clears a path the user did not edit)", async () => {
+	const saved = "/Volumes/External/claude/claude";
+	const missing: ClaudeLocalStatus = { ...ready, state: "not-found", binary: null, binaryPath: saved, error: `No Claude Code executable at ${saved}.` };
+	const puts: unknown[] = [];
+	globalThis.fetch = async (_url, init) => {
+		if (init?.method === "PUT") { puts.push(JSON.parse(String(init.body))); return Response.json({ ok: true }); }
+		return Response.json(missing);
+	};
+	host = document.createElement("div"); document.body.append(host); root = createRoot(host);
+	await act(async () => root!.render(<ClaudeLocalConnection initialStatus={missing} />));
+	const manage = [...document.querySelectorAll<HTMLButtonElement>("button")].find((el) => el.textContent === "Manage…");
+	assert(manage); await act(async () => manage.click());
+	assert.equal(document.querySelector<HTMLInputElement>('[data-testid="claude-local-binary-path"]')?.value, saved, "the field shows the saved override");
+	await act(async () => document.querySelector<HTMLElement>('[data-testid="toggle-allow-background-use"]')!.click());
+	assert.deepEqual(puts, [{ enabled: true, allowBackgroundUse: false, systemPromptMode: "custom", binaryPath: saved }]);
+});

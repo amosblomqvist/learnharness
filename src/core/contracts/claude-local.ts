@@ -78,6 +78,11 @@ export interface ClaudeLocalStatus {
 	allowBackgroundUse: boolean;
 	systemPromptMode: ClaudeLocalSystemPromptMode;
 	state: ClaudeLocalState;
+	/** The configured path override ("" when none) — what the user saved,
+	 *  reported even when nothing is found there (an unmounted volume), so a
+	 *  write of another preference never clears it. A filesystem path the
+	 *  user typed, never a credential. */
+	binaryPath: string;
 	/** The detected install (also reported while not ready, for the card). */
 	binary: { path: string; version: string | null; source: "override" | "path" | "known-location" } | null;
 	/** What Claude Code reported about its login — never a token or email. */

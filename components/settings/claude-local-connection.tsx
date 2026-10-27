@@ -29,7 +29,7 @@ const PATH = "/api/claude-local";
 const headers = { "Content-Type": "application/json", "x-learnharness-subscriptions": "1" };
 
 export function emptyClaudeLocalStatus(): ClaudeLocalStatus {
-	return { providerId: CLAUDE_LOCAL.providerId, enabled: false, allowBackgroundUse: true, systemPromptMode: "custom", state: "disabled", binary: null, account: null, models: 0, probedAt: null, revision: 0 };
+	return { providerId: CLAUDE_LOCAL.providerId, enabled: false, allowBackgroundUse: true, systemPromptMode: "custom", state: "disabled", binaryPath: "", binary: null, account: null, models: 0, probedAt: null, revision: 0 };
 }
 
 /** The state line (one sentence; the error carries the detail). */
@@ -113,7 +113,7 @@ export function ClaudeLocalDialogBody({ status, busy, error, onChange, onProbe, 
 		<div className="mt-4 flex flex-col gap-1 text-xs text-foreground">
 			<label className="flex items-center gap-3" htmlFor="claude-local-binary-path">
 				<span className="shrink-0">Claude Code path</span>
-				<span className="flex-1"><CommitInput value={status.binary?.source === "override" ? status.binary.path : ""} placeholder="detected automatically" ariaLabel="Claude Code path" testid="claude-local-binary-path" onCommit={(binaryPath) => onChange({ binaryPath })} /></span>
+				<span className="flex-1"><CommitInput value={status.binaryPath} placeholder="detected automatically" ariaLabel="Claude Code path" testid="claude-local-binary-path" onCommit={(binaryPath) => onChange({ binaryPath })} /></span>
 			</label>
 			<span className="leading-relaxed text-muted-foreground">Optional. Set it when Claude Code is installed somewhere LearnHarness does not look (PATH, ~/.local/bin, Homebrew, npm global).</span>
 		</div>
@@ -156,7 +156,9 @@ export function ClaudeLocalConnection({ initialStatus }: { initialStatus?: Claud
 		finally { if (mounted.current) setBusy(false); }
 	}
 	const change = (next: { enabled?: boolean; allowBackgroundUse?: boolean; systemPromptMode?: ClaudeLocalSystemPromptMode; binaryPath?: string }) => run(async () => {
-		const savedPath = status.binary?.source === "override" ? status.binary.path : "";
+		// The configured override, even when nothing is found there: a write of
+		// another preference never clears a path the user did not edit.
+		const savedPath = status.binaryPath;
 		const settings = {
 			enabled: next.enabled ?? status.enabled,
 			allowBackgroundUse: next.allowBackgroundUse ?? status.allowBackgroundUse,

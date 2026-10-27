@@ -336,7 +336,7 @@ describe("the tool-less StreamFunction (compaction summaries)", () => {
 describe("review fixes (S11, S13, S15, N1, N5, N13–N17)", () => {
 	const roles = (messages: unknown[]) => messages.map((m) => (m as { role: string }).role);
 	const assistants = (messages: unknown[]) => messages.filter((m) => (m as { role: string }).role === "assistant") as AssistantMessage[];
-	const readyStatus = (revision: number) => ({ providerId: "claude-local" as const, enabled: true, allowBackgroundUse: false, systemPromptMode: "custom" as const, state: "ready" as const, binary: { path: "/fake/claude", version: "2.1.311", source: "path" as const }, account: { subscriptionType: "max" }, models: 1, probedAt: null, revision });
+	const readyStatus = (revision: number) => ({ providerId: "claude-local" as const, enabled: true, allowBackgroundUse: false, systemPromptMode: "custom" as const, state: "ready" as const, binaryPath: "", binary: { path: "/fake/claude", version: "2.1.311", source: "path" as const }, account: { subscriptionType: "max" }, models: 1, probedAt: null, revision });
 
 	it("S11: a Claude Code set up to bill an API key is refused at system/init (masked plan-login wording) and the route goes not-ready", async () => {
 		const noted: string[] = [];

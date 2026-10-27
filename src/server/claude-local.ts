@@ -300,7 +300,7 @@ function adoptApiKeyVerdict(state: Owner): void {
 	emit("subscriptions-changed", {});
 }
 function initialStatus(settings: EffectiveSettings["claudeLocal"]): ClaudeLocalStatus {
-	return { providerId: CLAUDE_LOCAL.providerId, enabled: settings.enabled, allowBackgroundUse: settings.allowBackgroundUse, systemPromptMode: settings.systemPromptMode, state: settings.enabled ? "unavailable" : "disabled", binary: null, account: null, models: 0, probedAt: null, revision: 0 };
+	return { providerId: CLAUDE_LOCAL.providerId, enabled: settings.enabled, allowBackgroundUse: settings.allowBackgroundUse, systemPromptMode: settings.systemPromptMode, state: settings.enabled ? "unavailable" : "disabled", binaryPath: settings.binaryPath ?? "", binary: null, account: null, models: 0, probedAt: null, revision: 0 };
 }
 /** The child's working directory: app-owned, empty, under the data dir. */
 export function claudeLocalCwd(): string {

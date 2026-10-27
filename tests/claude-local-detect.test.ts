@@ -180,6 +180,7 @@ describe("the status owner, the bridge and the catalog", () => {
 		const status = await server.refreshClaudeLocal({ force: true });
 		assert.equal(status.state, "not-found"); assert.match(status.error ?? "", /No Claude Code executable at .*missing/);
 		assert.equal(status.binary, null); assert.equal(subscriptionConnected("claude-local"), false);
+		assert.equal(status.binaryPath, path.join(directory, "missing", "claude"), "the saved override is reported even when nothing is there (review P2)");
 	});
 	it("an old install is refused by version with the floor named", { skip: !posix }, async () => {
 		writeSettings({ version: 1, claudeLocal: { enabled: true, binaryPath: fakeBinary(path.join(directory, "old"), "2.0.9") } });
