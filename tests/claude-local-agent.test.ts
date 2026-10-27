@@ -538,3 +538,47 @@ describe("review fixes (S11, S13, S15, N1, N5, N13–N17)", () => {
 		assert.equal(((during.messages.at(-1) as AssistantMessage).content[0] as { text: string }).text, "Both.");
 	});
 });
+
+describe("external review (P0–P3)", () => {
+	const roles = (messages: unknown[]) => messages.map((m) => (m as { role: string }).role);
+
+	it("P0: a tool-less stream that streams content and then fails at the result is an error, never a partial done", async () => {
+		const fake = fakeClaude([{ text: "Half a summary." }, { error: "server_error: overloaded" }]);
+		const stream = claudeLocalStream(() => false, undefined, runtimeFor(async () => fake.query));
+		const events: string[] = [];
+		const s = stream(model, normalizeContext({ messages: [{ role: "system", content: "Summarize.", timestamp: 0 }, { role: "user", content: "long transcript", timestamp: 1 }] }));
+		for await (const event of s) events.push(event.type);
+		const result = await s.result();
+		assert.equal(result.stopReason, "error", "a failed result is never a successful summary");
+		assert.ok(!events.includes("done"), `no done event: ${events.join(",")}`);
+		assert.equal(events.at(-1), "error");
+	});
+
+	it("P1: a later batch whose control runs ahead of its message keeps its results (two-step controlAhead)", async () => {
+		const { messages, events } = await runAgent([
+			{ text: "First." },
+			{ text: "Second.", tools: [{ name: "lookup_weather", args: { city: "Oslo" } }], controlAhead: true },
+			{ text: "Done." },
+		]);
+		assert.deepEqual(roles(messages), ["user", "assistant", "assistant", "toolResult", "assistant"]);
+		const order = record(events);
+		assert.deepEqual(order, [
+			"agent_start", "turn_start",
+			"message_start:assistant", "message_end:assistant", "turn_end",
+			"turn_start", "message_start:assistant", "message_end:assistant",
+			"tool_execution_start:lookup_weather", "tool_execution_end:lookup_weather", "message_start:toolResult", "message_end:toolResult", "turn_end",
+			"turn_start", "message_start:assistant", "message_end:assistant", "turn_end",
+			"agent_end",
+		]);
+	});
+
+	it("P1: a question in a later controlAhead batch stops the run", async () => {
+		const { messages } = await runAgent([
+			{ text: "First." },
+			{ text: "A question.", tools: [{ name: "quiz", args: { question: "Sunny?", options: ["yes", "no"] } }], controlAhead: true },
+			{ text: "never reached" },
+		]);
+		assert.ok(!JSON.stringify(messages).includes("never reached"));
+		assert.deepEqual(roles(messages), ["user", "assistant", "assistant", "toolResult"]);
+	});
+});

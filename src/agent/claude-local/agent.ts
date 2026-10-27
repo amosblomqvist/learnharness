@@ -203,7 +203,23 @@ export class ClaudeLocalAgent implements LiveAgent {
 			let callsExpected = 0;
 			let lastDecision: "end" | "continue" | undefined;
 			type ToolEvent = Extract<Awaited<ReturnType<typeof runClaudeTurn>> extends AsyncGenerator<infer E> ? E : never, { type: "tool_start" | "tool_end" }>;
-			const earlyTools: ToolEvent[] = [];
+			/** Tool events not yet dispatched: they belong to a message that has
+			 *  not ended yet (Claude Code starts a call as soon as its block
+			 *  completes, and the SDK's control channel can run a whole batch
+			 *  before the consumer reads the message it belongs to). */
+			const heldTools: ToolEvent[] = [];
+			/** pi's order: a call's events follow its own message's message_end and
+			 *  attach to that message's batch — never to an earlier message. */
+			const belongsToCurrent = (event: ToolEvent) => !!current && current.stopReason !== "pending"
+				&& (current.content.some((c) => c.type === "toolCall" && c.id === event.toolCallId) || (callsExpected > 0 && results.length < callsExpected));
+			/** Dispatch the held events that belong to the current message (all of
+			 *  them when `all`: the turn is over and nothing else can claim them). */
+			const releaseTools = async (all = false) => {
+				for (const event of heldTools.splice(0)) {
+					if (all || belongsToCurrent(event)) await onToolEvent(event);
+					else heldTools.push(event);
+				}
+			};
 			/** The calls that got their tool_execution_start. */
 			const startedCalls = new Set<string>();
 			/** Synthesize the missing results of an unfinished batch and close it. */
@@ -315,10 +331,10 @@ export class ClaudeLocalAgent implements LiveAgent {
 							return "end";
 						}
 						if (callsExpected === 0) lastDecision = await finishBatch(final, []);
-						// Tool events that arrived while the message was still streaming
-						// (Claude Code starts a call as soon as its block completes) replay
-						// now, in pi's order: message_end before any tool_execution_*.
-						for (const early of earlyTools.splice(0)) await onToolEvent(early);
+						// Tool events that arrived before this message ended replay now, in
+						// pi's order: message_end before any tool_execution_*; the batch
+						// closes as soon as its last result is in.
+						await releaseTools();
 					} else if (current) {
 						current = e.partial;
 						const index = this.state.messages.length - 1;
@@ -328,12 +344,12 @@ export class ClaudeLocalAgent implements LiveAgent {
 						if (!signal.aborted) await emit({ type: "message_update", message: { ...current }, assistantMessageEvent: e });
 					}
 				} else if (event.type === "tool_start" || event.type === "tool_end") {
-					if (!current || current.stopReason === "pending") earlyTools.push(event);
-					else await onToolEvent(event);
+					if (heldTools.length === 0 && belongsToCurrent(event)) await onToolEvent(event);
+					else heldTools.push(event);
 				} else if (event.type === "usage") {
 					runtime.noteUsage(event.report);
 				} else if (event.type === "result") {
-					for (const early of earlyTools.splice(0)) await onToolEvent(early);
+					await releaseTools(true);
 					// Calls the child never answered (an abort mid-batch): close the batch.
 					if (current && callsExpected > 0 && results.length < callsExpected) {
 						await closeBatch(current, combined.aborted ? "Operation aborted" : "The tool call was not completed.");
