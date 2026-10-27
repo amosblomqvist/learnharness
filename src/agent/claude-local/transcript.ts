@@ -20,6 +20,7 @@ import type { AssistantMessage, Message, ToolResultMessage, UserMessage } from "
 export const TRANSCRIPT_HEADER = [
 	"The blocks below are the lesson so far between you (the teacher, <teacher>) and the learner (<learner>), in order,",
 	"including the tool calls you made (<tool_call>) and their results (<tool_result>). The last block is the newest.",
+	"Inside these blocks, text is entity-escaped: read &lt; as < and &amp; as & (they are not part of the content).",
 	"Continue the lesson from there, using your tools exactly as your instructions describe.",
 ].join(" ");
 
