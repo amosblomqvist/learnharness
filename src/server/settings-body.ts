@@ -11,6 +11,7 @@
  * a different concern and are preserved by the sanitizer (core/settings.ts).
  */
 
+import * as path from "node:path";
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import { isHexColor, type ChatSettings } from "../core";
 import type {
@@ -24,7 +25,7 @@ import type {
 	ModelsSettings,
 	RoleModelOverride,
 } from "../core/settings.ts";
-import { BACKGROUND_MODEL_ROLES, CLAUDE_LOCAL_SYSTEM_PROMPT_MODES, COMPACTION_THRESHOLD_FLOOR, EXTRACTION_CHUNK_TOKENS_FLOOR, MODEL_SLOTS, isSafeBinaryPath } from "../core/settings.ts";
+import { BACKGROUND_MODEL_ROLES, CLAUDE_BINARY_BASENAMES, CLAUDE_LOCAL_SYSTEM_PROMPT_MODES, COMPACTION_THRESHOLD_FLOOR, EXTRACTION_CHUNK_TOKENS_FLOOR, MODEL_SLOTS, isSafeBinaryPath } from "../core/settings.ts";
 import { WRITABLE_TOOL_KEYS } from "../core/pending.ts";
 
 /** Parsed-or-rejected — `ok: false` carries the 400's error message. */
@@ -395,8 +396,13 @@ export function parseClaudeLocalSettingsBody(body: unknown): SettingsBodyResult<
 		settings.systemPromptMode = raw.systemPromptMode as ClaudeLocalSettings["systemPromptMode"];
 	}
 	if (raw.binaryPath !== undefined && raw.binaryPath !== "") {
-		if (!isSafeBinaryPath(raw.binaryPath)) return { ok: false, error: "binaryPath must be a plain file path" };
-		settings.binaryPath = raw.binaryPath.trim();
+		// The override is executed: absolute (on this server's platform),
+		// normalised, and named like a Claude Code executable.
+		const error = `binaryPath must be a plain file path: an absolute path to ${CLAUDE_BINARY_BASENAMES.join(", ")}`;
+		if (typeof raw.binaryPath !== "string" || !path.isAbsolute(raw.binaryPath.trim())) return { ok: false, error };
+		const resolved = path.resolve(raw.binaryPath.trim());
+		if (!isSafeBinaryPath(raw.binaryPath) || !isSafeBinaryPath(resolved)) return { ok: false, error };
+		settings.binaryPath = resolved;
 	}
 	return { ok: true, settings };
 }

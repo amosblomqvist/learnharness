@@ -28,7 +28,7 @@ import { acceptClaudeLocalSnapshot, claudeLocalStatus as bridgeStatus, claudeLoc
 import { loadClaudeQuery, type AccountInfo, type ClaudeQuery, type ModelInfo } from "../agent/claude-local/sdk.ts";
 import type { EffectiveSettings } from "../core/settings-resolution.ts";
 import { effectiveSettings } from "./stores.ts";
-import { subscriptionRequestAuthorized } from "./web-subscription-http.ts";
+import { readControlJson, subscriptionRequestAuthorized } from "./web-subscription-http.ts";
 
 // ─── detection ──────────────────────────────────────────────────────────────
 
@@ -334,8 +334,13 @@ export async function claudeLocalControlsResponse(request: Request): Promise<Res
 		return Response.json(claudeLocalStatusNow(), { headers: HEADERS });
 	}
 	if (request.method !== "POST") return Response.json({ error: "Unsupported method." }, { status: 405, headers: HEADERS });
+	// The subscriptions' body guards: JSON only, 16 KB, bounded read.
 	let command: unknown;
-	try { command = await request.json(); } catch { command = null; }
+	try {
+		const body = await readControlJson(request);
+		if ("error" in body) return body.error;
+		command = body.value;
+	} catch { command = null; }
 	const op = command && typeof command === "object" && !Array.isArray(command) ? (command as { op?: unknown }).op : undefined;
 	if (op !== "probe") return Response.json({ error: "Unsupported control." }, { status: 400, headers: HEADERS });
 	await refreshClaudeLocal({ force: true });

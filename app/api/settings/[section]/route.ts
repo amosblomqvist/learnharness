@@ -39,6 +39,7 @@ import {
 	invalidateClaudeLocal,
 	promptOverrides,
 	readSettingsRecord,
+	subscriptionRequestAuthorized,
 	validateAgentModelOverrides,
 	validateChatSettings,
 	validateModelsSettings,
@@ -59,6 +60,11 @@ export async function PUT(request: Request, ctx: { params: Promise<{ section: st
 			{ error: `unknown settings section "${section}"`, supported: Object.keys(SETTINGS_SECTIONS) },
 			{ status: 404 },
 		);
+	}
+	// Local Claude's settings name an executable the server runs: the same
+	// same-origin gate as the connection controls (/api/claude-local).
+	if (section === "claudeLocal" && !subscriptionRequestAuthorized(request)) {
+		return Response.json({ error: "Local Claude controls require a same-origin LearnHarness request." }, { status: 403 });
 	}
 	const body = await request.json().catch(() => null);
 	const parsed = parser(body);

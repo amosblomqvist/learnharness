@@ -621,10 +621,20 @@ function sanitizeCompaction(raw: Record<string, unknown>): CompactionSettings {
 	return out;
 }
 
-/** A binary path is a plain non-empty string without control characters;
- *  anything else drops (the probe reports "not found" for a bad path). */
+/** The executables a binaryPath override may name (the native binary,
+ *  npm's Windows shim, the npm cli.js entry). */
+export const CLAUDE_BINARY_BASENAMES: readonly string[] = ["claude", "claude.exe", "claude.cmd", "cli.js"];
+/** A binary path is an absolute path (POSIX `/…`, Windows `C:\…` or `\\…`)
+ *  without control characters whose basename is a Claude Code executable;
+ *  anything else drops. The override is executed, so a settings write must
+ *  never be able to name an arbitrary program (the PUT parser additionally
+ *  applies the server platform's path.isAbsolute and normalises). */
 export function isSafeBinaryPath(value: unknown): value is string {
-	return typeof value === "string" && value.trim().length > 0 && value.length <= 4096 && !/[\x00-\x1f\x7f]/.test(value);
+	if (typeof value !== "string") return false;
+	const trimmed = value.trim();
+	if (trimmed.length === 0 || value.length > 4096 || /[\x00-\x1f\x7f]/.test(value)) return false;
+	if (!/^(\/|[A-Za-z]:[\\/]|\\\\)/.test(trimmed)) return false;
+	return CLAUDE_BINARY_BASENAMES.includes(trimmed.split(/[\\/]/).pop() ?? "");
 }
 export const CLAUDE_LOCAL_SYSTEM_PROMPT_MODES: readonly ClaudeLocalSystemPromptMode[] = ["custom", "preset"];
 

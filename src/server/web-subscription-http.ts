@@ -24,27 +24,34 @@ function authorized(request: Request): boolean {
 	return request.method === "GET" ? !supplied || supplied === origin : supplied === origin;
 }
 function error(message: string, status: number) { return Response.json({ error: message }, { status, headers: HEADERS }); }
+/** The connection controls' JSON body (subscriptions and Local Claude):
+ *  `application/json` only, bounded at 16 KB both advertised and streamed,
+ *  before anything is parsed. Malformed JSON throws (the caller's 400). */
+export async function readControlJson(request: Request): Promise<{ value: unknown } | { error: Response }> {
+	if (request.headers.get("content-type")?.split(";")[0]?.trim() !== "application/json") return { error: error("Expected JSON.", 415) };
+	if (Number(request.headers.get("content-length")) > 16384) return { error: error("Request too large.", 413) };
+	const reader = request.body?.getReader();
+	if (!reader) return { error: error("Expected a command.", 400) };
+	const chunks: Uint8Array[] = []; let size = 0;
+	try {
+		for (;;) {
+			const next = await reader.read(); if (next.done) break;
+			size += next.value.byteLength;
+			if (size > 16384) { await reader.cancel(); return { error: error("Request too large.", 413) }; }
+			chunks.push(next.value);
+		}
+	} finally { reader.releaseLock(); }
+	return { value: JSON.parse(Buffer.concat(chunks).toString("utf8")) as unknown };
+}
 export async function subscriptionControlsResponse(request: Request): Promise<Response> {
 	if (!webSubscriptionsEnabled()) return error("Web subscription controls are unavailable in desktop-owned mode.", 404);
 	if (!authorized(request)) return error("Subscription controls require a same-origin LearnHarness request.", 403);
 	try {
 		if (request.method === "GET") return Response.json(await webSubscriptionStatus(), { headers: HEADERS });
 		if (request.method !== "POST") return error("Unsupported method.", 405);
-		if (request.headers.get("content-type")?.split(";")[0]?.trim() !== "application/json") return error("Expected JSON.", 415);
-		// Bound both advertised and streamed input before parsing commands.
-		if (Number(request.headers.get("content-length")) > 16384) return error("Request too large.", 413);
-		const reader = request.body?.getReader();
-		if (!reader) return error("Expected a command.", 400);
-		const chunks: Uint8Array[] = []; let size = 0;
-		try {
-			for (;;) {
-				const next = await reader.read(); if (next.done) break;
-				size += next.value.byteLength;
-				if (size > 16384) { await reader.cancel(); return error("Request too large.", 413); }
-				chunks.push(next.value);
-			}
-		} finally { reader.releaseLock(); }
-		const command: unknown = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+		const body = await readControlJson(request);
+		if ("error" in body) return body.error;
+		const command = body.value;
 		if (!command || typeof command !== "object" || Array.isArray(command)) return error("Invalid command.", 400);
 		const fields = command as Record<string, unknown>;
 		const providerId = fields.providerId;

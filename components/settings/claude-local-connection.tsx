@@ -71,7 +71,7 @@ async function probe(): Promise<ClaudeLocalStatus> {
 	return response.json() as Promise<ClaudeLocalStatus>;
 }
 async function putSettings(settings: { enabled: boolean; allowBackgroundUse: boolean; systemPromptMode: ClaudeLocalSystemPromptMode; binaryPath: string }): Promise<void> {
-	const response = await fetch("/api/settings/claudeLocal", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(settings) });
+	const response = await fetch("/api/settings/claudeLocal", { method: "PUT", headers, body: JSON.stringify(settings) });
 	if (!response.ok) throw new Error(((await response.json().catch(() => null)) as { error?: string } | null)?.error ?? "The setting could not be saved.");
 }
 
