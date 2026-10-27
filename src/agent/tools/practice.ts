@@ -21,6 +21,7 @@ import { readTool } from "./read.ts";
 import { lsTool } from "./ls.ts";
 import { findTool } from "./find.ts";
 import { grepTool } from "./grep.ts";
+import { codePlaygroundTool } from "./code-playground.ts";
 import { jobTools, type JobToolContext } from "./jobs.ts";
 import { proberGraphTools, type GraphToolContext } from "./graph.ts";
 import { activeProblemOf } from "../../core/native-messages.ts";
@@ -238,6 +239,9 @@ export function practiceTools(ctx: PracticeToolContext): Record<string, AgentToo
 	return healToolRecord({
 		problem: problemTool(gate, ctx.graphNodes),
 		conclude: concludeTool(gate),
+		// Coding problems under interview conditions (owner 2026-10-27): the
+		// playground is an assessment instrument here, unlike teach-only demo/visual.
+		code_playground: codePlaygroundTool(),
 		read: readTool,
 		ls: lsTool,
 		find: findTool,
