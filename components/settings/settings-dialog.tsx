@@ -33,6 +33,8 @@ import { createPortal } from "react-dom";
 import { useBackdropDismiss } from "@/components/backdrop-dismiss";
 import {
 	CURRENT_SETTINGS_VERSION,
+	LOCALE_NAMES,
+	LOCALES,
 	type AgentSettings,
 	type AppearanceSettings,
 	type CompactionSettings,
@@ -40,7 +42,8 @@ import {
 	type UserSettings,
 } from "@/src/core";
 import { useAppearance } from "./appearance.tsx";
-import { SettingsSection } from "./controls.tsx";
+import { SettingsRow, SettingsSection, ThinSelect } from "./controls.tsx";
+import { useT } from "@/components/locale";
 import { UpdateSettings } from "./update-settings.tsx";
 import { AgentSection } from "./agent-section.tsx";
 import type { ModelsSettings } from "@/src/core";
@@ -142,6 +145,7 @@ export function SettingsDialogBody({
 	 *  retargets follow it exactly like initialSection below. */
 	initialRow?: string | null;
 }) {
+	const t = useT();
 	const { onAppearanceChange } = useAppearance();
 	const [record, setRecord] = useState<UserSettings | null | undefined>(
 		undefined,
@@ -240,7 +244,7 @@ export function SettingsDialogBody({
 					error?: string;
 				};
 				setError(`${section}: ${detail.error ?? res.status}`);
-				return;
+				return false;
 			}
 			// Server truth, never the request body (fix wave, owner repro):
 			// the models section clamps pinned thinking levels on write
@@ -257,6 +261,7 @@ export function SettingsDialogBody({
 			notifySettingsSaved(section);
 			if (section === "appearance")
 				onAppearanceChange(body as AppearanceSettings);
+			return true;
 		},
 		[onAppearanceChange],
 	);
@@ -360,6 +365,28 @@ export function SettingsDialogBody({
 									title="General"
 									testid="section-general"
 								>
+									<SettingsRow
+										label={t("Language")}
+										hint={t("The interface and the agent's replies")}
+										testid="row-language"
+									>
+										<ThinSelect
+											value={record.general?.language ?? "en"}
+											ariaLabel={t("Language")}
+											testid="select-language"
+											// The layout reads the language on the server, so a
+											// reload re-renders every surface in the new one.
+											onChange={(language) =>
+												void write("general", { ...record.general, language }).then((saved) => saved && window.location.reload())
+											}
+										>
+											{LOCALES.map((locale) => (
+												<option key={locale} value={locale}>
+													{LOCALE_NAMES[locale]}
+												</option>
+											))}
+										</ThinSelect>
+									</SettingsRow>
 									<UpdateSettings
 										autoUpdate={record.general?.autoUpdate ?? true}
 										onAutoUpdateChange={(on) =>

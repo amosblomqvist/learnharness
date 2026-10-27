@@ -6,6 +6,7 @@ import type { Usage } from "@earendil-works/pi-ai";
 import { PATHS } from "../../config.ts";
 import { APP_IDENTITY, piEngineFor, type PiEngine } from "./models.ts";
 import { effectivePromptSegments } from "./prompt-segments.ts";
+import type { Locale } from "../core/i18n/index.ts";
 import {
 	askUserQuestionTool,
 	createProberTools,
@@ -91,6 +92,17 @@ const composedInstructions: Record<AgentKind, string> = {
 	practice: composeInstructions("practice"),
 };
 
+/** The conversation-language rule. The prompts are written in English and
+ *  need none; any other UI language appends its rule after the composition
+ *  (outside the override segments, so an override never drops it). */
+const LANGUAGE_RULES: Readonly<Record<Exclude<Locale, "en">, string>> = {
+	es: '## Language\n\nWrite every learner-facing word in Spanish (neutral Spanish, addressing the learner as "tú"): replies, questions, options, hints, plans, cards, demos, visuals, and learner files. Tool input field names, file names, code, and formulas stay exactly as specified. If the learner explicitly asks for another language, use that language instead.',
+};
+
+export function withLanguageRule(systemPrompt: string, language: Locale = "en"): string {
+	return language === "en" ? systemPrompt : `${systemPrompt}\n\n---\n\n${LANGUAGE_RULES[language]}`;
+}
+
 // Money channel (wave 4): the chat-handler passes a per-turn collector;
 // every model call's usage lands in the chat record's turns log
 // (ChatStore.appendTurnUsage). The narrow param keeps the seam honest.
@@ -121,6 +133,8 @@ export interface AgentBuildOptions {
 	 *  fresh per turn, honoring enabled overrides (switch on + file
 	 *  exists); absent → the cached pure-source composition. */
 	promptSwitches?: Record<string, boolean>;
+	/** The settings' general.language: the language the agent writes in (absent = English). */
+	language?: Locale;
 	/** Native conversation identity: the existing persisted chat id, reused
 	 * across reconstructed prober, teacher, and practice Agents.
 	 * Debug: when set AND LH_PROVIDER_EVENTS=1, raw provider stream events
@@ -181,9 +195,10 @@ function baseAgentOptions(kind: AgentKind, opts: AgentBuildOptions, tools: Agent
 	// ("practice" is not a ModelRole) honest about that.
 	const engine = opts.engine ?? piEngineFor(kind as "prober" | "teacher");
 	const stopper = makeQuestionStopper(kind);
-	const systemPrompt = opts.promptSwitches
-		? composeInstructions(kind, opts.promptSwitches)
-		: composedInstructions[kind]!;
+	const systemPrompt = withLanguageRule(
+		opts.promptSwitches ? composeInstructions(kind, opts.promptSwitches) : composedInstructions[kind]!,
+		opts.language,
+	);
 	// Debug recorder (owner, 2026-10-04): raw provider events when
 	// LH_PROVIDER_EVENTS=1 and the caller handed a chatId; undefined is
 	// the normal no-observer path (tests, env-off).
