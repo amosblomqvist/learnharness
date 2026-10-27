@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Loader2Icon, MicIcon } from "lucide-react";
-import { useSettingsDialog, waitForPendingGeneralSettingsWrites } from "@/components/settings/settings-dialog";
+import { useSettingsDialog, waitForPendingSettingsWrites } from "@/components/settings/settings-dialog";
 import { Hint } from "@/components/ui/hint";
 import { DICTATION_STOP_PCM_BYTES, MAX_DICTATION_WAV_BYTES, WAV_HEADER_BYTES, deepgramListenUrl, pcm16Wav, type DictationLanguage, type DictationProvider } from "@/src/core";
 import { useDictationLanguage } from "@/components/dictation-preference";
@@ -403,7 +403,7 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 		pcmRef.current = []; pcmBytesRef.current = 0; limitReachedRef.current = false;
 		const gen = ++genRef.current;
 		try {
-			await waitForPendingGeneralSettingsWrites();
+			await waitForPendingSettingsWrites("general");
 			if (gen !== genRef.current) return;
 			const provider = await getProvider();
 			if (gen !== genRef.current) return;

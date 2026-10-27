@@ -4,6 +4,7 @@ import { test } from "node:test";
 import { parseHTML } from "linkedom";
 import { useDictation, type Dictation } from "../components/dictation.tsx";
 import { SettingsDialogBody } from "../components/settings/settings-dialog.tsx";
+import { useDictationLanguage } from "../components/dictation-preference.ts";
 
 test("recording waits for an in-flight provider choice and locks it until capture ends", async () => {
 	const dom = parseHTML("<html><body><div id='root'></div></body></html>");
@@ -13,6 +14,7 @@ test("recording waits for an in-flight provider choice and locks it until captur
 	let micCalls = 0;
 	let sockets = 0;
 	let current!: Dictation;
+	let preference!: ReturnType<typeof useDictationLanguage>;
 	class Context {
 		sampleRate = 16000;
 		state = "running";
@@ -51,6 +53,7 @@ test("recording waits for an in-flight provider choice and locks it until captur
 	const root = createRoot(document.getElementById("root")!);
 	function Harness() {
 		current = useDictation({ append: () => {} });
+		preference = useDictationLanguage();
 		return <SettingsDialogBody initialSection="general" onClose={() => {}} />;
 	}
 	try {
@@ -70,6 +73,19 @@ test("recording waits for an in-flight provider choice and locks it until captur
 		assert.equal(sockets, 0, "the confirmed OpenAI choice never opens Deepgram");
 		await act(async () => current.cancel());
 		assert.equal(select.disabled, false);
+
+		// A successful save can finish after navigation has removed the last
+		// dictation reader. A later page must not use the previously cached provider.
+		await act(async () => root.render(<SettingsDialogBody initialSection="general" onClose={() => {}} />));
+		const afterNavigation = document.querySelector<HTMLSelectElement>('[data-testid="dictation-provider"]')!;
+		await act(async () => {
+			Object.defineProperty(afterNavigation, "value", { configurable: true, writable: true, value: "deepgram" });
+			afterNavigation.dispatchEvent(new window.Event("change", { bubbles: true }));
+		});
+		await act(async () => finishWrite());
+		assert.equal(record.general.dictationProvider, "deepgram");
+		await act(async () => root.render(<Harness />));
+		assert.equal(await preference.getProvider(), "deepgram", "a save during a reader gap invalidates the cached provider");
 	} finally {
 		await act(async () => root.unmount());
 		for (const [key, descriptor] of previous) {

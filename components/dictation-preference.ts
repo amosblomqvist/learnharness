@@ -118,20 +118,24 @@ const store = createDictationLanguageStore((...args) => fetch(...args), () => {
 	announcingSave = true;
 	try { notifySettingsSaved("dictation"); } finally { announcingSave = false; }
 });
-let readers = 0;
+let signalWindow: Window | undefined;
 let stopSignals: (() => void) | undefined;
 
 function subscribe(listener: () => void) {
 	const off = store.subscribe(listener);
-	if (readers++ === 0) {
+	if (signalWindow !== window) {
+		stopSignals?.();
+		signalWindow = window;
+		// The cached preferences outlive a page, so their invalidation listener
+		// must also survive periods when no dictation surface is mounted.
 		stopSignals = onSettingsSaved((section) => {
 			if ((section === "dictation" && !announcingSave) || section === "general") void store.load(true).catch(() => {});
 		});
-		// A confirmed preference lives for the window, not the page. Navigation
-		// and reopening Settings must not add a new network failure point.
-		void store.getLanguage().catch(() => {});
 	}
-	return () => { off(); if (--readers === 0) { stopSignals?.(); stopSignals = undefined; } };
+	// A confirmed preference lives for the window, not the page. Navigation
+	// and reopening Settings must not add a new network failure point.
+	void store.getLanguage().catch(() => {});
+	return off;
 }
 
 export function useDictationLanguage() {
