@@ -189,10 +189,6 @@ export async function probeAccount(query: ClaudeQuery, launch: ClaudeLocalLaunch
 		prompt: silence(abort.signal),
 		options: {
 			...claudeLaunchOptions(launch),
-			tools: [],
-			settingSources: [],
-			persistSession: false,
-			strictMcpConfig: true,
 			maxTurns: 1,
 			systemPrompt: "",
 			abortController: abort,

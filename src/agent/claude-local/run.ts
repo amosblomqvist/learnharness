@@ -161,11 +161,9 @@ export async function* runClaudeTurn(params: ClaudeTurnParams): AsyncGenerator<C
 		}) satisfies HookCallback] }],
 	};
 	const options: ClaudeQueryOptions = {
+		// Isolation (tools: [], settingSources: [], strictMcpConfig,
+		// persistSession: false) comes with the launch slice.
 		...claudeLaunchOptions(params.launch),
-		tools: [],
-		settingSources: [],
-		strictMcpConfig: true,
-		persistSession: false,
 		// Permissions: ONLY the app's own tool server is pre-approved (the
 		// `mcp__<server>` prefix form); anything else would need a prompt there
 		// is no tool for, and the PreToolUse hook denies it by name anyway. No

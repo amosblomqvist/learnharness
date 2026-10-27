@@ -20,10 +20,21 @@ export function claudeCommand(binary: { path: string; viaNode: boolean }, execPa
 	return { command: execPath, args: [binary.path], extraEnv: { ELECTRON_RUN_AS_NODE: "1" } };
 }
 
-/** The shared option slice for every query against this install. */
-export function claudeLaunchOptions(launch: ClaudeLocalLaunch, base: NodeJS.ProcessEnv = process.env): Pick<ClaudeQueryOptions, "pathToClaudeCodeExecutable" | "executable" | "cwd" | "env" | "spawnClaudeCodeProcess"> {
+/** The isolation every query against the user's install carries: no
+ *  Claude Code built-in tools, none of the user's settings (CLAUDE.md,
+ *  hooks, MCP config), only the MCP servers the call passes, and no
+ *  session files under ~/.claude/projects. */
+export function claudeIsolationOptions(): Required<Pick<ClaudeQueryOptions, "tools" | "settingSources" | "strictMcpConfig" | "persistSession">> {
+	return { tools: [], settingSources: [], strictMcpConfig: true, persistSession: false };
+}
+
+/** The shared option slice for every query against this install —
+ *  isolated by construction (claudeIsolationOptions), so no call site can
+ *  omit the isolation flags. */
+export function claudeLaunchOptions(launch: ClaudeLocalLaunch, base: NodeJS.ProcessEnv = process.env): Pick<ClaudeQueryOptions, "pathToClaudeCodeExecutable" | "executable" | "cwd" | "env" | "spawnClaudeCodeProcess" | "tools" | "settingSources" | "strictMcpConfig" | "persistSession"> {
 	const { command, extraEnv } = claudeCommand(launch);
 	return {
+		...claudeIsolationOptions(),
 		pathToClaudeCodeExecutable: launch.path,
 		...(launch.viaNode ? { executable: "node" as const } : {}),
 		cwd: launch.cwd,

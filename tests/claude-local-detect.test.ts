@@ -525,3 +525,19 @@ describe("external review: Windows env casing (P2)", () => {
 		assert.equal(claudeChildEnvAllows("PATH", "linux"), true);
 	});
 });
+
+describe("external review: isolation by construction (G1)", () => {
+	it("the launch slice always carries the four isolation flags, for a native binary and a viaNode install, and both call sites send them", async () => {
+		for (const launch of [{ path: "/opt/x/claude", viaNode: false, cwd: "/d" }, { path: "/g/cli.js", viaNode: true, cwd: "/d" }]) {
+			const options = claudeLaunchOptions(launch, { PATH: "/bin" } as unknown as NodeJS.ProcessEnv);
+			assert.deepEqual(options.tools, [], launch.path); assert.deepEqual(options.settingSources, [], launch.path);
+			assert.equal(options.strictMcpConfig, true, launch.path); assert.equal(options.persistSession, false, launch.path);
+		}
+		const a = claudeLaunchOptions({ path: "/opt/x/claude", viaNode: false, cwd: "/d" }), b = claudeLaunchOptions({ path: "/opt/x/claude", viaNode: false, cwd: "/d" });
+		assert.notEqual(a.tools, b.tools, "each call gets its own arrays (no shared mutable state)");
+		const fake = fakeQuery({ account: PLAN });
+		await server.probeAccount(fake.query, { path: "/x", viaNode: false, cwd: directory }, 2000);
+		const probe = fake.calls[0]!.options;
+		assert.deepEqual([probe.tools, probe.settingSources, probe.strictMcpConfig, probe.persistSession], [[], [], true, false], "the login probe is isolated");
+	});
+});
