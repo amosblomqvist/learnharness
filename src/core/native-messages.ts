@@ -43,7 +43,7 @@ import {
 	NEXT_PROBLEM_TEXT,
 	THINKING_LABEL,
 } from "./contracts/chat.ts";
-import { compactAnswerForModel, type QuestionAnswerData } from "./question-core.ts";
+import { planReviewChoice, compactAnswerForModel, type QuestionAnswerData } from "./question-core.ts";
 import { activeCompactionOf, keptIndexFor } from "./compaction.ts";
 
 /** The hard-invariant wording for an aborted turn's unanswered calls —
@@ -204,9 +204,9 @@ export function newAnswerResult(
 
 /** The probe→teach handoff wake: scaffolding, not speech — the model reads
  *  HANDOFF_TEXT, the UI renders the quiet system line. */
-export function newHandoffMessage(chatId: string): LhMarkerMessage {
+export function newHandoffMessage(chatId: string, toolCallId?: string): LhMarkerMessage {
 	return {
-		id: `steer_probe_${chatId}`,
+		id: toolCallId ? `steer_probe_${chatId}_${toolCallId}` : `steer_probe_${chatId}`,
 		role: "custom",
 		customType: "probe-handoff",
 		content: HANDOFF_TEXT,
@@ -708,15 +708,33 @@ export function successfulToolResultIds(messages: readonly LhMessage[], tool: st
 	return results;
 }
 
-/** The probe→teach construction seam (chat-handler and the tool guard):
- *  only a concluded call plus a matching successful result means teach. */
+/** Matching plan review answers, never inferred from prose or arbitrary option values. */
+export function planReviewResults(messages: readonly LhMessage[]): Map<string, "accept" | "revise" | "probe"> {
+	const calls = new Map<string, unknown>();
+	const decisions = new Map<string, "accept" | "revise" | "probe">();
+	for (const message of messages) {
+		if (message.role === "assistant" && message.stopReason !== "error" && message.stopReason !== "aborted") {
+			for (const block of message.content) {
+				if (block.type === "toolCall" && block.name === "ask_user_question") calls.set(block.id, block.arguments);
+			}
+		} else if (message.role === "toolResult" && message.toolName === "ask_user_question" && !message.isError) {
+			const decision = planReviewChoice(calls.get(message.toolCallId), message.details);
+			if (decision) decisions.set(message.id, decision);
+		}
+	}
+	return decisions;
+}
+
+/** A successful conclusion selects the teacher until a successful reopening
+ * or an explicit diagnostic choice in a plan review selects the prober. */
 export function hasProbeDone(messages: readonly LhMessage[]): boolean {
 	const done = probeDoneResultIds(messages);
 	const resumed = successfulToolResultIds(messages, "resume_probe");
+	const reviews = planReviewResults(messages);
 	let concluded = false;
 	for (const message of messages) {
 		if (done.has(message.id)) concluded = true;
-		if (resumed.has(message.id)) concluded = false;
+		if (resumed.has(message.id) || reviews.get(message.id) === "probe") concluded = false;
 	}
 	return concluded;
 }

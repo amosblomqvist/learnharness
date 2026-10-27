@@ -17,12 +17,19 @@ import type { SteerMessage } from "../src/core/contracts.ts";
 const created: string[] = [];
 after(() => { for (const id of created) fs.rmSync(path.join(PATHS.chats, `${id}.json`), { force: true }); });
 function call(id: string, name: string, args = {}): LhMessage {
-	return { id, role: "assistant", content: [{ type: "toolCall", id, name, arguments: args }],
-		stopReason: "toolUse", timestamp: 1 } as LhMessage;
+	return {
+		id,
+		role: "assistant",
+		content: [{ type: "toolCall", id, name, arguments: args }],
+		stopReason: "toolUse",
+		timestamp: 1,
+	} as LhMessage;
 }
 function result(id: string, tool: string, isError = false, details = { ok: true }): LhMessage {
-	return { id: `${id}-result`, role: "toolResult", toolCallId: id, toolName: tool,
-		content: [{ type: "text", text: "ok" }], details, isError, timestamp: 2 };
+	return {
+		id: `${id}-result`, role: "toolResult", toolCallId: id, toolName: tool,
+		content: [{ type: "text", text: "ok" }], details, isError, timestamp: 2,
+	};
 }
 const done = [call("done", "probe_done"), result("done", "probe_done")];
 const teaching = [...done, call("quiz", "quiz", { nodeId: "foundation" })];
@@ -98,4 +105,29 @@ test("reopening is always available and blocks a later teaching pose in the same
 	const quiz = await tools.quiz!.execute("quiz-after-resume", { question: "q", options: [{ label: "a" }, { label: "b" }],
 		correctAnswer: "a", explanation: "a", type: "predict", nodeId: "foundation" });
 	assert.equal(quiz.isError, true);
+});
+
+test("a steer arriving during probe completion can reopen before the queued planning wake", async () => {
+	const chat = chatStore.createChat("In-flight diagnostic request"); created.push(chat.id);
+	const faux = createFauxCore({});
+	let requests = 0;
+	faux.setResponses([
+		() => fauxAssistantMessage([fauxToolCall("probe_done", { assessment: { strands: [{ strand: "foundation", assessment: "Initial estimate" }], summary: "Provisional" } }, { id: "initial-done" })], { stopReason: "toolUse" }),
+		(context) => {
+			requests++;
+			assert.match(JSON.stringify(context.messages), /continue probing/);
+			return fauxAssistantMessage([fauxToolCall("resume_probe", {}, { id: "resume-live" })], { stopReason: "toolUse" });
+		},
+	]);
+	const wakes: SteerMessage[] = [];
+	const agent = createProberAgent({ chatId: chat.id, chatStore, jobStore, spawn: () => {}, deliver: (s) => {
+		wakes.push(s);
+		if (wakes.length === 1) agent.steer({ role: "user", content: "continue probing", timestamp: Date.now() });
+	} }, { engine: { model: faux.getModel(), streamFn: faux.streamSimple } });
+	await agent.prompt("Assess foundations");
+	assert.equal(requests, 1);
+	assert.equal(wakes.length, 2);
+	const persisted = agent.state.messages.map((m, i) => ({ ...m, id: `live-${i}` })) as LhMessage[];
+	assert.equal(hasProbeDone(persisted), false);
+	assert.equal(phaseAt3Lh(persisted), "probe");
 });

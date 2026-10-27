@@ -1,40 +1,17 @@
 /**
- * Phase derivation (docs/probe-teach-split.md §4) — EXPLICIT EVENTS, never
- * occupancy. The probe→teach agent split (2026-09-11) gave the first
- * boundary a transcript event; the second is INFERRED (owner ruling
- * 2026-09-26, the verdict death):
+ * Transcript-derived phases shared by server summaries and the browser.
+ * A successful probe_done opens planning; the first valid node-tagged
+ * quiz/explain starts teaching. Failed generations and rejected calls
+ * never represent a posed teaching question.
  *
- *   probe  — until the prober's `probe_done` call CONCLUDES (a clean
- *            toolResult for it; the assessment rides the call's arguments)
- *   plan   — probe concluded, until teaching actually BEGINS
- *   teach  — the first quiz tool call tagged with a `nodeId` (a question
- *            ABOUT a plan node — probe quizzes carry no nodeId in their
- *            schema, so nothing false-triggers). The CALL is the seam, not
- *            its answer: the block that poses the first node question is
- *            where teaching starts.
+ * Initial plan approval authorizes a pose, but does not itself change the
+ * phase. A successful resume_probe or a diagnostic plan-review choice
+ * returns either fold to probe without removing history.
  *
- * There is no verdict gate anymore: presenting the plan ends the teacher's
- * turn, and the learner's next message is a natural reply (a change
- * request, or the go-ahead). The live indicator LAGS by design (owner
- * accepted): "teach" shows only once the first node's question is posed.
- * A teacher that never tags a quiz can no longer exist — nodeId is
- * schema-required at the teach quiz boundary (owner ruling 2026-09-26),
- * so the seam signal is structural, not prompt-mandated.
- *
- * The former derived-occupancy seam (phase-of-tree via `currentNodeId`)
- * is GONE, as is the verdict-marker fold: no backwards compatibility
- * (legacy sessions are wiped data).
- *
- * TWO FOLDS over the same events (Wave D): `phaseAt3`/`phaseTimeline` fold
- * VIEW messages (the client's dividers and dock — part shapes, pure and
- * structural); `phaseAt3Lh` folds the NATIVE record (server summaries,
- * tests) — probe→plan advances at the probe_done RESULT message, plan→teach
- * at the assistant message carrying the first nodeId-tagged quiz CALL.
- * Both are strictly sequential; the two derivations agree on every settled
- * record (a call's part projects into the same view boundary).
- *
- * Pure: only browser-safe core helpers — safe on server, client, and tests.
+ * Native results project back onto their calls in the view. Both folds
+ * must agree on settled records, including failed and aborted generations.
  */
+import { planReviewChoice } from "./question-core.ts";
 
 /** The three phases of a session, as the picker / header / dividers see them. */
 export type Phase3 = "probe" | "plan" | "teach";
@@ -76,9 +53,11 @@ function advance(
 ): Phase3 {
 	if (!parts) return phase;
 	for (const part of parts) {
+		if (part.type === "tool-ask_user_question" && part.state === "output-available" &&
+			planReviewChoice(part.input, part.output) === "probe") phase = "probe";
 		if (part.type === "tool-resume_probe" && part.state === "output-available" &&
 			(part.output as { ok?: unknown } | undefined)?.ok === true) phase = "probe";
-		// STRICTLY SEQUENTIAL: probe → plan only via a concluded probe_done,
+		// probe → plan only via a concluded probe_done,
 		// plan → teach only via a valid nodeId-tagged question. Rejected
 		// calls remain retry context and never represent posed teaching.
 		if (
@@ -159,7 +138,7 @@ export function phaseTimeline(messages: readonly PhaseMessage[]): Phase3[] {
 
 // ─── the native fold (Wave D: record-side phase over LhMessage[]) ───────────
 
-import { probeDoneResultIds, successfulToolResultIds, type LhMessage } from "./native-messages.ts";
+import { planReviewResults, probeDoneResultIds, successfulToolResultIds, type LhMessage } from "./native-messages.ts";
 
 /** The phase at `upToIndex` (inclusive; default: the last message) of a
  *  NATIVE record. probe→plan advances at the probe_done call's clean
@@ -171,6 +150,7 @@ export function phaseAt3Lh(messages: readonly LhMessage[], upToIndex?: number): 
 	const last = Math.min(upToIndex ?? messages.length - 1, messages.length - 1);
 	const concluded = probeDoneResultIds(messages.slice(0, last + 1));
 	const resumed = successfulToolResultIds(messages.slice(0, last + 1), "resume_probe");
+	const reviews = planReviewResults(messages.slice(0, last + 1));
 	// Results project back onto their calls in the client. Match that rule
 	// even when asking for the phase at an earlier message index.
 	const rejected = new Set(messages.flatMap((m) =>
@@ -181,7 +161,7 @@ export function phaseAt3Lh(messages: readonly LhMessage[], upToIndex?: number): 
 		const m = messages[i]!;
 		const role = (m as { role?: string }).role;
 		if (role === "toolResult") {
-			if (resumed.has(m.id)) phase = "probe";
+			if (resumed.has(m.id) || reviews.get(m.id) === "probe") phase = "probe";
 			if (phase === "probe" && concluded.has(m.id)) phase = "plan";
 		} else if (m.role === "assistant" && m.stopReason !== "error" && m.stopReason !== "aborted") {
 			const content = (m as { content?: ReadonlyArray<{ type?: string; name?: string; id?: string; arguments?: unknown }> }).content ?? [];

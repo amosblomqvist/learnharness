@@ -25,6 +25,13 @@ core tool surface must appear in real data here.
   2026-10-10): graph-context (the bracketed preamble), problem ×2,
   practice-thinking ×2, conclude ×2, practice-next, problem-dismissed — the
   full marker cycle of a practice session, including the dismissal.
+- `chats/chat_mvr8o176_c6aa9462.json` captures initial probe completion,
+  plan presentation, a `plan_review` answer requesting further diagnostic,
+  and `resume_probe`. Captured on 2026-10-27 through `handleChatInput`, the
+  actual prober/teacher factories and `chatStore`, with an isolated data
+  directory and a scripted Pi faux provider. The source record was copied
+  byte-for-byte after settlement, without hand-editing. It contains no
+  learner account, credential or live-provider output.
 - `graph/` — the real ledgers: nodes (282 lines), chains (160), sessions (8),
   coverage (93), sources (4), render-settings, positions.
 - `jobs/` — five records covering kind × status: research done + aborted by

@@ -420,13 +420,13 @@ function abortText(kind: JobKind): string {
 // probe_done's execute queues this through the same wake pipeline; the
 // pump fires it once the prober's turn ends (gates + grace). It carries no
 // artifact — the assessment it references is durable in the transcript as
-// the probe_done tool result. Deterministic id per chat: exactly one
-// handoff, idempotent re-delivery. The marker's content is HANDOFF_TEXT
+// the probe_done tool result. Call-specific ids permit another handoff
+// after diagnostic reopens while keeping each delivery idempotent. The marker's content is HANDOFF_TEXT
 // (core/contracts/chat.ts — single source); the UI renders the quiet
 // system line off the customType. Nothing human-looking is persisted, ever.
 
-export function buildProbeHandoffSteer(chatId: string): SteerMessage {
-	return newHandoffMessage(chatId);
+export function buildProbeHandoffSteer(chatId: string, toolCallId?: string): SteerMessage {
+	return newHandoffMessage(chatId, toolCallId);
 }
 
 /** True when the transcript already carries this steer — idempotent

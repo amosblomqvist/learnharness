@@ -4,8 +4,8 @@
  * The prober concludes its phase with `probe_done` — a server-side tool
  * whose INPUT is the learner assessment (authored by the model, streamed to
  * the learner live, durable in the transcript by the tool result itself).
- * The first `probe_done` in the transcript is the probe→planning seam: the
- * teacher agent is constructed from that point on, and the tool's execute
+ * A successful `probe_done` concludes the current diagnostic. The teacher
+ * is selected until diagnostic reopens, and the tool's execute
  * queues the handoff steer through the wake pipeline so the teacher starts
  * immediately after the prober's turn ends (auto-wake, user-decided).
  *

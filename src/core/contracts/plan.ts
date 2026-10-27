@@ -113,6 +113,8 @@ export function derivePlanStatuses(tree: PlanTree, messages: readonly PartsCarri
  */
 export interface PlanToolResult {
 	ok: boolean;
+	/** Initial presentations require explicit review; absent on old records. */
+	approvalRequired?: boolean;
 	error?: string;
 	/** The saved tree — SUCCESS results only (owner, context diet
 	 *  2026-10-09): this is the record/UI-facing `details` value. The

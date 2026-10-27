@@ -5,13 +5,20 @@ import { projectView } from "../src/core/view.ts";
 import type { LhMessage } from "../src/core/native-messages.ts";
 
 function call(id: string, name: string, args = {}): LhMessage {
-	return { id, role: "assistant", content: [{ type: "toolCall", id, name, arguments: args }],
-		stopReason: "toolUse", timestamp: 1 } as LhMessage;
+	return {
+		id,
+		role: "assistant",
+		content: [{ type: "toolCall", id, name, arguments: args }],
+		stopReason: "toolUse",
+		timestamp: 1,
+	} as LhMessage;
 }
 function result(id: string, name: string, isError: boolean, details = {}): LhMessage {
-	return { id: `${id}-result`, role: "toolResult", toolCallId: id, toolName: name,
+	return {
+		id: `${id}-result`, role: "toolResult", toolCallId: id, toolName: name,
 		content: [{ type: "text", text: isError ? "Invalid nodeId: no plan exists" : "ok" }],
-		isError, details, timestamp: 2 };
+		isError, details, timestamp: 2,
+	};
 }
 const probe = [call("done", "probe_done"), result("done", "probe_done", false, { ok: true })];
 

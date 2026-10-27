@@ -1,5 +1,6 @@
 import { Type } from "typebox";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
+import { planApprovalPending } from "../core/plan-approval.ts";
 import { invalidInputResult, questionResult, serverExecute } from "./tool-execute.ts";
 import {
 	askInputSchema,
@@ -90,6 +91,13 @@ export const askUserQuestionTool: AgentTool<typeof askInputSchema> = {
 	executionMode: "sequential",
 	execute: async (_toolCallId, input) => {
 		const problems = askOptionProblems(input.options ?? []);
+		if (input.purpose === "plan_review") {
+			const values = input.options?.map((option) => option.value) ?? [];
+			if (input.multiSelect || values.length !== 3 ||
+				!["accept", "revise", "probe"].every((value) => values.includes(value))) {
+				problems.push("Plan review requires single-select options with exactly the values accept, revise, and probe.");
+			}
+		}
 		if (problems.length > 0) return invalidInputResult("ask_user_question", problems);
 		return questionResult();
 	},
@@ -231,8 +239,8 @@ export function teachExplainToolFor(
 		executionMode: "sequential",
 		execute: async (_toolCallId, input) => {
 			const problems = [...explainInputProblems(input)];
-			const nodeIdProblemText = nodeIdProblem(ctx, input.nodeId);
-			if (nodeIdProblemText) problems.push(nodeIdProblemText);
+			const teachingProblem = teachingQuestionProblem(ctx, input.nodeId);
+			if (teachingProblem) problems.push(teachingProblem);
 			if (problems.length > 0) return invalidInputResult("explain", problems);
 			return questionResult();
 		},
@@ -350,9 +358,8 @@ export function createProberTools(
 
 // ─── the teacher's question tools (quiz carries the position field) ──────────
 
-/** The nodeId-against-live-tree check the teacher's quiz chains after the
- *  shared authoring contract (the old superRefine, verbatim). */
-function nodeIdProblem(ctx: Pick<PlanToolContext, "chatId" | "chatStore">, nodeId: string): string | null {
+/** Teaching questions require a current plan node and learner approval. */
+function teachingQuestionProblem(ctx: Pick<PlanToolContext, "chatId" | "chatStore">, nodeId: string): string | null {
 	const record = ctx.chatStore.getChat(ctx.chatId);
 	const known = record?.tree?.nodes.map((n) => n.id) ?? [];
 	if (!known.includes(nodeId)) {
@@ -362,6 +369,9 @@ function nodeIdProblem(ctx: Pick<PlanToolContext, "chatId" | "chatStore">, nodeI
 				? `Copy one of your plan_init slugs exactly (${known.slice(0, 5).join(", ")}${known.length > 5 ? ", …" : ""}).`
 				: "No plan map exists yet — call plan_init before posing quizzes.")
 		);
+	}
+	if (record && planApprovalPending(record.messages)) {
+		return "The current plan needs learner approval. Ask a plan_review question and wait for accept; use resume_probe for further diagnostic.";
 	}
 	return null;
 }
@@ -383,8 +393,8 @@ export function teachQuizToolFor(ctx: Pick<PlanToolContext, "chatId" | "chatStor
 		executionMode: "sequential",
 		execute: async (_toolCallId, input) => {
 			const problems = [...quizInputProblems(input)];
-			const nodeIdProblemText = nodeIdProblem(ctx, input.nodeId);
-			if (nodeIdProblemText) problems.push(nodeIdProblemText);
+			const teachingProblem = teachingQuestionProblem(ctx, input.nodeId);
+			if (teachingProblem) problems.push(teachingProblem);
 			if (problems.length > 0) return invalidInputResult("quiz", problems);
 			return questionResult();
 		},
@@ -441,6 +451,7 @@ export function createTeacherTools(
 	// quiz for the teach explain — one quizzing tool at a time, whichever
 	// the settings arm. ask stays always-on.
 	let resumed = false;
+	let awaitingApproval = planApprovalPending(ctx.chatStore.getChat(ctx.chatId)?.messages ?? []);
 	const resume = resumeProbeTool({ ...ctx, onResume: () => { resumed = true; } });
 	const mechanics = quizMechanics(enabled);
 	// Same widening as the prober's (see above) — the conditional spread of
@@ -450,9 +461,11 @@ export function createTeacherTools(
 	// A mixed batch must not pose teaching after reopening in the same run.
 	for (const tool of Object.values(quizzing)) {
 		const execute = tool.execute;
-		tool.execute = (...args) => resumed
-			? Promise.resolve(invalidInputResult(tool.name, ["Diagnostic reopened. End this turn; the prober continues next."]))
-			: execute(...args);
+		tool.execute = async (...args) => {
+			if (resumed) return invalidInputResult(tool.name, ["Diagnostic reopened. End this turn; the prober continues next."]);
+			if (awaitingApproval) return invalidInputResult(tool.name, ["The current plan needs learner approval. Ask a plan_review question and wait for accept."]);
+			return execute(...args);
+		};
 	}
 	// healToolRecord — same standard as the prober's registry (above).
 	return healToolRecord({
@@ -468,7 +481,7 @@ export function createTeacherTools(
 			ls: lsTool,
 			find: findTool,
 			grep: grepTool,
-			...planTools(ctx),
+			...planTools({ ...ctx, onPresented: (required) => { awaitingApproval = required; } }),
 			...resume,
 			...jobTools({ chatId: ctx.chatId, jobStore: ctx.jobStore, spawn: ctx.spawn, searchAvailable: ctx.searchAvailable }),
 		},
