@@ -24,6 +24,17 @@ prompt, plan continuity, persistence, threshold, scheduling, and authorization
 lifecycle. It does not adopt Pi's coding summary or separate split-turn summary
 calls. A cut that drops no active history does not launch a summarizer.
 
+When the active cutoff is applied, conversation requests carry the latest summary
+once, followed by the retained transcript without older compaction markers. When
+a subsequent compaction supplies that prior summary separately, it includes it
+once, plus the newly superseded transcript without summary markers. All markers
+and original messages remain stored. The existing full-history fallback for an
+unresolved cutoff is unchanged, including its summary text.
+
+A provider response stopped at its output limit (`length`) is an incomplete
+summary, not a successful checkpoint. Compaction fails without changing the
+existing history or prior summary; a later attempt can retry normally.
+
 ## Conversation meter
 
 The numerator is the latest qualifying completed conversation response's native

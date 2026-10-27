@@ -2,6 +2,8 @@ import React, { act } from "react";
 import assert from "node:assert/strict";
 import { it } from "node:test";
 import { parseHTML } from "linkedom";
+import { notifySettingsSaved } from "../components/settings-signal.ts";
+import { isDictationActive } from "../components/dictation-state.ts";
 import { useDictation, type Dictation, OPENAI_DICTATION_KEYLESS } from "../components/dictation.tsx";
 
 (globalThis as Record<string, unknown>).React = React;
@@ -73,7 +75,7 @@ it("records, flushes and retries OpenAI audio without losing or double-inserting
 			return { getTracks: () => [{ stop() {} }] };
 		} } },
 		fetch: async (url: string, init?: RequestInit) => {
-			if (url === "/api/settings") return Response.json({ settings: { general: { dictationProvider: provider } } });
+			if (url === "/api/settings") return Response.json({ settings: { version: 1, general: { dictationProvider: provider } } });
 			if (url === "/api/keys") return Response.json({ keys: hasKey ? [{ id: "OPENAI_API_KEY", present: true }] : [] });
 			if (url === "/api/stt/token") return Response.json({ token: "fake-deepgram-token" });
 			assert.equal(url, "/api/stt/openai");
@@ -113,11 +115,13 @@ it("records, flushes and retries OpenAI audio without losing or double-inserting
 		await act(async () => { assert.equal(await current!.finish(), false); });
 		assert.equal(current!.retryable, true);
 		assert.equal(current!.active, true, "failed audio gates submission");
+		assert.equal(isDictationActive(), true, "pending retry keeps shared settings locked");
 		assert.equal(await current!.finish(), false, "submission stays gated while audio is pending");
 		assert.deepEqual(appended, ["Первый ответ"]);
 		mode = "success";
 		await act(async () => { current!.toggle(); await new Promise((resolve) => setTimeout(resolve, 0)); });
 		assert.equal(current!.retryable, false);
+		assert.equal(isDictationActive(), false, "successful retry unlocks settings");
 		assert.deepEqual(appended, ["Первый ответ", "Результат test"]);
 
 		mode = "defer";
@@ -136,6 +140,7 @@ it("records, flushes and retries OpenAI audio without losing or double-inserting
 		assert.equal(micCalls, beforeMic, "missing key is detected before capturing audio");
 
 		provider = "deepgram";
+		await act(async () => { notifySettingsSaved("general"); });
 		await act(async () => current!.toggle());
 		assert.equal(current!.phase, "recording");
 		act(() => socket!.emit("message", { data: JSON.stringify({ type: "Results", is_final: true, channel: { alternatives: [{ transcript: "Deepgram text" }] } }) }));

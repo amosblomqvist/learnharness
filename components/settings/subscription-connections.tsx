@@ -119,16 +119,19 @@ export function NativeSubscriptionUIProvider({ children }: { children: React.Rea
 	</Context.Provider>;
 }
 
-export function NativeSubscriptionConnection({ providerId }: { providerId: NativeSubscriptionProviderId }) {
+export function NativeSubscriptionConnection({ providerId, labelClassName }: { providerId: NativeSubscriptionProviderId; labelClassName?: string }) {
 	const ui = useContext(Context), descriptor = NATIVE_SUBSCRIPTIONS.find((p) => p.providerId === providerId)!;
 	const status = ui.statuses.find((s) => s.providerId === providerId) ?? emptySubscriptionStatus(providerId);
 	return <div className="flex flex-col gap-2" data-testid={`${providerId}-connection`}>
-		<ConnectionRow label={descriptor.label} action={status.connectionId ? "Manage…" : "Connect"} disabled={ui.busy || !status.available || ui.statuses.some((s) => s.pending)} onAction={() => ui.open(providerId)} />
+		<ConnectionRow label={descriptor.label} labelClassName={labelClassName} action={status.connectionId ? "Manage…" : "Connect"} disabled={ui.busy || !status.available || ui.statuses.some((s) => s.pending)} onAction={() => ui.open(providerId)} />
 		{status.error && <p role="alert" className="text-xs text-red-400">{status.error}</p>}
 	</div>;
 }
 export function SubscriptionConnections({ setup = false }: { setup?: boolean }) {
-	return <div className="space-y-3" data-testid="subscription-connections"><ChatGPTConnection setup={setup} />{NATIVE_SUBSCRIPTIONS.map((p) => <NativeSubscriptionConnection key={p.providerId} providerId={p.providerId} />)}</div>;
+	// Providers uses ordinary settings-label typography. The setup surface
+	// keeps its existing compact labels; dialogs and actions are untouched.
+	const labelClassName = setup ? undefined : "font-prose text-(length:--lh-prose-size) text-foreground";
+	return <div className="space-y-3" data-testid="subscription-connections"><ChatGPTConnection setup={setup} labelClassName={labelClassName} />{NATIVE_SUBSCRIPTIONS.map((p) => <NativeSubscriptionConnection key={p.providerId} providerId={p.providerId} labelClassName={labelClassName} />)}</div>;
 }
 export function NativeSubscriptionBackgroundAccess({ provider }: { provider: string | undefined }) {
 	const ui = useContext(Context), descriptor = NATIVE_SUBSCRIPTIONS.find((p) => p.logicalId === provider);

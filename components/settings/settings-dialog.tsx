@@ -48,6 +48,7 @@ import { MENU_CLOSE_EVENT, MENU_OPEN_EVENT } from "@/components/menu-shell";
 import { notifySettingsSaved } from "@/components/settings-signal";
 import { KeysSection } from "./keys-section.tsx";
 import { Hint } from "@/components/ui/hint";
+import { useDictationActive } from "@/components/dictation-state";
 import { AppearanceSection, GraphSection } from "./appearance-section.tsx";
 import { KeyboardSection } from "./keyboard-section.tsx";
 import { ChatGPTUIProvider } from "./chatgpt-connection.tsx";
@@ -70,6 +71,12 @@ type PendingSectionWrite = { compose: (current: unknown) => object; optimistic: 
 // A closed dialog can still have queued writes. A new dialog must wait
 // for those writes before loading a record on which new edits will build.
 const pendingSettingsWrites = new Set<Promise<void>>();
+const pendingGeneralSettingsWrites = new Set<Promise<void>>();
+
+/** Dictation waits for a provider selection made just before recording starts. */
+export async function waitForPendingGeneralSettingsWrites() {
+	while (pendingGeneralSettingsWrites.size) await Promise.all(pendingGeneralSettingsWrites);
+}
 
 /** `open(section?, row?)` — the optional ROW deep-links into the Keys
  *  section with that row unfolded (zero-keys wave: the dictation error's
@@ -148,6 +155,7 @@ export function SettingsDialogBody({
 	initialRow?: string | null;
 }) {
 	const { onAppearanceChange } = useAppearance();
+	const dictationActive = useDictationActive();
 	const [record, setRecord] = useState<UserSettings | null | undefined>(
 		undefined,
 	);
@@ -303,6 +311,13 @@ export function SettingsDialogBody({
 			};
 			const activeWrite = drain();
 			pendingSettingsWrites.add(activeWrite);
+			if (section === "general") {
+				pendingGeneralSettingsWrites.add(activeWrite);
+				void activeWrite.then(
+					() => { pendingGeneralSettingsWrites.delete(activeWrite); },
+					() => { pendingGeneralSettingsWrites.delete(activeWrite); },
+				);
+			}
 			void activeWrite.then(
 				() => { pendingSettingsWrites.delete(activeWrite); },
 				() => { pendingSettingsWrites.delete(activeWrite); },
@@ -421,6 +436,7 @@ export function SettingsDialogBody({
 											<select
 												aria-label="Speech provider"
 												data-testid="dictation-provider"
+												disabled={dictationActive}
 												value={record.general?.dictationProvider ?? "deepgram"}
 											onChange={(event) => {
 												const dictationProvider = event.target.value;

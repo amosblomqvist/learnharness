@@ -6,6 +6,8 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { exportJWK, generateKeyPair, SignJWT } from "jose";
+import type { ChatGPTStatus } from "../src/core/contracts/chatgpt.ts";
+import { completedWithin } from "./completion.ts";
 const require = createRequire(import.meta.url);
 const { createChatGPT, fileStore, allowedAuthEndpoint, SCOPES } = require("../electron/chatgpt.cjs");
 const { privateKey, publicKey } = await generateKeyPair("RS256");
@@ -611,10 +613,17 @@ test("disconnect persistence failure is not reported as local forgetting and lea
 	} finally { f.service.close(); }
 });
 
-test("one app-wide background preference defaults ON over legacy OFF, persists with zero accounts, and never changes on auth/account operations", async () => {
+for (const holdToken of [false, true]) test(`one app-wide background preference defaults ON over legacy OFF, persists with zero accounts, and never changes on auth/account operations${holdToken ? " (completion held beyond old wait budget)" : ""}`, async () => {
 	const first = await loggedIn(); first.service.close();
 	const legacy = structuredClone(first.saved); legacy.registrations[0].background = false;
-	const f = fixture({ state: legacy });
+	const tokenEntered = deferred(), releaseToken = deferred();
+	let completion = deferred<ChatGPTStatus>();
+	const change = ({ status }: { status: ChatGPTStatus }) => { if (!status.pending) completion.resolve(status); };
+	const f = fixture({ state: legacy, change, token: async (form, url) => {
+		tokenEntered.resolve();
+		if (holdToken) await releaseToken.promise;
+		return Response.json({ access_token: "scratch-oauth-token", refresh_token: "scratch-refresh", id_token: await signed(form.get("client_id")!, url.searchParams.get("nonce")!), token_type: "Bearer", expires_in: 3600, scope: SCOPES.join(" ") });
+	} });
 	try {
 		assert.equal((await f.service.status()).allowBackgroundUse, true, "absent new setting ignores legacy per-account OFF");
 		await f.service.lease(true);
@@ -624,21 +633,43 @@ test("one app-wide background preference defaults ON over legacy OFF, persists w
 		await f.service.lease(false);
 		const id = f.saved.activeId;
 		await f.service.select(id); assert.equal((await f.service.status()).allowBackgroundUse, false);
-		await f.service.login(id); await f.callback();
-		for (let i = 0; i < 100 && (await f.service.status()).pending; i++) await new Promise((r) => setImmediate(r));
+		// A fresh signal per attempt: the fixture's original changed promise
+		// was already resolved by earlier account/consent notifications.
+		completion = deferred<ChatGPTStatus>();
+		await f.service.login(id);
+		const response = await f.callback(); assert.equal(response.status, 200); await response.text();
+		const waiting = completedWithin(completion.promise, "returning verified sign-in");
+		let settled = false; void waiting.then(() => { settled = true; }, () => { settled = true; });
+		if (holdToken) {
+			await completedWithin(tokenEntered.promise, "held token request");
+			// Regression only: exhaust the OLD wait while real completion is
+			// explicitly held, rather than relying on machine speed or sleeps.
+			for (let i = 0; i < 100 && (await f.service.status()).pending; i++) await new Promise((r) => setImmediate(r));
+			assert.equal((await f.service.status()).pending, true);
+			assert.equal(f.saved.registrations[0].background, false, "the old assertion would run before replacement was saved");
+			assert.equal(settled, false, "the corrected wait must still await completion");
+			releaseToken.resolve();
+		}
+		const status = await waiting;
+		assert.equal(status.pending, false); assert.equal(status.error, null, "reconnecting must actually succeed");
+		assert.equal(status.activeId, id); assert.equal(status.accounts[0]!.connected, true);
 		assert.equal(f.saved.allowBackgroundUse, false, "reconnecting cannot overwrite app preference");
 		assert.equal(f.saved.registrations[0].background, undefined, "new verified registrations omit obsolete per-account preference");
 		await f.service.disconnect(f.saved.activeId);
 		assert.deepEqual(f.saved.registrations, []); assert.equal(f.saved.allowBackgroundUse, false);
-		const restarted = fixture({ state: f.saved });
+		const restarted = fixture({ state: f.saved, change });
 		try {
 			assert.equal((await restarted.service.status()).allowBackgroundUse, false, "zero-account restart preserves global OFF");
-			await restarted.service.login(); await restarted.callback();
-			for (let i = 0; i < 100 && (await restarted.service.status()).pending; i++) await new Promise((r) => setImmediate(r));
+			completion = deferred<ChatGPTStatus>();
+			await restarted.service.login();
+			const response = await restarted.callback(); assert.equal(response.status, 200); await response.text();
+			const status = await completedWithin(completion.promise, "verified sign-in after zero-account restart");
+			assert.equal(status.pending, false); assert.equal(status.error, null);
+			assert.notEqual(status.activeId, null); assert.equal(status.accounts[0]!.connected, true);
 			assert.equal(restarted.saved.allowBackgroundUse, false);
 			await restarted.service.consent(true); assert.equal(restarted.saved.allowBackgroundUse, true);
 		} finally { restarted.service.close(); }
-	} finally { f.service.close(); }
+	} finally { releaseToken.resolve(); f.service.close(); }
 });
 
 test("private leases bind active account, authority revision and raw visible model membership", async () => {

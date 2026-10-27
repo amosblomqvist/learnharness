@@ -21,7 +21,8 @@ philosophy so they share a view of the whole process).
   field it must not use. No plan tools, no jobs, no demos.
 - **The teacher** runs everything from planning onward: full tool set
   (teach quiz with nodeId, plan_init, jobs, demos). Constructed the moment the
-  transcript carries a `probe_done`.
+  transcript carries a concluded `probe_done`: a non-failed/non-aborted
+  assistant call followed by a matching successful tool result.
 - **The swap happens between probing and planning** — the planning phase
   needs full knowledge of how teaching is done, so the teacher agent starts
   at planning.
@@ -43,6 +44,12 @@ The prober concludes explicitly:
 - **Refuses while a question is open** ("resolve the open question first") —
   same doctrine as nodeId validation.
 - **Refuses a second conclusion** (idempotent: the probe concludes once).
+  Conclusion requires a later `probe_done` result matching the call's ID
+  and tool name. The calling generation must not have failed or aborted;
+  the result must not be `isError` or explicitly contain `details.ok:false`.
+  Clean acknowledgments without an explicit `ok:true` remain valid. Bare,
+  unmatched, errored, or refused calls keep probing open; saved attempts
+  are never deleted or replay-executed by this detection rule.
 - The assessment is the tool call's input, so it streams to the learner live
   and is durable in the transcript by the tool result itself. A dedicated
   assessment card/viewer comes later (UI).
@@ -53,7 +60,7 @@ The prober concludes explicitly:
 - **Side effect: it queues the handoff.** When the prober's turn ends, the
   wake pipeline (the same machinery that delivers sub-agent results and
   abort steers) fires a server-side turn with a handoff steer — the teacher
-  is constructed (probe_done is in the transcript) and authors the plan.
+  is constructed (probe_done has successfully concluded) and authors the plan.
   The learner experiences assessment → plan as one continuous flow. If the
   wake is lost (crash window), the next client message still constructs the
   teacher — the transcript is the source of truth.

@@ -245,10 +245,17 @@ export function validateChatSettings(settings: ChatSettings): SettingsValidation
 	return { ok: true };
 }
 
-export function validateModelsSettings(settings: ModelsSettings): SettingsValidation {
+/** Validate introduced/replaced model selections, not unchanged saved pins.
+ * A disconnected subscription loses its available catalog, but its stored
+ * selections must not prevent repairing another slot or editing thinking.
+ * Only the SAME slot's provider+id can pass through; runtime admission stays
+ * separate. Callers without a stored section retain strict catalog checking. */
+export function validateModelsSettings(settings: ModelsSettings, stored?: ModelsSettings): SettingsValidation {
 	for (const name of MODEL_SLOTS) {
 		const slot = settings[name];
 		if (!slot) continue;
+		const previous = stored?.[name]?.model;
+		if (slot.model && previous && slot.model.provider === previous.provider && slot.model.id === previous.id) continue;
 		const verdict = validateSlotSpec(name, slot);
 		if (!verdict.ok) return verdict;
 	}
@@ -280,9 +287,8 @@ function validateSlotSpec(name: ModelSlotName, slot: { model?: { provider: strin
 // runtime — and the clamped value is what lands in the record. The
 // server is the truth: the record shows the clamped level after write.
 
-/** Clamp one level against one model (identity when the model is unknown
- *  or the level already supported — the existence gate rejects unknown
- *  models separately, so this only ever sees real ones in practice). */
+/** Clamp one level against one model. Preserve the preference when metadata
+ *  is unavailable for an unchanged saved pin; runtime clamps after reconnect. */
 function clampLevelFor(provider: string, id: string, level: ThinkingLevel): ThinkingLevel {
 	const model = connectionModel(provider, id);
 	return model ? clampThinkingLevel(model, level) : level;

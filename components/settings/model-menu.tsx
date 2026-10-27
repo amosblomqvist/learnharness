@@ -23,6 +23,7 @@ import { useEffect, useRef, useState } from "react";
 import type { ModelCatalogEntry } from "@/src/core";
 import { fuzzyScore, subscriptionLabel } from "@/src/core";
 import { formatTokens } from "@/components/usage-format";
+import { SearchMenuList } from "./search-menu-list";
 
 function priceLabel(cost: ModelCatalogEntry["cost"]): string {
 	const fmt = (n: number) => `$${n < 1 ? n.toFixed(2).replace(/0$/, "") : n.toFixed(2)}`;
@@ -53,90 +54,34 @@ export function ModelMenuList({
 	/** Quiet footer note under the list (context-specific). */
 	footer?: string;
 }) {
-	const [query, setQuery] = useState("");
-	const [menuIdx, setMenuIdx] = useState<number | null>(null);
-	const searchRef = useRef<HTMLInputElement>(null);
-	const listRef = useRef<HTMLUListElement>(null);
-
-	useEffect(() => {
-		searchRef.current?.focus();
-	}, []);
-
-	// Keep the arrow-walked result visible in the scrolling list.
-	useEffect(() => {
-		if (menuIdx === null) return;
-		listRef.current?.querySelector(`[data-idx="${menuIdx}"]`)?.scrollIntoView({ block: "nearest" });
-	}, [menuIdx]);
-
-	// The filtered, ranked model list.
-	const results = (models ?? [])
-		.map((m) => ({ m, s: fuzzyScore(query, m.provider, m.id, m.name) }))
-		.filter((r) => r.s !== null)
-		.sort((a, b) => b.s! - a.s! || a.m.id.localeCompare(b.m.id))
-		.map((r) => r.m);
-
 	return (
 		<>
-			<input
-				ref={searchRef}
-				data-testid="model-search"
-				value={query}
-				onChange={(e) => {
-					setQuery(e.target.value);
-					setMenuIdx(null); // new query → the walk restarts on Enter/↓
-				}}
-				onKeyDown={(e) => {
-					if (e.key === "ArrowDown" || e.key === "ArrowUp") {
-						e.preventDefault();
-						e.stopPropagation();
-						if (results.length === 0) return;
-						setMenuIdx((i) =>
-							e.key === "ArrowDown"
-								? Math.min((i ?? -1) + 1, results.length - 1)
-								: Math.max((i ?? results.length) - 1, 0),
-						);
-					} else if (e.key === "Enter") {
-						const chosen = results[menuIdx ?? 0];
-						if (chosen) {
-							e.preventDefault();
-							e.stopPropagation();
-							onPick(chosen);
-						}
-					}
-				}}
+			<SearchMenuList
+				items={models}
+				itemKey={(m) => `${m.provider}/${m.id}`}
+				searchTerms={(m) => [m.provider, m.id, m.name]}
+				compare={(a, b) => a.id.localeCompare(b.id)}
+				isSelected={(m) => m.id === effectiveId && m.provider === (effectiveProvider ?? m.provider)}
+				onPick={onPick}
+				searchTestid="model-search"
+				listTestid="model-list"
+				optionTestid={(m) => `model-option-${m.id.replace(/[^a-z0-9-]/gi, "_")}`}
 				placeholder="Search models…"
-				className="lh-input mb-1.5 w-full rounded-lg border bg-background px-2 py-1.5 text-foreground outline-none focus:ring-1 focus:ring-ring"
+				loading="Loading models…"
+				empty="No models match."
+				renderItem={(m) => <>
+					<span className="flex items-center justify-between gap-2">
+						<span className="truncate text-card-foreground">{m.name}</span>
+						<span className="shrink-0 tabular-nums text-muted-foreground" title={subscriptionLabel(`${m.provider}:${m.id}`) ? "Subscription connection" : "USD per 1M tokens in/out"}>
+							{subscriptionLabel(`${m.provider}:${m.id}`) ?? priceLabel(m.cost)}
+						</span>
+					</span>
+					<span className="flex items-center justify-between gap-2 text-muted-foreground">
+						<span className="truncate">{subscriptionLabel(`${m.provider}:${m.id}`) ? `${subscriptionLabel(`${m.provider}:${m.id}`)} (subscription)` : m.provider} · {m.id}</span>
+						<span className="shrink-0 tabular-nums">{formatTokens(m.contextWindow)}</span>
+					</span>
+				</>}
 			/>
-			{!models && <div className="px-2 py-3 text-center text-muted-foreground">Loading models…</div>}
-			{models && results.length === 0 && (
-				<div className="px-2 py-3 text-center text-muted-foreground">No models match.</div>
-			)}
-			<ul ref={listRef} data-testid="model-list" className="flex max-h-72 flex-col overflow-y-auto px-1">
-				{results.map((m, i) => (
-					<li key={`${m.provider}/${m.id}`}>
-						<button
-							type="button"
-							data-testid={`model-option-${m.id.replace(/[^a-z0-9-]/gi, "_")}`}
-							data-idx={i}
-							onClick={() => onPick(m)}
-							className={`flex w-full flex-col gap-0.5 rounded-lg px-2 py-1.5 text-left outline-none transition-colors hover:bg-muted ${
-								i === menuIdx ? "bg-accent/40 ring-1 ring-inset ring-border" : ""
-							}${m.id === effectiveId && m.provider === (effectiveProvider ?? m.provider) && i !== menuIdx ? " bg-muted/60" : ""}`}
-						>
-							<span className="flex items-center justify-between gap-2">
-								<span className="truncate text-card-foreground">{m.name}</span>
-								<span className="shrink-0 tabular-nums text-muted-foreground" title={subscriptionLabel(`${m.provider}:${m.id}`) ? "Subscription connection" : "USD per 1M tokens in/out"}>
-									{subscriptionLabel(`${m.provider}:${m.id}`) ?? priceLabel(m.cost)}
-								</span>
-							</span>
-							<span className="flex items-center justify-between gap-2 text-muted-foreground">
-								<span className="truncate">{subscriptionLabel(`${m.provider}:${m.id}`) ? `${subscriptionLabel(`${m.provider}:${m.id}`)} (subscription)` : m.provider} · {m.id}</span>
-								<span className="shrink-0 tabular-nums">{formatTokens(m.contextWindow)}</span>
-							</span>
-						</button>
-					</li>
-				))}
-			</ul>
 			{footer && (
 				<div className="mt-1 border-t px-2 pt-1.5 text-xs text-muted-foreground">{footer}</div>
 			)}

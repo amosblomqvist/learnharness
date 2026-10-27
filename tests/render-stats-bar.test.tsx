@@ -89,9 +89,15 @@ describe("stats bar", () => {
 		assert.match(empty, /data-testid="stats-context">\?</);
 	});
 
-	it("prettyModel strips vendor + date suffix, keeps dashes", () => {
+	it("prettyModel strips only the vendor path, preserving versions, dates and variants", () => {
 		assert.equal(prettyModel("z-ai/glm-5.3-flash"), "glm-5.3-flash"); // dashes kept (owner round 5)
-		assert.equal(prettyModel("qwen/qwen3.8-max-0902"), "qwen3.8-max");
+		assert.equal(prettyModel("qwen/qwen3.8-max-0902"), "qwen3.8-max-0902");
+		assert.equal(prettyModel("google/gemma-4-27b-it:free"), "gemma-4-27b-it:free");
+		assert.equal(prettyModel("anthropic/claude-opus-5:batch"), "claude-opus-5:batch");
+		assert.equal(prettyModel("claude-opus-5"), "claude-opus-5");
+		assert.equal(prettyModel("claude-opus-5-5"), "claude-opus-5-5");
+		assert.equal(prettyModel("model:free"), "model:free");
+		assert.equal(prettyModel("model:variant:free"), "model:variant:free");
 	});
 
 	it("provider-qualified stamps (usage contract, model-slots wave)", () => {
@@ -99,8 +105,10 @@ describe("stats bar", () => {
 		// the same model via two providers different bookkeeping
 		assert.equal(prettyModel("openrouter:z-ai/glm-5.3-flash", true), "glm-5.3-flash · openrouter");
 		assert.equal(prettyModel("openai:gpt-5.2", true), "gpt-5.2 · openai");
-		// unqualified on a qualified stamp: provider silently dropped (old shape)
-		assert.equal(prettyModel("openrouter:z-ai/glm-5.3-flash"), "glm-5.3-flash");
+		assert.equal(prettyModel("openrouter:google/gemma-4-27b-it:free", true), "gemma-4-27b-it:free · openrouter");
+		assert.equal(prettyModel("opencode:claude-opus-5-5", true), "claude-opus-5-5 · opencode");
+		// Bare ids are never parsed as usage stamps, even with a colon.
+		assert.equal(prettyModel("model:free"), "model:free");
 		// qualified on a bare id: no suffix invented
 		assert.equal(prettyModel("z-ai/glm-5.3-flash", true), "glm-5.3-flash");
 	});

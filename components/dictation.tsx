@@ -2,9 +2,12 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Loader2Icon, MicIcon } from "lucide-react";
-import { useSettingsDialog } from "@/components/settings/settings-dialog";
+import { useSettingsDialog, waitForPendingGeneralSettingsWrites } from "@/components/settings/settings-dialog";
 import { Hint } from "@/components/ui/hint";
-import { DICTATION_STOP_PCM_BYTES, MAX_DICTATION_WAV_BYTES, WAV_HEADER_BYTES, pcm16Wav, type DictationProvider } from "@/src/core";
+import { DICTATION_STOP_PCM_BYTES, MAX_DICTATION_WAV_BYTES, WAV_HEADER_BYTES, deepgramListenUrl, pcm16Wav, type DictationLanguage, type DictationProvider } from "@/src/core";
+import { useDictationLanguage } from "@/components/dictation-preference";
+import { setDictationActive } from "@/components/dictation-state";
+export { isDictationActive } from "@/components/dictation-state";
 
 /**
  * Voice dictation — the cloud engine (STT wave 1, 2026-09-17).
@@ -86,15 +89,7 @@ import { DICTATION_STOP_PCM_BYTES, MAX_DICTATION_WAV_BYTES, WAV_HEADER_BYTES, pc
  * endpointing=300, no interims. Silence streams too (the worklet never
  * pauses), so the socket never idles — no KeepAlive needed.
  */
-const DG_URL =
-	"wss://api.deepgram.com/v1/listen" +
-	"?model=nova-3" +
-	"&encoding=linear16" +
-	"&sample_rate=16000" +
-	"&channels=1" +
-	"&smart_format=true" +
-	"&punctuate=true" +
-	"&endpointing=300";
+// URL construction lives in the browser-safe core; only language varies.
 
 /** Meter tuning — the owner's tested values, see the file header. */
 const METER_FLOOR_DB = -50;
@@ -205,16 +200,6 @@ export function rmsToMeter(rms: number): number {
  */
 let questionTarget: ((text: string) => void) | null = null;
 
-/* Is a dictation run live on this page? The Esc chain (keyboard wave A,
- * components/keyboard-shortcuts.tsx) needs a SYNCHRONOUS answer — the
- * stop handler can't report back through a CustomEvent. Set at start(),
- * cleared in cleanup() (every terminal path runs through cleanup). */
-let dictationActiveFlag = false;
-
-export function isDictationActive(): boolean {
-	return dictationActiveFlag;
-}
-
 /* The finisher registry: submit paths FAR from the hook's owner (the
  * pending question's dock) need finish() without a prop bridge. Same
  * module-level pattern as questionTarget — one window, one instance,
@@ -287,18 +272,9 @@ export type Dictation = {
  * composer fallback; the mounted question form's claim wins while a
  * question waits.
  */
-async function selectedDictationProvider(): Promise<DictationProvider> {
-	const res = await fetch("/api/settings", { cache: "no-store" });
-	if (!res.ok) throw new Error("Could not load dictation settings");
-	const body = await res.json() as { settings?: { general?: { dictationProvider?: unknown } } | null };
-	const provider = body.settings?.general?.dictationProvider;
-	if (provider === undefined || provider === "deepgram") return "deepgram";
-	if (provider === "openai") return "openai";
-	throw new Error("Unknown dictation provider");
-}
-
 /** One capture target, with provider-specific finalization and no cross-provider fallback. */
 export function useDictation({ append }: { append: (text: string) => void }): Dictation {
+	const { getLanguage, getProvider } = useDictationLanguage();
 	const [phase, setPhase] = useState<DictationPhase>("idle");
 	const [error, setError] = useState<string | null>(null);
 	const [retryable, setRetryable] = useState(false);
@@ -343,7 +319,7 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 		const keep = retainAudio && pcmBytesRef.current > 0;
 		retryableRef.current = keep;
 		setRetryable(keep);
-		dictationActiveFlag = keep;
+		setDictationActive(keep);
 		if (success) flush(); else bufferRef.current = [];
 		if (safetyRef.current) clearTimeout(safetyRef.current);
 		safetyRef.current = null;
@@ -390,8 +366,8 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 		}
 	}, [cleanup]);
 
-	const openSocket = useCallback((gen: number, token: string) => {
-		const ws = new WebSocket(DG_URL, ["bearer", token]);
+	const openSocket = useCallback((gen: number, token: string, language: DictationLanguage) => {
+		const ws = new WebSocket(deepgramListenUrl(language), ["bearer", token]);
 		wsRef.current = ws;
 		ws.addEventListener("open", () => {
 			if (gen !== genRef.current) return;
@@ -411,7 +387,7 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 			if (ev.code === 1000) { cleanup(); return; }
 			if (reconnectsRef.current < 1) {
 				reconnectsRef.current++;
-				mintFreshToken().then((t) => { if (gen === genRef.current) openSocket(gen, t); }).catch(() => {
+				mintFreshToken().then((t) => { if (gen === genRef.current) openSocket(gen, t, language); }).catch(() => {
 					if (gen === genRef.current) { setError("Deepgram reconnect failed"); cleanup(); }
 				});
 			} else { setError(`Deepgram connection lost (${ev.code})`); cleanup(); }
@@ -420,14 +396,16 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 
 	const start = useCallback(async () => {
 		if (phaseRef.current !== "idle" || retryableRef.current) return;
-		dictationActiveFlag = true;
+		setDictationActive(true);
 		setError(null); setRunPhase("connecting");
 		providerRef.current = null;
 		reconnectsRef.current = 0; bufferRef.current = []; pendingRef.current = [];
 		pcmRef.current = []; pcmBytesRef.current = 0; limitReachedRef.current = false;
 		const gen = ++genRef.current;
 		try {
-			const provider = await selectedDictationProvider();
+			await waitForPendingGeneralSettingsWrites();
+			if (gen !== genRef.current) return;
+			const provider = await getProvider();
 			if (gen !== genRef.current) return;
 			providerRef.current = provider;
 			if (provider === "openai") {
@@ -436,6 +414,9 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 				const body = await keys.json() as { keys?: { id: string; present: boolean }[] };
 				if (!body.keys?.some((key) => key.id === "OPENAI_API_KEY" && key.present)) throw new Error(OPENAI_DICTATION_KEYLESS);
 			}
+			if (gen !== genRef.current) return;
+			// Deepgram uses the confirmed language for the entire run, including reconnects.
+			const language = provider === "deepgram" ? await getLanguage() : null;
 			if (gen !== genRef.current) return;
 			const tokenPromise = provider === "deepgram" ? warmTokens.mint() : null;
 			tokenPromise?.catch(() => {});
@@ -480,14 +461,14 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 			sourceRef.current = source; source.connect(worklet); worklet.connect(ctx.destination);
 			if (provider === "openai") { setRunPhase("recording"); return; }
 			const token = await tokenPromise!;
-			if (gen === genRef.current) openSocket(gen, token);
+			if (gen === genRef.current && language) openSocket(gen, token, language);
 		} catch (e) {
 			if (gen !== genRef.current) return;
 			const message = e instanceof DOMException && (e.name === "NotAllowedError" || e.name === "SecurityError")
 				? "Microphone permission denied" : e instanceof Error ? e.message : "Dictation unavailable";
 			setError(message); cleanup(false);
 		}
-	}, [cleanup, openSocket, setRunPhase]);
+	}, [cleanup, getLanguage, getProvider, openSocket, setRunPhase]);
 
 	const stop = useCallback(() => {
 		const current = phaseRef.current;
@@ -547,7 +528,7 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 	const toggle = useCallback(() => {
 		const current = phaseRef.current;
 		if (current === "idle" && retryableRef.current) {
-			setError(null); setRunPhase("stopping"); dictationActiveFlag = true;
+			setError(null); setRunPhase("stopping"); setDictationActive(true);
 			void uploadOpenAI(++genRef.current);
 		} else if (current === "idle") void start();
 		else if (current === "recording" || current === "connecting") stop();
@@ -555,11 +536,11 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 
 	useEffect(() => {
 		let cancelled = false;
-		void selectedDictationProvider().then((provider) => {
+		void getProvider().then((provider) => {
 			if (!cancelled && provider === "deepgram") warmTokens.refresh();
 		}).catch(() => {});
 		return () => { cancelled = true; };
-	}, []);
+	}, [getProvider]);
 	useEffect(() => {
 		window.addEventListener("lh:kbd-toggle-dictation", toggle);
 		return () => window.removeEventListener("lh:kbd-toggle-dictation", toggle);
@@ -570,7 +551,7 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 	}, [cancel]);
 	useEffect(() => () => {
 		genRef.current++;
-		dictationActiveFlag = false;
+		setDictationActive(false);
 		uploadRef.current?.abort();
 		if (safetyRef.current) clearTimeout(safetyRef.current);
 		for (const track of streamRef.current?.getTracks() ?? []) track.stop();
@@ -604,7 +585,6 @@ export function DictationBar({ dictation }: { dictation: Dictation }) {
 	 *  error keeps the old behavior (click = retry, which clears). */
 	const keyless = error === DICTATION_KEYLESS || error === OPENAI_DICTATION_KEYLESS;
 	const [levels, setLevels] = useState<number[]>(() => new Array(METER_CELLS).fill(0));
-	const recording = phase === "recording" || phase === "stopping";
 	/** Adaptive cell count (owner round 2): derived from the meter's
 	 *  measured width — narrow rows show fewer bars instead of
 	 *  overflowing under neighbors. */
@@ -661,10 +641,7 @@ export function DictationBar({ dictation }: { dictation: Dictation }) {
 	if (!active) {
 		return (
 			<Hint
-				// Errored: the button span truncates the line — the tooltip is its
-				// full reveal (the keyless line KEEPS "Deepgram" — owner overrule:
-				// it's the Keys row label, the truth the user needs). Otherwise the
-				// quiet label + the live ⌘D binding.
+				// The error line truncates in the button; its tooltip reveals it.
 				label={error ?? "Dictate"}
 				action={error ? undefined : "toggle-dictation"}
 				side="top"
@@ -681,10 +658,8 @@ export function DictationBar({ dictation }: { dictation: Dictation }) {
 					}}
 					aria-label={error ? `Dictation failed: ${error}` : "Start dictation"}
 					data-testid="dictation-toggle"
-				// Same blurring as the floating chrome (owner, fix wave round 3),
-			// but lower opacity — the mic stays quieter than the model pills.
-			className="flex h-7 w-full items-center justify-center gap-1.5 rounded-md border border-border/50 bg-card/50 text-xs text-muted-foreground/70 shadow-lg backdrop-blur transition-colors hover:border-border hover:text-muted-foreground"
-			>
+					className="flex h-7 w-full items-center justify-center gap-1.5 rounded-md border border-border/50 bg-card/50 text-xs text-muted-foreground/70 shadow-lg backdrop-blur transition-colors hover:border-border hover:text-muted-foreground"
+				>
 					<MicIcon className="size-3.5" />
 					<span className="max-w-full truncate">{error ?? "Dictate"}</span>
 				</button>
@@ -694,32 +669,20 @@ export function DictationBar({ dictation }: { dictation: Dictation }) {
 
 	return (
 		<div className="flex w-full min-w-0 items-center gap-2" data-testid="dictation-bar">
-			<Hint
-				// The owner flagged this copy good ("Stop dictation (Esc)") —
-				// kept verbatim; only the machinery moved to the styled tooltip.
-				label="Stop dictation (Esc)"
-				side="top"
-			>
+			<Hint label="Stop dictation (Esc)" side="top">
 				<button
 					type="button"
 					onClick={toggle}
 					disabled={phase === "stopping"}
 					aria-label="Stop dictation"
-				data-testid="dictation-toggle"
-				className="flex h-7 shrink-0 items-center gap-1.5 rounded-md bg-destructive/10 px-2 text-xs font-medium text-destructive transition-colors hover:bg-destructive/20"
-			>
-				{phase === "stopping" ? (
-					<Loader2Icon className="size-3.5 animate-spin" />
-				) : (
-					<MicIcon className="size-3.5" />
-				)}
+					data-testid="dictation-toggle"
+					className="flex h-7 shrink-0 items-center gap-1.5 rounded-md bg-destructive/10 px-2 text-xs font-medium text-destructive transition-colors hover:bg-destructive/20"
+				>
+					{phase === "stopping" ? <Loader2Icon className="size-3.5 animate-spin" /> : <MicIcon className="size-3.5" />}
 					Stop
 				</button>
 			</Hint>
 			<span className="size-1.5 shrink-0 animate-pulse rounded-full bg-destructive" aria-hidden />
-			{/* Fixed width while recording — nothing ever appends text beside it
-			    (no interims, owner round 1). Cells carry no minimum width; the
-			    COUNT adapts to the measured row space (owner round 2). */}
 			<div ref={meterRef} className="flex h-4 min-w-0 flex-1 items-center gap-[2px]" data-testid="dictation-meter">
 				{levels.slice(-cellCount).map((v, i) => (
 					<span

@@ -19,6 +19,7 @@ import {
 	needsContinuation,
 	danglingQuestionOf,
 	answeredCallIds,
+	failedResponseAtEnd,
 	measuredContextTokens,
 	newAnswerResult,
 	newNextMessage,
@@ -179,6 +180,8 @@ function sameDetails(a: unknown, b: unknown): boolean {
 export interface SessionState {
 	messages: LhViewMessage[];
 	nativeMessages: LhMessage[];
+	/** Server-read history only; optimistic bubbles are not delivery proof. */
+	hasConfirmedConversation: boolean;
 	/** Completed conversation usage; null after compaction or before first usage. */
 	contextTokens: number | null;
 	status: SessionStatus;
@@ -256,6 +259,9 @@ export class SessionModel {
 	// The single live consume (POST response or reattach stream): a newer
 	// consume cancels the older — one reader at a time.
 	private consumeAbort: AbortController | null = null;
+	/** Retain the latest request across stop(): an opening POST still owns
+	 * its refusal after view detachment, but never after a newer request. */
+	private latestRequest: AbortController | null = null;
 	/** Synchronous ready check for the gate (send/read mount logic). */
 	readyRef = true;
 
@@ -286,18 +292,19 @@ export class SessionModel {
 				? { executions: this.executions, inFlight: true, streamingIds: this.streamingIds }
 				: undefined;
 		const messages = [...this.base, ...this.tail];
-		const latest = messages.at(-1);
-		// One rule for live and restored failures: only the final completed
-		// assistant can own the banner. While trying again, hide the old
-		// failure from the first Thinking frame, but show a new failure at end.
+		const latest = failedResponseAtEnd(messages);
+		// Presentation/compaction markers do not resolve a failure. While
+		// trying again, hide the old banner from the first Thinking frame,
+		// but show a new completed failure from this consume immediately.
 		const providerError =
-			latest?.role === "assistant" && latest.stopReason === "error" &&
+			latest !== undefined &&
 			!this.incompleteUsageIds.has(latest.id) && (!live || latest.id === this.liveFailureId)
 				? { message: latest.errorMessage ?? "An error occurred." }
 				: null;
 		return {
 			messages: projectView(messages, live),
 			nativeMessages: messages,
+			hasConfirmedConversation: this.base.some(m => m.role === "user" || m.role === "assistant"),
 			contextTokens: measuredContextTokens(messages, this.incompleteUsageIds),
 			status: this.statusValue,
 			error: this.errorValue ?? providerError,
@@ -552,6 +559,7 @@ export class SessionModel {
 		this.consumeAbort?.abort();
 		const controller = new AbortController();
 		this.consumeAbort = controller;
+		this.latestRequest = controller;
 		// REPLAY ONTO A CLEAN SLATE (owner, optimistic round 3, 2026-10-02):
 		// the reattach stream replays the turn from its FIRST event — an
 		// aborted earlier attempt (React StrictMode's simulated remount)
@@ -636,40 +644,41 @@ export class SessionModel {
 	 * POST + consume. Ready-gated: one turn per client at a time (the
 	 * server's 409 + identity retry covers the wake-race window).
 	 */
-	async send(input: ChatInput): Promise<void> {
+	async send(input: ChatInput, onAccepted?: () => void): Promise<boolean> {
 		const recovering = this.statusValue === "error";
-		if (!this.readyRef && !recovering) return;
+		if (!this.readyRef && !recovering) return false;
 		this.consumeAbort?.abort();
 		const controller = new AbortController();
 		this.consumeAbort = controller;
+		this.latestRequest = controller;
 		this.setError(null);
 		this.setStatus("submitted");
 		if (recovering && input.type === "answer") {
 			try {
 				const res = await this.fetch(`/api/chats/${encodeURIComponent(this.chatId)}`, { signal: controller.signal });
-				if (this.consumeAbort !== controller) return;
+				if (this.consumeAbort !== controller) return false;
 				if (!res.ok) throw new Error((await res.text()) || "An error occurred.");
 				const record = await res.json() as { messages?: LhMessage[]; turnInFlight?: boolean; turnError?: string };
-				if (this.consumeAbort !== controller) return;
+				if (this.consumeAbort !== controller) return false;
 				// No verified record/liveness: retain the draft and never guess
 				// whether a lost acknowledgement meant the input was accepted.
 				if (!Array.isArray(record.messages) || typeof record.turnInFlight !== "boolean") throw new Error("An error occurred.");
 				this.setMessages(record.messages, record.turnError);
 				if (record.turnInFlight) {
 					await this.resumeStream(false);
-					return;
+					return false;
 				}
 				if (input.type === "answer" && (answeredCallIds(record.messages).has(input.toolCallId) || danglingQuestionOf(record.messages)?.toolCallId !== input.toolCallId)) {
 					// The call already resolved, or no longer owns the dock. Adopt
 					// truth, never POST that answer a second time.
 					this.setStatus("ready");
-					return;
+					return false;
 				}
 			} catch (err) {
-				if (this.consumeAbort !== controller || controller.signal.aborted) return;
+				if (this.consumeAbort !== controller || controller.signal.aborted) return false;
 				this.setError((err as Error).message);
 				this.setStatus("error");
-				return;
+				return false;
 			}
 		}
 		if (input.type !== "continue") this.automaticContinuationBlocked = false;
@@ -696,6 +705,7 @@ export class SessionModel {
 		if (optimistic.length > 0) this.mutate(() => {
 			this.tail = [...this.tail, ...optimistic];
 		});
+		let accepted = false;
 		try {
 			// SUBMITS ARE NOT ABORTABLE BY VIEW TEARDOWN (owner, 2026-10-10 —
 			// the dead-session-start postmortem): the POST must NOT ride
@@ -714,11 +724,21 @@ export class SessionModel {
 				throw new Error("A turn is already running — try again in a moment.");
 			}
 			if (!res.ok) {
-				// Refusal envelopes (503 BYOK/key gates) and 400s: the RAW body
-				// text rides the error message — the banner shows it, and the
-				// page's refusal flow JSON-parses the envelope out of it.
-				throw new Error((await res.text()) || `The send failed (${res.status}).`);
+				// Keep model/key refusal envelopes verbatim: the page's refusal
+				// flow parses them. Retry's 400s are ordinary user-facing
+				// guidance, so show their error text without JSON syntax.
+				let message = (await res.text()) || `The send failed (${res.status}).`;
+				if (input.type === "retry" && res.status === 400) {
+					try {
+						const refusal = JSON.parse(message) as { error?: unknown } | null;
+						if (typeof refusal?.error === "string" && refusal.error.length > 0) message = refusal.error;
+					} catch { /* Non-envelope failures keep their original text. */ }
+				}
+				throw new Error(message);
 			}
+			accepted = true;
+			// Opening-message handover ends at acceptance, not stream completion.
+			onAccepted?.();
 			// CONNECTION DIET B (owner, 2026-10-10 — parallel-session freeze
 			// postmortem): the POST acknowledges and closes; there is no stream
 			// on this response to consume. Attach through the SAME reattach wire
@@ -730,13 +750,24 @@ export class SessionModel {
 			// A stop() or a newer send/consume won while the ack was in
 			// flight: the turn is live server-side either way — do not attach
 			// a stream from a view that is gone or superseded.
-			if (this.consumeAbort !== controller) return;
+			if (this.consumeAbort !== controller) return true;
 			await this.resumeStream(true);
+			return true;
 		} catch (err) {
-			if (this.consumeAbort !== controller || controller.signal.aborted) return;
-			// Restore the question when acceptance failed or is unknown. Remove
-			// only THIS optimistic answer, never saved copies/newer live content.
-			// Other input kinds retain their existing optimistic presentation.
+			const failedOpening = input.type === "text" && onAccepted !== undefined && !accepted;
+			if (failedOpening) {
+				// The POST outlives stop(), including StrictMode's cleanup. Remove
+				// only its own failed optimistic bubble even if a newer request
+				// won; never touch canonical messages or another attempt's tail.
+				const ids = new Set(optimistic.map(m => m.id));
+				this.mutate(() => { this.tail = this.tail.filter(m => !ids.has(m.id)); });
+			}
+			const detachedOpening = failedOpening && this.consumeAbort === null && this.latestRequest === controller;
+			if ((this.consumeAbort !== controller || controller.signal.aborted) && !detachedOpening) return accepted;
+			// A detached opening refusal must still reach the replayed mount's
+			// existing setup recovery. A newer send/reattach ALWAYS owns errors
+			// and status instead, even if that request has since been stopped.
+			// Ordinary text and answer teardown behavior stays unchanged.
 			if (input.type === "answer") {
 				const ids = new Set(optimistic.map(m => m.id));
 				this.mutate(() => {
@@ -746,6 +777,10 @@ export class SessionModel {
 			}
 			this.setError((err as Error).message);
 			this.setStatus("error");
+			// true means we observed this POST's acknowledgment. false does
+			// NOT prove non-delivery: a network failure may hide acceptance.
+			// Opening-message callers restore a draft, never automatically retry.
+			return accepted;
 		}
 	}
 
@@ -795,7 +830,7 @@ export class SessionModel {
 	 *  result (fork 1), riding as its input event. */
 	submitAnswer(tool: string, toolCallId: string, output: QuestionAnswerData): Promise<void> {
 		void tool;
-		return this.send({ type: "answer", toolCallId, answer: output });
+		return this.send({ type: "answer", toolCallId, answer: output }).then(() => undefined);
 	}
 
 	/** The dismissal path (owner design 2026-10-03, "A2"): the skipped
