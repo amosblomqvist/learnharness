@@ -19,9 +19,19 @@ export const CLAUDE_LOCAL = Object.freeze({
 	label: "Local Claude",
 	/** The Providers card title. Never a product/feature name on its own. */
 	title: "Claude (via your Claude Code install)",
-	/** The oldest Claude Code the pinned Agent SDK is known to drive (the SDK's
-	 *  own type docs name 2.1.248 for the flags it always sends; an older CLI
-	 *  exits on unknown options). One constant, compared by the probe. */
+	/** The oldest Claude Code the probe admits. One constant, compared by the
+	 *  probe. Re-verified against the pinned SDK (0.3.311, which targets Claude
+	 *  Code 2.1.311 per its package.json `claudeCodeVersion`): its sdk.d.ts gives
+	 *  a "requires Claude Code" version for NONE of the options this route sends
+	 *  (`--thinking`, `--thinking-display`, `--effort`, `--tools`,
+	 *  `--setting-sources`, `--strict-mcp-config`, `--no-session-persistence`,
+	 *  `--allowedTools`, `--permission-mode`, `--include-partial-messages`), and
+	 *  the SDK runs no version check of its own. Its only version notes are
+	 *  `verbatimPrompts` (2.1.248; older CLIs ignore it), `plugins` delivered
+	 *  via initialize, the one path that sends `--await-initialize` (2.1.261;
+	 *  older CLIs exit), and initialize-response fields (2.1.268) — none used
+	 *  here. So 2.1.248 is a conservative floor, not a proven requirement;
+	 *  re-check it whenever the SDK is bumped. */
 	minVersion: "2.1.248",
 	/** The in-process MCP server the app's tools are served through; the
 	 *  model sees `mcp__learnharness__<tool>`, the record keeps bare names. */
