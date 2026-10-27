@@ -169,6 +169,18 @@ export function validateKeyShape(id: string, rawValue: string): KeyShapeResult {
 	}
 }
 
+export const LOCAL_AI_KEY_ID = "LOCAL_AI_API_KEY";
+
+export function isLocalAuthKey(id: string): boolean {
+	return id === LOCAL_AI_KEY_ID;
+}
+
+export function validateLocalKey(id: string, rawValue: string): KeyShapeResult {
+	const value = rawValue.trim();
+	if (value.length >= 1 && !/\s/.test(value)) return { ok: true };
+	return { ok: false, error: `${id} must not be empty or contain whitespace` };
+}
+
 /** The generic truncation guard for MODEL-PROVIDER keys (families vary —
  *  only paste hygiene applies; owner spec: trim, no whitespace, min 12). */
 export function genericProviderKeyGuard(id: string, rawValue: string): KeyShapeResult {

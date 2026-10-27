@@ -38,6 +38,7 @@ import {
 	effectiveSettings,
 	promptOverrides,
 	readSettingsRecord,
+	refreshConnectionCatalog,
 	validateChatSettings,
 	validateModelsSettings,
 	writeSettingsRecord,
@@ -127,5 +128,8 @@ export async function PUT(request: Request, ctx: { params: Promise<{ section: st
 	const record = readSettingsRecord() ?? { version: 1 };
 	const next = { ...record, [section]: sectionOut };
 	writeSettingsRecord(next);
+	if (section === "localProviders") {
+		await refreshConnectionCatalog();
+	}
 	return Response.json({ settings: next });
 }

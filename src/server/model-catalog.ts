@@ -19,15 +19,51 @@
 
 import { clampThinkingLevel, getSupportedThinkingLevels, type Api, type Model } from "@earendil-works/pi-ai";
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
-import { piModels } from "../agent/models.ts";
+import { clearLocalProvider, createLocalProvider, piModels, setLocalProvider } from "../agent/models.ts";
+import { probeOllama, probeVLLM } from "./local-models.ts";
 import { chatGPTConnected, chatGPTModel, chatGPTModels, refreshChatGPTModels } from "../agent/chatgpt-bridge.ts";
 import { NATIVE_SUBSCRIPTIONS } from "../core/contracts/subscriptions.ts";
 import { nativeSubscriptionId, nativeSubscriptionConnected, nativeSubscriptionModel, nativeSubscriptionModels, refreshSubscriptionModels } from "../agent/subscription-bridge.ts";
+
+export async function refreshLocalModels(provider?: string): Promise<void> {
+	const settings = effectiveSettings().localProviders;
+	const tasks: Promise<void>[] = [];
+
+	if (!provider || provider === "ollama") {
+		tasks.push((async () => {
+			if (settings.ollama.enabled) {
+				const res = await probeOllama(settings.ollama.baseUrl, settings.ollama.defaultContextWindow);
+				if (res.ok) {
+					setLocalProvider(createLocalProvider("ollama", settings.ollama.baseUrl, undefined, res.models));
+				}
+			} else {
+				clearLocalProvider("ollama");
+			}
+		})());
+	}
+
+	if (!provider || provider === "custom") {
+		tasks.push((async () => {
+			if (settings.custom.enabled) {
+				const apiKey = keyValue("LOCAL_AI_API_KEY");
+				const res = await probeVLLM(settings.custom.baseUrl, apiKey, settings.custom.defaultContextWindow);
+				if (res.ok) {
+					setLocalProvider(createLocalProvider("custom", settings.custom.baseUrl, apiKey, res.models));
+				}
+			} else {
+				clearLocalProvider("custom");
+			}
+		})());
+	}
+
+	await Promise.all(tasks);
+}
 
 export async function refreshConnectionCatalog(provider?: string): Promise<void> {
 	await Promise.all([
 		!provider || provider === "chatgpt" ? refreshChatGPTModels(piModels().getModels("openai").filter((m): m is Model<"openai-responses"> => m.api === "openai-responses")) : Promise.resolve(),
 		!provider || nativeSubscriptionId(provider) ? refreshSubscriptionModels() : Promise.resolve(),
+		!provider || provider === "ollama" || provider === "custom" ? refreshLocalModels(provider) : Promise.resolve(),
 	]);
 }
 function connectionModel(provider: string, id: string): Model<Api> | undefined {
@@ -135,6 +171,7 @@ export function catalogSlots(): SlotPins {
  *  with keyPresent read env-wins through the keys seam, fresh per call —
  *  saving a key immediately federates the provider into the picker. */
 export function catalogProviders(): CatalogProvider[] {
+	const local = effectiveSettings().localProviders;
 	return AUTH_PROVIDER_KEYS.map((p) => ({
 		id: p.id,
 		envVar: p.envVar,
@@ -142,6 +179,8 @@ export function catalogProviders(): CatalogProvider[] {
 	})).concat([
 		{ id: "chatgpt", envVar: "", keyPresent: chatGPTConnected() },
 		...NATIVE_SUBSCRIPTIONS.map((p) => ({ id: p.logicalId, envVar: "", keyPresent: nativeSubscriptionConnected(p.providerId) })),
+		{ id: "ollama", envVar: "", keyPresent: local.ollama.enabled },
+		{ id: "custom", envVar: "LOCAL_AI_API_KEY", keyPresent: local.custom.enabled },
 	]).sort((a, b) => a.id.localeCompare(b.id));
 }
 

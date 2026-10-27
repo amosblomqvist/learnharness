@@ -1,16 +1,20 @@
 import {
 	clampThinkingLevel,
 	createModels,
+	createProvider,
 	getSupportedThinkingLevels,
 	type Api,
 	type Model,
 	type Models,
+	type Provider,
 	type StreamFunction,
 } from "@earendil-works/pi-ai";
+import { openAICompletionsApi } from "@earendil-works/pi-ai/api/openai-completions.lazy";
 import { builtinProviders } from "@earendil-works/pi-ai/providers/all";
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import { type ModelRole } from "../../config.ts";
-import { DEFAULT_THINKING_ORDER } from "../core/settings.ts";
+import { DEFAULT_THINKING_ORDER, normalizeOpenAIBaseUrl } from "../core/settings.ts";
+import type { ModelCatalogEntry } from "../core/contracts/models.ts";
 import packageMetadata from "../../package.json" with { type: "json" };
 import { chatGPTModel } from "./chatgpt-bridge.ts";
 import { chatGPTStream } from "./chatgpt-stream.ts";
@@ -135,4 +139,73 @@ export function piEngineFor(role: ModelRole): PiEngine {
 	throw new Error(
 		`no configured model for role "${role}" — set your model slots (settings → models)`,
 	);
+}
+
+/** Project a discovered local model into a Pi Model with OpenAI-completions compatibility flags. */
+export function toPiModelDefinition(m: ModelCatalogEntry, baseUrl: string): Model<"openai-completions"> {
+	const contextWindow = m.contextWindow || 32768;
+	const maxTokens = m.maxTokens || Math.min(4096, Math.max(512, Math.floor(contextWindow / 2)));
+	return {
+		id: m.id,
+		name: m.name,
+		provider: m.provider,
+		api: "openai-completions",
+		baseUrl,
+		reasoning: m.reasoning,
+		input: m.input,
+		cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+		contextWindow,
+		maxTokens,
+		compat: {
+			supportsStore: false,
+			supportsDeveloperRole: false,
+			supportsStrictMode: false,
+			maxTokensField: "max_tokens",
+			supportsReasoningEffort: false,
+		},
+	};
+}
+
+/** Build a local Provider using pi-ai's createProvider and ApiKeyAuth contract. */
+export function createLocalProvider(
+	id: "ollama" | "custom",
+	rawBaseUrl: string,
+	apiKey?: string,
+	models: ModelCatalogEntry[] = [],
+): Provider<"openai-completions"> {
+	const baseUrl = normalizeOpenAIBaseUrl(rawBaseUrl);
+
+	return createProvider<"openai-completions">({
+		id,
+		name: id === "ollama" ? "Ollama" : "Custom (vLLM)",
+		baseUrl,
+		api: openAICompletionsApi(),
+		auth: {
+			apiKey: {
+				name: id === "ollama" ? "Ollama" : "Local AI API Key",
+				check: async () => ({ type: "api_key", source: "local" }),
+				resolve: async () => ({
+					auth: { apiKey: apiKey?.trim() || (id === "ollama" ? "ollama" : "local") },
+					source: "local",
+				}),
+			},
+		},
+		models: models.map((m) => toPiModelDefinition(m, baseUrl)),
+	});
+}
+
+/** Register or update a local provider in the process-wide Models collection. */
+export function setLocalProvider(provider: Provider<"openai-completions">): void {
+	piModels().setProvider(provider as Provider);
+}
+
+/** Clear a local provider from the collection on disable. */
+export function clearLocalProvider(id: "ollama" | "custom"): void {
+	if (!collection) return;
+	const models = collection as { deleteProvider?: (id: string) => void; setProvider: (p: Provider) => void };
+	if (typeof models.deleteProvider === "function") {
+		models.deleteProvider(id);
+	} else {
+		setLocalProvider(createLocalProvider(id, id === "ollama" ? "http://localhost:11434" : "http://localhost:8000/v1", undefined, []));
+	}
 }

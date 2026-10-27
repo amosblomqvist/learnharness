@@ -211,9 +211,9 @@ export async function handleChatInput(
 	// persist (nothing durable changes); wake-pipeline turns ride the same
 	// path. The affected tier is strong — the conversation chain's own tier
 	// (a chat.model override still resolves through it).
-	if (isSubscriptionProvider(conversation.provider)) {
+	if (isSubscriptionProvider(conversation.provider) || conversation.provider === "ollama" || conversation.provider === "custom") {
 		await refreshConnectionCatalog(conversation.provider);
-		if (input.type === "steers" && !connectionBackgroundAllowed(conversation.provider)) {
+		if (isSubscriptionProvider(conversation.provider) && input.type === "steers" && !connectionBackgroundAllowed(conversation.provider)) {
 			return Response.json({ error: "Background use is off for this connection. Automatic follow-up remains deferred in its queue." }, { status: 403 });
 		}
 	}

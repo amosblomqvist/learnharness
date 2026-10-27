@@ -47,9 +47,12 @@ import {
 	type AuthKeyStatus,
 	genericProviderKeyGuard,
 	isKnownAuthKey,
+	isLocalAuthKey,
 	isProviderEnvVar,
+	LOCAL_AI_KEY_ID,
 	maskKey,
 	validateKeyShape,
+	validateLocalKey,
 } from "../core/auth-keys.ts";
 import { authStore } from "../store/auth.ts";
 import { isSubscriptionProvider, subscriptionConnected } from "../agent/subscription-connections.ts";
@@ -72,10 +75,10 @@ function boot(): AuthBoot {
 	return g[BOOT_KEY];
 }
 
-/** Is `id` a WRITABLE key name — curated catalog or model-provider env
- *  var (provider-keys interlude: PUT/DELETE accept both). */
+/** Is `id` a WRITABLE key name — curated catalog, model-provider env
+ *  var, or local AI token (provider-keys interlude: PUT/DELETE accept all). */
 export function isWritableAuthKey(id: string): boolean {
-	return isKnownAuthKey(id) || isProviderEnvVar(id);
+	return isKnownAuthKey(id) || isProviderEnvVar(id) || isLocalAuthKey(id);
 }
 
 /** The settings page's provider dropdown: every pi-ai provider that takes
@@ -109,6 +112,7 @@ export function initAuthEnv(): void {
 		// an env-exported OPENAI_API_KEY with a file copy gets honest shadow
 		// semantics, exactly like the curated vars.
 		...AUTH_PROVIDER_KEYS.map((p) => p.envVar),
+		LOCAL_AI_KEY_ID,
 	]);
 	if (envKeysIgnored()) {
 		// THE FRESH-USER SWITCH: delete every managed env var (re-run on
@@ -155,6 +159,9 @@ export function resolveKeyStatuses(
 	const ids = new Set<string>([...AUTH_KEYS.map((k) => k.id), ...Object.keys(fileVars)]);
 	for (const envVar of providerEnvVars) {
 		if (env[envVar] !== undefined || fileVars[envVar] !== undefined) ids.add(envVar);
+	}
+	if (env[LOCAL_AI_KEY_ID] !== undefined || fileVars[LOCAL_AI_KEY_ID] !== undefined) {
+		ids.add(LOCAL_AI_KEY_ID);
 	}
 	const rows: AuthKeyStatus[] = [];
 	for (const id of ids) {
@@ -213,7 +220,11 @@ export function providerKeyPresent(provider: string): boolean {
  * reports shadowedByEnv so the page can explain it).
  */
 export function saveKey(id: string, value: string): { ok: true; status: AuthKeyStatus } | { ok: false; error: string } {
-	const shape = isProviderEnvVar(id) ? genericProviderKeyGuard(id, value) : validateKeyShape(id, value);
+	const shape = isLocalAuthKey(id)
+		? validateLocalKey(id, value)
+		: isProviderEnvVar(id)
+			? genericProviderKeyGuard(id, value)
+			: validateKeyShape(id, value);
 	if (!shape.ok) return { ok: false, error: shape.error };
 	const trimmed = value.trim();
 	authStore.setAuthVar(id, trimmed);

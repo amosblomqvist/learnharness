@@ -41,7 +41,8 @@ Secrets and machine-specific paths only. Model choice and thinking budgets are t
 
 | Variable | Purpose |
 |---|---|
-| `OPENROUTER_API_KEY` | required — all LLM calls go through OpenRouter |
+| `OPENROUTER_API_KEY` | cloud provider key (or configure other providers / local models in settings) |
+| `LOCAL_AI_API_KEY` | optional — bearer token for protected local OpenAI-compatible endpoints (vLLM / LM Studio) |
 | `GOOGLE_SEARCH_API_KEY` + `GOOGLE_CSE_ID` | researcher's `web_search` (Google Custom Search) |
 | `DEEPGRAM_API_KEY` | optional — dictation (STT token minting; audio streams browser→Deepgram, never through the server) |
 | `CHROME_PATH` | optional system Chrome fallback for demo verification; the app's own browser helper is primary (nothing is downloaded) |

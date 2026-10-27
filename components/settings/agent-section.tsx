@@ -633,9 +633,8 @@ export function AgentSection({
 					const chosen = coord ? catalog?.find((m) => m.id === coord.id && m.provider === coord.provider) : undefined;
 					const levels = chosen ? chosen.supportedLevels : THINKING_LEVELS;
 					const thisMenuOpen = openMenu?.target === slot ? openMenu.kind : null;
-					// Vision slots pick from image-capable models only.
-					const slotCatalog =
-						slot === "vision" ? catalog?.filter((m) => m.input.includes("image")) : catalog;
+					// Vision slots allow all models so users with text-only setups are never blocked.
+					const slotCatalog = catalog;
 					return (
 						<SettingsRow
 							key={slot}
@@ -693,7 +692,9 @@ export function AgentSection({
 											footer={
 												catalog && catalog.length === 0
 													? "No models — add a provider key in Keys"
-													: "Runs every agent of this tier"
+													: slot === "vision"
+														? "Models with 👁 support image & diagram inspection"
+														: "Runs every agent of this tier"
 											}
 										/>
 									</MenuShell>

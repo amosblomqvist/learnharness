@@ -356,6 +356,31 @@ export interface CompactionSettings {
 	thresholdTokens?: number;
 }
 
+/** Local provider configuration (Ollama and custom/vLLM endpoints). */
+export interface LocalProviderConfig {
+	enabled?: boolean;
+	baseUrl?: string;
+	defaultContextWindow?: number;
+}
+
+export interface LocalProvidersSettings {
+	ollama?: LocalProviderConfig;
+	custom?: LocalProviderConfig;
+}
+
+/** Strips trailing slashes and /v1 for Ollama root endpoints (/api/tags, /api/show). */
+export function normalizeOllamaRootUrl(url: string): string {
+	const trimmed = url.trim().replace(/\/+$/, "");
+	return trimmed.replace(/\/v1$/, "");
+}
+
+/** Ensures trailing /v1 and strips redundant slashes for OpenAI-compatible endpoints. */
+export function normalizeOpenAIBaseUrl(url: string): string {
+	const trimmed = url.trim().replace(/\/+$/, "");
+	if (!trimmed) return "";
+	return trimmed.endsWith("/v1") ? trimmed : `${trimmed}/v1`;
+}
+
 /** THE record. Every section optional (delta); unknown top-level keys are
  *  preserved verbatim by the sanitizer (forward-compat with newer records). */
 export interface UserSettings {
@@ -364,6 +389,7 @@ export interface UserSettings {
 	agent?: AgentSettings;
 	/** The strong/cheap/vision model slots (model slots wave, 2026-09-20). */
 	models?: ModelsSettings;
+	localProviders?: LocalProvidersSettings;
 	appearance?: AppearanceSettings;
 	graph?: GraphSettings;
 	compaction?: CompactionSettings;
@@ -378,6 +404,10 @@ export interface UserSettings {
 export interface FactorySettings {
 	version: number;
 	general: Required<GeneralSettings>;
+	localProviders: {
+		ollama: Required<LocalProviderConfig>;
+		custom: Required<LocalProviderConfig>;
+	};
 	appearance: {
 		mode: "dark" | "light";
 		background: string | null;
@@ -397,6 +427,10 @@ export interface FactorySettings {
 export const FACTORY_SETTINGS: FactorySettings = {
 	version: CURRENT_SETTINGS_VERSION,
 	general: { autoUpdate: true },
+	localProviders: {
+		ollama: { enabled: false, baseUrl: "http://localhost:11434", defaultContextWindow: 32768 },
+		custom: { enabled: false, baseUrl: "http://localhost:8000/v1", defaultContextWindow: 32768 },
+	},
 	appearance: {
 		mode: "dark",
 		background: null, // the dark default (#141414) lives in the mode's derivation curve
@@ -600,6 +634,30 @@ function sanitizeCompaction(raw: Record<string, unknown>): CompactionSettings {
 	return out;
 }
 
+function sanitizeLocalProvider(raw: unknown): LocalProviderConfig | undefined {
+	if (raw === null || typeof raw !== "object" || Array.isArray(raw)) return undefined;
+	const r = raw as Record<string, unknown>;
+	const out: LocalProviderConfig = {};
+	const enabled = boolOrDrop(r.enabled);
+	if (enabled !== undefined) out.enabled = enabled;
+	if (typeof r.baseUrl === "string" && r.baseUrl.trim()) {
+		out.baseUrl = r.baseUrl.trim();
+	}
+	if (typeof r.defaultContextWindow === "number" && Number.isFinite(r.defaultContextWindow) && r.defaultContextWindow > 0) {
+		out.defaultContextWindow = Math.floor(r.defaultContextWindow);
+	}
+	return Object.keys(out).length ? out : undefined;
+}
+
+function sanitizeLocalProviders(raw: Record<string, unknown>): LocalProvidersSettings {
+	const out: LocalProvidersSettings = {};
+	const ollama = sanitizeLocalProvider(raw.ollama);
+	if (ollama) out.ollama = ollama;
+	const custom = sanitizeLocalProvider(raw.custom);
+	if (custom) out.custom = custom;
+	return out;
+}
+
 /**
  * Coerce arbitrary JSON (disk file, network body) into a valid delta record:
  * known fields validated strictly (invalid ones drop/clamp per module doc),
@@ -625,11 +683,17 @@ export function sanitizeUserSettings(raw: unknown): UserSettings | null {
 		const models = sanitizeModels(r.models as Record<string, unknown>);
 		if (Object.keys(models).length) out.models = models;
 	}
+	if (r.localProviders !== null && typeof r.localProviders === "object" && !Array.isArray(r.localProviders)) {
+		const local = sanitizeLocalProviders(r.localProviders as Record<string, unknown>);
+		if (Object.keys(local).length) out.localProviders = local;
+	}
 	if (r.graph !== null && typeof r.graph === "object" && !Array.isArray(r.graph)) {
 		out.graph = sanitizeGraph(r.graph as Record<string, unknown>);
 		if (r.compaction !== undefined && r.compaction !== null && typeof r.compaction === "object") {
 			out.compaction = sanitizeCompaction(r.compaction as Record<string, unknown>);
 		}
+	} else if (r.compaction !== undefined && r.compaction !== null && typeof r.compaction === "object") {
+		out.compaction = sanitizeCompaction(r.compaction as Record<string, unknown>);
 	}
 	// Unknown top-level keys ride along untouched (forward-compat). One
 	// known-DEAD key is stripped instead of riding: `chat` (the old

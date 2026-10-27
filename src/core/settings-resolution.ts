@@ -88,6 +88,10 @@ export interface EffectiveSettings {
 	 *  way down, owner 2026-09-22). These are the tier-level views the
 	 *  picker captions and the per-need refusal gates read. */
 	models: Record<ModelSlotName, EffectiveSlot | null>;
+	localProviders: {
+		ollama: Required<import("./settings.ts").LocalProviderConfig>;
+		custom: Required<import("./settings.ts").LocalProviderConfig>;
+	};
 	appearance: EffectiveAppearance;
 	graph: Required<GraphSettings>;
 	/** Compaction (owner round 14): resolved concrete — absent record
@@ -215,6 +219,18 @@ export function resolveSettings(record: UserSettings | null): EffectiveSettings 
 		},
 		compaction: {
 			thresholdTokens: record?.compaction?.thresholdTokens ?? FACTORY_SETTINGS.compaction.thresholdTokens,
+		},
+		localProviders: {
+			ollama: {
+				enabled: record?.localProviders?.ollama?.enabled ?? FACTORY_SETTINGS.localProviders.ollama.enabled,
+				baseUrl: record?.localProviders?.ollama?.baseUrl ?? FACTORY_SETTINGS.localProviders.ollama.baseUrl,
+				defaultContextWindow: record?.localProviders?.ollama?.defaultContextWindow ?? FACTORY_SETTINGS.localProviders.ollama.defaultContextWindow,
+			},
+			custom: {
+				enabled: record?.localProviders?.custom?.enabled ?? FACTORY_SETTINGS.localProviders.custom.enabled,
+				baseUrl: record?.localProviders?.custom?.baseUrl ?? FACTORY_SETTINGS.localProviders.custom.baseUrl,
+				defaultContextWindow: record?.localProviders?.custom?.defaultContextWindow ?? FACTORY_SETTINGS.localProviders.custom.defaultContextWindow,
+			},
 		},
 	};
 }

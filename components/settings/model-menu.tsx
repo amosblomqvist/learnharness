@@ -124,7 +124,10 @@ export function ModelMenuList({
 							}${m.id === effectiveId && m.provider === (effectiveProvider ?? m.provider) && i !== menuIdx ? " bg-muted/60" : ""}`}
 						>
 							<span className="flex items-center justify-between gap-2">
-								<span className="truncate text-card-foreground">{m.name}</span>
+								<span className="truncate text-card-foreground">
+									{m.name}
+									{m.input.includes("image") && <span className="ml-1 text-[10px] text-sky-400" title="Vision capable">👁</span>}
+								</span>
 								<span className="shrink-0 tabular-nums text-muted-foreground" title={subscriptionLabel(`${m.provider}:${m.id}`) ? "Subscription connection" : "USD per 1M tokens in/out"}>
 									{subscriptionLabel(`${m.provider}:${m.id}`) ?? priceLabel(m.cost)}
 								</span>

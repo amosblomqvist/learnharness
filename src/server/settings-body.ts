@@ -20,6 +20,8 @@ import type {
 	CompactionSettings,
 	GeneralSettings,
 	GraphSettings,
+	LocalProviderConfig,
+	LocalProvidersSettings,
 	ModelsSettings,
 	RoleModelOverride,
 } from "../core/settings.ts";
@@ -375,6 +377,53 @@ export function parseCompactionSettingsBody(body: unknown): SettingsBodyResult<C
 	return { ok: true, settings };
 }
 
+export function parseLocalProvidersSettingsBody(body: unknown): SettingsBodyResult<LocalProvidersSettings> {
+	const raw = asRecord(body);
+	if (!raw) return { ok: false, error: "Invalid JSON body" };
+	const settings: LocalProvidersSettings = {};
+	if (raw.ollama !== undefined) {
+		const ollama = asRecord(raw.ollama);
+		if (!ollama) return { ok: false, error: "ollama must be an object" };
+		const config: LocalProviderConfig = {};
+		if (ollama.enabled !== undefined) {
+			if (typeof ollama.enabled !== "boolean") return { ok: false, error: "ollama.enabled must be boolean" };
+			config.enabled = ollama.enabled;
+		}
+		if (ollama.baseUrl !== undefined) {
+			if (typeof ollama.baseUrl !== "string") return { ok: false, error: "ollama.baseUrl must be string" };
+			config.baseUrl = ollama.baseUrl.trim();
+		}
+		if (ollama.defaultContextWindow !== undefined) {
+			if (typeof ollama.defaultContextWindow !== "number" || !Number.isFinite(ollama.defaultContextWindow) || ollama.defaultContextWindow <= 0) {
+				return { ok: false, error: "ollama.defaultContextWindow must be positive number" };
+			}
+			config.defaultContextWindow = Math.floor(ollama.defaultContextWindow);
+		}
+		settings.ollama = config;
+	}
+	if (raw.custom !== undefined) {
+		const custom = asRecord(raw.custom);
+		if (!custom) return { ok: false, error: "custom must be an object" };
+		const config: LocalProviderConfig = {};
+		if (custom.enabled !== undefined) {
+			if (typeof custom.enabled !== "boolean") return { ok: false, error: "custom.enabled must be boolean" };
+			config.enabled = custom.enabled;
+		}
+		if (custom.baseUrl !== undefined) {
+			if (typeof custom.baseUrl !== "string") return { ok: false, error: "custom.baseUrl must be string" };
+			config.baseUrl = custom.baseUrl.trim();
+		}
+		if (custom.defaultContextWindow !== undefined) {
+			if (typeof custom.defaultContextWindow !== "number" || !Number.isFinite(custom.defaultContextWindow) || custom.defaultContextWindow <= 0) {
+				return { ok: false, error: "custom.defaultContextWindow must be positive number" };
+			}
+			config.defaultContextWindow = Math.floor(custom.defaultContextWindow);
+		}
+		settings.custom = config;
+	}
+	return { ok: true, settings };
+}
+
 /** The section→parser map for PUT /api/settings/[section] (the route also
  *  carries the special prompts sub-resource). */
 export const SETTINGS_SECTIONS = {
@@ -385,6 +434,7 @@ export const SETTINGS_SECTIONS = {
 	graph: parseGraphSettingsBody,
 	compaction: parseCompactionSettingsBody,
 	models: parseModelsSettingsBody,
+	localProviders: parseLocalProvidersSettingsBody,
 } as const;
 
 export type SettingsSectionName = keyof typeof SETTINGS_SECTIONS;

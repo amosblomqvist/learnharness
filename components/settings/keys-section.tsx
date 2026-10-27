@@ -27,6 +27,7 @@ import { useEffect, useRef, useState } from "react";
 import { AUTH_KEYS, type AuthKeyStatus } from "@/src/core";
 import { SettingsGroup } from "./controls.tsx";
 import { SubscriptionConnections } from "./subscription-connections.tsx";
+import { LocalProviderCards } from "./local-provider-cards.tsx";
 import { ProviderMenuList } from "./model-menu.tsx";
 import { MenuShell } from "@/components/menu-shell";
 import { notifySettingsSaved } from "@/components/settings-signal";
@@ -457,6 +458,10 @@ export function KeysSection({
 
 			<SettingsGroup label="Subscriptions" testid="group-subscriptions">
 				<SubscriptionConnections />
+			</SettingsGroup>
+
+			<SettingsGroup label="Local Models (Ollama / vLLM)" testid="group-local-models">
+				<LocalProviderCards />
 			</SettingsGroup>
 
 			{(["Dictation", "Search"] as const).map((label) => <SettingsGroup key={label} label={label} testid={label === "Dictation" ? "group-dictation" : "group-search"}>
