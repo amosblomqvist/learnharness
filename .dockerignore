@@ -1,0 +1,20 @@
+.git
+node_modules
+.next
+dist
+
+# Runtime state and credentials
+.env*
+auth.json
+chatgpt-credentials.json*
+github-copilot-credentials.json*
+xai-credentials.json*
+data
+.fresh-data
+real-data-extraction
+.memory
+
+# Local development artifacts
+*.log
+*.tsbuildinfo
+.DS_Store
