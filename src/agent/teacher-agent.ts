@@ -242,6 +242,9 @@ function baseAgentOptions(kind: AgentKind, opts: AgentBuildOptions, tools: Agent
 				prepareRequest,
 				purpose: () => opts.callPurpose?.background ?? false,
 				lifecycle: opts.requestCycle,
+				// The same recorder as pi's onProviderStreamEvent: the raw SDK
+				// messages are this route's provider wire.
+				...(providerEvents ? { onProviderEvent: providerEvents } : {}),
 			})
 		: new Agent({
 				identity: APP_IDENTITY,

@@ -37,6 +37,7 @@ export function claudeLocalStream(background: () => boolean, lifecycle?: Subscri
 					query, launch, model, thinkingLevel: level,
 					systemPrompt: getCurrentSystemPrompt(context.messages), systemPromptMode: runtime.systemPromptMode(),
 					blocks: flattenTranscript(context.messages), tools: [], signal,
+					onApiKeySource: (source) => runtime.noteApiKeySource?.(source),
 					beforeDispatch: () => { if (!runtime.scopeCurrent(scope!)) throw new Error("connection changed"); lifecycle?.beforeDispatch(runtime.admissionScope(scope!)); committed = true; },
 				})) {
 					if (event.type === "usage") { runtime.noteUsage(event.report); continue; }
@@ -46,7 +47,7 @@ export function claudeLocalStream(background: () => boolean, lifecycle?: Subscri
 					else if (e.type === "error") throw new Error(e.error.errorMessage ?? "Local Claude stream failed");
 					else if (!terminal) output.push(e);
 				}
-				if (!terminal) throw new Error("Claude Code ended without a response");
+				if (!terminal) throw new Error(signal.aborted ? "aborted" : "Claude Code ended without a response");
 			} catch (error) {
 				if (terminal) return;
 				const message = error instanceof Error ? error.message : String(error);

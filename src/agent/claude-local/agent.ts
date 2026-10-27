@@ -30,7 +30,7 @@ import { markUnadmittedUsage } from "../subscription-request-cycle.ts";
 import * as bridge from "./bridge.ts";
 import type { ClaudeLocalLaunch } from "./bridge.ts";
 import { claudeLocalError, runClaudeTurn } from "./run.ts";
-import { loadClaudeQuery, type ClaudeQuery } from "./sdk.ts";
+import { loadClaudeQuery, type ClaudeQuery, type SDKMessage } from "./sdk.ts";
 import { emptyAssistant } from "./stream-mapper.ts";
 import { flattenTranscript } from "./transcript.ts";
 
@@ -46,6 +46,9 @@ export interface ClaudeLocalRuntime {
 	abortController(background: boolean): { controller: AbortController; release(): void };
 	denial(scope: ClaudeLocalScope | undefined, controller: AbortController, callerAborted: boolean, background: boolean): NoDispatchKind;
 	noteUsage(report: ClaudeLocalUsageReport): void;
+	/** A turn found Claude Code set up to bill an API key (system/init):
+	 *  mark the route not-ready until the next probe. */
+	noteApiKeySource?(source: string): void;
 	query(): Promise<ClaudeQuery>;
 }
 export const productionRuntime: ClaudeLocalRuntime = {
@@ -58,6 +61,7 @@ export const productionRuntime: ClaudeLocalRuntime = {
 	abortController: bridge.claudeLocalAbortController,
 	denial: bridge.claudeLocalDenial,
 	noteUsage: bridge.noteClaudeLocalUsage,
+	noteApiKeySource: bridge.noteClaudeLocalApiKeySource,
 	query: loadClaudeQuery,
 };
 
@@ -77,6 +81,9 @@ export interface ClaudeLocalAgentOptions {
 	/** Parity with pi's Agent (tests pin both): the app identity and the chat id. */
 	identity?: ClientIdentity;
 	sessionId?: string;
+	/** The raw-wire recorder (LH_PROVIDER_EVENTS): every raw SDK message of
+	 *  the run, with the model it served — pi's onProviderStreamEvent shape. */
+	onProviderEvent?: (message: SDKMessage, model: Model<any>) => void;
 }
 
 type Listener = (event: AgentEvent, signal: AbortSignal) => Promise<void> | void;
@@ -171,7 +178,7 @@ export class ClaudeLocalAgent implements LiveAgent {
 		const fail = async (message: string, reason: "error" | "aborted" = "error") => {
 			// The raw cause goes to the server log (the learner sees the masked text).
 			if (reason === "error") console.error(`[claude-local] turn failed: ${message}`);
-			const error: AssistantMessage = { ...emptyAssistant(model, reason), errorMessage: claudeLocalError(message) };
+			const error: AssistantMessage = { ...emptyAssistant(model, reason), thinkingLevel: this.state.thinkingLevel, errorMessage: claudeLocalError(message) };
 			if (!committed) { markUnadmittedUsage(error.usage); options.lifecycle?.noDispatch(runtime.denial(scope, controller, signal.aborted, background)); }
 			await emit({ type: "message_start", message: error });
 			this.state.messages.push(error);
@@ -197,10 +204,14 @@ export class ClaudeLocalAgent implements LiveAgent {
 			let lastDecision: "end" | "continue" | undefined;
 			type ToolEvent = Extract<Awaited<ReturnType<typeof runClaudeTurn>> extends AsyncGenerator<infer E> ? E : never, { type: "tool_start" | "tool_end" }>;
 			const earlyTools: ToolEvent[] = [];
+			/** The calls that got their tool_execution_start. */
+			const startedCalls = new Set<string>();
 			/** Synthesize the missing results of an unfinished batch and close it. */
 			const closeBatch = async (message: AssistantMessage, text: string) => {
 				for (const call of message.content.filter((c) => c.type === "toolCall")) {
 					if (results.some((r) => r.toolCallId === call.id)) continue;
+					// pi always announces a call before its end, even a call that never ran.
+					if (!startedCalls.has(call.id)) { startedCalls.add(call.id); await emit({ type: "tool_execution_start", toolCallId: call.id, toolName: call.name, args: call.arguments }); }
 					await emit({ type: "tool_execution_end", toolCallId: call.id, toolName: call.name, result: { content: [{ type: "text", text }], details: {} }, isError: true });
 					results.push({ role: "toolResult", toolCallId: call.id, toolName: call.name, content: [{ type: "text", text }], details: {}, isError: true, timestamp: Date.now() });
 				}
@@ -208,6 +219,7 @@ export class ClaudeLocalAgent implements LiveAgent {
 			};
 			const onToolEvent = async (event: ToolEvent) => {
 				if (event.type === "tool_start") {
+					startedCalls.add(event.toolCallId);
 					await emit({ type: "tool_execution_start", toolCallId: event.toolCallId, toolName: event.toolName, args: event.args });
 					return;
 				}
@@ -235,19 +247,26 @@ export class ClaudeLocalAgent implements LiveAgent {
 				query, launch, model, thinkingLevel: this.state.thinkingLevel,
 				systemPrompt: this.state.systemPrompt, systemPromptMode: runtime.systemPromptMode(),
 				blocks, tools: this.state.tools, signal: combined,
+				...(options.onProviderEvent ? { onProviderEvent: (message: SDKMessage) => options.onProviderEvent!(message, model) } : {}),
+				onApiKeySource: (source) => runtime.noteApiKeySource?.(source),
 				beforeDispatch: () => { if (!runtime.scopeCurrent(scope!)) throw new Error("connection changed"); options.lifecycle?.beforeDispatch(runtime.admissionScope(scope!)); committed = true; },
 				shouldStopAfterBatch: (calls) => {
-					// pi's stop rules: every result terminates (the batch rule), or the
-					// app's finishTurn (the question stopper) — evaluated on the same
-					// data the app's stopper reads, from the current assistant message.
-					if (!current) return false;
+					// pi's stop rules, in pi's precedence: the batch rule first — when
+					// every result terminates the run ends, whatever the stopper says —
+					// then the app's finishTurn (the question stopper).
 					if (calls.length > 0 && calls.every((call) => call.terminate)) return true;
 					const stopper = options.finishTurn;
 					if (!stopper) return false;
+					// Decided from the hook's own data only: the SDK runs this hook
+					// ahead of the messages this loop has read, so the consumer-side
+					// `current` may not be the batch's message yet. The probe message
+					// is rebuilt from the batch's calls (Claude Code's ids, bare names,
+					// the arguments the bridge received).
+					const message: AssistantMessage = { ...emptyAssistant(model, "toolUse"), content: calls.map((call) => ({ type: "toolCall" as const, id: call.toolCallId, name: call.toolName, arguments: (call.args ?? {}) as Record<string, never> })) };
 					// finishTurn is async in pi; the batch hook needs a sync answer. The
 					// app's stoppers are pure (teacher-agent makeQuestionStopper), so a
 					// synchronous probe with the batch's results is exact.
-					const probe = stopper({ message: current, toolResults: calls.map((call) => ({ role: "toolResult", toolCallId: call.toolCallId, toolName: call.toolName, content: [], isError: call.isError, timestamp: Date.now() })), context: { messages: this.state.messages, tools: this.state.tools }, newMessages: [] }, signal);
+					const probe = stopper({ message, toolResults: calls.map((call) => ({ role: "toolResult", toolCallId: call.toolCallId, toolName: call.toolName, content: [], isError: call.isError, timestamp: Date.now() })), context: { messages: this.state.messages, tools: this.state.tools }, newMessages: [] }, signal);
 					return !!probe && typeof probe === "object" && "action" in probe && (probe as { action?: string }).action === "end";
 				},
 			})) {
@@ -278,6 +297,8 @@ export class ClaudeLocalAgent implements LiveAgent {
 						await emit({ type: "message_start", message: { ...current } });
 					} else if (e.type === "done" || e.type === "error") {
 						const final = e.type === "done" ? e.message : e.error;
+						// pi records the requested level on every final message.
+						final.thinkingLevel ??= this.state.thinkingLevel;
 						if (e.type === "error" && !committed) { markUnadmittedUsage(final.usage); options.lifecycle?.noDispatch(runtime.denial(scope, controller, signal.aborted, background)); }
 						if (e.type === "error") final.errorMessage = claudeLocalError(final.errorMessage ?? "failed");
 						// Replace the streaming partial in place (pi: a message that never
@@ -315,7 +336,7 @@ export class ClaudeLocalAgent implements LiveAgent {
 					for (const early of earlyTools.splice(0)) await onToolEvent(early);
 					// Calls the child never answered (an abort mid-batch): close the batch.
 					if (current && callsExpected > 0 && results.length < callsExpected) {
-						await closeBatch(current, signal.aborted ? "Operation aborted" : "The tool call was not completed.");
+						await closeBatch(current, combined.aborted ? "Operation aborted" : "The tool call was not completed.");
 						callsExpected = 0;
 					}
 					if (!streamed && event.ok) {
@@ -328,8 +349,10 @@ export class ClaudeLocalAgent implements LiveAgent {
 					// A failed turn is terminal. The failure already ended the run when it
 					// arrived as the message in flight (the error branch above) or as
 					// Claude Code's own error message; otherwise it is reported here.
-					if (!event.ok) return current?.stopReason === "error" || event.failedAssistant ? "end" : await fail(event.errors.join("; ") || "failed", signal.aborted ? "aborted" : "error");
-					return signal.aborted ? "end" : "continue";
+					// An abort — the caller's or the route's own (a re-probe, consent
+					// off) — is a cancelled turn: the masked cancelled message, then end.
+					if (!event.ok) return current?.stopReason === "error" || event.failedAssistant ? "end" : combined.aborted ? await fail("aborted", "aborted") : await fail(event.errors.join("; ") || "failed", "error");
+					return combined.aborted ? "end" : "continue";
 				}
 			}
 			return "continue";

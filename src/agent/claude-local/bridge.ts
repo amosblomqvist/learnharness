@@ -102,3 +102,12 @@ export function claudeLocalDenial(scope: ClaudeLocalScope | undefined, controlle
  *  card reads it through the server). */
 export function noteClaudeLocalUsage(report: ClaudeLocalUsageReport): void { bridge().usage = report; }
 export function claudeLocalUsage(): ClaudeLocalUsageReport | undefined { return bridge().usage; }
+/** A turn's `system/init` said Claude Code would bill an API key: the route
+ *  is not ready until the next probe (no launch, no models; nothing else
+ *  changes — the revision stays, so only the probe re-admits). */
+export function noteClaudeLocalApiKeySource(source: string): void {
+	const state = bridge();
+	if (!state.snapshot) return;
+	state.snapshot = { status: { ...state.snapshot.status, state: "api-key", error: `Claude Code is set up to use an API key (${source}); this route only runs on a Claude plan login.` }, models: [], launch: null };
+	notify(state);
+}

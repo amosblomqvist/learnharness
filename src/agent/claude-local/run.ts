@@ -34,7 +34,7 @@ import { claudeLaunchOptions } from "./launch.ts";
 import { ClaudeStreamMapper } from "./stream-mapper.ts";
 import { createToolBridge } from "./tools.ts";
 import { toolPrefixNote } from "./transcript.ts";
-import type { ClaudeQuery, ClaudeQueryOptions, HookCallback, SDKUserMessage } from "./sdk.ts";
+import type { ClaudeQuery, ClaudeQueryOptions, HookCallback, SDKMessage, SDKUserMessage } from "./sdk.ts";
 
 export type ClaudeTurnEvent =
 	| { type: "assistant"; event: AssistantMessageEvent }
@@ -44,6 +44,10 @@ export type ClaudeTurnEvent =
 	/** Claude Code finished the turn (end of its loop): the last assistant
 	 *  message's stop reason decides what the agent does next. */
 	| { type: "result"; ok: boolean; errors: string[]; /** The failure already reached the record as an error assistant message. */ failedAssistant?: boolean; terminalReason?: string };
+
+/** One completed call of a tool batch, from the bridge's own record of it:
+ *  Claude Code's tool_use id, the BARE name and the arguments it was called with. */
+export interface BatchCall { toolCallId: string; toolName: string; args: unknown; isError: boolean; terminate: boolean }
 
 export interface ClaudeTurnParams {
 	query: ClaudeQuery;
@@ -58,11 +62,16 @@ export interface ClaudeTurnParams {
 	signal: AbortSignal;
 	/** The batch-level stop rule (pi's finishTurn, applied once per completed
 	 *  tool batch): return true to end the run after this batch. */
-	shouldStopAfterBatch?: (calls: { toolCallId: string; toolName: string; isError: boolean; terminate: boolean }[]) => boolean;
+	shouldStopAfterBatch?: (calls: BatchCall[]) => boolean;
 	/** Called right before the child is spawned (the admission commit). */
 	beforeDispatch?: () => void;
 	/** The child's stderr tail (diagnostics in error messages). */
 	onStderr?: (line: string) => void;
+	/** Every raw SDK message, as it arrives (the LH_PROVIDER_EVENTS recorder). */
+	onProviderEvent?: (message: SDKMessage) => void;
+	/** Claude Code reported (system/init) that it would bill an API key: the
+	 *  turn is refused, and the route's status is marked not-ready. */
+	onApiKeySource?: (source: string) => void;
 }
 
 /** pi thinking level → the SDK's effort + thinking mode. */
@@ -97,17 +106,23 @@ export async function* runClaudeTurn(params: ClaudeTurnParams): AsyncGenerator<C
 	const serverName = CLAUDE_LOCAL.mcpServerName;
 	// The run's own controller: our caller's abort and the SDK's close both route through it.
 	const abort = new AbortController();
-	const onAbort = () => abort.abort();
-	if (signal.aborted) abort.abort(); else signal.addEventListener("abort", onAbort, { once: true });
+	// The prompt stream's own end: closed after a successful result so the
+	// child sees stdin close and exits on its own (the SDK abort stays for
+	// real aborts and the final cleanup).
+	const promptDone = new AbortController();
 	// Events from the tool bridge (another async context) are queued here and
 	// interleaved with the SDK's own messages in arrival order.
 	const queue: ClaudeTurnEvent[] = [];
 	let wake: (() => void) | undefined;
+	// An abort wakes the loop at once (an empty queue would otherwise wait
+	// for the SDK to close the child's stdout).
+	const onAbort = () => { abort.abort(); wake?.(); };
+	if (signal.aborted) abort.abort(); else signal.addEventListener("abort", onAbort, { once: true });
 	const push = (event: ClaudeTurnEvent) => { queue.push(event); wake?.(); };
 	// Correlation for tool_use ids: the streamed tool_use blocks of the current message.
 	let mapper = new ClaudeStreamMapper(model, serverName, params.thinkingLevel);
 	const streamedCalls: { id: string; name: string; args: unknown; started: boolean }[] = [];
-	const batch: { toolCallId: string; toolName: string; isError: boolean; terminate: boolean }[] = [];
+	const batch: BatchCall[] = [];
 	let stopRequested = false;
 	let minted = 0;
 	const deepEqual = (a: unknown, b: unknown) => { try { return JSON.stringify(a) === JSON.stringify(b); } catch { return false; } };
@@ -122,7 +137,7 @@ export async function* runClaudeTurn(params: ClaudeTurnParams): AsyncGenerator<C
 		},
 		onStart: (call) => push({ type: "tool_start", ...call }),
 		onEnd: (call) => {
-			batch.push({ toolCallId: call.toolCallId, toolName: call.toolName, isError: call.isError, terminate: call.result.terminate === true });
+			batch.push({ toolCallId: call.toolCallId, toolName: call.toolName, args: call.args, isError: call.isError, terminate: call.result.terminate === true });
 			push({ type: "tool_end", ...call });
 		},
 	}) : undefined;
@@ -170,9 +185,16 @@ export async function* runClaudeTurn(params: ClaudeTurnParams): AsyncGenerator<C
 		abortController: abort,
 		stderr: (data) => { stderr = (stderr + data).slice(-2000); params.onStderr?.(data); },
 	};
+	// Aborted before the spawn: nothing is committed or started (the
+	// caller's no-dispatch path reports it).
+	if (signal.aborted) {
+		signal.removeEventListener("abort", onAbort);
+		yield { type: "result", ok: false, errors: [] };
+		return;
+	}
 	params.beforeDispatch?.();
 	let handle: ReturnType<ClaudeQuery>;
-	try { handle = params.query({ prompt: promptOf(params.blocks, abort.signal), options }); }
+	try { handle = params.query({ prompt: promptOf(params.blocks, AbortSignal.any([abort.signal, promptDone.signal])), options }); }
 	catch (error) {
 		signal.removeEventListener("abort", onAbort);
 		yield { type: "assistant", event: mapper.finish({ reason: "error", message: error instanceof Error ? error.message : String(error) }) };
@@ -183,7 +205,12 @@ export async function* runClaudeTurn(params: ClaudeTurnParams): AsyncGenerator<C
 	let done = false;
 	let failure: unknown;
 	const pumping = (async () => {
-		try { for await (const message of handle) push({ type: "sdk", message } as unknown as ClaudeTurnEvent); }
+		try {
+			for await (const message of handle) {
+				if (params.onProviderEvent) { try { params.onProviderEvent(message); } catch { /* an observer never takes the run down */ } }
+				push({ type: "sdk", message } as unknown as ClaudeTurnEvent);
+			}
+		}
 		catch (error) { failure = error; }
 		finally { done = true; wake?.(); }
 	})();
@@ -194,9 +221,7 @@ export async function* runClaudeTurn(params: ClaudeTurnParams): AsyncGenerator<C
 	/** Set when Claude Code reported the turn's failure as an assistant message. */
 	let failedAssistant = false;
 	try {
-		while (!done || queue.length > 0) {
-			if (queue.length === 0) { await new Promise<void>((resolve) => { wake = resolve; }); wake = undefined; continue; }
-			const next = queue.shift()!;
+		pump: while (!done || queue.length > 0) {
 			// pi's abort semantics: the moment the run is aborted, the message in
 			// flight ends as "aborted" and nothing already buffered reaches the
 			// views (the child is killed by the SDK's close sequence regardless).
@@ -206,9 +231,26 @@ export async function* runClaudeTurn(params: ClaudeTurnParams): AsyncGenerator<C
 				yield { type: "result", ok: false, errors: [] };
 				break;
 			}
+			if (queue.length === 0) { await new Promise<void>((resolve) => { wake = resolve; }); wake = undefined; continue; }
+			const next = queue.shift()!;
 			if (next.type !== ("sdk" as never)) { yield next; continue; }
 			const message = (next as unknown as { message: import("./sdk.ts").SDKMessage }).message;
 			switch (message.type) {
+				case "system": {
+					// How Claude Code will bill this turn: anything but no API key is
+					// refused before the first model call (the route only runs on a
+					// Claude plan login), and the route's status goes not-ready.
+					if (message.subtype !== "init") break;
+					const source = message.apiKeySource;
+					if (!source || source === "none") break;
+					params.onApiKeySource?.(source);
+					sawResult = true;
+					const detail = `Claude Code would use an API key (apiKeySource: ${source})`;
+					const target = mapper.started && !mapper.stopped ? mapper : new ClaudeStreamMapper(model, serverName, params.thinkingLevel);
+					yield { type: "assistant", event: target.finish({ reason: "error", message: detail }) };
+					yield { type: "result", ok: false, errors: [detail], failedAssistant: true };
+					break pump;
+				}
 				case "stream_event": {
 					if (message.parent_tool_use_id) break; // sub-agent output never reaches the lesson
 					if (message.event.type === "message_start") { mapper = new ClaudeStreamMapper(model, serverName, params.thinkingLevel); streamedCalls.length = 0; seenAssistantIds.add(message.event.message.id); }
@@ -262,13 +304,14 @@ export async function* runClaudeTurn(params: ClaudeTurnParams): AsyncGenerator<C
 				}
 				case "result": {
 					sawResult = true;
+					// The turn is over: release the prompt stream so the child exits
+					// on its own (before the consumer acts on the result).
+					promptDone.abort();
 					const errors = message.subtype === "success" ? (message.is_error ? [message.result] : []) : message.errors;
 					const failed = errors.length > 0 || message.is_error;
 					if (rebuilt) { rebuilt.mapper.handle({ type: "message_stop" }); yield { type: "assistant", event: rebuilt.mapper.finish(failed && !failedAssistant ? { reason: "error", message: errors.join("; ") || "failed" } : undefined) }; rebuilt = undefined; }
 					else if (mapper.started && !mapper.stopped) yield { type: "assistant", event: mapper.finish(failed ? { reason: "error", message: errors.join("; ") || "failed" } : undefined) };
 					yield { type: "result", ok: !failed, errors, failedAssistant, ...(message.terminal_reason ? { terminalReason: message.terminal_reason } : {}) };
-					// The turn is over: release the prompt stream so the child exits.
-					abort.abort();
 					break;
 				}
 				default: break;
@@ -299,10 +342,11 @@ export async function* runClaudeTurn(params: ClaudeTurnParams): AsyncGenerator<C
 export function claudeLocalError(message: string): string {
 	const suffix = " No API key was used.";
 	if (/aborted|cancel/i.test(message)) return `Local Claude request cancelled.${suffix}`;
+	if (/apiKeySource/.test(message)) return `Local Claude runs only on a Claude plan login, and your Claude Code is set up to use an API key. Remove the API key from Claude Code's setup, sign in with your Claude plan, then re-check in Providers.${suffix}`;
 	if (/rate.?limit|usage limit|429|exceeded|out of credits|extra usage/i.test(message)) return `Your Claude plan's usage limit was reached. Wait for the window to reset or check your plan at claude.ai, then retry.${suffix}`;
 	if (/authentication|not logged in|login|sign.?in|credential|401|403|oauth/i.test(message)) return `Claude Code is not signed in. Run \`claude\` in a terminal, sign in with your Claude plan, then re-check in Providers.${suffix}`;
 	if (/ENOENT|not found|could not be started|spawn|exited with code/i.test(message)) return `Claude Code could not be started. Re-check the install in Providers.${suffix}`;
-	if (/catalog|model/i.test(message)) return `The selected model is not available from your Claude Code. Re-check in Providers and choose an available model.${suffix}`;
+	if (/catalog|model_not_found|issue with the selected model/i.test(message)) return `The selected model is not available from your Claude Code. Re-check in Providers and choose an available model.${suffix}`;
 	if (/background/i.test(message)) return `Local Claude background use is off in this app. Enable it in Providers to run this work.${suffix}`;
 	return `Local Claude request failed. Check Claude Code and your plan, then retry.${suffix}`;
 }
