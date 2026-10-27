@@ -6,10 +6,11 @@ import { NATIVE_SUBSCRIPTIONS, type NativeSubscriptionSnapshot } from "../src/co
 import { refreshSubscriptionModels, nativeSubscriptionModels, subscriptionAbortController, subscriptionRequest } from "../src/agent/subscription-bridge.ts";
 import { subscriptionHistory } from "../src/agent/subscription-stream.ts";
 import { runSubagent } from "../src/agent/subagents/pi-run.ts";
+import { getAntigravityRequestModelId } from "../electron/antigravity-provider.cjs";
 
 const originalSend = Object.getOwnPropertyDescriptor(process, "send"), originalConnected = Object.getOwnPropertyDescriptor(process, "connected");
 const marker = process.env.LH_DESKTOP_SERVER, secret = process.env.LH_DESKTOP_API_SECRET;
-const xaiKey = process.env.XAI_API_KEY, copilotKey = process.env.COPILOT_GITHUB_TOKEN;
+const xaiKey = process.env.XAI_API_KEY, copilotKey = process.env.COPILOT_GITHUB_TOKEN, antigravityKey = process.env.ANTIGRAVITY_API_KEY;
 let revision = 1, denied = false, sends = 0;
 const context = normalizeContext({ messages: [{ role: "user", content: "Offline fixture", timestamp: 0 }] });
 function snapshot(background = true): NativeSubscriptionSnapshot {
@@ -21,10 +22,10 @@ function snapshot(background = true): NativeSubscriptionSnapshot {
 const emit = (value: unknown) => (process.emit as (event: string, value: unknown) => boolean)("message", value);
 before(async () => {
 	process.env.LH_DESKTOP_SERVER = "1"; process.env.LH_DESKTOP_API_SECRET = "d".repeat(64);
-	process.env.XAI_API_KEY = "fixture-must-never-be-used"; process.env.COPILOT_GITHUB_TOKEN = "fixture-api-route-only";
+	process.env.XAI_API_KEY = "fixture-must-never-be-used"; process.env.COPILOT_GITHUB_TOKEN = "fixture-api-route-only"; process.env.ANTIGRAVITY_API_KEY = "fixture-must-never-be-used";
 	Object.defineProperty(process, "connected", { configurable: true, value: true });
 	Object.defineProperty(process, "send", { configurable: true, value: (message: any, callback?: () => void) => {
-		sends++; queueMicrotask(() => emit({ channel: "lh:subscriptions", id: message.id, op: message.op, ...(denied && message.op === "lease" ? { ok: false, error: "fixture expired refresh" } : { ok: true, value: message.op === "snapshot" ? snapshot() : { scope: message.scope, auth: { apiKey: "fixture-oauth-only", ...(message.scope.providerId === "github-copilot" ? { baseUrl: "https://api.business.githubcopilot.com", headers: { "x-fixture-auth": "native-retained" } } : {}) } } }) }));
+		sends++; queueMicrotask(() => emit({ channel: "lh:subscriptions", id: message.id, op: message.op, ...(denied && message.op === "lease" ? { ok: false, error: "fixture expired refresh" } : { ok: true, value: message.op === "snapshot" ? snapshot() : { scope: message.scope, auth: { apiKey: "fixture-oauth-only", ...(message.scope.providerId === "github-copilot" ? { baseUrl: "https://api.business.githubcopilot.com", headers: { "x-fixture-auth": "native-retained" } } : message.scope.providerId === "antigravity" ? { baseUrl: "https://daily-cloudcode-pa.googleapis.com", headers: { "x-antigravity-project": "fixture-project" } } : {}) } } }) }));
 		callback?.(); return true;
 	} });
 	await refreshSubscriptionModels();
@@ -32,7 +33,7 @@ before(async () => {
 after(() => {
 	if (originalSend) Object.defineProperty(process, "send", originalSend); else delete process.send;
 	if (originalConnected) Object.defineProperty(process, "connected", originalConnected); else delete (process as { connected?: boolean }).connected;
-	for (const [key, value] of [["LH_DESKTOP_SERVER", marker], ["LH_DESKTOP_API_SECRET", secret], ["XAI_API_KEY", xaiKey], ["COPILOT_GITHUB_TOKEN", copilotKey]]) { if (value === undefined) delete process.env[key!]; else process.env[key!] = value; }
+	for (const [key, value] of [["LH_DESKTOP_SERVER", marker], ["LH_DESKTOP_API_SECRET", secret], ["XAI_API_KEY", xaiKey], ["COPILOT_GITHUB_TOKEN", copilotKey], ["ANTIGRAVITY_API_KEY", antigravityKey]]) { if (value === undefined) delete process.env[key!]; else process.env[key!] = value; }
 });
 test("logical subscription routes are separate catalog entries without rewriting native API models", () => {
 	for (const p of NATIVE_SUBSCRIPTIONS) {
@@ -51,9 +52,18 @@ for (const p of NATIVE_SUBSCRIPTIONS) test(`${p.providerId}: every SDK transport
 			fetch: async (input, init) => {
 				requests++; const request = new Request(input, init), body = await request.json();
 				assert.equal(request.headers.get("authorization"), "Bearer fixture-oauth-only");
-				assert.equal(body.model, native.id);
-				if (p.providerId === "github-copilot") { assert.equal(new URL(request.url).origin, "https://api.business.githubcopilot.com"); assert.equal(request.headers.get("x-fixture-auth"), "native-retained"); }
-				else assert.equal(new URL(request.url).origin, "https://api.x.ai");
+				if (p.providerId === "antigravity") {
+					assert.equal(body.model, getAntigravityRequestModelId(native.id, "medium"));
+					assert.equal(body.project, "fixture-project");
+					assert.equal(new URL(request.url).origin, "https://daily-cloudcode-pa.googleapis.com");
+				} else if (p.providerId === "github-copilot") {
+					assert.equal(body.model, native.id);
+					assert.equal(new URL(request.url).origin, "https://api.business.githubcopilot.com");
+					assert.equal(request.headers.get("x-fixture-auth"), "native-retained");
+				} else {
+					assert.equal(body.model, native.id);
+					assert.equal(new URL(request.url).origin, "https://api.x.ai");
+				}
 				return new Response('{"error":{"message":"private-fixture-provider-detail"}}', { status: 401, headers: { "content-type": "application/json" } });
 			},
 		}).result();
@@ -104,4 +114,27 @@ test("framework IPC alone cannot request subscription credentials or retain a us
 	const previous = sends; delete process.env.LH_DESKTOP_SERVER;
 	await assert.rejects(subscriptionRequest("snapshot"), /desktop app/); assert.equal(sends, previous); assert.deepEqual(nativeSubscriptionModels(), []);
 	process.env.LH_DESKTOP_SERVER = "1";
+});
+test("antigravity SSE streaming parses thinking, text, tool calls, and usage across subscription and API-key modes", async () => {
+	const ssePayload = [
+		'data: {"response":{"candidates":[{"content":{"parts":[{"thought":true,"text":"Analyzing...","thoughtSignature":"c2lnMTIz"},{"text":"Hello from Antigravity!"},{"functionCall":{"id":"call_1","name":"lookup","args":{"q":"test"}}}]}}]}}\n\n',
+		'data: {"response":{"candidates":[{"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":120,"cachedContentTokenCount":20,"candidatesTokenCount":40,"thoughtsTokenCount":10,"totalTokenCount":170}}}\n\n',
+		"data: [DONE]\n\n",
+	].join("");
+	for (const provider of ["antigravity-subscription", "antigravity"] as const) {
+		const engine = piEngineForSpec({ provider, id: "gemini-3.8-flash", thinkingLevel: "high" }, false);
+		const result = await engine.streamFn(engine.model, context, {
+			...(provider === "antigravity" ? { apiKey: "fixture-api-key-mode" } : {}),
+			fetch: async () => new Response(ssePayload, { status: 200, headers: { "content-type": "text/event-stream" } }),
+		}).result();
+		assert.equal(result.provider, provider);
+		assert.equal(result.stopReason, "toolUse");
+		assert.equal(result.content.length, 3);
+		assert.equal(result.content[0]?.type, "thinking");
+		assert.equal(result.content[1]?.type, "text");
+		assert.equal(result.content[2]?.type, "toolCall");
+		assert.equal(result.usage.input, 100);
+		assert.equal(result.usage.output, 50);
+		assert.equal(result.usage.cacheRead, 20);
+	}
 });

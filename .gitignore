@@ -16,6 +16,7 @@ auth.json
 chatgpt-credentials.json*
 github-copilot-credentials.json*
 xai-credentials.json*
+antigravity-credentials.json*
 
 # dev-fresh launcher scratch (fresh-user sim): disposable per launch
 .fresh-data/

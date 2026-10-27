@@ -16,7 +16,7 @@ describe("standalone JavaScript tracing exclusions and native workaround policy"
 		const file = (relative: string) => root + (windows ? "\\" : "/") + (windows ? relative.replaceAll("/", "\\") : relative);
 		const ignored = picomatch(patterns, { contains: true, dot: true, windows });
 		it(`excludes genuine data directories and secrets (${windows ? "Windows" : "POSIX"})`, () => {
-			for (const relative of ["data/canary.json", "nested/data/private.json", "auth.json", ".env", ".env.local", "chatgpt-credentials.json", "github-copilot-credentials.json", "xai-credentials.json", "chatgpt-credentials.json.fixture.tmp", "github-copilot-credentials.json.fixture.tmp", "xai-credentials.json.fixture.tmp"]) {
+			for (const relative of ["data/canary.json", "nested/data/private.json", "auth.json", ".env", ".env.local", "chatgpt-credentials.json", "github-copilot-credentials.json", "xai-credentials.json", "antigravity-credentials.json", "chatgpt-credentials.json.fixture.tmp", "github-copilot-credentials.json.fixture.tmp", "xai-credentials.json.fixture.tmp", "antigravity-credentials.json.fixture.tmp"]) {
 				assert.equal(ignored(file(relative)), true, relative);
 			}
 			// The explicit includes remain necessary: this raw ignore still matches SDK data.
@@ -37,7 +37,7 @@ describe("standalone JavaScript tracing exclusions and native workaround policy"
 		assert.equal(ignore(`${root}/node_modules/gcp-metadata/build/src/index.js`), false);
 	});
 	it("preserves all secret exclusions exactly", () => {
-		assert.deepEqual(patterns, ["**/data/**/*", "auth.json", "chatgpt-credentials.json*", "github-copilot-credentials.json*", "xai-credentials.json*", ".env*"]);
+		assert.deepEqual(patterns, ["**/data/**/*", "auth.json", "chatgpt-credentials.json*", "github-copilot-credentials.json*", "xai-credentials.json*", "antigravity-credentials.json*", ".env*"]);
 	});
 	it("retains exactly the narrow native-Turbopack closure workaround and existing runtime includes", () => {
 		assert.deepEqual(nextConfig.outputFileTracingIncludes!["*"], [

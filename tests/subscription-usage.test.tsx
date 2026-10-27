@@ -18,7 +18,8 @@ test("only explicit subscription route IDs count as subscription use; names stay
 	assert.equal(subscriptionLabel("chatgpt:gpt-5"), "ChatGPT");
 	assert.equal(subscriptionLabel("github-copilot-subscription:fixture"), "GitHub Copilot");
 	assert.equal(subscriptionLabel("xai-subscription:grok"), "Grok");
-	for (const model of ["openai:gpt-5", "xai:grok", "github-copilot:fixture", "meta:muse", "radius:any", "kimi-coding:any"]) assert(!isSubscriptionModel(model));
+	assert.equal(subscriptionLabel("antigravity-subscription:gemini-4-argon"), "Antigravity");
+	for (const model of ["openai:gpt-5", "xai:grok", "github-copilot:fixture", "antigravity:gemini-4-argon", "meta:muse", "radius:any", "kimi-coding:any"]) assert(!isSubscriptionModel(model));
 	assert.deepEqual(subscriptionLabels(["chatgpt:a", "xai-subscription:b", "chatgpt:c", "github-copilot-subscription:d"]), ["ChatGPT", "Grok", "GitHub Copilot"]);
 	assert.equal(planCostLabel(0.12, ["Grok"], (n) => `$${n.toFixed(2)}`), "$0.12 + Grok");
 	assert.equal(planCostLabel(0.67, ["ChatGPT"], (n) => `$${n.toFixed(2)}`), "$0.67 + ChatGPT");

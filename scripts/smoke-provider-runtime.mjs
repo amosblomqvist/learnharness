@@ -105,9 +105,11 @@ async function probe(standalone) {
 		}
 		// Exercise the public lazy OAuth surface offline. toAuth evaluates the
 		// real flow module and its imports but neither logs in nor refreshes.
-		for (const [name, factory] of [["github-copilot", "githubCopilotProvider"], ["xai", "xaiProvider"]]) {
-			const provider = (await import(new URL(`providers/${name}.js`, entry).href))[factory]();
-			const credential = { type: "oauth", access: name === "github-copilot" ? "tid=offline;proxy-ep=proxy.individual.githubcopilot.com;" : "offline-xai-oauth-not-a-token", refresh: "offline-refresh-not-a-token", expires: Date.now() + 3600000, availableModelIds: provider.getModels().map((model) => model.id) };
+		for (const [name, factory] of [["github-copilot", "githubCopilotProvider"], ["xai", "xaiProvider"], ["antigravity", "antigravityProvider"]]) {
+			const provider = name === "antigravity"
+				? (await import(pathToFileURL(path.join(root, "electron/antigravity-provider.cjs")).href))[factory]({ disableLoopback: true })
+				: (await import(new URL(`providers/${name}.js`, entry).href))[factory]();
+			const credential = { type: "oauth", access: name === "github-copilot" ? "tid=offline;proxy-ep=proxy.individual.githubcopilot.com;" : "offline-xai-oauth-not-a-token", refresh: "offline-refresh-not-a-token", expires: Date.now() + 3600000, availableModelIds: provider.getModels().map((model) => model.id), ...(name === "antigravity" ? { projectId: "offline-project" } : {}) };
 			const auth = await provider.auth.oauth.toAuth(credential);
 			assert.equal(auth.apiKey, credential.access);
 			if (name === "github-copilot") assert.equal(auth.baseUrl, "https://api.individual.githubcopilot.com");

@@ -87,6 +87,7 @@ export interface AuthProviderInfo {
 export const AUTH_PROVIDER_KEYS: readonly AuthProviderInfo[] = [
 	{ id: "ant-ling", envVar: "ANT_LING_API_KEY", label: "Ant Ling" },
 	{ id: "anthropic", envVar: "ANTHROPIC_API_KEY", label: "Anthropic" },
+	{ id: "antigravity", envVar: "ANTIGRAVITY_API_KEY", label: "Antigravity" },
 	{ id: "baseten", envVar: "BASETEN_API_KEY", label: "Baseten" },
 	{ id: "cerebras", envVar: "CEREBRAS_API_KEY", label: "Cerebras" },
 	{ id: "deepseek", envVar: "DEEPSEEK_API_KEY", label: "DeepSeek" },
