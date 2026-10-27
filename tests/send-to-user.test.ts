@@ -36,7 +36,7 @@ after(() => {
 });
 
 const { sendToUserTool } = await import("../src/agent/tools/send-to-user.ts");
-const { createProberAgent, createTeacherAgent, createPracticeAgent, composeInstructions } = await import("../src/agent/teacher-agent.ts");
+const { createProberAgent, createTeacherAgent, createPracticeAgent, composeInstructions, withLanguageRule } = await import("../src/agent/teacher-agent.ts");
 const { SEND_TO_USER_TOOL, activeProblemOf, asAgentMessages, newUserMessage, sendToUserText, toLlmMessages, userFacingTextOf } = await import("../src/core/native-messages.ts");
 const { coverageOf, messageFingerprint, messageViewLines, teacherProseBlocks } = await import("../src/core/coverage.ts");
 const { projectView } = await import("../src/core/view.ts");
@@ -107,6 +107,18 @@ describe("send_to_user model gate", () => {
 			}
 		});
 	}
+
+	it("the language setting reaches every conversation agent's system prompt, with or without prompt switches", () => {
+		const { engine } = scripted("anthropic", "claude-opus-5-5");
+		for (const [kind, factory] of Object.entries(factories)) {
+			const k = kind as keyof typeof factories;
+			const spanish = withLanguageRule(composeInstructions(k), "es");
+			assert.notEqual(spanish, composeInstructions(k), kind);
+			assert.equal(factory({ engine, language: "es" }).state.systemPrompt, spanish, kind);
+			assert.equal(factory({ engine, language: "es", promptSwitches: {} }).state.systemPrompt, spanish, kind);
+			assert.equal(factory({ engine, language: "en" }).state.systemPrompt, composeInstructions(k), kind);
+		}
+	});
 
 	it("explicitly injected teacher/practice test registries remain unchanged", () => {
 		const { engine } = scripted("anthropic", "claude-opus-5-5");
