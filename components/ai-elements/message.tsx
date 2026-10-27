@@ -395,12 +395,19 @@ export const MessageResponse = memo(
 
 MessageResponse.displayName = "MessageResponse";
 
+/** Fully escaped fences need real line breaks before Markdown can recognize
+ * them; other layout recovery stays with the math/content reader. */
+function repairToolContent(content: string): string {
+  const escapedFence = !content.includes("\n") && content.includes("```") && content.includes("\\n");
+  return repairMathForDisplay(escapedFence ? content.replace(/\\n/g, "\n") : content);
+}
+
 /** Recovery is a tool-text presentation concern, not a shape/answer-data
  * transform. Ordinary assistant/user prose keeps MessageResponse unchanged. */
 export function ToolContentResponse({ children, ...props }: MessageResponseProps) {
   return (
     <MessageResponse {...props}>
-      {typeof children === "string" ? repairMathForDisplay(children) : children}
+      {typeof children === "string" ? repairToolContent(children) : children}
     </MessageResponse>
   );
 }
