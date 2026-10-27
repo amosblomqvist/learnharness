@@ -178,6 +178,7 @@ describe("the source-derived segment list", () => {
 			[
 				"system-prompt.md",
 				"prober/10-probe-doctrine.md",
+			"prober/45-code-probe.md",
 				"shared/10-voice.md",
 				"shared/15-accuracy.md",
 				"shared/16-mental-model.md",

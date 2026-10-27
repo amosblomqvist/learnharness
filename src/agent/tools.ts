@@ -320,6 +320,12 @@ export function createProberTools(
 			{
 				...quizzing,
 				ask_user_question: askUserQuestionTool,
+				// Code cards measure better than self-report (owner 2026-10-27): a
+				// three-line task shows what a learner can actually write, where "how
+				// good is your Python?" shows what they believe. Assessing a coding
+				// goal is the main use; the prober never grades style, and a card
+				// here is one short task, not a lesson step.
+				code_playground: codePlaygroundTool(),
 				// The learner-filesystem set is always-on (user-decided 2026-09,
 				// sources v1): the prober inspects and LOCATES learner-referenced
 				// files while assessing the edge. Read-only by construction.
