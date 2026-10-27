@@ -398,10 +398,11 @@ function settingsKeyOf(settings: EffectiveSettings["claudeLocal"]): string { ret
 /** Refresh the status. Which paths may spawn a probe (`claude --version`
  *  plus one Claude Code boot that never prompts a model), and the bounds:
  *  - the pre-turn path (`cachedOnly`: chat-handler through
- *    refreshConnectionCatalog(provider)) never probes, except a route that
- *    is enabled and was never probed (a fresh server) — a turn is admitted
- *    on the cached snapshot and the turn's own child fails fast if the
- *    install is gone;
+ *    refreshConnectionCatalog(provider)) never probes on a TTL lapse: only
+ *    an enabled route never probed (a fresh server) or one whose settings
+ *    changed since the last probe (turned on, a new path) — otherwise a
+ *    turn is admitted on the cached snapshot and the turn's own child fails
+ *    fast if the install is gone;
  *  - GET /api/models probes when the status is older than
  *    CLAUDE_LOCAL_CATALOG_TTL_MS (60 min) or the settings changed;
  *  - GET /api/claude-local probes when older than 5 minutes or the
@@ -412,8 +413,11 @@ function settingsKeyOf(settings: EffectiveSettings["claudeLocal"]): string { ret
 export async function refreshClaudeLocal(options: { force?: boolean; maxAgeMs?: number; cachedOnly?: boolean } = {}): Promise<ClaudeLocalStatus> {
 	const state = owner();
 	const settings = effectiveSettings().claudeLocal;
-	if (options.cachedOnly && !options.force && (state.status.probedAt !== null || !settings.enabled)) return state.status;
 	const key = settingsKeyOf(settings);
+	// The pre-turn path admits on the cached snapshot: it probes only a route
+	// never probed yet, or one whose settings changed since the last probe
+	// (turned on, a new path) — never on a mere TTL lapse.
+	if (options.cachedOnly && !options.force && (!settings.enabled || (state.status.probedAt !== null && key === state.settingsKey))) return state.status;
 	const fresh = state.status.probedAt !== null && Date.now() - Date.parse(state.status.probedAt) < (options.maxAgeMs ?? STATUS_TTL_MS);
 	if (!options.force && key === state.settingsKey && fresh) return state.status;
 	if (state.inFlight && key === state.settingsKey) {

@@ -422,6 +422,20 @@ describe("review fixes: the status owner", () => {
 			assert.equal(fake.calls.length, calls);
 		} finally { background.release(); foreground.release(); }
 	});
+	it("S1: the pre-turn refresh probes once when the route was turned on without the card (a settings change), then admits on the cache", { skip: !posix }, async () => {
+		const { fake, binary } = await readyRoute("s1c");
+		writeSettings({ version: 1, claudeLocal: { enabled: false } });
+		server.invalidateClaudeLocal();
+		assert.equal(bridge.claudeLocalConnected(), false);
+		writeSettings({ version: 1, claudeLocal: { enabled: true, binaryPath: binary } });
+		server.invalidateClaudeLocal();
+		const calls = fake.calls.length;
+		await refreshConnectionCatalog("claude-local");
+		assert.equal(fake.calls.length, calls + 1, "the settings changed since the last probe: the turn's refresh probes");
+		assert.equal(bridge.claudeLocalConnected(), true);
+		await refreshConnectionCatalog("claude-local");
+		assert.equal(fake.calls.length, calls + 1, "and then admits on the cached snapshot");
+	});
 	it("S12: an in-place update of the same install (a new version) keeps the revision", { skip: !posix }, async () => {
 		const { status: ready } = await readyRoute("s12b");
 		fakeBinary(path.join(directory, "s12b"), "2.1.312");
