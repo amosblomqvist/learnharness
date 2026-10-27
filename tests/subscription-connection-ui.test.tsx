@@ -45,12 +45,14 @@ async function click(element: HTMLElement) { assert(element); await act(async ()
 async function connectionStep(id: string) { await click(button("Connect", row(id))); await click(button("Continue", dialog())); }
 afterEach(async () => { await act(async () => root?.unmount()); host?.remove(); root = undefined; host = undefined; delete window.lh; });
 
-test("three compact rows render in approved order with no browser-only sign-in or fabricated identities", () => {
+test("four compact rows render in approved order with no browser-only sign-in or fabricated identities; Local Claude has no sign-in at all", () => {
 	const html = renderToStaticMarkup(<ChatGPTUIProvider><NativeSubscriptionUIProvider><SubscriptionConnections /></NativeSubscriptionUIProvider></ChatGPTUIProvider>);
 	assert(html.indexOf('data-testid="chatgpt-connection"') < html.indexOf('data-testid="github-copilot-connection"'));
 	assert(html.indexOf('data-testid="github-copilot-connection"') < html.indexOf('data-testid="xai-connection"'));
-	assert.equal((html.match(/>Connect<\/button>/g) ?? []).length, 3);
-	assert(!html.includes("@")); assert(!html.includes("Add accounts"));
+	assert(html.indexOf('data-testid="xai-connection"') < html.indexOf('data-testid="claude-local-connection"'));
+	assert.equal((html.match(/>Connect<\/button>/g) ?? []).length, 3, "the three OAuth connections offer Connect");
+	assert.equal((html.match(/>Set up…<\/button>/g) ?? []).length, 1, "Local Claude offers setup, never sign-in");
+	assert(!html.includes("@")); assert(!html.includes("Add accounts")); assert(!/Sign in|Log in/.test(html.slice(html.indexOf('data-testid="claude-local-connection"'))));
 });
 for (const [id, label] of [["github-copilot", "GitHub Copilot"], ["xai", "Grok"]] as const) test(`${id}: disclosure and connection are separate steps with no duplicated content or early authorization`, async () => {
 	const f = fixture(); await mount(); await click(button("Connect", row(id)));

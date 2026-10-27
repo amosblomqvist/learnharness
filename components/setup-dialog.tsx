@@ -36,7 +36,7 @@ import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useBackdropDismiss } from "@/components/backdrop-dismiss";
 import type React from "react";
-import { type ModelCatalogEntry, type ModelSlotName, type ModelsSettings } from "@/src/core";
+import { isClaudeLocalProvider, type ModelCatalogEntry, type ModelSlotName, type ModelsSettings } from "@/src/core";
 import { prettyModel } from "@/components/usage-format";
 import { ModelMenuList } from "@/components/settings/model-menu";
 import { MenuShell } from "@/components/menu-shell";
@@ -462,8 +462,9 @@ export function SetupDialog({
 							const entry = picked[slot];
 							const level = levels[slot];
 							const levelsForEntry = entry?.supportedLevels ?? [];
+							// Vision: image-capable only; Local Claude: the conversation slot only.
 							const catalog =
-								slot === "vision" ? body?.models.filter((m) => m.input.includes("image")) : body?.models;
+								(slot === "vision" ? body?.models.filter((m) => m.input.includes("image")) : body?.models)?.filter((m) => slot === "strong" || !isClaudeLocalProvider(m.provider));
 							return (
 								<div key={slot} data-testid={`setup-slot-${slot}`} className="flex flex-col gap-1.5">
 									<span className="flex items-center gap-1.5">

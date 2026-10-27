@@ -74,6 +74,7 @@ import { SettingsGroup, SettingsRow, Toggle, CommitInput } from "./controls.tsx"
 import { ModelMenuList, ThinkingMenuList } from "./model-menu";
 import { ChatGPTBackgroundAccess } from "./chatgpt-connection";
 import { NativeSubscriptionBackgroundAccess } from "./subscription-connections";
+import { isClaudeLocalProvider } from "@/src/core";
 
 /** One slot's display identity — the tier's roster as the row hint rides
  *  with the resolved default (owner: the hint ALWAYS names the default). */
@@ -633,9 +634,10 @@ export function AgentSection({
 					const chosen = coord ? catalog?.find((m) => m.id === coord.id && m.provider === coord.provider) : undefined;
 					const levels = chosen ? chosen.supportedLevels : THINKING_LEVELS;
 					const thisMenuOpen = openMenu?.target === slot ? openMenu.kind : null;
-					// Vision slots pick from image-capable models only.
+					// Vision slots pick from image-capable models only; Local Claude is
+					// conversation-only (owner, 2026-10-27) — helper tiers never list it.
 					const slotCatalog =
-						slot === "vision" ? catalog?.filter((m) => m.input.includes("image")) : catalog;
+						(slot === "vision" ? catalog?.filter((m) => m.input.includes("image")) : catalog)?.filter((m) => slot === "strong" || !isClaudeLocalProvider(m.provider));
 					return (
 						<SettingsRow
 							key={slot}
