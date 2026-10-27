@@ -516,3 +516,12 @@ describe("external review: the owner adopts a turn's API-key verdict (P2)", () =
 		assert.equal(back.state, "ready"); assert.ok(back.revision > ready.revision); assert.ok(bridge.claudeLocalConnected());
 	});
 });
+
+describe("external review: Windows env casing (P2)", () => {
+	it("on win32 the allowlist ignores case, so Windows' `Path` reaches the child as spelled; POSIX stays exact; the deny rule still wins", () => {
+		const env = claudeChildEnv({ Path: "C:\\Windows\\system32", SystemRoot: "C:\\Windows", USERPROFILE: "C:\\Users\\u", ComSpec: "C:\\Windows\\cmd.exe", Anthropic_Api_Key: "sk-ant-never", lh_desktop_api_secret: "s" } as unknown as NodeJS.ProcessEnv, {}, "win32");
+		assert.deepEqual(env, { Path: "C:\\Windows\\system32", SystemRoot: "C:\\Windows", USERPROFILE: "C:\\Users\\u", ComSpec: "C:\\Windows\\cmd.exe", ...CLAUDE_CHILD_CONTROLS });
+		assert.equal(claudeChildEnvAllows("Path", "linux"), false, "POSIX names are case-sensitive");
+		assert.equal(claudeChildEnvAllows("PATH", "linux"), true);
+	});
+});

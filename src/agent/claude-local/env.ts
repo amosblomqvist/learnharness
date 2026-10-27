@@ -28,6 +28,10 @@ const PASS_NAMES = new Set([
 	"SystemRoot", "SYSTEMROOT", "SystemDrive", "ComSpec", "COMSPEC", "PATHEXT", "APPDATA", "LOCALAPPDATA", "USERPROFILE",
 	"HOMEDRIVE", "HOMEPATH", "ProgramData", "PROGRAMDATA", "ProgramFiles", "PROGRAMFILES", "WINDIR", "windir", "USERNAME",
 ]);
+/** Windows env names are case-insensitive and Node reports them as the
+ *  system spells them (commonly `Path`, not `PATH`): on win32 the
+ *  allowlist matches ignoring case and keeps the name as given. */
+const PASS_NAMES_UPPER = new Set([...PASS_NAMES].map((name) => name.toUpperCase()));
 /** Prefixes that pass through (locale and XDG base dirs). */
 const PASS_PREFIXES = ["LC_", "XDG_"];
 /** Names that NEVER pass, whatever the allowlist says (belt and braces). */
@@ -41,18 +45,19 @@ export const CLAUDE_CHILD_CONTROLS: Readonly<Record<string, string>> = Object.fr
 	CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1",
 });
 
-export function claudeChildEnvAllows(name: string): boolean {
+export function claudeChildEnvAllows(name: string, platform: NodeJS.Platform = process.platform): boolean {
 	if (DENY.test(name)) return false;
+	if (platform === "win32") return PASS_NAMES_UPPER.has(name.toUpperCase()) || PASS_PREFIXES.some((prefix) => name.toUpperCase().startsWith(prefix));
 	return PASS_NAMES.has(name) || PASS_PREFIXES.some((prefix) => name.startsWith(prefix));
 }
 
 /** Build the child's environment from the allowlist plus the controls.
  *  `extra` (e.g. ELECTRON_RUN_AS_NODE for a cli.js launch through the
  *  packaged app's own binary) is applied last and also filtered. */
-export function claudeChildEnv(base: NodeJS.ProcessEnv = process.env, extra: Record<string, string> = {}): Record<string, string> {
+export function claudeChildEnv(base: NodeJS.ProcessEnv = process.env, extra: Record<string, string> = {}, platform: NodeJS.Platform = process.platform): Record<string, string> {
 	const out: Record<string, string> = {};
 	for (const [name, value] of Object.entries(base)) {
-		if (typeof value !== "string" || !claudeChildEnvAllows(name)) continue;
+		if (typeof value !== "string" || !claudeChildEnvAllows(name, platform)) continue;
 		out[name] = value;
 	}
 	Object.assign(out, CLAUDE_CHILD_CONTROLS);
