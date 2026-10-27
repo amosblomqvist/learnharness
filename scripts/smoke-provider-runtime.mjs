@@ -105,8 +105,13 @@ async function probe(standalone) {
 		}
 		// Exercise the public lazy OAuth surface offline. toAuth evaluates the
 		// real flow module and its imports but neither logs in nor refreshes.
-		for (const [name, factory] of [["github-copilot", "githubCopilotProvider"], ["xai", "xaiProvider"]]) {
-			const provider = (await import(new URL(`providers/${name}.js`, entry).href))[factory]();
+		// Every registered native provider (electron/native-providers.cjs) —
+		// the registry drives the gate, so a new provider is covered the day
+		// it is registered.
+		const { NATIVE_PROVIDERS, PI_SDK_SPECIFIER } = createRequire(import.meta.url)("../electron/native-providers.cjs");
+		for (const { providerId: name, specifier, factory } of NATIVE_PROVIDERS) {
+			assert.ok(specifier.startsWith(`${PI_SDK_SPECIFIER}/`), `${name}: specifier outside Pi: ${specifier}`);
+			const provider = (await import(new URL(`${specifier.slice(PI_SDK_SPECIFIER.length + 1)}.js`, entry).href))[factory]();
 			const credential = { type: "oauth", access: name === "github-copilot" ? "tid=offline;proxy-ep=proxy.individual.githubcopilot.com;" : "offline-xai-oauth-not-a-token", refresh: "offline-refresh-not-a-token", expires: Date.now() + 3600000, availableModelIds: provider.getModels().map((model) => model.id) };
 			const auth = await provider.auth.oauth.toAuth(credential);
 			assert.equal(auth.apiKey, credential.access);

@@ -9,6 +9,7 @@ import { createChatGPT, fileStore } from "../../electron/chatgpt.cjs";
 import { createSubscriptions } from "../../electron/subscriptions.cjs";
 import { chatGPTControl } from "../../electron/chatgpt-ipc.cjs";
 import { subscriptionControl } from "../../electron/subscription-ipc.cjs";
+import { loadNativeProviderSDK, NATIVE_SDK_SPECIFIERS } from "../../electron/native-providers.cjs";
 import { emit } from "../core/events.ts";
 import type { ChatGPTStatus } from "../core/contracts/chatgpt.ts";
 import type { NativeSubscriptionSnapshot } from "../core/contracts/subscriptions.ts";
@@ -27,13 +28,22 @@ function publish(channel: Channel, packet: Packet) {
 	publishWebSubscriptionPacket(channel, packet);
 	emit("subscriptions-changed", {});
 }
+/** The web loader's STATIC import table — bundlers need literal specifiers,
+ *  so each registry module is spelled once here. Keys MUST equal the
+ *  registry's NATIVE_SDK_SPECIFIERS (pinned by tests/native-providers.test.ts);
+ *  a registry entry with no row here fails loudly below instead of leaving
+ *  the provider's factory undefined at runtime (reviewer issue #1). */
+export const WEB_NATIVE_SDK_IMPORTS: Record<string, () => Promise<object>> = {
+	"@earendil-works/pi-ai": () => import("@earendil-works/pi-ai"),
+	"@earendil-works/pi-ai/providers/github-copilot": () => import("@earendil-works/pi-ai/providers/github-copilot"),
+	"@earendil-works/pi-ai/providers/xai": () => import("@earendil-works/pi-ai/providers/xai"),
+};
 async function loadSDK() {
-	const [sdk, copilot, xai] = await Promise.all([
-		import("@earendil-works/pi-ai"),
-		import("@earendil-works/pi-ai/providers/github-copilot"),
-		import("@earendil-works/pi-ai/providers/xai"),
-	]);
-	return { ...sdk, ...copilot, ...xai };
+	return loadNativeProviderSDK((specifier: string) => {
+		const importer = WEB_NATIVE_SDK_IMPORTS[specifier];
+		if (!importer) throw new Error(`web subscription loader has no import for ${specifier} (registry: ${NATIVE_SDK_SPECIFIERS.join(", ")})`);
+		return importer();
+	});
 }
 
 /** Injectable factories/stores keep all test authentication offline. */

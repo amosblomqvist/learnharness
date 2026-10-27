@@ -15,6 +15,7 @@ import { createServer } from "node:net";
 const ROOT = path.resolve(import.meta.dirname, "..");
 const require = createRequire(import.meta.url);
 const { SCOPES } = require("../electron/chatgpt.cjs");
+const { NATIVE_PROVIDERS } = require("../electron/native-providers.cjs");
 const sdk = (file) => import(pathToFileURL(path.join(ROOT, "node_modules/@earendil-works/pi-ai/dist", file)));
 const { createModels } = await sdk("index.js");
 const { builtinProviders } = await sdk("providers/all.js");
@@ -60,7 +61,7 @@ async function freePort() {
 }
 async function run(mode) {
 	await fs.writeFile(path.join(profile, "chatgpt-credentials.json"), JSON.stringify(saved), { mode: 0o600 });
-	for (const id of ["github-copilot", "xai"]) await fs.writeFile(path.join(profile, `${id}-credentials.json`), JSON.stringify({
+	for (const { providerId: id } of NATIVE_PROVIDERS) await fs.writeFile(path.join(profile, `${id}-credentials.json`), JSON.stringify({
 		version: 1, allowBackgroundUse: true, connectionId: "00000000-0000-4000-8000-000000000001",
 		credential: { type: "oauth", access: id === "xai" ? "fixture-xai-access" : "tid=fixture;proxy-ep=proxy.individual.githubcopilot.com;", refresh: "fixture-refresh", expires: Date.now() + 3600000, ...(id === "github-copilot" ? { availableModelIds: [copilot.id] } : {}) },
 	}), { mode: 0o600 });
@@ -81,9 +82,9 @@ async function run(mode) {
 		});
 		// Controls have not been imported through an HTTP request yet.
 		const catalog = (await (await request("/api/models")).json()).providers;
-		for (const id of ["chatgpt", "github-copilot-subscription", "xai-subscription"]) assert(catalog.find((provider) => provider.id === id)?.keyPresent, `${mode}: cold ${id} unavailable.`);
+		for (const id of ["chatgpt", ...NATIVE_PROVIDERS.map((provider) => provider.logicalId)]) assert(catalog.find((provider) => provider.id === id)?.keyPresent, `${mode}: cold ${id} unavailable.`);
 		let state = await (await request("/api/subscriptions")).json();
-		assert.equal(state.chatgpt.accounts[0].email, "fixture@example.invalid"); assert.equal(state.native.length, 2);
+		assert.equal(state.chatgpt.accounts[0].email, "fixture@example.invalid"); assert.equal(state.native.length, NATIVE_PROVIDERS.length);
 		for (const secret of ["fixture-chatgpt-access", "fixture-chatgpt-refresh", "fixture-id-token", "fixture-xai-access", "fixture-refresh"]) assert(!JSON.stringify(state).includes(secret));
 		const stream = await fetch(origin + "/api/events", { signal: AbortSignal.timeout(60000) });
 		const reader = stream.body.getReader();
