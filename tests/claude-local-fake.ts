@@ -13,8 +13,10 @@ import type { ClaudeQuery, HookCallback, SDKMessage } from "../src/agent/claude-
 
 export interface FakeToolCall { name: string; args: Record<string, unknown>; id?: string; /** A Claude Code built-in: its name reaches the hook unprefixed. */ raw?: boolean }
 export type FakeStep =
-	| { text?: string; thinking?: string; tools?: FakeToolCall[]; model?: string }
+	| { text?: string; thinking?: string; tools?: FakeToolCall[]; model?: string; /** No stream events: only Claude Code's per-block `assistant` echoes (the fallback path). */ unstreamed?: boolean }
 	| { error: string }
+	/** Claude Code's synthetic API-failure assistant message (e.g. rate_limit) followed by an is_error result. */
+	| { apiError: string; text: string }
 	| { crash: string };
 
 export interface FakeTurn { blocks: string[]; options: Record<string, unknown>; toolCalls: { id: string; name: string; args: unknown; result: unknown; isError: boolean }[]; hookDenials: string[] }
@@ -33,6 +35,7 @@ export function fakeClaude(script: FakeStep[] | ((blocks: string[], turn: number
 		const hooks = (options.hooks ?? {}) as Record<string, { hooks: HookCallback[] }[]>;
 		const hook = (event: string) => hooks[event]?.[0]?.hooks[0];
 		const stopped = () => abort?.signal.aborted === true;
+		function* one(message: SDKMessage | undefined): Generator<SDKMessage> { if (message) yield message; }
 		async function* generate(): AsyncGenerator<SDKMessage> {
 			// The prompt: one user message, or (the probe) nothing until closed.
 			if (typeof params.prompt === "string") turn.blocks = [params.prompt];
@@ -56,50 +59,56 @@ export function fakeClaude(script: FakeStep[] | ((blocks: string[], turn: number
 			for (const step of steps) {
 				if (stopped()) return;
 				if ("crash" in step) throw new Error(step.crash);
+				if ("apiError" in step) {
+					yield { type: "assistant", message: { id: `msg_${++counter}`, type: "message", role: "assistant", model: String(options.model ?? ""), content: [{ type: "text", text: step.text }], stop_reason: "end_turn", stop_sequence: null, usage: { input_tokens: 10, output_tokens: 1 } }, error: step.apiError, parent_tool_use_id: null, uuid: `u-${++counter}`, session_id: sessionId } as unknown as SDKMessage;
+					yield { type: "result", subtype: "success", duration_ms: 1, duration_api_ms: 1, is_error: true, num_turns: 1, result: step.text, stop_reason: null, total_cost_usd: 0, usage: {} as never, modelUsage: {}, permission_denials: [], terminal_reason: "api_error", uuid: `u-${++counter}`, session_id: sessionId } as unknown as SDKMessage;
+					return;
+				}
 				if ("error" in step) {
 					yield { type: "result", subtype: "error_during_execution", duration_ms: 1, duration_api_ms: 1, is_error: true, num_turns: 1, stop_reason: null, total_cost_usd: 0, usage: {} as never, modelUsage: {}, permission_denials: [], errors: [step.error], uuid: `u-${++counter}`, session_id: sessionId } as unknown as SDKMessage;
 					return;
 				}
 				const id = `msg_${++counter}`;
 				const model = step.model ?? String(options.model ?? "claude-fake");
-				const event = (e: unknown): SDKMessage => ({ type: "stream_event", event: e, parent_tool_use_id: null, uuid: `u-${++counter}`, session_id: sessionId } as unknown as SDKMessage);
+				const unstreamed = step.unstreamed === true;
+				const event = (e: unknown): SDKMessage | undefined => unstreamed ? undefined : ({ type: "stream_event", event: e, parent_tool_use_id: null, uuid: `u-${++counter}`, session_id: sessionId } as unknown as SDKMessage);
 				const blocks: unknown[] = [];
-				yield event({ type: "message_start", message: { id, type: "message", role: "assistant", model, content: [], stop_reason: null, stop_sequence: null, usage: { input_tokens: 10, output_tokens: 1, cache_creation_input_tokens: 5, cache_read_input_tokens: 3 } } });
+				yield* one(event({ type: "message_start", message: { id, type: "message", role: "assistant", model, content: [], stop_reason: null, stop_sequence: null, usage: { input_tokens: 10, output_tokens: 1, cache_creation_input_tokens: 5, cache_read_input_tokens: 3 } } }));
 				let index = 0;
 				const echo = (block: unknown): SDKMessage => ({ type: "assistant", message: { id, type: "message", role: "assistant", model, content: [block], stop_reason: null, stop_sequence: null, usage: { input_tokens: 10, output_tokens: 1 } }, parent_tool_use_id: null, uuid: `u-${++counter}`, session_id: sessionId } as unknown as SDKMessage);
 				if (step.thinking) {
-					yield event({ type: "content_block_start", index, content_block: { type: "thinking", thinking: "", signature: "" } });
-					yield event({ type: "content_block_delta", index, delta: { type: "thinking_delta", thinking: step.thinking } });
-					yield event({ type: "content_block_delta", index, delta: { type: "signature_delta", signature: "sig-1" } });
-					yield event({ type: "content_block_stop", index });
+					yield* one(event({ type: "content_block_start", index, content_block: { type: "thinking", thinking: "", signature: "" } }));
+					yield* one(event({ type: "content_block_delta", index, delta: { type: "thinking_delta", thinking: step.thinking } }));
+					yield* one(event({ type: "content_block_delta", index, delta: { type: "signature_delta", signature: "sig-1" } }));
+					yield* one(event({ type: "content_block_stop", index }));
 					blocks.push({ type: "thinking", thinking: step.thinking, signature: "sig-1" });
 					yield echo(blocks[blocks.length - 1]);
 					index++;
 				}
 				if (step.text) {
-					yield event({ type: "content_block_start", index, content_block: { type: "text", text: "" } });
+					yield* one(event({ type: "content_block_start", index, content_block: { type: "text", text: "" } }));
 					const half = Math.ceil(step.text.length / 2);
-					yield event({ type: "content_block_delta", index, delta: { type: "text_delta", text: step.text.slice(0, half) } });
+					yield* one(event({ type: "content_block_delta", index, delta: { type: "text_delta", text: step.text.slice(0, half) } }));
 					if (stopped()) return;
-					yield event({ type: "content_block_delta", index, delta: { type: "text_delta", text: step.text.slice(half) } });
-					yield event({ type: "content_block_stop", index });
+					yield* one(event({ type: "content_block_delta", index, delta: { type: "text_delta", text: step.text.slice(half) } }));
+					yield* one(event({ type: "content_block_stop", index }));
 					blocks.push({ type: "text", text: step.text });
 					yield echo(blocks[blocks.length - 1]);
 					index++;
 				}
 				const calls = (step.tools ?? []).map((tool) => ({ ...tool, id: tool.id ?? `toolu_${++counter}` }));
 				for (const call of calls) {
-					yield event({ type: "content_block_start", index, content_block: { type: "tool_use", id: call.id, name: call.raw ? call.name : `mcp__learnharness__${call.name}`, input: {} } });
+					yield* one(event({ type: "content_block_start", index, content_block: { type: "tool_use", id: call.id, name: call.raw ? call.name : `mcp__learnharness__${call.name}`, input: {} } }));
 					const json = JSON.stringify(call.args);
-					yield event({ type: "content_block_delta", index, delta: { type: "input_json_delta", partial_json: json.slice(0, 3) } });
-					yield event({ type: "content_block_delta", index, delta: { type: "input_json_delta", partial_json: json.slice(3) } });
-					yield event({ type: "content_block_stop", index });
+					yield* one(event({ type: "content_block_delta", index, delta: { type: "input_json_delta", partial_json: json.slice(0, 3) } }));
+					yield* one(event({ type: "content_block_delta", index, delta: { type: "input_json_delta", partial_json: json.slice(3) } }));
+					yield* one(event({ type: "content_block_stop", index }));
 					blocks.push({ type: "tool_use", id: call.id, name: call.raw ? call.name : `mcp__learnharness__${call.name}`, input: call.args });
 					yield echo(blocks[blocks.length - 1]);
 					index++;
 				}
-				yield event({ type: "message_delta", delta: { stop_reason: calls.length ? "tool_use" : "end_turn", stop_sequence: null }, usage: { output_tokens: 20, input_tokens: 10, cache_creation_input_tokens: 5, cache_read_input_tokens: 3 } });
-				yield event({ type: "message_stop" });
+				yield* one(event({ type: "message_delta", delta: { stop_reason: calls.length ? "tool_use" : "end_turn", stop_sequence: null }, usage: { output_tokens: 20, input_tokens: 10, cache_creation_input_tokens: 5, cache_read_input_tokens: 3 } }));
+				yield* one(event({ type: "message_stop" }));
 				if (!usageReported) { usageReported = true; yield { type: "rate_limit_event", rate_limit_info: { status: "allowed", utilization: 0.25, resetsAt: 1700000000, rateLimitType: "five_hour", isUsingOverage: false }, uuid: `u-${++counter}`, session_id: sessionId } as unknown as SDKMessage; }
 				// Claude Code runs the batch: PreToolUse per call, the MCP call, PostToolBatch once.
 				for (const call of calls) {

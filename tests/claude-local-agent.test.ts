@@ -201,6 +201,54 @@ describe("ClaudeLocalAgent: one lesson turn in pi's vocabulary", () => {
 		assert.equal(fake.turns.length, 1);
 	});
 
+	it("the admission cycle (held events until dispatch) releases EVERY in-child model call, not just the first (review blocker B1)", async () => {
+		const { SubscriptionRequestCycle } = await import("../src/agent/subscription-request-cycle.ts");
+		const fake = fakeClaude([{ text: "Look it up.", tools: [{ name: "lookup_weather", args: { city: "Oslo" } }] }, { text: "Sunny.", tools: [{ name: "lookup_weather", args: { city: "Bergen" } }] }, { text: "Done." }]);
+		const runtime = runtimeFor(async () => fake.query);
+		const purpose = { background: false };
+		const messages = [newUserMessage("Weather?")];
+		const cycle = new SubscriptionRequestCycle({ initialMessages: messages, foregroundOwed: true, purpose, scopeCurrent: () => true, restoreAutomatic: () => {} });
+		const agent = new ClaudeLocalAgent({ systemPrompt: "T", model, thinkingLevel: "off", tools: [lookup], messages, convertToLlm: toLlmMessages, prepareRequest: (request) => cycle.prepare(request), lifecycle: cycle, runtime, purpose: () => purpose.background });
+		// ui-stream's wiring: events the cycle holds reach the views only on release.
+		const released: AgentEvent[] = [];
+		const admitted: boolean[] = [];
+		const handle = (event: AgentEvent) => { released.push(event); if (event.type === "message_end" && (event.message as { role: string }).role === "assistant") admitted.push(cycle.acceptsUsage(event.message as AssistantMessage)); };
+		cycle.bindRelease(handle);
+		agent.subscribe((event) => { if (!cycle.hold(event)) handle(event); });
+		await agent.continue();
+		const outcome = cycle.finishNativeCycle();
+		if (outcome.action !== "resumeForeground") handle({ type: "agent_end", messages: [...agent.state.messages] });
+		assert.equal(released.filter((e) => e.type === "message_end" && (e.message as { role: string }).role === "assistant").length, 3, "all three model calls reached the views");
+		assert.deepEqual(admitted, [true, true, true], "usage is admitted for every model call");
+		assert.equal(released.filter((e) => e.type === "turn_end").length, 3);
+		assert.equal(released.at(-1)?.type, "agent_end");
+		assert.ok(cycle.dispatched);
+	});
+
+	it("Claude Code's synthetic API-failure message ends the run as a masked error, never as a reply (review blocker B2)", async () => {
+		const { messages, events, fake } = await runAgent([{ apiError: "rate_limit", text: "API Error: 429 {\"type\":\"rate_limit_error\"}" }, { text: "never" }]);
+		const last = messages.at(-1) as AssistantMessage;
+		assert.equal(messages.filter((m) => (m as { role: string }).role === "assistant").length, 1);
+		assert.equal(last.stopReason, "error"); assert.match(last.errorMessage ?? "", /usage limit.*No API key was used/);
+		assert.ok(!JSON.stringify(last.content).includes("API Error"), "the raw API text is not recorded as a reply");
+		assert.deepEqual(record(events).slice(-3), ["message_end:assistant", "turn_end", "agent_end"]);
+		assert.equal(fake.turns.length, 1);
+		// A failure after a streamed reply is terminal too.
+		const streamedThenFailed = await runAgent([{ text: "Half." }, { error: "server_error: overloaded" }]);
+		const replies = streamedThenFailed.messages.filter((m) => (m as { role: string }).role === "assistant") as AssistantMessage[];
+		assert.equal(replies.length, 2); assert.equal(replies[0]!.stopReason, "stop"); assert.equal(replies[1]!.stopReason, "error");
+	});
+
+	it("a message Claude Code delivers only as per-block assistant echoes (no stream) is rebuilt with every block (review S14)", async () => {
+		const { messages, fake } = await runAgent([{ thinking: "hm", text: "Both blocks.", tools: [{ name: "lookup_weather", args: { city: "Oslo" } }], unstreamed: true }, { text: "Done.", unstreamed: true }]);
+		const first = messages[1] as AssistantMessage;
+		assert.deepEqual(first.content.map((c) => c.type), ["thinking", "text", "toolCall"]);
+		assert.equal(first.stopReason, "toolUse");
+		assert.deepEqual(fake.turns[0]!.toolCalls.map((c) => c.name), ["lookup_weather"]);
+		assert.equal((messages.at(-1) as AssistantMessage).stopReason, "stop");
+		assert.deepEqual(((messages.at(-1) as AssistantMessage).content[0] as { text: string }).text, "Done.");
+	});
+
 	it("an error result becomes a masked error message; a crash before dispatch reports no-dispatch to the admission cycle", async () => {
 		const { messages } = await runAgent([{ error: "Not logged in · Please run /login" }]);
 		const last = messages[messages.length - 1] as AssistantMessage;

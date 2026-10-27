@@ -258,8 +258,18 @@ export class ClaudeLocalAgent implements LiveAgent {
 						// result) closes with error results before the next message.
 						if (current && callsExpected > 0 && results.length < callsExpected) { await closeBatch(current, "The tool call was not completed."); callsExpected = 0; }
 						// A new model call. pi emits turn_start before every request after
-						// the first (the run's own turn_start preceded this turn).
-						if (streamed) await emit({ type: "turn_start" });
+						// the first (the run's own turn_start preceded this turn), and the
+						// admission cycle re-arms its hold on every turn_start — so every
+						// in-child request re-commits exactly as pi's per-request dispatch
+						// would (the first one committed through the runner's beforeDispatch).
+						if (streamed) {
+							await emit({ type: "turn_start" });
+							if (scope && options.lifecycle) {
+								if (!runtime.scopeCurrent(scope)) throw new Error("connection changed");
+								options.lifecycle.captured(runtime.admissionScope(scope));
+								options.lifecycle.beforeDispatch(runtime.admissionScope(scope));
+							}
+						}
 						// Defensive: a partial that never ended is replaced, never doubled.
 						if (current && current.stopReason === "pending") this.state.messages.splice(this.state.messages.lastIndexOf(current as AgentMessage), 1);
 						current = e.partial;
@@ -315,7 +325,10 @@ export class ClaudeLocalAgent implements LiveAgent {
 						lastDecision = await finishBatch(empty, []);
 					}
 					if (lastDecision === "end" || event.terminalReason === "hook_stopped" || event.terminalReason === "stop_hook_prevented") return "end";
-					if (!event.ok && !streamed) return await fail(event.errors.join("; ") || "failed", signal.aborted ? "aborted" : "error");
+					// A failed turn is terminal. The failure already ended the run when it
+					// arrived as the message in flight (the error branch above) or as
+					// Claude Code's own error message; otherwise it is reported here.
+					if (!event.ok) return current?.stopReason === "error" || event.failedAssistant ? "end" : await fail(event.errors.join("; ") || "failed", signal.aborted ? "aborted" : "error");
 					return signal.aborted ? "end" : "continue";
 				}
 			}
