@@ -1,5 +1,7 @@
-import { handleChatRequest } from "@/src/server";
+import { handleChatRequest, withUser } from "@/src/server";
 
-export async function POST(req: Request) {
+async function handlePOST(req: Request) {
 	return handleChatRequest(req);
 }
+
+export const POST = withUser(handlePOST);

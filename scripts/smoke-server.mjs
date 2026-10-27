@@ -17,7 +17,8 @@
  * 127.0.0.1 on a kernel-assigned
  * free port, NODE_ENV=production, a THROWAWAY LH_DATA_DIR and an EMPTY
  * LH_AUTH_FILE under os.tmpdir() (no real keys or data ever touch it) —
- * polls GET / until 200, then probes the GET-only API surface (graph /
+ * polls GET / until 200 (a fresh install redirects / to the /users select
+ * screen, which must answer 200), then probes the GET-only API surface (graph /
  * models / settings — no side effects). Any non-200, an early server
  * exit, or a 30s boot timeout fails the gate and prints the server's own
  * log tail for diagnosis. The child is ALWAYS killed before exit — a
@@ -64,17 +65,31 @@ function freePort() {
 
 /** One GET; resolves the status code (0 = connection refused/failed). */
 function get(url) {
+	return getWithLocation(url).then((res) => res.status);
+}
+
+/** One GET; resolves the status code and any redirect target. */
+function getWithLocation(url) {
 	return new Promise((resolve) => {
 		const req = http.get(url, (res) => {
 			res.resume();
-			resolve(res.statusCode ?? 0);
+			resolve({ status: res.statusCode ?? 0, location: res.headers.location ?? null });
 		});
-		req.on("error", () => resolve(0));
+		req.on("error", () => resolve({ status: 0, location: null }));
 		req.setTimeout(5000, () => {
 			req.destroy();
-			resolve(0);
+			resolve({ status: 0, location: null });
 		});
 	});
+}
+
+/** GET / on a fresh install redirects to the profile select screen;
+ *  that screen answering 200 is a successful boot. */
+async function bootStatus(url) {
+	const home = await getWithLocation(url);
+	if (home.status !== 307 || home.location == null) return home.status;
+	if (new URL(home.location, url).pathname !== "/users") return home.status;
+	return get(new URL("/users", url).href);
 }
 
 async function main() {
@@ -153,12 +168,12 @@ async function main() {
 		const deadline = Date.now() + BOOT_TIMEOUT_MS;
 		while (Date.now() < deadline) {
 			if (exited) throw new Error(`server exited before answering on ${url}`);
-			boot = await get(url);
+			boot = await bootStatus(url);
 			if (boot === 200) break;
 			await new Promise((r) => setTimeout(r, POLL_MS));
 		}
 		if (boot !== 200) throw new Error(`server never answered 200 on ${url} (last status: ${boot})`);
-		console.log(`[smoke-server] boot ok: GET / → 200 (${url})`);
+		console.log(`[smoke-server] boot ok: the app answered 200 (${url})`);
 
 		// 2) API surface: every probe must be 200.
 		for (const route of PROBES) {

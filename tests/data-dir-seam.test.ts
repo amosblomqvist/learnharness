@@ -23,8 +23,10 @@ describe("LH_DATA_DIR seam", () => {
 		const dir = fs.mkdtempSync(path.join(os.tmpdir(), "lh-seam-"));
 		process.env.LH_DATA_DIR = dir;
 		try {
-			const { PATHS, ROOT } = await import("../config.ts");
+			const { PATHS, ROOT, INSTALL, userDataDir } = await import("../config.ts");
 			assert.equal(PATHS.data, dir, "PATHS.data resolves the env value (resolved absolute)");
+			assert.equal(INSTALL.users, path.join(dir, "users.json"), "the profile registry lives at the install root");
+			assert.equal(userDataDir("usr_a1"), path.join(dir, "users", "usr_a1"), "each profile gets a folder under it");
 			assert.equal(PATHS.chats, path.join(dir, "chats"));
 			assert.equal(PATHS.graph, path.join(dir, "graph"));
 			assert.equal(
@@ -38,13 +40,13 @@ describe("LH_DATA_DIR seam", () => {
 	});
 
 	it("unset = the repo data/ exactly as before (fresh child process, no env)", () => {
+		const { LH_DATA_DIR: _suiteDataDir, ...env } = process.env;
 		const out = execFileSync(
 			process.execPath,
-			["--import", TSX_LOADER, "--eval", `const m = await import(${JSON.stringify(path.join(REPO_ROOT, "config.ts"))}); console.log(JSON.stringify({ data: m.PATHS.data, chats: m.PATHS.chats }));`],
-			{ cwd: REPO_ROOT, encoding: "utf-8" },
+			["--import", TSX_LOADER, "--eval", `const m = await import(${JSON.stringify(path.join(REPO_ROOT, "config.ts"))}); console.log(JSON.stringify({ data: m.INSTALL.root }));`],
+			{ cwd: REPO_ROOT, encoding: "utf-8", env },
 		);
-		const parsed = JSON.parse(out) as { data: string; chats: string | null };
+		const parsed = JSON.parse(out) as { data: string };
 		assert.equal(parsed.data, path.join(REPO_ROOT, "data"));
-		assert.equal(parsed.chats, path.join(REPO_ROOT, "data", "chats"));
 	});
 });

@@ -16,7 +16,7 @@
 		"dev": "next dev",
 		"build": "next build",
 		"start": "next start",
-		"test": "NODE_ENV=test tsx --test tests/*.test.ts tests/*.test.tsx",
+		"test": "bash scripts/test.sh",
 		"lint": "eslint .",
 		"typecheck": "tsc --noEmit",
 		"desktop:dev": "concurrently -k \"next dev\" \"LH_DEV_URL=http://localhost:3000 electron .\"",

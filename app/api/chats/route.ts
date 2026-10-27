@@ -1,6 +1,6 @@
 import { chainsForSelection, formatChainLine } from "@/src/core";
 import { newGraphContextMessage, type GraphContextPick } from "@/src/core";
-import { compactionInFlight, createChat, isTurnRunning, listChats, readSettingsRecord, stores, titleFromPrompt } from "@/src/server";
+import { compactionInFlight, createChat, isTurnRunning, listChats, readSettingsRecord, stores, titleFromPrompt, withUser } from "@/src/server";
 import type { ChatListItem } from "@/src/core";
 
 /** The session picker's list: record-derived summaries (phase, pending
@@ -10,7 +10,7 @@ import type { ChatListItem } from "@/src/core";
  *  count — the sidebar's Background agents section is their channel now
  *  (a running spinner per row would double-signal them), so busy means
  *  exactly "a teach turn is in flight". */
-export async function GET() {
+async function handleGET(_req: Request) {
 	const chats: ChatListItem[] = listChats().map((c) => ({
 		...c,
 		busy: isTurnRunning(c.id),
@@ -19,7 +19,7 @@ export async function GET() {
 	return Response.json({ chats });
 }
 
-export async function POST(req: Request) {
+async function handlePOST(req: Request) {
 	const body = (await req.json().catch(() => ({}))) as { title?: unknown; kind?: unknown; graphContext?: unknown };
 	const title = typeof body.title === "string" ? body.title : "";
 	// Practice sessions (owner, 2026-10-04): kind "practice" marks the
@@ -69,3 +69,6 @@ export async function POST(req: Request) {
 	}
 	return Response.json({ id: chat.id, title: chat.title });
 }
+
+export const GET = withUser(handleGET);
+export const POST = withUser(handlePOST);

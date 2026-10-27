@@ -13,9 +13,9 @@
  * /auth/grant (their docs, token-based auth FAQ) — plain read/transcribe
  * keys return FORBIDDEN here.
  */
-import { keyValue } from "@/src/server";
+import { keyValue, withUser } from "@/src/server";
 
-export async function GET() {
+async function handleGET(_req: Request) {
 	const key = keyValue("DEEPGRAM_API_KEY");
 	if (!key) {
 		return Response.json(
@@ -46,3 +46,5 @@ export async function GET() {
 		return Response.json({ message: "Deepgram unreachable" }, { status: 502 });
 	}
 }
+
+export const GET = withUser(handleGET);

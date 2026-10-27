@@ -13,7 +13,7 @@
  * healthy. The dock's chips + graph refetch track progress live through
  * /api/graph/status, as with session runs.
  */
-import { extraction, NotesImportError } from "@/src/server";
+import { extraction, NotesImportError, withUser } from "@/src/server";
 import {
 	ModelsNotConfiguredError,
 	PROVIDER_KEY_MISSING_CODE,
@@ -40,7 +40,7 @@ interface ImportResult {
 	slots?: string[];
 }
 
-export async function POST(request: Request) {
+async function handlePOST(request: Request) {
 	const form = await request.formData();
 	const files = form.getAll("files").filter((f): f is File => f instanceof File);
 	if (files.length === 0) {
@@ -94,3 +94,5 @@ export async function POST(request: Request) {
 	await Promise.all(workers);
 	return Response.json({ results });
 }
+
+export const POST = withUser(handlePOST);

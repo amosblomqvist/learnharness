@@ -67,6 +67,7 @@ import {
 } from "../core/contracts.ts";
 import type { TurnInput } from "../core/input-events.ts";
 import { danglingQuestionOf, endsInDismissal, type LhMessage } from "../core/native-messages.ts";
+import { activeUserId, runAsUser } from "../../config.ts";
 import { fireJobAbort, isJobLive } from "../agent/subagents/aborts.ts";
 import { stores, effectiveSettings } from "./stores.ts";
 import { resolveConversationSpec } from "../core/settings-resolution.ts";
@@ -121,8 +122,12 @@ interface WakeState {
 	liveAgents: Map<string, Agent>;
 	/** Chats whose pump loop is currently active (serialization per chat). */
 	pumping: Set<string>;
-	/** Throttle bookkeeping for the stale-job sweep. */
+	/** Throttle bookkeeping for the stale-job sweep (unclaimed install). */
 	lastSweepAt: number;
+	/** The same throttle per profile: each sweep only sees its own jobs. */
+	userSweepAt?: Map<string, number>;
+	/** chatId → owning profile, for work fired outside a request. */
+	owners?: Map<string, string>;
 	stopConnectionWatch?: () => void;
 	automaticDeferred: WeakSet<Agent>;
 }
@@ -238,7 +243,21 @@ function queueSteer(chatId: string, steer: SteerMessage): QueuedSteer {
 	const entry: QueuedSteer = { steer, promise, resolve, reject };
 	queue.push(entry);
 	state().queues.set(chatId, queue);
+	noteOwner(chatId);
 	return entry;
+}
+
+/** Remember which profile a chat's pipeline belongs to: the connection
+ *  watch below fires outside any request and must re-enter it. */
+function noteOwner(chatId: string): void {
+	const userId = activeUserId();
+	if (userId) (state().owners ??= new Map()).set(chatId, userId);
+}
+
+function asOwner(chatId: string, fn: () => void): void {
+	const owner = state().owners?.get(chatId);
+	if (owner) runAsUser(owner, fn);
+	else fn();
 }
 
 /** Hand every eligible pending marker to a live agent's steering queue
@@ -291,6 +310,7 @@ function handOffEligible(chatId: string, agent: Agent): void {
  *  never happens inside the constructor call. */
 export function registerLiveAgent(chatId: string, agent: Agent, allowDeferred = true, wakeSteerIds?: ReadonlySet<string>): void {
 	state().liveAgents.set(chatId, agent);
+	noteOwner(chatId);
 	restorePendingDeliveries(chatId);
 	for (const entry of state().queues.get(chatId) ?? []) {
 		if (allowDeferred) entry.deferred = false;
@@ -626,10 +646,10 @@ state().stopConnectionWatch = onSubscriptionChange(() => {
 		agent.clearSteeringQueue();
 		for (const entry of pending) entry.handedTo = undefined;
 		for (const entry of s.userSteers.get(chatId) ?? []) if (!consumed.has(entry.message.id)) entry.handedTo = undefined;
-		handOffEligible(chatId, agent); // only unconsumed learner input; never replay consumed steers
+		asOwner(chatId, () => handOffEligible(chatId, agent)); // only unconsumed learner input; never replay consumed steers
 	}
 	for (const chatId of s.queues.keys()) {
-		if (automaticFollowUpAllowed(chatId, s.liveAgents.get(chatId))) void pump(chatId);
+		if (automaticFollowUpAllowed(chatId, s.liveAgents.get(chatId))) asOwner(chatId, () => void pump(chatId));
 	}
 });
 
@@ -734,8 +754,15 @@ const SWEEP_THROTTLE_MS = 30_000;
 export function recoverStaleJobs(): void {
 	const s = state();
 	const now = Date.now();
-	if (now - s.lastSweepAt < SWEEP_THROTTLE_MS) return;
-	s.lastSweepAt = now;
+	const userId = activeUserId();
+	if (userId) {
+		const swept = (s.userSweepAt ??= new Map());
+		if (now - (swept.get(userId) ?? 0) < SWEEP_THROTTLE_MS) return;
+		swept.set(userId, now);
+	} else {
+		if (now - s.lastSweepAt < SWEEP_THROTTLE_MS) return;
+		s.lastSweepAt = now;
+	}
 	try {
 		for (const chat of stores.chatStore.listChats()) {
 			for (const job of stores.jobStore.listJobs(chat.id)) {

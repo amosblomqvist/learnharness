@@ -10,9 +10,9 @@
  * { input: { messageId, inverted } } or targets no demo/visual steer.
  */
 import { setSteerUiInverted, type SteerDetails } from "@/src/core";
-import { getChat, stores } from "@/src/server";
+import { getChat, stores, withUser } from "@/src/server";
 
-export async function POST(req: Request, ctx: { params: Promise<{ id: string }> }): Promise<Response> {
+async function handlePOST(req: Request, ctx: { params: Promise<{ id: string }> }): Promise<Response> {
 	const { id } = await ctx.params;
 	const chat = getChat(id);
 	if (!chat) return Response.json({ error: "Unknown chat" }, { status: 404 });
@@ -39,3 +39,5 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
 	stores.chatStore.saveMessages(id, messages);
 	return Response.json({ ok: true });
 }
+
+export const POST = withUser(handlePOST);

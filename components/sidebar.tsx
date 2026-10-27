@@ -6,7 +6,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { MenuShell } from "@/components/menu-shell";
 import { DeleteSessionDialog } from "@/components/delete-session-dialog";
 import type { ChatDeleteMode } from "@/src/core";
-import { DumbbellIcon, PanelLeftCloseIcon, PanelLeftOpenIcon, PlusIcon, SearchIcon, SettingsIcon } from "lucide-react";
+import { DumbbellIcon, PanelLeftCloseIcon, PanelLeftOpenIcon, PlusIcon, SearchIcon, SettingsIcon, UsersIcon } from "lucide-react";
 import { ActivitySection } from "@/components/activity-dock";
 import { CoverageMenuBlock } from "@/components/extraction-coverage";
 import { LhMark } from "@/components/lh-mark";
@@ -846,7 +846,21 @@ function SessionsSidebar() {
 					{/* Settings entry (settings-app wave): same row language as
 					    New session — quiet, bottom-pinned, opens the centered
 					    dialog (also mod+, in the keyboard registry). */}
-					<div className="px-3 pb-3 pt-1">
+					<div className="flex flex-col px-3 pb-3 pt-1">
+						{/* Change user (multi-user profiles): ends this browser's
+						    session and lands on the select screen with a full load,
+						    so no view state crosses profiles. */}
+						<button
+							type="button"
+							onClick={() => {
+								void fetch("/api/users/session", { method: "DELETE" }).finally(() => window.location.assign("/users"));
+							}}
+							data-testid="change-user"
+							className="flex items-center gap-1.5 rounded-md px-2 py-1.5 text-xs uppercase tracking-wider text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+						>
+							<UsersIcon className="size-3" />
+							Change user
+						</button>
 						<Hint label="Settings" action="open-settings" side="right">
 							<button
 								type="button"

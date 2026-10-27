@@ -19,7 +19,7 @@ npm run dev          # http://localhost:3000
 npm run build        # production build (standalone output)
 npm start            # serve the production build
 
-npm test             # the full suite (node:test via tsx; deterministic, no LLM, no network)
+npm test             # the full suite (node:test via tsx; deterministic, no LLM, no network; throwaway data dir)
 npm run lint         # eslint — includes the import law (architecture §2)
 npm run typecheck    # tsc --noEmit
 node scripts/smoke-web-subscriptions.mjs # after build: offline Next start/dev + reload gate
@@ -56,7 +56,13 @@ Web/dev saves `chatgpt-credentials.json`, `github-copilot-credentials.json` and 
 
 Sign-in opens a new tab in the browser that initiated it; permit that tab if your browser blocks popups. **ChatGPT sign-in must be completed in a browser on the server's machine**, because its callback listener remains `127.0.0.1` on that machine. Copilot/Grok use device codes. In the Electron dev shell, provider pages open in the system browser instead. Once connected, credentials and refresh remain server-owned; other browsers using that server share its connections and background-use consent, just as they share its API keys. Disconnect, storage-failure handling, and provider-specific background consent retain the existing behavior; subscription routes never fall back to API-key billing.
 
-This remains a **trusted developer/shared-server mode**, not multi-user hosting. Subscription controls require same-origin JSON/custom-header requests; browser-opening actions are short-lived, origin-bound and one-use. These checks prevent ordinary cross-origin browser controls, **not user authentication or DNS-rebinding protection**. Do not expose an unprotected dev/server instance to untrusted users or the public Internet; a public deployment needs an independent access/host gate. Remote ChatGPT callback routing, per-user accounts and credential import are not implemented.
+This remains a **trusted developer/shared-server mode**, not multi-user hosting. Subscription controls require same-origin JSON/custom-header requests; browser-opening actions are short-lived, origin-bound and one-use. These checks prevent ordinary cross-origin browser controls, **not user authentication or DNS-rebinding protection**. Do not expose an unprotected dev/server instance to untrusted users or the public Internet; a public deployment needs an independent access/host gate. Remote ChatGPT callback routing, per-provider accounts per profile and credential import are not implemented.
+
+### Profiles
+
+Opening the app shows a profile select screen. Each profile keeps its own learner records under `<data dir>/users/<id>/` (chats, graph, jobs, `settings.json`, prompt overrides, debug logs). Install-wide files stay at the data-dir root: `users.json` (the profiles), `host.json` (restricted sign-ups), `sessions.json` (which browser has which profile open), and the model cache. API keys and subscription credentials are household-wide: every profile uses the same ones. The first profile created is the only admin; on an install that already has records, it claims them (they move into its folder). Without `users.json` the install is unclaimed and learner paths resolve to the data-dir root, which is what tests and the pre-profiles layout rely on.
+
+Profiles are **local profiles, not accounts**. A profile's PIN only stops someone opening it through the app; it is stored in plain text and nothing is encrypted, so anyone with access to the data directory can read every profile. The network gate above still applies: profiles do not make it safe to expose the server to untrusted users.
 
 ## Architecture
 

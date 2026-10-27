@@ -13,12 +13,14 @@
  * wrapper over the server barrel (the import law); tests drive the seams
  * (turn-runs + ui-stream) directly.
  */
-import { getChat, runningTurn, piTurnResponse, settledTurnResponse } from "@/src/server";
+import { getChat, runningTurn, piTurnResponse, settledTurnResponse, withUser } from "@/src/server";
 
-export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> }): Promise<Response> {
+async function handleGET(_req: Request, ctx: { params: Promise<{ id: string }> }): Promise<Response> {
 	const { id } = await ctx.params;
 	if (!getChat(id)) return Response.json({ error: "Unknown chat" }, { status: 404 });
 	const handle = runningTurn(id);
 	if (!handle) return settledTurnResponse(id);
 	return piTurnResponse(handle);
 }
+
+export const GET = withUser(handleGET);

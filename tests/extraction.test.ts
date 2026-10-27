@@ -61,7 +61,7 @@ import { ModelsNotConfiguredError, ProviderKeyMissingError, providerKeyMissing, 
 import { coverageOf, coverageSlots, messageViewLines } from "../src/core/coverage.ts";
 import { chatStore } from "../src/store/chats.ts";
 import { subscribe } from "../src/core/events.ts";
-import { PATHS } from "../config.ts";
+import { PATHS, runAsUser } from "../config.ts";
 
 // ─── fixtures ────────────────────────────────────────────────────────────────
 
@@ -2468,6 +2468,32 @@ describe("notes import completion and retry reliability", () => {
 		await first;
 		assert.deepEqual(await make(ledgers).importNotes(input), { nodes: 1, chains: 0 }, "lock released after lifecycle");
 		assert.equal(ledgers.readSources()[0]!.extractions?.length, 2);
+	});
+
+	it("two profiles importing the same path at once each get their own run; one profile still can't double-import", async () => {
+		const [ledgersA, ledgersB] = [memoryLedgers(), memoryLedgers()];
+		let releaseA!: () => void;
+		let releaseB!: () => void;
+		const gateA = new Promise<void>((resolve) => { releaseA = resolve; });
+		const gateB = new Promise<void>((resolve) => { releaseB = resolve; });
+		const firstA = runAsUser("usr_a", () => make(ledgersA, gatedSubmitModel("submit_findings", NOTES_FINDINGS, gateA)).importNotes(input));
+		const firstB = runAsUser("usr_b", () => make(ledgersB, gatedSubmitModel("submit_findings", NOTES_FINDINGS, gateB)).importNotes(input));
+		try {
+			await until(() => extractionStatuses().length === 2);
+			const [rowA, rowB] = [runAsUser("usr_a", extractionStatuses), runAsUser("usr_b", extractionStatuses)];
+			assert.equal(rowA.length, 1);
+			assert.equal(rowB.length, 1);
+			assert.equal(rowA[0]!.userId, "usr_a");
+			assert.equal(rowB[0]!.userId, "usr_b");
+			assert.equal(rowA[0]!.chatId, rowB[0]!.chatId, "same path, same source id in each profile's graph");
+			assert.notEqual(rowA[0]!.controller, rowB[0]!.controller, "separate runs, separate abort handles");
+			await assert.rejects(runAsUser("usr_a", () => make(ledgersA).importNotes(input)), incomplete("busy", 0));
+		} finally { releaseA(); }
+		assert.deepEqual(await firstA, { nodes: 1, chains: 0 });
+		assert.equal(runAsUser("usr_b", extractionStatuses).length, 1, "A finishing leaves B's run in place");
+		releaseB();
+		assert.deepEqual(await firstB, { nodes: 1, chains: 0 });
+		assert.equal(extractionStatuses().length, 0);
 	});
 
 	it("a fulfilled zero-node chunk plus a failed chunk is partial, not failed or completed", async () => {

@@ -45,3 +45,6 @@ export * from "./observability.ts";
 export * from "./model-catalog.ts";
 export { subscriptionControlsResponse, subscriptionBrowserResponse } from "./web-subscription-http.ts";
 export { sessionCost } from "./pricing.ts";
+// Multi-user profiles (2026-10-27): sessions, permissions, the claim, and
+// the withUser route wrapper.
+export * from "./users.ts";

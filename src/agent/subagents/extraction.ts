@@ -3,7 +3,7 @@ import type { Usage } from "@earendil-works/pi-ai";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { Type, type Static, type TSchema } from "typebox";
 import { toToolResult } from "../tool-execute.ts";
-import type { ModelRole } from "../../../config.ts";
+import { activeUserId, type ModelRole } from "../../../config.ts";
 import {
 	FACTORY_SETTINGS,
 	ModelsNotConfiguredError,
@@ -621,9 +621,10 @@ export type ExtractionPhase = "queued" | "extracting" | "waiting" | "auditing" |
  *  Exported for the status payload's consumer typing (the dock). */
 export interface RunningExtraction {
 	/** The SOURCE id (chat id / notes src id) — the payload's identity and
-	 *  the abort key. The registry KEY adds "#i" for chunk jobs (a
-	 *  multi-chunk source owns several entries); this field stays the
-	 *  source id so the feed's reveal logic and abort stay source-scoped. */
+	 *  the abort key. The registry KEY is the chat id, or a notes import's
+	 *  run id (two profiles may import the same path at once), plus "#i"
+	 *  for chunk jobs; this field stays the source id so the feed's reveal
+	 *  logic and abort stay source-scoped. */
 	chatId: string;
 	/** PER-CHUNK JOBS (owner, 2026-09-28): which chunk of how many this
 	 *  job is — present only when the source fanned out (n > 1). Drives
@@ -647,13 +648,23 @@ export interface RunningExtraction {
 	/** True-cancellation handle (the dock's abort button): one controller per
 	 *  run, shared across phases; abort() cancels the in-flight model call. */
 	controller: AbortController;
+	/** The profile whose graph the run writes (undefined on an unclaimed
+	 *  install). Status and abort only see the caller's own runs. */
+	userId?: string;
+}
+
+/** A run belongs to the caller when either side has no profile. */
+function ownRun(run: RunningExtraction): boolean {
+	const caller = activeUserId();
+	return !caller || !run.userId || run.userId === caller;
 }
 
 interface LhExtractionGlobal {
 	__lhExtractionRuns?: {
-		/** In-flight pipeline runs, keyed chatId (chat) / src id (notes). */
+		/** In-flight pipeline runs, keyed chatId (chat) / run id (notes). */
 		running: Map<string, RunningExtraction>;
-		/** The single-flight guard, shared by every pipeline instance. */
+		/** The single-flight guard, shared by every pipeline instance:
+		 *  chat ids, and profile-scoped src ids for notes imports. */
 		inFlight: Set<string>;
 		/** Last minted startedAt — kept monotonic so two runs starting in the
 		 *  same millisecond never collide on the usage idempotency key. */
@@ -685,7 +696,7 @@ function runs(): NonNullable<LhExtractionGlobal["__lhExtractionRuns"]> {
 
 /** In-flight pipeline runs (oldest first) — the /api/graph/status payload. */
 export function extractionStatuses(): RunningExtraction[] {
-	return [...runs().running.values()].sort((a, b) => a.startedAt - b.startedAt);
+	return [...runs().running.values()].filter(ownRun).sort((a, b) => a.startedAt - b.startedAt);
 }
 
 /** True cancellation of the in-flight run for a chat (the dock's abort
@@ -699,7 +710,7 @@ export function abortExtraction(chatId: string): boolean {
 	// job of its fan-out.
 	let found = false;
 	for (const run of runs().running.values()) {
-		if (run.chatId !== chatId) continue;
+		if (run.chatId !== chatId || !ownRun(run)) continue;
 		run.controller.abort();
 		found = true;
 	}
@@ -835,12 +846,13 @@ export function createExtractionPipeline(deps: ExtractionPipelineDeps): Extracti
 		kind: "chat" | "notes",
 		label?: string,
 		part?: { i: number; n: number },
+		sourceId?: string,
 	): void {
 		const R = runs();
 		const prev = runningExtractions.get(jobKey);
 		if (!prev) R.lastStartedAt = Math.max(Date.now(), R.lastStartedAt + 1);
 		runningExtractions.set(jobKey, {
-			chatId: prev?.chatId ?? jobKey.split("#")[0]!,
+			chatId: prev?.chatId ?? sourceId ?? jobKey.split("#")[0]!,
 			part: prev?.part ?? part, // phase changes never lose the part
 			kind,
 			label: prev?.label ?? label, // phase changes never lose the label
@@ -848,6 +860,7 @@ export function createExtractionPipeline(deps: ExtractionPipelineDeps): Extracti
 			startedAt: prev?.startedAt ?? R.lastStartedAt,
 			usage: prev?.usage ?? {}, // phase changes never lose usage
 			controller: prev?.controller ?? new AbortController(),
+			userId: prev?.userId ?? activeUserId(),
 		});
 		// Every phase transition announces the dock (push S5, 2026-10-02):
 		// notify-after-write — the registry is the feed's truth.
@@ -1045,10 +1058,11 @@ export function createExtractionPipeline(deps: ExtractionPipelineDeps): Extracti
 	 *  failure isolation lives at the fan-out site (one bad chunk never
 	 *  kills its siblings). */
 	async function runJob(
-		source: { id: string; kind: "chat" | "notes"; label?: string; part?: { i: number; n: number } },
+		source: { id: string; runId?: string; kind: "chat" | "notes"; label?: string; part?: { i: number; n: number } },
 		body: (jobKey: string) => Promise<EmissionStats>,
 	): Promise<EmissionStats> {
-		const jobKey = source.part ? `${source.id}#${source.part.i}` : source.id;
+		const key = source.runId ?? source.id;
+		const jobKey = source.part ? `${key}#${source.part.i}` : key;
 		const t0 = performance.now();
 		try {
 			const stats = await body(jobKey);
@@ -1303,8 +1317,8 @@ export function createExtractionPipeline(deps: ExtractionPipelineDeps): Extracti
 	// The notes auditor is the SAME identity-linker as the chat one (one
 	// schema now that attribution is gone) — audit() above, verbatim.
 
-	async function runNotesExtraction(input: { id: string; filePath: string; text: string; importedAt: string }): Promise<EmissionStats> {
-		const { id } = input;
+	async function runNotesExtraction(input: { id: string; runId: string; filePath: string; text: string; importedAt: string }): Promise<EmissionStats> {
+		const { id, runId } = input;
 		// importNotes owns the source exclusion, including metadata and cleanup.
 		const t0 = performance.now();
 		const mergedStats: EmissionStats = { nodes: 0, chains: 0 };
@@ -1339,8 +1353,8 @@ export function createExtractionPipeline(deps: ExtractionPipelineDeps): Extracti
 				try {
 					settled.push({
 						status: "fulfilled",
-						value: await runJob({ id, kind: "notes", label: input.filePath, part }, async (jobKey) => {
-							setPhase(jobKey, "queued", "notes", input.filePath, part);
+						value: await runJob({ id, runId, kind: "notes", label: input.filePath, part }, async (jobKey) => {
+							setPhase(jobKey, "queued", "notes", input.filePath, part, id);
 							chunkSignal = runningExtractions.get(jobKey)?.controller.signal;
 							const findings = await withExtractSlot(jobKey, async () => {
 								setPhase(jobKey, "extracting", "notes", input.filePath, part);
@@ -1411,7 +1425,7 @@ export function createExtractionPipeline(deps: ExtractionPipelineDeps): Extracti
 			throw new NotesImportError(err instanceof Error && err.name === "AbortError" ? "aborted" : "failed", mergedStats,
 				err instanceof Error ? err.message : String(err), { cause: err });
 		} finally {
-			finishExtraction(id); // done or failed — no longer running
+			finishExtraction(runId); // done or failed — no longer running
 		}
 	}
 
@@ -1419,18 +1433,20 @@ export function createExtractionPipeline(deps: ExtractionPipelineDeps): Extracti
 	 * auditor and usage history remain source-scoped; this is not exactly-once. */
 	async function importNotes(input: NotesImportInput): Promise<EmissionStats> {
 		const id = `src_${crypto.createHash("sha256").update(input.filePath).digest("hex").slice(0, 12)}`;
+		// Each profile has its own graph, so the guard is per profile and file.
+		const guard = `${activeUserId() ?? ""}:${id}`;
 		// Acquire BEFORE source upsert: overlapping contents must not alter metadata.
-		if (inFlight.has(id)) throw new NotesImportError("busy", { nodes: 0, chains: 0 }, "This file is already being imported. Try again when it finishes.");
-		inFlight.add(id);
+		if (inFlight.has(guard)) throw new NotesImportError("busy", { nodes: 0, chains: 0 }, "This file is already being imported. Try again when it finishes.");
+		inFlight.add(guard);
 		try {
 			const importedAt = new Date().toISOString();
 			graphStore.upsertSource({ id, filePath: input.filePath, importedAt });
-			return await runNotesExtraction({ id, ...input, importedAt });
+			return await runNotesExtraction({ id, runId: crypto.randomUUID(), ...input, importedAt });
 		} catch (err) {
 			if (err instanceof NotesImportError || err instanceof ModelsNotConfiguredError || err instanceof ProviderKeyMissingError) throw err;
 			throw new NotesImportError("failed", { nodes: 0, chains: 0 }, err instanceof Error ? err.message : String(err), { cause: err });
 		} finally {
-			inFlight.delete(id);
+			inFlight.delete(guard);
 		}
 	}
 

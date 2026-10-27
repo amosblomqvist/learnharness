@@ -24,10 +24,15 @@
  * The closure shape (teardown assigned in start, called in cancel) is the
  * ui-stream subscribe() pattern.
  */
+import { activeUserId } from "../../config.ts";
 import { subscribe, type ServerEvent } from "../core/events.ts";
 
-/** One window's subscription as an SSE Response. */
+/** One window's subscription as an SSE Response. Profile-scoped: emit()
+ *  calls listeners synchronously, so activeUserId() inside the listener is
+ *  the EMITTER's profile — another profile's events never reach this
+ *  window; profile-less events (subscriptions) reach every window. */
 export function eventsResponse(): Response {
+	const subscriber = activeUserId();
 	const encoder = new TextEncoder();
 	let teardown: (() => void) | undefined;
 	const stream = new ReadableStream<Uint8Array>({
@@ -58,6 +63,8 @@ export function eventsResponse(): Response {
 			// construction and subscription (single-threaded — the same
 			// attach-then-replay law as ui-stream's subscribe()).
 			unsubscribe = subscribe((event: ServerEvent) => {
+				const emitter = activeUserId();
+				if (subscriber && emitter && emitter !== subscriber) return;
 				const { type, ...payload } = event;
 				frame(`event: ${type}\ndata: ${JSON.stringify(payload)}\n\n`);
 			});

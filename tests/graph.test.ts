@@ -27,7 +27,7 @@ import { deriveView, getGraph, graphSnapshot, mergeFindings, type GraphDeps } fr
 import { coverageSlots } from "../src/core/coverage.ts";
 import { graphStore } from "../src/store/graph.ts";
 import { chatStore } from "../src/store/chats.ts";
-import { LEDGER_FILES, PATHS, SOURCES_FILE } from "../config.ts";
+import { LEDGER_FILES, PATHS, sourcesFile } from "../config.ts";
 
 /** The wired fs adapters, exactly what src/server/stores.ts passes in production. */
 const graphDeps = { chatStore, graphStore } as const satisfies GraphDeps;
@@ -42,7 +42,7 @@ function sessionSource(chatId: string): { foldedAt: string } {
 
 // ─── ledger isolation (backup-and-clear of data/graph/*.jsonl) ──────────────
 
-const LEDGER_PATHS = [...Object.values(LEDGER_FILES), SOURCES_FILE];
+const LEDGER_PATHS = [LEDGER_FILES.nodes, LEDGER_FILES.chains, LEDGER_FILES.sessions, LEDGER_FILES.coverage, sourcesFile()];
 const backups: Array<{ file: string; bak: string }> = [];
 const createdChats: string[] = [];
 

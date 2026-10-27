@@ -81,3 +81,6 @@ export * from "./coverage.ts";
 // ONE session→markdown formatter — the extractor's view and the user-facing
 // export share it. Pure, browser-safe.
 export * from "./session-markdown.ts";
+// users.ts (multi-user profiles, 2026-10-27): profile shape, avatar
+// palette, validation — pure, browser-safe.
+export * from "./users.ts";

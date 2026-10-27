@@ -27,7 +27,7 @@ test("Next-style IPC is not desktop transport; web ownership works without delay
 			if (capability === undefined) delete process.env.LH_DESKTOP_API_SECRET; else process.env.LH_DESKTOP_API_SECRET = capability;
 			// A framework parent cannot establish ChatGPT state by sharing only IPC.
 			(process.emit as (name: string, value: unknown) => boolean)("message", { channel: "lh:chatgpt", kind: "state", stamp: { epoch: 1, authorityRevision: 1, revision: 1 }, status: { available: true, activeId: "fixture", accounts: [{ id: "fixture", connected: true, planEnabled: true }] } });
-			const response = await GET();
+			const response = await GET(new Request("http://localhost/api/models"));
 			assert.equal(response.status, 200);
 			const catalog = await response.json();
 			assert.ok(catalog.models.some((m: { provider: string }) => m.provider === "openai"));
@@ -44,7 +44,7 @@ test("Next-style IPC is not desktop transport; web ownership works without delay
 		}
 		process.env.LH_DESKTOP_SERVER = "1"; process.env.LH_DESKTOP_API_SECRET = "d".repeat(64);
 		Object.defineProperty(process, "connected", { configurable: true, value: false });
-		await GET();
+		await GET(new Request("http://localhost/api/models"));
 		await assert.rejects(chatGPTRequest("status"), /available only in the desktop app/);
 		assert.equal(sends, 0, "desktop markers without connected IPC do not suffice");
 	} finally {

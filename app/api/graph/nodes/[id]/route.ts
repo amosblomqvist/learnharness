@@ -1,4 +1,4 @@
-import { deleteGraphNode } from "@/src/server";
+import { deleteGraphNode, withUser } from "@/src/server";
 
 /**
  * DELETE /api/graph/nodes/[id] — single-node deletion, FULL DEATH (owner
@@ -17,7 +17,7 @@ import { deleteGraphNode } from "@/src/server";
  * synchronous end to end — nothing interleaves. The response carries what
  * was removed plus the new graphRevision (the refetch signal).
  */
-export async function DELETE(_req: Request, { params }: { params: Promise<{ id: string }> }) {
+async function handleDELETE(_req: Request, { params }: { params: Promise<{ id: string }> }) {
 	const { id } = await params;
 	const outcome = deleteGraphNode(id);
 	if (!outcome.ok) {
@@ -25,3 +25,5 @@ export async function DELETE(_req: Request, { params }: { params: Promise<{ id: 
 	}
 	return Response.json({ stats: outcome.stats, graphRevision: outcome.graphRevision });
 }
+
+export const DELETE = withUser(handleDELETE);

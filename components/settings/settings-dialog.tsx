@@ -43,6 +43,7 @@ import { useAppearance } from "./appearance.tsx";
 import { SettingsSection } from "./controls.tsx";
 import { UpdateSettings } from "./update-settings.tsx";
 import { AgentSection } from "./agent-section.tsx";
+import { UsersSection } from "./users-section.tsx";
 import type { ModelsSettings } from "@/src/core";
 import { MENU_CLOSE_EVENT, MENU_OPEN_EVENT } from "@/components/menu-shell";
 import { notifySettingsSaved } from "@/components/settings-signal";
@@ -62,6 +63,7 @@ const SECTIONS = [
 	{ id: "appearance", label: "Appearance" },
 	{ id: "graph", label: "Graph" },
 	{ id: "keyboard", label: "Keyboard", hint: "Stored on this device" },
+	{ id: "users", label: "Users" },
 	{ id: "general", label: "General" },
 ] as const;
 type SectionId = (typeof SECTIONS)[number]["id"];
@@ -366,6 +368,11 @@ export function SettingsDialogBody({
 											void write("general", { ...record.general, autoUpdate: on })
 										}
 									/>
+								</SettingsSection>
+							)}
+							{active === "users" && (
+								<SettingsSection title="Users" testid="section-users">
+									<UsersSection />
 								</SettingsSection>
 							)}
 							{active === "keys" && (
