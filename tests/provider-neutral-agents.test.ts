@@ -15,6 +15,7 @@ import {
 } from "@earendil-works/pi-ai";
 import { builtinProviders } from "@earendil-works/pi-ai/providers/all";
 import { APP_IDENTITY, piEngineForSpec, type PiEngine } from "../src/agent/models.ts";
+import { commandCodeProvider } from "../src/agent/commandcode.ts";
 import { runVisualMaker } from "../src/agent/subagents/visual-maker.ts";
 import { runPdfReaderAgent } from "../src/agent/subagents/pdf-reader.ts";
 import type { HeadlessApi } from "../src/agent/subagents/headless.ts";
@@ -43,6 +44,9 @@ const TRANSPORTS: Transport[] = [
 	{ provider: "openai", id: "gpt-4o-mini", envVar: "OPENAI_API_KEY", api: "openai-responses", origin: "https://api.openai.com", path: "/v1/responses", authHeader: "authorization" },
 	{ provider: "anthropic", id: "claude-haiku-4-5", envVar: "ANTHROPIC_API_KEY", api: "anthropic-messages", origin: "https://api.anthropic.com", path: "/v1/messages", authHeader: "x-api-key" },
 	{ provider: "google", id: "gemini-2.5-flash", envVar: "GEMINI_API_KEY", api: "google-generative-ai", origin: "https://generativelanguage.googleapis.com", path: "/v1beta/models/gemini-2.5-flash:streamGenerateContent", authHeader: "x-goog-api-key" },
+	{ provider: "commandcode", id: "z-ai/glm-5.3-flash", envVar: "COMMAND_CODE_API_KEY", api: "openai-completions", origin: "https://api.commandcode.ai", path: "/provider/v1/chat/completions", authHeader: "authorization" },
+	{ provider: "commandcode", id: "gpt-5.6-luna", envVar: "COMMAND_CODE_API_KEY", api: "openai-responses", origin: "https://api.commandcode.ai", path: "/provider/v1/responses", authHeader: "authorization" },
+	{ provider: "commandcode", id: "claude-sonnet-4-6", envVar: "COMMAND_CODE_API_KEY", api: "anthropic-messages", origin: "https://api.commandcode.ai", path: "/provider/v1/messages", authHeader: "x-api-key" },
 ];
 
 // Replacing rather than extending env also isolates secondary tokens (including
@@ -245,6 +249,7 @@ describe("provider-neutral raw agent loops", { concurrency: false }, () => {
 			const env = Object.fromEntries(AUTH_PROVIDER_KEYS.map(({ envVar }) => [envVar, `dummy-resolver-${envVar}`]));
 			const models = createModels({ authContext: { env: async (name) => env[name], fileExists: async () => false } });
 			for (const provider of builtinProviders()) models.setProvider(provider);
+			models.setProvider(commandCodeProvider());
 			for (const { id, envVar } of AUTH_PROVIDER_KEYS) {
 				const resolved = await models.getAuth(id);
 				assert.ok(resolved, id);

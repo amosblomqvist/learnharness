@@ -9,6 +9,11 @@ import {
 } from "@earendil-works/pi-ai";
 import { builtinProviders } from "@earendil-works/pi-ai/providers/all";
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
+import {
+	COMMANDCODE_API_KEY_ENV,
+	COMMANDCODE_PROVIDER_ID,
+	commandCodeProvider,
+} from "./commandcode.ts";
 import { type ModelRole } from "../../config.ts";
 import { DEFAULT_THINKING_ORDER } from "../core/settings.ts";
 import packageMetadata from "../../package.json" with { type: "json" };
@@ -62,8 +67,41 @@ export function piModels() {
 	if (!collection) {
 		collection = createModels({ identity: APP_IDENTITY });
 		for (const provider of builtinProviders()) collection.setProvider(provider);
+		// Command Code is served by its own Provider API, not pi-ai's static
+		// catalog. Register the snapshot catalog + live refresh overlay.
+		collection.setProvider(commandCodeProvider());
 	}
 	return collection;
+}
+
+const COMMANDCODE_REFRESH_MS = 15 * 60_000;
+let commandCodeRefreshAt = 0;
+let commandCodeRefreshInFlight: Promise<void> | undefined;
+
+/**
+ * Refresh Command Code's live catalog overlay (settings picker + engine).
+ * Called from GET /api/models: the first call after boot (and again after
+ * the TTL) updates the snapshot in the background; the current request keeps
+ * serving the last-known catalog. Skipped in tests so the suite stays
+ * deterministic and offline, and when no key is configured (pi's refresh
+ * would skip it anyway, but this avoids resolving auth work on every call).
+ */
+export function refreshCommandCodeCatalog(): Promise<void> {
+	if (process.env.NODE_ENV === "test") return Promise.resolve();
+	if (!process.env[COMMANDCODE_API_KEY_ENV]) return Promise.resolve();
+	const now = Date.now();
+	if (commandCodeRefreshInFlight || now - commandCodeRefreshAt < COMMANDCODE_REFRESH_MS) {
+		return commandCodeRefreshInFlight ?? Promise.resolve();
+	}
+	commandCodeRefreshAt = now;
+	commandCodeRefreshInFlight = piModels()
+		.refresh({ providers: [COMMANDCODE_PROVIDER_ID] })
+		.catch(() => undefined)
+		.then(() => undefined)
+		.finally(() => {
+			commandCodeRefreshInFlight = undefined;
+		});
+	return commandCodeRefreshInFlight;
 }
 
 /** OpenRouter API key (BYOK); tests never read this — they inject engines. */
