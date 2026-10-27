@@ -194,6 +194,8 @@ async function probe(standalone) {
 		for (const name of fs.existsSync(scope) ? fs.readdirSync(scope) : []) {
 			if (!name.startsWith("claude-agent-sdk-")) continue;
 			const dir = path.join(scope, name);
+			// A dangling stub link (a broken install) holds no binary to ship.
+			if (!fs.statSync(dir, { throwIfNoEntry: false })?.isDirectory()) continue;
 			assert.ok(!fs.readdirSync(dir).some((entry) => /^claude(\.exe)?$/.test(entry)), `payload ships a bundled Claude Code binary: ${name}`);
 		}
 		assert.ok([...loaded].some((file) => file.includes(`${path.sep}node_modules${path.sep}@anthropic-ai${path.sep}claude-agent-sdk${path.sep}`)), "Agent SDK was not loaded from the payload");
