@@ -47,7 +47,7 @@ export function renderAssistant(message: AssistantMessage): string {
 	const parts: string[] = [];
 	for (const block of message.content) {
 		if (block.type === "text") { if (block.text.trim()) parts.push(escapeText(block.text)); }
-		else if (block.type === "toolCall") parts.push(`<tool_call id="${escapeAttr(block.id)}" name="${escapeAttr(block.name)}">${JSON.stringify(block.arguments)}</tool_call>`);
+		else if (block.type === "toolCall") parts.push(`<tool_call id="${escapeAttr(block.id)}" name="${escapeAttr(block.name)}">${escapeText(JSON.stringify(block.arguments) ?? "{}")}</tool_call>`);
 		// thinking: never replayed
 	}
 	return `<teacher>\n${parts.join("\n")}\n</teacher>`;
