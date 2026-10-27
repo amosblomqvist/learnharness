@@ -62,7 +62,7 @@ export const productionRuntime: ClaudeLocalRuntime = {
 	denial: bridge.claudeLocalDenial,
 	noteUsage: bridge.noteClaudeLocalUsage,
 	noteApiKeySource: bridge.noteClaudeLocalApiKeySource,
-	query: loadClaudeQuery,
+	query: () => loadClaudeQuery(),
 };
 
 export interface ClaudeLocalAgentOptions {

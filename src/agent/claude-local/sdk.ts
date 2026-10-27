@@ -27,7 +27,8 @@ export type { AccountInfo, HookCallback, McpSdkServerConfigWithInstance, ModelIn
 interface Seam {
 	/** A test-injected query (never set in production). */
 	query?: ClaudeQuery;
-	/** The resolved real import, cached after the first load. */
+	/** The real import, cached once it is under way or resolved (a rejected
+	 *  import is dropped, so the next probe or turn retries it). */
 	loaded?: Promise<ClaudeQuery>;
 }
 const KEY = Symbol.for("lh.claudeLocal.sdk");
@@ -37,11 +38,20 @@ function seam(): Seam {
 }
 
 /** The query function the route runs on: the injected fake when a test
- *  set one, else the real SDK (imported once per process). */
-export function loadClaudeQuery(): Promise<ClaudeQuery> {
+ *  set one, else the real SDK (imported once per process). A failed import
+ *  (the chunk missing mid-update, a transient load error) is not cached:
+ *  one failure must not leave the route unavailable until a restart.
+ *  `load` is the import itself (a test seam). */
+export function loadClaudeQuery(load: () => Promise<{ query: ClaudeQuery }> = () => import("@anthropic-ai/claude-agent-sdk")): Promise<ClaudeQuery> {
 	const state = seam();
 	if (state.query) return Promise.resolve(state.query);
-	state.loaded ??= import("@anthropic-ai/claude-agent-sdk").then((sdk) => sdk.query);
+	if (!state.loaded) {
+		const loading: Promise<ClaudeQuery> = load().then((sdk) => sdk.query, (error: unknown) => {
+			if (state.loaded === loading) state.loaded = undefined;
+			throw error;
+		});
+		state.loaded = loading;
+	}
 	return state.loaded;
 }
 
