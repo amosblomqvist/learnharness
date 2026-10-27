@@ -27,6 +27,7 @@
  * (fully concrete) view lives in settings-resolution.ts.
  */
 
+import { DEFAULT_TRANSCRIPTION_LANGUAGE, isTranscriptionLanguage, type TranscriptionLanguage } from "./transcription.ts";
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import { AUTH_PROVIDER_KEYS } from "./auth-keys.ts";
 import type { ModelRole } from "../../config.ts";
@@ -233,6 +234,8 @@ export const ROLE_SLOT: Readonly<Record<ModelRole, ModelSlotName>> = {
 export interface GeneralSettings {
 	/** Automatic startup/24h update checks (default ON). Manual checks bypass this. */
 	autoUpdate?: boolean;
+	/** Spoken language for the next dictation session (default English). */
+	transcriptionLanguage?: TranscriptionLanguage;
 }
 
 /** Agent settings — everything about the non-conversation machinery. */
@@ -396,7 +399,7 @@ export interface FactorySettings {
 
 export const FACTORY_SETTINGS: FactorySettings = {
 	version: CURRENT_SETTINGS_VERSION,
-	general: { autoUpdate: true },
+	general: { autoUpdate: true, transcriptionLanguage: DEFAULT_TRANSCRIPTION_LANGUAGE },
 	appearance: {
 		mode: "dark",
 		background: null, // the dark default (#141414) lives in the mode's derivation curve
@@ -441,6 +444,7 @@ function sanitizeGeneral(raw: Record<string, unknown>): GeneralSettings {
 	const out: GeneralSettings = {};
 	const autoUpdate = boolOrDrop(raw.autoUpdate);
 	if (autoUpdate !== undefined) out.autoUpdate = autoUpdate;
+	if (isTranscriptionLanguage(raw.transcriptionLanguage)) out.transcriptionLanguage = raw.transcriptionLanguage;
 	return out;
 }
 

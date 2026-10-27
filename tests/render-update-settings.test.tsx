@@ -190,6 +190,41 @@ describe("General update rows", () => {
 });
 
 describe("Settings integration", () => {
+	it("saves the transcription language, preserves updates, and follows the stored language", async () => {
+		const record = { version: 1, general: { autoUpdate: false, transcriptionLanguage: "en" } };
+		const puts: unknown[] = [];
+		globalThis.fetch = async (input, init) => {
+			assert.equal(String(input), init?.method === "PUT" ? "/api/settings/general" : "/api/settings");
+			if (init?.method === "PUT") {
+				const body = JSON.parse(String(init.body)); puts.push(body);
+				return Response.json({ settings: { ...record, general: { ...body, transcriptionLanguage: "multi" } } });
+			}
+			return Response.json({ settings: record });
+		};
+		const host = await mount(<SettingsDialogBody initialSection="general" onClose={() => {}} />);
+		const select = q(host, "select-transcription-language") as unknown as HTMLSelectElement;
+		assert.equal(select.getAttribute("aria-label"), "Transcription language");
+		assert.ok(select.querySelector('option[value="ru"]'));
+		assert.ok(select.querySelector('option[value="multi"]'));
+		await act(async () => {
+			Object.defineProperty(select, "value", { configurable: true, value: "ru" });
+			select.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
+		});
+		assert.deepEqual(puts, [{ autoUpdate: false, transcriptionLanguage: "ru" }]);
+		assert.ok(q(host, "select-transcription-language")!.querySelector('option[value="multi"][selected]'));
+	});
+
+	it("first boot offers English without writing a preference just by opening settings", async () => {
+		let writes = 0;
+		globalThis.fetch = async (_input, init) => {
+			if (init?.method === "PUT") writes++;
+			return Response.json({ settings: null });
+		};
+		const host = await mount(<SettingsDialogBody initialSection="general" onClose={() => {}} />);
+		assert.ok(q(host, "select-transcription-language")!.querySelector('option[value="en"][selected]'));
+		assert.equal(writes, 0);
+	});
+
 	it("the toggle sends the complete General section and follows stored server truth", async () => {
 		bridge();
 		// A synthetic future sibling exercises the caller's section-preserving

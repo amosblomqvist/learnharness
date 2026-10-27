@@ -11,6 +11,7 @@
  * a different concern and are preserved by the sanitizer (core/settings.ts).
  */
 
+import { isTranscriptionLanguage } from "../core/transcription.ts";
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import { isHexColor, type ChatSettings } from "../core";
 import type {
@@ -75,7 +76,7 @@ function asRecord(body: unknown): Record<string, unknown> | null {
 	return body as Record<string, unknown>;
 }
 
-/** general: { autoUpdate?: boolean } */
+/** General app preferences; absent fields clear their overrides. */
 export function parseGeneralSettingsBody(body: unknown): SettingsBodyResult<GeneralSettings> {
 	const raw = asRecord(body);
 	if (!raw) return { ok: false, error: "Invalid JSON body" };
@@ -85,6 +86,12 @@ export function parseGeneralSettingsBody(body: unknown): SettingsBodyResult<Gene
 			return { ok: false, error: "autoUpdate must be a boolean" };
 		}
 		settings.autoUpdate = raw.autoUpdate;
+	}
+	if (raw.transcriptionLanguage !== undefined) {
+		if (!isTranscriptionLanguage(raw.transcriptionLanguage)) {
+			return { ok: false, error: "transcriptionLanguage must be a supported transcription language" };
+		}
+		settings.transcriptionLanguage = raw.transcriptionLanguage;
 	}
 	return { ok: true, settings };
 }

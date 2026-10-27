@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Loader2Icon, MicIcon } from "lucide-react";
 import { useSettingsDialog } from "@/components/settings/settings-dialog";
 import { Hint } from "@/components/ui/hint";
+import { dictationUrl, transcriptionLanguage, type TranscriptionLanguage, type UserSettings } from "@/src/core";
 
 /**
  * Voice dictation — the cloud engine (STT wave 1, 2026-09-17).
@@ -86,15 +87,13 @@ import { Hint } from "@/components/ui/hint";
  * endpointing=300, no interims. Silence streams too (the worklet never
  * pauses), so the socket never idles — no KeepAlive needed.
  */
-const DG_URL =
-	"wss://api.deepgram.com/v1/listen" +
-	"?model=nova-3" +
-	"&encoding=linear16" +
-	"&sample_rate=16000" +
-	"&channels=1" +
-	"&smart_format=true" +
-	"&punctuate=true" +
-	"&endpointing=300";
+/** Re-read at each start so a saved language never needs a reload. */
+export async function readDictationLanguage(): Promise<TranscriptionLanguage> {
+	const response = await fetch("/api/settings", { cache: "no-store" });
+	if (!response.ok) throw new Error("Could not load dictation settings");
+	const body = await response.json() as { settings: UserSettings | null };
+	return transcriptionLanguage(body.settings?.general?.transcriptionLanguage);
+}
 
 /** Meter tuning — the owner's tested values, see the file header. */
 const METER_FLOOR_DB = -50;
@@ -362,11 +361,11 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 
 	/** Open the Deepgram socket and wire its messages. `gen` guards staleness. */
 	const openSocket = useCallback(
-		(gen: number, token: string) => {
+		(gen: number, token: string, language: TranscriptionLanguage) => {
 			// Minted JWTs authenticate via the "bearer" subprotocol — ["token",
 			// jwt] is rejected at the handshake (verified live; "token" is for
 			// raw API keys only, as in the owner's pi dictate extension).
-			const ws = new WebSocket(DG_URL, ["bearer", token]);
+			const ws = new WebSocket(dictationUrl(language), ["bearer", token]);
 			wsRef.current = ws;
 
 			ws.addEventListener("open", () => {
@@ -408,7 +407,7 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 					reconnectsRef.current++;
 					mintFreshToken() // always FRESH — a stale warm token is the likely culprit
 						.then((t) => {
-							if (gen === genRef.current) openSocket(gen, t);
+							if (gen === genRef.current) openSocket(gen, t, language);
 						})
 						.catch(() => {
 							if (gen === genRef.current) {
@@ -440,8 +439,9 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 		// the token runs concurrently with it. 127.0.0.1 is a secure
 		// context, so getUserMedia works without TLS; macOS TCC prompts on
 		// first use.
-		const tokenPromise = warmTokens.mint();
-		tokenPromise.catch(() => {}); // surfaced below; no unhandled rejection
+		// Settings load locally alongside the warm token and microphone.
+		const connectionPromise = Promise.all([warmTokens.mint(), readDictationLanguage()]);
+		connectionPromise.catch(() => {}); // surfaced below; no unhandled rejection
 		const micPromise = navigator.mediaDevices.getUserMedia({
 			audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true },
 		});
@@ -498,8 +498,9 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 		}
 		if (gen !== genRef.current) return;
 		let token: string;
+		let language: TranscriptionLanguage;
 		try {
-			token = await tokenPromise;
+			[token, language] = await connectionPromise;
 		} catch (e) {
 			if (gen !== genRef.current) return;
 			setError(e instanceof Error ? e.message : "token unavailable");
@@ -509,7 +510,7 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 		if (gen !== genRef.current) return;
 		// Mitigation B: the handshake fires the moment the graph is live,
 		// overlapping any remaining token wait — mic-gated, never before it.
-		openSocket(gen, token);
+		openSocket(gen, token, language);
 	}, [openSocket, cleanup]);
 
 	const stop = useCallback(() => {
