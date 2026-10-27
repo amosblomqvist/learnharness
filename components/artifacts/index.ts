@@ -1,5 +1,6 @@
 import type { ComponentType } from "react";
 import type { ArtifactPartProps } from "@/src/core";
+import { CodePlaygroundCard } from "@/components/artifacts/code-playground-card";
 import { DemoCard } from "@/components/artifacts/demo-card";
 import { JobCard, PdfJobCard } from "@/components/artifacts/job-card";
 import { VisualCard } from "@/components/artifacts/visual-card";
@@ -27,6 +28,7 @@ export const artifactRenderers: Record<string, ComponentType<ArtifactPartProps>>
 	// part-level plan_init divider retired with it).
 	// Artifacts (W6 fills in the components):
 	demo: DemoCard,
+	code_playground: CodePlaygroundCard,
 	visual: VisualCard,
 	// The probe conclusion: the assessment belongs to the learner as much as
 	// to the transcript (docs/probe-teach-split.md §2). Plain v1 card.

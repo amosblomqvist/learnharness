@@ -12,6 +12,9 @@ const nextConfig: NextConfig = {
 	// The manual copies the docs require — public/ and .next/static — are
 	// done by scripts/build-server.mjs.
 	output: "standalone",
+	// Dev servers reached through a proxy need their public origin allowlisted;
+	// product installs leave this unset.
+	...(process.env.LH_DEV_ORIGINS ? { allowedDevOrigins: process.env.LH_DEV_ORIGINS.split(",") } : {}),
 	// SAFETY (empirically verified 2026-09-17): without this, output file
 	// tracing sweeps the repo's real data/ — chat records, graph ledgers —
 	// INTO the standalone bundle. A shipped desktop app would carry the
