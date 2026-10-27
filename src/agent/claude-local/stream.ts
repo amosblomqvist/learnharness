@@ -41,6 +41,10 @@ export function claudeLocalStream(background: () => boolean, lifecycle?: Subscri
 					beforeDispatch: () => { if (!runtime.scopeCurrent(scope!)) throw new Error("connection changed"); lifecycle?.beforeDispatch(runtime.admissionScope(scope!)); committed = true; },
 				})) {
 					if (event.type === "usage") { runtime.noteUsage(event.report); continue; }
+					// The result ends the run here (as the lesson agent does): leaving the
+					// loop closes the child at once rather than waiting for it to exit on
+					// its own after stdin closed.
+					if (event.type === "result") break;
 					if (event.type !== "assistant") continue;
 					const e = event.event;
 					if (e.type === "done") { if (!terminal) { terminal = true; output.push(e); } }
