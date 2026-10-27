@@ -207,7 +207,7 @@ describe("provider-neutral raw agent loops", { concurrency: false }, () => {
 						if (transport.provider === "opencode-go") {
 							assert.match(request.headers.get("x-opencode-session") ?? "", /^[0-9a-f-]{36}$/);
 							assert.equal(request.headers.get("x-opencode-session"), requests[0]!.headers.get("x-opencode-session"));
-							assert.equal(request.headers.get("x-opencode-client"), "learnharness");
+							assert.equal(request.headers.get("x-opencode-client"), "custom-learn-harness");
 						}
 						const url = new URL(request.url);
 						assert.equal(url.origin, transport.origin);

@@ -159,12 +159,19 @@ describe("desktop packaging policy", () => {
 		assert.equal(config.publish[0].releaseType, "draft");
 	});
 
+	it("is the fork's own app and release channel, never upstream's (ADR-0001)", () => {
+		assert.equal(config.appId, "com.stephenboynton.customlearnharness");
+		assert.equal(config.productName, "Custom Learn Harness");
+		assert.deepEqual(config.publish.map((entry: Record<string, unknown>) => [entry.provider, entry.owner, entry.repo]),
+			[["github", "stephen-boynton", "custom-learn-harness"]]);
+	});
+
 	it("deb has public maintainer metadata and a matching desktop identity", () => {
 		const pkg = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
 		assert.equal(pkg.author.name, "Amos Blomqvist");
 		assert.equal(pkg.author.email, "255718537+amosblomqvist@users.noreply.github.com");
-		assert.equal(pkg.homepage, "https://github.com/amosblomqvist/learnharness");
-		assert.equal(pkg.desktopName, "learnharness.desktop");
+		assert.equal(pkg.homepage, "https://github.com/stephen-boynton/custom-learn-harness");
+		assert.equal(pkg.desktopName, "custom-learn-harness.desktop");
 	});
 });
 

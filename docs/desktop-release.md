@@ -12,7 +12,7 @@ Windows signing is deliberately disabled for this first release. SmartScreen may
 
 The custom app bar stays on all three platforms. macOS keeps its left-side traffic lights; Windows/Linux use Electron's native right-side Window Controls Overlay, with CSS space reserved from the overlay's actual geometry. Windows/Linux hide the native menu until Alt is pressed. macOS keeps its system menu.
 
-Icons are per-platform (2026-10-13): macOS compiles the Icon Composer document `build/icon.icon` via actool into `Assets.car` (macOS 26 Liquid Glass) plus a fallback icns that `scripts/after-pack.cjs` replaces with the hand-packed full-res `build/icon.icns` (actool's caps at 256px); Windows embeds `build/icon.ico` and Linux uses `build/icon.png`, both generated from the flat design (`build/icon-flat.svg`) by `node scripts/make-icons.mjs`. Building the mac icon needs **macOS 26+ and Xcode 26+** (`actool`): Xcode 26's asset compiler crashes on macOS 15 because its host frameworks lack required symbols. `desktop:dist` injects `DEVELOPER_DIR` locally; release packaging uses `macos-26` and selects Xcode via setup-xcode. The older-OS fallback icon remains included. Linux's desktop identity is `learnharness.desktop`. Public package-maintainer metadata uses the owner's GitHub no-reply address; support goes through [GitHub Issues](https://github.com/amosblomqvist/learnharness/issues).
+Icons are per-platform (2026-10-13): macOS compiles the Icon Composer document `build/icon.icon` via actool into `Assets.car` (macOS 26 Liquid Glass) plus a fallback icns that `scripts/after-pack.cjs` replaces with the hand-packed full-res `build/icon.icns` (actool's caps at 256px); Windows embeds `build/icon.ico` and Linux uses `build/icon.png`, both generated from the flat design (`build/icon-flat.svg`) by `node scripts/make-icons.mjs`. Building the mac icon needs **macOS 26+ and Xcode 26+** (`actool`): Xcode 26's asset compiler crashes on macOS 15 because its host frameworks lack required symbols. `desktop:dist` injects `DEVELOPER_DIR` locally; release packaging uses `macos-26` and selects Xcode via setup-xcode. The older-OS fallback icon remains included. Linux's desktop identity is `custom-learn-harness.desktop`. Public package-maintainer metadata uses the owner's GitHub no-reply address; support goes through [GitHub Issues](https://github.com/stephen-boynton/custom-learn-harness/issues).
 
 ## Build pipeline
 
@@ -60,11 +60,11 @@ The three jobs upload distinct updater feeds: `latest-mac.yml`, `latest.yml`, `l
 
 | Asset | Role |
 |---|---|
-| `LearnHarness-<v>-arm64.dmg` + `.blockmap` | macOS installer |
-| `LearnHarness-<v>-arm64-mac.zip` + `.blockmap` | macOS updater payload (Squirrel.Mac installs from the ZIP) |
-| `LearnHarness-<v>-x64-setup.exe` + `.blockmap` | Windows NSIS installer |
-| `LearnHarness-<v>-x86_64.AppImage` | Linux AppImage (no sidecar blockmap) |
-| `LearnHarness-<v>-amd64.deb` | Linux deb (no sidecar blockmap) |
+| `Custom-Learn-Harness-<v>-arm64.dmg` + `.blockmap` | macOS installer |
+| `Custom-Learn-Harness-<v>-arm64-mac.zip` + `.blockmap` | macOS updater payload (Squirrel.Mac installs from the ZIP) |
+| `Custom-Learn-Harness-<v>-x64-setup.exe` + `.blockmap` | Windows NSIS installer |
+| `Custom-Learn-Harness-<v>-x86_64.AppImage` | Linux AppImage (no sidecar blockmap) |
+| `Custom-Learn-Harness-<v>-amd64.deb` | Linux deb (no sidecar blockmap) |
 | `latest-mac.yml` / `latest.yml` / `latest-linux.yml` | updater feeds |
 
   (The Linux names are deliberate: the user-set `linux.artifactName` applies to both Linux targets, and `${arch}` expands per target — `x86_64` inside the AppImage, `amd64` in the deb — exactly what the installed app-builder-lib 26.15.3 emits. The script's expectations fail closed if `electron-builder.yml` drifts from these shapes.);

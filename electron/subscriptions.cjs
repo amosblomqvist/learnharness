@@ -169,7 +169,7 @@ function createSubscriptions(options) {
 					attempt.public.prompt = { id, type: prompt.type, message: prompt.message, ...(prompt.placeholder ? { placeholder: prompt.placeholder } : {}), ...(prompt.type === "select" ? { options: clone(prompt.options) } : {}) };
 					abort.signal.addEventListener("abort", stop, { once: true }); prompt.signal?.addEventListener("abort", stop, { once: true }); changed(entry);
 				}),
-			}, { agentName: "LearnHarness" });
+			}, { agentName: "Custom Learn Harness" });
 			if (!active()) throw failure("cancel"); validateCredential(providerId, credential);
 			const auth = await entry.provider.auth.oauth.toAuth(credential);
 			if (!validEndpoint(providerId, auth, credential) || !active()) throw failure("login");

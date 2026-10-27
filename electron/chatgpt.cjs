@@ -1,6 +1,6 @@
 "use strict";
 
-// LearnHarness-owned public-client OAuth. Never import pi's bundled login.
+// Custom Learn Harness-owned public-client OAuth. Never import pi's bundled login.
 // This module is main-process-only; dependencies are injectable for scratch tests.
 const crypto = require("node:crypto");
 const http = require("node:http");
@@ -294,7 +294,7 @@ function createChatGPT({ store, openExternal, fetch: request = globalThis.fetch,
 				// Reject duplicate parameters and unsolicited callbacks without consuming a valid pending attempt.
 				if (["state", "code", "client_id", "error"].some((key) => params.getAll(key).length > 1) || params.get("state") !== expectedState) { res.writeHead(400).end("Sign-in could not be verified."); return; }
 				consumed = true;
-				res.writeHead(200, { "content-type": "text/plain; charset=utf-8" }).end("Return to LearnHarness to view the sign-in result. You may close this tab.");
+				res.writeHead(200, { "content-type": "text/plain; charset=utf-8" }).end("Return to Custom Learn Harness to view the sign-in result. You may close this tab.");
 				cleanup();
 				try {
 					if (params.has("error")) throw fail(params.get("error") === "access_denied" ? "cancelled" : "identity");
@@ -336,7 +336,7 @@ function createChatGPT({ store, openExternal, fetch: request = globalThis.fetch,
 			const url = new URL(AUTHORIZE);
 			url.search = new URLSearchParams({
 				client_id: selected?.clientId ?? "dynamic_agent_client",
-				...(selected ? {} : { agent_name_hint: "LearnHarness" }),
+				...(selected ? {} : { agent_name_hint: "Custom Learn Harness" }),
 				ext_agent_host_id: state.hostId,
 				...(selected?.tokens?.idToken ? { id_token_hint: selected.tokens.idToken } : {}),
 				...(selected?.email ? { login_hint: selected.email } : {}),

@@ -12,22 +12,28 @@
  * builder (app-builder-lib 26.15.3) — these are the artifacts it actually
  * emits for this repo's electron-builder.yml, not pattern guesses:
  *
+ * The productName "Custom Learn Harness" has spaces, which GitHub does not
+ * allow in asset names. For every target below the builder's
+ * computeSafeArtifactNameIfNeeded swaps each space for a dash, and the
+ * GitHub publisher uploads (and the update feeds reference) that safe name.
+ * So the local files keep the spaces and the release assets don't:
+ *
  *   mac (dmg + zip, arm64; no user artifactName there):
- *     dmg    LearnHarness-<v>-arm64.dmg       + .blockmap (createBlockmap)
- *     zip    LearnHarness-<v>-arm64-mac.zip   + .blockmap (createBlockmap;
+ *     dmg    Custom-Learn-Harness-<v>-arm64.dmg       + .blockmap (createBlockmap)
+ *     zip    Custom-Learn-Harness-<v>-arm64-mac.zip   + .blockmap (createBlockmap;
  *            Squirrel.Mac updates from the ZIP — it IS the updater payload)
  *     feed   latest-mac.yml — files[0] is the ZIP (writeUpdateInfoFiles
  *            sorts zip first) and the legacy top-level path/sha512 point
  *            at it.
  *   win (nsis x64; artifactName "${productName}-${version}-${arch}-setup.${ext}"):
- *     exe    LearnHarness-<v>-x64-setup.exe   + .blockmap (createBlockmap)
+ *     exe    Custom-Learn-Harness-<v>-x64-setup.exe   + .blockmap (createBlockmap)
  *     feed   latest.yml — a single file entry, the exe.
  *   linux (AppImage + deb, x64; artifactName "${productName}-${version}-${arch}.${ext}"
  *            is user-forced at the linux level, so it overrides BOTH targets'
  *            default name formats, and ${arch} expands per target ext:
  *            x64→x86_64 for AppImage, x64→amd64 for deb):
- *     image  LearnHarness-<v>-x86_64.AppImage (no blockmap in 26.15.3)
- *     deb    LearnHarness-<v>-amd64.deb       (no blockmap)
+ *     image  Custom-Learn-Harness-<v>-x86_64.AppImage (no blockmap in 26.15.3)
+ *     deb    Custom-Learn-Harness-<v>-amd64.deb       (no blockmap)
  *     feed   latest-linux.yml — the AppImage and deb entries merged by
  *            writeUpdateInfoFiles (order not deterministic; checked as a set).
  *
@@ -104,8 +110,10 @@ type Issues = Issue[];
 // Version + expected assets
 // ---------------------------------------------------------------------------
 
-/** Verified product name spelled into every artifact (electron-builder.yml productName). */
-const PRODUCT_NAME = "LearnHarness";
+/** electron-builder.yml productName. */
+const PRODUCT_NAME = "Custom Learn Harness";
+/** productName as spelled into every release asset: spaces become dashes (see header). */
+const ASSET_PREFIX = PRODUCT_NAME.replace(/ /g, "-");
 
 const VERSION_PATTERN = /^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/;
 
@@ -119,17 +127,17 @@ export function checkVersion(version: unknown): { ok: true; version: string } | 
 /** The exact asset set the installed builder emits for this repo's config. */
 export function expectedAssets(version: string): ExpectedAssets {
 	const mac = {
-		dmg: `${PRODUCT_NAME}-${version}-arm64.dmg`,
-		zip: `${PRODUCT_NAME}-${version}-arm64-mac.zip`,
+		dmg: `${ASSET_PREFIX}-${version}-arm64.dmg`,
+		zip: `${ASSET_PREFIX}-${version}-arm64-mac.zip`,
 		feed: "latest-mac.yml",
 	};
 	const win = {
-		exe: `${PRODUCT_NAME}-${version}-x64-setup.exe`,
+		exe: `${ASSET_PREFIX}-${version}-x64-setup.exe`,
 		feed: "latest.yml",
 	};
 	const linux = {
-		appImage: `${PRODUCT_NAME}-${version}-x86_64.AppImage`,
-		deb: `${PRODUCT_NAME}-${version}-amd64.deb`,
+		appImage: `${ASSET_PREFIX}-${version}-x86_64.AppImage`,
+		deb: `${ASSET_PREFIX}-${version}-amd64.deb`,
 		feed: "latest-linux.yml",
 	};
 	// Sidecar differential-update blockmaps: emitted for dmg, mac zip and
@@ -259,7 +267,7 @@ export function verifyConfigAssumptions(config: unknown, pkg: unknown): { ok: tr
 	const errors: Issues = [];
 	const bad = (message: string) => errors.push(message);
 	if (!isPlainObject(pkg) || typeof pkg.version !== "string") bad("package.json has no string version");
-	if (!isPlainObject(pkg) || pkg.name !== "learnharness") bad("package.json name is no longer \"learnharness\"");
+	if (!isPlainObject(pkg) || pkg.name !== "custom-learn-harness") bad("package.json name is no longer \"custom-learn-harness\"");
 	if (!isPlainObject(config)) {
 		return { ok: false, errors: ["electron-builder.yml did not parse to a mapping", ...errors] };
 	}

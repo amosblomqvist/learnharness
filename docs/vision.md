@@ -1,5 +1,7 @@
 # Learning Harness — Vision & Plans
 
+> **Superseded / stale in this fork:** the event ledger, understanding levels and hotspots described here were removed upstream, learner evidence is redesigned in [ADR-0002](adr/0002-evidence-ledger-beside-the-graph.md), and `vision-extensibility.md` does not exist; see [`docs/research/teaching-premise-vs-implementation.md` §3 gap 6](research/teaching-premise-vs-implementation.md#3-gaps).
+
 Living document. Started 2026-08-22, capturing the current vision and all agreed decisions. Amend as things evolve.
 
 Master frame: the three-part learning model and the extensibility/plugin direction live in [`vision-extensibility.md`](vision-extensibility.md) (2026-10-02).

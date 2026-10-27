@@ -69,7 +69,7 @@ test("PKCE/state/nonce/host identity and exact ephemeral 127.0.0.1 callback; no 
 		await f.service.login();
 		const params = f.url.searchParams;
 		assert.equal(params.get("client_id"), "dynamic_agent_client");
-		assert.equal(params.get("agent_name_hint"), "LearnHarness");
+		assert.equal(params.get("agent_name_hint"), "Custom Learn Harness");
 		assert.equal(params.get("ext_agent_host_id"), f.saved.hostId);
 		assert.equal(new URL(params.get("redirect_uri")!).hostname, "127.0.0.1");
 		assert.equal(new URL(params.get("redirect_uri")!).pathname, "/auth/callback");

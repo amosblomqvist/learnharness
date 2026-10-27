@@ -70,12 +70,12 @@ test("web notices identify the server machine and same-machine ChatGPT sign-in; 
 	const { CHATGPT_NOTICE, chatGPTNotice } = await import("../components/settings/chatgpt-connection.tsx");
 	const { subscriptionNotice, subscriptionDisconnectCopy } = await import("../components/settings/subscription-connections.tsx");
 	assert.equal(chatGPTNotice(), CHATGPT_NOTICE); assert(CHATGPT_NOTICE.includes("on this device"));
-	assert(chatGPTNotice(true).includes("on the machine running LearnHarness"));
+	assert(chatGPTNotice(true).includes("on the machine running Custom Learn Harness"));
 	assert(chatGPTNotice(true).endsWith("Complete ChatGPT sign-in in a browser on that same machine."));
 	for (const label of ["GitHub Copilot", "Grok"]) {
 		assert(subscriptionNotice(label).includes("stored locally")); assert(subscriptionDisconnectCopy(label).includes("from this device"));
-		assert(subscriptionNotice(label, true).includes("on the machine running LearnHarness"));
-		assert(subscriptionDisconnectCopy(label, true).includes("from the machine running LearnHarness"));
+		assert(subscriptionNotice(label, true).includes("on the machine running Custom Learn Harness"));
+		assert(subscriptionDisconnectCopy(label, true).includes("from the machine running Custom Learn Harness"));
 	}
 });
 

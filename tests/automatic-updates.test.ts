@@ -13,7 +13,10 @@ const mainFile = fileURLToPath(new URL("../electron/main.cjs", import.meta.url))
 const mainSource = readFileSync(mainFile, "utf8");
 const mainRequire = createRequire(mainFile);
 
-function fixture({ packaged = true, updaterMissing = false } = {}) {
+/** `updatesEnabled` overrides the fork's update policy switch so the dormant
+ * updater stays covered; "real" loads electron/update-policy.cjs as shipped. */
+function fixture({ packaged = true, updaterMissing = false, updatesEnabled = true as boolean | "real" } = {}) {
+	let updaterLoads = 0;
 	let settings: string | Error = JSON.stringify({ version: 1, general: { autoUpdate: true } });
 	const settingsReads: string[] = [];
 	const order: string[] = [];
@@ -87,7 +90,9 @@ function fixture({ packaged = true, updaterMissing = false } = {}) {
 	const context = createContext({
 		require: (id: string) => {
 			if (id === "electron") return electron;
+			if (id === "./update-policy.cjs" && updatesEnabled !== "real") return { AUTO_UPDATE_ENABLED: updatesEnabled };
 			if (id === "electron-updater") {
+				updaterLoads++;
 				if (updaterMissing) throw new Error("missing updater");
 				return { autoUpdater: updater };
 			}
@@ -110,6 +115,8 @@ function fixture({ packaged = true, updaterMissing = false } = {}) {
 	const run = (code: string) => runInContext(code, context);
 	return {
 		run, updater, windows, intervals, handles, settingsReads, order, app,
+		updaterLoads: () => updaterLoads,
+		menuLabels: () => menu.flatMap(group => group.submenu ?? []).map(item => item.label).filter(Boolean),
 		setSettings: (value: unknown) => { settings = JSON.stringify(value); },
 		setSettingsFailure: (value: string | Error) => { settings = value; },
 		setEnumerationFailure: (value: boolean) => { enumerationFails = value; },
@@ -295,5 +302,31 @@ describe("startup, timer, trusted IPC and menu wiring", () => {
 		const f = fixture(); f.setSettings({ general: { autoUpdate: false } }); await f.run("main()");
 		f.windows[0]!.webContents.fails = true; f.windows[0]!.webContents.loading = false;
 		f.menuCheck(); assert.equal(f.updater.checks, 1);
+	});
+});
+
+describe("fork policy: updates are off as shipped", () => {
+	it("the shipped switch is off", () => {
+		assert.equal(mainRequire("./update-policy.cjs").AUTO_UPDATE_ENABLED, false);
+	});
+
+	it("a packaged build loads no updater, checks nothing, schedules nothing, and shows no menu item", async () => {
+		const f = fixture({ updatesEnabled: "real" });
+		await f.run("main()");
+		assert.equal(f.updaterLoads(), 0);
+		assert.equal(f.state().status, "disabled");
+		assert.equal(f.intervals.length, 0);
+		assert.ok(!f.menuLabels().includes("Check for Updates…"));
+		const sender = f.windows[0]!.webContents;
+		f.handles.get("lh:update:check")!({ sender, senderFrame: sender.mainFrame });
+		await Promise.resolve();
+		assert.equal(f.updater.checks, 0);
+		assert.equal(f.settingsReads.length, 0);
+	});
+
+	it("turning the switch on restores the menu item", async () => {
+		const f = fixture({ updatesEnabled: true });
+		await f.run("main()");
+		assert.ok(f.menuLabels().includes("Check for Updates…"));
 	});
 });
