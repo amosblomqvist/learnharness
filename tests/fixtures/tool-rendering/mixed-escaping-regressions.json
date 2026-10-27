@@ -1,0 +1,19 @@
+{
+  "provenance": "multilingual-20261025-01; original collection findings, not the failed r1 rendering",
+  "cases": [
+    {
+      "chatId": "chat_mvo6kxzl_540b570e",
+      "source": "messages.1.content.2.arguments.explanation",
+      "model": "z-ai/glm-5.3-flash",
+      "raw": "乘法规则是\"左行的元素依次乘右列的元素再相加\"：\\n$$\\nAB=\\begin{pmatrix}1\\\\cdot3+2\\\\cdot0 & 1\\\\cdot1+2\\\\cdot2\\\\\\\\ 0\\\\cdot3+1\\\\cdot0 & 0\\\\cdot1+1\\\\cdot2\\\\end{pmatrix}=\\begin{pmatrix}3 & 5\\\\\\\\ 0 & 2\\\\end{pmatrix}\\n$$\\n选项 b 其实是 $BA$（$\\\\begin{pmatrix}3 & 7\\\\\\\\ 0 & 2\\\\end{pmatrix}$）——顺序交换后结果不同，这正是矩阵乘法不交换的例子。选项 c 是对应位置直接相加，那是加法不是乘法。",
+      "oldDisplay": "乘法规则是\"左行的元素依次乘右列的元素再相加\"：\\n$$\\nAB=\\begin{pmatrix}1\\cdot3+2\\cdot0 & 1\\cdot1+2\\cdot2\\\\\\\\ 0\\cdot3+1\\cdot0 & 0\\cdot1+1\\cdot2\\end{pmatrix}=\\begin{pmatrix}3 & 5\\\\\\\\ 0 & 2\\end{pmatrix}\\n$$\\n选项 b 其实是 $BA$（$\\begin{pmatrix}3 & 7\\\\\\\\ 0 & 2\\end{pmatrix}$）——顺序交换后结果不同，这正是矩阵乘法不交换的例子。选项 c 是对应位置直接相加，那是加法不是乘法。"
+    },
+    {
+      "chatId": "chat_mvo9oquq_74bfd7f6",
+      "source": "messages.3.content.1.arguments.explanation",
+      "model": "xiaomi/mimo-v2.6-flash",
+      "raw": "Perkalian matriks $AB$ = baris-kolom: elemen $(i,j)$ hasil adalah titik-antara baris $i$ dari $A$ dengan kolom $j$ dari $B$.\\n\\n- $(1,1): (1,2)\\cdot(2,0) = 1\\cdot2 + 2\\cdot1 = 4$\\n- $(1,2): (1,2)\\cdot(0,2) = 1\\cdot0 + 2\\cdot2 = 4$\\n- $(2,1): (3,4)\\cdot(2,0) = 3\\cdot2 + 4\\cdot1 = 10$\\n- $(2,2): (3,4)\\cdot(0,2) = 3\\cdot0 + 4\\cdot2 = 8$\\n\\n$$AB = \\\\begin{pmatrix} 4 & 4 \\\\\\\\ 10 & 8 \\\\end{pmatrix}$$\\n\\nPilihan lain adalah tiga kesalahan berbeda: $\\begin{pmatrix} 2 & 4 \\\\ 7 & 10 \\\\end{pmatrix}$ adalah $BA$ (urutan dibalik), $\\begin{pmatrix} 4 & 10 \\\\ 4 & 8 \\\\end{pmatrix}$ adalah transpos hasil (peletakan elemen tertukar), dan $\\begin{pmatrix} 2 & 0 \\\\ 3 & 8 \\\\end{pmatrix}$ adalah perkalian elemen-per-elemen, bukan baris-kolom. Perhatikan juga bahwa $AB \\neq BA$ — perkalian matriks tidak komutatif.",
+      "oldDisplay": "Perkalian matriks $AB$ = baris-kolom: elemen $(i,j)$ hasil adalah titik-antara baris $i$ dari $A$ dengan kolom $j$ dari $B$.\\n\\n- $(1,1): (1,2)\\cdot(2,0) = 1\\cdot2 + 2\\cdot1 = 4$\\n- $(1,2): (1,2)\\cdot(0,2) = 1\\cdot0 + 2\\cdot2 = 4$\\n- $(2,1): (3,4)\\cdot(2,0) = 3\\cdot2 + 4\\cdot1 = 10$\\n- $(2,2): (3,4)\\cdot(0,2) = 3\\cdot0 + 4\\cdot2 = 8$\\n\\n$$AB = \\begin{pmatrix} 4 & 4 \\\\\\\\ 10 & 8 \\end{pmatrix}$$\\n\\nPilihan lain adalah tiga kesalahan berbeda: $\\begin{pmatrix} 2 & 4 \\\\ 7 & 10 \\end{pmatrix}$ adalah $BA$ (urutan dibalik), $\\begin{pmatrix} 4 & 10 \\\\ 4 & 8 \\end{pmatrix}$ adalah transpos hasil (peletakan elemen tertukar), dan $\\begin{pmatrix} 2 & 0 \\\\ 3 & 8 \\end{pmatrix}$ adalah perkalian elemen-per-elemen, bukan baris-kolom. Perhatikan juga bahwa $AB \\neq BA$ — perkalian matriks tidak komutatif."
+    }
+  ]
+}

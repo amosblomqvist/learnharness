@@ -12,7 +12,7 @@ const { GET } = await import("../app/api/models/route.ts");
 const { chatGPTRequest, chatGPTConnected, chatGPTModels } = await import("../src/agent/chatgpt-bridge.ts");
 after(() => fs.rmSync(scratch, { recursive: true, force: true }));
 
-test("Next-style connected IPC is not desktop transport and never delays keyed API catalogs", async () => {
+test("Next-style IPC is not desktop transport; web ownership works without delaying keyed catalogs", async () => {
 	const send = Object.getOwnPropertyDescriptor(process, "send");
 	const connected = Object.getOwnPropertyDescriptor(process, "connected");
 	const marker = process.env.LH_DESKTOP_SERVER, secret = process.env.LH_DESKTOP_API_SECRET;
@@ -35,7 +35,11 @@ test("Next-style connected IPC is not desktop transport and never delays keyed A
 			assert.equal(catalog.providers.find((p: { id: string }) => p.id === "chatgpt").keyPresent, false);
 			assert.equal(chatGPTConnected(), false);
 			assert.deepEqual(chatGPTModels(), []);
-			await assert.rejects(chatGPTRequest("status"), /available only in the desktop app/);
+			if (!mode && !capability) {
+				const value = await chatGPTRequest<{ status: { available: boolean; accounts: unknown[] } }>("status");
+				assert.equal(value.status.available, true);
+				assert.deepEqual(value.status.accounts, []);
+			} else await assert.rejects(chatGPTRequest("status"), /available only in the desktop app/);
 			assert.equal(sends, 0, "no desktop request/timer may be started over framework IPC");
 		}
 		process.env.LH_DESKTOP_SERVER = "1"; process.env.LH_DESKTOP_API_SECRET = "d".repeat(64);

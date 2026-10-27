@@ -136,6 +136,8 @@ export interface CreateJobInit {
 	toolCallId: string;
 	/** First activity line (defaults to "starting"). */
 	activity?: string;
+	/** Saved on the job before its worker is spawned. */
+	input?: unknown;
 }
 
 /** Mergeable fields — identity (id, kind, chatId, toolCallId, createdAt) is immutable. */

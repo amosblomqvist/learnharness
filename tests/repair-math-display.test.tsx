@@ -12,7 +12,7 @@ import { PracticeDock } from "../components/practice-dock.tsx";
 import { QuestionDock } from "../components/question-dock.tsx";
 import { LatexGlyph } from "../components/latex-glyph.tsx";
 import { ProblemCard, ConcludeCard } from "../components/practice-cards.tsx";
-import { MessageResponse } from "../components/ai-elements/message.tsx";
+import { MessageResponse, ToolContentResponse } from "../components/ai-elements/message.tsx";
 import {
 	repairMathForDisplay, healOverescapedCommands, restoreMathEscapes,
 	parseQuizInput, parseAskInput, parseExplainInput, activeProblemOf, projectView,
@@ -206,17 +206,17 @@ describe("practice display surfaces", () => {
 		assert.ok(!plain.glyphs.includes("∇")); // Same unchanged assistant/user MessageResponse path.
 	});
 
-	it("teaching quiz/ask/explain still repair the same bytes without mutating their inputs", () => {
+	it("teaching shape parsing retains source bytes; presentation alone recovers them", () => {
 		const quiz = { question: doubled, options: [{ label: "yes" }, { label: "no" }], correctAnswer: "yes", explanation: debris };
 		const ask = { question: doubled };
 		const explain = { question: doubled, correctAnswer: debris };
 		const before = structuredClone({ quiz, ask, explain });
-		assert.equal(parseQuizInput(quiz)?.question, clean);
-		assert.equal(parseQuizInput(quiz)?.explanation, `$${repairedDebris}$`);
-		assert.equal(parseAskInput(ask)?.question, clean);
-		assert.equal(parseExplainInput(explain)?.question, clean);
-		assert.equal(parseExplainInput(explain)?.correctAnswer, `$${repairedDebris}$`);
-		assertMath(renderToStaticMarkup(<MessageResponse>{parseAskInput(ask)!.question}</MessageResponse>));
+		assert.equal(parseQuizInput(quiz)?.question, doubled);
+		assert.equal(parseQuizInput(quiz)?.explanation, debris);
+		assert.equal(parseAskInput(ask)?.question, doubled);
+		assert.equal(parseExplainInput(explain)?.question, doubled);
+		assert.equal(parseExplainInput(explain)?.correctAnswer, debris);
+		assertMath(renderToStaticMarkup(<ToolContentResponse>{parseAskInput(ask)!.question}</ToolContentResponse>));
 		assert.deepEqual({ quiz, ask, explain }, before);
 	});
 

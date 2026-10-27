@@ -1,8 +1,8 @@
 "use client";
 
-import { MessageResponse } from "@/components/ai-elements/message";
+import { ToolContentResponse } from "@/components/ai-elements/message";
 import { cn } from "@/lib/utils";
-import { repairMathForDisplay, type ArtifactPartProps } from "@/src/core";
+import type { ArtifactPartProps } from "@/src/core";
 
 /**
  * The practice transcript cards (practice sessions, owner design
@@ -66,7 +66,7 @@ export function ProblemCard({ part }: ArtifactPartProps) {
 		<div data-testid="problem-card" className="lh-card-enter my-1 rounded-xl border bg-card p-4">
 			<div className="mb-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">Problem</div>
 			<div className="lh-prose text-[15px]">
-				<MessageResponse>{repairMathForDisplay(statement)}</MessageResponse>
+				<ToolContentResponse>{statement}</ToolContentResponse>
 			</div>
 		</div>
 	);
@@ -133,7 +133,7 @@ export function ConcludeCard({ part }: ArtifactPartProps) {
 			    (owner round 3): the same quiet 50% register as quiz explanations. */}
 			{verdict.length > 0 && (
 				<div className="text-sm text-foreground/50">
-					<MessageResponse>{repairMathForDisplay(verdict)}</MessageResponse>
+					<ToolContentResponse>{verdict}</ToolContentResponse>
 				</div>
 			)}
 			{/* Then the divider, then the labeled model solution (Slice G: the
@@ -144,7 +144,7 @@ export function ConcludeCard({ part }: ArtifactPartProps) {
 					<div>
 						<div className="mb-0.5 text-xs font-medium uppercase tracking-wide text-muted-foreground">Model solution</div>
 						<div className="lh-prose text-[15px]">
-							<MessageResponse>{repairMathForDisplay(reveal)}</MessageResponse>
+							<ToolContentResponse>{reveal}</ToolContentResponse>
 						</div>
 					</div>
 				</>

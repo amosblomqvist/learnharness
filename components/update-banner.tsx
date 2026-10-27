@@ -3,32 +3,19 @@
 /**
  * The auto-update banner (Wave C, owner 2026-10-10: silent download +
  * restart-banner UX). The shell pushes "lh:update-status" once a staged
- * update exists (electron/main.cjs update-downloaded); this is the whole
- * renderer surface — a small fixed card, bottom-right, offering Restart.
+ * update exists (electron/main.cjs update-downloaded). Snapshot retrieval
+ * also covers a late load. The card offers Restart alongside Settings.
  * Browser builds have no window.lh and never see a push: renders null.
  *
  * No dismiss: a downloaded update installs on quit anyway
  * (autoInstallOnAppQuit); the banner is a courtesy, not a gate.
  */
 
-import { useEffect, useState } from "react";
-
-// The window.lh bridge type lives in components/sidebar.tsx (the incumbent
-// declare-global) — onUpdateStatus/installUpdate are declared there too.
-
-type UpdateStatus = { status: string; version: string | null };
+import { useUpdateState } from "@/components/settings/update-settings.tsx";
 
 export default function UpdateBanner() {
-	const [ready, setReady] = useState<UpdateStatus | null>(null);
-
-	useEffect(() => {
-		// Absent bridge (browser / dev) → stays hidden forever.
-		return window.lh?.onUpdateStatus?.((s) => {
-			if (s?.status === "downloaded") setReady(s);
-		});
-	}, []);
-
-	if (!ready) return null;
+	const { state: ready } = useUpdateState();
+	if (ready?.status !== "downloaded") return null;
 	return (
 		<div
 			data-testid="update-banner"

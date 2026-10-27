@@ -15,7 +15,7 @@ import { BrailleSpinner } from "@/components/braille-spinner";
  *
  *   job unknown → "dispatched" pulse (the jobs feed hasn't seen it yet)
  *   running     → live activity card (activity line + elapsed)
- *   done/error  → quiet one-liner ("delivered" / "failed") — the artifact
+ *   done/error  → quiet one-liner ("finished" / "failed") — the artifact
  *                 itself arrives in the steer message right below, so the
  *                 box must not duplicate it.
  */
@@ -54,7 +54,7 @@ export function DispatchCard({ toolCallId, kind }: { toolCallId: string; kind: J
 		>
 			{failed ? <XIcon className="size-3.5 text-red-500" /> : <CheckIcon className="size-3.5" />}
 			<span className="font-medium uppercase tracking-wide">{label}</span>
-			<span>{failed ? "failed" : "delivered"}</span>
+			<span>{failed ? "failed" : "finished"}</span>
 		</div>
 	);
 }

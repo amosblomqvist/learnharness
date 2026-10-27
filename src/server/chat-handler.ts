@@ -17,7 +17,7 @@ import { createExtractionPipeline } from "../agent/subagents/extraction.ts";
 import type { ModelRole } from "../../config.ts";
 import {
 	deliverJobResult,
-	noteSteerVisible,
+	noteSteersDurable,
 	reconcileUserSteers,
 	registerLiveAgent,
 	restoreUncommittedAutomatic,
@@ -42,8 +42,8 @@ import {
 import { modelsNotConfigured, providerKeyMissing as providerKeyMissingEnvelope, type ProviderKeyMissing } from "../core/settings.ts";
 import { beginTurn, endTurn } from "./turn-liveness.ts";
 import { applyParkedDismissal } from "./dismissal-park.ts";
-import { registerTurn, unregisterTurn } from "./turn-runs.ts";
-import { persistTurn, triggerExtraction } from "./turn-service.ts";
+import { registerTurn, rememberTurnFailure, unregisterTurn } from "./turn-runs.ts";
+import { persistTurn, triggerExtraction, TurnPersistenceError } from "./turn-service.ts";
 import { hasProbeDone, danglingQuestionOf } from "../core/native-messages.ts";
 import { composeInstructions } from "../agent/teacher-agent.ts";
 import { ensureCompacted, kickCompaction, effectiveThresholdTokens } from "./compaction.ts";
@@ -58,7 +58,7 @@ import {
 	type TurnInput,
 } from "../core/input-events.ts";
 import { steerDelivered } from "../core/contracts.ts";
-import type {CallUsage, SteerMessage} from "../core/contracts.ts";
+import type {CallUsage} from "../core/contracts.ts";
 
 /**
  * One chat turn over the server-owned native record. Framework-free (plain
@@ -78,6 +78,10 @@ import type {CallUsage, SteerMessage} from "../core/contracts.ts";
  * wake pipeline's server-side steers (src/server/jobs.ts) — one code path
  * for write-ahead persistence, turn liveness, and the turn services.
  */
+
+function settlementErrorText(error: unknown): string {
+	return error instanceof TurnPersistenceError ? error.message : "An error occurred.";
+}
 
 const jobRunner = createJobRunner({
 	chatStore: stores.chatStore,
@@ -255,7 +259,8 @@ export async function handleChatInput(
 		chatId,
 	);
 	const compactedRecord = stores.chatStore.getChat(chatId);
-	if (compactedRecord) record = compactedRecord;
+	if (!compactedRecord) return Response.json({ error: "Unknown chat" }, { status: 404 });
+	record = compactedRecord;
 
 	// The input's native appends (pure; the honest 400 for an answer with no
 	// pending question call). Computed BEFORE beginTurn so a refused input
@@ -289,7 +294,11 @@ export async function handleChatInput(
 	// the composer gates), so adjacency holds by construction.
 	if (input.type === "answer" && danglingQuestionOf([...record.messages, ...appends]) !== null) {
 		const merged = [...record.messages, ...appends];
-		stores.chatStore.saveMessages(chatId, merged);
+		try { stores.chatStore.saveMessages(chatId, merged); }
+		catch (err) {
+			console.error(`[chat ${chatId}] write-ahead persist failed:`, err);
+			return new Response("Your input could not be saved. Please try again.", { status: 500 });
+		}
 		emit("record-changed", { chatId });
 		return settledTurnResponse(); // the cheap terminal — no beginTurn, no turn
 	}
@@ -313,14 +322,17 @@ export async function handleChatInput(
 	let persistBaseCount = stagedAutomatic ? record.messages.length : merged.length;
 	try {
 		if (!stagedAutomatic) stores.chatStore.saveMessages(chatId, merged);
-		// Dock fix (owner ruling 2026-09-26): persisted markers are visible
-		// in the record — flip their jobs now (the wake's steers ride this
-		// write-ahead; the delivering turn may run for minutes).
-		for (const appended of stagedAutomatic ? [] : appends) {
-			if ((appended as { role?: string }).role === "custom") noteSteerVisible(appended as SteerMessage);
-		}
 	} catch (err) {
 		console.error(`[chat ${chatId}] write-ahead persist failed:`, err);
+		endTurn(chatId);
+		return new Response("Your input could not be saved. Please try again.", { status: 500 });
+	}
+	// Visibility bookkeeping is not the canonical save. Its failure must
+	// neither misreport a saved input as lost nor prevent the turn running.
+	try {
+		if (!stagedAutomatic) noteSteersDurable(chatId, merged);
+	} catch (err) {
+		console.error(`[chat ${chatId}] input visibility bookkeeping failed:`, err);
 	}
 
 	// MONEY CHANNEL (wave 4): one collector per request, fed by the agent's
@@ -370,7 +382,11 @@ export async function handleChatInput(
 		foregroundOwed: !callPurpose.background,
 		purpose: callPurpose,
 		scopeCurrent: (scope) => connectionScopeCurrent(conversation.provider, scope),
-		commitStaged: () => { stores.chatStore.saveMessages(chatId, merged); persistBaseCount = merged.length; },
+		commitStaged: () => {
+			stores.chatStore.saveMessages(chatId, merged);
+			persistBaseCount = merged.length;
+			noteSteersDurable(chatId, merged);
+		},
 		restoreAutomatic: (automaticIds, retainedIds) => restoreUncommittedAutomatic(chatId, constructed, automaticIds, retainedIds),
 	});
 	const agentOpts: AgentBuildOptions = {
@@ -468,7 +484,8 @@ export async function handleChatInput(
 		// run's first LLM call (the native replacement for continuation
 		// coalescing). Settlement still cannot beat the flow below: it needs
 		// a streamed response, which never happens inside the constructor.
-		registerLiveAgent(chatId, constructed);
+		registerLiveAgent(chatId, constructed, input.type !== "steers" && input.type !== "continue",
+			input.type === "steers" ? new Set(appends.map((message) => message.id)) : undefined);
 		// Debug recorder run marker (owner, 2026-10-04): correlates the
 		// JSONL event stream with the record's turns; no-op unless
 		// LH_PROVIDER_EVENTS=1.
@@ -496,10 +513,26 @@ export async function handleChatInput(
 				console.error(`[chat ${chatId}] turn error:`, error);
 				return "An error occurred.";
 			},
+			onSettleError: settlementErrorText,
+			onSettleFailure: (error, reportedErrorText) => {
+				// POST only acknowledges acceptance; the submitter may attach
+				// after this turn has already failed and left the registry.
+				rememberTurnFailure(chatId, reportedErrorText ?? settlementErrorText(error));
+				endTurn(chatId);
+				unregisterTurn(chatId);
+				unregisterLiveAgent(chatId);
+				// The canonical save may have succeeded before later bookkeeping
+				// threw. Reconcile against actual durability, never replay input
+				// merely because usage/extraction/other settlement work failed.
+				const persisted = stores.chatStore.getChat(chatId)?.messages ?? [];
+				reconcileUserSteers(chatId, persisted);
+				settleSteers(chatId, persisted, true, constructed);
+			},
 			onFinish: (turnMessages, isAborted) => {
 				// Wave B: the record write is the agent's own final state —
 				// the new messages are the slice past the merged base.
 				const stamped = persistTurn(stores.chatStore, chatId, persistBaseCount, turnMessages, isAborted);
+				noteSteersDurable(chatId, stores.chatStore.getChat(chatId)?.messages ?? stamped);
 				// usage log append (idempotent per turn id) — the stats bar
 				// refolds this on the client after the turn settles. The
 				// provenance message is the turn's FIRST new assistant message.
@@ -545,7 +578,7 @@ export async function handleChatInput(
 				// resolve; stranded markers return to pending), then let
 				// the pump take any stragglers down the idle wake.
 				unregisterLiveAgent(chatId);
-				settleSteers(chatId, stamped);
+				settleSteers(chatId, stamped, false, constructed);
 				// Composer steers (2026-10-03): delivered ids dropped, stranded
 				// ones stay parked for the chat's next run (the registry is the
 				// stranding safety net — the agent's undrained copy died above).

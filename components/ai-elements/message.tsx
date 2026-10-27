@@ -34,7 +34,7 @@ import {
   type PluginConfig,
 } from "streamdown";
 import { mdComponents } from "@/components/md-blocks";
-import { transformMathDelimiters } from "@/src/core";
+import { repairMathForDisplay, transformMathDelimiters } from "@/src/core";
 
 export type MessageProps = HTMLAttributes<HTMLDivElement> & {
   from: LhViewMessage["role"];
@@ -387,6 +387,16 @@ export const MessageResponse = memo(
 );
 
 MessageResponse.displayName = "MessageResponse";
+
+/** Recovery is a tool-text presentation concern, not a shape/answer-data
+ * transform. Ordinary assistant/user prose keeps MessageResponse unchanged. */
+export function ToolContentResponse({ children, ...props }: MessageResponseProps) {
+  return (
+    <MessageResponse {...props}>
+      {typeof children === "string" ? repairMathForDisplay(children) : children}
+    </MessageResponse>
+  );
+}
 
 export type MessageToolbarProps = ComponentProps<"div">;
 

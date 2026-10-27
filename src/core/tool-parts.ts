@@ -30,7 +30,6 @@
 import { Value } from "typebox/value";
 import type { TSchema } from "typebox";
 import { quizDisplayInputSchema, askInputSchema, askOptionProblems, quizInputProblems, explainInputProblems, explainDisplayInputSchema, type AskToolInput, type QuizToolInput, type ExplainToolInput } from "./question-core.ts";
-import { repairMathForDisplay } from "./math-delims.ts";
 import { healEncodedArguments } from "./argument-heal.ts";
 import { probeDoneInputSchema, type ProbeDoneInput } from "./contracts/probe.ts";
 
@@ -67,28 +66,9 @@ function boundaryParse<T>(schema: TSchema, input: unknown): T | undefined {
  * never have been posed (e.g. `correctAnswer: undefined`, which Convert
  * widens to "") renders as a quiet fallback, not a broken quiz.
  */
-/** LaTeX-escape restoration, deep over every string field (the JSON-debris
- *  fix, owner ruling 2026-09-26): records persist RAW call args, so
- *  single-backslash LaTeX eaten by JSON escape resolution (FF ate the 'f' of
- *  \forall, VT the 'v' of \varphi, TAB the 't' of \to) survives to the
- *  display path. This is the ONE seam every rendered question passes
- *  through — new turns and already-poisoned records alike heal here.
- *  healOverescapedCommands (owner ruling 2026-10-15) rides the same walk:
- *  the same models also stochastically DOUBLE command backslashes
- *  (`\\nabla` saved where `\nabla` was meant — KaTeX shows the row break
- *  plus "nabla" as letters), so even runs before a command start inside
- *  balanced math spans collapse to one backslash. */
-function restoreMathEscapesDeep(value: unknown): unknown {
-	if (typeof value === "string") return repairMathForDisplay(value);
-	if (Array.isArray(value)) return value.map(restoreMathEscapesDeep);
-	if (typeof value === "object" && value !== null) {
-		const out: Record<string, unknown> = {};
-		for (const [k, v] of Object.entries(value)) out[k] = restoreMathEscapesDeep(v);
-		return out;
-	}
-	return value;
-}
-
+/** Shape parsing never repairs authored text. The dock builds its answer
+ * data from this source copy; recovery belongs exclusively to presentation
+ * (ToolContentResponse), never option identities, grading, or snapshots. */
 export function parseQuizInput(input: unknown): QuizToolInput | undefined {
 	// quizDisplayInputSchema (question-core, owner 2026-10-03): base + the
 	// OPTIONAL `type` — new teach-phase records carry predict|check and the
@@ -100,7 +80,7 @@ export function parseQuizInput(input: unknown): QuizToolInput | undefined {
 	// wobble must heal HERE too or a posed quiz renders invisible (the
 	// tool-parts law). healEncodedArguments is the same pure pass the
 	// boundary's withArgumentHeal runs.
-	const healedInput = healEncodedArguments(restoreMathEscapesDeep(input), quizDisplayInputSchema);
+	const healedInput = healEncodedArguments(input, quizDisplayInputSchema);
 	const cleaned = boundaryParse<QuizToolInput>(quizDisplayInputSchema, healedInput);
 	if (!cleaned) return undefined;
 	if (quizInputProblems(cleaned).length > 0) return undefined;
@@ -114,7 +94,7 @@ export function parseQuizInput(input: unknown): QuizToolInput | undefined {
  * keying, so they parse to undefined exactly like the zod seam did).
  */
 export function parseAskInput(input: unknown): AskToolInput | undefined {
-	const cleaned = boundaryParse<AskToolInput>(askInputSchema, restoreMathEscapesDeep(input));
+	const cleaned = boundaryParse<AskToolInput>(askInputSchema, input);
 	if (!cleaned) return undefined;
 	if (askOptionProblems(cleaned.options ?? []).length > 0) return undefined;
 	return cleaned;
@@ -127,7 +107,7 @@ export function parseAskInput(input: unknown): AskToolInput | undefined {
  *  variants share the same fields; the teacher's nodeId is an unknown
  *  key Value.Clean strips, same as the quiz seam. */
 export function parseExplainInput(input: unknown): ExplainToolInput | undefined {
-	const cleaned = boundaryParse<ExplainToolInput>(explainDisplayInputSchema, restoreMathEscapesDeep(input));
+	const cleaned = boundaryParse<ExplainToolInput>(explainDisplayInputSchema, input);
 	if (!cleaned) return undefined;
 	if (explainInputProblems(cleaned).length > 0) return undefined;
 	return cleaned;

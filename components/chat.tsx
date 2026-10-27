@@ -38,7 +38,6 @@ import {
 	messageAnchorId,
 	textPartMessageId,
 	kbdEventForAction as kbdEventForChat,
-	needsContinuation,
 	type ChatInput,
 	type ChatSettings,
 	type LhMessage,
@@ -57,7 +56,7 @@ import { PracticeDock } from "@/components/practice-dock";
 import { ThinkingCard, type PracticeThinkingData } from "@/components/practice-cards";
 import { GraphContextCard, type GraphContextData } from "@/components/graph-context-card";
 import { TopBar } from "@/components/top-bar";
-import type { ArtifactPartProps, JobRecord, Phase3, QuestionAnswerData, TurnUsage, SessionPricing } from "@/src/core";
+import type { ArtifactPartProps, JobRecord, Phase3, QuestionAnswerData, QuestionFormDraft, TurnUsage, SessionPricing } from "@/src/core";
 import type { LhViewMessage } from "@/src/core";
 import { PhaseChip, PhaseDivider } from "@/components/phase-divider";
 import {
@@ -198,6 +197,7 @@ export function Chat({
 	chatId,
 	title,
 	initialMessages,
+	initialError,
 	initialPrompt,
 	initiallyInFlight,
 	initiallyCompacting = false,
@@ -207,6 +207,8 @@ export function Chat({
 	chatId: string;
 	title: string;
 	initialMessages: LhMessage[];
+	/** Memory-only settlement notice supplied on reopening. */
+	initialError?: string;
 	/** The session kind (practice sessions, owner 2026-10-04): practice
 	 *  renders no phase chip (no probe→teach arc applies) and a Practice
 	 *  tag rides the header instead. */
@@ -236,8 +238,8 @@ export function Chat({
 	// (core/view.ts projectView); sends are ONE explicit input event each
 	// ({chatId, input} — the stash indirection died with the SDK), and the
 	// turn stream is the VERBATIM AgentEvent passthrough the server emits.
-	const { messages, nativeMessages, contextTokens, send, steer, steerQueue, submitAnswer, dismissQuestion, dismissProblem, setMessages, adoptRecord, status, error, stop, clearError, resumeStream, setReattachSettled } =
-		useChatSession({ chatId, initialMessages, initiallyInFlight });
+	const { messages, nativeMessages, contextTokens, send, continueIfOwed, steer, steerQueue, submitAnswer, dismissQuestion, dismissProblem, questionDraft, saveQuestionDraft, setMessages, adoptRecord, status, error, stop, clearError, resumeStream, setReattachSettled } =
+		useChatSession({ chatId, initialMessages, initialError, initiallyInFlight });
 
 	const sessionFindScopeRef = useRef<HTMLDivElement | null>(null);
 	const scrollContextRef = useRef<StickToBottomContext | null>(null);
@@ -434,9 +436,7 @@ export function Chat({
 	useEffect(() => {
 		if (mountContinuation.current) return;
 		mountContinuation.current = true;
-		if (!turnInFlight && status === "ready" && needsContinuation(initialMessages)) {
-			void send({ type: "continue" });
-		}
+		if (!turnInFlight) continueIfOwed(initialMessages);
 		// mount-only by design (turnInFlight read at initial value)
 	}, []);
 
@@ -532,10 +532,12 @@ export function Chat({
 	}, []);
 	const pendingQuestionId = pending?.toolCallId ?? null;
 	useEffect(() => {
-		// A new pending question never inherits the previous one's draft.
-		readingThinkingRef.current = "";
-		setReadingThinking("");
-	}, [pendingQuestionId]);
+		// Different calls never share a draft; a failed submission of THIS
+		// call restores the reading channel alongside the form's snapshot.
+		const reading = pendingQuestionId ? questionDraft(pendingQuestionId)?.readingThinking ?? "" : "";
+		readingThinkingRef.current = reading;
+		setReadingThinking(reading);
+	}, [pendingQuestionId, questionDraft]);
 
 	// The phase at every message (one linear fold): the transcript draws a
 	// color-coded dotted divider at each boundary; the header chip reads the
@@ -717,20 +719,20 @@ export function Chat({
 	const syncFromServer = useCallback(async () => {
 		const res = await fetch(`/api/chats/${chatId}`);
 		if (!res.ok) return;
-		const record = (await res.json()) as { messages?: LhMessage[]; turns?: TurnUsage[]; pricing?: SessionPricing };
+		const record = (await res.json()) as { messages?: LhMessage[]; turns?: TurnUsage[]; pricing?: SessionPricing; turnError?: string };
 		if (Array.isArray(record.turns)) setTurns(record.turns);
 		setPricing(record.pricing);
 		if (!Array.isArray(record.messages)) return;
-		setMessages(record.messages);
+		setMessages(record.messages, record.turnError);
 		// The continuation seam (contracts.ts protocol §4): a job result
 		// landing in the record leaves the agent owing a continuation — the
 		// record ENDS on un-consumed results, the dock owns no question, and
 		// nothing runs. The native fold (needsContinuation) is the old SDK
 		// lastAssistantMessageIsCompleteWithToolCalls check.
-		if (status === "ready" && needsContinuation(record.messages)) {
-			void send({ type: "continue" });
-		}
-	}, [chatId, setMessages, send, status]);
+		// Current model truth also guards retained/live failures: canonical
+		// sync must never automatically replace a reply that failed to save.
+		continueIfOwed(record.messages);
+	}, [chatId, setMessages, continueIfOwed]);
 
 	// The settled terminal's other half (stream-reattach wave): the
 	// transport resolved turn-settled — no turn running, the record is
@@ -905,8 +907,8 @@ export function Chat({
 		// (endTurn emits from onFinish before the response terminates, so the
 		// SSE frame reliably beats [DONE]) — the handler below cannot sync
 		// there, it flags instead, and THIS flip consumes the flag: the record
-		// is guaranteed durable (endTurn fires only after persistTurn, the S2
-		// ordering law), so replacing the view onto it absorbs the tail's
+		// reflects durable truth (a failed settlement retains its notice,
+		// not its unsaved reply), so replacing the view absorbs the tail's
 		// streamed c_-id copies into base under their server ids. Without
 		// this the tail kept those copies forever and the next send's
 		// steer-adoption window rendered them a second time. The wake handoff
@@ -1596,6 +1598,8 @@ export function Chat({
 				    fold) and NEVER overlaps the composer. */}
 				<DockOverlay
 					pending={pending}
+					initialQuestionDraft={pending ? questionDraft(pending.toolCallId)?.form : undefined}
+					onSaveQuestionDraft={(form) => { if (pending) saveQuestionDraft(pending.toolCallId, { form }); }}
 					practice={activeProblem}
 					compactionRunning={compacting}
 					onSubmitThinking={submitThinking}
@@ -1663,8 +1667,10 @@ export function Chat({
 						// ride the same callback (QuestionAnswerData.dismissed). The
 						// reading-thinking draft rides along (owner 2026-10-03) — the
 						// check answer is its only carrier.
+						saveQuestionDraft(pending.toolCallId, { readingThinking: readingThinkingRef.current });
 						const reading = readingThinkingRef.current.trim() || undefined;
-						clearReadingThinking();
+						// The pending-id effect clears this only when the question
+						// actually leaves. An offline preflight keeps the draft visible.
 						submitAnswer(pending.tool, pending.toolCallId, reading ? { ...output, readingThinking: reading } : output);
 					}}
 				/>
@@ -1821,6 +1827,8 @@ export function shouldStampGeometryMute(nextH: number, prevH: number, pending: b
 
 function DockOverlay({
 	pending,
+	initialQuestionDraft,
+	onSaveQuestionDraft,
 	practice,
 	compactionRunning,
 	onSubmitThinking,
@@ -1843,6 +1851,8 @@ function DockOverlay({
 	queuedSteers,
 }: {
 	pending: ReturnType<typeof findPendingToolCall>;
+	initialQuestionDraft?: QuestionFormDraft;
+	onSaveQuestionDraft: (draft: QuestionFormDraft) => void;
 	/** Compaction running for this chat (round 14) — the docks' submit
 	 *  affordance gate (the server's registry is the real one). */
 	compactionRunning: boolean;
@@ -2309,6 +2319,8 @@ function DockOverlay({
 									phase={phase}
 									onExpand={expandAndReveal}
 									onSubmit={onSubmitAnswer}
+									initialDraft={initialQuestionDraft}
+									onSaveDraft={onSaveQuestionDraft}
 									onEscape={dictationCancel}
 									dictationClaim={!revealPending}
 									compactionRunning={compactionRunning}

@@ -6,16 +6,19 @@ import { notifySettingsSaved } from "@/components/settings-signal";
 import { ConnectionDialog, ConnectionFooter, ConnectionRow } from "./connection-controls";
 import { ChatGPTConnection } from "./chatgpt-connection";
 import { Toggle } from "./controls";
+import { useNativeSubscriptionBridge } from "./subscription-client";
 
 export const COPILOT_POLICY_NOTICE = "Pi's native Copilot sign-in may enable additional models whose policy is not yet configured. Models explicitly disabled by policy are not enabled. Organization restrictions still apply.";
 export const SUBSCRIPTION_BACKGROUND_HINT = "Allow LearnHarness helper agents and automatic follow-ups to use this connection.";
-export function subscriptionNotice(label: string): string { return `Your prompts, tool results, and relevant session context are sent to ${label} to run the work you select. Credentials are stored locally in an owner-only plaintext file. Provider terms, data-use policies, and plan limits apply. This connection never falls back to an API key.`; }
-export function subscriptionDisconnectCopy(label: string): string { return `Disconnect ${label} from LearnHarness? This stops work using this connection and removes its saved credentials from this device. It does not cancel your subscription or revoke access at the provider. Saved model choices will remain unavailable until you reconnect or change them.`; }
+export function subscriptionNotice(label: string, web = false): string { return `Your prompts, tool results, and relevant session context are sent to ${label} to run the work you select. Credentials are stored ${web ? "on the machine running LearnHarness" : "locally"} in an owner-only plaintext file. Provider terms, data-use policies, and plan limits apply. This connection never falls back to an API key.`; }
+export function subscriptionDisconnectCopy(label: string, web = false): string { return `Disconnect ${label} from LearnHarness? This stops work using this connection and removes its saved credentials from ${web ? "the machine running LearnHarness" : "this device"}. It does not cancel your subscription or revoke access at the provider. Saved model choices will remain unavailable until you reconnect or change them.`; }
 export function emptySubscriptionStatus(providerId: NativeSubscriptionProviderId): NativeSubscriptionStatus { return { providerId, available: false, connected: false, pending: false, allowBackgroundUse: true, connectionId: null, epoch: 0, authorityRevision: 0, revision: 0 }; }
 const Context = createContext({ statuses: [] as NativeSubscriptionStatus[], busy: false, open: (_providerId: NativeSubscriptionProviderId) => {} });
 const CONTROL_ERROR = "The connection could not be changed. Try again.";
 
 export function NativeSubscriptionUIProvider({ children }: { children: React.ReactNode }) {
+	const bridge = useNativeSubscriptionBridge();
+	const web = typeof window !== "undefined" && bridge !== window.lh?.subscriptions;
 	const [statuses, setStatuses] = useState<NativeSubscriptionStatus[]>([]);
 	const [dialog, setDialog] = useState<NativeSubscriptionProviderId | null>(null);
 	const [view, setView] = useState<"notice" | "connection" | "manage">("notice");
@@ -30,7 +33,7 @@ export function NativeSubscriptionUIProvider({ children }: { children: React.Rea
 	async function refresh() {
 		const request = ++sequence.current;
 		try {
-			const values = await window.lh?.subscriptions?.status();
+			const values = await bridge?.status();
 			if (!mounted.current || request !== sequence.current || !Array.isArray(values)) return;
 			const accepted = NATIVE_SUBSCRIPTIONS.map(({ providerId }) => {
 				const next = values.find((s) => s.providerId === providerId), old = statusesRef.current.find((s) => s.providerId === providerId);
@@ -41,10 +44,10 @@ export function NativeSubscriptionUIProvider({ children }: { children: React.Rea
 	}
 	useEffect(() => {
 		mounted.current = true; void refresh();
-		const off = window.lh?.subscriptions?.onChange(() => { void refresh(); notifySettingsSaved("keys"); });
+		const off = bridge?.onChange(() => { void refresh(); notifySettingsSaved("keys"); });
 		return () => { mounted.current = false; generation.current++; off?.(); };
 		// The root-lifetime subscriber reads current state through refs.
-	}, []);
+	}, [bridge]);
 	useEffect(() => { setPromptValue(""); }, [prompt?.id]);
 	// Remember the attempt this dialog has shown: after Cancel a superseded refresh can leave its stale pending status in state, and that must not read as a foreign attempt.
 	useEffect(() => { if (dialog && interaction?.attemptId) shown.current = interaction.attemptId; }, [dialog, interaction?.attemptId]);
@@ -79,7 +82,6 @@ export function NativeSubscriptionUIProvider({ children }: { children: React.Rea
 		if (!dialog || busy) return;
 		adopted.current = null;
 		if (confirm) { setConfirm(false); setError(null); return; }
-		const bridge = window.lh?.subscriptions;
 		if ((status?.pending || operation === "login") && bridge) { void control(() => bridge.cancel(dialog), true); return; }
 		generation.current++; setDialog(null); setError(null);
 	}
@@ -88,23 +90,21 @@ export function NativeSubscriptionUIProvider({ children }: { children: React.Rea
 		generation.current++; setError(null); setConfirm(false); setBackground(status.allowBackgroundUse); setBackgroundDirty(false); setView("notice");
 	}
 	async function login() {
-		const bridge = window.lh?.subscriptions;
 		if (!dialog || !bridge || operation || !status?.available) return;
 		const owner = ++generation.current; setOperation("login"); setError(null);
 		try { await bridge.login(dialog, backgroundDirty ? background : undefined); await refresh(); if (mounted.current && generation.current === owner) setDialog(null); }
 		catch { if (mounted.current && generation.current === owner) setError("Sign-in did not complete. Try connecting again."); }
 		finally { if (mounted.current && generation.current === owner) setOperation(null); }
 	}
-	const bridge = typeof window === "undefined" ? undefined : window.lh?.subscriptions;
 	return <Context.Provider value={{ statuses, busy: !!operation, open }}>
 		{children}
 		{dialog && descriptor && status && <ConnectionDialog key={`${dialog}:${view}:${confirm}`} label={`${descriptor.label} connection`} testid="subscription-connection-dialog" backdropTestid="subscription-dialog-backdrop" busy={busy} onClose={close}>
 			<h2 className="text-sm font-semibold text-foreground">{descriptor.label}</h2>
 			{confirm ? <>
 				<p className="mt-3 text-sm font-semibold text-red-400">Disconnect {descriptor.label}?</p>
-				<p className="mt-3 text-xs leading-relaxed text-muted-foreground">{subscriptionDisconnectCopy(descriptor.label)}</p>
+				<p className="mt-3 text-xs leading-relaxed text-muted-foreground">{subscriptionDisconnectCopy(descriptor.label, web)}</p>
 			</> : view === "notice" ? <>
-				<p className="mt-3 text-xs leading-relaxed text-muted-foreground" data-testid="subscription-privacy-notice">{subscriptionNotice(descriptor.label)}</p>
+				<p className="mt-3 text-xs leading-relaxed text-muted-foreground" data-testid="subscription-privacy-notice">{subscriptionNotice(descriptor.label, web)}</p>
 				{dialog === "github-copilot" && <p className="mt-3 text-xs leading-relaxed text-muted-foreground" data-testid="copilot-policy-notice">{COPILOT_POLICY_NOTICE}</p>}
 			</> : <>
 				<div className="mt-4 flex items-center gap-3 text-xs text-foreground">
