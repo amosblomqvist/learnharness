@@ -87,11 +87,17 @@ async function run(mode) {
 		// a path that does not exist is a recoverable not-found (no process, no
 		// credential anywhere in the status), and the picker keeps it out.
 		assert.equal(catalog.find((provider) => provider.id === "claude-local")?.keyPresent, false);
-		// Both modes share the profile's settings file: start from the defaults (replace-whole PUT).
-		assert.equal((await fetch(origin + "/api/settings/claudeLocal", { method: "PUT", headers: { "content-type": "application/json" }, body: "{}", signal: AbortSignal.timeout(60000) })).status, 200);
+		// Both modes share the profile's settings file: start from the defaults
+		// (replace-whole PUT). The claudeLocal section takes the controls' gate
+		// (its path names an executable the server runs): a plain PUT is a 403.
+		const putLocal = (body) => fetch(origin + "/api/settings/claudeLocal", { method: "PUT", headers: { origin, "sec-fetch-site": "same-origin", "x-learnharness-subscriptions": "1", "content-type": "application/json" }, body: JSON.stringify(body), signal: AbortSignal.timeout(60000) });
+		assert.equal((await fetch(origin + "/api/settings/claudeLocal", { method: "PUT", headers: { "content-type": "application/json" }, body: "{}", signal: AbortSignal.timeout(60000) })).status, 403);
+		assert.equal((await putLocal({})).status, 200);
 		const local = await (await request("/api/claude-local")).json();
 		assert.equal(local.state, "disabled"); assert.equal(local.enabled, false);
-		assert.equal((await fetch(origin + "/api/settings/claudeLocal", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ enabled: true, binaryPath: path.join(profile, "no-such-claude") }), signal: AbortSignal.timeout(60000) })).status, 200);
+		// Only an absolute path to a Claude Code executable name is accepted.
+		assert.equal((await putLocal({ enabled: true, binaryPath: path.join(profile, "no-such-claude") })).status, 400);
+		assert.equal((await putLocal({ enabled: true, binaryPath: path.join(profile, "no-such", "claude") })).status, 200);
 		const probed = await (await request("/api/claude-local", { op: "probe" })).json();
 		assert.equal(probed.state, "not-found", JSON.stringify(probed)); assert.match(probed.error, /No Claude Code executable at/);
 		assert(!/token|credential|email/i.test(JSON.stringify(probed)));
