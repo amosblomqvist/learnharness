@@ -37,7 +37,7 @@ describe("standalone JavaScript tracing exclusions and native workaround policy"
 		assert.equal(ignore(`${root}/node_modules/gcp-metadata/build/src/index.js`), false);
 	});
 	it("preserves all secret exclusions exactly", () => {
-		assert.deepEqual(patterns, ["**/data/**/*", "auth.json", "chatgpt-credentials.json*", "github-copilot-credentials.json*", "xai-credentials.json*", ".env*"]);
+		assert.deepEqual(patterns, ["**/data/**/*", "auth.json", "chatgpt-credentials.json*", "github-copilot-credentials.json*", "xai-credentials.json*", ".env*", "node_modules/@anthropic-ai/claude-agent-sdk-*/**/*"]);
 	});
 	it("retains exactly the narrow native-Turbopack closure workaround and existing runtime includes", () => {
 		assert.deepEqual(nextConfig.outputFileTracingIncludes!["*"], [
@@ -53,10 +53,18 @@ describe("standalone JavaScript tracing exclusions and native workaround policy"
 			"node_modules/gcp-metadata/**/*",
 			"node_modules/json-bigint/**/*",
 			"node_modules/bignumber.js/**/*",
+			"node_modules/@anthropic-ai/claude-agent-sdk/**/*",
 		]);
 	});
+	it("excludes every Agent SDK platform binary package but keeps the SDK's own JavaScript", () => {
+		const ignored = picomatch(patterns, { contains: true, dot: true });
+		for (const relative of ["node_modules/@anthropic-ai/claude-agent-sdk-linux-x64/claude", "node_modules/@anthropic-ai/claude-agent-sdk-darwin-arm64/package.json", "node_modules/@anthropic-ai/claude-agent-sdk-win32-x64/claude.exe"]) assert.equal(ignored(relative), true, relative);
+		for (const relative of ["node_modules/@anthropic-ai/claude-agent-sdk/sdk.mjs", "node_modules/@anthropic-ai/claude-agent-sdk/core-0bjz4v5z.mjs", "node_modules/@anthropic-ai/sdk/index.mjs"]) assert.equal(ignored(relative), false, relative);
+		assert.ok(nextConfig.serverExternalPackages!.includes("@anthropic-ai/claude-agent-sdk"));
+		assert.ok(nextConfig.serverExternalPackages!.includes("@modelcontextprotocol/sdk"));
+	});
 	it("limits the workaround to its three packages, never learner data or unrelated dependencies", () => {
-		const closure = nextConfig.outputFileTracingIncludes!["*"]!.slice(-3);
+		const closure = nextConfig.outputFileTracingIncludes!["*"]!.slice(-4, -1);
 		const included = picomatch(closure, { dot: true });
 		for (const file of ["node_modules/gcp-metadata/build/src/index.js", "node_modules/json-bigint/lib/parse.js", "node_modules/bignumber.js/bignumber.js"]) assert.equal(included(file), true, file);
 		for (const file of ["data/private.json", "nested/data/private.json", "auth.json", ".env.local", "node_modules/unrelated/runtime.js", "node_modules/gcp-metadata-lookalike/index.js"]) assert.equal(included(file), false, file);

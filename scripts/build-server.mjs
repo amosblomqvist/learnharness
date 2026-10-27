@@ -61,7 +61,26 @@ for (const secret of ["auth.json", ...subscriptionSecrets, ".env", ".env.local"]
 	}
 }
 
-// 2c) Payload curation (2026-10-11): the trace sweep can copy repo-root
+// 2c) Safety (Local Claude route, docs/architecture.md §8.1): the app runs
+// the user's OWN Claude Code install only. The Agent SDK's platform binary
+// packages are stubbed at install and excluded from the trace; a `claude`
+// binary inside the standalone payload means one of those guards regressed
+// and 281 MB of proprietary binary would ship in the app.
+const sdkScope = path.join(STANDALONE, "node_modules", "@anthropic-ai");
+if (exists(sdkScope)) {
+	for (const name of fs.readdirSync(sdkScope)) {
+		if (!name.startsWith("claude-agent-sdk-")) continue;
+		const dir = path.join(sdkScope, name);
+		const shipped = fs.existsSync(dir) && fs.readdirSync(dir).some((entry) => /^claude(\.exe)?$/.test(entry));
+		if (shipped) {
+			console.error(`[build-server] REFUSING: standalone contains ${name}/claude — the Agent SDK's bundled Claude Code binary would ship in the app.`);
+			console.error("             Check the package.json overrides and outputFileTracingExcludes in next.config.ts.");
+			process.exit(1);
+		}
+	}
+}
+
+// 2d) Payload curation (2026-10-11): the trace sweep can copy repo-root
 // dist/ (previous installers, recursively) and the development Electron
 // runtime (the demo helper's dev-only require). Neither belongs in the
 // server: packaged helpers use process.execPath, the app's own binary.

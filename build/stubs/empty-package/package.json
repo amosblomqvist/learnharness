@@ -1,0 +1,6 @@
+{
+	"name": "lh-empty-package",
+	"version": "0.0.0",
+	"private": true,
+	"description": "Stands in for the Claude Agent SDK's platform binary packages: the app only ever runs the user's own Claude Code install (see next.config.ts and docs/architecture.md §8.1)."
+}

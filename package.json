@@ -24,8 +24,10 @@
 		"desktop:dist": "rm -rf dist .next/standalone && next build && node scripts/smoke-provider-runtime.mjs && node scripts/build-server.mjs && node scripts/smoke-server.mjs && DEVELOPER_DIR=${DEVELOPER_DIR:-/Applications/Xcode.app/Contents/Developer} APPLE_KEYCHAIN_PROFILE=LH_NOTARY APPLE_TEAM_ID=JS6XN22HY6 electron-builder --mac --arm64"
 	},
 	"dependencies": {
+		"@anthropic-ai/claude-agent-sdk": "0.3.311",
 		"@earendil-works/pi-agent-core": "1.4.0",
 		"@earendil-works/pi-ai": "1.4.0",
+		"@modelcontextprotocol/sdk": "1.32.2",
 		"@mozilla/readability": "^0.6.0",
 		"@radix-ui/react-use-controllable-state": "^1.2.6",
 		"@resvg/resvg-js": "^2.6.2",
@@ -53,8 +55,8 @@
 		"mdast-util-from-markdown": "2.0.3",
 		"mdast-util-math": "3.0.0",
 		"media-chrome": "^4.19.2",
-		"micromark-extension-math": "3.1.0",
 		"mermaid": "^11.17.0",
+		"micromark-extension-math": "3.1.0",
 		"motion": "^13.1.1",
 		"nanoid": "^6.0.1",
 		"next": "^16.3.2",
@@ -75,7 +77,15 @@
 		"zod": "^4.4.3"
 	},
 	"overrides": {
-		"katex": "$katex"
+		"katex": "$katex",
+		"@anthropic-ai/claude-agent-sdk-linux-x64": "file:../../../build/stubs/empty-package",
+		"@anthropic-ai/claude-agent-sdk-linux-arm64": "file:../../../build/stubs/empty-package",
+		"@anthropic-ai/claude-agent-sdk-linux-x64-musl": "file:../../../build/stubs/empty-package",
+		"@anthropic-ai/claude-agent-sdk-linux-arm64-musl": "file:../../../build/stubs/empty-package",
+		"@anthropic-ai/claude-agent-sdk-darwin-x64": "file:../../../build/stubs/empty-package",
+		"@anthropic-ai/claude-agent-sdk-darwin-arm64": "file:../../../build/stubs/empty-package",
+		"@anthropic-ai/claude-agent-sdk-win32-x64": "file:../../../build/stubs/empty-package",
+		"@anthropic-ai/claude-agent-sdk-win32-arm64": "file:../../../build/stubs/empty-package"
 	},
 	"devDependencies": {
 		"@next/eslint-plugin-next": "^16.3.3",

@@ -52,6 +52,12 @@ const nextConfig: NextConfig = {
 			"github-copilot-credentials.json*",
 			"xai-credentials.json*",
 			".env*",
+			// Local Claude route (docs/architecture.md §8.1): the app only ever
+			// runs the user's OWN Claude Code install. The Agent SDK's per-platform
+			// binary packages are stubbed at install (package.json overrides) and
+			// excluded here belt-and-braces — a 281 MB proprietary `claude` must
+			// never ride into the bundle; scripts/build-server.mjs refuses one.
+			"node_modules/@anthropic-ai/claude-agent-sdk-*/**/*",
 		],
 	},
 	// Empirically verified gaps (2026-09-17 standalone smoke): the tracer
@@ -96,6 +102,12 @@ const nextConfig: NextConfig = {
 			"node_modules/gcp-metadata/**/*",
 			"node_modules/json-bigint/**/*",
 			"node_modules/bignumber.js/**/*",
+			// Local Claude route: the Agent SDK is loaded through a runtime
+			// import() seam (src/agent/claude-local/sdk.ts) and its entry splits
+			// into hashed core-*.mjs chunks the tracer cannot see from the
+			// dynamic edge. Include the whole JS package (4.8 MB, no binaries —
+			// those are the excluded platform packages above).
+			"node_modules/@anthropic-ai/claude-agent-sdk/**/*",
 		],
 	},
 	// Framework-free core lives in src/ (plain TS, imported by routes and CLI alike).
@@ -107,6 +119,11 @@ const nextConfig: NextConfig = {
 		"pdfjs-dist", // sources v0: bundling breaks its node fake-worker path
 		"@napi-rs/canvas", // native binding — bundling breaks the .node require
 		"@resvg/resvg-js", // native binding — same
+		// Local Claude route: the Agent SDK spawns a child process and serves
+		// in-process MCP tools over stdio control messages — runtime Node code
+		// that must stay external (and lazily imported) like pi-ai.
+		"@anthropic-ai/claude-agent-sdk",
+		"@modelcontextprotocol/sdk",
 	],
 };
 
