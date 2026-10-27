@@ -492,3 +492,26 @@ describe("external review: the probe never logs the child's stderr (P1)", () => 
 		assert.equal(server.claudeLocalStatusNow().error?.includes(SECRET), false);
 	});
 });
+
+describe("external review: the owner adopts a turn's API-key verdict (P2)", () => {
+	it("after a turn's init reports an API key, neither a transient probe failure nor a consent toggle re-advertises ready; a successful probe re-admits", { skip: !posix }, async () => {
+		const { status: ready, binary } = await readyRoute("p2-key");
+		bridge.noteClaudeLocalApiKeySource("ANTHROPIC_API_KEY");
+		assert.equal(server.claudeLocalStatusNow().state, "api-key");
+		setClaudeQueryForTests(fakeQuery({ reject: sdkError("Claude Code did not finish initializing", { errorClass: "initialize_timeout" }) }).query);
+		const after = await server.refreshClaudeLocal({ maxAgeMs: 0 });
+		assert.notEqual(after.state, "ready", "a transient failure never restores a ready the turn disproved");
+		assert.equal(bridge.claudeLocalConnected(), false); assert.deepEqual(bridge.claudeLocalModels(), []);
+		// The in-place consent path.
+		await readyRoute("p2-key");
+		bridge.noteClaudeLocalApiKeySource("apiKeyHelper");
+		writeSettings({ version: 1, claudeLocal: { enabled: true, binaryPath: binary, allowBackgroundUse: false } });
+		server.invalidateClaudeLocal();
+		assert.equal(server.claudeLocalStatusNow().state, "api-key"); assert.equal(server.claudeLocalStatusNow().allowBackgroundUse, false);
+		assert.equal(bridge.claudeLocalConnected(), false);
+		// Fixing Claude Code and re-checking re-admits under a new revision.
+		setClaudeQueryForTests(fakeQuery({ account: PLAN, models: [{ value: "x", resolvedModel: knownId(), displayName: "X" }] }).query);
+		const back = await server.refreshClaudeLocal({ force: true });
+		assert.equal(back.state, "ready"); assert.ok(back.revision > ready.revision); assert.ok(bridge.claudeLocalConnected());
+	});
+});

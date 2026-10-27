@@ -24,7 +24,7 @@ import { emit } from "../core/events.ts";
 import { piModels } from "../agent/models.ts";
 import { claudeChildEnv } from "../agent/claude-local/env.ts";
 import { claudeCommand, claudeLaunchOptions, withoutStderr } from "../agent/claude-local/launch.ts";
-import { acceptClaudeLocalSnapshot, claudeLocalStatus as bridgeStatus, claudeLocalUsage, type ClaudeLocalLaunch } from "../agent/claude-local/bridge.ts";
+import { acceptClaudeLocalSnapshot, claudeLocalStatus as bridgeStatus, claudeLocalUsage, onClaudeLocalChange, type ClaudeLocalLaunch } from "../agent/claude-local/bridge.ts";
 import { loadClaudeQuery, type AccountInfo, type ClaudeQuery, type ModelInfo } from "../agent/claude-local/sdk.ts";
 import type { EffectiveSettings } from "../core/settings-resolution.ts";
 import { effectiveSettings } from "./stores.ts";
@@ -279,7 +279,25 @@ const STATUS_TTL_MS = 5 * 60_000;
 export const CLAUDE_LOCAL_CATALOG_TTL_MS = 60 * 60_000;
 function owner(): Owner {
 	const global = globalThis as typeof globalThis & { [KEY]?: Owner };
-	return global[KEY] ??= { status: initialStatus(effectiveSettings().claudeLocal), launch: null, models: [], settingsKey: "", settings: null, revision: 0, generation: 0 };
+	if (!global[KEY]) {
+		const state: Owner = { status: initialStatus(effectiveSettings().claudeLocal), launch: null, models: [], settingsKey: "", settings: null, revision: 0, generation: 0 };
+		global[KEY] = state;
+		onClaudeLocalChange(() => adoptApiKeyVerdict(state));
+	}
+	return global[KEY];
+}
+/** A turn's system/init found Claude Code set up to bill an API key
+ *  (bridge.noteClaudeLocalApiKeySource): the owner takes that verdict as
+ *  its own status — no launch, no models, same revision — so neither the
+ *  last-known-good path of a transient probe failure nor an in-place
+ *  consent/prompt-mode write can re-publish the ready status the turn
+ *  disproved. Only a probe re-admits (its verdict changes the authority,
+ *  so the revision moves). */
+function adoptApiKeyVerdict(state: Owner): void {
+	const noted = bridgeStatus();
+	if (!noted || noted.state !== "api-key" || state.status.state !== "ready" || noted.revision !== state.status.revision) return;
+	state.status = { ...noted }; state.launch = null; state.models = [];
+	emit("subscriptions-changed", {});
 }
 function initialStatus(settings: EffectiveSettings["claudeLocal"]): ClaudeLocalStatus {
 	return { providerId: CLAUDE_LOCAL.providerId, enabled: settings.enabled, allowBackgroundUse: settings.allowBackgroundUse, systemPromptMode: settings.systemPromptMode, state: settings.enabled ? "unavailable" : "disabled", binary: null, account: null, models: 0, probedAt: null, revision: 0 };
