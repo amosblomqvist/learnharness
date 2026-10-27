@@ -314,7 +314,7 @@ export function AgentSection({
 	/** Writes the composed models section (slots — replace-PUT discipline). */
 	onModelsChange: (next: ModelsSettings) => void;
 	/** Writes the whole compaction section (replace-PUT discipline). */
-	onCompactionChange: (next: CompactionSettings) => void;
+	onCompactionChange: (change: (current: CompactionSettings | undefined) => CompactionSettings) => void;
 }) {
 	const [catalog, setCatalog] = useState<ModelCatalogEntry[] | null>(null);
 	/** The three tiers' resolved pins — GET /api/models `slots`. The rows'
@@ -886,8 +886,8 @@ export function AgentSection({
 									value={String(compaction?.contextWindows?.[key] ?? "")}
 									placeholder={String(selected.defaultContextWindow ?? selected.contextWindow)}
 									onCommit={(value) => {
-										const next = composeContextWindow(compaction, key, value, max);
-										if (next) onCompactionChange(next);
+										if (!composeContextWindow(undefined, key, value, max)) return;
+										onCompactionChange((current) => composeContextWindow(current, key, value, max)!);
 									}} />
 							</span>
 						</SettingsRow>
@@ -916,7 +916,7 @@ export function AgentSection({
 							// Empty = factory default (the budget row's discipline):
 							// absence is the unset for numbers.
 							if (v === "") {
-								onCompactionChange({ ...compaction, thresholdTokens: undefined });
+								onCompactionChange((current) => ({ ...current, thresholdTokens: undefined }));
 								return;
 							}
 							const n = Number(v);
@@ -924,10 +924,10 @@ export function AgentSection({
 							// Mirror the server floor (anti-churn: each compaction
 							// keeps a ~20k-token tail); no ceiling — the effective
 							// trigger is min(threshold, contextWindow − 16k) anyway.
-							onCompactionChange({
-								...compaction,
+							onCompactionChange((current) => ({
+								...current,
 								thresholdTokens: Math.max(COMPACTION_THRESHOLD_FLOOR, Math.round(n)),
-							});
+							}));
 						}}
 					/>
 				</SettingsRow>
