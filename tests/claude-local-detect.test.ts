@@ -32,6 +32,8 @@ const { CLAUDE_LOCAL } = await import("../src/core/contracts/claude-local.ts");
 const { piModels } = await import("../src/agent/models.ts");
 
 const posix = process.platform !== "win32";
+/** An empty system root: the host's own Claude Code (Homebrew, /usr/local) never decides a detection test. */
+const hostless = path.join(directory, "system-root");
 after(() => { setClaudeQueryForTests(undefined); fs.rmSync(directory, { recursive: true, force: true }); });
 
 /** A fake install: an executable script that answers --version. */
@@ -88,11 +90,11 @@ describe("detection and the version gate", () => {
 	it("finds the binary on PATH first, then known locations, then nothing; an override wins; symlinked cli.js runs through Node", { skip: !posix }, () => {
 		const home = path.join(directory, "home1"); fs.mkdirSync(home, { recursive: true });
 		const empty = path.join(directory, "empty"); fs.mkdirSync(empty, { recursive: true });
-		assert.equal(server.detectClaudeBinary({ env: { PATH: empty } as unknown as NodeJS.ProcessEnv, home, platform: "linux" }), null);
+		assert.equal(server.detectClaudeBinary({ env: { PATH: empty } as unknown as NodeJS.ProcessEnv, home, platform: "linux", systemRoot: hostless }), null);
 		const known = fakeBinary(path.join(home, ".local", "bin"));
-		assert.deepEqual(server.detectClaudeBinary({ env: { PATH: empty } as unknown as NodeJS.ProcessEnv, home, platform: "linux" }), { path: known, viaNode: false, source: "known-location" });
+		assert.deepEqual(server.detectClaudeBinary({ env: { PATH: empty } as unknown as NodeJS.ProcessEnv, home, platform: "linux", systemRoot: hostless }), { path: known, viaNode: false, source: "known-location" });
 		const onPath = fakeBinary(path.join(directory, "bin1"));
-		assert.deepEqual(server.detectClaudeBinary({ env: { PATH: `${empty}${path.delimiter}${path.dirname(onPath)}` } as unknown as NodeJS.ProcessEnv, home, platform: "linux" }), { path: onPath, viaNode: false, source: "path" });
+		assert.deepEqual(server.detectClaudeBinary({ env: { PATH: `${empty}${path.delimiter}${path.dirname(onPath)}` } as unknown as NodeJS.ProcessEnv, home, platform: "linux", systemRoot: hostless }), { path: onPath, viaNode: false, source: "path" });
 		// npm global: a symlink to cli.js resolves to the JavaScript entry.
 		const cli = path.join(directory, "lib", "node_modules", "@anthropic-ai", "claude-code", "cli.js"); fs.mkdirSync(path.dirname(cli), { recursive: true }); fs.writeFileSync(cli, "// cli\n");
 		const shim = path.join(directory, "npmbin", "claude"); fs.mkdirSync(path.dirname(shim), { recursive: true }); fs.symlinkSync(cli, shim);
@@ -292,7 +294,7 @@ describe("review fixes: detection, the version gate and the probe", () => {
 		fs.writeFileSync(path.join(blocked, "claude"), "not a program\n", { mode: 0o644 });
 		const good = fakeBinary(path.join(directory, "n0d-b"));
 		const home = path.join(directory, "n0d-home"); fs.mkdirSync(home, { recursive: true });
-		assert.deepEqual(server.detectClaudeBinary({ env: { PATH: `${blocked}${path.delimiter}${path.dirname(good)}` } as unknown as NodeJS.ProcessEnv, home, platform: "linux" }), { path: good, viaNode: false, source: "path" });
+		assert.deepEqual(server.detectClaudeBinary({ env: { PATH: `${blocked}${path.delimiter}${path.dirname(good)}` } as unknown as NodeJS.ProcessEnv, home, platform: "linux", systemRoot: hostless }), { path: good, viaNode: false, source: "path" });
 		assert.equal(server.detectClaudeBinary({ override: path.join(blocked, "claude") }), null);
 	});
 	it("N0: a spawn that throws synchronously resolves null instead of rejecting", async () => {
@@ -441,5 +443,31 @@ describe("review fixes: the status owner", () => {
 		fakeBinary(path.join(directory, "s12b"), "2.1.312");
 		const updated = await server.refreshClaudeLocal({ force: true });
 		assert.equal(updated.binary?.version, "2.1.312"); assert.equal(updated.revision, ready.revision);
+	});
+});
+
+describe("external review (P1, P2)", () => {
+	it("P2 hermetic detection: the system locations sit under the injected root, so only that root's install is found", { skip: !posix }, () => {
+		const root = path.join(directory, "system-root-2"); const home = path.join(directory, "home-hermetic"); fs.mkdirSync(home, { recursive: true });
+		const empty = path.join(directory, "empty-hermetic"); fs.mkdirSync(empty, { recursive: true });
+		const env = { PATH: empty } as unknown as NodeJS.ProcessEnv;
+		assert.equal(server.detectClaudeBinary({ env, home, platform: "linux", systemRoot: root }), null);
+		const brew = fakeBinary(path.join(root, "opt", "homebrew", "bin"));
+		assert.deepEqual(server.detectClaudeBinary({ env, home, platform: "darwin", systemRoot: root }), { path: brew, viaNode: false, source: "known-location" });
+		assert.ok(server.knownClaudeLocations("darwin", "/Users/u", {} as NodeJS.ProcessEnv).includes("/opt/homebrew/bin/claude"), "production still looks at the real Homebrew prefix");
+	});
+
+	it("P1: a rejected SDK import is not cached — the next load retries it", async () => {
+		const { loadClaudeQuery } = await import("../src/agent/claude-local/sdk.ts");
+		setClaudeQueryForTests(undefined);
+		delete (globalThis as Record<symbol, unknown>)[Symbol.for("lh.claudeLocal.sdk")];
+		let attempts = 0;
+		const fake = (() => undefined) as unknown as ClaudeQuery;
+		const load = async () => { attempts++; if (attempts === 1) throw new Error("Cannot find module './sdk-chunk.mjs'"); return { query: fake }; };
+		await assert.rejects(loadClaudeQuery(load), /Cannot find module/);
+		assert.equal(await loadClaudeQuery(load), fake, "the second load retried the import");
+		assert.equal(await loadClaudeQuery(load), fake);
+		assert.equal(attempts, 2, "a resolved import stays cached");
+		delete (globalThis as Record<symbol, unknown>)[Symbol.for("lh.claudeLocal.sdk")];
 	});
 });

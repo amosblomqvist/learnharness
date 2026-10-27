@@ -43,6 +43,10 @@ export interface DetectOptions {
 	env?: NodeJS.ProcessEnv;
 	platform?: NodeJS.Platform;
 	home?: string;
+	/** The root the absolute system locations (Homebrew, /usr/local) sit
+	 *  under: "/" in production, an isolated directory in tests, so a host's
+	 *  own install can never decide a detection test. */
+	systemRoot?: string;
 }
 
 /** The entries the SDK runs through a JS runtime rather than spawning
@@ -80,14 +84,15 @@ function launchable(candidate: string, platform: NodeJS.Platform = process.platf
  *  the PATH the child inherits (PATH passes through env.ts's allowlist
  *  unchanged); a Dock-launched app's minimal PATH may lack it, which then
  *  shows as "could not be started". */
-export function knownClaudeLocations(platform: NodeJS.Platform, home: string, env: NodeJS.ProcessEnv): string[] {
+export function knownClaudeLocations(platform: NodeJS.Platform, home: string, env: NodeJS.ProcessEnv, systemRoot = "/"): string[] {
 	const names = platform === "win32" ? ["claude.exe", "claude.cmd", "claude"] : ["claude"];
+	const system = (...parts: string[]) => path.join(systemRoot, ...parts);
 	const dirs = platform === "win32"
 		? [path.join(home, ".local", "bin"), env.APPDATA ? path.join(env.APPDATA, "npm") : "", env.LOCALAPPDATA ? path.join(env.LOCALAPPDATA, "Programs", "claude") : ""]
-		: [path.join(home, ".local", "bin"), path.join(home, ".claude", "local"), "/opt/homebrew/bin", "/usr/local/bin", path.join(home, ".npm-global", "bin"), "/usr/local/lib/node_modules/.bin"];
+		: [path.join(home, ".local", "bin"), path.join(home, ".claude", "local"), system("opt", "homebrew", "bin"), system("usr", "local", "bin"), path.join(home, ".npm-global", "bin"), system("usr", "local", "lib", "node_modules", ".bin")];
 	const files = dirs.filter(Boolean).flatMap((dir) => names.map((name) => path.join(dir, name)));
 	// npm global cli.js entries (no shim needed).
-	files.push(...(platform === "win32" && env.APPDATA ? [path.join(env.APPDATA, "npm", "node_modules", "@anthropic-ai", "claude-code", "cli.js")] : ["/usr/local/lib/node_modules/@anthropic-ai/claude-code/cli.js", path.join(home, ".npm-global", "lib", "node_modules", "@anthropic-ai", "claude-code", "cli.js")]));
+	files.push(...(platform === "win32" && env.APPDATA ? [path.join(env.APPDATA, "npm", "node_modules", "@anthropic-ai", "claude-code", "cli.js")] : [system("usr", "local", "lib", "node_modules", "@anthropic-ai", "claude-code", "cli.js"), path.join(home, ".npm-global", "lib", "node_modules", "@anthropic-ai", "claude-code", "cli.js")]));
 	return files;
 }
 
@@ -106,7 +111,7 @@ export function detectClaudeBinary(options: DetectOptions = {}): DetectedBinary 
 			if (found) return { ...found, source: "path" };
 		}
 	}
-	for (const candidate of knownClaudeLocations(platform, home, env)) {
+	for (const candidate of knownClaudeLocations(platform, home, env, options.systemRoot)) {
 		const found = launchable(candidate, platform);
 		if (found) return { ...found, source: "known-location" };
 	}
