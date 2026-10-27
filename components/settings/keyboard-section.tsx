@@ -26,6 +26,7 @@ import {
 	type KeyAction,
 	type KeyScope,
 } from "@/src/core";
+import { useT } from "@/components/locale";
 import { SettingsRow } from "./controls.tsx";
 
 const SCOPES: { scope: KeyScope; label: string }[] = [
@@ -51,6 +52,7 @@ export function KeyboardSection() {
 	const [overrides, setOverrides] = useState<Partial<Record<KeyAction, string>>>({});
 	const [rebinding, setRebinding] = useState<KeyAction | null>(null);
 	const [nonce, setNonce] = useState(0);
+	const t = useT();
 
 	// localStorage is read post-mount (SSR-safe); `nonce` re-reads after writes.
 	useEffect(() => {
@@ -101,20 +103,20 @@ export function KeyboardSection() {
 				if (!actions.length) return null;
 				return (
 					<div key={scope} data-testid={`kbd-scope-${scope}`}>
-						<p className="mb-1 text-xs uppercase tracking-widest text-muted-foreground/70">{label}</p>
+						<p className="mb-1 text-xs uppercase tracking-widest text-muted-foreground/70">{t(label)}</p>
 						<div className="flex flex-col gap-2">
 							{actions.map((def) => {
 								const effective = overrides[def.id] ?? def.binding;
 								return (
 									<SettingsRow
 										key={def.id}
-										label={def.label}
-										hint={def.displayOnly ? "Fixed — part of this screen" : undefined}
+										label={t(def.label)}
+										hint={def.displayOnly ? t("Fixed — part of this screen") : undefined}
 										testid={`kbd-row-${def.id}`}
 									>
 										<span className="flex items-center gap-2">
 											<kbd className="rounded-sm border border-border bg-muted px-1.5 py-0.5 font-ui text-xs">
-												{rebinding === def.id ? "Press keys…" : formatBinding(effective)}
+												{rebinding === def.id ? t("Press keys…") : formatBinding(effective)}
 											</kbd>
 											{def.displayOnly ? null : rebinding === def.id ? (
 												<button
@@ -122,7 +124,7 @@ export function KeyboardSection() {
 													onClick={() => setRebinding(null)}
 													className="text-xs text-muted-foreground/70 underline-offset-2 hover:text-foreground hover:underline"
 												>
-													Cancel
+													{t("Cancel")}
 												</button>
 											) : (
 												<>
@@ -132,7 +134,7 @@ export function KeyboardSection() {
 														data-testid={`kbd-rebind-${def.id}`}
 														className="text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
 													>
-														Rebind
+														{t("Rebind")}
 													</button>
 													{overridden(def.id) && (
 														<button
@@ -141,7 +143,7 @@ export function KeyboardSection() {
 															data-testid={`kbd-reset-${def.id}`}
 															className="text-xs text-muted-foreground/70 underline-offset-2 hover:text-foreground hover:underline"
 														>
-															Reset
+															{t("Reset")}
 														</button>
 													)}
 												</>
@@ -155,14 +157,14 @@ export function KeyboardSection() {
 				);
 			})}
 			<div className="mt-1 flex items-center justify-between">
-				<span className="text-xs text-muted-foreground/70">Stored on this device (lh:keymap) — overrides only.</span>
+				<span className="text-xs text-muted-foreground/70">{t("Stored on this device (lh:keymap) — overrides only.")}</span>
 				<button
 					type="button"
 					onClick={resetAll}
 					data-testid="kbd-reset-all"
 					className="text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
 				>
-					Reset all to defaults
+					{t("Reset all to defaults")}
 				</button>
 			</div>
 		</>

@@ -25,6 +25,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useBackdropDismiss } from "@/components/backdrop-dismiss";
+import { useT } from "@/components/locale";
 import { useRouter } from "next/navigation";
 import {
 	actionForBinding,
@@ -152,6 +153,7 @@ export function KeyboardShortcuts() {
  *  stay discoverable. */
 function CheatSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
 	const backdropDismiss = useBackdropDismiss(onClose);
+	const t = useT();
 	if (!open) return null;
 	const scopes = ["global", "chat", "graph"] as const;
 	const scopeLabels: Record<(typeof scopes)[number], string> = {
@@ -170,8 +172,8 @@ function CheatSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
 				onClick={(e) => e.stopPropagation()}
 			>
 				<div className="mb-4 flex items-baseline justify-between">
-					<span className="text-sm font-medium text-card-foreground">Keyboard shortcuts</span>
-					<span className="text-xs text-muted-foreground">Esc to close</span>
+					<span className="text-sm font-medium text-card-foreground">{t("Keyboard shortcuts")}</span>
+					<span className="text-xs text-muted-foreground">{t("Esc to close")}</span>
 				</div>
 				{scopes.map((scope) => {
 					const actions = KEYBOARD_ACTIONS.filter((a) => a.scope === scope);
@@ -179,12 +181,12 @@ function CheatSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
 					return (
 						<div key={scope} className="mb-4">
 							<div className="mb-1.5 text-xs uppercase tracking-widest text-muted-foreground/70">
-								{scopeLabels[scope]}
+								{t(scopeLabels[scope])}
 							</div>
 							<div className="flex flex-col gap-1">
 								{actions.map((a) => (
 									<div key={a.id} className="flex items-center justify-between gap-4 text-sm">
-										<span className="text-muted-foreground">{a.label}</span>
+										<span className="text-muted-foreground">{t(a.label)}</span>
 										<kbd className="rounded-md border border-border bg-background px-1.5 py-0.5 font-mono text-xs text-card-foreground">
 											{formatBinding(bindingForAction(a.id))}
 										</kbd>

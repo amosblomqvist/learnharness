@@ -18,6 +18,7 @@
 import type { AuthKeyStatus } from "@/src/core";
 import { classifyKeys, type ProviderKeyInfo } from "@/components/settings/keys-section";
 import { useModelCatalog } from "@/components/model-picker";
+import { useT } from "@/components/locale";
 import type { ModelCatalogResponse } from "@/src/core";
 
 /** Pure: does a MODEL-PROVIDER key exist among the statuses? Reuses
@@ -46,6 +47,7 @@ export function useZeroKeys(): boolean {
  *  chain's copy. testid "setup-cta-keys" (the models CTA keeps
  *  "setup-cta"; probes can tell them apart). */
 export function ZeroKeysPill({ onOpen, inline = false }: { onOpen: () => void; inline?: boolean }) {
+	const t = useT();
 	const button = (
 		<button
 			type="button"
@@ -53,7 +55,7 @@ export function ZeroKeysPill({ onOpen, inline = false }: { onOpen: () => void; i
 			onClick={onOpen}
 			className="rounded-sm border border-border bg-card px-3 py-1.5 font-ui text-xs text-foreground transition-colors hover:border-muted-foreground/50 hover:bg-accent cursor-pointer"
 		>
-			Add a provider key
+			{t("Add a provider key")}
 		</button>
 	);
 	return inline ? button : <div className="pointer-events-auto mb-2 flex justify-center">{button}</div>;
