@@ -137,7 +137,6 @@ export class ClaudeLocalAgent implements LiveAgent {
 		const { options } = this;
 		const emit = (event: AgentEvent) => this.emit(event, signal);
 		await emit({ type: "agent_start" });
-		let first = true;
 		for (;;) {
 			await emit({ type: "turn_start" });
 			// Steering (pi's start-of-turn poll, "all" mode): record and announce
@@ -152,8 +151,7 @@ export class ClaudeLocalAgent implements LiveAgent {
 				if (update?.model) this.state.model = update.model;
 				if (update?.thinkingLevel) this.state.thinkingLevel = update.thinkingLevel;
 			}
-			const outcome = await this.turn(signal, emit, first);
-			first = false;
+			const outcome = await this.turn(signal, emit);
 			if (outcome === "end" || signal.aborted) break;
 			if (this.steering.length === 0) break;
 		}
@@ -161,7 +159,7 @@ export class ClaudeLocalAgent implements LiveAgent {
 	}
 
 	/** One Claude Code turn. Returns "end" when the run must stop. */
-	private async turn(signal: AbortSignal, emit: (event: AgentEvent) => Promise<void>, first: boolean): Promise<"end" | "continue"> {
+	private async turn(signal: AbortSignal, emit: (event: AgentEvent) => Promise<void>): Promise<"end" | "continue"> {
 		const { options, runtime } = this;
 		const model = this.state.model;
 		const background = options.purpose?.() ?? false;
@@ -192,7 +190,6 @@ export class ClaudeLocalAgent implements LiveAgent {
 			const llm = await options.convertToLlm(this.state.messages);
 			const blocks = flattenTranscript(llm);
 			const query = await runtime.query();
-			void first;
 			let current: AssistantMessage | undefined;
 			let streamed = false;
 			const results: ToolResultMessage[] = [];

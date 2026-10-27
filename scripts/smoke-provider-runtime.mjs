@@ -16,6 +16,10 @@ import { randomUUID } from "node:crypto";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { formatProbeError, probeEnv } from "./smoke-demo-runtime.mjs";
 
+/** The native-provider registry — the checkout's own list of what to
+ *  probe, loaded before the payload-confinement hook is installed. */
+const { NATIVE_PROVIDERS, PI_SDK_SPECIFIER } = createRequire(import.meta.url)("../electron/native-providers.cjs");
+
 export function verifyProviderRuntime(standalone, runtime = process.execPath) {
 	const home = fs.mkdtempSync(path.join(os.tmpdir(), "lh-provider-runtime-"));
 	try {
@@ -105,10 +109,10 @@ async function probe(standalone) {
 		}
 		// Exercise the public lazy OAuth surface offline. toAuth evaluates the
 		// real flow module and its imports but neither logs in nor refreshes.
-		// Every registered native provider (electron/native-providers.cjs) —
-		// the registry drives the gate, so a new provider is covered the day
-		// it is registered.
-		const { NATIVE_PROVIDERS, PI_SDK_SPECIFIER } = createRequire(import.meta.url)("../electron/native-providers.cjs");
+		// Every registered native provider (electron/native-providers.cjs, read
+		// at module load — it is the checkout's test plan, not a payload
+		// dependency) — the registry drives the gate, so a new provider is
+		// covered the day it is registered.
 		for (const { providerId: name, specifier, factory } of NATIVE_PROVIDERS) {
 			assert.ok(specifier.startsWith(`${PI_SDK_SPECIFIER}/`), `${name}: specifier outside Pi: ${specifier}`);
 			const provider = (await import(new URL(`${specifier.slice(PI_SDK_SPECIFIER.length + 1)}.js`, entry).href))[factory]();

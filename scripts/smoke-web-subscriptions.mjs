@@ -86,8 +86,11 @@ async function run(mode) {
 		// Local Claude (2026-10-27): off by default, never probed; enabling it with
 		// a path that does not exist is a recoverable not-found (no process, no
 		// credential anywhere in the status), and the picker keeps it out.
+		assert.equal(catalog.find((provider) => provider.id === "claude-local")?.keyPresent, false);
+		// Both modes share the profile's settings file: start from the defaults (replace-whole PUT).
+		assert.equal((await fetch(origin + "/api/settings/claudeLocal", { method: "PUT", headers: { "content-type": "application/json" }, body: "{}", signal: AbortSignal.timeout(60000) })).status, 200);
 		const local = await (await request("/api/claude-local")).json();
-		assert.equal(local.state, "disabled"); assert.equal(local.enabled, false); assert.equal(catalog.find((provider) => provider.id === "claude-local")?.keyPresent, false);
+		assert.equal(local.state, "disabled"); assert.equal(local.enabled, false);
 		assert.equal((await fetch(origin + "/api/settings/claudeLocal", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ enabled: true, binaryPath: path.join(profile, "no-such-claude") }), signal: AbortSignal.timeout(60000) })).status, 200);
 		const probed = await (await request("/api/claude-local", { op: "probe" })).json();
 		assert.equal(probed.state, "not-found", JSON.stringify(probed)); assert.match(probed.error, /No Claude Code executable at/);
