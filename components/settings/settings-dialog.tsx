@@ -69,7 +69,16 @@ type WritableSection = "general" | "agent" | "models" | "appearance" | "graph" |
 type PendingSectionWrite = { compose: (current: unknown) => object; optimistic: boolean };
 // A closed dialog can still have queued writes. A new dialog must wait
 // for those writes before loading a record on which new edits will build.
-const pendingSettingsWrites = new Set<Promise<void>>();
+const pendingSettingsWrites = new Map<Promise<void>, WritableSection>();
+
+/** Wait for all pending writes, or only those for the requested section. */
+export async function waitForPendingSettingsWrites(section?: WritableSection) {
+	for (;;) {
+		const writes = [...pendingSettingsWrites].filter(([, name]) => !section || name === section).map(([write]) => write);
+		if (!writes.length) return;
+		await Promise.all(writes);
+	}
+}
 
 /** `open(section?, row?)` — the optional ROW deep-links into the Keys
  *  section with that row unfolded (zero-keys wave: the dictation error's
@@ -207,7 +216,7 @@ export function SettingsDialogBody({
 		let live = true;
 		const load = async () => {
 			try {
-				while (pendingSettingsWrites.size) await Promise.all(pendingSettingsWrites);
+				await waitForPendingSettingsWrites();
 				if (!live) return;
 				const response = await fetch("/api/settings");
 				if (!response.ok) throw new Error(`status ${response.status}`);
@@ -302,7 +311,7 @@ export function SettingsDialogBody({
 				}
 			};
 			const activeWrite = drain();
-			pendingSettingsWrites.add(activeWrite);
+			pendingSettingsWrites.set(activeWrite, section);
 			void activeWrite.then(
 				() => { pendingSettingsWrites.delete(activeWrite); },
 				() => { pendingSettingsWrites.delete(activeWrite); },
