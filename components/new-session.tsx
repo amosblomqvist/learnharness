@@ -182,7 +182,7 @@ export function DraftShell({
 							</ConversationContent>
 						</Conversation>
 						<div className="h-24 bg-gradient-to-t from-background via-background/85 to-transparent" />
-						<div className="bg-background pb-4">
+						<div className="bg-background pb-4" style={{ paddingBottom: "calc(1rem + var(--lh-keyboard-inset, 0px))" }}>
 							<div className={DOCK}>
 								<ComposerActions
 									picker={(picks.length > 0 || mode === "practice") && (

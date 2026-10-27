@@ -63,7 +63,9 @@
  * camera never moves.
  */
 
-import { useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { usePhoneLayout } from "@/components/phone-layout-context";
+import { cn } from "@/lib/utils";
 import { NotesImportErrors, useNotesImport } from "@/components/notes-import.tsx";
 import Link from "next/link";
 import { FileTextIcon, ListTreeIcon, Loader2Icon, SearchIcon, SettingsIcon, UploadIcon, WaypointsIcon } from "lucide-react";
@@ -829,6 +831,10 @@ function GraphSettingsControl({
 	);
 }
 
+function SecondToolRow({ children }: { children: React.ReactNode }) {
+	return <div className="flex items-start gap-2">{children}</div>;
+}
+
 /** The top-chrome actions row's body (empty-graph chrome wave, owner
  *  2026-09-25): Import Notes renders ALWAYS (graph enabled) — it's the
  *  one action that works on an empty graph, the entry point itself;
@@ -849,7 +855,11 @@ export function GraphChromeRow({
 	settings,
 	changeSettings,
 	onOpenChains,
+	rows = 1,
 }: {
+	/** 2 on a phone-width browser: search alone on the first row, the
+	 *  actions on a second, so nothing reaches the menu button. */
+	rows?: 1 | 2;
 	isEmpty: boolean;
 	query: string;
 	onQuery: (v: string) => void;
@@ -866,6 +876,7 @@ export function GraphChromeRow({
 	 *  2026-09-29). */
 	onOpenChains: () => void;
 }) {
+	const ActionsRow = rows === 2 ? SecondToolRow : Fragment;
 	return (
 		<>
 			{!isEmpty && (
@@ -894,6 +905,7 @@ export function GraphChromeRow({
 					)}
 				</div>
 			)}
+			<ActionsRow>
 			{/* The chain table (chains overlay, owner plan 2026-09-29). Own
 			    container (36px band), between the search and Import. */}
 			{!isEmpty && (
@@ -954,6 +966,7 @@ export function GraphChromeRow({
 					<GraphSettingsControl settings={settings} changeSettings={changeSettings} />
 				</div>
 			)}
+			</ActionsRow>
 		</>
 	);
 }
@@ -977,6 +990,7 @@ export function GraphView({
 	const containerRef = useRef<HTMLDivElement | null>(null);
 	const canvasRef = useRef<HTMLCanvasElement | null>(null);
 	const cardRef = useRef<HTMLDivElement | null>(null);
+	const { graphToolRows, nodeCard } = usePhoneLayout();
 	const [snapshot, setSnapshot] = useState<GraphSnapshot | null>(null);
 	const [selected, setSelected] = useState<Selection | null>(null);
 	// The latest snapshot for the renderer's click callbacks (they are
@@ -1474,6 +1488,10 @@ export function GraphView({
 		const card = cardRef.current;
 		const container = containerRef.current;
 		if (!selected || !card || !container) return;
+		if (nodeCard === "bottom-sheet") {
+			card.style.visibility = "visible";
+			return;
+		}
 		const width = card.offsetWidth;
 		const height = card.offsetHeight;
 		const margin = 8;
@@ -1489,7 +1507,7 @@ export function GraphView({
 		card.style.left = `${left}px`;
 		card.style.top = `${top}px`;
 		card.style.visibility = "visible";
-	}, [selected]);
+	}, [selected, nodeCard]);
 
 	return (
 		<div className="relative h-full w-full">
@@ -1597,11 +1615,12 @@ export function GraphView({
 			    the settings/coverage dropdowns (owner report), still hoverable
 			    and clickable on top of them. The row is a stacking context, so
 			    its open dropdowns cover the number; clicks land on the panel. */}
-			<div className="relative z-20 flex min-w-0 items-start gap-2">
+			<div className={cn("relative z-20 flex min-w-0 items-start gap-2", graphToolRows === 2 && "flex-col items-end")}>
 				{/* The actions row (empty-graph chrome wave, owner 2026-09-25):
 				    Import Notes always — the empty graph's entry point; search +
 				    settings only when nodes exist, fading in on their mount. */}
 				<GraphChromeRow
+					rows={graphToolRows}
 					isEmpty={isEmpty}
 					query={query}
 					onQuery={setQuery}
@@ -1642,11 +1661,19 @@ export function GraphView({
 					ref={cardRef}
 					// Positioned imperatively in the layout effect above; hidden
 					// until placed so the flip never flashes in the wrong spot.
-					style={{ visibility: "hidden", left: 0, top: 0 }}
+					style={
+						nodeCard === "bottom-sheet"
+							? { visibility: "hidden", bottom: "calc(0.5rem + env(safe-area-inset-bottom))" }
+							: { visibility: "hidden", left: 0, top: 0 }
+					}
+					data-placement={nodeCard}
 					// lh-no-drag: the card is placed anywhere on the canvas —
 					// when it lands in the top strip it must stay interactive
 					// over home.tsx's drag surface (2026-09-17).
-					className="lh-no-drag absolute z-10 w-80 max-w-[calc(100%-1rem)] rounded-xl border bg-card p-4 text-left shadow-lg"
+					className={cn(
+						"lh-no-drag absolute z-10 w-80 max-w-[calc(100%-1rem)] rounded-xl border bg-card p-4 text-left shadow-lg",
+						nodeCard === "bottom-sheet" && "inset-x-2 w-auto max-w-none max-h-[60%] overflow-y-auto",
+					)}
 				>
 					<div className="text-sm font-medium leading-snug">{selected.node.name}</div>
 					<div className="mt-1 text-xs leading-relaxed text-muted-foreground">{selected.node.statement}</div>

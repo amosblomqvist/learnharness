@@ -5,6 +5,8 @@ import { ArrowDownIcon, ChevronRightIcon, PlayIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { finishDictation, isDictationActive, joinDictation, useDictationTarget } from "@/components/dictation";
 import { useEnterSubmits } from "@/components/enter-submits";
+import { confidenceHitHeight, enterKey } from "@/components/phone-layout";
+import { usePhoneLayout } from "@/components/phone-layout-context";
 import { ToolContentResponse } from "@/components/ai-elements/message";
 import { cn } from "@/lib/utils";
 import {
@@ -266,6 +268,7 @@ function QuestionDockForm({
 	compactionRunning = false,
 }: Omit<QuestionDockProps, "expanded" | "onExpand" | "reveal">) {
 	const kind = toolQuestionKind(toolName);
+	const { enterInsertsNewline, coarsePointer } = usePhoneLayout();
 
 	// Canonical QuestionData, built once per question. Quiz options are
 	// deterministically shuffled (seeded by toolCallId) so position never leaks
@@ -808,7 +811,16 @@ function QuestionDockForm({
 									}
 									setConfIdx(best);
 								}}
-								style={{ color: CONFIDENCE_COLORS[confIdx] }}
+								style={{
+									color: CONFIDENCE_COLORS[confIdx],
+									// The hit box grows for a finger around the same centered
+									// track; the painted rail above is untouched.
+									...(coarsePointer && {
+										height: confidenceHitHeight(true),
+										top: "50%",
+										transform: "translateY(-50%)",
+									}),
+								}}
 								className={cn(
 									"absolute inset-0 h-4 w-full cursor-pointer appearance-none bg-transparent outline-none",
 									"[&::-webkit-slider-runnable-track]:h-4 [&::-webkit-slider-runnable-track]:bg-transparent",
@@ -869,7 +881,8 @@ function QuestionDockForm({
 								}
 								// Chat convention: Enter submits, Shift+Enter is a newline;
 								// ⌘/Ctrl+Enter also submits (universal across the app).
-								if (e.key === "Enter" && (e.metaKey || e.ctrlKey || !e.shiftKey)) {
+								// On touch, Enter is the newline and Submit submits.
+								if (e.key === "Enter" && enterKey({ coarsePointer: enterInsertsNewline, ...e }) === "submit") {
 									e.preventDefault();
 									submit();
 								}
@@ -899,7 +912,7 @@ function QuestionDockForm({
 								// THE STANDARD CHORD (owner round 5, 2026-10-05): Enter
 								// submits, Shift+Enter is a newline, ⌘/Ctrl+Enter works
 								// too — identical to the practice dock and the composer.
-								if (e.key === "Enter" && (!e.shiftKey || e.metaKey || e.ctrlKey)) {
+								if (e.key === "Enter" && enterKey({ coarsePointer: enterInsertsNewline, ...e }) === "submit") {
 									e.preventDefault();
 									submit();
 								}
@@ -916,7 +929,7 @@ function QuestionDockForm({
 					)}
 					<div className="flex items-center justify-between gap-2 p-1">
 						<span aria-hidden className="pl-1.5 text-xs text-muted-foreground">
-								{compactionRunning ? "compacting session…" : "↵ submits · ⇧↵ newline"}
+								{compactionRunning ? "compacting session…" : enterInsertsNewline ? "↵ newline" : "↵ submits · ⇧↵ newline"}
 						</span>
 						<Button
 							type="submit"

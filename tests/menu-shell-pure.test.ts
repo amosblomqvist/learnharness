@@ -80,3 +80,26 @@ describe("computeMenuPlacement — cap + position", () => {
 		assert.ok(!("right" in p.style));
 	});
 });
+
+describe("computeMenuPlacement — phone viewport", () => {
+	const phone = { width: 390, height: 844 };
+	const anchor = { top: 400, bottom: 440, left: 200, right: 278 };
+
+	it("a right-aligned 352px menu that would cross the left edge slides to the 8px floor", () => {
+		const p = computeMenuPlacement(anchor, phone, 300, "down", "right", 352);
+		assert.equal(p.style.left, 8);
+		assert.ok(!("right" in p.style));
+	});
+
+	it("a left-aligned 352px menu that would cross the right edge slides back inside", () => {
+		const p = computeMenuPlacement(anchor, phone, 300, "down", "left", 352);
+		assert.equal(p.style.left, 390 - 8 - 352);
+	});
+
+	it("a menu that already fits keeps its anchor alignment", () => {
+		const wide = { top: 400, bottom: 440, left: 600, right: 900 };
+		const p = computeMenuPlacement(wide, viewport(800), 300, "down", "right", 352);
+		assert.equal(p.style.right, 1280 - 900);
+		assert.ok(!("left" in p.style));
+	});
+});

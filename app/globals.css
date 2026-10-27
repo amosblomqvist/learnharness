@@ -598,3 +598,13 @@ body {
 	outline: 1px solid var(--border);
 	border-radius: 0.25rem;
 }
+
+/* iOS zooms the page when a focused text control is under 16px. Unlayered,
+   so it outranks the utility font sizes. Width mirrors NARROW_WIDTH. */
+@media (max-width: 927.98px) and (pointer: coarse) {
+	input:not([type="range"]):not([type="checkbox"]):not([type="radio"]):not([type="file"]),
+	textarea,
+	select {
+		font-size: 16px;
+	}
+}

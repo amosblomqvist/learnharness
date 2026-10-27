@@ -3,6 +3,8 @@
 import { ArrowRightIcon, CornerDownLeftIcon, SquareIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Hint } from "@/components/ui/hint";
+import { enterKey } from "@/components/phone-layout";
+import { usePhoneLayout } from "@/components/phone-layout-context";
 
 /**
  * The chat composer — content row ONLY (the persistent rounded shell lives in
@@ -75,6 +77,7 @@ export function Composer({
 	 *  empty-Enter share it. */
 	onNext?: () => void;
 }) {
+	const { enterInsertsNewline } = usePhoneLayout();
 	const act = () => {
 		const action = enterAction({ busy, canSend, nextProblem });
 		if (action === "stop") onStop();
@@ -108,7 +111,8 @@ export function Composer({
 					// Chat convention: Enter sends, Shift+Enter is a newline.
 					// ⌘/Ctrl+Enter also sends — the universal submit shortcut
 					// across every input in the app (thinking field, answers).
-					if (e.key === "Enter" && (e.metaKey || e.ctrlKey || !e.shiftKey)) {
+					// On touch, Enter is the newline and the button sends.
+					if (e.key === "Enter" && enterKey({ coarsePointer: enterInsertsNewline, ...e }) === "submit") {
 						e.preventDefault();
 						act();
 					}

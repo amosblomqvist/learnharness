@@ -2,6 +2,8 @@
 
 import { useCallback } from "react";
 import { joinDictation, useDictationTarget } from "@/components/dictation";
+import { enterKey } from "@/components/phone-layout";
+import { usePhoneLayout } from "@/components/phone-layout-context";
 
 /**
  * The reading-thinking field (owner design 2026-10-03, "two questions per
@@ -37,6 +39,7 @@ export function ReadingThinkingField({
 	/** Primary dictation claim — true while the check is behind its reveal. */
 	claim: boolean;
 }) {
+	const { enterInsertsNewline } = usePhoneLayout();
 	useDictationTarget(
 		useCallback(
 			(t: string) => {
@@ -80,7 +83,7 @@ export function ReadingThinkingField({
 					// (and the universal ⌘/Ctrl+Enter) opens it — the dictation
 					// flush lands HERE first via the caller's finishDictation,
 					// so spoken thoughts ride along. Shift+Enter stays a newline.
-					if (e.key === "Enter" && onOpen !== undefined && (!e.shiftKey || e.metaKey || e.ctrlKey)) {
+					if (e.key === "Enter" && onOpen !== undefined && enterKey({ coarsePointer: enterInsertsNewline, ...e }) === "submit") {
 						e.preventDefault();
 						e.stopPropagation();
 						onOpen();

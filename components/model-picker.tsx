@@ -7,6 +7,7 @@ import { prettyModel } from "@/components/usage-format";
 import { ModelMenuList, ThinkingMenuList } from "@/components/settings/model-menu";
 import { composeSlotModel } from "@/components/settings/agent-section";
 import { MenuShell } from "@/components/menu-shell";
+import { useModelMenuWidth } from "@/components/phone-layout-context";
 import { Hint } from "@/components/ui/hint";
 import { notifySettingsSaved, onSettingsSaved, useSettingsSaved } from "@/components/settings-signal";
 import { defaultOrderLevel, populateLevel, THINKING_LABEL } from "@/components/thinking-default";
@@ -83,6 +84,7 @@ export function catalogLimits(catalog: Pick<ModelCatalogResponse, "models">): Ma
  */
 export function ModelControl({ chatId, onModelChange }: { chatId?: string; onModelChange?: (model: string | undefined) => void }) {
 	const { catalog, refresh } = useModelCatalog();
+	const menuWidth = useModelMenuWidth();
 	const [models, setModels] = useState<ModelsSettings | undefined>();
 	const [session, setSession] = useState<ChatSettings | undefined>();
 	const [open, setOpen] = useState<"model" | "thinking" | null>(null);
@@ -379,6 +381,7 @@ export function ModelControl({ chatId, onModelChange }: { chatId?: string; onMod
 					testid="model-menu"
 					preferredSide="up"
 					menuClass="flex w-[22rem] flex-col rounded-xl border bg-card p-2 text-xs shadow-xl"
+					width={menuWidth}
 				>
 					{error && <div className="mb-1.5 text-destructive">{error}</div>}
 					<ModelMenuList

@@ -2,6 +2,8 @@
 
 import { createContext, Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useChatSession } from "@/components/session";
+import { capDockHeight } from "@/components/phone-layout";
+import { useKeyboardInset, usePhoneLayout } from "@/components/phone-layout-context";
 import { visibleQueuedSteers } from "@/components/session-core";
 import { SetupDialog } from "@/components/setup-dialog";
 import { Hint } from "@/components/ui/hint";
@@ -31,6 +33,7 @@ import { DictationBar, finishDictation, joinDictation, useDictation } from "@/co
 import { useFieldCycle } from "@/components/field-cycle";
 import { JobsContext } from "@/components/jobs-context";
 import { StatsBar } from "@/components/stats-bar";
+import { cn } from "@/lib/utils";
 import { useServerEvent, useServerResync } from "@/components/server-events";
 import {
 	isProviderKeyRefusal,
@@ -276,6 +279,8 @@ export function Chat({
 	const [renaming, setRenaming] = useState(false);
 	const [titleDraft, setTitleDraft] = useState("");
 	const titleInputRef = useRef<HTMLInputElement | null>(null);
+	const { compactTitle } = usePhoneLayout();
+	const titleSize = compactTitle ? "text-xl" : "text-3xl";
 
 	const commitRename = useCallback(
 		async (next: string) => {
@@ -1240,7 +1245,10 @@ export function Chat({
 								spellCheck={false}
 								aria-label="Session title"
 								title="Rename this session"
-								className="lh-no-drag min-w-[8ch] max-w-[70%] shrink-0 bg-transparent font-title text-3xl tracking-tight caret-current outline-none [field-sizing:content]"
+								className={cn(
+									"lh-no-drag min-w-[8ch] max-w-[70%] shrink-0 bg-transparent font-title tracking-tight caret-current outline-none [field-sizing:content]",
+									titleSize,
+								)}
 							/>
 							{/* flex-1 spacer during rename too, so the chips stay at
 							    the right edge; clicks here commit via the header
@@ -1261,7 +1269,10 @@ export function Chat({
 								setTitleDraft(titleText);
 								setRenaming(true);
 							}}
-							className="lh-no-drag -mx-1.5 min-w-4 shrink cursor-text truncate rounded-md px-1.5 text-left font-title text-3xl tracking-tight transition-colors hover:bg-accent"
+							className={cn(
+								"lh-no-drag -mx-1.5 min-w-4 shrink cursor-text truncate rounded-md px-1.5 text-left font-title tracking-tight transition-colors hover:bg-accent",
+								titleSize,
+							)}
 						>
 							{titleText}
 							</button>
@@ -2020,7 +2031,10 @@ function DockOverlay({
 	// scroller already starts below the top bar) minus a 2rem breathing
 	// gap, carried as --dock-max-h for the docks' scroll areas.
 	const [sbInset, setSbInset] = useState(0);
-	const [dockMaxH, setDockMaxH] = useState<number | null>(null);
+	const [columnMaxH, setDockMaxH] = useState<number | null>(null);
+	// The on-screen keyboard shrinks the room above the dock (phone).
+	const keyboard = useKeyboardInset();
+	const dockMaxH = columnMaxH === null ? null : capDockHeight(columnMaxH, keyboard.dockMaxHeight);
 	useEffect(() => {
 		const el = scrollRef.current;
 		if (!el) return;
@@ -2274,7 +2288,16 @@ function DockOverlay({
 	return (
 		<div className="pointer-events-none absolute inset-x-0 bottom-0" style={{ right: sbInset }}>
 			<div className="h-24 bg-gradient-to-t from-background via-background/85 to-transparent" />
-			<div ref={blockRef} className="relative bg-background pb-5" style={{ "--dock-max-h": dockMaxH ? `${dockMaxH}px` : undefined } as React.CSSProperties}>
+			<div
+				ref={blockRef}
+				className="relative bg-background pb-5"
+				style={
+					{
+						"--dock-max-h": dockMaxH ? `${dockMaxH}px` : undefined,
+						paddingBottom: "calc(1.25rem + var(--lh-keyboard-inset, 0px))",
+					} as React.CSSProperties
+				}
+			>
 				<div className={DOCK}>
 					{setupCta}
 					{/* The queued-steer indicator (owner spec 2026-10-03): quiet

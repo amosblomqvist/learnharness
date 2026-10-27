@@ -76,6 +76,9 @@ export function computeMenuPlacement(
 	contentHeight: number,
 	preferredSide: MenuSide,
 	align: MenuAlign,
+	/** The measured menu width; when given, a menu that would cross a
+	 *  viewport edge slides back to the EDGE floor. */
+	menuWidth?: number,
 ): MenuPlacement {
 	const availDown = viewport.height - EDGE - (rect.bottom + GAP);
 	const availUp = rect.top - GAP - EDGE;
@@ -91,8 +94,13 @@ export function computeMenuPlacement(
 	}
 	const avail = side === "down" ? availDown : availUp;
 	const maxHeight = Math.max(MIN_USABLE, Math.min(CAP_VH * viewport.height, avail));
-	const horizontal: Record<string, number> =
+	let horizontal: Record<string, number> =
 		align === "right" ? { right: viewport.width - rect.right } : { left: rect.left };
+	if (menuWidth !== undefined) {
+		const left = align === "right" ? rect.right - menuWidth : rect.left;
+		const clamped = Math.max(EDGE, Math.min(left, viewport.width - EDGE - menuWidth));
+		if (clamped !== left) horizontal = { left: clamped };
+	}
 	const vertical: Record<string, number> =
 		side === "down" ? { top: rect.bottom + GAP } : { bottom: viewport.height - rect.top + GAP };
 	return { side, style: { ...horizontal, ...vertical }, maxHeight };
@@ -108,8 +116,12 @@ export function MenuShell({
 	preferredSide,
 	align = "right",
 	menuClass,
+	width,
 	children,
 }: {
+	/** A px width that overrides menuClass's width (model menus capped to
+	 *  a phone viewport). */
+	width?: number;
 	anchorRef?: RefObject<HTMLElement | null>;
 	anchorTestid?: string;
 	/** The menu body's own testid (sites assert it). */
@@ -204,6 +216,7 @@ export function MenuShell({
 				menuRef.current.scrollHeight,
 				preferredSide,
 				align,
+				menuRef.current.offsetWidth,
 			);
 			setPlaced(p);
 		};
@@ -230,7 +243,7 @@ export function MenuShell({
 				ref={menuRef}
 				data-testid={testid}
 				data-lh-menu=""
-				style={{ position: "fixed", left: 0, top: 0, visibility: "hidden" }}
+				style={{ position: "fixed", left: 0, top: 0, visibility: "hidden", width }}
 				className={menuClass}
 			>
 				{children}
@@ -245,7 +258,7 @@ export function MenuShell({
 			data-lh-menu=""
 			tabIndex={-1}
 			onKeyDown={onBodyKeyDown}
-			style={{ position: "fixed", zIndex: 60, ...placed.style, maxHeight: placed.maxHeight, overflowY: "auto" }}
+			style={{ position: "fixed", zIndex: 60, ...placed.style, maxHeight: placed.maxHeight, overflowY: "auto", width }}
 			// The body is the arrow machine's focus home (input-less menus
 			// land focus here on open) — the focus STAYS, but the browser's
 			// default blue ring around it must not draw (owner, polish

@@ -48,6 +48,8 @@ import { MENU_CLOSE_EVENT, MENU_OPEN_EVENT } from "@/components/menu-shell";
 import { notifySettingsSaved } from "@/components/settings-signal";
 import { KeysSection } from "./keys-section.tsx";
 import { Hint } from "@/components/ui/hint";
+import { usePhoneLayout } from "@/components/phone-layout-context";
+import { cn } from "@/lib/utils";
 import { AppearanceSection, GraphSection } from "./appearance-section.tsx";
 import { KeyboardSection } from "./keyboard-section.tsx";
 import { ChatGPTUIProvider } from "./chatgpt-connection.tsx";
@@ -143,6 +145,7 @@ export function SettingsDialogBody({
 	initialRow?: string | null;
 }) {
 	const { onAppearanceChange } = useAppearance();
+	const { sheetDialogs: sheet } = usePhoneLayout();
 	const [record, setRecord] = useState<UserSettings | null | undefined>(
 		undefined,
 	);
@@ -267,7 +270,10 @@ export function SettingsDialogBody({
 			aria-modal="true"
 			aria-label="Settings"
 			data-testid="settings-dialog"
-			className="settings-dialog-pop flex h-[620px] max-h-[85vh] w-[920px] max-w-[90vw] flex-col overflow-hidden rounded-md border border-border bg-card shadow-xl"
+			className={cn(
+				"settings-dialog-pop flex h-[620px] max-h-[85vh] w-[920px] max-w-[90vw] flex-col overflow-hidden rounded-md border border-border bg-card shadow-xl",
+				sheet && "h-dvh max-h-none w-screen max-w-none rounded-none border-0 pb-[env(safe-area-inset-bottom)] pt-[env(safe-area-inset-top)]",
+			)}
 			onClick={(e) => e.stopPropagation()}
 		>
 			{/* Header — the app's quiet CMU title language. */}
@@ -299,13 +305,17 @@ export function SettingsDialogBody({
 					</Hint>
 			</header>
 
-			<div className="flex min-h-0 flex-1">
+			<div className={cn("flex min-h-0 flex-1", sheet && "flex-col")}>
 				{/* Left nav — text-only, the session-list mono language,
-					    active = bg-accent. */}
+					    active = bg-accent. On a phone sheet it becomes a
+					    horizontal scroller above the content. */}
 				<nav
 					aria-label="Settings sections"
 					data-testid="settings-nav"
-					className="flex w-44 shrink-0 flex-col gap-1 border-r border-border p-2"
+					className={cn(
+						"flex w-44 shrink-0 flex-col gap-1 border-r border-border p-2",
+						sheet && "w-auto flex-row overflow-x-auto border-r-0 border-b",
+					)}
 				>
 					{SECTIONS.map((s) => (
 						<button
@@ -313,7 +323,7 @@ export function SettingsDialogBody({
 							type="button"
 							data-testid={`settings-nav-${s.id}`}
 							aria-current={active === s.id}
-							className={`rounded-sm px-3 py-1.5 text-left font-ui text-sm transition-colors ${
+							className={`${sheet ? "shrink-0 whitespace-nowrap " : ""}rounded-sm px-3 py-1.5 text-left font-ui text-sm transition-colors ${
 								active === s.id
 									? "bg-accent text-foreground"
 									: "text-muted-foreground hover:bg-accent hover:text-foreground"

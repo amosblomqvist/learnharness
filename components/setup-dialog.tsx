@@ -42,6 +42,8 @@ import { ModelMenuList } from "@/components/settings/model-menu";
 import { MenuShell } from "@/components/menu-shell";
 import { notifySettingsSaved, useSettingsSaved } from "@/components/settings-signal";
 import { Hint } from "@/components/ui/hint";
+import { useModelMenuWidth, usePhoneLayout } from "@/components/phone-layout-context";
+import { cn } from "@/lib/utils";
 import { type ProviderKeyInfo } from "@/components/settings/keys-section";
 import { ProviderMenuList } from "@/components/settings/model-menu";
 import { ChatGPTBackgroundAccess } from "@/components/settings/chatgpt-connection";
@@ -147,6 +149,7 @@ export function SetupKeysBody({
 	/** The MenuShell anchor — wired by the wrapper (its triggerRef). */
 	menuAnchor: React.RefObject<HTMLDivElement | null>;
 }) {
+	const menuWidth = useModelMenuWidth();
 	return (
 		<div className="flex flex-col gap-3 px-6 py-5" data-testid="setup-stage-keys">
 			<p className="text-xs text-muted-foreground">
@@ -174,6 +177,7 @@ export function SetupKeysBody({
 							preferredSide="down"
 							align="left"
 							menuClass="flex w-[22rem] flex-col rounded-xl border border-border bg-card p-2 text-xs shadow-xl"
+							width={menuWidth}
 						>
 							<ProviderMenuList providers={providers ?? []} onPick={onPick} />
 						</MenuShell>
@@ -229,6 +233,8 @@ export function SetupDialog({
 	onDone: (models: ModelsSettings) => void;
 }) {
 	const backdropDismiss = useBackdropDismiss(onClose);
+	const { sheetDialogs: sheet } = usePhoneLayout();
+	const menuWidth = useModelMenuWidth();
 	const [body, setBody] = useState<ModelsBody | null>(null);
 	const [failed, setFailed] = useState(false);
 	const [picked, setPicked] = useState<Partial<Record<ModelSlotName, ModelCatalogEntry>>>({});
@@ -409,7 +415,10 @@ export function SetupDialog({
 				aria-modal="true"
 				aria-label="Set up your models"
 				data-testid="setup-dialog"
-				className="settings-dialog-pop flex max-h-[85vh] w-[640px] max-w-[90vw] flex-col overflow-hidden rounded-md border border-border bg-card shadow-xl"
+				className={cn(
+					"settings-dialog-pop flex max-h-[85vh] w-[640px] max-w-[90vw] flex-col overflow-hidden rounded-md border border-border bg-card shadow-xl",
+					sheet && "h-dvh max-h-none w-screen max-w-none rounded-none border-0 pb-[env(safe-area-inset-bottom)] pt-[env(safe-area-inset-top)]",
+				)}
 				onClick={(e) => e.stopPropagation()}
 			>
 				<header className="flex h-15 shrink-0 items-center gap-3 border-b border-border px-5">
@@ -510,6 +519,7 @@ export function SetupDialog({
 													preferredSide="down"
 													align="left"
 													menuClass="flex w-[22rem] flex-col rounded-xl border border-border bg-card p-2 text-xs shadow-xl"
+													width={menuWidth}
 												>
 													<ModelMenuList
 														models={catalog}

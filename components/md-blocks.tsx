@@ -42,6 +42,8 @@ import { MermaidError } from "@/components/mermaid-error";
 import { blurAfterPointerClick } from "@/components/focus-hygiene";
 import { chartSize, useSessionMermaid } from "@/components/session-overlay";
 import { Hint } from "@/components/ui/hint";
+import { copyVisibility } from "@/components/phone-layout";
+import { usePhoneLayout } from "@/components/phone-layout-context";
 
 // ─── The one affordance: the hover-reveal corner copy ────────────────────────
 
@@ -95,13 +97,17 @@ export function CopyCorner({
 	const [copied, setCopied] = useState(false);
 	const timerRef = useRef<number | undefined>(undefined);
 	useEffect(() => () => window.clearTimeout(timerRef.current), []);
+	const visible = copyVisibility(usePhoneLayout().canHover) === "visible";
 	return (
 		<span className={cn("relative inline-flex", className)}>
 			<button
 				type="button"
 				aria-label={label}
 				data-testid="md-copy"
-				className="flex size-6 items-center justify-center rounded-md text-muted-foreground/70 opacity-0 transition-opacity hover:bg-accent hover:text-foreground focus-visible:opacity-100 group-hover/md:opacity-100"
+				className={cn(
+					"flex size-6 items-center justify-center rounded-md text-muted-foreground/70 opacity-0 transition-opacity hover:bg-accent hover:text-foreground focus-visible:opacity-100 group-hover/md:opacity-100",
+					visible && "opacity-100",
+				)}
 				onClick={(e) => {
 					blurAfterPointerClick(e);
 					void copyText(getText()).then((ok) => {
@@ -139,6 +145,7 @@ export function codeSource(children: ReactNode): string {
  *  still streaming (the trailing open fence), a quiet skeleton instead of a
  *  doomed parse. */
 function MermaidInline({ chart }: { chart: string }) {
+	const { canHover } = usePhoneLayout();
 	const [svg, setSvg] = useState<string | null>(null);
 	const [error, setError] = useState<string | null>(null);
 	const [attempt, setAttempt] = useState(0);
@@ -211,7 +218,10 @@ function MermaidInline({ chart }: { chart: string }) {
 						type="button"
 						aria-label="Expand diagram"
 						data-testid="md-mermaid-expand"
-												className="flex size-6 items-center justify-center rounded-md text-muted-foreground/70 opacity-0 transition-opacity hover:bg-accent hover:text-foreground group-hover/md:opacity-100"
+												className={cn(
+							"flex size-6 items-center justify-center rounded-md text-muted-foreground/70 opacity-0 transition-opacity hover:bg-accent hover:text-foreground group-hover/md:opacity-100",
+							copyVisibility(canHover) === "visible" && "opacity-100",
+						)}
 						onClick={(e) => {
 							blurAfterPointerClick(e);
 							overlay.openMermaid(chart);
