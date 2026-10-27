@@ -26,6 +26,7 @@ node scripts/smoke-web-subscriptions.mjs # after build: offline Next start/dev +
 
 npm run desktop:dev    # next dev + Electron shell pointed at it
 npm run desktop:dist   # local signed/notarized macOS arm64 build (LH_NOTARY keychain)
+npm run desktop:dist:mac:x64:unsigned # native Intel macOS rehearsal; no signing/notarization/publishing
 
 # one-shot data scripts (run from the master tree only — data never crosses trees)
 npx tsx --env-file=.env.local scripts/import-notes.ts <dir>   # bulk-import notes → graph
@@ -33,7 +34,7 @@ npx tsx --env-file=.env.local scripts/backfill-graph.ts       # wipe + re-extrac
 npx tsx --env-file=.env.local scripts/replay-layout.ts        # re-derive layout from the ledgers
 ```
 
-For Windows/Linux packages and the three-OS CI/release flow, see [`desktop-release.md`](desktop-release.md). Native renderer binaries are traced per platform, so release builds run on the target OS, not as cross-builds from macOS.
+For native Intel/Apple Silicon macOS packages, Windows/Linux packages, and the single-publisher macOS update feed, see [`desktop-release.md`](desktop-release.md). Use Node 26 and `npm ci` for release parity. Native renderer binaries are traced per OS and CPU architecture: install dependencies and build on the target, never cross-package a standalone payload.
 
 ## Environment (`.env.local`)
 

@@ -4,7 +4,7 @@ on:
   push:
     tags: ["v*"]
   # Manual runs are artifact-only, unsigned, and NEVER create a release.
-  # Use this for the first Windows/Linux dress rehearsal without secrets.
+  # Both Mac architectures are finalized together, without release uploads.
   workflow_dispatch:
 
 permissions:
@@ -95,6 +95,11 @@ jobs:
           - os: macos-26
             platform: mac-arm64
             builder_args: --mac --arm64
+            app_dir: mac-arm64
+          - os: macos-15-intel
+            platform: mac-x64
+            builder_args: --config electron-builder.mac-x64.yml --mac --x64
+            app_dir: mac
           - os: windows-2025
             platform: windows-x64
             builder_args: --win --x64
@@ -113,12 +118,10 @@ jobs:
         with:
           node-version: "26"
           cache: npm
-      # The mac icon is the Icon Composer document (build/icon.icon);
-      # compiling it needs both macOS 26+ and actool ≥ 26 (Xcode 26+).
-      # Xcode 26's asset compiler crashes on macOS 15's older frameworks.
-      # Select the latest stable Xcode; no-op for Windows/Linux.
-      - name: Select Xcode 26+ for actool (mac icon compile)
-        if: runner.os == 'macOS'
+      # Only arm64 compiles Icon Composer (macOS 26 + Xcode 26).
+      # Intel uses the existing static icns, including on macOS 15.
+      - name: Select Xcode 26+ for actool (arm64 icon compile)
+        if: matrix.platform == 'mac-arm64'
         uses: maxim-lobanov/setup-xcode@v1
         with:
           xcode-version: latest-stable
@@ -148,16 +151,15 @@ jobs:
               exit 1
             fi
           done
-      - name: Signed and notarized macOS release → draft
+      - name: Signed and notarized macOS release (stage only)
         if: github.event_name == 'push' && runner.os == 'macOS'
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           CSC_LINK: ${{ secrets.MAC_CSC_LINK }}
           CSC_KEY_PASSWORD: ${{ secrets.MAC_CSC_KEY_PASSWORD }}
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-        run: npx electron-builder ${{ matrix.builder_args }} --publish always -c.forceCodeSigning=true
+        run: npx electron-builder ${{ matrix.builder_args }} --publish never -c.forceCodeSigning=true
       - name: Windows/Linux release → draft
         if: github.event_name == 'push' && runner.os != 'macOS'
         env:
@@ -175,7 +177,7 @@ jobs:
         run: |
           case "$RUNNER_OS" in
             macOS)
-              app="dist/mac-arm64/LearnHarness.app/Contents"
+              app="dist/${{ matrix.app_dir }}/LearnHarness.app/Contents"
               payload="$app/Resources/server/standalone"
               runtime="$app/MacOS/LearnHarness"
               ;;
@@ -194,7 +196,7 @@ jobs:
         run: |
           case "$RUNNER_OS" in
             macOS)
-              app="dist/mac-arm64/LearnHarness.app/Contents"
+              app="dist/${{ matrix.app_dir }}/LearnHarness.app/Contents"
               node scripts/smoke-demo-runtime.mjs --standalone "$app/Resources/server/standalone" --runtime "$app/MacOS/LearnHarness" --browser
               ;;
             Windows)
@@ -219,16 +221,59 @@ jobs:
             dist/*.blockmap
             dist/latest*.yml
 
-  # The last gate before a human publishes: after ALL three packaging jobs
-  # have uploaded, fail the run unless the tag's single draft release holds
-  # exactly the 11 verified assets (4 installers + mac updater ZIP + their
-  # blockmaps + 3 latest*.yml feeds) and the feeds reference those uploads
-  # by exact name at the package.json version. Read-only: it never creates,
-  # edits, publishes, or deletes anything. Manual rehearsals upload nothing,
-  # so there is no draft to verify and the job stays skipped.
+  # One writer for macOS: neither architecture job uploads to GitHub Releases.
+  # Download into separate directories so partial latest-mac.yml files cannot
+  # overwrite each other. This runs for rehearsals too, proving finalization.
+  finalize-mac:
+    name: Finalize macOS update feed
+    needs: package
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "26"
+          cache: npm
+      - run: npm ci
+      - uses: actions/download-artifact@v8
+        with:
+          name: learnharness-mac-arm64
+          path: dist/mac-input/arm64
+      - uses: actions/download-artifact@v8
+        with:
+          name: learnharness-mac-x64
+          path: dist/mac-input/x64
+      - name: Validate artifacts and combine both architectures
+        run: npx tsx scripts/finalize-mac-update.ts dist/mac-input/arm64 dist/mac-input/x64 dist/mac-update
+      - uses: actions/upload-artifact@v7
+        with:
+          name: learnharness-mac-combined
+          path: dist/mac-update/*
+          retention-days: 7
+          if-no-files-found: error
+      - name: Upload macOS artifacts then the complete feed to the single draft
+        if: github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/releases?per_page=100" > "$RUNNER_TEMP/releases.json"
+          npx tsx scripts/verify-release.ts select "$RUNNER_TEMP/releases.json" --tag "$GITHUB_REF_NAME" > "$RUNNER_TEMP/draft.json"
+          tag=$(node -e 'console.log(JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8")).matchedTagName)' "$RUNNER_TEMP/draft.json")
+          gh release upload "$tag" dist/mac-update/*.dmg dist/mac-update/*.zip dist/mac-update/*.blockmap --clobber
+          gh release upload "$tag" dist/mac-update/latest-mac.yml --clobber
+
+  # Read-only final gate: exactly 15 assets, with both macOS architectures
+  # in the single combined feed. Manual rehearsals create no draft.
   verify:
     name: Verify draft release
-    needs: package
+    needs: [package, finalize-mac]
     if: github.event_name == 'push'
     runs-on: ubuntu-24.04
     timeout-minutes: 10

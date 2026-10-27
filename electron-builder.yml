@@ -1,4 +1,5 @@
 # electron-builder config — LearnHarness desktop (macOS arm64; Windows/Linux x64).
+# Native Intel macOS uses electron-builder.mac-x64.yml.
 #
 # Shape (fact-checked 2026-09-17):
 #   - the app's real server (.next/standalone, curated by
@@ -20,7 +21,8 @@ directories:
 #         capped at 256px, which scripts/after-pack.cjs swaps for the
 #         hand-packed full-res build/icon.icns (pre-Tahoe keeps 16→1024).
 #         Requires actool ≥ 26: desktop:dist injects DEVELOPER_DIR locally;
-#         the release workflow's mac job runs setup-xcode.
+#         the release workflow's arm64 mac job runs setup-xcode.
+#   mac x64 build/icon.icns — static full-resolution artwork; no actool.
 #   win   build/icon.ico  — generated (16→256) from the flat design by
 #         scripts/make-icons.mjs.
 #   linux build/icon.png  — 512×512, same script. Rounded squircle with
@@ -150,6 +152,8 @@ dmg:
       y: 190
       type: link
       path: /Applications
+# Refuse cross-packaging a native standalone server for another macOS arch.
+beforePack: scripts/before-pack.cjs
 afterPack: scripts/after-pack.cjs
 win:
   icon: build/icon.ico
@@ -185,8 +189,8 @@ publish:
   # zip/blockmap live on releases; electron-updater reads them anonymously.
   # REQUIRES THE REPO TO BE PUBLIC before 0.3.0 ships — anonymous downloads
   # from a private repo are impossible, and a token baked into the app
-  # would be a leak. desktop:dist passes no --publish flag, so builds never
-  # upload; publishing happens at release time (GH_TOKEN + --publish).
+  # would be a leak. Local desktop:dist commands explicitly pass --publish
+  # never; publishing happens at release time (GH_TOKEN + --publish).
   - provider: github
     owner: amosblomqvist
     repo: learnharness

@@ -41,6 +41,8 @@ jobs:
           # Standard macos-15 runners are Apple Silicon (not macos-15-intel).
           - os: macos-15
             platform: mac-arm64
+          - os: macos-15-intel
+            platform: mac-x64
           - os: windows-2025
             platform: windows-x64
           - os: ubuntu-24.04

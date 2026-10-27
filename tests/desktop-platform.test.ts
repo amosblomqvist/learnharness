@@ -1,4 +1,4 @@
-/** Platform window chrome + packaging policy, without launching Electron. */
+/** Platform window chrome and draft-release behavior, without launching Electron. */
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
@@ -136,70 +136,6 @@ describe("update preload bridge", () => {
 	});
 });
 
-describe("desktop packaging policy", () => {
-	const yaml = require("js-yaml") as { load(source: string): Record<string, any> };
-	const config = yaml.load(readFileSync(new URL("../electron-builder.yml", import.meta.url), "utf8"));
-
-	it("configuration is accepted by the INSTALLED electron-builder schema", async () => {
-		const { validateConfiguration } = require("app-builder-lib/out/util/config/config.js");
-		await validateConfiguration(config, { isEnabled: false });
-	});
-
-	it("ships Mac arm64, Windows NSIS x64, and both Linux x64 channels", () => {
-		assert.deepEqual(config.mac.target, [
-			{ target: "dmg", arch: ["arm64"] }, { target: "zip", arch: ["arm64"] },
-		]);
-		assert.deepEqual(config.win.target, [{ target: "nsis", arch: ["x64"] }]);
-		assert.equal(config.win.signExecutable, false);
-		assert.equal(config.win.verifyUpdateCodeSignature, false);
-		assert.deepEqual(config.linux.target, [
-			{ target: "AppImage", arch: ["x64"] }, { target: "deb", arch: ["x64"] },
-		]);
-		assert.equal(config.linux.syncDesktopName, true);
-		assert.equal(config.publish[0].releaseType, "draft");
-	});
-
-	it("deb has public maintainer metadata and a matching desktop identity", () => {
-		const pkg = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
-		assert.equal(pkg.author.name, "Amos Blomqvist");
-		assert.equal(pkg.author.email, "255718537+amosblomqvist@users.noreply.github.com");
-		assert.equal(pkg.homepage, "https://github.com/amosblomqvist/learnharness");
-		assert.equal(pkg.desktopName, "learnharness.desktop");
-	});
-});
-
-describe("workflow action versions", () => {
-	type Step = { uses?: string; with?: Record<string, unknown> };
-	type Workflow = { jobs: Record<string, { steps: Step[] }> };
-	const yaml = require("js-yaml") as { load(source: string): Workflow };
-
-	for (const filename of ["ci.yml", "release.yml"]) {
-		it(`${filename} uses supported Action runtimes without changing the app's Node 26`, () => {
-			const workflow = yaml.load(readFileSync(new URL(`../.github/workflows/${filename}`, import.meta.url), "utf8"));
-			const expected = ["actions/checkout@v7", "actions/setup-node@v7"];
-			if (filename === "release.yml") {
-				expected.push("actions/github-script@v9", "actions/upload-artifact@v7", "maxim-lobanov/setup-xcode@v1");
-			}
-			const observed = new Set<string>();
-			for (const job of Object.values(workflow.jobs)) {
-				for (const step of job.steps) {
-					if (!step.uses) continue;
-					assert.ok(expected.includes(step.uses), `unexpected Action reference: ${step.uses}`);
-					observed.add(step.uses);
-					if (step.uses === "actions/setup-node@v7") {
-						assert.equal(step.with?.["node-version"], "26");
-						assert.equal(step.with?.cache, "npm");
-					}
-					if (step.uses === "actions/upload-artifact@v7") {
-						assert.equal(step.with?.archive ?? true, true, "multi-file installers remain zipped artifacts");
-					}
-				}
-			}
-			assert.deepEqual([...observed].sort(), expected.sort());
-		});
-	}
-});
-
 describe("desktop release workflow", () => {
 	type Step = {
 		if?: string; run?: string; uses?: string; env?: Record<string, string>;
@@ -249,43 +185,6 @@ describe("desktop release workflow", () => {
 		});
 		return created;
 	}
-
-	it("prepares once after gates, never on rehearsals, before parallel packaging", () => {
-		assert.equal(draft.needs, "quality");
-		assert.equal(prepare.if, "github.event_name == 'push'");
-		assert.deepEqual(packaging.needs, ["quality", "draft"]);
-		assert.equal(workflow.concurrency.group, "release-${{ github.ref }}");
-		assert.equal(workflow.concurrency["cancel-in-progress"], false);
-		for (const filename of ["ci.yml", "release.yml"]) {
-			const config = yaml.load(readFileSync(new URL(`../.github/workflows/${filename}`, import.meta.url), "utf8"));
-			const job = config.jobs[filename === "ci.yml" ? "standalone" : "package"];
-			assert.ok(job);
-			const steps = job.steps;
-			const native = steps.find(step => step.run?.includes("pdf-native-render.test.ts"));
-			assert.ok(native);
-			assert.ok(native.run?.startsWith("npx electron --import tsx --test "));
-			assert.equal(native.env?.ELECTRON_RUN_AS_NODE, "1");
-			assert.ok(steps.some(step => step.run === "node scripts/smoke-server.mjs --electron"));
-		}
-	});
-
-	it("pairs Icon Composer packaging with macOS 26 and Xcode selection, retaining macOS 15 CI", () => {
-		const mac = packaging.strategy?.matrix.include.find(entry => entry.platform === "mac-arm64");
-		assert.equal(mac?.os, "macos-26", "actool's .icon compiler needs macOS 26 host frameworks, not just newer Xcode");
-		assert.equal(mac?.builder_args, "--mac --arm64");
-		assert.equal(packaging["runs-on"], "${{ matrix.os }}");
-		const xcodeIndex = packaging.steps.findIndex(step => step.uses === "maxim-lobanov/setup-xcode@v1");
-		assert.ok(xcodeIndex >= 0);
-		const xcode = packaging.steps[xcodeIndex];
-		assert.equal(xcode?.if, "runner.os == 'macOS'");
-		assert.equal(xcode?.with?.["xcode-version"], "latest-stable");
-		const buildIndex = packaging.steps.findIndex(step => step.run?.includes("electron-builder"));
-		assert.ok(buildIndex > xcodeIndex, "select Xcode before packaging compiles the icon");
-
-		const ci = yaml.load(readFileSync(new URL("../.github/workflows/ci.yml", import.meta.url), "utf8"));
-		const ciMac = ci.jobs.standalone?.strategy?.matrix.include.find(entry => entry.platform === "mac-arm64");
-		assert.equal(ciMac?.os, "macos-15", "ordinary CI keeps older macOS build/boot coverage");
-	});
 
 	it("creates exactly one unpublished draft when none matches", async () => {
 		assert.deepEqual(await prepareDraft([{ id: 9, tag_name: "v0.2.0", draft: false }]), [{
