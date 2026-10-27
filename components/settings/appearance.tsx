@@ -11,6 +11,14 @@
  * palette is designed in the later design wave; <html class="dark"> is
  * static in app/layout.tsx).
  *
+ * OMARCHY THEME (2026-10-26): with appearance.theme = "omarchy" the palette
+ * comes from the desktop's theme file (GET /api/theme/omarchy, shape in
+ * core/system-theme.ts) instead of the background derivation — every
+ * palette token, the mode included: a light Omarchy theme drops the dark
+ * class. "theme-changed" (the server's watch on that file) refetches it,
+ * so an Omarchy theme switch retints open windows live. Selected but no
+ * file = the app's own palette.
+ *
  * The provider is mounted at the ROOT LAYOUT level (like ActivityProvider):
  * every page picks appearance up on load. The settings page writes a
  * section, hands the new appearance here, and the vars move immediately.
@@ -20,12 +28,20 @@
  */
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
-import { FACTORY_SETTINGS, type AppearanceSettings } from "@/src/core";
+import {
+	FACTORY_SETTINGS,
+	sanitizeSystemTheme,
+	systemThemeVars,
+	type AppearanceSettings,
+	type SystemTheme,
+} from "@/src/core";
+import { useServerEvent, useServerResync } from "@/components/server-events";
 
 /** The resolved, fully-concrete appearance view (delta + factory merged). */
 export function resolveAppearance(delta: AppearanceSettings | undefined) {
 	const f = FACTORY_SETTINGS.appearance;
 	return {
+		theme: delta?.theme ?? f.theme,
 		mode: delta?.mode ?? f.mode,
 		background: delta?.background ?? f.background,
 		fontFamily: delta?.fontFamily ?? f.fontFamily,
@@ -71,12 +87,27 @@ export function derivedPalette(background: string): Record<string, string> {
 	};
 }
 
+/** The palette in effect: the Omarchy theme when it is selected AND its
+ *  file was read, otherwise null (the app's own palette). Pure. */
+export function activeSystemTheme(
+	a: ReturnType<typeof resolveAppearance>,
+	systemTheme: SystemTheme | null,
+): SystemTheme | null {
+	return a.theme === "omarchy" ? systemTheme : null;
+}
+
 /** THE mapping: resolved appearance → the CSS variables to set on <html>.
- *  Absent entries = leave the factory stylesheet value in place. Pure —
- *  exported for tests. */
-export function appearanceVars(a: ReturnType<typeof resolveAppearance>): Record<string, string> {
+ *  Absent entries = leave the factory stylesheet value in place. An active
+ *  Omarchy theme replaces the background derivation; type and emphasis
+ *  settings still apply on top. Pure — exported for tests. */
+export function appearanceVars(
+	a: ReturnType<typeof resolveAppearance>,
+	systemTheme: SystemTheme | null = null,
+): Record<string, string> {
 	const vars: Record<string, string> = {};
-	if (a.background !== null) Object.assign(vars, derivedPalette(a.background));
+	const theme = activeSystemTheme(a, systemTheme);
+	if (theme !== null) Object.assign(vars, systemThemeVars(theme));
+	else if (a.background !== null) Object.assign(vars, derivedPalette(a.background));
 	if (a.fontFamily !== null) {
 		vars["--font-prose"] = `"${a.fontFamily}", var(--font-sans3), ui-sans-serif, system-ui, sans-serif`;
 	}
@@ -110,12 +141,15 @@ export function staleVarNames(
 interface AppearanceContextValue {
 	/** Resolved appearance; factory until the record arrives. */
 	appearance: ReturnType<typeof resolveAppearance>;
+	/** The Omarchy theme file's palette; null = no usable file. */
+	systemTheme: SystemTheme | null;
 	/** Called by the settings page after a successful section PUT. */
 	onAppearanceChange: (delta: AppearanceSettings | undefined) => void;
 }
 
 const AppearanceContext = createContext<AppearanceContextValue>({
 	appearance: resolveAppearance(undefined),
+	systemTheme: null,
 	onAppearanceChange: () => {},
 });
 
@@ -125,10 +159,30 @@ export function useAppearance() {
 
 export function AppearanceProvider({ children }: { children: React.ReactNode }) {
 	const [delta, setDelta] = useState<AppearanceSettings | undefined>(undefined);
+	const [systemTheme, setSystemTheme] = useState<SystemTheme | null>(null);
 	const appliedRef = useRef<string>("");
 
 	// The vars apply on every change — stringified as the change signal.
-	const vars = useMemo(() => appearanceVars(resolveAppearance(delta)), [delta]);
+	const vars = useMemo(() => appearanceVars(resolveAppearance(delta), systemTheme), [delta, systemTheme]);
+	// The one thing the vars can't reach: Tailwind's dark variant keys off
+	// <html class="dark">, so a light Omarchy theme has to drop the class.
+	const light = activeSystemTheme(resolveAppearance(delta), systemTheme)?.mode === "light";
+	useEffect(() => {
+		document.documentElement.classList.toggle("dark", !light);
+	}, [light]);
+
+	// The Omarchy theme file: read on load, re-read whenever the server's
+	// watch reports a change (and after a reconnect, which may have missed
+	// one). A failed read keeps the last palette rather than flashing back.
+	const loadSystemTheme = useCallback(() => {
+		fetch("/api/theme/omarchy")
+			.then((r) => r.json())
+			.then((body: { theme?: unknown }) => setSystemTheme(sanitizeSystemTheme(body.theme)))
+			.catch(() => {/* keep the last palette */});
+	}, []);
+	useEffect(loadSystemTheme, [loadSystemTheme]);
+	useServerEvent("theme-changed", loadSystemTheme);
+	useServerResync(loadSystemTheme);
 	const key = useMemo(() => JSON.stringify(vars), [vars]);
 	// REMOVAL is half the job (owner repro, fix wave): a later write that
 	// OMITS a var (empty field = factory, serif toggle back on) must clear
@@ -178,8 +232,8 @@ export function AppearanceProvider({ children }: { children: React.ReactNode }) 
 	}, []);
 
 	const value = useMemo(
-		() => ({ appearance: resolveAppearance(delta), onAppearanceChange }),
-		[delta, onAppearanceChange],
+		() => ({ appearance: resolveAppearance(delta), systemTheme, onAppearanceChange }),
+		[delta, systemTheme, onAppearanceChange],
 	);
 	return <AppearanceContext.Provider value={value}>{children}</AppearanceContext.Provider>;
 }

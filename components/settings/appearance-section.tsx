@@ -9,7 +9,9 @@
  * raised/accent/edge palette in code (components/settings/appearance.tsx).
  * Mode is dark-only this wave: control rendered DISABLED with a note — the
  * light palette is the design wave's work, and a lying control is worse
- * than an honest disabled one.
+ * than an honest disabled one. The Theme row (2026-10-26) picks the palette
+ * source; with Omarchy active, Mode shows the desktop theme's mode and the
+ * Background row dims (stored value kept for switching back).
  *
  * Graph graying (owner, 2026-09-20) follows the graph viewer's render-panel
  * convention: the whole row dims when a parent is off (stored values
@@ -35,11 +37,12 @@ import {
 	EXTRACTION_CHUNK_TOKENS_FLOOR,
 	resolveSettings,
 	type AppearanceSettings,
+	type AppearanceTheme,
 	type GraphSettings,
 } from "@/src/core";
 import { MenuShell } from "@/components/menu-shell";
 import { Hint } from "@/components/ui/hint";
-import { useAppearance } from "./appearance.tsx";
+import { activeSystemTheme, useAppearance } from "./appearance.tsx";
 import { FontMenuList } from "./model-menu";
 import { CommitInput, SettingsMenuTrigger, SettingsRow, ThinSelect, Toggle } from "./controls.tsx";
 
@@ -97,8 +100,14 @@ export function AppearanceSection({
 	/** PUT the whole appearance section; the page re-applies on success. */
 	onSectionChange: (next: AppearanceSettings) => void;
 }) {
-	const { appearance: resolved } = useAppearance();
+	const { appearance: resolved, systemTheme } = useAppearance();
 	const md = appearance?.mdRendering;
+	// The Omarchy option only appears once its file exists (or while it is
+	// the stored choice, so the select never shows a value it can't name).
+	// Active, it owns mode and background: those rows dim, values kept.
+	const omarchyActive = activeSystemTheme(resolved, systemTheme) !== null;
+	const mode = omarchyActive ? systemTheme!.mode : "dark";
+	const themeHint = resolved.theme === "omarchy" && systemTheme === null ? "Omarchy theme file not found" : undefined;
 
 	// The font dropdown's open state + its enumeration cache. undefined =
 	// not enumerated yet (desktop: click-bound queryLocalFonts pending);
@@ -186,15 +195,27 @@ export function AppearanceSection({
 
 	return (
 		<>
-			<SettingsRow label="Mode" hint="Coming soon" testid="row-mode" dimmed>
-				<ThinSelect value="dark" ariaLabel="mode" onChange={() => {}} testid="select-mode" disabled>
-					<option value="dark">Dark</option>
+			<SettingsRow label="Theme" hint={themeHint} testid="row-theme">
+				<ThinSelect
+					value={resolved.theme}
+					ariaLabel="theme"
+					testid="select-theme"
+					onChange={(v) => onSectionChange({ ...appearance, theme: v as AppearanceTheme })}
+				>
+					<option value="default">LearnHarness</option>
+					{(systemTheme !== null || resolved.theme === "omarchy") && <option value="omarchy">Omarchy</option>}
+				</ThinSelect>
+			</SettingsRow>
+			<SettingsRow label="Mode" hint={omarchyActive ? "From Omarchy" : "Coming soon"} testid="row-mode" dimmed>
+				<ThinSelect value={mode} ariaLabel="mode" onChange={() => {}} testid="select-mode" disabled>
+					<option value={mode}>{mode === "light" ? "Light" : "Dark"}</option>
 				</ThinSelect>
 			</SettingsRow>
 			<SettingsRow
 				label="Background"
-				hint={`Empty = ${resolved.background ?? "#141414"}`}
+				hint={omarchyActive ? "From Omarchy" : `Empty = ${resolved.background ?? "#141414"}`}
 				testid="row-background"
+				dimmed={omarchyActive}
 			>
 				<CommitInput
 					value={appearance?.background ?? ""}

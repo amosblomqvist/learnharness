@@ -1,3 +1,4 @@
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -143,3 +144,19 @@ export const PROMPTS_OVERRIDE_DIR = path.join(DATA_ROOT, "prompts");
 export const AUTH_FILE = process.env.LH_AUTH_FILE
 	? path.resolve(process.env.LH_AUTH_FILE)
 	: path.join(ROOT, "auth.json");
+
+/**
+ * THE OMARCHY THEME FILE (2026-10-26): Omarchy's theme-set hook writes the
+ * current desktop palette here (src/core/system-theme.ts has the shape) —
+ * the T3 Code pattern (~/.t3/userdata/themes/omarchy.json). ONE fixed path
+ * for every run mode (packaged, Electron dev, web dev), so the hook needs no
+ * knowledge of LH_DATA_DIR. LH_SYSTEM_THEME_FILE relocates it (tests).
+ */
+export const SYSTEM_THEME_FILE = process.env.LH_SYSTEM_THEME_FILE
+	? path.resolve(process.env.LH_SYSTEM_THEME_FILE)
+	: path.join(
+			process.env.XDG_CONFIG_HOME || path.join(os.homedir(), ".config"),
+			"LearnHarness",
+			"themes",
+			"omarchy.json",
+		);

@@ -1,0 +1,30 @@
+#!/bin/bash
+
+# Sync the generated Omarchy theme to LearnHarness (same pattern as
+# omarchy-theme-set-t3code). Install as ~/.config/omarchy/hooks/theme-set.d/60-learnharness;
+# the template goes in ~/.config/omarchy/themed/learnharness.json.tpl.
+
+set -euo pipefail
+
+LH_SOURCE_PATH="$HOME/.local/state/omarchy/current/theme/learnharness.json"
+LH_THEMES_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/LearnHarness/themes"
+LH_THEME_PATH="$LH_THEMES_DIR/omarchy.json"
+
+[[ -f $LH_SOURCE_PATH ]] || exit 0
+
+# A theme missing a color leaves its placeholder unresolved; LearnHarness would
+# reject the file, so keep the previous palette instead.
+if grep -q '{{' "$LH_SOURCE_PATH"; then
+  echo "Skipping LearnHarness theme: $(basename "$LH_SOURCE_PATH") has unresolved colors." >&2
+  exit 0
+fi
+
+# Only follow an install that exists: LearnHarness creates this directory the
+# first time it runs on Linux.
+[[ -d $LH_THEMES_DIR ]] || exit 0
+
+# LearnHarness watches this directory and retints open windows on change, so
+# the write must be atomic.
+tmp=$(mktemp "$LH_THEME_PATH.XXXXXX")
+cp "$LH_SOURCE_PATH" "$tmp"
+mv "$tmp" "$LH_THEME_PATH"

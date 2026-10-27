@@ -24,7 +24,14 @@ import type {
 	ModelsSettings,
 	RoleModelOverride,
 } from "../core/settings.ts";
-import { BACKGROUND_MODEL_ROLES, COMPACTION_THRESHOLD_FLOOR, EXTRACTION_CHUNK_TOKENS_FLOOR, MODEL_SLOTS } from "../core/settings.ts";
+import {
+	APPEARANCE_THEMES,
+	BACKGROUND_MODEL_ROLES,
+	COMPACTION_THRESHOLD_FLOOR,
+	EXTRACTION_CHUNK_TOKENS_FLOOR,
+	isAppearanceTheme,
+	MODEL_SLOTS,
+} from "../core/settings.ts";
 import { WRITABLE_TOOL_KEYS } from "../core/pending.ts";
 import { isDictationLanguage } from "../core/dictation.ts";
 
@@ -209,12 +216,18 @@ function parseHexOrNull(value: unknown, field: string): { color?: string | null;
 	return { color: value };
 }
 
-/** appearance: { mode?, background?, fontFamily?, proseFontSize?,
+/** appearance: { theme?, mode?, background?, fontFamily?, proseFontSize?,
  *  sessionNameSerif?, mdRendering? } */
 export function parseAppearanceSettingsBody(body: unknown): SettingsBodyResult<AppearanceSettings> {
 	const raw = asRecord(body);
 	if (!raw) return { ok: false, error: "Invalid JSON body" };
 	const settings: AppearanceSettings = {};
+	if (raw.theme !== undefined) {
+		if (!isAppearanceTheme(raw.theme)) {
+			return { ok: false, error: `theme must be one of ${APPEARANCE_THEMES.map((t) => `"${t}"`).join(", ")}` };
+		}
+		settings.theme = raw.theme;
+	}
 	if (raw.mode !== undefined) {
 		if (raw.mode !== "dark" && raw.mode !== "light") {
 			return { ok: false, error: "mode must be \"dark\" or \"light\"" };

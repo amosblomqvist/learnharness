@@ -50,6 +50,9 @@ export interface ServerEvents {
 	 *  the chat; the client mirrors it by disabling the composer/dock
 	 *  submit. */
 	"compaction-changed": { chatId: string; running: boolean };
+	/** The Omarchy theme file changed on disk (the desktop switched
+	 *  themes). Open windows refetch it and retint. */
+	"theme-changed": Record<string, never>;
 }
 
 export type ServerEventType = keyof ServerEvents;
@@ -66,6 +69,7 @@ export const SERVER_EVENT_TYPES = [
 	"subscriptions-changed",
 	"record-changed",
 	"compaction-changed",
+	"theme-changed",
 ] as const satisfies readonly ServerEventType[];
 
 /** One notification: the type discriminates the payload. */

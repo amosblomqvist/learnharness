@@ -281,8 +281,19 @@ export interface MdRenderingSettings {
 	italicColor?: string | null;
 }
 
-/** Appearance settings — mode, colors, type, markdown emphasis. */
+/** The palette source: the app's own ("default") or the Omarchy theme file
+ *  (core/system-theme.ts), which then replaces mode and background. */
+export const APPEARANCE_THEMES = ["default", "omarchy"] as const;
+export type AppearanceTheme = (typeof APPEARANCE_THEMES)[number];
+
+export function isAppearanceTheme(value: unknown): value is AppearanceTheme {
+	return typeof value === "string" && (APPEARANCE_THEMES as readonly string[]).includes(value);
+}
+
+/** Appearance settings — theme, mode, colors, type, markdown emphasis. */
 export interface AppearanceSettings {
+	/** "default" | "omarchy" (default "default"). */
+	theme?: AppearanceTheme;
 	/** "dark" | "light" (default dark). */
 	mode?: "dark" | "light";
 	/** The one user-chosen color; everything else derives per-mode in code.
@@ -387,6 +398,7 @@ export interface FactorySettings {
 	general: Required<GeneralSettings>;
 	dictation: Required<DictationSettings>;
 	appearance: {
+		theme: AppearanceTheme;
 		mode: "dark" | "light";
 		background: string | null;
 		fontFamily: string | null;
@@ -407,6 +419,7 @@ export const FACTORY_SETTINGS: FactorySettings = {
 	general: { autoUpdate: true },
 	dictation: { language: "en" },
 	appearance: {
+		theme: "default",
 		mode: "dark",
 		background: null, // the dark default (#141414) lives in the mode's derivation curve
 		fontFamily: null, // Source Sans 3
@@ -554,6 +567,7 @@ function sanitizeMdRendering(raw: unknown): MdRenderingSettings {
 
 function sanitizeAppearance(raw: Record<string, unknown>): AppearanceSettings {
 	const out: AppearanceSettings = {};
+	if (isAppearanceTheme(raw.theme)) out.theme = raw.theme;
 	if (raw.mode === "dark" || raw.mode === "light") out.mode = raw.mode;
 	if (raw.background !== undefined) out.background = sanitizeHexOrNull(raw.background);
 	if (raw.fontFamily !== undefined) {
