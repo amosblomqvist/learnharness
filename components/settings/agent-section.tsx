@@ -55,6 +55,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { MenuShell } from "@/components/menu-shell";
 import { useSettingsSaved } from "@/components/settings-signal";
 import { defaultOrderLevel, populateLevel } from "@/components/thinking-default";
+import { useModelCatalog } from "@/components/model-catalog";
+import { Hint } from "@/components/ui/hint";
 import type React from "react";
 import {
 	COMPACTION_THRESHOLD_FLOOR,
@@ -64,14 +66,13 @@ import {
 	type AgentSettings,
 	type CompactionSettings,
 	type GraphSettings,
-	type ModelCatalogEntry,
 	type ModelSlotName,
 	type ModelsSettings,
 } from "@/src/core";
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import { prettyModel } from "@/components/usage-format";
 import { cn } from "@/lib/utils";
-import { SettingsGroup, SettingsRow, Toggle, CommitInput } from "./controls.tsx";
+import { SettingsGroup, SettingsRow, SettingsMenuTrigger, Toggle, CommitInput } from "./controls.tsx";
 import { ModelMenuList, ThinkingMenuList } from "./model-menu";
 import { ChatGPTBackgroundAccess } from "./chatgpt-connection";
 import { NativeSubscriptionBackgroundAccess } from "./subscription-connections";
@@ -100,15 +101,6 @@ interface SegmentInfo {
 	overrideText: string | null;
 	enabled: boolean;
 	shared: boolean;
-}
-
-/** The GET /api/models response fields this section consumes. */
-interface ModelsBody {
-	models: ModelCatalogEntry[];
-	/** The three tiers' RESOLVED pins (BYOK: NULL per unset tier — no
-	 *  factory floor) — machinery only (the thinking list fallback); the
-	 *  rows' displays read the record override, never a phantom pin. */
-	slots: Record<ModelSlotName, { model: { provider: string; id: string }; thinkingLevel?: string } | null>;
 }
 
 /** Compose: one tool toggled, the rest of the section carried verbatim.
@@ -247,8 +239,10 @@ function MenuTrigger({
 	onClick,
 	widthClass,
 	disabled,
+	hint,
 }: {
 	value: string;
+	hint?: string;
 	/** What the trigger shows when there is no override ("Default"). */
 	emptyLabel: string;
 	ariaLabel: string;
@@ -263,25 +257,20 @@ function MenuTrigger({
 	/** The no-key search state grays the whole row; the trigger follows. */
 	disabled?: boolean;
 }) {
-	return (
-		<button
-			type="button"
+	const button = (
+		<SettingsMenuTrigger
+			value={value || emptyLabel}
 			aria-label={ariaLabel}
 			aria-expanded={open}
 			data-testid={testid}
 			onClick={() => {
 				if (!disabled) onClick();
 			}}
-			className={`flex h-7 items-center gap-1 rounded-sm border border-border bg-background px-1.5 font-ui text-xs text-foreground transition-colors ${
-				disabled ? "cursor-not-allowed" : "hover:border-muted-foreground/50"
-			} ${widthClass}`}
-		>
-			<span className="min-w-0 flex-1 truncate">{value || emptyLabel}</span>
-			<span aria-hidden className="text-muted-foreground">
-				▾
-			</span>
-		</button>
+			unavailable={disabled}
+			className={widthClass}
+		/>
 	);
+	return hint ? <Hint label={hint}>{button}</Hint> : button;
 }
 
 /* The section's dropdowns all mount the shared MenuShell (fix wave chunk
@@ -316,10 +305,9 @@ export function AgentSection({
 	/** Writes the whole compaction section (replace-PUT discipline). */
 	onCompactionChange: (change: (current: CompactionSettings | undefined) => CompactionSettings) => void;
 }) {
-	const [catalog, setCatalog] = useState<ModelCatalogEntry[] | null>(null);
-	/** The three tiers' resolved pins — GET /api/models `slots`. The rows'
-	 *  Default hints and thinking lists resolve from it. */
-	const [slots, setSlots] = useState<ModelsBody["slots"] | null>(null);
+	const { catalog: body, failed: catalogFailed, refresh: refreshCatalog } = useModelCatalog();
+	const catalog = body?.models;
+	const slots = body?.slots;
 	const [contextSelection, setContextSelection] = useState("");
 	/** The live search state (/api/search) — the row's reason line. */
 	const [search, setSearch] = useState<{ available: boolean; engine: string | null; reason: string } | null>(null);
@@ -355,28 +343,9 @@ export function AgentSection({
 			.catch(() => {});
 	}, []);
 
-	// The catalog (federated: keyed providers only), the resolved slots,
-	// the prompt segments, and the search engines' key presence — one
-	// fetch each per section mount. The models read ALSO re-runs on the
-	// cross-surface signal (fix wave: another surface's write re-reads
-	// into the slot rows live).
-	const modelsRequest = useRef(0);
-	const modelsMounted = useRef(false);
-	const readModels = useCallback((connectionChanged = false) => {
-		const request = ++modelsRequest.current;
-		if (connectionChanged) setCatalog(null);
-		fetch("/api/models")
-			.then((r) => { if (!r.ok) throw new Error("Catalog unavailable"); return r.json(); })
-			.then((body: ModelsBody) => {
-				if (!modelsMounted.current || request !== modelsRequest.current) return;
-				setCatalog(body.models);
-				setSlots(body.slots);
-			})
-			.catch(() => { if (modelsMounted.current && request === modelsRequest.current) setCatalog(null); });
-	}, []);
-
+	// The shared catalog seeds the first frame and refreshes per mount and
+	// keys/models signal. Settings props still own saved selections/levels.
 	useSettingsSaved((section) => {
-		if (section === "models" || section === "keys" || section === "compaction") readModels(section === "keys");
 		// THE state-echo root cause: the prompt switches write through the
 		// agent section, but this view (the toggles' truth) never re-read —
 		// the settings-saved law (every reader re-reads) was missing this
@@ -385,8 +354,6 @@ export function AgentSection({
 	});
 
 	useEffect(() => {
-		modelsMounted.current = true;
-		readModels();
 		fetch("/api/settings/prompts")
 			.then((r) => r.json())
 			.then((body: { prober: SegmentInfo[]; teacher: SegmentInfo[] }) => setPrompts(body))
@@ -402,7 +369,6 @@ export function AgentSection({
 				setEngineKeys(present);
 			})
 			.catch(() => {});
-		return () => { modelsMounted.current = false; modelsRequest.current++; };
 	}, []);
 
 	// The reason line re-reads /api/search AFTER an engine write lands —
@@ -629,6 +595,7 @@ export function AgentSection({
 	return (
 		<>
 			<SettingsGroup label="Models" testid="group-models">
+				{catalogFailed && <p role="alert" className="text-xs text-red-400">Model catalog could not be loaded. Check the connection and retry. <button type="button" className="underline" onClick={refreshCatalog}>Retry</button></p>}
 				{MODEL_SLOTS.map((slot) => {
 					const override = models?.[slot];
 					const modelId = override?.model?.id ?? "";
@@ -666,6 +633,7 @@ export function AgentSection({
 								{slot !== "strong" && <><ChatGPTBackgroundAccess provider={coord?.provider} /><NativeSubscriptionBackgroundAccess provider={coord?.provider} /></>}
 								<MenuTrigger
 									value={modelId ? prettyModel(modelId) : ""}
+									hint={modelId ? `${provider}:${modelId}` : undefined}
 									emptyLabel="—"
 									ariaLabel={`${SLOT_META[slot].label} model`}
 									testid={`slot-model-${slot}`}

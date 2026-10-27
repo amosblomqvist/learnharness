@@ -12,6 +12,7 @@ import { SettingsDialogBody } from "../components/settings/settings-dialog.tsx";
 import { KeysSection } from "../components/settings/keys-section.tsx";
 import { ModelControl } from "../components/model-picker.tsx";
 import type { ChatGPTStatus, ChatGPTControlBridge } from "../src/core/index.ts";
+import { completedWithin } from "./completion.ts";
 
 const dom = parseHTML("<html><body></body></html>");
 Object.assign(globalThis, { window: dom.window, document: dom.document, Element: dom.window.Element, HTMLElement: dom.window.HTMLElement, CustomEvent: dom.window.CustomEvent, IS_REACT_ACT_ENVIRONMENT: true, localStorage: { getItem: () => null, setItem() {} } });
@@ -23,7 +24,7 @@ const connected = (allowBackgroundUse = true): ChatGPTStatus => ({ ...disconnect
 const storageError = "ChatGPT credentials could not be read or saved. Check local file access, then reconnect before making requests.";
 const warning = "Account disconnected locally. Remote revocation could not be confirmed.";
 const errorReply = () => ({ error: storageError } as ChatGPTStatus);
-function deferred<T>() { let resolve!: (v: T) => void; const promise = new Promise<T>((done) => { resolve = done; }); return { promise, resolve }; }
+function deferred<T>() { let resolve!: (v: T) => void; let reject!: (error: unknown) => void; const promise = new Promise<T>((done, fail) => { resolve = done; reject = fail; }); return { promise, resolve, reject }; }
 function fixture(initial = disconnected(), overrides: Partial<ChatGPTControlBridge> = {}) {
  let status = initial;
  const calls = { login: [] as (string | undefined)[], cancel: 0, consent: [] as boolean[], disconnect: [] as string[], select: [] as string[], logout: 0 };
@@ -494,26 +495,57 @@ test("canceled attempt's late reply cannot release a newer pending attempt or ap
  await act(async () => f.complete()); assert.deepEqual(f.calls.consent, []); assert.equal(f.status.allowBackgroundUse, true); assert(!document.querySelector('[data-testid="chatgpt-account-dialog"]'));
 });
 
-test("real main/control bridge: immediate pending, actual cancellation, verified callback, then explicit global draft persistence", async () => {
+for (const holdSave of [false, true]) test(`real main/control bridge: immediate pending, actual cancellation, verified callback, then explicit global draft persistence${holdSave ? " (completion held beyond old wait budget)" : ""}`, async () => {
  const require = createRequire(import.meta.url); const { createChatGPT, SCOPES } = require("../electron/chatgpt.cjs"); const { chatGPTControl } = require("../electron/chatgpt-ipc.cjs");
  const { privateKey, publicKey } = await generateKeyPair("RS256"); const jwk = { ...await exportJWK(publicKey), kid: "ui-fixture", alg: "RS256", use: "sig" };
- let saved: any = null, authorize!: URL, tokenCalls = 0; const listeners = new Set<() => void>();
- const service = createChatGPT({ store: { secure() {}, async read() { return saved; }, async write(s: any) { saved = structuredClone(s); } }, openExternal: async (url: string) => { authorize = new URL(url); }, onChange: () => { for (const cb of listeners) cb(); }, fetch: async (url: string, init: RequestInit) => {
+ const consentCompleted = deferred<ChatGPTStatus>(), saveEntered = deferred<void>(), releaseSave = deferred<void>();
+ let saved: any = null, authorize!: URL, tokenCalls = 0, completionArmed = false; const listeners = new Set<() => void>();
+ const service = createChatGPT({ store: { secure() {}, async read() { return saved; }, async write(s: any) {
+  if (holdSave && s.allowBackgroundUse === false) { saveEntered.resolve(); await releaseSave.promise; }
+  saved = structuredClone(s);
+ } }, openExternal: async (url: string) => { authorize = new URL(url); }, onChange: ({ status }: { status: ChatGPTStatus }) => {
+  if (completionArmed && !status.pending && status.error) consentCompleted.reject(new Error(`Fixture sign-in failed: ${status.error}`));
+  for (const cb of listeners) cb();
+ }, fetch: async (url: string, init: RequestInit) => {
   if (url.endsWith("jwks.json")) return Response.json({ keys: [jwk] });
   assert.equal(url, "https://auth.openai.com/api/accounts/oauth/token"); tokenCalls++;
   const form = init.body as URLSearchParams;
   const jwt = await new SignJWT({ nonce: authorize.searchParams.get("nonce"), email: "fixture@example.invalid" }).setProtectedHeader({ alg: "RS256", kid: "ui-fixture" }).setIssuer("https://auth.openai.com").setSubject("fixture-subject").setAudience(form.get("client_id")!).setIssuedAt().setExpirationTime("1h").sign(privateKey);
   return Response.json({ access_token: "fixture-access", refresh_token: "fixture-refresh", id_token: jwt, token_type: "Bearer", expires_in: 3600, scope: SCOPES.join(" ") });
  } });
- window.lh = { expandWindow() {}, chatgpt: { status: () => chatGPTControl({ op: "status" }, service), login: (id) => chatGPTControl({ op: "login", id }, service), cancel: () => chatGPTControl({ op: "cancel" }, service), select: (id) => chatGPTControl({ op: "select", id }, service), disconnect: (id) => chatGPTControl({ op: "disconnect", id }, service), logout: (id) => chatGPTControl({ op: "logout", id }, service), consent: (enabled) => chatGPTControl({ op: "consent", enabled }, service), onChange: (cb) => { listeners.add(cb); return () => listeners.delete(cb); } } };
+ window.lh = { expandWindow() {}, chatgpt: { status: () => chatGPTControl({ op: "status" }, service), login: (id) => chatGPTControl({ op: "login", id }, service), cancel: () => chatGPTControl({ op: "cancel" }, service), select: (id) => chatGPTControl({ op: "select", id }, service), disconnect: (id) => chatGPTControl({ op: "disconnect", id }, service), logout: (id) => chatGPTControl({ op: "logout", id }, service), consent: (enabled) => {
+  const reply = chatGPTControl({ op: "consent", enabled }, service);
+  void reply.then(consentCompleted.resolve, consentCompleted.reject);
+  return reply;
+ }, onChange: (cb) => { listeners.add(cb); return () => listeners.delete(cb); } } };
  try {
   await mount(); await begin(); assert.equal((await service.status()).pending, true); await click(button("Cancel", byTest("chatgpt-account-dialog"))); assert.equal((await service.status()).pending, false); assert.equal(tokenCalls, 0);
   await click(byTest("chatgpt-login")); await click(toggle()); await click(byTest("chatgpt-proceed"));
   const callback = new URL(authorize.searchParams.get("redirect_uri")!); callback.search = new URLSearchParams({ state: authorize.searchParams.get("state")!, code: "fixture-code", client_id: "oaiapp_ui_fixture" }).toString();
-  await act(async () => { const response = await originalFetch(callback); await response.text(); for (let i = 0; i < 100 && (saved.allowBackgroundUse !== false || (await service.status()).pending); i++) await new Promise((r) => setImmediate(r)); });
+  await act(async () => {
+   completionArmed = true;
+   // Callback acknowledgment is not verified login, nor is login completion
+   // the subsequent consent save. Wait for the actual control reply.
+   const waiting = completedWithin(consentCompleted.promise, "verified sign-in and global draft persistence");
+   let settled = false; void waiting.then(() => { settled = true; }, () => { settled = true; });
+   const response = await originalFetch(callback); assert.equal(response.status, 200); await response.text();
+   if (holdSave) {
+    await completedWithin(saveEntered.promise, "held global draft save");
+    // Regression only: the OLD loop returns with the save still held.
+    for (let i = 0; i < 100 && (saved.allowBackgroundUse !== false || (await service.status()).pending); i++) await new Promise((r) => setImmediate(r));
+    assert.equal((await service.status()).pending, false, "verification finished before the consent save");
+    assert.equal(saved.allowBackgroundUse, undefined, "the old assertion would run before the global draft was saved");
+    assert.equal(settled, false, "the corrected wait must still await persistence");
+    releaseSave.resolve();
+   }
+   const status = await waiting;
+   assert.equal(status.error, null); assert.equal(status.pending, false);
+   assert.equal(status.allowBackgroundUse, false); assert.equal(status.accounts[0]!.connected, true);
+  });
   assert.equal(tokenCalls, 1); assert.equal(saved.allowBackgroundUse, false); assert.equal(saved.registrations[0].background, undefined);
+  assert.equal(document.querySelector('[role="alert"]'), null);
   assert(!document.querySelector('[data-testid="chatgpt-account-dialog"]')); assert(button("Manage…"));
- } finally { await act(async () => service.close()); }
+ } finally { releaseSave.resolve(); await act(async () => service.close()); }
 });
 
 test("browser-only sign-in is disabled; foreground toolbar has no plan badge or background action", async () => {
