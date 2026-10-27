@@ -83,6 +83,17 @@ async function run(mode) {
 		// Controls have not been imported through an HTTP request yet.
 		const catalog = (await (await request("/api/models")).json()).providers;
 		for (const id of ["chatgpt", ...NATIVE_PROVIDERS.map((provider) => provider.logicalId)]) assert(catalog.find((provider) => provider.id === id)?.keyPresent, `${mode}: cold ${id} unavailable.`);
+		// Local Claude (2026-10-27): off by default, never probed; enabling it with
+		// a path that does not exist is a recoverable not-found (no process, no
+		// credential anywhere in the status), and the picker keeps it out.
+		const local = await (await request("/api/claude-local")).json();
+		assert.equal(local.state, "disabled"); assert.equal(local.enabled, false); assert.equal(catalog.find((provider) => provider.id === "claude-local")?.keyPresent, false);
+		assert.equal((await fetch(origin + "/api/settings/claudeLocal", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ enabled: true, binaryPath: path.join(profile, "no-such-claude") }), signal: AbortSignal.timeout(60000) })).status, 200);
+		const probed = await (await request("/api/claude-local", { op: "probe" })).json();
+		assert.equal(probed.state, "not-found", JSON.stringify(probed)); assert.match(probed.error, /No Claude Code executable at/);
+		assert(!/token|credential|email/i.test(JSON.stringify(probed)));
+		assert.equal((await (await request("/api/models")).json()).providers.find((provider) => provider.id === "claude-local").keyPresent, false);
+		assert.equal((await fetch(origin + "/api/claude-local", { method: "POST", headers: { origin: "https://unrelated.invalid", "content-type": "application/json", "x-learnharness-subscriptions": "1" }, body: JSON.stringify({ op: "probe" }) })).status, 403);
 		let state = await (await request("/api/subscriptions")).json();
 		assert.equal(state.chatgpt.accounts[0].email, "fixture@example.invalid"); assert.equal(state.native.length, NATIVE_PROVIDERS.length);
 		for (const secret of ["fixture-chatgpt-access", "fixture-chatgpt-refresh", "fixture-id-token", "fixture-xai-access", "fixture-refresh"]) assert(!JSON.stringify(state).includes(secret));
@@ -114,7 +125,7 @@ async function run(mode) {
 		assert.equal((await fetch(origin + "/api/subscriptions", { method: "POST", headers: { origin: "https://unrelated.invalid", "content-type": "application/json", "x-learnharness-subscriptions": "1" }, body: JSON.stringify({ providerId: "chatgpt", op: "disconnect", id: "offline-account" }) })).status, 403);
 		assert.equal((await request("/api/subscriptions", { providerId: "chatgpt", op: "disconnect", id: "offline-account" })).status, 200);
 		assert.equal((await (await request("/api/models")).json()).providers.find((provider) => provider.id === "chatgpt").keyPresent, false);
-		console.log(`[smoke-web-subscriptions] ${mode}: cold catalogs, safe status, cross-route SSE/consent/disconnect, opaque redirect/replay, CSRF${mode === "dev" ? ", owner retained across source reload" : ""} passed`);
+		console.log(`[smoke-web-subscriptions] ${mode}: cold catalogs, safe status, Local Claude off/not-found, cross-route SSE/consent/disconnect, opaque redirect/replay, CSRF${mode === "dev" ? ", owner retained across source reload" : ""} passed`);
 	} catch (error) { console.error(logs); throw error; }
 	finally {
 		if (!exited) child.kill("SIGTERM");

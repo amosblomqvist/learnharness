@@ -137,6 +137,39 @@ async function probe(standalone) {
 			assert.ok([...loaded].some((file) => file.includes(`${path.sep}node_modules${path.sep}${name.replaceAll("/", path.sep)}${path.sep}`)),
 				`Google runtime chain was not loaded: ${name}`);
 		}
+		// Local Claude route (2026-10-27): the Claude Agent SDK must resolve from
+		// the payload and assemble a complete query WITHOUT a process — a fake
+		// spawner captures the command line and refuses — and no platform binary
+		// package may ship (the app only ever runs the user's own install).
+		const sdkEntry = pathToFileURL(path.join(root, "node_modules/@anthropic-ai/claude-agent-sdk/sdk.mjs"));
+		const { query } = await import(sdkEntry.href);
+		let spawned;
+		const sentinel = `LH_OFFLINE_NO_SPAWN_${randomUUID()}`;
+		// The refusing spawner may surface synchronously from query() or through
+		// the iterator; either way the command line was assembled first.
+		let outcome = "constructed";
+		try {
+			const handle = query({ prompt: "Offline initialization only", options: {
+				pathToClaudeCodeExecutable: path.join(root, "offline-claude-not-a-binary"), tools: [], settingSources: [], persistSession: false, strictMcpConfig: true, systemPrompt: "offline",
+				env: { PATH: process.env.PATH ?? "" },
+				spawnClaudeCodeProcess: (options) => { spawned = options; throw new Error(sentinel); },
+			} });
+			outcome = await handle.next().then(() => "yielded", (error) => error?.message ?? String(error));
+			try { handle.close(); } catch { /* never started */ }
+		} catch (error) { outcome = error?.message ?? String(error); }
+		assert.ok(spawned, `Agent SDK never reached the spawner: ${outcome}`);
+		assert.ok(outcome === sentinel || outcome.includes(sentinel), `unexpected outcome after the refused spawn: ${outcome}`);
+		assert.ok(spawned.args.includes("--output-format") && spawned.args.includes("stream-json") && spawned.args.includes("--tools="), `unexpected Claude Code command line: ${spawned.args.join(" ")}`);
+		assert.ok(!("ANTHROPIC_API_KEY" in spawned.env), "the SDK must not add credentials to the child env");
+		const scope = path.join(root, "node_modules", "@anthropic-ai");
+		for (const name of fs.existsSync(scope) ? fs.readdirSync(scope) : []) {
+			if (!name.startsWith("claude-agent-sdk-")) continue;
+			const dir = path.join(scope, name);
+			assert.ok(!fs.readdirSync(dir).some((entry) => /^claude(\.exe)?$/.test(entry)), `payload ships a bundled Claude Code binary: ${name}`);
+		}
+		assert.ok([...loaded].some((file) => file.includes(`${path.sep}node_modules${path.sep}@anthropic-ai${path.sep}claude-agent-sdk${path.sep}`)), "Agent SDK was not loaded from the payload");
+		noNetwork();
+		console.log(`[smoke-provider-runtime] claude-local: Agent SDK assembled a Claude Code command line offline (${spawned.args.length} args), no bundled binary, zero network attempts`);
 		console.log(`[smoke-provider-runtime] native Pi Google initialization passed; ${loaded.size} modules confined to ${root}; zero network attempts`);
 	} finally { hooks.deregister(); }
 }
