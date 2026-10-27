@@ -61,6 +61,9 @@ export function createDictationLanguageStore(request: typeof fetch, saved: () =>
 	function save(language: DictationLanguage): Promise<boolean> {
 		// A different selection must never inherit the previous write's success.
 		if (writing || snapshot.language === undefined) return Promise.resolve(false);
+		// A successful PUT returns the full settings record and supersedes an
+		// older refresh. A failed PUT must not erase that refresh's invalidation.
+		const refreshRequired = needsRead;
 		revision++;
 		reading = null;
 		needsRead = false;
@@ -78,6 +81,7 @@ export function createDictationLanguageStore(request: typeof fetch, saved: () =>
 				saved();
 				return true;
 			} catch {
+				needsRead ||= refreshRequired;
 				publish({ error: "Could not save dictation language. Try again." });
 				return false;
 			} finally {

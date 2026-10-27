@@ -128,3 +128,23 @@ test("a provider refresh arriving during a language save is not lost", async () 
 	assert.equal(await provider, "openai");
 	assert.equal(reads, 2);
 });
+
+
+test("a failed language save does not discard a provider refresh already in flight", async () => {
+	let finishOldRead!: (response: Response) => void;
+	let reads = 0;
+	const store = createDictationLanguageStore(async (_url, init) => {
+		if (init?.method === "PUT") return Response.json({}, { status: 500 });
+		reads++;
+		if (reads === 2) return new Promise<Response>((resolve) => { finishOldRead = resolve; });
+		return Response.json({ settings: { version: 1, general: { dictationProvider: reads === 1 ? "deepgram" : "openai" }, dictation: { language: "en" } } });
+	});
+	assert.equal(await store.getProvider(), "deepgram");
+	const oldRefresh = store.load(true);
+	await Promise.resolve();
+	assert.equal(await store.save("multi"), false);
+	finishOldRead(Response.json({ settings: { version: 1, general: { dictationProvider: "openai" }, dictation: { language: "en" } } }));
+	assert.equal(await oldRefresh, "en");
+	assert.equal(await store.getProvider(), "openai");
+	assert.equal(reads, 3, "a failed save must not make stale provider settings authoritative");
+});
