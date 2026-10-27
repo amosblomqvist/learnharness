@@ -2,6 +2,7 @@
 
 import type { ReactNode } from "react";
 import { DumbbellIcon } from "lucide-react";
+import { useT } from "@/components/locale";
 
 /** Home and the draft share one wrapping action row. Picker controls lead;
  * setup is centered only when it is the sole action. */
@@ -25,6 +26,7 @@ export function NodePickerControl({ count, onOpen, onClear }: {
 	onOpen?: () => void;
 	onClear?: () => void;
 }) {
+	const t = useT();
 	return (
 		<div className="flex items-center gap-1.5">
 			<button
@@ -39,7 +41,7 @@ export function NodePickerControl({ count, onOpen, onClear }: {
 				}
 			>
 				<DumbbellIcon aria-hidden="true" className="size-3.5 text-muted-foreground" />
-				{count > 0 ? `${count} ${count === 1 ? "node" : "nodes"} selected` : "Pick nodes"}
+				{count > 0 ? t(count === 1 ? "{n} node selected" : "{n} nodes selected", { n: count }) : t("Pick nodes")}
 			</button>
 			{count > 0 && (
 				<button
@@ -48,7 +50,7 @@ export function NodePickerControl({ count, onOpen, onClear }: {
 					onClick={onClear}
 					className="cursor-pointer rounded-full px-2 py-1 font-ui text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
 				>
-					Clear
+					{t("Clear")}
 				</button>
 			)}
 		</div>
