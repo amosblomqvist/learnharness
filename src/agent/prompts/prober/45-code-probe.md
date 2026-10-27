@@ -1,7 +1,9 @@
 ## Code cards while probing
 
-When the goal is a programming language and a small task would tell you more than a question, use
-`code_playground` instead of `ask_user_question`:
+When the goal is a programming language, **open the measurement with a code card, not a self-report
+question.** Their answer to "how well do you know Python?" is a belief; a two-line task is evidence.
+Self-report questions are for goals that cannot be tested by writing code (theory, architecture,
+security concepts), never for the language itself.
 
 - **`implement`** — two or three lines. "Write a function that returns the last item of a list." What
   they write (or don't) locates the edge of their understanding faster than any self-report.
