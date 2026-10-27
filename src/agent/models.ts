@@ -17,6 +17,9 @@ import { chatGPTStream } from "./chatgpt-stream.ts";
 import type { ChatGPTDispatchLifecycle } from "./chatgpt-request-cycle.ts";
 import { nativeSubscriptionId, nativeSubscriptionModel } from "./subscription-bridge.ts";
 import { nativeSubscriptionStream } from "./subscription-stream.ts";
+import { isClaudeLocalProvider } from "../core/contracts/claude-local.ts";
+import { claudeLocalModel } from "./claude-local/bridge.ts";
+import { claudeLocalStream } from "./claude-local/stream.ts";
 
 /** App identity is immutable and shared by Models and every native Agent.
  * Agent's default Pi attribution otherwise overrides the Models identity. */
@@ -101,7 +104,10 @@ function defaultThinkingLevel(model: Model<Api>): ThinkingLevel {
 export function piEngineForSpec(spec: ResolvedModelSpec, background: boolean | (() => boolean) = true, lifecycle?: ChatGPTDispatchLifecycle): PiEngine {
 	const models: Models = piModels();
 	const nativeId = nativeSubscriptionId(spec.provider);
-	const model = spec.provider === "chatgpt" ? chatGPTModel(spec.id) : nativeId ? nativeSubscriptionModel(spec.provider, spec.id) : models.getModel(spec.provider, spec.id);
+	// Local Claude (owner, 2026-10-27): the probe's catalog; lesson turns run
+	// on the ClaudeLocalAgent (teacher-agent.ts), this engine's streamFn
+	// serves tool-less one-shot calls (compaction summaries).
+	const model = spec.provider === "chatgpt" ? chatGPTModel(spec.id) : isClaudeLocalProvider(spec.provider) ? claudeLocalModel(spec.id) : nativeId ? nativeSubscriptionModel(spec.provider, spec.id) : models.getModel(spec.provider, spec.id);
 	if (!model) {
 		throw new Error(`${spec.provider} catalog has no model ${spec.id}`);
 	}
@@ -119,7 +125,7 @@ export function piEngineForSpec(spec: ResolvedModelSpec, background: boolean | (
 		// the pin honest even when config or settings drift off the map.
 		streamFn: (requestModel, context, options) => {
 			const purpose = typeof background === "function" ? background : () => background;
-			const stream = spec.provider === "chatgpt" ? chatGPTStream(purpose, lifecycle) : nativeId ? nativeSubscriptionStream(models.getProvider(nativeId)!, purpose, lifecycle) : models.streamSimple.bind(models);
+			const stream = spec.provider === "chatgpt" ? chatGPTStream(purpose, lifecycle) : isClaudeLocalProvider(spec.provider) ? claudeLocalStream(purpose, lifecycle) : nativeId ? nativeSubscriptionStream(models.getProvider(nativeId)!, purpose, lifecycle) : models.streamSimple.bind(models);
 			return stream(requestModel, context, { ...options, reasoning: level === "off" ? undefined : level });
 		},
 	};

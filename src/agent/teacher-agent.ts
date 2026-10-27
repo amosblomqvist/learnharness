@@ -22,6 +22,8 @@ import { QUESTION_TOOLS, type EnabledTools } from "../core/pending.ts";
 import { toLlmMessages, nativeInputCause, PRACTICE_PROBLEM_TOOL } from "../core/native-messages.ts";
 import type { ChatGPTRequestCycle } from "./chatgpt-request-cycle.ts";
 import { usageWasAdmitted } from "./subscription-request-cycle.ts";
+import { isClaudeLocalProvider } from "../core/contracts/claude-local.ts";
+import { ClaudeLocalAgent } from "./claude-local/agent.ts";
 
 /**
  * The two teaching-side agents (docs/probe-teach-split.md): the PROBER and
@@ -189,67 +191,88 @@ function baseAgentOptions(kind: AgentKind, opts: AgentBuildOptions, tools: Agent
 	// the normal no-observer path (tests, env-off).
 	const providerEvents = opts.chatId ? providerEventObserver(opts.chatId, kind) : undefined;
 	const seenInputs = new Set((opts.messages ?? []).map((m) => (m as { id?: string }).id).filter(Boolean));
-	const agent = new Agent({
-		identity: APP_IDENTITY,
-		sessionId: opts.chatId,
-		initialState: {
-			systemPrompt,
-			model: engine.model,
-			thinkingLevel: engine.level,
-			// Conditional registry inclusion, like the graph-tool gates: when
-			// closed, neither the tool nor its usage instructions reach the model.
-			// Match Claude across providers (including OpenRouter), not the API
-			// transport. Explicit test registries remain caller-owned.
-			tools: [
-				...tools,
-				...(opts.tools === undefined && engine.model.id.toLowerCase().includes("claude")
-					? [withArgumentHeal(sendToUserTool)]
-					: []),
-			],
-			messages: opts.messages ?? [],
-		},
-		streamFn: engine.streamFn,
-		...(providerEvents ? { onProviderStreamEvent: providerEvents } : {}),
-		// 0.87.1: shouldStopAfterTurn → finishTurn. Same call point (after
-		// tool results attach, before turn_end) and `{ action: "end" }` still
-		// exits BEFORE the steering poll — the parked-marker stranding our
-		// Wave C registerLiveAgent-before-runPiTurn design depends on.
-		// undefined preserves normal scheduling (the old boolean false).
-		finishTurn: (turn) => (stopper(turn) ? { action: "end" } : undefined),
-		// Wave C (2026-09-26, owner correction same day): markers handed to a
-		// live run drain from pi's STEERING queue — the lesson loop is one
-		// continuous teach→quiz→teach run, so delivery must inject at turn
-		// boundaries INSIDE the run, not wait for it to stop (follow-ups).
-		// "all" joins every handed marker at one boundary, matching the idle
-		// wake's carry-everything semantics (the default "one-at-a-time"
-		// would spend one teacher turn per marker).
-		steeringMode: "all",
-		// Wave B (owner-approved 2026-09-26): the model-facing conversion is
-		// THE app seam — markers flatten to their canonical user text
-		// (HANDOFF_TEXT / steer text, all single-sourced),
-		// UI-only markers (plan-block) drop, the app's id fields strip, and
-		// an abort's dangling question call gets its INTERRUPTED result. It
-		// must never throw (pi's convertToLlm contract).
-		convertToLlm: toLlmMessages,
-		prepareRequest: (request) => {
-			if (opts.callPurpose) {
-				let learner = false, automatic = false;
-				const messages = request.context.messages;
-				for (const message of messages) {
-					const id = (message as { id?: string }).id;
-					const cause = nativeInputCause(message, messages.slice(0, messages.indexOf(message)));
-					if (cause === "neutral") continue;
-					if (id && seenInputs.has(id)) continue;
-					if (id) seenInputs.add(id);
-					if (cause === "learner" && id) learner = true;
-					else automatic = true; // missing/unrecognized identity never grants foreground
-				}
-				if (automatic) opts.callPurpose.background = true;
-				else if (learner) opts.callPurpose.background = false;
+	// Conditional registry inclusion, like the graph-tool gates: when
+	// closed, neither the tool nor its usage instructions reach the model.
+	// Match Claude across providers (including OpenRouter), not the API
+	// transport. Explicit test registries remain caller-owned.
+	const registry: AgentTool<any, any>[] = [
+		...tools,
+		...(opts.tools === undefined && engine.model.id.toLowerCase().includes("claude")
+			? [withArgumentHeal(sendToUserTool)]
+			: []),
+	];
+	// 0.87.1: shouldStopAfterTurn → finishTurn. Same call point (after
+	// tool results attach, before turn_end) and `{ action: "end" }` still
+	// exits BEFORE the steering poll — the parked-marker stranding our
+	// Wave C registerLiveAgent-before-runPiTurn design depends on.
+	// undefined preserves normal scheduling (the old boolean false).
+	const finishTurn = (turn: Parameters<typeof stopper>[0]) => (stopper(turn) ? { action: "end" as const } : undefined);
+	const prepareRequest = (request: { context: { messages: AgentMessage[] } }) => {
+		if (opts.callPurpose) {
+			let learner = false, automatic = false;
+			const messages = request.context.messages;
+			for (const message of messages) {
+				const id = (message as { id?: string }).id;
+				const cause = nativeInputCause(message, messages.slice(0, messages.indexOf(message)));
+				if (cause === "neutral") continue;
+				if (id && seenInputs.has(id)) continue;
+				if (id) seenInputs.add(id);
+				if (cause === "learner" && id) learner = true;
+				else automatic = true; // missing/unrecognized identity never grants foreground
 			}
-			opts.requestCycle?.prepare(request);
-		},
-	});
+			if (automatic) opts.callPurpose.background = true;
+			else if (learner) opts.callPurpose.background = false;
+		}
+		opts.requestCycle?.prepare(request as Parameters<NonNullable<ChatGPTRequestCycle["prepare"]>>[0]);
+	};
+	// LOCAL CLAUDE (owner-approved design, 2026-10-27): the same prompt,
+	// tools, record, stopper, purpose and admission cycle — run by the
+	// user's own Claude Code through the adapter instead of pi's loop.
+	const agent: Agent | ClaudeLocalAgent = isClaudeLocalProvider(engine.model.provider)
+		? new ClaudeLocalAgent({
+				identity: APP_IDENTITY,
+				sessionId: opts.chatId,
+				systemPrompt,
+				model: engine.model,
+				thinkingLevel: engine.level ?? "off",
+				tools: registry,
+				messages: opts.messages ?? [],
+				convertToLlm: toLlmMessages,
+				finishTurn,
+				prepareRequest,
+				purpose: () => opts.callPurpose?.background ?? false,
+				lifecycle: opts.requestCycle,
+			})
+		: new Agent({
+				identity: APP_IDENTITY,
+				sessionId: opts.chatId,
+				initialState: {
+					systemPrompt,
+					model: engine.model,
+					thinkingLevel: engine.level,
+					tools: registry,
+					messages: opts.messages ?? [],
+				},
+				streamFn: engine.streamFn,
+				...(providerEvents ? { onProviderStreamEvent: providerEvents } : {}),
+				finishTurn,
+				// Wave C (2026-09-26, owner correction same day): markers handed to a
+				// live run drain from pi's STEERING queue — the lesson loop is one
+				// continuous teach→quiz→teach run, so delivery must inject at turn
+				// boundaries INSIDE the run, not wait for it to stop (follow-ups).
+				// "all" joins every handed marker at one boundary, matching the idle
+				// wake's carry-everything semantics (the default "one-at-a-time"
+				// would spend one teacher turn per marker).
+				steeringMode: "all",
+				// Wave B (owner-approved 2026-09-26): the model-facing conversion is
+				// THE app seam — markers flatten to their canonical user text
+				// (HANDOFF_TEXT / steer text, all single-sourced),
+				// UI-only markers (plan-block) drop, the app's id fields strip, and
+				// an abort's dangling question call gets its INTERRUPTED result. It
+				// must never throw (pi's convertToLlm contract).
+				convertToLlm: toLlmMessages,
+				prepareRequest,
+			});
 	if (opts.onUsage) {
 		agent.subscribe((event: AgentEvent) => {
 			if (event.type === "message_end" && event.message.role === "assistant" && "usage" in event.message) {

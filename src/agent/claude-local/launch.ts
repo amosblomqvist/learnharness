@@ -30,12 +30,21 @@ export function claudeLaunchOptions(launch: ClaudeLocalLaunch, base: NodeJS.Proc
 		env: claudeChildEnv(base, extraEnv),
 		// The SDK names "node" for a .js entry; run it on OUR runtime instead.
 		// A ChildProcess satisfies the SDK's SpawnedProcess contract.
-		spawnClaudeCodeProcess: (options) => spawn(launch.viaNode && options.command === "node" ? command : options.command, options.args, {
-			cwd: options.cwd,
-			env: options.env as NodeJS.ProcessEnv,
-			stdio: ["pipe", "pipe", "pipe"],
-			signal: options.signal,
-			windowsHide: true,
-		}),
+		spawnClaudeCodeProcess: (options) => {
+			const child = spawn(launch.viaNode && options.command === "node" ? command : options.command, options.args, {
+				cwd: options.cwd,
+				env: options.env as NodeJS.ProcessEnv,
+				stdio: ["pipe", "pipe", "pipe"],
+				signal: options.signal,
+				windowsHide: true,
+			});
+			// Debug aid (LH_CLAUDE_LOCAL_DEBUG=1, the LH_PROVIDER_EVENTS idiom): the
+			// exact command line and the child's stderr on the server log.
+			if (base.LH_CLAUDE_LOCAL_DEBUG === "1") {
+				console.error(`[claude-local] spawn ${child.spawnfile} ${options.args.join(" ")}`);
+				child.stderr?.on("data", (chunk) => process.stderr.write(`[claude-local stderr] ${chunk}`));
+			}
+			return child;
+		},
 	};
 }

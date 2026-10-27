@@ -31,7 +31,7 @@ import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import { AUTH_PROVIDER_KEYS } from "./auth-keys.ts";
 import type { ModelRole } from "../../config.ts";
 import type { ChatSettings } from "./contracts/chat.ts";
-import type { ClaudeLocalSystemPromptMode } from "./contracts/claude-local.ts";
+import { CLAUDE_LOCAL, type ClaudeLocalSystemPromptMode } from "./contracts/claude-local.ts";
 import type { SearchEngineId } from "./search.ts";
 
 /** The schema version this code understands. Bump ONLY for breaking shape
@@ -156,10 +156,12 @@ export interface ProviderKeyMissing {
 /** The refusal wording's invariant tail — the matcher below keys on it
  * (the label prefix varies by provider). */
 const PROVIDER_KEY_MISSING_TAIL = "key is set — add one in Settings → Keys";
+/** The Local Claude route has no key: its refusal names the Providers card. */
+const CLAUDE_LOCAL_NOT_READY_TAIL = "is not ready — check it in Settings → Providers";
 export function providerKeyMissing(provider: string, slots: ModelSlotName[]): ProviderKeyMissing {
 	const label = AUTH_PROVIDER_KEYS.find((p) => p.id === provider)?.label ?? provider;
 	return {
-		error: `No ${label} ${PROVIDER_KEY_MISSING_TAIL}`,
+		error: provider === CLAUDE_LOCAL.providerId ? `${CLAUDE_LOCAL.label} ${CLAUDE_LOCAL_NOT_READY_TAIL}` : `No ${label} ${PROVIDER_KEY_MISSING_TAIL}`,
 		code: PROVIDER_KEY_MISSING_CODE,
 		provider,
 		slots,
@@ -170,7 +172,7 @@ export function providerKeyMissing(provider: string, slots: ModelSlotName[]): Pr
  * scary-error) — the envelope's home module owns the string so the
  * writer and the matcher can never drift. */
 export function isProviderKeyRefusal(error: string | undefined): boolean {
-	return !!error && error.endsWith(PROVIDER_KEY_MISSING_TAIL);
+	return !!error && (error.endsWith(PROVIDER_KEY_MISSING_TAIL) || error.endsWith(CLAUDE_LOCAL_NOT_READY_TAIL));
 }
 /** The typed throw for in-process seams (extraction pipeline) — the
  * ProviderKeyMissing sibling of ModelsNotConfiguredError: callers catch

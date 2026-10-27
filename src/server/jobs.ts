@@ -72,7 +72,7 @@ import { stores, effectiveSettings } from "./stores.ts";
 import { resolveConversationSpec } from "../core/settings-resolution.ts";
 import { connectionBackgroundAllowed, isSubscriptionProvider, onSubscriptionChange } from "../agent/subscription-connections.ts";
 import { isTurnRunning } from "./turn-liveness.ts";
-import type { Agent } from "@earendil-works/pi-agent-core";
+import type { LiveAgent as Agent } from "../agent/live-agent.ts";
 
 /** Fires one server-side teacher turn: (chatId, input) → HTTP-ish status.
  *  Wave C: the input is the IDLE WAKE — every queued marker as the turn's
