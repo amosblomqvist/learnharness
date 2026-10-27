@@ -39,6 +39,7 @@ import {
 import type { ExtraProps } from "streamdown";
 import { MERMAID_FONT_SIZE, renderMermaid } from "@/components/mermaid-render";
 import { MermaidError } from "@/components/mermaid-error";
+import { useT } from "@/components/locale";
 import { blurAfterPointerClick } from "@/components/focus-hygiene";
 import { chartSize, useSessionMermaid } from "@/components/session-overlay";
 import { Hint } from "@/components/ui/hint";
@@ -92,6 +93,7 @@ export function CopyCorner({
 	label: string;
 	className?: string;
 }) {
+	const t = useT();
 	const [copied, setCopied] = useState(false);
 	const timerRef = useRef<number | undefined>(undefined);
 	useEffect(() => () => window.clearTimeout(timerRef.current), []);
@@ -99,7 +101,7 @@ export function CopyCorner({
 		<span className={cn("relative inline-flex", className)}>
 			<button
 				type="button"
-				aria-label={label}
+				aria-label={t(label)}
 				data-testid="md-copy"
 				className="flex size-6 items-center justify-center rounded-md text-muted-foreground/70 opacity-0 transition-opacity hover:bg-accent hover:text-foreground focus-visible:opacity-100 group-hover/md:opacity-100"
 				onClick={(e) => {
@@ -139,6 +141,7 @@ export function codeSource(children: ReactNode): string {
  *  still streaming (the trailing open fence), a quiet skeleton instead of a
  *  doomed parse. */
 function MermaidInline({ chart }: { chart: string }) {
+	const t = useT();
 	const [svg, setSvg] = useState<string | null>(null);
 	const [error, setError] = useState<string | null>(null);
 	const [attempt, setAttempt] = useState(0);
@@ -204,12 +207,12 @@ function MermaidInline({ chart }: { chart: string }) {
 					<Hint
 					// Full-screen overlay copy (tooltip wave) — "session view" was
 					// internal direction-speak for the same thing.
-					label="Open full-screen"
+					label={t("Open full-screen")}
 					side="bottom"
 				>
 <button
 						type="button"
-						aria-label="Expand diagram"
+						aria-label={t("Expand diagram")}
 						data-testid="md-mermaid-expand"
 												className="flex size-6 items-center justify-center rounded-md text-muted-foreground/70 opacity-0 transition-opacity hover:bg-accent hover:text-foreground group-hover/md:opacity-100"
 						onClick={(e) => {

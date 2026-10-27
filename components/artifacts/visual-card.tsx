@@ -9,6 +9,7 @@ import { useSessionMermaid } from "@/components/session-overlay";
 import { downloadFile } from "@/components/artifacts/download";
 import { DispatchCard } from "@/components/artifacts/dispatch-card";
 import { SvgImage } from "@/components/artifacts/svg-image";
+import { useT } from "@/components/locale";
 import type { ArtifactPartProps, VisualResult } from "@/src/core";
 
 /**
@@ -50,6 +51,7 @@ export function VisualOutputCard({
 	messageId?: string;
 	initialInverted?: boolean;
 }) {
+	const t = useT();
 	const result = output as VisualResult | undefined;
 	const overlay = useSessionMermaid();
 	const actions = useContext(ChatActionsContext);
@@ -72,7 +74,7 @@ export function VisualOutputCard({
 	if (!result || typeof result.svg !== "string") {
 		return (
 			<div className="rounded-xl border bg-card p-4 text-sm text-muted-foreground">
-				Figure completed, but the result could not be displayed.
+				{t("Figure completed, but the result could not be displayed.")}
 			</div>
 		);
 	}
@@ -81,10 +83,10 @@ export function VisualOutputCard({
 		return (
 			<div className="rounded-xl border bg-card p-4 text-card-foreground" data-testid="visual-card-failed">
 				<div className="flex items-center gap-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-					Figure
-					<span className="rounded bg-red-500/15 px-1.5 py-0.5 text-red-500">failed</span>
+					{t("Figure")}
+					<span className="rounded bg-red-500/15 px-1.5 py-0.5 text-red-500">{t("failed")}</span>
 				</div>
-				<p className="mt-2 text-sm text-muted-foreground">{result.notes ?? "The figure could not be drawn."}</p>
+				<p className="mt-2 text-sm text-muted-foreground">{result.notes ?? t("The figure could not be drawn.")}</p>
 			</div>
 		);
 	}
@@ -124,21 +126,22 @@ export function VisualOutputCard({
 				/>
 			</div>
 			<div className="mt-2 flex items-center justify-between gap-2">
-				<div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Figure</div>
+				<div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{t("Figure")}</div>
 				<div className="flex items-center gap-1.5">
 					{/* The invert affordance (owner round, 2026-10-07): the disc IS
 					    the half-filled contrast circle; the tooltip names it. */}
 					<Toggle
 						checked={inverted}
 						onChange={toggleInverted}
+						// The label stays English: Toggle derives its data-testid from it.
 						label="Invert figure brightness"
-						title="Invert colors"
+						title={t("Invert colors")}
 						discIcon={<InvertDiscIcon className="size-3" />}
 					/>
 					<button
 						type="button"
-						aria-label="Download figure as SVG"
-						title="Download as SVG"
+						aria-label={t("Download figure as SVG")}
+						title={t("Download as SVG")}
 						onClick={() => downloadFile("figure.svg", result.svg, "image/svg+xml")}
 						data-testid="visual-download"
 						className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
@@ -148,8 +151,8 @@ export function VisualOutputCard({
 					{overlay && (
 						<button
 							type="button"
-							aria-label="Open figure fullscreen"
-							title="Open fullscreen"
+							aria-label={t("Open figure fullscreen")}
+							title={t("Open fullscreen")}
 							onClick={() => overlay.openFigure(result.svg, inverted)}
 							data-testid="visual-open"
 							className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"

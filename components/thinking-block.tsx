@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { ChevronDownIcon } from "lucide-react";
 import { blurAfterPointerClick } from "@/components/focus-hygiene";
+import { useT } from "@/components/locale";
 import { cn } from "@/lib/utils";
 
 /** The unified user-thinking row (owner round, 2026-10-05): ONE visual
@@ -83,6 +84,7 @@ export function ThinkingBlock({
 	/** On the card's own background: no band (the accent read too light). */
 	inCard?: boolean;
 }) {
+	const t = useT();
 	const [open, setOpen] = useState(() => resolveUserThinkingOpen(defaultOpen));
 	// ⌘T: an explicit global set overrides every row (once set, rows re-sync).
 	const syncedRef = useRef(false);
@@ -123,7 +125,7 @@ export function ThinkingBlock({
 				aria-expanded={open}
 				className="flex w-full items-center gap-2 font-medium uppercase tracking-wide text-muted-foreground transition-colors hover:text-foreground"
 			>
-				{label}
+				{t(label)}
 				<ChevronDownIcon className={cn("size-4 shrink-0 transition-transform", open ? "rotate-180" : "rotate-0")} />
 			</button>
 			{open && (

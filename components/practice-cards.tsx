@@ -1,6 +1,7 @@
 "use client";
 
 import { ToolContentResponse } from "@/components/ai-elements/message";
+import { useT } from "@/components/locale";
 import { cn } from "@/lib/utils";
 import type { ArtifactPartProps } from "@/src/core";
 
@@ -60,11 +61,12 @@ export function ProblemCard({ part }: ArtifactPartProps) {
 	// statement — same container + eyebrow discipline as the answered card
 	// and the dock (which mirrors this in Slice D). The commitment never
 	// renders — only the call's statement.
+	const t = useT();
 	const input = (part.input ?? {}) as { statement?: string };
 	const statement = typeof input.statement === "string" ? input.statement : "";
 	return (
 		<div data-testid="problem-card" className="lh-card-enter my-1 rounded-xl border bg-card p-4">
-			<div className="mb-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">Problem</div>
+			<div className="mb-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">{t("Problem")}</div>
 			<div className="lh-prose text-[15px]">
 				<ToolContentResponse>{statement}</ToolContentResponse>
 			</div>
@@ -100,6 +102,7 @@ export function ConcludeCard({ part }: ArtifactPartProps) {
 	// below in the quiz-explanation register (small, muted, low-key).
 	// Nothing collapsible. Legacy inputs (pre-slim records) that carry
 	// their own solutionReveal fall back to it.
+	const t = useT();
 	const input = (part.input ?? {}) as { outcome?: string; verdict?: string; solutionReveal?: string };
 	const outcome = typeof input.outcome === "string" ? input.outcome : "";
 	const verdict = typeof input.verdict === "string" ? input.verdict : "";
@@ -111,7 +114,7 @@ export function ConcludeCard({ part }: ArtifactPartProps) {
 	if (outcome === "dismissed") {
 		return (
 			<div data-testid="conclude-card" className="my-1 px-1 text-sm text-muted-foreground/70">
-				Problem dismissed.
+				{t("Problem dismissed.")}
 			</div>
 		);
 	}
@@ -122,10 +125,10 @@ export function ConcludeCard({ part }: ArtifactPartProps) {
 			    eyebrow + the outcome in the quiz cards' EXACT chip register —
 			    no more two same-weight headings stacked. */}
 			<div className="mb-1 flex items-center gap-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-				Concluded
+				{t("Concluded")}
 				{(OUTCOME_LABEL[outcome] ?? "") !== "" && outcome !== "dismissed" && (
 					<span className={cn("rounded px-1.5 py-0.5", OUTCOME_CHIP[outcome] ?? OUTCOME_CHIP.movedOn)}>
-						{OUTCOME_LABEL[outcome]}
+						{t(OUTCOME_LABEL[outcome]!)}
 					</span>
 				)}
 			</div>
@@ -142,7 +145,7 @@ export function ConcludeCard({ part }: ArtifactPartProps) {
 				<>
 					<div className="my-3 border-t" />
 					<div>
-						<div className="mb-0.5 text-xs font-medium uppercase tracking-wide text-muted-foreground">Model solution</div>
+						<div className="mb-0.5 text-xs font-medium uppercase tracking-wide text-muted-foreground">{t("Model solution")}</div>
 						<div className="lh-prose text-[15px]">
 							<ToolContentResponse>{reveal}</ToolContentResponse>
 						</div>
@@ -177,6 +180,7 @@ function MetadataPopover({
 	concludeInput: { outcome?: string; rung?: unknown; missClass?: unknown; retest?: unknown };
 	problemInput: { mode?: unknown; target?: unknown };
 }) {
+	const t = useT();
 	const [open, setOpen] = useState(false);
 	const triggerRef = useRef<HTMLButtonElement | null>(null);
 	const rootRef = useRef<HTMLDivElement | null>(null);
@@ -186,7 +190,7 @@ function MetadataPopover({
 	const [anchor, setAnchor] = useState<{ top: number; left: number } | null>(null);
 	const [names, setNames] = useState<Record<string, string> | null>(null);
 	const targets = Array.isArray(problemInput.target)
-		? problemInput.target.filter((t): t is string => typeof t === "string")
+		? problemInput.target.filter((id): id is string => typeof id === "string")
 		: [];
 	// Resolve names only when there is something to resolve.
 	useEffect(() => {
@@ -239,7 +243,7 @@ function MetadataPopover({
 				aria-expanded={open}
 				className="flex items-center gap-1 text-xs font-medium uppercase tracking-wide text-muted-foreground transition-colors hover:text-foreground"
 			>
-				Metadata
+				{t("Metadata")}
 			</button>
 			{open &&
 				anchor &&
@@ -256,31 +260,31 @@ function MetadataPopover({
 						className="z-50 w-80 max-w-[calc(100vw-1rem)] rounded-xl border bg-card p-4 text-left shadow-lg"
 					>
 				<dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-xs">
-						<dt className="text-muted-foreground">Mode</dt>
+						<dt className="text-muted-foreground">{t("Mode")}</dt>
 						<dd className="font-mono">{mode || "—"}</dd>
-						<dt className="text-muted-foreground">Targets</dt>
+						<dt className="text-muted-foreground">{t("Targets")}</dt>
 						<dd className="font-mono">
 							{targets.length === 0 ? (
-								"untagged"
+								t("untagged")
 							) : (
 								<span>
-									{targets.map((t, i) => (
-										<span key={t}>
+									{targets.map((id, i) => (
+										<span key={id}>
 											{i > 0 && ", "}
-											{names?.[t] ?? t}
+											{names?.[id] ?? id}
 										</span>
 									))}
 								</span>
 							)}
 						</dd>
-						<dt className="text-muted-foreground">Outcome</dt>
+						<dt className="text-muted-foreground">{t("Outcome")}</dt>
 						<dd className="font-mono">{outcome || "—"}</dd>
-						<dt className="text-muted-foreground">Hint rung</dt>
-						<dd className="font-mono">{rung || "none"}</dd>
-						<dt className="text-muted-foreground">Miss class</dt>
-						<dd className="font-mono">{miss || "none"}</dd>
-						<dt className="text-muted-foreground">Retest</dt>
-						<dd className="font-mono">{retest === undefined ? "—" : retest ? "yes" : "no"}</dd>
+						<dt className="text-muted-foreground">{t("Hint rung")}</dt>
+						<dd className="font-mono">{rung || t("none")}</dd>
+						<dt className="text-muted-foreground">{t("Miss class")}</dt>
+						<dd className="font-mono">{miss || t("none")}</dd>
+						<dt className="text-muted-foreground">{t("Retest")}</dt>
+						<dd className="font-mono">{retest === undefined ? "—" : retest ? t("yes") : t("no")}</dd>
 					</dl>
 					</div>,
 					document.body,
