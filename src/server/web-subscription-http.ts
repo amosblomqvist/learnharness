@@ -14,6 +14,8 @@ export function subscriptionRequestOrigin(request: Request): string | undefined 
 		return addressed.origin;
 	} catch { return; }
 }
+/** Exported for the Local Claude controls (same rules, same header). */
+export function subscriptionRequestAuthorized(request: Request): boolean { return authorized(request); }
 function authorized(request: Request): boolean {
 	const origin = subscriptionRequestOrigin(request);
 	if (!origin || request.headers.get("x-learnharness-subscriptions") !== "1") return false;

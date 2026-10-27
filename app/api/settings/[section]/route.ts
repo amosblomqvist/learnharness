@@ -36,6 +36,7 @@ import {
 	clampChatLevel,
 	clampModelsLevels,
 	effectiveSettings,
+	invalidateClaudeLocal,
 	promptOverrides,
 	readSettingsRecord,
 	validateAgentModelOverrides,
@@ -132,5 +133,8 @@ export async function PUT(request: Request, ctx: { params: Promise<{ section: st
 	const record = readSettingsRecord() ?? { version: 1 };
 	const next = { ...record, [section]: sectionOut };
 	writeSettingsRecord(next);
+	// Local Claude (2026-10-27): a preference change re-probes on the next
+	// status read (enable/disable, a new path) — never on this request.
+	if (section === "claudeLocal") invalidateClaudeLocal();
 	return Response.json({ settings: next });
 }

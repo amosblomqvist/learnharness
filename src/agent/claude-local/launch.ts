@@ -1,0 +1,41 @@
+/**
+ * How the user's Claude Code install is started (Local Claude route): the
+ * query options every SDK call shares — the executable, the scrubbed
+ * environment, the app-owned cwd — and the custom spawner that lets an
+ * npm `cli.js` install run through the app's OWN runtime (the packaged
+ * app is Electron-as-Node; a Dock-launched app has no `node` on PATH).
+ * Native binaries spawn directly; the SDK's own abort sequence (stdin
+ * close → SIGTERM after 2 s → SIGKILL after 5 s) applies unchanged.
+ */
+import { spawn } from "node:child_process";
+import type { ClaudeLocalLaunch } from "./bridge.ts";
+import { claudeChildEnv } from "./env.ts";
+import type { ClaudeQueryOptions } from "./sdk.ts";
+
+/** The command line for an install: the native binary as is, or cli.js
+ *  through the app's runtime (ELECTRON_RUN_AS_NODE makes Electron plain
+ *  Node; it is harmless under real Node). */
+export function claudeCommand(binary: { path: string; viaNode: boolean }, execPath = process.execPath): { command: string; args: string[]; extraEnv: Record<string, string> } {
+	if (!binary.viaNode) return { command: binary.path, args: [], extraEnv: {} };
+	return { command: execPath, args: [binary.path], extraEnv: { ELECTRON_RUN_AS_NODE: "1" } };
+}
+
+/** The shared option slice for every query against this install. */
+export function claudeLaunchOptions(launch: ClaudeLocalLaunch, base: NodeJS.ProcessEnv = process.env): Pick<ClaudeQueryOptions, "pathToClaudeCodeExecutable" | "executable" | "cwd" | "env" | "spawnClaudeCodeProcess"> {
+	const { command, extraEnv } = claudeCommand(launch);
+	return {
+		pathToClaudeCodeExecutable: launch.path,
+		...(launch.viaNode ? { executable: "node" as const } : {}),
+		cwd: launch.cwd,
+		env: claudeChildEnv(base, extraEnv),
+		// The SDK names "node" for a .js entry; run it on OUR runtime instead.
+		// A ChildProcess satisfies the SDK's SpawnedProcess contract.
+		spawnClaudeCodeProcess: (options) => spawn(launch.viaNode && options.command === "node" ? command : options.command, options.args, {
+			cwd: options.cwd,
+			env: options.env as NodeJS.ProcessEnv,
+			stdio: ["pipe", "pipe", "pipe"],
+			signal: options.signal,
+			windowsHide: true,
+		}),
+	};
+}
