@@ -29,13 +29,18 @@ export function bareToolName(name: string, serverName: string): string {
 	const prefix = `mcp__${serverName}__`;
 	return name.startsWith(prefix) ? name.slice(prefix.length) : name;
 }
-function mapStopReason(reason: string | null | undefined): StopReason {
+/** pi's Anthropic provider mapping (pi-ai anthropic-messages mapStopReason). */
+function mapStopReason(reason: string | null | undefined, explanation?: string | null): { stopReason: StopReason; errorMessage?: string } {
 	switch (reason) {
-		case "tool_use": return "toolUse";
-		case "max_tokens": return "length";
-		case "end_turn": case "stop_sequence": case "pause_turn": return "stop";
-		case "refusal": return "stop";
-		default: return "stop";
+		case "tool_use": return { stopReason: "toolUse" };
+		case "max_tokens": return { stopReason: "length" };
+		case "end_turn": case "stop_sequence": return { stopReason: "stop" };
+		// A paused long-running turn (server tools): pi records it as a plain
+		// stop ("stop is good enough -> resubmit"); the app's next turn resumes.
+		case "pause_turn": return { stopReason: "stop" };
+		// pi records a refusal as an error with the API's explanation.
+		case "refusal": return { stopReason: "error", errorMessage: explanation || "The model refused to complete the request" };
+		default: return { stopReason: "stop" };
 	}
 }
 function total(usage: Usage): number { return usage.input + usage.output + usage.cacheRead + usage.cacheWrite; }
@@ -53,6 +58,7 @@ export class ClaudeStreamMapper {
 	private readonly serverName: string;
 	private readonly thinkingLevel?: string;
 	private stopReason: StopReason = "pending";
+	private stopError?: string;
 	constructor(model: Pick<Model<any>, "api" | "provider" | "id">, serverName: string, thinkingLevel?: string) {
 		this.model = model; this.serverName = serverName; this.thinkingLevel = thinkingLevel;
 		this.partial = emptyAssistant(model);
@@ -146,7 +152,11 @@ export class ClaudeStreamMapper {
 					if (typeof usage.cache_creation_input_tokens === "number") this.partial.usage.cacheWrite = usage.cache_creation_input_tokens;
 					this.partial.usage.totalTokens = total(this.partial.usage);
 				}
-				if (event.delta?.stop_reason) this.stopReason = mapStopReason(event.delta.stop_reason);
+				if (event.delta?.stop_reason) {
+					const mapped = mapStopReason(event.delta.stop_reason, event.delta.stop_details?.explanation);
+					this.stopReason = mapped.stopReason;
+					this.stopError = mapped.errorMessage;
+				}
 				break;
 			}
 			case "message_stop": {
@@ -160,6 +170,8 @@ export class ClaudeStreamMapper {
 	/** The terminal event: `done` with the final message, or `error`. */
 	finish(failure?: { reason: "error" | "aborted"; message: string }): AssistantMessageEvent {
 		const content = this.partial.content.filter(Boolean);
+		// A stop reason pi records as an error (a refusal) ends as one.
+		if (!failure && this.stopReason === "error") failure = { reason: "error", message: this.stopError ?? "failed" };
 		if (failure) {
 			const error: AssistantMessage = { ...this.snapshot(), content, stopReason: failure.reason, errorMessage: failure.message };
 			this.partial = error;

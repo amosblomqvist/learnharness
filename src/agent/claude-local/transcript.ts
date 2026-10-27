@@ -37,29 +37,34 @@ function text(content: unknown): string {
 	}).filter(Boolean).join("\n");
 }
 function escapeAttr(value: string): string { return value.replace(/["<>&]/g, (c) => ({ '"': "&quot;", "<": "&lt;", ">": "&gt;", "&": "&amp;" })[c]!); }
+/** Element text: `<` and `&` escaped the way attributes are, so no message
+ *  or tool result can close its block and spoof the transcript structure. */
+function escapeText(value: string): string { return value.replace(/[<&]/g, (c) => ({ "<": "&lt;", "&": "&amp;" })[c]!); }
 
-export function renderUser(message: UserMessage): string { return `<learner>\n${text(message.content)}\n</learner>`; }
+export function renderUser(message: UserMessage): string { return `<learner>\n${escapeText(text(message.content))}\n</learner>`; }
 export function renderAssistant(message: AssistantMessage): string {
 	const parts: string[] = [];
 	for (const block of message.content) {
-		if (block.type === "text") { if (block.text.trim()) parts.push(block.text); }
+		if (block.type === "text") { if (block.text.trim()) parts.push(escapeText(block.text)); }
 		else if (block.type === "toolCall") parts.push(`<tool_call id="${escapeAttr(block.id)}" name="${escapeAttr(block.name)}">${JSON.stringify(block.arguments)}</tool_call>`);
 		// thinking: never replayed
 	}
 	return `<teacher>\n${parts.join("\n")}\n</teacher>`;
 }
 export function renderToolResult(message: ToolResultMessage): string {
-	return `<tool_result id="${escapeAttr(message.toolCallId)}" name="${escapeAttr(message.toolName)}"${message.isError ? ' error="true"' : ""}>\n${text(message.content)}\n</tool_result>`;
+	return `<tool_result id="${escapeAttr(message.toolCallId)}" name="${escapeAttr(message.toolName)}"${message.isError ? ' error="true"' : ""}>\n${escapeText(text(message.content))}\n</tool_result>`;
 }
 
 /** The content blocks for the SDK user message: header + one per message
- *  (leading system messages — request chrome — are skipped). */
+ *  (leading system messages — request chrome — are skipped; errored and
+ *  aborted assistant messages are skipped too, as pi's own replay does —
+ *  pi-ai transformMessages: incomplete turns are never replayed). */
 export function flattenTranscript(messages: readonly Message[]): string[] {
 	const blocks: string[] = [TRANSCRIPT_HEADER];
 	for (const message of messages) {
 		if (message.role === "system") continue;
 		if (message.role === "user") blocks.push(renderUser(message));
-		else if (message.role === "assistant") blocks.push(renderAssistant(message));
+		else if (message.role === "assistant") { if (message.stopReason !== "error" && message.stopReason !== "aborted") blocks.push(renderAssistant(message)); }
 		else if (message.role === "toolResult") blocks.push(renderToolResult(message));
 	}
 	return blocks;
