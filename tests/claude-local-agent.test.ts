@@ -21,7 +21,7 @@ import { questionResult, serverExecute, invalidInputResult } from "../src/agent/
 import { toLlmMessages, newUserMessage } from "../src/core/native-messages.ts";
 import { QUESTION_TOOLS } from "../src/core/pending.ts";
 import { piModels } from "../src/agent/models.ts";
-import { fakeClaude, type FakeAccount, type FakeStep } from "./claude-local-fake.ts";
+import { FAKE_COST_USD, fakeClaude, type FakeAccount, type FakeStep } from "./claude-local-fake.ts";
 
 const base = piModels().getModel("anthropic", "claude-haiku-5-5")!;
 const model = { ...base, provider: "claude-local", cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } };
@@ -605,5 +605,65 @@ describe("external review: the child's stderr is never persisted (P1)", () => {
 		const { value, logged } = await captured(async () => claudeLocalStream(() => false, undefined, runtimeFor(async () => fake.query))(model, normalizeContext({ messages: [{ role: "user", content: "x", timestamp: 1 }] })).result());
 		assert.equal(value.stopReason, "error");
 		assert.ok(!logged.includes(SECRET) && !JSON.stringify(value).includes(SECRET));
+	});
+});
+
+describe("external review: fake fidelity and the MCP handshake (P2)", () => {
+	const roles = (messages: unknown[]) => messages.map((m) => (m as { role: string }).role);
+
+	it("the app's tool server not reported connected at init refuses the turn before any model call (failed or absent)", async () => {
+		for (const mcpStatus of ["failed", "pending", "absent"]) {
+			const logged: string[] = [];
+			const original = console.error;
+			console.error = (...args: unknown[]) => { logged.push(args.map(String).join(" ")); };
+			let run;
+			try { run = await runAgent([{ text: "never reached", tools: [{ name: "lookup_weather", args: { city: "Oslo" } }] }], { fake: { mcpStatus } }); } finally { console.error = original; }
+			const { messages, fake } = run;
+			assert.deepEqual(roles(messages), ["user", "assistant"], mcpStatus);
+			const last = messages.at(-1) as AssistantMessage;
+			assert.equal(last.stopReason, "error");
+			assert.equal(last.errorMessage, "Local Claude request failed. Check Claude Code and your plan, then retry. No API key was used.");
+			assert.ok(!JSON.stringify(messages).includes("never reached"));
+			assert.deepEqual(fake.turns[0]!.toolCalls, []);
+			assert.ok(logged.some((line) => line.includes(`tool server`) && line.includes(mcpStatus === "absent" ? "not reported" : mcpStatus)), logged.join("\n"));
+		}
+	});
+
+	it("a connected tool server proceeds; a tool-less call has no server to check", async () => {
+		const { messages } = await runAgent([{ text: "Fine." }], { fake: { mcpStatus: "connected" } });
+		assert.equal((messages.at(-1) as AssistantMessage).stopReason, "stop");
+		const fake = fakeClaude([{ text: "Summary." }]);
+		const result = await claudeLocalStream(() => false, undefined, runtimeFor(async () => fake.query))(model, normalizeContext({ messages: [{ role: "user", content: "x", timestamp: 1 }] })).result();
+		assert.equal(result.stopReason, "stop");
+	});
+
+	it("the fake's permission resolver: only the mcp__learnharness rule (or the exact name) pre-approves a call; anything else is denied", async () => {
+		const { fake, messages } = await runAgent([{ tools: [{ name: "lookup_weather", args: { city: "Oslo" } }] }, { text: "Done." }]);
+		assert.deepEqual(fake.turns[0]!.permissionDenials, [], "the route's allowedTools passes the CLI's resolver");
+		assert.equal((messages[2] as ToolResultMessage).isError, false);
+		const wrong = fakeClaude([{ tools: [{ name: "lookup_weather", args: { city: "Oslo" } }] }]);
+		const hook = { PreToolUse: [{ hooks: [async () => ({})] }] };
+		for await (const message of wrong.query({ prompt: "x", options: { allowedTools: ["learnharness"], hooks: hook } as never })) void message;
+		assert.deepEqual(wrong.turns[0]!.permissionDenials, ["lookup_weather"], "a rule that is not the mcp__ prefix form pre-approves nothing");
+	});
+
+	it("unstreamed messages rebuild once whatever the echo shape (per block, cumulative, full)", async () => {
+		for (const echo of ["block", "cumulative", "full"] as const) {
+			const { messages } = await runAgent([{ thinking: "hm", text: "Both blocks.", tools: [{ name: "lookup_weather", args: { city: "Oslo" } }], unstreamed: true, echo }, { text: "Done.", unstreamed: true, echo }]);
+			const first = messages[1] as AssistantMessage;
+			assert.deepEqual(first.content.map((c) => c.type), ["thinking", "text", "toolCall"], echo);
+			assert.equal(roles(messages).filter((r) => r === "toolResult").length, 1, echo);
+			assert.deepEqual((messages.at(-1) as AssistantMessage).content, [{ type: "text", text: "Done." }], echo);
+		}
+		const streamed = await runAgent([{ text: "Streamed.", echo: "cumulative" }]);
+		assert.deepEqual((streamed.messages.at(-1) as AssistantMessage).content, [{ type: "text", text: "Streamed." }], "echoes of a streamed message are never added");
+	});
+
+	it("a nonzero total_cost_usd never reaches the record (plan usage is never priced)", async () => {
+		assert.ok(FAKE_COST_USD > 0);
+		const { messages } = await runAgent([{ text: "Hi." }]);
+		const usage = (messages.at(-1) as AssistantMessage).usage;
+		assert.equal(usage.cost.total, 0);
+		assert.ok(!JSON.stringify(messages).includes(String(FAKE_COST_USD)));
 	});
 });

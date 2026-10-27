@@ -215,8 +215,9 @@ export async function* runClaudeTurn(params: ClaudeTurnParams): AsyncGenerator<C
 	})();
 	let sawResult = false;
 	const seenAssistantIds = new Set<string>();
-	/** A message rebuilt from Claude Code's per-block `assistant` echoes (no stream delivered). */
-	let rebuilt: { id: string; mapper: ClaudeStreamMapper; blocks: number } | undefined;
+	/** A message rebuilt from Claude Code's `assistant` echoes (no stream
+	 *  delivered); `seen` holds the blocks already added, as JSON. */
+	let rebuilt: { id: string; mapper: ClaudeStreamMapper; blocks: number; seen: string[] } | undefined;
 	/** Set when Claude Code reported the turn's failure as an assistant message. */
 	let failedAssistant = false;
 	try {
@@ -241,10 +242,23 @@ export async function* runClaudeTurn(params: ClaudeTurnParams): AsyncGenerator<C
 					// Claude plan login), and the route's status goes not-ready.
 					if (message.subtype !== "init") break;
 					const source = message.apiKeySource;
-					if (!source || source === "none") break;
-					params.onApiKeySource?.(source);
+					let detail: string | undefined;
+					if (source && source !== "none") {
+						params.onApiKeySource?.(source);
+						detail = `Claude Code would use an API key (apiKeySource: ${source})`;
+					} else if (bridge) {
+						// The lesson's tools exist only through the app's in-process server:
+						// unless init reports it connected, the turn would run as a
+						// text-only lesson — refused before the first model call (the raw
+						// status goes to the server log; the learner sees the generic text).
+						const status = message.mcp_servers?.find((server) => server.name === serverName)?.status;
+						if (status !== "connected") {
+							detail = `the LearnHarness tool server ${status ? `did not connect (status: ${status})` : "was not reported"} at Claude Code's init`;
+							console.error(`[claude-local] ${detail}`);
+						}
+					}
+					if (!detail) break;
 					sawResult = true;
-					const detail = `Claude Code would use an API key (apiKeySource: ${source})`;
 					const target = mapper.started && !mapper.stopped ? mapper : new ClaudeStreamMapper(model, serverName, params.thinkingLevel);
 					yield { type: "assistant", event: target.finish({ reason: "error", message: detail }) };
 					yield { type: "result", ok: false, errors: [detail], failedAssistant: true };
@@ -285,10 +299,15 @@ export async function* runClaudeTurn(params: ClaudeTurnParams): AsyncGenerator<C
 					if (seenAssistantIds.has(message.message.id) || (mapper.started && !mapper.stopped)) break;
 					if (rebuilt && rebuilt.id !== message.message.id) { yield { type: "assistant", event: rebuilt.mapper.finish() }; rebuilt = undefined; }
 					if (!rebuilt) {
-						rebuilt = { id: message.message.id, mapper: new ClaudeStreamMapper(model, serverName, params.thinkingLevel), blocks: 0 };
+						rebuilt = { id: message.message.id, mapper: new ClaudeStreamMapper(model, serverName, params.thinkingLevel), blocks: 0, seen: [] };
 						for (const event of rebuilt.mapper.handle({ type: "message_start", message: { ...message.message, content: [] } })) yield { type: "assistant", event };
 					}
-					for (const block of message.message.content) {
+					// An echo is one new block, or (cumulative / full echo) the message so
+					// far: blocks already added are skipped, never duplicated.
+					const content = message.message.content.map((block) => JSON.stringify(block));
+					const repeats = rebuilt.seen.length > 0 && content.length >= rebuilt.seen.length && rebuilt.seen.every((block, index) => content[index] === block);
+					for (const block of message.message.content.slice(repeats ? rebuilt.seen.length : 0)) {
+						rebuilt.seen.push(JSON.stringify(block));
 						const index = rebuilt.blocks++;
 						for (const event of rebuilt.mapper.handle({ type: "content_block_start", index, content_block: block as never })) yield { type: "assistant", event };
 						for (const event of rebuilt.mapper.handle({ type: "content_block_stop", index })) yield { type: "assistant", event };

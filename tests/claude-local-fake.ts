@@ -13,12 +13,23 @@
  * (each call starts as soon as its block completes, while the message still
  * streams), `controlAhead` (the batch's control requests — hooks and tool
  * calls — run before the consumer receives the message they belong to, as
- * the SDK's reader can run ahead of its message queue), and the
- * `{ apiRetry }` step (Claude Code's `system/api_retry` notice).
+ * the SDK's reader can run ahead of its message queue), `echo` (per-block,
+ * cumulative or one full `assistant` echo), and the `{ apiRetry }` step
+ * (Claude Code's `system/api_retry` notice). Like the CLI it also resolves
+ * permissions (a call the PreToolUse hook leaves undecided runs only when
+ * allowedTools pre-approves it — `mcp__<server>` or the exact name — or
+ * canUseTool allows it), reports the tool server's status at init
+ * (`mcpStatus`), delivers stderr (`{ emitStderr }`, a crash's `stderr`) the
+ * way the SDK does, and prices every result (FAKE_COST_USD) so a reader of
+ * total_cost_usd would show.
  */
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import type { ClaudeQuery, HookCallback, SDKMessage } from "../src/agent/claude-local/sdk.ts";
+
+/** Every result reports a nonzero total_cost_usd, as a real CLI does: the
+ *  app must never read it (plan usage is labelled, never priced). */
+export const FAKE_COST_USD = 0.0421;
 
 export interface FakeToolCall { name: string; args: Record<string, unknown>; id?: string; /** A Claude Code built-in: its name reaches the hook unprefixed. */ raw?: boolean }
 export type FakeStep =
@@ -29,6 +40,9 @@ export type FakeStep =
 		/** Start each call when its tool_use block completes, before message_stop. */ toolsDuringStream?: boolean;
 		/** Run the batch (hooks + calls) before the message's own events reach the consumer. */ controlAhead?: boolean;
 		/** The API's stop reason (default: tool_use with tools, else end_turn). */ stopReason?: string;
+		/** How Claude Code echoes the message as `assistant` messages: one block
+		 *  each (default), each echo carrying every block so far (cumulative), or
+		 *  one echo of the whole message after its last block (full). */ echo?: "block" | "cumulative" | "full";
 	}
 	| { error: string }
 	/** Claude Code's synthetic API-failure assistant message (e.g. rate_limit) followed by an is_error result. */
@@ -48,12 +62,17 @@ export interface FakeTurn {
 	promptEnd?: "closed" | "aborted";
 	/** The PostToolBatch inputs the hook received. */
 	batches: unknown[];
+	/** Calls the permission resolver refused (not pre-approved, no canUseTool). */
+	permissionDenials: string[];
 }
 
 export interface FakeAccount {
 	account?: Record<string, unknown>; models?: Array<Record<string, unknown>>;
 	/** The init message's apiKeySource (default "none": a plan login). */
 	apiKeySource?: string;
+	/** The init message's status for the app's tool server (default: "connected"
+	 *  once the in-process server connected); "absent" leaves it out of mcp_servers. */
+	mcpStatus?: string;
 }
 
 export function fakeClaude(script: FakeStep[] | ((blocks: string[], turn: number) => FakeStep[]), account: FakeAccount = {}) {
@@ -64,7 +83,7 @@ export function fakeClaude(script: FakeStep[] | ((blocks: string[], turn: number
 		const abort = options.abortController as AbortController | undefined;
 		let closed!: () => void;
 		const closedPromise = new Promise<void>((resolve) => { closed = resolve; });
-		const turn: FakeTurn = { blocks: [], options, toolCalls: [], hookDenials: [], batches: [] };
+		const turn: FakeTurn = { blocks: [], options, toolCalls: [], hookDenials: [], batches: [], permissionDenials: [] };
 		turns.push(turn);
 		const sessionId = `fake-session-${turns.length}`;
 		const hooks = (options.hooks ?? {}) as Record<string, { hooks: HookCallback[] }[]>;
@@ -91,7 +110,10 @@ export function fakeClaude(script: FakeStep[] | ((blocks: string[], turn: number
 				client = new Client({ name: "fake-claude-code", version: "0" });
 				await client.connect(clientTransport);
 			}
-			yield { type: "system", subtype: "init", session_id: sessionId, uuid: "u-init", cwd: String(options.cwd ?? ""), tools: [], mcp_servers: [], model: String(options.model ?? ""), permissionMode: String(options.permissionMode ?? "default"), apiKeySource: account.apiKeySource ?? "none", claude_code_version: "2.1.311", slash_commands: [], output_style: "default", skills: [], plugins: [] } as unknown as SDKMessage;
+			// Like the CLI, init reports each configured MCP server's status.
+			const mcpStatus = account.mcpStatus ?? (client ? "connected" : undefined);
+			const mcpServers = server && mcpStatus !== "absent" ? [{ name: "learnharness", status: mcpStatus ?? "failed", source: "sdk" }] : [];
+			yield { type: "system", subtype: "init", session_id: sessionId, uuid: "u-init", cwd: String(options.cwd ?? ""), tools: [], mcp_servers: mcpServers, model: String(options.model ?? ""), permissionMode: String(options.permissionMode ?? "default"), apiKeySource: account.apiKeySource ?? "none", claude_code_version: "2.1.311", slash_commands: [], output_style: "default", skills: [], plugins: [] } as unknown as SDKMessage;
 			const steps = typeof script === "function" ? script(turn.blocks, turns.length) : script;
 			let usageReported = false;
 			const signal = () => abort?.signal ?? new AbortController().signal;
@@ -101,6 +123,19 @@ export function fakeClaude(script: FakeStep[] | ((blocks: string[], turn: number
 				const pre = await hook("PreToolUse")?.({ hook_event_name: "PreToolUse", tool_name: call.raw ? call.name : `mcp__learnharness__${call.name}`, tool_input: call.args, tool_use_id: call.id, session_id: sessionId, transcript_path: "", cwd: "" } as never, call.id, { signal: signal() });
 				const decision = (pre as { hookSpecificOutput?: { permissionDecision?: string } } | undefined)?.hookSpecificOutput?.permissionDecision;
 				if (decision === "deny") { turn.hookDenials.push(call.name); return; }
+				// The CLI's permission resolver: a call the hook did not decide runs
+				// only when a rule pre-approves it — `mcp__<server>` (every tool of
+				// that server) or the exact tool name — or bypass mode is on, or
+				// canUseTool allows it; with none of those it is denied (an SDK
+				// session has no one to prompt).
+				const wire = call.raw ? call.name : `mcp__learnharness__${call.name}`;
+				const allowed = (options.allowedTools as string[] | undefined) ?? [];
+				const preApproved = decision === "allow" || options.permissionMode === "bypassPermissions" || allowed.includes(wire) || (!call.raw && allowed.includes("mcp__learnharness"));
+				if (!preApproved) {
+					const canUseTool = options.canUseTool as ((name: string, input: unknown, extra: unknown) => Promise<{ behavior: string }>) | undefined;
+					const verdict = canUseTool ? await canUseTool(wire, call.args, { signal: signal(), toolUseID: call.id }) : { behavior: "deny" };
+					if (verdict.behavior !== "allow") { turn.permissionDenials.push(call.name); return; }
+				}
 				if (!client) { turn.toolCalls.push({ id: call.id, name: call.name, args: call.args, result: "no tool server", isError: true }); return; }
 				const result = await client.callTool({ name: call.name, arguments: call.args, _meta: { "claudecode/toolUseId": call.id } });
 				turn.toolCalls.push({ id: call.id, name: call.name, args: call.args, result: result.content, isError: result.isError === true });
@@ -118,11 +153,11 @@ export function fakeClaude(script: FakeStep[] | ((blocks: string[], turn: number
 				}
 				if ("apiError" in step) {
 					yield { type: "assistant", message: { id: `msg_${++counter}`, type: "message", role: "assistant", model: String(options.model ?? ""), content: [{ type: "text", text: step.text }], stop_reason: "end_turn", stop_sequence: null, usage: { input_tokens: 10, output_tokens: 1 } }, error: step.apiError, parent_tool_use_id: null, uuid: `u-${++counter}`, session_id: sessionId } as unknown as SDKMessage;
-					yield { type: "result", subtype: "success", duration_ms: 1, duration_api_ms: 1, is_error: true, num_turns: 1, result: step.text, stop_reason: null, total_cost_usd: 0, usage: {} as never, modelUsage: {}, permission_denials: [], terminal_reason: "api_error", uuid: `u-${++counter}`, session_id: sessionId } as unknown as SDKMessage;
+					yield { type: "result", subtype: "success", duration_ms: 1, duration_api_ms: 1, is_error: true, num_turns: 1, result: step.text, stop_reason: null, total_cost_usd: FAKE_COST_USD, usage: {} as never, modelUsage: {}, permission_denials: [], terminal_reason: "api_error", uuid: `u-${++counter}`, session_id: sessionId } as unknown as SDKMessage;
 					return;
 				}
 				if ("error" in step) {
-					yield { type: "result", subtype: "error_during_execution", duration_ms: 1, duration_api_ms: 1, is_error: true, num_turns: 1, stop_reason: null, total_cost_usd: 0, usage: {} as never, modelUsage: {}, permission_denials: [], errors: [step.error], uuid: `u-${++counter}`, session_id: sessionId } as unknown as SDKMessage;
+					yield { type: "result", subtype: "error_during_execution", duration_ms: 1, duration_api_ms: 1, is_error: true, num_turns: 1, stop_reason: null, total_cost_usd: FAKE_COST_USD, usage: {} as never, modelUsage: {}, permission_denials: [], errors: [step.error], uuid: `u-${++counter}`, session_id: sessionId } as unknown as SDKMessage;
 					return;
 				}
 				const id = `msg_${++counter}`;
@@ -135,7 +170,9 @@ export function fakeClaude(script: FakeStep[] | ((blocks: string[], turn: number
 				const blocks: unknown[] = [];
 				yield* one(event({ type: "message_start", message: { id, type: "message", role: "assistant", model, content: [], stop_reason: null, stop_sequence: null, usage: { input_tokens: 10, output_tokens: 1, cache_creation_input_tokens: 5, cache_read_input_tokens: 3 } } }));
 				let index = 0;
-				const echo = (block: unknown): SDKMessage | undefined => send({ type: "assistant", message: { id, type: "message", role: "assistant", model, content: [block], stop_reason: null, stop_sequence: null, usage: { input_tokens: 10, output_tokens: 1 } }, parent_tool_use_id: null, uuid: `u-${++counter}`, session_id: sessionId } as unknown as SDKMessage);
+				const echoMode = step.echo ?? "block";
+				const echoOf = (content: unknown[]): SDKMessage | undefined => send({ type: "assistant", message: { id, type: "message", role: "assistant", model, content, stop_reason: null, stop_sequence: null, usage: { input_tokens: 10, output_tokens: 1 } }, parent_tool_use_id: null, uuid: `u-${++counter}`, session_id: sessionId } as unknown as SDKMessage);
+				const echo = (block: unknown): SDKMessage | undefined => echoMode === "full" ? undefined : echoOf(echoMode === "cumulative" ? [...blocks] : [block]);
 				if (step.thinking) {
 					yield* one(event({ type: "content_block_start", index, content_block: { type: "thinking", thinking: "", signature: "" } }));
 					yield* one(event({ type: "content_block_delta", index, delta: { type: "thinking_delta", thinking: step.thinking } }));
@@ -173,6 +210,7 @@ export function fakeClaude(script: FakeStep[] | ((blocks: string[], turn: number
 						await new Promise<void>((resolve) => setImmediate(resolve));
 					}
 				}
+				if (echoMode === "full") yield* one(echoOf([...blocks]));
 				yield* one(event({ type: "message_delta", delta: { stop_reason: step.stopReason ?? (calls.length ? "tool_use" : "end_turn"), stop_sequence: null }, usage: { output_tokens: 20, input_tokens: 10, cache_creation_input_tokens: 5, cache_read_input_tokens: 3 } }));
 				yield* one(event({ type: "message_stop" }));
 				if (!usageReported) { usageReported = true; yield* one(send({ type: "rate_limit_event", rate_limit_info: { status: "allowed", utilization: 0.25, resetsAt: 1700000000, rateLimitType: "five_hour", isUsingOverage: false }, uuid: `u-${++counter}`, session_id: sessionId } as unknown as SDKMessage)); }
@@ -190,12 +228,12 @@ export function fakeClaude(script: FakeStep[] | ((blocks: string[], turn: number
 				}
 				for (const message of held.splice(0)) yield message;
 				if (stop) {
-					yield { type: "result", subtype: "success", duration_ms: 1, duration_api_ms: 1, is_error: false, num_turns: 1, result: "", stop_reason: "tool_use", total_cost_usd: 0, usage: {} as never, modelUsage: {}, permission_denials: [], terminal_reason: "hook_stopped", uuid: `u-${++counter}`, session_id: sessionId } as unknown as SDKMessage;
+					yield { type: "result", subtype: "success", duration_ms: 1, duration_api_ms: 1, is_error: false, num_turns: 1, result: "", stop_reason: "tool_use", total_cost_usd: FAKE_COST_USD, usage: {} as never, modelUsage: {}, permission_denials: [], terminal_reason: "hook_stopped", uuid: `u-${++counter}`, session_id: sessionId } as unknown as SDKMessage;
 					return;
 				}
 			}
 			if (stopped()) return;
-			yield { type: "result", subtype: "success", duration_ms: 1, duration_api_ms: 1, is_error: false, num_turns: 1, result: "", stop_reason: "end_turn", total_cost_usd: 0, usage: {} as never, modelUsage: {}, permission_denials: [], terminal_reason: "completed", uuid: `u-${++counter}`, session_id: sessionId } as unknown as SDKMessage;
+			yield { type: "result", subtype: "success", duration_ms: 1, duration_api_ms: 1, is_error: false, num_turns: 1, result: "", stop_reason: "end_turn", total_cost_usd: FAKE_COST_USD, usage: {} as never, modelUsage: {}, permission_denials: [], terminal_reason: "completed", uuid: `u-${++counter}`, session_id: sessionId } as unknown as SDKMessage;
 		}
 		const iterator = generate();
 		return Object.assign(iterator, {
