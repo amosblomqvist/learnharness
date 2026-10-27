@@ -252,6 +252,26 @@ describe("AppearanceSection (thin SSR)", () => {
 		);
 		assert.ok(html.includes(`value="#1a1a2e"`));
 	});
+
+	it("text width defaults to Large (80rem); media limit is off and live", () => {
+		const html = renderToStaticMarkup(<AppearanceSection appearance={undefined} onSectionChange={() => {}} />);
+		assert.ok(html.includes("80rem"));
+		assert.ok(/<option value="xl" selected="">Large<\/option>/.test(html), "Large is the selected option");
+		for (const label of ["Full", "Large", "Medium", "Small"]) assert.ok(html.includes(`>${label}</option>`), label);
+		assert.ok(!tagOf(html, "row-constrain-media").includes("opacity-40"), "media row live under a measure");
+		assert.ok(tagOf(html, "toggle-limit-media-width").includes(`aria-checked="false"`));
+	});
+
+	it("text width Full: the media row dims and its switch locks", () => {
+		const html = renderToStaticMarkup(
+			<AppearanceSection appearance={{ textWidth: "full", constrainMedia: true }} onSectionChange={() => {}} />,
+		);
+		assert.ok(html.includes("Full column"));
+		assert.ok(tagOf(html, "row-constrain-media").includes("opacity-40"), "whole row dims");
+		const toggle = tagOf(html, "toggle-limit-media-width");
+		assert.ok(toggle.includes("disabled"), "switch locked");
+		assert.ok(toggle.includes(`aria-checked="true"`), "stored value still shows");
+	});
 });
 
 describe("KeyboardSection (thin SSR)", () => {

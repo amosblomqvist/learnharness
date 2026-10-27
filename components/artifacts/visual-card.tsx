@@ -71,7 +71,7 @@ export function VisualOutputCard({
 	const natural = result && typeof result.svg === "string" ? svgNaturalWidth(result.svg) : null;
 	if (!result || typeof result.svg !== "string") {
 		return (
-			<div className="rounded-xl border bg-card p-4 text-sm text-muted-foreground">
+			<div className="lh-measure rounded-xl border bg-card p-4 text-sm text-muted-foreground">
 				Figure completed, but the result could not be displayed.
 			</div>
 		);
@@ -79,7 +79,7 @@ export function VisualOutputCard({
 	const failed = result.svg.length === 0;
 	if (failed) {
 		return (
-			<div className="rounded-xl border bg-card p-4 text-card-foreground" data-testid="visual-card-failed">
+			<div className="lh-measure rounded-xl border bg-card p-4 text-card-foreground" data-testid="visual-card-failed">
 				<div className="flex items-center gap-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
 					Figure
 					<span className="rounded bg-red-500/15 px-1.5 py-0.5 text-red-500">failed</span>
@@ -97,8 +97,8 @@ export function VisualOutputCard({
 		<div
 			className={
 				natural !== null
-					? "my-4 mx-auto w-fit max-w-full"
-					: "my-4 w-full"
+					? "lh-media my-4 w-fit"
+					: "lh-media my-4 w-full"
 			}
 			data-testid="visual-card"
 		>

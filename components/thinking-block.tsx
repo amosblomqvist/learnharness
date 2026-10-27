@@ -110,7 +110,7 @@ export function ThinkingBlock({
 				// keeps the text off the band's right edge. In-card rows take
 				// NO band — the accent lift read too light; rail only.
 				"lh-card-enter my-2 w-full border-l-[calc(3ch-14px)] border-muted-foreground/30 py-1 pl-[14px] pr-4 font-ui text-xs",
-				inCard ? "" : "bg-card",
+				inCard ? "" : "lh-measure bg-card",
 			)}
 		>
 			<button

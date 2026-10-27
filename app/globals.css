@@ -65,6 +65,13 @@
 	--lh-prose-leading: 1.5;
 	/* Markdown heading weight (appearance settings; 900 = the Black cut). */
 	--lh-heading-weight: 900;
+	/* The chat measure (appearance "Text width", factory xl). Media keeps
+	   the full transcript column until "Limit media width" is on. */
+	--lh-text-max: 80rem;
+	--lh-media-max: 100%;
+	--lh-media-span: 100cqi;
+	--lh-media-outset: calc(50% - 50cqi);
+	--lh-media-table-inset: auto;
 }
 
 /* The app is always dark (<html class="dark">); mirror the same values so
@@ -192,6 +199,36 @@ body {
 	font-family: var(--font-prose);
 	font-size: var(--lh-prose-size);
 	line-height: var(--lh-prose-leading);
+}
+
+/* The chat measure: transcript text blocks center at the appearance
+   text width. Unlayered, so it beats the w-full/size-full utilities. */
+.lh-measure {
+	width: min(100%, var(--lh-text-max));
+	margin-inline: auto;
+}
+
+/* Media standing in the transcript beside the text (figures, the plan
+   diagram) caps at the media width, centered. */
+.lh-media {
+	max-width: var(--lh-media-max);
+	margin-inline: auto;
+}
+
+/* Media nested in a narrowed prose block (.lh-breakout — never a card)
+   breaks out to the transcript column (the inline-size container),
+   centered on it. The outset math assumes a centered parent, so list
+   items and quotes keep their media in flow. */
+.lh-breakout
+	:is([data-testid="md-mermaid"], [data-testid="md-code"], [data-testid="md-table"]):not(
+		:is(li, blockquote, [data-testid="md-callout"]) *
+	) {
+	width: var(--lh-media-span);
+	max-width: none;
+	margin-inline: var(--lh-media-outset);
+}
+.lh-breakout [data-testid="md-table"]:not(:is(li, blockquote, [data-testid="md-callout"]) *) [data-streamdown="table"] {
+	margin-inline: var(--lh-media-table-inset);
 }
 
 /* Session-name weight (owner, fix wave round 3): with the serif toggle

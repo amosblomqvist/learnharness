@@ -25,7 +25,7 @@ export function GraphContextCard({ data }: { data: GraphContextData }) {
 	const { propositions = [], chains = [] } = data ?? {};
 	const noun = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
 	return (
-		<div data-testid="graph-context-card" className="my-1">
+		<div data-testid="graph-context-card" className="lh-measure my-1">
 			<button
 				type="button"
 				data-testid="graph-context-toggle"

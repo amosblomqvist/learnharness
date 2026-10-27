@@ -49,7 +49,7 @@ export function DispatchCard({ toolCallId, kind }: { toolCallId: string; kind: J
 	const failed = job.status === "error";
 	return (
 		<div
-			className="flex items-center gap-2 text-xs text-muted-foreground"
+			className="lh-measure flex items-center gap-2 text-xs text-muted-foreground"
 			data-testid="dispatch-settled"
 		>
 			{failed ? <XIcon className="size-3.5 text-red-500" /> : <CheckIcon className="size-3.5" />}
@@ -64,7 +64,7 @@ function DispatchRefusedCard({ label, line, button }: { label: string; line: str
 	const ctx = useContext(ChatActionsContext);
 	return (
 		<div
-			className="flex items-center gap-2 text-xs text-muted-foreground"
+			className="lh-measure flex items-center gap-2 text-xs text-muted-foreground"
 			data-testid="dispatch-refused"
 		>
 			<SettingsIcon className="size-3.5" />
@@ -91,7 +91,7 @@ function DispatchActivityCard({ job, label }: { job: JobRecord | null; label: st
 		job && job.createdAt ? Math.max(0, Math.round((Date.now() - Date.parse(job.createdAt)) / 1000)) : null;
 	return (
 		<div
-			className="rounded-xl border bg-card p-4 text-card-foreground"
+			className="lh-measure rounded-xl border bg-card p-4 text-card-foreground"
 			data-testid="dispatch-card"
 		>
 			<div className="flex items-center gap-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">

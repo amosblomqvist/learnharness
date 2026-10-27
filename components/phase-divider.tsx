@@ -66,7 +66,7 @@ export function PhaseDivider({ phase, nodeCount }: { phase: Phase3; nodeCount?: 
 			? `Plan · ${nodeCount} node${nodeCount === 1 ? "" : "s"}`
 			: CHIP_LABEL[phase];
 	return (
-		<div className="my-4 flex w-full items-center gap-3" data-testid={`phase-divider-${phase}`}>
+		<div className="lh-measure my-4 flex items-center gap-3" data-testid={`phase-divider-${phase}`}>
 			<span className="h-0 flex-1 border-t-2 border-dotted border-border/50" aria-hidden />
 			<span className="rounded-full border border-border/80 px-2.5 py-0.5 text-xs font-medium uppercase tracking-wide text-muted-foreground">
 				{label}

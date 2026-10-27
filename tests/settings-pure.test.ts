@@ -31,6 +31,8 @@ describe("resolveAppearance — delta over factory", () => {
 		assert.equal(a.fontFamily, null);
 		assert.equal(a.proseFontSize, 16);
 		assert.equal(a.sessionNameSerif, true);
+		assert.equal(a.textWidth, "xl");
+		assert.equal(a.constrainMedia, false);
 		assert.deepEqual(a.mdRendering, { headingWeight: 900, boldColor: null, italicColor: null });
 	});
 
@@ -78,6 +80,32 @@ describe("appearanceVars — the mapping the provider applies", () => {
 		assert.equal(vars["--font-title"], undefined, "CMU stays");
 		assert.equal(vars["--background"], undefined, "factory palette untouched");
 		assert.equal(vars["--lh-ink-strong"], undefined, "default ink");
+		assert.equal(vars["--lh-text-max"], "80rem", "factory measure = Large (xl)");
+		assert.equal(vars["--lh-media-max"], "100%", "media keeps the full column");
+		assert.equal(vars["--lh-media-span"], "100cqi");
+		assert.equal(vars["--lh-media-outset"], "calc(50% - 50cqi)");
+		assert.equal(vars["--lh-media-table-inset"], "auto", "broken-out tables center on the text axis");
+	});
+
+	it("text width Full: the measure is the column, tables stay left-aligned", () => {
+		const vars = appearanceVars(resolveAppearance({ textWidth: "full" }));
+		assert.equal(vars["--lh-text-max"], "100%");
+		assert.equal(vars["--lh-media-max"], "100%");
+		assert.equal(vars["--lh-media-table-inset"], "0px");
+	});
+
+	it("each measure maps to its Tailwind screen width", () => {
+		assert.equal(appearanceVars(resolveAppearance({ textWidth: "lg" }))["--lh-text-max"], "64rem");
+		assert.equal(appearanceVars(resolveAppearance({ textWidth: "md" }))["--lh-text-max"], "48rem");
+	});
+
+	it("limit media width: media follows the text measure, no breakout", () => {
+		const vars = appearanceVars(resolveAppearance({ textWidth: "lg", constrainMedia: true }));
+		assert.equal(vars["--lh-text-max"], "64rem");
+		assert.equal(vars["--lh-media-max"], "64rem");
+		assert.equal(vars["--lh-media-span"], "100%");
+		assert.equal(vars["--lh-media-outset"], "0px");
+		assert.equal(vars["--lh-media-table-inset"], "0px");
 	});
 
 	it("full delta: every knob lands on its token", () => {
@@ -103,7 +131,7 @@ describe("appearanceVars — the mapping the provider applies", () => {
 	it("sessionNameSerif false alone: titles move, nothing else does", () => {
 		const vars = appearanceVars(resolveAppearance({ sessionNameSerif: false }));
 		assert.equal(vars["--font-title"], "var(--font-prose)");
-		assert.equal(Object.keys(vars).length, 3, "prose-size, heading-weight, font-title only");
+		assert.equal(Object.keys(vars).length, 8, "font-title + the always-applied prose-size, heading-weight, and five measure tokens");
 	});
 });
 

@@ -20,7 +20,7 @@
  */
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
-import { FACTORY_SETTINGS, type AppearanceSettings } from "@/src/core";
+import { FACTORY_SETTINGS, TEXT_WIDTH_SIZES, type AppearanceSettings } from "@/src/core";
 
 /** The resolved, fully-concrete appearance view (delta + factory merged). */
 export function resolveAppearance(delta: AppearanceSettings | undefined) {
@@ -31,6 +31,8 @@ export function resolveAppearance(delta: AppearanceSettings | undefined) {
 		fontFamily: delta?.fontFamily ?? f.fontFamily,
 		proseFontSize: delta?.proseFontSize ?? f.proseFontSize,
 		sessionNameSerif: delta?.sessionNameSerif ?? f.sessionNameSerif,
+		textWidth: delta?.textWidth ?? f.textWidth,
+		constrainMedia: delta?.constrainMedia ?? f.constrainMedia,
 		mdRendering: {
 			headingWeight: delta?.mdRendering?.headingWeight ?? f.mdRendering.headingWeight,
 			boldColor: delta?.mdRendering?.boldColor ?? f.mdRendering.boldColor,
@@ -87,6 +89,17 @@ export function appearanceVars(a: ReturnType<typeof resolveAppearance>): Record<
 	// to the prose family — covers chat.tsx + new-session.tsx titles with
 	// zero component edits (they use the .font-title utility).
 	if (!a.sessionNameSerif) vars["--font-title"] = "var(--font-prose)";
+	// The chat measure: text centers at --lh-text-max. Media nested in a
+	// narrowed text block breaks out to the transcript column (100cqi of the
+	// column's inline-size container) unless media is constrained too.
+	const textMax = TEXT_WIDTH_SIZES[a.textWidth];
+	vars["--lh-text-max"] = textMax;
+	vars["--lh-media-max"] = a.constrainMedia ? textMax : "100%";
+	vars["--lh-media-span"] = a.constrainMedia ? "100%" : "100cqi";
+	vars["--lh-media-outset"] = a.constrainMedia ? "0px" : "calc(50% - 50cqi)";
+	// Broken-out tables hug their cells, so they center on the text's axis;
+	// inside the text they stay left-aligned with it.
+	vars["--lh-media-table-inset"] = a.constrainMedia || a.textWidth === "full" ? "0px" : "auto";
 	// Markdown rendering: heading weight + the emphasis inks (the vars
 	// were built "ready for the settings UI").
 	vars["--lh-heading-weight"] = String(a.mdRendering.headingWeight);

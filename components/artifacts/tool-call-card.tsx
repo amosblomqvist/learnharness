@@ -71,7 +71,7 @@ export function ToolCallCard({ part }: ArtifactPartProps) {
 		<details
 			data-testid="tool-call-card"
 			data-tool={tool}
-			className="group my-1 w-full max-w-2xl select-none"
+			className="group lh-measure my-1 select-none"
 		>
 			<summary className="flex cursor-pointer list-none items-center gap-2 text-xs text-muted-foreground [&::-webkit-details-marker]:hidden">
 				<span className={`font-medium uppercase tracking-wide ${failed ? "text-red-500" : ""}`}>
@@ -80,7 +80,7 @@ export function ToolCallCard({ part }: ArtifactPartProps) {
 				{arg && <span className="truncate">{arg}</span>}
 				<ChevronRight className="size-3 shrink-0 opacity-50 transition-transform group-open:rotate-90" />
 			</summary>
-			<div className="mt-2 space-y-2 rounded-xl border bg-card p-3 text-xs">
+			<div className="mt-2 max-w-2xl space-y-2 rounded-xl border bg-card p-3 text-xs">
 				{p.input != null && (
 					<div>
 						<div className="mb-1 font-medium uppercase tracking-wide text-muted-foreground">

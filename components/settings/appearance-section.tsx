@@ -33,19 +33,30 @@
 import { useEffect, useRef, useState } from "react";
 import {
 	EXTRACTION_CHUNK_TOKENS_FLOOR,
+	TEXT_WIDTH_SIZES,
+	isTextWidth,
 	resolveSettings,
 	type AppearanceSettings,
 	type GraphSettings,
+	type TextWidth,
 } from "@/src/core";
 import { MenuShell } from "@/components/menu-shell";
 import { Hint } from "@/components/ui/hint";
-import { useAppearance } from "./appearance.tsx";
+import { resolveAppearance, useAppearance } from "./appearance.tsx";
 import { FontMenuList } from "./model-menu";
 import { CommitInput, SettingsRow, ThinSelect, Toggle } from "./controls.tsx";
 
 /** The factory reading family — the DEFAULT row's identity (unset =
  *  this). Exported for tests. */
 export const DEFAULT_READING_FONT = "Source Sans 3";
+
+/** The Text width options, widest first. */
+const TEXT_WIDTH_LABELS: Record<TextWidth, string> = {
+	full: "Full",
+	xl: "Large",
+	lg: "Medium",
+	md: "Small",
+};
 
 /** The dev-browser fallback list (queryLocalFonts is absent there):
  *  the app's own knowns plus a handful of ubiquitous macOS families,
@@ -99,6 +110,7 @@ export function AppearanceSection({
 }) {
 	const { appearance: resolved } = useAppearance();
 	const md = appearance?.mdRendering;
+	const textWidth = resolveAppearance(appearance).textWidth;
 
 	// The font dropdown's open state + its enumeration cache. undefined =
 	// not enumerated yet (desktop: click-bound queryLocalFonts pending);
@@ -286,6 +298,39 @@ export function AppearanceSection({
 						if (!Number.isFinite(n)) return; // bad input: no write, factory stays
 						onSectionChange({ ...appearance, proseFontSize: Math.min(24, Math.max(12, Math.round(n))) });
 					}}
+				/>
+			</SettingsRow>
+			<SettingsRow
+				label="Text width"
+				hint={textWidth === "full" ? "Full column" : TEXT_WIDTH_SIZES[textWidth]}
+				testid="row-text-width"
+			>
+				<ThinSelect
+					value={textWidth}
+					ariaLabel="text width"
+					testid="select-text-width"
+					onChange={(v) => {
+						if (isTextWidth(v)) onSectionChange({ ...appearance, textWidth: v });
+					}}
+				>
+					{(Object.keys(TEXT_WIDTH_LABELS) as TextWidth[]).map((w) => (
+						<option key={w} value={w}>
+							{TEXT_WIDTH_LABELS[w]}
+						</option>
+					))}
+				</ThinSelect>
+			</SettingsRow>
+			<SettingsRow
+				label="Limit media width"
+				hint="Off = diagrams, figures, code, and tables use the full column"
+				testid="row-constrain-media"
+				dimmed={textWidth === "full"}
+			>
+				<Toggle
+					checked={appearance?.constrainMedia ?? false}
+					label="limit media width"
+					disabled={textWidth === "full"}
+					onChange={(on) => onSectionChange({ ...appearance, constrainMedia: on })}
 				/>
 			</SettingsRow>
 			<SettingsRow label="Session names in serif" testid="row-session-serif">

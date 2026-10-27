@@ -105,6 +105,8 @@ describe("parseAppearanceSettingsBody", () => {
 			fontFamily: "Some Font",
 			proseFontSize: 20,
 			sessionNameSerif: false,
+			textWidth: "lg",
+			constrainMedia: true,
 			mdRendering: { headingWeight: 700, boldColor: "#ff8800", italicColor: null },
 		});
 		assert.ok(r.ok);
@@ -114,6 +116,8 @@ describe("parseAppearanceSettingsBody", () => {
 			fontFamily: "Some Font",
 			proseFontSize: 20,
 			sessionNameSerif: false,
+			textWidth: "lg",
+			constrainMedia: true,
 			mdRendering: { headingWeight: 700, boldColor: "#ff8800", italicColor: null },
 		});
 	});
@@ -128,6 +132,10 @@ describe("parseAppearanceSettingsBody", () => {
 			{ proseFontSize: 30 },
 			{ proseFontSize: 64.5 },
 			{ sessionNameSerif: 1 },
+			{ textWidth: "2xl" },
+			{ textWidth: "80rem" },
+			{ textWidth: null },
+			{ constrainMedia: "true" },
 			{ mdRendering: { headingWeight: 1000 } },
 			{ mdRendering: { boldColor: "red" } },
 		];
@@ -140,6 +148,9 @@ describe("parseAppearanceSettingsBody", () => {
 		assert.ok(parseAppearanceSettingsBody({ mdRendering: { headingWeight: 100 } }));
 		assert.ok(parseAppearanceSettingsBody({ mdRendering: { headingWeight: 900 } }));
 		assert.ok(parseAppearanceSettingsBody({ background: "#abc" }));
+		for (const textWidth of ["full", "xl", "lg", "md"]) {
+			assert.ok(parseAppearanceSettingsBody({ textWidth }).ok, textWidth);
+		}
 		// null = "the mode's default" — explicit, valid
 		assert.ok(parseAppearanceSettingsBody({ background: null, fontFamily: null }));
 	});

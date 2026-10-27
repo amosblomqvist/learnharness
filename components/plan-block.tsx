@@ -686,7 +686,7 @@ export function PlanBlock({ data, onOpen }: { data: PlanBlockData; onOpen: () =>
 			data-testid="plan-block-full"
 			aria-label="Open the full plan"
 			onClick={onOpen}
-			className="block w-full text-left"
+			className="lh-media block w-full text-left"
 		>
 			{/* pad keeps centered strokes + the glow halo inside the frame; the
 		    cap keeps node text at or below chat prose size while still filling
