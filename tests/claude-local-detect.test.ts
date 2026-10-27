@@ -29,6 +29,7 @@ const { modelCatalog, refreshConnectionCatalog, validateModelsSettings, validate
 const { isSubscriptionProvider, subscriptionConnected, connectionBackgroundAllowed } = await import("../src/agent/subscription-connections.ts");
 const { providerKeyPresent } = await import("../src/server/keys.ts");
 const { CLAUDE_LOCAL } = await import("../src/core/contracts/claude-local.ts");
+const { piModels } = await import("../src/agent/models.ts");
 
 const posix = process.platform !== "win32";
 after(() => { setClaudeQueryForTests(undefined); fs.rmSync(directory, { recursive: true, force: true }); });
@@ -41,7 +42,7 @@ function fakeBinary(dir: string, version = "2.1.311", name = "claude"): string {
 	return file;
 }
 
-type FakeQueryOptions = { account?: Record<string, unknown>; models?: Array<Record<string, unknown>>; reject?: Error; hang?: boolean };
+type FakeQueryOptions = { account?: Record<string, unknown>; models?: Array<Record<string, unknown>>; reject?: Error; hang?: boolean; gate?: Promise<void> };
 /** A fake SDK query: records the options, answers the control requests,
  *  never spawns. The iterator ends when close() is called. */
 function fakeQuery(fake: FakeQueryOptions = {}) {
@@ -53,7 +54,7 @@ function fakeQuery(fake: FakeQueryOptions = {}) {
 		const ended = new Promise<void>((resolve) => { finish = resolve; });
 		const iterator = (async function* () { await ended; })();
 		const handle = Object.assign(iterator, {
-			accountInfo: async () => { if (fake.reject) throw fake.reject; if (fake.hang) await new Promise<never>(() => {}); return fake.account ?? {}; },
+			accountInfo: async () => { if (fake.gate) await fake.gate; if (fake.reject) throw fake.reject; if (fake.hang) await new Promise<never>(() => {}); return fake.account ?? {}; },
 			supportedModels: async () => fake.models ?? [],
 			close: () => { closed++; finish(); },
 		});
@@ -249,5 +250,182 @@ describe("the status owner, the bridge and the catalog", () => {
 		setClaudeQueryForTests(fakeQuery({ reject: new Error("Please run /login first") }).query);
 		const loggedOut = await server.refreshClaudeLocal({ force: true });
 		assert.equal(loggedOut.state, "not-signed-in"); assert.match(loggedOut.error ?? "", /sign in with your Claude plan/);
+	});
+});
+
+// ─── review fixes (S1, S5–S10, S12, N0–N0d, N4) ─────────────────────────────
+
+/** An SDK-shaped error: the SDK stamps `errorClass` (and `exitCode`) on its own errors. */
+const sdkError = (message: string, fields: Record<string, unknown>) => Object.assign(new Error(message), fields);
+const PLAN = { subscriptionType: "max", apiProvider: "firstParty" };
+/** A bare id pi-ai's Anthropic catalog knows (picked at runtime, never named here). */
+const knownId = (): string => piModels().getModels("anthropic").map((m) => m.id).find((id) => !/-\d{8}$|\[1m\]$/i.test(id))!;
+async function until(predicate: () => boolean, ms = 5000): Promise<void> {
+	const end = Date.now() + ms;
+	while (!predicate()) { if (Date.now() > end) throw new Error("timed out waiting"); await new Promise((resolve) => setTimeout(resolve, 10)); }
+}
+async function readyRoute(dir: string, fake = fakeQuery({ account: PLAN, models: [{ value: "x", resolvedModel: knownId(), displayName: "X" }] })) {
+	setClaudeQueryForTests(fake.query);
+	const binary = fakeBinary(path.join(directory, dir));
+	writeSettings({ version: 1, claudeLocal: { enabled: true, binaryPath: binary } });
+	const status = await server.refreshClaudeLocal({ force: true });
+	assert.equal(status.state, "ready", status.error);
+	return { fake, binary, status };
+}
+
+describe("review fixes: detection, the version gate and the probe", () => {
+	it("S12: a native install's symlink is the launch path (its versioned target is only classified)", { skip: !posix }, () => {
+		const target = fakeBinary(path.join(directory, "s12", "versions"), "2.1.311", "2.1.311");
+		const link = path.join(directory, "s12", "bin", "claude"); fs.mkdirSync(path.dirname(link), { recursive: true }); fs.symlinkSync(target, link);
+		assert.deepEqual(server.detectClaudeBinary({ override: link }), { path: link, viaNode: false, source: "override" });
+	});
+	it("N0c: exactly the SDK's script extensions (case-sensitive) run through Node", { skip: !posix }, () => {
+		const dir = path.join(directory, "n0c"); fs.mkdirSync(dir, { recursive: true });
+		const write = (name: string) => { const file = path.join(dir, name); fs.writeFileSync(file, "#!/bin/sh\n", { mode: 0o755 }); return file; };
+		assert.equal(server.detectClaudeBinary({ override: write("cli.cjs") })?.viaNode, false);
+		assert.equal(server.detectClaudeBinary({ override: write("CLI.JS") })?.viaNode, false);
+		assert.equal(server.detectClaudeBinary({ override: write("cli.ts") })?.viaNode, true);
+		assert.equal(server.detectClaudeBinary({ override: write("cli.mjs") })?.viaNode, true);
+	});
+	it("N0d: a non-executable `claude` earlier on PATH is skipped and the search continues", { skip: !posix }, () => {
+		const blocked = path.join(directory, "n0d-a"); fs.mkdirSync(blocked, { recursive: true });
+		fs.writeFileSync(path.join(blocked, "claude"), "not a program\n", { mode: 0o644 });
+		const good = fakeBinary(path.join(directory, "n0d-b"));
+		const home = path.join(directory, "n0d-home"); fs.mkdirSync(home, { recursive: true });
+		assert.deepEqual(server.detectClaudeBinary({ env: { PATH: `${blocked}${path.delimiter}${path.dirname(good)}` } as unknown as NodeJS.ProcessEnv, home, platform: "linux" }), { path: good, viaNode: false, source: "path" });
+		assert.equal(server.detectClaudeBinary({ override: path.join(blocked, "claude") }), null);
+	});
+	it("N0: a spawn that throws synchronously resolves null instead of rejecting", async () => {
+		assert.equal(await server.claudeVersion({ path: "/no\0such/claude", viaNode: false }), null);
+	});
+	it("S10: --version settles on close (stdout drained), not on exit", { skip: !posix }, async () => {
+		const file = path.join(directory, "s10", "claude"); fs.mkdirSync(path.dirname(file), { recursive: true });
+		fs.writeFileSync(file, '#!/bin/sh\n(sleep 0.3; echo "2.1.300 (Claude Code)") &\nexit 0\n', { mode: 0o755 });
+		assert.equal(await server.claudeVersion({ path: file, viaNode: false }), "2.1.300");
+	});
+	it("N4: --version output is read up to 4 KB only", { skip: !posix }, async () => {
+		const file = path.join(directory, "n4", "claude"); fs.mkdirSync(path.dirname(file), { recursive: true });
+		fs.writeFileSync(file, '#!/bin/sh\nhead -c 8192 /dev/zero | tr "\\000" x\necho\necho "2.1.300 (Claude Code)"\n', { mode: 0o755 });
+		assert.equal(await server.claudeVersion({ path: file, viaNode: false }), null);
+	});
+	it("S7: the probe's silent prompt ends with the probe (no pending generator left behind)", async () => {
+		const fake = fakeQuery({ account: PLAN });
+		await server.probeAccount(fake.query, { path: "/x", viaNode: false, cwd: directory }, 2000);
+		const prompt = fake.calls[0]!.prompt as AsyncGenerator<never>;
+		const next = await Promise.race([prompt.next(), new Promise<"pending">((resolve) => setTimeout(() => resolve("pending"), 200))]);
+		assert.deepEqual(next, { done: true, value: undefined });
+	});
+	it("N0b + S6: failures classify on the SDK's error class, the stderr tail never reaches the status, a silent exit 1 reads as not signed in", { skip: !posix }, async () => {
+		writeSettings({ version: 1, claudeLocal: { enabled: true, binaryPath: fakeBinary(path.join(directory, "n0b")) } });
+		setClaudeQueryForTests(fakeQuery({ reject: sdkError("Claude Code process exited with code 2. stderr: oauth refresh failed for someone", { errorClass: "process_exited_nonzero", exitCode: 2 }) }).query);
+		const crashed = await server.refreshClaudeLocal({ force: true });
+		assert.equal(crashed.state, "unavailable"); assert.match(crashed.error ?? "", /exited with code 2\)$/); assert.doesNotMatch(crashed.error ?? "", /stderr|oauth|someone/);
+		setClaudeQueryForTests(fakeQuery({ reject: new Error("Unexpected token < in JSON at position 0") }).query);
+		assert.equal((await server.refreshClaudeLocal({ force: true })).state, "unavailable");
+		setClaudeQueryForTests(fakeQuery({ reject: sdkError("Claude Code process exited with code 1", { errorClass: "process_exited_nonzero", exitCode: 1 }) }).query);
+		const silent = await server.refreshClaudeLocal({ force: true });
+		assert.equal(silent.state, "not-signed-in"); assert.match(silent.error ?? "", /probably not signed in, or it could not start/);
+	});
+	it("S5: dated and [1m] ids join on the bare catalog id and keep Claude Code's id; unknown ids are reported, never invented", { skip: !posix }, async () => {
+		const bare = knownId();
+		const rows = [{ value: "a", resolvedModel: `${bare}-20261001`, displayName: "A", description: "" }, { value: "b", resolvedModel: `${bare}[1m]`, displayName: "B", description: "" }, { value: "c", resolvedModel: "unknown-model-x", displayName: "C", description: "" }];
+		const skipped: string[] = [];
+		const catalog = server.claudeLocalCatalog(rows, skipped);
+		assert.deepEqual(catalog.map((m) => m.id), [`${bare}-20261001`, `${bare}[1m]`]);
+		assert.equal(catalog[0]!.contextWindow, piModels().getModels("anthropic").find((m) => m.id === bare)!.contextWindow);
+		assert.deepEqual(skipped, ["unknown-model-x"]);
+		const { status } = await readyRoute("s5", fakeQuery({ account: PLAN, models: rows }));
+		assert.equal(status.models, 2); assert.deepEqual(status.skippedModels, ["unknown-model-x"]);
+		setClaudeQueryForTests(fakeQuery({ account: PLAN, models: [rows[2]!] }).query);
+		const none = await server.refreshClaudeLocal({ force: true });
+		assert.equal(none.state, "unavailable"); assert.match(none.error ?? "", /skipped: unknown-model-x/);
+	});
+});
+
+describe("review fixes: the status owner", () => {
+	const route = () => new Request("http://localhost:3000/api/claude-local", { headers: { origin: "http://localhost:3000", "x-learnharness-subscriptions": "1" } });
+
+	it("S1: a transient probe failure keeps the last ready status, its revision and live runs; Re-check or a definitive verdict demotes", { skip: !posix }, async () => {
+		const { status: ready } = await readyRoute("s1a");
+		const live = bridge.claudeLocalAbortController(false);
+		try {
+			const flaky = fakeQuery({ reject: sdkError("Claude Code did not finish initializing", { errorClass: "initialize_timeout" }) });
+			setClaudeQueryForTests(flaky.query);
+			const kept = await server.refreshClaudeLocal({ maxAgeMs: 0 });
+			assert.equal(flaky.calls.length, 1, "the stale status re-probed");
+			assert.equal(kept.state, "ready"); assert.equal(kept.revision, ready.revision);
+			assert.ok(!live.controller.signal.aborted); assert.ok(bridge.claudeLocalConnected());
+			const demoted = await server.refreshClaudeLocal({ force: true });
+			assert.equal(demoted.state, "unavailable"); assert.ok(live.controller.signal.aborted);
+		} finally { live.release(); }
+		await readyRoute("s1a");
+		setClaudeQueryForTests(fakeQuery({ account: { subscriptionType: "Claude API", apiProvider: "firstParty" } }).query);
+		assert.equal((await server.refreshClaudeLocal({ maxAgeMs: 0 })).state, "api-key", "a definitive verdict replaces ready without force");
+	});
+	it("S1 + N3: the pre-turn refresh never re-probes; the picker waits an hour, the card five minutes", { skip: !posix }, async () => {
+		const { fake } = await readyRoute("s1b");
+		const realNow = Date.now;
+		try {
+			const before = fake.calls.length;
+			Date.now = () => realNow() + 6 * 60_000;
+			await refreshConnectionCatalog("claude-local");
+			assert.equal(fake.calls.length, before, "the pre-turn path admits on the cached snapshot");
+			await refreshConnectionCatalog();
+			assert.equal(fake.calls.length, before, "the picker's TTL is longer");
+			assert.equal((await server.claudeLocalControlsResponse(route())).status, 200);
+			assert.equal(fake.calls.length, before + 1, "the card's status read re-probes after five minutes");
+			Date.now = () => realNow() + 61 * 60_000;
+			await refreshConnectionCatalog("claude-local");
+			assert.equal(fake.calls.length, before + 1);
+			await refreshConnectionCatalog();
+			assert.equal(fake.calls.length, before + 2, "the picker re-probes after an hour");
+		} finally { Date.now = realNow; }
+	});
+	it("S8: of two overlapping probes only the latest applies; a slow older one never undoes a newer verdict or 'off'", { skip: !posix }, async () => {
+		let release!: () => void;
+		const slow = fakeQuery({ account: PLAN, models: [{ value: "x", resolvedModel: knownId(), displayName: "X" }], gate: new Promise<void>((resolve) => { release = resolve; }) });
+		setClaudeQueryForTests(slow.query);
+		writeSettings({ version: 1, claudeLocal: { enabled: true, binaryPath: fakeBinary(path.join(directory, "s8a")) } });
+		const older = server.refreshClaudeLocal({ force: true });
+		await until(() => slow.calls.length === 1);
+		setClaudeQueryForTests(fakeQuery({ account: { subscriptionType: "Claude API", apiProvider: "firstParty" } }).query);
+		writeSettings({ version: 1, claudeLocal: { enabled: true, binaryPath: fakeBinary(path.join(directory, "s8b")) } });
+		assert.equal((await server.refreshClaudeLocal()).state, "api-key");
+		release(); await older;
+		assert.equal(server.claudeLocalStatusNow().state, "api-key"); assert.equal(bridge.claudeLocalConnected(), false);
+		// Turned off while a probe is in flight: off wins.
+		let release2!: () => void;
+		const slow2 = fakeQuery({ account: PLAN, models: [{ value: "x", resolvedModel: knownId(), displayName: "X" }], gate: new Promise<void>((resolve) => { release2 = resolve; }) });
+		setClaudeQueryForTests(slow2.query);
+		const pending = server.refreshClaudeLocal({ force: true });
+		await until(() => slow2.calls.length === 1);
+		writeSettings({ version: 1, claudeLocal: { enabled: false } });
+		server.invalidateClaudeLocal();
+		release2(); await pending;
+		assert.equal(server.claudeLocalStatusNow().state, "disabled"); assert.equal(bridge.claudeLocalConnected(), false);
+	});
+	it("S9: consent and the prompt mode apply on the write with no probe and no new revision; off makes the bridge not-ready at once", { skip: !posix }, async () => {
+		const { fake, binary, status: ready } = await readyRoute("s9");
+		const calls = fake.calls.length;
+		const background = bridge.claudeLocalAbortController(true), foreground = bridge.claudeLocalAbortController(false);
+		try {
+			writeSettings({ version: 1, claudeLocal: { enabled: true, binaryPath: binary, allowBackgroundUse: false, systemPromptMode: "preset" } });
+			server.invalidateClaudeLocal();
+			assert.equal(bridge.claudeLocalBackgroundAllowed(), false); assert.equal(bridge.claudeLocalSystemPromptMode(), "preset");
+			assert.ok(background.controller.signal.aborted); assert.ok(!foreground.controller.signal.aborted);
+			const after = await server.refreshClaudeLocal();
+			assert.equal(fake.calls.length, calls, "no re-probe"); assert.equal(after.revision, ready.revision); assert.equal(after.allowBackgroundUse, false);
+			writeSettings({ version: 1, claudeLocal: { enabled: false } });
+			server.invalidateClaudeLocal();
+			assert.equal(bridge.claudeLocalConnected(), false); assert.ok(foreground.controller.signal.aborted);
+			assert.equal(server.claudeLocalStatusNow().state, "disabled"); assert.equal(bridge.claudeLocalModels().length, 0);
+			assert.equal(fake.calls.length, calls);
+		} finally { background.release(); foreground.release(); }
+	});
+	it("S12: an in-place update of the same install (a new version) keeps the revision", { skip: !posix }, async () => {
+		const { status: ready } = await readyRoute("s12b");
+		fakeBinary(path.join(directory, "s12b"), "2.1.312");
+		const updated = await server.refreshClaudeLocal({ force: true });
+		assert.equal(updated.binary?.version, "2.1.312"); assert.equal(updated.revision, ready.revision);
 	});
 });

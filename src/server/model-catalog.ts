@@ -25,14 +25,18 @@ import { NATIVE_SUBSCRIPTIONS } from "../core/contracts/subscriptions.ts";
 import { CLAUDE_LOCAL, isClaudeLocalProvider } from "../core/contracts/claude-local.ts";
 import { nativeSubscriptionId, nativeSubscriptionConnected, nativeSubscriptionModel, nativeSubscriptionModels, refreshSubscriptionModels } from "../agent/subscription-bridge.ts";
 import { claudeLocalConnected, claudeLocalModel, claudeLocalModels } from "../agent/claude-local/bridge.ts";
-import { refreshClaudeLocal } from "./claude-local.ts";
+import { CLAUDE_LOCAL_CATALOG_TTL_MS, refreshClaudeLocal } from "./claude-local.ts";
 
 export async function refreshConnectionCatalog(provider?: string): Promise<void> {
 	await Promise.all([
 		!provider || provider === "chatgpt" ? refreshChatGPTModels(piModels().getModels("openai").filter((m): m is Model<"openai-responses"> => m.api === "openai-responses")) : Promise.resolve(),
 		!provider || nativeSubscriptionId(provider) ? refreshSubscriptionModels() : Promise.resolve(),
-		// Local Claude: a cached probe within its TTL (never a spawn per call).
-		!provider || isClaudeLocalProvider(provider) ? refreshClaudeLocal().then(() => undefined) : Promise.resolve(),
+		// Local Claude: with a provider (the pre-turn path) the cached snapshot,
+		// probing only a route never probed yet; without one (the picker) a
+		// probe at most every CLAUDE_LOCAL_CATALOG_TTL_MS.
+		!provider ? refreshClaudeLocal({ maxAgeMs: CLAUDE_LOCAL_CATALOG_TTL_MS }).then(() => undefined)
+			: isClaudeLocalProvider(provider) ? refreshClaudeLocal({ cachedOnly: true }).then(() => undefined)
+				: Promise.resolve(),
 	]);
 }
 function connectionModel(provider: string, id: string): Model<Api> | undefined {

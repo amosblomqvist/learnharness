@@ -24,6 +24,7 @@ const { runningTurn } = await import("../src/server/turn-runs.ts");
 const { chatStore } = await import("../src/store/chats.ts");
 const { writeSettings } = await import("../src/store/settings.ts");
 const { fakeClaude } = await import("./claude-local-fake.ts");
+const { PUT: putSettingsSection } = await import("../app/api/settings/[section]/route.ts");
 import type { AssistantMessage } from "@earendil-works/pi-ai";
 
 const posix = process.platform !== "win32";
@@ -47,6 +48,14 @@ async function drainTurn(chatId: string, req: Request): Promise<Response> {
 }
 
 describe("a Local Claude lesson turn through the chat handler", { skip: !posix }, () => {
+	// Runs first: the route is enabled and ready but this server has never probed it.
+	it("N0e: a models write naming a ready-but-never-probed Local Claude model validates against a refreshed catalog", async () => {
+		setClaudeQueryForTests(fakeClaude([{ text: "unused" }]).query);
+		writeSettings({ version: 1, claudeLocal: { enabled: true, binaryPath: fakeBinary() } });
+		const body = JSON.stringify({ strong: { model: { provider: "claude-local", id: "claude-haiku-5-5" } } });
+		const response = await putSettingsSection(new Request("http://test/api/settings/models", { method: "PUT", headers: { "Content-Type": "application/json" }, body }), { params: Promise.resolve({ section: "models" }) });
+		assert.equal(response.status, 200, await response.text());
+	});
 	it("runs on the adapter, persists pi-shaped messages, stamps claude-local usage, and refuses when the route is off", async () => {
 		const fake = fakeClaude((blocks) => [{ text: `Reply to ${blocks.length - 1} message(s).` }]);
 		setClaudeQueryForTests(fake.query);

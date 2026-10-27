@@ -38,6 +38,7 @@ import {
 	effectiveSettings,
 	invalidateClaudeLocal,
 	promptOverrides,
+	refreshConnectionCatalog,
 	readSettingsRecord,
 	subscriptionRequestAuthorized,
 	validateAgentModelOverrides,
@@ -74,7 +75,10 @@ export async function PUT(request: Request, ctx: { params: Promise<{ section: st
 	let agentHealed: AgentSettings | undefined;
 
 	// Section-specific cross-validation (against the catalog / the prompt
-	// store) — the parsers only see shapes.
+	// store) — the parsers only see shapes. A Local Claude route that is
+	// ready but not yet probed must be known first (cached; never a probe
+	// once one has run).
+	if (section === "chat" || section === "models") await refreshConnectionCatalog("claude-local");
 	if (section === "chat") {
 		const verdict = validateChatSettings(parsed.settings as ChatSettings);
 		if (!verdict.ok) {
@@ -139,8 +143,9 @@ export async function PUT(request: Request, ctx: { params: Promise<{ section: st
 	const record = readSettingsRecord() ?? { version: 1 };
 	const next = { ...record, [section]: sectionOut };
 	writeSettingsRecord(next);
-	// Local Claude (2026-10-27): a preference change re-probes on the next
-	// status read (enable/disable, a new path) — never on this request.
+	// Local Claude (2026-10-27): applied now, never a probe on this request —
+	// off / consent / prompt mode reach the bridge synchronously; turning it
+	// on or a new path re-probes on the next status read.
 	if (section === "claudeLocal") invalidateClaudeLocal();
 	return Response.json({ settings: next });
 }

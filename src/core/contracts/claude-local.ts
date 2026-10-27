@@ -86,6 +86,9 @@ export interface ClaudeLocalStatus {
 	models: number;
 	/** Human-readable detail for the non-ready states. */
 	error?: string;
+	/** Ids Claude Code offered that pi-ai's catalog does not know (no
+	 *  context window known, so never offered) — reported in any state. */
+	skippedModels?: string[];
 	/** ISO time of the last probe, null before the first. */
 	probedAt: string | null;
 	/** Bumped on every state/catalog change (scope invalidation). */
