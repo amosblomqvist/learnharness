@@ -45,6 +45,7 @@ Future teaching sessions can read the graph instead of starting from scratch. Pr
 **[Download from learnharness.ai](https://learnharness.ai)** · [GitHub Releases](https://github.com/amosblomqvist/learnharness/releases)
 
 - **macOS (Apple Silicon):** signed and notarized DMG. Drag the app to Applications.
+- **macOS (Intel):** native x64 DMG/ZIP build support is available in this checkout. See the [desktop release guide](docs/desktop-release.md#local-unsigned-intel-build) for an unsigned local build; official signed Intel downloads require the maintainer's release gates. Apple Silicon artwork and artifact names are unchanged.
 - **Windows (x64):** run the installer. It is currently unsigned; Windows may show an “unknown publisher” or SmartScreen warning.
 - **Linux (x64):** make the AppImage executable and open it, or install the Debian/Ubuntu `.deb`.
 

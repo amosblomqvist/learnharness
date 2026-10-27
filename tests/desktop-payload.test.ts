@@ -64,6 +64,59 @@ describe("desktop standalone payload", () => {
 		});
 	});
 
+	it("removes known root build inputs without pruning runtime assets or the checkout", () => {
+		withPayload(({ root, write, run }) => {
+			const buildOnly = [
+				"tests/build.test.ts",
+				"scripts/build-helper.mjs",
+				"build/icon.icns",
+				"INTEL-MAC-PLAN.md",
+				"electron-builder.yml",
+				"electron-builder.mac-x64.yml",
+				"package-lock.json",
+				"tsconfig.json",
+				"eslint.config.mjs",
+				"postcss.config.mjs",
+				"next.config.ts",
+				"AGENTS.md",
+			];
+			for (const file of buildOnly) {
+				write(file);
+				write(path.join(STANDALONE, file));
+			}
+			write(".memory/intel-node/runtime");
+			write(".git/config");
+			const runtime = [
+				"server.js",
+				"package.json",
+				PROMPT,
+				"src/agent/prompts/teacher/20-teaching.md",
+				"docs/compaction-accounting.md",
+				"LICENSE",
+				"skills/learnharness/SKILL.md",
+				"unknown-runtime-asset.bin",
+				"node_modules/example/scripts/runtime.js",
+				"node_modules/example/tests/runtime-fixture.json",
+				"node_modules/example/tsconfig.json",
+				"node_modules/example/build/native.node",
+			];
+			for (const file of runtime) write(path.join(STANDALONE, file));
+			const result = run();
+			assert.equal(result.status, 0, String(result.stderr));
+			for (const file of buildOnly) {
+				assert.equal(fs.existsSync(path.join(root, STANDALONE, file)), false, file);
+				assert.ok(fs.existsSync(path.join(root, file)), `checkout retained: ${file}`);
+			}
+			assert.equal(fs.existsSync(path.join(root, STANDALONE, "tests")), false);
+			assert.equal(fs.existsSync(path.join(root, STANDALONE, "scripts")), false);
+			for (const file of runtime) {
+				assert.ok(fs.existsSync(path.join(root, STANDALONE, file)), `runtime retained: ${file}`);
+			}
+			assert.ok(fs.existsSync(path.join(root, ".memory", "intel-node", "runtime")));
+			assert.ok(fs.existsSync(path.join(root, ".git", "config")));
+		});
+	});
+
 	it("accepts a clean payload and is idempotent", () => {
 		withPayload(({ run }) => {
 			for (let i = 0; i < 2; i++) {

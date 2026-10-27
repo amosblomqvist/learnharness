@@ -1,0 +1,14 @@
+# Native Intel overlay; production signing/notarization stay inherited.
+# Local unsigned rehearsal: npm run desktop:dist:mac:x64:unsigned
+extends: ./electron-builder.yml
+mac:
+  # Static full-resolution artwork needs Command Line Tools, not actool/Xcode.
+  icon: build/icon.icns
+  # Builder merges arrays by concatenation. A single target object replaces
+  # the inherited arm64 array; Electron's default targets are ZIP and DMG.
+  target:
+    target: default
+    arch: x64
+  artifactName: "${productName}-${version}-x64-mac.${ext}"
+dmg:
+  artifactName: "${productName}-${version}-x64.${ext}"

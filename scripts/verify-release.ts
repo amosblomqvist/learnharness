@@ -1,8 +1,8 @@
 /**
  * verify-release.ts — the final desktop-release gate (2026-10-13).
  *
- * Runs in the release workflow's LAST job, after all three packaging jobs
- * have uploaded to the tag's single draft GitHub Release, and fails the
+ * Runs in the release workflow's LAST job, after native packaging and Mac
+ * finalization have uploaded to the tag's single draft GitHub Release, and fails the
  * workflow unless that draft holds exactly what end users and
  * electron-updater need. The workflow never publishes; this script only
  * reads (release list via the workflow's read-only token, update feeds
@@ -12,13 +12,12 @@
  * builder (app-builder-lib 26.15.3) — these are the artifacts it actually
  * emits for this repo's electron-builder.yml, not pattern guesses:
  *
- *   mac (dmg + zip, arm64; no user artifactName there):
- *     dmg    LearnHarness-<v>-arm64.dmg       + .blockmap (createBlockmap)
- *     zip    LearnHarness-<v>-arm64-mac.zip   + .blockmap (createBlockmap;
- *            Squirrel.Mac updates from the ZIP — it IS the updater payload)
- *     feed   latest-mac.yml — files[0] is the ZIP (writeUpdateInfoFiles
- *            sorts zip first) and the legacy top-level path/sha512 point
- *            at it.
+ *   mac (dmg + zip, separate arm64 and x64):
+ *     dmg    LearnHarness-<v>-<arch>.dmg       + .blockmap
+ *     zip    LearnHarness-<v>-<arch>-mac.zip   + .blockmap
+ *     feed   latest-mac.yml — the finalizer merges both native feeds with
+ *            the arm64 ZIP first and preserves its legacy path/sha512.
+ *            arm64 uses builder defaults; x64 uses explicit overlay names.
  *   win (nsis x64; artifactName "${productName}-${version}-${arch}-setup.${ext}"):
  *     exe    LearnHarness-<v>-x64-setup.exe   + .blockmap (createBlockmap)
  *     feed   latest.yml — a single file entry, the exe.
@@ -87,10 +86,10 @@ export type DraftSelection =
 	| { ok: true; release: ReleaseRecord; warnings: string[] }
 	| Failures;
 
-/** The full expected asset inventory for one version (11 files). */
+/** The full expected asset inventory for one version (15 files). */
 export type ExpectedAssets = {
 	version: string;
-	mac: { dmg: string; zip: string; feed: string };
+	mac: { arm64: { dmg: string; zip: string }; x64: { dmg: string; zip: string }; feed: string };
 	win: { exe: string; feed: string };
 	linux: { appImage: string; deb: string; feed: string };
 	/** Every asset name the draft must hold, and no others. */
@@ -119,8 +118,8 @@ export function checkVersion(version: unknown): { ok: true; version: string } | 
 /** The exact asset set the installed builder emits for this repo's config. */
 export function expectedAssets(version: string): ExpectedAssets {
 	const mac = {
-		dmg: `${PRODUCT_NAME}-${version}-arm64.dmg`,
-		zip: `${PRODUCT_NAME}-${version}-arm64-mac.zip`,
+		arm64: { dmg: `${PRODUCT_NAME}-${version}-arm64.dmg`, zip: `${PRODUCT_NAME}-${version}-arm64-mac.zip` },
+		x64: { dmg: `${PRODUCT_NAME}-${version}-x64.dmg`, zip: `${PRODUCT_NAME}-${version}-x64-mac.zip` },
 		feed: "latest-mac.yml",
 	};
 	const win = {
@@ -134,13 +133,13 @@ export function expectedAssets(version: string): ExpectedAssets {
 	};
 	// Sidecar differential-update blockmaps: emitted for dmg, mac zip and
 	// NSIS exe (createBlockmap); AppImage/deb have none in app-builder-lib 26.15.3.
-	const blockmaps = [mac.dmg, mac.zip, win.exe].map((name) => `${name}.blockmap`);
+	const blockmaps = [mac.arm64.dmg, mac.arm64.zip, mac.x64.dmg, mac.x64.zip, win.exe].map((name) => `${name}.blockmap`);
 	return {
 		version,
 		mac,
 		win,
 		linux,
-		files: [mac.dmg, mac.zip, win.exe, linux.appImage, linux.deb, ...blockmaps, mac.feed, win.feed, linux.feed],
+		files: [mac.arm64.dmg, mac.arm64.zip, mac.x64.dmg, mac.x64.zip, win.exe, linux.appImage, linux.deb, ...blockmaps, mac.feed, win.feed, linux.feed],
 	};
 }
 
@@ -255,7 +254,7 @@ export function selectDraft(releases: ReleaseRecord[], tag: string, version: str
 /** Names below were derived from these exact config shapes; drift means the
  *  expectations in this file must be re-derived against the new builder
  *  output. Failing here is deliberate: a silently stale gate is worse. */
-export function verifyConfigAssumptions(config: unknown, pkg: unknown): { ok: true } | { ok: false; errors: Issues } {
+export function verifyConfigAssumptions(config: unknown, pkg: unknown, x64Config: unknown): { ok: true } | { ok: false; errors: Issues } {
 	const errors: Issues = [];
 	const bad = (message: string) => errors.push(message);
 	if (!isPlainObject(pkg) || typeof pkg.version !== "string") bad("package.json has no string version");
@@ -272,6 +271,29 @@ export function verifyConfigAssumptions(config: unknown, pkg: unknown): { ok: tr
 		if (config.mac.artifactName != null) bad("mac.artifactName set — expected names no longer hold");
 		if (!sameTargets(config.mac.target, [{ target: "dmg", arch: ["arm64"] }, { target: "zip", arch: ["arm64"] }])) {
 			bad(`mac.target changed (${JSON.stringify(config.mac.target)}) — expected names no longer hold`);
+		}
+	}
+	if (isPlainObject(config.dmg) && config.dmg.artifactName != null) {
+		bad("base dmg.artifactName set — expected names no longer hold");
+	}
+	if (!isPlainObject(x64Config) || x64Config.extends !== "./electron-builder.yml") {
+		bad("electron-builder.mac-x64.yml must extend ./electron-builder.yml");
+	} else {
+		if (Object.keys(x64Config).some((key) => !["extends", "mac", "dmg"].includes(key))) {
+			bad("x64 overlay has unverified top-level overrides — expected names no longer hold");
+		}
+		// Builder concatenates target arrays; the scalar default target replaces
+		// arm64 targets and expands to the pinned Mac framework's ZIP and DMG.
+		if (!isPlainObject(x64Config.mac) ||
+			x64Config.mac.artifactName !== "${productName}-${version}-x64-mac.${ext}" ||
+			!isPlainObject(x64Config.mac.target) || x64Config.mac.target.target !== "default" || x64Config.mac.target.arch !== "x64" ||
+			Object.keys(x64Config.mac).some((key) => !["icon", "artifactName", "target"].includes(key))) {
+			bad("x64 mac naming/targets changed — expected names no longer hold");
+		}
+		if (!isPlainObject(x64Config.dmg) ||
+			x64Config.dmg.artifactName !== "${productName}-${version}-x64.${ext}" ||
+			Object.keys(x64Config.dmg).some((key) => key !== "artifactName")) {
+			bad("x64 dmg naming changed — expected names no longer hold");
 		}
 	}
 	if (!isPlainObject(config.win)) bad("win section missing");
@@ -315,7 +337,7 @@ export function verifyAssets(release: ReleaseRecord, expected: ExpectedAssets): 
 		else seen.set(asset.name, asset);
 		// Checked for EVERY entry, duplicates included — fail closed.
 		if (asset.state !== "uploaded") errors.push(`${asset.name}: state is "${asset.state}", not "uploaded"`);
-		if (!(asset.size > 0)) errors.push(`${asset.name}: zero-size asset (size=${asset.size})`);
+		if (!Number.isSafeInteger(asset.size) || asset.size <= 0) errors.push(`${asset.name}: zero-size or invalid asset size (size=${asset.size})`);
 		if (!expected.files.includes(asset.name)) {
 			errors.push(`${asset.name}: unexpected asset — not in the expected set (stale name from an older run?)`);
 		}
@@ -331,7 +353,7 @@ export function verifyAssets(release: ReleaseRecord, expected: ExpectedAssets): 
 // Update-feed (latest*.yml) verification
 // ---------------------------------------------------------------------------
 
-type FeedExpectation = {
+export type FeedExpectation = {
 	file: string;
 	/** Every files[].url the feed must reference — exactly these, no more. */
 	urls: string[];
@@ -341,7 +363,7 @@ type FeedExpectation = {
 
 export function feedExpectations(expected: ExpectedAssets): FeedExpectation[] {
 	return [
-		{ file: expected.mac.feed, urls: [expected.mac.zip, expected.mac.dmg], first: expected.mac.zip },
+		{ file: expected.mac.feed, urls: [expected.mac.arm64.zip, expected.mac.arm64.dmg, expected.mac.x64.zip, expected.mac.x64.dmg], first: expected.mac.arm64.zip },
 		{ file: expected.win.feed, urls: [expected.win.exe] },
 		{ file: expected.linux.feed, urls: [expected.linux.appImage, expected.linux.deb] },
 	];
@@ -352,10 +374,10 @@ export function feedExpectations(expected: ExpectedAssets): FeedExpectation[] {
  *  updater could be steered with. */
 export function isPlainAssetName(url: unknown): url is string {
 	return typeof url === "string" && url !== "" && url !== "." && url !== ".." &&
-		!url.includes("/") && !url.includes("\\") && !url.includes(":") && !url.includes("?") && !url.includes("#") && !url.startsWith("~");
+		!/[\\/:?#%\x00-\x20\x7f]/.test(url) && !url.startsWith("~");
 }
 
-const SHA512_BASE64 = /^[A-Za-z0-9+/]{80,}={0,2}$/;
+const SHA512_BASE64 = /^[A-Za-z0-9+/]{86}==$/;
 
 type FeedFileEntry = { url: string; sha512: string; size: number };
 
@@ -364,9 +386,18 @@ export function verifyMetadataFiles(
 	release: ReleaseRecord,
 	expected: ExpectedAssets,
 ): { ok: true } | { ok: false; errors: Issues } {
+	return verifyUpdateFeeds(files, release, expected.version, feedExpectations(expected));
+}
+
+/** Shared strict metadata gate for native staging feeds and the combined release. */
+export function verifyUpdateFeeds(
+	files: Record<string, string>,
+	release: ReleaseRecord,
+	version: string,
+	expectations: FeedExpectation[],
+): { ok: true } | Failures {
 	const errors: Issues = [];
 	const byName = new Map(release.assets.map((asset) => [asset.name, asset]));
-	const expectations = feedExpectations(expected);
 
 	for (const expectation of expectations) {
 		const content = files[expectation.file];
@@ -385,8 +416,8 @@ export function verifyMetadataFiles(
 			errors.push(`${expectation.file}: top level is not a mapping`);
 			continue;
 		}
-		if (info.version !== expected.version) {
-			errors.push(`${expectation.file}: version is ${JSON.stringify(info.version)}, expected "${expected.version}"`);
+		if (info.version !== version) {
+			errors.push(`${expectation.file}: version is ${JSON.stringify(info.version)}, expected "${version}"`);
 		}
 		if (!Array.isArray(info.files) || info.files.length === 0) {
 			errors.push(`${expectation.file}: no files[] entries`);
@@ -406,12 +437,12 @@ export function verifyMetadataFiles(
 				malformed = true;
 				return;
 			}
-			if (typeof sha512 !== "string" || !SHA512_BASE64.test(sha512)) {
+			if (typeof sha512 !== "string" || !SHA512_BASE64.test(sha512) || Buffer.from(sha512, "base64").toString("base64") !== sha512) {
 				errors.push(`${expectation.file}: files[${index}] (${entry.url}): sha512 is not a base64 digest`);
 				malformed = true;
 				return;
 			}
-			if (typeof size !== "number" || !Number.isInteger(size) || size <= 0) {
+			if (typeof size !== "number" || !Number.isSafeInteger(size) || size <= 0) {
 				errors.push(`${expectation.file}: files[${index}] (${entry.url}): size must be a positive integer`);
 				malformed = true;
 				return;
@@ -488,19 +519,18 @@ function loadReleases(file: string): { ok: true; releases: ReleaseRecord[] } | {
 
 /** Reads package.json (version) + electron-builder.yml from the cwd — the
  *  workflow checks out the tagged revision before running the gate. */
-function loadRepoConfig(): { ok: true; pkg: unknown; config: unknown } | { ok: false; errors: Issues } {
+export function loadRepoConfig(): { ok: true; pkg: unknown; config: unknown; x64Config: unknown } | Failures {
 	const pkg = readJson("package.json");
 	if (!pkg.ok) return { ok: false, errors: [pkg.error] };
-	let configSource: string;
 	try {
-		configSource = fs.readFileSync("electron-builder.yml", "utf8");
+		return {
+			ok: true,
+			pkg: pkg.value,
+			config: yaml.load(fs.readFileSync("electron-builder.yml", "utf8")),
+			x64Config: yaml.load(fs.readFileSync("electron-builder.mac-x64.yml", "utf8")),
+		};
 	} catch (error) {
-		return { ok: false, errors: [`cannot read electron-builder.yml: ${String(error)}`] };
-	}
-	try {
-		return { ok: true, pkg: pkg.value, config: yaml.load(configSource) };
-	} catch (error) {
-		return { ok: false, errors: [`electron-builder.yml does not parse as YAML: ${String(error)}`] };
+		return { ok: false, errors: [`cannot load packaging configuration: ${String(error)}`] };
 	}
 }
 
@@ -529,7 +559,7 @@ function parseArgs(argv: string[]): { ok: true; command: string; positional: str
 
 /** Tag ↔ version agreement + release-list load, shared by both commands. */
 function startGate(argv: string[]):
-	| { ok: true; tag: string; version: string; releases: ReleaseRecord[]; config: unknown; pkg: unknown; positional: string[] }
+	| { ok: true; tag: string; version: string; releases: ReleaseRecord[]; config: unknown; x64Config: unknown; pkg: unknown; positional: string[] }
 	| { ok: false; errors: Issues } {
 	const parsed = parseArgs(argv);
 	if (!parsed.ok) return parsed;
@@ -552,6 +582,7 @@ function startGate(argv: string[]):
 		version: versioned.version,
 		releases: releases.releases,
 		config: repo.config,
+		x64Config: repo.x64Config,
 		pkg: repo.pkg,
 		positional: parsed.positional,
 	};
@@ -581,7 +612,7 @@ function main(argv: string[]): number {
 	const metadataDir = start.positional[1];
 	if (metadataDir == null) return fail([usage()]);
 	const errors: Issues = [];
-	const assumptions = verifyConfigAssumptions(start.config, start.pkg);
+	const assumptions = verifyConfigAssumptions(start.config, start.pkg, start.x64Config);
 	if (!assumptions.ok) errors.push(...assumptions.errors);
 	const selection = selectDraft(start.releases, start.tag, start.version);
 	if (!selection.ok) return fail([...errors, ...selection.errors]);

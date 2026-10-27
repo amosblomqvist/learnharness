@@ -6,9 +6,9 @@
  * outside that the docs require us to copy: public/ and .next/static/.
  * This script finishes the job and sanity-checks the result — including
  * the exclusion that keeps the repo's real data/ OUT of the bundle
- * (see next.config.ts outputFileTracingExcludes). It also removes two
- * exact build-only paths the tracer sweeps in: old installers and the
- * development Electron runtime. Broad trace exclusions break externals.
+ * (see next.config.ts outputFileTracingExcludes). It also removes exact
+ * build-only paths the tracer sweeps in: installers, development Electron,
+ * tests, tooling, and build configuration. Broad exclusions break externals.
  */
 import * as fs from "node:fs";
 import * as path from "node:path";
@@ -61,15 +61,30 @@ for (const secret of ["auth.json", ...subscriptionSecrets, ".env", ".env.local"]
 	}
 }
 
-// 2c) Payload curation (2026-10-11): the trace sweep can copy repo-root
-// dist/ (previous installers, recursively) and the development Electron
-// runtime (the demo helper's dev-only require). Neither belongs in the
-// server: packaged helpers use process.execPath, the app's own binary.
-// Remove ONLY these standalone-root paths AFTER tracing — excluding a
-// generic dist/** earlier broke pi-ai / pi-agent-core's runtime dist/.
-// Never touch ROOT/dist or ROOT/node_modules/electron (the running app
-// and the build runtime); native canvas/resvg packages stay untouched.
-for (const extra of ["dist", path.join("node_modules", "electron")]) {
+// 2c) Remove known build-only paths from the standalone ROOT after tracing.
+// Packaged helpers use process.execPath, not the development Electron copy.
+// Next's generated server.js embeds its production config; source config,
+// test suites, and checkout tooling are not runtime inputs.
+// Never prune matching names inside dependencies: broad dist/** exclusions
+// previously broke pi-ai / pi-agent-core. Prompts, docs/licenses, and unknown
+// assets stay intact. The checkout (including .memory toolchain/evidence)
+// is never modified by this curation.
+for (const extra of [
+	"dist",
+	path.join("node_modules", "electron"),
+	"tests",
+	"scripts",
+	"build",
+	"INTEL-MAC-PLAN.md",
+	"electron-builder.yml",
+	"electron-builder.mac-x64.yml",
+	"package-lock.json",
+	"tsconfig.json",
+	"eslint.config.mjs",
+	"postcss.config.mjs",
+	"next.config.ts",
+	"AGENTS.md",
+]) {
 	const target = path.join(STANDALONE, extra);
 	if (exists(target)) {
 		fs.rmSync(target, { recursive: true, force: true });
