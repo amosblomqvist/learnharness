@@ -46,6 +46,9 @@ describe("resolveSettings", () => {
 		// budget — absent record resolves the factory 4096 (halved back
 		// from the digest-era 8192, owner, 2026-10-13)
 		assert.deepEqual(eff.graph, { enabled: true, rendering: true, extractionChunkTokens: 4096 });
+		// Local Claude (2026-10-27): opt-in, consent on, custom prompt, no path.
+		assert.deepEqual(eff.claudeLocal, { enabled: false, allowBackgroundUse: true, systemPromptMode: "custom" });
+		assert.deepEqual(resolveSettings({ version: 1, claudeLocal: { enabled: true, binaryPath: "/x/claude" } }).claudeLocal, { enabled: true, allowBackgroundUse: true, systemPromptMode: "custom", binaryPath: "/x/claude" });
 	});
 
 	it("explicit record values win over every factory default", () => {

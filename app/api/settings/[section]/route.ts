@@ -38,6 +38,7 @@ import {
 	effectiveSettings,
 	promptOverrides,
 	readSettingsRecord,
+	validateAgentModelOverrides,
 	validateChatSettings,
 	validateModelsSettings,
 	writeSettingsRecord,
@@ -83,6 +84,10 @@ export async function PUT(request: Request, ctx: { params: Promise<{ section: st
 		}
 	}
 	if (section === "agent") {
+		// Local Claude is conversation-only (owner, 2026-10-27): a background
+		// role can never be pinned to it.
+		const verdict = validateAgentModelOverrides((parsed.settings as AgentSettings).models);
+		if (!verdict.ok) return Response.json({ error: verdict.error }, { status: 400 });
 		// Orphan-heal (contract fix, interlude 2026-09-26): an ON switch
 		// whose override file is gone (or whose segment left the source
 		// tree) is healed to OFF (key dropped) inside this write — never a

@@ -10,6 +10,7 @@ import {
 	modelCatalog,
 	rolePinsFor,
 	toModelDto,
+	validateAgentModelOverrides,
 	validateChatSettings,
 	validateModelsSettings,
 } from "../src/server/model-catalog.ts";
@@ -199,6 +200,18 @@ describe("the models-section validation gate", () => {
 			validateModelsSettings({ vision: { model: { provider: "openrouter", id: "nope/nope" } } }).ok,
 			false,
 		);
+	});
+
+	it("Local Claude is conversation-only (owner, 2026-10-27): helper slots and role overrides refuse it", () => {
+		for (const name of ["cheap", "vision"] as const) {
+			const verdict = validateModelsSettings({ [name]: { model: { provider: "claude-local", id: "claude-opus-5-5" } } });
+			assert.equal(verdict.ok, false, name);
+			assert.match((verdict as { error: string }).error, /conversation \(strong\) slot only/);
+		}
+		const roles = validateAgentModelOverrides({ researcher: { model: { provider: "claude-local", id: "claude-opus-5-5" } } });
+		assert.equal(roles.ok, false); assert.match((roles as { error: string }).error, /conversation \(strong\) slot only/);
+		assert.equal(validateAgentModelOverrides({ researcher: { model: { provider: "openrouter", id: "z-ai/glm-5.3-flash" } } }).ok, true);
+		assert.equal(validateAgentModelOverrides(undefined).ok, true);
 	});
 
 	it("thinking levels never reject a slot write (owner, interlude 2026-09-22)", () => {

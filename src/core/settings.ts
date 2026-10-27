@@ -31,6 +31,7 @@ import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import { AUTH_PROVIDER_KEYS } from "./auth-keys.ts";
 import type { ModelRole } from "../../config.ts";
 import type { ChatSettings } from "./contracts/chat.ts";
+import type { ClaudeLocalSystemPromptMode } from "./contracts/claude-local.ts";
 import type { SearchEngineId } from "./search.ts";
 
 /** The schema version this code understands. Bump ONLY for breaking shape
@@ -356,6 +357,18 @@ export interface CompactionSettings {
 	thresholdTokens?: number;
 }
 
+/** The Local Claude route's preferences (contracts/claude-local.ts, owner
+ *  2026-10-27): opt-in, background consent, system-prompt mode and an
+ *  optional explicit path to the user's Claude Code install. NOTHING
+ *  credential-shaped ever lives here — Claude Code keeps its own login. */
+export interface ClaudeLocalSettings {
+	enabled?: boolean;
+	allowBackgroundUse?: boolean;
+	systemPromptMode?: ClaudeLocalSystemPromptMode;
+	/** An explicit binary path (overrides PATH / known-location detection). */
+	binaryPath?: string;
+}
+
 /** THE record. Every section optional (delta); unknown top-level keys are
  *  preserved verbatim by the sanitizer (forward-compat with newer records). */
 export interface UserSettings {
@@ -367,6 +380,7 @@ export interface UserSettings {
 	appearance?: AppearanceSettings;
 	graph?: GraphSettings;
 	compaction?: CompactionSettings;
+	claudeLocal?: ClaudeLocalSettings;
 	[key: string]: unknown;
 }
 
@@ -392,6 +406,7 @@ export interface FactorySettings {
 	};
 	graph: Required<GraphSettings>;
 	compaction: Required<CompactionSettings>;
+	claudeLocal: Required<Omit<ClaudeLocalSettings, "binaryPath">>;
 }
 
 export const FACTORY_SETTINGS: FactorySettings = {
@@ -407,6 +422,10 @@ export const FACTORY_SETTINGS: FactorySettings = {
 	},
 	graph: { enabled: true, rendering: true, extractionChunkTokens: 4096 },
 	compaction: { thresholdTokens: 150_000 },
+	// Local Claude is OPT-IN (owner, 2026-10-27): API keys / cloud providers
+	// stay the default; background consent defaults ON like the other
+	// connections; the custom prompt is the default mode.
+	claudeLocal: { enabled: false, allowBackgroundUse: true, systemPromptMode: "custom" },
 };
 
 /** The chunk budget's validated floor (GraphSettings.extractionChunkTokens
@@ -600,6 +619,24 @@ function sanitizeCompaction(raw: Record<string, unknown>): CompactionSettings {
 	return out;
 }
 
+/** A binary path is a plain non-empty string without control characters;
+ *  anything else drops (the probe reports "not found" for a bad path). */
+export function isSafeBinaryPath(value: unknown): value is string {
+	return typeof value === "string" && value.trim().length > 0 && value.length <= 4096 && !/[\x00-\x1f\x7f]/.test(value);
+}
+export const CLAUDE_LOCAL_SYSTEM_PROMPT_MODES: readonly ClaudeLocalSystemPromptMode[] = ["custom", "preset"];
+
+function sanitizeClaudeLocal(raw: Record<string, unknown>): ClaudeLocalSettings {
+	const out: ClaudeLocalSettings = {};
+	const enabled = boolOrDrop(raw.enabled);
+	if (enabled !== undefined) out.enabled = enabled;
+	const background = boolOrDrop(raw.allowBackgroundUse);
+	if (background !== undefined) out.allowBackgroundUse = background;
+	if (typeof raw.systemPromptMode === "string" && (CLAUDE_LOCAL_SYSTEM_PROMPT_MODES as readonly string[]).includes(raw.systemPromptMode)) out.systemPromptMode = raw.systemPromptMode as ClaudeLocalSystemPromptMode;
+	if (isSafeBinaryPath(raw.binaryPath)) out.binaryPath = raw.binaryPath.trim();
+	return out;
+}
+
 /**
  * Coerce arbitrary JSON (disk file, network body) into a valid delta record:
  * known fields validated strictly (invalid ones drop/clamp per module doc),
@@ -624,6 +661,9 @@ export function sanitizeUserSettings(raw: unknown): UserSettings | null {
 	if (r.models !== null && typeof r.models === "object" && !Array.isArray(r.models)) {
 		const models = sanitizeModels(r.models as Record<string, unknown>);
 		if (Object.keys(models).length) out.models = models;
+	}
+	if (r.claudeLocal !== null && typeof r.claudeLocal === "object" && !Array.isArray(r.claudeLocal)) {
+		out.claudeLocal = sanitizeClaudeLocal(r.claudeLocal as Record<string, unknown>);
 	}
 	if (r.graph !== null && typeof r.graph === "object" && !Array.isArray(r.graph)) {
 		out.graph = sanitizeGraph(r.graph as Record<string, unknown>);

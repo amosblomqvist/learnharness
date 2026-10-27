@@ -22,6 +22,7 @@ import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import { piModels } from "../agent/models.ts";
 import { chatGPTConnected, chatGPTModel, chatGPTModels, refreshChatGPTModels } from "../agent/chatgpt-bridge.ts";
 import { NATIVE_SUBSCRIPTIONS } from "../core/contracts/subscriptions.ts";
+import { CLAUDE_LOCAL, isClaudeLocalProvider } from "../core/contracts/claude-local.ts";
 import { nativeSubscriptionId, nativeSubscriptionConnected, nativeSubscriptionModel, nativeSubscriptionModels, refreshSubscriptionModels } from "../agent/subscription-bridge.ts";
 
 export async function refreshConnectionCatalog(provider?: string): Promise<void> {
@@ -255,10 +256,30 @@ export function validateModelsSettings(settings: ModelsSettings): SettingsValida
 	return { ok: true };
 }
 
+/** Local Claude (owner-approved v1 scope, 2026-10-27): the route serves the
+ *  CONVERSATION only — the strong slot and a chat's own model. Helper tiers
+ *  (cheap/vision) and background-role overrides refuse it at write time so
+ *  a sub-agent can never be pinned to it; the pickers hide it there too. */
+export function claudeLocalAllowedFor(slot: ModelSlotName | "role"): boolean {
+	return slot === "strong";
+}
+const CLAUDE_LOCAL_SLOT_ERROR = `${CLAUDE_LOCAL.label} is available for the conversation (strong) slot only — helper roles need an API-key or other connection`;
+
+/** The agent section's role overrides (PUT /api/settings/agent): the
+ *  same conversation-only rule as the slots. */
+export function validateAgentModelOverrides(models: Partial<Record<BackgroundModelRole, { model?: { provider: string; id: string } }>> | undefined): SettingsValidation {
+	for (const role of BACKGROUND_MODEL_ROLES) {
+		const override = models?.[role];
+		if (override?.model && isClaudeLocalProvider(override.model.provider) && !claudeLocalAllowedFor("role")) return { ok: false, error: CLAUDE_LOCAL_SLOT_ERROR };
+	}
+	return { ok: true };
+}
+
 function validateSlotSpec(name: ModelSlotName, slot: { model?: { provider: string; id: string }; thinkingLevel?: ThinkingLevel }): SettingsValidation {
 	const providers = connectionProviderIds();
 	if (slot.model) {
 		const { provider, id } = slot.model;
+		if (isClaudeLocalProvider(provider) && !claudeLocalAllowedFor(name)) return { ok: false, error: CLAUDE_LOCAL_SLOT_ERROR };
 		if (!providers.includes(provider)) {
 			return { ok: false, error: `Unknown provider "${provider}" — configured: ${providers.join(", ")}` };
 		}

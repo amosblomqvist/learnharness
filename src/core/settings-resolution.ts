@@ -33,6 +33,7 @@ import {
 	ROLE_SLOT,
 	type AgentSettings,
 	type BackgroundModelRole,
+	type ClaudeLocalSettings,
 	type FactorySettings,
 	type GeneralSettings,
 	type CompactionSettings,
@@ -93,6 +94,9 @@ export interface EffectiveSettings {
 	/** Compaction (owner round 14): resolved concrete — absent record
 	 *  section resolves to the factory 150k. */
 	compaction: Required<CompactionSettings>;
+	/** Local Claude (owner, 2026-10-27): resolved concrete; binaryPath stays
+	 *  optional (absent = detect on PATH and the known locations). */
+	claudeLocal: Required<Omit<ClaudeLocalSettings, "binaryPath">> & { binaryPath?: string };
 }
 
 /** The conversation pair's chain (BYOK, owner 2026-09-22): the chat's own
@@ -215,6 +219,12 @@ export function resolveSettings(record: UserSettings | null): EffectiveSettings 
 		},
 		compaction: {
 			thresholdTokens: record?.compaction?.thresholdTokens ?? FACTORY_SETTINGS.compaction.thresholdTokens,
+		},
+		claudeLocal: {
+			enabled: record?.claudeLocal?.enabled ?? FACTORY_SETTINGS.claudeLocal.enabled,
+			allowBackgroundUse: record?.claudeLocal?.allowBackgroundUse ?? FACTORY_SETTINGS.claudeLocal.allowBackgroundUse,
+			systemPromptMode: record?.claudeLocal?.systemPromptMode ?? FACTORY_SETTINGS.claudeLocal.systemPromptMode,
+			...(record?.claudeLocal?.binaryPath ? { binaryPath: record.claudeLocal.binaryPath } : {}),
 		},
 	};
 }

@@ -83,6 +83,14 @@ describe("sanitizeUserSettings", () => {
 		assert.deepEqual(sanitizeUserSettings(record), record);
 	});
 
+	it("claudeLocal (Local Claude route, 2026-10-27): booleans, the prompt-mode enum and a plain path survive; junk drops; nothing credential-shaped is modelled", () => {
+		const out = sanitizeUserSettings({ version: 1, claudeLocal: { enabled: true, allowBackgroundUse: false, systemPromptMode: "preset", binaryPath: "/opt/homebrew/bin/claude" } });
+		assert.deepEqual(out?.claudeLocal, { enabled: true, allowBackgroundUse: false, systemPromptMode: "preset", binaryPath: "/opt/homebrew/bin/claude" });
+		const junk = sanitizeUserSettings({ version: 1, claudeLocal: { enabled: "yes", allowBackgroundUse: 1, systemPromptMode: "claude_code", binaryPath: "bad\u0000path", token: "sk-ant-oat-never" } });
+		assert.deepEqual(junk?.claudeLocal, {}, "unknown and malformed keys drop — a token-shaped key has nowhere to land");
+		assert.deepEqual(FACTORY_SETTINGS.claudeLocal, { enabled: false, allowBackgroundUse: true, systemPromptMode: "custom" }, "opt-in by default");
+	});
+
 	it("null and non-objects → null (first-boot semantics), never throws", () => {
 		assert.equal(sanitizeUserSettings(null), null);
 		assert.equal(sanitizeUserSettings("junk"), null);
