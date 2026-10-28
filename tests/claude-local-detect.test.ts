@@ -12,7 +12,9 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { after, describe, it } from "node:test";
 
-const directory = fs.mkdtempSync(path.join(os.tmpdir(), "lh-claude-local-"));
+// Canonical from the start: detection reports a cli.js by its realpath, and
+// os.tmpdir() can sit under a symlink (macOS: /var → /private/var).
+const directory = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "lh-claude-local-")));
 process.env.LH_DATA_DIR = path.join(directory, "data");
 process.env.LH_AUTH_FILE = path.join(directory, "auth.json");
 delete process.env.LH_DESKTOP_SERVER; delete process.env.LH_DESKTOP_API_SECRET;
