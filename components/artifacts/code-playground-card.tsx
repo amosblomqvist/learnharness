@@ -18,6 +18,7 @@
 import { useContext, useEffect, useMemo, useRef, useState } from "react";
 import { ChatActionsContext } from "@/components/chat";
 import { CodeEditor } from "@/components/code-editor";
+import { MessageResponse } from "@/components/ai-elements/message";
 import type { ArtifactPartProps } from "@/src/core";
 import {
 	RUNNER_LANGUAGES,
@@ -278,8 +279,10 @@ export function CodePlaygroundCard({ part }: ArtifactPartProps) {
 				<span className="ml-auto" />
 			</div>
 
+			{/* The teacher writes markdown: inline code and $math$ must render here,
+			    not show as backticks and dollar signs in a compact card. */}
 			<div className="border-b border-[var(--border)] px-3 py-2.5 text-[14.5px] text-[#cfcfcf]">
-				{input.task}
+				<MessageResponse>{input.task}</MessageResponse>
 			</div>
 
 			{req.editable ? (

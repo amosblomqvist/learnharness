@@ -30,7 +30,9 @@ What makes a good card:
 - **language**: the one the lesson actually uses, as a plain lowercase word (`c`, `cpp`, `rust`,
   `csharp`, `go`, `java`, `kotlin`, `python`, `javascript`, `typescript`, `sql`, `ruby`, `php`, …).
   The card tells the learner which engine is available; you do not need to.
-- **task**: one imperative sentence. Say what to implement or fix, not how.
+- **task**: one imperative sentence. Say what to implement or fix, not how. The card renders markdown,
+  so inline code for identifiers (``double(n)``) and `$math$` both display properly — but keep it to one
+  line; display maths and multi-paragraph prompts belong in the teaching prose above the card.
 - **starter**: code that already parses and runs, or is one edit away. A void is a bad teacher; an
   almost-right scaffold is a good one.
 - **checks**: when correctness is mechanical, put the assertion in `checks` rather than asserting
