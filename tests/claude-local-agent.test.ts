@@ -338,7 +338,7 @@ describe("review fixes (S11, S13, S15, N1, N5, N13–N17)", () => {
 	const assistants = (messages: unknown[]) => messages.filter((m) => (m as { role: string }).role === "assistant") as AssistantMessage[];
 	const readyStatus = (revision: number) => ({ providerId: "claude-local" as const, enabled: true, allowBackgroundUse: false, systemPromptMode: "custom" as const, state: "ready" as const, binaryPath: "", binary: { path: "/fake/claude", version: "2.1.311", source: "path" as const }, account: { subscriptionType: "max" }, models: 1, probedAt: null, revision });
 
-	it("S11: a Claude Code set up to bill an API key is refused at system/init (masked plan-login wording) and the route goes not-ready", async () => {
+	it("S11: a Claude Code set up to bill an API key is refused before the turn (masked plan-login wording) and the route goes not-ready", async () => {
 		const noted: string[] = [];
 		const { messages, events, fake } = await runAgent([{ text: "never streamed" }], { fake: { apiKeySource: "ANTHROPIC_API_KEY" }, runtime: { noteApiKeySource: (source) => { noted.push(source); } } });
 		const replies = assistants(messages);
@@ -611,7 +611,7 @@ describe("external review: the child's stderr is never persisted (P1)", () => {
 describe("external review: fake fidelity and the MCP handshake (P2)", () => {
 	const roles = (messages: unknown[]) => messages.map((m) => (m as { role: string }).role);
 
-	it("the app's tool server not reported connected at init refuses the turn before any model call (failed or absent)", async () => {
+	it("the app's tool server not reported connected refuses the turn before any model call (failed, pending or absent)", async () => {
 		for (const mcpStatus of ["failed", "pending", "absent"]) {
 			const logged: string[] = [];
 			const original = console.error;
@@ -831,5 +831,61 @@ describe("external review round 3: unstreamed echoes rebuild each block exactly 
 		const closed: unknown[] = [];
 		for await (const event of runClaudeTurn({ query, launch, model, thinkingLevel: "off", systemPrompt: "S", systemPromptMode: "custom", blocks: ["x"], tools: [], signal: new AbortController().signal })) if (event.type === "assistant" && event.event.type === "done") closed.push(event.event.message.content.map((c) => (c as { text?: string }).text));
 		assert.deepEqual(closed, [["first"], ["second"]]);
+	});
+});
+
+describe("the pre-model gate (UserPromptSubmit) refuses before any model request", () => {
+	async function logged<T>(run: () => Promise<T>): Promise<{ value: T; lines: string }> {
+		const lines: string[] = [];
+		const original = console.error;
+		console.error = (...args: unknown[]) => { lines.push(args.map(String).join(" ")); };
+		try { return { value: await run(), lines: lines.join("\n") }; } finally { console.error = original; }
+	}
+	it("an API key: no model request, the gate's stop is never taken for a success, the route is marked not-ready once", async () => {
+		const noted: string[] = [];
+		const { messages, fake } = await runAgent([{ text: "never reached" }], { fake: { apiKeySource: "ANTHROPIC_API_KEY" }, runtime: { noteApiKeySource: (source) => { noted.push(source); } } });
+		assert.equal(fake.turns[0]!.requests, 0, "stopped before any model request");
+		assert.equal((fake.turns[0]!.promptGate as { continue?: boolean }).continue, false);
+		assert.deepEqual(noted, ["ANTHROPIC_API_KEY"]);
+		const last = messages.at(-1) as AssistantMessage;
+		assert.equal(last.stopReason, "error"); assert.match(last.errorMessage ?? "", /only on a Claude plan login.*No API key was used/);
+		assert.ok(!JSON.stringify(messages).includes("never reached"));
+	});
+	it("a third-party provider: no model request, a masked failure", async () => {
+		const { messages, fake } = await runAgent([{ text: "never reached" }], { fake: { account: { apiProvider: "bedrock" } } });
+		assert.equal(fake.turns[0]!.requests, 0);
+		assert.equal((messages.at(-1) as AssistantMessage).stopReason, "error");
+		assert.match((messages.at(-1) as AssistantMessage).errorMessage ?? "", /No API key was used/);
+	});
+	for (const [status, line] of [["failed", /tool server did not connect \(status: failed\) before the turn/], ["pending", /tool server was still pending before the turn \(unexpected: Claude Code connects an in-process server before the turn\)/], ["absent", /tool server was not reported before the turn/]] as const) {
+		it(`a tool server ${status}: no model request, the status is logged`, async () => {
+			const { value, lines } = await logged(() => runAgent([{ text: "never reached", tools: [{ name: "lookup_weather", args: { city: "Oslo" } }] }], { fake: { mcpStatus: status } }));
+			assert.equal(value.fake.turns[0]!.requests, 0);
+			assert.match(lines, line);
+			assert.deepEqual(value.fake.turns[0]!.toolCalls, []);
+			assert.equal((value.messages.at(-1) as AssistantMessage).stopReason, "error");
+		});
+	}
+	it("a passing gate lets the turn run (one request per model call)", async () => {
+		const { fake, messages } = await runAgent([{ text: "Hello." }]);
+		assert.deepEqual(fake.turns[0]!.promptGate, {});
+		assert.equal(fake.turns[0]!.requests, 1);
+		assert.equal((messages.at(-1) as AssistantMessage).stopReason, "stop");
+	});
+	it("init stays the defence in depth when the gate saw nothing wrong but init disagrees", async () => {
+		const noted: string[] = [];
+		const key = await runAgent([{ text: "never reached" }], { fake: { apiKeySource: "apiKeyHelper", account: { subscriptionType: "max", apiProvider: "firstParty" } }, runtime: { noteApiKeySource: (source) => { noted.push(source); } } });
+		assert.deepEqual(key.fake.turns[0]!.promptGate, {}, "the gate passed");
+		assert.deepEqual(noted, ["apiKeyHelper"]);
+		assert.equal((key.messages.at(-1) as AssistantMessage).stopReason, "error");
+		assert.ok(!JSON.stringify(key.messages).includes("never reached"));
+		const { value, lines } = await logged(() => runAgent([{ text: "never reached", tools: [{ name: "lookup_weather", args: { city: "Oslo" } }] }], { fake: { mcpStatus: "failed", liveMcpStatus: "connected" } }));
+		assert.match(lines, /tool server did not connect \(status: failed\) at Claude Code's init/);
+		assert.equal((value.messages.at(-1) as AssistantMessage).stopReason, "error");
+	});
+	it("the tool-less stream is gated too (an API key refuses the compaction call before any request)", async () => {
+		const fake = fakeClaude([{ text: "Summary." }], { apiKeySource: "ANTHROPIC_API_KEY" });
+		const result = await claudeLocalStream(() => false, undefined, runtimeFor(async () => fake.query))(model, normalizeContext({ messages: [{ role: "user", content: "x", timestamp: 1 }] })).result();
+		assert.equal(result.stopReason, "error"); assert.equal(fake.turns[0]!.requests, 0);
 	});
 });

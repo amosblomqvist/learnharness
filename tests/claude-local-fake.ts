@@ -85,6 +85,10 @@ export interface FakeTurn {
 	promptEnd?: "closed" | "aborted";
 	/** The PostToolBatch inputs the hook received. */
 	batches: unknown[];
+	/** What the UserPromptSubmit hook returned (it runs before init and before any model request). */
+	promptGate?: unknown;
+	/** Model requests made (one per scripted step reached). */
+	requests: number;
 	/** Calls the permission resolver refused (not pre-approved, no canUseTool). */
 	permissionDenials: string[];
 }
@@ -96,6 +100,10 @@ export interface FakeAccount {
 	/** The init message's status for the app's tool server (default: "connected"
 	 *  once the in-process server connected); "absent" leaves it out of mcp_servers. */
 	mcpStatus?: string;
+	/** What handle.mcpServerStatus() reports for the tool server (default: the
+	 *  init status) — set it apart to reach the init check behind a passing
+	 *  pre-model gate. */
+	liveMcpStatus?: string;
 }
 
 export function fakeClaude(script: FakeStep[] | ((blocks: string[], turn: number) => FakeStep[]), account: FakeAccount = {}) {
@@ -106,7 +114,8 @@ export function fakeClaude(script: FakeStep[] | ((blocks: string[], turn: number
 		const abort = options.abortController as AbortController | undefined;
 		let closed!: () => void;
 		const closedPromise = new Promise<void>((resolve) => { closed = resolve; });
-		const turn: FakeTurn = { blocks: [], options, toolCalls: [], hookDenials: [], batches: [], permissionDenials: [] };
+		const turn: FakeTurn = { blocks: [], options, toolCalls: [], hookDenials: [], batches: [], permissionDenials: [], requests: 0 };
+		const initMcpStatus = () => account.mcpStatus ?? (options.mcpServers ? "connected" : undefined);
 		turns.push(turn);
 		const sessionId = `fake-session-${turns.length}`;
 		const hooks = (options.hooks ?? {}) as Record<string, { hooks: HookCallback[] }[]>;
@@ -136,7 +145,22 @@ export function fakeClaude(script: FakeStep[] | ((blocks: string[], turn: number
 			// Like the CLI, init reports each configured MCP server's status.
 			const mcpStatus = account.mcpStatus ?? (client ? "connected" : undefined);
 			const mcpServers = server && mcpStatus !== "absent" ? [{ name: "learnharness", status: mcpStatus ?? "failed", source: "sdk" }] : [];
-			yield { type: "system", subtype: "init", session_id: sessionId, uuid: "u-init", cwd: String(options.cwd ?? ""), tools: [], mcp_servers: mcpServers, model: String(options.model ?? ""), permissionMode: String(options.permissionMode ?? "default"), apiKeySource: account.apiKeySource ?? "none", claude_code_version: "2.1.311", slash_commands: [], output_style: "default", skills: [], plugins: [] } as unknown as SDKMessage;
+			const init = { type: "system", subtype: "init", session_id: sessionId, uuid: "u-init", cwd: String(options.cwd ?? ""), tools: [], mcp_servers: mcpServers, model: String(options.model ?? ""), permissionMode: String(options.permissionMode ?? "default"), apiKeySource: account.apiKeySource ?? "none", claude_code_version: "2.1.311", slash_commands: [], output_style: "default", skills: [], plugins: [] } as unknown as SDKMessage;
+			// Like the CLI (2.1.312, verified): UserPromptSubmit runs after the tool
+			// server connected and BEFORE init; continue:false stops the turn with
+			// no model request and an ordinary-looking success result.
+			const gate = hook("UserPromptSubmit");
+			if (gate) {
+				turn.promptGate = await gate({ hook_event_name: "UserPromptSubmit", prompt: turn.blocks.join("\n\n"), prompt_id: `p-${turns.length}`, session_id: sessionId, transcript_path: "", cwd: String(options.cwd ?? ""), permission_mode: String(options.permissionMode ?? "default") } as never, `gate-${turns.length}`, { signal: abort?.signal ?? new AbortController().signal });
+				const out = turn.promptGate as { continue?: boolean; stopReason?: string } | undefined;
+				if (out?.continue === false) {
+					yield init;
+					yield { type: "system", subtype: "informational", content: `Operation stopped by hook: ${out.stopReason ?? ""}`, level: "warning", prevent_continuation: true, uuid: `u-${++counter}`, session_id: sessionId } as unknown as SDKMessage;
+					yield { type: "result", subtype: "success", duration_ms: 1, duration_api_ms: 0, is_error: false, num_turns: 0, result: `Operation stopped by hook: ${out.stopReason ?? ""}`, stop_reason: null, total_cost_usd: 0, usage: {} as never, modelUsage: {}, permission_denials: [], uuid: `u-${++counter}`, session_id: sessionId } as unknown as SDKMessage;
+					return;
+				}
+			}
+			yield init;
 			const steps = typeof script === "function" ? script(turn.blocks, turns.length) : script;
 			let usageReported = false;
 			const signal = () => abort?.signal ?? new AbortController().signal;
@@ -165,6 +189,7 @@ export function fakeClaude(script: FakeStep[] | ((blocks: string[], turn: number
 			};
 			for (const step of steps) {
 				if (stopped()) return;
+				if (!("emitStderr" in step) && !("crash" in step)) turn.requests++;
 				if ("emitStderr" in step) { (options.stderr as ((data: string) => void) | undefined)?.(step.emitStderr); continue; }
 				if ("crash" in step) {
 					if (step.stderr) (options.stderr as ((data: string) => void) | undefined)?.(step.stderr);
@@ -272,7 +297,12 @@ export function fakeClaude(script: FakeStep[] | ((blocks: string[], turn: number
 		}
 		const iterator = generate();
 		return Object.assign(iterator, {
-			accountInfo: async () => account.account ?? { subscriptionType: "max", apiProvider: "firstParty" },
+			// Like the CLI: apiKeySource appears only when an API key is in use.
+			accountInfo: async () => account.account ?? { subscriptionType: "max", apiProvider: "firstParty", ...(account.apiKeySource && account.apiKeySource !== "none" ? { apiKeySource: account.apiKeySource } : {}) },
+			mcpServerStatus: async () => {
+				const status = account.liveMcpStatus ?? initMcpStatus();
+				return options.mcpServers && status && status !== "absent" ? [{ name: "learnharness", status }] : [];
+			},
 			supportedModels: async () => account.models ?? [{ value: "haiku", resolvedModel: "claude-haiku-5-5", displayName: "Haiku", description: "" }, { value: "opus", resolvedModel: "claude-opus-5-5", displayName: "Opus", description: "" }],
 			interrupt: async () => undefined,
 			close: () => { closed(); abort?.abort(); },

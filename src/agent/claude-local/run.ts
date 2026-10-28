@@ -23,6 +23,10 @@
  *     denies anything else by name (defence in depth), and a PostToolBatch
  *     hook stops the loop when a batch terminates (a cleanly posed
  *     question) — pi's finishTurn, in CC terms;
+ *   - a UserPromptSubmit hook is the pre-model gate: before any model
+ *     request it refuses a turn Claude Code would bill to an API key or a
+ *     third-party provider, or one whose tool server did not connect;
+ *     system/init repeats the checks as defence in depth;
  *   - `total_cost_usd` is never read; `rate_limit_event` is reported for
  *     the status card, never persisted.
  */
@@ -31,7 +35,7 @@ import type { AssistantMessage, AssistantMessageEvent, Model } from "@earendil-w
 import { CLAUDE_LOCAL, type ClaudeLocalSystemPromptMode, type ClaudeLocalUsageReport } from "../../core/contracts/claude-local.ts";
 import type { ClaudeLocalLaunch } from "./bridge.ts";
 import { claudeLaunchOptions } from "./launch.ts";
-import { describeFailure, errorFields, reportedApiKeySource, reportedMcpStatus, reportedNumber, reportedRateLimitStatus, reportedRateLimitType, resultFields } from "./reported.ts";
+import { describeFailure, errorFields, reportedApiKeySource, reportedApiProvider, reportedMcpStatus, reportedNumber, reportedRateLimitStatus, reportedRateLimitType, resultFields } from "./reported.ts";
 import { ClaudeStreamMapper } from "./stream-mapper.ts";
 import { createToolBridge } from "./tools.ts";
 import { toolPrefixNote } from "./transcript.ts";
@@ -149,7 +153,50 @@ export async function* runClaudeTurn(params: ClaudeTurnParams): AsyncGenerator<C
 			push({ type: "tool_end", ...call });
 		},
 	}) : undefined;
+	/** What is wrong with the app's tool server, from its reported status
+	 *  (undefined when it is connected). Claude Code connects an in-process
+	 *  server before the turn and reports it connected or failed (verified
+	 *  on 2.1.312); "pending" would be a change in Claude Code and is said so
+	 *  in the log. Every non-connected status refuses the turn (owner
+	 *  decision 2026-10-28): its tools would be missing from it. */
+	const toolServerProblem = (status: string | undefined, where: string): string | undefined => {
+		if (status === "connected") return undefined;
+		if (status === "pending") return `the LearnHarness tool server was still pending ${where} (unexpected: Claude Code connects an in-process server before the turn)`;
+		return `the LearnHarness tool server ${status ? `did not connect (status: ${status})` : "was not reported"} ${where}`;
+	};
+	/** The pre-model gate's refusal, kept for the result: Claude Code reports
+	 *  a turn stopped by UserPromptSubmit as an ordinary success (num_turns 0,
+	 *  no errors), so the runner remembers its own verdict. */
+	let refused: { detail: string; cause: string } | undefined;
+	/** The gate's checks, against the handle (both answer in milliseconds:
+	 *  accountInfo is the SDK's cached initialize answer). */
+	const preModelRefusal = async (): Promise<{ detail: string; cause: string } | undefined> => {
+		const account = await handle.accountInfo().catch(() => undefined);
+		// Claude Code leaves apiKeySource out when no key is in use.
+		const source = reportedApiKeySource(account?.apiKeySource);
+		if (source && source !== "none") {
+			params.onApiKeySource?.(source);
+			return { detail: `Claude Code would use an API key (apiKeySource: ${source})`, cause: `API key source ${source}` };
+		}
+		const provider = reportedApiProvider(account?.apiProvider);
+		if (provider && provider !== "firstParty") return { detail: `Claude Code is configured for a third-party provider (${provider})`, cause: `API provider ${provider}` };
+		if (bridge) {
+			const statuses = await handle.mcpServerStatus().catch(() => undefined);
+			const problem = toolServerProblem(reportedMcpStatus(statuses?.find((server) => server.name === serverName)?.status), "before the turn");
+			if (problem) { console.error(`[claude-local] ${problem}`); return { detail: problem, cause: problem }; }
+		}
+		return undefined;
+	};
 	const hooks: NonNullable<ClaudeQueryOptions["hooks"]> = {
+		UserPromptSubmit: [{ hooks: [(async () => {
+			// The pre-model gate (owner decision 2026-10-28). Claude Code runs this
+			// hook once per user message, after it connected the app's tool server
+			// and before init or any model request; continue:false stops the turn
+			// with zero requests (verified on 2.1.312). system/init, by contrast,
+			// arrives after the first request has started.
+			refused = await preModelRefusal();
+			return refused ? { continue: false, stopReason: "LearnHarness stopped this turn before any model request." } : {};
+		}) satisfies HookCallback] }],
 		PreToolUse: [{ hooks: [(async (input, toolUseId) => {
 			const { tool_name: name = "", tool_input: args } = input as { tool_name?: string; tool_input?: unknown };
 			if (name.startsWith(TOOL_PREFIX)) return {};
@@ -276,27 +323,27 @@ export async function* runClaudeTurn(params: ClaudeTurnParams): AsyncGenerator<C
 			const message = (next as unknown as { message: import("./sdk.ts").SDKMessage }).message;
 			switch (message.type) {
 				case "system": {
-					// How Claude Code will bill this turn: anything but no API key is
-					// refused before the first model call (the route only runs on a
-					// Claude plan login), and the route's status goes not-ready.
+					// The turn's own report, after the pre-model gate. A refusal the gate
+					// made ends the turn here (no model request was made). Otherwise init
+					// repeats the gate's checks as defence in depth — it arrives after
+					// Claude Code has started the first model request (verified on
+					// 2.1.312), so it can only cut that turn short: billing an API key
+					// (the route only runs on a Claude plan login; the route's status goes
+					// not-ready) or a tool server that is not connected (the turn would
+					// run as a text-only lesson). The status goes to the server log; the
+					// learner sees the masked text.
 					if (message.subtype !== "init") break;
-					const source = reportedApiKeySource(message.apiKeySource);
-					let detail: string | undefined;
-					let cause: string | undefined;
-					if (source && source !== "none") {
-						params.onApiKeySource?.(source);
-						detail = `Claude Code would use an API key (apiKeySource: ${source})`;
-						cause = `API key source ${source}`;
-					} else if (bridge) {
-						// The lesson's tools exist only through the app's in-process server:
-						// unless init reports it connected, the turn would run as a
-						// text-only lesson — refused before the first model call (the raw
-						// status goes to the server log; the learner sees the generic text).
-						const status = reportedMcpStatus(message.mcp_servers?.find((server) => server.name === serverName)?.status);
-						if (status !== "connected") {
-							cause = `the LearnHarness tool server ${status ? `did not connect (status: ${status})` : "was not reported"} at Claude Code's init`;
-							detail = cause;
-							console.error(`[claude-local] ${cause}`);
+					let detail = refused?.detail;
+					let cause = refused?.cause;
+					if (!detail) {
+						const source = reportedApiKeySource(message.apiKeySource);
+						if (source && source !== "none") {
+							params.onApiKeySource?.(source);
+							detail = `Claude Code would use an API key (apiKeySource: ${source})`;
+							cause = `API key source ${source}`;
+						} else if (bridge) {
+							const problem = toolServerProblem(reportedMcpStatus(message.mcp_servers?.find((server) => server.name === serverName)?.status), "at Claude Code's init");
+							if (problem) { detail = cause = problem; console.error(`[claude-local] ${problem}`); }
 						}
 					}
 					if (!detail) break;
@@ -380,6 +427,12 @@ export async function* runClaudeTurn(params: ClaudeTurnParams): AsyncGenerator<C
 					// The turn is over: release the prompt stream so the child exits
 					// on its own (before the consumer acts on the result).
 					promptDone.abort();
+					// A gate refusal whose init never came: the "success" is the stop.
+					if (refused) {
+						yield* failedMessage("error", refused.detail);
+						yield { type: "result", ok: false, errors: [refused.detail], cause: refused.cause, failedAssistant: true };
+						break pump;
+					}
 					const errors = message.subtype === "success" ? (message.is_error ? [message.result] : []) : message.errors;
 					const failed = errors.length > 0 || message.is_error;
 					if (rebuilt) yield* closeRebuilt(failed && !failedAssistant ? { reason: "error", message: errors.join("; ") || "failed" } : undefined, true);
