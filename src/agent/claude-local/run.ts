@@ -189,12 +189,19 @@ export async function* runClaudeTurn(params: ClaudeTurnParams): AsyncGenerator<C
 		return;
 	}
 	params.beforeDispatch?.();
+	/** A failure that is its own message (nothing of it streamed), announced
+	 *  by its start like every message — so the consumer can never take it
+	 *  for the end of the message before it. */
+	const failedMessage = (reason: "error" | "aborted", message: string): ClaudeTurnEvent[] => {
+		const fresh = new ClaudeStreamMapper(model, serverName, params.thinkingLevel);
+		return [{ type: "assistant", event: fresh.start() }, { type: "assistant", event: fresh.finish({ reason, message }) }];
+	};
 	let handle: ReturnType<ClaudeQuery>;
 	try { handle = params.query({ prompt: promptOf(params.blocks, AbortSignal.any([abort.signal, promptDone.signal])), options }); }
 	catch (error) {
 		signal.removeEventListener("abort", onAbort);
 		const detail = withoutStderr(error instanceof Error ? error.message : String(error));
-		yield { type: "assistant", event: mapper.finish({ reason: "error", message: detail }) };
+		yield* failedMessage("error", detail);
 		yield { type: "result", ok: false, errors: [detail] };
 		return;
 	}
@@ -257,8 +264,8 @@ export async function* runClaudeTurn(params: ClaudeTurnParams): AsyncGenerator<C
 					}
 					if (!detail) break;
 					sawResult = true;
-					const target = mapper.started && !mapper.stopped ? mapper : new ClaudeStreamMapper(model, serverName, params.thinkingLevel);
-					yield { type: "assistant", event: target.finish({ reason: "error", message: detail }) };
+					if (mapper.started && !mapper.stopped) yield { type: "assistant", event: mapper.finish({ reason: "error", message: detail }) };
+					else yield* failedMessage("error", detail);
 					yield { type: "result", ok: false, errors: [detail], failedAssistant: true };
 					break pump;
 				}
@@ -282,7 +289,7 @@ export async function* runClaudeTurn(params: ClaudeTurnParams): AsyncGenerator<C
 						const text = message.message.content.map((block) => (block as { type: string; text?: string }).type === "text" ? (block as { text?: string }).text ?? "" : "").filter(Boolean).join(" ");
 						const target = mapper.started && !mapper.stopped ? mapper : (rebuilt?.id === message.message.id ? rebuilt.mapper : undefined);
 						if (target) { if (target === rebuilt?.mapper) rebuilt = undefined; yield { type: "assistant", event: target.finish({ reason: "error", message: `${message.error}: ${text}` }) }; }
-						else { yield { type: "assistant", event: new ClaudeStreamMapper(model, serverName, params.thinkingLevel).finish({ reason: "error", message: `${message.error}: ${text}` }) }; }
+						else yield* failedMessage("error", `${message.error}: ${text}`);
 						failedAssistant = true;
 						seenAssistantIds.add(message.message.id);
 						break;
@@ -339,10 +346,7 @@ export async function* runClaudeTurn(params: ClaudeTurnParams): AsyncGenerator<C
 			const detail = withoutStderr(cause);
 			if (reason === "error") console.error(`[claude-local] Claude Code turn ended without a result: ${detail}`);
 			if (mapper.started && !mapper.stopped) yield { type: "assistant", event: mapper.finish({ reason, message: detail }) };
-			else if (reason === "error" && !stopRequested) {
-				mapper = new ClaudeStreamMapper(model, serverName, params.thinkingLevel);
-				yield { type: "assistant", event: mapper.finish({ reason, message: detail }) };
-			}
+			else if (reason === "error" && !stopRequested) yield* failedMessage(reason, detail);
 			yield { type: "result", ok: false, errors: reason === "aborted" ? [] : [detail] };
 		}
 	} finally {

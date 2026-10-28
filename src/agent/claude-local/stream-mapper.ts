@@ -167,6 +167,13 @@ export class ClaudeStreamMapper {
 		}
 		return out;
 	}
+	/** The start of a message nothing of which streamed (a failure that is
+	 *  its own message): every message the runner yields opens with one. */
+	start(): AssistantMessageEvent {
+		this.started = true;
+		if (this.thinkingLevel !== undefined) this.partial.thinkingLevel = this.thinkingLevel as AssistantMessage["thinkingLevel"];
+		return { type: "start", partial: this.snapshot() };
+	}
 	/** The terminal event: `done` with the final message, or `error`. */
 	finish(failure?: { reason: "error" | "aborted"; message: string }): AssistantMessageEvent {
 		const content = this.partial.content.filter(Boolean);

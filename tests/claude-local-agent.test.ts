@@ -697,3 +697,23 @@ describe("fake fidelity: malformed tool arguments and sub-agent output (second r
 		assert.deepEqual(fake.turns[0]!.toolCalls, []);
 	});
 });
+
+describe("a failure that is its own message never overwrites the message before it", () => {
+	it("a later model call's synthetic API error (no stream) keeps the earlier assistant message and its tool result intact", async () => {
+		const { messages, events } = await runAgent([{ text: "Checking.", tools: [{ name: "lookup_weather", args: { city: "Oslo" } }] }, { apiError: "rate_limit", text: "You've hit your limit" }]);
+		assert.deepEqual(messages.map((m) => (m as { role: string }).role), ["user", "assistant", "toolResult", "assistant"]);
+		const first = messages[1] as AssistantMessage;
+		assert.equal(first.stopReason, "toolUse");
+		assert.deepEqual(first.content.map((c) => c.type), ["text", "toolCall"]);
+		assert.equal((messages[2] as ToolResultMessage).toolCallId, (first.content[1] as { id: string }).id);
+		const last = messages[3] as AssistantMessage;
+		assert.equal(last.stopReason, "error"); assert.match(last.errorMessage ?? "", /usage limit/);
+		assert.deepEqual(record(events).slice(-6), ["turn_end", "turn_start", "message_start:assistant", "message_end:assistant", "turn_end", "agent_end"], "the failed call is a new turn and a new message");
+	});
+	it("a turn that ends without a result after a finished message records the failure as a new message", async () => {
+		const { messages } = await runAgent([{ text: "Checking.", tools: [{ name: "lookup_weather", args: { city: "Oslo" } }] }, { crash: "Claude Code process exited with code 2" }]);
+		assert.deepEqual(messages.map((m) => (m as { role: string }).role), ["user", "assistant", "toolResult", "assistant"]);
+		assert.deepEqual(((messages[1] as AssistantMessage).content[0] as { text: string }).text, "Checking.");
+		assert.equal((messages[3] as AssistantMessage).stopReason, "error");
+	});
+});

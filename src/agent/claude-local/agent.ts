@@ -319,8 +319,9 @@ export class ClaudeLocalAgent implements LiveAgent {
 						if (e.type === "error" && !committed) { markUnadmittedUsage(final.usage); options.lifecycle?.noDispatch(runtime.denial(scope, controller, signal.aborted, background)); }
 						if (e.type === "error") final.errorMessage = claudeLocalError(final.errorMessage ?? "failed");
 						// Replace the streaming partial in place (pi: a message that never
-						// streamed gets its message_start now).
-						const index = current ? this.state.messages.lastIndexOf(current as AgentMessage) : -1;
+						// streamed gets its message_start now). Only a partial is replaced:
+						// a message that already ended is never overwritten by the next one.
+						const index = current && current.stopReason === "pending" ? this.state.messages.lastIndexOf(current as AgentMessage) : -1;
 						if (index >= 0) this.state.messages[index] = final;
 						else { await emit({ type: "message_start", message: { ...final } }); this.state.messages.push(final); }
 						current = final;
