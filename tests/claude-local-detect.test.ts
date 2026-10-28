@@ -622,3 +622,37 @@ describe("external review round 3: a probe failure's own text never reaches a lo
 		assert.ok(!logged.includes(SECRET), logged);
 	});
 });
+
+describe("external review round 3: child-reported identifiers are constrained before the status shows them (P1)", () => {
+	// Real Claude tokens run past 100 characters, so the 64-character identifier shape rejects them.
+	const TOKEN = `sk-ant-oat01-${"A1b2C3d4E5".repeat(10)}`;
+	it("account facts: a documented value or a short identifier is kept, anything else reads as unrecognized", () => {
+		assert.deepEqual(server.classifyAccount({ apiProvider: TOKEN as never }), { state: "third-party", detail: "Claude Code is configured for an unrecognized provider; this route only runs on a Claude plan login." });
+		assert.equal(server.classifyAccount({ apiProvider: "bedrock" }).detail, "Claude Code is configured for bedrock; this route only runs on a Claude plan login.");
+		assert.equal(server.classifyAccount({ apiProvider: "firstParty", apiKeySource: TOKEN }).detail, "Claude Code is signed in with an API key (unrecognized); this route only runs on a Claude plan login.");
+		assert.equal(server.classifyAccount({ apiProvider: "firstParty", apiKeySource: "apiKeyHelper" }).detail, "Claude Code is signed in with an API key (apiKeyHelper); this route only runs on a Claude plan login.");
+		assert.equal(server.classifyAccount({ apiProvider: "firstParty", subscriptionType: TOKEN }).detail, 'Claude Code reports "unrecognized", not a Claude plan login.');
+		assert.equal(server.classifyAccount({ apiProvider: "firstParty", subscriptionType: "free" }).detail, 'Claude Code reports "free", not a Claude plan login.');
+	});
+	it("a probe's status.account carries only constrained values", { skip: !posix }, async () => {
+		const { status } = await readyRoute("r3-ids", fakeQuery({ account: { subscriptionType: "Claude Max", apiProvider: "firstParty", email: "never@example.com" }, models: [{ value: "x", resolvedModel: knownId(), displayName: "X" }] }));
+		assert.deepEqual(status.account, { subscriptionType: "Claude Max", apiProvider: "firstParty" });
+	});
+	it("a model id that is not a model id is skipped and counted, never printed", () => {
+		const lines: string[] = [];
+		const original = console.info;
+		console.info = (...args: unknown[]) => { lines.push(args.map(String).join(" ")); };
+		const skipped: string[] = [];
+		let catalog;
+		try { catalog = server.claudeLocalCatalog([{ value: "a", resolvedModel: TOKEN, displayName: "A", description: "" }, { value: "b", resolvedModel: knownId(), displayName: "B", description: "" }], skipped); } finally { console.info = original; }
+		assert.deepEqual(catalog.map((m) => m.id), [knownId()]);
+		assert.deepEqual(skipped, ["unrecognized"]);
+		assert.ok(!lines.join("\n").includes(TOKEN), lines.join("\n"));
+	});
+	it("an API-key note from a turn names only a documented source", () => {
+		const status = { providerId: "claude-local" as const, enabled: true, allowBackgroundUse: true, systemPromptMode: "custom" as const, state: "ready" as const, binaryPath: "", binary: null, account: null, models: 1, probedAt: null, revision: 99 };
+		bridge.acceptClaudeLocalSnapshot({ status, models: [], launch: null });
+		bridge.noteClaudeLocalApiKeySource(TOKEN);
+		assert.equal(bridge.claudeLocalStatus()?.error, "Claude Code is set up to use an API key (unrecognized); this route only runs on a Claude plan login.");
+	});
+});

@@ -14,6 +14,7 @@
 import type { Api, Model } from "@earendil-works/pi-ai";
 import { CLAUDE_LOCAL, type ClaudeLocalScope, type ClaudeLocalStatus, type ClaudeLocalSystemPromptMode, type ClaudeLocalUsageReport } from "../../core/contracts/claude-local.ts";
 import type { AdmissionScope, NoDispatchKind } from "../subscription-request-cycle.ts";
+import { reportedApiKeySource, UNRECOGNIZED } from "./reported.ts";
 
 /** How to start the detected install (never part of the public status). */
 export interface ClaudeLocalLaunch {
@@ -108,6 +109,6 @@ export function claudeLocalUsage(): ClaudeLocalUsageReport | undefined { return 
 export function noteClaudeLocalApiKeySource(source: string): void {
 	const state = bridge();
 	if (!state.snapshot) return;
-	state.snapshot = { status: { ...state.snapshot.status, state: "api-key", error: `Claude Code is set up to use an API key (${source}); this route only runs on a Claude plan login.` }, models: [], launch: null };
+	state.snapshot = { status: { ...state.snapshot.status, state: "api-key", error: `Claude Code is set up to use an API key (${reportedApiKeySource(source) ?? UNRECOGNIZED}); this route only runs on a Claude plan login.` }, models: [], launch: null };
 	notify(state);
 }

@@ -24,7 +24,7 @@ import { emit } from "../core/events.ts";
 import { piModels } from "../agent/models.ts";
 import { claudeChildEnv } from "../agent/claude-local/env.ts";
 import { claudeCommand, claudeLaunchOptions } from "../agent/claude-local/launch.ts";
-import { describeFailure, errorFields, failureSuffix, resultFields, type FailureFields } from "../agent/claude-local/reported.ts";
+import { describeFailure, errorFields, failureSuffix, reportedApiKeySource, reportedApiProvider, reportedIdentifier, reportedModelId, resultFields, UNRECOGNIZED, type FailureFields } from "../agent/claude-local/reported.ts";
 import { acceptClaudeLocalSnapshot, claudeLocalStatus as bridgeStatus, claudeLocalUsage, onClaudeLocalChange, type ClaudeLocalLaunch } from "../agent/claude-local/bridge.ts";
 import { loadClaudeQuery, type AccountInfo, type ClaudeQuery, type ModelInfo } from "../agent/claude-local/sdk.ts";
 import type { EffectiveSettings } from "../core/settings-resolution.ts";
@@ -161,17 +161,27 @@ export function claudeVersion(binary: { path: string; viaNode: boolean }, timeou
 
 /** Plan logins Claude Code reports for claude.ai subscriptions (its usage
  *  reply documents 'pro' | 'max' | 'team' | 'enterprise'; the Console API
- *  login reads "Claude API"). Matched case-insensitively on the word. */
+ *  login reads "Claude API"). Matched case-insensitively on the word.
+ *  Everything echoed into the status is checked first (reported.ts): a
+ *  documented value, a short identifier, or "unrecognized". */
 const PLAN_WORDS = ["pro", "max", "team", "enterprise"];
 export function classifyAccount(account: AccountInfo | undefined): { state: Extract<ClaudeLocalState, "ready" | "api-key" | "third-party" | "not-signed-in">; detail?: string } {
 	if (!account) return { state: "not-signed-in", detail: "Claude Code did not report a login." };
-	if (account.apiProvider && account.apiProvider !== "firstParty") return { state: "third-party", detail: `Claude Code is configured for ${account.apiProvider}; this route only runs on a Claude plan login.` };
-	const keySource = account.apiKeySource;
+	const provider = reportedApiProvider(account.apiProvider);
+	if (provider && provider !== "firstParty") return { state: "third-party", detail: `Claude Code is configured for ${provider === UNRECOGNIZED ? "an unrecognized provider" : provider}; this route only runs on a Claude plan login.` };
+	const keySource = reportedApiKeySource(account.apiKeySource);
 	if (keySource && keySource !== "none") return { state: "api-key", detail: `Claude Code is signed in with an API key (${keySource}); this route only runs on a Claude plan login.` };
 	const plan = (account.subscriptionType ?? "").toLowerCase();
 	if (PLAN_WORDS.some((word) => new RegExp(`\\b${word}\\b`).test(plan))) return { state: "ready" };
 	if (/api/.test(plan)) return { state: "api-key", detail: "Claude Code is signed in to a Claude API (Console) account; this route only runs on a Claude plan login." };
-	return { state: "not-signed-in", detail: account.subscriptionType ? `Claude Code reports "${account.subscriptionType}", not a Claude plan login.` : "Claude Code reported no Claude plan login." };
+	const reported = reportedIdentifier(account.subscriptionType);
+	return { state: "not-signed-in", detail: reported ? `Claude Code reports "${reported}", not a Claude plan login.` : "Claude Code reported no Claude plan login." };
+}
+/** The account facts the status carries (never a token or an email). */
+function statusAccount(account: AccountInfo): NonNullable<ClaudeLocalStatus["account"]> {
+	const subscriptionType = reportedIdentifier(account.subscriptionType);
+	const apiProvider = reportedApiProvider(account.apiProvider);
+	return { ...(subscriptionType ? { subscriptionType } : {}), ...(apiProvider ? { apiProvider } : {}) };
 }
 
 /** An iterable that never yields: the CLI starts, initialises, answers
@@ -246,7 +256,9 @@ export function claudeLocalCatalog(models: ModelInfo[], skipped: string[] = []):
 	const out = new Map<string, Model<Api>>();
 	for (const info of models) {
 		if (info.value === "default") continue;
-		const id = info.resolvedModel ?? info.value;
+		const id = reportedModelId(info.resolvedModel ?? info.value);
+		// Not a model id at all: counted, never printed.
+		if (!id) { console.info("[claude-local] skipping a model entry whose id is not a model id"); skipped.push(UNRECOGNIZED); continue; }
 		if (out.has(id) || skipped.includes(id)) continue;
 		const base = piModels().getModel("anthropic", id) ?? piModels().getModel("anthropic", catalogLookupId(id));
 		if (!base) { console.info(`[claude-local] skipping ${id}: not in pi-ai's Anthropic catalog (no context window known)`); skipped.push(id); continue; }
@@ -380,7 +392,7 @@ async function runProbe(settings: EffectiveSettings["claudeLocal"], state: Owner
 					const query = await loadClaudeQuery();
 					const probe = await probeAccount(query, candidate);
 					const verdict = classifyAccount(probe.account);
-					next = { ...next, state: verdict.state, account: { ...(probe.account.subscriptionType ? { subscriptionType: probe.account.subscriptionType } : {}), ...(probe.account.apiProvider ? { apiProvider: probe.account.apiProvider } : {}) }, ...(verdict.detail ? { error: verdict.detail } : {}) };
+					next = { ...next, state: verdict.state, account: statusAccount(probe.account), ...(verdict.detail ? { error: verdict.detail } : {}) };
 					if (verdict.state === "ready") {
 						const skipped: string[] = [];
 						models = claudeLocalCatalog(probe.models, skipped);

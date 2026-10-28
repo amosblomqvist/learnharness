@@ -31,7 +31,7 @@ import type { AssistantMessage, AssistantMessageEvent, Model } from "@earendil-w
 import { CLAUDE_LOCAL, type ClaudeLocalSystemPromptMode, type ClaudeLocalUsageReport } from "../../core/contracts/claude-local.ts";
 import type { ClaudeLocalLaunch } from "./bridge.ts";
 import { claudeLaunchOptions } from "./launch.ts";
-import { describeFailure, errorFields, reportedApiKeySource, reportedMcpStatus, resultFields } from "./reported.ts";
+import { describeFailure, errorFields, reportedApiKeySource, reportedMcpStatus, reportedNumber, reportedRateLimitStatus, reportedRateLimitType, resultFields } from "./reported.ts";
 import { ClaudeStreamMapper } from "./stream-mapper.ts";
 import { createToolBridge } from "./tools.ts";
 import { toolPrefixNote } from "./transcript.ts";
@@ -334,8 +334,12 @@ export async function* runClaudeTurn(params: ClaudeTurnParams): AsyncGenerator<C
 					break;
 				}
 				case "rate_limit_event": {
+					// Shown on the card: only documented values and finite numbers.
 					const info = message.rate_limit_info;
-					yield { type: "usage", report: { status: info.status, ...(info.utilization !== undefined ? { utilization: info.utilization } : {}), ...(info.resetsAt !== undefined ? { resetsAt: info.resetsAt } : {}), ...(info.rateLimitType ? { rateLimitType: info.rateLimitType } : {}), ...(info.isUsingOverage !== undefined ? { isUsingOverage: info.isUsingOverage } : {}), observedAt: Date.now() } };
+					const status = reportedRateLimitStatus(info?.status);
+					if (!status) break;
+					const utilization = reportedNumber(info.utilization), resetsAt = reportedNumber(info.resetsAt), rateLimitType = reportedRateLimitType(info.rateLimitType);
+					yield { type: "usage", report: { status, ...(utilization !== undefined ? { utilization } : {}), ...(resetsAt !== undefined ? { resetsAt } : {}), ...(rateLimitType ? { rateLimitType } : {}), ...(typeof info.isUsingOverage === "boolean" ? { isUsingOverage: info.isUsingOverage } : {}), observedAt: Date.now() } };
 					break;
 				}
 				case "result": {

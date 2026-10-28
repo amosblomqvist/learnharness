@@ -757,3 +757,21 @@ describe("external review round 3: Claude Code's own failure text never reaches 
 		assert.ok(!logged.includes(SECRET) && !JSON.stringify(value).includes(SECRET));
 	});
 });
+
+describe("external review round 3: the plan-usage report carries only documented values and numbers (P1)", () => {
+	async function usageOf(info: Record<string, unknown>) {
+		const query = (() => Object.assign((async function* () {
+			yield { type: "system", subtype: "init", apiKeySource: "none", mcp_servers: [], tools: [], session_id: "s", uuid: "u0" };
+			yield { type: "rate_limit_event", rate_limit_info: info, uuid: "u1", session_id: "s" };
+			yield { type: "result", subtype: "success", is_error: false, result: "", num_turns: 0, uuid: "u2", session_id: "s" };
+		})(), { close() {}, interrupt: async () => undefined })) as unknown as Parameters<typeof runClaudeTurn>[0]["query"];
+		const reports: unknown[] = [];
+		for await (const event of runClaudeTurn({ query, launch, model, thinkingLevel: "off", systemPrompt: "S", systemPromptMode: "custom", blocks: ["x"], tools: [], signal: new AbortController().signal })) if (event.type === "usage") reports.push({ ...event.report, observedAt: 0 });
+		return reports;
+	}
+	it("documented values pass; an undocumented type reads as unrecognized; non-numbers are dropped; an undocumented status drops the report", async () => {
+		assert.deepEqual(await usageOf({ status: "allowed_warning", utilization: 0.5, resetsAt: 1700000000, rateLimitType: "seven_day", isUsingOverage: false }), [{ status: "allowed_warning", utilization: 0.5, resetsAt: 1700000000, rateLimitType: "seven_day", isUsingOverage: false, observedAt: 0 }]);
+		assert.deepEqual(await usageOf({ status: "rejected", utilization: "0.5 sk-ant-x", resetsAt: Number.NaN, rateLimitType: "sk-ant-oat01-secret", isUsingOverage: "yes" }), [{ status: "rejected", rateLimitType: "unrecognized", observedAt: 0 }]);
+		assert.deepEqual(await usageOf({ status: "sk-ant-oat01-secret" }), []);
+	});
+});
