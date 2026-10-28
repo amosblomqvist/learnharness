@@ -124,6 +124,10 @@ export const ChatActionsContext = createContext<{
 	syncFromServer: () => Promise<void>;
 	/** Send a user message into the session (demo error-fix loop, W6). */
 	sendText: (text: string) => void;
+	/** False while the session is attaching or a turn is in flight — a send now
+	 *  would be dropped silently (session-core's readiness guard), so surfaces
+	 *  that submit on the learner's behalf must not offer it. */
+	canSend: boolean;
 	/** Opens the model setup dialog (BYOK, 2026-09-22): refused job cards
 	 *  deep-link into the same SetupDialog the send interception uses. */
 	openSetup: () => void;
@@ -1250,6 +1254,7 @@ export function Chat({
 				sendText: (t: string) => {
 					void send({ type: "text", text: t });
 				},
+				canSend: status === "ready" || status === "error",
 				openSetup: () => setSetupOpen(true),
 			}}
 		>

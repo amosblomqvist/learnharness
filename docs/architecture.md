@@ -575,3 +575,55 @@ Each of these was implemented, lived in real data, and was replaced; the replace
 ## 14. Deliberately deferred
 
 Structured logging (§10); SQLite/remote storage (drop-in behind the ports, §3); multi-scale cluster hierarchy (Louvain's dendrogram idea, parked); the anchored calibration rubric; alternative extraction triggers beyond the coverage seam (session end, idle); retroactive bootstrap of the POC sessions (vision §1 consolidation). When any of these land, this doc changes with the commit that lands them — it describes the system, not an intention.
+## Code playground (2026-10-27)
+
+A lesson beat that asks the learner to write code hands them a real editor
+instead of a prose description of one, runs what they write, and returns the
+attempt (with every failure) as their next turn.
+
+- **Contract + engine registry**: `src/core/code-playground.ts` — pure. The
+  teacher declares a free-form language; the registry resolves it to an engine
+  that can *actually execute* it: `native` (JS/TS in a Worker), `runner`
+  (compiled and long-tail languages via the sandbox service), or `none` with a
+  stated reason. A language is never advertised as runnable without an executor.
+- **Tool**: `code_playground` is client-executed like `quiz` (no server
+  execute; the call ends the turn). Registered for BOTH agents: the teacher uses
+  it when the next beat is code, and the practitioner uses it for coding
+  practice problems under interview conditions. Always-on, like `quiz`; turning
+  it off is a prompt-segment switch (`prompts/teacher/55-code-playground.md`),
+  not a tool toggle — the toggleable set stays the sub-agent dispatch tools.
+- **Card**: `components/artifacts/code-playground-card.tsx`, registered in the
+  artifact registry; editing surface is CodeMirror 6 (`components/code-editor.tsx`)
+  with an explicit highlight style, so syntax errors are the parser's and tokens
+  are coloured for every engine language.
+- **Execution**: JS/TS run in a **Worker** (`terminate()` bounds an infinite
+  loop; a DOM-using program gets an honest error instead of freezing the tab).
+  TypeScript is transpiled by `POST /api/code/transpile` (TypeScript compiler
+  API — esbuild cannot be bundled into the server). Everything else goes through
+  `app/api/code/run` → `runner/` (loopback, token-gated, one throwaway systemd
+  unit per run, capped at 2 concurrent).
+- **Predict-first**: the card carries a "predict what it prints" field; the run
+  records the guess and whether it matched (numeric-tolerant comparison). The
+  report leads with it — a right answer with a wrong prediction is a guess.
+- **Failure is structured, engine-agnostically**: every engine's signal
+  (compile exit, error name, timeout, process exit, check verdicts) maps onto one
+  vocabulary — `syntax | runtime | timeout | checks | not-run` — so the teacher
+  picks the repair instead of parsing stderr. Checks are only reported where an
+  engine can evaluate them.
+- **Feedback**: the attempt returns as the learner's own turn, not a tool
+  output — `send({type:"answer"})` is bound to dangling *question* tools, and a
+  learner message is also what the coverage/extraction pipeline expects from
+  learner content. Checks are evaluated where an engine can evaluate them
+  (JS/TS); for other languages the card says so rather than reporting a verdict
+  it did not compute.
+- **Engines (33)**: c, cpp, rust, go, java, kotlin, csharp, python, ruby, php,
+  lua, perl, bash, r, octave, haskell, lisp, fortran, sql, julia, dart, swift,
+  erlang, elixir, clojure, ocaml, nim, crystal, groovy, prolog, racket, tcl, awk.
+  Each is proven by executing it, not by being installed. Scala is absent on
+  purpose: `scala-cli` fetches its toolchain on first run and the sandbox has no
+  network.
+- **The invariant**: a card that asks the learner to run code is only authored
+  when the language has an engine (`engineKindFor`), so a Run button that cannot
+  work is refused at the tool boundary — never delivered. Read-only drills
+  (`error-read`, `syntax`) need no runtime and stay available for any language,
+  while non-languages ("spanish") are refused in every mode.
