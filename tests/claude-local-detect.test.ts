@@ -468,12 +468,14 @@ describe("external review (P1, P2)", () => {
 		const { loadClaudeQuery } = await import("../src/agent/claude-local/sdk.ts");
 		setClaudeQueryForTests(undefined);
 		delete (globalThis as Record<symbol, unknown>)[Symbol.for("lh.claudeLocal.sdk")];
-		let attempts = 0;
-		const fake = (() => undefined) as unknown as ClaudeQuery;
+		let attempts = 0, calls = 0;
+		const fake = (() => { calls++; }) as unknown as ClaudeQuery;
 		const load = async () => { attempts++; if (attempts === 1) throw new Error("Cannot find module './sdk-chunk.mjs'"); return { query: fake }; };
 		await assert.rejects(loadClaudeQuery(load), /Cannot find module/);
-		assert.equal(await loadClaudeQuery(load), fake, "the second load retried the import");
-		assert.equal(await loadClaudeQuery(load), fake);
+		const loaded = await loadClaudeQuery(load);
+		(loaded as unknown as () => void)();
+		assert.equal(calls, 1, "the second load retried the import and hands over the SDK's query");
+		assert.equal(await loadClaudeQuery(load), loaded);
 		assert.equal(attempts, 2, "a resolved import stays cached");
 		delete (globalThis as Record<symbol, unknown>)[Symbol.for("lh.claudeLocal.sdk")];
 	});
@@ -679,5 +681,31 @@ describe("the child's stderr is never a pipe (an unread pipe stalls a chatty chi
 		const code = await new Promise<number | null>((resolve) => { const timer = setTimeout(() => { child.kill("SIGKILL"); resolve(-1); }, 5000); child.on("close", (c) => { clearTimeout(timer); resolve(c); }); });
 		assert.equal(code, 0, "the child was not stalled on a full stderr pipe");
 		assert.match(out, /2\.1\.311/);
+	});
+});
+
+describe("external review round 3: the SDK's own debug log is never armed (P1)", () => {
+	it("DEBUG_CLAUDE_AGENT_SDK is removed from the server's env before the SDK loads and before every query, with one fixed log line", async () => {
+		const { loadClaudeQuery } = await import("../src/agent/claude-local/sdk.ts");
+		setClaudeQueryForTests(undefined);
+		delete (globalThis as Record<symbol, unknown>)[Symbol.for("lh.claudeLocal.sdk")];
+		const previous = process.env.DEBUG_CLAUDE_AGENT_SDK;
+		const lines: string[] = [];
+		const original = console.info;
+		console.info = (...args: unknown[]) => { lines.push(args.map(String).join(" ")); };
+		try {
+			process.env.DEBUG_CLAUDE_AGENT_SDK = "1";
+			let seenAtLoad: string | undefined = "unset", seenAtQuery: string | undefined = "unset";
+			const query = await loadClaudeQuery(async () => { seenAtLoad = process.env.DEBUG_CLAUDE_AGENT_SDK; return { query: (() => { seenAtQuery = process.env.DEBUG_CLAUDE_AGENT_SDK; }) as unknown as ClaudeQuery }; });
+			assert.equal(seenAtLoad, undefined, "removed before the SDK module loads");
+			process.env.DEBUG_CLAUDE_AGENT_SDK = "1";
+			(query as unknown as () => void)();
+			assert.equal(seenAtQuery, undefined, "removed again before a query");
+			assert.equal(lines.filter((line) => line === "[claude-local] ignoring DEBUG_CLAUDE_AGENT_SDK: the Agent SDK's debug log would write Claude Code's own output to disk").length, 2);
+		} finally {
+			console.info = original;
+			if (previous === undefined) delete process.env.DEBUG_CLAUDE_AGENT_SDK; else process.env.DEBUG_CLAUDE_AGENT_SDK = previous;
+			delete (globalThis as Record<symbol, unknown>)[Symbol.for("lh.claudeLocal.sdk")];
+		}
 	});
 });
