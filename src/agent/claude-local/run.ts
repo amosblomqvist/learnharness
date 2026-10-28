@@ -231,8 +231,29 @@ export async function* runClaudeTurn(params: ClaudeTurnParams): AsyncGenerator<C
 	let sawResult = false;
 	const seenAssistantIds = new Set<string>();
 	/** A message rebuilt from Claude Code's `assistant` echoes (no stream
-	 *  delivered); `seen` holds the blocks already added, as JSON. */
-	let rebuilt: { id: string; mapper: ClaudeStreamMapper; blocks: number; seen: string[] } | undefined;
+	 *  delivered); `seen` holds the blocks already added, as JSON; `held` its
+	 *  events, released only when the message closes. */
+	let rebuilt: { id: string; mapper: ClaudeStreamMapper; blocks: number; seen: string[]; held: AssistantMessageEvent[] } | undefined;
+	/** Close the rebuilt message. A success releases everything it held. A
+	 *  failure (owner decision 2026-10-28) records it EMPTY with the masked
+	 *  error — announced by its start only, so none of its text reaches the
+	 *  record or the wire: a never-streamed message a failure closes can be
+	 *  the failure's own wording (an API-error message without its optional
+	 *  `error` field). */
+	function* closeRebuilt(failure?: { reason: "error"; message: string }, stop = false): Generator<ClaudeTurnEvent> {
+		const closing = rebuilt!;
+		rebuilt = undefined;
+		if (stop) closing.mapper.handle({ type: "message_stop" });
+		const end = closing.mapper.finish(failure);
+		if (failure && end.type === "error") {
+			end.error.content = [];
+			yield { type: "assistant", event: closing.held[0]! };
+			yield { type: "assistant", event: end };
+			return;
+		}
+		for (const event of closing.held) yield { type: "assistant", event };
+		yield { type: "assistant", event: end };
+	}
 	/** Set when Claude Code reported the turn's failure as an assistant message. */
 	let failedAssistant = false;
 	try {
@@ -300,9 +321,12 @@ export async function* runClaudeTurn(params: ClaudeTurnParams): AsyncGenerator<C
 					// (or the rebuilt message) as an error and let the result end the turn.
 					if (message.error) {
 						const text = message.message.content.map((block) => (block as { type: string; text?: string }).type === "text" ? (block as { text?: string }).text ?? "" : "").filter(Boolean).join(" ");
-						const target = mapper.started && !mapper.stopped ? mapper : (rebuilt?.id === message.message.id ? rebuilt.mapper : undefined);
-						if (target) { if (target === rebuilt?.mapper) rebuilt = undefined; yield { type: "assistant", event: target.finish({ reason: "error", message: `${message.error}: ${text}` }) }; }
-						else yield* failedMessage("error", `${message.error}: ${text}`);
+						const detail = `${message.error}: ${text}`;
+						// An earlier rebuilt message (another id) was complete: release it first.
+						if (rebuilt && rebuilt.id !== message.message.id) yield* closeRebuilt();
+						if (mapper.started && !mapper.stopped) yield { type: "assistant", event: mapper.finish({ reason: "error", message: detail }) };
+						else if (rebuilt) yield* closeRebuilt({ reason: "error", message: detail });
+						else yield* failedMessage("error", detail);
 						failedAssistant = true;
 						seenAssistantIds.add(message.message.id);
 						break;
@@ -315,10 +339,10 @@ export async function* runClaudeTurn(params: ClaudeTurnParams): AsyncGenerator<C
 					// accumulated; the message closes when the id changes or the
 					// result arrives.
 					if (seenAssistantIds.has(message.message.id) || (mapper.started && !mapper.stopped)) break;
-					if (rebuilt && rebuilt.id !== message.message.id) { yield { type: "assistant", event: rebuilt.mapper.finish() }; rebuilt = undefined; }
+					if (rebuilt && rebuilt.id !== message.message.id) yield* closeRebuilt();
 					if (!rebuilt) {
-						rebuilt = { id: message.message.id, mapper: new ClaudeStreamMapper(model, serverName, params.thinkingLevel), blocks: 0, seen: [] };
-						for (const event of rebuilt.mapper.handle({ type: "message_start", message: { ...message.message, content: [] } })) yield { type: "assistant", event };
+						rebuilt = { id: message.message.id, mapper: new ClaudeStreamMapper(model, serverName, params.thinkingLevel), blocks: 0, seen: [], held: [] };
+						rebuilt.held.push(...rebuilt.mapper.handle({ type: "message_start", message: { ...message.message, content: [] } }));
 					}
 					// An echo is one new block, or (cumulative / full echo) the message so
 					// far: blocks already added are skipped, never duplicated.
@@ -327,8 +351,8 @@ export async function* runClaudeTurn(params: ClaudeTurnParams): AsyncGenerator<C
 					for (const block of message.message.content.slice(repeats ? rebuilt.seen.length : 0)) {
 						rebuilt.seen.push(JSON.stringify(block));
 						const index = rebuilt.blocks++;
-						for (const event of rebuilt.mapper.handle({ type: "content_block_start", index, content_block: block as never })) yield { type: "assistant", event };
-						for (const event of rebuilt.mapper.handle({ type: "content_block_stop", index })) yield { type: "assistant", event };
+						rebuilt.held.push(...rebuilt.mapper.handle({ type: "content_block_start", index, content_block: block as never }));
+						rebuilt.held.push(...rebuilt.mapper.handle({ type: "content_block_stop", index }));
 					}
 					rebuilt.mapper.handle({ type: "message_delta", delta: { stop_reason: message.message.stop_reason, stop_sequence: null, container: null, stop_details: null }, usage: message.message.usage as never, context_management: null });
 					break;
@@ -349,7 +373,7 @@ export async function* runClaudeTurn(params: ClaudeTurnParams): AsyncGenerator<C
 					promptDone.abort();
 					const errors = message.subtype === "success" ? (message.is_error ? [message.result] : []) : message.errors;
 					const failed = errors.length > 0 || message.is_error;
-					if (rebuilt) { rebuilt.mapper.handle({ type: "message_stop" }); yield { type: "assistant", event: rebuilt.mapper.finish(failed && !failedAssistant ? { reason: "error", message: errors.join("; ") || "failed" } : undefined) }; rebuilt = undefined; }
+					if (rebuilt) yield* closeRebuilt(failed && !failedAssistant ? { reason: "error", message: errors.join("; ") || "failed" } : undefined, true);
 					else if (mapper.started && !mapper.stopped) yield { type: "assistant", event: mapper.finish(failed ? { reason: "error", message: errors.join("; ") || "failed" } : undefined) };
 					yield { type: "result", ok: !failed, errors, ...(failed ? { cause: describeFailure(resultFields(message)) } : {}), failedAssistant, ...(message.terminal_reason ? { terminalReason: message.terminal_reason } : {}) };
 					break;

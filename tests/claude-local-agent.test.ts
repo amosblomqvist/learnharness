@@ -775,3 +775,29 @@ describe("external review round 3: the plan-usage report carries only documented
 		assert.deepEqual(await usageOf({ status: "sk-ant-oat01-secret" }), []);
 	});
 });
+
+describe("external review round 3: a never-streamed message a failure closes is recorded empty (P1)", () => {
+	const SECRET = "sk-ant-oat01-ROUND3-REBUILT-SECRET";
+	it("an API-error message without its optional `error` field: its text reaches neither the record nor any event", async () => {
+		const { messages, events } = await runAgent([{ apiError: "authentication_failed", text: `API Error: 401 OAuth token ${SECRET} has expired`, errorField: false }]);
+		assert.deepEqual(messages.map((m) => (m as { role: string }).role), ["user", "assistant"]);
+		const last = messages[1] as AssistantMessage;
+		assert.equal(last.stopReason, "error"); assert.deepEqual(last.content, []);
+		assert.match(last.errorMessage ?? "", /not signed in.*No API key was used/);
+		assert.ok(!JSON.stringify(events).includes(SECRET), "no message_update carried the text");
+	});
+	it("an unstreamed partial that an error result closes is recorded empty with the masked error; a successful one keeps its blocks", async () => {
+		const failed = await runAgent([{ text: "Half a reply.", unstreamed: true }, { error: "server_error: overloaded" }]);
+		const last = failed.messages.at(-1) as AssistantMessage;
+		assert.equal(failed.messages.filter((m) => (m as { role: string }).role === "assistant").length, 1);
+		assert.equal(last.stopReason, "error"); assert.deepEqual(last.content, []);
+		assert.ok(!JSON.stringify(failed.events).includes("Half a reply."));
+		const ok = await runAgent([{ text: "Whole reply.", unstreamed: true }]);
+		assert.deepEqual((ok.messages.at(-1) as AssistantMessage).content, [{ type: "text", text: "Whole reply." }]);
+	});
+	it("a streamed partial closed by a failure keeps its content (model output, pi parity)", async () => {
+		const { messages } = await runAgent([{ text: "Streamed half." }, { error: "server_error: overloaded" }]);
+		const replies = messages.filter((m) => (m as { role: string }).role === "assistant") as AssistantMessage[];
+		assert.deepEqual(replies[0]!.content, [{ type: "text", text: "Streamed half." }]);
+	});
+});
