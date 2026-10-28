@@ -62,6 +62,10 @@ export interface FailureFields {
 	assistantError?: string;
 	/** An Error's class name, used only when nothing else is known. */
 	name?: string;
+	/** The app's own probe outcomes (src/server/claude-local.ts probeAccount):
+	 *  no answer within the bound, or Claude Code ended before answering. */
+	probeOutcome?: "timeout" | "exited_before_answering";
+	probeTimeoutMs?: number;
 }
 
 /** The stable fields of a thrown error (an SDK error carries errorClass,
@@ -69,7 +73,7 @@ export interface FailureFields {
  *  property (a probe failure that saw the startup result) is merged in. */
 export function errorFields(error: unknown): FailureFields {
 	if (!error || typeof error !== "object") return {};
-	const e = error as { errorClass?: unknown; exitCode?: unknown; signal?: unknown; code?: unknown; errorCode?: unknown; name?: unknown; fields?: FailureFields };
+	const e = error as { errorClass?: unknown; exitCode?: unknown; signal?: unknown; code?: unknown; errorCode?: unknown; name?: unknown; probeOutcome?: unknown; probeTimeoutMs?: unknown; fields?: FailureFields };
 	return {
 		...(member(ERROR_CLASSES, e.errorClass) ? { errorClass: e.errorClass as string } : {}),
 		...(Number.isInteger(e.exitCode) ? { exitCode: e.exitCode as number } : {}),
@@ -77,6 +81,8 @@ export function errorFields(error: unknown): FailureFields {
 		...(shaped(NODE_CODE, e.code) ? { code: e.code as string } : {}),
 		...(shaped(ERROR_CODE, e.errorCode) ? { errorCode: e.errorCode as string } : {}),
 		...(shaped(/^[A-Za-z]{0,40}Error$/, e.name) ? { name: e.name as string } : {}),
+		...(e.probeOutcome === "timeout" || e.probeOutcome === "exited_before_answering" ? { probeOutcome: e.probeOutcome } : {}),
+		...(Number.isInteger(e.probeTimeoutMs) ? { probeTimeoutMs: e.probeTimeoutMs as number } : {}),
 		...(e.fields ?? {}),
 	};
 }
@@ -103,6 +109,7 @@ export function assistantErrorField(error: unknown): FailureFields {
  *  "error_during_execution, startup failure: managed_settings_invalid". */
 export function describeFailure(fields: FailureFields): string {
 	const parts = [
+		fields.probeOutcome === "timeout" ? "timeout" : fields.probeOutcome === "exited_before_answering" ? "exited before answering" : undefined,
 		fields.errorClass, fields.subtype, fields.assistantError,
 		fields.terminalReason && fields.terminalReason !== "completed" ? `terminal reason ${fields.terminalReason}` : undefined,
 		fields.startupFailureReason ? `startup failure: ${fields.startupFailureReason}` : undefined,
@@ -121,6 +128,7 @@ export function describeFailure(fields: FailureFields): string {
  *  there are none. */
 export function failureSuffix(fields: FailureFields): string {
 	return [
+		fields.probeOutcome === "timeout" ? `no answer within ${Math.max(1, Math.round((fields.probeTimeoutMs ?? 20_000) / 1000))} s` : fields.probeOutcome === "exited_before_answering" ? "exited before answering" : undefined,
 		fields.startupFailureReason ? `startup failure: ${fields.startupFailureReason}` : undefined,
 		fields.errorClass === "control_request_failed" && fields.errorCode ? `control request failed: ${fields.errorCode}` : undefined,
 		fields.exitCode !== undefined ? `exit code ${fields.exitCode}` : undefined,

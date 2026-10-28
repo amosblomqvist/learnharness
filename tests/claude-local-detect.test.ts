@@ -50,6 +50,8 @@ type FakeQueryOptions = {
 	account?: Record<string, unknown>; models?: Array<Record<string, unknown>>; reject?: Error; hang?: boolean; gate?: Promise<void>;
 	/** Messages the iterator yields first (e.g. the zeroed result a startup failure writes), before a `reject`. */
 	yields?: unknown[];
+	/** The iterator ends at once (Claude Code exited before answering). */
+	endsAtOnce?: boolean;
 };
 /** A fake SDK query: records the options, answers the control requests,
  *  never spawns. The iterator ends when close() is called. */
@@ -60,7 +62,7 @@ function fakeQuery(fake: FakeQueryOptions = {}) {
 		calls.push({ prompt: params.prompt, options: params.options ?? {} });
 		let finish!: () => void;
 		const ended = new Promise<void>((resolve) => { finish = resolve; });
-		const iterator = (async function* () { yield* (fake.yields ?? []); await ended; })();
+		const iterator = (async function* () { yield* (fake.yields ?? []); if (!fake.endsAtOnce) await ended; })();
 		const handle = Object.assign(iterator, {
 			accountInfo: async () => { if (fake.gate) await fake.gate; if (fake.yields) await new Promise((resolve) => setTimeout(resolve, 10)); if (fake.reject) throw fake.reject; if (fake.hang) await new Promise<never>(() => {}); return fake.account ?? {}; },
 			supportedModels: async () => fake.models ?? [],
@@ -708,4 +710,46 @@ describe("external review round 3: the SDK's own debug log is never armed (P1)",
 			delete (globalThis as Record<symbol, unknown>)[Symbol.for("lh.claudeLocal.sdk")];
 		}
 	});
+});
+
+describe("round-3 review follow-up F: the probe's own outcomes keep their reason as a stable field", () => {
+	it("no answer within the bound: the error carries the outcome; the card and the log name it without free text", async () => {
+		const { errorFields, describeFailure, failureSuffix } = await import("../src/agent/claude-local/reported.ts");
+		const caught = await server.probeAccount(fakeQuery({ account: PLAN, hang: true }).query, { path: "/x", viaNode: false, cwd: directory }, 50).catch((error: unknown) => error);
+		const fields = errorFields(caught);
+		assert.equal(fields.probeOutcome, "timeout");
+		assert.equal(describeFailure(fields), "timeout");
+		assert.equal(failureSuffix(fields), "no answer within 1 s", "a sub-second bound still reads as a whole second");
+		assert.equal(failureSuffix({ probeOutcome: "timeout", probeTimeoutMs: 20_000 }), "no answer within 20 s");
+	});
+	it("exited before answering: the card says so and the log names the outcome", { skip: !posix }, async () => {
+		writeSettings({ version: 1, claudeLocal: { enabled: true, binaryPath: fakeBinary(path.join(directory, "f-exit")) } });
+		setClaudeQueryForTests(fakeQuery({ account: PLAN, hang: true, endsAtOnce: true }).query);
+		const lines: string[] = [];
+		const original = console.info;
+		console.info = (...args: unknown[]) => { lines.push(args.map(String).join(" ")); };
+		let status;
+		try { status = await server.refreshClaudeLocal({ force: true }); } finally { console.info = original; }
+		assert.equal(status.state, "unavailable");
+		assert.equal(status.error, "Claude Code could not be started. Check the path and run `claude` in a terminal. (exited before answering)");
+		assert.match(lines.join("\n"), /probe failed: exited before answering$/m);
+	});
+});
+
+describe("round-3 review follow-up G: status.account never carries an unconstrained value", () => {
+	const TOKEN = `sk-ant-oat01-${"Z9y8X7w6V5".repeat(10)}`;
+	const route = () => new Request("http://localhost:3000/api/claude-local", { headers: { origin: "http://localhost:3000", "x-learnharness-subscriptions": "1" } });
+	for (const [name, account, expected] of [
+		["a token-length subscriptionType", { subscriptionType: TOKEN, apiProvider: "firstParty" }, { state: "not-signed-in", account: { subscriptionType: "unrecognized", apiProvider: "firstParty" } }],
+		["a token-length apiProvider", { subscriptionType: "max", apiProvider: TOKEN }, { state: "third-party", account: { subscriptionType: "max", apiProvider: "unrecognized" } }],
+	] as const) {
+		it(`${name} reads as unrecognized in the status, its read and the GET body`, { skip: !posix }, async () => {
+			writeSettings({ version: 1, claudeLocal: { enabled: true, binaryPath: fakeBinary(path.join(directory, "g-account")) } });
+			setClaudeQueryForTests(fakeQuery({ account, models: [{ value: "x", resolvedModel: knownId(), displayName: "X" }] }).query);
+			const status = await server.refreshClaudeLocal({ force: true });
+			assert.equal(status.state, expected.state); assert.deepEqual(status.account, expected.account);
+			const body = await (await server.claudeLocalControlsResponse(route())).text();
+			for (const sink of [JSON.stringify(status), JSON.stringify(server.claudeLocalStatusNow()), body]) assert.ok(!sink.includes(TOKEN), sink);
+		});
+	}
 });

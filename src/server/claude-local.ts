@@ -217,12 +217,14 @@ export async function probeAccount(query: ClaudeQuery, launch: ClaudeLocalLaunch
 		},
 	});
 	let timer: ReturnType<typeof setTimeout> | undefined;
-	const timeout = new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error("Claude Code did not answer the account probe in time.")), timeoutMs); });
+	// The probe's own two outcomes carry a stable field (reported.ts): the card
+	// and the log name them without any free text.
+	const timeout = new Promise<never>((_, reject) => { timer = setTimeout(() => reject(Object.assign(new Error("Claude Code did not answer the account probe in time."), { probeOutcome: "timeout", probeTimeoutMs: timeoutMs })), timeoutMs); });
 	// The iterator must be driven for the control channel to pump; a
 	// surfaced error (spawn failure, exit) rejects the race.
 	let result: FailureFields = {};
 	const drain = (async () => { for await (const message of handle) { if (message.type === "result") result = resultFields(message); } })();
-	const failure = drain.then(() => { throw new Error("Claude Code exited before answering the account probe."); });
+	const failure = drain.then(() => { throw Object.assign(new Error("Claude Code exited before answering the account probe."), { probeOutcome: "exited_before_answering" }); });
 	try {
 		const [account, models] = await Promise.race([Promise.all([handle.accountInfo(), handle.supportedModels()]), timeout, failure]);
 		return { account, models };
