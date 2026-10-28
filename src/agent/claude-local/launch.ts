@@ -45,7 +45,10 @@ export function claudeLaunchOptions(launch: ClaudeLocalLaunch, base: NodeJS.Proc
 			const child = spawn(launch.viaNode && options.command === "node" ? command : options.command, options.args, {
 				cwd: options.cwd,
 				env: options.env as NodeJS.ProcessEnv,
-				stdio: ["pipe", "pipe", "pipe"],
+				// stderr is never a pipe: the app never reads it (it may carry
+				// anything Claude Code prints about its login), and an unread pipe
+				// stalls a child that writes more than the pipe holds.
+				stdio: ["pipe", "pipe", "ignore"],
 				signal: options.signal,
 				windowsHide: true,
 			});

@@ -656,3 +656,28 @@ describe("external review round 3: child-reported identifiers are constrained be
 		assert.equal(bridge.claudeLocalStatus()?.error, "Claude Code is set up to use an API key (unrecognized); this route only runs on a Claude plan login.");
 	});
 });
+
+describe("the child's stderr is never a pipe (an unread pipe stalls a chatty child)", () => {
+	/** A fake install that writes 300 KB to stderr before answering. */
+	function chatty(dir: string): string {
+		fs.mkdirSync(dir, { recursive: true });
+		const file = path.join(dir, "claude");
+		// One process (a pipe write blocks it once the pipe is full and unread).
+		fs.writeFileSync(file, `#!/usr/bin/env node\nprocess.stderr.write("x".repeat(300000));\nprocess.stdout.write("2.1.311 (Claude Code)\\n");\n`, { mode: 0o755 });
+		return file;
+	}
+	it("claude --version still answers", { skip: !posix }, async () => {
+		assert.equal(await server.claudeVersion({ path: chatty(path.join(directory, "chatty-a")), viaNode: false }, 5000), "2.1.311");
+	});
+	it("the SDK spawner's child runs to its end with no stderr stream at all", { skip: !posix }, async () => {
+		const file = chatty(path.join(directory, "chatty-b"));
+		const { spawnClaudeCodeProcess } = claudeLaunchOptions({ path: file, viaNode: false, cwd: directory }, { PATH: process.env.PATH ?? "" } as unknown as NodeJS.ProcessEnv);
+		const child = spawnClaudeCodeProcess!({ command: file, args: [], cwd: directory, env: { PATH: process.env.PATH ?? "" }, signal: new AbortController().signal }) as unknown as import("node:child_process").ChildProcess;
+		assert.equal(child.stderr, null);
+		let out = "";
+		child.stdout?.on("data", (chunk) => { out += String(chunk); });
+		const code = await new Promise<number | null>((resolve) => { const timer = setTimeout(() => { child.kill("SIGKILL"); resolve(-1); }, 5000); child.on("close", (c) => { clearTimeout(timer); resolve(c); }); });
+		assert.equal(code, 0, "the child was not stalled on a full stderr pipe");
+		assert.match(out, /2\.1\.311/);
+	});
+});

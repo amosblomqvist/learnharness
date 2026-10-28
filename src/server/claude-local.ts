@@ -148,7 +148,7 @@ export function claudeVersion(binary: { path: string; viaNode: boolean }, timeou
 		let timer: ReturnType<typeof setTimeout> | undefined;
 		const done = (value: string | null) => { if (!settled) { settled = true; clearTimeout(timer); resolve(value); } };
 		let child: ReturnType<typeof spawn>;
-		try { child = spawn(command, [...args, "--version"], { env: claudeChildEnv(process.env, extraEnv) as NodeJS.ProcessEnv, stdio: ["ignore", "pipe", "pipe"], windowsHide: true }); }
+		try { child = spawn(command, [...args, "--version"], { env: claudeChildEnv(process.env, extraEnv) as NodeJS.ProcessEnv, stdio: ["ignore", "pipe", "ignore"], windowsHide: true }); }
 		catch { done(null); return; }
 		timer = setTimeout(() => { try { child.kill("SIGKILL"); } catch { /* gone */ } done(null); }, timeoutMs);
 		child.stdout?.on("data", (chunk) => { if (output.length < VERSION_OUTPUT_CAP) output = (output + String(chunk)).slice(0, VERSION_OUTPUT_CAP); });
