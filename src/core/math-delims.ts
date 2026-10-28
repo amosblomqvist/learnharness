@@ -34,6 +34,13 @@ function replaceEscapedDollars(content: string): string {
 	return out;
 }
 
+/** Streaming Markdown reads `<` + letter or `/` as a raw HTML tag opener
+ * before math tokenizes, swallowing the rest of the message (`$a<b$`).
+ * TeX math mode ignores the inserted space, so the rendering is unchanged. */
+function separateTagOpeners(body: string): string {
+	return body.replace(/<(?=[A-Za-z/])/g, "< ");
+}
+
 /** Read old \(...\)/\[...\] syntax without touching literal content or
  * reparsing native math as Markdown. Dollar authoring remains native. */
 export function transformMathDelimiters(markdown: string): string {
@@ -41,9 +48,9 @@ export function transformMathDelimiters(markdown: string): string {
 	return readContentSpans(markdown).map(span => {
 		const start = offset; offset += span.raw.length;
 		if (span.kind !== "math") return span.raw;
-		if (span.open === "$") return "$" + replaceEscapedDollars(span.body) + span.close;
-		if (span.open !== "\\(" && span.open !== "\\[") return span.raw;
-		const body = span.body.trim();
+		if (span.open === "$") return "$" + replaceEscapedDollars(separateTagOpeners(span.body)) + span.close;
+		if (span.open !== "\\(" && span.open !== "\\[") return span.open + separateTagOpeners(span.body) + span.close;
+		const body = separateTagOpeners(span.body.trim());
 		if (!body) return span.raw;
 		if (span.open === "\\(") return `$$${body}$$`;
 		if (indented(markdown, start)) return `$$${body.replace(/\s*\n\s*/g, " ")}$$`;

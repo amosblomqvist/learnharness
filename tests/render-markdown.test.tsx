@@ -92,6 +92,15 @@ describe("math delimiter transform (pure unit)", () => {
 			"\\[ partial\n\nbut $$ok$$",
 		);
 	});
+
+	it("spaces a `<` before a letter or `/` in every math form, never in code", () => {
+		assert.equal(transformMathDelimiters("$P[-1<X\\le2]$"), "$P[-1< X\\le2]$");
+		assert.equal(transformMathDelimiters("$a</b$"), "$a< /b$");
+		assert.equal(transformMathDelimiters("$$\na<b\n$$"), "$$\na< b\n$$");
+		assert.equal(transformMathDelimiters("a \\(x<y\\) b"), "a $$x< y$$ b");
+		assert.equal(transformMathDelimiters("$a < b$ and $1<2$"), "$a < b$ and $1<2$");
+		assert.equal(transformMathDelimiters("run `a<b` here"), "run `a<b` here");
+	});
 });
 
 describe("render — standard dollar math + legacy compatibility (streamdown + KaTeX)", () => {
@@ -155,6 +164,17 @@ describe("render — standard dollar math + legacy compatibility (streamdown + K
 	it("leaves an unbalanced \\[ mid-stream untouched", () => {
 		const html = render("partial \\[ mid-stream");
 		assert.ok(!html.includes("katex") && !html.includes("$$"), "no math, no dollars");
+	});
+
+	it("keeps `<` + letter math intact in streaming mode (no HTML tag, no [blocked] link)", () => {
+		// Streaming (the default mode) read `<X` as a raw HTML opener: the
+		// rest of the message vanished behind "$P-1 [blocked]".
+		const html = renderToStaticMarkup(
+			<MessageResponse>{"$F_X(2)=0.60$이라고 하자. $P[-1<X\\le2]$는 얼마일까?"}</MessageResponse>,
+		);
+		assert.ok(!html.includes("[blocked]"), "no blocked-link indicator");
+		assert.ok(html.includes("는 얼마일까?"), "the text after the math survives");
+		assert.equal((html.match(/class="katex"/g) ?? []).length, 2, "both formulas render");
 	});
 
 	it("renders math inside headings and keeps the heading", () => {
