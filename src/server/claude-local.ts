@@ -23,7 +23,8 @@ import { CLAUDE_LOCAL, type ClaudeLocalState, type ClaudeLocalStatus } from "../
 import { emit } from "../core/events.ts";
 import { piModels } from "../agent/models.ts";
 import { claudeChildEnv } from "../agent/claude-local/env.ts";
-import { claudeCommand, claudeLaunchOptions, withoutStderr } from "../agent/claude-local/launch.ts";
+import { claudeCommand, claudeLaunchOptions } from "../agent/claude-local/launch.ts";
+import { describeFailure, errorFields, failureSuffix, resultFields, type FailureFields } from "../agent/claude-local/reported.ts";
 import { acceptClaudeLocalSnapshot, claudeLocalStatus as bridgeStatus, claudeLocalUsage, onClaudeLocalChange, type ClaudeLocalLaunch } from "../agent/claude-local/bridge.ts";
 import { loadClaudeQuery, type AccountInfo, type ClaudeQuery, type ModelInfo } from "../agent/claude-local/sdk.ts";
 import type { EffectiveSettings } from "../core/settings-resolution.ts";
@@ -182,6 +183,17 @@ async function* silence(signal: AbortSignal): AsyncGenerator<never> {
 }
 
 export interface ProbeResult { account: AccountInfo; models: ModelInfo[] }
+/** A failed probe: the cause's message (Claude Code's own text, in memory
+ *  for the sign-in wording check only) plus the stable fields of the cause
+ *  and of any result Claude Code wrote before it failed (a startup failure
+ *  writes one carrying startup_failure_reason). */
+export class ClaudeProbeFailure extends Error {
+	readonly fields: FailureFields;
+	constructor(cause: unknown, result: FailureFields) {
+		super(cause instanceof Error ? cause.message : String(cause));
+		this.fields = { ...errorFields(cause), ...result };
+	}
+}
 /** Ask the install who it is and what it offers, then close it. */
 export async function probeAccount(query: ClaudeQuery, launch: ClaudeLocalLaunch, timeoutMs = 20_000): Promise<ProbeResult> {
 	const abort = new AbortController();
@@ -198,11 +210,14 @@ export async function probeAccount(query: ClaudeQuery, launch: ClaudeLocalLaunch
 	const timeout = new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error("Claude Code did not answer the account probe in time.")), timeoutMs); });
 	// The iterator must be driven for the control channel to pump; a
 	// surfaced error (spawn failure, exit) rejects the race.
-	const drain = (async () => { for await (const message of handle) { void message; } })();
+	let result: FailureFields = {};
+	const drain = (async () => { for await (const message of handle) { if (message.type === "result") result = resultFields(message); } })();
 	const failure = drain.then(() => { throw new Error("Claude Code exited before answering the account probe."); });
 	try {
 		const [account, models] = await Promise.race([Promise.all([handle.accountInfo(), handle.supportedModels()]), timeout, failure]);
 		return { account, models };
+	} catch (error) {
+		throw new ClaudeProbeFailure(error, result);
 	} finally {
 		if (timer) clearTimeout(timer);
 		abort.abort();
@@ -318,22 +333,23 @@ const STATE_MESSAGES: Partial<Record<ClaudeLocalState, string>> = {
 /** SDK error classes (the `errorClass` field the SDK stamps on its
  *  errors) that describe the child process itself — spawn, exit, signal,
  *  startup timeout, abort — and are never a login verdict on their own. */
-const PROCESS_ERROR_CLASSES = new Set(["aborted", "executable_not_found", "executable_launch_failed", "process_exited_nonzero", "process_killed_by_signal", "initialize_timeout"]);
-/** A failed probe → a non-ready state. The SDK appends the child's stderr
- *  tail after ". stderr:" — that never reaches a client. Classified on the
- *  SDK's error class/name where present; the wording regex is only the
- *  fallback for a control request answered with an error. `transient`:
+const PROCESS_ERROR_CLASSES = new Set(["aborted", "executable_not_found", "executable_launch_failed", "spawn_failed", "process_error", "process_exited_nonzero", "process_killed_by_signal", "initialize_timeout"]);
+/** A failed probe → a non-ready state. What reaches the card is the
+ *  state's fixed sentence plus, at most, the failure's stable fields
+ *  (reported.ts failureSuffix: "exit code 2", "startup failure: …") —
+ *  never Claude Code's own text. Classified on the SDK's error class where
+ *  present; the sign-in wording check on the (in-memory) message is only
+ *  the fallback for a control request answered with an error. `transient`:
  *  the failure says nothing definitive about the install or its login. */
 function classifyProbeFailure(error: unknown): { state: "not-signed-in" | "unavailable"; error: string; transient: boolean } {
-	const raw = error instanceof Error ? error.message : String(error);
-	const hasStderr = raw.includes(". stderr:");
-	const message = (raw.split(". stderr:")[0] ?? "").split("\n")[0]?.slice(0, 200) ?? "";
-	const fields = (error !== null && typeof error === "object" ? error : {}) as { name?: unknown; errorClass?: unknown; exitCode?: unknown };
-	const unavailable = { state: "unavailable" as const, error: `${STATE_MESSAGES.unavailable} (${message})`, transient: true };
-	if (fields.name === "AbortError") return unavailable;
-	if (typeof fields.errorClass === "string" && PROCESS_ERROR_CLASSES.has(fields.errorClass)) {
-		// A logged-out CLI may simply exit 1 without a word before answering.
-		if (fields.exitCode === 1 && !hasStderr) return { state: "not-signed-in", error: "Claude Code exited before answering — it is probably not signed in, or it could not start. Run `claude` in a terminal, sign in with your Claude plan, then re-check.", transient: true };
+	const message = (error instanceof Error ? error.message : String(error)).split("\n")[0] ?? "";
+	const fields = errorFields(error);
+	const suffix = failureSuffix(fields);
+	const unavailable = { state: "unavailable" as const, error: suffix ? `${STATE_MESSAGES.unavailable} (${suffix})` : STATE_MESSAGES.unavailable!, transient: true };
+	if (fields.errorClass && PROCESS_ERROR_CLASSES.has(fields.errorClass)) {
+		// A logged-out CLI may simply exit 1 without a word before answering
+		// (the app never reads its stderr, so the exit code is all there is).
+		if (fields.exitCode === 1) return { state: "not-signed-in", error: "Claude Code exited before answering — it is probably not signed in, or it could not start. Run `claude` in a terminal, sign in with your Claude plan, then re-check.", transient: true };
 		return unavailable;
 	}
 	if (/auth|log.?in|sign.?in|credential|\b401\b|\b403\b/i.test(message)) return { state: "not-signed-in", error: STATE_MESSAGES["not-signed-in"]!, transient: false };
@@ -376,7 +392,8 @@ async function runProbe(settings: EffectiveSettings["claudeLocal"], state: Owner
 				}
 			}
 		} catch (error) {
-			console.info(`[claude-local] probe failed: ${withoutStderr(error instanceof Error ? error.message : String(error))}`);
+			// Stable fields only: the cause's message can be Claude Code's own text.
+			console.info(`[claude-local] probe failed: ${describeFailure(errorFields(error))}`);
 			const failure = classifyProbeFailure(error);
 			next = { ...next, state: failure.state, error: failure.error };
 			launch = null; models = [];

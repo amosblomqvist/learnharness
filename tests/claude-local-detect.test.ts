@@ -46,7 +46,11 @@ function fakeBinary(dir: string, version = "2.1.311", name = "claude"): string {
 	return file;
 }
 
-type FakeQueryOptions = { account?: Record<string, unknown>; models?: Array<Record<string, unknown>>; reject?: Error; hang?: boolean; gate?: Promise<void> };
+type FakeQueryOptions = {
+	account?: Record<string, unknown>; models?: Array<Record<string, unknown>>; reject?: Error; hang?: boolean; gate?: Promise<void>;
+	/** Messages the iterator yields first (e.g. the zeroed result a startup failure writes), before a `reject`. */
+	yields?: unknown[];
+};
 /** A fake SDK query: records the options, answers the control requests,
  *  never spawns. The iterator ends when close() is called. */
 function fakeQuery(fake: FakeQueryOptions = {}) {
@@ -56,9 +60,9 @@ function fakeQuery(fake: FakeQueryOptions = {}) {
 		calls.push({ prompt: params.prompt, options: params.options ?? {} });
 		let finish!: () => void;
 		const ended = new Promise<void>((resolve) => { finish = resolve; });
-		const iterator = (async function* () { await ended; })();
+		const iterator = (async function* () { yield* (fake.yields ?? []); await ended; })();
 		const handle = Object.assign(iterator, {
-			accountInfo: async () => { if (fake.gate) await fake.gate; if (fake.reject) throw fake.reject; if (fake.hang) await new Promise<never>(() => {}); return fake.account ?? {}; },
+			accountInfo: async () => { if (fake.gate) await fake.gate; if (fake.yields) await new Promise((resolve) => setTimeout(resolve, 10)); if (fake.reject) throw fake.reject; if (fake.hang) await new Promise<never>(() => {}); return fake.account ?? {}; },
 			supportedModels: async () => fake.models ?? [],
 			close: () => { closed++; finish(); },
 		});
@@ -324,7 +328,7 @@ describe("review fixes: detection, the version gate and the probe", () => {
 		writeSettings({ version: 1, claudeLocal: { enabled: true, binaryPath: fakeBinary(path.join(directory, "n0b")) } });
 		setClaudeQueryForTests(fakeQuery({ reject: sdkError("Claude Code process exited with code 2. stderr: oauth refresh failed for someone", { errorClass: "process_exited_nonzero", exitCode: 2 }) }).query);
 		const crashed = await server.refreshClaudeLocal({ force: true });
-		assert.equal(crashed.state, "unavailable"); assert.match(crashed.error ?? "", /exited with code 2\)$/); assert.doesNotMatch(crashed.error ?? "", /stderr|oauth|someone/);
+		assert.equal(crashed.state, "unavailable"); assert.match(crashed.error ?? "", /could not be started\. .*\(exit code 2\)$/); assert.doesNotMatch(crashed.error ?? "", /stderr|oauth|someone/);
 		setClaudeQueryForTests(fakeQuery({ reject: new Error("Unexpected token < in JSON at position 0") }).query);
 		assert.equal((await server.refreshClaudeLocal({ force: true })).state, "unavailable");
 		setClaudeQueryForTests(fakeQuery({ reject: sdkError("Claude Code process exited with code 1", { errorClass: "process_exited_nonzero", exitCode: 1 }) }).query);
@@ -489,7 +493,7 @@ describe("external review: the probe never logs the child's stderr (P1)", () => 
 		try { status = await server.refreshClaudeLocal({ force: true }); } finally { Object.assign(console, original); }
 		assert.equal(status.state, "unavailable");
 		const logged = lines.join("\n");
-		assert.match(logged, /probe failed: Claude Code process exited with code 2/);
+		assert.match(logged, /probe failed: process_exited_nonzero, exit code 2/);
 		assert.ok(!logged.includes(SECRET) && !logged.includes("oauth refresh"), logged);
 		assert.ok(!JSON.stringify(status).includes(SECRET));
 		assert.equal(server.claudeLocalStatusNow().error?.includes(SECRET), false);
@@ -580,5 +584,41 @@ describe("external review round 3: a probe started before an adopted API-key ver
 		release(); await stale;
 		assert.equal(server.claudeLocalStatusNow().revision, back.revision, "the stale probe landed without effect");
 		assert.ok(bridge.claudeLocalConnected());
+	});
+});
+
+describe("external review round 3: a probe failure's own text never reaches a log, the status or the card (P1)", () => {
+	const SECRET = "sk-ant-oat01-ROUND3-PROBE-SECRET";
+	const route = () => new Request("http://localhost:3000/api/claude-local", { headers: { origin: "http://localhost:3000", "x-learnharness-subscriptions": "1" } });
+	async function captured<T>(run: () => Promise<T>): Promise<{ value: T; logged: string }> {
+		const lines: string[] = [];
+		const original = { error: console.error, info: console.info, warn: console.warn, log: console.log };
+		const capture = (...args: unknown[]) => { lines.push(args.map(String).join(" ")); };
+		Object.assign(console, { error: capture, info: capture, warn: capture, log: capture });
+		try { return { value: await run(), logged: lines.join("\n") }; } finally { Object.assign(console, original); }
+	}
+	const cases: Array<{ name: string; fake: FakeQueryOptions; error: string; logs: RegExp }> = [
+		{ name: "a control request answered with Claude Code's own text", fake: { reject: new Error(`startup failed: ${SECRET}`) }, error: "Claude Code could not be started. Check the path and run `claude` in a terminal.", logs: /probe failed: unclassified failure \(Error\)$/m },
+		{ name: "a control request failure with a CLI error code", fake: { reject: sdkError(`settings refused: ${SECRET}`, { errorClass: "control_request_failed", errorCode: "managed_settings_invalid" }) }, error: "Claude Code could not be started. Check the path and run `claude` in a terminal. (control request failed: managed_settings_invalid)", logs: /probe failed: control_request_failed, error code managed_settings_invalid$/m },
+		{ name: "a startup failure (its result first, then the error result)", fake: { yields: [{ type: "result", subtype: "error_during_execution", is_error: true, errors: [`managed settings invalid: ${SECRET}`], startup_failure_reason: "managed_settings_invalid" }], reject: sdkError(`Claude Code returned an error result: managed settings invalid: ${SECRET}`, { errorClass: "error_result" }) }, error: "Claude Code could not be started. Check the path and run `claude` in a terminal. (startup failure: managed_settings_invalid)", logs: /probe failed: error_result, error_during_execution, startup failure: managed_settings_invalid$/m },
+	];
+	for (const c of cases) {
+		it(`${c.name}: the card gets the fixed sentence and stable fields only; so does the log`, { skip: !posix }, async () => {
+			writeSettings({ version: 1, claudeLocal: { enabled: true, binaryPath: fakeBinary(path.join(directory, "r3-probe")) } });
+			setClaudeQueryForTests(fakeQuery(c.fake).query);
+			const { value: status, logged } = await captured(() => server.refreshClaudeLocal({ force: true }));
+			assert.equal(status.state, "unavailable"); assert.equal(status.error, c.error);
+			assert.match(logged, c.logs, logged);
+			const body = await (await server.claudeLocalControlsResponse(route())).text();
+			for (const sink of [logged, JSON.stringify(status), JSON.stringify(server.claudeLocalStatusNow()), body]) assert.ok(!sink.includes(SECRET), sink);
+		});
+	}
+	it("the keep-last-ready log after a transient failure carries no failure text either", { skip: !posix }, async () => {
+		await readyRoute("r3-keep");
+		setClaudeQueryForTests(fakeQuery({ reject: new Error(`startup failed: ${SECRET}`) }).query);
+		const { value: kept, logged } = await captured(() => server.refreshClaudeLocal({ maxAgeMs: 0 }));
+		assert.equal(kept.state, "ready");
+		assert.match(logged, /keeping the last ready status/);
+		assert.ok(!logged.includes(SECRET), logged);
 	});
 });

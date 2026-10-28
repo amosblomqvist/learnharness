@@ -55,15 +55,22 @@ export type FakeStep =
 		 *  carries this parent_tool_use_id, and its tool calls never run here
 		 *  (the sub-agent's own loop would run them). */ parentToolUseId?: string;
 	}
-	| { error: string }
-	/** Claude Code's synthetic API-failure assistant message (e.g. rate_limit) followed by an is_error result. */
-	| { apiError: string; text: string }
+	/** An error result. `startupFailureReason` makes it the zeroed result a
+	 *  run writes on a known startup failure (whose `errors` the SDK
+	 *  documents as "the same text as stderr"). */
+	| { error: string; startupFailureReason?: string }
+	/** Claude Code's synthetic API-failure assistant message (e.g. rate_limit)
+	 *  followed by an is_error result; `errorField: false` sends it without
+	 *  its optional `error` field (the SDK types the field as optional). */
+	| { apiError: string; text: string; errorField?: false }
 	/** Claude Code's `system/api_retry` notice (a retryable API failure it retries itself). */
 	| { apiRetry: string }
 	/** The child crashes; `stderr` is what it printed first: delivered to an
 	 *  `options.stderr` callback when one is set and appended to the error as
-	 *  the SDK does (". stderr: <tail>"). */
-	| { crash: string; stderr?: string }
+	 *  the SDK's built-in spawner does (". stderr: <tail>"). `exitCode`
+	 *  stamps the SDK's own fields on the error (errorClass
+	 *  process_exited_nonzero + exitCode), as the real SDK does for an exit. */
+	| { crash: string; stderr?: string; exitCode?: number; errorClass?: string }
 	/** The child prints to stderr (reaches only an `options.stderr` callback, as in the SDK). */
 	| { emitStderr: string };
 
@@ -156,19 +163,21 @@ export function fakeClaude(script: FakeStep[] | ((blocks: string[], turn: number
 				if ("emitStderr" in step) { (options.stderr as ((data: string) => void) | undefined)?.(step.emitStderr); continue; }
 				if ("crash" in step) {
 					if (step.stderr) (options.stderr as ((data: string) => void) | undefined)?.(step.stderr);
-					throw new Error(step.stderr ? `${step.crash}. stderr: ${step.stderr}` : step.crash);
+					const error = new Error(step.stderr ? `${step.crash}. stderr: ${step.stderr}` : step.crash);
+					const errorClass = step.errorClass ?? (step.exitCode !== undefined ? "process_exited_nonzero" : undefined);
+					throw Object.assign(error, errorClass ? { errorClass } : {}, step.exitCode !== undefined ? { exitCode: step.exitCode } : {});
 				}
 				if ("apiRetry" in step) {
 					yield { type: "system", subtype: "api_retry", attempt: 1, max_retries: 10, retry_delay_ms: 1, error_status: 529, error: step.apiRetry, uuid: `u-${++counter}`, session_id: sessionId } as unknown as SDKMessage;
 					continue;
 				}
 				if ("apiError" in step) {
-					yield { type: "assistant", message: { id: `msg_${++counter}`, type: "message", role: "assistant", model: String(options.model ?? ""), content: [{ type: "text", text: step.text }], stop_reason: "end_turn", stop_sequence: null, usage: { input_tokens: 10, output_tokens: 1 } }, error: step.apiError, parent_tool_use_id: null, uuid: `u-${++counter}`, session_id: sessionId } as unknown as SDKMessage;
+					yield { type: "assistant", message: { id: `msg_${++counter}`, type: "message", role: "assistant", model: String(options.model ?? ""), content: [{ type: "text", text: step.text }], stop_reason: "end_turn", stop_sequence: null, usage: { input_tokens: 10, output_tokens: 1 } }, ...(step.errorField === false ? {} : { error: step.apiError }), parent_tool_use_id: null, uuid: `u-${++counter}`, session_id: sessionId } as unknown as SDKMessage;
 					yield { type: "result", subtype: "success", duration_ms: 1, duration_api_ms: 1, is_error: true, num_turns: 1, result: step.text, stop_reason: null, total_cost_usd: FAKE_COST_USD, usage: {} as never, modelUsage: {}, permission_denials: [], terminal_reason: "api_error", uuid: `u-${++counter}`, session_id: sessionId } as unknown as SDKMessage;
 					return;
 				}
 				if ("error" in step) {
-					yield { type: "result", subtype: "error_during_execution", duration_ms: 1, duration_api_ms: 1, is_error: true, num_turns: 1, stop_reason: null, total_cost_usd: FAKE_COST_USD, usage: {} as never, modelUsage: {}, permission_denials: [], errors: [step.error], uuid: `u-${++counter}`, session_id: sessionId } as unknown as SDKMessage;
+					yield { type: "result", subtype: "error_during_execution", duration_ms: 1, duration_api_ms: 1, is_error: true, num_turns: 1, stop_reason: null, total_cost_usd: FAKE_COST_USD, usage: {} as never, modelUsage: {}, permission_denials: [], errors: [step.error], ...(step.startupFailureReason ? { startup_failure_reason: step.startupFailureReason } : {}), uuid: `u-${++counter}`, session_id: sessionId } as unknown as SDKMessage;
 					return;
 				}
 				const id = `msg_${++counter}`;

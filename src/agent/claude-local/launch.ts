@@ -57,12 +57,3 @@ export function claudeLaunchOptions(launch: ClaudeLocalLaunch, base: NodeJS.Proc
 		},
 	};
 }
-
-/** The SDK appends the child's stderr tail to its process errors
- *  (". stderr: …"). That tail may carry anything Claude Code prints about
- *  its login, so it is cut before a message is logged, classified or
- *  recorded — nothing from the child's stderr is ever persisted. */
-export function withoutStderr(message: string): string {
-	const index = message.indexOf(". stderr:");
-	return index < 0 ? message : message.slice(0, index);
-}

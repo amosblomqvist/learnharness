@@ -30,7 +30,8 @@ import type { AgentToolResult, AgentTool, ThinkingLevel } from "@earendil-works/
 import type { AssistantMessage, AssistantMessageEvent, Model } from "@earendil-works/pi-ai";
 import { CLAUDE_LOCAL, type ClaudeLocalSystemPromptMode, type ClaudeLocalUsageReport } from "../../core/contracts/claude-local.ts";
 import type { ClaudeLocalLaunch } from "./bridge.ts";
-import { claudeLaunchOptions, withoutStderr } from "./launch.ts";
+import { claudeLaunchOptions } from "./launch.ts";
+import { describeFailure, errorFields, reportedApiKeySource, reportedMcpStatus, resultFields } from "./reported.ts";
 import { ClaudeStreamMapper } from "./stream-mapper.ts";
 import { createToolBridge } from "./tools.ts";
 import { toolPrefixNote } from "./transcript.ts";
@@ -43,7 +44,16 @@ export type ClaudeTurnEvent =
 	| { type: "usage"; report: ClaudeLocalUsageReport }
 	/** Claude Code finished the turn (end of its loop): the last assistant
 	 *  message's stop reason decides what the agent does next. */
-	| { type: "result"; ok: boolean; errors: string[]; /** The failure already reached the record as an error assistant message. */ failedAssistant?: boolean; terminalReason?: string };
+	| {
+		type: "result"; ok: boolean;
+		/** Claude Code's own failure text: in memory only, for the masked
+		 *  wording (claudeLocalError) — never logged, never shown raw. */
+		errors: string[];
+		/** The failure's stable fields, rendered for the server log
+		 *  (reported.ts describeFailure); never Claude Code's own text. */
+		cause?: string;
+		/** The failure already reached the record as an error assistant message. */ failedAssistant?: boolean; terminalReason?: string;
+	};
 
 /** One completed call of a tool batch, from the bridge's own record of it:
  *  Claude Code's tool_use id, the BARE name and the arguments it was called with. */
@@ -200,9 +210,9 @@ export async function* runClaudeTurn(params: ClaudeTurnParams): AsyncGenerator<C
 	try { handle = params.query({ prompt: promptOf(params.blocks, AbortSignal.any([abort.signal, promptDone.signal])), options }); }
 	catch (error) {
 		signal.removeEventListener("abort", onAbort);
-		const detail = withoutStderr(error instanceof Error ? error.message : String(error));
+		const detail = error instanceof Error ? error.message : String(error);
 		yield* failedMessage("error", detail);
-		yield { type: "result", ok: false, errors: [detail] };
+		yield { type: "result", ok: false, errors: [detail], cause: describeFailure(errorFields(error)) };
 		return;
 	}
 	// Pump the SDK's iterator into the same queue as the bridge's events.
@@ -246,27 +256,30 @@ export async function* runClaudeTurn(params: ClaudeTurnParams): AsyncGenerator<C
 					// refused before the first model call (the route only runs on a
 					// Claude plan login), and the route's status goes not-ready.
 					if (message.subtype !== "init") break;
-					const source = message.apiKeySource;
+					const source = reportedApiKeySource(message.apiKeySource);
 					let detail: string | undefined;
+					let cause: string | undefined;
 					if (source && source !== "none") {
 						params.onApiKeySource?.(source);
 						detail = `Claude Code would use an API key (apiKeySource: ${source})`;
+						cause = `API key source ${source}`;
 					} else if (bridge) {
 						// The lesson's tools exist only through the app's in-process server:
 						// unless init reports it connected, the turn would run as a
 						// text-only lesson — refused before the first model call (the raw
 						// status goes to the server log; the learner sees the generic text).
-						const status = message.mcp_servers?.find((server) => server.name === serverName)?.status;
+						const status = reportedMcpStatus(message.mcp_servers?.find((server) => server.name === serverName)?.status);
 						if (status !== "connected") {
-							detail = `the LearnHarness tool server ${status ? `did not connect (status: ${status})` : "was not reported"} at Claude Code's init`;
-							console.error(`[claude-local] ${detail}`);
+							cause = `the LearnHarness tool server ${status ? `did not connect (status: ${status})` : "was not reported"} at Claude Code's init`;
+							detail = cause;
+							console.error(`[claude-local] ${cause}`);
 						}
 					}
 					if (!detail) break;
 					sawResult = true;
 					if (mapper.started && !mapper.stopped) yield { type: "assistant", event: mapper.finish({ reason: "error", message: detail }) };
 					else yield* failedMessage("error", detail);
-					yield { type: "result", ok: false, errors: [detail], failedAssistant: true };
+					yield { type: "result", ok: false, errors: [detail], ...(cause ? { cause } : {}), failedAssistant: true };
 					break pump;
 				}
 				case "stream_event": {
@@ -334,20 +347,22 @@ export async function* runClaudeTurn(params: ClaudeTurnParams): AsyncGenerator<C
 					const failed = errors.length > 0 || message.is_error;
 					if (rebuilt) { rebuilt.mapper.handle({ type: "message_stop" }); yield { type: "assistant", event: rebuilt.mapper.finish(failed && !failedAssistant ? { reason: "error", message: errors.join("; ") || "failed" } : undefined) }; rebuilt = undefined; }
 					else if (mapper.started && !mapper.stopped) yield { type: "assistant", event: mapper.finish(failed ? { reason: "error", message: errors.join("; ") || "failed" } : undefined) };
-					yield { type: "result", ok: !failed, errors, failedAssistant, ...(message.terminal_reason ? { terminalReason: message.terminal_reason } : {}) };
+					yield { type: "result", ok: !failed, errors, ...(failed ? { cause: describeFailure(resultFields(message)) } : {}), failedAssistant, ...(message.terminal_reason ? { terminalReason: message.terminal_reason } : {}) };
 					break;
 				}
 				default: break;
 			}
 		}
 		if (!sawResult) {
-			const cause = failure instanceof Error ? failure.message : failure ? String(failure) : signal.aborted ? "aborted" : "Claude Code exited without a result";
+			const detail = failure instanceof Error ? failure.message : failure ? String(failure) : signal.aborted ? "aborted" : "Claude Code exited without a result";
 			const reason = signal.aborted ? "aborted" : "error";
-			const detail = withoutStderr(cause);
-			if (reason === "error") console.error(`[claude-local] Claude Code turn ended without a result: ${detail}`);
+			// The log gets the failure's stable fields only (an SDK error's message
+			// can carry Claude Code's own text — an error result, a control error).
+			const cause = failure ? describeFailure(errorFields(failure)) : detail;
+			if (reason === "error") console.error(`[claude-local] Claude Code turn ended without a result: ${cause}`);
 			if (mapper.started && !mapper.stopped) yield { type: "assistant", event: mapper.finish({ reason, message: detail }) };
 			else if (reason === "error" && !stopRequested) yield* failedMessage(reason, detail);
-			yield { type: "result", ok: false, errors: reason === "aborted" ? [] : [detail] };
+			yield { type: "result", ok: false, errors: reason === "aborted" ? [] : [detail], ...(reason === "error" ? { cause } : {}) };
 		}
 	} finally {
 		signal.removeEventListener("abort", onAbort);

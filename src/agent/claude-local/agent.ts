@@ -29,7 +29,7 @@ import type { AdmissionScope, NoDispatchKind, SubscriptionDispatchLifecycle } fr
 import { markUnadmittedUsage } from "../subscription-request-cycle.ts";
 import * as bridge from "./bridge.ts";
 import type { ClaudeLocalLaunch } from "./bridge.ts";
-import { withoutStderr } from "./launch.ts";
+import { describeFailure, errorFields } from "./reported.ts";
 import { claudeLocalError, runClaudeTurn } from "./run.ts";
 import { loadClaudeQuery, type ClaudeQuery, type SDKMessage } from "./sdk.ts";
 import { emptyAssistant } from "./stream-mapper.ts";
@@ -176,9 +176,11 @@ export class ClaudeLocalAgent implements LiveAgent {
 		let scope: ClaudeLocalScope | undefined;
 		let committed = false;
 		// The failure path: an assistant error message (pi's hard exit).
-		const fail = async (message: string, reason: "error" | "aborted" = "error") => {
-			// The raw cause goes to the server log (the learner sees the masked text).
-			if (reason === "error") console.error(`[claude-local] turn failed: ${withoutStderr(message)}`);
+		const fail = async (message: string, reason: "error" | "aborted" = "error", logged: string = message) => {
+			// The server log gets `logged`: the app's own wording, or a failure's
+			// stable fields (run.ts `cause`) — never Claude Code's own text, which
+			// only feeds the masked wording the learner sees.
+			if (reason === "error") console.error(`[claude-local] turn failed: ${logged}`);
 			const error: AssistantMessage = { ...emptyAssistant(model, reason), thinkingLevel: this.state.thinkingLevel, errorMessage: claudeLocalError(message) };
 			if (!committed) { markUnadmittedUsage(error.usage); options.lifecycle?.noDispatch(runtime.denial(scope, controller, signal.aborted, background)); }
 			await emit({ type: "message_start", message: error });
@@ -369,13 +371,17 @@ export class ClaudeLocalAgent implements LiveAgent {
 					// Claude Code's own error message; otherwise it is reported here.
 					// An abort — the caller's or the route's own (a re-probe, consent
 					// off) — is a cancelled turn: the masked cancelled message, then end.
-					if (!event.ok) return current?.stopReason === "error" || event.failedAssistant ? "end" : combined.aborted ? await fail("aborted", "aborted") : await fail(event.errors.join("; ") || "failed", "error");
+					if (!event.ok) return current?.stopReason === "error" || event.failedAssistant ? "end" : combined.aborted ? await fail("aborted", "aborted") : await fail(event.errors.join("; ") || "failed", "error", event.cause ?? "unclassified failure");
 					return combined.aborted ? "end" : "continue";
 				}
 			}
 			return "continue";
 		} catch (error) {
-			return await fail(error instanceof Error ? error.message : String(error), signal.aborted ? "aborted" : "error");
+			// Thrown here: the app's own failures (an SDK error never propagates this
+			// far, but if one did, only its stable fields would be logged).
+			const message = error instanceof Error ? error.message : String(error);
+			const fields = errorFields(error);
+			return await fail(message, signal.aborted ? "aborted" : "error", fields.errorClass ? describeFailure(fields) : message);
 		} finally {
 			release();
 		}

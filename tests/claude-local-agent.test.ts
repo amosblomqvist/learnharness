@@ -593,8 +593,8 @@ describe("external review: the child's stderr is never persisted (P1)", () => {
 		try { return { value: await run(), logged: lines.join("\n") }; } finally { Object.assign(console, original); }
 	}
 	it("a crash whose SDK error carries a stderr tail logs and records none of it; no stderr callback is passed", async () => {
-		const { value, logged } = await captured(() => runAgent([{ emitStderr: `token=${SECRET}\n` }, { crash: "Claude Code process exited with code 2", stderr: `oauth refresh failed: ${SECRET}` }]));
-		assert.match(logged, /\[claude-local\] .*exited with code 2/, "the cause is still logged");
+		const { value, logged } = await captured(() => runAgent([{ emitStderr: `token=${SECRET}\n` }, { crash: "Claude Code process exited with code 2", stderr: `oauth refresh failed: ${SECRET}`, exitCode: 2 }]));
+		assert.match(logged, /\[claude-local\] .*process_exited_nonzero, exit code 2/, "the cause's stable fields are still logged");
 		assert.ok(!logged.includes(SECRET) && !logged.includes("oauth refresh"), logged);
 		assert.ok(!JSON.stringify(value.messages).includes(SECRET));
 		assert.ok(!JSON.stringify(value.events).includes(SECRET));
@@ -715,5 +715,45 @@ describe("a failure that is its own message never overwrites the message before 
 		assert.deepEqual(messages.map((m) => (m as { role: string }).role), ["user", "assistant", "toolResult", "assistant"]);
 		assert.deepEqual(((messages[1] as AssistantMessage).content[0] as { text: string }).text, "Checking.");
 		assert.equal((messages[3] as AssistantMessage).stopReason, "error");
+	});
+});
+
+describe("external review round 3: Claude Code's own failure text never reaches a log or the record (P1)", () => {
+	const SECRET = "sk-ant-oat01-ROUND3-RESULT-ERROR-SECRET";
+	async function captured<T>(run: () => Promise<T>): Promise<{ value: T; logged: string }> {
+		const lines: string[] = [];
+		const original = { error: console.error, info: console.info, warn: console.warn, log: console.log };
+		const capture = (...args: unknown[]) => { lines.push(args.map((a) => a instanceof Error ? `${a.message} ${a.stack}` : typeof a === "string" ? a : JSON.stringify(a)).join(" ")); };
+		Object.assign(console, { error: capture, info: capture, warn: capture, log: capture });
+		try { return { value: await run(), logged: lines.join("\n") }; } finally { Object.assign(console, original); }
+	}
+	const cases: Array<{ name: string; steps: FakeStep[]; fake?: FakeAccount; logs: RegExp }> = [
+		{ name: "an error result's errors", steps: [{ error: SECRET }], logs: /turn failed: error_during_execution$/m },
+		{ name: "a startup failure's result (errors = the stderr text)", steps: [{ error: `managed settings invalid: ${SECRET}`, startupFailureReason: "managed_settings_invalid" }], logs: /turn failed: error_during_execution, startup failure: managed_settings_invalid$/m },
+		{ name: "an iterator rejected with the error result's text", steps: [{ crash: `Claude Code returned an error result: startup failed: ${SECRET}`, errorClass: "error_result" }], logs: /turn ended without a result: error_result$/m },
+		{ name: "a tool server status that is not a documented status", steps: [{ text: "never" }], fake: { mcpStatus: SECRET }, logs: /tool server did not connect \(status: unrecognized\)/ },
+		{ name: "an API error message's own text", steps: [{ apiError: "authentication_failed", text: `OAuth token ${SECRET} has expired` }], logs: /^$/ },
+	];
+	for (const c of cases) {
+		it(`${c.name}: the log carries only stable fields; the record and the events carry none of the text`, async () => {
+			const { value, logged } = await captured(() => runAgent(c.steps, { fake: c.fake }));
+			assert.ok(!logged.includes(SECRET), logged);
+			assert.match(logged, c.logs, logged);
+			assert.ok(!JSON.stringify(value.messages).includes(SECRET), "record");
+			assert.ok(!JSON.stringify(value.events).includes(SECRET), "events");
+			assert.equal((value.messages.at(-1) as AssistantMessage).stopReason, "error");
+		});
+	}
+	it("an apiKeySource that is not a documented value reaches the route's status as \"unrecognized\"", async () => {
+		const noted: string[] = [];
+		const { value, logged } = await captured(() => runAgent([{ text: "never" }], { fake: { apiKeySource: SECRET }, runtime: { noteApiKeySource: (source) => { noted.push(source); } } }));
+		assert.deepEqual(noted, ["unrecognized"]);
+		assert.ok(!logged.includes(SECRET) && !JSON.stringify(value.messages).includes(SECRET));
+	});
+	it("the tool-less stream masks an error result without logging it", async () => {
+		const fake = fakeClaude([{ error: SECRET }]);
+		const { value, logged } = await captured(async () => claudeLocalStream(() => false, undefined, runtimeFor(async () => fake.query))(model, normalizeContext({ messages: [{ role: "user", content: "x", timestamp: 1 }] })).result());
+		assert.equal(value.stopReason, "error");
+		assert.ok(!logged.includes(SECRET) && !JSON.stringify(value).includes(SECRET));
 	});
 });
