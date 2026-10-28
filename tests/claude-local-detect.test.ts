@@ -543,3 +543,42 @@ describe("external review: isolation by construction (G1)", () => {
 		assert.deepEqual([probe.tools, probe.settingSources, probe.strictMcpConfig, probe.persistSession], [[], [], true, false], "the login probe is isolated");
 	});
 });
+
+describe("external review round 3: a probe started before an adopted API-key verdict never re-admits (P3)", () => {
+	const plan = (gate?: Promise<void>) => fakeQuery({ account: PLAN, models: [{ value: "x", resolvedModel: knownId(), displayName: "X" }], ...(gate ? { gate } : {}) });
+
+	it("the held probe and every caller that joined it resolve to the adopted verdict; the route stays not-ready", { skip: !posix }, async () => {
+		const { status: ready } = await readyRoute("p3-race-a");
+		let release!: () => void;
+		const slow = plan(new Promise<void>((resolve) => { release = resolve; }));
+		setClaudeQueryForTests(slow.query);
+		const p0 = server.refreshClaudeLocal({ maxAgeMs: 0 });
+		await until(() => slow.calls.length === 1);
+		const p1 = server.refreshClaudeLocal({ maxAgeMs: 0 });
+		bridge.noteClaudeLocalApiKeySource("ANTHROPIC_API_KEY");
+		release();
+		const [r0, r1] = await Promise.all([p0, p1]);
+		assert.equal(r0.state, "api-key"); assert.equal(r1.state, "api-key");
+		const now = server.claudeLocalStatusNow();
+		assert.equal(now.state, "api-key"); assert.equal(now.revision, ready.revision);
+		assert.equal(bridge.claudeLocalConnected(), false); assert.deepEqual(bridge.claudeLocalModels(), []);
+	});
+
+	it("a Re-check pressed while that stale probe still runs starts a fresh probe and re-admits under a new revision", { skip: !posix }, async () => {
+		const { status: ready } = await readyRoute("p3-race-b");
+		let release!: () => void;
+		const slow = plan(new Promise<void>((resolve) => { release = resolve; }));
+		setClaudeQueryForTests(slow.query);
+		const stale = server.refreshClaudeLocal({ maxAgeMs: 0 });
+		await until(() => slow.calls.length === 1);
+		bridge.noteClaudeLocalApiKeySource("ANTHROPIC_API_KEY");
+		const fresh = plan();
+		setClaudeQueryForTests(fresh.query);
+		const back = await server.refreshClaudeLocal({ force: true });
+		assert.equal(fresh.calls.length, 1, "the Re-check ran its own probe instead of joining the superseded one");
+		assert.equal(back.state, "ready"); assert.ok(back.revision > ready.revision);
+		release(); await stale;
+		assert.equal(server.claudeLocalStatusNow().revision, back.revision, "the stale probe landed without effect");
+		assert.ok(bridge.claudeLocalConnected());
+	});
+});

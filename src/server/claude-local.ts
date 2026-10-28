@@ -261,9 +261,11 @@ interface Owner {
 	settings: EffectiveSettings["claudeLocal"] | null;
 	revision: number;
 	/** Bumped by every probe start and every synchronous authority change
-	 *  (invalidateClaudeLocal): a probe applies its result only while its
-	 *  ticket is still the latest generation — an older, slower probe can
-	 *  never overwrite a newer verdict or a "turn it off". */
+	 *  (invalidateClaudeLocal, a turn's adopted API-key verdict): a probe
+	 *  applies its result only while its ticket is still the latest
+	 *  generation — an older, slower probe can never overwrite a newer
+	 *  verdict or a "turn it off" — and only a probe of the latest
+	 *  generation is joined (a superseded one runs out and is discarded). */
 	generation: number;
 }
 const KEY = Symbol.for("lh.claudeLocal.owner");
@@ -287,11 +289,13 @@ function owner(): Owner {
  *  its own status — no launch, no models, same revision — so neither the
  *  last-known-good path of a transient probe failure nor an in-place
  *  consent/prompt-mode write can re-publish the ready status the turn
- *  disproved. Only a probe re-admits (its verdict changes the authority,
- *  so the revision moves). */
+ *  disproved. It is a new generation: a probe started before the note is
+ *  discarded when it lands, so only a probe started after it re-admits
+ *  (its verdict changes the authority, so the revision moves). */
 function adoptApiKeyVerdict(state: Owner): void {
 	const noted = bridgeStatus();
 	if (!noted || noted.state !== "api-key" || state.status.state !== "ready" || noted.revision !== state.status.revision) return;
+	state.generation++;
 	state.status = { ...noted }; state.launch = null; state.models = [];
 	emit("subscriptions-changed", {});
 }
@@ -439,7 +443,10 @@ export async function refreshClaudeLocal(options: { force?: boolean; maxAgeMs?: 
 	if (options.cachedOnly && !options.force && (!settings.enabled || (state.status.probedAt !== null && key === state.settingsKey))) return state.status;
 	const fresh = state.status.probedAt !== null && Date.now() - Date.parse(state.status.probedAt) < (options.maxAgeMs ?? STATUS_TTL_MS);
 	if (!options.force && key === state.settingsKey && fresh) return state.status;
-	if (state.inFlight && key === state.settingsKey) {
+	// Join only a probe of the current generation: one a later authority
+	// change superseded (an adopted API-key verdict, "off") is discarded when
+	// it lands, so a caller — a Re-check above all — starts a fresh one.
+	if (state.inFlight && key === state.settingsKey && state.inFlightTicket?.generation === state.generation) {
 		if (options.force && state.inFlightTicket) state.inFlightTicket.authoritative = true;
 		return state.inFlight;
 	}
