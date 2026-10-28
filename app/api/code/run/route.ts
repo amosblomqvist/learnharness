@@ -12,15 +12,16 @@ const RUNNER_ENABLED = process.env.LH_RUNNER_ENABLED !== "0";
 const MAX_CONCURRENT = Number(process.env.LH_RUNNER_MAX_CONCURRENT ?? 2);
 let inFlight = 0;
 
-function runnerToken(): string {
+/** Read once at module load: a computed path in readFileSync makes the bundler
+ *  trace the whole project (Turbopack warns), and the token does not rotate. */
+const RUNNER_TOKEN = (() => {
 	if (process.env.LH_RUNNER_TOKEN) return process.env.LH_RUNNER_TOKEN;
-	const file = process.env.LH_RUNNER_TOKEN_FILE ?? "/etc/learnharness-runner/token";
 	try {
-		return readFileSync(file, "utf8").trim();
+		return readFileSync("/etc/learnharness-runner/token", "utf8").trim();
 	} catch {
 		return "";
 	}
-}
+})();
 
 interface RunnerHealth {
 	languages: Array<{ id: string; label: string; available: boolean; version: string | null }>;
@@ -91,7 +92,7 @@ export async function POST(req: Request) {
 	try {
 		const res = await fetch(`${RUNNER_URL}/execute`, {
 			method: "POST",
-			headers: { "content-type": "application/json", "x-lh-runner-token": runnerToken() },
+			headers: { "content-type": "application/json", "x-lh-runner-token": RUNNER_TOKEN },
 			body: JSON.stringify({
 				language: runnerLanguage,
 				code,
