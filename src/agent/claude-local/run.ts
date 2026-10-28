@@ -231,9 +231,10 @@ export async function* runClaudeTurn(params: ClaudeTurnParams): AsyncGenerator<C
 	let sawResult = false;
 	const seenAssistantIds = new Set<string>();
 	/** A message rebuilt from Claude Code's `assistant` echoes (no stream
-	 *  delivered); `seen` holds the blocks already added, as JSON; `held` its
-	 *  events, released only when the message closes. */
-	let rebuilt: { id: string; mapper: ClaudeStreamMapper; blocks: number; seen: string[]; held: AssistantMessageEvent[] } | undefined;
+	 *  delivered); `seen` holds the blocks already added, as JSON; `frames`
+	 *  the uuids of the echoes applied; `held` its events, released only when
+	 *  the message closes. */
+	let rebuilt: { id: string; mapper: ClaudeStreamMapper; blocks: number; seen: string[]; frames: Set<string>; held: AssistantMessageEvent[] } | undefined;
 	/** Close the rebuilt message. A success releases everything it held. A
 	 *  failure (owner decision 2026-10-28) records it EMPTY with the masked
 	 *  error — announced by its start only, so none of its text reaches the
@@ -243,6 +244,8 @@ export async function* runClaudeTurn(params: ClaudeTurnParams): AsyncGenerator<C
 	function* closeRebuilt(failure?: { reason: "error"; message: string }, stop = false): Generator<ClaudeTurnEvent> {
 		const closing = rebuilt!;
 		rebuilt = undefined;
+		// A closed message is done: a late re-send of its id is never rebuilt again.
+		seenAssistantIds.add(closing.id);
 		if (stop) closing.mapper.handle({ type: "message_stop" });
 		const end = closing.mapper.finish(failure);
 		if (failure && end.type === "error") {
@@ -335,19 +338,25 @@ export async function* runClaudeTurn(params: ClaudeTurnParams): AsyncGenerator<C
 					// time, BEFORE the stream's message_stop — a duplicate whenever the
 					// stream was delivered (its id was seen at message_start). Only a
 					// message that never streamed is rebuilt here: its blocks arrive
-					// one `assistant` message at a time under one id and are
-					// accumulated; the message closes when the id changes or the
-					// result arrives.
+					// one `assistant` frame at a time under one id and are accumulated;
+					// the message closes when the id changes or the result arrives.
 					if (seenAssistantIds.has(message.message.id) || (mapper.started && !mapper.stopped)) break;
 					if (rebuilt && rebuilt.id !== message.message.id) yield* closeRebuilt();
 					if (!rebuilt) {
-						rebuilt = { id: message.message.id, mapper: new ClaudeStreamMapper(model, serverName, params.thinkingLevel), blocks: 0, seen: [], held: [] };
+						rebuilt = { id: message.message.id, mapper: new ClaudeStreamMapper(model, serverName, params.thinkingLevel), blocks: 0, seen: [], frames: new Set(), held: [] };
 						rebuilt.held.push(...rebuilt.mapper.handle({ type: "message_start", message: { ...message.message, content: [] } }));
 					}
-					// An echo is one new block, or (cumulative / full echo) the message so
-					// far: blocks already added are skipped, never duplicated.
+					// Which blocks a frame adds (owner decision 2026-10-28):
+					//  - a frame whose uuid was already applied is an exact re-send: none;
+					//  - a ONE-block frame is always a new block (the SDK's documented
+					//    shape: one frame per completed block, sdk.d.ts SDKAssistantMessage),
+					//    even when it equals the block before it;
+					//  - a frame of several blocks that starts with every block seen so far
+					//    is a full or cumulative echo: only its tail is new.
+					if (message.uuid && rebuilt.frames.has(message.uuid)) break;
+					if (message.uuid) rebuilt.frames.add(message.uuid);
 					const content = message.message.content.map((block) => JSON.stringify(block));
-					const repeats = rebuilt.seen.length > 0 && content.length >= rebuilt.seen.length && rebuilt.seen.every((block, index) => content[index] === block);
+					const repeats = content.length > 1 && content.length >= rebuilt.seen.length && rebuilt.seen.every((block, index) => content[index] === block);
 					for (const block of message.message.content.slice(repeats ? rebuilt.seen.length : 0)) {
 						rebuilt.seen.push(JSON.stringify(block));
 						const index = rebuilt.blocks++;

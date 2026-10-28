@@ -801,3 +801,35 @@ describe("external review round 3: a never-streamed message a failure closes is 
 		assert.deepEqual(replies[0]!.content, [{ type: "text", text: "Streamed half." }]);
 	});
 });
+
+describe("external review round 3: unstreamed echoes rebuild each block exactly once (P3 echo rule)", () => {
+	const textsOf = (messages: unknown[]) => (messages.at(-1) as AssistantMessage).content.map((c) => (c as { text?: string }).text);
+	const shapes: Array<{ name: string; step: FakeStep; expected: string[] }> = [
+		{ name: "per-block, two identical blocks", step: { texts: ["ok", "ok"], unstreamed: true }, expected: ["ok", "ok"] },
+		{ name: "per-block, three identical blocks", step: { texts: ["ok", "ok", "ok"], unstreamed: true }, expected: ["ok", "ok", "ok"] },
+		{ name: "per-block, A B A", step: { texts: ["A", "B", "A"], unstreamed: true }, expected: ["A", "B", "A"] },
+		{ name: "per-block then the full message under a new uuid", step: { texts: ["A", "B"], unstreamed: true, echo: "block-then-full" }, expected: ["A", "B"] },
+		{ name: "an exact re-send of the last frame (same uuid)", step: { texts: ["A", "B"], unstreamed: true, resendLast: true }, expected: ["A", "B"] },
+		{ name: "an exact re-send of a one-block message", step: { text: "A", unstreamed: true, resendLast: true }, expected: ["A"] },
+		{ name: "cumulative echoes of identical blocks", step: { texts: ["ok", "ok"], unstreamed: true, echo: "cumulative" }, expected: ["ok", "ok"] },
+		{ name: "one full echo", step: { texts: ["A", "B"], unstreamed: true, echo: "full" }, expected: ["A", "B"] },
+	];
+	for (const shape of shapes) {
+		it(shape.name, async () => {
+			const { messages } = await runAgent([shape.step]);
+			assert.deepEqual(textsOf(messages), shape.expected);
+			assert.equal(messages.filter((m) => (m as { role: string }).role === "assistant").length, 1);
+		});
+	}
+	it("a late re-send of a message that already closed is not rebuilt as a second message", async () => {
+		const frame = (id: string, uuid: string, text: string) => ({ type: "assistant", message: { id, type: "message", role: "assistant", model: "m", content: [{ type: "text", text }], stop_reason: null, stop_sequence: null, usage: { input_tokens: 1, output_tokens: 1 } }, parent_tool_use_id: null, uuid, session_id: "s" });
+		const query = (() => Object.assign((async function* () {
+			yield { type: "system", subtype: "init", apiKeySource: "none", mcp_servers: [], tools: [], session_id: "s", uuid: "u0" };
+			yield frame("msg_1", "u1", "first"); yield frame("msg_2", "u2", "second"); yield frame("msg_1", "u1", "first");
+			yield { type: "result", subtype: "success", is_error: false, result: "", num_turns: 2, uuid: "u3", session_id: "s" };
+		})(), { close() {}, interrupt: async () => undefined, accountInfo: async () => ({ apiProvider: "firstParty" }), mcpServerStatus: async () => [] })) as unknown as Parameters<typeof runClaudeTurn>[0]["query"];
+		const closed: unknown[] = [];
+		for await (const event of runClaudeTurn({ query, launch, model, thinkingLevel: "off", systemPrompt: "S", systemPromptMode: "custom", blocks: ["x"], tools: [], signal: new AbortController().signal })) if (event.type === "assistant" && event.event.type === "done") closed.push(event.event.message.content.map((c) => (c as { text?: string }).text));
+		assert.deepEqual(closed, [["first"], ["second"]]);
+	});
+});

@@ -43,6 +43,9 @@ export interface FakeToolCall {
 export type FakeStep =
 	| {
 		text?: string; thinking?: string; tools?: FakeToolCall[]; model?: string;
+		/** More text blocks after `text`, in order (identical blocks allowed). */ texts?: string[];
+		/** Re-send the message's last `assistant` echo under its own uuid (Claude
+		 *  Code's re-send path) after its last block. */ resendLast?: boolean;
 		/** No stream events: only Claude Code's per-block `assistant` echoes (the fallback path). */ unstreamed?: boolean;
 		/** Run the batch's calls concurrently (default: one at a time). */ parallelTools?: boolean;
 		/** Start each call when its tool_use block completes, before message_stop. */ toolsDuringStream?: boolean;
@@ -50,7 +53,9 @@ export type FakeStep =
 		/** The API's stop reason (default: tool_use with tools, else end_turn). */ stopReason?: string;
 		/** How Claude Code echoes the message as `assistant` messages: one block
 		 *  each (default), each echo carrying every block so far (cumulative), or
-		 *  one echo of the whole message after its last block (full). */ echo?: "block" | "cumulative" | "full";
+		 *  one echo of the whole message after its last block (full), or one
+		 *  per block and then the whole message once more under a new uuid
+		 *  (block-then-full). */ echo?: "block" | "cumulative" | "full" | "block-then-full";
 		/** The message is a sub-agent's output: every stream_event and echo
 		 *  carries this parent_tool_use_id, and its tool calls never run here
 		 *  (the sub-agent's own loop would run them). */ parentToolUseId?: string;
@@ -193,7 +198,13 @@ export function fakeClaude(script: FakeStep[] | ((blocks: string[], turn: number
 				let index = 0;
 				const echoMode = step.echo ?? "block";
 				const echoOf = (content: unknown[]): SDKMessage | undefined => send({ type: "assistant", message: { id, type: "message", role: "assistant", model, content, stop_reason: null, stop_sequence: null, usage: { input_tokens: 10, output_tokens: 1 } }, parent_tool_use_id: parent, uuid: `u-${++counter}`, session_id: sessionId } as unknown as SDKMessage);
-				const echo = (block: unknown): SDKMessage | undefined => echoMode === "full" ? undefined : echoOf(echoMode === "cumulative" ? [...blocks] : [block]);
+				let lastEcho: SDKMessage | undefined;
+				const echo = (block: unknown): SDKMessage | undefined => {
+					if (echoMode === "full") return undefined;
+					const frame = echoOf(echoMode === "cumulative" ? [...blocks] : [block]);
+					lastEcho = frame ?? lastEcho;
+					return frame;
+				};
 				if (step.thinking) {
 					yield* one(event({ type: "content_block_start", index, content_block: { type: "thinking", thinking: "", signature: "" } }));
 					yield* one(event({ type: "content_block_delta", index, delta: { type: "thinking_delta", thinking: step.thinking } }));
@@ -203,14 +214,14 @@ export function fakeClaude(script: FakeStep[] | ((blocks: string[], turn: number
 					yield* one(echo(blocks[blocks.length - 1]));
 					index++;
 				}
-				if (step.text) {
+				for (const text of [...(step.text ? [step.text] : []), ...(step.texts ?? [])]) {
 					yield* one(event({ type: "content_block_start", index, content_block: { type: "text", text: "" } }));
-					const half = Math.ceil(step.text.length / 2);
-					yield* one(event({ type: "content_block_delta", index, delta: { type: "text_delta", text: step.text.slice(0, half) } }));
+					const half = Math.ceil(text.length / 2);
+					yield* one(event({ type: "content_block_delta", index, delta: { type: "text_delta", text: text.slice(0, half) } }));
 					if (stopped()) return;
-					yield* one(event({ type: "content_block_delta", index, delta: { type: "text_delta", text: step.text.slice(half) } }));
+					yield* one(event({ type: "content_block_delta", index, delta: { type: "text_delta", text: text.slice(half) } }));
 					yield* one(event({ type: "content_block_stop", index }));
-					blocks.push({ type: "text", text: step.text });
+					blocks.push({ type: "text", text });
 					yield* one(echo(blocks[blocks.length - 1]));
 					index++;
 				}
@@ -233,7 +244,8 @@ export function fakeClaude(script: FakeStep[] | ((blocks: string[], turn: number
 						await new Promise<void>((resolve) => setImmediate(resolve));
 					}
 				}
-				if (echoMode === "full") yield* one(echoOf([...blocks]));
+				if (echoMode === "full" || echoMode === "block-then-full") yield* one(echoOf([...blocks]));
+				if (step.resendLast && lastEcho) yield* one(send(lastEcho));
 				yield* one(event({ type: "message_delta", delta: { stop_reason: step.stopReason ?? (streamedCalls.length ? "tool_use" : "end_turn"), stop_sequence: null }, usage: { output_tokens: 20, input_tokens: 10, cache_creation_input_tokens: 5, cache_read_input_tokens: 3 } }));
 				yield* one(event({ type: "message_stop" }));
 				if (!usageReported) { usageReported = true; yield* one(send({ type: "rate_limit_event", rate_limit_info: { status: "allowed", utilization: 0.25, resetsAt: 1700000000, rateLimitType: "five_hour", isUsingOverage: false }, uuid: `u-${++counter}`, session_id: sessionId } as unknown as SDKMessage)); }
