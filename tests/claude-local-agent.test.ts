@@ -902,12 +902,18 @@ describe("external review round 3: the LH_PROVIDER_EVENTS recorder never gets Cl
 		assert.deepEqual(r({ type: "assistant", error: "authentication_failed", message: { id: "m", content: [{ type: "text", text: SECRET }] } }).message, { id: "m", content: [{ type: "text", text: p(SECRET) }] });
 		assert.deepEqual(r({ type: "assistant", message: { id: "m", content: [{ type: "text", text: "model text" }] } }).message, { id: "m", content: [{ type: "text", text: "model text" }] });
 		assert.deepEqual(r({ type: "auth_status", isAuthenticating: false, output: [SECRET], error: SECRET }), { type: "auth_status", isAuthenticating: false, output: [p(SECRET)], error: p(SECRET) });
-		assert.deepEqual(r({ type: "system", subtype: "init", apiKeySource: "none", plugin_errors: [{ plugin: "x@y", type: "generic-error", message: SECRET }] }).plugin_errors, [{ plugin: "x@y", type: "generic-error", message: p(SECRET) }]);
+		// system frames: an allowlist of documented enums and ids; every other string is redacted.
+		const init = r({ type: "system", subtype: "init", uuid: "u", session_id: "s", model: "claude-haiku-5-5", apiKeySource: "none", permissionMode: "default", cwd: "/c", claude_code_version: "2.1.312", tools: ["mcp__learnharness__quiz"], mcp_servers: [{ name: "learnharness", status: "connected", source: "sdk", error: SECRET }], plugin_errors: [{ plugin: "x@y", type: "generic-error", message: SECRET }], fast_mode: false });
+		assert.deepEqual(init, { type: "system", subtype: "init", uuid: "u", session_id: "s", model: "claude-haiku-5-5", apiKeySource: "none", permissionMode: "default", cwd: "/c", claude_code_version: "2.1.312", tools: ["mcp__learnharness__quiz"], mcp_servers: [{ name: "learnharness", status: "connected", source: "sdk", error: p(SECRET) }], plugin_errors: [{ plugin: p("x@y"), type: p("generic-error"), message: p(SECRET) }], fast_mode: false });
 		for (const subtype of ["hook_started", "hook_progress", "hook_response"]) {
-			const out = r({ type: "system", subtype, hook_name: "h", stdout: SECRET, stderr: SECRET, output: SECRET });
-			assert.deepEqual([out.stdout, out.stderr, out.output, out.hook_name], [p(SECRET), p(SECRET), p(SECRET), "h"], subtype);
+			const out = r({ type: "system", subtype, hook_name: "h", stdout: SECRET, stderr: SECRET, output: SECRET, exit_code: 2 });
+			assert.deepEqual([out.stdout, out.stderr, out.output, out.hook_name, out.exit_code], [p(SECRET), p(SECRET), p(SECRET), p("h"), 2], subtype);
 		}
 		assert.deepEqual(r({ type: "system", subtype: "mirror_error", error: SECRET }).error, p(SECRET));
+		assert.deepEqual(r({ type: "system", subtype: "informational", content: `Operation stopped by hook: ${SECRET}`, level: "warning", prevent_continuation: true }), { type: "system", subtype: "informational", content: p(`Operation stopped by hook: ${SECRET}`), level: p("warning"), prevent_continuation: true });
+		assert.deepEqual(r({ type: "system", subtype: "notification", text: SECRET }).text, p(SECRET));
+		assert.deepEqual(r({ type: "system", subtype: "some_future_subtype", detail: { nested: [SECRET] } }).detail, { nested: [p(SECRET)] }, "a new subtype is redacted by default");
+		assert.deepEqual(r({ type: "system", subtype: "api_retry", error: "overloaded", error_status: 529, attempt: 1 }), { type: "system", subtype: "api_retry", error: "overloaded", error_status: 529, attempt: 1 });
 		const stream = { type: "stream_event", event: { type: "content_block_delta", delta: { type: "text_delta", text: "model text" } } };
 		assert.equal(redactedForRecorder(stream), stream);
 	});
@@ -937,5 +943,80 @@ describe("external review round 3: the LH_PROVIDER_EVENTS recorder never gets Cl
 			setClaudeQueryForTests(undefined);
 			fs.rmSync(dir, { recursive: true, force: true });
 		}
+	});
+});
+
+describe("round-3 review follow-ups: held rebuilds, batches and the recorder", () => {
+	const shape = (messages: unknown[]) => messages.map((m) => {
+		const message = m as { role: string; content?: Array<{ type: string; text?: string; id?: string }>; toolCallId?: string; stopReason?: string };
+		if (message.role === "toolResult") return `toolResult:${message.toolCallId}`;
+		if (message.role !== "assistant") return message.role;
+		return `assistant[${(message.content ?? []).map((c) => c.type === "toolCall" ? `call:${c.id}` : c.text).join(",")}]:${message.stopReason}`;
+	});
+	const call = (id: string, city = "Oslo") => ({ name: "lookup_weather", args: { city }, id });
+
+	it("A: a streamed model call closes the previous call's held rebuild first (record in source order)", async () => {
+		const a = await runAgent([{ text: "First.", tools: [call("toolu_A")], unstreamed: true }, { text: "Second." }]);
+		assert.deepEqual(shape(a.messages), ["user", "assistant[First.,call:toolu_A]:toolUse", "toolResult:toolu_A", "assistant[Second.]:stop"]);
+		const b = await runAgent([{ text: "First.", tools: [call("toolu_A")], unstreamed: true }, { text: "Second.", tools: [call("toolu_B", "Rome")] }, { text: "Third." }]);
+		assert.deepEqual(shape(b.messages), ["user", "assistant[First.,call:toolu_A]:toolUse", "toolResult:toolu_A", "assistant[Second.,call:toolu_B]:toolUse", "toolResult:toolu_B", "assistant[Third.]:stop"]);
+		const c = await runAgent([{ text: "First.", tools: [call("toolu_A")] }, { text: "Second.", tools: [call("toolu_B", "Rome")], unstreamed: true }, { text: "Third." }]);
+		assert.deepEqual(shape(c.messages), ["user", "assistant[First.,call:toolu_A]:toolUse", "toolResult:toolu_A", "assistant[Second.,call:toolu_B]:toolUse", "toolResult:toolu_B", "assistant[Third.]:stop"]);
+	});
+	it("A: an echo-only message followed by a streamed partial an error result closes: the first kept, the partial kept as the failure's content", async () => {
+		const frame = { type: "assistant", message: { id: "msg_1", type: "message", role: "assistant", model: "m", content: [{ type: "text", text: "Checking." }], stop_reason: null, stop_sequence: null, usage: { input_tokens: 1, output_tokens: 1 } }, parent_tool_use_id: null, uuid: "u1", session_id: "s" };
+		const ev = (event: unknown, uuid: string) => ({ type: "stream_event", event, parent_tool_use_id: null, uuid, session_id: "s" });
+		const query = (() => Object.assign((async function* () {
+			yield { type: "system", subtype: "init", apiKeySource: "none", mcp_servers: [], tools: [], session_id: "s", uuid: "u0" };
+			yield frame;
+			yield ev({ type: "message_start", message: { id: "msg_2", type: "message", role: "assistant", model: "m", content: [], stop_reason: null, stop_sequence: null, usage: { input_tokens: 1, output_tokens: 1 } } }, "u2");
+			yield ev({ type: "content_block_start", index: 0, content_block: { type: "text", text: "" } }, "u3");
+			yield ev({ type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "Streamed half." } }, "u4");
+			yield { type: "result", subtype: "error_during_execution", is_error: true, errors: ["server_error: overloaded"], num_turns: 2, uuid: "u5", session_id: "s" };
+		})(), { close() {}, interrupt: async () => undefined, accountInfo: async () => ({ apiProvider: "firstParty" }), mcpServerStatus: async () => [] })) as unknown as Parameters<typeof runClaudeTurn>[0]["query"];
+		const closed: unknown[] = [];
+		for await (const event of runClaudeTurn({ query, launch, model, thinkingLevel: "off", systemPrompt: "S", systemPromptMode: "custom", blocks: ["x"], tools: [], signal: new AbortController().signal })) {
+			if (event.type === "assistant" && (event.event.type === "done" || event.event.type === "error")) { const m = event.event.type === "done" ? event.event.message : event.event.error; closed.push([m.stopReason, m.content.map((c) => (c as { text?: string }).text)]); }
+		}
+		assert.deepEqual(closed, [["stop", ["Checking."]], ["error", ["Streamed half."]]], "a streamed partial closed by a failure keeps its content (pi parity)");
+	});
+	it("B: an unfinished batch never claims the next message's tool events (a call Claude Code answered itself)", async () => {
+		for (const second of [{ text: "B.", tools: [call("toolu_T2")], unstreamed: true }, { text: "B.", tools: [call("toolu_T2")], controlAhead: true }] as FakeStep[]) {
+			const fake = fakeClaude([{ text: "A.", tools: [{ name: "Ghost", args: {}, id: "toolu_G", raw: true }] }, second, { text: "Done." }]);
+			// Claude Code itself refuses the made-up tool: the app's hook never sees it, so no tool event exists for toolu_G.
+			const query = ((params: { prompt: unknown; options: Record<string, unknown> }) => {
+				const hooks = params.options.hooks as Record<string, Array<{ hooks: Array<(input: { tool_name?: string }, id: string | undefined, ctx: unknown) => Promise<unknown>> }>>;
+				const pre = hooks.PreToolUse![0]!.hooks[0]!;
+				return (fake.query as unknown as (p: unknown) => unknown)({ ...params, options: { ...params.options, hooks: { ...hooks, PreToolUse: [{ hooks: [async (input: { tool_name?: string }, id: string | undefined, ctx: unknown) => input.tool_name === "Ghost" ? {} : pre(input, id, ctx)] }] } } });
+			}) as unknown as Awaited<ReturnType<ClaudeLocalRuntime["query"]>>;
+			const runtime = runtimeFor(async () => query);
+			const agent = new ClaudeLocalAgent({ systemPrompt: "x", model, thinkingLevel: "medium", tools: [lookup], messages: [newUserMessage("hi")], convertToLlm: toLlmMessages, runtime });
+			const ends: string[] = [];
+			agent.subscribe((e) => { if (e.type === "tool_execution_end") ends.push(e.toolCallId); });
+			await agent.continue();
+			const messages = agent.state.messages.filter((m) => (m as { role: string }).role !== "system");
+			assert.deepEqual(shape(messages), ["user", "assistant[A.,call:toolu_G]:toolUse", "toolResult:toolu_G", "assistant[B.,call:toolu_T2]:toolUse", "toolResult:toolu_T2", "assistant[Done.]:stop"], JSON.stringify(second));
+			assert.deepEqual(ends, ["toolu_G", "toolu_T2"], "every call ends exactly once");
+		}
+	});
+	it("C: an abort during a held rebuild's tool releases it as aborted with its call, and every announced call ends", async () => {
+		const route = new AbortController();
+		const aborting: AgentTool<any> = { ...lookup, execute: async () => { route.abort("all"); return { content: [{ type: "text", text: "late" }], details: {} }; } };
+		const { messages, events } = await runAgent([{ text: "Checking.", tools: [call("toolu_A")], unstreamed: true }, { text: "never" }], { tools: [aborting], runtime: { abortController: () => ({ controller: route, release() {} }) } });
+		assert.deepEqual(shape(messages), ["user", "assistant[Checking.,call:toolu_A]:aborted", "toolResult:toolu_A"]);
+		const tools = events.filter((e) => e.type === "tool_execution_start" || e.type === "tool_execution_end").map((e) => `${e.type}:${(e as { toolCallId: string }).toolCallId}`);
+		assert.deepEqual(tools, ["tool_execution_start:toolu_A", "tool_execution_end:toolu_A"]);
+		assert.ok(!JSON.stringify(messages).includes("never"));
+	});
+	it("D: the recorder writes a never-streamed message's frames when it closes — raw on success, text redacted on a failure close", async () => {
+		const SECRET = "sk-ant-oat01-ROUND3-HELD-RECORDER-SECRET";
+		const recorded = async (steps: FakeStep[]) => { const seen: unknown[] = []; await runAgent(steps, { onProviderEvent: (message) => { seen.push(message); } }); return seen; };
+		const failed = await recorded([{ apiError: "authentication_failed", text: `API Error: 401 OAuth token ${SECRET} has expired`, errorField: false }]);
+		assert.ok(!JSON.stringify(failed).includes(SECRET), "redacted when a failure closes the message");
+		assert.ok(failed.some((m) => (m as { type: string }).type === "assistant"), "the frame is still recorded");
+		const ok = await recorded([{ text: "Whole reply.", unstreamed: true }]);
+		assert.match(JSON.stringify(ok), /Whole reply\./);
+		const types = ok.map((m) => (m as { type: string }).type);
+		assert.ok(types.indexOf("assistant") < types.indexOf("result"), "held frames are written before the closing result");
 	});
 });

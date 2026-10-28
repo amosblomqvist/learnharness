@@ -153,34 +153,61 @@ export function redacted(value: unknown): { __redacted: "child text"; chars: num
 	return { __redacted: "child text", chars: typeof value === "string" ? value.length : 0 };
 }
 const redactAll = (values: unknown): unknown => Array.isArray(values) ? values.map(redacted) : values === undefined ? undefined : redacted(values);
+/** Every string anywhere in a value replaced; numbers, booleans and null kept. */
+function redactStrings(value: unknown): unknown {
+	if (typeof value === "string") return redacted(value);
+	if (Array.isArray(value)) return value.map(redactStrings);
+	if (value && typeof value === "object") return Object.fromEntries(Object.entries(value).map(([key, inner]) => [key, redactStrings(inner)]));
+	return value;
+}
+/** The text blocks of an `assistant` frame replaced (an API-error message,
+ *  or a never-streamed message a failure closed — run.ts). */
+export function redactedAssistantText(message: unknown): unknown {
+	const m = message as Record<string, unknown>;
+	const inner = m.message as { content?: unknown } | undefined;
+	const content = Array.isArray(inner?.content) ? inner.content.map((block) => block && typeof block === "object" && "text" in block ? { ...block, text: redacted((block as { text?: unknown }).text) } : block) : inner?.content;
+	return { ...m, message: { ...inner, content } };
+}
+/** The string fields of a `system` frame kept raw: documented enums and ids
+ *  only (owner decision 2026-10-28: allowlist, redact the rest — so a new
+ *  SDK subtype is redacted by default). */
+const SYSTEM_KEEP: Record<string, readonly string[]> = {
+	"*": ["type", "subtype", "uuid", "session_id"],
+	init: ["model", "apiKeySource", "permissionMode", "cwd", "claude_code_version", "tools", "mcp_servers"],
+	api_retry: ["error"],
+	status: ["status", "permissionMode"],
+};
+function redactedSystem(m: Record<string, unknown>): Record<string, unknown> {
+	const keep = new Set([...SYSTEM_KEEP["*"]!, ...(SYSTEM_KEEP[String(m.subtype)] ?? [])]);
+	const out: Record<string, unknown> = {};
+	for (const [key, value] of Object.entries(m)) {
+		if (!keep.has(key)) { out[key] = redactStrings(value); continue; }
+		// mcp_servers: each server's name, status and source; anything else it carries is redacted.
+		out[key] = key === "mcp_servers" && Array.isArray(value)
+			? value.map((server) => Object.fromEntries(Object.entries((server ?? {}) as Record<string, unknown>).map(([field, inner]) => [field, field === "name" || field === "status" || field === "source" ? inner : redactStrings(inner)])))
+			: value;
+	}
+	return out;
+}
 
 /** A copy of one raw SDK message for the opt-in LH_PROVIDER_EVENTS recorder
- *  (owner decision 2026-10-28): Claude Code's own error and diagnostic text
+ *  (owner decisions 2026-10-28): Claude Code's own error and diagnostic text
  *  — an error result's `errors`, an API error's `result`, the text of a
- *  synthetic API-error message, plugin load errors, hook stdout/stderr/
- *  output, auth status output and errors, a mirror error — is replaced by
- *  `{ __redacted, chars }`; model output, prompts and everything else stay
- *  raw, as the recorder records every other provider. */
+ *  synthetic API-error message, auth status output and errors, and every
+ *  string of a `system` frame but its documented enums and ids (plugin
+ *  errors, hook output, informational and notification text, a mirror
+ *  error…) — is replaced by `{ __redacted, chars }`; model output, prompts
+ *  and everything else stay raw, as the recorder records every other
+ *  provider. (A never-streamed message's frames wait in run.ts until the
+ *  message closes: a failure close redacts their text too.) */
 export function redactedForRecorder(message: unknown): unknown {
 	if (!message || typeof message !== "object") return message;
 	const m = message as Record<string, unknown> & { type?: unknown; subtype?: unknown };
 	if (m.type === "result") {
 		return { ...m, ...(m.errors !== undefined ? { errors: redactAll(m.errors) } : {}), ...(m.is_error === true && m.result !== undefined ? { result: redacted(m.result) } : {}) };
 	}
-	if (m.type === "assistant" && m.error !== undefined) {
-		const inner = m.message as { content?: unknown } | undefined;
-		const content = Array.isArray(inner?.content) ? inner.content.map((block) => block && typeof block === "object" && "text" in block ? { ...block, text: redacted((block as { text?: unknown }).text) } : block) : inner?.content;
-		return { ...m, message: { ...inner, content } };
-	}
+	if (m.type === "assistant" && m.error !== undefined) return redactedAssistantText(m);
 	if (m.type === "auth_status") return { ...m, ...(m.output !== undefined ? { output: redactAll(m.output) } : {}), ...(m.error !== undefined ? { error: redacted(m.error) } : {}) };
-	if (m.type === "system") {
-		if (m.subtype === "init" && Array.isArray(m.plugin_errors)) return { ...m, plugin_errors: m.plugin_errors.map((entry) => ({ ...(entry as object), message: redacted((entry as { message?: unknown }).message) })) };
-		if (m.subtype === "hook_started" || m.subtype === "hook_progress" || m.subtype === "hook_response") {
-			const out: Record<string, unknown> = { ...m };
-			for (const field of ["stdout", "stderr", "output"]) if (out[field] !== undefined) out[field] = redacted(out[field]);
-			return out;
-		}
-		if (m.subtype === "mirror_error" && m.error !== undefined) return { ...m, error: redacted(m.error) };
-	}
+	if (m.type === "system") return redactedSystem(m);
 	return message;
 }

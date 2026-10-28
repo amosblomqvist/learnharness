@@ -30,7 +30,7 @@ import { markUnadmittedUsage } from "../subscription-request-cycle.ts";
 import * as bridge from "./bridge.ts";
 import type { ClaudeLocalLaunch } from "./bridge.ts";
 import { describeFailure, errorFields } from "./reported.ts";
-import { claudeLocalError, runClaudeTurn } from "./run.ts";
+import { claudeLocalError, isMintedToolCallId, runClaudeTurn } from "./run.ts";
 import { loadClaudeQuery, type ClaudeQuery, type SDKMessage } from "./sdk.ts";
 import { emptyAssistant } from "./stream-mapper.ts";
 import { flattenTranscript } from "./transcript.ts";
@@ -214,7 +214,11 @@ export class ClaudeLocalAgent implements LiveAgent {
 			/** pi's order: a call's events follow its own message's message_end and
 			 *  attach to that message's batch — never to an earlier message. */
 			const belongsToCurrent = (event: ToolEvent) => !!current && current.stopReason !== "pending"
-				&& (current.content.some((c) => c.type === "toolCall" && c.id === event.toolCallId) || (callsExpected > 0 && results.length < callsExpected));
+				&& (current.content.some((c) => c.type === "toolCall" && c.id === event.toolCallId)
+					// By count only for an id the runner minted: a Claude Code tool_use id
+					// the current message lacks belongs to a message not yet seen (an
+					// unfinished batch must never claim it).
+					|| (callsExpected > 0 && results.length < callsExpected && isMintedToolCallId(event.toolCallId)));
 			/** Dispatch the held events that belong to the current message (all of
 			 *  them when `all`: the turn is over and nothing else can claim them). */
 			const releaseTools = async (all = false) => {
@@ -330,6 +334,15 @@ export class ClaudeLocalAgent implements LiveAgent {
 						await emit({ type: "message_end", message: final });
 						callsExpected = final.content.filter((c) => c.type === "toolCall").length;
 						if (final.stopReason === "error" || final.stopReason === "aborted") {
+							// An aborted message whose calls already ran (a rebuilt message the
+							// abort released): its batch closes like an aborted batch — every call
+							// announced and ended, the missing results "Operation aborted" (N13).
+							const ran = final.stopReason === "aborted" && heldTools.some((held) => final.content.some((c) => c.type === "toolCall" && c.id === held.toolCallId));
+							if (ran) {
+								await releaseTools();
+								if (callsExpected > 0) await closeBatch(final, "Operation aborted");
+								return "end";
+							}
 							await options.finishTurn?.({ message: final, toolResults: [], context: { messages: this.state.messages, tools: this.state.tools }, newMessages: [] }, signal);
 							await emit({ type: "turn_end", message: final, toolResults: [] });
 							return "end";

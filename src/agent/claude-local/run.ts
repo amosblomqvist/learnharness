@@ -35,7 +35,7 @@ import type { AssistantMessage, AssistantMessageEvent, Model } from "@earendil-w
 import { CLAUDE_LOCAL, type ClaudeLocalSystemPromptMode, type ClaudeLocalUsageReport } from "../../core/contracts/claude-local.ts";
 import type { ClaudeLocalLaunch } from "./bridge.ts";
 import { claudeLaunchOptions } from "./launch.ts";
-import { describeFailure, errorFields, redactedForRecorder, reportedApiKeySource, reportedApiProvider, reportedMcpStatus, reportedNumber, reportedRateLimitStatus, reportedRateLimitType, resultFields } from "./reported.ts";
+import { describeFailure, errorFields, redactedAssistantText, redactedForRecorder, reportedApiKeySource, reportedApiProvider, reportedMcpStatus, reportedNumber, reportedRateLimitStatus, reportedRateLimitType, resultFields } from "./reported.ts";
 import { ClaudeStreamMapper } from "./stream-mapper.ts";
 import { createToolBridge } from "./tools.ts";
 import { toolPrefixNote } from "./transcript.ts";
@@ -111,6 +111,10 @@ async function* promptOf(blocks: string[], signal: AbortSignal): AsyncGenerator<
 }
 
 export const TOOL_PREFIX = `mcp__${CLAUDE_LOCAL.mcpServerName}__`;
+/** An id the runner minted for a call Claude Code did not name (no
+ *  tool_use id reached the bridge or the hook) — the only kind of id the
+ *  agent may attach to an open batch by count rather than by id. */
+export function isMintedToolCallId(id: string): boolean { return id.startsWith(`${CLAUDE_LOCAL.mcpServerName}-`); }
 
 /** Drive one turn; yields pi-shaped events; ends after the result (or an
  *  error/abort, surfaced as the assistant `error` event, then a result). */
@@ -263,19 +267,19 @@ export async function* runClaudeTurn(params: ClaudeTurnParams): AsyncGenerator<C
 		yield { type: "result", ok: false, errors: [detail], cause: describeFailure(errorFields(error)) };
 		return;
 	}
+	const recorder = params.onProviderEvent ? recorderFor(params.onProviderEvent) : undefined;
 	// Pump the SDK's iterator into the same queue as the bridge's events.
 	let done = false;
 	let failure: unknown;
 	const pumping = (async () => {
 		try {
 			for await (const message of handle) {
-				// The recorder gets the message with Claude Code's own diagnostic text redacted (reported.ts).
-				if (params.onProviderEvent) { try { params.onProviderEvent(redactedForRecorder(message) as SDKMessage); } catch { /* an observer never takes the run down */ } }
+				recorder?.observe(message);
 				push({ type: "sdk", message } as unknown as ClaudeTurnEvent);
 			}
 		}
 		catch (error) { failure = error; }
-		finally { done = true; wake?.(); }
+		finally { recorder?.end(signal.aborted); done = true; wake?.(); }
 	})();
 	let sawResult = false;
 	const seenAssistantIds = new Set<string>();
@@ -289,15 +293,17 @@ export async function* runClaudeTurn(params: ClaudeTurnParams): AsyncGenerator<C
 	 *  error — announced by its start only, so none of its text reaches the
 	 *  record or the wire: a never-streamed message a failure closes can be
 	 *  the failure's own wording (an API-error message without its optional
-	 *  `error` field). */
-	function* closeRebuilt(failure?: { reason: "error"; message: string }, stop = false): Generator<ClaudeTurnEvent> {
+	 *  `error` field). An abort is not Claude Code's failure: the message is
+	 *  released with its content and ends "aborted", as a streamed message in
+	 *  flight does. */
+	function* closeRebuilt(failure?: { reason: "error" | "aborted"; message: string }, stop = false): Generator<ClaudeTurnEvent> {
 		const closing = rebuilt!;
 		rebuilt = undefined;
 		// A closed message is done: a late re-send of its id is never rebuilt again.
 		seenAssistantIds.add(closing.id);
 		if (stop) closing.mapper.handle({ type: "message_stop" });
 		const end = closing.mapper.finish(failure);
-		if (failure && end.type === "error") {
+		if (failure?.reason === "error" && end.type === "error") {
 			end.error.content = [];
 			yield { type: "assistant", event: closing.held[0]! };
 			yield { type: "assistant", event: end };
@@ -316,6 +322,7 @@ export async function* runClaudeTurn(params: ClaudeTurnParams): AsyncGenerator<C
 			if (signal.aborted && !sawResult) {
 				sawResult = true;
 				if (mapper.started && !mapper.stopped) yield { type: "assistant", event: mapper.finish({ reason: "aborted", message: "Operation aborted" }) };
+				else if (rebuilt) yield* closeRebuilt({ reason: "aborted", message: "Operation aborted" });
 				yield { type: "result", ok: false, errors: [] };
 				break;
 			}
@@ -357,7 +364,11 @@ export async function* runClaudeTurn(params: ClaudeTurnParams): AsyncGenerator<C
 				}
 				case "stream_event": {
 					if (message.parent_tool_use_id) break; // sub-agent output never reaches the lesson
-					if (message.event.type === "message_start") { mapper = new ClaudeStreamMapper(model, serverName, params.thinkingLevel); streamedCalls.length = 0; seenAssistantIds.add(message.event.message.id); }
+					if (message.event.type === "message_start") {
+						// A new model call: a message rebuilt from the previous call's echoes is complete.
+						if (rebuilt) yield* closeRebuilt(undefined, true);
+						mapper = new ClaudeStreamMapper(model, serverName, params.thinkingLevel); streamedCalls.length = 0; seenAssistantIds.add(message.event.message.id);
+					}
 					for (const event of mapper.handle(message.event)) {
 						if (event.type === "toolcall_end") streamedCalls.push({ id: event.toolCall.id, name: event.toolCall.name, args: event.toolCall.arguments, started: false });
 						yield { type: "assistant", event };
@@ -462,6 +473,46 @@ export async function* runClaudeTurn(params: ClaudeTurnParams): AsyncGenerator<C
 		try { handle.close(); } catch { /* already gone */ }
 		await pumping.catch(() => undefined);
 	}
+}
+
+/** The LH_PROVIDER_EVENTS recorder's copy of the wire (owner decisions
+ *  2026-10-28): every message as it arrives, with Claude Code's own
+ *  diagnostic text redacted (reported.ts) — except the frames of a message
+ *  that never streamed, held until that message closes, the record's rule
+ *  (closeRebuilt): written as they are when it closes normally (a new model
+ *  call, another message's frame, a successful result, an abort), their
+ *  text redacted when a failure closes it (an error result, an API-error
+ *  frame for its id, the turn ending without a result) — such a message
+ *  can be the failure's own wording. Same triggers as the runner, seen in
+ *  the same order. */
+function recorderFor(observe: (message: SDKMessage) => void) {
+	const write = (message: unknown) => { try { observe(redactedForRecorder(message) as SDKMessage); } catch { /* an observer never takes the run down */ } };
+	const streamed = new Set<string>();
+	let held: { id: string; frames: SDKMessage[] } | undefined;
+	const flush = (failed: boolean) => {
+		if (!held) return;
+		for (const frame of held.frames) write(failed ? redactedAssistantText(frame) : frame);
+		held = undefined;
+	};
+	return {
+		observe(message: SDKMessage) {
+			if (message.type === "stream_event" && !message.parent_tool_use_id && message.event.type === "message_start") { flush(false); streamed.add(message.event.message.id); }
+			else if (message.type === "assistant" && !message.parent_tool_use_id) {
+				if (message.error) flush(held?.id === message.message.id);
+				else if (!streamed.has(message.message.id)) {
+					if (held && held.id !== message.message.id) flush(false);
+					(held ??= { id: message.message.id, frames: [] }).frames.push(message);
+					return;
+				}
+			} else if (message.type === "result") {
+				const errors = message.subtype === "success" ? (message.is_error ? [message.result] : []) : message.errors;
+				flush(errors.length > 0 || message.is_error);
+			}
+			write(message);
+		},
+		/** The iterator ended: a message still held closed with the turn. */
+		end(aborted: boolean) { flush(!aborted); },
+	};
 }
 
 /** The user-facing wording for a failed turn (masked like the other
