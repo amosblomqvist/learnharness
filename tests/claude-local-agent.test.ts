@@ -889,3 +889,53 @@ describe("the pre-model gate (UserPromptSubmit) refuses before any model request
 		assert.equal(result.stopReason, "error"); assert.equal(fake.turns[0]!.requests, 0);
 	});
 });
+
+describe("external review round 3: the LH_PROVIDER_EVENTS recorder never gets Claude Code's own diagnostic text (P1)", () => {
+	const SECRET = "sk-ant-oat01-ROUND3-RECORDER-SECRET";
+	it("each diagnostic field is replaced by a placeholder; model output and everything else stay raw", async () => {
+		const { redactedForRecorder } = await import("../src/agent/claude-local/reported.ts");
+		const r = (message: unknown) => redactedForRecorder(message) as Record<string, unknown>;
+		const p = (text: string) => ({ __redacted: "child text", chars: text.length });
+		assert.deepEqual(r({ type: "result", subtype: "error_during_execution", is_error: true, errors: [SECRET, "x"], num_turns: 1 }), { type: "result", subtype: "error_during_execution", is_error: true, errors: [p(SECRET), p("x")], num_turns: 1 });
+		assert.deepEqual(r({ type: "result", subtype: "success", is_error: true, result: SECRET }).result, p(SECRET));
+		assert.equal(r({ type: "result", subtype: "success", is_error: false, result: "the reply" }).result, "the reply", "a successful result's text is model output");
+		assert.deepEqual(r({ type: "assistant", error: "authentication_failed", message: { id: "m", content: [{ type: "text", text: SECRET }] } }).message, { id: "m", content: [{ type: "text", text: p(SECRET) }] });
+		assert.deepEqual(r({ type: "assistant", message: { id: "m", content: [{ type: "text", text: "model text" }] } }).message, { id: "m", content: [{ type: "text", text: "model text" }] });
+		assert.deepEqual(r({ type: "auth_status", isAuthenticating: false, output: [SECRET], error: SECRET }), { type: "auth_status", isAuthenticating: false, output: [p(SECRET)], error: p(SECRET) });
+		assert.deepEqual(r({ type: "system", subtype: "init", apiKeySource: "none", plugin_errors: [{ plugin: "x@y", type: "generic-error", message: SECRET }] }).plugin_errors, [{ plugin: "x@y", type: "generic-error", message: p(SECRET) }]);
+		for (const subtype of ["hook_started", "hook_progress", "hook_response"]) {
+			const out = r({ type: "system", subtype, hook_name: "h", stdout: SECRET, stderr: SECRET, output: SECRET });
+			assert.deepEqual([out.stdout, out.stderr, out.output, out.hook_name], [p(SECRET), p(SECRET), p(SECRET), "h"], subtype);
+		}
+		assert.deepEqual(r({ type: "system", subtype: "mirror_error", error: SECRET }).error, p(SECRET));
+		const stream = { type: "stream_event", event: { type: "content_block_delta", delta: { type: "text_delta", text: "model text" } } };
+		assert.equal(redactedForRecorder(stream), stream);
+	});
+	it("end to end: a lesson turn's error result lands in chat_events.jsonl redacted", async () => {
+		const fs = await import("node:fs"); const os = await import("node:os"); const path = await import("node:path");
+		const { providerEventsDir } = await import("../src/agent/provider-events.ts");
+		const { setClaudeQueryForTests } = await import("../src/agent/claude-local/sdk.ts");
+		const bridge = await import("../src/agent/claude-local/bridge.ts");
+		const { createTeacherAgent } = await import("../src/agent/teacher-agent.ts");
+		const dir = fs.mkdtempSync(path.join(os.tmpdir(), "lh-claude-local-redact-"));
+		const previousDir = providerEventsDir.current; const previousEnv = process.env.LH_PROVIDER_EVENTS;
+		const fake = fakeClaude([{ text: "Half." }, { error: `managed settings invalid: ${SECRET}`, startupFailureReason: "managed_settings_invalid" }]);
+		try {
+			providerEventsDir.current = dir; process.env.LH_PROVIDER_EVENTS = "1";
+			bridge.acceptClaudeLocalSnapshot({ status: { providerId: "claude-local", enabled: true, allowBackgroundUse: false, systemPromptMode: "custom", state: "ready", binaryPath: "", binary: { path: "/fake/claude", version: "2.1.311", source: "path" }, account: { subscriptionType: "max" }, models: 1, probedAt: null, revision: 43 }, models: [model], launch });
+			setClaudeQueryForTests(fake.query);
+			const agent = createTeacherAgent(undefined, { engine: { model, streamFn: (() => { throw new Error("the pi stream is not used"); }) as never, level: "low" }, chatId: "chat_redact", tools: { lookup_weather: lookup }, messages: [newUserMessage("Hi")] });
+			await agent.continue();
+			const text = fs.readFileSync(path.join(dir, "chat_redact.jsonl"), "utf-8");
+			assert.ok(!text.includes(SECRET), "the recorder file carries none of the error text");
+			assert.match(text, /"__redacted":"child text"/);
+			assert.match(text, /"startup_failure_reason":"managed_settings_invalid"/, "stable fields stay raw");
+			assert.match(text, /Half\./, "model output stays raw");
+		} finally {
+			providerEventsDir.current = previousDir;
+			if (previousEnv === undefined) delete process.env.LH_PROVIDER_EVENTS; else process.env.LH_PROVIDER_EVENTS = previousEnv;
+			setClaudeQueryForTests(undefined);
+			fs.rmSync(dir, { recursive: true, force: true });
+		}
+	});
+});

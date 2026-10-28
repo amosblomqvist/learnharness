@@ -35,7 +35,7 @@ import type { AssistantMessage, AssistantMessageEvent, Model } from "@earendil-w
 import { CLAUDE_LOCAL, type ClaudeLocalSystemPromptMode, type ClaudeLocalUsageReport } from "../../core/contracts/claude-local.ts";
 import type { ClaudeLocalLaunch } from "./bridge.ts";
 import { claudeLaunchOptions } from "./launch.ts";
-import { describeFailure, errorFields, reportedApiKeySource, reportedApiProvider, reportedMcpStatus, reportedNumber, reportedRateLimitStatus, reportedRateLimitType, resultFields } from "./reported.ts";
+import { describeFailure, errorFields, redactedForRecorder, reportedApiKeySource, reportedApiProvider, reportedMcpStatus, reportedNumber, reportedRateLimitStatus, reportedRateLimitType, resultFields } from "./reported.ts";
 import { ClaudeStreamMapper } from "./stream-mapper.ts";
 import { createToolBridge } from "./tools.ts";
 import { toolPrefixNote } from "./transcript.ts";
@@ -79,7 +79,8 @@ export interface ClaudeTurnParams {
 	shouldStopAfterBatch?: (calls: BatchCall[]) => boolean;
 	/** Called right before the child is spawned (the admission commit). */
 	beforeDispatch?: () => void;
-	/** Every raw SDK message, as it arrives (the LH_PROVIDER_EVENTS recorder). */
+	/** Every raw SDK message, as it arrives (the LH_PROVIDER_EVENTS recorder),
+	 *  with Claude Code's own diagnostic text redacted. */
 	onProviderEvent?: (message: SDKMessage) => void;
 	/** Claude Code reported (system/init) that it would bill an API key: the
 	 *  turn is refused, and the route's status is marked not-ready. */
@@ -268,7 +269,8 @@ export async function* runClaudeTurn(params: ClaudeTurnParams): AsyncGenerator<C
 	const pumping = (async () => {
 		try {
 			for await (const message of handle) {
-				if (params.onProviderEvent) { try { params.onProviderEvent(message); } catch { /* an observer never takes the run down */ } }
+				// The recorder gets the message with Claude Code's own diagnostic text redacted (reported.ts).
+				if (params.onProviderEvent) { try { params.onProviderEvent(redactedForRecorder(message) as SDKMessage); } catch { /* an observer never takes the run down */ } }
 				push({ type: "sdk", message } as unknown as ClaudeTurnEvent);
 			}
 		}

@@ -145,3 +145,42 @@ export function reportedRateLimitStatus(value: unknown): "allowed" | "allowed_wa
 export function reportedRateLimitType(value: unknown): string | undefined { return value === undefined || value === null || value === "" ? undefined : member(RATE_LIMIT_TYPES, value) ?? UNRECOGNIZED; }
 /** A finite number, or undefined. */
 export function reportedNumber(value: unknown): number | undefined { return typeof value === "number" && Number.isFinite(value) ? value : undefined; }
+
+// ─── the LH_PROVIDER_EVENTS recorder ───────────────────────────────────────
+
+/** The recorder's placeholder for Claude Code's own diagnostic text. */
+export function redacted(value: unknown): { __redacted: "child text"; chars: number } {
+	return { __redacted: "child text", chars: typeof value === "string" ? value.length : 0 };
+}
+const redactAll = (values: unknown): unknown => Array.isArray(values) ? values.map(redacted) : values === undefined ? undefined : redacted(values);
+
+/** A copy of one raw SDK message for the opt-in LH_PROVIDER_EVENTS recorder
+ *  (owner decision 2026-10-28): Claude Code's own error and diagnostic text
+ *  — an error result's `errors`, an API error's `result`, the text of a
+ *  synthetic API-error message, plugin load errors, hook stdout/stderr/
+ *  output, auth status output and errors, a mirror error — is replaced by
+ *  `{ __redacted, chars }`; model output, prompts and everything else stay
+ *  raw, as the recorder records every other provider. */
+export function redactedForRecorder(message: unknown): unknown {
+	if (!message || typeof message !== "object") return message;
+	const m = message as Record<string, unknown> & { type?: unknown; subtype?: unknown };
+	if (m.type === "result") {
+		return { ...m, ...(m.errors !== undefined ? { errors: redactAll(m.errors) } : {}), ...(m.is_error === true && m.result !== undefined ? { result: redacted(m.result) } : {}) };
+	}
+	if (m.type === "assistant" && m.error !== undefined) {
+		const inner = m.message as { content?: unknown } | undefined;
+		const content = Array.isArray(inner?.content) ? inner.content.map((block) => block && typeof block === "object" && "text" in block ? { ...block, text: redacted((block as { text?: unknown }).text) } : block) : inner?.content;
+		return { ...m, message: { ...inner, content } };
+	}
+	if (m.type === "auth_status") return { ...m, ...(m.output !== undefined ? { output: redactAll(m.output) } : {}), ...(m.error !== undefined ? { error: redacted(m.error) } : {}) };
+	if (m.type === "system") {
+		if (m.subtype === "init" && Array.isArray(m.plugin_errors)) return { ...m, plugin_errors: m.plugin_errors.map((entry) => ({ ...(entry as object), message: redacted((entry as { message?: unknown }).message) })) };
+		if (m.subtype === "hook_started" || m.subtype === "hook_progress" || m.subtype === "hook_response") {
+			const out: Record<string, unknown> = { ...m };
+			for (const field of ["stdout", "stderr", "output"]) if (out[field] !== undefined) out[field] = redacted(out[field]);
+			return out;
+		}
+		if (m.subtype === "mirror_error" && m.error !== undefined) return { ...m, error: redacted(m.error) };
+	}
+	return message;
+}
