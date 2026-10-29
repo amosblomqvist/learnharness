@@ -28,6 +28,7 @@ import assert from "node:assert/strict";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { after, describe, it } from "node:test";
+import { createCanvas } from "@napi-rs/canvas";
 import { Value } from "typebox/value";
 import { createFauxCore, fauxAssistantMessage, fauxToolCall, type FauxResponseStep, type ToolCall } from "@earendil-works/pi-ai";
 import { renderToStaticMarkup } from "react-dom/server";
@@ -171,7 +172,11 @@ function fakeHeadless(opts: {
 			if (opts.renderFailures && api.svgRenders.length <= opts.renderFailures) {
 				throw new Error("XML parse error");
 			}
-			return Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]); // PNG magic
+			// The shared native image processor decodes renders, so a signature
+			// alone is no longer a successful fake raster.
+			const canvas = createCanvas(1, 1);
+			canvas.getContext("2d").fillRect(0, 0, 1, 1);
+			return canvas.toBuffer("image/png");
 		},
 	};
 	return api as HeadlessApi & { demoRuns: string[]; svgRenders: string[] };

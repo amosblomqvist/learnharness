@@ -27,6 +27,12 @@ test("Terra is a narrowly scoped fallback and a native Pi entry wins", () => {
 	assert.equal(withOpenAITerraFallback(other), other);
 });
 
+test("Terra registration retains upstream Claude Code and Bedrock providers", () => {
+	assert.ok(piModels().getProvider("amazon-bedrock"));
+	assert.ok(piModels().getModel("claude-code", "opus"));
+	assert.ok(piModels().getModel("openai", "gpt-6.1-terra"));
+});
+
 test("Terra requires the account catalog and dispatches with the selected credential and reasoning", async () => {
 	const send = Object.getOwnPropertyDescriptor(process, "send");
 	const connected = Object.getOwnPropertyDescriptor(process, "connected");

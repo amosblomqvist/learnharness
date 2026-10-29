@@ -42,8 +42,9 @@ function probeConcluded(messages: readonly LhMessage[]): boolean {
  *     live), so the agent sees the fixed PROBE_DONE_ACK_TEXT — never an
  *     echo. details = {ok:true} only.
  *
- * The first probe_done in the transcript is also the construction seam:
- * from that message on, every request builds the TEACHER agent.
+ * The first concluded probe_done (non-failed call plus matching successful
+ * result) is also the construction seam: from that result on, every request
+ * builds the TEACHER agent. Bare calls and refused results keep probing.
  */
 export function probeDoneTool(ctx: ProbeDoneContext): Record<string, AgentTool<any>> {
 	return {

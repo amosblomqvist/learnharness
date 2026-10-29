@@ -27,6 +27,7 @@
 import { spawn } from "node:child_process";
 import { probeEnv, verifyDemoRuntime } from "./smoke-demo-runtime.mjs";
 import { verifyProviderRuntime } from "./smoke-provider-runtime.mjs";
+import { verifyCompressionRuntime } from "./smoke-compression-runtime.mjs";
 import { createRequire } from "node:module";
 import * as fs from "node:fs";
 import * as http from "node:http";
@@ -83,6 +84,8 @@ async function main() {
 	verifyDemoRuntime(STANDALONE, RUNTIME);
 	// /api/models only reads catalogs; initialize the real lazy SDK offline too.
 	verifyProviderRuntime(STANDALONE, RUNTIME);
+	// A plain GET without Accept-Encoding never exercises gzip backpressure.
+	verifyCompressionRuntime(STANDALONE, RUNTIME);
 	const port = await freePort();
 	const url = `http://127.0.0.1:${port}`;
 	const home = fs.mkdtempSync(path.join(os.tmpdir(), "lh-smoke-"));

@@ -110,7 +110,7 @@ test("render-settings: its write stamps the family sidecar too", () => {
 // ── the fixtures stay the legacy pin: golden data reads unstamped ───────────
 
 test("golden fixtures are deliberately the unstamped legacy shape (lazy v1 = current-valid)", () => {
-	const here = path.dirname(new URL(import.meta.url).pathname);
+	const here = import.meta.dirname;
 	const teach = JSON.parse(fs.readFileSync(path.join(here, "fixtures", "golden-data", "chats", "chat_mv27rrra_feff23b6.json"), "utf8"));
 	assert.equal(teach.version, undefined, "fixture records pin the unstamped read path");
 	assert.ok(!fs.existsSync(path.join(here, "fixtures", "golden-data", "graph", "format.json")), "no sidecar in the fixture graph dir");

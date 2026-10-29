@@ -4,7 +4,7 @@ import { findSessionTextMatches } from "@/src/core";
  * hidden/unmounted sections do not. Never walk embedded documents or drafts.
  * Do NOT exclude aria-hidden globally: KaTeX's VISIBLE HTML uses it too. */
 const EXCLUDED = [
-	"script", "style", "noscript", "textarea", "input", "select", "iframe", "canvas",
+	"script", "style", "noscript", "textarea", "input", "select", "iframe", "canvas", '[contenteditable="true"]',
 	"title", "defs", "metadata", "desc", ".katex-mathml", ".sr-only", "[hidden]",
 	"[data-session-find-exclude]", "[data-lh-menu]", '[role="menu"]', '[role="dialog"]', '[role="tooltip"]',
 ].join(",");
