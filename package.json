@@ -48,6 +48,7 @@
 		"dagre-d3-es": "7.0.14",
 		"electron-updater": "^6.8.9",
 		"embla-carousel-react": "^8.6.0",
+		"fflate": "^0.8.3",
 		"jose": "^6.2.12",
 		"katex": "0.18.2",
 		"linkedom": "^0.18.13",
