@@ -17,6 +17,7 @@ import {
 	composeQuizMechanics,
 	sectionedSegments,
 } from "../components/settings/agent-section.tsx";
+import { applyPersonalizationPreset } from "../src/core";
 import { nextOverrides } from "../components/settings/keyboard-section.tsx";
 import { classifyKeys, keyStatusLine, type ProviderKeyInfo } from "../components/settings/keys-section.tsx";
 import type { AgentSettings, AuthKeyStatus, ModelsSettings } from "../src/core";
@@ -387,5 +388,16 @@ describe("composeQuizMechanics (the segmented control's write)", () => {
 			assert.equal(after.tools?.research, false, "the research toggle carries verbatim");
 			assert.deepEqual(after.prompts, before.prompts, "the prompts map carries verbatim");
 		}
+	});
+});
+
+describe("applyPersonalizationPreset (personalization chip helper)", () => {
+	it("appends preset snippet cleanly when absent and is idempotent when already present", () => {
+		const first = applyPersonalizationPreset("", "Gunakan Bahasa Indonesia.");
+		assert.equal(first, "Gunakan Bahasa Indonesia.");
+		const second = applyPersonalizationPreset(first, "Beri analogi praktis.");
+		assert.equal(second, "Gunakan Bahasa Indonesia.\nBeri analogi praktis.");
+		const duplicate = applyPersonalizationPreset(second, "Gunakan Bahasa Indonesia.");
+		assert.equal(duplicate, second, "does not duplicate an already-present snippet");
 	});
 });

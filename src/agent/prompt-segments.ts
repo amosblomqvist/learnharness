@@ -30,7 +30,14 @@
 import fs from "node:fs";
 import path from "node:path";
 import { PATHS, PROMPTS_OVERRIDE_DIR } from "../../config.ts";
-import { FRAGMENT_RE, isValidSegmentPath, type PromptAgent, type PromptSegmentInfo } from "../core/prompt-segments.ts";
+import {
+	FRAGMENT_RE,
+	PERSONALIZATION_SEGMENT,
+	isCustomSkillPath,
+	isValidSegmentPath,
+	type PromptAgent,
+	type PromptSegmentInfo,
+} from "../core/prompt-segments.ts";
 
 const PROMPTS_DIR = path.join(PATHS.root, "src", "agent", "prompts");
 
@@ -96,6 +103,25 @@ export function listSourceSegments(agent: PromptAgent): Array<{ path: string; sh
 	return segments;
 }
 
+/** List user-created custom segments (personalization.md + skills/*.md) present on disk. */
+export function listCustomSegments(): string[] {
+	const out: string[] = [];
+	if (readPromptOverride(PERSONALIZATION_SEGMENT) !== null) {
+		out.push(PERSONALIZATION_SEGMENT);
+	}
+	const skillsDir = path.join(PROMPTS_OVERRIDE_DIR, "skills");
+	try {
+		const files = fs
+			.readdirSync(skillsDir)
+			.filter((f) => isCustomSkillPath(`skills/${f}`))
+			.sort();
+		for (const f of files) out.push(`skills/${f}`);
+	} catch {
+		// skills dir absent = none
+	}
+	return out;
+}
+
 /**
  * The effective segment view for one agent — every segment with its source
  * text, override text, and effective switch state. `switches` is the
@@ -106,7 +132,7 @@ export function effectivePromptSegments(
 	agent: PromptAgent,
 	switches: Record<string, boolean>,
 ): PromptSegmentInfo[] {
-	return listSourceSegments(agent).map((segment) => {
+	const base = listSourceSegments(agent).map((segment) => {
 		let sourceText: string;
 		try {
 			sourceText = fs.readFileSync(segment.file, "utf-8");
@@ -122,6 +148,19 @@ export function effectivePromptSegments(
 			shared: segment.shared,
 		};
 	});
+	for (const customPath of listCustomSegments()) {
+		const overrideText = readPromptOverride(customPath);
+		if (overrideText !== null) {
+			base.push({
+				path: customPath,
+				sourceText: "",
+				overrideText,
+				enabled: switches[customPath] === true,
+				shared: true,
+			});
+		}
+	}
+	return base;
 }
 
 /** Every known segment path across both agents (route validation). */
@@ -130,5 +169,6 @@ export function allSegmentPaths(): string[] {
 	for (const agent of ["prober", "teacher", "practice"] as const) {
 		for (const segment of listSourceSegments(agent)) paths.add(segment.path);
 	}
+	for (const customPath of listCustomSegments()) paths.add(customPath);
 	return [...paths].sort();
 }

@@ -38,12 +38,12 @@ process.env.LH_DATA_DIR = TMP_DATA;
 const { PROMPTS_OVERRIDE_DIR } = await import("../config.ts");
 const teacherAgent = await import("../src/agent/teacher-agent.ts");
 const { allSegmentPaths, effectivePromptSegments } = await import("../src/agent/prompt-segments.ts");
-const { isValidSegmentPath } = await import("../src/core/prompt-segments.ts");
+const { isValidSegmentPath, isCustomSkillPath, sanitizeSkillPath } = await import("../src/core/prompt-segments.ts");
 const { promptOverrides } = await import("../src/store/prompt-overrides.ts");
 // Route-level pins drive the actual app/api handlers (framework-free
 // Request/Response), isolated under the same temp LH_DATA_DIR.
 const { PUT: putSettingsSection } = await import("../app/api/settings/[section]/route.ts");
-const { DELETE: deletePromptText } = await import("../app/api/settings/prompts/[...segment]/route.ts");
+const { PUT: putPromptText, DELETE: deletePromptText } = await import("../app/api/settings/prompts/[...segment]/route.ts");
 const { readSettingsRecord } = await import("../src/server/index.ts");
 
 /** The REAL repo prompts dir this suite must never touch (read-only). */
@@ -95,6 +95,18 @@ function putSection(section: string, body: unknown): Promise<Response> {
 	);
 }
 
+/** PUT /api/settings/prompts/<segment...> with a fabricated params context. */
+function putSegment(segment: string[], text: string): Promise<Response> {
+	return putPromptText(
+		new Request("http://test/api/settings/prompts", {
+			method: "PUT",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({ text }),
+		}),
+		{ params: Promise.resolve({ segment }) },
+	);
+}
+
 /** DELETE /api/settings/prompts/<segment...> with a fabricated params context. */
 function deleteSegment(segment: string[]): Promise<Response> {
 	return deletePromptText(new Request("http://test/api/settings/prompts", { method: "DELETE" }), {
@@ -123,6 +135,23 @@ describe("isValidSegmentPath (the mirror-layout discipline)", () => {
 			"teacher/sub/10-x.md", // nested (not the mirror layout)
 			"prober\\10-x.md", // backslash
 		]) {
+			assert.equal(isValidSegmentPath(bad), false, bad);
+		}
+	});
+
+	it("accepts personalization.md and skills/<slug>.md as custom user segments", () => {
+		assert.equal(isValidSegmentPath("personalization.md"), true);
+		assert.equal(isValidSegmentPath("skills/socratic-tutor.md"), true);
+		assert.equal(isValidSegmentPath("skills/SKILL.md"), true);
+		assert.equal(isCustomSkillPath("personalization.md"), true);
+		assert.equal(isCustomSkillPath("skills/socratic-tutor.md"), true);
+		assert.equal(isCustomSkillPath("system-prompt.md"), false);
+		assert.equal(isCustomSkillPath("shared/10-voice.md"), false);
+		assert.equal(sanitizeSkillPath("My Custom Skill.md"), "skills/my-custom-skill.md");
+		assert.equal(sanitizeSkillPath("SKILL.md"), "skills/skill.md");
+		assert.equal(sanitizeSkillPath("SKILL.md", "---\nname: Socratic Tutor\n---\nBody"), "skills/socratic-tutor.md");
+		assert.equal(sanitizeSkillPath("SKILL.md", "# Rigorous Math\nBody"), "skills/rigorous-math.md");
+		for (const bad of ["skills/", "skills/.md", "skills/../evil.md", "skills/sub/a.md", "skills/a.txt"]) {
 			assert.equal(isValidSegmentPath(bad), false, bad);
 		}
 	});
@@ -319,6 +348,26 @@ describe("composeInstructions: override honoring + the byte-identical source pat
 			promptOverrides.deleteOverride("system-prompt.md");
 		}
 	});
+
+	it("composes personalization.md and uploaded skills/*.md into all agents when enabled", () => {
+		promptOverrides.writeOverride("personalization.md", "PREFER BAHASA INDONESIA DAN ANALOGI PRAKTIS");
+		promptOverrides.writeOverride("skills/code-tutor.md", "# Skill: Socratic Code Tutor\nAlways ask user to trace variables.");
+		try {
+			const switches = { "personalization.md": true, "skills/code-tutor.md": true };
+			for (const kind of ["prober", "teacher", "practice"] as const) {
+				const composed = composeInstructions(kind, switches);
+				assert.ok(composed.includes("PREFER BAHASA INDONESIA DAN ANALOGI PRAKTIS"), `${kind} includes personalization`);
+				assert.ok(composed.includes("# Skill: Socratic Code Tutor"), `${kind} includes skill`);
+			}
+			// When switches are off, neither composes:
+			const off = composeInstructions("teacher", { "personalization.md": false, "skills/code-tutor.md": false });
+			assert.ok(!off.includes("PREFER BAHASA INDONESIA DAN ANALOGI PRAKTIS"));
+			assert.ok(!off.includes("# Skill: Socratic Code Tutor"));
+		} finally {
+			promptOverrides.deleteOverride("personalization.md");
+			promptOverrides.deleteOverride("skills/code-tutor.md");
+		}
+	});
 });
 
 // ─── the orphan-heal contract (interlude, 2026-09-26) ────────────────────────
@@ -356,6 +405,26 @@ describe("delete clears the switch — the record and file agree by construction
 		assert.equal(res.status, 200);
 		const body = (await res.json()) as { switchCleared: boolean };
 		assert.equal(body.switchCleared, false, "no switch was present — nothing cleared");
+	});
+
+	it("PUT /api/settings/prompts/[...segment] accepts new personalization.md and skills/<name>.md, then PUT /api/settings/agent enables them", async () => {
+		const putPers = await putSegment(["personalization.md"], "Prefer Bahasa Indonesia.");
+		assert.equal(putPers.status, 200);
+		const putSkill = await putSegment(["skills", "socratic.md"], "# Skill: Socratic\nAsk why.");
+		assert.equal(putSkill.status, 200);
+
+		const enableRes = await putSection("agent", {
+			prompts: { "personalization.md": true, "skills/socratic.md": true },
+		});
+		assert.equal(enableRes.status, 200);
+		assert.equal(readSettingsRecord()?.agent?.prompts?.["personalization.md"], true);
+		assert.equal(readSettingsRecord()?.agent?.prompts?.["skills/socratic.md"], true);
+
+		// Deleting the uploaded skill removes the file AND clears the switch:
+		const delRes = await deleteSegment(["skills", "socratic.md"]);
+		assert.equal(delRes.status, 200);
+		assert.equal(readSettingsRecord()?.agent?.prompts?.["skills/socratic.md"], undefined);
+		await deleteSegment(["personalization.md"]);
 	});
 });
 
