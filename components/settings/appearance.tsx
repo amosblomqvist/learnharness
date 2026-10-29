@@ -21,7 +21,17 @@
  * with the other navigations — mod+, pushes /settings from anywhere.)
  */
 
-import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import {
+	createContext,
+	useCallback,
+	useContext,
+	useEffect,
+	useLayoutEffect,
+	useMemo,
+	useRef,
+	useState,
+	useSyncExternalStore,
+} from "react";
 import {
 	FACTORY_SETTINGS,
 	resolveRenderedMode,
@@ -166,8 +176,11 @@ export function AppearanceProvider({
 	// next load, the class for every `.dark`/`.light` rule and variant.
 	// System reads the OS here, not resolvedMode: during hydration that still
 	// holds the server snapshot (dark) and would undo the head script's class
-	// for a commit. resolvedMode stays a dep so an OS flip re-runs this.
-	useEffect(() => {
+	// for a commit. resolvedMode stays a dep so an OS flip re-runs this. A
+	// LAYOUT effect (like the vars below): descendants' passive effects run
+	// after it, so anything reading computed tokens (the graph canvas) sees
+	// the new mode, and the swap lands before paint.
+	useLayoutEffect(() => {
 		const root = document.documentElement;
 		const dark = mode === "system" ? window.matchMedia(DARK_QUERY).matches : mode === "dark";
 		root.dataset.lhMode = mode;
@@ -185,7 +198,7 @@ export function AppearanceProvider({
 	// has ever set is tracked; names absent from the new set are removed so
 	// the factory stylesheet value returns.
 	const appliedNamesRef = useRef<Set<string>>(new Set());
-	useEffect(() => {
+	useLayoutEffect(() => {
 		if (appliedRef.current === key) return;
 		appliedRef.current = key;
 		const root = document.documentElement;

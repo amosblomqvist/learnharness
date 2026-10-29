@@ -338,6 +338,11 @@ body {
 	border-radius: 0.75rem;
 	padding: 0.375rem;
 }
+/* The same well on the light page, gentler: 14% black over #f5f5f3 reads as
+   a heavy gray slab, 4% keeps it just darker than the page. */
+.light [data-streamdown="code-block"] {
+	background: color-mix(in oklab, var(--background) 96%, black);
+}
 [data-streamdown="code-block-header"] {
 	display: none;
 }
