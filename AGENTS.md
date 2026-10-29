@@ -13,3 +13,9 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 All design authority belongs to the human. **Never guess a design or implementation decision.** If anything is ambiguous — naming, behavior, data shapes, UX, defaults, scope boundaries, prompt wording — STOP and ask with the ask-user-question tool before proceeding. If you are "a little unsure," you are unsure: ask. A wrong guess is far more expensive than a question. Ask early, ask specific, one question per call.
 
 Concretely: first investigate and plan rigorously (asking the user design questions along the way), get the plan approved by the user, and only then implement. Implementation should be mechanical execution of an approved plan — not interpretation.
+
+# Pointers & Checks
+
+- Architecture, hexagon import law (`eslint.config.mjs`), and store ports: read [`docs/architecture.md`](docs/architecture.md).
+- Prompt segments, overrides, and custom skills/personalization (`data/prompts/`): read [`src/agent/prompts/README.md`](src/agent/prompts/README.md) and [`src/core/prompt-segments.ts`](src/core/prompt-segments.ts).
+- Verification gate: run `npm run typecheck`, `npm run lint`, and targeted `npx tsx --test tests/<file>.test.ts` (`package.json`'s `npm test` uses POSIX `NODE_ENV=test` syntax).
