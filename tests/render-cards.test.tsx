@@ -96,7 +96,7 @@ describe("question submission draft restoration", () => {
 
 	it("restores an ask's custom answer and a free-text answer", () => {
 		const custom = renderToStaticMarkup(<QuestionDock toolName="ask_user_question" toolCallId="ask1" input={{ question: "Fixture?", options: [{ label: "Listed answer" }, { label: "Another answer" }], multiSelect: true }} expanded onExpand={() => {}} onSubmit={() => {}} initialDraft={draft} />);
-		assert.ok(custom.includes('value="preserved custom answer"'));
+		assert.match(custom, /role="textbox"[^>]*aria-multiline="false"[^>]*>preserved custom answer<\/div>/);
 		assert.match(custom, /aria-checked="true" data-testid="other-option"/);
 		const text = renderToStaticMarkup(<QuestionDock toolName="ask_user_question" toolCallId="ask2" input={{ question: "Fixture?" }} expanded onExpand={() => {}} onSubmit={() => {}} initialDraft={draft} />);
 		assert.ok(text.includes("preserved free-text answer"));

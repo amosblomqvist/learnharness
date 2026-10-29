@@ -1,13 +1,22 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { subscriptionLabels, subscriptionLabel, type SessionPricing, type TurnUsage } from "@/src/core";
+import { CLAUDE_CODE_PROVIDER, subscriptionLabels, subscriptionLabel, type cliContextWindowOf, type SessionPricing, type TurnUsage } from "@/src/core";
 import { formatTokens, formatUsd, planCostLabel, prettyModel } from "@/components/usage-format";
 import { ModelControl, catalogLimits, useModelCatalog } from "@/components/model-picker";
 
 export function formatContextMeasurement(tokens: number | null, limit: number | null): string {
 	const numerator = tokens === null ? "?" : formatTokens(tokens);
 	return limit === null ? numerator : `${numerator} / ${formatTokens(limit)}`;
+}
+
+/** CLI aliases have no global catalog limit: only this session's matching
+ * response can supply a denominator. Other providers keep their catalog join. */
+export function contextLimitForModel(model: string | undefined, limits: ReadonlyMap<string, number> | undefined,
+	cliWindow: ReturnType<typeof cliContextWindowOf> = null): number | null {
+	if (!model) return null;
+	if (model.startsWith(`${CLAUDE_CODE_PROVIDER}:`)) return cliWindow?.model === model ? cliWindow.tokens : null;
+	return limits?.get(model) ?? null;
 }
 
 /**
@@ -24,12 +33,14 @@ export function formatContextMeasurement(tokens: number | null, limit: number | 
  * Spending arrives already priced by the server through Pi's catalog and
  * calculator. Missing cost stays "—", never fake zero. Context is a separate
  * completed-conversation measurement, never a money-log/summarizer fold or
- * transcript estimate. Its catalog denominator follows the selected model;
- * model changes preserve the numerator. Successful compaction clears it to ?.
+ * transcript estimate. Its denominator follows the selected model, from the
+ * catalog or the session's CLI report; model changes preserve the numerator.
+ * Successful compaction clears the numerator and any old CLI report.
  */
 export function StatsBar({
 	turns,
 	contextTokens = null,
+	cliContextWindow = null,
 	pricing,
 	dictationSlot,
 	chatId,
@@ -38,6 +49,7 @@ export function StatsBar({
 }: {
 	turns: TurnUsage[];
 	contextTokens?: number | null;
+	cliContextWindow?: ReturnType<typeof cliContextWindowOf>;
 	pricing?: SessionPricing;
 	/** The bound session (per-session models, owner 2026-09-28): present
 	 *  on the in-session bar — the model control binds THE SESSION'S own
@@ -86,18 +98,19 @@ export function StatsBar({
 			document.removeEventListener("keydown", onKeyDown);
 		};
 	}, [open]);
-	// Catalog-only denominator; the picker reports its effective selection.
-	// Missing/pending catalog means usage-only, never a hardcoded maximum.
+	// The picker reports its effective selection. CLI windows are session-
+	// scoped; unknown metadata always means usage-only, never a guessed maximum.
 	const { catalog } = useModelCatalog();
 	const limits = useMemo(() => (catalog ? catalogLimits(catalog) : undefined), [catalog]);
-	const limit = selectedModel ? limits?.get(selectedModel) ?? null : null;
+	const limit = contextLimitForModel(selectedModel, limits, cliContextWindow);
 	const contextLabel = formatContextMeasurement(contextTokens, limit);
 	const { cost = 0, unpriced = turns.length, subscription = 0 } = pricing ?? {};
 	// Honest cost: show dollars only when at least one turn priced;
 	// otherwise "—" (never a fake $0.0000).
 	const pricedCount = turns.length - unpriced - subscription;
 	const providers = pricing?.subscriptionProviders ?? subscriptionLabels(turns.map((turn) => turn.model));
-	const costLabel = planCostLabel(pricedCount > 0 ? cost : null, providers);
+	const cliBilled = turns.some((turn) => turn.model.startsWith(`${CLAUDE_CODE_PROVIDER}:`));
+	const costLabel = planCostLabel(pricedCount > 0 ? cost : null, cliBilled ? [...providers, "CLI"] : providers);
 
 	return (
 		<div
@@ -151,6 +164,9 @@ export function StatsBar({
 									{contextLabel}
 								</span>
 							</div>
+							{selectedModel?.startsWith(`${CLAUDE_CODE_PROVIDER}:`) && (
+								<p>Window reported by Claude Code; may be lower for auto-compaction.</p>
+							)}
 							<div className="flex justify-between gap-2">
 								<span>{subscription ? "Usage" : "Total cost"}</span>
 								<span className="tabular-nums text-card-foreground">{costLabel}</span>
@@ -178,7 +194,7 @@ export function StatsBar({
 												</span>
 												<span className="flex shrink-0 items-center gap-2 tabular-nums text-card-foreground">
 													<span className="text-muted-foreground">{turn.steps.length} steps</span>
-													<span>{subscriptionLabel(turn.model) ?? (c === null ? "—" : formatUsd(c))}</span>
+													<span>{turn.model.startsWith(`${CLAUDE_CODE_PROVIDER}:`) ? "CLI" : subscriptionLabel(turn.model) ?? (c === null ? "—" : formatUsd(c))}</span>
 												</span>
 											</li>
 										);

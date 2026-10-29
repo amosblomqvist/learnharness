@@ -52,6 +52,9 @@ export interface LhViewPart extends Record<string, unknown> {
 	text?: string;
 	state?: string;
 	toolCallId?: string;
+	/** Native location, retained across display grouping (client-only). */
+	sourceMessageId?: string;
+	sourceContentIndex?: number;
 	input?: unknown;
 	output?: unknown;
 	rawInput?: unknown;
@@ -219,13 +222,17 @@ export function projectView(messages: readonly LhMessage[], live?: LiveTurnState
 			// back to a spinner mid-transcript; live cards belong at the
 			// bottom, and this gate is what puts them there by construction).
 			const streamingMessage = live?.streamingIds.has(m.id) === true;
-			for (const block of assistant.content) {
+			for (const [contentIndex, block] of assistant.content.entries()) {
 				if (block.type === "text") {
 					rest.push({ type: "text", id: `${m.id}-t${textN++}`, text: block.text, state: "done" });
 				} else if (block.type === "thinking") {
 					reasoning.push({ type: "reasoning", id: `${m.id}-r${reasoningN++}`, text: block.thinking, state: "done" });
 				} else if (block.type === "toolCall") {
 					const part = toolPartOf(block, live, streamingMessage);
+					if ((QUESTION_TOOLS as readonly string[]).includes(block.name)) {
+						part.sourceMessageId = m.id;
+						part.sourceContentIndex = contentIndex;
+					}
 					if (block.name === SEND_TO_USER_TOOL) {
 						// Failed/aborted generations never execute their calls;
 						// the provider error/abort UI already owns that outcome.

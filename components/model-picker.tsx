@@ -13,14 +13,12 @@ import { useModelCatalog } from "@/components/model-catalog";
 export { useModelCatalog } from "@/components/model-catalog";
 import { defaultOrderLevel, populateLevel, THINKING_LABEL } from "@/components/thinking-default";
 
-/** provider:id → contextWindow over the cached catalog — the client-side
- *  twin of the server's catalogContextLimits join (context-meter
- *  amendment: the resolved catalog is the limit source, so a model missing
- *  from the index reads limit-null and the meter renders usage-only,
- *  the honest-render precedent). Consumed by the stats bar: the same
- *  cached /api/models fetch the picker rides feeds the denominator. */
+/** provider:id → known contextWindow over the cached catalog, mirroring
+ * the server's catalogContextLimits join. CLI aliases have no global
+ * denominator: the stats bar uses that session's actual CLI report instead.
+ * Missing limits always render usage-only, without a hardcoded fallback. */
 export function catalogLimits(catalog: Pick<ModelCatalogResponse, "models">): Map<string, number> {
-	return new Map(catalog.models.map((m) => [`${m.provider}:${m.id}`, m.contextWindow]));
+	return new Map(catalog.models.flatMap((m) => m.contextWindow === null ? [] : [[`${m.provider}:${m.id}`, m.contextWindow] as const]));
 }
 
 /**

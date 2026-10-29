@@ -19,6 +19,7 @@
 import { clampThinkingLevel, getSupportedThinkingLevels, type Api, type Model } from "@earendil-works/pi-ai";
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import { piModels } from "../agent/models.ts";
+import { customProviderAvailable } from "./custom-provider.ts";
 import { chatGPTCatalogScope, chatGPTConnected, chatGPTModel, chatGPTModels, refreshChatGPTModels } from "../agent/chatgpt-bridge.ts";
 import { NATIVE_SUBSCRIPTIONS } from "../core/contracts/subscriptions.ts";
 import { nativeSubscriptionId, nativeSubscriptionConnected, nativeSubscriptionModel, nativeSubscriptionModels, refreshSubscriptionModels } from "../agent/subscription-bridge.ts";
@@ -30,6 +31,7 @@ export async function refreshConnectionCatalog(provider?: string): Promise<void>
 	]);
 }
 function connectionModel(provider: string, id: string): Model<Api> | undefined {
+	if (provider === CLAUDE_CODE_PROVIDER && !claudeCodeAvailable()) return undefined;
 	return provider === "chatgpt" ? chatGPTModel(id) : nativeSubscriptionId(provider) ? nativeSubscriptionModel(provider, id) : piModels().getModel(provider, id);
 }
 function connectionProviderIds(): string[] { return [...piModels().getProviders().map((p) => p.id), "chatgpt", ...NATIVE_SUBSCRIPTIONS.map((p) => p.logicalId)]; }
@@ -46,8 +48,18 @@ import type {
 	SlotPins,
 } from "../core/contracts/models.ts";
 import type { EffectiveModelSpec, EffectiveSlot } from "../core/settings-resolution.ts";
-import { AUTH_PROVIDER_KEYS } from "../core/auth-keys.ts";
-import { BACKGROUND_MODEL_ROLES, COMPACTION_THRESHOLD_FLOOR, MODEL_SLOTS, type BackgroundModelRole, type ModelSlotName, type ModelsSettings } from "../core/settings.ts";
+import { AUTH_PROVIDER_KEYS, CUSTOM_PROVIDER } from "../core/auth-keys.ts";
+import { claudeCodeAvailable } from "./claude-code-config.ts";
+import { CLAUDE_CODE_PROVIDER } from "../agent/claude-code/constants.ts";
+import {
+	BACKGROUND_MODEL_ROLES,
+	COMPACTION_THRESHOLD_FLOOR,
+	MODEL_SLOTS,
+	customProviderUsable,
+	type BackgroundModelRole,
+	type ModelSlotName,
+	type ModelsSettings,
+} from "../core/settings.ts";
 
 /** The picker's client-safe model entry (contract: core/contracts/models.ts). */
 export type ModelDto = ModelCatalogEntry;
@@ -134,13 +146,20 @@ export function catalogSlots(): SlotPins {
  *  with keyPresent read env-wins through the keys seam, fresh per call —
  *  saving a key immediately federates the provider into the picker. */
 export function catalogProviders(): CatalogProvider[] {
+	piModels();
 	return AUTH_PROVIDER_KEYS.map((p) => ({
 		id: p.id,
 		envVar: p.envVar,
 		keyPresent: keyValue(p.envVar) !== undefined,
 	})).concat([
 		{ id: "chatgpt", envVar: "", keyPresent: chatGPTConnected() },
+		{ id: CLAUDE_CODE_PROVIDER, envVar: "", keyPresent: claudeCodeAvailable() },
 		...NATIVE_SUBSCRIPTIONS.map((p) => ({ id: p.logicalId, envVar: "", keyPresent: nativeSubscriptionConnected(p.providerId) })),
+		// The custom endpoint: a row only when usable (base URL set). keyPresent
+		// reflects usability, not key presence (keyless local servers are allowed).
+		...(customProviderUsable(effectiveSettings().customProvider)
+			? [{ id: CUSTOM_PROVIDER.id, envVar: CUSTOM_PROVIDER.envVar, keyPresent: customProviderAvailable() }]
+			: []),
 	]).sort((a, b) => a.id.localeCompare(b.id));
 }
 
@@ -153,7 +172,7 @@ function keyedProviderIds(): Set<string> {
 
 /** Resolve an explicit choice only against the current account's advertised
  * ceiling. Account switches and lower ceilings cannot inherit an unsafe limit. */
-export function resolveModelContext(model: Model<Api>, windows: Readonly<Record<string, number>> = {}): Pick<ModelDto, "contextWindow" | "defaultContextWindow" | "maxContextWindow" | "contextWindowSource" | "contextWindowKey"> {
+export function resolveModelContext(model: Model<Api>, windows: Readonly<Record<string, number>> = {}): Pick<ModelDto, "contextWindow" | "defaultContextWindow" | "maxContextWindow" | "contextWindowSource" | "contextWindowKey"> & { contextWindow: number } {
 	const metadata = model as Model<Api> & { contextWindowSource?: "account"; maxContextWindow?: number };
 	if (model.provider !== "chatgpt" || metadata.contextWindowSource !== "account") return { contextWindow: model.contextWindow };
 	const max = metadata.maxContextWindow;
@@ -177,21 +196,22 @@ export function toModelDto(model: Model<Api>, windows: Readonly<Record<string, n
 		reasoning: model.reasoning,
 		input: [...model.input],
 		supportedLevels: getSupportedThinkingLevels(model),
-		cost: {
+		cost: model.provider === CLAUDE_CODE_PROVIDER || model.provider === CUSTOM_PROVIDER.id ? null : {
 			input: model.cost.input,
 			output: model.cost.output,
 			cacheRead: model.cost.cacheRead,
 			cacheWrite: model.cost.cacheWrite,
 		},
-		...resolveModelContext(model, windows),
-		maxTokens: model.maxTokens,
+		...(model.provider === CLAUDE_CODE_PROVIDER ? { contextWindow: null } : resolveModelContext(model, windows)),
+		maxTokens: model.provider === CLAUDE_CODE_PROVIDER ? null : model.maxTokens,
 	};
 }
 
 /** The live-limits index (context-meter amendment, owner 2026-09-23):
  *  provider:id → contextWindow from pi's catalog, over the SAME keyed
- *  providers the picker federates. The one source for every context
- *  meter's denominator — the stats-bar join holds /api/models' copy,
+ *  providers the picker federates. Native CLI aliases are excluded:
+ *  only a session-specific CLI report can provide their denominator.
+ *  For other models the stats-bar join holds /api/models' copy,
  *  and the activity feed (observability.ts) resolves job limits
  *  server-side through this. No hardcoded fallback exists anywhere:
  *  a model missing here reads limit-null (usage-only, honest render). */
@@ -200,7 +220,7 @@ export function catalogContextLimits(): Map<string, number> {
 	const windows = effectiveSettings().compaction.contextWindows;
 	const index = new Map<string, number>();
 	for (const provider of piModels().getProviders()) {
-		if (!keyed.has(provider.id)) continue;
+		if (!keyed.has(provider.id) || provider.id === CLAUDE_CODE_PROVIDER) continue;
 		for (const model of piModels().getModels(provider.id)) {
 			index.set(`${provider.id}:${model.id}`, resolveModelContext(model, windows).contextWindow);
 		}

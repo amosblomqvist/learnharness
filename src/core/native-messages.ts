@@ -35,7 +35,8 @@
 
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { AssistantMessage, Message, ToolResultMessage, UserMessage } from "@earendil-works/pi-ai";
-import { QUESTION_TOOLS } from "./pending.ts";
+import { QUESTION_TOOLS, type PendingQuestion } from "./pending.ts";
+import { CLAUDE_CODE_PROVIDER } from "./contracts/claude-code.ts";
 import {
 	CONCLUDE_ACK_TEXT,
 	HANDOFF_TEXT,
@@ -90,7 +91,26 @@ declare module "@earendil-works/pi-agent-core" {
 }
 
 /** A record message: a native pi message (or our marker) plus the record id. */
-export type LhMessage = (UserMessage | AssistantMessage | ToolResultMessage | LhMarkerMessage) & { id: string };
+export type LhMessage = (UserMessage | AssistantMessage | ToolResultMessage | LhMarkerMessage) & {
+	id: string;
+	/** CLI-reported effective context budget, not a catalog model maximum.
+	 * App-only metadata: never transmitted as provider/model message content. */
+	cliContextWindow?: number;
+};
+
+/** Latest response only: never borrow an older process/model's window when
+ * a fresh response has no metadata. Compaction invalidates the old report. */
+export function cliContextWindowOf(messages: readonly LhMessage[]): { model: string; tokens: number } | null {
+	for (let i = messages.length - 1; i >= 0; i--) {
+		const message = messages[i]!;
+		if (message.role === "custom" && message.customType === "compaction") return null;
+		if (message.role !== "assistant") continue;
+		const tokens = message.cliContextWindow;
+		return message.provider === CLAUDE_CODE_PROVIDER && typeof tokens === "number" && Number.isSafeInteger(tokens) && tokens > 0
+			? { model: `${message.provider}:${message.model}`, tokens } : null;
+	}
+	return null;
+}
 
 /** A record message list is assignable to the agent's context — that IS
  *  the replay (ui-stream/chat-handler assign it to initialState.messages). */
@@ -617,8 +637,8 @@ export function toLlmMessages(messages: readonly AgentMessage[]): Message[] {
 			});
 			continue;
 		}
-		// Strip the record id: the wire carries the native shape only.
-		const { id: _id, ...native } = m as LhMessage;
+		// Strip app-only id/CLI context metadata: the wire carries the native shape only.
+		const { id: _id, cliContextWindow: _cliContextWindow, ...native } = m as LhMessage;
 		out.push(native as Message);
 		// Repair unanswered calls from completed generations, not calls in
 		// failed generations. Pi filters error/aborted assistants itself;
@@ -653,16 +673,60 @@ export function toLlmMessages(messages: readonly AgentMessage[]): Message[] {
 export function danglingQuestionOf(
 	messages: readonly LhMessage[],
 ): { toolCallId: string; tool: string; input: unknown } | null {
+	const question = questionOccurrenceOf(messages);
+	return question ? { toolCallId: question.toolCallId, tool: question.tool, input: question.input } : null;
+}
+
+/** The same authority, retaining native boundaries for the client dock.
+ * Unique call ids are stable even when a live message's local id is replaced
+ * by its persisted stamp. Only colliding ids need an occurrence-qualified
+ * draft/reset key; this never changes stored ids or the answer wire. */
+export function pendingQuestionOf(messages: readonly LhMessage[]): PendingQuestion | null {
+	// turn_end includes the temporary questionResult acknowledgement. The
+	// view ignores it too: it is NOT the learner's answer. Exclude it only
+	// from client authority, leaving persisted/server result policy intact.
+	const question = questionOccurrenceOf(messages.filter(message => !isLiveQuestionPlaceholder(message)));
+	if (!question) return null;
+	let occurrences = 0;
+	for (const message of messages) {
+		// A streamed c_ assistant can temporarily coexist with its saved
+		// copy during append-only adoption. New live calls are already
+		// uniquified; only settled history establishes reuse.
+		if (message.role !== "assistant" || message.id.startsWith("c_")) continue;
+		for (const call of message.content) {
+			if (call.type === "toolCall" && call.id === question.toolCallId) occurrences++;
+		}
+	}
+	return {
+		...question,
+		key: occurrences > 1 ? JSON.stringify([question.messageId, question.contentIndex, question.toolCallId]) : question.toolCallId,
+	};
+}
+
+/** Only the transient c_ result with the questionResult contract qualifies.
+ * Real answers have details; errors/aborts remain resolving results. A saved
+ * null result is not reinterpreted by this client-only compatibility seam. */
+function isLiveQuestionPlaceholder(message: LhMessage): boolean {
+	return message.role === "toolResult" && message.id.startsWith("c_") &&
+		!message.isError && message.details === null &&
+		(QUESTION_TOOLS as readonly string[]).includes(message.toolName);
+}
+
+/** Shared native authority: newest assistant only, siblings in call order. */
+function questionOccurrenceOf(messages: readonly LhMessage[]): Omit<PendingQuestion, "key"> | null {
 	for (let mi = messages.length - 1; mi >= 0; mi--) {
 		const m = messages[mi]!;
 		if ((m as { role?: string }).role !== "assistant") continue;
 		const assistant = m as AssistantMessage & { id: string };
 		const answered = resultIdsFrom(messages.slice(mi + 1));
-		for (const block of assistant.content) {
+		for (const [contentIndex, block] of assistant.content.entries()) {
 			if (block.type !== "toolCall") continue;
 			if (!(QUESTION_TOOLS as readonly string[]).includes(block.name)) continue;
 			if (answered.has(block.id)) continue;
-			return { toolCallId: block.id, tool: block.name, input: block.arguments };
+			return {
+				toolCallId: block.id, tool: block.name, input: block.arguments,
+				messageId: assistant.id, contentIndex,
+			};
 		}
 		return null; // the newest assistant message's questions are all answered
 	}

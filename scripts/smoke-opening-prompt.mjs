@@ -109,14 +109,14 @@ try {
 		// Release synthetic streams from prior cases rather than pin slots.
 		await Promise.all(held.splice(0).map(request => request.abort("aborted").catch(() => {})));
 		await page.goto(origin + route, { waitUntil: "domcontentloaded", timeout: 120000 });
-		await page.waitForSelector(route === "/" ? "textarea" : '[data-testid="composer"] textarea');
+		await page.waitForSelector(route === "/" ? "[data-file-path-input]" : '[data-testid="composer"] [data-file-path-input]');
 		await page.waitForFunction(() => !document.querySelector('[data-testid="setup-cta"]') && !document.querySelector('[data-testid="setup-cta-keys"]'));
 	}
 	async function fill(text) {
 		await page.evaluate(value => {
-			const textarea = document.querySelector('[data-testid="composer"] textarea') || document.querySelector("textarea");
-			Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value").set.call(textarea, value);
-			textarea.dispatchEvent(new Event("input", { bubbles: true }));
+			const input = document.querySelector('[data-testid="composer"] [data-file-path-input]') || document.querySelector("[data-file-path-input]");
+			input.textContent = value;
+			input.dispatchEvent(new Event("input", { bubbles: true }));
 		}, text);
 	}
 	async function submit() {
@@ -127,7 +127,10 @@ try {
 		await page.locator('button[aria-label="Start session"], [data-testid="composer"] button[aria-label="Send"]').click();
 	}
 	async function stash(id) { return page.evaluate(chat => sessionStorage.getItem(`lh.openingPrompt.${chat}`), id); }
-	async function assertDraft(text) { await page.waitForFunction(value => document.querySelector('[data-testid="composer"] textarea')?.value === value, {}, text); }
+	async function assertDraft(text) { await page.waitForFunction(value => {
+		const input = document.querySelector('[data-testid="composer"] [data-file-path-input]');
+		return input && [...input.childNodes].map(node => node.nodeType === 1 ? node.getAttribute("data-file-path-source") ?? node.textContent : node.textContent).join("") === value;
+	}, {}, text); }
 	const long = "A full synthetic syllabus — 世界 & ? #. ".repeat(1200).trim();
 	for (const route of ["/", "/chat/new"]) {
 		for (const text of ["a short synthetic topic", long]) {
@@ -163,7 +166,7 @@ try {
 		await fill(long); await submit();
 		await page.waitForSelector('[role="alert"]');
 		assert.equal(new URL(page.url()).pathname, route);
-		assert.equal(await page.$eval("textarea", element => element.value), long);
+		assert.equal(await page.$eval("[data-file-path-input]", element => [...element.childNodes].map(node => node.nodeType === 1 ? node.getAttribute("data-file-path-source") ?? node.textContent : node.textContent).join("")), long);
 		assert.equal(posts.length, sendCount);
 		assert.equal(creates.length, createCount + 1);
 		await page.evaluate(() => { window.failOpeningStorage = false; });
@@ -239,7 +242,7 @@ try {
 	console.log(JSON.stringify({ checks, pageErrors: errors, isolation: "synthetic catalog/POST+streams; empty auth; no providers", origin }, null, 2));
 } catch (err) {
 	console.error(err);
-	console.error(JSON.stringify({ checks, errors, url: page?.url(), dom: await page?.evaluate(() => ({ textareas: [...document.querySelectorAll('textarea')].map(e => ({ length: e.value.length, placeholder: e.placeholder })), buttons: [...document.querySelectorAll('button[aria-label="Send"], button[aria-label="Start session"]')].map(e => ({ disabled: e.disabled, label: e.getAttribute('aria-label') })), alerts: [...document.querySelectorAll('[role="alert"]')].map(e => e.textContent), failStorage: window.failOpeningStorage, text: document.body.innerText.slice(-1200) })).catch(() => null) }, null, 2));
+	console.error(JSON.stringify({ checks, errors, url: page?.url(), dom: await page?.evaluate(() => ({ inputs: [...document.querySelectorAll('[data-file-path-input]')].map(e => ({ length: [...e.childNodes].map(n => n.nodeType === 1 ? n.getAttribute('data-file-path-source') ?? n.textContent : n.textContent).join('').length, placeholder: e.getAttribute('data-placeholder') })), buttons: [...document.querySelectorAll('button[aria-label="Send"], button[aria-label="Start session"]')].map(e => ({ disabled: e.disabled, label: e.getAttribute('aria-label') })), alerts: [...document.querySelectorAll('[role="alert"]')].map(e => e.textContent), failStorage: window.failOpeningStorage, text: document.body.innerText.slice(-1200) })).catch(() => null) }, null, 2));
 	console.error(logs); process.exitCode = 1;
 } finally {
 	await browser?.close();
