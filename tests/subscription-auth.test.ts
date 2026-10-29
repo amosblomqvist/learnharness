@@ -98,6 +98,20 @@ test("device interaction exposes only public code and opaque browser action; can
 		await assert.rejects(fs.readFile(path.join(f.directory, "xai-credentials.json")), (error: any) => error.code === "ENOENT");
 	} finally { await f.cleanup(); }
 });
+test("pending interaction carries the draft background choice so a reloaded renderer can show it", async () => {
+	let done = deferred<OAuthCredential>(); const f = await fixture({ login: () => done.promise });
+	try {
+		let pending = f.controller.login("xai", false); await new Promise((resolve) => setImmediate(resolve));
+		let status = (await f.controller.status()).find((s: any) => s.providerId === "xai");
+		assert.equal(status.pending, true); assert.equal(status.interaction.allowBackgroundUse, false); assert.equal(status.allowBackgroundUse, true);
+		f.controller.cancel("xai"); done.resolve(credential("xai")); await pending;
+		await f.controller.consent("xai", false); done = deferred<OAuthCredential>();
+		pending = f.controller.login("xai"); await new Promise((resolve) => setImmediate(resolve));
+		status = (await f.controller.status()).find((s: any) => s.providerId === "xai");
+		assert.equal(status.interaction.allowBackgroundUse, false);
+		f.controller.cancel("xai"); done.resolve(credential("xai")); await pending;
+	} finally { await f.cleanup(); }
+});
 test("cancelled replacement retains old credentials; late old completion cannot overwrite a newer login", async () => {
 	let count = 0; const old = deferred<OAuthCredential>();
 	const f = await fixture({ login: async (id) => ++count === 2 ? old.promise : credential(id) });

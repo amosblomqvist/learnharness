@@ -24,7 +24,7 @@ export function NativeSubscriptionUIProvider({ children }: { children: React.Rea
 	const [view, setView] = useState<"notice" | "connection" | "manage">("notice");
 	const [confirm, setConfirm] = useState(false), [background, setBackground] = useState(true), [backgroundDirty, setBackgroundDirty] = useState(false), [promptValue, setPromptValue] = useState("");
 	const [operation, setOperation] = useState<"login" | "control" | null>(null), [error, setError] = useState<string | null>(null);
-	const mounted = useRef(false), sequence = useRef(0), generation = useRef(0), statusesRef = useRef(statuses);
+	const mounted = useRef(false), sequence = useRef(0), generation = useRef(0), statusesRef = useRef(statuses), adopted = useRef<NativeSubscriptionProviderId | null>(null), shown = useRef<string | null>(null);
 	const descriptor = NATIVE_SUBSCRIPTIONS.find((p) => p.providerId === dialog);
 	const status = statuses.find((s) => s.providerId === dialog) ?? (dialog ? emptySubscriptionStatus(dialog) : undefined);
 	const interaction = status?.interaction, prompt = interaction?.prompt;
@@ -49,6 +49,22 @@ export function NativeSubscriptionUIProvider({ children }: { children: React.Rea
 		// The root-lifetime subscriber reads current state through refs.
 	}, [bridge]);
 	useEffect(() => { setPromptValue(""); }, [prompt?.id]);
+	// Remember the attempt this dialog has shown: after Cancel a superseded refresh can leave its stale pending status in state, and that must not read as a foreign attempt.
+	useEffect(() => { if (dialog && interaction?.attemptId) shown.current = interaction.attemptId; }, [dialog, interaction?.attemptId]);
+	// A renderer reload loses the dialog, not main's attempt: adopt a pending attempt this window has never shown so it can be continued or cancelled.
+	useEffect(() => {
+		const pending = dialog || operation ? undefined : statuses.find((s) => s.pending);
+		if (!pending?.interaction || pending.interaction.attemptId === shown.current) return;
+		const draft = pending.interaction.allowBackgroundUse;
+		adopted.current = pending.providerId; generation.current++; setError(null); setConfirm(false); setBackgroundDirty(draft !== undefined);
+		setBackground(draft ?? pending.allowBackgroundUse); setView("connection"); setDialog(pending.providerId);
+	}, [statuses, dialog, operation]);
+	// Deps are the fields read; `status` itself is derived every render.
+	useEffect(() => {
+		if (!dialog || adopted.current !== dialog || operation || !status || status.pending) return;
+		adopted.current = null;
+		if (status.connected && !status.error) { setDialog(null); setError(null); }
+	}, [dialog, operation, status?.pending, status?.connected, status?.error]);
 	function open(providerId: NativeSubscriptionProviderId) {
 		if (operation || statusesRef.current.some((s) => s.pending)) return;
 		generation.current++; setError(null); setConfirm(false); setBackgroundDirty(false);
@@ -64,6 +80,7 @@ export function NativeSubscriptionUIProvider({ children }: { children: React.Rea
 	}
 	function close() {
 		if (!dialog || busy) return;
+		adopted.current = null;
 		if (confirm) { setConfirm(false); setError(null); return; }
 		if ((status?.pending || operation === "login") && bridge) { void control(() => bridge.cancel(dialog), true); return; }
 		generation.current++; setDialog(null); setError(null);

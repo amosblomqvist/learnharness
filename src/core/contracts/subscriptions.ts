@@ -20,6 +20,8 @@ export interface SubscriptionPrompt {
 /** Only public device user codes, never the private device_code or tokens. */
 export interface SubscriptionInteraction {
 	attemptId: string;
+	/** The background-use choice this attempt started with; lets a reloaded renderer show it while the attempt is pending. */
+	allowBackgroundUse?: boolean;
 	prompt?: SubscriptionPrompt;
 	browser?: { id: string; url: string };
 	userCode?: string;
