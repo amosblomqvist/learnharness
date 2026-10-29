@@ -157,6 +157,11 @@ export function withContextWindow<T extends { provider: string; id: string }>(sp
 	return contextWindow === undefined ? spec : { ...spec, contextWindow };
 }
 
+/** Only a known catalog limit can cap compaction; CLI model values are placeholders. */
+export function compactionThresholdForSpec(setting: number | undefined, spec: { contextWindow?: number }): number {
+	return effectiveThresholdTokens(setting, spec.contextWindow);
+}
+
 setJobRespawn((jobId) => void jobRunner.runJob(jobId));
 
 /** The route-facing entry: parse {chatId, input} and run one turn. */
@@ -275,10 +280,7 @@ export async function handleChatInput(
 			canStart: () => connectionBackgroundAllowed(conversation.provider),
 			modelId: modelIdForCompaction,
 			kind: record.kind === "practice" ? "practice" : hasProbeDone(record.messages) ? "teach" : "probe",
-			thresholdTokens: effectiveThresholdTokens(
-				effective.compaction?.thresholdTokens,
-				conversationEngine.model.contextWindow,
-			),
+			thresholdTokens: compactionThresholdForSpec(effective.compaction?.thresholdTokens, conversationWithContext),
 			systemPromptTokens: Math.ceil(composeInstructions(record.kind === "practice" ? "practice" : "teacher").length / 4),
 		},
 		chatId,
@@ -640,7 +642,8 @@ export async function handleChatInput(
 						const spec = resolveConversationSpec(stores.chatStore.getChat(chatId)?.settings, fresh.models.strong);
 						if (!spec || !connectionBackgroundAllowed(spec.provider)) return null;
 						let kickEngine: PiEngine;
-						try { kickEngine = piEngineForSpec(withContextWindow(spec), true); } catch { return null; }
+						const kickWithContext = withContextWindow(spec);
+						try { kickEngine = piEngineForSpec(kickWithContext, true); } catch { return null; }
 						const kickModelId = `${kickEngine.model.provider}:${kickEngine.model.id}`;
 						const freshRecord = stores.chatStore.getChat(chatId);
 						if (!freshRecord) return null;
@@ -650,10 +653,7 @@ export async function handleChatInput(
 							canStart: () => connectionBackgroundAllowed(spec.provider),
 							modelId: kickModelId,
 							kind: freshRecord.kind === "practice" ? "practice" : hasProbeDone(freshRecord.messages) ? "teach" : "probe",
-							thresholdTokens: effectiveThresholdTokens(
-								fresh.compaction?.thresholdTokens,
-								kickEngine.model.contextWindow,
-							),
+							thresholdTokens: compactionThresholdForSpec(fresh.compaction?.thresholdTokens, kickWithContext),
 							systemPromptTokens: Math.ceil(composeInstructions(freshRecord.kind === "practice" ? "practice" : "teacher").length / 4),
 						};
 					}, chatId);
