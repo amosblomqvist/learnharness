@@ -11,13 +11,14 @@ import React from "react";
 (globalThis as Record<string, unknown>).React = React;
 
 import assert from "node:assert/strict";
+import fs from "node:fs";
 import { describe, it } from "node:test";
 import { renderToStaticMarkup } from "react-dom/server";
 import { MessageResponse } from "../components/ai-elements/message.tsx";
 import { ThinkingBlock, setAllUserThinkingOpen } from "@/components/thinking-block";
 import { MermaidOverlay, SessionMermaidContext, chartSize } from "../components/session-overlay.tsx";
 import { PlanPopup } from "../components/plan-block.tsx";
-import { MarkdownCode, codeSource } from "../components/md-blocks.tsx";
+import { MarkdownCode, codeSource, proseText } from "../components/md-blocks.tsx";
 
 function render(md: string): string {
 	return renderToStaticMarkup(<MessageResponse mode="static">{md}</MessageResponse>);
@@ -69,10 +70,10 @@ describe("md-blocks — tables", () => {
 		assert.ok(!html.includes('data-streamdown="table-wrapper"'), "streamdown's boxed wrapper is gone");
 		assert.match(html, /aria-label="Copy table"/, "the corner copy affordance is present");
 		assert.ok(!html.match(/Fullscreen|aria-label="Download"/), "no fullscreen/download chrome on tables");
-		// The corner is CONTAINED in the table (top-1 right-1, not the old
+		// The corner is CONTAINED in the table (top-1 end-1, not the old
 		// -top-3 that straddled the top outline — the 24px button at a 12px
 		// offset sat half over the border; owner report, 2026-09-19).
-		assert.match(html, /absolute top-1 right-1 z-10/, "the corner sits inside the table's top-right");
+		assert.match(html, /absolute top-1 end-1 z-10/, "the corner sits inside the table at its top inline end");
 		// Table text runs at the session prose size — no text-sm pin (the
 		// cells' own text-sm is overridden to inherit via globals.css).
 		assert.ok(!/border-collapse text-sm/.test(html), "the table itself pins no smaller text size");
@@ -236,9 +237,49 @@ describe("md-blocks — the restored plain blockquote (owner round, 2026-10-07)"
 		const html = renderToStaticMarkup(
 			<MessageResponse mode="static">{"Before.\n\n> An ordinary quote.\n\nAfter."}</MessageResponse>,
 		);
-		assert.ok(html.includes("border-l-4"), "the left border is back");
+		assert.ok(html.includes("border-s-4"), "the left border is back");
 		assert.ok(html.includes("text-muted-foreground italic"), "muted italic — the quote register");
 		assert.ok(!html.includes("md-callout"), "a plain quote is not a callout box");
+	});
+});
+
+describe("md-blocks: content direction pieces (the scenarios live in render-bidi.test.tsx)", () => {
+	const text = (value: string) => ({ type: "text", value });
+	const element = (tagName: string, children: unknown[], className?: string[]) => ({
+		type: "element", tagName, properties: className ? { className } : {}, children,
+	});
+
+	it("proseText reads the words of a hast subtree and skips KaTeX, code and keys", () => {
+		const node = element("p", [
+			text("one "),
+			element("strong", [text("two")]),
+			text(" "),
+			element("span", [element("span", [text("عربي")])], ["katex"]),
+			element("span", [text("عربي")], ["katex-display"]),
+			element("code", [text("عربي")]),
+			element("kbd", [text("ع")]),
+			text(" three"),
+		]);
+		assert.equal(proseText(node as never), "one two  three");
+	});
+
+	it("the p, heading and list overrides render Streamdown's own markup: parity with no overrides, apart from dir and the logical list inset", () => {
+		const md = '# One\n\n## Two\n\n### Three\n\n#### Four\n\n##### Five\n\n###### Six\n\n- a\n- b\n\n1. c\n2. d\n\n<p id="intro" title="t">plain</p>\n\n# مقدمة\n\n- عربي\n\n1. عربي';
+		const overridden = render(md);
+		const plain = renderToStaticMarkup(<MessageResponse mode="static" components={{}}>{md}</MessageResponse>);
+		// The one agreed difference in English markup: list nesting on the logical side.
+		assert.ok(plain.includes("[li_&amp;]:pl-6") && overridden.includes("[li_&amp;]:ps-6"), "Streamdown nests on the physical side, the override on the logical one");
+		const normalize = (html: string) => html.replace(/\[li_&amp;\]:pl-6/g, "[li_&amp;]:ps-6").replace(/ dir="rtl"/g, "");
+		assert.equal(normalize(overridden), normalize(plain));
+		assert.ok(overridden.includes('<p id="user-content-intro" title="t">plain</p>'), "a paragraph keeps its own attributes");
+		assert.equal((overridden.match(/ dir="rtl"/g) ?? []).length, 3, "the Arabic heading and the two Arabic lists state their direction");
+	});
+
+	it("equations and code are stamped left-to-right wherever they sit", () => {
+		const html = render("inline $x$ and `code`\n\n$$\ny\n$$");
+		assert.equal((html.match(/class="katex" dir="ltr"/g) ?? []).length, 2, "inline and display equations");
+		assert.match(html, /class="katex-display" dir="ltr"/);
+		assert.match(html, /data-streamdown="inline-code" dir="ltr"/);
 	});
 });
 
@@ -270,5 +311,30 @@ describe("ThinkingBlock — the document band + ⌘T sync (owner rounds, 2026-10
 		assert.match(reopened, /aria-expanded="true"/);
 		// restore the null default for other tests in this file
 		setAllUserThinkingOpen(true);
+	});
+});
+
+describe("globals.css — right-to-left typography", () => {
+	const css = fs.readFileSync("app/globals.css", "utf-8").replace(/\r\n/g, "\n");
+
+	it("tracking and synthetic italics are removed by resolved direction", () => {
+		const rule = css.match(/(?:^|\n):dir\(rtl\)\s*\{([^}]*)\}/);
+		assert.ok(rule, "a bare :dir(rtl) rule exists");
+		assert.match((rule[1] ?? ""), /letter-spacing:\s*normal/);
+		assert.match((rule[1] ?? ""), /font-style:\s*normal/);
+	});
+
+	it("mermaid labels get their own first-strong direction, in the message and in the overlay, down to the paragraph inside a label", () => {
+		const prefix = ':is\\(\\[data-streamdown="mermaid"\\], \\[data-lh-overlay-chart\\]\\)';
+		const rule = css.match(new RegExp(`${prefix}\\s*:is\\(([^)]*)\\),\\s*${prefix}\\s*:is\\(([^)]*)\\)\\s*:is\\(([^)]*)\\)\\s*\\{([^}]*)\\}`));
+		assert.ok(rule, "a per-label mermaid rule exists for both containers, the labels and the elements inside them");
+		for (const name of [".nodeLabel", ".edgeLabel", ".cluster-label"]) {
+			assert.ok(rule[1]!.includes(name) && rule[2]!.includes(name), name);
+		}
+		assert.match(rule[1]!, /\btext\b/);
+		// Mermaid 11 wraps each HTML label's text in a <p>, and unicode-bidi is not inherited.
+		assert.match(rule[3]!, /\bp\b/);
+		assert.match(rule[3]!, /\bspan\b/);
+		assert.match(rule[4]!, /unicode-bidi:\s*plaintext/);
 	});
 });

@@ -215,12 +215,12 @@ body {
 
 /* Markdown lists indent from the prose edge (owner ask, 2026-09-24):
    streamdown ships list-inside with no container padding (top-level
-   markers sit ON the text edge — nested lists get their pl-6 only via
-   [li_&]). 24px — the same measure as that nested-case pl-6 — pulls
+   markers sit ON the text edge — nested lists get their ps-6 only via
+   [li_&]). 24px — the same measure as that nested-case ps-6 — pulls
    the whole list right as a block. Unlayered CSS beats the utility
    layer; :where keeps specificity zero. */
 .lh-prose :where(ul, ol) {
-	padding-left: 1.5rem;
+	padding-inline-start: 1.5rem;
 }
 
 /* Markdown headings render at the font's BLACK weight (owner ask,
@@ -231,6 +231,20 @@ body {
    under .lh-prose and stay untouched. */
 .lh-prose :where(h1, h2, h3, h4, h5, h6) {
 	font-weight: var(--lh-heading-weight, 900);
+}
+
+/* Right-to-left text: any element whose direction is right-to-left, set on
+   itself (BidiText, the markdown blocks, inputs) or inherited from a
+   right-to-left block. Arabic letters join, so letter-spacing opens gaps
+   inside a word, and the script has no slanted form, so a synthetic italic
+   only distorts it. Unlayered CSS beats the tracking-* and italic utilities
+   on the same element. :dir() reads the resolved direction, so an emphasized
+   or tracked right-to-left element renders upright and untracked as a whole,
+   the English words isolated inside it included: the element computes
+   normal, and a span isolated as dir="ltr" inherits that. */
+:dir(rtl) {
+	letter-spacing: normal;
+	font-style: normal;
 }
 
 /* lh-input (owner, typography round 2): lh-prose's 1.5 READING leading
@@ -313,10 +327,30 @@ body {
 	height: auto !important;
 }
 
+/* Mermaid output is injected unchanged, so every label would take the page
+   direction and an Arabic label on the left-to-right page misplaces its
+   trailing punctuation. plaintext gives each label its own first-strong
+   direction, in the message and in the focus overlay's copy of the chart.
+   .nodeLabel/.edgeLabel/.cluster-label are the HTML labels; text covers SVG
+   text labels. Mermaid 11 wraps each HTML label's text in a <p> (and some in
+   a span) inside the label, and unicode-bidi is not inherited, so the rule
+   names those too. */
+:is([data-streamdown="mermaid"], [data-lh-overlay-chart]) :is(.nodeLabel, .edgeLabel, .cluster-label, text),
+:is([data-streamdown="mermaid"], [data-lh-overlay-chart]) :is(.nodeLabel, .edgeLabel, .cluster-label) :is(p, span) {
+	unicode-bidi: plaintext;
+}
+
 /* Display math: long equations scroll instead of overflowing the column. */
 .katex-display {
 	overflow-x: auto;
 	overflow-y: hidden;
+}
+
+/* Math has no direction of its own and must not take its sentence's: an
+   equation inside Arabic text stays left-to-right, isolated as one unit. */
+.katex {
+	direction: ltr;
+	unicode-bidi: isolate;
 }
 
 /* ============================================================
@@ -368,11 +402,16 @@ body {
 [data-streamdown="table"] :where(th, td) {
 	font-size: inherit;
 }
-/* Column separators: a hairline left rule on every cell but the first in
+/* Header cells align to the table's start edge: streamdown pins text-left,
+   which reads wrong when the table runs right-to-left. */
+[data-streamdown="table"] :where(th) {
+	text-align: start;
+}
+/* Column separators: a hairline inline-start rule on every cell but the first in
    its row (owner ask, 2026-09-19) — border-collapse merges it with the row
    rules and the outer border, no doubled lines anywhere. */
 [data-streamdown="table"] :where(th, td):not(:first-child) {
-	border-left: 1px solid var(--border);
+	border-inline-start: 1px solid var(--border);
 }
 [data-streamdown="table-header"] {
 	background: transparent;
