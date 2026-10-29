@@ -30,6 +30,7 @@ import {
 	VELOCITY_DECAY_RANGE,
 	DEFAULT_PHYSICS_TUNING,
 	DEFAULT_REGION_TUNING,
+	defaultRenderSettings,
 	fromLadderPosition,
 	fromOffSliderPosition,
 	fromSliderPosition,
@@ -195,6 +196,17 @@ describe("sanitizeRenderSettings", () => {
 		assert.equal(DEFAULT_REGION_TUNING.blur, 40); // new default (owner, 2026-10-07)
 		assert.equal(DEFAULT_REGION_TUNING.edgeAlpha, 0.2);
 		assert.equal(DEFAULT_REGION_TUNING.bitmap, 256);
+	});
+
+	test("Restore defaults returns an independent copy of the factory settings", () => {
+		const first = defaultRenderSettings();
+		const second = defaultRenderSettings();
+		assert.deepEqual(first, DEFAULT_RENDER_SETTINGS);
+		assert.notEqual(first, second);
+		assert.notEqual(first.regions, second.regions);
+		assert.notEqual(first.physics, second.physics);
+		first.regions.blur = 999;
+		assert.equal(DEFAULT_REGION_TUNING.blur, 40, "editing a reset copy never mutates the factory");
 	});
 
 	test("nested sections sanitize: garbage snaps inside them without touching the rest", () => {

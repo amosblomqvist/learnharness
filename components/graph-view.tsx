@@ -66,7 +66,7 @@
 import { useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { NotesImportErrors, useNotesImport } from "@/components/notes-import.tsx";
 import Link from "next/link";
-import { FileTextIcon, ListTreeIcon, Loader2Icon, SearchIcon, SettingsIcon, UploadIcon, WaypointsIcon } from "lucide-react";
+import { FileTextIcon, ListTreeIcon, Loader2Icon, RotateCcwIcon, SearchIcon, SettingsIcon, UploadIcon, WaypointsIcon } from "lucide-react";
 import { incrementalLayout, propositionSessionHref, type GraphCostSummary, type GraphNode, type GraphSnapshot } from "@/src/core";
 import { planCostLabel } from "@/components/usage-format";
 import { GraphCanvasRenderer, type GraphRenderSettings } from "./graph-canvas.ts";
@@ -86,6 +86,7 @@ import {
 	DEPTH_SPACING_RANGE,
 	DEPTH_STRENGTH_RANGE,
 	DEFAULT_RENDER_SETTINGS,
+	defaultRenderSettings,
 	EDGE_WIDTH_LADDER,
 	GRAVITY_RANGE,
 	LABEL_SIZE_LADDER,
@@ -821,6 +822,20 @@ function GraphSettingsControl({
 										physics: { ...cur.physics, depthBaseRadius: fromSliderPosition(p, DEPTH_BASE_RADIUS_RANGE.min, DEPTH_BASE_RADIUS_RANGE.max) },
 									}))}
 							/>
+						</div>
+						{/* Display-only reset: node positions and the per-device
+						    camera are separate state and deliberately untouched. */}
+						<div className="mt-1.5 border-t pt-1.5">
+							<button
+								type="button"
+								data-testid="graph-settings-reset"
+								aria-label="Restore graph display defaults"
+								onClick={() => changeSettings(() => defaultRenderSettings())}
+								className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-border/70 bg-background/60 px-2.5 py-1.5 text-[11px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+							>
+								<RotateCcwIcon className="size-3.5" />
+								Restore defaults
+							</button>
 						</div>
 					</div>
 				</div>

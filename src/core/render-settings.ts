@@ -272,6 +272,17 @@ export const DEFAULT_RENDER_SETTINGS: GraphRenderSettings = {
 	physics: DEFAULT_PHYSICS_TUNING,
 };
 
+/** An independent copy of the factory display settings — what the panel's
+ *  Restore defaults action applies. The nested sections are cloned too, so
+ *  a later slider edit can never mutate the shared factory object. */
+export function defaultRenderSettings(): GraphRenderSettings {
+	return {
+		...DEFAULT_RENDER_SETTINGS,
+		regions: { ...DEFAULT_REGION_TUNING },
+		physics: { ...DEFAULT_PHYSICS_TUNING },
+	};
+}
+
 // ─── The slider ladders (2026-09-17) ─────────────────────────────────────────
 //
 // Non-physics knobs move on hand-authored 11-stop ladders — the classic
