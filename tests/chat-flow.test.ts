@@ -999,6 +999,28 @@ describe("mid-turn navigation (turn liveness + write-ahead)", () => {
 });
 
 describe("renameChat (the header's click-to-edit title)", () => {
+	it("a teacher's plan title survives turn persistence and reaches the session API", async () => {
+		const chat = createConfiguredChat("I want to learn this");
+		createdChats.push(chat.id);
+		const { engine } = scriptedTeacher(() => [
+			fauxAssistantMessage([fauxToolCall("plan_init", {
+				mermaid: "graph TD\n  functions[Functions] --> decorators[Python decorators]",
+				title: "Python decorators",
+			})], { stopReason: "toolUse" }),
+			fauxAssistantMessage([fauxText("We will build from functions to decorators. Does this plan work for you?")]),
+		]);
+		const tools = createTeacherTools({ chatId: chat.id, chatStore, jobStore, spawn: () => {} });
+		await drainTurn(post(chat.id, { type: "text", text: "I know Python functions and want to understand decorators." }),
+			(opts) => createTeacherAgent(undefined, { engine, messages: opts.messages, tools }));
+		const response = await recordRoute.GET(new Request(`http://test/api/chats/${chat.id}`), { params: Promise.resolve({ id: chat.id }) });
+		const saved = await response.json();
+		assert.equal(saved.title, "Python decorators");
+		assert.equal(saved.titleSource, "plan");
+		assert.equal(saved.tree.nodes.length, 2);
+		assert.match(JSON.stringify(saved.messages), /Does this plan work for you/);
+		assert.equal(chatStore.listChats().find((item) => item.id === chat.id)!.title, saved.title);
+	});
+
 	it("persists the title and does NOT bump updatedAt — sidebar order must not churn", () => {
 		const chat = chatStore.createChat("old title");
 		createdChats.push(chat.id);

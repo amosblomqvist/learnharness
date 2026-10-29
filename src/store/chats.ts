@@ -13,7 +13,7 @@ import { PATHS } from "../../config.ts";
 import { emit } from "../core/events.ts";
 import type { ChatStore } from "../core/ports.ts";
 import type { ChatRecord, ChatSettings, ChatSummary, ExtractionRunUsage, PlanTree, TurnUsage } from "../core/contracts.ts";
-import { CURRENT_CHAT_VERSION } from "../core/contracts.ts";
+import { CURRENT_CHAT_VERSION, titleFromPrompt } from "../core/contracts.ts";
 import type { LhMessage } from "../core/native-messages.ts";
 import { activeProblemOf, danglingQuestionOf } from "../core/native-messages.ts";
 import { phaseAt3Lh } from "../core/phases.ts";
@@ -24,7 +24,7 @@ function chatFile(id: string): string {
 }
 
 /** THE SILENCE LAW (push S6, 2026-10-02): chats-changed announces ONLY
- *  list-SHAPE mutations — createChat, renameChat, deleteChat (below,
+ *  list-SHAPE mutations — createChat, renameChat, renameChatFromPlan, deleteChat (below,
  *  each emits post-write). The content writers (saveMessages,
  *  appendTurnUsage, appendExtractionUsage, saveSettings, saveTree) are
  *  DELIBERATELY SILENT: saveMessages fires per turn-persist and would
@@ -37,6 +37,7 @@ function createChat(title: string, kind?: "practice"): ChatRecord {
 	const record: ChatRecord = {
 		id: `chat_${Date.now().toString(36)}_${crypto.randomUUID().slice(0, 8)}`,
 		title: title.trim() || "Untitled session",
+		titleSource: "prompt",
 		createdAt: now,
 		updatedAt: now,
 		messages: [],
@@ -176,9 +177,24 @@ function renameChat(id: string, title: string): ChatRecord {
 	const record = getChat(id);
 	if (!record) throw new Error(`Chat not found: ${id}`);
 	record.title = title.trim() || "Untitled session";
+	record.titleSource = "manual";
 	writeChat(record);
 	emit("chats-changed", {});
 	return record;
+}
+
+/** Only fresh prompt titles are eligible. Reading immediately before the
+ * synchronous write protects manual names, including a rename to the same text.
+ * Legacy records have no provenance and are deliberately left alone. */
+function renameChatFromPlan(id: string, title: string): void {
+	const record = getChat(id);
+	if (!record || record.kind === "practice" || record.titleSource !== "prompt") return;
+	const next = titleFromPrompt(title);
+	if (!next) return;
+	record.title = next;
+	record.titleSource = "plan";
+	writeChat(record);
+	emit("chats-changed", {});
 }
 
 /** Delete the session record file entirely (session-deletion wave 6,
@@ -213,6 +229,7 @@ export const chatStore: ChatStore = {
 	saveTree,
 	saveSettings,
 	renameChat,
+	renameChatFromPlan,
 	deleteChat,
 	appendTurnUsage,
 	appendExtractionUsage,

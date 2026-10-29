@@ -35,6 +35,7 @@ import { useFieldCycle } from "@/components/field-cycle";
 import { JobsContext } from "@/components/jobs-context";
 import { StatsBar } from "@/components/stats-bar";
 import { useServerEvent, useServerResync } from "@/components/server-events";
+import { useSessionTitle } from "@/components/session-title";
 import {
 	isProviderKeyRefusal,
 	firstSourceTextParts,
@@ -277,9 +278,9 @@ export function Chat({
 	// title opens edit mode with everything selected — typing replaces, arrows
 	// move inside. Enter or a click away commits (PUT /api/chats/:id); Escape
 	// discards. The server never bumps updatedAt on a rename (sidebar order
-	// must not churn), and the sidebar patch is instant via the window event —
-	// its 2.5s poll is only a backstop.
-	const [titleText, setTitleText] = useState(title);
+	// must not churn). Local renames patch instantly; server-generated titles
+	// and other windows arrive through chats-changed notifications.
+	const [titleText, setTitleText] = useSessionTitle(chatId, title);
 	const [renaming, setRenaming] = useState(false);
 	const [titleDraft, setTitleDraft] = useState("");
 	const titleInputRef = useRef<HTMLInputElement | null>(null);
@@ -304,7 +305,7 @@ export function Chat({
 				console.error("rename failed:", err); // keep the old title
 			}
 		},
-		[chatId, titleText],
+		[chatId, titleText, setTitleText],
 	);
 
 	// Select-all when edit mode opens: the click means "replace", so the
@@ -337,11 +338,11 @@ export function Chat({
 	useEffect(() => {
 		const onRenamed = (e: Event) => {
 			const { id, title } = (e as CustomEvent<{ id: string; title: string }>).detail;
-			if (id === chatId) setTitleText((prev) => (title !== prev ? title : prev));
+			if (id === chatId) setTitleText(title);
 		};
 		window.addEventListener("lh:chat-renamed", onRenamed);
 		return () => window.removeEventListener("lh:chat-renamed", onRenamed);
-	}, [chatId]);
+	}, [chatId, setTitleText]);
 
 	// The Esc chain's last link: abort the turn. The background runner
 	// decoupled turns from views, so the abort is ALWAYS the remote kill

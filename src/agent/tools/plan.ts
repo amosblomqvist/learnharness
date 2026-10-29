@@ -2,6 +2,7 @@ import { Type } from "typebox";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { serverExecute } from "../tool-execute.ts";
 import type { PlanToolResult, PlanTree } from "../../core/contracts.ts";
+import { TITLE_MAX_CHARS } from "../../core/contracts.ts";
 import type { ChatStore } from "../../core/ports.ts";
 import { createTree, PlanTreeError } from "../../core/plan-tree.ts";
 import { parseMermaidPlan } from "./mermaid-plan.ts";
@@ -57,6 +58,12 @@ const planInitInput = Type.Object({
 			"The only strict rule: ids are permanent lowercase slugs (a-z, 0-9, hyphens/underscores) — checks reference them via nodeId. " +
 			"Titles are free single-line text; `-->` means 'from = prerequisite' (chains fine); no subgraphs, styles, or classes.",
 	}),
+	title: Type.Optional(Type.String({
+		description:
+			`A concise session title (at most ${TITLE_MAX_CHARS} characters) summarizing the learner's clarified goal and this plan, in the learner's language. ` +
+			"Include it when presenting the first plan. Use plain text without quotes or Markdown; do not copy a vague opening message. " +
+			"The app preserves manual titles and titles already generated from a plan.",
+	})),
 });
 
 export function planTools(ctx: PlanToolContext): Record<string, AgentTool<any>> {
@@ -71,7 +78,7 @@ export function planTools(ctx: PlanToolContext): Record<string, AgentTool<any>> 
 				"`-->` edges meaning 'from must be understood before to' (chains fine). 5–15 nodes: a map, not a syllabus — one reasoning step per node, compress. " +
 				"Every check you fire names the node it assesses via `nodeId`; where the lesson stands derives from those tags.",
 			parameters: planInitInput,
-			execute: serverExecute("plan_init", planInitInput, async ({ mermaid }) => {
+			execute: serverExecute("plan_init", planInitInput, async ({ mermaid, title }) => {
 				const { chatId, chatStore } = ctx;
 				const record = chatStore.getChat(chatId);
 				if (!record) return { ok: false, error: `Chat not found: ${chatId}` };
@@ -88,6 +95,15 @@ export function planTools(ctx: PlanToolContext): Record<string, AgentTool<any>> 
 					// edge endpoints, self-loops, cycles → PlanTreeError).
 					const next = createTree(parsed.plan.nodes, parsed.plan.edges);
 					chatStore.saveTree(chatId, next);
+					// Naming is optional metadata: a missing title or failed title write
+					// must never reject a valid, already-persisted learning plan.
+					if (typeof title === "string" && title.trim()) {
+						try {
+							chatStore.renameChatFromPlan(chatId, title);
+						} catch (err) {
+							console.error(`[chat ${chatId}] plan title could not be saved:`, err);
+						}
+					}
 					// Context diet: content = the validated nodeIds + the reminder (the
 				// ids just became binding for every quiz/explain call); details =
 					// the full tree for the record/UI — the plan popup's latestTree

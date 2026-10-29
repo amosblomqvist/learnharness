@@ -58,6 +58,9 @@ export interface ChatStore {
 	 * Like saveSettings: a rename is NOT conversation activity — updatedAt
 	 * stays put, so sidebar order never churns on a rename. */
 	renameChat(id: string, title: string): ChatRecord;
+	/** Apply the first plan title only to a prompt-derived title. Recheck the
+	 * persisted source so a manual rename always wins. Does not bump updatedAt. */
+	renameChatFromPlan(id: string, title: string): void;
 	/** Delete the session record entirely (session-deletion wave 6, owner
 	 *  2026-09-22). False when the id is unknown. The graph-ledger purge and
 	 *  job cleanup are the caller's choreography (core/graph-deletion.ts +

@@ -18,6 +18,7 @@ import { planTools } from "../src/agent/tools/plan.ts";
 import { parseMermaidPlan } from "../src/agent/tools/mermaid-plan.ts";
 import { chatStore } from "../src/store/chats.ts";
 import { PATHS } from "../config.ts";
+import { subscribe } from "../src/core/events.ts";
 
 const N = (id: string, title = id, summary?: string) => ({ id, title, ...(summary ? { summary } : {}) });
 const E = (from: string, to: string) => ({ from, to });
@@ -111,6 +112,87 @@ function newChat(title: string): string {
 }
 
 describe("plan_init — the author-once mermaid tool (execute against the real store)", () => {
+	it("applies a plan title after the tree is durable, announces it, and keeps sidebar ordering", async () => {
+		const chatId = newChat("I want to learn this but don't know where to start");
+		const before = chatStore.getChat(chatId)!;
+		const snapshots: typeof before[] = [];
+		const off = subscribe((event) => {
+			if (event.type === "chats-changed") snapshots.push(chatStore.getChat(chatId)!);
+		});
+		try {
+			const res = await exec(planTools({ chatId, chatStore }), "plan_init", {
+				mermaid: "graph TD\n  functions[Functions] --> decorators[Python decorators]",
+				title: "  Python\n decorators  ",
+			});
+			assert.equal(res.ok, true);
+			assert.equal(snapshots.length, 1);
+			assert.equal(snapshots[0]!.title, "Python decorators");
+			assert.equal(snapshots[0]!.titleSource, "plan");
+			assert.deepEqual(snapshots[0]!.tree, res.tree);
+			assert.equal(snapshots[0]!.updatedAt, before.updatedAt);
+			assert.equal(chatStore.listChats().find((chat) => chat.id === chatId)!.title, "Python decorators");
+		} finally { off(); }
+	});
+
+	it("preserves manual titles, including a rename to the original text, and legacy titles", async () => {
+		for (const source of ["manual", "legacy"] as const) {
+			const chatId = newChat("My chosen title");
+			const tools = planTools({ chatId, chatStore });
+			if (source === "manual") chatStore.renameChat(chatId, "My chosen title");
+			else {
+				const record = chatStore.getChat(chatId)!;
+				delete record.titleSource;
+				fs.writeFileSync(path.join(PATHS.chats, `${chatId}.json`), JSON.stringify(record));
+			}
+			const res = await exec(tools, "plan_init", {
+				mermaid: "graph TD\n  a[Decorators]", title: "Python decorators",
+			});
+			assert.equal(res.ok, true);
+			assert.equal(chatStore.getChat(chatId)!.title, "My chosen title");
+		}
+	});
+
+	it("keeps the first generated title on plan rewrites and still permits manual rename", async () => {
+		const chatId = newChat("Initial request");
+		const tools = planTools({ chatId, chatStore });
+		await exec(tools, "plan_init", { mermaid: "graph TD\n  a[装饰器]", title: "Python 装饰器" });
+		await exec(tools, "plan_init", { mermaid: "graph TD\n  b[闭包]", title: "Closures" });
+		assert.equal(chatStore.getChat(chatId)!.title, "Python 装饰器");
+		chatStore.renameChat(chatId, "My Python notes");
+		await exec(tools, "plan_init", { mermaid: "graph TD\n  c[Functions]", title: "Functions" });
+		assert.equal(chatStore.getChat(chatId)!.title, "My Python notes");
+		assert.equal(chatStore.getChat(chatId)!.titleSource, "manual");
+	});
+
+	it("missing or blank titles leave the plan usable and allow a later title", async () => {
+		const chatId = newChat("Original title");
+		const tools = planTools({ chatId, chatStore });
+		for (const title of [undefined, " \n "]) {
+			const res = await exec(tools, "plan_init", { mermaid: "graph TD\n  a[Functions]", title });
+			assert.equal(res.ok, true);
+			assert.equal(chatStore.getChat(chatId)!.title, "Original title");
+			assert.equal(chatStore.getChat(chatId)!.titleSource, "prompt");
+		}
+		await exec(tools, "plan_init", { mermaid: "graph TD\n  a[Functions]", title: "Python functions" });
+		assert.equal(chatStore.getChat(chatId)!.title, "Python functions");
+	});
+
+	it("rejects invalid plans without renaming and isolates title-write failures from valid plans", async () => {
+		const chatId = newChat("Keep this title");
+		const tools = planTools({ chatId, chatStore });
+		const invalid = await exec(tools, "plan_init", { mermaid: "graph TD\n  a[A] --> b[B] --> a", title: "Invalid plan" });
+		assert.equal(invalid.ok, false);
+		assert.equal(chatStore.getChat(chatId)!.title, "Keep this title");
+		assert.equal(chatStore.getChat(chatId)!.tree, undefined);
+		const failing = planTools({ chatId, chatStore: {
+			...chatStore, renameChatFromPlan: () => { throw new Error("Simulated title write failure"); },
+		} });
+		const valid = await exec(failing, "plan_init", { mermaid: "graph TD\n  a[Functions]", title: "Functions" });
+		assert.equal(valid.ok, true);
+		assert.deepEqual(chatStore.getChat(chatId)!.tree, valid.tree);
+		assert.equal(chatStore.getChat(chatId)!.title, "Keep this title");
+	});
+
 	it("parses a mermaid block, builds the tree, persists, returns the full tree", async () => {
 		const chatId = newChat("Plan: init");
 		const tools = planTools({ chatId, chatStore });

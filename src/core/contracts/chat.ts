@@ -30,6 +30,8 @@ export type ChatKind = "teach" | "practice";
 export interface ChatRecord {
 	id: string;
 	title: string;
+	/** Absent on older records: preserve those titles because their origin is unknown. */
+	titleSource?: "prompt" | "plan" | "manual";
 	createdAt: string;
 	updatedAt: string;
 	messages: LhMessage[];
