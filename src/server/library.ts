@@ -18,12 +18,13 @@
 import * as fs from "node:fs";
 import { stores } from "./stores.ts";
 import { emit } from "../core/events.ts";
-import type { LibraryItem } from "../core/contracts.ts";
-import { classifyUpload, libraryAncestors, librarySubtree, resolveAttachmentFiles } from "../core/contracts.ts";
+import type { ChatAttachmentsSnapshot, LibraryDeletionImpact, LibraryItem, LibrarySnapshot, LibrarySummaryState } from "../core/contracts.ts";
+import { classifyUpload, effectiveTag, libraryAncestors, libraryPath, librarySubtree, resolveAttachmentFiles } from "../core/contracts.ts";
 import { pdfPageCount } from "../agent/subagents/pdf-ops.ts";
 import { detectSupportedImageMimeType } from "../agent/image-processing/index.ts";
 import { extractOffice, type ExtractedDocument } from "../agent/library/office-extract.ts";
 import { convertToPdf, findSoffice } from "../agent/library/libreoffice.ts";
+import { birthSessionOf } from "../core/session-clusters.ts";
 
 const library = () => stores.libraryStore;
 
@@ -145,13 +146,6 @@ export function uploadLibraryFile(parentId: string | null, name: string, bytes: 
 
 // ─── Deletion choreography ────────────────────────────────────────────────────
 
-export interface LibraryDeletionImpact {
-	/** Ids that would be removed (the item and its subtree). */
-	itemIds: string[];
-	/** Chats whose attachments reference any of them. */
-	chats: { id: string; title: string }[];
-}
-
 function attachingChats(ids: ReadonlySet<string>): { id: string; title: string; attachments: string[] }[] {
 	const out: { id: string; title: string; attachments: string[] }[] = [];
 	for (const summary of stores.chatStore.listChats()) {
@@ -207,4 +201,86 @@ export function setChatAttachments(chatId: string, ids: string[]): { ok: true; a
 export function chatAttachmentFiles(chatId: string): LibraryItem[] {
 	const attachments = stores.chatStore.getChat(chatId)?.attachments ?? [];
 	return attachments.length ? resolveAttachmentFiles(library().listItems(), attachments) : [];
+}
+
+// ─── Snapshots (the routes' read payloads) ────────────────────────────────────
+
+/** A file's summary state for the UI: ready when a summary for the CURRENT
+ *  content exists; otherwise whatever the summary service reports (pending
+ *  while generating, failed after an error); absent = never requested. */
+export function summaryStateOf(item: LibraryItem): LibrarySummaryState | undefined {
+	if (!item.file) return undefined;
+	if (library().readSummary(item.id)?.sha256 === item.file.sha256) return "ready";
+	return summaryStatusOverride.current?.(item.id);
+}
+
+/** Late-bound hook the summary service registers (it lives in its own
+ *  module and imports this one — the hook keeps the import one-way). */
+export const summaryStatusOverride: { current?: (fileId: string) => LibrarySummaryState | undefined } = {};
+
+export function librarySnapshot(): LibrarySnapshot {
+	resumeLibraryProcessing();
+	const items = library().listItems();
+	const summaries: Record<string, LibrarySummaryState> = {};
+	for (const item of items) {
+		const state = summaryStateOf(item);
+		if (state) summaries[item.id] = state;
+	}
+	return { items, summaries, libreOffice: findSoffice() !== null };
+}
+
+export function chatAttachmentsSnapshot(chatId: string): ChatAttachmentsSnapshot {
+	const attachments = stores.chatStore.getChat(chatId)?.attachments ?? [];
+	const items = library().listItems();
+	return {
+		attachments,
+		items: attachments.flatMap((id) => {
+			const item = items.find((i) => i.id === id);
+			if (!item) return [];
+			const tag = effectiveTag(items, id);
+			return [{
+				id,
+				kind: item.kind,
+				name: item.name,
+				path: libraryPath(items, id),
+				...(tag ? { tag } : {}),
+				fileCount: resolveAttachmentFiles(items, [id]).length,
+			}];
+		}),
+		files: resolveAttachmentFiles(items, attachments).map((f) => {
+			const tag = effectiveTag(items, f.id);
+			const summary = summaryStateOf(f);
+			return {
+				id: f.id,
+				name: f.name,
+				path: libraryPath(items, f.id),
+				...(tag ? { tag } : {}),
+				format: f.file!.format,
+				status: f.file!.status,
+				...(f.file!.pages !== undefined ? { pages: f.file!.pages } : {}),
+				...(summary ? { summary } : {}),
+			};
+		}),
+	};
+}
+
+/** PRACTICE INHERITANCE (owner rulings 2026-10-29): a practice session
+ *  started from picked propositions attaches whatever each proposition's
+ *  BIRTH chat attached — deduped, in pick order, items still in the
+ *  library only. Notes-import births (src_…) carry no attachments. */
+export function inheritedAttachments(nodeIds: readonly string[]): string[] {
+	const nodes = new Map(stores.graphStore.readNodes().map((n) => [n.id, n]));
+	const known = new Set(library().listItems().map((i) => i.id));
+	const out: string[] = [];
+	const seenChats = new Set<string>();
+	for (const id of nodeIds) {
+		const node = nodes.get(id);
+		const birth = node ? birthSessionOf(node) : null;
+		if (!birth || seenChats.has(birth)) continue;
+		seenChats.add(birth);
+		for (const a of stores.chatStore.getChat(birth)?.attachments ?? []) {
+			if (known.has(a) && !out.includes(a)) out.push(a);
+		}
+	}
+	return out;
 }

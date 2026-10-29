@@ -28,6 +28,8 @@ import { ROLE_SLOT, modelsNotConfigured, type ModelSlotName, type ProviderKeyMis
 import type { ChatStore, JobStore } from "../../core/ports.ts";
 import { runDemoBuilder } from "./demo-builder.ts";
 import { runPdfReaderAgent } from "./pdf-reader.ts";
+import { runLibraryReader } from "./library-reader.ts";
+import type { LibraryReadable } from "../library/readable.ts";
 import { runResearcherAgent } from "./researcher.ts";
 import { runVisualMaker } from "./visual-maker.ts";
 
@@ -92,6 +94,11 @@ export interface JobRunnerDeps {
 	 *  Injected because the agent layer may not read the key store; absent
 	 *  in tests that inject engines directly (test engines never owe a key). */
 	providerKeyMissing?: (provider: string, tier: ModelSlotName) => ProviderKeyMissing | null;
+	/** Course-library brief seam (2026-10-29): resolve a library file a
+	 *  chat has attached — null when it's gone or out of the chat's scope
+	 *  (the scope check lives server-side; the agent layer never reads the
+	 *  library store). Absent = library briefs fail honestly. */
+	libraryFile?: (chatId: string, fileId: string) => LibraryReadable | null;
 }
 
 export interface JobRunner {
@@ -493,6 +500,10 @@ export function createJobRunner(deps: JobRunnerDeps): JobRunner {
 		const input = (passedInput ?? resolveInput(job, passedInput)) as PdfToolInput | undefined;
 		const path = typeof input?.path === "string" && input.path.trim() ? input.path.trim() : "";
 		const question = typeof input?.question === "string" ? input.question : "";
+		if (typeof input?.fileId === "string") {
+			await runLibraryBrief(jobId, job.chatId, model, input.fileId, path, question, loop);
+			return;
+		}
 
 		try {
 			jobStore.updateJob(jobId, { activity: "reading pdf" });
@@ -514,6 +525,51 @@ export function createJobRunner(deps: JobRunnerDeps): JobRunner {
 			const reason = err instanceof Error ? err.message : String(err);
 			if (stillRunning(jobId)) jobStore.updateJob(jobId, { error: reason });
 			await finishJob(jobId, { path, question, brief: `PDF failed: ${reason}`, pagesRead: [], pagesConsulted: [] });
+		}
+	}
+
+	/** A pdf job naming a course-library file (library_brief): the library
+	 *  reader handles every format; the result keeps the PdfResult shape
+	 *  (units in the page fields) so delivery and the job card are shared. */
+	async function runLibraryBrief(
+		jobId: string,
+		chatId: string,
+		model: PiEngine | undefined,
+		fileId: string,
+		displayPath: string,
+		question: string,
+		loop: LoopContext,
+	): Promise<void> {
+		const fail = (reason: string) => finishJob(jobId, { path: displayPath, question, brief: `PDF failed: ${reason}`, pagesRead: [], pagesConsulted: [] });
+		const file = deps.libraryFile?.(chatId, fileId) ?? null;
+		if (!file) {
+			if (stillRunning(jobId)) jobStore.updateJob(jobId, { error: "the file is no longer attached to this chat" });
+			await fail("the file is no longer attached to this chat");
+			return;
+		}
+		if (!model) {
+			await fail("no model configured for document reading");
+			return;
+		}
+		try {
+			jobStore.updateJob(jobId, { activity: `reading ${file.name}` });
+			const result = await runLibraryReader(file, "brief", question, {
+				engine: model,
+				abortSignal: loop.abortSignal,
+				onUsage: (usage) => loop.onUsage(piUsageToStep(usage)),
+				onActivity: (line) => jobStore.updateJob(jobId, { activity: line }),
+			});
+			if (result.failed) {
+				if (stillRunning(jobId)) jobStore.updateJob(jobId, { error: result.text });
+				await fail(result.text.replace(/^Reading failed:\s*/i, ""));
+				return;
+			}
+			await finishJob(jobId, { path: file.path, question, brief: result.text, pagesRead: result.unitsConsulted, pagesConsulted: result.unitsConsulted });
+		} catch (err) {
+			if (loop.abortSignal.aborted) return;
+			const reason = err instanceof Error ? err.message : String(err);
+			if (stillRunning(jobId)) jobStore.updateJob(jobId, { error: reason });
+			await fail(reason);
 		}
 	}
 

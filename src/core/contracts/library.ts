@@ -13,6 +13,8 @@
  * src/store/library.ts.
  */
 
+import type { CallUsage } from "./chat.ts";
+
 // ─── Tags ─────────────────────────────────────────────────────────────────────
 
 /** The tag vocabulary (owner, 2026-10-29). Untagged = general reference. */
@@ -143,6 +145,9 @@ export interface LibrarySummary {
 	generatedAt: string;
 	/** Provider-qualified model that wrote it. */
 	model: string;
+	/** What writing it cost (one entry per model call) — summaries are
+	 *  library-global, so their spend lives with them, not in a chat log. */
+	steps?: CallUsage[];
 }
 
 /** The client's view of a file's summary state (chat Materials panel). */
@@ -249,4 +254,44 @@ export function validateLibraryName(name: unknown): { ok: true; name: string } |
 	if (/[\u0000-\u001f\u007f]/u.test(trimmed)) return { ok: false, error: "Name can't contain control characters" };
 	if (trimmed.length > 200) return { ok: false, error: "Name is too long (200 characters max)" };
 	return { ok: true, name: trimmed };
+}
+
+// ─── API payloads (routes ↔ library page / Materials panel) ──────────────────
+
+/** What deleting an item takes with it — the confirm dialog's facts. */
+export interface LibraryDeletionImpact {
+	/** Ids that would be removed (the item and its subtree). */
+	itemIds: string[];
+	/** Chats whose attachments reference any of them. */
+	chats: { id: string; title: string }[];
+}
+
+/** GET /api/library. */
+export interface LibrarySnapshot {
+	items: LibraryItem[];
+	summaries: Record<string, LibrarySummaryState>;
+	/** Whether Office files will be converted (LibreOffice found). */
+	libreOffice: boolean;
+}
+
+/** One attached file as the chat's Materials panel shows it. */
+export interface ChatAttachmentFile {
+	id: string;
+	name: string;
+	path: string;
+	tag?: LibraryTag;
+	format: LibraryFileFormat;
+	status: LibraryFileMeta["status"];
+	pages?: number;
+	summary?: LibrarySummaryState;
+}
+
+/** GET/PUT /api/chats/[id]/attachments. */
+export interface ChatAttachmentsSnapshot {
+	/** The attached ids, in order (unknown ids already pruned on delete). */
+	attachments: string[];
+	/** Each attached item for the panel's list (folders and files). */
+	items: { id: string; kind: "folder" | "file"; name: string; path: string; tag?: LibraryTag; fileCount: number }[];
+	/** Every file in scope (folders expanded). */
+	files: ChatAttachmentFile[];
 }

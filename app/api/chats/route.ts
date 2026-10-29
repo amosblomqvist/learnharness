@@ -1,6 +1,6 @@
 import { chainsForSelection, formatChainLine } from "@/src/core";
 import { newGraphContextMessage, type GraphContextPick } from "@/src/core";
-import { compactionInFlight, createChat, isTurnRunning, listChats, readSettingsRecord, stores, titleFromPrompt } from "@/src/server";
+import { compactionInFlight, createChat, inheritedAttachments, isTurnRunning, listChats, readSettingsRecord, requestAttachmentSummaries, setChatAttachments, stores, titleFromPrompt } from "@/src/server";
 import type { ChatListItem } from "@/src/core";
 
 /** The session picker's list: record-derived summaries (phase, pending
@@ -20,7 +20,7 @@ export async function GET() {
 }
 
 export async function POST(req: Request) {
-	const body = (await req.json().catch(() => ({}))) as { title?: unknown; kind?: unknown; graphContext?: unknown };
+	const body = (await req.json().catch(() => ({}))) as { title?: unknown; kind?: unknown; graphContext?: unknown; attachments?: unknown };
 	const title = typeof body.title === "string" ? body.title : "";
 	// Practice sessions (owner, 2026-10-04): kind "practice" marks the
 	// record — the practice agent + its tools from turn 1, no extraction.
@@ -67,5 +67,16 @@ export async function POST(req: Request) {
 		);
 		stores.chatStore.saveMessages(chat.id, [newGraphContextMessage(picks, chainLines)]);
 	}
+	// Course library (2026-10-29): materials chosen on the home composer,
+	// plus — for practice — the materials the picked propositions' birth
+	// chats attached (owner rulings: inherit, still attachable after).
+	// Unknown ids are dropped here rather than failing the creation.
+	const chosen = Array.isArray(body.attachments) ? body.attachments.filter((a): a is string => typeof a === "string") : [];
+	const known = new Set(stores.libraryStore.listItems().map((i) => i.id));
+	const attachments = [...new Set([
+		...chosen.filter((a) => known.has(a)),
+		...(kind === "practice" ? inheritedAttachments(picks.map((p) => p.id)) : []),
+	])];
+	if (attachments.length > 0 && setChatAttachments(chat.id, attachments).ok) requestAttachmentSummaries(chat.id);
 	return Response.json({ id: chat.id, title: chat.title });
 }

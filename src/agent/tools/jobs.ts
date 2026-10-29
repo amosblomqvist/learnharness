@@ -69,8 +69,10 @@ export const pdfInputSchema = Type.Object({
 /**
  * The per-call dispatch: create the job (idempotent by toolCallId), fire the
  * runner, and return the ack. Shared by all three tools — only kind differs.
+ * Exported for the course library's library_brief (a pdf job that names a
+ * library file instead of a path).
  */
-function dispatch(
+export function dispatchJob(
 	ctx: JobToolContext,
 	kind: JobRecord["kind"],
 	toolCallId: string,
@@ -92,7 +94,7 @@ const DEMO_ACK =
 const VISUAL_ACK =
 	"This call is fire-and-forget: continue your turn and keep teaching — do not wait, poll, or mention waiting. " +
 	"The verified figure arrives as a new message when ready and is rendered in the lesson; reference it then.";
-const PDF_ACK =
+export const PDF_ACK =
 	"This call is fire-and-forget: continue your turn and keep teaching — do not wait, poll, or mention waiting. " +
 	"The document brief arrives as a new message when ready; weave it into the lesson and cite its pages.";
 
@@ -136,7 +138,7 @@ export function jobTools(ctx: JobToolContext): Record<string, AgentTool<any>> {
 			description: RESEARCH_DESCRIPTION,
 			parameters: researchInputSchema,
 			execute: serverExecute("research", researchInputSchema, (input, { toolCallId }) =>
-				dispatch(ctx, "research", toolCallId, RESEARCH_ACK, input),
+				dispatchJob(ctx, "research", toolCallId, RESEARCH_ACK, input),
 			),
 		},
 		demo: {
@@ -144,7 +146,7 @@ export function jobTools(ctx: JobToolContext): Record<string, AgentTool<any>> {
 			label: "demo",
 			description: DEMO_DESCRIPTION,
 			parameters: demoInputSchema,
-			execute: serverExecute("demo", demoInputSchema, (input, { toolCallId }) => dispatch(ctx, "demo", toolCallId, DEMO_ACK, input)),
+			execute: serverExecute("demo", demoInputSchema, (input, { toolCallId }) => dispatchJob(ctx, "demo", toolCallId, DEMO_ACK, input)),
 		},
 		visual: {
 			name: "visual",
@@ -152,7 +154,7 @@ export function jobTools(ctx: JobToolContext): Record<string, AgentTool<any>> {
 			description: VISUAL_DESCRIPTION,
 			parameters: visualInputSchema,
 			execute: serverExecute("visual", visualInputSchema, (input, { toolCallId }) =>
-				dispatch(ctx, "visual", toolCallId, VISUAL_ACK, input),
+				dispatchJob(ctx, "visual", toolCallId, VISUAL_ACK, input),
 			),
 		},
 		pdf: {
@@ -160,7 +162,7 @@ export function jobTools(ctx: JobToolContext): Record<string, AgentTool<any>> {
 			label: "pdf",
 			description: PDF_DESCRIPTION,
 			parameters: pdfInputSchema,
-			execute: serverExecute("pdf", pdfInputSchema, (input, { toolCallId }) => dispatch(ctx, "pdf", toolCallId, PDF_ACK, input)),
+			execute: serverExecute("pdf", pdfInputSchema, (input, { toolCallId }) => dispatchJob(ctx, "pdf", toolCallId, PDF_ACK, input)),
 		},
 	};
 }
@@ -168,4 +170,6 @@ export function jobTools(ctx: JobToolContext): Record<string, AgentTool<any>> {
 export type ResearchInput = Static<typeof researchInputSchema>;
 export type DemoInput = Static<typeof demoInputSchema>;
 export type VisualInput = Static<typeof visualInputSchema>;
-export type PdfInput = Static<typeof pdfInputSchema>;
+/** fileId is never in the pdf tool's schema — only library_brief sets it
+ *  (the runner then reads that library file instead of `path`). */
+export type PdfInput = Static<typeof pdfInputSchema> & { fileId?: string };
