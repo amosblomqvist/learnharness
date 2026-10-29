@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { AssistantMessage, Message, Tool, ToolResultMessage, Usage } from "@earendil-works/pi-ai";
 import { normalizeContext } from "@earendil-works/pi-ai";
+import { processImage, type ProcessImageResult } from "../image-processing/index.ts";
 import { Type } from "typebox";
 import { piEngineFor, type PiEngine, type ThinkingLevel } from "../models.ts";
 import { providerEventObserver, type ProviderEventObserver } from "../provider-events.ts";
@@ -193,6 +194,9 @@ export async function runVisualMaker(input: VisualMakerInput, opts: VisualMakerO
 						const msg = err instanceof Error ? err.message : String(err);
 						return { svg: "", notes: `FAILED: rendering the final SVG failed — ${msg}` };
 					}
+					const image = await processImage(png, "image/png", { resizeOptions: engine.model.inputLimits?.images?.resize });
+					opts.abortSignal?.throwIfAborted();
+					if (!image.ok) return { svg: "", notes: `FAILED: inspecting the final SVG failed — ${image.message}` };
 					opts.onActivity?.("render_svg: inspecting final render");
 					renderedSvg = currentSvg;
 					messages = [
@@ -200,8 +204,8 @@ export async function runVisualMaker(input: VisualMakerInput, opts: VisualMakerO
 						{
 							role: "user",
 							content: [
-								{ type: "text", text: UNLOOKED_FINISH_MESSAGE },
-								{ type: "image", data: png.toString("base64"), mimeType: "image/png" },
+								{ type: "text", text: [UNLOOKED_FINISH_MESSAGE, ...image.hints].join("\n") },
+								{ type: "image", data: image.data, mimeType: image.mimeType },
 							],
 							timestamp: Date.now(),
 						},
@@ -212,7 +216,7 @@ export async function runVisualMaker(input: VisualMakerInput, opts: VisualMakerO
 			}
 
 			const toolResults: ToolResultMessage[] = [];
-			let renderPng: Buffer | null = null; // appended as the image message AFTER the tool results
+			let renderImage: Extract<ProcessImageResult, { ok: true }> | null = null; // appended AFTER the tool results
 			for (const call of toolCalls) {
 				if (call.name === "write_svg") {
 					const svg = (call.arguments as { svg?: unknown }).svg;
@@ -260,7 +264,10 @@ export async function runVisualMaker(input: VisualMakerInput, opts: VisualMakerO
 					}
 					try {
 						const png = await headless.renderSvg(currentSvg);
-						renderPng = png;
+						const image = await processImage(png, "image/png", { resizeOptions: engine.model.inputLimits?.images?.resize });
+						opts.abortSignal?.throwIfAborted();
+						if (!image.ok) throw new Error(image.message);
+						renderImage = image;
 						renderedSvg = currentSvg;
 						opts.onActivity?.("render_svg: inspecting render");
 						toolResults.push(toolText(call.id, call.name, "Rendered — the PNG follows in the next message. Look at it."));
@@ -275,14 +282,14 @@ export async function runVisualMaker(input: VisualMakerInput, opts: VisualMakerO
 			}
 			// Message order: assistant tool-calls → tool results → render image.
 			messages = [...messages, ...toolResults];
-			if (renderPng) {
+			if (renderImage) {
 				messages = [
 					...messages,
 					{
 						role: "user",
 						content: [
-							{ type: "text", text: LOOK_MESSAGE },
-							{ type: "image", data: renderPng.toString("base64"), mimeType: "image/png" },
+							{ type: "text", text: [LOOK_MESSAGE, ...renderImage.hints].join("\n") },
+							{ type: "image", data: renderImage.data, mimeType: renderImage.mimeType },
 						],
 						timestamp: Date.now(),
 					},

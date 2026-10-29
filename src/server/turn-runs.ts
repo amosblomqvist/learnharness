@@ -13,7 +13,9 @@
  * Registration lifecycle: chat-handler registers the handle the moment
  * the turn starts (after the 409 guard) and its onFinish unregisters LAST
  * — after persist, usage, extraction, and endTurn — so anything that sees
- * "no running turn" also sees an already-persisted record. The per-chat
+ * "no running turn" sees durable record truth. Failed settlement also
+ * retains its small notice before unregistering, so late attachments do
+ * not mistake an unsaved reply for success. The per-chat
  * 409 guard means a chatId can hold at most one handle, and beginTurn's
  * 30-minute TTL bounds the pathological never-settling case the same way
  * it does for the liveness map: if onFinish never fires, the stale entry
@@ -30,11 +32,31 @@ import type { PiTurnHandle } from "./pi/ui-stream.ts";
 
 interface LhTurnRunsGlobal {
 	__lhTurnRuns?: Map<string, PiTurnHandle>;
+	__lhTurnFailures?: Map<string, string>;
 }
 
 function runs(): Map<string, PiTurnHandle> {
 	const g = globalThis as typeof globalThis & LhTurnRunsGlobal;
 	return (g.__lhTurnRuns ??= new Map<string, PiTurnHandle>());
+}
+
+/** One small, transient notice per failed session. Never stores messages.
+ * Cleared on the next accepted begin, session deletion, or process exit. */
+function failures(): Map<string, string> {
+	const g = globalThis as typeof globalThis & LhTurnRunsGlobal;
+	return (g.__lhTurnFailures ??= new Map<string, string>());
+}
+
+export function rememberTurnFailure(chatId: string, errorText: string): void {
+	failures().set(chatId, errorText);
+}
+
+export function turnFailure(chatId: string): string | undefined {
+	return failures().get(chatId);
+}
+
+export function clearTurnFailure(chatId: string): void {
+	failures().delete(chatId);
 }
 
 /** Register the chat's running turn (chat-handler, right after the turn
@@ -67,11 +89,14 @@ export function abortTurn(chatId: string): { ok: true } | { ok: false; reason: "
 /** The cheap terminal when GET /api/chats/[id]/stream finds no running
  *  turn (raced settle, or the client checked turnInFlight a beat too
  *  late): a same-dialect SSE response whose single chunk tells the client
- *  "nothing to attach to — the record is current, refetch it". Chosen as
- *  an EVENT (not a status code) so the reattach path consumes ONE wire
+ *  "nothing to attach to — refetch durable truth". A retained settlement
+ *  failure is delivered first, including when no view attached in time.
+ *  Chosen as an EVENT (not a status code), consuming ONE wire
  *  protocol end to end. */
-export function settledTurnResponse(): Response {
-	return new Response('data: {"type":"turn-settled"}\n\ndata: [DONE]\n\n', {
+export function settledTurnResponse(chatId?: string): Response {
+	const errorText = chatId ? turnFailure(chatId) : undefined;
+	const notice = errorText === undefined ? "" : `data: ${JSON.stringify({ type: "error", errorText })}\n\n`;
+	return new Response(`${notice}data: {"type":"turn-settled"}\n\ndata: [DONE]\n\n`, {
 		headers: {
 			"Content-Type": "text/event-stream",
 			"Cache-Control": "no-cache, no-transform",

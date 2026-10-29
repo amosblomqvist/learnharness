@@ -1,0 +1,67 @@
+name: Bug report
+description: Report something that is not working as expected.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for helping improve LearnHarness. Describe what you observed; you do not need to know the cause.
+
+        **This report is public.** Remove API keys, tokens, passwords and private information before posting. Never attach credential files or your whole data folder. Share only the learning content you are comfortable making public.
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened?
+      description: Describe the problem and what you expected to happen instead.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: LearnHarness version or build
+      description: Include the app version, installer filename or source commit. If you cannot find it, write "unknown".
+    validations:
+      required: true
+  - type: input
+    id: operating_system
+    attributes:
+      label: Operating system
+      description: For example, Windows, macOS or your Linux distribution. Include the OS version if known.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps or context (optional)
+      description: How can we reproduce it? If it is intermittent or you are unsure, describe what you were doing when it happened.
+    validations:
+      required: false
+  - type: input
+    id: installation
+    attributes:
+      label: Installation method (optional)
+      description: For example, desktop installer, AppImage, system package, self-hosted web or source build.
+    validations:
+      required: false
+  - type: input
+    id: provider_model
+    attributes:
+      label: Provider and model (if relevant)
+      description: Include the provider, model and API-key or subscription connection type if relevant. Do not include any keys or tokens.
+    validations:
+      required: false
+  - type: textarea
+    id: transcript_excerpt
+    attributes:
+      label: Sanitized raw JSON or chat-log excerpt (optional)
+      description: A few relevant entries around the affected turn or tool call are especially helpful. Paste the excerpt directly, preserving JSON escaping where possible. Remove credentials, personal information and private learning content first. Leave this blank if the records are difficult to find.
+      render: json
+    validations:
+      required: false
+  - type: textarea
+    id: screenshots
+    attributes:
+      label: Screenshots or other context (optional)
+      description: Attach screenshots or add other relevant details. Check for private information before posting.
+    validations:
+      required: false

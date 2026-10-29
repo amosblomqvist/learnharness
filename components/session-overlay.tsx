@@ -8,6 +8,7 @@ import { fitGraphView, fitZoomFor, zoomedGraphView, type Viewport } from "@/comp
 import { renderMermaid } from "@/components/mermaid-render";
 import { MermaidError } from "@/components/mermaid-error";
 import { Hint } from "@/components/ui/hint";
+import { SvgImage } from "@/components/artifacts/svg-image";
 
 /**
  * SESSION-SCOPED OVERLAYS (owner wave, 2026-09-19): the "fullscreen"
@@ -258,22 +259,24 @@ export function MermaidOverlay({
 										: "transform 180ms ease-out, opacity 160ms ease-out",
 							}}
 						>
-							{/* data-lh-overlay-chart: globals.css pins the svg to the
-							    wrapper's width (kills mermaid's inline max-width cap)
-							    so the wrapper IS the natural-size box the fit math
-							    centers. FIGURE MODE: a white stage (the figure's
-							    backing law — models draw for a white page) with the
-							    caller's invert filter riding it, exactly like the
-							    in-card holder. */}
-							<div
-								data-lh-overlay-chart
-								className={cn(
-									"[&_svg]:h-auto [&_svg]:w-full",
-									rawSvg !== undefined && "bg-white",
-								)}
-								style={rawSvg !== undefined && inverted ? { filter: "invert(1) hue-rotate(180deg)" } : undefined}
-								dangerouslySetInnerHTML={{ __html: svg }}
-							/>
+							{/* Figures share the card's image boundary and white backing.
+							    Mermaid keeps its inline renderer; globals.css removes
+							    its max-width cap so it fills the natural-size box. */}
+							{rawSvg !== undefined ? (
+								<div
+									data-lh-overlay-chart
+									className="bg-white"
+									style={inverted ? { filter: "invert(1) hue-rotate(180deg)" } : undefined}
+								>
+									<SvgImage svg={svg} className="block h-auto w-full" />
+								</div>
+							) : (
+								<div
+									data-lh-overlay-chart
+									className="[&_svg]:h-auto [&_svg]:w-full"
+									dangerouslySetInnerHTML={{ __html: svg }}
+								/>
+							)}
 						</div>
 						<div className="pointer-events-none absolute inset-x-0 bottom-0 flex items-end justify-between p-2">
 							<span className="text-xs text-muted-foreground/60">Drag to pan · scroll to zoom</span>

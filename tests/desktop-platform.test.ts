@@ -15,7 +15,7 @@ const mainRequire = createRequire(mainFile);
 /** Decline the single-instance lock so normal boot never spawns a server.
  * Then call the REAL createWindow with a stub Electron API and inspect its
  * constructor options. No rewritten copy of the production logic. */
-function windowOptions(platform: string) {
+function windowOptions(platform: string, env: Record<string, string> = {}) {
 	class FakeWindow {
 		constructor(readonly options: unknown) {}
 		webContents = { on() {}, setWindowOpenHandler() {} };
@@ -23,13 +23,13 @@ function windowOptions(platform: string) {
 		once() {}
 	}
 	const electron = {
-		app: { setName() {}, requestSingleInstanceLock: () => false, quit() {} },
+		app: { setName() {}, getPath: () => "/fixture/LearnHarness", setPath() {}, requestSingleInstanceLock: () => false, quit() {} },
 		BrowserWindow: FakeWindow,
 		session: { defaultSession: { setPermissionRequestHandler() {}, setPermissionCheckHandler() {} } },
 	};
 	const context = {
 		require: (id: string) => id === "electron" ? electron : mainRequire(id),
-		process: { platform, argv: [], env: {}, on() {} },
+		process: { platform, argv: [], env, on() {} },
 		__dirname: dirname(mainFile),
 	};
 	runInNewContext(mainSource, context, { filename: mainFile });
@@ -61,6 +61,24 @@ describe("desktop window chrome", () => {
 		});
 	}
 
+	it("only the external dev shell receives the web subscription transport marker", () => {
+		assert.equal(windowOptions("darwin").webPreferences.additionalArguments, undefined);
+		assert.deepEqual(windowOptions("darwin", { LH_DEV_URL: "http://localhost:3000" }).webPreferences.additionalArguments, ["--lh-web-subscriptions"]);
+	});
+
+	it("dev preload routes opaque sign-in actions through its narrow external-browser channel", async () => {
+		let bridge!: { subscriptionTransport: string; openSubscriptionBrowser(action: string): Promise<void> };
+		const invoked: unknown[][] = [];
+		runInNewContext(readFileSync(new URL("../electron/preload.cjs", import.meta.url), "utf8"), {
+			process: { platform: "darwin", argv: ["--lh-web-subscriptions"] },
+			require: () => ({ contextBridge: { exposeInMainWorld: (_: string, value: typeof bridge) => { bridge = value; } }, ipcRenderer: { on() {}, invoke: async (...args: unknown[]) => { invoked.push(args); } } }),
+		});
+		assert.equal(bridge.subscriptionTransport, "web");
+		const action = "/api/subscriptions/browser?id=00000000-0000-4000-8000-000000000001";
+		await bridge.openSubscriptionBrowser(action);
+		assert.deepEqual(invoked, [["lh:subscriptions:web-browser", action]]);
+	});
+
 	it("preload exposes OS identity without exposing Node/Electron to the renderer", () => {
 		let bridge: Record<string, unknown> = {};
 		const context = {
@@ -72,15 +90,49 @@ describe("desktop window chrome", () => {
 						bridge = api;
 					},
 				},
-				ipcRenderer: {},
+				ipcRenderer: { on() {} },
 			}),
 		};
 		runInNewContext(readFileSync(new URL("../electron/preload.cjs", import.meta.url), "utf8"), context);
 		assert.equal(bridge.platform, "win32");
 		assert.deepEqual(Object.keys(bridge).sort(), [
-			"chatgpt", "expandWindow", "getZoom", "installUpdate", "onUpdateStatus", "onZoom", "platform", "subscriptions",
+			"chatgpt", "checkForUpdates", "expandWindow", "getPathForFile", "getUpdateState", "getZoom", "installUpdate", "onOpenSettings", "onUpdateStatus", "onZoom", "platform", "subscriptions",
 		]);
 		assert.deepEqual(Object.keys(bridge.subscriptions as object).sort(), ["cancel", "consent", "disconnect", "login", "onChange", "open", "respond", "retry", "status"]);
+	});
+});
+
+describe("update preload bridge", () => {
+	it("buffers the menu request, unsubscribes safely, and uses the matching snapshot/check channels", async () => {
+		let bridge!: {
+			onOpenSettings: (cb: (section: string) => void) => () => void;
+			getUpdateState: () => Promise<unknown>;
+			checkForUpdates: () => Promise<void>;
+		};
+		const handlers = new Map<string, (event: unknown, value: string) => void>();
+		const invoked: string[] = [];
+		runInNewContext(readFileSync(new URL("../electron/preload.cjs", import.meta.url), "utf8"), {
+			process: { platform: "darwin" },
+			require: () => ({
+				contextBridge: { exposeInMainWorld: (_: string, value: typeof bridge) => { bridge = value; } },
+				ipcRenderer: {
+					on: (channel: string, listener: (event: unknown, value: string) => void) => handlers.set(channel, listener),
+					invoke: async (channel: string) => { invoked.push(channel); },
+				},
+			}),
+		});
+		const send = () => handlers.get("lh:open-settings")!({}, "general");
+		const seen: string[] = [];
+		send(); const off = bridge.onOpenSettings(section => seen.push(section));
+		assert.deepEqual(seen, ["general"], "pre-subscription request is delivered once");
+		send(); assert.deepEqual(seen, ["general", "general"]);
+		off(); send(); assert.equal(seen.length, 2);
+		const next: string[] = []; const offNext = bridge.onOpenSettings(section => next.push(section));
+		assert.deepEqual(next, ["general"]);
+		off(); send(); assert.equal(next.length, 2, "old cleanup cannot remove a newer subscriber");
+		offNext();
+		await bridge.getUpdateState(); await bridge.checkForUpdates();
+		assert.deepEqual(invoked, ["lh:update:get", "lh:update:check"]);
 	});
 });
 

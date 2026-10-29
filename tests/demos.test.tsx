@@ -6,7 +6,7 @@
  *   1. bridge-script injection (buildDemoSrcDoc) + the pure bridge-message
  *      reducer (reduceDemoBridgeState)
  *   2. card rendering (static markup): sandboxed iframe attrs, error chip,
- *      failure notes, inline sanitized svg
+ *      failure notes, SVG image documents
  *   3. the demo-builder loop with a FAKE model + FAKE headless (success with
  *      a fix iteration, untested-final verification, never-clean failure,
  *      no-Chrome failure)
@@ -28,6 +28,7 @@ import assert from "node:assert/strict";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { after, describe, it } from "node:test";
+import { createCanvas } from "@napi-rs/canvas";
 import { Value } from "typebox/value";
 import { createFauxCore, fauxAssistantMessage, fauxToolCall, type FauxResponseStep, type ToolCall } from "@earendil-works/pi-ai";
 import { renderToStaticMarkup } from "react-dom/server";
@@ -40,7 +41,7 @@ import {
 	INITIAL_DEMO_BRIDGE_STATE,
 	reduceDemoBridgeState,
 } from "../components/artifacts/demo-card.tsx";
-import { sanitizeSvg, svgNaturalWidth, VisualCard, VisualOutputCard } from "../components/artifacts/visual-card.tsx";
+import { svgNaturalWidth, VisualCard, VisualOutputCard } from "../components/artifacts/visual-card.tsx";
 import { slugFilename } from "../components/artifacts/download.ts";
 import { chartSize } from "../components/session-overlay.tsx";
 import { SubagentSteerCard } from "../components/artifacts/steer-card.tsx";
@@ -171,7 +172,11 @@ function fakeHeadless(opts: {
 			if (opts.renderFailures && api.svgRenders.length <= opts.renderFailures) {
 				throw new Error("XML parse error");
 			}
-			return Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]); // PNG magic
+			// The shared native image processor decodes renders, so a signature
+			// alone is no longer a successful fake raster.
+			const canvas = createCanvas(1, 1);
+			canvas.getContext("2d").fillRect(0, 0, 1, 1);
+			return canvas.toBuffer("image/png");
 		},
 	};
 	return api as HeadlessApi & { demoRuns: string[]; svgRenders: string[] };
@@ -274,14 +279,14 @@ describe("dispatch card rendering (the tool-call ack box)", () => {
 		assert.match(html, /Dispatched…/);
 	});
 
-	it("settles to a quiet delivered one-liner when done (artifact lives in the steer)", () => {
+	it("settles to a quiet finished one-liner when the worker is done", () => {
 		const html = renderToStaticMarkup(
 			<JobsContext.Provider value={[mkJob("done", "delivered")]}>
 				<JobCard part={ackPart as never} />
 			</JobsContext.Provider>,
 		);
 		assert.match(html, /Research agent/);
-		assert.match(html, /delivered/);
+		assert.match(html, /finished/);
 		assert.ok(!html.includes("web_search"), "no stale activity line once settled");
 	});
 
@@ -325,7 +330,7 @@ describe("dispatch card rendering (the tool-call ack box)", () => {
 		assert.match(html, /pdf_render/);
 	});
 
-	it("pdf dispatch settles to the delivered one-liner", () => {
+	it("pdf dispatch settles to the finished one-liner", () => {
 		const pdfJob: JobRecord = ({
 			id: "jp1",
 			kind: "pdf",
@@ -342,7 +347,7 @@ describe("dispatch card rendering (the tool-call ack box)", () => {
 			</JobsContext.Provider>,
 		);
 		assert.match(html, /PDF reader/);
-		assert.match(html, /delivered/);
+		assert.match(html, /finished/);
 	});
 });
 
@@ -373,19 +378,19 @@ describe("steer card rendering (the delivered artifact)", () => {
 		assert.ok(!html.includes("<iframe"), "no iframe for a failed build");
 	});
 
-	it("renders the verified svg inline (sanitized); the maker's notes are glue and stay hidden", () => {
+	it("renders the verified svg as an image; the maker's notes are glue and stay hidden", () => {
 		const svg = '<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100"><circle cx="50" cy="50" r="20"/></svg>';
 		const steer = buildSubagentSteer(
 			{ id: "jv", kind: "visual", toolCallId: "cv" },
 			{ svg, notes: "Looking at the render, the diagram is clean and accurate." },
 		);
 		const html = renderToStaticMarkup(<SubagentSteerCard message={projectNative([steer])[0] as never} />);
-		assert.ok(html.includes("circle"), "svg content rendered inline");
+		assert.ok(html.includes(encodeURIComponent(svg)), "the image URL contains the original SVG");
 		assert.match(html, /Figure/);
 		// Natural sizing (owner, 2026-10-07): a DECLARED width (200) means the
 		// holder hugs + centers rather than stretching full-width.
 		assert.match(html, /w-fit/, "holder hugs the declared size");
-		assert.match(html, /svg\]:max-w-full/, "svg shrinks to fit only when oversized");
+		assert.match(html, /class="block h-auto max-w-full"/, "image shrinks to fit only when oversized");
 		assert.ok(!html.includes("Looking at the render"), "model-facing notes never render");
 	});
 
@@ -590,17 +595,8 @@ describe("setSteerUiInverted (the persisted invert switch, 2026-10-07)", () => {
 	});
 });
 
-describe("sanitizeSvg", () => {
-	it("strips script blocks, event handlers, and javascript: urls, keeps geometry", () => {
-		const dirty = '<svg width="10" height="10" onload="alert(1)"><script>alert(2)</script><circle r="1" onclick="pwn()"/><a href="javascript:alert(3)"><rect width="2" height="2"/></a></svg>';
-		const clean = sanitizeSvg(dirty);
-		assert.ok(!/<script/i.test(clean), "script tags removed");
-		assert.ok(!/\sonload/i.test(clean), "onload removed");
-		assert.ok(!/\sonclick/i.test(clean), "onclick removed");
-		assert.ok(!/javascript:/i.test(clean), "javascript: urls removed");
-		assert.ok(clean.includes("circle") && clean.includes("rect"), "geometry preserved");
-	});
-});
+// Generated-figure image boundaries are covered in svg-image.test.tsx.
+// There is no longer a partial regex sanitizer in the display path.
 
 // ─── 3. the demo-builder loop ────────────────────────────────────────────────
 
@@ -848,7 +844,7 @@ describe("demo/visual job runners", () => {
 
 		const done = jobStore.getJob(job.id)!;
 		assert.equal(done.status, "done");
-		assert.equal(done.activity, "delivered", "the fake deliver flips status like the wake pipeline");
+		assert.equal(done.activity, "finished", "the worker finishes independently of delivery");
 		const result = done.result as { title: string; html: string; tested: boolean; notes?: string };
 		assert.equal(result.title, "Compound interest");
 		assert.equal(result.html, GOOD_HTML);

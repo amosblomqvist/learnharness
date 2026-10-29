@@ -8,14 +8,17 @@ import { MinimalHome } from "@/components/minimal-home";
 import { SetupDialog } from "@/components/setup-dialog";
 import { ComposerActions, NodePickerControl } from "@/components/composer-actions";
 import { DraftImageStrip } from "@/components/draft-image-strip";
-import { firstMessageUrl, handleImagePaste, useImageDraft } from "@/components/draft-images";
+import { handleImagePaste, useImageDraft } from "@/components/draft-images";
 import { useImageLightbox } from "@/components/image-lightbox";
 import { IMAGE_ONLY_TITLE } from "@/src/core";
-import { useStrongKeyless, useZeroKeys, ZeroKeysPill } from "@/components/setup-cta";
+import { useModelSetup, selectedModelUnavailable, openModelPicker, ZeroKeysPill } from "@/components/setup-cta";
 import { DictationBar, joinDictation, useDictation } from "@/components/dictation";
 import { useFieldCycle } from "@/components/field-cycle";
 import { SidebarToggle } from "@/components/sidebar";
 import { StatsBar } from "@/components/stats-bar";
+import { OPENING_PROMPT_FAILURE } from "@/components/opening-prompt";
+import { PathInput } from "@/components/path-input";
+import { SessionStarter } from "@/components/start-session";
 import type { TurnUsage } from "@/src/core";
 
 /**
@@ -45,15 +48,8 @@ export function Home({
 	// start until the user has picked all three slots — no defaults for
 	// 33 providers. The dock shows the CTA while unconfigured; submitting
 	// a topic opens the setup dialog WITH THE DRAFT PRESERVED (Save
-	// stores the slots and the queued message sends).
-	const [configured, setConfigured] = useState(initialConfigured);
-	// The zero-keys truth (zero-keys wave): no provider key = the pill
-	// takes precedence over the models CTA (keys come first in the chain).
-	const zeroKeys = useZeroKeys();
-	// The strong slot's keyless truth (pre-send key guards, owner interlude
-	// 2026-09-25): keys may exist generally while the STRONG slot's pinned
-	// provider has none — the same skip-everything treatment on send.
-	const strongKeyless = useStrongKeyless();
+	// stores slots only; the learner sends the message themselves).
+	const { catalog, configured, zeroKeys } = useModelSetup(initialConfigured);
 	const [setupOpen, setSetupOpen] = useState(false);
 	// Voice dictation (STT wave, 2026-09-17): finals append at the end of the
 	// topic draft; the strip lives in the stats bar's middle slot.
@@ -72,10 +68,13 @@ export function Home({
 	 * (draft-images.ts) and the push carries only the session id. */
 	const imageDraft = useImageDraft();
 	const lightbox = useImageLightbox();
+	const startingRef = useRef(false);
+	const starterRef = useRef(new SessionStarter());
+	const [startError, setStartError] = useState(false);
 	/* Run end focuses the topic input (owner, 2026-10-01): the hands are on
 	 * the keyboard from the stop. Falling edge only; this surface's only
 	 * dictation target IS this textarea, so no case-split is needed. */
-	const topicInputRef = useRef<HTMLTextAreaElement>(null);
+	const topicInputRef = useRef<HTMLDivElement>(null);
 	// Tab navigates INTO the topic composer (owner, keyboard round
 	// 2026-10-06): the only text field on this surface — and home's
 	// composer is its OWN textarea, not the shared Composer component,
@@ -123,7 +122,7 @@ export function Home({
 		await imageDraft.awaitReads(); // a paste followed by Enter must not race its read
 		const t = topicRef.current.trim();
 		const images = imageDraft.imagesRef.current;
-		if ((!t && images.length === 0) || busy) return;
+		if ((!t && images.length === 0) || busy || startingRef.current) return;
 		// Unconfigured: the send INTERCEPTS into the setup flow (the draft
 		// stays in the textarea; the learner sends it after Save).
 		if (!configured) {
@@ -134,36 +133,44 @@ export function Home({
 		// models case guards BEFORE creation; the key cases must too — a
 		// refused first send would otherwise leave an orphan error-shell
 		// chat in the sidebar (the 503 lands only after POST /api/chats
-		// already created the record). Same skip-everything-and-open-setup
-		// treatment; the server's 503 gate remains the belt for /chat/[id]
-		// sessions.
-		if (zeroKeys || strongKeyless) {
+		// already created the record). Zero providers opens connection setup;
+		// an unavailable selection with another provider opens its ordinary
+		// picker. The server's admission gate remains the belt.
+		if (zeroKeys) {
 			setSetupOpen(true);
 			return;
 		}
+		const strong = catalog?.slots.strong?.model;
+		if (selectedModelUnavailable(catalog, strong ? `${strong.provider}:${strong.id}` : undefined)) {
+			openModelPicker();
+			return; // Preserve the draft and never create an orphan session.
+		}
+		startingRef.current = true;
 		setBusy(true);
+		setStartError(false);
 		try {
 			// The map context (owner, 2026-10-04): picks in EITHER mode ride
 			// the CREATION as graphContext — the server writes a
 			// graph-context marker as message[0] (a separate custom message
 			// before the learner's first user message, propositions + the
 			// chains among them); the prompt stays the learner's own words.
-			const res = await fetch("/api/chats", {
-				method: "POST",
-				headers: { "Content-Type": "application/json" },
-				body: JSON.stringify({
-					title: t || IMAGE_ONLY_TITLE,
+			const title = t || IMAGE_ONLY_TITLE;
+			const target = await starterRef.current.start(
+				{
+					title,
 					...(mode === "practice" ? { kind: "practice" } : {}),
 					...(practiceProps.length > 0 ? { graphContext: { propositions: practiceProps } } : {}),
-				}),
-			});
-			const { id } = (await res.json()) as { id: string };
-			// No settings PUT on create (per-session models, owner
-			// 2026-09-28): the SERVER stamps the newborn from the strong
-			// slot — the same default this surface's model control edits.
-			router.push(firstMessageUrl(id, t, images));
+				},
+				fetch,
+				JSON.stringify(catalog?.slots.strong),
+				images,
+				t,
+			);
+			router.push(target);
 		} catch {
+			startingRef.current = false;
 			setBusy(false);
+			setStartError(true);
 		}
 	};
 
@@ -255,6 +262,7 @@ export function Home({
 							)
 						)}
 					/>
+					{startError && <p role="alert" className="mb-2 text-sm text-destructive">{OPENING_PROMPT_FAILURE}</p>}
 					<form
 						data-testid="home-composer"
 						className="flex flex-wrap items-end gap-1.5 rounded-2xl border bg-card p-1.5 shadow-lg"
@@ -264,13 +272,14 @@ export function Home({
 					}}
 				>
 					<DraftImageStrip draft={{ ...imageDraft.props, onOpen: lightbox.open }} />
-					<textarea
+					<PathInput
 						ref={topicInputRef}
 						value={topic}
-						onChange={(e) => {
-							topicRef.current = e.target.value;
-							setTopic(e.target.value);
+						onValueChange={(value) => {
+							topicRef.current = value;
+							setTopic(value);
 						}}
+						defaultDropTarget
 						onPaste={(e) => handleImagePaste(e, imageDraft.props.onPaste)}
 						onKeyDown={(e) => {
 							// Esc ends dictation (the dictate decisions: click-again or
@@ -289,7 +298,6 @@ export function Home({
 						}}
 						placeholder={mode === "practice" ? "What do you want to practice?" : "What do you want to learn?"}
 						autoFocus
-						rows={1}
 						className="field-sizing-content lh-input max-h-48 min-h-10 flex-1 resize-none bg-transparent px-2.5 py-2 outline-none placeholder:text-muted-foreground"
 					/>
 					{/* No tooltip on the start square — the ↵ glyph is the
@@ -343,7 +351,6 @@ export function Home({
 				open={setupOpen}
 				onClose={() => setSetupOpen(false)}
 				onDone={() => {
-					setConfigured(true);
 					setSetupOpen(false);
 					// Save only saves: the draft waits in the composer.
 				}}

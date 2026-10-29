@@ -34,7 +34,7 @@
 
 import type { AssistantMessage, ImageContent, ToolResultMessage, UserMessage } from "@earendil-works/pi-ai";
 import type { LhMarkerMessage, LhMessage } from "./native-messages.ts";
-import { modelSolutionForConclude, PRACTICE_CONCLUDE_TOOL, problemInputForConclude } from "./native-messages.ts";
+import { modelSolutionForConclude, PRACTICE_CONCLUDE_TOOL, problemInputForConclude, SEND_TO_USER_TOOL, sendToUserText } from "./native-messages.ts";
 import { activeCompactionOf, type CompactionDetails } from "./compaction.ts";
 import { QUESTION_TOOLS } from "./pending.ts";
 import type { SubagentArtifactData, SubagentResultMeta } from "./contracts/jobs.ts";
@@ -53,6 +53,9 @@ export interface LhViewPart extends Record<string, unknown> {
 	text?: string;
 	state?: string;
 	toolCallId?: string;
+	/** Native location, retained across display grouping (client-only). */
+	sourceMessageId?: string;
+	sourceContentIndex?: number;
 	input?: unknown;
 	output?: unknown;
 	rawInput?: unknown;
@@ -132,6 +135,14 @@ function lastSuccessfulPlanInit(parts: LhViewPart[]): number {
  *  view messages. Pure: the same input always projects to the same list. */
 export function projectView(messages: readonly LhMessage[], live?: LiveTurnState): LhViewMessage[] {
 	const out: LhViewMessage[] = [];
+	// Output calls become text rather than tool parts, so read settled
+	// failures up front: a failed call must retain the normal error path.
+	const outputErrors = new Map<string, ToolResultMessage>();
+	for (const message of messages) {
+		if (message.role === "toolResult" && message.toolName === SEND_TO_USER_TOOL && message.isError) {
+			outputErrors.set(message.toolCallId, message);
+		}
+	}
 
 	const lastAssistant = (): LhViewMessage | undefined => {
 		const last = out[out.length - 1];
@@ -221,13 +232,35 @@ export function projectView(messages: readonly LhMessage[], live?: LiveTurnState
 			// back to a spinner mid-transcript; live cards belong at the
 			// bottom, and this gate is what puts them there by construction).
 			const streamingMessage = live?.streamingIds.has(m.id) === true;
-			for (const block of assistant.content) {
+			for (const [contentIndex, block] of assistant.content.entries()) {
 				if (block.type === "text") {
 					rest.push({ type: "text", id: `${m.id}-t${textN++}`, text: block.text, state: "done" });
 				} else if (block.type === "thinking") {
 					reasoning.push({ type: "reasoning", id: `${m.id}-r${reasoningN++}`, text: block.thinking, state: "done" });
 				} else if (block.type === "toolCall") {
 					const part = toolPartOf(block, live, streamingMessage);
+					if ((QUESTION_TOOLS as readonly string[]).includes(block.name)) {
+						part.sourceMessageId = m.id;
+						part.sourceContentIndex = contentIndex;
+					}
+					if (block.name === SEND_TO_USER_TOOL) {
+						// Failed/aborted generations never execute their calls;
+						// the provider error/abort UI already owns that outcome.
+						if (assistant.stopReason === "error" || assistant.stopReason === "aborted") continue;
+						const error = outputErrors.get(block.id);
+						if (error) applyResult(part, error);
+						if (part.state === "output-error") {
+							rest.push(part);
+						} else {
+							const text = sendToUserText(block);
+							if (text !== undefined) {
+								rest.push({ type: "text", id: `${m.id}-t${textN++}`, text, state: "done" });
+							}
+						}
+						// No live tool card or acknowledgement: this channel is
+						// ordinary prose, including while its arguments stream.
+						continue;
+					}
 					// The conclusion's reveal join (owner round, 2026-10-05): the
 					// hero of a conclude card is the modelSolution committed at POSE
 					// time — a record fold, enriched here so the card renders pure.

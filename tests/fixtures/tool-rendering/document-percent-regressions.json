@@ -1,0 +1,90 @@
+[
+  {
+    "group": "multilingual-20261025-01",
+    "chatId": "chat_mvo321f7_4202fae0",
+    "source": "messages.1.content.1.arguments.explanation",
+    "model": "google/gemini-3.7-flash",
+    "kind": "percent-at-display-end",
+    "raw": "To find the posterior probability $P(D \\\\mid +)$, we apply Bayes' theorem:\n$$\nP(D \\\\mid +) = \\\\frac{P(D \\\\cap +)}{P(+)} = \\\\frac{P(D)P(+ \\\\mid D)}{P(D)P(+ \\\\mid D) + P(\\\\neg D)P(+ \\\\mid \\\\neg D)}\n$$\n\nGiven:\n- $P(D) = 0.01$ (and thus $P(\\\\neg D) = 0.99$)\n- $P(+ \\\\mid D) = 0.90$\n- $P(+ \\\\mid \\\\neg D) = 0.05$\n\nEvaluating the numerator and denominator:\n$$\nP(D \\\\cap +) = 0.01 \\\\times 0.90 = 0.009\n$$\n$$\nP(\\\\neg D \\\\cap +) = 0.99 \\\\times 0.05 = 0.0495\n$$\n$$\nP(+) = 0.009 + 0.0495 = 0.0585\n$$\n\nTherefore:\n$$\nP(D \\\\mid +) = \\\\frac{0.009}{0.0585} = \\\\frac{9}{58.5} = \\\\frac{2}{13} \\\\approx 15.4\\\\%\n$$"
+  },
+  {
+    "group": "multilingual-20261025-01",
+    "chatId": "chat_mvo321f7_4202fae0",
+    "source": "messages.5.content.1.arguments.explanation",
+    "model": "google/gemini-3.7-flash",
+    "kind": "percent-at-display-end",
+    "raw": "Because the two tests are conditionally independent given disease status:\n$$\nP(T_1 = +, T_2 = + \\\\mid D) = P(T_1 = + \\\\mid D) \\\\cdot P(T_2 = + \\\\mid D) = 0.90 \\\\times 0.90 = 0.81\n$$\n$$\nP(T_1 = +, T_2 = + \\\\mid \\\\neg D) = P(T_1 = + \\\\mid \\\\neg D) \\\\cdot P(T_2 = + \\\\mid \\\\neg D) = 0.10 \\\\times 0.10 = 0.01\n$$\n\nNow calculate the joint probabilities:\n$$\nP(D \\\\cap T_1 = + \\\\cap T_2 = +) = P(D) \\\\cdot P(T_1 = +, T_2 = + \\\\mid D) = 0.01 \\\\times 0.81 = 0.0081\n$$\n$$\nP(\\\\neg D \\\\cap T_1 = + \\\\cap T_2 = +) = P(\\\\neg D) \\\\cdot P(T_1 = +, T_2 = + \\\\mid \\\\neg D) = 0.99 \\\\times 0.01 = 0.0099\n$$\n\nTotal probability of two positive tests:\n$$\nP(T_1 = +, T_2 = +) = 0.0081 + 0.0099 = 0.0180\n$$\n\nApplying Bayes' theorem:\n$$\nP(D \\\\mid T_1 = +, T_2 = +) = \\\\frac{0.0081}{0.0180} = \\\\frac{81}{180} = \\\\frac{9}{20} = 45\\\\%\n$$"
+  },
+  {
+    "group": "multilingual-20261025-01",
+    "chatId": "chat_mvo4op90_74572548",
+    "source": "messages.1.content.2.arguments.explanation",
+    "language": "pt",
+    "model": "deepseek/deepseek-v4.1-flash",
+    "kind": "percent-at-display-end",
+    "raw": "Em $10\\\\,000$ pessoas: $100$ estão doentes e $99$ dessas testam positivo; $9\\\\,900$ estão saudáveis e $5\\\\%$ delas, isto é $495$, testam positivo. Total de positivos: $99 + 495 = 594$. Entre os positivos, a fração de doentes é\\n$$\\n\\\\frac{99}{594} = \\\\frac{1}{6} \\\\approx 16{,}7\\\\%\\n$$\\nA base pequena de doentes faz os falsos positivos ($495$) dominarem os verdadeiros positivos ($99$)."
+  },
+  {
+    "group": "multilingual-20261025-01",
+    "chatId": "chat_mvo4op90_74572548",
+    "source": "messages.3.content.2.arguments.explanation",
+    "language": "pt",
+    "model": "deepseek/deepseek-v4.1-flash",
+    "kind": "percent-at-display-end",
+    "raw": "Continua valendo a mesma estrutura de Bayes, agora com números diferentes. Em $10\\\\,000$ pessoas: $200$ doentes, das quais $90\\\\%$ testam positivo $= 180$; $9\\\\,800$ saudáveis, das quais $5\\\\%$ testam positivo $= 490$ falsos positivos. Total de positivos: $180 + 490 = 670$.\\n$$\\nP(\\\\text{doente} \\\\mid +) = \\\\frac{180}{670} \\\\approx 26{,}9\\\\%\\n$$\\nNote que a especificidade $95\\\\%$ entra na conta pela sua taxa de falso positivo $1 - 0{,}95 = 0{,}05$, pesada por $P(\\\\text{saudável}) = 0{,}98$."
+  },
+  {
+    "group": "multilingual-20261025-01",
+    "chatId": "chat_mvo8kgtc_65767ffd",
+    "source": "messages.5.content.1.arguments.question",
+    "language": "es",
+    "model": "xiaomi/mimo-v2.6-flash",
+    "kind": "document-math-framing",
+    "raw": "Una enfermedad afecta al $1\\%$ de una población. La prueba tiene una sensibilidad del $99\\%$ (probabilidad de dar positivo si la enfermedad está presente) y una tasa de falsos positivos del $5\\%$ (probabilidad de dar positivo si no está presente). Una persona al azar da positivo. ¿Cuál es la probabilidad de que realmente tenga la enfermedad?\\n\\n$$\\nP(\\text{enf} \\mid +) \\;=\\; ?$$"
+  },
+  {
+    "group": "multilingual-20261025-01",
+    "chatId": "chat_mvo91klg_5332fa79",
+    "source": "messages.3.content.1.arguments.explanation",
+    "language": "zh-Hans",
+    "model": "xiaomi/mimo-v2.6-flash",
+    "kind": "percent-at-display-end",
+    "raw": "条件概率把样本空间缩小到条件所指定的那一部分。已知\"检测阳性\"，人群就从 $1000$ 人缩到 $140$ 人，其中患病的有 $45$ 人，所以\\n$$\\nP(\\\\text{患病}\\\\mid\\\\text{阳性})=\\\\frac{P(\\\\text{患病}\\\\cap\\\\text{阳性})}{P(\\\\text{阳性})}=\\\\frac{45/1000}{140/1000}=\\\\frac{45}{140}\\\\approx 32.1\\\\%.\\n$$\\n另外三个数各有各的含义：$\\\\frac{45}{50}=90\\\\%$ 是 $P(\\\\text{阳性}\\\\mid\\\\text{患病})$（敏感度，条件方向反了）；$\\\\frac{45}{1000}=4.5\\\\%$ 是联合概率 $P(\\\\text{患病}\\\\cap\\\\text{阳性})$（没做条件化）；$\\\\frac{140}{1000}=14\\\\%$ 是 $P(\\\\text{阳性})$（不分是否患病的总阳性率）。"
+  },
+  {
+    "group": "multilingual-20261025-01",
+    "chatId": "chat_mvo91klg_5332fa79",
+    "source": "messages.7.content.1.arguments.explanation",
+    "language": "zh-Hans",
+    "model": "xiaomi/mimo-v2.6-flash",
+    "kind": "percent-at-display-end",
+    "raw": "用 $10000$ 人（或直接用全概率公式）算分母：\\n$$\\n\\\\begin{aligned}\\n\\\\text{患病且阳性}&=10000\\\\times 0.01\\\\times 0.99=99,\\\\\\\\\\n\\\\text{未患病但阳性}&=10000\\\\times 0.99\\\\times 0.05=495.\\n\\\\end{aligned}\\n$$\\n阳性总数 $=99+495=594$，所以\\n$$\\nP(D\\\\mid +)=\\\\frac{99}{594}\\\\approx 16.7\\\\%.\\n$$\\n各错误选项对应的具体失误：$99\\\\%$ 是把敏感度 $P(+\\\\mid D)$ 当成了 $P(D\\\\mid +)$（条件方向颠倒）；$95.2\\\\%=\\\\frac{0.99}{0.99+0.05}$ 是把阳性率和假阳性率直接当人数用，漏掉了基础发生率的加权（$99\\\\%$ 的人未患病，所以少量假阳性也架不住人多）；$1\\\\%$ 是看到了阳性结果却不更新概率。"
+  },
+  {
+    "group": "multilingual-20261025-01",
+    "chatId": "chat_mvo91klg_5332fa79",
+    "source": "messages.9.content.1.arguments.explanation",
+    "language": "zh-Hans",
+    "model": "xiaomi/mimo-v2.6-flash",
+    "kind": "percent-at-display-end",
+    "raw": "两次阳性后的后验，用同样的公式但似然要平方：\\n$$\\n\\\\begin{aligned}\\nP(++\\\\mid D)&=0.99^2=0.9801,\\\\\\\\\\nP(++\\\\mid D')&=0.05^2=0.0025.\\n\\\\end{aligned}\\n$$\\n$$\\nP(D\\\\mid ++)\\\\frac{0.99^2\\\\times 0.01}{0.99^2\\\\times 0.01+0.05^2\\\\times 0.99}=\\\\frac{0.009801}{0.009801+0.002475}\\\\approx 79.8\\\\%.\\n$$\\n关键在于**两条分支都要平方**：患病分支的似然变成 $0.99^2$，未患病分支的假阳性率变成 $0.05^2$（$5\\%$ 是很小的数，平方后变得更小，所以假阳性这一侧收缩得比患病侧更狠，后验从 $16.7\\\\%$ 跳到约 $80\\\\%$）。其他选项的失误：$98\\\\%$ 是把 $P(++\\\\mid D)$ 当成了 $P(D\\\\mid ++)$；$16.5\\\\%$ 只对患病分支用了两次独立，未患病分支仍用单次假阳性率；$33\\\\%$ 是把单次后验直接乘 $2$——两次阳性提供的证据不是相加的，而要在似然层面相乘。"
+  },
+  {
+    "group": "multilingual-20261025-01",
+    "chatId": "chat_mvo9c830_3866e4a6",
+    "source": "messages.7.content.1.arguments.explanation",
+    "language": "zh-Hans",
+    "model": "anthropic/claude-haiku-5.5",
+    "kind": "percent-at-display-end",
+    "raw": "阳性总人数：真阳性 $100\\\\times0.9=90$，假阳性 $9900\\\\times0.05=495$，合计 $585$。\n\n所求的是阳性者中患病者的占比，分母是全部阳性者：\n$$\n\\\\frac{90}{585}\\\\approx15.4\\\\%\n$$\n\n$90\\\\%$ 是患病者中阳性的比例，分母错成了患病者；$84.6\\\\%$ 是阳性者中健康者的占比，回答的是另一个问题；$5\\\\%$ 是健康者中的假阳性率，分母是健康人群。"
+  },
+  {
+    "group": "multilingual-20261025-01",
+    "chatId": "chat_mvo9nu8w_dcc7add9",
+    "source": "messages.3.content.1.arguments.explanation",
+    "language": "id",
+    "model": "xiaomi/mimo-v2.6-flash",
+    "kind": "percent-at-display-end",
+    "raw": "Pakai aturan Bayes dengan menghitung dulu kejadian gabungan dalam satu kelompok besar, misalnya $10.000$ orang:\\n\\n- Sakit dan positif: $10.000 \\\\times 0{,}01 \\\\times 0{,}99 = 99$ orang.\\n- Sehat dan positif: $10.000 \\\\times 0{,}99 \\\\times 0{,}05 = 495$ orang.\\n\\nSemua yang hasilnya positif: $99 + 495 = 594$ orang. Maka\\n$$\\nP(\\\\text{sakit}\\\\mid +) = \\\\frac{99}{594} = \\\\frac{1}{6} \\\\approx 16{,}7\\\\%.\\n$$\\n\\nYang menipu di sini adalah base rate: kelompok sehat jauh lebih besar, sehingga meski hanya 5% dari mereka yang salah positif, jumlahnya tetap 5 kali lipat jumlah positif yang benar. Nilai $95{,}2\\\\%$ muncul kalau kelompok sakit dan sehat dianggap sama besar ($\\\\frac{99}{99+5}$); nilai $99\\\\%$ muncul kalau arah kondisinya dibalik, membaca $P(+\\\\mid \\\\text{sakit})$ sebagai $P(\\\\text{sakit}\\\\mid +)$."
+  }
+]

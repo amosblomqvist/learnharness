@@ -24,8 +24,8 @@ import { afterEach, describe, it } from "node:test";
 import { absorbed, pendingCallTool, SessionModel } from "../components/session-core.ts";
 import type { ChatInput } from "../src/core/input-events.ts";
 import type { LhMessage } from "../src/core/native-messages.ts";
-import { newUserMessage, newAnswerResult, newThinkingMessage, needsContinuation, endsInDismissal } from "../src/core/native-messages.ts";
-import { newCompactionMarker, newPlanBlockMessage, projectView } from "../src/core/index.ts";
+import { newUserMessage, newAnswerResult, newThinkingMessage, needsContinuation, endsInDismissal, pendingQuestionOf } from "../src/core/native-messages.ts";
+import { endsInFailedTurn, newCompactionMarker, newPlanBlockMessage, projectView } from "../src/core/index.ts";
 import { dismissedAnswer } from "../src/core/question-core.ts";
 import { buildAnswer, type QuestionData } from "../src/core/question-core.ts";
 
@@ -483,7 +483,7 @@ it("Wave C: markers injected mid-run (custom role, follow-up delivery) append to
 	});
 });
 
-// ─── provider failures: one final-entry rule for live and saved records ──────
+// ─── provider failures: one marker-aware rule for live and saved records ────
 
 describe("provider-error banner (live and saved)", () => {
 	function failed(id = "failed", errorMessage: string | undefined = "Google 500: fixture failure"): LhMessage {
@@ -512,7 +512,7 @@ describe("provider-error banner (live and saved)", () => {
 		assert.equal(model().getState().error, null);
 	});
 
-	it("any later entry supersedes the failure, including plan/compaction markers and aborts", () => {
+	it("substantive later input/output supersedes the failure, including aborts", () => {
 		const failure = failed();
 		const later: LhMessage[] = [
 			newUserMessage("retry"),
@@ -520,8 +520,6 @@ describe("provider-error banner (live and saved)", () => {
 			{ ...assistantMsg("aborted", ""), stopReason: "aborted", errorMessage: "Aborted" } as LhMessage,
 			newThinkingMessage("problem", "my attempt"),
 			resultMsg("call"),
-			newPlanBlockMessage("plan", { kind: "full", nodes: [], edges: [], current: null }),
-			newCompactionMarker("summary", { firstKeptMessageId: failure.id, tokensBefore: 100, model: "fixture", at: "2026-01-01T00:00:00Z" }),
 		];
 		for (const entry of later) {
 			const m = model({ initialMessages: [failure] });
@@ -530,6 +528,31 @@ describe("provider-error banner (live and saved)", () => {
 			m.setMessages([failure, entry]);
 			assert.equal(m.getState().error, null, `live banner superseded by ${entry.role}`);
 			assert.equal(model({ initialMessages: [failure, entry] }).getState().error, null, "reopened view agrees");
+		}
+	});
+
+	it("plan and compaction markers preserve the banner on sync, adoption and reopen", async () => {
+		const failure = failed();
+		const record = [newUserMessage("topic"), failure];
+		const markers = [
+			newPlanBlockMessage("plan", { kind: "full", nodes: [], edges: [], current: null }),
+			newCompactionMarker("summary", { firstKeptMessageId: failure.id, tokensBefore: 100, model: "fixture", at: "2026-01-01T00:00:00Z" }),
+		];
+		for (const marker of markers) {
+			const saved = [...record, marker];
+			let posts = 0;
+			const m = model({ initialMessages: record, fetch: async () => { posts++; throw new Error("unexpected request"); } });
+			m.setMessages(saved);
+			assert.equal(m.getState().error?.message, failure.role === "assistant" ? failure.errorMessage : undefined);
+			assert.equal(model({ initialMessages: saved }).getState().error?.message, m.getState().error?.message);
+			const adopted = model({ initialMessages: record });
+			adopted.adoptRecord(saved);
+			assert.equal(adopted.getState().error?.message, m.getState().error?.message);
+			assert.equal(endsInFailedTurn(saved), marker.customType === "plan-block", "later compaction removes Retry eligibility, not the error notice");
+			await m.continueIfOwed(saved);
+			assert.equal(posts, 0, "restoring the banner is never an automatic retry");
+			m.setMessages([...saved, newUserMessage("continue from here")]);
+			assert.equal(m.getState().error, null, "new learner input supersedes the notice");
 		}
 	});
 
@@ -554,7 +577,7 @@ describe("provider-error banner (live and saved)", () => {
 		assert.equal(m.getState().error?.message, "Google 500: fixture failure");
 	});
 
-	for (const input of [{ type: "text", text: "retry" }, { type: "continue" }] as const) {
+	for (const input of [{ type: "text", text: "retry" }, { type: "continue" }, { type: "retry" }] as const) {
 		it(`hides the old failure during the optimistic ${input.type} wait, then shows a new live failure`, async () => {
 			let acknowledge!: (response: Response) => void;
 			const ack = new Promise<Response>((resolve) => { acknowledge = resolve; });
@@ -681,6 +704,436 @@ describe("provider-error banner (live and saved)", () => {
 		assert.equal(model({ initialMessages: m.getState().nativeMessages }).getState().error, null, "request errors are not fabricated as saved messages");
 		m.clearError();
 		assert.equal(m.getState().error, null);
+	});
+});
+
+describe("truncated stream recovery", () => {
+	const truncated = () => sseResponse({ type: "message_start", message: { role: "assistant", content: [{ type: "text", text: "partial" }] } });
+	const completed = () => sseResponse({ type: "message_start", message: { role: "assistant", content: [{ type: "text", text: "complete" }] } }, { type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "complete" }], stopReason: "stop" } }, "[DONE]");
+
+	it("reattaches once after EOF without DONE and replaces the incomplete replay", async () => {
+		let streams = 0;
+		const m = model({ fetch: dietFetch({ userText: "go", stream: () => ++streams === 1 ? truncated() : completed() }) });
+		await m.send({ type: "text", text: "go" });
+		assert.equal(streams, 2);
+		assert.equal(m.status, "ready");
+		assert.equal(m.getState().error, null);
+		assert.equal(m.getState().nativeMessages.filter(m => m.role === "assistant").length, 1);
+		assert.equal(m.getState().messages.at(-1)!.parts.at(-1)!.text, "complete");
+	});
+
+	it("surfaces an error after a second truncation without retrying the input", async () => {
+		let streams = 0;
+		let posts = 0;
+		const m = model({ fetch: dietFetch({ onPost: () => posts++, stream: () => { streams++; return truncated(); } }) });
+		await m.send({ type: "text", text: "go" });
+		assert.equal(posts, 1);
+		assert.equal(streams, 2);
+		assert.equal(m.status, "error");
+		assert.equal(m.getState().error?.message, "The connection dropped before the turn completed.");
+	});
+
+	it("reports the approved connection error when the recovery record read fails", async () => {
+		let reads = 0;
+		const m = model({ fetch: async (url) => {
+			if (String(url) === "/api/chat") return Response.json({ ok: true });
+			if (String(url).endsWith("/stream")) return truncated();
+			if (++reads === 1) return Response.json({ messages: [] });
+			throw new TypeError("synthetic offline");
+		} });
+		await m.send({ type: "text", text: "go" });
+		assert.equal(m.status, "error");
+		assert.equal(m.getState().error?.message, "The connection dropped before the turn completed.");
+	});
+
+	it("accepts turn-settled when the original turn finished during the disconnection", async () => {
+		let streams = 0;
+		let settled = 0;
+		const m = model({ onReattachSettled: () => { settled++; }, fetch: dietFetch({ stream: () => ++streams === 1 ? truncated() : sseResponse({ type: "turn-settled" }, "[DONE]") }) });
+		await m.send({ type: "text", text: "go" });
+		assert.equal(streams, 2);
+		assert.equal(settled, 1);
+		assert.equal(m.status, "ready");
+		assert.equal(m.getState().error, null);
+	});
+
+	it("also recovers a rejected body read but does not relabel event-application bugs", async () => {
+		let streams = 0;
+		const m = model({ fetch: dietFetch({ stream: () => ++streams === 1 ? new Response(new ReadableStream({ start(controller) { controller.error(new TypeError("synthetic read failure")); } })) : completed() }) });
+		await m.send({ type: "text", text: "go" });
+		assert.equal(streams, 2);
+		assert.equal(m.status, "ready");
+		streams = 0;
+		const broken = model({ fetch: dietFetch({ stream: () => { streams++; return completed(); } }) });
+		broken.applyWireEvent = () => { throw new Error("synthetic event application bug"); };
+		await broken.send({ type: "text", text: "go" });
+		assert.equal(streams, 1);
+		assert.equal(broken.getState().error?.message, "synthetic event application bug");
+	});
+
+	it("recovers an AbortError body rejection unless the view was actually cancelled", async () => {
+		let streams = 0;
+		const m = model({ fetch: dietFetch({ stream: () => ++streams === 1 ? new Response(new ReadableStream({
+			start(controller) { controller.error(new DOMException("synthetic unexpected read abort", "AbortError")); },
+		})) : completed() }) });
+		await m.send({ type: "text", text: "go" });
+		assert.equal(streams, 2);
+		assert.equal(m.status, "ready");
+		assert.equal(m.getState().error, null);
+	});
+
+	it("uses the approved drop message when recovery record headers arrive but its body read fails", async () => {
+		let reads = 0;
+		const m = model({ fetch: async (url) => {
+			if (String(url) === "/api/chat") return Response.json({ ok: true });
+			if (String(url).endsWith("/stream")) return truncated();
+			if (++reads === 1) return Response.json({ messages: [] });
+			return new Response(new ReadableStream({ start(controller) { controller.error(new TypeError("synthetic record-body transport failure")); } }));
+		} });
+		await m.send({ type: "text", text: "go" });
+		assert.equal(m.status, "error");
+		assert.equal(m.getState().error?.message, "The connection dropped before the turn completed.");
+	});
+
+	it("preserves malformed-event diagnostics rather than calling them network drops", async () => {
+		let streams = 0;
+		const m = model({ fetch: dietFetch({ stream: () => { streams++; return new Response("data: {broken}\n\n"); } }) });
+		await m.send({ type: "text", text: "go" });
+		assert.equal(streams, 1);
+		assert.equal(m.status, "error");
+		assert.notEqual(m.getState().error?.message, "The connection dropped before the turn completed.");
+		assert.match(m.getState().error!.message, /JSON|property name/);
+	});
+
+	it("reports a failed recovery stream request without attempting a third attachment", async () => {
+		let streams = 0;
+		const m = model({ fetch: dietFetch({ stream: () => ++streams === 1 ? truncated() : new Response("synthetic unavailable", { status: 503 }) }) });
+		await m.send({ type: "text", text: "go" });
+		assert.equal(streams, 2);
+		assert.equal(m.status, "error");
+		assert.equal(m.getState().error?.message, "The connection dropped before the turn completed.");
+	});
+
+	it("a superseded consume cannot recover or overwrite its replacement's state", async () => {
+		let streams = 0;
+		let closeFirst!: () => void;
+		let beganReading!: () => void;
+		const reading = new Promise<void>(resolve => { beganReading = resolve; });
+		const m = model({ fetch: dietFetch({ stream: () => ++streams === 1 ? new Response(new ReadableStream({
+			start(controller) { closeFirst = () => controller.close(); },
+			pull() { beganReading(); },
+		}, { highWaterMark: 0 })) : completed() }) });
+		const first = m.resumeStream(false);
+		await reading;
+		await m.resumeStream(false);
+		closeFirst();
+		await first;
+		assert.equal(streams, 2);
+		assert.equal(m.status, "ready");
+		assert.equal(m.getState().error, null);
+		assert.equal(m.getState().messages.at(-1)!.parts.at(-1)!.text, "complete");
+	});
+});
+
+describe("automatic continuation after recovery failure", () => {
+	const question = { ...assistantMsg("question", ""), content: [{ type: "toolCall", id: "q1", name: "quiz", arguments: { question: "Q?" } }] } as LhMessage;
+	const answer = buildAnswer({ id: "q1", kind: "quiz", question: "Q?", mode: "single-select", options: [], createdAt: "fixture" }, { dontKnow: true });
+	const answered = [question, newAnswerResult("q1", "quiz", answer)];
+
+	it("a retained failure seeds the banner and blocks continuation even after banner dismissal", async () => {
+		let posts = 0;
+		const m = model({ initialMessages: answered, initialError: "The reply could not be saved.", fetch: dietFetch({ onPost: () => posts++, stream: () => sseResponse("[DONE]") }) });
+		assert.equal(SessionModel.needsContinuation(answered), true);
+		assert.equal(m.getState().error?.message, "The reply could not be saved.");
+		await m.continueIfOwed(answered);
+		assert.equal(posts, 0);
+		m.clearError();
+		await m.continueIfOwed(answered);
+		assert.equal(posts, 0, "closing the banner is not permission to retry the model");
+		await m.send({ type: "text", text: "explicit learner input" });
+		assert.equal(posts, 1);
+		assert.equal(m.getState().error, null);
+	});
+
+	it("a new server-owned turn clears the retained banner without releasing Thinking", () => {
+		const m = model({ initialMessages: answered, initialError: "The reply could not be saved." });
+		assert.equal(m.getState().error?.message, "The reply could not be saved.");
+		assert.equal(m.applyWireEvent({ type: "agent_start" }), false);
+		assert.equal(m.getState().error, null, "positive new-turn evidence replaces the old transient notice");
+	});
+
+	it("a live failed save cannot auto-continue the accepted answer during canonical sync", async () => {
+		let posts = 0;
+		const m = model({ initialMessages: answered, fetch: dietFetch({ onPost: () => posts++, stream: () => sseResponse("[DONE]") }) });
+		m.applyWireEvent({ type: "error", errorText: "The reply could not be saved." });
+		m.setMessages(answered);
+		await m.continueIfOwed(answered);
+		assert.equal(posts, 0);
+	});
+
+	it("a healthy owed continuation still starts once through the normal send gate", async () => {
+		let posts = 0;
+		const m = model({ initialMessages: answered, fetch: dietFetch({ onPost: () => posts++, stream: () => sseResponse("[DONE]") }) });
+		await m.continueIfOwed(answered);
+		assert.equal(posts, 1);
+	});
+});
+
+// ─── failed answer submissions (no replay without canonical reconciliation) ──
+
+describe("answer submission recovery", () => {
+	const question = {
+		...assistantMsg("question", "Q?"),
+		content: [{ type: "toolCall", id: "q1", name: "quiz", arguments: { question: "Q?" } }],
+	} as LhMessage;
+	const answer = buildAnswer({ id: "q1", kind: "quiz", question: "Q?", mode: "single-select", options: [], createdAt: "fixture" }, { dontKnow: true, thinking: "keep my reasoning" });
+
+	it("restores the question after a failed POST and checks the record before another POST", async () => {
+		const calls: string[] = [];
+		let posts = 0;
+		const m = model({ initialMessages: [question], fetch: async (url) => {
+			calls.push(String(url));
+			if (String(url) === "/api/chat") {
+				posts++;
+				return posts === 1 ? new Response("request refused", { status: 500 }) : Response.json({ ok: true });
+			}
+			if (String(url).endsWith("/stream")) return sseResponse("[DONE]");
+			return Response.json({ messages: [question], turnInFlight: false });
+		} });
+		await m.submitAnswer("quiz", "q1", answer);
+		assert.equal(m.getState().messages[0]!.parts.find(p => p.toolCallId === "q1")!.state, "input-available");
+		assert.equal(m.status, "error");
+		m.clearError(); // dismissing the banner must not disable recovery
+		await m.submitAnswer("quiz", "q1", answer);
+		assert.equal(posts, 2, "error must not permanently close the send gate");
+		assert.deepEqual(calls.slice(0, 3), ["/api/chat", "/api/chats/chat_x", "/api/chat"]);
+	});
+
+	it("retains all submitted draft channels until the canonical answer resolves the call", async () => {
+		const form = { selection: { selected: new Set([1]), otherSelected: true, dontKnow: false }, thinking: "reasoning", other: "custom answer", text: "free text", confidenceIndex: 4 };
+		const m = model({ initialMessages: [question], fetch: async () => { throw new TypeError("offline"); } });
+		m.saveQuestionDraft("q1", { form });
+		m.saveQuestionDraft("q1", { readingThinking: "reading reasoning" });
+		await m.submitAnswer("quiz", "q1", answer);
+		assert.deepEqual(m.questionDraft("q1"), { form, readingThinking: "reading reasoning" });
+		m.setMessages([question]);
+		assert.deepEqual(m.questionDraft("q1"), { form, readingThinking: "reading reasoning" });
+		assert.equal(m.questionDraft("q2"), undefined, "a different question never inherits the draft");
+		m.adoptRecord([question, newAnswerResult("q1", "quiz", answer)]);
+		assert.equal(m.questionDraft("q1"), undefined, "only confirmed native resolution clears it");
+	});
+
+	it("a final 409 restores the question instead of leaving an optimistic answer", async () => {
+		const m = model({ initialMessages: [question], waitMaxMs: 0, fetch: async () => new Response("busy", { status: 409 }) });
+		await m.submitAnswer("quiz", "q1", answer);
+		assert.equal(m.getState().nativeMessages.length, 1);
+		assert.equal(m.status, "error");
+	});
+
+	it("does not repost an answer whose acceptance acknowledgement was lost", async () => {
+		let posts = 0;
+		const saved = JSON.parse(JSON.stringify([question, newAnswerResult("q1", "quiz", answer)])) as LhMessage[];
+		const m = model({ initialMessages: [question], fetch: async (url) => {
+			if (String(url) === "/api/chat") { posts++; throw new TypeError("failed fetch"); }
+			return Response.json({ messages: saved, turnInFlight: false });
+		} });
+		await m.submitAnswer("quiz", "q1", answer);
+		await m.submitAnswer("quiz", "q1", answer);
+		assert.equal(posts, 1);
+		assert.equal(m.status, "ready");
+		assert.deepEqual(m.getState().nativeMessages, saved);
+	});
+
+	it("reattaches to an accepted running turn instead of posting another answer", async () => {
+		const calls: string[] = [];
+		const m = model({ initialMessages: [question], fetch: async (url) => {
+			calls.push(String(url));
+			if (String(url) === "/api/chat") throw new TypeError("failed fetch");
+			if (String(url).endsWith("/stream")) return sseResponse("[DONE]");
+			return Response.json({ messages: [question, newAnswerResult("q1", "quiz", answer)], turnInFlight: true });
+		} });
+		await m.submitAnswer("quiz", "q1", answer);
+		await m.submitAnswer("quiz", "q1", answer);
+		assert.deepEqual(calls, ["/api/chat", "/api/chats/chat_x", "/api/chats/chat_x/stream"]);
+		assert.equal(m.status, "ready");
+	});
+
+	it("keeps the question and makes no further POST while reconciliation is unreachable", async () => {
+		const calls: string[] = [];
+		const m = model({ initialMessages: [question], fetch: async (url) => { calls.push(String(url)); throw new TypeError("offline"); } });
+		await m.submitAnswer("quiz", "q1", answer);
+		await m.submitAnswer("quiz", "q1", answer);
+		assert.deepEqual(calls, ["/api/chat", "/api/chats/chat_x"]);
+		assert.equal(m.status, "error");
+		assert.equal(m.getState().nativeMessages.some(m => m.role === "toolResult"), false);
+	});
+
+	it("does not undo an acknowledged dismissal when an unrelated send's record read fails", async () => {
+		const m = model({ initialMessages: [question], fetch: async (url) => {
+			if (String(url).endsWith("/dismiss") || String(url) === "/api/chat") return Response.json({ ok: true });
+			throw new TypeError("record read failed");
+		} });
+		await m.dismissQuestion("q1", dismissedAnswer("quiz", "Q?"));
+		await m.send({ type: "text", text: "move on" });
+		assert.equal(m.status, "error");
+		const part = m.getState().messages.flatMap(m => m.parts).find(p => p.toolCallId === "q1")!;
+		assert.equal(part.state, "output-available");
+		assert.equal((part.output as { dismissed: boolean }).dismissed, true);
+	});
+
+	it("restores an unconfirmed optimistic answer when the post-ack record read fails", async () => {
+		let posts = 0;
+		let reads = 0;
+		const saved = JSON.parse(JSON.stringify([question, newAnswerResult("q1", "quiz", answer)])) as LhMessage[];
+		const m = model({ initialMessages: [question], fetch: async (url) => {
+			if (String(url) === "/api/chat") { posts++; return Response.json({ ok: true }); }
+			if (++reads === 1) throw new TypeError("record read failed");
+			return Response.json({ messages: saved, turnInFlight: false });
+		} });
+		await m.submitAnswer("quiz", "q1", answer);
+		assert.equal(m.status, "error");
+		assert.equal(m.getState().nativeMessages.some(m => m.role === "toolResult"), false);
+		await m.submitAnswer("quiz", "q1", answer);
+		assert.equal(posts, 1, "the acknowledged answer must not be reposted");
+		assert.equal(m.status, "ready");
+		assert.deepEqual(m.getState().nativeMessages, saved);
+	});
+
+	for (const next of [{ type: "text", text: "a distinct new message" }, { type: "thinking", problemCallId: "problem1", text: "new practice thinking" }] as const) {
+		it(`preserves the existing POST/409-wait path for a new ${next.type} submission after an error`, async () => {
+			const posted: ChatInput[] = [];
+			const m = model({ pollMs: 0, fetch: async (url, init) => {
+				if (String(url) === "/api/chat") {
+					posted.push(JSON.parse(String(init?.body)).input);
+					if (posted.length === 1) throw new TypeError("failed fetch");
+					if (posted.length === 2) return new Response("busy", { status: 409 });
+					return Response.json({ ok: true });
+				}
+				if (String(url).startsWith("/api/jobs")) return Response.json({ turnInFlight: false });
+				if (String(url).endsWith("/stream")) return sseResponse("[DONE]");
+				return Response.json({ messages: [], turnInFlight: true });
+			} });
+			await m.send({ type: "text", text: "original input" });
+			await m.send(next);
+			assert.deepEqual(posted, [{ type: "text", text: "original input" }, next, next]);
+			assert.equal(m.status, "ready");
+		});
+	}
+
+	it("accepts immediate/recovery submissions and dismissals while a live question placeholder is in the tail", async () => {
+		for (const dismiss of [false, true]) {
+			let posts = 0;
+			const m = model({ initialMessages: [question], fetch: async (url) => {
+				if (String(url) === "/api/chat" || String(url).endsWith("/dismiss")) {
+					posts++;
+					return new Response("refused", { status: 500 });
+				}
+				return Response.json({ messages: [question], turnInFlight: false });
+			} });
+			m.applyWireEvent({ type: "turn_end", message: question, toolResults: [{ role: "toolResult", toolCallId: "q1", toolName: "quiz",
+				content: [{ type: "text", text: "Question posed" }], details: null, isError: false, timestamp: 1 }] });
+			const key = pendingQuestionOf([question])!.key;
+			if (dismiss) await m.dismissQuestion("q1", answer, key);
+			else {
+				await m.submitAnswer("quiz", "q1", answer, key);
+				await m.submitAnswer("quiz", "q1", answer, key);
+			}
+			assert.equal(posts, dismiss ? 1 : 2, "placeholder must not reject the render's question identity");
+		}
+	});
+
+	it("does not mistake an old same-id answer for resolution of the current question during recovery", async () => {
+		let posts = 0;
+		const newer = { ...question, id: "new-question" } as LhMessage;
+		const record = [question, newAnswerResult("q1", "quiz", answer), newer];
+		const m = model({ initialMessages: record, fetch: async (url) => {
+			if (String(url) === "/api/chat") { posts++; return new Response("refused", { status: 500 }); }
+			return Response.json({ messages: record, turnInFlight: false });
+		} });
+		const key = pendingQuestionOf(record)!.key;
+		m.saveQuestionDraft(key, { readingThinking: "NEW reasoning" });
+		await m.submitAnswer("quiz", "q1", answer, key);
+		await m.submitAnswer("quiz", "q1", answer, key);
+		assert.equal(posts, 2, "an older occurrence's result does not forbid retrying this one");
+		assert.equal(m.questionDraft(key)?.readingThinking, "NEW reasoning");
+		m.setMessages([...record, newAnswerResult("q1", "quiz", answer)]);
+		assert.equal(m.questionDraft(key), undefined);
+	});
+
+	it("adopts a newer same-id occurrence instead of reposting an older question's answer", async () => {
+		let posts = 0;
+		const newer = { ...question, id: "new-question" } as LhMessage;
+		const m = model({ initialMessages: [question], fetch: async (url) => {
+			if (String(url) === "/api/chat") { posts++; throw new TypeError("offline"); }
+			return Response.json({ messages: [question, newer], turnInFlight: false });
+		} });
+		const key = pendingQuestionOf([question])!.key;
+		await m.submitAnswer("quiz", "q1", answer, key);
+		await m.submitAnswer("quiz", "q1", answer, key);
+		assert.equal(posts, 1);
+		assert.equal(m.status, "ready");
+		assert.equal(pendingQuestionOf(m.getState().nativeMessages)?.messageId, "new-question");
+	});
+
+	it("rejects stale render callbacks locally, including same-id silent dismissals", async () => {
+		let requests = 0;
+		const m = model({ initialMessages: [question], fetch: async () => { requests++; return Response.json({ ok: true }); } });
+		const oldKey = pendingQuestionOf([question])!.key;
+		const newer = { ...question, id: "new-question" } as LhMessage;
+		m.setMessages([question, newer]);
+		await m.submitAnswer("quiz", "q1", answer, oldKey);
+		await m.dismissQuestion("q1", answer, oldKey);
+		assert.equal(requests, 0);
+		assert.equal(m.getState().nativeMessages.length, 2, "no optimistic answer targets the newer question");
+	});
+
+	it("uses the newest occurrence's tool for optimistic answers and dismissals", async () => {
+		const older = { ...question, id: "old-ask", content: [{ type: "toolCall", id: "q1", name: "ask_user_question", arguments: {} }] } as LhMessage;
+		for (const dismiss of [false, true]) {
+			const m = model({ initialMessages: [older, question], fetch: async () => { throw new TypeError("offline"); } });
+			const key = pendingQuestionOf([older, question])!.key;
+			let optimisticTool: string | undefined;
+			m.onChange = () => {
+				const result = m.getState().nativeMessages.find(m => m.role === "toolResult");
+				if (result?.role === "toolResult") optimisticTool = result.toolName;
+			};
+			if (dismiss) await m.dismissQuestion("q1", answer, key);
+			else await m.submitAnswer("quiz", "q1", answer, key);
+			assert.equal(optimisticTool, "quiz");
+		}
+	});
+
+	it("does not leak drafts between same-id questions, and preserves unique-id live handover", () => {
+		const m = model({ initialMessages: [question] });
+		const oldKey = pendingQuestionOf([question])!.key;
+		m.saveQuestionDraft(oldKey, { readingThinking: "old reasoning" });
+		const newer = { ...question, id: "new-question" } as LhMessage;
+		m.setMessages([question, newer]);
+		const newKey = pendingQuestionOf([question, newer])!.key;
+		assert.notEqual(oldKey, newKey);
+		assert.equal(m.questionDraft(newKey), undefined);
+		assert.equal(m.questionDraft(oldKey), undefined);
+
+		const live = { ...question, id: "c_live" };
+		m.setMessages([live]);
+		const liveKey = pendingQuestionOf([live])!.key;
+		m.saveQuestionDraft(liveKey, { readingThinking: "live reasoning" });
+		m.setMessages([question]);
+		assert.equal(m.questionDraft(pendingQuestionOf([question])!.key)?.readingThinking, "live reasoning");
+	});
+
+	it("adopts a changed pending question instead of sending the stale answer", async () => {
+		let posts = 0;
+		const newer = { ...question, id: "new-question", content: [{ type: "toolCall", id: "q2", name: "quiz", arguments: {} }] } as LhMessage;
+		const m = model({ initialMessages: [question], fetch: async (url) => {
+			if (String(url) === "/api/chat") { posts++; throw new TypeError("failed fetch"); }
+			return Response.json({ messages: [question, newer], turnInFlight: false });
+		} });
+		await m.submitAnswer("quiz", "q1", answer);
+		await m.submitAnswer("quiz", "q1", answer);
+		assert.equal(posts, 1);
+		assert.deepEqual(m.getState().nativeMessages, [question, newer]);
+		assert.equal(m.status, "ready");
 	});
 });
 

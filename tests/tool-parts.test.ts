@@ -12,7 +12,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { quizInputProblems } from "../src/core/question-core.ts";
 import { Value } from "typebox/value";
-import { restoreMathEscapes } from "../src/core/math-delims.ts";
+import { repairMathForDisplay, restoreMathEscapes } from "../src/core/math-delims.ts";
 import {
 	parseAskInput,
 	parseProbeDoneInput,
@@ -170,7 +170,7 @@ describe("LaTeX-escape restoration (the JSON-debris fix, owner ruling 2026-09-26
 	// The exact live shapes from the modal-logic session: single-backslash
 	// LaTeX inside JSON args — JSON escape resolution ate the command's
 	// first letter (\f → FF ate 'f' of \forall, \v → VT ate 'v' of \varphi).
-	it("parseQuizInput restores escape debris inside math spans (question + options + explanation)", () => {
+	it("presentation restores debris from parsed source fields (question + options + explanation)", () => {
 		const parsed = parseQuizInput({
 			question: "What does \\(\\forall x\\, \\varphi(x)\\) mean?",
 			options: [
@@ -182,18 +182,18 @@ describe("LaTeX-escape restoration (the JSON-debris fix, owner ruling 2026-09-26
 		});
 		assert.ok(parsed);
 		assert.equal(parsed.question, "What does \\(\\forall x\\, \\varphi(x)\\) mean?");
-		assert.equal(parsed.options[0]!.label, "\\(\\varphi\\) is true when every element satisfies it");
-		assert.equal(parsed.options[1]!.label, "\\(\\forall\\) and \\(\\exists\\) are just shorthand");
-		assert.equal(parsed.explanation, "\\(\\forall\\) quantifies over the domain.");
+		assert.equal(repairMathForDisplay(parsed.options[0]!.label), "\\(\\varphi\\) is true when every element satisfies it");
+		assert.equal(repairMathForDisplay(parsed.options[1]!.label), "\\(\\forall\\) and \\(\\exists\\) are just shorthand");
+		assert.equal(repairMathForDisplay(parsed.explanation), "\\(\\forall\\) quantifies over the domain.");
 	});
 
-	it("parseAskInput restores debris in ask option labels too", () => {
+	it("presentation restores debris from parsed ask option labels too", () => {
 		const parsed = parseAskInput({
 			question: "Goal?",
 			options: [{ label: "\\(\x0corall\\) rigor" }, { label: "Intuition first" }],
 		});
 		assert.ok(parsed);
-		assert.equal(parsed.options![0]!.label, "\\(\\forall\\) rigor");
+		assert.equal(repairMathForDisplay(parsed.options![0]!.label), "\\(\\forall\\) rigor");
 	});
 
 	it("restores TAB debris (the \\to case) inside spans only", () => {
@@ -204,7 +204,7 @@ describe("LaTeX-escape restoration (the JSON-debris fix, owner ruling 2026-09-26
 			explanation: "",
 		});
 		assert.ok(parsed);
-		assert.equal(parsed.question, "Is \\(p\\to q\\) valid?");
+		assert.equal(repairMathForDisplay(parsed.question), "Is \\(p\\to q\\) valid?");
 	});
 
 	it("control chars OUTSIDE math spans are left alone (real prose/pasted text)", () => {
@@ -253,7 +253,7 @@ describe("display-math newline rule (Option A, owner ruling 2026-09-27)", () => 
 			explanation: "",
 		});
 		assert.ok(parsed);
-		assert.equal(parsed.question, "Evaluate \\[\\left( a \\right)\\] carefully.");
+		assert.equal(repairMathForDisplay(parsed.question), "Evaluate \\[\\left( a \\right)\\] carefully.");
 	});
 
 	it("sloppy \\neq in display math stays broken — the accepted cost (newline kept, byte-identical to a real line break)", () => {
@@ -276,7 +276,7 @@ describe("display-math newline rule (Option A, owner ruling 2026-09-27)", () => 
 			explanation: "",
 		});
 		assert.ok(parsed);
-		assert.equal(parsed.question, "Is \\(p \\neq q\\) valid?");
+		assert.equal(repairMathForDisplay(parsed.question), "Is \\(p \\neq q\\) valid?");
 	});
 });
 
@@ -289,9 +289,9 @@ describe("dollar-delimiter recognition — existing escape restoration rules", (
 			explanation: "Here $p\to q$ is an implication.",
 		});
 		assert.ok(parsed);
-		assert.equal(parsed.question, "What does $\\forall x$ mean?");
-		assert.equal(parsed.options[0]!.label, "$\\varphi$ holds");
-		assert.equal(parsed.explanation, "Here $p\\to q$ is an implication.");
+		assert.equal(repairMathForDisplay(parsed.question), "What does $\\forall x$ mean?");
+		assert.equal(repairMathForDisplay(parsed.options[0]!.label), "$\\varphi$ holds");
+		assert.equal(repairMathForDisplay(parsed.explanation), "Here $p\\to q$ is an implication.");
 	});
 
 	it("keeps the same six-character inline recovery map", () => {
@@ -320,21 +320,21 @@ describe("dollar-delimiter recognition — existing escape restoration rules", (
 		}
 	});
 
-	it("preserves legacy replacement frequency when a span has multiple debris characters", () => {
+	it("restores all debris in one pass consistently across delimiter syntaxes", () => {
 		const body = "p\to q, \rho";
 		const legacy = restoreMathEscapes(`\\(${body}\\)`).slice(2, -2);
 		assert.equal(restoreMathEscapes(`$${body}$`), `$${legacy}$`);
-		assert.equal(legacy, "p\\to q, \rho", "the existing first-match-only behavior is unchanged");
+		assert.equal(legacy, "p\\to q, \\rho", "recovery converges instead of requiring a second render");
 	});
 
 	it("shares dollar recovery with ask and free-recall fields", () => {
 		const ask = parseAskInput({ question: "Goal?", options: [{ label: "$\x0corall$ rigor" }, { label: "Intuition" }] });
 		assert.ok(ask);
-		assert.equal(ask.options![0]!.label, "$\\forall$ rigor");
+		assert.equal(repairMathForDisplay(ask.options![0]!.label), "$\\forall$ rigor");
 		const explain = parseExplainInput({ question: "Explain $p\to q$", correctAnswer: "$p\neq q$ is different." });
 		assert.ok(explain);
-		assert.equal(explain.question, "Explain $p\\to q$");
-		assert.equal(explain.correctAnswer, "$p\\neq q$ is different.");
+		assert.equal(repairMathForDisplay(explain.question), "Explain $p\\to q$");
+		assert.equal(repairMathForDisplay(explain.correctAnswer), "$p\\neq q$ is different.");
 	});
 
 	it("leaves non-math debris, escaped opening dollars, and code examples untouched", () => {
@@ -401,13 +401,9 @@ describe("parseExplainInput: the dock's display seam for explain calls", () => {
 	});
 });
 
-describe("over-escaped command heal at the parse seam (owner ruling 2026-10-15)", () => {
-	// xiaomi/mimo-v2.6-pro and deepseek-v4.1-flash stochastically DOUBLE
-	// LaTeX command backslashes inside JSON tool arguments — per-call and
-	// per-field (gradient-descent msg 3: question doubled, explanation and
-	// options in the SAME call clean). restoreMathEscapesDeep now rides
-	// healOverescapedCommands after the debris restore, so doubled spans
-	// heal at every display parse: live dock, settled cards, old records.
+describe("over-escaped command recovery after shape parsing", () => {
+	// Keep these real authoring shapes, but recover only for presentation.
+	// Parsed source is also used to build durable answers and identities.
 	const CLEAN =
 		"Let $f : \\mathbb{R}^n \\to \\mathbb{R}$ be differentiable at $x$, with $\\nabla f(x) \\neq 0$. Among all unit directions $\\|u\\|_2 = 1$, which makes $D_u f(x)$ most negative?";
 	const DOUBLE = (s: string): string => s.replace(/\\/g, "\\\\");
@@ -420,19 +416,21 @@ describe("over-escaped command heal at the parse seam (owner ruling 2026-10-15)"
 		explanation: "By Cauchy\u2013Schwarz: $$u^\\star = -\\frac{\\nabla f(x)}{\\|\\nabla f(x)\\|_2}$$",
 	};
 
-	it("parseQuizInput heals a doubled question field (the gradient-descent msg-3 shape)", () => {
+	it("presentation heals a doubled question field (the gradient-descent msg-3 shape)", () => {
 		const parsed = parseQuizInput({ ...BASE, question: DOUBLE(CLEAN) });
 		assert.ok(parsed, "parses");
-		assert.equal(parsed.question, CLEAN);
+		assert.equal(parsed.question, DOUBLE(CLEAN), "shape parsing retains source");
+		assert.equal(repairMathForDisplay(parsed.question), CLEAN);
 		// The CLEAN sibling fields of the same call stay byte-identical.
 		assert.equal(parsed.options[0]!.label, BASE.options[0]!.label);
 		assert.equal(parsed.explanation, BASE.explanation);
 	});
 
-	it("parseQuizInput heals a quadrupled field (the agent's over-correction, msg 6)", () => {
+	it("presentation heals a quadrupled field (the agent's over-correction, msg 6)", () => {
 		const parsed = parseQuizInput({ ...BASE, question: DOUBLE(DOUBLE(CLEAN)) });
 		assert.ok(parsed, "parses");
-		assert.equal(parsed.question, CLEAN);
+		assert.equal(parsed.question, DOUBLE(DOUBLE(CLEAN)), "shape parsing retains source");
+		assert.equal(repairMathForDisplay(parsed.question), CLEAN);
 	});
 
 	it("doubled option labels and explanations heal too (the inference-runtime msg-7 shape)", () => {
@@ -448,10 +446,10 @@ describe("over-escaped command heal at the parse seam (owner ruling 2026-10-15)"
 		assert.ok(parsed, "parses");
 		assert.equal(parsed.options[0]!.label, "$mkn$");
 		assert.equal(parsed.options[1]!.label, "$2mkn$");
-		assert.equal(parsed.explanation, "$$c_{ij} = \\sum_{\\ell=1}^{k} a_{i\\ell}\\, b_{\\ell j}$$");
+		assert.equal(repairMathForDisplay(parsed.explanation), "$$c_{ij} = \\sum_{\\ell=1}^{k} a_{i\\ell}\\, b_{\\ell j}$$");
 	});
 
-	it("parseAskInput heals doubled ask-option descriptions the same way", () => {
+	it("presentation heals doubled ask-option descriptions the same way", () => {
 		const parsed = parseAskInput({
 			question: "Depth?",
 			options: [
@@ -460,7 +458,7 @@ describe("over-escaped command heal at the parse seam (owner ruling 2026-10-15)"
 			],
 		});
 		assert.ok(parsed, "parses");
-		assert.equal(parsed.options![0]!.description, "why $-\\nabla f$ is steepest descent");
+		assert.equal(repairMathForDisplay(parsed.options![0]!.description!), "why $-\\nabla f$ is steepest descent");
 	});
 
 	it("clean records pass through byte-identical (no over-heal)", () => {

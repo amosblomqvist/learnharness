@@ -22,16 +22,18 @@ export interface UseChatSessionOptions {
 	chatId: string;
 	/** The native record seed (server-rendered page or a full sync). */
 	initialMessages: LhMessage[];
+	/** Transient settlement failure retained by the server, not the transcript. */
+	initialError?: string;
 	/** Reattach on mount: a turn is running server-side with no live view. */
 	initiallyInFlight?: boolean;
 }
 
-export function useChatSession({ chatId, initialMessages, initiallyInFlight }: UseChatSessionOptions) {
+export function useChatSession({ chatId, initialMessages, initialError, initiallyInFlight }: UseChatSessionOptions) {
 	// The model is per-mount (chatId-keyed component); onChange forces the
 	// re-render. The ref pattern keeps it stable across renders.
 	const modelRef = useRef<SessionModel | null>(null);
 	if (modelRef.current === null) {
-		modelRef.current = new SessionModel({ chatId, initialMessages });
+		modelRef.current = new SessionModel({ chatId, initialMessages, initialError });
 	}
 	const model = modelRef.current;
 	// The render VERSION — bumped by every model change, so the state memo
@@ -100,22 +102,25 @@ export function useChatSession({ chatId, initialMessages, initiallyInFlight }: U
 		[model],
 	);
 
-	const send = useCallback((input: ChatInput) => void model.send(input), [model]);
+	const send = useCallback((input: ChatInput, onAccepted?: () => void) => model.send(input, onAccepted), [model]);
+	const continueIfOwed = useCallback((record: readonly LhMessage[]) => void model.continueIfOwed(record), [model]);
 	const steer = useCallback((text: string) => void model.steer(text), [model]);
 	const submitAnswer = useCallback(
-		(tool: string, toolCallId: string, output: QuestionAnswerData) =>
-			void model.submitAnswer(tool, toolCallId, output),
+		(tool: string, toolCallId: string, output: QuestionAnswerData, questionKey?: string) =>
+			void model.submitAnswer(tool, toolCallId, output, questionKey),
 		[model],
 	);
 	const dismissQuestion = useCallback(
-		(toolCallId: string, answer: QuestionAnswerData) => void model.dismissQuestion(toolCallId, answer),
+		(toolCallId: string, answer: QuestionAnswerData, questionKey?: string) => void model.dismissQuestion(toolCallId, answer, questionKey),
 		[model],
 	);
 	const dismissProblem = useCallback(
 		(problemCallId: string) => void model.dismissProblem(problemCallId),
 		[model],
 	);
-	const setMessages = useCallback((record: LhMessage[]) => model.setMessages(record), [model]);
+	const questionDraft = useCallback((questionKey: string) => model.questionDraft(questionKey), [model]);
+	const saveQuestionDraft = useCallback((questionKey: string, draft: Parameters<SessionModel["saveQuestionDraft"]>[1]) => model.saveQuestionDraft(questionKey, draft), [model]);
+	const setMessages = useCallback((record: LhMessage[], turnError?: string) => model.setMessages(record, turnError), [model]);
 	const adoptRecord = useCallback((record: LhMessage[]) => model.adoptRecord(record), [model]);
 	const stop = useCallback(() => model.stop(), [model]);
 	const clearError = useCallback(() => model.clearError(), [model]);
@@ -124,15 +129,19 @@ export function useChatSession({ chatId, initialMessages, initiallyInFlight }: U
 	return {
 		messages: state.messages,
 		nativeMessages: state.nativeMessages,
+		hasConfirmedConversation: state.hasConfirmedConversation,
 		contextTokens: state.contextTokens,
 		status: state.status,
 		error: state.error,
 		steerQueue: state.steerQueue,
 		send,
+		continueIfOwed,
 		steer,
 		submitAnswer,
 		dismissQuestion,
 		dismissProblem,
+		questionDraft,
+		saveQuestionDraft,
 		setMessages,
 		adoptRecord,
 		stop,

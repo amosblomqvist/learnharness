@@ -5,8 +5,10 @@
  * The pdfjs layer itself is covered by pdf-ops.test.ts against the fixture.
  */
 import assert from "node:assert/strict";
+import * as fs from "node:fs";
+import * as os from "node:os";
 import * as path from "node:path";
-import { describe, it } from "node:test";
+import { after, before, describe, it } from "node:test";
 import { createFauxCore, fauxAssistantMessage, fauxText, fauxToolCall, type FauxResponseStep } from "@earendil-works/pi-ai";
 import type { PiEngine } from "../src/agent/models.ts";
 import { runPdfReaderAgent } from "../src/agent/subagents/pdf-reader.ts";
@@ -28,10 +30,12 @@ const PNG_1PX = Buffer.from([
 	0x42, 0x60, 0x82,
 ]);
 
-function fakeHeadless(rendered: { pages: number[] } = { pages: [] }): HeadlessApi & { calls: string[] } {
+function fakeHeadless(rendered: { pages: number[] } = { pages: [] }): HeadlessApi & { calls: string[]; paths: string[] } {
 	const calls: string[] = [];
+	const paths: string[] = [];
 	return {
 		calls,
+		paths,
 		available: () => true,
 		unavailableReason: () => null,
 		runDemo: async () => {
@@ -40,13 +44,87 @@ function fakeHeadless(rendered: { pages: number[] } = { pages: [] }): HeadlessAp
 		renderSvg: async () => {
 			throw new Error("unused");
 		},
-		renderPdfPages: async (_pdfPath, pages) => {
+		renderPdfPages: async (pdfPath, pages) => {
+			paths.push(pdfPath);
 			calls.push(`render:${pages.join(",")}`);
 			rendered.pages.push(...pages);
 			return pages.map((page) => ({ page, png: PNG_1PX }));
 		},
 	};
 }
+
+describe("pdf-reader source paths", () => {
+	let home: string;
+	const relativePath = path.join("Course notes", "sample document.pdf");
+	const originalHome = process.env.HOME;
+	const originalUserProfile = process.env.USERPROFILE;
+
+	before(() => {
+		home = fs.mkdtempSync(path.join(os.tmpdir(), "lh-pdf-home-"));
+		const target = path.join(home, relativePath);
+		fs.mkdirSync(path.dirname(target), { recursive: true });
+		fs.copyFileSync(FIXTURE, target);
+		process.env.HOME = home;
+		process.env.USERPROFILE = home;
+	});
+
+	after(() => {
+		if (originalHome === undefined) delete process.env.HOME;
+		else process.env.HOME = originalHome;
+		if (originalUserProfile === undefined) delete process.env.USERPROFILE;
+		else process.env.USERPROFILE = originalUserProfile;
+		fs.rmSync(home, { recursive: true, force: true });
+	});
+
+	for (const kind of ["absolute", "home-relative"] as const) {
+		it(`${kind} path reaches text tools and rendering as the same absolute path`, async () => {
+			const absolutePath = path.join(home, relativePath);
+			const inputPath = kind === "absolute" ? absolutePath : relativePath;
+			assert.equal(os.homedir(), home);
+			assert.notEqual(path.resolve(relativePath), absolutePath, "cwd is not the learner's home");
+			const headless = fakeHeadless();
+			const engine = fauxEngine([
+				fauxAssistantMessage([fauxToolCall("pdf_info", {}, { id: "i1" })], { stopReason: "toolUse" }),
+				fauxAssistantMessage([fauxToolCall("pdf_search", { query: "integral", literal: true }, { id: "s1" })], { stopReason: "toolUse" }),
+				fauxAssistantMessage([fauxToolCall("pdf_extract", { pages: "2" }, { id: "e1" })], { stopReason: "toolUse" }),
+				fauxAssistantMessage([fauxToolCall("pdf_render", { pages: "3" }, { id: "r1" })], { stopReason: "toolUse" }),
+				fauxAssistantMessage([fauxText("Read the requested document (p. 1, p. 2, p. 3).")]),
+			]);
+			let lastContext = "";
+			const stream = engine.streamFn;
+			engine.streamFn = (...args) => {
+				lastContext = JSON.stringify(args[1]);
+				return stream(...args);
+			};
+			const result = await runPdfReaderAgent(
+				{ path: inputPath, question: "Read the document" },
+				{ engine, headless },
+			);
+			assert.equal(result.path, absolutePath);
+			assert.match(result.brief, /^Read the requested document/);
+			assert.match(lastContext, /Pages: 3/, "metadata opened the home-anchored PDF");
+			assert.deepEqual(result.pagesRead, [2, 3]);
+			assert.deepEqual(result.pagesConsulted, [1, 2, 3], "search and extraction opened the home-anchored PDF");
+			assert.deepEqual(headless.paths, [absolutePath]);
+		});
+	}
+
+	it("a missing home-relative source fails before any model call", async () => {
+		let modelCalls = 0;
+		const engine = fauxEngine([]);
+		engine.streamFn = () => {
+			modelCalls++;
+			throw new Error("the model must not be called");
+		};
+		const missing = path.join("Course notes", "missing.pdf");
+		const result = await runPdfReaderAgent({ path: missing, question: "anything" }, { engine });
+		assert.equal(result.path, path.join(home, missing));
+		assert.match(result.brief, /^PDF failed:.*ENOENT/);
+		assert.equal(modelCalls, 0);
+		assert.deepEqual(result.pagesRead, []);
+		assert.deepEqual(result.pagesConsulted, []);
+	});
+});
 
 describe("pdf-reader loop (faux engine)", () => {
 	it("triage → extract → final brief: pagesConsulted tracks the extract", async () => {

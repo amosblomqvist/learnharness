@@ -103,6 +103,16 @@ test("phaseAt3: a mere probe_done CALL (input-available, not yet concluded) keep
 	assert.equal(still, "probe");
 });
 
+test("phaseAt3 and phaseTimeline: explicit probe refusals never advance the UI phase", () => {
+	const refused = assistantTool("probe_done", "output-available", { ok: false, error: "question open" });
+	const errored = assistantTool("probe_done", "output-error", { ok: true });
+	const tagged = assistantQuiz({ nodeId: "n1" });
+	const clean = assistantTool("probe_done", "output-available", { ok: true });
+	const messages = [refused, errored, tagged, clean, tagged];
+	assert.equal(phaseAt3(messages, 2), "probe");
+	assert.deepEqual(phaseTimeline(messages), ["probe", "probe", "probe", "plan", "teach"]);
+});
+
 test("phaseAt3: legacy transcripts without probe_done read as probe (no backwards compat — data wiped)", () => {
 	const legacy = phaseAt3([user("teach me lacan"), assistantTool("plan_init", "output-available", PLAN_OK)]);
 	assert.equal(legacy, "probe", "plan_init alone never flips a phase post-split");
@@ -158,23 +168,31 @@ function assistantQuizCall(arguments_: Record<string, unknown>): LhMessage {
 	} as unknown as LhMessage;
 }
 
+function assistantProbeCall(): LhMessage {
+	return {
+		...assistantQuizCall({}),
+		content: [{ type: "toolCall", id: "call_probe_done", name: "probe_done", arguments: {} }],
+	} as LhMessage;
+}
+
 test("phaseAt3Lh (native fold): probe→plan at the clean probe_done result; plan→teach at the first tagged quiz CALL", () => {
 	const done = toolResult("probe_done");
+	const call = assistantProbeCall();
 	const tagged = assistantQuizCall({ question: "q", nodeId: "gravity-basics", correctAnswer: "a" });
 	const untagged = assistantQuizCall({ question: "q", correctAnswer: "a" });
 
-	assert.equal(phaseAt3Lh([done, untagged]), "plan", "an untagged quiz call never starts teaching");
-	assert.equal(phaseAt3Lh([done, tagged]), "teach", "the tagged quiz CALL is the seam");
+	assert.equal(phaseAt3Lh([call, done, untagged]), "plan", "an untagged quiz call never starts teaching");
+	assert.equal(phaseAt3Lh([call, done, tagged]), "teach", "the tagged quiz CALL is the seam");
 	assert.equal(phaseAt3Lh([tagged]), "probe", "the chain never skips (tag before probe_done)");
 	assert.equal(
-		phaseAt3Lh([toolResult("probe_done", true), tagged]),
+		phaseAt3Lh([call, toolResult("probe_done", true), tagged]),
 		"probe",
 		"an ERRORED probe_done concludes nothing",
 	);
 	// The two folds agree on the same settled transcript (the view projection
 	// of the tagged call carries its arguments as the part input).
 	assert.equal(
-		phaseAt3Lh([done, tagged]),
+		phaseAt3Lh([call, done, tagged]),
 		phaseAt3([
 			{ parts: [{ type: "tool-probe_done", state: "output-available" } as never] },
 			{ parts: [{ type: "tool-quiz", input: { nodeId: "gravity-basics" } } as never] },
@@ -188,6 +206,7 @@ test("phaseAt3Lh (native fold): probe→plan at the clean probe_done result; pla
 
 test("phaseAt3 + phaseAt3Lh: a tagged explain CALL is the plan→teach seam too", () => {
 	const done = toolResult("probe_done");
+	const call = assistantProbeCall();
 	const explainCall = (args: Record<string, unknown>): LhMessage =>
 		({
 			id: "a_explain",
@@ -199,10 +218,10 @@ test("phaseAt3 + phaseAt3Lh: a tagged explain CALL is the plan→teach seam too"
 	const tagged = explainCall({ question: "q", correctAnswer: "a", explanation: "e", nodeId: "gravity-basics" });
 	const untagged = explainCall({ question: "q", correctAnswer: "a", explanation: "e" });
 
-	assert.equal(phaseAt3Lh([done, untagged]), "plan", "an untagged explain never starts teaching");
-	assert.equal(phaseAt3Lh([done, tagged]), "teach", "the tagged explain CALL is the seam");
+	assert.equal(phaseAt3Lh([call, done, untagged]), "plan", "an untagged explain never starts teaching");
+	assert.equal(phaseAt3Lh([call, done, tagged]), "teach", "the tagged explain CALL is the seam");
 	assert.equal(
-		phaseAt3Lh([done, tagged]),
+		phaseAt3Lh([call, done, tagged]),
 		phaseAt3([
 			{ parts: [{ type: "tool-probe_done", state: "output-available" } as never] },
 			{ parts: [{ type: "tool-explain", input: { nodeId: "gravity-basics" } } as never] },

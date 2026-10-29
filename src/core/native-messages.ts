@@ -36,7 +36,8 @@
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { AssistantMessage, Message, ToolResultMessage, UserMessage } from "@earendil-works/pi-ai";
 import { imageBlock, type ComposerImage } from "./images.ts";
-import { QUESTION_TOOLS } from "./pending.ts";
+import { QUESTION_TOOLS, type PendingQuestion } from "./pending.ts";
+import { CLAUDE_CODE_PROVIDER } from "./contracts/claude-code.ts";
 import {
 	CONCLUDE_ACK_TEXT,
 	HANDOFF_TEXT,
@@ -91,12 +92,80 @@ declare module "@earendil-works/pi-agent-core" {
 }
 
 /** A record message: a native pi message (or our marker) plus the record id. */
-export type LhMessage = (UserMessage | AssistantMessage | ToolResultMessage | LhMarkerMessage) & { id: string };
+export type LhMessage = (UserMessage | AssistantMessage | ToolResultMessage | LhMarkerMessage) & {
+	id: string;
+	/** CLI-reported effective context budget, not a catalog model maximum.
+	 * App-only metadata: never transmitted as provider/model message content. */
+	cliContextWindow?: number;
+};
+
+/** Latest response only: never borrow an older process/model's window when
+ * a fresh response has no metadata. Compaction invalidates the old report. */
+export function cliContextWindowOf(messages: readonly LhMessage[]): { model: string; tokens: number } | null {
+	for (let i = messages.length - 1; i >= 0; i--) {
+		const message = messages[i]!;
+		if (message.role === "custom" && message.customType === "compaction") return null;
+		if (message.role !== "assistant") continue;
+		const tokens = message.cliContextWindow;
+		return message.provider === CLAUDE_CODE_PROVIDER && typeof tokens === "number" && Number.isSafeInteger(tokens) && tokens > 0
+			? { model: `${message.provider}:${message.model}`, tokens } : null;
+	}
+	return null;
+}
 
 /** A record message list is assignable to the agent's context — that IS
  *  the replay (ui-stream/chat-handler assign it to initialState.messages). */
 export function asAgentMessages(messages: readonly LhMessage[]): AgentMessage[] {
 	return messages as unknown as AgentMessage[];
+}
+
+// ─── explicit learner-facing output ─────────────────────────────────────────
+
+export const SEND_TO_USER_TOOL = "send_to_user";
+
+/** Read the output tool's message without changing the native call. Also
+ * accepts partial arguments while streaming; malformed/empty inputs carry
+ * no prose. This projection is independent of the currently selected model. */
+export function sendToUserText(block: unknown): string | undefined {
+	if (!block || typeof block !== "object") return undefined;
+	const call = block as { type?: unknown; name?: unknown; arguments?: unknown };
+	if (call.type !== "toolCall" || call.name !== SEND_TO_USER_TOOL) return undefined;
+	if (!call.arguments || typeof call.arguments !== "object") return undefined;
+	const message = (call.arguments as { message?: unknown }).message;
+	return typeof message === "string" && message.trim() ? message : undefined;
+}
+
+/** Learner-facing prose, in content order. Only the explicit output tool
+ * joins ordinary text here — thinking and all other tool inputs stay out.
+ * Shared by coverage/extraction and Markdown; native history stays intact. */
+export function userFacingTextOf(content: unknown, failedOutputCalls?: ReadonlySet<string>): string[] {
+	if (typeof content === "string") return content.trim() ? [content] : [];
+	if (!Array.isArray(content)) return [];
+	const out: string[] = [];
+	for (const block of content) {
+		if (!block || typeof block !== "object") continue;
+		if (block.type === "toolCall" && failedOutputCalls?.has(block.id)) continue;
+		const text = block.type === "text" ? block.text : sendToUserText(block);
+		if (typeof text === "string" && text.trim()) out.push(text);
+	}
+	return out;
+}
+
+/** Failed output calls remain retry context, not delivered teaching.
+ * Truncated calls can have valid-looking partial arguments. Failed/aborted
+ * generations do not execute their calls at all, so may have no result. */
+export function failedOutputCallIds(messages: readonly LhMessage[]): ReadonlySet<string> {
+	const failed = new Set<string>();
+	for (const message of messages) {
+		if (message.role === "toolResult" && message.toolName === SEND_TO_USER_TOOL && message.isError) {
+			failed.add(message.toolCallId);
+		} else if (message.role === "assistant" && (message.stopReason === "error" || message.stopReason === "aborted")) {
+			for (const block of message.content) {
+				if (block.type === "toolCall" && block.name === SEND_TO_USER_TOOL) failed.add(block.id);
+			}
+		}
+	}
+	return failed;
 }
 
 // ─── id minting ──────────────────────────────────────────────────────────────
@@ -509,9 +578,10 @@ function resultIdsFrom(messages: readonly AgentMessage[]): Set<string> {
  * - markers flatten to a user message carrying their content (the
  *   canonical text single-sourced in core/contracts); plan blocks are
  *   UI-only and filtered.
- * - dangling tool calls (an aborted turn's unanswered questions) get the
- *   synthesized interrupted result — the provider protocol's hard
- *   invariant: a tool call must be followed by its result.
+ * - dangling calls from successfully generated assistant messages (for
+ *   example, an unanswered question) get a synthesized interrupted result.
+ *   Error/aborted generations do not: Pi drops those assistant messages,
+ *   so manufacturing their results would leave orphan results on the wire.
  *
  * Contract (pi-agent-core): never throws — an unknown shape passes
  * through untouched rather than killing the loop.
@@ -520,8 +590,9 @@ export function toLlmMessages(messages: readonly AgentMessage[]): Message[] {
 	// THE COMPACTION CUT (owner round 14, 2026-10-05): the ACTIVE marker
 	// (the newest — chained compactions rule last) names the first kept
 	// message; everything before it is replaced by the marker's content
-	// (header + summary) rendered ONCE, up top. The marker itself is then
-	// skipped in place — it must never render twice. A cut naming a
+	// (header + summary) rendered ONCE, up top. All compaction markers
+	// in the retained tail are then skipped, including older summaries
+	// whose stored positions still lie after the cut. A cut naming a
 	// missing id degrades honestly (everything renders — never throw).
 	const lhMessages = messages as readonly LhMessage[];
 	const active = activeCompactionOf(lhMessages);
@@ -562,11 +633,10 @@ export function toLlmMessages(messages: readonly AgentMessage[]): Message[] {
 			// UI-only markers: plan blocks, and problem dismissals (the
 			// synthesized conclude pair carries the model's face).
 			if (marker.customType === "plan-block" || marker.customType === "problem-dismissed") continue;
-			// The ACTIVE compaction marker already rendered as the head —
-			// never twice. (Stale markers before the cut are unreachable; a
-			// marker whose cut could not resolve has no head and renders as
-			// its user text — honest degradation.)
-			if (marker.customType === "compaction" && head !== null && marker.id === active!.id) continue;
+			// The head supersedes every compaction marker, not only its own
+			// stored position. Without a resolved head, preserve the existing
+			// full-history fallback, including the summary text.
+			if (marker.customType === "compaction" && head !== null) continue;
 			out.push({
 				role: "user",
 				content: [{ type: "text", text: marker.content }],
@@ -574,14 +644,15 @@ export function toLlmMessages(messages: readonly AgentMessage[]): Message[] {
 			});
 			continue;
 		}
-		// Strip the record id: the wire carries the native shape only.
-		const { id: _id, ...native } = m as LhMessage;
+		// Strip app-only id/CLI context metadata: the wire carries the native shape only.
+		const { id: _id, cliContextWindow: _cliContextWindow, ...native } = m as LhMessage;
 		out.push(native as Message);
-		// Dangling-call synthesis: an assistant message whose toolCalls have
-		// no results in the remaining tail (abort mid-question) — the
-		// provider rejects unanswered calls outright.
+		// Repair unanswered calls from completed generations, not calls in
+		// failed generations. Pi filters error/aborted assistants itself;
+		// adding results for their unexecuted calls would leave orphans.
 		if (role === "assistant") {
 			const assistant = m as AssistantMessage;
+			if (assistant.stopReason === "error" || assistant.stopReason === "aborted") continue;
 			const calls = assistant.content.filter((b) => b.type === "toolCall");
 			if (calls.length === 0) continue;
 			const answered = resultIdsFrom(messages.slice(i + 1));
@@ -609,31 +680,95 @@ export function toLlmMessages(messages: readonly AgentMessage[]): Message[] {
 export function danglingQuestionOf(
 	messages: readonly LhMessage[],
 ): { toolCallId: string; tool: string; input: unknown } | null {
+	const question = questionOccurrenceOf(messages);
+	return question ? { toolCallId: question.toolCallId, tool: question.tool, input: question.input } : null;
+}
+
+/** The same authority, retaining native boundaries for the client dock.
+ * Unique call ids are stable even when a live message's local id is replaced
+ * by its persisted stamp. Only colliding ids need an occurrence-qualified
+ * draft/reset key; this never changes stored ids or the answer wire. */
+export function pendingQuestionOf(messages: readonly LhMessage[]): PendingQuestion | null {
+	// turn_end includes the temporary questionResult acknowledgement. The
+	// view ignores it too: it is NOT the learner's answer. Exclude it only
+	// from client authority, leaving persisted/server result policy intact.
+	const question = questionOccurrenceOf(messages.filter(message => !isLiveQuestionPlaceholder(message)));
+	if (!question) return null;
+	let occurrences = 0;
+	for (const message of messages) {
+		// A streamed c_ assistant can temporarily coexist with its saved
+		// copy during append-only adoption. New live calls are already
+		// uniquified; only settled history establishes reuse.
+		if (message.role !== "assistant" || message.id.startsWith("c_")) continue;
+		for (const call of message.content) {
+			if (call.type === "toolCall" && call.id === question.toolCallId) occurrences++;
+		}
+	}
+	return {
+		...question,
+		key: occurrences > 1 ? JSON.stringify([question.messageId, question.contentIndex, question.toolCallId]) : question.toolCallId,
+	};
+}
+
+/** Only the transient c_ result with the questionResult contract qualifies.
+ * Real answers have details; errors/aborts remain resolving results. A saved
+ * null result is not reinterpreted by this client-only compatibility seam. */
+function isLiveQuestionPlaceholder(message: LhMessage): boolean {
+	return message.role === "toolResult" && message.id.startsWith("c_") &&
+		!message.isError && message.details === null &&
+		(QUESTION_TOOLS as readonly string[]).includes(message.toolName);
+}
+
+/** Shared native authority: newest assistant only, siblings in call order. */
+function questionOccurrenceOf(messages: readonly LhMessage[]): Omit<PendingQuestion, "key"> | null {
 	for (let mi = messages.length - 1; mi >= 0; mi--) {
 		const m = messages[mi]!;
 		if ((m as { role?: string }).role !== "assistant") continue;
 		const assistant = m as AssistantMessage & { id: string };
 		const answered = resultIdsFrom(messages.slice(mi + 1));
-		for (const block of assistant.content) {
+		for (const [contentIndex, block] of assistant.content.entries()) {
 			if (block.type !== "toolCall") continue;
 			if (!(QUESTION_TOOLS as readonly string[]).includes(block.name)) continue;
 			if (answered.has(block.id)) continue;
-			return { toolCallId: block.id, tool: block.name, input: block.arguments };
+			return {
+				toolCallId: block.id, tool: block.name, input: block.arguments,
+				messageId: assistant.id, contentIndex,
+			};
 		}
 		return null; // the newest assistant message's questions are all answered
 	}
 	return null;
 }
 
-/** The probe→teach construction seam (chat-handler): a probe_done call in
- *  the transcript — any state — means the probe is concluded: teach. */
-export function hasProbeDone(messages: readonly LhMessage[]): boolean {
+/** Successful probe_done result MESSAGE ids, in transcript order. A call
+ *  from a failed/aborted generation grants no completion authority. Its
+ *  later result must match both call id and tool name, must not be an
+ *  error, and must not explicitly refuse with details.ok:false. Older
+ *  clean acknowledgments without ok:true still count. No history changes. */
+export function probeDoneResultIds(messages: readonly LhMessage[]): Set<string> {
+	const calls = new Set<string>();
+	const results = new Set<string>();
 	for (const m of messages) {
-		if ((m as { role?: string }).role !== "assistant") continue;
-		const assistant = m as AssistantMessage;
-		if (assistant.content.some((b) => b.type === "toolCall" && b.name === "probe_done")) return true;
+		if (m.role === "assistant") {
+			if (m.stopReason === "error" || m.stopReason === "aborted") continue;
+			for (const block of m.content) {
+				if (block.type === "toolCall" && block.name === "probe_done") calls.add(block.id);
+			}
+		} else if (
+			m.role === "toolResult" && m.toolName === "probe_done" &&
+			calls.has(m.toolCallId) && !m.isError &&
+			(m.details as { ok?: unknown } | null | undefined)?.ok !== false
+		) {
+			results.add(m.id);
+		}
 	}
-	return false;
+	return results;
+}
+
+/** The probe→teach construction seam (chat-handler and the tool guard):
+ *  only a concluded call plus a matching successful result means teach. */
+export function hasProbeDone(messages: readonly LhMessage[]): boolean {
+	return probeDoneResultIds(messages).size > 0;
 }
 
 /** Every toolResult id in the record — answer-event validation (the call

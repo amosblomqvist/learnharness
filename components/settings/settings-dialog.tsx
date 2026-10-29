@@ -40,7 +40,8 @@ import {
 	type UserSettings,
 } from "@/src/core";
 import { useAppearance } from "./appearance.tsx";
-import { SettingsSection, SettingsRow, Toggle } from "./controls.tsx";
+import { SettingsSection } from "./controls.tsx";
+import { UpdateSettings } from "./update-settings.tsx";
 import { AgentSection } from "./agent-section.tsx";
 import type { ModelsSettings } from "@/src/core";
 import { MENU_CLOSE_EVENT, MENU_OPEN_EVENT } from "@/components/menu-shell";
@@ -75,10 +76,6 @@ const DialogContext = createContext<{ open: (section?: string, row?: string) => 
 /** AppShell-level mount: the sidebar row and the mod+, chord call this.
  *  `open(section)` lands the dialog on a specific section (the first-run
  *  setup flow deep-links to Keys when no provider key exists yet). */
-/** The auto-update row's hint (tooltip wave): honest user language — no
- *  stream vocabulary. Exported for the copy pin (tooltip-mechanism test). */
-export const AUTO_UPDATE_HINT = "Automatic updates arrive in an upcoming release";
-
 export function SettingsDialogProvider({
 	children,
 }: {
@@ -92,6 +89,7 @@ export function SettingsDialogProvider({
 		setLandOnRow(row ?? null);
 		setShow(true);
 	}, []);
+	useEffect(() => window.lh?.onOpenSettings?.((section) => open(section)), [open]);
 	return (
 		<ChatGPTUIProvider><NativeSubscriptionUIProvider><DialogContext.Provider value={{ open }}>
 			{children}
@@ -362,19 +360,12 @@ export function SettingsDialogBody({
 									title="General"
 									testid="section-general"
 								>
-									<SettingsRow
-										label="Auto-update"
-										hint={AUTO_UPDATE_HINT}
-										testid="row-auto-update"
-									>
-										<Toggle
-											checked={record.general?.autoUpdate ?? true}
-											label="auto update"
-											onChange={(on) =>
-												void write("general", { autoUpdate: on })
-											}
-										/>
-									</SettingsRow>
+									<UpdateSettings
+										autoUpdate={record.general?.autoUpdate ?? true}
+										onAutoUpdateChange={(on) =>
+											void write("general", { ...record.general, autoUpdate: on })
+										}
+									/>
 								</SettingsSection>
 							)}
 							{active === "keys" && (

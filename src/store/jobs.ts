@@ -35,6 +35,7 @@ function createJob(init: CreateJobInit): JobRecord {
 		kind: init.kind,
 		chatId: init.chatId,
 		toolCallId: init.toolCallId,
+		...(init.input !== undefined ? { input: init.input } : {}),
 		status: "running",
 		activity: init.activity ?? "starting",
 		createdAt: now,

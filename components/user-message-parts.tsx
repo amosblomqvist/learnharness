@@ -1,5 +1,6 @@
 "use client";
 
+import { PathText } from "@/components/file-path-chip";
 import type { LhViewPart } from "@/src/core";
 
 /**
@@ -20,7 +21,7 @@ export function UserMessageParts({
 		if (part.type === "text") {
 			return (
 				<div key={key} className="lh-prose whitespace-pre-wrap text-foreground">
-					{part.text}
+					<PathText text={part.text ?? ""} />
 				</div>
 			);
 		}

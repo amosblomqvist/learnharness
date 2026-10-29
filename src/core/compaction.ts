@@ -272,9 +272,9 @@ export function newCompactionMarker(summary: string, details: CompactionDetails)
 	};
 }
 
-/** The ACTIVE compaction marker: the newest one in the record (chained
- * compactions — the last one rules; older markers fall inside the
- * dropped span and never render). */
+/** The ACTIVE compaction marker: the newest one with a retained-message
+ * id. Its summary supersedes older markers even when their stored
+ * positions remain inside its retained tail. */
 export function activeCompactionOf(messages: readonly LhMessage[]): (LhMarkerMessage & { details: CompactionDetails }) | null {
 	for (let i = messages.length - 1; i >= 0; i--) {
 		const m = messages[i]!;
