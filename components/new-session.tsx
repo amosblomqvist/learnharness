@@ -12,6 +12,9 @@ import { useModelSetup, selectedModelUnavailable, openModelPicker, ZeroKeysPill 
 import { StatsBar } from "@/components/stats-bar";
 import { ChainTableOverlay } from "@/components/chain-table.tsx";
 import { ComposerActions, NodePickerControl } from "@/components/composer-actions";
+import { useImageLightbox } from "@/components/image-lightbox";
+import { useImageDraft, type ImageDraftProps } from "@/components/draft-images";
+import { IMAGE_ONLY_TITLE, type DraftImage } from "@/src/core";
 import { OPENING_PROMPT_FAILURE } from "@/components/opening-prompt";
 import { SessionStarter } from "@/components/start-session";
 import type { ChatSettings, GraphSnapshot } from "@/src/core";
@@ -45,21 +48,21 @@ export async function startDraftSession(
 	fetchLike: typeof fetch,
 	mode?: "practice",
 	picks?: readonly DraftPick[],
+	images: readonly DraftImage[] = [],
 	starter = new SessionStarter(),
 	settingsIdentity?: string,
 ): Promise<string | null> {
 	const t = text.trim();
-	if (!t) return null;
-	// THE PICKS RIDE THE CREATE (owner round 10): a practice draft seeded
-	// from the pick bar creates its session WITH the graph context — the
-	// same contract as the home screen's practice send (the marker with
-	// [id] name: statement lines, target validation's truth set).
+	if (!t && images.length === 0) return null;
+	const title = t || IMAGE_ONLY_TITLE;
 	return starter.start(
 		mode === "practice"
-			? { title: t, kind: "practice", ...(picks && picks.length > 0 ? { graphContext: { propositions: picks } } : {}) }
-			: { title: t },
+			? { title, kind: "practice", ...(picks && picks.length > 0 ? { graphContext: { propositions: picks } } : {}) }
+			: { title },
 		fetchLike,
 		settingsIdentity,
+		images,
+		t,
 	);
 }
 
@@ -80,6 +83,7 @@ export function DraftShell({
 	onOpenPicker,
 	onClearPicks,
 	overlay,
+	imageDraft,
 }: {
 	busy: boolean;
 	text: string;
@@ -102,6 +106,8 @@ export function DraftShell({
 	picks?: DraftPick[];
 	onOpenPicker?: () => void;
 	onClearPicks?: () => void;
+	/** The pasted-image draft (composer paste), parent-held. */
+	imageDraft?: ImageDraftProps;
 	/** THE PICKER SLOT (owner round 10b): the chain-table overlay hosts
 	 *  INSIDE the content column's relative container — the same law as
 	 *  the graph view (the overlay fills its column, never the sidebar).
@@ -124,7 +130,7 @@ export function DraftShell({
 	// round, owner 2026-10-01): the spoken text is deferred in the run's
 	// buffer — Enter must reach the finish-first send, not be gated out by
 	// an empty textarea. Nothing said → the send no-ops.
-	const canSend = text.trim().length > 0 || dictation.active;
+	const canSend = text.trim().length > 0 || dictation.active || Boolean(imageDraft?.hasImages);
 	/* FINISH DICTATION FIRST (owner, 2026-10-01): stop the run, let the
 	 * last finals land through onChange, THEN call the parent's send —
 	 * which reads its REF mirror, so the post-await timing of React's
@@ -197,6 +203,7 @@ export function DraftShell({
 										onSend={handleSend}
 										onStop={() => {}}
 										canSend={canSend}
+										imageDraft={imageDraft}
 										inputRef={composerInputRef}
 										autoFocus
 										onEscape={dictation.active ? dictation.cancel : undefined}
@@ -242,6 +249,11 @@ export function NewSession({ initialConfigured, mode = "teach" }: { initialConfi
 		setText(v);
 	};
 	const [busy, setBusy] = useState(false);
+	/* THE IMAGE DRAFT (composer paste): the pasted pictures ride the first
+	 * message. `?prompt=` cannot carry them, so a send with images stashes
+	 * them for the chat page (draft-images.ts) and pushes the plain URL. */
+	const imageDraft = useImageDraft();
+	const lightbox = useImageLightbox();
 	const startingRef = useRef(false);
 	const starterRef = useRef(new SessionStarter());
 	const [startError, setStartError] = useState(false);
@@ -280,9 +292,12 @@ export function NewSession({ initialConfigured, mode = "teach" }: { initialConfi
 	const { catalog, configured, zeroKeys } = useModelSetup(initialConfigured);
 	const [setupOpen, setSetupOpen] = useState(false);
 
-	const send = useCallback(() => {
+	const { awaitReads, imagesRef } = imageDraft;
+	const send = useCallback(async () => {
+		await awaitReads(); // a paste followed by Enter must not race its own read
 		const draft = textRef.current.trim();
-		if (!draft || startingRef.current) return;
+		const images = imagesRef.current;
+		if ((!draft && images.length === 0) || busy || startingRef.current) return;
 		if (!configured) {
 			setSetupOpen(true);
 			return;
@@ -305,8 +320,15 @@ export function NewSession({ initialConfigured, mode = "teach" }: { initialConfi
 		startingRef.current = true;
 		setBusy(true);
 		setStartError(false);
-		void startDraftSession(draft, fetch, mode === "practice" ? "practice" : undefined, mode === "practice" ? picksRef.current : undefined,
-			starterRef.current, JSON.stringify(catalog?.slots.strong))
+		void startDraftSession(
+			draft,
+			fetch,
+			mode === "practice" ? "practice" : undefined,
+			mode === "practice" ? picksRef.current : undefined,
+			imagesRef.current,
+			starterRef.current,
+			JSON.stringify(catalog?.slots.strong),
+		)
 			.then((target) => {
 				if (target) router.push(target);
 				else { startingRef.current = false; setBusy(false); }
@@ -316,7 +338,7 @@ export function NewSession({ initialConfigured, mode = "teach" }: { initialConfi
 				setBusy(false);
 				setStartError(true);
 			});
-	}, [router, configured, zeroKeys, catalog, mode]);
+	}, [busy, router, configured, zeroKeys, catalog, mode, awaitReads, imagesRef]);
 
 	return (
 		<>
@@ -330,6 +352,7 @@ export function NewSession({ initialConfigured, mode = "teach" }: { initialConfi
 				picks={picks}
 				onOpenPicker={openPicker}
 				onClearPicks={() => applyPicks([])}
+				imageDraft={{ ...imageDraft.props, onOpen: lightbox.open }}
 				overlay={
 					// THE PICKER (owner round 10b): hosted INSIDE the content
 					// column — absolute inset-0 resolves to the column's relative
@@ -372,6 +395,9 @@ export function NewSession({ initialConfigured, mode = "teach" }: { initialConfi
 					)
 				}
 			/>
+			{/* The pasted picture at full size (composer paste): a session-scoped
+			    overlay over the draft column, the same shell the session uses. */}
+			{lightbox.lightbox}
 			{/* First-run setup: the send interception's landing surface — stage
 			    1 is the self-contained first-key screen (zero-keys wave). */}
 			<SetupDialog

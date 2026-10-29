@@ -3,6 +3,8 @@
 import { ArrowRightIcon, CornerDownLeftIcon, SquareIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Hint } from "@/components/ui/hint";
+import { DraftImageStrip } from "@/components/draft-image-strip";
+import { handleImagePaste, type ImageDraftProps } from "@/components/draft-images";
 import { PathInput } from "@/components/path-input";
 
 /**
@@ -50,6 +52,7 @@ export function Composer({
 	placeholder = "Ask, answer, or steer the lesson…",
 	nextProblem = false,
 	onNext,
+	imageDraft,
 }: {
 	busy: boolean;
 	value: string;
@@ -58,6 +61,9 @@ export function Composer({
 	onStop: () => void;
 	canSend: boolean;
 	autoFocus?: boolean;
+	/** The pasted-image draft (composer paste, draft-images.ts): parent-held;
+	 *  the composer shows it above the input, takes pastes, and removes. */
+	imageDraft?: ImageDraftProps;
 	/** The page's handle to the textarea — the dictation-end focus (owner,
 	 *  2026-10-01): a run ending hands the cursor to the bare composer. */
 	inputRef?: React.RefObject<HTMLDivElement | null>;
@@ -85,17 +91,19 @@ export function Composer({
 	return (
 		<form
 			data-testid="composer"
-			className="flex items-end gap-1.5 p-1.5"
+			className="flex flex-wrap items-end gap-1.5 p-1.5"
 			onSubmit={(e) => {
 				e.preventDefault();
 				act();
 			}}
 		>
+			{imageDraft && <DraftImageStrip draft={imageDraft} />}
 			<PathInput
 				ref={inputRef}
 				value={value}
 				onValueChange={onChange}
 				defaultDropTarget
+				onPaste={(e) => handleImagePaste(e, imageDraft?.onPaste)}
 				onKeyDown={(e) => {
 					// Esc ends dictation before anything else Esc might someday mean
 					// here (the dictate decisions: click-again or Esc to stop).

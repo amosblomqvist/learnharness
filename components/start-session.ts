@@ -1,4 +1,6 @@
 import { clearOpeningPrompt, OPENING_PROMPT_FAILURE, stashOpeningPrompt } from "./opening-prompt";
+import { firstMessageUrl } from "./draft-images";
+import type { DraftImage } from "@/src/core";
 
 interface SessionCreation {
 	title: string;
@@ -13,8 +15,14 @@ interface SessionCreation {
 export class SessionStarter {
 	private created?: { identity: string; id: string };
 
-	async start(body: SessionCreation, fetchLike: typeof fetch, settingsIdentity?: string): Promise<string> {
-		const identity = JSON.stringify([body, settingsIdentity]);
+	async start(
+		body: SessionCreation,
+		fetchLike: typeof fetch,
+		settingsIdentity?: string,
+		images: readonly DraftImage[] = [],
+		openingText?: string,
+	): Promise<string> {
+		const identity = JSON.stringify([body, settingsIdentity, images]);
 		if (this.created?.identity !== identity) {
 			if (this.created) clearOpeningPrompt(this.created.id);
 			this.created = undefined;
@@ -28,7 +36,11 @@ export class SessionStarter {
 			if (typeof result.id !== "string" || !/^[A-Za-z0-9_-]+$/.test(result.id)) throw new Error(OPENING_PROMPT_FAILURE);
 			this.created = { identity, id: result.id };
 		}
-		if (!stashOpeningPrompt(this.created.id, body.title)) throw new Error(OPENING_PROMPT_FAILURE);
+		if (images.length > 0) {
+			return firstMessageUrl(this.created.id, openingText ?? "", images);
+		}
+		const prompt = openingText ?? body.title;
+		if (!stashOpeningPrompt(this.created.id, prompt)) throw new Error(OPENING_PROMPT_FAILURE);
 		return `/chat/${this.created.id}`;
 	}
 }

@@ -32,13 +32,14 @@
  * Pure and deterministic: client-safe (no node deps), same input → same view.
  */
 
-import type { AssistantMessage, ToolResultMessage } from "@earendil-works/pi-ai";
+import type { AssistantMessage, ImageContent, ToolResultMessage, UserMessage } from "@earendil-works/pi-ai";
 import type { LhMarkerMessage, LhMessage } from "./native-messages.ts";
 import { modelSolutionForConclude, PRACTICE_CONCLUDE_TOOL, problemInputForConclude, SEND_TO_USER_TOOL, sendToUserText } from "./native-messages.ts";
 import { activeCompactionOf, type CompactionDetails } from "./compaction.ts";
 import { QUESTION_TOOLS } from "./pending.ts";
 import type { SubagentArtifactData, SubagentResultMeta } from "./contracts/jobs.ts";
 import type { PlanBlockData } from "./contracts/chat.ts";
+import { imageUrl } from "./images.ts";
 
 /** A view part — the loose part vocabulary the renderers consume (the same
  *  shape names the pre-Wave-D UIMessage dialect used, so the renderer
@@ -97,6 +98,13 @@ export interface LiveTurnState {
 
 function textPart(text: string): LhViewPart {
 	return { type: "text", text, state: "done" };
+}
+
+/** Alt text for a learner's pasted picture (the transcript knows no more). */
+const PASTED_ALT = "Pasted from the clipboard";
+
+function imagePart(image: ImageContent, id: string): LhViewPart {
+	return { type: "image", id, url: imageUrl(image), alt: PASTED_ALT };
 }
 
 /** The result a tool part should show, from a native toolResult. */
@@ -182,12 +190,14 @@ export function projectView(messages: readonly LhMessage[], live?: LiveTurnState
 		}
 
 		if (role === "user") {
-			const content = m.content as string | Array<{ type: string; text?: string }>;
-			const texts =
-				typeof content === "string"
-					? [content]
-					: content.filter((c) => c.type === "text").map((c) => (c as { text: string }).text);
-			out.push({ id: m.id, role: "user", parts: texts.map(textPart) });
+			// Pasted images (images.ts) keep the block ORDER: the picture and
+			// its caption read as they were sent.
+			const content = (m as UserMessage).content;
+			const blocks = typeof content === "string" ? [{ type: "text" as const, text: content }] : content;
+			const parts = blocks.map((c, i) =>
+				c.type === "text" ? { ...textPart(c.text), id: `${m.id}-t${i}` } : imagePart(c, `${m.id}-i${i}`),
+			);
+			out.push({ id: m.id, role: "user", parts });
 			continue;
 		}
 

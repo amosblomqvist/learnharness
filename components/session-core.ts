@@ -142,7 +142,7 @@ export function absorbed(m: LhMessage, record: readonly LhMessage[]): boolean {
 	if (role === "user") {
 		const content = (m as { content?: unknown }).content;
 		return record.some(
-			(r) => (r as { role?: string }).role === "user" && (r as { content?: unknown }).content === content,
+			(r) => (r as { role?: string }).role === "user" && sameJson((r as { content?: unknown }).content, content),
 		);
 	}
 	if (role === "toolResult") {
@@ -165,15 +165,16 @@ export function absorbed(m: LhMessage, record: readonly LhMessage[]): boolean {
 			(r) =>
 				(r as { role?: string }).role === "custom" &&
 				(r as LhMarkerMessage).customType === marker.customType &&
-				sameDetails((r as LhMarkerMessage).details, marker.details),
+				sameJson((r as LhMarkerMessage).details, marker.details),
 		);
 	}
 	return false;
 }
 
-/** Structural deep-equal for marker details (JSON-stable payloads — the
+/** Structural deep-equal for JSON-stable payloads (marker details, and user
+ *  content, which is a string or, with pasted images, a block array: the
  *  constructors mint plain data). */
-function sameDetails(a: unknown, b: unknown): boolean {
+function sameJson(a: unknown, b: unknown): boolean {
 	return JSON.stringify(a) === JSON.stringify(b);
 }
 
@@ -693,7 +694,7 @@ export class SessionModel {
 		// write-ahead will persist (inputAppends), with LOCAL ids so
 		// adoption can tell them from the record's absorbed copies.
 		const optimistic: LhMessage[] = [];
-		if (input.type === "text") optimistic.push({ ...newUserMessage(input.text), id: localId() });
+		if (input.type === "text") optimistic.push({ ...newUserMessage(input.text, input.images), id: localId() });
 		else if (input.type === "thinking") {
 			// The practice submissions (2026-10-04): the marker lands
 			// optimistically — the card renders from its details the

@@ -526,12 +526,13 @@ The bus itself is a `globalThis`-backed listener set (the Next per-entry-module 
 
 ## 11. Testing
 
-All deterministic, no network: engines are injected (pi-ai's **faux provider** — `createFauxCore`/`setResponses` — wrapped as the `PiEngine` production uses), `globalThis.fetch` is stubbed where transport matters, and pure logic gets in-memory port implementations. Suites either mirror production wiring with the real fs adapters (backup-and-clear of the ledgers they touch) or swap in-memory ports deliberately ("this suite never touches data/graph"). Four strata:
+All deterministic, no network: engines are injected (pi-ai's **faux provider**, `createFauxCore`/`setResponses`, wrapped as the `PiEngine` production uses), `globalThis.fetch` is stubbed where transport matters, and pure logic gets in-memory port implementations. Suites either mirror production wiring with the real fs adapters (backup-and-clear of the ledgers they touch) or swap in-memory ports deliberately ("this suite never touches data/graph"). Five strata:
 
 1. **Pure core units** — merger via real adapters, derivation, coverage, question grading, plan tree, phases, clusters, layout, tool-parts, prices, fuzzy search.
 2. **Server flows** — `handleChatRequest` driven end-to-end with scripted faux engines: persistence, liveness, steer claiming, the wake pipeline (409 retry, quiz deferral, idempotency), crash recovery, the data-dir seam (including a fresh child process).
 3. **Sub-agent loops** — researcher/demo-builder/visual-maker with fake headless APIs; the extraction pipeline end-to-end (audit drops, failure-checkpoints-nothing, single-flight, abort); the practice pipeline end-to-end (partition echo/coverage retries, failure isolation, semaphore width, abort mid-generation, grading, boot sweep).
 4. **Render tests** — transcript, cards, docks, composer, sidebar, coverage, stats, practice surfaces (creation dialog both modes, chain table incl. the shared-TopBar + lines-law pins, list, exam states) via React server-side rendering (`renderToStaticMarkup`), no DOM library.
+5. **Browser end-to-end** (`npm run test:e2e`, `tests/e2e/*.e2e.mjs`): a production `next start` on a throwaway `LH_DATA_DIR`, driven by real Chrome through `puppeteer-core`, for behavior only a browser has (clipboard paste, the image draft, the lightbox, first-message handoff). The provider key is fake, so no turn reaches a model. Needs a prior `npm run build`; kept out of `npm test` because it boots a server and a browser.
 
 Gates on every change: `tsc` clean, all tests, `eslint` clean, `next build` clean.
 

@@ -1,5 +1,6 @@
 "use client";
 
+import { useEscapeClaim } from "@/components/escape-claim";
 import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { MaximizeIcon, MinusIcon, PlusIcon, XIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -110,20 +111,8 @@ export function MermaidOverlay({
 		};
 	}, [rawSvg, chart, attempt]);
 
-	// Esc closes — claimed at the document level (THE ONE-ESC LAW, owner
-	// keyboard round 2026-10-06): one Esc, one action; the window chain
-	// (dictation → abort) never fires under a surfaced layer.
-	useEffect(() => {
-		const onKey = (e: KeyboardEvent) => {
-			if (e.key === "Escape") {
-				e.preventDefault();
-				e.stopPropagation();
-				onClose();
-			}
-		};
-		document.addEventListener("keydown", onKey);
-		return () => document.removeEventListener("keydown", onKey);
-	}, [onClose]);
+	// Esc closes, claimed at the document level (the one-Esc law).
+	useEscapeClaim(onClose);
 
 	// ── pan/zoom viewport (same wiring as the plan popup) ──
 	const viewportRef = useRef<HTMLDivElement>(null);

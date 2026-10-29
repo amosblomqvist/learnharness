@@ -14,7 +14,6 @@ import {
 	ConversationScrollButton,
 } from "@/components/ai-elements/conversation";
 import { Message, MessageContent, MessageResponse } from "@/components/ai-elements/message";
-import { PathText } from "@/components/file-path-chip";
 import { Reasoning, ReasoningContent, ReasoningTrigger } from "@/components/ai-elements/reasoning";
 import { Shimmer } from "@/components/ai-elements/shimmer";
 import { BrailleSpinner } from "@/components/braille-spinner";
@@ -50,6 +49,9 @@ import {
 import { PlanBlock, PlanPopup, latestTree } from "@/components/plan-block";
 import { PlanMarginalia, planExists } from "@/components/plan-window";
 import { MermaidOverlay, SessionMermaidContext } from "@/components/session-overlay";
+import { useImageLightbox } from "@/components/image-lightbox";
+import { takeFirstMessage, useImageDraft } from "@/components/draft-images";
+import { UserMessageParts } from "@/components/user-message-parts";
 import { AbortTurnDialog, type AbortMode } from "@/components/abort-turn-dialog";
 import { ArrowRightIcon, DumbbellIcon, WaypointsIcon } from "lucide-react";
 import type { PlanBlockData } from "@/src/core";
@@ -84,6 +86,9 @@ import {
 } from "@/src/core";
 import { ReadingThinkingField } from "@/components/reading-thinking";
 import { currentUserThinkingOpen, setAllUserThinkingOpen } from "@/components/thinking-block";
+import { slotsConfigured, type ModelsSettings } from "@/src/core";
+import { MODEL_CANNOT_READ_IMAGES_CODE, wireImages, type DraftImage } from "@/src/core";
+import { useSettingsSaved } from "@/components/settings-signal";
 
 /** One width for everything: transcript, cards, and the bottom blob share this column. */
 /**
@@ -163,6 +168,19 @@ export function parseProviderKeyRefusal(message: string | undefined): boolean {
 		return body.code === "provider_key_missing" && typeof body.error === "string" && isProviderKeyRefusal(body.error);
 	} catch {
 		return false;
+	}
+}
+
+/** The image refusal's transport seam (composer paste): same discipline as
+ *  the two parsers above. Returns the server's own wording (it names the
+ *  model), or null for any other error. */
+function parseImageRefusal(message: string | undefined): string | null {
+	if (!message) return null;
+	try {
+		const body = JSON.parse(message) as { code?: unknown; error?: unknown };
+		return body.code === MODEL_CANNOT_READ_IMAGES_CODE && typeof body.error === "string" ? body.error : null;
+	} catch {
+		return null;
 	}
 }
 
@@ -574,6 +592,26 @@ export function Chat({
 	 *  Auto-continuations (probe answers) never set it — their refusal
 	 *  opens recovery with no replay. */
 	const draftRef = useRef<string | null>(null);
+	/* The same preserve-and-replay seam for pasted images: a refused send puts
+	 * them back in the composer with the text. */
+	const draftImagesRef = useRef<DraftImage[]>([]);
+	/* THE COMPOSER'S IMAGE DRAFT (composer paste): the shared paste, validate,
+	 * read hook. Its own ref mirror is why a send that resumes after an
+	 * await (dictation finish, image reads) still sees the live images. */
+	const imageDraft = useImageDraft();
+	const lightbox = useImageLightbox();
+
+	/** ONE learner message out: remembers the draft for the refusal flow's
+	 *  restore, then sends text plus any pictures as one input event. */
+	const sendDraft = useCallback(
+		(text: string, images: readonly DraftImage[]) => {
+			draftRef.current = text;
+			draftImagesRef.current = [...images];
+			void send({ type: "text", text, ...(images.length > 0 ? { images: wireImages(images) } : {}) });
+		},
+		[send],
+	);
+
 	const openingDraftRef = useRef<string | null>(null);
 	const [openingError, setOpeningError] = useState(false);
 	const openingMountedRef = useRef(false);
@@ -584,15 +622,13 @@ export function Chat({
 
 	const deliverOpeningPrompt = useCallback((prompt: string) => {
 		openingDraftRef.current = prompt;
-		// Persist uncertainty BEFORE the POST: another mount must restore,
-		// not race the still-arriving request. No storage means no auto-send.
 		if (!stashOpeningPrompt(chatId, prompt, true)) {
 			applyText(prompt);
 			setOpeningError(true);
 			return;
 		}
 		setOpeningError(false);
-		draftRef.current = prompt; // The existing 503 flow must restore it too.
+		draftRef.current = prompt;
 		applyText("");
 		void send({ type: "text", text: prompt }, () => {
 			clearOpeningPrompt(chatId);
@@ -609,25 +645,30 @@ export function Chat({
 	useEffect(() => {
 		if (sentInitial.current) return;
 		sentInitial.current = true;
+		if (!initialPrompt) {
+			const stashed = takeFirstMessage(chatId);
+			if (stashed) {
+				sendDraft(stashed.text, stashed.images);
+				return;
+			}
+		}
 		const entry = readOpeningPromptEntry(chatId);
-		const prompt = initialPrompt || entry?.text; // Legacy links still work.
+		const prompt = initialPrompt || entry?.text;
 		if (!initialPromptOwed(initialMessages, prompt)) {
 			if (initialMessages.some(m => m.role === "user" || m.role === "assistant")) clearOpeningPrompt(chatId);
 			return;
 		}
 		openingDraftRef.current = prompt!;
 		if (entry?.attempted || initiallyInFlight) {
-			applyText(prompt!); // Interrupted start: the learner explicitly resends.
+			applyText(prompt!);
 			return;
 		}
 		deliverOpeningPrompt(prompt!);
-	}, [chatId, initialPrompt, initialMessages, initiallyInFlight, deliverOpeningPrompt, applyText]);
+	}, [chatId, initialPrompt, initialMessages, initiallyInFlight, deliverOpeningPrompt, applyText, sendDraft]);
 
 	useEffect(() => {
 		if (!hasConfirmedConversation) return;
 		clearOpeningPrompt(chatId);
-		// A later canonical read may confirm a lost acknowledgment. Clear
-		// only the unchanged recovered draft, never the learner's newer work.
 		const opening = openingDraftRef.current;
 		if (opening !== null && textRef.current === opening) applyText("");
 		if (draftRef.current === opening) draftRef.current = null;
@@ -652,7 +693,11 @@ export function Chat({
 		// connected, repair belongs to the ordinary current-session picker;
 		// otherwise setup derives its exclusive provider/loading stage.
 		const keyRefused = parseProviderKeyRefusal(error.message);
-		if (!missing && !keyRefused) return; // a real error keeps the honest banner
+		// The image twin (composer paste): the model cannot read pictures.
+		// Same revert-draft, but the reason shows on the draft strip, not
+		// the setup dialog (no setup step fixes it; a model swap does).
+		const imageRefusal = parseImageRefusal(error.message);
+		if (!missing && !keyRefused && !imageRefusal) return; // a real error keeps the honest banner
 		// ORDER MATTERS: clearError() flips this effect's own dep (`error`)
 		// and would cancel the in-flight work below — so the banner dismiss,
 		// the draft restore, and the dialog open all land TOGETHER after the
@@ -669,8 +714,12 @@ export function Chat({
 				applyText(draftRef.current);
 				draftRef.current = null;
 			}
+			// Merged, never replaced: pictures pasted since the send stay.
+			imageDraft.restoreSent(draftImagesRef.current);
+			draftImagesRef.current = [];
 			clearError();
-			if (keyRefused && catalogRef.current?.providers.some((p) => p.keyPresent)) openModelPicker();
+			if (imageRefusal) imageDraft.setError(imageRefusal);
+			else if (keyRefused && catalogRef.current?.providers.some((p) => p.keyPresent)) openModelPicker();
 			else setSetupOpen(true);
 		})();
 		return () => {
@@ -745,7 +794,7 @@ export function Chat({
 	const retryable = (status === "ready" || status === "error") && !busy && !compacting && endsInFailedTurn(nativeMessages);
 	const retryFailedTurn = () => retryFailedResponse(send, draftRef);
 	const canSend =
-		(text.trim().length > 0 || dictation.active) && !pending && !activeProblem && !compacting;
+		(text.trim().length > 0 || dictation.active || imageDraft.hasImages) && !pending && !activeProblem && !compacting;
 
 	/* THE PRACTICE PAUSE (owner round 16): between problems — practice
 	 * kind, nothing active, nothing in flight, and at least one problem
@@ -1197,32 +1246,36 @@ export function Chat({
 		/* FINISH DICTATION FIRST (owner, 2026-10-01): a learner who keeps
 		 * talking right through Enter must not lose the tail — stop the run,
 		 * let the last finals land in the composer, then send the REF value
-		 * (the flush lands via setState, invisible to this closure). */
+		 * (the flush lands via setState, invisible to this closure). Pasted
+		 * images have the same race (FileReader is async): settle those reads
+		 * before the same seam reads the drafts. */
 		if (!dictation.active) {
-			doSteerOrSend();
+			void imageDraft.awaitReads().then(doSteerOrSend);
 			return;
 		}
-		void dictation.finish().then(doSteerOrSend);
+		void dictation.finish().then(imageDraft.awaitReads).then(doSteerOrSend);
 	};
 	const doSend = () => {
 		if (busy || pending || compacting) return;
 		const t = textRef.current.trim();
-		if (!t) return;
+		const imgs = imageDraft.imagesRef.current;
+		if (!t && imgs.length === 0) return;
 		if (zeroKeys) {
 			setSetupOpen(true);
 			return;
 		}
 		if (selectedModelUnavailable(catalog, selectedModel)) {
 			openModelPicker();
-			return; // No optimistic send and no change to the learner's draft.
+			return;
 		}
 		if (openingDraftRef.current !== null) {
 			deliverOpeningPrompt(t);
 			return;
 		}
-		draftRef.current = t; // the refusal flow's preserve-and-replay seam
 		applyText("");
-		void send({ type: "text", text: t });
+		imageDraft.setImages([]);
+		imageDraft.setError(null);
+		sendDraft(t, imgs);
 	};
 
 	/* STEER VS SEND (owner arc 2026-10-03): a send while a turn runs steers
@@ -1237,8 +1290,13 @@ export function Chat({
 	const doSteerOrSend = () => {
 		if (pending || compacting) return;
 		const t = textRef.current.trim();
-		if (!t) return;
+		const imgs = imageDraft.imagesRef.current;
+		if (!t && imgs.length === 0) return;
 		if (busy) {
+			// Images are NOT steerable (v1, the steer event has no images). The
+			// draft waits for the turn to settle: send/Enter is a no-op rather
+			// than a drop, and never a Stop (an Enter must not abort a turn).
+			if (imgs.length > 0) return;
 			applyText("");
 			void steer(t);
 			return;
@@ -1510,9 +1568,7 @@ export function Chat({
 												    sits INSIDE the rail, same mono-xs register and same 1ch
 												    rail as the thinking rows — one quote geometry. */}
 												<div className="font-medium uppercase tracking-wide text-muted-foreground">You</div>
-												<div className="lh-prose whitespace-pre-wrap text-foreground">
-													<PathText text={m.parts.filter((p) => p.type === "text").map((p) => p.text).join("\n")} />
-												</div>
+												<UserMessageParts parts={m.parts} onOpenImage={lightbox.open} />
 											</div>
 									) : (
 									<Message from="assistant" className="max-w-full">
@@ -1727,6 +1783,7 @@ export function Chat({
 							busy={busy}
 							value={text}
 							onChange={applyText}
+							imageDraft={{ ...imageDraft.props, onOpen: lightbox.open }}
 							inputRef={composerInputRef}
 							onSend={onSend}
 							onStop={abortInFlightTurn}
@@ -1773,6 +1830,7 @@ export function Chat({
 						onClose={() => setFigureFocus(null)}
 					/>
 				)}
+				{lightbox.lightbox}
 				{planOpen && <PlanPopup messages={messages} onClose={() => setPlanOpen(false)} />}
 				<AbortTurnDialog mode={abortAsk} onClose={() => setAbortAsk(null)} onConfirm={confirmAbort} busy={busy} />
 				</div>

@@ -7,6 +7,10 @@ import { GraphView } from "@/components/graph-view";
 import { MinimalHome } from "@/components/minimal-home";
 import { SetupDialog } from "@/components/setup-dialog";
 import { ComposerActions, NodePickerControl } from "@/components/composer-actions";
+import { DraftImageStrip } from "@/components/draft-image-strip";
+import { handleImagePaste, useImageDraft } from "@/components/draft-images";
+import { useImageLightbox } from "@/components/image-lightbox";
+import { IMAGE_ONLY_TITLE } from "@/src/core";
 import { useModelSetup, selectedModelUnavailable, openModelPicker, ZeroKeysPill } from "@/components/setup-cta";
 import { DictationBar, joinDictation, useDictation } from "@/components/dictation";
 import { useFieldCycle } from "@/components/field-cycle";
@@ -59,6 +63,11 @@ export function Home({
 		},
 	});
 	const [busy, setBusy] = useState(false);
+	/* THE IMAGE DRAFT (composer paste): a first message may be a picture. The
+	 * `?prompt=` handoff is text-only, so images are stashed for the chat page
+	 * (draft-images.ts) and the push carries only the session id. */
+	const imageDraft = useImageDraft();
+	const lightbox = useImageLightbox();
 	const startingRef = useRef(false);
 	const starterRef = useRef(new SessionStarter());
 	const [startError, setStartError] = useState(false);
@@ -110,8 +119,10 @@ export function Home({
 		void dictation.finish().then(() => begin());
 	};
 	const begin = async () => {
+		await imageDraft.awaitReads(); // a paste followed by Enter must not race its read
 		const t = topicRef.current.trim();
-		if (!t || startingRef.current) return;
+		const images = imageDraft.imagesRef.current;
+		if ((!t && images.length === 0) || busy || startingRef.current) return;
 		// Unconfigured: the send INTERCEPTS into the setup flow (the draft
 		// stays in the textarea; the learner sends it after Save).
 		if (!configured) {
@@ -143,11 +154,18 @@ export function Home({
 			// graph-context marker as message[0] (a separate custom message
 			// before the learner's first user message, propositions + the
 			// chains among them); the prompt stays the learner's own words.
-			const target = await starterRef.current.start({
-				title: t,
-				...(mode === "practice" ? { kind: "practice" } : {}),
-				...(practiceProps.length > 0 ? { graphContext: { propositions: practiceProps } } : {}),
-			}, fetch, JSON.stringify(catalog?.slots.strong));
+			const title = t || IMAGE_ONLY_TITLE;
+			const target = await starterRef.current.start(
+				{
+					title,
+					...(mode === "practice" ? { kind: "practice" } : {}),
+					...(practiceProps.length > 0 ? { graphContext: { propositions: practiceProps } } : {}),
+				},
+				fetch,
+				JSON.stringify(catalog?.slots.strong),
+				images,
+				t,
+			);
 			router.push(target);
 		} catch {
 			startingRef.current = false;
@@ -205,6 +223,9 @@ export function Home({
 				</div>
 			</header>
 
+			{/* A pasted picture at full size (composer paste). */}
+			{lightbox.lightbox}
+
 			{/* New session — same floating blob as the chat composer, docked
 			    OVER the graph (no gradient: the graph runs clean under it to the
 			    bottom edge). Matches chat.tsx's DOCK geometry (max-w-[46rem]
@@ -243,12 +264,14 @@ export function Home({
 					/>
 					{startError && <p role="alert" className="mb-2 text-sm text-destructive">{OPENING_PROMPT_FAILURE}</p>}
 					<form
-						className="flex items-end gap-1.5 rounded-2xl border bg-card p-1.5 shadow-lg"
+						data-testid="home-composer"
+						className="flex flex-wrap items-end gap-1.5 rounded-2xl border bg-card p-1.5 shadow-lg"
 					onSubmit={(e) => {
 						e.preventDefault();
 						void start();
 					}}
 				>
+					<DraftImageStrip draft={{ ...imageDraft.props, onOpen: lightbox.open }} />
 					<PathInput
 						ref={topicInputRef}
 						value={topic}
@@ -257,6 +280,7 @@ export function Home({
 							setTopic(value);
 						}}
 						defaultDropTarget
+						onPaste={(e) => handleImagePaste(e, imageDraft.props.onPaste)}
 						onKeyDown={(e) => {
 							// Esc ends dictation (the dictate decisions: click-again or
 							// Esc) — stopPropagation claims it (keyboard wave A) so
@@ -281,7 +305,7 @@ export function Home({
 					<button
 						type="submit"
 						aria-label="Start session"
-						disabled={(!topic.trim() && !dictation.active) || busy}
+						disabled={(!topic.trim() && !dictation.active && !imageDraft.hasImages) || busy}
 						className="flex size-10 shrink-0 items-center justify-center rounded-[10px] bg-primary text-primary-foreground transition-colors hover:opacity-90 disabled:opacity-40"
 					>
 						<CornerDownLeftIcon className="size-5" />

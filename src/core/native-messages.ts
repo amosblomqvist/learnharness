@@ -35,6 +35,7 @@
 
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { AssistantMessage, Message, ToolResultMessage, UserMessage } from "@earendil-works/pi-ai";
+import { imageBlock, type ComposerImage } from "./images.ts";
 import { QUESTION_TOOLS, type PendingQuestion } from "./pending.ts";
 import { CLAUDE_CODE_PROVIDER } from "./contracts/claude-code.ts";
 import {
@@ -177,12 +178,18 @@ export function newMessageId(): string {
 // ─── constructors (the input-event → native append mapping lives in
 //     core/input-events.ts; steers in core/contracts/jobs.ts) ─────────────────
 
-/** A learner-authored user message (text input, verdict note). */
-export function newUserMessage(text: string): LhMessage & UserMessage {
+/** A learner-authored user message (text input, verdict note). Images ride
+ *  as native ImageContent blocks (composer paste, images.ts): content stays
+ *  a plain string for text-only messages, so every old record and caller
+ *  reads unchanged. */
+export function newUserMessage(text: string, images?: readonly ComposerImage[]): LhMessage & UserMessage {
 	return {
 		id: newMessageId(),
 		role: "user",
-		content: text,
+		content:
+			images && images.length > 0
+				? [...(text.length > 0 ? [{ type: "text" as const, text }] : []), ...images.map((i) => imageBlock(i.mimeType, i.data))]
+				: text,
 		timestamp: Date.now(),
 	};
 }
