@@ -214,6 +214,27 @@ describe("AgentSection (thin SSR)", () => {
 		const html = renderToStaticMarkup(<AgentSection agent={undefined} models={undefined} graph={undefined} onSectionChange={() => {}} onModelsChange={() => {}} />);
 		assert.ok(html.includes("Loading prompt segments"));
 	});
+
+	it("renders the Personalization & Skills group with preset chips, textarea, and upload skill control", () => {
+		const html = renderToStaticMarkup(
+			<AgentSection
+				agent={undefined}
+				models={undefined}
+				graph={undefined}
+				compaction={undefined}
+				onSectionChange={() => {}}
+				onModelsChange={() => {}}
+				onCompactionChange={() => {}}
+			/>,
+		);
+		assert.ok(html.includes('data-testid="group-personalization"'), "Personalization & Skills group");
+		assert.ok(html.includes('data-testid="input-personalization"'), "personalization textarea");
+		assert.ok(html.includes('data-testid="upload-skill-input"'), "hidden file input for .md upload");
+		assert.ok(html.includes('data-testid="upload-skill-button"'), "upload SKILL.md button");
+		assert.ok(html.includes('data-testid="preset-chip-id"'), "Bahasa Indonesia preset chip");
+		assert.ok(html.includes('data-testid="preset-chip-analogy"'), "Practical analogies preset chip");
+		assert.ok(html.includes('data-testid="preset-chip-socratic"'), "Socratic code tutor preset chip");
+	});
 });
 
 describe("GraphSection — master switch + chunk budget (wave 7 + 2026-10-02)", () => {
