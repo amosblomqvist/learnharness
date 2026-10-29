@@ -27,6 +27,10 @@
  *   window.lh.onOpenSettings(cb) — menu navigation, buffered until React
  *   subscribes after a window is reopened. Browser builds have no bridge.
  *
+ *   window.lh.setAppearance(a) — the appearance mode + backgrounds
+ *   (light-mode wave, 2026-10-29): main sets nativeTheme.themeSource and
+ *   repaints the native window background / control overlay to match.
+ *
  * Channel names are mirrored in electron/main.cjs — keep them in sync.
  */
 const { contextBridge, ipcRenderer, webUtils } = require("electron");
@@ -77,6 +81,7 @@ contextBridge.exposeInMainWorld("lh", {
 		},
 	},
 	expandWindow: () => ipcRenderer.send("lh:expand-window"),
+	setAppearance: (a) => ipcRenderer.send("lh:appearance", a),
 	onZoom: (cb) => {
 		const listener = (_event, factor) => cb(factor);
 		ipcRenderer.on("lh:zoom", listener);

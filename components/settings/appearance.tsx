@@ -167,6 +167,9 @@ export function AppearanceProvider({
 	initialMode: AppearanceMode;
 }) {
 	const [delta, setDelta] = useState<AppearanceSettings | undefined>(undefined);
+	// The record has arrived (or a write replaced it): until then only the
+	// mode is known (server-rendered), not the custom backgrounds.
+	const [recordLoaded, setRecordLoaded] = useState(false);
 	const appliedRef = useRef<string>("");
 	const prefersDark = usePrefersDark();
 	const mode: AppearanceMode = delta?.mode ?? initialMode;
@@ -212,6 +215,16 @@ export function AppearanceProvider({
 		}
 	}, [key, vars]);
 
+	// The desktop shell's native chrome (window background, Windows/Linux
+	// control overlay) follows the mode and backgrounds — absent in a browser.
+	// Held until the record loads: main read the same settings file at
+	// launch, and the factory backgrounds would briefly undo a custom one.
+	const { background, lightBackground } = resolveAppearance(delta);
+	useEffect(() => {
+		if (!recordLoaded) return;
+		window.lh?.setAppearance?.({ mode, background, lightBackground });
+	}, [recordLoaded, mode, background, lightBackground]);
+
 	// One fetch per app load: the record (sanitized server-side) carries the
 	// delta; resolution happens here against the compiled factory.
 	useEffect(() => {
@@ -227,6 +240,7 @@ export function AppearanceProvider({
 				setDelta(
 					appearance && typeof appearance === "object" ? (appearance as AppearanceSettings) : undefined,
 				);
+				setRecordLoaded(true);
 			})
 			.catch(() => {/* settings stay factory — not worth a crash */});
 		return () => {
@@ -236,6 +250,7 @@ export function AppearanceProvider({
 
 	const onAppearanceChange = useCallback((next: AppearanceSettings | undefined) => {
 		setDelta(next);
+		setRecordLoaded(true);
 	}, []);
 
 	const value = useMemo(
