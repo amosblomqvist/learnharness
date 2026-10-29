@@ -7,6 +7,7 @@ import { InvertDiscIcon } from "@/components/artifacts/invert-disc";
 import { ChatActionsContext } from "@/components/chat";
 import { downloadFile, slugFilename } from "@/components/artifacts/download";
 import { DispatchCard } from "@/components/artifacts/dispatch-card";
+import { useArtifactInvert } from "@/components/artifacts/use-artifact-invert";
 import { toneFromCssColor, type ArtifactPartProps, type ArtifactTone, type DemoResult } from "@/src/core";
 
 /**
@@ -102,16 +103,17 @@ export function DemoCard({ part }: ArtifactPartProps) {
 }
 
 /** The demo artifact — exported: the steer card renders the delivered
- *  result. `messageId` + `initialInverted` carry the PERSISTED invert
- *  switch (details.ui.inverted via the artifact-ui route, owner 2026-10-07). */
+ *  result. `messageId` + `initialPin` carry the PERSISTED invert switch
+ *  (details.ui.inverted via the artifact-ui route, owner 2026-10-07) —
+ *  absent = auto, following the rendered mode (auto-invert, 2026-10-29). */
 export function DemoOutputCard({
 	output,
 	messageId,
-	initialInverted = false,
+	initialPin,
 }: {
 	output: unknown;
 	messageId?: string;
-	initialInverted?: boolean;
+	initialPin?: boolean;
 }) {
 	const result = output as DemoResult | undefined;
 	if (!result || typeof result.html !== "string" || typeof result.title !== "string") {
@@ -134,7 +136,7 @@ export function DemoOutputCard({
 		);
 	}
 	return (
-		<DemoFrame title={result.title} html={result.html} messageId={messageId} initialInverted={initialInverted} />
+		<DemoFrame title={result.title} html={result.html} messageId={messageId} initialPin={initialPin} />
 	);
 }
 
@@ -142,33 +144,28 @@ function DemoFrame({
 	title,
 	html,
 	messageId,
-	initialInverted = false,
+	initialPin,
 }: {
 	title: string;
 	html: string;
 	messageId?: string;
-	initialInverted?: boolean;
+	initialPin?: boolean;
 }) {
 	const actions = useContext(ChatActionsContext);
 	const iframeRef = useRef<HTMLIFrameElement | null>(null);
 	const [state, setState] = useState<DemoBridgeState>(INITIAL_DEMO_BRIDGE_STATE);
 	// Brightness inversion (owner, 2026-10-07): the switch state PERSISTS on
-	// the steer record (details.ui.inverted) — seeded here, written through
-	// the silent artifact-ui route on toggle. Without a chat page (tests,
-	// previews) the toggle stays local-only. The filter rides the iframe
-	// element, which carries the card's white backing, so one filter flips
-	// page + content together while hue-rotate(180deg) undoes invert's hue
-	// flip.
-	const [inverted, setInverted] = useState(initialInverted);
-	const toggleInverted = (next: boolean) => {
-		setInverted(next);
-		if (!actions?.chatId || !messageId) return;
-		void fetch(`/api/chats/${actions.chatId}/artifact-ui`, {
-			method: "POST",
-			headers: { "Content-Type": "application/json" },
-			body: JSON.stringify({ input: { messageId, inverted: next } }),
-		}).catch(() => {});
-	};
+	// the steer record (details.ui.inverted) as a pin — absent = auto: a demo
+	// whose page the bridge reports light shows inverted while the app
+	// renders dark (use-artifact-invert.ts, 2026-10-29). The filter rides
+	// the iframe element, which carries the card's white backing, so one
+	// filter flips page + content together while hue-rotate(180deg) undoes
+	// invert's hue flip.
+	const { inverted, held, toggle: toggleInverted } = useArtifactInvert({
+		initialPin,
+		tone: state.tone ?? "pending",
+		messageId,
+	});
 	const srcDoc = useMemo(() => buildDemoSrcDoc(html), [html]);
 
 	useEffect(() => {
@@ -242,6 +239,7 @@ function DemoFrame({
 					height: state.height ?? 360,
 					boxSizing: "content-box",
 					filter: inverted ? "invert(1) hue-rotate(180deg)" : undefined,
+					opacity: held ? 0 : undefined,
 				}}
 				data-testid="demo-iframe"
 			/>

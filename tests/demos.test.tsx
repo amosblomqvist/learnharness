@@ -38,10 +38,12 @@ import {
 	DEMO_BRIDGE_SCRIPT,
 	DemoCard,
 	DemoErrorChip,
+	DemoOutputCard,
 	INITIAL_DEMO_BRIDGE_STATE,
 	reduceDemoBridgeState,
 } from "../components/artifacts/demo-card.tsx";
 import { svgNaturalWidth, VisualCard, VisualOutputCard } from "../components/artifacts/visual-card.tsx";
+import { primeSvgTone } from "../components/artifacts/artifact-tone.ts";
 import { slugFilename } from "../components/artifacts/download.ts";
 import { chartSize } from "../components/session-overlay.tsx";
 import { SubagentSteerCard } from "../components/artifacts/steer-card.tsx";
@@ -515,7 +517,7 @@ describe("artifact chrome — scrollbar, invert toggles, downloads (release poli
 		assert.match(html, /scrolling="no"/, "no internal scrollbar — the wheel chains to the session");
 		assert.match(html, /toggle-invert-demo-brightness/, "the invert switch (house Toggle)");
 		assert.match(html, /data-testid="demo-download"/);
-		assert.ok(!html.includes("hue-rotate"), "inversion is OFF by default — a manual toggle only");
+		assert.ok(!html.includes("hue-rotate"), "unmeasured → not inverted (auto waits for the bridge's tone)");
 		assert.match(html, /interactive demo/, "the kind label lives in the caption header");
 		assert.match(html, /Wave interference/, "the title rides beside the kind label");
 	});
@@ -526,7 +528,43 @@ describe("artifact chrome — scrollbar, invert toggles, downloads (release poli
 		assert.match(html, /toggle-invert-figure-brightness/, "the invert switch (house Toggle)");
 		assert.match(html, /data-testid="visual-download"/);
 		assert.ok(!html.includes('data-testid="visual-open"'), "fullscreen needs the session overlay context");
-		assert.ok(!html.includes("hue-rotate"), "inversion OFF by default");
+		assert.ok(!html.includes("hue-rotate"), "unmeasured → not inverted (auto waits for the tone)");
+	});
+
+	it("figure: an unpinned LIGHT figure auto-inverts in dark mode", () => {
+		const svg = '<svg xmlns="http://www.w3.org/2000/svg" width="210" height="100"><rect width="210" height="100" fill="#fff"/></svg>';
+		primeSvgTone(svg, "light");
+		const html = renderToStaticMarkup(<VisualOutputCard output={{ svg }} />);
+		assert.match(html, /hue-rotate/, "auto → inverted");
+	});
+
+	it("figure: a DARK figure is never auto-flipped; a pin wins over auto", () => {
+		const dark = '<svg xmlns="http://www.w3.org/2000/svg" width="220" height="100"><rect width="220" height="100" fill="#111"/></svg>';
+		primeSvgTone(dark, "dark");
+		assert.ok(!renderToStaticMarkup(<VisualOutputCard output={{ svg: dark }} />).includes("hue-rotate"));
+		const light = '<svg xmlns="http://www.w3.org/2000/svg" width="230" height="100"></svg>';
+		primeSvgTone(light, "light");
+		assert.ok(
+			!renderToStaticMarkup(<VisualOutputCard output={{ svg: light }} initialPin={false} />).includes("hue-rotate"),
+			"pinned original stays original",
+		);
+		assert.match(renderToStaticMarkup(<VisualOutputCard output={{ svg: dark }} initialPin />), /hue-rotate/, "pinned inverted");
+	});
+
+	it("figure: while the tone is pending, an unpinned figure holds hidden (no white flash)", () => {
+		const svg = '<svg xmlns="http://www.w3.org/2000/svg" width="240" height="100"></svg>';
+		assert.match(renderToStaticMarkup(<VisualOutputCard output={{ svg }} />), /opacity:0/);
+		assert.ok(
+			!renderToStaticMarkup(<VisualOutputCard output={{ svg }} initialPin={false} />).includes("opacity:0"),
+			"a pin needs no measurement",
+		);
+	});
+
+	it("demo: pinned inverted renders the filter; unpinned holds while the bridge reports", () => {
+		const pinned = renderToStaticMarkup(<DemoOutputCard output={{ title: "T", html: DEMO_HTML, tested: true }} initialPin />);
+		assert.match(pinned, /hue-rotate/);
+		const auto = renderToStaticMarkup(<DemoOutputCard output={{ title: "T", html: DEMO_HTML, tested: true }} />);
+		assert.match(auto, /opacity:0/);
 	});
 
 	it("figure card: NO card chrome, image first, caption row BELOW (owner round, 2026-10-07)", () => {
