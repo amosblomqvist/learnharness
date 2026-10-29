@@ -25,6 +25,11 @@ import type {
 	SessionCheckpoint,
 	TurnUsage,
 	NotesSource,
+	LibraryFileFormat,
+	LibraryFileMeta,
+	LibraryItem,
+	LibrarySummary,
+	LibraryTag,
 } from "./contracts.ts";
 import type { UserSettings } from "./settings.ts";
 
@@ -54,6 +59,9 @@ export interface ChatStore {
 	/** Persist the per-chat model/thinking settings (the model control).
 	 *  Replace-whole: the picker sends the complete settings object. */
 	saveSettings(id: string, settings: ChatSettings): void;
+	/** Persist the chat's course-library attachments — replace-whole, like
+	 *  saveSettings (not conversation activity: updatedAt stays put). */
+	saveAttachments(id: string, attachments: string[]): void;
 	/** Rename a session (the header's click-to-edit title, 2026-09-17).
 	 * Like saveSettings: a rename is NOT conversation activity — updatedAt
 	 * stays put, so sidebar order never churns on a rename. */
@@ -230,3 +238,43 @@ export interface AuthStore {
 	deleteAuthVar(name: string): void;
 }
 
+
+// ─── LibraryStore — the shared course library (data/library) ────────────────
+
+/** Derived artifacts stored beside a file's original. */
+export type LibraryDerivedName = "converted.pdf" | "extracted.json";
+
+/** The library's single writer (course library wave, 2026-10-29). Tree
+ *  integrity (parents exist and are folders, no move into one's own
+ *  subtree) is enforced here — violations throw; routes turn them into
+ *  400s after their own validation. Every write announces
+ *  library-changed post-write. */
+export interface LibraryStore {
+	/** Every item, in stored order (fold with contracts/library.ts helpers). */
+	listItems(): LibraryItem[];
+	getItem(id: string): LibraryItem | null;
+	createFolder(parentId: string | null, name: string): LibraryItem;
+	/** Copy the bytes in as a new file item (status "processing"). */
+	addFile(
+		parentId: string | null,
+		name: string,
+		bytes: Uint8Array,
+		kind: { ext: string; mime: string; format: LibraryFileFormat },
+	): LibraryItem;
+	/** Rename / move / retag. `tag: null` clears the item's own tag. */
+	updateItem(id: string, patch: { name?: string; parentId?: string | null; tag?: LibraryTag | null }): LibraryItem;
+	/** Import-processing results (status, read path, page count, error). */
+	setFileMeta(id: string, patch: Partial<Pick<LibraryFileMeta, "status" | "via" | "pages" | "error">>): LibraryItem;
+	/** Delete the item and its whole subtree (records + stored files).
+	 *  Returns the removed ids (empty when unknown). Detaching chats is the
+	 *  caller's choreography, not the store's. */
+	deleteItem(id: string): string[];
+	/** Absolute path of a file's stored original. */
+	originalPath(id: string): string;
+	/** Absolute path of a derived artifact (may not exist yet). */
+	derivedPath(id: string, name: LibraryDerivedName): string;
+	writeDerived(id: string, name: LibraryDerivedName, data: Uint8Array | string): void;
+	/** The cached summary, or null when absent/corrupt. */
+	readSummary(id: string): LibrarySummary | null;
+	writeSummary(id: string, summary: LibrarySummary): void;
+}

@@ -52,6 +52,13 @@ export interface ServerEvents {
 	 *  the chat; the client mirrors it by disabling the composer/dock
 	 *  submit. */
 	"compaction-changed": { chatId: string; running: boolean };
+	/** The course library changed — tree shape (create, rename, move, tag,
+	 *  delete) or a file's processing/summary state. Library views refetch. */
+	"library-changed": Record<string, never>;
+	/** Summaries for a chat's attachments started/finished generating.
+	 *  running=true is the turn-wait signal: the chat shows progress and
+	 *  the next turn waits server-side until every summary is ready. */
+	"library-summaries-changed": { chatId: string; running: boolean };
 }
 
 export type ServerEventType = keyof ServerEvents;
@@ -69,6 +76,8 @@ export const SERVER_EVENT_TYPES = [
 	"subscriptions-changed",
 	"record-changed",
 	"compaction-changed",
+	"library-changed",
+	"library-summaries-changed",
 ] as const satisfies readonly ServerEventType[];
 
 /** One notification: the type discriminates the payload. */
