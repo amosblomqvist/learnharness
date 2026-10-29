@@ -1767,3 +1767,210 @@ describe("absorbed — the custom role (the doubled thinking card)", () => {
 		assert.equal((customs[0] as { id?: string }).id, "srv_1");
 	});
 });
+
+// ─── editing a queued steer (issue #321) ────────────────────────────────────
+
+describe("SessionModel.editSteer (edit or cancel a queued composer steer)", () => {
+	/** A model with one queued steer; `editStatus` answers the PUT. */
+	async function queued(editStatus: number | Error = 200) {
+		const calls: { method: string; url: string; body: unknown }[] = [];
+		const m = model({
+			fetch: (async (url: string, init?: RequestInit) => {
+				const method = init?.method ?? "GET";
+				calls.push({ method, url, body: init?.body ? JSON.parse(String(init.body)) : undefined });
+				if (method === "PUT") {
+					if (editStatus instanceof Error) throw editStatus;
+					return new Response(null, { status: editStatus });
+				}
+				return new Response(null, { status: 200 }); // the original steer POST
+			}) as typeof fetch,
+		});
+		await m.steer("original words");
+		const id = m.getState().steerQueue[0]!.id;
+		calls.length = 0;
+		return { m, id, calls };
+	}
+
+	it("PUTs the edit and shows the new text in the queue", async () => {
+		const { m, id, calls } = await queued();
+		await m.editSteer(id, "  better words  ");
+		assert.deepEqual(calls, [{
+			method: "PUT",
+			url: "/api/chats/chat_x/steer",
+			body: { input: { type: "steer-edit", id, text: "better words" } },
+		}]);
+		assert.deepEqual(m.getState().steerQueue, [{ id, text: "better words" }]);
+	});
+
+	it("blank text cancels: the line leaves the queue and an empty edit is sent", async () => {
+		const { m, id, calls } = await queued();
+		await m.editSteer(id, "   ");
+		assert.deepEqual(calls[0]?.body, { input: { type: "steer-edit", id, text: "" } });
+		assert.deepEqual(m.getState().steerQueue, []);
+	});
+
+	it("the edit shows optimistically, before the server answers", async () => {
+		const { m, id } = await queued();
+		const pending = m.editSteer(id, "optimistic");
+		assert.equal(m.getState().steerQueue[0]?.text, "optimistic");
+		await pending;
+	});
+
+	it("409 (already delivered) reverts the text silently — no error, status untouched", async () => {
+		const { m, id } = await queued(409);
+		await m.editSteer(id, "too late");
+		assert.deepEqual(m.getState().steerQueue, [{ id, text: "original words" }]);
+		assert.equal(m.getState().error, null);
+		assert.equal(m.getState().status, "ready");
+	});
+
+	it("409 on a cancel restores the line", async () => {
+		const { m, id } = await queued(409);
+		await m.editSteer(id, "");
+		assert.deepEqual(m.getState().steerQueue, [{ id, text: "original words" }]);
+	});
+
+	it("a network failure reverts and surfaces the error (like steer())", async () => {
+		const { m, id } = await queued(new Error("offline"));
+		await m.editSteer(id, "never lands");
+		assert.deepEqual(m.getState().steerQueue, [{ id, text: "original words" }]);
+		assert.equal(m.getState().error?.message, "offline");
+	});
+
+	it("an unknown id or unchanged text sends nothing", async () => {
+		const { m, id, calls } = await queued();
+		await m.editSteer("steer_unknown", "x");
+		await m.editSteer(id, "original words");
+		assert.deepEqual(calls, []);
+	});
+});
+
+describe("SessionModel.editSteer: a failed edit reverts only its own line", () => {
+	it("a steer queued while the PUT is in flight keeps its line when that PUT 409s", async () => {
+		let release!: () => void;
+		const gate = new Promise<void>((r) => { release = r; });
+		const m = model({
+			fetch: (async (_url: string, init?: RequestInit) => {
+				if (init?.method === "PUT") { await gate; return new Response(null, { status: 409 }); }
+				return new Response(null, { status: 200 });
+			}) as typeof fetch,
+		});
+		await m.steer("first");
+		const id = m.getState().steerQueue[0]!.id;
+		const pending = m.editSteer(id, "first, edited");
+		await m.steer("second"); // queued while the edit is still in flight
+		release();
+		await pending;
+		assert.deepEqual(m.getState().steerQueue.map((s) => s.text), ["first", "second"]);
+	});
+
+	it("a cancelled line that 409s comes back in its original position", async () => {
+		let release!: () => void;
+		const gate = new Promise<void>((r) => { release = r; });
+		const m = model({
+			fetch: (async (_url: string, init?: RequestInit) => {
+				if (init?.method === "PUT") { await gate; return new Response(null, { status: 409 }); }
+				return new Response(null, { status: 200 });
+			}) as typeof fetch,
+		});
+		await m.steer("first");
+		await m.steer("second");
+		const id = m.getState().steerQueue[0]!.id;
+		const pending = m.editSteer(id, "");
+		await m.steer("third");
+		release();
+		await pending;
+		assert.deepEqual(m.getState().steerQueue.map((s) => s.text), ["first", "second", "third"]);
+	});
+});
+
+describe("SessionModel.editSteer: an edit never overtakes the steer's own POST", () => {
+	/** A model whose steer POST is held until `release` — the PUT must wait for it. */
+	function heldSteer(postStatus = 200) {
+		const calls: string[] = [];
+		let release!: () => void;
+		const gate = new Promise<void>((r) => { release = r; });
+		const m = model({
+			fetch: (async (_url: string, init?: RequestInit) => {
+				const method = init?.method ?? "GET";
+				calls.push(method);
+				if (method === "POST") { await gate; return new Response(postStatus === 200 ? null : "boom", { status: postStatus }); }
+				return new Response(null, { status: 200 });
+			}) as typeof fetch,
+		});
+		return { m, calls, release };
+	}
+
+	it("holds the PUT until the steer POST is acknowledged, then sends it", async () => {
+		const { m, calls, release } = heldSteer();
+		const sent = m.steer("first");
+		const id = m.getState().steerQueue[0]!.id;
+		const edited = m.editSteer(id, "first, edited");
+		await new Promise((r) => setTimeout(r, 20));
+		assert.deepEqual(calls, ["POST"], "no PUT while the POST is still in flight");
+		assert.equal(m.getState().steerQueue[0]?.text, "first, edited", "the line still edits optimistically");
+		release();
+		await Promise.all([sent, edited]);
+		assert.deepEqual(calls, ["POST", "PUT"]);
+		assert.deepEqual(m.getState().steerQueue.map((s) => s.text), ["first, edited"]);
+	});
+
+	it("if the steer POST fails, the pending edit sends nothing and the dropped line stays gone", async () => {
+		const { m, calls, release } = heldSteer(500);
+		const sent = m.steer("first");
+		const id = m.getState().steerQueue[0]!.id;
+		const edited = m.editSteer(id, "first, edited");
+		release();
+		await Promise.all([sent, edited]);
+		assert.deepEqual(calls, ["POST"], "no PUT for a steer the server never accepted");
+		assert.deepEqual(m.getState().steerQueue, [], "the failed steer's line is not resurrected");
+	});
+});
+
+describe("SessionModel.steer: the 409 settle-race fallback honours an edit made in flight", () => {
+	/** The steer POST is held, then refused with 409 (the turn just settled). */
+	function settledRace() {
+		const sent: { url: string; method: string; body: unknown }[] = [];
+		let release!: () => void;
+		const gate = new Promise<void>((r) => { release = r; });
+		const m = model({
+			fetch: (async (url: string, init?: RequestInit) => {
+				const method = init?.method ?? "GET";
+				sent.push({ url, method, body: init?.body ? JSON.parse(String(init.body)) : undefined });
+				if (method === "POST" && url.endsWith("/steer")) { await gate; return new Response("no live turn to steer", { status: 409 }); }
+				return new Response(null, { status: 200 });
+			}) as typeof fetch,
+		});
+		const plainSends = () => sent.filter((c) => c.method === "POST" && !c.url.endsWith("/steer"));
+		return { m, release, plainSends };
+	}
+
+	it("sends the EDITED text as the plain message, not the original", async () => {
+		const { m, release, plainSends } = settledRace();
+		const pending = m.steer("original words");
+		const id = m.getState().steerQueue[0]!.id;
+		const edited = m.editSteer(id, "edited words");
+		release();
+		await Promise.all([pending, edited]);
+		assert.deepEqual(plainSends().map((c) => (c.body as { input: { text: string } }).input.text), ["edited words"]);
+	});
+
+	it("sends nothing when the learner cancelled the steer while the POST was in flight", async () => {
+		const { m, release, plainSends } = settledRace();
+		const pending = m.steer("original words");
+		const id = m.getState().steerQueue[0]!.id;
+		const cancelled = m.editSteer(id, "  ");
+		release();
+		await Promise.all([pending, cancelled]);
+		assert.deepEqual(plainSends(), [], "a cancelled steer must not come back as a message");
+		assert.deepEqual(m.getState().steerQueue, []);
+	});
+
+	it("an untouched steer still falls back with its original text (unchanged behaviour)", async () => {
+		const { m, release, plainSends } = settledRace();
+		const pending = m.steer("original words");
+		release();
+		await pending;
+		assert.deepEqual(plainSends().map((c) => (c.body as { input: { text: string } }).input.text), ["original words"]);
+	});
+});

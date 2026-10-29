@@ -229,6 +229,8 @@ export class SessionModel {
 	fetch: typeof globalThis.fetch;
 	/** Steers sent but not yet drained (the queued indicator's truth). */
 	private steerQueueValue: SteerQueueItem[] = [];
+	/** Steer id → its POST's outcome (true = accepted), alive while in flight. */
+	private steerAcks = new Map<string, Promise<boolean>>();
 	private readonly pollMs: number;
 	private readonly waitMaxMs: number;
 	private onReattachSettled?: () => void;
@@ -809,9 +811,15 @@ export class SessionModel {
 		const id = `steer_${localId()}`;
 		this.steerQueueValue = [...this.steerQueueValue, { id, text: t }];
 		this.onChange?.();
+		// The line is editable the moment it shows, but the server only knows
+		// the steer after this POST: editSteer waits on this ack so its PUT can
+		// never overtake the POST (issue #321). Settled true once accepted.
+		let acked!: (ok: boolean) => void;
+		this.steerAcks.set(id, new Promise<boolean>((resolve) => { acked = resolve; }));
 		const dropSteer = () => {
 			this.steerQueueValue = this.steerQueueValue.filter((s) => s.id !== id);
 			this.onChange?.();
+			acked(false);
 		};
 		try {
 			const res = await this.fetch(`/api/chats/${this.chatId}/steer`, {
@@ -819,16 +827,68 @@ export class SessionModel {
 				headers: { "Content-Type": "application/json" },
 				body: JSON.stringify({ input: { type: "steer", id, text: t } }),
 			});
-			if (res.ok) return; // parked or delivered — the stream lands the card
+			if (res.ok) { acked(true); return; } // parked or delivered — the stream lands the card
 			if (res.status === 409) {
+				// The line holds the learner's latest word: an edit made while this
+				// POST was in flight rides the plain send, and a cancel (the line is
+				// gone) sends nothing — read it BEFORE dropSteer removes it.
+				const latest = this.steerQueueValue.find((s) => s.id === id)?.text;
 				dropSteer();
-				await this.send({ type: "text", text: t }); // the settle race: plain send
+				if (latest) await this.send({ type: "text", text: latest }); // the settle race: plain send
 				return;
 			}
 			dropSteer();
 			this.setError((await res.text()) || `The steer failed (${res.status}).`);
 		} catch (err) {
 			dropSteer();
+			this.setError((err as Error).message);
+		} finally {
+			this.steerAcks.delete(id);
+		}
+	}
+
+	/** EDIT a queued steer (issue #321): rewrite the text of a steer the agent
+	 *  has not received yet, or — blank text — cancel it. Optimistic like
+	 *  steer(): the line changes at once and the PUT confirms. A 409 means
+	 *  the steer was already delivered (or the turn ended): the queued line
+	 *  simply reverts, silently — the transcript shows what the agent got. */
+	async editSteer(id: string, text: string): Promise<void> {
+		const before = this.steerQueueValue;
+		const current = before.find((s) => s.id === id);
+		const t = text.trim();
+		if (!current || t === current.text) return;
+		// Restore ONLY this line: a steer queued (or edited) while the PUT was
+		// in flight must survive a failed edit, so never swap in the old snapshot.
+		const revert = () => {
+			const now = this.steerQueueValue;
+			if (now.some((s) => s.id === id)) {
+				this.steerQueueValue = now.map((s) => (s.id === id ? current : s));
+			} else {
+				const at = Math.min(before.indexOf(current), now.length);
+				this.steerQueueValue = [...now.slice(0, at), current, ...now.slice(at)];
+			}
+			this.onChange?.();
+		};
+		this.steerQueueValue = t
+			? before.map((s) => (s.id === id ? { id, text: t } : s))
+			: before.filter((s) => s.id !== id);
+		this.onChange?.();
+		// Never overtake the steer's own POST: until the server has it there is
+		// nothing to edit. If that POST failed, its line is already gone — send
+		// nothing and do not resurrect it.
+		const ack = this.steerAcks.get(id);
+		if (ack && !(await ack)) return;
+		try {
+			const res = await this.fetch(`/api/chats/${this.chatId}/steer`, {
+				method: "PUT",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({ input: { type: "steer-edit", id, text: t } }),
+			});
+			if (res.ok) return;
+			revert();
+			if (res.status !== 409) this.setError((await res.text()) || `The steer edit failed (${res.status}).`);
+		} catch (err) {
+			revert();
 			this.setError((err as Error).message);
 		}
 	}

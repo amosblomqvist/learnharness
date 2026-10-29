@@ -66,7 +66,7 @@ import {
 	type SteerMessage,
 } from "../core/contracts.ts";
 import type { TurnInput } from "../core/input-events.ts";
-import { danglingQuestionOf, endsInDismissal, type LhMessage } from "../core/native-messages.ts";
+import { danglingQuestionOf, endsInDismissal, newUserSteer, type LhMessage } from "../core/native-messages.ts";
 import { fireJobAbort, isJobLive } from "../agent/subagents/aborts.ts";
 import { stores, effectiveSettings } from "./stores.ts";
 import { resolveConversationSpec } from "../core/settings-resolution.ts";
@@ -324,6 +324,40 @@ export function steerLiveChat(chatId: string, message: LhMessage): boolean {
 	state().userSteers.set(chatId, q);
 	agent.steer(message);
 	entry.handedTo = agent;
+	return true;
+}
+
+/** Edit or cancel a user steer that is still queued (issue #321). pi's
+ *  steering queue has no per-message removal, so the queue is rebuilt from
+ *  its own snapshot: peekQueuedMessages IS the truth of "not drained yet"
+ *  (steeringMode "all" — everything queued), and the snapshot carries any
+ *  job markers along in order. Blank text cancels the steer. Synchronous
+ *  like steerLiveChat, so a drain can never interleave. Returns false when
+ *  nothing editable matches (no live turn, a job marker, or already
+ *  drained): the caller 409s and the client keeps the text it has. The
+ *  registry copy is updated too, so a steer stranded by an abort rides the
+ *  next run with its edited text — or not at all, once cancelled. */
+export function editLiveSteer(chatId: string, id: string, text: string): boolean {
+	const agent = state().liveAgents.get(chatId);
+	if (!agent) return false;
+	const queued = agent.peekQueuedMessages();
+	if (!queued.some((m) => (m as { id?: string }).id === id)) return false;
+	const entries = state().userSteers.get(chatId) ?? [];
+	const entry = entries.find((e) => e.message.id === id);
+	if (!entry) return false;
+	const cancel = text.trim().length === 0;
+	if (cancel) {
+		const kept = entries.filter((e) => e !== entry);
+		if (kept.length === 0) state().userSteers.delete(chatId);
+		else state().userSteers.set(chatId, kept);
+	} else {
+		entry.message = newUserSteer(text, id);
+	}
+	agent.clearSteeringQueue();
+	for (const m of queued) {
+		if ((m as { id?: string }).id !== id) agent.steer(m);
+		else if (!cancel) agent.steer(entry.message);
+	}
 	return true;
 }
 
