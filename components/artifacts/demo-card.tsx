@@ -7,7 +7,7 @@ import { InvertDiscIcon } from "@/components/artifacts/invert-disc";
 import { ChatActionsContext } from "@/components/chat";
 import { downloadFile, slugFilename } from "@/components/artifacts/download";
 import { DispatchCard } from "@/components/artifacts/dispatch-card";
-import type { ArtifactPartProps, DemoResult } from "@/src/core";
+import { toneFromCssColor, type ArtifactPartProps, type ArtifactTone, type DemoResult } from "@/src/core";
 
 /**
  * Demo artifact card (W6): while the part is input-available, a job activity
@@ -20,7 +20,8 @@ import type { ArtifactPartProps, DemoResult } from "@/src/core";
  * postMessage {type:"demo-resize",height} (parent sizes the iframe) and
  * window.onerror → {type:"demo-error",message} (error chip on the card, with
  * a "Send to teacher" button that feeds the error back into the lesson — the
- * fix loop).
+ * fix loop), plus {type:"demo-tone",body,root} — the page's computed
+ * background, so a demo drawn light auto-inverts in the dark app.
  *
  * Bridge message handling is a pure function (reduceDemoBridgeState) so
  * tests cover it without a DOM.
@@ -44,6 +45,9 @@ window.addEventListener("load",post);
 window.addEventListener("error",function(e){send({type:"demo-error",message:e.message||String(e)})});
 setTimeout(post,50);
 setTimeout(post,400);
+var tone=function(){try{send({type:"demo-tone",body:getComputedStyle(document.body).backgroundColor,root:getComputedStyle(document.documentElement).backgroundColor})}catch(e){}};
+tone();
+window.addEventListener("load",tone);
 })();</script>`;
 
 /** Inject the bridge before </body> (or at the end of a body-less document). */
@@ -55,9 +59,11 @@ export function buildDemoSrcDoc(html: string): string {
 export interface DemoBridgeState {
 	height: number | null;
 	error: string | null;
+	/** Whether the page was drawn light; null = not reported yet. */
+	tone: ArtifactTone | null;
 }
 
-export const INITIAL_DEMO_BRIDGE_STATE: DemoBridgeState = { height: null, error: null };
+export const INITIAL_DEMO_BRIDGE_STATE: DemoBridgeState = { height: null, error: null, tone: null };
 
 const MIN_HEIGHT = 80;
 const MAX_HEIGHT = 2400;
@@ -74,6 +80,13 @@ export function reduceDemoBridgeState(state: DemoBridgeState, data: unknown): De
 	if (message.type === "demo-error") {
 		const text = typeof message.message === "string" && message.message.trim() ? message.message : "unknown error";
 		return text === state.error ? state : { ...state, error: text };
+	}
+	if (message.type === "demo-tone") {
+		const { body, root } = data as { body?: unknown; root?: unknown };
+		if (typeof body !== "string" || typeof root !== "string") return state;
+		// body, else html, else the card's white holder behind the iframe.
+		const tone = toneFromCssColor(body) ?? toneFromCssColor(root) ?? "light";
+		return tone === state.tone ? state : { ...state, tone };
 	}
 	return state;
 }

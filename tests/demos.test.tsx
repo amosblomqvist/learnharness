@@ -243,6 +243,24 @@ describe("demo bridge", () => {
 		assert.deepEqual(reduceDemoBridgeState(state, "demo-resize"), state);
 		assert.deepEqual(reduceDemoBridgeState(state, null), state);
 	});
+
+	it("the bridge reports the page background, and the reducer reads its tone", () => {
+		assert.match(buildDemoSrcDoc("<body></body>"), /demo-tone/);
+		const s0 = INITIAL_DEMO_BRIDGE_STATE;
+		assert.equal(s0.tone, null, "not reported yet");
+		assert.equal(reduceDemoBridgeState(s0, { type: "demo-tone", body: "rgb(255, 255, 255)", root: "rgba(0, 0, 0, 0)" }).tone, "light");
+		assert.equal(
+			reduceDemoBridgeState(s0, { type: "demo-tone", body: "rgba(0, 0, 0, 0)", root: "rgb(17, 17, 17)" }).tone,
+			"dark",
+			"html background when body is transparent",
+		);
+		assert.equal(
+			reduceDemoBridgeState(s0, { type: "demo-tone", body: "rgba(0, 0, 0, 0)", root: "rgba(0, 0, 0, 0)" }).tone,
+			"light",
+			"fully transparent → the white holder shows",
+		);
+		assert.equal(reduceDemoBridgeState(s0, { type: "demo-tone", body: 3 }), s0, "garbage is ignored");
+	});
 });
 
 // ─── 2. card rendering ───────────────────────────────────────────────────────
