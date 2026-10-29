@@ -147,6 +147,10 @@ describe("AgentSection (thin SSR)", () => {
 			<AgentSection agent={{ search: { engine: "tavily" } }} models={undefined} graph={undefined} onSectionChange={() => {}} onModelsChange={() => {}} />,
 		);
 		assert.ok(html2.includes("Tavily"), "pinned engine visible in the trigger");
+		const exa = renderToStaticMarkup(
+			<AgentSection agent={{ search: { engine: "exa" } }} models={undefined} graph={undefined} onSectionChange={() => {}} onModelsChange={() => {}} />,
+		);
+		assert.ok(exa.includes("Exa"), "an Exa pin retains its label in the trigger");
 	});
 
 	it("the prober graph-tools row: FIRST in the Tools group, default ON, its own key (wave 7)", () => {
