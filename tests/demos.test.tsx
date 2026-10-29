@@ -593,6 +593,13 @@ describe("setSteerUiInverted (the persisted invert switch, 2026-10-07)", () => {
 		const missing = setSteerUiInverted([demoSteer], "nope", true);
 		assert.equal(missing[0], demoSteer, "no target → identity");
 	});
+
+	it("null clears the pin back to auto (the key AND an emptied ui go)", () => {
+		const pinned = setSteerUiInverted([demoSteer], demoSteer.id, false);
+		const cleared = setSteerUiInverted(pinned, demoSteer.id, null);
+		const details = (cleared[0] as { details: { ui?: { inverted?: boolean } } }).details;
+		assert.equal(details.ui, undefined);
+	});
 });
 
 // Generated-figure image boundaries are covered in svg-image.test.tsx.

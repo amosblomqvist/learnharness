@@ -278,7 +278,8 @@ export interface SubagentResultMeta {
 export interface SubagentArtifactData {
 	kind: JobKind;
 	result: ResearchResult | DemoResult | VisualResult | PdfResult;
-	/** The learner's pinned UI state (invert switch) riding the record. */
+	/** The learner's pinned UI state (invert switch) riding the record.
+	 *  `inverted` absent = auto (core/artifact-invert.ts). */
 	ui?: { inverted?: boolean };
 }
 
@@ -289,24 +290,30 @@ export interface SteerDetails extends SubagentResultMeta {
 	/** LEARNER UI state pinned onto the artifact (owner, 2026-10-07): the
 	 *  invert switch's position, persisted so navigating away and back (or
 	 *  restarting) keeps it. A VIEW preference — never enters the teacher's
-	 *  context, never exports (the markdown engine reads `result` only). */
+	 *  context, never exports (the markdown engine reads `result` only).
+	 *  `inverted` absent = auto: follows the rendered mode for an artifact
+	 *  measured light (auto-invert, 2026-10-29). */
 	ui?: { inverted?: boolean };
 }
 
-/** Set a steer message's ui.inverted (pure): returns a NEW message array
- *  with the target's details updated — no-op (same array) when the message
- *  is missing or not an invertible artifact steer. The silent route's
- *  whole body. */
+/** Set a steer message's ui.inverted pin (pure): returns a NEW message
+ *  array with the target's details updated — no-op (same array members)
+ *  when the message is missing or not an invertible artifact steer. `null`
+ *  clears the pin back to auto (core/artifact-invert.ts) — the key goes,
+ *  and an emptied `ui` with it. The silent route's whole body. */
 export function setSteerUiInverted(
 	messages: readonly LhMessage[],
 	messageId: string,
-	inverted: boolean,
+	inverted: boolean | null,
 ): LhMessage[] {
 	return messages.map((m) => {
 		if (m.id !== messageId) return m;
 		const d = (m as LhMarkerMessage).details as Partial<SteerDetails> | undefined;
 		if (!d || (d.kind !== "demo" && d.kind !== "visual")) return m;
-		return { ...m, details: { ...d, ui: { ...d.ui, inverted } } } as LhMessage;
+		if (inverted !== null) return { ...m, details: { ...d, ui: { ...d.ui, inverted } } } as LhMessage;
+		const { inverted: _cleared, ...ui } = d.ui ?? {};
+		const { ui: _ui, ...rest } = d;
+		return { ...m, details: Object.keys(ui).length > 0 ? { ...rest, ui } : rest } as LhMessage;
 	});
 }
 
