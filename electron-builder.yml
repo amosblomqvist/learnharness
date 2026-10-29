@@ -6,11 +6,12 @@
 #     because native .node/dylib can't dlopen from a read-only archive and
 #     server.js process.chdir()s into its own dir;
 #   - the asar holds only the shell (electron/main.cjs + package.json);
-#   - signed + notarized since 2026-10-08 (Developer ID Application cert in
-#     the login keychain; notary credentials in the LH_NOTARY keychain
-#     profile; the profile + team env vars are baked into desktop:dist).
-appId: com.learnharness.LearnHarness
-productName: LearnHarness
+#   - FORK BUILD (Learnharness-FS, 2026-10-29): its own app id + product
+#     name (so its data folder and install are separate from the official
+#     LearnHarness), updates from josh-torrez/learnharness releases, and an
+#     ad-hoc signed, un-notarized Mac app (see mac: below).
+appId: io.github.josh-torrez.learnharness-fs
+productName: Learnharness-FS
 directories:
   output: dist
 # Icons (owner ruling, 2026-10-13) — per-platform sources in build/:
@@ -126,16 +127,18 @@ mac:
   # reads this string; macOS asks regardless of Electron's own handlers.
   extendInfo:
     NSMicrophoneUsageDescription: "LearnHarness uses the microphone only for speech-to-text input into your sessions."
-  hardenedRuntime: true
+  # FORK BUILD (Learnharness-FS, 2026-10-29): no Apple Developer ID, so the
+  # app is AD-HOC signed ("-") — Apple Silicon refuses to launch unsigned
+  # code — and never notarized. Hardened runtime is off: it only matters
+  # for notarization, and ad-hoc + hardened runtime needs an extra
+  # library-validation entitlement. First launch: right-click → Open (or
+  # System Settings → Privacy & Security → Open Anyway). Squirrel.Mac only
+  # installs updates into a Developer-ID-signed app, so electron/main.cjs
+  # keeps the Mac updater off; the zip target stays for the release set.
+  identity: "-"
+  hardenedRuntime: false
   entitlements: build/entitlements.mac.plist
-  # Signing + notarization (flipped 2026-10-08): identity auto-detects the
-  # Developer ID Application certificate from the login keychain;
-  # notarize: true makes electron-builder sign → submit to Apple's notary
-  # service → staple the ticket, all inside this one build (credentials
-  # via the LH_NOTARY keychain profile, env baked into desktop:dist).
-  # Adds minutes per build (Apple's scan queue). Verification battery:
-  # codesign --verify --deep / spctl --assess / stapler validate.
-  notarize: true
+  notarize: false
 dmg:
   title: "${productName} ${version}"
   # Owner artwork: 540×380 at 1×; the sibling background@2x.png is
@@ -188,7 +191,7 @@ publish:
   # would be a leak. desktop:dist passes no --publish flag, so builds never
   # upload; publishing happens at release time (GH_TOKEN + --publish).
   - provider: github
-    owner: amosblomqvist
+    owner: josh-torrez
     repo: learnharness
     # All three CI jobs contribute assets; only the owner publishes it.
     releaseType: draft
