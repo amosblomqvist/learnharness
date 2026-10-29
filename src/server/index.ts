@@ -22,7 +22,7 @@ export {
 	settingsStore,
 } from "../store/settings.ts";
 export { promptOverrides } from "../store/prompt-overrides.ts";
-export { isValidSegmentPath } from "../core/prompt-segments.ts";
+export { isValidSegmentPath, isCustomSkillPath } from "../core/prompt-segments.ts";
 // The canonical segment discovery/resolution lives in the agent layer
 // (composition is an agent concern); the barrel re-exports it for the
 // routes — server→agent is the lawful direction (chat-handler precedent).
