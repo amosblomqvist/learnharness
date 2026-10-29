@@ -412,6 +412,14 @@ The graph holds TRUE ideas about the world, nothing else — never anything abou
 teacher, or this reading: not "the learner understands X" but X. A misconception enters as its TRUE
 correction. Each statement is one self-contained idea at full precision.
 
+Write each new proposition's name and statement in the language of the source passage that teaches
+it, not the language of these instructions or THE GRAPH SO FAR. For mixed-language passages, follow
+the surrounding explanation while preserving technical terms, code, and mathematical notation as
+used in the source. Established terminology means the established term in that language, not an
+automatic translation into English. Aliases remain verbatim phrasings actually used in the source;
+do not invent translated aliases. Keep existing graph ideas referenced by id as instructed below —
+this is not a translation or renaming pass over the existing graph.
+
 Extract the load-bearing ideas of the subject — what a reference on it would teach — not the full run
 of the discourse. An idea earns its place only when the source's arguments run through it — examples,
 notation glosses, and restatements that no argument needs are not core ideas. Every idea must stand
