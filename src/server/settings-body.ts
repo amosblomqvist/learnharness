@@ -25,7 +25,7 @@ import type {
 	ModelsSettings,
 	RoleModelOverride,
 } from "../core/settings.ts";
-import { BACKGROUND_MODEL_ROLES, COMPACTION_THRESHOLD_FLOOR, CUSTOM_MODEL_PIN_FLOOR, EXTRACTION_CHUNK_TOKENS_FLOOR, MODEL_SLOTS } from "../core/settings.ts";
+import { BACKGROUND_MODEL_ROLES, COMPACTION_THRESHOLD_FLOOR, CONTEXT_WINDOW_CEILING, CUSTOM_MODEL_PIN_FLOOR, EXTRACTION_CHUNK_TOKENS_FLOOR, MODEL_SLOTS } from "../core/settings.ts";
 import { WRITABLE_TOOL_KEYS } from "../core/pending.ts";
 import { isDictationLanguage } from "../core/dictation.ts";
 
@@ -383,6 +383,18 @@ export function parseCompactionSettingsBody(body: unknown): SettingsBodyResult<C
 			};
 		}
 		settings.thresholdTokens = floored;
+	}
+	if (raw.contextWindows !== undefined) {
+		const windows = asRecord(raw.contextWindows);
+		if (!windows) return { ok: false, error: "contextWindows must be an object" };
+		const parsed: Record<string, number> = {};
+		for (const [key, value] of Object.entries(windows)) {
+			if (!/^chatgpt:[^\s:]+:[^\s:]+$/.test(key) || key.length > 512 || typeof value !== "number" || !Number.isSafeInteger(value) || value < COMPACTION_THRESHOLD_FLOOR || value > CONTEXT_WINDOW_CEILING) {
+				return { ok: false, error: `contextWindows must contain ChatGPT model ids and integer limits between ${COMPACTION_THRESHOLD_FLOOR} and ${CONTEXT_WINDOW_CEILING}` };
+			}
+			parsed[key] = value;
+		}
+		if (Object.keys(parsed).length) settings.contextWindows = parsed;
 	}
 	return { ok: true, settings };
 }

@@ -110,6 +110,8 @@ export interface ResolvedModelSpec {
 	provider: string;
 	id: string;
 	thinkingLevel?: ThinkingLevel;
+	/** Server-resolved, account-scoped context limit. */
+	contextWindow?: number;
 }
 
 /** The first entry of the baked default order the model supports (owner,
@@ -136,10 +138,12 @@ export function piEngineForSpec(spec: ResolvedModelSpec, background: boolean | (
 	// Custom endpoint owners authorize image attempts independently of sparse
 	// discovery metadata. Never promote the registered/catalog capabilities.
 	const permitImages = (value: Model<Api>): Model<Api> => ({ ...value, input: ["text", "image"] });
-	const model = custom && registeredModel ? permitImages(registeredModel) : registeredModel;
-	if (!model) {
+	const selected = custom && registeredModel ? permitImages(registeredModel) : registeredModel;
+	if (!selected) {
 		throw new Error(`${spec.provider} catalog has no model ${spec.id}`);
 	}
+	const model = typeof spec.contextWindow === "number" && Number.isSafeInteger(spec.contextWindow) && spec.contextWindow > 0
+		? { ...selected, contextWindow: spec.contextWindow } : selected;
 	// UNSET level → the baked default order (first entry the model
 	// supports); SET level → pi's native nearest-clamp (model swaps keep
 	// the user's intent and adapt honestly).

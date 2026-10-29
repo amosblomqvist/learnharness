@@ -231,6 +231,16 @@ describe("parseCompactionSettingsBody (owner round 14)", () => {
 		assert.ok(!r.ok);
 		assert.match(r.error ?? "", /must be a number/);
 	});
+	it("accepts account-scoped context windows and rejects unsafe values", () => {
+		const valid = parseCompactionSettingsBody({ thresholdTokens: 800_000, contextWindows: { "chatgpt:account-a:gpt-6.1-sol": 872_000 } });
+		assert.ok(valid.ok);
+		assert.deepEqual(valid.settings.contextWindows, { "chatgpt:account-a:gpt-6.1-sol": 872_000 });
+		for (const value of [0, 31_999, 1.2, 10_000_001, "872000"]) {
+			assert.equal(parseCompactionSettingsBody({ contextWindows: { "chatgpt:account-a:gpt-6.1-sol": value } }).ok, false);
+		}
+		assert.equal(parseCompactionSettingsBody({ contextWindows: { "openai:gpt-6.1-sol": 872_000 } }).ok, false);
+		assert.equal(parseCompactionSettingsBody({ contextWindows: [] }).ok, false);
+	});
 });
 
 describe("SETTINGS_SECTIONS (the route's section map)", () => {

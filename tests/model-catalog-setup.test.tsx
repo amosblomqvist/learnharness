@@ -296,3 +296,18 @@ test("OpenCode's saved shared credential names both Pi providers without changin
 	assert.equal(providerKeyLabel("FIXTURE_KEY", [provider]), "Fixture");
 	assert.equal(classifyKeys([{ id: "OPENCODE_API_KEY", info: null, present: true, masked: "…fake", source: "file", shadowedByEnv: false }], providers).addable.length, 0);
 });
+
+test("a context setting refreshes the shared catalog and an older response cannot overwrite it", async () => {
+	installFetch();
+	const initial = catalog(); initial.models[0] = { ...a, contextWindow: 272_000 };
+	await warm(initial);
+	await act(async () => notifySettingsSaved("compaction"));
+	assert.equal(requests.length, 2, "context changes revalidate every catalog consumer");
+	await act(async () => notifySettingsSaved("compaction"));
+	assert.equal(requests.length, 3);
+	const current = catalog(); current.models[0] = { ...a, contextWindow: 800_000 };
+	const stale = catalog(); stale.models[0] = { ...a, contextWindow: 400_000 };
+	await answer(2, current);
+	await answer(1, stale);
+	assert.equal(snapshot.catalog?.models[0]?.contextWindow, 800_000);
+});

@@ -53,6 +53,13 @@ describe("isHexColor", () => {
 });
 
 describe("sanitizeUserSettings", () => {
+	it("sanitizes compaction even when no graph section exists", () => {
+		const value = sanitizeUserSettings({ version: 1, compaction: { thresholdTokens: 800_000, contextWindows: {
+			"chatgpt:account-a:gpt-6.1-sol": 872_000, "chatgpt:account-b:gpt-6.1-sol": -1, "openai:gpt-6.1-sol": 999_999,
+		} } });
+		assert.deepEqual(value?.compaction, { thresholdTokens: 800_000, contextWindows: { "chatgpt:account-a:gpt-6.1-sol": 872_000 } });
+		assert.equal(sanitizeUserSettings({ compaction: "invalid" })?.compaction, undefined);
+	});
 	it("round-trips a fully valid record field-for-field", () => {
 		const record = {
 			version: 1,

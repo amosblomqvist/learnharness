@@ -60,6 +60,7 @@ import { Hint } from "@/components/ui/hint";
 import type React from "react";
 import {
 	COMPACTION_THRESHOLD_FLOOR,
+	COMPACTION_RESERVE_TOKENS,
 	MODEL_SLOTS,
 	resolveSettings,
 	type AgentSettings,
@@ -162,6 +163,18 @@ export function composeSearchEngine(
 		return { ...rest } as AgentSettings;
 	}
 	return { ...agent, search: { engine } };
+}
+
+/** Write an account/model window choice without disturbing other settings. */
+export function composeContextWindow(compaction: CompactionSettings | undefined, key: string, value: string, max: number): CompactionSettings | null {
+	const windows = { ...compaction?.contextWindows };
+	if (!value) delete windows[key];
+	else {
+		const n = Number(value);
+		if (!Number.isFinite(n) || n <= 0) return null;
+		windows[key] = Math.min(max, Math.max(COMPACTION_THRESHOLD_FLOOR, Math.floor(n)));
+	}
+	return { ...compaction, contextWindows: Object.keys(windows).length ? windows : undefined };
 }
 
 /** The indicator under a row whose override IS the version in use (owner
@@ -290,11 +303,12 @@ export function AgentSection({
 	/** Writes the composed models section (slots — replace-PUT discipline). */
 	onModelsChange: (next: ModelsSettings) => void;
 	/** Writes the whole compaction section (replace-PUT discipline). */
-	onCompactionChange: (next: CompactionSettings) => void;
+	onCompactionChange: (change: (current: CompactionSettings | undefined) => CompactionSettings) => void;
 }) {
 	const { catalog: body, failed: catalogFailed, refresh: refreshCatalog } = useModelCatalog();
 	const catalog = body?.models;
 	const slots = body?.slots;
+	const [contextSelection, setContextSelection] = useState("");
 	/** The live search state (/api/search) — the row's reason line. */
 	const [search, setSearch] = useState<{ available: boolean; engine: string | null; reason: string } | null>(null);
 	/** Which search engines have a key (/api/keys) — the no-keys-anywhere
@@ -816,9 +830,47 @@ export function AgentSection({
 			</SettingsGroup>
 
 			<SettingsGroup label="Context" testid="group-context">
+				{(() => {
+					const candidates = catalog?.filter((m) => m.provider === "chatgpt" && m.contextWindowKey && (m.maxContextWindow ?? 0) >= COMPACTION_THRESHOLD_FLOOR) ?? [];
+					const strong = slots?.strong?.model;
+					const selected = candidates.find((m) => m.contextWindowKey === contextSelection)
+						?? candidates.find((m) => m.provider === strong?.provider && m.id === strong.id)
+						?? candidates[0];
+					if (!selected?.contextWindowKey || selected.maxContextWindow === undefined) return null;
+					const key = selected.contextWindowKey;
+					const max = selected.maxContextWindow;
+					return (
+						<SettingsRow label="Model context window" testid="context-window-row"
+							hint={`Account default ${selected.defaultContextWindow ?? selected.contextWindow}; maximum ${max}; effective ${selected.contextWindow}. Applies only to this account and model.`}>
+							<span className="flex items-center gap-2">
+								<select aria-label="Context model" data-testid="context-model" value={key}
+									onChange={(event) => setContextSelection(event.target.value)}
+									className="max-w-44 rounded-md border border-border bg-card px-2 py-1 text-xs text-foreground">
+									{candidates.map((model) => <option key={model.contextWindowKey} value={model.contextWindowKey}>{model.name}</option>)}
+								</select>
+								<CommitInput type="number" ariaLabel="model context window" testid="input-context-window"
+									value={String(compaction?.contextWindows?.[key] ?? "")}
+									placeholder={String(selected.defaultContextWindow ?? selected.contextWindow)}
+									onCommit={(value) => {
+										if (!composeContextWindow(undefined, key, value, max)) return;
+										onCompactionChange((current) => composeContextWindow(current, key, value, max)!);
+									}} />
+							</span>
+						</SettingsRow>
+					);
+				})()}
 				<SettingsRow
 					label="Compaction threshold"
-					hint={`${resolvedCompaction.thresholdTokens} tok`}
+					hint={(() => {
+						const candidates = catalog?.filter((m) => m.provider === "chatgpt" && m.contextWindowKey && (m.maxContextWindow ?? 0) >= COMPACTION_THRESHOLD_FLOOR) ?? [];
+						const strong = slots?.strong?.model;
+						const model = candidates.find((m) => m.contextWindowKey === contextSelection)
+							?? candidates.find((m) => m.provider === strong?.provider && m.id === strong?.id)
+							?? candidates[0];
+						if (!model || model.contextWindow === null) return `${resolvedCompaction.thresholdTokens} tok`;
+						const effective = Math.min(resolvedCompaction.thresholdTokens, Math.max(model.contextWindow - COMPACTION_RESERVE_TOKENS, 1));
+						return `${effective} tok effective for ${model.name} (${COMPACTION_RESERVE_TOKENS} reserved)`;
+					})()}
 					testid="compaction-row-threshold"
 				>
 					<CommitInput
@@ -831,7 +883,7 @@ export function AgentSection({
 							// Empty = factory default (the budget row's discipline):
 							// absence is the unset for numbers.
 							if (v === "") {
-								onCompactionChange({ ...compaction, thresholdTokens: undefined });
+								onCompactionChange((current) => ({ ...current, thresholdTokens: undefined }));
 								return;
 							}
 							const n = Number(v);
@@ -839,10 +891,10 @@ export function AgentSection({
 							// Mirror the server floor (anti-churn: each compaction
 							// keeps a ~20k-token tail); no ceiling — the effective
 							// trigger is min(threshold, contextWindow − 16k) anyway.
-							onCompactionChange({
-								...compaction,
+							onCompactionChange((current) => ({
+								...current,
 								thresholdTokens: Math.max(COMPACTION_THRESHOLD_FLOOR, Math.round(n)),
-							});
+							}));
 						}}
 					/>
 				</SettingsRow>

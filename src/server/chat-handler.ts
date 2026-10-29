@@ -149,7 +149,17 @@ setTurnRunner(async (chatId, input) => {
  *  FRESH so a settings PUT between dispatch and spawn lands. */
 function resolveEngine(role: ModelRole): PiEngine | undefined {
 	const spec = resolveRoleSpec(role, stores.settingsStore.readSettings());
-	return spec ? piEngineForSpec(spec) : undefined;
+	return spec ? piEngineForSpec(withContextWindow(spec)) : undefined;
+}
+
+export function withContextWindow<T extends { provider: string; id: string }>(spec: T): T & { contextWindow?: number } {
+	const contextWindow = catalogContextLimits().get(`${spec.provider}:${spec.id}`);
+	return contextWindow === undefined ? spec : { ...spec, contextWindow };
+}
+
+/** Only a known catalog limit can cap compaction; CLI model values are placeholders. */
+export function compactionThresholdForSpec(setting: number | undefined, spec: { contextWindow?: number }): number {
+	return effectiveThresholdTokens(setting, spec.contextWindow);
 }
 
 setJobRespawn((jobId) => void jobRunner.runJob(jobId));
@@ -259,20 +269,18 @@ export async function handleChatInput(
 		noDispatch: (kind) => requestCycle?.noDispatch(kind),
 	};
 	let conversationEngine: PiEngine;
-	try { conversationEngine = piEngineForSpec(conversation, () => callPurpose.background, lifecycle); }
+	const conversationWithContext = withContextWindow(conversation);
+	try { conversationEngine = piEngineForSpec(conversationWithContext, () => callPurpose.background, lifecycle); }
 	catch { return Response.json({ error: conversation.provider === "chatgpt" ? chatGPTStreamError("model catalog") : isSubscriptionProvider(conversation.provider) ? nativeSubscriptionError(conversation.provider, "model catalog") : "The selected model is unavailable." }, { status: 503 }); }
 	const modelIdForCompaction = `${conversationEngine.model.provider}:${conversationEngine.model.id}`;
 	await ensureCompacted(
 		{
 			chatStore: stores.chatStore,
-			engine: piEngineForSpec(conversation, true),
+			engine: piEngineForSpec(conversationWithContext, true),
 			canStart: () => connectionBackgroundAllowed(conversation.provider),
 			modelId: modelIdForCompaction,
 			kind: record.kind === "practice" ? "practice" : hasProbeDone(record.messages) ? "teach" : "probe",
-			thresholdTokens: effectiveThresholdTokens(
-				effective.compaction?.thresholdTokens,
-				catalogContextLimits().get(modelIdForCompaction),
-			),
+			thresholdTokens: compactionThresholdForSpec(effective.compaction?.thresholdTokens, conversationWithContext),
 			systemPromptTokens: Math.ceil(composeInstructions(record.kind === "practice" ? "practice" : "teacher").length / 4),
 		},
 		chatId,
@@ -634,7 +642,8 @@ export async function handleChatInput(
 						const spec = resolveConversationSpec(stores.chatStore.getChat(chatId)?.settings, fresh.models.strong);
 						if (!spec || !connectionBackgroundAllowed(spec.provider)) return null;
 						let kickEngine: PiEngine;
-						try { kickEngine = piEngineForSpec(spec, true); } catch { return null; }
+						const kickWithContext = withContextWindow(spec);
+						try { kickEngine = piEngineForSpec(kickWithContext, true); } catch { return null; }
 						const kickModelId = `${kickEngine.model.provider}:${kickEngine.model.id}`;
 						const freshRecord = stores.chatStore.getChat(chatId);
 						if (!freshRecord) return null;
@@ -644,10 +653,7 @@ export async function handleChatInput(
 							canStart: () => connectionBackgroundAllowed(spec.provider),
 							modelId: kickModelId,
 							kind: freshRecord.kind === "practice" ? "practice" : hasProbeDone(freshRecord.messages) ? "teach" : "probe",
-							thresholdTokens: effectiveThresholdTokens(
-								fresh.compaction?.thresholdTokens,
-								catalogContextLimits().get(kickModelId),
-							),
+							thresholdTokens: compactionThresholdForSpec(fresh.compaction?.thresholdTokens, kickWithContext),
 							systemPromptTokens: Math.ceil(composeInstructions(freshRecord.kind === "practice" ? "practice" : "teacher").length / 4),
 						};
 					}, chatId);
