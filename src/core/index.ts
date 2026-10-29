@@ -62,6 +62,9 @@ export * from "./fuzzy.ts";
 // the user-settings record's shape/sanitizer (pure) and its fully-resolved
 // view. Browser-safe — the Wave-4 panel imports these directly.
 export * from "./settings.ts";
+// appearance-palette.ts (light-mode wave, 2026-10-29): the mode resolver and
+// the per-variant palette curves — pure, shared by the provider and Settings.
+export * from "./appearance-palette.ts";
 export * from "./dictation.ts";
 // graph-deletion.ts (wave 6): the whole module is PURE but storage-port
 // driven — the deletion RUNS server-side only. The shell needs exactly one

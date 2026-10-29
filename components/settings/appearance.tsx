@@ -7,9 +7,11 @@
  * Why variables and not className swaps: every seam the settings touch was
  * built token-first (--font-prose, --lh-prose-size, --lh-ink-strong, …),
  * so application is setProperty and nothing re-renders. The ONE thing the
- * variables can't reach — the mode — is dark-only this wave (the light
- * palette is designed in the later design wave; <html class="dark"> is
- * static in app/layout.tsx).
+ * variables can't reach — the mode — is a class on <html> (light-mode
+ * wave, 2026-10-29): app/layout.tsx server-renders `dark`/`light` plus
+ * data-lh-mode from the settings record, an inline <head> script resolves
+ * System against the OS before first paint, and this provider owns every
+ * live switch after that (a settings write, an OS flip under System).
  *
  * The provider is mounted at the ROOT LAYOUT level (like ActivityProvider):
  * every page picks appearance up on load. The settings page writes a
@@ -19,8 +21,14 @@
  * with the other navigations — mod+, pushes /settings from anywhere.)
  */
 
-import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
-import { FACTORY_SETTINGS, type AppearanceSettings } from "@/src/core";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import {
+	FACTORY_SETTINGS,
+	resolveRenderedMode,
+	type AppearanceMode,
+	type AppearanceSettings,
+	type RenderedMode,
+} from "@/src/core";
 
 /** The resolved, fully-concrete appearance view (delta + factory merged). */
 export function resolveAppearance(delta: AppearanceSettings | undefined) {
@@ -28,6 +36,7 @@ export function resolveAppearance(delta: AppearanceSettings | undefined) {
 	return {
 		mode: delta?.mode ?? f.mode,
 		background: delta?.background ?? f.background,
+		lightBackground: delta?.lightBackground ?? f.lightBackground,
 		fontFamily: delta?.fontFamily ?? f.fontFamily,
 		proseFontSize: delta?.proseFontSize ?? f.proseFontSize,
 		sessionNameSerif: delta?.sessionNameSerif ?? f.sessionNameSerif,
@@ -110,22 +119,63 @@ export function staleVarNames(
 interface AppearanceContextValue {
 	/** Resolved appearance; factory until the record arrives. */
 	appearance: ReturnType<typeof resolveAppearance>;
+	/** The variant actually on screen — System resolved against the OS. */
+	resolvedMode: RenderedMode;
 	/** Called by the settings page after a successful section PUT. */
 	onAppearanceChange: (delta: AppearanceSettings | undefined) => void;
 }
 
 const AppearanceContext = createContext<AppearanceContextValue>({
 	appearance: resolveAppearance(undefined),
+	resolvedMode: "dark",
 	onAppearanceChange: () => {},
 });
+
+const DARK_QUERY = "(prefers-color-scheme: dark)";
+
+function subscribePrefersDark(onChange: () => void): () => void {
+	const mq = window.matchMedia(DARK_QUERY);
+	mq.addEventListener("change", onChange);
+	return () => mq.removeEventListener("change", onChange);
+}
+
+/** The OS preference as an external store: the server snapshot is dark (the
+ *  layout's default), so hydration matches the server HTML and React
+ *  re-renders with the real value right after — no mismatch under System. */
+function usePrefersDark(): boolean {
+	return useSyncExternalStore(subscribePrefersDark, () => window.matchMedia(DARK_QUERY).matches, () => true);
+}
 
 export function useAppearance() {
 	return useContext(AppearanceContext);
 }
 
-export function AppearanceProvider({ children }: { children: React.ReactNode }) {
+export function AppearanceProvider({
+	children,
+	initialMode,
+}: {
+	children: React.ReactNode;
+	/** The mode the layout server-rendered — holds until the record arrives. */
+	initialMode: AppearanceMode;
+}) {
 	const [delta, setDelta] = useState<AppearanceSettings | undefined>(undefined);
 	const appliedRef = useRef<string>("");
+	const prefersDark = usePrefersDark();
+	const mode: AppearanceMode = delta?.mode ?? initialMode;
+	const resolvedMode = resolveRenderedMode(mode, prefersDark);
+
+	// The mode lives on <html>: data-lh-mode for the pre-paint script on the
+	// next load, the class for every `.dark`/`.light` rule and variant.
+	// System reads the OS here, not resolvedMode: during hydration that still
+	// holds the server snapshot (dark) and would undo the head script's class
+	// for a commit. resolvedMode stays a dep so an OS flip re-runs this.
+	useEffect(() => {
+		const root = document.documentElement;
+		const dark = mode === "system" ? window.matchMedia(DARK_QUERY).matches : mode === "dark";
+		root.dataset.lhMode = mode;
+		root.classList.toggle("dark", dark);
+		root.classList.toggle("light", !dark);
+	}, [mode, resolvedMode]);
 
 	// The vars apply on every change — stringified as the change signal.
 	const vars = useMemo(() => appearanceVars(resolveAppearance(delta)), [delta]);
@@ -178,8 +228,8 @@ export function AppearanceProvider({ children }: { children: React.ReactNode }) 
 	}, []);
 
 	const value = useMemo(
-		() => ({ appearance: resolveAppearance(delta), onAppearanceChange }),
-		[delta, onAppearanceChange],
+		() => ({ appearance: resolveAppearance(delta), resolvedMode, onAppearanceChange }),
+		[delta, resolvedMode, onAppearanceChange],
 	);
 	return <AppearanceContext.Provider value={value}>{children}</AppearanceContext.Provider>;
 }

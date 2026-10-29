@@ -28,6 +28,7 @@ describe("resolveAppearance — delta over factory", () => {
 		const a = resolveAppearance(undefined);
 		assert.equal(a.mode, "dark");
 		assert.equal(a.background, null);
+		assert.equal(a.lightBackground, null);
 		assert.equal(a.fontFamily, null);
 		assert.equal(a.proseFontSize, 16);
 		assert.equal(a.sessionNameSerif, true);
