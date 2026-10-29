@@ -28,8 +28,13 @@
 }
 
 /* Palette (owner's hexes): main #141414, raised #1C1C1C, edges #434343.
-   Mono chrome = JetBrains Mono; prose = Source Sans 3; titles = CMU Serif. */
-:root {
+   Mono chrome = JetBrains Mono; prose = Source Sans 3; titles = CMU Serif.
+   Dark is the default variant (:root) and the `.dark` class on <html>;
+   `.light` below overrides the colors only. The color defaults here are
+   variantPalette(mode, null) in src/core/appearance-palette.ts as
+   literals — tests/appearance-palette.test.ts pins the two equal. */
+:root,
+.dark {
 	color-scheme: dark;
 	--radius: 8px;
 	--background: #141414;
@@ -50,6 +55,8 @@
 	--border: #434343;
 	--input: #434343;
 	--ring: #8d8d8d;
+	/* The strong line ink: plan-map outlines, callout borders, the LH mark. */
+	--lh-line-strong: #ffffff;
 	/* Emphasis inks default to the REGULAR TEXT COLOR (owner ruling,
 	   appearance wave 2026-09-26 — the old #ee928c/#6fa9d6 factory
 	   emphasis colors are gone). Explicit overrides land via the
@@ -67,39 +74,32 @@
 	--lh-heading-weight: 900;
 }
 
-/* The app is always dark (<html class="dark">); mirror the same values so
-   the block stays coherent under Tailwind's variant. */
-.dark {
-	--background: #141414;
-	--foreground: #e6e6e6;
-	--card: #1c1c1c;
-	--card-foreground: #e6e6e6;
-	--popover: #1c1c1c;
-	--popover-foreground: #e6e6e6;
-	--primary: #e6e6e6;
-	--primary-foreground: #141414;
-	--secondary: #1c1c1c;
-	--secondary-foreground: #e6e6e6;
-	--muted: #1c1c1c;
-	--muted-foreground: #8d8d8d;
-	--accent: #2a2a2a;
-	--accent-foreground: #e6e6e6;
-	--destructive: oklch(0.704 0.191 22.216);
-	--border: #434343;
-	--input: #434343;
-	--ring: #8d8d8d;
-	/* Same emphasis ruling as the block above: unset = text color. */
+/* The light variant ("paper": #f5f5f3 page, white raised surfaces). Must
+   follow the block above: :root still matches <html class="light">, and
+   with equal specificity the later rule wins. */
+.light {
+	color-scheme: light;
+	--background: #f5f5f3;
+	--foreground: #1a1a1a;
+	--card: #ffffff;
+	--card-foreground: #1a1a1a;
+	--popover: #ffffff;
+	--popover-foreground: #1a1a1a;
+	--primary: #1a1a1a;
+	--primary-foreground: #f5f5f3;
+	--secondary: #ffffff;
+	--secondary-foreground: #1a1a1a;
+	--muted: #ffffff;
+	--muted-foreground: #6b6b68;
+	--accent: #e8e8e6;
+	--accent-foreground: #1a1a1a;
+	--destructive: oklch(0.577 0.245 27.325);
+	--border: #d4d4d2;
+	--input: #d4d4d2;
+	--ring: #6b6b68;
+	--lh-line-strong: var(--foreground);
 	--lh-ink-strong: var(--foreground);
 	--lh-ink-italic: var(--foreground);
-	/* THE READING SIZE = the ladder's 16px rung (--text-lg). Can't be
-	   var()-linked: @theme inline inlines literals into utilities without
-	   emitting runtime vars — so this is the one documented duplication:
-	   change one, change both. (owner, typography round 4: snapped from
-	   the reskin's hand-tuned 16.5 to the ladder's 16.) */
-	--lh-prose-size: 16px;
-	--lh-prose-leading: 1.5;
-	/* Markdown heading weight (appearance settings; 900 = the Black cut). */
-	--lh-heading-weight: 900;
 }
 
 /* CMU Serif bold (titles) — bundled local file, no CDN dependency. */
@@ -173,6 +173,7 @@
 	--color-border: var(--border);
 	--color-input: var(--input);
 	--color-ring: var(--ring);
+	--color-line-strong: var(--lh-line-strong);
 }
 
 * {

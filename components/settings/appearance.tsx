@@ -25,6 +25,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import {
 	FACTORY_SETTINGS,
 	resolveRenderedMode,
+	variantPalette,
 	type AppearanceMode,
 	type AppearanceSettings,
 	type RenderedMode,
@@ -48,44 +49,41 @@ export function resolveAppearance(delta: AppearanceSettings | undefined) {
 	};
 }
 
-/** One channel clamped on the dark curve: additive offsets matching today's
- *  hand-picked palette (#141414 → card #1c1c1c (+8) → accent #2a2a2a (+22)
- *  → border #434343 (+47)) — the "per-mode derivation in code" the schema
- *  promises, as the thinnest curve that keeps the palette's relationships. */
-function raise(hex: string, add: number): string {
-	const n = hex.length === 4
-		? hex.slice(1).split("").map((c) => parseInt(c + c, 16))
-		: [parseInt(hex.slice(1, 3), 16), parseInt(hex.slice(3, 5), 16), parseInt(hex.slice(5, 7), 16)];
-	return `#${n.map((c) => Math.min(255, c + add).toString(16).padStart(2, "0")).join("")}`;
-}
+/** The surfaces a chosen background moves — the inks stay the stylesheet's. */
+const SURFACE_TOKENS = [
+	"--background",
+	"--card",
+	"--popover",
+	"--secondary",
+	"--muted",
+	"--accent",
+	"--border",
+	"--input",
+	"--primary-foreground",
+] as const;
 
-/** The derived palette a chosen background implies (dark curve): background
- *  itself, the raised surfaces (card/popover/secondary/muted, +8), the
- *  accent (+22), the edges (border/input, +47), and primary-foreground
- *  (the inverted text on primary = the background's own color, as today). */
-export function derivedPalette(background: string): Record<string, string> {
-	const card = raise(background, 8);
-	const accent = raise(background, 22);
-	const border = raise(background, 47);
-	return {
-		"--background": background,
-		"--card": card,
-		"--popover": card,
-		"--secondary": card,
-		"--muted": card,
-		"--accent": accent,
-		"--border": border,
-		"--input": border,
-		"--primary-foreground": background,
-	};
+/** The derived palette a chosen background implies along one variant's
+ *  curve (src/core/appearance-palette.ts): background itself, the raised
+ *  surfaces (card/popover/secondary/muted), the accent, the edges
+ *  (border/input), and primary-foreground (the inverted text on primary =
+ *  the background's own color). */
+export function derivedPalette(background: string, mode: RenderedMode = "dark"): Record<string, string> {
+	const full = variantPalette(mode, background);
+	return Object.fromEntries(SURFACE_TOKENS.map((t) => [t, full[t]!]));
 }
 
 /** THE mapping: resolved appearance → the CSS variables to set on <html>.
- *  Absent entries = leave the factory stylesheet value in place. Pure —
- *  exported for tests. */
-export function appearanceVars(a: ReturnType<typeof resolveAppearance>): Record<string, string> {
+ *  Absent entries = leave the factory stylesheet value in place. Each
+ *  variant derives from its OWN background (dark `background`, light
+ *  `lightBackground`), so a dark custom palette never survives a switch to
+ *  light. Pure — exported for tests. */
+export function appearanceVars(
+	a: ReturnType<typeof resolveAppearance>,
+	mode: RenderedMode = "dark",
+): Record<string, string> {
 	const vars: Record<string, string> = {};
-	if (a.background !== null) Object.assign(vars, derivedPalette(a.background));
+	const bg = mode === "dark" ? a.background : a.lightBackground;
+	if (bg !== null) Object.assign(vars, derivedPalette(bg, mode));
 	if (a.fontFamily !== null) {
 		vars["--font-prose"] = `"${a.fontFamily}", var(--font-sans3), ui-sans-serif, system-ui, sans-serif`;
 	}
@@ -178,7 +176,7 @@ export function AppearanceProvider({
 	}, [mode, resolvedMode]);
 
 	// The vars apply on every change — stringified as the change signal.
-	const vars = useMemo(() => appearanceVars(resolveAppearance(delta)), [delta]);
+	const vars = useMemo(() => appearanceVars(resolveAppearance(delta), resolvedMode), [delta, resolvedMode]);
 	const key = useMemo(() => JSON.stringify(vars), [vars]);
 	// REMOVAL is half the job (owner repro, fix wave): a later write that
 	// OMITS a var (empty field = factory, serif toggle back on) must clear

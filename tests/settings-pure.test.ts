@@ -101,6 +101,16 @@ describe("appearanceVars — the mapping the provider applies", () => {
 		assert.equal(vars["--lh-ink-italic"], "#00ff00");
 	});
 
+	it("each mode derives from its own background; a dark custom never leaks into light", () => {
+		const a = resolveAppearance({ background: "#202020", lightBackground: null });
+		assert.equal(appearanceVars(a, "dark")["--background"], "#202020");
+		assert.equal(appearanceVars(a, "light")["--background"], undefined);
+		const light = appearanceVars(resolveAppearance({ lightBackground: "#eeeeee" }), "light");
+		assert.equal(light["--background"], "#eeeeee");
+		assert.equal(light["--card"], "#ffffff", "light raised surfaces stay white");
+		assert.equal(light["--border"], "#cdcdcd", "edges darken: 238 − 33");
+	});
+
 	it("sessionNameSerif false alone: titles move, nothing else does", () => {
 		const vars = appearanceVars(resolveAppearance({ sessionNameSerif: false }));
 		assert.equal(vars["--font-title"], "var(--font-prose)");
