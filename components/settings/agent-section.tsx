@@ -61,7 +61,12 @@ import type React from "react";
 import {
 	COMPACTION_THRESHOLD_FLOOR,
 	MODEL_SLOTS,
+	PERSONALIZATION_PRESETS,
+	PERSONALIZATION_SEGMENT,
+	applyPersonalizationPreset,
+	isCustomSkillPath,
 	resolveSettings,
+	sanitizeSkillPath,
 	type AgentSettings,
 	type CompactionSettings,
 	type GraphSettings,
@@ -182,7 +187,6 @@ export interface PromptSection {
 	hint?: string;
 	segments: SegmentInfo[];
 }
-
 /** Split the server's per-agent segment lists into the owner's three
  *  sections. The server contract returns the shared segments in BOTH
  *  lists (same paths, same content) — the shared chunks are listed ONCE
@@ -192,7 +196,7 @@ export interface PromptSection {
  *  assembly order (numeric-prefix filename sort). Pure — exported for
  *  tests. */
 export function sectionedSegments(view: { prober: SegmentInfo[]; teacher: SegmentInfo[] }): PromptSection[] {
-	const own = (who: "prober" | "teacher") => view[who].filter((s) => !s.shared);
+	const own = (who: "prober" | "teacher") => view[who].filter((s) => !s.shared && !isCustomSkillPath(s.path));
 	return [
 		{ id: "teacher", label: "Teacher", segments: own("teacher") },
 		{ id: "prober", label: "Prober", segments: own("prober") },
@@ -200,7 +204,7 @@ export function sectionedSegments(view: { prober: SegmentInfo[]; teacher: Segmen
 			id: "shared",
 			label: "Shared",
 			hint: "Used by both agents",
-			segments: view.teacher.filter((s) => s.shared),
+			segments: view.teacher.filter((s) => s.shared && !isCustomSkillPath(s.path)),
 		},
 	];
 }
@@ -308,6 +312,7 @@ export function AgentSection({
 	 *  row), which kind. */
 	const [openMenu, setOpenMenu] = useState<{ target: ModelSlotName | "search"; kind: "model" | "thinking" | "engine" } | null>(null);
 	const menuAnchorRef = useRef<HTMLSpanElement>(null);
+	const skillFileInputRef = useRef<HTMLInputElement>(null);
 
 	const refreshSearch = () =>
 		fetch("/api/search")
@@ -473,30 +478,34 @@ export function AgentSection({
 		// anything" half of the report).
 		const draft = segmentDraft[info.path] ?? info.overrideText ?? "";
 		const dirty = draft !== (info.overrideText ?? "");
+		const isCustom = isCustomSkillPath(info.path);
 		return (
 			<div key={info.path} data-testid={`prompt-segment-${info.path}`}>
 				<SettingsRow
 					label={info.path}
-					// Overhaul rulings (2026-09-26, refined): the small text
-					// states WHICH VERSION IS IN USE — nothing when the
-					// default composes (even with a saved override sitting
-					// on disk unused), "Your version is in use" when the
-					// switch is on. The switch's meaning becomes legible
-					// through this line.
 					hint={info.enabled ? PROMPT_IN_USE_HINT : undefined}
 					testid={`prompt-row-${info.path}`}
 				>
-					{/* Graying ruling: ONLY the toggle dims without an
-					    override file — the file name above stays
-					    full-contrast (the whole-row dim is dead). */}
-					<span className={fileExists ? undefined : "opacity-40"}>
-						<Toggle
-							checked={info.enabled}
-							disabled={!fileExists}
-							label={`prompt ${info.path}`}
-							onChange={(on) => onSectionChange(composePromptSwitch(agent, info.path, on))}
-						/>
-					</span>
+					<div className="flex items-center gap-3">
+						{isCustom && fileExists && (
+							<button
+								type="button"
+								data-testid={`delete-skill-${info.path}`}
+								onClick={() => void deleteSegment(info.path)}
+								className="text-xs text-muted-foreground/70 underline-offset-2 hover:text-red-500 hover:underline"
+							>
+								Delete
+							</button>
+						)}
+						<span className={fileExists ? undefined : "opacity-40"}>
+							<Toggle
+								checked={info.enabled}
+								disabled={!fileExists}
+								label={`prompt ${info.path}`}
+								onChange={(on) => onSectionChange(composePromptSwitch(agent, info.path, on))}
+							/>
+						</span>
+					</div>
 				</SettingsRow>
 				<button
 					type="button"
@@ -510,17 +519,21 @@ export function AgentSection({
 				</button>
 				{open && (
 					<div className="mt-1 flex flex-col gap-2">
+						{!isCustom && (
+							<div>
+								<p className="mb-1 text-xs uppercase tracking-widest text-muted-foreground/70">Source</p>
+								<textarea
+									readOnly
+									value={info.sourceText}
+									aria-label="The original instructions"
+									className="h-24 w-full resize-y rounded-sm border border-border bg-muted p-2 font-ui text-xs text-muted-foreground"
+								/>
+							</div>
+						)}
 						<div>
-							<p className="mb-1 text-xs uppercase tracking-widest text-muted-foreground/70">Source</p>
-							<textarea
-								readOnly
-								value={info.sourceText}
-								aria-label="The original instructions"
-								className="h-24 w-full resize-y rounded-sm border border-border bg-muted p-2 font-ui text-xs text-muted-foreground"
-							/>
-						</div>
-						<div>
-							<p className="mb-1 text-xs uppercase tracking-widest text-muted-foreground/70">Override</p>
+							<p className="mb-1 text-xs uppercase tracking-widest text-muted-foreground/70">
+								{isCustom ? "Skill instructions" : "Override"}
+							</p>
 							<textarea
 								value={segmentDraft[info.path] ?? info.overrideText ?? ""}
 								onChange={(e) => setSegmentDraft({ ...segmentDraft, [info.path]: e.target.value })}
@@ -551,12 +564,6 @@ export function AgentSection({
 									Delete
 								</button>
 							)}
-							{/* The quiet inline confirmation — next to the
-							    action, not the old path-echoing line at the
-							    section's bottom (production-copy: no file
-							    paths in user-facing status). One editor is
-							    open at a time (openSegment), so one shared
-							    status reads unambiguously. */}
 							{segmentStatus && (
 								<p className="text-xs text-muted-foreground/70" data-testid="segment-status">
 									{segmentStatus}
@@ -846,6 +853,130 @@ export function AgentSection({
 						}}
 					/>
 				</SettingsRow>
+			</SettingsGroup>
+
+			<SettingsGroup label="Personalization & Skills" testid="group-personalization">
+				{(() => {
+					const persInfo = prompts?.teacher.find((s) => s.path === PERSONALIZATION_SEGMENT);
+					const persDraft = segmentDraft[PERSONALIZATION_SEGMENT] ?? persInfo?.overrideText ?? "";
+					const persDirty = persDraft !== (persInfo?.overrideText ?? "");
+					const persExists = (persInfo?.overrideText ?? null) !== null;
+					const skillSegments = prompts?.teacher.filter((s) => isCustomSkillPath(s.path) && s.path !== PERSONALIZATION_SEGMENT) ?? [];
+					return (
+						<div className="flex flex-col gap-3">
+							<SettingsRow
+								label="Learning profile"
+								hint={persInfo?.enabled ? PROMPT_IN_USE_HINT : "Customize language, tone, and teaching preferences across all sessions"}
+								testid="personalization-row"
+							>
+								<span className={persExists ? undefined : "opacity-40"}>
+									<Toggle
+										checked={persInfo?.enabled ?? (agent?.prompts?.[PERSONALIZATION_SEGMENT] === true && persExists)}
+										disabled={!persExists}
+										label="learning profile"
+										onChange={(on) => onSectionChange(composePromptSwitch(agent, PERSONALIZATION_SEGMENT, on))}
+									/>
+								</span>
+							</SettingsRow>
+							<div className="flex flex-wrap gap-1.5">
+								{PERSONALIZATION_PRESETS.map((preset) => (
+									<button
+										key={preset.id}
+										type="button"
+										data-testid={`preset-chip-${preset.id}`}
+										onClick={() =>
+											setSegmentDraft({
+												...segmentDraft,
+												[PERSONALIZATION_SEGMENT]: applyPersonalizationPreset(persDraft, preset.snippet),
+											})
+										}
+										className="rounded-md border border-border bg-muted/40 px-2 py-1 font-ui text-xs text-muted-foreground transition-colors hover:border-muted-foreground/50 hover:text-foreground"
+									>
+										+ {preset.label}
+									</button>
+								))}
+							</div>
+							<textarea
+								data-testid="input-personalization"
+								value={persDraft}
+								onChange={(e) => setSegmentDraft({ ...segmentDraft, [PERSONALIZATION_SEGMENT]: e.target.value })}
+								aria-label="Personalization and learning preferences"
+								placeholder="e.g. Explain in Bahasa Indonesia, use code analogies, keep steps concise…"
+								className="h-20 w-full resize-y rounded-sm border border-border bg-background p-2 font-ui text-xs text-foreground outline-none"
+							/>
+							<div className="flex items-center gap-3">
+								<button
+									type="button"
+									data-testid="save-personalization-button"
+									disabled={!persDirty}
+									onClick={() => void saveSegment(PERSONALIZATION_SEGMENT, persDraft)}
+									className={
+										persDirty
+											? "text-xs text-foreground underline-offset-2 hover:underline"
+											: "cursor-not-allowed text-xs text-muted-foreground/40 underline-offset-2"
+									}
+								>
+									Save profile
+								</button>
+								{persExists && (
+									<button
+										type="button"
+										data-testid="delete-personalization-button"
+										onClick={() => {
+											setSegmentDraft((prev) => {
+												const next = { ...prev };
+												delete next[PERSONALIZATION_SEGMENT];
+												return next;
+											});
+											void deleteSegment(PERSONALIZATION_SEGMENT);
+										}}
+									>
+										Clear
+									</button>
+								)}
+							</div>
+							<div className="mt-1 border-t border-border/50 pt-2">
+								<SettingsRow
+									label="Custom skills (SKILL.md)"
+									hint="Upload markdown skill files to extend tutor instructions (uses built-in read/grep/demo/research tools)"
+									testid="upload-skill-row"
+								>
+									<div>
+										<input
+											ref={skillFileInputRef}
+											type="file"
+											accept=".md,text/markdown,text/plain"
+											data-testid="upload-skill-input"
+											className="hidden"
+											onChange={(e) => {
+												const file = e.target.files?.[0];
+												if (!file) return;
+												void file.text().then((content) => {
+													const targetPath = sanitizeSkillPath(file.name, content);
+													void saveSegment(targetPath, content);
+												});
+												e.target.value = "";
+											}}
+										/>
+										<button
+											type="button"
+											data-testid="upload-skill-button"
+											onClick={() => skillFileInputRef.current?.click()}
+											className="h-7 rounded-sm border border-border bg-background px-2.5 font-ui text-xs text-foreground hover:border-muted-foreground/50"
+										>
+											Upload SKILL.md
+										</button>
+									</div>
+								</SettingsRow>
+								{skillSegments.length > 0 && (
+									<div className="mt-2 flex flex-col gap-2" data-testid="uploaded-skills-list">
+										{skillSegments.map((info) => segmentRow(info))}
+									</div>
+								)}
+							</div>
+						</div>
+					);
+				})()}
 			</SettingsGroup>
 
 			<SettingsGroup label="System prompts" testid="group-prompts">
