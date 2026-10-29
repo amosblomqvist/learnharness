@@ -248,6 +248,9 @@ describe("demo bridge", () => {
 
 	it("the bridge reports the page background, and the reducer reads its tone", () => {
 		assert.match(buildDemoSrcDoc("<body></body>"), /demo-tone/);
+		// The iframe can load before the card hydrates (SSR html), so the card
+		// asks on mount and the bridge answers.
+		assert.match(DEMO_BRIDGE_SCRIPT, /demo-tone-request/);
 		const s0 = INITIAL_DEMO_BRIDGE_STATE;
 		assert.equal(s0.tone, null, "not reported yet");
 		assert.equal(reduceDemoBridgeState(s0, { type: "demo-tone", body: "rgb(255, 255, 255)", root: "rgba(0, 0, 0, 0)" }).tone, "light");

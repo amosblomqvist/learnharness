@@ -22,7 +22,9 @@ import { toneFromCssColor, type ArtifactPartProps, type ArtifactTone, type DemoR
  * window.onerror → {type:"demo-error",message} (error chip on the card, with
  * a "Send to teacher" button that feeds the error back into the lesson — the
  * fix loop), plus {type:"demo-tone",body,root} — the page's computed
- * background, so a demo drawn light auto-inverts in the dark app.
+ * background, so a demo drawn light auto-inverts in the dark app. The
+ * server-rendered iframe can load (and report) before the card hydrates,
+ * so the card also ASKS on mount ({type:"demo-tone-request"}).
  *
  * Bridge message handling is a pure function (reduceDemoBridgeState) so
  * tests cover it without a DOM.
@@ -49,6 +51,7 @@ setTimeout(post,400);
 var tone=function(){try{send({type:"demo-tone",body:getComputedStyle(document.body).backgroundColor,root:getComputedStyle(document.documentElement).backgroundColor})}catch(e){}};
 tone();
 window.addEventListener("load",tone);
+window.addEventListener("message",function(e){if(e.source===parent&&e.data&&e.data.type==="demo-tone-request")tone()});
 })();</script>`;
 
 /** Inject the bridge before </body> (or at the end of a body-less document). */
@@ -176,6 +179,9 @@ function DemoFrame({
 			setState((prev) => reduceDemoBridgeState(prev, event.data));
 		};
 		window.addEventListener("message", onMessage);
+		// A report sent before hydration was lost — ask again. If the frame
+		// has not loaded yet, its own on-load report arrives after this.
+		iframeRef.current?.contentWindow?.postMessage({ type: "demo-tone-request" }, "*");
 		return () => window.removeEventListener("message", onMessage);
 	}, []);
 
