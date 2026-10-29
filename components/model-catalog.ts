@@ -39,7 +39,7 @@ export function useModelCatalog(): { catalog: ModelCatalogResponse | undefined; 
 		catalogReaders.add(read);
 		if (first) {
 			stopCatalogSignals = onSettingsSaved((section) => {
-				if (section === "keys") {
+				if (section === "keys" || section === "claudeCode") {
 					catalogGeneration++; catalogInflight = undefined; catalogCache = undefined;
 					fetchCatalog();
 				} else if (section === "models") fetchCatalog(true);

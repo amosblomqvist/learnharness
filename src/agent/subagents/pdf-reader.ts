@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { AssistantMessage, Message, ToolResultMessage, Usage, Tool } from "@earendil-works/pi-ai";
 import { normalizeContext } from "@earendil-works/pi-ai";
+import { processImage, type ProcessImageResult } from "../image-processing/index.ts";
 import { Type } from "typebox";
 import { resolveSourcePath } from "../tools/fs-shared.ts";
 import { piEngineFor, type PiEngine, type ThinkingLevel } from "../models.ts";
@@ -246,7 +247,7 @@ export async function runPdfReaderAgent(
 			const toolResults: ToolResultMessage[] = [];
 			/** Rendered pages this batch, appended as images AFTER the tool
 			 *  results — the visual-maker's image-in-the-loop idiom. */
-			let renderedImages: { page: number; png: Buffer }[] | null = null;
+			let renderedImages: { page: number; image: ProcessImageResult }[] | null = null;
 
 			for (const call of toolCalls) {
 				const args = (call.arguments ?? {}) as Record<string, unknown>;
@@ -287,19 +288,26 @@ export async function runPdfReaderAgent(
 						const wanted = specNumbers(spec, RENDER_BATCH_CAP);
 						opts.onActivity?.(`pdf_render: ${spec} @${dpi}dpi`);
 						const pages = await headless.renderPdfPages(pdfPath, wanted, { dpi });
+						const processed: { page: number; image: ProcessImageResult }[] = [];
 						for (const p of pages) {
-							consulted.add(p.page);
-							read.add(p.page);
+							const image = await processImage(p.png, "image/png", { resizeOptions: engine.model.inputLimits?.images?.resize });
+							opts.abortSignal?.throwIfAborted();
+							processed.push({ page: p.page, image });
+							// Only images actually delivered to the model count as read.
+							if (image.ok) {
+								consulted.add(p.page);
+								read.add(p.page);
+							}
 						}
 						if (pages.length === 0) {
 							toolResults.push(toolText(call.id, call.name, "ERROR: no pages rendered (spec matched nothing?)"));
 						} else {
-							renderedImages = pages;
+							renderedImages = [...(renderedImages ?? []), ...processed];
 							toolResults.push(
 								toolText(
 									call.id,
 									call.name,
-									`Rendered ${pages.length} page(s) at ${dpi} DPI — the images follow below. Read them carefully (equations, diagrams, layout).`,
+									`Rendered ${pages.length} page(s) at ${dpi} DPI — processed images or explicit omission notes follow below. Read the images carefully (equations, diagrams, layout).`,
 								),
 							);
 						}
@@ -323,11 +331,12 @@ export async function runPdfReaderAgent(
 								type: "text",
 								text: `The rendered page(s), in order (${renderedImages.map((p) => `p${p.page}`).join(", ")}):`,
 							},
-							...renderedImages.map((p) => ({
-								type: "image" as const,
-								data: p.png.toString("base64"),
-								mimeType: "image/png",
-							})),
+							...renderedImages.flatMap(({ page, image }) => image.ok
+								? [
+									{ type: "text" as const, text: [`Page ${page}`, ...image.hints].join("\n") },
+									{ type: "image" as const, data: image.data, mimeType: image.mimeType },
+								]
+								: [{ type: "text" as const, text: `Page ${page}: ${image.message}` }]),
 						],
 						timestamp: Date.now(),
 					},

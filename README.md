@@ -12,7 +12,8 @@
   <a href="https://learnharness.ai">Download</a> ·
   <a href="#how-it-works">How it works</a> ·
   <a href="docs/development.md">Documentation</a> ·
-  <a href="https://github.com/amosblomqvist/learnharness/issues">Issues</a>
+  <a href="https://github.com/amosblomqvist/learnharness/issues">Issues</a> ·
+  <a href="https://discord.gg/5tCHHQEB2e">Discord</a>
 </p>
 
 LearnHarness uses AI agents to plan and teach lessons from your current understanding to your goal. It builds a detailed picture of what you understand and how you reason. That picture is updated as you learn.

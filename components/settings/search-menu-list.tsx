@@ -7,7 +7,7 @@ import { fuzzyScore } from "@/src/core";
  * Models and dictation languages supply only their catalog and row content.
  * The caller owns the shared MenuShell and dismissal behavior. */
 export function SearchMenuList<T>({
-	items, itemKey, searchTerms, compare, isSelected, onPick, renderItem,
+	items, itemKey, searchTerms, compare, prioritize, isSelected, onPick, renderItem,
 	searchTestid, listTestid, optionTestid, placeholder, ariaLabel, loading, empty,
 	disabled = false,
 }: {
@@ -15,6 +15,10 @@ export function SearchMenuList<T>({
 	itemKey: (item: T) => string;
 	searchTerms: (item: T) => string[];
 	compare?: (a: T, b: T) => number;
+	/** Optional grouping key: items it answers true for sort ahead of the
+	 *  rest, fuzzy rank still deciding within each group (a stable partition,
+	 *  never a filter — nothing is hidden). */
+	prioritize?: (item: T) => boolean;
 	isSelected: (item: T) => boolean;
 	onPick: (item: T) => void;
 	renderItem: (item: T) => ReactNode;
@@ -41,7 +45,12 @@ export function SearchMenuList<T>({
 	const results = (items ?? [])
 		.map((item) => ({ item, score: fuzzyScore(query, ...searchTerms(item)) }))
 		.filter((result) => result.score !== null)
-		.sort((a, b) => b.score! - a.score! || (compare?.(a.item, b.item) ?? 0))
+		.sort(
+			(a, b) =>
+				(prioritize ? Number(prioritize(b.item)) - Number(prioritize(a.item)) : 0) ||
+				b.score! - a.score! ||
+				(compare?.(a.item, b.item) ?? 0),
+		)
 		.map(({ item }) => item);
 
 	return <>

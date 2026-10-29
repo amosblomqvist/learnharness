@@ -3,6 +3,7 @@
 import { ArrowRightIcon, CornerDownLeftIcon, SquareIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Hint } from "@/components/ui/hint";
+import { PathInput } from "@/components/path-input";
 
 /**
  * The chat composer — content row ONLY (the persistent rounded shell lives in
@@ -59,7 +60,7 @@ export function Composer({
 	autoFocus?: boolean;
 	/** The page's handle to the textarea — the dictation-end focus (owner,
 	 *  2026-10-01): a run ending hands the cursor to the bare composer. */
-	inputRef?: React.RefObject<HTMLTextAreaElement | null>;
+	inputRef?: React.RefObject<HTMLDivElement | null>;
 	/** Escape while a dictation runs stops it (STT wave, 2026-09-17). No-op
 	 *  when absent — Esc otherwise means nothing in the composer. */
 	onEscape?: () => void;
@@ -90,10 +91,11 @@ export function Composer({
 				act();
 			}}
 		>
-			<textarea
+			<PathInput
 				ref={inputRef}
 				value={value}
-				onChange={(e) => onChange(e.target.value)}
+				onValueChange={onChange}
+				defaultDropTarget
 				onKeyDown={(e) => {
 					// Esc ends dictation before anything else Esc might someday mean
 					// here (the dictate decisions: click-again or Esc to stop).
@@ -115,7 +117,6 @@ export function Composer({
 				}}
 				placeholder={placeholder}
 				autoFocus={autoFocus}
-				rows={1}
 				className="field-sizing-content lh-input max-h-48 min-h-10 flex-1 resize-none bg-transparent px-2.5 py-2 outline-none placeholder:text-muted-foreground"
 			/>
 			{/* The button follows the text (owner report 2026-10-03): while

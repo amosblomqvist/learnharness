@@ -2,7 +2,7 @@ import React, { act } from "react";
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { parseHTML } from "linkedom";
-import { useDictation, type Dictation } from "../components/dictation.tsx";
+import { appendToPrimaryInput, useDictation, type Dictation } from "../components/dictation.tsx";
 
 test("cancelling pending key preflight and unmounting an upload invalidate late work", async () => {
 	const dom = parseHTML("<html><body><div id='root'></div></body></html>");
@@ -59,6 +59,9 @@ test("cancelling pending key preflight and unmounting an upload invalidate late 
 	let unmounted = false;
 	try {
 		await act(async () => root.render(<Harness />));
+		assert.equal(appendToPrimaryInput("/tmp/dropped-file"), true);
+		assert.deepEqual(appended, ["/tmp/dropped-file"], "file paths use the mounted dictation composer's target");
+		appended.length = 0;
 		await act(async () => current.toggle());
 		assert.equal(current.phase, "connecting");
 		assert.equal(micCalls, 0);
@@ -73,6 +76,7 @@ test("cancelling pending key preflight and unmounting an upload invalidate late 
 		await act(async () => { result = current.finish(); await Promise.resolve(); });
 		assert.equal(current.phase, "stopping");
 		await act(async () => { root.unmount(); unmounted = true; });
+		assert.equal(appendToPrimaryInput("/tmp/late-file"), false, "an unmounted composer cannot receive a dropped path");
 		assert.equal(uploadSignal.aborted, true);
 		assert.equal(await result, false);
 		await act(async () => finishUpload(Response.json({ text: "late result" })));

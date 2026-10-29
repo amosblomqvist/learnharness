@@ -42,6 +42,8 @@ export * from "./math-delims.ts";
 export * from "./native-messages.ts";
 export * from "./compaction.ts";
 export * from "./input-events.ts";
+export { parseFilePaths, quoteFilePath, filePathLabel } from "./file-paths.ts";
+export type { FilePathPart } from "./file-paths.ts";
 // Wave D (owner-approved 2026-09-26): the client view model — the grouping
 // canon (one continuous assistant document, step separators) ported from
 // the deleted server projection to the client side. Pure, browser-safe.
@@ -54,6 +56,7 @@ export type { ChatGPTStatus, ChatGPTControlBridge } from "./contracts/chatgpt.ts
 export { NATIVE_SUBSCRIPTIONS } from "./contracts/subscriptions.ts";
 export type { NativeSubscriptionProviderId, NativeSubscriptionLogicalId, NativeSubscriptionStatus, NativeSubscriptionSnapshot, NativeSubscriptionScope, NativeSubscriptionControlBridge, SubscriptionInteraction, SubscriptionPrompt } from "./contracts/subscriptions.ts";
 export * from "./cost-summary.ts";
+export { CLAUDE_CODE_PROVIDER, CLAUDE_CODE_MINIMUM_VERSION, type ClaudeCodeStatus } from "./contracts/claude-code.ts";
 export * from "./fuzzy.ts";
 // settings.ts + settings-resolution.ts (settings-storage wave, 2026-09-19):
 // the user-settings record's shape/sanitizer (pure) and its fully-resolved

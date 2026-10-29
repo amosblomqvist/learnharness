@@ -24,7 +24,7 @@ import { afterEach, describe, it } from "node:test";
 import { absorbed, pendingCallTool, SessionModel } from "../components/session-core.ts";
 import type { ChatInput } from "../src/core/input-events.ts";
 import type { LhMessage } from "../src/core/native-messages.ts";
-import { newUserMessage, newAnswerResult, newThinkingMessage, needsContinuation, endsInDismissal } from "../src/core/native-messages.ts";
+import { newUserMessage, newAnswerResult, newThinkingMessage, needsContinuation, endsInDismissal, pendingQuestionOf } from "../src/core/native-messages.ts";
 import { endsInFailedTurn, newCompactionMarker, newPlanBlockMessage, projectView } from "../src/core/index.ts";
 import { dismissedAnswer } from "../src/core/question-core.ts";
 import { buildAnswer, type QuestionData } from "../src/core/question-core.ts";
@@ -1019,6 +1019,108 @@ describe("answer submission recovery", () => {
 			assert.equal(m.status, "ready");
 		});
 	}
+
+	it("accepts immediate/recovery submissions and dismissals while a live question placeholder is in the tail", async () => {
+		for (const dismiss of [false, true]) {
+			let posts = 0;
+			const m = model({ initialMessages: [question], fetch: async (url) => {
+				if (String(url) === "/api/chat" || String(url).endsWith("/dismiss")) {
+					posts++;
+					return new Response("refused", { status: 500 });
+				}
+				return Response.json({ messages: [question], turnInFlight: false });
+			} });
+			m.applyWireEvent({ type: "turn_end", message: question, toolResults: [{ role: "toolResult", toolCallId: "q1", toolName: "quiz",
+				content: [{ type: "text", text: "Question posed" }], details: null, isError: false, timestamp: 1 }] });
+			const key = pendingQuestionOf([question])!.key;
+			if (dismiss) await m.dismissQuestion("q1", answer, key);
+			else {
+				await m.submitAnswer("quiz", "q1", answer, key);
+				await m.submitAnswer("quiz", "q1", answer, key);
+			}
+			assert.equal(posts, dismiss ? 1 : 2, "placeholder must not reject the render's question identity");
+		}
+	});
+
+	it("does not mistake an old same-id answer for resolution of the current question during recovery", async () => {
+		let posts = 0;
+		const newer = { ...question, id: "new-question" } as LhMessage;
+		const record = [question, newAnswerResult("q1", "quiz", answer), newer];
+		const m = model({ initialMessages: record, fetch: async (url) => {
+			if (String(url) === "/api/chat") { posts++; return new Response("refused", { status: 500 }); }
+			return Response.json({ messages: record, turnInFlight: false });
+		} });
+		const key = pendingQuestionOf(record)!.key;
+		m.saveQuestionDraft(key, { readingThinking: "NEW reasoning" });
+		await m.submitAnswer("quiz", "q1", answer, key);
+		await m.submitAnswer("quiz", "q1", answer, key);
+		assert.equal(posts, 2, "an older occurrence's result does not forbid retrying this one");
+		assert.equal(m.questionDraft(key)?.readingThinking, "NEW reasoning");
+		m.setMessages([...record, newAnswerResult("q1", "quiz", answer)]);
+		assert.equal(m.questionDraft(key), undefined);
+	});
+
+	it("adopts a newer same-id occurrence instead of reposting an older question's answer", async () => {
+		let posts = 0;
+		const newer = { ...question, id: "new-question" } as LhMessage;
+		const m = model({ initialMessages: [question], fetch: async (url) => {
+			if (String(url) === "/api/chat") { posts++; throw new TypeError("offline"); }
+			return Response.json({ messages: [question, newer], turnInFlight: false });
+		} });
+		const key = pendingQuestionOf([question])!.key;
+		await m.submitAnswer("quiz", "q1", answer, key);
+		await m.submitAnswer("quiz", "q1", answer, key);
+		assert.equal(posts, 1);
+		assert.equal(m.status, "ready");
+		assert.equal(pendingQuestionOf(m.getState().nativeMessages)?.messageId, "new-question");
+	});
+
+	it("rejects stale render callbacks locally, including same-id silent dismissals", async () => {
+		let requests = 0;
+		const m = model({ initialMessages: [question], fetch: async () => { requests++; return Response.json({ ok: true }); } });
+		const oldKey = pendingQuestionOf([question])!.key;
+		const newer = { ...question, id: "new-question" } as LhMessage;
+		m.setMessages([question, newer]);
+		await m.submitAnswer("quiz", "q1", answer, oldKey);
+		await m.dismissQuestion("q1", answer, oldKey);
+		assert.equal(requests, 0);
+		assert.equal(m.getState().nativeMessages.length, 2, "no optimistic answer targets the newer question");
+	});
+
+	it("uses the newest occurrence's tool for optimistic answers and dismissals", async () => {
+		const older = { ...question, id: "old-ask", content: [{ type: "toolCall", id: "q1", name: "ask_user_question", arguments: {} }] } as LhMessage;
+		for (const dismiss of [false, true]) {
+			const m = model({ initialMessages: [older, question], fetch: async () => { throw new TypeError("offline"); } });
+			const key = pendingQuestionOf([older, question])!.key;
+			let optimisticTool: string | undefined;
+			m.onChange = () => {
+				const result = m.getState().nativeMessages.find(m => m.role === "toolResult");
+				if (result?.role === "toolResult") optimisticTool = result.toolName;
+			};
+			if (dismiss) await m.dismissQuestion("q1", answer, key);
+			else await m.submitAnswer("quiz", "q1", answer, key);
+			assert.equal(optimisticTool, "quiz");
+		}
+	});
+
+	it("does not leak drafts between same-id questions, and preserves unique-id live handover", () => {
+		const m = model({ initialMessages: [question] });
+		const oldKey = pendingQuestionOf([question])!.key;
+		m.saveQuestionDraft(oldKey, { readingThinking: "old reasoning" });
+		const newer = { ...question, id: "new-question" } as LhMessage;
+		m.setMessages([question, newer]);
+		const newKey = pendingQuestionOf([question, newer])!.key;
+		assert.notEqual(oldKey, newKey);
+		assert.equal(m.questionDraft(newKey), undefined);
+		assert.equal(m.questionDraft(oldKey), undefined);
+
+		const live = { ...question, id: "c_live" };
+		m.setMessages([live]);
+		const liveKey = pendingQuestionOf([live])!.key;
+		m.saveQuestionDraft(liveKey, { readingThinking: "live reasoning" });
+		m.setMessages([question]);
+		assert.equal(m.questionDraft(pendingQuestionOf([question])!.key)?.readingThinking, "live reasoning");
+	});
 
 	it("adopts a changed pending question instead of sending the stale answer", async () => {
 		let posts = 0;
