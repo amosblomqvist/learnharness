@@ -67,6 +67,8 @@ import {
 	type RegionTuning,
 	INCREMENTAL_GRAVITY,
 	LINK_DISTANCE,
+	isolateLtrRuns,
+	letterDirection,
 	type DepthAnchorMode,
 	type GraphRenderSettings,
 	type LayoutNode,
@@ -173,13 +175,19 @@ const REGION_LABEL_LINE_HEIGHT = 1.3;
  *  char-wise for words alone wider than the max (long file paths — the
  *  node-label discipline), capped at maxLines. Overflow folds into the
  *  last line, ellipsized to fit. measure is the canvas measureText (or a
- *  fake in tests) — pure otherwise. */
+ *  fake in tests) — pure otherwise. The lines come back as drawn, isolated
+ *  when the label is right-to-left (see shownLabel). */
 export function wrapRegionLabel(
 	text: string,
 	maxWidth: number,
 	maxLines: number,
-	measure: (s: string) => number,
+	measureText: (s: string, label: string) => number,
 ): string[] {
+	const direction = letterDirection(text);
+	return regionLines(text, maxWidth, maxLines, (s) => measureText(s, text)).map((line) => shownLabel(line, direction));
+}
+
+function regionLines(text: string, maxWidth: number, maxLines: number, measure: (s: string) => number): string[] {
 	if (maxLines < 1) return [text];
 	if (measure(text) <= maxWidth) return [text];
 	const lines: string[] = [];
@@ -199,10 +207,11 @@ export function wrapRegionLabel(
 				// The word alone overflows: char-split it, the remainder stays
 				// pending for the next line (paths have no spaces to help).
 				let chunk = "";
-				while (word.length > 0 && measure(chunk + word[0]) <= maxWidth) {
-					chunk += word[0];
-					word = word.slice(1);
+				for (const { segment } of LABEL_GRAPHEMES.segment(word)) {
+					if (measure(chunk + segment) > maxWidth) break;
+					chunk += segment;
 				}
+				word = word.slice(chunk.length);
 				if (chunk) {
 					lines.push(chunk);
 					pending[0] = word;
@@ -228,9 +237,9 @@ export function wrapRegionLabel(
 		lines.push(rest);
 		return lines;
 	}
-	let tail = rest;
-	while (tail.length > 1 && measure(`${tail}…`) > maxWidth) tail = tail.slice(0, -1);
-	lines.push(`${tail}…`);
+	const tail = Array.from(LABEL_GRAPHEMES.segment(rest), ({ segment }) => segment);
+	while (tail.length > 1 && measure(`${tail.join("")}…`) > maxWidth) tail.pop();
+	lines.push(`${tail.join("")}…`);
 	return lines;
 }
 
@@ -248,7 +257,7 @@ export function applyClusterLabels(
 	labels: ReadonlyMap<string, string | null>,
 	maxWidth: number,
 	maxLines: number,
-	measure: (s: string) => number,
+	measure: (s: string, label: string) => number,
 ): boolean {
 	let changed = false;
 	for (const cluster of clusters) {
@@ -502,22 +511,42 @@ function rgbaFromHex(hex: string, alpha: number): string {
 	return `rgba(${r}, ${g}, ${b}, ${alpha})`;
 }
 
-/** Word-wrap for canvas text. Never truncates: overlong single words are
- *  hard-broken by character so no line ever exceeds maxWidth. */
-function wrapLabel(context: CanvasRenderingContext2D, text: string, maxWidth: number): string[] {
+const LABEL_GRAPHEMES = new Intl.Segmenter(undefined, { granularity: "grapheme" });
+
+/** Label text as the canvas draws it. A canvas line has no spans, so in a
+ *  right-to-left label each left-to-right run gets an isolate, which keeps
+ *  `C++` in order and adds no width. */
+function shownLabel(text: string, direction: "rtl" | "ltr" | undefined): string {
+	return direction === "rtl" ? isolateLtrRuns(text) : text;
+}
+
+/** Width of text drawn inside label: label's direction, its runs isolated. */
+export function measureLabel(context: CanvasRenderingContext2D, text: string, label = text): number {
+	const direction = letterDirection(label);
+	context.direction = direction ?? "inherit";
+	return context.measureText(shownLabel(text, direction)).width;
+}
+
+/** Word-wrap for canvas text. Oversized words split only at grapheme
+ *  boundaries; a single grapheme can exceed maxWidth. The lines come back
+ *  as drawn, isolated when the label is right-to-left (see shownLabel). */
+export function wrapLabel(context: CanvasRenderingContext2D, text: string, maxWidth: number): string[] {
+	const direction = letterDirection(text);
+	context.direction = direction ?? "inherit";
+	const width = (line: string) => context.measureText(shownLabel(line, direction)).width;
 	const lines: string[] = [];
 	for (const word of text.split(/\s+/).filter(Boolean)) {
 		const last = lines.length > 0 ? lines[lines.length - 1]! : null;
 		if (last !== null) {
 			const joined = `${last} ${word}`;
-			if (context.measureText(joined).width <= maxWidth) {
+			if (width(joined) <= maxWidth) {
 				lines[lines.length - 1] = joined;
 				continue;
 			}
 		}
 		let chunk = "";
-		for (const char of word) {
-			if (chunk && context.measureText(`${chunk}${char}`).width > maxWidth) {
+		for (const { segment: char } of LABEL_GRAPHEMES.segment(word)) {
+			if (chunk && width(`${chunk}${char}`) > maxWidth) {
 				lines.push(chunk);
 				chunk = char;
 			} else {
@@ -526,7 +555,7 @@ function wrapLabel(context: CanvasRenderingContext2D, text: string, maxWidth: nu
 		}
 		if (chunk) lines.push(chunk);
 	}
-	return lines;
+	return lines.map((line) => shownLabel(line, direction));
 }
 
 /** World-unit sizes for the label pass, derived once per geometry build. */
@@ -539,16 +568,18 @@ interface WorldSizes {
 
 /** The pre-wrapped node name, centered below the node in WORLD units —
  *  identical geometry at rest and on hover, so hover only changes the
- *  color, nothing jumps. Lines are wrapped once per geometry build, never
- *  per frame. */
-function drawNameLines(
+ *  color, nothing jumps. Lines are wrapped (and isolated, see wrapLabel)
+ *  once per geometry build, never per frame. */
+export function drawNameLines(
 	context: CanvasRenderingContext2D,
 	x: number,
 	y: number,
 	lines: string[],
 	world: WorldSizes,
 	color: string,
+	label: string,
 ): void {
+	context.direction = letterDirection(label) ?? "inherit";
 	context.fillStyle = color;
 	context.textAlign = "center";
 	context.textBaseline = "top";
@@ -847,6 +878,7 @@ export class GraphCanvasRenderer {
 		}
 		const ctx = this.ctx;
 		const prevFont = ctx.font;
+		const prevDirection = ctx.direction;
 		ctx.font = `${LABEL_WEIGHT} ${settings.clusterLabelSize}px ${data.fontFamily}`;
 		const changed = applyClusterLabels(
 			data.clusters,
@@ -854,9 +886,10 @@ export class GraphCanvasRenderer {
 			labels,
 			REGION_LABEL_MAX_WIDTH,
 			REGION_LABEL_MAX_LINES,
-			(s) => ctx.measureText(s).width,
+			(s, label) => measureLabel(ctx, s, label),
 		);
 		ctx.font = prevFont;
+		ctx.direction = prevDirection;
 		if (changed) this.markDirty();
 	}
 
@@ -1292,12 +1325,14 @@ export class GraphCanvasRenderer {
 		this.labelLines = new Map();
 		const ctx = this.ctx;
 		const prevFont = ctx.font;
+		const prevDirection = ctx.direction;
 		ctx.font = this.worldLabelFont;
 		const maxW = LABEL_MAX_WIDTH * (settings.labelSize / LABEL_SIZE);
 		for (const n of data.nodes) {
 			if (isVisible(n.id) && !isImpNodeId(n.id)) this.labelLines.set(n.id, wrapLabel(ctx, n.label, maxW));
 		}
 		ctx.font = prevFont;
+		ctx.direction = prevDirection;
 	}
 
 	/** (Re)create the live sim from data.nodes at their current
@@ -1428,13 +1463,15 @@ export class GraphCanvasRenderer {
 		if (settings) {
 			const ctx = this.ctx;
 			const prevFont = ctx.font;
+			const prevDirection = ctx.direction;
 			ctx.font = `${LABEL_WEIGHT} ${settings.clusterLabelSize}px ${data.fontFamily}`;
 			for (const rm of this.regionMeta) {
 				rm.lines = rm.label
-					? wrapRegionLabel(rm.label, REGION_LABEL_MAX_WIDTH, REGION_LABEL_MAX_LINES, (s) => ctx.measureText(s).width)
+					? wrapRegionLabel(rm.label, REGION_LABEL_MAX_WIDTH, REGION_LABEL_MAX_LINES, (s, label) => measureLabel(ctx, s, label))
 					: null;
 			}
 			ctx.font = prevFont;
+			ctx.direction = prevDirection;
 		}
 
 		// THE off switch (user 2026-09-15): compute is skipped, not just
@@ -1674,7 +1711,7 @@ export class GraphCanvasRenderer {
 			for (const [id, lines] of this.labelLines) {
 				const n = this.nodeById.get(id);
 				if (!n) continue;
-				drawNameLines(ctx, n.x, n.y, lines, this.world, data.colors.label);
+				drawNameLines(ctx, n.x, n.y, lines, this.world, data.colors.label, n.label);
 			}
 			ctx.restore();
 		}
@@ -1699,7 +1736,7 @@ export class GraphCanvasRenderer {
 				ctx.save();
 				ctx.globalAlpha = this.hoverFade;
 				ctx.font = this.worldLabelFont;
-				drawNameLines(ctx, n.x, n.y, this.labelLines.get(n.id) ?? [], this.world, data.colors.hoverText);
+				drawNameLines(ctx, n.x, n.y, this.labelLines.get(n.id) ?? [], this.world, data.colors.hoverText, n.label);
 				ctx.restore();
 			}
 		}
@@ -1725,6 +1762,7 @@ export class GraphCanvasRenderer {
 			const lineH = (settings.clusterLabelSize * REGION_LABEL_LINE_HEIGHT) / k;
 			for (const rm of this.regionMeta) {
 				if (!rm.lines) continue;
+				ctx.direction = letterDirection(rm.label ?? "") ?? "inherit";
 				ctx.fillStyle = `hsla(${rm.hue}, 55%, 78%, 0.85)`;
 				const firstOffset = (-(rm.lines.length - 1) / 2) * lineH;
 				for (let i = 0; i < rm.lines.length; i++) {
