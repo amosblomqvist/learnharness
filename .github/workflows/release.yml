@@ -216,12 +216,13 @@ jobs:
             dist/*.exe
             dist/*.AppImage
             dist/*.deb
+            dist/*.rpm
             dist/*.blockmap
             dist/latest*.yml
 
   # The last gate before a human publishes: after ALL three packaging jobs
   # have uploaded, fail the run unless the tag's single draft release holds
-  # exactly the 11 verified assets (4 installers + mac updater ZIP + their
+  # exactly the 12 verified assets (5 installers + mac updater ZIP + their
   # blockmaps + 3 latest*.yml feeds) and the feeds reference those uploads
   # by exact name at the package.json version. Read-only: it never creates,
   # edits, publishes, or deletes anything. Manual rehearsals upload nothing,

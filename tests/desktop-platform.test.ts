@@ -145,7 +145,7 @@ describe("desktop packaging policy", () => {
 		await validateConfiguration(config, { isEnabled: false });
 	});
 
-	it("ships Mac arm64, Windows NSIS x64, and both Linux x64 channels", () => {
+	it("ships Mac arm64, Windows NSIS x64, and all three Linux x64 channels", () => {
 		assert.deepEqual(config.mac.target, [
 			{ target: "dmg", arch: ["arm64"] }, { target: "zip", arch: ["arm64"] },
 		]);
@@ -153,7 +153,7 @@ describe("desktop packaging policy", () => {
 		assert.equal(config.win.signExecutable, false);
 		assert.equal(config.win.verifyUpdateCodeSignature, false);
 		assert.deepEqual(config.linux.target, [
-			{ target: "AppImage", arch: ["x64"] }, { target: "deb", arch: ["x64"] },
+			{ target: "AppImage", arch: ["x64"] }, { target: "deb", arch: ["x64"] }, { target: "rpm", arch: ["x64"] },
 		]);
 		assert.equal(config.linux.syncDesktopName, true);
 		assert.equal(config.publish[0].releaseType, "draft");

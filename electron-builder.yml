@@ -165,6 +165,13 @@ win:
 nsis:
   oneClick: true
   perMachine: false
+# Static AppImage runtime (AppImage/type2-runtime). The default "0.0.0"
+# toolset embeds the legacy AppImageKit runtime, which dlopen()s
+# libfuse.so.2 at startup; Fedora and Ubuntu 22.04+ don't ship that by
+# default, so the AppImage exited before the app started (#84). The static
+# runtime needs no libfuse2. The payload compression defaults to zstd.
+toolsets:
+  appimage: "1.0.3"
 linux:
   icon: build/icon.png
   target:
@@ -174,12 +181,18 @@ linux:
     - target: deb
       arch:
         - x64
+    # Fedora/openSUSE package (#9). Building it needs rpmbuild, which the
+    # ubuntu-24.04 runner image ships in its preinstalled "rpm" package.
+    - target: rpm
+      arch:
+        - x64
   artifactName: "${productName}-${version}-${arch}.${ext}"
   category: Education
   # Match Electron's app_id/WM_CLASS to the installed desktop launcher.
   syncDesktopName: true
-  # Both targets update via electron-updater 6.8.9. AppImage replaces its
-  # own file; deb uses dpkg/apt and may request administrator permission.
+  # All three targets update via electron-updater 6.8.9. AppImage replaces
+  # its own file; deb uses dpkg/apt and rpm uses zypper/dnf/yum/rpm (the
+  # first one found), both of which may request administrator permission.
 publish:
   # Update feed = GitHub Releases (decided 2026-10-08): latest-mac.yml +
   # zip/blockmap live on releases; electron-updater reads them anonymously.
