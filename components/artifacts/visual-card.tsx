@@ -115,10 +115,10 @@ export function VisualOutputCard({
 			<div
 				className={
 					natural !== null
-						? "w-fit max-w-full overflow-hidden rounded-lg bg-white"
-						: "w-full overflow-hidden rounded-lg bg-white"
+						? `w-fit max-w-full overflow-hidden rounded-lg bg-white${held ? " lh-artifact-hold" : ""}`
+						: `w-full overflow-hidden rounded-lg bg-white${held ? " lh-artifact-hold" : ""}`
 				}
-				style={{ filter: inverted ? "invert(1) hue-rotate(180deg)" : undefined, opacity: held ? 0 : undefined }}
+				style={{ filter: inverted ? "invert(1) hue-rotate(180deg)" : undefined }}
 				data-testid="visual-svg"
 			>
 				<SvgImage

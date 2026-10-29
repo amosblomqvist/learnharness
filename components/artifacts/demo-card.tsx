@@ -8,7 +8,7 @@ import { ChatActionsContext } from "@/components/chat";
 import { downloadFile, slugFilename } from "@/components/artifacts/download";
 import { DispatchCard } from "@/components/artifacts/dispatch-card";
 import { useArtifactInvert } from "@/components/artifacts/use-artifact-invert";
-import { toneFromCssColor, type ArtifactPartProps, type ArtifactTone, type DemoResult } from "@/src/core";
+import { toneFromCssColor, toneFromSamples, type ArtifactPartProps, type ArtifactTone, type DemoResult } from "@/src/core";
 
 /**
  * Demo artifact card (W6): while the part is input-available, a job activity
@@ -21,10 +21,15 @@ import { toneFromCssColor, type ArtifactPartProps, type ArtifactTone, type DemoR
  * postMessage {type:"demo-resize",height} (parent sizes the iframe) and
  * window.onerror → {type:"demo-error",message} (error chip on the card, with
  * a "Send to teacher" button that feeds the error back into the lesson — the
- * fix loop), plus {type:"demo-tone",body,root} — the page's computed
- * background, so a demo drawn light auto-inverts in the dark app. The
- * server-rendered iframe can load (and report) before the card hydrates,
- * so the card also ASKS on mount ({type:"demo-tone-request"}).
+ * fix loop), plus {type:"demo-tone",samples} — so a demo drawn light
+ * auto-inverts in the dark app. After load (+2 frames, so canvases have
+ * drawn) the bridge samples eight points just inside the page edges: each
+ * is the first opaque background under that point (a canvas reports its
+ * own pixel, copied via drawImage so the demo's context is never touched),
+ * "media" for svg/img/video, or null for an empty edge (the card's white
+ * holder shows). The server-rendered iframe can load (and report) before
+ * the card hydrates, so the card also ASKS on mount
+ * ({type:"demo-tone-request"}).
  *
  * Bridge message handling is a pure function (reduceDemoBridgeState) so
  * tests cover it without a DOM.
@@ -48,10 +53,18 @@ window.addEventListener("load",post);
 window.addEventListener("error",function(e){send({type:"demo-error",message:e.message||String(e)})});
 setTimeout(post,50);
 setTimeout(post,400);
-var tone=function(){try{send({type:"demo-tone",body:getComputedStyle(document.body).backgroundColor,root:getComputedStyle(document.documentElement).backgroundColor})}catch(e){}};
-tone();
-window.addEventListener("load",tone);
-window.addEventListener("message",function(e){if(e.source===parent&&e.data&&e.data.type==="demo-tone-request")tone()});
+var bg=function(el){for(var e=el;e;e=e.parentElement){var c=getComputedStyle(e).backgroundColor;if(c&&c!=="transparent"&&!/^rgba\(.*,\s*0\)$/.test(c))return c}return null};
+var px=document.createElement("canvas");px.width=px.height=1;var pg=px.getContext("2d",{willReadFrequently:true});
+var sample=function(x,y){var el=document.elementFromPoint(x,y);if(!el)return null;
+if(el.tagName==="CANVAS"){try{var r=el.getBoundingClientRect();pg.clearRect(0,0,1,1);pg.drawImage(el,Math.floor((x-r.left)*el.width/r.width),Math.floor((y-r.top)*el.height/r.height),1,1,0,0,1,1);var d=pg.getImageData(0,0,1,1).data;if(d[3]>0)return"rgba("+d[0]+","+d[1]+","+d[2]+","+(d[3]/255)+")"}catch(e){return"media"}return bg(el.parentElement)}
+if(el.closest("svg")||/^(IMG|VIDEO|PICTURE|IFRAME|OBJECT|EMBED)$/.test(el.tagName))return"media";
+return bg(el)};
+var tone=function(){try{var W=innerWidth,H=Math.min(innerHeight,document.documentElement.scrollHeight),xs=[2,W/2,W-3],ys=[2,H/2,H-3],s=[];
+for(var a=0;a<3;a++)for(var b=0;b<3;b++){if(a!==1||b!==1)s.push(sample(xs[a],ys[b]))}
+send({type:"demo-tone",samples:s})}catch(e){}};
+var loaded=false;
+window.addEventListener("load",function(){loaded=true;requestAnimationFrame(function(){requestAnimationFrame(tone)})});
+window.addEventListener("message",function(e){if(loaded&&e.source===parent&&e.data&&e.data.type==="demo-tone-request")tone()});
 })();</script>`;
 
 /** Inject the bridge before </body> (or at the end of a body-less document). */
@@ -86,10 +99,13 @@ export function reduceDemoBridgeState(state: DemoBridgeState, data: unknown): De
 		return text === state.error ? state : { ...state, error: text };
 	}
 	if (message.type === "demo-tone") {
-		const { body, root } = data as { body?: unknown; root?: unknown };
-		if (typeof body !== "string" || typeof root !== "string") return state;
-		// body, else html, else the card's white holder behind the iframe.
-		const tone = toneFromCssColor(body) ?? toneFromCssColor(root) ?? "light";
+		const { samples } = data as { samples?: unknown };
+		if (!Array.isArray(samples) || !samples.every((x) => x === null || typeof x === "string")) return state;
+		// An empty edge (or a transparent color) is the white holder showing.
+		const tones = (samples as (string | null)[]).map((x): ArtifactTone =>
+			x === null ? "light" : x === "media" ? "unknown" : (toneFromCssColor(x) ?? "light"),
+		);
+		const tone = toneFromSamples(tones);
 		return tone === state.tone ? state : { ...state, tone };
 	}
 	return state;
@@ -237,7 +253,7 @@ function DemoFrame({
 				// the wheel (session scrolling stalls over the demo). With
 				// scrolling disabled the wheel chains straight to the session.
 				scrolling="no"
-				className="mt-2 w-full rounded-lg border bg-white"
+				className={`mt-2 w-full rounded-lg border bg-white${held ? " lh-artifact-hold" : ""}`}
 				// content-box: the bridge reports the CONTENT height — with the
 				// preflight's border-box the 2px border would eat into it and clip
 				// the bottom of the demo (smoke finding, 2026-10-07).
@@ -245,7 +261,6 @@ function DemoFrame({
 					height: state.height ?? 360,
 					boxSizing: "content-box",
 					filter: inverted ? "invert(1) hue-rotate(180deg)" : undefined,
-					opacity: held ? 0 : undefined,
 				}}
 				data-testid="demo-iframe"
 			/>

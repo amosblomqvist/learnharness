@@ -5,7 +5,9 @@
  * absent = auto. While an unpinned artifact's tone is still pending in
  * dark mode the stage HOLDS hidden (so a light figure never flashes
  * white before inverting) — at most HOLD_MS, then the tone settles as
- * "unknown" for this mount and the artifact shows as generated.
+ * "unknown" for this mount and the artifact shows as generated. The hold
+ * is the .lh-artifact-hold class (app/globals.css), whose animation also
+ * releases it at HOLD_MS before hydration.
  */
 import { useContext, useEffect, useState } from "react";
 import { ChatActionsContext } from "@/components/chat";

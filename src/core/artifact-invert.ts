@@ -75,3 +75,15 @@ export function toneFromCssColor(css: string): ArtifactTone | null {
 	if (alpha === 0) return null;
 	return relativeLuminance(Number(m[1]), Number(m[2]), Number(m[3])) >= 0.5 ? "light" : "dark";
 }
+
+/** A demo's tone from its edge samples (one tone per sampled point): the
+ *  majority decides; a tie — or "unknown" (media) leading — is unknown,
+ *  which never auto-flips. */
+export function toneFromSamples(samples: readonly ArtifactTone[]): ArtifactTone {
+	const count = { light: 0, dark: 0, unknown: 0 };
+	for (const t of samples) count[t]++;
+	const top = Math.max(count.light, count.dark, count.unknown);
+	if (top === 0) return "unknown";
+	const leaders = (["light", "dark", "unknown"] as const).filter((t) => count[t] === top);
+	return leaders.length === 1 ? leaders[0]! : "unknown";
+}

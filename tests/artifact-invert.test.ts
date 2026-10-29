@@ -13,6 +13,7 @@ import {
 	relativeLuminance,
 	toneFromCssColor,
 	toneFromPixels,
+	toneFromSamples,
 } from "../src/core/artifact-invert.ts";
 
 describe("artifact auto-invert pins", () => {
@@ -70,5 +71,18 @@ describe("artifact tone", () => {
 		assert.equal(toneFromCssColor("rgba(0, 0, 0, 0)"), null);
 		assert.equal(toneFromCssColor("transparent"), null);
 		assert.equal(toneFromCssColor("color(display-p3 1 1 1)"), "unknown");
+	});
+});
+
+describe("toneFromSamples (demo edge samples)", () => {
+	it("the majority decides", () => {
+		assert.equal(toneFromSamples(["light", "light", "dark"]), "light");
+		assert.equal(toneFromSamples(["dark", "dark", "dark", "light"]), "dark");
+	});
+
+	it("ties and media-heavy edges are unknown; nothing sampled is unknown", () => {
+		assert.equal(toneFromSamples(["light", "dark"]), "unknown");
+		assert.equal(toneFromSamples(["unknown", "unknown", "light"]), "unknown");
+		assert.equal(toneFromSamples([]), "unknown");
 	});
 });

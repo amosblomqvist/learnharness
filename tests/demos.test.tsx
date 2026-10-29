@@ -253,18 +253,18 @@ describe("demo bridge", () => {
 		assert.match(DEMO_BRIDGE_SCRIPT, /demo-tone-request/);
 		const s0 = INITIAL_DEMO_BRIDGE_STATE;
 		assert.equal(s0.tone, null, "not reported yet");
-		assert.equal(reduceDemoBridgeState(s0, { type: "demo-tone", body: "rgb(255, 255, 255)", root: "rgba(0, 0, 0, 0)" }).tone, "light");
-		assert.equal(
-			reduceDemoBridgeState(s0, { type: "demo-tone", body: "rgba(0, 0, 0, 0)", root: "rgb(17, 17, 17)" }).tone,
-			"dark",
-			"html background when body is transparent",
-		);
-		assert.equal(
-			reduceDemoBridgeState(s0, { type: "demo-tone", body: "rgba(0, 0, 0, 0)", root: "rgba(0, 0, 0, 0)" }).tone,
-			"light",
-			"fully transparent → the white holder shows",
-		);
-		assert.equal(reduceDemoBridgeState(s0, { type: "demo-tone", body: 3 }), s0, "garbage is ignored");
+		const tone = (samples: unknown) => reduceDemoBridgeState(s0, { type: "demo-tone", samples }).tone;
+		// Each edge sample: the first opaque background under that point (or a
+		// canvas pixel), "media" for svg/img/video, null for an empty edge.
+		assert.equal(tone(["rgb(255, 255, 255)", "rgb(250, 250, 250)", null]), "light");
+		assert.equal(tone(["rgb(17, 17, 17)", "rgb(17, 17, 17)", "rgb(255, 255, 255)"]), "dark", "a dark wrapper div / canvas");
+		assert.equal(tone([null, null, null]), "light", "empty edges → the white holder shows");
+		assert.equal(tone(["media", "media", "rgb(255, 255, 255)"]), "unknown", "media edges never auto-flip");
+		assert.equal(reduceDemoBridgeState(s0, { type: "demo-tone", samples: "x" }), s0, "garbage is ignored");
+		assert.equal(reduceDemoBridgeState(s0, { type: "demo-tone", samples: [3] }), s0);
+		// Sampled at load, after paint — not at parse time, when a canvas is
+		// still blank.
+		assert.match(DEMO_BRIDGE_SCRIPT, /elementFromPoint/);
 	});
 });
 
@@ -556,9 +556,9 @@ describe("artifact chrome — scrollbar, invert toggles, downloads (release poli
 
 	it("figure: while the tone is pending, an unpinned figure holds hidden (no white flash)", () => {
 		const svg = '<svg xmlns="http://www.w3.org/2000/svg" width="240" height="100"></svg>';
-		assert.match(renderToStaticMarkup(<VisualOutputCard output={{ svg }} />), /opacity:0/);
+		assert.match(renderToStaticMarkup(<VisualOutputCard output={{ svg }} />), /lh-artifact-hold/);
 		assert.ok(
-			!renderToStaticMarkup(<VisualOutputCard output={{ svg }} initialPin={false} />).includes("opacity:0"),
+			!renderToStaticMarkup(<VisualOutputCard output={{ svg }} initialPin={false} />).includes("lh-artifact-hold"),
 			"a pin needs no measurement",
 		);
 	});
@@ -567,7 +567,7 @@ describe("artifact chrome — scrollbar, invert toggles, downloads (release poli
 		const pinned = renderToStaticMarkup(<DemoOutputCard output={{ title: "T", html: DEMO_HTML, tested: true }} initialPin />);
 		assert.match(pinned, /hue-rotate/);
 		const auto = renderToStaticMarkup(<DemoOutputCard output={{ title: "T", html: DEMO_HTML, tested: true }} />);
-		assert.match(auto, /opacity:0/);
+		assert.match(auto, /lh-artifact-hold/);
 	});
 
 	it("figure card: NO card chrome, image first, caption row BELOW (owner round, 2026-10-07)", () => {

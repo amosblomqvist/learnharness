@@ -598,3 +598,18 @@ body {
 	outline: 1px solid var(--border);
 	border-radius: 0.25rem;
 }
+
+/* Auto-invert hold (2026-10-29): an unpinned figure/demo whose tone is
+   still being measured stays hidden in dark mode, so a light artifact
+   never flashes white before inverting. The animation is the HARD bound —
+   it releases at 300ms even before the page hydrates (or if JS fails).
+   HOLD_MS in components/artifacts/use-artifact-invert.ts — change both. */
+.lh-artifact-hold {
+	opacity: 0;
+	animation: lh-artifact-hold-release 0s 300ms forwards;
+}
+@keyframes lh-artifact-hold-release {
+	to {
+		opacity: 1;
+	}
+}
