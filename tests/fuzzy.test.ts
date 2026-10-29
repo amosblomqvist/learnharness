@@ -39,4 +39,30 @@ describe("fuzzyScore", () => {
 		assert.equal(fuzzyScore("", "anything"), 0);
 		assert.equal(fuzzyScore("   ", "anything"), 0);
 	});
+
+	it("matches Arabic tashkeel and spelling variants with the same ranking", () => {
+		for (const [query, text] of [["احمد", "أَحْمَد"], ["مدرسه", "مدرسة"], ["على", "علي"], ["علم", "عَـلْم"]]) {
+			// The folded operand scores exactly as the plain one does against itself.
+			const exact = fuzzyScore(query!, query!);
+			assert.ok(exact !== null);
+			assert.equal(fuzzyScore(query!, text!), exact);
+			assert.equal(fuzzyScore(text!, query!), exact);
+		}
+		assert.ok(fuzzyScore("احمد مدرسه", "أَحْمَد", "مدرسة") !== null);
+		assert.equal(fuzzyScore("احمد مفقود", "أَحْمَد", "مدرسة"), null);
+	});
+
+	it("uses Unicode folding for Latin accents, Hebrew niqqud and compatibility text", () => {
+		for (const [query, text] of [["cafe", "café"], ["שלום", "שָׁלוֹם"], ["ffi", "ﬃ"]] as const) {
+			const exact = fuzzyScore(query, query);
+			assert.ok(exact !== null);
+			assert.equal(fuzzyScore(query, text), exact);
+			assert.equal(fuzzyScore(text, query), exact);
+		}
+	});
+
+	it("keeps voiced kana apart: a bus is not a lotus", () => {
+		assert.equal(fuzzyScore("ハス", "バス"), null);
+		assert.equal(fuzzyScore("バス", "ﾊﾞｽ"), fuzzyScore("バス", "バス"));
+	});
 });

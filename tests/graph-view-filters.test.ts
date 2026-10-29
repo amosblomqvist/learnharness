@@ -1,6 +1,7 @@
 /**
  * Legend/filters predicate tests — the pure half of the graph-view filters
  * panel (isNodeVisible); the sigma reducers just consume its verdict.
+ * Unicode folding matches hamza, tashkeel and niqqud on both sides.
  */
 
 import assert from "node:assert/strict";
@@ -13,6 +14,19 @@ const node = {
 };
 
 describe("isNodeVisible (search predicate)", () => {
+	it("matches hamza and tashkeel in names and statements on both sides", () => {
+		const marked = { name: "أَحْمَدُ", statement: "إِنَّ الْمُشْتَقَّةَ مُهِمَّةٌ" };
+		assert.equal(isNodeVisible(marked, "احمد"), true);
+		assert.equal(isNodeVisible(marked, "أحْمَد"), true);
+		assert.equal(isNodeVisible(marked, "ان المشتقة"), true);
+		assert.equal(isNodeVisible({ name: "احمد", statement: "ان المشتقة مهمة" }, "إِنَّ الْمُشْتَقَّةَ"), true);
+		assert.equal(isNodeVisible(marked, "تكامل"), false);
+	});
+
+	it("folds Hebrew niqqud without a language-specific filter path", () => {
+		assert.equal(isNodeVisible({ name: "שָׁלוֹם", statement: "" }, "שלום"), true);
+	});
+
 	it("is visible with an empty query", () => {
 		assert.equal(isNodeVisible(node, ""), true);
 	});
@@ -33,6 +47,12 @@ describe("isNodeVisible (search predicate)", () => {
 
 	it("whitespace-only query is no filter", () => {
 		assert.equal(isNodeVisible(node, "   "), true);
+	});
+
+	it("keeps voiced kana apart and finds a math letter by its plain letter", () => {
+		assert.equal(isNodeVisible({ name: "バス", statement: "" }, "ハス"), false);
+		assert.equal(isNodeVisible({ name: "バス", statement: "" }, "ﾊﾞｽ"), true);
+		assert.equal(isNodeVisible({ name: "x ∈ ℝ", statement: "" }, "r"), true);
 	});
 
 

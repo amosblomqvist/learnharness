@@ -67,7 +67,7 @@ import { useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, use
 import { NotesImportErrors, useNotesImport } from "@/components/notes-import.tsx";
 import Link from "next/link";
 import { FileTextIcon, ListTreeIcon, Loader2Icon, SearchIcon, SettingsIcon, UploadIcon, WaypointsIcon } from "lucide-react";
-import { incrementalLayout, propositionSessionHref, type GraphCostSummary, type GraphNode, type GraphSnapshot } from "@/src/core";
+import { incrementalLayout, normalizeForSearch, propositionSessionHref, type GraphCostSummary, type GraphNode, type GraphSnapshot } from "@/src/core";
 import { planCostLabel } from "@/components/usage-format";
 import { GraphCanvasRenderer, type GraphRenderSettings } from "./graph-canvas.ts";
 import { usePopoverDismiss } from "@/components/popover-dismiss";
@@ -126,13 +126,13 @@ type RenderSettings = GraphRenderSettings;
 
 /**
  * Pure filter predicate for the search panel: a node is visible when the
- * query is empty or matches its name or statement (case-insensitive).
+ * query is empty or matches its name or statement after Unicode folding.
  * Exported for tests; the visibility feed just consumes its verdict.
  */
 export function isNodeVisible(node: Pick<GraphNode, "name" | "statement">, query: string): boolean {
-	const q = query.trim().toLowerCase();
+	const q = normalizeForSearch(query.trim());
 	if (!q) return true;
-	return node.name.toLowerCase().includes(q) || node.statement.toLowerCase().includes(q);
+	return normalizeForSearch(node.name).includes(q) || normalizeForSearch(node.statement).includes(q);
 }
 
 /** In-place sessions patch for a live rename (rename-shuffle fix,

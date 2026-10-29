@@ -5,6 +5,10 @@
  * prefixes beat buried substrings. Pure core; the picker sorts by score.
  */
 
+import { normalizeForSearch } from "./text-search.ts";
+
+const TOKEN_SEPARATOR = /\s+/;
+
 /** Score one candidate, or null when any token matches no field.
  *  Higher is better; ties break naturally by list order (stable sort).
  *
@@ -14,9 +18,9 @@
  *  "z-ai/glm-5.3-flash" loses to a model whose id contains "glm flash"
  *  verbatim — as it should). */
 export function fuzzyScore(query: string, ...fields: string[]): number | null {
-	const tokens = query.trim().toLowerCase().split(/\s+/).filter(Boolean);
+	const tokens = normalizeForSearch(query).trim().split(TOKEN_SEPARATOR).filter(Boolean);
 	if (tokens.length === 0) return 0;
-	const hay = fields.map((f) => f.toLowerCase());
+	const hay = fields.map(normalizeForSearch);
 
 	let total = 0;
 	for (const token of tokens) {
