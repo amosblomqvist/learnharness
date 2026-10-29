@@ -9,8 +9,10 @@
  *
  * Path grammar: "system-prompt.md" (the shared base), "shared/<fragment>"
  * (sources v1: fragments composed by BOTH agents), "prober/<fragment>" /
- * "teacher/<fragment>" — where <fragment> is numeric-prefixed + .md
- * (e.g. 20-teaching.md). POSIX-relative, no traversal, no nesting.
+ * "teacher/<fragment>" / "practice/<fragment>" — where <fragment> is
+ * numeric-prefixed + .md (e.g. 20-teaching.md), plus user-created custom
+ * segments ("personalization.md" and "skills/<slug>.md"). POSIX-relative,
+ * no traversal.
  */
 
 /** A prompt fragment: numeric order key + .md (e.g. 20-teaching.md). Nothing else loads. */
@@ -39,11 +41,66 @@ export interface PromptSegmentInfo {
 	shared: boolean;
 }
 
+export const PERSONALIZATION_SEGMENT = "personalization.md";
+export const SKILL_FILE_RE = /^[\w][\w.-]*\.md$/;
+
+export const PERSONALIZATION_PRESETS = [
+	{
+		id: "id",
+		label: "Bahasa Indonesia",
+		snippet: "Use Bahasa Indonesia for explanations, questions, and feedback.",
+	},
+	{
+		id: "analogy",
+		label: "Practical analogies",
+		snippet: "Ground abstract concepts in concrete, practical analogies and real-world examples first.",
+	},
+	{
+		id: "socratic",
+		label: "Socratic code tutor",
+		snippet: "When teaching code or math, guide me to trace state and derive the fix myself before showing the full answer.",
+	},
+] as const;
+
+/** Pure helper: append a preset snippet to the personalization draft if not already included. */
+export function applyPersonalizationPreset(current: string, snippet: string): string {
+	const trimmed = current.trim();
+	if (trimmed.includes(snippet)) return trimmed;
+	return trimmed ? `${trimmed}\n${snippet}` : snippet;
+}
+
+export function isCustomSkillPath(segmentPath: string): boolean {
+	if (segmentPath === PERSONALIZATION_SEGMENT) return true;
+	const m = /^skills\/([\w.-]+\.md)$/.exec(segmentPath);
+	if (!m || m[1] === undefined) return false;
+	return SKILL_FILE_RE.test(m[1]) && !m[1].includes("..");
+}
+
+function slugifySkillName(raw: string): string {
+	return raw
+		.trim()
+		.toLowerCase()
+		.replace(/[^a-z0-9_-]+/g, "-")
+		.replace(/^-+|-+$/g, "");
+}
+
+export function sanitizeSkillPath(fileName: string, content?: string): string {
+	const rawBase = fileName.replace(/\.md$/i, "").trim();
+	let candidate = slugifySkillName(rawBase);
+	if ((!candidate || candidate === "skill") && content) {
+		const fmMatch = /^---\r?\n[\s\S]*?^name:\s*["']?([^\r\n"']+)["']?/m.exec(content);
+		const headingMatch = /^#\s+([^\r\n]+)/m.exec(content);
+		const derived = slugifySkillName(fmMatch?.[1] ?? headingMatch?.[1] ?? "");
+		if (derived) candidate = derived;
+	}
+	return `skills/${candidate || "skill"}.md`;
+}
+
 /** Validate a segment path against the mirror-layout rules (see module
  *  doc). Exported for the routes, which also check membership in the
  *  CURRENT source segment list. */
 export function isValidSegmentPath(segmentPath: string): boolean {
-	if (segmentPath === "system-prompt.md") return true;
+	if (segmentPath === "system-prompt.md" || isCustomSkillPath(segmentPath)) return true;
 	const m = /^(prober|teacher|practice|shared)\/([\w.-]+\.md)$/.exec(segmentPath);
 	if (!m || m[2] === undefined) return false;
 	return FRAGMENT_RE.test(m[2]);
