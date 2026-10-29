@@ -6,7 +6,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { MenuShell } from "@/components/menu-shell";
 import { DeleteSessionDialog } from "@/components/delete-session-dialog";
 import type { ChatDeleteMode } from "@/src/core";
-import { DumbbellIcon, PanelLeftCloseIcon, PanelLeftOpenIcon, PlusIcon, SearchIcon, SettingsIcon } from "lucide-react";
+import { DumbbellIcon, LibraryIcon, PanelLeftCloseIcon, PanelLeftOpenIcon, PlusIcon, SearchIcon, SettingsIcon } from "lucide-react";
 import { ActivitySection } from "@/components/activity-dock";
 import { CoverageMenuBlock } from "@/components/extraction-coverage";
 import { LhMark } from "@/components/lh-mark";
@@ -716,6 +716,21 @@ function SessionsSidebar() {
 						<DumbbellIcon className="size-3" />
 						Practice
 						<span className="sr-only">create a new practice session</span>
+					</button>
+					{/* The course library (2026-10-29): a destination, not a new
+					    session — same row language, highlighted while open. */}
+					<button
+						type="button"
+						data-testid="library-entry"
+						onClick={() => router.push("/library")}
+						aria-current={pathname === "/library" ? "page" : undefined}
+						className={
+							"flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-xs uppercase tracking-wider transition-colors hover:bg-accent hover:text-foreground " +
+							(pathname === "/library" ? "bg-accent text-foreground" : "text-muted-foreground")
+						}
+					>
+						<LibraryIcon className="size-3" />
+						Library
 					</button>
 				</div>
 

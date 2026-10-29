@@ -6,7 +6,7 @@ import { CornerDownLeftIcon, DumbbellIcon } from "lucide-react";
 import { GraphView } from "@/components/graph-view";
 import { MinimalHome } from "@/components/minimal-home";
 import { SetupDialog } from "@/components/setup-dialog";
-import { ComposerActions, NodePickerControl } from "@/components/composer-actions";
+import { ComposerActions, MaterialsControl, NodePickerControl } from "@/components/composer-actions";
 import { useModelSetup, selectedModelUnavailable, openModelPicker, ZeroKeysPill } from "@/components/setup-cta";
 import { DictationBar, joinDictation, useDictation } from "@/components/dictation";
 import { useFieldCycle } from "@/components/field-cycle";
@@ -15,6 +15,7 @@ import { StatsBar } from "@/components/stats-bar";
 import { OPENING_PROMPT_FAILURE } from "@/components/opening-prompt";
 import { PathInput } from "@/components/path-input";
 import { SessionStarter } from "@/components/start-session";
+import { LibraryPicker } from "@/components/library/library-picker";
 import type { TurnUsage } from "@/src/core";
 
 /**
@@ -96,6 +97,10 @@ export function Home({
 	const [chainSelectOpen, setChainSelectOpen] = useState(false);
 	// The chain table is CONTROLLED off this id set (the lifted pick).
 	const pickedIds = useMemo(() => new Set(practiceProps.map((p) => p.id)), [practiceProps]);
+	// Course-library attachments chosen before the session exists — they
+	// ride the creation, in either mode (course library wave, 2026-10-29).
+	const [materials, setMaterials] = useState<string[]>([]);
+	const [materialsOpen, setMaterialsOpen] = useState(false);
 
 	/* FINISH DICTATION FIRST (owner, 2026-10-01): Enter may arrive while a
 	 * run is live with the topic still deferred in the run's buffer — stop
@@ -147,6 +152,7 @@ export function Home({
 				title: t,
 				...(mode === "practice" ? { kind: "practice" } : {}),
 				...(practiceProps.length > 0 ? { graphContext: { propositions: practiceProps } } : {}),
+				...(materials.length > 0 ? { attachments: materials } : {}),
 			}, fetch, JSON.stringify(catalog?.slots.strong));
 			router.push(target);
 		} catch {
@@ -226,6 +232,7 @@ export function Home({
 								onClear={() => setPracticeProps([])}
 							/>
 						)}
+						materials={<MaterialsControl count={materials.length} onOpen={() => setMaterialsOpen(true)} onClear={() => setMaterials([])} />}
 						setup={zeroKeys ? (
 							<ZeroKeysPill inline onOpen={() => setSetupOpen(true)} />
 						) : (
@@ -323,6 +330,15 @@ export function Home({
 			    interception's landing surface — stage 1 is the self-contained
 			    first-key screen (zero-keys wave); Save never sends — the
 			    draft stays for the learner to send (owner 2026-10-09). */}
+			<LibraryPicker
+				open={materialsOpen}
+				initial={materials}
+				onClose={() => setMaterialsOpen(false)}
+				onConfirm={(ids) => {
+					setMaterials(ids);
+					setMaterialsOpen(false);
+				}}
+			/>
 			<SetupDialog
 				open={setupOpen}
 				onClose={() => setSetupOpen(false)}

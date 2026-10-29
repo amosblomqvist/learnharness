@@ -4,6 +4,8 @@ interface SessionCreation {
 	title: string;
 	kind?: "practice";
 	graphContext?: { propositions: readonly { id: string; name: string; statement: string }[] };
+	/** Course-library items to attach at creation (ids). */
+	attachments?: readonly string[];
 }
 
 /** Per source-composer instance. Retain a successful creation if storage
