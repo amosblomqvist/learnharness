@@ -62,6 +62,8 @@ All three platforms support in-app updates.
 - **External services.** Models run through your configured providers. Model requests send the context needed for the task; web research and dictation also contact external services. Local storage does not mean offline processing.
 - **Inspectable behavior.** System prompts are visible and editable. The app is open source under the AGPL-3.0 license.
 
+Choose Deepgram or OpenAI API under Settings → General for dictation. OpenAI dictation uses an OpenAI Platform API key and is billed separately from a ChatGPT subscription.
+
 ## Development and support
 
 ```bash
