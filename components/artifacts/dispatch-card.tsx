@@ -2,6 +2,7 @@
 
 import { useContext } from "react";
 import { CheckIcon, SettingsIcon, XIcon } from "lucide-react";
+import { BidiText } from "@/components/bidi-text";
 import { JobsContext } from "@/components/jobs-context";
 import { ChatActionsContext } from "@/components/chat";
 import { isModelsRefusal, isProviderKeyRefusal, type JobKind, type JobRecord } from "@/src/core";
@@ -104,9 +105,7 @@ function DispatchActivityCard({ job, label }: { job: JobRecord | null; label: st
 				{elapsed !== null && <span className="font-normal">· {elapsed}s</span>}
 			</div>
 			{job?.activity && (
-				<div className="mt-1 truncate text-sm text-muted-foreground" data-testid="dispatch-activity-line">
-					{job.activity}
-				</div>
+				<BidiText as="div" className="mt-1 truncate text-sm text-muted-foreground" data-testid="dispatch-activity-line" text={job.activity} />
 			)}
 			{!job && (
 				<div className="mt-1 text-sm text-muted-foreground" data-testid="dispatch-pending">

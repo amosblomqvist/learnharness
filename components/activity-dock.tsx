@@ -2,6 +2,7 @@
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { ActivityIcon, BotIcon, FileTextIcon, PenToolIcon, PlayIcon, SearchIcon, SquareIcon, WaypointsIcon } from "lucide-react";
+import { BidiText } from "@/components/bidi-text";
 import { cn } from "@/lib/utils";
 import type { CallUsage, JobKind, JobRecord } from "@/src/core";
 import { isModelsRefusal, isProviderKeyRefusal, subscriptionLabel, subscriptionLabels } from "@/src/core";
@@ -411,15 +412,13 @@ function ActivityBlobRow({
 				type="button"
 				onClick={onToggleDetail}
 				aria-expanded={detailOpen}
-				className="flex w-full items-center gap-2 pr-7 text-left"
+				className="flex w-full items-center gap-2 pr-7 text-start"
 			>
 				<Icon className="size-3.5 shrink-0 text-muted-foreground" />
 				<span className="min-w-0 flex-1">
-					<span className="block truncate font-medium text-card-foreground">{blob.title}</span>
+					<BidiText className="block truncate font-medium text-card-foreground" text={blob.title} />
 					{blob.activity ? (
-						<span className="block truncate text-muted-foreground" title={blob.activity}>
-							{blob.activity}
-						</span>
+						<BidiText className="block truncate text-muted-foreground" title={blob.activity} text={blob.activity} />
 					) : (
 						<span className="block truncate text-muted-foreground/80">{label}</span>
 					)}
@@ -457,10 +456,8 @@ function ActivityBlobRow({
 						</span>
 					</div>
 					<div className="flex flex-col gap-1 text-muted-foreground">
-						<div className="truncate text-card-foreground" title={blob.title}>
-							{blob.title}
-						</div>
-						{blob.activity && <div className="break-words">{blob.activity}</div>}
+						<BidiText as="div" className="truncate text-card-foreground" title={blob.title} text={blob.title} />
+						{blob.activity && <BidiText as="div" className="break-words" text={blob.activity} />}
 						<div className="flex justify-between gap-2">
 							<span>Cost</span>
 							<span className="tabular-nums text-card-foreground">

@@ -800,3 +800,60 @@ describe("question context renders as markdown everywhere (owner, 2026-10-12)", 
 		assert.ok(!html.includes("lh-prose block text-xs"), "no description slot without an ask input");
 	});
 });
+
+describe("model-authored text takes its own direction", () => {
+	const ARABIC = "ما هو قانون نيوتن الثاني؟";
+
+	it("a probe-done strand in Arabic is rtl, an English assessment beside it ltr", () => {
+		const html = renderToStaticMarkup(
+			<ProbeDoneCard
+				part={{
+					state: "input-available",
+					input: { assessment: { strands: [{ strand: ARABIC, assessment: "Solid." }], summary: "Short." } },
+				} as never}
+			/>,
+		);
+		assert.match(html, new RegExp(`<div class="text-sm font-medium" dir="rtl">${ARABIC}</div>`));
+		assert.match(html, /<div class="mt-0\.5 text-sm text-muted-foreground" dir="ltr">Solid\.<\/div>/);
+	});
+
+	it("a probe-done summary and a retry error each read in their own text's direction", () => {
+		const summary = renderToStaticMarkup(
+			<ProbeDoneCard
+				part={{
+					state: "input-available",
+					input: { assessment: { strands: [{ strand: "Limits", assessment: "Solid." }], summary: ARABIC } },
+				} as never}
+			/>,
+		);
+		assert.ok(summary.includes(`<p class="px-1 text-sm text-muted-foreground" dir="rtl">${ARABIC}</p>`), summary);
+		const retry = renderToStaticMarkup(
+			<ProbeDoneCard part={{ state: "output-available", output: { ok: false, error: ARABIC } } as never} />,
+		);
+		assert.ok(retry.includes(`<p class="text-sm text-muted-foreground">The prober retried: <span dir="rtl">${ARABIC}</span></p>`), retry);
+	});
+
+	it("a dismissed answered card keeps an English question left-to-right", () => {
+		const answer = { ...buildAnswer(quizQD(), { dontKnow: true }), dismissed: true };
+		const html = renderToStaticMarkup(<AnsweredCard answer={answer} />);
+		assert.ok(html.includes('<span class="font-medium" dir="ltr">Which planet is closest to the sun?</span>'));
+	});
+
+	it("both collapsed question bars show an Arabic teaser as rtl", () => {
+		for (const reveal of [false, true]) {
+			const html = renderToStaticMarkup(
+				<QuestionDock
+					toolName="quiz"
+					toolCallId="q-ar"
+					input={{ ...quizInput, question: ARABIC } as never}
+					expanded={false}
+					reveal={reveal}
+					onExpand={() => {}}
+					onSubmit={() => {}}
+				/>,
+			);
+			const classes = reveal ? "block truncate text-xs text-muted-foreground" : "min-w-0 flex-1 truncate text-muted-foreground";
+			assert.ok(html.includes(`<span class="${classes}" dir="rtl">${ARABIC}</span>`), String(reveal));
+		}
+	});
+});

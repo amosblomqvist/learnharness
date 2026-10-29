@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
 import { ChevronDownIcon, ChevronUpIcon, SearchIcon, XIcon } from "lucide-react";
-import { kbdEventForAction, stepSessionMatch } from "@/src/core";
+import { kbdEventForAction, letterDirection, stepSessionMatch } from "@/src/core";
 import {
 	sameSessionRange, sessionFindRanges, sessionRangeIdentity, type SessionRangeIdentity,
 } from "@/components/session-find-dom";
@@ -185,6 +185,7 @@ export function SessionFind({ scopeRef, scrollContextRef }: {
 				aria-label="Find in session"
 				placeholder="Find in session…"
 				value={query}
+				dir={letterDirection(query)}
 				onChange={(event) => setQuery(event.target.value)}
 				spellCheck={false}
 				className="lh-input min-w-0 flex-1 bg-transparent outline-none placeholder:text-muted-foreground"

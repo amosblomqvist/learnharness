@@ -1,9 +1,11 @@
+import { act } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { ActivitySection, formatElapsed, toBlobs, type ActivityFeed, type FeedExtraction } from "../components/activity-dock.tsx";
 import { formatTokens, formatUsd } from "../components/usage-format.ts";
 import { jobCost } from "../src/server/pricing.ts";
+import { mountClient } from "./helpers/client-mount.ts";
 
 // The section's pure layer: folds, formatting, and blob order — then the SSR
 // render (blobs, "—" doctrine, the abort affordance, the always-present
@@ -222,6 +224,30 @@ describe("activity section render", () => {
 		// the truncated activity + title spans carry title= — a styled
 		// tooltip adds nothing over an ellipsis reveal.
 		assert.match(html, /title="building sandbox…"/);
+	});
+
+	it("a row's title and activity line each take their own text's direction, keeping the reveal title", () => {
+		const html = renderToStaticMarkup(
+			<ActivitySection feed={{ jobs: [job({ title: "درس النهايات", activity: "بحث عن أفلاطون" })], extractions: [] }} />,
+		);
+		assert.ok(html.includes('<span class="block truncate font-medium text-card-foreground" dir="rtl">درس النهايات</span>'), "the title");
+		assert.ok(html.includes('<span class="block truncate text-muted-foreground" title="بحث عن أفلاطون" dir="rtl">بحث عن أفلاطون</span>'), "the activity line");
+	});
+
+	it("a row's expanded detail shows the title and activity each in its own text's direction", async () => {
+		const view = await mountClient(<ActivitySection feed={{ jobs: [job({ title: "درس النهايات", activity: "بحث عن أفلاطون" })], extractions: [] }} />);
+		try {
+			await act(async () => view.host.querySelector<HTMLButtonElement>('[data-testid="activity-blob-job"] button[aria-expanded]')!.click());
+			const detail = view.host.querySelector('[data-testid="activity-blob-detail"]')!;
+			const title = detail.querySelector('[class="truncate text-card-foreground"]')!;
+			assert.equal(title.textContent, "درس النهايات");
+			assert.equal(title.getAttribute("dir"), "rtl", "the title");
+			const activity = detail.querySelector('[class="break-words"]')!;
+			assert.equal(activity.textContent, "بحث عن أفلاطون");
+			assert.equal(activity.getAttribute("dir"), "rtl", "the activity");
+		} finally {
+			await view.unmount();
+		}
 	});
 
 

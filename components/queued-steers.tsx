@@ -1,3 +1,5 @@
+import { BidiText } from "@/components/bidi-text";
+
 /**
  * THE QUEUED-STEER INDICATOR (owner spec 2026-10-03): steers sent but not
  * yet drained render as quiet one-liners ABOVE the composer shell —
@@ -23,13 +25,12 @@ export function QueuedSteersBody({ steers }: { steers: QueuedSteerLine[] }) {
 	return (
 		<div className="flex flex-col items-end gap-0.5 pb-1 pr-4" data-testid="queued-steers">
 			{steers.map((s) => (
-				<span
+				<BidiText
 					key={s.id}
 					title={s.text}
 					className="block max-w-[240px] truncate font-ui text-[11px] text-muted-foreground/60"
-				>
-					{s.text}
-				</span>
+					text={s.text}
+				/>
 			))}
 		</div>
 	);

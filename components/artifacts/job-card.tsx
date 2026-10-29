@@ -1,6 +1,7 @@
 "use client";
 
 import { DispatchCard } from "@/components/artifacts/dispatch-card";
+import { BidiText } from "@/components/bidi-text";
 import { MessageResponse } from "@/components/ai-elements/message";
 import type { ArtifactPartProps, PdfResult, ResearchResult } from "@/src/core";
 
@@ -100,15 +101,17 @@ export function ResearchBriefCard({ output }: { output: unknown }) {
 					<div className="mb-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">Sources</div>
 					<ul className="flex flex-col gap-0.5 text-xs">
 						{result.sources.map((s) => (
-							<li key={s.url} className="truncate">
-								<a
+							<li key={s.url}>
+								{/* The link is the truncating element, so the title's own
+								    direction decides which end the ellipsis cuts. */}
+								<BidiText
+									as="a"
 									href={s.url}
 									target="_blank"
 									rel="noopener noreferrer"
-									className="text-primary underline-offset-2 hover:underline"
-								>
-									{s.title}
-								</a>
+									className="inline-block max-w-full align-bottom truncate text-primary underline-offset-2 hover:underline"
+									text={s.title}
+								/>
 							</li>
 						))}
 					</ul>

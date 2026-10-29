@@ -269,6 +269,15 @@ describe("dispatch card rendering (the tool-call ack box)", () => {
 		assert.ok(!html.includes("Dispatched (job j1.)") || true, "ack text is not the display");
 	});
 
+	it("the activity line takes the activity's own direction, keeping its testid and look", () => {
+		const html = renderToStaticMarkup(
+			<JobsContext.Provider value={[mkJob("running", "بحث عن أفلاطون")]}>
+				<JobCard part={ackPart as never} />
+			</JobsContext.Provider>,
+		);
+		assert.ok(html.includes('<div class="mt-1 truncate text-sm text-muted-foreground" data-testid="dispatch-activity-line" dir="rtl">بحث عن أفلاطون</div>'), html);
+	});
+
 	it("renders the dispatched pulse when the poll has not seen the job yet", () => {
 		const html = renderToStaticMarkup(
 			<JobsContext.Provider value={[]}>
@@ -368,6 +377,15 @@ describe("steer card rendering (the delivered artifact)", () => {
 		assert.ok(!html.includes("do NOT wait"), "no protocol glue in the bubble");
 	});
 
+	it("the demo title takes its own text's direction beside the kind label", () => {
+		const steer = buildSubagentSteer(
+			{ id: "jd", kind: "demo", toolCallId: "cd" },
+			{ title: "مذبذب مخمد", html: DEMO_HTML, tested: true },
+		);
+		const html = renderToStaticMarkup(<SubagentSteerCard message={projectNative([steer])[0] as never} />);
+		assert.ok(html.includes('<span class="truncate text-xs font-medium tracking-wide text-foreground" dir="rtl">مذبذب مخمد</span>'), html);
+	});
+
 	it("renders the demo failure note with no iframe when the build FAILED", () => {
 		const steer = buildSubagentSteer(
 			{ id: "jd", kind: "demo", toolCallId: "cd" },
@@ -436,6 +454,20 @@ describe("steer card rendering (the delivered artifact)", () => {
 		assert.ok(!/<details[^>]*open/.test(html), "collapsed by default — no `open` attribute");
 		assert.ok(html.includes("founded the Academy"), "the persisted brief rides inside the details");
 		assert.ok(html.includes("britannica.com/plato"), "source links ride inside the details");
+	});
+
+	it("a source link takes its title's direction, so the ellipsis cuts the title's own end", () => {
+		const steer = buildSubagentSteer(
+			{ id: "jr", kind: "research", toolCallId: "cr" },
+			{ brief: "Plato founded the Academy.", sources: [{ title: "موسوعة الفلسفة", url: "https://example.com/plato" }] },
+		);
+		const html = renderToStaticMarkup(<SubagentSteerCard message={projectNative([steer])[0] as never} />);
+		assert.ok(
+			html.includes(
+				'<a href="https://example.com/plato" target="_blank" rel="noopener noreferrer" class="inline-block max-w-full align-bottom truncate text-primary underline-offset-2 hover:underline" dir="rtl">موسوعة الفلسفة</a>',
+			),
+			html,
+		);
 	});
 
 	it("renders a quiet PDF-reading-complete one-liner (sources v0) whose collapsed details carries the brief + pages", () => {

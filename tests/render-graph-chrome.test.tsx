@@ -67,4 +67,14 @@ describe("GraphChromeRow — the empty-graph ruling (owner, 2026-09-25)", () => 
 		);
 		assert.ok(!quiet.includes("No matching nodes."));
 	});
+
+	it("the node search takes the query's direction, keeping its label and look", () => {
+		const html = renderToStaticMarkup(createElement(GraphChromeRow, { ...PROPS, isEmpty: false, query: "مشتقة" }));
+		assert.ok(
+			html.includes(
+				'<input dir="rtl" placeholder="Search nodes…" aria-label="Search nodes" spellCheck="false" class="h-7 w-full rounded-lg border bg-background pl-8 text-xs outline-none placeholder:text-muted-foreground focus:border-ring" value="مشتقة"/>',
+			),
+			html,
+		);
+	});
 });

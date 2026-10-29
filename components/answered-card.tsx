@@ -1,10 +1,11 @@
 "use client";
 
 import { useState } from "react";
+import { BidiText } from "@/components/bidi-text";
 import { ConfidenceRail } from "@/components/confidence-rail";
 import { GlyphMark } from "@/components/ui/glyph-mark";
 import { ThinkingBlock } from "@/components/thinking-block";
-import { PathText } from "@/components/file-path-chip";
+import { filePathChunks } from "@/components/file-path-chip";
 import { cn } from "@/lib/utils";
 import { ToolContentResponse } from "@/components/ai-elements/message";
 import type { QuestionAnswerData } from "@/src/core";
@@ -26,7 +27,7 @@ export function AnsweredCard({ answer: savedAnswer, input }: { answer: QuestionA
 	if (answer.dismissed) {
 		return (
 			<div className="rounded-xl border bg-card p-4 text-sm text-muted-foreground">
-				<span className="font-medium">{answer.questionText}</span> — skipped
+				<BidiText className="font-medium" text={answer.questionText} /> — skipped
 			</div>
 		);
 	}
@@ -154,13 +155,13 @@ export function AnsweredCard({ answer: savedAnswer, input }: { answer: QuestionA
 							data-testid="answered-other"
 							className="flex items-center gap-2 rounded-lg border border-primary bg-accent px-3 py-1.5"
 						>
-							<span>“<PathText text={answer.other} />”</span>
+							<BidiText text={`“${answer.other}”`} chunks={filePathChunks} />
 						</div>
 					)}
 				</div>
 			)}
 
-			{answer.text && <div className="lh-prose mt-2 whitespace-pre-wrap">“<PathText text={answer.text} />”</div>}
+			{answer.text && <BidiText as="div" className="lh-prose mt-2 whitespace-pre-wrap" text={`“${answer.text}”`} chunks={filePathChunks} multiline />}
 
 			{/* The confidence record (owner round 6): the slider's rail, disc
 			    removed — the missing handle itself says "this is a record, not a

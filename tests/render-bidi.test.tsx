@@ -1,6 +1,6 @@
 /**
- * Mixed right-to-left and left-to-right content (static render, plus one
- * client re-render for the streaming flip). Pins:
+ * Mixed right-to-left and left-to-right content (static render, plus client
+ * mounts for the streaming flip and for text a user action brings up). Pins:
  * - markdown blocks (p, h1-h6, blockquote) take their direction from their own
  *   letters, ul/ol/table from their whole text, items and cells inherit; math
  *   and code never count and are always left-to-right;
@@ -10,24 +10,52 @@
  *   `<span dir="ltr">`: the runs `ltrRuns` finds over the whole inline text, so
  *   markup, math and code join them (`Newton's **second law**`, `**C**++`,
  *   `(**derivative**)`), a URL is one phrase and an accent stays with its
- *   letter; sentence punctuation ends a phrase; bold or italic that a phrase
- *   spills into or out of is cut at the phrase boundary, while a link stays
- *   whole and isolates inside itself;
+ *   letter; punctuation between two English pieces stays in the phrase and
+ *   only at its ends stays out; bold or italic that a phrase spills into or
+ *   out of is cut at the phrase boundary, while a link stays whole: it joins
+ *   the phrase when it holds no strong right-to-left character, else it
+ *   isolates inside itself;
  * - a block with no letters sets no `dir`; an LTR block states `dir="ltr"` only
- *   where it overrides a right-to-left flow (an Arabic block);
+ *   where it overrides a right-to-left flow (an Arabic block); an English
+ *   document is untouched, apart from code and math, which are always `ltr`;
  * - the direction follows the text as it streams, and a block that turns
- *   right-to-left mid-stream isolates the runs of the items it already held.
+ *   right-to-left mid-stream isolates the runs of the items it already held;
+ * - BidiText: one line under one direction, line breaks collapsed, or with
+ *   `multiline` one block per line, runs isolated the same way; a file-path
+ *   chip is placed whole in the run it sits in, and its letters never set the
+ *   direction; text fields take `dir` from their value and none when empty;
+ * - a field or card that exists only after typing or a click (the rename
+ *   field, the home topic, the sessions search, the practice thinking, a
+ *   graph node's card) takes its text's direction the same way.
  * Arabic is the tested language; one Hebrew case proves the rule is general.
  */
-import React from "react";
+import React, { act } from "react";
 (globalThis as Record<string, unknown>).React = React;
 
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { renderToStaticMarkup } from "react-dom/server";
+import { AppRouterContext, type AppRouterInstance } from "next/dist/shared/lib/app-router-context.shared-runtime";
+import { AnsweredCard } from "../components/answered-card.tsx";
 import { MessageResponse } from "../components/ai-elements/message.tsx";
 import { BidiText } from "../components/bidi-text.tsx";
+import { Composer } from "../components/composer.tsx";
+import { ChainTableBody } from "../components/chain-table.tsx";
+import { Chat } from "../components/chat.tsx";
+import { FilePathChip, filePathChunks } from "../components/file-path-chip.tsx";
+import { GraphView } from "../components/graph-view.tsx";
+import { Home } from "../components/home.tsx";
+import { PracticeDock } from "../components/practice-dock.tsx";
+import { QuestionDock } from "../components/question-dock.tsx";
+import { ReadingThinkingField } from "../components/reading-thinking.tsx";
+import { ServerEventsProvider } from "../components/server-events.tsx";
+import { AppShell, RenameRow } from "../components/sidebar.tsx";
 import { hasRtlLetter, ltrRuns } from "../src/core/bidi.ts";
+import { newUserMessage } from "../src/core/native-messages.ts";
+import { buildAnswer, DEFAULT_CONFIDENCE_INDEX, emptyDockSelection } from "../src/core/question-core.ts";
+import type { QuestionData, QuestionFormDraft } from "../src/core/question-core.ts";
+import type { ChatListItem, GraphSnapshot } from "../src/core/index.ts";
+import { mountClient, typeInto, typeIntoEditor } from "./helpers/client-mount.ts";
 
 const escapeHtml = (text: string) =>
 	text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#x27;");
@@ -40,6 +68,12 @@ function isolated(text: string): string {
 function render(md: string): string {
 	return renderToStaticMarkup(<MessageResponse mode="static">{md}</MessageResponse>);
 }
+
+/** The app router `useRouter` reads outside Next: every navigation is a no-op. */
+const noopRouter: AppRouterInstance = { back() {}, forward() {}, refresh() {}, push() {}, replace() {}, prefetch() {}, bfcacheId: "_b_0_" };
+
+/** A server-events channel that never opens and never delivers. */
+const silentEvents = () => ({ close() {}, onOpen() {}, onEvent() {} });
 
 const INLINE_CODE = '<code class="rounded bg-muted px-1.5 py-0.5 font-mono text-sm" data-streamdown="inline-code" dir="ltr">';
 
@@ -307,6 +341,28 @@ describe("markdown blocks: no letters, or only left-to-right letters", () => {
 		assert.ok(html.includes('<p dir="ltr">English paragraph here.</p>'));
 	});
 
+	it("a URL's right-to-left path segment never counts: an English sentence around it stays left-to-right, as a block and as plain text", () => {
+		const text = "See https://ar.wikipedia.org/wiki/فيزياء for details.";
+		const md = render(text);
+		assert.match(md, /<p>See <button [^>]*data-streamdown="link"[^>]*>https:\/\/ar\.wikipedia\.org\/wiki\/فيزياء<\/button> for details\.<\/p>/);
+		assert.ok(!md.includes('dir="rtl"'), md);
+		assert.equal(renderToStaticMarkup(<BidiText text={text} />), `<span dir="ltr">${text}</span>`);
+	});
+
+	it("an English document carries no dir on any block and no isolate; only inline code, code fences and math are stamped ltr, on every page, having no direction of their own", () => {
+		const md = "# Heading\n\nSome **bold** and `code` text with $x^2$ inline math.\n\n```js\nconst x = 1;\n```\n\n- one\n- two\n\n| A | B |\n|---|---|\n| 1 | 2 |\n\n> A quote.\n\n> [!IMPORTANT]\n> A callout.\n\n$$\ny = x\n$$";
+		const html = render(md);
+		const stamped = [...html.matchAll(/<[a-z0-9]+[^>]*\sdir="([^"]*)"[^>]*>/g)];
+		assert.equal(stamped.length, 5, "the inline code, the inline equation, the fence body, the display equation and the equation inside it");
+		for (const [tag, dir] of stamped) {
+			assert.equal(dir, "ltr", tag);
+			assert.match(tag, /data-streamdown="(inline-code|code-block-body)"|class="katex(-display)?"/, `only code and math carry dir: ${tag}`);
+		}
+		assert.equal((html.match(/<span dir="ltr">/g) ?? []).length, 0, "no isolate");
+		const block = /^<(p|h[1-6]|ul|ol|li|blockquote|table|thead|tbody|tr|th|td)\b|data-testid="(md-callout|md-table)"/;
+		assert.ok(stamped.every(([tag]) => !block.test(tag)), "no block carries dir");
+	});
+
 	it("a lone image keeps its unwrapped place instead of nesting a block in a paragraph", () => {
 		const html = render("![alt](https://example.com/a.png)\n\nنص");
 		assert.ok(!/<p[^>]*><div/.test(html));
@@ -330,29 +386,314 @@ describe("markdown blocks: streaming", () => {
 	});
 
 	it("a list that turns right-to-left mid-stream isolates the runs of the items it already held", async () => {
-		const { parseHTML } = await import("linkedom");
-		const dom = parseHTML("<html><head></head><body><div id='root'></div></body></html>");
-		const globals = globalThis as Record<string, unknown>;
-		const saved = Object.fromEntries(["window", "document", "HTMLElement", "Node", "IS_REACT_ACT_ENVIRONMENT"].map((key) => [key, globals[key]]));
-		Object.assign(globals, { window: dom.window, document: dom.document, HTMLElement: dom.window.HTMLElement, Node: dom.window.Node, IS_REACT_ACT_ENVIRONMENT: true });
+		const view = await mountClient(null);
 		try {
-			const { createRoot } = await import("react-dom/client");
-			const root = createRoot(dom.document.getElementById("root")!);
 			const show = async (md: string) => {
-				await React.act(async () => root.render(<MessageResponse>{md}</MessageResponse>));
-				return dom.document.getElementById("root")!.innerHTML;
+				await view.render(<MessageResponse>{md}</MessageResponse>);
+				return view.host.innerHTML;
 			};
 			const before = await show("- Newton\n- two\n- three");
 			assert.ok(!before.includes("dir="), "English so far: no direction, no isolation");
 			const after = await show("- Newton\n- two\n- three ينص");
 			assert.match(after, /<ul [^>]*dir="rtl"/);
 			assert.equal((after.match(/<span dir="ltr">/g) ?? []).length, 3, "the earlier items are isolated too, not left stale");
-			await React.act(async () => root.unmount());
+			const grown = await show("- Newton\n- two\n- three ينص\n- four");
+			assert.equal((grown.match(/<span dir="ltr">/g) ?? []).length, 4, "a later item is isolated too, and the earlier ones keep theirs");
 		} finally {
-			for (const [key, value] of Object.entries(saved)) {
-				if (value === undefined) delete globals[key];
-				else globals[key] = value;
+			await view.unmount();
+		}
+	});
+});
+
+describe("BidiText: plain text under its own direction", () => {
+	const html = (node: React.ReactElement) => renderToStaticMarkup(node);
+
+	it("single-line Arabic with an English run: dir on the element, the run isolated", () => {
+		const text = "المشتقة (derivative) مهمة";
+		assert.equal(html(<BidiText text={text} />), `<span dir="rtl">${isolated(text)}</span>`);
+	});
+
+	it("a non-string value from cast tool output renders as React would, without throwing", () => {
+		assert.equal(html(<BidiText text={502 as unknown as string} />), `<span>502</span>`);
+		assert.equal(html(<BidiText text={undefined as unknown as string} />), `<span></span>`);
+	});
+
+	it("English pieces joined by a comma are one isolate; Arabic between pieces ends it", () => {
+		const text = "مثل Python، Java وأيضا Big-O notation هنا";
+		assert.equal(html(<BidiText text={text} />), `<span dir="rtl">${isolated(text)}</span>`);
+		assert.equal((html(<BidiText text={text} />).match(/<span dir="ltr">/g) ?? []).length, 2);
+		assert.ok(html(<BidiText text={text} />).includes('<span dir="ltr">Python، Java</span>'));
+	});
+
+	it("single-line English is left-to-right and nothing is isolated", () => {
+		assert.equal(html(<BidiText text="Newton law" />), '<span dir="ltr">Newton law</span>');
+	});
+
+	it("text without letters sets no dir", () => {
+		assert.equal(html(<BidiText text="42" />), "<span>42</span>");
+		assert.equal(html(<BidiText text="" />), "<span></span>");
+	});
+
+	it("a Hebrew title is right-to-left", () => {
+		const text = "מבוא ל-Python";
+		assert.equal(html(<BidiText text={text} />), `<span dir="rtl">${isolated(text)}</span>`);
+	});
+
+	it("without multiline, a line break collapses to a space: one line, one dir, as a title or an activity row shows it", () => {
+		assert.equal(html(<BidiText className="truncate" text={"derivative\nrules"} />), '<span class="truncate" dir="ltr">derivative rules</span>');
+		const text = "مرحبا Newton\r\n\n  English line";
+		assert.equal(html(<BidiText text={text} />), `<span dir="rtl">${isolated("مرحبا Newton English line")}</span>`);
+	});
+
+	it("with multiline, text is one block per line, each with its own direction; empty lines keep their height", () => {
+		const text = "مرحبا Newton\nEnglish line\n\nسطر أخير";
+		assert.equal(
+			html(<BidiText as="div" className="whitespace-pre-wrap" text={text} multiline />),
+			'<div class="whitespace-pre-wrap">' +
+				`<span class="block" dir="rtl">${isolated("مرحبا Newton")}</span>` +
+				'<span class="block" dir="ltr">English line</span>' +
+				'<span class="block"><br/></span>' +
+				'<span class="block" dir="rtl">سطر أخير</span>' +
+				"</div>",
+		);
+	});
+
+	it("a trailing line break ends the last line without opening another; CRLF splits like LF", () => {
+		assert.equal(
+			html(<BidiText text={"سطر\r\nline\r\n"} multiline />),
+			'<span><span class="block" dir="rtl">سطر</span><span class="block" dir="ltr">line</span></span>',
+		);
+	});
+
+	it("passes the element's own props through, whatever element it renders", () => {
+		const out = html(<BidiText as="button" type="button" data-testid="title" className="truncate" text="عنوان" />);
+		assert.equal(out, '<button type="button" data-testid="title" class="truncate" dir="rtl">عنوان</button>');
+	});
+
+	it("the answered-card quote reads in its own direction, quotation marks inside the line", () => {
+		const qd: QuestionData = { id: "e1", kind: "explain", question: "Why?", mode: "text", options: [], createdAt: new Date().toISOString() };
+		const text = "لأن Newton قال ذلك";
+		const card = html(<AnsweredCard answer={buildAnswer(qd, { text })} />);
+		assert.ok(card.includes(`<div class="lh-prose mt-2 whitespace-pre-wrap" dir="rtl">${isolated(`“${text}”`)}</div>`), card);
+	});
+
+	it("the learner's own typed option reads in its own direction, quotation marks inside the line", () => {
+		const qd: QuestionData = { id: "a1", kind: "ask", question: "Which?", mode: "single-select", options: [], createdAt: new Date().toISOString() };
+		const other = "خيار آخر (other)";
+		const card = html(<AnsweredCard answer={buildAnswer(qd, { other })} />);
+		assert.ok(card.includes(`data-testid="answered-other" class="flex items-center gap-2 rounded-lg border border-primary bg-accent px-3 py-1.5"><span dir="rtl">${isolated(`“${other}”`)}</span></div>`), card);
+	});
+
+	it("the session title and the learner's message each read in their own text's direction", () => {
+		const message = "أريد أن أفهم Newton";
+		const chat = html(
+			<ServerEventsProvider>
+				<Chat chatId="c1" title="درس المشتقات" initialMessages={[newUserMessage(message)]} />
+			</ServerEventsProvider>,
+		);
+		assert.match(
+			chat,
+			/<button type="button" class="lh-no-drag -mx-1\.5 min-w-4 shrink cursor-text truncate rounded-md px-1\.5 text-start font-title text-3xl tracking-tight transition-colors hover:bg-accent"[^>]* dir="rtl">درس المشتقات<\/button>/,
+			"the title button",
+		);
+		assert.ok(chat.includes(`<div class="lh-prose whitespace-pre-wrap text-foreground" dir="rtl">${isolated(message)}</div>`), "the learner's message");
+	});
+});
+
+describe("BidiText: file-path chips in learner text", () => {
+	const html = (node: React.ReactElement) => renderToStaticMarkup(node);
+	const chip = (path: string) => html(<FilePathChip path={path} />);
+
+	it("an Arabic line with a chip: the chip is one left-to-right unit, isolated with the English beside it", () => {
+		const text = "راجع ملف `/home/user/notes.md` (draft) هنا";
+		assert.equal(
+			html(<BidiText text={text} chunks={filePathChunks} />),
+			`<span dir="rtl">راجع ملف <span dir="ltr">${chip("/home/user/notes.md")} (draft)</span> هنا</span>`,
+		);
+	});
+
+	it("an English line whose path holds Arabic letters stays left-to-right: the path never sets the direction", () => {
+		const text = "Open `/home/user/ملاحظات.md` now";
+		assert.equal(html(<BidiText text={text} chunks={filePathChunks} />), `<span dir="ltr">Open ${chip("/home/user/ملاحظات.md")} now</span>`);
+	});
+
+	it("a line that is only a chip sets no dir: an element is not text", () => {
+		assert.equal(html(<BidiText text={"`/home/user/notes.md`"} chunks={filePathChunks} />), `<span>${chip("/home/user/notes.md")}</span>`);
+	});
+});
+
+describe("text fields take dir from their value", () => {
+	const fields = (markup: string) => [...markup.matchAll(/<(?:input\b|textarea\b|div\b(?=[^>]*data-file-path-input))[^>]*>/g)].map((match) => match[0]);
+	const dirOf = (tag: string) => /\bdir="(\w+)"/.exec(tag)?.[1];
+
+	it("the composer: rtl for Arabic, ltr for English, none when empty", () => {
+		const composer = (value: string) =>
+			renderToStaticMarkup(<Composer busy={false} value={value} onChange={() => {}} onSend={() => {}} onStop={() => {}} canSend />);
+		assert.equal(dirOf(fields(composer("مرحبا Newton"))[0]!), "rtl");
+		assert.equal(dirOf(fields(composer("hello"))[0]!), "ltr");
+		assert.equal(dirOf(fields(composer(""))[0]!), undefined);
+	});
+
+	it("the reading-thinking field: rtl for Arabic, none when empty", () => {
+		const field = (value: string) => renderToStaticMarkup(<ReadingThinkingField value={value} onChange={() => {}} claim={false} />);
+		assert.equal(dirOf(fields(field("أفكر في"))[0]!), "rtl");
+		assert.equal(dirOf(fields(field(""))[0]!), undefined);
+	});
+
+	it("the session rename field: rtl for an Arabic title, none when empty", () => {
+		const row = (title: string) =>
+			renderToStaticMarkup(<RenameRow chat={{ id: "c1", title, updatedAt: new Date().toISOString(), busy: false } as unknown as ChatListItem} onCommit={() => {}} onCancel={() => {}} />);
+		assert.equal(dirOf(fields(row("درس المشتقات"))[0]!), "rtl");
+		assert.equal(dirOf(fields(row(""))[0]!), undefined);
+	});
+
+	it("the chain-table search: rtl for an Arabic query, none when empty", () => {
+		const body = (query: string) =>
+			renderToStaticMarkup(
+				<ChainTableBody
+					nodes={[]} chains={[]} sessions={{}} fileSources={{}} query={query} onQuery={() => {}}
+					sort={{ col: "name", dir: 1 }} onSort={() => {}} selection={new Set()} expandedClusters={new Set()} expandedChains={new Set()}
+					onToggleCluster={() => {}} onToggleChain={() => {}} onToggleNodes={() => {}} onClear={() => {}} onDelete={() => {}} onClose={() => {}}
+					onSelect={() => {}}
+				/>,
+			);
+		const search = (markup: string) => fields(markup).find((tag) => tag.includes("chain-table-search"))!;
+		assert.equal(dirOf(search(body("مشتقة"))), "rtl");
+		assert.equal(dirOf(search(body(""))), undefined);
+	});
+
+	it("the question dock answer field and the practice dock thinking field start with no dir", () => {
+		const question = renderToStaticMarkup(
+			<QuestionDock toolName="ask_user_question" toolCallId="a2" input={{ question: "Explain the chain rule." } as never} expanded onExpand={() => {}} onSubmit={() => {}} />,
+		);
+		assert.equal(dirOf(fields(question).find((tag) => tag.startsWith("<div"))!), undefined);
+		const practice = renderToStaticMarkup(
+			<PracticeDock problemCallId="p1" input={{ statement: "Show it." }} expanded onExpand={() => {}} onSubmit={() => {}} />,
+		);
+		assert.equal(dirOf(fields(practice).find((tag) => tag.startsWith("<div"))!), undefined);
+	});
+
+	it("each question dock field takes its draft's direction: the typed answer, the custom option and the thinking", () => {
+		const draft = (over: Partial<QuestionFormDraft>): QuestionFormDraft => ({
+			selection: emptyDockSelection(), thinking: "", other: "", text: "", confidenceIndex: DEFAULT_CONFIDENCE_INDEX, ...over,
+		});
+		const dock = (input: object, initialDraft: QuestionFormDraft) =>
+			renderToStaticMarkup(
+				<QuestionDock toolName="ask_user_question" toolCallId="a3" input={input as never} expanded onExpand={() => {}} onSubmit={() => {}} initialDraft={initialDraft} />,
+			);
+		const field = (markup: string, label: string) => fields(markup).find((tag) => tag.includes(`aria-label="${label}"`)) ?? "";
+		const answer = field(dock({ question: "Explain the chain rule." }, draft({ text: "قاعدة السلسلة" })), "Type your answer…");
+		assert.equal(dirOf(answer), "rtl", "the typed answer");
+		assert.ok(answer.includes("field-sizing-content lh-input max-h-48 min-h-10 w-full resize-none bg-transparent px-2.5 py-2 outline-none placeholder:text-muted-foreground"), answer);
+		const picked = dock(
+			{ question: "Pick one", options: [{ label: "A" }, { label: "B" }] },
+			draft({ other: "خيار آخر", thinking: "أفكر في الجواب", selection: { ...emptyDockSelection(), otherSelected: true } }),
+		);
+		const other = field(picked, "Type your own answer…");
+		assert.equal(dirOf(other), "rtl", "the custom option");
+		assert.ok(other.includes("lh-input w-full min-w-0 flex-1 bg-transparent outline-none placeholder:text-muted-foreground"), other);
+		const thinking = field(picked, "Why this answer? Whatever comes to mind.");
+		assert.equal(dirOf(thinking), "rtl", "the thinking");
+		assert.ok(thinking.includes("field-sizing-content lh-input max-h-48 w-full resize-none bg-transparent px-2.5 py-2 outline-none placeholder:text-muted-foreground/70"), thinking);
+	});
+});
+
+describe("text that appears only after a user action takes its own direction", () => {
+	it("the session rename field follows the typed title: ltr for the English title it opens with, rtl once Arabic is typed", async () => {
+		const view = await mountClient(
+			<ServerEventsProvider connect={silentEvents}>
+				<Chat chatId="c1" title="Derivatives" initialMessages={[]} />
+			</ServerEventsProvider>,
+		);
+		try {
+			const title = [...view.host.querySelectorAll("button")].find((button) => button.textContent === "Derivatives")!;
+			await act(async () => title.click());
+			const field = view.host.querySelector<HTMLInputElement>('input[aria-label="Session title"]')!;
+			assert.equal(field.getAttribute("dir"), "ltr");
+			await typeInto(field, "درس المشتقات");
+			assert.equal(field.getAttribute("dir"), "rtl");
+		} finally {
+			await view.unmount();
+		}
+	});
+
+	it("the practice dock's thinking field takes the typed text's direction", async () => {
+		const view = await mountClient(<PracticeDock problemCallId="p1" input={{ statement: "Show it." }} expanded onExpand={() => {}} onSubmit={() => {}} />);
+		try {
+			const editor = view.host.querySelector<HTMLElement>('[data-testid="practice-thinking-field"] [data-file-path-input]')!;
+			assert.equal(editor.getAttribute("dir"), null);
+			await typeIntoEditor(editor, "أفكر في الحل");
+			assert.equal(editor.getAttribute("dir"), "rtl");
+		} finally {
+			await view.unmount();
+		}
+	});
+
+	it("the home topic field takes the typed topic's direction", async () => {
+		const view = await mountClient(
+			<AppRouterContext.Provider value={noopRouter}>
+				<Home initialConfigured rendering={false} />
+			</AppRouterContext.Provider>,
+		);
+		try {
+			const editor = view.host.querySelector<HTMLElement>('form [data-file-path-input]')!;
+			assert.equal(editor.getAttribute("dir"), null);
+			await typeIntoEditor(editor, "قاعدة السلسلة");
+			assert.equal(editor.getAttribute("dir"), "rtl");
+		} finally {
+			await view.unmount();
+		}
+	});
+
+	it("the sessions search box takes the typed query's direction", async () => {
+		const view = await mountClient(
+			<AppRouterContext.Provider value={noopRouter}>
+				<ServerEventsProvider connect={silentEvents}>
+					<AppShell>{null}</AppShell>
+				</ServerEventsProvider>
+			</AppRouterContext.Provider>,
+		);
+		try {
+			const search = view.host.querySelector<HTMLInputElement>('[data-testid="session-search"]')!;
+			assert.equal(search.getAttribute("dir"), null);
+			await typeInto(search, "مشتقة");
+			assert.equal(search.getAttribute("dir"), "rtl");
+		} finally {
+			await view.unmount();
+		}
+	});
+
+	it("a clicked graph node's card shows its name, statement and notes file each in its own direction", async () => {
+		const node = { id: "n_1", name: "قانون نيوتن", statement: "القوة تساوي الكتلة في التسارع (F = ma).", aliases: [], createdAt: "2026-01-01T00:00:00.000Z", provenance: [] };
+		const snapshot: GraphSnapshot = {
+			nodes: [node], propositions: [node], edges: [], logicalEdges: [], impLinks: [], chains: [], clusters: [],
+			sessions: {}, fileSources: { src_1: "ملاحظات الفيزياء.md" }, nodeSessions: { n_1: ["src_1"] }, positions: { n_1: { x: 100, y: 80 } },
+		};
+		const graphOnly: typeof fetch = async (input) => (input === "/api/graph" ? Response.json(snapshot) : new Promise<Response>(() => {}));
+		const view = await mountClient(
+			<ServerEventsProvider connect={silentEvents}>
+				<GraphView />
+			</ServerEventsProvider>,
+			{ fetch: graphOnly, frames: true },
+		);
+		try {
+			// The snapshot arrives, then the canvas's live layout anneals to rest:
+			// a press on a node while it is still moving is a drag, not a click.
+			await view.settle();
+			// A zero-size canvas never fits its camera, so screen and layout points
+			// coincide: the click lands on the node's ledger position.
+			const canvas = view.host.querySelector("canvas")!;
+			for (const type of ["pointerdown", "pointerup"]) {
+				await act(async () => {
+					canvas.dispatchEvent(Object.assign(new window.Event(type, { bubbles: true }), { button: 0, pointerId: 1, clientX: 100, clientY: 80 }));
+				});
 			}
+			const owner = (classes: string) => view.host.querySelector(`[class="${classes}"]`);
+			assert.equal(owner("text-sm font-medium leading-snug")?.getAttribute("dir"), "rtl", "the name");
+			assert.equal(owner("mt-1 text-xs leading-relaxed text-muted-foreground")?.getAttribute("dir"), "rtl", "the statement");
+			assert.equal(owner("min-w-0 flex-1 truncate px-2 py-1.5 text-sm text-muted-foreground")?.getAttribute("dir"), "rtl", "the notes file");
+		} finally {
+			await view.unmount();
 		}
 	});
 });

@@ -7,15 +7,17 @@
  * page), not re-implemented here.
  * Compatibility expansions produce unique, non-overlapping original spans.
  */
-import React from "react";
+import React, { act, createRef } from "react";
 (globalThis as Record<string, unknown>).React = React;
 
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { parseHTML } from "linkedom";
 import { findSessionTextMatches, stepSessionMatch } from "../src/core/session-find.ts";
+import { kbdEventForAction } from "../src/core/keyboard.ts";
 import { sessionFindRanges, sessionRangeIdentity, sameSessionRange } from "../components/session-find-dom.ts";
-import { clearSessionFindHighlights, injectFindStyles, sessionFindHasForegroundLayer } from "../components/session-find.tsx";
+import { clearSessionFindHighlights, injectFindStyles, SessionFind, sessionFindHasForegroundLayer } from "../components/session-find.tsx";
+import { mountClient, typeInto } from "./helpers/client-mount.ts";
 
 const dom = parseHTML("<html><head><style></style></head><body></body></html>");
 (globalThis as Record<string, unknown>).window = dom.window;
@@ -278,5 +280,23 @@ describe("clearSessionFindHighlights — browser-API shaped, linkedom-safe", () 
 		clearSessionFindHighlights();
 		assert.equal((CSS as { highlights?: Map<string, unknown> }).highlights!.size, 0);
 		assert.ok(range!, "a range existed and the DOM beneath it is untouched");
+	});
+});
+
+describe("SessionFind — the find box", () => {
+	it("opened by the find key, it takes the typed query's direction", async () => {
+		const view = await mountClient(<SessionFind scopeRef={createRef()} scrollContextRef={createRef()} />);
+		try {
+			assert.equal(view.host.querySelector('[data-testid="session-find"]'), null, "closed until the find key");
+			await act(async () => {
+				window.dispatchEvent(new window.CustomEvent(kbdEventForAction("find")));
+			});
+			const input = view.host.querySelector<HTMLInputElement>('input[aria-label="Find in session"]')!;
+			assert.equal(input.getAttribute("dir"), null);
+			await typeInto(input, "مدرسة");
+			assert.equal(input.getAttribute("dir"), "rtl");
+		} finally {
+			await view.unmount();
+		}
 	});
 });

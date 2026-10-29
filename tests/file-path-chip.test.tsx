@@ -26,6 +26,7 @@ describe("FilePathChip", () => {
 		assert.equal(chip.getAttributeNames().some((name) => name.toLowerCase() === "contenteditable"), false);
 		assert.ok(chip.classList.contains("inline-flex"));
 		assert.ok(chip.querySelector(".truncate"));
+		assert.equal(chip.getAttribute("dir"), "ltr", "the icon stays left of the name inside a right-to-left field");
 	});
 
 	it("supports atomic editor rendering without requiring an editor in transcripts", () => {

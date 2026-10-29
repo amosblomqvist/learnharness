@@ -3,6 +3,7 @@
 import { useCallback } from "react";
 import { joinDictation, useDictationTarget } from "@/components/dictation";
 import { PathInput } from "@/components/path-input";
+import { textDirection } from "@/src/core";
 
 /**
  * The reading-thinking field (owner design 2026-10-03, "two questions per
@@ -57,6 +58,7 @@ export function ReadingThinkingField({
 			</div>
 			<PathInput
 				value={value}
+				dir={textDirection(value)}
 				onValueChange={onChange}
 				/* py-0.5 (owner round, 2026-10-07): the scrollbar fix. Source
 				   Sans 3's font box is 22px at 16px; lh-input's 1.25 leading

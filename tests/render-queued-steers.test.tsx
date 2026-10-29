@@ -29,6 +29,16 @@ describe("QueuedSteersBody (the quiet queue above the composer)", () => {
 		assert.match(html, /also cover Venus/, "the text rides the line");
 	});
 
+	it("a queued steer takes its own text's direction, keeping its line's look and title", () => {
+		const text = "اشرح المثال مرة أخرى";
+		const html = renderToStaticMarkup(<QueuedSteersBody steers={[{ id: "steer_ar", text }]} />);
+		assert.equal(html.match(/<span/g)?.length, 1, "one span per steer");
+		assert.ok(
+			html.includes(`<span title="${text}" class="block max-w-[240px] truncate font-ui text-[11px] text-muted-foreground/60" dir="rtl">${text}</span>`),
+			html,
+		);
+	});
+
 	it("empty queue renders nothing", () => {
 		assert.equal(renderToStaticMarkup(<QueuedSteersBody steers={[]} />), "");
 	});

@@ -301,6 +301,14 @@ describe("ThinkingBlock — the document band + ⌘T sync (owner rounds, 2026-10
 		assert.ok(html.includes("border-l-[calc(3ch-14px)]"), "rail only, same geometry");
 	});
 
+	it("the learner's thinking takes its own text's direction, inside the row's prose look", () => {
+		const html = renderToStaticMarkup(<ThinkingBlock text="أفكر أن المشتقة سالبة هنا" defaultOpen />);
+		assert.ok(
+			html.includes('<span class="lh-prose mt-1.5 block whitespace-pre-wrap text-[15px] italic text-foreground/50" dir="rtl">أفكر أن المشتقة سالبة هنا</span>'),
+			html,
+		);
+	});
+
 	it("⌘T sets every row — explicit sets stomp individual state, late mounts honor the last set", () => {
 		setAllUserThinkingOpen(false);
 		const collapsed = renderToStaticMarkup(<ThinkingBlock text="synced" defaultOpen />);

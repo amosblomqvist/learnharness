@@ -3,11 +3,13 @@
 import { useCallback, useRef, useState } from "react";
 import { ChevronRightIcon } from "lucide-react";
 import { ToolContentResponse } from "@/components/ai-elements/message";
+import { BidiText } from "@/components/bidi-text";
 import { Button } from "@/components/ui/button";
 import { joinDictation, useDictationTarget } from "@/components/dictation";
 import { useEnterSubmits } from "@/components/enter-submits";
 import { PathInput } from "@/components/path-input";
 import { cn } from "@/lib/utils";
+import { textDirection } from "@/src/core";
 
 /**
  * The practice dock (practice sessions, owner design 2026-10-04): an
@@ -90,11 +92,11 @@ export function PracticeDock({ problemCallId, input, expanded, onExpand, onSubmi
 				type="button"
 				data-testid="practice-dock-bar"
 				onClick={onExpand}
-				className="flex w-full cursor-pointer items-center gap-2 px-4 py-3 text-left text-sm text-muted-foreground transition-colors hover:text-foreground"
+				className="flex w-full cursor-pointer items-center gap-2 px-4 py-3 text-start text-sm text-muted-foreground transition-colors hover:text-foreground"
 			>
 				<ChevronRightIcon className="size-4 shrink-0 rotate-90" />
 				<span className="font-medium">Problem</span>
-				<span className="min-w-0 flex-1 truncate">{input.statement}</span>
+				<BidiText className="min-w-0 flex-1 truncate" text={String(input.statement ?? "").replace(/\s+/g, " ").trim()} />
 			</button>
 		);
 	}
@@ -124,6 +126,7 @@ export function PracticeDock({ problemCallId, input, expanded, onExpand, onSubmi
 				</div>
 				<PathInput
 					value={thinking}
+					dir={textDirection(thinking)}
 					onValueChange={(value) => {
 						thinkingRef.current = value;
 						setThinking(value);

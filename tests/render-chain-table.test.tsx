@@ -223,6 +223,22 @@ describe("ChainTableBody — chain rows (chips + connectors)", () => {
 		assert.ok(html.includes("pl-12"), "chains aligned with the folder icon");
 		assert.ok(html.includes("h-5 w-3.5"), "the expander shares the checkbox's 14px width");
 	});
+
+	it("a cluster label, a proposition chip and a statement each take their own text's direction", () => {
+		const nodes = NODES.map((n) => (n.id === "a" ? { ...n, name: "قانون نيوتن", statement: "القوة تساوي الكتلة في التسارع." } : n));
+		const html = render({
+			nodes,
+			sessions: { ...BASE.sessions, chat1: "درس الأخلاق" },
+			expandedClusters: new Set(["chat1"]),
+			expandedChains: new Set(["c1"]),
+		});
+		assert.ok(html.includes('<span class="truncate" dir="rtl">درس الأخلاق</span>'), "the cluster label");
+		assert.ok(html.includes('<span data-testid="prop-chip-a" class="rounded border border-border/70 bg-muted/30 px-1.5 py-0.5" dir="rtl">قانون نيوتن</span>'), "the chip");
+		assert.ok(
+			html.includes('<span class="min-w-0 flex-1 text-xs leading-relaxed text-muted-foreground" dir="rtl">القوة تساوي الكتلة في التسارع.</span>'),
+			"the statement",
+		);
+	});
 });
 
 describe("ChainTableBody — the sortable table headers", () => {
