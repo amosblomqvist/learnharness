@@ -4,6 +4,8 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { standardFontsDir } from "./pdf-ops";
+import { FIGURE_MAX_CHARS } from "../../core/question-core.ts";
+import { svgImageSource } from "../../core/svg-source.ts";
 
 /**
  * Verification engines for sub-agents: demos use the app's own Electron
@@ -410,6 +412,24 @@ function crc32(buf: Buffer): number {
 		for (let k = 0; k < 8; k++) c = (c >>> 1) ^ (0xedb88320 & -(c & 1));
 	}
 	return ~c >>> 0;
+}
+
+/** The question-figure boundary check: an absent figure passes, an
+ *  oversized or unparseable one becomes problems the model retries on.
+ *  Parse only — no fonts, no raster. */
+export async function figureProblems(figure?: string): Promise<string[]> {
+	if (figure === undefined) return [];
+	if (figure.length > FIGURE_MAX_CHARS) {
+		return [`figure is ${figure.length} characters; the cap is ${FIGURE_MAX_CHARS} — simplify it.`];
+	}
+	try {
+		const { Resvg } = await import("@resvg/resvg-js");
+		// The bytes the learner's browser gets (SvgImage's display repairs).
+		new Resvg(svgImageSource(figure), { font: { loadSystemFonts: false } });
+		return [];
+	} catch (err) {
+		return [`figure is not valid SVG: ${err instanceof Error ? err.message : String(err)}`];
+	}
 }
 
 async function renderSvg(svg: string, opts: RenderSvgOptions = {}): Promise<Buffer> {

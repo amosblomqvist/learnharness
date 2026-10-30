@@ -24,6 +24,7 @@ import { lsTool } from "./tools/ls.ts";
 import { findTool } from "./tools/find.ts";
 import { grepTool } from "./tools/grep.ts";
 import { healToolRecord } from "./tools/heal.ts";
+import { figureProblems } from "./subagents/headless.ts";
 import type { GraphStore } from "../core/ports.ts";
 
 export { jobTools };
@@ -210,7 +211,7 @@ export const probeQuizTool: AgentTool<typeof probeQuizInputSchema> = {
 	prepareArguments: prepareQuestionArguments,
 	executionMode: "sequential",
 	execute: async (_toolCallId, input) => {
-		const problems = quizInputProblems(input);
+		const problems = [...quizInputProblems(input), ...(await figureProblems(input.figure))];
 		if (problems.length > 0) return invalidInputResult("probe", problems);
 		return questionResult();
 	},
@@ -229,7 +230,7 @@ export function teachExplainToolFor(
 		prepareArguments: prepareQuestionArguments,
 		executionMode: "sequential",
 		execute: async (_toolCallId, input) => {
-			const problems = [...explainInputProblems(input)];
+			const problems = [...explainInputProblems(input), ...(await figureProblems(input.figure))];
 			const nodeIdProblemText = nodeIdProblem(ctx, input.nodeId);
 			if (nodeIdProblemText) problems.push(nodeIdProblemText);
 			if (problems.length > 0) return invalidInputResult("explain", problems);
@@ -254,7 +255,7 @@ export const probeExplainTool: AgentTool<typeof explainInputBase> = {
 	prepareArguments: prepareQuestionArguments,
 	executionMode: "sequential",
 	execute: async (_toolCallId, input) => {
-		const problems = explainInputProblems(input);
+		const problems = [...explainInputProblems(input), ...(await figureProblems(input.figure))];
 		if (problems.length > 0) return invalidInputResult("recall", problems);
 		return questionResult();
 	},
@@ -381,7 +382,7 @@ export function teachQuizToolFor(ctx: Pick<PlanToolContext, "chatId" | "chatStor
 		prepareArguments: prepareQuestionArguments,
 		executionMode: "sequential",
 		execute: async (_toolCallId, input) => {
-			const problems = [...quizInputProblems(input)];
+			const problems = [...quizInputProblems(input), ...(await figureProblems(input.figure))];
 			const nodeIdProblemText = nodeIdProblem(ctx, input.nodeId);
 			if (nodeIdProblemText) problems.push(nodeIdProblemText);
 			if (problems.length > 0) return invalidInputResult("quiz", problems);

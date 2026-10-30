@@ -31,6 +31,7 @@ import { jobStore } from "../src/store/jobs.ts";
 import { probeQuizInputSchema, quizInputObject, quizInputProblems } from "../src/core/question-core.ts";
 import { chatStore } from "../src/store/chats.ts";
 import { PATHS } from "../config.ts";
+import { figureProblems } from "../src/agent/subagents/headless.ts";
 
 const dataDir = path.join(PATHS.root, "data");
 fs.mkdirSync(dataDir, { recursive: true });
@@ -471,5 +472,33 @@ describe("tool descriptions carry mechanics only, no question-craft", () => {
 		);
 		assert.ok(shared.includes("asymmetry"), "the option craft moved here, not deleted");
 		assert.ok(shared.includes("TRANSCRIBED SPEECH"), "the dictation-leniency note lives here");
+	});
+});
+
+describe("figureProblems: the question-figure boundary check (owner, 2026-10-27)", () => {
+	const svg = "<svg xmlns='http://www.w3.org/2000/svg' width='10' height='10'><rect width='5' height='5'/></svg>";
+	it("absent and valid figures pass; the display's xmlns repair is honored", async () => {
+		assert.deepEqual(await figureProblems(undefined), []);
+		assert.deepEqual(await figureProblems(svg), []);
+		assert.deepEqual(await figureProblems("<svg width='10' height='10'><rect width='5' height='5'/></svg>"), []);
+	});
+	it("malformed and oversized figures become problems", async () => {
+		assert.match((await figureProblems("<svg width='10'><rect></svg>"))[0] ?? "", /not valid SVG/);
+		assert.match((await figureProblems("not svg"))[0] ?? "", /not valid SVG/);
+		assert.match((await figureProblems(svg + " ".repeat(20001)))[0] ?? "", /cap is 20000/);
+	});
+	it("every graded tool rejects a malformed figure back to the model", async () => {
+		const bad = "<svg><g></svg>";
+		const { type: _t, nodeId: _n, ...probeQuiz } = validQuiz;
+		const recall = { question: "Why?", correctAnswer: "Because." };
+		for (const [tool, input] of [
+			[probeQuizTool, { ...probeQuiz, figure: bad }],
+			[probeExplainTool, { ...recall, figure: bad }],
+		] as const) {
+			const r = await boundaryParse(tool, input);
+			assert.equal(r.success, false);
+			assert.match(problemLines(r.error).join("\n"), /figure is not valid SVG/);
+		}
+		assert.equal((await boundaryParse(probeQuizTool, { ...probeQuiz, figure: svg })).success, true);
 	});
 });
