@@ -13,9 +13,22 @@
  * /auth/grant (their docs, token-based auth FAQ) — plain read/transcribe
  * keys return FORBIDDEN here.
  */
-import { keyValue } from "@/src/server";
+import { isHandyAvailable, keyValue, readSettingsRecord } from "@/src/server";
 
 export async function GET() {
+	const settings = readSettingsRecord();
+	const provider = settings?.dictation?.provider;
+
+	if (provider === "handy" || (provider === undefined && isHandyAvailable())) {
+		if (!isHandyAvailable()) {
+			return Response.json(
+				{ message: "Handy is selected for dictation but the handy binary was not found." },
+				{ status: 503 },
+			);
+		}
+		return Response.json({ token: "handy-local", provider: "handy" });
+	}
+
 	const key = keyValue("DEEPGRAM_API_KEY");
 	if (!key) {
 		return Response.json(

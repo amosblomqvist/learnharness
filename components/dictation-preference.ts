@@ -3,11 +3,17 @@
 import { useSyncExternalStore } from "react";
 import {
 	FACTORY_SETTINGS, isDictationLanguage, sanitizeUserSettings,
-	type DictationLanguage, type UserSettings,
+	type DictationLanguage, type DictationProvider, type DictationSettings, type UserSettings,
 } from "@/src/core";
 import { notifySettingsSaved, onSettingsSaved } from "@/components/settings-signal";
 
-const INITIAL = { language: undefined as DictationLanguage | undefined, saving: false, error: null as string | null };
+const INITIAL = {
+	language: undefined as DictationLanguage | undefined,
+	provider: undefined as DictationProvider | undefined,
+	handyModel: undefined as string | undefined,
+	saving: false,
+	error: null as string | null,
+};
 
 /** One confirmed preference and one write in flight, shared by every surface.
  * The factory keeps transport tests isolated without a second persistence path.
@@ -40,8 +46,10 @@ export function createDictationLanguageStore(request: typeof fetch, saved: () =>
 				if (body.settings !== null && record === null) throw new Error();
 				if (version !== revision) return getLanguage();
 				const language = record?.dictation?.language ?? FACTORY_SETTINGS.dictation.language;
+				const provider = record?.dictation?.provider;
+				const handyModel = record?.dictation?.handyModel;
 				needsRead = false;
-				publish({ language, error: null });
+				publish({ language, provider, handyModel, error: null });
 				return language;
 			} catch {
 				if (version !== revision) return getLanguage();
@@ -56,26 +64,42 @@ export function createDictationLanguageStore(request: typeof fetch, saved: () =>
 	}
 
 	function save(language: DictationLanguage): Promise<boolean> {
-		// A different selection must never inherit the previous write's success.
+		return saveDictationSettings({ language });
+	}
+
+	function saveDictationSettings(patch: Partial<DictationSettings>): Promise<boolean> {
 		if (writing || snapshot.language === undefined) return Promise.resolve(false);
 		revision++;
 		reading = null;
 		writing = Promise.resolve().then(async () => {
 			try {
+				const payload: DictationSettings = {
+					language: patch.language ?? snapshot.language ?? FACTORY_SETTINGS.dictation.language,
+				};
+				const nextProvider = "provider" in patch ? patch.provider : snapshot.provider;
+				if (nextProvider !== undefined) payload.provider = nextProvider;
+				const nextModel = "handyModel" in patch ? patch.handyModel : snapshot.handyModel;
+				if (nextModel !== undefined) payload.handyModel = nextModel;
+
 				const res = await request("/api/settings/dictation", {
 					method: "PUT", headers: { "Content-Type": "application/json" },
-					body: JSON.stringify({ language }),
+					body: JSON.stringify(payload),
 				});
 				if (!res.ok) throw new Error();
 				const body = await res.json() as { settings: UserSettings };
 				const confirmed = body.settings?.dictation?.language;
 				if (!isDictationLanguage(confirmed)) throw new Error();
 				needsRead = false;
-				publish({ language: confirmed, error: null });
+				publish({
+					language: confirmed,
+					provider: body.settings?.dictation?.provider,
+					handyModel: body.settings?.dictation?.handyModel,
+					error: null,
+				});
 				saved();
 				return true;
 			} catch {
-				publish({ error: "Could not save dictation language. Try again." });
+				publish({ error: "Could not save dictation settings. Try again." });
 				return false;
 			} finally {
 				writing = null;
@@ -95,8 +119,13 @@ export function createDictationLanguageStore(request: typeof fetch, saved: () =>
 		}
 	}
 
+	async function getDictationSettings(): Promise<{ language: DictationLanguage; provider?: DictationProvider; handyModel?: string }> {
+		const language = await getLanguage();
+		return { language, provider: snapshot.provider, handyModel: snapshot.handyModel };
+	}
+
 	return {
-		load, save, getLanguage,
+		load, save, saveDictationSettings, getLanguage, getDictationSettings,
 		getSnapshot: () => snapshot,
 		getServerSnapshot: () => INITIAL,
 		subscribe(listener: () => void) { listeners.add(listener); return () => { listeners.delete(listener); }; },
@@ -128,5 +157,13 @@ function subscribe(listener: () => void) {
 
 export function useDictationLanguage() {
 	const snapshot = useSyncExternalStore(subscribe, store.getSnapshot, store.getServerSnapshot);
-	return { ...snapshot, load: store.load, save: store.save, getLanguage: store.getLanguage };
+	return {
+		...snapshot,
+		load: store.load,
+		save: store.save,
+		saveDictationSettings: store.saveDictationSettings,
+		getLanguage: store.getLanguage,
+		getDictationSettings: store.getDictationSettings,
+	};
 }
+
