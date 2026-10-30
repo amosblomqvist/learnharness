@@ -170,6 +170,11 @@ export function piEngineForSpec(spec: ResolvedModelSpec, background: boolean | (
 				return current.streamSimple(permitImages(currentModel), context, { ...options, reasoning: currentLevel === "off" ? undefined : currentLevel });
 			}
 			const requestOptions = { ...options, reasoning: level === "off" ? undefined : level };
+			// Pi only gives a request-scoped profile precedence over ambient AWS keys.
+			const profile = options?.env?.AWS_PROFILE || process.env.AWS_PROFILE;
+			if (spec.provider === "amazon-bedrock" && profile) {
+				requestOptions.env = { ...options?.env, AWS_PROFILE: profile };
+			}
 			const purpose = typeof background === "function" ? background : () => background;
 			const stream = spec.provider === "chatgpt" ? chatGPTStream(purpose, lifecycle) : nativeId ? nativeSubscriptionStream(models.getProvider(nativeId)!, purpose, lifecycle) : models.streamSimple.bind(models);
 			return stream(requestModel, context, requestOptions);

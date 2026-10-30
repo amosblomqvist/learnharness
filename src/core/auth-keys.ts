@@ -18,6 +18,8 @@
  * have shapes worth checking and docs worth showing).
  */
 
+import { BEDROCK_PROVIDER } from "./bedrock.ts";
+
 /** One curated key entry. `id` is the env-var/file key name. */
 export interface AuthKeyInfo {
 	id: string;
@@ -135,10 +137,14 @@ export const CUSTOM_PROVIDER = {
 	label: "Custom endpoint",
 } as const;
 
-/** Every distinct env var a model-provider key rides in (the write side's
+/** Every distinct env var a model-provider key rides in, including Bedrock's
+ *  optional bearer token (the write side's
  *  writability check — see isProviderEnvVar below; also drives which
  *  PRESENT provider vars surface as status rows). */
-export const AUTH_PROVIDER_ENV_VARS: ReadonlySet<string> = new Set(AUTH_PROVIDER_KEYS.map((p) => p.envVar));
+export const AUTH_PROVIDER_ENV_VARS: ReadonlySet<string> = new Set([
+	...AUTH_PROVIDER_KEYS.map((p) => p.envVar),
+	BEDROCK_PROVIDER.envVar,
+]);
 
 /** Is this env-var name the key of SOME pi-ai model provider? */
 export function isProviderEnvVar(envVar: string): boolean {

@@ -51,6 +51,9 @@ Future teaching sessions can read the graph instead of starting from scratch. Pr
 
 Add your provider API key and choose your models, then start a session with what you want to understand. LearnHarness supports 30+ provider options, including OpenAI, Anthropic, Google, DeepSeek, and OpenRouter. Optional dictation and web search use separate service keys.
 
+**Amazon Bedrock:** Use a Bedrock API key or launch with your AWS profile and
+region. See the [Bedrock setup guide](docs/bedrock.md).
+
 All three platforms support in-app updates.
 
 **Dictation:** Create a [Deepgram API key](https://console.deepgram.com/) with the **Member role or higher** ([required for token minting](https://developers.deepgram.com/reference/auth/tokens/grant)) and add it under **Settings → Providers → Dictation**. Choose the language below the key; **Multilingual** supports automatic recognition and mixed-language speech. A `403 Insufficient permissions` error during token minting can indicate an insufficient key role.

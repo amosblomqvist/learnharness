@@ -36,9 +36,13 @@ export async function PUT(req: Request, { params }: Params) {
 	if (!body || typeof body !== "object" || Array.isArray(body) || typeof (body as { value?: unknown }).value !== "string") {
 		return Response.json({ error: "body must be {value: string}" }, { status: 400 });
 	}
-	const result = saveKey(id, (body as { value: string }).value);
-	if (!result.ok) return Response.json({ error: result.error }, { status: 400 });
-	return Response.json({ status: result.status });
+	try {
+		const result = saveKey(id, (body as { value: string }).value);
+		if (!result.ok) return Response.json({ error: result.error }, { status: 400 });
+		return Response.json({ status: result.status });
+	} catch {
+		return Response.json({ error: "Unable to save key. Check your credential file and permissions, then retry." }, { status: 500 });
+	}
 }
 
 export async function DELETE(_req: Request, { params }: Params) {
@@ -46,5 +50,9 @@ export async function DELETE(_req: Request, { params }: Params) {
 	if (!isWritableAuthKey(id)) {
 		return Response.json({ error: `unknown key "${id}"` }, { status: 404 });
 	}
-	return Response.json({ status: deleteKey(id) });
+	try {
+		return Response.json({ status: deleteKey(id) });
+	} catch {
+		return Response.json({ error: "Unable to delete key. Check your credential file and permissions, then retry." }, { status: 500 });
+	}
 }

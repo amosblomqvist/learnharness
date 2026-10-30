@@ -11,10 +11,10 @@
  */
 
 import assert from "node:assert/strict";
-import * as fs from "node:fs";
+import fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { after, before, describe, it } from "node:test";
+import { after, describe, it, mock } from "node:test";
 
 const TMP = fs.mkdtempSync(path.join(os.tmpdir(), "lh-auth-store-"));
 process.env.LH_AUTH_FILE = path.join(TMP, "auth.json");
@@ -76,5 +76,33 @@ describe("AuthStore adapter", () => {
 		const files = fs.readdirSync(TMP).filter((f) => f.startsWith(".auth.json.tmp"));
 		assert.deepEqual(files, [], "no tmp file survives the rename");
 		JSON.parse(fs.readFileSync(AUTH_FILE, "utf-8")); // must parse
+	});
+
+	it("refuses writes over malformed or non-object records without changing their bytes", () => {
+		for (const raw of ['{"OPENAI_API_KEY":"recoverable",', "[]", "null", '"not a map"']) {
+			fs.writeFileSync(AUTH_FILE, raw);
+			assert.throws(() => authStore.setAuthVar("AWS_BEARER_TOKEN_BEDROCK", "fixture-token"));
+			assert.equal(fs.readFileSync(AUTH_FILE, "utf8"), raw);
+			assert.throws(() => authStore.deleteAuthVar("OPENAI_API_KEY"));
+			assert.equal(fs.readFileSync(AUTH_FILE, "utf8"), raw);
+		}
+	});
+
+	it("refuses writes when reading the existing file fails", () => {
+		const raw = '{"OPENAI_API_KEY":"recoverable"}';
+		fs.writeFileSync(AUTH_FILE, raw);
+		const read = mock.method(fs, "readFileSync", () => { throw Object.assign(new Error("synthetic access error"), { code: "EACCES" }); });
+		try {
+			assert.throws(() => authStore.setAuthVar("AWS_BEARER_TOKEN_BEDROCK", "fixture-token"));
+			assert.throws(() => authStore.deleteAuthVar("OPENAI_API_KEY"));
+		} finally { read.mock.restore(); }
+		assert.equal(fs.readFileSync(AUTH_FILE, "utf8"), raw);
+	});
+
+	it("preserves unknown JSON values while updating an ordinary credential", () => {
+		fs.writeFileSync(AUTH_FILE, JSON.stringify({ future: { version: 2 }, OPENAI_API_KEY: "old" }));
+		authStore.setAuthVar("AWS_BEARER_TOKEN_BEDROCK", "fixture-token");
+		authStore.deleteAuthVar("OPENAI_API_KEY");
+		assert.deepEqual(JSON.parse(fs.readFileSync(AUTH_FILE, "utf8")), { future: { version: 2 }, AWS_BEARER_TOKEN_BEDROCK: "fixture-token" });
 	});
 });

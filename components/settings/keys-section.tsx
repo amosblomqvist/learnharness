@@ -42,6 +42,17 @@ import { MenuShell } from "@/components/menu-shell";
 import { notifySettingsSaved } from "@/components/settings-signal";
 import { DictationLanguageSetting } from "@/components/dictation-language";
 
+/** Shared guidance for the native AWS route in first-run setup and Settings. */
+export function BedrockSetupHint() {
+	return <p data-testid="bedrock-setup-hint" className="px-1 text-[11px] leading-relaxed text-muted-foreground/70">
+		Amazon Bedrock accepts a Bedrock API key, or AWS credentials configured before starting the app.
+		For a named profile, set AWS_PROFILE and AWS_REGION in the launch environment
+		(or .env.local for development), then restart. Use AWS_PROFILE=default for the default profile.
+		Choose models available in your region and account.{" "}
+		<a href="https://docs.aws.amazon.com/bedrock/latest/userguide/api-keys.html" target="_blank" rel="noreferrer" className="underline underline-offset-2 hover:text-foreground">Bedrock setup</a>
+	</p>;
+}
+
 /** One pi-ai provider with plain API-key auth (the Platform seam —
  *  derived from pi-ai's own env-key table; no drift possible). */
 export interface ProviderKeyInfo {
@@ -177,7 +188,7 @@ function KeyTableRow({
 	expanded: boolean;
 	onToggle: () => void;
 	onSave: (value: string) => Promise<string | null>;
-	onDelete?: () => Promise<void>;
+	onDelete?: () => Promise<string | null>;
 	/** Folds the editor (owner, fix wave: the way OUT of a paste prompt
 	 *  must be visible — Cancel beside Save/Delete, not only Esc). */
 	onCancel: () => void;
@@ -195,6 +206,15 @@ function KeyTableRow({
 		const err = await onSave(value);
 		if (err) setError(err);
 		else setValue("");
+		setBusy(false);
+	}
+
+	async function remove() {
+		if (busy || !onDelete) return;
+		setBusy(true);
+		setError(null);
+		const err = await onDelete();
+		if (err) setError(err);
 		setBusy(false);
 	}
 
@@ -242,7 +262,7 @@ function KeyTableRow({
 					{status.present && status.source === "file" && onDelete && (
 						<button
 							type="button"
-							onClick={() => void onDelete()}
+							onClick={() => void remove()}
 							disabled={busy}
 							data-testid={`${testid}-delete`}
 							className="shrink-0 text-xs text-muted-foreground/70 underline-offset-2 hover:text-red-500 hover:underline"
@@ -457,10 +477,16 @@ export function KeysSection({
 		return null;
 	}
 
-	async function deleteKey(id: string): Promise<void> {
-		await fetch(`/api/keys/${id}`, { method: "DELETE" }).catch(() => undefined);
+	async function deleteKey(id: string): Promise<string | null> {
+		const res = await fetch(`/api/keys/${id}`, { method: "DELETE" }).catch(() => null);
+		if (!res) return "Delete failed. Check your connection and try again.";
+		if (!res.ok) {
+			const body = await res.json().catch(() => ({})) as { error?: string };
+			return body.error ?? `Delete failed (${res.status})`;
+		}
 		await reload();
 		notifySettingsSaved("keys");
+		return null;
 	}
 
 	/** Forget the custom endpoint (config + key server-side), same rhythm as
@@ -563,6 +589,7 @@ export function KeysSection({
 						<AddProviderEditor provider={adding} onSave={(v) => void saveNewProvider(adding, v)} onCancel={() => setAdding(null)} error={addError} />
 					</div>
 				)}
+				<div><BedrockSetupHint /></div>
 				{unknownRows.length > 0 && <div data-testid="group-unknown-keys">
 					{unknownRows.map((status) => <div key={status.id} data-testid={`unknown-${status.id}`} className="flex items-center justify-between gap-3 px-1 py-1.5 opacity-40">
 						<span className="font-mono text-xs text-foreground">{status.id}</span>
