@@ -62,6 +62,10 @@ All three platforms support in-app updates.
 - **External services.** Models run through your configured providers. Model requests send the context needed for the task; web research and dictation also contact external services. Local storage does not mean offline processing.
 - **Inspectable behavior.** System prompts are visible and editable. The app is open source under the AGPL-3.0 license.
 
+## Troubleshooting
+
+**The knowledge graph is not updating.** If your models come from a ChatGPT, GitHub Copilot, or Grok subscription, check that **Allow background use** is on for that provider in **Settings → Providers**. Graph extraction runs in the background and subscription routes never fall back to API-key billing, so with it off the extraction stops without updating the graph.
+
 ## Development and support
 
 ```bash
