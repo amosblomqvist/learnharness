@@ -3,6 +3,7 @@
 import { useContext, useEffect, useMemo, useRef, useState } from "react";
 import { DownloadIcon } from "lucide-react";
 import { Toggle } from "@/components/settings/controls";
+import { BidiText } from "@/components/bidi-text";
 import { InvertDiscIcon } from "@/components/artifacts/invert-disc";
 import { ChatActionsContext } from "@/components/chat";
 import { downloadFile, slugFilename } from "@/components/artifacts/download";
@@ -179,7 +180,7 @@ function DemoFrame({
 					<span className="shrink-0 text-xs font-medium uppercase tracking-wide text-muted-foreground">
 						interactive demo
 					</span>
-					<span className="truncate text-xs font-medium tracking-wide text-foreground">{title}</span>
+					<BidiText className="truncate text-xs font-medium tracking-wide text-foreground" text={title} />
 				</div>
 				<div className="flex shrink-0 items-center gap-1.5">
 					<Toggle

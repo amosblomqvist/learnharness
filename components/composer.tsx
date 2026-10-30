@@ -4,6 +4,7 @@ import { ArrowRightIcon, CornerDownLeftIcon, SquareIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Hint } from "@/components/ui/hint";
 import { PathInput } from "@/components/path-input";
+import { textDirection } from "@/src/core";
 
 /**
  * The chat composer — content row ONLY (the persistent rounded shell lives in
@@ -94,6 +95,7 @@ export function Composer({
 			<PathInput
 				ref={inputRef}
 				value={value}
+				dir={textDirection(value)}
 				onValueChange={onChange}
 				defaultDropTarget
 				onKeyDown={(e) => {

@@ -76,6 +76,35 @@ describe("PracticeDock", () => {
 		assert.match(html, /data-testid="practice-dock-bar"/);
 		assert.match(html, /Show that the sum is even\./);
 	});
+
+	it("collapsed: a missing statement leaves the excerpt empty", () => {
+		for (const statement of [undefined, null]) {
+			const html = renderToStaticMarkup(
+				<PracticeDock
+					problemCallId="call_p1"
+					input={{ statement } as never}
+					expanded={false}
+					onExpand={() => {}}
+					onSubmit={() => {}}
+				/>,
+			);
+			assert.match(html, /<span class="min-w-0 flex-1 truncate"><\/span>/, String(statement));
+			assert.doesNotMatch(html, /undefined|null/, String(statement));
+		}
+	});
+
+	it("collapsed: an Arabic statement reads right-to-left on one line", () => {
+		const html = renderToStaticMarkup(
+			<PracticeDock
+				problemCallId="call_p1"
+				input={{ statement: "أثبت أن المجموع زوجي.\nثم عمم النتيجة." }}
+				expanded={false}
+				onExpand={() => {}}
+				onSubmit={() => {}}
+			/>,
+		);
+		assert.match(html, /<span class="min-w-0 flex-1 truncate" dir="rtl">أثبت أن المجموع زوجي\. ثم عمم النتيجة\.<\/span>/);
+	});
 });
 
 // ── the transcript cards ─────────────────────────────────────────────────────

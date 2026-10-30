@@ -9,7 +9,8 @@ import {
 	FileText,
 	FileVideo,
 } from "lucide-react";
-import { filePathLabel, parseFilePaths } from "@/src/core";
+import type { InlineChunk } from "@/components/bidi-text";
+import { LITERAL_TEXT, filePathLabel, parseFilePaths } from "@/src/core";
 
 function fileIcon(label: string) {
 	const extension = label.split(".").at(-1)?.toLowerCase();
@@ -30,7 +31,9 @@ export interface FilePathChipProps {
 	className?: string;
 }
 
-/** Pure presentation: no links, open actions, HTML injection or path probing. */
+/** Pure presentation: no links, open actions, HTML injection or path probing.
+ *  Always left-to-right, so the icon stays left of the name inside a
+ *  right-to-left field as it does in the sent message. */
 export function FilePathChip({ path, contentEditable, className }: FilePathChipProps) {
 	const label = filePathLabel(path);
 	const Icon = fileIcon(label);
@@ -39,6 +42,7 @@ export function FilePathChip({ path, contentEditable, className }: FilePathChipP
 			role="img"
 			aria-label={path}
 			title={path}
+			dir="ltr"
 			contentEditable={contentEditable}
 			className={`inline-flex max-w-full items-center gap-1 rounded border bg-muted/50 px-1.5 py-0.5 align-middle text-sm${className ? ` ${className}` : ""}`}
 		>
@@ -59,4 +63,16 @@ export function PathText({ text }: { text: string }) {
 			))}
 		</>
 	);
+}
+
+/** One line of learner text as `BidiText` chunks: text parts stay text, and
+ *  each quoted path is one chip that reads as a single left-to-right letter, so
+ *  it stays whole inside the run it sits in and its letters never set the
+ *  line's direction. */
+export function filePathChunks(line: string): InlineChunk[] {
+	return parseFilePaths(line).map((part) => {
+		if (part.kind === "text") return { text: part.text };
+		const chip = <FilePathChip key={part.start} path={part.path} />;
+		return { text: LITERAL_TEXT, element: { node: chip, own: () => chip } };
+	});
 }

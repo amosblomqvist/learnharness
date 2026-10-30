@@ -2,9 +2,10 @@
 
 import { useEffect, useRef, useState } from "react";
 import { ChevronDownIcon } from "lucide-react";
+import { BidiText } from "@/components/bidi-text";
 import { blurAfterPointerClick } from "@/components/focus-hygiene";
 import { cn } from "@/lib/utils";
-import { PathText } from "@/components/file-path-chip";
+import { filePathChunks } from "@/components/file-path-chip";
 
 /** The unified user-thinking row (owner round, 2026-10-05): ONE visual
  *  language for every surface where the learner's own thinking renders —
@@ -128,7 +129,7 @@ export function ThinkingBlock({
 				<ChevronDownIcon className={cn("size-4 shrink-0 transition-transform", open ? "rotate-180" : "rotate-0")} />
 			</button>
 			{open && (
-				<span className="lh-prose mt-1.5 block whitespace-pre-wrap text-[15px] italic text-foreground/50"><PathText text={text} /></span>
+				<BidiText className="lh-prose mt-1.5 block whitespace-pre-wrap text-[15px] italic text-foreground/50" text={text} chunks={filePathChunks} multiline />
 			)}
 		</div>
 	);

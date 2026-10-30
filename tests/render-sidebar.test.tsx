@@ -119,6 +119,11 @@ describe("SessionRow", () => {
 		assert.ok(html.includes("bg-accent"), "active background");
 		assert.ok(!html.includes("font-medium"), "weight is not a second channel doing the same job");
 	});
+
+	it("the session row takes the title's direction, in the title's own type", () => {
+		const html = render(item({ title: "درس المشتقات" }));
+		assert.ok(html.includes('<span class="block truncate font-prose text-(length:--lh-prose-size)" dir="rtl">درس المشتقات</span>'), html);
+	});
 });
 
 describe("timeAgo", () => {

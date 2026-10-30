@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ArrowDownIcon, ChevronRightIcon, PlayIcon } from "lucide-react";
+import { BidiText } from "@/components/bidi-text";
 import { Button } from "@/components/ui/button";
 import { finishDictation, isDictationActive, joinDictation, useDictationTarget } from "@/components/dictation";
 import { useEnterSubmits } from "@/components/enter-submits";
@@ -36,6 +37,7 @@ import {
 	type QuizToolInput,
 	type SelectMode,
 	type Phase3,
+	textDirection,
 } from "@/src/core";
 import { CONFIDENCE_COLORS, confidenceRailStyle } from "@/components/confidence-rail";
 
@@ -217,14 +219,14 @@ export function QuestionDockBar({
 				type="button"
 				data-testid="teach-check-reveal"
 				onClick={onExpand}
-				className="dock-variant flex w-full items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-accent/40"
+				className="dock-variant flex w-full items-center gap-3 px-4 py-3 text-start transition-colors hover:bg-accent/40"
 			>
 				<span className="flex size-7 shrink-0 items-center justify-center rounded-full bg-primary/15 text-primary">
 					<PlayIcon className="size-3.5" />
 				</span>
 				<span className="min-w-0 flex-1">
 					<span className="block text-sm font-medium">Check your understanding</span>
-					<span className="block truncate text-xs text-muted-foreground">{teaserText(question)}</span>
+					<BidiText className="block truncate text-xs text-muted-foreground" text={teaserText(question)} />
 				</span>
 				<span className="flex shrink-0 items-center gap-1 text-xs font-medium text-primary">
 					Open <ChevronRightIcon className="size-3.5" />
@@ -237,14 +239,14 @@ export function QuestionDockBar({
 			type="button"
 			data-testid="question-dock-bar"
 			onClick={onExpand}
-			className="dock-variant flex w-full items-center gap-2.5 px-4 py-2.5 text-left text-sm transition-colors hover:bg-accent/40"
+			className="dock-variant flex w-full items-center gap-2.5 px-4 py-2.5 text-start text-sm transition-colors hover:bg-accent/40"
 		>
 			<span className="shrink-0 text-xs font-medium uppercase tracking-wide text-muted-foreground">
 				{label ??
 							toolLabel ??
 							(toolName === "quiz" ? "Check" : toolName === "explain" ? "Explain" : "Question")}
 			</span>
-			<span className="min-w-0 flex-1 truncate text-muted-foreground">{teaserText(question)}</span>
+			<BidiText className="min-w-0 flex-1 truncate text-muted-foreground" text={teaserText(question)} />
 			<span className="flex shrink-0 items-center gap-1 text-xs font-medium">
 				Answer <ArrowDownIcon className="size-3.5" />
 			</span>
@@ -602,7 +604,7 @@ function QuestionDockForm({
 									data-kbdrow={i}
 									onClick={() => toggle(i)}
 									className={cn(
-										"flex items-start gap-3 rounded-lg border px-3 py-2 text-left text-sm outline-none transition-colors",
+										"flex items-start gap-3 rounded-lg border px-3 py-2 text-start text-sm outline-none transition-colors",
 										isSel ? "border-primary bg-accent" : "hover:bg-accent/50",
 										i === kbdIdx && !isSel && "ring-1 ring-border bg-accent/40",
 									)}
@@ -650,7 +652,7 @@ function QuestionDockForm({
 								className={cn(
 									// Option-row layout + radio circle (owner); the dashed
 									// outline stays — this is the deliberate non-answer.
-									"flex items-start gap-3 rounded-lg border border-dashed px-3 py-2 text-left text-sm outline-none transition-colors",
+									"flex items-start gap-3 rounded-lg border border-dashed px-3 py-2 text-start text-sm outline-none transition-colors",
 									sel.dontKnow ? "border-primary text-foreground" : "text-muted-foreground",
 									kbdIdx === optionCount && !sel.dontKnow && "ring-1 ring-border bg-accent/40",
 								)}
@@ -677,7 +679,7 @@ function QuestionDockForm({
 								data-kbdrow={optionCount}
 								onClick={selectOther}
 								className={cn(
-									"flex items-start gap-3 rounded-lg border px-3 py-2 text-left text-sm outline-none transition-colors",
+									"flex items-start gap-3 rounded-lg border px-3 py-2 text-start text-sm outline-none transition-colors",
 									sel.otherSelected ? "border-primary bg-accent" : "border-dashed hover:bg-accent/50",
 									kbdIdx === optionCount && !sel.otherSelected && "ring-1 ring-border bg-accent/40",
 								)}
@@ -701,6 +703,7 @@ function QuestionDockForm({
 									ref={otherInputRef}
 									singleLine
 									value={other}
+									dir={textDirection(other)}
 									onValueChange={(value) => {
 										setOther(value);
 										// Typing selects the row — displacing in
@@ -855,6 +858,7 @@ function QuestionDockForm({
 					{qd.mode === "text" ? (
 						<PathInput
 							value={text}
+							dir={textDirection(text)}
 							onValueChange={(value) => {
 								answerTextRef.current = value;
 								setText(value);
@@ -883,6 +887,7 @@ function QuestionDockForm({
 						<PathInput
 							ref={thinkingRef}
 							value={thinking}
+							dir={textDirection(thinking)}
 							onValueChange={(value) => {
 								thinkingTextRef.current = value;
 								setThinking(value);

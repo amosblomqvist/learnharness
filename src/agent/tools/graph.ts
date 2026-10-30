@@ -3,6 +3,7 @@ import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { serverExecute } from "../tool-execute.ts";
 import { getGraph, graphSessionIndex, graphSessionPropositions } from "../../core/graph.ts";
 import type { ChatStore, GraphStore } from "../../core/ports.ts";
+import { normalizeForSearch } from "../../core/text-search.ts";
 
 /**
  * THE PROBER'S GRAPH TOOLS (wave 7, owner-locked 2026-09-23): context
@@ -98,15 +99,25 @@ export function proberGraphTools(ctx: GraphToolContext): Record<string, AgentToo
  * Read-only, pure core seams, same ports the snapshot reads.
  */
 
-/** Glob match — `*` spans anything, case-insensitive. `*needle*` is the
- *  expected shape; a bare term gets implicit surrounding stars. */
+const GLOB_SPECIAL = /[.*+?^${}()|[\]\\]/g;
+let lastGlob: string | undefined;
+let lastGlobPattern: RegExp | null = null;
+
+/** Glob match: an ASCII `*` spans anything, case-insensitive. `*needle*` is
+ * the expected shape; a bare term gets implicit surrounding stars. Each literal
+ * segment is folded on its own, so a full-width `＊` stays text and a term
+ * that folds to nothing (a lone mark, tatweel, a zero-width space) matches
+ * nothing rather than everything. */
 function globMatch(pattern: string, text: string): boolean {
-	const raw = pattern.includes("*") ? pattern : `*${pattern}*`;
-	const re = new RegExp(
-		`^${raw.replace(/[.*+?^${}()|[\]\\]/g, (ch) => (ch === "*" ? "[\\s\\S]*" : `\\${ch}`))}$`,
-		"i",
-	);
-	return re.test(text);
+	if (pattern !== lastGlob) {
+		const segments = pattern.split("*").map((segment) => normalizeForSearch(segment).replace(GLOB_SPECIAL, "\\$&"));
+		const bare = segments.length === 1;
+		lastGlobPattern = bare && !segments[0]
+			? null
+			: new RegExp(bare ? `^[\\s\\S]*${segments[0]}[\\s\\S]*$` : `^${segments.join("[\\s\\S]*")}$`, "i");
+		lastGlob = pattern;
+	}
+	return lastGlobPattern !== null && lastGlobPattern.test(normalizeForSearch(text));
 }
 
 export function auditorGraphTools(ctx: GraphToolContext): Record<string, AgentTool<any>> {

@@ -14,7 +14,7 @@ import { layout as dagreLayout } from "dagre-d3-es/src/dagre/index.js";
 import { curveBasis, line } from "d3-shape";
 import { fitGraphView, fitZoomFor, zoomedGraphView, type Viewport } from "@/components/pan-zoom";
 import type { PlanBlockData, PlanNodeStatus, PlanTree } from "@/src/core";
-import { derivedNodeStatus, derivePlanStatuses } from "@/src/core";
+import { derivedNodeStatus, derivePlanStatuses, hasRtlLetter, isolateLtrRuns, letterDirection } from "@/src/core";
 import { Hint } from "@/components/ui/hint";
 
 /**
@@ -72,12 +72,20 @@ export const NODE_H = 44;
 const NARROW_CHARS = new Set(" ijltfr.,:;'!|()[]-\\");
 const WIDE_CHARS = new Set("mwMW@");
 const CAP_DIGIT = /[A-Z0-9]/;
+const COMBINING_MARK = /\p{M}/u;
+// RTL letters are estimated at about 5.5px each at 11px.
+// Their marks have no advance; other width classes keep their existing rates.
+const RTL_LETTER_WIDTH = 5.5;
 
 /** Estimated rendered width (px) of one line at text-xs. Pure. */
 export function estimateLineWidth(line: string): number {
 	let w = 0;
+	let rtlBase = false;
 	for (const ch of line) {
-		if (NARROW_CHARS.has(ch)) w += 3.1;
+		if (COMBINING_MARK.test(ch) && rtlBase) continue;
+		rtlBase = hasRtlLetter(ch);
+		if (rtlBase) w += RTL_LETTER_WIDTH;
+		else if (NARROW_CHARS.has(ch)) w += 3.1;
 		else if (WIDE_CHARS.has(ch)) w += 9.2;
 		else if (CAP_DIGIT.test(ch)) w += 6.0;
 		else w += 5.4;
@@ -255,7 +263,9 @@ export function blockLayout(nodes: readonly LayoutNode[], edges: ReadonlyArray<{
 	};
 }
 
-/** Greedy word wrap to lines of ≤ maxChars — NOTHING is dropped: the
+const TITLE_GRAPHEMES = new Intl.Segmenter(undefined, { granularity: "grapheme" });
+
+/** Greedy word wrap to lines of ≤ maxChars graphemes. NOTHING is dropped: the
  *  node's box grows to fit every line (owner: show the full content of
  *  each node). A single oversized word is hard-chunked across lines at
  *  maxChars. Pure. */
@@ -263,17 +273,24 @@ export function wrapTitle(title: string, maxChars = 28): string[] {
 	const words = title.trim().split(/\s+/).filter(Boolean);
 	if (words.length === 0) return [""];
 	// Oversized words can never fit a line — chunk them so no content is lost.
-	const atoms: string[] = [];
+	const atoms: { text: string; length: number }[] = [];
 	for (const w of words) {
-		for (let i = 0; i < w.length; i += maxChars) atoms.push(w.slice(i, i + maxChars));
+		const graphemes = Array.from(TITLE_GRAPHEMES.segment(w), ({ segment }) => segment);
+		for (let i = 0; i < graphemes.length; i += maxChars) {
+			const chunk = graphemes.slice(i, i + maxChars);
+			atoms.push({ text: chunk.join(""), length: chunk.length });
+		}
 	}
 	const lines: string[] = [];
+	let lastLength = 0;
 	for (const a of atoms) {
 		const last = lines[lines.length - 1];
-		if (last !== undefined && last.length + 1 + a.length <= maxChars) {
-			lines[lines.length - 1] = `${last} ${a}`;
+		if (last !== undefined && lastLength + 1 + a.length <= maxChars) {
+			lines[lines.length - 1] = `${last} ${a.text}`;
+			lastLength += 1 + a.length;
 		} else {
-			lines.push(a);
+			lines.push(a.text);
+			lastLength = a.length;
 		}
 	}
 	return lines;
@@ -614,6 +631,8 @@ export function PlanDiagram({
 				const status = statusOf(n.id);
 				const glow = n.id === glowId && !monochrome;
 				const lines = wrapTitle(n.title);
+				// Only a right-to-left title carries the attribute; the rest inherit.
+				const dir = letterDirection(n.title) === "rtl" ? "rtl" : undefined;
 				// The box hugs its wrapped content; text centers in it —
 				// horizontally too now (text-first sizing round, 2026-10-07).
 				const h = layout.nodeH.get(n.id) ?? NODE_H;
@@ -654,9 +673,11 @@ export function PlanDiagram({
 								x={w / 2}
 								y={y0 + i * LINE_H}
 								textAnchor="middle"
+								direction={dir}
 								className={monochrome ? MONO_TEXT : TEXT[status]}
 							>
-								{line}
+								{/* A <text> has no spans, so the isolates keep `C++` in order; the width estimate never sees them. */}
+								{dir ? isolateLtrRuns(line) : line}
 							</text>
 						))}
 					</g>

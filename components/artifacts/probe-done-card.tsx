@@ -1,6 +1,7 @@
 "use client";
 
 import { ClipboardCheckIcon } from "lucide-react";
+import { BidiText } from "@/components/bidi-text";
 import { parseProbeDoneInput, type ProbeDoneResult } from "@/src/core";
 
 /**
@@ -46,7 +47,7 @@ export function ProbeDoneCard({ part }: { part: { input?: unknown; output?: unkn
 				Probe concluded — your assessment
 			</div>
 			{output && !output.ok ? (
-				<p className="text-sm text-muted-foreground">The prober retried: {output.error}</p>
+				<p className="text-sm text-muted-foreground">The prober retried: <BidiText text={output.error ?? ""} /></p>
 			) : state === "output-error" ? (
 				<p className="text-sm text-muted-foreground">
 					The assessment was malformed — the prober retried with a corrected one.
@@ -55,12 +56,12 @@ export function ProbeDoneCard({ part }: { part: { input?: unknown; output?: unkn
 				<div className="space-y-2">
 					{strands.map((s, i) => (
 						<div key={i} className="rounded-lg bg-background/60 px-3 py-2">
-							<div className="text-sm font-medium">{s.strand}</div>
-							<div className="mt-0.5 text-sm text-muted-foreground">{s.assessment}</div>
+							<BidiText as="div" className="text-sm font-medium" text={s.strand} />
+							<BidiText as="div" className="mt-0.5 text-sm text-muted-foreground" text={s.assessment} />
 						</div>
 					))}
 					{assessment?.summary && (
-						<p className="px-1 text-sm text-muted-foreground">{assessment.summary}</p>
+						<BidiText as="p" className="px-1 text-sm text-muted-foreground" text={assessment.summary} />
 					)}
 				</div>
 			) : (

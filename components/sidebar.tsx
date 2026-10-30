@@ -3,6 +3,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
+import { BidiText } from "@/components/bidi-text";
 import { MenuShell } from "@/components/menu-shell";
 import { DeleteSessionDialog } from "@/components/delete-session-dialog";
 import type { ChatDeleteMode } from "@/src/core";
@@ -17,7 +18,7 @@ import { Hint } from "@/components/ui/hint";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
-import { fuzzyScore } from "@/src/core";
+import { fuzzyScore, letterDirection, textDirection } from "@/src/core";
 import { useServerEvent, useServerResync } from "@/components/server-events";
 import type { ChatListItem } from "@/src/core";
 import { kbdEventForAction } from "@/src/core";
@@ -308,7 +309,7 @@ export function SessionRow({
 			onContextMenu={onContextMenu}
 			data-testid={kbdSelected ? "session-row-kbd" : "session-row"}
 			className={cn(
-				"relative mb-0.5 flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left transition-colors hover:bg-accent",
+				"relative mb-0.5 flex w-full items-center gap-2 rounded-lg px-3 py-2 text-start transition-colors hover:bg-accent",
 				active && "bg-accent",
 				kbdSelected && !active && "bg-accent/60 ring-1 ring-border",
 			)}
@@ -320,7 +321,7 @@ export function SessionRow({
 				    the meta line below stays JetBrains Mono (machine data). One
 				    rule, finally applied to the picker too (owner, typography
 				    round): mono = chrome, Source Sans = human words. */}
-				<span className="block truncate font-prose text-(length:--lh-prose-size)">{chat.title}</span>
+				<BidiText className="block truncate font-prose text-(length:--lh-prose-size)" text={chat.title} />
 				<span className="block text-xs text-muted-foreground">{sessionMeta(chat)}</span>
 			</span>
 			{/* The dumbbell rides the FAR RIGHT (owner round 6, 2026-10-05) —
@@ -366,6 +367,7 @@ export function RenameRow({ chat, onCommit, onCancel }: { chat: ChatListItem; on
 					spellCheck={false}
 					onChange={(e) => setDraft(e.target.value)}
 					onBlur={() => onCommit(draft)}
+					dir={textDirection(draft)}
 					onKeyDown={(e) => {
 						if (e.key === "Enter") e.currentTarget.blur();
 						if (e.key === "Escape") {
@@ -726,6 +728,7 @@ function SessionsSidebar() {
 						<Input
 							ref={searchRef}
 							data-testid="session-search"
+							dir={letterDirection(query)}
 							value={query}
 							onChange={(e) => {
 								setQuery(e.target.value);

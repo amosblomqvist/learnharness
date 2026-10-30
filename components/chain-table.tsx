@@ -67,8 +67,9 @@ import {
 	SearchIcon,
 	XIcon,
 } from "lucide-react";
-import { chainsForSelection, formatChainLine, fuzzyScore } from "@/src/core";
+import { chainsForSelection, formatChainLine, fuzzyScore, letterDirection } from "@/src/core";
 import type { GraphChain, GraphNode } from "@/src/core";
+import { BidiText } from "@/components/bidi-text";
 import { TopBar } from "@/components/top-bar";
 import { DeleteNodeDialog } from "@/components/delete-node-dialog";
 import { LatexGlyph } from "@/components/latex-glyph";
@@ -252,6 +253,7 @@ export function ChainTableBody({
 					<SearchIcon className="absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
 					<input
 						value={query}
+						dir={letterDirection(query)}
 						data-testid="chain-table-search"
 						onChange={(e) => onQuery(e.target.value)}
 						placeholder="Search nodes…"
@@ -354,9 +356,15 @@ export function ChainTableBody({
 								<span className="flex shrink-0 items-center justify-center text-muted-foreground">
 									{open ? <FolderOpenIcon className="size-3.5" /> : <FolderIcon className="size-3.5" />}
 								</span>
-								<span className="min-w-0 flex-1 truncate text-sm font-medium">
-									{group.label ?? <span className="text-muted-foreground/60">unlabeled</span>}
-									{group.kind === "notes" && <span className="ml-2 text-[11px] uppercase tracking-widest text-muted-foreground/60">notes</span>}
+								{/* The label is the truncating element, so its own
+								    direction decides which end the ellipsis cuts. */}
+								<span className="flex min-w-0 flex-1 items-baseline gap-2 text-sm font-medium">
+									{group.label === null ? (
+										<span className="truncate text-muted-foreground/60">unlabeled</span>
+									) : (
+										<BidiText className="truncate" text={group.label} />
+									)}
+									{group.kind === "notes" && <span className="shrink-0 text-[11px] uppercase tracking-widest text-muted-foreground/60">notes</span>}
 								</span>
 								<span className="w-14 shrink-0 text-right text-xs tabular-nums text-muted-foreground">
 									{group.nodeIds.length}
@@ -428,12 +436,11 @@ export function ChainTableBody({
 																		className="px-1.5 text-foreground"
 																	/>
 																))}
-																<span
+																<BidiText
 																	data-testid={`prop-chip-${id}`}
 																	className="rounded border border-border/70 bg-muted/30 px-1.5 py-0.5"
-																>
-																	{nameOf(id)}
-																</span>
+																	text={nameOf(id)}
+																/>
 															</span>
 														);
 													})}
@@ -467,9 +474,7 @@ export function ChainTableBody({
 																testid={`prop-checkbox-${id}`}
 																label={`Select node ${node.name}`}
 															/>
-															<span className="min-w-0 flex-1 text-xs leading-relaxed text-muted-foreground">
-																{node.statement}
-															</span>
+															<BidiText className="min-w-0 flex-1 text-xs leading-relaxed text-muted-foreground" text={node.statement} />
 															<span className="w-14 shrink-0" />
 															<span className="w-20 shrink-0" />
 														</div>

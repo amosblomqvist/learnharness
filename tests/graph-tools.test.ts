@@ -216,6 +216,65 @@ describe("auditor graph tools", () => {
 		assert.ok(!out.includes("2026-09-20"), "no dates in the auditor's view");
 	});
 
+	it("find: normalizes Arabic in patterns, names, statements and aliases", async () => {
+		const stores = fakeStores([
+			{ ...node("ar1", "أَحْمَد", [pt("c1")]), statement: "يتعلم في مَدْرَسَةٍ", aliases: ["عَلَى"] },
+			{ ...node("ar2", "Plain", [pt("c1")]), statement: "Other", aliases: ["علي"] },
+		]);
+		const tools = auditorGraphTools(stores);
+		for (const query of ["احمد", "أَحْمَد", "ا*مد", "مدرسه", "*مَدْرَسَة*"]) {
+			const out = (await tools.find!.execute!("tc", { query })).details as string;
+			assert.match(out, /1 match\(es\):/);
+			assert.ok(out.includes("ar1 :: أَحْمَد"));
+			assert.ok(out.includes("statement: يتعلم في مَدْرَسَةٍ"));
+		}
+		for (const query of ["على", "عَلِيّ"]) {
+			const out = (await tools.find!.execute!("tc", { query })).details as string;
+			assert.match(out, /2 match\(es\):/);
+		}
+	});
+
+	it("find: keeps wildcard, literal metacharacter and case-insensitive English behavior", async () => {
+		const tools = auditorGraphTools(fakeStores([
+			{ ...node("literal", "C++", [pt("c1")]), statement: "Node.js\nAPI", aliases: ["x(y)"] },
+			{ ...node("other", "NodeXjs", [pt("c1")]), statement: "Other", aliases: [] },
+		]));
+		for (const query of ["c++", "node.js", "NODE.JS*API", "x(y)", "*C++"]) {
+			const out = (await tools.find!.execute!("tc", { query })).details as string;
+			assert.match(out, /1 match\(es\):/);
+			assert.match(out, /literal :: C\+\+/);
+		}
+	});
+
+	it("find: folds accents, niqqud and compatibility text in both operands", async () => {
+		const tools = auditorGraphTools(fakeStores([
+			{ ...node("folded", "Café", [pt("c1")]), statement: "שָׁלוֹם", aliases: ["ﬃ"] },
+			node("other", "Other", [pt("c1")]),
+		]));
+		for (const query of ["cafe", "CAFÉ", "שלום", "שָׁלוֹם", "*של*ום*", "ffi", "ﬃ"]) {
+			const out = (await tools.find!.execute!("tc", { query })).details as string;
+			assert.match(out, /1 match\(es\):/);
+			assert.ok(out.includes("folded :: Café"));
+			assert.ok(out.includes("statement: שָׁלוֹם"));
+		}
+	});
+
+	it("find: a term that folds to nothing matches nothing, and only an ASCII star is a wildcard", async () => {
+		const tools = auditorGraphTools(fakeStores([
+			{ ...node("plain", "Derivative", [pt("c1")]), statement: "Rate of change", aliases: [] },
+			{ ...node("star", "deriv*ive", [pt("c1")]), statement: "A literal star", aliases: [] },
+		]));
+		for (const query of ["\u0301", "ـ", "\u200B"]) {
+			const out = (await tools.find!.execute!("tc", { query })).details as string;
+			assert.equal(out, `No existing proposition matches "${query}".`);
+		}
+		const fullWidth = (await tools.find!.execute!("tc", { query: "deriv＊ive" })).details as string;
+		assert.match(fullWidth, /1 match\(es\):/);
+		assert.match(fullWidth, /star :: deriv\*ive/);
+		const wildcard = (await tools.find!.execute!("tc", { query: "deriv*ive" })).details as string;
+		assert.match(wildcard, /2 match\(es\):/);
+	});
+
 	it("list_propositions: FULL statement text (identity work), no dates", async () => {
 		const { chatStore: cs, graphStore: gs } = fakeStores(nodes);
 		const tools = auditorGraphTools({ chatStore: cs, graphStore: gs });

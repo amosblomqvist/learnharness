@@ -14,7 +14,7 @@ import {
 	ConversationScrollButton,
 } from "@/components/ai-elements/conversation";
 import { Message, MessageContent, MessageResponse } from "@/components/ai-elements/message";
-import { PathText } from "@/components/file-path-chip";
+import { filePathChunks } from "@/components/file-path-chip";
 import { Reasoning, ReasoningContent, ReasoningTrigger } from "@/components/ai-elements/reasoning";
 import { Shimmer } from "@/components/ai-elements/shimmer";
 import { BrailleSpinner } from "@/components/braille-spinner";
@@ -23,6 +23,7 @@ import { Separator } from "@/components/ui/separator";
 import { AnsweredCard } from "@/components/answered-card";
 import { artifactRenderers } from "@/components/artifacts";
 import { SubagentSteerCard } from "@/components/artifacts/steer-card";
+import { BidiText } from "@/components/bidi-text";
 import { Composer } from "@/components/composer";
 import { useEnterSubmits } from "@/components/enter-submits";
 import { blurAfterPointerClick } from "@/components/focus-hygiene";
@@ -42,6 +43,7 @@ import {
 	messageAnchorId,
 	textPartMessageId,
 	kbdEventForAction as kbdEventForChat,
+	textDirection,
 	type ChatInput,
 	type ChatSettings,
 	type LhMessage,
@@ -1312,6 +1314,7 @@ export function Chat({
 									}
 								}}
 								onBlur={() => void commitRename(titleDraft)}
+								dir={textDirection(titleDraft)}
 								spellCheck={false}
 								aria-label="Session title"
 								title="Rename this session"
@@ -1330,16 +1333,16 @@ export function Chat({
 							action="rename-session"
 							side="bottom"
 						>
-<button
-							type="button"
-														onClick={() => {
-								setTitleDraft(titleText);
-								setRenaming(true);
-							}}
-							className="lh-no-drag -mx-1.5 min-w-4 shrink cursor-text truncate rounded-md px-1.5 text-left font-title text-3xl tracking-tight transition-colors hover:bg-accent"
-						>
-							{titleText}
-							</button>
+							<BidiText
+								as="button"
+								type="button"
+								onClick={() => {
+									setTitleDraft(titleText);
+									setRenaming(true);
+								}}
+								className="lh-no-drag -mx-1.5 min-w-4 shrink cursor-text truncate rounded-md px-1.5 text-start font-title text-3xl tracking-tight transition-colors hover:bg-accent"
+								text={titleText}
+							/>
 						</Hint>
 							{/* flex-1 spacer: keeps the chips at the right edge AND stays a
 							    drag surface (no carve-out) — the freed bar is grippable. */}
@@ -1510,9 +1513,13 @@ export function Chat({
 												    sits INSIDE the rail, same mono-xs register and same 1ch
 												    rail as the thinking rows — one quote geometry. */}
 												<div className="font-medium uppercase tracking-wide text-muted-foreground">You</div>
-												<div className="lh-prose whitespace-pre-wrap text-foreground">
-													<PathText text={m.parts.filter((p) => p.type === "text").map((p) => p.text).join("\n")} />
-												</div>
+												<BidiText
+													as="div"
+													className="lh-prose whitespace-pre-wrap text-foreground"
+													text={m.parts.filter((p) => p.type === "text").map((p) => p.text).join("\n")}
+													chunks={filePathChunks}
+													multiline
+												/>
 											</div>
 									) : (
 									<Message from="assistant" className="max-w-full">

@@ -20,6 +20,7 @@ import type { PlanBlockData, PlanTree } from "../src/core/contracts.ts";
 // Plan blocks: the pure layered layout, the frozen-snapshot rendering
 // (full = borderless + column-filling
 // with the glowing current), and the popup's LIVE derivation.
+// Titles retain graphemes, estimate mark-free widths and select RTL per title.
 
 const CHAIN: PlanTree = {
 	nodes: [
@@ -35,6 +36,38 @@ const CHAIN: PlanTree = {
 };
 
 describe("plan block layout (pure)", () => {
+	it("wraps a title with tashkeel by words and graphemes without losing content", () => {
+		const word = "الْمُشْتَقَّةُ";
+		const graphemes = new Intl.Segmenter(undefined, { granularity: "grapheme" });
+		const lines = wrapTitle(word, 3);
+		assert.ok(lines.length > 1);
+		assert.equal(lines.join(""), word);
+		for (const line of lines) {
+			assert.ok(!/^\p{M}/u.test(line));
+			assert.ok(Array.from(graphemes.segment(line)).length <= 3);
+		}
+		assert.deepEqual(wrapTitle("عِلْمُ حِسَابٍ", 4), ["عِلْمُ", "حِسَابٍ"]);
+		assert.deepEqual(wrapTitle("👩‍🔬👩‍🔬", 1), ["👩‍🔬", "👩‍🔬"]);
+		// Four graphemes in seven code units: packing by .length would break it.
+		assert.deepEqual(wrapTitle("عِلْ مُ", 4), ["عِلْ مُ"]);
+	});
+
+	it("estimates sensible RTL widths without charging tashkeel for extra advance", () => {
+		assert.equal(estimateLineWidth("e\u0301"), 10.8, "Latin combining-mark width stays unchanged");
+		assert.equal(estimateLineWidth("الْمُشْتَقَّةُ"), estimateLineWidth("المشتقة"));
+		const title = "مقدمة في حساب المشتقات وتطبيقاتها العملية";
+		const lines = wrapTitle(title);
+		// The widest line a title can wrap to: one full line of Arabic letters.
+		const [fullLine] = wrapTitle("م".repeat(100));
+		assert.ok(lines.length > 1);
+		for (const line of lines) {
+			assert.ok(estimateLineWidth(line) > 20);
+			assert.ok(estimateLineWidth(line) <= estimateLineWidth(fullLine!));
+		}
+		assert.ok(nodeWidth(lines) >= NODE_W_MIN);
+		assert.ok(nodeWidth(lines) <= nodeWidth([fullLine!]));
+	});
+
 	it("layers a chain top-down, one node per depth row", () => {
 		const { order, depth } = topoFor(CHAIN.nodes, CHAIN.edges);
 		assert.deepEqual(order.map((n) => n.id), ["a", "b", "c"]);
@@ -139,6 +172,53 @@ describe("plan block layout (pure)", () => {
 });
 
 describe("plan block render", () => {
+	it("sets the SVG direction per complete title and leaves letterless titles inheriting", () => {
+		const data: PlanBlockData = {
+			kind: "full",
+			at: "2026-10-24T12:00:00Z",
+			current: null,
+			nodes: [
+				{ id: "rtl", title: "Newton ينص على أن القوى تتوازن في هذا المثال", status: "upcoming" },
+				{ id: "he", title: "שָׁלוֹם", status: "upcoming" },
+				{ id: "latin", title: "English title", status: "upcoming" },
+				{ id: "math", title: "1 + 2", status: "upcoming" },
+			],
+			edges: [],
+		};
+		const html = renderToStaticMarkup(<PlanBlock data={data} onOpen={() => {}} />);
+		for (const id of ["rtl", "he"]) {
+			const group = html.match(new RegExp(`data-testid="plan-node-${id}"[^]*?</g>`))![0];
+			const texts = group.match(/<text[^>]*>/g)!;
+			assert.ok(texts.length > 0);
+			for (const text of texts) {
+				assert.match(text, /direction="rtl"/);
+				assert.doesNotMatch(text, /unicode-bidi=/);
+				assert.match(text, /text-anchor="middle"/);
+			}
+		}
+		for (const id of ["latin", "math"]) {
+			const group = html.match(new RegExp(`data-testid="plan-node-${id}"[^]*?</g>`))![0];
+			assert.doesNotMatch(group, /direction=|unicode-bidi=/, id);
+		}
+	});
+
+	it("isolates each left-to-right run of a right-to-left title, and nothing in an English one", () => {
+		const data: PlanBlockData = {
+			kind: "full",
+			at: "2026-10-24T12:00:00Z",
+			current: null,
+			nodes: [
+				{ id: "rtl", title: "تعلم C++", status: "upcoming" },
+				{ id: "latin", title: "Learn C++", status: "upcoming" },
+			],
+			edges: [],
+		};
+		const html = renderToStaticMarkup(<PlanBlock data={data} onOpen={() => {}} />);
+		const textOf = (id: string) => html.match(new RegExp(`data-testid="plan-node-${id}"[^]*?<text[^>]*>([^<]*)</text>`))![1];
+		assert.equal(textOf("rtl"), "تعلم \u2066C++\u2069");
+		assert.equal(textOf("latin"), "Learn C++");
+	});
+
 	it("full block: borderless, column-filling, statuses AS CARRIED (never re-derived)", () => {
 		const data: PlanBlockData = {
 			kind: "full",

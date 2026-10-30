@@ -3,6 +3,7 @@
  * (components/graph-canvas.ts). The renderer class itself is DOM-bound
  * (canvas, rAF, ResizeObserver) and is verified live in the browser; the
  * math it runs on every frame must be exact, so it is pinned here.
+ * Label tests pin grapheme boundaries, content direction and centered drawing.
  *
  * The camera-ratio convention is the load-bearing contract with the
  * persisted settings: sigma's ratio (1 = fit, SMALLER = zoomed in) is kept
@@ -16,9 +17,12 @@ import {
 	arrowGeometry,
 	isImpNodeId,
 	boxBlurRound,
+	drawNameLines,
 	fitTransform,
 	labelAlpha,
+	measureLabel,
 	pickNearest,
+	wrapLabel,
 	wrapRegionLabel,
 	zoomRatioOf,
 	LABELS_FADE_RATIO,
@@ -31,6 +35,140 @@ import {
 	REGION_BITMAP_OPTIONS,
 	REGION_BLUR_LADDER,
 } from "../src/core/render-settings.ts";
+
+describe("canvas label text", () => {
+	const graphemes = new Intl.Segmenter(undefined, { granularity: "grapheme" });
+	const graphemeCount = (text: string) => Array.from(graphemes.segment(text)).length;
+	// UTF-16 code units, so a letter with its mark measures wider than the
+	// letter alone and a split by code point lands on different lines. The
+	// isolates add no width, as on a real canvas.
+	const width = (text: string) => text.replace(/[\u2066\u2069]/g, "").length;
+	const LRI = "\u2066";
+	const PDI = "\u2069";
+	const context = () => ({
+		direction: "inherit",
+		measureText: (text: string) => ({ width: width(text) }),
+	}) as unknown as CanvasRenderingContext2D;
+	const world = { nodeR: 4, glowOuter: 10, labelSize: 12, labelGap: 3 };
+	const outsideIsolates = (text: string) => text.replace(/\u2066[^\u2069]*\u2069/g, "");
+
+	it("keeps normal Latin word wrapping and oversized chunks unchanged", () => {
+		assert.deepEqual(wrapLabel(context(), "one two three", 7), ["one two", "three"]);
+		assert.deepEqual(wrapLabel(context(), "abcdefgh word", 5), ["abcde", "fgh", "word"]);
+	});
+
+	it("keeps tashkeel with its base letter when a word exceeds the width", () => {
+		const word = "الْمُشْتَقَّةُ";
+		const lines = wrapLabel(context(), word, 2);
+		assert.ok(lines.length > 1);
+		assert.equal(lines.join(""), word);
+		for (const line of lines) {
+			assert.ok(!/^\p{M}/u.test(line));
+			assert.ok(width(line) <= 2 || graphemeCount(line) === 1);
+		}
+	});
+
+	it("keeps an indivisible grapheme whole even when it exceeds the width", () => {
+		assert.deepEqual(wrapLabel(context(), "👩‍🔬", 0.5), ["👩‍🔬"]);
+	});
+
+	it("sets direction before measurement and drawing for each complete label", () => {
+		const ctx = context();
+		for (const [label, direction] of [
+			["Newton ينص على", "rtl"],
+			["שָׁלוֹם", "rtl"],
+			["English label", "ltr"],
+			["$س$", "rtl"],
+			["123", "inherit"],
+		] as const) {
+			ctx.measureText = (text) => {
+				assert.equal(ctx.direction, direction);
+				return { width: width(text) } as TextMetrics;
+			};
+			ctx.direction = "inherit";
+			assert.equal(measureLabel(ctx, label), width(label));
+			ctx.direction = "inherit";
+			const lines = wrapLabel(ctx, label, 6);
+			ctx.direction = "inherit";
+			const drawn: string[] = [];
+			ctx.fillText = (text) => {
+				assert.equal(ctx.direction, direction);
+				assert.equal(ctx.textAlign, "center");
+				drawn.push(text);
+			};
+			drawNameLines(ctx, 10, 20, lines, world, "#fff", label);
+			assert.deepEqual(drawn, lines);
+		}
+	});
+
+	it("measures a piece of a label in the direction of the whole label", () => {
+		const ctx = context();
+		ctx.measureText = (text) => {
+			assert.equal(ctx.direction, "rtl");
+			return { width: width(text) } as TextMetrics;
+		};
+		assert.equal(measureLabel(ctx, "Newton", "Newton ينص على"), 6);
+	});
+
+	it("isolates each left-to-right run of a right-to-left label before measuring and drawing", () => {
+		const ctx = context();
+		const measured: string[] = [];
+		ctx.measureText = (text) => {
+			measured.push(text);
+			return { width: width(text) } as TextMetrics;
+		};
+		const drawn: string[] = [];
+		ctx.fillText = (text) => {
+			drawn.push(text);
+		};
+		const label = "تعلم C++";
+		assert.equal(measureLabel(ctx, label), width(label), "the isolates add no width");
+		assert.deepEqual(measured, [`تعلم ${LRI}C++${PDI}`]);
+		const lines = wrapLabel(ctx, label, 4);
+		// A line with no right-to-left letter still sits in the label's direction.
+		assert.deepEqual(lines, ["تعلم", `${LRI}C++${PDI}`]);
+		drawNameLines(ctx, 10, 20, lines, world, "#fff", label);
+		assert.deepEqual(drawn, lines);
+
+		const region = wrapRegionLabel("تعلم C++ C++", 9, 1, (s, whole) => measureLabel(ctx, s, whole));
+		assert.deepEqual(region, [`تعلم ${LRI}C++${PDI}…`]);
+		for (const text of measured) assert.doesNotMatch(outsideIsolates(text), /C/, text);
+	});
+
+	it("leaves a left-to-right label without isolates", () => {
+		const ctx = context();
+		const seen: string[] = [];
+		ctx.measureText = (text) => {
+			seen.push(text);
+			return { width: width(text) } as TextMetrics;
+		};
+		ctx.fillText = (text) => {
+			seen.push(text);
+		};
+		measureLabel(ctx, "C++ and more");
+		const lines = wrapLabel(ctx, "C++ and more", 4);
+		drawNameLines(ctx, 10, 20, lines, world, "#fff", "C++ and more");
+		assert.deepEqual(wrapRegionLabel("C++ and more", 4, 2, (s, whole) => measureLabel(ctx, s, whole)), ["C++", "and…"]);
+		assert.ok(seen.length > 0);
+		for (const text of seen) assert.doesNotMatch(text, /[\u2066\u2069]/);
+	});
+
+	it("region wrapping and ellipsis keep graphemes and the full measurement label", () => {
+		const label = "الْمُشْتَقَّةُ الْمُشْتَقَّةُ";
+		const lines = wrapRegionLabel(label, 4, 2, (text, original) => {
+			assert.equal(original, label);
+			return width(text);
+		});
+		assert.equal(lines.length, 2);
+		assert.ok(lines[1]!.endsWith("…"));
+		for (const line of lines) {
+			assert.ok(!/^\p{M}/u.test(line));
+			assert.ok(width(line) <= 4);
+		}
+		// The ellipsis cuts whole graphemes: the shin keeps its sukun or goes with it.
+		assert.deepEqual(lines, ["الْ", "مُ…"]);
+	});
+});
 
 describe("zoomRatioOf (the sigma-compatible camera ratio)", () => {
 	test("1 at fit zoom, smaller when zoomed in, larger when zoomed out", () => {

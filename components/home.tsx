@@ -15,6 +15,7 @@ import { StatsBar } from "@/components/stats-bar";
 import { OPENING_PROMPT_FAILURE } from "@/components/opening-prompt";
 import { PathInput } from "@/components/path-input";
 import { SessionStarter } from "@/components/start-session";
+import { textDirection } from "@/src/core";
 import type { TurnUsage } from "@/src/core";
 
 /**
@@ -252,6 +253,7 @@ export function Home({
 					<PathInput
 						ref={topicInputRef}
 						value={topic}
+						dir={textDirection(topic)}
 						onValueChange={(value) => {
 							topicRef.current = value;
 							setTopic(value);

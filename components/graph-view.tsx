@@ -67,8 +67,9 @@ import { useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, use
 import { NotesImportErrors, useNotesImport } from "@/components/notes-import.tsx";
 import Link from "next/link";
 import { FileTextIcon, ListTreeIcon, Loader2Icon, SearchIcon, SettingsIcon, UploadIcon, WaypointsIcon } from "lucide-react";
-import { incrementalLayout, propositionSessionHref, type GraphCostSummary, type GraphNode, type GraphSnapshot } from "@/src/core";
+import { incrementalLayout, letterDirection, normalizeForSearch, propositionSessionHref, type GraphCostSummary, type GraphNode, type GraphSnapshot } from "@/src/core";
 import { planCostLabel } from "@/components/usage-format";
+import { BidiText } from "@/components/bidi-text";
 import { GraphCanvasRenderer, type GraphRenderSettings } from "./graph-canvas.ts";
 import { usePopoverDismiss } from "@/components/popover-dismiss";
 import { useActivity } from "@/components/activity-dock";
@@ -126,13 +127,13 @@ type RenderSettings = GraphRenderSettings;
 
 /**
  * Pure filter predicate for the search panel: a node is visible when the
- * query is empty or matches its name or statement (case-insensitive).
+ * query is empty or matches its name or statement after Unicode folding.
  * Exported for tests; the visibility feed just consumes its verdict.
  */
 export function isNodeVisible(node: Pick<GraphNode, "name" | "statement">, query: string): boolean {
-	const q = query.trim().toLowerCase();
+	const q = normalizeForSearch(query.trim());
 	if (!q) return true;
-	return node.name.toLowerCase().includes(q) || node.statement.toLowerCase().includes(q);
+	return normalizeForSearch(node.name).includes(q) || normalizeForSearch(node.statement).includes(q);
 }
 
 /** In-place sessions patch for a live rename (rename-shuffle fix,
@@ -881,6 +882,7 @@ export function GraphChromeRow({
 						<input
 							ref={searchInputRef}
 							value={query}
+							dir={letterDirection(query)}
 							onChange={(e) => onQuery(e.target.value)}
 							placeholder="Search nodes…"
 							aria-label="Search nodes"
@@ -1646,10 +1648,10 @@ export function GraphView({
 					// lh-no-drag: the card is placed anywhere on the canvas —
 					// when it lands in the top strip it must stay interactive
 					// over home.tsx's drag surface (2026-09-17).
-					className="lh-no-drag absolute z-10 w-80 max-w-[calc(100%-1rem)] rounded-xl border bg-card p-4 text-left shadow-lg"
+					className="lh-no-drag absolute z-10 w-80 max-w-[calc(100%-1rem)] rounded-xl border bg-card p-4 text-start shadow-lg"
 				>
-					<div className="text-sm font-medium leading-snug">{selected.node.name}</div>
-					<div className="mt-1 text-xs leading-relaxed text-muted-foreground">{selected.node.statement}</div>
+					<BidiText as="div" className="text-sm font-medium leading-snug" text={selected.node.name} />
+					<BidiText as="div" className="mt-1 text-xs leading-relaxed text-muted-foreground" text={selected.node.statement} />
 					{selected.sourceIds.length > 0 ? (
 						<div className="mt-3 flex flex-col gap-1">
 							<div className="text-xs text-muted-foreground">Sessions</div>
@@ -1660,22 +1662,20 @@ export function GraphView({
 									return (
 										<div key={sourceId} className="flex items-center gap-1.5">
 											<FileTextIcon className="size-3.5 shrink-0 text-muted-foreground" />
-											<span className="min-w-0 flex-1 truncate px-2 py-1.5 text-sm text-muted-foreground">
-												{snapshot.fileSources[sourceId]}
-											</span>
+											<BidiText className="min-w-0 flex-1 truncate px-2 py-1.5 text-sm text-muted-foreground" text={snapshot.fileSources[sourceId] ?? sourceId} />
 										</div>
 									);
 								}
 								// A real session: deep-linkable provenance.
 								return (
 									<div key={sourceId} className="flex items-center gap-1.5">
-										<Link
+										<BidiText
+											as={Link}
 											href={propositionSessionHref(selected.node, sourceId)}
 											scroll={false}
 											className="min-w-0 flex-1 truncate rounded-md px-2 py-1.5 text-sm text-foreground transition-colors hover:bg-accent"
-										>
-											{snapshot?.sessions[sourceId] ?? sourceId}
-										</Link>
+											text={snapshot?.sessions[sourceId] ?? sourceId}
+										/>
 									</div>
 								);
 							})}
