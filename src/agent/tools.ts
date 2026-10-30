@@ -148,7 +148,8 @@ function quizDescription(delta: { name: "quiz" | "probe"; nodeId: boolean; types
 		" always has a " +
 		"correct answer supplied by you, marks the learner's selection right/wrong, reveals the correct answer, and " +
 		"can show an explanation. Options-only: single-select or multi-select, plus an automatic 'I don't know' " +
-		"choice so the learner can signal a genuine gap instead of guessing. An always-present optional thinking " +
+		"choice so the learner can signal a genuine gap instead of guessing. Options are shuffled for display and shown without letters. " +
+		"In the explanation, refer to options by their content, never by letter or position. An always-present optional thinking " +
 		"field lets the learner attach his reasoning to ANY answer; it reaches you only when non-empty. " +
 		"No free-text answers — for non-graded questions use ask_user_question instead. " +
 		(delta.types

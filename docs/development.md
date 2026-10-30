@@ -19,7 +19,7 @@ npm run dev          # http://localhost:3000
 npm run build        # production build (standalone output)
 npm start            # serve the production build
 
-npm test             # the full suite (node:test via tsx; deterministic, no LLM, no network)
+npm test             # the full suite (node:test via tsx; deterministic, no LLM, no network; disposable data/auth)
 npm run lint         # eslint — includes the import law (architecture §2)
 npm run typecheck    # tsc --noEmit
 node scripts/smoke-web-subscriptions.mjs # after build: offline Next start/dev + reload gate
@@ -34,6 +34,8 @@ npx tsx --env-file=.env.local scripts/replay-layout.ts        # re-derive layout
 ```
 
 For Windows/Linux packages and the three-OS CI/release flow, see [`docs/desktop-release.md`](desktop-release.md). Native renderer binaries are traced per platform, so release builds run on the target OS, not as cross-builds from macOS.
+
+`npm test` creates temporary data and auth paths before loading any test modules, overrides inherited `LH_DATA_DIR` / `LH_AUTH_FILE`, and removes its scratch directory after success or failure. To run selected files with the same isolation, use `npm test -- tests/question-tools.test.ts`. Direct `tsx --test` invocations bypass this launcher and must supply their own isolated storage paths.
 
 ## Environment (`.env.local`)
 
