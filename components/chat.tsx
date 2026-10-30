@@ -2147,7 +2147,7 @@ function DockOverlay({
 	const [sbInset, setSbInset] = useState(0);
 	useDockHeight({
 		scrollRef, blockRef, viewportRef, bodyRef, shellRef, contentRef,
-		expanded, enabled: !!pending || !!practice, mode, onScrollbarInset: setSbInset, onHeight: offer,
+		expanded, pinned: pinnedRef.current, enabled: !!pending || !!practice, mode, onScrollbarInset: setSbInset, onHeight: offer,
 	});
 
 	// GROWTH MUTE (owner round, 2026-10-05 — the generation churn): during a
