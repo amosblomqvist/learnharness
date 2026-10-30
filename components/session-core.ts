@@ -211,6 +211,21 @@ export function visibleQueuedSteers(
 	return queue.filter((s) => !ids.has(s.id));
 }
 
+/** The message the edit control may touch (issue #321): the learner's LAST
+ *  message, once the server's record holds it. An optimistic id (`c_…`) is
+ *  still in flight — the server has never heard of it — and it is the last
+ *  message, so there is no earlier one to fall back to. `hasReply` says
+ *  something follows it: editing then discards that work. */
+export function editableUserMessage(messages: readonly LhMessage[]): { id: string; hasReply: boolean } | null {
+	for (let i = messages.length - 1; i >= 0; i--) {
+		const m = messages[i]!;
+		if (m.role !== "user") continue;
+		if (m.id.startsWith("c_")) return null;
+		return { id: m.id, hasReply: i < messages.length - 1 };
+	}
+	return null;
+}
+
 export interface SessionModelOptions extends SessionModelDeps {
 	chatId: string;
 	initialMessages: LhMessage[];
@@ -229,6 +244,8 @@ export class SessionModel {
 	fetch: typeof globalThis.fetch;
 	/** Steers sent but not yet drained (the queued indicator's truth). */
 	private steerQueueValue: SteerQueueItem[] = [];
+	/** Steer id → its POST's outcome (true = accepted), alive while in flight. */
+	private steerAcks = new Map<string, Promise<boolean>>();
 	private readonly pollMs: number;
 	private readonly waitMaxMs: number;
 	private onReattachSettled?: () => void;
@@ -809,9 +826,15 @@ export class SessionModel {
 		const id = `steer_${localId()}`;
 		this.steerQueueValue = [...this.steerQueueValue, { id, text: t }];
 		this.onChange?.();
+		// The line is editable the moment it shows, but the server only knows
+		// the steer after this POST: editSteer waits on this ack so its PUT can
+		// never overtake the POST (issue #321). Settled true once accepted.
+		let acked!: (ok: boolean) => void;
+		this.steerAcks.set(id, new Promise<boolean>((resolve) => { acked = resolve; }));
 		const dropSteer = () => {
 			this.steerQueueValue = this.steerQueueValue.filter((s) => s.id !== id);
 			this.onChange?.();
+			acked(false);
 		};
 		try {
 			const res = await this.fetch(`/api/chats/${this.chatId}/steer`, {
@@ -819,10 +842,14 @@ export class SessionModel {
 				headers: { "Content-Type": "application/json" },
 				body: JSON.stringify({ input: { type: "steer", id, text: t } }),
 			});
-			if (res.ok) return; // parked or delivered — the stream lands the card
+			if (res.ok) { acked(true); return; } // parked or delivered — the stream lands the card
 			if (res.status === 409) {
+				// The line holds the learner's latest word: an edit made while this
+				// POST was in flight rides the plain send, and a cancel (the line is
+				// gone) sends nothing — read it BEFORE dropSteer removes it.
+				const latest = this.steerQueueValue.find((s) => s.id === id)?.text;
 				dropSteer();
-				await this.send({ type: "text", text: t }); // the settle race: plain send
+				if (latest) await this.send({ type: "text", text: latest }); // the settle race: plain send
 				return;
 			}
 			dropSteer();
@@ -830,6 +857,85 @@ export class SessionModel {
 		} catch (err) {
 			dropSteer();
 			this.setError((err as Error).message);
+		} finally {
+			this.steerAcks.delete(id);
+		}
+	}
+
+	/** EDIT a queued steer (issue #321): rewrite the text of a steer the agent
+	 *  has not received yet, or — blank text — cancel it. Optimistic like
+	 *  steer(): the line changes at once and the PUT confirms. A 409 means
+	 *  the steer was already delivered (or the turn ended): the queued line
+	 *  simply reverts, silently — the transcript shows what the agent got. */
+	async editSteer(id: string, text: string): Promise<void> {
+		const before = this.steerQueueValue;
+		const current = before.find((s) => s.id === id);
+		const t = text.trim();
+		if (!current || t === current.text) return;
+		// Restore ONLY this line: a steer queued (or edited) while the PUT was
+		// in flight must survive a failed edit, so never swap in the old snapshot.
+		const revert = () => {
+			const now = this.steerQueueValue;
+			if (now.some((s) => s.id === id)) {
+				this.steerQueueValue = now.map((s) => (s.id === id ? current : s));
+			} else {
+				const at = Math.min(before.indexOf(current), now.length);
+				this.steerQueueValue = [...now.slice(0, at), current, ...now.slice(at)];
+			}
+			this.onChange?.();
+		};
+		this.steerQueueValue = t
+			? before.map((s) => (s.id === id ? { id, text: t } : s))
+			: before.filter((s) => s.id !== id);
+		this.onChange?.();
+		// Never overtake the steer's own POST: until the server has it there is
+		// nothing to edit. If that POST failed, its line is already gone — send
+		// nothing and do not resurrect it.
+		const ack = this.steerAcks.get(id);
+		if (ack && !(await ack)) return;
+		try {
+			const res = await this.fetch(`/api/chats/${this.chatId}/steer`, {
+				method: "PUT",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({ input: { type: "steer-edit", id, text: t } }),
+			});
+			if (res.ok) return;
+			revert();
+			if (res.status !== 409) this.setError((await res.text()) || `The steer edit failed (${res.status}).`);
+		} catch (err) {
+			revert();
+			this.setError((err as Error).message);
+		}
+	}
+
+	/** EDIT THE LAST SENT MESSAGE (issue #321): the server stops the running
+	 *  turn, removes that message and everything after it, and hands its text
+	 *  back. Returns the text for the composer (resending it is the ordinary
+	 *  send), or null when the server refused: the reason is surfaced and
+	 *  nothing changed. The view is NOT swapped here — the caller adopts the
+	 *  server's record, and owns the turn-in-flight flag. The queued steer
+	 *  lines go (the server dropped them with the tail) and automatic
+	 *  continuation stays blocked until the next explicit send, so nothing
+	 *  runs behind the edit. */
+	async rewind(messageId: string): Promise<string | null> {
+		try {
+			const res = await this.fetch(`/api/chats/${this.chatId}/rewind`, {
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({ messageId }),
+			});
+			const body = (await res.json().catch(() => null)) as { text?: unknown; error?: unknown } | null;
+			if (!res.ok || typeof body?.text !== "string") {
+				this.setError(typeof body?.error === "string" ? body.error : `The edit failed (${res.status}).`);
+				return null;
+			}
+			this.steerQueueValue = [];
+			this.automaticContinuationBlocked = true;
+			this.onChange?.();
+			return body.text;
+		} catch (err) {
+			this.setError((err as Error).message);
+			return null;
 		}
 	}
 

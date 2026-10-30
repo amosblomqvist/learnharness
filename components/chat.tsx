@@ -2,7 +2,7 @@
 
 import { createContext, Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useChatSession } from "@/components/session";
-import { visibleQueuedSteers } from "@/components/session-core";
+import { editableUserMessage, visibleQueuedSteers } from "@/components/session-core";
 import { SetupDialog } from "@/components/setup-dialog";
 import { Hint } from "@/components/ui/hint";
 import { useModelSetup, selectedModelUnavailable, openModelPicker, ZeroKeysPill } from "@/components/setup-cta";
@@ -30,6 +30,7 @@ import { dockStateKey } from "@/components/dock-state-key";
 import { clearOpeningPrompt, readOpeningPromptEntry, stashOpeningPrompt, OPENING_PROMPT_FAILURE } from "@/components/opening-prompt";
 import { forwardDockWheel, useDockHeight } from "@/components/dock-height";
 import { QueuedSteersBody, type QueuedSteerLine } from "@/components/queued-steers";
+import { EditMessageButton } from "@/components/edit-message";
 import { DictationBar, finishDictation, joinDictation, useDictation } from "@/components/dictation";
 import { useFieldCycle } from "@/components/field-cycle";
 import { JobsContext } from "@/components/jobs-context";
@@ -255,7 +256,7 @@ export function Chat({
 	// (core/view.ts projectView); sends are ONE explicit input event each
 	// ({chatId, input} — the stash indirection died with the SDK), and the
 	// turn stream is the VERBATIM AgentEvent passthrough the server emits.
-	const { messages, nativeMessages, hasConfirmedConversation, contextTokens, send, continueIfOwed, steer, steerQueue, submitAnswer, dismissQuestion, dismissProblem, questionDraft, saveQuestionDraft, setMessages, adoptRecord, status, error, stop, clearError, resumeStream, setReattachSettled } =
+	const { messages, nativeMessages, hasConfirmedConversation, contextTokens, send, continueIfOwed, steer, editSteer, rewind, steerQueue, submitAnswer, dismissQuestion, dismissProblem, questionDraft, saveQuestionDraft, setMessages, adoptRecord, status, error, stop, clearError, resumeStream, setReattachSettled } =
 		useChatSession({ chatId, initialMessages, initialError, initiallyInFlight });
 
 	const sessionFindScopeRef = useRef<HTMLDivElement | null>(null);
@@ -373,6 +374,10 @@ export function Chat({
 	const [abortAsk, setAbortAsk] = useState<AbortMode | null>(null);
 	const abortAskRef = useRef<AbortMode | null>(null);
 	abortAskRef.current = abortAsk;
+	// Edit-last-message (issue #321): the confirm popup carries the message it
+	// will rewind, and a ref reaches the page-level action defined further down.
+	const pendingEditRef = useRef<string | null>(null);
+	const editLastMessageRef = useRef<(messageId: string) => void>(() => {});
 	useEffect(() => {
 		const onAbort = () => {
 			const target = escAbortTarget({
@@ -397,6 +402,12 @@ export function Chat({
 	const confirmAbort = useCallback(
 		(mode: AbortMode) => {
 			setAbortAsk(null);
+			if (mode === "edit") {
+				const messageId = pendingEditRef.current;
+				pendingEditRef.current = null;
+				if (messageId) editLastMessageRef.current(messageId);
+				return;
+			}
 			if (mode === "turn") {
 				abortInFlightTurn();
 				return;
@@ -550,6 +561,8 @@ export function Chat({
 	// color-coded dotted divider at each boundary; the header chip reads the
 	// session's current phase.
 	const phases = useMemo(() => phaseTimeline(messages), [messages]);
+	// The one message the edit control may touch (issue #321): the learner's last.
+	const editTarget = useMemo(() => editableUserMessage(nativeMessages), [nativeMessages]);
 
 	const [text, setText] = useState("");
 	/* The composer's value MIRROR ("nothing gets lost" round, owner
@@ -796,6 +809,37 @@ export function Chat({
 		// sync must never automatically replace a reply that failed to save.
 		continueIfOwed(record.messages);
 	}, [chatId, setMessages, continueIfOwed]);
+
+	// EDIT THE LAST SENT MESSAGE (issue #321): the server stops the turn and
+	// rewinds the record; the rewound turn is over for this view, so adopt the
+	// server's truth (never the stale tail), then put the text back in the
+	// composer. Nothing auto-continues: the learner's next send is the wake.
+	const rewindingRef = useRef(false);
+	const editLastMessage = useCallback(async (messageId: string) => {
+		if (rewindingRef.current) return;
+		rewindingRef.current = true;
+		try {
+			const removed = await rewind(messageId);
+			if (removed === null) return;
+			setTurnInFlight(false);
+			await syncFromServer();
+			applyText(removed);
+			composerInputRef.current?.focus();
+		} finally {
+			rewindingRef.current = false;
+		}
+	}, [rewind, syncFromServer, applyText]);
+	editLastMessageRef.current = (messageId) => void editLastMessage(messageId);
+	// A reply exists (or is streaming): editing discards that work — confirm.
+	// A message nothing has answered yet edits at once.
+	const requestEdit = (messageId: string) => {
+		if (busy || editTarget?.hasReply) {
+			pendingEditRef.current = messageId;
+			setAbortAsk("edit");
+		} else {
+			void editLastMessage(messageId);
+		}
+	};
 
 	// The settled terminal's other half (stream-reattach wave): the
 	// transport resolved turn-settled — no turn running, the record is
@@ -1504,12 +1548,17 @@ export function Chat({
 										    inset (the band is the authorship mark against the agent's
 										    transparent prose). The "You" label stays — one register
 										    with the thinking labels. */
-										className="my-2 w-full border-l-[calc(3ch-14px)] border-muted-foreground/30 bg-card py-1 pl-[14px] pr-4 font-ui text-xs"
+										className="group my-2 w-full border-l-[calc(3ch-14px)] border-muted-foreground/30 bg-card py-1 pl-[14px] pr-4 font-ui text-xs"
 									>
 												{/* The rail GROUPS (owner round 4, 2026-10-05): the YOU heading
 												    sits INSIDE the rail, same mono-xs register and same 1ch
 												    rail as the thinking rows — one quote geometry. */}
-												<div className="font-medium uppercase tracking-wide text-muted-foreground">You</div>
+												<div className="flex items-center justify-between font-medium uppercase tracking-wide text-muted-foreground">
+													You
+													{/* THE EDIT CONTROL (issue #321): only the learner's LAST message,
+													    once the server's record holds it. */}
+													{m.id === editTarget?.id ? <EditMessageButton onEdit={() => requestEdit(m.id)} /> : null}
+												</div>
 												<div className="lh-prose whitespace-pre-wrap text-foreground">
 													<PathText text={m.parts.filter((p) => p.type === "text").map((p) => p.text).join("\n")} />
 												</div>
@@ -1700,6 +1749,7 @@ export function Chat({
 					dictationSlot={<DictationBar dictation={dictation} />}
 					dictationCancel={dictation.cancel}
 					queuedSteers={visibleQueuedSteers(steerQueue, nativeMessages)}
+					onEditSteer={editSteer}
 					setupCta={
 						zeroKeys ? (
 							<ZeroKeysPill onOpen={() => setSetupOpen(true)} />
@@ -1934,6 +1984,7 @@ function DockOverlay({
 	dictationCancel,
 	setupCta,
 	queuedSteers,
+	onEditSteer,
 }: {
 	pending: ReturnType<typeof pendingQuestionOf>;
 	initialQuestionDraft?: QuestionFormDraft;
@@ -1982,6 +2033,8 @@ function DockOverlay({
 	/** The queued-steer indicator's lines (composer steering, 2026-10-03):
 	 *  already filtered by visibleQueuedSteers — only undrained steers. */
 	queuedSteers: QueuedSteerLine[];
+	/** Edit or cancel (blank text) a queued steer — the lines' click-to-edit. */
+	onEditSteer: (id: string, text: string) => void;
 	/** The persistent setup CTA (BYOK, owner 2026-09-22): the same pill
 	 *  home and /chat/new carry, above the composer while slots are unset. */
 	setupCta?: React.ReactNode;
@@ -2342,7 +2395,7 @@ function DockOverlay({
 					    one-liners above the shell - right-aligned to where its corner
 					    rounding starts, truncated, no background, no container. A
 					    line dies when its card lands (visibleQueuedSteers). */}
-					<QueuedSteersBody steers={queuedSteers} />
+					<QueuedSteersBody steers={queuedSteers} onEdit={onEditSteer} />
 					{/* The reading-thinking field (owner 2026-10-03): mounted while a
 					    teach-phase check waits — the same cue that collapses it. It
 					    claims dictated speech until the learner reveals the check

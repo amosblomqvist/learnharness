@@ -43,6 +43,10 @@
  * aliases) are stripped and its provenance points removed (owner ruling
  * 2026-09-23: all traces, identity survives).
  *
+ * A third operation, deleteMessageTraces, rewinds ONE chat's tail (editing
+ * the last sent message): the delete-nodes rules above, scoped to the
+ * discarded messages instead of the whole chat.
+ *
  * Not touched, by design:
  *   - imported-notes sources (src_…) — a different front door with its
  *     own lifecycle (re-import dedupes by path hash); this wave deletes
@@ -59,6 +63,7 @@ import type {
 	CoverageEntry,
 	GraphChain,
 	GraphNode,
+	ProvenancePoint,
 	SessionCheckpoint,
 } from "./contracts.ts";
 import type { GraphStore } from "./ports.ts";
@@ -229,6 +234,124 @@ export function deleteChatTraces(graphStore: GraphStore, chatId: string, mode: C
 	if (Object.keys(prunedPositions).length !== Object.keys(positions).length) {
 		graphStore.writePositions(prunedPositions);
 	}
+
+	return stats;
+}
+
+// ─── message-granular rewind (editing the last sent message) ─────────────────
+
+/** What a rewind purge removed. Checkpoint lines are whole-chat legacy
+ *  bookkeeping and are never touched by a rewind. */
+export type MessageDeletionStats = Pick<ChatDeletionStats, "nodesRemoved" | "chainsRemoved" | "coverageRemoved">;
+
+/** The tail of a transcript being rewound away. */
+export interface MessageCut {
+	/** Ids of the discarded messages: the edited one and everything after it. */
+	messageIds: ReadonlySet<string>;
+	/** Coverage fingerprints of those messages, computed by the caller from
+	 *  the PRE-truncation transcript (core/coverage.ts coverageSlots). */
+	fingerprints: ReadonlySet<string>;
+}
+
+/**
+ * Undo what extraction learned from a chat's discarded tail. Same rules as
+ * deleteChatTraces "delete-nodes" (a node lives iff another reference
+ * survives; a surviving node keeps its identity but loses the rolled-back
+ * phrasings; a chain dies when its provenance empties or a member node
+ * dies), scoped to ONE chat's tail. Synchronous, one rewriteLedgers call,
+ * idempotent — the same atomicity argument as the chat cascade.
+ *
+ * What counts as the tail's trace:
+ *   - a node point anchored to a discarded message id; and
+ *   - EVERYTHING this chat's extraction runs wrote at or after the earliest
+ *     fold of a discarded message. Chains carry only chat-level provenance
+ *     (messageId ""), so the fold time is the only thing that dates them.
+ *     The cut is the transcript's tail, so any later run folds only
+ *     discarded messages (a mutated, re-opened earlier message is the one
+ *     rare over-reach, and it just re-extracts).
+ * A batch folds its messages under ONE foldedAt, so a batch that mixes a
+ * kept and a discarded message rolls back whole: its coverage rows go too,
+ * and the kept message is uncovered again for the next extraction.
+ *
+ * Known limit: a message whose view changed after it was folded (a quiz
+ * answer merged into it) has an older coverage row under its previous
+ * fingerprint; that row cannot be tied to the message, so a run known only
+ * by it is not dated. The message-id anchor still removes its nodes.
+ */
+export function deleteMessageTraces(graphStore: GraphStore, chatId: string, cut: MessageCut): MessageDeletionStats {
+	const coverage = graphStore.readCoverage();
+	let since: string | null = null;
+	for (const row of coverage) {
+		if (row.chatId !== chatId || !cut.fingerprints.has(row.fp)) continue;
+		if (since === null || row.foldedAt < since) since = row.foldedAt;
+	}
+	const rolledBack = (createdAt: string): boolean => since !== null && createdAt >= since;
+	const isCut = (pt: ProvenancePoint, createdAt: string): boolean =>
+		pt.chatId === chatId && (cut.messageIds.has(pt.messageId) || rolledBack(createdAt));
+
+	const outCoverage = coverage.filter((row) => !(row.chatId === chatId && rolledBack(row.foldedAt)));
+
+	// Survival: a node dies only if the rewind cut one of its points AND no
+	// surviving point remains. A node the rewind never touched stays, whatever
+	// its provenance (destructive rewriting may not exceed the cut's reach).
+	const nodeLines = graphStore.readNodes();
+	const chainLines = graphStore.readChains();
+	const touched = new Set<string>();
+	const live = new Set<string>();
+	for (const line of nodeLines) {
+		for (const pt of line.provenance) (isCut(pt, line.createdAt) ? touched : live).add(line.id);
+	}
+	const deadNodes = new Set([...touched].filter((id) => !live.has(id)));
+
+	let nodesChanged = false;
+	const outNodes: GraphNode[] = [];
+	const seenIds = new Set<string>();
+	for (const line of nodeLines) {
+		const first = !seenIds.has(line.id);
+		seenIds.add(line.id);
+		if (deadNodes.has(line.id)) { nodesChanged = true; continue; }
+		const points = line.provenance.filter((pt) => !isCut(pt, line.createdAt));
+		if (points.length === line.provenance.length) { outNodes.push(line); continue; }
+		nodesChanged = true;
+		if (points.length > 0) outNodes.push({ ...line, provenance: points });
+		else if (first) outNodes.push({ ...line, provenance: [], aliases: [] }); // identity survives, phrasings die
+		// else: a link line of the rolled-back run — dies with its phrasings.
+	}
+
+	let chainsChanged = false;
+	const outChains: GraphChain[] = [];
+	for (const line of chainLines) {
+		if (deadNodes.has(line.conclusion) || line.premises.some((premise) => deadNodes.has(premise))) { chainsChanged = true; continue; }
+		const points = line.provenance.filter((pt) => !isCut(pt, line.createdAt));
+		if (points.length === line.provenance.length) { outChains.push(line); continue; }
+		chainsChanged = true;
+		// An assertion dies when THIS rewind empties its provenance; a line
+		// that already had no points is foreign data and rides untouched.
+		if (points.length > 0) outChains.push({ ...line, provenance: points });
+	}
+
+	const stats: MessageDeletionStats = {
+		nodesRemoved: deadNodes.size,
+		chainsRemoved: chainLines.length - outChains.length,
+		coverageRemoved: coverage.length - outCoverage.length,
+	};
+	if (!nodesChanged && !chainsChanged && stats.coverageRemoved === 0) return stats;
+
+	// Resting positions die with every dead node and every chain id left with
+	// no line. They go FIRST: a crash between the two writes then leaves the
+	// ledgers whole, and the retry recomputes the same dead ids and finishes
+	// (ledgers first would strand positions that no retry ever prunes).
+	const survivingChains = new Set(outChains.map((line) => line.id));
+	const deadChains = new Set(chainLines.filter((line) => !survivingChains.has(line.id)).map((line) => line.id));
+	const positions = graphStore.readPositions();
+	const pruned = Object.fromEntries(Object.entries(positions).filter(([id]) => !deadNodes.has(id) && !deadChains.has(id)));
+	if (Object.keys(pruned).length !== Object.keys(positions).length) graphStore.writePositions(pruned);
+
+	graphStore.rewriteLedgers({
+		...(nodesChanged ? { nodes: outNodes } : {}),
+		...(chainsChanged ? { chains: outChains } : {}),
+		...(stats.coverageRemoved > 0 ? { coverage: outCoverage } : {}),
+	});
 
 	return stats;
 }

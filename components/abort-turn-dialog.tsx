@@ -24,8 +24,10 @@ import { useBackdropDismiss } from "@/components/backdrop-dismiss";
  * model in its context.
  */
 
-/** What Esc is aborting — drives copy and the confirm action. */
-export type AbortMode = "turn" | "question" | "problem";
+/** What the popup is confirming — drives copy and the confirm action.
+ *  "edit" is not an Esc abort: it guards the edit-last-message control
+ *  (issue #321), which discards the reply to the message being edited. */
+export type AbortMode = "turn" | "question" | "problem" | "edit";
 
 const COPY: Record<AbortMode, { title: string; line: string; action: string }> = {
 	turn: {
@@ -42,6 +44,11 @@ const COPY: Record<AbortMode, { title: string; line: string; action: string }> =
 		title: "Discard this problem?",
 		line: "The problem is dropped — no solution is revealed.",
 		action: "Discard",
+	},
+	edit: {
+		title: "Edit this message?",
+		line: "The agent's reply to it will be discarded.",
+		action: "Edit",
 	},
 };
 

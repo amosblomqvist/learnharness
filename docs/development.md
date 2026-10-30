@@ -135,6 +135,8 @@ src/
   server/turn-service.ts       turn seams: persist · extraction trigger
   server/jobs.ts               the wake pipeline: serialized per-chat steer delivery,
                                server-side wake turns, crash recovery
+  server/rewind.ts             edit the last sent message: stop the turn, rewind the record,
+                               graph, plan tree and jobs of the discarded tail
   server/stores.ts              THE storage composition root — the one place adapters wire in
   server/turn-liveness.ts       per-chat turn registry (one turn per chat, ever)
   server/observability.ts       the activity feed (running jobs + extraction, abort)

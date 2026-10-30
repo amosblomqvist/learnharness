@@ -52,6 +52,7 @@ import { runningTurn } from "../src/server/turn-runs.ts";
 import {
 	abortJob,
 	deliverJobResult,
+	editLiveSteer,
 	noteSteersDurable,
 	discardChatDeliveries,
 	reconcileUserSteers,
@@ -1905,5 +1906,124 @@ describe("composer steering: steerLiveChat + the deliver-or-requeue lifecycle", 
 		assert.deepEqual((next.handed[0] as { id: string }).id, "steer_s1");
 		unregisterLiveAgent(chatId);
 		reconcileUserSteers(chatId, [stranded, delivered] as never); // cleanup
+	});
+});
+
+// ─── composer steering: editing a steer that is still queued ────────────────
+
+describe("composer steering: editLiveSteer (edit or cancel a still-queued steer)", () => {
+	type Queued = { id: string; role: string; content: string; timestamp: number };
+	/** A stand-in for pi's Agent with a real steering queue: peek is the
+	 *  queue's truth, drain (simulated) removes from it. */
+	function queueAgent(): { queue: Queued[]; agent: unknown } {
+		const queue: Queued[] = [];
+		return {
+			queue,
+			agent: {
+				steer: (m: Queued) => queue.push(m),
+				clearSteeringQueue: () => { queue.length = 0; },
+				peekQueuedMessages: () => queue.slice(),
+			},
+		};
+	}
+	const steerMsg = (id: string, content: string): Queued => ({ id, role: "user", content, timestamp: 1 });
+
+	it("no live turn → false", () => {
+		const chatId = chatStore.createChat("edit steer: idle").id;
+		assert.equal(editLiveSteer(chatId, "steer_e0", "x"), false);
+	});
+
+	it("an id that is not queued → false, and the queue is left untouched", () => {
+		const chatId = chatStore.createChat("edit steer: unknown").id;
+		const { queue, agent } = queueAgent();
+		registerLiveAgent(chatId, agent as never);
+		assert.equal(steerLiveChat(chatId, steerMsg("steer_e1", "first") as never), true);
+		assert.equal(editLiveSteer(chatId, "steer_nope", "x"), false);
+		assert.deepEqual(queue.map((m) => m.content), ["first"]);
+		unregisterLiveAgent(chatId);
+		reconcileUserSteers(chatId, [steerMsg("steer_e1", "first")] as never);
+	});
+
+	it("edit replaces the text in place: same id, same position, neighbours untouched", () => {
+		const chatId = chatStore.createChat("edit steer: replace").id;
+		const { queue, agent } = queueAgent();
+		registerLiveAgent(chatId, agent as never);
+		const b = steerMsg("steer_e3b", "second");
+		assert.equal(steerLiveChat(chatId, steerMsg("steer_e3a", "first") as never), true);
+		assert.equal(steerLiveChat(chatId, b as never), true);
+		assert.equal(editLiveSteer(chatId, "steer_e3a", "first, corrected"), true);
+		assert.deepEqual(queue.map((m) => [m.id, m.content]), [["steer_e3a", "first, corrected"], ["steer_e3b", "second"]]);
+		assert.equal(queue[1], b, "the neighbour is re-handed as the very same message object");
+		unregisterLiveAgent(chatId);
+		reconcileUserSteers(chatId, [{ id: "steer_e3a" }, { id: "steer_e3b" }] as never);
+	});
+
+	it("a steer pi already drained is no longer editable → false, nothing re-delivered", () => {
+		const chatId = chatStore.createChat("edit steer: drained").id;
+		const { queue, agent } = queueAgent();
+		registerLiveAgent(chatId, agent as never);
+		assert.equal(steerLiveChat(chatId, steerMsg("steer_e4a", "drained") as never), true);
+		assert.equal(steerLiveChat(chatId, steerMsg("steer_e4b", "still queued") as never), true);
+		queue.shift(); // pi's drain took the first steer
+		assert.equal(editLiveSteer(chatId, "steer_e4a", "too late"), false);
+		assert.deepEqual(queue.map((m) => m.id), ["steer_e4b"], "the drained steer is never put back");
+		unregisterLiveAgent(chatId);
+		reconcileUserSteers(chatId, [{ id: "steer_e4a" }, { id: "steer_e4b" }] as never);
+	});
+
+	it("empty text cancels: the steer leaves the queue and never rides a later run", () => {
+		const chatId = chatStore.createChat("edit steer: cancel").id;
+		const { queue, agent } = queueAgent();
+		registerLiveAgent(chatId, agent as never);
+		assert.equal(steerLiveChat(chatId, steerMsg("steer_e5a", "regret") as never), true);
+		assert.equal(steerLiveChat(chatId, steerMsg("steer_e5b", "keep") as never), true);
+		assert.equal(editLiveSteer(chatId, "steer_e5a", "   "), true);
+		assert.deepEqual(queue.map((m) => m.id), ["steer_e5b"]);
+		unregisterLiveAgent(chatId);
+		const next = queueAgent();
+		registerLiveAgent(chatId, next.agent as never);
+		assert.deepEqual(next.queue.map((m) => m.id), ["steer_e5b"], "only the kept steer is parked for the next run");
+		unregisterLiveAgent(chatId);
+		reconcileUserSteers(chatId, [{ id: "steer_e5b" }] as never);
+	});
+
+	it("an edited steer that gets stranded rides the NEXT run with the NEW text", () => {
+		const chatId = chatStore.createChat("edit steer: stranded").id;
+		const { agent } = queueAgent();
+		registerLiveAgent(chatId, agent as never);
+		assert.equal(steerLiveChat(chatId, steerMsg("steer_e6", "old words") as never), true);
+		assert.equal(editLiveSteer(chatId, "steer_e6", "new words"), true);
+		unregisterLiveAgent(chatId); // question termination / abort: never drained
+		const next = queueAgent();
+		registerLiveAgent(chatId, next.agent as never);
+		assert.deepEqual(next.queue.map((m) => [m.id, m.content]), [["steer_e6", "new words"]]);
+		unregisterLiveAgent(chatId);
+		reconcileUserSteers(chatId, [{ id: "steer_e6" }] as never);
+	});
+
+	it("a job marker's id is not an editable steer → false, queue untouched", () => {
+		const chatId = chatStore.createChat("edit steer: marker id").id;
+		const { queue, agent } = queueAgent();
+		registerLiveAgent(chatId, agent as never);
+		const marker = { id: "job_marker_2", role: "custom", content: "research result", timestamp: 1 };
+		(agent as { steer: (m: unknown) => void }).steer(marker);
+		assert.equal(editLiveSteer(chatId, "job_marker_2", "tampered"), false);
+		assert.equal(editLiveSteer(chatId, "job_marker_2", ""), false, "and it cannot be cancelled either");
+		assert.deepEqual(queue, [marker]);
+		unregisterLiveAgent(chatId);
+	});
+
+	it("a queued job marker rides through an edit untouched and in order", () => {
+		const chatId = chatStore.createChat("edit steer: marker").id;
+		const { queue, agent } = queueAgent();
+		registerLiveAgent(chatId, agent as never);
+		const marker = { id: "job_marker_1", role: "custom", content: "research result", timestamp: 1 };
+		assert.equal(steerLiveChat(chatId, steerMsg("steer_e7", "mine") as never), true);
+		(agent as { steer: (m: unknown) => void }).steer(marker); // a job marker handed to the same queue
+		assert.equal(editLiveSteer(chatId, "steer_e7", "mine, edited"), true);
+		assert.deepEqual(queue.map((m) => m.id), ["steer_e7", "job_marker_1"]);
+		assert.equal(queue[1], marker);
+		unregisterLiveAgent(chatId);
+		reconcileUserSteers(chatId, [{ id: "steer_e7" }] as never);
 	});
 });

@@ -110,6 +110,21 @@ function deleteJobsForChat(chatId: string): number {
 	return removed;
 }
 
+/** Delete one job record file; false when it was already gone. Any other
+ *  failure (a locked or unwritable file) throws: it must never read as deleted. */
+function deleteJob(id: string): boolean {
+	const job = getJob(id);
+	if (!job) return false;
+	try {
+		fs.unlinkSync(jobFile(id));
+	} catch (err) {
+		if ((err as NodeJS.ErrnoException).code === "ENOENT") return false; // already gone
+		throw err;
+	}
+	emit("jobs-changed", { chatId: job.chatId });
+	return true;
+}
+
 export const jobStore: JobStore = {
 	createJob,
 	getJob,
@@ -117,4 +132,5 @@ export const jobStore: JobStore = {
 	listJobs,
 	findJobByToolCallId,
 	deleteJobsForChat,
+	deleteJob,
 };

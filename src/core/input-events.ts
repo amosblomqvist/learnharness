@@ -131,6 +131,23 @@ export function parseUserSteerInput(input: unknown): UserSteerInput {
 	return { type: "steer", id: i.id, text: i.text };
 }
 
+/** An edit of a steer that is still queued (issue #321): the id of the
+ *  queued steer plus its new text. Blank text is the cancel — it removes the
+ *  steer from the queue — so, unlike a new steer, the text may be empty. */
+export type UserSteerEditInput = { type: "steer-edit"; id: string; text: string };
+
+/** Parse and validate a steer edit off a request body. */
+export function parseUserSteerEditInput(input: unknown): UserSteerEditInput {
+	if (typeof input !== "object" || input === null) throw new ChatInputError("input must be an object");
+	const i = input as Record<string, unknown>;
+	if (i.type !== "steer-edit") throw new ChatInputError(`unknown input type: ${String(i.type)}`);
+	if (typeof i.id !== "string" || i.id.length === 0) {
+		throw new ChatInputError("steer-edit input requires the queued steer's id");
+	}
+	if (typeof i.text !== "string") throw new ChatInputError("steer-edit input requires text");
+	return { type: "steer-edit", id: i.id, text: i.text };
+}
+
 /** The native appends a dismissal makes (pure — same orphan discipline
  *  as answers: the call must be a DANGLING question call, or — the
  *  practice variant — the ACTIVE problem). */
