@@ -216,9 +216,9 @@ export interface AuthStore {
 	/** The whole map — absent or corrupt file = {} ("no keys yet", the
 	 *  documented first-boot state). Never throws. */
 	authVars(): Record<string, string>;
-	/** Set one VAR (atomic write, mode 0600 always, other vars preserved). */
+	/** Set one VAR atomically at mode 0600; refuse an unreadable existing file. */
 	setAuthVar(name: string, value: string): void;
-	/** Remove one VAR if present (absent = no-op, still a silent success). */
+	/** Remove one VAR if present; refuse an unreadable existing file. */
 	deleteAuthVar(name: string): void;
 }
 

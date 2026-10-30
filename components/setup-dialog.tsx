@@ -48,7 +48,8 @@ import { notifySettingsSaved, useSettingsSaved } from "@/components/settings-sig
 import { useModelCatalog } from "@/components/model-catalog";
 import { savedSlotsConfigured } from "@/components/setup-cta";
 import { Hint } from "@/components/ui/hint";
-import { type ProviderKeyInfo, CUSTOM_PROVIDER_INFO, CustomEndpointSetup } from "@/components/settings/keys-section";
+import { type ProviderKeyInfo, CUSTOM_PROVIDER_INFO, CustomEndpointSetup, BedrockSetupHint } from "@/components/settings/keys-section";
+import { BEDROCK_PROVIDER } from "@/src/core";
 import { ProviderMenuList } from "@/components/settings/model-menu";
 import { ChatGPTBackgroundAccess } from "@/components/settings/chatgpt-connection";
 import { NativeSubscriptionBackgroundAccess, SubscriptionConnections } from "@/components/settings/subscription-connections";
@@ -217,6 +218,7 @@ export function SetupKeysBody({
 								{saving ? "Saving…" : "Save key"}
 							</button>
 						</div>
+						{provider.id === BEDROCK_PROVIDER.id && <BedrockSetupHint />}
 					</div>
 				))}
 				{error && (

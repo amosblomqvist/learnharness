@@ -8,9 +8,8 @@
  * The server (src/server/keys.ts) is the only intended writer: it applies
  * shape validation before setAuthVar and env precedence on top of
  * authVars(). Ordinary reads never throw (absent/corrupt file = {} =
- * "no keys yet"); custom-only pair reads/writes below are deliberately
- * strict so an unreadable private record is never overwritten as {}.
- * Ordinary writes preserve unknown string vars verbatim
+ * "no keys yet"); every write uses a strict read so an unreadable private
+ * record is never overwritten as {}. Writes preserve unknown JSON values
  * (forward-compat: future entries — e.g. a plans-login token — ride along
  * untouched until a catalog entry adopts them).
  */
@@ -22,13 +21,22 @@ import type { AuthStore } from "../core/ports.ts";
 import { CUSTOM_PROVIDER } from "../core/auth-keys.ts";
 import { CUSTOM_AUTH_BINDING, parseCustomAuthBinding, type CustomAuthBinding } from "../core/custom-provider-auth.ts";
 
+/** Only a missing file is empty. Never replace an unreadable existing record. */
+function readStoredMap(): Record<string, unknown> {
+	let text: string;
+	try { text = fs.readFileSync(AUTH_FILE, "utf8"); }
+	catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return {}; throw new Error("Authorization storage unavailable"); }
+	let raw: unknown;
+	try { raw = JSON.parse(text); } catch { throw new Error("Authorization storage unavailable"); }
+	if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw new Error("Authorization storage unavailable");
+	return raw as Record<string, unknown>;
+}
+
 /** The flat string→string map, or {} for absent/corrupt/non-object. */
 function readMap(): Record<string, string> {
 	try {
-		const raw = JSON.parse(fs.readFileSync(AUTH_FILE, "utf-8"));
-		if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
 		return Object.fromEntries(
-			Object.entries(raw).filter(([, v]) => typeof v === "string") as [string, string][],
+			Object.entries(readStoredMap()).filter(([, v]) => typeof v === "string") as [string, string][],
 		);
 	} catch {
 		return {}; // absent or corrupt — the documented state is "no keys yet"
@@ -54,30 +62,22 @@ export const authStore: AuthStore = {
 	},
 	setAuthVar(name, value) {
 		assertOrdinaryVar(name);
-		const map = readMap();
-		map[name] = value;
+		const map = readStoredMap();
+		Object.defineProperty(map, name, { value, enumerable: true, configurable: true, writable: true });
 		writeMap(map);
 	},
 	deleteAuthVar(name) {
 		assertOrdinaryVar(name);
-		const map = readMap();
-		if (!(name in map)) return; // absent = silent success, idempotent
+		const map = readStoredMap();
+		if (!Object.hasOwn(map, name)) return; // absent = silent success, idempotent
 		delete map[name];
 		writeMap(map);
 	},
 };
 
-/** Custom writes must never turn an unreadable/corrupt private file into {}.
- * Other providers retain their existing adapter semantics. Unknown JSON values
- * survive custom-only updates, not just the ordinary string projection. */
+/** Custom authorization also validates its endpoint-binding metadata. */
 function readCustomMap(): Record<string, unknown> {
-	let text: string;
-	try { text = fs.readFileSync(AUTH_FILE, "utf8"); }
-	catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return {}; throw new Error("Custom authorization storage unavailable"); }
-	let raw: unknown;
-	try { raw = JSON.parse(text); } catch { throw new Error("Custom authorization storage unavailable"); }
-	if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw new Error("Custom authorization storage unavailable");
-	const map = raw as Record<string, unknown>;
+	const map = readStoredMap();
 	if (Object.hasOwn(map, CUSTOM_AUTH_BINDING) && !parseCustomAuthBinding(map[CUSTOM_AUTH_BINDING])) throw new Error("Invalid custom authorization record");
 	if (Object.hasOwn(map, CUSTOM_PROVIDER.envVar) && typeof map[CUSTOM_PROVIDER.envVar] !== "string") throw new Error("Invalid custom credential record");
 	return map;
