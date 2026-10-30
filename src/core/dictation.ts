@@ -81,6 +81,38 @@ export function isDictationLanguage(value: unknown): value is DictationLanguage 
 	return DICTATION_LANGUAGES.some(({ code }) => code === value);
 }
 
+/** Languages ElevenLabs Scribe v2 lists as supported, as `language_code`
+ * values (ISO 639-1 where one exists, else 639-3: `yue`). The docs list is in
+ * ISO 639-3; each entry is its 639-1 equivalent. Languages without a 639-1
+ * code that the app never offers are omitted (ast, ceb, ful, lug, kea, luo,
+ * nso, umb); `fil` stays, as Tagalog's target.
+ * Source: https://elevenlabs.io/docs/overview/capabilities/speech-to-text
+ * ("90+ languages", the page's list; checked 2026-10-29). */
+export const ELEVENLABS_SCRIBE_LANGUAGES: ReadonlySet<string> = new Set([
+	"af", "am", "ar", "hy", "as", "az", "be", "bn", "bs", "bg", "my", "yue", "ca", "ny", "hr", "cs", "da", "nl",
+	"en", "et", "fi", "fr", "gl", "ka", "de", "el", "gu", "ha", "he", "hi", "hu", "is", "ig", "id", "ga", "it",
+	"ja", "jv", "kn", "kk", "km", "ko", "ku", "ky", "lo", "lv", "ln", "lt", "lb", "mk", "ms", "ml", "mt", "zh",
+	"mi", "mr", "mn", "ne", "no", "oc", "or", "ps", "fa", "pl", "pt", "pa", "ro", "ru", "sr", "sn", "sd", "si",
+	"sk", "sl", "so", "es", "sw", "sv", "ta", "tg", "te", "th", "tr", "uk", "ur", "uz", "vi", "cy", "wo", "xh", "zu",
+	"fil",
+]);
+
+/** A regional code whose region changes the LANGUAGE, not just the accent. */
+const SCRIBE_REGION_LANGUAGES: Partial<Record<DictationLanguage, string>> = {
+	"zh-HK": "yue", // Cantonese, not Mandarin `zh`
+	tl: "fil", // Scribe lists Filipino, Tagalog's standardized form (owner, 2026-10-29)
+};
+
+/** The Scribe `language_code` for the saved dictation language, or undefined
+ *  to omit it (Scribe then auto-detects; verified live, PRD slice 1). "multi"
+ *  and any language Scribe doesn't list auto-detect. Regional codes use their
+ *  base language. */
+export function elevenLabsLanguageCode(language: DictationLanguage): string | undefined {
+	if (language === "multi") return undefined;
+	const code = SCRIBE_REGION_LANGUAGES[language] ?? language.split("-")[0]!;
+	return ELEVENLABS_SCRIBE_LANGUAGES.has(code) ? code : undefined;
+}
+
 /** Only language varies. Keep the owner's tuned streaming parameters. */
 export function deepgramListenUrl(language: DictationLanguage): string {
 	return "wss://api.deepgram.com/v1/listen" +

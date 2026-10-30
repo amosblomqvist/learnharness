@@ -9,8 +9,8 @@
  *   Shift+Tab cycles the thinking level instead.
  * - Esc is a layered dismiss: topmost popover first (popovers stopPropagation
  *   on their own Esc — usePopoverDismiss + ModelControl), then dictation
- *   CANCEL (discard the transcript, owner 2026-09-17 round 3), then abort of
- *   an in-flight turn.
+ *   CANCEL (discard the transcript, owner 2026-09-17 round 3), then stop
+ *   read aloud, then abort of an in-flight turn.
  * - Global actions dispatch lh:kbd-<action> window events; surfaces that are
  *   mounted listen (the lh:chat-renamed pattern). A surface that isn't
  *   mounted simply doesn't listen — an F2 on the graph view is a no-op, not
@@ -36,6 +36,8 @@ import {
 	KEYBOARD_ACTIONS,
 } from "@/src/core";
 import { isDictationActive } from "@/components/dictation";
+import { runEscFallback } from "@/components/esc-fallback";
+import { readAloudPlayer } from "@/components/read-aloud";
 import { useSettingsDialog } from "@/components/settings/settings-dialog.tsx";
 
 // Re-exported for the contract pin (tests/keyboard-toggle-sidebar.test.ts):
@@ -92,15 +94,16 @@ export function KeyboardShortcuts() {
 				// NOTHING is surfaced and no field is focused. This chain is
 				// the fallback, bottom-up: dictation (a live capture, not a
 				// surface — it survives Esc that closes a plan or overlay),
-				// then abort the turn (a server-side turn has no client
-				// request to abort — the abort seam in Chat decides what's
-				// honestly stoppable, layered by escAbortTarget).
-				if (isDictationActive()) {
-					e.preventDefault();
-					window.dispatchEvent(new CustomEvent("lh:kbd-cancel-dictation"));
-					return;
-				}
-				window.dispatchEvent(new CustomEvent("lh:kbd-abort-turn"));
+				// then stop read aloud (audio playing — consumes the Esc, so
+				// the turn is NOT aborted), then abort the turn (a
+				// server-side turn has no client request to abort — the
+				// abort seam in Chat decides what's honestly stoppable,
+				// layered by escAbortTarget). Order: esc-fallback.ts.
+				runEscFallback(e, {
+					isDictationActive,
+					player: readAloudPlayer(),
+					dispatch: (name) => window.dispatchEvent(new CustomEvent(name)),
+				});
 				return;
 			}
 

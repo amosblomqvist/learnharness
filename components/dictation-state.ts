@@ -15,11 +15,12 @@ export function setDictationActive(next: boolean): void {
 	for (const listener of listeners) listener();
 }
 
-function subscribe(listener: () => void): () => void {
+/** Notified whenever the flag flips (read aloud stops itself when dictation starts). */
+export function subscribeDictationActive(listener: () => void): () => void {
 	listeners.add(listener);
 	return () => { listeners.delete(listener); };
 }
 
 export function useDictationActive(): boolean {
-	return useSyncExternalStore(subscribe, isDictationActive, () => false);
+	return useSyncExternalStore(subscribeDictationActive, isDictationActive, () => false);
 }

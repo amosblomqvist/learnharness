@@ -16,6 +16,7 @@ import {
 	parseGeneralSettingsBody,
 	parseCompactionSettingsBody,
 	parseGraphSettingsBody,
+	parseDictationSettingsBody,
 	SETTINGS_SECTIONS,
 } from "../src/server/settings-body.ts";
 
@@ -233,6 +234,22 @@ describe("parseCompactionSettingsBody (owner round 14)", () => {
 	});
 });
 
+describe("parseDictationSettingsBody (provider)", () => {
+	it("accepts language and provider, each optional", () => {
+		assert.deepEqual(parseDictationSettingsBody({ language: "pl", provider: "elevenlabs" }), { ok: true, settings: { language: "pl", provider: "elevenlabs" } });
+		assert.deepEqual(parseDictationSettingsBody({ provider: "deepgram" }), { ok: true, settings: { provider: "deepgram" } });
+		assert.deepEqual(parseDictationSettingsBody({ language: "en" }), { ok: true, settings: { language: "en" } });
+		assert.deepEqual(parseDictationSettingsBody({}), { ok: true, settings: {} });
+	});
+
+	it("rejects an unknown provider", () => {
+		for (const provider of ["whisper", 1, null]) {
+			const r = parseDictationSettingsBody({ provider });
+			assert.equal(r.ok, false, String(provider));
+		}
+	});
+});
+
 describe("SETTINGS_SECTIONS (the route's section map)", () => {
 	it("maps exactly the eight record sections", () => {
 		// compaction joined (owner round 14): its own section PUT — the
@@ -241,7 +258,7 @@ describe("SETTINGS_SECTIONS (the route's section map)", () => {
 		// connected through POST /api/custom-provider.
 		assert.deepEqual(
 			Object.keys(SETTINGS_SECTIONS),
-			["general", "chat", "agent", "appearance", "graph", "compaction", "models", "dictation", "claudeCode"],
+			["general", "chat", "agent", "appearance", "graph", "compaction", "models", "dictation", "readAloud", "claudeCode"],
 		);
 	});
 });

@@ -3,11 +3,17 @@
 import { useSyncExternalStore } from "react";
 import {
 	FACTORY_SETTINGS, isDictationLanguage, sanitizeUserSettings,
-	type DictationLanguage, type UserSettings,
+	type DictationLanguage, type DictationProviderId, type UserSettings,
 } from "@/src/core";
 import { notifySettingsSaved, onSettingsSaved } from "@/components/settings-signal";
 
-const INITIAL = { language: undefined as DictationLanguage | undefined, saving: false, error: null as string | null };
+const INITIAL = {
+	language: undefined as DictationLanguage | undefined,
+	/** Absent = not chosen (the key-presence resolver decides). */
+	provider: undefined as DictationProviderId | undefined,
+	saving: false,
+	error: null as string | null,
+};
 
 /** One confirmed preference and one write in flight, shared by every surface.
  * The factory keeps transport tests isolated without a second persistence path.
@@ -41,7 +47,7 @@ export function createDictationLanguageStore(request: typeof fetch, saved: () =>
 				if (version !== revision) return getLanguage();
 				const language = record?.dictation?.language ?? FACTORY_SETTINGS.dictation.language;
 				needsRead = false;
-				publish({ language, error: null });
+				publish({ language, provider: record?.dictation?.provider, error: null });
 				return language;
 			} catch {
 				if (version !== revision) return getLanguage();
@@ -55,7 +61,18 @@ export function createDictationLanguageStore(request: typeof fetch, saved: () =>
 		return reading;
 	}
 
+	/** Both settings share ONE whole-section PUT, so every write carries the
+	 *  other field along (replace-whole: an omitted provider would un-choose it). */
 	function save(language: DictationLanguage): Promise<boolean> {
+		return put({ language, provider: snapshot.provider }, "language");
+	}
+
+	function saveProvider(provider: DictationProviderId): Promise<boolean> {
+		if (snapshot.language === undefined) return Promise.resolve(false);
+		return put({ language: snapshot.language, provider }, "provider");
+	}
+
+	function put(next: { language: DictationLanguage; provider: DictationProviderId | undefined }, what: string): Promise<boolean> {
 		// A different selection must never inherit the previous write's success.
 		if (writing || snapshot.language === undefined) return Promise.resolve(false);
 		revision++;
@@ -64,18 +81,19 @@ export function createDictationLanguageStore(request: typeof fetch, saved: () =>
 			try {
 				const res = await request("/api/settings/dictation", {
 					method: "PUT", headers: { "Content-Type": "application/json" },
-					body: JSON.stringify({ language }),
+					body: JSON.stringify(next),
 				});
 				if (!res.ok) throw new Error();
 				const body = await res.json() as { settings: UserSettings };
 				const confirmed = body.settings?.dictation?.language;
-				if (!isDictationLanguage(confirmed)) throw new Error();
+				const confirmedProvider = body.settings?.dictation?.provider;
+				if (!isDictationLanguage(confirmed) || confirmed !== next.language || confirmedProvider !== next.provider) throw new Error();
 				needsRead = false;
-				publish({ language: confirmed, error: null });
+				publish({ language: confirmed, provider: confirmedProvider, error: null });
 				saved();
 				return true;
 			} catch {
-				publish({ error: "Could not save dictation language. Try again." });
+				publish({ error: `Could not save dictation ${what}. Try again.` });
 				return false;
 			} finally {
 				writing = null;
@@ -96,7 +114,7 @@ export function createDictationLanguageStore(request: typeof fetch, saved: () =>
 	}
 
 	return {
-		load, save, getLanguage,
+		load, save, saveProvider, getLanguage,
 		getSnapshot: () => snapshot,
 		getServerSnapshot: () => INITIAL,
 		subscribe(listener: () => void) { listeners.add(listener); return () => { listeners.delete(listener); }; },
@@ -128,5 +146,5 @@ function subscribe(listener: () => void) {
 
 export function useDictationLanguage() {
 	const snapshot = useSyncExternalStore(subscribe, store.getSnapshot, store.getServerSnapshot);
-	return { ...snapshot, load: store.load, save: store.save, getLanguage: store.getLanguage };
+	return { ...snapshot, load: store.load, save: store.save, saveProvider: store.saveProvider, getLanguage: store.getLanguage };
 }

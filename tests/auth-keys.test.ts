@@ -2,7 +2,7 @@
  * The curated auth-key catalog + shape rules (auth-keys wave, 2026-09-19;
  * search wave 2026-09-20: the Google CSE pair retired, Tavily + Brave in)
  * — PURE module, so this file owns no fs. Owner decisions being pinned:
- *  - the catalog is exactly the three known keys, ids = env-var names;
+ *  - the catalog is exactly the four known keys, ids = env-var names;
  *  - validation is SHAPE-ONLY (no live pings) and bad pastes are 400s;
  *  - masking is last-4 + length — plaintext never leaves the store.
  */
@@ -12,10 +12,10 @@ import { describe, it } from "node:test";
 import { AUTH_KEYS, genericProviderKeyGuard, isKnownAuthKey, maskKey, validateKeyShape } from "../src/core/auth-keys.ts";
 
 describe("the catalog", () => {
-	it("is exactly the three CURATED app-service keys (provider keys live in the provider table)", () => {
+	it("is exactly the four CURATED app-service keys (provider keys live in the provider table)", () => {
 		assert.deepEqual(
 			AUTH_KEYS.map((k) => k.id),
-			["DEEPGRAM_API_KEY", "TAVILY_API_KEY", "BRAVE_API_KEY"],
+			["DEEPGRAM_API_KEY", "ELEVENLABS_API_KEY", "TAVILY_API_KEY", "BRAVE_API_KEY"],
 		);
 		for (const k of AUTH_KEYS) {
 			assert.ok(k.label.length > 0, `${k.id} has a label`);
@@ -32,6 +32,7 @@ describe("the catalog", () => {
 
 	it("isKnownAuthKey: catalog yes, everything else no", () => {
 		assert.ok(isKnownAuthKey("DEEPGRAM_API_KEY"));
+		assert.ok(isKnownAuthKey("ELEVENLABS_API_KEY"));
 		assert.ok(isKnownAuthKey("TAVILY_API_KEY"));
 		assert.ok(isKnownAuthKey("BRAVE_API_KEY"));
 		assert.ok(!isKnownAuthKey("OPENROUTER_API_KEY"));
@@ -59,6 +60,13 @@ describe("validateKeyShape (the 400 gate — curated keys)", () => {
 		assert.ok(validateKeyShape("DEEPGRAM_API_KEY", "a".repeat(40)).ok);
 		assert.ok(!validateKeyShape("DEEPGRAM_API_KEY", "a".repeat(19)).ok, "truncated paste");
 		assert.ok(!validateKeyShape("DEEPGRAM_API_KEY", "a b c d e f g h i j k l m n o p q r s").ok, "whitespace");
+	});
+
+	it("ElevenLabs: no public format — a ≥20-char truncation guard, no whitespace", () => {
+		assert.ok(validateKeyShape("ELEVENLABS_API_KEY", "e".repeat(40)).ok);
+		assert.ok(!validateKeyShape("ELEVENLABS_API_KEY", "e".repeat(19)).ok, "truncated paste");
+		assert.ok(!validateKeyShape("ELEVENLABS_API_KEY", "a b c d e f g h i j k l m n o p q r s").ok, "whitespace");
+		assert.ok(validateKeyShape("ELEVENLABS_API_KEY", `  ${"e".repeat(40)}  `).ok, "trimmed first");
 	});
 
 	it("trims surrounding paste whitespace before checking", () => {

@@ -188,7 +188,8 @@ flowchart LR
         FS["fs stores — src/store (data/)"]
         LLM["LLM engines — pi-ai/OpenRouter via piEngineFor"]
         HEAD["headless Chrome — demo verify · SVG render"]
-        DEEP["Deepgram STT — token-minting route, browser-side WebSocket"]
+        DEEP["Dictation STT (Deepgram or ElevenLabs Scribe) — token-minting route, browser-side WebSocket"]
+        TTS["ElevenLabs read aloud — /api/tts server proxy, key stays server-side"]
         WEB["web tools — Google CSE + Readability/Jina (researcher)"]
     end
 
@@ -205,6 +206,7 @@ flowchart LR
     SESS --> HEAD
     SESS --> WEB
     BROWSER --> DEEP
+    HTTP --> TTS
 ```
 
 ---
@@ -412,7 +414,8 @@ flowchart LR
     end
     subgraph OUTSIDE["outside the process"]
         OR["OpenRouter (BYOK key from auth.json, env-injected — never argv)"]
-        DG["Deepgram STT (browser-direct WebSocket)"]
+        DG["Deepgram / ElevenLabs STT (browser-direct WebSocket)"]
+        EL["ElevenLabs text-to-speech (read aloud, via the /api/tts proxy)"]
         GCSE["Google CSE / Jina (researcher tools)"]
         CHROME["system Chrome (headless: demo verify · SVG render)"]
         DISK["data/ ledgers (via LH_DATA_DIR seam)"]
@@ -422,12 +425,28 @@ flowchart LR
     NEXT --> CHROME
     NEXT --> DISK
     REND --> DG
+    NEXT -->|"POST /v1/text-to-speech/{voice}/stream<br/>xi-api-key — the key never leaves this process"| EL
     REND -->|"fetch /api/*"| NEXT
 ```
+
+**Dictation path (Deepgram or ElevenLabs).** The renderer never holds a speech key. `GET /api/stt/token` (`src/server/stt-token.ts`) resolves the provider on the server from the saved `dictation.provider` and which keys exist (`resolveDictationProvider` in `src/core/dictation-provider.ts`: an explicit choice wins; otherwise whichever key exists, Deepgram if both), mints a short-lived token upstream (Deepgram access token; ElevenLabs single-use `realtime_scribe` token), and returns `{ provider, token }`; a missing key is a 503 naming the key id. The renderer then opens the provider's WebSocket directly and audio never touches this server. The provider-specific wire protocol lives in `src/core/dictation-engine.ts` (`DictationEngine`): Deepgram sends binary linear16 frames, authenticates via the `bearer` subprotocol and finishes on close code 1000; ElevenLabs sends base64 JSON `input_audio_chunk` messages, authenticates with a `token` query parameter, commits phrases on VAD pauses, and, after Stop, finalizes once ~400 ms pass with no message following a commit (a late VAD commit can precede the Stop commit; a 3 s safety net caps it) — the client closes the socket. Its `language_code` comes from `elevenLabsLanguageCode` (`src/core/dictation.ts`): regional codes use their base language, `zh-HK` is Cantonese (`yue`), and "Multilingual" or a language Scribe does not list omits the parameter so Scribe auto-detects. An ElevenLabs engine is per run (it remembers that Stop requested a commit), and its tokens are single-use, so the hook's reconnect-once always mints a fresh token.
 
 The Electron main is a launcher + credential/security guard, never a host for teaching or inference logic: single-instance lock, deny-by-default permissions, origin-pinned navigation, sandboxed renderer. All Next.js code runs unchanged in a child process (`output: "standalone"`), relocated by the `LH_DATA_DIR` seam (also the test seam — `data-dir-seam.test.ts` covers it, including a fresh-child-process case). The build hard-fails if repo `data/` would leak into the bundle or if prompt assets fall out of the trace (`scripts/build-server.mjs`).
 
 ---
+
+### 8.0 Voice boundaries (dictation and read aloud)
+
+The two voice directions cross the process boundary differently, but the real key stays server-side in both:
+
+- **Dictation** (Deepgram): the renderer asks `/api/stt/token` for a short-lived token and opens the provider WebSocket itself; audio never loops through the server.
+- **Read aloud** (ElevenLabs): the renderer never talks to ElevenLabs at all. Each prose block's Listen button (one under every text part of an assistant message, reading only that block; a teaching group merges several native messages into one view message, so a message-level button would read the whole group) turns its markdown into speech chunks in the browser-safe core (`src/core/speech-text.ts`: prose flattened, code/diagram/table/display-math replaced by one spoken marker each, inline math read as words, a short first chunk) and POSTs them one at a time to `POST /api/tts`. The route (`src/server/tts.ts`) reads `ELEVENLABS_API_KEY` from the key store, calls `POST /v1/text-to-speech/{voice}/stream?output_format=mp3_44100_64` with the `xi-api-key` header, and streams the MP3 body straight back as `audio/mpeg`. The provider sits behind a small `TtsProvider` seam so another could be added later. Errors keep their meaning: 400 bad text (empty, or over the 2500-character cap), 503 keyless (`{ message, keyless }`), 502 upstream (with ElevenLabs' status), and the key never appears in a response. The client player (`components/read-aloud-player.ts`) owns one audio element per window, plays one source at a time, and requests chunk n+1 while chunk n plays; generated audio is kept in a per-window in-memory cache (`components/audio-cache.ts`: keyed by chunk text, voice and model, capped at ~50 MB with the oldest evicted first, never written to disk, failed or aborted loads never kept), so replaying a message makes no request. Bare URLs in a reply are spoken as their host name. The text of the reply, not the key, is what reaches ElevenLabs. Voice usage is billed by ElevenLabs and is not in the cost meter.
+
+  Settings → Read aloud (the `readAloud` settings section: optional `voiceId` and `modelId`; absent means the default) is fed by two sibling routes on the same provider seam: `GET /api/tts/voices` follows ElevenLabs' `next_page_token` (`GET /v2/voices?page_size=100`) until `has_more` is false and returns `[{ id, name, category }]`, cloned voices included; `GET /api/tts/models` returns the `can_do_text_to_speech` models of `GET /v1/models` as `[{ id, name, maxChars }]`, cached in memory for five minutes. Both share the keyless 503 / upstream 502 contract. The model that plays is `resolveTtsModel(saved, listedIds)` in `src/core/read-aloud.ts`: the saved model if the account lists it, else `eleven_v4_turbo`, else `eleven_flash_v2_5`, else the first listed (with no list, the saved model or v4 Turbo). `speak()` applies it on every request and the model picker shows its result, so a retired model never silences playback and the picker never claims a model that isn't used. The voice resolves the same way: `resolveTtsVoice(saved, listedIds)` keeps a saved voice the account lists, else plays Alice (with no list, the saved voice or Alice); `speak()` checks it against a voice-id list cached like the models (five minutes, failures not cached, looked up alongside the model list), and the searchable voice menu in Settings shows Alice for a missing voice without writing it back. The Listen button sends the saved `voiceId`/`modelId` with each chunk (absent stays absent; the server defaults to Alice).
+
+  **Auto-read** (`readAloud.autoRead`, off by default; Settings → Read aloud → "Read replies aloud"). The `readAloud` section PUT replaces the whole section, so voice, model and auto-read saves each carry all three fields. `components/auto-read.ts` is a small controller that `chat.tsx` feeds once per render with `busy`, the failure state, the projected messages and the final native assistant message's `stopReason`. A turn is eligible only if the view saw it begin and end (busy false → true → false), which keeps history out: sessions opened or reloaded, records adopted from the server, and a turn already running at mount never play. At the end, and only then, it plays the prose blocks the turn added, in order, each with its Listen button's own block source id and text (`proseBlocks` in `components/auto-read.ts`, the single helper both the render and the controller use, so the button shows Stop while its block plays and a later manual Listen behaves the same; blocks that existed when the turn began are never replayed, so a growing teaching group is not reread from its top) unless the setting is off, the turn failed (error status or banner, `stopReason` `error`), was aborted (`stopReason` `aborted`), dictation is active, the turn added no text blocks, or a block was already played. While a turn is busy, only the newest message's final block hides its Listen button (it may still be streaming); settled blocks above it keep theirs. A skipped reply is never revisited, and `play` itself also refuses while dictation is active.
+
+  **Dock questions** are read too. The pending question in the dock has its own Listen button (the same `ListenButton`, source id `q-<toolCallId>` so it never collides with a message's) that reads the question's prompt only: `questionPromptSpeech` in `src/core/speech-text.ts` takes the question text plus its `details` (the context shown under it) through the same markdown-to-speech conversion, and never an option, an option description, a quiz explanation or an explain's committed answer, in any mode (single or multi select, text). With auto-read on, the same controller reads a newly shown question's prompt after the blocks the turn added. A question counts as new only if it first appears during a turn the view watched (or in the observation that ends it); one already pending at mount, restored with a reopened session or adopted from the server never plays, and neither does a teach-phase check still collapsed behind "Check your understanding" (it would give away what the collapse hides): the controller marks it known without queuing it, revealing it later does not auto-play it, and only its Listen button, which is inert while collapsed, reads it. The player reads one source at a time, so the controller queues the blocks and then the prompt one behind another (`play()` resolves `true` only when its source played to the end) rather than issuing two plays: a tool-only turn plays the prompt alone, and Stop (which cancels every block still queued too), Esc, another Listen, a failure, dictation, the question being answered or a new turn cancel the queued prompt. Each question plays once.
 
 ### 8.1 Subscription connection boundary
 

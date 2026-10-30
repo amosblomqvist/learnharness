@@ -3,7 +3,10 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { after, describe, it } from "node:test";
-import { DICTATION_LANGUAGES, deepgramListenUrl, isDictationLanguage } from "../src/core/dictation.ts";
+import {
+	DICTATION_LANGUAGES, ELEVENLABS_SCRIBE_LANGUAGES, deepgramListenUrl, elevenLabsLanguageCode, isDictationLanguage,
+	type DictationLanguage,
+} from "../src/core/dictation.ts";
 import { sanitizeUserSettings } from "../src/core/settings.ts";
 import { resolveSettings } from "../src/core/settings-resolution.ts";
 import { parseDictationSettingsBody } from "../src/server/settings-body.ts";
@@ -79,4 +82,43 @@ it("the section route persists language independently and rejects unsupported va
 	}), { params: Promise.resolve({ section: "general" }) });
 	assert.equal(general.status, 200);
 	assert.deepEqual(readSettings(), { ...saved, general: { autoUpdate: true } }, "auto-update cannot erase dictation language");
+});
+
+describe("ElevenLabs Scribe dictation language mapping", () => {
+	const mapped = (code: DictationLanguage) => elevenLabsLanguageCode(code);
+
+	it("multilingual omits language_code so Scribe auto-detects", () => {
+		assert.equal(mapped("multi"), undefined);
+	});
+
+	it("a regional code becomes its base language", () => {
+		const cases: [DictationLanguage, string][] = [
+			["en-GB", "en"], ["en-US", "en"], ["pt-BR", "pt"], ["pt-PT", "pt"], ["fr-CA", "fr"],
+			["es-419", "es"], ["de-CH", "de"], ["nl-BE", "nl"], ["ar-EG", "ar"], ["zh-TW", "zh"],
+			["zh-Hans", "zh"], ["zh-Hant", "zh"], ["zh-CN", "zh"], ["ko-KR", "ko"],
+		];
+		for (const [input, expected] of cases) assert.equal(mapped(input), expected, input);
+	});
+
+	it("zh-HK is Cantonese (yue), not Mandarin", () => {
+		assert.equal(mapped("zh-HK"), "yue");
+	});
+
+	it("Tagalog is sent as Filipino (fil), the code Scribe lists", () => {
+		assert.equal(mapped("tl"), "fil");
+	});
+
+	it("a language Scribe does not list falls back to auto-detect", () => {
+		assert.equal(mapped("xx" as DictationLanguage), undefined);
+	});
+
+	it("every dictation language maps to a supported code or auto-detect", () => {
+		for (const { code } of DICTATION_LANGUAGES) {
+			const out = mapped(code);
+			assert.ok(out === undefined || ELEVENLABS_SCRIBE_LANGUAGES.has(out), `${code} -> ${out}`);
+		}
+		// Not vacuously all-auto: only multi resolves to auto.
+		const auto = DICTATION_LANGUAGES.filter(({ code }) => mapped(code) === undefined).map(({ code }) => code);
+		assert.deepEqual(auto, ["multi"]);
+	});
 });

@@ -25,6 +25,7 @@ import { externalCliEnv } from "../src/core/auth-env.ts";
 for (const varName of [
 	"OPENROUTER_API_KEY",
 	"DEEPGRAM_API_KEY",
+	"ELEVENLABS_API_KEY",
 	"TAVILY_API_KEY",
 	"BRAVE_API_KEY",
 	"GOOGLE_SEARCH_API_KEY",
@@ -62,6 +63,7 @@ const ENV_OWNED = "sk-or-v1-envvalue99";
 after(() => {
 	delete process.env.OPENROUTER_API_KEY;
 	delete process.env.DEEPGRAM_API_KEY;
+	delete process.env.ELEVENLABS_API_KEY;
 	delete process.env.OPENAI_API_KEY;
 	fs.rmSync(TMP, { recursive: true, force: true });
 });
@@ -110,6 +112,33 @@ describe("saveKey / deleteKey (immediate effect, no restart)", () => {
 		assert.equal(authStore.authVars().DEEPGRAM_API_KEY, value, "file updated");
 		assert.equal(r.status.source, "file", "the reflected copy is the store's — the file is its origin of truth");
 		assert.ok(!r.status.shadowedByEnv);
+	});
+
+	it("ElevenLabs: one stored value — saved to file + env, masked to the last four, deletable", () => {
+		const value = `${"e".repeat(36)}abcd`; // throwaway, ≥ the length floor
+		const r = saveKey("ELEVENLABS_API_KEY", value);
+		assert.ok(r.ok);
+		assert.equal(process.env.ELEVENLABS_API_KEY, value, "env updated immediately");
+		assert.equal(externalCliEnv().ELEVENLABS_API_KEY, undefined, "voice keys never ride into external CLIs");
+		assert.equal(authStore.authVars().ELEVENLABS_API_KEY, value);
+		assert.equal(keyValue("ELEVENLABS_API_KEY"), value);
+		assert.match(r.status.masked!, /^…abcd/);
+		assert.ok(!r.status.masked!.includes(value));
+		assert.ok(isWritableAuthKey("ELEVENLABS_API_KEY"));
+		const row = deleteKey("ELEVENLABS_API_KEY");
+		assert.ok(!row.present);
+		assert.equal(process.env.ELEVENLABS_API_KEY, undefined);
+		assert.ok(!("ELEVENLABS_API_KEY" in authStore.authVars()));
+	});
+
+	it("ElevenLabs: truncated or whitespace pastes are rejected, nothing stored", () => {
+		for (const bad of ["short", "has whitespace in the middle of it ok"]) {
+			const r = saveKey("ELEVENLABS_API_KEY", bad);
+			assert.ok(!r.ok);
+			if (!r.ok) assert.match(r.error, /ELEVENLABS_API_KEY must be at least 20/);
+		}
+		assert.ok(!("ELEVENLABS_API_KEY" in authStore.authVars()));
+		assert.equal(process.env.ELEVENLABS_API_KEY, undefined);
 	});
 
 	it("save to an env-owned var: file updated, env NOT overwritten, shadow reported", () => {

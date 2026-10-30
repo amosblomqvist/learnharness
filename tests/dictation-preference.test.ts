@@ -94,6 +94,38 @@ for (const newestFirst of [false, true]) test(`overlapping reads keep the newest
 	assert.equal(await store.getLanguage(), "multi");
 });
 
+test("the provider loads absent, saves with the language kept, and a language save keeps the provider (whole-section PUTs)", async () => {
+	let record: unknown = { version: 1, dictation: { language: "pl" } };
+	const bodies: unknown[] = [];
+	const store = createDictationLanguageStore(async (_url, init) => {
+		if (init?.method === "PUT") {
+			bodies.push(JSON.parse(init.body as string));
+			record = { version: 1, dictation: bodies.at(-1) };
+			return Response.json({ settings: record });
+		}
+		return Response.json({ settings: record });
+	});
+	await store.load();
+	assert.equal(store.getSnapshot().provider, undefined, "absent means not chosen");
+	assert.equal(await store.saveProvider("elevenlabs"), true);
+	assert.deepEqual(bodies.at(-1), { language: "pl", provider: "elevenlabs" });
+	assert.equal(store.getSnapshot().provider, "elevenlabs");
+	assert.equal(await store.save("multi"), true);
+	assert.deepEqual(bodies.at(-1), { language: "multi", provider: "elevenlabs" });
+	await store.load(true);
+	assert.equal(store.getSnapshot().provider, "elevenlabs");
+});
+
+test("a provider save the server did not confirm reports failure and keeps the old choice", async () => {
+	const store = createDictationLanguageStore(async (_url, init) => init?.method === "PUT"
+		? Response.json({ settings: { version: 1, dictation: { language: "pl" } } })
+		: Response.json({ settings: { version: 1, dictation: { language: "pl" } } }));
+	await store.load();
+	assert.equal(await store.saveProvider("elevenlabs"), false);
+	assert.equal(store.getSnapshot().provider, undefined);
+	assert.match(store.getSnapshot().error!, /Could not save dictation provider/);
+});
+
 test("capture also waits for a write initiated as a pending read publishes its result", async () => {
 	const store = createDictationLanguageStore(async (_url, init) => Response.json({ settings: {
 		version: 1, dictation: { language: init?.method === "PUT" ? "multi" : "en" },

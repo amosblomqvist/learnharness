@@ -4,8 +4,12 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Loader2Icon, MicIcon } from "lucide-react";
 import { useSettingsDialog } from "@/components/settings/settings-dialog";
 import { Hint } from "@/components/ui/hint";
-import { deepgramListenUrl, type DictationLanguage } from "@/src/core";
+import {
+	DICTATION_PROVIDERS, createDictationEngine, isDictationProvider, keyRowTarget,
+	type DictationEngine, type DictationLanguage, type DictationProviderId,
+} from "@/src/core";
 import { useDictationLanguage } from "@/components/dictation-preference";
+import { onSettingsSaved } from "@/components/settings-signal";
 import { setDictationActive } from "@/components/dictation-state";
 export { isDictationActive } from "@/components/dictation-state";
 
@@ -90,7 +94,10 @@ export { isDictationActive } from "@/components/dictation-state";
  * endpointing=300, no interims. Silence streams too (the worklet never
  * pauses), so the socket never idles — no KeepAlive needed.
  */
-// URL construction lives in the browser-safe core; only language varies.
+// URL construction and the wire protocol live in the browser-safe core's
+// engine adapters (src/core/dictation-engine.ts); only language varies. This
+// file keeps the provider-neutral lifecycle: each run builds its engine from
+// the provider the token route minted for (Deepgram or ElevenLabs).
 
 /** Meter tuning — the owner's tested values, see the file header. */
 const METER_FLOOR_DB = -50;
@@ -99,31 +106,55 @@ export const METER_TICK_MS = 60;
 /** Rolling history: 48 cells × 60ms ≈ 2.9s of recent loudness. */
 export const METER_CELLS = 48;
 
+/** After Stop, how long the stream must stay quiet (since the last message
+ *  following a settling one) before the run finalizes. The 3 s safety net
+ *  still caps the whole stop. */
+export const STOP_QUIET_MS = 400;
+
 /** The Deepgram key's id in the keys store (the env-var name — the Keys
  *  section's openRow state and the PUT /api/keys/:id seam). */
 export const DEEPGRAM_KEY_ID = "DEEPGRAM_API_KEY";
+
+/** The ElevenLabs key's id (same seam as DEEPGRAM_KEY_ID). */
+export const ELEVENLABS_KEY_ID = "ELEVENLABS_API_KEY";
 
 /** The client-authored KEYLESS line (zero-keys wave, owner 2026-09-25):
  * the token route's raw 503 message is dev-speak ("add it to auth.json
  * (desktop) or .env.local (dev)") — the surface says the short truth
  * instead. Exported for pins; the errored idle button's click recognizes
- * it and deep-links Settings → Keys → the Deepgram row. */
+ * it and deep-links Settings → Keys → the Dictation row of the key it names. */
 export const DICTATION_KEYLESS = "Dictation needs a Deepgram key";
+export const DICTATION_KEYLESS_ELEVENLABS = "Dictation needs an ElevenLabs key";
+
+/** The keyless line per missing key id; the reverse lookup tells the button
+ *  which row to open. */
+const KEYLESS_LINES: Record<string, string> = {
+	[DEEPGRAM_KEY_ID]: DICTATION_KEYLESS,
+	[ELEVENLABS_KEY_ID]: DICTATION_KEYLESS_ELEVENLABS,
+};
+
+/** The key id a keyless error line asks for, or null for any other error. */
+export function keylessKeyId(error: string | null): string | null {
+	return Object.entries(KEYLESS_LINES).find(([, line]) => line === error)?.[0] ?? null;
+}
+
+/** What the token route minted: which provider's token this is. */
+export type DictationMint = { provider: DictationProviderId; token: string };
 
 /** Mint a fresh short-lived token (the route holds the real key
  *  server-side). Module-level: the start path's warm cache and the
- *  reconnect path both bottom out here. The keyless 503 (no
- *  DEEPGRAM_API_KEY) is the route's ONLY 503 — the raw message is
- *  dev-speak, so the error becomes the short client-authored line
- *  (zero-keys wave, owner 2026-09-25). */
-async function mintFreshToken(): Promise<string> {
+ *  reconnect path both bottom out here. The keyless 503 names the missing
+ *  key id — the raw message is dev-speak, so the error becomes the short
+ *  client-authored line (zero-keys wave, owner 2026-09-25). A 503 that
+ *  names nothing is the old route's Deepgram-only keyless. */
+async function mintFreshToken(): Promise<DictationMint> {
 	const res = await fetch("/api/stt/token");
-	const data = (await res.json()) as { token?: string; message?: string };
-	if (!res.ok || !data.token) {
-		if (res.status === 503) throw new Error(DICTATION_KEYLESS);
+	const data = (await res.json()) as { provider?: DictationProviderId; token?: string; message?: string; keyless?: string };
+	if (!res.ok || !data.token || !isDictationProvider(data.provider)) {
+		if (res.status === 503) throw new Error(KEYLESS_LINES[data.keyless ?? DEEPGRAM_KEY_ID] ?? DICTATION_KEYLESS);
 		throw new Error(data.message ?? `token route ${res.status}`);
 	}
-	return data.token;
+	return { provider: data.provider, token: data.token };
 }
 
 /** Warm-token cache (mitigation D, owner 2026-09-27): the click path takes
@@ -135,15 +166,15 @@ async function mintFreshToken(): Promise<string> {
  *  failures are silently tolerated (a keyless pre-mint just doesn't warm). */
 export const WARM_TOKEN_TTL_MS = 3 * 60_000;
 
-export type WarmMinter = { mint: () => Promise<string>; refresh: () => void };
+export type WarmMinter<T = string> = { mint: () => Promise<T>; refresh: () => void };
 
-export function createWarmMinter(
-	mint: () => Promise<string>,
+export function createWarmMinter<T = string>(
+	mint: () => Promise<T>,
 	now: () => number = Date.now,
 	ttlMs: number = WARM_TOKEN_TTL_MS,
-): WarmMinter {
-	let warm: { p: Promise<string>; at: number } | null = null;
-	const m: WarmMinter = {
+): WarmMinter<T> {
+	let warm: { p: Promise<T>; at: number } | null = null;
+	const m: WarmMinter<T> = {
 		mint: () => {
 			if (!warm || now() - warm.at > ttlMs) {
 				const p = mint().catch((e: unknown) => {
@@ -163,6 +194,8 @@ export function createWarmMinter(
 }
 
 const warmTokens = createWarmMinter(mintFreshToken);
+
+const providerLabel = (id: DictationProviderId) => DICTATION_PROVIDERS.find((p) => p.id === id)!.label;
 
 /* Persistent capture graph (mitigation C, owner 2026-09-27): one
  * app-lifetime AudioContext + a module-load memo. Created under the
@@ -313,6 +346,10 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 	const pendingRef = useRef<ArrayBuffer[]>([]);
 	const genRef = useRef(0); // stale-handler guard (dictate pattern)
 	const safetyRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+	/** The post-Stop quiet timer (engines that report `settles`): armed by a
+	 *  settling message, restarted by any message after it, finalizes the run
+	 *  when it fires. */
+	const quietRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 	const reconnectsRef = useRef(0);
 	/** The deferred transcript (owner round 2): finals land here during the
 	 *  run and flush into the primary input once, at teardown. */
@@ -320,6 +357,10 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 	/** Resolvers waiting for the run to fully end (finish(), owner
 	 *  2026-10-01): released by cleanup() — every terminal path runs it. */
 	const waitersRef = useRef<Array<() => void>>([]);
+	/** This run's engine and the provider it speaks for — set once the token
+	 *  mint says which provider the server resolved (a stateful engine is per
+	 *  run), null until then. */
+	const engineRef = useRef<{ provider: DictationProviderId; engine: DictationEngine } | null>(null);
 
 	/** Flush the buffered transcript into the primary input — question claim
 	 *  first, composer fallback. Called exactly once per run, at cleanup; the
@@ -339,6 +380,10 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 		if (safetyRef.current) {
 			clearTimeout(safetyRef.current);
 			safetyRef.current = null;
+		}
+		if (quietRef.current) {
+			clearTimeout(quietRef.current);
+			quietRef.current = null;
 		}
 		pendingRef.current = [];
 		for (const track of streamRef.current?.getTracks() ?? []) track.stop();
@@ -365,13 +410,14 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 		if (warmNext) warmTokens.refresh();
 	}, []);
 
-	/** Open the Deepgram socket and wire its messages. `gen` guards staleness. */
+	/** Open the provider's socket and wire its messages. `gen` guards staleness. */
 	const openSocket = useCallback(
 		(gen: number, token: string, language: DictationLanguage) => {
-			// Minted JWTs authenticate via the "bearer" subprotocol — ["token",
-			// jwt] is rejected at the handshake (verified live; "token" is for
-			// raw API keys only, as in the owner's pi dictate extension).
-			const ws = new WebSocket(deepgramListenUrl(language), ["bearer", token]);
+			const { provider, engine } = engineRef.current!;
+			// URL + auth (Deepgram: the "bearer" subprotocol; ElevenLabs: a query
+			// token) come from the engine.
+			const { url, protocols } = engine.socket(token, language);
+			const ws = new WebSocket(url, protocols);
 			wsRef.current = ws;
 
 			ws.addEventListener("open", () => {
@@ -379,30 +425,36 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 				// Mitigation A: everything captured during the handshake (or a
 				// reconnect gap) goes out now, in order — Deepgram accepts
 				// faster-than-realtime sends.
-				for (const frame of pendingRef.current) ws.send(frame);
+				for (const frame of pendingRef.current) ws.send(engine.encodeFrame(frame));
 				pendingRef.current = [];
 				setPhase("recording");
 			});
 			ws.addEventListener("message", (ev) => {
 				if (gen !== genRef.current) return;
-				let msg: any;
-				try {
-					msg = JSON.parse(ev.data as string);
-				} catch {
-					return;
-				}
-				if (msg.type === "Results") {
-					const text: string | undefined = msg.channel?.alternatives?.[0]?.transcript;
-					// Only finals stream (interim_results=false). DEFERRED (owner
-					// round 2): they buffer here and reach the input once, at
-					// teardown — the meter is the only live feedback.
-					if (msg.is_final && text) bufferRef.current.push(text);
+				const parsed = engine.parseMessage(ev.data as string);
+				// Only finals stream. DEFERRED (owner round 2): they buffer here
+				// and reach the input once, at teardown — the meter is the only
+				// live feedback.
+				bufferRef.current.push(...parsed.finals);
+				if (parsed.error) {
+					setError(parsed.error);
+					cleanup();
+				} else if (parsed.settles || quietRef.current) {
+					// The engine has no server close to wait for (ElevenLabs): a
+					// settling message (a commit, or "no new audio", after Stop)
+					// starts the quiet window, and ANY later message restarts it —
+					// a late VAD commit of an earlier phrase can precede the Stop
+					// commit. When it fires, finalize (cleanup closes the socket).
+					if (quietRef.current) clearTimeout(quietRef.current);
+					quietRef.current = setTimeout(() => {
+						if (gen === genRef.current) cleanup();
+					}, STOP_QUIET_MS);
 				}
 			});
 			ws.addEventListener("close", (ev) => {
 				if (gen !== genRef.current) return;
-				if (ev.code === 1000) {
-					// Our own CloseStream landing: finalize now — the stop path's
+				if (engine.isFinishedClose(ev.code)) {
+					// Our own end-of-stream landing: finalize now — the stop path's
 					// safety net stays as the no-close backstop only.
 					cleanup();
 					return;
@@ -412,17 +464,20 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 				if (reconnectsRef.current < 1) {
 					reconnectsRef.current++;
 					mintFreshToken() // always FRESH — a stale warm token is the likely culprit
-						.then((t) => {
-							if (gen === genRef.current) openSocket(gen, t, language);
+						.then((minted) => {
+							// The run keeps its engine: a provider switched mid-run
+							// applies to the NEXT run, so this token can't be used.
+							if (minted.provider !== provider) throw new Error("provider changed");
+							if (gen === genRef.current) openSocket(gen, minted.token, language);
 						})
 						.catch(() => {
 							if (gen === genRef.current) {
-								setError("Deepgram reconnect failed");
+								setError(`${providerLabel(provider)} reconnect failed`);
 								cleanup();
 							}
 						});
 				} else {
-					setError(`Deepgram connection lost (${ev.code})`);
+					setError(`${providerLabel(provider)} connection lost (${ev.code})`);
 					cleanup();
 				}
 			});
@@ -437,6 +492,7 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 		reconnectsRef.current = 0;
 		bufferRef.current = []; // fresh run, fresh buffer (round 2)
 		pendingRef.current = []; // fresh run, fresh queue (mitigation A)
+		engineRef.current = null; // fresh run, fresh engine once the mint names the provider
 		const gen = ++genRef.current;
 		let language: DictationLanguage;
 		try {
@@ -484,7 +540,7 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 					levelRef.current = msg.rms ?? 0; // never reset to zero (dictate pattern)
 				} else if (msg.type === "audio") {
 					const ws = wsRef.current;
-					if (ws && ws.readyState === WebSocket.OPEN) ws.send(msg.buffer!);
+					if (ws && ws.readyState === WebSocket.OPEN) ws.send(engineRef.current!.engine.encodeFrame(msg.buffer!));
 					// Mitigation A: not OPEN yet (handshake or reconnect gap) —
 					// queue, capped; the open handler flushes in order.
 					else {
@@ -514,7 +570,10 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 		if (gen !== genRef.current) return;
 		let token: string;
 		try {
-			token = await tokenPromise;
+			const minted = await tokenPromise;
+			if (gen !== genRef.current) return;
+			engineRef.current = { provider: minted.provider, engine: createDictationEngine(minted.provider) };
+			token = minted.token;
 		} catch (e) {
 			if (gen !== genRef.current) return;
 			setError(e instanceof Error ? e.message : "token unavailable");
@@ -544,7 +603,7 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 		const ws = wsRef.current;
 		if (ws && ws.readyState === WebSocket.OPEN) {
 			try {
-				ws.send(JSON.stringify({ type: "CloseStream" }));
+				for (const m of engineRef.current!.engine.endOfStream()) ws.send(m);
 			} catch {
 				cleanup();
 				return;
@@ -601,7 +660,13 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 	// attached.
 	useEffect(() => {
 		warmTokens.refresh(); // pre-mint at mount (mitigation D) — silent if keyless
+		// A provider switch (or language save) must reach the NEXT run: the warm
+		// token was minted for the old choice.
+		const offSaved = onSettingsSaved((section) => {
+			if (section === "dictation") warmTokens.refresh();
+		});
 		return () => {
+			offSaved();
 			// Navigation cancels capture: invalidate every pending await before
 			// releasing resources, and never append into a different page's input.
 			bufferRef.current = [];
@@ -646,10 +711,10 @@ export function DictationBar({ dictation }: { dictation: Dictation }) {
 	const { phase, error, levelRef, toggle, active, clearError } = dictation;
 	const { open: openSettings } = useSettingsDialog();
 	/** The keyless click (zero-keys wave, owner dictation trio): the errored
-	 *  idle button deep-links Settings → Keys → the Deepgram row and clears
+	 *  idle button deep-links Settings → Keys → the Dictation row of the missing key and clears
 	 *  the error — the surface is clean when the user returns. Any other
 	 *  error keeps the old behavior (click = retry, which clears). */
-	const keyless = error === DICTATION_KEYLESS;
+	const keylessKey = keylessKeyId(error);
 	const [levels, setLevels] = useState<number[]>(() => new Array(METER_CELLS).fill(0));
 	/** Adaptive cell count (owner round 2): derived from the meter's
 	 *  measured width — narrow rows show fewer bars instead of
@@ -702,9 +767,10 @@ export function DictationBar({ dictation }: { dictation: Dictation }) {
 				<button
 					type="button"
 					onClick={() => {
-						if (keyless) {
+						if (keylessKey) {
 							clearError();
-							openSettings("keys", DEEPGRAM_KEY_ID);
+							// The bare id opens the Dictation group's row.
+							openSettings("keys", keyRowTarget(keylessKey));
 						} else {
 							toggle();
 						}

@@ -34,6 +34,8 @@ import type { ModelRole } from "../../config.ts";
 import type { ChatSettings } from "./contracts/chat.ts";
 import type { SearchEngineId } from "./search.ts";
 import { isDictationLanguage, type DictationLanguage } from "./dictation.ts";
+import { isDictationProvider, type DictationProviderId } from "./dictation-provider.ts";
+import { isPlainTtsId } from "./read-aloud.ts";
 
 /** The schema version this code understands. Bump ONLY for breaking shape
  *  changes (a field renamed/meaning changed); pure additions never bump. */
@@ -333,6 +335,8 @@ export interface GeneralSettings {
 /** One app-wide dictation preference, shared by every composer. */
 export interface DictationSettings {
 	language?: DictationLanguage;
+	/** Absent = not chosen: the resolver uses whichever dictation key exists. */
+	provider?: DictationProviderId;
 }
 
 /** Agent settings — everything about the non-conversation machinery. */
@@ -456,12 +460,23 @@ export interface CompactionSettings {
 	thresholdTokens?: number;
 }
 
+/** Read aloud (ElevenLabs voice slice 9): which voice and model speak. Absent =
+ *  the default (Alice; the resolved model, see resolveTtsModel). A section PUT
+ *  replaces the whole section, so every write carries all fields. */
+export interface ReadAloudSettings {
+	voiceId?: string;
+	modelId?: string;
+	/** Read each new reply aloud once it has finished (slice 10). Absent = off. */
+	autoRead?: boolean;
+}
+
 /** THE record. Every section optional (delta); unknown top-level keys are
  *  preserved verbatim by the sanitizer (forward-compat with newer records). */
 export interface UserSettings {
 	version: number;
 	general?: GeneralSettings;
 	dictation?: DictationSettings;
+	readAloud?: ReadAloudSettings;
 	/** Explicit app-wide opt-in; absent/invalid is off, including older records. */
 	claudeCode?: { enabled?: boolean };
 	agent?: AgentSettings;
@@ -483,7 +498,7 @@ export interface UserSettings {
 export interface FactorySettings {
 	version: number;
 	general: Required<GeneralSettings>;
-	dictation: Required<DictationSettings>;
+	dictation: Required<Pick<DictationSettings, "language">>;
 	appearance: {
 		mode: "dark" | "light";
 		background: string | null;
@@ -798,10 +813,24 @@ export function sanitizeUserSettings(raw: unknown): UserSettings | null {
 	}
 	if (r.dictation !== undefined) {
 		const raw = r.dictation;
-		out.dictation = raw !== null && typeof raw === "object" && !Array.isArray(raw) &&
-			isDictationLanguage((raw as Record<string, unknown>).language)
-			? { language: (raw as DictationSettings).language }
-			: {};
+		const dictation: DictationSettings = {};
+		if (raw !== null && typeof raw === "object" && !Array.isArray(raw)) {
+			const { language, provider } = raw as Record<string, unknown>;
+			if (isDictationLanguage(language)) dictation.language = language;
+			if (isDictationProvider(provider)) dictation.provider = provider;
+		}
+		out.dictation = dictation;
+	}
+	if (r.readAloud !== undefined) {
+		const raw = r.readAloud;
+		const readAloud: ReadAloudSettings = {};
+		if (raw !== null && typeof raw === "object" && !Array.isArray(raw)) {
+			const { voiceId, modelId, autoRead } = raw as Record<string, unknown>;
+			if (isPlainTtsId(voiceId)) readAloud.voiceId = voiceId;
+			if (isPlainTtsId(modelId)) readAloud.modelId = modelId;
+			if (typeof autoRead === "boolean") readAloud.autoRead = autoRead;
+		}
+		out.readAloud = readAloud;
 	}
 	if (r.claudeCode !== undefined) {
 		const raw = r.claudeCode;

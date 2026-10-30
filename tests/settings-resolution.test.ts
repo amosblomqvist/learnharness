@@ -127,6 +127,14 @@ describe("resolveSettings", () => {
 	});
 });
 
+describe("dictation resolution", () => {
+	it("language falls back to the factory; provider stays absent until chosen", () => {
+		assert.equal(resolveSettings(null).dictation.language, "en");
+		assert.equal(resolveSettings(null).dictation.provider, undefined);
+		assert.equal(resolveSettings({ version: 1, dictation: { language: "pl", provider: "elevenlabs" } }).dictation.provider, "elevenlabs");
+	});
+});
+
 describe("the slot tier (BYOK, owner 2026-09-22)", () => {
 	it("slot alone re-tiers every role of its tier (no role overrides present)", () => {
 		const eff = resolveSettings({ version: 1, models: { cheap: { model: { provider: "zai", id: "glm-5.3-flash" } } } });

@@ -32,9 +32,15 @@ export interface AuthKeyInfo {
 export const AUTH_KEYS: readonly AuthKeyInfo[] = [
 	{
 		id: "DEEPGRAM_API_KEY",
-		label: "Deepgram",
-		description: "Speech-to-text key for dictation — needs ≥ Member permission in the Deepgram console to mint tokens.",
+		label: "Deepgram (dictation only)",
+		description: "Speech-to-text key for dictation only (Deepgram does not read aloud) — needs ≥ Member permission in the Deepgram console to mint tokens.",
 		docsUrl: "https://console.deepgram.com/",
+	},
+	{
+		id: "ELEVENLABS_API_KEY",
+		label: "ElevenLabs",
+		description: "Speech key for dictation and read aloud — one key for both.",
+		docsUrl: "https://elevenlabs.io/app/settings/api-keys",
 	},
 	{
 		id: "TAVILY_API_KEY",
@@ -54,6 +60,15 @@ const AUTH_KEY_IDS: ReadonlySet<string> = new Set(AUTH_KEYS.map((k) => k.id));
 
 export function isKnownAuthKey(id: string): boolean {
 	return AUTH_KEY_IDS.has(id);
+}
+
+/** A Settings → Keys deep-link target (the `row` of `open("keys", row)`).
+ *  A key rendered in more than one group (ELEVENLABS_API_KEY: Dictation and
+ *  Read aloud) gets one target per group, so a feature's keyless click
+ *  unfolds the row under that feature (owner, 2026-10-29). The bare key id
+ *  is the key's first group. */
+export function keyRowTarget(id: string, group?: "read-aloud"): string {
+	return group ? `${id}@${group}` : id;
 }
 
 /** One model-provider key row for the settings page's dropdown: which
@@ -153,8 +168,8 @@ export type KeyShapeResult = { ok: true } | { ok: false; error: string };
  * a truncated or wrong-family key can never land in the store). Values are
  * TRIMMED first (paste hygiene); empty-after-trim always fails.
  *
- * CURATED keys carry family rules (Tavily's tvly-… prefix; Brave and
- * Deepgram publish no format — length floors + paste hygiene only).
+ * CURATED keys carry family rules (Tavily's tvly-… prefix; Brave,
+ * Deepgram and ElevenLabs publish no format — length floors + paste hygiene only).
  * MODEL-PROVIDER keys use genericProviderKeyGuard below instead (families
  * vary by provider — only paste hygiene applies; owner spec: min length
  * ~12, no whitespace). OPENROUTER_API_KEY moved to the generic guard with
@@ -175,6 +190,7 @@ export function validateKeyShape(id: string, rawValue: string): KeyShapeResult {
 			// No public format — a length floor + paste hygiene only.
 			return nonEmpty(20);
 		case "DEEPGRAM_API_KEY":
+		case "ELEVENLABS_API_KEY":
 			// No public format — the length floor only catches truncated pastes.
 			return nonEmpty(20);
 		default:

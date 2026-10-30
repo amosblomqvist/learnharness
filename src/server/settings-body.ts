@@ -21,6 +21,7 @@ import type {
 	CustomModelOverride,
 	GeneralSettings,
 	DictationSettings,
+	ReadAloudSettings,
 	GraphSettings,
 	ModelsSettings,
 	RoleModelOverride,
@@ -28,6 +29,8 @@ import type {
 import { BACKGROUND_MODEL_ROLES, COMPACTION_THRESHOLD_FLOOR, CUSTOM_MODEL_PIN_FLOOR, EXTRACTION_CHUNK_TOKENS_FLOOR, MODEL_SLOTS } from "../core/settings.ts";
 import { WRITABLE_TOOL_KEYS } from "../core/pending.ts";
 import { isDictationLanguage } from "../core/dictation.ts";
+import { isDictationProvider } from "../core/dictation-provider.ts";
+import { isPlainTtsId } from "../core/read-aloud.ts";
 
 /** Parsed-or-rejected — `ok: false` carries the 400's error message. */
 export type SettingsBodyResult<T> =
@@ -387,13 +390,42 @@ export function parseCompactionSettingsBody(body: unknown): SettingsBodyResult<C
 	return { ok: true, settings };
 }
 
-/** dictation: { language?: one of Nova-3's supported language codes } */
+/** dictation: { language?: one of Nova-3's supported language codes,
+ *  provider?: "deepgram" | "elevenlabs" } */
 export function parseDictationSettingsBody(body: unknown): SettingsBodyResult<DictationSettings> {
 	const raw = asRecord(body);
 	if (!raw) return { ok: false, error: "Invalid JSON body" };
-	if (raw.language === undefined) return { ok: true, settings: {} };
-	if (!isDictationLanguage(raw.language)) return { ok: false, error: "Unsupported dictation language" };
-	return { ok: true, settings: { language: raw.language } };
+	const settings: DictationSettings = {};
+	if (raw.language !== undefined) {
+		if (!isDictationLanguage(raw.language)) return { ok: false, error: "Unsupported dictation language" };
+		settings.language = raw.language;
+	}
+	if (raw.provider !== undefined) {
+		if (!isDictationProvider(raw.provider)) return { ok: false, error: "Unsupported dictation provider" };
+		settings.provider = raw.provider;
+	}
+	return { ok: true, settings };
+}
+
+/** readAloud: { voiceId?, modelId?, autoRead? } — plain provider ids (they land
+ *  in a URL path / JSON body) and the auto-read switch. Absent = the default. */
+export function parseReadAloudSettingsBody(body: unknown): SettingsBodyResult<ReadAloudSettings> {
+	const raw = asRecord(body);
+	if (!raw) return { ok: false, error: "Invalid JSON body" };
+	const settings: ReadAloudSettings = {};
+	if (raw.voiceId !== undefined) {
+		if (!isPlainTtsId(raw.voiceId)) return { ok: false, error: "voiceId must be a plain voice id" };
+		settings.voiceId = raw.voiceId;
+	}
+	if (raw.modelId !== undefined) {
+		if (!isPlainTtsId(raw.modelId)) return { ok: false, error: "modelId must be a plain model id" };
+		settings.modelId = raw.modelId;
+	}
+	if (raw.autoRead !== undefined) {
+		if (typeof raw.autoRead !== "boolean") return { ok: false, error: "autoRead must be a boolean" };
+		settings.autoRead = raw.autoRead;
+	}
+	return { ok: true, settings };
 }
 
 /** The custom endpoint's per-model pins (PATCH /api/custom-provider): the
@@ -446,6 +478,7 @@ export const SETTINGS_SECTIONS = {
 	compaction: parseCompactionSettingsBody,
 	models: parseModelsSettingsBody,
 	dictation: parseDictationSettingsBody,
+	readAloud: parseReadAloudSettingsBody,
 	claudeCode: parseClaudeCodeSettingsBody,
 } as const;
 

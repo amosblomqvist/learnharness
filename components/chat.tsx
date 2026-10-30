@@ -30,6 +30,11 @@ import { dockStateKey } from "@/components/dock-state-key";
 import { clearOpeningPrompt, readOpeningPromptEntry, stashOpeningPrompt, OPENING_PROMPT_FAILURE } from "@/components/opening-prompt";
 import { forwardDockWheel, useDockHeight } from "@/components/dock-height";
 import { QueuedSteersBody, type QueuedSteerLine } from "@/components/queued-steers";
+import { ListenButton, readAloudPlayer } from "@/components/read-aloud";
+import { blockInProgress, createAutoRead, finalAssistantStop, pendingQuestionSource, proseBlocks, withCollapsed } from "@/components/auto-read";
+import { isDictationActive } from "@/components/dictation-state";
+import { useReadAloudSettings } from "@/components/read-aloud-preference";
+import { markdownToSpeechChunks } from "@/src/core";
 import { DictationBar, finishDictation, joinDictation, useDictation } from "@/components/dictation";
 import { useFieldCycle } from "@/components/field-cycle";
 import { JobsContext } from "@/components/jobs-context";
@@ -476,6 +481,42 @@ export function Chat({
 		if (turnInFlight && (status === "submitted" || status === "streaming")) setTurnInFlight(false);
 	}, [status, turnInFlight]);
 
+	// Teach-phase check (W5, vision §2): a pending QUIZ that lands once a
+	// plan node is OCCUPIED (phaseAt3 "teach") starts collapsed behind a
+	// "Check your understanding" reveal button; probe- and plan-phase
+	// questions auto-open as today. Both teach quizzing tools obey the
+	// law (owner, 2026-10-09: explain checks join quiz checks behind the
+	// reveal); predictions of either mechanic and ask always arrive open.
+	// A pending question can never precede its phase's seam in the transcript (the teacher's turn
+	// ends at the question call), so the session's current phase IS the
+	// question's phase.
+	const requiresReveal = pending !== null && questionNeedsReveal(pending.tool, pending.input, phaseAt3(messages));
+
+	// Auto-read (ElevenLabs voice slice 10): the controller sees each render's
+	// busy -> idle edge and decides once whether that turn's final reply plays, then
+	// (slice 11) a newly shown dock question's prompt after it (components/auto-read.ts
+	// holds every rule). The newest play options are read at play time through the ref.
+	const readAloudSettings = useReadAloudSettings();
+	const autoReadOptionsRef = useRef({ voiceId: readAloudSettings.voiceId, modelId: readAloudSettings.modelId });
+	autoReadOptionsRef.current = { voiceId: readAloudSettings.voiceId, modelId: readAloudSettings.modelId };
+	const autoReadRef = useRef<ReturnType<typeof createAutoRead>>(null);
+	autoReadRef.current ??= createAutoRead({
+		play: (sourceId, markdown) => readAloudPlayer().play(sourceId, markdownToSpeechChunks(markdown), autoReadOptionsRef.current),
+		dictating: isDictationActive,
+	});
+	useEffect(() => {
+		autoReadRef.current!.observe({
+			busy,
+			failed: status === "error" || error !== null,
+			enabled: readAloudSettings.loaded && readAloudSettings.autoRead,
+			finalStop: finalAssistantStop(nativeMessages),
+			messages,
+			// A teach check still collapsed behind its reveal is never read aloud (owner 2026-10-29).
+			// requiresReveal is the same pure test the dock collapses on, so it needs no state lifted.
+			question: withCollapsed(pendingQuestionSource(pending), requiresReveal),
+		});
+	}, [busy, status, error, messages, nativeMessages, pending, requiresReveal, readAloudSettings.loaded, readAloudSettings.autoRead]);
+
 	// Mid-session discovery (jobs poll, handoff watch): a server-side turn
 	// exists that none of our views holds — attach to it through the same
 	// resume path as mount reattach (live rendering, instant catch-up). The
@@ -502,17 +543,6 @@ export function Chat({
 		},
 		[send],
 	);
-
-	// Teach-phase check (W5, vision §2): a pending QUIZ that lands once a
-	// plan node is OCCUPIED (phaseAt3 "teach") starts collapsed behind a
-	// "Check your understanding" reveal button; probe- and plan-phase
-	// questions auto-open as today. Both teach quizzing tools obey the
-	// law (owner, 2026-10-09: explain checks join quiz checks behind the
-	// reveal); predictions of either mechanic and ask always arrive open.
-	// A pending question can never precede its phase's seam in the transcript (the teacher's turn
-	// ends at the question call), so the session's current phase IS the
-	// question's phase.
-	const requiresReveal = pending !== null && questionNeedsReveal(pending.tool, pending.input, phaseAt3(messages));
 
 	/* The READING-THINKING channel (owner 2026-10-03): a draft field for
 	 * thinking while reading the teaching prose, mounted while a check waits
@@ -1550,9 +1580,17 @@ export function Chat({
 													case "text": {
 														const sourceId = textPartMessageId(part.id);
 														const anchor = sourceId && sourceTextParts.get(sourceId) === part.id ? messageAnchorId(sourceId) : undefined;
+														// Read aloud (ElevenLabs voice slice 6): one Listen button per prose
+														// block, reading only that block (a teaching group merges several
+														// native messages into this one view message). Only the block that
+														// may still be streaming waits; the settled ones above it keep theirs.
+														const blocks = proseBlocks(m, mi);
+														const block = blocks.find((b) => b.partIndex === pi);
+														const writing = blockInProgress(blocks, mi === messages.length - 1, busy);
 														return (
 															<div key={part.id || pi} id={anchor} data-source-message-id={sourceId ?? undefined} className="lh-source-passage">
 																<MessageResponse>{part.text}</MessageResponse>
+																{block && block.sourceId !== writing ? <ListenButton sourceId={block.sourceId} markdown={block.markdown} /> : null}
 															</div>
 														);
 													}

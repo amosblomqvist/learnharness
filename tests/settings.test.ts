@@ -17,6 +17,22 @@ import {
 	sanitizeUserSettings,
 } from "../src/core/settings.ts";
 
+describe("sanitizeUserSettings — dictation provider", () => {
+	const sanitize = (dictation: unknown) => sanitizeUserSettings({ version: 1, dictation })?.dictation;
+
+	it("keeps a known provider alongside the language", () => {
+		assert.deepEqual(sanitize({ language: "pl", provider: "elevenlabs" }), { language: "pl", provider: "elevenlabs" });
+		assert.deepEqual(sanitize({ provider: "deepgram" }), { provider: "deepgram" });
+	});
+
+	it("drops unknown providers, independently of the language", () => {
+		assert.deepEqual(sanitize({ language: "pl", provider: "whisper" }), { language: "pl" });
+		assert.deepEqual(sanitize({ provider: 3 }), {});
+		assert.deepEqual(sanitize({ language: "xx", provider: "elevenlabs" }), { provider: "elevenlabs" });
+		assert.deepEqual(sanitize("nope"), {});
+	});
+});
+
 describe("FACTORY_SETTINGS (the compiled factory layer)", () => {
 	it("pins the owner-decided defaults", () => {
 		assert.equal(CURRENT_SETTINGS_VERSION, 1);
