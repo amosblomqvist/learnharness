@@ -388,6 +388,17 @@ function projectMarker(marker: LhMarkerMessage, out: LhViewMessage[]): void {
 			});
 			return;
 		}
+		case "course-lesson": {
+			// The session's course context (courses plan, 2026-10-30): the
+			// graph-context precedent — a collapsible card above the first
+			// user message, never a text bubble.
+			out.push({
+				id: marker.id,
+				role: "user",
+				parts: [{ type: "data-course-lesson", id: `cl_${marker.id}`, data: marker.details }],
+			});
+			return;
+		}
 		case "probe-handoff": {
 			out.push({
 				id: marker.id,

@@ -25,6 +25,8 @@ import type {
 	SessionCheckpoint,
 	TurnUsage,
 	NotesSource,
+	CourseRecord,
+	PlannerRunUsage,
 } from "./contracts.ts";
 import type { UserSettings } from "./settings.ts";
 
@@ -158,6 +160,27 @@ export interface JobStore {
 	 *  route refuses while jobs are still running, so by the time this
 	 *  fires every record is terminal. */
 	deleteJobsForChat(chatId: string): number;
+}
+
+// ─── CourseStore — curriculum courses (courses plan, 2026-10-30) ─────────────
+
+/**
+ * One whole-file JSON record per course (contracts/course.ts CourseRecord).
+ * Read-modify-write like ChatStore; a record stamped NEWER than this build
+ * reads as absent. Progress and minutes are never stored — core derives them.
+ */
+export interface CourseStore {
+	/** Every readable course, most recently updated first. */
+	listCourses(): CourseRecord[];
+	getCourse(id: string): CourseRecord | null;
+	/** Persist a new record (id is minted by the store). */
+	createCourse(record: Omit<CourseRecord, "id" | "createdAt" | "updatedAt">): CourseRecord;
+	/** Replace-whole persist; stamps updatedAt. Null if unknown id. */
+	saveCourse(record: CourseRecord): CourseRecord | null;
+	/** Append one planner run's usage (every run, discarded drafts too). */
+	appendUsage(id: string, run: PlannerRunUsage): void;
+	/** Remove the record (linked sessions stay). True if it existed. */
+	deleteCourse(id: string): boolean;
 }
 
 // ─── SettingsStore — THE user settings record (settings-storage wave, 2026-09-19) ──
