@@ -52,6 +52,7 @@ import { AppearanceSection, GraphSection } from "./appearance-section.tsx";
 import { KeyboardSection } from "./keyboard-section.tsx";
 import { ChatGPTUIProvider } from "./chatgpt-connection.tsx";
 import { NativeSubscriptionUIProvider } from "./subscription-connections.tsx";
+import { LessonTransfer } from "./lesson-transfer.tsx";
 
 /** Owner (2026-09-20): hints earn their place — mechanics-explaining
  *  prose is out; only the keyboard note stays (storage location is a
@@ -63,6 +64,7 @@ const SECTIONS = [
 	{ id: "graph", label: "Graph" },
 	{ id: "keyboard", label: "Keyboard", hint: "Stored on this device" },
 	{ id: "general", label: "General" },
+	{ id: "transfer", label: "Export/import" },
 ] as const;
 type SectionId = (typeof SECTIONS)[number]["id"];
 
@@ -355,6 +357,7 @@ export function SettingsDialogBody({
 						</p>
 					) : (
 						<div>
+							{active === "transfer" && <SettingsSection title="Export/import" testid="section-transfer"><LessonTransfer /></SettingsSection>}
 							{active === "general" && (
 								<SettingsSection
 									title="General"

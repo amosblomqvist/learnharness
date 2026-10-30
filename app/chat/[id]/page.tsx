@@ -1,7 +1,7 @@
 import { notFound } from "next/navigation";
 import { Chat } from "@/components/chat";
 import { slotsConfigured } from "@/src/core";
-import { compactionInFlight, getChat, isTurnRunning, readSettingsRecord, turnFailure } from "@/src/server";
+import { compactionInFlight, getChat, isTurnRunning, readSettingsRecord, turnFailure, stores } from "@/src/server";
 
 export const dynamic = "force-dynamic";
 
@@ -23,6 +23,7 @@ export default async function ChatPage({
 		<Chat
 			key={chat.id}
 			chatId={chat.id}
+			initialAwaitingInput={!!stores.chatStore.pendingImport?.(chat.id)}
 			title={chat.title}
 			kind={chat.kind ?? "teach"}
 			// Wave D: the record IS native agent history — the client view is

@@ -10,12 +10,14 @@ export * from "./chats.ts";
 export * from "./graph.ts";
 export * from "./source-organization.ts";
 export * from "./source-deletion.ts";
-export { NotesImportError } from "../agent/subagents/extraction.ts";
+export { NotesImportError, extractionStatuses } from "../agent/subagents/extraction.ts";
 export { convertPdf } from "../agent/subagents/pdf-ops.ts";
 export { joinPages } from "../agent/subagents/pdf-markdown.ts";
 export * from "./commit-positions.ts";
 export * from "./jobs.ts";
 export * from "./stores.ts";
+export { previewExport, downloadExport } from "../store/lesson-export.ts";
+export { previewImport, installImport, readImportPackage, importVersions, importVersion } from "../store/lesson-import.ts";
 export { readRenderSettings, writeRenderSettings } from "../store/render-settings.ts";
 // The settings record + prompt overrides (settings-storage wave, 2026-09-19).
 // The *Record aliases keep the app/api/settings routes explicit about which

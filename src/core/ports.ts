@@ -31,6 +31,9 @@ import type { UserSettings } from "./settings.ts";
 // ─── ChatStore — the session record's home (data/chats) ─────────────────────
 
 export interface ChatStore {
+	/** Import revision awaiting the first explicit learner input; opening never resumes it. */
+	pendingImport?(id: string): string | undefined;
+	acceptInput?(id: string): void;
 	/** Create a session record (persisted immediately). */
 	/** Create a session record; kind "practice" marks a practice session
 	 *  (absent = teach, the default). */

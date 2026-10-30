@@ -19,6 +19,7 @@ import type { ChatInput, LhMessage, QuestionAnswerData } from "@/src/core";
 import { SessionModel, type SessionState } from "@/components/session-core";
 
 export interface UseChatSessionOptions {
+	initialAwaitingInput?: boolean;
 	chatId: string;
 	/** The native record seed (server-rendered page or a full sync). */
 	initialMessages: LhMessage[];
@@ -28,12 +29,12 @@ export interface UseChatSessionOptions {
 	initiallyInFlight?: boolean;
 }
 
-export function useChatSession({ chatId, initialMessages, initialError, initiallyInFlight }: UseChatSessionOptions) {
+export function useChatSession({ chatId, initialMessages, initialError, initiallyInFlight, initialAwaitingInput = false }: UseChatSessionOptions) {
 	// The model is per-mount (chatId-keyed component); onChange forces the
 	// re-render. The ref pattern keeps it stable across renders.
 	const modelRef = useRef<SessionModel | null>(null);
 	if (modelRef.current === null) {
-		modelRef.current = new SessionModel({ chatId, initialMessages, initialError });
+		modelRef.current = new SessionModel({ chatId, initialMessages, initialError, awaitingInput: initialAwaitingInput });
 	}
 	const model = modelRef.current;
 	// The render VERSION — bumped by every model change, so the state memo
@@ -120,13 +121,14 @@ export function useChatSession({ chatId, initialMessages, initialError, initiall
 	);
 	const questionDraft = useCallback((questionKey: string) => model.questionDraft(questionKey), [model]);
 	const saveQuestionDraft = useCallback((questionKey: string, draft: Parameters<SessionModel["saveQuestionDraft"]>[1]) => model.saveQuestionDraft(questionKey, draft), [model]);
-	const setMessages = useCallback((record: LhMessage[], turnError?: string) => model.setMessages(record, turnError), [model]);
+	const setMessages = useCallback((record: LhMessage[], turnError?: string, awaitingInput?: boolean) => model.setMessages(record, turnError, awaitingInput), [model]);
 	const adoptRecord = useCallback((record: LhMessage[]) => model.adoptRecord(record), [model]);
 	const stop = useCallback(() => model.stop(), [model]);
 	const clearError = useCallback(() => model.clearError(), [model]);
 	const resumeStream = useCallback(() => void model.resumeStream(), [model]);
 
 	return {
+		awaitingInput: model.awaitingInput,
 		messages: state.messages,
 		nativeMessages: state.nativeMessages,
 		hasConfirmedConversation: state.hasConfirmedConversation,

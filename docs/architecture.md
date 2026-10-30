@@ -14,6 +14,8 @@ This is the current implementation reference for the released app: a Next.js app
 | `src/store/` | Filesystem persistence adapters | `chats.ts`, `jobs.ts`, `graph.ts`, `settings.ts` |
 | `electron/` | Desktop launch, navigation/permission security, credentials and browser helper | `main.cjs`, subscription controllers |
 
+**Offline lesson import.** `POST /api/lesson-import` coordinates the chat and graph adapters through `src/store/lesson-import.ts`: validate/preview, explicit conflicts, revision and idle-writer checks, then synchronous byte-preserving installation under a rollback journal. Only already-authored compatible evidence is appended; it does not extract, regenerate, re-identify or overwrite graph definitions. Originals, inert packages and an explicit-input pause live in `data/lesson-transfers/`. Foreign model/account overrides remain inert; the first accepted learner input uses locally configured model settings and releases the pause. Opening an import never starts a model request. Chat-adapter startup recovers interrupted installs before serving requests. This single-process protocol is not a second live teaching/extraction writer or a multi-process lock. See [lesson transfer](lesson-transfer.md) for bounds and evidence.
+
 The import restrictions in [`eslint.config.mjs`](../eslint.config.mjs) enforce specific boundaries:
 
 - Imports from `components/` into `src/` must use the browser-facing `src/core/index.ts` barrel.
