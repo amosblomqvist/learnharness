@@ -20,7 +20,7 @@
  */
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
-import { FACTORY_SETTINGS, type AppearanceSettings } from "@/src/core";
+import { FACTORY_SETTINGS, MD_CENTER_WIDTHS, type AppearanceSettings } from "@/src/core";
 
 /** The resolved, fully-concrete appearance view (delta + factory merged). */
 export function resolveAppearance(delta: AppearanceSettings | undefined) {
@@ -35,6 +35,8 @@ export function resolveAppearance(delta: AppearanceSettings | undefined) {
 			headingWeight: delta?.mdRendering?.headingWeight ?? f.mdRendering.headingWeight,
 			boldColor: delta?.mdRendering?.boldColor ?? f.mdRendering.boldColor,
 			italicColor: delta?.mdRendering?.italicColor ?? f.mdRendering.italicColor,
+			textAlign: delta?.mdRendering?.textAlign ?? f.mdRendering.textAlign,
+			centerWidth: delta?.mdRendering?.centerWidth ?? f.mdRendering.centerWidth,
 		},
 	};
 }
@@ -92,6 +94,18 @@ export function appearanceVars(a: ReturnType<typeof resolveAppearance>): Record<
 	vars["--lh-heading-weight"] = String(a.mdRendering.headingWeight);
 	if (a.mdRendering.boldColor !== null) vars["--lh-ink-strong"] = a.mdRendering.boldColor;
 	if (a.mdRendering.italicColor !== null) vars["--lh-ink-italic"] = a.mdRendering.italicColor;
+	// Markdown alignment (owner, 2026-10-30): left is the stylesheet's own
+	// default. Right/justify align the text (justify hyphenates; right also
+	// pushes the content-hugging boxes right). Center keeps the text left
+	// and narrows the transcript column instead — its TEXT width plus the
+	// column's px-6 (Obsidian's readable line length, owner revision).
+	const align = a.mdRendering.textAlign;
+	if (align === "right" || align === "justify") vars["--lh-md-align"] = align;
+	if (align === "justify") vars["--lh-md-hyphens"] = "auto";
+	if (align === "right") vars["--lh-md-box-ml"] = "auto";
+	if (align === "center") {
+		vars["--lh-chat-column-max"] = `calc(${MD_CENTER_WIDTHS[a.mdRendering.centerWidth]}px + 3rem)`;
+	}
 	return vars;
 }
 

@@ -376,7 +376,8 @@ export const MessageResponse = memo(
         className={cn(
           // Source Sans 3 + emphasis-color tokens on every markdown surface
           // (labels stay JetBrains Mono). Unlayered plain CSS wins over text-sm.
-          "lh-prose size-full [&>*:first-child]:mt-0 [&>*:last-child]:mb-0",
+          // lh-md = rendered markdown only: the text-alignment setting's hook.
+          "lh-prose lh-md size-full [&>*:first-child]:mt-0 [&>*:last-child]:mb-0",
           className
         )}
         components={mdComponents}

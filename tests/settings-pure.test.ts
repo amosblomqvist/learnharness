@@ -31,7 +31,13 @@ describe("resolveAppearance — delta over factory", () => {
 		assert.equal(a.fontFamily, null);
 		assert.equal(a.proseFontSize, 16);
 		assert.equal(a.sessionNameSerif, true);
-		assert.deepEqual(a.mdRendering, { headingWeight: 900, boldColor: null, italicColor: null });
+		assert.deepEqual(a.mdRendering, {
+			headingWeight: 900,
+			boldColor: null,
+			italicColor: null,
+			textAlign: "left",
+			centerWidth: "medium",
+		});
 	});
 
 	it("explicit deltas win field-by-field", () => {
@@ -100,6 +106,49 @@ describe("appearanceVars — the mapping the provider applies", () => {
 		assert.equal(vars["--lh-ink-italic"], "#00ff00");
 	});
 
+	it("textAlign left (factory): no alignment tokens — the stylesheet defaults stand", () => {
+		const vars = appearanceVars(resolveAppearance({ mdRendering: { textAlign: "left" } }));
+		for (const name of ["--lh-md-align", "--lh-md-hyphens", "--lh-md-box-ml", "--lh-chat-column-max"]) {
+			assert.equal(vars[name], undefined, name);
+		}
+	});
+
+	it("textAlign center: the transcript column narrows to the medium text width; text stays left", () => {
+		const vars = appearanceVars(resolveAppearance({ mdRendering: { textAlign: "center" } }));
+		assert.equal(vars["--lh-chat-column-max"], "calc(700px + 3rem)", "700px of text + the column's px-6");
+		assert.equal(vars["--lh-md-align"], undefined, "lines stay left-aligned inside the column");
+		assert.equal(vars["--lh-md-box-ml"], undefined, "boxes sit at the column's left edge");
+		assert.equal(vars["--lh-md-hyphens"], undefined, "hyphenation rides justify only");
+	});
+
+	it("textAlign center: small and large pick their own column widths", () => {
+		const small = appearanceVars(resolveAppearance({ mdRendering: { textAlign: "center", centerWidth: "small" } }));
+		const large = appearanceVars(resolveAppearance({ mdRendering: { textAlign: "center", centerWidth: "large" } }));
+		assert.equal(small["--lh-chat-column-max"], "calc(560px + 3rem)");
+		assert.equal(large["--lh-chat-column-max"], "calc(880px + 3rem)");
+	});
+
+	it("centerWidth alone does nothing — the column narrows under Center only", () => {
+		for (const textAlign of ["left", "right", "justify"] as const) {
+			const vars = appearanceVars(resolveAppearance({ mdRendering: { textAlign, centerWidth: "small" } }));
+			assert.equal(vars["--lh-chat-column-max"], undefined, textAlign);
+		}
+	});
+
+	it("textAlign right: text right-aligns and the boxes push right (left margin auto only)", () => {
+		const vars = appearanceVars(resolveAppearance({ mdRendering: { textAlign: "right" } }));
+		assert.equal(vars["--lh-md-align"], "right");
+		assert.equal(vars["--lh-md-box-ml"], "auto");
+		assert.equal(vars["--lh-md-hyphens"], undefined);
+	});
+
+	it("textAlign justify: justified text with auto hyphenation; boxes stay at the left edge", () => {
+		const vars = appearanceVars(resolveAppearance({ mdRendering: { textAlign: "justify" } }));
+		assert.equal(vars["--lh-md-align"], "justify");
+		assert.equal(vars["--lh-md-hyphens"], "auto");
+		assert.equal(vars["--lh-md-box-ml"], undefined);
+	});
+
 	it("sessionNameSerif false alone: titles move, nothing else does", () => {
 		const vars = appearanceVars(resolveAppearance({ sessionNameSerif: false }));
 		assert.equal(vars["--font-title"], "var(--font-prose)");
@@ -136,6 +185,18 @@ describe("staleVarNames — the removal half of application (owner repro: resets
 		assert.ok(stale.includes("--background"));
 		assert.ok(stale.includes("--card"), "the derived palette follows the background out");
 		assert.equal(emptied["--background"], undefined);
+	});
+
+	it("alignment back to left frees every alignment token (the stylesheet's left returns)", () => {
+		const centered = appearanceVars(resolveAppearance({ mdRendering: { textAlign: "center" } }));
+		const right = appearanceVars(resolveAppearance({ mdRendering: { textAlign: "right" } }));
+		const justified = appearanceVars(resolveAppearance({ mdRendering: { textAlign: "justify" } }));
+		const left = appearanceVars(resolveAppearance({ mdRendering: { textAlign: "left" } }));
+		const applied = [...Object.keys(centered), ...Object.keys(right), ...Object.keys(justified)];
+		const stale = staleVarNames(applied, left);
+		for (const name of ["--lh-md-align", "--lh-md-hyphens", "--lh-md-box-ml", "--lh-chat-column-max"]) {
+			assert.ok(stale.includes(name), name);
+		}
 	});
 
 	it("no previous applications → nothing stale", () => {

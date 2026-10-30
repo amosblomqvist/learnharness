@@ -35,6 +35,8 @@ describe("FACTORY_SETTINGS (the compiled factory layer)", () => {
 		assert.equal(a.mdRendering.headingWeight, 900);
 		assert.equal(a.mdRendering.boldColor, null); // white
 		assert.equal(a.mdRendering.italicColor, null);
+		assert.equal(a.mdRendering.textAlign, "left"); // today's look
+		assert.equal(a.mdRendering.centerWidth, "medium"); // 700px
 	});
 
 	it("has NO factory model pin — chat defaults and role overrides start absent", () => {
@@ -147,6 +149,32 @@ describe("sanitizeUserSettings", () => {
 		assert.equal(out.appearance?.background, null);
 		assert.equal(out.appearance?.mdRendering?.boldColor, "#f00");
 		assert.equal(out.appearance?.mdRendering?.italicColor, null);
+	});
+
+	it("mdRendering.textAlign: the four alignments pass, anything else drops (factory left)", () => {
+		for (const good of ["left", "center", "right", "justify"]) {
+			const out = sanitizeUserSettings({ appearance: { mdRendering: { textAlign: good } } });
+			assert.ok(out);
+			assert.equal(out.appearance?.mdRendering?.textAlign, good, good);
+		}
+		for (const bad of ["middle", "start", "LEFT", "", 1, null]) {
+			const out = sanitizeUserSettings({ appearance: { mdRendering: { textAlign: bad } } });
+			assert.ok(out);
+			assert.equal(out.appearance?.mdRendering?.textAlign, undefined, JSON.stringify(bad));
+		}
+	});
+
+	it("mdRendering.centerWidth: small/medium/large pass, anything else drops (factory medium)", () => {
+		for (const good of ["small", "medium", "large"]) {
+			const out = sanitizeUserSettings({ appearance: { mdRendering: { centerWidth: good } } });
+			assert.ok(out);
+			assert.equal(out.appearance?.mdRendering?.centerWidth, good, good);
+		}
+		for (const bad of ["huge", "Medium", "700", 700, "", null, "toString"]) {
+			const out = sanitizeUserSettings({ appearance: { mdRendering: { centerWidth: bad } } });
+			assert.ok(out);
+			assert.equal(out.appearance?.mdRendering?.centerWidth, undefined, JSON.stringify(bad));
+		}
 	});
 
 	it("empty strings/whitespace fontFamily → null (Source Sans 3); wrong-type → null too (the default)", () => {
