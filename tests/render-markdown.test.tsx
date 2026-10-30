@@ -12,8 +12,10 @@ import React from "react";
 
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import fs from "node:fs";
 import { renderToStaticMarkup } from "react-dom/server";
 import { MessageResponse } from "../components/ai-elements/message.tsx";
+import { Reasoning, ReasoningContent } from "../components/ai-elements/reasoning.tsx";
 import { MermaidError } from "../components/mermaid-error.tsx";
 import { transformMathDelimiters, healOverescapedCommands } from "../src/core/math-delims.ts";
 
@@ -444,3 +446,58 @@ describe("over-escaped command heal — doubled backslashes in tool args (owner 
 	});
 });
 
+describe("text alignment — the markdown-only hook (appearance.mdRendering.textAlign)", () => {
+	/** The Streamdown root's opening tag — the element the alignment hook rides. */
+	const rootTag = (html: string, marker: string) => {
+		const i = html.indexOf(marker);
+		assert.ok(i >= 0, `missing ${marker}`);
+		return html.slice(html.lastIndexOf("<", i), html.indexOf(">", i) + 1);
+	};
+
+	it("message markdown roots carry .lh-md (alongside .lh-prose)", () => {
+		const html = render("plain paragraph");
+		const tag = rootTag(html, "lh-prose");
+		assert.match(tag, /\blh-md\b/);
+	});
+
+	it("reasoning markdown roots carry .lh-md too (reasoning follows the setting)", () => {
+		const html = renderToStaticMarkup(
+			<Reasoning open><ReasoningContent>{"thinking it through"}</ReasoningContent></Reasoning>,
+		);
+		assert.match(html, /class="[^"]*\blh-md\b[^"]*"/);
+	});
+
+	it("explicit GFM column alignment stays an INLINE style (it outranks the setting)", () => {
+		const html = render("| a | b |\n|:-:|--:|\n| 1 | 2 |");
+		assert.ok(html.includes("text-align:center"), "the :-: column keeps its center");
+		assert.ok(html.includes("text-align:right"), "the --: column keeps its right");
+	});
+
+	it("globals.css: the hook reads the tokens; both theme blocks default to today's left", () => {
+		const css = fs.readFileSync("app/globals.css", "utf-8");
+		assert.match(css, /\.lh-md \{[^}]*text-align: var\(--lh-md-align\);/);
+		assert.match(css, /\.lh-md \{[^}]*hyphens: var\(--lh-md-hyphens\);/);
+		assert.equal((css.match(/--lh-md-align: left;/g) ?? []).length, 2, "both theme blocks");
+		assert.equal((css.match(/--lh-md-hyphens: manual;/g) ?? []).length, 2, "both theme blocks");
+		assert.equal((css.match(/--lh-md-box-ml: 0;/g) ?? []).length, 2, "both theme blocks");
+		assert.equal((css.match(/--lh-chat-column-max: none;/g) ?? []).length, 2, "both theme blocks: full width by default");
+		assert.ok(!css.includes("--lh-md-box-mr"), "center no longer moves boxes — the right-margin token is gone");
+	});
+
+	it("Center's column: the transcript column carries the hook and globals.css caps it by the token", () => {
+		const css = fs.readFileSync("app/globals.css", "utf-8");
+		assert.match(css, /\.lh-chat-column \{[^}]*max-width: var\(--lh-chat-column-max\);/);
+		const chat = fs.readFileSync("components/chat.tsx", "utf-8");
+		assert.match(chat, /const COLUMN = "[^"]*\blh-chat-column\b[^"]*";/);
+	});
+
+	it("globals.css: code blocks and diagrams are pinned left, unhyphenated", () => {
+		const css = fs.readFileSync("app/globals.css", "utf-8");
+		const pinned = css.match(/\.lh-md :where\(([^)]*\[data-streamdown="code-block"\][^)]*)\) \{([^}]*)\}/);
+		assert.ok(pinned, "a pin rule exists for code blocks");
+		const [, selectors = "", body = ""] = pinned;
+		assert.ok(selectors.includes('[data-streamdown="mermaid"]'), "mermaid (md-blocks' own hook) pinned with code");
+		assert.ok(body.includes("text-align: left;"));
+		assert.ok(body.includes("hyphens: manual;"));
+	});
+});

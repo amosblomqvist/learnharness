@@ -31,17 +31,39 @@
  */
 
 import { useEffect, useRef, useState } from "react";
+import { TextAlignCenterIcon, TextAlignEndIcon, TextAlignJustifyIcon, TextAlignStartIcon } from "lucide-react";
 import {
 	EXTRACTION_CHUNK_TOKENS_FLOOR,
 	resolveSettings,
 	type AppearanceSettings,
 	type GraphSettings,
+	MD_CENTER_WIDTHS,
+	type MdCenterWidth,
+	type MdTextAlign,
 } from "@/src/core";
 import { MenuShell } from "@/components/menu-shell";
 import { Hint } from "@/components/ui/hint";
 import { useAppearance } from "./appearance.tsx";
 import { FontMenuList } from "./model-menu";
-import { CommitInput, SettingsMenuTrigger, SettingsRow, ThinSelect, Toggle } from "./controls.tsx";
+import { CommitInput, SegmentedControl, SettingsMenuTrigger, SettingsRow, ThinSelect, Toggle } from "./controls.tsx";
+
+/** The text-alignment row's buttons, in MD_TEXT_ALIGNS order. */
+const TEXT_ALIGN_OPTIONS = [
+	{ value: "left", label: "Left", icon: TextAlignStartIcon },
+	{ value: "center", label: "Center", icon: TextAlignCenterIcon },
+	{ value: "right", label: "Right", icon: TextAlignEndIcon },
+	{ value: "justify", label: "Justify", icon: TextAlignJustifyIcon },
+] as const satisfies readonly { value: MdTextAlign; label: string; icon: unknown }[];
+
+/** Center's column-width buttons (words, no icons); the tooltip names the
+ *  text width from MD_CENTER_WIDTHS. */
+const CENTER_WIDTH_OPTIONS = (
+	[
+		["small", "Small"],
+		["medium", "Medium"],
+		["large", "Large"],
+	] as const satisfies readonly (readonly [MdCenterWidth, string])[]
+).map(([value, label]) => ({ value, label, title: `${label} — ${MD_CENTER_WIDTHS[value]}px` }));
 
 /** The factory reading family — the DEFAULT row's identity (unset =
  *  this). Exported for tests. */
@@ -281,6 +303,28 @@ export function AppearanceSection({
 					}}
 				/>
 			</SettingsRow>
+			<SettingsRow label="Text alignment" testid="row-text-align">
+				<SegmentedControl
+					value={md?.textAlign ?? "left"}
+					options={TEXT_ALIGN_OPTIONS}
+					ariaLabel="Text alignment"
+					testid="seg-text-align"
+					onChange={(textAlign) => onSectionChange({ ...appearance, mdRendering: { ...md, textAlign } })}
+				/>
+			</SettingsRow>
+			{/* Center's width (owner, 2026-10-30): shown only while Center is
+			    the stored alignment; the value stays stored when hidden. */}
+			{md?.textAlign === "center" && (
+				<SettingsRow label="Column width" testid="row-center-width">
+					<SegmentedControl
+						value={md.centerWidth ?? "medium"}
+						options={CENTER_WIDTH_OPTIONS}
+						ariaLabel="Column width"
+						testid="seg-center-width"
+						onChange={(centerWidth) => onSectionChange({ ...appearance, mdRendering: { ...md, centerWidth } })}
+					/>
+				</SettingsRow>
+			)}
 			<SettingsRow label="Session names in serif" testid="row-session-serif">
 				<Toggle
 					checked={appearance?.sessionNameSerif ?? true}

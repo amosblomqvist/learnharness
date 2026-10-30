@@ -144,6 +144,32 @@ describe("parseAppearanceSettingsBody", () => {
 		assert.ok(parseAppearanceSettingsBody({ background: null, fontFamily: null }));
 	});
 
+	it("mdRendering.textAlign: the four alignments parse, anything else rejects with the enum named", () => {
+		for (const textAlign of ["left", "center", "right", "justify"]) {
+			const r = parseAppearanceSettingsBody({ mdRendering: { textAlign } });
+			assert.ok(r.ok, textAlign);
+			assert.deepEqual(r.settings, { mdRendering: { textAlign } });
+		}
+		for (const textAlign of ["middle", "start", "", 1, null]) {
+			const r = parseAppearanceSettingsBody({ mdRendering: { textAlign } });
+			assert.equal(r.ok, false, JSON.stringify(textAlign));
+			if (!r.ok) assert.equal(r.error, "mdRendering.textAlign must be one of left, center, right, justify");
+		}
+	});
+
+	it("mdRendering.centerWidth: the three widths parse, anything else rejects with the enum named", () => {
+		for (const centerWidth of ["small", "medium", "large"]) {
+			const r = parseAppearanceSettingsBody({ mdRendering: { centerWidth } });
+			assert.ok(r.ok, centerWidth);
+			assert.deepEqual(r.settings, { mdRendering: { centerWidth } });
+		}
+		for (const centerWidth of ["huge", "700", 700, "", null, "toString"]) {
+			const r = parseAppearanceSettingsBody({ mdRendering: { centerWidth } });
+			assert.equal(r.ok, false, JSON.stringify(centerWidth));
+			if (!r.ok) assert.equal(r.error, "mdRendering.centerWidth must be one of small, medium, large");
+		}
+	});
+
 	it("rejects non-object bodies and non-object mdRendering", () => {
 		assert.equal(parseAppearanceSettingsBody([1]).ok, false);
 		assert.equal(parseAppearanceSettingsBody({ mdRendering: "big" }).ok, false);

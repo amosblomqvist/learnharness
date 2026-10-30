@@ -364,6 +364,17 @@ export interface AgentSettings {
 	prompts?: Record<string, boolean>;
 }
 
+/** The rendered-markdown alignments (owner, 2026-10-30): the four the
+ *  settings row offers, in its button order. Tests pin the set. */
+export const MD_TEXT_ALIGNS = ["left", "center", "right", "justify"] as const;
+export type MdTextAlign = (typeof MD_TEXT_ALIGNS)[number];
+
+/** Center's reading-column TEXT widths in px (owner, 2026-10-30: medium =
+ *  700px, Obsidian's readable line length; small/large are the build's
+ *  call). Tests pin the set. */
+export const MD_CENTER_WIDTHS = { small: 560, medium: 700, large: 880 } as const;
+export type MdCenterWidth = keyof typeof MD_CENTER_WIDTHS;
+
 /** Markdown-rendering knobs — the bare-bones set (owner decision). */
 export interface MdRenderingSettings {
 	/** Heading font weight (100–900, default 900). CSS resolves the nearest
@@ -373,6 +384,14 @@ export interface MdRenderingSettings {
 	boldColor?: string | null;
 	/** Color for *italic* spans (default #ffffff). */
 	italicColor?: string | null;
+	/** Alignment of rendered markdown — replies, teaching/practice content,
+	 *  job briefs, reasoning (default left — today's look). Center is NOT
+	 *  line-centering: it narrows the whole transcript column to
+	 *  centerWidth and keeps the text left-aligned (owner revision). */
+	textAlign?: MdTextAlign;
+	/** Center's column width (default medium). Inert under any other
+	 *  alignment; kept so switching back to Center restores it. */
+	centerWidth?: MdCenterWidth;
 }
 
 /** Appearance settings — mode, colors, type, markdown emphasis. */
@@ -494,6 +513,8 @@ export interface FactorySettings {
 			headingWeight: number;
 			boldColor: string | null;
 			italicColor: string | null;
+			textAlign: MdTextAlign;
+			centerWidth: MdCenterWidth;
 		};
 	};
 	graph: Required<GraphSettings>;
@@ -510,7 +531,7 @@ export const FACTORY_SETTINGS: FactorySettings = {
 		fontFamily: null, // Source Sans 3
 		proseFontSize: 16,
 		sessionNameSerif: true,
-		mdRendering: { headingWeight: 900, boldColor: null, italicColor: null },
+		mdRendering: { headingWeight: 900, boldColor: null, italicColor: null, textAlign: "left", centerWidth: "medium" },
 	},
 	graph: { enabled: true, rendering: true, extractionChunkTokens: 4096 },
 	compaction: { thresholdTokens: 150_000 },
@@ -721,6 +742,11 @@ function sanitizeMdRendering(raw: unknown): MdRenderingSettings {
 	}
 	if (r.boldColor !== undefined) out.boldColor = sanitizeHexOrNull(r.boldColor);
 	if (r.italicColor !== undefined) out.italicColor = sanitizeHexOrNull(r.italicColor);
+	// Unknown alignment drops (the factory left resumes) — lenient read side.
+	if ((MD_TEXT_ALIGNS as readonly unknown[]).includes(r.textAlign)) out.textAlign = r.textAlign as MdTextAlign;
+	if (typeof r.centerWidth === "string" && Object.hasOwn(MD_CENTER_WIDTHS, r.centerWidth)) {
+		out.centerWidth = r.centerWidth as MdCenterWidth;
+	}
 	return out;
 }
 
