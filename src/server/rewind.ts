@@ -12,7 +12,9 @@
  *   - the background jobs the tail spawned (killed WITHOUT the abort steer
  *     abortJob would queue — it would land on a call that no longer exists)
  *     and their queued deliveries;
- *   - the learner steers still parked for the chat.
+ *   - the learner steers still parked for the chat;
+ *   - and the other way round: a KEPT job whose result (or abort) marker sat
+ *     inside the tail owes that delivery again.
  * The usage logs stay: that spend really happened.
  *
  * Choreography (the deleteChatSession precedent):
@@ -106,6 +108,18 @@ function targetIndex(messages: readonly LhMessage[], messageId: string): number 
 	return index;
 }
 
+/** The jobs whose delivery marker (a result or abort steer) sits in these messages. */
+function deliveryJobIdsOf(messages: readonly LhMessage[]): Set<string> {
+	const ids = new Set<string>();
+	for (const message of messages) {
+		if (message.role !== "custom") continue;
+		if (message.customType !== "subagent-steer" && message.customType !== "subagent-abort") continue;
+		const jobId = (message.details as { jobId?: unknown } | undefined)?.jobId;
+		if (typeof jobId === "string") ids.add(jobId);
+	}
+	return ids;
+}
+
 /** Every tool call the discarded messages made — what ties a job to the tail. */
 function toolCallIdsOf(messages: readonly LhMessage[]): Set<string> {
 	const ids = new Set<string>();
@@ -175,6 +189,17 @@ export async function rewindChat(chatId: string, messageId: string): Promise<Rew
 		discardRewoundDeliveries(chatId, new Set(jobs.map((job) => job.id)));
 		let jobsRemoved = 0;
 		for (const job of jobs) if (stores.jobStore.deleteJob(job.id)) jobsRemoved++;
+
+		// A KEPT job whose delivery marker sat inside the tail loses that marker
+		// with it: it owes the delivery again. Only a pending job is re-queued
+		// (restorePendingDeliveries), so a stale "delivered" would lose its
+		// result for good.
+		const redeliver = deliveryJobIdsOf(discarded);
+		for (const job of stores.jobStore.listJobs(chatId)) {
+			if (redeliver.has(job.id) && job.delivery?.status === "delivered") {
+				stores.jobStore.updateJob(job.id, { delivery: { ...job.delivery, status: "pending" } });
+			}
+		}
 
 		stores.chatStore.rewindMessages(chatId, retained, latestPlanTreeOf(retained));
 		emit("record-changed", { chatId });
