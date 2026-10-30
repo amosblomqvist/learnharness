@@ -1,8 +1,9 @@
 /**
  * pdf-ops (sources v0) — the pdfjs text layer against a committed fixture
  * (tests/fixtures/sample-3page.pdf: 3 pages, distinct subjects, "force" on
- * page 2 only). The render path (headless Chrome) is covered by the
- * pdf-reader loop tests via the headlessOverride fake.
+ * page 2 only; tests/fixtures/sample-multiline.pdf: 1 page, 3 text lines,
+ * "keyword" on line 2 only). The render path (headless Chrome) is covered
+ * by the pdf-reader loop tests via the headlessOverride fake.
  */
 import assert from "node:assert/strict";
 import * as path from "node:path";
@@ -10,6 +11,7 @@ import { describe, it } from "node:test";
 import { parsePageSpec, pdfExtract, pdfInfo, pdfProbe, pdfSearch } from "../src/agent/subagents/pdf-ops.ts";
 
 const FIXTURE = path.join(import.meta.dirname, "fixtures", "sample-3page.pdf");
+const MULTILINE = path.join(import.meta.dirname, "fixtures", "sample-multiline.pdf");
 
 describe("pdf-ops — the pdfjs text layer", () => {
 	it("pdfInfo triages every page (count, text lengths, image counts, math density)", async () => {
@@ -49,6 +51,24 @@ describe("pdf-ops — the pdfjs text layer", () => {
 		assert.equal(none.hits.length, 0);
 		// invalid regex throws the skill's error shape
 		await assert.rejects(() => pdfSearch(FIXTURE, "([unclosed"), /Invalid regex/);
+	});
+
+	it("pdfExtract keeps each text line on its own line", async () => {
+		const text = await pdfExtract(MULTILINE, "1");
+		assert.equal(
+			text,
+			"--- Page 1 ---\nFirst line of the page\nSecond line with a keyword\nThird line ends here",
+		);
+	});
+
+	it("pdfSearch reports the hit's own line with its neighbours as context", async () => {
+		const { hits } = await pdfSearch(MULTILINE, "keyword", { literal: true, contextLines: 1 });
+		assert.equal(hits.length, 1);
+		assert.equal(hits[0]!.line, 2);
+		assert.equal(
+			hits[0]!.context,
+			"    First line of the page\n>>> Second line with a keyword\n    Third line ends here",
+		);
 	});
 
 	it("pdfProbe accepts the fixture and rejects garbage", async () => {
