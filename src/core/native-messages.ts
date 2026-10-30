@@ -68,6 +68,7 @@ export interface LhMarkerMessage {
 	role: "custom";
 	customType:
 		| "graph-context"
+		| "course-lesson"
 		| "probe-handoff"
 		| "subagent-steer"
 		| "subagent-abort"
@@ -302,6 +303,48 @@ export function newGraphContextMessage(picks: readonly GraphContextPick[], chain
 		content: lines.join("\n"),
 		display: true,
 		details: { propositions: picks, chains },
+		timestamp: Date.now(),
+	};
+}
+
+/** The course-lesson marker's details — the transcript card's payload. */
+export interface CourseLessonContext {
+	courseId: string;
+	courseTitle: string;
+	courseGoal: string;
+	lessonId: string;
+	lessonTitle: string;
+	lessonGoal: string;
+	/** Titles of the lesson's prerequisite lessons. */
+	buildsOn: string[];
+	/** Titles of the lessons that depend on this one. */
+	leadsInto: string[];
+	guideSummary: string;
+}
+
+/** The session's course context (courses plan, 2026-10-30): message[0] of
+ *  a session started from a course lesson — the graph-context precedent.
+ *  `content` is the model's face (flattened to a user message by
+ *  toLlmMessages, bracketed per the PREAMBLE LAW); `details` feeds the
+ *  transcript's CourseLessonCard. */
+export function newCourseLessonMessage(ctx: CourseLessonContext): LhMarkerMessage {
+	const list = (titles: readonly string[]) => (titles.length > 0 ? titles.join("; ") : "none");
+	const lines = [
+		`[Session context] — this session is one lesson of the learner's course "${ctx.courseTitle}" (course goal: ${ctx.courseGoal}).`,
+		`Lesson: ${ctx.lessonTitle}`,
+		`Lesson goal: ${ctx.lessonGoal}`,
+		`Builds on earlier lessons: ${list(ctx.buildsOn)}`,
+		`Leads into: ${list(ctx.leadsInto)}`,
+		"Guide material for this lesson (summary of the learner's guide):",
+		ctx.guideSummary,
+	];
+	return {
+		id: newMessageId(),
+		role: "custom",
+		customType: "course-lesson",
+		content: lines.join("\n"),
+		display: true,
+		details: ctx,
 		timestamp: Date.now(),
 	};
 }
@@ -819,7 +862,7 @@ export function nativeInputCause(message: AgentMessage, history: readonly AgentM
 	if (message.role === "custom") {
 		if (["probe-handoff", "subagent-steer", "subagent-abort"].includes(message.customType)) return "automatic";
 		if (["practice-thinking", "practice-next"].includes(message.customType)) return "learner";
-		return ["graph-context", "plan-block", "problem-dismissed", "compaction"].includes(message.customType) ? "neutral" : "unrecognizable";
+		return ["graph-context", "course-lesson", "plan-block", "problem-dismissed", "compaction"].includes(message.customType) ? "neutral" : "unrecognizable";
 	}
 	if (message.role === "toolResult") {
 		if (!(QUESTION_TOOLS as readonly string[]).includes(message.toolName) || message.isError || message.details == null || (message.details as { dismissed?: boolean }).dismissed) return "neutral";

@@ -32,6 +32,7 @@ import { AUTH_PROVIDER_KEYS } from "./auth-keys.ts";
 import { CLAUDE_CODE_PROVIDER } from "./contracts/claude-code.ts";
 import type { ModelRole } from "../../config.ts";
 import type { ChatSettings } from "./contracts/chat.ts";
+import type { CourseEstimateMode } from "./contracts/course.ts";
 import type { SearchEngineId } from "./search.ts";
 import { isDictationLanguage, type DictationLanguage } from "./dictation.ts";
 
@@ -321,6 +322,7 @@ export const ROLE_SLOT: Readonly<Record<ModelRole, ModelSlotName>> = {
 	auditor: "cheap",
 	visualMaker: "vision",
 	pdfReader: "vision",
+	coursePlanner: "strong",
 };
 
 /** General settings — app-level behavior. Version DISPLAY and plans login
@@ -328,6 +330,10 @@ export const ROLE_SLOT: Readonly<Record<ModelRole, ModelSlotName>> = {
 export interface GeneralSettings {
 	/** Automatic startup/24h update checks (default ON). Manual checks bypass this. */
 	autoUpdate?: boolean;
+	/** Course lesson estimates (courses plan, 2026-10-30): "frozen" uses the
+	 *  pace snapshot taken at planning; "live" recomputes from the current
+	 *  pace on every view. Default frozen. */
+	courseEstimates?: CourseEstimateMode;
 }
 
 /** One app-wide dictation preference, shared by every composer. */
@@ -502,7 +508,7 @@ export interface FactorySettings {
 
 export const FACTORY_SETTINGS: FactorySettings = {
 	version: CURRENT_SETTINGS_VERSION,
-	general: { autoUpdate: true },
+	general: { autoUpdate: true, courseEstimates: "frozen" },
 	dictation: { language: "en" },
 	appearance: {
 		mode: "dark",
@@ -548,6 +554,7 @@ function sanitizeGeneral(raw: Record<string, unknown>): GeneralSettings {
 	const out: GeneralSettings = {};
 	const autoUpdate = boolOrDrop(raw.autoUpdate);
 	if (autoUpdate !== undefined) out.autoUpdate = autoUpdate;
+	if (raw.courseEstimates === "frozen" || raw.courseEstimates === "live") out.courseEstimates = raw.courseEstimates;
 	return out;
 }
 

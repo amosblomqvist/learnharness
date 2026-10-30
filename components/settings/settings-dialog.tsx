@@ -40,7 +40,7 @@ import {
 	type UserSettings,
 } from "@/src/core";
 import { useAppearance } from "./appearance.tsx";
-import { SettingsSection } from "./controls.tsx";
+import { SettingsRow, SettingsSection, ThinSelect } from "./controls.tsx";
 import { UpdateSettings } from "./update-settings.tsx";
 import { AgentSection } from "./agent-section.tsx";
 import type { ModelsSettings } from "@/src/core";
@@ -366,6 +366,23 @@ export function SettingsDialogBody({
 											void write("general", { ...record.general, autoUpdate: on })
 										}
 									/>
+									<SettingsRow
+										label="Course time estimates"
+										hint="Frozen keeps each course's estimates from when it was planned; live recomputes them from your current pace."
+										testid="row-course-estimates"
+									>
+										<ThinSelect
+											value={record.general?.courseEstimates ?? "frozen"}
+											ariaLabel="course time estimates"
+											testid="select-course-estimates"
+											onChange={(v) =>
+												void write("general", { ...record.general, courseEstimates: v === "live" ? "live" : "frozen" })
+											}
+										>
+											<option value="frozen">Frozen at planning</option>
+											<option value="live">Update live from my pace</option>
+										</ThinSelect>
+									</SettingsRow>
 								</SettingsSection>
 							)}
 							{active === "keys" && (

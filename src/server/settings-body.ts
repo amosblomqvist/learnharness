@@ -78,7 +78,7 @@ function asRecord(body: unknown): Record<string, unknown> | null {
 	return body as Record<string, unknown>;
 }
 
-/** general: { autoUpdate?: boolean } */
+/** general: { autoUpdate?: boolean, courseEstimates?: "frozen" | "live" } */
 export function parseGeneralSettingsBody(body: unknown): SettingsBodyResult<GeneralSettings> {
 	const raw = asRecord(body);
 	if (!raw) return { ok: false, error: "Invalid JSON body" };
@@ -88,6 +88,12 @@ export function parseGeneralSettingsBody(body: unknown): SettingsBodyResult<Gene
 			return { ok: false, error: "autoUpdate must be a boolean" };
 		}
 		settings.autoUpdate = raw.autoUpdate;
+	}
+	if (raw.courseEstimates !== undefined) {
+		if (raw.courseEstimates !== "frozen" && raw.courseEstimates !== "live") {
+			return { ok: false, error: 'courseEstimates must be "frozen" or "live"' };
+		}
+		settings.courseEstimates = raw.courseEstimates;
 	}
 	return { ok: true, settings };
 }

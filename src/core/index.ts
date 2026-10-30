@@ -84,3 +84,8 @@ export * from "./coverage.ts";
 // ONE session→markdown formatter — the extractor's view and the user-facing
 // export share it. Pure, browser-safe.
 export * from "./session-markdown.ts";
+// Courses (owner-approved plan, 2026-10-30): the lesson dependency graph,
+// derived progress, and the learned pace — pure, browser-safe.
+export * from "./course-graph.ts";
+export * from "./course-progress.ts";
+export * from "./pace.ts";

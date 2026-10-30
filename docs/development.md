@@ -150,14 +150,16 @@ src/
                                 prices, tool-parts — all pure: storage
                                 arrives as parameters
   store/                        fs adapters implementing the ports: chats · graph
-                                ledgers · jobs (+ render-settings, default-settings)
+                                ledgers · jobs · courses (+ render-settings,
+                                default-settings)
 electron/                       desktop launcher + security guard (spawns the standalone
                                 server; 1 IPC channel; LH_DATA_DIR + BYOK env)
 scripts/                        build-server.mjs (packaging guards), import-notes,
                                 backfill-graph, replay-layout
 data/                           chats/ · graph/ (nodes/chains/sessions/coverage
                                 ledgers + positions/sources/render-settings maps) ·
-                                jobs/ · settings.json — runtime state, git-ignored
+                                jobs/ · courses/ · settings.json — runtime state,
+                                git-ignored
 ```
 
 ## Key mechanisms
@@ -197,3 +199,13 @@ The teaching methodology comes from an Obsidian-based POC (its `knowledge graph 
 Nothing under `data/` is ever tracked by git. Chats, graph ledgers, jobs, positions, and the settings records are plain files (JSON/JSONL) — inspect them freely; they are the canonical records. The desktop app relocates the whole directory via `LH_DATA_DIR`.
 
 **Schema stamps (2026-10-10):** chat records carry `version` (stamped at the store's write choke point; absence reads as v1 — lazy migration, no mass rewrite), and the graph family (ledgers, sources, render-settings) shares one sidecar `graph/format.json`, created on the family's first write. `positions.json` is deliberately unstamped (rebuildable). A record stamped NEWER than the running build is refused on read — honest refusal for the downgrade scenario: a read-modify-write store never rewrites what it doesn't understand.
+
+## Courses (curriculum planner)
+
+A course turns a guide markdown file (uploaded or pasted, stored on the course), an optional goal, a deadline and free-text availability notes into a **dependency graph of lessons** (`src/core/contracts/course.ts`). Sidebar: **+ Course** → `/course/new` → Generate creates a persisted **draft** (`/course/[id]`), which the learner regenerates with feedback or accepts.
+
+- **Planner** — `src/agent/subagents/course-planner.ts`: one `runSubmitAgent` call (`submit_course`, role `coursePlanner` → the strong slot). With the graph-tools gate open it also gets the prober's names-only `list_sessions` / `list_propositions`. Submit-seam validation (DAG, dates within today…deadline and after prerequisites, multiplier 0.5–2 with a reason, replan invariants) error-backs into a retry. Usage of every run, failed ones included, is appended to the course record and priced at read time.
+- **Lessons → sessions** — "Start lesson" creates an ordinary teaching session whose message[0] is a `course-lesson` marker (course goal, lesson goal, neighbors, the lesson's guide summary); the lesson goal is auto-sent as the first message. A lesson may link many sessions.
+- **Derived progress** (`src/core/course-progress.ts`) — a session is done when every node of its current plan tree was the subject of a tagged quiz/explain call **and** the latest tagged call has an answered result; a lesson is done if any linked session is. Overdue = not done and past its target date.
+- **Learned pace** (`src/core/pace.ts`) — active time sums message gaps, dropping gaps over 10 minutes. Per teach session that reached teaching: probe/plan overhead and per-node run minutes. Blended toward defaults: node pace `(8·10 + Σ)/(10 + n)`, overhead `(10·5 + Σ)/(5 + m)`. Lesson minutes = `round((overhead + predictedNodes × nodePace) × multiplier)`. Settings → General → *Course time estimates* picks the course's planning-time pace snapshot (**frozen**, default) or the current pace (**live**).
+- **Replan** — reschedules the not-done lessons into a proposal the learner accepts or discards. Without feedback only dates, predicted nodes and multipliers may change; with feedback the planner may restructure (lessons with sessions keep their ids).
