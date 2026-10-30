@@ -2,6 +2,10 @@
 
 import { useRef, useState } from "react";
 
+/** The import pickers' filter: text notes, plus PDFs and the images the
+ * vision pass reads (issue #285). The server sniffs content, not names. */
+export const NOTES_IMPORT_ACCEPT = ".md,.markdown,.txt,.pdf,.png,.jpg,.jpeg,.gif,.webp,.bmp";
+
 // Transport-only types: never import the server's extraction/agent module here.
 export interface NotesImportResult {
 	requestIndex: number;
@@ -51,6 +55,41 @@ export async function postNotesImport(files: readonly File[]): Promise<NotesImpo
 	return parseNotesImportResults(body, files);
 }
 
+/** The import cap for any one file (issue #285): the API proxy buffers at
+ * most 26 MB of a request body (next.config.ts), so bigger files never
+ * leave the client. The server applies the same cap to PDFs and images. */
+const MAX_IMPORT_BYTES = 25 * 1024 * 1024;
+
+function importErrorText(r: NotesImportResult): string {
+	return `${r.filePath}: ${r.error}${r.code ? `\n${r.code}${r.provider ? ` — ${r.provider}` : ""}${r.missing?.length ? ` — ${r.missing.join(", ")}` : ""}${r.slots?.length ? ` — ${r.slots.join(", ")}` : ""}` : ""}`;
+}
+
+/** One request per file, three in flight (the route's own pool width), so
+ * no request outgrows the proxy's body limit however many PDFs are picked.
+ * Returns every failure's text in pick order; successes contribute none. */
+export async function importFilesSeparately(files: readonly File[]): Promise<string[]> {
+	const errors: (string | undefined)[] = files.map(() => undefined);
+	let next = 0;
+	const worker = async () => {
+		while (next < files.length) {
+			const index = next++;
+			const file = files[index]!;
+			if (file.size > MAX_IMPORT_BYTES) {
+				errors[index] = `${file.name}: File too large (over 25 MB)`;
+				continue;
+			}
+			try {
+				const [result] = await postNotesImport([file]);
+				if (!result!.ok) errors[index] = importErrorText(result!);
+			} catch (error) {
+				errors[index] = `${file.name}: ${error instanceof Error ? error.message : String(error)}`;
+			}
+		}
+	};
+	await Promise.all(Array.from({ length: Math.min(3, files.length) }, worker));
+	return errors.filter((error): error is string => error !== undefined);
+}
+
 /** Only error text survives a request; selected Files stay request-local. */
 export function useNotesImport(callbacks: { onStart?: () => void; onFinish?: () => void } = {}) {
 	const [errors, setErrors] = useState<string[]>([]);
@@ -63,11 +102,7 @@ export function useNotesImport(callbacks: { onStart?: () => void; onFinish?: () 
 		setErrors([]);
 		try {
 			callbacks.onStart?.();
-			const results = await postNotesImport(files);
-			setErrors(results
-				.filter((result) => !result.ok)
-				.sort((a, b) => a.requestIndex - b.requestIndex)
-				.map((r) => `${r.filePath}: ${r.error}${r.code ? `\n${r.code}${r.provider ? ` — ${r.provider}` : ""}${r.missing?.length ? ` — ${r.missing.join(", ")}` : ""}${r.slots?.length ? ` — ${r.slots.join(", ")}` : ""}` : ""}`));
+			setErrors(await importFilesSeparately(files));
 		} catch (error) {
 			const message = error instanceof Error ? error.message : String(error);
 			setErrors(files.map((file) => `${file.name}: ${message}`));

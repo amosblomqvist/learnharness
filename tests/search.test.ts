@@ -2,7 +2,7 @@
  * The search engines (search port + model slots wave, 2026-09-20):
  * engine resolution (the owner's auto-detect decision — a key is enough,
  * no engine choice needed; explicit pin requires the key; no silent
- * fallback) + the Tavily/Brave adapters against a STUB fetch (never the
+ * fallback) + the Tavily/Brave/Firecrawl adapters against a STUB fetch (never the
  * network — the wire shapes are verified against the published docs, and
  * the tests pin those shapes).
  *
@@ -11,7 +11,7 @@
 
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { resolveSearchEngineFor, tavilyProvider, braveProvider } from "../src/server/search.ts";
+import { resolveSearchEngineFor, tavilyProvider, braveProvider, firecrawlProvider } from "../src/server/search.ts";
 
 describe("resolveSearchEngineFor (the auto-detect decision)", () => {
 	it("no keys: honestly unavailable, no default", () => {
@@ -30,6 +30,11 @@ describe("resolveSearchEngineFor (the auto-detect decision)", () => {
 		const brv = resolveSearchEngineFor(undefined, { brave: "brave-throwaway-key-00001" });
 		assert.ok(brv.available);
 		assert.equal(brv.engine, "brave");
+
+		const fc = resolveSearchEngineFor(undefined, { firecrawl: "fc-throwaway-key-000001" });
+		assert.ok(fc.available);
+		assert.equal(fc.engine, "firecrawl");
+		assert.match(fc.reason, /auto/);
 	});
 
 	it("both keys, no pin: preference order — Tavily first (owner decision)", () => {
@@ -39,6 +44,20 @@ describe("resolveSearchEngineFor (the auto-detect decision)", () => {
 		});
 		assert.ok(out.available);
 		assert.equal(out.engine, "tavily");
+	});
+
+	it("Firecrawl ranks last — adding its key never changes an existing auto engine", () => {
+		const all = resolveSearchEngineFor(undefined, {
+			tavily: "tvly-throwaway-key-00001",
+			brave: "brave-throwaway-key-00001",
+			firecrawl: "fc-throwaway-key-000001",
+		});
+		assert.equal(all.engine, "tavily");
+		const braveAndFc = resolveSearchEngineFor(undefined, {
+			brave: "brave-throwaway-key-00001",
+			firecrawl: "fc-throwaway-key-000001",
+		});
+		assert.equal(braveAndFc.engine, "brave");
 	});
 
 	it("the explicit pin wins when its key is present", () => {
@@ -57,6 +76,20 @@ describe("resolveSearchEngineFor (the auto-detect decision)", () => {
 		assert.equal(out.engine, null);
 		assert.match(out.reason, /tavily/);
 		assert.match(out.reason, /API key is missing/);
+	});
+
+	it("a Firecrawl pin without its key names FIRECRAWL_API_KEY", () => {
+		const out = resolveSearchEngineFor("firecrawl", { tavily: "tvly-throwaway-key-00001" });
+		assert.ok(!out.available);
+		assert.equal(out.engine, null);
+		assert.match(out.reason, /FIRECRAWL_API_KEY/);
+
+		const pinned = resolveSearchEngineFor("firecrawl", {
+			tavily: "tvly-throwaway-key-00001",
+			firecrawl: "fc-throwaway-key-000001",
+		});
+		assert.equal(pinned.engine, "firecrawl");
+		assert.match(pinned.reason, /chosen/);
 	});
 });
 
@@ -129,5 +162,52 @@ describe("braveProvider (wire shape per Brave's dashboard docs, verified 2026-09
 			new Response("rate limited", { status: 429 }),
 		);
 		await assert.rejects(provider.search("q", 5), /Brave search API 429/);
+	});
+});
+
+describe("firecrawlProvider (wire shape per docs.firecrawl.dev, verified 2026-10-29)", () => {
+	it("POSTs api.firecrawl.dev/v2/search with Bearer auth + query/limit, no scrape", async () => {
+		const provider = firecrawlProvider("fc-throwaway-key-000001", stubFetch(
+			{
+				success: true,
+				data: {
+					web: [
+						{ title: "Example", url: "https://example.com/c", description: "line1\nline2", position: 1 },
+						{ url: "https://example.com/untitled", description: "no title" },
+						{ title: "No URL", description: "dropped" },
+					],
+				},
+			},
+			(url, init) => {
+				assert.equal(url, "https://api.firecrawl.dev/v2/search");
+				assert.equal(init.method, "POST");
+				const headers = init.headers as Record<string, string>;
+				assert.equal(headers.authorization, "Bearer fc-throwaway-key-000001");
+				const body = JSON.parse(init.body as string);
+				assert.equal(body.query, "test query");
+				assert.equal(body.limit, 5);
+				// A bare search — scraping each hit would cost extra credits.
+				assert.equal(body.scrapeOptions, undefined);
+			},
+		));
+		const hits = await provider.search("test query", 5);
+		assert.deepEqual(hits, [
+			{ title: "Example", url: "https://example.com/c", snippet: "line1 line2" },
+			{ title: "https://example.com/untitled", url: "https://example.com/untitled", snippet: "no title" },
+		]);
+	});
+
+	it("maps the {success:false, error} body into the message", async () => {
+		const provider = firecrawlProvider("fc-throwaway-key-000001", async () =>
+			new Response(JSON.stringify({ success: false, error: "Unauthorized: Invalid token" }), { status: 401 }),
+		);
+		await assert.rejects(provider.search("q", 5), /Firecrawl search API 401: Unauthorized: Invalid token/);
+	});
+
+	it("keeps the raw slice when the error body is not JSON", async () => {
+		const provider = firecrawlProvider("fc-throwaway-key-000001", async () =>
+			new Response("Payment Required", { status: 402 }),
+		);
+		await assert.rejects(provider.search("q", 5), /Firecrawl search API 402: Payment Required/);
 	});
 });

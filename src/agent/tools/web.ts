@@ -20,7 +20,7 @@ import TurndownService from "turndown";
  *
  * SEARCH REWIRING (search port wave, 2026-09-20): the Google CSE backend is
  * retired — web_search now runs on the injected search port (core/search.ts).
- * The live adapter (Tavily/Brave — server/search.ts) arrives as a DEPENDENCY
+ * The live adapter (Tavily/Brave/Firecrawl — server/search.ts) arrives as a DEPENDENCY
  * (import law: this tool depends on the core port, never server code). NO
  * silent fallback (owner decision): provider absent → search is honestly
  * unavailable, and the composition root drops the research dispatch tool on
@@ -148,7 +148,7 @@ export function createWebTools(search: () => SearchProvider | null): Record<stri
 				if (!provider) {
 					return (
 						"web_search is not available: no search engine is configured. " +
-						"Set a Tavily or Brave search API key in settings. Report in your brief that web search is unavailable."
+						"Set a Tavily, Brave, or Firecrawl search API key in settings. Report in your brief that web search is unavailable."
 					);
 				}
 				try {

@@ -40,6 +40,7 @@ import { CLAUDE_CODE_PROVIDER } from "./contracts/claude-code.ts";
 import {
 	CONCLUDE_ACK_TEXT,
 	HANDOFF_TEXT,
+	RESUME_PROBE_TEXT,
 	NEXT_PROBLEM_TEXT,
 	THINKING_LABEL,
 } from "./contracts/chat.ts";
@@ -232,6 +233,15 @@ export function newHandoffMessage(chatId: string): LhMarkerMessage {
 		display: true,
 		details: { chatId },
 		timestamp: Date.now(),
+	};
+}
+
+/** Return through the same idle-only delivery path with diagnostic instructions. */
+export function newProbeResumeMessage(chatId: string, toolCallId: string): LhMarkerMessage {
+	return {
+		...newHandoffMessage(chatId),
+		id: `steer_resume_probe_${toolCallId}`,
+		content: RESUME_PROBE_TEXT,
 	};
 }
 
@@ -739,16 +749,20 @@ function questionOccurrenceOf(messages: readonly LhMessage[]): Omit<PendingQuest
  *  error, and must not explicitly refuse with details.ok:false. Older
  *  clean acknowledgments without ok:true still count. No history changes. */
 export function probeDoneResultIds(messages: readonly LhMessage[]): Set<string> {
+	return successfulToolResultIds(messages, "probe_done");
+}
+
+export function successfulToolResultIds(messages: readonly LhMessage[], tool: string): Set<string> {
 	const calls = new Set<string>();
 	const results = new Set<string>();
 	for (const m of messages) {
 		if (m.role === "assistant") {
 			if (m.stopReason === "error" || m.stopReason === "aborted") continue;
 			for (const block of m.content) {
-				if (block.type === "toolCall" && block.name === "probe_done") calls.add(block.id);
+				if (block.type === "toolCall" && block.name === tool) calls.add(block.id);
 			}
 		} else if (
-			m.role === "toolResult" && m.toolName === "probe_done" &&
+			m.role === "toolResult" && m.toolName === tool &&
 			calls.has(m.toolCallId) && !m.isError &&
 			(m.details as { ok?: unknown } | null | undefined)?.ok !== false
 		) {
@@ -761,7 +775,14 @@ export function probeDoneResultIds(messages: readonly LhMessage[]): Set<string> 
 /** The probe→teach construction seam (chat-handler and the tool guard):
  *  only a concluded call plus a matching successful result means teach. */
 export function hasProbeDone(messages: readonly LhMessage[]): boolean {
-	return probeDoneResultIds(messages).size > 0;
+	const done = probeDoneResultIds(messages);
+	const resumed = successfulToolResultIds(messages, "resume_probe");
+	let concluded = false;
+	for (const message of messages) {
+		if (done.has(message.id)) concluded = true;
+		if (resumed.has(message.id)) concluded = false;
+	}
+	return concluded;
 }
 
 /** Every toolResult id in the record — answer-event validation (the call

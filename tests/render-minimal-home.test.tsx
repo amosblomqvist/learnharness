@@ -73,3 +73,13 @@ describe("KnowledgeSummary — the quiet home summary (2026-10-06)", () => {
 		assert.ok(!html.includes("Nothing here yet"));
 	});
 });
+
+describe("MinimalHome — the Study time entry", () => {
+	it("renders the Study time button without any graph data", async () => {
+		const { MinimalHome } = await import("../components/minimal-home.tsx");
+		const html = renderToStaticMarkup(React.createElement(MinimalHome));
+		assert.ok(html.includes('data-testid="open-study-time"'));
+		assert.ok(html.includes("Study time"));
+		assert.ok(html.indexOf("open-study-time") < html.indexOf("open-chain-table"), "first in the top-right row");
+	});
+});

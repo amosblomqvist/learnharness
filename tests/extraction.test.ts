@@ -24,7 +24,8 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import * as fs from "node:fs";
-import { after, describe, it } from "node:test";
+import * as path from "node:path";
+import { after, before, describe, it } from "node:test";
 import { createFauxCore, fauxAssistantMessage, fauxToolCall, type FauxResponseStep, type ToolCall, type Usage } from "@earendil-works/pi-ai";
 import type { PiEngine } from "../src/agent/models.ts";
 import type { LhMessage } from "../src/core/native-messages.ts";
@@ -55,7 +56,9 @@ import {
 	NOTES_PREAMBLE,
 	EXTRACTOR_INSTRUCTIONS,
 	NOTES_EXTRACTOR_INSTRUCTIONS,
+	notesImportInput,
 } from "../src/agent/subagents/extraction.ts";
+import { headlessOverride } from "../src/agent/subagents/headless.ts";
 import { getGraph, simplifyChains } from "../src/core/graph.ts";
 import { ModelsNotConfiguredError, ProviderKeyMissingError, providerKeyMissing, type ModelSlotName } from "../src/core/settings.ts";
 import { coverageOf, coverageSlots, messageViewLines } from "../src/core/coverage.ts";
@@ -907,9 +910,9 @@ describe("the extraction pipeline (extractor → auditor → merger)", () => {
 		const run = record.extractions![0]!;
 		assert.equal(run.stats?.nodes, 1); // p2 created; p1 linked, not created
 		// the scripted engine's model, provider-qualified (model slots wave)
-		assert.equal(run.stages.extractor.model, "faux:faux-1");
-		assert.equal(run.stages.extractor.steps.length, 1); // the submit call — the run STOPS after a clean submit
-		const step = run.stages.extractor.steps[0]!;
+		assert.equal(run.stages.extractor!.model, "faux:faux-1");
+		assert.equal(run.stages.extractor!.steps.length, 1); // the submit call — the run STOPS after a clean submit
+		const step = run.stages.extractor!.steps[0]!;
 		assert.ok(step.inputTokens! > 0 && step.outputTokens! > 0, "estimated usage captured");
 		assert.equal(step.cacheReadTokens, 0);
 		assert.equal(nativeUsage.extractor.length, 1);
@@ -918,11 +921,11 @@ describe("the extraction pipeline (extractor → auditor → merger)", () => {
 		assert.equal(step.cacheWriteTokens, nativeUsage.extractor[0]!.cacheWrite);
 		assert.equal(step.reasoningTokens, 0);
 		assert.equal(nativeUsage.auditor.length, 1);
-		assert.equal(run.stages.auditor.steps[0]!.cacheReadTokens, 0, "auditor owns a fresh conversation too");
+		assert.equal(run.stages.auditor!.steps[0]!.cacheReadTokens, 0, "auditor owns a fresh conversation too");
 		assert.ok(nativeUsage.auditor[0]!.cacheWrite > 0);
-		assert.equal(run.stages.auditor.steps[0]!.cacheReadTokens, nativeUsage.auditor[0]!.cacheRead);
-		assert.equal(run.stages.auditor.steps[0]!.cacheWriteTokens, nativeUsage.auditor[0]!.cacheWrite);
-		assert.equal(run.stages.auditor.steps.length, 1);
+		assert.equal(run.stages.auditor!.steps[0]!.cacheReadTokens, nativeUsage.auditor[0]!.cacheRead);
+		assert.equal(run.stages.auditor!.steps[0]!.cacheWriteTokens, nativeUsage.auditor[0]!.cacheWrite);
+		assert.equal(run.stages.auditor!.steps.length, 1);
 		assert.ok(!Number.isNaN(Date.parse(run.at)));
 	});
 
@@ -955,8 +958,8 @@ describe("the extraction pipeline (extractor → auditor → merger)", () => {
 		assert.equal(record.extractions?.length, 1);
 		const run = record.extractions![0]!;
 		assert.equal(run.stats, undefined);
-		assert.equal(run.stages.extractor.steps.length, 0);
-		assert.equal(run.stages.auditor.steps.length, 0);
+		assert.equal(run.stages.extractor!.steps.length, 0);
+		assert.equal(run.stages.auditor!.steps.length, 0);
 
 		// Aborting a non-running chat is an idempotent no-op.
 		assert.equal(abortExtraction(chatId), false);
@@ -1517,7 +1520,7 @@ describe("the notes front door (importNotes — format-agnostic)", () => {
 		assert.ok(Date.parse(source.importedAt));
 		assert.equal(source.extractions?.length, 1, "the run's usage persisted into the source record");
 		assert.equal(source.extractions![0]!.stats?.nodes, 1);
-		assert.ok(source.extractions![0]!.stages.extractor.steps.length > 0, "faux usage captured");
+		assert.ok(source.extractions![0]!.stages.extractor!.steps.length > 0, "faux usage captured");
 
 		// File-scoped provenance (submit-schema slim, 2026-09-28): the
 		// node carries ONE chat-level point — the source key itself, no
@@ -2520,5 +2523,139 @@ describe("notes import completion and retry reliability", () => {
 		assert.equal(ledgers.readSources().length, 1);
 		assert.equal(ledgers.readSources()[0]!.extractions?.length, 2);
 		assert.equal(ledgers.readNodes().length, 2);
+	});
+});
+
+describe("PDF and image imports (issue #285): transcription before extraction", () => {
+	const PDF_BYTES = new Uint8Array(fs.readFileSync(path.join(import.meta.dirname, "fixtures", "sample-3page.pdf")));
+	const PNG_1PX = new Uint8Array([
+		0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52,
+		0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x06, 0x00, 0x00, 0x00, 0x1f, 0x15, 0xc4,
+		0x89, 0x00, 0x00, 0x00, 0x0a, 0x49, 0x44, 0x41, 0x54, 0x78, 0x9c, 0x63, 0x00, 0x01, 0x00, 0x00,
+		0x05, 0x00, 0x01, 0x0d, 0x0a, 0x2d, 0xb4, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4e, 0x44, 0xae,
+		0x42, 0x60, 0x82,
+	]);
+	before(() => {
+		headlessOverride.current = {
+			available: () => true,
+			unavailableReason: () => null,
+			runDemo: async () => { throw new Error("unused"); },
+			renderSvg: async () => { throw new Error("unused"); },
+			renderPdfPages: async (_pdfPath, pages) => pages.map((page) => ({ page, png: Buffer.from(PNG_1PX) })),
+		};
+	});
+	after(() => { headlessOverride.current = undefined; });
+
+	/** A vision engine answering every call by page; records the phase it ran in. */
+	function transcriber(calls: number, phases: string[] = []): PiEngine {
+		return fauxEngine(Array.from({ length: calls }, () => (context: unknown) => {
+			phases.push(extractionStatuses().find((r) => r.chatId.startsWith("src_"))?.phase ?? "none");
+			const page = /Page (\d+) of/.exec(JSON.stringify(context))?.[1] ?? "image";
+			return fauxAssistantMessage(`TRANSCRIBED ${page}`);
+		}));
+	}
+	/** The notes extractor, capturing the prompt it was given. */
+	function seeingExtractor(seen: string[]): PiEngine {
+		return fauxEngine([(context) => {
+			seen.push(JSON.stringify(context));
+			return fauxAssistantMessage(
+				[fauxToolCall("submit_findings", NOTES_FINDINGS as ToolCall["arguments"], { id: "submit_findings-call" })],
+				{ stopReason: "toolUse" },
+			);
+		}]);
+	}
+
+	it("notesImportInput sniffs PDFs and images by content and caps them at 25 MB", () => {
+		assert.ok("pdf" in (notesImportInput("a.txt", PDF_BYTES) as object), "content wins over the name");
+		assert.deepEqual(notesImportInput("photo.png", PNG_1PX), { filePath: "photo.png", image: PNG_1PX, mimeType: "image/png" });
+		assert.deepEqual(notesImportInput("notes.md", new TextEncoder().encode("# Vim")), { filePath: "notes.md", text: "# Vim" });
+		const huge = new Uint8Array(25 * 1024 * 1024 + 1);
+		huge.set(PDF_BYTES.subarray(0, 5));
+		assert.equal(notesImportInput("huge.pdf", huge), "File too large (over 25 MB)");
+		const hugeText = new Uint8Array(25 * 1024 * 1024 + 1).fill(0x61);
+		assert.ok("text" in (notesImportInput("huge.md", hugeText) as object), "text files stay uncapped");
+	});
+
+	it("a PDF is transcribed in its own phase, then extracted from the transcription", async () => {
+		const ledgers = memoryLedgers();
+		const phases: string[] = [];
+		const seen: string[] = [];
+		const pipeline = createExtractionPipeline({
+			chatStore,
+			graphStore: ledgers,
+			transcriber: transcriber(3, phases),
+			extractor: seeingExtractor(seen),
+			auditor: submitModel("submit_review", NOTES_VERDICT),
+		});
+		const stats = await pipeline.importNotes({ filePath: "lecture.pdf", pdf: PDF_BYTES });
+		assert.deepEqual(stats, { nodes: 1, chains: 0 });
+		assert.deepEqual(phases, ["transcribing", "transcribing", "transcribing"]);
+		assert.match(seen[0]!, /--- Page 1 ---\\nTRANSCRIBED 1\\n--- Page 2 ---\\nTRANSCRIBED 2/);
+		assert.equal(extractionStatuses().length, 0, "the registry clears when the import ends");
+
+		const runs = ledgers.readSources()[0]!.extractions!;
+		assert.equal(runs.length, 2, "one transcription run + one chunk run");
+		const [transcription, chunk] = runs as [ExtractionRunUsage, ExtractionRunUsage];
+		assert.deepEqual(Object.keys(transcription.stages), ["transcription"]);
+		assert.equal(transcription.stages.transcription!.model, "faux:faux-1");
+		assert.equal(transcription.stages.transcription!.steps.length, 3);
+		assert.equal(transcription.stats, undefined);
+		assert.ok(chunk.stages.extractor && chunk.stages.auditor && !chunk.stages.transcription);
+	});
+
+	it("an image is transcribed in one call", async () => {
+		const ledgers = memoryLedgers();
+		const seen: string[] = [];
+		const pipeline = createExtractionPipeline({
+			chatStore,
+			graphStore: ledgers,
+			transcriber: transcriber(1),
+			extractor: seeingExtractor(seen),
+			auditor: submitModel("submit_review", NOTES_VERDICT),
+		});
+		assert.deepEqual(await pipeline.importNotes({ filePath: "board.png", image: PNG_1PX, mimeType: "image/png" }), { nodes: 1, chains: 0 });
+		assert.match(seen[0]!, /TRANSCRIBED image/);
+		assert.equal(ledgers.readSources()[0]!.extractions![0]!.stages.transcription!.steps.length, 1);
+	});
+
+	it("refuses before any call when the vision stage is unset or keyless", async () => {
+		const base = { chatStore, graphStore: memoryLedgers(), extractor: submitModel("submit_findings", NOTES_FINDINGS), auditor: submitModel("submit_review", NOTES_VERDICT) };
+		await assert.rejects(createExtractionPipeline(base).importNotes({ filePath: "a.pdf", pdf: PDF_BYTES }), (err: unknown) => {
+			assert.ok(err instanceof ModelsNotConfiguredError);
+			assert.deepEqual(err.envelope.missing, ["vision"]);
+			return true;
+		});
+		let called = false;
+		const keyless = createExtractionPipeline({
+			...base,
+			transcriber: fauxEngine([() => { called = true; return fauxAssistantMessage("unused"); }]),
+			providerKeyMissing: (provider, tier) => (tier === "vision" ? providerKeyMissing(provider, [tier]) : null),
+		});
+		await assert.rejects(keyless.importNotes({ filePath: "b.png", image: PNG_1PX, mimeType: "image/png" }), ProviderKeyMissingError);
+		assert.equal(called, false);
+		// Text imports never need the vision stage.
+		assert.deepEqual(await createExtractionPipeline(base).importNotes({ filePath: "c.md", text: NOTES_TEXT }), { nodes: 1, chains: 0 });
+	});
+
+	it("a failed transcription fails the import with nothing merged; an abort reports aborted", async () => {
+		const ledgers = memoryLedgers();
+		const make = (engine: PiEngine) => createExtractionPipeline({
+			chatStore, graphStore: ledgers, transcriber: engine,
+			extractor: submitModel("submit_findings", NOTES_FINDINGS), auditor: submitModel("submit_review", NOTES_VERDICT),
+		});
+		await assert.rejects(make(fauxEngine([() => { throw new Error("vision down"); }])).importNotes({ filePath: "x.png", image: PNG_1PX, mimeType: "image/png" }), (err: unknown) => {
+			assert.ok(err instanceof NotesImportError);
+			assert.equal(err.outcome, "failed");
+			assert.match(err.message, /Transcription failed/);
+			return true;
+		});
+		assert.equal(ledgers.readNodes().length, 0);
+
+		const run = make(hangingModel()).importNotes({ filePath: "y.png", image: PNG_1PX, mimeType: "image/png" });
+		await until(() => extractionStatuses().some((r) => r.phase === "transcribing"));
+		const sourceId = extractionStatuses().find((r) => r.phase === "transcribing")!.chatId;
+		assert.equal(abortExtraction(sourceId), true);
+		await assert.rejects(run, (err: unknown) => err instanceof NotesImportError && err.outcome === "aborted");
+		assert.equal(extractionStatuses().length, 0);
 	});
 });

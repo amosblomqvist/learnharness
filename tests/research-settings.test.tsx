@@ -13,7 +13,7 @@ it("keyless settings keep Research interactive while search-engine setup retains
 	const reason = "No search engine is configured.";
 	const bodies: Record<string, unknown> = {
 		"/api/search": { available: false, engine: null, reason },
-		"/api/keys": { keys: [{ id: "TAVILY_API_KEY", present: false }, { id: "BRAVE_API_KEY", present: false }] },
+		"/api/keys": { keys: [{ id: "TAVILY_API_KEY", present: false }, { id: "BRAVE_API_KEY", present: false }, { id: "FIRECRAWL_API_KEY", present: false }] },
 		"/api/models": { models: [], slots: { strong: null, cheap: null, vision: null } },
 		"/api/settings/prompts": { prober: [], teacher: [] },
 	};

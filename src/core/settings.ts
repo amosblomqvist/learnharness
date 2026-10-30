@@ -32,7 +32,7 @@ import { AUTH_PROVIDER_KEYS } from "./auth-keys.ts";
 import { CLAUDE_CODE_PROVIDER } from "./contracts/claude-code.ts";
 import type { ModelRole } from "../../config.ts";
 import type { ChatSettings } from "./contracts/chat.ts";
-import type { SearchEngineId } from "./search.ts";
+import { isSearchEngineId, type SearchEngineId } from "./search.ts";
 import { isDictationLanguage, type DictationLanguage } from "./dictation.ts";
 
 /** The schema version this code understands. Bump ONLY for breaking shape
@@ -456,6 +456,12 @@ export interface CompactionSettings {
 	thresholdTokens?: number;
 }
 
+/** Study-time settings: the idle limit (whole minutes, 1–60) and the week start. */
+export interface StudyTimeSettings {
+	idleMinutes?: number;
+	weekStart?: "monday" | "sunday";
+}
+
 /** THE record. Every section optional (delta); unknown top-level keys are
  *  preserved verbatim by the sanitizer (forward-compat with newer records). */
 export interface UserSettings {
@@ -472,6 +478,7 @@ export interface UserSettings {
 	appearance?: AppearanceSettings;
 	graph?: GraphSettings;
 	compaction?: CompactionSettings;
+	studyTime?: StudyTimeSettings;
 	[key: string]: unknown;
 }
 
@@ -498,6 +505,7 @@ export interface FactorySettings {
 	};
 	graph: Required<GraphSettings>;
 	compaction: Required<CompactionSettings>;
+	studyTime: Required<StudyTimeSettings>;
 }
 
 export const FACTORY_SETTINGS: FactorySettings = {
@@ -514,6 +522,7 @@ export const FACTORY_SETTINGS: FactorySettings = {
 	},
 	graph: { enabled: true, rendering: true, extractionChunkTokens: 4096 },
 	compaction: { thresholdTokens: 150_000 },
+	studyTime: { idleMinutes: 5, weekStart: "monday" },
 };
 
 /** The chunk budget's validated floor (GraphSettings.extractionChunkTokens
@@ -699,7 +708,7 @@ function sanitizeAgent(raw: Record<string, unknown>): AgentSettings {
 	// record, it just loses the pin and auto-detection resumes).
 	if (raw.search !== null && typeof raw.search === "object" && !Array.isArray(raw.search)) {
 		const engine = (raw.search as Record<string, unknown>).engine;
-		if (engine === "tavily" || engine === "brave") out.search = { engine };
+		if (isSearchEngineId(engine)) out.search = { engine };
 	}
 	// Prober graph tools (wave 7): its own agent-section subsection —
 	// lenient read side (a bad shape drops the key and the default ON
@@ -781,6 +790,22 @@ function sanitizeCompaction(raw: Record<string, unknown>): CompactionSettings {
 	return out;
 }
 
+/** Bounds of the study idle limit, in whole minutes. */
+export const STUDY_IDLE_MINUTES_MIN = 1;
+export const STUDY_IDLE_MINUTES_MAX = 60;
+
+/** clamp-never-reject: a finite idleMinutes rounds and clamps to 1–60; any
+ *  other idleMinutes, or a weekStart other than the two values, drops. */
+function sanitizeStudyTime(raw: Record<string, unknown>): StudyTimeSettings {
+	const out: StudyTimeSettings = {};
+	const minutes = raw.idleMinutes;
+	if (typeof minutes === "number" && Number.isFinite(minutes)) {
+		out.idleMinutes = Math.min(STUDY_IDLE_MINUTES_MAX, Math.max(STUDY_IDLE_MINUTES_MIN, Math.round(minutes)));
+	}
+	if (raw.weekStart === "monday" || raw.weekStart === "sunday") out.weekStart = raw.weekStart;
+	return out;
+}
+
 /**
  * Coerce arbitrary JSON (disk file, network body) into a valid delta record:
  * known fields validated strictly (invalid ones drop/clamp per module doc),
@@ -827,6 +852,9 @@ export function sanitizeUserSettings(raw: unknown): UserSettings | null {
 		if (r.compaction !== undefined && r.compaction !== null && typeof r.compaction === "object") {
 			out.compaction = sanitizeCompaction(r.compaction as Record<string, unknown>);
 		}
+	}
+	if (r.studyTime !== null && typeof r.studyTime === "object" && !Array.isArray(r.studyTime)) {
+		out.studyTime = sanitizeStudyTime(r.studyTime as Record<string, unknown>);
 	}
 	// Unknown top-level keys ride along untouched (forward-compat). One
 	// known-DEAD key is stripped instead of riding: `chat` (the old

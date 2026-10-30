@@ -5,7 +5,7 @@ import * as path from "node:path";
 import { describe, it } from "node:test";
 
 import type { AgentTool } from "@earendil-works/pi-agent-core";
-import { expandBraces, globToRegex, matchGlob, walkFiles } from "../src/agent/tools/fs-shared.ts";
+import { expandBraces, globToRegex, matchGlob, resolveSourcePath, walkFiles } from "../src/agent/tools/fs-shared.ts";
 import { findTool } from "../src/agent/tools/find.ts";
 import { grepTool } from "../src/agent/tools/grep.ts";
 import { lsTool } from "../src/agent/tools/ls.ts";
@@ -83,6 +83,21 @@ describe("glob helpers (fs-shared)", () => {
 		assert.equal(globToRegex("a?c").test("abc"), true);
 		assert.equal(globToRegex("a?c").test("ac"), false);
 		assert.equal(matchGlob("a.b.txt", "a.b*"), true, "the dot is literal, not any-char");
+	});
+});
+
+describe("resolveSourcePath (fs-shared)", () => {
+	it("a leading ~ is the learner's home, as a shell expands it", () => {
+		const home = os.homedir();
+		assert.equal(resolveSourcePath("~"), home);
+		assert.equal(resolveSourcePath("~/notes/calculus.md"), path.join(home, "notes", "calculus.md"));
+	});
+
+	it("~user and non-leading tildes stay literal", () => {
+		const home = os.homedir();
+		assert.equal(resolveSourcePath("~other/notes.md"), path.join(home, "~other", "notes.md"));
+		assert.equal(resolveSourcePath("notes/~draft.md"), path.join(home, "notes", "~draft.md"));
+		assert.equal(resolveSourcePath("/tmp/~/x.md"), "/tmp/~/x.md");
 	});
 });
 

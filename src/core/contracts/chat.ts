@@ -105,10 +105,13 @@ export interface ExtractionRunUsage {
 	/** What the run merged into the graph; absent when it failed first. */
 	stats?: EmissionStats;
 	/** Model usage per stage, in pipeline order (merger is deterministic —
-	 *  no model call, no entry). */
+	 *  no model call, no entry). Chunk/batch runs carry extractor + auditor;
+	 *  a PDF/image import's transcription run (issue #285) carries only
+	 *  transcription. */
 	stages: {
-		extractor: ExtractionStageUsage;
-		auditor: ExtractionStageUsage;
+		transcription?: ExtractionStageUsage;
+		extractor?: ExtractionStageUsage;
+		auditor?: ExtractionStageUsage;
 	};
 }
 
@@ -190,6 +193,12 @@ export const HANDOFF_TEXT =
 	"Find the unconditional truths, plan the motivated derivations/discoveries, so every reasoning step has to land as obviously true. " +
 	"Take your time here and really think this through. " +
 	"When it's genuinely reasoned out, call plan_init and present the plan; I'll accept it or ask for changes.";
+
+/** The return-to-diagnostic handoff, distinct from planning instructions. */
+export const RESUME_PROBE_TEXT =
+	"The learner asked to continue the diagnostic. Resume probing their foundations, " +
+	"using the full conversation as evidence. The previous assessment and map are provisional. " +
+	"Do not start teaching. Conclude again with probe_done only when the diagnostic is complete.";
 
 // ─── Practice sessions (owner, 2026-10-04) — marker + ack texts ──────────────
 // Single-sourced here per the marker law: the model-facing text of every

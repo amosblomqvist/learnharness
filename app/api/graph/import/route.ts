@@ -7,13 +7,18 @@
  * source record (the file's provenance + the run's usage), and runs
  * extractor → auditor → merger over the raw text.
  *
+ * PDFs and images (issue #285) are sniffed by magic bytes and handed over
+ * as bytes — the pipeline transcribes them before extraction; anything
+ * else is still decoded as text. They are capped at 25 MB (the
+ * researcher's web-PDF cap); text files stay uncapped.
+ *
  * Small concurrency cap: the model calls are the slow part, and a burst of
  * 25 simultaneous runs would trip provider rate limits — a 3-wide worker
  * pool keeps the run registry (the dock's status chips) and the ledgers
  * healthy. The dock's chips + graph refetch track progress live through
  * /api/graph/status, as with session runs.
  */
-import { extraction, NotesImportError } from "@/src/server";
+import { extraction, NotesImportError, notesImportInput } from "@/src/server";
 import {
 	ModelsNotConfiguredError,
 	PROVIDER_KEY_MISSING_CODE,
@@ -55,8 +60,12 @@ export async function POST(request: Request) {
 			if (!next) return;
 			const { file, requestIndex } = next;
 			try {
-				const text = await file.text();
-				const stats = await extraction.importNotes({ filePath: file.name, text });
+				const input = notesImportInput(file.name, new Uint8Array(await file.arrayBuffer()));
+				if (typeof input === "string") {
+					results.push({ filePath: file.name, requestIndex, outcome: "failed", ok: false, error: input });
+					continue;
+				}
+				const stats = await extraction.importNotes(input);
 				results.push({ filePath: file.name, requestIndex, outcome: "completed", ok: true, stats });
 			} catch (err) {
 				if (err instanceof ModelsNotConfiguredError) {
