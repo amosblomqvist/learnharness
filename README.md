@@ -35,7 +35,7 @@ The agent can also research questions in the background, create visual explanati
 
 ## Knowledge that carries forward
 
-What you are taught accumulates as propositions and reasoning chains: individual claims and the premises that lead to them. The graph shows this structure, with links back to the source sessions. You can also import notes.
+What you are taught accumulates as propositions and reasoning chains: individual claims and the premises that lead to them. The graph shows this structure, with links back to the source sessions. You can also import notes, including PDFs and images: pages with math, figures, scans, or handwriting are read by your vision model.
 
 Future teaching sessions can read the graph instead of starting from scratch. Practice sessions can draw their material from it. It stores the ideas and their connections, not ratings of your ability.
 

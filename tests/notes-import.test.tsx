@@ -32,6 +32,11 @@ async function mount() {
 async function submit(selected: File[] | null = [...files]) {
 	await act(async () => { current.onImportFiles(selected as unknown as FileList | null); });
 }
+/** Wait out uploads whose stubs need real ticks (timers, File reads). */
+async function settled() {
+	for (let i = 0; current.importing && i < 500; i++) await act(async () => { await new Promise((resolve) => setTimeout(resolve, 2)); });
+	assert.equal(current.importing, false, "the import settled");
+}
 afterEach(async () => {
 	await act(async () => { root?.unmount(); });
 	root = undefined;
@@ -132,18 +137,58 @@ it("empty error text renders nothing; multiple errors are plain independent aler
 	assert.doesNotMatch(html, /<section|<button|border|bg-/);
 });
 
-it("mixed out-of-order results show only failed files in selection order, including duplicate basenames", async () => {
+/** The route's answer for one posted file, chosen by that file's content. */
+function fetchPerFile(answer: (name: string, text: string) => NotesImportResult, posted: string[] = []): typeof fetch {
+	return async (_url, init) => {
+		const form = init!.body as FormData;
+		const sent = form.getAll("files") as File[];
+		assert.equal(sent.length, 1, "one file per request");
+		const text = await sent[0]!.text();
+		posted.push(text);
+		// The second duplicate answers first: completion order is not pick order.
+		if (text === "two") await new Promise((resolve) => setTimeout(resolve, 5));
+		return Response.json({ results: [answer(sent[0]!.name, text)] });
+	};
+}
+
+it("mixed results show only failed files in selection order, including duplicate basenames", async () => {
 	const selected = [new File(["success"], "success.md"), ...files];
-	const results: NotesImportResult[] = [
-		{ requestIndex: 2, filePath: "same.md", ok: false, outcome: "partial", error: "second duplicate" },
-		{ ...completed(), filePath: "success.md" },
-		{ requestIndex: 1, filePath: "same.md", ok: false, outcome: "failed", error: "first duplicate" },
-	];
-	globalThis.fetch = async () => Response.json({ results });
+	globalThis.fetch = fetchPerFile((name, text) => text === "success"
+		? { ...completed(), filePath: name }
+		: { requestIndex: 0, filePath: name, ok: false, outcome: text === "one" ? "failed" : "partial", error: text === "one" ? "first duplicate" : "second duplicate" });
 	await mount();
 	await submit(selected);
+	await settled();
 	assert.deepEqual(current.errors, ["same.md: first duplicate", "same.md: second duplicate"]);
 	assert.doesNotMatch(host!.innerHTML, /success.md|completed|propositions/);
+});
+
+it("files over 25 MB are refused before upload; the rest still import (issue #285)", async () => {
+	const posted: string[] = [];
+	globalThis.fetch = fetchPerFile((name) => ({ ...completed(), filePath: name }), posted);
+	await mount();
+	await submit([new File([new Uint8Array(25 * 1024 * 1024 + 1)], "huge.pdf"), files[0]!]);
+	await settled();
+	assert.deepEqual(current.errors, ["huge.pdf: File too large (over 25 MB)"]);
+	assert.deepEqual(posted, ["one"], "the oversized file never left the client");
+});
+
+it("at most three uploads are in flight at once", async () => {
+	let active = 0;
+	let peak = 0;
+	globalThis.fetch = async (_url, init) => {
+		active++; peak = Math.max(peak, active);
+		await new Promise((resolve) => setTimeout(resolve, 5));
+		active--;
+		const file = (init!.body as FormData).get("files") as File;
+		return Response.json({ results: [{ ...completed(), filePath: file.name }] });
+	};
+	await mount();
+	await submit(Array.from({ length: 7 }, (_, i) => new File([String(i)], `${i}.md`)));
+	await settled();
+	assert.equal(peak, 3);
+	assert.equal(active, 0, "all seven finished");
+	assert.deepEqual(current.errors, []);
 });
 
 for (const kind of ["network", "non-JSON", "non-2xx", "malformed", "duplicate index"] as const) it(`${kind} hook failure is visible for every selected file, never success`, async () => {
@@ -164,7 +209,7 @@ for (const kind of ["network", "non-JSON", "non-2xx", "malformed", "duplicate in
 
 it("actual attempts clear errors immediately, guard synchronous reentry, preserve callbacks and allow same-file reimport", async () => {
 	let requests = 0;
-	let resolve!: (response: Response) => void;
+	const pending: ((response: Response) => void)[] = [];
 	globalThis.fetch = async () => { requests++; return Response.json({ results: [] }); };
 	await mount();
 	await submit();
@@ -172,28 +217,28 @@ it("actual attempts clear errors immediately, guard synchronous reentry, preserv
 	await submit(null);
 	await submit([]);
 	assert.equal(current.errors.length, 2, "cancel/empty selection is not an attempt");
-	assert.equal(requests, 1);
-	globalThis.fetch = async () => { requests++; return new Promise<Response>((done) => { resolve = done; }); };
+	assert.equal(requests, 2, "one request per file");
+	globalThis.fetch = async () => { requests++; return new Promise<Response>((done) => { pending.push(done); }); };
 	await act(async () => {
 		const staleHandler = current.onImportFiles;
 		staleHandler(files as unknown as FileList);
 		staleHandler(files as unknown as FileList);
 	});
-	assert.equal(requests, 2, "ref guard rejects even same-tick reentry before React rerenders");
+	assert.equal(requests, 4, "ref guard rejects even same-tick reentry before React rerenders");
 	assert.equal(current.importing, true);
 	assert.deepEqual(current.errors, []);
 	assert.equal(host!.innerHTML, "");
 	assert.equal(starts, 2);
-	assert.equal(finishes, 1, "finish waits for the POST");
+	assert.equal(finishes, 1, "finish waits for every POST");
 	await submit();
-	assert.equal(requests, 2, "pending attempts do not submit");
-	await act(async () => { resolve(Response.json({ results: [completed(1), completed()] })); });
+	assert.equal(requests, 4, "pending attempts do not submit");
+	await act(async () => { for (const done of pending) done(Response.json({ results: [completed()] })); });
 	assert.equal(current.importing, false);
 	assert.deepEqual(current.errors, []);
 	assert.equal(finishes, 2);
-	globalThis.fetch = async () => { requests++; return Response.json({ results: [completed(), completed(1)] }); };
+	globalThis.fetch = async () => { requests++; return Response.json({ results: [completed()] }); };
 	await submit();
-	assert.equal(requests, 3, "same File objects can be submitted again after settlement");
+	assert.equal(requests, 6, "same File objects can be submitted again after settlement");
 	assert.equal(starts, 3);
 	assert.equal(finishes, 3);
 	assert.equal(host!.innerHTML, "");

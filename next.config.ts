@@ -114,6 +114,14 @@ const nextConfig: NextConfig = {
 		"@silvia-odwyer/photon-node", // CJS loads its adjacent WASM from disk
 		"@resvg/resvg-js", // native binding — same
 	],
+	experimental: {
+		// proxy.ts runs on every /api route, and Next buffers a proxied body
+		// only up to this size (default 10MB) — the rest is silently cut and
+		// the route sees a broken multipart body. Notes imports (issue #285)
+		// send one file per request under a 25 MB cap; this leaves room for
+		// the multipart envelope.
+		proxyClientMaxBodySize: "26mb",
+	},
 };
 
 export default nextConfig;

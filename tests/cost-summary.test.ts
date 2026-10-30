@@ -110,4 +110,36 @@ describe("graphCostSummary (the cost pill's fold)", () => {
 		assert.equal(empty.runs.length, 0);
 		assert.equal(empty.stages.extraction.tokens.inputTokens, undefined);
 	});
+
+	test("a transcription run (issue #285) folds into its own stage only", () => {
+		const transcriptionRun = (startedAt: number, model: string): ExtractionRunUsage => ({
+			startedAt,
+			at: new Date(startedAt).toISOString(),
+			durationMs: 5_000,
+			stages: { transcription: { model, steps: [step(3000, 400), step(3000, 400)] } },
+		});
+		const s = graphCostSummary({
+			chats: [],
+			sources: [{ filePath: "lecture.pdf", extractions: [transcriptionRun(100, PRICED), extractionRun(200, PRICED, PRICED)] }],
+		});
+		const pageCost = callCost(step(3000, 400), PRICED)!;
+		assert.equal(s.stages.transcription.runs, 1);
+		assert.equal(s.stages.transcription.dollars, pageCost * 2);
+		assert.equal(s.stages.transcription.tokens.inputTokens, 6000);
+		assert.equal(s.stages.extraction.runs, 1, "the transcription run bills no extraction stage");
+		assert.equal(s.stages.audit.runs, 1);
+		assert.equal(s.totalDollars, s.stages.transcription.dollars + s.stages.extraction.dollars + s.stages.audit.dollars);
+		assert.equal(s.runs.find((r) => r.startedAt === 100)!.dollars, pageCost * 2);
+		assert.equal(s.unpricedRuns, 0);
+
+		const unpriced = graphCostSummary({ chats: [], sources: [{ filePath: "x.png", extractions: [transcriptionRun(1, "nowhere:unknown-model")] }] });
+		assert.equal(unpriced.stages.transcription.unpricedRuns, 1);
+		assert.equal(unpriced.unpricedRuns, 1);
+		assert.equal(unpriced.runs[0]!.unpricedStages, 1);
+
+		const subscription = graphCostSummary({ chats: [], sources: [{ filePath: "y.png", extractions: [transcriptionRun(1, "chatgpt:gpt-5")] }] });
+		assert.equal(subscription.stages.transcription.subscriptionRuns, 1);
+		assert.equal(subscription.unpricedRuns, 0, "a subscription-only run is not unpriced");
+		assert.equal(subscription.runs[0]!.unpricedStages, undefined);
+	});
 });

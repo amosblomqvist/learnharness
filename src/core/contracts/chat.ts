@@ -105,10 +105,13 @@ export interface ExtractionRunUsage {
 	/** What the run merged into the graph; absent when it failed first. */
 	stats?: EmissionStats;
 	/** Model usage per stage, in pipeline order (merger is deterministic —
-	 *  no model call, no entry). */
+	 *  no model call, no entry). Chunk/batch runs carry extractor + auditor;
+	 *  a PDF/image import's transcription run (issue #285) carries only
+	 *  transcription. */
 	stages: {
-		extractor: ExtractionStageUsage;
-		auditor: ExtractionStageUsage;
+		transcription?: ExtractionStageUsage;
+		extractor?: ExtractionStageUsage;
+		auditor?: ExtractionStageUsage;
 	};
 }
 

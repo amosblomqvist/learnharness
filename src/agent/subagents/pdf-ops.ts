@@ -173,6 +173,23 @@ export async function pdfExtract(filePath: string, pageSpec: string): Promise<st
 	return out.join("\n");
 }
 
+/** Every page's text in one document pass (index 0 = page 1) — the notes
+ *  transcriber's base layer, without reopening the PDF per page. */
+export async function pdfPageTexts(filePath: string): Promise<string[]> {
+	const { doc, task } = await openDocument(filePath);
+	try {
+		const out: string[] = [];
+		for (let i = 1; i <= doc.numPages; i++) {
+			const page = await doc.getPage(i);
+			const content = await page.getTextContent();
+			out.push(itemsToText(content.items as unknown[]));
+		}
+		return out;
+	} finally {
+		await task.destroy();
+	}
+}
+
 export interface PdfSearchHit {
 	page: number;
 	line: number;

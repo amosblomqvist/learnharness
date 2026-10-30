@@ -101,3 +101,30 @@ it("route returns 400 without files", async () => {
 	assert.equal(response.status, 400);
 	assert.deepEqual(await response.json(), { results: [], error: "no files" });
 });
+
+it("route hands PDFs and images over as bytes and refuses oversized ones per file (issue #285)", async () => {
+	const seen: Parameters<typeof extraction.importNotes>[0][] = [];
+	extraction.importNotes = async (input) => { seen.push(input); return { nodes: 0, chains: 0 }; };
+	const png = new Uint8Array([
+		0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52,
+		0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x06, 0x00, 0x00, 0x00, 0x1f, 0x15, 0xc4,
+	]);
+	const huge = new Uint8Array(25 * 1024 * 1024 + 1);
+	huge.set(new TextEncoder().encode("%PDF-"));
+	const form = new FormData();
+	form.append("files", new File([new TextEncoder().encode("%PDF-1.7\n")], "lecture.pdf"));
+	form.append("files", new File([png], "board.png"));
+	form.append("files", new File(["# plain notes"], "notes.md"));
+	form.append("files", new File([huge], "huge.pdf"));
+	const response = await POST(new Request("http://localhost/api/graph/import", { method: "POST", body: form }));
+	const { results } = await response.json();
+	const byName = (name: string) => results.find((r: { filePath: string }) => r.filePath === name);
+	assert.ok(["lecture.pdf", "board.png", "notes.md"].every((name) => byName(name).ok));
+	assert.deepEqual(byName("huge.pdf"), { filePath: "huge.pdf", requestIndex: 3, outcome: "failed", ok: false, error: "File too large (over 25 MB)" });
+	const input = (name: string) => seen.find((i) => i.filePath === name)!;
+	assert.ok("pdf" in input("lecture.pdf"));
+	const board = input("board.png");
+	assert.ok("image" in board && board.mimeType === "image/png");
+	assert.deepEqual(input("notes.md"), { filePath: "notes.md", text: "# plain notes" });
+	assert.equal(seen.length, 3, "the oversized file never reaches the pipeline");
+});
