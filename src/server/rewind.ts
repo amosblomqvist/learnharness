@@ -16,7 +16,8 @@
  * The usage logs stay: that spend really happened.
  *
  * Choreography (the deleteChatSession precedent):
- *   1. validate the target — the chat's LAST user message;
+ *   1. validate the target — the chat's LAST user message — and refuse a
+ *      compaction in flight BEFORE touching anything;
  *   2. stop the running turn and wait for it to settle (its onFinish
  *      persists the partial transcript and may kick an extraction);
  *   3. claim the chat's turn slot, so no wake turn can start mid-rewind;
@@ -63,8 +64,10 @@ export type RewindOutcome =
  *  so tests can tighten it. */
 export const rewindLimits = { settleTimeoutMs: 10_000 };
 const SETTLE_POLL_MS = 50;
-/** A wake turn can slip in between the settle and the claim: abort it too. */
-const CLAIM_ATTEMPTS = 3;
+
+function compactionRunning(): Extract<RewindOutcome, { ok: false }> {
+	return { ok: false, status: 409, code: "compaction_running", error: "The session is being compacted — try again when it finishes" };
+}
 
 function turnBusy(chatId: string): boolean {
 	return isTurnRunning(chatId) || runningTurn(chatId) !== undefined;
@@ -119,24 +122,27 @@ export async function rewindChat(chatId: string, messageId: string): Promise<Rew
 	const refused = targetIndex(first.messages, messageId);
 	if (typeof refused !== "number") return refused;
 
-	// Stop the running turn, then claim the slot (steps 2 and 3).
-	let claimed = false;
-	for (let attempt = 0; attempt < CLAIM_ATTEMPTS && !claimed; attempt++) {
-		if (turnBusy(chatId)) {
-			abortTurn(chatId);
-			if (!(await turnSettled(chatId))) {
-				return { ok: false, status: 503, code: "turn_winding_down", error: "The session's turn is still winding down — try again in a moment" };
-			}
+	// Refuse BEFORE the destructive abort: a refused rewind must not cost the
+	// learner the reply that is still streaming.
+	if (compactionInFlight(chatId)) return compactionRunning();
+
+	// Stop the running turn, then claim the slot (steps 2 and 3). No await
+	// sits between the settle check and the claim, so nothing can start a
+	// turn in between.
+	if (turnBusy(chatId)) {
+		abortTurn(chatId);
+		if (!(await turnSettled(chatId))) {
+			return { ok: false, status: 503, code: "turn_winding_down", error: "The session's turn is still winding down — try again in a moment" };
 		}
-		claimed = beginTurn(chatId);
 	}
-	if (!claimed) {
-		return { ok: false, status: 409, code: "turn_in_flight", error: "A turn keeps starting in this session — try again in a moment" };
+	if (!beginTurn(chatId)) {
+		return { ok: false, status: 409, code: "turn_in_flight", error: "A turn is running in this session — try again in a moment" };
 	}
 
 	try {
+		// A compaction can start after the settle (the finished turn kicks it).
 		if (compactionInFlight(chatId)) {
-			return { ok: false, status: 409, code: "compaction_running", error: "The session is being compacted — try again when it finishes" };
+			return compactionRunning();
 		}
 		if (!(await windDownExtraction(chatId))) {
 			return { ok: false, status: 503, code: "extraction_winding_down", error: "The session's extraction is still winding down — try again in a moment" };

@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { after, afterEach, describe, it } from "node:test";
+import { syncBuiltinESMExports } from "node:module";
+import { after, afterEach, describe, it, mock } from "node:test";
 import { buildSubagentSteer, type PlanTree, type SessionFindings } from "../src/core/contracts.ts";
 import { coverageSlots } from "../src/core/coverage.ts";
 import { mergeFindings } from "../src/core/graph.ts";
@@ -21,6 +22,8 @@ const { registerTurn, unregisterTurn } = await import("../src/server/turn-runs.t
 const {
 	deliverJobResult, discardChatDeliveries, registerLiveAgent, steerLiveChat, unregisterLiveAgent,
 } = await import("../src/server/jobs.ts");
+
+const { subscribe } = await import("../src/core/events.ts");
 
 const chats: string[] = [];
 const controllers: string[] = [];
@@ -115,6 +118,7 @@ async function scenario() {
 afterEach(() => {
 	rewindLimits.settleTimeoutMs = 10_000;
 	(globalThis as { __lhCompaction?: unknown }).__lhCompaction = undefined;
+	(globalThis as { __lhExtractionRuns?: unknown }).__lhExtractionRuns = undefined;
 	for (const id of controllers.splice(0)) unregisterJobAbort(id);
 	for (const id of chats.splice(0)) {
 		unregisterTurn(id); unregisterLiveAgent(id); endTurn(id); discardChatDeliveries(id);
@@ -239,12 +243,101 @@ describe("rewindChat (editing the last sent message)", () => {
 		assert.equal(stores.chatStore.getChat(chat.id)!.messages.length, 2);
 	});
 
-	it("a compaction in flight is a 409, and the turn slot is released", async () => {
+	it("a compaction in flight is a 409 that refuses BEFORE aborting: the streaming turn is untouched", async () => {
 		const chat = newChat([user("u1", "teach me"), user("u2", "edit me")]);
 		(globalThis as { __lhCompaction?: unknown }).__lhCompaction = { inFlight: new Map([[chat.id, Promise.resolve()]]) };
+		let aborts = 0;
+		assert(beginTurn(chat.id));
+		registerTurn(chat.id, { subscribe: () => new ReadableStream(), abort: () => { aborts++; } } as unknown as Parameters<typeof registerTurn>[1]);
+
 		const outcome = await rewindChat(chat.id, "u2");
 		assert.ok(!outcome.ok && outcome.status === 409 && outcome.code === "compaction_running");
+		assert.equal(aborts, 0, "the learner's streaming reply is not cut short by a refused rewind");
 		assert.equal(stores.chatStore.getChat(chat.id)!.messages.length, 2);
-		assert.equal(isTurnRunning(chat.id), false);
+		assert.equal(isTurnRunning(chat.id), true, "the running turn still owns its slot");
+	});
+
+	it("a compaction that starts after the settle is a 409, and the claimed turn slot is released", async () => {
+		const chat = newChat([user("u1", "teach me"), user("u2", "edit me")]);
+		assert(beginTurn(chat.id));
+		registerTurn(chat.id, {
+			subscribe: () => new ReadableStream(),
+			abort() {
+				setTimeout(() => { // the finished turn kicks a compaction as it settles
+					(globalThis as { __lhCompaction?: unknown }).__lhCompaction = { inFlight: new Map([[chat.id, Promise.resolve()]]) };
+					unregisterTurn(chat.id);
+					endTurn(chat.id);
+				}, 10);
+			},
+		} as unknown as Parameters<typeof registerTurn>[1]);
+
+		const outcome = await rewindChat(chat.id, "u2");
+		assert.ok(!outcome.ok && outcome.status === 409 && outcome.code === "compaction_running");
+		assert.equal(stores.chatStore.getChat(chat.id)!.messages.length, 2, "nothing was rewound");
+		assert.equal(isTurnRunning(chat.id), false, "the slot claimed for the rewind is released");
+	});
+
+	it("a running extraction is cancelled and awaited before the ledgers are rewritten", async () => {
+		const { chat } = await scenario();
+		const controller = new AbortController();
+		const running = new Map<string, unknown>([["extraction-run", { chatId: chat.id, kind: "chat", phase: "extracting", startedAt: 1, usage: {}, controller }]]);
+		(globalThis as { __lhExtractionRuns?: unknown }).__lhExtractionRuns = { running, inFlight: new Set(), lastStartedAt: 0 };
+		let cutNodeSeenByExtraction = false;
+		controller.signal.addEventListener("abort", () => {
+			setTimeout(() => { // the pipeline unwinds a beat later; the rewind must still be waiting
+				cutNodeSeenByExtraction = nodeStatements().includes(`${chat.id} cut`);
+				running.delete("extraction-run");
+			}, 30);
+		});
+
+		const outcome = await rewindChat(chat.id, "u2");
+		(globalThis as { __lhExtractionRuns?: unknown }).__lhExtractionRuns = undefined;
+		assert.ok(outcome.ok);
+		assert.equal(controller.signal.aborted, true);
+		assert.equal(cutNodeSeenByExtraction, true, "the ledgers were still untouched while the extraction wound down");
+		assert.ok(!nodeStatements().includes(`${chat.id} cut`), "and rewritten only after");
+	});
+});
+
+describe("JobStore.deleteJob", () => {
+	it("removes the record and announces it; an unknown id is false and silent", () => {
+		const chat = newChat([user("u1", "hi")]);
+		const job = stores.jobStore.createJob({ kind: "research", chatId: chat.id, toolCallId: "call-x" });
+		const events: string[] = [];
+		const unsubscribe = subscribe((event) => { if (event.type === "jobs-changed") events.push(event.chatId ?? ""); });
+		try {
+			assert.equal(stores.jobStore.deleteJob("job_missing"), false);
+			assert.deepEqual(events, [], "nothing died, nothing announced");
+			assert.equal(stores.jobStore.deleteJob(job.id), true);
+			assert.deepEqual(events, [chat.id]);
+			assert.equal(stores.jobStore.getJob(job.id), null);
+			assert.equal(stores.jobStore.deleteJob(job.id), false, "idempotent");
+		} finally {
+			unsubscribe();
+		}
+	});
+
+	it("a runner finishing after its job is gone resurrects nothing", () => {
+		const chat = newChat([user("u1", "hi")]);
+		const job = stores.jobStore.createJob({ kind: "research", chatId: chat.id, toolCallId: "call-y" });
+		assert.equal(stores.jobStore.deleteJob(job.id), true);
+		// What an aborted runner still does on its way out: a usage merge-patch.
+		assert.equal(stores.jobStore.updateJob(job.id, { usage: { model: "faux:faux", inputTokens: 1, outputTokens: 1, cacheReadTokens: undefined, cacheWriteTokens: undefined, reasoningTokens: undefined, steps: 1 } }), null);
+		assert.equal(stores.jobStore.getJob(job.id), null);
+		assert.deepEqual(stores.jobStore.listJobs(chat.id), []);
+	});
+
+	it("a failure other than 'already gone' throws instead of reading as deleted", () => {
+		const chat = newChat([user("u1", "hi")]);
+		const job = stores.jobStore.createJob({ kind: "research", chatId: chat.id, toolCallId: "call-z" });
+		const unlink = mock.method(fs, "unlinkSync", () => { throw Object.assign(new Error("file is locked"), { code: "EBUSY" }); });
+		syncBuiltinESMExports();
+		try {
+			assert.throws(() => stores.jobStore.deleteJob(job.id), /file is locked/);
+		} finally {
+			unlink.mock.restore();
+			syncBuiltinESMExports();
+		}
+		assert.ok(stores.jobStore.getJob(job.id), "the record is still there");
 	});
 });
