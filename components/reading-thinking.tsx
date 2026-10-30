@@ -2,6 +2,7 @@
 
 import { useCallback } from "react";
 import { joinDictation, useDictationTarget } from "@/components/dictation";
+import { PathInput } from "@/components/path-input";
 
 /**
  * The reading-thinking field (owner design 2026-10-03, "two questions per
@@ -54,9 +55,9 @@ export function ReadingThinkingField({
 			<div className="pb-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">
 				Thinking while reading
 			</div>
-			<textarea
+			<PathInput
 				value={value}
-				onChange={(e) => onChange(e.target.value)}
+				onValueChange={onChange}
 				/* py-0.5 (owner round, 2026-10-07): the scrollbar fix. Source
 				   Sans 3's font box is 22px at 16px; lh-input's 1.25 leading
 				   gives a 20px line box — the content area sticks 1px below the
@@ -95,7 +96,6 @@ export function ReadingThinkingField({
 					}
 				}}
 				placeholder="Whatever comes to mind as you read."
-				rows={1}
 				className="field-sizing-content lh-input max-h-40 w-full resize-none bg-transparent py-0.5 outline-none placeholder:text-muted-foreground/70"
 			/>
 		</div>

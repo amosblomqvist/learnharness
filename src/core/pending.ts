@@ -38,10 +38,18 @@ export interface PendingToolCall {
 	input: unknown;
 }
 
+/** Client-only identity: projection may group several native assistants.
+ * Never persisted or sent as part of an answer event. */
+export interface PendingQuestion extends PendingToolCall {
+	messageId: string;
+	contentIndex: number;
+	/** Unique call ids stay stable across live → persisted message stamps.
+	 * Reused ids include their native occurrence instead. */
+	key: string;
+}
+
 /** Tools that render in the question dock and gate the composer. The
- *  probe-phase names (probe/recall, owner 2026-10-09) join their teach
- *  twins — old records keep the teach names; new probe-phase calls carry
- *  the phase names. */
+ * probe-phase names join their teach twins; old records keep teach names. */
 export const QUESTION_TOOLS = [
 	"quiz",
 	"probe",
@@ -105,14 +113,20 @@ export function filterEnabledTools<T>(tools: Record<string, T>, enabled?: Enable
 	return out;
 }
 
-function findPending(messages: UIMessage[], names: readonly string[]): PendingToolCall | null {
+function findPending(messages: UIMessage[], names: readonly string[], authority?: string | PendingQuestion): PendingToolCall | null {
 	for (let m = messages.length - 1; m >= 0; m--) {
 		const msg = messages[m]!;
 		for (let p = 0; p < msg.parts.length; p++) {
 			const part = msg.parts[p]!;
 			if (isToolUIPart(part) && part.state === "input-available") {
 				const tool = part.type.slice("tool-".length);
-				if (names.includes(tool)) {
+				if (!names.includes(tool)) continue;
+				if (typeof authority === "object") {
+					if (part.toolCallId !== authority.toolCallId || tool !== authority.tool ||
+						part.sourceMessageId !== authority.messageId || part.sourceContentIndex !== authority.contentIndex) continue;
+					return authority;
+				}
+				if (authority === undefined || part.toolCallId === authority) {
 					return { toolCallId: part.toolCallId as string, tool, input: part.input };
 				}
 			}
@@ -121,8 +135,16 @@ function findPending(messages: UIMessage[], names: readonly string[]): PendingTo
 	return null;
 }
 
-export function findPendingToolCall(messages: UIMessage[]): PendingToolCall | null {
-	return findPending(messages, QUESTION_TOOLS);
+/** Grouped view messages lose native assistant boundaries. Native callers
+ * supply the exact occurrence, not just an id: its OWN part must have cleared
+ * validation. Never fall back to an older available question.
+ * null means no native pending question; undefined keeps view-only callers.
+ * The string overload is retained for view-only/id-filter consumers. */
+export function findPendingToolCall(messages: UIMessage[], authority: PendingQuestion | null): PendingQuestion | null;
+export function findPendingToolCall(messages: UIMessage[], authority?: string | null): PendingToolCall | null;
+export function findPendingToolCall(messages: UIMessage[], authority?: string | PendingQuestion | null): PendingToolCall | null {
+	if (authority === null) return null;
+	return findPending(messages, QUESTION_TOOLS, authority);
 }
 
 // ─── Turn activity label (2026-09-19, the “Writing a question…” fix) ──────

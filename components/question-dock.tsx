@@ -5,6 +5,7 @@ import { ArrowDownIcon, ChevronRightIcon, PlayIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { finishDictation, isDictationActive, joinDictation, useDictationTarget } from "@/components/dictation";
 import { useEnterSubmits } from "@/components/enter-submits";
+import { PathInput } from "@/components/path-input";
 import { ToolContentResponse } from "@/components/ai-elements/message";
 import { FigureSplit } from "@/components/figure-split";
 import { cn } from "@/lib/utils";
@@ -440,8 +441,8 @@ function QuestionDockForm({
 	   expanded — collapsed, the bar's native Enter expands it. */
 	const [kbdIdx, setKbdIdx] = useState<number | null>(null);
 	const rootRef = useRef<HTMLDivElement>(null);
-	const otherInputRef = useRef<HTMLInputElement>(null);
-	const thinkingRef = useRef<HTMLTextAreaElement>(null);
+	const otherInputRef = useRef<HTMLDivElement>(null);
+	const thinkingRef = useRef<HTMLDivElement>(null);
 	// One row past the options is the trailing row: quiz → don't-know,
 	// ask → Other (a question never has both). Text mode (ask/explain)
 	// has no rows — the composer IS the answer surface.
@@ -474,7 +475,7 @@ function QuestionDockForm({
 	const focusRow = (idx: number) => {
 		const row = rootRef.current?.querySelector(`[data-kbdrow="${idx}"]`) as HTMLElement | null;
 		if (!row) return;
-		const el = (row.querySelector("input") as HTMLElement | null) ?? row;
+		const el = (row.querySelector("input, [data-file-path-input]") as HTMLElement | null) ?? row;
 		el.focus();
 	};
 
@@ -565,7 +566,7 @@ function QuestionDockForm({
 			{/* Question area — scrolls internally if very tall; the bottom row stays put.
 			    Capped by the measured column (--dock-max-h; the old fixed 55dvh cut
 			    long questions short — owner round, 2026-10-05). */}
-			<div data-session-find-root="" className="max-h-[var(--dock-max-h,55dvh)] overflow-y-auto px-4 pt-3">
+			<div data-dock-scroll-area="" data-session-find-root="" className="max-h-[var(--dock-max-h,55dvh)] overflow-y-auto px-4 pt-3">
 				<FigureSplit
 					figure={(input as { figure?: string }).figure}
 					head={
@@ -703,11 +704,12 @@ function QuestionDockForm({
 											</span>
 										)}
 									</span>
-									<input
+									<PathInput
 										ref={otherInputRef}
+										singleLine
 										value={other}
-										onChange={(e) => {
-											setOther(e.target.value);
+										onValueChange={(value) => {
+											setOther(value);
 											// Typing selects the row — displacing in
 											// single-select, alongside the siblings in multi.
 											setSel((prev) => (prev.otherSelected ? prev : toggleOther(selectMode, prev)));
@@ -859,11 +861,11 @@ function QuestionDockForm({
 						{qd.mode === "text" ? "Your answer" : "YOUR THINKING"}
 					</div>
 					{qd.mode === "text" ? (
-						<textarea
+						<PathInput
 							value={text}
-							onChange={(e) => {
-								answerTextRef.current = e.target.value;
-								setText(e.target.value);
+							onValueChange={(value) => {
+								answerTextRef.current = value;
+								setText(value);
 							}}
 							onKeyDown={(e) => {
 								// Esc ends dictation (the dictate decisions: click-again
@@ -883,16 +885,15 @@ function QuestionDockForm({
 								}
 							}}
 							placeholder="Type your answer…"
-							rows={1}
 							className="field-sizing-content lh-input max-h-48 min-h-10 w-full resize-none bg-transparent px-2.5 py-2 outline-none placeholder:text-muted-foreground"
 						/>
 					) : (
-						<textarea
+						<PathInput
 							ref={thinkingRef}
 							value={thinking}
-							onChange={(e) => {
-								thinkingTextRef.current = e.target.value;
-								setThinking(e.target.value);
+							onValueChange={(value) => {
+								thinkingTextRef.current = value;
+								setThinking(value);
 							}}
 							onKeyDown={(e) => {
 								// Esc ends dictation (the dictate decisions: click-again
@@ -913,7 +914,6 @@ function QuestionDockForm({
 								}
 							}}
 							placeholder="Why this answer? Whatever comes to mind."
-							rows={1}
 							className={cn(
 								"field-sizing-content lh-input max-h-48 w-full resize-none bg-transparent px-2.5 py-2 outline-none placeholder:text-muted-foreground/70",
 								// Phase-scaled prominence: teaching invites depth,
