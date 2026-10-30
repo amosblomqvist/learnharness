@@ -979,6 +979,40 @@ describe("message-granular rewind purge (deleteMessageTraces)", () => {
 		assert.deepEqual(graphStore.readPositions(), before.positions);
 	});
 
+	it("a kept run that merged AFTER the cut's run is rolled back too, and its message re-opens (the over-reach heals by re-extraction)", async () => {
+		const chat = rewindChat("Rewind purge order");
+		// Chunks extract in parallel and merge in any order: the discarded
+		// message's run lands FIRST, the kept message's run after it.
+		fold(chat.id, ["rt2"], { propositions: [{ id: "p2", name: "Cut side", statement: "Rewind order cut", aliases: [], messageId: "rt2" }], chains: [] });
+		await tick();
+		fold(chat.id, ["rt1"], { propositions: [{ id: "p1", name: "Kept side", statement: "Rewind order kept", aliases: [], messageId: "rt1" }], chains: [] });
+
+		const stats = deleteMessageTraces(graphStore, chat.id, cutOf(chat.id, ["ru2", "rt2"]));
+		assert.equal(stats.nodesRemoved, 2, "both runs are at or after the earliest cut fold");
+		assert.equal(stats.coverageRemoved, 2);
+		assert.equal(coverageOf(chatStore.getChat(chat.id)!.messages, graphStore.readCoverage(), chat.id).uncoveredCount, 2, "the kept message is uncovered again");
+	});
+
+	it("a positions write that fails leaves the ledgers whole, and the retry finishes", async () => {
+		const chat = rewindChat("Rewind purge crash");
+		fold(chat.id, ["rt1"], { propositions: [{ id: "p1", name: "Kept", statement: "Rewind crash kept", aliases: [], messageId: "rt1" }], chains: [] });
+		await tick();
+		fold(chat.id, ["rt2"], { propositions: [{ id: "q1", name: "Cut", statement: "Rewind crash cut", aliases: [], messageId: "rt2" }], chains: [] });
+		const keptId = idOf(chat.id, "Rewind crash kept");
+		const cutId = idOf(chat.id, "Rewind crash cut");
+		graphStore.writePositions({ ...graphStore.readPositions(), [keptId]: { x: 1, y: 1 }, [cutId]: { x: 2, y: 2 } });
+		const nodesBefore = graphStore.readNodes();
+		const flaky = { ...graphStore, writePositions: () => { throw new Error("disk full"); } } as typeof graphStore;
+
+		assert.throws(() => deleteMessageTraces(flaky, chat.id, cutOf(chat.id, ["ru2", "rt2"])), /disk full/);
+		assert.deepEqual(graphStore.readNodes(), nodesBefore, "the ledgers are whole after the failed positions write");
+
+		const stats = deleteMessageTraces(graphStore, chat.id, cutOf(chat.id, ["ru2", "rt2"]));
+		assert.equal(stats.nodesRemoved, 1, "the retry finishes the rollback");
+		assert.equal(graphStore.readPositions()[cutId], undefined, "the dead node's resting spot is gone");
+		assert.deepEqual(graphStore.readPositions()[keptId], { x: 1, y: 1 });
+	});
+
 	it("an anchored node dies by its message id even without a coverage row; chats other than this one are untouched", () => {
 		const chat = rewindChat("Rewind purge anchored");
 		const foreign = rewindChat("Rewind purge foreign");

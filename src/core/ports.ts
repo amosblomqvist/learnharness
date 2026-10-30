@@ -44,6 +44,12 @@ export interface ChatStore {
 	saveMessages(id: string, messages: LhMessage[]): void;
 	/** Persist the session plan tree (plan tools call this in execute). */
 	saveTree(id: string, tree: PlanTree): void;
+	/** Rewind the record to a retained message prefix (editing the last sent
+	 *  message): replace the messages AND the plan tree in ONE write — the
+	 *  tree is the one the retained prefix implies, or none. Bumps updatedAt
+	 *  like any conversation write. The usage logs are left alone: that
+	 *  spend really happened. */
+	rewindMessages(id: string, messages: LhMessage[], tree: PlanTree | undefined): void;
 	/** Append one usage entry to the record's turn log (the money channel,
 	 * 2026-09): idempotent per turn id — each request carries its own, so
 	 * a turn persisted twice appends once while continuation turns (which
@@ -158,6 +164,9 @@ export interface JobStore {
 	 *  route refuses while jobs are still running, so by the time this
 	 *  fires every record is terminal. */
 	deleteJobsForChat(chatId: string): number;
+	/** Delete one job record (the rewind drops the jobs a discarded tail
+	 *  spawned). False when the id is unknown. */
+	deleteJob(id: string): boolean;
 }
 
 // ─── SettingsStore — THE user settings record (settings-storage wave, 2026-09-19) ──

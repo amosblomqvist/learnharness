@@ -110,6 +110,19 @@ function deleteJobsForChat(chatId: string): number {
 	return removed;
 }
 
+/** Delete one job record file; false when it was already gone. */
+function deleteJob(id: string): boolean {
+	const job = getJob(id);
+	if (!job) return false;
+	try {
+		fs.unlinkSync(jobFile(id));
+	} catch {
+		return false; // already gone
+	}
+	emit("jobs-changed", { chatId: job.chatId });
+	return true;
+}
+
 export const jobStore: JobStore = {
 	createJob,
 	getJob,
@@ -117,4 +130,5 @@ export const jobStore: JobStore = {
 	listJobs,
 	findJobByToolCallId,
 	deleteJobsForChat,
+	deleteJob,
 };

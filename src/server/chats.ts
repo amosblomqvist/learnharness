@@ -95,26 +95,34 @@ function runningWorkBlocker(chatId: string): Extract<ChatDeleteOutcome, { status
 	return null;
 }
 
+/** Cancel the chat's extraction run and wait for it to leave the registry.
+ *  False on timeout (callers map it to a retryable 503). Shared by session
+ *  deletion and the rewind: both purge the graph ledgers and must never
+ *  race a merge. */
+export async function windDownExtraction(chatId: string): Promise<boolean> {
+	if (!extractionStatuses().some((run) => run.chatId === chatId)) return true;
+	abortExtraction(chatId); // true cancellation — spend stops, nothing merges
+	const deadline = Date.now() + WIND_DOWN_TIMEOUT_MS;
+	while (extractionStatuses().some((run) => run.chatId === chatId)) {
+		if (Date.now() > deadline) return false;
+		await new Promise((resolve) => setTimeout(resolve, WIND_DOWN_POLL_MS));
+	}
+	return true;
+}
+
 export async function deleteChatSession(chatId: string, mode: ChatDeleteMode): Promise<ChatDeleteOutcome> {
 	if (!stores.chatStore.getChat(chatId)) {
 		return { ok: false, status: 404, code: "not_found", error: "No such session" };
 	}
 	const blocker = runningWorkBlocker(chatId);
 	if (blocker) return blocker;
-	if (extractionStatuses().some((run) => run.chatId === chatId)) {
-		abortExtraction(chatId); // true cancellation — spend stops, nothing merges
-		const deadline = Date.now() + WIND_DOWN_TIMEOUT_MS;
-		while (extractionStatuses().some((run) => run.chatId === chatId)) {
-			if (Date.now() > deadline) {
-				return {
-					ok: false,
-					status: 503,
-					code: "extraction_winding_down",
-					error: "The session's extraction is still winding down — try again in a moment",
-				};
-			}
-			await new Promise((resolve) => setTimeout(resolve, WIND_DOWN_POLL_MS));
-		}
+	if (!(await windDownExtraction(chatId))) {
+		return {
+			ok: false,
+			status: 503,
+			code: "extraction_winding_down",
+			error: "The session's extraction is still winding down — try again in a moment",
+		};
 	}
 
 	// A result wake or a worker may have started during extraction wind-down.

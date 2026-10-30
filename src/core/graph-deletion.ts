@@ -337,19 +337,21 @@ export function deleteMessageTraces(graphStore: GraphStore, chatId: string, cut:
 	};
 	if (!nodesChanged && !chainsChanged && stats.coverageRemoved === 0) return stats;
 
-	graphStore.rewriteLedgers({
-		...(nodesChanged ? { nodes: outNodes } : {}),
-		...(chainsChanged ? { chains: outChains } : {}),
-		...(stats.coverageRemoved > 0 ? { coverage: outCoverage } : {}),
-	});
-
-	// Resting positions die with every dead node and every chain id left
-	// with no line.
+	// Resting positions die with every dead node and every chain id left with
+	// no line. They go FIRST: a crash between the two writes then leaves the
+	// ledgers whole, and the retry recomputes the same dead ids and finishes
+	// (ledgers first would strand positions that no retry ever prunes).
 	const survivingChains = new Set(outChains.map((line) => line.id));
 	const deadChains = new Set(chainLines.filter((line) => !survivingChains.has(line.id)).map((line) => line.id));
 	const positions = graphStore.readPositions();
 	const pruned = Object.fromEntries(Object.entries(positions).filter(([id]) => !deadNodes.has(id) && !deadChains.has(id)));
 	if (Object.keys(pruned).length !== Object.keys(positions).length) graphStore.writePositions(pruned);
+
+	graphStore.rewriteLedgers({
+		...(nodesChanged ? { nodes: outNodes } : {}),
+		...(chainsChanged ? { chains: outChains } : {}),
+		...(stats.coverageRemoved > 0 ? { coverage: outCoverage } : {}),
+	});
 
 	return stats;
 }
