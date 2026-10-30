@@ -47,6 +47,10 @@ Pi seeds the system prompt/tools at construction; that synthetic system message 
 
 Settlement persists new native messages, plan snapshots, and usage, including partial output on abort. Failed input writes refuse inference; failed reply writes are surfaced before the terminal and do not masquerade as successful empty turns. Cleanup releases liveness. A memory-only failure notice can inform reattaching views without fabricating saved transcript content.
 
+### Editing the last sent message
+
+Editing the last sent message (`POST /api/chats/[id]/rewind`, `src/server/rewind.ts`) rewinds a chat to just before that message. Only the learner's last message is editable. The rewind stops the running turn and waits for it to settle, claims the chat's turn slot so no wake turn can start mid-rewind, winds the extraction down, and then, in one synchronous block, undoes what the removed tail left behind: the graph rows its extraction wrote, the background jobs it spawned (killed without the abort steer, with their queued deliveries) and the learner steers still parked for the chat. The graph purge (`deleteMessageTraces`) removes node points anchored to a removed message plus everything this chat's extraction runs wrote at or after the first fold of a removed message: chains carry only chat-level provenance, so the fold time is the only thing that dates them. A batch that mixes a kept and a removed message rolls back whole, and the kept message is uncovered again for the next extraction. The record is written last, with the plan tree restored from the last `plan_init` the kept messages still hold, so a retry finishes an interrupted rewind. Usage logs are kept: that spend happened. The response carries the removed text, and the client puts it back in the composer.
+
 ### Streaming and recovery
 
 [`pi/ui-stream.ts`](../src/server/pi/ui-stream.ts) emits native agent events. Partial-message updates replace a slot; they are not accumulated text deltas. Replay retains settled events and the latest in-flight updates, with coalesced live fan-out. Tool IDs are uniquified against history so persistence, answer routing, and provider context agree.

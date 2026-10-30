@@ -106,6 +106,7 @@ export function useChatSession({ chatId, initialMessages, initialError, initiall
 	const continueIfOwed = useCallback((record: readonly LhMessage[]) => void model.continueIfOwed(record), [model]);
 	const steer = useCallback((text: string) => void model.steer(text), [model]);
 	const editSteer = useCallback((id: string, text: string) => void model.editSteer(id, text), [model]);
+	const rewind = useCallback((messageId: string) => model.rewind(messageId), [model]);
 	const submitAnswer = useCallback(
 		(tool: string, toolCallId: string, output: QuestionAnswerData, questionKey?: string) =>
 			void model.submitAnswer(tool, toolCallId, output, questionKey),
@@ -139,6 +140,7 @@ export function useChatSession({ chatId, initialMessages, initialError, initiall
 		continueIfOwed,
 		steer,
 		editSteer,
+		rewind,
 		submitAnswer,
 		dismissQuestion,
 		dismissProblem,
