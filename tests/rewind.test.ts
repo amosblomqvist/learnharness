@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { syncBuiltinESMExports } from "node:module";
 import { after, afterEach, describe, it, mock } from "node:test";
-import { buildSubagentSteer, type PlanTree, type SessionFindings } from "../src/core/contracts.ts";
+import { buildAbortSteer, buildSubagentSteer, type PlanTree, type SessionFindings } from "../src/core/contracts.ts";
 import { coverageSlots } from "../src/core/coverage.ts";
 import { mergeFindings } from "../src/core/graph.ts";
 import { newUserSteer, type LhMessage } from "../src/core/native-messages.ts";
@@ -182,6 +182,44 @@ describe("rewindChat (editing the last sent message)", () => {
 		registerLiveAgent(chat.id, next.value);
 		assert.equal(next.handed.length, 2, "the job result and the learner steer");
 	});
+
+	/** A kept job (its tool call is in a kept message) whose delivery marker sits at `markerAt`
+	 *  in u1 a1 | u2 a2: 0 = before the edited message u2, 1 = inside the tail. */
+	function keptJobWithMarker(kind: "result" | "abort", markerAt: 0 | 1) {
+		const chat = newChat([]);
+		const created = stores.jobStore.createJob({ kind: "research", chatId: chat.id, toolCallId: "jc1" });
+		const job = stores.jobStore.updateJob(created.id, kind === "result"
+			? { status: "done", result, activity: "finished", delivery: { kind, status: "delivered" } }
+			: { status: "error", error: "Aborted by learner", activity: "aborted", delivery: { kind, status: "delivered" } })!;
+		const steer = (kind === "result" ? buildSubagentSteer(job, result) : buildAbortSteer(job)) as unknown as LhMessage;
+		const head = [user("u1", "teach me"), assistant("a1", "First lesson", [{ id: "jc1", name: "research" }])];
+		const tail = [user("u2", "edit me"), assistant("a2", "Second lesson")];
+		stores.chatStore.saveMessages(chat.id, markerAt === 0 ? [...head, steer, ...tail] : [...head, tail[0]!, steer, tail[1]!]);
+		return { chat, job, steer };
+	}
+
+	for (const kind of ["result", "abort"] as const) {
+		it(`a kept job whose ${kind} was delivered INSIDE the tail owes that delivery again`, async () => {
+			const { chat, job, steer } = keptJobWithMarker(kind, 1);
+			const outcome = await rewindChat(chat.id, "u2");
+			assert.ok(outcome.ok);
+			assert.deepEqual(stores.chatStore.getChat(chat.id)!.messages.map((m) => m.id), ["u1", "a1"]);
+			assert.deepEqual(stores.jobStore.getJob(job.id)!.delivery, { kind, status: "pending" }, "the marker went with the tail, so the job owes it again");
+			const next = agent();
+			registerLiveAgent(chat.id, next.value);
+			assert.deepEqual((next.handed as Array<{ id: string }>).map((m) => m.id), [steer.id], "and it rides the next run");
+		});
+
+		it(`control: a kept job whose ${kind} was delivered BEFORE the edited message stays delivered`, async () => {
+			const { chat, job } = keptJobWithMarker(kind, 0);
+			const outcome = await rewindChat(chat.id, "u2");
+			assert.ok(outcome.ok);
+			assert.equal(stores.jobStore.getJob(job.id)!.delivery?.status, "delivered");
+			const next = agent();
+			registerLiveAgent(chat.id, next.value);
+			assert.deepEqual(next.handed, [], "nothing is owed");
+		});
+	}
 
 	it("view-less messages share one fingerprint per role: a stray row under it never dates the cut", async () => {
 		const chat = newChat(transcript());
