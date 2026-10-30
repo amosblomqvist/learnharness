@@ -209,6 +209,23 @@ export function discardChatDeliveries(chatId: string): void {
 	for (const entry of queue) entry.resolve();
 }
 
+/** A rewind discards the obligations its discarded tail created: the queued
+ *  deliveries of the jobs it removes, and every learner steer still parked
+ *  for the chat (parked steers were typed after the message being edited,
+ *  so they belong to the same tail). Other jobs' deliveries stay queued. */
+export function discardRewoundDeliveries(chatId: string, jobIds: ReadonlySet<string>): void {
+	const s = state();
+	const kept: QueuedSteer[] = [];
+	for (const entry of s.queues.get(chatId) ?? []) {
+		const jobId = jobIdOf(entry.steer);
+		if (jobId !== null && jobIds.has(jobId)) entry.resolve();
+		else kept.push(entry);
+	}
+	if (kept.length === 0) s.queues.delete(chatId);
+	else s.queues.set(chatId, kept);
+	s.userSteers.delete(chatId);
+}
+
 /** Finalize a delivered steer's job bookkeeping — job steers only. */
 function finalizeSteer(steer: SteerMessage): void {
 	const jobId = jobIdOf(steer);
