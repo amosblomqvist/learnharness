@@ -210,7 +210,7 @@ describe("md-blocks — key-idea callouts (GitHub alerts, owner round 2026-10-07
 		const html = render("> [!IMPORTANT]\n> First the truth.\n>\n> Then the payoff.");
 		assert.match(html, /First the truth\./);
 		assert.match(html, /Then the payoff\./);
-		assert.ok((html.match(/<p>/g) ?? []).length >= 2, "both paragraphs render inside the box");
+		assert.ok((html.match(/<p(?:\s[^>]*)?>/g) ?? []).length >= 2, "both paragraphs render inside the box");
 	});
 
 	it("plain blockquotes pass through untouched — no box for ordinary quotes", () => {
@@ -236,7 +236,7 @@ describe("md-blocks — the restored plain blockquote (owner round, 2026-10-07)"
 		const html = renderToStaticMarkup(
 			<MessageResponse mode="static">{"Before.\n\n> An ordinary quote.\n\nAfter."}</MessageResponse>,
 		);
-		assert.ok(html.includes("border-l-4"), "the left border is back");
+		assert.ok(html.includes("border-s-4"), "the border follows the quote's reading direction");
 		assert.ok(html.includes("text-muted-foreground italic"), "muted italic — the quote register");
 		assert.ok(!html.includes("md-callout"), "a plain quote is not a callout box");
 	});

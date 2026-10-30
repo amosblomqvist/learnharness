@@ -250,6 +250,7 @@ export function Home({
 					}}
 				>
 					<PathInput
+						dir="auto"
 						ref={topicInputRef}
 						value={topic}
 						onValueChange={(value) => {

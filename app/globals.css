@@ -220,7 +220,29 @@ body {
    the whole list right as a block. Unlayered CSS beats the utility
    layer; :where keeps specificity zero. */
 .lh-prose :where(ul, ol) {
-	padding-left: 1.5rem;
+	padding-left: 0;
+	padding-right: 0;
+	padding-inline-start: 1.5rem;
+}
+
+.lh-prose :where(p, h1, h2, h3, h4, h5, h6, li, th, td, dt, dd),
+[dir="auto"] {
+	text-align: start;
+}
+
+.lh-prose :where(code, pre, .katex, .katex-display),
+[data-streamdown="mermaid"] {
+	direction: ltr;
+	unicode-bidi: isolate;
+}
+
+.lh-prose :where(pre) {
+	text-align: left;
+}
+
+.lh-prose.whitespace-pre-wrap,
+textarea[dir="auto"] {
+	unicode-bidi: plaintext;
 }
 
 /* Markdown headings render at the font's BLACK weight (owner ask,
@@ -373,6 +395,10 @@ body {
    rules and the outer border, no doubled lines anywhere. */
 [data-streamdown="table"] :where(th, td):not(:first-child) {
 	border-left: 1px solid var(--border);
+}
+[data-streamdown="table"][dir="rtl"] :where(th, td):not(:first-child) {
+	border-left: 0;
+	border-right: 1px solid var(--border);
 }
 [data-streamdown="table-header"] {
 	background: transparent;

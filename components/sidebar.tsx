@@ -320,7 +320,7 @@ export function SessionRow({
 				    the meta line below stays JetBrains Mono (machine data). One
 				    rule, finally applied to the picker too (owner, typography
 				    round): mono = chrome, Source Sans = human words. */}
-				<span className="block truncate font-prose text-(length:--lh-prose-size)">{chat.title}</span>
+				<span dir="auto" className="block truncate font-prose text-(length:--lh-prose-size)">{chat.title}</span>
 				<span className="block text-xs text-muted-foreground">{sessionMeta(chat)}</span>
 			</span>
 			{/* The dumbbell rides the FAR RIGHT (owner round 6, 2026-10-05) —
@@ -360,7 +360,7 @@ export function RenameRow({ chat, onCommit, onCancel }: { chat: ChatListItem; on
 			    it). The input here is borderless and padding-free at the
 			    exact title x; the underline is the only editing cue. */}
 			<span className="flex min-w-0 w-full flex-col">
-				<input
+				<input dir="auto"
 					ref={inputRef}
 					value={draft}
 					spellCheck={false}

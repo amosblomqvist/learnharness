@@ -240,7 +240,7 @@ export function MarkdownCode(props: ComponentProps<"code"> & ExtraProps) {
 	// Inline code: no data-block (the pre handler stamps block fences only).
 	if (!("data-block" in props)) {
 		return (
-			<code className={cn("rounded bg-muted px-1.5 py-0.5 font-mono text-sm", className)} data-streamdown="inline-code" {...rest}>
+			<code className={cn("rounded bg-muted px-1.5 py-0.5 font-mono text-sm", className)} data-streamdown="inline-code" {...rest} dir="ltr">
 				{children}
 			</code>
 		);
@@ -256,7 +256,7 @@ export function MarkdownCode(props: ComponentProps<"code"> & ExtraProps) {
 	const startLine = startMatch ? Number.parseInt(startMatch[1]!, 10) : undefined;
 	const lineNumbers = !/\bnoLineNumbers\b/.test(meta);
 	return (
-		<div className="group/md relative" data-testid="md-code">
+		<div className="group/md relative" data-testid="md-code" dir="ltr">
 			<CopyCorner className="absolute top-1.5 right-2 z-10" getText={() => source} label="Copy code" />
 			<CodeBlock
 				code={source}
@@ -348,7 +348,7 @@ export function MarkdownBlockquote(props: ComponentProps<"blockquote"> & ExtraPr
 		return (
 			<blockquote
 				{...rest}
-				className="my-4 border-l-4 border-muted-foreground/30 pl-4 text-muted-foreground italic"
+				className="my-4 border-s-4 border-muted-foreground/30 ps-4 text-muted-foreground italic"
 				data-streamdown="blockquote"
 			>
 				{children}
@@ -359,7 +359,8 @@ export function MarkdownBlockquote(props: ComponentProps<"blockquote"> & ExtraPr
 		<div
 			data-testid="md-callout"
 			data-alert-kind={alert.kind}
-			className="my-4 w-fit max-w-full border border-white px-4 py-3 [&> :first-child]:mt-0 [&> :last-child]:mb-0"
+			dir={rest.dir}
+			className="my-4 me-auto w-fit max-w-full border border-white px-4 py-3 [&> :first-child]:mt-0 [&> :last-child]:mb-0"
 		>
 			{alert.children}
 		</div>
@@ -377,7 +378,7 @@ export function MarkdownTable(props: ComponentProps<"table"> & ExtraProps) {
 	const { children, node, ...rest } = props;
 	const ref = useRef<HTMLTableElement>(null);
 	return (
-		<div className="group/md relative my-4" data-testid="md-table">
+		<div className="group/md relative my-4" data-testid="md-table" dir={rest.dir}>
 			<CopyCorner
 				// Contained in the table's top-right corner (owner note, 2026-09-19:
 				// the old -top-3 lifted only half the 24px button above the 12px
@@ -418,7 +419,7 @@ export function MathDisplay(props: ComponentProps<"span"> & ExtraProps) {
 	const ref = useRef<HTMLSpanElement>(null);
 	if (!className?.includes("katex-display")) {
 		return (
-			<span className={className} {...rest}>
+			<span className={className} {...rest} dir={className?.split(" ").includes("katex") ? "ltr" : rest.dir}>
 				{children}
 			</span>
 		);
@@ -437,7 +438,7 @@ export function MathDisplay(props: ComponentProps<"span"> & ExtraProps) {
 				label="Copy equation source"
 				getText={() => ref.current?.querySelector("annotation")?.textContent ?? ""}
 			/>
-			<span ref={ref} className={className} {...rest}>
+			<span ref={ref} className={className} {...rest} dir="ltr">
 				{children}
 			</span>
 		</span>

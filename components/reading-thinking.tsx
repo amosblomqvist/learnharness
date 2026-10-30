@@ -56,6 +56,7 @@ export function ReadingThinkingField({
 				Thinking while reading
 			</div>
 			<PathInput
+				dir="auto"
 				value={value}
 				onValueChange={onChange}
 				/* py-0.5 (owner round, 2026-10-07): the scrollbar fix. Source

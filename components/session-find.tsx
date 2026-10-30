@@ -180,7 +180,7 @@ export function SessionFind({ scopeRef, scrollContextRef }: {
 			}}
 		>
 			<SearchIcon className="size-4 shrink-0 text-muted-foreground" aria-hidden />
-			<input
+			<input dir="auto"
 				ref={inputRef}
 				aria-label="Find in session"
 				placeholder="Find in session…"

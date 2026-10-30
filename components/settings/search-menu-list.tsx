@@ -56,6 +56,7 @@ export function SearchMenuList<T>({
 	return <>
 		<input
 			type="text"
+			dir="auto"
 			ref={searchRef}
 			data-testid={searchTestid}
 			aria-label={ariaLabel}

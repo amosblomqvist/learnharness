@@ -179,7 +179,7 @@ export function ProviderMenuList({
 
 	return (
 		<>
-			<input
+			<input dir="auto"
 				ref={searchRef}
 				data-testid="provider-search"
 				value={query}
@@ -309,7 +309,7 @@ export function FontMenuList({
 
 	return (
 		<>
-			<input
+			<input dir="auto"
 				ref={searchRef}
 				data-testid="font-search"
 				value={query}

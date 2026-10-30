@@ -512,7 +512,7 @@ export function AgentSection({
 					<div className="mt-1 flex flex-col gap-2">
 						<div>
 							<p className="mb-1 text-xs uppercase tracking-widest text-muted-foreground/70">Source</p>
-							<textarea
+							<textarea dir="auto"
 								readOnly
 								value={info.sourceText}
 								aria-label="The original instructions"
@@ -521,7 +521,7 @@ export function AgentSection({
 						</div>
 						<div>
 							<p className="mb-1 text-xs uppercase tracking-widest text-muted-foreground/70">Override</p>
-							<textarea
+							<textarea dir="auto"
 								value={segmentDraft[info.path] ?? info.overrideText ?? ""}
 								onChange={(e) => setSegmentDraft({ ...segmentDraft, [info.path]: e.target.value })}
 								aria-label="Your version of the instructions"

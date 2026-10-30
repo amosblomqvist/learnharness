@@ -1298,7 +1298,7 @@ export function Chat({
 				>
 					{renaming ? (
 						<>
-							<input
+							<input dir="auto"
 								ref={titleInputRef}
 								value={titleDraft}
 								onChange={(e) => setTitleDraft(e.target.value)}
@@ -1336,6 +1336,7 @@ export function Chat({
 								setTitleDraft(titleText);
 								setRenaming(true);
 							}}
+							dir="auto"
 							className="lh-no-drag -mx-1.5 min-w-4 shrink cursor-text truncate rounded-md px-1.5 text-left font-title text-3xl tracking-tight transition-colors hover:bg-accent"
 						>
 							{titleText}
@@ -1510,7 +1511,7 @@ export function Chat({
 												    sits INSIDE the rail, same mono-xs register and same 1ch
 												    rail as the thinking rows — one quote geometry. */}
 												<div className="font-medium uppercase tracking-wide text-muted-foreground">You</div>
-												<div className="lh-prose whitespace-pre-wrap text-foreground">
+												<div dir="auto" className="lh-prose whitespace-pre-wrap text-foreground">
 													<PathText text={m.parts.filter((p) => p.type === "text").map((p) => p.text).join("\n")} />
 												</div>
 											</div>

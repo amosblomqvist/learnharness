@@ -231,6 +231,7 @@ export function CommitInput({
 	return (
 		<input
 			type={type}
+			dir={type === "text" ? "auto" : "ltr"}
 			value={editing ? draft : value}
 			placeholder={placeholder}
 			aria-label={ariaLabel}

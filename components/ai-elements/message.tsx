@@ -31,6 +31,8 @@ import {
 import remarkBreaks from "remark-breaks";
 import {
   Streamdown,
+  defaultRehypePlugins,
+  detectTextDirection,
   type PluginConfig,
 } from "streamdown";
 import { mdComponents } from "@/components/md-blocks";
@@ -361,6 +363,40 @@ export const streamdownPlugins = {
 // separate sanitization/hardening and all other Markdown repairs stay enabled.
 export const streamdownRemend = { htmlTags: false };
 
+type DirectionNode = {
+  type: string;
+  tagName?: string;
+  value?: string;
+  properties?: Record<string, unknown>;
+  children?: DirectionNode[];
+};
+
+const directionalBlocks = new Set(["p", "h1", "h2", "h3", "h4", "h5", "h6", "li", "th", "td", "dt", "dd"]);
+const directionalContainers = new Set(["ul", "ol", "table", "blockquote"]);
+const technicalBlocks = new Set(["pre", "code", "math", "svg"]);
+
+function directionText(node: DirectionNode): string {
+  if (technicalBlocks.has(node.tagName ?? "")) return "";
+  if (node.type === "text") return node.value ?? "";
+  return node.children?.map(directionText).join("") ?? "";
+}
+
+function rehypeTextDirection() {
+  return function visit(node: DirectionNode): void {
+    const tag = node.tagName ?? "";
+    if (technicalBlocks.has(tag)) return;
+    if (directionalBlocks.has(tag) || directionalContainers.has(tag)) {
+      node.properties ??= {};
+      node.properties.dir = directionalContainers.has(tag)
+        ? detectTextDirection(directionText(node).replace(/^\s*\[!(?:note|tip|important|warning|caution)\]\s*/i, ""))
+        : "auto";
+    }
+    node.children?.forEach(visit);
+  };
+}
+
+const directionalRehypePlugins = [...Object.values(defaultRehypePlugins), rehypeTextDirection];
+
 export const MessageResponse = memo(
   ({ className, children, ...props }: MessageResponseProps) => {
     // Legacy backslash delimiters are converted in a single linear scan;
@@ -382,6 +418,7 @@ export const MessageResponse = memo(
         components={mdComponents}
         plugins={streamdownPlugins}
         remend={streamdownRemend}
+        rehypePlugins={directionalRehypePlugins}
         {...props}
       >
         {content}

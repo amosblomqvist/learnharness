@@ -878,7 +878,7 @@ export function GraphChromeRow({
 					>
 					<div className="relative">
 						<SearchIcon className="absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
-						<input
+						<input dir="auto"
 							ref={searchInputRef}
 							value={query}
 							onChange={(e) => onQuery(e.target.value)}

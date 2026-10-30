@@ -123,6 +123,7 @@ export function PracticeDock({ problemCallId, input, expanded, onExpand, onSubmi
 					YOUR THINKING
 				</div>
 				<PathInput
+					dir="auto"
 					value={thinking}
 					onValueChange={(value) => {
 						thinkingRef.current = value;

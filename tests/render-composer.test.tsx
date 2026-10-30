@@ -12,6 +12,8 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { renderToStaticMarkup } from "react-dom/server";
 import { Composer, enterAction } from "../components/composer.tsx";
+import { Input } from "../components/ui/input.tsx";
+import { Textarea } from "../components/ui/textarea.tsx";
 
 function render(
 	opts: { busy?: boolean; canSend?: boolean; placeholder?: string; nextProblem?: boolean } = {},
@@ -30,7 +32,26 @@ function render(
 	);
 }
 
+describe("bidirectional input defaults", () => {
+	it("detects free-text direction while technical inputs remain LTR", () => {
+		for (const input of [<Input />, <Input type="search" />, <Textarea />]) {
+			assert.match(renderToStaticMarkup(input), /dir="auto"/);
+		}
+		for (const type of ["number", "password", "url", "email"]) {
+			assert.match(renderToStaticMarkup(<Input type={type} />), /dir="ltr"/);
+		}
+		assert.match(renderToStaticMarkup(<Textarea dir="ltr" />), /dir="ltr"/);
+	});
+});
+
 describe("Composer", () => {
+	it("detects typing direction without reversing the controls", () => {
+		const html = render();
+		const editable = html.match(/<div[^>]*data-file-path-input[^>]*>/)?.[0] ?? "";
+		assert.match(editable, /dir="auto"/, "the editable surface auto-detects direction");
+		assert.doesNotMatch(html, /<form[^>]*dir="(?:auto|rtl)"/);
+	});
+
 	it("chat placeholder + send button", () => {
 		const html = render();
 		assert.match(html, /Ask, answer, or steer the lesson/, "the default — active sessions");

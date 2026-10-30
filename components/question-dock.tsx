@@ -698,6 +698,7 @@ function QuestionDockForm({
 									)}
 								</span>
 								<PathInput
+									dir="auto"
 									ref={otherInputRef}
 									singleLine
 									value={other}
@@ -854,6 +855,7 @@ function QuestionDockForm({
 					</div>
 					{qd.mode === "text" ? (
 						<PathInput
+							dir="auto"
 							value={text}
 							onValueChange={(value) => {
 								answerTextRef.current = value;
@@ -881,6 +883,7 @@ function QuestionDockForm({
 						/>
 					) : (
 						<PathInput
+							dir="auto"
 							ref={thinkingRef}
 							value={thinking}
 							onValueChange={(value) => {

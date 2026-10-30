@@ -14,6 +14,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { renderToStaticMarkup } from "react-dom/server";
 import { MessageResponse } from "../components/ai-elements/message.tsx";
+import { parseHTML } from "linkedom";
 import { MermaidError } from "../components/mermaid-error.tsx";
 import { transformMathDelimiters, healOverescapedCommands } from "../src/core/math-delims.ts";
 
@@ -21,6 +22,51 @@ import { transformMathDelimiters, healOverescapedCommands } from "../src/core/ma
 function render(md: string): string {
 	return renderToStaticMarkup(<MessageResponse mode="static">{md}</MessageResponse>);
 }
+
+describe("render — bidirectional content", () => {
+	const markdown = "## عنوان فارسی\n\nسلام **دنیا** با `model.id` و $x^2$.\n\nEnglish paragraph.\n\n- گزینه فارسی\n- English option\n  - خيار عربي\n\n> نقل قول فارسی\n\n| عنوان | Name |\n|---|---|\n| مقدار | Value |\n\n```js\nconst label = 'سلام';\n```\n\n$$\nx = 2\n$$";
+
+	for (const mode of ["static", "streaming"] as const) {
+		it(`${mode}: gives each prose block its own automatic direction`, () => {
+			const html = renderToStaticMarkup(<MessageResponse mode={mode}>{markdown}</MessageResponse>);
+			const { document } = parseHTML(html);
+			for (const selector of ["p", "h2", "li", "th", "td"]) {
+				const blocks = document.querySelectorAll(selector);
+				assert.ok(blocks.length > 0, `${selector} is rendered`);
+				for (const block of blocks) assert.equal(block.getAttribute("dir"), "auto", `${selector}: ${block.textContent}`);
+			}
+			for (const selector of ["ul", "blockquote", "table"]) {
+				assert.equal(document.querySelector(selector)?.getAttribute("dir"), "rtl", selector);
+			}
+			assert.ok(!html.includes("katex-error"));
+		});
+
+		it(`${mode}: isolates code and equations from surrounding RTL prose`, () => {
+			const { document } = parseHTML(renderToStaticMarkup(<MessageResponse mode={mode}>{markdown}</MessageResponse>));
+			assert.equal(document.querySelector('[data-testid="md-code"]')?.getAttribute("dir"), "ltr");
+			assert.equal(document.querySelector('[data-streamdown="inline-code"]')?.getAttribute("dir"), "ltr");
+			for (const math of document.querySelectorAll(".katex, .katex-display")) assert.equal(math.getAttribute("dir"), "ltr");
+		});
+	}
+
+	it("aligns RTL tables and callouts without letting an English alert marker set their direction", () => {
+		const { document } = parseHTML(render("> [!IMPORTANT]\n> نکتهٔ فارسی\n\n| نام | مقدار |\n|---|---|\n| یک | دو |"));
+		assert.equal(document.querySelector('[data-testid="md-callout"]')?.getAttribute("dir"), "rtl");
+		assert.equal(document.querySelector('[data-testid="md-table"]')?.getAttribute("dir"), "rtl");
+	});
+
+	it("keeps unsafe HTML and link protocols blocked with directional rendering enabled", () => {
+		const { document } = parseHTML(render('سلام <script>alert(1)</script> [link](javascript:alert%281%29) <img src="x" onerror="alert(1)">'));
+		assert.equal(document.querySelector("script, [onerror], [href^='javascript:']"), null);
+	});
+
+	it("keeps automatic direction while a multilingual response grows", () => {
+		for (const text of ["", "۱۲۳ ", "۱۲۳ سلام", "۱۲۳ سلام دنیا\n\nEnglish follows.", "مرحبا بالعالم", "שלום עולם"]) {
+			const { document } = parseHTML(renderToStaticMarkup(<MessageResponse>{text}</MessageResponse>));
+			for (const paragraph of document.querySelectorAll("p")) assert.equal(paragraph.getAttribute("dir"), "auto");
+		}
+	});
+});
 
 describe("math delimiter transform (pure unit)", () => {
 	it("converts inline \\(...\\) to the two-dollar inline form", () => {

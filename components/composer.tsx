@@ -92,6 +92,7 @@ export function Composer({
 			}}
 		>
 			<PathInput
+				dir="auto"
 				ref={inputRef}
 				value={value}
 				onValueChange={onChange}
