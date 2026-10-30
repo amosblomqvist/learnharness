@@ -317,3 +317,80 @@ test("a question answered after the idle timeout starts a fresh CLI process that
 	assert.ok(replay.includes("[tool result ask_user_question]"), replay);
 	assert.ok(replay.includes(ANSWER_TEXT), replay);
 });
+
+// These use real held HTTP MCP requests, with only the clock budget accelerated.
+// Without the idle env fix the SDK cancels at 300ms; with it the answer at 450ms
+// reaches the same process (the configured budget is 1800ms).
+test("a held question survives past the accelerated default CLI MCP idle timeout without replay", async (t) => {
+	const scenario = toAskScenario();
+	scenario[scenario.length - 2] = JSON.stringify({ fake: "idle-call", id: ASK_ID, name: "ask_user_question", arguments: ASK_INPUT, scale: 1000 });
+	const fakeRun = createFakeRun(t, [scenario]);
+	const factory = createAgentFactory(fakeRun);
+	const chatId = createClaudeCodeChat(t);
+	await runChatTurn(chatId, { type: "text", text: "teach me sockets" }, factory);
+	await sleep(450);
+	assert.equal(fakeRun.children[0]!.signalCode, null, "the real held MCP request must outlast the old idle limit");
+	await runChatTurn(chatId, toAnswerInput(), factory);
+	assert.equal(fakeRun.children.length, 1, "normal answers must not pay for a full transcript replay");
+	assert.ok(getLastAssistantText(chatId).includes(ANSWER_TEXT));
+	await waitForExit(fakeRun.children[0]!);
+});
+
+const IDLE_TIMEOUT_TEXT = 'MCP server "learnharness" tool "ask_user_question" sent no response or progress for 300s; aborting. If this server is configured in your MCP settings, set a per-server "timeout" (ms).';
+
+function toInterruptedWaitScenario(interruption: string[]): string[] {
+	const scenario = toAskScenario();
+	scenario.splice(scenario.length - 2, 2,
+		JSON.stringify({ fake: "start-call", id: ASK_ID, name: "ask_user_question", arguments: ASK_INPUT }),
+		JSON.stringify({ fake: "wait-for-message" }),
+		...interruption,
+		streamEvent({ type: "message_start", message: { usage: {} } }),
+		JSON.stringify({ fake: "hold" }),
+	);
+	return scenario;
+}
+
+for (const mode of ["cancel", "timeout-string", "timeout-blocks"] as const) test(`an admitted learner wait ${mode} replays once on the saved answer without Retry`, async (t) => {
+	const interruption = mode === "cancel" ? JSON.stringify({ fake: "cancel-call", id: ASK_ID })
+		: JSON.stringify({ type: "user", message: { content: [{ type: "tool_result", tool_use_id: ASK_ID, is_error: true,
+			content: mode === "timeout-string" ? IDLE_TIMEOUT_TEXT : [{ type: "text", text: IDLE_TIMEOUT_TEXT }],
+		}] } });
+	const fakeRun = createFakeRun(t, [toInterruptedWaitScenario([interruption]), readFileSync(TEXT_FIXTURE, "utf8").trim().split("\n")]);
+	const factory = createAgentFactory(fakeRun);
+	const chatId = createClaudeCodeChat(t);
+	await runChatTurn(chatId, { type: "text", text: "teach me sockets" }, factory);
+	assert.equal(danglingQuestionOf(chatStore.getChat(chatId)!.messages)?.toolCallId, ASK_ID);
+	const child = fakeRun.children[0]!;
+	child.send("expire the admitted request");
+	await waitForExit(child);
+	await runChatTurn(chatId, toAnswerInput(), factory);
+	assert.equal(fakeRun.children.length, 2, "only the expired child should need replay");
+	assert.equal(getLastAssistantText(chatId), "hello there");
+	const messages = chatStore.getChat(chatId)!.messages;
+	assert.equal(messages.filter((message) => message.role === "toolResult" && message.toolCallId === ASK_ID).length, 1, "the saved answer must appear exactly once");
+	assert.equal(messages.some((message) => message.role === "assistant" && message.stopReason === "error"), false, "no stale pendingError or manual Retry");
+	const replay = readFileSync(fakeRun.stdinFiles[1]!, "utf8");
+	assert.equal(replay.split(ANSWER_TEXT).length - 1, 1, "replay includes the saved answer exactly once");
+	assert.ok(replay.includes(ASK_INPUT.question));
+	await waitForExit(fakeRun.children[1]!);
+});
+
+for (const mode of ["policy-denial", "unrelated-timeout-id", "not-an-error"] as const) test(`a ${mode} after admission still fails closed instead of silently replaying`, async (t) => {
+	const rejected = JSON.stringify({ type: "user", message: { content: [{ type: "tool_result",
+		tool_use_id: mode === "unrelated-timeout-id" ? "toolu_unrelated" : ASK_ID,
+		is_error: mode !== "not-an-error", content: mode === "policy-denial" ? "Denied by managed policy" : IDLE_TIMEOUT_TEXT,
+	}] } });
+	const fakeRun = createFakeRun(t, [toInterruptedWaitScenario([rejected])]);
+	const factory = createAgentFactory(fakeRun);
+	const chatId = createClaudeCodeChat(t);
+	await runChatTurn(chatId, { type: "text", text: "teach me sockets" }, factory);
+	const child = fakeRun.children[0]!;
+	child.send("report an unrecoverable error");
+	await waitForExit(child);
+	await runChatTurn(chatId, toAnswerInput(), factory);
+	assert.equal(fakeRun.children.length, 1, "must not hide a compatibility error behind replay");
+	const last = chatStore.getChat(chatId)!.messages.at(-1);
+	assert.ok(last?.role === "assistant");
+	assert.equal(last.stopReason, "error");
+	assert.match(last.errorMessage ?? "", /moved on while.*waiting for results/);
+});

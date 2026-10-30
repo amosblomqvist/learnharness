@@ -25,6 +25,7 @@ import { parseStreamingJson, parseToolCallArguments } from "@earendil-works/pi-a
 
 import { externalCliEnv } from "../../core/auth-env.ts";
 import type { LhMessage } from "../../core/native-messages.ts";
+import { QUESTION_TOOLS } from "../../core/pending.ts";
 import { ClaudeLaunchError, createClaudeLauncher } from "./launch.ts";
 import { parseCliLine, type CliBlock, type CliEvent, type CliUsage } from "./cli-events.ts";
 import { ClaudeCodeError } from "./constants.ts";
@@ -41,7 +42,7 @@ export type RunClaude = (args: string[], options: RunClaudeOptions) => ClaudeChi
 
 // A held MCP call lasts until pi calls back with the tool result, which for a question tool is
 // whenever the learner answers; this must outlast the live-process idle timeout so the CLI never
-// times out first.
+// times out first. Claude Code has separate total and no-progress idle limits.
 const MCP_TOOL_TIMEOUT_MS = 30 * 60_000;
 
 const PRIVATE_FILE_MODE = 0o600;
@@ -503,6 +504,10 @@ class ClaudeProcess implements LiveProcess {
 		// Already admitted work belongs to Pi and cannot be undone. A queued
 		// request, however, must never become executable after cancellation.
 		this.sourceCalls = this.sourceCalls.filter((intent) => intent.id !== call.id);
+		// An admitted learner wait is already durable in Pi. If its authenticated
+		// MCP request expires, retire only the stale child; the next answer uses
+		// the normal transcript replay, without executing or saving it again.
+		if (this.turn.finished && this.admitted.includes(call) && (QUESTION_TOOLS as readonly string[]).includes(call.name)) this.kill();
 	}
 
 	/** Only authenticated MCP requests, never stdout intent alone, admit side effects. */
@@ -546,9 +551,16 @@ class ClaudeProcess implements LiveProcess {
 		const event = parseCliLine(line);
 		if (!event) return;
 		if (event.type === "toolResults") {
-			if (event.ids.some((id) => this.sourceCalls.some((call) => call.id === id))) {
+			if (event.results.some((result) => this.sourceCalls.some((call) => call.id === result.id))) {
 				this.fail("claude CLI refused a harness tool call before MCP admission");
+				return;
 			}
+			// Some CLI versions report an idle expiry without cancelling MCP first.
+			// Require the explicit CLI timeout and an admitted learner-wait identity;
+			// policy denials, unrelated errors and stdout-only intents still fail closed.
+			if (this.turn.finished && event.results.every((result) => result.isError
+				&& /^(?:Error: )?MCP server "[^"\n]+" tool "[^"\n]+" sent no response or progress for \d+(?:\.\d+)?s; aborting\./.test(result.text)
+				&& this.admitted.some((call) => call.id === result.id && (QUESTION_TOOLS as readonly string[]).includes(call.name)))) this.kill();
 			return;
 		}
 		// Moving on before held calls were answered means the CLI did not
@@ -613,7 +625,11 @@ function continueLiveProcess(turn: ClaudeTurn, owner: symbol, sessionId: string 
 function toClaudeEnv(): NodeJS.ProcessEnv {
 	// Preserve native CLI auth/routing, including launch-environment credentials.
 	// Claude Code chooses the account and billing method, not LearnHarness.
-	return { ...externalCliEnv(), MCP_TOOL_TIMEOUT: String(MCP_TOOL_TIMEOUT_MS) };
+	return {
+		...externalCliEnv(),
+		MCP_TOOL_TIMEOUT: String(MCP_TOOL_TIMEOUT_MS),
+		CLAUDE_CODE_MCP_TOOL_IDLE_TIMEOUT: String(MCP_TOOL_TIMEOUT_MS),
+	};
 }
 
 async function startProcess(

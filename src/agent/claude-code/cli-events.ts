@@ -15,7 +15,7 @@ export type CliEvent =
 	| { type: "messageStop" }
 	| { type: "assistantError"; error: string; text: string }
 	| { type: "resultError"; text: string }
-	| { type: "toolResults"; ids: string[] };
+	| { type: "toolResults"; results: { id: string; isError: boolean; text: string }[] };
 
 type RawUsage = {
 	input_tokens?: number | null;
@@ -47,7 +47,7 @@ type RawCliLine = {
 	type?: string;
 	event?: RawStreamEvent;
 	error?: string | null;
-	message?: { content?: { type: string; text?: string; tool_use_id?: string }[] };
+	message?: { content?: { type: string; text?: string; tool_use_id?: string; is_error?: boolean; content?: unknown }[] };
 	is_error?: boolean;
 	result?: string;
 	subtype?: string;
@@ -174,8 +174,13 @@ export function parseCliLine(text: string): CliEvent | null {
 
 		case "user": {
 			const blocks = Array.isArray(line.message?.content) ? line.message.content : [];
-			const ids = blocks.flatMap((block) => block.type === "tool_result" && typeof block.tool_use_id === "string" ? [block.tool_use_id] : []);
-			return ids.length ? { type: "toolResults", ids } : null;
+			const results = blocks.flatMap((block) => {
+				if (block.type !== "tool_result" || typeof block.tool_use_id !== "string") return [];
+				const text = typeof block.content === "string" ? block.content : Array.isArray(block.content)
+					? block.content.flatMap((part) => part?.type === "text" && typeof part.text === "string" ? [part.text] : []).join("\n") : "";
+				return [{ id: block.tool_use_id, isError: block.is_error === true, text }];
+			});
+			return results.length ? { type: "toolResults", results } : null;
 		}
 
 		case "result":

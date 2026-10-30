@@ -5,6 +5,7 @@
  *   {"fake":"hold"}                          stay alive until killed, like the CLI waiting on a held MCP call
  *   {"fake":"exit","code":1,"stderr":"..."}  write stderr and exit with that code
  *   {"fake":"call","id":"toolu_...","name":"read","arguments":{...}}  call the MCP bridge and wait for its result
+ *   {"fake":"idle-call",...,"scale":1000} apply the CLI idle env as an accelerated real MCP request timeout
  *   {"fake":"start-call",...}                start the same request without waiting for its result
  *   {"fake":"cancel-call","id":"toolu_..."} cancel an individual pending MCP request
  *   {"fake":"checkpoint"}                   notify the parent after previous sends finish
@@ -119,7 +120,7 @@ for (const line of lines) {
 		process.on("SIGTERM", () => {});
 		continue;
 	}
-	if (directive.fake === "call" || directive.fake === "start-call") {
+	if (directive.fake === "call" || directive.fake === "start-call" || directive.fake === "idle-call") {
 		bridge ??= await connectBridge(mcpConfig);
 		const controller = new AbortController();
 		controllers.set(directive.id, controller);
@@ -127,14 +128,25 @@ for (const line of lines) {
 			name: directive.name,
 			arguments: directive.arguments,
 			...(directive.id !== undefined ? { _meta: { "claudecode/toolUseId": directive.id } } : {}),
-		}, undefined, { signal: controller.signal });
+		}, undefined, {
+			signal: controller.signal,
+			...(directive.fake === "idle-call" ? { timeout: Number(process.env.CLAUDE_CODE_MCP_TOOL_IDLE_TIMEOUT ?? 300000) / directive.scale } : {}),
+		});
 		if (directive.fake === "start-call") {
 			pendingResults.push({ id: directive.id, request });
 			void request.catch(() => {});
 			await lastSend;
 		} else {
-			const result = await request;
-			results.push(result.content.map((block) => block.text).join(""));
+			try {
+				const result = await request;
+				results.push(result.content.map((block) => block.text).join(""));
+			} catch (error) {
+				if (directive.fake !== "idle-call" || error.code !== -32001) throw error;
+				await writeLine(JSON.stringify({ type: "user", message: { content: [{
+					type: "tool_result", tool_use_id: directive.id, is_error: true,
+					content: `MCP server "learnharness" tool "${directive.name}" sent no response or progress for 300s; aborting.`,
+				}] } }));
+			}
 		}
 		continue;
 	}
