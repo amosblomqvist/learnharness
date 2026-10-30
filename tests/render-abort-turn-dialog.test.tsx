@@ -32,6 +32,24 @@ describe("AbortTurnBody", () => {
 		assert.ok(!html.includes("Abort this turn"));
 	});
 
+	it("edit mode (issue #321): names the message edit, the discarded reply, Edit", () => {
+		const html = renderToStaticMarkup(
+			<AbortTurnBody mode="edit" onClose={() => {}} onConfirm={() => {}} />,
+		);
+		assert.match(html, /Edit this message\?/);
+		assert.match(html, /The agent&#x27;s reply to it will be discarded\./);
+		assert.match(html, /Cancel/);
+		assert.ok(!html.includes("Abort this turn") && !html.includes("Dismiss"), "no other mode's copy leaks in");
+		assert.ok(!html.includes("The working turn stops too."), "idle: nothing is running");
+	});
+
+	it("edit mode while a turn runs says the working turn stops too", () => {
+		const html = renderToStaticMarkup(
+			<AbortTurnBody mode="edit" onClose={() => {}} onConfirm={() => {}} busy />,
+		);
+		assert.match(html, /The working turn stops too\./);
+	});
+
 	it("the confirm action is the destructive pair, never the cancel", () => {
 		const html = renderToStaticMarkup(
 			<AbortTurnBody mode="turn" onClose={() => {}} onConfirm={() => {}} />,

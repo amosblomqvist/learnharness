@@ -21,7 +21,7 @@
  */
 import assert from "node:assert/strict";
 import { afterEach, describe, it } from "node:test";
-import { absorbed, pendingCallTool, SessionModel } from "../components/session-core.ts";
+import { absorbed, editableUserMessage, pendingCallTool, SessionModel } from "../components/session-core.ts";
 import type { ChatInput } from "../src/core/input-events.ts";
 import type { LhMessage } from "../src/core/native-messages.ts";
 import { newUserMessage, newAnswerResult, newThinkingMessage, needsContinuation, endsInDismissal, pendingQuestionOf } from "../src/core/native-messages.ts";
@@ -1765,6 +1765,106 @@ describe("absorbed — the custom role (the doubled thinking card)", () => {
 		const customs = m.getState().nativeMessages.filter((x) => (x as { role?: string }).role === "custom");
 		assert.equal(customs.length, 1, "the server copy replaced the optimistic one — no doubling");
 		assert.equal((customs[0] as { id?: string }).id, "srv_1");
+	});
+});
+
+// ─── editing the last sent message (issue #321) ─────────────────────────────
+
+describe("editableUserMessage (which message the edit control may touch)", () => {
+	const learner = (id: string, text = "words"): LhMessage => ({ id, role: "user", content: text, timestamp: 1 }) as LhMessage;
+	const marker = (id: string): LhMessage => ({ id, role: "custom", customType: "plan-block", content: "", display: true, details: {}, timestamp: 1 }) as LhMessage;
+
+	it("is the last user message; hasReply says whether anything follows it", () => {
+		assert.deepEqual(editableUserMessage([learner("u1")]), { id: "u1", hasReply: false });
+		assert.deepEqual(editableUserMessage([learner("u1"), assistantMsg("a1", "hi")]), { id: "u1", hasReply: true });
+		assert.deepEqual(editableUserMessage([learner("u1"), assistantMsg("a1", "hi"), learner("u2")]), { id: "u2", hasReply: false });
+	});
+
+	it("is none without a user message, and markers are never the target", () => {
+		assert.equal(editableUserMessage([]), null);
+		assert.equal(editableUserMessage([marker("m1"), assistantMsg("a1", "hi")]), null);
+		assert.deepEqual(editableUserMessage([learner("u1"), marker("m1")]), { id: "u1", hasReply: true });
+	});
+
+	it("is none while the last message is still optimistic: the server has never heard of its local id", () => {
+		assert.equal(editableUserMessage([learner("u1"), assistantMsg("a1", "hi"), learner("c_local1")]), null,
+			"never falls back to the earlier message — the new one is the last");
+	});
+
+	it("a mid-turn steer carries the server's id and is editable", () => {
+		assert.deepEqual(editableUserMessage([learner("u1"), assistantMsg("a1", "hi"), learner("steer_abc")]), { id: "steer_abc", hasReply: false });
+	});
+});
+
+describe("SessionModel.rewind (edit the last sent message)", () => {
+	/** A model whose rewind POST answers `reply`; `calls` records every request. */
+	function rewinding(reply: () => Response | Promise<Response>, init: Partial<ConstructorParameters<typeof SessionModel>[0]> = {}) {
+		const calls: { method: string; url: string; body: unknown }[] = [];
+		const m = model({
+			...init,
+			fetch: (async (url: string, req?: RequestInit) => {
+				const method = req?.method ?? "GET";
+				calls.push({ method, url, body: req?.body ? JSON.parse(String(req.body)) : undefined });
+				if (url === "/api/chats/chat_x/rewind") return reply();
+				return new Response(null, { status: 200 }); // a steer POST
+			}) as typeof fetch,
+		});
+		return { m, calls };
+	}
+
+	it("POSTs the message id and returns the removed text for the composer", async () => {
+		const { m, calls } = rewinding(() => Response.json({ ok: true, text: "explain the chain rule", removedMessages: 3 }));
+		assert.equal(await m.rewind("u2"), "explain the chain rule");
+		assert.deepEqual(calls, [{ method: "POST", url: "/api/chats/chat_x/rewind", body: { messageId: "u2" } }]);
+		assert.equal(m.getState().error, null);
+	});
+
+	it("drops the queued steer lines: the server dropped them with the tail", async () => {
+		const { m } = rewinding(() => Response.json({ ok: true, text: "x" }));
+		await m.steer("a queued thought");
+		assert.equal(m.getState().steerQueue.length, 1);
+		await m.rewind("u2");
+		assert.deepEqual(m.getState().steerQueue, []);
+	});
+
+	it("blocks automatic continuation: nothing may run behind the edit", async () => {
+		const owed = [
+			{ id: "u1", role: "user", content: "go", timestamp: 1 },
+			{ id: "a1", role: "assistant", content: [{ type: "toolCall", id: "c1", name: "quiz", arguments: {} }], stopReason: "toolUse", usage: { input: 0, output: 0, total: 0, cacheReads: 0, cacheWrites: 0 }, timestamp: 1, provider: "openrouter", model: "test" },
+			{ id: "r1", role: "toolResult", toolCallId: "c1", toolName: "quiz", content: [{ type: "text", text: "ok" }], isError: false, timestamp: 1 },
+		] as unknown as LhMessage[];
+		assert.equal(SessionModel.needsContinuation(owed), true, "the fixture really owes a continuation");
+		const { m, calls } = rewinding(() => Response.json({ ok: true, text: "x" }));
+		await m.rewind("u2");
+		calls.length = 0;
+		await m.continueIfOwed(owed);
+		assert.deepEqual(calls, [], "no turn starts until the learner sends");
+	});
+
+	it("a refusal returns null, surfaces the server's own words and leaves the queue alone", async () => {
+		const { m } = rewinding(() => Response.json({ error: "The session is being compacted — try again when it finishes", code: "compaction_running" }, { status: 409 }));
+		await m.steer("a queued thought");
+		assert.equal(await m.rewind("u2"), null);
+		assert.equal(m.getState().error?.message, "The session is being compacted — try again when it finishes");
+		assert.equal(m.getState().steerQueue.length, 1, "nothing was rewound, so nothing is dropped");
+	});
+
+	it("a failure without a JSON body falls back to a generic message", async () => {
+		const { m } = rewinding(() => new Response("boom", { status: 500 }));
+		assert.equal(await m.rewind("u2"), null);
+		assert.equal(m.getState().error?.message, "The edit failed (500).");
+	});
+
+	it("a network failure returns null and surfaces the error", async () => {
+		const { m } = rewinding(() => { throw new Error("offline"); });
+		assert.equal(await m.rewind("u2"), null);
+		assert.equal(m.getState().error?.message, "offline");
+	});
+
+	it("a 200 without text is a failure, never an empty edit", async () => {
+		const { m } = rewinding(() => Response.json({ ok: true }));
+		assert.equal(await m.rewind("u2"), null);
+		assert.ok(m.getState().error);
 	});
 });
 

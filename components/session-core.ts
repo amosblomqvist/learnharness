@@ -211,6 +211,21 @@ export function visibleQueuedSteers(
 	return queue.filter((s) => !ids.has(s.id));
 }
 
+/** The message the edit control may touch (issue #321): the learner's LAST
+ *  message, once the server's record holds it. An optimistic id (`c_…`) is
+ *  still in flight — the server has never heard of it — and it is the last
+ *  message, so there is no earlier one to fall back to. `hasReply` says
+ *  something follows it: editing then discards that work. */
+export function editableUserMessage(messages: readonly LhMessage[]): { id: string; hasReply: boolean } | null {
+	for (let i = messages.length - 1; i >= 0; i--) {
+		const m = messages[i]!;
+		if (m.role !== "user") continue;
+		if (m.id.startsWith("c_")) return null;
+		return { id: m.id, hasReply: i < messages.length - 1 };
+	}
+	return null;
+}
+
 export interface SessionModelOptions extends SessionModelDeps {
 	chatId: string;
 	initialMessages: LhMessage[];
@@ -890,6 +905,37 @@ export class SessionModel {
 		} catch (err) {
 			revert();
 			this.setError((err as Error).message);
+		}
+	}
+
+	/** EDIT THE LAST SENT MESSAGE (issue #321): the server stops the running
+	 *  turn, removes that message and everything after it, and hands its text
+	 *  back. Returns the text for the composer (resending it is the ordinary
+	 *  send), or null when the server refused: the reason is surfaced and
+	 *  nothing changed. The view is NOT swapped here — the caller adopts the
+	 *  server's record, and owns the turn-in-flight flag. The queued steer
+	 *  lines go (the server dropped them with the tail) and automatic
+	 *  continuation stays blocked until the next explicit send, so nothing
+	 *  runs behind the edit. */
+	async rewind(messageId: string): Promise<string | null> {
+		try {
+			const res = await this.fetch(`/api/chats/${this.chatId}/rewind`, {
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({ messageId }),
+			});
+			const body = (await res.json().catch(() => null)) as { text?: unknown; error?: unknown } | null;
+			if (!res.ok || typeof body?.text !== "string") {
+				this.setError(typeof body?.error === "string" ? body.error : `The edit failed (${res.status}).`);
+				return null;
+			}
+			this.steerQueueValue = [];
+			this.automaticContinuationBlocked = true;
+			this.onChange?.();
+			return body.text;
+		} catch (err) {
+			this.setError((err as Error).message);
+			return null;
 		}
 	}
 
