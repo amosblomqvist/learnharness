@@ -52,6 +52,8 @@ describe("failed saves leave the old file whole", () => {
 	});
 
 	it("job", (t) => {
+		assertAllOrNothing(t, path.join(config.PATHS.data, "jobs", "unborn.json"), () => {},
+			() => jobStore.createJob({ kind: "research", chatId: "chat_atomic", toolCallId: "tc_unborn" }));
 		const job = jobStore.createJob({ kind: "research", chatId: "chat_atomic", toolCallId: "tc_atomic" });
 		assertAllOrNothing(t, path.join(config.PATHS.data, "jobs", `${job.id}.json`), () => {}, () => jobStore.updateJob(job.id, { status: "done" }));
 	});
