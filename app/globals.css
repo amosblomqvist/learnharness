@@ -118,10 +118,10 @@
 	   fonts: `font-mono`/`font-sans` utilities would otherwise fall to the
 	   SYSTEM stacks — a fourth font the app never chose — and streamdown's
 	   code-block chrome + mermaid-error + demo-card all use them. */
-	--font-ui: var(--font-jetbrains), ui-monospace, SFMono-Regular, monospace;
-	--font-prose: var(--font-sans3), ui-sans-serif, system-ui, sans-serif;
-	--font-mono: var(--font-jetbrains), ui-monospace, SFMono-Regular, monospace;
-	--font-sans: var(--font-sans3), ui-sans-serif, system-ui, sans-serif;
+	--font-ui: var(--font-jetbrains), var(--font-vazirmatn), ui-monospace, SFMono-Regular, monospace;
+	--font-prose: var(--font-sans3), var(--font-vazirmatn), ui-sans-serif, system-ui, sans-serif;
+	--font-mono: var(--font-jetbrains), var(--font-vazirmatn), ui-monospace, SFMono-Regular, monospace;
+	--font-sans: var(--font-sans3), var(--font-vazirmatn), ui-sans-serif, system-ui, sans-serif;
 	/* The modular type ladder — each size carries its own line-height.
 	   Component sizes must pull from this ladder. (owner, typography
 	   round 4: the 10px rung is merged into 11 — one pixel apart was a
@@ -610,7 +610,7 @@ pre,
    session-name-serif toggle overrides this var at runtime, so the
    .font-title utility must read it through var(), not carry a baked copy. */
 @theme {
-	--font-title: "lh-cmu", serif;
+	--font-title: "lh-cmu", var(--font-vazirmatn), serif;
 }
 
 /* Card enter (owner round, 2026-10-05): the transcript cards' one-shot
