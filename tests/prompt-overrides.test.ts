@@ -35,7 +35,8 @@ import type { PiEngine } from "../src/agent/models.ts";
 const TMP_DATA = fs.mkdtempSync(path.join(os.tmpdir(), "lh-prompt-overrides-"));
 process.env.LH_DATA_DIR = TMP_DATA;
 
-const { PROMPTS_OVERRIDE_DIR } = await import("../config.ts");
+const { promptsOverrideDir } = await import("../config.ts");
+const PROMPTS_OVERRIDE_DIR = promptsOverrideDir();
 const teacherAgent = await import("../src/agent/teacher-agent.ts");
 const { allSegmentPaths, effectivePromptSegments } = await import("../src/agent/prompt-segments.ts");
 const { isValidSegmentPath } = await import("../src/core/prompt-segments.ts");

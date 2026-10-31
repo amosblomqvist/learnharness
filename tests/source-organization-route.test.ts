@@ -13,14 +13,14 @@ after(() => fs.rmSync(root, { recursive: true, force: true }));
 const { GET, POST } = await import("../app/api/graph/sources/route.ts");
 const { stores } = await import("../src/server/stores.ts");
 const { sourceDirectory } = await import("../src/server/source-organization.ts");
-const { SOURCE_ORGANIZATION_FILE } = await import("../config.ts");
+const { sourceOrganizationFile } = await import("../config.ts");
 const change = (action: unknown) => POST(new Request("http://localhost/api/graph/sources", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(action) }));
 const sourceId = (filePath: string) => `src_${createHash("sha256").update(filePath).digest("hex").slice(0, 12)}`;
 
 it("GET is a non-writing read and inventories all sessions, imported records and missing provenance", async () => {
 	const before = await GET(); assert.equal(before.status, 200);
 	assert.deepEqual((await before.json()).sources, []);
-	assert.equal(fs.existsSync(SOURCE_ORGANIZATION_FILE), false);
+	assert.equal(fs.existsSync(sourceOrganizationFile()), false);
 	const chat = stores.chatStore.createChat("Unextracted session");
 	stores.graphStore.upsertSource({ id: sourceId("Root/empty.md"), filePath: "Root/empty.md", importedAt: "2026-10-30T00:00:00Z" });
 	stores.graphStore.appendNode({ id: "n_orphan", name: "Orphan", statement: "A record is missing.", aliases: [], createdAt: "2026-10-30T00:00:00Z", provenance: [{ chatId: "gone", messageId: "m1" }] });
@@ -46,7 +46,7 @@ it("rename/move operations persist independently without changing source IDs, pa
 	assert.equal(directory.organization.folders.find((f: { id: string }) => f.id === sub.id).parentId, null);
 	assert.deepEqual(stores.graphStore.readNodes(), before.nodes); assert.deepEqual(stores.graphStore.readChains(), before.chains);
 	assert.deepEqual(stores.graphStore.readSources().find((s) => s.id === id), before.source);
-	assert.ok(fs.existsSync(SOURCE_ORGANIZATION_FILE));
+	assert.ok(fs.existsSync(sourceOrganizationFile()));
 });
 
 it("session rename uses its existing title without activity churn; existing root source placement survives reimport", async () => {
@@ -73,19 +73,19 @@ it("server validates cycles, stale sources/parents and nonempty folders, includi
 });
 
 it("malformed, oversized and failed streams refuse before metadata writes", async () => {
-	const before = fs.readFileSync(SOURCE_ORGANIZATION_FILE, "utf8");
+	const before = fs.readFileSync(sourceOrganizationFile(), "utf8");
 	for (const request of [new Request("http://localhost/api/graph/sources", { method: "POST", body: "{" }), new Request("http://localhost/api/graph/sources", { method: "POST", body: "x".repeat(65537) }), new Request("http://localhost/api/graph/sources", { method: "POST", body: new ReadableStream({ start(c) { c.error(new Error("synthetic broken stream")); } }), duplex: "half" } as RequestInit)]) assert.equal((await POST(request)).status, 400);
-	assert.equal(fs.readFileSync(SOURCE_ORGANIZATION_FILE, "utf8"), before);
+	assert.equal(fs.readFileSync(sourceOrganizationFile(), "utf8"), before);
 });
 
 it("newer/corrupt data refuses reads and writes without overwriting its bytes", async () => {
-	const before = fs.readFileSync(SOURCE_ORGANIZATION_FILE, "utf8");
+	const before = fs.readFileSync(sourceOrganizationFile(), "utf8");
 	try {
 		for (const value of ["{", '{"version":2,"folders":[],"placements":{}}']) {
-			fs.writeFileSync(SOURCE_ORGANIZATION_FILE, value);
+			fs.writeFileSync(sourceOrganizationFile(), value);
 			assert.equal((await GET()).status, 500);
 			assert.equal((await change({ action: "create-folder", name: "Do not overwrite", parentId: null })).status, 500);
-			assert.equal(fs.readFileSync(SOURCE_ORGANIZATION_FILE, "utf8"), value);
+			assert.equal(fs.readFileSync(sourceOrganizationFile(), "utf8"), value);
 		}
-	} finally { fs.writeFileSync(SOURCE_ORGANIZATION_FILE, before); }
+	} finally { fs.writeFileSync(sourceOrganizationFile(), before); }
 });

@@ -598,3 +598,64 @@ body {
 	outline: 1px solid var(--border);
 	border-radius: 0.25rem;
 }
+
+/* ============================================================
+ * MOBILE SHELL (mobile-web, 2026-10-29)
+ *
+ * Phones get: safe-area-aware edges, no rubber-band scrolling behind the
+ * drawer/sheets, touch-sized controls, and no keyboard hints (there is no
+ * keyboard). The layout itself is driven by the components (drawer, bottom
+ * sheets); this block is the platform polish.
+ * ============================================================ */
+
+:root {
+	--lh-safe-bottom: env(safe-area-inset-bottom, 0px);
+	--lh-safe-top: env(safe-area-inset-top, 0px);
+	--lh-tap-min: 2.75rem; /* 44px — the iOS/WCAG touch target floor */
+}
+
+html {
+	-webkit-text-size-adjust: 100%;
+	text-size-adjust: 100%;
+}
+
+body {
+	overscroll-behavior-y: contain;
+}
+
+/* Nothing may pan sideways on a phone: wide tables, code and mermaid already
+ * scroll inside their own wrappers. */
+@media (max-width: 767px) {
+	body {
+		overflow-x: hidden;
+	}
+}
+
+/* Coarse pointers (phones/tablets): no hover-only affordances left dimmed,
+ * and no tap highlight flash. */
+@media (pointer: coarse) {
+	button,
+	[role="button"],
+	a {
+		-webkit-tap-highlight-color: transparent;
+	}
+
+	/* Keyboard hints are noise on a touch device, and the Keyboard section
+	 * teaches shortcuts that do not exist there. */
+	kbd,
+	[data-testid="settings-nav-keyboard"] {
+		display: none !important;
+	}
+}
+
+/* Bottom sheets and the drawer sit on the safe area, never under the home
+ * indicator. */
+.lh-safe-b {
+	padding-bottom: calc(1rem + var(--lh-safe-bottom));
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.sidebar-motion {
+		transition: none !important;
+	}
+}

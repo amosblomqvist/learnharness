@@ -52,6 +52,8 @@ import { AppearanceSection, GraphSection } from "./appearance-section.tsx";
 import { KeyboardSection } from "./keyboard-section.tsx";
 import { ChatGPTUIProvider } from "./chatgpt-connection.tsx";
 import { NativeSubscriptionUIProvider } from "./subscription-connections.tsx";
+import { AccountsSection } from "./accounts-section.tsx";
+import { useMe } from "@/components/auth/use-me";
 
 /** Owner (2026-09-20): hints earn their place — mechanics-explaining
  *  prose is out; only the keyboard note stays (storage location is a
@@ -63,6 +65,8 @@ const SECTIONS = [
 	{ id: "graph", label: "Graph" },
 	{ id: "keyboard", label: "Keyboard", hint: "Stored on this device" },
 	{ id: "general", label: "General" },
+	// Accounts (mobile-web, 2026-10-29) — admin-only; filtered out below.
+	{ id: "accounts", label: "Accounts" },
 ] as const;
 type SectionId = (typeof SECTIONS)[number]["id"];
 
@@ -143,6 +147,10 @@ export function SettingsDialogBody({
 	initialRow?: string | null;
 }) {
 	const { onAppearanceChange } = useAppearance();
+	// Accounts nav is admin-only: the section itself also refuses non-admins,
+	// but a nav item that always 403s is noise.
+	const { user } = useMe();
+	const sections = SECTIONS.filter((s) => s.id !== "accounts" || user?.role === "admin");
 	const [record, setRecord] = useState<UserSettings | null | undefined>(
 		undefined,
 	);
@@ -267,7 +275,7 @@ export function SettingsDialogBody({
 			aria-modal="true"
 			aria-label="Settings"
 			data-testid="settings-dialog"
-			className="settings-dialog-pop flex h-[620px] max-h-[85vh] w-[920px] max-w-[90vw] flex-col overflow-hidden rounded-md border border-border bg-card shadow-xl"
+			className="settings-dialog-pop flex h-[620px] max-h-[85vh] w-[920px] max-w-[90vw] flex-col overflow-hidden rounded-md border border-border bg-card shadow-xl max-md:h-full max-md:max-h-full max-md:w-full max-md:max-w-none max-md:rounded-none max-md:border-0"
 			onClick={(e) => e.stopPropagation()}
 		>
 			{/* Header — the app's quiet CMU title language. */}
@@ -299,15 +307,15 @@ export function SettingsDialogBody({
 					</Hint>
 			</header>
 
-			<div className="flex min-h-0 flex-1">
+			<div className="flex min-h-0 flex-1 max-md:flex-col max-md:overflow-hidden">
 				{/* Left nav — text-only, the session-list mono language,
 					    active = bg-accent. */}
 				<nav
 					aria-label="Settings sections"
 					data-testid="settings-nav"
-					className="flex w-44 shrink-0 flex-col gap-1 border-r border-border p-2"
+					className="flex w-44 shrink-0 flex-col gap-1 border-r border-border p-2 max-md:w-full max-md:flex-row max-md:overflow-x-auto max-md:border-r-0 max-md:border-b max-md:p-1.5"
 				>
-					{SECTIONS.map((s) => (
+					{sections.map((s) => (
 						<button
 							key={s.id}
 							type="button"
@@ -430,6 +438,7 @@ export function SettingsDialogBody({
 									<KeyboardSection />
 								</SettingsSection>
 							)}
+							{active === "accounts" && user?.role === "admin" && <AccountsSection />}
 						</div>
 					)}
 				</div>

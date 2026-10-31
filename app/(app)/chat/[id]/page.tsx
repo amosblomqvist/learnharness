@@ -2,6 +2,7 @@ import { notFound } from "next/navigation";
 import { Chat } from "@/components/chat";
 import { slotsConfigured } from "@/src/core";
 import { compactionInFlight, getChat, isTurnRunning, readSettingsRecord, turnFailure } from "@/src/server";
+import { withUserScope } from "@/src/server/auth/context.ts";
 
 export const dynamic = "force-dynamic";
 
@@ -13,12 +14,20 @@ export default async function ChatPage({
 	searchParams: Promise<{ prompt?: string }>;
 }) {
 	const [{ id }, { prompt }] = await Promise.all([params, searchParams]);
-	const chat = getChat(id);
+	// Every read below is account-scoped: pages never pass through withUser,
+	// and an unscoped read sees the empty base root (404 on a live chat).
+	const view = await withUserScope(() => {
+		const chat = getChat(id);
+		return {
+			chat,
+			record: chat ? readSettingsRecord() : null,
+			failure: chat ? turnFailure(chat.id) : undefined,
+			running: chat ? isTurnRunning(chat.id) : false,
+			compacting: chat ? compactionInFlight(chat.id) : false,
+		};
+	});
+	const { chat, record, failure, running, compacting } = view;
 	if (!chat) notFound();
-	// The persistent setup CTA's seed (BYOK, owner 2026-09-22): slotsConfigured
-	// over the settings record, server-read — the same gate home/new read. The
-	// server's 503 stays the truth; this only decides whether the pill rides.
-	const record = readSettingsRecord();
 	return (
 		<Chat
 			key={chat.id}
@@ -29,13 +38,13 @@ export default async function ChatPage({
 				// derived app-side (core/view.ts projectView; GET serves the same
 				// native messages).
 				initialMessages={chat.messages}
-			initialError={turnFailure(chat.id)}
+			initialError={failure}
 			initialConfigured={slotsConfigured(record?.models)}
 			initialPrompt={prompt}
 			// A teacher turn that outlived its client: the remounted view must
 			// attach (busy shimmer + poll), never resurrect the stale record.
-			initiallyInFlight={isTurnRunning(chat.id)}
-			initiallyCompacting={compactionInFlight(chat.id)}
+			initiallyInFlight={running}
+			initiallyCompacting={compacting}
 		/>
 	);
 }

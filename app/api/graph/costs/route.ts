@@ -1,3 +1,4 @@
+import { withUser } from "@/src/server/auth/context.ts";
 /**
  * GET /api/graph/costs — the graph view's cost pill (2026-09 graph cost
  * metrics wave): what the graph PIPELINE cost, folded read-time from the
@@ -14,6 +15,6 @@ import { graphCosts } from "@/src/server";
 
 export const dynamic = "force-dynamic";
 
-export async function GET() {
+export const GET = withUser(async function GET() {
 	return Response.json(graphCosts());
-}
+});

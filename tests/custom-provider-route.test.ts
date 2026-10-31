@@ -56,11 +56,11 @@ function answerWith(status: number, statusText: string, body?: unknown): void {
 	globalThis.fetch = (async () => (body === undefined ? new Response("nope", { status, statusText }) : Response.json(body))) as typeof fetch;
 }
 
-function post(payload: unknown): Promise<Response> {
+async function post(payload: unknown): Promise<Response> {
 	return route.POST(
 		new Request("http://localhost/api/custom-provider", {
 			method: "POST",
-			headers: { "content-type": "application/json", origin: "http://localhost", "if-match": route.GET(new Request("http://localhost/api/custom-provider")).headers.get("etag")! },
+			headers: { "content-type": "application/json", origin: "http://localhost", "if-match": (await route.GET(new Request("http://localhost/api/custom-provider"))).headers.get("etag")! },
 			body: JSON.stringify({ authMode: payload && typeof payload === "object" && "key" in payload ? "apiKey" : "keyless", ...payload as object }),
 		}),
 	);

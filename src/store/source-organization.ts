@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
-import { SOURCE_ORGANIZATION_FILE } from "../../config.ts";
+import { sourceOrganizationFile } from "../../config.ts";
 import { emptySourceOrganization, parseSourceOrganization } from "../core/source-organization.ts";
 import type { SourceOrganizationStore } from "../core/ports.ts";
 import { emit } from "../core/events.ts";
@@ -11,7 +11,7 @@ export const sourceOrganizationStore: SourceOrganizationStore = {
 	read() {
 		assertGraphFormat();
 		let raw: string;
-		try { raw = fs.readFileSync(SOURCE_ORGANIZATION_FILE, "utf8"); }
+		try { raw = fs.readFileSync(sourceOrganizationFile(), "utf8"); }
 		catch (error) {
 			if ((error as NodeJS.ErrnoException).code === "ENOENT") return emptySourceOrganization();
 			throw error;
@@ -21,12 +21,12 @@ export const sourceOrganizationStore: SourceOrganizationStore = {
 	write(state) {
 		assertGraphFormat();
 		const valid = parseSourceOrganization(state);
-		fs.mkdirSync(path.dirname(SOURCE_ORGANIZATION_FILE), { recursive: true });
+		fs.mkdirSync(path.dirname(sourceOrganizationFile()), { recursive: true });
 		ensureGraphFormat();
-		const tmp = `${SOURCE_ORGANIZATION_FILE}.${randomUUID()}.tmp`;
+		const tmp = `${sourceOrganizationFile()}.${randomUUID()}.tmp`;
 		try {
 			fs.writeFileSync(tmp, JSON.stringify(valid, null, "\t") + "\n", "utf8");
-			fs.renameSync(tmp, SOURCE_ORGANIZATION_FILE);
+			fs.renameSync(tmp, sourceOrganizationFile());
 		} finally { fs.rmSync(tmp, { force: true }); }
 		emit("sources-changed", {});
 	},

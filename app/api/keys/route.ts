@@ -1,3 +1,4 @@
+import { withUser } from "@/src/server/auth/context.ts";
 /**
  * GET /api/keys — the auth page's key list (auth-keys wave, 2026-09-19;
  * providers added by the provider-keys interlude same wave).
@@ -21,6 +22,6 @@ import { keyStatuses, providerKeyList } from "@/src/server";
 
 export const dynamic = "force-dynamic";
 
-export async function GET() {
+export const GET = withUser(async function GET() {
 	return Response.json({ keys: keyStatuses(), providers: providerKeyList() });
-}
+});

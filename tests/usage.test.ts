@@ -3,7 +3,9 @@ import test from "node:test";
 import * as fs from "node:fs";
 import { chatStore } from "../src/store/chats.ts";
 import { graphStore } from "../src/store/graph.ts";
-import { PATHS, SOURCES_FILE } from "../config.ts";
+import { PATHS, sourcesFile } from "../config.ts";
+
+const SOURCES_FILE = sourcesFile();
 import { callCost, jobCost, sessionCost, turnCost } from "../src/server/pricing.ts";
 import { sumSteps } from "../src/core/prices.ts";
 import type { CallUsage, ExtractionRunUsage, JobRecord, TurnUsage } from "../src/core/contracts.ts";

@@ -1,3 +1,4 @@
+import { withUser } from "@/src/server/auth/context.ts";
 /**
  * THE SILENT DISMISSAL ROUTE (owner design 2026-10-03, "A2"): ESC-abort
  * from a pending question writes the dismissed toolResult to the record
@@ -22,7 +23,7 @@
 import { ChatInputError, dismissAppends, emit, parseDismissInput } from "@/src/core";
 import { getChat, isTurnRunning, parkDismissal, stores } from "@/src/server";
 
-export async function POST(req: Request, ctx: { params: Promise<{ id: string }> }): Promise<Response> {
+export const POST = withUser(async function POST(req: Request, ctx: { params: Promise<{ id: string }> }): Promise<Response> {
 	const { id } = await ctx.params;
 	const chat = getChat(id);
 	if (!chat) return Response.json({ error: "Unknown chat" }, { status: 404 });
@@ -62,4 +63,4 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
 	stores.chatStore.saveMessages(id, merged);
 	emit("record-changed", { chatId: id });
 	return Response.json({ ok: true });
-}
+});

@@ -1,3 +1,4 @@
+import { withUser } from "@/src/server/auth/context.ts";
 /**
  * GET /api/activity — the dock's one poll: every running background
  * process, every view (chat, home, everywhere). Composition only — the
@@ -9,6 +10,6 @@ import { activityFeed } from "@/src/server";
 
 export const dynamic = "force-dynamic";
 
-export async function GET() {
+export const GET = withUser(async function GET() {
 	return Response.json(activityFeed());
-}
+});

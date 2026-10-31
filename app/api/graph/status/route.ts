@@ -1,3 +1,4 @@
+import { withUser } from "@/src/server/auth/context.ts";
 /**
  * GET /api/graph/status — the in-flight background extraction runs
  * (vision §1: the pipeline status must be visible on the home graph).
@@ -11,7 +12,7 @@ import { chatStore, extractionStatuses } from "@/src/server";
 
 export const dynamic = "force-dynamic";
 
-export async function GET() {
+export const GET = withUser(async function GET() {
 	const runs = extractionStatuses().map((run) => ({
 		// Unique row id (the registry job key: source id, or "src#i" for
 		// chunk jobs) — one source's rows share chatId, and React keys on
@@ -33,4 +34,4 @@ export async function GET() {
 		usage: run.usage,
 	}));
 	return Response.json({ runs });
-}
+});

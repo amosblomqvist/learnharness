@@ -1,3 +1,4 @@
+import { withUser } from "@/src/server/auth/context.ts";
 import { chainsForSelection, formatChainLine } from "@/src/core";
 import { newGraphContextMessage, type GraphContextPick } from "@/src/core";
 import { compactionInFlight, createChat, isTurnRunning, listChats, readSettingsRecord, stores, titleFromPrompt } from "@/src/server";
@@ -10,16 +11,16 @@ import type { ChatListItem } from "@/src/core";
  *  count — the sidebar's Background agents section is their channel now
  *  (a running spinner per row would double-signal them), so busy means
  *  exactly "a teach turn is in flight". */
-export async function GET() {
+export const GET = withUser(async function GET() {
 	const chats: ChatListItem[] = listChats().map((c) => ({
 		...c,
 		busy: isTurnRunning(c.id),
 		compacting: compactionInFlight(c.id),
 	}));
 	return Response.json({ chats });
-}
+});
 
-export async function POST(req: Request) {
+export const POST = withUser(async function POST(req: Request) {
 	const body = (await req.json().catch(() => ({}))) as { title?: unknown; kind?: unknown; graphContext?: unknown };
 	const title = typeof body.title === "string" ? body.title : "";
 	// Practice sessions (owner, 2026-10-04): kind "practice" marks the
@@ -68,4 +69,4 @@ export async function POST(req: Request) {
 		stores.chatStore.saveMessages(chat.id, [newGraphContextMessage(picks, chainLines)]);
 	}
 	return Response.json({ id: chat.id, title: chat.title });
-}
+});

@@ -28,7 +28,8 @@ const { piEngineForSpec, piModels } = await import("../src/agent/models.ts");
 import { BACKGROUND_MODEL_ROLES } from "../src/core/settings.ts";
 import { resolveSettings } from "../src/core/settings-resolution.ts";
 const { readSettings, writeSettings } = await import("../src/store/settings.ts");
-const { SETTINGS_FILE } = await import("../config.ts");
+const { settingsFile } = await import("../config.ts");
+const SETTINGS_FILE = settingsFile();
 const { effectiveSettings } = await import("../src/server/stores.ts");
 const { providerKeyPresent } = await import("../src/server/keys.ts");
 

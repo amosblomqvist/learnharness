@@ -1,3 +1,4 @@
+import { withUser } from "@/src/server/auth/context.ts";
 /**
  * POST-less BYOK mint: the renderer never holds the real Deepgram key.
  *
@@ -15,7 +16,7 @@
  */
 import { keyValue } from "@/src/server";
 
-export async function GET() {
+export const GET = withUser(async function GET() {
 	const key = keyValue("DEEPGRAM_API_KEY");
 	if (!key) {
 		return Response.json(
@@ -45,4 +46,4 @@ export async function GET() {
 	} catch {
 		return Response.json({ message: "Deepgram unreachable" }, { status: 502 });
 	}
-}
+});

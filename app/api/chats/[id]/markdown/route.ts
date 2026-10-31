@@ -1,3 +1,4 @@
+import { withUser } from "@/src/server/auth/context.ts";
 /**
  * THE SESSION MARKDOWN EXPORT (owner, release polish 2026-10-06): the
  * user-facing export the session-markdown engine was built for — the
@@ -23,7 +24,7 @@ function slugify(title: string): string {
 	return slug.length > 0 ? slug : "session";
 }
 
-export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> }): Promise<Response> {
+export const GET = withUser(async function GET(_req: Request, ctx: { params: Promise<{ id: string }> }): Promise<Response> {
 	const { id } = await ctx.params;
 	const record = getChat(id);
 	if (!record) return Response.json({ error: "Unknown chat" }, { status: 404 });
@@ -34,4 +35,4 @@ export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> 
 			"content-disposition": `attachment; filename="${slugify(record.title)}.md"`,
 		},
 	});
-}
+});
