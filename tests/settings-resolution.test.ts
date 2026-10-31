@@ -25,6 +25,7 @@ describe("resolveSettings", () => {
 	it("null record (first boot): non-model knobs land on factory defaults; every model view is EMPTY", () => {
 		const eff = resolveSettings(null);
 		assert.deepEqual(eff.general, { autoUpdate: true });
+		assert.deepEqual(eff.pi, { enabled: true, dir: null });
 		assert.deepEqual(eff.agent.tools, {});
 		assert.deepEqual(eff.agent.prompts, {});
 		assert.deepEqual(eff.agent.search, {});
