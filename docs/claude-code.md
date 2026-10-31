@@ -80,8 +80,12 @@ arguments select user settings only, disable hooks and slash commands, disable
 CLI session persistence and permission prompts, and restrict tools/MCP as above.
 These are integration boundaries, **not an OS sandbox, legal certification, or a
 blanket claim about provider-policy compliance**. User CLI settings and native
-authentication are intentionally retained. Provider terms and account limits still
-apply. CLI stderr is retained in a bounded buffer and logged on process close;
+authentication are intentionally retained, but not the user's coding-agent
+instructions: loading user settings would also load `~/.claude/CLAUDE.md`, its
+imports and rules, and memory files, so the child runs with
+`CLAUDE_CODE_DISABLE_CLAUDE_MDS=1`, and `--settings` resets `outputStyle` to
+`default` so a custom output style is not added to the tutor's prompt. Provider
+terms and account limits still apply. CLI stderr is retained in a bounded buffer and logged on process close;
 server logs can therefore contain CLI diagnostic information.
 
 ### Ownership, reuse, and recovery

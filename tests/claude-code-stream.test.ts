@@ -302,7 +302,7 @@ test("toClaudeArgs includes every isolation flag from Global Constraints", () =>
 		"--setting-sources",
 		"user",
 		"--settings",
-		'{"disableAllHooks":true}',
+		'{"disableAllHooks":true,"outputStyle":"default"}',
 		"--disable-slash-commands",
 		"--no-session-persistence",
 		"--permission-prompts",
@@ -772,6 +772,14 @@ test("spawns with the model alias, effort, bridge tools, MCP timeout headroom an
 	}
 	assert.equal(call.env.HOME, process.env.HOME);
 	assert.equal(call.env.CLAUDE_CONFIG_DIR, process.env.CLAUDE_CONFIG_DIR);
+});
+
+test("spawns without the user's CLAUDE.md or memory files, even when the launch env re-enables them", async (t) => {
+	const saved = process.env.CLAUDE_CODE_DISABLE_CLAUDE_MDS;
+	t.after(() => { if (saved === undefined) delete process.env.CLAUDE_CODE_DISABLE_CLAUDE_MDS; else process.env.CLAUDE_CODE_DISABLE_CLAUDE_MDS = saved; });
+	process.env.CLAUDE_CODE_DISABLE_CLAUDE_MDS = "0";
+	const { calls } = await runScenario(t, readFixtureLines("text.jsonl"));
+	assert.equal(getOnlyCall(calls).env.CLAUDE_CODE_DISABLE_CLAUDE_MDS, "1");
 });
 
 test("MCP timeout headroom overrides inherited shorter timeouts", async (t) => {
