@@ -38,12 +38,14 @@ import {
 	DEMO_BRIDGE_SCRIPT,
 	DemoCard,
 	DemoErrorChip,
+	DemoFullscreenPlaceholder,
+	DemoOverlay,
 	INITIAL_DEMO_BRIDGE_STATE,
 	reduceDemoBridgeState,
 } from "../components/artifacts/demo-card.tsx";
 import { svgNaturalWidth, VisualCard, VisualOutputCard } from "../components/artifacts/visual-card.tsx";
 import { slugFilename } from "../components/artifacts/download.ts";
-import { chartSize } from "../components/session-overlay.tsx";
+import { chartSize, SessionMermaidContext } from "../components/session-overlay.tsx";
 import { SubagentSteerCard } from "../components/artifacts/steer-card.tsx";
 import { DispatchCard } from "../components/artifacts/dispatch-card.tsx";
 import { JobCard, PdfJobCard } from "../components/artifacts/job-card.tsx";
@@ -212,6 +214,31 @@ describe("demo bridge", () => {
 		assert.match(srcDoc, /<canvas id="c">/);
 	});
 
+	it("bridge styles the demo's scrollbars like the app's from a parent message (first in <head>, validated colors)", () => {
+		assert.ok(DEMO_BRIDGE_SCRIPT.includes('"lh-scrollbar"'));
+		assert.ok(DEMO_BRIDGE_SCRIPT.includes("e.source!==parent"), "only the parent may restyle");
+		assert.ok(DEMO_BRIDGE_SCRIPT.includes("h.insertBefore(s,h.firstChild)"), "first, so the demo's own scrollbar css wins");
+		// the validator's escapes must survive the template literal (\w\s, not "ws")
+		const validator = /var ok=(\/.*\/);/.exec(DEMO_BRIDGE_SCRIPT)?.[1];
+		assert.ok(validator, "color validator present");
+		const ok = eval(validator) as RegExp;
+		assert.ok(ok.test("rgb(67, 67, 67)") && ok.test("oklch(0.3 0 0 / 50%)"));
+		assert.ok(!ok.test("red;}body{x:1"));
+		assert.ok(DEMO_BRIDGE_SCRIPT.includes("scrollbar-width:thin"));
+	});
+
+	it("bridge paints <html> white only when the demo sets no background (the iframe element itself is card-colored)", () => {
+		assert.ok(DEMO_BRIDGE_SCRIPT.includes('de.style.setProperty("background-color","#fff")'));
+		assert.ok(DEMO_BRIDGE_SCRIPT.includes('de.style.removeProperty("background-color")'), "re-evaluated each pass: a late demo background wins");
+		const clearSrc = /var clear=(function\(c\)\{.*?\});/.exec(DEMO_BRIDGE_SCRIPT)?.[1];
+		assert.ok(clearSrc, "transparency test present");
+		const clear = eval(`(${clearSrc})`) as (c: string) => boolean;
+		assert.ok(clear("rgba(0, 0, 0, 0)") && clear("transparent") && clear("color(srgb 0 0 0 / 0)"));
+		assert.ok(!clear("rgb(17, 24, 39)") && !clear("rgba(0, 0, 0, 0.5)"));
+		assert.ok(DEMO_BRIDGE_SCRIPT.includes("width:8px"));
+		assert.ok(!buildDemoSrcDoc("<div>x</div>").includes("data-lh-scrollbar"), "srcDoc stays deterministic (SSR hydration)");
+	});
+
 	it("appends the bridge when the document has no </body>", () => {
 		const srcDoc = buildDemoSrcDoc("<div>fragment demo</div>");
 		assert.match(srcDoc, /demo-resize/);
@@ -242,6 +269,15 @@ describe("demo bridge", () => {
 		assert.deepEqual(reduceDemoBridgeState(state, { type: "something-else" }), state);
 		assert.deepEqual(reduceDemoBridgeState(state, "demo-resize"), state);
 		assert.deepEqual(reduceDemoBridgeState(state, null), state);
+	});
+
+	it("forwards Escape as demo-escape, which the card reducer ignores", () => {
+		assert.ok(DEMO_BRIDGE_SCRIPT.includes("demo-escape"));
+		assert.ok(DEMO_BRIDGE_SCRIPT.includes('"Escape"'));
+		assert.equal(
+			reduceDemoBridgeState(INITIAL_DEMO_BRIDGE_STATE, { type: "demo-escape" }),
+			INITIAL_DEMO_BRIDGE_STATE,
+		);
 	});
 });
 
@@ -498,8 +534,50 @@ describe("artifact chrome — scrollbar, invert toggles, downloads (release poli
 		assert.match(html, /toggle-invert-demo-brightness/, "the invert switch (house Toggle)");
 		assert.match(html, /data-testid="demo-download"/);
 		assert.ok(!html.includes("hue-rotate"), "inversion is OFF by default — a manual toggle only");
+		assert.match(html, /rounded-lg border bg-card/, "the iframe element's own backing is the card color (no white flash while unpainted)");
 		assert.match(html, /interactive demo/, "the kind label lives in the caption header");
 		assert.match(html, /Wave interference/, "the title rides beside the kind label");
+	});
+
+	it("demo card: the fullscreen button needs the chat page's context, and never shows on a failed build", () => {
+		const ok = buildSubagentSteer({ id: "jf1", kind: "demo", toolCallId: "cf1" }, { title: "Wave interference", html: DEMO_HTML, tested: true });
+		const failed = buildSubagentSteer(
+			{ id: "jf2", kind: "demo", toolCallId: "cf2" },
+			{ title: "T", html: "", tested: true, notes: "FAILED: never passed verification" },
+		);
+		const provide = (message: unknown) =>
+			renderToStaticMarkup(
+				<SessionMermaidContext.Provider value={{ openMermaid() {}, openFigure() {}, openDemo() {}, closeDemo() {} }}>
+					<SubagentSteerCard message={message as never} />
+				</SessionMermaidContext.Provider>,
+			);
+		const okMessage = projectNative([ok])[0];
+		const bare = renderToStaticMarkup(<SubagentSteerCard message={okMessage as never} />);
+		assert.ok(!bare.includes('data-testid="demo-fullscreen"'), "no chat page → no fullscreen button");
+		const withProvider = provide(okMessage);
+		assert.match(withProvider, /data-testid="demo-fullscreen"/);
+		assert.match(withProvider, /Open demo fullscreen/);
+		assert.ok(!provide(projectNative([failed])[0]).includes("demo-fullscreen"), "failed demos never reach DemoFrame");
+	});
+
+	it("demo fullscreen placeholder: same height, label, close button, no iframe", () => {
+		const html = renderToStaticMarkup(<DemoFullscreenPlaceholder height={420} onClose={() => {}} />);
+		assert.match(html, /Open in fullscreen/);
+		assert.match(html, /Close fullscreen/);
+		assert.match(html, /demo-fullscreen-close/);
+		assert.match(html, /height:420px/);
+		assert.ok(!html.includes("<iframe"));
+	});
+
+	it("demo overlay: chrome + empty zoom slot (no iframe of its own); invert seeds from the card", () => {
+		const props = { title: "Wave interference", onInvertedChange: () => {}, onClose: () => {} };
+		const html = renderToStaticMarkup(<DemoOverlay {...props} initialInverted={false} />);
+		assert.match(html, /data-testid="demo-overlay"/);
+		assert.match(html, /data-demo-overlay-slot/);
+		assert.match(html, /Wave interference/);
+		assert.match(html, /toggle-invert-demo-brightness/);
+		assert.match(html, /demo-overlay-close/);
+		assert.ok(!html.includes("<iframe"), "the card's iframe zooms over the slot — never remounted here");
 	});
 
 	it("figure card: invert + download buttons; NO fullscreen button without a chat page (the context is null there)", () => {

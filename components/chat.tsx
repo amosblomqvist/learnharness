@@ -50,7 +50,8 @@ import {
 } from "@/src/core";
 import { PlanBlock, PlanPopup, latestTree } from "@/components/plan-block";
 import { PlanMarginalia, planExists } from "@/components/plan-window";
-import { MermaidOverlay, SessionMermaidContext } from "@/components/session-overlay";
+import { MermaidOverlay, SessionMermaidContext, type DemoFocus } from "@/components/session-overlay";
+import { DemoOverlay } from "@/components/artifacts/demo-card";
 import { AbortTurnDialog, type AbortMode } from "@/components/abort-turn-dialog";
 import { ArrowRightIcon, DumbbellIcon, WaypointsIcon } from "lucide-react";
 import type { PlanBlockData } from "@/src/core";
@@ -379,7 +380,7 @@ export function Chat({
 		const onAbort = () => {
 			const target = escAbortTarget({
 				abortAsk: abortAskRef.current !== null,
-				mermaidFocus: mermaidFocusRef.current !== null || figureFocusRef.current !== null,
+				mermaidFocus: mermaidFocusRef.current !== null || figureFocusRef.current !== null || demoFocusRef.current !== null,
 				planOpen: planOpenRef.current,
 				setupOpen: setupOpenRef.current,
 				pending: pendingRef.current !== null,
@@ -898,6 +899,10 @@ export function Chat({
 	// overlay shell as mermaid, but carrying the raw svg + the card's invert
 	// state so the fullscreen view stays faithful to the toggled card.
 	const [figureFocus, setFigureFocus] = useState<{ svg: string; inverted: boolean } | null>(null);
+	// Demo focus (2026-10-30): the demo card's fullscreen button — the card
+	// hands over its chrome data + callbacks (DemoFocus); closing always goes through
+	// closeDemo so the card learns the overlay ended.
+	const [demoFocus, setDemoFocus] = useState<DemoFocus | null>(null);
 
 	// Overlay mirrors for the layered-Esc gate (owner 2026-10-04): the
 	// lh:kbd-abort-turn handler reads these at EVENT time — declared here
@@ -909,6 +914,20 @@ export function Chat({
 	// document level by the overlay itself); the window chain must stay out.
 	const figureFocusRef = useRef(figureFocus);
 	figureFocusRef.current = figureFocus;
+	// The demo focus rides the mermaid layer in the Esc gate too (the overlay
+	// closes itself from its own document listener; the gate only claims).
+	const demoFocusRef = useRef(demoFocus);
+	demoFocusRef.current = demoFocus;
+	const closeDemo = useCallback(() => {
+		const f = demoFocusRef.current;
+		if (!f) return;
+		f.onClose();
+		setDemoFocus(null);
+	}, []);
+	const openDemo = useCallback((demo: DemoFocus) => {
+		demoFocusRef.current?.onClose();
+		setDemoFocus(demo);
+	}, []);
 	const planOpenRef = useRef(planOpen);
 	planOpenRef.current = planOpen;
 	const setupOpenRef = useRef(setupOpen);
@@ -1268,6 +1287,8 @@ export function Chat({
 			value={{
 				openMermaid: setMermaidFocus,
 				openFigure: (svg, inverted) => setFigureFocus({ svg, inverted }),
+				openDemo,
+				closeDemo,
 			}}
 		>
 		<JobsContext.Provider value={jobs}>
@@ -1788,6 +1809,14 @@ export function Chat({
 						svg={figureFocus.svg}
 						inverted={figureFocus.inverted}
 						onClose={() => setFigureFocus(null)}
+					/>
+				)}
+				{demoFocus !== null && (
+					<DemoOverlay
+						title={demoFocus.title}
+						initialInverted={demoFocus.inverted}
+						onInvertedChange={demoFocus.onInvertedChange}
+						onClose={closeDemo}
 					/>
 				)}
 				{planOpen && <PlanPopup messages={messages} onClose={() => setPlanOpen(false)} />}
