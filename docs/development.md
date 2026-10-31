@@ -9,6 +9,7 @@ Not a chat app with a graph bolted on: sessions are probe→teach lessons, the p
 - [`docs/architecture.md`](docs/architecture.md) is the **canonical architecture spec** — layers, the import law, the five systems, the invariants, the seam directory. (The pre-audit spec is archived under `docs/archive/` — history only.)
 - Living design doc (all decisions): [`docs/vision.md`](docs/vision.md)
 - Build plan + wave/gate results: [`docs/plan.md`](docs/plan.md)
+- Trusted local plugins: [architecture](plugin-architecture.md), [authoring guide](plugin-authoring.md), and [`examples/plugins/`](../examples/plugins/).
 
 ## Commands
 
@@ -25,6 +26,12 @@ npm run typecheck    # tsc --noEmit
 
 npm run desktop:dev    # next dev + Electron shell pointed at it
 npm run desktop:dist   # local signed/notarized macOS arm64 build (LH_NOTARY keychain)
+
+node scripts/build-plugin-types.mjs  # portable type-only plugin SDK → dist/plugin-sdk
+# After npm run build: assemble and verify a source-free standalone copy.
+node scripts/build-server.mjs
+node scripts/smoke-server.mjs --isolated --browser
+# Add --electron to use Electron's bundled Node; --browser requires local Chrome/Chromium.
 
 # one-shot data scripts (run from the master tree only — data never crosses trees)
 npx tsx --env-file=.env.local scripts/import-notes.ts <dir>   # bulk-import notes → graph
@@ -49,7 +56,7 @@ The packaged desktop app takes keys from `userData/auth.json` (BYOK, mode 0600, 
 
 ## Architecture
 
-Five layers, dependency arrows pointing inward only, machine-enforced as four ESLint zones (shell → barrels only; core and agent never import below themselves). Two composition roots, one writer per store. The full spec — layers, systems, runtime flows, invariants, seams: [`docs/architecture.md`](docs/architecture.md).
+Five layers, dependency arrows pointing inward only, machine-enforced as four ESLint zones (shell → barrels only; core and agent never import below themselves). Explicit composition roots (core stores, chat turns, and plugin-scoped services), one writer per store. The full spec — layers, systems, runtime flows, invariants, seams: [`docs/architecture.md`](docs/architecture.md).
 
 ```mermaid
 flowchart TB

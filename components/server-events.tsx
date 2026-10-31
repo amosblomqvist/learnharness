@@ -122,6 +122,14 @@ export function ServerEventsProvider({ children, connect }: { children: ReactNod
 	return <EventsContext.Provider value={hub}>{children}</EventsContext.Provider>;
 }
 
+/** Access the existing window channel for consumers subscribing to the full
+ * vocabulary. This does not open another connection. */
+export function useNotifyHub() {
+	const hub = useContext(EventsContext);
+	if (!hub) throw new Error("useNotifyHub requires <ServerEventsProvider>");
+	return hub;
+}
+
 /** Subscribe to one event type for this component's lifetime. The callback
  *  is a latest-ref: pass inline closures freely — the freshest render's
  *  closure runs, so state captured at the last completed render is safe to

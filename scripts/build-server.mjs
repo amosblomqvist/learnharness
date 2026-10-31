@@ -12,6 +12,7 @@
  */
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { spawnSync } from "node:child_process";
 
 const ROOT = path.resolve(import.meta.dirname, "..");
 const STANDALONE = path.join(ROOT, ".next", "standalone");
@@ -37,6 +38,34 @@ if (!exists(staticFrom)) {
 copyTree(staticFrom, staticTo);
 if (exists(path.join(ROOT, "public"))) {
 	copyTree(path.join(ROOT, "public"), path.join(STANDALONE, "public"));
+}
+
+// Runtime native plugin loader is deliberately outside Next's module graph.
+// Copy it explicitly: external plugin entries must be loaded by native Node,
+// not interpreted as build-time imports by webpack/Turbopack.
+copyTree(path.join(ROOT, "scripts", "plugin-loader.cjs"), path.join(STANDALONE, "scripts", "plugin-loader.cjs"));
+if (exists(path.join(ROOT, "bundled-plugins"))) {
+	for (const id of fs.readdirSync(path.join(ROOT, "bundled-plugins"))) {
+		if (exists(path.join(ROOT, "bundled-plugins", id, "data"))) {
+			console.error(`[build-server] REFUSING: bundled plugin ${id} contains user data/.`);
+			process.exit(1);
+		}
+	}
+	copyTree(path.join(ROOT, "bundled-plugins"), path.join(STANDALONE, "bundled-plugins"));
+}
+
+// Ship authoring material and generated API types, not the application source or
+// development toolchain. The examples have no credentials or populated data/.
+const authoring = path.join(STANDALONE, "plugin-authoring");
+for (const file of ["plugin-authoring.md", "plugin-architecture.md"]) {
+	copyTree(path.join(ROOT, "docs", file), path.join(authoring, "docs", file));
+}
+copyTree(path.join(ROOT, "examples", "plugins"), path.join(authoring, "examples", "plugins"));
+copyTree(path.join(ROOT, "skills", "learnharness-plugins"), path.join(authoring, "skills", "learnharness-plugins"));
+const types = spawnSync(process.execPath, [path.join(ROOT, "scripts", "build-plugin-types.mjs"), path.join(authoring, "types")], { cwd: ROOT, stdio: "inherit" });
+if (types.error || types.status !== 0) {
+	console.error("[build-server] plugin API declaration emission failed", types.error ?? types.status);
+	process.exit(1);
 }
 
 // 2) Safety: the repo's real data/ must NEVER ride along in the bundle.
@@ -79,6 +108,8 @@ for (const extra of ["dist", path.join("node_modules", "electron")]) {
 // 3) Sanity: the runtime-read prompt assets must be present (the teacher
 //    agent reads them from disk at request time).
 for (const asset of [
+	path.join("scripts", "plugin-loader.cjs"),
+	path.join("public", "plugin-loader.js"),
 	path.join("src", "agent", "system-prompt.md"),
 	path.join("src", "agent", "prompts", "teacher", "20-teaching.md"),
 ]) {

@@ -17,10 +17,9 @@ import { Message, MessageContent, MessageResponse } from "@/components/ai-elemen
 import { Reasoning, ReasoningContent, ReasoningTrigger } from "@/components/ai-elements/reasoning";
 import { Shimmer } from "@/components/ai-elements/shimmer";
 import { BrailleSpinner } from "@/components/braille-spinner";
-import { LiveToolCard } from "@/components/artifacts/live-tool-card";
+import { ToolPartRenderer } from "@/components/plugin-renderers";
 import { Separator } from "@/components/ui/separator";
 import { AnsweredCard } from "@/components/answered-card";
-import { artifactRenderers } from "@/components/artifacts";
 import { SubagentSteerCard } from "@/components/artifacts/steer-card";
 import { Composer } from "@/components/composer";
 import { useEnterSubmits } from "@/components/enter-submits";
@@ -57,7 +56,7 @@ import { PracticeDock } from "@/components/practice-dock";
 import { ThinkingCard, type PracticeThinkingData } from "@/components/practice-cards";
 import { GraphContextCard, type GraphContextData } from "@/components/graph-context-card";
 import { TopBar } from "@/components/top-bar";
-import type { ArtifactPartProps, JobRecord, Phase3, QuestionAnswerData, TurnUsage, SessionPricing } from "@/src/core";
+import type { JobRecord, Phase3, QuestionAnswerData, TurnUsage, SessionPricing } from "@/src/core";
 import type { LhViewMessage } from "@/src/core";
 import { PhaseChip, PhaseDivider } from "@/components/phase-divider";
 import {
@@ -1515,21 +1514,9 @@ export function Chat({
 														return null;
 													}
 													default: {
-														// A tool call being WRITTEN (owner, streaming round 2026-10-01):
-														// input-streaming spans the whole execution, and the live card —
-														// spinner + shimmered activity label, the input watchable on expand
-														// — replaces the retired transcript bottom line. On settling, the
-														// registry's card takes over below.
-														if (part.type.startsWith("tool-") && part.state === "input-streaming") {
-															return <LiveToolCard key={pi} part={part as ArtifactPartProps["part"]} />;
-														}
-														// Artifact extension point (contracts.ts): job
-														// parts and future artifacts render via the
-														// registry — add renderers there, not here.
-														if (part.type.startsWith("tool-")) {
-															const Renderer = artifactRenderers[part.type.slice("tool-".length)];
-															if (Renderer) return <Renderer key={pi} part={part as ArtifactPartProps["part"]} />;
-														}
+														// Built-in presentation stays authoritative; plugin renderers
+														// extend only the generic native-tool fallback slot.
+														if (part.type.startsWith("tool-")) return <ToolPartRenderer key={pi} part={part} />;
 														return null;
 													}
 												}

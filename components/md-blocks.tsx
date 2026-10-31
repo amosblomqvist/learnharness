@@ -42,6 +42,7 @@ import { MermaidError } from "@/components/mermaid-error";
 import { blurAfterPointerClick } from "@/components/focus-hygiene";
 import { chartSize, useSessionMermaid } from "@/components/session-overlay";
 import { Hint } from "@/components/ui/hint";
+import { BUILTIN_MERMAID_LANGUAGE, PluginCodeBlock } from "@/components/plugin-renderers";
 
 // ─── The one affordance: the hover-reveal corner copy ────────────────────────
 
@@ -250,12 +251,13 @@ export function MarkdownCode(props: ComponentProps<"code"> & ExtraProps) {
 	const meta = (node?.properties?.metastring as string | undefined) ?? "";
 	const source = codeSource(children);
 
-	if (language === "mermaid") return <MermaidInline chart={source} />;
+	if (language === BUILTIN_MERMAID_LANGUAGE) return <MermaidInline chart={source} />;
 
 	const startMatch = /startLine=(\d+)/.exec(meta);
 	const startLine = startMatch ? Number.parseInt(startMatch[1]!, 10) : undefined;
 	const lineNumbers = !/\bnoLineNumbers\b/.test(meta);
 	return (
+		<PluginCodeBlock language={language} source={source} meta={meta} incomplete={incomplete} fallback={
 		<div className="group/md relative" data-testid="md-code">
 			<CopyCorner className="absolute top-1.5 right-2 z-10" getText={() => source} label="Copy code" />
 			<CodeBlock
@@ -267,6 +269,7 @@ export function MarkdownCode(props: ComponentProps<"code"> & ExtraProps) {
 				lineNumbers={lineNumbers}
 			/>
 		</div>
+		} />
 	);
 }
 

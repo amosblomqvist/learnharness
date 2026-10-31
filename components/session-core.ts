@@ -413,7 +413,7 @@ export class SessionModel {
 				// The execution layer: clean question placeholders are IGNORED
 				// downstream (view.ts fork 2); errors keep their validation text.
 				const result = agent.result as
-					| { content?: Array<{ type?: string; text?: string }>; details?: unknown }
+					| Pick<ToolResultMessage, "content" | "details">
 					| null;
 				const text = result?.content?.find((c) => c.type === "text")?.text ?? "The tool call failed.";
 				this.mutate(() => {
@@ -421,6 +421,7 @@ export class SessionModel {
 						isError: agent.isError,
 						output: result?.details,
 						errorText: text,
+						...(result ? { result: { content: result.content, details: result.details, isError: agent.isError } } : {}),
 					});
 				});
 				return true; // the execution layer updated the tool part's card

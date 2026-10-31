@@ -47,8 +47,9 @@
  *   Crash recovery (recoverStaleJobs): a process restart can orphan jobs —
  *     "running" with a result (the wake never fired) or without one (the
  *     sub-agent loop itself died). The sweep re-delivers finished results
- *     (idempotently) and re-spawns unfinished loops, both via injected
- *     seams. It runs lazily off the /api/jobs poll, throttled.
+ *     (idempotently) and re-spawns unfinished BUILTIN loops. Plugin jobs
+ *     only read canonical task records through injected recovery, never
+ *     replaying plugin code. It runs lazily off /api/jobs, throttled.
  *
  * All mutable state lives on globalThis (the turn-liveness lesson: Next dev
  * gives each route entry its own module instances — a module-level Map would
@@ -80,8 +81,13 @@ export type TurnRunner = (chatId: string, input: TurnInput) => Promise<number>;
 
 /** Re-runs a job's sub-agent loop (crash recovery for orphaned jobs). */
 export type JobRespawn = (jobId: string) => void;
+export type PluginJobRecovery = (job: JobRecord) => Promise<void>;
+export function setPluginJobRecovery(recover: PluginJobRecovery): void {
+	state().recoverPlugin = recover;
+}
 
 interface QueuedSteer {
+	promise: Promise<void>;
 	steer: SteerMessage;
 	resolve: () => void;
 	reject: (reason: Error) => void;
@@ -95,6 +101,9 @@ interface QueuedSteer {
 interface WakeState {
 	turnRunner?: TurnRunner;
 	respawn?: JobRespawn;
+	recoverPlugin?: PluginJobRecovery;
+	/** Includes wake cargo already dequeued at fire; one immutable marker per id. */
+	deliveries: Map<string, QueuedSteer>;
 	/** chatId → steers awaiting delivery, in arrival order. The single
 	 *  delivery registry (Wave C: the agent's own follow-up queue is a
 	 *  per-run VEHICLE, not the registry — settlement reconciles here). */
@@ -123,7 +132,9 @@ interface LhWakeGlobal {
 
 function state(): WakeState {
 	const g = globalThis as typeof globalThis & LhWakeGlobal;
-	return (g.__lhWakePipeline ??= { queues: new Map(), liveAgents: new Map(), userSteers: new Map(), pumping: new Set(), lastSweepAt: 0, automaticDeferred: new WeakSet() });
+	const current = (g.__lhWakePipeline ??= { deliveries: new Map(), queues: new Map(), liveAgents: new Map(), userSteers: new Map(), pumping: new Set(), lastSweepAt: 0, automaticDeferred: new WeakSet() });
+	current.deliveries ??= new Map(); // dev hot reload of an existing registry
+	return current;
 }
 
 /** chat-handler wires this at module init: its adapter around handleChatRequest. */
@@ -196,14 +207,22 @@ function failSteer(steer: SteerMessage, err: Error): void {
  *  Resolves when the wake turn has completed; rejects when delivery fails
  *  unrecoverably. Never rejects for queueing itself. */
 export function deliverJobResult(steer: SteerMessage): Promise<void> {
-	return new Promise<void>((resolve, reject) => {
-		const s = state();
-		const chatId = chatIdOf(steer);
-		const queue = s.queues.get(chatId) ?? [];
-		queue.push({ steer, resolve, reject });
-		s.queues.set(chatId, queue);
-		void pump(chatId);
-	});
+	const s = state();
+	const known = s.deliveries.get(steer.id);
+	if (known) return known.promise;
+	let resolve!: () => void;
+	let reject!: (reason: Error) => void;
+	const promise = new Promise<void>((yes, no) => { resolve = yes; reject = no; });
+	const entry: QueuedSteer = { steer, promise, resolve, reject };
+	s.deliveries.set(steer.id, entry);
+	const forget = () => { if (s.deliveries.get(steer.id) === entry) s.deliveries.delete(steer.id); };
+	void promise.then(forget, forget);
+	const chatId = chatIdOf(steer);
+	const queue = s.queues.get(chatId) ?? [];
+	queue.push(entry);
+	s.queues.set(chatId, queue);
+	void pump(chatId);
+	return promise;
 }
 
 /** Hand every eligible pending marker to a live agent's steering queue
@@ -369,20 +388,19 @@ export interface AbortOutcome {
  * route is master's thin composition — this is the job-side mechanism.
  * Four things happen, in order:
  *
- *   1. KILL the spend: fire the job's registered AbortController (the
+ *   1. FLIP the record to error "Aborted by learner" immediately — the
+ *      poll reflects the user's action at once. Commit before firing any
+ *      synchronous worker terminal callback so it cannot enqueue a result.
+ *      finalizeJob never overwrites a non-running status.
+ *   2. KILL the spend: fire the job's registered AbortController (the
  *      runner registered it at loop start) — the in-flight model call
  *      aborts, not just the next loop check. The runner unwinds silently
  *      (its catch checks abortSignal.aborted; finishJob checks status).
- *   2. DROP any queued result steer for this job (the delivering-result
+ *   3. DROP any queued result steer for this job (the delivering-result
  *      phase): resolve its entry without firing the wake. If the wake
  *      turn is ALREADY in flight (the pump shifted the entry), it's too
  *      late — the result steer lands, and the cancellation steer dedupes
  *      against it via steerDelivered (same jobId metadata).
- *   3. FLIP the record to error "Aborted by learner" immediately — the
- *      poll reflects the user's action at once (the user chose
- *      error-with-reason over a distinct cancelled status). finalizeJob
- *      never overwrites a non-running status, so the flip is terminal no
- *      matter what the wake does.
  *   4. STEER the teacher: a one-line abort note (buildAbortSteer) through
  *      the same wake pipeline, so the teacher's promise of a result
  *      doesn't hang silently in the lesson.
@@ -395,6 +413,9 @@ export function abortJob(jobId: string): AbortOutcome {
 	if (!job) return { ok: false, reason: "not_found" };
 	if (job.status !== "running") return { ok: false, reason: "not_running" };
 
+	// Commit the abort before firing synchronous worker listeners: a terminal
+	// callback must not enqueue a result while the record still looks running.
+	stores.jobStore.updateJob(jobId, { status: "error", error: "Aborted by learner", activity: "aborted" });
 	fireJobAbort(jobId); // no-op when the loop already returned (delivering)
 
 	// Drop any queued steers for this job (their deliver() resolves unfired).
@@ -409,11 +430,13 @@ export function abortJob(jobId: string): AbortOutcome {
 		if (remaining.length === 0) state().queues.delete(job.chatId);
 		else state().queues.set(job.chatId, remaining);
 		for (const entry of queue) {
-			if (jobIdOf(entry.steer) === jobId && entry.handedTo === undefined) entry.resolve();
+			if (jobIdOf(entry.steer) === jobId && entry.handedTo === undefined) {
+				state().deliveries.delete(entry.steer.id);
+				entry.resolve();
+			}
 		}
 	}
 
-	stores.jobStore.updateJob(jobId, { status: "error", error: "Aborted by learner", activity: "aborted" });
 	void deliverJobResult(buildAbortSteer(job)).catch(() => {
 		/* deliverJobResult marks the job error on unrecoverable failure */
 	});
@@ -537,9 +560,13 @@ async function pump(chatId: string): Promise<void> {
 
 			// A live run may have delivered some markers while the gates were
 			// closed — re-check: only still-missing markers ride the wake.
-			const fire = stillPending.filter((e) => !steerDelivered(fresh.messages, e.steer.id));
+			// Abort may have replaced pending cargo while waitForIdle yielded.
+			// Refresh registry ownership, not just transcript visibility.
+			const current = s.queues.get(chatId) ?? [];
+			const fire = current.filter((e) => !steerDelivered(fresh.messages, e.steer.id));
 			for (const entry of stillPending) {
 				if (!fire.includes(entry)) {
+					if (!current.includes(entry)) continue;
 					finalizeSteer(entry.steer);
 					entry.resolve();
 				}
@@ -717,6 +744,14 @@ export function recoverStaleJobs(): void {
 				if (isJobLive(job.id)) continue; // provably executing here — never re-run beside it
 				if (!stores.chatStore.getChat(job.chatId)) continue;
 				if (isTurnRunning(job.chatId)) continue; // a wake turn may be delivering it right now
+				if (job.kind === "plugin") {
+					// Never respawn plugin code. The injected recovery only reads
+					// canonical persisted tasks or re-delivers a saved presentation.
+					if (s.recoverPlugin) void s.recoverPlugin(job).catch((error: unknown) => {
+						if (stores.jobStore.getJob(job.id)?.status === "running") stores.jobStore.updateJob(job.id, { status: "error", error: String(error), activity: "recovery failed" });
+					});
+					continue;
+				}
 				if (job.result) {
 					// The wake never fired (or crashed mid-flight): re-deliver.
 					const steer = buildSubagentSteer(job, job.result as never);

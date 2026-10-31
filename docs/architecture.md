@@ -9,9 +9,9 @@ Status: **the canonical architecture spec** — describes the as-built system, v
 1. **Maximum control.** Every dependency edge is explicit and machine-checked. Nothing reaches sideways for convenience.
 2. **Easy editability.** A worker can trace any behavior to one file. Layers are named by responsibility, not by framework accident.
 3. **Zero technical debt.** The shape you see is the shape that runs. Deprecated paths are deleted, not parked.
-4. **Crystal-clear architecture.** Two barrels as the entire public API, two composition roots, one writer per store, named seams. When a rule can be a lint rule, it is.
+4. **Crystal-clear architecture.** Two barrels as the internal shell API, explicit composition roots, one writer per store, named seams. Trusted plugins receive the separate context API described in §15. When a rule can be a lint rule, it is.
 
-**The one-sentence model:** a pure domain core at the center; every external effect (fs, LLMs, browser, OS) behind an adapter at the edge; two composition roots as the only places the edges are plugged together; and every persistent store written by exactly one system.
+**The one-sentence model:** a pure domain core at the center; every external effect (fs, LLMs, browser, OS) behind an adapter at the edge; named composition roots as the only places the edges are plugged together; and every persistent store written by exactly one system.
 
 ---
 
@@ -136,7 +136,7 @@ flowchart TB
     COMP -.->|"✗ FORBIDDEN (lint)"| SERVER
 ```
 
-**Two rules are documentation-only by design.** The ESLint plugin's `except` can't express "all but one", so (a) `src/server/stores.ts` is *intended* to be the only server module importing adapters — but the server barrel also re-exports the two portless settings adapters and `observability.ts` imports `chatStore` directly; and (b) the browser-safety of the core barrel is a doc-comment convention (see §2.1). `tests/`, `scripts/`, and `electron/` are deliberately outside the law (lint-excluded); tests import freely across layers, scripts act as extra composition roots.
+**Two rules are documentation-only by design.** The ESLint plugin's `except` can't express "all but one", so (a) `src/server/stores.ts` is *intended* to be the only server module importing adapters — but the server barrel also re-exports the two portless settings adapters, `observability.ts` imports `chatStore` directly, and `src/server/plugins.ts` composes plugin-owned stores (§15); and (b) the browser-safety of the core barrel is a doc-comment convention (see §2.1). `tests/`, `scripts/`, and `electron/` are deliberately outside the law (lint-excluded); tests import freely across layers, scripts act as extra composition roots.
 
 ### 2.1 The core barrel and browser-safety
 
@@ -164,6 +164,7 @@ Storage is **per-entity semantic ports**, never one generic interface: `ChatStor
 
 - **`src/server/stores.ts` is THE composition root for storage**: it instantiates the adapters and hands the port objects to everything else (chat-handler, job runner, extraction pipeline, practice pipeline, graph/positions/chats routes, turn services). It is the single place a storage decision (JSON vs SQLite, local vs remote) gets re-made.
 - **`src/server/chat-handler.ts` is THE composition root for a turn**: it wires the stores, the job runner, the extraction pipeline, the practice pipeline, and the pi engine into the stream response (`setTurnRunner`/`setJobRespawn` register its seams for the wake pipeline). All logic lives behind the seams it calls.
+- **`src/server/plugins.ts` composes plugin-scoped services**: it wires the plugin-local `PluginAgentRecordStore` port (also in `src/core/ports.ts`), authenticated inference, learning-data readers, and lifecycle under one server-process host. These stores never write core chats or graph files.
 - The agent layer is dependency-inverted throughout: `createJobRunner({ chatStore, jobStore, deliver })`, `createExtractionPipeline({ chatStore, graphStore, extractor?, auditor?, embedder })`, `createTeacherTools({ chatId, chatStore, jobStore, spawn })`, `createProberAgent`/`createTeacherAgent(engine?, tools?, …)`. Tests inject the same ports production wires — or swap an in-memory port.
 
 The engine side is adapted too: `src/agent/models.ts` (`piEngineFor`) resolves each role's engine from the user's **model slots** (BYOK: `settings.json` `models` section — strong/cheap/vision; a chain that ends empty refuses honestly with 503 `models_not_configured`) — and the teacher/prober conversation runs the **SESSION'S OWN record**: `POST /api/chats` stamps every newborn verbatim from the strong slot (the new-session default, chosen in setup), in-session picks write the session's record (`PUT /api/chats/:id/settings`), and the strong slot never reaches an existing session again (legacy unstamped records fall back to it at resolve time) — per-session models, owner 2026-09-28. Beyond the conversation, `src/server/pi/` bridges the two SDK worlds: `record-adapter.ts` (persisted UIMessage record → stateless pi `Message[]`, dangling tool calls get synthesized INTERRUPTED results) and `ui-stream.ts` (pi agent events → AI-SDK UIMessage SSE).
@@ -565,3 +566,19 @@ Each of these was implemented, lived in real data, and was replaced; the replace
 ## 14. Deliberately deferred
 
 Structured logging (§10); SQLite/remote storage (drop-in behind the ports, §3); multi-scale cluster hierarchy (Louvain's dendrogram idea, parked); the anchored calibration rubric; alternative extraction triggers beyond the coverage seam (session end, idle); retroactive bootstrap of the POC sessions (vision §1 consolidation). When any of these land, this doc changes with the commit that lands them — it describes the system, not an intention.
+
+## 15. Trusted local plugins (API v1)
+
+The [plugin architecture](plugin-architecture.md) specifies the runtime and [authoring guide](plugin-authoring.md) documents its public contract. Plugins are optional, disabled by default, and trusted like other local programs: no sandbox or permission fiction. Bundled and externally installed packages use the same context API. A package under `data/plugins/<id>/` has a manifest, optional browser ES module and Node backend, optional CSS/assets, and persistent `data/` of its own. The backend runs inside the existing Next Node server; disable is cooperative.
+
+`instrumentation.ts` starts the server singleton in `src/server/plugins.ts`. Its `globalThis` anchor survives Next's separately compiled route modules. The native `scripts/plugin-loader.cjs` sidecar loads external CommonJS backends without asking Next to bundle user-installed code. The HTTP adapter exposes list/enable/call and allowlisted frontend assets; private plugin data and backend modules are never asset responses. LearnHarness's existing desktop-API origin protection still covers those routes. Branded host errors retain their HTTP meaning across separately compiled module instances.
+
+`PluginsProvider` owns one frontend lifecycle per window. The external loader uses native dynamic import, not eval. Custom plugin views appear in the sidebar and main content area; Settings → Plugins controls enablement and hosts plugin settings. Registrations, subscriptions, mounts, CSS, and async teardown follow plugin lifetime. Re-enabling awaits that plugin's previous frontend cleanup; other plugins are independent. `plugins-changed` announces host availability changes; `plugin-message` carries plugin-scoped, non-durable JSON notifications. Reconnect/resync rereads host availability and lets plugin views reread their authoritative backend state.
+
+Supported services are thin read-only access to all learning records, configured/authenticated model calls, and an optional managed agent-session helper built on the existing pi Agent SDK. Managed sessions are plugin-local, not a third core chat kind: they survive navigation, support persisted deferred input and end-run tools, deduplicate accepted request IDs, and mark interrupted runs without automatically replaying tools. Plugins own their domain logic and UI. No scheduling, flashcards, exam semantics, or alternative agent framework is added to the core.
+
+Backend contributions append instructions and native Pi tools to the existing prober/teacher/practice registries, with per-turn factories and package-level failure isolation. Frontend fenced-block and tool-result renderers mount through the same HTMLElement/cleanup model; built-in presentations retain precedence, and missing or failing renderers leave readable raw fallbacks. This does not introduce a new learner-answer protocol.
+
+The result-oriented `ctx.workers` service complements managed conversations: immutable accepted input, explicit model/purpose and turn budget, schema/semantic validation through a native terminal submission tool, and one durable accepted result. Unfinished tasks become interrupted on disable/restart; they are never automatically replayed. `createBackgroundTool` binds a worker to the existing acknowledgement-now/result-steer-later job pipeline. Task outcomes and delivery state remain distinct. Shared request-level worker admission is separate app work and is not implemented by this plugin increment.
+
+Bundled updates run before activation with a durable recovery journal and manifest-last replacement. A failed package is blocked while unrelated plugins remain usable; corrupt shared ownership metadata is refused. Updates never replace plugin `data/`. Source-free payload smoke checks cover a post-build installed backend, browser ESM/relative assets, UI enable/disable/remount, and disabled asset denial. See `scripts/smoke-server.mjs --isolated --browser` (optionally `--electron`).

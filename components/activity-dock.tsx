@@ -219,7 +219,7 @@ export function toBlobs(feed: ActivityFeed): ActivityBlob[] {
 			id: job.id,
 			process: "job",
 			jobKind: job.kind,
-			title: job.title,
+			title: job.kind === "plugin" ? job.plugin?.label || job.plugin?.toolName || "Plugin worker" : job.title,
 			chatId: job.chatId,
 			startedAt: Date.parse(job.createdAt) || 0,
 			cost: job.costUsd ?? null,
@@ -283,6 +283,7 @@ const KIND_ICON: Record<JobKind, typeof SearchIcon> = {
 	demo: PlayIcon,
 	visual: PenToolIcon,
 	pdf: FileTextIcon, // sources v0 — type-forced entry (JobKind grew "pdf")
+	plugin: BotIcon,
 };
 
 /** Abort states per blob id: pending (fired) / failed (backend absent). */
@@ -401,7 +402,9 @@ function ActivityBlobRow({
 						? "Figure maker"
 						: blob.jobKind === "pdf"
 							? "PDF reader"
-							: "Sub-agent";
+							: blob.jobKind === "plugin"
+								? "Plugin worker"
+								: "Sub-agent";
 	return (
 		<div
 			data-testid={`activity-blob-${blob.process}`}

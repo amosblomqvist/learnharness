@@ -69,6 +69,8 @@ npm test           # deterministic, no LLM, no network
 
 See the [development guide](docs/development.md), [architecture](docs/architecture.md), and [desktop release guide](docs/desktop-release.md).
 
+For trusted local plugins, see the [plugin authoring guide](docs/plugin-authoring.md), [plugin architecture](docs/plugin-architecture.md), and runnable examples in [`examples/plugins/`](examples/plugins/).
+
 Questions, bug reports, and feature requests: [GitHub Issues](https://github.com/amosblomqvist/learnharness/issues).
 
 ## License

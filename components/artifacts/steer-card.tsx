@@ -2,11 +2,12 @@
 
 import { CheckIcon, CircleX } from "lucide-react";
 import type { PdfResult, ResearchResult, SubagentArtifactData } from "@/src/core";
-import type { LhViewMessage } from "@/src/core";
+import type { LhViewMessage, PluginBackgroundResult, SubagentResultMeta } from "@/src/core";
 import { isSubagentFailure } from "@/src/core";
 import { DemoOutputCard } from "@/components/artifacts/demo-card";
 import { PdfBriefCard, ResearchBriefCard } from "@/components/artifacts/job-card";
 import { VisualOutputCard } from "@/components/artifacts/visual-card";
+import { PluginWorkerCard } from "@/components/artifacts/plugin-worker-card";
 
 /**
  * The sub-agent result delivery card (contracts.ts "THE ASYNC PROTOCOL" §4).
@@ -24,6 +25,8 @@ import { VisualOutputCard } from "@/components/artifacts/visual-card";
  *   demo / visual — the artifact itself (sandboxed iframe / sanitized SVG).
  *     The sub-agent's verification notes are model-facing glue and do NOT
  *     render; only a failure note does.
+ *   plugin — the separate later task outcome, with an optional registered
+ *     tool renderer and a persisted readable fallback (the call keeps its ack).
  */
 export function SubagentSteerCard({ message }: { message: LhViewMessage }) {
 	const artifactPart = message.parts.find((p) => p.type === "data-subagent-artifact");
@@ -33,8 +36,16 @@ export function SubagentSteerCard({ message }: { message: LhViewMessage }) {
 	// metadata, is the marker) — a quiet chip, mirroring the complete-badge.
 	if (!data) {
 		const aborted = message.parts.find((p) => p.type === "data-subagent-aborted") as
-			| { data?: { kind?: string } }
+			| { data?: { kind?: string; failure?: string } }
 			| undefined;
+		// Recovery/delivery failures share this marker family, but are not
+		// learner aborts and do not invent an outcome for an unreadable task.
+		if (typeof aborted?.data?.failure === "string") return (
+			<div data-testid="job-delivery-failure" role="alert" className="space-y-1 rounded-xl border bg-card p-4 text-sm">
+				<p className="font-medium">Background job recovery/delivery failed</p>
+				<p className="whitespace-pre-wrap break-words text-muted-foreground">{aborted.data.failure}</p>
+			</div>
+		);
 		if (aborted?.data) return <AbortedBadge kind={aborted.data.kind ?? "job"} />;
 		return (
 				<div className="rounded-xl border bg-card p-4 text-sm text-muted-foreground">
@@ -43,6 +54,10 @@ export function SubagentSteerCard({ message }: { message: LhViewMessage }) {
 		);
 	}
 	switch (data.kind) {
+		case "plugin": {
+			const meta = (message.metadata as { subagentResult?: SubagentResultMeta } | undefined)?.subagentResult;
+			return <PluginWorkerCard result={data.result as PluginBackgroundResult} toolCallId={meta?.toolCallId ?? ""} />;
+		}
 		case "research":
 			return isSubagentFailure("research", data.result as ResearchResult) ? (
 				<ResearchBriefCard output={data.result} />

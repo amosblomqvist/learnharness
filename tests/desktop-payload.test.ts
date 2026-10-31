@@ -23,6 +23,16 @@ function withPayload(test: (fixture: {
 	};
 	try {
 		write(path.join("scripts", "build-server.mjs"), source);
+		write(path.join("scripts", "plugin-loader.cjs"), "exports.load = () => {};\n");
+		// Declaration generation is tested separately. This fixture tests payload
+		// curation, not the TypeScript compiler or the full application sources.
+		write(path.join("scripts", "build-plugin-types.mjs"), `import fs from 'node:fs'; import path from 'node:path'; fs.mkdirSync(process.argv[2], {recursive:true}); fs.writeFileSync(path.join(process.argv[2], 'index.d.ts'), 'export interface Example {}');`);
+		write(path.join("public", "plugin-loader.js"), "export {};\n");
+		write(path.join("docs", "plugin-authoring.md"));
+		write(path.join("docs", "plugin-architecture.md"));
+		write(path.join("examples", "plugins", "hello-plugin", "manifest.json"));
+		write(path.join("examples", "plugins", "hello-plugin", "main.js"));
+		write(path.join("skills", "learnharness-plugins", "SKILL.md"));
 		write(path.join(STANDALONE, "server.js"));
 		write(path.join(".next", "static", "runtime.js"));
 		write(path.join("public", "asset.txt"));
@@ -61,6 +71,9 @@ describe("desktop standalone payload", () => {
 			for (const file of runtime) assert.ok(fs.existsSync(path.join(root, STANDALONE, file)), file);
 			assert.ok(fs.existsSync(path.join(root, STANDALONE, ".next", "static", "runtime.js")));
 			assert.ok(fs.existsSync(path.join(root, STANDALONE, "public", "asset.txt")));
+			for (const asset of ["scripts/plugin-loader.cjs", "public/plugin-loader.js", "plugin-authoring/docs/plugin-authoring.md", "plugin-authoring/types/index.d.ts", "plugin-authoring/examples/plugins/hello-plugin/main.js", "plugin-authoring/skills/learnharness-plugins/SKILL.md"]) {
+				assert.ok(fs.existsSync(path.join(root, STANDALONE, asset)), asset);
+			}
 		});
 	});
 
@@ -83,6 +96,15 @@ describe("desktop standalone payload", () => {
 				assert.match(String(result.stderr), /REFUSING/);
 			});
 		}
+	});
+
+	it("refuses user data accidentally placed inside a bundled plugin", () => {
+		withPayload(({ write, run }) => {
+			write(path.join("bundled-plugins", "example", "data", "private.json"));
+			const result = run();
+			assert.equal(result.status, 1);
+			assert.match(String(result.stderr), /REFUSING.*bundled plugin/);
+		});
 	});
 
 	it("still refuses a missing runtime prompt asset", () => {

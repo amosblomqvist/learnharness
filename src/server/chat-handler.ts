@@ -31,6 +31,7 @@ import { runPiTurn } from "./pi/ui-stream.ts";
 import { collectToolCallIds } from "./pi/call-ids.ts";
 import { providerEventNote } from "../agent/provider-events.ts";
 import { effectiveSettings, stores } from "./stores.ts";
+import { getPluginAgentContributions } from "./plugins.ts";
 import { searchAvailable, searchProvider } from "./search.ts";
 import { providerKeyPresent } from "./keys.ts";
 import {
@@ -373,7 +374,17 @@ export async function handleChatInput(
 		commitStaged: () => { stores.chatStore.saveMessages(chatId, merged); persistBaseCount = merged.length; },
 		restoreAutomatic: (automaticIds, retainedIds) => restoreUncommittedAutomatic(chatId, constructed, automaticIds, retainedIds),
 	});
+	let pluginContributions: AgentBuildOptions["pluginContributions"];
+	if (!buildAgent) {
+		try { pluginContributions = await getPluginAgentContributions(); }
+		catch (error) {
+			// Fatal plugin storage/startup errors stay visible through plugin APIs,
+			// but must not make the core lesson unusable. Test factories remain owned.
+			console.error("[plugins] Agent contributions unavailable:", error);
+		}
+	}
 	const agentOpts: AgentBuildOptions = {
+		pluginContributions,
 		engine,
 		callPurpose,
 		requestCycle,

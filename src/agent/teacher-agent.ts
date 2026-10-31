@@ -17,7 +17,8 @@ import {
 import { practiceTools, type PracticeToolContext } from "./tools/practice.ts";
 import { healToolRecord } from "./tools/heal.ts";
 import { quizInputObject, quizInputProblems } from "../core/question-core.ts";
-import { QUESTION_TOOLS, type EnabledTools } from "../core/pending.ts";
+import { QUESTION_TOOLS, TOGGLEABLE_TOOLS, type EnabledTools } from "../core/pending.ts";
+import type { PluginToolContext } from "../core/plugins.ts";
 import { toLlmMessages, nativeInputCause } from "../core/native-messages.ts";
 import type { ChatGPTRequestCycle } from "./chatgpt-request-cycle.ts";
 import { usageWasAdmitted } from "./subscription-request-cycle.ts";
@@ -49,6 +50,13 @@ import { usageWasAdmitted } from "./subscription-request-cycle.ts";
 /** Which agent's prompt directory to compose. Practice (2026-10-04)
  *  composes ONLY its own directory — see prompt-segments.ts. */
 export type AgentKind = "prober" | "teacher" | "practice";
+
+/** Reserve conversation builtins even when role/mechanics/settings gates hide them.
+ * New builtin names must join this catalog; actual turn tools are reserved too. */
+export const CONVERSATION_TOOL_NAMES = Object.freeze([
+	...QUESTION_TOOLS, ...TOGGLEABLE_TOOLS, "probe_done", "read", "ls", "find", "grep",
+	"plan_init", "list_sessions", "list_propositions", "problem", "conclude",
+] as const);
 
 // P2 (2026-09-19): segment discovery + override resolution live in ONE
 // canonical place now — src/store/prompt-overrides.ts (listSourceSegments
@@ -108,6 +116,12 @@ export interface AgentBuildOptions {
 	/** Tests may pass a bare tool registry to drive deterministic flows.
 	 *  An explicit registry is NEVER toggle-filtered — the caller owns it. */
 	tools?: Record<string, AgentTool<any>>;
+	/** Server-owned per-turn resolver. Additive only; explicit tools test overrides
+	 * bypass contributions entirely. No conversation identity means no factory call. */
+	pluginContributions?: (context: PluginToolContext, reservedToolNames: readonly string[]) => {
+		instructions: readonly string[];
+		tools: readonly AgentTool<any>[];
+	};
 	/** The resolved per-user tool toggles (core/pending EnabledTools — the
 	 *  2026-09-19 P2 bridge: Platform's chat-handler passes
 	 *  effective.agent.tools; the factories drop any tool explicitly false.
@@ -175,9 +189,16 @@ function baseAgentOptions(kind: AgentKind, opts: AgentBuildOptions, tools: Agent
 	// ("practice" is not a ModelRole) honest about that.
 	const engine = opts.engine ?? piEngineFor(kind as "prober" | "teacher");
 	const stopper = makeQuestionStopper();
-	const systemPrompt = opts.promptSwitches
+	const builtinPrompt = opts.promptSwitches
 		? composeInstructions(kind, opts.promptSwitches)
 		: composedInstructions[kind]!;
+	const contributions = opts.tools === undefined && opts.chatId && opts.pluginContributions
+		? opts.pluginContributions({ chatId: opts.chatId, agent: kind }, [...CONVERSATION_TOOL_NAMES, ...tools.map(tool => tool.name)])
+		: undefined;
+	// Never replace the builtin prompt or tools, or mutate an already-running Agent.
+	const systemPrompt = contributions?.instructions.length
+		? [builtinPrompt, ...contributions.instructions].join("\n\n---\n\n")
+		: builtinPrompt;
 	// Debug recorder (owner, 2026-10-04): raw provider events when
 	// LH_PROVIDER_EVENTS=1 and the caller handed a chatId; undefined is
 	// the normal no-observer path (tests, env-off).
@@ -190,7 +211,7 @@ function baseAgentOptions(kind: AgentKind, opts: AgentBuildOptions, tools: Agent
 			systemPrompt,
 			model: engine.model,
 			thinkingLevel: engine.level,
-			tools,
+			tools: contributions ? [...tools, ...contributions.tools] : tools,
 			messages: opts.messages ?? [],
 		},
 		streamFn: engine.streamFn,

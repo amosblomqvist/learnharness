@@ -20,7 +20,7 @@ import { phaseAt3Lh } from "../core/phases.ts";
 
 function chatFile(id: string): string {
 	if (!/^[A-Za-z0-9_-]+$/.test(id)) throw new Error(`Invalid chat id: ${id}`);
-	return path.join(PATHS.chats, `${id}.json`);
+	return path.join(/* turbopackIgnore: true */ PATHS.chats, `${id}.json`);
 }
 
 /** THE SILENCE LAW (push S6, 2026-10-02): chats-changed announces ONLY
@@ -61,7 +61,7 @@ function writeChat(record: ChatRecord): void {
 function getChat(id: string): ChatRecord | null {
 	let parsed: unknown;
 	try {
-		parsed = JSON.parse(fs.readFileSync(chatFile(id), "utf-8"));
+		parsed = JSON.parse(fs.readFileSync(/* turbopackIgnore: true */ chatFile(id), "utf-8"));
 	} catch {
 		return null;
 	}
@@ -80,7 +80,7 @@ function listChats(): ChatSummary[] {
 	try {
 		fs.mkdirSync(PATHS.chats, { recursive: true });
 		return fs
-			.readdirSync(PATHS.chats)
+			.readdirSync(/* turbopackIgnore: true */ PATHS.chats)
 			.filter((f) => f.endsWith(".json"))
 			.map((f) => getChat(f.slice(0, -5)))
 			.filter((r): r is ChatRecord => r !== null)

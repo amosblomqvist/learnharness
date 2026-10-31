@@ -44,3 +44,4 @@ export { runPiTurn, piTurnResponse, type PiTurnHandle, type PiTurnSpec } from ".
 export * from "./observability.ts";
 export * from "./model-catalog.ts";
 export { sessionCost } from "./pricing.ts";
+export { initializePlugins, getPluginHost, getPluginAgentContributions, pluginTransport } from "./plugins.ts";

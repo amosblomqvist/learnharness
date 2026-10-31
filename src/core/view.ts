@@ -56,6 +56,8 @@ export interface LhViewPart extends Record<string, unknown> {
 	output?: unknown;
 	rawInput?: unknown;
 	errorText?: string;
+	/** Native result retained for public plugin renderers and readable fallbacks. */
+	result?: Pick<ToolResultMessage, "content" | "details" | "isError">;
 	data?: unknown;
 }
 
@@ -75,6 +77,7 @@ export interface LiveExecution {
 	output?: unknown;
 	/** The failure text (output-error parts). */
 	errorText?: string;
+	result?: Pick<ToolResultMessage, "content" | "details" | "isError">;
 }
 
 /** The live turn's execution layer, maintained by the session hook. */
@@ -98,6 +101,7 @@ function textPart(text: string): LhViewPart {
 
 /** The result a tool part should show, from a native toolResult. */
 function applyResult(part: LhViewPart, result: ToolResultMessage): void {
+	part.result = { content: result.content, details: result.details, isError: result.isError };
 	if (result.isError) {
 		part.state = "output-error";
 		part.rawInput = part.input;
@@ -288,6 +292,7 @@ function toolPartOf(
 	const exec = live?.executions.get(block.id);
 	const isQuestion = isPlaceholderResultTool(block.name);
 	if (exec) {
+		if (exec.result) part.result = exec.result;
 		if (exec.isError) {
 			// An invalid call NEVER becomes input-available — the dock's mount
 			// gate keys on the clean execution end (the live modal-realism
