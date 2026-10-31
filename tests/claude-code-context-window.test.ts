@@ -92,7 +92,7 @@ test("per-session metadata survives JSON persistence, never borrows older report
 });
 
 test("CLI catalog limits remain unknown and cannot create a global denominator", () => {
-	const models = CLAUDE_CODE_MODELS.map(toModelDto);
+	const models = CLAUDE_CODE_MODELS.map((m) => toModelDto(m));
 	assert(models.every((model) => model.contextWindow === null && model.maxTokens === null));
 	assert.equal(catalogLimits({ models }).size, 0);
 });

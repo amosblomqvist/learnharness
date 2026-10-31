@@ -40,7 +40,7 @@ import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useBackdropDismiss } from "@/components/backdrop-dismiss";
 import type React from "react";
-import { type ModelCatalogEntry, type ModelSlotName, type ModelsSettings, CUSTOM_PROVIDER } from "@/src/core";
+import { type ModelCatalogEntry, type ModelSlotName, type ModelsSettings, isCustomProviderId } from "@/src/core";
 import { prettyModel } from "@/components/usage-format";
 import { ModelMenuList } from "@/components/settings/model-menu";
 import { MenuShell } from "@/components/menu-shell";
@@ -436,7 +436,7 @@ function OpenSetupDialog({ onClose, onDone }: SetupDialogProps) {
 		error={keyError}
 		menuOpen={keyMenuOpen}
 		menuAnchor={keyTriggerRef}
-		isCustom={keyProvider?.id === CUSTOM_PROVIDER.id}
+		isCustom={isCustomProviderId(keyProvider?.id ?? "")}
 		onCustomSaved={() => { setKeyProvider(null); notifySettingsSaved("keys"); }}
 		onToggleMenu={() => setKeyMenuOpen((v) => !v)}
 		onPick={(p) => { setKeyProvider(p); setKeyMenuOpen(false); setKeyError(null); }}
@@ -495,7 +495,7 @@ function OpenSetupDialog({ onClose, onDone }: SetupDialogProps) {
 							const levelsForEntry = metadata?.supportedLevels ?? (entry ? Object.keys(THINKING_LABEL) : []);
 							const available = catalog?.models ?? (failed ? [] : undefined);
 							const slotCatalog = slot === "vision"
-								? available?.filter((m) => m.input.includes("image") || m.provider === CUSTOM_PROVIDER.id)
+								? available?.filter((m) => m.input.includes("image") || isCustomProviderId(m.provider))
 								: available;
 							return (
 								<div key={slot} data-testid={`setup-slot-${slot}`} className="flex flex-col gap-1.5">

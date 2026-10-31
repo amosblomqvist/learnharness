@@ -20,7 +20,14 @@ import path from "node:path";
 import { AUTH_FILE } from "../../config.ts";
 import type { AuthStore } from "../core/ports.ts";
 import { CUSTOM_PROVIDER } from "../core/auth-keys.ts";
-import { CUSTOM_AUTH_BINDING, parseCustomAuthBinding, type CustomAuthBinding } from "../core/custom-provider-auth.ts";
+import {
+	CUSTOM_AUTH_BINDING,
+	customBindingAuthKey,
+	customCredentialAuthKey,
+	isReservedCustomAuthKey,
+	parseCustomAuthBinding,
+	type CustomAuthBinding,
+} from "../core/custom-provider-auth.ts";
 
 /** The flat string→string map, or {} for absent/corrupt/non-object. */
 function readMap(): Record<string, string> {
@@ -78,25 +85,33 @@ function readCustomMap(): Record<string, unknown> {
 	try { raw = JSON.parse(text); } catch { throw new Error("Custom authorization storage unavailable"); }
 	if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw new Error("Custom authorization storage unavailable");
 	const map = raw as Record<string, unknown>;
-	if (Object.hasOwn(map, CUSTOM_AUTH_BINDING) && !parseCustomAuthBinding(map[CUSTOM_AUTH_BINDING])) throw new Error("Invalid custom authorization record");
-	if (Object.hasOwn(map, CUSTOM_PROVIDER.envVar) && typeof map[CUSTOM_PROVIDER.envVar] !== "string") throw new Error("Invalid custom credential record");
+	for (const [name, value] of Object.entries(map)) {
+		if (name.startsWith(CUSTOM_AUTH_BINDING)) {
+			if (!parseCustomAuthBinding(value)) throw new Error("Invalid custom authorization record");
+		} else if (isReservedCustomAuthKey(name) && typeof value !== "string") {
+			throw new Error("Invalid custom credential record");
+		}
+	}
 	return map;
 }
 function assertOrdinaryVar(name: string): void {
-	if (name === CUSTOM_AUTH_BINDING || name === CUSTOM_PROVIDER.envVar) throw new Error("Use the custom endpoint editor");
+	if (isReservedCustomAuthKey(name)) throw new Error("Use the custom endpoint editor");
 }
-/** One immutable file snapshot. Keyless callers never invoke fileKey(). */
-export function readCustomAuth() {
+/** One provider's immutable file snapshot. Keyless callers never invoke
+ *  fileKey(). The id defaults to the legacy endpoint. */
+export function readCustomAuth(id: string = CUSTOM_PROVIDER.id) {
 	const map = readCustomMap();
-	return { binding: parseCustomAuthBinding(map[CUSTOM_AUTH_BINDING]), fileKey: () => map[CUSTOM_PROVIDER.envVar] as string | undefined };
+	return { binding: parseCustomAuthBinding(map[customBindingAuthKey(id)]), fileKey: () => map[customCredentialAuthKey(id)] as string | undefined };
 }
-/** Replace just the custom pair in ONE existing atomic record write. */
-export function writeCustomAuth(binding: CustomAuthBinding | undefined, fileKey: string | undefined): void {
+/** Replace just one provider's custom pair in ONE atomic record write. */
+export function writeCustomAuth(id: string = CUSTOM_PROVIDER.id, binding?: CustomAuthBinding, fileKey?: string): void {
 	const map = readCustomMap();
+	const bindingKey = customBindingAuthKey(id);
+	const credentialKey = customCredentialAuthKey(id);
 	if (binding && !parseCustomAuthBinding(JSON.stringify(binding))) throw new Error("Invalid custom authorization record");
-	if (fileKey === undefined) delete map[CUSTOM_PROVIDER.envVar];
-	else Object.defineProperty(map, CUSTOM_PROVIDER.envVar, { value: fileKey, enumerable: true, configurable: true, writable: true });
-	if (binding === undefined) delete map[CUSTOM_AUTH_BINDING];
-	else Object.defineProperty(map, CUSTOM_AUTH_BINDING, { value: JSON.stringify(binding), enumerable: true, configurable: true, writable: true });
+	if (fileKey === undefined) delete map[credentialKey];
+	else Object.defineProperty(map, credentialKey, { value: fileKey, enumerable: true, configurable: true, writable: true });
+	if (binding === undefined) delete map[bindingKey];
+	else Object.defineProperty(map, bindingKey, { value: JSON.stringify(binding), enumerable: true, configurable: true, writable: true });
 	writeMap(map);
 }

@@ -11,10 +11,12 @@ Object.assign(globalThis, { window: dom.window, document: dom.document, Element:
 const originalFetch = globalThis.fetch;
 let root: Root | undefined;
 let host: HTMLElement | undefined;
-async function mount(setup = false) {
+const FIXTURE = { id: "custom", label: "Fixture endpoint", baseUrl: "http://fixture.invalid/v1", authMode: "keyless", keySource: "none", keyPresent: false, keyReuseRequired: false, models: [{ id: "fixture-model" }], overrides: {}, manualModels: [] };
+let mountedProviders = [FIXTURE];
+async function mount(setup = false, providers = mountedProviders) {
 	globalThis.fetch = async (input, init) => {
 		assert.equal(init?.method ?? "GET", "GET", "polish interactions must not save credentials/settings");
-		if (String(input).startsWith("/api/custom-provider")) return Response.json({ baseUrl: "http://fixture.invalid/v1", authMode: "keyless", keySource: "none", keyPresent: false, keyReuseRequired: false, models: [{ id: "fixture-model" }], overrides: {}, manualModels: [] }, { headers: { etag: '"fixture"' } });
+		if (String(input).startsWith("/api/custom-provider")) return Response.json({ providers }, { headers: { etag: '"fixture"' } });
 		return Response.json({ keys: [], providers: [] });
 	};
 	host = document.createElement("div"); document.body.appendChild(host); root = createRoot(host);
@@ -38,6 +40,24 @@ for (const setup of [false, true]) {
 		assert.ok(element("custom-save"));
 	});
 }
+test("renders one labelled row per configured endpoint and edits the chosen one", async () => {
+	mountedProviders = [
+		FIXTURE,
+		{ id: "custom-0123456789ab", label: "Local GPU", baseUrl: "http://local.invalid/v1", authMode: "keyless", keySource: "none", keyPresent: false, keyReuseRequired: false, models: [{ id: "local-model" }], overrides: {}, manualModels: [] },
+	];
+	try {
+		await mount();
+		const rows = document.querySelectorAll<HTMLElement>('[data-testid="custom-endpoint-row-btn"]');
+		assert.equal(rows.length, 2);
+		assert.ok(rows[0]!.textContent?.includes("Fixture endpoint"));
+		assert.ok(rows[1]!.textContent?.includes("Local GPU"));
+		await act(async () => rows[1]!.dispatchEvent(new dom.window.Event("click", { bubbles: true })));
+		assert.equal((element("custom-label-input") as HTMLInputElement).value, "Local GPU");
+		assert.equal((element("custom-baseurl-input") as HTMLInputElement).value, "http://local.invalid/v1");
+	} finally {
+		mountedProviders = [FIXTURE];
+	}
+});
 test("model controls use approved effort labels, right-align Save limits, and group help below", async () => {
 	await mount();
 	const select = element("custom-pin-reasoning-fixture-model");

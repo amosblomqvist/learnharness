@@ -45,11 +45,11 @@ if (mode === "inspect") {
 	console.log(JSON.stringify({ enabled, reason, requests, statusIds: keyStatuses().map(row => row.id), metadataInEnv: process.env.__learnharness_custom_provider_binding !== undefined }));
 } else {
 	const route = await import("../../app/api/custom-provider/route.ts");
-	const get = route.GET(new Request("http://localhost/api/custom-provider"));
-	const payload = action === "keyless" ? { baseUrl: "http://second.invalid/v1", authMode: "keyless" }
-		: action === "envMove" ? { baseUrl: "http://second.invalid/v1", authMode: "apiKey", reuseKey: true }
-		: action === "reuse" ? { baseUrl: "http://first.invalid/v1", authMode: "apiKey", reuseKey: true }
-		: { baseUrl: "http://second.invalid/v1", authMode: "apiKey", key: "fixture-new-key" };
+	const get = route.GET();
+	const payload = action === "keyless" ? { id: "custom", baseUrl: "http://second.invalid/v1", authMode: "keyless" }
+		: action === "envMove" ? { id: "custom", baseUrl: "http://second.invalid/v1", authMode: "apiKey", reuseKey: true }
+		: action === "reuse" ? { id: "custom", baseUrl: "http://first.invalid/v1", authMode: "apiKey", reuseKey: true }
+		: { id: "custom", baseUrl: "http://second.invalid/v1", authMode: "apiKey", key: "fixture-new-key" };
 	const request = new Request("http://localhost/api/custom-provider", { method: action === "disconnect" ? "DELETE" : "POST", headers: { origin: "http://localhost", "content-type": "application/json", "if-match": get.headers.get("etag")! }, body: JSON.stringify(payload) });
 	const result = await route.POST(request);
 	console.log(JSON.stringify({ status: result.status, body: await result.json(), requests }));

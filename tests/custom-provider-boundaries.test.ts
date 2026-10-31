@@ -16,12 +16,15 @@ const { authorizeFixture } = await import("./helpers/custom-provider-auth.ts");
 const { readCustomAuth } = await import("../src/store/auth.ts");
 const { persistCustomAuth } = await import("../src/server/custom-provider-auth.ts");
 const settingsFile = path.join(scratch, "settings.json");
-const seed = (cp: import("../src/core/settings.ts").CustomProviderSettings = { baseUrl: "http://old/v1", authMode: "keyless", models: [{ id: "m" }] }, key?: string) => fs.writeFileSync(settingsFile, JSON.stringify({ version: 1, customProvider: authorizeFixture(cp, key) }));
-const setFileKey = (key: string) => { const auth = readCustomAuth(); persistCustomAuth({ ...auth.binding!, fileKeyBaseUrl: auth.binding!.baseUrl }, key); };
+const seed = (cp: import("../src/core/settings.ts").CustomProviderSettings = { baseUrl: "http://old/v1", authMode: "keyless", models: [{ id: "m" }] }, key?: string) => fs.writeFileSync(settingsFile, JSON.stringify({ version: 1, customProviders: [authorizeFixture({ id: "custom", ...cp }, key)] }));
+const setFileKey = (key: string) => { const auth = readCustomAuth(); persistCustomAuth("custom", { ...auth.binding!, fileKeyBaseUrl: auth.binding!.baseUrl }, key); };
 const current = () => JSON.parse(fs.readFileSync(settingsFile, "utf8"));
-const get = (inspect = false) => route.GET(new Request(`http://localhost/api/custom-provider${inspect ? "?authMode=apiKey" : ""}`));
+const get = (inspect = false) => route.GET(inspect ? new Request("http://localhost/api/custom-provider?authMode=apiKey") : new Request("http://localhost/api/custom-provider"));
 function mutate(body: unknown, method = "POST", headers: Record<string, string> = {}) {
-	return route.POST(new Request("http://localhost/api/custom-provider", { method, headers: { origin: "http://localhost", "content-type": "application/json", "if-match": get().headers.get("etag")!, ...headers }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) }));
+	const payload = method === "DELETE" || body === undefined || typeof body !== "object" || Array.isArray(body)
+		? body
+		: { id: "custom", ...(body as Record<string, unknown>) };
+	return route.POST(new Request("http://localhost/api/custom-provider", { method, headers: { origin: "http://localhost", "content-type": "application/json", "if-match": get().headers.get("etag")!, ...headers }, ...(payload === undefined ? {} : { body: JSON.stringify(payload) }) }));
 }
 let requests: { url: string; authorization: string | null }[];
 beforeEach(() => {
@@ -44,7 +47,7 @@ test("keyless probe never forwards a stored key, and clearing removes authentica
 	assert.equal((await mutate({ baseUrl: "http://new/v1", authMode: "keyless", key: "do-not-use-this" })).status, 200);
 	assert.equal(requests[0]?.authorization, null);
 	assert.equal(keys.keyValue(CUSTOM_PROVIDER.envVar), undefined);
-	assert.equal(current().customProvider.authMode, "keyless");
+	assert.equal(current().customProviders[0].authMode, "keyless");
 });
 test("new keys have no arbitrary minimum; the exact probed key is stored", async () => {
 	assert.equal((await mutate({ baseUrl: "http://new/v1", authMode: "apiKey", key: " k " })).status, 200);
@@ -78,6 +81,22 @@ test("actual GET /api/keys fully redacts every custom key length and preserves o
 		keys.deleteKey("OPENAI_API_KEY");
 	}
 });
+test("additional endpoints keep their own credential and never surface it", async () => {
+	const { customCredentialAuthKey } = await import("../src/core/custom-provider-auth.ts");
+	const res = await mutate({ id: undefined, label: "Second", baseUrl: "http://second/v1", authMode: "apiKey", key: "second-secret" });
+	assert.equal(res.status, 200);
+	const created = (await res.json()).provider as { id: string; label: string };
+	assert.match(created.id, /^custom-[a-f0-9]{12}$/);
+	assert.equal(created.label, "Second");
+	assert.equal(requests.at(-1)?.authorization, "Bearer second-secret");
+	assert.equal(keys.keyValue(customCredentialAuthKey(created.id)), "second-secret");
+	assert.equal(keys.keyValue(CUSTOM_PROVIDER.envVar), undefined, "the legacy credential is untouched");
+	const body = await get().text();
+	assert.ok(!body.includes("second-secret"));
+	assert.ok(!keys.keyStatuses().some(row => row.id === customCredentialAuthKey(created.id)), "reserved storage stays out of the key inventory");
+	assert.equal(keys.saveKey(customCredentialAuthKey(created.id), "bypass").ok, false);
+	assert.equal((current().customProviders as { id: string; label: string }[]).find((p) => p.id === created.id)?.label, "Second");
+});
 test("changing destination cannot silently reuse an existing credential", async () => {
 	setFileKey("private-old");
 	const payload = { baseUrl: "http://new/v1", authMode: "apiKey" };
@@ -89,10 +108,10 @@ test("same-URL unbound development key needs existing explicit reuse consent", a
 	seed({ baseUrl: "http://old/v1", authMode: "apiKey", models: [{ id: "m" }] }, "legacy-key");
 	const { CUSTOM_AUTH_BINDING } = await import("../src/core/custom-provider-auth.ts");
 	const file = path.join(scratch, "auth.json"); const map = JSON.parse(fs.readFileSync(file, "utf8")); delete map[CUSTOM_AUTH_BINDING]; fs.writeFileSync(file, JSON.stringify(map));
-	assert.equal((await get().json()).keyReuseRequired, true);
+	assert.equal((await get().json()).providers[0].keyReuseRequired, true);
 	assert.equal((await mutate({ baseUrl: "http://old/v1", authMode: "apiKey" })).status, 400); assert.equal(requests.length, 0);
 	assert.equal((await mutate({ baseUrl: "http://old/v1", authMode: "apiKey", reuseKey: true })).status, 200);
-	assert.equal(requests[0]?.authorization, "Bearer legacy-key"); assert.equal((await get().json()).keyReuseRequired, false);
+	assert.equal(requests[0]?.authorization, "Bearer legacy-key"); assert.equal((await get().json()).providers[0].keyReuseRequired, false);
 });
 test("generic custom/reserved key writes cannot bypass the atomic binding seam", async () => {
 	const ordinary = await import("../app/api/keys/[id]/route.ts");
@@ -119,7 +138,7 @@ test("environment ownership is shown; consent uses the environment key in probe 
 	process.env[CUSTOM_PROVIDER.envVar] = "environment-secret";
 	authEnvRecord().realEnv.add(CUSTOM_PROVIDER.envVar);
 	try {
-		assert.equal((await get(true).json()).keySource, "env");
+		assert.equal((await get(true).json()).providers[0].keySource, "env");
 		assert.equal((await mutate({ baseUrl: "http://new/v1", authMode: "apiKey", key: "shadowed" })).status, 400);
 		assert.equal((await mutate({ baseUrl: "http://new/v1", authMode: "apiKey", reuseKey: true })).status, 200);
 		assert.equal(requests[0]?.authorization, "Bearer environment-secret");
@@ -193,7 +212,7 @@ test("after discovery preserves unrelated edits and rejects intervening custom e
 	assert.deepEqual(current().appearance, { mode: "dark" }); assert.equal(current().claudeCode.enabled, true);
 	globalThis.fetch = async () => { seed({ baseUrl: "http://changed", authMode: "keyless", models: [] }); return Response.json({ data: [{ id: "m" }] }); };
 	assert.equal((await mutate({ baseUrl: "http://h", authMode: "keyless" })).status, 409);
-	assert.equal(current().customProvider.baseUrl, "http://changed");
+	assert.equal(current().customProviders[0].baseUrl, "http://changed");
 });
 test("after discovery rejects a changed effective key", async () => {
 	seed({ baseUrl: "http://old/v1", authMode: "apiKey", models: [{ id: "m" }] }, "before");
@@ -204,7 +223,7 @@ test("after discovery rejects a changed effective key", async () => {
 test("offline pins accept 512/1, retain support declaration, and do not probe", async () => {
 	const res = await mutate({ overrides: { m: { context: 1, maxTokens: 512, reasoning: false } } }, "PATCH");
 	assert.equal(res.status, 200); assert.equal(requests.length, 0);
-	assert.deepEqual(current().customProvider.overrides.m, { context: 1, maxTokens: 512, reasoning: false });
+	assert.deepEqual(current().customProviders[0].overrides.m, { context: 1, maxTokens: 512, reasoning: false });
 });
 test("settings-write failure restores previous key/config and reports failure", async () => {
 	setFileKey("old-key");
