@@ -63,6 +63,7 @@ This is a **trusted local/shared developer-server mode**, not multi-user hosting
 | Native input/record/UI projection | `src/core/input-events.ts`, `native-messages.ts`, `view.ts`; `components/session-core.ts` |
 | Agent prompts and tool registries | `src/agent/teacher-agent.ts`, `prompt-segments.ts`, `tools.ts`, `tools/practice.ts` |
 | Async workers and result delivery | `src/agent/subagents/runner.ts`, `src/server/jobs.ts` |
+| Learner images shown or annotated in lessons | `src/agent/tools/show-image.ts`, `tools/learner-image.ts`, `subagents/visual-maker.ts`; `components/artifacts/image-card.tsx` |
 | Graph extraction, coverage and derivation | `src/agent/subagents/extraction.ts`, `src/core/coverage.ts`, `graph.ts` |
 | Notes/PDF import and local conversion | `components/notes-import.tsx`, `app/api/graph/import/route.ts`, `src/agent/subagents/pdf-markdown.ts` |
 | Stores and resolved settings | `src/server/stores.ts`, `src/store/`, `src/core/settings-resolution.ts` |

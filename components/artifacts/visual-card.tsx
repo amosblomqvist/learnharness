@@ -77,6 +77,10 @@ export function VisualOutputCard({
 		);
 	}
 	const failed = result.svg.length === 0;
+	// An annotated learner image (issue #363) is a photo: inverting it
+	// shows a negative, so it never inverts and shows no switch.
+	const invertible = result.image === undefined;
+	const shownInverted = invertible && inverted;
 	if (failed) {
 		return (
 			<div className="rounded-xl border bg-card p-4 text-card-foreground" data-testid="visual-card-failed">
@@ -114,7 +118,7 @@ export function VisualOutputCard({
 						? "w-fit max-w-full overflow-hidden rounded-lg bg-white"
 						: "w-full overflow-hidden rounded-lg bg-white"
 				}
-				style={{ filter: inverted ? "invert(1) hue-rotate(180deg)" : undefined }}
+				style={{ filter: shownInverted ? "invert(1) hue-rotate(180deg)" : undefined }}
 				data-testid="visual-svg"
 			>
 				<SvgImage
@@ -128,13 +132,15 @@ export function VisualOutputCard({
 				<div className="flex items-center gap-1.5">
 					{/* The invert affordance (owner round, 2026-10-07): the disc IS
 					    the half-filled contrast circle; the tooltip names it. */}
-					<Toggle
-						checked={inverted}
-						onChange={toggleInverted}
-						label="Invert figure brightness"
-						title="Invert colors"
-						discIcon={<InvertDiscIcon className="size-3" />}
-					/>
+					{invertible && (
+						<Toggle
+							checked={inverted}
+							onChange={toggleInverted}
+							label="Invert figure brightness"
+							title="Invert colors"
+							discIcon={<InvertDiscIcon className="size-3" />}
+						/>
+					)}
 					<button
 						type="button"
 						aria-label="Download figure as SVG"
@@ -150,7 +156,7 @@ export function VisualOutputCard({
 							type="button"
 							aria-label="Open figure fullscreen"
 							title="Open fullscreen"
-							onClick={() => overlay.openFigure(result.svg, inverted)}
+							onClick={() => overlay.openFigure(result.svg, shownInverted)}
 							data-testid="visual-open"
 							className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
 						>

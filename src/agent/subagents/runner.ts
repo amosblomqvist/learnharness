@@ -30,6 +30,7 @@ import { runDemoBuilder } from "./demo-builder.ts";
 import { runPdfReaderAgent } from "./pdf-reader.ts";
 import { runResearcherAgent } from "./researcher.ts";
 import { runVisualMaker } from "./visual-maker.ts";
+import { loadLearnerImage, type LearnerImage } from "../tools/learner-image.ts";
 
 /**
  * The background job runner (contracts.ts "THE ASYNC PROTOCOL" §2–3), created
@@ -454,11 +455,19 @@ export function createJobRunner(deps: JobRunnerDeps): JobRunner {
 
 		const input = (passedInput ?? resolveInput(job, passedInput)) as VisualToolInput | undefined;
 		const brief = typeof input?.brief === "string" ? input.brief : "";
+		const imagePath = typeof input?.image === "string" ? input.image : undefined;
 
 		try {
-			jobStore.updateJob(jobId, { activity: "drawing figure" });
+			// Annotation (issue #363): the learner image is read once, here,
+			// and rides into the maker bounded for storage.
+			let image: LearnerImage | undefined;
+			if (imagePath !== undefined) {
+				jobStore.updateJob(jobId, { activity: "loading image" });
+				image = await loadLearnerImage(imagePath, loop.abortSignal);
+			}
+			jobStore.updateJob(jobId, { activity: image ? "annotating image" : "drawing figure" });
 			const result = await runVisualMaker(
-				{ brief },
+				{ brief, image },
 				{
 					engine: model,
 					abortSignal: loop.abortSignal,

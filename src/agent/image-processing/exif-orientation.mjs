@@ -82,7 +82,7 @@ function hasExifHeader(bytes, offset) {
         bytes[offset + 4] === 0x00 &&
         bytes[offset + 5] === 0x00);
 }
-function getExifOrientation(bytes) {
+export function getExifOrientation(bytes) {
     let tiffOffset = -1;
     // JPEG: starts with FF D8
     if (bytes.length >= 2 && bytes[0] === 0xff && bytes[1] === 0xd8) {

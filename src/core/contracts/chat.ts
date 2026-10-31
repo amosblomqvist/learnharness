@@ -293,6 +293,22 @@ export interface ChatListItem extends ChatSummary {
 	compacting: boolean;
 }
 
+// ─── Learner images in the lesson (issue #363) ──────────────────────────────
+
+/** The show_image tool's record payload (its tool part's output): the
+ *  learner's picture, bounded and embedded so the lesson survives the file
+ *  moving. Never model-facing — the teacher's result is one text line. */
+export interface ShowImageDetails {
+	/** The absolute path the image was read from. */
+	path: string;
+	caption?: string;
+	mimeType: "image/png" | "image/jpeg";
+	/** Base64 image bytes. */
+	data: string;
+	width: number;
+	height: number;
+}
+
 // ─── Artifact renderer registry (client extension point) ────────────────────
 
 /**
