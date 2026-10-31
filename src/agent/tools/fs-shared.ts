@@ -1,3 +1,4 @@
+import * as fsSync from "node:fs";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -13,6 +14,9 @@ import * as path from "node:path";
  * deliberate scope widening vs pi: relative paths and default roots resolve
  * against the LEARNER'S HOME, not a project cwd — the harness has no
  * meaningful working directory, and "find my notes" should just work.
+ * The one carve-out from that scope: SENSITIVE_HOME_PATHS (credentials,
+ * keys, other tools' private data) are refused by the resolver and skipped
+ * by walks — whatever a tool reads is sent to the model provider.
  *
  * Ported behaviors (mirroring pi's dist/core/tools/{ls,find,grep}.js): the
  * schemas, descriptions, output formats, and truncation notices are copied
@@ -35,15 +39,90 @@ export const WALK_TIMEOUT_MS = 10_000;
  */
 const EXCLUDED_DIR_NAMES = new Set(["node_modules", ".git", "Library", ".Trash"]);
 
+/**
+ * Home-relative locations the tools never read or walk into: credential
+ * stores, keys, other agents' session transcripts and settings, browser
+ * profiles. Unlike EXCLUDED_DIR_NAMES these are refused for explicit paths
+ * too (resolveSourcePath), not only skipped by walks. Matched
+ * case-insensitively (macOS and Windows filesystems are).
+ */
+const SENSITIVE_HOME_PATHS = [
+	".claude",
+	".codex",
+	".cursor",
+	".gemini",
+	".ssh",
+	".gnupg",
+	".aws",
+	".azure",
+	".config/gcloud",
+	".kube",
+	".docker",
+	".netrc",
+	".npmrc",
+	".pypirc",
+	".git-credentials",
+	"Library/Keychains",
+	"Library/Cookies",
+	"Library/Safari",
+	"Library/Application Support/Google/Chrome",
+	"Library/Application Support/BraveSoftware",
+	"Library/Application Support/Microsoft Edge",
+	"Library/Application Support/Firefox",
+	".mozilla",
+	".config/google-chrome",
+	".config/chromium",
+	".config/BraveSoftware",
+	".config/microsoft-edge",
+	"AppData/Local/Google/Chrome",
+	"AppData/Local/BraveSoftware",
+	"AppData/Local/Microsoft/Edge",
+	"AppData/Roaming/Mozilla",
+].map((p) => p.toLowerCase());
+
+/** `.env`, `.env.local`, … — dotenv files hold secrets wherever they live. */
+const ENV_FILE = /^\.env(\..*)?$/i;
+
+/** True for a path under SENSITIVE_HOME_PATHS or a dotenv file. String
+ *  check only — walks call it per entry and never follow symlinks; the
+ *  resolver also checks the real path. */
+export function isSensitivePath(absolute: string, home: string = os.homedir()): boolean {
+	if (ENV_FILE.test(path.basename(absolute))) return true;
+	const rel = path.relative(home, absolute);
+	if (rel === "" || rel.startsWith("..") || path.isAbsolute(rel)) return false;
+	const posix = rel.split(path.sep).join("/").toLowerCase();
+	return SENSITIVE_HOME_PATHS.some((p) => posix === p || posix.startsWith(`${p}/`));
+}
+
+function realOrSelf(p: string): string {
+	try {
+		return fsSync.realpathSync.native(p);
+	} catch {
+		return p;
+	}
+}
+
 /** Resolve a tool path argument: absolute stays, relative/absent → home.
  *  (pi resolves against the project cwd; the harness's "project" is the
  *  learner's life, so the home directory is the anchor.) A leading `~` or
  *  `~/` is the home directory, as a shell would expand it — learners and
  *  models write paths that way. `~user` is not expanded. */
 export function resolveSourcePath(p?: string): string {
-	if (!p) return os.homedir();
-	if (p === "~" || p.startsWith("~/") || p.startsWith(`~${path.sep}`)) return path.join(os.homedir(), p.slice(1));
-	return path.isAbsolute(p) ? p : path.join(os.homedir(), p);
+	const home = os.homedir();
+	if (!p) return home;
+	const resolved = p === "~" || p.startsWith("~/") || p.startsWith(`~${path.sep}`)
+		? path.join(home, p.slice(1))
+		: path.isAbsolute(p) ? p : path.join(home, p);
+	// The real path too: a symlink in ~/notes must not reach ~/.ssh.
+	const real = realOrSelf(resolved);
+	const realHome = realOrSelf(home);
+	if (isSensitivePath(resolved, home) || isSensitivePath(real, home) || isSensitivePath(real, realHome)) {
+		throw new Error(
+			`Access denied: ${resolved} is a sensitive location (credentials, keys, or another app's private data). ` +
+				"The learner file tools never read it. If the learner wants it discussed, ask them to paste the relevant part.",
+		);
+	}
+	return resolved;
 }
 
 /** pi's formatSize idiom (50KB prints as "50.0KB"). */
@@ -130,7 +209,8 @@ export function matchGlob(relativePath: string, pattern: string): boolean {
 }
 
 /**
- * Depth-first walk under `root`, never entering EXCLUDED_DIR_NAMES.
+ * Depth-first walk under `root`, never entering EXCLUDED_DIR_NAMES or
+ * sensitive locations (isSensitivePath).
  * `visit` receives absolute file paths; returning true STOPS the walk
  * (find's result limit). The deadline bounds a home-dir walk to
  * WALK_TIMEOUT_MS — partial results are the graceful degradation.
@@ -171,9 +251,10 @@ export async function walkFiles(
 			}
 			const full = path.join(dir, entry.name);
 			if (entry.isDirectory()) {
-				if (EXCLUDED_DIR_NAMES.has(entry.name)) continue;
+				if (EXCLUDED_DIR_NAMES.has(entry.name) || isSensitivePath(full)) continue;
 				if (await walkDir(full)) return true;
 			} else if (entry.isFile()) {
+				if (isSensitivePath(full)) continue;
 				if (await visit(full)) return true;
 			}
 			// symlinks/other: not followed (pi's fd doesn't follow either)
