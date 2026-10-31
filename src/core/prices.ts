@@ -41,6 +41,29 @@ export function sumSteps(steps: readonly CallUsage[]): CallUsage {
 	};
 }
 
+/** Observed session-wide token reuse, not a prediction of cache warmth.
+ * Pi's fresh input excludes both cache buckets. Weight by prompt tokens,
+ * never by call percentages; writes count once (the 1h bucket is a subset).
+ * Missing cache counts mean no recorded reuse, not proven cache misses.
+ * Hide until positive reads exist; incomplete/invalid input cannot yield a rate.
+ */
+export function sessionCacheHitRate(record: Pick<ChatRecord, "turns">): number | null {
+	let promptTokens = 0;
+	let cacheReadTokens = 0;
+	for (const turn of record.turns ?? []) {
+		for (const step of turn.steps) {
+			const input = step.inputTokens;
+			const read = step.cacheReadTokens ?? 0;
+			const write = step.cacheWriteTokens ?? 0;
+			if (input === undefined || [input, read, write].some((v) => !Number.isFinite(v) || v < 0)) return null;
+			promptTokens += input + read + write;
+			cacheReadTokens += read;
+		}
+	}
+	return cacheReadTokens > 0 && Number.isFinite(promptTokens)
+		? cacheReadTokens / promptTokens : null;
+}
+
 export function turnCost(turn: Pick<TurnUsage, "model" | "steps">, price: CallPricer): number | null {
 	if (isSubscriptionModel(turn.model) || turn.steps.length === 0) return null;
 	let total = 0;

@@ -1,105 +1,164 @@
 # Keyboard shortcuts
 
-Decided 2026-09-17 (owner key-map review after the first draft; the whole
-app must be usable with the keyboard only — voice first, keyboard as the
-second pillar of input).
+This reference describes the shipped defaults. **Mod** means ⌘ on macOS and
+Ctrl on Windows/Linux; the dispatcher accepts either modifier on every platform.
+Press **?** outside a text field for the in-app cheat sheet.
 
-## Architecture
+## Default key map
 
-- **Registry**: `src/core/keyboard.ts` — `KEYBOARD_ACTIONS` holds every
-  action: `{ id, label, scope, binding }`. The cheat sheet renders FROM
-  the registry, so it can never list a non-functional shortcut.
-- **Provider**: `components/keyboard-shortcuts.tsx` — one window-level
-  keydown listener (bubble phase, mounted once in AppShell). Normalizes
-  keys to `mod+d`-style strings, resolves overrides, dispatches
-  `lh:kbd-<action-id>` window CustomEvents. Surfaces listen for their
-  own events (matching the pre-existing `lh:chat-renamed` seam style).
-- **Persistence**: overrides live under localStorage `lh:keymap` as
-  `{actionId: binding}` merged over defaults. No editor yet — the
-  settings milestone owns key map editing.
-- **displayOnly entries**: the registry also lists SURFACE-owned keys
-  (the question dock's row machine) for the cheat sheet only —
-  `effectiveKeymap` skips them so bare arrows can never leak to pages
-  where the surface isn't mounted.
+| Action | Binding |
+|---|---|
+| Toggle dictation | Mod+D |
+| Open settings | Mod+, |
+| Model selector | Mod+K |
+| Cycle thinking level | Shift+Tab |
+| Toggle sessions sidebar | Mod+B |
+| Search sessions | Mod+Shift+F |
+| Graph view | Mod+G |
+| New session | Mod+N |
+| Rename current session | F2 |
+| Toggle all your thinking in the session | Mod+T |
+| Find in session / search graph or chains view | Mod+F |
+| Shortcut cheat sheet | ? |
 
-## Rules
+Surface-specific actions require their surface to be mounted. Bare shortcuts
+such as **?** and **F2** do not fire while typing; modifier shortcuts still do.
 
-- **Tab is dead everywhere** (owner decision: browser tab-focus
-  navigation abandoned). Shift+Tab cycles the thinking level — also
-  while typing in a field (modifier combos are the only keys that fire
-  from typing surfaces; bare keys never do).
-- **Esc priority chain**: topmost popover → cheat sheet → cancel
-  dictation (DISCARD — the transcript flush is Cmd+D/Stop only, owner
-  round) → abort turn (local stream only — a server-side wake turn has
-  no client request to abort). Every element/document-level Esc handler
-  that acts calls `e.stopPropagation()` so the window chain never
-  double-fires. The session search claims Esc to blur back to normal.
-- **Focus ring**: browser Tab-focus is gone, so `:focus-visible` stays
-  unstyled (an earlier experimental outline was live-rejected — inputs
-  showed a red ring on plain click-focus).
+**Settings → Keyboard** displays the registry and offers Rebind, per-action
+Reset, and Reset all controls. Overrides are stored on this device in
+localStorage (`lh:keymap`), not in the learning-data settings file. Contextual
+question keys are shown as **Fixed — part of this screen**, not rebindable.
+Tab and Esc also have dedicated handling outside ordinary registry dispatch.
 
-## Key map (Wave A — global)
+## Keyboard layouts
 
-| Action | Binding | Seam |
-|---|---|---|
-| Toggle dictation | ⌘D | `lh:kbd-toggle-dictation` (dictation.tsx) |
-| Model selector | ⌘K | `lh:kbd-open-model-picker` (model-picker.tsx) |
-| Cycle thinking level | Shift+Tab | `lh:kbd-cycle-thinking` (model-picker.tsx) |
-| Toggle sidebar | ⌘B | `lh:toggle-sidebar` (sidebar.tsx) |
-| Sessions search | ⌘⇧F | `lh:kbd-sessions-search` (sidebar.tsx) |
-| Walk search results | ↑ / ↓ *in the search field* | sidebar.tsx (cycles the filtered rows, wraps) |
-| Open search result | Enter *in the search field* | sidebar.tsx (walked row, else the first match) |
-| ~~Cycle session~~ | ~~⌥↑ / ⌥↓~~ | RETIRED (owner, 2026-10-10) — the search walk above replaces it |
-| ~~Open selected session~~ | ~~⌥Enter~~ | RETIRED (owner, 2026-10-10) — the search Enter above replaces it |
-| Jump to graph (home) | ⌘G | router.push in keyboard-shortcuts.tsx |
-| New session | ⌘N | router.push in keyboard-shortcuts.tsx |
-| Rename session | F2 | `lh:kbd-rename-session` (chat.tsx) |
-| Cheat sheet | ? | keyboard-shortcuts.tsx |
-| Find (graph: node search) | ⌘F | `lh:kbd-find` (graph-view.tsx; chat transcript search rides the same event when that feature lands) |
+Shortcut matching and Settings rebinding use the same normalization. With
+**Ctrl, ⌘, or Alt/Option** held, a single non-ASCII character falls back to its
+physical **A–Z or comma** key position when the event supplies that code. For
+example, Russian Ctrl+`л` at `KeyK` matches **Mod+K**, and ⌘+`б` at `Comma`
+matches **Mod+,**. This also covers non-ASCII characters produced by Alt/Option,
+such as Option+K reporting `˚` at `KeyK` and normalizing to `alt+k`.
 
-## Model menu keyboard machine (owner polish, 2026-09-17)
+ASCII characters still follow the reported character, not the physical position:
+an AZERTY event reporting `q` at `KeyA` stays `mod+q`. Bare typing is unchanged.
+Other physical codes and named keys (including dead keys) keep their existing
+handling; this is not a guarantee for every OS/IME or layout-specific key.
 
-(Removed from the settings/cheat-sheet registry 2026-10-10 — obvious
-in-field navigation; the behavior below is unchanged.)
+## Focus and Esc
 
-While the model menu is open, focus stays in the search field and the
-menu owns ↑/↓/Enter inside the input's own handler:
+- **Tab** does not use the browser's normal focus traversal. On composer-bearing
+  pages it cycles the live text fields forward, wrapping to the first. In a
+  session the order is reading-thinking → active dock fields → composer,
+  including only fields currently mounted. From elsewhere it enters the first
+  field. The expanded select-question dock has its own rows↔thinking cycle below.
+- **Shift+Tab** cycles the model's thinking level, including while typing; it is
+  not backward focus traversal. Connection dialogs can own their own Tab trap.
+- **Esc** acts on the active field or topmost surfaced layer first: for example,
+  leave a field, dismiss a menu/dialog, or close Find. Handlers claim the event
+  so one Esc does not also act on lower layers. With no layer claiming it, the
+  fallback closes the cheat sheet or cancels dictation (discarding its pending
+  transcript) before reaching the chat's confirmation to dismiss a pending
+  question/problem or abort a running turn. Confirmed turn abort signals the
+  server, including for background turns; it also detaches any local stream.
 
-- **↑/↓** walk the filtered results — clamped, no wrap. First ↓ starts at
-  the first row; first ↑ at the last. The walked row gets a muted ring and
-  scrollIntoView.
-- **Enter** picks the walked row, or the **first result** when nothing is
-  walked yet (owner decision). Typing a new query resets the walk.
-- Clicking and Enter share one `pickModel` path; Esc still closes the menu.
+To keep dictated text, stop dictation with **Mod+D** / Stop rather than the
+fallback Esc cancellation.
 
-## Question dock row machine (Wave B, owner rounds 2026-09-17)
+## Enter and submission
 
-While a question is expanded, the dock owns ↑/↓/Space/Enter/Tab:
+- In the **chat composer**, **question answer/thinking fields**, and **practice
+  thinking field**, **Enter submits**; **Shift+Enter** inserts a newline;
+  **Mod+Enter** also submits. A question still needs an answer, and practice
+  needs nonempty thinking. Submission is disabled during compaction.
+- The composer's action follows its state: send text (or steer a running turn),
+  Stop when busy with no sendable text, or **Next problem** when empty in the
+  practice pause.
+- Plain **Enter outside a typing surface** also submits the active question or
+  practice response when valid, or advances from the practice pause. A
+  pointer-clicked transcript button does not steal this submit. Keyboard-focused
+  buttons and buttons in open menus/dialogs retain native Enter activation.
+- When a pending check is closed, **Enter** opens it rather than submitting a
+  hidden answer. In **Thinking while reading**, Enter / Mod+Enter opens that
+  waiting check; otherwise Enter makes a newline and Mod+Enter leaves the field.
+- The single-line **Other…** answer submits on Enter, including Shift+Enter.
+- Search/menu fields own their Enter; Find navigation never submits an answer.
 
-- **↑/↓** walk every answerable row in order — options first, then the
-  quiz's "I don't know" / the ask's "Other…" (never both) — **clamped at
-  the ends, no wrap** (owner: faster to navigate when the walk stops).
-  The walked row gets a subtle ring (`bg-accent/40`) and scrollIntoView.
-- **Space** acts on the walked row exactly like a click: multi toggles,
-  single displaces; Other also focuses its inline input for typing.
-- **Enter** submits once an answer exists (`canSubmit`).
-- **Tab (plain)** toggles focus between the thinking field and the
-  answer rows — nothing else (owner round 3). From the thinking side it
-  focuses the walked (or first) row; from the rows it returns to the
-  thinking field. Focus follows the walk while the user is in the rows,
-  so focused and walked never diverge. Shift+Tab is NOT the dock's —
-  the global thinking-level cycle owns it everywhere.
-- Guards: keys from a typing surface keep their native meaning (arrows
-  move the caret, space types — the thinking field is never hijacked),
-  and modifier combos are never the dock's — Alt+arrows cycle sessions
-  without ALSO walking the question rows (owner round 3). The listener
-  lives only while the dock is expanded — collapsed, the bar's native
-  Enter expands it.
+## Question dock
 
-## Status
+While a select question is expanded and active:
 
-- Wave A (global plumbing + shortcuts above) — landed, CDP-verified.
-- Wave B (question row machine) — landed, CDP-verified.
-- Wave C remainder: ⌘F chat transcript search (new feature, needs its own
-  design pass), ⌘I import notes on graph. ⌘F graph node search shipped
-  early (owner live-tested the gap).
+- **↑/↓** walk answer rows: options first, then **I don't know** (quiz) or
+  **Other…** (ask). The walk stops at either end; it does not wrap.
+- **Space** acts like clicking the walked row: toggles a multi-select option or
+  picks a single-select option. Selecting Other focuses its input; Space on an
+  already selected Other row deselects it without erasing its text.
+- **←/→** adjust quiz confidence through its stops, except on **I don't know**.
+- **Tab** toggles between the thinking field and walked (or first) answer row.
+  Focus follows the arrow walk while in the rows. The confidence slider is not
+  part of this cycle. **Shift+Tab** remains the thinking-level shortcut.
+- Arrows and Space keep their text-editing meaning in typing fields; Alt/Ctrl/⌘
+  combinations do not walk the dock. In Other, **Esc** leaves the input but
+  keeps the answer selected.
+
+Text-only questions have no answer-row machine; their answer field uses the
+submission conventions above.
+
+## Chains view
+
+- **Mod+F** focuses the chains search while the view is open, rather than the
+  graph search underneath it. **↓** from that field enters the first result;
+  the other arrows retain their text-editing meaning there.
+- **↑/↓** move between siblings in the current layer, skipping expanded
+  descendants and stopping at either end without wrapping.
+- **→** expands the highlighted row and enters its first child: folders →
+  sources → chains → propositions. A leaf stays where it is.
+- **←** returns to the parent and collapses that parent's contents. At the top
+  level, it collapses the highlighted row if open.
+- **Space** toggles the highlighted row's checkbox, where available. Ordinary
+  browsing selects whole sources/folders; practice's Pick nodes also offers
+  chain/proposition checkboxes. Text inputs retain normal Space behavior.
+- Clicking blank space below the tree clears row focus/highlighting, not checked
+  items. Creating a folder clears any search and focuses the new folder.
+- The whole active row is highlighted and scrolled into view. This focus is
+  separate from checkbox selection; navigation does not select graph nodes.
+  Clicking a row establishes the navigation position. Rename inputs keep their
+  normal text-editing arrow keys; foreground menus/dialogs take priority.
+
+## Search and menus
+
+- **Sessions search (Mod+Shift+F):** opens the sidebar if needed and focuses its
+  search field. **↑/↓** walk the filtered sessions with wrap; **Enter** opens the
+  walked row, or the first match if none was walked, then leaves the field.
+  **Esc** leaves the field without clearing the query.
+- **Model search menus:** focus stays in search. **↑/↓** walk filtered results
+  without wrap; the first ↓ starts at the first result, the first ↑ at the last.
+  **Enter** picks the walked result or the first result. Editing the query resets
+  the walk. Menus without a search field instead move button focus with wrapping
+  **↑/↓**, support **Home/End**, and use native **Enter** activation.
+- **Find (Mod+F):** in the graph, focuses node search; with the chains view
+  open, focuses that view's search instead. In a session, opens a
+  literal, case-insensitive search of displayed session text, including offscreen
+  scroll content but excluding hidden/collapsed content, draft fields, and embedded
+  documents. **Enter / Shift+Enter** in the Find field move to the next/previous
+  match with wrap. **Esc** closes Find, clears highlights, and restores prior
+  focus. Reopening retains the query and reading position within that session;
+  changing sessions resets Find. A foreground menu/dialog takes priority.
+
+## Implementation sources
+
+- [Registry and persistence](../src/core/keyboard.ts),
+  [window dispatcher and cheat sheet](../components/keyboard-shortcuts.tsx),
+  [Keyboard settings](../components/settings/keyboard-section.tsx).
+- [Field cycle](../components/field-cycle.ts),
+  [question dock](../components/question-dock.tsx),
+  [practice dock](../components/practice-dock.tsx),
+  [composer](../components/composer.tsx),
+  [chat focus and abort handling](../components/chat.tsx),
+  [reading-thinking field](../components/reading-thinking.tsx),
+  [Enter focus rules](../components/enter-submits.ts).
+- [Sidebar search](../components/sidebar.tsx),
+  [model menus](../components/settings/model-menu.tsx),
+  [menu shell](../components/menu-shell.tsx),
+  [session Find](../components/session-find.tsx),
+  [displayed-text matching](../components/session-find-dom.ts),
+  [chains navigation](../components/chain-navigation.ts).

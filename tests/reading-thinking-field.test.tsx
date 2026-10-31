@@ -8,7 +8,7 @@ import { ReadingThinkingField } from "../components/reading-thinking.tsx";
 describe("the reading-thinking field (owner round, 2026-10-07)", () => {
 	it("carries vertical padding — the 1px-scrollbar absorption", () => {
 		const html = renderToStaticMarkup(
-			<ReadingThinkingField value="" onChange={() => {}} claim={false} />,
+			<ReadingThinkingField value="" revision={0} onChange={() => {}} claim={false} />,
 		);
 		// The fix (empirically diagnosed): Source Sans 3's font box (22px at
 		// 16px) exceeds lh-input's 20px line box by 1px; Chromium counts that

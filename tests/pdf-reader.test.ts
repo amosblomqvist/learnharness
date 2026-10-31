@@ -76,10 +76,10 @@ describe("pdf-reader source paths", () => {
 		fs.rmSync(home, { recursive: true, force: true });
 	});
 
-	for (const kind of ["absolute", "home-relative"] as const) {
+	for (const kind of ["absolute", "home-relative", "tilde"] as const) {
 		it(`${kind} path reaches text tools and rendering as the same absolute path`, async () => {
 			const absolutePath = path.join(home, relativePath);
-			const inputPath = kind === "absolute" ? absolutePath : relativePath;
+			const inputPath = { absolute: absolutePath, "home-relative": relativePath, tilde: `~/${relativePath}` }[kind];
 			assert.equal(os.homedir(), home);
 			assert.notEqual(path.resolve(relativePath), absolutePath, "cwd is not the learner's home");
 			const headless = fakeHeadless();

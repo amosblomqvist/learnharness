@@ -102,6 +102,7 @@ function memoryLedgers() {
 			sources.set(s.id, { ...s, extractions: [...(prev?.extractions ?? [])] });
 		},
 		readSources: () => [...sources.values()].map((s) => ({ ...s, extractions: [...(s.extractions ?? [])] })),
+		deleteSources: (ids: ReadonlySet<string>) => [...ids].reduce((count, id) => count + Number(sources.delete(id)), 0),
 		appendSourceUsage: (id: string, entry: ExtractionRunUsage) => {
 			const source = sources.get(id);
 			if (!source) return;
@@ -1441,26 +1442,28 @@ describe("the extractor redesign (owner, 2026-09-30): chains are the deliverable
 		assert.deepEqual(await pipeline.runExtraction(chatId), { nodes: 2, chains: 1 });
 	});
 
-	it("the system prompt is goal-first: ONE shared core, both preambles assembled onto it", () => {
-		// The core carries the goal + submission mechanics.
-		assert.match(EXTRACTION_CORE, /JOINTLY entail a conclusion/);
-		assert.match(EXTRACTION_CORE, /for the same conclusion are separate chains/);
-		assert.match(EXTRACTION_CORE, /Entailment is the only link that earns a\s+chain/);
-		assert.match(EXTRACTION_CORE, /what a reference on it would teach/);
-		assert.match(EXTRACTION_CORE, /stand\s+alone for a reader who never saw this source/);
-		assert.match(EXTRACTION_CORE, /may not lean on the source's own\s+scaffolding/);
-		assert.match(EXTRACTION_CORE, /SUBMIT with one submit_findings call/);
-		assert.match(EXTRACTION_CORE, /"chains": \[\] when the source makes no\s+arguments/);
-		// The digest doctrine (2026-09-30 evening) + the core-ideas language.
-		assert.match(EXTRACTION_CORE, /THE GOAL: uncover the source's CORE IDEAS/);
-		assert.match(EXTRACTION_CORE, /everything derives from the foundations/);
-		assert.match(EXTRACTION_CORE, /build\s+on it\./);
+	it("separate source framing is assembled around shared graph and output contracts", () => {
+		const sharedRules = Object.values(EXTRACTION_CORE).join("\n\n");
+		assert.match(sharedRules, /JOINTLY entail a conclusion/);
+		assert.match(sharedRules, /for the same conclusion are separate chains/);
+		assert.match(sharedRules, /Entailment is the only link that earns a\s+chain/);
+		assert.match(sharedRules, /stand\s+alone for a reader who never saw this source/);
+		assert.match(sharedRules, /may not lean on the source's own\s+scaffolding/);
+		assert.match(sharedRules, /SUBMIT with one submit_findings call/);
+		assert.match(sharedRules, /"chains": \[\] when the source makes no\s+arguments/);
+		assert.match(sharedRules, /build\s+on it\./);
+		assert.doesNotMatch(sharedRules, /THE GOAL:|source teaches by arguing|Extract the load-bearing ideas/);
 
-		// Assembly: each front door = its preamble + the shared core.
+		// Both front doors still receive every shared contract, but own their
+		// goal/selection wording independently of those contracts.
 		assert.ok(EXTRACTOR_INSTRUCTIONS.startsWith(SESSION_PREAMBLE));
-		assert.ok(EXTRACTOR_INSTRUCTIONS.includes(EXTRACTION_CORE));
 		assert.ok(NOTES_EXTRACTOR_INSTRUCTIONS.startsWith(NOTES_PREAMBLE));
-		assert.ok(NOTES_EXTRACTOR_INSTRUCTIONS.includes(EXTRACTION_CORE), "the notes extractor shares the core by construction");
+		for (const prompt of [EXTRACTOR_INSTRUCTIONS, NOTES_EXTRACTOR_INSTRUCTIONS]) {
+			for (const section of Object.values(EXTRACTION_CORE)) assert.ok(prompt.includes(section));
+		}
+		assert.match(EXTRACTOR_INSTRUCTIONS, /THE GOAL: uncover the source's CORE IDEAS/);
+		assert.match(EXTRACTOR_INSTRUCTIONS, /everything derives from the foundations/);
+		assert.match(EXTRACTOR_INSTRUCTIONS, /what a reference on it would teach/);
 
 		// THE ANCHOR RULE (owner, 2026-10-13) is SESSION-ONLY: the exact
 		// sentence rides the session instructions; the notes
@@ -1487,9 +1490,90 @@ describe("the extractor redesign (owner, 2026-09-30): chains are the deliverable
 			assert.doesNotMatch(prompt, /follows\/supports/);
 		}
 	});
+
+	it("preserves the complete teaching-session prompt byte-for-byte", () => {
+		// Original UTF-8 snapshot, including every newline, preamble and the
+		// session-only anchor rule. Notes-only changes must not alter it.
+		assert.equal(
+			createHash("sha256").update(EXTRACTOR_INSTRUCTIONS, "utf8").digest("hex"),
+			"a8bddd7d47130ed5e39ffe7d8d0ed6efdd6b30407d52cd9838e7be2e465089a6",
+		);
+	});
+
+	it("the notes framing records knowledge without requiring a foundational reconstruction", () => {
+		const notes = NOTES_EXTRACTOR_INSTRUCTIONS.replace(/\s+/g, " ");
+		assert.ok(notes.includes("THE GOAL: bring the knowledge in these notes into the learner’s knowledge graph. Notes may contain definitions, formulas, facts, arguments, or outlines without forming a complete lesson. Report the substantive ideas and the reasoning the notes support. A useful representation of this material is the deliverable, not a reconstruction of the subject from its foundations."));
+		assert.ok(notes.includes("Keep the meaningful definitions, formulas, claims, and explanations, including ideas that have no derivation. Use chains for reasoning the notes give, including direct inferences from their stated relationships. A sketch need not spell out every intermediate step, but a topic outline or component dependency alone is not a derivation. Where the notes just state an idea, record it as a proposition rather than constructing an argument for it. Select enough detail to preserve the knowledge, without expanding the note into a full treatment of the subject."));
+		assert.doesNotMatch(notes, /source teaches by arguing|everything derives from the foundations|An idea earns its place only|what a reference on it would teach/);
+		assert.match(notes, /Each chain is premises that JOINTLY entail a conclusion/);
+		assert.match(notes, /"chains": \[\] when the source makes no arguments/);
+	});
+
+	it("the session runner still receives the unchanged teaching-session instructions", async () => {
+		const { chatId } = fixtureChat();
+		let calls = 0;
+		const pipeline = createExtractionPipeline({
+			chatStore,
+			graphStore: memoryLedgers(),
+			extractor: fauxEngine([(context) => {
+				calls++;
+				const system = context.messages.find((message) => message.role === "system");
+				assert.ok(system && system.role === "system");
+				const instructions = typeof system.content === "string" ? system.content : system.content.map((part) => part.text).join("\n");
+				assert.equal(instructions, EXTRACTOR_INSTRUCTIONS);
+				return fauxAssistantMessage([fauxToolCall("submit_findings", FINDINGS, { id: "session-findings" })], { stopReason: "toolUse" });
+			}]),
+			auditor: submitModel("submit_review", { links: [] }),
+		});
+		assert.deepEqual(await pipeline.runExtraction(chatId), { nodes: 2, chains: 1 });
+		assert.equal(calls, 1);
+	});
 });
 
 describe("the notes front door (importNotes — format-agnostic)", () => {
+	// These faux responses verify prompt routing and the unchanged wire/merge
+	// contracts, not whether a real model follows the new instructions.
+	for (const example of [
+		{
+			label: "standalone definitions",
+			text: "Vim starts in Normal mode, where keys are commands.",
+			findings: NOTES_FINDINGS,
+			expected: { nodes: 1, chains: 0 },
+		},
+		{
+			label: "a supported derivation sketch",
+			text: "Inner-product spaces ⊂ normed spaces ⊂ metric spaces.",
+			findings: {
+				propositions: [
+					{ id: "p1", name: "Inner-product spaces are normed", statement: "Every inner-product space is a normed space.", aliases: [] },
+					{ id: "p2", name: "Normed spaces are metric", statement: "Every normed space is a metric space.", aliases: [] },
+					{ id: "p3", name: "Inner-product spaces are metric", statement: "Every inner-product space is a metric space.", aliases: [] },
+				],
+				chains: [{ premises: ["p1", "p2"], conclusion: "p3" }],
+			},
+			expected: { nodes: 3, chains: 1 },
+		},
+	]) {
+		it(`the notes runner receives the notes-specific instructions and accepts ${example.label}`, async () => {
+			let calls = 0;
+			const pipeline = createExtractionPipeline({
+				chatStore,
+				graphStore: memoryLedgers(),
+				extractor: fauxEngine([(context) => {
+					calls++;
+					const system = context.messages.find((message) => message.role === "system");
+					assert.ok(system && system.role === "system");
+					const instructions = typeof system.content === "string" ? system.content : system.content.map((part) => part.text).join("\n");
+					assert.equal(instructions, NOTES_EXTRACTOR_INSTRUCTIONS);
+					return fauxAssistantMessage([fauxToolCall("submit_findings", example.findings, { id: "notes-findings" })], { stopReason: "toolUse" });
+				}]),
+				auditor: submitModel("submit_review", { links: [] }),
+			});
+			assert.deepEqual(await pipeline.importNotes({ filePath: `synthetic-${example.label}.txt`, text: example.text }), example.expected);
+			assert.equal(calls, 1);
+		});
+	}
+
 	it("imports raw notes end to end: source record, file-scoped provenance", async () => {
 		const ledgers = memoryLedgers();
 		const seen: { kind?: string; label?: string }[] = [];
@@ -2053,17 +2137,16 @@ describe("the session-deletion guard (chat deleted mid-run)", () => {
 // ─── digest-aware serialized extraction + chain simplification (owner, 2026-09-30 evening) ────
 
 describe("digest-aware serialized extraction (the extractor is the assembler)", () => {
-	it("the system prompt is goal-first: core ideas, foundations direction, build-on-the-digest doctrine", () => {
-		assert.match(EXTRACTION_CORE, /THE GOAL: uncover the source's CORE IDEAS and show how everything derives from the foundations/);
-		assert.match(EXTRACTION_CORE, /JOINTLY entail a conclusion/);
-		assert.match(EXTRACTION_CORE, /[Ee]ntailment is the\s+only link that earns a\s+chain/);
-		assert.match(EXTRACTION_CORE, /examples,\s+notation glosses, and restatements that no argument needs are not core ideas/);
-		assert.match(EXTRACTION_CORE, /build\s+on it\. Reference an existing idea by its id/);
-		assert.match(EXTRACTION_CORE, /OR existing ids from THE GRAPH SO FAR, verbatim/);
-		// Each front door = its preamble + the shared core; the preambles
-		// name the continuing-source posture.
-		assert.ok(EXTRACTOR_INSTRUCTIONS.includes(EXTRACTION_CORE));
-		assert.ok(NOTES_EXTRACTOR_INSTRUCTIONS.includes(EXTRACTION_CORE));
+	it("both source prompts retain their goal and the shared build-on-the-digest doctrine", () => {
+		assert.match(EXTRACTION_CORE.entailment, /JOINTLY entail a conclusion/);
+		assert.match(EXTRACTION_CORE.entailment, /[Ee]ntailment is the\s+only link that earns a\s+chain/);
+		assert.match(EXTRACTION_CORE.continuation, /build\s+on it\. Reference an existing idea by its id/);
+		assert.match(EXTRACTION_CORE.submission, /OR existing ids from THE GRAPH SO FAR, verbatim/);
+		assert.match(EXTRACTOR_INSTRUCTIONS, /THE GOAL: uncover the source's CORE IDEAS and show how everything derives from the foundations/);
+		assert.match(EXTRACTOR_INSTRUCTIONS, /examples,\s+notation glosses, and restatements that no argument needs are not core ideas/);
+		for (const prompt of [EXTRACTOR_INSTRUCTIONS, NOTES_EXTRACTOR_INSTRUCTIONS]) {
+			for (const section of Object.values(EXTRACTION_CORE)) assert.ok(prompt.includes(section));
+		}
 		assert.match(SESSION_PREAMBLE, /building on everything already extracted from this source/);
 		assert.match(NOTES_PREAMBLE, /building on everything already extracted from this source/);
 	});
@@ -2096,6 +2179,78 @@ describe("digest-aware serialized extraction (the extractor is the assembler)", 
 		assert.match(digest, /n_a \| Self-ownership \| statement of Self-ownership/);
 		assert.doesNotMatch(digest, /Foreign key/, "other sources' material never leaks into the digest");
 		assert.doesNotMatch(digest, /DERIVATIONS ALREADY RECORDED/, "no same-source chains → no chain block");
+	});
+
+	it("the real auditor receives the proposed ids, batched candidate tool and practical-equivalence prompt", async () => {
+		const ledgers = memoryLedgers();
+		ledgers.appendNode({
+			id: "n_seed", name: "Evaporation", statement: "Liquid changes into vapor.", aliases: [],
+			createdAt: "2026-01-01T00:00:00Z", provenance: [{ chatId: "old_source", messageId: "" }],
+		});
+		const auditor = fauxEngine([
+			(context) => {
+				const system = context.messages.find((message) => message.role === "system");
+				assert.ok(system && system.role === "system");
+				assert.ok(system.toolsAdded?.some((tool) => tool.name === "find_candidates"));
+				assert.ok(!system.toolsAdded?.some((tool) => tool.name === "find"));
+				const instructions = typeof system.content === "string" ? system.content : system.content.map((part) => part.text).join("\n");
+				assert.match(instructions, /REVIEW THE PROVIDED RECORDS/);
+				assert.match(instructions, /CALLING the submit_review TOOL/);
+				assert.match(instructions, /JSON\s+printed as text, does not submit a review/);
+				assert.match(instructions, /statement AND its matched aliases are accepted knowledge/);
+				assert.doesNotMatch(instructions, /WHOLE proposition|majority of its clauses/);
+				const view = capturedView(context);
+				const initial = JSON.parse(view.slice(view.indexOf("{")));
+				assert.deepEqual(initial.matches[0].candidateIds, ["n_seed"], "the model starts with candidates, not an instruction to fetch them");
+				assert.equal(initial.candidates[0].statement, "Liquid changes into vapor.");
+				assert.doesNotMatch(view, /Explore it with your tools|current knowledge graph has/);
+				return fauxAssistantMessage([fauxToolCall("find_candidates", { propositions: [{ id: "p1" }] }, { id: "lookup" })], { stopReason: "toolUse" });
+			},
+			(context) => {
+				const result = context.messages.find((message) => message.role === "toolResult");
+				assert.ok(result && result.role === "toolResult");
+				const text = result.content.find((part) => part.type === "text");
+				assert.ok(text && text.type === "text");
+				const candidates = JSON.parse(text.text);
+				assert.deepEqual(candidates.matches[0].candidateIds, ["n_seed"]);
+				assert.equal(candidates.candidates[0].statement, "Liquid changes into vapor.");
+				return fauxAssistantMessage([fauxToolCall("submit_review", { links: [{ id: "p1", linkTo: "n_seed" }] }, { id: "review" })], { stopReason: "toolUse" });
+			},
+		]);
+		const pipeline = createExtractionPipeline({
+			chatStore, graphStore: ledgers, auditor,
+			extractor: submitModel("submit_findings", { propositions: [{ id: "p1", name: "Vaporization", statement: "Liquid changes into vapor.", aliases: [] }], chains: [] }),
+		});
+		const stats = await pipeline.importNotes({ filePath: "synthetic-candidates.txt", text: "Liquid changes into vapor." });
+		assert.equal(stats.nodes, 0, "the candidate identity is used by the existing merger");
+		assert.equal(getGraph(ledgers).nodes.length, 1);
+		assert.ok(getGraph(ledgers).nodes[0]!.provenance.some((point) => point.chatId === ledgers.readSources()[0]!.id));
+	});
+
+	it("a supplied accepted alias can be matched and submitted in one auditor response, with no lookup", async () => {
+		const ledgers = memoryLedgers();
+		ledgers.appendNode({
+			id: "n_seed", name: "Legacy label", statement: "The original canonical statement.",
+			aliases: ["An amber canoe travels upstream."], createdAt: "2026-01-01T00:00:00Z",
+			provenance: [{ chatId: "old_source", messageId: "" }],
+		});
+		let calls = 0;
+		const pipeline = createExtractionPipeline({
+			chatStore, graphStore: ledgers,
+			extractor: submitModel("submit_findings", { propositions: [{ id: "p1", name: "Upstream travel", statement: "An amber canoe travels upstream.", aliases: [] }], chains: [] }),
+			auditor: fauxEngine([(context) => {
+				calls++;
+				const view = capturedView(context);
+				const initial = JSON.parse(view.slice(view.indexOf("{")));
+				assert.deepEqual(initial.candidates[0].matchedAliases, ["An amber canoe travels upstream."]);
+				assert.doesNotMatch(view, /PRIVATE SOURCE PASSAGE/);
+				return fauxAssistantMessage([fauxToolCall("submit_review", { links: [{ id: "p1", linkTo: "n_seed" }] }, { id: "review" })], { stopReason: "toolUse" });
+			}]),
+		});
+		const stats = await pipeline.importNotes({ filePath: "synthetic-alias.txt", text: "PRIVATE SOURCE PASSAGE" });
+		assert.equal(calls, 1);
+		assert.equal(stats.nodes, 0);
+		assert.equal(getGraph(ledgers).nodes.length, 1);
 	});
 
 	it("a seeded digest rides the extractor's view: mixed-namespace chains reference existing ids VERBATIM", async () => {

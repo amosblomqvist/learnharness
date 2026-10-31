@@ -1,5 +1,10 @@
 # The probe→teach agent split & plan-movement semantics
 
+> **Historical design record, not current implementation documentation.**
+> The original decisions below may be superseded or unimplemented.
+> See [Architecture](architecture.md) and [Development](development.md) for the
+> shipped agent structure and current development guidance.
+
 Shared understanding reached 2026-09-11 (user + master session). This is the
 convergence record — the decided design, with reasoning. It is not a task
 list; implementation waves are planned against it.

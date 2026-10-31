@@ -30,6 +30,7 @@ import { describe, it } from "node:test";
 import { ChainTableBody, ChainTableOverlay } from "../components/chain-table.tsx";
 import type { ChainSort } from "../components/chain-table.tsx";
 import type { GraphChain, GraphNode } from "../src/core/contracts.ts";
+import { ServerEventsProvider } from "../components/server-events.tsx";
 
 /** The fixture graph — two follows-chains + one standalone:
  *  a → c1 ← b  (chain one, conclusion born chat1), d → e (chain two,
@@ -73,6 +74,8 @@ const BASE = {
 	sort: { col: "name", dir: 1 } as ChainSort,
 	onSort: () => {},
 	selection: new Set<string>(),
+	selectedSources: new Set<string>(),
+	selectMode: false,
 	expandedClusters: new Set<string>(),
 	expandedChains: new Set<string>(),
 	onToggleCluster: () => {},
@@ -94,8 +97,9 @@ describe("ChainTableBody — clusters (the outermost layer)", () => {
 		assert.ok(html.includes('data-testid="cluster-group-chat1"'), "the chat cluster");
 		assert.ok(html.includes('data-testid="cluster-group-notes1"'), "the notes cluster");
 		assert.ok(html.includes("Ethics lesson"), "chat label");
-		assert.ok(html.includes("notes/raw/ethics.md"), "notes label");
-		assert.ok(html.includes("lucide-folder"), "the closed folder icon");
+		assert.ok(html.includes("ethics"), "exact basename minus extension");
+		assert.ok(!html.includes("notes/raw/ethics.md"), "import path is not a display name");
+		assert.ok(html.includes("lucide-book"), "the closed book icon");
 		assert.ok(!html.includes('data-testid="chain-row-c1"'), "no chain row when collapsed");
 		assert.ok(!html.includes("Premise one"), "no chips when collapsed");
 	});
@@ -266,22 +270,33 @@ describe("ChainTableBody — the floating selection bar (never shifts layout)", 
 		assert.ok(!html.includes('data-testid="chain-selection-bar"'));
 	});
 
-	it("appears with the derived N nodes → M chains + Clear + the FENCED Delete", () => {
-		const html = render({ selection: new Set(["a", "b", "c1"]) });
+	it("counts selected sources with Clear and a fenced source-only Delete", () => {
+		const html = render({ selectedSources: new Set(["chat1", "notes1"]) });
 		assert.ok(html.includes('data-testid="chain-selection-bar"'));
 		assert.ok(html.includes('data-testid="chain-selected-summary"'));
-		assert.ok(html.includes("3 nodes → 1 chain"));
+		assert.ok(html.includes("2 sources"));
 		assert.ok(html.includes('data-testid="chain-clear"'));
 		// The danger fence (owner, 2026-09-29 night): a divider quarantines
 		// the destructive action at the bar's right end, red + trash icon,
-		// riding the same confirm dialog as the canvas delete.
+		// opening a source-contribution confirmation, not global node deletion.
 		assert.ok(html.includes('data-testid="chain-danger-divider"'));
 		const del = html.match(/<button[^>]*data-testid="chain-delete"[^>]*>/)?.[0] ?? "";
 		assert.match(del, /border-destructive\/50/); // the destructive pair
-		assert.match(del, /aria-label="Delete 3 selected nodes"/);
+		assert.match(del, /aria-label="Delete selected sources and folders"/);
 		assert.ok(html.includes("lucide-trash-2"), "the trash icon");
 		// the fence is before Delete in the DOM (right end of the bar)
 		assert.ok(html.indexOf('chain-danger-divider"') < html.indexOf('chain-delete"'));
+	});
+
+	it("Delete and practice Done have matching top/bottom/right pill insets and fully rounded contours", () => {
+		for (const [selectMode, action] of [[false, "chain-delete"], [true, "chain-practice-done"]] as const) {
+			const html = render({ selectMode, selectedSources: new Set(["chat1"]), selection: new Set(["a"]) });
+			const bar = html.match(/<div[^>]*data-testid="chain-selection-bar"[^>]*>/)?.[0] ?? "";
+			const button = html.match(new RegExp(`<button[^>]*data-testid="${action}"[^>]*>`))?.[0] ?? "";
+			assert.match(bar, /rounded-full/); assert.match(button, /rounded-full/);
+			assert.match(bar, /py-2 pl-4 pr-2/, "keep text inset, match right inset to the vertical inset");
+			assert.equal(bar.includes(" px-4 "), false);
+		}
 	});
 
 	it("the Delete rides ONLY with a selection — no bar, no kill switch", () => {
@@ -291,7 +306,7 @@ describe("ChainTableBody — the floating selection bar (never shifts layout)", 
 	});
 
 	it("a premise WITHOUT its conclusion derives as the singleton it becomes", () => {
-		const html = render({ selection: new Set(["a", "d"]) });
+		const html = render({ selectMode: true, selection: new Set(["a", "d"]) });
 		assert.ok(html.includes("2 nodes → 2 chains"), "no follows-edge survives inside the selection");
 	});
 });
@@ -301,6 +316,7 @@ describe("ChainTableBody — the fuzzy search (grouped + auto-expand)", () => {
 		const aliased = NODES.map((n) => (n.id === "b" ? { ...n, aliases: ["zebra alias"] } : n));
 		const html = render({
 			nodes: aliased,
+			selectMode: true,
 			query: "zebra",
 			selection: new Set(["a", "b", "c1"]), // selection spans BOTH chains
 		});
@@ -324,7 +340,7 @@ describe("ChainTableBody — the fuzzy search (grouped + auto-expand)", () => {
 describe("ChainTableOverlay — the lifted practice pick (owner vision, 2026-10-04)", () => {
 	function overlay(extra: Record<string, unknown> = {}) {
 		return renderToStaticMarkup(
-			React.createElement(ChainTableOverlay, {
+			React.createElement(ServerEventsProvider, { children: React.createElement(ChainTableOverlay, {
 				open: true,
 				nodes: NODES,
 				chains: CHAINS,
@@ -332,12 +348,12 @@ describe("ChainTableOverlay — the lifted practice pick (owner vision, 2026-10-
 				fileSources: {},
 				onClose: () => {},
 				...extra,
-			} as never),
+			} as never) }),
 		);
 	}
 
 	it("CONTROLLED selection renders the caller's set — the bar counts it live", () => {
-		const html = overlay({ controlledSelection: new Set(["a", "b", "c1"]) });
+		const html = overlay({ selectMode: true, controlledSelection: new Set(["a", "b", "c1"]) });
 		assert.ok(html.includes("3 nodes → 1 chain"), "the bar reflects the lifted set, not internal state");
 	});
 
@@ -352,9 +368,9 @@ describe("ChainTableOverlay — the lifted practice pick (owner vision, 2026-10-
 		assert.ok(!html.includes('data-testid="chain-danger-divider"'));
 	});
 
-	it("browse mode unchanged: the fenced Delete remains", () => {
+	it("browse mode cannot accidentally delete a lifted graph-node selection", () => {
 		const html = overlay({ controlledSelection: new Set(["a"]) });
-		assert.ok(html.includes('data-testid="chain-delete"'));
+		assert.ok(!html.includes('data-testid="chain-delete"'));
 		assert.ok(!html.includes('data-testid="chain-practice-done"'));
 	});
 });

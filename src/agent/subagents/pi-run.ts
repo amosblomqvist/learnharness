@@ -4,6 +4,7 @@ import { randomUUID } from "node:crypto";
 import { APP_IDENTITY, piEngineFor, type PiEngine } from "../models.ts";
 import { usageWasAdmitted } from "../subscription-request-cycle.ts";
 import { providerEventObserver } from "../provider-events.ts";
+import { backgroundCaptureStream, createBackgroundCapture } from "../background-capture.ts";
 import type { ModelRole } from "../../../config.ts";
 
 /**
@@ -42,7 +43,8 @@ export interface SubagentRunOptions {
 	shouldStop?: (message: AssistantMessage, toolResults: ToolResultMessage[]) => boolean;
 	/** Debug: when set AND LH_PROVIDER_EVENTS=1, raw provider stream
 	 *  events append to data/debug/provider-events/<chatId>.jsonl (context
-	 *  "job:<role>"). Absent or env-off → no observer. */
+	 *  "job:<role>"). Absent or env-off → no observer.
+	 *  Also identifies the source in opt-in LH_BACKGROUND_CAPTURE captures. */
 	chatId?: string;
 }
 
@@ -65,10 +67,12 @@ export async function runSubagent(tools: AgentTool<any, any>[], opts: SubagentRu
 	let turns = 0;
 	// Debug recorder (owner, 2026-10-04): raw provider events per job run.
 	const providerEvents = opts.chatId ? providerEventObserver(opts.chatId, `job:${opts.role}`) : undefined;
+	const sessionId = randomUUID();
+	const capture = createBackgroundCapture({ role: opts.role, runId: sessionId, sourceId: opts.chatId });
 	const agent = new Agent({
 		identity: APP_IDENTITY,
 		// One unsaved conversation per invocation, stable through every turn.
-		sessionId: randomUUID(),
+		sessionId,
 		initialState: {
 			systemPrompt: opts.systemPrompt,
 			model: engine.model,
@@ -76,7 +80,7 @@ export async function runSubagent(tools: AgentTool<any, any>[], opts: SubagentRu
 			tools,
 			messages: opts.messages ?? [],
 		},
-		streamFn: engine.streamFn,
+		streamFn: backgroundCaptureStream(engine.streamFn, capture),
 		...(providerEvents ? { onProviderStreamEvent: providerEvents } : {}),
 		// 0.87.1: shouldStopAfterTurn → finishTurn (same call point; "end"
 		// exits before the steering poll, exactly the old boolean-true).
@@ -95,6 +99,7 @@ export async function runSubagent(tools: AgentTool<any, any>[], opts: SubagentRu
 	let step = 0;
 	let errorMessage: string | undefined;
 	let aborted = false;
+	let runFailure: unknown;
 
 	try {
 		agent.subscribe((event: AgentEvent) => {
@@ -102,6 +107,7 @@ export async function runSubagent(tools: AgentTool<any, any>[], opts: SubagentRu
 				case "message_end":
 					if ((event.message as { role?: string }).role === "assistant") {
 						const m = event.message as AssistantMessage;
+						capture?.reply(m);
 						if (m.stopReason === "aborted") {
 							// The call was cancelled — no completed step, no billed
 							// usage (the abort path asserts zero steps).
@@ -113,6 +119,8 @@ export async function runSubagent(tools: AgentTool<any, any>[], opts: SubagentRu
 						opts.onUsage?.(m.usage);
 						opts.onAssistantMessage?.(m, step);
 						if (m.stopReason === "error") errorMessage = m.errorMessage;
+					} else if (event.message.role === "toolResult") {
+						capture?.toolResult(event.message);
 					}
 					break;
 				case "tool_execution_start":
@@ -126,13 +134,18 @@ export async function runSubagent(tools: AgentTool<any, any>[], opts: SubagentRu
 			timestamp: Date.now(),
 		});
 		else await agent.continue();
+	} catch (error) {
+		runFailure = error;
+		throw error;
 	} finally {
 		opts.abortSignal?.removeEventListener("abort", onAbort);
+		capture?.finish(runFailure);
 	}
 
 	if (aborted || opts.abortSignal?.aborted) {
 		const err = new Error("aborted");
 		err.name = "AbortError";
+		capture?.finish(err);
 		throw err;
 	}
 	if (errorMessage !== undefined) throw new Error(errorMessage);

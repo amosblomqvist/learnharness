@@ -3,6 +3,7 @@ import {
 	createModels,
 	getSupportedThinkingLevels,
 	type Api,
+	type CacheRetention,
 	type Model,
 	type Models,
 	type MutableModels,
@@ -128,7 +129,7 @@ function defaultThinkingLevel(model: Model<Api>): ThinkingLevel {
  *  key is resolved by pi-ai itself from the environment per request (the
  *  keys seam reflects file-saved keys into env), so the engine never
  *  hardcodes OpenRouter's. */
-export function piEngineForSpec(spec: ResolvedModelSpec, background: boolean | (() => boolean) = true, lifecycle?: ChatGPTDispatchLifecycle): PiEngine {
+export function piEngineForSpec(spec: ResolvedModelSpec, background: boolean | (() => boolean) = true, lifecycle?: ChatGPTDispatchLifecycle, cacheRetention?: () => CacheRetention | undefined): PiEngine {
 	const models: Models = piModels();
 	const nativeId = nativeSubscriptionId(spec.provider);
 	const registeredModel = spec.provider === "chatgpt" ? chatGPTModel(spec.id) : nativeId ? nativeSubscriptionModel(spec.provider, spec.id) : models.getModel(spec.provider, spec.id);
@@ -156,6 +157,14 @@ export function piEngineForSpec(spec: ResolvedModelSpec, background: boolean | (
 		// = off on pi-ai's scale). Built-ins keep the factory clamp; custom
 		// requests re-resolve thinking against their current metadata below.
 		streamFn: (requestModel, context, options) => {
+			// Read the slot preference for every operation, not just engine creation.
+			// Unset adds NOTHING: native defaults/env and explicit caller options survive.
+			const retention = cacheRetention?.();
+			const requestOptions = {
+				...options,
+				...(retention !== undefined ? { cacheRetention: retention } : {}),
+				reasoning: level === "off" ? undefined : level,
+			};
 			if (custom) {
 				// Revalidate before EVERY upstream model operation, including later
 				// tool-loop steps. Resolve thinking from the ORIGINAL preference (or
@@ -167,9 +176,8 @@ export function piEngineForSpec(spec: ResolvedModelSpec, background: boolean | (
 				const currentLevel = thinkingPreference
 					? clampThinkingLevel(currentModel, thinkingPreference)
 					: defaultThinkingLevel(currentModel);
-				return current.streamSimple(permitImages(currentModel), context, { ...options, reasoning: currentLevel === "off" ? undefined : currentLevel });
+				return current.streamSimple(permitImages(currentModel), context, { ...requestOptions, reasoning: currentLevel === "off" ? undefined : currentLevel });
 			}
-			const requestOptions = { ...options, reasoning: level === "off" ? undefined : level };
 			const purpose = typeof background === "function" ? background : () => background;
 			const stream = spec.provider === "chatgpt" ? chatGPTStream(purpose, lifecycle) : nativeId ? nativeSubscriptionStream(models.getProvider(nativeId)!, purpose, lifecycle) : models.streamSimple.bind(models);
 			return stream(requestModel, context, requestOptions);

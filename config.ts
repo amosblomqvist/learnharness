@@ -75,6 +75,8 @@ export const LEDGER_FILES = {
  * log. Read-modify-write like a chat file, not append-only like the ledgers.
  */
 export const SOURCES_FILE = path.join(PATHS.graph, "sources.json");
+/** Presentation-only source names/folder placement; never extraction identity. */
+export const SOURCE_ORGANIZATION_FILE = path.join(PATHS.graph, "source-organization.json");
 /** The layout ledger (read-modify-write like sources.json): nodeId →
  *  {x,y} resting positions from the incremental settle (core/layout.ts).
  *  Carries an updatedAt stamp for future live-physics conflict handling. */

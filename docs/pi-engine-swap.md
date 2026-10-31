@@ -1,5 +1,10 @@
 # The pi engine swap — design record
 
+> **Historical design record, not current runtime documentation.**
+> The original status and design below may be superseded or unimplemented.
+> See [Architecture](architecture.md) and [Development](development.md) for the
+> shipped Pi runtime and current development guidance.
+
 Date: 2026-09-12. Status: PLANNED (facts verified, awaiting go).
 
 Decision (user, 2026-09-12): swap the server agent engine (Band B) and the

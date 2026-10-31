@@ -174,6 +174,21 @@ export const graphStore: GraphStore = {
 	readSources(): NotesSource[] {
 		return Object.values(readSourceMap());
 	},
+	deleteSources(ids: ReadonlySet<string>): number {
+		if (ids.size === 0) return 0;
+		const all = readSourceMap();
+		let removed = 0;
+		for (const id of ids) if (Object.hasOwn(all, id)) { delete all[id]; removed++; }
+		if (removed === 0) return 0;
+		const tmp = `${SOURCES_FILE}.tmp-${crypto.randomUUID()}`;
+		try {
+			fs.writeFileSync(tmp, JSON.stringify(all, null, "\t"), "utf-8");
+			fs.renameSync(tmp, SOURCES_FILE);
+		} finally {
+			if (fs.existsSync(tmp)) fs.unlinkSync(tmp);
+		}
+		return removed;
+	},
 	/** Idempotent per startedAt — same discipline as chats.appendExtractionUsage. */
 	appendSourceUsage(id: string, entry: ExtractionRunUsage): void {
 		const all = readSourceMap();
