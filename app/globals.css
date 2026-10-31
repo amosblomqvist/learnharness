@@ -220,7 +220,10 @@ body {
    the whole list right as a block. Unlayered CSS beats the utility
    layer; :where keeps specificity zero. */
 .lh-prose :where(ul, ol) {
-	padding-left: 1.5rem;
+	/* Logical sides: the same 24px on the left in English, on the right in
+	   right-to-left lists (and none on the other side, where the nested
+	   [li_&]:pl-6 utility would otherwise add a second indent). */
+	padding-inline: 1.5rem 0;
 }
 
 /* Markdown headings render at the font's BLACK weight (owner ask,
@@ -320,6 +323,52 @@ body {
 }
 
 /* ============================================================
+ * Bidirectional text. components/text-direction.ts puts dir="rtl" on
+ * Persian/Arabic/Hebrew blocks and labels; the interface stays LTR.
+ * ============================================================ */
+
+/* RTL text aligns to its own start (the right), also under an ancestor that
+   hard-codes text-left. One-line truncated labels (titles, names) stay
+   aligned with the LTR interface instead; a long one still clips at its
+   logical end, since overflowing lines start-align. In the base layer, so an
+   element's own alignment utility (text-center, …) still wins. */
+@layer base {
+	[dir="rtl"] {
+		text-align: start;
+	}
+	.truncate[dir="rtl"] {
+		text-align: left;
+	}
+}
+
+/* Cells align with their table, whatever their own dir: a column stays
+   even when one cell is English in a Persian table, or the reverse. This
+   also replaces the text-left Streamdown pins on header cells. */
+[data-streamdown="table"] :is(th, td) {
+	text-align: left;
+}
+[data-streamdown="table"][dir="rtl"] :is(th, td) {
+	text-align: right;
+}
+
+/* Code and math are LTR islands inside RTL text. Isolating them keeps the
+   punctuation at their edges in place: without it `useState()` reads
+   `()useState`, and KaTeX's inline boxes lay out right-to-left. A <code>
+   with its own dir (a Persian name in the delete dialogs) keeps it. */
+code:not([dir]),
+.katex {
+	direction: ltr;
+	unicode-bidi: isolate;
+}
+
+/* Code blocks stay LTR and left-aligned even inside an RTL list item. */
+pre,
+[data-streamdown="code-block"] {
+	direction: ltr;
+	text-align: left;
+}
+
+/* ============================================================
  * Chrome melt (owner wave, 2026-09-19) — tables and code blocks stop
  * being boxes: blocks read as part of the message. These rules override
  * streamdown's Tailwind utilities (utilities live in a cascade LAYER;
@@ -370,9 +419,10 @@ body {
 }
 /* Column separators: a hairline left rule on every cell but the first in
    its row (owner ask, 2026-09-19) — border-collapse merges it with the row
-   rules and the outer border, no doubled lines anywhere. */
+   rules and the outer border, no doubled lines anywhere. Logical side: the
+   right rule in an RTL table, whose first cell is the rightmost. */
 [data-streamdown="table"] :where(th, td):not(:first-child) {
-	border-left: 1px solid var(--border);
+	border-inline-start: 1px solid var(--border);
 }
 [data-streamdown="table-header"] {
 	background: transparent;

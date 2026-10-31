@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { useBackdropDismiss } from "@/components/backdrop-dismiss";
+import { rtlDir } from "@/components/text-direction";
 
 /** The 409 extraction_running line (owner phrasing, node interlude):
  *  the server's error names the extraction; the ACTIVITY DOCK is the
@@ -70,11 +71,11 @@ export function DeleteNodeBody({
 			    more" — the count in the title carries the full number). */}
 			<div className="mt-1.5">
 				{nodes.length === 1 ? (
-					<code data-testid="node-name-code" className="font-mono text-sm text-foreground">
+					<code data-testid="node-name-code" dir={rtlDir(nodes[0]?.name)} className="font-mono text-sm text-foreground">
 						{nodes[0]?.name}
 					</code>
 				) : (
-					<code data-testid="node-names-code" className="font-mono text-sm text-foreground">
+					<code data-testid="node-names-code" dir={rtlDir(nodes.map((n) => n.name).join(" "))} className="font-mono text-sm text-foreground">
 						{nodes.slice(0, 8).map((n) => n.name).join(", ")}
 						{nodes.length > 8 ? `, and ${nodes.length - 8} more` : ""}
 					</code>

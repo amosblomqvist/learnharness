@@ -5,6 +5,7 @@ import { ChevronRightIcon, FolderIcon, FolderOpenIcon } from "lucide-react";
 import { canMoveFolder, folderIsEmpty, fuzzyScore, placementOf, folderEntryCheck, type SourceEntrySelection, type OrganizationAction, type SourceDirectory } from "@/src/core";
 import type { ChainSort } from "./chain-table";
 import { chainRow } from "./chain-navigation";
+import { rtlDir } from "@/components/text-direction";
 
 export type OrganizationChange = (action: OrganizationAction) => Promise<string | void>;
 const DRAG_TYPE = "application/x-learnharness-source";
@@ -81,7 +82,7 @@ export function EditableSourceName({ name, onSave, onCancel, initiallyEditing = 
 		finally { submitting.current = false; }
 	};
 	return <span className="min-w-0 flex-1">
-		{editing ? <input ref={input} value={draft} placeholder="Folder name" aria-label="Source or folder name" data-testid="source-name-input"
+		{editing ? <input ref={input} value={draft} dir={rtlDir(draft)} placeholder="Folder name" aria-label="Source or folder name" data-testid="source-name-input"
 			className="block h-5 w-full min-w-0 border-0 bg-transparent p-0 text-sm font-medium leading-5 outline-none shadow-none focus:ring-0"
 			onChange={(e) => setDraft(e.target.value)} onBlur={() => { void commit(); }}
 			onKeyDown={(e) => {
@@ -89,7 +90,7 @@ export function EditableSourceName({ name, onSave, onCancel, initiallyEditing = 
 				if (e.key === "Enter") { e.preventDefault(); e.stopPropagation(); void commit(); }
 			}} onDragStart={(e) => { e.preventDefault(); e.stopPropagation(); }} />
 			: <button type="button" className="block max-w-full truncate rounded-sm text-left text-sm font-medium leading-5 transition-colors hover:bg-accent" title="Rename"
-				onClick={() => { cancelled.current = false; setDraft(name); setEditing(true); }}>{name}</button>}
+				dir={rtlDir(name)} onClick={() => { cancelled.current = false; setDraft(name); setEditing(true); }}>{name}</button>}
 		{failure && <span role="alert" className="block text-xs text-red-400">{failure}</span>}
 	</span>;
 }
@@ -194,7 +195,7 @@ export function SourceFolderTree<T extends TreeSource>({ groups, directory, quer
 						{open ? <FolderOpenIcon className="size-3.5 shrink-0" /> : <FolderIcon className="size-3.5 shrink-0" />}
 					</button>
 					{onAction ? <EditableSourceName name={folder.name} onSave={(name) => onAction({ action: "rename-folder", id: folder.id, name })} />
-						: <span className="min-w-0 flex-1 truncate text-sm font-medium">{folder.name}</span>}
+						: <span dir={rtlDir(folder.name)} className="min-w-0 flex-1 truncate text-sm font-medium">{folder.name}</span>}
 					<span className="w-14 shrink-0 text-right text-xs tabular-nums text-muted-foreground">{members.length}</span>
 					<span className="w-20 shrink-0 text-right text-xs tabular-nums text-muted-foreground">{folder.createdAt.slice(0, 10)}</span>
 				</SourceDragRow>

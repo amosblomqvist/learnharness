@@ -5,6 +5,7 @@ import { ConfidenceRail } from "@/components/confidence-rail";
 import { GlyphMark } from "@/components/ui/glyph-mark";
 import { ThinkingBlock } from "@/components/thinking-block";
 import { PathText } from "@/components/file-path-chip";
+import { rtlDir } from "@/components/text-direction";
 import { cn } from "@/lib/utils";
 import { ToolContentResponse } from "@/components/ai-elements/message";
 import type { QuestionAnswerData } from "@/src/core";
@@ -154,13 +155,13 @@ export function AnsweredCard({ answer: savedAnswer, input }: { answer: QuestionA
 							data-testid="answered-other"
 							className="flex items-center gap-2 rounded-lg border border-primary bg-accent px-3 py-1.5"
 						>
-							<span>“<PathText text={answer.other} />”</span>
+							<span dir={rtlDir(answer.other)}>“<PathText text={answer.other} />”</span>
 						</div>
 					)}
 				</div>
 			)}
 
-			{answer.text && <div className="lh-prose mt-2 whitespace-pre-wrap">“<PathText text={answer.text} />”</div>}
+			{answer.text && <div dir={rtlDir(answer.text)} className="lh-prose mt-2 whitespace-pre-wrap">“<PathText text={answer.text} />”</div>}
 
 			{/* The confidence record (owner round 6): the slider's rail, disc
 			    removed — the missing handle itself says "this is a record, not a
