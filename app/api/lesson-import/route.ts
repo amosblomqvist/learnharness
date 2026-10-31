@@ -1,7 +1,7 @@
 import { PATHS } from "@/config";
 import type { ImportChoices } from "@/src/core";
 import { emit } from "@/src/core";
-import { previewImport, installImport, importVersions, importVersion, readImportPackage, isTurnRunning, compactionInFlight, extractionStatuses, stores } from "@/src/server";
+import { previewImport, installImport, readImportPackage, isTurnRunning, compactionInFlight, extractionStatuses, stores } from "@/src/server";
 
 export const runtime = "nodejs";
 const LIMIT = 32 * 1024 * 1024;
@@ -9,17 +9,6 @@ const headers = { "Cache-Control": "no-store", "X-Content-Type-Options": "nosnif
 function foreign(request: Request) {
 	const origin = request.headers.get("origin");
 	return (origin && origin !== new URL(request.url).origin) || request.headers.get("sec-fetch-site") === "cross-site";
-}
-export async function GET(request: Request): Promise<Response> {
-	if (foreign(request)) return Response.json({ error: "Use the LearnHarness window" }, { status: 403, headers });
-	try {
-		const params = new URL(request.url).searchParams, id = params.get("id"), sha = params.get("sha");
-		if (id !== null || sha !== null) {
-			if (!id || !sha) throw new Error("Missing version");
-			return new Response(new Uint8Array(importVersion(PATHS.data, id, sha)), { headers: { ...headers, "Content-Type": "application/json", "Content-Disposition": `attachment; filename="${id}-${sha}.json"` } });
-		}
-		return Response.json({ versions: importVersions(PATHS.data) }, { headers });
-	} catch { return Response.json({ error: "Could not read saved versions" }, { status: 400, headers }); }
 }
 export async function POST(request: Request): Promise<Response> {
 	if (foreign(request)) return Response.json({ error: "Use the LearnHarness window to import lessons" }, { status: 403, headers });
@@ -35,7 +24,7 @@ export async function POST(request: Request): Promise<Response> {
 			}
 		} finally { reader.releaseLock(); }
 		const form = await new Response(Buffer.concat(chunks), { headers: { "Content-Type": request.headers.get("content-type")! } }).formData();
-		if ([...form.keys()].some(k => !["file", "action", "revision", "choices", "acknowledged"].includes(k)) || [...new Set(form.keys())].some(k => form.getAll(k).length !== 1)) throw new Error("Invalid fields");
+		if ([...form.keys()].some(k => !["file", "action", "revision", "choices"].includes(k)) || [...new Set(form.keys())].some(k => form.getAll(k).length !== 1)) throw new Error("Invalid fields");
 		const file = form.get("file"), action = form.get("action");
 		if (!(file instanceof File) || file.size > LIMIT || !["preview", "install"].includes(action as string)) throw new Error("Invalid import");
 		const bytes = new Uint8Array(await file.arrayBuffer());
@@ -48,7 +37,7 @@ export async function POST(request: Request): Promise<Response> {
 		if (typeof revision !== "string" || typeof rawChoices !== "string" || rawChoices.length > 65_536) throw new Error("Missing approval");
 		const choices: unknown = JSON.parse(rawChoices);
 		if (!choices || typeof choices !== "object" || Array.isArray(choices) || Object.values(choices).some(v => !["local", "incoming"].includes(v as string))) throw new Error("Invalid conflict choices");
-		const result = installImport(PATHS.data, bytes, { revision, choices: choices as ImportChoices, acknowledged: form.get("acknowledged") === "true" });
+		const result = installImport(PATHS.data, bytes, { revision, choices: choices as ImportChoices });
 		emit("chats-changed", {});
 		for (const chatId of result.installed) emit("record-changed", { chatId });
 		emit("activity-changed", {});

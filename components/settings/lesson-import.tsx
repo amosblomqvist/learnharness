@@ -15,7 +15,7 @@ export function LessonImport({ onInstalled }: { onInstalled: () => void }) {
 	const button = "rounded-sm border border-border px-3 py-1 text-xs hover:bg-accent disabled:opacity-40";
 	async function install(chosen: File, reviewed: ImportPreview, decisions: ImportChoices) {
 		const form = new FormData(); form.set("file", chosen); form.set("action", "install");
-		form.set("revision", reviewed.revision); form.set("choices", JSON.stringify(decisions)); form.set("acknowledged", "true");
+		form.set("revision", reviewed.revision); form.set("choices", JSON.stringify(decisions));
 		const res = await fetch("/api/lesson-import", { method: "POST", body: form });
 		const body = await res.json();
 		if (!res.ok) throw new Error(body.error ?? "Import failed");
@@ -41,7 +41,7 @@ export function LessonImport({ onInstalled }: { onInstalled: () => void }) {
 		} finally { setWorking(false); }
 	}
 	return <SettingsGroup label="Import">
-		<p className="text-xs text-muted-foreground">ZIP imports lessons and graph; JSON imports one lesson without a graph. Continue with your local model settings. Import starts no model requests. External files are not supported; some dependencies may be missing. Up to 32 MiB total, 16 MB per file.</p>
+		<p className="text-xs text-muted-foreground">ZIP imports lessons and graph; JSON imports one lesson without a graph. Continue with your local model settings. External files are not supported; some dependencies may be missing. Up to 32 MiB total, 16 MB per file.</p>
 		<fieldset disabled={working} className="min-w-0 space-y-3">
 			<input ref={input} type="file" accept=".zip,.json,application/zip,application/json" aria-label="Import file" hidden onChange={e => {
 				const chosen = e.target.files?.[0]; e.target.value = "";

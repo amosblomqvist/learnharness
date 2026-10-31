@@ -22,7 +22,7 @@ export async function POST(request: Request): Promise<Response> {
 			}
 		} finally { reader.releaseLock(); }
 		const body = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(Buffer.concat(chunks))) as {
-			ids: string[]; mode: ExportMode; preview?: boolean; revision?: string; files?: number[]; allowIncomplete?: boolean;
+			ids: string[]; mode: ExportMode; preview?: boolean; revision?: string; files?: number[];
 		};
 		if (!Array.isArray(body.ids) || body.ids.length > 100 || body.ids.some(id => typeof id !== "string" || !/^[A-Za-z0-9_-]{1,200}$/.test(id)))
 			throw new Error("Invalid lesson selection");
@@ -32,7 +32,7 @@ export async function POST(request: Request): Promise<Response> {
 		// This synchronous snapshot/download block cannot interleave with in-process writers.
 		if (body.preview) return Response.json(previewExport(PATHS.data, body.ids), { headers });
 		const file = downloadExport(PATHS.data, body.ids, body.mode, {
-			revision: body.revision ?? "", files: body.files ?? [], allowIncomplete: body.allowIncomplete === true,
+			revision: body.revision ?? "", files: body.files ?? [],
 		});
 		return new Response(new Uint8Array(file.bytes), { headers: { ...headers, "Content-Type": file.type, "Content-Disposition": `attachment; filename="${file.name}"` } });
 	} catch {

@@ -126,7 +126,7 @@ export function previewExport(root: string, ids: string[]): ExportPreview {
 	const s = snapshot(root, ids);
 	return { revision: s.revision, chats: s.chats.map(c => ({ id: c.record.id, title: c.record.title })), files: s.files, issues: s.issues, complete: false };
 }
-export function downloadExport(root: string, ids: string[], mode: ExportMode, approval?: { revision: string; files: number[]; allowIncomplete: boolean }) {
+export function downloadExport(root: string, ids: string[], mode: ExportMode, approval?: { revision: string; files: number[] }) {
 	if (!["md", "txt", "json", "zip"].includes(mode)) throw new Error("Unknown export format");
 	if (mode !== "zip") {
 		const chats = records(root, ids);
@@ -142,7 +142,6 @@ export function downloadExport(root: string, ids: string[], mode: ExportMode, ap
 	}
 	const s = snapshot(root, ids);
 	if (!approval || approval.revision !== s.revision) throw new Error("Selection changed; preview again");
-	if (!approval.allowIncomplete) throw new Error("Acknowledge the partial dependency audit before exporting");
 	if (!Array.isArray(approval.files) || new Set(approval.files).size !== approval.files.length || approval.files.some(i => !Number.isInteger(i) || s.files[i]?.status !== "available"))
 		throw new Error("Invalid source-file selection");
 	const files: Record<string, Uint8Array> = {};

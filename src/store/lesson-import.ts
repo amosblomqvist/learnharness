@@ -111,7 +111,7 @@ export function readImportPackage(bytes: Uint8Array) {
 
 // All local destinations are generated here, never taken from manifest source paths.
 function local(root: string, relative: string): string {
-	if (!/^(?:chats\/[A-Za-z0-9_-]{1,200}\.json|graph\/(?:nodes\.jsonl|chains\.jsonl|format\.json)|lesson-transfers\/(?:readonly\/[A-Za-z0-9_-]{1,200}\.json|versions\/[A-Za-z0-9_-]{1,200}\/[a-f0-9]{64}\.json|packages\/[a-f0-9]{64}\.(?:zip|json)))$/.test(relative)) throw new Error("Invalid local destination");
+	if (!/^(?:chats\/[A-Za-z0-9_-]{1,200}\.json|graph\/(?:nodes\.jsonl|chains\.jsonl|format\.json)|lesson-transfers\/(?:readonly\/[A-Za-z0-9_-]{1,200}\.json|versions\/[A-Za-z0-9_-]{1,200}\/[a-f0-9]{64}\.json|packages\/[a-f0-9]{64}\.(?:zip|json)|receipts\/[a-f0-9-]{36}_[a-f0-9-]{36}\.json))$/.test(relative)) throw new Error("Invalid local destination");
 	const parts = relative.split("/"); let file = path.resolve(root);
 	if (fs.existsSync(file) && fs.lstatSync(file).isSymbolicLink()) throw new Error("Symlink library unsupported");
 	for (const part of parts) {
@@ -121,7 +121,7 @@ function local(root: string, relative: string): string {
 	}
 	return file;
 }
-function atomic(file: string, bytes: Uint8Array) {
+export function atomic(file: string, bytes: Uint8Array) {
 	fs.mkdirSync(path.dirname(file), { recursive: true });
 	const tmp = `${file}.tmp-${randomUUID()}`;
 	try {
@@ -225,11 +225,11 @@ export function previewImport(root: string, bytes: Uint8Array): ImportPreview {
 }
 /** One synchronous installation block: no in-process writer can interleave. Durable originals
  * precede every active replacement; an interrupted transaction rolls back on the next boot. */
-export function installImport(root: string, bytes: Uint8Array, approval: { revision: string; choices: ImportChoices; acknowledged: boolean },
+export function installImport(root: string, bytes: Uint8Array, approval: { revision: string; choices: ImportChoices; receipt?: { peer: string; operation: string; requestHash: string } },
 	// Bounded fault injection for offline rollback/restart tests only; never exposed by transport.
 	afterWrite?: (index: number) => void) {
 	const s = snapshot(root, bytes);
-	if (s.revision !== approval.revision || s.blockers.length || !approval.acknowledged) throw new Error("Preview changed or installation blocked");
+	if (s.revision !== approval.revision || s.blockers.length) throw new Error("Preview changed or installation blocked");
 	const conflicts = s.chats.filter(c => c.kind === "conflict");
 	if (Object.keys(approval.choices).length !== conflicts.length || conflicts.some(c => !["local", "incoming"].includes(approval.choices[c.record.id]!))) throw new Error("Choose every conflict explicitly");
 	const selected = s.chats.filter(c => c.kind !== "conflict" || approval.choices[c.record.id] === "incoming");
@@ -261,6 +261,14 @@ export function installImport(root: string, bytes: Uint8Array, approval: { revis
 	if (!s.format.length && s.pack.format) put("graph/format.json", s.pack.format);
 	// The full inert archive preserves skipped incoming graph/history for later inspection.
 	put(`${state}/packages/${s.pack.sha}.${bytes[0] === 0x50 && bytes[1] === 0x4b ? "zip" : "json"}`, bytes);
+	const result = { installed: selected.filter(c => c.kind !== "same").map(c => c.record.id), unchanged: s.chats.length - selected.filter(c => c.kind !== "same").length };
+	if (approval.receipt) {
+		const r = approval.receipt;
+		if (!/^[a-f0-9-]{36}$/.test(r.peer) || !/^[a-f0-9-]{36}$/.test(r.operation) || !shaPattern.test(r.requestHash)) throw new Error("Invalid receipt");
+		const relative = `${state}/receipts/${r.peer}_${r.operation}.json`;
+		if (fs.existsSync(local(root, relative))) throw new Error("Receipt already committed");
+		put(relative, Buffer.from(JSON.stringify({ ...result, requestHash: r.requestHash })));
+	}
 	if (!changes.size) return { installed: [] as string[], unchanged: s.chats.length };
 	const pending = pendingPath(root); fs.mkdirSync(pending, { recursive: true });
 	try {
@@ -279,7 +287,7 @@ export function installImport(root: string, bytes: Uint8Array, approval: { revis
 		fs.renameSync(pending, committed);
 		try { fs.rmSync(committed, { recursive: true, force: true }); } catch { /* inert cleanup only */ }
 	} catch (error) { recoverTransfers(root); throw error; }
-	return { installed: selected.filter(c => c.kind !== "same").map(c => c.record.id), unchanged: s.chats.length - selected.filter(c => c.kind !== "same").length };
+	return result;
 }
 export function importVersions(root: string): { id: string; sha: string }[] {
 	const folder = path.join(root, state, "versions");
@@ -288,10 +296,4 @@ export function importVersions(root: string): { id: string; sha: string }[] {
 	for (const id of fs.readdirSync(folder)) if (idPattern.test(id)) for (const name of fs.readdirSync(path.dirname(local(root, `${state}/versions/${id}/${"0".repeat(64)}.json`))))
 		if (/^[a-f0-9]{64}\.json$/.test(name)) out.push({ id, sha: name.slice(0, -5) });
 	return out;
-}
-export function importVersion(root: string, id: string, sha: string): Buffer {
-	if (!idPattern.test(id) || !shaPattern.test(sha)) throw new Error("Invalid version identity");
-	const raw = read(local(root, `${state}/versions/${id}/${sha}.json`));
-	if (hash(raw) !== sha) throw new Error("Corrupt saved version");
-	chat(raw, id); return raw;
 }

@@ -7,7 +7,7 @@ import { createHash } from "node:crypto";
 import { after, test } from "node:test";
 import { zipSync, unzipSync } from "fflate";
 import { downloadExport, previewExport } from "../src/store/lesson-export.ts";
-import { readImportPackage, previewImport, installImport, recoverTransfers, importPause, importVersions, importVersion } from "../src/store/lesson-import.ts";
+import { readImportPackage, previewImport, installImport, recoverTransfers, importPause, importVersions } from "../src/store/lesson-import.ts";
 import { graphSnapshot } from "../src/core/graph.ts";
 const roots: string[] = [];
 const temp = () => { const root = fs.mkdtempSync(path.join(os.tmpdir(), "lh-import-")); roots.push(root); return root; };
@@ -23,10 +23,10 @@ function archive(records = [record()], nodes = records.map(c => node(`n_${c.id}`
 	write(root, "graph/chains.jsonl", chains.map(c => JSON.stringify(c)).join("\n") + (chains.length ? "\n" : ""));
 	write(root, "graph/format.json", '{"version":1,"opaque":"preserve"}\n');
 	const ids = records.map(c => c.id), p = previewExport(root, ids);
-	return { root, bytes: downloadExport(root, ids, "zip", { revision: p.revision, files: [], allowIncomplete: true }).bytes };
+	return { root, bytes: downloadExport(root, ids, "zip", { revision: p.revision, files: [] }).bytes };
 }
 function install(root: string, bytes: Uint8Array, choices = {}, afterWrite?: (index: number) => void) {
-	return installImport(root, bytes, { revision: previewImport(root, bytes).revision, choices, acknowledged: true }, afterWrite);
+	return installImport(root, bytes, { revision: previewImport(root, bytes).revision, choices }, afterWrite);
 }
 function files(root: string): Record<string, string> {
 	const out: Record<string, string> = {};
@@ -51,7 +51,7 @@ test("preview is read-only; install preserves native bytes, graph and opaque met
 		assert.deepEqual(fs.readFileSync(path.join(root, file)), fs.readFileSync(path.join(source.root, file)));
 	assert.ok(importPause(root, "chat_import"));
 	const after = files(root); assert.deepEqual(install(root, source.bytes).installed, []); assert.deepEqual(files(root), after);
-	assert.deepEqual(importVersions(root).map(v => importVersion(root, v.id, v.sha).toString()), [fs.readFileSync(path.join(source.root, "chats/chat_import.json"), "utf8")]);
+	assert.deepEqual(importVersions(root).map(v => fs.readFileSync(path.join(root, "lesson-transfers/versions", v.id, `${v.sha}.json`), "utf8")), [fs.readFileSync(path.join(source.root, "chats/chat_import.json"), "utf8")]);
 	// Compose the actual desktop adapters in this isolated library, never installed data.
 	process.env.LH_DATA_DIR = root; process.env.LH_AUTH_FILE = path.join(root, "unused-auth.json");
 	const { chatStore } = await import("../src/store/chats.ts");
@@ -89,7 +89,7 @@ test("conflicts require every explicit decision, retain both originals and never
 	const a = archive([record()], [], []), b = archive([record("chat_import", "Changed incoming")], [], []), root = temp();
 	install(root, a.bytes); const before = files(root), p = previewImport(root, b.bytes);
 	assert.equal(p.chats[0]!.kind, "conflict");
-	assert.throws(() => installImport(root, b.bytes, { revision: p.revision, choices: {}, acknowledged: true })); assert.deepEqual(files(root), before);
+	assert.throws(() => installImport(root, b.bytes, { revision: p.revision, choices: {} })); assert.deepEqual(files(root), before);
 	install(root, b.bytes, { chat_import: "local" });
 	assert.deepEqual(fs.readFileSync(path.join(root, "chats/chat_import.json")), fs.readFileSync(path.join(a.root, "chats/chat_import.json")));
 	assert.equal(importVersions(root).length, 2);
@@ -97,13 +97,12 @@ test("conflicts require every explicit decision, retain both originals and never
 	assert.deepEqual(fs.readFileSync(path.join(root, "chats/chat_import.json")), fs.readFileSync(path.join(b.root, "chats/chat_import.json")));
 	assert.equal(importVersions(root).length, 2); assert.deepEqual(fs.readdirSync(path.join(root, "chats")), ["chat_import.json"]);
 });
-test("stale preview, absent acknowledgement and extra conflict keys fail before mutation", () => {
+test("stale preview and extra conflict keys fail before mutation", () => {
 	const source = archive(), root = temp(), p = previewImport(root, source.bytes);
-	assert.throws(() => installImport(root, source.bytes, { revision: p.revision, choices: {}, acknowledged: false }));
-	assert.throws(() => installImport(root, source.bytes, { revision: p.revision, choices: { wrong: "local" }, acknowledged: true }));
+	assert.throws(() => installImport(root, source.bytes, { revision: p.revision, choices: { wrong: "local" } }));
 	write(root, "chats/chat_import.json", JSON.stringify(record("chat_import", "Local changed")));
 	const before = files(root);
-	assert.throws(() => installImport(root, source.bytes, { revision: p.revision, choices: { chat_import: "incoming" }, acknowledged: true })); assert.deepEqual(files(root), before);
+	assert.throws(() => installImport(root, source.bytes, { revision: p.revision, choices: { chat_import: "incoming" } })); assert.deepEqual(files(root), before);
 });
 test("shared definitions, graph format differences, skipped conflicting provenance and replacement of graph evidence are blocked", () => {
 	const first = archive(), root = temp(); install(root, first.bytes);
@@ -143,18 +142,24 @@ test("every injected write failure rolls back active records, graph, flags and a
 test("a process-death journal is rolled back on adapter startup before serving chats", () => {
 	const source = archive(), root = temp(); write(root, "input.zip", source.bytes); const before = files(root);
 	const cwd = process.cwd();
-	const script = `import fs from 'node:fs'; import {previewImport,installImport} from './src/store/lesson-import.ts'; const b=fs.readFileSync(process.env.LH_DATA_DIR+'/input.zip'); installImport(process.env.LH_DATA_DIR,b,{revision:previewImport(process.env.LH_DATA_DIR,b).revision,choices:{},acknowledged:true},i=>{if(i===3)process.exit(23)});`;
+	const script = `import fs from 'node:fs'; import {previewImport,installImport} from './src/store/lesson-import.ts'; const b=fs.readFileSync(process.env.LH_DATA_DIR+'/input.zip'); installImport(process.env.LH_DATA_DIR,b,{revision:previewImport(process.env.LH_DATA_DIR,b).revision,choices:{}},i=>{if(i===3)process.exit(23)});`;
 	assert.throws(() => execFileSync(process.execPath, ["--import", "tsx", "--input-type=module", "-e", script], { cwd, timeout: 20_000, env: { ...process.env, LH_DATA_DIR: root, LH_AUTH_FILE: path.join(root, "unused-auth.json") }, stdio: "pipe" }), (e: unknown) => (e as { status: number }).status === 23);
 	assert.equal(fs.existsSync(path.join(root, "lesson-transfers/pending/journal.json")), true);
 	execFileSync(process.execPath, ["--import", "tsx", "--input-type=module", "-e", "import {chatStore} from './src/store/chats.ts'; if(chatStore.getChat('chat_import')!==null)process.exit(24);"], { cwd, timeout: 20_000, env: { ...process.env, LH_DATA_DIR: root, LH_AUTH_FILE: path.join(root, "unused-auth.json") }, stdio: "pipe" });
 	assert.deepEqual(files(root), before); install(root, source.bytes);
 });
-test("unsafe members, file/source dependencies, bad hashes, newer versions and malformed UTF-8/JSON are refused", () => {
+test("unsafe members, malformed ZIP64, dependencies, bad hashes, newer versions and malformed UTF-8/JSON are refused", () => {
 	const source = archive();
 	for (const name of ["../escape", "files/000.pdf", "graph/sources.json", "chats/unselected.json"]) assert.throws(() => readImportPackage(repack(source.bytes, m => { m[name] = Buffer.from("{}"); })));
 	assert.throws(() => readImportPackage(repack(source.bytes, m => { m["chats/chat_import.json"] = Buffer.from([0xff]); })));
 	assert.throws(() => readImportPackage(repack(source.bytes, m => { m["chats/chat_import.json"] = Buffer.from("[".repeat(65) + "0" + "]".repeat(65)); })));
 	assert.throws(() => readImportPackage(repack(source.bytes, m => { const r = record(); r.version = 2; m["chats/chat_import.json"] = Buffer.from(JSON.stringify(r)); })));
+	// CVE-2026-45820: missing ZIP64 extra field used to hang before the bounded filter ran.
+	const zip64 = Buffer.from(zipSync({ "manifest.json": Buffer.from("{}") }));
+	const central = zip64.indexOf(Buffer.from([0x50, 0x4b, 0x01, 0x02])); assert.ok(central >= 0);
+	zip64.writeUInt32LE(0xffffffff, central + 20);
+	const rejectZip64 = `import assert from 'node:assert/strict'; import {readImportPackage} from './src/store/lesson-import.ts'; assert.throws(()=>readImportPackage(Buffer.from('${zip64.toString("base64")}','base64')));`;
+	execFileSync(process.execPath, ["--import", "tsx", "--input-type=module", "-e", rejectZip64], { cwd: process.cwd(), timeout: 5000, stdio: "pipe" });
 	const damaged = unzipSync(source.bytes); damaged["chats/chat_import.json"] = Buffer.from("{}"); assert.throws(() => readImportPackage(zipSync(damaged)));
 	assert.throws(() => readImportPackage(new Uint8Array(32 * 1024 * 1024 + 1)));
 	const forged = Buffer.from(source.bytes);

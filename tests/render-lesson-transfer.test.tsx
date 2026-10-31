@@ -8,6 +8,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { parseHTML } from "linkedom";
 import { LessonTransfer } from "../components/settings/lesson-transfer.tsx";
 import { LessonImport } from "../components/settings/lesson-import.tsx";
+import { LessonLan } from "../components/settings/lesson-lan.tsx";
 const dom = parseHTML("<html><body></body></html>");
 Object.assign(globalThis, { window: dom.window, document: dom.document });
 const originalFetch = globalThis.fetch;
@@ -41,6 +42,47 @@ test("simple English UI has Import/Export, formats and warnings, without preview
 	assert.match(html, /type="file"[^>]*hidden=""/);
 });
 
+test("device connection shows QR in one click and polls presence without resetting QR or leaking timers", async t => {
+	t.mock.timers.enable({ apis: ["setInterval"] });
+	const calls: string[] = []; let enabled = false, pairingActive = false, unavailable = false;
+	let devices: { id: string; name: string; online: boolean }[] = [];
+	globalThis.fetch = async (url, init) => {
+		assert.equal(url, "/api/lesson-lan"); const body = JSON.parse(init!.body as string); calls.push(body.action);
+		if (unavailable) return Response.json({ error: "Offline" }, { status: 503 });
+		if (body.action === "start") enabled = true;
+		if (body.action === "stop") { enabled = false; pairingActive = false; }
+		if (body.action === "revoke") { assert.equal(body.id, "synthetic-device"); devices = []; }
+		if (body.action === "pair") { assert.deepEqual(body, { action: "pair" }); pairingActive = true; return Response.json({ connection: "learnharness-lan://pair?synthetic", qr: "data:image/png;base64,AA==", expires: 1 }); }
+		return Response.json({ enabled, pairingActive, devices });
+	};
+	const host = document.createElement("div"); document.body.append(host); const root = createRoot(host);
+	try {
+		await act(async () => root.render(<LessonLan />)); assert.deepEqual(calls, ["status"]);
+		await act(async () => button(host, "Connect a device").click());
+		assert.ok(host.querySelector("img")); assert.equal(host.querySelector("select"), null);
+		assert.doesNotMatch(host.textContent!, /LAN sync|Listening|Reasoned|Refresh|models|192\.168/);
+		assert.equal(host.querySelector<HTMLTextAreaElement>("textarea")!.defaultValue, "learnharness-lan://pair?synthetic");
+		for (let i = 0; i < 3; i++) {
+			const before = calls.length; await act(async () => t.mock.timers.tick(1000));
+			assert.equal(calls.length, before + 1); assert.equal(calls.at(-1), "status");
+			assert.ok(host.querySelector("img")); // Polling must not regenerate or remove a valid QR.
+		}
+		devices = [{ id: "synthetic-device", name: "Authored device", online: true }]; pairingActive = false;
+		await act(async () => t.mock.timers.tick(1000));
+		assert.equal(host.querySelector("img"), null); assert.ok(button(host, "Connect another device"));
+		assert.ok(host.querySelector('[aria-label="Online"]')?.classList.contains("bg-green-500"));
+		devices[0]!.online = false; await act(async () => t.mock.timers.tick(1000));
+		assert.ok(host.querySelector('[aria-label="Offline"]')?.classList.contains("bg-red-500"));
+		unavailable = true; await act(async () => t.mock.timers.tick(1000)); assert.ok(host.querySelector('[role="alert"]'));
+		unavailable = false; devices[0]!.online = true; await act(async () => t.mock.timers.tick(1000));
+		assert.ok(host.querySelector('[aria-label="Online"]')); assert.equal(host.querySelector('[role="alert"]'), null);
+		await act(async () => button(host, "Disconnect").click()); assert.equal(button(host, "Disconnect"), undefined);
+		await act(async () => button(host, "Turn off").click());
+		assert.deepEqual(calls.filter(action => action !== "status"), ["start", "pair", "revoke", "stop"]);
+	} finally { await act(async () => root.unmount()); host.remove(); }
+	const stopped = calls.length; t.mock.timers.tick(5000); assert.equal(calls.length, stopped);
+});
+
 test("choosing JSON checks and imports immediately without an acknowledgement checkbox", async () => {
 	const calls: string[] = []; let installed = 0;
 	globalThis.fetch = async (url, init) => {
@@ -48,7 +90,7 @@ test("choosing JSON checks and imports immediately without an acknowledgement ch
 		const form = init!.body as FormData, action = form.get("action") as string; calls.push(action);
 		assert.equal((form.get("file") as File).name, "synthetic.json");
 		if (action === "preview") return Response.json({ revision: "rev", chats: [{ id: "chat_ui", title: "Authored JSON", kind: "new" }], nodes: 0, chains: 0, warnings: [], blockers: [] });
-		assert.equal(form.get("revision"), "rev"); assert.equal(form.get("acknowledged"), "true"); assert.equal(form.get("choices"), "{}");
+		assert.equal(form.get("revision"), "rev"); assert.equal(form.has("acknowledged"), false); assert.equal(form.get("choices"), "{}");
 		return Response.json({ installed: ["chat_ui"] });
 	};
 	const host = document.createElement("div"); document.body.append(host); const root = createRoot(host);
@@ -98,17 +140,18 @@ test("blocked or rejected imports never install", async () => {
 });
 
 test("one Export click checks and downloads a source-free ZIP; actual source files remain opt-in", async () => {
-	const calls: { preview: boolean; revision?: string; files?: number[]; allowIncomplete?: boolean }[] = [];
+	const calls: { preview: boolean; revision?: string; files?: number[] }[] = [];
 	let available = false, downloads = 0;
 	const timer = window.setTimeout, create = URL.createObjectURL, revoke = URL.revokeObjectURL;
 	window.setTimeout = ((fn: () => void) => { fn(); return 0; }) as unknown as typeof window.setTimeout;
 	URL.createObjectURL = () => { downloads++; return "blob:synthetic"; }; URL.revokeObjectURL = () => {};
 	globalThis.fetch = async (input, init) => {
+		if (input === "/api/lesson-lan") return Response.json({ enabled: false, addresses: [], devices: [] });
 		if (input === "/api/chats") return Response.json({ chats: [{ id: "chat_ui", title: "Synthetic lesson", kind: "teach" }] });
 		assert.equal(input, "/api/lesson-export");
 		const body = JSON.parse(init!.body as string); calls.push(body);
 		if (body.preview) return Response.json({ revision: "rev", chats: [{ id: "chat_ui" }], files: available ? [{ path: "/synthetic/private.pdf", status: "available", bytes: 10 }] : [], issues: [], complete: false });
-		assert.equal(body.revision, "rev"); assert.equal(body.allowIncomplete, true); assert.deepEqual(body.files, []);
+		assert.equal(body.revision, "rev"); assert.equal("allowIncomplete" in body, false); assert.deepEqual(body.files, []);
 		return new Response("authored ZIP", { headers: { "content-disposition": 'attachment; filename="synthetic.zip"' } });
 	};
 	const host = document.createElement("div"); document.body.append(host); const root = createRoot(host);

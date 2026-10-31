@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import type { ChatListItem, ExportMode, ExportPreview } from "@/src/core";
 import { SettingsGroup, SettingsRow, ThinSelect } from "./controls";
 import { LessonImport } from "./lesson-import";
+import { LessonLan } from "./lesson-lan";
 
 /** Ordinary LearnHarness exports. No Android renderer or connection is required. */
 export function LessonTransfer() {
@@ -40,7 +41,7 @@ export function LessonTransfer() {
 				if (body.files.some(f => f.status === "available")) return;
 			}
 			const response = await fetch("/api/lesson-export", { method: "POST", headers: { "Content-Type": "application/json" },
-				body: JSON.stringify({ ids, mode, preview: false, revision: reviewed?.revision, files, allowIncomplete: true }) });
+				body: JSON.stringify({ ids, mode, preview: false, revision: reviewed?.revision, files }) });
 			if (!response.ok) {
 				const body = await response.json() as { error?: string };
 				throw new Error(body.error ?? "Export failed");
@@ -88,5 +89,6 @@ export function LessonTransfer() {
 			{error && <p role="alert" className="mt-3 text-xs">{error}</p>}
 			{notice && <p role="status" className="mt-3 text-xs">{notice}</p>}
 		</SettingsGroup>
+		<LessonLan />
 	</div>;
 }

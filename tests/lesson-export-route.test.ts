@@ -23,13 +23,13 @@ const request = (body: unknown, origin = "http://localhost") => new Request("htt
 test("route rejects foreign origins, oversized bodies, stale previews and live writers", async () => {
 	assert.equal((await POST(request({ ids: ["chat_export"], mode: "json" }, "https://foreign.invalid"))).status, 403);
 	assert.equal((await POST(request({ data: "x".repeat(65_536) }))).status, 400);
-	assert.equal((await POST(request({ ids: ["chat_export"], mode: "zip", revision: "stale", allowIncomplete: true }))).status, 400);
+	assert.equal((await POST(request({ ids: ["chat_export"], mode: "zip", revision: "stale" }))).status, 400);
 	assert.equal(beginTurn("chat_export"), true);
 	try { assert.equal((await POST(request({ ids: ["chat_export"], mode: "json" }))).status, 409); }
 	finally { endTurn("chat_export"); }
 	assert.equal(network, 0);
 });
-test("route returns download headers and supports preview/explicit partial ZIP without mutation or spending", async () => {
+test("route returns download headers and supports preview/partial ZIP without mutation or spending", async () => {
 	const before = fs.readFileSync(path.join(root, "chats/chat_export.json"));
 	const res = await POST(request({ ids: ["chat_export"], mode: "json" }));
 	assert.equal(res.status, 200); assert.equal(res.headers.get("Cache-Control"), "no-store");
@@ -38,7 +38,7 @@ test("route returns download headers and supports preview/explicit partial ZIP w
 	const preview = await POST(request({ ids: ["chat_export"], preview: true }));
 	assert.equal(preview.status, 200);
 	const body = await preview.json() as { revision: string };
-	const zip = await POST(request({ ids: ["chat_export"], mode: "zip", revision: body.revision, files: [], allowIncomplete: true }));
+	const zip = await POST(request({ ids: ["chat_export"], mode: "zip", revision: body.revision, files: [] }));
 	assert.equal(zip.status, 200); assert.equal(zip.headers.get("Content-Type"), "application/zip");
 	assert.deepEqual(fs.readFileSync(path.join(root, "chats/chat_export.json")), before); assert.equal(network, 0);
 });

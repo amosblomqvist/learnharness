@@ -30,7 +30,7 @@ function graph(root: string) {
 const text = (bytes: Uint8Array) => new TextDecoder().decode(bytes);
 function archive(root: string, files: number[] = []) {
 	const preview = previewExport(root, ["chat_one"]);
-	return unzipSync(downloadExport(root, ["chat_one"], "zip", { revision: preview.revision, files, allowIncomplete: true }).bytes);
+	return unzipSync(downloadExport(root, ["chat_one"], "zip", { revision: preview.revision, files }).bytes);
 }
 
 test("readable text excludes hidden commitments, JSON preserves exact bytes, neither depends on graph compatibility", () => {
@@ -93,9 +93,9 @@ test("sources are opt-in, missing and credential-like paths are reported, and ch
 	const withSource = archive(root, [0]); assert.equal(text(withSource["files/000.pdf"]!), "%PDF synthetic");
 	assert.equal(JSON.parse(text(withSource["manifest.json"]!)).attachments[0].sourcePath, source);
 	assert.throws(() => archive(root, [1])); assert.throws(() => archive(root, [-1]));
-	assert.throws(() => downloadExport(root, ["chat_one"], "zip", { revision: preview.revision, files: [], allowIncomplete: false }));
+	assert.throws(() => downloadExport(root, ["chat_one"], "zip"));
 	fs.appendFileSync(source, " changed");
-	assert.throws(() => downloadExport(root, ["chat_one"], "zip", { revision: preview.revision, files: [0], allowIncomplete: true }), /changed/);
+	assert.throws(() => downloadExport(root, ["chat_one"], "zip", { revision: preview.revision, files: [0] }), /changed/);
 	assert.equal(fs.readFileSync(secret, "utf8"), "do not export");
 });
 

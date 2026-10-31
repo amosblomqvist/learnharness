@@ -1,6 +1,6 @@
 # Lesson transfer (experimental)
 
-Settings → **Lesson transfer** provides **Import** and **Export** for teaching or practice sessions. This is a general LearnHarness feature: reading or backing up a session does not require another app, an account, a provider connection or a compatible Android renderer.
+Settings → **Export/import** provides **Import** and **Export** for teaching or practice sessions. This is a general LearnHarness feature: reading or backing up a session does not require another app, an account, a provider connection or a compatible Android renderer.
 
 ## Choose the right format
 
@@ -36,41 +36,81 @@ There is no mandatory preview screen or acknowledgement checkbox. Short explanat
 
 The receiver independently validates ZIP names, duplicate members, declared and actual inflation sizes, inventory hashes, UTF-8/JSON bounds, native identities and graph references/provenance. Sender completeness claims grant no authority. Unsupported versions, source registries and `files/*` are rejected, not extracted or silently discarded. Existing shared node definitions, chain identities and format metadata must agree. Graph assertions cannot depend on skipped conflicting history or relabel existing evidence from replaced messages. Combined ledgers must remain within the native bounds. Incompatible histories must stay in separate libraries rather than be merged by guesswork.
 
-The upload handler rechecks revision, explicit decisions and writer liveness immediately before a synchronous install. All extraction and the selected lessons' generation, compaction and running jobs must be idle. Original lesson bytes and opaque metadata are preserved. Existing graph bytes stay in place and only unseen selected assertion lines are appended. `data/lesson-transfers/` contains retained JSON versions, original inert ZIP/JSON inputs and local explicit-input pause metadata. Saved-version downloads are no longer exposed in Settings; retention remains internal for conflict safety.
+The upload handler rechecks revision, explicit decisions and writer liveness immediately before a synchronous install. All extraction and the selected lessons' generation, compaction and running jobs must be idle. Original lesson bytes and opaque metadata are preserved. Existing graph bytes stay in place and only unseen selected assertion lines are appended. `data/lesson-transfers/` contains retained JSON versions, original inert ZIP/JSON inputs and local explicit-input pause metadata. Saved versions are retained internally for conflict safety; no listing or download endpoint is exposed.
 
 A rollback journal covers lesson, graph, marker and version writes. Interrupted installs are rolled back when the chat adapter starts, before serving requests; corrupt recovery state fails closed. This is single-process coordination and process-death recovery, not a multi-process lock or a power-loss guarantee. Do not run two servers against the same library. Preserve the entire data directory when backing it up, including transfer metadata.
 
 New or replaced imported lessons can **continue with your local model settings**. Importing or opening them starts no model request. Automatic continuation, extraction and jobs stay paused until an explicit learner input, such as **Continue**, answering a question or sending a message. Foreign model/provider overrides are not adopted: the local lesson picker wins, otherwise the locally configured conversation model is used. Missing models or credentials open the existing setup flow rather than silently choosing an account. The first accepted input saves that local model choice and releases the pause; ordinary session behavior then resumes. A byte-identical existing local lesson keeps its existing policy. Deletion remains the existing explicit local-only operation; saved versions are not a remote deletion signal.
 
-## Planned local-network sync (not implemented)
+## Local-network exchange (experimental)
 
-The agreed first version replaces manual ZIP handoff, not the importer: selected lessons and native
-graph move over a narrow, explicitly enabled HTTPS endpoint. LearnHarness displays a pairing QR with
-its local address, certificate fingerprint and short-lived single-use code; Reasoned confirms the
-computer/library. The full application UI/API is not exposed to the LAN, and paired access can be revoked.
+A **Connect a device** section sits inside the existing **Export/import** screen,
+not a separate menu item. File Import/Export stays unchanged: users can still save ZIP/JSON or readable
+exports to Google Drive and move them to another computer manually. No Google Drive API integration
+is required. LAN reuses the existing source-free ZIP, importer and exporter as an additional transport.
+
+One **Connect a device** click enables the listener and shows its QR, choosing a private IPv4 address
+automatically. No address selector, port, library path or opaque identity is displayed. **Connect another
+device**, **Disconnect** and **Turn off** manage pairing and access. Saved devices show their name and a
+green/red online dot; status refreshes every second without resetting the QR. Android keeps its
+one-second heartbeat active on any app screen (including its portrait QR scanner), stops it when the
+app is minimized and marks the peer offline after three missed responses. Desktop presence expires
+three seconds after the last authenticated request; this is presence only, not automatic lesson sync.
+Selected lessons and native graph move over a narrow HTTPS endpoint, not the full application UI/API.
+The QR contains the local address, certificate fingerprint and a short-lived single-use pairing key.
+The key stays inside the QR: no separate numeric code or extra code-entry step. It prevents other
+LAN devices from accessing the library or sending lessons without pairing. Reasoned provides an in-app
+QR scanner and fallback connection-string input, and confirms the target computer/library. Use
+established QR/certificate libraries rather than custom cryptography.
 
 The phone initiates connections and can **send to the computer or receive from it**. Uploads go directly
 through the desktop receiver, without a desktop file-picker step. Both apps must be reachable on the same
 local network and LearnHarness must be running. Each exchange remains one-way and user initiated:
-identical records are skipped, conflicts require an active-version choice, and both originals survive.
+identical records are skipped, active-version conflicts are resolved on the phone, and both originals survive.
 Success requires a committed-install receipt; interrupted transfers and lost acknowledgements must be
 safe to retry without duplication. Existing validation and recovery remain authoritative.
 
 No cloud, permanent background sync, automatic merging, deletion propagation or external-file import.
 Account settings and credentials stay local; receiving/opening never invokes a model. Continue uses the
 destination's local model settings after learner input. Pairing grants neither spend nor blanket overwrite
-permission. This network feature still needs implementation and independent acceptance checks.
+permission. The listener is off at process startup; it binds a dedicated port and exposes only transfer
+operations. Pairing lasts five minutes and works once; the same device can reconcile a lost pairing
+response. The Android client pins the exact certificate, disables proxies/redirects and keeps its token
+in Keystore-backed storage. Desktop stores token hashes and a local TLS identity, never provider keys.
+Keep the desktop data directory private; allow its listener through the firewall only on trusted networks.
+The first version uses private IPv4 addresses: changed desktop addresses require pairing again.
+
+Committed receipts participate in the same recovery journal as installation. A retry checks the receipt
+before writing, so a lost response cannot overwrite later learner history. Phone receive receipts use
+the same SQLite transaction as lesson/graph installation. Pending exchanges survive phone process loss
+in app-private storage, with encrypted operation credentials and explicit Retry/Discard controls.
+Receipts reconcile operations, not a shared synchronization baseline: different same-ID histories still
+require explicit choices; there is no automatic changed-since-sync merge.
+
+Thirty focused desktop transfer/LAN/control/UI checks passed, including actual TLS, wrong pins,
+single-use pairing, live-writer refusal, interrupted upload, dropped acknowledgement, receipt rollback,
+restart and revocation. A disposable API-36 emulator also passed a real pinned-HTTPS round trip through
+both importers, graph preservation, phone-created lesson upload, receipt reconciliation, re-export
+and foreground heartbeat/stop,
+with zero provider/public fetches. These are synthetic stores/transport and DOM checks, not physical
+Wi-Fi/firewall, camera QR, browser/Electron or a full manual UI conflict-workflow acceptance.
 
 ## Remaining limits
 
-No external-file/source-registry installation or connected Sync. Continuation covers the supported native subset, not every historical tool/artifact or external dependency. Exports containing those broader source members remain useful for backup/tools but are not accepted by this receiver or Reasoned's current receiver. This is not a complete library backup or universal portability guarantee. Browser/Electron import and the full two-app manual conflict workflow remain unverified; synthetic installation evidence below is narrower.
+Dependency audit: `fflate` is pinned to 0.8.3 to fix malformed-ZIP64 infinite-loop advisory
+[CVE-2026-45820](https://github.com/advisories/GHSA-px8p-9vwx-vf98); a child-process timeout regression
+checks rejection through the real importer. The current npm audit still reports 34 existing dependency
+findings (24 moderate, 7 high, 3 critical), outside this transport change. Those remain release/security
+gates, not a clean-audit claim; no new LAN dependency version was in that advisory set.
+
+No external-file/source-registry installation, automatic/background sync or multi-process library locking. Continuation covers the supported native subset, not every historical tool/artifact or external dependency. Exports containing those broader source members remain useful for backup/tools but are not accepted by this receiver or Reasoned's current receiver. This is not a complete library backup or universal portability guarantee. Browser/Electron import and the full two-app manual conflict workflow remain unverified; synthetic installation evidence below is narrower.
 
 ## Offline checks
 
 From the repository root:
 
 ```sh
-NODE_ENV=test node --import tsx --test tests/lesson-export.test.ts tests/lesson-export-route.test.ts tests/lesson-import.test.ts tests/lesson-import-route.test.ts tests/render-lesson-transfer.test.tsx tests/session-core.test.ts tests/session-markdown.test.ts tests/markdown-export.test.ts
+NODE_ENV=test node --import tsx --test tests/lesson-export.test.ts tests/lesson-export-route.test.ts tests/lesson-import.test.ts tests/lesson-import-route.test.ts tests/render-lesson-transfer.test.tsx tests/lesson-lan.test.ts tests/lesson-lan-control.test.ts tests/session-core.test.ts tests/session-markdown.test.ts tests/markdown-export.test.ts
 npx tsc --noEmit --incremental false
 ```
 
@@ -89,6 +129,6 @@ node --input-type=module -e 'import fs from "node:fs"; import path from "node:pa
 npm run dev
 ```
 
-Open the development URL, then Settings → Lesson transfer; do not start a lesson or enter credentials. Select **Synthetic export example**. Download each readable variant and JSON. Choose ZIP and click Export; check `manifest.json` and that the chat matches the original file. For an import check, keep using this isolated library: click Import and select a source-free synthetic ZIP or lesson JSON. It installs automatically unless there are conflicts; explicitly choose active versions if prompted. Open the imported lesson and confirm its controls are usable and no generation starts; without configuring a provider or clicking Continue/Send, repeat the import to check no duplicate lesson appears. Test conflicts only with authored copies, never your installed lessons.
+Open the development URL, then Settings → Export/import; do not start a lesson or enter credentials. Select **Synthetic export example**. Download each readable variant and JSON. Choose ZIP and click Export; check `manifest.json` and that the chat matches the original file. For an import check, keep using this isolated library: click Import and select a source-free synthetic ZIP or lesson JSON. It installs automatically unless there are conflicts; explicitly choose active versions if prompted. Open the imported lesson and confirm its controls are usable and no generation starts; without configuring a provider or clicking Continue/Send, repeat the import to check no duplicate lesson appears. Test conflicts only with authored copies, never your installed lessons.
 
 Stop the development server afterward. Remove only the printed synthetic directory when finished, and unset `LH_DATA_DIR` and `LH_AUTH_FILE`; do not run cleanup against your real LearnHarness directory.
