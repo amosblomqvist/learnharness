@@ -5,7 +5,7 @@ import { emptySourceOrganization, parseSourceOrganization } from "../core/source
 import type { SourceOrganizationStore } from "../core/ports.ts";
 import { emit } from "../core/events.ts";
 import { assertGraphFormat, ensureGraphFormat } from "./graph-format.ts";
-import { writeFileAtomicSync } from "./atomic-write.ts";
+import { removeLeftoverTemps, writeFileAtomicSync } from "./atomic-write.ts";
 
 export const sourceOrganizationStore: SourceOrganizationStore = {
 	read() {
@@ -24,6 +24,7 @@ export const sourceOrganizationStore: SourceOrganizationStore = {
 		fs.mkdirSync(path.dirname(SOURCE_ORGANIZATION_FILE), { recursive: true });
 		ensureGraphFormat();
 		writeFileAtomicSync(SOURCE_ORGANIZATION_FILE, JSON.stringify(valid, null, "\t") + "\n");
+		removeLeftoverTemps(SOURCE_ORGANIZATION_FILE); // crash leftovers could still place deleted sources
 		emit("sources-changed", {});
 	},
 };
