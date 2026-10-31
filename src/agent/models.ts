@@ -7,6 +7,7 @@ import {
 	type Model,
 	type Models,
 	type MutableModels,
+	type Provider,
 	type StreamFunction,
 } from "@earendil-works/pi-ai";
 import { builtinProviders } from "@earendil-works/pi-ai/providers/all";
@@ -29,6 +30,48 @@ export const APP_IDENTITY = Object.freeze({
 	userAgent: Object.freeze({ custom: `learnharness/${packageMetadata.version}` }),
 	attribution: Object.freeze({ name: packageMetadata.name, url: packageMetadata.homepage }),
 });
+
+/**
+ * Pi has added Terra on main but has not yet published a package containing
+ * it. Keep this narrow compatibility entry until the pinned pi-ai release
+ * includes the model; a native Pi entry always wins. Metadata follows Pi's
+ * generator and OpenAI's published API model description. The 272k value is
+ * Pi's conservative catalog default, not a claim about account entitlement.
+ * https://github.com/earendil-works/pi/blob/6c384aa30f619d7b28963f2bab24d8dacbe73cb6/packages/ai/scripts/generate-models.ts
+ * https://developers.openai.com/api/docs/models/gpt-6.1-terra
+ */
+const TERRA_FALLBACK: Model<"openai-responses"> = {
+	id: "gpt-6.1-terra",
+	name: "GPT-6.1 Terra",
+	api: "openai-responses",
+	provider: "openai",
+	baseUrl: "https://api.openai.com/v1",
+	type: "chat",
+	reasoning: true,
+	input: ["text", "image"],
+	cost: { input: 1, output: 5, cacheRead: 0.05, cacheWrite: 1.25, tiers: [{ inputTokensAbove: 272_000, input: 2, output: 7.5, cacheRead: 0.1, cacheWrite: 2.5 }] },
+	contextWindow: 272_000,
+	maxTokens: 128_000,
+	thinkingLevelMap: { off: "none", minimal: null, low: "low", medium: "medium", high: "high", xhigh: "xhigh", max: "max" },
+	compat: { supportsStrictMode: true, supportsOpenAIGrammarTools: true, supportsAdditionalTools: true, supportsToolSearch: true, supportsMidConvoSystemMessages: true, supportsExplicitPromptCacheMode: true, supportsMidConvoEffort: true },
+	inputLimits: { maxRequestBytes: 536_870_912, images: { maxPerRequest: 1500, resize: { maxWidth: 2000, maxHeight: 2000, maxBytes: 4_718_592, jpegQuality: 80 } } },
+};
+
+export function withOpenAITerraFallback(provider: Provider): Provider {
+	if (provider.id !== "openai") return provider;
+	return {
+		...provider,
+		getModels: () => {
+			const models = provider.getModels();
+			return models.some((model) => model.id === TERRA_FALLBACK.id) ? models : [...models, TERRA_FALLBACK];
+		},
+		getAllModels: () => {
+			const models = provider.getAllModels?.() ?? provider.getModels();
+			return models.some((model) => model.id === TERRA_FALLBACK.id && (model.type === undefined || model.type === "chat"))
+				? models : [...models, TERRA_FALLBACK];
+		},
+	};
+}
 
 /**
  * The one engine factory every agent's model comes from (the pi-ai swap,
@@ -87,9 +130,10 @@ export function piModels() {
 			// Keep the native Bedrock implementation reachable by standalone tracing.
 			// Pi's default Node-only loader hides this import from bundlers. Only
 			// replace its lazy forwarding; preserve the native factory's auth/catalog.
-			collection.setProvider(provider.id === "amazon-bedrock"
+			const registered = provider.id === "amazon-bedrock"
 				? { ...provider, ...lazyApi(() => import("@earendil-works/pi-ai/api/bedrock-converse-stream")) }
-				: provider);
+				: provider;
+			collection.setProvider(withOpenAITerraFallback(registered));
 		}
 		collection.setProvider(createClaudeCodeProvider(streamClaudeCode));
 	}
