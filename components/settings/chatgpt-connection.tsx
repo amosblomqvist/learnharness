@@ -8,7 +8,7 @@ import { Toggle } from "./controls";
 import { useChatGPTBridge } from "./subscription-client";
 
 export const CHATGPT_NOTICE = "LearnHarness stores your ChatGPT account details and credentials in an unencrypted local file on this device. When this connection is used, relevant conversation context, learning material, and tool results are sent directly to OpenAI. ChatGPT plan limits apply; any additional credits are authorized and managed in ChatGPT, not LearnHarness.";
-export function chatGPTNotice(web = false): string { return web ? `${CHATGPT_NOTICE.replace("on this device", "on the machine running LearnHarness")} Complete ChatGPT sign-in in a browser on that same machine.` : CHATGPT_NOTICE; }
+export function chatGPTNotice(web = false): string { return web ? `${CHATGPT_NOTICE.replace("on this device", "on the machine running LearnHarness")} If your browser is on another device, finish with the address it ends on.` : CHATGPT_NOTICE; }
 export const CHATGPT_BACKGROUND_HINT = "Background work counts toward your ChatGPT plan usage.";
 const BACKGROUND_LABEL = "Allow background use for all ChatGPT accounts";
 const REVOCATION_WARNING = "Account disconnected locally. Remote revocation could not be confirmed.";
@@ -243,6 +243,14 @@ export function ChatGPTUIProvider({ children }: { children: React.ReactNode }) {
 		// No finally: pending OAuth outlives this IPC promise. Only its status
 		// completion, failure, or explicit cancellation releases the attempt.
 	}
+	async function finishSignIn(address: string) {
+		if (!bridge?.callback) return;
+		setError(null);
+		try {
+			const value: unknown = await bridge.callback(address);
+			if (mounted.current) receive.current(value);
+		} catch { if (mounted.current) setError(CONTROL_ERROR); }
+	}
 	const context = {
 		status, busy, error: warning ? null : visibleError, inlineError: dialog || warning ? null : visibleError, warning: dialog?.kind === "warning" ? null : warning,
 		connect: openConnect,
@@ -293,6 +301,7 @@ export function ChatGPTUIProvider({ children }: { children: React.ReactNode }) {
 				</div>
 				{!status.available && <p className="mt-3 text-xs text-muted-foreground">ChatGPT sign-in is available only in the desktop app. API-key connections remain available here.</p>}
 				{status.pending && <p role="status" className="mt-3 text-xs text-muted-foreground">Waiting for browser sign-in…</p>}
+				{status.pending && web && bridge?.callback && <SignInAddress onSubmit={finishSignIn} />}
 				{context.error && <p role="alert" className="mt-3 text-xs text-red-400">{context.error}</p>}
 				{dialog.kind === "manage" && managed && <div className="mt-4 flex flex-wrap items-center justify-between gap-3" data-testid="chatgpt-account-strip">
 					<div data-testid="chatgpt-managed-identity" className="flex min-w-0 items-center gap-2 text-xs text-foreground">
@@ -321,6 +330,23 @@ function ContinueButton({ onClick, disabled, testid = "chatgpt-login" }: { onCli
 		<img src="/siwc/chatgpt-logo-white.svg" width="16" height="16" alt="" aria-hidden="true" />
 		Continue with ChatGPT
 	</Button>;
+}
+
+function SignInAddress({ onSubmit }: { onSubmit: (address: string) => Promise<void> }) {
+	const [address, setAddress] = useState("");
+	const [submitting, setSubmitting] = useState(false);
+	return <form className="mt-3 flex flex-col gap-2 text-xs text-muted-foreground" data-testid="chatgpt-callback" onSubmit={(event) => {
+		event.preventDefault();
+		if (submitting || !address.trim()) return;
+		setSubmitting(true);
+		void onSubmit(address.trim()).finally(() => setSubmitting(false));
+	}}>
+		<label htmlFor="chatgpt-callback-address">If sign-in ends on a page that won&apos;t load (127.0.0.1), paste that page&apos;s full address here</label>
+		<div className="flex items-center gap-2">
+			<input id="chatgpt-callback-address" type="url" value={address} maxLength={4096} autoComplete="off" spellCheck={false} disabled={submitting} onChange={(event) => setAddress(event.target.value)} className="min-w-0 flex-1 rounded-sm border border-border bg-background px-2 py-1.5 text-foreground" />
+			<Button type="submit" variant="outline" size="sm" disabled={submitting || !address.trim()}>Finish sign-in</Button>
+		</div>
+	</form>;
 }
 
 function AccountDialog({ children, onClose, busy }: { children: React.ReactNode; onClose: () => void; busy: boolean }) {

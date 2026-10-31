@@ -550,6 +550,39 @@ for (const holdSave of [false, true]) test(`real main/control bridge: immediate 
  } finally { releaseSave.resolve(); await act(async () => service.close()); }
 });
 
+test("web sign-in offers paste-back while pending; a rejected address shows its error, an accepted one completes; desktop never offers it", async () => {
+ const rejected = "That address is not from this ChatGPT sign-in. Paste the full address of the page sign-in ended on.";
+ const label = "If sign-in ends on a page that won't load (127.0.0.1), paste that page's full address here";
+ let status = disconnected(); const posts: Record<string, unknown>[] = [];
+ window.open = (() => ({ opener: {}, closed: false, location: { href: "" }, close() {} })) as unknown as typeof window.open;
+ globalThis.fetch = async (_url, options) => {
+  if (!options?.method) return Response.json({ chatgpt: status, native: [] });
+  const command = JSON.parse(String(options.body)); posts.push(command);
+  if (command.op === "login") { status = { ...status, pending: true }; return Response.json({ value: status, browserAction: "/api/subscriptions/browser?id=00000000-0000-4000-8000-000000000001" }); }
+  if (command.url === "http://127.0.0.1:1/auth/callback?state=wrong") return Response.json({ value: { error: rejected } });
+  status = { ...connected(), pending: false }; return Response.json({ value: status });
+ };
+ async function paste(address: string) {
+  const input = document.querySelector<HTMLInputElement>("#chatgpt-callback-address")! as unknown as Record<string, { onChange(event: unknown): void }>;
+  // react-dom loads before this file's DOM exists, so it never listens for native input events here.
+  await act(async () => input[Object.keys(input).find((key) => key.startsWith("__reactProps"))!]!.onChange({ target: { value: address } }));
+  assert(!button("Finish sign-in", byTest("chatgpt-callback")).disabled);
+  await act(async () => byTest("chatgpt-callback").dispatchEvent(new window.Event("submit", { bubbles: true, cancelable: true })));
+ }
+ await mount(); await begin();
+ assert(byTest("chatgpt-privacy-notice").textContent?.endsWith("If your browser is on another device, finish with the address it ends on."));
+ assert.equal(document.querySelector('label[for="chatgpt-callback-address"]')?.textContent, label);
+ await paste("http://127.0.0.1:1/auth/callback?state=wrong");
+ assert.equal(document.querySelector('[data-testid="chatgpt-account-dialog"] [role="alert"]')?.textContent, rejected);
+ assert(byTest("chatgpt-callback"), "a rejected address keeps the attempt open for another paste");
+ await paste("http://127.0.0.1:1/auth/callback?state=right&code=c");
+ assert.deepEqual(posts.filter((p) => p.op === "callback").map((p) => p.url), ["http://127.0.0.1:1/auth/callback?state=wrong", "http://127.0.0.1:1/auth/callback?state=right&code=c"]);
+ assert(!document.querySelector('[data-testid="chatgpt-account-dialog"]')); assert(button("Manage…"));
+ await act(async () => root!.unmount()); host?.remove(); root = undefined;
+ fixture(disconnected(), { callback: async () => assert.fail("desktop has no paste-back") }); await mount(); await begin();
+ assert(document.body.textContent?.includes("Waiting for browser sign-in")); assert(!document.querySelector('[data-testid="chatgpt-callback"]'));
+});
+
 test("browser-only sign-in is disabled; foreground toolbar has no plan badge or background action", async () => {
  await mount(); assert((byTest("chatgpt-login") as HTMLButtonElement).disabled); await click(byTest("chatgpt-login")); assert(!document.querySelector('[data-testid="chatgpt-account-dialog"]'));
  await act(async () => root!.unmount()); host?.remove(); root = undefined;

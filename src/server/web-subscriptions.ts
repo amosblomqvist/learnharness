@@ -5,7 +5,7 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import { randomUUID } from "node:crypto";
 import path from "node:path";
 import { AUTH_FILE } from "../../config.ts";
-import { createChatGPT, fileStore } from "../../electron/chatgpt.cjs";
+import { createChatGPT, fileStore, publicError } from "../../electron/chatgpt.cjs";
 import { createSubscriptions } from "../../electron/subscriptions.cjs";
 import { chatGPTControl } from "../../electron/chatgpt-ipc.cjs";
 import { subscriptionControl } from "../../electron/subscription-ipc.cjs";
@@ -61,13 +61,19 @@ export function createWebSubscriptionOwner(options: {
 		directory: options.directory, sdk: options.sdk, loadSDK, openExternal,
 		onChange: (snapshot: NativeSubscriptionSnapshot) => notify("lh:subscriptions", { channel: "lh:subscriptions", op: "changed", snapshot }),
 	});
+	// Web only, never in the desktop IPC: desktop sign-in always returns to its own 127.0.0.1 listener.
+	const chatGPTCallback = async (url: unknown) => {
+		if (typeof url !== "string" || url.length > 4096) return { error: "Unsupported ChatGPT control." };
+		try { return await chatgpt.completeLogin(url); }
+		catch (err) { return { error: publicError(err) }; }
+	};
 	return {
 		chatgpt, native,
 		async control(providerId: string, command: Record<string, unknown>, origin: string) {
 			const targets: string[] = [];
-			const value = await launches.run(targets, () => providerId === "chatgpt"
-				? chatGPTControl(command, chatgpt)
-				: subscriptionControl({ ...command, providerId }, native));
+			const value = await launches.run(targets, () => providerId !== "chatgpt"
+				? subscriptionControl({ ...command, providerId }, native)
+				: command.op === "callback" ? chatGPTCallback(command.url) : chatGPTControl(command, chatgpt));
 			let browserAction: string | undefined;
 			const target = targets[0];
 			if (target) {

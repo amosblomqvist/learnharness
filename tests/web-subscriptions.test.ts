@@ -88,6 +88,26 @@ test("HTTP controls reject cross-origin, simple-form and private credential oper
 	delete process.env.LH_DESKTOP_SERVER; delete process.env.LH_DESKTOP_API_SECRET;
 });
 
+test("ChatGPT paste-back is a web control only; the shared desktop IPC dispatcher refuses it", async () => {
+	const response = await subscriptionControlsResponse(request({ providerId: "chatgpt", op: "callback", url: "http://127.0.0.1:1/auth/callback?state=x&code=y" }));
+	assert.equal(response.status, 200);
+	assert.match((await response.json()).value.error, /not from this ChatGPT sign-in/);
+	for (const url of [7, "x".repeat(4097)]) assert.deepEqual((await (await subscriptionControlsResponse(request({ providerId: "chatgpt", op: "callback", url }))).json()).value, { error: "Unsupported ChatGPT control." });
+	const { chatGPTControl } = require("../electron/chatgpt-ipc.cjs");
+	assert.deepEqual(await chatGPTControl({ op: "callback", url: "http://127.0.0.1:1/auth/callback" }, {}), { error: "Unsupported ChatGPT control." });
+});
+
+test("browser actions accept same-origin Fetch Metadata, or a same-origin Referer when plain HTTP omits it", async () => {
+	const origin = "http://192.168.1.10:3000";
+	const open = (headers: Record<string, string>) => subscriptionBrowserResponse(new Request(`${origin}/api/subscriptions/browser?id=00000000-0000-4000-8000-000000000001`, { headers: { host: new URL(origin).host, ...headers } }));
+	// 410 means the request passed the navigation gate and only the fixture action id is unknown.
+	assert.equal((await open({ "sec-fetch-site": "same-origin" })).status, 410);
+	assert.equal((await open({ referer: `${origin}/settings` })).status, 410);
+	for (const headers of <Record<string, string>[]>[{}, { referer: "http://evil.invalid/" }, { referer: "https://192.168.1.10:3000/" }, { referer: "not a url" }, { "sec-fetch-site": "cross-site", referer: `${origin}/` }, { "sec-fetch-site": "same-site", referer: `${origin}/` }, { "sec-fetch-site": "none", referer: `${origin}/` }]) {
+		assert.equal((await open(headers)).status, 403, JSON.stringify(headers));
+	}
+});
+
 function fakeSDK(login: (id: string, interaction: ProviderAuthInteraction) => Promise<OAuthCredential>) {
 	const factory = (id: string) => {
 		const provider = id === "xai" ? xaiProvider() : githubCopilotProvider();

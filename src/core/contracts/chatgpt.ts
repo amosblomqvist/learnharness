@@ -23,5 +23,7 @@ export interface ChatGPTControlBridge {
 	disconnect(id: string): Promise<ChatGPTStatus>;
 	logout(id: string): Promise<ChatGPTStatus>;
 	consent(enabled: boolean): Promise<ChatGPTStatus>;
+	/** Web only: finish the pending sign-in with the 127.0.0.1 address a remote browser ended on. */
+	callback?(url: string): Promise<ChatGPTStatus>;
 	onChange(callback: () => void): () => void;
 }
