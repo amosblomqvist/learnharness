@@ -100,6 +100,7 @@ export function estimateMessageTokens(message: LhMessage | AgentMessage): number
 		}
 	} else {
 		chars += textCharsOfContent(content);
+		if (message.role === "user") chars += ((message as LhMessage & { attachmentContext?: string }).attachmentContext?.length ?? 0);
 		if (message.role === "system") {
 			const system = message as SystemMessage;
 			for (const section of Object.values(system.sections ?? {})) chars += section?.length ?? 0;
@@ -311,7 +312,14 @@ export function serializeForSummary(messages: readonly LhMessage[]): string {
 	for (const m of messages) {
 		const role = (m as { role?: string }).role;
 		if (role === "user") {
-			lines.push(`[LEARNER] ${(m as { content: string }).content}`);
+			const user = m as LhMessage & { content: unknown; attachments?: Array<{ name: string }>; attachmentContext?: string };
+			const content = typeof user.content === "string"
+				? user.content
+				: Array.isArray(user.content)
+					? user.content.filter((block) => block && typeof block === "object" && (block as { type?: string }).type === "text").map((block) => (block as { text?: string }).text ?? "").join("\n")
+					: "";
+			const names = user.attachments?.map((attachment) => `[ATTACHMENT: ${attachment.name}]`).join("\n") ?? "";
+			lines.push(`[LEARNER] ${[content, names, user.attachmentContext].filter(Boolean).join("\n")}`);
 		} else if (role === "assistant") {
 			const assistant = m as AssistantMessage;
 			const blocks: string[] = [];

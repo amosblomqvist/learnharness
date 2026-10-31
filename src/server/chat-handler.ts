@@ -62,6 +62,36 @@ import {
 } from "../core/input-events.ts";
 import { steerDelivered } from "../core/contracts.ts";
 import type {CallUsage} from "../core/contracts.ts";
+import { prepareChatAttachments } from "./chat-attachments.ts";
+
+const MAX_CHAT_REQUEST_BYTES = 15 * 1024 * 1024;
+
+async function readChatRequestJson(req: Request): Promise<unknown> {
+	const length = Number(req.headers.get("content-length"));
+	if (Number.isFinite(length) && length > MAX_CHAT_REQUEST_BYTES) throw new RangeError("Chat request body is too large");
+	if (!req.body) return null;
+	const reader = req.body.getReader();
+	const chunks: Uint8Array[] = [];
+	let total = 0;
+	try {
+		while (true) {
+			const { done, value } = await reader.read();
+			if (done) break;
+			total += value.byteLength;
+			if (total > MAX_CHAT_REQUEST_BYTES) {
+				await reader.cancel();
+				throw new RangeError("Chat request body is too large");
+			}
+			chunks.push(value);
+		}
+	} finally {
+		reader.releaseLock();
+	}
+	const bytes = new Uint8Array(total);
+	let offset = 0;
+	for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength; }
+	return JSON.parse(new TextDecoder().decode(bytes));
+}
 
 /**
  * One chat turn over the server-owned native record. Framework-free (plain
@@ -168,8 +198,11 @@ export async function handleChatRequest(
 ): Promise<Response> {
 	let body: { chatId?: unknown; input?: unknown };
 	try {
-		body = await req.json();
-	} catch {
+		const parsed = await readChatRequestJson(req);
+		if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new SyntaxError("Request JSON must be an object");
+		body = parsed as typeof body;
+	} catch (err) {
+		if (err instanceof RangeError) return Response.json({ error: "Chat request body is too large" }, { status: 413 });
 		return Response.json({ error: "Invalid JSON body" }, { status: 400 });
 	}
 	const chatId = typeof body.chatId === "string" ? body.chatId : "";
@@ -199,6 +232,21 @@ export async function handleChatInput(
 	let record = stores.chatStore.getChat(chatId);
 	if (!record) {
 		return Response.json({ error: "Unknown chat" }, { status: 404 });
+	}
+	if (input.type === "text") {
+		try { input = parseChatInput(input); }
+		catch (err) {
+			if (err instanceof ChatInputError) return Response.json({ error: err.message }, { status: 400 });
+			throw err;
+		}
+	}
+	let preparedAttachments: Awaited<ReturnType<typeof prepareChatAttachments>> = [];
+	if (input.type === "text" && input.attachments?.length) {
+		try { preparedAttachments = await prepareChatAttachments(input.attachments); }
+		catch (err) {
+			if (err instanceof ChatInputError) return Response.json({ error: err.message }, { status: 400 });
+			throw err;
+		}
 	}
 
 	// Refuse an ineligible Retry before catalog refresh, compaction, or any
@@ -276,6 +324,9 @@ export async function handleChatInput(
 	let conversationEngine: PiEngine;
 	try { conversationEngine = piEngineForSpec(conversation, () => callPurpose.background, lifecycle, retentionForSlot("strong")); }
 	catch { return Response.json({ error: conversation.provider === "chatgpt" ? chatGPTStreamError("model catalog") : isSubscriptionProvider(conversation.provider) ? nativeSubscriptionError(conversation.provider, "model catalog") : "The selected model is unavailable." }, { status: 503 }); }
+	if (preparedAttachments.some((attachment) => attachment.mimeType.startsWith("image/")) && !conversationEngine.model.input.includes("image")) {
+		return Response.json({ error: "The selected model does not support image attachments." }, { status: 400 });
+	}
 	const modelIdForCompaction = `${conversationEngine.model.provider}:${conversationEngine.model.id}`;
 	await ensureCompacted(
 		{
@@ -320,7 +371,7 @@ export async function handleChatInput(
 		appends =
 			input.type === "steers"
 				? input.steers.filter((s) => !steerDelivered(record.messages, s.id))
-				: inputAppends(record, input);
+				: inputAppends(record, input, preparedAttachments);
 	} catch (err) {
 		if (err instanceof ChatInputError) {
 			return Response.json({ error: err.message }, { status: 400 });

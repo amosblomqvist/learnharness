@@ -25,6 +25,7 @@ import { MalformedQuestion } from "@/components/malformed-question";
 import { artifactRenderers } from "@/components/artifacts";
 import { SubagentSteerCard } from "@/components/artifacts/steer-card";
 import { ChatSessionComposer } from "@/components/composer";
+import { AttachmentPicker, AttachmentPreview, AttachmentTray, useAttachmentDraft } from "@/components/chat-attachments";
 import { useEnterSubmits } from "@/components/enter-submits";
 import { blurAfterPointerClick } from "@/components/focus-hygiene";
 import { dockStateKey } from "@/components/dock-state-key";
@@ -44,6 +45,7 @@ import {
 	textPartMessageId,
 	kbdEventForAction as kbdEventForChat,
 	type ChatInput,
+	type ChatAttachment,
 	type ChatSettings,
 	type LhMessage,
 	type ModelSlotName,
@@ -557,10 +559,12 @@ export function Chat({
 	// session's current phase.
 	const phases = useMemo(() => phaseTimeline(messages), [messages]);
 
+	const attachments = useAttachmentDraft();
+	const attachmentSending = useRef(false);
+	const [sendingAttachments, setSendingAttachments] = useState(false);
 	const [composerDraftRevision, setComposerDraftRevision] = useState(0);
 	/* The composer draft ref is synchronous, so sends and dictation flushes
-	 * read the latest text without a parent render per input event. Explicit
-	 * resets still bump a revision so the local field can sync. */
+	 * read the latest text without a parent render per input event. */
 	const textRef = useRef("");
 	const applyText = useCallback((v: string) => {
 		textRef.current = v;
@@ -1212,9 +1216,9 @@ export function Chat({
 		void dictation.finish().then(doSteerOrSend);
 	};
 	const doSend = () => {
-		if (busy || pending || compacting) return;
+		if (busy || pending || compacting || attachments.reading || attachmentSending.current) return;
 		const t = textRef.current.trim();
-		if (!t) return;
+		if (!t && !attachments.files.length) return;
 		if (zeroKeys) {
 			setSetupOpen(true);
 			return;
@@ -1222,6 +1226,22 @@ export function Chat({
 		if (selectedModelUnavailable(catalog, selectedModel)) {
 			openModelPicker();
 			return; // No optimistic send and no change to the learner's draft.
+		}
+		if (attachments.files.length) {
+			const files = attachments.files;
+			draftRef.current = null; // Attachment drafts stay visible through refusal.
+			attachmentSending.current = true;
+			setSendingAttachments(true);
+			void send({ type: "text", text: t, attachments: files }, () => {
+				attachments.accepted(files);
+				if (textRef.current.trim() === t) applyText("");
+				attachmentSending.current = false;
+				setSendingAttachments(false);
+			}).finally(() => {
+				attachmentSending.current = false;
+				setSendingAttachments(false);
+			});
+			return;
 		}
 		if (openingDraftRef.current !== null) {
 			deliverOpeningPrompt(t);
@@ -1243,6 +1263,10 @@ export function Chat({
 	 * plain send; a raced settle 409s and falls back to exactly that. */
 	const doSteerOrSend = () => {
 		if (pending || compacting) return;
+		if (attachments.files.length || attachments.reading) {
+			if (!busy) doSend();
+			return;
+		}
 		const t = textRef.current.trim();
 		if (!t) return;
 		if (busy) {
@@ -1520,6 +1544,7 @@ export function Chat({
 												<div className="lh-prose whitespace-pre-wrap text-foreground">
 													<PathText text={m.parts.filter((p) => p.type === "text").map((p) => p.text).join("\n")} />
 												</div>
+												<div className="flex flex-wrap gap-2">{m.parts.filter((part) => part.type === "attachment").map((part, index) => <AttachmentPreview key={index} file={part.data as ChatAttachment} />)}</div>
 											</div>
 									) : (
 									<Message from="assistant" className="max-w-full">
@@ -1734,6 +1759,8 @@ export function Chat({
 						)
 					}
 					composer={
+						<div>
+						<AttachmentTray files={attachments.files} error={attachments.error} reading={attachments.reading} waiting={busy && attachments.files.length > 0} disabled={sendingAttachments || attachments.reading} onRemove={attachments.remove} />
 						<ChatSessionComposer
 							// Stop aborts ANY in-flight turn (stream-reattach wave): the
 							// square renders while a reattached/wake turn runs too — the
@@ -1748,6 +1775,9 @@ export function Chat({
 							onStop={abortInFlightTurn}
 							sendAllowed={sendAllowed}
 							dictationActive={dictation.active}
+							hasAttachments={attachments.files.length > 0}
+							attachmentControl={<AttachmentPicker disabled={busy || !!pending || !!activeProblem || compacting || attachments.reading || sendingAttachments} onFiles={(files) => void attachments.add(files)} />}
+							sendBlocked={sendingAttachments || attachments.reading || (busy && attachments.files.length > 0)}
 							onEscape={dictation.active ? dictation.cancel : undefined}
 							// The pause affordance (owner round 16): the placeholder
 							// IS the hint — empty state, exactly where Enter-on-empty
@@ -1756,6 +1786,7 @@ export function Chat({
 							onNext={sendNext}
 							placeholder={nextReady ? "Ask anything, or press Enter for the next one." : undefined}
 						/>
+						</div>
 					}
 					onSubmitAnswer={(output) => {
 						if (!pending) return;

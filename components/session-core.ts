@@ -25,6 +25,7 @@ import {
 	newProblemDismissedMarker,
 	newThinkingMessage,
 	newUserMessage,
+	newAttachmentUserMessage,
 	projectView,
 	type ChatInput,
 	type LhMarkerMessage,
@@ -693,7 +694,7 @@ export class SessionModel {
 		// write-ahead will persist (inputAppends), with LOCAL ids so
 		// adoption can tell them from the record's absorbed copies.
 		const optimistic: LhMessage[] = [];
-		if (input.type === "text") optimistic.push({ ...newUserMessage(input.text), id: localId() });
+		if (input.type === "text") optimistic.push({ ...(input.attachments?.length ? newAttachmentUserMessage(input.text, input.attachments) : newUserMessage(input.text)), id: localId() });
 		else if (input.type === "thinking") {
 			// The practice submissions (2026-10-04): the marker lands
 			// optimistically — the card renders from its details the
@@ -735,7 +736,7 @@ export class SessionModel {
 				// flow parses them. Retry's 400s are ordinary user-facing
 				// guidance, so show their error text without JSON syntax.
 				let message = (await res.text()) || `The send failed (${res.status}).`;
-				if ((input.type === "retry" || input.type === "retry-question") && res.status === 400) {
+				if ((input.type === "retry" || input.type === "retry-question" || (input.type === "text" && input.attachments?.length)) && res.status === 400) {
 					try {
 						const refusal = JSON.parse(message) as { error?: unknown } | null;
 						if (typeof refusal?.error === "string" && refusal.error.length > 0) message = refusal.error;
