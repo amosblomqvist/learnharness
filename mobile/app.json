@@ -22,10 +22,7 @@
     "web": {
       "favicon": "./assets/favicon.png"
     },
-    "plugins": [
-      "expo-router",
-      "expo-font"
-    ],
+    "plugins": ["expo-router", "expo-font"],
     "scheme": "mandarintutor",
     "experiments": {
       "typedRoutes": true

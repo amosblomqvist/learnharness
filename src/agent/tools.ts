@@ -117,22 +117,24 @@ export const askUserQuestionTool: AgentTool<typeof askInputSchema> = {
 // from ONE canonical body so the variants cannot disagree; craft doctrine
 // stays in the prompts.
 
-/** The canonical example body (owner-approved content, 2026-10-12): a
- *  compact applied question whose fields exercise the escaping hazards —
- *  braced commands (\frac, \cos), inline and display math, newlines —
- *  while doubling as an exemplar of good craft: uniform options, stable
- *  values, reasoning (explanation) committed before correctAnswer.
- *  JSON.stringify renders the wire text, so the escaping the model sees
- *  is by construction the correct one. Exported for the description pins. */
+/** The canonical example body (owner-approved content, 2026-10-31, the
+ *  Mandarin repurpose — replaced the LaTeX chain-rule example): a compact
+ *  Taiwan Mandarin question whose fields exercise the escaping hazards a
+ *  model still meets (a newline inside a string) while doubling as an
+ *  exemplar of good craft: uniform options, stable values, reasoning
+ *  (explanation) committed before correctAnswer. Characters and pinyin are
+ *  plain text — no LaTeX anywhere. JSON.stringify renders the wire text, so
+ *  the escaping the model sees is by construction the correct one.
+ *  Exported for the description pins. */
 export const quizExampleBody = {
-	question: "A signal is $y=\\sin(2x)$ and $\\frac{dx}{dt}=3$. What is $\\frac{dy}{dt}$?",
+	question: "市政府把路拓寬以後，塞車 ___ 更嚴重了。 Which word fits?",
 	options: [
-		{ label: "$6\\cos(2x)$", value: "a" },
-		{ label: "$2\\cos(2x)$", value: "b" },
-		{ label: "$3\\cos(2x)$", value: "c" },
+		{ label: "反而 fǎn'ér", value: "a" },
+		{ label: "還是 háishi", value: "b" },
+		{ label: "其實 qíshí", value: "c" },
 	],
 	explanation:
-		"The phase changes twice as fast as $x$; multiply by the sine's slope:\n$$\n\\frac{dy}{dt}=\\cos(2x)\\cdot2\\cdot3=6\\cos(2x)\n$$",
+		"反而 marks an outcome opposite to what was expected: widening roads should ease traffic, but it got worse.\nThe others don't signal a reversal.",
 	correctAnswer: "a",
 };
 
@@ -163,10 +165,10 @@ function quizDescription(delta: { name: "quiz" | "probe"; nodeId: boolean; types
 	// Phase-correct shape: the teach example LEADS with the required pair
 	// (type, nodeId — the 2026-10-09 drop-order ruling); the probe example
 	// carries no phase metadata at all, exactly like the probe schema.
-	const example = delta.nodeId ? { type: "check" as const, nodeId: "chain-rule", ...quizExampleBody } : quizExampleBody;
+	const example = delta.nodeId ? { type: "check" as const, nodeId: "reversal-connectives", ...quizExampleBody } : quizExampleBody;
 	return (
 		base +
-		"\nExample arguments — copy the escaping exactly: inside JSON strings a LaTeX backslash is \\\\ and a newline is \\n.\n```json\n" +
+		"\nExample arguments — copy the escaping exactly: inside JSON strings a newline is \\n.\n```json\n" +
 		JSON.stringify(example, null, 2) +
 		"\n```" +
 		(delta.nodeId ? " The example's nodeId is illustrative — copy an exact id from this session's plan_init." : "")

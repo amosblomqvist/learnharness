@@ -1,6 +1,7 @@
 import { Fragment } from "react";
 import { View } from "react-native";
 import { useMarkdown, type MarkedStyles } from "react-native-marked";
+import { unwrapPlainMath } from "@/lib/plain-math";
 import { colors } from "@/lib/theme";
 
 const styles: MarkedStyles = {
@@ -12,7 +13,7 @@ const styles: MarkedStyles = {
 
 /** Inline markdown (no own scroll container), for use inside list rows. */
 export function Markdown({ text, color }: { text: string; color?: string }) {
-  const elements = useMarkdown(text, {
+  const elements = useMarkdown(unwrapPlainMath(text), {
     colorScheme: "light",
     styles: color ? { ...styles, text: { ...styles.text, color } } : styles,
   });

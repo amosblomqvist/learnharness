@@ -7,7 +7,7 @@ const sendToUserInput = Type.Object({
 	message: Type.String({
 		minLength: 1,
 		pattern: "\\S",
-		description: "The complete content to display to the learner. Markdown and LaTeX are supported.",
+		description: "The complete content to display to the learner. Markdown is supported; LaTeX is not.",
 	}),
 });
 
@@ -24,7 +24,7 @@ export const sendToUserTool: AgentTool<typeof sendToUserInput> = {
 		"There is no exception for short messages or the end of a turn.\n\n" +
 		"Ordinary response text may be converted into summarized thinking instead of reaching the learner. " +
 		"**Never rely on ordinary response text to communicate with the learner. Thinking is not delivery.**\n\n" +
-		"Put the complete message in `message`. Markdown and LaTeX are supported. " +
+		"Put the complete message in `message`. Markdown is supported; LaTeX is not. " +
 		"Do not duplicate it in ordinary response text.\n\n" +
 		"Question content still belongs in the appropriate question tool; send any accompanying teaching or " +
 		"commentary through `send_to_user` before calling that tool.\n\n" +

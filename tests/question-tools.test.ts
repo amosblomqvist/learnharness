@@ -215,7 +215,7 @@ describe("quiz tool descriptions carry the complete, phase-correct example", () 
 	it("the canonical body is schema-valid and authoring-clean (never ship a broken exemplar)", () => {
 		assert.deepEqual(quizInputProblems(quizExampleBody), []);
 		assert.equal(Value.Check(probeQuizInputSchema, quizExampleBody), true);
-		const teachExample = { type: "check", nodeId: "chain-rule", ...quizExampleBody };
+		const teachExample = { type: "check", nodeId: "reversal-connectives", ...quizExampleBody };
 		assert.equal(Value.Check(quizInputObject, teachExample), true);
 	});
 
@@ -228,20 +228,21 @@ describe("quiz tool descriptions carry the complete, phase-correct example", () 
 		// The escaping exemplar must be VISIBLE as wire text — the runtime
 		// string carries literal double backslashes, exactly what the model
 		// must type inside JSON.
-		assert.ok(desc.includes("A signal is $y=\\\\sin(2x)$"), "LaTeX command backslash shows doubled");
-		assert.ok(desc.includes("a LaTeX backslash is \\\\ and a newline is \\n"), "the one-line escaping hint");
+		assert.ok(desc.includes("反而 fǎn'ér"), "the Mandarin example: characters + pinyin as plain text");
+		assert.ok(!desc.includes("$"), "no LaTeX delimiters anywhere in the example");
+		assert.ok(desc.includes("inside JSON strings a newline is \\n"), "the one-line escaping hint");
 		assert.ok(!desc.includes("nodeId"), "probe example carries no phase metadata");
 	});
 
 	it("quiz: the required pair leads the example, with the plan-id caveat", () => {
 		const chatId = newChat("Teacher: description example");
 		const desc = teachQuizToolFor({ chatId, chatStore }).description;
-		const teachExample = { type: "check", nodeId: "chain-rule", ...quizExampleBody };
+		const teachExample = { type: "check", nodeId: "reversal-connectives", ...quizExampleBody };
 		assert.ok(desc.includes("```json\n" + JSON.stringify(teachExample, null, 2) + "\n```"));
 		// The 2026-10-09 drop-order ruling: type+nodeId LEAD the object —
 		// fields generated first get dropped least.
 		assert.ok(
-			/```json\n\{\n {2}"type": "check",\n {2}"nodeId": "chain-rule",/.test(desc),
+			/```json\n\{\n {2}"type": "check",\n {2}"nodeId": "reversal-connectives",/.test(desc),
 			"type and nodeId lead the serialized example",
 		);
 		assert.ok(

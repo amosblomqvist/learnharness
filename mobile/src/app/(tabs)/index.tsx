@@ -2,7 +2,17 @@
 // lesson — POST /api/chats, then the chat screen sends the opening message.
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useRouter } from "expo-router";
-import { ActivityIndicator, FlatList, KeyboardAvoidingView, Platform, Pressable, RefreshControl, StyleSheet, Text, View } from "react-native";
+import {
+  ActivityIndicator,
+  FlatList,
+  KeyboardAvoidingView,
+  Platform,
+  Pressable,
+  RefreshControl,
+  StyleSheet,
+  Text,
+  View,
+} from "react-native";
 import type { ChatListItem } from "@core";
 import { Composer } from "@/components/Composer";
 import { stashOpening } from "@/lib/opening";
@@ -48,12 +58,19 @@ export default function LearnScreen() {
           )
         }
         renderItem={({ item }) => (
-          <Pressable style={styles.row} onPress={() => router.push({ pathname: "/chat/[id]", params: { id: item.id } })}>
+          <Pressable
+            style={styles.row}
+            onPress={() => router.push({ pathname: "/chat/[id]", params: { id: item.id } })}
+          >
             <Text style={styles.title} numberOfLines={1}>
               {item.title}
             </Text>
             <Text style={styles.meta}>
-              {item.busy ? "Working…" : item.pendingQuestion ? "Question waiting" : new Date(item.updatedAt).toLocaleDateString()}
+              {item.busy
+                ? "Working…"
+                : item.pendingQuestion
+                  ? "Question waiting"
+                  : new Date(item.updatedAt).toLocaleDateString()}
             </Text>
           </Pressable>
         )}
@@ -71,7 +88,13 @@ const styles = StyleSheet.create({
   empty: { marginTop: space.xl, textAlign: "center", color: colors.muted, paddingHorizontal: space.lg },
   error: { color: colors.danger },
   startError: { paddingHorizontal: space.lg },
-  row: { paddingHorizontal: space.lg, paddingVertical: space.md, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border, gap: 2 },
+  row: {
+    paddingHorizontal: space.lg,
+    paddingVertical: space.md,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: colors.border,
+    gap: 2,
+  },
   title: { fontSize: 16, color: colors.text },
   meta: { fontSize: 13, color: colors.muted },
 });

@@ -4,7 +4,16 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Stack, useLocalSearchParams } from "expo-router";
 import { useEffect, useRef } from "react";
-import { ActivityIndicator, FlatList, KeyboardAvoidingView, Platform, Pressable, StyleSheet, Text, View } from "react-native";
+import {
+  ActivityIndicator,
+  FlatList,
+  KeyboardAvoidingView,
+  Platform,
+  Pressable,
+  StyleSheet,
+  Text,
+  View,
+} from "react-native";
 import { findPendingToolCall, pendingQuestionOf } from "@core";
 import { Composer } from "@/components/Composer";
 import { MessageView } from "@/components/MessageView";
@@ -66,7 +75,11 @@ function ChatSession({ chatId, record }: { chatId: string; record: ChatRecord })
   const list = useRef<FlatList>(null);
 
   return (
-    <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === "ios" ? "padding" : undefined} keyboardVerticalOffset={90}>
+    <KeyboardAvoidingView
+      style={styles.flex}
+      behavior={Platform.OS === "ios" ? "padding" : undefined}
+      keyboardVerticalOffset={90}
+    >
       <FlatList
         ref={list}
         style={styles.flex}
@@ -105,6 +118,13 @@ const styles = StyleSheet.create({
   center: { flex: 1, marginTop: space.xl, textAlign: "center" },
   spinner: { marginVertical: space.md },
   error: { color: colors.danger },
-  errorBar: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: space.md, padding: space.md, backgroundColor: "#FEF2F2" },
+  errorBar: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: space.md,
+    padding: space.md,
+    backgroundColor: "#FEF2F2",
+  },
   retry: { color: colors.accent, fontWeight: "600" },
 });

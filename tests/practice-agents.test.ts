@@ -382,13 +382,14 @@ describe("practice prompt composition (own directory + the formatting appendix)"
 		assert.match(prober, /the verdict, his confidence, and his thinking field together set where the next question should sit/);
 	});
 
-	it("the SHARED formatting guide composes (owner, 2026-10-04 late): LaTeX delimiters in every setting", () => {
+	it("the SHARED formatting guide composes (Mandarin repurpose, 2026-10-31): never LaTeX, in every setting", () => {
 		const prompt = composeInstructions("practice");
-		// The standard delimiter law is shared by all three authoring agents.
+		// The no-LaTeX law is shared by all three authoring agents (the mobile
+		// client renders markdown only).
 		for (const agent of ["practice", "prober", "teacher"] as const) {
 			const instructions = composeInstructions(agent);
-			assert.ok(instructions.includes("Inline `$f(x)$`, display `$$` fenced on its own lines."));
-			assert.ok(!instructions.includes("NEVER `$` or `$$`"));
+			assert.ok(instructions.includes("Plain text and markdown only — NEVER LaTeX."));
+			assert.ok(!instructions.includes("Inline `$f(x)$`"));
 		}
 		assert.ok(prompt.indexOf("# The practice session") < prompt.indexOf("## Formatting"), "formatting rides as the appendix");
 	});

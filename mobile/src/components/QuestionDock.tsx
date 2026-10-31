@@ -29,6 +29,7 @@ import {
   type SelectMode,
 } from "@core";
 import { Markdown } from "@/components/Markdown";
+import { unwrapPlainMath } from "@/lib/plain-math";
 import { colors, radius, space } from "@/lib/theme";
 
 interface Props {
@@ -37,7 +38,11 @@ interface Props {
   onSubmit: (output: QuestionAnswerData) => void;
 }
 
-function questionData(tool: string, toolCallId: string, input: QuizToolInput | AskToolInput | ExplainToolInput): QuestionData {
+function questionData(
+  tool: string,
+  toolCallId: string,
+  input: QuizToolInput | AskToolInput | ExplainToolInput,
+): QuestionData {
   const kind = toolQuestionKind(tool);
   const quizInput = kind === "quiz" ? (input as QuizToolInput) : null;
   const askInput = kind === "ask" ? (input as AskToolInput) : null;
@@ -53,7 +58,9 @@ function questionData(tool: string, toolCallId: string, input: QuizToolInput | A
           ? "multi-select"
           : "single-select"
         : "text";
-  const options = normalizeOptions((quizInput?.options ?? askInput?.options ?? []) as { label: string; value?: string }[]);
+  const options = normalizeOptions(
+    (quizInput?.options ?? askInput?.options ?? []) as { label: string; value?: string }[],
+  );
   const ordered = kind === "quiz" && options.length > 0 ? shuffleOptions(options, seededRandom(toolCallId)) : options;
   const q: QuestionData = {
     id: toolCallId,
@@ -110,9 +117,13 @@ export function QuestionDock({ pending, disabled, onSubmit }: Props) {
 
   return (
     <View style={styles.dock}>
-      <ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled">
+      <ScrollView
+        style={styles.scroll}
+        contentContainerStyle={styles.scrollContent}
+        keyboardShouldPersistTaps="handled"
+      >
         <Markdown text={qd.question} />
-        {qd.context ? <Text style={styles.context}>{qd.context}</Text> : null}
+        {qd.context ? <Text style={styles.context}>{unwrapPlainMath(qd.context)}</Text> : null}
 
         {qd.mode !== "text" && (
           <View style={styles.options}>
@@ -135,14 +146,22 @@ export function QuestionDock({ pending, disabled, onSubmit }: Props) {
               />
             )}
             {kind === "ask" && sel.otherSelected && (
-              <TextInput style={styles.input} value={other} onChangeText={setOther} placeholder="Your answer" multiline />
+              <TextInput
+                style={styles.input}
+                value={other}
+                onChangeText={setOther}
+                placeholder="Your answer"
+                multiline
+              />
             )}
             {kind === "quiz" && (
               <OptionRow
                 label="I don't know"
                 multi={false}
                 selected={sel.dontKnow}
-                onPress={() => setSel((prev) => ({ ...prev, selected: new Set(), otherSelected: false, dontKnow: !prev.dontKnow }))}
+                onPress={() =>
+                  setSel((prev) => ({ ...prev, selected: new Set(), otherSelected: false, dontKnow: !prev.dontKnow }))
+                }
               />
             )}
           </View>
@@ -168,9 +187,21 @@ export function QuestionDock({ pending, disabled, onSubmit }: Props) {
         )}
 
         {qd.mode === "text" ? (
-          <TextInput style={[styles.input, styles.tall]} value={text} onChangeText={setText} placeholder="Your answer" multiline />
+          <TextInput
+            style={[styles.input, styles.tall]}
+            value={text}
+            onChangeText={setText}
+            placeholder="Your answer"
+            multiline
+          />
         ) : (
-          <TextInput style={styles.input} value={thinking} onChangeText={setThinking} placeholder="Your thinking (optional)" multiline />
+          <TextInput
+            style={styles.input}
+            value={thinking}
+            onChangeText={setThinking}
+            placeholder="Your thinking (optional)"
+            multiline
+          />
         )}
       </ScrollView>
 
@@ -186,7 +217,13 @@ export function QuestionDock({ pending, disabled, onSubmit }: Props) {
   );
 }
 
-function OptionRow(props: { label: string; description?: string; multi: boolean; selected: boolean; onPress: () => void }) {
+function OptionRow(props: {
+  label: string;
+  description?: string;
+  multi: boolean;
+  selected: boolean;
+  onPress: () => void;
+}) {
   return (
     <Pressable
       onPress={props.onPress}
@@ -194,17 +231,24 @@ function OptionRow(props: { label: string; description?: string; multi: boolean;
       accessibilityRole={props.multi ? "checkbox" : "radio"}
       accessibilityState={{ checked: props.selected }}
     >
-      <View style={[styles.mark, props.multi ? styles.markSquare : styles.markRound, props.selected && styles.markOn]} />
+      <View
+        style={[styles.mark, props.multi ? styles.markSquare : styles.markRound, props.selected && styles.markOn]}
+      />
       <View style={styles.optionBody}>
-        <Text style={styles.optionLabel}>{props.label}</Text>
-        {props.description ? <Text style={styles.optionDesc}>{props.description}</Text> : null}
+        <Text style={styles.optionLabel}>{unwrapPlainMath(props.label)}</Text>
+        {props.description ? <Text style={styles.optionDesc}>{unwrapPlainMath(props.description)}</Text> : null}
       </View>
     </Pressable>
   );
 }
 
 const styles = StyleSheet.create({
-  dock: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border, backgroundColor: colors.bg, maxHeight: "65%" },
+  dock: {
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: colors.border,
+    backgroundColor: colors.bg,
+    maxHeight: "65%",
+  },
   scroll: { flexGrow: 0 },
   scrollContent: { padding: space.lg, gap: space.md },
   context: { color: colors.muted, fontSize: 14 },
@@ -229,7 +273,14 @@ const styles = StyleSheet.create({
   label: { fontSize: 13, color: colors.muted, fontWeight: "600" },
   confidence: { gap: space.sm },
   stops: { flexDirection: "row", gap: space.xs },
-  stop: { flex: 1, paddingVertical: space.sm, borderRadius: radius.sm, borderWidth: 1, borderColor: colors.border, alignItems: "center" },
+  stop: {
+    flex: 1,
+    paddingVertical: space.sm,
+    borderRadius: radius.sm,
+    borderWidth: 1,
+    borderColor: colors.border,
+    alignItems: "center",
+  },
   stopActive: { backgroundColor: colors.accent, borderColor: colors.accent },
   stopText: { fontSize: 13, color: colors.text },
   stopTextActive: { color: colors.accentText, fontWeight: "600" },
@@ -243,7 +294,14 @@ const styles = StyleSheet.create({
     minHeight: 44,
   },
   tall: { minHeight: 96, textAlignVertical: "top" },
-  submit: { margin: space.lg, marginTop: 0, backgroundColor: colors.accent, borderRadius: radius.md, paddingVertical: space.md, alignItems: "center" },
+  submit: {
+    margin: space.lg,
+    marginTop: 0,
+    backgroundColor: colors.accent,
+    borderRadius: radius.md,
+    paddingVertical: space.md,
+    alignItems: "center",
+  },
   submitDisabled: { opacity: 0.4 },
   submitText: { color: colors.accentText, fontSize: 16, fontWeight: "600" },
 });

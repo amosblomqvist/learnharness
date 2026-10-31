@@ -72,7 +72,7 @@ export function createPracticeGate(ctx: PracticeToolContext): PracticeGate {
 export const problemInputObject = Type.Object({
 	statement: Type.String({
 		description:
-			"REQUIRED — the problem as the learner sees it (markdown + LaTeX). Must be self-contained and " +
+			"REQUIRED — the problem as the learner sees it (markdown; no LaTeX). Must be self-contained and " +
 			"solvable from the session's material. NEVER announces the target proposition.",
 	}),
 	mode: Type.Union([Type.Literal("recall"), Type.Literal("discrimination"), Type.Literal("composition")], {

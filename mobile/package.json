@@ -7,6 +7,7 @@
     "@tanstack/react-query": "5.104.3",
     "expo": "~58.0.21",
     "expo-constants": "~58.0.14",
+    "expo-crypto": "~58.0.7",
     "expo-font": "~58.0.11",
     "expo-linking": "~58.0.15",
     "expo-router": "~58.0.28",
@@ -23,6 +24,7 @@
     "@types/react": "~19.3.0",
     "eslint": "^9.39.5",
     "eslint-config-expo": "~58.0.4",
+    "prettier": "3.9.10",
     "typescript": "~6.0.3"
   },
   "scripts": {
@@ -31,7 +33,9 @@
     "ios": "expo start --ios",
     "web": "expo start --web",
     "lint": "expo lint",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "format": "prettier --write .",
+    "format:check": "prettier --check ."
   },
   "private": true,
   "license": "AGPL-3.0-only"

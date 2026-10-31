@@ -5,6 +5,7 @@ import { memo } from "react";
 import { StyleSheet, Text, View } from "react-native";
 import { QUESTION_TOOLS, toolActivityLabel, type LhViewMessage, type LhViewPart, type QuestionAnswerData } from "@core";
 import { Markdown } from "@/components/Markdown";
+import { unwrapPlainMath } from "@/lib/plain-math";
 import { colors, radius, space } from "@/lib/theme";
 
 const QUESTION_TOOL_SET = new Set<string>(QUESTION_TOOLS);
@@ -30,7 +31,13 @@ export const MessageView = memo(function MessageView({ message }: { message: LhV
       </View>
     );
   }
-  return <View style={styles.assistant}>{message.parts.map((part, i) => <PartView key={part.id ?? i} part={part} />)}</View>;
+  return (
+    <View style={styles.assistant}>
+      {message.parts.map((part, i) => (
+        <PartView key={part.id ?? i} part={part} />
+      ))}
+    </View>
+  );
 });
 
 function PartView({ part }: { part: LhViewPart }) {
@@ -59,8 +66,10 @@ function AnsweredCard({ answer }: { answer: QuestionAnswerData }) {
   return (
     <View style={styles.card}>
       <Markdown text={answer.questionText} />
-      <Text style={styles.cardAnswer}>Your answer: {picked}</Text>
-      {verdict && <Text style={[styles.cardVerdict, { color: answer.correct ? colors.success : colors.danger }]}>{verdict}</Text>}
+      <Text style={styles.cardAnswer}>Your answer: {unwrapPlainMath(picked)}</Text>
+      {verdict && (
+        <Text style={[styles.cardVerdict, { color: answer.correct ? colors.success : colors.danger }]}>{verdict}</Text>
+      )}
       {answer.explanation ? <Markdown text={answer.explanation} color={colors.muted} /> : null}
     </View>
   );
@@ -68,11 +77,23 @@ function AnsweredCard({ answer }: { answer: QuestionAnswerData }) {
 
 const styles = StyleSheet.create({
   userRow: { flexDirection: "row", justifyContent: "flex-end", paddingHorizontal: space.lg, paddingVertical: space.sm },
-  userBubble: { maxWidth: "85%", backgroundColor: colors.userBubble, borderRadius: radius.lg, paddingHorizontal: space.md, paddingVertical: space.sm },
+  userBubble: {
+    maxWidth: "85%",
+    backgroundColor: colors.userBubble,
+    borderRadius: radius.lg,
+    paddingHorizontal: space.md,
+    paddingVertical: space.sm,
+  },
   userText: { color: colors.userText, fontSize: 16, lineHeight: 22 },
   assistant: { paddingHorizontal: space.lg, paddingVertical: space.sm, gap: space.sm },
   thinking: { color: colors.muted, fontStyle: "italic" },
-  chip: { alignSelf: "flex-start", backgroundColor: colors.surface, borderRadius: radius.sm, paddingHorizontal: space.sm, paddingVertical: 2 },
+  chip: {
+    alignSelf: "flex-start",
+    backgroundColor: colors.surface,
+    borderRadius: radius.sm,
+    paddingHorizontal: space.sm,
+    paddingVertical: 2,
+  },
   chipText: { color: colors.muted, fontSize: 12 },
   card: { borderWidth: 1, borderColor: colors.border, borderRadius: radius.md, padding: space.md, gap: space.sm },
   cardAnswer: { color: colors.text, fontSize: 14 },

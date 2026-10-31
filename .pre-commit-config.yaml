@@ -1,0 +1,46 @@
+# Pre-commit checks (https://pre-commit.com). Setup once per clone:
+#   pre-commit install
+# Run on everything:  pre-commit run --all-files
+#
+# Root: the existing ESLint (import law) + typecheck, no formatter.
+# mobile/: Prettier (rewrites staged files; re-stage and commit again),
+# expo lint and tsc. mobile also re-checks when the shared code it imports
+# (src/core, components/session-core.ts) changes.
+repos:
+  - repo: local
+    hooks:
+      - id: root-eslint
+        name: root eslint
+        entry: node_modules/.bin/eslint
+        language: system
+        files: \.(js|mjs|cjs|ts|tsx)$
+        exclude: ^mobile/
+
+      - id: root-typecheck
+        name: root typecheck
+        entry: npm run typecheck
+        language: system
+        files: \.(ts|tsx)$
+        exclude: ^mobile/
+        pass_filenames: false
+
+      - id: mobile-prettier
+        name: mobile prettier
+        entry: mobile/node_modules/.bin/prettier --write --ignore-unknown --ignore-path mobile/.prettierignore
+        language: system
+        files: ^mobile/
+        exclude: \.md$
+
+      - id: mobile-lint
+        name: mobile expo lint
+        entry: bash -c 'cd mobile && npx expo lint'
+        language: system
+        files: ^mobile/.*\.(js|ts|tsx)$
+        pass_filenames: false
+
+      - id: mobile-typecheck
+        name: mobile typecheck
+        entry: bash -c 'cd mobile && npx tsc --noEmit'
+        language: system
+        files: ^(mobile/.*\.(ts|tsx)|src/core/.*\.ts|components/session-core\.ts)$
+        pass_filenames: false

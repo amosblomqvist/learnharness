@@ -19,8 +19,20 @@ export function Composer({ placeholder, disabled, onSend }: Props) {
   };
   return (
     <View style={styles.row}>
-      <TextInput style={styles.input} value={text} onChangeText={setText} placeholder={placeholder} multiline editable={!disabled} />
-      <Pressable onPress={send} disabled={!canSend} style={[styles.send, !canSend && styles.sendDisabled]} accessibilityLabel="Send">
+      <TextInput
+        style={styles.input}
+        value={text}
+        onChangeText={setText}
+        placeholder={placeholder}
+        multiline
+        editable={!disabled}
+      />
+      <Pressable
+        onPress={send}
+        disabled={!canSend}
+        style={[styles.send, !canSend && styles.sendDisabled]}
+        accessibilityLabel="Send"
+      >
         <Ionicons name="arrow-up" size={20} color={colors.accentText} />
       </Pressable>
     </View>
@@ -49,6 +61,13 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: colors.text,
   },
-  send: { width: 44, height: 44, borderRadius: 22, backgroundColor: colors.accent, alignItems: "center", justifyContent: "center" },
+  send: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: colors.accent,
+    alignItems: "center",
+    justifyContent: "center",
+  },
   sendDisabled: { opacity: 0.4 },
 });

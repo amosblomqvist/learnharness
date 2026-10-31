@@ -1,3 +1,125 @@
+# Mandarin Tutor
+
+React Native + Expo (SDK 58) app for Android. Its backend is the LearnHarness
+Next.js server in the repo root. For now it's a single-user dev setup: the
+phone reaches `next dev` on your laptop over the home Wi-Fi.
+
+## Getting started
+
+### 1. Prerequisites
+
+- Node.js and npm (the same version you use for the repo root).
+- The harness working on the laptop: `npm install` in the repo root, API keys
+  in `auth.json` or `.env.local`, and models picked in the web UI settings.
+- For a real phone: the **Expo Go** app from the Play Store, with the phone
+  on the same Wi-Fi as the laptop.
+- For the emulator: the Android SDK in `~/Android/Sdk` with an AVD (e.g. `lh_pixel`).
+
+### 2. Start the harness (backend)
+
+From the repo root:
+
+```bash
+npm run dev            # http://localhost:3000, also reachable on the LAN
+```
+
+Check it from another device: `http://<laptop-LAN-IP>:3000` should load the web UI.
+
+### 3. Configure the app
+
+```bash
+cd mobile
+npm install
+cp .env.example .env.local
+```
+
+Edit `.env.local` and set your laptop's LAN IP:
+
+```
+EXPO_PUBLIC_SERVER_URL=http://192.168.0.139:3000
+```
+
+Find the IP with `ip -4 addr` (Linux). The value is baked in when the bundle
+is built, so after you change it, restart Expo with `npx expo start --clear`.
+
+### 4. Run the app
+
+```bash
+npx expo start
+```
+
+- **Phone:** open Expo Go and scan the QR code, or enter `exp://<laptop-LAN-IP>:8081`.
+- **Emulator:** start it with a window, then press `a` in the Expo terminal:
+
+  ```bash
+  ~/Android/Sdk/emulator/emulator -avd lh_pixel -no-audio -gpu swiftshader_indirect &
+  ```
+
+  `swiftshader_indirect` (software GPU) avoids the host-GPU crashes seen with the
+  default renderer, but it uses a lot of CPU. Close the emulator when you're done.
+
+You should see the Learn tab listing your harness sessions.
+
+### 5. Checks before committing
+
+Install the git hook once per clone (run from the repo root; needs
+[pre-commit](https://pre-commit.com)):
+
+```bash
+pre-commit install
+```
+
+Each commit then runs Prettier, `expo lint` and `tsc` on mobile, and ESLint
+and typecheck on root files (`.pre-commit-config.yaml`). When Prettier
+rewrites a file, the commit stops: re-stage the file and commit again.
+To run the checks by hand:
+
+```bash
+pre-commit run --all-files   # from the repo root
+npm run format               # in mobile/: format all files
+npx expo-doctor              # dependency / config sanity
+```
+
+Manual feature tests live in [TESTING.md](TESTING.md). Update it along with
+each feature.
+
+Add packages with `npx expo install <pkg>`, not `npm install`, so the
+versions match SDK 58. See `AGENTS.md` for Expo conventions.
+
+> **Warning:** don't run the repo-root `npm test` against your real data. Some
+> tests write into `./data` (chats, jobs, settings). Isolate them:
+> `LH_DATA_DIR=$(mktemp -d)/data LH_AUTH_FILE=$(mktemp -d)/auth.json npm test`
+
+## How it fits together
+
+- `src/app/`: screens (Expo Router). `(tabs)/` holds Learn, Review, Progress
+  and Profile; `chat/[id].tsx` is a lesson.
+- The chat reuses the web client's session state machine
+  (`../components/session-core.ts`) and the pure core (`../src/core`) through
+  the `@web/session-core` and `@core` aliases. Send, streaming (SSE), reattach
+  and question grading therefore follow the same protocol as the web UI.
+- `metro.config.js` lets Metro bundle those repo-root files. It maps the
+  server-only `node:crypto` to a stub that throws (`src/shims/node-crypto.ts`).
+- `src/lib/server.ts`: `apiFetch` / `apiJson` against `EXPO_PUBLIC_SERVER_URL`.
+
+## Troubleshooting
+
+- **"Something went wrong… [runtime not ready] … EventEmitter of undefined"**
+  right after the emulator boots: this is an Expo Go startup race, not a code
+  bug. Force-stop Expo Go and open the app again, or use Reload in the dev menu.
+- **Network request failed / empty list:** check that `npm run dev` is running,
+  that the IP in `.env.local` is current (restart with `--clear` after
+  changing it), and that the phone is on the same Wi-Fi with no firewall
+  blocking port 3000.
+- **Sending fails with "models not configured":** pick models in the web UI
+  (the model pickers next to Dictate, or Settings).
+- **VS Code freezes while the emulator runs:** CPU load from the software GPU.
+  Click "Wait", or use a real phone.
+
+---
+
+## Product notes
+
 Learn a language through the place you call home.
 
 This gives room to expand from Taipei to Paris, Tokyo, Berlin and beyond without changing the product concept.
