@@ -1448,6 +1448,21 @@ describe("adoptRecord — append-only adoption", () => {
 		assert.match(ids[2] ?? "", /^c_/, "the live streaming tail stays last (client slot id)");
 	});
 
+	it("drops a staged steer from the live tail when adoption returns the same server id", () => {
+		const m = model({ initialMessages: [userText("u1", "topic")] });
+		const steer = userText("steer_probe_chat_1", "plan the next step");
+		m.applyWireEvent({ type: "message_start", message: steer });
+		m.applyWireEvent({ type: "message_end", message: steer });
+		m.applyWireEvent({ type: "message_start", message: { role: "assistant", content: [{ type: "text", text: "planning" }] } });
+
+		m.adoptRecord([userText("u1", "topic"), steer]);
+
+		const ids = m.getState().nativeMessages.map((x) => x.id);
+		assert.deepEqual(ids.slice(0, 2), ["u1", "steer_probe_chat_1"], "the server-stamped steer appears exactly once");
+		assert.match(ids[2] ?? "", /^c_/, "the unrelated live assistant tail stays last");
+		assert.equal(ids.length, 3);
+	});
+
 	it("a missing base id (record rewrite) bails — the idle full sync is the net", () => {
 		const m = model({ initialMessages: [userText("u1", "a"), userText("u2", "b")] });
 		m.adoptRecord([userText("u2", "b")]); // u1 vanished: a rewrite, not an append
