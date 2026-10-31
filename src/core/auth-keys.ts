@@ -48,6 +48,13 @@ export const AUTH_KEYS: readonly AuthKeyInfo[] = [
 		description: "Web-search engine for the researcher sub-agent — the alternative to Tavily. Setting the key activates it.",
 		docsUrl: "https://brave.com/search/api/",
 	},
+	{
+		id: "DEEPSEEK_API_KEY",
+		label: "DeepSeek Search",
+		description:
+			"Web-search engine for the researcher sub-agent (DeepSeek's in-house Search API). The same key that serves DeepSeek models — setting it also makes DeepSeek available as a search engine.",
+		docsUrl: "https://api-docs.deepseek.com/guides/search/",
+	},
 ] as const;
 
 const AUTH_KEY_IDS: ReadonlySet<string> = new Set(AUTH_KEYS.map((k) => k.id));
@@ -177,6 +184,10 @@ export function validateKeyShape(id: string, rawValue: string): KeyShapeResult {
 		case "DEEPGRAM_API_KEY":
 			// No public format — the length floor only catches truncated pastes.
 			return nonEmpty(20);
+		case "DEEPSEEK_API_KEY":
+			// Shares the model-provider key family (sk-…) — the same paste
+			// hygiene as any provider key (see genericProviderKeyGuard).
+			return nonEmpty(12);
 		default:
 			return { ok: false, error: `unknown key "${id}" (supported: ${[...AUTH_KEY_IDS].join(", ")})` };
 	}

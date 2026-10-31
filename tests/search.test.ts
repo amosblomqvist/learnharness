@@ -2,8 +2,8 @@
  * The search engines (search port + model slots wave, 2026-09-20):
  * engine resolution (the owner's auto-detect decision — a key is enough,
  * no engine choice needed; explicit pin requires the key; no silent
- * fallback) + the Tavily/Brave adapters against a STUB fetch (never the
- * network — the wire shapes are verified against the published docs, and
+ * fallback) + the Tavily/Brave/DeepSeek adapters against a STUB fetch (never
+ * the network — the wire shapes are verified against the published docs, and
  * the tests pin those shapes).
  *
  * PURE + injected fetch — this file owns no fs.
@@ -11,7 +11,7 @@
 
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { resolveSearchEngineFor, tavilyProvider, braveProvider } from "../src/server/search.ts";
+import { resolveSearchEngineFor, tavilyProvider, braveProvider, deepseekProvider } from "../src/server/search.ts";
 
 describe("resolveSearchEngineFor (the auto-detect decision)", () => {
 	it("no keys: honestly unavailable, no default", () => {
@@ -129,5 +129,91 @@ describe("braveProvider (wire shape per Brave's dashboard docs, verified 2026-09
 			new Response("rate limited", { status: 429 }),
 		);
 		await assert.rejects(provider.search("q", 5), /Brave search API 429/);
+	});
+});
+
+describe("deepseekProvider (wire shape per api-docs.deepseek.com/guides/search)", () => {
+	/** POST https://api.deepseek.com/v1/tools/search — the same Bearer key
+	 *  family as the DeepSeek model API. `summary` is the model-facing
+	 *  field, so it wins over the display `snippet`. */
+	it("POSTs v1/tools/search with Bearer auth, count, and need_content:false", async () => {
+		const provider = deepseekProvider("sk-throwawaykey0000001", stubFetch(
+			{
+				results: [
+					{ title: "Example", url: "https://example.com/d", summary: "a model-ready\nsummary", snippet: "short" },
+					{ title: "Fallback", url: "https://example.com/e", snippet: "display only" },
+					{ title: "No URL", summary: "dropped" },
+				],
+			},
+			(url, init) => {
+				assert.equal(url, "https://api.deepseek.com/v1/tools/search");
+				assert.equal(init.method, "POST");
+				const headers = init.headers as Record<string, string>;
+				assert.equal(headers.authorization, "Bearer sk-throwawaykey0000001");
+				assert.equal(headers["content-type"], "application/json");
+				const body = JSON.parse(init.body as string);
+				assert.equal(body.query, "test query");
+				assert.equal(body.count, 5);
+				// Full page text would blow the researcher's context — web_fetch
+				// owns page bodies, so the adapter never asks for content.
+				assert.equal(body.need_content, false);
+			},
+		));
+		const hits = await provider.search("test query", 5);
+		assert.deepEqual(hits, [
+			{ title: "Example", url: "https://example.com/d", snippet: "a model-ready summary" },
+			{ title: "Fallback", url: "https://example.com/e", snippet: "display only" },
+		]);
+	});
+
+	it("clamps count to the API's 1–50 window", async () => {
+		const provider = deepseekProvider("sk-throwawaykey0000001", stubFetch({ results: [] }, (_url, init) => {
+			assert.equal(JSON.parse(init.body as string).count, 50);
+		}));
+		assert.deepEqual(await provider.search("q", 999), []);
+	});
+
+	it("surfaces the HTTP status on failure", async () => {
+		const provider = deepseekProvider("sk-throwawaykey0000001", async () =>
+			new Response("insufficient balance", { status: 402 }),
+		);
+		await assert.rejects(provider.search("q", 5), /DeepSeek search API 402: insufficient balance/);
+	});
+});
+
+describe("deepseek in the engine order (auto-detect)", () => {
+	it("a DeepSeek key alone activates the deepseek engine", () => {
+		const out = resolveSearchEngineFor(undefined, { deepseek: "sk-throwawaykey0000001" });
+		assert.ok(out.available);
+		assert.equal(out.engine, "deepseek");
+	});
+
+	it("DEEPSEEK_API_KEY sits LAST — a dedicated search key outranks it", () => {
+		// DEEPSEEK_API_KEY is also a model-provider key, so a chat-only
+		// DeepSeek user must not lose their Tavily/Brave engine to it.
+		const both = resolveSearchEngineFor(undefined, {
+			tavily: "tvly-throwaway-key-00001",
+			deepseek: "sk-throwawaykey0000001",
+		});
+		assert.equal(both.engine, "tavily");
+
+		const brave = resolveSearchEngineFor(undefined, {
+			brave: "brave-throwaway-key-00001",
+			deepseek: "sk-throwawaykey0000001",
+		});
+		assert.equal(brave.engine, "brave");
+	});
+
+	it("pinning deepseek requires its key — no silent fallback to another engine", () => {
+		const missing = resolveSearchEngineFor("deepseek", { tavily: "tvly-throwaway-key-00001" });
+		assert.ok(!missing.available);
+		assert.equal(missing.engine, null);
+		assert.match(missing.reason, /DEEPSEEK_API_KEY/);
+
+		const pinned = resolveSearchEngineFor("deepseek", {
+			tavily: "tvly-throwaway-key-00001",
+			deepseek: "sk-throwawaykey0000001",
+		});
+		assert.equal(pinned.engine, "deepseek");
 	});
 });

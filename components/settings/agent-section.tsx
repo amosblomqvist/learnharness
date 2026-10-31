@@ -87,7 +87,19 @@ const SLOT_META: Record<ModelSlotName, { label: string; roster: string }> = {
 };
 
 /** The search engines this wave ships (src/core/search.ts) + their labels. */
-const SEARCH_ENGINES = ["tavily", "brave"] as const;
+const SEARCH_ENGINES = ["tavily", "brave", "deepseek"] as const;
+
+/** The menu label + the auth-store key each engine reads (the single
+ *  mapping the key-presence fetch and the picker share). */
+const SEARCH_ENGINE_INFO: Record<
+	(typeof SEARCH_ENGINES)[number],
+	{ label: string; envVar: string }
+> = {
+	tavily: { label: "Tavily", envVar: "TAVILY_API_KEY" },
+	brave: { label: "Brave", envVar: "BRAVE_API_KEY" },
+	// The same key that serves DeepSeek models (Bearer, same account).
+	deepseek: { label: "DeepSeek", envVar: "DEEPSEEK_API_KEY" },
+};
 
 /** The owner's final toggleable-tool list (confirm with the user before
  *  changing — the Teacher stream settled this 2026-09-19). */
@@ -361,7 +373,7 @@ export function AgentSection({
 			.then((body: { keys: { id: string; present: boolean }[] }) => {
 				const present: Partial<Record<(typeof SEARCH_ENGINES)[number], boolean>> = {};
 				for (const id of SEARCH_ENGINES) {
-					const envVar = id === "tavily" ? "TAVILY_API_KEY" : "BRAVE_API_KEY";
+					const envVar = SEARCH_ENGINE_INFO[id].envVar;
 					present[id] = body.keys.some((k) => k.id === envVar && k.present);
 				}
 				setEngineKeys(present);
@@ -848,7 +860,7 @@ export function AgentSection({
 											setOpenMenu(null);
 										})}
 										{SEARCH_ENGINES.map((id) =>
-											engineOption(id, id === "tavily" ? "Tavily" : "Brave", engine === id, engineKeys[id] ?? false, () => {
+											engineOption(id, SEARCH_ENGINE_INFO[id].label, engine === id, engineKeys[id] ?? false, () => {
 												onSectionChange(composeSearchEngine(agent, id));
 												setOpenMenu(null);
 											}),

@@ -1,6 +1,6 @@
 /**
  * The search engines' server composition (search port + model slots wave,
- * 2026-09-20): the Tavily + Brave adapters behind the core port
+ * 2026-09-20): the Tavily + Brave + DeepSeek adapters behind the core port
  * (core/search.ts) + the live-engine resolution the settings UI and the
  * agent-layer tool both read.
  *
@@ -108,12 +108,58 @@ export function braveProvider(apiKey: string, fetchFn: FetchLike = fetch): Searc
 	};
 }
 
+/** DeepSeek: POST https://api.deepseek.com/v1/tools/search — Bearer auth in
+ *  the Authorization header, the same scheme (and the same key) as the
+ *  DeepSeek model API. VERIFIED against api-docs.deepseek.com/guides/search
+ *  (2026-10-17 launch): body {query, count (1–50), …}; response
+ *  {results: [{title, url, snippet (~100–200 chars), summary (~600–800
+ *  chars, model-facing), content, date, rerank_score, authority}]}.
+ *
+ *  `summary` is the model-ready field, so it BEATS the display snippet here
+ *  (Tavily/Brave have no such field — their one text field is the whole
+ *  hit). `need_content` stays false: full page text would blow the
+ *  researcher's context, and web_fetch owns page bodies. */
+export function deepseekProvider(apiKey: string, fetchFn: FetchLike = fetch): SearchProvider {
+	return {
+		id: "deepseek",
+		async search(query: string, count: number): Promise<SearchHit[]> {
+			const resp = await fetchFn("https://api.deepseek.com/v1/tools/search", {
+				method: "POST",
+				headers: {
+					"content-type": "application/json",
+					authorization: `Bearer ${apiKey}`,
+				},
+				body: JSON.stringify({ query, count: Math.min(count, 50), need_content: false }),
+				signal: AbortSignal.timeout(30_000),
+			});
+			if (!resp.ok) {
+				const body = await resp.text();
+				throw new Error(`DeepSeek search API ${resp.status}: ${body.slice(0, 200)}`);
+			}
+			const data = (await resp.json()) as {
+				results?: Array<{ title?: string; url?: string; summary?: string; snippet?: string }>;
+			};
+			return (data.results ?? [])
+				.filter((r) => typeof r.url === "string" && r.url)
+				.map((r) => ({
+					title: r.title ?? r.url ?? "",
+					url: r.url ?? "",
+					snippet: (r.summary || r.snippet || "").replace(/\n/g, " ").slice(0, 500),
+				}));
+		},
+	};
+}
+
 /** The engines this wave ships, in PREFERENCE order (both keys present,
  *  no explicit pin → the first live engine wins; owner decision
  *  2026-09-20: Tavily first — the AI-native search API the wave chose). */
 const ENGINE_ORDER: ReadonlyArray<{ id: SearchEngineId; envVar: string }> = [
 	{ id: "tavily", envVar: "TAVILY_API_KEY" },
 	{ id: "brave", envVar: "BRAVE_API_KEY" },
+	// LAST on purpose: DEEPSEEK_API_KEY is also a MODEL-provider key, so a
+	// user who only does chat through DeepSeek would otherwise lose their
+	// Tavily/Brave engine to auto-detection. Pinning it explicitly still wins.
+	{ id: "deepseek", envVar: "DEEPSEEK_API_KEY" },
 ];
 
 /** The engine's key (env-or-file; env wins) — null when the engine is
@@ -122,6 +168,15 @@ function engineKey(id: SearchEngineId): string | null {
 	const envVar = ENGINE_ORDER.find((e) => e.id === id)?.envVar;
 	const value = envVar ? keyValue(envVar) : undefined;
 	return value ? value : null;
+}
+
+/** Every engine's live key, in ENGINE_ORDER — the one shape
+ *  resolveSearchEngineFor takes (kept beside the order so a new engine
+ *  means one edit, not three). */
+function engineKeys(): Partial<Record<SearchEngineId, string | undefined>> {
+	const keys: Partial<Record<SearchEngineId, string | undefined>> = {};
+	for (const { id } of ENGINE_ORDER) keys[id] = engineKey(id) ?? undefined;
+	return keys;
 }
 
 /** Resolve the search state PURELY from the given pins (testable): the
@@ -138,7 +193,7 @@ export function resolveSearchEngineFor(
 			return {
 				available: false,
 				engine: null,
-				reason: `search engine is set to "${pinned}" but its API key is missing — set the ${pinned === "tavily" ? "TAVILY_API_KEY" : "BRAVE_API_KEY"} key`,
+				reason: `search engine is set to "${pinned}" but its API key is missing — set the ${ENGINE_ORDER.find((e) => e.id === pinned)?.envVar ?? pinned} key`,
 				key: null,
 			};
 		}
@@ -151,7 +206,7 @@ export function resolveSearchEngineFor(
 	return {
 		available: false,
 		engine: null,
-		reason: "no search engine configured — set a Tavily or Brave search API key",
+		reason: "no search engine configured — set a Tavily, Brave, or DeepSeek search API key",
 		key: null,
 	};
 }
@@ -162,10 +217,7 @@ export function resolveSearchEngineFor(
 export function searchStatus(): SearchStatus {
 	const { available, engine, reason } = resolveSearchEngineFor(
 		effectiveSettings().agent.search?.engine,
-		{
-			tavily: engineKey("tavily") ?? undefined,
-			brave: engineKey("brave") ?? undefined,
-		},
+		engineKeys(),
 	);
 	return { available, engine, reason };
 }
@@ -180,10 +232,14 @@ export function searchAvailable(): boolean {
  *  the tool layer (Teacher stream) calls this once per search, so key
  *  rotations take effect immediately. */
 export function searchProvider(): SearchProvider | null {
-	const resolved = resolveSearchEngineFor(effectiveSettings().agent.search?.engine, {
-		tavily: engineKey("tavily") ?? undefined,
-		brave: engineKey("brave") ?? undefined,
-	});
-	if (!resolved.available || !resolved.key) return null;
-	return resolved.engine === "tavily" ? tavilyProvider(resolved.key) : braveProvider(resolved.key);
+	const resolved = resolveSearchEngineFor(effectiveSettings().agent.search?.engine, engineKeys());
+	if (!resolved.available || !resolved.key || !resolved.engine) return null;
+	// The exhaustive factory map (a Record keys SearchEngineId — adding an
+	// engine without an adapter is a compile error, not a runtime surprise).
+	const factories: Record<SearchEngineId, (key: string) => SearchProvider> = {
+		tavily: tavilyProvider,
+		brave: braveProvider,
+		deepseek: deepseekProvider,
+	};
+	return factories[resolved.engine](resolved.key);
 }

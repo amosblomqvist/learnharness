@@ -74,6 +74,10 @@ describe("parseAgentSettingsBody", () => {
 		assert.ok(clear.ok);
 		assert.equal(clear.settings.search, undefined, "absent engine = back to auto-detect");
 		assert.equal(parseAgentSettingsBody({ search: { engine: "google" } }).ok, false);
+		// deepseek joined the engine catalog (the Search/Fetch API wave).
+		const ds = parseAgentSettingsBody({ search: { engine: "deepseek" } });
+		assert.ok(ds.ok);
+		assert.deepEqual(ds.settings.search, { engine: "deepseek" });
 		assert.equal(parseAgentSettingsBody({ search: "tavily" }).ok, false, "search must be an object");
 		assert.equal(parseAgentSettingsBody({ search: { engine: 1 } }).ok, false);
 	});
