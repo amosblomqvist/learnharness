@@ -6,7 +6,7 @@
  * components never import from the server band).
  */
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
-import type { BackgroundModelRole, ModelSlotName } from "../settings.ts";
+import type { BackgroundModelRole, ModelSlotName, ModelSlot } from "../settings.ts";
 
 /** One picker row: everything the UI shows about a model, projected from
  *  pi-ai's catalog. Costs are USD per 1M tokens (the same catalog, the same
@@ -21,9 +21,11 @@ export interface ModelCatalogEntry {
 	 * thinkingLevelMap — e.g. GLM-5.3-flash: low|high|max). The thinking
 	 * picker lists exactly these; anything else is a lie. */
 	supportedLevels: ThinkingLevel[];
-	cost: { input: number; output: number; cacheRead: number; cacheWrite: number };
-	contextWindow: number;
-	maxTokens: number;
+	/** Null when LearnHarness cannot estimate prices for this connection. */
+	cost: { input: number; output: number; cacheRead: number; cacheWrite: number } | null;
+	/** Null for native CLI aliases whose effective limits are session-specific. */
+	contextWindow: number | null;
+	maxTokens: number | null;
 }
 
 /** The conversation agents' resolved default (BYOK, owner 2026-09-22): the
@@ -47,10 +49,7 @@ export type RolePins = Record<
 /** One slot tier's RESOLVED pin (BYOK, owner 2026-09-22): NULL = the tier
  *  holds no model. The settings UI captions each slot row with it and the
  *  picker pre-fills from it. */
-export type SlotPins = Record<
-	ModelSlotName,
-	{ model: { provider: string; id: string }; thinkingLevel?: ThinkingLevel } | null
->;
+export type SlotPins = Record<ModelSlotName, (ModelSlot & { model: { provider: string; id: string } }) | null>;
 
 /** GET /api/models response. */
 export interface ModelCatalogResponse {
@@ -78,8 +77,8 @@ export interface ModelCatalogResponse {
 /** One row of the providers surface. */
 export interface CatalogProvider {
 	id: string;
-	/** The env var whose presence federates this provider in. */
+	/** The gating env var; empty for subscription and file-configured routes. */
 	envVar: string;
-	/** Whether that var is currently present (env or auth file). */
+	/** Whether credentials are present (and custom references resolve). */
 	keyPresent: boolean;
 }

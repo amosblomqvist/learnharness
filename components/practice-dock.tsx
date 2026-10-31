@@ -6,6 +6,7 @@ import { ToolContentResponse } from "@/components/ai-elements/message";
 import { Button } from "@/components/ui/button";
 import { joinDictation, useDictationTarget } from "@/components/dictation";
 import { useEnterSubmits } from "@/components/enter-submits";
+import { PathInput } from "@/components/path-input";
 import { cn } from "@/lib/utils";
 
 /**
@@ -121,11 +122,11 @@ export function PracticeDock({ problemCallId, input, expanded, onExpand, onSubmi
 				<div className="px-2.5 pt-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
 					YOUR THINKING
 				</div>
-				<textarea
+				<PathInput
 					value={thinking}
-					onChange={(e) => {
-						thinkingRef.current = e.target.value;
-						setThinking(e.target.value);
+					onValueChange={(value) => {
+						thinkingRef.current = value;
+						setThinking(value);
 					}}
 					onKeyDown={(e) => {
 						// Esc ends dictation — stopPropagation claims it (the
@@ -144,7 +145,6 @@ export function PracticeDock({ problemCallId, input, expanded, onExpand, onSubmi
 						}
 					}}
 					placeholder="Work here, think out loud."
-					rows={4}
 					className={cn(
 						"field-sizing-content lh-input max-h-64 min-h-16 w-full resize-none bg-transparent px-2.5 pb-2 outline-none placeholder:text-muted-foreground",
 					)}

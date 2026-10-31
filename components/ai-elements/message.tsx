@@ -355,6 +355,12 @@ export const streamdownPlugins = {
   math: createMathPlugin({ singleDollarTextMath: true }),
 } as unknown as PluginConfig;
 
+// Remend's incomplete-HTML heuristic mistakes `<b` in `$a<b$` for a
+// partial tag and deletes the remaining source before math can tokenize.
+// Preserve that text (unfinished prose HTML may show literally); Streamdown's
+// separate sanitization/hardening and all other Markdown repairs stay enabled.
+export const streamdownRemend = { htmlTags: false };
+
 export const MessageResponse = memo(
   ({ className, children, ...props }: MessageResponseProps) => {
     // Legacy backslash delimiters are converted in a single linear scan;
@@ -375,6 +381,7 @@ export const MessageResponse = memo(
         )}
         components={mdComponents}
         plugins={streamdownPlugins}
+        remend={streamdownRemend}
         {...props}
       >
         {content}
