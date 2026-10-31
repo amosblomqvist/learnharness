@@ -510,6 +510,20 @@ describe("probe-done card", () => {
 		assert.match(html, /modal logic basics/);
 	});
 
+	it("renders math in the strand, assessment, and summary", () => {
+		const html = renderToStaticMarkup(
+			<ProbeDoneCard part={{ state: "output-available", input: { assessment: {
+				strands: [{ strand: "Compare $x$", assessment: "Understands $y$" }],
+				summary: "Review\n\n$$\nz=1\n$$",
+			} }, output: { ok: true } }} />,
+		);
+		assert.equal((html.match(/class="katex"/g) ?? []).length, 3);
+		assert.ok(html.includes("katex-display"), "display math in the summary renders as display math");
+		assert.match(html, /Compare/);
+		assert.match(html, /Understands/);
+		assert.match(html, /Review/);
+	});
+
 	it("a REJECTED assessment (the stringified live shape) renders the retry note, never the garbage", () => {
 		// The exact live crash: assessment arrived as a string, zod rejected
 		// the call, the model retried — this dead part must not explode.
