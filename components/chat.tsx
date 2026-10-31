@@ -87,15 +87,14 @@ import {
 import { ReadingThinkingField } from "@/components/reading-thinking";
 import { currentUserThinkingOpen, setAllUserThinkingOpen } from "@/components/thinking-block";
 
-/** One width for everything: transcript, cards, and the bottom blob share this column. */
 /**
- * Width tokens (wave-5 reskin, owner decision): the teaching PROSE spans the
- * full session width with a thin px-6 margin; the composer/question DOCK is
- * deliberately narrower (~46rem centered) per the reference. Same ELEMENT,
- * same place — width polish only.
+ * Width tokens: the composer/question DOCK is a centered 46rem column, and
+ * the transcript reads in the same column (#136): full-width prose ran ~300
+ * characters per line on a 2560px window. Sharing the token keeps the text
+ * edges flush with the composer's, and the plan marginalia keeps the flank.
  */
-const COLUMN = "mx-auto w-full max-w-none px-6";
 const DOCK = "mx-auto w-full max-w-[46rem] px-4";
+const COLUMN = DOCK;
 // The DOCK container's fixed width (46rem) and the plan marginalia's
 // geometry (owner, plan-placement round): the bare diagram sits in the
 // dock band's RIGHT flank — MARGIN_GAP from the DOCK container's edge and
@@ -1401,7 +1400,7 @@ export function Chat({
 				<div ref={sessionFindScopeRef} className="relative flex min-h-0 flex-1">
 				<Conversation className="h-full min-w-0 flex-1" initial="instant" contextRef={scrollContextRef}>
 					<SessionMessageNavigation />
-					<ConversationContent className="min-h-full gap-0 p-0">
+					<ConversationContent className="min-h-full gap-0 p-0 [container-type:inline-size]">
 						<div data-session-find-root="" className={`${COLUMN} flex flex-1 flex-col gap-4 pt-4`}>
 							{messages.length === 0 && !busy && (
 								<ConversationEmptyState
@@ -1523,7 +1522,7 @@ export function Chat({
 											</div>
 									) : (
 									<Message from="assistant" className="max-w-full">
-									<MessageContent className="w-full">
+									<MessageContent className="w-full overflow-visible">
 											{m.parts.map((part, pi) => {
 												const isLastPart = mi === messages.length - 1 && pi === m.parts.length - 1;
 												// The step boundary where teaching begins (round 8): when
