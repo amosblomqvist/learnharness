@@ -49,6 +49,16 @@ it("unsupported-only directories are never sent; picker .DS_Store is ignored and
 	assert.deepEqual(queue.getSnapshot().errors, ["Root/Images/a.png: Unsupported format or unsafe relative path.", "../bad.txt: Unsupported format or unsafe relative path."]);
 });
 
+it("folder picks skip dot-directories such as .obsidian/ silently, even when the chosen root itself is hidden", async () => {
+	const paths: string[] = [];
+	const queue = createNotesImportQueue(async ([f]) => { const path = f!.webkitRelativePath || f!.name; paths.push(path); return [success(path)]; });
+	queue.append([file("app.json", "Vault/.obsidian/app.json"), file("old.md", "Vault/.trash/old.md"), file("notes.md", "Vault/Sub/notes.md")]);
+	queue.append([file("a.md", ".notes/a.md")]);
+	await tick();
+	assert.deepEqual(paths, ["Vault/Sub/notes.md", ".notes/a.md"]);
+	assert.deepEqual(queue.getSnapshot().errors, []);
+});
+
 it("synchronous transport failures settle one wave once without reentrant pump recursion", async () => {
 	let calls = 0;
 	const queue = createNotesImportQueue(() => { calls++; throw new Error("transport failure"); });
