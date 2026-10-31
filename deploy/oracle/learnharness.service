@@ -1,0 +1,27 @@
+# LearnHarness como serviço web (instalado por install.sh, que troca
+# @USER@, @HOME@ e @REPO@ pelos valores reais). Escuta só em 127.0.0.1: quem
+# expõe o app para os seus aparelhos é o `tailscale serve` (HTTPS privado).
+# O modo navegador não tem login — nunca troque HOSTNAME para 0.0.0.0.
+
+[Unit]
+Description=LearnHarness (servidor web)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=@USER@
+WorkingDirectory=@HOME@/learnharness-server
+EnvironmentFile=@HOME@/.config/learnharness/learnharness.env
+Environment=NODE_ENV=production
+Environment=HOSTNAME=127.0.0.1
+ExecStart=/usr/bin/node @HOME@/learnharness-server/server.js
+# Ao parar (update, reboot), salva um último backup. O "-" ignora falhas
+# (sem rede, por exemplo) para não travar o desligamento.
+ExecStopPost=-@REPO@/deploy/oracle/backup.sh
+TimeoutStopSec=120
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

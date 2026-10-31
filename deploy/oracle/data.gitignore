@@ -1,0 +1,11 @@
+# .gitignore do repositório de dados (learnharness-data).
+
+# Temporários das escritas atômicas do app (arquivo.tmp-xxxx → rename).
+*.tmp-*
+.*.tmp-*
+# Gravações de depuração (só existem com LH_PROVIDER_EVENTS ligado).
+debug/
+# Segredos nunca entram no backup, mesmo que parem aqui por engano.
+auth.json
+*-credentials.json*
+.env*

@@ -1,0 +1,12 @@
+# Um backup dos dados para o repositório privado (disparado pelo timer).
+
+[Unit]
+Description=LearnHarness: backup dos dados no GitHub
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=@USER@
+EnvironmentFile=@HOME@/.config/learnharness/learnharness.env
+ExecStart=@REPO@/deploy/oracle/backup.sh

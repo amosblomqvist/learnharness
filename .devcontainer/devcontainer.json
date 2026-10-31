@@ -1,0 +1,30 @@
+{
+	"name": "LearnHarness",
+	"image": "mcr.microsoft.com/devcontainers/base:ubuntu-24.04",
+	"features": {
+		"ghcr.io/devcontainers/features/node:1": { "version": "26" }
+	},
+	"hostRequirements": { "cpus": 2, "memory": "8gb" },
+	"containerEnv": {
+		"LH_DATA_REPO": "GabrielSartoriMosquer/learnharness-data",
+		"LH_DATA_DIR": "/workspaces/learnharness-data",
+		"LH_AUTH_FILE": "/workspaces/.lh/auth.json",
+		"CLAUDE_CONFIG_DIR": "/workspaces/.lh/claude",
+		"ELECTRON_SKIP_BINARY_DOWNLOAD": "1"
+	},
+	"forwardPorts": [3000],
+	"portsAttributes": {
+		"3000": { "label": "LearnHarness", "onAutoForward": "notify" }
+	},
+	"postCreateCommand": "bash deploy/codespaces/setup.sh",
+	"postStartCommand": "bash deploy/codespaces/start.sh",
+	"customizations": {
+		"codespaces": {
+			"repositories": {
+				"GabrielSartoriMosquer/learnharness-data": {
+					"permissions": { "contents": "write" }
+				}
+			}
+		}
+	}
+}

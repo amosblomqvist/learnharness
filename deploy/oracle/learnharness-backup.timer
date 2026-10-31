@@ -1,0 +1,11 @@
+# Backup a cada 15 minutos. backup.sh só faz commit quando algo mudou.
+
+[Unit]
+Description=LearnHarness: backup a cada 15 minutos
+
+[Timer]
+OnCalendar=*:0/15
+Persistent=true
+
+[Install]
+WantedBy=timers.target
