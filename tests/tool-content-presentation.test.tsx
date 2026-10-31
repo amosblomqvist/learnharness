@@ -162,3 +162,19 @@ test("historical ambiguous options and absent/invalid original calls retain thei
 	renderToStaticMarkup(<AnsweredCard answer={answer} />);
 	assert.deepEqual(answer, before);
 });
+
+test("escaped fenced code blocks render as syntax-highlighted code blocks with copy affordance", () => {
+	const sqlQuestion =
+		"Consider the following SQL query:\\n\\n```sql\\nSELECT *\\nFROM users u\\nLEFT JOIN orders o ON u.id = o.user_id\\nWHERE o.status = 'PENDING';\\n```\\n\\nWhat is the behavioral impact of the `WHERE o.status = 'PENDING'` clause on this `LEFT JOIN`?";
+	const document = dom(render(sqlQuestion));
+	const codeBlocks = document.querySelectorAll('[data-testid="md-code"]');
+	assert.equal(codeBlocks.length, 1);
+	const block = codeBlocks[0]!;
+	assert.ok(block.querySelector('[data-testid="md-copy"]'));
+	assert.equal(block.querySelector('[data-language="sql"]')?.getAttribute("data-language"), "sql");
+	const text = block.textContent ?? "";
+	assert.ok(text.includes("SELECT *"));
+	assert.ok(text.includes("FROM users u"));
+	assert.ok(text.includes("WHERE o.status = 'PENDING';"));
+	assert.ok(!text.includes("\\n"));
+});
