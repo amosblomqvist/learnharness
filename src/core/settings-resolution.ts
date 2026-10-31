@@ -26,6 +26,7 @@ import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import type { ModelRole } from "../../config.ts";
 import type { ChatSettings } from "./contracts/chat.ts";
 import type { SearchEngineId } from "./search.ts";
+import type { DictationLanguage, DictationProvider } from "./dictation.ts";
 import {
 	BACKGROUND_MODEL_ROLES,
 	FACTORY_SETTINGS,
@@ -72,7 +73,11 @@ export type EffectiveAppearance = FactorySettings["appearance"];
 /** The concrete view: every knob resolved, no absent fields. */
 export interface EffectiveSettings {
 	general: Required<GeneralSettings>;
-	dictation: Required<DictationSettings>;
+	dictation: {
+		language: DictationLanguage;
+		provider?: DictationProvider;
+		handyModel?: string;
+	};
 	agent: {
 		models: Record<BackgroundModelRole, EffectiveModelSpec | undefined>;
 		/** Delta map as stored — consumers resolve absent key → enabled. */
@@ -185,6 +190,8 @@ export function resolveSettings(record: UserSettings | null): EffectiveSettings 
 		},
 		dictation: {
 			language: record?.dictation?.language ?? FACTORY_SETTINGS.dictation.language,
+			provider: record?.dictation?.provider,
+			handyModel: record?.dictation?.handyModel,
 		},
 		agent: {
 			models,

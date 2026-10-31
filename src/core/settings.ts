@@ -33,7 +33,7 @@ import { CLAUDE_CODE_PROVIDER } from "./contracts/claude-code.ts";
 import type { ModelRole } from "../../config.ts";
 import type { ChatSettings } from "./contracts/chat.ts";
 import type { SearchEngineId } from "./search.ts";
-import { isDictationLanguage, type DictationLanguage } from "./dictation.ts";
+import { isDictationLanguage, isDictationProvider, type DictationLanguage, type DictationProvider } from "./dictation.ts";
 
 /** The schema version this code understands. Bump ONLY for breaking shape
  *  changes (a field renamed/meaning changed); pure additions never bump. */
@@ -333,6 +333,8 @@ export interface GeneralSettings {
 /** One app-wide dictation preference, shared by every composer. */
 export interface DictationSettings {
 	language?: DictationLanguage;
+	provider?: DictationProvider;
+	handyModel?: string;
 }
 
 /** Agent settings — everything about the non-conversation machinery. */
@@ -483,7 +485,7 @@ export interface UserSettings {
 export interface FactorySettings {
 	version: number;
 	general: Required<GeneralSettings>;
-	dictation: Required<DictationSettings>;
+	dictation: { language: DictationLanguage };
 	appearance: {
 		mode: "dark" | "light";
 		background: string | null;
@@ -798,10 +800,18 @@ export function sanitizeUserSettings(raw: unknown): UserSettings | null {
 	}
 	if (r.dictation !== undefined) {
 		const raw = r.dictation;
-		out.dictation = raw !== null && typeof raw === "object" && !Array.isArray(raw) &&
-			isDictationLanguage((raw as Record<string, unknown>).language)
-			? { language: (raw as DictationSettings).language }
-			: {};
+		if (raw !== null && typeof raw === "object" && !Array.isArray(raw)) {
+			const dict: DictationSettings = {};
+			const rec = raw as Record<string, unknown>;
+			if (isDictationLanguage(rec.language)) dict.language = rec.language;
+			if (isDictationProvider(rec.provider)) dict.provider = rec.provider;
+			if (typeof rec.handyModel === "string" && rec.handyModel.trim().length > 0) {
+				dict.handyModel = rec.handyModel.trim();
+			}
+			out.dictation = dict;
+		} else {
+			out.dictation = {};
+		}
 	}
 	if (r.claudeCode !== undefined) {
 		const raw = r.claudeCode;

@@ -40,7 +40,7 @@ import { ClaudeCodeInstallationStatus } from "./claude-code-status.tsx";
 import { ProviderMenuList } from "./model-menu.tsx";
 import { MenuShell } from "@/components/menu-shell";
 import { notifySettingsSaved } from "@/components/settings-signal";
-import { DictationLanguageSetting } from "@/components/dictation-language";
+import { DictationHandyModelSetting, DictationLanguageSetting, DictationProviderSetting } from "@/components/dictation-language";
 
 /** One pi-ai provider with plain API-key auth (the Platform seam —
  *  derived from pi-ai's own env-key table; no drift possible). */
@@ -396,9 +396,15 @@ export function KeysSection({
 		if (openRow === null && adding === null && !addingCustom) return;
 		const onKeyDown = (e: KeyboardEvent) => {
 			if (e.key !== "Escape") return;
-			// A language dropdown above this editor in the dismissal stack owns
+			// A dictation dropdown above this editor in the dismissal stack owns
 			// the first Escape; do not swallow it at document capture phase.
-			if (document.querySelector('[data-testid="dictation-language-menu"]')) return;
+			if (
+				document.querySelector(
+					'[data-testid="dictation-language-menu"], [data-testid="dictation-provider-menu"], [data-testid="dictation-model-menu"]',
+				)
+			) {
+				return;
+			}
 			e.preventDefault();
 			e.stopPropagation();
 			setOpenRow(null);
@@ -608,6 +614,8 @@ export function KeysSection({
 							className="underline underline-offset-2 hover:text-foreground"
 						>Deepgram API key</a> with the Member role or higher, then add it above.
 					</p>
+					<DictationProviderSetting />
+					<DictationHandyModelSetting />
 				</>}
 			</SettingsGroup>)}
 
