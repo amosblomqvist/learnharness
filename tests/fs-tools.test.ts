@@ -1,5 +1,6 @@
 import assert from "node:assert";
 import * as fs from "node:fs/promises";
+import { realpathSync } from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { describe, it } from "node:test";
@@ -100,7 +101,7 @@ describe("resolveSourcePath (fs-shared)", () => {
 		assert.equal(resolveSourcePath(), home);
 		assert.equal(resolveSourcePath(""), home);
 		assert.equal(resolveSourcePath("notes/calculus.md"), path.join(home, "notes", "calculus.md"));
-		assert.equal(resolveSourcePath(absolute), absolute);
+		assert.equal(resolveSourcePath(absolute), path.join(realpathSync.native(os.tmpdir()), "course", "notes.md"));
 	});
 
 	it("backslash is a home separator only on Windows", () => {
@@ -115,7 +116,7 @@ describe("resolveSourcePath (fs-shared)", () => {
 		const home = os.homedir();
 		assert.equal(resolveSourcePath("~other/notes.md"), path.join(home, "~other", "notes.md"));
 		assert.equal(resolveSourcePath("notes/~draft.md"), path.join(home, "notes", "~draft.md"));
-		assert.equal(resolveSourcePath("/tmp/~/x.md"), "/tmp/~/x.md");
+		assert.equal(resolveSourcePath(path.join(os.tmpdir(), "~", "x.md")), path.join(realpathSync.native(os.tmpdir()), "~", "x.md"));
 	});
 });
 
@@ -157,7 +158,7 @@ describe("sensitive locations under home are off-limits", () => {
 		await fs.mkdir(path.join(home, ".ssh"), { recursive: true });
 		await fs.writeFile(path.join(home, ".ssh", "id_ed25519"), "eigenvector PRIVATE KEY\n");
 		await fs.writeFile(path.join(home, "code", ".env.local"), "EIGENVECTOR_API_KEY=sk-secret-token\n");
-		await fs.symlink(path.join(home, ".ssh"), path.join(home, "notes", "keys"));
+		await fs.symlink(path.join(home, ".ssh"), path.join(home, "notes", "keys"), process.platform === "win32" ? "junction" : "dir");
 		await fs.mkdir(path.join(home, ".claudette"), { recursive: true });
 		await fs.writeFile(path.join(home, ".claudette", "ok.md"), "eigenvector lookalike\n");
 		const originalHome = process.env.HOME;
@@ -219,7 +220,7 @@ describe("sensitive locations under home are off-limits", () => {
 
 	it("explicit paths are refused by read, ls, find, and grep — symlinks included", async () => {
 		await withSensitiveHome(async (home) => {
-			const denied = /Access denied: .* is a sensitive location/;
+			const denied = /Access denied: .* is a protected location/;
 			await assert.rejects(readTool.execute!("c", { path: "~/.ssh/id_ed25519" }), denied);
 			await assert.rejects(readTool.execute!("c", { path: path.join(home, "code", ".env.local") }), denied);
 			await assert.rejects(readTool.execute!("c", { path: "~/notes/keys/id_ed25519" }), denied);

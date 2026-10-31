@@ -2,6 +2,7 @@ import * as fsSync from "node:fs";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
+import { AUTH_FILE } from "../../../config.ts";
 
 /**
  * Shared plumbing for the learner-filesystem tools (ls / find / grep) —
@@ -14,9 +15,10 @@ import * as path from "node:path";
  * deliberate scope widening vs pi: relative paths and default roots resolve
  * against the LEARNER'S HOME, not a project cwd — the harness has no
  * meaningful working directory, and "find my notes" should just work.
- * The one carve-out from that scope: SENSITIVE_HOME_PATHS (credentials,
- * keys, other tools' private data) are refused by the resolver and skipped
- * by walks — whatever a tool reads is sent to the model provider.
+ * The carve-out: sensitive home locations, dotenv files, and the app's
+ * configured credential stores are refused by the resolver and skipped by
+ * walks — whatever a tool reads is sent to the model provider. This is
+ * path-based defense in depth, not a sandbox or content-redaction system.
  *
  * Ported behaviors (mirroring pi's dist/core/tools/{ls,find,grep}.js): the
  * schemas, descriptions, output formats, and truncation notices are copied
@@ -44,7 +46,7 @@ const EXCLUDED_DIR_NAMES = new Set(["node_modules", ".git", "Library", ".Trash"]
  * stores, keys, other agents' session transcripts and settings, browser
  * profiles. Unlike EXCLUDED_DIR_NAMES these are refused for explicit paths
  * too (resolveSourcePath), not only skipped by walks. Matched
- * case-insensitively (macOS and Windows filesystems are).
+ * case-insensitively, including on case-sensitive filesystems.
  */
 const SENSITIVE_HOME_PATHS = [
 	".claude",
@@ -78,51 +80,113 @@ const SENSITIVE_HOME_PATHS = [
 	"AppData/Local/BraveSoftware",
 	"AppData/Local/Microsoft/Edge",
 	"AppData/Roaming/Mozilla",
-].map((p) => p.toLowerCase());
+];
 
-/** `.env`, `.env.local`, … — dotenv files hold secrets wherever they live. */
+/** Templates are deliberately included: their names do not guarantee safe contents. */
 const ENV_FILE = /^\.env(\..*)?$/i;
+const SUBSCRIPTION_FILES = ["chatgpt-credentials.json", "github-copilot-credentials.json", "xai-credentials.json"];
+// Match the actual writers in store/auth.ts and electron/{chatgpt,subscription-store}.cjs.
+const CREDENTIAL_TEMP = /^(?:\.auth\.json\.tmp-\d+|(?:chatgpt|github-copilot|xai)-credentials\.json\.[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\.tmp)$/i;
 
-/** True for a path under SENSITIVE_HOME_PATHS or a dotenv file. String
- *  check only — walks call it per entry and never follow symlinks; the
- *  resolver also checks the real path. */
-export function isSensitivePath(absolute: string, home: string = os.homedir()): boolean {
-	if (ENV_FILE.test(path.basename(absolute))) return true;
-	const rel = path.relative(home, absolute);
-	if (rel === "" || rel.startsWith("..") || path.isAbsolute(rel)) return false;
-	const posix = rel.split(path.sep).join("/").toLowerCase();
-	return SENSITIVE_HOME_PATHS.some((p) => posix === p || posix.startsWith(`${p}/`));
+/** Windows namespace aliases and alternate data streams must not change policy.
+ *  The returned spelling is for comparison only, never for opening a file. */
+function comparisonPath(absolute: string): string {
+	let normalized = path.resolve(absolute);
+	if (process.platform === "win32") {
+		if (normalized.startsWith("\\\\?\\UNC\\")) normalized = `\\\\${normalized.slice(8)}`;
+		else if (normalized.startsWith("\\\\?\\")) normalized = normalized.slice(4);
+		const base = path.basename(normalized);
+		const stream = base.indexOf(":");
+		if (stream !== -1) normalized = path.join(path.dirname(normalized), base.slice(0, stream));
+	}
+	return normalized;
 }
 
-function realOrSelf(p: string): string {
+/** Segment-aware containment; home denials retain the donor's case-insensitive policy. */
+function isWithin(absolute: string, root: string, ignoreCase = false): boolean {
+	let child = comparisonPath(absolute);
+	let parent = comparisonPath(root);
+	if (ignoreCase) { child = child.toLowerCase(); parent = parent.toLowerCase(); }
+	const rel = path.relative(parent, child);
+	return rel === "" || (rel !== ".." && !rel.startsWith(`..${path.sep}`) && !path.isAbsolute(rel));
+}
+
+function credentialFiles(authFile: string): string[] {
+	return [authFile, ...SUBSCRIPTION_FILES.map((name) => path.join(/* turbopackIgnore: true */ path.dirname(authFile), name))];
+}
+
+function isCredentialTemp(absolute: string, directory: string): boolean {
+	const file = comparisonPath(absolute);
+	return path.relative(comparisonPath(directory), path.dirname(file)) === "" && CREDENTIAL_TEMP.test(path.basename(file));
+}
+
+/** String-only check, also usable with synthetic home/credential locations.
+ *  The runtime guard below additionally resolves both sources and protected roots.
+ *  Only credentials are app-private denials: learning data remains readable. */
+export function isSensitivePath(absolute: string, home: string = os.homedir(), authFile: string = AUTH_FILE): boolean {
+	const file = comparisonPath(absolute);
+	return ENV_FILE.test(path.basename(file)) ||
+		SENSITIVE_HOME_PATHS.some((p) => isWithin(file, path.join(home, p), true)) ||
+		credentialFiles(authFile).some((p) => isWithin(file, p)) ||
+		isCredentialTemp(file, path.dirname(authFile));
+}
+
+/** Resolve existing ancestors too, so absent descendants of symlinked roots
+ *  receive the same policy. Missing paths keep their normal tool IO errors;
+ *  permission failures/loops must not silently turn into an unchecked path. */
+function realOrMissing(absolute: string): string {
 	try {
-		return fsSync.realpathSync.native(p);
-	} catch {
-		return p;
+		// Runtime learner/credential paths are not assets to trace into a build.
+		return fsSync.realpathSync.native(/* turbopackIgnore: true */ absolute);
+	} catch (err) {
+		const code = (err as NodeJS.ErrnoException).code;
+		if (code !== "ENOENT" && code !== "ENOTDIR") throw err;
+		const parent = path.dirname(absolute);
+		return parent === absolute ? absolute : path.join(/* turbopackIgnore: true */ realOrMissing(parent), path.basename(absolute));
 	}
 }
 
-/** Resolve a tool path argument: absolute stays, relative/absent → home.
- *  (pi resolves against the project cwd; the harness's "project" is the
- *  learner's life, so the home directory is the anchor.) A leading `~` or
- *  `~/` is the home directory, as a shell would expand it — learners and
- *  models write paths that way. `~user` is not expanded. */
+/** An unrelated inaccessible/broken protected root must not break ordinary
+ *  notes. Its named location remains denied; a source's OWN realpath errors
+ *  still fail closed in checkedSourcePath, never opening its unchecked alias. */
+function protectedRealPath(absolute: string): string {
+	try { return realOrMissing(absolute); } catch { return absolute; }
+}
+
+/** One snapshot per resolution/walk, not per visited entry. Resolve protected
+ *  roots too: a sensitive directory or AUTH_FILE can itself be a symlink to
+ *  a location outside home. Never read credential contents or app records. */
+function sourcePathCheck(home = os.homedir()): (absolute: string) => boolean {
+	const homeRoots = SENSITIVE_HOME_PATHS.map((p) => protectedRealPath(path.join(/* turbopackIgnore: true */ home, p)));
+	const files = credentialFiles(AUTH_FILE).map(protectedRealPath);
+	const credentialDir = protectedRealPath(path.dirname(AUTH_FILE));
+	return (absolute) => isSensitivePath(absolute, home) ||
+		homeRoots.some((p) => isWithin(absolute, p, true)) ||
+		files.some((p) => isWithin(absolute, p)) || isCredentialTemp(absolute, credentialDir);
+}
+
+function checkedSourcePath(absolute: string, denied: (absolute: string) => boolean): string {
+	const refuse = () => {
+		throw new Error(
+			`Access denied: ${absolute} is a protected location. Learner file tools cannot open it. ` +
+			"Do not paste credentials or private transcripts into chat. Use another source or a manually reviewed, non-sensitive excerpt.",
+		);
+	};
+	if (denied(absolute)) refuse();
+	const real = realOrMissing(absolute);
+	if (denied(real)) refuse();
+	return real;
+}
+
+/** Relative/absent → home; leading ~ expands, ~user stays literal. Return
+ *  the CHECKED canonical location for IO, not an unchecked symlink alias.
+ *  These path checks are not protection against a hostile concurrent OS user. */
 export function resolveSourcePath(p?: string): string {
 	const home = os.homedir();
-	if (!p) return home;
-	const resolved = p === "~" || p.startsWith("~/") || p.startsWith(`~${path.sep}`)
+	const resolved = !p ? home : p === "~" || p.startsWith("~/") || p.startsWith(`~${path.sep}`)
 		? path.join(home, p.slice(1))
-		: path.isAbsolute(p) ? p : path.join(home, p);
-	// The real path too: a symlink in ~/notes must not reach ~/.ssh.
-	const real = realOrSelf(resolved);
-	const realHome = realOrSelf(home);
-	if (isSensitivePath(resolved, home) || isSensitivePath(real, home) || isSensitivePath(real, realHome)) {
-		throw new Error(
-			`Access denied: ${resolved} is a sensitive location (credentials, keys, or another app's private data). ` +
-				"The learner file tools never read it. If the learner wants it discussed, ask them to paste the relevant part.",
-		);
-	}
-	return resolved;
+		: path.resolve(home, p);
+	return checkedSourcePath(resolved, sourcePathCheck(home));
 }
 
 /** pi's formatSize idiom (50KB prints as "50.0KB"). */
@@ -224,6 +288,10 @@ export async function walkFiles(
 	let timedOut = false;
 	let aborted = false;
 	if (signal?.aborted) return { timedOut: false, aborted: true };
+	const denied = sourcePathCheck();
+	// A caller may supply an alias of home as its root. Start from the real
+	// root and compare descendants against the same canonical protected roots.
+	const realRoot = checkedSourcePath(path.resolve(root), denied);
 
 	const walkDir = async (dir: string): Promise<boolean> => {
 		if (Date.now() > deadline) {
@@ -251,10 +319,10 @@ export async function walkFiles(
 			}
 			const full = path.join(dir, entry.name);
 			if (entry.isDirectory()) {
-				if (EXCLUDED_DIR_NAMES.has(entry.name) || isSensitivePath(full)) continue;
+				if (EXCLUDED_DIR_NAMES.has(entry.name) || denied(full)) continue;
 				if (await walkDir(full)) return true;
 			} else if (entry.isFile()) {
-				if (isSensitivePath(full)) continue;
+				if (denied(full)) continue;
 				if (await visit(full)) return true;
 			}
 			// symlinks/other: not followed (pi's fd doesn't follow either)
@@ -262,7 +330,7 @@ export async function walkFiles(
 		return false;
 	};
 
-	await walkDir(root);
+	await walkDir(realRoot);
 	return { timedOut, aborted };
 }
 
