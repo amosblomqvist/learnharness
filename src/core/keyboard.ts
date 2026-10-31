@@ -157,7 +157,8 @@ export function eventBinding(e: KeyboardEvent): string {
 	// "shift+/"), so it returns alone. With a real modifier riding along,
 	// shift is explicit (⌘⇧F = "mod+shift+f"); non-printable keys (Tab,
 	// arrows) always keep their shift (Shift+Tab = "shift+tab").
-	if (e.key.length === 1 && !mod && !e.altKey) return e.key.toLowerCase();
+	// Persian/Arabic layouts type "؟" (U+061F) on Shift+/: still the "?" key.
+	if (e.key.length === 1 && !mod && !e.altKey) return e.key === "؟" ? "?" : e.key.toLowerCase();
 	const mods: string[] = [];
 	if (mod) mods.push("mod");
 	if (e.altKey) mods.push("alt");

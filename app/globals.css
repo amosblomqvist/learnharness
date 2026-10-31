@@ -328,11 +328,14 @@ body {
  * ============================================================ */
 
 /* RTL text aligns to its own start (the right), also under an ancestor that
-   hard-codes text-left. In the base layer, so an element's own alignment
-   utility (text-center, …) still wins. */
+   hard-codes text-left, and sets in the reading font: no monospace font has
+   Persian letters, and inside the mono UI chrome Persian words came out
+   spaced by the mono font's wide spaces. In the base layer, so an element's
+   own utility (text-center, font-title, font-mono, …) still wins. */
 @layer base {
 	[dir="rtl"] {
 		text-align: start;
+		font-family: var(--font-prose);
 	}
 }
 
@@ -360,6 +363,14 @@ code:not([dir]),
 .katex {
 	direction: ltr;
 	unicode-bidi: isolate;
+}
+
+/* Free text that cannot carry a computed dir: each paragraph or line takes
+   its direction from its own first letters. Mermaid labels (HTML inside the
+   diagram's foreignObject, or SVG text) and the prompt editors. */
+svg[id^="lh-mermaid-"] :is(foreignObject *, text),
+textarea {
+	unicode-bidi: plaintext;
 }
 
 /* Code blocks stay LTR and left-aligned even inside an RTL list item. */

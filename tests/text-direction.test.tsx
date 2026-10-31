@@ -58,6 +58,7 @@ describe("textDirection (word vote)", () => {
 		assert.equal(rtlDir("آموزش React"), "rtl");
 		assert.equal(rtlDir("Learning React"), undefined);
 		assert.equal(rtlDir(undefined), undefined);
+		assert.equal(rtlDir(17), undefined, "saved records can hold non-strings");
 	});
 });
 

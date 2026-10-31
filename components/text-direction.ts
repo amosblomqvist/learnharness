@@ -5,7 +5,9 @@
  * order and their punctuation on the correct side.
  */
 
-const RTL_RANGES = "\\u0590-\\u08FF\\uFB1D-\\uFDFF\\uFE70-\\uFEFC";
+import { createElement, Fragment, type ReactNode } from "react";
+
+const RTL_RANGES ="\\u0590-\\u08FF\\uFB1D-\\uFDFF\\uFE70-\\uFEFC";
 /** Letter runs (≈ words) in right-to-left scripts. Digits and punctuation in
  *  those Unicode blocks do not vote. */
 const RTL_WORD = new RegExp(`(?:(?=[\\p{L}\\p{M}])[${RTL_RANGES}])+`, "gu");
@@ -28,9 +30,19 @@ export function textDirection(text: string): TextDirection | undefined {
 }
 
 /** `dir` for a label inside the left-to-right interface: set only for
- *  right-to-left text, so English labels render exactly as before. */
-export function rtlDir(text: string | null | undefined): "rtl" | undefined {
-	return text && textDirection(text) === "rtl" ? "rtl" : undefined;
+ *  right-to-left text, so English labels render exactly as before. Takes
+ *  `unknown`: saved records can carry non-strings where text is typed (a
+ *  numeric problem statement), and a label must never crash on them. */
+export function rtlDir(text: unknown): "rtl" | undefined {
+	return typeof text === "string" && textDirection(text) === "rtl" ? "rtl" : undefined;
+}
+
+/** Names joined by ", " in left-to-right UI copy, each Persian one isolated
+ *  in its own span: otherwise the commas and the neighbouring names pull
+ *  its words apart. English names stay plain text. */
+export function bidiJoin(names: readonly string[]): ReactNode[] {
+	return names.map((name, i) =>
+		createElement(Fragment, { key: i }, i > 0 ? ", " : null, rtlDir(name) ? createElement("span", { dir: "rtl" }, name) : name));
 }
 
 type HastNode = {

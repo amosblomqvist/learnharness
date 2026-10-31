@@ -8,6 +8,7 @@ import { joinDictation, useDictationTarget } from "@/components/dictation";
 import { useEnterSubmits } from "@/components/enter-submits";
 import { PathInput } from "@/components/path-input";
 import { cn } from "@/lib/utils";
+import { rtlDir } from "@/components/text-direction";
 
 /**
  * The practice dock (practice sessions, owner design 2026-10-04): an
@@ -94,7 +95,7 @@ export function PracticeDock({ problemCallId, input, expanded, onExpand, onSubmi
 			>
 				<ChevronRightIcon className="size-4 shrink-0 rotate-90" />
 				<span className="font-medium">Problem</span>
-				<span className="min-w-0 flex-1 truncate">{input.statement}</span>
+				<span dir={rtlDir(input.statement)} className="min-w-0 flex-1 truncate">{input.statement}</span>
 			</button>
 		);
 	}

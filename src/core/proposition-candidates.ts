@@ -1,4 +1,5 @@
 import type { GraphNode } from "./contracts/graph.ts";
+import { foldSearchText } from "./fuzzy.ts";
 
 /** Retrieval only: scores rank lexical candidates, never decide identity. */
 export interface CandidateProposition {
@@ -45,7 +46,9 @@ const STOP_WORDS = new Set((
 ).split(" "));
 
 function words(text: string): string[] {
-	return (text.normalize("NFKC").toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? [])
+	// Folded: a Persian word with a vowel mark or half-space stays one word,
+	// and Arabic/Persian spellings of it are the same word.
+	return (foldSearchText(text.normalize("NFKC")).match(/[\p{L}\p{N}]+/gu) ?? [])
 		.filter((word) => !STOP_WORDS.has(word));
 }
 

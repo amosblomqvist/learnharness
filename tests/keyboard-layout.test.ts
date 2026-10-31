@@ -40,6 +40,10 @@ describe("eventBinding — non-Latin layouts", () => {
 		assert.equal(eventBinding(press({ key: "k", code: "KeyK", ctrlKey: true })), "mod+k");
 	});
 
+	it("Shift+/ on a Persian layout (key \"؟\") is the ? shortcut", () => {
+		assert.equal(eventBinding(press({ key: "؟", code: "Slash", shiftKey: true })), "?");
+	});
+
 	it("bare non-Latin typing is not a binding to rewrite", () => {
 		assert.equal(eventBinding(press({ key: "л", code: "KeyK" })), "л");
 		assert.equal(eventBinding(press({ key: "Л", code: "KeyK", shiftKey: true })), "л");

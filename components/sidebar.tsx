@@ -729,6 +729,7 @@ function SessionsSidebar() {
 							ref={searchRef}
 							data-testid="session-search"
 							value={query}
+							dir={rtlDir(query)}
 							onChange={(e) => {
 								setQuery(e.target.value);
 								// The list reorders under the query every keystroke —

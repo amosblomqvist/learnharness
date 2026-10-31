@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { useBackdropDismiss } from "@/components/backdrop-dismiss";
-import { rtlDir } from "@/components/text-direction";
+import { bidiJoin, rtlDir } from "@/components/text-direction";
 
 /** The 409 extraction_running line (owner phrasing, node interlude):
  *  the server's error names the extraction; the ACTIVITY DOCK is the
@@ -75,13 +75,13 @@ export function DeleteNodeBody({
 						{nodes[0]?.name}
 					</code>
 				) : (
-					<code data-testid="node-names-code" dir={rtlDir(nodes.map((n) => n.name).join(" "))} className="font-mono text-sm text-foreground">
-						{nodes.slice(0, 8).map((n) => n.name).join(", ")}
+					<code data-testid="node-names-code" className="font-mono text-sm text-foreground">
+						{bidiJoin(nodes.slice(0, 8).map((n) => n.name))}
 						{nodes.length > 8 ? `, and ${nodes.length - 8} more` : ""}
 					</code>
 				)}
 			</div>
-			{folders.length > 0 && <p className="mt-2 text-sm" data-testid="folder-removal-names">Empty folders: {folders.map((f) => f.name).join(", ")}</p>}
+			{folders.length > 0 && <p className="mt-2 text-sm" data-testid="folder-removal-names">Empty folders: {bidiJoin(folders.map((f) => f.name))}</p>}
 			{nodes.length > 0 && <p className="mt-2 text-sm text-muted-foreground" data-testid="node-permanence-line">
 				{nodes.length === 1
 					? "This permanently deletes the node — this cannot be undone."
