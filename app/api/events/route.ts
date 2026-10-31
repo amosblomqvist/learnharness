@@ -1,3 +1,4 @@
+import { withUser } from "@/src/server/auth/context.ts";
 /**
  * THE NOTIFICATION CHANNEL ROUTE (push-architecture slice 1, 2026-10-02):
  * one SSE connection per open window over the core event bus — the
@@ -10,6 +11,6 @@ import { eventsResponse } from "@/src/server";
 
 export const dynamic = "force-dynamic";
 
-export function GET(): Response {
+export const GET = withUser(async function GET() {
 	return eventsResponse();
-}
+});

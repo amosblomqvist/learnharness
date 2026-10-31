@@ -1,5 +1,6 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { scopedDataRoot } from "./src/server/scope.ts";
 
 /** Repository root (this file is at <root>/config.ts). */
 export const ROOT = path.dirname(fileURLToPath(import.meta.url));
@@ -13,23 +14,53 @@ export const ROOT = path.dirname(fileURLToPath(import.meta.url));
  * Unset (plain web dev / repo work) it resolves to the repo's data/,
  * byte-for-byte as before. Read-only assets (prompts) stay ROOT-anchored
  * on purpose: they ship inside the app bundle by design.
+ *
+ * MULTI-USER (mobile-web, 2026-10-29): the base root below is now only the
+ * FALLBACK. Inside a signed-in request, src/server/scope.ts supplies the
+ * account's own root (`<base>/users/<id>/`), so chats, ledgers, jobs and
+ * settings resolve per user. Provider keys (AUTH_FILE) stay machine-global
+ * by owner decision.
  */
-const DATA_ROOT = process.env.LH_DATA_DIR
+const BASE_DATA_ROOT = process.env.LH_DATA_DIR
 	? path.resolve(process.env.LH_DATA_DIR)
 	: path.join(ROOT, "data");
 
-export const PATHS = {
-	root: ROOT,
-	/** Teacher system prompt — the agent's instructions (src/agent/). */
-	teacherPrompt: path.join(ROOT, "src", "agent", "system-prompt.md"),
-	data: DATA_ROOT,
-	/** Chat sessions (AI SDK UIMessage transcripts, one JSON file per chat). */
-	chats: path.join(DATA_ROOT, "chats"),
-	graph: path.join(DATA_ROOT, "graph"),
-	/** Debug artifacts (env-gated): data/debug/provider-events/<chatId>.jsonl
-	 * raw provider stream recordings (src/agent/provider-events.ts). */
-	debug: path.join(DATA_ROOT, "debug"),
-} as const;
+/** The account-relative root for this call (scope-aware), else the base. */
+function dataRoot(): string {
+	return scopedDataRoot(BASE_DATA_ROOT);
+}
+
+function pathsFor(root: string) {
+	return {
+		root: ROOT,
+		/** Teacher system prompt — the agent's instructions (src/agent/). */
+		teacherPrompt: path.join(ROOT, "src", "agent", "system-prompt.md"),
+		data: root,
+		/** Chat sessions (AI SDK UIMessage transcripts, one JSON file per chat). */
+		chats: path.join(root, "chats"),
+		graph: path.join(root, "graph"),
+		/** Debug artifacts (env-gated): data/debug/provider-events/<chatId>.jsonl
+		 * raw provider stream recordings (src/agent/provider-events.ts). */
+		debug: path.join(root, "debug"),
+	};
+}
+
+export type Paths = {
+	root: string;
+	teacherPrompt: string;
+	data: string;
+	chats: string;
+	graph: string;
+	debug: string;
+};
+
+/** Scope-aware paths. Read a property per use — never capture at module load. */
+export const PATHS: Paths = new Proxy({} as Paths, {
+	get(_target, property): string | undefined {
+		if (typeof property !== "string") return undefined;
+		return (pathsFor(dataRoot()) as Record<string, string>)[property];
+	},
+});
 
 // ─── Models ────────────────────────────────────────────────────────────────
 // BYOK ALL THE WAY DOWN (owner, 2026-09-22): there are NO factory default
@@ -59,39 +90,52 @@ export type ModelRole =
  * pipeline. Line shapes: src/core/contracts.ts. CHAINS ARE THE STORED
  * TRUTH (owner, 2026-09-30): edges are a derived view, never stored.
  */
-export const LEDGER_FILES = {
-	nodes: path.join(PATHS.graph, "nodes.jsonl"),
-	chains: path.join(PATHS.graph, "chains.jsonl"),
-	sessions: path.join(PATHS.graph, "sessions.jsonl"),
-	/** Per-message extraction coverage (contracts/graph.ts CoverageEntry;
-	 *  the checkpoint's replacement for chat extractions — notes keep
-	 *  sessions.jsonl, whole-file as they are). */
-	coverage: path.join(PATHS.graph, "coverage.jsonl"),
-} as const;
+export type LedgerFiles = {
+	nodes: string;
+	chains: string;
+	sessions: string;
+	coverage: string;
+};
+
+/** Scope-aware: every property resolves against the caller's graph dir. */
+export const LEDGER_FILES: LedgerFiles = new Proxy({} as LedgerFiles, {
+	get(_target, property): string | undefined {
+		if (typeof property !== "string") return undefined;
+		return path.join(PATHS.graph, `${property}.jsonl`);
+	},
+});
 
 /**
  * Notes-import bookkeeping (NOT a ledger): one JSON map, src-id → NotesSource
  * record (contracts/graph.ts) — the file path + import time + the run's usage
  * log. Read-modify-write like a chat file, not append-only like the ledgers.
  */
-export const SOURCES_FILE = path.join(PATHS.graph, "sources.json");
+export function sourcesFile(): string {
+	return path.join(PATHS.graph, "sources.json");
+}
 /** The layout ledger (read-modify-write like sources.json): nodeId →
  *  {x,y} resting positions from the incremental settle (core/layout.ts).
  *  Carries an updatedAt stamp for future live-physics conflict handling. */
-export const POSITIONS_FILE = path.join(PATHS.graph, "positions.json");
+export function positionsFile(): string {
+	return path.join(PATHS.graph, "positions.json");
+}
 
 /**
  * Graph render settings (the settings-panel controls): one small JSON blob,
  * read-modify-write. Shared shape/sanitizer: src/core/render-settings.ts.
  */
-export const RENDER_SETTINGS_FILE = path.join(PATHS.graph, "render-settings.json");
+export function renderSettingsFile(): string {
+	return path.join(PATHS.graph, "render-settings.json");
+}
 
 /** The graph-family FORMAT STAMP sidecar (schema-versioning wave,
  *  2026-10-10): one version for the whole family — the four JSONL ledgers,
  *  sources.json, render-settings.json. LAZY v1: absent = v1; the first
  *  graph-family write creates it. positions.json is REBUILDABLE and rides
  *  along unversioned by design (owner ruling). */
-export const GRAPH_FORMAT_FILE = path.join(PATHS.graph, "format.json");
+export function graphFormatFile(): string {
+	return path.join(PATHS.graph, "format.json");
+}
 
 /**
  * THE USER SETTINGS RECORD (settings-storage wave, 2026-09-19): one
@@ -109,7 +153,9 @@ export const GRAPH_FORMAT_FILE = path.join(PATHS.graph, "format.json");
  * with per-session models, owner 2026-09-28 — sessions own their model
  * from birth, stamped from the strong slot.)
  */
-export const SETTINGS_FILE = path.join(DATA_ROOT, "settings.json");
+export function settingsFile(): string {
+	return path.join(PATHS.data, "settings.json");
+}
 
 /**
  * User prompt-override files (settings-storage wave, 2026-09-19): the
@@ -124,7 +170,30 @@ export const SETTINGS_FILE = path.join(DATA_ROOT, "settings.json");
  * remove, or reorder fragments adapt automatically; an override keyed to
  * a vanished segment stops composing but stays on disk.
  */
-export const PROMPTS_OVERRIDE_DIR = path.join(DATA_ROOT, "prompts");
+export function promptsOverrideDir(): string {
+	return path.join(PATHS.data, "prompts");
+}
+
+/** The machine-global data root (LH_DATA_DIR or <repo>/data) — the fallback
+ *  root and the home of the account registry + session key. */
+export const BASE_DATA = BASE_DATA_ROOT;
+
+/**
+ * THE ACCOUNT REGISTRY (mobile-web, 2026-10-29): one hand-editable JSON
+ * document at the base data root — accounts and pending invites. NOT
+ * account-scoped: it is what tells the server WHICH account a session
+ * belongs to. Mode 0600 (it holds password hashes and invite codes).
+ */
+export const USERS_FILE = path.join(BASE_DATA_ROOT, "users.json");
+
+/** HMAC secret for session cookies (0600, generated on first use). */
+export const SESSION_KEY_FILE = path.join(BASE_DATA_ROOT, "session.key");
+
+/** `<base>/users/<id>/` — the account's mutable-record root. */
+export function userDataRoot(userId: string): string {
+	if (!/^[A-Za-z0-9_-]+$/.test(userId)) throw new Error(`Invalid user id: ${userId}`);
+	return path.join(BASE_DATA_ROOT, "users", userId);
+}
 
 /**
  * THE AUTH/KEY STORE (auth-keys wave, 2026-09-19): BYOK provider keys in a

@@ -1,3 +1,4 @@
+import { withUser } from "@/src/server/auth/context.ts";
 import { modelCatalog, refreshConnectionCatalog } from "@/src/server";
 
 /**
@@ -6,7 +7,7 @@ import { modelCatalog, refreshConnectionCatalog } from "@/src/server";
  * model's SUPPORTED thinking levels (per its thinkingLevelMap). Static
  * catalog: no network, stable within a pi-ai version.
  */
-export async function GET() {
+export const GET = withUser(async function GET() {
 	await refreshConnectionCatalog();
 	return Response.json(modelCatalog(), { headers: { "Cache-Control": "no-store" } });
-}
+});

@@ -1,6 +1,9 @@
 /** Child-process fixture: owned profile only; every upstream fetch is synthetic. */
 import fs from "node:fs";
-import { AUTH_FILE, SETTINGS_FILE } from "../../config.ts";
+import { AUTH_FILE, settingsFile } from "../../config.ts";
+
+// Paths are scope-aware now; resolve once for this test file.
+const SETTINGS_FILE = settingsFile();
 const [mode, action = "key", fault = "none"] = process.argv.slice(2);
 const requests: { url: string; authorization: string | null }[] = [];
 globalThis.fetch = async (url, init) => {
@@ -45,7 +48,7 @@ if (mode === "inspect") {
 	console.log(JSON.stringify({ enabled, reason, requests, statusIds: keyStatuses().map(row => row.id), metadataInEnv: process.env.__learnharness_custom_provider_binding !== undefined }));
 } else {
 	const route = await import("../../app/api/custom-provider/route.ts");
-	const get = route.GET(new Request("http://localhost/api/custom-provider"));
+	const get = await route.GET(new Request("http://localhost/api/custom-provider"));
 	const payload = action === "keyless" ? { baseUrl: "http://second.invalid/v1", authMode: "keyless" }
 		: action === "envMove" ? { baseUrl: "http://second.invalid/v1", authMode: "apiKey", reuseKey: true }
 		: action === "reuse" ? { baseUrl: "http://first.invalid/v1", authMode: "apiKey", reuseKey: true }

@@ -1,3 +1,4 @@
+import { withUser } from "@/src/server/auth/context.ts";
 /**
  * POST /api/graph/coverage/extract — the manual extraction affordance
  * (vision-extraction-coverage.md): run the pipeline over ONE session's
@@ -14,7 +15,7 @@ import { extraction, extractionStatuses } from "@/src/server";
 
 export const dynamic = "force-dynamic";
 
-export async function POST(request: Request) {
+export const POST = withUser(async function POST(request: Request) {
 	let body: unknown;
 	try {
 		body = await request.json();
@@ -34,4 +35,4 @@ export async function POST(request: Request) {
 		console.error(`[chat ${chatId}] manual extraction failed:`, err);
 	});
 	return Response.json({ started: true }, { status: 202 });
-}
+});

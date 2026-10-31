@@ -1,3 +1,4 @@
+import { withUser } from "@/src/server/auth/context.ts";
 /**
  * POST /api/graph/import — the format-agnostic front door's transport
  * (vision §1, 2026-09-13): raw personal-notes files in, one extraction run
@@ -40,7 +41,7 @@ interface ImportResult {
 	slots?: string[];
 }
 
-export async function POST(request: Request) {
+export const POST = withUser(async function POST(request: Request) {
 	const form = await request.formData();
 	const files = form.getAll("files").filter((f): f is File => f instanceof File);
 	if (files.length === 0) {
@@ -93,4 +94,4 @@ export async function POST(request: Request) {
 	});
 	await Promise.all(workers);
 	return Response.json({ results });
-}
+});

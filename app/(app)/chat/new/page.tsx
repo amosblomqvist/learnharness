@@ -1,6 +1,7 @@
 import { NewSession } from "@/components/new-session";
 import { readSettingsRecord } from "@/src/server";
 import { slotsConfigured } from "@/src/core";
+import { withUserScope } from "@/src/server/auth/context.ts";
 
 export const dynamic = "force-dynamic";
 
@@ -21,9 +22,11 @@ export default async function NewSessionPage({
 	searchParams: Promise<{ mode?: string }>;
 }) {
 	const { mode } = await searchParams;
+	// Account-scoped read (pages never pass through withUser).
+	const configured = await withUserScope(() => slotsConfigured(readSettingsRecord()?.models));
 	return (
 		<NewSession
-			initialConfigured={slotsConfigured(readSettingsRecord()?.models)}
+			initialConfigured={configured}
 			mode={mode === "practice" ? "practice" : "teach"}
 		/>
 	);

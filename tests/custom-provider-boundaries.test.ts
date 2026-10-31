@@ -19,9 +19,9 @@ const settingsFile = path.join(scratch, "settings.json");
 const seed = (cp: import("../src/core/settings.ts").CustomProviderSettings = { baseUrl: "http://old/v1", authMode: "keyless", models: [{ id: "m" }] }, key?: string) => fs.writeFileSync(settingsFile, JSON.stringify({ version: 1, customProvider: authorizeFixture(cp, key) }));
 const setFileKey = (key: string) => { const auth = readCustomAuth(); persistCustomAuth({ ...auth.binding!, fileKeyBaseUrl: auth.binding!.baseUrl }, key); };
 const current = () => JSON.parse(fs.readFileSync(settingsFile, "utf8"));
-const get = (inspect = false) => route.GET(new Request(`http://localhost/api/custom-provider${inspect ? "?authMode=apiKey" : ""}`));
-function mutate(body: unknown, method = "POST", headers: Record<string, string> = {}) {
-	return route.POST(new Request("http://localhost/api/custom-provider", { method, headers: { origin: "http://localhost", "content-type": "application/json", "if-match": get().headers.get("etag")!, ...headers }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) }));
+const get = async (inspect = false) => route.GET(new Request(`http://localhost/api/custom-provider${inspect ? "?authMode=apiKey" : ""}`));
+async function mutate(body: unknown, method = "POST", headers: Record<string, string> = {}) {
+	return route.POST(new Request("http://localhost/api/custom-provider", { method, headers: { origin: "http://localhost", "content-type": "application/json", "if-match": (await get()).headers.get("etag")!, ...headers }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) }));
 }
 let requests: { url: string; authorization: string | null }[];
 beforeEach(() => {
@@ -50,7 +50,7 @@ test("new keys have no arbitrary minimum; the exact probed key is stored", async
 	assert.equal((await mutate({ baseUrl: "http://new/v1", authMode: "apiKey", key: " k " })).status, 200);
 	assert.equal(requests[0]?.authorization, "Bearer k");
 	assert.equal(keys.keyValue(CUSTOM_PROVIDER.envVar), "k");
-	const body = await get().text(); assert.ok(!body.includes("Bearer"));
+	const body = await (await get()).text(); assert.ok(!body.includes("Bearer"));
 });
 test("actual GET /api/keys fully redacts every custom key length and preserves other providers", async () => {
 	const inventory = await import("../app/api/keys/route.ts");
@@ -89,10 +89,10 @@ test("same-URL unbound development key needs existing explicit reuse consent", a
 	seed({ baseUrl: "http://old/v1", authMode: "apiKey", models: [{ id: "m" }] }, "legacy-key");
 	const { CUSTOM_AUTH_BINDING } = await import("../src/core/custom-provider-auth.ts");
 	const file = path.join(scratch, "auth.json"); const map = JSON.parse(fs.readFileSync(file, "utf8")); delete map[CUSTOM_AUTH_BINDING]; fs.writeFileSync(file, JSON.stringify(map));
-	assert.equal((await get().json()).keyReuseRequired, true);
+	assert.equal((await (await get()).json()).keyReuseRequired, true);
 	assert.equal((await mutate({ baseUrl: "http://old/v1", authMode: "apiKey" })).status, 400); assert.equal(requests.length, 0);
 	assert.equal((await mutate({ baseUrl: "http://old/v1", authMode: "apiKey", reuseKey: true })).status, 200);
-	assert.equal(requests[0]?.authorization, "Bearer legacy-key"); assert.equal((await get().json()).keyReuseRequired, false);
+	assert.equal(requests[0]?.authorization, "Bearer legacy-key"); assert.equal((await (await get()).json()).keyReuseRequired, false);
 });
 test("generic custom/reserved key writes cannot bypass the atomic binding seam", async () => {
 	const ordinary = await import("../app/api/keys/[id]/route.ts");
@@ -119,12 +119,12 @@ test("environment ownership is shown; consent uses the environment key in probe 
 	process.env[CUSTOM_PROVIDER.envVar] = "environment-secret";
 	authEnvRecord().realEnv.add(CUSTOM_PROVIDER.envVar);
 	try {
-		assert.equal((await get(true).json()).keySource, "env");
+		assert.equal((await (await get(true)).json()).keySource, "env");
 		assert.equal((await mutate({ baseUrl: "http://new/v1", authMode: "apiKey", key: "shadowed" })).status, 400);
 		assert.equal((await mutate({ baseUrl: "http://new/v1", authMode: "apiKey", reuseKey: true })).status, 200);
 		assert.equal(requests[0]?.authorization, "Bearer environment-secret");
 		assert.equal(keys.keyValue(CUSTOM_PROVIDER.envVar), "environment-secret");
-		assert.ok(!(await get().text()).includes("environment-secret"));
+		assert.ok(!(await (await get()).text()).includes("environment-secret"));
 		assert.equal((await mutate({ baseUrl: "http://other/v1", authMode: "keyless" })).status, 200);
 		assert.equal(requests.at(-1)?.authorization, null);
 	} finally { authEnvRecord().realEnv.delete(CUSTOM_PROVIDER.envVar); delete process.env[CUSTOM_PROVIDER.envVar]; }
@@ -136,15 +136,15 @@ test("cross-origin/opaque/missing-origin and non-JSON writes cannot probe or mut
 	assert.equal(requests.length, 0);
 });
 test("standalone internal URL uses the addressed Host origin, never forwarded origins", async () => {
-	const headers = { "content-type": "application/json", "if-match": get().headers.get("etag")!, host: "127.0.0.1:3317", origin: "http://127.0.0.1:3317" };
+	const headers = { "content-type": "application/json", "if-match": (await get()).headers.get("etag")!, host: "127.0.0.1:3317", origin: "http://127.0.0.1:3317" };
 	assert.equal((await route.DELETE(new Request("http://localhost:3317/api/custom-provider", { method: "DELETE", headers }))).status, 200);
 	assert.equal((await mutate({}, "DELETE", { "x-forwarded-host": "evil", origin: "http://evil" })).status, 403);
 });
 test("empty DELETE streams normalize consistently without accepting malformed JSON", async () => {
-	const headers = { "content-type": "application/json", "if-match": get().headers.get("etag")!, origin: "http://localhost" };
+	const headers = { "content-type": "application/json", "if-match": (await get()).headers.get("etag")!, origin: "http://localhost" };
 	const init: RequestInit & { duplex: "half" } = { method: "DELETE", headers, body: new ReadableStream({ start(controller) { controller.close(); } }), duplex: "half" };
 	assert.equal((await route.DELETE(new Request("http://localhost/api/custom-provider", init))).status, 200);
-	assert.equal((await route.DELETE(new Request("http://localhost/api/custom-provider", { method: "DELETE", headers: { ...headers, "if-match": get().headers.get("etag")! }, body: "{" }))).status, 400);
+	assert.equal((await route.DELETE(new Request("http://localhost/api/custom-provider", { method: "DELETE", headers: { ...headers, "if-match": (await get()).headers.get("etag")! }, body: "{" }))).status, 400);
 	assert.equal((await route.POST(new Request("http://localhost/api/custom-provider", { method: "POST", headers, body: "" }))).status, 400);
 });
 test("desktop capability remains mandatory in desktop mode", async () => {
@@ -178,7 +178,7 @@ test("write size bounds are explicit for streamed bodies", async () => {
 	assert.equal(requests.length, 0);
 });
 test("stale save, pin edit and disconnect all return reload guidance without writing", async () => {
-	const etag = get().headers.get("etag")!;
+	const etag = (await get()).headers.get("etag")!;
 	seed({ baseUrl: "http://other/v1", authMode: "keyless", models: [{ id: "different" }] });
 	const before = current();
 	for (const method of ["POST", "PATCH", "DELETE"]) {

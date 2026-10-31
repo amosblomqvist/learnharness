@@ -1,3 +1,4 @@
+import { withUser } from "@/src/server/auth/context.ts";
 /**
  * PUT /api/graph/positions — the live-physics drag commit. The client
  * anneals a drag to rest and sends the new positions; the server
@@ -13,7 +14,7 @@ import { commitPositions } from "@/src/server";
 
 export const dynamic = "force-dynamic";
 
-export async function PUT(request: Request) {
+export const PUT = withUser(async function PUT(request: Request) {
 	let body: unknown;
 	try {
 		body = await request.json();
@@ -21,4 +22,4 @@ export async function PUT(request: Request) {
 		return Response.json({ error: "invalid JSON body" }, { status: 400 });
 	}
 	return Response.json({ positions: commitPositions(body) });
-}
+});

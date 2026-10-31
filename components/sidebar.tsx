@@ -22,6 +22,8 @@ import { useServerEvent, useServerResync } from "@/components/server-events";
 import type { ChatListItem } from "@/src/core";
 import { kbdEventForAction } from "@/src/core";
 import { notifySettingsSaved } from "@/components/settings-signal";
+import { AccountFooter } from "@/components/auth/account-footer";
+import { useIsMobile } from "@/components/use-is-mobile";
 
 /**
  * Toggleable sidebar — NOT a modal drawer: no backdrop, no focus theft. It
@@ -84,9 +86,10 @@ declare global {
 	}
 }
 
-const SidebarContext = createContext<{ open: boolean; toggle: () => void }>({
+const SidebarContext = createContext<{ open: boolean; toggle: () => void; mobile: boolean }>({
 	open: false,
 	toggle: () => {},
+	mobile: false,
 });
 
 export function useSidebar() {
@@ -106,6 +109,10 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
 	const [open, setOpen] = useState(false);
 	const [narrow, setNarrow] = useState(false);
 	const [mounted, setMounted] = useState(false);
+	// Phones (mobile-web): the sidebar is an off-canvas DRAWER, not a column —
+	// it starts closed, never persists open state, and closes on navigation.
+	const mobile = useIsMobile();
+	const pathname = usePathname();
 
 	useEffect(() => {
 		// Electron shell detection (merged chrome, 2026-09-17): keys the
@@ -147,6 +154,11 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
 		return () => window.removeEventListener("resize", onResize);
 	}, []);
 
+	// Mobile: a route change always closes the drawer (it covered the page).
+	useEffect(() => {
+		if (mobile) setOpen(false);
+	}, [mobile, pathname]);
+
 	const toggle = useCallback(() => {
 		// Opening while narrow (auto-closed, or the user's own closed-at-
 		// narrow): ask the shell to widen to the threshold — the resize
@@ -179,7 +191,7 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
 	}, [toggle]);
 
 	return (
-		<SidebarContext.Provider value={{ open: open && !narrow, toggle }}>
+		<SidebarContext.Provider value={{ open: open && !narrow, toggle, mobile }}>
 			{/* transitions gated on mount: no slide-in flash on page load */}
 			<div className={cn("flex h-dvh", mounted && "[&_.sidebar-motion]:transition-[width,margin,opacity]")}>{children}</div>
 		</SidebarContext.Provider>
@@ -390,6 +402,7 @@ export type SessionKindFilter = "teach" | "all" | "practice";
 const KIND_FILTER_KEY = "lh:session-kind-filter";
 
 function SessionsSidebar() {
+	const { mobile } = useSidebar();
 	const { open, toggle } = useSidebar();
 	const [chats, setChats] = useState<ChatListItem[] | null>(null);
 	const [query, setQuery] = useState("");
@@ -647,7 +660,16 @@ function SessionsSidebar() {
 
 	return (
 		<aside
-			className={cn("sidebar-motion shrink-0 overflow-hidden duration-200", open ? "w-72" : "w-0")}
+			className={cn(
+				"sidebar-motion shrink-0 overflow-hidden duration-200",
+				// Phone: off-canvas drawer over the page, above the backdrop.
+				mobile
+					? cn(
+							"fixed inset-y-0 left-0 z-50 w-72 max-w-[85vw] shadow-2xl",
+							open ? "translate-x-0" : "-translate-x-full",
+						)
+					: cn(open ? "w-72" : "w-0"),
+			)}
 			aria-hidden={!open}
 		>
 			<div className="flex h-full w-72 flex-col border-r bg-background">
@@ -849,6 +871,10 @@ function SessionsSidebar() {
 					{/* Settings entry (settings-app wave): same row language as
 					    New session — quiet, bottom-pinned, opens the centered
 					    dialog (also mod+, in the keyboard registry). */}
+					{/* The signed-in account + sign out (mobile-web): hidden in the
+					    Electron shell and pre-auth local mode. */}
+					<AccountFooter />
+
 					<div className="px-3 pb-3 pt-1">
 						<Hint label="Settings" action="open-settings" side="right">
 							<button
@@ -944,9 +970,37 @@ function SessionsSidebar() {
 
 /** The app frame: sidebar inline + content. Rendered once in the root layout. */
 export function AppShell({ children }: { children: React.ReactNode }) {
+	const { open, toggle, mobile } = useSidebar();
+	// While the drawer is open on a phone: lock the page behind it and let
+	// Escape close it (Escape is the only "back" a keyboard offers).
+	useEffect(() => {
+		if (!(mobile && open)) return;
+		const previous = document.body.style.overflow;
+		document.body.style.overflow = "hidden";
+		const onKey = (event: KeyboardEvent) => {
+			if (event.key === "Escape") toggle();
+		};
+		document.addEventListener("keydown", onKey);
+		return () => {
+			document.body.style.overflow = previous;
+			document.removeEventListener("keydown", onKey);
+		};
+	}, [mobile, open, toggle]);
+
 	return (
 		<SettingsDialogProvider>
 			<SessionsSidebar />
+			{mobile && open && (
+				<button
+					type="button"
+					aria-label="Close sidebar"
+					data-testid="sidebar-backdrop"
+					onClick={toggle}
+					className="fixed inset-0 z-40 bg-background/70 backdrop-blur-sm"
+				/>
+			)}
+			{/* 0.4.0 wraps the page in the file-path drop zone; the mobile
+			    drawer/backdrop rides outside it so it overlays everything. */}
 			<FilePathDropZone className="relative min-w-0 flex-1">{children}</FilePathDropZone>
 			{/* The single document-level keydown listener (keyboard wave A) —
 			    after the content in the tree, but it's window-level so order only
