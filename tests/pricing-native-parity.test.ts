@@ -18,7 +18,7 @@ test("API catalog models price through Pi at every tier boundary; native CLI sta
 			const usage = nativeUsage(input);
 			const call = Object.freeze(saved(usage));
 			const before = structuredClone(call);
-			const expected = model.provider === "claude-code" ? null : calculateCost(model, usage).total;
+			const expected = ["claude-code", "antigravity"].includes(model.provider) ? null : calculateCost(model, usage).total;
 			assert.equal(callCost(call, `${model.provider}:${model.id}`), expected, `${model.provider}:${model.id} input=${input}`);
 			assert.deepEqual(call, before);
 		}
