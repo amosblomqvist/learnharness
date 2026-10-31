@@ -82,6 +82,10 @@ describe("POST /api/chats/:id/artifact-ui", () => {
 		assert.equal((await post(chat.id, { input: { messageId: steer.id, inverted: false } })).status, 200);
 		saved = getChat(chat.id)!.messages as [{ details: { ui?: { inverted?: boolean } } }];
 		assert.equal(saved[0]!.details.ui?.inverted, false, "and toggles back off");
+
+		assert.equal((await post(chat.id, { input: { messageId: steer.id, inverted: null } })).status, 200);
+		saved = getChat(chat.id)!.messages as [{ details: { ui?: { inverted?: boolean } } }];
+		assert.equal(saved[0]!.details.ui?.inverted, undefined, "null clears the pin back to auto");
 	});
 });
 

@@ -38,10 +38,12 @@ import {
 	DEMO_BRIDGE_SCRIPT,
 	DemoCard,
 	DemoErrorChip,
+	DemoOutputCard,
 	INITIAL_DEMO_BRIDGE_STATE,
 	reduceDemoBridgeState,
 } from "../components/artifacts/demo-card.tsx";
 import { svgNaturalWidth, VisualCard, VisualOutputCard } from "../components/artifacts/visual-card.tsx";
+import { primeSvgTone } from "../components/artifacts/artifact-tone.ts";
 import { slugFilename } from "../components/artifacts/download.ts";
 import { chartSize } from "../components/session-overlay.tsx";
 import { SubagentSteerCard } from "../components/artifacts/steer-card.tsx";
@@ -242,6 +244,27 @@ describe("demo bridge", () => {
 		assert.deepEqual(reduceDemoBridgeState(state, { type: "something-else" }), state);
 		assert.deepEqual(reduceDemoBridgeState(state, "demo-resize"), state);
 		assert.deepEqual(reduceDemoBridgeState(state, null), state);
+	});
+
+	it("the bridge reports the page background, and the reducer reads its tone", () => {
+		assert.match(buildDemoSrcDoc("<body></body>"), /demo-tone/);
+		// The iframe can load before the card hydrates (SSR html), so the card
+		// asks on mount and the bridge answers.
+		assert.match(DEMO_BRIDGE_SCRIPT, /demo-tone-request/);
+		const s0 = INITIAL_DEMO_BRIDGE_STATE;
+		assert.equal(s0.tone, null, "not reported yet");
+		const tone = (samples: unknown) => reduceDemoBridgeState(s0, { type: "demo-tone", samples }).tone;
+		// Each edge sample: the first opaque background under that point (or a
+		// canvas pixel), "media" for svg/img/video, null for an empty edge.
+		assert.equal(tone(["rgb(255, 255, 255)", "rgb(250, 250, 250)", null]), "light");
+		assert.equal(tone(["rgb(17, 17, 17)", "rgb(17, 17, 17)", "rgb(255, 255, 255)"]), "dark", "a dark wrapper div / canvas");
+		assert.equal(tone([null, null, null]), "light", "empty edges → the white holder shows");
+		assert.equal(tone(["media", "media", "rgb(255, 255, 255)"]), "unknown", "media edges never auto-flip");
+		assert.equal(reduceDemoBridgeState(s0, { type: "demo-tone", samples: "x" }), s0, "garbage is ignored");
+		assert.equal(reduceDemoBridgeState(s0, { type: "demo-tone", samples: [3] }), s0);
+		// Sampled at load, after paint — not at parse time, when a canvas is
+		// still blank.
+		assert.match(DEMO_BRIDGE_SCRIPT, /elementFromPoint/);
 	});
 });
 
@@ -497,7 +520,7 @@ describe("artifact chrome — scrollbar, invert toggles, downloads (release poli
 		assert.match(html, /scrolling="no"/, "no internal scrollbar — the wheel chains to the session");
 		assert.match(html, /toggle-invert-demo-brightness/, "the invert switch (house Toggle)");
 		assert.match(html, /data-testid="demo-download"/);
-		assert.ok(!html.includes("hue-rotate"), "inversion is OFF by default — a manual toggle only");
+		assert.ok(!html.includes("hue-rotate"), "unmeasured → not inverted (auto waits for the bridge's tone)");
 		assert.match(html, /interactive demo/, "the kind label lives in the caption header");
 		assert.match(html, /Wave interference/, "the title rides beside the kind label");
 	});
@@ -508,7 +531,43 @@ describe("artifact chrome — scrollbar, invert toggles, downloads (release poli
 		assert.match(html, /toggle-invert-figure-brightness/, "the invert switch (house Toggle)");
 		assert.match(html, /data-testid="visual-download"/);
 		assert.ok(!html.includes('data-testid="visual-open"'), "fullscreen needs the session overlay context");
-		assert.ok(!html.includes("hue-rotate"), "inversion OFF by default");
+		assert.ok(!html.includes("hue-rotate"), "unmeasured → not inverted (auto waits for the tone)");
+	});
+
+	it("figure: an unpinned LIGHT figure auto-inverts in dark mode", () => {
+		const svg = '<svg xmlns="http://www.w3.org/2000/svg" width="210" height="100"><rect width="210" height="100" fill="#fff"/></svg>';
+		primeSvgTone(svg, "light");
+		const html = renderToStaticMarkup(<VisualOutputCard output={{ svg }} />);
+		assert.match(html, /hue-rotate/, "auto → inverted");
+	});
+
+	it("figure: a DARK figure is never auto-flipped; a pin wins over auto", () => {
+		const dark = '<svg xmlns="http://www.w3.org/2000/svg" width="220" height="100"><rect width="220" height="100" fill="#111"/></svg>';
+		primeSvgTone(dark, "dark");
+		assert.ok(!renderToStaticMarkup(<VisualOutputCard output={{ svg: dark }} />).includes("hue-rotate"));
+		const light = '<svg xmlns="http://www.w3.org/2000/svg" width="230" height="100"></svg>';
+		primeSvgTone(light, "light");
+		assert.ok(
+			!renderToStaticMarkup(<VisualOutputCard output={{ svg: light }} initialPin={false} />).includes("hue-rotate"),
+			"pinned original stays original",
+		);
+		assert.match(renderToStaticMarkup(<VisualOutputCard output={{ svg: dark }} initialPin />), /hue-rotate/, "pinned inverted");
+	});
+
+	it("figure: while the tone is pending, an unpinned figure holds hidden (no white flash)", () => {
+		const svg = '<svg xmlns="http://www.w3.org/2000/svg" width="240" height="100"></svg>';
+		assert.match(renderToStaticMarkup(<VisualOutputCard output={{ svg }} />), /lh-artifact-hold/);
+		assert.ok(
+			!renderToStaticMarkup(<VisualOutputCard output={{ svg }} initialPin={false} />).includes("lh-artifact-hold"),
+			"a pin needs no measurement",
+		);
+	});
+
+	it("demo: pinned inverted renders the filter; unpinned holds while the bridge reports", () => {
+		const pinned = renderToStaticMarkup(<DemoOutputCard output={{ title: "T", html: DEMO_HTML, tested: true }} initialPin />);
+		assert.match(pinned, /hue-rotate/);
+		const auto = renderToStaticMarkup(<DemoOutputCard output={{ title: "T", html: DEMO_HTML, tested: true }} />);
+		assert.match(auto, /lh-artifact-hold/);
 	});
 
 	it("figure card: NO card chrome, image first, caption row BELOW (owner round, 2026-10-07)", () => {
@@ -592,6 +651,13 @@ describe("setSteerUiInverted (the persisted invert switch, 2026-10-07)", () => {
 		assert.equal((off[0] as { details: { ui?: { inverted?: boolean } } }).details.ui?.inverted, false);
 		const missing = setSteerUiInverted([demoSteer], "nope", true);
 		assert.equal(missing[0], demoSteer, "no target → identity");
+	});
+
+	it("null clears the pin back to auto (the key AND an emptied ui go)", () => {
+		const pinned = setSteerUiInverted([demoSteer], demoSteer.id, false);
+		const cleared = setSteerUiInverted(pinned, demoSteer.id, null);
+		const details = (cleared[0] as { details: { ui?: { inverted?: boolean } } }).details;
+		assert.equal(details.ui, undefined);
 	});
 });
 
