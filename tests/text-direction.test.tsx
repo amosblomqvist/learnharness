@@ -12,9 +12,11 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { renderToStaticMarkup } from "react-dom/server";
 import { MessageResponse } from "../components/ai-elements/message.tsx";
+import { AnsweredCard } from "../components/answered-card.tsx";
 import { PlanBlock } from "../components/plan-block.tsx";
 import { rtlDir, textDirection } from "../components/text-direction.ts";
 import type { PlanBlockData } from "../src/core/contracts.ts";
+import type { QuestionAnswerData } from "../src/core/question-core.ts";
 
 const render = (md: string) => renderToStaticMarkup(<MessageResponse mode="static">{md}</MessageResponse>);
 /** The opening tag of the first <tag> whose text includes `text`. */
@@ -103,6 +105,18 @@ describe("markdown blocks", () => {
 		const html = renderToStaticMarkup(<PlanBlock data={data} onOpen={() => {}} />);
 		assert.match(openTag(html, "text", "قانون"), /direction="rtl"/);
 		assert.doesNotMatch(openTag(html, "text", "Momentum"), /direction=/);
+	});
+
+	it("turns a Persian question's whole option list right-to-left, and leaves an English one alone", () => {
+		const answer = (questionText: string, labels: string[]): QuestionAnswerData => ({
+			kind: "ask", questionText, options: labels.map((label, i) => ({ index: i + 1, label })),
+			answers: [{ index: 1, label: labels[0]!, value: "a" }], dontKnow: false, answeredAt: "synthetic",
+		});
+		const fa = renderToStaticMarkup(<AnsweredCard answer={answer("کدام موضوع را می‌خواهی؟", ["چرا آسمان آبی است", "p = mv"])} />);
+		// The list container itself, so formula-only rows sit right as well.
+		assert.match(fa, /<div dir="rtl" class="flex flex-col gap-1\.5/);
+		const en = renderToStaticMarkup(<AnsweredCard answer={answer("Which topic?", ["Why the sky is blue", "Inflation"])} />);
+		assert.doesNotMatch(en, /\sdir=/);
 	});
 
 	it("never marks code blocks", () => {

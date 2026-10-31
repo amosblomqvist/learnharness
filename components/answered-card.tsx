@@ -100,7 +100,11 @@ export function AnsweredCard({ answer: savedAnswer, input }: { answer: QuestionA
 			)}
 
 			{((answer.options?.length ?? 0) > 0 || answer.other) && (
-				<div className="flex flex-col gap-1.5 text-sm">
+				<div
+					// One direction for the whole list, as in the pending dock.
+					dir={rtlDir([answer.questionText, ...(answer.options ?? []).map((o) => o.label), ...descByIndex.values()].join(" "))}
+					className="flex flex-col gap-1.5 text-sm"
+				>
 					{answer.options?.map((opt) => {
 						const sel = selectedIdx.has(opt.index);
 						const key = isQuiz && correctIdx.has(opt.index);

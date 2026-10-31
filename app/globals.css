@@ -328,17 +328,18 @@ body {
  * ============================================================ */
 
 /* RTL text aligns to its own start (the right), also under an ancestor that
-   hard-codes text-left. One-line truncated labels (titles, names) stay
-   aligned with the LTR interface instead; a long one still clips at its
-   logical end, since overflowing lines start-align. In the base layer, so an
-   element's own alignment utility (text-center, …) still wins. */
+   hard-codes text-left. In the base layer, so an element's own alignment
+   utility (text-center, …) still wins. */
 @layer base {
 	[dir="rtl"] {
 		text-align: start;
 	}
-	.truncate[dir="rtl"] {
-		text-align: left;
-	}
+}
+
+/* An input's placeholder takes its own direction: inside a Persian
+   question's options, "Type your own answer…" keeps its ellipsis at the end. */
+[data-file-path-input]::before {
+	unicode-bidi: plaintext;
 }
 
 /* Cells align with their table, whatever their own dir: a column stays
