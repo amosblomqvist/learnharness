@@ -162,7 +162,10 @@ const questionFigure = Type.Optional(
 	Type.String({
 		description:
 			"Optional figure shown beside the question: ONE complete <svg>…</svg> document with explicit width/height " +
-			"and a matching viewBox, a white background, dark strokes, and sans-serif labels. It renders as a static image " +
+			"and a matching viewBox, a white background, dark strokes, and sans-serif labels. Where the learner answers it " +
+			// The dock's figure column caps near 327px (owner, 2026-10-31); answered cards keep natural size.
+			"is shown at most about 320 px wide (narrower on small screens), and a wider figure is scaled down with its " +
+			"text, so draw it at width 320 or less with text at least 12 px. It renders as a static image " +
 			"(no script, no interaction), and you never see it rendered, so plan the coordinates carefully. Prefer " +
 			"single-quoted attributes inside the JSON string. It is parsed at call time; malformed SVG, or more than " +
 			FIGURE_MAX_CHARS +
