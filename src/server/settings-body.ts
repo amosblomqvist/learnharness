@@ -29,6 +29,7 @@ import type {
 import { BACKGROUND_MODEL_ROLES, CACHE_RETENTIONS, COMPACTION_THRESHOLD_FLOOR, CUSTOM_MODEL_PIN_FLOOR, EXTRACTION_CHUNK_TOKENS_FLOOR, MODEL_SLOTS } from "../core/settings.ts";
 import { WRITABLE_TOOL_KEYS } from "../core/pending.ts";
 import { isDictationLanguage } from "../core/dictation.ts";
+import { isSearchEngineId } from "../core/search.ts";
 
 /** Parsed-or-rejected — `ok: false` carries the 400's error message. */
 export type SettingsBodyResult<T> =
@@ -190,8 +191,8 @@ export function parseAgentSettingsBody(body: unknown): SettingsBodyResult<AgentS
 		const search = asRecord(raw.search);
 		if (!search) return { ok: false, error: "search must be an object" };
 		if (search.engine !== undefined) {
-			if (search.engine !== "tavily" && search.engine !== "brave") {
-				return { ok: false, error: 'search.engine must be "tavily" or "brave"' };
+			if (!isSearchEngineId(search.engine)) {
+				return { ok: false, error: 'search.engine must be "tavily", "brave", or "firecrawl"' };
 			}
 			settings.search = { engine: search.engine };
 		}

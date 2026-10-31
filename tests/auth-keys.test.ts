@@ -12,10 +12,10 @@ import { describe, it } from "node:test";
 import { AUTH_KEYS, genericProviderKeyGuard, isKnownAuthKey, maskKey, validateKeyShape } from "../src/core/auth-keys.ts";
 
 describe("the catalog", () => {
-	it("is exactly the three CURATED app-service keys (provider keys live in the provider table)", () => {
+	it("is exactly the four CURATED app-service keys (provider keys live in the provider table)", () => {
 		assert.deepEqual(
 			AUTH_KEYS.map((k) => k.id),
-			["DEEPGRAM_API_KEY", "TAVILY_API_KEY", "BRAVE_API_KEY"],
+			["DEEPGRAM_API_KEY", "TAVILY_API_KEY", "BRAVE_API_KEY", "FIRECRAWL_API_KEY"],
 		);
 		for (const k of AUTH_KEYS) {
 			assert.ok(k.label.length > 0, `${k.id} has a label`);
@@ -34,6 +34,7 @@ describe("the catalog", () => {
 		assert.ok(isKnownAuthKey("DEEPGRAM_API_KEY"));
 		assert.ok(isKnownAuthKey("TAVILY_API_KEY"));
 		assert.ok(isKnownAuthKey("BRAVE_API_KEY"));
+		assert.ok(isKnownAuthKey("FIRECRAWL_API_KEY"));
 		assert.ok(!isKnownAuthKey("OPENROUTER_API_KEY"));
 		assert.ok(!isKnownAuthKey("OPENAI_API_KEY"), "provider vars are a separate surface");
 		assert.ok(!isKnownAuthKey("FUTURE_PLANS_TOKEN"));
@@ -47,6 +48,14 @@ describe("validateKeyShape (the 400 gate — curated keys)", () => {
 		assert.ok(!validateKeyShape("TAVILY_API_KEY", "sk-or-v1-abcdefghij").ok, "wrong family");
 		assert.ok(!validateKeyShape("TAVILY_API_KEY", "tvly-").ok, "prefix alone is a truncation");
 		assert.ok(!validateKeyShape("TAVILY_API_KEY", "  ").ok, "empty fails");
+	});
+
+	it("Firecrawl: fc- prefix required, length floor past it", () => {
+		assert.ok(validateKeyShape("FIRECRAWL_API_KEY", "fc-0123456789abcdef0123456789abcdef").ok);
+		assert.ok(!validateKeyShape("FIRECRAWL_API_KEY", "tvly-abc123def456ghi78").ok, "wrong family");
+		assert.ok(!validateKeyShape("FIRECRAWL_API_KEY", "fc-").ok, "prefix alone is a truncation");
+		assert.ok(!validateKeyShape("FIRECRAWL_API_KEY", "fc-0123456789 abcdef0123").ok, "whitespace fails");
+		assert.ok(!validateKeyShape("FIRECRAWL_API_KEY", "  ").ok, "empty fails");
 	});
 
 	it("Brave: no public format — a ≥20-char truncation guard, no whitespace", () => {

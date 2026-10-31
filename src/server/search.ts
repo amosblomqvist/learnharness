@@ -1,6 +1,6 @@
 /**
  * The search engines' server composition (search port + model slots wave,
- * 2026-09-20): the Tavily + Brave adapters behind the core port
+ * 2026-09-20): the Tavily, Brave + Firecrawl adapters behind the core port
  * (core/search.ts) + the live-engine resolution the settings UI and the
  * agent-layer tool both read.
  *
@@ -8,10 +8,10 @@
  *  - NO default engine: an engine is live iff its key is present (auth
  *    store or env — env wins, keyed via server/keys.ts keyValue).
  *  - Setting a key is ALL the user does — auto-detection: explicit
- *    agent.search.engine pins the preference (when BOTH keys are present
- *    the preference order is Tavily → Brave); without a pin, whichever
- *    engine has a key is the engine.
- *  - An explicit choice does NOT silently fall back to the other engine:
+ *    agent.search.engine pins the preference (when several keys are
+ *    present the preference order is Tavily → Brave → Firecrawl); without
+ *    a pin, whichever engine has a key is the engine.
+ *  - An explicit choice does NOT silently fall back to another engine:
  *    engine pinned but its key missing = honestly unavailable (reason
  *    says so) — no guessing what the user meant.
  *
@@ -19,7 +19,7 @@
  * tool depends on the PORT only and tests never touch the network.
  */
 
-import type { SearchEngineId, SearchHit, SearchProvider, SearchStatus } from "../core/search.ts";
+import { SEARCH_ENGINES, type SearchEngineId, type SearchHit, type SearchProvider, type SearchStatus } from "../core/search.ts";
 import { keyValue } from "./keys.ts";
 import { effectiveSettings } from "./stores.ts";
 
@@ -108,20 +108,68 @@ export function braveProvider(apiKey: string, fetchFn: FetchLike = fetch): Searc
 	};
 }
 
-/** The engines this wave ships, in PREFERENCE order (both keys present,
- *  no explicit pin → the first live engine wins; owner decision
- *  2026-09-20: Tavily first — the AI-native search API the wave chose). */
-const ENGINE_ORDER: ReadonlyArray<{ id: SearchEngineId; envVar: string }> = [
-	{ id: "tavily", envVar: "TAVILY_API_KEY" },
-	{ id: "brave", envVar: "BRAVE_API_KEY" },
-];
+/** Firecrawl: POST https://api.firecrawl.dev/v2/search — Bearer auth,
+ *  query + limit (1–100) in the JSON body. No scrapeOptions: a bare search
+ *  costs 2 credits per 10 results, and web_fetch owns page bodies.
+ *  VERIFIED against docs.firecrawl.dev, 2026-10-29: response
+ *  {success, data: {web: [{title, url, description, position}]}}, errors
+ *  {success: false, error}. */
+export function firecrawlProvider(apiKey: string, fetchFn: FetchLike = fetch): SearchProvider {
+	return {
+		id: "firecrawl",
+		async search(query: string, count: number): Promise<SearchHit[]> {
+			const resp = await fetchFn("https://api.firecrawl.dev/v2/search", {
+				method: "POST",
+				headers: {
+					"content-type": "application/json",
+					authorization: `Bearer ${apiKey}`,
+				},
+				body: JSON.stringify({ query, limit: Math.min(count, 100) }),
+				signal: AbortSignal.timeout(30_000),
+			});
+			if (!resp.ok) {
+				const body = await resp.text();
+				// Their error body is {success: false, error: "…"} — surface the
+				// message when present, else the raw slice.
+				let detail = body.slice(0, 200);
+				try {
+					const parsed = JSON.parse(body) as { error?: string };
+					if (parsed.error) detail = parsed.error.slice(0, 200);
+				} catch {
+					/* keep the raw slice */
+				}
+				throw new Error(`Firecrawl search API ${resp.status}: ${detail}`);
+			}
+			const data = (await resp.json()) as {
+				data?: { web?: Array<{ title?: string; url?: string; description?: string }> };
+			};
+			return (data.data?.web ?? [])
+				.filter((r) => typeof r.url === "string" && r.url)
+				.map((r) => ({
+					title: r.title ?? r.url ?? "",
+					url: r.url ?? "",
+					snippet: (r.description ?? "").replace(/\n/g, " ").slice(0, 500),
+				}));
+		},
+	};
+}
 
 /** The engine's key (env-or-file; env wins) — null when the engine is
  *  not keyed, which by owner decision means NOT LIVE. */
 function engineKey(id: SearchEngineId): string | null {
-	const envVar = ENGINE_ORDER.find((e) => e.id === id)?.envVar;
+	const envVar = SEARCH_ENGINES.find((e) => e.id === id)?.envVar;
 	const value = envVar ? keyValue(envVar) : undefined;
 	return value ? value : null;
+}
+
+/** Every engine's live key, read fresh (the resolver's input). */
+function engineKeys(): Partial<Record<SearchEngineId, string>> {
+	const keys: Partial<Record<SearchEngineId, string>> = {};
+	for (const { id } of SEARCH_ENGINES) {
+		const key = engineKey(id);
+		if (key) keys[id] = key;
+	}
+	return keys;
 }
 
 /** Resolve the search state PURELY from the given pins (testable): the
@@ -138,20 +186,20 @@ export function resolveSearchEngineFor(
 			return {
 				available: false,
 				engine: null,
-				reason: `search engine is set to "${pinned}" but its API key is missing — set the ${pinned === "tavily" ? "TAVILY_API_KEY" : "BRAVE_API_KEY"} key`,
+				reason: `search engine is set to "${pinned}" but its API key is missing — set the ${SEARCH_ENGINES.find((e) => e.id === pinned)?.envVar} key`,
 				key: null,
 			};
 		}
 		return { available: true, engine: pinned, reason: `search engine: ${pinned} (chosen)`, key: pinnedKey };
 	}
-	for (const { id } of ENGINE_ORDER) {
+	for (const { id } of SEARCH_ENGINES) {
 		const key = keys[id] ?? null;
 		if (key) return { available: true, engine: id, reason: `search engine: ${id} (auto)`, key };
 	}
 	return {
 		available: false,
 		engine: null,
-		reason: "no search engine configured — set a Tavily or Brave search API key",
+		reason: "no search engine configured — set a Tavily, Brave, or Firecrawl search API key",
 		key: null,
 	};
 }
@@ -162,10 +210,7 @@ export function resolveSearchEngineFor(
 export function searchStatus(): SearchStatus {
 	const { available, engine, reason } = resolveSearchEngineFor(
 		effectiveSettings().agent.search?.engine,
-		{
-			tavily: engineKey("tavily") ?? undefined,
-			brave: engineKey("brave") ?? undefined,
-		},
+		engineKeys(),
 	);
 	return { available, engine, reason };
 }
@@ -180,10 +225,16 @@ export function searchAvailable(): boolean {
  *  the tool layer (Teacher stream) calls this once per search, so key
  *  rotations take effect immediately. */
 export function searchProvider(): SearchProvider | null {
-	const resolved = resolveSearchEngineFor(effectiveSettings().agent.search?.engine, {
-		tavily: engineKey("tavily") ?? undefined,
-		brave: engineKey("brave") ?? undefined,
-	});
+	const resolved = resolveSearchEngineFor(effectiveSettings().agent.search?.engine, engineKeys());
 	if (!resolved.available || !resolved.key) return null;
-	return resolved.engine === "tavily" ? tavilyProvider(resolved.key) : braveProvider(resolved.key);
+	switch (resolved.engine) {
+		case "tavily":
+			return tavilyProvider(resolved.key);
+		case "brave":
+			return braveProvider(resolved.key);
+		case "firecrawl":
+			return firecrawlProvider(resolved.key);
+		default:
+			return null;
+	}
 }

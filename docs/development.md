@@ -31,7 +31,7 @@ Secrets and machine-specific paths may be supplied through the process environme
 | Configuration | Purpose |
 |---|---|
 | Provider-specific API key variables | Optional; needed only for the selected API provider. The supported UI key names are defined in `src/core/auth-keys.ts`. |
-| `TAVILY_API_KEY` / `BRAVE_API_KEY` | Optional search adapters. Research remains available without a search key and can fetch known URLs. |
+| `TAVILY_API_KEY` / `BRAVE_API_KEY` / `FIRECRAWL_API_KEY` | Optional search adapters; any one key activates its engine (automatic order Tavily → Brave → Firecrawl unless Settings pins one). Research remains available without a search key and can fetch known URLs. |
 | `DEEPGRAM_API_KEY` | Optional dictation: short-lived token minting on the server; audio streams directly from the browser to Deepgram. |
 | `CHROME_PATH` | Optional Chrome/Chromium executable fallback for demo verification. The Electron browser helper is primary; no extra Chromium is downloaded. PDFs/SVGs use native rendering. |
 | `LH_DATA_DIR` | Relocates mutable chats, jobs, graph, settings and prompt overrides; default is repo `data/`. |
