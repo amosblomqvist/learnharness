@@ -1,6 +1,7 @@
+import { withUser } from "@/src/server/auth/context.ts";
 import { compactionInFlight, deleteChatSession, getChat, isTurnRunning, sessionCoverage, sessionCost, stores, turnFailure, type ChatDeleteMode } from "@/src/server";
 
-export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
+export const GET = withUser(async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
 	const { id } = await params;
 	const chat = getChat(id);
 	if (!chat) return Response.json({ error: "Not found" }, { status: 404 });
@@ -24,7 +25,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
 		compacting: compactionInFlight(id),
 		coverage: sessionCoverage(id),
 	});
-}
+});
 
 /**
  * Rename (2026-09-17): the header's click-to-edit title commits here.
@@ -33,7 +34,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
  * deliberately NOT bumped: a rename must not reorder the sidebar (same
  * rule as the settings PUT).
  */
-export async function PUT(req: Request, { params }: { params: Promise<{ id: string }> }) {
+export const PUT = withUser(async function PUT(req: Request, { params }: { params: Promise<{ id: string }> }) {
 	const { id } = await params;
 	if (!getChat(id)) return Response.json({ error: "Not found" }, { status: 404 });
 	const body = (await req.json().catch(() => null)) as { title?: unknown } | null;
@@ -43,7 +44,7 @@ export async function PUT(req: Request, { params }: { params: Promise<{ id: stri
 	const title = body.title.trim();
 	const record = stores.chatStore.renameChat(id, title);
 	return Response.json({ title: record.title });
-}
+});
 
 /**
  * DELETE /api/chats/[id]?mode=preserve-graph|delete-nodes — session deletion
@@ -65,7 +66,7 @@ export async function PUT(req: Request, { params }: { params: Promise<{ id: stri
  * response carries what was removed plus the new graphRevision (the
  * version stamp the UI polls to refetch clusters/layout).
  */
-export async function DELETE(req: Request, { params }: { params: Promise<{ id: string }> }) {
+export const DELETE = withUser(async function DELETE(req: Request, { params }: { params: Promise<{ id: string }> }) {
 	const { id } = await params;
 	const mode = new URL(req.url).searchParams.get("mode");
 	if (mode !== "preserve-graph" && mode !== "delete-nodes") {
@@ -95,5 +96,5 @@ export async function DELETE(req: Request, { params }: { params: Promise<{ id: s
 		jobsRemoved: outcome.jobsRemoved,
 		graphRevision: outcome.graphRevision,
 	});
-}
+});
 

@@ -1,3 +1,4 @@
+import { withUser } from "@/src/server/auth/context.ts";
 import { isTurnRunning, listJobs } from "@/src/server";
 
 export const dynamic = "force-dynamic";
@@ -11,7 +12,7 @@ export const dynamic = "force-dynamic";
  * and the re-sync when a job settles. `turnInFlight` rides along for the
  * settle logic's idle check.
  */
-export async function GET(req: Request) {
+export const GET = withUser(async function GET(req: Request) {
 	const chatId = new URL(req.url).searchParams.get("chatId");
 	if (!chatId) {
 		return Response.json({ error: "chatId query parameter is required" }, { status: 400 });
@@ -20,4 +21,4 @@ export async function GET(req: Request) {
 		return Response.json({ error: "Invalid chatId" }, { status: 400 });
 	}
 	return Response.json({ jobs: listJobs(chatId), turnInFlight: isTurnRunning(chatId) });
-}
+});

@@ -29,6 +29,7 @@ import { blurAfterPointerClick } from "@/components/focus-hygiene";
 import { dockStateKey } from "@/components/dock-state-key";
 import { clearOpeningPrompt, readOpeningPromptEntry, stashOpeningPrompt, OPENING_PROMPT_FAILURE } from "@/components/opening-prompt";
 import { forwardDockWheel, useDockHeight } from "@/components/dock-height";
+import { useIsMobile } from "@/components/use-is-mobile";
 import { QueuedSteersBody, type QueuedSteerLine } from "@/components/queued-steers";
 import { DictationBar, finishDictation, joinDictation, useDictation } from "@/components/dictation";
 import { useFieldCycle } from "@/components/field-cycle";
@@ -1315,12 +1316,12 @@ export function Chat({
 								spellCheck={false}
 								aria-label="Session title"
 								title="Rename this session"
-								className="lh-no-drag min-w-[8ch] max-w-[70%] shrink-0 bg-transparent font-title text-3xl tracking-tight caret-current outline-none [field-sizing:content]"
+								className="lh-no-drag min-w-[8ch] max-w-[70%] shrink-0 bg-transparent font-title text-3xl tracking-tight caret-current outline-none [field-sizing:content] max-md:text-xl"
 							/>
 							{/* flex-1 spacer during rename too, so the chips stay at
 							    the right edge; clicks here commit via the header
 							    mousedown handler. */}
-							<div className="min-w-4 flex-1" aria-hidden="true" />
+							<div className="min-w-4 flex-1 max-md:hidden" aria-hidden="true" />
 						</>
 					) : (
 					<>
@@ -1336,14 +1337,15 @@ export function Chat({
 								setTitleDraft(titleText);
 								setRenaming(true);
 							}}
-							className="lh-no-drag -mx-1.5 min-w-4 shrink cursor-text truncate rounded-md px-1.5 text-left font-title text-3xl tracking-tight transition-colors hover:bg-accent"
+							className="lh-no-drag -mx-1.5 min-w-4 shrink cursor-text truncate rounded-md px-1.5 text-left font-title text-3xl tracking-tight transition-colors hover:bg-accent max-md:min-w-0 max-md:flex-1 max-md:text-xl"
 						>
 							{titleText}
 							</button>
 						</Hint>
 							{/* flex-1 spacer: keeps the chips at the right edge AND stays a
-							    drag surface (no carve-out) — the freed bar is grippable. */}
-							<div className="min-w-4 flex-1" aria-hidden="true" />
+							    drag surface (no carve-out) — the freed bar is grippable.
+							    On a phone it would halve the title's width, so it goes. */}
+							<div className="min-w-4 flex-1 max-md:hidden" aria-hidden="true" />
 					</>
 					)}
 					{/* The plan chip (owner, plan-placement round): session-level
@@ -1375,19 +1377,21 @@ export function Chat({
 					{kind !== "practice" && <CoverageRing chatId={chatId} refreshKey={coverageTick} />}
 					{/* Practice sessions: no phase arc — a quiet Practice tag
 					    instead of the phase chip. */}
-					{kind === "practice" ? (
-						<span
-							data-testid="phase-chip"
-							data-phase="practice"
-							aria-hidden="true"
-							className="pointer-events-none flex shrink-0 select-none items-center gap-1 text-xs font-medium uppercase tracking-wide text-muted-foreground"
-						>
-							<DumbbellIcon className="size-3" />
-							Practice
-						</span>
-					) : (
-						<PhaseChip phase={phases.at(-1) ?? "probe"} />
-					)}
+					<span className="max-md:hidden">
+						{kind === "practice" ? (
+							<span
+								data-testid="phase-chip"
+								data-phase="practice"
+								aria-hidden="true"
+								className="pointer-events-none flex shrink-0 select-none items-center gap-1 text-xs font-medium uppercase tracking-wide text-muted-foreground"
+							>
+								<DumbbellIcon className="size-3" />
+								Practice
+							</span>
+						) : (
+							<PhaseChip phase={phases.at(-1) ?? "probe"} />
+						)}
+					</span>
 				</TopBar>
 
 				<SessionFind scopeRef={sessionFindScopeRef} scrollContextRef={scrollContextRef} />
@@ -2131,6 +2135,9 @@ function DockOverlay({
 	// effect below. Short windows scroll the reading/question/answer body;
 	// the stats/model toolbar remains outside that overflow viewport.
 	const [sbInset, setSbInset] = useState(0);
+	// Phone: the sidebar is a drawer over the page, so the dock spans the full
+	// width; the sheet sits on the safe area instead.
+	const mobileDock = useIsMobile();
 	useDockHeight({
 		scrollRef, blockRef, viewportRef, bodyRef, shellRef, contentRef,
 		expanded, enabled: !!pending || !!practice, mode, onScrollbarInset: setSbInset, onHeight: offer,
@@ -2331,9 +2338,15 @@ function DockOverlay({
 	});
 
 	return (
-		<div className="pointer-events-none absolute inset-x-0 bottom-0" style={{ right: sbInset }}>
-			<div className="h-24 bg-gradient-to-t from-background via-background/85 to-transparent" />
-			<div ref={blockRef} className="relative bg-background pb-5">
+		<div
+			className="pointer-events-none absolute inset-x-0 bottom-0 max-md:fixed max-md:z-30"
+			style={{ right: mobileDock ? 0 : sbInset }}
+		>
+			<div className="h-24 bg-gradient-to-t from-background via-background/85 to-transparent max-md:hidden" />
+			<div
+				ref={blockRef}
+				className="relative bg-background pb-5 max-md:rounded-t-2xl max-md:border-t max-md:border-border max-md:pb-[calc(1rem+env(safe-area-inset-bottom))] max-md:shadow-[0_-8px_24px_-12px_rgba(0,0,0,0.6)]"
+			>
 				<div className={DOCK}>
 					<div ref={viewportRef} data-dock-viewport="" className="pointer-events-auto">
 					<div ref={bodyRef}>

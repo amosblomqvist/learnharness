@@ -1,3 +1,4 @@
+import { withUser } from "@/src/server/auth/context.ts";
 import { graphView } from "@/src/server";
 
 /**
@@ -8,6 +9,6 @@ import { graphView } from "@/src/server";
 
 export const dynamic = "force-dynamic";
 
-export async function GET() {
+export const GET = withUser(async function GET() {
 	return Response.json(graphView());
-}
+});

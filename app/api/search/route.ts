@@ -1,3 +1,4 @@
+import { withUser } from "@/src/server/auth/context.ts";
 /**
  * GET /api/search — the search engines' status (search wave, 2026-09-20):
  * the honest availability signal the settings UI explains from (the
@@ -13,6 +14,6 @@ import { searchStatus } from "@/src/server";
 
 export const dynamic = "force-dynamic";
 
-export async function GET() {
+export const GET = withUser(async function GET() {
 	return Response.json(searchStatus());
-}
+});

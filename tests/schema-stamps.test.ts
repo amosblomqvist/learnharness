@@ -24,7 +24,8 @@ process.env.LH_DATA_DIR = TMP_DATA;
 const { chatStore } = await import("../src/store/chats.ts");
 const { graphStore } = await import("../src/store/graph.ts");
 const { readRenderSettings, writeRenderSettings } = await import("../src/store/render-settings.ts");
-const { GRAPH_FORMAT_FILE } = await import("../config.ts");
+const { graphFormatFile } = await import("../config.ts");
+const GRAPH_FORMAT_FILE = graphFormatFile();
 
 test.after(() => {
 	fs.rmSync(TMP_DATA, { recursive: true, force: true });
