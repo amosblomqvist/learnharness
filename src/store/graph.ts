@@ -36,6 +36,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { LEDGER_FILES, POSITIONS_FILE, SOURCES_FILE } from "../../config.ts";
 import { assertGraphFormat, ensureGraphFormat } from "./graph-format.ts";
+import { writeFileAtomicSync } from "./atomic-write.ts";
 import type {
 	GraphChain,
 	GraphNode,
@@ -321,7 +322,7 @@ function readSourceMap(): Record<string, NotesSource> {
 function writeSourceMap(map: Record<string, NotesSource>): void {
 	fs.mkdirSync(path.dirname(SOURCES_FILE), { recursive: true });
 	ensureGraphFormat(); // the lazy format stamp (graph-format.ts)
-	fs.writeFileSync(SOURCES_FILE, JSON.stringify(map, null, "\t"), "utf-8");
+	writeFileAtomicSync(SOURCES_FILE, JSON.stringify(map, null, "\t"));
 }
 
 // ─── one-way purges at adapter load: dead ledgers are exactly the confusion
