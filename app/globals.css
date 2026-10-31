@@ -65,6 +65,13 @@
 	--lh-prose-leading: 1.5;
 	/* Markdown heading weight (appearance settings; 900 = the Black cut). */
 	--lh-heading-weight: 900;
+	/* Markdown alignment (appearance settings; left = today's look). The
+	   box margin pushes content-hugging tables/callouts right for Right;
+	   Center caps the transcript column instead (none = full width). */
+	--lh-md-align: left;
+	--lh-md-hyphens: manual;
+	--lh-md-box-ml: 0;
+	--lh-chat-column-max: none;
 }
 
 /* The app is always dark (<html class="dark">); mirror the same values so
@@ -100,6 +107,13 @@
 	--lh-prose-leading: 1.5;
 	/* Markdown heading weight (appearance settings; 900 = the Black cut). */
 	--lh-heading-weight: 900;
+	/* Markdown alignment (appearance settings; left = today's look). The
+	   box margin pushes content-hugging tables/callouts right for Right;
+	   Center caps the transcript column instead (none = full width). */
+	--lh-md-align: left;
+	--lh-md-hyphens: manual;
+	--lh-md-box-ml: 0;
+	--lh-chat-column-max: none;
 }
 
 /* CMU Serif bold (titles) — bundled local file, no CDN dependency. */
@@ -231,6 +245,49 @@ body {
    under .lh-prose and stay untouched. */
 .lh-prose :where(h1, h2, h3, h4, h5, h6) {
 	font-weight: var(--lh-heading-weight, 900);
+}
+
+/* Markdown alignment (owner, 2026-10-30): RENDERED markdown only — the
+   Streamdown roots carry .lh-md (replies, teaching/practice content, job
+   briefs, reasoning); user-typed .lh-prose text never does. Paragraphs,
+   headings, lists, quotes/callouts, table cells, and images inherit.
+   Explicit GFM column alignment is an inline style and still wins.
+   Center is not here: it keeps the text left and narrows the column. */
+.lh-md {
+	text-align: var(--lh-md-align);
+	hyphens: var(--lh-md-hyphens);
+}
+
+/* Streamdown pins header cells text-left; unlayered CSS beats the utility
+   layer, so headers follow the body cells. */
+.lh-md :where([data-streamdown="table-header-cell"]) {
+	text-align: inherit;
+}
+
+/* Tables and callouts HUG their content, so aligning their text alone
+   barely shows: Right moves the box itself (owner ruling). */
+.lh-md :where([data-streamdown="table"], [data-alert-kind]) {
+	margin-left: var(--lh-md-box-ml);
+}
+
+/* Center (owner revision, 2026-10-30 — Obsidian's readable line length):
+   the whole transcript column (user messages, reasoning, replies, cards)
+   narrows to the chosen width and stays centered by its mx-auto; the
+   text inside stays left-aligned. The composer dock is not this column. */
+.lh-chat-column {
+	max-width: var(--lh-chat-column-max);
+}
+
+/* Justify's hyphenation stays out of headings, code, and math — a split
+   token in code or TeX is a wrong token. */
+.lh-md :where(h1, h2, h3, h4, h5, h6, code, .katex) {
+	hyphens: manual;
+}
+
+/* Code blocks and diagrams keep today's layout under every alignment. */
+.lh-md :where([data-streamdown="code-block"], [data-streamdown="mermaid"]) {
+	text-align: left;
+	hyphens: manual;
 }
 
 /* lh-input (owner, typography round 2): lh-prose's 1.5 READING leading

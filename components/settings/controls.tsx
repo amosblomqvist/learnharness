@@ -9,7 +9,7 @@
  * control together) and the control itself locks — the row owns the dim.
  */
 
-import { useState, type ComponentPropsWithRef, type ReactNode } from "react";
+import { useState, type ComponentPropsWithRef, type ComponentType, type ReactNode } from "react";
 import { cn } from "@/lib/utils";
 
 /** A section block: pronounced mono heading + content. */
@@ -199,6 +199,59 @@ export function ThinSelect({
 		>
 			{children}
 		</select>
+	);
+}
+
+/** A one-of-N picker (text-alignment wave, owner 2026-10-30): a
+ *  ThinSelect-height pill of buttons in the radio role, the chosen one
+ *  raised. An option with an icon shows only the icon (its label rides
+ *  aria-label); without one it shows its label as a word. The native
+ *  tooltip is the option's title, else its label. */
+export function SegmentedControl<V extends string>({
+	value,
+	options,
+	onChange,
+	ariaLabel,
+	testid,
+}: {
+	value: V;
+	options: readonly { value: V; label: string; icon?: ComponentType<{ className?: string }>; title?: string }[];
+	onChange: (next: V) => void;
+	ariaLabel: string;
+	testid?: string;
+}) {
+	return (
+		<div
+			role="radiogroup"
+			aria-label={ariaLabel}
+			data-testid={testid}
+			className="flex h-7 items-center gap-0.5 rounded-sm border border-border bg-background p-0.5"
+		>
+			{options.map((o) => {
+				const checked = o.value === value;
+				return (
+					<button
+						key={o.value}
+						type="button"
+						role="radio"
+						aria-checked={checked}
+						aria-label={o.label}
+						title={o.title ?? o.label}
+						data-testid={testid ? `${testid}-${o.value}` : undefined}
+						onClick={() => {
+							if (!checked) onChange(o.value);
+						}}
+						className={cn(
+							"flex h-5.5 items-center justify-center rounded-[3px] transition-colors",
+							o.icon ? "w-5.5" : "px-2 font-ui text-xs",
+							checked ? "bg-accent text-foreground" : "text-muted-foreground hover:text-foreground",
+						)}
+					>
+						{o.icon ? <o.icon className="size-3.5" /> : o.label}
+					</button>
+				);
+			})}
+		</div>
 	);
 }
 

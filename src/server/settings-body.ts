@@ -22,10 +22,12 @@ import type {
 	GeneralSettings,
 	DictationSettings,
 	GraphSettings,
+	MdCenterWidth,
+	MdTextAlign,
 	ModelsSettings,
 	RoleModelOverride,
 } from "../core/settings.ts";
-import { BACKGROUND_MODEL_ROLES, COMPACTION_THRESHOLD_FLOOR, CUSTOM_MODEL_PIN_FLOOR, EXTRACTION_CHUNK_TOKENS_FLOOR, MODEL_SLOTS } from "../core/settings.ts";
+import { BACKGROUND_MODEL_ROLES, COMPACTION_THRESHOLD_FLOOR, CUSTOM_MODEL_PIN_FLOOR, EXTRACTION_CHUNK_TOKENS_FLOOR, MD_CENTER_WIDTHS, MD_TEXT_ALIGNS, MODEL_SLOTS } from "../core/settings.ts";
 import { WRITABLE_TOOL_KEYS } from "../core/pending.ts";
 import { isDictationLanguage } from "../core/dictation.ts";
 
@@ -220,7 +222,8 @@ function parseHexOrNull(value: unknown, field: string): { color?: string | null;
 }
 
 /** appearance: { mode?, background?, fontFamily?, proseFontSize?,
- *  sessionNameSerif?, mdRendering? } */
+ *  sessionNameSerif?, mdRendering? } — mdRendering: { headingWeight?,
+ *  boldColor?, italicColor?, textAlign?, centerWidth? } */
 export function parseAppearanceSettingsBody(body: unknown): SettingsBodyResult<AppearanceSettings> {
 	const raw = asRecord(body);
 	if (!raw) return { ok: false, error: "Invalid JSON body" };
@@ -283,6 +286,18 @@ export function parseAppearanceSettingsBody(body: unknown): SettingsBodyResult<A
 			const parsed = parseHexOrNull(md.italicColor, "mdRendering.italicColor");
 			if (parsed.error) return { ok: false, error: parsed.error };
 			rendering.italicColor = parsed.color ?? null;
+		}
+		if (md.textAlign !== undefined) {
+			if (!(MD_TEXT_ALIGNS as readonly unknown[]).includes(md.textAlign)) {
+				return { ok: false, error: `mdRendering.textAlign must be one of ${MD_TEXT_ALIGNS.join(", ")}` };
+			}
+			rendering.textAlign = md.textAlign as MdTextAlign;
+		}
+		if (md.centerWidth !== undefined) {
+			if (typeof md.centerWidth !== "string" || !Object.hasOwn(MD_CENTER_WIDTHS, md.centerWidth)) {
+				return { ok: false, error: `mdRendering.centerWidth must be one of ${Object.keys(MD_CENTER_WIDTHS).join(", ")}` };
+			}
+			rendering.centerWidth = md.centerWidth as MdCenterWidth;
 		}
 		if (Object.keys(rendering).length) settings.mdRendering = rendering;
 	}

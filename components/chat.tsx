@@ -92,7 +92,9 @@ import { currentUserThinkingOpen, setAllUserThinkingOpen } from "@/components/th
  * deliberately narrower (~46rem centered) per the reference. Same ELEMENT,
  * same place — width polish only.
  */
-const COLUMN = "mx-auto w-full max-w-none px-6";
+// lh-chat-column: the Center alignment's hook — globals.css caps this
+// column by --lh-chat-column-max (unset = none = full width as above).
+const COLUMN = "lh-chat-column mx-auto w-full max-w-none px-6";
 const DOCK = "mx-auto w-full max-w-[46rem] px-4";
 // The DOCK container's fixed width (46rem) and the plan marginalia's
 // geometry (owner, plan-placement round): the bare diagram sits in the

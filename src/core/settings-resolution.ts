@@ -208,6 +208,8 @@ export function resolveSettings(record: UserSettings | null): EffectiveSettings 
 				headingWeight: md.headingWeight ?? factoryMd.headingWeight,
 				boldColor: md.boldColor ?? factoryMd.boldColor,
 				italicColor: md.italicColor ?? factoryMd.italicColor,
+				textAlign: md.textAlign ?? factoryMd.textAlign,
+				centerWidth: md.centerWidth ?? factoryMd.centerWidth,
 			},
 		},
 		graph: {
