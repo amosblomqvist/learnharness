@@ -125,8 +125,8 @@ function isSymlink(file: string): boolean {
 
 function removeTemp(tmp: string): void {
 	try {
-		fs.rmSync(tmp, { force: true });
+		fs.unlinkSync(tmp); // not rmSync: on Node 25 for Windows it silently skips paths with non-ASCII characters
 	} catch (error) {
-		console.warn(`[store] could not remove temp file ${tmp}:`, error); // harmless: listings skip it
+		if ((error as NodeJS.ErrnoException).code !== "ENOENT") console.warn(`[store] could not remove temp file ${tmp}:`, error); // harmless: listings skip it
 	}
 }

@@ -18,8 +18,8 @@ const root = fs.mkdtempSync(path.join(os.tmpdir(), "lh-atomic-write-"));
 after(() => fs.rmSync(root, { recursive: true, force: true }));
 const onWindows = { skip: process.platform !== "win32" && "Windows rename semantics" };
 
-function target(name: string, text?: string): string {
-	const dir = fs.mkdtempSync(path.join(root, "case-"));
+function target(name: string, text?: string, folder = "case-"): string {
+	const dir = fs.mkdtempSync(path.join(root, folder));
 	const file = path.join(dir, name);
 	if (text !== undefined) fs.writeFileSync(file, text);
 	return file;
@@ -39,6 +39,14 @@ describe("writeFileAtomicSync", () => {
 		const file = target("new.json");
 		writeFileAtomicSync(file, "{}");
 		assert.equal(fs.readFileSync(file, "utf-8"), "{}");
+	});
+
+	it("failed saves in folders with non-ASCII characters leave no temp file", (t) => {
+		const file = target("record.json", "old", "José-日本-");
+		t.mock.method(fs, "renameSync", () => { throw fail("EIO"); });
+		assert.throws(() => writeFileAtomicSync(file, "new"), { code: "EIO" });
+		assert.equal(fs.readFileSync(file, "utf-8"), "old");
+		assert.deepEqual(temps(file), []);
 	});
 
 	it("failed renames throw their own error and keep the old file whole", (t) => {
@@ -73,6 +81,20 @@ describe("writeFileAtomicSync", () => {
 		writeFileAtomicSync(file, "new");
 		assert.equal(fs.readFileSync(file, "utf-8"), "new");
 		assert.deepEqual(temps(file), []);
+		assert.equal(warn.mock.callCount(), 0, "the rename landed; no in-place fallback");
+	});
+
+	it("Windows: new files whose temp is briefly held still land by rename", onWindows, (t) => {
+		const file = target("new.json");
+		const rename = fs.renameSync;
+		let refusals = 2;
+		t.mock.method(fs, "renameSync", (...args: Parameters<typeof rename>) => {
+			if (refusals-- > 0) throw fail("EPERM"); // scanners holding the fresh temp file
+			return rename(...args);
+		});
+		const warn = t.mock.method(console, "warn", () => {});
+		writeFileAtomicSync(file, "new");
+		assert.equal(fs.readFileSync(file, "utf-8"), "new");
 		assert.equal(warn.mock.callCount(), 0, "the rename landed; no in-place fallback");
 	});
 
@@ -166,6 +188,13 @@ describe("removeLeftoverTemps", () => {
 		for (const name of ["chat_a.json.tmp-1", "chat_a.json.tmp-2", "chat_ab.json.tmp-3", "chat_b.json"]) fs.writeFileSync(path.join(dir, name), "x");
 		removeLeftoverTemps(file);
 		assert.deepEqual(fs.readdirSync(dir).sort(), ["chat_a.json", "chat_ab.json.tmp-3", "chat_b.json"]);
+	});
+
+	it("works in folders with non-ASCII characters", () => {
+		const file = target("chat_a.json", "{}", "José-日本-");
+		fs.writeFileSync(`${file}.tmp-1`, "x");
+		removeLeftoverTemps(file);
+		assert.deepEqual(temps(file), []);
 	});
 
 	it("does nothing when the folder is gone", () => {
