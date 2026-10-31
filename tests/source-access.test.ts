@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import * as fs from "node:fs/promises";
+import { realpathSync } from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { after, describe, it } from "node:test";
@@ -58,7 +59,7 @@ await write("keyfiles/custom-keys.json.backup-not-managed", "ordinary file\n");
 await write("unrelated/.ssh/notes.md", "ordinary outside-home directory\n");
 for (const name of [".env", ".env.example", ".env.template", ".ENV.production"]) await write(`elsewhere/${name}`);
 
-const { isSensitivePath, resolveSourcePath, walkFiles } = await import("../src/agent/tools/fs-shared.ts");
+const { isSensitivePath, resolveSourcePath, sensitiveHomeLocations, walkFiles } = await import("../src/agent/tools/fs-shared.ts");
 const { readTool, createReadTool } = await import("../src/agent/tools/read.ts");
 const { lsTool } = await import("../src/agent/tools/ls.ts");
 const { findTool } = await import("../src/agent/tools/find.ts");
@@ -218,6 +219,123 @@ describe("source access: canonical roots and all tool paths", () => {
 			assert.deepEqual(result.pagesConsulted, []);
 		}
 		assert.equal(modelCalls, 0);
+	});
+});
+
+describe("source access: case-sensitive home-location variants", () => {
+	it("expands every matching spelling at every segment, including coexisting case variants", () => {
+		const listings = new Map([
+			[home, [".ssh", ".SSH", ".config", ".CONFIG", ".claudette"]],
+			[path.join(home, ".config"), ["gcloud"]],
+			[path.join(home, ".CONFIG"), ["gcloud", "GCLOUD"]],
+		]);
+		const reads = new Map<string, number>();
+		const roots = sensitiveHomeLocations(home, (directory) => {
+			reads.set(directory, (reads.get(directory) ?? 0) + 1);
+			return listings.get(directory) ?? [];
+		});
+		for (const relative of [".ssh", ".SSH", ".config/gcloud", ".CONFIG/gcloud", ".CONFIG/GCLOUD"]) {
+			assert.ok(roots.includes(path.join(home, relative)), relative);
+		}
+		assert.ok(!roots.includes(path.join(home, ".claudette")));
+		assert.ok([...reads.values()].every((count) => count === 1), "parent listings are cached per policy snapshot");
+	});
+
+	it("modeled case-sensitive lookup denies canonical targets of case-variant single/multi-segment roots", async (t) => {
+		const ssh = path.join(home, ".ssh");
+		const saved = path.join(root, "saved-ssh");
+		const upperSsh = path.join(home, ".SSH");
+		const upperConfig = path.join(home, ".CONFIG");
+		const vault = path.join(root, "variant-vault");
+		const cloudVault = path.join(root, "variant-cloud-vault");
+		await write("variant-vault/key", "CASE_VARIANT_SECRET\n");
+		await write("variant-cloud-vault/key", "CASE_VARIANT_SECRET\n");
+		await fs.rename(ssh, saved);
+		await link(vault, upperSsh, true);
+		await fs.mkdir(upperConfig);
+		await link(cloudVault, path.join(upperConfig, "GCLOUD"), true);
+		const native = realpathSync.native;
+		// Make the missing lowercase spellings genuinely miss even on the
+		// host's case-insensitive volume. All other IO uses the real synthetic
+		// files. This models Linux lookup, not a claimed native Linux run.
+		t.mock.method(realpathSync, "native", (file: string) => {
+			if ([ssh, path.join(home, ".config")].some((prefix) => file === prefix || file.startsWith(prefix + path.sep))) {
+				throw Object.assign(new Error("synthetic case-sensitive ENOENT"), { code: "ENOENT" });
+			}
+			return native(file);
+		});
+		try {
+			for (const folder of [upperSsh, path.join(upperConfig, "GCLOUD"), vault, cloudVault]) {
+				await assert.rejects(readTool.execute!("case-root", { path: path.join(folder, "key") }), denied);
+				await assert.rejects(lsTool.execute!("case-root", { path: folder }), denied);
+				await assert.rejects(findTool.execute!("case-root", { path: folder, pattern: "*" }), denied);
+				await assert.rejects(grepTool.execute!("case-root", { path: folder, pattern: "CASE_VARIANT_SECRET" }), denied);
+				await assert.rejects(walkFiles(folder, () => assert.fail("protected target must not be visited")), denied);
+				const pdf = await runPdfReaderAgent({ path: path.join(folder, "key"), question: "synthetic" });
+				assert.match(pdf.brief, /^PDF failed: Access denied:/);
+			}
+			assert.equal(await text(grepTool, { path: root, pattern: "CASE_VARIANT_SECRET" }), "No matches found");
+			assert.match(await text(readTool, { path: "notes/topic.md" }), /ordinary study notes/);
+		} finally {
+			t.mock.restoreAll();
+			await fs.unlink(upperSsh);
+			await fs.rm(upperConfig, { recursive: true });
+			await fs.rename(saved, ssh);
+			await fs.rm(vault, { recursive: true });
+			await fs.rm(cloudVault, { recursive: true });
+		}
+	});
+});
+
+describe("source access: credential case aliases on the fixture filesystem", () => {
+	async function caseAliasesAvailable(): Promise<boolean> {
+		try {
+			const [named, alias] = await Promise.all([fs.stat(path.join(root, "keyfiles")), fs.stat(path.join(root, "KEYFILES"))]);
+			return named.dev === alias.dev && named.ino === alias.ino;
+		} catch { return false; }
+	}
+
+	it("refuses differently cased credential filenames, directories, real targets and temporary files", async (t) => {
+		if (!await caseAliasesAvailable()) return t.skip("fixture filesystem is case-sensitive");
+		const aliases = [
+			path.join(root, "keyfiles", "CHATGPT-CREDENTIALS.JSON"),
+			path.join(root, "KEYFILES", "github-copilot-credentials.json"),
+			path.join(root, "KEYFILES", "XAI-CREDENTIALS.JSON"),
+			path.join(root, "RELOCATED-TOKEN"),
+			path.join(root, "KEYFILES", ".auth.json.tmp-123"),
+			path.join(root, "KEYFILES", `chatgpt-credentials.json.${uuid}.tmp`),
+		];
+		for (const alias of aliases) {
+			if (process.platform === "darwin") {
+				const original = path.join(root, path.relative(root, alias).toLowerCase());
+				assert.equal(realpathSync.native(alias), realpathSync.native(original), "native realpath canonicalizes these synthetic case aliases on this Mac");
+			}
+			await assert.rejects(readTool.execute!("case-alias", { path: alias }), denied);
+			await assert.rejects(grepTool.execute!("case-alias", { path: alias, pattern: "LH_SYNTHETIC_SECRET_MARKER" }), denied);
+			const pdf = await runPdfReaderAgent({ path: alias, question: "synthetic" });
+			assert.match(pdf.brief, /^PDF failed: Access denied:/);
+		}
+		assert.equal(await text(grepTool, { path: path.join(root, "KEYFILES"), pattern: "LH_SYNTHETIC_SECRET_MARKER" }), "No matches found");
+		const found = await text(findTool, { path: path.join(root, "KEYFILES"), pattern: "*" });
+		assert.doesNotMatch(found, /credentials\.json|\.auth\.json\.tmp/);
+		assert.match(found, /data\/chats\/session\.json/);
+	});
+
+	it("protects a non-symlink configured AUTH_FILE regardless of filename or parent-directory case", async (t) => {
+		if (!await caseAliasesAvailable()) return t.skip("fixture filesystem is case-sensitive");
+		await fs.unlink(auth);
+		await fs.writeFile(auth, "LH_SYNTHETIC_SECRET_MARKER\n");
+		try {
+			for (const alias of [path.join(root, "keyfiles", "CUSTOM-KEYS.JSON"), path.join(root, "KEYFILES", "custom-keys.json")]) {
+				await assert.rejects(readTool.execute!("case-auth", { path: alias }), denied);
+				await assert.rejects(grepTool.execute!("case-auth", { path: alias, pattern: "LH_SYNTHETIC_SECRET_MARKER" }), denied);
+				const pdf = await runPdfReaderAgent({ path: alias, question: "synthetic" });
+				assert.match(pdf.brief, /^PDF failed: Access denied:/);
+			}
+		} finally {
+			await fs.unlink(auth);
+			await link(targetKey, auth);
+		}
 	});
 });
 

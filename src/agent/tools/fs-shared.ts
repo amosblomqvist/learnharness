@@ -153,11 +153,41 @@ function protectedRealPath(absolute: string): string {
 	try { return realOrMissing(absolute); } catch { return absolute; }
 }
 
+/** Expand actual spellings of each protected home location, segment by
+ *  segment. On a case-sensitive filesystem .ssh and .SSH can BOTH exist
+ *  and lead to different targets; named and canonical denials must agree.
+ *  Only list the fixed locations' parent directories, never file contents.
+ *  The directory-reader argument lets tests model case-sensitive listings
+ *  on any host, without mounting a volume or touching real private paths. */
+export function sensitiveHomeLocations(
+	home: string,
+	readDirectory: (directory: string) => readonly string[] = (directory) => fsSync.readdirSync(/* turbopackIgnore: true */ directory),
+): string[] {
+	const listings = new Map<string, readonly string[]>();
+	const entries = (directory: string): readonly string[] => {
+		if (!listings.has(directory)) {
+			try { listings.set(directory, readDirectory(directory)); }
+			catch { listings.set(directory, []); }
+		}
+		return listings.get(directory)!;
+	};
+	return SENSITIVE_HOME_PATHS.flatMap((location) => {
+		let candidates = [home];
+		for (const segment of location.split("/")) {
+			candidates = candidates.flatMap((parent) => {
+				const variants = entries(parent).filter((entry) => entry.toLowerCase() === segment.toLowerCase());
+				return (variants.length ? variants : [segment]).map((name) => path.join(/* turbopackIgnore: true */ parent, name));
+			});
+		}
+		return candidates;
+	});
+}
+
 /** One snapshot per resolution/walk, not per visited entry. Resolve protected
  *  roots too: a sensitive directory or AUTH_FILE can itself be a symlink to
  *  a location outside home. Never read credential contents or app records. */
 function sourcePathCheck(home = os.homedir()): (absolute: string) => boolean {
-	const homeRoots = SENSITIVE_HOME_PATHS.map((p) => protectedRealPath(path.join(/* turbopackIgnore: true */ home, p)));
+	const homeRoots = sensitiveHomeLocations(home).map(protectedRealPath);
 	const files = credentialFiles(AUTH_FILE).map(protectedRealPath);
 	const credentialDir = protectedRealPath(path.dirname(AUTH_FILE));
 	return (absolute) => isSensitivePath(absolute, home) ||
