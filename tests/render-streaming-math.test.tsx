@@ -5,12 +5,13 @@ import { describe, it } from "node:test";
 import { renderToStaticMarkup } from "react-dom/server";
 import { createRoot } from "react-dom/client";
 import { parseHTML } from "linkedom";
-import { MessageResponse, ToolContentResponse } from "../components/ai-elements/message.tsx";
+import { AssistantTextResponse, MessageResponse, ToolContentResponse } from "../components/ai-elements/message.tsx";
 import { Reasoning, ReasoningContent } from "../components/ai-elements/reasoning.tsx";
 import { transformMathDelimiters } from "../src/core/math-delims.ts";
 
 const surfaces = {
 	message: (source: string) => <MessageResponse>{source}</MessageResponse>,
+	assistant: (source: string) => <AssistantTextResponse>{source}</AssistantTextResponse>,
 	tool: (source: string) => <ToolContentResponse>{source}</ToolContentResponse>,
 	reasoning: (source: string) => <Reasoning open><ReasoningContent>{source}</ReasoningContent></Reasoning>,
 };
@@ -137,4 +138,12 @@ it("retains less-than prefixes through mounted streaming updates on every entry 
 			else Reflect.deleteProperty(globalThis, key);
 		}
 	}
+});
+
+it("heals doubled command backslashes in assistant prose in the default streaming mode (#111)", () => {
+	const tex = String.raw`\frac{\partial L}{\partial w} = \frac{\partial L}{\partial a}`;
+	const document = documentFor(<AssistantTextResponse>{`$$\n${tex.replace(/\\/g, "\\\\")}\n$$\n\nTAIL`}</AssistantTextResponse>);
+	assert.deepEqual(annotations(document), [tex]);
+	assert.ok(!(document.querySelector(".katex-html")?.textContent ?? "").includes("frac"));
+	assert.ok(document.body.textContent.includes("TAIL"));
 });
