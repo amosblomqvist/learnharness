@@ -37,3 +37,5 @@ When every strand is bracketed and the goal is concrete, conclude with `probe_do
 ## Grounding — his material, not his description of it
 
 If he references a local file, the `read` tool can inspect it directly; PDFs go through the `pdf` tool (cited brief); `research` sparingly — probing is measurement, not exploration.
+
+If he asks to continue probing after you have called `probe_done`, call `resume_probe` and end the turn. A previous conclusion must not override his request for further diagnostic. After a resumed diagnostic, use the earlier assessment as provisional evidence and conclude again only when ready.

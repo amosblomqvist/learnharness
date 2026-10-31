@@ -62,7 +62,7 @@ export function probeDoneTool(ctx: ProbeDoneContext): Record<string, AgentTool<a
 			// The core-owned schema (contracts/probe.ts) — the SAME schema the UI
 			// parse seam (tool-parts.ts) runs, so boundary-valid ⇔ consumer-parseable.
 			parameters: probeDoneInputSchema,
-			execute: serverExecute("probe_done", probeDoneInputSchema, async (input) => {
+			execute: serverExecute("probe_done", probeDoneInputSchema, async (input, { toolCallId }) => {
 				const record = ctx.chatStore.getChat(ctx.chatId);
 				if (!record) return { ok: false, error: `Chat not found: ${ctx.chatId}` };
 
@@ -78,7 +78,10 @@ export function probeDoneTool(ctx: ProbeDoneContext): Record<string, AgentTool<a
 					return { ok: false, error: "The probe is already concluded — probe_done fires exactly once." };
 				}
 				try {
-					ctx.deliver(buildProbeHandoffSteer(ctx.chatId));
+					const handoff = buildProbeHandoffSteer(ctx.chatId);
+					// Each diagnostic cycle needs its own idempotent wake.
+					handoff.id += `_${toolCallId}`;
+					ctx.deliver(handoff);
 				} catch (err) {
 					console.error(`[chat ${ctx.chatId}] probe handoff queueing failed:`, err);
 					// The handoff is recoverable-by-design (the next client message

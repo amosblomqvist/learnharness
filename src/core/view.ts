@@ -228,6 +228,10 @@ export function projectView(messages: readonly LhMessage[], live?: LiveTurnState
 				} else if (block.type === "thinking") {
 					reasoning.push({ type: "reasoning", id: `${m.id}-r${reasoningN++}`, text: block.thinking, state: "done" });
 				} else if (block.type === "toolCall") {
+					// Failed generations never pose their question calls. Native history
+					// retains them for Retry; the view must not offer them to the learner.
+					if ((block.name === "quiz" || block.name === "explain") &&
+						(assistant.stopReason === "error" || assistant.stopReason === "aborted")) continue;
 					const part = toolPartOf(block, live, streamingMessage);
 					if ((QUESTION_TOOLS as readonly string[]).includes(block.name)) {
 						part.sourceMessageId = m.id;
