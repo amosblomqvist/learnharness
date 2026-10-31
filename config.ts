@@ -26,6 +26,8 @@ export const PATHS = {
 	/** Chat sessions (AI SDK UIMessage transcripts, one JSON file per chat). */
 	chats: path.join(DATA_ROOT, "chats"),
 	graph: path.join(DATA_ROOT, "graph"),
+	/** Study time (src/store/study.ts): intervals.jsonl history + open.json timers. */
+	study: path.join(DATA_ROOT, "study"),
 	/** Debug artifacts (env-gated): data/debug/provider-events/<chatId>.jsonl
 	 * raw provider stream recordings (src/agent/provider-events.ts). */
 	debug: path.join(DATA_ROOT, "debug"),
@@ -53,6 +55,12 @@ export type ModelRole =
 	| "pdfReader"
 	| "extractor"
 	| "auditor";
+
+/** Study-time files: the append-only history and the open-timer working state. */
+export const STUDY_FILES = {
+	intervals: path.join(PATHS.study, "intervals.jsonl"),
+	open: path.join(PATHS.study, "open.json"),
+} as const;
 
 /**
  * The LIVE graph store (src/store/graph.ts) — owned by the app's extraction

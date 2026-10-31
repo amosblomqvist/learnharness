@@ -214,3 +214,20 @@ describe("sanitizeUserSettings", () => {
 		]);
 	});
 });
+
+describe("studyTime settings", () => {
+	it("factory defaults", () => {
+		assert.deepEqual(FACTORY_SETTINGS.studyTime, { idleMinutes: 5, weekStart: "monday" });
+	});
+
+	it("sanitize: clamps and rounds idleMinutes, drops junk, keeps valid weekStart", () => {
+		const run = (studyTime: unknown) => sanitizeUserSettings({ version: 1, studyTime })?.studyTime;
+		assert.deepEqual(run({ idleMinutes: 0 }), { idleMinutes: 1 });
+		assert.deepEqual(run({ idleMinutes: 500 }), { idleMinutes: 60 });
+		assert.deepEqual(run({ idleMinutes: 7.6 }), { idleMinutes: 8 });
+		assert.deepEqual(run({ idleMinutes: "9", weekStart: "friday" }), {});
+		assert.deepEqual(run({ idleMinutes: Number.NaN }), {});
+		assert.deepEqual(run({ weekStart: "sunday" }), { weekStart: "sunday" });
+		assert.equal(run(undefined), undefined);
+	});
+});

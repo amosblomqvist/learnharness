@@ -27,6 +27,7 @@ import type {
 	NotesSource,
 } from "./contracts.ts";
 import type { UserSettings } from "./settings.ts";
+import type { OpenStudyTimers, StudyInterval } from "./contracts/study.ts";
 
 // ─── ChatStore — the session record's home (data/chats) ─────────────────────
 
@@ -128,6 +129,16 @@ export interface GraphStore {
 		coverage?: CoverageEntry[];
 		checkpoints?: SessionCheckpoint[];
 	}): void;
+}
+
+// ─── StudyStore — study-time history + open timers (data/study) ─────────────
+
+export interface StudyStore {
+	/** Valid lines in file order, raw (de-dup is core's job). */
+	readIntervals(): StudyInterval[];
+	appendIntervals(list: StudyInterval[]): void;
+	readOpen(): OpenStudyTimers;
+	writeOpen(open: OpenStudyTimers): void;
 }
 
 /** Separate from graph ledgers and source identity, for future shared views. */

@@ -6,6 +6,7 @@ import { useSettingsDialog } from "@/components/settings/settings-dialog";
 import { Hint } from "@/components/ui/hint";
 import { deepgramListenUrl, type DictationLanguage } from "@/src/core";
 import { useDictationLanguage } from "@/components/dictation-preference";
+import { noteStudyInput } from "@/components/study-tracker";
 import { setDictationActive } from "@/components/dictation-state";
 export { isDictationActive } from "@/components/dictation-state";
 
@@ -396,7 +397,10 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 					// Only finals stream (interim_results=false). DEFERRED (owner
 					// round 2): they buffer here and reach the input once, at
 					// teardown — the meter is the only live feedback.
-					if (msg.is_final && text) bufferRef.current.push(text);
+					if (msg.is_final && text) {
+						bufferRef.current.push(text);
+						if (text.trim()) noteStudyInput();
+					}
 				}
 			});
 			ws.addEventListener("close", (ev) => {
