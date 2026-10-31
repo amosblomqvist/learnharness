@@ -52,9 +52,13 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import type { CacheRetention } from "@earendil-works/pi-ai";
+import { CacheRetentionMenu, cacheRetentionLabel } from "./cache-retention-menu.tsx";
 import { MenuShell } from "@/components/menu-shell";
 import { useSettingsSaved } from "@/components/settings-signal";
 import { defaultOrderLevel, populateLevel } from "@/components/thinking-default";
+import { useModelCatalog } from "@/components/model-catalog";
+import { Hint } from "@/components/ui/hint";
 import type React from "react";
 import {
 	COMPACTION_THRESHOLD_FLOOR,
@@ -63,14 +67,13 @@ import {
 	type AgentSettings,
 	type CompactionSettings,
 	type GraphSettings,
-	type ModelCatalogEntry,
 	type ModelSlotName,
 	type ModelsSettings,
 } from "@/src/core";
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import { prettyModel } from "@/components/usage-format";
 import { cn } from "@/lib/utils";
-import { SettingsGroup, SettingsRow, Toggle, CommitInput } from "./controls.tsx";
+import { SettingsGroup, SettingsRow, SettingsMenuTrigger, Toggle, CommitInput } from "./controls.tsx";
 import { ModelMenuList, ThinkingMenuList } from "./model-menu";
 import { ChatGPTBackgroundAccess } from "./chatgpt-connection";
 import { NativeSubscriptionBackgroundAccess } from "./subscription-connections";
@@ -99,15 +102,6 @@ interface SegmentInfo {
 	overrideText: string | null;
 	enabled: boolean;
 	shared: boolean;
-}
-
-/** The GET /api/models response fields this section consumes. */
-interface ModelsBody {
-	models: ModelCatalogEntry[];
-	/** The three tiers' RESOLVED pins (BYOK: NULL per unset tier — no
-	 *  factory floor) — machinery only (the thinking list fallback); the
-	 *  rows' displays read the record override, never a phantom pin. */
-	slots: Record<ModelSlotName, { model: { provider: string; id: string }; thinkingLevel?: string } | null>;
 }
 
 /** Compose: one tool toggled, the rest of the section carried verbatim.
@@ -151,10 +145,19 @@ export function composeSlotModel(
 		return next;
 	}
 	next[slot] = {
+		...(prev?.cacheRetention !== undefined ? { cacheRetention: prev.cacheRetention } : {}),
 		...(provider && id ? { model: { provider, id } } : prev?.model ? { model: prev.model } : {}),
 		...(thinking ? { thinkingLevel: thinking as ThinkingLevel } : {}),
 	};
 	return next;
+}
+
+/** Retention is slot-only; selecting Pi default removes the field entirely. */
+export function composeSlotCacheRetention(models: ModelsSettings | undefined, slot: ModelSlotName, value: CacheRetention | undefined): ModelsSettings {
+	const next = { ...models?.[slot] };
+	if (value === undefined) delete next.cacheRetention;
+	else next.cacheRetention = value;
+	return { ...models, [slot]: next };
 }
 
 /** Compose: the search-engine preference. null = the explicit pin is
@@ -234,8 +237,10 @@ function MenuTrigger({
 	onClick,
 	widthClass,
 	disabled,
+	hint,
 }: {
 	value: string;
+	hint?: string;
 	/** What the trigger shows when there is no override ("Default"). */
 	emptyLabel: string;
 	ariaLabel: string;
@@ -250,25 +255,20 @@ function MenuTrigger({
 	/** The no-key search state grays the whole row; the trigger follows. */
 	disabled?: boolean;
 }) {
-	return (
-		<button
-			type="button"
+	const button = (
+		<SettingsMenuTrigger
+			value={value || emptyLabel}
 			aria-label={ariaLabel}
 			aria-expanded={open}
 			data-testid={testid}
 			onClick={() => {
 				if (!disabled) onClick();
 			}}
-			className={`flex h-7 items-center gap-1 rounded-sm border border-border bg-background px-1.5 font-ui text-xs text-foreground transition-colors ${
-				disabled ? "cursor-not-allowed" : "hover:border-muted-foreground/50"
-			} ${widthClass}`}
-		>
-			<span className="min-w-0 flex-1 truncate">{value || emptyLabel}</span>
-			<span aria-hidden className="text-muted-foreground">
-				▾
-			</span>
-		</button>
+			unavailable={disabled}
+			className={widthClass}
+		/>
 	);
+	return hint ? <Hint label={hint}>{button}</Hint> : button;
 }
 
 /* The section's dropdowns all mount the shared MenuShell (fix wave chunk
@@ -303,10 +303,9 @@ export function AgentSection({
 	/** Writes the whole compaction section (replace-PUT discipline). */
 	onCompactionChange: (next: CompactionSettings) => void;
 }) {
-	const [catalog, setCatalog] = useState<ModelCatalogEntry[] | null>(null);
-	/** The three tiers' resolved pins — GET /api/models `slots`. The rows'
-	 *  Default hints and thinking lists resolve from it. */
-	const [slots, setSlots] = useState<ModelsBody["slots"] | null>(null);
+	const { catalog: body, failed: catalogFailed, refresh: refreshCatalog } = useModelCatalog();
+	const catalog = body?.models;
+	const slots = body?.slots;
 	/** The live search state (/api/search) — the row's reason line. */
 	const [search, setSearch] = useState<{ available: boolean; engine: string | null; reason: string } | null>(null);
 	/** Which search engines have a key (/api/keys) — the no-keys-anywhere
@@ -318,7 +317,8 @@ export function AgentSection({
 	const [segmentStatus, setSegmentStatus] = useState<string | null>(null);
 	/** One open dropdown for the whole section: which slot (or the search
 	 *  row), which kind. */
-	const [openMenu, setOpenMenu] = useState<{ target: ModelSlotName | "search"; kind: "model" | "thinking" | "engine" } | null>(null);
+	const [openMenu, setOpenMenu] = useState<{ target: ModelSlotName | "search"; kind: "model" | "thinking" | "engine" | "cache" } | null>(null);
+	const [advancedModels, setAdvancedModels] = useState(false);
 	const menuAnchorRef = useRef<HTMLSpanElement>(null);
 
 	const refreshSearch = () =>
@@ -341,28 +341,9 @@ export function AgentSection({
 			.catch(() => {});
 	}, []);
 
-	// The catalog (federated: keyed providers only), the resolved slots,
-	// the prompt segments, and the search engines' key presence — one
-	// fetch each per section mount. The models read ALSO re-runs on the
-	// cross-surface signal (fix wave: another surface's write re-reads
-	// into the slot rows live).
-	const modelsRequest = useRef(0);
-	const modelsMounted = useRef(false);
-	const readModels = useCallback((connectionChanged = false) => {
-		const request = ++modelsRequest.current;
-		if (connectionChanged) setCatalog(null);
-		fetch("/api/models")
-			.then((r) => { if (!r.ok) throw new Error("Catalog unavailable"); return r.json(); })
-			.then((body: ModelsBody) => {
-				if (!modelsMounted.current || request !== modelsRequest.current) return;
-				setCatalog(body.models);
-				setSlots(body.slots);
-			})
-			.catch(() => { if (modelsMounted.current && request === modelsRequest.current) setCatalog(null); });
-	}, []);
-
+	// The shared catalog seeds the first frame and refreshes per mount and
+	// keys/models signal. Settings props still own saved selections/levels.
 	useSettingsSaved((section) => {
-		if (section === "models" || section === "keys") readModels(section === "keys");
 		// THE state-echo root cause: the prompt switches write through the
 		// agent section, but this view (the toggles' truth) never re-read —
 		// the settings-saved law (every reader re-reads) was missing this
@@ -371,8 +352,6 @@ export function AgentSection({
 	});
 
 	useEffect(() => {
-		modelsMounted.current = true;
-		readModels();
 		fetch("/api/settings/prompts")
 			.then((r) => r.json())
 			.then((body: { prober: SegmentInfo[]; teacher: SegmentInfo[] }) => setPrompts(body))
@@ -388,7 +367,6 @@ export function AgentSection({
 				setEngineKeys(present);
 			})
 			.catch(() => {});
-		return () => { modelsMounted.current = false; modelsRequest.current++; };
 	}, []);
 
 	// The reason line re-reads /api/search AFTER an engine write lands —
@@ -615,6 +593,14 @@ export function AgentSection({
 	return (
 		<>
 			<SettingsGroup label="Models" testid="group-models">
+				<button
+					type="button"
+					data-testid="models-advanced"
+					aria-expanded={advancedModels}
+					onClick={() => { setAdvancedModels(!advancedModels); setOpenMenu(null); }}
+					className="mb-1 self-start text-xs text-muted-foreground hover:text-foreground"
+				>{advancedModels ? "Hide advanced settings" : "Show advanced settings"}</button>
+				{catalogFailed && <p role="alert" className="text-xs text-red-400">Model catalog could not be loaded. Check the connection and retry. <button type="button" className="underline" onClick={refreshCatalog}>Retry</button></p>}
 				{MODEL_SLOTS.map((slot) => {
 					const override = models?.[slot];
 					const modelId = override?.model?.id ?? "";
@@ -633,9 +619,6 @@ export function AgentSection({
 					const chosen = coord ? catalog?.find((m) => m.id === coord.id && m.provider === coord.provider) : undefined;
 					const levels = chosen ? chosen.supportedLevels : THINKING_LEVELS;
 					const thisMenuOpen = openMenu?.target === slot ? openMenu.kind : null;
-					// Vision slots pick from image-capable models only.
-					const slotCatalog =
-						slot === "vision" ? catalog?.filter((m) => m.input.includes("image")) : catalog;
 					return (
 						<SettingsRow
 							key={slot}
@@ -647,11 +630,18 @@ export function AgentSection({
 							    span holding BOTH triggers of the open menu. */}
 							<span
 								ref={thisMenuOpen ? menuAnchorRef : undefined}
-								className="relative flex items-center gap-2"
+								className={`relative flex items-center gap-2 ${advancedModels ? "shrink-0" : ""}`}
+								onKeyDown={(event) => {
+									// Portal events bubble here too: close this menu, not the dialog.
+									if (thisMenuOpen === "cache" && event.key === "Escape") {
+										event.preventDefault(); event.stopPropagation(); setOpenMenu(null);
+									}
+								}}
 							>
 								{slot !== "strong" && <><ChatGPTBackgroundAccess provider={coord?.provider} /><NativeSubscriptionBackgroundAccess provider={coord?.provider} /></>}
 								<MenuTrigger
 									value={modelId ? prettyModel(modelId) : ""}
+									hint={modelId ? `${provider}:${modelId}` : undefined}
 									emptyLabel="—"
 									ariaLabel={`${SLOT_META[slot].label} model`}
 									testid={`slot-model-${slot}`}
@@ -671,6 +661,27 @@ export function AgentSection({
 									onClick={() => setOpenMenu(thisMenuOpen === "thinking" ? null : { target: slot, kind: "thinking" })}
 									widthClass="w-20"
 								/>
+								{advancedModels && <MenuTrigger
+									value={cacheRetentionLabel(override?.cacheRetention)}
+									emptyLabel="Cache: default"
+									ariaLabel={`${SLOT_META[slot].label} cache retention`}
+									testid={`slot-cache-${slot}`}
+									open={thisMenuOpen === "cache"}
+									disabled={!override?.model}
+									onClick={() => setOpenMenu(thisMenuOpen === "cache" ? null : { target: slot, kind: "cache" })}
+									widthClass="w-40"
+								/>}
+								{advancedModels && thisMenuOpen === "cache" && <MenuShell
+									preferredSide="down"
+									anchorTestid={`slot-cache-${slot}`}
+									testid={`slot-cache-menu-${slot}`}
+									menuClass="flex w-80 flex-col gap-0.5 rounded-xl border border-border bg-card p-2 text-xs shadow-xl"
+								>
+									<CacheRetentionMenu value={override?.cacheRetention} onPick={(value) => {
+										onModelsChange(composeSlotCacheRetention(models, slot, value));
+										setOpenMenu(null);
+									}} />
+								</MenuShell>}
 								{thisMenuOpen === "model" && (
 									<MenuShell
 										preferredSide="down"
@@ -679,9 +690,10 @@ export function AgentSection({
 										menuClass="flex w-[22rem] flex-col rounded-xl border border-border bg-card p-2 text-xs shadow-xl"
 									>
 										<ModelMenuList
-											models={slotCatalog ?? undefined}
+											models={catalog ?? undefined}
 											effectiveId={modelId}
 											effectiveProvider={provider}
+											vision={slot === "vision"}
 											onPick={(entry) => {
 												// Auto-populate (chunk 2, owner: "populate everywhere"): the
 												// fresh pick writes a level — the stored one rides as-is

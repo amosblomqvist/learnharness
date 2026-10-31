@@ -1,5 +1,10 @@
 # Learning Harness — Vision & Plans
 
+> **Historical design record, not current implementation documentation.**
+> The original decisions and plans below may be superseded or unimplemented.
+> See [Architecture](architecture.md) and [Development](development.md) for the
+> shipped system and current development guidance.
+
 Living document. Started 2026-08-22, capturing the current vision and all agreed decisions. Amend as things evolve.
 
 Master frame: the three-part learning model and the extensibility/plugin direction live in [`vision-extensibility.md`](vision-extensibility.md) (2026-10-02).

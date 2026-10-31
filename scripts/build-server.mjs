@@ -40,6 +40,29 @@ if (exists(path.join(ROOT, "public"))) {
 	copyTree(path.join(ROOT, "public"), path.join(STANDALONE, "public"));
 }
 
+// 2) Safety: the repo's real data/ must NEVER ride along in the bundle.
+const leakedData = path.join(STANDALONE, "data");
+if (exists(leakedData)) {
+	console.error("[build-server] REFUSING: standalone contains a data/ directory — repo session data would ship in the app.");
+	console.error("             Check outputFileTracingExcludes in next.config.ts.");
+	process.exit(1);
+}
+
+// 2b) Safety: the repo's dev SECRETS must never ride along either — the
+// same trace sweep that catches data/ shipped the repo-root auth.json
+// (the DEV BYOK key store, 0600) byte-identical into the DMG (caught in
+// the 2026-10-08 payload audit; excluded in next.config.ts — this guard
+// makes a regression loud instead of silent).
+const subscriptionSecrets = fs.readdirSync(STANDALONE).filter((name) => /^(chatgpt|github-copilot|xai)-credentials\.json/.test(name));
+for (const secret of ["auth.json", ...subscriptionSecrets, ".env", ".env.local"]) {
+	if (exists(path.join(STANDALONE, secret))) {
+		console.error(`[build-server] REFUSING: standalone contains ${secret} — dev secrets would ship in the app.`);
+		console.error("             Check outputFileTracingExcludes in next.config.ts.");
+		process.exit(1);
+	}
+}
+
+// Assemble plugin assets only after refusing unsafe traced data/credentials.
 // Runtime native plugin loader is deliberately outside Next's module graph.
 // Copy it explicitly: external plugin entries must be loaded by native Node,
 // not interpreted as build-time imports by webpack/Turbopack.
@@ -66,27 +89,6 @@ const types = spawnSync(process.execPath, [path.join(ROOT, "scripts", "build-plu
 if (types.error || types.status !== 0) {
 	console.error("[build-server] plugin API declaration emission failed", types.error ?? types.status);
 	process.exit(1);
-}
-
-// 2) Safety: the repo's real data/ must NEVER ride along in the bundle.
-const leakedData = path.join(STANDALONE, "data");
-if (exists(leakedData)) {
-	console.error("[build-server] REFUSING: standalone contains a data/ directory — repo session data would ship in the app.");
-	console.error("             Check outputFileTracingExcludes in next.config.ts.");
-	process.exit(1);
-}
-
-// 2b) Safety: the repo's dev SECRETS must never ride along either — the
-// same trace sweep that catches data/ shipped the repo-root auth.json
-// (the DEV BYOK key store, 0600) byte-identical into the DMG (caught in
-// the 2026-10-08 payload audit; excluded in next.config.ts — this guard
-// makes a regression loud instead of silent).
-for (const secret of ["auth.json", ".env", ".env.local"]) {
-	if (exists(path.join(STANDALONE, secret))) {
-		console.error(`[build-server] REFUSING: standalone contains ${secret} — dev secrets would ship in the app.`);
-		console.error("             Check outputFileTracingExcludes in next.config.ts.");
-		process.exit(1);
-	}
 }
 
 // 2c) Payload curation (2026-10-11): the trace sweep can copy repo-root

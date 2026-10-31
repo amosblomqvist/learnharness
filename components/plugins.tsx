@@ -69,6 +69,7 @@ export async function importPluginModule(url: string): Promise<PluginFrontendMod
 
 export function PluginsProvider({ children }: { children: ReactNode }) {
 	const hub = useNotifyHub();
+	if (!hub) throw new Error("useNotifyHub requires <ServerEventsProvider>");
 	const router = useRouter();
 	const routerRef = useRef(router);
 	routerRef.current = router;

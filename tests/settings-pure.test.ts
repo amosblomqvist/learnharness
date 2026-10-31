@@ -320,7 +320,7 @@ describe("first-run gate — slotsConfigured + setupStage (model-slots wave)", (
 	});
 
 	it("setupStage: keys before models (owner's dependency ordering)", () => {
-		assert.equal(setupStage(null), "keys", "fetch failed → the honest fallback");
+		assert.equal(setupStage(null), "loading", "unknown catalog must not claim keys are missing");
 		assert.equal(setupStage([]), "keys", "no providers = keys");
 		assert.equal(setupStage([{ id: "zai", keyPresent: false }]), "keys", "provider present but keyless");
 		assert.equal(setupStage([{ id: "zai", keyPresent: false }, { id: "openai", keyPresent: true }]), "pickers", "one keyed provider widens the pickers");

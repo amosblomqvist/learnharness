@@ -54,23 +54,27 @@
  * Read-only toward the graph.
  */
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
 	ChevronDownIcon,
 	ChevronRightIcon,
 	ChevronUpIcon,
 	DumbbellIcon,
-	FolderIcon,
-	FolderOpenIcon,
+	BookIcon,
+	BookOpenIcon,
+	FolderPlusIcon,
 	Trash2Icon,
 	ListTreeIcon,
 	SearchIcon,
 	XIcon,
 } from "lucide-react";
-import { chainsForSelection, formatChainLine, fuzzyScore } from "@/src/core";
-import type { GraphChain, GraphNode } from "@/src/core";
+import { chainsForSelection, folderEntryCheck, toggleSourceEntries, formatChainLine, fuzzyScore, sourceFileLabel } from "@/src/core";
+import type { GraphChain, GraphNode, SourceDirectory, SourceEntry, SourceFolder, SourceEntrySelection } from "@/src/core";
+import { EditableSourceName, SourceDragRow, sourceNameMatches, SourceFolderTree, type OrganizationChange } from "./source-folder-tree";
+import { chainRow, useChainNavigation } from "./chain-navigation";
+import { useServerEvent, useServerResync } from "./server-events";
 import { TopBar } from "@/components/top-bar";
-import { DeleteNodeDialog } from "@/components/delete-node-dialog";
+import { DeleteSourceDialog } from "@/components/delete-source-dialog";
 import { LatexGlyph } from "@/components/latex-glyph";
 
 /** The sortable columns (owner ruling: all three — consistency). */
@@ -116,7 +120,21 @@ export function ChainTableBody({
 	onClose,
 	selectMode,
 	onSelect,
+	directory,
+	onOrganizationChange,
+	selectedFolders = new Set<string>(),
+	selectedSources = new Set<string>(),
+	onToggleSource = () => {},
+	onToggleFolder = () => {},
+	keyboardActive = true,
 }: {
+	keyboardActive?: boolean;
+	directory?: SourceDirectory;
+	onOrganizationChange?: OrganizationChange;
+	selectedFolders?: ReadonlySet<string>;
+	selectedSources?: ReadonlySet<string>;
+	onToggleSource?: (id: string, next: boolean) => void;
+	onToggleFolder?: (id: string, next: boolean) => void;
 	nodes: GraphNode[];
 	chains: GraphChain[];
 	sessions: Record<string, string>;
@@ -143,9 +161,41 @@ export function ChainTableBody({
 	selectMode?: boolean;
 	onSelect?: () => void;
 }) {
+	const [creatingFolder, setCreatingFolder] = useState(false);
+	const tableRef = useRef<HTMLDivElement>(null);
+	const searchRef = useRef<HTMLInputElement>(null);
+	const navigation = useChainNavigation(tableRef, searchRef, keyboardActive);
+	// Searches still expand sources/folders by default, but explicit keyboard
+	// or pointer collapses remain effective until the search changes.
+	const [searchFolds, setSearchFolds] = useState({ query, ids: new Set<string>() });
+	useEffect(() => { setSearchFolds({ query, ids: new Set() }); }, [query]);
+	const foldedClusters = searchFolds.query === query ? searchFolds.ids : new Set<string>();
+	const toggleCluster = (id: string) => {
+		if (!query.trim()) { onToggleCluster(id); return; }
+		setSearchFolds((previous) => {
+			const ids = new Set(previous.query === query ? previous.ids : []);
+			if (ids.has(id)) ids.delete(id); else ids.add(id);
+			return { query, ids };
+		});
+	};
 	const byId = useMemo(() => new Map(nodes.map((n) => [n.id, n])), [nodes]);
+	const sourceRecords = useMemo(() => new Map(directory?.sources.map((s) => [s.id, s])), [directory]);
+	const matchesSource = useCallback((birth: string) => sourceNameMatches(directory, birth,
+		sourceRecords.get(birth)?.label ?? sessions[birth] ?? (fileSources[birth] === undefined ? null : sourceFileLabel(fileSources[birth])), query),
+	[directory, sourceRecords, sessions, fileSources, query]);
 	const chains = useMemo(() => chainsForSelection(nodes, storedChains), [nodes, storedChains]);
 	const searching = query.trim() !== "";
+	const allSourceNodes = useMemo(() => {
+		const membership = new Map<string, Set<string>>();
+		for (const chain of chains) {
+			const birth = byId.get(chain.conclusion)?.provenance[0]?.chatId;
+			if (!birth) continue;
+			const members = membership.get(birth) ?? new Set<string>();
+			for (const id of [...chain.premises, chain.conclusion]) members.add(id);
+			membership.set(birth, members);
+		}
+		return membership;
+	}, [chains, byId]);
 
 	// The fuzzy filter: a chain is visible when ANY member matches on
 	// name, aliases, or statement; chains rank by best member score.
@@ -153,7 +203,8 @@ export function ChainTableBody({
 		if (!searching) return chains;
 		const scored = chains
 			.map((chain) => {
-				let best: number | null = null;
+				const birth = byId.get(chain.conclusion)?.provenance[0]?.chatId;
+				let best: number | null = birth && matchesSource(birth) ? 0 : null;
 				for (const id of [...chain.premises, chain.conclusion]) {
 					const node = byId.get(id);
 					if (!node) continue;
@@ -167,20 +218,25 @@ export function ChainTableBody({
 		return scored
 			.sort((a, b) => b.best - a.best || (a.chain.id < b.chain.id ? -1 : 1))
 			.map(({ chain }) => chain);
-	}, [chains, byId, query, searching]);
+	}, [chains, byId, query, searching, matchesSource]);
 
 	// Group the visible chains by their CONCLUSION's birth (owner ruling).
 	// Unlabeled births (provenance gone / never named) form one honest
 	// muted group, sorted last under name-sort.
 	const groups = useMemo(() => {
 		const map = new Map<string, ClusterGroup>();
+		for (const source of directory?.sources ?? []) {
+			if (searching && !matchesSource(source.id)) continue;
+			map.set(source.id, { key: source.id, birth: source.id, label: source.label,
+				kind: source.kind === "missing" ? null : source.kind, chains: [], nodeIds: [], newestCreatedAt: "" });
+		}
 		for (const chain of visibleChains) {
 			const conclusion = byId.get(chain.conclusion);
 			const birth = conclusion?.provenance[0]?.chatId ?? null;
 			const key = birth ?? "\0unlabeled";
 			let group = map.get(key);
 			if (!group) {
-				const label = birth === null ? null : (sessions[birth] ?? fileSources[birth] ?? null);
+				const label = birth === null ? null : (sourceRecords.get(birth)?.label ?? sessions[birth] ?? (fileSources[birth] === undefined ? null : sourceFileLabel(fileSources[birth])));
 				const kind =
 					birth === null ? null : sessions[birth] !== undefined ? "chat" : fileSources[birth] !== undefined ? "notes" : null;
 				group = { key, birth, label, kind, chains: [], nodeIds: [], newestCreatedAt: "" };
@@ -195,6 +251,9 @@ export function ChainTableBody({
 		}
 		const collator = new Intl.Collator(undefined, { sensitivity: "base", numeric: true });
 		const list = [...map.values()];
+		// Existing graph groups retain their newest-member date. Inventory-only
+		// rows fall back to record dates; a re-import must not redraft old dates.
+		for (const group of list) if (!group.newestCreatedAt && group.birth) group.newestCreatedAt = sourceRecords.get(group.birth)?.createdAt ?? "";
 		// Sort law (owner ruling: all three columns sortable — consistency):
 		// the active column orders BOTH cluster rows and chains within; name
 		// is the universal tiebreak (asc). Unlabeled clusters sort last under
@@ -222,7 +281,7 @@ export function ChainTableBody({
 			);
 		}
 		return list;
-	}, [visibleChains, byId, sessions, fileSources, sort]);
+	}, [visibleChains, byId, sessions, fileSources, sort, directory, sourceRecords, searching, matchesSource]);
 
 	// The derived shape under the floating bar (the agents' ACTUAL input).
 	const derived = useMemo(() => {
@@ -230,13 +289,14 @@ export function ChainTableBody({
 		return chainsForSelection(selectedNodes, storedChains);
 	}, [selection, byId, storedChains]);
 
+	const fullySelectedFolders = directory ? new Set([...selectedFolders].filter((id) => folderEntryCheck(directory, id, { sources: selectedSources, folders: selectedFolders }).checked)) : selectedFolders;
 	const nameOf = (id: string) => byId.get(id)?.name ?? id;
 	const dateOf = (id: string) => byId.get(id)?.createdAt.slice(0, 10) ?? "";
 	const dirIcon = (col: ChainSortCol) =>
 		sort.col !== col ? null : sort.dir === 1 ? <ChevronUpIcon className="size-3" /> : <ChevronDownIcon className="size-3" />;
 
 	return (
-		<div data-testid="chain-table" className="relative flex h-full min-h-0 flex-col">
+		<div ref={tableRef} tabIndex={-1} data-testid="chain-table" className="relative flex h-full min-h-0 flex-col outline-none [&_[data-chain-nav-active=true]]:bg-accent/50 [&_[data-chain-nav-row]]:outline-none [&_[data-chain-nav-row]]:scroll-mt-8 [&_[data-chain-nav-row]]:scroll-mb-16">
 			{/* THE shared top bar (standardization ruling): drag mechanics,
 			    sidebar reopen, traffic-light gutter — the same element as every
 			    chat surface. NO TITLE (owner round 11, 2026-10-05): the serif
@@ -248,9 +308,12 @@ export function ChainTableBody({
 				<span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">
 					{chains.length} {chains.length === 1 ? "chain" : "chains"} · {nodes.length} {nodes.length === 1 ? "node" : "nodes"}
 				</span>
+				{onOrganizationChange && <button type="button" aria-label="Add folder" data-testid="add-source-folder"
+					onClick={() => setCreatingFolder(true)} className="lh-no-drag rounded-lg p-2 text-muted-foreground hover:bg-accent"><FolderPlusIcon className="size-4" /></button>}
 				<div className="relative shrink-0">
 					<SearchIcon className="absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
 					<input
+						ref={searchRef}
 						value={query}
 						data-testid="chain-table-search"
 						onChange={(e) => onQuery(e.target.value)}
@@ -277,10 +340,10 @@ export function ChainTableBody({
 			    two-column steps — chains pl-12 aligned with the folder icon,
 			    statements pl-21 where a chain icon would sit).
 			    All three columns sort, small chevron on active. */}
-			<div className="min-h-0 flex-1 overflow-y-auto">
+			<div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
 				{/* The TOP rule (owner round 5: the table is framed — a line under
 			    the header, a line under the last group, lines between groups). */}
-				<div className="sticky top-0 z-10 flex items-center gap-1 border-b border-border/60 bg-background/80 px-3 py-1.5 text-[11px] uppercase tracking-widest text-muted-foreground/70 backdrop-blur">
+				<div className="sticky top-0 z-10 flex shrink-0 items-center gap-1 border-b border-border/60 bg-background/80 px-3 py-1.5 text-[11px] uppercase tracking-widest text-muted-foreground/70 backdrop-blur">
 					<button
 						type="button"
 						data-testid="sort-name"
@@ -310,14 +373,25 @@ export function ChainTableBody({
 					</button>
 				</div>
 
-				{groups.length === 0 && (
+				{creatingFolder && onOrganizationChange && <div className="flex items-center px-3 py-2" data-testid="new-folder-row">
+					<EditableSourceName name="" initiallyEditing onCancel={() => setCreatingFolder(false)}
+						onSave={async (name) => {
+						const id = await onOrganizationChange({ action: "create-folder", name, parentId: null });
+						onQuery(""); if (id) navigation.focusRow(["folder", id]); setCreatingFolder(false);
+					}} />
+				</div>}
+				{groups.length === 0 && (directory?.organization.folders.length ?? 0) === 0 && (
 					<div data-testid="chain-table-nomatch" className="px-4 pt-3 text-xs text-muted-foreground">
 						No matching chains.
 					</div>
 				)}
 
-				{groups.map((group) => {
-					const open = searching || expandedClusters.has(group.key);
+				<SourceFolderTree groups={groups} directory={directory} query={query} sort={sort} onAction={onOrganizationChange}
+					sourceSelection={selectMode ? undefined : { sources: selectedSources, folders: selectedFolders }}
+					expanded={expandedClusters} collapsedForSearch={foldedClusters} onToggleExpanded={toggleCluster} selection={selection} selectedFolders={selectedFolders}
+					onToggleNodes={onToggleNodes} onToggleFolder={onToggleFolder} allowEmptySelection={!selectMode} allSourceNodes={allSourceNodes}
+					renderSource={(group, depth) => {
+					const open = searching ? !foldedClusters.has(group.key) : expandedClusters.has(group.key);
 					const selectedCount = group.nodeIds.filter((id) => selection.has(id)).length;
 					return (
 						<div
@@ -326,7 +400,8 @@ export function ChainTableBody({
 							// The horizontal rules (owner rulings, rounds 2 + 5): between
 							// cluster groups AND under the last one — the table is framed
 							// top (header) and bottom. Never on individual rows.
-							className="relative border-b border-border/60"
+							className="relative border-b border-transparent"
+							style={{ marginLeft: depth * 36 }}
 						>
 							{/* The TREE THREAD (owner rounds 5–6): a vertical guide at the
 							    expander arrow's column (center 37px: pl-3 + checkbox 14 +
@@ -342,29 +417,31 @@ export function ChainTableBody({
 								/>
 							)}
 							{/* The cluster row: birth-session group header. */}
-							<div className="flex items-center gap-1 px-3 py-1.5">
+							<SourceDragRow {...chainRow(["source", group.key], depth, open)} kind="source" id={group.key} name={group.label ?? "unlabeled"} enabled={Boolean(onOrganizationChange && group.birth)} className="flex items-center gap-1 px-3 py-1.5">
 								<RowCheckbox
-									checked={selectedCount === group.nodeIds.length && group.nodeIds.length > 0}
-									indeterminate={selectedCount > 0 && selectedCount < group.nodeIds.length}
-									onToggle={(next) => onToggleNodes(group.nodeIds, next)}
+									disabled={selectMode ? group.nodeIds.length === 0 : !directory?.sources.some((s) => s.id === group.birth)}
+									checked={selectMode ? selectedCount === group.nodeIds.length && group.nodeIds.length > 0 : group.birth !== null && selectedSources.has(group.birth)}
+									indeterminate={selectMode ? selectedCount > 0 && selectedCount < group.nodeIds.length : false}
+									onToggle={(next) => { if (selectMode) onToggleNodes(group.nodeIds, next); else if (group.birth) onToggleSource(group.birth, next); }}
 									testid={`cluster-checkbox-${group.key}`}
-									label={`Select everything born in ${group.label ?? "unlabeled"}`}
+									label={selectMode ? `Select everything born in ${group.label ?? "unlabeled"}` : `Select source ${group.label ?? "unlabeled"}`}
 								/>
-								<Expander open={open} onClick={() => onToggleCluster(group.key)} testid={`cluster-toggle-${group.key}`} label={`Expand cluster ${group.label ?? "unlabeled"}`} />
-								<span className="flex shrink-0 items-center justify-center text-muted-foreground">
-									{open ? <FolderOpenIcon className="size-3.5" /> : <FolderIcon className="size-3.5" />}
-								</span>
-								<span className="min-w-0 flex-1 truncate text-sm font-medium">
-									{group.label ?? <span className="text-muted-foreground/60">unlabeled</span>}
-									{group.kind === "notes" && <span className="ml-2 text-[11px] uppercase tracking-widest text-muted-foreground/60">notes</span>}
-								</span>
+								<Expander open={open} onClick={() => toggleCluster(group.key)} testid={`cluster-toggle-${group.key}`} label={`Expand cluster ${group.label ?? "unlabeled"}`} />
+								<button type="button" data-source-icon data-testid={`source-icon-${group.key}`} aria-expanded={open} aria-label={`Expand source ${group.label ?? "unlabeled"}`}
+									onClick={() => toggleCluster(group.key)} className="flex h-5 w-3.5 shrink-0 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground">
+									{open ? <BookOpenIcon className="size-3.5 shrink-0" /> : <BookIcon className="size-3.5 shrink-0" />}
+								</button>
+								{onOrganizationChange && group.birth && group.kind !== null
+									? <EditableSourceName name={group.label ?? ""} onSave={(name) => onOrganizationChange({ action: "rename-source", id: group.birth!, name })} />
+									: <span className="min-w-0 flex-1 truncate text-sm font-medium">{group.label ?? <span className="text-muted-foreground/60">unlabeled</span>}</span>}
+								{group.kind === "notes" && <span className="text-[11px] uppercase tracking-widest text-muted-foreground/60">notes</span>}
 								<span className="w-14 shrink-0 text-right text-xs tabular-nums text-muted-foreground">
 									{group.nodeIds.length}
 								</span>
 								<span className="w-20 shrink-0 text-right text-xs tabular-nums text-muted-foreground">
 									{group.newestCreatedAt.slice(0, 10)}
 								</span>
-							</div>
+							</SourceDragRow>
 
 							{/* The chain rows — clearly indented under the folder
 							    (owner ruling); visible only when the cluster is open
@@ -388,17 +465,18 @@ export function ChainTableBody({
 													/>
 												)}
 											<div
+												{...chainRow(["chain", group.key, chain.id], depth + 1, chainOpen)}
 												data-testid={`chain-row-${chain.id}`}
 												aria-label={formatChainLine(chain, Object.fromEntries([...byId.entries()].map(([id, n]) => [id, { name: n.name }])))}
 												className="flex items-center gap-1 py-1 pl-12 pr-3"
 											>
-												<RowCheckbox
+												{selectMode ? <RowCheckbox
 													checked={selectedInChain === memberIds.length && memberIds.length > 0}
 													indeterminate={selectedInChain > 0 && selectedInChain < memberIds.length}
 													onToggle={(next) => onToggleNodes(memberIds, next)}
 													testid={`chain-checkbox-${chain.id}`}
 													label={`Select chain ${nameOf(chain.conclusion)}`}
-												/>
+												/> : <span aria-hidden="true" className="size-3.5 shrink-0" />}
 												<Expander open={chainOpen} onClick={() => onToggleChain(chain.id)} testid={`chain-toggle-${chain.id}`} label={`Expand chain ${nameOf(chain.conclusion)}`} />
 												{/* The chain line: proposition names as faint-outlined
 												    chips. THE LOGIC IS THE PAYLOAD (owner rulings,
@@ -458,15 +536,16 @@ export function ChainTableBody({
 													return (
 														<div
 															key={id}
+															{...chainRow(["prop", group.key, chain.id, id], depth + 2)}
 															data-testid={`prop-row-${id}`}
 															className="flex items-start gap-2 py-1 pl-21 pr-3"
 														>
-															<RowCheckbox
+															{selectMode ? <RowCheckbox
 																checked={selection.has(id)}
 																onToggle={(next) => onToggleNodes([id], next)}
 																testid={`prop-checkbox-${id}`}
 																label={`Select node ${node.name}`}
-															/>
+															/> : <span aria-hidden="true" className="size-3.5 shrink-0" />}
 															<span className="min-w-0 flex-1 text-xs leading-relaxed text-muted-foreground">
 																{node.statement}
 															</span>
@@ -478,23 +557,24 @@ export function ChainTableBody({
 										</div>
 									);
 								})}
+							<div data-testid={`source-separator-${group.key}`} className="pointer-events-none absolute bottom-[-1px] right-0 border-b border-border/60" style={{ left: depth === 0 ? 0 : 1 }} />
 						</div>
 					);
-				})}
+				}} />
 			</div>
 
 			{/* The floating selection bar (owner ruling: never shifts layout —
 			    the Google-Photos pattern). Appears only when something is
 			    selected; floats over the table's bottom edge. */}
-			{selection.size > 0 && (
+			{(selectMode ? selection.size > 0 : selectedSources.size > 0 || fullySelectedFolders.size > 0) && (
 				<div className="pointer-events-none absolute inset-x-0 bottom-0 z-10 flex justify-center pb-4">
 					<div
 						data-testid="chain-selection-bar"
-						className="pointer-events-auto flex items-center gap-3 rounded-full border bg-card px-4 py-2 shadow-lg"
+						className="pointer-events-auto flex items-center gap-3 rounded-full border bg-card py-2 pl-4 pr-2 shadow-lg"
 					>
 						<span data-testid="chain-selected-summary" className="text-xs font-medium">
-							{selection.size} {selection.size === 1 ? "node" : "nodes"} →{" "}
-							{derived.length} {derived.length === 1 ? "chain" : "chains"}
+							{selectMode ? <>{selection.size} {selection.size === 1 ? "node" : "nodes"} → {derived.length} {derived.length === 1 ? "chain" : "chains"}</>
+								: <>{selectedSources.size} {selectedSources.size === 1 ? "source" : "sources"}{fullySelectedFolders.size > 0 && ` · ${fullySelectedFolders.size} ${fullySelectedFolders.size === 1 ? "folder" : "folders"}`}</>}
 						</span>
 						<button
 							type="button"
@@ -526,7 +606,7 @@ export function ChainTableBody({
 								type="button"
 								data-testid="chain-delete"
 								onClick={onDelete}
-								aria-label={`Delete ${selection.size} selected ${selection.size === 1 ? "node" : "nodes"}`}
+								aria-label="Delete selected sources and folders"
 								className="flex items-center gap-1.5 rounded-full border border-destructive/50 bg-destructive/10 px-3 py-1.5 text-xs font-medium text-destructive transition-colors hover:bg-destructive/20"
 							>
 								<Trash2Icon aria-hidden="true" className="size-3.5" />
@@ -562,12 +642,14 @@ function Expander({ open, onClick, testid, label }: { open: boolean; onClick: ()
  *  property set via ref (React does not expose `indeterminate`). */
 function RowCheckbox({
 	checked,
+	disabled = false,
 	indeterminate = false,
 	onToggle,
 	testid,
 	label,
 }: {
 	checked: boolean;
+	disabled?: boolean;
 	indeterminate?: boolean;
 	onToggle: (next: boolean) => void;
 	testid: string;
@@ -576,6 +658,7 @@ function RowCheckbox({
 	return (
 		<input
 			type="checkbox"
+			disabled={disabled}
 			checked={checked}
 			ref={(el) => {
 				if (el) el.indeterminate = indeterminate;
@@ -625,7 +708,63 @@ export function ChainTableOverlay({
 	const [internalSelection, setInternalSelection] = useState<ReadonlySet<string>>(() => new Set());
 	const [expandedClusters, setExpandedClusters] = useState<ReadonlySet<string>>(() => new Set());
 	const [expandedChains, setExpandedChains] = useState<ReadonlySet<string>>(() => new Set());
-	const [deleteOpen, setDeleteOpen] = useState(false);
+	const [deletion, setDeletion] = useState<{ sources: SourceEntry[]; folders: SourceFolder[] } | null>(null);
+	const deleteOpen = deletion !== null;
+	const [directory, setDirectory] = useState<SourceDirectory>();
+	const [directoryFailure, setDirectoryFailure] = useState("");
+	const [entrySelection, setEntrySelection] = useState<SourceEntrySelection>(() => ({ sources: new Set(), folders: new Set() }));
+	useEffect(() => {
+		if (!directory) return;
+		setEntrySelection((previous) => {
+			const sources = new Set([...previous.sources].filter((id) => directory.sources.some((s) => s.id === id)));
+			const folders = new Set([...previous.folders].filter((id) => directory.organization.folders.some((f) => f.id === id)));
+			return sources.size === previous.sources.size && folders.size === previous.folders.size ? previous : { sources, folders };
+		});
+	}, [directory]);
+	const requestVersion = useRef(0);
+	const mutationTail = useRef<Promise<unknown>>(Promise.resolve());
+	const readDirectory = useCallback(async () => {
+		const version = ++requestVersion.current;
+		try {
+			const response = await fetch("/api/graph/sources", { cache: "no-store" });
+			if (!response.ok) throw new Error("Could not read source organization.");
+			const body = await response.json() as SourceDirectory;
+			if (version === requestVersion.current) { setDirectory(body); setDirectoryFailure(""); }
+		} catch (error) { if (version === requestVersion.current) setDirectoryFailure(error instanceof Error ? error.message : String(error)); }
+	}, []);
+	useEffect(() => {
+		if (open) void readDirectory();
+		return () => { requestVersion.current++; };
+	}, [open, readDirectory]);
+	useServerEvent("sources-changed", () => { if (open) void readDirectory(); });
+	useServerEvent("chats-changed", () => { if (open) void readDirectory(); });
+	useServerResync(() => { if (open) void readDirectory(); });
+	const changeOrganization: OrganizationChange = (action) => {
+		// Serialize this page's edits, and invalidate older notify-then-fetch reads.
+		const operation = mutationTail.current.catch(() => {}).then(async () => {
+			try {
+				const response = await fetch("/api/graph/sources", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(action) });
+				const body = await response.json();
+				if (!response.ok) throw new Error(typeof body.error === "string" ? body.error : "Could not save source organization.");
+				requestVersion.current++;
+				setDirectory(body as SourceDirectory);
+				setDirectoryFailure("");
+				if (action.action === "rename-source") {
+					const entry = (body as SourceDirectory).sources.find((s) => s.id === action.id);
+					window.dispatchEvent(new CustomEvent(entry?.kind === "chat" ? "lh:chat-renamed" : "lh:source-renamed", { detail: { id: action.id, title: action.name } }));
+				}
+				return typeof body.createdFolderId === "string" ? body.createdFolderId : undefined;
+			} catch (error) { setDirectoryFailure(error instanceof Error ? error.message : String(error)); throw error; }
+		});
+		mutationTail.current = operation;
+		return operation;
+	};
+	const selectedSources = new Set([...entrySelection.sources].filter((id) => directory?.sources.some((s) => s.id === id)));
+	const selectedFolders = new Set([...entrySelection.folders].filter((id) => directory?.organization.folders.some((f) => f.id === id)));
+	const fullySelectedFolders = new Set([...selectedFolders].filter((id) => directory && folderEntryCheck(directory, id, { sources: selectedSources, folders: selectedFolders }).checked));
+	const toggleEntries = (kind: "source" | "folder", id: string, checked: boolean) => {
+		if (directory) setEntrySelection((previous) => toggleSourceEntries(directory, previous, kind, id, checked));
+	};
 
 	// Controlled when the caller lifts the selection (the practice pick
 	// set); internal (uncontrolled) otherwise — the delete flow's own.
@@ -641,6 +780,9 @@ export function ChainTableOverlay({
 		if (!open || deleteOpen) return;
 		const onKeyDown = (e: KeyboardEvent) => {
 			if (e.key === "Escape") {
+				// App Router delegates React events on document too: a child's
+				// stopPropagation cannot silence a sibling document listener.
+				if (e.defaultPrevented || (e.target instanceof Element && e.target.closest('[data-testid="source-name-input"]'))) return;
 				// THE ONE-ESC LAW (owner, keyboard round 2026-10-06): claim
 				// at the document level — the window chain (dictation →
 				// abort) must not also act. One Esc, one action.
@@ -654,11 +796,6 @@ export function ChainTableOverlay({
 	}, [open, deleteOpen, onClose]);
 
 	if (!open) return null;
-
-	const byId = new Map(nodes.map((n) => [n.id, n]));
-	const selectedNodes = [...selection].map((id) => byId.get(id)).filter((n): n is GraphNode => n !== undefined);
-	const derived = chainsForSelection(selectedNodes, storedChains);
-	const nodeIds = [...selection].sort();
 
 	const toggleNodes = (ids: string[], next: boolean) => {
 		const s = new Set(selection);
@@ -681,7 +818,15 @@ export function ChainTableOverlay({
 				data-testid="chain-table-overlay"
 				className="absolute inset-0 z-40 flex flex-col bg-background/80 backdrop-blur-sm"
 			>
+				{directoryFailure && <p role="alert" className="px-3 py-1 text-xs text-red-400">{directoryFailure}</p>}
 				<ChainTableBody
+					keyboardActive={!deleteOpen}
+					directory={directory}
+					onOrganizationChange={directory ? changeOrganization : undefined}
+					selectedFolders={selectedFolders}
+					selectedSources={selectedSources}
+					onToggleSource={(id, next) => toggleEntries("source", id, next)}
+					onToggleFolder={(id, next) => toggleEntries("folder", id, next)}
 					nodes={nodes}
 					chains={storedChains}
 					sessions={sessions}
@@ -702,29 +847,41 @@ export function ChainTableOverlay({
 					onToggleCluster={(key) => setExpandedClusters((prev) => toggleIn(prev, key))}
 					onToggleChain={(id) => setExpandedChains((prev) => toggleIn(prev, id))}
 					onToggleNodes={toggleNodes}
-					onClear={() => applySelection(new Set())}
-					onDelete={() => setDeleteOpen(true)}
+					onClear={() => { if (selectMode) applySelection(new Set()); else setEntrySelection({ sources: new Set(), folders: new Set() }); }}
+					onDelete={() => setDeletion({
+						sources: directory?.sources.filter((s) => selectedSources.has(s.id)) ?? [],
+						folders: directory?.organization.folders.filter((f) => fullySelectedFolders.has(f.id)) ?? [],
+					})}
 					onClose={onClose}
 					selectMode={selectMode}
 					onSelect={onClose}
 				/>
 			</div>
-			{deleteOpen && (
-				<DeleteNodeDialog
-					nodes={selectedNodes.map((n) => ({ id: n.id, name: n.name }))}
-					onClose={() => setDeleteOpen(false)}
-					onDeleted={(deadIds, graphRevision) => {
-						// Close the dialog; prune the dead ids from the
-						// selection (the rest of a big selection survives);
-						// announce the revision so GraphView refetches the
-						// snapshot — fresh nodes/edges flow back in as props.
-						setDeleteOpen(false);
-						const dead = new Set(deadIds);
-						applySelection(new Set([...selection].filter((id) => !dead.has(id))));
-						window.dispatchEvent(new CustomEvent("lh:graph-revision", { detail: { graphRevision } }));
-					}}
-				/>
-			)}
+			{!selectMode && <DeleteSourceDialog open={deleteOpen}
+				sources={deletion?.sources ?? []}
+				folders={deletion?.folders ?? []}
+				onClose={() => setDeletion(null)}
+				onDelete={(deleteSessions) => {
+					const operation = mutationTail.current.catch(() => {}).then(async () => {
+						let graphRevision: number | undefined;
+						try {
+							const response = await fetch("/api/graph/sources", { method: "DELETE", headers: { "Content-Type": "application/json" },
+								body: JSON.stringify({ sourceIds: deletion?.sources.map((s) => s.id) ?? [], folderIds: deletion?.folders.map((f) => f.id) ?? [], deleteSessions }) });
+							const body = await response.json();
+							if (!response.ok) throw new Error(typeof body.error === "string" ? body.error : "Could not delete sources.");
+							graphRevision = body.graphRevision;
+							requestVersion.current++; setDirectory(body as SourceDirectory); setDirectoryFailure("");
+							setEntrySelection({ sources: new Set(), folders: new Set() });
+						} finally {
+							// A failed response can still follow partial disk writes.
+							// Refresh graph content as well as the directory, in both home modes.
+							void readDirectory();
+							window.dispatchEvent(new CustomEvent("lh:graph-revision", { detail: { graphRevision } }));
+						}
+					});
+					mutationTail.current = operation; return operation;
+				}}
+			/>}
 		</>
 	);
 }

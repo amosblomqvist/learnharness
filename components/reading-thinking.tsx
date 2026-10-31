@@ -1,7 +1,8 @@
 "use client";
 
-import { useCallback } from "react";
+import { useCallback, useLayoutEffect, useRef, useState } from "react";
 import { joinDictation, useDictationTarget } from "@/components/dictation";
+import { PathInput } from "@/components/path-input";
 
 /**
  * The reading-thinking field (owner design 2026-10-03, "two questions per
@@ -20,12 +21,14 @@ import { joinDictation, useDictationTarget } from "@/components/dictation";
  */
 export function ReadingThinkingField({
 	value,
+	revision,
 	onChange,
 	onEscape,
 	onOpen,
 	claim,
 }: {
 	value: string;
+	revision: number;
 	onChange: (v: string) => void;
 	/** Esc in the field stops dictation (threaded from the page's hook). */
 	onEscape?: () => void;
@@ -37,13 +40,18 @@ export function ReadingThinkingField({
 	/** Primary dictation claim — true while the check is behind its reveal. */
 	claim: boolean;
 }) {
+	const [draft, setDraft] = useState(value);
+	// Appends may arrive back-to-back before React commits. Like Chat's
+	// submit mirror, this ref includes every edit synchronously.
+	const draftRef = useRef(value);
+	useLayoutEffect(() => { draftRef.current = value; setDraft(value); }, [revision, value]);
+	const applyDraft = useCallback((next: string) => {
+		draftRef.current = next;
+		setDraft(next);
+		onChange(next);
+	}, [onChange]);
 	useDictationTarget(
-		useCallback(
-			(t: string) => {
-				onChange(joinDictation(value, t));
-			},
-			[value, onChange],
-		),
+		useCallback((text: string) => applyDraft(joinDictation(draftRef.current, text)), [applyDraft]),
 		claim,
 	);
 	return (
@@ -54,9 +62,9 @@ export function ReadingThinkingField({
 			<div className="pb-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">
 				Thinking while reading
 			</div>
-			<textarea
-				value={value}
-				onChange={(e) => onChange(e.target.value)}
+			<PathInput
+				value={draft}
+				onValueChange={applyDraft}
 				/* py-0.5 (owner round, 2026-10-07): the scrollbar fix. Source
 				   Sans 3's font box is 22px at 16px; lh-input's 1.25 leading
 				   gives a 20px line box — the content area sticks 1px below the
@@ -95,7 +103,6 @@ export function ReadingThinkingField({
 					}
 				}}
 				placeholder="Whatever comes to mind as you read."
-				rows={1}
 				className="field-sizing-content lh-input max-h-40 w-full resize-none bg-transparent py-0.5 outline-none placeholder:text-muted-foreground/70"
 			/>
 		</div>

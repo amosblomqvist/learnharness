@@ -21,7 +21,7 @@ import { stores } from "./stores.ts";
 import { isTurnRunning } from "./turn-liveness.ts";
 import { compactionInFlight } from "./compaction.ts";
 
-export const pluginDirectory = path.join(PATHS.data, "plugins");
+export const pluginDirectory = path.join(/* turbopackIgnore: true */ PATHS.data, "plugins");
 type Host = ReturnType<typeof createPluginHost>;
 interface Runtime { host: Host; ready: Promise<void> }
 interface PluginGlobal { __lhPlugins?: Runtime }
@@ -46,12 +46,12 @@ function runtime(): Runtime {
 		createServices({ manifest, dataDirectory, signal }) {
 			const inference = createPluginInference({ signal, dataDirectory });
 			const agents = createPluginAgentService({
-				store: createPluginAgentRecordStore(path.join(dataDirectory, "agents")),
+				store: createPluginAgentRecordStore(path.join(/* turbopackIgnore: true */ dataDirectory, "agents")),
 				engineFor: inference.engineFor, onUsage: inference.onUsage, signal,
 				onChange: () => { if (!signal.aborted) emit("plugin-message", { pluginId: manifest.id, topic: "agents-changed" }); },
 			});
 			const workers = createPluginWorkerService({
-				store: createPluginTaskRecordStore(path.join(dataDirectory, "tasks")),
+				store: createPluginTaskRecordStore(path.join(/* turbopackIgnore: true */ dataDirectory, "tasks")),
 				engineFor: inference.engineFor, onUsage: inference.onUsage, signal,
 			});
 			return { learning, inference: inference.inference, agents, workers,

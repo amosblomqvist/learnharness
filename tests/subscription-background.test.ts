@@ -42,7 +42,7 @@ for (const p of NATIVE_SUBSCRIPTIONS) for (const revokeAfterQueue of [false, tru
 	const chat = stores.chatStore.createChat("Fixture mixed queue"); const model = { ...piModels().getModels(p.providerId)[0]!, provider: p.logicalId };
 	stores.chatStore.saveSettings(chat.id, { model: { provider: p.logicalId, id: model.id } });
 	const job = stores.jobStore.createJob({ kind: "research", chatId: chat.id, toolCallId: "fixture-job-call" }); const result = { brief: "Fixture helper result", sources: [] };
-	stores.jobStore.updateJob(job.id, { status: "running", result }); const steer = buildSubagentSteer(job, result); const contexts: string[] = [];
+	stores.jobStore.updateJob(job.id, { status: "done", result, delivery: { kind: "result", status: "pending" } }); const steer = buildSubagentSteer(job, result); const contexts: string[] = [];
 	const agent = new Agent({ initialState: { model, messages: [{ id: "fixture-initial", role: "user", content: "Initial learner input", timestamp: 1 } as AgentMessage] }, convertToLlm: toLlmMessages, streamFn: () => {
 		contexts.push(JSON.stringify(agent.state.messages)); const stream = new AssistantMessageEventStream();
 		const output = { role: "assistant" as const, provider: p.logicalId, api: model.api, model: model.id, content: [{ type: "text" as const, text: "Foreground response" }], stopReason: "stop" as const, timestamp: 2, usage: { input: 2, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 3, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } } };
@@ -57,6 +57,6 @@ for (const p of NATIVE_SUBSCRIPTIONS) for (const revokeAfterQueue of [false, tru
 	assert.equal(contexts.length, 1); assert(contexts[0]!.includes("Continue my learning")); assert(!contexts[0]!.includes(steer.id));
 	const persisted = persistTurn(stores.chatStore, chat.id, 0, agent.state.messages, false);
 	unregisterLiveAgent(chat.id); endTurn(chat.id); settleSteers(chat.id, persisted); await new Promise((resolve) => setImmediate(resolve));
-	assert.equal(wakes, 0); assert.equal(stores.jobStore.getJob(job.id)!.status, "running");
+	assert.equal(wakes, 0); assert.equal(stores.jobStore.getJob(job.id)!.status, "done"); assert.equal(stores.jobStore.getJob(job.id)!.delivery?.status, "pending");
 	connection(p.providerId, true); await delivered; assert.equal(wakes, 1); assert.equal(stores.jobStore.getJob(job.id)!.status, "done");
 });

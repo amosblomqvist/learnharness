@@ -19,6 +19,9 @@ import { KeyboardSection } from "../components/settings/keyboard-section.tsx";
 import type { GraphSettings } from "../src/core/index.ts";
 import { SettingsDialogBody, SettingsDialogProvider } from "../components/settings/settings-dialog.tsx";
 import { KEYBOARD_ACTIONS } from "../src/core/index.ts";
+import { DictationLanguageSetting } from "../components/dictation-language.tsx";
+import { SettingsMenuTrigger } from "../components/settings/controls.tsx";
+import { SubscriptionConnections } from "../components/settings/subscription-connections.tsx";
 
 /** The full opening tag of the element carrying a testid — attribute
  *  order in React output is not contractual, so assertions run on the
@@ -57,6 +60,52 @@ describe("SettingsDialog (the designed surface, SSR)", () => {
 		assert.ok(html.includes("Loading settings…"));
 		// Modal-only doctrine: no link back to /settings anywhere in it.
 		assert.ok(!html.includes('href="/settings"'));
+	});
+});
+
+describe("the shared settings dropdown trigger", () => {
+	it("Agent, Appearance and dictation use the same compact dark mono trigger", () => {
+		const surfaces = [
+			[renderToStaticMarkup(<AgentSection agent={undefined} models={undefined} graph={undefined} onSectionChange={() => {}} onModelsChange={() => {}} />), "slot-model-strong"],
+			[renderToStaticMarkup(<AppearanceSection appearance={undefined} onSectionChange={() => {}} />), "font-trigger"],
+			[renderToStaticMarkup(<DictationLanguageSetting />), "dictation-language"],
+		] as const;
+		for (const [html, id] of surfaces) {
+			const tag = tagOf(html, id);
+			const classes = tag.match(/class="([^"]+)"/)![1]!.split(" ");
+			for (const token of ["h-7", "rounded-sm", "border", "border-border", "bg-background", "px-1.5", "font-ui", "text-xs", "hover:border-muted-foreground/50"]) {
+				assert.ok(classes.includes(token), `${id}: ${token}`);
+			}
+			assert.ok(html.includes("▾"), `${id}: shared dropdown indicator`);
+		}
+	});
+
+	it("preserves native disabling separately from callers' existing click-gated unavailable state", () => {
+		const disabled = tagOf(renderToStaticMarkup(<SettingsMenuTrigger value="English" disabled data-testid="disabled-trigger" />), "disabled-trigger");
+		const unavailable = tagOf(renderToStaticMarkup(<SettingsMenuTrigger value="Automatic" unavailable data-testid="unavailable-trigger" />), "unavailable-trigger");
+		assert.ok(disabled.includes('disabled=""'));
+		assert.ok(!unavailable.includes('disabled=""'));
+		assert.ok(unavailable.includes("cursor-not-allowed"));
+		assert.ok(!unavailable.includes("hover:border-muted-foreground/50"));
+	});
+});
+
+describe("Providers settings-label typography", () => {
+	it("Language uses the standard sans SettingsRow label without changing its mono trigger", () => {
+		const html = renderToStaticMarkup(<DictationLanguageSetting />);
+		assert.ok(html.includes('<span class="block font-prose text-(length:--lh-prose-size)">Language</span>'));
+		assert.ok(tagOf(html, "dictation-language").includes("font-ui text-xs"));
+	});
+
+	it("only Providers subscription labels use sans; setup labels retain their compact mono styling", () => {
+		const settings = renderToStaticMarkup(<SubscriptionConnections />);
+		const setup = renderToStaticMarkup(<SubscriptionConnections setup />);
+		for (const label of ["ChatGPT", "GitHub Copilot", "Grok"]) {
+			assert.ok(settings.includes(`<span class="font-prose text-(length:--lh-prose-size) text-foreground">${label}</span>`), `${label}: settings sans label`);
+			assert.ok(setup.includes(`<span class="font-ui text-xs text-foreground">${label}</span>`), `${label}: unchanged setup label`);
+		}
+		assert.equal((settings.match(/>Connect<\/button>/g) ?? []).length, 3);
+		assert.equal((setup.match(/>Connect<\/button>/g) ?? []).length, 3);
 	});
 });
 

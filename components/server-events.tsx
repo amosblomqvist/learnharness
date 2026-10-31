@@ -116,18 +116,13 @@ export function wireSource(source: NotifySource, hub: ReturnType<typeof createNo
 
 const EventsContext = createContext<ReturnType<typeof createNotifyHub> | null>(null);
 
+/** Transport adapters may also be mounted in isolation with an injected bridge. */
+export function useNotifyHub() { return useContext(EventsContext); }
+
 export function ServerEventsProvider({ children, connect }: { children: ReactNode; connect?: () => NotifySource }) {
 	const hub = useMemo(() => createNotifyHub(), []);
 	useEffect(() => wireSource((connect ?? openEventsChannel)(), hub), [hub, connect]);
 	return <EventsContext.Provider value={hub}>{children}</EventsContext.Provider>;
-}
-
-/** Access the existing window channel for consumers subscribing to the full
- * vocabulary. This does not open another connection. */
-export function useNotifyHub() {
-	const hub = useContext(EventsContext);
-	if (!hub) throw new Error("useNotifyHub requires <ServerEventsProvider>");
-	return hub;
 }
 
 /** Subscribe to one event type for this component's lifetime. The callback

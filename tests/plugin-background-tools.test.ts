@@ -11,7 +11,8 @@ import { createPluginBackgroundTool, recoverPluginBackgroundJob } from "../src/s
 import { buildAbortSteer, buildSubagentSteer, isSubagentFailure, type JobRecord, type SteerMessage } from "../src/core/contracts/jobs.ts";
 import type { JobStore } from "../src/core/ports.ts";
 import { createJobRunner } from "../src/agent/subagents/runner.ts";
-import { abortJob, deliverJobResult, recoverStaleJobs, registerLiveAgent, setJobRespawn, setPluginJobRecovery, setTurnRunner, settleSteers, unregisterLiveAgent } from "../src/server/jobs.ts";
+import { abortJob, deliverJobResult, recoverStaleJobs, registerLiveAgent, setJobRespawn, setPluginJobRecovery, setTurnRunner as setRawTurnRunner, settleSteers, unregisterLiveAgent, noteSteersDurable, type TurnRunner } from "../src/server/jobs.ts";
+import { registerJobAbort, unregisterJobAbort, isJobLive } from "../src/agent/subagents/aborts.ts";
 import { beginTurn, endTurn } from "../src/server/turn-liveness.ts";
 import { chatStore } from "../src/store/chats.ts";
 import { jobStore as diskJobs } from "../src/store/jobs.ts";
@@ -23,6 +24,21 @@ function deferred<T>() {
 	return { promise, resolve };
 }
 async function flush() { for (let i = 0; i < 8; i++) await Promise.resolve(); }
+/** Test wakes acknowledge only after the marker is canonically persisted. */
+function setTurnRunner(run: TurnRunner): void {
+	setRawTurnRunner(async (chatId, input) => {
+		const status = await run(chatId, input);
+		if (status === 200 && input.type === "steers") {
+			const chat = chatStore.getChat(chatId);
+			if (chat) {
+				const messages = [...chat.messages, ...input.steers.filter((steer) => !chat.messages.some((message) => message.id === steer.id))];
+				chatStore.saveMessages(chatId, messages);
+				noteSteersDurable(chatId, messages);
+			}
+		}
+		return status;
+	});
+}
 function memoryJobs(): JobStore {
 	const jobs = new Map<string, JobRecord>();
 	return {
@@ -83,7 +99,7 @@ function harness(overrides: Partial<PluginBackgroundTool<typeof schema>> = {}) {
 		unregisterAbort: (id: string) => { aborts.delete(id); },
 	};
 	const tool = createPluginBackgroundTool({ ...common, pluginId: "test-plugin", context: { chatId: "chat", agent: "teacher" }, definition, workers, signal: active.signal, isActive: () => !active.signal.aborted });
-	return { tool, jobStore, active, aborts, deliveries, released, update, common, counts: () => ({ prepareCalls, starts, formats }), task: () => structuredClone(task), job: () => jobStore.listJobs("chat")[0]!, listeners };
+	return { tool, workers, definition, jobStore, active, aborts, deliveries, released, update, common, counts: () => ({ prepareCalls, starts, formats }), task: () => structuredClone(task), job: () => jobStore.listJobs("chat")[0]!, listeners };
 }
 function result(job: JobRecord) { return job.result as PluginBackgroundResult; }
 
@@ -105,11 +121,28 @@ describe("native plugin background tool adapter", () => {
 		assert.equal(h.deliveries[0]!.content, "Model-facing summary");
 		assert.deepEqual(result(h.job()).data, { visible: true, html: "<script>never model text</script>" });
 		assert.deepEqual(result(h.job()).outcome, { id: "task_1", status: "succeeded", result: false });
-		assert.equal(h.aborts.has(h.job().id), true, "liveness spans delivery");
+		assert.equal(h.aborts.has(h.job().id), false, "session delivery does not retain computation resources");
+		assert.equal(h.job().status, "done");
+		assert.deepEqual(h.job().delivery, { kind: "result", status: "pending" });
+		assert.deepEqual(h.job().input, { query: "input" });
 		assert.equal(h.listeners.size, 0);
 		h.released.resolve(); await flush();
 		assert.equal(h.aborts.size, 0);
 		assert.deepEqual(await h.tool.execute("call", { query: "retry after delivery" }), ack);
+	});
+
+	it("delivery rejection cannot rewrite accepted success or retain computation resources", async (t) => {
+		const h = harness(); const logged: unknown[][] = [];
+		t.mock.method(console, "error", (...args: unknown[]) => { logged.push(args); });
+		const tool = createPluginBackgroundTool({ ...h.common, workers: h.workers, definition: h.definition, pluginId: "example",
+			context: { chatId: "chat", agent: "teacher" }, signal: h.active.signal, isActive: () => true,
+			deliver: async () => { throw new Error("wake start unavailable"); },
+		});
+		await tool.execute("call", { query: "input" }); h.update({ status: "succeeded", result: false }); await flush();
+		assert.equal(h.job().status, "done"); assert.equal(h.job().error, undefined);
+		assert.deepEqual(h.job().delivery, { kind: "result", status: "pending" });
+		assert.equal(result(h.job()).outcome.status, "succeeded"); assert.equal(h.aborts.size, 0);
+		assert.equal(logged.length, 1);
 	});
 
 	it("rechecks dedup after asynchronous prepare so concurrent calls accept one task",  async () => {
@@ -172,30 +205,28 @@ describe("native plugin background tool adapter", () => {
 	it("abort after task success does not change its immutable outcome", async () => {
 		const h = harness(); await h.tool.execute("call", { query: "input" });
 		h.update({ status: "succeeded", result: null }); await flush();
-		h.jobStore.updateJob(h.job().id, { status: "error", error: "Aborted by learner" });
-		h.aborts.get(h.job().id)!.abort();
+		assert.equal(h.job().status, "done");
+		assert.equal(h.aborts.has(h.job().id), false);
 		assert.equal(h.task().status, "succeeded");
 		assert.deepEqual(result(h.job()).outcome, { id: "task_1", status: "succeeded", result: null });
 		h.released.resolve(); await flush();
 	});
 
-	for (const stop of ["disable", "END"] as const) it(`${stop} stops waiting for a stuck formatter without claiming to kill author code`, async () => {
+	it("disable stops waiting for a stuck formatter without claiming to kill author code", async () => {
 		const formatting = deferred<{ text: string }>();
 		const h = harness({ format: () => formatting.promise });
 		await h.tool.execute("call", { query: "input" });
 		h.update({ status: "succeeded", result: false }); await flush();
 		assert.equal(h.deliveries.length, 0);
-		if (stop === "disable") h.active.abort();
-		else { h.jobStore.updateJob(h.job().id, { status: "error", error: "Aborted by learner" }); h.aborts.get(h.job().id)!.abort(); }
-		await flush();
+		h.active.abort(); await flush();
 		assert.equal(result(h.job()).outcome.status, "succeeded");
 		assert.match(result(h.job()).text, /completed successfully/);
 		assert.match(result(h.job()).formatError!, /aborted/);
-		assert.equal(h.deliveries.length, stop === "disable" ? 1 : 0);
+		assert.equal(h.deliveries.length, 1);
 		h.released.resolve(); await flush(); assert.equal(h.aborts.size, 0);
 		formatting.resolve({ text: "Late stale formatter" }); await flush();
 		assert.match(result(h.job()).text, /completed successfully/);
-		assert.equal(h.deliveries.length, stop === "disable" ? 1 : 0);
+		assert.equal(h.deliveries.length, 1);
 	});
 
 	it("invalid author presentation data is formatting failure, never worker or persistence failure", async () => {
@@ -203,7 +234,8 @@ describe("native plugin background tool adapter", () => {
 		for (const data of [cyclic, 1n, () => "function", NaN, Infinity, { nested: undefined }, [Symbol("not JSON")]]) {
 			const h = harness({ format: () => ({ text: "Author text", data }) });
 			await h.tool.execute("call", { query: "input" }); h.update({ status: "succeeded", result: 0 }); await flush();
-			assert.equal(h.job().status, "running", "awaits real delivery instead of retiring accepted success");
+			assert.equal(h.job().status, "done", "computation is terminal while the session owns pending delivery");
+			assert.deepEqual(h.job().delivery, { kind: "result", status: "pending" });
 			assert.equal(h.job().error, undefined);
 			assert.equal(result(h.job()).outcome.status, "succeeded");
 			assert.match(result(h.job()).text, /completed successfully/);
@@ -292,6 +324,27 @@ describe("native plugin background tool adapter", () => {
 });
 
 describe("plugin job restart recovery", () => {
+	it("restart uses the persisted generic outcome without replaying a pending formatter", async () => {
+		const formatting = deferred<{ text: string }>();
+		const h = harness({ format: () => formatting.promise });
+		await h.tool.execute("call", { query: "input" }); h.update({ status: "succeeded", result: 0 }); await flush();
+		const saved = h.job();
+		assert.equal(saved.status, "done"); assert.deepEqual(saved.delivery, { kind: "result", status: "pending" });
+		assert.match(result(saved).text, /completed successfully/);
+		const restarted = memoryJobs();
+		restarted.createJob({ kind: saved.kind, chatId: saved.chatId, toolCallId: saved.toolCallId, plugin: saved.plugin, input: saved.input });
+		restarted.updateJob(saved.id, { status: saved.status, result: saved.result, delivery: saved.delivery });
+		const notices: SteerMessage[] = []; const live = new Set<string>();
+		await recoverPluginBackgroundJob(restarted.getJob(saved.id)!, {
+			jobStore: restarted, deliver: async (steer) => { notices.push(steer); },
+			registerAbort: (id) => { live.add(id); }, unregisterAbort: (id) => { live.delete(id); },
+			readTask: () => { assert.fail("persisted generic result requires no task read"); },
+		});
+		assert.equal(notices.length, 1); assert.equal(notices[0]!.content, result(saved).text);
+		assert.deepEqual(result(restarted.getJob(saved.id)!).outcome, { id: "task_1", status: "succeeded", result: 0 });
+		assert.equal(live.size, 0);
+		h.active.abort(); h.released.resolve(); await flush();
+	});
 	function orphan() {
 		const h = harness();
 		const job = h.jobStore.createJob({ kind: "plugin", chatId: "chat", toolCallId: "call", plugin: { pluginId: "disabled-plugin", toolName: "example", workerId: "worker", requestId: "request", input: { original: true } } });
@@ -378,7 +431,7 @@ describe("real worker/store terminal ownership", () => {
 				assert.equal(store.get(taskId)?.status, "interrupted");
 				assert.equal(result(h.job()).outcome.status, "interrupted");
 				assert.equal(formats, 0); assert.equal(h.deliveries.length, 1);
-				assert.equal(h.aborts.has(h.job().id), true, "abort spans terminal delivery");
+				assert.equal(h.aborts.has(h.job().id), false, "pending terminal delivery is not live computation");
 				h.released.resolve(); await flush();
 				assert.equal(h.aborts.size, 0);
 			} finally { admission.resolve(); h.released.resolve(); await workers.dispose(); rmSync(directory, { recursive: true, force: true }); }
@@ -437,7 +490,7 @@ describe("shared native job integration regressions", () => {
 		const chat = chatStore.createChat("Test: plugin background delivery");
 		const job = diskJobs.createJob({ kind: "plugin", chatId: chat.id, toolCallId: "call", plugin: { pluginId: "example", toolName: "example", workerId: "worker", requestId: "request", taskId: "task" } });
 		const payload: PluginBackgroundResult = { pluginId: "example", toolName: "example", input: {}, text: "Real worker success", outcome: { id: "task", status: "succeeded", result: true } };
-		diskJobs.updateJob(job.id, { result: payload });
+		diskJobs.updateJob(job.id, { result: payload, status: "done", activity: "finished", delivery: { kind: "result", status: "pending" } });
 		return { chat, job, steer: buildSubagentSteer(job, payload), cleanup() {
 			unregisterLiveAgent(chat.id); endTurn(chat.id);
 			diskJobs.updateJob(job.id, { status: "error" });
@@ -445,6 +498,87 @@ describe("shared native job integration regressions", () => {
 			setTurnRunner(async () => 200); setJobRespawn(() => {}); setPluginJobRecovery(async () => {});
 		} };
 	}
+	function livePlugin(format: PluginBackgroundTool<typeof schema>["format"], complete = true) {
+		const chat = chatStore.createChat("Test: live plugin computation");
+		const directory = mkdtempSync(join(tmpdir(), "lh-background-delivery-"));
+		const active = new AbortController(); const admission = deferred<void>();
+		const faux = createFauxCore({});
+		faux.setResponses([fauxAssistantMessage([fauxToolCall("submit_result", { result: false })], { stopReason: "toolUse" })]);
+		const taskStore = createPluginTaskRecordStore(join(directory, "tasks"));
+		const workers = createPluginWorkerService({ store: taskStore, signal: active.signal, engineFor: async () => {
+			if (!complete) await admission.promise;
+			return { model: faux.getModel(), streamFn: faux.streamSimple };
+		} });
+		workers.register({ id: "worker", instructions: "Return a result", resultSchema: Type.Boolean() });
+		const tool = createPluginBackgroundTool({ pluginId: "example", context: { chatId: chat.id, agent: "teacher" }, workers,
+			signal: active.signal, isActive: () => !active.signal.aborted, jobStore: diskJobs,
+			deliver: deliverJobResult, registerAbort: registerJobAbort, unregisterAbort: unregisterJobAbort,
+			definition: { name: "test", label: "test", description: "test", parameters: schema, workerId: "worker",
+				prepare: (input) => ({ input, prompt: "Return false", model: { provider: "offline", id: "fake" }, maxTurns: 2 }), format,
+			},
+		});
+		return { chat, tool, taskStore, job: () => diskJobs.listJobs(chat.id)[0]!, async cleanup() {
+			active.abort(); admission.resolve(); await workers.dispose(); await flush();
+			for (const job of diskJobs.listJobs(chat.id)) unregisterJobAbort(job.id);
+			unregisterLiveAgent(chat.id); endTurn(chat.id);
+			diskJobs.deleteJobsForChat(chat.id); chatStore.deleteChat(chat.id);
+			rmSync(directory, { recursive: true, force: true }); setTurnRunner(async () => 200);
+		} };
+	}
+	it("registerLiveAgent cannot deliver a live plugin's generic fallback before its formatter", async () => {
+		const entered = deferred<void>(); const formatted = deferred<{ text: string }>();
+		const h = livePlugin(() => { entered.resolve(); return formatted.promise; }); const handed: SteerMessage[] = [];
+		try {
+			await h.tool.execute("call", { query: "input" }); await entered.promise;
+			assert.equal(h.job().status, "done"); assert.equal(isJobLive(h.job().id), true, "formatter owns preparation only");
+			assert.match(result(h.job()).text, /completed successfully/);
+			assert.equal(beginTurn(h.chat.id), true);
+			registerLiveAgent(h.chat.id, { steer: (steer: SteerMessage) => handed.push(steer) } as never);
+			assert.equal(handed.length, 0);
+			assert.deepEqual(abortJob(h.job().id), { ok: false, reason: "not_running" });
+			formatted.resolve({ text: "Author presentation ready" }); await flush();
+			assert.equal(handed.length, 1); assert.equal(handed[0]!.content, "Author presentation ready");
+			assert.equal(isJobLive(h.job().id), false, "session delivery holds no worker resources");
+			assert.equal(h.job().delivery?.status, "pending");
+			chatStore.saveMessages(h.chat.id, [handed[0]!]); noteSteersDurable(h.chat.id, [handed[0]!]);
+			assert.equal(h.job().delivery?.status, "delivered"); assert.equal(h.job().status, "done");
+		} finally { formatted.resolve({ text: "cleanup" }); await h.cleanup(); }
+	});
+	it("synchronous cancellation callbacks cannot replace the durable learner-abort obligation", async () => {
+		const h = livePlugin(() => { assert.fail("cancelled task must not call the formatter"); }, false);
+		const handed: SteerMessage[] = [];
+		try {
+			assert.equal(beginTurn(h.chat.id), true);
+			registerLiveAgent(h.chat.id, { steer: (steer: SteerMessage) => handed.push(steer) } as never);
+			await h.tool.execute("call", { query: "input" });
+			assert.deepEqual(abortJob(h.job().id), { ok: true }); await flush();
+			assert.equal(h.taskStore.get(h.job().plugin!.taskId!)?.status, "cancelled");
+			assert.deepEqual(h.job().delivery, { kind: "abort", status: "pending" });
+			assert.equal(h.job().error, "Aborted by learner"); assert.equal(handed.length, 1);
+			assert.equal(handed[0]!.customType, "subagent-abort");
+			assert.equal((handed[0]!.details as { aborted?: true }).aborted, true);
+			assert.equal((handed[0]!.details as { failure?: string }).failure, undefined);
+			chatStore.saveMessages(h.chat.id, [handed[0]!]); noteSteersDurable(h.chat.id, [handed[0]!]);
+			assert.deepEqual(h.job().delivery, { kind: "abort", status: "delivered" });
+		} finally { await h.cleanup(); }
+	});
+	it("durable pipeline-failure notices restore without learner cancellation or a fabricated outcome", () => {
+		const h = setup(); const handed: SteerMessage[] = []; const failure = "Canonical task JSON is unreadable";
+		try {
+			diskJobs.updateJob(h.job.id, { status: "error", result: undefined, error: failure, delivery: { kind: "failure", status: "pending" } });
+			assert.equal(beginTurn(h.chat.id), true);
+			registerLiveAgent(h.chat.id, { steer: (steer: SteerMessage) => handed.push(steer) } as never);
+			assert.equal(handed.length, 1); assert.equal(handed[0]!.id, `steer_${h.job.id}`);
+			assert.equal(handed[0]!.customType, "subagent-abort");
+			assert.equal((handed[0]!.details as { aborted?: true }).aborted, undefined);
+			assert.equal((handed[0]!.details as { failure: string }).failure, failure);
+			chatStore.saveMessages(h.chat.id, handed); noteSteersDurable(h.chat.id, handed);
+			assert.equal(diskJobs.getJob(h.job.id)?.delivery?.status, "delivered");
+			assert.equal(diskJobs.getJob(h.job.id)?.status, "error");
+			assert.equal(diskJobs.getJob(h.job.id)?.error, failure);
+			assert.equal(diskJobs.getJob(h.job.id)?.result, undefined);
+		} finally { h.cleanup(); }
+	});
 	it("core runner ignores plugin tasks entirely", async () => {
 		const jobStore = memoryJobs();
 		const job = jobStore.createJob({ kind: "plugin", chatId: "chat", toolCallId: "call" });
@@ -461,7 +595,7 @@ describe("shared native job integration regressions", () => {
 			const delivery = deliverJobResult(h.steer);
 			assert.equal(deliverJobResult(h.steer), delivery, "duplicates share original delivery ownership");
 			assert.equal(handed.length, 1);
-			assert.deepEqual(abortJob(h.job.id), { ok: true });
+			assert.deepEqual(abortJob(h.job.id), { ok: false, reason: "not_running" });
 			assert.equal(handed.length, 1, "abort must not hand a contradictory same-id marker to pi");
 			assert.equal(handed[0]!.customType, "subagent-steer");
 			unregisterLiveAgent(h.chat.id); settleSteers(h.chat.id, [h.steer]);
@@ -469,18 +603,18 @@ describe("shared native job integration regressions", () => {
 			assert.equal((diskJobs.getJob(h.job.id)!.result as PluginBackgroundResult).outcome.status, "succeeded");
 		} finally { h.cleanup(); }
 	});
-	it("aborting pending delivery replaces stale pre-idle cargo with exactly one abort marker", async () => {
+	it("END refuses completed computation and leaves the pending result intact", async () => {
 		const h = setup(); let markers: SteerMessage[] = [];
 		try {
 			assert.equal(beginTurn(h.chat.id), true);
 			setTurnRunner(async (_chatId, input) => { assert.equal(input.type, "steers"); if (input.type === "steers") markers = input.steers as SteerMessage[]; return 200; });
 			const old = deliverJobResult(h.steer);
-			assert.equal(abortJob(h.job.id).ok, true);
-			const aborted = deliverJobResult(buildAbortSteer(h.job));
-			endTurn(h.chat.id); await old; await aborted;
+			assert.deepEqual(abortJob(h.job.id), { ok: false, reason: "not_running" });
+			endTurn(h.chat.id); await old;
 			assert.equal(markers.length, 1);
-			assert.equal(markers[0]!.customType, "subagent-abort");
-			assert.equal((markers[0]!.details as { aborted: true }).aborted, true);
+			assert.equal(markers[0]!.customType, "subagent-steer");
+			assert.equal(diskJobs.getJob(h.job.id)?.status, "done");
+			assert.equal(diskJobs.getJob(h.job.id)?.delivery?.status, "delivered");
 		} finally { h.cleanup(); }
 	});
 	it("dedupes abort against dequeued in-flight wake cargo", async () => {
@@ -489,7 +623,7 @@ describe("shared native job integration regressions", () => {
 			setTurnRunner(async (_chatId, input) => { calls++; assert.equal(input.type, "steers"); entered.resolve(); return release.promise; });
 			const delivery = deliverJobResult(h.steer);
 			await entered.promise;
-			assert.equal(abortJob(h.job.id).ok, true);
+			assert.deepEqual(abortJob(h.job.id), { ok: false, reason: "not_running" });
 			assert.equal(deliverJobResult(buildAbortSteer(h.job)), delivery);
 			release.resolve(200); await delivery;
 			assert.equal(calls, 1);
@@ -499,7 +633,7 @@ describe("shared native job integration regressions", () => {
 	it("recovery sweep routes plugin jobs only through safe recovery, never the builtin respawn", async () => {
 		const h = setup(); let recovered = 0; let respawned = 0;
 		try {
-			diskJobs.updateJob(h.job.id, { result: undefined });
+			diskJobs.updateJob(h.job.id, { result: undefined, status: "running", delivery: undefined });
 			setJobRespawn(() => { respawned++; });
 			setPluginJobRecovery(async (job) => { if (job.id === h.job.id) recovered++; });
 			const global = globalThis as { __lhWakePipeline?: { lastSweepAt: number } };

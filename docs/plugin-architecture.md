@@ -159,9 +159,13 @@ Model text and rendered data are separate; the later card reuses the tool render
 explicit background metadata rather than fabricating a native tool result.
 
 The canonical task outcome and delivery state are separate: formatter/unavailable-plugin
-failure keeps the accepted result plus honest fallback, and cancelling a delivery does not
-erase a completed task. Recovery reads safe persisted task state even for disabled packages;
-it re-delivers results or reports an honest failure, never replays preparation/tools/formatters.
+failure keeps the accepted result plus honest fallback. Worker completion ends the job's
+computing state; END does not cancel completed work or its queued delivery. A generic
+outcome is persisted before asynchronous formatting; live delivery waits for formatting,
+but restart recovery can use that persisted fallback. Recovery reads safe persisted task
+state even for disabled packages; it re-delivers results or reports an honest failure,
+never replays preparation/tools/formatters. Durable delivery distinguishes result, learner
+abort, and failure notices; missing/unreadable task state is not relabeled as learner abort.
 The shared job adapter uses atomic fsynced replacement for durable linkage/result updates.
 
 There is no DAG framework, guaranteed execution with the app closed, new plugin concurrency
@@ -224,13 +228,27 @@ projection/persistence and usage accounting without provider requests. Worker/br
 cover interruption, durable accept-one results, cancellation before dispatch, formatter
 failures, and recovery without tool replay.
 
+Integration with main **v0.4.1** (`e69e852`) passed **3,410 tests / 546 suites** with
+no failures or skips, typecheck, and lint (zero errors; one existing warning in
+`tests/source-name-ui.test.tsx`). The production build, payload curation and source-free
+Electron/Chrome smoke also passed. The merge retains main's independent computation and
+delivery lifecycle, model-aware tools, provider gates and named-core-role diagnostic
+captures alongside plugin contributions and awaited native worker checkpoints. Unscoped
+plugin workers do not acquire an invented diagnostic capture role.
+
 Packaging verification exposed that Next 16.3.2 traces some runtime path producers even
 without file reads, and instrumentation does not inherit route-level trace exclusions.
 Comment-only per-expression opt-outs now keep mutable data/auth/debug paths out of the
 payload while retaining shipped prompts. Controlled disposable builds checked independent
 chat/graph/settings/jobs/override/auth sentinels; `tests/runtime-path-tracing.test.ts` locks
-the identified source boundaries. The production payload's existing data/secret refusal
-checks remain unchanged. Two existing route-only broad-trace warnings (headless browser
+the identified source boundaries. The main integration additionally exposed installed
+plugin data to tracing: runtime plugin/service directories, inference usage filenames,
+both recovery task-directory producers, and main's background-capture paths now carry
+per-expression opt-outs. Independent Next 16.4.3 inert-copy builds confirmed that the usage
+join and **each** task-directory join independently reintroduced private sentinels when
+left unannotated; together the opt-outs removed them while retaining shipped prompts.
+The production payload's existing data/secret refusal checks remain unchanged and run
+before plugin SDK assembly. Two existing route-only broad-trace warnings (headless browser
 spawn and PDF download path) remain; this is not a warning-free build claim.
 
 After `node scripts/build-server.mjs`, the extended source-free check

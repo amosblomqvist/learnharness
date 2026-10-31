@@ -7,7 +7,7 @@ import {
 	type TeachingAgent,
 } from "../agent/teacher-agent.ts";
 import { piEngineForSpec, type PiEngine } from "../agent/models.ts";
-import { connectionBackgroundAllowed, connectionScopeCurrent, isSubscriptionProvider } from "../agent/subscription-connections.ts";
+import { connectionBackgroundAllowed as subscriptionBackgroundAllowed, connectionScopeCurrent, isSubscriptionProvider } from "../agent/subscription-connections.ts";
 import { nativeSubscriptionError } from "../agent/subscription-stream.ts";
 import { chatGPTStreamError } from "../agent/chatgpt-stream.ts";
 import { SubscriptionRequestCycle, type SubscriptionDispatchLifecycle } from "../agent/subscription-request-cycle.ts";
@@ -17,7 +17,7 @@ import { createExtractionPipeline } from "../agent/subagents/extraction.ts";
 import type { ModelRole } from "../../config.ts";
 import {
 	deliverJobResult,
-	noteSteerVisible,
+	noteSteersDurable,
 	reconcileUserSteers,
 	registerLiveAgent,
 	restoreUncommittedAutomatic,
@@ -34,18 +34,19 @@ import { effectiveSettings, stores } from "./stores.ts";
 import { getPluginAgentContributions } from "./plugins.ts";
 import { searchAvailable, searchProvider } from "./search.ts";
 import { providerKeyPresent } from "./keys.ts";
+import { CLAUDE_CODE_PROVIDER } from "../core/contracts/claude-code.ts";
 import {
 	extractionEnabled,
 	graphToolsEnabled,
 	resolveConversationSpec,
 	resolveRoleSpec,
 } from "../core/settings-resolution.ts";
-import { modelsNotConfigured, providerKeyMissing as providerKeyMissingEnvelope, type ProviderKeyMissing } from "../core/settings.ts";
+import { modelsNotConfigured, providerKeyMissing as providerKeyMissingEnvelope, ROLE_SLOT, type ModelSlotName, type ProviderKeyMissing } from "../core/settings.ts";
 import { beginTurn, endTurn } from "./turn-liveness.ts";
 import { applyParkedDismissal } from "./dismissal-park.ts";
-import { registerTurn, unregisterTurn } from "./turn-runs.ts";
-import { persistTurn, triggerExtraction } from "./turn-service.ts";
-import { hasProbeDone, danglingQuestionOf } from "../core/native-messages.ts";
+import { registerTurn, rememberTurnFailure, unregisterTurn } from "./turn-runs.ts";
+import { persistTurn, triggerExtraction, TurnPersistenceError } from "./turn-service.ts";
+import { hasProbeDone, hasUnresolvedQuestion } from "../core/native-messages.ts";
 import { composeInstructions } from "../agent/teacher-agent.ts";
 import { ensureCompacted, kickCompaction, effectiveThresholdTokens } from "./compaction.ts";
 import { catalogContextLimits, refreshConnectionCatalog } from "./model-catalog.ts";
@@ -56,10 +57,12 @@ import {
 	ChatInputError,
 	inputAppends,
 	parseChatInput,
+	questionRecoveryAppends,
+	retryDrops,
 	type TurnInput,
 } from "../core/input-events.ts";
 import { steerDelivered } from "../core/contracts.ts";
-import type {CallUsage, SteerMessage} from "../core/contracts.ts";
+import type {CallUsage} from "../core/contracts.ts";
 
 /**
  * One chat turn over the server-owned native record. Framework-free (plain
@@ -79,6 +82,16 @@ import type {CallUsage, SteerMessage} from "../core/contracts.ts";
  * wake pipeline's server-side steers (src/server/jobs.ts) — one code path
  * for write-ahead persistence, turn liveness, and the turn services.
  */
+
+/** Fresh check only at new background-run admission; never cancel a run
+ * already in progress when the opt-in is switched off. */
+function connectionBackgroundAllowed(provider: string): boolean {
+	return subscriptionBackgroundAllowed(provider) && (provider !== CLAUDE_CODE_PROVIDER || providerKeyPresent(provider));
+}
+
+function settlementErrorText(error: unknown): string {
+	return error instanceof TurnPersistenceError ? error.message : "An error occurred.";
+}
 
 const jobRunner = createJobRunner({
 	chatStore: stores.chatStore,
@@ -138,7 +151,13 @@ setTurnRunner(async (chatId, input) => {
  *  FRESH so a settings PUT between dispatch and spawn lands. */
 function resolveEngine(role: ModelRole): PiEngine | undefined {
 	const spec = resolveRoleSpec(role, stores.settingsStore.readSettings());
-	return spec ? piEngineForSpec(spec) : undefined;
+	return spec ? piEngineForSpec(spec, true, undefined, retentionForSlot(ROLE_SLOT[role])) : undefined;
+}
+
+/** Slot policy is independent of model overrides. Read fresh per operation,
+ * including parked conversations, background loops and compaction. */
+function retentionForSlot(slot: ModelSlotName) {
+	return () => stores.settingsStore.readSettings()?.models?.[slot]?.cacheRetention;
 }
 
 setJobRespawn((jobId) => void jobRunner.runJob(jobId));
@@ -181,6 +200,25 @@ export async function handleChatInput(
 	let record = stores.chatStore.getChat(chatId);
 	if (!record) {
 		return Response.json({ error: "Unknown chat" }, { status: 404 });
+	}
+
+	// Refuse an ineligible Retry before catalog refresh, compaction, or any
+	// turn/write effects. Revalidate after the awaited gates below too.
+	if (input.type === "retry") {
+		try {
+			retryDrops(record.messages);
+		} catch (err) {
+			if (err instanceof ChatInputError) return Response.json({ error: err.message }, { status: 400 });
+			throw err;
+		}
+	}
+
+	if (input.type === "retry-question") {
+		try { questionRecoveryAppends(record.messages, input); }
+		catch (err) {
+			if (err instanceof ChatInputError) return Response.json({ error: err.message }, { status: 400 });
+			throw err;
+		}
 	}
 
 	// THE UNIVERSAL TURN GATE (BYOK, owner, 2026-09-22): a turn needs the
@@ -237,13 +275,13 @@ export async function handleChatInput(
 		noDispatch: (kind) => requestCycle?.noDispatch(kind),
 	};
 	let conversationEngine: PiEngine;
-	try { conversationEngine = piEngineForSpec(conversation, () => callPurpose.background, lifecycle); }
+	try { conversationEngine = piEngineForSpec(conversation, () => callPurpose.background, lifecycle, retentionForSlot("strong")); }
 	catch { return Response.json({ error: conversation.provider === "chatgpt" ? chatGPTStreamError("model catalog") : isSubscriptionProvider(conversation.provider) ? nativeSubscriptionError(conversation.provider, "model catalog") : "The selected model is unavailable." }, { status: 503 }); }
 	const modelIdForCompaction = `${conversationEngine.model.provider}:${conversationEngine.model.id}`;
 	await ensureCompacted(
 		{
 			chatStore: stores.chatStore,
-			engine: piEngineForSpec(conversation, true),
+			engine: piEngineForSpec(conversation, true, undefined, retentionForSlot("strong")),
 			canStart: () => connectionBackgroundAllowed(conversation.provider),
 			modelId: modelIdForCompaction,
 			kind: record.kind === "practice" ? "practice" : hasProbeDone(record.messages) ? "teach" : "probe",
@@ -256,7 +294,20 @@ export async function handleChatInput(
 		chatId,
 	);
 	const compactedRecord = stores.chatStore.getChat(chatId);
-	if (compactedRecord) record = compactedRecord;
+	if (!compactedRecord) return Response.json({ error: "Unknown chat" }, { status: 404 });
+	record = compactedRecord;
+	// Recompute Retry eligibility on current truth, still before beginTurn.
+	// A compaction marker or another writer may have landed during awaits.
+	// These omissions affect ONLY the agent context, never the saved record.
+	let retryOmissions = new Set<string>();
+	if (input.type === "retry") {
+		try {
+			retryOmissions = retryDrops(record.messages);
+		} catch (err) {
+			if (err instanceof ChatInputError) return Response.json({ error: err.message }, { status: 400 });
+			throw err;
+		}
+	}
 
 	// The input's native appends (pure; the honest 400 for an answer with no
 	// pending question call). Computed BEFORE beginTurn so a refused input
@@ -288,9 +339,13 @@ export async function handleChatInput(
 	// the sibling question permanently pre-fix). Nothing else can generate
 	// while a question dangles (job wakes wait, continuation folds refuse,
 	// the composer gates), so adjacency holds by construction.
-	if (input.type === "answer" && danglingQuestionOf([...record.messages, ...appends]) !== null) {
+	if (input.type === "answer" && hasUnresolvedQuestion([...record.messages, ...appends])) {
 		const merged = [...record.messages, ...appends];
-		stores.chatStore.saveMessages(chatId, merged);
+		try { stores.chatStore.saveMessages(chatId, merged); }
+		catch (err) {
+			console.error(`[chat ${chatId}] write-ahead persist failed:`, err);
+			return new Response("Your input could not be saved. Please try again.", { status: 500 });
+		}
 		emit("record-changed", { chatId });
 		return settledTurnResponse(); // the cheap terminal — no beginTurn, no turn
 	}
@@ -310,18 +365,26 @@ export async function handleChatInput(
 	// ride this same write-ahead - the pump de-queued them at fire, so this
 	// is the ONLY copy ever appended.)
 	const merged = [...record.messages, ...appends];
+	// Retry preserves every persisted attempt. Pi needs a non-assistant
+	// tail to start continue(), so its temporary history omits the trailing
+	// failures only. Count that SAME temporary prefix at settlement, or the
+	// retained failures would make persistTurn skip genuinely new output.
+	const agentMessages = input.type === "retry" ? merged.filter((m) => !retryOmissions.has(m.id)) : merged;
 	const stagedAutomatic = isSubscriptionProvider(conversation.provider) && input.type === "steers";
-	let persistBaseCount = stagedAutomatic ? record.messages.length : merged.length;
+	let persistBaseCount = stagedAutomatic ? record.messages.length : agentMessages.length;
 	try {
 		if (!stagedAutomatic) stores.chatStore.saveMessages(chatId, merged);
-		// Dock fix (owner ruling 2026-09-26): persisted markers are visible
-		// in the record — flip their jobs now (the wake's steers ride this
-		// write-ahead; the delivering turn may run for minutes).
-		for (const appended of stagedAutomatic ? [] : appends) {
-			if ((appended as { role?: string }).role === "custom") noteSteerVisible(appended as SteerMessage);
-		}
 	} catch (err) {
 		console.error(`[chat ${chatId}] write-ahead persist failed:`, err);
+		endTurn(chatId);
+		return new Response("Your input could not be saved. Please try again.", { status: 500 });
+	}
+	// Visibility bookkeeping is not the canonical save. Its failure must
+	// neither misreport a saved input as lost nor prevent the turn running.
+	try {
+		if (!stagedAutomatic) noteSteersDurable(chatId, merged);
+	} catch (err) {
+		console.error(`[chat ${chatId}] input visibility bookkeeping failed:`, err);
 	}
 
 	// MONEY CHANNEL (wave 4): one collector per request, fed by the agent's
@@ -347,7 +410,7 @@ export async function handleChatInput(
 	// the session is still probing: build the PROBER (quiz/ask + probe_done).
 	// Both share this whole composition (write-ahead persist, liveness,
 	// steers, usage, extraction) — only the agent differs.
-	const teaching = hasProbeDone(merged);
+	const teaching = hasProbeDone(agentMessages);
 	// BYOK (owner, 2026-09-22): the conversation chain was resolved by the
 	// turn gate above (chat.model override → strong slot → refused) — the
 	// engine build is pure from here; thinking levels clamp natively.
@@ -366,12 +429,16 @@ export async function handleChatInput(
 	// sub-agent JOB tools (research/demo/visual/pdf; adjudicated with the
 	// user: quiz/ask/fs/plan/probe_done are always-on).
 	if (isSubscriptionProvider(conversation.provider)) requestCycle = new SubscriptionRequestCycle({
-		initialMessages: asAgentMessages(merged),
+		initialMessages: asAgentMessages(agentMessages),
 		staged: stagedAutomatic ? asAgentMessages(appends) : undefined,
 		foregroundOwed: !callPurpose.background,
 		purpose: callPurpose,
 		scopeCurrent: (scope) => connectionScopeCurrent(conversation.provider, scope),
-		commitStaged: () => { stores.chatStore.saveMessages(chatId, merged); persistBaseCount = merged.length; },
+		commitStaged: () => {
+			stores.chatStore.saveMessages(chatId, merged);
+			persistBaseCount = merged.length;
+			noteSteersDurable(chatId, merged);
+		},
 		restoreAutomatic: (automaticIds, retainedIds) => restoreUncommittedAutomatic(chatId, constructed, automaticIds, retainedIds),
 	});
 	let pluginContributions: AgentBuildOptions["pluginContributions"];
@@ -388,7 +455,7 @@ export async function handleChatInput(
 		engine,
 		callPurpose,
 		requestCycle,
-		messages: asAgentMessages(merged),
+		messages: asAgentMessages(agentMessages),
 		onUsage: collectUsage,
 		toolToggles: effective.agent.tools,
 		// Debug (owner, 2026-10-04): teacher/prober raw provider events under
@@ -479,11 +546,12 @@ export async function handleChatInput(
 		// run's first LLM call (the native replacement for continuation
 		// coalescing). Settlement still cannot beat the flow below: it needs
 		// a streamed response, which never happens inside the constructor.
-		registerLiveAgent(chatId, constructed);
+		registerLiveAgent(chatId, constructed, input.type !== "steers" && input.type !== "continue",
+			input.type === "steers" ? new Set(appends.map((message) => message.id)) : undefined);
 		// Debug recorder run marker (owner, 2026-10-04): correlates the
 		// JSONL event stream with the record's turns; no-op unless
 		// LH_PROVIDER_EVENTS=1.
-		providerEventNote(chatId, "turn", `run start (base: ${merged.length} messages)`);
+		providerEventNote(chatId, "turn", `run start (base: ${agentMessages.length} messages)`);
 		const handle = runPiTurn({
 			agent: constructed,
 			requestCycle,
@@ -507,10 +575,26 @@ export async function handleChatInput(
 				console.error(`[chat ${chatId}] turn error:`, error);
 				return "An error occurred.";
 			},
+			onSettleError: settlementErrorText,
+			onSettleFailure: (error, reportedErrorText) => {
+				// POST only acknowledges acceptance; the submitter may attach
+				// after this turn has already failed and left the registry.
+				rememberTurnFailure(chatId, reportedErrorText ?? settlementErrorText(error));
+				endTurn(chatId);
+				unregisterTurn(chatId);
+				unregisterLiveAgent(chatId);
+				// The canonical save may have succeeded before later bookkeeping
+				// threw. Reconcile against actual durability, never replay input
+				// merely because usage/extraction/other settlement work failed.
+				const persisted = stores.chatStore.getChat(chatId)?.messages ?? [];
+				reconcileUserSteers(chatId, persisted);
+				settleSteers(chatId, persisted, true, constructed);
+			},
 			onFinish: (turnMessages, isAborted) => {
-				// Wave B: the record write is the agent's own final state —
-				// the new messages are the slice past the merged base.
+				// Wave B: append only messages past the temporary agent prefix.
+				// Retry's saved record still includes its earlier failed attempts.
 				const stamped = persistTurn(stores.chatStore, chatId, persistBaseCount, turnMessages, isAborted);
+				noteSteersDurable(chatId, stores.chatStore.getChat(chatId)?.messages ?? stamped);
 				// usage log append (idempotent per turn id) — the stats bar
 				// refolds this on the client after the turn settles. The
 				// provenance message is the turn's FIRST new assistant message.
@@ -556,7 +640,7 @@ export async function handleChatInput(
 				// resolve; stranded markers return to pending), then let
 				// the pump take any stragglers down the idle wake.
 				unregisterLiveAgent(chatId);
-				settleSteers(chatId, stamped);
+				settleSteers(chatId, stamped, false, constructed);
 				// Composer steers (2026-10-03): delivered ids dropped, stranded
 				// ones stay parked for the chat's next run (the registry is the
 				// stranding safety net — the agent's undrained copy died above).
@@ -576,7 +660,7 @@ export async function handleChatInput(
 						const spec = resolveConversationSpec(stores.chatStore.getChat(chatId)?.settings, fresh.models.strong);
 						if (!spec || !connectionBackgroundAllowed(spec.provider)) return null;
 						let kickEngine: PiEngine;
-						try { kickEngine = piEngineForSpec(spec, true); } catch { return null; }
+						try { kickEngine = piEngineForSpec(spec, true, undefined, retentionForSlot("strong")); } catch { return null; }
 						const kickModelId = `${kickEngine.model.provider}:${kickEngine.model.id}`;
 						const freshRecord = stores.chatStore.getChat(chatId);
 						if (!freshRecord) return null;

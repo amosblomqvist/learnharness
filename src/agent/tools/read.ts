@@ -1,9 +1,10 @@
 import * as fs from "node:fs/promises";
-import * as path from "node:path";
 import { Type } from "typebox";
+import type { Api, Model } from "@earendil-works/pi-ai";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { serverExecute, type ImageFileResult } from "../tool-execute.ts";
 import { resolveSourcePath } from "./fs-shared.ts";
+import { detectSupportedImageMimeTypeFromFile, processImage } from "../image-processing/index.ts";
 
 /**
  * The read tool — sources v0 (2026-09): a Node port of pi's read semantics
@@ -30,17 +31,6 @@ import { resolveSourcePath } from "./fs-shared.ts";
 
 const MAX_LINES = 2000;
 const MAX_BYTES = 50 * 1024;
-
-/** Extension map for v0 (pi sniffs magic bytes; extensions suffice here —
- *  learner files are pasted paths, not adversarial uploads). */
-const IMAGE_MIME: Record<string, string> = {
-	".jpg": "image/jpeg",
-	".jpeg": "image/jpeg",
-	".png": "image/png",
-	".gif": "image/gif",
-	".webp": "image/webp",
-	".bmp": "image/bmp",
-};
 
 const readInput = Type.Object({
 	path: Type.String({ minLength: 1, description: "Path to the file to read (relative or absolute)" }),
@@ -95,26 +85,39 @@ function readTextSlice(text: string, offset: number | undefined, limit: number |
  * fragment (prompts/shared/). Relative paths resolve against the
  * learner's home (fs-shared.ts), the harness's anchor.
  */
-export const readTool: AgentTool<typeof readInput> = {
-	name: "read",
-	label: "read",
-	description: `Read the contents of a file. Supports text files and images (jpg, png, gif, webp, bmp). Images are sent as attachments. For text files, output is truncated to 2000 lines or 50.0KB (whichever is hit first). Use offset/limit for large files. When you need the full file, continue with offset until complete.`,
-	parameters: readInput,
-	execute: serverExecute("read", readInput, async ({ path: rawPath, offset, limit }): Promise<string | ImageFileResult> => {
-		const absolute = resolveSourcePath(rawPath);
-		const ext = path.extname(absolute).toLowerCase();
-		const mime = IMAGE_MIME[ext];
-		const buffer = await fs.readFile(absolute); // ENOENT/EACCES → error result the model sees
-		if (mime) {
-			// NOTE v0: no resize — raw bytes as base64. Learner files are study
-			// material (screenshots, figures), not adversarial payloads; a resize
-			// step (sharp) can land later if large images prove wasteful.
-			return {
-				text: `Read image file [${mime}] — ${path.basename(absolute)} (${formatSize(buffer.byteLength)}), attached as an image.`,
-				images: [{ data: buffer.toString("base64"), mimeType: mime }],
-			};
-		}
-		const text = buffer.toString("utf-8");
-		return readTextSlice(text, offset, limit);
-	}),
-};
+export type ReadModel = Pick<Model<Api>, "input" | "inputLimits">;
+
+/** One implementation for every learner-file reader. Bind the active model
+ * per agent, rather than sharing mutable model state between conversations.
+ * Home-relative paths, text slicing and the app's abort guard stay unchanged;
+ * image detection/processing and its notes follow native Pi read behavior. */
+export function createReadTool(model?: ReadModel): AgentTool<typeof readInput> {
+	return {
+		name: "read",
+		label: "read",
+		description: `Read the contents of a file. Supports text files and images (jpg, png, gif, webp, bmp). Images are sent as attachments. For text files, output is truncated to 2000 lines or 50.0KB (whichever is hit first). Use offset/limit for large files. When you need the full file, continue with offset until complete.`,
+		parameters: readInput,
+		execute: serverExecute("read", readInput, async ({ path: rawPath, offset, limit }, { signal }): Promise<string | ImageFileResult> => {
+			const absolute = resolveSourcePath(rawPath);
+			const mime = await detectSupportedImageMimeTypeFromFile(absolute);
+			const buffer = await fs.readFile(absolute, { signal });
+			if (mime) {
+				const processed = await processImage(buffer, mime, { resizeOptions: model?.inputLimits?.images?.resize });
+				signal?.throwIfAborted();
+				const note = processed.ok
+					? [`Read image file [${processed.mimeType}]`, ...processed.hints]
+					: [`Read image file [${mime}]`, processed.message];
+				if (model && !model.input.includes("image")) {
+					note.push("[Current model does not support images. The image will be omitted from this request.]");
+				}
+				return {
+					text: note.join("\n"),
+					...(processed.ok ? { images: [{ data: processed.data, mimeType: processed.mimeType }] } : {}),
+				};
+			}
+			return readTextSlice(buffer.toString("utf-8"), offset, limit);
+		}),
+	};
+}
+
+export const readTool = createReadTool();

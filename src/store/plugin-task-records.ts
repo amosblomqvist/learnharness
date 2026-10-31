@@ -118,7 +118,7 @@ function safeTaskDirectory(rootPluginsDirectory: string, pluginId: string): stri
 	if (typeof pluginId !== "string" || !PLUGIN_ID_PATTERN.test(pluginId)) throw new Error("Invalid plugin id");
 	const root = path.resolve(/* turbopackIgnore: true */ rootPluginsDirectory);
 	let realRoot: string | undefined;
-	for (const dir of [root, path.join(root, pluginId), path.join(/* turbopackIgnore: true */ root, pluginId, "data"), path.join(root, pluginId, "data", "tasks")]) {
+	for (const dir of [root, path.join(root, pluginId), path.join(/* turbopackIgnore: true */ root, pluginId, "data"), path.join(/* turbopackIgnore: true */ root, pluginId, "data", "tasks")]) {
 		let stat: fs.Stats;
 		try { stat = fs.lstatSync(dir); } catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return null; throw error; }
 		if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error(`Unsafe plugin task directory: ${dir}`);
@@ -127,7 +127,7 @@ function safeTaskDirectory(rootPluginsDirectory: string, pluginId: string): stri
 		const relative = path.relative(realRoot, real);
 		if (relative.startsWith(`..${path.sep}`) || relative === ".." || path.isAbsolute(relative)) throw new Error("Plugin task directory escapes root");
 	}
-	return path.join(root, pluginId, "data", "tasks");
+	return path.join(/* turbopackIgnore: true */ root, pluginId, "data", "tasks");
 }
 
 /** Recovery-only read: never activates plugin code or creates missing data.

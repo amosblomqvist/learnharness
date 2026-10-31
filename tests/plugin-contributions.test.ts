@@ -192,6 +192,59 @@ test("builtin names remain reserved when absent; first valid package wins and in
 	assert.equal(f.host.list().find(item => item.id === "a-first")!.error, undefined);
 });
 
+test("Claude-conditional send_to_user stays reserved when hidden and plugins append after model-bound builtins", async t => {
+	const f = fixture(t); f.plugin("a-addon"); f.plugin("b-shadow");
+	const addon = await f.context("a-addon"), shadow = await f.context("b-shadow");
+	addon.registerTools({ agents: ["prober", "teacher", "practice"], create: () => [native("addon")] });
+	shadow.registerInstructions({ agents: ["prober", "teacher", "practice"], text: "Must not replace output mechanics" });
+	shadow.registerTools({ agents: ["prober", "teacher", "practice"], create: () => [native("send_to_user")] });
+	const { readTool } = await import("../src/agent/tools/read.ts");
+	const builders = {
+		prober: (opts: AgentBuildOptions) => createProberAgent({ chatId: opts.chatId } as never, opts),
+		teacher: (opts: AgentBuildOptions) => createTeacherAgent(undefined, opts),
+		practice: (opts: AgentBuildOptions) => createPracticeAgent({ chatId: opts.chatId, chatStore: { getChat: () => null } } as never, opts),
+	};
+	for (const [provider, id, enabled] of [["openai", "gpt-fixture", false], ["openrouter", "anthropic/claude-fixture", true], ["claude-code", "sonnet", true]] as const) {
+		const faux = createFauxCore({ provider, models: [{ id }] });
+		const selected = { model: faux.getModel(), streamFn: faux.streamSimple };
+		for (const [role, build] of Object.entries(builders)) {
+			const opts = { engine: selected, chatId: `conditional-${role}` };
+			const core = build(opts), extended = build({ ...opts, pluginContributions: f.host.agentContributions });
+			assert.deepEqual(extended.state.tools.map(tool => tool.name), [...core.state.tools.map(tool => tool.name), "addon"]);
+			assert.equal(extended.state.tools.filter(tool => tool.name === "send_to_user").length, enabled ? 1 : 0);
+			assert.equal(extended.state.systemPrompt, core.state.systemPrompt);
+			assert.match(f.host.list().find(info => info.id === "b-shadow")!.error!, /name collision/);
+			if (role === "prober") assert.notEqual(extended.state.tools.find(tool => tool.name === "read")!.execute, readTool.execute);
+		}
+	}
+});
+
+test("plugin tools and Claude output preserve practice correction and mixed-batch pose stopping", async t => {
+	const f = fixture(t); f.plugin(); const ctx = await f.context();
+	ctx.registerTools({ agents: ["practice"], create: () => [native("practice_addon")] });
+	const faux = createFauxCore({ provider: "anthropic", models: [{ id: "claude-plugin-fixture" }] });
+	faux.setResponses([
+		fauxAssistantMessage([
+			fauxToolCall("send_to_user", { message: "Try this exercise." }, { id: "send-one" }),
+			fauxToolCall("practice_addon", {}, { id: "addon-one" }),
+			fauxToolCall("problem", { statement: "Incomplete", mode: "recall" }, { id: "bad-pose" }),
+		], { stopReason: "toolUse" }),
+		fauxAssistantMessage([
+			fauxToolCall("practice_addon", {}, { id: "addon-two" }),
+			fauxToolCall("send_to_user", { message: "Corrected exercise." }, { id: "send-two" }),
+			fauxToolCall("problem", { statement: "What is two plus two?", mode: "recall", modelSolution: "Four." }, { id: "good-pose" }),
+		], { stopReason: "toolUse" }),
+		fauxAssistantMessage("Must not continue before the learner answers."),
+	]);
+	const agent = createPracticeAgent({ chatId: "mixed-plugin-practice", chatStore: { getChat: () => null } }, {
+		engine: { model: faux.getModel(), streamFn: faux.streamSimple }, chatId: "mixed-plugin-practice", pluginContributions: f.host.agentContributions,
+	});
+	await agent.prompt("Pose an offline exercise.");
+	assert.equal(faux.state.callCount, 2);
+	const poses = agent.state.messages.filter(message => message.role === "toolResult" && message.toolName === "problem");
+	assert.equal(poses.length, 2); assert.equal(poses[0]!.role === "toolResult" && poses[0]!.isError, true); assert.equal(poses[1]!.role === "toolResult" && poses[1]!.isError, false);
+});
+
 test("context-specific factory errors omit that turn only; successful re-evaluation clears the active warning", async t => {
 	const f = fixture(t); f.plugin(); const ctx = await f.context();
 	ctx.registerInstructions({ agents: ["teacher"], text: "Restored on good context" });

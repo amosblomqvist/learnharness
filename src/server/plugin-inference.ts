@@ -112,7 +112,7 @@ export function createPluginInference(
 			cost: { input: usage.cost.input, output: usage.cost.output, cacheRead: usage.cost.cacheRead, cacheWrite: usage.cost.cacheWrite, total: usage.cost.total },
 		} };
 		fs.mkdirSync(directory, { recursive: true });
-		fs.appendFileSync(path.join(directory, "usage.jsonl"), `${JSON.stringify(row)}\n`, { mode: 0o600 });
+		fs.appendFileSync(path.join(/* turbopackIgnore: true */ directory, "usage.jsonl"), `${JSON.stringify(row)}\n`, { mode: 0o600 });
 	};
 	const engineFor = async (model: PluginModelSpec, purpose: PluginCallPurpose, options?: PluginInferenceOptions): Promise<PiEngine> => {
 		check(signal);

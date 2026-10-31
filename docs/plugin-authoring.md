@@ -411,8 +411,11 @@ card in your renderer. The header/status and formatter errors remain host-owned;
 renderer owns the body. Raw fallback stays readable without the plugin.
 
 Do not perform side effects in `prepare`/`format`. Completed task outcome and result delivery
-are separate facts: cancelling a queued delivery does not erase an already accepted task
-result. Recovery re-delivers persisted results, never re-runs plugin tools or formatters;
+are separate facts. Worker completion ends the shared job's computing state; END no longer
+cancels a finished worker or its queued result delivery. The generic outcome is persisted
+before asynchronous formatting, and delivery waits for formatting while the plugin is live.
+A restart can deliver that persisted fallback without running plugin code. Recovery
+re-delivers persisted results, never re-runs plugin tools or formatters;
 missing/unreadable task state produces an honest failure notification rather than a
 fabricated result. Formatter failure or unavailable plugin code keeps the real task
 outcome and a safe fallback, not a false task failure.

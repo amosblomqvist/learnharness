@@ -4,10 +4,11 @@ import { useState } from "react";
 import { ConfidenceRail } from "@/components/confidence-rail";
 import { GlyphMark } from "@/components/ui/glyph-mark";
 import { ThinkingBlock } from "@/components/thinking-block";
+import { PathText } from "@/components/file-path-chip";
 import { cn } from "@/lib/utils";
-import { MessageResponse } from "@/components/ai-elements/message";
+import { ToolContentResponse } from "@/components/ai-elements/message";
 import type { QuestionAnswerData } from "@/src/core";
-import { parseAskInput, parseQuizInput } from "@/src/core";
+import { answerForPresentation, parseAskInput, parseQuizInput } from "@/src/core";
 
 /**
  * Static rendering of an answered question (tool part in `output-available`).
@@ -19,7 +20,8 @@ import { parseAskInput, parseQuizInput } from "@/src/core";
  * client — the card reveals his answer, the committed correct answer, and
  * the explanation, with NO verdict chips (owner ruling 2026-09-27).
  */
-export function AnsweredCard({ answer, input }: { answer: QuestionAnswerData; input?: unknown }) {
+export function AnsweredCard({ answer: savedAnswer, input }: { answer: QuestionAnswerData; input?: unknown }) {
+	const answer = answerForPresentation(savedAnswer, input);
 	const [whyOpen, setWhyOpen] = useState(false); // the tucked explanation (predictions, owner 2026-10-03)
 	if (answer.dismissed) {
 		return (
@@ -86,13 +88,13 @@ export function AnsweredCard({ answer, input }: { answer: QuestionAnswerData; in
 					))}
 			</div>
 			<div className="mb-3 font-medium">
-				<MessageResponse>{answer.questionText}</MessageResponse>
+				<ToolContentResponse>{answer.questionText}</ToolContentResponse>
 			</div>
 			{parsedDetails && (
 				// The details line, same paint as the pending dock (owner,
 				// 2026-10-12): full markdown, LaTeX included.
 				<div className="mb-3 text-sm text-muted-foreground">
-					<MessageResponse>{parsedDetails}</MessageResponse>
+					<ToolContentResponse>{parsedDetails}</ToolContentResponse>
 				</div>
 			)}
 
@@ -131,14 +133,14 @@ export function AnsweredCard({ answer, input }: { answer: QuestionAnswerData; in
 									</span>
 								)}
 								<span className={cn(!sel && "text-muted-foreground")}>
-									<MessageResponse>{opt.label}</MessageResponse>
+									<ToolContentResponse>{opt.label}</ToolContentResponse>
 									{descByIndex.get(opt.index) && (
 										// Ask-option subtext (owner, 2026-10-12): same markdown path
 										// as the pending dock — LaTeX included. Quiz options carry
 										// none (owner ruling 2026-09-26); the map stays empty for them.
-										<MessageResponse className="lh-prose block text-xs text-muted-foreground">
+										<ToolContentResponse className="lh-prose block text-xs text-muted-foreground">
 											{descByIndex.get(opt.index)}
-										</MessageResponse>
+										</ToolContentResponse>
 									)}
 								</span>
 							</div>
@@ -152,13 +154,13 @@ export function AnsweredCard({ answer, input }: { answer: QuestionAnswerData; in
 							data-testid="answered-other"
 							className="flex items-center gap-2 rounded-lg border border-primary bg-accent px-3 py-1.5"
 						>
-							<span>“{answer.other}”</span>
+							<span>“<PathText text={answer.other} />”</span>
 						</div>
 					)}
 				</div>
 			)}
 
-			{answer.text && <div className="lh-prose mt-2 whitespace-pre-wrap">“{answer.text}”</div>}
+			{answer.text && <div className="lh-prose mt-2 whitespace-pre-wrap">“<PathText text={answer.text} />”</div>}
 
 			{/* The confidence record (owner round 6): the slider's rail, disc
 			    removed — the missing handle itself says "this is a record, not a
@@ -211,9 +213,9 @@ export function AnsweredCard({ answer, input }: { answer: QuestionAnswerData; in
 					{whyOpen && (
 						<div className="mt-1.5 rounded-lg bg-muted py-2 text-sm text-foreground/50">
 							<span className="font-medium text-muted-foreground">Why: </span>
-							{/* The markdown wrapper must go truly inline — a block <p> after the
-							   "Why:" label created the oversized leading gap (owner's fix list). */}
-							<MessageResponse className="inline [&_p]:inline [&_p]:m-0">{answer.explanation}</MessageResponse>
+							{/* Keep the first paragraph beside the label, not every paragraph:
+							   later paragraphs must retain their recovered document structure. */}
+							<ToolContentResponse className="inline [&>p:first-child]:inline [&>p:first-child]:m-0">{answer.explanation}</ToolContentResponse>
 						</div>
 					)}
 				</div>
@@ -225,7 +227,7 @@ export function AnsweredCard({ answer, input }: { answer: QuestionAnswerData; in
 			{isExplain && answer.committed && (
 				<div className="mt-3 rounded-lg bg-muted py-2 text-sm text-muted-foreground">
 					<span className="font-medium text-foreground">The answer: </span>
-					<MessageResponse className="inline [&_p]:inline [&_p]:m-0">{answer.committed}</MessageResponse>
+					<ToolContentResponse className="inline [&>p:first-child]:inline [&>p:first-child]:m-0">{answer.committed}</ToolContentResponse>
 				</div>
 			)}
 		</div>

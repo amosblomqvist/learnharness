@@ -94,7 +94,10 @@ describe("plugin background job labels", () => {
 		assert.match(pending, /Plugin worker/); assert.match(pending, /Dispatched/);
 		const active = renderToStaticMarkup(<JobsContext.Provider value={[job]}><DispatchCard kind="plugin" toolCallId="original-call" /></JobsContext.Provider>);
 		assert.match(active, /Source checker/);
-		const done = renderToStaticMarkup(<JobsContext.Provider value={[{ ...job, status: "done" }]}><DispatchCard kind="plugin" toolCallId="original-call" /></JobsContext.Provider>);
-		assert.match(done, /Source checker/); assert.match(done, /delivered/);
+		for (const status of ["pending", "delivered"] as const) {
+			const done = renderToStaticMarkup(<JobsContext.Provider value={[{ ...job, status: "done", result, delivery: { kind: "result", status } }]}><DispatchCard kind="plugin" toolCallId="original-call" /></JobsContext.Provider>);
+			assert.match(done, /Source checker/); assert.match(done, /finished/);
+			assert.doesNotMatch(done, /delivered|dispatch-card/);
+		}
 	});
 });

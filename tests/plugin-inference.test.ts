@@ -424,3 +424,15 @@ test("engine option binding rejects unsupported transport fields and reasoning o
 	await assert.rejects(f.adapter.engineFor(spec, "user", { reasoning: "high" }), /thinkingLevel/);
 	assert.equal(f.calls.length, 0);
 });
+
+test("Claude Code explicit pins retain host availability gating without forwarding private session or auth options", async t => {
+	const pin = { provider: "claude-code", id: "sonnet", thinkingLevel: "medium" } as const;
+	const f = fixture(t, { model: pin });
+	const final = await f.adapter.inference.complete({ ...request(pin), purpose: "user" });
+	assert.equal(final.provider, pin.provider); assert.equal(final.model, pin.id); assert.equal(f.calls.length, 1);
+	assert.equal(f.calls[0]!.background, false);
+	assert.equal(f.calls[0]!.options.apiKey, undefined); assert.equal(f.calls[0]!.options.sessionId, undefined);
+	f.removeKey();
+	await assert.rejects(f.adapter.inference.complete(request(pin)), /Claude Code is unavailable.*Settings/);
+	assert.equal(f.calls.length, 1, "unavailable CLI never dispatches or falls back to an API provider");
+});

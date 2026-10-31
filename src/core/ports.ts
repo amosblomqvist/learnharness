@@ -120,6 +120,8 @@ export interface GraphStore {
 	upsertSource(source: NotesSource): void;
 	/** Every notes source record, by id order-insensitive. */
 	readSources(): NotesSource[];
+	/** Remove imported-source bookkeeping only; the service removes graph traces first. */
+	deleteSources(ids: ReadonlySet<string>): number;
 	/** Append one run's usage to a source record — idempotent per
 	 *  startedAt, mirroring ChatRecord.extractions. */
 	appendSourceUsage(id: string, entry: ExtractionRunUsage): void;
@@ -147,6 +149,12 @@ export interface GraphStore {
 	}): void;
 }
 
+/** Separate from graph ledgers and source identity, for future shared views. */
+export interface SourceOrganizationStore {
+	read(): import("./source-organization.ts").SourceOrganization;
+	write(state: import("./source-organization.ts").SourceOrganization): void;
+}
+
 // ─── JobStore — background sub-agent jobs (data/jobs) ─────────────────────────
 
 export interface CreateJobInit {
@@ -157,6 +165,8 @@ export interface CreateJobInit {
 	activity?: string;
 	/** Host-owned plugin worker linkage, not model-selected routing. */
 	plugin?: PluginJobMetadata;
+	/** Saved on the job before its worker is spawned. */
+	input?: unknown;
 }
 
 /** Mergeable fields — identity (id, kind, chatId, toolCallId, createdAt) is immutable. */

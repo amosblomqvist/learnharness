@@ -78,7 +78,7 @@ function dispatch(
 	input: ResearchInput | DemoInput | VisualInput | PdfInput,
 ): string {
 	const existing = ctx.jobStore.findJobByToolCallId(ctx.chatId, toolCallId);
-	const job = existing ?? ctx.jobStore.createJob({ kind, chatId: ctx.chatId, toolCallId });
+	const job = existing ?? ctx.jobStore.createJob({ kind, chatId: ctx.chatId, toolCallId, input });
 	if (!existing) ctx.spawn(job, input);
 	return `Dispatched (job ${job.id}). ${ack}`;
 }
