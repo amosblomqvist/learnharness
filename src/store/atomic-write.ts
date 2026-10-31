@@ -69,8 +69,11 @@ export function removeLeftoverTemps(file: string): void {
 	let names: string[];
 	try {
 		names = fs.readdirSync(path.dirname(file));
-	} catch {
-		return; // no folder, no leftovers
+	} catch (error) {
+		// No folder means no leftovers. Anything else is reported, not thrown:
+		// the record itself is already deleted.
+		if ((error as NodeJS.ErrnoException).code !== "ENOENT") console.warn(`[store] could not look for temp files beside ${file}:`, error);
+		return;
 	}
 	for (const name of names) if (name.startsWith(prefix)) removeTemp(path.join(path.dirname(file), name));
 }
@@ -97,21 +100,18 @@ function renameRetryingSync(tmp: string, file: string): boolean {
 function isSharingViolation(error: unknown, file: string): boolean {
 	const code = (error as NodeJS.ErrnoException).code;
 	if (process.platform !== "win32" || (code !== "EPERM" && code !== "EACCES" && code !== "EBUSY")) return false;
-	let stat: fs.Stats;
+	let stat: fs.Stats | undefined;
 	try {
-		stat = fs.statSync(file);
+		stat = fs.statSync(file, { throwIfNoEntry: false });
 	} catch {
-		return true; // no target yet: the handle is on the temp file
+		return false; // can't tell: report the rename error itself
 	}
+	if (!stat) return true; // no target yet: the handle is on the temp file
 	return stat.isFile() && (stat.mode & 0o200) !== 0;
 }
 
 function isSymlink(file: string): boolean {
-	try {
-		return fs.lstatSync(file).isSymbolicLink();
-	} catch {
-		return false; // missing: plain new file
-	}
+	return fs.lstatSync(file, { throwIfNoEntry: false })?.isSymbolicLink() ?? false; // missing: plain new file
 }
 
 function removeTemp(tmp: string): void {
