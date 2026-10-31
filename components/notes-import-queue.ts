@@ -2,6 +2,9 @@ import { IMPORT_EXTENSIONS, MAX_IMPORT_BYTES, validNotesPath } from "@/lib/notes
 import type { NotesImportResult } from "./notes-import";
 
 export const notesPath = (file: File): string => file.webkitRelativePath || file.name;
+/** Folder picks carry dot-entries (.DS_Store, .obsidian/, .git/, .trash/) that are never
+ * notes. The chosen root is segment 0 and stays importable even when hidden. */
+const hiddenInFolder = (file: File): boolean => file.webkitRelativePath.split("/").slice(1).some((part) => part.startsWith("."));
 export interface ImportQueueSnapshot {
 	importing: boolean;
 	errors: string[];
@@ -59,7 +62,7 @@ export function createNotesImportQueue(post: (files: readonly File[]) => Promise
 			for (const file of files) {
 				const index = sequence++;
 				const path = notesPath(file);
-				if (file.webkitRelativePath && file.name === ".DS_Store") continue;
+				if (file.webkitRelativePath && hiddenInFolder(file)) continue;
 				if (!IMPORT_EXTENSIONS.test(path) || !validNotesPath(path, file.name)) failures.set(index, `${path}: Unsupported format or unsafe relative path.`);
 				else if (file.size > MAX_IMPORT_BYTES) failures.set(index, `${path}: Too big. Max 25 MB.`);
 				else pending.push({ file, index });
