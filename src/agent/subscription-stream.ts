@@ -13,6 +13,7 @@ export function nativeSubscriptionError(provider: string, message: string): stri
 	if (/quota|429|limit/i.test(message)) return `${label} usage limit reached. Check your provider account and try again later.${suffix}`;
 	if (/expired|invalid_grant|401|refresh/i.test(message)) return `${label} authorization could not be refreshed. Retry or reconnect in Providers.${suffix}`;
 	if (/cancel|abort|closed|disconnect/i.test(message)) return `${label} request cancelled or connection closed.${suffix}`;
+	if (/Auto session/.test(message)) return `GitHub Copilot could not start an Auto session. Retry, or reconnect in Providers.${suffix}`;
 	if (/catalog|model|stale|changed/i.test(message)) return `The selected ${label} model or connection is unavailable. Refresh Providers and explicitly choose an available model.${suffix}`;
 	return `${label} request failed. Check the connection, account access and provider limits, then retry.${suffix}`;
 }
@@ -45,10 +46,10 @@ export function nativeSubscriptionStream(provider: Provider, background: () => b
 			try {
 				if (Object.keys(options?.headers ?? {}).some((key) => ["authorization", "x-api-key", "api-key", "host"].includes(key.toLowerCase()))) throw new Error("Authorization override forbidden");
 				scope = subscriptionScope(nativeId, logicalModel.id); lifecycle?.captured(subscriptionAdmissionScope(scope));
-				const auth = await subscriptionLease(scope, purpose); check();
+				const { auth, model: leasedId } = await subscriptionLease(scope, purpose); check();
 				const authKeys = new Set(Object.keys(auth.headers ?? {}).map((key) => key.toLowerCase()));
 				if (Object.keys(options?.headers ?? {}).some((key) => authKeys.has(key.toLowerCase()))) throw new Error("Authorization override forbidden");
-				const nativeModel = provider.getModels().find((model) => model.id === logicalModel.id && model.api === logicalModel.api);
+				const nativeModel = provider.getModels().find((model) => model.id === (leasedId ?? logicalModel.id) && model.api === logicalModel.api);
 				if (!nativeModel) throw new Error("Native model unavailable");
 				const transport = { ...nativeModel, ...(auth.baseUrl ? { baseUrl: auth.baseUrl } : {}) };
 				const fetch = options?.fetch ?? globalThis.fetch;

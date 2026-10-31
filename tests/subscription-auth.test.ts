@@ -15,7 +15,7 @@ const { subscriptionControl } = require("../electron/subscription-ipc.cjs");
 const ids = ["github-copilot", "xai"] as const;
 const credential = (id: string, expires = Date.now() + 3600000): OAuthCredential => ({ type: "oauth", access: id === "xai" ? "fixture-xai-access" : "tid=fixture;proxy-ep=proxy.individual.githubcopilot.com;", refresh: "fixture-refresh", expires, ...(id === "github-copilot" ? { availableModelIds: [githubCopilotProvider().getModels()[0]!.id] } : {}) });
 function deferred<T>() { let resolve!: (value: T) => void; const promise = new Promise<T>((done) => { resolve = done; }); return { resolve, promise }; }
-async function fixture(options: { login?: (id: string, interaction: ProviderAuthInteraction) => Promise<OAuthCredential>; refresh?: (id: string, value: OAuthCredential, signal: AbortSignal) => Promise<OAuthCredential>; stores?: Record<string, unknown> } = {}) {
+async function fixture(options: { login?: (id: string, interaction: ProviderAuthInteraction) => Promise<OAuthCredential>; refresh?: (id: string, value: OAuthCredential, signal: AbortSignal) => Promise<OAuthCredential>; stores?: Record<string, unknown>; fetch?: (url: string, init: any) => Promise<Response> } = {}) {
 	const directory = await fs.mkdtemp(path.join(os.tmpdir(), "lh-subscription-auth-"));
 	let refreshes = 0;
 	const factory = (id: string) => {
@@ -24,7 +24,7 @@ async function fixture(options: { login?: (id: string, interaction: ProviderAuth
 	};
 	const sdk = { createModels, githubCopilotProvider: () => factory("github-copilot"), xaiProvider: () => factory("xai") };
 	const updates: any[] = [], opened: string[] = [];
-	const controller = createSubscriptions({ directory, sdk, stores: options.stores, openExternal: async (url: string) => { opened.push(url); }, onChange: (snapshot: unknown) => updates.push(snapshot) });
+	const controller = createSubscriptions({ directory, sdk, stores: options.stores, fetch: options.fetch, openExternal: async (url: string) => { opened.push(url); }, onChange: (snapshot: unknown) => updates.push(snapshot) });
 	await controller.ready;
 	const scope = async (id: string): Promise<NativeSubscriptionScope> => {
 		const snapshot = await controller.snapshot(), status = snapshot.statuses.find((s: any) => s.providerId === id), model = snapshot.models[id][0];
@@ -61,6 +61,60 @@ for (const id of ids) test(`${id}: independent default-ON file, restart, explici
 		const removed = JSON.parse(await fs.readFile(path.join(f.directory, `${id}-credentials.json`), "utf8"));
 		assert.deepEqual(removed, { version: 1, allowBackgroundUse: false });
 		assert.equal((await f.controller.status()).find((s: any) => s.providerId !== id).connected, false);
+	} finally { await f.cleanup(); }
+});
+const sessionResponse = (over: Record<string, unknown> = {}) => new Response(JSON.stringify({ available_models: ["mai-code-1.1-flash"], selected_model: "mai-code-1.1-flash", session_token: "fixture-session-token", expires_at: Math.floor(Date.now() / 1000) + 3600, ...over }), { status: 200, headers: { "content-type": "application/json" } });
+const autoScope = async (f: Awaited<ReturnType<typeof fixture>>): Promise<NativeSubscriptionScope> => ({ ...(await f.scope("github-copilot")), selectedModelId: "auto" });
+test("Auto is listed for Copilot even with an empty available list, never for xai, with conservative metadata", async () => {
+	const f = await fixture({ login: async (id) => ({ ...credential(id), ...(id === "github-copilot" ? { availableModelIds: [] } : {}) }) });
+	try {
+		await f.controller.login("github-copilot", true); await f.controller.login("xai", true);
+		const snapshot = await f.controller.snapshot(), auto = snapshot.models["github-copilot"].find((m: any) => m.id === "auto");
+		assert.deepEqual(snapshot.models["github-copilot"].map((m: any) => m.id), ["auto"]);
+		assert(!snapshot.models.xai.some((m: any) => m.id === "auto"));
+		const models = githubCopilotProvider().getModels(), mai = models.find((m) => m.id === "mai-code-1.1-flash")!, gpt = models.find((m) => m.id === "gpt-5.3-codex")!;
+		assert.equal(auto.name, "Auto"); assert.equal(auto.provider, "github-copilot"); assert.equal(auto.api, "openai-responses"); assert.equal(auto.reasoning, true);
+		assert.deepEqual(auto.input, ["text", "image"]); assert.equal(auto.contextWindow, Math.min(mai.contextWindow, gpt.contextWindow)); assert.equal(auto.maxTokens, 128000);
+		assert.deepEqual(auto.thinkingLevelMap, { off: null, minimal: null, low: "low", medium: "medium", high: "high", xhigh: null, max: null });
+		assert.deepEqual(auto.cost, mai.cost); assert.deepEqual(auto.headers, mai.headers); assert.equal(auto.baseUrl, mai.baseUrl);
+		const before = (await f.controller.status()).find((s: any) => s.providerId === "github-copilot").authorityRevision;
+		await f.controller.snapshot(); assert.equal((await f.controller.status()).find((s: any) => s.providerId === "github-copilot").authorityRevision, before);
+	} finally { await f.cleanup(); }
+});
+test("Auto lease starts one shared session, caches it until near expiry and never touches the catalog revision", async () => {
+	const calls: { url: string; init: any }[] = []; let response = () => sessionResponse();
+	const f = await fixture({ fetch: async (url, init) => { calls.push({ url, init }); return response(); } });
+	const realNow = Date.now;
+	try {
+		await f.controller.login("github-copilot", true); const scope = await autoScope(f);
+		const revision = (await f.controller.status()).find((s: any) => s.providerId === "github-copilot").authorityRevision;
+		const [first, parallel] = await Promise.all([f.controller.lease(scope, false), f.controller.lease(scope, false)]);
+		assert.equal(calls.length, 1); assert.equal(calls[0]!.url, "https://api.individual.githubcopilot.com/models/session");
+		assert.equal(calls[0]!.init.method, "POST"); assert.deepEqual(JSON.parse(calls[0]!.init.body), { auto_mode: { model_hints: ["auto"] } });
+		assert.equal(calls[0]!.init.headers.Authorization, `Bearer ${credential("github-copilot").access}`); assert.equal(calls[0]!.init.headers["Content-Type"], "application/json"); assert.equal(calls[0]!.init.headers["X-GitHub-Api-Version"], "2026-06-01");
+		assert.equal(calls[0]!.init.headers["Editor-Version"], githubCopilotProvider().getModels()[0]!.headers!["Editor-Version"]);
+		for (const result of [first, parallel]) { assert.equal(result.model, "mai-code-1.1-flash"); assert.equal(result.auth.headers["Copilot-Session-Token"], "fixture-session-token"); assert.equal(result.auth.headers["X-GitHub-Api-Version"], "2026-06-01"); assert.equal(result.auth.apiKey, credential("github-copilot").access); }
+		await f.controller.lease(scope, false); assert.equal(calls.length, 1);
+		assert.equal((await f.controller.status()).find((s: any) => s.providerId === "github-copilot").authorityRevision, revision);
+		Date.now = () => realNow() + 3600000 - 30000; response = () => sessionResponse({ session_token: "second-token", expires_at: Math.floor(realNow() / 1000) + 7200 });
+		assert.equal((await f.controller.lease(scope, false)).auth.headers["Copilot-Session-Token"], "second-token"); assert.equal(calls.length, 2);
+	} finally { Date.now = realNow; await f.cleanup(); }
+});
+test("malformed or failed Auto sessions give one public message without leaking provider text, and disconnect clears the cache", async () => {
+	const secret = "private-session-detail"; let calls = 0;
+	let response: () => Response = () => new Response(secret, { status: 500 });
+	const f = await fixture({ fetch: async () => { calls++; return response(); } });
+	try {
+		await f.controller.login("github-copilot", true); const scope = await autoScope(f);
+		const bad: (() => Response)[] = [() => new Response(secret, { status: 500 }), () => new Response(secret, { status: 200 }), () => sessionResponse({ selected_model: "not-a-model" }), () => sessionResponse({ selected_model: 7 }), () => sessionResponse({ session_token: "" }), () => sessionResponse({ session_token: `a\r\nb${secret}` }), () => sessionResponse({ expires_at: "soon" })];
+		for (const make of bad) {
+			response = make;
+			await assert.rejects(f.controller.lease(scope, false), (error: any) => error.code === "auto" && publicError(error) === "GitHub Copilot could not start an Auto session. Retry, or reconnect in Providers." && !publicError(error).includes(secret));
+		}
+		assert.equal(calls, bad.length); assert(!(await f.controller.status()).some((s: any) => s.error));
+		response = () => sessionResponse(); await f.controller.lease(scope, false); await f.controller.lease(scope, false); assert.equal(calls, bad.length + 1);
+		await f.controller.disconnect("github-copilot"); await f.controller.login("github-copilot", true);
+		await f.controller.lease(await autoScope(f), false); assert.equal(calls, bad.length + 2);
 	} finally { await f.cleanup(); }
 });
 test("parallel expired-token requests refresh once, preserve native extension metadata and durable rotation", async () => {

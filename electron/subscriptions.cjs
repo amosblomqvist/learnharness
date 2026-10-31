@@ -17,7 +17,25 @@ const MESSAGES = {
 	background: "Background use is off for this connection. Automatic follow-up remains deferred in its queue.",
 	stale: "The connection or model catalog changed. Select an available model and retry.",
 	interaction: "This sign-in action is no longer available.",
+	auto: "GitHub Copilot could not start an Auto session. Retry, or reconnect in Providers.",
 };
+const AUTO_ID = "auto", AUTO_BASES = ["mai-code-1.1-flash", "gpt-5.3-codex"], SESSION_HEADER = "Copilot-Session-Token", SESSION_MARGIN_MS = 60000;
+// Copilot answers 404 to /models/session, and refuses the session token on requests, without an API version.
+const API_VERSION_HEADER = "X-GitHub-Api-Version", API_VERSION = "2026-06-01";
+/** Conservative merge of the models Copilot's auto mode can pick; null when none exist in the static catalog. */
+function autoModel(models) {
+	const found = AUTO_BASES.map((id) => models.find((m) => m.id === id && APIS.has(m.api))).filter(Boolean);
+	const bases = found.filter((m) => m.api === found[0]?.api);
+	if (!bases.length) return null;
+	const [lead] = bases, levels = {};
+	for (const key of new Set(bases.flatMap((m) => Object.keys(m.thinkingLevelMap ?? {})))) levels[key] = bases.some((m) => m.thinkingLevelMap?.[key] === null) ? null : bases.find((m) => m.thinkingLevelMap?.[key] !== undefined).thinkingLevelMap[key];
+	return {
+		id: AUTO_ID, name: "Auto", api: lead.api, provider: lead.provider, baseUrl: lead.baseUrl, reasoning: bases.every((m) => m.reasoning),
+		input: lead.input.filter((kind) => bases.every((m) => m.input.includes(kind))), cost: clone(lead.cost),
+		contextWindow: Math.min(...bases.map((m) => m.contextWindow)), maxTokens: Math.min(...bases.map((m) => m.maxTokens)),
+		...(lead.headers ? { headers: clone(lead.headers) } : {}), ...(Object.keys(levels).length ? { thinkingLevelMap: levels } : {}),
+	};
+}
 function publicError(error) { return MESSAGES[error?.code] ?? MESSAGES.unavailable; }
 /** Resolve the SAME SDK installation as the standalone server, through public exports. */
 async function loadSubscriptionSDK(baseDirectory) {
@@ -51,7 +69,7 @@ function createSubscriptions(options) {
 	let closed = false, paused = false;
 	const entries = new Map(PROVIDERS.map((providerId) => [providerId, {
 		providerId, state: { version: 1, allowBackgroundUse: true }, disk: options.stores?.[providerId] ?? fileStore(path.join(options.directory, `${providerId}-credentials.json`), providerId),
-		epoch: 0, authorityRevision: 0, revision: 0, tail: Promise.resolve(), fatal: false, blocked: false, ready: false, error: undefined, authFailed: false, attempt: null, catalog: [], endpoint: null,
+		epoch: 0, session: undefined, authorityRevision: 0, revision: 0, tail: Promise.resolve(), fatal: false, blocked: false, ready: false, error: undefined, authFailed: false, attempt: null, catalog: [], endpoint: null,
 	}]));
 	const entryFor = (id) => { const entry = entries.get(id); if (!entry) throw failure("unavailable"); return entry; };
 	function serialized(entry, fn) { const result = entry.tail.then(fn); entry.tail = result.catch(() => {}); return result; }
@@ -75,6 +93,7 @@ function createSubscriptions(options) {
 		if (!entry.state.credential) models = [];
 		else if (entry.providerId === "github-copilot" && !Array.isArray(entry.state.credential.availableModelIds)) models = [];
 		else if (entry.provider?.filterModels) models = [...entry.provider.filterModels(models, entry.state.credential)];
+		if (entry.providerId === "github-copilot" && entry.state.credential) { const auto = autoModel(entry.provider?.getModels() ?? []); if (auto) models = [...models, auto]; }
 		if (JSON.stringify(models) !== JSON.stringify(entry.catalog)) { entry.catalog = models; entry.authorityRevision++; }
 	}
 	async function updateEndpoint(entry) {
@@ -89,7 +108,7 @@ function createSubscriptions(options) {
 	function storageFailed(entry) { entry.fatal = true; entry.blocked = true; entry.epoch++; entry.error = MESSAGES.storage; changed(entry); }
 	async function save(entry, state) {
 		try { await entry.disk.write(state); } catch { storageFailed(entry); throw failure("storage"); }
-		entry.state = clone(state);
+		entry.state = clone(state); entry.session = undefined;
 		try { await updateEndpoint(entry); catalog(entry); } catch { storageFailed(entry); throw failure("storage"); }
 		changed(entry);
 	}
@@ -189,13 +208,15 @@ function createSubscriptions(options) {
 		if (entry.fatal || closed || paused || !entry.state.credential) throw failure("unavailable");
 		const connectionId = entry.state.connectionId, epoch = entry.epoch;
 		const unchanged = () => connectionId === entry.state.connectionId && epoch === entry.epoch && !entry.blocked && !closed && !paused;
+		const auto = entry.providerId === "github-copilot" && modelId === AUTO_ID;
+		let auth;
 		try {
-			const model = entry.provider.getModels().find((m) => m.id === modelId);
+			const model = auto ? entry.provider.getModels()[0] : entry.provider.getModels().find((m) => m.id === modelId);
 			if (!model) throw failure("stale");
 			const resolved = await entry.models.getAuth(model);
 			if (!unchanged()) throw failure("stale");
 			if (!validEndpoint(entry.providerId, resolved?.auth, entry.state.credential)) throw failure("unavailable");
-			return {
+			auth = {
 				...(typeof resolved.auth.apiKey === "string" ? { apiKey: resolved.auth.apiKey } : {}),
 				...(resolved.auth.headers ? { headers: Object.fromEntries(Object.entries(resolved.auth.headers).filter(([, value]) => value === null || typeof value === "string")) } : {}),
 				...(typeof resolved.auth.baseUrl === "string" ? { baseUrl: resolved.auth.baseUrl } : {}),
@@ -204,6 +225,35 @@ function createSubscriptions(options) {
 			if (!entry.fatal && unchanged()) { entry.authFailed = true; entry.error = MESSAGES.refresh; entry.epoch++; changed(entry); }
 			throw failure(entry.fatal ? "storage" : error?.code === "stale" ? "stale" : "refresh");
 		}
+		if (!auto) return { auth };
+		const session = await autoSession(entry, auth, unchanged);
+		return { auth: { ...auth, headers: { ...auth.headers, [API_VERSION_HEADER]: API_VERSION, [SESSION_HEADER]: session.token } }, model: session.model };
+	}
+	async function fetchSession(entry, auth) {
+		const base = entry.provider.getModels().find((m) => m.id === AUTO_BASES[0]) ?? entry.provider.getModels()[0];
+		const headers = { ...base?.headers, ...Object.fromEntries(Object.entries(auth.headers ?? {}).filter(([, value]) => typeof value === "string")), "Content-Type": "application/json", [API_VERSION_HEADER]: API_VERSION };
+		if (auth.apiKey) headers.Authorization = `Bearer ${auth.apiKey}`;
+		const response = await (options.fetch ?? globalThis.fetch)(`${(auth.baseUrl ?? entry.endpoint).replace(/\/$/, "")}/models/session`, { method: "POST", headers, body: JSON.stringify({ auto_mode: { model_hints: [AUTO_ID] } }), redirect: "error", signal: AbortSignal.timeout(15000) });
+		if (!response.ok) throw failure("auto");
+		const body = await response.json();
+		const model = entry.provider.getModels().find((m) => m.id === body?.selected_model);
+		if (typeof body?.selected_model !== "string" || !body.selected_model || !model || !APIS.has(model.api)) throw failure("auto");
+		if (typeof body.session_token !== "string" || !body.session_token || /[\u0000-\u001f\u007f]/.test(body.session_token) || !Number.isFinite(body.expires_at)) throw failure("auto");
+		return { token: body.session_token, model: model.id, expiresAt: body.expires_at * 1000 };
+	}
+	async function autoSession(entry, auth, unchanged, retried = false) {
+		const key = JSON.stringify([entry.state.connectionId, entry.epoch, auth.apiKey ?? auth.headers]);
+		let holder = entry.session;
+		if (holder?.key !== key || holder.failed) {
+			holder = { key, failed: false, value: undefined, promise: undefined };
+			holder.promise = fetchSession(entry, auth).then((value) => { holder.value = value; return value; }, (error) => { holder.failed = true; throw error; });
+			entry.session = holder;
+		}
+		let value;
+		try { value = holder.value ?? await holder.promise; } catch { throw failure("auto"); }
+		if (!retried && value.expiresAt - SESSION_MARGIN_MS <= Date.now()) { if (entry.session === holder) entry.session = undefined; return autoSession(entry, auth, unchanged, true); }
+		if (!unchanged() || entry.session !== holder) throw failure("stale");
+		return value;
 	}
 	return {
 		ready,
@@ -227,10 +277,10 @@ function createSubscriptions(options) {
 			await ready; const entry = entryFor(scope?.providerId);
 			if (!current(entry, scope)) throw failure("stale");
 			if (background && !entry.state.allowBackgroundUse) throw failure("background");
-			const auth = await resolveAuth(entry, scope.selectedModelId);
+			const { auth, model } = await resolveAuth(entry, scope.selectedModelId);
 			if (!current(entry, scope)) throw failure("stale");
 			if (background && !entry.state.allowBackgroundUse) throw failure("background");
-			return { scope: clone(scope), auth: clone(auth) };
+			return { scope: clone(scope), auth: clone(auth), ...(model ? { model } : {}) };
 		},
 		async retry(providerId) {
 			await ready; const entry = entryFor(providerId);
@@ -240,7 +290,7 @@ function createSubscriptions(options) {
 		async disconnect(providerId) {
 			await ready; const entry = entryFor(providerId); cancel(providerId);
 			if (entry.fatal) throw failure("storage");
-			entry.blocked = true; entry.epoch++; changed(entry);
+			entry.blocked = true; entry.epoch++; entry.session = undefined; changed(entry);
 			await entry.models.logout(providerId); entry.blocked = false; entry.authFailed = false; entry.error = undefined; changed(entry);
 		},
 		pause() { paused = true; for (const entry of entries.values()) { cancel(entry.providerId); entry.epoch++; changed(entry); } },

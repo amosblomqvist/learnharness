@@ -118,11 +118,12 @@ export function subscriptionAdmissionScope(scope: NativeSubscriptionScope): Admi
 export function nativeAdmissionCurrent(providerId: NativeSubscriptionProviderId, scope: AdmissionScope): boolean {
 	return subscriptionScopeCurrent({ providerId, connectionId: scope.accountId, epoch: scope.epoch, authorityRevision: scope.authorityRevision, selectedModelId: scope.selectedModelId });
 }
-export async function subscriptionLease(scope: NativeSubscriptionScope, background: boolean): Promise<ModelAuth> {
+export async function subscriptionLease(scope: NativeSubscriptionScope, background: boolean): Promise<{ auth: ModelAuth; model?: string }> {
 	if (!subscriptionScopeCurrent(scope)) throw new Error("Subscription connection changed");
-	const result = await subscriptionRequest<{ scope: NativeSubscriptionScope; auth: ModelAuth }>("lease", { scope, background });
+	const result = await subscriptionRequest<{ scope: NativeSubscriptionScope; auth: ModelAuth; model?: unknown }>("lease", { scope, background });
 	if (!result?.auth || !subscriptionScopeCurrent(scope) || JSON.stringify(result.scope) !== JSON.stringify(scope) || (!result.auth.apiKey && !Object.values(result.auth.headers ?? {}).some((value) => !!value))) throw new Error("Subscription lease is stale");
-	return result.auth;
+	if (result.model !== undefined && (typeof result.model !== "string" || !result.model)) throw new Error("Subscription lease is stale");
+	return { auth: result.auth, ...(result.model ? { model: result.model as string } : {}) };
 }
 export function subscriptionAbortController(providerId: NativeSubscriptionProviderId, background: boolean) {
 	const state = bridge(); const controller = new AbortController(); state.controllers.set(controller, { providerId, background });
