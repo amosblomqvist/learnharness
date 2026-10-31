@@ -44,6 +44,7 @@ import {
 	AUTH_PROVIDER_KEYS,
 	AUTH_PROVIDER_ENV_VARS,
 	CUSTOM_PROVIDER,
+	isCustomProviderId,
 	type AuthKeyInfo,
 	type AuthKeyStatus,
 	genericProviderKeyGuard,
@@ -57,7 +58,7 @@ import { isSubscriptionProvider, subscriptionConnected } from "../agent/subscrip
 import { customProviderAvailable, installCustomProviderSource } from "./custom-provider.ts";
 import { claudeCodeAvailable } from "./claude-code-config.ts";
 import { CLAUDE_CODE_PROVIDER } from "../agent/claude-code/constants.ts";
-import { CUSTOM_AUTH_BINDING } from "../core/custom-provider-auth.ts";
+import { CUSTOM_AUTH_BINDING, CUSTOM_CREDENTIAL_PREFIX, isReservedCustomAuthKey } from "../core/custom-provider-auth.ts";
 
 // Shared HMR-stable provenance lets external CLIs exclude file-only injections
 // without importing this store-backed module into the agent layer.
@@ -66,7 +67,7 @@ import { authEnvRecord as boot } from "../core/auth-env.ts";
 /** Ordinary writable key names. Custom auth writes must use the atomic
  * endpoint-binding seam, never the generic single-key API. */
 export function isWritableAuthKey(id: string): boolean {
-	return id !== CUSTOM_AUTH_BINDING && id !== CUSTOM_PROVIDER.envVar && (isKnownAuthKey(id) || isProviderEnvVar(id));
+	return !isReservedCustomAuthKey(id) && (isKnownAuthKey(id) || isProviderEnvVar(id));
 }
 
 /** The settings page's provider dropdown: every pi-ai provider that takes
@@ -92,7 +93,11 @@ export function envKeysIgnored(): boolean {
  */
 export function initAuthEnv(): void {
 	const record = boot();
-	const fileVars = Object.fromEntries(Object.entries(authStore.authVars()).filter(([name]) => name !== CUSTOM_AUTH_BINDING));
+	const fileVars = Object.fromEntries(
+		Object.entries(authStore.authVars()).filter(([name]) =>
+			name !== CUSTOM_AUTH_BINDING && !name.startsWith(`${CUSTOM_AUTH_BINDING}__`) && !name.startsWith(CUSTOM_CREDENTIAL_PREFIX)
+		),
+	);
 	const managed = new Set<string>([
 		...Object.keys(fileVars),
 		...AUTH_KEYS.map((k) => k.id),
@@ -128,7 +133,8 @@ export function initAuthEnv(): void {
 /** Is this env-var name one the keys system manages (curated, provider,
  *  or held in the file)? */
 function isManagedName(name: string): boolean {
-	return name !== CUSTOM_AUTH_BINDING && (isWritableAuthKey(name) || name in authStore.authVars());
+	const reservedStorage = name.startsWith(CUSTOM_AUTH_BINDING) || name.startsWith(CUSTOM_CREDENTIAL_PREFIX);
+	return !reservedStorage && (isWritableAuthKey(name) || name in authStore.authVars());
 }
 
 /**
@@ -150,7 +156,7 @@ export function resolveKeyStatuses(
 	}
 	const rows: AuthKeyStatus[] = [];
 	for (const id of ids) {
-		if (id === CUSTOM_AUTH_BINDING) continue;
+		if (id.startsWith(CUSTOM_AUTH_BINDING) || id.startsWith(CUSTOM_CREDENTIAL_PREFIX)) continue;
 		const envValue = env[id];
 		const fileValue = fileVars[id];
 		const isRealEnv = realEnv.has(id);
@@ -197,7 +203,7 @@ export function keyValue(id: string): string | undefined {
  * (gate by what would run). Providers absent from AUTH_PROVIDER_KEYS take
  * no key at all: nothing to gate, present by definition. */
 export function providerKeyPresent(provider: string): boolean {
-	if (provider === CUSTOM_PROVIDER.id) return customProviderAvailable();
+	if (isCustomProviderId(provider)) return customProviderAvailable(provider);
 	// Explicit opt-in + installation only, never authentication readiness.
 	// Consulted at admission, not inside already-running agent loops.
 	if (provider === CLAUDE_CODE_PROVIDER) return claudeCodeAvailable();
@@ -213,7 +219,7 @@ export function providerKeyPresent(provider: string): boolean {
  * reports shadowedByEnv so the page can explain it).
  */
 export function saveKey(id: string, value: string): { ok: true; status: AuthKeyStatus } | { ok: false; error: string } {
-	if (id === CUSTOM_PROVIDER.envVar || id === CUSTOM_AUTH_BINDING) return { ok: false, error: "Use the custom endpoint editor" };
+	if (isReservedCustomAuthKey(id)) return { ok: false, error: "Use the custom endpoint editor" };
 	const shape = isProviderEnvVar(id) ? genericProviderKeyGuard(id, value) : validateKeyShape(id, value);
 	if (!shape.ok) return { ok: false, error: shape.error };
 	const trimmed = value.trim();
@@ -233,7 +239,7 @@ export function saveKey(id: string, value: string): { ok: true; status: AuthKeyS
  * wins) and the status shows the key still present from env.
  */
 export function deleteKey(id: string): AuthKeyStatus {
-	if (id === CUSTOM_PROVIDER.envVar || id === CUSTOM_AUTH_BINDING) throw new Error("Use the custom endpoint editor");
+	if (isReservedCustomAuthKey(id)) throw new Error("Use the custom endpoint editor");
 	authStore.deleteAuthVar(id);
 	const record = boot();
 	if (record.fillGap.has(id) && !record.realEnv.has(id)) {

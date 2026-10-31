@@ -123,17 +123,37 @@ export const AUTH_PROVIDER_KEYS: readonly AuthProviderInfo[] = [
 ] as const;
 
 /**
- * THE single custom endpoint's identity: a user-configured OpenAI-compatible
- * server registered into pi-ai at runtime (server/custom-provider.ts). NOT part
- * of AUTH_PROVIDER_KEYS (that table is test-pinned to pi-ai's built-ins and is
- * env-var-keyed); this one is keyed by a user-supplied base URL, and its key
- * rides this reserved env var (optional — keyless local servers allowed).
+ * Custom OpenAI-compatible endpoints: user-configured servers registered into
+ * pi-ai at runtime (server/custom-provider.ts). NOT part of
+ * AUTH_PROVIDER_KEYS (that table is test-pinned to pi-ai's built-ins and is
+ * env-var-keyed); these are keyed by a user-supplied base URL.
+ *
+ * `CUSTOM_PROVIDER` is the legacy/primary endpoint identity. It keeps the
+ * original provider id and env-var key so existing configurations keep
+ * working unchanged. Additional endpoints use `custom-<12 hex>` ids; their
+ * credentials live in auth.json (there is no per-endpoint env var).
  */
 export const CUSTOM_PROVIDER = {
 	id: "custom",
 	envVar: "CUSTOM_OPENAI_API_KEY",
 	label: "Custom endpoint",
 } as const;
+
+/** Provider ids for additional custom endpoints. Legacy "custom" is the one
+ *  exception; every new endpoint carries a stable random suffix so renaming
+ *  a label never moves saved model selections. */
+export const CUSTOM_PROVIDER_ID_PREFIX = "custom-";
+const CUSTOM_PROVIDER_EXTRA_ID = /^custom-[a-f0-9]{12}$/;
+
+export function isCustomProviderId(id: string): boolean {
+	return id === CUSTOM_PROVIDER.id || CUSTOM_PROVIDER_EXTRA_ID.test(id);
+}
+
+/** The label shown for a custom endpoint: the user's name, or the legacy
+ *  default when none was stored. */
+export function customProviderLabel(provider: { label?: string } | undefined): string {
+	return provider?.label?.trim() || CUSTOM_PROVIDER.label;
+}
 
 /** Every distinct env var a model-provider key rides in (the write side's
  *  writability check — see isProviderEnvVar below; also drives which

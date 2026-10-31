@@ -21,7 +21,7 @@ import {
 } from "../src/core/settings.ts";
 import { resolveSettings } from "../src/core/settings-resolution.ts";
 import { parseCustomModelOverridesBody } from "../src/server/settings-body.ts";
-import { CUSTOM_PROVIDER } from "../src/core/auth-keys.ts";
+import { CUSTOM_PROVIDER, isCustomProviderId } from "../src/core/auth-keys.ts";
 import {
 	buildOpenAiCompatibleProvider,
 	discoverModels,
@@ -69,14 +69,14 @@ describe("sanitizeUserSettings — customProvider", () => {
 				],
 			},
 		});
-		const cp = out?.customProvider;
+		const cp = out?.customProviders?.[0];
 		assert.equal(cp?.baseUrl, "https://host:8000/v1");
 		assert.deepEqual(cp?.models, [{ id: "llama-3" }, { id: "gpt" }]);
 	});
 	it("keeps image:true and drops a non-array models list / invalid base URL", () => {
 		const out = sanitizeUserSettings({ customProvider: { baseUrl: "ftp://x", models: "nope" } });
-		assert.equal(out?.customProvider?.baseUrl, undefined);
-		assert.equal(out?.customProvider?.models, undefined);
+		assert.equal(out?.customProviders?.[0]?.baseUrl, undefined);
+		assert.equal(out?.customProviders?.[0]?.models, undefined);
 	});
 	it("keeps reasoning:true and drops a non-true reasoning flag", () => {
 		const out = sanitizeUserSettings({
@@ -85,7 +85,7 @@ describe("sanitizeUserSettings — customProvider", () => {
 				models: [{ id: "thinker", reasoning: true }, { id: "plain", reasoning: "yes" }],
 			},
 		});
-		assert.deepEqual(out?.customProvider?.models, [{ id: "thinker", reasoning: true }, { id: "plain" }]);
+		assert.deepEqual(out?.customProviders?.[0]?.models, [{ id: "thinker", reasoning: true }, { id: "plain" }]);
 	});
 });
 
@@ -105,7 +105,7 @@ describe("sanitizeUserSettings / sanitizeCustomModelOverrides — pins", () => {
 				},
 			},
 		});
-		assert.deepEqual(out?.customProvider?.overrides, {
+		assert.deepEqual(out?.customProviders?.[0]?.overrides, {
 			llama: { context: 131072, maxTokens: 8192, reasoning: true },
 			qwen: { context: 10 },
 			quiet: { reasoning: false },
@@ -123,7 +123,7 @@ describe("sanitizeUserSettings / sanitizeCustomModelOverrides — pins", () => {
 	});
 	it("drops an invalid overrides section from the record entirely", () => {
 		const out = sanitizeUserSettings({ customProvider: { baseUrl: "https://h/v1", overrides: "nope" } });
-		assert.equal(out?.customProvider?.overrides, undefined);
+		assert.equal(out?.customProviders?.[0]?.overrides, undefined);
 	});
 });
 
@@ -161,21 +161,86 @@ describe("parseCustomModelOverridesBody — the strict write side", () => {
 // ─── resolution ──────────────────────────────────────────────────────────
 describe("resolveSettings — customProvider", () => {
 	it("resolves an absent section to concrete defaults", () => {
-		assert.deepEqual(resolveSettings(null).customProvider, { baseUrl: "", models: [], overrides: {}, manualModels: [] });
+		assert.deepEqual(resolveSettings(null).customProviders, []);
 	});
 	it("carries stored pins through to the concrete view", () => {
 		const resolved = resolveSettings({
 			version: 1,
-			customProvider: { baseUrl: "http://h/v1", models: [{ id: "a" }], overrides: { a: { context: 32768 } } },
+			customProviders: [{ id: "custom", baseUrl: "http://h/v1", models: [{ id: "a" }], overrides: { a: { context: 32768 } } }],
 		});
-		assert.deepEqual(resolved.customProvider.overrides, { a: { context: 32768 } });
+		assert.deepEqual(resolved.customProviders[0]!.overrides, { a: { context: 32768 } });
 	});
 	it("carries stored manual model ids through to the concrete view", () => {
 		const resolved = resolveSettings({
 			version: 1,
-			customProvider: { baseUrl: "http://h/v1", models: [{ id: "a" }], manualModels: ["a"] },
+			customProviders: [{ id: "custom", baseUrl: "http://h/v1", models: [{ id: "a" }], manualModels: ["a"] }],
 		});
-		assert.deepEqual(resolved.customProvider.manualModels, ["a"]);
+		assert.deepEqual(resolved.customProviders[0]!.manualModels, ["a"]);
+	});
+});
+
+describe("multiple custom endpoints", () => {
+	it("keeps every endpoint, its label, and its own models and pins", () => {
+		const out = sanitizeUserSettings({
+			customProviders: [
+				{ id: "custom", label: "Legacy", baseUrl: "http://one/v1", models: [{ id: "a" }], overrides: { a: { context: 4096 } } },
+				{ id: "custom-0123456789ab", label: "Local", baseUrl: "http://two/v1", models: [{ id: "b" }] },
+			],
+		});
+		assert.deepEqual(out?.customProviders?.map((cp) => [cp.id, cp.label, cp.baseUrl]), [
+			["custom", "Legacy", "http://one/v1"],
+			["custom-0123456789ab", "Local", "http://two/v1"],
+		]);
+		assert.deepEqual(out?.customProviders?.[0]?.overrides, { a: { context: 4096 } });
+	});
+	it("drops duplicate ids and invalid ids fall back to the legacy endpoint", () => {
+		const out = sanitizeUserSettings({
+			customProviders: [
+				{ id: "custom-0123456789ab", baseUrl: "http://one/v1" },
+				{ id: "custom-0123456789ab", baseUrl: "http://two/v1" },
+				{ id: "not-custom", baseUrl: "http://three/v1" },
+			],
+		});
+		assert.deepEqual(out?.customProviders?.map((cp) => [cp.id, cp.baseUrl]), [
+			["custom-0123456789ab", "http://one/v1"],
+			["custom", "http://three/v1"],
+		]);
+	});
+	it("folds the legacy singular section into the canonical list on read", () => {
+		const out = sanitizeUserSettings({ version: 1, customProvider: { baseUrl: "http://legacy/v1", models: [{ id: "m" }] } });
+		assert.deepEqual(out?.customProviders?.map((cp) => [cp.id, cp.baseUrl]), [["custom", "http://legacy/v1"]]);
+		assert.equal("customProvider" in (out ?? {}), false, "the retired key never rides along as an unknown");
+	});
+	it("resolves every endpoint with a stable id and label", () => {
+		const resolved = resolveSettings({
+			version: 1,
+			customProviders: [
+				{ id: "custom", baseUrl: "http://one/v1" },
+				{ id: "custom-0123456789ab", label: "Second", baseUrl: "http://two/v1" },
+			],
+		});
+		assert.deepEqual(resolved.customProviders.map((cp) => [cp.id, cp.label, cp.baseUrl]), [
+			["custom", "Custom endpoint", "http://one/v1"],
+			["custom-0123456789ab", "Second", "http://two/v1"],
+		]);
+	});
+	it("recognizes the legacy id and generated ids, and rejects lookalikes", () => {
+		assert.equal(isCustomProviderId("custom"), true);
+		assert.equal(isCustomProviderId("custom-0123456789ab"), true);
+		assert.equal(isCustomProviderId("custom-xyz"), false);
+		assert.equal(isCustomProviderId("customized"), false);
+	});
+	it("builds each provider under its own id and label", () => {
+		const provider = buildOpenAiCompatibleProvider({
+			id: "custom-0123456789ab",
+			name: "Local endpoint",
+			baseUrl: "http://h/v1",
+			models: [{ id: "m" }],
+		});
+		assert.equal(provider.id, "custom-0123456789ab");
+		const [model] = provider.getModels();
+		assert.equal(model!.provider, "custom-0123456789ab");
+		assert.equal(model!.baseUrl, "http://h/v1");
 	});
 });
 
@@ -194,9 +259,9 @@ describe("manual model ids", () => {
 	});
 	it("the sanitizer keeps a clean manual list and drops an empty one", () => {
 		const kept = sanitizeUserSettings({ version: 1, customProvider: { baseUrl: "http://h/v1", manualModels: [" a ", "a", "b"] } });
-		assert.deepEqual(kept?.customProvider?.manualModels, ["a", "b"]);
+		assert.deepEqual(kept?.customProviders?.[0]?.manualModels, ["a", "b"]);
 		const dropped = sanitizeUserSettings({ version: 1, customProvider: { baseUrl: "http://h/v1", manualModels: [] } });
-		assert.equal(dropped?.customProvider?.manualModels, undefined);
+		assert.equal(dropped?.customProviders?.[0]?.manualModels, undefined);
 	});
 	it("mergeManualModels adds typed ids with defaults and never replaces discovered metadata", () => {
 		const merged = mergeManualModels([{ id: "b", image: true, context: 65536 }], ["c", "b", "a"]);

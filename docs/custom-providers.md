@@ -1,27 +1,42 @@
 # Custom and local models
 
-LearnHarness supports **one custom OpenAI-compatible endpoint with multiple models**.
-The setup and Settings UI are based on PR #62 by Daniel Buckner and Abhishek Thakur.
-Pi owns inference, message conversion, tools, streaming, and reasoning-effort handling.
+LearnHarness supports **any number of named custom OpenAI-compatible endpoints**,
+each with its own base URL, authentication, and model list. The setup and Settings
+UI are based on PR #62 by Daniel Buckner and Abhishek Thakur. Pi owns inference,
+message conversion, tools, streaming, and reasoning-effort handling.
 
-## Configure an endpoint
+The original single-endpoint configuration is still supported. It keeps the
+provider id `custom`, is read automatically from the legacy settings shape, and
+continues to back existing saved model selections. New endpoints get a stable
+`custom-<12 lowercase hex>` id so a saved model reference never changes when
+another endpoint is added or removed.
 
-1. Open **Settings → Providers → + Add a provider → Custom endpoint**. The same
-   editor is available from the first-run provider picker.
-2. Enter the server's complete API base URL, for example
+## Add an endpoint
+
+1. Open **Settings → Providers → + Add a provider → Custom endpoint**, or the
+   same editor from the first-run provider picker.
+2. Give the endpoint a **name**. The name is shown in model pickers instead of
+   the raw provider id.
+3. Enter the server's complete API base URL, for example
    `http://localhost:11434/v1`. LearnHarness does **not** append `/v1`.
-3. Choose **Keyless** or **API key**:
+4. Choose **Keyless** or **API key**:
    - **Keyless** never uses a saved or environment custom-provider key for
      authentication. Pi's OpenAI client receives an internal dummy credential.
-   - **API key** uses the effective `CUSTOM_OPENAI_API_KEY`. A real environment
-     value wins over a file-saved value; the editor identifies environment ownership.
-     Any nonempty trimmed custom key is accepted—there is no arbitrary length floor.
+   - **API key** uses the endpoint's own saved key. For the legacy `custom`
+     endpoint only, a real `CUSTOM_OPENAI_API_KEY` environment value wins over a
+     file-saved value and the editor identifies environment ownership.
+     Additional endpoints are file-key or keyless; they have no per-endpoint
+     environment variable.
+   - Any nonempty trimmed custom key is accepted—there is no arbitrary length
+     floor.
    - Changing the URL requires a new effective key or explicit consent to reuse
      the existing effective key. A key is never silently forwarded to a new URL.
-     Clearing authentication selects Keyless.
-4. Enter optional **model IDs**, separated by commas or whitespace. This supports
+   - Clearing authentication selects Keyless.
+5. Enter optional **model IDs**, separated by commas or whitespace. This supports
    servers whose chat endpoint works but whose `/models` endpoint is absent.
-5. Click **Connect**, then choose models for Strong, Cheap, and Vision.
+6. Click **Connect**, then choose models for Strong, Cheap, and Vision.
+7. Repeat **+ Add a provider → Custom endpoint** for another endpoint. Existing
+   endpoints stay listed and editable independently.
 
 HTTP and HTTPS, including localhost/private-network servers, are supported. URLs
 with embedded credentials, query strings, or fragments are rejected. Put a key in
@@ -40,7 +55,7 @@ No backend/model installation, downloads, or OAuth flows are performed.
 
 ## Model budgets and reasoning support
 
-Settings exposes offline-editable pins per model:
+Settings exposes offline-editable pins per model, independently for every endpoint:
 
 - **Context budget**: user pin → reported context → **8192 fallback**.
 - **Maximum output**: user pin → reported output limit → **4096 fallback**.
@@ -74,21 +89,46 @@ that every model understands images. A text-only backend may reject the request;
 that error is surfaced, with no silent text-only fallback. This does not establish
 real-model image-understanding quality.
 
+## Multiple endpoints at once
+
+Every configured endpoint is registered as its own Pi provider, so an engine is
+bound to the endpoint that advertised its model. Requests resolve that endpoint's
+current URL, credential, limits, and saved effort preference. Adding, editing, or
+removing one endpoint does not rewrite another endpoint's models or pins.
+
+Deleting an endpoint removes it and its model rows; engines already started on it
+fail rather than falling back to a different endpoint. Saved model selections and
+history are not rewritten. Disconnecting the legacy `custom` endpoint also leaves
+its disabled marker behind, so a latent environment key cannot revive it.
+
 ## Credentials, reloads, and concurrent editing
 
-Nonsecret configuration is stored in the existing `settings.json.customProvider`;
-file-saved credentials use the existing `auth.json` key seam. A reserved internal
-string entry, `__learnharness_custom_provider_binding`, binds authorization to the
-endpoint, mode, and a random nonsecret `credentialBindingId` in custom settings.
-The file key and its binding are published in one existing atomic auth-map write.
-The internal entry is not an environment variable or an editable/displayed key.
-Neither keys nor raw upstream errors are returned by the custom-provider API.
+Nonsecret configuration is stored in `settings.json.customProviders`, an ordered
+array of endpoint records. Each record carries its own `id`, `label`, `baseUrl`,
+`authMode`, `models`, optional `overrides` and `manualModels`, and a nonsecret
+`credentialBindingId`. A legacy `settings.json.customProvider` object is folded
+into the first record as `id: "custom"` when read and is dropped from unknown-key
+carryover.
+
+File-saved credentials use the existing `auth.json` key seam, with one reserved
+internal pair per endpoint:
+
+- `__learnharness_custom_provider_key__<id>` — the saved file key.
+- `__learnharness_custom_provider_binding__<id>` — the binding record.
+
+The legacy endpoint keeps its original names, `CUSTOM_OPENAI_API_KEY` for the
+environment override and `__learnharness_custom_provider_binding` for the binding.
+A binding ties authorization to the endpoint, mode, and its random nonsecret
+`credentialBindingId`. The file key and its binding are published in one existing
+atomic auth-map write. These reserved entries are not environment variables or
+editable/displayed keys. Neither keys nor raw upstream errors are returned by the
+custom-provider API.
 
 Every startup and upstream operation requires matching binding IDs, URL, and mode
 before using credentials. A crash between auth/settings writes, or a failed
-settings write whose auth rollback also fails, leaves the custom provider disabled
-rather than sending a new key to an old endpoint. Reload and explicitly reconnect
-to repair authorization. A shadowed file key retains its own authorized URL: if an
+settings write whose auth rollback also fails, leaves that endpoint disabled rather
+than sending a new key to an old endpoint. Reload and explicitly reconnect to
+repair authorization. A shadowed file key retains its own authorized URL: if an
 environment key is reused for another URL and later disappears, the old file key
 is not silently forwarded there. Keyless also requires its nonsecret binding, but
 never resolves a stored/environment key. Disconnect leaves an internal disabled
@@ -107,15 +147,17 @@ metadata. Already-started requests keep their setup. A removed model or disconne
 provider fails rather than falling back; saved model selections and history are not
 rewritten.
 
-Edits use an opaque nonsecret ETag/If-Match revision. A stale edit returns **409** with
-reload/retry guidance. A connect also checks configuration and effective credentials
-after discovery, and merges only the custom section into the latest settings record,
-preserving intervening unrelated edits. Failed mutations never claim success.
+Edits use one opaque nonsecret ETag/If-Match revision covering **all** custom
+endpoints. A stale edit returns **409** with reload/retry guidance. A connect also
+checks configuration and effective credentials after discovery, and merges only
+the custom section into the latest settings record, preserving intervening
+unrelated edits. Failed mutations never claim success.
 
 Desktop requests use the existing desktop capability. Browser mutations must be
 same-origin JSON requests. Limits are **15 seconds** for discovery, **8 MiB** for its
-response, **10,000** listed models, and **64 KiB** for configuration-write bodies.
-These are protections for the new endpoint, not a multiuser authentication system.
+response, **10,000** listed models per endpoint, and **64 KiB** for
+configuration-write bodies. These are protections for the new endpoints, not a
+multiuser authentication system.
 
 ## Pricing and previous development configuration
 
@@ -129,5 +171,5 @@ profile reset, history rewrite, or silent model remapping. Existing development
 profiles need manual endpoint configuration and model reselection. Unbound early
 GUI development configurations also require explicit reconnect/new-key entry or
 the existing reuse-consent checkbox, even at the same URL; they are never silently
-trusted or migrated. This release
-supports one OpenAI-compatible custom endpoint, not multiple arbitrary protocols.
+trusted or migrated. This release supports multiple OpenAI-compatible custom
+endpoints, not multiple arbitrary protocols.

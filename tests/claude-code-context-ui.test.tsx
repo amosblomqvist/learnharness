@@ -17,7 +17,7 @@ let root: Root | undefined, host: HTMLDivElement | undefined;
 afterEach(async () => { await act(async () => root?.unmount()); host?.remove(); root = undefined; globalThis.fetch = originalFetch; });
 
 test("compact CLI context is numeric only; effective-window explanation appears only in expanded session metadata", async () => {
-	const catalog: ModelCatalogResponse = { models: CLAUDE_CODE_MODELS.map(toModelDto), providers: [],
+	const catalog: ModelCatalogResponse = { models: CLAUDE_CODE_MODELS.map((m) => toModelDto(m)), providers: [],
 		slots: { strong: null, cheap: null, vision: null }, defaults: null,
 		rolePins: { researcher: null, demoBuilder: null, visualMaker: null, extractor: null, auditor: null } };
 	globalThis.fetch = (async (url) => {

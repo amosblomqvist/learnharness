@@ -46,7 +46,7 @@ test("mixed session totals retain known API dollars and subscription labels alon
 });
 
 test("model-catalog API and menus never advertise the CLI adapter's placeholder zero rates", () => {
-	const models = CLAUDE_CODE_MODELS.map(toModelDto);
+	const models = CLAUDE_CODE_MODELS.map((m) => toModelDto(m));
 	assert(models.every((model) => model.cost === null));
 	const html = renderToStaticMarkup(<ModelMenuList models={models} effectiveId={undefined} onPick={() => {}} />);
 	assert.equal((html.match(/>CLI billing<\/span>/g) ?? []).length, 3);

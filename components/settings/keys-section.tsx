@@ -55,8 +55,12 @@ interface KeysResponse {
 	providers?: ProviderKeyInfo[];
 }
 
-/** The custom endpoint's non-secret status (GET /api/custom-provider). */
+/** One custom endpoint's non-secret status (GET /api/custom-provider). */
 interface CustomStatus {
+	/** Stable provider id (legacy "custom" or `custom-<12 hex>`). */
+	id: string;
+	/** User-facing endpoint name. */
+	label: string;
 	keyReuseRequired: boolean;
 	revision: string;
 	authMode: "keyless" | "apiKey";
@@ -69,11 +73,27 @@ interface CustomStatus {
 	keyPresent: boolean;
 }
 
-async function readCustomStatus(inspectKey = false): Promise<CustomStatus> {
+async function readCustomStatuses(inspectKey = false): Promise<{ providers: CustomStatus[]; revision: string }> {
 	const response = await fetch(`/api/custom-provider${inspectKey ? "?authMode=apiKey" : ""}`);
 	if (!response.ok) throw new Error("Unable to load custom configuration.");
-	const cp = await response.json() as Partial<CustomStatus>;
-	return { keyReuseRequired: Boolean(cp.keyReuseRequired), revision: response.headers.get("etag") ?? "", authMode: cp.authMode ?? "keyless", keySource: cp.keySource ?? "none", baseUrl: cp.baseUrl ?? "", models: cp.models ?? [], overrides: cp.overrides ?? {}, manualModels: cp.manualModels ?? [], keyPresent: Boolean(cp.keyPresent) };
+	const body = await response.json() as { providers?: Partial<CustomStatus>[] };
+	const revision = response.headers.get("etag") ?? "";
+	return {
+		providers: (body.providers ?? []).map((cp) => ({
+			id: cp.id ?? "",
+			label: cp.label ?? CUSTOM_PROVIDER.label,
+			keyReuseRequired: Boolean(cp.keyReuseRequired),
+			revision,
+			authMode: cp.authMode ?? "keyless",
+			keySource: cp.keySource ?? "none",
+			baseUrl: cp.baseUrl ?? "",
+			models: cp.models ?? [],
+			overrides: cp.overrides ?? {},
+			manualModels: cp.manualModels ?? [],
+			keyPresent: Boolean(cp.keyPresent),
+		})),
+		revision,
+	};
 }
 
 /** The curated tools group, pinned by id (the catalog owns the copy;
@@ -82,7 +102,8 @@ async function readCustomStatus(inspectKey = false): Promise<CustomStatus> {
  *  section can never drift from core/auth-keys.ts again. */
 const TOOL_IDS = AUTH_KEYS.map((k) => k.id) as readonly string[];
 
-/** The custom endpoint's synthetic Add-provider entry (offered only while unconfigured). */
+/** The custom endpoint's synthetic Add-provider entry (always offered — the
+ *  menu adds multiple named endpoints). */
 export const CUSTOM_PROVIDER_INFO: ProviderKeyInfo = {
 	id: CUSTOM_PROVIDER.id,
 	envVar: CUSTOM_PROVIDER.envVar,
@@ -121,10 +142,10 @@ export function classifyKeys(
 	const unknownRows: AuthKeyStatus[] = [];
 	for (const s of statuses) {
 		if (isTool(s.id)) continue;
-		// The custom endpoint's key has its OWN home (the Custom endpoint
+		// A custom endpoint's credential has its OWN home (the Custom endpoints
 		// section), so it never shows here — not as a provider row, not as an
-		// "other stored variable".
-		if (s.id === CUSTOM_PROVIDER.envVar) continue;
+		// "other stored variable". Additional endpoints use reserved names.
+		if (s.id === CUSTOM_PROVIDER.envVar || s.id.startsWith("__learnharness_custom_provider")) continue;
 		if (providerEnv.has(s.id) || (!s.info && providers === undefined)) providerRows.push(s);
 		else if (!s.info) unknownRows.push(s);
 		// (pre-interlude catalogs: a curated-but-unclassified status still
@@ -384,16 +405,18 @@ export function KeysSection({
 	/** The paste editor for a freshly chosen Add-provider target. */
 	const [adding, setAdding] = useState<ProviderKeyInfo | null>(null);
 	const [addError, setAddError] = useState<string | null>(null);
-	/** The custom endpoint's status + whether its connect editor is open. */
-	const [custom, setCustom] = useState<CustomStatus | null>(null);
-	const [addingCustom, setAddingCustom] = useState(false);
+	/** Every configured custom endpoint + the global revision. */
+	const [customs, setCustoms] = useState<CustomStatus[]>([]);
+	const [customRevision, setCustomRevision] = useState("");
+	/** The open custom editor: an existing endpoint, or {} for a new one. */
+	const [customEditor, setCustomEditor] = useState<{ status?: CustomStatus } | null>(null);
 
 	// Escape folds any open editor (unfolded row or the Add-provider paste)
 	// WITHOUT closing the dialog. Claimed at document CAPTURE phase — the
 	// only stopPropagation that outruns both the input's React handler and
 	// the dialog's window-level listener.
 	useEffect(() => {
-		if (openRow === null && adding === null && !addingCustom) return;
+		if (openRow === null && adding === null && !customEditor) return;
 		const onKeyDown = (e: KeyboardEvent) => {
 			if (e.key !== "Escape") return;
 			// A language dropdown above this editor in the dismissal stack owns
@@ -403,11 +426,11 @@ export function KeysSection({
 			e.stopPropagation();
 			setOpenRow(null);
 			setAdding(null);
-			setAddingCustom(false);
+			setCustomEditor(null);
 		};
 		document.addEventListener("keydown", onKeyDown, true);
 		return () => document.removeEventListener("keydown", onKeyDown, true);
-	}, [openRow, adding, addingCustom]);
+	}, [openRow, adding, customEditor]);
 
 	const reload = async () => {
 		try {
@@ -419,10 +442,12 @@ export function KeysSection({
 		} finally {
 			setLoading(false);
 		}
-		// Best-effort and independent: the custom endpoint's status must never
-		// blank the provider-key list above if its fetch fails.
+		// Best-effort and independent: custom endpoints must never blank the
+		// provider-key list above if their fetch fails.
 		try {
-			setCustom(await readCustomStatus());
+			const next = await readCustomStatuses();
+			setCustoms(next.providers);
+			setCustomRevision(next.revision);
 		} catch {
 			/* custom status unavailable — leave it unset */
 		}
@@ -463,12 +488,12 @@ export function KeysSection({
 		notifySettingsSaved("keys");
 	}
 
-	/** Forget the custom endpoint (config + key server-side), same rhythm as
+	/** Forget one custom endpoint (config + key server-side), same rhythm as
 	 *  deleteKey: fire, re-read, broadcast so the catalog narrows everywhere. */
-	async function disconnectCustom(revision: string): Promise<string | null> {
-		const res = await fetch("/api/custom-provider", { method: "DELETE", headers: { "content-type": "application/json", "if-match": revision }, body: JSON.stringify({}) }).catch(() => null);
+	async function disconnectCustom(id: string, revision: string): Promise<string | null> {
+		const res = await fetch("/api/custom-provider", { method: "DELETE", headers: { "content-type": "application/json", "if-match": revision }, body: JSON.stringify({ id }) }).catch(() => null);
 		if (!res?.ok) return res ? ((await res.json().catch(() => ({}))).error ?? "Disconnect failed.") : "Disconnect failed. Check your connection.";
-		setAddingCustom(false);
+		setCustomEditor(null);
 		await reload();
 		notifySettingsSaved("keys");
 		return null;
@@ -510,27 +535,40 @@ export function KeysSection({
 						testid={`key-${status.id.toLowerCase()}`}
 					/>
 				))}
-				{custom?.baseUrl && (
-					<CustomEndpointRow
-						status={custom}
-						expanded={addingCustom}
-						onToggle={() => setAddingCustom((v) => !v)}
-					/>
-				)}
-				{addingCustom && (
+				{customs.map((status) => (
+					<div key={status.id} data-testid="custom-endpoint-item">
+						<CustomEndpointRow
+							status={status}
+							expanded={customEditor?.status?.id === status.id}
+							onToggle={() => setCustomEditor(customEditor?.status?.id === status.id ? null : { status })}
+						/>
+						{customEditor?.status?.id === status.id && (
+							<CustomEndpointEditor
+								key={`${status.id}-${status.revision}-${status.models.length}`}
+								status={status}
+								revision0={customRevision || status.revision}
+								onReload={async () => { await reload(); setCustomEditor(null); }}
+								onSaved={async () => {
+									setCustomEditor(null);
+									await reload();
+									notifySettingsSaved("keys");
+								}}
+								onPinsSaved={async () => {
+									await reload();
+									notifySettingsSaved("keys");
+								}}
+								onDelete={(revision) => disconnectCustom(status.id, revision)}
+								onCancel={() => setCustomEditor(null)}
+							/>
+						)}
+					</div>
+				))}
+				{customEditor && !customEditor.status && (
 					<CustomEndpointEditor
-						revision0={custom?.revision ?? ""}
-						authMode0={custom?.authMode ?? "keyless"}
-						keySource0={custom?.keySource ?? "none"}
-						keyReuseRequired0={custom?.keyReuseRequired ?? false}
-						onReload={async () => { await reload(); setAddingCustom(false); }}
-						baseUrl0={custom?.baseUrl ?? ""}
-						keyPresent={custom?.keyPresent ?? false}
-						models={custom?.models ?? []}
-						overrides={custom?.overrides ?? {}}
-						manualModels0={custom?.manualModels ?? []}
+						revision0={customRevision}
+						onReload={async () => { await reload(); setCustomEditor(null); }}
 						onSaved={async () => {
-							setAddingCustom(false);
+							setCustomEditor(null);
 							await reload();
 							notifySettingsSaved("keys");
 						}}
@@ -538,20 +576,19 @@ export function KeysSection({
 							await reload();
 							notifySettingsSaved("keys");
 						}}
-						onDelete={disconnectCustom}
-						onCancel={() => setAddingCustom(false)}
+						onCancel={() => setCustomEditor(null)}
 					/>
 				)}
 				{providers !== undefined && (
 					<AddProviderRow
-						addable={custom?.baseUrl ? addable : [...addable, CUSTOM_PROVIDER_INFO]}
+						addable={[...addable, CUSTOM_PROVIDER_INFO]}
 						onPick={(p) => {
 							setAddError(null);
 							if (p.id === CUSTOM_PROVIDER.id) {
 								setAdding(null);
-								setAddingCustom(true);
+								setCustomEditor({});
 							} else {
-								setAddingCustom(false);
+								setCustomEditor(null);
 								setAdding(p);
 							}
 						}}
@@ -673,15 +710,21 @@ function AddProviderEditor({
 /** One donor editor for first setup and Settings; setup omits offline pin and
  * disconnect controls, while authentication/revisions/manual IDs stay identical. */
 export function CustomEndpointSetup({ onSaved }: { onSaved: () => void | Promise<void> }) {
-	const [status, setStatus] = useState<CustomStatus | null>(null);
+	const [status, setStatus] = useState<CustomStatus | undefined>();
+	const [revision, setRevision] = useState("");
 	const [error, setError] = useState(false);
 	async function reload() {
-		try { setStatus(await readCustomStatus()); setError(false); }
-		catch { setError(true); }
+		try {
+			const next = await readCustomStatuses();
+			setStatus(next.providers[0]);
+			setRevision(next.revision);
+			setError(false);
+		} catch { setError(true); }
 	}
 	useEffect(() => { void reload(); }, []);
-	if (!status || error) return <div className="text-xs">{error ? "Unable to load custom configuration." : "Loading custom configuration…"}{error && <button onClick={() => void reload()}>Retry</button>}</div>;
-	return <CustomEndpointEditor key={status.revision} setup revision0={status.revision} authMode0={status.authMode} keySource0={status.keySource} keyReuseRequired0={status.keyReuseRequired} baseUrl0={status.baseUrl} keyPresent={status.keyPresent} models={status.models} overrides={status.overrides} manualModels0={status.manualModels} onSaved={onSaved} onPinsSaved={reload} onReload={reload} onCancel={reload} />;
+	if (error) return <div className="text-xs">Unable to load custom configuration. <button onClick={() => void reload()}>Retry</button></div>;
+	if (!revision && !status) return <div className="text-xs">Loading custom configuration…</div>;
+	return <CustomEndpointEditor key={`${status?.id ?? "new"}-${revision}`} setup status={status} revision0={revision} onSaved={onSaved} onPinsSaved={reload} onReload={reload} onCancel={reload} />;
 }
 
 /** The custom endpoint's status row (shown once configured); clicking re-opens the editor. */
@@ -705,7 +748,7 @@ function CustomEndpointRow({
 				onClick={onToggle}
 				className="flex w-full items-center justify-between gap-3 rounded-sm px-1 py-1.5 text-left cursor-pointer transition-colors hover:bg-accent/50"
 			>
-				<span className="font-ui text-xs text-foreground">Custom endpoint</span>
+				<span className="font-ui text-xs text-foreground">{status.label}</span>
 				<span data-testid="custom-endpoint-status" className="max-w-[60%] truncate font-mono text-[11px] text-muted-foreground">
 					{line}
 				</span>
@@ -759,57 +802,38 @@ const pinTestid = (prefix: string, id: string) => `${prefix}-${id.replace(/[^a-z
  *  detected automatically. */
 function CustomEndpointEditor({
 	setup = false,
-	revision0, authMode0, keySource0, keyReuseRequired0, onReload,
-	baseUrl0,
-	keyPresent: initialKeyPresent,
-	models,
-	overrides,
-	manualModels0,
+	status,
+	revision0,
+	onReload,
 	onSaved,
 	onPinsSaved,
 	onCancel,
 	onDelete,
 }: {
 	setup?: boolean;
+	/** The endpoint being edited; absent = a new endpoint. */
+	status?: CustomStatus;
 	revision0: string;
-	authMode0: "keyless" | "apiKey";
-	keySource0: "env" | "file" | "none";
-	keyReuseRequired0: boolean;
 	onReload: () => void | Promise<void>;
-	baseUrl0: string;
-	keyPresent: boolean;
-	/** The discovered models — one limits row each. */
-	models: readonly CustomModel[];
-	/** Their stored user pins. */
-	overrides: Record<string, CustomModelOverride>;
-	manualModels0: readonly string[];
 	onSaved: () => void | Promise<void>;
 	/** Pins saved — the editor stays open (a form, not a connect). */
 	onPinsSaved: () => void | Promise<void>;
 	onCancel: () => void;
 	onDelete?: (revision: string) => Promise<string | null>;
 }) {
+	const providerId = status?.id;
+	const baseUrl0 = status?.baseUrl ?? "";
+	const models = status?.models ?? [];
+	const overrides = status?.overrides ?? {};
+	const manualModels0 = status?.manualModels ?? [];
 	const [revision, setRevision] = useState(revision0);
-	const [authMode, setAuthMode] = useState(authMode0);
-	const [keySource, setKeySource] = useState(keySource0);
-	const [keyPresent, setKeyPresent] = useState(initialKeyPresent);
-	const [keyReuseRequired, setKeyReuseRequired] = useState(keyReuseRequired0);
+	const [label, setLabel] = useState(status?.label ?? CUSTOM_PROVIDER.label);
+	const [authMode, setAuthMode] = useState<"keyless" | "apiKey">(status?.authMode ?? "keyless");
+	const [keySource, setKeySource] = useState(status?.keySource ?? "none");
+	const [keyPresent, setKeyPresent] = useState(status?.keyPresent ?? false);
+	const [keyReuseRequired, setKeyReuseRequired] = useState(status?.keyReuseRequired ?? false);
 	const [authLoading, setAuthLoading] = useState(false);
 	const [reuseKey, setReuseKey] = useState(false);
-	useEffect(() => {
-		if (authMode !== "apiKey") return;
-		let cancelled = false;
-		setAuthLoading(true);
-		readCustomStatus(true).then((status) => {
-			if (cancelled) return;
-			setKeySource(status.keySource);
-			setKeyPresent(status.keyPresent);
-			setKeyReuseRequired(status.keyReuseRequired);
-			if (status.keySource === "env") setKey("");
-		}).catch(() => { if (!cancelled) setError("Unable to inspect effective key. Reload configuration and retry."); })
-			.finally(() => { if (!cancelled) setAuthLoading(false); });
-		return () => { cancelled = true; };
-	}, [authMode]);
 	const [baseUrl, setBaseUrl] = useState(baseUrl0);
 	const [key, setKey] = useState("");
 	const [keyTouched, setKeyTouched] = useState(false);
@@ -822,9 +846,29 @@ function CustomEndpointEditor({
 	const [baseline, setBaseline] = useState(() => JSON.stringify(pinsPayload(draftsFor(models, overrides))));
 	const [pinsBusy, setPinsBusy] = useState(false);
 	const [pinsError, setPinsError] = useState<string | null>(null);
+	// The list GET is enough for an endpoint already stored as apiKey (the
+	// snapshot inspects those). Switching a keyless endpoint to apiKey needs
+	// an explicit inspection so an environment-owned effective key is visible
+	// before Connect instead of being rejected after the fact.
+	useEffect(() => {
+		if (authMode !== "apiKey" || status?.authMode === "apiKey") return;
+		let cancelled = false;
+		setAuthLoading(true);
+		readCustomStatuses(true).then(({ providers }) => {
+			if (cancelled) return;
+			const current = providerId ? providers.find((p) => p.id === providerId) : undefined;
+			setKeySource(current?.keySource ?? "none");
+			setKeyPresent(current?.keyPresent ?? false);
+			setKeyReuseRequired(current?.keyReuseRequired ?? false);
+			if (current?.keySource === "env") setKey("");
+		}).catch(() => { if (!cancelled) setError("Unable to inspect effective key. Reload configuration and retry."); })
+			.finally(() => { if (!cancelled) setAuthLoading(false); });
+		return () => { cancelled = true; };
+	}, [authMode, providerId, status?.authMode]);
 	const changedTarget = normalizeBaseUrl(baseUrl) !== normalizeBaseUrl(baseUrl0);
-	const canConnect = Boolean(baseUrl.trim()) && (authMode === "keyless" || (!authLoading && ((Boolean(key.trim()) && keySource !== "env") || (keyPresent && (!(changedTarget || keyReuseRequired) || reuseKey)))));
-
+	const hasOwnKey = Boolean(key.trim()) && keySource !== "env";
+	const canReuseKey = keyPresent && (!(changedTarget || keyReuseRequired) || reuseKey);
+	const canConnect = Boolean(baseUrl.trim() && label.trim()) && (authMode === "keyless" || (!authLoading && (hasOwnKey || canReuseKey)));
 	const draftOf = (m: CustomModel): PinDraft => drafts[m.id] ?? pinDraft(overrides[m.id]);
 	const setDraft = (m: CustomModel, patch: Partial<PinDraft>) =>
 		setDrafts((prev) => ({ ...prev, [m.id]: { ...draftOf(m), ...patch } }));
@@ -838,7 +882,7 @@ function CustomEndpointEditor({
 		const res = await fetch("/api/custom-provider", {
 			method: "PATCH",
 			headers: { "content-type": "application/json", "if-match": revision },
-			body: JSON.stringify({ overrides: pinsPayload(current) }),
+			body: JSON.stringify({ ...(providerId ? { id: providerId } : {}), overrides: pinsPayload(current) }),
 		}).catch(() => null);
 		if (!res || !res.ok) {
 			const b = (await res?.json().catch(() => ({}))) as { error?: string } | undefined;
@@ -863,7 +907,7 @@ function CustomEndpointEditor({
 		const res = await fetch("/api/custom-provider", {
 			method: "POST",
 			headers: { "content-type": "application/json", "if-match": revision },
-			body: JSON.stringify({ baseUrl, authMode, reuseKey, manualModels, ...(authMode === "apiKey" && keyTouched && key.trim() && keySource !== "env" ? { key } : {}) }),
+			body: JSON.stringify({ ...(providerId ? { id: providerId } : {}), label, baseUrl, authMode, reuseKey, manualModels, ...(authMode === "apiKey" && keyTouched && key.trim() && keySource !== "env" ? { key } : {}) }),
 		}).catch(() => null);
 		if (!res || !res.ok) {
 			const b = (await res?.json().catch(() => ({}))) as { error?: string } | undefined;
@@ -878,7 +922,17 @@ function CustomEndpointEditor({
 	return (
 		<div data-testid="custom-endpoint-editor" className="flex flex-col gap-2 rounded-sm px-1 py-1.5">
 			<div className="flex items-center gap-2">
-				<span className="shrink-0 font-ui text-xs text-foreground">Custom endpoint</span>
+				<input
+					type="text"
+					value={label}
+					onChange={(e) => setLabel(e.target.value)}
+					placeholder="Name, e.g. LM Studio"
+					aria-label="Custom endpoint name"
+					data-testid="custom-label-input"
+					disabled={busy}
+					autoFocus
+					className="h-7 w-40 shrink-0 rounded-sm border border-border bg-background px-1.5 font-ui text-xs text-foreground outline-none placeholder:text-muted-foreground/60 focus:border-muted-foreground/50"
+				/>
 				<input
 					type="text"
 					value={baseUrl}
@@ -887,7 +941,6 @@ function CustomEndpointEditor({
 					aria-label="Custom endpoint base URL"
 					data-testid="custom-baseurl-input"
 					disabled={busy}
-					autoFocus
 					className="h-7 min-w-0 flex-1 rounded-sm border border-border bg-background px-1.5 font-mono text-xs text-foreground outline-none placeholder:text-muted-foreground/60 focus:border-muted-foreground/50"
 				/>
 			</div>

@@ -1,7 +1,35 @@
 /** Private custom credential authorization; no credential-derived public value. */
+import { CUSTOM_PROVIDER, isCustomProviderId } from "./auth-keys.ts";
 import { normalizeBaseUrl, type CustomProviderSettings } from "./settings.ts";
 
 export const CUSTOM_AUTH_BINDING = "__learnharness_custom_provider_binding";
+/** Auth.json key prefix for additional endpoints' file credentials. The
+ *  legacy endpoint keeps CUSTOM_PROVIDER.envVar for compatibility. */
+export const CUSTOM_CREDENTIAL_PREFIX = "__learnharness_custom_provider_key__";
+/** Binding records for additional endpoints: legacy keeps the unsuffixed
+ *  name, every other endpoint appends `__<provider id>`. */
+const CUSTOM_BINDING_PREFIX = `${CUSTOM_AUTH_BINDING}__`;
+
+export function customBindingAuthKey(id: string): string {
+	return id === CUSTOM_PROVIDER.id ? CUSTOM_AUTH_BINDING : `${CUSTOM_BINDING_PREFIX}${id}`;
+}
+
+export function customCredentialAuthKey(id: string): string {
+	return id === CUSTOM_PROVIDER.id ? CUSTOM_PROVIDER.envVar : `${CUSTOM_CREDENTIAL_PREFIX}${id}`;
+}
+
+/** Every auth.json name owned by the custom-endpoint editor. Generic key
+ *  writes must never touch these. */
+export function isReservedCustomAuthKey(name: string): boolean {
+	return name === CUSTOM_AUTH_BINDING || name.startsWith(CUSTOM_BINDING_PREFIX)
+		|| name === CUSTOM_PROVIDER.envVar || name.startsWith(CUSTOM_CREDENTIAL_PREFIX);
+}
+
+/** Provider id carried by a stored section; absent = the legacy endpoint. */
+export function customProviderId(provider: CustomProviderSettings | undefined): string {
+	return provider?.id && isCustomProviderId(provider.id) ? provider.id : CUSTOM_PROVIDER.id;
+}
+
 export interface CustomAuthBinding {
 	version: 1;
 	id: string;

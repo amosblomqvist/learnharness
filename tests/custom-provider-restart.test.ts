@@ -12,7 +12,7 @@ const base = "http://first.invalid/v1";
 function profile() {
 	const home = fs.mkdtempSync(path.join(root, "case-"));
 	const id = "a".repeat(32);
-	fs.writeFileSync(path.join(home, "settings.json"), JSON.stringify({ version: 1, appearance: { mode: "dark" }, customProvider: { baseUrl: base, authMode: "apiKey", credentialBindingId: id, models: [{ id: "m" }] } }));
+	fs.writeFileSync(path.join(home, "settings.json"), JSON.stringify({ version: 1, appearance: { mode: "dark" }, customProviders: [{ id: "custom", baseUrl: base, authMode: "apiKey", credentialBindingId: id, models: [{ id: "m" }] }] }));
 	fs.writeFileSync(path.join(home, "auth.json"), JSON.stringify({ CUSTOM_OPENAI_API_KEY: "fixture-old-key", OTHER_PROVIDER_KEY: "untouched", future: { preserve: true }, [CUSTOM_AUTH_BINDING]: JSON.stringify({ version: 1, id, baseUrl: base, authMode: "apiKey", fileKeyBaseUrl: base }) }), { mode: 0o600 });
 	return home;
 }
