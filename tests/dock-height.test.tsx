@@ -4,8 +4,6 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { createRoot } from "react-dom/client";
 import { parseHTML } from "linkedom";
-import { QuestionDock } from "../components/question-dock.tsx";
-import { PracticeDock } from "../components/practice-dock.tsx";
 
 const dom = parseHTML("<html><body></body></html>");
 Object.assign(globalThis, {
@@ -30,8 +28,11 @@ Object.assign(globalThis, {
 		overflowY: el.style.overflowY || (el.classList.contains("overflow-y-auto") ? "auto" : "visible"),
 	}),
 });
-// Import after installing window so the hook uses its browser layout effect.
+// Import after installing window so the hook uses its browser layout effect —
+// the docks too: they reach dock-height transitively (question-dock → figure-split → chat).
 const { dockHeightBudget, syncDockHeight, useDockHeight, forwardDockWheel } = await import("../components/dock-height.ts");
+const { QuestionDock } = await import("../components/question-dock.tsx");
+const { PracticeDock } = await import("../components/practice-dock.tsx");
 
 const normal = {
 	columnHeight: 700, outsideHeight: 60, beforeShellHeight: 0,

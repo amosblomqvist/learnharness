@@ -53,6 +53,7 @@ export type { FilePathPart } from "./file-paths.ts";
 export * from "./view.ts";
 export * from "./tool-parts.ts";
 export * from "./answer-presentation.ts";
+export * from "./svg-source.ts";
 export * from "./prices.ts";
 export * from "./context-usage.ts";
 export type { ChatGPTStatus, ChatGPTControlBridge } from "./contracts/chatgpt.ts";

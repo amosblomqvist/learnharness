@@ -800,3 +800,34 @@ describe("question context renders as markdown everywhere (owner, 2026-10-12)", 
 		assert.ok(!html.includes("lh-prose block text-xs"), "no description slot without an ask input");
 	});
 });
+
+describe("question figures beside the question (owner, 2026-10-27)", () => {
+	const figure = "<svg xmlns='http://www.w3.org/2000/svg' width='120' height='80'><rect width='120' height='80' fill='white'/></svg>";
+
+	it("dock: question, then figure, then options in DOM order (the narrow stack); no figure, no split", () => {
+		const html = renderDock({ toolName: "quiz", toolCallId: "f1", input: { ...quizInput, figure } as never });
+		assert.match(html, /data-testid="figure-split"/);
+		const at = html.indexOf('data-testid="visual-card"');
+		assert.ok(at > 0, "the figure renders through VisualOutputCard");
+		assert.ok(html.indexOf("Which planet") < at, "question precedes the figure");
+		assert.ok(at < html.indexOf('role="radiogroup"'), "figure precedes the options");
+		assert.ok(!renderDock({ toolName: "quiz", toolCallId: "f2", input: quizInput as never }).includes("figure-split"));
+	});
+
+	it("explain dock carries it too", () => {
+		const html = renderDock({ toolName: "recall", toolCallId: "f3", input: { question: "Describe the curve.", correctAnswer: "A parabola.", figure } as never });
+		assert.match(html, /data-testid="visual-card"/);
+	});
+
+	it("answered cards re-render the figure from the persisted call", () => {
+		const quiz = buildAnswer(quizQD(), { values: ["Mercury"] });
+		assert.match(renderToStaticMarkup(<AnsweredCard answer={quiz} input={{ ...quizInput, figure }} />), /data-testid="visual-card"/);
+		assert.ok(!renderToStaticMarkup(<AnsweredCard answer={quiz} input={quizInput} />).includes("figure-split"));
+		const explainQD: QuestionData = { id: "f4", kind: "explain", question: "Describe the curve.", mode: "text", options: [], committedAnswer: "A parabola.", createdAt: new Date().toISOString() };
+		const explain = buildAnswer(explainQD, { text: "A U shape." });
+		assert.match(
+			renderToStaticMarkup(<AnsweredCard answer={explain} input={{ question: "Describe the curve.", correctAnswer: "A parabola.", figure }} />),
+			/data-testid="visual-card"/,
+		);
+	});
+});

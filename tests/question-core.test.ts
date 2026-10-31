@@ -69,8 +69,8 @@ describe("the schema's argument order (reasoning before the pick)", () => {
 				`explanation must precede correctAnswer in the emitted schema (got: ${keys.join(", ")})`,
 			);
 			assert.deepEqual(keys, schema === quizInputSchema
-				? ["type", "nodeId", "question", "options", "multiSelect", "explanation", "correctAnswer", "details"]
-				: ["question", "options", "multiSelect", "explanation", "correctAnswer", "details"]);
+				? ["type", "nodeId", "question", "options", "multiSelect", "explanation", "correctAnswer", "details", "figure"]
+				: ["question", "options", "multiSelect", "explanation", "correctAnswer", "details", "figure"]);
 		}
 	});
 });
@@ -658,7 +658,7 @@ describe("explainInputBase / explainInputProblems (the commitment contract)", ()
 		// The MC quiz's explanation/answer split was quiz baggage: free
 		// recall commits a single correctAnswer, reasoning included.
 		const keys = Object.keys(explainInputBase.properties);
-		assert.deepEqual(keys, ["question", "correctAnswer", "details"]);
+		assert.deepEqual(keys, ["question", "correctAnswer", "details", "figure"]);
 	});
 
 	it("the teach object LEADS with the required pair (type, nodeId) — base fields follow", () => {

@@ -77,8 +77,10 @@ An assistant tool call has roughly this shape:
 }
 ```
 
-This is an illustrative fragment, not a valid complete question fixture. Tool
-arguments are authored by the teacher; correct answers, explanations, and practice
+This is an illustrative fragment, not a valid complete question fixture. Graded
+question calls (`probe`, `quiz`, `recall`, `explain`) may also carry an optional
+`figure`: an SVG string shown beside the question. Tool arguments are authored by
+the teacher; correct answers, explanations, and practice
 solutions can already be stored before the learner answers. A call without a
 learner-result message may be pending or interrupted; never invent an answer.
 An `isError: true` result means the call failed, not that its contents were
