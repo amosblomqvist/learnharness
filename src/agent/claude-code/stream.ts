@@ -105,12 +105,12 @@ export function toClaudeArgs(input: ClaudeArgsInput): string[] {
 		"--strict-mcp-config",
 		"--mcp-config",
 		input.mcpConfigFile,
-		// User settings carry native auth/routing; their output style would add the
-		// user's coding-agent instructions to the tutor's prompt.
+		// Keep native user auth/routing, but override its instruction channels.
+		// Settings env can replace inherited env, so pin the memory switch here too.
 		"--setting-sources",
 		"user",
 		"--settings",
-		JSON.stringify({ disableAllHooks: true, outputStyle: "default" }),
+		JSON.stringify({ disableAllHooks: true, outputStyle: "default", env: { CLAUDE_CODE_DISABLE_CLAUDE_MDS: "1" } }),
 		"--disable-slash-commands",
 		"--no-session-persistence",
 		"--permission-prompts",

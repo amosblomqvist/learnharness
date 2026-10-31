@@ -80,13 +80,34 @@ arguments select user settings only, disable hooks and slash commands, disable
 CLI session persistence and permission prompts, and restrict tools/MCP as above.
 These are integration boundaries, **not an OS sandbox, legal certification, or a
 blanket claim about provider-policy compliance**. User CLI settings and native
-authentication are intentionally retained, but not the user's coding-agent
-instructions: loading user settings would also load `~/.claude/CLAUDE.md`, its
-imports and rules, and memory files, so the child runs with
-`CLAUDE_CODE_DISABLE_CLAUDE_MDS=1`, and `--settings` resets `outputStyle` to
-`default` so a custom output style is not added to the tutor's prompt. Provider
-terms and account limits still apply. CLI stderr is retained in a bounded buffer and logged on process close;
-server logs can therefore contain CLI diagnostic information.
+authentication are intentionally retained, but the tutor must not inherit
+personal coding-agent instructions. The child forces
+`CLAUDE_CODE_DISABLE_CLAUDE_MDS=1`, overriding an inherited value, and pins the
+same variable under `env` in inline `--settings`. The latter matters because
+[settings can replace inherited environment values](https://code.claude.com/docs/en/settings-reference#env).
+Only that variable is pinned: unrelated user auth/routing settings remain
+available under the CLI's documented per-variable merge semantics.
+
+The CLI's [documented memory switch](https://code.claude.com/docs/en/env-vars#variables)
+excludes user and project `CLAUDE.md` instructions (including their imports and
+rules) and auto memory. Disabling loading also excludes
+[**managed-policy `CLAUDE.md`**](https://code.claude.com/docs/en/memory#deploy-organization-wide-claude-md).
+This deliberately excludes managed instruction files too; it does **not** disable
+managed settings or remove user settings used for authentication/routing.
+
+Inline `--settings` retains `disableAllHooks: true` and sets `outputStyle` to
+`default`, overriding a custom user output style. Under the CLI's
+[settings precedence](https://code.claude.com/docs/en/settings#settings-precedence),
+managed settings still outrank inline settings, including the pinned `env`
+variable. This is not an attempt to bypass managed settings. These controls
+depend on the installed CLI honoring them; passing the minimum-version check
+alone does not verify instruction isolation. Current official documentation does
+not establish the memory switch's first supported version or its exact startup
+evaluation order; isolation at the accepted minimum of 2.1.259 remains unverified.
+Nor does this establish exclusion of every plugin instruction channel or other
+CLI-added context, such as signed-in account metadata. Provider terms and account
+limits still apply. CLI stderr is retained in a bounded buffer and logged on
+process close; server logs can therefore contain CLI diagnostic information.
 
 ### Ownership, reuse, and recovery
 

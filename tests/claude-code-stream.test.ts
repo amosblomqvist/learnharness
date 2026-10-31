@@ -302,7 +302,7 @@ test("toClaudeArgs includes every isolation flag from Global Constraints", () =>
 		"--setting-sources",
 		"user",
 		"--settings",
-		'{"disableAllHooks":true,"outputStyle":"default"}',
+		'{"disableAllHooks":true,"outputStyle":"default","env":{"CLAUDE_CODE_DISABLE_CLAUDE_MDS":"1"}}',
 		"--disable-slash-commands",
 		"--no-session-persistence",
 		"--permission-prompts",
@@ -774,12 +774,36 @@ test("spawns with the model alias, effort, bridge tools, MCP timeout headroom an
 	assert.equal(call.env.CLAUDE_CONFIG_DIR, process.env.CLAUDE_CONFIG_DIR);
 });
 
-test("spawns without the user's CLAUDE.md or memory files, even when the launch env re-enables them", async (t) => {
+for (const inherited of [undefined, "0", "1"]) test(`spawn pins the memory switch in child env and inline settings with inherited value ${inherited}`, async (t) => {
+	const saved = process.env.CLAUDE_CODE_DISABLE_CLAUDE_MDS;
+	t.after(() => { if (saved === undefined) delete process.env.CLAUDE_CODE_DISABLE_CLAUDE_MDS; else process.env.CLAUDE_CODE_DISABLE_CLAUDE_MDS = saved; });
+	if (inherited === undefined) delete process.env.CLAUDE_CODE_DISABLE_CLAUDE_MDS;
+	else process.env.CLAUDE_CODE_DISABLE_CLAUDE_MDS = inherited;
+	const { calls } = await runScenario(t, readFixtureLines("text.jsonl"));
+	const call = getOnlyCall(calls);
+	assert.equal(call.env.CLAUDE_CODE_DISABLE_CLAUDE_MDS, "1");
+	assert.equal(process.env.CLAUDE_CODE_DISABLE_CLAUDE_MDS, inherited, "isolation changes only the child environment");
+	assert.equal(getFlagValue(call.args, "--setting-sources"), "user");
+	assert.deepEqual(JSON.parse(getFlagValue(call.args, "--settings")), {
+		disableAllHooks: true,
+		outputStyle: "default",
+		env: { CLAUDE_CODE_DISABLE_CLAUDE_MDS: "1" },
+	}, "inline settings pin only the memory switch, leaving unrelated user settings available");
+});
+
+test("a held process remains reusable when the overridden inherited memory switch changes", async (t) => {
 	const saved = process.env.CLAUDE_CODE_DISABLE_CLAUDE_MDS;
 	t.after(() => { if (saved === undefined) delete process.env.CLAUDE_CODE_DISABLE_CLAUDE_MDS; else process.env.CLAUDE_CODE_DISABLE_CLAUDE_MDS = saved; });
 	process.env.CLAUDE_CODE_DISABLE_CLAUDE_MDS = "0";
-	const { calls } = await runScenario(t, readFixtureLines("text.jsonl"));
+	const read: ToolUse = { id: "toolu_isolated_reuse", name: "read", arguments: { path: "a" } };
+	const { runClaude, calls } = createFakeRun(t, [...toToolUseMessage([read]), callTool(read), REPLY]);
+	const stream = createClaudeCodeStreamFunction(runClaude);
+	const message = await runTurn(stream, [HI]);
 	assert.equal(getOnlyCall(calls).env.CLAUDE_CODE_DISABLE_CLAUDE_MDS, "1");
+	process.env.CLAUDE_CODE_DISABLE_CLAUDE_MDS = "1";
+	const reply = await runTurn(stream, [HI, message, toToolResult(read, "isolated contents")]);
+	assert.equal(getText(reply), "isolated contents");
+	await assertCleanedUp(getOnlyCall(calls));
 });
 
 test("MCP timeout headroom overrides inherited shorter timeouts", async (t) => {
@@ -815,6 +839,8 @@ test("preserves existing CLI environment authentication without a subscription g
 
 	assert.equal(call.env.ANTHROPIC_API_KEY, "sk-ant-test");
 	assert.equal(call.env.ANTHROPIC_AUTH_TOKEN, "token-test");
+	assert.equal(call.env.CLAUDE_CODE_DISABLE_CLAUDE_MDS, "1", "instruction isolation does not strip native credentials");
+	assert.equal(getFlagValue(call.args, "--setting-sources"), "user");
 });
 
 test("does not inject credentials reflected only from LearnHarness's key store", async (t) => {
@@ -829,6 +855,7 @@ test("does not inject credentials reflected only from LearnHarness's key store",
 	record.fillGap.add(name);
 	const { calls } = await runScenario(t, readFixtureLines("text.jsonl"));
 	assert.equal(getOnlyCall(calls).env[name], undefined);
+	assert.equal(getOnlyCall(calls).env.CLAUDE_CODE_DISABLE_CLAUDE_MDS, "1", "instruction isolation does not bypass auth provenance");
 	assert.equal(process.env[name], "lh-only-key", "other LearnHarness providers keep their env reflection");
 });
 
@@ -1148,17 +1175,18 @@ test("a mismatched MCP identity cannot admit a streamed call", async (t) => {
 	await assertCleanedUp(getOnlyCall(calls));
 });
 
-for (const change of ["model", "effort", "system prompt", "tool schema", "tool description", "history", "authentication environment"] as const) {
+for (const change of ["model", "effort", "system prompt", "tool schema", "tool description", "history", "authentication environment", "routing environment"] as const) {
 	test(`a changed ${change} prevents reuse of a held process`, async (t) => {
 		const read: ToolUse = { id: `toolu_reuse_${change}`, name: "read", arguments: { path: "a" } };
 		const waiting = createFakeRun(t, [...toToolUseMessage([read]), callTool(read), REPLY]);
 		const fresh = createFakeRun(t, readFixtureLines("text.jsonl"));
 		const stream = createClaudeCodeStreamFunction((args, options) => (waiting.calls.length === 0 ? waiting : fresh).runClaude(args, options));
 		const message = await runTurn(stream, [HI]);
-		if (change === "authentication environment") {
-			const saved = process.env.ANTHROPIC_AUTH_TOKEN;
-			t.after(() => { if (saved === undefined) delete process.env.ANTHROPIC_AUTH_TOKEN; else process.env.ANTHROPIC_AUTH_TOKEN = saved; });
-			process.env.ANTHROPIC_AUTH_TOKEN = "changed-cli-auth";
+		if (change === "authentication environment" || change === "routing environment") {
+			const name = change === "authentication environment" ? "ANTHROPIC_AUTH_TOKEN" : "ANTHROPIC_BASE_URL";
+			const saved = process.env[name];
+			t.after(() => { if (saved === undefined) delete process.env[name]; else process.env[name] = saved; });
+			process.env[name] = change === "authentication environment" ? "changed-cli-auth" : "http://127.0.0.1:1/changed-routing";
 		}
 		const messages = [change === "history" ? { ...HI, content: "replacement history after compaction" } : HI, message, toToolResult(read, "A")];
 		const context = normalizeContext({
@@ -1172,8 +1200,12 @@ for (const change of ["model", "effort", "system prompt", "tool schema", "tool d
 		const model = change === "model" ? CLAUDE_CODE_MODELS[1]! : getModel();
 		const events = await collectEvents(stream(model, context, { sessionId: SESSION_ID, ...(change === "effort" ? { reasoning: "high" as const } : {}) }));
 		assert.equal(getLastEvent(events).type, "done");
-		assert.equal(fresh.calls.length, 1, "must start a fresh CLI rather than silently use stale configuration");
+		const freshCall = getOnlyCall(fresh.calls);
+		assert.equal(freshCall.env.CLAUDE_CODE_DISABLE_CLAUDE_MDS, "1");
+		if (change === "authentication environment") assert.equal(freshCall.env.ANTHROPIC_AUTH_TOKEN, "changed-cli-auth");
+		if (change === "routing environment") assert.equal(freshCall.env.ANTHROPIC_BASE_URL, "http://127.0.0.1:1/changed-routing");
 		await assertCleanedUp(getOnlyCall(waiting.calls));
+		await assertCleanedUp(freshCall);
 	});
 }
 
