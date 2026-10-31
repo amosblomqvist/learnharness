@@ -1,0 +1,424 @@
+{
+	"id": "chat_mvr8o176_c6aa9462",
+	"title": "Diagnostic reopening and plan review fixture",
+	"createdAt": "2026-10-27T22:10:07.506Z",
+	"updatedAt": "2026-10-27T22:10:07.534Z",
+	"messages": [
+		{
+			"id": "msg_mvr8o17b_e5aafb2b",
+			"role": "user",
+			"content": "Diagnose my understanding of fractions before we plan a lesson.",
+			"timestamp": 1793139007511
+		},
+		{
+			"role": "assistant",
+			"content": [
+				{
+					"type": "toolCall",
+					"id": "fixture-probe-done",
+					"name": "probe_done",
+					"arguments": {
+						"assessment": {
+							"strands": [
+								{
+									"strand": "fractions",
+									"assessment": "Can identify halves; compare unlike denominators next."
+								}
+							],
+							"summary": "Provisional fraction foundations."
+						}
+					}
+				}
+			],
+			"api": "faux:1793139007506:l90qd9b4hh",
+			"provider": "faux",
+			"model": "faux-1",
+			"usage": {
+				"input": 6696,
+				"output": 45,
+				"cacheRead": 0,
+				"cacheWrite": 6696,
+				"totalTokens": 13437,
+				"cost": {
+					"input": 0,
+					"output": 0,
+					"cacheRead": 0,
+					"cacheWrite": 0,
+					"total": 0
+				}
+			},
+			"stopReason": "toolUse",
+			"timestamp": 1793139007517,
+			"durationMs": 1,
+			"thinkingLevel": "off",
+			"id": "msg_mvr8o17n_42a51639"
+		},
+		{
+			"role": "toolResult",
+			"toolCallId": "fixture-probe-done",
+			"toolName": "probe_done",
+			"content": [
+				{
+					"type": "text",
+					"text": "Assessment recorded — it is shown to the learner now and the teacher plans from it. Say your closing sentence and end your turn; the teaching phase takes over from here."
+				}
+			],
+			"details": {
+				"ok": true
+			},
+			"isError": false,
+			"durationMs": 1,
+			"timestamp": 1793139007522,
+			"id": "msg_mvr8o17n_dbdb4a84"
+		},
+		{
+			"role": "assistant",
+			"content": [
+				{
+					"type": "text",
+					"text": "The initial assessment is ready."
+				}
+			],
+			"api": "faux:1793139007506:l90qd9b4hh",
+			"provider": "faux",
+			"model": "faux-1",
+			"usage": {
+				"input": 96,
+				"output": 8,
+				"cacheRead": 6696,
+				"cacheWrite": 96,
+				"totalTokens": 6896,
+				"cost": {
+					"input": 0,
+					"output": 0,
+					"cacheRead": 0,
+					"cacheWrite": 0,
+					"total": 0
+				}
+			},
+			"stopReason": "stop",
+			"timestamp": 1793139007522,
+			"durationMs": 0,
+			"thinkingLevel": "off",
+			"id": "msg_mvr8o17n_2ec95910"
+		},
+		{
+			"id": "steer_probe_chat_mvr8o176_c6aa9462_fixture-probe-done",
+			"role": "custom",
+			"customType": "probe-handoff",
+			"content": "Next: plan the full teaching arc from my current understanding to the goal understanding. Apply the teaching methodology in your system prompt, and find the optimal way to teach me this. Find the unconditional truths, plan the motivated derivations/discoveries, so every reasoning step has to land as obviously true. Take your time here and really think this through. When it's genuinely reasoned out, call plan_init and present the plan; I'll accept it or ask for changes.",
+			"display": true,
+			"details": {
+				"chatId": "chat_mvr8o176_c6aa9462"
+			},
+			"timestamp": 1793139007521
+		},
+		{
+			"role": "assistant",
+			"content": [
+				{
+					"type": "toolCall",
+					"id": "fixture-plan",
+					"name": "plan_init",
+					"arguments": {
+						"mermaid": "graph TD\nhalves[Halves] --> fractions[Compare fractions]"
+					}
+				},
+				{
+					"type": "toolCall",
+					"id": "fixture-review",
+					"name": "ask_user_question",
+					"arguments": {
+						"purpose": "plan_review",
+						"question": "Should we start teaching this plan?",
+						"options": [
+							{
+								"label": "Start teaching",
+								"value": "accept"
+							},
+							{
+								"label": "Revise the plan",
+								"value": "revise"
+							},
+							{
+								"label": "Continue diagnostic",
+								"value": "probe"
+							}
+						]
+					}
+				}
+			],
+			"api": "faux:1793139007506:l90qd9b4hh",
+			"provider": "faux",
+			"model": "faux-1",
+			"usage": {
+				"input": 13222,
+				"output": 81,
+				"cacheRead": 300,
+				"cacheWrite": 13222,
+				"totalTokens": 26825,
+				"cost": {
+					"input": 0,
+					"output": 0,
+					"cacheRead": 0,
+					"cacheWrite": 0,
+					"total": 0
+				}
+			},
+			"stopReason": "toolUse",
+			"timestamp": 1793139007526,
+			"durationMs": 0,
+			"thinkingLevel": "off",
+			"id": "msg_mvr8o17u_1e4723d6"
+		},
+		{
+			"role": "toolResult",
+			"toolCallId": "fixture-plan",
+			"toolName": "plan_init",
+			"content": [
+				{
+					"type": "text",
+					"text": "{\"ok\":true,\"nodeIds\":[\"halves\",\"fractions\"],\"reminder\":\"These are the plan's node ids — the only valid nodeId values for every quiz and explain call from here on. Reference them exactly.\",\"approvalRequired\":true}"
+				}
+			],
+			"details": {
+				"ok": true,
+				"tree": {
+					"nodes": [
+						{
+							"id": "halves",
+							"title": "Halves"
+						},
+						{
+							"id": "fractions",
+							"title": "Compare fractions"
+						}
+					],
+					"edges": [
+						{
+							"from": "halves",
+							"to": "fractions"
+						}
+					],
+					"version": 1
+				},
+				"approvalRequired": true
+			},
+			"isError": false,
+			"durationMs": 1,
+			"timestamp": 1793139007528,
+			"id": "msg_mvr8o17u_cfa37912"
+		},
+		{
+			"id": "pb_mvr8o17u_f169423b",
+			"role": "custom",
+			"customType": "plan-block",
+			"content": "",
+			"display": true,
+			"details": {
+				"planCallId": "fixture-plan",
+				"block": {
+					"kind": "full",
+					"at": "2026-10-27T22:10:07.530Z",
+					"current": null,
+					"nodes": [
+						{
+							"id": "halves",
+							"title": "Halves",
+							"status": "upcoming"
+						},
+						{
+							"id": "fractions",
+							"title": "Compare fractions",
+							"status": "upcoming"
+						}
+					],
+					"edges": [
+						{
+							"from": "halves",
+							"to": "fractions"
+						}
+					]
+				}
+			},
+			"timestamp": 1793139007530
+		},
+		{
+			"id": "msg_mvr8o17v_b9d035fc",
+			"role": "toolResult",
+			"toolCallId": "fixture-review",
+			"toolName": "ask_user_question",
+			"content": [
+				{
+					"type": "text",
+					"text": "{\"kind\":\"ask\",\"answers\":[{\"index\":3,\"label\":\"Continue diagnostic\"}]}"
+				}
+			],
+			"details": {
+				"kind": "ask",
+				"tool": "ask_user_question",
+				"questionText": "Should we start teaching this plan?",
+				"options": [
+					{
+						"index": 1,
+						"label": "Start teaching"
+					},
+					{
+						"index": 2,
+						"label": "Revise the plan"
+					},
+					{
+						"index": 3,
+						"label": "Continue diagnostic"
+					}
+				],
+				"dontKnow": false,
+				"answers": [
+					{
+						"label": "Continue diagnostic",
+						"value": "probe",
+						"index": 3
+					}
+				],
+				"answeredAt": "2026-10-27T22:10:07.530Z"
+			},
+			"isError": false,
+			"timestamp": 1793139007532
+		},
+		{
+			"role": "assistant",
+			"content": [
+				{
+					"type": "toolCall",
+					"id": "fixture-resume",
+					"name": "resume_probe",
+					"arguments": {}
+				}
+			],
+			"api": "faux:1793139007506:l90qd9b4hh",
+			"provider": "faux",
+			"model": "faux-1",
+			"usage": {
+				"input": 6790,
+				"output": 4,
+				"cacheRead": 300,
+				"cacheWrite": 6790,
+				"totalTokens": 13884,
+				"cost": {
+					"input": 0,
+					"output": 0,
+					"cacheRead": 0,
+					"cacheWrite": 0,
+					"total": 0
+				}
+			},
+			"stopReason": "toolUse",
+			"timestamp": 1793139007533,
+			"durationMs": 0,
+			"thinkingLevel": "off",
+			"id": "msg_mvr8o17y_7d6a271c"
+		},
+		{
+			"role": "toolResult",
+			"toolCallId": "fixture-resume",
+			"toolName": "resume_probe",
+			"content": [
+				{
+					"type": "text",
+					"text": "Diagnostic reopened. End this turn; the prober continues next."
+				}
+			],
+			"details": {
+				"ok": true
+			},
+			"isError": false,
+			"durationMs": 0,
+			"timestamp": 1793139007534,
+			"id": "msg_mvr8o17y_bb8b1373"
+		}
+	],
+	"version": 1,
+	"settings": {
+		"model": {
+			"provider": "openrouter",
+			"id": "z-ai/glm-5.3-flash"
+		}
+	},
+	"turns": [
+		{
+			"id": "08338adf-3543-492f-aece-10216734e3fb",
+			"messageId": "msg_mvr8o17n_42a51639",
+			"at": "2026-10-27T22:10:07.523Z",
+			"model": "openrouter:z-ai/glm-5.3-flash",
+			"steps": [
+				{
+					"inputTokens": 6696,
+					"outputTokens": 45,
+					"cacheReadTokens": 0,
+					"cacheWriteTokens": 6696,
+					"cacheWrite1hTokens": 0,
+					"reasoningTokens": 0
+				},
+				{
+					"inputTokens": 96,
+					"outputTokens": 8,
+					"cacheReadTokens": 6696,
+					"cacheWriteTokens": 96,
+					"cacheWrite1hTokens": 0,
+					"reasoningTokens": 0
+				}
+			]
+		},
+		{
+			"id": "0ad40085-41f6-4591-b8aa-6f953a19debf",
+			"messageId": "msg_mvr8o17u_1e4723d6",
+			"at": "2026-10-27T22:10:07.530Z",
+			"model": "openrouter:z-ai/glm-5.3-flash",
+			"steps": [
+				{
+					"inputTokens": 13222,
+					"outputTokens": 81,
+					"cacheReadTokens": 300,
+					"cacheWriteTokens": 13222,
+					"cacheWrite1hTokens": 0,
+					"reasoningTokens": 0
+				}
+			]
+		},
+		{
+			"id": "1d552ad1-24bf-4fbd-97a9-bd59d9d9a0d1",
+			"messageId": "msg_mvr8o17y_7d6a271c",
+			"at": "2026-10-27T22:10:07.534Z",
+			"model": "openrouter:z-ai/glm-5.3-flash",
+			"steps": [
+				{
+					"inputTokens": 6790,
+					"outputTokens": 4,
+					"cacheReadTokens": 300,
+					"cacheWriteTokens": 6790,
+					"cacheWrite1hTokens": 0,
+					"reasoningTokens": 0
+				}
+			]
+		}
+	],
+	"tree": {
+		"nodes": [
+			{
+				"id": "halves",
+				"title": "Halves"
+			},
+			{
+				"id": "fractions",
+				"title": "Compare fractions"
+			}
+		],
+		"edges": [
+			{
+				"from": "halves",
+				"to": "fractions"
+			}
+		],
+		"version": 1
+	}
+}

@@ -1,5 +1,7 @@
 import { Type } from "typebox";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
+import { phaseAt3Lh } from "../../core/phases.ts";
+import { planApprovalPending } from "../../core/plan-approval.ts";
 import { serverExecute } from "../tool-execute.ts";
 import type { PlanToolResult, PlanTree } from "../../core/contracts.ts";
 import type { ChatStore } from "../../core/ports.ts";
@@ -16,6 +18,7 @@ const PLAN_NODE_IDS_REMINDER =
 
 /** What the plan tools close over (the plan-tree half of the tool context). */
 export interface PlanToolContext {
+	onPresented?: (approvalRequired: boolean) => void;
 	chatId: string;
 	/** The storage port plan tools persist through. */
 	chatStore: ChatStore;
@@ -88,6 +91,8 @@ export function planTools(ctx: PlanToolContext): Record<string, AgentTool<any>> 
 					// edge endpoints, self-loops, cycles → PlanTreeError).
 					const next = createTree(parsed.plan.nodes, parsed.plan.edges);
 					chatStore.saveTree(chatId, next);
+					const approvalRequired = phaseAt3Lh(record.messages) !== "teach" || planApprovalPending(record.messages);
+					ctx.onPresented?.(approvalRequired);
 					// Context diet: content = the validated nodeIds + the reminder (the
 				// ids just became binding for every quiz/explain call); details =
 					// the full tree for the record/UI — the plan popup's latestTree
@@ -97,8 +102,9 @@ export function planTools(ctx: PlanToolContext): Record<string, AgentTool<any>> 
 							ok: true,
 							nodeIds: next.nodes.map((n) => n.id),
 							reminder: PLAN_NODE_IDS_REMINDER,
+							approvalRequired,
 						}),
-						details: { ok: true, tree: next },
+						details: { ok: true, tree: next, approvalRequired },
 					};
 				} catch (err) {
 					if (err instanceof PlanTreeError) return { ok: false, error: err.message };

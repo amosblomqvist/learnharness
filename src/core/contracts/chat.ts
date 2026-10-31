@@ -191,6 +191,12 @@ export const HANDOFF_TEXT =
 	"Take your time here and really think this through. " +
 	"When it's genuinely reasoned out, call plan_init and present the plan; I'll accept it or ask for changes.";
 
+/** The return-to-diagnostic handoff, distinct from planning instructions. */
+export const RESUME_PROBE_TEXT =
+	"The learner asked to continue the diagnostic. Resume probing their foundations, " +
+	"using the full conversation as evidence. The previous assessment and map are provisional. " +
+	"Do not start teaching. Conclude again with probe_done only when the diagnostic is complete.";
+
 // ─── Practice sessions (owner, 2026-10-04) — marker + ack texts ──────────────
 // Single-sourced here per the marker law: the model-facing text of every
 // custom marker lives in core/contracts, never in the flattening seam.

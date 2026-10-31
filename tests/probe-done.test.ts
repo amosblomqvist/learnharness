@@ -78,7 +78,7 @@ describe("probe_done: the probe→planning seam", () => {
 		assert.equal(res.ok, true);
 		assert.equal(res.error, undefined);
 		assert.equal(delivered.length, 1, "the handoff is queued exactly once");
-		assert.equal(delivered[0]!.id, `steer_probe_${chatId}`);
+		assert.equal(delivered[0]!.id, `steer_probe_${chatId}_test`);
 		// Native marker (Wave B): the model-facing HANDOFF_TEXT rides content;
 		// the UI keys off customType; the chat id rides details.
 		assert.equal(delivered[0]!.customType, "probe-handoff");

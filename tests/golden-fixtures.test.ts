@@ -48,6 +48,8 @@ const { danglingQuestionOf, activeProblemOf } = await import("../src/core/native
 
 const TEACH = "chat_mv27rrra_feff23b6";
 const PRACTICE = "chat_mv293wv5_10656952";
+const REVIEW = "chat_mvr8o176_c6aa9462";
+const CHAT_FIXTURES = [TEACH, PRACTICE, REVIEW];
 
 function snapshotTree(dir: string): Map<string, Buffer> {
 	const out = new Map<string, Buffer>();
@@ -67,13 +69,13 @@ test.after(() => {
 
 // ── chats: records, folds, and the wire ─────────────────────────────────────
 
-test("chats: both fixture records parse through the production read path", () => {
+test("chats: all fixture records parse through the production read path", () => {
 	const list = chatStore.listChats();
 	const ids = new Set(list.map((c) => c.id));
 	assert.ok(ids.has(TEACH), "the teach master record lists");
 	assert.ok(ids.has(PRACTICE), "the practice lifecycle record lists");
 
-	for (const id of [TEACH, PRACTICE]) {
+	for (const id of CHAT_FIXTURES) {
 		const r = chatStore.getChat(id);
 		assert.ok(r, `${id} reads`);
 		assert.ok(Array.isArray(r!.messages) && r!.messages.length > 0);
@@ -85,7 +87,7 @@ test("chats: both fixture records parse through the production read path", () =>
 });
 
 test("chats: the LLM wire flattening turns each full record into a legal provider message list", () => {
-	for (const id of [TEACH, PRACTICE]) {
+	for (const id of CHAT_FIXTURES) {
 		const r = chatStore.getChat(id)!;
 		const wire = toLlmMessages(r.messages as never);
 		assert.ok(wire.length > 0);
@@ -111,7 +113,7 @@ test("chats: the LLM wire flattening turns each full record into a legal provide
 	}
 });
 
-test("markers: the fixture pair covers EVERY custom-marker kind of the current contract", () => {
+test("markers: the fixtures cover EVERY custom-marker kind of the current contract", () => {
 	// The coverage law: a new customType added to the contract without real
 	// fixture data fails here — extend the fixtures in the same commit.
 	const EXPECTED = [
@@ -126,7 +128,7 @@ test("markers: the fixture pair covers EVERY custom-marker kind of the current c
 		"compaction",
 	] as const;
 	const seen = new Set<string>();
-	for (const id of [TEACH, PRACTICE]) {
+	for (const id of CHAT_FIXTURES) {
 		for (const m of chatStore.getChat(id)!.messages) {
 			if ((m as { role?: string }).role === "custom") seen.add((m as { customType: string }).customType);
 		}
@@ -141,7 +143,7 @@ test("tools: the core tool surface appears in real fixture data", () => {
 	// stay representable in real records.
 	const teachTools = new Set<string>();
 	const practiceTools = new Set<string>();
-	for (const m of chatStore.getChat(TEACH)!.messages) {
+	for (const m of [TEACH, REVIEW].flatMap((id) => chatStore.getChat(id)!.messages)) {
 		for (const b of (m as { content?: Array<{ type?: string; name?: string }> }).content ?? []) {
 			if (b.type === "toolCall" && b.name) teachTools.add(b.name);
 		}
@@ -151,12 +153,30 @@ test("tools: the core tool surface appears in real fixture data", () => {
 			if (b.type === "toolCall" && b.name) practiceTools.add(b.name);
 		}
 	}
-	for (const t of ["quiz", "ask_user_question", "plan_init", "probe_done", "recall", "explain", "research", "demo", "visual", "pdf"]) {
+	for (const t of ["quiz", "ask_user_question", "plan_init", "probe_done", "resume_probe", "recall", "explain", "research", "demo", "visual", "pdf"]) {
 		assert.ok(teachTools.has(t), `teach tool ${t} exercised in the fixture record`);
 	}
 	for (const t of ["problem", "conclude"]) {
 		assert.ok(practiceTools.has(t), `practice tool ${t} exercised in the fixture record`);
 	}
+});
+
+test("plan review: the application-written record preserves approval and diagnostic reopening", async () => {
+	const { hasProbeDone } = await import("../src/core/native-messages.ts");
+	const { planApprovalPending } = await import("../src/core/plan-approval.ts");
+	const { phaseAt3 } = await import("../src/core/phases.ts");
+	const { projectView } = await import("../src/core/view.ts");
+	const messages = chatStore.getChat(REVIEW)!.messages;
+	const choice = messages.findIndex((m) => m.role === "toolResult" && m.toolCallId === "fixture-review");
+	assert.ok(choice > 0);
+	const before = messages.slice(0, choice);
+	assert.equal(hasProbeDone(before), true);
+	assert.equal(planApprovalPending(before), true);
+	assert.equal(phaseAt3Lh(before), "plan");
+	assert.equal(hasProbeDone(messages), false);
+	assert.equal(planApprovalPending(messages), true);
+	assert.equal(phaseAt3Lh(messages), "probe");
+	assert.equal(phaseAt3(projectView(messages)), "probe");
 });
 
 // ── the graph: ledgers through the full derivation ──────────────────────────

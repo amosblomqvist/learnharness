@@ -15,9 +15,7 @@ export interface ProbeDoneContext {
 	deliver: (steer: SteerMessage) => void;
 }
 
-/** Does the transcript already carry a concluded probe (any state)?
- *  Wave B: the native scan (any probe_done tool call, any state) — same
- *  semantics the UIMessage part scan had. */
+/** Has the current diagnostic concluded since its latest reopening? */
 function probeConcluded(messages: readonly LhMessage[]): boolean {
 	return hasProbeDone(messages);
 }
@@ -42,9 +40,9 @@ function probeConcluded(messages: readonly LhMessage[]): boolean {
  *     live), so the agent sees the fixed PROBE_DONE_ACK_TEXT — never an
  *     echo. details = {ok:true} only.
  *
- * The first concluded probe_done (non-failed call plus matching successful
- * result) is also the construction seam: from that result on, every request
- * builds the TEACHER agent. Bare calls and refused results keep probing.
+ * A concluded probe_done (non-failed call plus matching successful
+ * result) selects the teacher until diagnostic reopens. Bare calls and
+ * refused results keep probing.
  */
 export function probeDoneTool(ctx: ProbeDoneContext): Record<string, AgentTool<any>> {
 	return {
@@ -62,7 +60,7 @@ export function probeDoneTool(ctx: ProbeDoneContext): Record<string, AgentTool<a
 			// The core-owned schema (contracts/probe.ts) — the SAME schema the UI
 			// parse seam (tool-parts.ts) runs, so boundary-valid ⇔ consumer-parseable.
 			parameters: probeDoneInputSchema,
-			execute: serverExecute("probe_done", probeDoneInputSchema, async (input) => {
+			execute: serverExecute("probe_done", probeDoneInputSchema, async (input, { toolCallId }) => {
 				const record = ctx.chatStore.getChat(ctx.chatId);
 				if (!record) return { ok: false, error: `Chat not found: ${ctx.chatId}` };
 
@@ -75,10 +73,10 @@ export function probeDoneTool(ctx: ProbeDoneContext): Record<string, AgentTool<a
 					};
 				}
 				if (probeConcluded(record.messages)) {
-					return { ok: false, error: "The probe is already concluded — probe_done fires exactly once." };
+					return { ok: false, error: "The current diagnostic is already concluded. Reopen it before concluding again." };
 				}
 				try {
-					ctx.deliver(buildProbeHandoffSteer(ctx.chatId));
+					ctx.deliver(buildProbeHandoffSteer(ctx.chatId, toolCallId));
 				} catch (err) {
 					console.error(`[chat ${ctx.chatId}] probe handoff queueing failed:`, err);
 					// The handoff is recoverable-by-design (the next client message
