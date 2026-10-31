@@ -718,6 +718,9 @@ function questionOccurrenceOf(messages: readonly LhMessage[]): Omit<PendingQuest
 		const m = messages[mi]!;
 		if ((m as { role?: string }).role !== "assistant") continue;
 		const assistant = m as AssistantMessage & { id: string };
+		// A stopped or failed generation's calls never reach the wire (pi drops
+		// it), so an answer to one would be an orphan result.
+		if (assistant.stopReason === "error" || assistant.stopReason === "aborted") return null;
 		const answered = resultIdsFrom(messages.slice(mi + 1));
 		for (const [contentIndex, block] of assistant.content.entries()) {
 			if (block.type !== "toolCall") continue;

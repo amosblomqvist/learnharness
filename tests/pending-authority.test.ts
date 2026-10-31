@@ -34,6 +34,16 @@ test("the newest assistant's parallel questions retain call order and never revi
 	assert.equal(pending(messages), null);
 });
 
+for (const stopReason of ["aborted", "error"] as const) {
+	test(`a question in a ${stopReason} generation is never pending (pi drops it from the wire)`, () => {
+		const stopped = assistant("new", "new-question");
+		if (stopped.role === "assistant") stopped.stopReason = stopReason;
+		const messages = [assistant("old", "old-question"), stopped];
+		assert.equal(danglingQuestionOf(messages), null);
+		assert.equal(pending(messages), null);
+	});
+}
+
 test("the authoritative question still waits for projected input validation", () => {
 	const messages = [assistant("old", "old-question"), assistant("new", "new-question")];
 	const view = projectView(messages);
