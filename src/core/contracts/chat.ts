@@ -63,6 +63,34 @@ export interface ChatRecord {
 /** The chat record format this build writes and understands. */
 export const CURRENT_CHAT_VERSION = 1;
 
+/** Read-only lesson export transport. Source paths are references, never install destinations. */
+export type ExportMode = "md" | "txt" | "json" | "zip";
+export interface ExportSource {
+	path: string;
+	name: string;
+	bytes: number;
+	modified: number;
+	status: "available" | "missing" | "blocked";
+}
+export interface ExportPreview {
+	revision: string;
+	chats: { id: string; title: string }[];
+	files: ExportSource[];
+	issues: string[];
+	complete: false;
+}
+
+export type ImportChoices = Record<string, "local" | "incoming">;
+export interface ImportPreview {
+	revision: string;
+	packageSha: string;
+	chats: { id: string; title: string; kind: "new" | "same" | "conflict" }[];
+	nodes: number;
+	chains: number;
+	warnings: string[];
+	blockers: string[];
+}
+
 /** The conversation agents' runtime model choice (model-control wave,
  *  2026-09-12): a per-chat override of config.ts's pinned prober/teacher
  *  spec. Absent fields fall back to config; written by the model picker

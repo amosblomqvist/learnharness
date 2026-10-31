@@ -69,10 +69,10 @@ async function begin() { await click(byTest("chatgpt-login")); await click(byTes
 async function confirmDisconnect() { await click(byTest("chatgpt-disconnect")); await click(byTest("chatgpt-confirm-disconnect")); }
 afterEach(async () => { await act(async () => root?.unmount()); host?.remove(); root = undefined; host = undefined; delete window.lh; globalThis.fetch = originalFetch; });
 
-test("Providers is the first/default page; General is last and other pages keep relative order", () => {
+test("Providers stays first/default; existing pages keep their order and Export/import is appended", () => {
  const html = renderToStaticMarkup(<SettingsDialogBody onClose={() => {}} />);
  const ids = [...html.matchAll(/data-testid="settings-nav-([^"]+)"/g)].map((m) => m[1]);
- assert.deepEqual(ids, ["keys", "agent", "appearance", "graph", "keyboard", "general"]);
+ assert.deepEqual(ids, ["keys", "agent", "appearance", "graph", "keyboard", "general", "transfer"]);
  assert.match(html, /settings-nav-keys[^>]*aria-current="true"/); assert.match(html, />Providers<\/button>/);
  assert.doesNotMatch(html, />Model providers<\/button>/);
 });

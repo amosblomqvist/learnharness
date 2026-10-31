@@ -212,6 +212,7 @@ export function visibleQueuedSteers(
 }
 
 export interface SessionModelOptions extends SessionModelDeps {
+	awaitingInput?: boolean;
 	chatId: string;
 	initialMessages: LhMessage[];
 	/** Retained, memory-only server failure when reopening a session. */
@@ -224,6 +225,7 @@ export interface SessionModelOptions extends SessionModelDeps {
 }
 
 export class SessionModel {
+	awaitingInput: boolean;
 	readonly chatId: string;
 	/** Injectable fetch (tests); defaults to the global. */
 	fetch: typeof globalThis.fetch;
@@ -266,6 +268,7 @@ export class SessionModel {
 	readyRef = true;
 
 	constructor(opts: SessionModelOptions) {
+		this.awaitingInput = opts.awaitingInput ?? false;
 		this.chatId = opts.chatId;
 		this.base = opts.initialMessages;
 		this.errorValue = opts.initialError === undefined ? null : { message: opts.initialError };
@@ -744,6 +747,7 @@ export class SessionModel {
 				throw new Error(message);
 			}
 			accepted = true;
+			this.awaitingInput = false;
 			// Opening-message handover ends at acceptance, not stream completion.
 			onAccepted?.();
 			// CONNECTION DIET B (owner, 2026-10-10 — parallel-session freeze
@@ -918,8 +922,9 @@ export class SessionModel {
 	}
 
 	/** Full snapshot swap (the idle settle sync — server canon). */
-	setMessages(record: LhMessage[], turnError?: string): void {
+	setMessages(record: LhMessage[], turnError?: string, awaitingInput?: boolean): void {
 		this.mutate(() => {
+			if (awaitingInput !== undefined) this.awaitingInput = awaitingInput;
 			this.base = record;
 			if (turnError !== undefined) {
 				this.errorValue = { message: turnError };
@@ -953,7 +958,7 @@ export class SessionModel {
 	/** Automatic mount/sync continuation is never permission to retry a
 	 * failed turn. Read current model truth, not a stale React closure. */
 	async continueIfOwed(record: readonly LhMessage[]): Promise<void> {
-		if (this.statusValue === "ready" && !this.automaticContinuationBlocked && this.getState().error === null && needsContinuation(record)) {
+		if (!this.awaitingInput && this.statusValue === "ready" && !this.automaticContinuationBlocked && this.getState().error === null && needsContinuation(record)) {
 			await this.send({ type: "continue" });
 		}
 	}
