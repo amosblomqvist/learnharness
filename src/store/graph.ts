@@ -228,6 +228,7 @@ export const graphStore: GraphStore = {
 			// must see exactly what appendLine would have written.
 			const body = records.map((record) => JSON.stringify(record)).join("\n") + (records.length > 0 ? "\n" : "");
 			writeFileAtomicSync(file, body);
+			removeLeftoverTemps(file); // crash leftovers would still hold the purged records
 		}
 	},
 };

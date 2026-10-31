@@ -14,7 +14,7 @@ import { after, describe, it } from "node:test";
 const TMP_DATA = fs.mkdtempSync(path.join(os.tmpdir(), "lh-delete-leftovers-"));
 process.env.LH_DATA_DIR = TMP_DATA;
 
-const { PATHS, SOURCES_FILE, PROMPTS_OVERRIDE_DIR } = await import("../config.ts");
+const { PATHS, SOURCES_FILE, PROMPTS_OVERRIDE_DIR, LEDGER_FILES } = await import("../config.ts");
 const { chatStore } = await import("../src/store/chats.ts");
 const { jobStore } = await import("../src/store/jobs.ts");
 const { graphStore } = await import("../src/store/graph.ts");
@@ -52,6 +52,13 @@ describe("deleting records removes their crash leftovers", () => {
 		leaveCrashCopy(SOURCES_FILE);
 		assert.equal(graphStore.deleteSources(new Set(["src_doomed"])), 1);
 		assert.deepEqual(leftovers(path.dirname(SOURCES_FILE)), []);
+	});
+
+	it("graph records purged by session or source deletes", () => {
+		graphStore.rewriteLedgers({ coverage: [] });
+		fs.writeFileSync(`${LEDGER_FILES.coverage}.tmp-crash`, "purged row\n");
+		graphStore.rewriteLedgers({ coverage: [] });
+		assert.deepEqual(leftovers(path.dirname(LEDGER_FILES.coverage)), []);
 	});
 
 	it("prompt edits", () => {
