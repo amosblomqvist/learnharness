@@ -319,6 +319,15 @@ body {
 	overflow-y: hidden;
 }
 
+/* KaTeX's bundled fonts do not cover Arabic, and its text metrics can be
+   missing for Unicode prose. Give rendered text spans the app/system fallback
+   stack and isolate their direction so right-to-left scripts stay readable. */
+.katex .mord.text > .mord {
+	font-family: var(--font-prose), system-ui, sans-serif;
+	direction: auto;
+	unicode-bidi: isolate;
+}
+
 /* ============================================================
  * Chrome melt (owner wave, 2026-09-19) — tables and code blocks stop
  * being boxes: blocks read as part of the message. These rules override

@@ -54,6 +54,62 @@ export function transformMathDelimiters(markdown: string): string {
 	}).join("");
 }
 
+const textCommands = new Set(["text", "textrm", "textit", "textbf", "textsf", "texttt", "mbox"]);
+const naturalText = /[^\p{ASCII}\p{Script=Greek}\p{Script=Common}\p{Script=Inherited}][\p{L}\p{M}\p{N}\u00a0 \t،؛؟,.!?…'’"«»()\-]*/gu;
+
+/** Ranges whose contents are already in TeX text mode. */
+function explicitTextRanges(source: string): Array<{ start: number; end: number }> {
+	const ranges: Array<{ start: number; end: number }> = [];
+	const command = /\\([A-Za-z]+)\s*\{/g;
+	for (let match; (match = command.exec(source));) {
+		if (!textCommands.has(match[1]!)) continue;
+		const start = command.lastIndex;
+		let depth = 1, i = start;
+		for (; i < source.length && depth > 0; i++) {
+			if (source[i] === "\\") { i++; continue; }
+			if (source[i] === "{") depth++;
+			else if (source[i] === "}") depth--;
+		}
+		if (depth === 0) ranges.push({ start, end: i - 1 });
+		command.lastIndex = Math.max(command.lastIndex, i);
+	}
+	return ranges;
+}
+
+/** Escape natural-language text before placing it in a TeX text argument. */
+function escapeTextArgument(text: string): string {
+	return text.replace(/[\\#$%&_{}]/g, char => `\\${char}`);
+}
+
+function wrapUnmarkedNaturalText(source: string): string {
+	const protectedRanges = explicitTextRanges(source);
+	let range = 0;
+	return source.replace(naturalText, (text, offset: number) => {
+		while (range < protectedRanges.length && protectedRanges[range]!.end <= offset) range++;
+		if (protectedRanges[range] && offset >= protectedRanges[range]!.start && offset < protectedRanges[range]!.end) return text;
+		return `\\text{${escapeTextArgument(text)}}`;
+	});
+}
+
+/** Normalize generated natural-language text only inside math, and only when
+ * the resulting TeX parses. Invalid blocks become escaped literal text before
+ * Markdown parsing; prose, code, and valid Markdown boundaries stay intact. */
+export function prepareMathForRendering(markdown: string): string {
+	const entities: Record<string, string> = {
+		"&": "&amp;", "<": "&lt;", ">": "&gt;", "\\": "&#92;", "$": "&#36;",
+		"*": "&#42;", "_": "&#95;", "`": "&#96;", "[": "&#91;", "]": "&#93;",
+		"|": "&#124;", "~": "&#126;", "#": "&#35;", "-": "&#45;", "+": "&#43;",
+		"!": "&#33;", ".": "&#46;",
+	};
+	const literal = (source: string) => source.replace(/[&<>\\$*_`\[\]|~#+!.-]/g, char => entities[char] ?? char);
+	return readContentSpans(markdown).map(span => {
+		if (span.kind !== "math") return span.raw;
+		const candidate = outsideTexComments(span.body, wrapUnmarkedNaturalText);
+		if (candidate !== span.body && canParseTex(candidate, span.display)) return span.open + candidate + span.close;
+		return canParseTex(span.body, span.display) ? span.raw : literal(span.raw);
+	}).join("");
+}
+
 const DEBRIS: Record<string, string> = {
 	"\b": "\\b", "\t": "\\t", "\v": "\\v", "\f": "\\f", "\r": "\\r",
 };

@@ -101,6 +101,34 @@ it("preserves native TeX source in both streaming and static modes", () => {
 		[...staticDocument.querySelectorAll(".katex-html")].map(node => node.innerHTML));
 });
 
+it("renders unmarked Cyrillic and Arabic as math text without changing surrounding Markdown", () => {
+	const source = "Пример: $x=Привет$ и <b>текст</b>; $y=مرحبا بالعالم$; $z=計算$.";
+	const document = documentFor(<MessageResponse>{source}</MessageResponse>);
+	assert.deepEqual(annotations(document), [String.raw`x=\text{Привет}`, String.raw`y=\text{مرحبا بالعالم}`, String.raw`z=\text{計算}`]);
+	assert.equal(document.querySelector("b")?.textContent, "текст");
+	assert.ok(document.body.textContent?.includes("Пример: "));
+	assert.ok(document.body.textContent?.includes(" и текст; "));
+	assert.ok(document.body.textContent?.includes("."));
+	assert.equal(document.querySelectorAll(".katex-error").length, 0);
+});
+
+it("keeps explicit text commands and shows malformed formulas as literal text", () => {
+	const document = documentFor(<MessageResponse>{String.raw`$\text{مرحبا}$ and $\frac{1$`}</MessageResponse>);
+	assert.deepEqual(annotations(document), [String.raw`\text{مرحبا}`]);
+	assert.equal(document.querySelectorAll(".katex-error").length, 0);
+	assert.ok(document.body.textContent?.includes(String.raw`\frac{1`));
+	assert.ok(document.body.textContent?.includes("$"));
+	assert.ok(document.body.textContent?.includes("and"));
+});
+
+it("escapes HTML-like fragments inside invalid formulas before Markdown parsing", () => {
+	const document = documentFor(<MessageResponse>{String.raw`Before $\frac{<img src=x>$ after`}</MessageResponse>);
+	assert.equal(document.querySelectorAll("img").length, 0);
+	assert.ok(document.body.textContent?.includes("<img src=x>"));
+	assert.ok(document.body.textContent?.includes("Before "));
+	assert.ok(document.body.textContent?.includes(" after"));
+});
+
 // Exercise successive updates on the SAME mounted components, rather than
 // mistaking independent server renders for incremental streaming coverage.
 it("retains less-than prefixes through mounted streaming updates on every entry point", async () => {
