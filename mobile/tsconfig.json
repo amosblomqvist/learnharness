@@ -1,0 +1,13 @@
+{
+  "extends": "expo/tsconfig.base",
+  "compilerOptions": {
+    "strict": true,
+    "allowImportingTsExtensions": true,
+    "paths": {
+      "@/*": ["./src/*"],
+      "@core": ["../src/core/index.ts"],
+      "@web/session-core": ["../components/session-core.ts"]
+    }
+  },
+  "include": ["**/*.ts", "**/*.tsx", ".expo/types/**/*.ts", "expo-env.d.ts"]
+}

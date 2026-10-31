@@ -21,8 +21,9 @@ import importPlugin from "eslint-plugin-import";
 
 export default defineConfig([
 	// electron/** — the desktop shell: plain Node, no framework, outside the
-// import law (same rationale as scripts/).
-	globalIgnores([".next/**", "node_modules/**", "data/**", "next-env.d.ts", "scripts/**", "electron/**", "dist/**"]),
+// import law (same rationale as scripts/). mobile/** — the Expo app: own
+// toolchain (`npx expo lint`, its own tsconfig).
+	globalIgnores([".next/**", "node_modules/**", "data/**", "next-env.d.ts", "scripts/**", "electron/**", "dist/**", "mobile/**"]),
 	{
 		files: ["**/*.{js,mjs,ts,tsx}"],
 		languageOptions: {

@@ -1,0 +1,38 @@
+{
+  "name": "mandarin-tutor",
+  "version": "1.0.0",
+  "main": "expo-router/entry",
+  "dependencies": {
+    "@expo/vector-icons": "^15.0.2",
+    "@tanstack/react-query": "5.104.3",
+    "expo": "~58.0.21",
+    "expo-constants": "~58.0.14",
+    "expo-font": "~58.0.11",
+    "expo-linking": "~58.0.15",
+    "expo-router": "~58.0.28",
+    "expo-status-bar": "~58.0.4",
+    "react": "19.3.0",
+    "react-dom": "19.3.0",
+    "react-native": "0.88.1",
+    "react-native-marked": "8.3.2",
+    "react-native-safe-area-context": "~5.10.1",
+    "react-native-screens": "~4.30.0",
+    "react-native-svg": "15.16.0"
+  },
+  "devDependencies": {
+    "@types/react": "~19.3.0",
+    "eslint": "^9.39.5",
+    "eslint-config-expo": "~58.0.4",
+    "typescript": "~6.0.3"
+  },
+  "scripts": {
+    "start": "expo start",
+    "android": "expo start --android",
+    "ios": "expo start --ios",
+    "web": "expo start --web",
+    "lint": "expo lint",
+    "typecheck": "tsc --noEmit"
+  },
+  "private": true,
+  "license": "AGPL-3.0-only"
+}
