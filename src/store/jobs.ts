@@ -15,7 +15,7 @@ import { emit } from "../core/events.ts";
 import type { JobStore } from "../core/ports.ts";
 import type { CreateJobInit, JobPatch } from "../core/ports.ts";
 import type { JobRecord } from "../core/contracts.ts";
-import { writeFileAtomicSync } from "./atomic-write.ts";
+import { removeLeftoverTemps, writeFileAtomicSync } from "./atomic-write.ts";
 
 /** Background jobs (data/jobs). Not in config.ts PATHS (orchestrator-owned). */
 const JOBS_DIR = path.join(PATHS.data, "jobs");
@@ -100,6 +100,7 @@ function deleteJobsForChat(chatId: string): number {
 	for (const job of listJobs(chatId)) {
 		try {
 			fs.unlinkSync(jobFile(job.id));
+			removeLeftoverTemps(jobFile(job.id));
 			removed++;
 		} catch {
 			/* already gone — the count is best-effort truth */
