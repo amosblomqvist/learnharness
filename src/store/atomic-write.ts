@@ -21,7 +21,8 @@
  *    (antivirus, the Search indexer, backup tools). The rename is retried for
  *    about 100 ms, blocking the thread. If the file is still held, the save
  *    falls back to writing in place, which is only as safe as before #403;
- *    the fsynced temp file stays until that write lands.
+ *    the fsynced temp file stays until that write lands, and is kept if it
+ *    fails midway.
  *  - Symlinked targets are written in place, so the link survives.
  *  - Crashes can leave `<file>.tmp-<uuid>` beside the target. Store listings
  *    only read names ending in .json or .md, so they skip it.
@@ -35,13 +36,16 @@ import { randomUUID } from "node:crypto";
 const TEMP_MARKER = ".tmp-";
 const RENAME_RETRY_MS = 100;
 
-/** Replace `file` with `text` (UTF-8). Throws on failure, with the old file untouched. */
+/** Replace `file` with `text` (UTF-8). Throws on failure, with the old file
+ *  untouched, except when the in-place fallback fails midway: then the temp
+ *  file beside it keeps the complete new bytes. */
 export function writeFileAtomicSync(file: string, text: string, options?: { mode?: number }): void {
 	if (isSymlink(file)) {
 		fs.writeFileSync(file, text, { encoding: "utf-8", mode: options?.mode });
 		return;
 	}
 	const tmp = `${file}${TEMP_MARKER}${randomUUID()}`;
+	let target: number;
 	try {
 		const fd = fs.openSync(tmp, "wx", options?.mode ?? 0o666);
 		try {
@@ -53,13 +57,18 @@ export function writeFileAtomicSync(file: string, text: string, options?: { mode
 		}
 		// `file` goes to renameSync exactly as given: test fault hooks match on it.
 		if (renameRetryingSync(tmp, file)) return;
-		console.warn(`[store] ${file} is held open by another program; saved it in place`);
-		fs.writeFileSync(file, text, "utf-8");
-		removeTemp(tmp);
+		target = fs.openSync(file, "w"); // held past the retry: save in place, as before #403
 	} catch (error) {
-		removeTemp(tmp);
+		removeTemp(tmp); // the target was not touched
 		throw error;
 	}
+	try {
+		fs.writeFileSync(target, text, "utf-8"); // if this fails, the temp is kept: it is the only complete copy
+	} finally {
+		fs.closeSync(target);
+	}
+	console.warn(`[store] ${file} is held open by another program; saved it in place`);
+	removeTemp(tmp);
 }
 
 /** Delete temp files that crashes left beside `file`. Call it after deleting `file`,

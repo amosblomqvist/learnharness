@@ -88,6 +88,36 @@ describe("writeFileAtomicSync", () => {
 		assert.match(String(warn.mock.calls[0]?.arguments[0]), /held open/);
 	});
 
+	it("Windows: fallbacks that cannot open the file fail and keep the old file", onWindows, (t) => {
+		const file = target("record.json", "old");
+		t.mock.method(fs, "renameSync", () => { throw fail("EPERM"); });
+		const open = fs.openSync;
+		t.mock.method(fs, "openSync", (...args: Parameters<typeof open>) => {
+			if (args[0] === file) throw fail("EBUSY");
+			return open(...args);
+		});
+		const warn = t.mock.method(console, "warn", () => {});
+		assert.throws(() => writeFileAtomicSync(file, "new"), { code: "EBUSY" });
+		assert.equal(fs.readFileSync(file, "utf-8"), "old");
+		assert.deepEqual(temps(file), []);
+		assert.equal(warn.mock.callCount(), 0, "nothing was saved");
+	});
+
+	it("Windows: fallbacks that fail midway keep the complete temp file", onWindows, (t) => {
+		const file = target("record.json", "old");
+		t.mock.method(fs, "renameSync", () => { throw fail("EPERM"); });
+		const write = fs.writeFileSync;
+		let writes = 0;
+		t.mock.method(fs, "writeFileSync", (...args: Parameters<typeof write>) => {
+			if (++writes === 2) throw fail("ENOSPC"); // the in-place write, after the temp's
+			return write(...args);
+		});
+		assert.throws(() => writeFileAtomicSync(file, "new"), { code: "ENOSPC" });
+		const kept = temps(file);
+		assert.equal(kept.length, 1);
+		assert.equal(fs.readFileSync(path.join(path.dirname(file), kept[0]!), "utf-8"), "new");
+	});
+
 	it("Windows: read-only files fail at once, like in-place writes", onWindows, () => {
 		const file = target("record.json", "old");
 		fs.chmodSync(file, 0o444);
