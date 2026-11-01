@@ -10,8 +10,8 @@ import { detectSupportedImageMimeTypeFromFile, processImage } from "../image-pro
  * The read tool — sources v0 (2026-09): a Node port of pi's read semantics
  * for the learner's local files. The flow is learner-owned: he pastes file
  * paths into the chat, the agent reads on its own terms (nothing is
- * auto-injected). Unrestricted local reads are the user-decided v0 scope —
- * this is a personal study harness, not a multi-tenant service.
+ * auto-injected). Broad local reads remain the scope, except the shared
+ * sensitive-location/credential denials in fs-shared.ts; this is not a sandbox.
  *
  * Ported behaviors (mirroring pi's dist/core/tools/read.js):
  * - text files: utf-8, offset (1-indexed) / limit slicing, and the
