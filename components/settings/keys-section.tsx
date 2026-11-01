@@ -601,7 +601,7 @@ export function KeysSection({
 				{label === "Dictation" && <>
 					<DictationLanguageSetting />
 					<p data-testid="dictation-setup-hint" className="px-1 text-[11px] leading-relaxed text-muted-foreground/70">
-						Create a <a
+						Dictation uses your signed-in Codex CLI subscription when available (install Codex and run codex login). Otherwise, create a <a
 							href="https://console.deepgram.com/"
 							target="_blank"
 							rel="noreferrer"
