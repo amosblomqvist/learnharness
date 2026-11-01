@@ -165,11 +165,11 @@ export function AnsweredCard({ answer: savedAnswer, input }: { answer: QuestionA
 			{/* The confidence record (owner round 6): the slider's rail, disc
 			    removed — the missing handle itself says "this is a record, not a
 			    control". Same paint, same ticks, same ramp, same % read-out as the
-			    live dock. Quiz answers only, and only when a confidence exists:
-			    "I don't know" sent none (its slider was grayed out), explain and
-			    ask never had one, and records from before the feature carry no
-			    field — nothing to show, nothing rendered. */}
-			{isQuiz && answer.confidence != null && (
+			    live dock. Quiz picks and explain/recall answers only, and only
+			    when a confidence exists: "I don't know" sent none (its slider
+			    was grayed out), ask never had one, and records from before the
+			    feature carry no field — nothing to show, nothing rendered. */}
+			{(isQuiz || isExplain) && answer.confidence != null && (
 				<div className="mt-3 flex items-center gap-3" data-testid="answered-confidence">
 					<ConfidenceRail value={answer.confidence} className="min-w-0 flex-1" />
 					<span className="w-9 shrink-0 text-right font-mono text-sm tabular-nums text-muted-foreground">

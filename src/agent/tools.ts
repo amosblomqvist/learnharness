@@ -186,7 +186,7 @@ function explainDescription(name: "explain" | "recall", nodeId: boolean): string
 		" always has one. THE COMMITMENT RULE: " +
 		"correctAnswer is the FULL correct answer in your own words, reasoning included, COMMITTED before he ever " +
 		"sees the question. When his answer returns, grade it strictly against the commitment — never revise it " +
-		"after seeing his words. He sees the committed answer on submit. " +
+		"after seeing his words. He sees the committed answer on submit. His answer returns with a `confidence` (0-100). " +
 		(nodeId
 			? "Set `nodeId` (required) to the plan node this question is about — validated at call time against the session's plan map. "
 			: "") +
