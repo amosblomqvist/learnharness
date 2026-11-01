@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'self'">
+<title>Connect to Server</title>
+<style>
+:root { color-scheme: dark; }
+* { box-sizing: border-box; }
+body { margin: 0; background: #141414; color: #e5e5e5; font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; }
+.drag { height: 38px; -webkit-app-region: drag; }
+main { padding: 0 28px 24px; display: grid; gap: 12px; }
+h1 { font-size: 15px; font-weight: 600; margin: 0; }
+p { margin: 0; color: #a3a3a3; }
+input, button { font: inherit; padding: 9px 12px; border-radius: 7px; border: 1px solid #2e2e2e; background: #1c1c1c; color: inherit; }
+input:focus { outline: 1px solid #737373; }
+.row { display: flex; gap: 8px; justify-content: flex-end; }
+button { cursor: pointer; }
+button.primary { background: #e5e5e5; color: #141414; border-color: #e5e5e5; font-weight: 600; }
+button:disabled { opacity: .5; cursor: default; }
+.status { min-height: 20px; }
+.err { color: #ff8a80; }
+.warn { color: #ffcc80; }
+.ok { color: #a5d6a7; }
+.link { background: none; border: none; padding: 0; color: #a3a3a3; text-decoration: underline; justify-self: start; }
+</style>
+</head>
+<body>
+<div class="drag"></div>
+<main>
+	<h1>Connect to Server</h1>
+	<p id="mode">Use a self-hosted LearnHarness server so every device shares the same sessions and knowledge graph.</p>
+	<input id="address" placeholder="http://my-server:3000" spellcheck="false" autocomplete="off" autofocus>
+	<div id="status" class="status"></div>
+	<div class="row">
+		<button id="cancel">Cancel</button>
+		<button id="connect" class="primary">Connect</button>
+	</div>
+	<button id="local" class="link" hidden>Stop using the server and run on this Mac</button>
+</main>
+<script src="connect.js"></script>
+</body>
+</html>
