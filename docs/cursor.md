@@ -29,6 +29,28 @@ The proxy listens on `127.0.0.1` port **32124**. If that port is taken, set `LEA
 
 Changing the login also needs a restart. `agent logout` does not kick a running app off the catalog until the next launch.
 
+### Replacing an older patched desktop installation
+
+An older local installation may start a separate `learnharness-cursor/proxy.mjs` from its launcher and inject a Cursor provider into the packaged pi-ai dependency. That bridge is independent of this repository: updating the source alone does not replace it.
+
+The old bridge can terminate with `spawn E2BIG` when a conversation exceeds the operating system's argument limit. Its stdin fallback also supplies a positional prompt, which takes precedence over stdin in the Cursor CLI. The integrated bridge fixes both paths and reports CLI failures as model errors.
+
+Quit LearnHarness and back up its user-data directory before replacing the app. Install a complete desktop package built from this branch, point the launcher at that package, and stop the old external proxy. The integrated bridge starts on demand and needs port 32124 free. Do not copy the patched pi-ai dependency into the new package or keep the old proxy startup in the launcher. Preserve the user-data directory so sessions, settings and saved connections remain available.
+
+If the old patch saved `CURSOR_API_KEY` with the literal placeholder `cursor-agent-login` in `auth.json` or the launch environment, remove that placeholder. It is not a credential and can override the CLI's saved login. Preserve any real keys and other saved connections.
+
+For a Linux package directory, use Node 26 and the existing packaging steps:
+
+```sh
+npm ci
+npm run build
+node scripts/build-server.mjs
+node scripts/smoke-server.mjs --electron
+npx electron-builder --linux --x64 --dir --publish never
+```
+
+Launch `dist/linux-unpacked/learnharness` from the resulting directory. Verify that Cursor models appear and a chat responds after restarting the app; an old proxy's successful `/health` response does not verify the integrated bridge.
+
 ## For developers
 
 Cursor is not a pi-ai builtin provider and it is not a row in `AUTH_PROVIDER_KEYS`. Those tables are pinned to pi-ai's env-key list. The provider is registered with `piModels().setProvider` after the builtins. The turn gate treats it like a subscription connection: `providerKeyPresent("cursor")` is the CLI login, not an env var. It does not use the ChatGPT/Copilot/Grok OAuth stream or background-consent path.
