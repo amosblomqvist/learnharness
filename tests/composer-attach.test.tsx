@@ -102,10 +102,13 @@ describe("composer attach button", () => {
 		assert.deepEqual(result, { paths: ["/notes/a.pdf"], skipped: 2 });
 	});
 
-	it("server render is the browser case: a disabled-looking paperclip, left of the input", () => {
+	it("server render is the browser case: a disabled-looking paperclip between the input and Send", () => {
 		const html = renderToStaticMarkup(<Composer busy={false} value="" onChange={() => {}} onSend={() => {}} onStop={() => {}} canSend={false} />);
 		assert.match(html, /aria-label="Attach files"[^>]*aria-disabled="true"|aria-disabled="true"[^>]*aria-label="Attach files"/);
-		assert.ok(html.indexOf('data-testid="attach-files"') < html.indexOf("data-file-path-input"), "the button leads the input");
+		const editor = html.indexOf("data-file-path-input");
+		const attach = html.indexOf('data-testid="attach-files"');
+		const send = html.indexOf('aria-label="Send"');
+		assert.ok(editor >= 0 && editor < attach && attach < send, "the paperclip follows the input and precedes Send");
 		assert.ok(html.includes('type="file"') && !html.includes("accept="), "any file type");
 	});
 
