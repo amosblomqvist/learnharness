@@ -202,6 +202,23 @@ describe("annotation placement protocol", () => {
 			assert.ok(annotationPlacementProblem(svg.replace('</svg>', `${markup}</svg>`), 40, 30));
 		}
 		assert.ok(annotationPlacementProblem('<!DOCTYPE svg><svg/>', 40, 30));
+		assert.ok(annotationPlacementProblem('<?xml-stylesheet type="text/xsl" href="https://example.invalid/style.xsl"?>' + svg, 40, 30));
+	});
+
+	it("rejects qualified element and attribute aliases and namespace rebinding", () => {
+		for (const markup of [
+			'<s:script xmlns:s="http://www.w3.org/2000/svg">alert(1)</s:script>',
+			'<s:foreignObject xmlns:s="http://www.w3.org/2000/svg"/>',
+			'<s:animate xmlns:s="http://www.w3.org/2000/svg" attributeName="href" to="https://example.invalid"/>',
+			'<use xmlns:l="http://www.w3.org/1999/xlink" l:href="https://example.invalid"/>',
+			'<use l:href="https://example.invalid"/>',
+			'<g xmlns="http://www.w3.org/1999/xhtml"><script>alert(1)</script></g>',
+			'<g xmlns:xlink="https://example.invalid/namespace"/>',
+		]) assert.ok(annotationPlacementProblem(svg.replace('</svg>', `${markup}</svg>`), 40, 30), markup);
+		assert.ok(annotationPlacementProblem(svg.replace('<svg', '<svg xmlns:s="http://www.w3.org/2000/svg"'), 40, 30));
+		assert.ok(annotationPlacementProblem(svg.replace('href="learner-image"', 'xlink:href="learner-image"'), 40, 30));
+		const standardXlink = svg.replace('<svg', '<svg xmlns:xlink="http://www.w3.org/1999/xlink"').replace('href="learner-image"', 'xlink:href="learner-image"');
+		assert.equal(annotationPlacementProblem(standardXlink, 40, 30), null);
 	});
 
 	it("embedding preserves comments and replaces only the actual picture", () => {

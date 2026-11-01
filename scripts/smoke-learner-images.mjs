@@ -12,7 +12,10 @@ import os from "node:os";
 import path from "node:path";
 import { createCanvas } from "@napi-rs/canvas";
 import puppeteer from "puppeteer-core";
+import { boundedSmokeOperation, stopOwnedSmokeServer } from "./lib/owned-smoke-lifetime.mjs";
 
+// This developer smoke needs detached POSIX groups to own descendant cleanup.
+if (process.platform === "win32") throw new Error("Learner-image UI smoke requires POSIX owned process groups");
 const root = path.resolve(import.meta.dirname, "..");
 const home = fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()), "lh364-ui-"));
 const data = path.join(home, "data");
@@ -50,7 +53,7 @@ const listener = net.createServer(); listener.listen(0, "127.0.0.1"); await once
 const port = listener.address().port; await new Promise(resolve => listener.close(resolve));
 const origin = `http://127.0.0.1:${port}`;
 const env = { PATH: process.env.PATH, HOME: home, TMPDIR: home, LH_DATA_DIR: data, LH_AUTH_FILE: path.join(home, "auth.json"), NODE_ENV: "development", NEXT_TELEMETRY_DISABLED: "1", NEXT_FONT_GOOGLE_MOCKED_RESPONSES: path.join(home, "fonts.cjs") };
-const server = spawn(process.execPath, ["node_modules/next/dist/bin/next", "dev", "--hostname", "127.0.0.1", "--port", String(port)], { cwd: root, env, detached: process.platform !== "win32", stdio: ["ignore", "pipe", "pipe"] });
+const server = spawn(process.execPath, ["node_modules/next/dist/bin/next", "dev", "--hostname", "127.0.0.1", "--port", String(port)], { cwd: root, env, detached: true, stdio: ["ignore", "pipe", "pipe"] });
 let logs = "";
 server.stdout.on("data", chunk => { logs += chunk; }); server.stderr.on("data", chunk => { logs += chunk; });
 let browser;
@@ -62,7 +65,7 @@ try {
 		const ready = () => { if (logs.includes("Ready in")) { clearTimeout(timeout); server.stdout.off("data", ready); resolve(); } };
 		server.stdout.on("data", ready); server.once("exit", code => { clearTimeout(timeout); reject(new Error(`server exited ${code}`)); }); ready();
 	});
-	browser = await puppeteer.launch({ executablePath: process.env.LH_TEST_CHROME || "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome", headless: true, userDataDir: path.join(home, "browser"), env, args: ["--disable-background-networking", "--disable-sync", "--no-first-run", "--disable-default-apps"] });
+	browser = await puppeteer.launch({ executablePath: process.env.LH_TEST_CHROME || "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome", headless: true, protocolTimeout: 30000, userDataDir: path.join(home, "browser"), env, args: ["--disable-background-networking", "--disable-sync", "--no-first-run", "--disable-default-apps"] });
 	page = await browser.newPage(); page.setDefaultTimeout(30000);
 	page.on("pageerror", error => errors.push(error.message));
 	await page.setRequestInterception(true);
@@ -98,17 +101,30 @@ try {
 	console.log("PASS: duplicate appearances share a snapshot; deleted source is unnecessary; image/annotation/ordinary SVG render, invert controls, fullscreen, self-contained downloads and reload.");
 } catch (error) {
 	console.error(error);
-	console.error(await page?.evaluate(() => ({ text: document.body.innerText.slice(-5000), images: [...document.images].map(image => ({ src: image.src.slice(0, 90), width: image.naturalWidth, complete: image.complete })) })).catch(() => null));
+	console.error(await boundedSmokeOperation(async () => page ? page.evaluate(() => ({ text: document.body.innerText.slice(-5000), images: [...document.images].map(image => ({ src: image.src.slice(0, 90), width: image.naturalWidth, complete: image.complete })) })) : null, 1000, null));
 	console.error(logs.slice(-16000));
 	throw error;
 } finally {
-	// Clean up only this invocation's exact spawned processes; never discover by name.
-	let timer;
-	await Promise.race([browser?.close().catch(() => {}), new Promise(resolve => { timer = setTimeout(() => { browser?.process()?.kill("SIGKILL"); resolve(); }, 3000); })]);
-	clearTimeout(timer);
-	try { if (process.platform !== "win32") process.kill(-server.pid, "SIGTERM"); else server.kill("SIGTERM"); } catch { /* already exited */ }
-	await Promise.race([once(server, "exit").catch(() => {}), new Promise(resolve => { timer = setTimeout(() => { try { if (process.platform !== "win32") process.kill(-server.pid, "SIGKILL"); else server.kill("SIGKILL"); } catch { /* already exited */ } resolve(); }, 3000); })]);
-	clearTimeout(timer);
+	// Only retained own handles/groups. Server cleanup starts independently of
+	// browser diagnostics/close, and waits for the GROUP, not the CLI's exit.
+	const browserProcess = browser?.process();
+	const cleanup = await Promise.allSettled([
+		stopOwnedSmokeServer(server),
+		(async () => {
+			const closed = await boundedSmokeOperation(async () => { await browser?.close(); return true; }, 3000, false);
+			if (!closed && browserProcess && browserProcess.exitCode === null && browserProcess.signalCode === null) {
+				const exited = await boundedSmokeOperation(async () => {
+					const exit = once(browserProcess, "exit");
+					browserProcess.kill("SIGKILL");
+					await exit;
+					return true;
+				}, 3000, false);
+				if (!exited) throw new Error("Owned smoke browser did not exit after bounded cleanup");
+			}
+		})(),
+	]);
 	server.stdout.destroy(); server.stderr.destroy();
+	const failed = cleanup.find(result => result.status === "rejected");
+	if (failed) { console.error(`Cleanup incomplete; preserving scratch ${home}`); throw failed.reason; }
 	fs.rmSync(home, { recursive: true, force: true });
 }
