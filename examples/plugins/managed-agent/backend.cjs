@@ -40,7 +40,8 @@ exports.activate = (ctx) => {
 		const catalog = await ctx.inference.catalog();
 		if (!catalog.models.some((m) => m.provider === model.provider && m.id === model.id)) throw new Error("Model is not available in your configured connections");
 		if (ctx.signal.aborted) throw new Error("Plugin disabled");
-		const spec = { provider: model.provider, id: model.id };
+		if (model.thinkingLevel !== undefined && !["off", "minimal", "low", "medium", "high", "xhigh", "max"].includes(model.thinkingLevel)) throw new Error("Invalid model thinkingLevel");
+		const spec = { provider: model.provider, id: model.id, ...(model.thinkingLevel !== undefined ? { thinkingLevel: model.thinkingLevel } : {}) };
 		const id = "model_" + createHash("sha256").update(JSON.stringify(spec)).digest("hex").slice(0, 24);
 		if (!definitions.some((entry) => entry.id === id)) {
 			const entry = { id, model: spec };

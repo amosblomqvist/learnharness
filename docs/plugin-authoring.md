@@ -10,8 +10,8 @@ renderer isolation or grant access to OAuth/BYOK credentials through the API.
 1. Open **Settings → Plugins**. It shows the writable plugins directory.
 2. Copy `examples/plugins/hello-plugin` into that directory (keep the folder name).
 3. Refresh the plugin list, then enable **Hello plugin**.
-4. Open its view from the sidebar. Its action and custom settings are also available
-   in the plugin's Settings entry.
+4. Open its view using its explicitly placed sidebar action. Open its dedicated
+   Settings page from Settings navigation or the plugin view's gear.
 5. Edit the installed code, restart LearnHarness, and enable it if necessary. Refresh
    discovers packages; it is not a JavaScript hot-reloader.
 
@@ -29,7 +29,8 @@ hello/managed-agent views, `examples/plugins/teaching-extension` demonstrates co
 to existing lessons: a normal native tool, a background-worker tool, and shared renderers.
 The background example may incur model cost, but runs only when explicitly requested.
 
-The exact API contracts are `src/core/plugins.ts` and `src/core/plugin-agents.ts`.
+The exact API contracts are `src/core/plugins.ts`, `src/core/plugin-ui.ts`,
+`src/core/plugin-agents.ts`, and `src/core/plugin-workers.ts`.
 For TypeScript in a checkout, use **type-only** imports from those files. Do not import
 application implementation modules at runtime. `scripts/build-plugin-types.mjs` emits
 a portable declaration tree for authors who do not use a source checkout. Pi native
@@ -81,17 +82,23 @@ export function activate(ctx) {
   ctx.registerView({
     id: "library",
     name: "My library",
-    mount(container) {
-      const title = document.createElement("h1");
-      title.textContent = "My library";
-      container.append(title);
-      return () => container.replaceChildren();
+    mount(container, signal) {
+      const button = ctx.ui.mountButton(container, {
+        label: "Plugin settings",
+        onClick: () => ctx.app.openSettings()
+      }, { signal });
+      return () => button.dispose();
     }
   });
   ctx.registerAction({
     id: "open-library",
     name: "Open my library",
     run: () => ctx.app.openView("library")
+  });
+  ctx.placeAction({
+    id: "library-sidebar",
+    actionId: "open-library",
+    location: "sidebar"
   });
 }
 ```
@@ -100,19 +107,162 @@ export function activate(ctx) {
 calls your returned cleanup and registered `ctx.cleanup(fn)` functions on disable.
 Register views/actions/settings during activation, and keep their disposables scoped
 to it. View/action IDs use 1–128 ASCII letters, digits, dots, underscores or hyphens,
-starting with a letter or digit; display names can be normal human-readable text. `mount` may return cleanup or a Promise of cleanup. A view that uses React
-must unmount its own root in that cleanup. Register browser events/timers for cleanup;
+starting with a letter or digit; display names can be normal human-readable text.
+`PluginView.mount(container, signal)` may return cleanup or a Promise of cleanup.
+The per-mount signal aborts on departure/replacement or plugin disable. Scope widgets
+to that signal, not just the longer activation `ctx.signal`. A view that uses React
+must unmount its own root in its cleanup. Register browser events/timers for cleanup;
 never leave them running after disable. Avoid work at module top level because native
 module caching lasts until restart.
+
+The host owns the view shell: top bar, view title, explicitly placed actions, and
+plugin-settings gear. Mount only the feature body; do not duplicate the shell.
+Registering a view or action does **not** create navigation buttons or other automatic
+chrome. There is no dedicated plugin sidebar section: explicitly placed sidebar
+actions share the normal action area with the core teaching/practice entries.
 
 Views are custom screens in designated host surfaces, not extensions to the existing
 teaching question dock. Use app theme variables such as `var(--foreground)`,
 `var(--background)`, and `var(--border)`, with plugin-scoped CSS selectors. Shared-page
 CSS is not sandboxed. Use `textContent` for text rather than unsafe HTML insertion.
 
-`ctx.registerSettings(mount)` receives the same kind of container and cleanup contract.
-Settings mount lazily when opened. `ctx.app` exposes supported pathname/navigation
-helpers, not the application's private React context or graph selection internals.
+### Explicit actions and placements
+
+Call `ctx.registerAction(action)` **before** `ctx.placeAction(placement)`. Each has its
+own ID and unregister function; one action can have several placements. Registration
+alone never displays it. An action has `id`, `name`, optional trusted SVG `icon`, optional
+`disabled` (boolean or context predicate), and `run(context): void | Promise<void>`.
+The host renders the surrounding button, label/tooltip, disabled and async busy states.
+It blocks repeat invocation of that action while its Promise is pending and reports
+errors. Call `ctx.refreshActions()` when plugin state changes a dynamic disabled
+predicate; this requests re-evaluation, not re-registration.
+
+Placements use `{ id, actionId, location }`:
+
+- `location: "sidebar"`: the shared sidebar action area.
+- `location: "graph"`: the graph action strip.
+- `location: "top-bar"`: also specify `sessions: ["teaching", "practice"]` (either
+  subset) and/or `views: ["library"]`. At least one target is required; view IDs refer
+  only to the placing plugin's views. There is no implicit “all surfaces” target.
+  The host handles narrow-width overflow.
+
+For example, after registering an action, place it on selected top bars with
+`ctx.placeAction({ id: "library-top", actionId: "open-library", location: "top-bar",
+sessions: ["teaching"], views: ["library"] })`.
+
+`PluginActionContext` is a discriminated union, not a private app state handle:
+
+| Placement/surface | Additional fields |
+| --- | --- |
+| `"top-bar"` / `"session"` | `sessionId`, `kind: "teaching" \| "practice"` |
+| `"top-bar"` / `"plugin-view"` | `pluginId`, `viewId` |
+| `"sidebar"` / `"sidebar"` | none |
+| `"graph"` / `"graph"` | none |
+
+`ctx.app` exposes `pathname()`, `openSession(id)`, `openHome()`, `openView(id)` (this
+plugin's view), and `openSettings()` (this plugin's dedicated page), not private React
+context or graph selection internals.
+
+### Controlled host UI
+
+Use `ctx.ui` for host-styled controls without runtime imports of host components.
+Every method takes a final `options: { signal: AbortSignal }` argument and returns a
+handle with `update(partialProps)` and idempotent `dispose()`. Updates shallow-merge
+props; for a preset, supply a complete replacement for any nested props you change.
+Aborting the mount signal or disabling the plugin disposes its widgets and overlays.
+Callbacks may return Promises; errors are surfaced rather than treated as success.
+
+| Method | Controlled inputs and callbacks |
+| --- | --- |
+| `mountModelPicker(container, props, options)` | `value: { provider, id } \| undefined`, `onChange(value)`, optional `disabled` |
+| `mountThinkingPicker(container, props, options)` | `model: { provider, id } \| undefined`, `value: ThinkingLevel \| undefined`, `onChange(value)`, optional `disabled` |
+| `mountComposer(container, props, options)` | `value`, `onChange`, `onSend`; optional `busy`, `onStop`, `canSend`, `placeholder`, `autoFocus` |
+| `mountDictation(container, props, options)` | `onTranscript(text)`, optional `disabled`; handle also has `toggle()`, `finish(): Promise<void>`, `cancel()` |
+| `mountStandardComposer(container, props, options)` | `{ composer, model, thinking, dictation }`, using the independent controls' props |
+| `mountButton(container, props, options)` | `label`, `onClick`; optional `disabled`, `variant`, `size`, `title` |
+| `mountSettingsRows(container, schema, options)` | `{ rows }`, as below |
+| `mountWorkerResult(container, props, options)` | `label`, terminal `status`, `text`, optional `content`, `presentation` |
+| `openMenu(anchor, props, options)` | `items: [{ key, label, onSelect, disabled? }]`; optional `label`, `preferredSide`, `onClose` |
+| `openDialog(props, options)` | `title`, `content`, optional `onClose` |
+
+These controls are controlled, not persistence or inference services. The plugin owns
+values, backend persistence, and any model fallback policy. Model/thinking selectors
+use the host catalog and emit choices; they do **not** write core model defaults or
+other core settings. Feed accepted values back with `handle.update(...)`. For example,
+inside a view mount:
+
+```js
+let selected;
+const picker = ctx.ui.mountModelPicker(container, {
+  value: selected,
+  async onChange(value) {
+    await ctx.call("save-model", value); // plugin-defined, validated backend operation
+    if (signal.aborted) return;
+    selected = value;
+    picker.update({ value: selected });
+  }
+}, { signal });
+```
+
+Composer, dictation, model, and thinking controls are independently mountable. The
+standard composer is a convenience preset, not a complete teaching/practice dock:
+it excludes usage meters, practice controls, attachments, and default file/drop
+insertion behavior. It finishes dictation and awaits transcript delivery before send;
+plugins using independent controls must coordinate that themselves.
+
+Dictation has one exclusive recording owner per window, including core and plugin
+controls. A competing start reports **“Dictation is active elsewhere”**, rather than
+stealing the recording. Focused plugin controls own their matching shortcuts; merely
+mounting one does not take over core shortcuts. Escape cancels the actual recording
+owner. Plugin dictation always delivers to its explicit `onTranscript` callback, never
+silently into a core composer/question. The plugin decides where that text goes.
+
+### Dedicated plugin settings
+
+**Every enabled plugin** has its own Settings navigation page, even a backend-only
+plugin or one with no settings registration (shown as “No settings available”).
+Settings → Plugins remains package management; custom controls are not embedded there.
+The host view gear and `ctx.app.openSettings()` open the owning plugin's page.
+
+`ctx.registerSettings(settings)` accepts one registration: either `{ rows }` or a custom
+`mount(container, signal)` with the view cleanup contract. The schema overload returns
+`PluginWidgetHandle<PluginSettingsSchema>`: `update({ rows })` validates and publishes
+new controlled rows; `dispose()` unregisters them. Disposed or stale-generation handles
+are inert. The custom-mount overload still returns an unregister function. Custom mounts
+are the escape hatch for richer layouts and can themselves use `ctx.ui.mountSettingsRows`.
+They mount lazily when the page is opened.
+
+Schema row types are `toggle` (boolean), `text` (string), `dropdown` (string plus
+`options: [{ value, label }]`), and `number`/`slider` (finite number, optional `min`,
+`max`, `step`). Every row has a unique nonempty `key`, `label`, controlled `value`, and
+`onChange(value)`; optional fields are `description`, `disabled`, and synchronous
+`validate(value): string | undefined`. Invalid schemas are rejected at registration.
+Validation messages/range failures prevent the callback and appear inline. While an
+async callback is pending the row is disabled; a thrown/rejected persistence callback
+is displayed as an error, not a successful save. Validate backend inputs too.
+
+The host does not load or save plugin settings. Callbacks own persistence and accepted
+values; do not mutate core settings files. A schema registration can publish live saved
+values directly through its handle, without a custom mount. For example, during async
+activation, with plugin-defined validated `get-settings` and `save-settings` operations:
+
+```js
+const saved = await ctx.call("get-settings");
+function rows(enabled) {
+  return [{
+    key: "enabled", type: "toggle", label: "Enable feature", value: enabled,
+    async onChange(value) {
+      await ctx.call("save-settings", { enabled: value });
+      registration.update({ rows: rows(value) }); // only after successful persistence
+    }
+  }];
+}
+const registration = ctx.registerSettings({ rows: rows(saved.enabled) });
+```
+
+A custom settings mount can likewise retain a `mountSettingsRows` handle and update
+accepted rows. Do not assume mutating a schema object creates a reactive store or
+that a failed write changed the saved value.
 
 ## Backend and operation bridge
 
@@ -410,6 +560,53 @@ consent and idempotent message identities. `tool.background` distinguishes that 
 card in your renderer. The header/status and formatter errors remain host-owned; your
 renderer owns the body. Raw fallback stays readable without the plugin.
 
+The approved default is a **collapsed result**, matching the research/PDF completion
+pattern, not an always-expanded standalone card. Host identity/status (and disclosure
+when collapsed) stay outside the custom body. For host-delivered later results,
+`PluginToolRenderer.backgroundPresentation?: "collapsed" | "card" | "plain"` selects
+the shell. For a result in your own view, reuse
+`ctx.ui.mountWorkerResult(container, { label, status, text, presentation: "collapsed" },
+{ signal })`; its `presentation` accepts the same three choices. `"collapsed"` is the
+default, `"card"` is an expanded bordered card, and `"plain"` is an expanded unframed
+body suitable for SVG or interactive demos. Even plain results retain host identity,
+status and formatter errors; presentation does not change execution or delivery.
+`status` is `"succeeded"`, `"failed"`, `"cancelled"`, or `"interrupted"`.
+Optional `content` replaces the text body with plugin-owned rich content: an HTMLElement
+or `(container, signal) => cleanup` (the mount may be async). This same content shape
+is used by dialogs. SVG, interactive demos and other custom DOM are allowed; preserve
+cleanup/cancellation and never insert unsanitized model HTML. The shared tool-renderer
+hook remains the way to customize the body of a host-delivered later result. For example,
+this renderer explicitly opts into an unframed later result with a simple SVG demo:
+
+```js
+ctx.registerToolRenderer({
+  toolName: "my_plugin_diagram",
+  backgroundPresentation: "plain",
+  mount(container, tool) {
+    if (!tool.background) {
+      container.textContent = tool.errorText ?? "Diagram dispatched";
+      return () => container.replaceChildren();
+    }
+    const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    svg.setAttribute("viewBox", "0 0 100 100");
+    svg.setAttribute("role", "img");
+    svg.setAttribute("aria-label", "Example circle");
+    const circle = document.createElementNS(svg.namespaceURI, "circle");
+    circle.setAttribute("cx", "50");
+    circle.setAttribute("cy", "50");
+    circle.setAttribute("r", "40");
+    circle.setAttribute("fill", "currentColor");
+    svg.append(circle);
+    container.append(svg);
+    return () => container.replaceChildren();
+  }
+});
+```
+
+Use `presentation: "plain"` with `mountWorkerResult` and custom `content` for the
+same unframed presentation in a plugin-owned view. The renderer property applies to
+later background results, not the original native tool acknowledgement.
+
 Do not perform side effects in `prepare`/`format`. Completed task outcome and result delivery
 are separate facts. Worker completion ends the shared job's computing state; END no longer
 cancels a finished worker or its queued result delivery. The generic outcome is persisted
@@ -435,6 +632,7 @@ the existing per-window app channel; do not open standing polling loops.
 ## What v1 deliberately does not do
 
 No marketplace, automatic community updater, sandbox, per-plugin process, hot code
-replacement, core-data write API, teaching-specific agent framework, declarative UI
-schema, or automatic restart/replay of interrupted arbitrary tools. Your feature owns
-its own product behavior. Host internals are not a supported extension API.
+replacement, core-data write API, teaching-specific agent framework, general declarative
+UI language, or automatic restart/replay of interrupted arbitrary tools. The small
+settings-row schema is a controlled presentation helper, not such a UI language.
+Your feature owns its own product behavior. Host internals are not a supported extension API.

@@ -1,6 +1,7 @@
 import type {
 	PluginAction, PluginCleanup, PluginFrontendContext, PluginFrontendModule, PluginInfo,
 	PluginNotification, PluginView, ServerEvent, PluginCodeBlockRenderer, PluginToolRenderer,
+	PluginActionContext, PluginActionPlacement, PluginSettingsRegistration,
 } from "@/src/core";
 
 export type PluginMount = (container: HTMLElement, signal: AbortSignal) => ReturnType<PluginView["mount"]>;
@@ -16,7 +17,9 @@ export interface FrontendPlugin {
 	error?: string;
 	views: PluginView[];
 	actions: PluginAction[];
-	settings?: PluginMount;
+	placements: PluginActionPlacement[];
+	actionBusy: string[];
+	settings?: PluginSettingsRegistration;
 	busy: boolean;
 }
 export interface PluginSnapshot {
@@ -39,9 +42,11 @@ interface Lifecycle {
 	teardown?: Promise<void>;
 	views: Map<string, PluginView>;
 	actions: Map<string, PluginAction>;
+	placements: Map<string, PluginActionPlacement>;
+	actionBusy: Set<string>;
 	codeBlocks: Map<string, CodeBlockRegistration>;
 	toolRenderers: Map<string, ToolRendererRegistration>;
-	settings?: PluginMount;
+	settings?: PluginSettingsRegistration;
 	notifications: Set<(event: PluginNotification) => void>;
 	events: Set<(event: ServerEvent) => void>;
 	resyncs: Set<() => void>;
@@ -56,6 +61,8 @@ export interface PluginHost {
 	importModule(url: string): Promise<PluginFrontendModule>;
 	pathname(): string;
 	navigate(path: string): void;
+	openSettings?(pluginId: string): void;
+	createUi?(options: { signal: AbortSignal; onError: (error: unknown) => void }): import("@/src/core/plugin-ui").PluginUi;
 	style?(url: string, onError: () => void): PluginCleanup;
 }
 
@@ -66,6 +73,33 @@ export function pluginAssetUrl(info: PluginInfo, path: string): string {
 	return `/api/plugins/${encodeURIComponent(info.id)}/assets/${encodeURIComponent(path)}?revision=${encodeURIComponent(info.revision)}`;
 }
 const message = (error: unknown) => error instanceof Error ? error.message : String(error);
+
+function validateSettingsSchema(value: unknown): asserts value is import("@/src/core/plugin-ui").PluginSettingsSchema {
+	const invalid = (detail: string): never => { throw new Error(`Plugin settings mount must be a function or a valid row schema: ${detail}`); };
+	if (!value || typeof value !== "object" || Array.isArray(value) || !Array.isArray((value as { rows?: unknown }).rows)) invalid("rows must be an array");
+	const keys = new Set<string>();
+	for (const row of (value as { rows: Record<string, unknown>[] }).rows) {
+		if (!row || typeof row !== "object" || typeof row.key !== "string" || !row.key.trim() || keys.has(row.key)) invalid("row keys must be nonempty and unique");
+		keys.add(row.key as string);
+		if (typeof row.label !== "string" || !row.label.trim() || typeof row.onChange !== "function") invalid("rows need a label and onChange callback");
+		if (row.validate !== undefined && typeof row.validate !== "function") invalid("validate must be a function");
+		if (row.disabled !== undefined && typeof row.disabled !== "boolean") invalid("disabled must be boolean");
+		switch (row.type) {
+			case "toggle": if (typeof row.value !== "boolean") invalid("toggle value must be boolean"); break;
+			case "text": if (typeof row.value !== "string") invalid("text value must be a string"); break;
+			case "dropdown":
+				if (typeof row.value !== "string" || !Array.isArray(row.options) || row.options.some(option => !option || typeof option.value !== "string" || typeof option.label !== "string")) invalid("dropdown needs a string value and options");
+				break;
+			case "number": case "slider":
+				if (typeof row.value !== "number" || !Number.isFinite(row.value)) invalid("numeric value must be finite");
+				for (const key of ["min", "max", "step"] as const) if (row[key] !== undefined && (typeof row[key] !== "number" || !Number.isFinite(row[key]))) invalid(`${key} must be finite`);
+				if (typeof row.min === "number" && typeof row.max === "number" && row.min > row.max) invalid("minimum exceeds maximum");
+				if (typeof row.step === "number" && row.step <= 0) invalid("step must be positive");
+				break;
+			default: invalid("unknown row control type");
+		}
+	}
+}
 
 /** Pure per-window lifecycle owner. No React, polling, or additional SSE source.
  * A lifecycle object IS its activation generation: every async continuation must
@@ -99,7 +133,8 @@ export class PluginFrontendManager {
 			return {
 				info, phase: life?.phase ?? (info.enabled ? (info.status === "error" ? "error" : "active") : "disabled"),
 				error: life?.error ?? this.cleanupErrors.get(info.id) ?? info.error, views: [...(life?.views.values() ?? [])],
-				actions: [...(life?.actions.values() ?? [])], settings: life?.settings, busy: this.pending.has(info.id),
+				actions: [...(life?.actions.values() ?? [])], placements: [...(life?.placements.values() ?? [])],
+				actionBusy: [...(life?.actionBusy ?? [])], settings: life?.settings, busy: this.pending.has(info.id),
 			};
 		}) };
 		for (const listener of [...this.listeners]) listener();
@@ -149,7 +184,7 @@ export class PluginFrontendManager {
 		if (this.lives.get(life.id) === life) this.lives.delete(life.id);
 		if (life.teardown) return life.teardown;
 		life.controller.abort();
-		life.views.clear(); life.actions.clear(); life.settings = undefined;
+		life.views.clear(); life.actions.clear(); life.placements.clear(); life.actionBusy.clear(); life.settings = undefined;
 		life.codeBlocks.clear(); life.toolRenderers.clear();
 		life.notifications.clear(); life.events.clear(); life.resyncs.clear();
 		const cleanups = [...life.cleanups].reverse();
@@ -200,7 +235,7 @@ export class PluginFrontendManager {
 			const life: Lifecycle = {
 				id: info.id, revision: info.revision, controller: new AbortController(), cleanups: new Set(),
 				activation: Promise.resolve(), tasks: new Set(),
-				views: new Map(), actions: new Map(), codeBlocks: new Map(), toolRenderers: new Map(),
+				views: new Map(), actions: new Map(), placements: new Map(), actionBusy: new Set(), codeBlocks: new Map(), toolRenderers: new Map(),
 				notifications: new Set(), events: new Set(), resyncs: new Set(), phase: "loading",
 			};
 			this.cleanupErrors.delete(info.id);
@@ -226,6 +261,11 @@ export class PluginFrontendManager {
 			if (typeof item.name !== "string" || !item.name.trim()) throw new Error("Plugin registration name must be a nonempty string");
 			const handler = callback === "mount" ? (item as PluginView).mount : (item as PluginAction).run;
 			if (typeof handler !== "function") throw new Error(`Plugin registration ${callback} must be a function`);
+			if (callback === "run") {
+				const action = item as PluginAction;
+				if (action.icon !== undefined && typeof action.icon !== "string") throw new Error("Plugin action icon must be SVG markup");
+				if (action.disabled !== undefined && typeof action.disabled !== "boolean" && typeof action.disabled !== "function") throw new Error("Plugin action disabled must be boolean or a predicate");
+			}
 			if (map.has(item.id)) throw new Error(`Duplicate plugin registration: ${item.id}`);
 			map.set(item.id, item); this.publish();
 			let registered = true;
@@ -252,7 +292,9 @@ export class PluginFrontendManager {
 			const existing = kind === "language" ? this.getCodeBlock(key) : this.getToolRenderer(key);
 			if (existing) rejectRenderer(`Duplicate plugin renderer ${kind}: ${key}`);
 			// Snapshot the key/callback without losing class-method receivers.
-			const ownedRenderer = Object.freeze({ [kind]: key, mount: renderer.mount.bind(renderer) }) as unknown as T;
+			const presentation = kind === "toolName" ? (renderer as PluginToolRenderer).backgroundPresentation : undefined;
+			if (presentation !== undefined && !["collapsed", "card", "plain"].includes(presentation)) rejectRenderer("Invalid plugin worker result presentation");
+			const ownedRenderer = Object.freeze({ [kind]: key, mount: renderer.mount.bind(renderer), ...(presentation ? { backgroundPresentation: presentation } : {}) }) as unknown as T;
 			const registration: PluginRendererRegistration<T> = Object.freeze({ pluginId: life.id, renderer: ownedRenderer });
 			const mounts = new Set<() => void>();
 			this.rendererMounts.set(registration, mounts);
@@ -271,25 +313,64 @@ export class PluginFrontendManager {
 			set.add(listener);
 			return () => { set.delete(listener); };
 		};
+		const registerSettings = ((settings: PluginSettingsRegistration) => {
+			if (!this.current(life)) return typeof settings === "function" ? () => {} : { update() {}, dispose() {} };
+			if (typeof settings !== "function") validateSettingsSchema(settings);
+			if (life.settings) throw new Error("Plugin settings are already registered");
+			let owned = settings;
+			life.settings = owned; this.publish();
+			let registered = true;
+			const dispose = () => {
+				if (!registered) return;
+				registered = false;
+				if (life.settings === owned) { life.settings = undefined; this.publish(); }
+			};
+			if (typeof settings === "function") return dispose;
+			return {
+				update: (next: Partial<import("@/src/core/plugin-ui").PluginSettingsSchema>) => {
+					if (!registered || !this.current(life) || life.settings !== owned) return;
+					const schema = { ...owned, ...next };
+					validateSettingsSchema(schema);
+					owned = schema; life.settings = schema; this.publish();
+				},
+				dispose,
+			};
+		}) as PluginFrontendContext["registerSettings"];
+		const thisManager = this;
+		let ui: import("@/src/core/plugin-ui").PluginUi | undefined;
 		const context: PluginFrontendContext = {
 			manifest, signal: life.controller.signal,
 			cleanup: cleanup => { this.addCleanup(life, cleanup); },
 			registerView: view => register(life.views, view, "mount"),
 			registerAction: action => register(life.actions, action, "run"),
+			placeAction: placement => {
+				if (!this.current(life)) return () => {};
+				if (!placement || typeof placement.id !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(placement.id)) throw new Error("Plugin placement id must be a route-safe string");
+				if (!life.actions.has(placement.actionId)) throw new Error("Plugin placement must reference a registered action");
+				if (!["top-bar", "sidebar", "graph"].includes(placement.location)) throw new Error("Unknown plugin action placement");
+				if (placement.location === "top-bar") {
+					if (placement.sessions !== undefined && (!Array.isArray(placement.sessions) || placement.sessions.some(kind => kind !== "teaching" && kind !== "practice"))) throw new Error("Invalid plugin top-bar session targets");
+					if (placement.views !== undefined && (!Array.isArray(placement.views) || placement.views.some(id => typeof id !== "string" || !id))) throw new Error("Invalid plugin top-bar view targets");
+					if (!placement.sessions?.length && !placement.views?.length) throw new Error("Plugin top-bar placement requires explicit session or view targets");
+				}
+				if (life.placements.has(placement.id)) throw new Error(`Duplicate plugin placement: ${placement.id}`);
+				const owned = Object.freeze({ ...placement, ...(placement.location === "top-bar" ? {
+					...(placement.sessions ? { sessions: [...placement.sessions] } : {}), ...(placement.views ? { views: [...placement.views] } : {}),
+				} : {}) });
+				life.placements.set(owned.id, owned); this.publish();
+				return () => { if (life.placements.get(owned.id) === owned) { life.placements.delete(owned.id); this.publish(); } };
+			},
+			refreshActions: () => { if (this.current(life)) this.publish(); },
+			get ui() {
+				if (!ui) {
+					if (!thisManager.host.createUi) throw new Error("Plugin UI host is unavailable");
+					ui = thisManager.host.createUi({ signal: life.controller.signal, onError: error => thisManager.report(life, error) });
+				}
+				return ui;
+			},
 			registerCodeBlock: renderer => registerRenderer(life.codeBlocks, renderer, "language"),
 			registerToolRenderer: renderer => registerRenderer(life.toolRenderers, renderer, "toolName"),
-			registerSettings: mount => {
-				if (!this.current(life)) return () => {};
-				if (typeof mount !== "function") throw new Error("Plugin settings mount must be a function");
-				if (life.settings) throw new Error("Plugin settings are already registered");
-				life.settings = mount; this.publish();
-				let registered = true;
-				return () => {
-					if (!registered) return;
-					registered = false;
-					if (life.settings === mount) { life.settings = undefined; this.publish(); }
-				};
-			},
+			registerSettings,
 			call: async <T>(operation: string, input?: unknown) => {
 				if (!this.current(life)) throw new Error("Plugin is no longer active");
 				const body = await this.json(`/api/plugins/${encodeURIComponent(info.id)}/call`, {
@@ -307,6 +388,7 @@ export class PluginFrontendManager {
 				openHome: () => { if (this.current(life)) this.host.navigate("/"); },
 				openSession: id => { if (this.current(life)) this.host.navigate(`/chat/${encodeURIComponent(id)}`); },
 				openView: id => { if (this.current(life)) this.host.navigate(pluginViewPath(info.id, id)); },
+				openSettings: () => { if (this.current(life)) this.host.openSettings?.(info.id); },
 			},
 		};
 		try {
@@ -381,10 +463,15 @@ export class PluginFrontendManager {
 			}
 		}
 	}
-	async runAction(id: string, action: PluginAction) {
+	async runAction(id: string, action: PluginAction, context: PluginActionContext) {
 		const life = this.lives.get(id);
-		if (!life || !this.current(life) || life.actions.get(action.id) !== action) return;
-		try { await action.run(); } catch (error) { this.report(life, error); }
+		if (!life || !this.current(life) || life.actions.get(action.id) !== action || life.actionBusy.has(action.id)) return;
+		try {
+			if (typeof action.disabled === "function" ? action.disabled(context) : action.disabled) return;
+			life.actionBusy.add(action.id); this.publish();
+			await action.run(context);
+		} catch (error) { this.report(life, error); }
+		finally { if (life.actionBusy.delete(action.id) && this.current(life)) this.publish(); }
 	}
 	getCodeBlock(language: string): CodeBlockRegistration | undefined {
 		for (const life of this.lives.values()) {

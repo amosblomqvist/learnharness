@@ -22,7 +22,8 @@ import { useServerEvent, useServerResync } from "@/components/server-events";
 import type { ChatListItem } from "@/src/core";
 import { kbdEventForAction } from "@/src/core";
 import { notifySettingsSaved } from "@/components/settings-signal";
-import { PluginSidebarLinks } from "@/components/plugins";
+import { PluginWidgets } from "@/components/plugins";
+import { PluginSidebarActions } from "@/components/plugin-chrome";
 
 /**
  * Toggleable sidebar — NOT a modal drawer: no backdrop, no focus theft. It
@@ -693,32 +694,31 @@ function SessionsSidebar() {
 					</Hint>
 				</div>
 
-				{/* Two doors, STACKED (owner round 8, 2026-10-05 — was a
-				    half/half row): full-width rows read cleaner and give the
-				    labels room; teaching keeps the original draft route,
-				    practice carries its mode. */}
-				<div className="mx-3 mb-2 flex flex-col gap-1.5">
+				{/* Core doors always lead explicit plugin sidebar placements. */}
+				<PluginSidebarActions>
 					<button
 						type="button"
 						data-testid="new-session"
+						title="Teaching"
 						onClick={() => void newSession()}
-						className="flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-xs uppercase tracking-wider text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+						className="flex min-w-0 w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-xs uppercase tracking-wider text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
 					>
-						<PlusIcon className="size-3" />
-						Teaching
+						<PlusIcon className="size-3 shrink-0" />
+						<span className="min-w-0 truncate">Teaching</span>
 						<span className="sr-only">create a new teaching session</span>
 					</button>
 					<button
 						type="button"
 						data-testid="new-session-practice"
+						title="Practice"
 						onClick={() => router.push("/chat/new?mode=practice")}
-						className="flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-xs uppercase tracking-wider text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+						className="flex min-w-0 w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-xs uppercase tracking-wider text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
 					>
-						<DumbbellIcon className="size-3" />
-						Practice
+						<DumbbellIcon className="size-3 shrink-0" />
+						<span className="min-w-0 truncate">Practice</span>
 						<span className="sr-only">create a new practice session</span>
 					</button>
-				</div>
+				</PluginSidebarActions>
 
 				<div className="mx-3 mb-2 flex items-center gap-2">
 					<span className="text-xs uppercase tracking-widest text-muted-foreground/70">Sessions</span>
@@ -845,7 +845,6 @@ function SessionsSidebar() {
 					    populates and grows when processes run. The session list is
 					    flex-1, so this pins to the bottom. Sidebar closed = the
 					    learner opted out (no ambient signal, user decision). */}
-					<PluginSidebarLinks />
 					<ActivitySection />
 
 					{/* Settings entry (settings-app wave): same row language as
@@ -954,6 +953,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 			    after the content in the tree, but it's window-level so order only
 			    matters for the events it dispatches, never for DOM priority. */}
 			<KeyboardShortcuts />
+			<PluginWidgets />
 		</SettingsDialogProvider>
 	);
 }

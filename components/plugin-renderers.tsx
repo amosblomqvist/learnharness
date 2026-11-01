@@ -1,12 +1,14 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { QUESTION_TOOLS, type ArtifactPartProps, type LhViewPart, type PluginCodeBlockProps, type PluginToolRenderProps } from "@/src/core";
 import { usePlugins } from "@/components/plugins";
 import { type CodeBlockRegistration, type ToolRendererRegistration, type PluginMount } from "@/components/plugin-manager";
 import { artifactRenderers } from "@/components/artifacts";
 import { LiveToolCard } from "@/components/artifacts/live-tool-card";
 import { ToolCallCard } from "@/components/artifacts/tool-call-card";
+import { DispatchCard } from "@/components/artifacts/dispatch-card";
+import { JobsContext } from "@/components/jobs-context";
 
 /** The Markdown dispatch uses this same exclusive built-in language. */
 export const BUILTIN_MERMAID_LANGUAGE = "mermaid";
@@ -61,10 +63,12 @@ export function toolFallbackPart(part: LhViewPart): ArtifactPartProps["part"] {
 	};
 }
 
-/** The fallback stays the host's existing expandable tool-call card. Unknown,
- * disabled, failed, or uninstalled renderers never make native results vanish. */
+/** Ordinary tools retain the expandable trace; accepted background calls use
+ * the native dispatch/status card. Custom renderers replace either default body.
+ * Disabled, failed, or uninstalled renderers never make native results vanish. */
 export function PluginToolRenderer({ part, fallback: suppliedFallback }: { part: LhViewPart; fallback?: ReactNode }) {
 	const { snapshot } = usePlugins();
+	const jobs = useContext(JobsContext);
 	const toolName = part.type.slice("tool-".length);
 	const background = part.background as PluginToolRenderProps["background"];
 	const pluginId = background?.pluginId, taskId = background?.taskId, status = background?.status;
@@ -79,7 +83,16 @@ export function PluginToolRenderer({ part, fallback: suppliedFallback }: { part:
 			...(pluginId !== undefined && taskId !== undefined && status !== undefined ? { background: { pluginId, taskId, status } } : {}), signal,
 		});
 	}, [registration, toolName, part.toolCallId, part.input, part.state, part.output, part.errorText, content, details, isError, pluginId, taskId, status]);
-	const fallback = suppliedFallback ?? <ToolCallCard part={toolFallbackPart(part)} />;
+	// Native ACK details identify dispatch even before the jobs feed catches up.
+	// A later synthetic result must not turn back into its original dispatch.
+	const ack = details as { jobId?: unknown; dispatched?: unknown } | null | undefined;
+	const dispatched = !background && part.state === "output-available" && !isError && (
+		jobs.some(job => job.kind === "plugin" && job.toolCallId === part.toolCallId) ||
+		(ack !== null && typeof ack === "object" && typeof ack.jobId === "string" && ack.dispatched === true)
+	);
+	const fallback = suppliedFallback ?? (dispatched
+		? <DispatchCard kind="plugin" toolCallId={part.toolCallId ?? ""} />
+		: <ToolCallCard part={toolFallbackPart(part)} />);
 	if (!registration || !isToolState(part.state)) return fallback;
 	return <RendererMount registration={registration} mount={mount} label={`Plugin tool (${toolName})`} fallback={fallback} />;
 }

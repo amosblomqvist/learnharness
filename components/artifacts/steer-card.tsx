@@ -1,6 +1,6 @@
 "use client";
 
-import { CheckIcon, CircleX } from "lucide-react";
+import { CircleX } from "lucide-react";
 import type { PdfResult, ResearchResult, SubagentArtifactData } from "@/src/core";
 import type { LhViewMessage, PluginBackgroundResult, SubagentResultMeta } from "@/src/core";
 import { isSubagentFailure } from "@/src/core";
@@ -8,6 +8,7 @@ import { DemoOutputCard } from "@/components/artifacts/demo-card";
 import { PdfBriefCard, ResearchBriefCard } from "@/components/artifacts/job-card";
 import { VisualOutputCard } from "@/components/artifacts/visual-card";
 import { PluginWorkerCard } from "@/components/artifacts/plugin-worker-card";
+import { WorkerResultDetails } from "@/components/artifacts/worker-result-presentation";
 
 /**
  * The sub-agent result delivery card (contracts.ts "THE ASYNC PROTOCOL" §4).
@@ -99,9 +100,7 @@ function PdfCompleteBadge({ result }: { result: PdfResult }) {
 	// the ?? is runtime tolerance for pre-split persisted steers.
 	const readPages = result.pagesRead ?? result.pagesConsulted;
 	return (
-		<details data-testid="pdf-complete-badge" className="group w-full text-xs text-muted-foreground">
-			<summary className="flex cursor-pointer select-none list-none items-center gap-2 [&::-webkit-details-marker]:hidden">
-				<CheckIcon className="size-3.5" />
+		<WorkerResultDetails testId="pdf-complete-badge" heading={<>
 				<span className="font-medium uppercase tracking-wide">PDF</span>
 				<span>reading complete</span>
 				{readPages.length > 0 && (
@@ -109,13 +108,9 @@ function PdfCompleteBadge({ result }: { result: PdfResult }) {
 						· read {readPages.length} page{readPages.length === 1 ? "" : "s"}
 					</span>
 				)}
-				<span className="ml-1 text-xs text-muted-foreground/70 group-open:hidden">view brief</span>
-				<span className="ml-1 hidden text-xs text-muted-foreground/70 group-open:inline">hide brief</span>
-			</summary>
-			<div className="mt-2">
-				<PdfBriefCard output={result} />
-			</div>
-		</details>
+			</>}>
+			<PdfBriefCard output={result} />
+		</WorkerResultDetails>
 	);
 }
 
@@ -126,18 +121,12 @@ function PdfCompleteBadge({ result }: { result: PdfResult }) {
  * the artifact part in the record is the single source of truth. */
 function ResearchCompleteBadge({ result }: { result: ResearchResult }) {
 	return (
-		<details data-testid="research-complete-badge" className="group w-full text-xs text-muted-foreground">
-			<summary className="flex cursor-pointer select-none list-none items-center gap-2 [&::-webkit-details-marker]:hidden">
-				<CheckIcon className="size-3.5" />
+		<WorkerResultDetails testId="research-complete-badge" heading={<>
 				<span className="font-medium uppercase tracking-wide">Research</span>
 				<span>complete</span>
 				{result.sources.length > 0 && <span>· {result.sources.length} sources</span>}
-				<span className="ml-1 text-xs text-muted-foreground/70 group-open:hidden">view brief</span>
-				<span className="ml-1 hidden text-xs text-muted-foreground/70 group-open:inline">hide brief</span>
-			</summary>
-			<div className="mt-2">
-				<ResearchBriefCard output={result} />
-			</div>
-		</details>
+			</>}>
+			<ResearchBriefCard output={result} />
+		</WorkerResultDetails>
 	);
 }

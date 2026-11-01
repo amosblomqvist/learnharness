@@ -556,6 +556,21 @@ body {
 	max-width: max(0px, calc(100% - 5.5rem - var(--lh-wco-right, 0px)));
 }
 
+/* A closed graph rail starts below the floating toggle/native lights band.
+   Like the existing light gutter, its physical clearance survives desktop zoom. */
+.lh-electron[data-lh-platform="darwin"] .lh-plugin-graph-closed {
+	top: max(2.75rem, calc(44px / var(--lh-zoom)));
+}
+
+/* Plugin action lists scroll without adding visible chrome to the graph rail. */
+.lh-plugin-scroll {
+	scrollbar-width: none;
+	overscroll-behavior: contain;
+}
+.lh-plugin-scroll::-webkit-scrollbar {
+	display: none;
+}
+
 /* --font-title deliberately NOT @theme inline (see comment above): the
    session-name-serif toggle overrides this var at runtime, so the
    .font-title utility must read it through var(), not carry a baked copy. */

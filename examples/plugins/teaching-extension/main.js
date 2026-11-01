@@ -33,6 +33,7 @@ export function activate(ctx) {
   });
   ctx.registerToolRenderer({
     toolName: "teaching_extension_note",
+    backgroundPresentation: "plain",
     mount(container, tool) {
       const heading = container.ownerDocument.createElement("strong");
       heading.textContent = tool.background ? "Example note worker result" : "Example note worker dispatch";
@@ -44,7 +45,9 @@ export function activate(ctx) {
       return () => container.replaceChildren();
     },
   });
-  ctx.registerSettings(container => {
+  // Custom settings content is the escape hatch for explanatory/plugin-owned DOM.
+  // No schema rows: this fixture has no configurable behavior or navigation chrome.
+  ctx.registerSettings((container, _signal) => {
     paragraph(container, "Ask a teacher or practice session to try the teaching-extension example. It adds an echo tool and plugin-note fenced-block rendering. Explicitly request the background-worker example to generate a short note using your cheap model slot; that request may incur cost. It has no automatic runs, independent view, configurable settings or learner-data writes.");
     return () => container.replaceChildren();
   });

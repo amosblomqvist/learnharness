@@ -202,6 +202,28 @@ export function ThinSelect({
 	);
 }
 
+/** Shared graph/settings range control; the label and value stay paired. */
+export function SettingsSlider({ label, min, max, step, value, display, onChange, disabled, showLabel = true }: {
+	label: string;
+	min?: number;
+	max?: number;
+	step?: number;
+	value: number;
+	display?: string;
+	/** SettingsRow supplies the visible label when false. */
+	showLabel?: boolean;
+	onChange: (value: number) => void;
+	disabled?: boolean;
+}) {
+	return <label className={`flex flex-col gap-1${disabled ? " opacity-40" : ""}`}>
+		<span className="flex items-center justify-between text-[11px] text-muted-foreground">
+			{showLabel && label}<span className="tabular-nums">{display ?? value}</span>
+		</span>
+		<input type="range" aria-label={label} min={min} max={max} step={step} value={value} disabled={disabled}
+			onChange={(e) => onChange(Number(e.target.value))} className="h-1.5 w-full accent-primary" />
+	</label>;
+}
+
 /** A thin hex/text input committing on blur + Enter (settings pace, not
  *  typing pace — every commit is a section PUT). */
 export function CommitInput({
@@ -211,6 +233,10 @@ export function CommitInput({
 	ariaLabel,
 	testid,
 	type = "text",
+	disabled,
+	min,
+	max,
+	step,
 }: {
 	/** "" = unset (the factory default). Mirrors the STORED record —
 	 *  after a clamped/normalized commit this flows back and the field
@@ -222,6 +248,10 @@ export function CommitInput({
 	ariaLabel: string;
 	testid?: string;
 	type?: "text" | "number";
+	disabled?: boolean;
+	min?: number;
+	max?: number;
+	step?: number;
 }) {
 	// The draft exists only while editing; a blur shows the record's value
 	// again — commit-on-blur/Enter (owner ruling), the field honest about
@@ -235,6 +265,10 @@ export function CommitInput({
 			placeholder={placeholder}
 			aria-label={ariaLabel}
 			data-testid={testid}
+			disabled={disabled}
+			min={min}
+			max={max}
+			step={step}
 			onChange={(e) => {
 				setEditing(true);
 				setDraft(e.target.value);

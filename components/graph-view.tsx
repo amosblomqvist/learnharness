@@ -65,6 +65,8 @@
 
 import { useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { NotesImportControl, NotesImportErrors, NotesImportNotices, useNotesImport } from "@/components/notes-import.tsx";
+import { PluginGraphActions } from "@/components/plugin-chrome";
+import { SettingsSlider as SettingSlider } from "@/components/settings/controls";
 import Link from "next/link";
 import { FileTextIcon, ListTreeIcon, Loader2Icon, SearchIcon, SettingsIcon, WaypointsIcon } from "lucide-react";
 import { incrementalLayout, propositionSessionHref, type GraphCostSummary, type GraphNode, type GraphSnapshot } from "@/src/core";
@@ -231,48 +233,6 @@ interface Selection {
 /** Compact size display for the log sliders: "2", "1.6", "0.75". */
 function sizeDisplay(v: number): string {
 	return `${v >= 1 ? Math.round(v * 10) / 10 : Math.round(v * 100) / 100}`;
-}
-
-function SettingSlider({
-	label,
-	min,
-	max,
-	step,
-	value,
-	display,
-	onChange,
-	disabled,
-}: {
-	label: string;
-	min: number;
-	max: number;
-	step: number;
-	value: number;
-	/** Value display override (e.g. "1.5×" for zoom) — defaults to the raw number. */
-	display?: string;
-	onChange: (v: number) => void;
-	/** Dependency graying (user 2026-09-17): children dim + lock when
-	 *  their parent toggle/mode is off — consistently across sections. */
-	disabled?: boolean;
-}) {
-	return (
-		<label className={`flex flex-col gap-1${disabled ? " opacity-40" : ""}`}>
-			<span className="flex items-center justify-between text-[11px] text-muted-foreground">
-				{label}
-				<span className="tabular-nums">{display ?? value}</span>
-			</span>
-			<input
-				type="range"
-				min={min}
-				max={max}
-				step={step}
-				value={value}
-				disabled={disabled}
-				onChange={(e) => onChange(Number(e.target.value))}
-				className="h-1.5 w-full accent-primary"
-			/>
-		</label>
-	);
 }
 
 /** Compact token display: 45231 → "45.2k"; absent → "—". */
@@ -1536,6 +1496,8 @@ export function GraphView({
 			/>
 
 
+
+			<PluginGraphActions />
 
 			{/* Legend + filters: search box and per-state toggle rows. */}
 			{/* Top-right controls — separate floating containers (owner,

@@ -7,6 +7,7 @@ import { prettyModel } from "@/components/usage-format";
 import { ModelMenuList, ThinkingMenuList } from "@/components/settings/model-menu";
 import { composeSlotModel } from "@/components/settings/agent-section";
 import { MenuShell } from "@/components/menu-shell";
+import { ModelPickerPill } from "@/components/model-picker-pill";
 import { Hint } from "@/components/ui/hint";
 import { notifySettingsSaved, useSettingsSaved } from "@/components/settings-signal";
 import { useModelCatalog } from "@/components/model-catalog";
@@ -279,20 +280,11 @@ export function ModelControl({ chatId, onModelChange }: { chatId?: string; onMod
 				action="open-model-picker"
 				side="bottom"
 			>
-				<button
-				type="button"
-				data-testid="stats-model"
-				onClick={() => openMenu("model")}
-				aria-expanded={open === "model"}
-				// Chrome look (owner, fix wave round 3): matches the graph
-				// view's floating top-right buttons (import notes, gear,
-				// coverage) — blurred, fuller opacity, shadowed — so the
-				// graph no longer bleeds through these pills.
-				className="flex items-center gap-1.5 rounded-full border bg-card/85 px-2.5 py-1 shadow-lg backdrop-blur transition-colors hover:border-border hover:bg-muted"
-			>
-				<span className="text-card-foreground">{effectiveId ? prettyModel(effectiveId) : "—"}</span>
-				<span aria-hidden className="text-xs text-muted-foreground">▾</span>
-			</button>
+				<ModelPickerPill
+					data-testid="stats-model"
+					onClick={() => openMenu("model")}
+					aria-expanded={open === "model"}
+				>{effectiveId ? prettyModel(effectiveId) : "—"}</ModelPickerPill>
 			</Hint>
 			<Hint
 				// "Thinking" + its real shortcut via the registry (owner interlude
@@ -302,29 +294,14 @@ export function ModelControl({ chatId, onModelChange }: { chatId?: string; onMod
 				action="cycle-thinking"
 				side="bottom"
 			>
-				<button
-				type="button"
-				data-testid="stats-thinking"
-				onClick={() => {
-					// No model picked → nothing to set a level FOR: the click
-					// is a no-op, never an empty menu.
-					if (entry === undefined) return;
-					openMenu("thinking");
-				}}
-				aria-expanded={open === "thinking"}
-				// Chrome look (owner, fix wave round 3): matches the graph
-				// view's floating top-right buttons (import notes, gear,
-				// coverage) — blurred, fuller opacity, shadowed — so the
-				// graph no longer bleeds through these pills.
-				className="flex items-center gap-1.5 rounded-full border bg-card/85 px-2.5 py-1 shadow-lg backdrop-blur transition-colors hover:border-border hover:bg-muted"
-			>
-				{/* Just the level — the button reads like the model button reads
-				   the model name (owner, stats-control round 1). */}
-				<span className="text-card-foreground">
-					{effectiveLevel === undefined ? "—" : (THINKING_LABEL[effectiveLevel] ?? effectiveLevel)}
-				</span>
-				<span aria-hidden className="text-xs text-muted-foreground">▾</span>
-			</button>
+				<ModelPickerPill
+					data-testid="stats-thinking"
+					onClick={() => {
+						if (entry === undefined) return;
+						openMenu("thinking");
+					}}
+					aria-expanded={open === "thinking"}
+				>{effectiveLevel === undefined ? "—" : (THINKING_LABEL[effectiveLevel] ?? effectiveLevel)}</ModelPickerPill>
 			</Hint>
 
 			{/* The shared dropdown body (extracted 2026-09-20): the agent

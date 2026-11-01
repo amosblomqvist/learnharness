@@ -1,27 +1,28 @@
 "use client";
 
 import { createContext, useContext, useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
-import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
+import { useRouter } from "next/navigation";
 import { SERVER_EVENT_TYPES, type PluginFrontendModule, type ServerEvent } from "@/src/core";
 import { useNotifyHub } from "@/components/server-events";
-import { PluginFrontendManager, pluginViewPath, type PluginHost, type PluginMount, type PluginSnapshot } from "@/components/plugin-manager";
+import { PluginFrontendManager, type PluginHost, type PluginMount, type PluginSnapshot } from "@/components/plugin-manager";
+import { createPluginUiStore, PluginUiHost } from "@/components/plugin-ui-host";
 import { BUILTIN_MERMAID_LANGUAGE, reservedToolRendererNames } from "@/components/plugin-renderers";
 
 const EMPTY: PluginSnapshot = { plugins: [], codeBlocks: [], toolRenderers: [], directory: "", loading: true, refreshing: false };
 const emptySubscribe = () => () => {};
 const emptySnapshot = () => EMPTY;
-const PluginsContext = createContext<{ manager: PluginFrontendManager | null; snapshot: PluginSnapshot }>({ manager: null, snapshot: EMPTY });
+const PluginsContext = createContext<{ manager: PluginFrontendManager | null; snapshot: PluginSnapshot; uiStore: ReturnType<typeof createPluginUiStore> | null }>({ manager: null, snapshot: EMPTY, uiStore: null });
 
 /** A deferred last-release makes React StrictMode's setup/cleanup/setup one
  * activation lifetime, while a genuine provider teardown still disposes. */
 export function createPluginWindowOwner(host: PluginHost) {
-	const manager = new PluginFrontendManager(host);
+	const uiStore = createPluginUiStore();
+	const manager = new PluginFrontendManager({ ...host, createUi: host.createUi ?? uiStore.createUi });
 	let leases = 0;
 	let generation = 0;
 	let disposed = false;
 	return {
-		manager,
+		manager, uiStore,
 		get disposed() { return disposed; },
 		acquire() {
 			leases++; generation++; manager.start();
@@ -74,12 +75,14 @@ export function PluginsProvider({ children }: { children: ReactNode }) {
 	const routerRef = useRef(router);
 	routerRef.current = router;
 	const [manager, setManager] = useState<PluginFrontendManager | null>(null);
+	const [uiStore, setUiStore] = useState<ReturnType<typeof createPluginUiStore> | null>(null);
 	useEffect(() => {
 		if (!window.__lhPluginWindow || window.__lhPluginWindow.disposed) {
 			window.__lhPluginWindow = createPluginWindowOwner({
 				reservedCodeBlockLanguages: [BUILTIN_MERMAID_LANGUAGE], reservedToolNames: reservedToolRendererNames(),
 				fetch: (...args) => fetch(...args), importModule: importPluginModule,
 				pathname: () => window.location.pathname, navigate: path => routerRef.current.push(path),
+				openSettings: pluginId => window.dispatchEvent(new CustomEvent("lh:open-plugin-settings", { detail: pluginId })),
 				style: (url, onError) => {
 					const link = document.createElement("link");
 					link.rel = "stylesheet"; link.href = url; link.onerror = onError;
@@ -90,6 +93,7 @@ export function PluginsProvider({ children }: { children: ReactNode }) {
 		}
 		const owner = window.__lhPluginWindow;
 		setManager(owner.manager);
+		setUiStore(owner.uiStore);
 		return owner.acquire();
 	}, []);
 	useEffect(() => {
@@ -103,30 +107,17 @@ export function PluginsProvider({ children }: { children: ReactNode }) {
 		return () => { for (const off of offs) off(); };
 	}, [hub, manager]);
 	const snapshot = useSyncExternalStore(manager?.subscribe ?? emptySubscribe, manager?.getSnapshot ?? emptySnapshot, emptySnapshot);
-	return <PluginsContext.Provider value={{ manager, snapshot }}>{children}</PluginsContext.Provider>;
+	return <PluginsContext.Provider value={{ manager, snapshot, uiStore }}>{children}</PluginsContext.Provider>;
 }
 
 /** Missing-provider fallback is intentional: existing sidebar render tests and
  * independent shells don't need plugin infrastructure to render. */
 export function usePlugins() { return useContext(PluginsContext); }
 
-export function PluginSidebarLinks() {
-	const { snapshot } = usePlugins();
-	const pathname = usePathname();
-	const plugins = snapshot.plugins.filter(plugin => plugin.info.enabled && plugin.views.length > 0);
-	if (!plugins.length) return null;
-	return (
-		<nav aria-label="Plugin views" className="max-h-48 shrink-0 overflow-y-auto border-t border-border/60 px-3 py-2">
-			<p className="mb-1 px-2 text-xs uppercase tracking-widest text-muted-foreground/70">Plugins</p>
-			{plugins.map(plugin => plugin.views.map(view => {
-				const href = pluginViewPath(plugin.info.id, view.id);
-				return <Link key={`${plugin.info.id}/${view.id}`} href={href} aria-current={pathname === href ? "page" : undefined}
-					className={`block truncate rounded-md px-2 py-1.5 text-xs transition-colors hover:bg-accent hover:text-foreground ${pathname === href ? "bg-accent text-foreground" : "text-muted-foreground"}`}>
-					{view.name}<span className="sr-only"> — {plugin.info.manifest?.name ?? plugin.info.id}</span>
-				</Link>;
-			}))}
-		</nav>
-	);
+/** Render inside SettingsDialogProvider: host widgets keep the real app contexts. */
+export function PluginWidgets() {
+	const { uiStore } = usePlugins();
+	return uiStore ? <PluginUiHost store={uiStore} /> : null;
 }
 
 /** Plugins own this DOM subtree (including their own bundled React root if

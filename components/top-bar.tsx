@@ -24,8 +24,9 @@
  *
  * The consumer brings the title (font-title text-3xl tracking-tight) and
  * any right-side controls. THE TITLE LAW (owner round 11, 2026-10-05):
- * the serif title ALWAYS names a session — chrome-less creation surfaces
- * (home, both /chat/new drafts) and the chain table render NO title.
+ * the serif title names a session or a registered plugin view (plugin UI
+ * ruling, 2026-11-01); chrome-less creation surfaces (home, both /chat/new
+ * drafts) and the chain table render NO title.
  * `drag={false}` is the one escape hatch —
  * chat's rename mode (app-region:drag would eat the mousedown that
  * exits the input; owner ask).

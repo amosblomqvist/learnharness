@@ -36,6 +36,7 @@ import {
 	KEYBOARD_ACTIONS,
 } from "@/src/core";
 import { isDictationActive } from "@/components/dictation";
+import { dispatchFocusedPluginShortcut } from "@/components/plugin-input-focus";
 import { useSettingsDialog } from "@/components/settings/settings-dialog.tsx";
 
 // Re-exported for the contract pin (tests/keyboard-toggle-sidebar.test.ts):
@@ -65,7 +66,10 @@ export function KeyboardShortcuts() {
 			// works from any focus.
 			if (e.key === "Tab") {
 				e.preventDefault();
-				if (e.shiftKey) window.dispatchEvent(new CustomEvent("lh:kbd-cycle-thinking"));
+				if (e.shiftKey) {
+					if (!dispatchFocusedPluginShortcut("cycle-thinking"))
+						window.dispatchEvent(new CustomEvent("lh:kbd-cycle-thinking"));
+				}
 				// Plain Tab cycles the active surface's text fields (owner,
 				// keyboard round 2026-10-06) — forward-only, wrapping; each
 				// composer-bearing page answers with its own chain. The quiz
@@ -137,7 +141,8 @@ export function KeyboardShortcuts() {
 					window.dispatchEvent(new CustomEvent(kbdEventForAction(action)));
 					break;
 				default:
-					window.dispatchEvent(new CustomEvent(kbdEventForAction(action)));
+					if (!dispatchFocusedPluginShortcut(action))
+						window.dispatchEvent(new CustomEvent(kbdEventForAction(action)));
 			}
 		};
 		window.addEventListener("keydown", onKeyDown);

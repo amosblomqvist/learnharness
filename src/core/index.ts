@@ -88,4 +88,5 @@ export * from "./coverage.ts";
 // export share it. Pure, browser-safe.
 export * from "./session-markdown.ts";
 export * from "./plugins.ts";
+export type * from "./plugin-ui.ts";
 export * from "./plugin-agents.ts";

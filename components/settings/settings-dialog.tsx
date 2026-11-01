@@ -51,6 +51,8 @@ import { Hint } from "@/components/ui/hint";
 import { AppearanceSection, GraphSection } from "./appearance-section.tsx";
 import { KeyboardSection } from "./keyboard-section.tsx";
 import { PluginsSection } from "./plugins-section.tsx";
+import { PluginSettingsPage } from "./plugin-settings-page.tsx";
+import { usePlugins } from "@/components/plugins";
 import { ChatGPTUIProvider } from "./chatgpt-connection.tsx";
 import { NativeSubscriptionUIProvider } from "./subscription-connections.tsx";
 
@@ -63,10 +65,9 @@ const SECTIONS = [
 	{ id: "appearance", label: "Appearance" },
 	{ id: "graph", label: "Graph" },
 	{ id: "keyboard", label: "Keyboard", hint: "Stored on this device" },
-	{ id: "plugins", label: "Plugins" },
 	{ id: "general", label: "General" },
 ] as const;
-type SectionId = (typeof SECTIONS)[number]["id"];
+type SectionId = (typeof SECTIONS)[number]["id"] | "plugins" | `plugin:${string}`;
 
 /** `open(section?, row?)` — the optional ROW deep-links into the Keys
  *  section with that row unfolded (zero-keys wave: the dictation error's
@@ -86,17 +87,27 @@ export function SettingsDialogProvider({
 	const [show, setShow] = useState(false);
 	const [landOn, setLandOn] = useState<SectionId>("keys");
 	const [landOnRow, setLandOnRow] = useState<string | null>(null);
+	const [navigationRequest, setNavigationRequest] = useState(0);
 	const open = useCallback((section?: string, row?: string) => {
+		setNavigationRequest(request => request + 1);
 		setLandOn(section ? section as SectionId : "keys");
 		setLandOnRow(row ?? null);
 		setShow(true);
 	}, []);
 	useEffect(() => window.lh?.onOpenSettings?.((section) => open(section)), [open]);
+	useEffect(() => {
+		const onPluginSettings = (event: Event) => {
+			const pluginId: unknown = (event as CustomEvent<unknown>).detail;
+			if (typeof pluginId === "string") open(`plugin:${pluginId}`);
+		};
+		window.addEventListener("lh:open-plugin-settings", onPluginSettings);
+		return () => window.removeEventListener("lh:open-plugin-settings", onPluginSettings);
+	}, [open]);
 	return (
 		<ChatGPTUIProvider><NativeSubscriptionUIProvider><DialogContext.Provider value={{ open }}>
 			{children}
 			{show && (
-				<SettingsDialog onClose={() => setShow(false)} initialSection={landOn} initialRow={landOnRow} />
+				<SettingsDialog onClose={() => setShow(false)} initialSection={landOn} initialRow={landOnRow} navigationRequest={navigationRequest} />
 			)}
 		</DialogContext.Provider></NativeSubscriptionUIProvider></ChatGPTUIProvider>
 	);
@@ -110,9 +121,11 @@ function SettingsDialog({
 	onClose,
 	initialSection,
 	initialRow,
+	navigationRequest,
 }: {
 	onClose: () => void;
 	initialSection: SectionId;
+	navigationRequest: number;
 	/** The keys-section row to unfold (see DialogContext above). */
 	initialRow: string | null;
 }) {
@@ -125,7 +138,7 @@ function SettingsDialog({
 			data-testid="settings-backdrop"
 			{...backdropDismiss}
 		>
-			<SettingsDialogBody onClose={onClose} initialSection={initialSection} initialRow={initialRow} />
+			<SettingsDialogBody onClose={onClose} initialSection={initialSection} initialRow={initialRow} navigationRequest={navigationRequest} />
 		</div>,
 		document.body,
 	);
@@ -137,14 +150,18 @@ export function SettingsDialogBody({
 	onClose,
 	initialSection = "keys",
 	initialRow = null,
+	navigationRequest = 0,
 }: {
 	onClose: () => void;
 	initialSection?: SectionId;
+	/** Repeated opens must retarget even when the requested section is unchanged. */
+	navigationRequest?: number;
 	/** The keys row to unfold on arrival (null = none). While-open
 	 *  retargets follow it exactly like initialSection below. */
 	initialRow?: string | null;
 }) {
 	const { onAppearanceChange } = useAppearance();
+	const { snapshot } = usePlugins();
 	const [record, setRecord] = useState<UserSettings | null | undefined>(
 		undefined,
 	);
@@ -189,7 +206,23 @@ export function SettingsDialogBody({
 	// nothing.
 	useEffect(() => {
 		setActive(initialSection);
-	}, [initialSection]);
+	}, [initialSection, navigationRequest]);
+
+	const enabledPlugins = snapshot.plugins.filter(plugin => plugin.info.enabled);
+	const activePluginId = active.startsWith("plugin:") ? active.slice("plugin:".length) : null;
+	const activePlugin = enabledPlugins.find(plugin => plugin.info.id === activePluginId);
+	// Keep a deep link pending while discovery loads. Once discovery settles,
+	// disabled/uninstalled destinations return to management, never stale DOM.
+	const missingPlugin = activePluginId !== null && !activePlugin && !snapshot.loading;
+	useEffect(() => {
+		if (missingPlugin) setActive("plugins");
+	}, [missingPlugin]);
+	const selected = missingPlugin ? "plugins" : active;
+	const navSections: { id: SectionId; label: string }[] = [
+		...SECTIONS,
+		{ id: "plugins", label: "Plugins" },
+		...enabledPlugins.map(plugin => ({ id: `plugin:${plugin.info.id}` as const, label: plugin.info.manifest?.name ?? plugin.info.id })),
+	];
 
 	// Fetch once per dialog mount. 200 {settings: null} is FIRST BOOT
 	// (no record = factory everything), not a failure — the error state is
@@ -307,23 +340,26 @@ export function SettingsDialogBody({
 				<nav
 					aria-label="Settings sections"
 					data-testid="settings-nav"
-					className="flex w-44 shrink-0 flex-col gap-1 border-r border-border p-2"
+					className="flex min-h-0 w-44 shrink-0 flex-col gap-1 overflow-y-auto border-r border-border p-2"
 				>
-					{SECTIONS.map((s) => (
-						<button
-							key={s.id}
-							type="button"
-							data-testid={`settings-nav-${s.id}`}
-							aria-current={active === s.id}
-							className={`rounded-sm px-3 py-1.5 text-left font-ui text-sm transition-colors ${
-								active === s.id
-									? "bg-accent text-foreground"
-									: "text-muted-foreground hover:bg-accent hover:text-foreground"
-							}`}
-							onClick={() => setActive(s.id)}
-						>
-							{s.label}
-						</button>
+					{navSections.map((s, index) => (
+						<div key={s.id} className="shrink-0">
+							{index === SECTIONS.length && <hr className="my-2 border-border" />}
+							<button
+								type="button"
+								data-testid={`settings-nav-${s.id}`}
+								aria-current={selected === s.id}
+								className={`w-full break-words rounded-sm px-3 py-1.5 text-left font-ui text-sm transition-colors ${
+									selected === s.id
+										? "bg-accent text-foreground"
+										: "text-muted-foreground hover:bg-accent hover:text-foreground"
+								}`}
+								onClick={() => setActive(s.id)}
+							>
+								{s.label}
+							</button>
+							{s.id === "plugins" && <hr className="my-2 border-border" />}
+						</div>
 					))}
 				</nav>
 
@@ -338,7 +374,7 @@ export function SettingsDialogBody({
 					className="min-w-0 flex-1 overflow-y-auto"
 					data-testid="settings-content"
 				>
-					{error && (
+					{error && !activePluginId && selected !== "plugins" && (
 						<p
 							role="alert"
 							className="m-4 rounded-sm border border-red-500/40 px-3 py-2 text-xs text-red-500"
@@ -347,7 +383,10 @@ export function SettingsDialogBody({
 							{error}
 						</p>
 					)}
-					{active === "plugins" ? <PluginsSection onOpenView={onClose} /> : record === undefined ? (
+					{selected === "plugins" ? <PluginsSection onOpenSettings={pluginId => setActive(`plugin:${pluginId}`)} />
+						: activePlugin ? <PluginSettingsPage key={`${activePlugin.info.id}/${activePlugin.info.revision}`} plugin={activePlugin} />
+							: activePluginId !== null ? <p role="status" className="px-6 py-5 text-xs text-muted-foreground">Loading plugins…</p>
+								: record === undefined ? (
 						<p className="px-6 py-5 text-xs text-muted-foreground/70">
 							Loading settings…
 						</p>

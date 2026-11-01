@@ -34,13 +34,31 @@ export function activate(ctx) {
     container.textContent = "Rendered fence: " + block.source;
     return () => container.replaceChildren();
   }});
-  ctx.registerToolRenderer({ toolName: "native_smoke_echo", mount(container, tool) {
+  ctx.registerToolRenderer({ toolName: "native_smoke_echo", backgroundPresentation: "plain", mount(container, tool) {
     container.dataset[tool.background ? "smokeBackground" : "smokeTool"] = "true";
     container.textContent = (tool.background ? "Rendered worker: " : "Rendered tool: ") + tool.output.value;
     return () => container.replaceChildren();
   }});
-  ctx.registerView({ id: "proof", name: "Runtime proof", async mount(container) {
+  ctx.registerAction({ id: "open", name: "Runtime proof", run: () => ctx.app.openView("proof") });
+  ctx.placeAction({ id: "open-sidebar", actionId: "open", location: "sidebar" });
+  ctx.placeAction({ id: "open-graph", actionId: "open", location: "graph" });
+  ctx.placeAction({ id: "open-session", actionId: "open", location: "top-bar", sessions: ["teaching", "practice"] });
+  for (let index = 0; index < 32; index++) {
+    ctx.placeAction({ id: "rail-" + index, actionId: "open", location: "graph" });
+    if (index < 8) {
+      ctx.placeAction({ id: "sidebar-" + index, actionId: "open", location: "sidebar" });
+      ctx.placeAction({ id: "session-" + index, actionId: "open", location: "top-bar", sessions: ["teaching", "practice"] });
+    }
+  }
+  const row = { key: "proof", label: "Fixture toggle", type: "toggle", value: false, onChange(value) { settings.update({ rows: [{ ...row, value }] }); } };
+  const settings = ctx.registerSettings({ rows: [row] });
+  ctx.registerView({ id: "proof", name: "Runtime proof", async mount(container, signal) {
     const heading = document.createElement("h1"); heading.textContent = message; container.append(heading);
+    const controls = document.createElement("div"); container.append(controls);
+    ctx.ui.mountButton(controls, { label: "Open host dialog", onClick: () => { ctx.ui.openDialog({ title: "Plugin dialog proof", content: (body) => { body.textContent = "Host dialog content"; } }, { signal }); } }, { signal });
+    let draft = "";
+    const composerProps = () => ({ value: draft, onChange(value) { draft = value; widget.update({ composer: composerProps() }); }, onSend() { const sent = document.createElement("p"); sent.dataset.smokeSubmitted = "true"; sent.textContent = draft; container.append(sent); draft = ""; widget.update({ composer: composerProps() }); }, placeholder: "Plugin composer proof" });
+    const widget = ctx.ui.mountStandardComposer(controls, { composer: composerProps(), model: { value: undefined, onChange() {} }, thinking: { model: undefined, value: undefined, onChange() {} }, dictation: { onTranscript(text) { draft = (draft + " " + text).trim(); widget.update({ composer: composerProps() }); } } }, { signal });
     const result = await ctx.call("proof", "browser-bridge");
     if (ctx.signal.aborted) return;
     const body = document.createElement("p"); body.textContent = result.answer; container.append(body);

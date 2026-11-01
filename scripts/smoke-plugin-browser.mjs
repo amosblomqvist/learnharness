@@ -23,8 +23,8 @@ const PLUGIN = "/api/plugins/native-smoke";
 const VIEW = "/plugins/native-smoke/proof";
 const ROW = '[data-testid="plugin-native-smoke"]';
 const TOGGLE = `${ROW} [role="switch"][aria-label="Enable Runtime proof"]`;
-const SIDEBAR_LINK = `nav[aria-label="Plugin views"] a[href="${VIEW}"]`;
-const MOUNT = 'main [aria-label="Runtime proof"]';
+const SIDEBAR_LINK = '[data-plugin-action="native-smoke/open-sidebar"]';
+const MOUNT = 'main div[aria-label="Runtime proof"]';
 
 async function chromeExecutable(supplied) {
 	const candidates = supplied ? [supplied] : [
@@ -159,7 +159,7 @@ export async function verifyPluginBrowser(url, options = {}) {
 			children: document.querySelector(mount)?.childElementCount,
 			headings: [...document.querySelectorAll(`${mount} h1`)].filter(element => element.textContent === "External module loaded").length,
 			answers: [...document.querySelectorAll(`${mount} p`)].filter(element => element.textContent === "browser-bridge").length,
-		}), { mount: MOUNT, link: SIDEBAR_LINK }), { links: 1, roots: 1, children: 1, headings: 1, answers: 1 }, "A view mount must have one sidebar link, one owned DOM root, and no duplicated content");
+		}), { mount: MOUNT, link: SIDEBAR_LINK }), { links: 1, roots: 1, children: 1, headings: 1, answers: 1 }, "A view mount must have one explicitly placed sidebar action, one owned DOM root, and no duplicated content");
 		await health();
 	};
 	const openTranscript = async () => {
@@ -216,6 +216,14 @@ export async function verifyPluginBrowser(url, options = {}) {
 		evidence.stage = "UI enable and external ESM activation";
 		await toggle(true);
 		await page.waitForSelector(SIDEBAR_LINK);
+		const sidebarLayout = await page.$eval('[data-testid="sidebar-actions"]', node => ({
+			columns: getComputedStyle(node).gridTemplateColumns.split(" ").length,
+			children: node.children.length, scrollable: node.scrollHeight > node.clientHeight,
+			first: node.children[0]?.textContent.trim(), second: node.children[1]?.textContent.trim(),
+		}));
+		assert.equal(sidebarLayout.columns, 2); assert.equal(sidebarLayout.children, 11);
+		assert.equal(sidebarLayout.scrollable, true); assert.match(sidebarLayout.first, /Teaching/); assert.match(sidebarLayout.second, /Practice/);
+		evidence.assertions.push("Sidebar uses row-major Teaching/Practice first row and capped two-column overflow above ten total buttons");
 		await closeSettings();
 		await openProof();
 		for (const asset of ["/plugin-loader.js", `${PLUGIN}/assets/main.js`, `${PLUGIN}/assets/assets/helper.js`]) {
@@ -223,12 +231,72 @@ export async function verifyPluginBrowser(url, options = {}) {
 		}
 		assert.ok(evidence.requests.some(entry => new URL(entry.url).pathname === `${PLUGIN}/assets/main.js` && new URL(entry.url).searchParams.has("revision")), "Entry module must use the server revision query");
 		evidence.assertions.push("Native external ESM + relative helper module + real browser-to-backend proof RPC");
+		evidence.pluginTitleStyle = await page.$eval('main header [data-plugin-chrome-title]', node => {
+			const style = getComputedStyle(node);
+			return { fontFamily: style.fontFamily, fontSize: style.fontSize, lineHeight: style.lineHeight, letterSpacing: style.letterSpacing };
+		});
 		await screenshot("enabled");
+
+		evidence.stage = "host widgets and dedicated plugin settings";
+		assert.equal(await page.$$eval('nav[aria-label="Plugin views"]', nodes => nodes.length), 0, "Views must not create an automatic sidebar section");
+		await page.locator(`${MOUNT} button[title="Open host dialog"], ${MOUNT} button`).filter(button => button.textContent === "Open host dialog").click();
+		await page.waitForSelector('[role="dialog"][aria-label="Plugin dialog proof"]', { visible: true });
+		assert.match(await page.$eval('[role="dialog"][aria-label="Plugin dialog proof"]', node => node.textContent), /Host dialog content/);
+		await page.locator('[aria-label="Close dialog"]').click();
+		await page.waitForSelector('[role="dialog"][aria-label="Plugin dialog proof"]', { hidden: true });
+		await page.locator(`${MOUNT} [contenteditable="true"]`).fill("Controlled plugin message");
+		await page.locator(`${MOUNT} [aria-label="Send"]`).click();
+		await page.waitForFunction(() => document.querySelector('[data-smoke-submitted]')?.textContent === "Controlled plugin message");
+		await page.locator(`${MOUNT} [contenteditable="true"]`).click();
+		const modifier = process.platform === "darwin" ? "Meta" : "Control";
+		await page.keyboard.down(modifier);
+		await page.keyboard.press("k");
+		await page.keyboard.up(modifier);
+		await page.waitForSelector('[data-testid="plugin-model-menu"]', { visible: true });
+		await page.keyboard.press("Escape");
+		await page.waitForSelector('[data-testid="plugin-model-menu"]', { hidden: true });
+		await page.locator('main button[aria-label="Plugin settings"]').click();
+		await page.waitForSelector('[data-testid="section-plugin-native-smoke"]', { visible: true });
+		await page.locator('[data-testid="section-plugin-native-smoke"] [role="switch"]').click();
+		await page.waitForSelector('[data-testid="section-plugin-native-smoke"] [role="switch"][aria-checked="true"]');
+		await closeSettings();
+		await health();
+		evidence.assertions.push("Host portal button/dialog, controlled composer and focused Mod+K model menu, gear deep-link and schema toggle work without plugin React imports or settings writes");
+		await screenshot("host-ui");
 
 		evidence.stage = "SPA Home navigation and view reattach";
 		await page.locator('aside a[aria-label="Home"]').click();
 		await page.waitForFunction(mount => window.location.pathname === "/" && document.querySelectorAll(mount).length === 0, {}, MOUNT);
 		assert.equal(await page.$$eval(SIDEBAR_LINK, elements => elements.length), 1, "Activation must survive leaving the view");
+		await page.waitForSelector('[data-testid="plugin-graph-actions"] [data-plugin-action="native-smoke/open-graph"]', { visible: true });
+		const rail = await page.$eval('[data-testid="plugin-graph-actions"]', element => {
+			const button = element.querySelector('button');
+			const bounds = button.getBoundingClientRect();
+			const railBounds = element.getBoundingClientRect();
+			const gapTarget = document.elementFromPoint(railBounds.left + 4, bounds.bottom + 4);
+			return { width: bounds.width, height: bounds.height, left: bounds.left - railBounds.left, top: bounds.top - railBounds.top,
+				pointerEvents: getComputedStyle(element).pointerEvents, buttonPointerEvents: getComputedStyle(button).pointerEvents,
+				gapIntercepted: element.contains(gapTarget) };
+		});
+		assert.deepEqual(rail, { width: 36, height: 36, left: 8, top: 8, pointerEvents: "none", buttonPointerEvents: "auto", gapIntercepted: false });
+		evidence.assertions.push("Graph rail matches native 36px controls/8px padding and transparent gaps pass through to the graph");
+		const railButton = await page.$('[data-testid="plugin-graph-actions"] button');
+		const railBounds = await railButton.boundingBox();
+		await page.mouse.move(railBounds.x + railBounds.width / 2, railBounds.y + railBounds.height / 2);
+		await page.mouse.wheel({ deltaY: 500 });
+		await page.waitForFunction(() => document.querySelector('[data-testid="plugin-graph-actions"]').scrollTop > 0);
+		await page.$eval('[data-testid="plugin-graph-actions"]', element => { element.scrollTop = 0; });
+		await page.locator('aside button[aria-label="Close sidebar"]').click();
+		await page.waitForSelector('aside[aria-hidden="true"]');
+		await page.waitForFunction(() => {
+			const rail = document.querySelector('[data-testid="plugin-graph-actions"] button')?.getBoundingClientRect();
+			const toggle = document.querySelector('button[aria-label="Open sidebar"]')?.getBoundingClientRect();
+			return rail && toggle && rail.top >= toggle.bottom + 7 && rail.left === 8;
+		});
+		await screenshot("graph-rail-sidebar-closed");
+		await page.locator('button[aria-label="Open sidebar"]').click();
+		await page.waitForSelector('aside[aria-hidden="false"]');
+		evidence.assertions.push("Graph rail scrolls over its buttons and stays below the sidebar toggle when the sidebar closes");
 		await openProof();
 		for (const asset of ["/plugin-loader.js", `${PLUGIN}/assets/main.js`, `${PLUGIN}/assets/assets/helper.js`, "/api/events"]) {
 			assert.equal(evidence.requests.filter(entry => new URL(entry.url).pathname === asset).length, 1, `SPA navigation must not duplicate the loader, activation imports, or standing SSE channel: ${asset}`);
@@ -239,6 +307,19 @@ export async function verifyPluginBrowser(url, options = {}) {
 
 		evidence.stage = "shared lesson renderers with stored native history";
 		await openTranscript();
+		await page.waitForSelector('[aria-label="More plugin actions"]', { visible: true });
+		await page.locator('[aria-label="More plugin actions"]').click();
+		await page.waitForSelector('[data-testid="plugin-top-bar-menu"]', { visible: true });
+		await page.keyboard.press("ArrowDown");
+		await page.waitForFunction(() => document.activeElement?.getAttribute("role") === "menuitem");
+		await page.keyboard.press("Escape");
+		await page.waitForSelector('[data-testid="plugin-top-bar-menu"]', { hidden: true });
+		const sessionTitleStyle = await page.$eval('main header [data-plugin-chrome-title]', node => {
+			const style = getComputedStyle(node);
+			return { fontFamily: style.fontFamily, fontSize: style.fontSize, lineHeight: style.lineHeight, letterSpacing: style.letterSpacing };
+		});
+		assert.deepEqual(sessionTitleStyle, evidence.pluginTitleStyle, "Plugin view titles match session-title typography exactly");
+		evidence.assertions.push("Session top-bar actions use keyboard-accessible three-dot overflow; plugin titles match session typography exactly");
 		for (const selector of ["[data-smoke-fence]", "[data-smoke-tool]", "[data-smoke-background]"]) {
 			await page.waitForSelector(selector, { visible: true });
 			assert.equal(await page.$$eval(selector, nodes => nodes.length), 1, `Expected one native renderer mount: ${selector}`);
@@ -285,6 +366,9 @@ export async function verifyPluginBrowser(url, options = {}) {
 		assert.match(await page.$eval("main", node => node.textContent), /Fence source\./);
 		assert.match(await page.$eval("main", node => node.textContent), /Tool detail/);
 		assert.match(await page.$eval("main", node => node.textContent), /Worker detail/);
+		assert.ok(await page.$('[data-testid="plugin-worker-card"] details:not([open])'), "Default worker fallback uses collapsed research/PDF presentation");
+		await page.locator('[data-testid="plugin-worker-card"] details > summary').click();
+		await page.waitForSelector('[data-testid="plugin-worker-fallback"]', { visible: true });
 		evidence.assertions.push("Disabling renderers preserves raw fence source, native call details and the later background result");
 		await screenshot("lesson-fallbacks");
 		await health();

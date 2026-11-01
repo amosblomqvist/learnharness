@@ -7,8 +7,10 @@ import { pluginBackgroundPart } from "../components/artifacts/plugin-worker-card
 import { SubagentSteerCard } from "../components/artifacts/steer-card.tsx";
 import { DispatchCard } from "../components/artifacts/dispatch-card.tsx";
 import { JobsContext } from "../components/jobs-context.ts";
+import { ToolPartRenderer } from "../components/plugin-renderers.tsx";
+import { PluginWorkerResultSurface } from "../components/plugin-worker-result.tsx";
 import { ActivitySection, toBlobs, type FeedJob } from "../components/activity-dock.tsx";
-import { buildAbortSteer, buildSubagentSteer, projectView, type LhMarkerMessage, type PluginBackgroundResult } from "../src/core/index.ts";
+import { buildAbortSteer, buildSubagentSteer, projectView, type LhMarkerMessage, type LhViewPart, type PluginBackgroundResult } from "../src/core/index.ts";
 
 const result: PluginBackgroundResult = {
 	pluginId: "uninstalled-proof", toolName: "check_sources", input: { topic: "original accepted input" },
@@ -74,6 +76,61 @@ describe("persisted plugin worker result UI without an active plugin", () => {
 	it("keeps the existing learner-abort marker presentation for plugin jobs", () => {
 		const html = renderToStaticMarkup(<SubagentSteerCard message={projectView([buildAbortSteer(job)])[0]!} />);
 		assert.match(html, /job-aborted-badge/); assert.match(html, /plugin/); assert.match(html, /aborted by the learner/);
+	});
+});
+
+describe("default plugin worker transcript presentation", () => {
+	const ack = {
+		type: "tool-check_sources", toolCallId: job.toolCallId, state: "output-available" as const,
+		input: result.input, result: { content: [{ type: "text" as const, text: "Accepted; keep teaching" }], details: { jobId: job.id, dispatched: true }, isError: false },
+	};
+
+	it("uses native dispatch from ACK details before the job feed arrives", () => {
+		const html = renderToStaticMarkup(<ToolPartRenderer part={ack} />);
+		assert.match(html, /dispatch-card/); assert.match(html, /Plugin worker/); assert.match(html, /Dispatched/);
+		assert.doesNotMatch(html, /tool-call-card|Accepted; keep teaching|Task details/);
+	});
+
+	it("matches plugin jobs by original toolCallId and reuses active/settled dispatch", () => {
+		for (const status of ["running", "done", "error"] as const) {
+			const html = renderToStaticMarkup(<JobsContext.Provider value={[{ ...job, status, activity: "Checking sources" }]}><ToolPartRenderer part={{ ...ack, result: undefined }} /></JobsContext.Provider>);
+			assert.match(html, /Source checker/); assert.doesNotMatch(html, /tool-call-card/);
+			assert.match(html, status === "running" ? /Checking sources/ : status === "done" ? /finished/ : /failed/);
+		}
+		const unrelated = renderToStaticMarkup(<JobsContext.Provider value={[{ ...job, toolCallId: "another-call" }]}><ToolPartRenderer part={{ ...ack, result: undefined }} /></JobsContext.Provider>);
+		assert.match(unrelated, /tool-call-card/); assert.doesNotMatch(unrelated, /dispatch-card/);
+	});
+
+	it("keeps ordinary sync tools and unsuccessful/non-ACK details generic", () => {
+		const fixtures: Array<NonNullable<LhViewPart["result"]>["details"]> = [undefined, null, { answer: 42 }, { jobId: job.id }, { dispatched: true }, { jobId: 12, dispatched: true }, { jobId: job.id, dispatched: false }];
+		for (const details of fixtures) {
+			const html = renderToStaticMarkup(<ToolPartRenderer part={{ ...ack, result: { ...ack.result, details } }} />);
+			assert.match(html, /tool-call-card/); assert.match(html, /Accepted; keep teaching|answer|jobId|dispatched/);
+			assert.doesNotMatch(html, /dispatch-card/);
+		}
+		const failure = renderToStaticMarkup(<ToolPartRenderer part={{ ...ack, state: "output-error", result: { ...ack.result, isError: true } }} />);
+		assert.match(failure, /tool-call-card/); assert.doesNotMatch(failure, /dispatch-card/);
+	});
+
+	it("defaults persisted results to shared collapsed grammar, readable markdown, and raw details", () => {
+		const html = renderToStaticMarkup(<SubagentSteerCard message={projectView([buildSubagentSteer(job, { ...result, text: "A **verified** answer." })])[0]!} />);
+		assert.match(html, /<details[^>]*data-testid="plugin-worker-result"/);
+		assert.doesNotMatch(html, /<details[^>]*data-testid="plugin-worker-result"[^>]*\sopen[\s=>]/);
+		assert.match(html, /<strong[^>]*>verified<\/strong>/); assert.match(html, /view result/);
+		assert.match(html, /Task details/); assert.match(html, /raw authoritative worker result/);
+		assert.doesNotMatch(html, /plugin-worker-result-card|dispatch-card/);
+	});
+
+	it("offers a reusable bordered result option without changing the default or nesting custom bodies", () => {
+		const collapsed = renderToStaticMarkup(<PluginWorkerResultSurface label="Checker" status="succeeded" text="**Readable** fallback" />);
+		assert.match(collapsed, /<details/); assert.match(collapsed, /<strong[^>]*>Readable<\/strong>/);
+		const card = renderToStaticMarkup(<PluginWorkerResultSurface label="Checker" status="interrupted" text="replaced" presentation="card"><svg data-testid="rich-result" /></PluginWorkerResultSurface>);
+		assert.match(card, /plugin-worker-result-card/); assert.match(card, /rounded-xl border bg-card p-4/);
+		assert.match(card, /Checker/); assert.match(card, /interrupted/); assert.match(card, /rich-result/);
+		assert.doesNotMatch(card, /<details|replaced/);
+		const plain = renderToStaticMarkup(<PluginWorkerResultSurface label="Figure checker" status="succeeded" text="replaced" presentation="plain"><svg data-testid="unframed-result" /></PluginWorkerResultSurface>);
+		assert.match(plain, /plugin-worker-result-plain/); assert.match(plain, /Figure checker/); assert.match(plain, /succeeded/);
+		assert.match(plain, /unframed-result/); assert.doesNotMatch(plain, /<details|rounded-xl|bg-card|replaced/);
 	});
 });
 

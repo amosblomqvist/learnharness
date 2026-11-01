@@ -124,13 +124,27 @@ export interface PluginBackendModule {
 export interface PluginView {
 	id: string;
 	name: string;
-	mount(container: HTMLElement): void | PluginCleanup | Promise<void | PluginCleanup>;
+	/** The host owns the shell. Abort scopes any UI mounted inside this view. */
+	mount(container: HTMLElement, signal: AbortSignal): void | PluginCleanup | Promise<void | PluginCleanup>;
 }
+export type PluginActionContext =
+	| { placement: "top-bar"; surface: "session"; sessionId: string; kind: "teaching" | "practice" }
+	| { placement: "top-bar"; surface: "plugin-view"; pluginId: string; viewId: string }
+	| { placement: "sidebar"; surface: "sidebar" }
+	| { placement: "graph"; surface: "graph" };
 export interface PluginAction {
 	id: string;
 	name: string;
-	run(): void | Promise<void>;
+	/** Trusted plugin SVG markup. The host still renders the surrounding button. */
+	icon?: string;
+	disabled?: boolean | ((context: PluginActionContext) => boolean);
+	run(context: PluginActionContext): void | Promise<void>;
 }
+/** Registration alone never creates chrome. Each placement is explicit. */
+export type PluginActionPlacement =
+	| { id: string; actionId: string; location: "sidebar" | "graph" }
+	| { id: string; actionId: string; location: "top-bar"; sessions?: ("teaching" | "practice")[]; views?: string[] };
+export type PluginSettingsRegistration = PluginView["mount"] | import("./plugin-ui.ts").PluginSettingsSchema;
 export interface PluginCodeBlockProps {
 	language: string;
 	source: string;
@@ -158,6 +172,8 @@ export interface PluginToolRenderProps {
 }
 export interface PluginToolRenderer {
 	toolName: string;
+	/** Later worker results collapse by default; rich results may opt into a card or unframed shell. */
+	backgroundPresentation?: "collapsed" | "card" | "plain";
 	mount(container: HTMLElement, tool: PluginToolRenderProps): void | PluginCleanup | Promise<void | PluginCleanup>;
 }
 export interface PluginFrontendContext {
@@ -166,7 +182,13 @@ export interface PluginFrontendContext {
 	cleanup(dispose: PluginCleanup): void;
 	registerView(view: PluginView): () => void;
 	registerAction(action: PluginAction): () => void;
+	placeAction(placement: PluginActionPlacement): () => void;
+	/** Explicitly notify the host when dynamic action enabled state changes. */
+	refreshActions(): void;
 	registerSettings(mount: PluginView["mount"]): () => void;
+	registerSettings(schema: import("./plugin-ui.ts").PluginSettingsSchema): import("./plugin-ui.ts").PluginWidgetHandle<import("./plugin-ui.ts").PluginSettingsSchema>;
+	registerSettings(settings: PluginSettingsRegistration): (() => void) | import("./plugin-ui.ts").PluginWidgetHandle<import("./plugin-ui.ts").PluginSettingsSchema>;
+	readonly ui: import("./plugin-ui.ts").PluginUi;
 	registerCodeBlock(renderer: PluginCodeBlockRenderer): () => void;
 	registerToolRenderer(renderer: PluginToolRenderer): () => void;
 	call<T = unknown>(operation: string, input?: unknown): Promise<T>;
@@ -179,6 +201,7 @@ export interface PluginFrontendContext {
 		openSession(id: string): void;
 		openHome(): void;
 		openView(id: string): void;
+		openSettings(): void;
 	};
 }
 export interface PluginFrontendModule {

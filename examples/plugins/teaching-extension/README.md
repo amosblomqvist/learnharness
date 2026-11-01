@@ -26,6 +26,11 @@ workers. Existing native calls/results remain saved. The original worker call st
 dispatch acknowledgement; the later result is a separate saved marker. Raw fallback
 remains readable without this plugin. Completed task records survive disable/restart.
 
+This is a silent, chrome-less extension: it registers no view, action, or placement.
+Its custom `registerSettings((container, signal) => …)` mount is intentionally retained
+as an explanatory-content escape hatch. There are no configurable behaviors to expose
+as schema settings; opening this content does not start a worker.
+
 Files use only the supported public context, no private app imports or runtime npm install.
 The backend has no independent product storage or core learning-data writes. The host
 owns task records and usage accounting in the installed package's `data/` directory.

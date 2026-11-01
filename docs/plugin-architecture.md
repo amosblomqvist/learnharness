@@ -9,10 +9,11 @@ remain in force. Backend code runs cooperatively inside the existing Node server
 broken code may require restarting the app.
 
 The human approved implementation of this plan in the `feature/plugin-architecture`
-worktree. Subsequent decisions: management/custom settings in **Settings → Plugins**,
-registered views in a small sidebar group; recoverable startup-only official-package
-updates rather than whole-directory swaps. Interrupted package updates must block that
-package from loading until a successful retry. Package-specific update failures are
+worktree. Subsequent decisions: package management in **Settings → Plugins** and,
+with the approved UI increment below, dedicated settings pages for enabled plugins
+and explicit action placement instead of an automatic plugin sidebar group;
+recoverable startup-only official-package updates rather than whole-directory swaps.
+Interrupted package updates must block that package from loading until a successful retry. Package-specific update failures are
 reported individually and do not prevent unrelated plugins from starting. These choices
 do not authorize a marketplace, core learning-data mutation, or a flashcard product design.
 
@@ -49,7 +50,8 @@ provides:
 - Optional managed agent sessions and result-oriented tasks under the plugin's own data directory.
 - Additive instructions/native Pi tools for the existing prober, teacher and practice agents.
 - Shared fenced-block/tool-result renderers, including later background-result presentation.
-- Custom view, action and settings registration; navigation and live app notifications.
+- Host-owned view shells, explicitly placed actions, dedicated plugin settings pages,
+  and controlled host UI widgets; navigation and live app notifications.
 - A JSON operation bridge between the frontend and its own backend.
 
 No supported API mutates core sessions or graph evidence initially. The learning-data
@@ -58,10 +60,69 @@ the host's file interpretation, not mandatory filesystem access control. Reads a
 several files are not promised to be transactional. `readGraphFile` uses store readers:
 for example `sources.json` returns source records, not the file's raw keyed JSON map.
 
-Custom views receive an HTMLElement. A plugin may use plain DOM or bundle React and
-mount/unmount its own root. Do not import private LearnHarness components or rely on
-its React context. Public assets are only declared frontend entry/style files and the
-explicit `assets/` subtree, never the backend or `data/` directory.
+Custom views receive an HTMLElement and a mount-scoped AbortSignal. A plugin may use
+plain DOM or bundle React and mount/unmount its own root. Do not import private
+LearnHarness components or rely on its React context. Public assets are only declared
+frontend entry/style files and the explicit `assets/` subtree, never the backend or
+`data/` directory.
+
+## Host shell, actions and controlled UI
+
+The exact contracts are `src/core/plugins.ts` and `src/core/plugin-ui.ts`;
+`components/plugin-manager.ts` owns the per-window registration/lifecycle boundary.
+`PluginView.mount(container, signal)` owns only the feature body. The host owns the
+top bar, title, action layout/overflow, and plugin-settings gear. A mount may return
+cleanup asynchronously; departure/replacement/disable aborts its signal. This is
+separate from the activation lifetime.
+
+Registering views/actions creates no automatic navigation chrome. Register an action
+with `registerAction` first, then attach it using `placeAction({ id, actionId,
+location, ...targets })`. Locations are `sidebar`, `graph`, and `top-bar`. Top-bar
+placements require explicit `sessions` (`teaching`/`practice`) and/or `views` (the
+placing plugin's view IDs) targets. Sidebar actions share the core teaching/practice
+action area; there is **no dedicated plugin sidebar section**. Graph actions occupy
+the host graph strip. Placement and registration have separate unregister handles.
+
+Actions receive typed surface context: session ID/kind on session top bars, plugin/view
+IDs on plugin top bars, or the sidebar/graph surface discriminator. Plugins supply
+name, optional trusted SVG icon, disabled boolean/predicate, and `run(context)`.
+`ctx.refreshActions()` explicitly asks the host to re-evaluate enabled state after
+plugin state changes. The host owns surrounding buttons and async busy state, prevents
+repeat invocation of the same action until its Promise settles, and surfaces errors.
+
+`ctx.ui` is a framework-neutral controlled facade, implemented in the host tree rather
+than exported private React components. It provides independently mountable composer,
+dictation, model picker, thinking picker, button, settings rows and worker-result
+presentation; `mountStandardComposer` combines the first four as a preset. Menus and
+dialogs are available via `openMenu` and `openDialog`. Every call takes
+`options: { signal }` and returns a handle with shallow `update(partialProps)` and
+idempotent `dispose()`. Widget scopes terminate on mount-signal abort or plugin disable.
+Plugins retain values and callback/persistence policy; selectors never write core
+model defaults or other core settings. No widget implicitly starts inference.
+
+The standard composer deliberately excludes usage, practice controls, attachments and
+default file/drop insertion. Dictation has an explicit plugin text destination, never
+an implicit core composer/question target. There is one recording owner across core
+and plugin instances in a window; another start reports “Dictation is active elsewhere”.
+Only focused plugin controls claim their matching shortcuts, with core fallback otherwise;
+Escape cancels the actual recording owner. The preset finishes dictation and awaits
+transcript delivery before send. Independent widgets leave that coordination to the plugin.
+
+Every enabled plugin gets a dedicated Settings navigation page, even without registered
+settings or a frontend entry. The host displays an empty state when appropriate; package
+management stays separate in Settings → Plugins. Both the view gear and
+`ctx.app.openSettings()` select the owning plugin's page. `registerSettings` accepts
+one `{ rows }` schema or a custom `mount(container, signal)` escape hatch. Rows support
+toggle, text, dropdown, number and slider controls, controlled values, plugin callbacks,
+optional validation/description/disabled state and numeric bounds. Schema validation
+rejects invalid registrations; value validation prevents invalid commits. Async callback
+failures are inline errors, not successful saves. The schema overload returns
+`PluginWidgetHandle<PluginSettingsSchema>`: `update({ rows })` validates and publishes
+accepted values, and `dispose()` unregisters; stale/disposed handles are inert. The
+custom-mount overload retains its unregister-function return. Plugins own persistence
+and backend validation, publishing rows only after a successful save; a custom mount
+is not required for live updates, but may use `mountSettingsRows` itself. No general
+declarative UI language or host-owned plugin settings store is added.
 
 ## Managed agents
 
@@ -158,6 +219,19 @@ pending-question gates, consent, continuation coalescing and deterministic deliv
 Model text and rendered data are separate; the later card reuses the tool renderer with
 explicit background metadata rather than fabricating a native tool result.
 
+The user-approved default result presentation is collapsed, sharing the research/PDF
+completion/disclosure grammar. Host identity/status (and disclosure when collapsed)
+remain authoritative; plugin renderers replace the body only.
+`PluginToolRenderer.backgroundPresentation?: "collapsed" | "card" | "plain"` chooses
+the shell for later host-delivered results, not the original tool acknowledgement.
+`ctx.ui.mountWorkerResult` exposes the same choices through its `presentation` prop
+for plugin-owned surfaces: default `"collapsed"` disclosure, expanded bordered `"card"`,
+or expanded unframed `"plain"` for SVG/demos. All retain host identity/status and
+host-delivered formatter errors remain visible. The helper also takes terminal status,
+label, fallback text and optional custom `content`. Content may be an HTMLElement or a signal-scoped mount with cleanup, including
+an async mount. Trusted SVG, interactive demos and other rich bodies are permitted;
+this does not authorize unsanitized model HTML or hiding readable fallback results.
+
 The canonical task outcome and delivery state are separate: formatter/unavailable-plugin
 failure keeps the accepted result plus honest fallback. Worker completion ends the job's
 computing state; END does not cancel completed work or its queued delivery. A generic
@@ -203,6 +277,8 @@ Uninstall/data deletion and automatic community updates are not part of v1.
 6. Authoring docs/types, template and coding-agent skill.
 7. Additive native agent contributions and shared renderer surfaces.
 8. Validated result tasks, native background-tool adapter and durable delivery/recovery.
+9. Host view shell, explicit action placements, controlled UI helpers, dedicated plugin
+   settings pages and shared collapsed result presentation.
 
 Validation includes focused lifecycle/storage/interaction tests, existing teaching/practice
 regressions, typecheck/lint, production build and a packaged-server smoke with disposable
@@ -211,7 +287,34 @@ checks. Full flashcards are the reference future consumer; generation cadence, r
 algorithm, source/deletion policy, prompts and other product behavior require their own
 approved specification.
 
+### UI implementation note — 2026-11-01
+
+This increment documents the approved host-shell/explicit-placement API, controlled
+widgets and composer preset, exclusive explicit-destination dictation, dedicated settings
+pages for enabled plugins with schema/custom mounts, and research/PDF-style collapsed result
+default with a reusable rich-body result helper and explicit collapsed/card/plain
+renderer presentation control. The hello-plugin, managed-agent and
+teaching-extension examples now consume these public APIs. This scope does not add
+automatic sidebar chrome, core settings writes, a general UI schema, or a new worker
+execution model. Existing installed example copies are not overwritten.
+
 ### Implementation verification
+
+The UI increment passed **3,465 tests / 552 suites** under the default test runner,
+plus the four standalone example-UI tests, typecheck and lint (zero errors; the same
+existing `source-name-ui` warning). Its production build, payload curation and
+source-free bundled-Node/Chrome smoke passed. Browser checks cover exact session/plugin
+title typography, explicit placements, sidebar row-major scrolling above ten buttons,
+graph-rail scrolling with the sidebar open/closed and pointer pass-through between
+buttons, keyboard-accessible top-bar overflow, controlled composer/model shortcut,
+dialogs, plugin settings gears/schema updates, renderer defaults and disable cleanup.
+A strict TypeScript consumer also compiled against the emitted framework-neutral SDK.
+
+Final suite verification exposed a pre-existing test-isolation bug: the background-tool
+test's recovery sweep could deliver another test process's pending job from shared disk
+stores. Clean pre-UI HEAD reproduced it; a cross-process write trace identified the
+foreign delivery. That test now allocates private storage before importing application
+modules and removes it after completion. No production scheduler or timeout was changed.
 
 The initial host checkpoint (before additive contributions/workers) passed **2,229 tests**
 (**468 suites**, no failures or skips), alongside `npm run typecheck`, `npm run lint`,

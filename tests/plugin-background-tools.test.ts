@@ -1,22 +1,31 @@
 import assert from "node:assert/strict";
-import { describe, it } from "node:test";
+import { after, describe, it } from "node:test";
 import { Type } from "typebox";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createFauxCore, fauxAssistantMessage, fauxToolCall } from "@earendil-works/pi-ai";
-import { createPluginWorkerService } from "../src/agent/plugin-workers.ts";
-import { createPluginTaskRecordStore } from "../src/store/plugin-task-records.ts";
-import { createPluginBackgroundTool, recoverPluginBackgroundJob } from "../src/server/plugin-background-tools.ts";
-import { buildAbortSteer, buildSubagentSteer, isSubagentFailure, type JobRecord, type SteerMessage } from "../src/core/contracts/jobs.ts";
+import type { JobRecord, SteerMessage } from "../src/core/contracts/jobs.ts";
 import type { JobStore } from "../src/core/ports.ts";
-import { createJobRunner } from "../src/agent/subagents/runner.ts";
-import { abortJob, deliverJobResult, recoverStaleJobs, registerLiveAgent, setJobRespawn, setPluginJobRecovery, setTurnRunner as setRawTurnRunner, settleSteers, unregisterLiveAgent, noteSteersDurable, type TurnRunner } from "../src/server/jobs.ts";
-import { registerJobAbort, unregisterJobAbort, isJobLive } from "../src/agent/subagents/aborts.ts";
-import { beginTurn, endTurn } from "../src/server/turn-liveness.ts";
-import { chatStore } from "../src/store/chats.ts";
-import { jobStore as diskJobs } from "../src/store/jobs.ts";
+import type { TurnRunner } from "../src/server/jobs.ts";
 import type { PluginBackgroundResult, PluginBackgroundTool, PluginTaskOutcome, PluginTaskRecord, PluginWorkerService } from "../src/core/plugin-workers.ts";
+
+// Recovery scans every chat/job in its store. Isolate before configuration
+// imports so this file's fake runner cannot deliver another test's markers.
+const testDataDirectory = mkdtempSync(join(tmpdir(), "lh-plugin-background-tools-"));
+process.env.LH_DATA_DIR = testDataDirectory;
+after(() => { rmSync(testDataDirectory, { recursive: true, force: true }); });
+
+const { createPluginWorkerService } = await import("../src/agent/plugin-workers.ts");
+const { createPluginTaskRecordStore } = await import("../src/store/plugin-task-records.ts");
+const { createPluginBackgroundTool, recoverPluginBackgroundJob } = await import("../src/server/plugin-background-tools.ts");
+const { buildAbortSteer, buildSubagentSteer, isSubagentFailure } = await import("../src/core/contracts/jobs.ts");
+const { createJobRunner } = await import("../src/agent/subagents/runner.ts");
+const { abortJob, deliverJobResult, recoverStaleJobs, registerLiveAgent, setJobRespawn, setPluginJobRecovery, setTurnRunner: setRawTurnRunner, settleSteers, unregisterLiveAgent, noteSteersDurable } = await import("../src/server/jobs.ts");
+const { registerJobAbort, unregisterJobAbort, isJobLive } = await import("../src/agent/subagents/aborts.ts");
+const { beginTurn, endTurn } = await import("../src/server/turn-liveness.ts");
+const { chatStore } = await import("../src/store/chats.ts");
+const { jobStore: diskJobs } = await import("../src/store/jobs.ts");
 
 function deferred<T>() {
 	let resolve!: (value: T) => void;

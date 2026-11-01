@@ -2,7 +2,10 @@
 
 import Link from "next/link";
 import { PluginMountPoint, usePlugins } from "@/components/plugins";
-import { SidebarToggle } from "@/components/sidebar";
+import { SettingsIcon } from "lucide-react";
+import { TopBar } from "@/components/top-bar";
+import { PluginTopBarActions } from "@/components/plugin-chrome";
+import { Hint } from "@/components/ui/hint";
 import { useSettingsDialog } from "@/components/settings/settings-dialog";
 import { Button } from "@/components/ui/button";
 
@@ -14,11 +17,14 @@ export function PluginViewScreen({ pluginId, viewId }: { pluginId: string; viewI
 	const loading = snapshot.loading || plugin?.phase === "loading";
 	const unavailable = !plugin ? "Plugin is not installed." : !plugin.info.enabled ? "This plugin is disabled." : "This plugin view is not available.";
 	return <div className="flex h-dvh min-w-0 flex-col">
-		<header className="lh-drag flex h-15 shrink-0 items-center gap-3 border-b border-border px-4">
-			<SidebarToggle />
-			<h1 className="truncate font-title text-2xl tracking-tight">{view?.name ?? plugin?.info.manifest?.name ?? "Plugin"}</h1>
-			<Button variant="ghost" size="sm" className="lh-no-drag ml-auto text-xs" onClick={() => open("plugins")}>Plugin settings</Button>
-		</header>
+		<TopBar>
+			<h1 data-plugin-chrome-title className="min-w-0 truncate font-title text-3xl tracking-tight">{view?.name ?? plugin?.info.manifest?.name ?? "Plugin"}</h1>
+			<div className="min-w-4 flex-1" aria-hidden="true" />
+			<PluginTopBarActions context={{ placement: "top-bar", surface: "plugin-view", pluginId, viewId }} />
+			<Hint label="Plugin settings" side="bottom">
+				<Button variant="ghost" size="icon" aria-label="Plugin settings" title="Plugin settings" className="shrink-0" onClick={() => open(`plugin:${pluginId}`)}><SettingsIcon className="size-4" /></Button>
+			</Hint>
+		</TopBar>
 		{snapshot.error && <p role="alert" className="px-5 py-3 text-xs text-destructive">{snapshot.error}</p>}
 		{plugin?.error && <p role="alert" className="px-5 py-3 text-xs text-destructive">{plugin.error}</p>}
 		{loading ? <p role="status" className="px-5 py-4 text-xs text-muted-foreground">Loading plugin…</p>

@@ -113,6 +113,8 @@ export function Composer({
 	placeholder = "Ask, answer, or steer the lesson…",
 	nextProblem = false,
 	onNext,
+	defaultDropTarget = true,
+	fileInsertion = true,
 }: {
 	busy: boolean;
 	value: string;
@@ -138,6 +140,9 @@ export function Composer({
 	/** The signal's dispatcher (send({type:"next"})) — the chip and the
 	 *  empty-Enter share it. */
 	onNext?: () => void;
+	/** Neutral plugin composers opt out without changing core defaults. */
+	defaultDropTarget?: boolean;
+	fileInsertion?: boolean;
 }) {
 	const act = () => {
 		const action = enterAction({ busy, canSend, nextProblem });
@@ -158,7 +163,8 @@ export function Composer({
 				ref={inputRef}
 				value={value}
 				onValueChange={onChange}
-				defaultDropTarget
+				defaultDropTarget={defaultDropTarget}
+				fileInsertion={fileInsertion}
 				onKeyDown={(e) => {
 					// Esc ends dictation before anything else Esc might someday mean
 					// here (the dictate decisions: click-again or Esc to stop).

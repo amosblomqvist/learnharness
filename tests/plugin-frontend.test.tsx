@@ -9,9 +9,10 @@ import { PathnameContext } from "next/dist/shared/lib/hooks-client-context.share
 import { parseHTML } from "linkedom";
 import { readFile } from "node:fs/promises";
 import { PluginFrontendManager, pluginAssetUrl, pluginViewPath, type PluginHost } from "../components/plugin-manager.ts";
-import { createPluginWindowOwner, importPluginModule, PluginsProvider, PluginSidebarLinks } from "../components/plugins.tsx";
+import { createPluginWindowOwner, importPluginModule, PluginsProvider, PluginWidgets } from "../components/plugins.tsx";
 import { ServerEventsProvider, type NotifySource } from "../components/server-events.tsx";
 import { PluginsSection } from "../components/settings/plugins-section.tsx";
+import { SettingsDialogBody } from "../components/settings/settings-dialog.tsx";
 import type { PluginCleanup, PluginFrontendContext, PluginFrontendModule, PluginInfo, ServerEvent } from "../src/core/index.ts";
 
 function deferred<T>() {
@@ -427,7 +428,7 @@ describe("plugin host APIs", () => {
 		f.manager.reconcile([info()]); await tick();
 		f.manager.notify({ pluginId: "fixture", topic: "test" });
 		assert.equal(good, 1); assert.equal(f.manager.getSnapshot().plugins[0]!.error, "listener exploded");
-		await f.manager.runAction("fixture", f.manager.getSnapshot().plugins[0]!.actions[0]!);
+		await f.manager.runAction("fixture", f.manager.getSnapshot().plugins[0]!.actions[0]!, { placement: "sidebar", surface: "sidebar" });
 		assert.equal(f.manager.getSnapshot().plugins[0]!.error, "action exploded");
 		f.manager.dispose();
 	});
@@ -453,7 +454,10 @@ describe("plugin view and settings mounts", () => {
 		let settingsMounts = 0, lateCleanups = 0, viewCleanups = 0;
 		const f = fixture({ activate(ctx) { ctx.registerSettings(() => { settingsMounts++; }); } });
 		f.manager.reconcile([info()]); await tick(); assert.equal(settingsMounts, 0);
-		const offSettings = f.manager.mount("fixture", f.manager.getSnapshot().plugins[0]!.settings!, container, assert.fail);
+		const settings = f.manager.getSnapshot().plugins[0]!.settings;
+		assert.equal(typeof settings, "function");
+		assert.ok(typeof settings === "function");
+		const offSettings = f.manager.mount("fixture", settings, container, assert.fail);
 		await tick(); assert.equal(settingsMounts, 1); offSettings();
 		const offOld = f.manager.mount("fixture", async child => { child.textContent = "old"; return completion.promise; }, container, assert.fail);
 		await tick(); offOld();
@@ -586,9 +590,10 @@ describe("plugin management transport and window ownership", () => {
 describe("plugin frontend surface and native importer", () => {
 	it("real provider and Settings interactions keep activation window-scoped and settings lazy", async () => {
 		const dom = parseHTML("<html><head></head><body><div id='root'></div></body></html>");
-		const keys = ["window", "self", "document", "HTMLElement", "IS_REACT_ACT_ENVIRONMENT"] as const;
+		const keys = ["window", "self", "document", "HTMLElement", "fetch", "IS_REACT_ACT_ENVIRONMENT"] as const;
 		const saved = new Map(keys.map(key => [key, Object.getOwnPropertyDescriptor(globalThis, key)]));
-		Object.assign(globalThis, { window: dom.window, self: dom.window, document: dom.document, HTMLElement: dom.window.HTMLElement, IS_REACT_ACT_ENVIRONMENT: true });
+		Object.assign(globalThis, { window: dom.window, self: dom.window, document: dom.document, HTMLElement: dom.window.HTMLElement,
+			fetch: async () => { throw new Error("Core settings unavailable"); }, IS_REACT_ACT_ENVIRONMENT: true });
 		let activated = 0, settingsMounts = 0, settingsCleanups = 0, activeSources = 0, enabled = true;
 		const actions: string[] = [], events: ServerEvent[] = [];
 		const f = fixture({ activate(ctx) {
@@ -615,21 +620,34 @@ describe("plugin frontend surface and native importer", () => {
 		};
 		const click = async (element: HTMLElement) => { await act(async () => { element.dispatchEvent(new dom.window.Event("click", { bubbles: true })); }); };
 		try {
-			await act(async () => { root.render(<React.StrictMode><AppRouterContext.Provider value={router}><PathnameContext.Provider value="/plugins/fixture/overview"><ServerEventsProvider connect={connect}><PluginsProvider><PluginSidebarLinks /><PluginsSection /></PluginsProvider></ServerEventsProvider></PathnameContext.Provider></AppRouterContext.Provider></React.StrictMode>); });
+			await act(async () => { root.render(<React.StrictMode><AppRouterContext.Provider value={router}><PathnameContext.Provider value="/plugins/fixture/overview"><ServerEventsProvider connect={connect}><PluginsProvider><SettingsDialogBody initialSection="plugins" onClose={() => {}} /></PluginsProvider></ServerEventsProvider></PathnameContext.Provider></AppRouterContext.Provider></React.StrictMode>); });
 			assert.equal(activated, 1); assert.equal(activeSources, 1); assert.equal(settingsMounts, 0);
 			assert.ok(document.body.textContent?.includes("/fixture/writable/plugins"));
-			assert.equal(document.querySelector('nav[aria-label="Plugin views"] a')?.getAttribute("href"), "/plugins/fixture/overview");
-			assert.equal(document.querySelector('nav[aria-label="Plugin views"] a')?.getAttribute("aria-current"), "page");
-			await click(button("Settings")); assert.equal(settingsMounts, 1);
-			assert.ok(document.body.textContent?.includes("Fixture custom settings"));
-			await click(button("Run fixture")); assert.deepEqual(actions, ["run"]);
-			await click(button("Settings")); assert.equal(settingsCleanups, 1);
+			assert.equal(document.querySelector('nav[aria-label="Plugin views"]'), null, "enabled plugin views do not create automatic navigation");
+			const gear = document.querySelector<HTMLButtonElement>('[aria-label="Settings for Plugin fixture"]')!;
+			assert.ok(gear);
+			assert.equal(gear.nextElementSibling?.getAttribute("role"), "switch", "gear sits immediately left of toggle");
+			assert.equal(document.querySelector('[data-testid="section-plugins"] a'), null, "management does not list plugin views");
+			assert.equal(document.body.textContent?.includes("Run fixture"), false, "management does not list actions");
+			await click(gear); assert.equal(settingsMounts, 1);
+			assert.ok(document.body.textContent?.includes("Fixture custom settings"), "plugin settings work despite core fetch failure");
+			assert.equal(document.querySelector('[data-testid="settings-nav-plugin:fixture"]')?.getAttribute("aria-current"), "true");
+			assert.deepEqual(actions, []);
+			await click(button("Plugins")); assert.equal(settingsCleanups, 1);
 			await act(async () => { frames.get("record-changed")!(JSON.stringify({ chatId: "external" })); });
 			assert.deepEqual(events, [{ type: "record-changed", chatId: "external" }]);
 			await click(document.querySelector<HTMLButtonElement>('[role="switch"]')!);
 			assert.equal(document.querySelector('[role="switch"]')?.getAttribute("aria-checked"), "false");
 			assert.equal(document.querySelector('nav[aria-label="Plugin views"]'), null);
 			assert.equal(activated, 1);
+			assert.equal(document.querySelector('[aria-label="Settings for Plugin fixture"]'), null, "disabled plugins have no settings gear");
+			assert.equal(document.querySelector('[data-testid="settings-nav-plugin:fixture"]'), null);
+			await act(async () => { await window.__lhPluginWindow!.manager.setEnabled("fixture", true); });
+			await click(document.querySelector<HTMLButtonElement>('[data-testid="settings-nav-plugin:fixture"]')!);
+			assert.equal(settingsMounts, 2);
+			await act(async () => { await window.__lhPluginWindow!.manager.setEnabled("fixture", false); });
+			assert.equal(settingsCleanups, 2);
+			assert.ok(document.querySelector('[data-testid="section-plugins"]'), "disable active plugin returns to management");
 		} finally {
 			await act(async () => { root.unmount(); });
 			assert.equal(activeSources, 0);
@@ -661,8 +679,8 @@ describe("plugin frontend surface and native importer", () => {
 			if (savedDocument) Object.defineProperty(globalThis, "document", savedDocument); else Reflect.deleteProperty(globalThis, "document");
 		}
 	});
-	it("sidebar safely renders empty without a provider", () => {
-		assert.equal(renderToStaticMarkup(<PluginSidebarLinks />), "");
+	it("widgets safely render empty without a provider", () => {
+		assert.equal(renderToStaticMarkup(<PluginWidgets />), "");
 	});
 	it("Settings explains trusted local code, broad access, restart recovery and directory install/refresh", () => {
 		const html = renderToStaticMarkup(<PluginsSection />);
