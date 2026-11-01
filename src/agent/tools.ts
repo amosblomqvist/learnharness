@@ -1,6 +1,11 @@
 import { Type } from "typebox";
-import type { AgentTool } from "@earendil-works/pi-agent-core";
+import type { AgentTool, AgentToolResult } from "@earendil-works/pi-agent-core";
 import { invalidInputResult, questionResult, serverExecute } from "./tool-execute.ts";
+import {
+	QUESTION_GATE_MAX_BOUNCES,
+	QUESTION_GATE_REJECTION_HEAD,
+	type QuestionGateFn,
+} from "./question-gate.ts";
 import {
 	askInputSchema,
 	askOptionProblems,
@@ -74,6 +79,84 @@ function prepareQuestionArguments<T extends object>(args: unknown): T {
 		return o as T;
 	}
 	return args as T;
+}
+
+// ─── the pre-delivery question gate (#417) ───────────────────────────────────
+//
+// Structural validation (question-core) makes a card GRADEABLE; the gate makes
+// it CORRECT before the learner can see it. It runs at the tool boundary AFTER
+// the structural contract passes (never before — a malformed call must not
+// spend a verifier call) and BEFORE the clean `questionResult()`. A rejection
+// is the SAME retryable invalid-input shape the tutor already fixes cards
+// from: the turn continues, the tutor re-authors, and the card cannot arm
+// because the wire only mounts a question on a clean execution end.
+//
+// FAIL-OPEN is the law (owner decision, increment 1): no gate / verifier
+// error / verifier timeout / the per-turn bounce budget all deliver the card.
+// A cancelled turn is the ONE exception — the abort propagates like every
+// other tool. The rejected attempt is hidden by the view projection
+// (core/view.ts keeps the two strings in sync); the record keeps it.
+
+/** Per-tool-INSTANCE budget (one turn): after N rejected cards the next pose
+ *  is delivered unverified, so a verifier false positive can never trap the
+ *  lesson in an unsatisfiable retry loop (owner decision, max 2 bounces). */
+interface QuestionGateState {
+	bounces: number;
+}
+
+/** The gate's reject result: an isError AgentToolResult — the tutor sees the
+ *  concrete problems and repairs the card in this same turn. `questionGate`
+ *  in details is the record's marker (the projection hides the part). */
+function gateRejectedResult(
+	tool: string,
+	problems: string[],
+): AgentToolResult<{ tool: string; problems: string[]; questionGate: true }> {
+	return {
+		content: [
+			{
+				type: "text",
+				text:
+					`${QUESTION_GATE_REJECTION_HEAD} for tool "${tool}":\n` +
+					`${problems.map((p) => `- ${p}`).join("\n")}\n` +
+					"Fix the card (stem, options, correctAnswer, explanation) and call the tool again — the learner has not seen it.",
+			},
+		],
+		isError: true,
+		details: { tool, problems, questionGate: true },
+	};
+}
+
+/** Ask the gate about one card. null = pose it (clean verdict, no gate, or the
+ *  fail-open budget); a problem list = reject → the tutor re-authors. The gate
+ *  module itself is fail-open; this wrapper only adds the bounce budget and
+ *  the abort rule (a parent abort rethrows so the turn cancellation owns it). */
+async function preDeliveryProblems(
+	gate: QuestionGateFn | undefined,
+	state: QuestionGateState,
+	tool: string,
+	input: unknown,
+	signal: AbortSignal | undefined,
+): Promise<string[] | null> {
+	if (!gate) return null;
+	if (state.bounces >= QUESTION_GATE_MAX_BOUNCES) {
+		console.warn(
+			`[question-gate] fail-open after ${state.bounces} rejected "${tool}" cards — next pose is delivered unverified`,
+		);
+		return null;
+	}
+	try {
+		const outcome = await gate({ tool, input: input as Record<string, unknown>, signal });
+		if (outcome.accepted) return null;
+		const problems = outcome.problems.map((p) => p.trim()).filter(Boolean);
+		// A reject with no usable problem text is not actionable — deliver.
+		if (problems.length === 0) return null;
+		state.bounces += 1;
+		return problems;
+	} catch (error) {
+		if (signal?.aborted) throw error;
+		console.warn(`[question-gate] fail-open ("${tool}"):`, error instanceof Error ? error.message : error);
+		return null;
+	}
 }
 
 export const askUserQuestionTool: AgentTool<typeof askInputSchema> = {
@@ -219,8 +302,11 @@ export const probeQuizTool: AgentTool<typeof probeQuizInputSchema> = {
 /** The teacher's free-recall variant (nodeId-validated, same seam as the
  *  teach quiz — phases/plan recognize BOTH tool names). */
 export function teachExplainToolFor(
-	ctx: Pick<PlanToolContext, "chatId" | "chatStore">,
+	ctx: Pick<PlanToolContext, "chatId" | "chatStore"> & { questionGate?: QuestionGateFn },
 ): AgentTool<typeof explainInputObject> {
+	// One bounce budget per tool INSTANCE (one agent per turn) — see
+	// preDeliveryProblems: the gate can never wedge the lesson.
+	const gateState: QuestionGateState = { bounces: 0 };
 	return {
 		name: "explain",
 		label: "explain",
@@ -228,11 +314,15 @@ export function teachExplainToolFor(
 		parameters: explainInputObject,
 		prepareArguments: prepareQuestionArguments,
 		executionMode: "sequential",
-		execute: async (_toolCallId, input) => {
+		execute: async (_toolCallId, input, signal) => {
 			const problems = [...explainInputProblems(input)];
 			const nodeIdProblemText = nodeIdProblem(ctx, input.nodeId);
 			if (nodeIdProblemText) problems.push(nodeIdProblemText);
 			if (problems.length > 0) return invalidInputResult("explain", problems);
+			// The pre-delivery semantic gate (#417): only after the card is
+			// structurally sound does it earn a verifier call.
+			const gateProblems = await preDeliveryProblems(ctx.questionGate, gateState, "explain", input, signal);
+			if (gateProblems) return gateRejectedResult("explain", gateProblems);
 			return questionResult();
 		},
 	};
@@ -276,6 +366,11 @@ export interface ProberToolContext extends ProbeDoneContext {
 	 *  master switch AND the agent.graphTools toggle (settings-resolution).
 	 *  Absent = the gate is closed, no map tools (tests drive this seam). */
 	graphStore?: GraphStore;
+	/** Pre-delivery gate SEAM (#417) — v1 deliberately does NOT wire it: the
+	 *  probe phase asks many cards per session and the owner decision keeps
+	 *  v1 teach-only. The field exists so a later opt-in needs no type churn
+	 *  at the composition root; prober tools ignore it. */
+	questionGate?: QuestionGateFn;
 }
 
 /** The prober's tool set: probe quiz (no nodeId) + ask + the learner-fs
@@ -372,7 +467,12 @@ function nodeIdProblem(ctx: Pick<PlanToolContext, "chatId" | "chatStore">, nodeI
  *  nodeId is REQUIRED (owner ruling 2026-09-26): the untagged ad-hoc quiz is
  *  gone — off-map checks route through ask_user_question, and the teach
  *  seam (first tagged quiz) is structurally guaranteed. */
-export function teachQuizToolFor(ctx: Pick<PlanToolContext, "chatId" | "chatStore">): AgentTool<typeof quizInputObject> {
+export function teachQuizToolFor(
+	ctx: Pick<PlanToolContext, "chatId" | "chatStore"> & { questionGate?: QuestionGateFn },
+): AgentTool<typeof quizInputObject> {
+	// One bounce budget per tool INSTANCE (one agent per turn) — see
+	// preDeliveryProblems: the gate can never wedge the lesson.
+	const gateState: QuestionGateState = { bounces: 0 };
 	return {
 		name: "quiz",
 		label: "quiz",
@@ -380,11 +480,15 @@ export function teachQuizToolFor(ctx: Pick<PlanToolContext, "chatId" | "chatStor
 		parameters: quizInputObject,
 		prepareArguments: prepareQuestionArguments,
 		executionMode: "sequential",
-		execute: async (_toolCallId, input) => {
+		execute: async (_toolCallId, input, signal) => {
 			const problems = [...quizInputProblems(input)];
 			const nodeIdProblemText = nodeIdProblem(ctx, input.nodeId);
 			if (nodeIdProblemText) problems.push(nodeIdProblemText);
 			if (problems.length > 0) return invalidInputResult("quiz", problems);
+			// The pre-delivery semantic gate (#417): only after the card is
+			// structurally sound does it earn a verifier call.
+			const gateProblems = await preDeliveryProblems(ctx.questionGate, gateState, "quiz", input, signal);
+			if (gateProblems) return gateRejectedResult("quiz", gateProblems);
 			return questionResult();
 		},
 	};
@@ -400,6 +504,11 @@ export interface TeacherToolContext extends PlanToolContext {
 	spawn: (job: JobRecord, input: ResearchInput | DemoInput | VisualInput | PdfInput) => void;
 	/** Retained search-status seam; research dispatch is available keylessly. */
 	searchAvailable?: () => boolean;
+	/** The pre-delivery semantic gate (#417, teach only in v1): the
+	 *  composition root passes the turn-scoped gate when a verifier engine and
+	 *  the settings switch resolve on; absent = no gate (fail-open by
+	 *  construction, today's behavior). */
+	questionGate?: QuestionGateFn;
 }
 
 /**

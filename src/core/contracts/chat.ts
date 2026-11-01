@@ -220,6 +220,14 @@ export const CONCLUDE_ACK_TEXT =
 export const NEXT_PROBLEM_TEXT =
 	"[NEXT PROBLEM] — the learner's explicit go-ahead: pose the next problem now per the selection rules, or wrap the session in text if the arc is complete.";
 
+/** The pre-delivery question gate's rejection head (#417, 2026-11-01): the
+ *  agent's question tools prepend it to the model-facing problem list (the
+ *  tutor repairs the card) AND the client-safe view projection matches it to
+ *  hide the rejected attempt (the record keeps the part). Single-sourced here
+ *  because the producer (agent layer) and the hider (core/view.ts) are on
+ *  opposite sides of the import law. */
+export const QUESTION_GATE_REJECTION_HEAD = "Question failed pre-delivery verification";
+
 /** The compaction marker's model-facing header (owner round 14,
  *  2026-10-05). The marker's content is this header + the summary — the
  *  single text the provider sees in place of the dropped span. Wording

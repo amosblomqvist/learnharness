@@ -14,6 +14,7 @@ import { SubscriptionRequestCycle, type SubscriptionDispatchLifecycle } from "..
 import { reconstructRequestCause } from "../core/native-messages.ts";
 import { createJobRunner } from "../agent/subagents/runner.ts";
 import { createExtractionPipeline } from "../agent/subagents/extraction.ts";
+import { createQuestionGate, questionGateEnabled, QUESTION_GATE_TIMEOUT_MS } from "../agent/question-gate.ts";
 import type { ModelRole } from "../../config.ts";
 import {
 	deliverJobResult,
@@ -403,6 +404,35 @@ export async function handleChatInput(
 		});
 	};
 
+	// THE PRE-DELIVERY QUESTION GATE (#417, owner-approved increment 1): the
+	// TEACH quiz/explain cards pass a cheap semantic verifier before the dock
+	// can arm them (a rejection returns through the ordinary invalid-input
+	// retry path; the learner never sees the attempt). The hidden
+	// `questionVerifier` role rides the CHEAP slot; no cheap model = no gate
+	// (fail-open — a BYOK install keeps today's behavior exactly). Probe
+	// cards are deliberately NOT gated in v1 (volume + cost; owner decision).
+	// The settings switch is absent = enabled; explicit false is the escape
+	// hatch. Verifier spend folds into the SAME per-turn money channel.
+	// The wiring is fail-open too: a misconfigured cheap slot must never
+	// refuse a lesson (the gate is a quality aid, not a turn dependency).
+	const questionGate = (() => {
+		if (!questionGateEnabled(stores.settingsStore.readSettings()?.agent?.questionGate)) return undefined;
+		try {
+			return createQuestionGate({
+				engine: resolveEngine("questionVerifier"),
+				onUsage: collectUsage,
+				timeoutMs: QUESTION_GATE_TIMEOUT_MS,
+				chatId,
+			});
+		} catch (error) {
+			console.warn(
+				`[chat ${chatId}] question gate disabled for this turn — the verifier engine could not be resolved:`,
+				error instanceof Error ? error.message : error,
+			);
+			return undefined;
+		}
+	})();
+
 	// AGENT CONSTRUCTION BRANCH (docs/probe-teach-split.md §2): the transcript
 	// is the seam — a probe_done call in the record means the probe is
 	// concluded: build the TEACHER (planning + the full toolset). Otherwise
@@ -496,6 +526,9 @@ export async function handleChatInput(
 						// The registry drop's signal (2026-09-20): no live engine
 						// = no research tool in the teacher's registry.
 						searchAvailable,
+						// The pre-delivery gate (#417): TEACH cards only; the
+						// prober ctx below deliberately stays gate-free in v1.
+						...(questionGate ? { questionGate } : {}),
 					},
 					agentOpts,
 				)

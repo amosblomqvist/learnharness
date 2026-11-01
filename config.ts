@@ -52,7 +52,12 @@ export type ModelRole =
 	| "visualMaker"
 	| "pdfReader"
 	| "extractor"
-	| "auditor";
+	| "auditor"
+	/** The pre-delivery question verifier (#417, 2026-11-01): a HIDDEN role —
+	 *  deliberately absent from BACKGROUND_MODEL_ROLES, so it silently rides
+	 *  the cheap slot with no settings-UI row; its own overrides can be added
+	 *  later without touching call sites. */
+	| "questionVerifier";
 
 /**
  * The LIVE graph store (src/store/graph.ts) — owned by the app's extraction
