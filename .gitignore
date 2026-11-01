@@ -19,3 +19,12 @@ xai-credentials.json*
 
 # dev-fresh launcher scratch (fresh-user sim): disposable per launch
 .fresh-data/
+
+# Android generated payload, build products and signing material.
+android/.gradle/
+android/.generated/
+android/build/
+android/app/build/
+android/local.properties
+android/*.keystore
+android/*.jks

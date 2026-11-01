@@ -1,0 +1,8 @@
+cmake_minimum_required(VERSION 3.22.1)
+project(learnharness)
+add_library(node SHARED IMPORTED)
+set_target_properties(node PROPERTIES IMPORTED_LOCATION "${CMAKE_CURRENT_SOURCE_DIR}/../../../../.generated/jniLibs/${ANDROID_ABI}/libnode.so")
+add_library(learnharness SHARED runtime.cpp)
+target_include_directories(learnharness PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/../../../../.generated/include/node")
+target_link_libraries(learnharness node log)
+target_link_options(learnharness PRIVATE "-Wl,-z,max-page-size=16384")

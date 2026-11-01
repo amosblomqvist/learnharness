@@ -1,0 +1,8 @@
+{
+  "version": "24.22.1-0",
+  "url": "https://github.com/fogtape/nodejs-mobile/releases/download/v24.22.1-0/nodejs-mobile-android-24.22.1-0.zip",
+  "sha256": "d6fd9f610fe5d81fede8f0d400c5a62723247725a19831835f15abf4f0604250",
+  "source": "https://github.com/fogtape/nodejs-mobile/tree/v24.22.1-0",
+  "upstream": "https://github.com/nodejs/node/tree/v24.22.1",
+  "status": "prerelease"
+}

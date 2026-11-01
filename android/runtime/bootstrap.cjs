@@ -1,0 +1,16 @@
+"use strict";
+const fs = require("node:fs");
+const path = require("node:path");
+const settings = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+if (!Number.isInteger(settings.port) || settings.port < 1024 || settings.port > 65535 || !/^[a-f0-9]{64}$/.test(settings.secret)) throw new Error("Invalid Android launch configuration");
+process.env.NODE_ENV = "production";
+process.env.NEXT_TELEMETRY_DISABLED = "1";
+process.env.LH_ANDROID = "1";
+process.env.LH_ANDROID_API_SECRET = settings.secret;
+process.env.LH_ANDROID_ORIGIN = `http://127.0.0.1:${settings.port}`;
+process.env.LH_DATA_DIR = path.join(settings.directory, "data");
+process.env.LH_AUTH_FILE = path.join(settings.directory, "auth.json");
+process.env.HOSTNAME = "127.0.0.1";
+process.env.PORT = String(settings.port);
+process.chdir(__dirname);
+require("./server.js");

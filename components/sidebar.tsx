@@ -55,6 +55,7 @@ const SIDEBAR_AUTOCLOSE = 928;
 
 // Module scope, guarded for SSR (the server has no navigator).
 const IS_ELECTRON = typeof navigator !== "undefined" && navigator.userAgent.includes("Electron");
+const IS_ANDROID_APP = typeof navigator !== "undefined" && navigator.userAgent.includes("LearnHarnessAndroid/");
 
 declare global {
 	interface Window {
@@ -117,6 +118,7 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
 			document.documentElement.classList.add("lh-electron");
 			document.documentElement.dataset.lhPlatform = window.lh?.platform ?? "";
 		}
+		if (IS_ANDROID_APP) document.documentElement.classList.add("lh-android");
 
 		// THE ZOOM TRUTH (owner round 7, 2026-10-05): ⌘±/⌘0 zoom the UI
 		// (Electron zoomFactor) while the native traffic lights stay
@@ -130,7 +132,7 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
 
 		const stored = localStorage.getItem(STORAGE_KEY);
 		// Default: open (first run introduces the sidebar).
-		setOpen(stored === null ? true : stored === "1");
+		setOpen(IS_ANDROID_APP && window.innerWidth < SIDEBAR_AUTOCLOSE ? false : stored === null ? true : stored === "1");
 		setMounted(true);
 		return () => off?.();
 	}, []);
@@ -944,10 +946,12 @@ function SessionsSidebar() {
 
 /** The app frame: sidebar inline + content. Rendered once in the root layout. */
 export function AppShell({ children }: { children: React.ReactNode }) {
+	const { open, toggle } = useSidebar();
 	return (
 		<SettingsDialogProvider>
 			<SessionsSidebar />
 			<FilePathDropZone className="relative min-w-0 flex-1">{children}</FilePathDropZone>
+			{open && <button className="lh-mobile-backdrop" aria-label="Close sidebar" onClick={toggle} />}
 			{/* The single document-level keydown listener (keyboard wave A) —
 			    after the content in the tree, but it's window-level so order only
 			    matters for the events it dispatches, never for DOM priority. */}

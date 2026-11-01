@@ -1,0 +1,92 @@
+/** Runs against a disposable emulator, never a user's configured tablet. */
+import { execFileSync } from "node:child_process";
+import fs from "node:fs/promises";
+import assert from "node:assert/strict";
+import path from "node:path";
+import puppeteer from "puppeteer-core";
+
+const app = "ar.com.learnharness";
+const artifacts = path.resolve("android/.generated/smoke");
+await fs.mkdir(artifacts, { recursive: true });
+const adb = (...args) => execFileSync("adb", args, { encoding: "utf8", timeout: 20000 });
+const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+let forwarding;
+let browser;
+async function start() {
+	adb("shell", "am", "start", "-n", `${app}/.MainActivity`);
+	let config;
+	for (let i = 0; i < 120; i++) {
+		try { config = JSON.parse(adb("shell", "run-as", app, "cat", "no_backup/learnharness/launch.json")); break; } catch { await pause(1000); }
+	}
+	assert(config?.port && config.secret, "Android runtime must initialize its private storage");
+	if (forwarding) adb("forward", "--remove", `tcp:${forwarding}`);
+	forwarding = adb("forward", "tcp:0", `tcp:${config.port}`).trim();
+	const origin = `http://127.0.0.1:${config.port}`;
+	const request = (route, options = {}) => fetch(`http://127.0.0.1:${forwarding}${route}`, {
+		...options, headers: { Host: `127.0.0.1:${config.port}`, Cookie: `lh_android=${config.secret}`, Origin: origin, "Content-Type": "application/json", "x-learnharness-subscriptions": "1", ...options.headers }, signal: AbortSignal.timeout(5000),
+	});
+	let ready = false;
+	for (let i = 0; i < 90; i++) {
+		try { if ((await request("/api/subscriptions")).status === 200) { ready = true; break; } } catch { /* startup */ }
+		await pause(1000);
+	}
+	assert(ready, "Bundled Android Node must serve the subscription API");
+	return { request, origin };
+}
+try {
+	adb("install", "-r", "android/app/build/outputs/apk/debug/app-x86_64-debug.apk");
+	adb("shell", "wm", "size", "1600x2560"); adb("shell", "wm", "density", "320");
+	adb("shell", "settings", "put", "system", "accelerometer_rotation", "0");
+	adb("shell", "settings", "put", "system", "user_rotation", "0");
+	let { request, origin } = await start();
+	assert.equal((await request("/api/chats", { headers: { Cookie: "" } })).status, 403);
+	assert.equal((await request("/", { headers: { Cookie: "" } })).status, 403);
+	assert.equal((await request("/api/chats", { method: "POST", body: "{}", headers: { Origin: "https://example.com" } })).status, 403);
+	const status = await (await request("/api/subscriptions")).json();
+	assert.equal(status.chatgpt.available, true);
+	const chat = await (await request("/api/chats", { method: "POST", body: JSON.stringify({ title: "Android persistence check" }) })).json();
+	assert(chat.id);
+
+	const pid = adb("shell", "pidof", app).trim().split(" ")[0];
+	const debugPort = adb("forward", "tcp:0", `localabstract:webview_devtools_remote_${pid}`).trim();
+	browser = await puppeteer.connect({ browserURL: `http://127.0.0.1:${debugPort}` });
+	let page;
+	for (let i = 0; i < 30; i++) {
+		page = (await browser.pages()).find((p) => p.url().startsWith(origin));
+		if (page) break;
+		await pause(500);
+	}
+	assert(page, "Native WebView must open the local app");
+	await page.waitForFunction(() => document.querySelector("main") || document.querySelector("button"), { timeout: 30000 });
+	assert.equal(await page.evaluate(() => document.cookie.includes("lh_android")), false, "Capability must be HttpOnly");
+	await page.waitForFunction(() => document.documentElement.classList.contains("lh-android"), { timeout: 30000 });
+	await fs.writeFile(path.join(artifacts, "portrait.png"), execFileSync("adb", ["exec-out", "screencap", "-p"]));
+	adb("shell", "settings", "put", "system", "user_rotation", "1");
+	await pause(1500);
+	await fs.writeFile(path.join(artifacts, "landscape.png"), execFileSync("adb", ["exec-out", "screencap", "-p"]));
+
+	// Exercise the actual web subscription flow. No account or paid inference
+	// is used: merely open the OpenAI authorization page, then cancel.
+	const login = await (await request("/api/subscriptions", { method: "POST", body: JSON.stringify({ providerId: "chatgpt", op: "login" }) })).json();
+	assert.match(login.browserAction, /^\/api\/subscriptions\/browser\?id=/);
+	const external = await request(login.browserAction, { redirect: "manual", headers: { "sec-fetch-site": "same-origin" } });
+	assert.equal(external.status, 303);
+	const authorization = new URL(external.headers.get("location"));
+	assert.equal(authorization.origin, "https://auth.openai.com");
+	assert.equal(authorization.searchParams.get("code_challenge_method"), "S256");
+	assert(authorization.searchParams.get("scope").includes("chatgpt.tokens.use.direct"));
+	await request("/api/subscriptions", { method: "POST", body: JSON.stringify({ providerId: "chatgpt", op: "cancel" }) });
+	await browser.disconnect(); browser = undefined;
+	adb("shell", "am", "force-stop", app);
+	adb("shell", "cmd", "connectivity", "airplane-mode", "enable");
+	// Old launch configuration exists until the new process writes its own.
+	adb("shell", "run-as", app, "rm", "no_backup/learnharness/launch.json");
+	({ request } = await start());
+	const saved = await (await request("/api/chats")).json();
+	assert(saved.chats.some((entry) => entry.id === chat.id), "Learning sessions survive process restart and offline startup");
+	console.log("Android smoke passed: native runtime, HTTP boundary, WebView, tablet rotations, Pro OAuth request, persistent offline sessions.");
+} finally {
+	if (browser) await browser.disconnect();
+	try { adb("shell", "cmd", "connectivity", "airplane-mode", "disable"); } catch { }
+	try { await fs.writeFile(path.join(artifacts, "logcat.txt"), adb("logcat", "-d", "-s", "LearnHarness:I", "LearnHarnessNode:I", "AndroidRuntime:E")); } catch { }
+}

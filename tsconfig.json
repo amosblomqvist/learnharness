@@ -42,6 +42,7 @@
     ".next/dev/types/**/*.ts"
   ],
   "exclude": [
+    "android",
     "node_modules",
     "dist",
     ".next"
