@@ -31,17 +31,21 @@ async function start() {
 	}
 	assert(config?.port && config.secret, "Android runtime must initialize its private storage");
 	if (forwarding) adb("forward", "--remove", `tcp:${forwarding}`);
-	forwarding = adb("forward", "tcp:0", `tcp:${config.port}`).trim();
+	// Node fetch derives Host from its URL, ignoring a supplied Host header.
+	// Keep the forwarded port equal to the app's origin so the real host guard
+	// is exercised without relaxing the production boundary for a test.
+	adb("forward", "--no-rebind", `tcp:${config.port}`, `tcp:${config.port}`);
+	forwarding = String(config.port);
 	const origin = `http://127.0.0.1:${config.port}`;
 	const request = (route, options = {}) => fetch(`http://127.0.0.1:${forwarding}${route}`, {
 		...options, headers: { Host: `127.0.0.1:${config.port}`, Cookie: `lh_android=${config.secret}`, Origin: origin, "Content-Type": "application/json", "x-learnharness-subscriptions": "1", ...options.headers }, signal: AbortSignal.timeout(5000),
 	});
-	let ready = false;
+	let ready = false, lastStatus;
 	for (let i = 0; i < 90; i++) {
-		try { if ((await request("/api/subscriptions")).status === 200) { ready = true; break; } } catch { /* startup */ }
+		try { lastStatus = (await request("/api/subscriptions")).status; if (lastStatus === 200) { ready = true; break; } } catch { /* startup */ }
 		await pause(1000);
 	}
-	assert(ready, "Bundled Android Node must serve the subscription API");
+	assert(ready, `Bundled Android Node must serve the subscription API (last status: ${lastStatus ?? "no response"})`);
 	return { request, origin };
 }
 try {
@@ -145,6 +149,7 @@ try {
 	assert(saved.chats.some((entry) => entry.id === chat.id), "Learning sessions survive process restart and offline startup");
 	console.log("Android smoke passed: native runtime, HTTP boundary, WebView, rotations, repeated popup cleanup, file selection, system-browser Pro sign-in launch, persistent offline sessions.");
 } finally {
+	try { await fs.writeFile(path.join(artifacts, "final-screen.png"), execFileSync("adb", ["exec-out", "screencap", "-p"], { timeout: 20000 })); } catch { }
 	if (browser) await browser.disconnect();
 	try { adb("shell", "cmd", "connectivity", "airplane-mode", "disable"); } catch { }
 	try { await fs.writeFile(path.join(artifacts, "logcat.txt"), adb("logcat", "-d", "-s", "LearnHarness:I", "LearnHarnessNode:I", "AndroidRuntime:E")); } catch { }
