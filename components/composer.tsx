@@ -1,10 +1,10 @@
 "use client";
 
-import { useCallback, useLayoutEffect, useState } from "react";
+import { useCallback, useLayoutEffect, useRef, useState } from "react";
 import { ArrowRightIcon, CornerDownLeftIcon, SquareIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { Hint } from "@/components/ui/hint";
 import { PathInput } from "@/components/path-input";
+import { AttachFilesButton } from "@/components/attach-files-button";
 
 /**
  * The chat composer — content row ONLY (the persistent rounded shell lives in
@@ -145,6 +145,8 @@ export function Composer({
 		else if (action === "send") onSend();
 		else if (action === "next") onNext?.();
 	};
+	const ownInputRef = useRef<HTMLDivElement>(null);
+	const editorRef = inputRef ?? ownInputRef;
 	return (
 		<form
 			data-testid="composer"
@@ -154,8 +156,9 @@ export function Composer({
 				act();
 			}}
 		>
+			<AttachFilesButton editorRef={editorRef} />
 			<PathInput
-				ref={inputRef}
+				ref={editorRef}
 				value={value}
 				onValueChange={onChange}
 				defaultDropTarget
