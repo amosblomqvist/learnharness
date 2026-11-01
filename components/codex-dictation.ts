@@ -68,7 +68,7 @@ export function useCodexDictation({ append, onActive, getLanguage, enabled = tru
 				const controller = new AbortController(); request.current = controller;
 				const deadline = setTimeout(() => controller.abort(), 75_000);
 				try {
-					const language = await callbacks.current.getLanguage?.().catch(() => "multi");
+					const language = await callbacks.current.getLanguage?.();
                     if (gen !== generation.current) return;
                     const headers: Record<string,string> = { "Content-Type": "audio/pcm;rate=24000" };
                     if (language && language !== "multi") headers["x-lh-dictation-language"] = language;

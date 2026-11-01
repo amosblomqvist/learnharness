@@ -131,3 +131,16 @@ test("the composer selects signed-in Codex and its keyboard shortcut starts only
 	assert.equal(dictation.phase, "recording");
 	await act(async () => dictation.cancel());
 });
+
+
+test("a failed language read does not upload the recording", async () => {
+ await mount(undefined, async () => { throw new Error("Could not load dictation language. Try again."); });
+ let uploaded = false;
+ globalThis.fetch = async () => { uploaded = true; return Response.json({ text: "" }); };
+ await act(async () => dictation.toggle());
+ worklet.audio(8192);
+ await act(async () => { await dictation.finish(); });
+ assert.equal(uploaded, false);
+ assert.match(dictation.error ?? "", /Could not load dictation language/);
+ assert.deepEqual(appended, []);
+});

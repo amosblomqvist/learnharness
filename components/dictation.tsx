@@ -7,7 +7,7 @@ import { useSettingsDialog } from "@/components/settings/settings-dialog";
 import { Hint } from "@/components/ui/hint";
 import { deepgramListenUrl, type DictationLanguage } from "@/src/core";
 import { useDictationLanguage } from "@/components/dictation-preference";
-import { setDictationActive } from "@/components/dictation-state";
+import { isDictationActive, setDictationActive } from "@/components/dictation-state";
 export { isDictationActive } from "@/components/dictation-state";
 
 /**
@@ -284,15 +284,20 @@ export type Dictation = {
  */
 export function useDictation({ append }: { append: (text: string) => void }): Dictation {
  const [subscription, setSubscription] = useState(false);
- const active = useRef(false);
  const { getLanguage } = useDictationLanguage();
  const deepgram = useDeepgramDictation({ append, enabled: !subscription });
  const codex = useCodexDictation({ append: (text) => (questionTarget ?? append)(text), onActive: setDictationActive, getLanguage, enabled: subscription });
  const selected = subscription ? codex : deepgram;
- active.current = selected.active;
  useEffect(() => {
   let live = true;
-  const refresh = () => { void fetch("/api/stt/transcribe", { cache: "no-store" }).then((r) => r.ok ? r.json() : { available: false }).then((v) => { if (live && !active.current) setSubscription(v.available === true); }).catch(() => {}); };
+  let sequence = 0;
+  const refresh = () => {
+   const current = ++sequence;
+   void fetch("/api/stt/transcribe", { cache: "no-store" })
+    .then((r) => r.ok ? r.json() : { available: false })
+    .then((v) => { if (live && current === sequence && !isDictationActive()) setSubscription(v.available === true); })
+    .catch(() => {});
+  };
   refresh();
   window.addEventListener("focus", refresh);
   return () => { live = false; window.removeEventListener("focus", refresh); };
