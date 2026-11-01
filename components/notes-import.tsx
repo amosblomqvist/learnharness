@@ -113,7 +113,7 @@ export function NotesImportControl({ importing, onImportFiles }: { importing: bo
 			<Hint label="Extract files into the graph" side="bottom">
 				<button type="button" onClick={() => setOpen(!open)} aria-expanded={open} aria-haspopup="menu" data-testid="import-notes"
 					className="flex h-7 items-center gap-1.5 rounded-lg px-2.5 text-xs text-muted-foreground transition-colors hover:bg-accent">
-					<WaypointsIcon className="size-3" />{importing ? "Extracting…" : "Extract files…"}
+					<WaypointsIcon className="size-3" /><span className="lh-chrome-label">{importing ? "Extracting…" : "Extract files…"}</span>
 				</button>
 			</Hint>
 			{open && (

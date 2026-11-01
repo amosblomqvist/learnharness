@@ -21,6 +21,7 @@
  * switching sections never refetches.
  */
 
+import { NATIVE_OPEN_SETTINGS_EVENT, postToNative } from "@/components/native-shell";
 import {
 	createContext,
 	useCallback,
@@ -124,7 +125,11 @@ export function SettingsDialogProvider({
 		setLandOnRow(row ?? null);
 		setShow(true);
 	}, [interactions, layerId]);
-	const close = useCallback((): CloseOutcome => { setShow(false); return "closed"; }, []);
+	const close = useCallback((): CloseOutcome => {
+		setShow(false);
+		postToNative({ type: "settingsClosed" });
+		return "closed";
+	}, []);
 	useEffect(() => window.lh?.onOpenSettings?.((section) => open(section)), [open]);
 	useEffect(() => {
 		const onPluginSettings = (event: Event) => {
@@ -133,6 +138,18 @@ export function SettingsDialogProvider({
 		};
 		window.addEventListener("lh:open-plugin-settings", onPluginSettings);
 		return () => window.removeEventListener("lh:open-plugin-settings", onPluginSettings);
+	}, [open]);
+	// The iPhone app's Settings tab opens a section directly (native-shell.ts);
+	// a request made before this provider mounted waits on the window.
+	useEffect(() => {
+		const onNativeOpen = (e: Event) => open((e as CustomEvent<string | undefined>).detail);
+		window.addEventListener(NATIVE_OPEN_SETTINGS_EVENT, onNativeOpen);
+		const pendingSection = window.lhNativePendingSettings;
+		if (pendingSection !== undefined) {
+			window.lhNativePendingSettings = undefined;
+			open(pendingSection || undefined);
+		}
+		return () => window.removeEventListener(NATIVE_OPEN_SETTINGS_EVENT, onNativeOpen);
 	}, [open]);
 	return (
 		<ChatGPTUIProvider><NativeSubscriptionUIProvider><WriteOrderContext.Provider value={writeOrder}><DialogContext.Provider value={{ open }}>
@@ -389,7 +406,7 @@ export function SettingsDialogBody({
 			aria-modal="true"
 			aria-label="Settings"
 			data-testid="settings-dialog"
-			className="settings-dialog-pop flex h-[620px] max-h-[85vh] w-[920px] max-w-[90vw] flex-col overflow-hidden rounded-md border border-border bg-card shadow-xl"
+			className="lh-settings-dialog settings-dialog-pop flex h-[620px] max-h-[85vh] w-[920px] max-w-[90vw] flex-col overflow-hidden rounded-md border border-border bg-card shadow-xl"
 			onClick={(e) => e.stopPropagation()}
 		>
 			{/* Header — the app's quiet CMU title language. */}
@@ -421,13 +438,13 @@ export function SettingsDialogBody({
 					</Hint>
 			</header>
 
-			<div className="flex min-h-0 flex-1">
+			<div className="lh-settings-body flex min-h-0 flex-1">
 				{/* Left nav — mono labels and theme-inherited decorative icons,
 					    active = bg-accent. */}
 				<nav
 					aria-label="Settings sections"
 					data-testid="settings-nav"
-					className="flex min-h-0 w-48 shrink-0 flex-col gap-1 overflow-y-auto border-r border-border p-2"
+					className="lh-settings-nav flex min-h-0 w-48 shrink-0 flex-col gap-1 overflow-y-auto border-r border-border p-2"
 				>
 					{navSections.map((s, index) => (
 						<div key={s.id} className="shrink-0">
