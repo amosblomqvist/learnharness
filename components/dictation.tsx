@@ -283,31 +283,26 @@ export type Dictation = {
  * question waits.
  */
 export function useDictation({ append }: { append: (text: string) => void }): Dictation {
- const [subscription, setSubscription] = useState(false);
- const { getLanguage } = useDictationLanguage();
- const deepgram = useDeepgramDictation({ append, enabled: !subscription });
- const codex = useCodexDictation({ append: (text) => (questionTarget ?? append)(text), onActive: setDictationActive, getLanguage, enabled: subscription });
- const selected = subscription ? codex : deepgram;
- useEffect(() => {
-  let live = true;
-  let sequence = 0;
-  const refresh = () => {
-   const current = ++sequence;
-   void fetch("/api/stt/transcribe", { cache: "no-store" })
-    .then((r) => r.ok ? r.json() : { available: false })
-    .then((v) => { if (live && current === sequence && !isDictationActive()) setSubscription(v.available === true); })
-    .catch(() => {});
-  };
-  refresh();
-  window.addEventListener("focus", refresh);
-  return () => { live = false; window.removeEventListener("focus", refresh); };
- }, []);
- useEffect(() => {
-  if (!subscription) return;
-  dictationFinisher = codex.finish;
-  return () => { if (dictationFinisher === codex.finish) dictationFinisher = null; };
- }, [subscription, codex.finish]);
- return selected;
+	const { getLanguage, provider: savedProvider, saving } = useDictationLanguage();
+	const selectedProvider = useRef(savedProvider);
+	// Do not move a live recording to another engine if settings refresh.
+	if (!isDictationActive()) selectedProvider.current = savedProvider;
+	const provider = selectedProvider.current;
+	const disabled = saving && !isDictationActive();
+	const deepgram = useDeepgramDictation({ append, enabled: provider === "deepgram" && !disabled });
+	const codex = useCodexDictation({
+		append: (text) => (questionTarget ?? append)(text),
+		onActive: setDictationActive,
+		getLanguage,
+		enabled: provider === "codex" && !disabled,
+	});
+	useEffect(() => {
+		if (provider !== "codex") return;
+		dictationFinisher = codex.finish;
+		return () => { if (dictationFinisher === codex.finish) dictationFinisher = null; };
+	}, [provider, codex.finish]);
+	const selected = provider === "codex" ? codex : deepgram;
+	return provider === undefined || disabled ? { ...selected, toggle: () => {} } : selected;
 }
 
 export function useDeepgramDictation({ append, enabled = true }: { append: (text: string) => void; enabled?: boolean }): Dictation {
@@ -630,7 +625,9 @@ export function useDeepgramDictation({ append, enabled = true }: { append: (text
 	// page owns ONE hook instance, and only the mounted page's listener is
 	// attached.
 	useEffect(() => {
-		if (enabled) warmTokens.refresh(); // pre-mint at mount (mitigation D) — silent if keyless
+		if (enabled) warmTokens.refresh(); // pre-mint when Deepgram is selected
+	}, [enabled]);
+	useEffect(() => {
 		return () => {
 			// Navigation cancels capture: invalidate every pending await before
 			// releasing resources, and never append into a different page's input.

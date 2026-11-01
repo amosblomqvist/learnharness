@@ -4,7 +4,10 @@
 import { spawn } from "node:child_process";
 import { createInterface } from "node:readline";
 import { randomUUID } from "node:crypto";
+import { tmpdir } from "node:os";
+import { externalCliEnv } from "../core/auth-env.ts";
 import WebSocket from "ws";
+import { codexBinary } from "./codex-binary.ts";
 
 export const MAX_DICTATION_BYTES = 24_000 * 2 * 120;
 const LOGIN_ERROR = "Sign in to Codex on this PC to use dictation.";
@@ -12,7 +15,10 @@ const LOGIN_ERROR = "Sign in to Codex on this PC to use dictation.";
 /** Ask Codex's own auth manager for its current login; never copy its auth file. */
 export async function codexDictationAuth(signal: AbortSignal): Promise<Record<string, string>> {
 	signal.throwIfAborted();
-	const child = spawn(process.env.LH_CODEX_BINARY || "codex", ["app-server", "--stdio"], { stdio: ["pipe", "pipe", "ignore"] });
+	const env = externalCliEnv();
+	for (const key of Object.keys(env)) if (key.startsWith("LH_")) delete env[key];
+	delete env.ELECTRON_RUN_AS_NODE;
+	const child = spawn(codexBinary(), ["app-server", "--stdio"], { cwd: tmpdir(), env, windowsHide: true, stdio: ["pipe", "pipe", "ignore"] });
 	const lines = createInterface({ input: child.stdout });
 	const pending = new Map<number, { resolve: (value: unknown) => void; reject: (error: Error) => void }>();
 	let nextId = 0;
@@ -23,6 +29,7 @@ export async function codexDictationAuth(signal: AbortSignal): Promise<Record<st
 	child.on("error", () => fail(new Error("Codex could not be started. Check that Codex CLI is installed.")));
 	child.on("exit", () => fail(new Error(LOGIN_ERROR)));
 	signal.addEventListener("abort", abort, { once: true });
+	if (signal.aborted) abort();
 	lines.on("line", (line) => {
 		if (line.length > 512 * 1024) { fail(new Error("Codex returned an invalid sign-in response.")); return; }
 		try {

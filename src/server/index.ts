@@ -47,7 +47,7 @@ export * from "./compaction.ts";
 export { runPiTurn, piTurnResponse, type PiTurnHandle, type PiTurnSpec } from "./pi/ui-stream.ts";
 export * from "./observability.ts";
 export * from "./model-catalog.ts";
-export { subscriptionControlsResponse, subscriptionBrowserResponse } from "./web-subscription-http.ts";
+export { subscriptionControlsResponse, subscriptionBrowserResponse, subscriptionRequestOrigin } from "./web-subscription-http.ts";
 export { sessionCost } from "./pricing.ts";
 export { claudeCodeInstallationResponse } from "./claude-code.ts";
 // The custom endpoint module (registers into piModels() + probes for models).
@@ -55,4 +55,4 @@ export { claudeCodeInstallationResponse } from "./claude-code.ts";
 export * from "./custom-provider.ts";
 export { customProviderGet, customProviderMutation } from "./custom-provider-http.ts";
 
-export { MAX_DICTATION_BYTES, codexDictationAuth, transcribeCodexDictation } from "./codex-dictation.ts";
+export { MAX_DICTATION_BYTES, transcribeCodexDictation } from "./codex-dictation.ts";

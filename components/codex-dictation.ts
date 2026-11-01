@@ -69,10 +69,10 @@ export function useCodexDictation({ append, onActive, getLanguage, enabled = tru
 				const deadline = setTimeout(() => controller.abort(), 75_000);
 				try {
 					const language = await callbacks.current.getLanguage?.();
-                    if (gen !== generation.current) return;
-                    const headers: Record<string,string> = { "Content-Type": "audio/pcm;rate=24000" };
-                    if (language && language !== "multi") headers["x-lh-dictation-language"] = language;
-                    const response = await fetch("/api/stt/transcribe", { method: "POST", body: audio, headers, signal: controller.signal });
+					if (gen !== generation.current) return;
+					const headers: Record<string, string> = { "Content-Type": "audio/pcm;rate=24000", "x-lh-dictation": "1" };
+					if (language && language !== "multi") headers["x-lh-dictation-language"] = language;
+					const response = await fetch("/api/stt/transcribe", { method: "POST", body: audio, headers, signal: controller.signal });
 					const result = await response.json() as { text?: string; message?: string };
 					if (gen !== generation.current) return;
 					if (!response.ok) throw new Error(result.message || "Codex dictation failed. Try again.");
@@ -98,6 +98,7 @@ export function useCodexDictation({ append, onActive, getLanguage, enabled = tru
 			if (gen !== generation.current) { for (const track of stream.getTracks()) track.stop(); return; }
 			media.current = stream;
 			const ctx = new AudioContext({ sampleRate: 24_000 }); context.current = ctx;
+			if (ctx.sampleRate !== 24_000) throw new Error("This device cannot record at the required sample rate.");
 			await ctx.audioWorklet.addModule("/worklets/codex-pcm-capture.js");
 			if (gen !== generation.current) return;
 			if (ctx.state === "suspended") await ctx.resume();
@@ -120,7 +121,7 @@ export function useCodexDictation({ append, onActive, getLanguage, enabled = tru
 			timer.current = setTimeout(() => stopRef.current(), 120_000);
 		} catch (failure) {
 			if (gen !== generation.current) return;
-			setError(failure instanceof DOMException && failure.name === "NotAllowedError" ? "Microphone permission denied" : "The microphone could not be started. Check your input device and try again.");
+			setError(failure instanceof DOMException && failure.name === "NotAllowedError" ? "Microphone permission denied" : failure instanceof Error && failure.message.includes("sample rate") ? failure.message : "The microphone could not be started. Check your input device and try again.");
 			cleanup();
 		}
 	}, [cleanup, transition]);

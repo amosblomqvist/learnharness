@@ -29,6 +29,7 @@ class FakeWorklet {
 	disconnect() {}
 }
 class FakeContext {
+	sampleRate = 24_000;
 	state = "running";
 	audioWorklet = { addModule: async () => {} };
 	createMediaStreamSource() { return { connect() {}, disconnect() {} }; }
@@ -113,25 +114,6 @@ test("cancel during language loading cannot upload a departing recording", async
  assert.equal(posts,0);assert.deepEqual(appended,[]);assert.equal(dictation.phase,"idle");
 });
 
-test("the composer selects signed-in Codex and its keyboard shortcut starts only one recording", async () => {
-	const { useDictation } = await import("../components/dictation.tsx");
-	let captures = 0;
-	Object.defineProperty(globalThis, "navigator", { configurable: true, value: { mediaDevices: { getUserMedia: async () => { captures++; return stream; } } } });
-	Object.assign(globalThis, { AudioContext: FakeContext, AudioWorkletNode: FakeWorklet });
-	globalThis.fetch = async (url) => {
-		if (url === "/api/stt/transcribe") return Response.json({ available: true });
-		if (url === "/api/stt/token") return Response.json({}, { status: 503 });
-		throw new Error(`Unexpected request ${url}`);
-	};
-	function Harness() { dictation = useDictation({ append: text => appended.push(text) }); return null; }
-	const host = document.createElement("div"); document.body.appendChild(host); root = createRoot(host);
-	await act(async () => { root!.render(<Harness />); await new Promise(resolve => setTimeout(resolve, 0)); });
-	await act(async () => { window.dispatchEvent(new window.Event("lh:kbd-toggle-dictation")); });
-	assert.equal(captures, 1);
-	assert.equal(dictation.phase, "recording");
-	await act(async () => dictation.cancel());
-});
-
 
 test("a failed language read does not upload the recording", async () => {
  await mount(undefined, async () => { throw new Error("Could not load dictation language. Try again."); });
@@ -143,4 +125,42 @@ test("a failed language read does not upload the recording", async () => {
  assert.equal(uploaded, false);
  assert.match(dictation.error ?? "", /Could not load dictation language/);
  assert.deepEqual(appended, []);
+});
+
+test("unsupported audio sample rates fail without uploading", async () => {
+	await mount();
+	class UnsupportedContext extends FakeContext { sampleRate = 48_000; }
+	Object.assign(globalThis, { AudioContext: UnsupportedContext });
+	let uploaded = false;
+	globalThis.fetch = async () => { uploaded = true; return Response.json({ text: "" }); };
+	await act(async () => dictation.toggle());
+	assert.equal(dictation.phase, "idle");
+	assert.match(dictation.error ?? "", /sample rate/);
+	assert.equal(uploaded, false);
+});
+
+test("the composer uses the explicitly saved Codex provider", async () => {
+	const { useDictation } = await import("../components/dictation.tsx");
+	let captures = 0;
+	let deepgramRequests = 0;
+	let provider = "codex";
+	Object.defineProperty(globalThis, "navigator", { configurable: true, value: { mediaDevices: { getUserMedia: async () => { captures++; return stream; } } } });
+	Object.assign(globalThis, { AudioContext: FakeContext, AudioWorkletNode: FakeWorklet });
+	globalThis.fetch = async (url) => {
+		if (url === "/api/settings") return Response.json({ settings: { version: 1, dictation: { language: "en", provider } } });
+		if (url === "/api/stt/token") { deepgramRequests++; return Response.json({}, { status: 503 }); }
+		throw new Error(`Unexpected request ${url}`);
+	};
+	function Harness() { dictation = useDictation({ append: text => appended.push(text) }); return null; }
+	const host = document.createElement("div"); document.body.appendChild(host); root = createRoot(host);
+	await act(async () => { root!.render(<Harness />); await new Promise(resolve => setTimeout(resolve, 0)); });
+	await act(async () => { window.dispatchEvent(new window.Event("lh:kbd-toggle-dictation")); });
+	assert.equal(captures, 1);
+	assert.equal(deepgramRequests, 0);
+	assert.equal(dictation.phase, "recording");
+	provider = "deepgram";
+	await act(async () => { window.dispatchEvent(new window.CustomEvent("lh:settings-saved", { detail: { section: "dictation" } })); });
+	assert.equal(dictation.phase, "recording", "a settings refresh must not switch a live recording");
+	await act(async () => dictation.cancel());
+	assert.equal(dictation.phase, "idle");
 });
