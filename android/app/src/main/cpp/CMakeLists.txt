@@ -1,5 +1,7 @@
 cmake_minimum_required(VERSION 3.22.1)
 project(learnharness)
+set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
 add_library(node SHARED IMPORTED)
 set_target_properties(node PROPERTIES IMPORTED_LOCATION "${CMAKE_CURRENT_SOURCE_DIR}/../../../../.generated/jniLibs/${ANDROID_ABI}/libnode.so")
 add_library(learnharness SHARED runtime.cpp)
