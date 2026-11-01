@@ -7,6 +7,7 @@ import { piEngineFor, type PiEngine, type ThinkingLevel } from "../models.ts";
 import { providerEventObserver, type ProviderEventObserver } from "../provider-events.ts";
 import { backgroundCaptureStream, createBackgroundCapture, type BackgroundCapture } from "../background-capture.ts";
 import type { VisualResult } from "../../core/contracts.ts";
+import type { LearnerImage } from "../tools/learner-image.ts";
 import { getHeadless, type HeadlessApi } from "./headless.ts";
 
 /**
@@ -30,11 +31,23 @@ import { getHeadless, type HeadlessApi } from "./headless.ts";
  * finishing. Nothing is delivered without having been looked at.
  *
  * Failure semantics mirror the demo-builder: { svg: "", notes: "FAILED: …" }.
+ *
+ * IMAGE MODE (issue #363): with a learner image the maker annotates it
+ * instead. The model sees the picture and places it with a placeholder
+ * href (LEARNER_IMAGE_HREF); the loop swaps in the real data URI for every
+ * render and for the delivered SVG, so the base64 never enters the
+ * model's context and stays out of its edits.
  */
 
 export interface VisualMakerInput {
 	brief: string;
+	/** The learner image to annotate, already bounded for storage. */
+	image?: LearnerImage;
 }
+
+/** The placeholder href the model gives the learner's picture. */
+export const LEARNER_IMAGE_HREF = "learner-image";
+const LEARNER_IMAGE_HREF_RE = /\b((?:xlink:)?href\s*=\s*)(["'])learner-image\2/g;
 
 export interface VisualMakerOptions {
 	/** Test seam: scripted engine; production uses the visualMaker role. */
@@ -95,6 +108,21 @@ Your FINAL message: 1-2 sentences of notes for the teacher (what the figure show
 NEVER the SVG source itself. If you genuinely cannot make a correct picture of the brief, say exactly
 that in your final message and why.`;
 
+const IMAGE_INSTRUCTIONS = `ANNOTATING THE LEARNER'S IMAGE — this brief comes with one of the learner's own pictures. Your
+figure is that picture with marks on it, not a new drawing:
+
+- Place it EXACTLY ONCE, at its natural size, before your marks so they sit on top:
+  <image href="${LEARNER_IMAGE_HREF}" x="…" y="…" width="W" height="H"/> — W×H is given with the image.
+  The loop substitutes the real picture; never draw or describe its content yourself.
+- Annotate in the picture's own pixel coordinates (shifted by your x/y if you add margins for labels).
+- Every mark must land on the exact feature it names — an arrow at the wrong part is a false statement.
+  Locate the feature in the picture first, then check each mark against the render.
+- Marks must read against any background: thick strokes in one or two high-contrast colors, and labels
+  with a white halo (stroke="white" paint-order="stroke") or set in a margin with a leader line.
+- Never hide what the brief is about under a label or a fill.
+- If a feature the brief names is not in the picture, never guess where it is: leave it unmarked and say
+  so in your notes.`;
+
 /** The wire declarations (pi-ai Tool, TypeBox parameters): this loop owns
  *  execution itself — write/edit dispatch inline below, render feeds the
  *  image-in-the-loop message — so the declarations carry no execute. */
@@ -148,14 +176,54 @@ export async function runVisualMaker(input: VisualMakerInput, opts: VisualMakerO
 	const sessionId = randomUUID();
 	const capture = createBackgroundCapture({ role: "visualMaker", runId: sessionId, sourceId: opts.chatId });
 	const streamEngine = { ...engine, streamFn: backgroundCaptureStream(engine.streamFn, capture) };
+	const learnerImage = input.image;
+	const systemPrompt = learnerImage ? `${INSTRUCTIONS}\n\n${IMAGE_INSTRUCTIONS}` : INSTRUCTIONS;
 	const prompt = [
-		"Brief for ONE precise figure (from the teacher, verbatim — it is everything you know):",
+		learnerImage
+			? "Brief for ONE annotated image (from the teacher, verbatim — it is everything you know):"
+			: "Brief for ONE precise figure (from the teacher, verbatim — it is everything you know):",
 		brief,
 		"",
+		...(learnerImage
+			? [
+					`The learner's image follows: ${learnerImage.width}×${learnerImage.height} px. Place it with <image href="${LEARNER_IMAGE_HREF}" … width="${learnerImage.width}" height="${learnerImage.height}"/>.`,
+				]
+			: []),
 		"Author the SVG, render it, look at it, iterate until correct, then finish with your notes.",
 	].join("\n");
 
 	let messages: Message[] = [{ role: "user", content: prompt, timestamp: Date.now() }];
+	if (learnerImage) {
+		const shown = await processImage(Buffer.from(learnerImage.data, "base64"), learnerImage.mimeType, {
+			resizeOptions: engine.model.inputLimits?.images?.resize,
+		});
+		if (!shown.ok) return { svg: "", notes: `FAILED: showing the learner's image to the maker failed — ${shown.message}` };
+		messages = [
+			{
+				role: "user",
+				content: [
+					{ type: "text", text: [prompt, ...shown.hints].join("\n") },
+					{ type: "image", data: shown.data, mimeType: shown.mimeType },
+				],
+				timestamp: Date.now(),
+			},
+		];
+	}
+	/** The SVG as rendered and delivered: the placeholder href swapped for
+	 *  the learner's picture (identity without an image). */
+	const embed = (svg: string): string =>
+		learnerImage
+			? svg.replace(LEARNER_IMAGE_HREF_RE, (_m, attr: string, quote: string) => `${attr}${quote}data:${learnerImage.mimeType};base64,${learnerImage.data}${quote}`)
+			: svg;
+	/** Image mode: the problem with an SVG that doesn't place the picture
+	 *  exactly once (null = fine, and always fine without an image). */
+	const placementProblem = (svg: string): string | null => {
+		if (!learnerImage) return null;
+		const count = svg.match(LEARNER_IMAGE_HREF_RE)?.length ?? 0;
+		return count === 1
+			? null
+			: `the SVG must place the learner's image exactly once with <image href="${LEARNER_IMAGE_HREF}" …/> (found ${count})`;
+	};
 	let currentSvg: string | null = null;
 	/** The svg shown in the most recent render (null = never rendered). */
 	let renderedSvg: string | null = null;
@@ -168,7 +236,7 @@ export async function runVisualMaker(input: VisualMakerInput, opts: VisualMakerO
 			// loop owns tool execution and the image-in-the-loop injection).
 			const result = await streamOnce(
 				streamEngine,
-				INSTRUCTIONS,
+				systemPrompt,
 				messages,
 				toolDeclarations,
 				sessionId,
@@ -194,7 +262,7 @@ export async function runVisualMaker(input: VisualMakerInput, opts: VisualMakerO
 				if (currentSvg && renderedSvg !== currentSvg) {
 					let png: Buffer;
 					try {
-						png = await headless.renderSvg(currentSvg);
+						png = await headless.renderSvg(embed(currentSvg));
 					} catch (err) {
 						const msg = err instanceof Error ? err.message : String(err);
 						return { svg: "", notes: `FAILED: rendering the final SVG failed — ${msg}` };
@@ -217,7 +285,7 @@ export async function runVisualMaker(input: VisualMakerInput, opts: VisualMakerO
 					];
 					continue;
 				}
-				return finish(currentSvg, finalText);
+				return finish(currentSvg && embed(currentSvg), finalText, learnerImage);
 			}
 
 			const toolResults: ToolResultMessage[] = [];
@@ -227,6 +295,11 @@ export async function runVisualMaker(input: VisualMakerInput, opts: VisualMakerO
 					const svg = (call.arguments as { svg?: unknown }).svg;
 					if (typeof svg !== "string" || !svg.includes("<svg")) {
 						toolResults.push(toolText(call.id, call.name, "ERROR: expected a complete <svg>…</svg> document in the `svg` field."));
+						continue;
+					}
+					const problem = placementProblem(svg);
+					if (problem) {
+						toolResults.push(toolText(call.id, call.name, `ERROR: ${problem}.`));
 						continue;
 					}
 					currentSvg = svg;
@@ -259,7 +332,13 @@ export async function runVisualMaker(input: VisualMakerInput, opts: VisualMakerO
 						);
 						continue;
 					}
-					currentSvg = currentSvg.replace(edit.old_text, edit.new_text);
+					const edited: string = currentSvg.replace(edit.old_text, edit.new_text);
+					const problem = placementProblem(edited);
+					if (problem) {
+						toolResults.push(toolText(call.id, call.name, `ERROR: edit not applied — ${problem}.`));
+						continue;
+					}
+					currentSvg = edited;
 					opts.onActivity?.("edit_svg: applied");
 					toolResults.push(toolText(call.id, call.name, "OK — replaced 1 occurrence. Call render_svg to look at the edited SVG."));
 				} else if (call.name === "render_svg") {
@@ -268,7 +347,7 @@ export async function runVisualMaker(input: VisualMakerInput, opts: VisualMakerO
 						continue;
 					}
 					try {
-						const png = await headless.renderSvg(currentSvg);
+						const png = await headless.renderSvg(embed(currentSvg));
 						const image = await processImage(png, "image/png", { resizeOptions: engine.model.inputLimits?.images?.resize });
 						opts.abortSignal?.throwIfAborted();
 						if (!image.ok) throw new Error(image.message);
@@ -312,7 +391,7 @@ export async function runVisualMaker(input: VisualMakerInput, opts: VisualMakerO
 
 	// Iteration limit: deliver the last written SVG only if it was looked at.
 	if (currentSvg && renderedSvg === currentSvg) {
-		return { svg: currentSvg, notes: finalText || "Iteration limit reached — delivering the last verified SVG." };
+		return finish(embed(currentSvg), finalText || "Iteration limit reached — delivering the last verified SVG.", learnerImage);
 	}
 	return { svg: "", notes: `FAILED: iteration limit (${maxIterations}) reached without a verified SVG.` };
 }
@@ -391,12 +470,12 @@ function snippetAround(svg: string, target: string): string {
 		.join("\n");
 }
 
-function finish(svg: string | null, finalText: string): VisualResult {
+function finish(svg: string | null, finalText: string, image?: LearnerImage): VisualResult {
 	if (!svg) {
 		return {
 			svg: "",
 			notes: `FAILED: the maker never wrote an SVG.${finalText ? ` (${finalText.slice(0, 300)})` : ""}`,
 		};
 	}
-	return { svg, notes: finalText || undefined };
+	return { svg, notes: finalText || undefined, ...(image ? { image: { path: image.path } } : {}) };
 }

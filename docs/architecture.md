@@ -85,7 +85,7 @@ The teaching agents share one record but have different prompts and registries (
 | Agent | Main interaction | Other capabilities |
 |---|---|---|
 | Prober | `probe` (multiple choice) or `recall` (free recall), `ask_user_question`, `probe_done` | Read-only file tools, research/PDF dispatch; graph readers when enabled |
-| Teacher | `quiz` or `explain`, `ask_user_question`, `plan_init` | Read-only file tools and research/PDF/demo/visual dispatch |
+| Teacher | `quiz` or `explain`, `ask_user_question`, `plan_init` | Read-only file tools, `show_image`, and research/PDF/demo/visual dispatch |
 | Practitioner | `problem`, `conclude` | Read-only file tools, research/PDF dispatch; graph readers when enabled |
 
 The choice/free-recall mechanic selects one graded tool per teaching phase. Tool toggles and availability gates affect the registry; the table is not a promise that every dispatch tool is always enabled. Practice side tools are composed separately, without the teaching toggle filter. Claude-family agents can also receive `send_to_user` for explicit learner-facing output. All ordinary registries pass through argument healing; semantic validation failures return error results so the model can correct the call.
@@ -114,6 +114,8 @@ Practice outcomes are evidence in the session, not graph mastery levels, certifi
 ## 5. Background work and delivery
 
 Researcher, PDF reader, demo builder and visual maker run independently (`src/agent/subagents/runner.ts`). Dispatch tools persist a job and its input, return an acknowledgement, then spawn the worker. Demos are executed through the browser helper before delivery; visual verification uses rendered images. PDF/SVG rendering and shared image postprocessing are native; demos use the app's Electron browser service with system Chrome as fallback, not an extra downloaded Chromium.
+
+**Learner images live in the record.** `show_image` (synchronous, teacher only) and `visual` with an `image` path both embed one of the learner's image files in the session: PNG/JPEG, at most 1600px on the longest side and about 1 MB, EXIF rotation baked in (`src/agent/tools/learner-image.ts`). The teacher's `show_image` result is one text line; the picture rides `details` only. An annotating visual maker places the picture with a placeholder href that its loop swaps for the data URI on every render and on delivery, so the base64 never enters the model's context. Image cards never offer the invert switch.
 
 **Worker completion is not session delivery.** The runner saves a terminal worker outcome plus pending delivery metadata before queueing the result. Worker resources and the running activity row can end while an unanswered question holds its result. Only computing workers are abortable; abort notices have their own pending-delivery lifecycle.
 
