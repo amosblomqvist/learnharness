@@ -24,6 +24,8 @@ import { kbdEventForAction } from "@/src/core";
 import { notifySettingsSaved } from "@/components/settings-signal";
 import { PluginWidgets } from "@/components/plugins";
 import { PluginSidebarActions } from "@/components/plugin-chrome";
+import { HostContentRootContext } from "@/components/host-content-root";
+import { KnowledgePickerForegroundProvider } from "@/components/knowledge-picker-foreground";
 
 /**
  * Toggleable sidebar — NOT a modal drawer: no backdrop, no focus theft. It
@@ -945,15 +947,18 @@ function SessionsSidebar() {
 
 /** The app frame: sidebar inline + content. Rendered once in the root layout. */
 export function AppShell({ children }: { children: React.ReactNode }) {
+	const [contentRoot, setContentRoot] = useState<HTMLElement | null>(null);
 	return (
-		<SettingsDialogProvider>
-			<SessionsSidebar />
-			<FilePathDropZone className="relative min-w-0 flex-1">{children}</FilePathDropZone>
-			{/* The single document-level keydown listener (keyboard wave A) —
-			    after the content in the tree, but it's window-level so order only
-			    matters for the events it dispatches, never for DOM priority. */}
-			<KeyboardShortcuts />
-			<PluginWidgets />
-		</SettingsDialogProvider>
+		<HostContentRootContext.Provider value={contentRoot}>
+			<KnowledgePickerForegroundProvider><SettingsDialogProvider>
+				<SessionsSidebar />
+				<FilePathDropZone className="relative min-w-0 flex-1" onContentRoot={setContentRoot}>{children}</FilePathDropZone>
+				{/* The single document-level keydown listener (keyboard wave A) —
+				    after the content in the tree, but it's window-level so order only
+				    matters for the events it dispatches, never for DOM priority. */}
+				<KeyboardShortcuts />
+				<PluginWidgets />
+			</SettingsDialogProvider></KnowledgePickerForegroundProvider>
+		</HostContentRootContext.Provider>
 	);
 }

@@ -12,12 +12,16 @@ import type { PiEngine } from "./models.ts";
 import { usageWasAdmitted } from "./subscription-request-cycle.ts";
 import { runSubagent } from "./subagents/pi-run.ts";
 
+/** Host observability only: never project prompts, inputs, transcripts or results. */
+export type PluginWorkerActivityMetadata = Pick<PluginTaskRecord,
+	"id" | "definitionId" | "status" | "createdAt" | "updatedAt" | "activity" | "model" | "usage">;
+
 export interface PluginWorkerServiceDeps {
 	store: PluginTaskRecordStore;
 	engineFor(model: PluginModelSpec, purpose: PluginCallPurpose, options?: PluginInferenceOptions): PiEngine | Promise<PiEngine>;
 	onUsage?: (model: PluginModelSpec, usage: Usage) => void;
 	signal?: AbortSignal;
-	onChange?: () => void;
+	onChange?: (metadata: PluginWorkerActivityMetadata) => void;
 }
 const clone = <T>(value: T): T => structuredClone(value);
 const terminal = (r: PluginTaskRecord) => r.status !== "queued" && r.status !== "running";
@@ -71,6 +75,7 @@ interface Task {
 	notifying?: boolean;
 	poisoned?: Error;
 	closed?: boolean;
+	activityRecord?: PluginTaskRecord;
 }
 
 /** Standalone result tasks. One service/writer per directory; no admission pool,
@@ -86,13 +91,17 @@ export function createPluginWorkerService(deps: PluginWorkerServiceDeps): Plugin
 	const notify = (t: Task) => {
 		if (t.flush) clearTimeout(t.flush); t.flush = undefined;
 		wake(t);
+		if (!disposed && t.activityRecord !== t.record) {
+			t.activityRecord = t.record;
+			const { id, definitionId, status, createdAt, updatedAt, activity, model, usage } = t.record;
+			try { deps.onChange?.(clone({ id, definitionId, status, createdAt, updatedAt, activity, model, usage })); } catch { /* Observe only. */ }
+		}
 		if (disposed || t.notifying) return;
 		t.notifying = true;
 		queueMicrotask(() => {
 			t.notifying = false;
 			if (disposed) return;
 			for (const listener of [...t.listeners]) { try { listener(snapshot(t)); } catch { /* Views do not own execution. */ } }
-			try { deps.onChange?.(); } catch { /* Observe only. */ }
 		});
 	};
 	const commit = (t: Task, record: PluginTaskRecord) => {

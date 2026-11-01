@@ -3,6 +3,7 @@ import type { AssistantMessage, ToolResultMessage, Usage } from "@earendil-works
 import { randomUUID } from "node:crypto";
 import { APP_IDENTITY, piEngineFor, type PiEngine } from "../models.ts";
 import { usageWasAdmitted } from "../subscription-request-cycle.ts";
+import { workerRequestStream } from "../worker-request-admission.ts";
 import { providerEventObserver } from "../provider-events.ts";
 import { backgroundCaptureStream, createBackgroundCapture } from "../background-capture.ts";
 import type { ModelRole } from "../../../config.ts";
@@ -42,6 +43,8 @@ export interface SubagentRunOptions {
 	onEvent?: (event: AgentEvent) => void | Promise<void>;
 	/** Guard immediately before each native provider request. */
 	beforeRequest?: () => void | Promise<void>;
+	/** Internal runner exception: conversation compaction is not worker work. */
+	bypassWorkerRequestAdmission?: boolean;
 	/** Per completed assistant message (extraction's step log). */
 	onAssistantMessage?: (message: AssistantMessage, step: number) => void;
 	/** Extra stop rule (extractor: stop after a clean submit). */
@@ -90,7 +93,10 @@ export async function runSubagent(tools: AgentTool<any, any>[], opts: SubagentRu
 			tools,
 			messages: opts.messages ?? [],
 		},
-		streamFn: backgroundCaptureStream(engine.streamFn, capture),
+		streamFn: backgroundCaptureStream(
+			opts.bypassWorkerRequestAdmission ? engine.streamFn : workerRequestStream(engine.streamFn),
+			capture,
+		),
 		prepareRequest: async () => {
 			if (opts.abortSignal?.aborted) throw Object.assign(new Error("aborted"), { name: "AbortError" });
 			await opts.beforeRequest?.();

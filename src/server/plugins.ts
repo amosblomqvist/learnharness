@@ -13,6 +13,7 @@ import { assertGraphFormat } from "../store/graph-format.ts";
 import { createPluginLearningData } from "./plugin-learning.ts";
 import { createPluginInference } from "./plugin-inference.ts";
 import { createPluginBackgroundTool, recoverPluginBackgroundJob } from "./plugin-background-tools.ts";
+import { registerPluginWorkerActivity } from "./plugin-worker-activity.ts";
 import { deliverJobResult, setPluginJobRecovery } from "./jobs.ts";
 import { createPluginHost } from "./plugin-host.ts";
 import { createPluginTransport } from "./plugin-transport.ts";
@@ -50,9 +51,14 @@ function runtime(): Runtime {
 				engineFor: inference.engineFor, onUsage: inference.onUsage, signal,
 				onChange: () => { if (!signal.aborted) emit("plugin-message", { pluginId: manifest.id, topic: "agents-changed" }); },
 			});
+			const workerActivity = registerPluginWorkerActivity({
+				pluginId: manifest.id, pluginName: manifest.name, signal,
+				cancel: taskId => workers.cancel(taskId),
+			});
 			const workers = createPluginWorkerService({
 				store: createPluginTaskRecordStore(path.join(/* turbopackIgnore: true */ dataDirectory, "tasks")),
 				engineFor: inference.engineFor, onUsage: inference.onUsage, signal,
+				onChange: workerActivity,
 			});
 			return { learning, inference: inference.inference, agents, workers,
 				createBackgroundTool(context, definition) {

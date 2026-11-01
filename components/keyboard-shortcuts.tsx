@@ -38,6 +38,7 @@ import {
 import { isDictationActive } from "@/components/dictation";
 import { dispatchFocusedPluginShortcut } from "@/components/plugin-input-focus";
 import { useSettingsDialog } from "@/components/settings/settings-dialog.tsx";
+import { useKnowledgePickerForeground } from "@/components/knowledge-picker-foreground";
 
 // Re-exported for the contract pin (tests/keyboard-toggle-sidebar.test.ts):
 // the dispatcher composes event names through the ONE helper — a second
@@ -48,6 +49,7 @@ export function KeyboardShortcuts() {
 	const router = useRouter();
 	const [cheatOpen, setCheatOpen] = useState(false);
 	const { open: openSettings } = useSettingsDialog();
+	const { store: pickerForeground } = useKnowledgePickerForeground();
 
 	// Router + cheat + settings state inside a ref so the keydown listener
 	// (attached once) never goes stale.
@@ -66,6 +68,7 @@ export function KeyboardShortcuts() {
 			// works from any focus.
 			if (e.key === "Tab") {
 				e.preventDefault();
+				if (pickerForeground?.hasActivePicker()) return;
 				if (e.shiftKey) {
 					if (!dispatchFocusedPluginShortcut("cycle-thinking"))
 						window.dispatchEvent(new CustomEvent("lh:kbd-cycle-thinking"));
@@ -147,7 +150,7 @@ export function KeyboardShortcuts() {
 		};
 		window.addEventListener("keydown", onKeyDown);
 		return () => window.removeEventListener("keydown", onKeyDown);
-	}, [cheatOpen]);
+	}, [cheatOpen, pickerForeground]);
 
 	return <CheatSheet open={cheatOpen} onClose={() => setCheatOpen(false)} />;
 }

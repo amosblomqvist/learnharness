@@ -26,6 +26,7 @@ import {
 	useCallback,
 	useContext,
 	useEffect,
+	useLayoutEffect,
 	useRef,
 	useState,
 } from "react";
@@ -55,6 +56,7 @@ import { PluginSettingsPage } from "./plugin-settings-page.tsx";
 import { usePlugins } from "@/components/plugins";
 import { ChatGPTUIProvider } from "./chatgpt-connection.tsx";
 import { NativeSubscriptionUIProvider } from "./subscription-connections.tsx";
+import { focusKnowledgePickerElement, useKnowledgePickerModal, type KnowledgePickerModal } from "@/components/knowledge-picker-foreground";
 
 /** Owner (2026-09-20): hints earn their place — mechanics-explaining
  *  prose is out; only the keyboard note stays (storage location is a
@@ -84,16 +86,24 @@ export function SettingsDialogProvider({
 }: {
 	children: React.ReactNode;
 }) {
+	const foreground = useKnowledgePickerModal();
+	const { modal } = foreground;
 	const [show, setShow] = useState(false);
 	const [landOn, setLandOn] = useState<SectionId>("keys");
 	const [landOnRow, setLandOnRow] = useState<string | null>(null);
 	const [navigationRequest, setNavigationRequest] = useState(0);
 	const open = useCallback((section?: string, row?: string) => {
+		foreground.store?.cancelPicker();
+		modal?.activate();
 		setNavigationRequest(request => request + 1);
 		setLandOn(section ? section as SectionId : "keys");
 		setLandOnRow(row ?? null);
 		setShow(true);
-	}, []);
+	}, [modal, foreground.store]);
+	const close = useCallback(() => { modal?.close(); setShow(false); }, [modal]);
+	useLayoutEffect(() => {
+		if (show && modal?.canHandle()) focusKnowledgePickerElement(foreground.frame.current);
+	}, [show, navigationRequest, modal, foreground.frame]);
 	useEffect(() => window.lh?.onOpenSettings?.((section) => open(section)), [open]);
 	useEffect(() => {
 		const onPluginSettings = (event: Event) => {
@@ -107,7 +117,7 @@ export function SettingsDialogProvider({
 		<ChatGPTUIProvider><NativeSubscriptionUIProvider><DialogContext.Provider value={{ open }}>
 			{children}
 			{show && (
-				<SettingsDialog onClose={() => setShow(false)} initialSection={landOn} initialRow={landOnRow} navigationRequest={navigationRequest} />
+				<SettingsDialog onClose={close} initialSection={landOn} initialRow={landOnRow} navigationRequest={navigationRequest} foreground={foreground} />
 			)}
 		</DialogContext.Provider></NativeSubscriptionUIProvider></ChatGPTUIProvider>
 	);
@@ -122,10 +132,12 @@ function SettingsDialog({
 	initialSection,
 	initialRow,
 	navigationRequest,
+	foreground,
 }: {
 	onClose: () => void;
 	initialSection: SectionId;
 	navigationRequest: number;
+	foreground: KnowledgePickerModal;
 	/** The keys-section row to unfold (see DialogContext above). */
 	initialRow: string | null;
 }) {
@@ -136,9 +148,12 @@ function SettingsDialog({
 		<div
 			className="fixed inset-0 z-50 flex items-center justify-center bg-background/80"
 			data-testid="settings-backdrop"
+			hidden={foreground.suspended}
+			inert={foreground.suspended}
+			style={foreground.suspended ? { display: "none" } : undefined}
 			{...backdropDismiss}
 		>
-			<SettingsDialogBody onClose={onClose} initialSection={initialSection} initialRow={initialRow} navigationRequest={navigationRequest} />
+			<SettingsDialogBody onClose={onClose} initialSection={initialSection} initialRow={initialRow} navigationRequest={navigationRequest} foreground={foreground} />
 		</div>,
 		document.body,
 	);
@@ -151,8 +166,11 @@ export function SettingsDialogBody({
 	initialSection = "keys",
 	initialRow = null,
 	navigationRequest = 0,
+	foreground,
 }: {
 	onClose: () => void;
+	/** Internal host coordination; isolated/SSR bodies retain legacy behavior. */
+	foreground?: KnowledgePickerModal;
 	initialSection?: SectionId;
 	/** Repeated opens must retarget even when the requested section is unchanged. */
 	navigationRequest?: number;
@@ -243,6 +261,7 @@ export function SettingsDialogBody({
 	// dialog's outer layer).
 	useEffect(() => {
 		const onKey = (e: KeyboardEvent) => {
+			if (foreground && (!foreground.canHandle() || e.defaultPrevented)) return;
 			if (e.key === "Escape") {
 				// THE ONE-ESC LAW (owner, keyboard round 2026-10-06): claim
 				// at the document level — the window chain (dictation →
@@ -254,7 +273,7 @@ export function SettingsDialogBody({
 		};
 		document.addEventListener("keydown", onKey);
 		return () => document.removeEventListener("keydown", onKey);
-	}, [onClose]);
+	}, [onClose, foreground]);
 
 	/** ONE writer for the whole dialog: PUT the whole section, keep the
 	 *  record mirror in sync, surface route errors inline (a 400 is a
@@ -298,6 +317,11 @@ export function SettingsDialogBody({
 
 	return (
 		<div
+			ref={foreground?.frame}
+			hidden={foreground?.suspended}
+			inert={foreground?.suspended}
+			style={foreground?.suspended ? { display: "none" } : undefined}
+			tabIndex={-1}
 			role="dialog"
 			aria-modal="true"
 			aria-label="Settings"

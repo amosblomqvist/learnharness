@@ -54,7 +54,9 @@ provides:
   and controlled host UI widgets; navigation and live app notifications.
 - A JSON operation bridge between the frontend and its own backend.
 
-No supported API mutates core sessions or graph evidence initially. The learning-data
+The backend learning-data API remains read-only; no new programmable core-write API is
+exposed. The knowledge picker's existing user-driven source rename, folder creation and
+drag organization are host UI operations, not backend learning-write methods. The learning-data
 location remains available to trusted backend code; readers are conveniences that share
 the host's file interpretation, not mandatory filesystem access control. Reads across
 several files are not promised to be transactional. `readGraphFile` uses store readers:
@@ -92,8 +94,9 @@ repeat invocation of the same action until its Promise settles, and surfaces err
 
 `ctx.ui` is a framework-neutral controlled facade, implemented in the host tree rather
 than exported private React components. It provides independently mountable composer,
-dictation, model picker, thinking picker, button, settings rows and worker-result
-presentation; `mountStandardComposer` combines the first four as a preset. Menus and
+dictation, model picker, thinking picker, knowledge picker, button, settings rows and
+worker-result presentation; `mountStandardComposer` combines composer, dictation, model
+and thinking controls as a preset. Menus and
 dialogs are available via `openMenu` and `openDialog`. Every call takes
 `options: { signal }` and returns a handle with shallow `update(partialProps)` and
 idempotent `dispose()`. Widget scopes terminate on mount-signal abort or plugin disable.
@@ -123,6 +126,51 @@ custom-mount overload retains its unregister-function return. Plugins own persis
 and backend validation, publishing rows only after a successful save; a custom mount
 is not required for live updates, but may use `mountSettingsRows` itself. No general
 declarative UI language or host-owned plugin settings store is added.
+
+### Knowledge selection through existing host UI
+
+The approved additive API v1 method is
+`ctx.ui.mountKnowledgePicker(container, { value: readonly string[], onChange(ids), disabled? }, { signal })`.
+Its `PluginKnowledgePickerProps` and standard `update(partialProps)`/`dispose()` handle
+are defined in `src/core/plugin-ui.ts` and included in the generated type bundle. The
+plugin chooses bubble placement, controls selected node IDs and owns persistence; the
+host never writes plugin state.
+
+The host reuses the exact existing `NodePickerControl` and real `ChainTableOverlay`, not
+copies. The bubble shows **Pick nodes**, selected count and **Clear**; Clear emits `[]`.
+Opening it presents Chains across the full app content column, including the top-bar
+area, while the sidebar remains accessible—not an inline embed. Checkbox changes are
+immediate controlled updates. Done, X and Escape close without resetting selection;
+reopening retains the controlled IDs. The host supplies canonical graph/source organization,
+loads lazily at first open following the existing new-practice pattern, and handles focus,
+portals and mount-signal/disable cleanup.
+
+The approved foreground extension supports ordinary plugin views, plugin Settings and
+content inside public `ctx.ui.openDialog`, without changing the API, adding props or
+requiring a new plugin-side lifetime arrangement. An internal host provider coordinates
+with the app shell. A launching modal stays mounted and retains state, but is temporarily
+hidden while the full-column selector is active. Done, X and Escape close only the
+selector and restore the origin's state and focus.
+
+Foregrounding happens at opening, not as a permanent always-on-top claim. A newer public
+dialog or menu can foreground normally. **Any Settings open** closes the active or pending
+selector from **any origin**: ordinary view, Settings or public dialog. It preserves the
+controlled IDs and performs normal Settings opening/deep-linking; closing Settings never
+automatically resumes the old picker. Settings does not merely cover the picker for later
+restoration. Broader Settings/public-dialog overlap rules remain undecided; this is not a
+general modal-stack policy.
+
+There is one active selector: opening a new one closes the previous selector without clearing its
+controlled IDs; the previous picker does not auto-resume. An older asynchronous load
+must not promote its selector over newer UI. These are scoped host-picker rules, not
+a general overlay framework.
+
+Selection mode retains user-driven source **rename**, folder **creation** and **drag
+organization**. It must not become a read-only source tree. Management Delete is not
+available in practice-picker mode, as before. These existing host UI edits do not expose
+new programmable core-write APIs or change the read-only backend learning API. Deck trees,
+state, membership and selection limits remain plugin-owned; no generic deck/library-tree
+host API is added. Final verification of the Settings/dialog foreground extension is pending.
 
 ## Managed agents
 
@@ -243,9 +291,44 @@ abort, and failure notices; missing/unreadable task state is not relabeled as le
 The shared job adapter uses atomic fsynced replacement for durable linkage/result updates.
 
 There is no DAG framework, guaranteed execution with the app closed, new plugin concurrency
-pool or competing setting. Request-level shared worker admission is separately approved app
-work; this increment deliberately leaves existing admission behavior unchanged. `purpose`
-classifies subscription policy and must not be mistaken for a concurrency permit.
+pool or competing setting. Task computation and result delivery retain their existing
+lifecycles; host admission does not add automatic retry or a new task-history screen.
+
+### Shared host worker-request admission
+
+Host admission establishes one process-global FIFO gate for
+background **model request streams**, not whole agents. A permit is released when its
+request ends, before tool execution or waiting for child work. The pool spans routes and
+windows connected to the same app-server process; independent server processes do not
+share it.
+
+Settings → Agent → Models exposes **Concurrent worker requests** as
+`agent.workerRequestConcurrency`, default **8** when unset. Any positive safely
+representable whole integer (JavaScript safe integer) is valid, without an arbitrary cap;
+invalid values are rejected rather than clamped. A live increase drains queued requests
+immediately up to the new limit. A decrease lets active requests finish and waits until
+the active count is below the new limit before admitting another request. Queued
+cancellation prevents provider dispatch.
+
+Extractor, auditor, researcher, demo builder, visual maker and PDF reader requests share
+the gate with **all** detached `ctx.workers` tasks, including user-initiated tasks.
+Direct teacher/prober/practice requests and their compaction, interactive plugin-managed
+conversations and standalone raw plugin inference are excluded. `purpose` governs
+subscription consent, not worker classification. The old whole-extractor-phase
+three-permit wrapper is removed; source-serial chunks and the audit-through-merge FIFO
+consistency lock remain. The frontend's three-file upload queue is independent.
+
+Standalone `ctx.workers` tasks integrate into the existing **Background agents** panel:
+one row titled **plugin name · worker definition ID**, with elapsed time, activity,
+model and usage when available. There is no invented session link. **END** cancels
+computing work, including queued work; completion still ends computing state without
+cancelling pending delivery. A linked `createBackgroundTool` host job already represents
+its task, so the standalone projection is suppressed to avoid duplicate rows. Canonical
+task state and existing durable delivery/recovery semantics remain authoritative.
+
+Request admission, activity registration and SDK engine operations/callback metadata are
+host implementation details, not new plugin contracts or a public agent framework.
+Plugins continue using the existing worker and background-tool APIs.
 
 ## Notifications and recovery
 
@@ -279,6 +362,9 @@ Uninstall/data deletion and automatic community updates are not part of v1.
 8. Validated result tasks, native background-tool adapter and durable delivery/recovery.
 9. Host view shell, explicit action placements, controlled UI helpers, dedicated plugin
    settings pages and shared collapsed result presentation.
+10. Shared host worker-request admission and standalone worker activity integration.
+11. Knowledge-picker control reusing the existing host Chains/source-organization UI,
+    with an approved Settings/dialog foreground extension; final extension verification pending.
 
 Validation includes focused lifecycle/storage/interaction tests, existing teaching/practice
 regressions, typecheck/lint, production build and a packaged-server smoke with disposable
@@ -298,7 +384,58 @@ teaching-extension examples now consume these public APIs. This scope does not a
 automatic sidebar chrome, core settings writes, a general UI schema, or a new worker
 execution model. Existing installed example copies are not overwritten.
 
-### Implementation verification
+### Knowledge picker foreground extension — final verification pending
+
+The ordinary-view picker checkpoint passed its tests and packaged actual-browser checks,
+including source rename, folder creation and drag organization, alongside the full admission
+checks. The SDK consumer check also passed. These results do **not** verify the newly
+approved Settings/dialog foreground extension or its revised any-Settings-open closure
+rule. Final gates and actual Settings/dialog-origin browser proof remain pending; no new
+extension pass counts are claimed. Broader Settings/public-dialog overlap behavior is not
+approved by this scoped rule.
+The completed admission/activity checkpoint below is retained separately and does not
+establish picker-extension verification.
+
+### Worker admission and activity verification checkpoint — 2026-11-01
+
+The admission/activity increment passed **3,513 tests / 552 suites** under the default
+test runner, plus **four separate example-UI tests**, typecheck and lint (zero errors;
+one pre-existing warning already present at HEAD). An isolated source-copy production
+build, server payload assembly and source-free smoke with Electron's bundled Node and
+local Chrome all passed. Inert private-sentinel tracing found **zero** private sentinels;
+the assembled payload contained no private records.
+
+The browser exercised the actual Settings → Agent numeric control: **1 → 2 → 1**,
+with each value persisted. Three standalone `ctx.workers` tasks appeared in Background
+agents without chat links. The run verified live increase and FIFO admission; decreasing
+the limit left two active requests running. END cancellations drained the active count
+**2 → 1 → 1 → 0**: the third request was admitted after the second cancellation freed
+capacity, and all three tasks ultimately became cancelled. The loopback mock OpenAI
+endpoint received **three held protocol requests**, with **zero completed responses**.
+This was not real model generation, a paid-provider call or real-account inference.
+Unlike the historical rendering-only browser checks below, this admission check did
+send those three local mock protocol requests.
+
+A reviewer P2 reproduction confirmed that constructor-time abort had replaced native
+usage **7** with **0**. It failed before the fix; the exact reproduction then passed,
+preserving native usage **7** and identity without leaking a permit. The actual
+extraction pipeline's audit-lock test likewise failed before the cancelled-middle-waiter
+fix and passed afterward.
+
+Local verification artifacts (temporary paths):
+
+- Tests: `/tmp/lh-admission-verified-tests-bfXAdL/tests.log`.
+- Isolated packaging: `/tmp/lh-admission-isolated-package-ovfxV0/final-package.log`.
+- Browser evidence: `/var/folders/3x/m0pk52v160jcprrhcb6qkd340000gn/T/lh-plugin-browser-evidence-dVX3ym`.
+
+These results do not establish signed/notarized installer behavior, a full Electron-window
+run, Windows/Linux runtime behavior or real-provider inference.
+
+### Historical implementation verification — through checkpoint `968ceaa`
+
+The results below record earlier checkpoints, including the UI checkpoint `968ceaa`.
+They are historical evidence, **not verification of the admission/activity increment**;
+that increment's distinct results are recorded above.
 
 The UI increment passed **3,465 tests / 552 suites** under the default test runner,
 plus the four standalone example-UI tests, typecheck and lint (zero errors; the same

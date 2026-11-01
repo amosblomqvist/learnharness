@@ -110,6 +110,20 @@ describe("Providers settings-label typography", () => {
 });
 
 describe("AgentSection (thin SSR)", () => {
+	it("Models exposes worker concurrency with exact help text and an unset default of 8", () => {
+		const render = (agent: { workerRequestConcurrency?: number } | undefined) => renderToStaticMarkup(
+			<AgentSection agent={agent} models={undefined} graph={undefined} compaction={undefined} onSectionChange={() => {}} onModelsChange={() => {}} onCompactionChange={() => {}} />,
+		);
+		const html = render(undefined);
+		assert.ok(html.includes("Concurrent worker requests"));
+		assert.ok(html.includes("Maximum simultaneous background-worker model requests. Direct conversations are not limited."));
+		const input = tagOf(html, "input-worker-request-concurrency");
+		for (const attribute of ['type="number"', 'min="1"', 'step="1"', 'placeholder="8"', 'value=""']) assert.ok(input.includes(attribute), attribute);
+		assert.ok(!input.includes('max="'), "no arbitrary ceiling");
+		assert.ok(html.indexOf('data-testid="worker-request-concurrency-row"') < html.indexOf('data-testid="group-tools"'), "row belongs to Models");
+		assert.ok(tagOf(render({ workerRequestConcurrency: 23 }), "input-worker-request-concurrency").includes('value="23"'));
+	});
+
 	it("renders the three model SLOT rows (slots-only, fix wave: unpicked reads —, no Default option)", () => {
 		const html = renderToStaticMarkup(<AgentSection agent={undefined} models={undefined} graph={undefined} onSectionChange={() => {}} onModelsChange={() => {}} />);
 		for (const slot of ["strong", "cheap", "vision"]) {

@@ -74,6 +74,7 @@ import { EditableSourceName, SourceDragRow, sourceNameMatches, SourceFolderTree,
 import { chainRow, useChainNavigation } from "./chain-navigation";
 import { useServerEvent, useServerResync } from "./server-events";
 import { TopBar } from "@/components/top-bar";
+import { sessionFindHasForegroundLayer } from "./session-find";
 import { DeleteSourceDialog } from "@/components/delete-source-dialog";
 import { LatexGlyph } from "@/components/latex-glyph";
 
@@ -692,8 +693,11 @@ export function ChainTableOverlay({
 	selectMode,
 	controlledSelection,
 	onSelectionChange,
+	keyboardActive = true,
 }: {
 	open: boolean;
+	/** Internal host ownership; ordinary practice keeps the existing default. */
+	keyboardActive?: boolean;
 	nodes: GraphNode[];
 	chains: GraphChain[];
 	sessions: Record<string, string>;
@@ -722,19 +726,23 @@ export function ChainTableOverlay({
 		});
 	}, [directory]);
 	const requestVersion = useRef(0);
+	const directoryRequest = useRef<AbortController | null>(null);
 	const mutationTail = useRef<Promise<unknown>>(Promise.resolve());
 	const readDirectory = useCallback(async () => {
 		const version = ++requestVersion.current;
+		directoryRequest.current?.abort();
+		const request = new AbortController();
+		directoryRequest.current = request;
 		try {
-			const response = await fetch("/api/graph/sources", { cache: "no-store" });
+			const response = await fetch("/api/graph/sources", { cache: "no-store", signal: request.signal });
 			if (!response.ok) throw new Error("Could not read source organization.");
 			const body = await response.json() as SourceDirectory;
-			if (version === requestVersion.current) { setDirectory(body); setDirectoryFailure(""); }
-		} catch (error) { if (version === requestVersion.current) setDirectoryFailure(error instanceof Error ? error.message : String(error)); }
+			if (!request.signal.aborted && version === requestVersion.current) { setDirectory(body); setDirectoryFailure(""); }
+		} catch (error) { if (!request.signal.aborted && version === requestVersion.current) setDirectoryFailure(error instanceof Error ? error.message : String(error)); }
 	}, []);
 	useEffect(() => {
 		if (open) void readDirectory();
-		return () => { requestVersion.current++; };
+		return () => { requestVersion.current++; directoryRequest.current?.abort(); directoryRequest.current = null; };
 	}, [open, readDirectory]);
 	useServerEvent("sources-changed", () => { if (open) void readDirectory(); });
 	useServerEvent("chats-changed", () => { if (open) void readDirectory(); });
@@ -777,12 +785,12 @@ export function ChainTableOverlay({
 	// Esc dismisses (unless a dialog has focus — each dialog's own Esc
 	// owns its layer; all listen on window, so the guards are explicit).
 	useEffect(() => {
-		if (!open || deleteOpen) return;
+		if (!open || deleteOpen || !keyboardActive) return;
 		const onKeyDown = (e: KeyboardEvent) => {
 			if (e.key === "Escape") {
 				// App Router delegates React events on document too: a child's
 				// stopPropagation cannot silence a sibling document listener.
-				if (e.defaultPrevented || (e.target instanceof Element && e.target.closest('[data-testid="source-name-input"]'))) return;
+				if (e.defaultPrevented || sessionFindHasForegroundLayer(document) || (e.target instanceof Element && e.target.closest('[data-testid="source-name-input"]'))) return;
 				// THE ONE-ESC LAW (owner, keyboard round 2026-10-06): claim
 				// at the document level — the window chain (dictation →
 				// abort) must not also act. One Esc, one action.
@@ -793,7 +801,7 @@ export function ChainTableOverlay({
 		};
 		document.addEventListener("keydown", onKeyDown);
 		return () => document.removeEventListener("keydown", onKeyDown);
-	}, [open, deleteOpen, onClose]);
+	}, [open, deleteOpen, keyboardActive, onClose]);
 
 	if (!open) return null;
 
@@ -820,7 +828,7 @@ export function ChainTableOverlay({
 			>
 				{directoryFailure && <p role="alert" className="px-3 py-1 text-xs text-red-400">{directoryFailure}</p>}
 				<ChainTableBody
-					keyboardActive={!deleteOpen}
+					keyboardActive={keyboardActive && !deleteOpen}
 					directory={directory}
 					onOrganizationChange={directory ? changeOrganization : undefined}
 					selectedFolders={selectedFolders}

@@ -6,11 +6,13 @@ import type { PluginDialogProps, PluginMenuProps, PluginUi, PluginWidgetHandle, 
 import type { Dictation } from "@/components/dictation";
 import { PluginComposer, PluginDictation, PluginStandardComposer } from "@/components/plugin-composer";
 import { PluginModelPicker, PluginThinkingPicker } from "@/components/plugin-model-picker";
+import { PluginKnowledgePicker } from "@/components/plugin-knowledge-picker";
 import { PluginSettingsRows } from "@/components/plugin-settings-rows";
 import { Button } from "@/components/ui/button";
 import { PluginWorkerResultSurface } from "@/components/plugin-worker-result";
 import { MenuShell } from "@/components/menu-shell";
 import { useBackdropDismiss } from "@/components/backdrop-dismiss";
+import { focusKnowledgePickerElement, useKnowledgePickerModal } from "@/components/knowledge-picker-foreground";
 export { PluginSettingsRows } from "@/components/plugin-settings-rows";
 
 export interface PluginUiFactoryOptions { signal: AbortSignal; onError?: (error: unknown) => void }
@@ -118,6 +120,7 @@ export function createPluginUiStore() {
 			return {
 				mountModelPicker: (target, props, options) => mount(target, props, options, (props, runtime) => <PluginModelPicker {...props} onError={runtime.report} />),
 				mountThinkingPicker: (target, props, options) => mount(target, props, options, (props, runtime) => <PluginThinkingPicker {...props} onError={runtime.report} />),
+				mountKnowledgePicker: (target, props, options) => mount(target, props, options, (props, runtime) => <PluginKnowledgePicker {...props} signal={runtime.signal} onError={runtime.report} />),
 				mountComposer: (target, props, options) => mount(target, props, options, (props, runtime) => <PluginComposer {...props} onError={runtime.report} />),
 				mountStandardComposer: (target, props, options) => mount(target, props, options, (props, runtime) => <PluginStandardComposer {...props} signal={runtime.signal} onError={runtime.report} />),
 				mountDictation: (target, props, options) => {
@@ -216,7 +219,8 @@ function PluginContent({ content, runtime }: Pick<PluginDialogProps, "content"> 
 }
 
 function PluginDialog({ title, content, onClose, runtime }: PluginDialogProps & { runtime: Runtime }) {
-	const frame = useRef<HTMLDivElement>(null);
+	const foreground = useKnowledgePickerModal();
+	const { frame, modal } = foreground;
 	const closing = useRef(false);
 	const latestOnClose = useRef(onClose);
 	latestOnClose.current = onClose;
@@ -227,15 +231,25 @@ function PluginDialog({ title, content, onClose, runtime }: PluginDialogProps & 
 		runtime.dispose();
 	};
 	const backdropDismiss = useBackdropDismiss(close);
-	useEffect(() => {
+	useLayoutEffect(() => {
 		const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-		frame.current?.focus();
+		modal?.activate();
+		if (foreground.canHandle()) focusKnowledgePickerElement(frame.current);
+		return () => {
+			modal?.close();
+			if (!modal || modal.canRestoreFocus()) focusKnowledgePickerElement(previous);
+		};
+	}, [modal, frame]);
+	useEffect(() => {
 		const key = (event: KeyboardEvent) => {
+			if (!foreground.canHandle()) return;
 			// Only the uppermost plugin modal owns dismissal. A menu above it
 			// gets first refusal, and core dialogs never consume the same Esc.
-			if (document.querySelector("[data-lh-menu]") || document.querySelectorAll("[data-plugin-ui-dialog]").item(document.querySelectorAll("[data-plugin-ui-dialog]").length - 1) !== frame.current) return;
+			const dialogs = document.querySelectorAll("[data-plugin-ui-dialog]:not([hidden])");
+			if (document.querySelector("[data-lh-menu]") || dialogs.item(dialogs.length - 1) !== frame.current) return;
 			if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); close(); }
 			if (event.key !== "Tab") return;
+			if (foreground.store?.hasActivePicker()) event.stopPropagation();
 			const controls = Array.from(frame.current?.querySelectorAll<HTMLElement>('button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled]),a[href],[tabindex="0"],[contenteditable="true"]') ?? []);
 			const first = controls[0]; const last = controls.at(-1);
 			if (!first) { event.preventDefault(); frame.current?.focus(); return; }
@@ -243,10 +257,10 @@ function PluginDialog({ title, content, onClose, runtime }: PluginDialogProps & 
 			else if (!event.shiftKey && (document.activeElement === last || document.activeElement === frame.current)) { event.preventDefault(); first.focus(); }
 		};
 		document.addEventListener("keydown", key, true);
-		return () => { document.removeEventListener("keydown", key, true); if (previous?.isConnected) previous.focus(); };
-	}, []);
-	return createPortal(<div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 backdrop-blur-sm" {...backdropDismiss}>
-		<div ref={frame} data-plugin-ui-dialog="" role="dialog" aria-modal="true" aria-label={title} tabIndex={-1} className="mx-4 flex max-h-[85vh] w-full max-w-lg flex-col overflow-y-auto rounded-xl border bg-card p-5 shadow-lg outline-none">
+		return () => { document.removeEventListener("keydown", key, true); };
+	});
+	return createPortal(<div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 backdrop-blur-sm" hidden={foreground.suspended} inert={foreground.suspended} style={foreground.suspended ? { display: "none" } : undefined} {...backdropDismiss}>
+		<div ref={frame} hidden={foreground.suspended} inert={foreground.suspended} style={foreground.suspended ? { display: "none" } : undefined} data-plugin-ui-dialog="" role="dialog" aria-modal="true" aria-label={title} tabIndex={-1} className="mx-4 flex max-h-[85vh] w-full max-w-lg flex-col overflow-y-auto rounded-xl border bg-card p-5 shadow-lg outline-none">
 			<div className="mb-4 flex items-center justify-between gap-4"><h2 className="text-sm font-semibold text-card-foreground">{title}</h2>
 				<Button type="button" variant="ghost" size="sm" aria-label="Close dialog" onClick={close}>Close</Button></div>
 			<PluginContent content={content} runtime={runtime} />

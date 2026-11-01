@@ -39,6 +39,7 @@ import {
 	effectiveSettings,
 	promptOverrides,
 	readSettingsRecord,
+	refreshWorkerRequestAdmission,
 	validateChatSettings,
 	validateModelsSettings,
 	writeSettingsRecord,
@@ -129,5 +130,8 @@ export async function PUT(request: Request, ctx: { params: Promise<{ section: st
 	// along untouched (other sections, unknown keys — sanitize preserves).
 	const next = { ...record, [section]: sectionOut };
 	writeSettingsRecord(next);
+	// Only a successful durable write changes admission. Increasing the
+	// limit immediately drains queued requests; decreasing never cancels active work.
+	refreshWorkerRequestAdmission();
 	return Response.json({ settings: next });
 }

@@ -176,6 +176,7 @@ Callbacks may return Promises; errors are surfaced rather than treated as succes
 | --- | --- |
 | `mountModelPicker(container, props, options)` | `value: { provider, id } \| undefined`, `onChange(value)`, optional `disabled` |
 | `mountThinkingPicker(container, props, options)` | `model: { provider, id } \| undefined`, `value: ThinkingLevel \| undefined`, `onChange(value)`, optional `disabled` |
+| `mountKnowledgePicker(container, props, options)` | `value: readonly string[]`, `onChange(ids)`, optional `disabled`; host node-selection bubble and Chains picker, as below |
 | `mountComposer(container, props, options)` | `value`, `onChange`, `onSend`; optional `busy`, `onStop`, `canSend`, `placeholder`, `autoFocus` |
 | `mountDictation(container, props, options)` | `onTranscript(text)`, optional `disabled`; handle also has `toggle()`, `finish(): Promise<void>`, `cancel()` |
 | `mountStandardComposer(container, props, options)` | `{ composer, model, thinking, dictation }`, using the independent controls' props |
@@ -216,6 +217,54 @@ stealing the recording. Focused plugin controls own their matching shortcuts; me
 mounting one does not take over core shortcuts. Escape cancels the actual recording
 owner. Plugin dictation always delivers to its explicit `onTranscript` callback, never
 silently into a core composer/question. The plugin decides where that text goes.
+
+### Knowledge picker
+
+The approved knowledge-picker increment adds
+`ctx.ui.mountKnowledgePicker(container, { value, onChange, disabled? }, { signal })`
+to API v1, with types in `src/core/plugin-ui.ts` included in the generated type bundle.
+`value` is a `readonly string[]` of selected node IDs; `onChange(ids)` receives the new
+ID array. It returns the standard handle with `update(partialProps)` and `dispose()`.
+Final verification of the approved Settings/dialog foreground extension is pending.
+
+The plugin chooses where to place the bubble, controls selection IDs, and owns any
+persistence. The host does not write plugin state. The bubble reuses the **exact existing
+`NodePickerControl`**: **Pick nodes**, selected count and **Clear**. Clear emits the
+controlled empty array `[]`. Clicking opens the real **`ChainTableOverlay`** in the full
+app **content column**, including the top-bar area, with the sidebar still accessible;
+it is not an inline Chains embed or a copied picker. Checkbox selection changes are
+immediate through `onChange`; reflect the new array with `handle.update({ value: ids })`,
+not a later Done commit. **Done**, **X** and **Escape** close the picker without discarding
+selection; reopening retains the controlled value.
+
+The picker is supported from ordinary plugin views, plugin Settings and content mounted
+inside public `ctx.ui.openDialog`. When launched from a modal, that origin stays mounted
+with its state preserved but is temporarily hidden while the full-column picker is active.
+Done, X and Escape close **only the selector**, restoring the origin's state and focus.
+The picker is foregrounded when opened, not pinned above all future UI: a newer public
+dialog or menu may foreground normally. **Any Settings open** instead closes the active
+or pending picker, regardless of whether it originated in a view, Settings or a public
+dialog. Controlled selection is retained; Settings opens or deep-links normally, and
+closing Settings does **not** automatically resume the picker. This special Settings
+rule supersedes merely covering a picker and restoring it afterward. It does not define
+a broader Settings/public-dialog overlap or general modal-stack policy.
+
+Only **one selector** is active. Opening another closes the previous selector without
+clearing its controlled selection, and the old picker does not automatically resume.
+An older asynchronous graph load cannot promote its selector over subsequently opened
+UI. The host's internal app-shell coordination owns these foreground transitions; plugins
+use the same API and mount signal, with no new props or plugin-side lifetime requirement.
+This is scoped picker integration, not a general overlay framework.
+
+The host supplies the graph and source organization, loading lazily on first open using
+the existing new-practice pattern, and owns focus, portals and abort/disposal cleanup.
+Graph names, chain presentation and source organization use the canonical existing UX.
+Selection mode is **not read-only**: user-driven source **rename**, folder **creation**
+and **drag organization** remain available. Management **Delete** remains unavailable in
+practice-picker mode, matching existing behavior. These are existing host UI operations,
+not new programmable core-write APIs: the backend learning-data API remains read-only.
+There is no generic deck/library-tree host API; deck trees, state, membership and
+selection limits remain plugin-owned.
 
 ### Dedicated plugin settings
 
@@ -388,8 +437,10 @@ learner-answer type into the question dock.
 
 Read the native transcript for learner answers/thinking/mistakes. The knowledge graph
 is extracted from teacher prose, not a complete representation of learner responses.
-Reads across files are not transactional. The supported API does not mutate core
-learning records; write plugin-generated cards/notes/schedules to plugin-owned state.
+Reads across files are not transactional. The backend learning-data API does not mutate
+core learning records; write plugin-generated cards/notes/schedules to plugin-owned state.
+The knowledge picker's user-driven source organization remains existing host UI behavior,
+not a programmable backend write service.
 
 ## Model calls
 
@@ -415,11 +466,13 @@ a text-only completion API. The catalog is the host's last-known catalog: it doe
 silently refresh accounts or select a fallback provider. Model selection must be
 explicit and currently available; an unset model is an error.
 
-`purpose` classifies automatic/background versus user-initiated work. Existing
-subscription background-use consent, admission, quota, and cancellation rules apply.
-Do not misclassify automatic work as user input to bypass those rules. Connecting a
-view never changes a background call into user-initiated work. There is no automatic
-API-key fallback after a refused subscription call.
+`purpose` classifies automatic/background versus user-initiated work for subscription
+consent; it does not classify a request for the shared worker-request pool described
+below. Existing subscription background-use consent, provider admission, quota, and
+cancellation rules apply. Do not misclassify automatic work as user input to bypass
+those rules. Connecting a view never changes a background call into user-initiated work.
+Standalone raw plugin inference is outside the worker-request pool, even with background
+purpose. There is no automatic API-key fallback after a refused subscription call.
 
 The host owns credentials and transport. Supported generation/reasoning/retry options
 are listed in `PluginInferenceOptions`; transport callbacks, custom fetch/env, headers,
@@ -538,10 +591,41 @@ explicitly. Disable and server restart mark **all unfinished tasks interrupted**
 queued tasks and disabled packages' saved tasks. Nothing automatically replays tools or
 starts a new model attempt. Completed results/history remain available.
 
-This service does not add a DAG, scheduling language, or a separate concurrency setting.
-Compose sequential stages with `wait`; coordinate independent tasks in plugin code.
-App-level worker-request admission remains a separate host concern; `purpose` classifies
-subscription consent and is not itself a concurrency permit.
+This service does not add a DAG, scheduling language, or a separate plugin concurrency
+setting. Compose sequential stages with `wait`; coordinate independent tasks in plugin code.
+
+### Shared host worker-request admission
+
+Host admission does not add plugin APIs or change task outcome/delivery recovery semantics.
+
+Settings → Agent → Models exposes **Concurrent worker requests**
+(`agent.workerRequestConcurrency`). The default is **8**, including when unset. Values
+must be positive safely representable whole integers (JavaScript safe integers); there is
+no arbitrary cap. Invalid values are rejected, not clamped. Increasing the value admits
+queued requests immediately. Decreasing it lets active requests finish, admitting no
+replacement until the active count is below the new limit.
+
+One process-global FIFO pool limits concurrent background **model request streams**, not
+whole agents or tasks. Each permit ends with its model request, before native tools run or
+an agent waits for child work. Core extractor, auditor, researcher, demo builder, visual
+maker and PDF reader requests share this pool with **all** detached `ctx.workers` tasks,
+including tasks started with `purpose: "user"`. Cancelling a queued request prevents
+provider dispatch. Teacher/prober/practice requests and their compaction, interactive
+plugin-managed conversations, and standalone raw plugin inference are outside this pool.
+`purpose` controls subscription consent, not worker classification. The pool is shared
+across routes and windows using one app-server process, not independent server processes.
+It replaces the old whole-extractor-phase three-permit wrapper; source-serial extraction
+chunks and the audit-through-merge consistency lock remain separate. The frontend's
+three-file upload queue is also independent of this model-request limit.
+
+Standalone tasks appear in the host **Background agents** panel using the existing row:
+title **plugin name · worker definition ID**, elapsed time, activity, model and usage when
+available. No session link is invented for a standalone task. **END** cancels computing
+work, including queued work; it does not cancel a completed result or pending delivery.
+A task already represented by a linked `createBackgroundTool` host job does not get a
+second row. This adds neither automatic retry nor a new task-history screen. Admission
+and activity bookkeeping, including internal SDK operations/callback metadata, remain
+host-private rather than a new public agent framework.
 
 ### Background tools in existing lessons
 

@@ -67,12 +67,30 @@ export interface FeedExtraction {
 	startedAt: number;
 }
 
+export interface FeedPluginWorker {
+	id: string;
+	taskId: string;
+	pluginId: string;
+	definitionId: string;
+	status: "queued" | "running";
+	title: string;
+	createdAt: string;
+	updatedAt: string;
+	activity?: string;
+	model: { provider: string; id: string };
+	usage?: FeedUsage;
+	costUsd: number | null;
+	contextLimit: number | null;
+}
+
 export interface ActivityFeed {
 	jobs: FeedJob[];
+	/** Optional for older payloads and consumers; current server always sends it. */
+	pluginWorkers?: FeedPluginWorker[];
 	extractions: FeedExtraction[];
 }
 
-const EMPTY_FEED: ActivityFeed = { jobs: [], extractions: [] };
+const EMPTY_FEED: ActivityFeed = { jobs: [], pluginWorkers: [], extractions: [] };
 
 // ─── The activity feed (composition root: the root layout) ───────────────────
 
@@ -109,7 +127,7 @@ export function ActivityProvider({ children }: { children: React.ReactNode }) {
 				if (res.ok) {
 					const data = (await res.json()) as Partial<ActivityFeed>;
 					if (alive)
-						setFeed({ jobs: data.jobs ?? [], extractions: data.extractions ?? [] });
+						setFeed({ jobs: data.jobs ?? [], pluginWorkers: data.pluginWorkers ?? [], extractions: data.extractions ?? [] });
 				}
 			} catch {
 				// transport blip: keep the last feed, announce again next event
@@ -169,13 +187,13 @@ export interface ActivityBlob {
 	/** job.id, or the extraction job's row id (source id, or "src#i" for
 	 *  chunk jobs — unique per row, per-chunk jobs owner 2026-09-28). */
 	id: string;
-	process: "job" | "extraction";
+	process: "job" | "plugin-worker" | "extraction";
 	/** Sub-agent kind for jobs (extraction blobs have none). */
 	jobKind?: JobKind;
 	/** Extraction phase (extracting/auditing/merging/embedding); jobs carry none. */
 	phase?: string;
 	title: string;
-	chatId: string;
+	chatId?: string;
 	/** ms epoch — blobs order oldest-first and elapsed counts from it. */
 	startedAt: number;
 	/** Inferred USD cost (jobCost) — null renders "—". */
@@ -239,6 +257,20 @@ export function toBlobs(feed: ActivityFeed): ActivityBlob[] {
 			steps: usage?.steps,
 		};
 	});
+	for (const task of feed.pluginWorkers ?? []) {
+		const last = task.usage?.lastStep;
+		blobs.push({
+			id: task.id, process: "plugin-worker", jobKind: "plugin", title: task.title,
+			startedAt: Date.parse(task.createdAt) || 0,
+			cost: task.costUsd ?? null,
+			context: task.contextLimit !== null && last?.inputTokens !== undefined
+				? { used: last.inputTokens + (last.outputTokens ?? 0) + (last.cacheReadTokens ?? 0) + (last.cacheWriteTokens ?? 0), limit: task.contextLimit }
+				: null,
+			activity: task.activity ?? task.status,
+			model: task.usage?.model ?? `${task.model.provider}:${task.model.id}`,
+			steps: task.usage?.steps,
+		});
+	}
 	for (const run of feed.extractions) {
 		blobs.push({
 			id: run.id,
@@ -408,6 +440,7 @@ function ActivityBlobRow({
 	return (
 		<div
 			data-testid={`activity-blob-${blob.process}`}
+			data-activity-id={blob.id}
 			className="relative rounded-lg px-2 py-1.5 text-xs transition-colors hover:bg-accent"
 		>
 			<button
@@ -490,9 +523,11 @@ function ActivityBlobRow({
 								<span className="tabular-nums text-card-foreground">{blob.steps}</span>
 							</div>
 						)}
-						<a href={`/chat/${blob.chatId}`} className="text-primary hover:underline">
-							Open session →
-						</a>
+						{blob.chatId && (
+							<a href={`/chat/${blob.chatId}`} className="text-primary hover:underline">
+								Open session →
+							</a>
+						)}
 					</div>
 					<div className="mt-2 text-muted-foreground/80">
 					{abortState === "failed" && "Abort failed — try again"}

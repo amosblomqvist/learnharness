@@ -7,6 +7,7 @@ import {
 	sameSessionRange, sessionFindRanges, sessionRangeIdentity, type SessionRangeIdentity,
 } from "@/components/session-find-dom";
 import { scrollSessionTarget, type SessionScrollContext } from "@/components/session-navigation";
+import { useKnowledgePickerForeground } from "@/components/knowledge-picker-foreground";
 
 export const SESSION_FIND_HIGHLIGHT = "lh-session-find";
 export const SESSION_FIND_ACTIVE_HIGHLIGHT = "lh-session-find-active";
@@ -66,6 +67,7 @@ export function SessionFind({ scopeRef, scrollContextRef }: {
 	scopeRef: RefObject<HTMLDivElement | null>;
 	scrollContextRef: RefObject<SessionScrollContext | null>;
 }) {
+	const { store: pickerForeground } = useKnowledgePickerForeground();
 	const [open, setOpen] = useState(false);
 	const [query, setQuery] = useState("");
 	const [result, setResult] = useState({ index: -1, count: 0 });
@@ -85,7 +87,7 @@ export function SessionFind({ scopeRef, scrollContextRef }: {
 
 	useEffect(() => {
 		const onFind = () => {
-			if (sessionFindHasForegroundLayer(document)) return;
+			if (pickerForeground?.isPickerForeground() || sessionFindHasForegroundLayer(document)) return;
 			if (!open) previousFocus.current = document.activeElement as HTMLElement | null;
 			setOpen(true);
 			// A second Mod+F focuses/selects the retained query, not a second bar.
@@ -93,21 +95,21 @@ export function SessionFind({ scopeRef, scrollContextRef }: {
 		};
 		window.addEventListener(kbdEventForAction("find"), onFind);
 		return () => window.removeEventListener(kbdEventForAction("find"), onFind);
-	}, [open]);
+	}, [open, pickerForeground]);
 
 	useEffect(() => {
 		if (!open) return;
 		inputRef.current?.focus({ preventScroll: true });
 		inputRef.current?.select();
 		const onEscape = (event: KeyboardEvent) => {
-			if (event.key !== "Escape" || sessionFindHasForegroundLayer(document)) return;
+			if (event.key !== "Escape" || pickerForeground?.isPickerForeground() || sessionFindHasForegroundLayer(document)) return;
 			event.preventDefault();
 			event.stopPropagation();
 			close();
 		};
 		document.addEventListener("keydown", onEscape);
 		return () => document.removeEventListener("keydown", onEscape);
-	}, [open, close]);
+	}, [open, close, pickerForeground]);
 
 	useEffect(() => {
 		if (!open || !scopeRef.current) return;

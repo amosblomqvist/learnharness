@@ -13,6 +13,11 @@ export interface PluginModelPickerProps {
 	onChange: PluginUiCallback<PluginModelValue>;
 	disabled?: boolean;
 }
+export interface PluginKnowledgePickerProps {
+	value: readonly string[];
+	onChange: PluginUiCallback<readonly string[]>;
+	disabled?: boolean;
+}
 export interface PluginThinkingPickerProps {
 	model: PluginModelValue | undefined;
 	value: ThinkingLevel | undefined;
@@ -96,6 +101,7 @@ export interface PluginSettingsSchema { rows: PluginSettingsRow[] }
 export interface PluginUi {
 	mountModelPicker(container: HTMLElement, props: PluginModelPickerProps, options: PluginWidgetOptions): PluginWidgetHandle<PluginModelPickerProps>;
 	mountThinkingPicker(container: HTMLElement, props: PluginThinkingPickerProps, options: PluginWidgetOptions): PluginWidgetHandle<PluginThinkingPickerProps>;
+	mountKnowledgePicker(container: HTMLElement, props: PluginKnowledgePickerProps, options: PluginWidgetOptions): PluginWidgetHandle<PluginKnowledgePickerProps>;
 	mountComposer(container: HTMLElement, props: PluginComposerProps, options: PluginWidgetOptions): PluginWidgetHandle<PluginComposerProps>;
 	mountDictation(container: HTMLElement, props: PluginDictationProps, options: PluginWidgetOptions): PluginDictationHandle;
 	mountStandardComposer(container: HTMLElement, props: PluginStandardComposerProps, options: PluginWidgetOptions): PluginWidgetHandle<PluginStandardComposerProps>;

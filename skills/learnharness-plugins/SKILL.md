@@ -41,11 +41,40 @@ bundles can be emitted with `node scripts/build-plugin-types.mjs`.
   after dynamic enabled-state changes. The host handles async busy/repeat prevention.
 - Use `ctx.ui` controlled helpers rather than private host component imports:
   `mountComposer`, `mountDictation`, `mountModelPicker`, `mountThinkingPicker`,
-  `mountStandardComposer`, `mountButton`, `mountSettingsRows`, `mountWorkerResult`,
+  `mountKnowledgePicker`, `mountStandardComposer`, `mountButton`, `mountSettingsRows`, `mountWorkerResult`,
   `openMenu`, and `openDialog`. Every call takes final `options: { signal }` and
   returns `update(partialProps)`/`dispose()`; updates are shallow, so replace whole
   nested preset props. Plugin callbacks own values/persistence; feed accepted values
   back into handles. Model/thinking selectors never write core settings.
+- The additive API v1 knowledge picker (Settings/dialog foreground extension final
+  verification pending)
+  uses `ctx.ui.mountKnowledgePicker(container, { value, onChange, disabled? }, { signal })`:
+  `value: readonly string[]` of node IDs, `onChange(ids)`, standard `update`/`dispose`.
+  Plugins own bubble placement, controlled selection and persistence; the host never
+  writes plugin state. Reuse the exact `NodePickerControl` and real `ChainTableOverlay`,
+  not copies: Pick nodes/count/Clear (`[]`), opening full app content-column Chains
+  including the top-bar area with sidebar accessible, never an inline embed. Checkbox
+  changes update immediately; feed IDs back with `handle.update({ value: ids })`.
+  Done/X/Escape close keeping selection; reopening retains it. Support ordinary views,
+  plugin Settings and public `ctx.ui.openDialog` content with the same API/props/signal;
+  no new plugin-side lifetime requirement. A launching modal stays mounted/stateful but
+  temporarily hidden while the selector is active; Done/X/Escape close only the selector
+  and restore origin state/focus. The selector foregrounds on opening, not above all
+  future UI: a newer public dialog or menu foregrounds normally. **Any Settings open**
+  closes the active/pending selector from any origin (view, Settings, public dialog),
+  retains controlled selection and opens/deep-links Settings normally. Closing Settings
+  never auto-resumes that picker; do not merely cover it for later restoration. This
+  does not approve broader Settings/public-dialog overlap or a general modal-stack rule.
+  Only one selector is active; another opening closes the previous picker without clearing
+  its controlled IDs, with no auto-resume. Old async loads must not promote old selectors
+  over newer UI. App-shell/provider coordination is host-internal, not a general overlay
+  framework. The host supplies canonical
+  graph/source organization, lazy first-open loading following new-practice behavior,
+  focus/portals and abort cleanup. Preserve user-driven source rename, folder creation
+  and drag organization: selection mode is **not read-only**. Management Delete stays
+  unavailable in practice-picker mode. The backend learning API remains read-only;
+  existing host UI edits do not expose new programmable core writes. No generic host
+  deck/library-tree API exists; deck tree/state/membership/limits stay plugin-owned.
 - Composer, dictation, model and thinking are independent controls; the standard
   composer is only a convenience preset. It excludes usage/practice controls,
   attachments and default file/drop insertion. Do not turn it into a teaching dock.
@@ -85,8 +114,30 @@ bundles can be emitted with `node scripts/build-plugin-types.mjs`.
   Use `createBackgroundTool` for ack-now/result-later delivery, not a suspended tool
   Promise or a second agent framework. Keep model text separate from rendered data;
   the original native result stays an acknowledgement. Preparation/formatting must
-  not introduce side effects. Shared worker admission is separate app policy, not
-  something to implement with a new plugin-local pool or misclassified purpose.
+  not introduce side effects. Do not add a plugin-local worker pool or use purpose
+  to bypass host policy.
+- Shared host admission uses Settings → Agent → Models → **Concurrent worker requests**,
+  `agent.workerRequestConcurrency`: default/unset **8**, any positive safely
+  representable whole integer, no arbitrary cap, invalid values rejected, never clamped.
+  A live increase admits queued requests immediately; a decrease lets active requests
+  finish and waits for active count below the new limit. One process-global FIFO pool
+  gates background model request streams, releasing before tools/child waits, not whole
+  agents. It covers core extractor/auditor/research/demo/visual/PDF requests and **all**
+  detached `ctx.workers`, even `purpose: "user"`. Direct teacher/prober/practice and their
+  compaction, interactive managed conversations and standalone raw plugin inference are
+  excluded. Purpose governs subscription consent, not worker classification. Queued
+  cancellation must not dispatch to a provider. Routes/windows share one app-server
+  process pool, not a pool across independent server processes. The obsolete whole-
+  extractor-phase three-permit wrapper is removed; source-serial chunks, the
+  audit-through-merge consistency lock and frontend three-file upload queue stay separate.
+- Standalone `ctx.workers` use the existing **Background agents** panel row, titled
+  **plugin name · worker definition ID**, with elapsed/activity/model/usage when
+  available and no invented session link. **END** cancels computing/queued work, not
+  completed results or pending delivery. Suppress a duplicate row when a linked
+  `createBackgroundTool` host job already represents the task. Existing task/delivery
+  recovery stays unchanged: no automatic retry or new history screen. Admission/activity
+  callbacks and SDK engine operations are host-private, not public plugin APIs or a new
+  agent framework.
 - Use `registerCodeBlock/registerToolRenderer` for shared presentation, not private
   Markdown/React imports. Honor per-mount abort signals and async cleanup. Preserve
   raw fallback and incomplete fence state; don't insert unsanitized model HTML.
