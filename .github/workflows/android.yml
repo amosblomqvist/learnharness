@@ -32,7 +32,14 @@ jobs:
         run: npm ci
       - name: Typecheck
         run: npm run typecheck
+      - name: Restore embedded application payload
+        id: payload
+        uses: actions/cache@v4
+        with:
+          path: android/.generated
+          key: android-payload-${{ hashFiles('src/**', 'lib/**', 'app/**', 'components/**', 'public/**', 'package-lock.json', 'package.json', 'next.config.ts', 'electron/**', 'android/runtime/**', 'android/runtime.json', 'android/*LICENSE', 'scripts/android/prepare.mjs', 'proxy.ts') }}
       - name: Build embedded application
+        if: steps.payload.outputs.cache-hit != 'true'
         run: npm run android:prepare
       - name: Build Android and test bundle installation
         working-directory: android
