@@ -261,6 +261,9 @@ export function newPlanBlockMessage(
 export const PRACTICE_PROBLEM_TOOL = "problem";
 export const PRACTICE_CONCLUDE_TOOL = "conclude";
 
+/** The agent-written recall cards (the Anki export's only source). */
+export const RECALL_CARDS_TOOL = "recall_cards";
+
 /** One picked proposition of the graph-context marker (the learner's map
  *  pick — name + statement as the learner SAW them at pick time). */
 export interface GraphContextPick {

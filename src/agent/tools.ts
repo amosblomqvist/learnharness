@@ -20,6 +20,7 @@ import { planTools, type PlanToolContext } from "./tools/plan.ts";
 import { probeDoneTool, type ProbeDoneContext } from "./tools/probe.ts";
 import { proberGraphTools } from "./tools/graph.ts";
 import { readTool } from "./tools/read.ts";
+import { recallCardsTool } from "./tools/recall-cards.ts";
 import { lsTool } from "./tools/ls.ts";
 import { findTool } from "./tools/find.ts";
 import { grepTool } from "./tools/grep.ts";
@@ -449,6 +450,7 @@ export function createTeacherTools(
 			{
 			...quizzing,
 			ask_user_question: askUserQuestionTool,
+			recall_cards: recallCardsTool,
 			// The learner-filesystem set is always-on (user-decided 2026-09,
 			// sources v1): the teacher locates and reads learner-referenced
 			// files on its own terms — nothing auto-injects. Read-only by

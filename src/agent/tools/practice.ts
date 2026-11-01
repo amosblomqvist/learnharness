@@ -3,7 +3,8 @@
  * practice agent's ENTIRE toolset — `problem` (pose: terminates the turn;
  * the commitment rides the call's arguments, hidden from the learner UI)
  * and `conclude` (end the problem: normal result, the turn continues so
- * the same reply can reveal + pose the next). The gating law (owner
+ * the same reply can reveal + pose the next), plus `recall_cards` (the
+ * Anki export's only source). The gating law (owner
  * ruling): an agent cannot pose while a problem is active and cannot
  * conclude with nothing active — activeProblemOf is the single fold both
  * gates read.
@@ -21,6 +22,7 @@ import { readTool } from "./read.ts";
 import { lsTool } from "./ls.ts";
 import { findTool } from "./find.ts";
 import { grepTool } from "./grep.ts";
+import { recallCardsTool } from "./recall-cards.ts";
 import { jobTools, type JobToolContext } from "./jobs.ts";
 import { proberGraphTools, type GraphToolContext } from "./graph.ts";
 import { activeProblemOf } from "../../core/native-messages.ts";
@@ -238,6 +240,7 @@ export function practiceTools(ctx: PracticeToolContext): Record<string, AgentToo
 	return healToolRecord({
 		problem: problemTool(gate, ctx.graphNodes),
 		conclude: concludeTool(gate),
+		recall_cards: recallCardsTool,
 		read: readTool,
 		ls: lsTool,
 		find: findTool,
