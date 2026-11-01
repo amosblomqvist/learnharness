@@ -4,6 +4,7 @@ import { probeDoneInputSchema, PROBE_DONE_ACK_TEXT } from "../../core/contracts.
 import { hasUnresolvedQuestion, hasProbeDone, type LhMessage } from "../../core/native-messages.ts";
 import type { ChatStore } from "../../core/ports.ts";
 import { buildProbeHandoffSteer, type SteerMessage } from "../../core/contracts.ts";
+import { probeCalibrationText } from "../../core/calibration.ts";
 
 /** What the probe_done tool closes over. */
 export interface ProbeDoneContext {
@@ -78,7 +79,10 @@ export function probeDoneTool(ctx: ProbeDoneContext): Record<string, AgentTool<a
 					return { ok: false, error: "The probe is already concluded — probe_done fires exactly once." };
 				}
 				try {
-					ctx.deliver(buildProbeHandoffSteer(ctx.chatId));
+					// Deterministic calibration summary (issue #390): computed from
+					// durable answer records, attached once to the handoff that the
+					// planning agent reads. Evidence, never a model-authored count.
+					ctx.deliver(buildProbeHandoffSteer(ctx.chatId, probeCalibrationText(record.messages)));
 				} catch (err) {
 					console.error(`[chat ${ctx.chatId}] probe handoff queueing failed:`, err);
 					// The handoff is recoverable-by-design (the next client message
