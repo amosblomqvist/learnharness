@@ -34,7 +34,7 @@
  */
 
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
-import type { AssistantMessage, Message, ToolResultMessage, UserMessage } from "@earendil-works/pi-ai";
+import type { Api, AssistantMessage, Message, Model, ToolResultMessage, UserMessage } from "@earendil-works/pi-ai";
 import { QUESTION_TOOLS, type PendingQuestion } from "./pending.ts";
 import { CLAUDE_CODE_PROVIDER } from "./contracts/claude-code.ts";
 import {
@@ -52,6 +52,119 @@ import { parseQuestionInput } from "./tool-parts.ts";
  *  never drifted. */
 export const INTERRUPTED_TEXT =
 	"The question was interrupted — the learner never answered; continue without holding a result for it.";
+
+// ─── replay integrity (the wire's call/result invariant) ─────────────────────
+//
+// A stored toolResult is only replayable while the assistant call it answers
+// is replayed too. Pi's provider transform drops assistants whose stopReason
+// is "error"/"aborted" but keeps their results
+// (pi-ai dist/api/transform-messages.js: "Skip errored/aborted assistant
+// messages entirely", while every toolResult is pushed through) — the wire
+// then carries a function_call_output / functionResponse with no matching
+// call, which OpenAI Responses and Gemini reject with HTTP 400 on every later
+// turn (#340). v0.4.1 stops NEW answers to aborted questions; these helpers
+// repair records that already carry such a pair, at read time: the record is
+// never mutated, the UI keeps rendering the aborted assistant and the answer
+// card, and the learner's answer survives on the wire as a user message (the
+// reporters' own verified recovery). The pairing invariant is enforced here
+// because pi's final transform is a dependency internal we cannot hook.
+
+/** Did this assistant message actually replay? Pi's provider transform skips
+ *  error/aborted generations (transform-messages.js:178-180), so their calls
+ *  contribute no surviving call id. Mirrors that rule, never guesses past it. */
+function replaysCalls(m: Message): m is AssistantMessage {
+	return m.role === "assistant" && m.stopReason !== "error" && m.stopReason !== "aborted";
+}
+
+/** The user message that replaces an unreplayable toolResult on the wire.
+ *  Content is the result's own model-facing blocks (answers are persisted as
+ *  JSON.stringify(compactAnswerForModel(...)), so nothing is re-rendered or
+ *  summarized — the learner's words stay exactly as the model first read
+ *  them); the timestamp rides along for replay/audit fidelity. */
+function asUserMessage(result: ToolResultMessage): UserMessage {
+	return { role: "user", content: result.content, timestamp: result.timestamp };
+}
+
+/** #340 read-time repair: no toolResult may reach the wire without a
+ *  surviving call. Orphan results become user messages — never dropped,
+ *  because the result content IS the learner's answer. Pure and idempotent
+ *  (a converted user message is not a toolResult on the next pass); returns
+ *  the input array untouched when nothing needs repair, so valid histories
+ *  project byte-identically. Also covers results orphaned by the compaction
+ *  cut and any future drift in the projection. */
+export function repairOrphanToolResults(messages: readonly Message[]): Message[] {
+	const calls = new Set<string>();
+	for (const m of messages) {
+		if (replaysCalls(m)) for (const block of m.content) if (block.type === "toolCall") calls.add(block.id);
+	}
+	let changed = false;
+	const out = messages.map((m) => {
+		if (m.role !== "toolResult" || calls.has(m.toolCallId)) return m;
+		changed = true;
+		return asUserMessage(m);
+	});
+	return changed ? out : (messages as Message[]);
+}
+
+/** Diagnostic twin of the repair: empty = every toolResult has a surviving
+ *  call. Never throws (the projection's contract); tests assert it directly,
+ *  production callers may log a violated-history warning. */
+export function callResultPairsValid(messages: readonly Message[]): string[] {
+	const calls = new Set<string>();
+	for (const m of messages) {
+		if (replaysCalls(m)) for (const block of m.content) if (block.type === "toolCall") calls.add(block.id);
+	}
+	const problems: string[] = [];
+	for (const m of messages) {
+		if (m.role === "toolResult" && !calls.has(m.toolCallId)) problems.push(`orphan toolResult ${m.toolCallId} (${m.toolName})`);
+	}
+	return problems;
+}
+
+/** #362(b) mid-session model switch into Gemini's native API: its request
+ *  validation wants a thought_signature on historical function calls (no user
+ *  text resets the check when the learner answers via a toolResult), and pi
+ *  already strips signatures and thinking for a different provider/model
+ *  (transform-messages.js:87-127; google-shared.js resolveThoughtSignature)
+ *  but cannot remove the foreign functionCall PART itself — so every turn
+ *  after the switch 400s. This pre-wire pass removes the part: foreign
+ *  assistants lose their toolCall blocks (their prose survives) and the
+ *  matching results become user text. Scoped to the ONE signature-strict api
+ *  today; same-provider history (Gemini→Gemini, which works) and every other
+ *  transport are untouched. The consumer is pi's Google converter:
+ *  dist/api/google-shared.js convertMessages emits remaining functionCall
+ *  parts only with a same-provider/model signature. A call-only assistant
+ *  would project an empty model turn, so it is dropped entirely. */
+export function sanitizeForeignToolPairs(
+	messages: readonly Message[],
+	model: Pick<Model<Api>, "api" | "provider" | "id">,
+): Message[] {
+	if (model.api !== "google-generative-ai") return messages as Message[];
+	const foreignCalls = new Set<string>();
+	let stripped = false;
+	const kept: Message[] = [];
+	for (const m of messages) {
+		if (m.role !== "assistant" || (m.provider === model.provider && m.api === model.api)) {
+			kept.push(m);
+			continue;
+		}
+		const content = m.content.filter((block) => block.type !== "toolCall");
+		for (const block of m.content) if (block.type === "toolCall") foreignCalls.add(block.id);
+		stripped = true;
+		if (content.length > 0) kept.push({ ...m, content });
+	}
+	const out = kept.map((m) => (m.role === "toolResult" && foreignCalls.has(m.toolCallId) ? asUserMessage(m) : m));
+	return stripped ? out : (messages as Message[]);
+}
+
+/** The model-aware projection factory — the agent's convertToLlm. The engine
+ *  is resolved per request and rebuilt from the record every POST, so the
+ *  CURRENT model is the only authority for "is this stored assistant
+ *  replayable by the target transport?". `toLlmMessages` alone cannot see it:
+ *  this factory is the ONE place the engine and the projection meet. */
+export function makeConvertToLlm(model: Model<Api>): (messages: readonly AgentMessage[]) => Message[] {
+	return (messages) => toLlmMessages(messages, { model });
+}
 
 // ─── The record's message type ───────────────────────────────────────────────
 
@@ -562,6 +675,15 @@ function resultIdsFrom(messages: readonly AgentMessage[]): Set<string> {
 	return ids;
 }
 
+/** Options for the model-facing projection. */
+export interface LlmProjectionOptions {
+	/** The engine this projection is for (see makeConvertToLlm). Omitted by
+	 *  non-wire callers (token estimates, tests): no model-switch detection
+	 *  happens, but #340's orphan repair still does — it is protocol safety,
+	 *  not policy. */
+	model?: Pick<Model<Api>, "api" | "provider" | "id">;
+}
+
 /**
  * AgentMessage[] → the provider wire (the agent's convertToLlm — required
  * by pi-agent-core's loop config, the ONE place model-facing decisions
@@ -577,10 +699,17 @@ function resultIdsFrom(messages: readonly AgentMessage[]): Set<string> {
  *   Error/aborted generations do not: Pi drops those assistant messages,
  *   so manufacturing their results would leave orphan results on the wire.
  *
+ * - Replay repair (2026-11-01): a toolResult whose owning assistant pi will
+ *   drop (error/aborted generation, or cut away by compaction) is emitted as
+ *   a user message instead; with an engine supplied, a foreign provider's
+ *   tool calls are also neutralized for Gemini's signature validation. See
+ *   the replay-integrity helpers above — the LAST projection is where a
+ *   call/result pairing invariant is cheap and exact.
+ *
  * Contract (pi-agent-core): never throws — an unknown shape passes
  * through untouched rather than killing the loop.
  */
-export function toLlmMessages(messages: readonly AgentMessage[]): Message[] {
+export function toLlmMessages(messages: readonly AgentMessage[], options: LlmProjectionOptions = {}): Message[] {
 	// THE COMPACTION CUT (owner round 14, 2026-10-05): the ACTIVE marker
 	// (the newest — chained compactions rule last) names the first kept
 	// message; everything before it is replaced by the marker's content
@@ -663,7 +792,13 @@ export function toLlmMessages(messages: readonly AgentMessage[]): Message[] {
 			}
 		}
 	}
-	return out;
+	// The LAST transformation before pi applies its own provider filters
+	// (transform-messages.js): the projected order is still known here, so the
+	// call/result invariant is enforced here — model-aware sanitization first
+	// (it can remove foreign calls and convert their results), then the orphan
+	// repair, so no later path leaves a result without a surviving call.
+	const sanitized = options.model ? sanitizeForeignToolPairs(out, options.model) : out;
+	return repairOrphanToolResults(sanitized);
 }
 
 // ─── native scans (the UIMessage-era pending/phase seams, natively) ──────────

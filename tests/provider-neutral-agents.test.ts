@@ -10,7 +10,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { describe, it } from "node:test";
 import {
-	createFauxCore, createModels, fauxAssistantMessage, fauxText, fauxToolCall,
+	createFauxCore, createModels, fauxAssistantMessage, fauxText, fauxToolCall, normalizeContext,
 	type JsonObject, type TranscriptContext, type Usage,
 } from "@earendil-works/pi-ai";
 import { builtinProviders } from "@earendil-works/pi-ai/providers/all";
@@ -20,6 +20,7 @@ import { runPdfReaderAgent } from "../src/agent/subagents/pdf-reader.ts";
 import type { HeadlessApi } from "../src/agent/subagents/headless.ts";
 import { AUTH_PROVIDER_KEYS } from "../src/core/auth-keys.ts";
 import { providerEventsDir } from "../src/agent/provider-events.ts";
+import { toLlmMessages } from "../src/core/native-messages.ts";
 
 const OR_KEY = "dummy-openrouter-MUST-NOT-REACH-other-endpoints";
 const SVG = '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 20 20"><rect width="20" height="20" fill="white"/></svg>';
@@ -336,3 +337,71 @@ function sseResponse(transport: Transport, calls: Call[], round: number): Respon
 	const data = events.map((event) => `${typeof event.type === "string" ? `event: ${event.type}\n` : ""}data: ${JSON.stringify(event)}\n\n`).join("") + (transport.api === "openai-completions" ? "data: [DONE]\n\n" : "");
 	return new Response(data, { status: 200, headers: { "content-type": "text/event-stream" } });
 }
+
+// ─── replay integrity: a mid-session switch into Gemini's native API (#362) ──
+// pi strips foreign thought signatures (transform-messages.js) but cannot
+// remove a foreign provider's functionCall PART; Gemini's request validation
+// wants a signature on historical calls, so the first answer after a switch
+// 400s forever. `toLlmMessages(history, {model})` neutralizes that foreign
+// pair; these cases capture the REAL outbound body through the actual Google
+// adapter (fetch closed, synthetic key) and prove the wire shape. The
+// same-provider control keeps its signature — the repair must never overreach.
+describe("replay integrity: mid-session switch into Gemini", { concurrency: false }, () => {
+	const google = TRANSPORTS.find((transport) => transport.provider === "google")!;
+	const USAGE = { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 2, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } };
+
+	/** Project for the engine, then let the real Google adapter serialize the
+	 *  request with fetch closed; return the captured body. */
+	async function capturedBody(history: readonly unknown[], engine: PiEngine): Promise<Record<string, unknown>> {
+		const requests: RecordedRequest[] = [];
+		globalThis.fetch = closedFetch(google, "pdf", requests);
+		const projected = toLlmMessages(history as never, { model: engine.model });
+		const stream = engine.streamFn(engine.model, normalizeContext({ messages: projected as never }), {});
+		for await (const _event of stream) { /* drain — the assertion is the request */ }
+		assert.equal(requests.length, 1);
+		return requests[0]!.body;
+	}
+
+	it("neutralizes a foreign provider's tool pair before Gemini's converter sees it", async () => {
+		await isolated({ GEMINI_API_KEY: "dummy-google-replay-key" }, async () => {
+			const engine = piEngineForSpec({ provider: "google", id: google.id, thinkingLevel: "off" });
+			const body = await capturedBody([
+				{
+					id: "asst_foreign", role: "assistant", api: "openai-completions", provider: "openrouter", model: "deepseek/deepseek-replay-test",
+					content: [
+						{ type: "text", text: "One question before we continue." },
+						{ type: "toolCall", id: "call_foreign", name: "ask_user_question", arguments: { question: "Which?" } },
+					],
+					usage: USAGE, stopReason: "toolUse", timestamp: 1000,
+				},
+				{
+					id: "res_foreign", role: "toolResult", toolCallId: "call_foreign", toolName: "ask_user_question",
+					content: [{ type: "text", text: "LEARNER-ANSWER-TEXT" }], isError: false, timestamp: 2000,
+				},
+			], engine);
+			const contents = body.contents as Array<{ parts: Array<Record<string, unknown>> }>;
+			assert.ok(Array.isArray(contents));
+			const functionCalls = contents.flatMap((content) => content.parts).filter((part) => "functionCall" in part);
+			assert.equal(functionCalls.length, 0, "no unsigned foreign functionCall may cross the wire");
+			assert.match(JSON.stringify(contents), /LEARNER-ANSWER-TEXT/, "the learner's answer survives as text");
+		});
+	});
+
+	it("keeps a same-provider Gemini call and its thought signature (control)", async () => {
+		await isolated({ GEMINI_API_KEY: "dummy-google-replay-key" }, async () => {
+			const engine = piEngineForSpec({ provider: "google", id: google.id, thinkingLevel: "off" });
+			const body = await capturedBody([
+				{
+					id: "asst_gemini", role: "assistant", api: "google-generative-ai", provider: "google", model: google.id,
+					content: [{ type: "toolCall", id: "call_gemini", name: "ask_user_question", arguments: { question: "q" }, thoughtSignature: "c2lnbmF0dXJl" }],
+					usage: USAGE, stopReason: "toolUse", timestamp: 1000,
+				},
+				{
+					id: "res_gemini", role: "toolResult", toolCallId: "call_gemini", toolName: "ask_user_question",
+					content: [{ type: "text", text: "LEARNER-ANSWER-TEXT" }], isError: false, timestamp: 2000,
+				},
+			], engine);
+			assert.match(JSON.stringify(body.contents), /thoughtSignature/, "same-provider signatures must stay for replay");
+		});
+	});
+});

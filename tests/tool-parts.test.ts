@@ -476,3 +476,39 @@ describe("over-escaped command recovery after shape parsing", () => {
 		assert.equal(parsed.question, matrix);
 	});
 });
+
+// ─── #362 regression pin: the malformed-question freeze ─────────────────────
+// v0.4.1 already healed the display parse (the issue's asymmetry was fixed:
+// parseAskInput now runs healEncodedArguments exactly like the quiz seam), and
+// the MalformedQuestion card + retry-question recovery cover what still cannot
+// be healed. Pin the healing so a future refactor cannot silently reintroduce
+// the dead card: the record keeps the RAW arguments, so the display parse is
+// the only thing between a string-encoded `options` and a locked lesson.
+describe("parseAskInput: the encoded-options heal (issue #362)", () => {
+	const encoded = JSON.stringify([
+		{ label: "A", value: "a" },
+		{ label: "B", value: "b" },
+	]);
+
+	it("heals a JSON-string options array exactly like the quiz display parse", () => {
+		const ask = parseAskInput({ question: "Which?", options: encoded });
+		assert.ok(ask, "the dock must arm — not show 'This question arrived malformed'");
+		assert.deepEqual(ask.options, [
+			{ label: "A", value: "a" },
+			{ label: "B", value: "b" },
+		]);
+		assert.ok(
+			parseQuizInput({ question: "Which?", options: encoded, correctAnswer: "a", explanation: "A." }),
+			"both display seams heal the same wobble",
+		);
+	});
+
+	it("a shape that is genuinely malformed still never arms the dock", () => {
+		assert.equal(parseAskInput({ question: "Which?", options: "not json" }), undefined);
+		assert.equal(
+			parseAskInput({ question: "Which?", options: [{ label: "A" }, { label: "A" }] }),
+			undefined,
+			"duplicate values still fail the option-sanity refinement",
+		);
+	});
+});
