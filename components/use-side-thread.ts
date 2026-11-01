@@ -11,6 +11,7 @@
 import { useCallback, useEffect, useReducer, useRef } from "react";
 import {
 	SIDE_THREAD_MAX_PAIRS,
+	SIDE_WORKING_MAX_CHARS,
 	type PassageSelector,
 	type SideNote,
 	type SidePair,
@@ -56,10 +57,13 @@ export interface SideThreadState {
 	readOnly?: SideQuestionDetails;
 	/** A reopened thread the learner asked more in: the thread it continues. */
 	continues?: string;
+	/** The thread was opened from the question waiting for the learner (its
+	 *  tool call id): the side agent nudges instead of answering. */
+	questionCallId?: string;
 }
 
 export type SideThreadAction =
-	| { type: "open"; threadId: string; anchor: SideThreadAnchor; passage?: SidePassage }
+	| { type: "open"; threadId: string; anchor: SideThreadAnchor; passage?: SidePassage; questionCallId?: string }
 	| { type: "open-read-only"; threadId: string; details: SideQuestionDetails; anchor: SideThreadAnchor }
 	| { type: "told"; threadId: string }
 	| { type: "continue"; threadId: string }
@@ -78,6 +82,9 @@ export function sideThreadReducer(state: SideThreadState | null, action: SideThr
 		return {
 			threadId: action.threadId, pairs: [], draft: null, learnerTell: null, mode: "popover", anchor: action.anchor,
 			...(action.passage ? { pendingPassage: action.passage } : {}),
+			// A thread on the waiting question opens beside the lesson, so the
+			// question stays in view (a popover would cover the dock).
+			...(action.questionCallId ? { questionCallId: action.questionCallId, mode: "panel" as const } : {}),
 		};
 	}
 	if (action.type === "open-read-only") {
@@ -183,20 +190,26 @@ function newThreadId(): string {
  *  request (it still completes on an in-app navigation). */
 const KEEPALIVE_MAX_BYTES = 60_000;
 
-function postClose(chatId: string, state: SideThreadState): void {
+function postClose(chatId: string, state: SideThreadState): Promise<void> {
 	const body = JSON.stringify(sideCloseBody(state));
 	const keepalive = new TextEncoder().encode(body).length <= KEEPALIVE_MAX_BYTES;
-	void fetch(`/api/chats/${encodeURIComponent(chatId)}/side-question/close`, { method: "POST", body, keepalive })
+	return fetch(`/api/chats/${encodeURIComponent(chatId)}/side-question/close`, { method: "POST", body, keepalive })
+		.then(() => undefined)
 		.catch((err) => console.error("side thread close failed:", err));
 }
+
+/** How long an answer submit waits for the close to reach the server. */
+const CLOSE_BEFORE_ANSWER_MS = 1_200;
 
 export interface SideThreadOpenArgs {
 	anchor: SideThreadAnchor;
 	passage?: SidePassage;
 	question?: string;
+	/** Open from the question waiting for the learner (its tool call id). */
+	questionCallId?: string;
 }
 
-export function useSideThread(chatId: string) {
+export function useSideThread(chatId: string, getWorking?: () => string) {
 	const [state, dispatch] = useReducer(sideThreadReducer, null);
 	// The ref is truth for the callbacks (a close right after a toggle or a
 	// frame must send it): every change goes through apply, which updates
@@ -215,13 +228,26 @@ export function useSideThread(chatId: string) {
 		readerRef.current = null;
 	}, []);
 
-	const close = useCallback(() => {
+	const getWorkingRef = useRef(getWorking);
+	getWorkingRef.current = getWorking;
+
+	const close = useCallback((): Promise<void> => {
 		const current = stateRef.current;
-		if (!current) return;
+		if (!current) return Promise.resolve();
 		stopReading();
-		if (!current.readOnly && (current.pairs.length || current.draft)) postClose(chatId, current);
+		const posted = !current.readOnly && (current.pairs.length || current.draft) ? postClose(chatId, current) : Promise.resolve();
 		apply({ type: "close" });
+		return posted;
 	}, [apply, chatId, stopReading]);
+
+	/** Commit the open thread and wait (briefly) for the server to have it:
+	 *  a thread closed before an answer parks behind the waiting question and
+	 *  lands right after the answer's result, where the tutor's reaction
+	 *  reads its note. */
+	const closeBeforeAnswer = useCallback(
+		() => Promise.race([close(), new Promise<void>((resolve) => setTimeout(resolve, CLOSE_BEFORE_ANSWER_MS))]),
+		[close],
+	);
 
 	const ask = useCallback((question: string) => {
 		if (stateRef.current?.readOnly && question.trim()) apply({ type: "continue", threadId: newThreadId() });
@@ -247,6 +273,8 @@ export function useSideThread(chatId: string) {
 						...(draft.selector !== undefined ? { selector: draft.selector } : {}),
 						// F10: the next note rewrites this one to cover the whole thread.
 						...(current.pairs.length ? { note: current.pairs[current.pairs.length - 1]!.note } : {}),
+						...(current.questionCallId ? { questionCallId: current.questionCallId } : {}),
+						...(current.questionCallId && getWorkingRef.current?.().trim() ? { working: getWorkingRef.current!().trim().slice(0, SIDE_WORKING_MAX_CHARS) } : {}),
 					}),
 				});
 				if (!res.ok || !res.body) {
@@ -274,7 +302,13 @@ export function useSideThread(chatId: string) {
 	/** Open a new thread; an open one closes (and commits) first (F7). */
 	const open = useCallback((args: SideThreadOpenArgs) => {
 		close();
-		const action: SideThreadAction = { type: "open", threadId: newThreadId(), anchor: args.anchor, ...(args.passage ? { passage: args.passage } : {}) };
+		const action: SideThreadAction = {
+			type: "open",
+			threadId: newThreadId(),
+			anchor: args.anchor,
+			...(args.passage ? { passage: args.passage } : {}),
+			...(args.questionCallId ? { questionCallId: args.questionCallId } : {}),
+		};
 		apply(action);
 		if (args.question?.trim()) ask(args.question);
 	}, [apply, ask, close]);
@@ -309,5 +343,5 @@ export function useSideThread(chatId: string) {
 		};
 	}, [close]);
 
-	return { state, open, ask, addPassage, setTell, expand, close, reopenReadOnly, tellTutor };
+	return { state, open, ask, addPassage, setTell, expand, close, closeBeforeAnswer, reopenReadOnly, tellTutor };
 }

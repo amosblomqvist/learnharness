@@ -51,6 +51,7 @@ export function createSideQuestionActions({ threadOpen, open, addPassage }: {
 export function sideThreadPlaceholder(state: SideThreadState): string {
 	if (state.pairs.length >= SIDE_THREAD_MAX_PAIRS) return "This side thread is full. Close it to start a new one.";
 	if (state.pendingPassage) return "Ask about this passage…";
+	if (state.questionCallId && !state.pairs.length && !state.draft) return "Stuck? Ask for a nudge (it won't give the answer)…";
 	return state.pairs.length || state.draft ? "Ask a follow-up…" : "Ask a side question…";
 }
 

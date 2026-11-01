@@ -31,11 +31,20 @@ export const TUTOR_NOTE_TOOL = "tutor_note";
 export const SIDE_QUESTION_MAX_TURNS = 8;
 
 /** Outside the numbered fragments, so it never composes into tutor prompts. */
-const SYSTEM_PROMPT_FILE = path.join(PATHS.root, "src", "agent", "prompts", "side-question", "system.md");
+const PROMPT_DIR = path.join(PATHS.root, "src", "agent", "prompts", "side-question");
+const SYSTEM_PROMPT_FILE = path.join(PROMPT_DIR, "system.md");
+/** Appended for a thread opened from the waiting question: nudge, never answer. */
+const PENDING_QUESTION_FILE = path.join(PROMPT_DIR, "pending-question.md");
 
-let cachedPrompt: string | undefined;
-export function sideQuestionSystemPrompt(): string {
-	return (cachedPrompt ??= fs.readFileSync(SYSTEM_PROMPT_FILE, "utf-8").trim());
+const cachedPrompts = new Map<boolean, string>();
+export function sideQuestionSystemPrompt(pendingQuestion = false): string {
+	let prompt = cachedPrompts.get(pendingQuestion);
+	if (prompt === undefined) {
+		prompt = fs.readFileSync(SYSTEM_PROMPT_FILE, "utf-8").trim();
+		if (pendingQuestion) prompt += `\n\nThis thread, specifically:\n${fs.readFileSync(PENDING_QUESTION_FILE, "utf-8").trim()}`;
+		cachedPrompts.set(pendingQuestion, prompt);
+	}
+	return prompt;
 }
 
 const tutorNoteInput = Type.Object({
@@ -62,6 +71,8 @@ export interface SideQuestionRunOptions {
 	engine: PiEngine;
 	userMessage: string;
 	chatId: string;
+	/** The thread was opened from the question waiting for the learner. */
+	pendingQuestion?: boolean;
 	/** The learner-facing answer as it streams (never the tutor note). */
 	onText: (delta: string) => void;
 	/** A file tool started (label: its path or pattern). */
@@ -155,7 +166,7 @@ export async function runSideQuestion(opts: SideQuestionRunOptions): Promise<Sid
 	await runSubagent(sideQuestionTools(opts.engine), {
 		role: "sideQuestion",
 		engine: opts.engine,
-		systemPrompt: sideQuestionSystemPrompt(),
+		systemPrompt: sideQuestionSystemPrompt(opts.pendingQuestion === true),
 		prompt: opts.userMessage,
 		maxTurns: SIDE_QUESTION_MAX_TURNS,
 		shouldStop: (m) => m.content.some((b) => b.type === "toolCall" && b.name === TUTOR_NOTE_TOOL),
