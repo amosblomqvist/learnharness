@@ -68,9 +68,14 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: learnharness-android
+          name: learnharness-android-arm64
+          path: android/app/build/outputs/apk/release/app-arm64-v8a-release-unsigned.apk
+          retention-days: 14
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: learnharness-android-validation
           path: |
-            android/app/build/outputs/apk/**/*.apk
             android/app/build/reports/tests/
             android/.generated/smoke/
           retention-days: 14
