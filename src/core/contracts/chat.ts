@@ -33,6 +33,8 @@ export interface ChatRecord {
 	createdAt: string;
 	updatedAt: string;
 	messages: LhMessage[];
+	/** Session-local processed pictures; artifact records carry references only. */
+	imageSnapshots?: Record<string, ImageSnapshot>;
 	/** The session's kind — absent = teach (pre-practice records). */
 	kind?: ChatKind;
 	/** The session's plan tree (vision §2) — written by plan tools via saveTree. */
@@ -295,16 +297,22 @@ export interface ChatListItem extends ChatSummary {
 
 // ─── Learner images in the lesson (issue #363) ──────────────────────────────
 
-/** The show_image tool's record payload (its tool part's output): the
- *  learner's picture, bounded and embedded so the lesson survives the file
- *  moving. Never model-facing — the teacher's result is one text line. */
+/** One upright, metadata-free picture, stored once per session. */
+export interface ImageSnapshot {
+	mimeType: "image/png" | "image/jpeg";
+	data: string;
+	width: number;
+	height: number;
+}
+
+/** The show_image record payload. Its session-owned snapshot is never model-facing. */
 export interface ShowImageDetails {
 	/** The absolute path the image was read from. */
 	path: string;
 	caption?: string;
 	mimeType: "image/png" | "image/jpeg";
-	/** Base64 image bytes. */
-	data: string;
+	/** SHA-256 identity in ChatRecord.imageSnapshots. */
+	snapshotId: string;
 	width: number;
 	height: number;
 }

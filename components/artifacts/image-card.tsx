@@ -4,7 +4,8 @@ import { DownloadIcon, MaximizeIcon } from "lucide-react";
 import { useSessionMermaid } from "@/components/session-overlay";
 import { downloadFile } from "@/components/artifacts/download";
 import { ToolCallCard } from "@/components/artifacts/tool-call-card";
-import type { ArtifactPartProps, ShowImageDetails } from "@/src/core";
+import type { ArtifactPartProps, ImageSnapshot, ShowImageDetails } from "@/src/core";
+import { useImageSnapshot } from "./use-image-snapshot";
 
 /**
  * The show_image card (issue #363): one of the learner's own images, as
@@ -17,8 +18,8 @@ import type { ArtifactPartProps, ShowImageDetails } from "@/src/core";
 function isShowImageDetails(value: unknown): value is ShowImageDetails {
 	const v = value as Partial<ShowImageDetails> | null | undefined;
 	return (
-		typeof v?.data === "string" &&
-		v.data.length > 0 &&
+		typeof v?.snapshotId === "string" &&
+		/^[a-f0-9]{64}$/.test(v.snapshotId) &&
 		(v.mimeType === "image/png" || v.mimeType === "image/jpeg") &&
 		typeof v.path === "string" &&
 		typeof v.width === "number" &&
@@ -40,13 +41,12 @@ export function imageDownloadName(image: Pick<ShowImageDetails, "path" | "mimeTy
 
 /** The image as a standalone SVG document — the shape the fullscreen
  *  overlay (an SVG viewer, sized by viewBox) takes. Pure. */
-export function imageSvgDocument(image: Pick<ShowImageDetails, "mimeType" | "data" | "width" | "height">): string {
+export function imageSvgDocument(image: ImageSnapshot): string {
 	const { width, height } = image;
 	return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}"><image href="data:${image.mimeType};base64,${image.data}" width="${width}" height="${height}"/></svg>`;
 }
 
 export function ImageCard({ part }: ArtifactPartProps) {
-	const overlay = useSessionMermaid();
 	if (part.state !== "output-available") return <ToolCallCard part={part} />;
 	const image = part.output;
 	if (!isShowImageDetails(image)) {
@@ -56,6 +56,18 @@ export function ImageCard({ part }: ArtifactPartProps) {
 			</div>
 		);
 	}
+	return <StoredImageCard details={image} />;
+}
+
+function StoredImageCard({ details }: { details: ShowImageDetails }) {
+	const { image, failed } = useImageSnapshot(details.snapshotId);
+	if (!image) return <div className="my-4 text-sm text-muted-foreground" role="status">{failed ? "Image snapshot could not be loaded." : "Loading image…"}</div>;
+	return <ImagePresentation image={{ ...image, path: details.path, caption: details.caption }} />;
+}
+
+/** Resolved presentation shared by inline display, download and fullscreen. */
+export function ImagePresentation({ image }: { image: ImageSnapshot & Pick<ShowImageDetails, "path" | "caption"> }) {
+	const overlay = useSessionMermaid();
 	const save = () => {
 		const bytes = Uint8Array.from(atob(image.data), (c) => c.charCodeAt(0));
 		downloadFile(imageDownloadName(image), bytes, image.mimeType);

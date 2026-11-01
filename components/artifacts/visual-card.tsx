@@ -9,7 +9,8 @@ import { useSessionMermaid } from "@/components/session-overlay";
 import { downloadFile } from "@/components/artifacts/download";
 import { DispatchCard } from "@/components/artifacts/dispatch-card";
 import { SvgImage } from "@/components/artifacts/svg-image";
-import type { ArtifactPartProps, VisualResult } from "@/src/core";
+import { embedLearnerImage, type ArtifactPartProps, type VisualResult } from "@/src/core";
+import { useImageSnapshot } from "./use-image-snapshot";
 
 /**
  * Visual artifact card (W6 → ack protocol): the tool part's output is the
@@ -51,6 +52,8 @@ export function VisualOutputCard({
 	initialInverted?: boolean;
 }) {
 	const result = output as VisualResult | undefined;
+	const snapshot = useImageSnapshot(result?.image?.snapshotId);
+	const svg = result?.image && snapshot.image ? embedLearnerImage(result.svg, snapshot.image) : result?.svg ?? "";
 	const overlay = useSessionMermaid();
 	const actions = useContext(ChatActionsContext);
 	// Brightness inversion (owner, 2026-10-07): the switch state PERSISTS on
@@ -92,6 +95,7 @@ export function VisualOutputCard({
 			</div>
 		);
 	}
+	if (result.image && !snapshot.image) return <div className="my-4 text-sm text-muted-foreground" role="status">{snapshot.failed ? "Image snapshot could not be loaded." : "Loading image…"}</div>;
 	return (
 		/* NO CARD CHROME (owner round, 2026-10-07): the figure is document
 		   material — no border, no padding box. Image first, then the CAPTION
@@ -122,7 +126,7 @@ export function VisualOutputCard({
 				data-testid="visual-svg"
 			>
 				<SvgImage
-					svg={result.svg}
+					svg={svg}
 					width={natural ?? undefined}
 					className={natural !== null ? "block h-auto max-w-full" : "block h-auto w-full"}
 				/>
@@ -145,7 +149,7 @@ export function VisualOutputCard({
 						type="button"
 						aria-label="Download figure as SVG"
 						title="Download as SVG"
-						onClick={() => downloadFile("figure.svg", result.svg, "image/svg+xml")}
+						onClick={() => downloadFile("figure.svg", svg, "image/svg+xml")}
 						data-testid="visual-download"
 						className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
 					>
@@ -156,7 +160,7 @@ export function VisualOutputCard({
 							type="button"
 							aria-label="Open figure fullscreen"
 							title="Open fullscreen"
-							onClick={() => overlay.openFigure(result.svg, shownInverted)}
+							onClick={() => overlay.openFigure(svg, shownInverted)}
 							data-testid="visual-open"
 							className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
 						>

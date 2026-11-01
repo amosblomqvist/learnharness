@@ -23,7 +23,7 @@ import { readTool } from "./tools/read.ts";
 import { lsTool } from "./tools/ls.ts";
 import { findTool } from "./tools/find.ts";
 import { grepTool } from "./tools/grep.ts";
-import { showImageTool } from "./tools/show-image.ts";
+import { createShowImageTool } from "./tools/show-image.ts";
 import { healToolRecord } from "./tools/heal.ts";
 import type { GraphStore } from "../core/ports.ts";
 
@@ -460,7 +460,7 @@ export function createTeacherTools(
 			grep: grepTool,
 			// The learner-image display twin of read (issue #363): teacher
 			// only, always on — it shows the learner their own file.
-			show_image: showImageTool,
+			show_image: createShowImageTool(ctx),
 			...planTools(ctx),
 			...jobTools({ chatId: ctx.chatId, jobStore: ctx.jobStore, spawn: ctx.spawn, searchAvailable: ctx.searchAvailable }),
 		},

@@ -9,10 +9,11 @@
 
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { createHash } from "node:crypto";
 import { PATHS } from "../../config.ts";
 import { emit } from "../core/events.ts";
 import type { ChatStore } from "../core/ports.ts";
-import type { ChatRecord, ChatSettings, ChatSummary, ExtractionRunUsage, PlanTree, TurnUsage } from "../core/contracts.ts";
+import type { ChatRecord, ChatSettings, ChatSummary, ExtractionRunUsage, ImageSnapshot, PlanTree, TurnUsage } from "../core/contracts.ts";
 import { CURRENT_CHAT_VERSION } from "../core/contracts.ts";
 import type { LhMessage } from "../core/native-messages.ts";
 import { activeProblemOf, danglingQuestionOf } from "../core/native-messages.ts";
@@ -84,7 +85,7 @@ function listChats(): ChatSummary[] {
 			.filter((f) => f.endsWith(".json"))
 			.map((f) => getChat(f.slice(0, -5)))
 			.filter((r): r is ChatRecord => r !== null)
-			.map(({ messages, tree, turns, extractions, ...summary }) => {
+			.map(({ messages, tree, turns, extractions, imageSnapshots: _imageSnapshots, ...summary }) => {
 				// Per-record isolation (Wave B): a record whose messages fail the
 				// projection (e.g. pre-Wave-B UIMessage-format scratch — the
 				// zero-back-compat wipe makes these "corrupt") must not blank the
@@ -128,6 +129,20 @@ function saveMessages(id: string, messages: LhMessage[]): void {
 	if (!record) throw new Error(`Chat not found: ${id}`);
 	record.messages = messages;
 	record.updatedAt = new Date().toISOString();
+	writeChat(record);
+}
+
+/** A synchronous read/merge/write keeps concurrent worker and turn writes from losing snapshots. */
+function saveImageSnapshot(id: string, snapshotId: string, image: ImageSnapshot): void {
+	if (!/^[a-f0-9]{64}$/.test(snapshotId) || createHash("sha256").update(Buffer.from(image.data, "base64")).digest("hex") !== snapshotId) {
+		throw new Error("Invalid image snapshot identity");
+	}
+	const record = getChat(id);
+	if (!record) throw new Error(`Chat not found: ${id}`);
+	if (record.imageSnapshots?.[snapshotId]) return;
+	record.imageSnapshots = { ...record.imageSnapshots, [snapshotId]: {
+		mimeType: image.mimeType, data: image.data, width: image.width, height: image.height,
+	} };
 	writeChat(record);
 }
 
@@ -210,6 +225,7 @@ export const chatStore: ChatStore = {
 	getChat,
 	listChats,
 	saveMessages,
+	saveImageSnapshot,
 	saveTree,
 	saveSettings,
 	renameChat,

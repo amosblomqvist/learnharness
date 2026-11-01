@@ -3,6 +3,7 @@ import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { serverExecute, type ImageFileResult } from "../tool-execute.ts";
 import { loadLearnerImage } from "./learner-image.ts";
 import type { ShowImageDetails } from "../../core/contracts.ts";
+import type { ChatStore } from "../../core/ports.ts";
 
 /**
  * show_image (issue #363): put one of the learner's image files into the
@@ -20,25 +21,29 @@ const showImageInput = Type.Object({
 	caption: Type.Optional(Type.String({ description: "One short line shown under the image" })),
 });
 
-export const showImageTool: AgentTool<typeof showImageInput> = {
-	name: "show_image",
-	label: "show_image",
-	description:
-		"Show one of the learner's image files (jpg, png, gif, webp, bmp) in the lesson as-is, with an optional caption. " +
-		"Instant. The result only confirms what was shown — the image is not sent back to you; use read to look at it. " +
-		"To draw marks on the image, call visual with its path instead.",
-	parameters: showImageInput,
-	execute: serverExecute("show_image", showImageInput, async ({ path, caption }, { signal }): Promise<ImageFileResult> => {
-		const image = await loadLearnerImage(path, signal);
-		const trimmed = caption?.trim();
-		const details: ShowImageDetails = {
-			path: image.path,
-			...(trimmed ? { caption: trimmed } : {}),
-			mimeType: image.mimeType,
-			data: image.data,
-			width: image.width,
-			height: image.height,
-		};
-		return { text: `Shown to the learner: ${image.path} (${image.width}×${image.height}).`, details };
-	}),
-};
+export function createShowImageTool(ctx: { chatId: string; chatStore: Pick<ChatStore, "saveImageSnapshot"> }): AgentTool<typeof showImageInput> {
+	return {
+		name: "show_image",
+		label: "show_image",
+		description:
+			"Show one of the learner's image files (jpg, png, gif, webp, bmp) in the lesson as-is, with an optional caption. " +
+			"Instant. The result only confirms what was shown — the image is not sent back to you; use read to look at it. " +
+			"To draw marks on the image, call visual with its path instead. Visual results display automatically: do not repeat a newly delivered result. " +
+			"Show a picture again only when resurfacing it meaningfully helps the current explanation.",
+		parameters: showImageInput,
+		execute: serverExecute("show_image", showImageInput, async ({ path, caption }, { signal }): Promise<ImageFileResult> => {
+			const image = await loadLearnerImage(path, signal);
+			ctx.chatStore.saveImageSnapshot(ctx.chatId, image.snapshotId, image);
+			const trimmed = caption?.trim();
+			const details: ShowImageDetails = {
+				path: image.path,
+				...(trimmed ? { caption: trimmed } : {}),
+				mimeType: image.mimeType,
+				snapshotId: image.snapshotId,
+				width: image.width,
+				height: image.height,
+			};
+			return { text: `Shown to the learner: ${image.path} (${image.width}×${image.height}).`, details };
+		}),
+	};
+}

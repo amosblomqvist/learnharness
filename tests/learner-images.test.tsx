@@ -1,7 +1,7 @@
 /**
  * Learner images in the lesson (issue #363) — deterministic, zero network:
  *
- *   1. the shared loader (learner-image.ts): byte-for-byte keep, the storage
+ *   1. the shared loader (learner-image.ts): metadata-free normalization, the storage
  *      bound, EXIF baked upright, format conversion, readable failures
  *   2. show_image: one text line to the teacher, the picture as details
  *   3. visual with an image: dispatch-time path check, the maker's
@@ -35,7 +35,9 @@ import {
 import { renderToStaticMarkup } from "react-dom/server";
 import { PATHS } from "../config.ts";
 import { checkLearnerImage, loadLearnerImage } from "../src/agent/tools/learner-image.ts";
-import { showImageTool } from "../src/agent/tools/show-image.ts";
+import { createShowImageTool } from "../src/agent/tools/show-image.ts";
+import { embedLearnerImage } from "../src/core/learner-image-svg.ts";
+import type { ImageSnapshot } from "../src/core/contracts.ts";
 import { jobTools } from "../src/agent/tools/jobs.ts";
 import { LEARNER_IMAGE_HREF, runVisualMaker } from "../src/agent/subagents/visual-maker.ts";
 import { headlessOverride, realHeadless, type HeadlessApi } from "../src/agent/subagents/headless.ts";
@@ -46,7 +48,7 @@ import type { PiEngine } from "../src/agent/models.ts";
 import { chatStore } from "../src/store/chats.ts";
 import { jobStore } from "../src/store/jobs.ts";
 import { VisualOutputCard } from "../components/artifacts/visual-card.tsx";
-import { ImageCard, imageDownloadName, imageSvgDocument } from "../components/artifacts/image-card.tsx";
+import { ImageCard, ImagePresentation, imageDownloadName, imageSvgDocument } from "../components/artifacts/image-card.tsx";
 import { artifactRenderers } from "../components/artifacts/index.ts";
 
 // The key-presence gate (see demos.test.tsx): the runner's model checks
@@ -57,6 +59,8 @@ const scratch = fs.mkdtempSync(path.join(os.tmpdir(), "lh-learner-images-"));
 const JOBS_DIR = path.join(PATHS.data, "jobs");
 const createdChats: string[] = [];
 const createdJobs: string[] = [];
+const snapshots = new Map<string, ImageSnapshot>();
+const showImageTool = createShowImageTool({ chatId: "test", chatStore: { saveImageSnapshot: (_chatId, id, image) => snapshots.set(id, image) } });
 
 after(() => {
 	fs.rmSync(scratch, { recursive: true, force: true });
@@ -179,11 +183,16 @@ const UNPLACED_SVG = '<svg xmlns="http://www.w3.org/2000/svg" width="40" height=
 // ─── 1. the loader ───────────────────────────────────────────────────────────
 
 describe("learner image loader", () => {
-	it("keeps a PNG already within the limits byte-for-byte", async () => {
+	it("normalizes a small PNG without changing its pixels",  async () => {
 		const bytes = raster(40, 30);
 		const p = file("small.png", bytes);
 		const image = await loadLearnerImage(p);
-		assert.deepEqual(image, { path: p, mimeType: "image/png", data: bytes.toString("base64"), width: 40, height: 30 });
+		assert.equal(image.path, p);
+		assert.equal(image.mimeType, "image/png");
+		assert.equal(image.width, 40);
+		assert.equal(image.height, 30);
+		assert.deepEqual(pixel(Buffer.from(image.data, "base64"), 5, 15), pixel(bytes, 5, 15));
+		assert.match(image.snapshotId, /^[a-f0-9]{64}$/);
 	});
 
 	it("shrinks a large image to 1600px on its longest side and about 1 MB", async () => {
@@ -213,8 +222,8 @@ describe("learner image loader", () => {
 
 	it("fails with readable errors for missing files, non-images, and directories", async () => {
 		await assert.rejects(loadLearnerImage(path.join(scratch, "nope.png")), /Cannot open image .*nope\.png: no such file/);
-		await assert.rejects(loadLearnerImage(file("notes.txt", "plain text")), /notes\.txt is not a supported image \(jpg, png, gif, webp, or bmp\)/);
-		await assert.rejects(checkLearnerImage(scratch), /it is a directory/);
+		await assert.rejects(loadLearnerImage(file("notes.txt", "plain text")), /notes\.txt: not a supported image \(jpg, png, gif, webp, or bmp\)/);
+		await assert.rejects(checkLearnerImage(scratch), /not a regular file/);
 	});
 
 	it("resolves relative paths against the learner's home, like read", async () => {
@@ -230,13 +239,14 @@ describe("show_image", () => {
 	it("returns one text line to the teacher and the picture as details", async () => {
 		const bytes = raster(40, 30);
 		const p = file("board.png", bytes);
+		const image = await loadLearnerImage(p);
 		const result = await showImageTool.execute("call-s1", { path: p, caption: "  The breadboard, top view  " });
 		assert.deepEqual(result.content, [{ type: "text", text: `Shown to the learner: ${p} (40×30).` }], "no image part reaches the model");
 		assert.deepEqual(result.details, {
 			path: p,
 			caption: "The breadboard, top view",
 			mimeType: "image/png",
-			data: bytes.toString("base64"),
+			snapshotId: image.snapshotId,
 			width: 40,
 			height: 30,
 		});
@@ -310,8 +320,9 @@ describe("visual maker with a learner image (fake model + fake headless)", () =>
 		assert.equal(headless.svgCalls.length, 1);
 		assert.ok(headless.svgCalls[0]!.includes(`href="${dataUri}"`), "the render carries the real picture");
 		assert.ok(!headless.svgCalls[0]!.includes(`href="${LEARNER_IMAGE_HREF}"`));
-		assert.equal(result.svg, MARKED_SVG.replace(`href="${LEARNER_IMAGE_HREF}"`, `href="${dataUri}"`));
-		assert.deepEqual(result.image, { path: image.path });
+		assert.equal(result.svg, MARKED_SVG, "saved SVG references the session snapshot, without repeating its bytes");
+		assert.equal(embedLearnerImage(result.svg, image), MARKED_SVG.replace(`href="${LEARNER_IMAGE_HREF}"`, `href="${dataUri}"`));
+		assert.deepEqual(result.image, { path: image.path, snapshotId: image.snapshotId });
 		assert.equal(result.notes, "Circled the yellow half.");
 		assert.ok(!requests.some((request) => text(request).includes(image.data)), "the base64 never enters the model's text");
 	});
@@ -331,8 +342,8 @@ describe("visual maker with a learner image (fake model + fake headless)", () =>
 			fauxAssistantMessage([fauxText("Kept the original placement.")]),
 		]);
 		const result = await runVisualMaker({ brief: "b", image }, { engine, headless });
-		assert.match(text(requests[2]!), /ERROR: edit not applied — the SVG must place the learner's image exactly once/);
-		assert.ok(result.svg.includes(`data:image/png;base64,${image.data}`), "the delivered SVG still embeds the picture");
+		assert.match(text(requests[2]!), /ERROR: edit not applied — the image must use exactly one href/);
+		assert.equal(result.svg, MARKED_SVG, "the delivered SVG still references the picture");
 		assert.equal(headless.svgCalls.length, 1, "no re-render: the SVG never changed");
 	});
 
@@ -351,10 +362,13 @@ describe("visual maker with a learner image (fake model + fake headless)", () =>
 });
 
 describe("native render of an embedded learner image (real resvg)", () => {
+	it("native-only annotation rendering refuses malformed SVG without a browser fallback", async () => {
+		await assert.rejects(realHeadless.renderSvg("<svg><unclosed>", { nativeOnly: true }));
+	});
 	it("draws the picture under the marks", async () => {
 		const image = await loadLearnerImage(file("resvg.png", raster(40, 30)));
 		const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="40" height="30"><image href="data:${image.mimeType};base64,${image.data}" x="0" y="0" width="40" height="30"/></svg>`;
-		const png = await realHeadless.renderSvg(svg);
+		const png = await realHeadless.renderSvg(svg, { nativeOnly: true });
 		const [lr, lg, lb] = pixel(png, 5, 15);
 		const [rr, rg, rb] = pixel(png, 35, 15);
 		assert.ok(lr > 200 && lg > 150 && lb < 80, `left half is the picture's yellow (got ${lr},${lg},${lb})`);
@@ -432,8 +446,11 @@ describe("visual job runner with an image", () => {
 			visualModelOverride.current = undefined;
 		}
 		const result = jobStore.getJob(job.id)!.result as VisualResult;
-		assert.deepEqual(result.image, { path: p });
-		assert.ok(result.svg.includes("data:image/png;base64,"));
+		const image = await loadLearnerImage(p);
+		assert.deepEqual(result.image, { path: p, snapshotId: image.snapshotId });
+		assert.ok(result.svg.includes('href="learner-image"'));
+		assert.ok(!result.svg.includes(image.data));
+		assert.equal(chatStore.getChat(job.chatId)?.imageSnapshots?.[image.snapshotId]?.data, image.data);
 		assert.equal(steers.length, 1);
 		assert.match(steers[0]!.content as string, /^The annotated image is drawn, verified by inspection/);
 	});
@@ -472,15 +489,15 @@ describe("image cards", () => {
 
 	it("an annotated image shows no invert switch and never inverts", () => {
 		const svg = '<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100"><circle cx="50" cy="50" r="20"/></svg>';
-		const html = renderToStaticMarkup(<VisualOutputCard output={{ svg, image: { path: "/a.png" } }} initialInverted />);
+		const html = renderToStaticMarkup(<VisualOutputCard output={{ svg, image: { path: "/a.png", snapshotId: "0".repeat(64) } }} initialInverted />);
 		assert.ok(!html.includes("toggle-invert-figure-brightness"), "no invert switch");
 		assert.ok(!html.includes("hue-rotate"), "a pinned inversion is ignored for photos");
-		assert.match(html, /data-testid="visual-download"/);
+		assert.match(html, /Image snapshot could not be loaded/);
 	});
 
 	it("show_image renders the picture with its caption, download, and no invert switch", () => {
 		const html = renderToStaticMarkup(
-			<ImageCard part={{ type: "tool-show_image", state: "output-available", toolCallId: "c1", input: { path: details.path }, output: details }} />,
+			<ImagePresentation image={details} />,
 		);
 		assert.ok(html.includes(`src="data:image/png;base64,${details.data}"`));
 		assert.match(html, /alt="Your breadboard"/);

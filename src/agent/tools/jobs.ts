@@ -163,8 +163,9 @@ export function jobTools(ctx: JobToolContext): Record<string, AgentTool<any>> {
 			parameters: visualInputSchema,
 			// An unusable image path fails the CALL (no job is created), so the
 			// teacher corrects the path in the same turn.
-			execute: serverExecute("visual", visualInputSchema, async (input, { toolCallId }) => {
-				if (input.image !== undefined) await checkLearnerImage(input.image);
+			execute: serverExecute("visual", visualInputSchema, async (input, { toolCallId, signal }) => {
+				if (!ctx.jobStore.findJobByToolCallId(ctx.chatId, toolCallId) && input.image !== undefined) await checkLearnerImage(input.image);
+				signal?.throwIfAborted();
 				return dispatch(ctx, "visual", toolCallId, VISUAL_ACK, input);
 			}),
 		},

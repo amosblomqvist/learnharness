@@ -8,6 +8,8 @@ import { providerEventObserver, type ProviderEventObserver } from "../provider-e
 import { backgroundCaptureStream, createBackgroundCapture, type BackgroundCapture } from "../background-capture.ts";
 import type { VisualResult } from "../../core/contracts.ts";
 import type { LearnerImage } from "../tools/learner-image.ts";
+import { embedLearnerImage, LEARNER_IMAGE_HREF } from "../../core/learner-image-svg.ts";
+import { annotationPlacementProblem } from "./annotation-svg.ts";
 import { getHeadless, type HeadlessApi } from "./headless.ts";
 
 /**
@@ -34,9 +36,9 @@ import { getHeadless, type HeadlessApi } from "./headless.ts";
  *
  * IMAGE MODE (issue #363): with a learner image the maker annotates it
  * instead. The model sees the picture and places it with a placeholder
- * href (LEARNER_IMAGE_HREF); the loop swaps in the real data URI for every
- * render and for the delivered SVG, so the base64 never enters the
- * model's context and stays out of its edits.
+ * href (LEARNER_IMAGE_HREF); the loop embeds bytes only for rendering.
+ * Delivered SVGs retain the placeholder and a session snapshot reference.
+ * The maker receives native image content, never base64 in SVG text/edits.
  */
 
 export interface VisualMakerInput {
@@ -46,8 +48,7 @@ export interface VisualMakerInput {
 }
 
 /** The placeholder href the model gives the learner's picture. */
-export const LEARNER_IMAGE_HREF = "learner-image";
-const LEARNER_IMAGE_HREF_RE = /\b((?:xlink:)?href\s*=\s*)(["'])learner-image\2/g;
+export { LEARNER_IMAGE_HREF };
 
 export interface VisualMakerOptions {
 	/** Test seam: scripted engine; production uses the visualMaker role. */
@@ -114,6 +115,8 @@ figure is that picture with marks on it, not a new drawing:
 - Place it EXACTLY ONCE, at its natural size, before your marks so they sit on top:
   <image href="${LEARNER_IMAGE_HREF}" x="…" y="…" width="W" height="H"/> — W×H is given with the image.
   The loop substitutes the real picture; never draw or describe its content yourself.
+- Use static SVG marks and inline attributes only: no scripts, animation, foreignObject, style blocks,
+  external resources, or escaped resource syntax. Local #fragment references are allowed.
 - Annotate in the picture's own pixel coordinates (shifted by your x/y if you add margins for labels).
 - Every mark must land on the exact feature it names — an arrow at the wrong part is a false statement.
   Locate the feature in the picture first, then check each mark against the render.
@@ -209,20 +212,14 @@ export async function runVisualMaker(input: VisualMakerInput, opts: VisualMakerO
 			},
 		];
 	}
-	/** The SVG as rendered and delivered: the placeholder href swapped for
-	 *  the learner's picture (identity without an image). */
-	const embed = (svg: string): string =>
-		learnerImage
-			? svg.replace(LEARNER_IMAGE_HREF_RE, (_m, attr: string, quote: string) => `${attr}${quote}data:${learnerImage.mimeType};base64,${learnerImage.data}${quote}`)
-			: svg;
+	/** Render-only embedding; persisted SVGs keep the small placeholder. */
+	const embed = (svg: string): string => learnerImage ? embedLearnerImage(svg, learnerImage) : svg;
+	const render = (svg: string) => headless.renderSvg(embed(svg), learnerImage ? { nativeOnly: true } : undefined);
 	/** Image mode: the problem with an SVG that doesn't place the picture
 	 *  exactly once (null = fine, and always fine without an image). */
 	const placementProblem = (svg: string): string | null => {
 		if (!learnerImage) return null;
-		const count = svg.match(LEARNER_IMAGE_HREF_RE)?.length ?? 0;
-		return count === 1
-			? null
-			: `the SVG must place the learner's image exactly once with <image href="${LEARNER_IMAGE_HREF}" …/> (found ${count})`;
+		return annotationPlacementProblem(svg, learnerImage.width, learnerImage.height);
 	};
 	let currentSvg: string | null = null;
 	/** The svg shown in the most recent render (null = never rendered). */
@@ -262,7 +259,7 @@ export async function runVisualMaker(input: VisualMakerInput, opts: VisualMakerO
 				if (currentSvg && renderedSvg !== currentSvg) {
 					let png: Buffer;
 					try {
-						png = await headless.renderSvg(embed(currentSvg));
+						png = await render(currentSvg);
 					} catch (err) {
 						const msg = err instanceof Error ? err.message : String(err);
 						return { svg: "", notes: `FAILED: rendering the final SVG failed — ${msg}` };
@@ -285,7 +282,7 @@ export async function runVisualMaker(input: VisualMakerInput, opts: VisualMakerO
 					];
 					continue;
 				}
-				return finish(currentSvg && embed(currentSvg), finalText, learnerImage);
+				return finish(currentSvg, finalText, learnerImage);
 			}
 
 			const toolResults: ToolResultMessage[] = [];
@@ -347,7 +344,7 @@ export async function runVisualMaker(input: VisualMakerInput, opts: VisualMakerO
 						continue;
 					}
 					try {
-						const png = await headless.renderSvg(embed(currentSvg));
+						const png = await render(currentSvg);
 						const image = await processImage(png, "image/png", { resizeOptions: engine.model.inputLimits?.images?.resize });
 						opts.abortSignal?.throwIfAborted();
 						if (!image.ok) throw new Error(image.message);
@@ -391,7 +388,7 @@ export async function runVisualMaker(input: VisualMakerInput, opts: VisualMakerO
 
 	// Iteration limit: deliver the last written SVG only if it was looked at.
 	if (currentSvg && renderedSvg === currentSvg) {
-		return finish(embed(currentSvg), finalText || "Iteration limit reached — delivering the last verified SVG.", learnerImage);
+		return finish(currentSvg, finalText || "Iteration limit reached — delivering the last verified SVG.", learnerImage);
 	}
 	return { svg: "", notes: `FAILED: iteration limit (${maxIterations}) reached without a verified SVG.` };
 }
@@ -477,5 +474,5 @@ function finish(svg: string | null, finalText: string, image?: LearnerImage): Vi
 			notes: `FAILED: the maker never wrote an SVG.${finalText ? ` (${finalText.slice(0, 300)})` : ""}`,
 		};
 	}
-	return { svg, notes: finalText || undefined, ...(image ? { image: { path: image.path } } : {}) };
+	return { svg, notes: finalText || undefined, ...(image ? { image: { path: image.path, snapshotId: image.snapshotId } } : {}) };
 }

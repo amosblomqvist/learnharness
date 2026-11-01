@@ -1,72 +1,83 @@
 import * as fs from "node:fs/promises";
+import path from "node:path";
+import { Worker } from "node:worker_threads";
+import { createHash } from "node:crypto";
 import { resolveSourcePath } from "./fs-shared.ts";
-import { detectSupportedImageMimeType, detectSupportedImageMimeTypeFromFile } from "../image-processing/index.ts";
-import { convertImageBytesToPng } from "../image-processing/convert.mjs";
-import { getExifOrientation } from "../image-processing/exif-orientation.mjs";
-import { resizeImage } from "../image-processing/resize.ts";
+import { detectSupportedImageMimeType, detectSupportedImageMimeTypeFromFile, type ResizedImage } from "../image-processing/index.ts";
+import { checkImageDimensions, MAX_LEARNER_IMAGE_BYTES } from "./learner-image-dimensions.ts";
+import type { ImageSnapshot } from "../../core/contracts.ts";
 
-/**
- * Learner images in the lesson (issue #363): `show_image` puts one in the
- * transcript as-is, and `visual` with an `image` path draws on top of one.
- * Both embed the picture INSIDE the session record (owner decision: the
- * lesson survives the file moving), so it is bounded here, once:
- *
- * - PNG or JPEG only — what every renderer (browser, resvg) and the
- *   ShowImageDetails contract accept;
- * - the longest side at most 1600px and about 1 MB of base64 — a file
- *   already within both is kept byte-for-byte;
- * - EXIF rotation baked into the pixels: browsers honor the tag and resvg
- *   does not, and the visual-maker must look at what the learner sees.
- *
- * Paths resolve like read's (home-anchored, fs-shared.ts); read-only.
- */
-
-const STORED_IMAGE_LIMITS = { maxWidth: 1600, maxHeight: 1600, maxBytes: 1024 * 1024 };
-
-const SUPPORTED = "jpg, png, gif, webp, or bmp";
-
-export interface LearnerImage {
-	/** The absolute path the image was read from. */
+/** One bounded, upright, metadata-free snapshot; path is provenance, not identity. */
+export interface LearnerImage extends ImageSnapshot {
 	path: string;
-	mimeType: "image/png" | "image/jpeg";
-	/** Base64 image bytes. */
-	data: string;
-	width: number;
-	height: number;
+	snapshotId: string;
 }
 
-/** Resolve a learner image path and sniff its type without decoding it —
- *  cheap enough for dispatch time. Returns the absolute path; throws a
- *  model-readable Error when the file is missing or not a supported image. */
 export async function checkLearnerImage(rawPath: string): Promise<string> {
+	// Reuse the shared file-access policy, including canonical/symlink checks.
 	const absolute = resolveSourcePath(rawPath);
-	let mime: string | null;
 	try {
-		mime = await detectSupportedImageMimeTypeFromFile(absolute);
-	} catch (err) {
-		const code = (err as NodeJS.ErrnoException).code;
-		const reason = code === "ENOENT" ? "no such file" : code === "EISDIR" ? "it is a directory" : err instanceof Error ? err.message : String(err);
+		const stat = await fs.stat(absolute);
+		if (!stat.isFile()) throw new Error("it is not a regular file");
+		if (stat.size > MAX_LEARNER_IMAGE_BYTES) throw new Error("image exceeds 25 MiB; provide a smaller image");
+		if (!await detectSupportedImageMimeTypeFromFile(absolute)) throw new Error("not a supported image (jpg, png, gif, webp, or bmp)");
+	} catch (error) {
+		const reason = (error as NodeJS.ErrnoException).code === "ENOENT" ? "no such file" : error instanceof Error ? error.message : String(error);
 		throw new Error(`Cannot open image ${absolute}: ${reason}`);
 	}
-	if (!mime) throw new Error(`${absolute} is not a supported image (${SUPPORTED})`);
 	return absolute;
 }
 
-/** Read a learner image and bound it for storage (the module doc's rules). */
+async function readBounded(absolute: string, signal?: AbortSignal): Promise<Uint8Array> {
+	const handle = await fs.open(absolute, "r");
+	try {
+		if (!(await handle.stat()).isFile()) throw new Error("Image is not a regular file");
+		const chunks: Buffer[] = [];
+		let length = 0;
+		while (true) {
+			signal?.throwIfAborted();
+			const chunk = Buffer.alloc(Math.min(64 * 1024, MAX_LEARNER_IMAGE_BYTES + 1 - length));
+			const { bytesRead } = await handle.read(chunk);
+			if (!bytesRead) break;
+			length += bytesRead;
+			if (length > MAX_LEARNER_IMAGE_BYTES) throw new Error("Image exceeds 25 MiB; provide a smaller image");
+			chunks.push(chunk.subarray(0, bytesRead));
+		}
+		return Buffer.concat(chunks, length);
+	} finally { await handle.close(); }
+}
+
+async function normalize(bytes: Uint8Array, signal?: AbortSignal): Promise<ResizedImage> {
+	signal?.throwIfAborted();
+	const worker = new Worker(path.join(process.cwd(), "src/agent/image-processing/learner-image-worker.mjs"));
+	try {
+		return await new Promise((resolve, reject) => {
+			const abort = () => reject(signal?.reason ?? new Error("Operation aborted"));
+			const cleanup = () => signal?.removeEventListener("abort", abort);
+			worker.once("message", (message: { result?: ResizedImage; error?: string }) => {
+				cleanup();
+				if (message.result) resolve(message.result);
+				else reject(new Error(message.error ?? "Image normalization failed"));
+			});
+			worker.once("error", (error) => { cleanup(); reject(error); });
+			worker.once("exit", (code) => { cleanup(); reject(new Error(`Image normalization worker exited (${code})`)); });
+			signal?.addEventListener("abort", abort, { once: true });
+			if (signal?.aborted) abort();
+			else worker.postMessage({ bytes });
+		});
+	} finally { await worker.terminate(); }
+}
+
 export async function loadLearnerImage(rawPath: string, signal?: AbortSignal): Promise<LearnerImage> {
+	signal?.throwIfAborted();
 	const absolute = await checkLearnerImage(rawPath);
-	const bytes = new Uint8Array(await fs.readFile(absolute, { signal }));
+	const bytes = await readBounded(absolute, signal);
 	const mime = detectSupportedImageMimeType(bytes);
-	// Upright PNG/JPEG goes straight to the resizer; anything else (other
-	// formats, a rotation tag) is decoded to an upright PNG first.
-	const direct = (mime === "image/png" || mime === "image/jpeg") && getExifOrientation(bytes) === 1;
-	const source = direct ? bytes : await convertImageBytesToPng(bytes);
+	if (!mime) throw new Error(`Not a supported image: ${absolute}`);
+	checkImageDimensions(bytes, mime);
+	const stored = await normalize(bytes, signal);
 	signal?.throwIfAborted();
-	if (!source) throw new Error(`Could not decode image ${absolute}`);
-	const stored = await resizeImage(source, direct ? mime : "image/png", STORED_IMAGE_LIMITS);
-	signal?.throwIfAborted();
-	if (!stored || (stored.mimeType !== "image/png" && stored.mimeType !== "image/jpeg")) {
-		throw new Error(`Could not shrink image ${absolute} to an embeddable size`);
-	}
-	return { path: absolute, mimeType: stored.mimeType, data: stored.data, width: stored.width, height: stored.height };
+	if (stored.mimeType !== "image/png" && stored.mimeType !== "image/jpeg") throw new Error("Unexpected stored image format");
+	const snapshotId = createHash("sha256").update(Buffer.from(stored.data, "base64")).digest("hex");
+	return { path: absolute, snapshotId, mimeType: stored.mimeType, data: stored.data, width: stored.width, height: stored.height };
 }

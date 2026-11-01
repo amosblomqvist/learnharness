@@ -476,6 +476,7 @@ export function createJobRunner(deps: JobRunnerDeps): JobRunner {
 					onActivity: (line) => jobStore.updateJob(jobId, { activity: line }),
 				},
 			);
+			if (image && result.svg && stillRunning(jobId)) chatStore.saveImageSnapshot(job.chatId, image.snapshotId, image);
 			if (isVisualFailure(result) && stillRunning(jobId))
 				jobStore.updateJob(jobId, { error: result.notes ?? "visual build failed" });
 			await finishJob(jobId, result);
