@@ -23,6 +23,22 @@ async function tapDocumentUi(attribute, value) {
 }
 let forwarding;
 let browser;
+async function connectWebView(origin) {
+	const pid = adb("shell", "pidof", app).trim().split(" ")[0];
+	const debugPort = adb("forward", "tcp:0", `localabstract:webview_devtools_remote_${pid}`).trim();
+	// Keep Android's real viewport; Puppeteer's default 800x600 would hide
+	// tablet reflow bugs and make rotation screenshots misleading.
+	browser = await puppeteer.connect({ browserURL: `http://127.0.0.1:${debugPort}`, defaultViewport: null });
+	let page;
+	for (let i = 0; i < 60; i++) {
+		page = (await browser.pages()).find((p) => p.url().startsWith(origin));
+		if (page) break;
+		await pause(500);
+	}
+	assert(page, "Native WebView must open the local app");
+	await page.waitForFunction(() => document.documentElement.classList.contains("lh-android") && document.querySelector("button"), { timeout: 30000 });
+	return page;
+}
 async function start() {
 	adb("shell", "am", "start", "-n", `${app}/.MainActivity`);
 	let config;
@@ -62,19 +78,9 @@ try {
 	const chat = await (await request("/api/chats", { method: "POST", body: JSON.stringify({ title: "Android persistence check" }) })).json();
 	assert(chat.id);
 
-	const pid = adb("shell", "pidof", app).trim().split(" ")[0];
-	const debugPort = adb("forward", "tcp:0", `localabstract:webview_devtools_remote_${pid}`).trim();
-	browser = await puppeteer.connect({ browserURL: `http://127.0.0.1:${debugPort}` });
-	let page;
-	for (let i = 0; i < 30; i++) {
-		page = (await browser.pages()).find((p) => p.url().startsWith(origin));
-		if (page) break;
-		await pause(500);
-	}
-	assert(page, "Native WebView must open the local app");
-	await page.waitForFunction(() => document.querySelector("main") || document.querySelector("button"), { timeout: 30000 });
+	const page = await connectWebView(origin);
 	assert.equal(await page.evaluate(() => document.cookie.includes("lh_android")), false, "Capability must be HttpOnly");
-	await page.waitForFunction(() => document.documentElement.classList.contains("lh-android"), { timeout: 30000 });
+	assert.equal(await page.evaluate(() => window.innerWidth < window.innerHeight), true, "Portrait layout uses the tablet viewport");
 	// A failed subscription request closes its reserved window. Native cleanup
 	// must release the popup slot so the fourth and later attempts still work.
 	await page.evaluate(() => {
@@ -91,6 +97,7 @@ try {
 	await page.evaluate(() => document.querySelector("#qa-popup-retry").remove());
 	await fs.writeFile(path.join(artifacts, "portrait.png"), execFileSync("adb", ["exec-out", "screencap", "-p"]));
 	adb("shell", "settings", "put", "system", "user_rotation", "1");
+	await page.waitForFunction(() => window.innerWidth > window.innerHeight, { timeout: 15000 });
 	await pause(1500);
 	await fs.writeFile(path.join(artifacts, "landscape.png"), execFileSync("adb", ["exec-out", "screencap", "-p"]));
 	const note = path.join(artifacts, "lh-smoke-notes.txt");
@@ -144,9 +151,11 @@ try {
 	adb("shell", "cmd", "connectivity", "airplane-mode", "enable");
 	// Old launch configuration exists until the new process writes its own.
 	adb("shell", "run-as", app, "rm", "no_backup/learnharness/launch.json");
-	({ request } = await start());
+	({ request, origin } = await start());
 	const saved = await (await request("/api/chats")).json();
 	assert(saved.chats.some((entry) => entry.id === chat.id), "Learning sessions survive process restart and offline startup");
+	const offlinePage = await connectWebView(origin);
+	assert.equal(await offlinePage.evaluate(() => window.innerWidth > window.innerHeight), true, "Offline restart renders the landscape WebView");
 	console.log("Android smoke passed: native runtime, HTTP boundary, WebView, rotations, repeated popup cleanup, file selection, system-browser Pro sign-in launch, persistent offline sessions.");
 } finally {
 	try { await fs.writeFile(path.join(artifacts, "final-screen.png"), execFileSync("adb", ["exec-out", "screencap", "-p"], { timeout: 20000 })); } catch { }
