@@ -24,13 +24,14 @@
  *     would shadow every settings-page key change until restart.
  */
 
-const { app, BrowserWindow, Menu, ipcMain, session, shell } = require("electron");
+const { app, BrowserWindow, Menu, dialog, ipcMain, session, shell } = require("electron");
 const { createChatGPT, fileStore } = require("./chatgpt.cjs");
 const { attachChatGPTChild, trustedSender, chatGPTControl } = require("./chatgpt-ipc.cjs");
 const { createSubscriptions, loadSubscriptionSDK } = require("./subscriptions.cjs");
 const { attachSubscriptionChild, subscriptionControl } = require("./subscription-ipc.cjs");
 const { desktopAPIHeaders } = require("./desktop-api.cjs");
 const { openWebSubscriptionBrowser } = require("./web-subscription-browser.cjs");
+const { APP_USER_AGENT_TOKEN, normalizeServerUrl, insecureRemote, readServerChoice, writeServerChoice, probeServer } = require("./remote-server.cjs");
 const { randomBytes } = require("node:crypto");
 const { spawn } = require("node:child_process");
 const fs = require("node:fs");
@@ -53,6 +54,8 @@ const PRODUCT_NAME = "LearnHarness";
 app.setName(PRODUCT_NAME);
 const AUTH_FILE = () => path.join(app.getPath("userData"), "auth.json");
 const DATA_DIR = () => path.join(app.getPath("userData"), "data");
+/** Local vs self-hosted server choice (electron/remote-server.cjs). */
+const SERVER_FILE = () => path.join(app.getPath("userData"), "server.json");
 
 /** The packaged standalone server (extraResources → Resources/server).
  *  In dev LH_DEV_URL short-circuits everything: no spawn, no packaging —
@@ -143,6 +146,9 @@ let subscriptionChild = null;
 let desktopAPISecret = null;
 let reopenWindow = null;
 const trustedAppWindows = new Set();
+// The self-hosted server this launch opened, or null when running locally.
+let remoteServerUrl = null;
+let connectWindow = null;
 
 // A GUI shell must never die to a stray exception (EPIPE dialogs, a race
 // in an event handler): the window + child server are the product, and
@@ -579,6 +585,107 @@ function applyZoom(win, factor) {
 	win.webContents.send("lh:zoom", factor);
 }
 
+/* ── Self-hosted server (docs/self-hosting.md) ────────────────────────────
+ * The server choice is read once at launch; changing it writes
+ * userData/server.json and relaunches, so local-only machinery (the child
+ * server, subscription sign-in, the desktop API capability) is either fully
+ * up or never started — no half-switched state. */
+function switchServer(choice) {
+	writeServerChoice(SERVER_FILE(), choice);
+	log(`server choice → ${choice.mode === "remote" ? choice.url : "local"} (relaunching)`);
+	killServer();
+	app.relaunch();
+	app.exit(0);
+}
+
+async function signOutOfServer() {
+	if (!remoteServerUrl) return;
+	await session.defaultSession.clearStorageData({ origin: remoteServerUrl, storages: ["cookies"] });
+	for (const win of trustedAppWindows) if (!win.isDestroyed()) void win.loadURL(remoteServerUrl);
+}
+
+const fromConnectWindow = (event) => !!connectWindow && !connectWindow.isDestroyed() && event.sender === connectWindow.webContents;
+
+function installConnectHandlers() {
+	ipcMain.handle("lh:connect:current", (event) => {
+		if (!fromConnectWindow(event)) throw new Error("Untrusted request.");
+		return remoteServerUrl ? { mode: "remote", url: remoteServerUrl } : { mode: "local" };
+	});
+	ipcMain.handle("lh:connect:save", async (event, address, allowInsecure) => {
+		if (!fromConnectWindow(event)) throw new Error("Untrusted request.");
+		const { url, error } = normalizeServerUrl(address);
+		if (error) return { error };
+		const probe = await probeServer(url);
+		if (!probe.ok) return { error: probe.error };
+		if (insecureRemote(url) && allowInsecure !== true) {
+			return { warning: "This address uses plain http:// over the internet, so your password would travel unencrypted. Use https:// or Tailscale, or press Connect again to use it anyway." };
+		}
+		setTimeout(() => switchServer({ mode: "remote", url }), 400);
+		return { ok: true };
+	});
+	ipcMain.handle("lh:connect:local", (event) => {
+		if (!fromConnectWindow(event)) throw new Error("Untrusted request.");
+		setTimeout(() => switchServer({ mode: "local" }), 100);
+		return { ok: true };
+	});
+	ipcMain.on("lh:connect:close", (event) => {
+		if (fromConnectWindow(event)) connectWindow.close();
+	});
+}
+
+function openConnectWindow() {
+	if (connectWindow && !connectWindow.isDestroyed()) {
+		connectWindow.focus();
+		return;
+	}
+	const parent = [...trustedAppWindows].find((win) => !win.isDestroyed());
+	connectWindow = new BrowserWindow({
+		width: 480,
+		height: 420,
+		resizable: false,
+		minimizable: false,
+		maximizable: false,
+		title: "Connect to Server",
+		backgroundColor: "#141414",
+		show: false,
+		...(parent ? { parent, modal: process.platform === "darwin" } : {}),
+		...(process.platform === "darwin" ? { titleBarStyle: "hiddenInset" } : {}),
+		webPreferences: { contextIsolation: true, sandbox: true, nodeIntegration: false, preload: path.join(__dirname, "connect-preload.cjs") },
+	});
+	connectWindow.webContents.on("will-navigate", (event) => event.preventDefault());
+	connectWindow.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
+	connectWindow.once("ready-to-show", () => connectWindow?.show());
+	connectWindow.on("closed", () => {
+		connectWindow = null;
+		// Opened from the unreachable-server prompt: nothing else to show.
+		if (trustedAppWindows.size === 0 && !reopenWindow) app.quit();
+	});
+	void connectWindow.loadFile(path.join(__dirname, "connect.html"));
+}
+
+/** Remote server down at launch: retry, pick another address, or go local.
+ *  Resolves true once the server answers; false when the user moved on. */
+async function reachRemoteServer(url) {
+	for (;;) {
+		const probe = await probeServer(url);
+		if (probe.ok) return true;
+		log(`remote server unreachable: ${probe.error}`);
+		const { response } = await dialog.showMessageBox({
+			type: "warning",
+			message: "Can't reach your LearnHarness server",
+			detail: probe.error,
+			buttons: ["Try Again", "Change Server…", "Use This Mac", "Quit"],
+			defaultId: 0,
+			cancelId: 3,
+		});
+		if (response === 0) continue;
+		if (response === 1) openConnectWindow();
+		else if (response === 2) switchServer({ mode: "local" });
+		else app.quit();
+		return false;
+	}
+}
+
 /** macOS needs an application menu with the Edit roles — without one,
  *  Cmd+C/V/A do nothing in the renderer. Everything else stays minimal. */
 function installMenu() {
@@ -589,6 +696,16 @@ function installMenu() {
 				{ role: "about" },
 				// Manual checks report their result in Settings → General.
 				{ label: "Check for Updates…", click: () => checkForUpdatesFromMenu() },
+				{ type: "separator" },
+				// Self-hosting: local bundled server vs a remote one (docs/self-hosting.md).
+				{ label: remoteServerUrl ? `Server: ${new URL(remoteServerUrl).host}` : "Server: This Mac", enabled: false },
+				{ label: "Connect to Server…", click: () => openConnectWindow() },
+				...(remoteServerUrl
+					? [
+						{ label: "Sign Out of Server", click: () => void signOutOfServer() },
+						{ label: "Use This Mac Instead", click: () => switchServer({ mode: "local" }) },
+					]
+					: []),
 				{ type: "separator" },
 				{ role: "hide" },
 				{ role: "hideOthers" },
@@ -650,8 +767,22 @@ async function main() {
 	// spawn, no packaging, full HMR. The rest of this shell still applies
 	// (guards, menu, single instance).
 	const devUrl = process.env.LH_DEV_URL;
-	const url = devUrl ?? `http://127.0.0.1:${await freePort()}`;
-	if (!devUrl) {
+	// Identify the app on every request (a self-hosted server in apps-only
+	// mode refuses anything else). Harmless for the local server.
+	session.defaultSession.setUserAgent(`${session.defaultSession.getUserAgent()} ${APP_USER_AGENT_TOKEN}`);
+	installConnectHandlers();
+	remoteServerUrl = devUrl ? null : (() => {
+		const choice = readServerChoice(SERVER_FILE());
+		return choice.mode === "remote" ? choice.url : null;
+	})();
+	const url = devUrl ?? remoteServerUrl ?? `http://127.0.0.1:${await freePort()}`;
+	if (remoteServerUrl) {
+		// Nothing local starts: no child server, no subscription sign-in, and
+		// no desktop API capability (that header must never leave this Mac).
+		log(`remote server: ${remoteServerUrl}`);
+		installMenu();
+		if (!(await reachRemoteServer(remoteServerUrl))) return;
+	} else if (!devUrl) {
 		desktopAPISecret = randomBytes(32).toString("hex");
 		const ownedOrigin = new URL(url).origin;
 		// All URLs, not only /api: remove the header again on external redirects.
