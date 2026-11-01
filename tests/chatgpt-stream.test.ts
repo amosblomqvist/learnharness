@@ -2,6 +2,10 @@ import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { normalizeContext, type AssistantMessage, type Model } from "@earendil-works/pi-ai";
 import { Type } from "typebox";
+import * as fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { backgroundCaptureDir, backgroundCaptureStream, createBackgroundCapture } from "../src/agent/background-capture.ts";
 import { piModels, piEngineForSpec } from "../src/agent/models.ts";
 import { chatGPTAbortController, chatGPTModels, refreshChatGPTModels } from "../src/agent/chatgpt-bridge.ts";
 import { chatGPTHistory, chatGPTPayload } from "../src/agent/chatgpt-stream.ts";
@@ -159,6 +163,50 @@ test("native identity/session/cache/fetch and awaited caller observers survive e
 	const failedEvents = []; for await (const event of failed) failedEvents.push(event);
 	assert.equal(failedEvents.filter((e) => e.type === "error").length, 1); assert.equal(failedEvents.filter((e) => e.type === "done").length, 0);
 	assert(!(await failed.result()).errorMessage?.includes("private observer detail"));
+});
+
+test("background capture matches final ChatGPT transport body without changing awaited callbacks or foreground", async (t) => {
+	const dir = fs.mkdtempSync(path.join(os.tmpdir(), "lh-chatgpt-capture-"));
+	const previousDir = backgroundCaptureDir.current, previousFlag = process.env.LH_BACKGROUND_CAPTURE;
+	backgroundCaptureDir.current = dir; process.env.LH_BACKGROUND_CAPTURE = "all";
+	t.after(() => {
+		backgroundCaptureDir.current = previousDir;
+		if (previousFlag === undefined) delete process.env.LH_BACKGROUND_CAPTURE; else process.env.LH_BACKGROUND_CAPTURE = previousFlag;
+		fs.rmSync(dir, { recursive: true, force: true });
+	});
+	const engine = piEngineForSpec({ provider: "chatgpt", id: model.id }, true);
+	const capture = createBackgroundCapture({ role: "auditor", runId: "chatgpt-final" })!;
+	const observed = backgroundCaptureStream(engine.streamFn, capture);
+	let callbackFinished = false, responseObserved = false, actualBody: unknown;
+	responseEvents = [complete()];
+	const result = await observed(engine.model, context(), {
+		onPayload: async (raw, native) => {
+			await Promise.resolve(); assert.equal(native.provider, "openai"); callbackFinished = true;
+			return { ...raw as object, model: "must-not-survive", metadata: { private: "must-not-survive" }, dangerous: true };
+		},
+		onResponse: async () => { await Promise.resolve(); responseObserved = true; },
+		fetch: async (input, init) => {
+			assert(callbackFinished);
+			const request = new Request(input, init);
+			assert.equal(request.headers.get("authorization"), "Bearer scratch-oauth-only");
+			actualBody = JSON.parse(await request.text());
+			return new Response(`data: ${JSON.stringify(complete())}\n\n`, { headers: { "content-type": "text/event-stream" } });
+		},
+	}).result();
+	capture.reply(result); capture.finish();
+	assert(responseObserved); assert.equal(result.stopReason, "stop");
+	const record = JSON.parse(fs.readFileSync(path.join(dir, "auditor-chatgpt-final.json"), "utf8"));
+	assert.deepEqual(record.request.payload, actualBody);
+	assert.equal(record.request.format, "provider");
+	assert.equal(record.request.model.provider, "chatgpt");
+	assert.equal(record.request.payload.input[0].role, "developer");
+	assert.equal(record.request.payload.tools[0].type, "namespace");
+	assert.equal(record.request.payload.metadata, undefined);
+	assert.equal(record.request.payload.dangerous, undefined);
+	assert(!JSON.stringify(record).includes("scratch-oauth-only"));
+	assert(!JSON.stringify(record).includes("must-not-survive"));
+	await engine.streamFn(engine.model, context()).result();
+	assert.equal(fs.readdirSync(dir).length, 1, "No async-local observer leaks into ordinary foreground/direct calls");
 });
 
 test("case-insensitive Authorization overrides including null are refused before native fetch", async () => {

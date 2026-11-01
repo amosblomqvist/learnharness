@@ -8,7 +8,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
 	buildCursorPrompt,
-	contentToText,
 	nextTextDelta,
 	parseToolEnvelope,
 	toolNames,
@@ -18,7 +17,8 @@ import {
 } from "./protocol.ts";
 import { cursorAgentBin } from "./login.ts";
 
-const ARG_BUDGET = 1_200_000;
+// Stay below OS per-argument limits; long lessons travel through stdin.
+const ARG_BUDGET = 16_000;
 const DEFAULT_PORT = 32124;
 
 export function cursorProxyPort(): number {
@@ -81,7 +81,7 @@ function runAgent(model: string, prompt: string, signal: AbortSignal): ChildProc
 	let stdin: string | null = null;
 	if (Buffer.byteLength(prompt) <= ARG_BUDGET) args.push(prompt);
 	else {
-		args.push("The full conversation is on stdin. Respond to it. Do not explore the disk or run commands.");
+		// Cursor ignores piped input when a positional prompt is also present.
 		stdin = prompt;
 	}
 	mkdirSync(cursorWorkspace(), { recursive: true });
@@ -110,7 +110,14 @@ function complete(body: ChatBody, res: ServerResponse, signal: AbortSignal) {
 	const defs = toolDefs(body);
 	const allowed = toolNames(defs);
 	const prompt = buildCursorPrompt(body.messages ?? [], defs);
-	const child = runAgent(body.model ?? "auto", prompt, signal);
+	let child: ChildProcess;
+	try {
+		child = runAgent(body.model ?? "auto", prompt, signal);
+	} catch (error) {
+		res.writeHead(502, { "Content-Type": "application/json" });
+		res.end(JSON.stringify({ error: { message: error instanceof Error ? error.message : "Cursor failed to start" } }));
+		return;
+	}
 	const state: DeltaState = { acc: "" };
 	let mode: "undecided" | "stream" | "tool" = "undecided";
 	let emitted = "";
@@ -124,6 +131,18 @@ function complete(body: ChatBody, res: ServerResponse, signal: AbortSignal) {
 		Connection: "keep-alive",
 	});
 	writeSse(res, chunk(id, { role: "assistant", content: "" }, null));
+	const fail = (message: string) => {
+		if (settled) return;
+		settled = true;
+		// The OpenAI adapter recognizes this as a failed model operation, not
+		// lesson prose. Preserve auth/quota/launch failures for Pi's callers.
+		writeSse(res, { error: { message, type: "cursor_error", code: "cursor_error" } });
+		res.write("data: [DONE]\n\n");
+		res.end();
+		child.kill("SIGTERM");
+	};
+	child.on("error", (error) => fail(error.message));
+	child.stdin?.on("error", (error) => fail(error.message));
 
 	const emitText = (text: string) => {
 		if (!text) return;
@@ -168,6 +187,7 @@ function complete(body: ChatBody, res: ServerResponse, signal: AbortSignal) {
 		mode = "tool";
 	};
 	const takeLine = (line: string) => {
+		if (settled) return;
 		const trimmed = line.trim();
 		if (!trimmed) return;
 		let event: {
@@ -192,12 +212,13 @@ function complete(body: ChatBody, res: ServerResponse, signal: AbortSignal) {
 		} else if (event.type === "thinking" && event.subtype === "delta" && event.text) {
 			writeSse(res, chunk(id, { reasoning_content: event.text }, null));
 		} else if (event.type === "result" && !settled) {
-			settled = true;
 			const finalText = typeof event.result === "string" && event.result ? event.result : state.acc;
 			if (event.is_error || event.subtype === "error") {
-				if (!emitted) emitText(event.error?.message || finalText || "cursor-agent failed");
-				writeSse(res, chunk(id, {}, "stop"));
-			} else finish(finalText);
+				fail(event.error?.message || finalText || "cursor-agent failed");
+				return;
+			}
+			settled = true;
+			finish(finalText);
 			res.write("data: [DONE]\n\n");
 			res.end();
 			child.kill("SIGTERM");
@@ -213,13 +234,16 @@ function complete(body: ChatBody, res: ServerResponse, signal: AbortSignal) {
 	child.stderr?.on("data", (buf: Buffer) => {
 		stderr += buf.toString();
 	});
-	child.on("close", () => {
+	child.on("close", (code, exitSignal) => {
 		if (settled) return;
-		settled = true;
 		if (buffer.trim()) takeLine(buffer);
-		if (settled && res.writableEnded) return;
-		if (!emitted && !state.acc) emitText(stderr.trim() || "cursor-agent exited");
-		finish(state.acc || contentToText(stderr));
+		if (settled) return;
+		if (code !== 0 || !state.acc) {
+			fail(stderr.trim() || `cursor-agent exited without a result (${exitSignal ?? code})`);
+			return;
+		}
+		settled = true;
+		finish(state.acc);
 		if (!res.writableEnded) {
 			res.write("data: [DONE]\n\n");
 			res.end();

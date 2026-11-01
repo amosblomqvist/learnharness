@@ -35,7 +35,8 @@
 
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { AssistantMessage, Message, ToolResultMessage, UserMessage } from "@earendil-works/pi-ai";
-import { QUESTION_TOOLS } from "./pending.ts";
+import { QUESTION_TOOLS, type PendingQuestion } from "./pending.ts";
+import { CLAUDE_CODE_PROVIDER } from "./contracts/claude-code.ts";
 import {
 	CONCLUDE_ACK_TEXT,
 	HANDOFF_TEXT,
@@ -44,6 +45,7 @@ import {
 } from "./contracts/chat.ts";
 import { compactAnswerForModel, type QuestionAnswerData } from "./question-core.ts";
 import { activeCompactionOf, keptIndexFor } from "./compaction.ts";
+import { parseQuestionInput } from "./tool-parts.ts";
 
 /** The hard-invariant wording for an aborted turn's unanswered calls —
  *  carried over verbatim from the pre-native era so the model's view
@@ -90,7 +92,26 @@ declare module "@earendil-works/pi-agent-core" {
 }
 
 /** A record message: a native pi message (or our marker) plus the record id. */
-export type LhMessage = (UserMessage | AssistantMessage | ToolResultMessage | LhMarkerMessage) & { id: string };
+export type LhMessage = (UserMessage | AssistantMessage | ToolResultMessage | LhMarkerMessage) & {
+	id: string;
+	/** CLI-reported effective context budget, not a catalog model maximum.
+	 * App-only metadata: never transmitted as provider/model message content. */
+	cliContextWindow?: number;
+};
+
+/** Latest response only: never borrow an older process/model's window when
+ * a fresh response has no metadata. Compaction invalidates the old report. */
+export function cliContextWindowOf(messages: readonly LhMessage[]): { model: string; tokens: number } | null {
+	for (let i = messages.length - 1; i >= 0; i--) {
+		const message = messages[i]!;
+		if (message.role === "custom" && message.customType === "compaction") return null;
+		if (message.role !== "assistant") continue;
+		const tokens = message.cliContextWindow;
+		return message.provider === CLAUDE_CODE_PROVIDER && typeof tokens === "number" && Number.isSafeInteger(tokens) && tokens > 0
+			? { model: `${message.provider}:${message.model}`, tokens } : null;
+	}
+	return null;
+}
 
 /** A record message list is assignable to the agent's context — that IS
  *  the replay (ui-stream/chat-handler assign it to initialState.messages). */
@@ -617,8 +638,8 @@ export function toLlmMessages(messages: readonly AgentMessage[]): Message[] {
 			});
 			continue;
 		}
-		// Strip the record id: the wire carries the native shape only.
-		const { id: _id, ...native } = m as LhMessage;
+		// Strip app-only id/CLI context metadata: the wire carries the native shape only.
+		const { id: _id, cliContextWindow: _cliContextWindow, ...native } = m as LhMessage;
 		out.push(native as Message);
 		// Repair unanswered calls from completed generations, not calls in
 		// failed generations. Pi filters error/aborted assistants itself;
@@ -648,25 +669,87 @@ export function toLlmMessages(messages: readonly AgentMessage[]): Message[] {
 // ─── native scans (the UIMessage-era pending/phase seams, natively) ──────────
 
 /** The pending-question gate (findPendingToolCall's native twin): the
- *  NEWEST assistant message's FIRST question-tool call with no result in
- *  the tail — one question at a time, the dock's subject. */
+ *  NEWEST assistant message's FIRST answerable question-tool call with no
+ *  result in the tail — never a failed generation or malformed fragment. */
 export function danglingQuestionOf(
 	messages: readonly LhMessage[],
 ): { toolCallId: string; tool: string; input: unknown } | null {
-	for (let mi = messages.length - 1; mi >= 0; mi--) {
-		const m = messages[mi]!;
-		if ((m as { role?: string }).role !== "assistant") continue;
-		const assistant = m as AssistantMessage & { id: string };
-		const answered = resultIdsFrom(messages.slice(mi + 1));
-		for (const block of assistant.content) {
-			if (block.type !== "toolCall") continue;
-			if (!(QUESTION_TOOLS as readonly string[]).includes(block.name)) continue;
-			if (answered.has(block.id)) continue;
-			return { toolCallId: block.id, tool: block.name, input: block.arguments };
+	const question = questionCallsOf(messages).find(call => call.status === "answerable");
+	return question ? { toolCallId: question.toolCallId, tool: question.tool, input: question.input } : null;
+}
+
+/** The same authority, retaining native boundaries for the client dock.
+ * Unique call ids are stable even when a live message's local id is replaced
+ * by its persisted stamp. Only colliding ids need an occurrence-qualified
+ * draft/reset key; this never changes stored ids or the answer wire. */
+export function pendingQuestionOf(messages: readonly LhMessage[]): PendingQuestion | null {
+	// turn_end includes the temporary questionResult acknowledgement. The
+	// view ignores it too: it is NOT the learner's answer. Exclude it only
+	// from client authority, leaving persisted/server result policy intact.
+	const question = questionCallsOf(messages.filter(message => !isLiveQuestionPlaceholder(message))).find(call => call.status === "answerable");
+	if (!question) return null;
+	let occurrences = 0;
+	for (const message of messages) {
+		// A streamed c_ assistant can temporarily coexist with its saved
+		// copy during append-only adoption. New live calls are already
+		// uniquified; only settled history establishes reuse.
+		if (message.role !== "assistant" || message.id.startsWith("c_")) continue;
+		for (const call of message.content) {
+			if (call.type === "toolCall" && call.id === question.toolCallId) occurrences++;
 		}
-		return null; // the newest assistant message's questions are all answered
 	}
-	return null;
+	return {
+		toolCallId: question.toolCallId, tool: question.tool, input: question.input,
+		messageId: question.messageId, contentIndex: question.contentIndex,
+		key: occurrences > 1 ? JSON.stringify([question.messageId, question.contentIndex, question.toolCallId]) : question.toolCallId,
+	};
+}
+
+/** Only the transient c_ result with the questionResult contract qualifies.
+ * Real answers have details; errors/aborts remain resolving results. A saved
+ * null result is not reinterpreted by this client-only compatibility seam. */
+function isLiveQuestionPlaceholder(message: LhMessage): boolean {
+	return message.role === "toolResult" && message.id.startsWith("c_") &&
+		!message.isError && message.details === null &&
+		(QUESTION_TOOLS as readonly string[]).includes(message.toolName);
+}
+
+export interface QuestionCall extends Omit<PendingQuestion, "key"> {
+	status: "streaming" | "answerable" | "malformed" | "failed";
+}
+
+/** Newest native assistant only; siblings remain in call order. No result
+ * alone is NOT proof of a posed question: failed generations never execute
+ * their calls, and older records can contain truncated/unvalidated inputs. */
+export function questionCallsOf(messages: readonly LhMessage[]): QuestionCall[] {
+	for (let mi = messages.length - 1; mi >= 0; mi--) {
+		const assistant = messages[mi]!;
+		if (assistant.role !== "assistant") continue;
+		const answered = resultIdsFrom(messages.slice(mi + 1));
+		const calls: QuestionCall[] = [];
+		for (const [contentIndex, block] of assistant.content.entries()) {
+			if (block.type !== "toolCall" || !(QUESTION_TOOLS as readonly string[]).includes(block.name) || answered.has(block.id)) continue;
+			const status = assistant.stopReason === "error" || assistant.stopReason === "aborted" ? "failed"
+				: assistant.stopReason === "pending" ? "streaming"
+				: assistant.stopReason === "length" || block.argumentsError || !parseQuestionInput(block.name, block.arguments) ? "malformed"
+				: "answerable";
+			calls.push({ toolCallId: block.id, tool: block.name, input: block.arguments,
+				messageId: assistant.id, contentIndex, status });
+		}
+		return calls; // never revive older calls, even when this message has none
+	}
+	return [];
+}
+
+/** Background wakes must still wait for an explicit learner action when a
+ * question is unusable. Releasing the composer is not permission to retry. */
+export function hasUnresolvedQuestion(messages: readonly LhMessage[]): boolean {
+	return questionCallsOf(messages).length > 0;
+}
+
+/** Client placeholders are loop acknowledgements, not learner answers. */
+export function malformedQuestionsOf(messages: readonly LhMessage[]): QuestionCall[] {
+	return questionCallsOf(messages.filter(message => !isLiveQuestionPlaceholder(message))).filter(call => call.status === "malformed");
 }
 
 /** Successful probe_done result MESSAGE ids, in transcript order. A call
@@ -745,6 +828,15 @@ export function endsInDismissal(messages: readonly LhMessage[]): boolean {
 	return last !== undefined && isDismissedResult(last);
 }
 
+/** The recovery click authorizes its immediate replacement turn, not an
+ * automatic restart if only the write-ahead error results survived. No new
+ * stored latch: explicit input or replacement output changes this tail. */
+export function endsInQuestionRecovery(messages: readonly LhMessage[]): boolean {
+	const last = messages[messages.length - 1];
+	return last?.role === "toolResult" && last.isError &&
+		(last.details as { questionRecovery?: unknown } | null)?.questionRecovery === true;
+}
+
 export type RequestCause = "foreground" | "background";
 export type ReconstructedCause = RequestCause | "ambiguous";
 export type NativeInputCause = "learner" | "automatic" | "neutral" | "unrecognizable";
@@ -758,6 +850,9 @@ export function nativeInputCause(message: AgentMessage, history: readonly AgentM
 		return ["graph-context", "plan-block", "problem-dismissed", "compaction"].includes(message.customType) ? "neutral" : "unrecognizable";
 	}
 	if (message.role === "toolResult") {
+		if (message.isError && (message.details as { questionRecovery?: unknown } | null)?.questionRecovery === true) {
+			return questionCallsOf(history as readonly LhMessage[]).some(call => call.status === "malformed" && call.toolCallId === message.toolCallId && call.tool === message.toolName) ? "learner" : "unrecognizable";
+		}
 		if (!(QUESTION_TOOLS as readonly string[]).includes(message.toolName) || message.isError || message.details == null || (message.details as { dismissed?: boolean }).dismissed) return "neutral";
 		const details = message.details as Partial<QuestionAnswerData>;
 		if (!["quiz", "ask", "explain"].includes(details.kind ?? "") || typeof details.questionText !== "string" || typeof details.dontKnow !== "boolean" || !Array.isArray(details.answers) || typeof details.answeredAt !== "string") return "unrecognizable";
@@ -816,7 +911,7 @@ export function needsContinuation(messages: readonly LhMessage[]): boolean {
 	// answer = the reaction is owed. One law with the pump's pause
 	// (endsInDismissal reads the same last result), so continuation,
 	// delivery-holding, and the pause can never disagree.
-	if (isDismissedResult(messages[messages.length - 1]!)) {
+	if (isDismissedResult(messages[messages.length - 1]!) || endsInQuestionRecovery(messages)) {
 		return false;
 	}
 	const owner = messages[start - 1];

@@ -7,7 +7,7 @@ LearnHarness can teach through the Cursor subscription already signed in on this
 1. Install the Cursor CLI. The binary is `agent` (some installs call it `cursor-agent`).
 2. Run `agent login`.
 3. Restart LearnHarness. The login check is cached for the life of the process.
-4. In Settings → Models, pick a `cursor/` model. `cursor/auto` lets Cursor choose.
+4. In Settings → Agent → Models, pick a `cursor/` model. `cursor/auto` lets Cursor choose.
 
 Settings → Providers says the same thing. The model list stays hidden until `agent status` reports that you are logged in. A turn that starts without that login is refused with: `Cursor is not signed in — run cursor-agent login, then restart LearnHarness`.
 
@@ -42,8 +42,8 @@ Cursor is not a pi-ai builtin provider and it is not a row in `AUTH_PROVIDER_KEY
 | `src/agent/cursor/provider.ts` | Catalog and the dummy loopback key. |
 | `src/agent/cursor/stream.ts` | Starts the proxy, then streams through pi-ai. |
 
-The CLI is spawned as `agent --print --mode ask --output-format stream-json --stream-partial-output --trust --workspace <tmpdir>`. Partial deltas are the events whose `timestamp_ms` is a number and whose `model_call_id` is not a string. Thinking deltas become `reasoning_content`. A result event ends the stream.
+The CLI is spawned as `agent --print --mode ask --output-format stream-json --stream-partial-output --trust --workspace <tmpdir>`. Prompts larger than 16,000 bytes are sent through stdin to stay below operating-system argument limits. Launch failures, error results and unsuccessful CLI exits propagate as model errors instead of lesson text. Partial deltas are the events whose `timestamp_ms` is a number and whose `model_call_id` is not a string. Thinking deltas become `reasoning_content`. A result event ends the stream.
 
 pi-ai will not stream until auth resolves. The provider resolves a fixed dummy, `learnharness-local`, and the proxy does not forward it to the CLI. If that value is sitting in `CURSOR_API_KEY`, the child environment drops it so the CLI keeps using its own login. Loopback is the trust boundary.
 
-`npm test` sets `NODE_ENV=test`. In that mode the CLI is never spawned. The catalog is the fixture `auto` and `composer-2.5`, and the login is off unless `LH_CURSOR_CONNECTED=1`. `tests/cursor-provider.test.ts` covers the protocol, the proxy (with a fake binary), and the picker gate.
+`npm test` sets `NODE_ENV=test`. In that mode the CLI is never spawned. The catalog is the fixture `auto` and `composer-2.5`, and the login is off unless `LH_CURSOR_CONNECTED=1`. `tests/cursor-provider.test.ts` covers the protocol, the proxy (with a fake binary), and the picker gate. `tests/cursor-runtime.test.ts` exercises the production Pi engine through the bridge, including text/tool calls, long conversations, launch failures, CLI errors and a final result without a trailing newline.
