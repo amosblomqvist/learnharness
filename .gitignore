@@ -19,3 +19,12 @@ xai-credentials.json*
 
 # dev-fresh launcher scratch (fresh-user sim): disposable per launch
 .fresh-data/
+
+# self-hosting secrets (docker-compose env_file)
+.env.server
+
+# iOS build output (xcodebuild -derivedDataPath build)
+ios/build/
+ios/LearnHarness.xcodeproj/xcuserdata/
+ios/LearnHarness.xcodeproj/project.xcworkspace/xcuserdata/
+ios/build-device/

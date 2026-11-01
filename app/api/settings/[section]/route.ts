@@ -37,6 +37,7 @@ import {
 	clampChatLevel,
 	clampModelsLevels,
 	effectiveSettings,
+	announceSettingsChanged,
 	promptOverrides,
 	readSettingsRecord,
 	validateChatSettings,
@@ -129,5 +130,6 @@ export async function PUT(request: Request, ctx: { params: Promise<{ section: st
 	// along untouched (other sections, unknown keys — sanitize preserves).
 	const next = { ...record, [section]: sectionOut };
 	writeSettingsRecord(next);
+	announceSettingsChanged(section);
 	return Response.json({ settings: next });
 }
