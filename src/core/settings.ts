@@ -326,6 +326,9 @@ export const ROLE_SLOT: Readonly<Record<ModelRole, ModelSlotName>> = {
 	auditor: "cheap",
 	visualMaker: "vision",
 	pdfReader: "vision",
+	// Hidden role (not a BackgroundModelRole — no settings row/override):
+	// the pre-delivery question verifier rides the cheap slot (#417).
+	questionVerifier: "cheap",
 };
 
 /** General settings — app-level behavior. Version DISPLAY and plans login
@@ -367,6 +370,13 @@ export interface AgentSettings {
 	 *  route); the switch is explicit so users keep a file on disk but run
 	 *  the source default to compare (owner decision 2026-09-19). */
 	prompts?: Record<string, boolean>;
+	/** Pre-delivery question verification (#417, owner-approved increment 1,
+	 *  2026-11-01): the semantic gate on TEACH quiz/explain cards before the
+	 *  dock can arm them. Absent = ENABLED (the toggle discipline); explicit
+	 *  false is the cost/perf escape hatch. No settings-UI surface in v1 —
+	 *  the field exists for the settings API / advanced records. Probe cards
+	 *  are not gated in v1 (volume + cost; deliberate). */
+	questionGate?: { enabled?: boolean };
 }
 
 /** Markdown-rendering knobs — the bare-bones set (owner decision). */
@@ -718,6 +728,14 @@ function sanitizeAgent(raw: Record<string, unknown>): AgentSettings {
 		const enabled = (raw.graphTools as Record<string, unknown>).enabled;
 		if (enabled === undefined) out.graphTools = {};
 		else if (typeof enabled === "boolean") out.graphTools = { enabled };
+	}
+	// Question gate (#417): same lenient-read discipline — absent stays
+	// absent (ENABLED by default); a bad shape drops the key and the default
+	// resumes instead of bricking the record.
+	if (raw.questionGate !== null && typeof raw.questionGate === "object" && !Array.isArray(raw.questionGate)) {
+		const enabled = (raw.questionGate as Record<string, unknown>).enabled;
+		if (enabled === undefined) out.questionGate = {};
+		else if (typeof enabled === "boolean") out.questionGate = { enabled };
 	}
 	return out;
 }

@@ -39,6 +39,7 @@ import { activeCompactionOf, type CompactionDetails } from "./compaction.ts";
 import { QUESTION_TOOLS } from "./pending.ts";
 import type { SubagentArtifactData, SubagentResultMeta } from "./contracts/jobs.ts";
 import type { PlanBlockData } from "./contracts/chat.ts";
+import { QUESTION_GATE_REJECTION_HEAD } from "./contracts/chat.ts";
 
 /** A view part — the loose part vocabulary the renderers consume (the same
  *  shape names the pre-Wave-D UIMessage dialect used, so the renderer
@@ -112,6 +113,22 @@ function applyResult(part: LhViewPart, result: ToolResultMessage): void {
 	}
 }
 
+/** HIDDEN GATE ATTEMPTS (question gate, #417, 2026-11-01): a rejected card's
+ *  invalid-input result is MODEL-FACING evidence (the tutor must see it to
+ *  re-author) — never learner content. The projection drops the failed
+ *  question part; the record keeps it, so the model context and the audit
+ *  trail are untouched. The head string is single-sourced in core/contracts
+ *  (the agent layer cannot be imported here); the details marker
+ *  (details.questionGate) is the record-side truth for settled parts, while
+ *  the head covers the LIVE execution layer during the turn (LiveExecution
+ *  carries text only). */
+function isQuestionGateRejection(result: ToolResultMessage): boolean {
+	if (!result.isError) return false;
+	if (!(QUESTION_TOOLS as readonly string[]).includes(result.toolName)) return false;
+	const details = result.details as { questionGate?: unknown } | null | undefined;
+	return details?.questionGate === true;
+}
+
 /** Does this assistant group carry a successful plan_init (the splice target)? */
 function lastSuccessfulPlanInit(parts: LhViewPart[]): number {
 	let idx = -1;
@@ -156,6 +173,20 @@ export function projectView(messages: readonly LhMessage[], live?: LiveTurnState
 		}
 		return undefined;
 	};
+	/** Drop a part no learner may see (the gate-rejected question attempts).
+	 *  The record keeps the call/result pair; only the projection forgets it. */
+	const removeToolPart = (toolCallId: string): void => {
+		for (let i = out.length - 1; i >= 0; i--) {
+			const parts = out[i]!.parts;
+			for (let p = parts.length - 1; p >= 0; p--) {
+				const part = parts[p]!;
+				if (part.type.startsWith("tool-") && part.toolCallId === toolCallId) {
+					parts.splice(p, 1);
+					return;
+				}
+			}
+		}
+	};
 
 	// The active compaction (owner round 14): the fold emits the CUT
 	// DIVIDER — the longer, at-the-seam marker — immediately BEFORE the
@@ -197,7 +228,14 @@ export function projectView(messages: readonly LhMessage[], live?: LiveTurnState
 		}
 
 		if (role === "toolResult") {
-			applyResultTo(findToolPart((m as ToolResultMessage).toolCallId), m as ToolResultMessage);
+			const result = m as ToolResultMessage;
+			// Gate-rejected question attempts never render (the tutor's retry
+			// evidence; see QUESTION_GATE_REJECTION_HEAD above).
+			if (isQuestionGateRejection(result)) {
+				removeToolPart(result.toolCallId);
+				continue;
+			}
+			applyResultTo(findToolPart(result.toolCallId), result);
 			continue;
 		}
 
@@ -232,6 +270,16 @@ export function projectView(messages: readonly LhMessage[], live?: LiveTurnState
 					if ((QUESTION_TOOLS as readonly string[]).includes(block.name)) {
 						part.sourceMessageId = m.id;
 						part.sourceContentIndex = contentIndex;
+						// A gate rejection that is already visible in the LIVE
+						// execution layer (it happened this turn) never renders —
+						// same hiding rule as the settled result below.
+						if (
+							part.state === "output-error" &&
+							typeof part.errorText === "string" &&
+							part.errorText.startsWith(QUESTION_GATE_REJECTION_HEAD)
+						) {
+							continue;
+						}
 					}
 					if (block.name === SEND_TO_USER_TOOL) {
 						// Failed/aborted generations never execute their calls;
