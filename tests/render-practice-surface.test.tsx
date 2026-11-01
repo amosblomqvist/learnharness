@@ -63,6 +63,55 @@ describe("PracticeDock", () => {
 		assert.match(html, /disabled/);
 	});
 
+	it("a reference opens the fullscreen worksheet: exercises left, the sheet right, one thinking field", () => {
+		const html = renderToStaticMarkup(
+			<PracticeDock
+				problemCallId="call_p1"
+				input={{ statement: "1) Factor $x^2-1$. 2) Factor $x^3-1$.", reference: "| rule | form |\n| --- | --- |\n| difference of squares | $a^2-b^2$ |" }}
+				expanded={true}
+				onExpand={() => {}}
+				onSubmit={() => {}}
+			/>,
+		);
+		assert.match(html, /data-testid="worksheet-full"/);
+		assert.match(html, /data-testid="worksheet-reference"/);
+		assert.match(html, /difference of squares/, "the sheet renders beside the exercises");
+		assert.match(html, /Factor/, "the statement renders");
+		assert.match(html, /data-testid="practice-thinking-field"/);
+		assert.match(html, /data-testid="practice-send"/);
+		assert.match(html, /Worksheet/);
+		assert.match(html, /data-testid="worksheet-close"/);
+	});
+
+	it("no reference: no worksheet — the dock markup is the pre-worksheet one", () => {
+		const html = renderToStaticMarkup(
+			<PracticeDock
+				problemCallId="call_p1"
+				input={{ statement: "Show that the sum is even." }}
+				expanded={true}
+				onExpand={() => {}}
+				onSubmit={() => {}}
+			/>,
+		);
+		assert.ok(!html.includes("worksheet-full"), "no overlay");
+		assert.ok(!html.includes("worksheet-reference"), "no sheet");
+		assert.ok(!html.includes("worksheet-open"), "no way in — a plain problem has no worksheet");
+		assert.match(html, /data-testid="practice-dock"/);
+	});
+
+	it("an empty (or blank) reference is not a worksheet", () => {
+		const html = renderToStaticMarkup(
+			<PracticeDock
+				problemCallId="call_p1"
+				input={{ statement: "S.", reference: "   " }}
+				expanded={true}
+				onExpand={() => {}}
+				onSubmit={() => {}}
+			/>,
+		);
+		assert.ok(!html.includes("worksheet-"));
+	});
+
 	it("collapsed: the slim bar carries the statement excerpt", () => {
 		const html = renderToStaticMarkup(
 			<PracticeDock
@@ -99,6 +148,26 @@ describe("the practice transcript cards", () => {
 		assert.doesNotMatch(html, /Pair them\./, "the commitment stays hidden");
 		// No chevron, no collapsed bar (owner round, 2026-10-05).
 		assert.doesNotMatch(html, /lucide-chevron|<button/, "nothing collapsible");
+	});
+
+	it("ProblemCard: a worksheet's reference sheet rides below the statement, collapsed", () => {
+		const html = renderToStaticMarkup(
+			<ProblemCard
+				part={part({
+					input: {
+						statement: "1) Factor $x^2-1$.",
+						reference: "| rule | form |\n| --- | --- |\n| difference of squares | $a^2-b^2$ |",
+						mode: "composition",
+						modelSolution: "1) $(x-1)(x+1)$.",
+					},
+				})}
+			/>,
+		);
+		assert.match(html, /data-testid="problem-reference"/);
+		assert.match(html, /difference of squares/);
+		assert.match(html, /Factor/);
+		assert.ok(html.indexOf("Factor") < html.indexOf("difference of squares"), "the statement first");
+		assert.ok(!html.includes("(x-1)(x+1)"), "the key stays hidden");
 	});
 
 	it("ConcludeCard: the SOLUTION is the hero (the pose's modelSolution via part.reveal); the verdict rides below, low-key", () => {

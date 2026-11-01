@@ -59,15 +59,27 @@ export function ProblemCard({ part }: ArtifactPartProps) {
 	// Always open, no chevron (owner round, 2026-10-05): the record IS the
 	// statement — same container + eyebrow discipline as the answered card
 	// and the dock (which mirrors this in Slice D). The commitment never
-	// renders — only the call's statement.
-	const input = (part.input ?? {}) as { statement?: string };
+	// renders — only the call's statement. A worksheet's reference sheet
+	// rides below it, collapsed (the transcript keeps it, quiet).
+	const input = (part.input ?? {}) as { statement?: string; reference?: string };
 	const statement = typeof input.statement === "string" ? input.statement : "";
+	const reference = typeof input.reference === "string" ? input.reference : "";
 	return (
 		<div data-testid="problem-card" className="lh-card-enter my-1 rounded-xl border bg-card p-4">
 			<div className="mb-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">Problem</div>
 			<div className="lh-prose text-[15px]">
 				<ToolContentResponse>{statement}</ToolContentResponse>
 			</div>
+			{reference.trim().length > 0 && (
+				<details data-testid="problem-reference" className="mt-3">
+					<summary className="cursor-pointer text-xs font-medium uppercase tracking-wide text-muted-foreground">
+						Reference
+					</summary>
+					<div className="lh-prose mt-2 text-[15px]">
+						<ToolContentResponse>{reference}</ToolContentResponse>
+					</div>
+				</details>
+			)}
 		</div>
 	);
 }

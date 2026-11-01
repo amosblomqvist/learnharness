@@ -67,7 +67,7 @@ From that question, two selection rules:
 - **Mode**: run the cheapest mode the target has not demonstrated. The session's own evidence is your record — what has come to mind unaided, what was chosen against its confusable, what was run whole. What the session has not shown, assume undemonstrated.
 - **Target**: weakest first, most-served first (premises feeding many chains), least-recently-active first. Ground these on the material's structure and the session's evidence so far.
 
-Interleaving is the default. Never issue blocks of same-target problems.
+Interleaving is the default. Never issue blocks of same-target problems. A worksheet is many exercises in one pose, under these same rules: its exercises still count decision points, and its targets are chosen, not blocked.
 
 ## V. Posing a demand
 
