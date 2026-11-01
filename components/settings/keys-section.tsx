@@ -40,7 +40,7 @@ import { ClaudeCodeInstallationStatus } from "./claude-code-status.tsx";
 import { ProviderMenuList } from "./model-menu.tsx";
 import { MenuShell } from "@/components/menu-shell";
 import { notifySettingsSaved } from "@/components/settings-signal";
-import { DictationLanguageSetting } from "@/components/dictation-language";
+import { DictationLanguageSetting, DictationProviderSetting } from "@/components/dictation-language";
 
 /** One pi-ai provider with plain API-key auth (the Platform seam —
  *  derived from pi-ai's own env-key table; no drift possible). */
@@ -599,9 +599,10 @@ export function KeysSection({
 					/>
 				))}
 				{label === "Dictation" && <>
+					<DictationProviderSetting />
 					<DictationLanguageSetting />
 					<p data-testid="dictation-setup-hint" className="px-1 text-[11px] leading-relaxed text-muted-foreground/70">
-						Create a <a
+						Codex sends audio to OpenAI using the account signed into Codex CLI. Install the CLI and run codex login. For Deepgram, create a <a
 							href="https://console.deepgram.com/"
 							target="_blank"
 							rel="noreferrer"

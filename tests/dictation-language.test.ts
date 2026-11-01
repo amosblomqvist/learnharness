@@ -80,3 +80,11 @@ it("the section route persists language independently and rejects unsupported va
 	assert.equal(general.status, 200);
 	assert.deepEqual(readSettings(), { ...saved, general: { autoUpdate: true } }, "auto-update cannot erase dictation language");
 });
+
+it("validates and resolves the explicit dictation provider without changing existing records", () => {
+	assert.equal(resolveSettings({ version: 1 }).dictation.provider, "deepgram");
+	assert.deepEqual(parseDictationSettingsBody({ language: "pl", provider: "codex" }), { ok: true, settings: { language: "pl", provider: "codex" } });
+	assert.equal(parseDictationSettingsBody({ provider: "unknown" }).ok, false);
+	assert.equal(resolveSettings(sanitizeUserSettings({ version: 1, dictation: { language: "pl", provider: "codex" } })).dictation.provider, "codex");
+	assert.equal(resolveSettings(sanitizeUserSettings({ version: 1, dictation: { language: "pl", provider: "unknown" } })).dictation.provider, "deepgram");
+});
