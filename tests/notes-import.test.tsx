@@ -143,6 +143,23 @@ it("picker stays enabled during imports, offers Files/Folder, and keeps PDF supp
 	const html = renderToStaticMarkup(<NotesImportControl importing onImportFiles={() => {}} />);
 	assert.match(html, /webkitdirectory/); assert.match(html, /accept=".md,.markdown,.txt,.pdf"/); assert.doesNotMatch(html, /disabled/);
 });
+it("Android offers the supported multi-file picker without an unusable Folder action", async () => {
+	const previous = Object.getOwnPropertyDescriptor(globalThis, "navigator");
+	Object.defineProperty(globalThis, "navigator", { configurable: true, value: { userAgent: "Android LearnHarnessAndroid/1" } });
+	try {
+		host = document.createElement("div"); document.body.appendChild(host); root = createRoot(host);
+		await act(async () => { root!.render(<NotesImportControl importing={false} onImportFiles={() => {}} />); });
+		await act(async () => { host!.querySelector<HTMLButtonElement>("[data-testid='import-notes']")!.click(); });
+		assert.deepEqual(Array.from(host.querySelectorAll('[role="menuitem"]'), (el) => el.textContent), ["Files"]);
+		let opened = false;
+		host.querySelector<HTMLInputElement>('input[type="file"]')!.click = () => { opened = true; };
+		await act(async () => { host!.querySelector<HTMLButtonElement>('[role="menuitem"]')!.click(); });
+		assert.equal(opened, true);
+	} finally {
+		if (previous) Object.defineProperty(globalThis, "navigator", previous);
+		else delete (globalThis as Record<string, unknown>).navigator;
+	}
+});
 it("alerts/notices stay plain and escaped", () => {
 	assert.equal(renderToStaticMarkup(<NotesImportErrors errors={[]} />), "");
 	const html = renderToStaticMarkup(<NotesImportErrors errors={["one.md: failure", "two.md: failure"]} />);

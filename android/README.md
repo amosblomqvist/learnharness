@@ -47,6 +47,12 @@ Set `JAVA_HOME` to your JDK and `ANDROID_HOME` to your SDK. Build products are i
 the owner's private key using Android `apksigner`. Never commit a signing key.
 Debug APKs are for testing, not interchangeable with a release-signed install.
 
+To sign a personal ARM64 install, run `node scripts/android/sign.mjs` from the
+repository root (or pass a downloaded unsigned APK path). This creates a private
+key under `~/.cache/learnharness-android/signing/` and reuses it on subsequent
+builds. Back up that directory privately: losing it prevents in-place updates.
+The signed APK and SHA-256 are written to `dist/`.
+
 The Android APK GitHub Actions workflow builds both ABIs and runs the x86_64 app
 on an API 35 emulator. `node scripts/android/smoke.mjs` checks startup, WebView,
 HTTP access controls, portrait/landscape layout, OAuth request construction and

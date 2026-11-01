@@ -91,11 +91,13 @@ export function NotesImportControl({ importing, onImportFiles }: { importing: bo
 	const filesRef = useRef<HTMLInputElement>(null);
 	const folderRef = useRef<HTMLInputElement>(null);
 	const [open, setOpen] = useState(false);
+	const [foldersSupported, setFoldersSupported] = useState(true);
+	useEffect(() => { setFoldersSupported(!navigator.userAgent.includes("LearnHarnessAndroid/")); }, []);
 	const onChange = (event: ChangeEvent<HTMLInputElement>) => {
 		onImportFiles(event.target.files);
 		event.target.value = "";
 	};
-	const choices = [["Files", filesRef], ["Folder", folderRef]] as const;
+	const choices = ([["Files", filesRef], ["Folder", folderRef]] as const).filter(([label]) => label !== "Folder" || foldersSupported);
 	return (
 		<div className="relative shrink-0 rounded-xl border bg-card/85 px-1 py-[3px] shadow-lg backdrop-blur"
 			onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget)) setOpen(false); }}

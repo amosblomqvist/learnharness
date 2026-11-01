@@ -7,6 +7,7 @@ import android.net.Uri;
 import android.os.*;
 import android.view.*;
 import android.webkit.*;
+import android.webkit.CookieManager;
 import android.widget.*;
 import java.net.*;
 import java.util.*;
@@ -52,6 +53,9 @@ public final class MainActivity extends Activity {
             @Override public boolean onCreateWindow(WebView source, boolean dialog, boolean gesture, Message result) {
                 if (!gesture || popups.size() >= 3) return false;
                 WebView popup = new WebView(MainActivity.this); configure(popup); popup.setWebViewClient(client(true));
+                popup.setWebChromeClient(new WebChromeClient() {
+                    @Override public void onCloseWindow(WebView window) { closePopup(window); }
+                });
                 popups.add(popup);
                 ((WebView.WebViewTransport) result.obj).setWebView(popup); result.sendToTarget();
                 return true;
