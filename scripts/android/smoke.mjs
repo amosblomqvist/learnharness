@@ -8,7 +8,7 @@ import puppeteer from "puppeteer-core";
 const app = "ar.com.learnharness";
 const artifacts = path.resolve("android/.generated/smoke");
 await fs.mkdir(artifacts, { recursive: true });
-const adb = (...args) => execFileSync("adb", args, { encoding: "utf8", timeout: 20000 });
+const adb = (...args) => execFileSync("adb", args, { encoding: "utf8", timeout: args[0] === "install" ? 180000 : 20000 });
 const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 async function tapDocumentUi(attribute, value) {
 	for (let i = 0; i < 8; i++) {
