@@ -19,6 +19,7 @@ import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import { fuzzyScore } from "@/src/core";
 import { useServerEvent, useServerResync } from "@/components/server-events";
+import { isNativeShell } from "@/components/native-shell";
 import type { ChatListItem } from "@/src/core";
 import { kbdEventForAction } from "@/src/core";
 import { notifySettingsSaved } from "@/components/settings-signal";
@@ -55,6 +56,10 @@ const SIDEBAR_AUTOCLOSE = 928;
 
 // Module scope, guarded for SSR (the server has no navigator).
 const IS_ELECTRON = typeof navigator !== "undefined" && navigator.userAgent.includes("Electron");
+/** The iPhone app (ios/) tags every request's User-Agent with this token.
+ *  Its phone layout (sidebar as a slide-over, .lh-ios CSS in globals.css)
+ *  applies only there; desktop and browsers are unchanged. */
+const IS_IOS_APP = typeof navigator !== "undefined" && navigator.userAgent.includes("LearnHarnessiOS/");
 
 declare global {
 	interface Window {
@@ -117,6 +122,9 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
 			document.documentElement.classList.add("lh-electron");
 			document.documentElement.dataset.lhPlatform = window.lh?.platform ?? "";
 		}
+		if (IS_IOS_APP) document.documentElement.classList.add("lh-ios");
+		// The iPhone app's native shell draws its own navigation (globals.css).
+		if (isNativeShell()) document.documentElement.classList.add("lh-native");
 
 		// THE ZOOM TRUTH (owner round 7, 2026-10-05): ⌘±/⌘0 zoom the UI
 		// (Electron zoomFactor) while the native traffic lights stay
@@ -129,11 +137,19 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
 		void window.lh?.getZoom?.().then(setZoomVar);
 
 		const stored = localStorage.getItem(STORAGE_KEY);
-		// Default: open (first run introduces the sidebar).
-		setOpen(stored === null ? true : stored === "1");
+		// Default: open (first run introduces the sidebar). On the iPhone the
+		// sidebar covers the page, so every launch starts on the page itself.
+		setOpen(IS_IOS_APP ? false : stored === null ? true : stored === "1");
 		setMounted(true);
 		return () => off?.();
 	}, []);
+
+	// iPhone: the sidebar is a slide-over, so picking a session (or any
+	// navigation) closes it and shows the page that was chosen.
+	const pathname = usePathname();
+	useEffect(() => {
+		if (IS_IOS_APP) setOpen(false);
+	}, [pathname]);
 
 	// Narrow-window auto-close/auto-restore (see SIDEBAR_AUTOCLOSE note):
 	// fires only on actual resizes — a boolean compare, no layout work.
@@ -203,7 +219,7 @@ export function SidebarToggle() {
 	return (
 		<span
 			className={cn(
-				"sidebar-motion lh-no-drag relative flex h-9 shrink-0 overflow-hidden duration-200",
+				"lh-sidebar-toggle sidebar-motion lh-no-drag relative flex h-9 shrink-0 overflow-hidden duration-200",
 				open ? "w-0 -mr-3" : "w-9 mr-0 lh-closed-toggle",
 			)}
 		>
@@ -646,8 +662,13 @@ function SessionsSidebar() {
 	}, [open, pathname, refresh]);
 
 	return (
+		<>
+		{/* iPhone slide-over backdrop: tap outside the sidebar to close it. */}
+		{IS_IOS_APP && open && (
+			<button type="button" aria-label="Close sidebar" className="lh-ios-backdrop" onClick={toggle} />
+		)}
 		<aside
-			className={cn("sidebar-motion shrink-0 overflow-hidden duration-200", open ? "w-72" : "w-0")}
+			className={cn("lh-sidebar sidebar-motion shrink-0 overflow-hidden duration-200", open ? "w-72" : "w-0")}
 			aria-hidden={!open}
 		>
 			<div className="flex h-full w-72 flex-col border-r bg-background">
@@ -939,6 +960,7 @@ function SessionsSidebar() {
 					onDeleted={onDeleted}
 				/>
 			</aside>
+		</>
 	);
 }
 

@@ -85,6 +85,7 @@ import {
 	questionNeedsReveal,
 } from "@/src/core";
 import { ReadingThinkingField } from "@/components/reading-thinking";
+import { postToNative, useNativeShell } from "@/components/native-shell";
 import { currentUserThinkingOpen, setAllUserThinkingOpen } from "@/components/thinking-block";
 
 /** One width for everything: transcript, cards, and the bottom blob share this column. */
@@ -775,6 +776,8 @@ export function Chat({
 		if (!nextReady) return;
 		void send({ type: "next" });
 	}, [nextReady, send]);
+	const nativeShell = useNativeShell();
+
 
 	/* ENTER FROM ANYWHERE (owner round 16 refinement, 2026-10-06 —
 	 * keyboard-first): the move-on must not require composer focus. The
@@ -916,6 +919,37 @@ export function Chat({
 	// The session's live plan (drives the top-bar chip; the marginalia
 	// derives its own from the same transcript).
 	const planTree = useMemo(() => latestTree(messages), [messages]);
+
+	/* THE iPHONE APP'S COMPOSER (native-shell.ts): inside the native shell
+	 * the app draws the composer and the mic, so this page reports what
+	 * the composer may do and hands Stop back to the same abort path. The
+	 * question and practice docks stay here — they replace the composer
+	 * exactly as on desktop, and the app hides its own while they show. */
+	const nativeComposer = !pending && !activeProblem;
+	useEffect(() => {
+		if (!nativeShell) return;
+		postToNative({
+			type: "chatState",
+			chatId,
+			busy,
+			composer: nativeComposer,
+			compacting,
+			nextReady,
+			configured: configured && !zeroKeys,
+			hasPlan: planTree !== null && planTree !== undefined,
+		});
+	}, [nativeShell, chatId, busy, nativeComposer, compacting, nextReady, configured, zeroKeys, planTree]);
+	useEffect(() => {
+		if (!nativeShell) return;
+		window.lhNativeChat = {
+			stop: abortInFlightTurn,
+			openPlan: () => setPlanOpen(true),
+			find: () => window.dispatchEvent(new Event(kbdEventForChat("find"))),
+		};
+		return () => {
+			window.lhNativeChat = undefined;
+		};
+	}, [nativeShell, abortInFlightTurn]);
 
 	// ── Session usage (wave-4 stats bar) ──
 	// The money channel: the record's turns log and read-time server Pi
@@ -1322,7 +1356,7 @@ export function Chat({
 								spellCheck={false}
 								aria-label="Session title"
 								title="Rename this session"
-								className="lh-no-drag min-w-[8ch] max-w-[70%] shrink-0 bg-transparent font-title text-3xl tracking-tight caret-current outline-none [field-sizing:content]"
+								className="lh-chat-title lh-no-drag min-w-[8ch] max-w-[70%] shrink-0 bg-transparent font-title text-3xl tracking-tight caret-current outline-none [field-sizing:content]"
 							/>
 							{/* flex-1 spacer during rename too, so the chips stay at
 							    the right edge; clicks here commit via the header
@@ -1343,7 +1377,7 @@ export function Chat({
 								setTitleDraft(titleText);
 								setRenaming(true);
 							}}
-							className="lh-no-drag -mx-1.5 min-w-4 shrink cursor-text truncate rounded-md px-1.5 text-left font-title text-3xl tracking-tight transition-colors hover:bg-accent"
+							className="lh-chat-title lh-no-drag -mx-1.5 min-w-4 shrink cursor-text truncate rounded-md px-1.5 text-left font-title text-3xl tracking-tight transition-colors hover:bg-accent"
 						>
 							{titleText}
 							</button>
@@ -1368,7 +1402,7 @@ export function Chat({
 							className="lh-no-drag flex shrink-0 cursor-pointer items-center gap-1.5 rounded-full border border-border/80 px-2 py-0.5 text-xs font-medium uppercase tracking-wide text-muted-foreground transition-colors hover:border-border hover:text-foreground"
 						>
 							<WaypointsIcon className="size-3.5 text-primary" aria-hidden />
-							Plan
+							<span className="lh-chrome-label">Plan</span>
 						</button>
 </Hint>
 					)}
@@ -1712,7 +1746,7 @@ export function Chat({
 					cliContextWindow={cliContextWindowOf(nativeMessages)}
 					pricing={pricing}
 					onReserve={setDockReserve}
-					dictationSlot={<DictationBar dictation={dictation} />}
+					dictationSlot={nativeShell ? undefined : <DictationBar dictation={dictation} />}
 					dictationCancel={dictation.cancel}
 					queuedSteers={visibleQueuedSteers(steerQueue, nativeMessages)}
 					setupCta={
@@ -1734,7 +1768,7 @@ export function Chat({
 						)
 					}
 					composer={
-						<ChatSessionComposer
+						nativeShell ? null : <ChatSessionComposer
 							// Stop aborts ANY in-flight turn (stream-reattach wave): the
 							// square renders while a reattached/wake turn runs too — the
 							// abort channel kills it server-side; stop() alone would
@@ -2384,7 +2418,7 @@ function DockOverlay({
 							claim={revealPending}
 						/>
 					)}
-					<div ref={shellRef} className="pointer-events-auto overflow-hidden rounded-2xl border bg-card shadow-lg">
+					<div ref={shellRef} className="lh-dock-shell pointer-events-auto overflow-hidden rounded-2xl border bg-card shadow-lg">
 						{/* Include descendant margins (notably practice thinking's
 						    bottom margin) in the natural content measurement. */}
 						<div
