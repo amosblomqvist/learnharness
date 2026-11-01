@@ -37,6 +37,7 @@ import {
 	clampChatLevel,
 	clampModelsLevels,
 	effectiveSettings,
+	announceSettingsChanged,
 	fileAccessConfigurationError,
 	promptOverrides,
 	readSettingsRecord,
@@ -148,6 +149,8 @@ export async function PUT(request: Request, ctx: { params: Promise<{ section: st
 	// Only a successful durable write changes admission. Increasing the
 	// limit immediately drains queued requests; decreasing never cancels active work.
 	refreshWorkerRequestAdmission();
+	// Other devices re-read settings without a reload (server mode).
+	announceSettingsChanged(section);
 	const fileAccessError = fileAccessConfigurationError();
 	return Response.json({ settings: stored, ...(fileAccessError ? { fileAccessError } : {}) });
 }

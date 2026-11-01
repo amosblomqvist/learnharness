@@ -1,0 +1,17 @@
+# Self-hosted LearnHarness. Put secrets in .env.server (copy .env.server.example).
+# Everything you create — chats, knowledge graph, practice sets, settings,
+# provider keys — lives in the learnharness-data volume on this machine.
+services:
+  learnharness:
+    build: .
+    image: learnharness:latest
+    restart: unless-stopped
+    env_file: .env.server
+    ports:
+      - "3000:3000"
+    volumes:
+      - learnharness-data:/data
+    shm_size: "512mb" # headless Chromium
+
+volumes:
+  learnharness-data:
