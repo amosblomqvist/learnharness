@@ -12,6 +12,7 @@ import { createFauxCore, fauxAssistantMessage, fauxText, fauxToolCall, type Faux
 import type { JobStore } from "../src/core/ports.ts";
 import type { JobRecord } from "../src/core/contracts.ts";
 import type { SearchHit, SearchProvider } from "../src/core/search.ts";
+import { resolveSearchEngineFor, duckduckgoProvider } from "../src/server/search.ts";
 
 function stubProvider(hits: SearchHit[] = [{ title: "t", url: "https://e.com/", snippet: "s" }]): SearchProvider {
 	return {
@@ -330,4 +331,84 @@ describe("keyless role registries", () => {
 		assert.equal("research" in tools, false);
 		assert.ok(tools.pdf && tools.demo && tools.visual);
 	});
+});
+
+describe("resolveSearchEngineFor with DuckDuckGo (no key needed)", () => {
+	it("DDG always available even without any key", () => {
+		const out = resolveSearchEngineFor("duckduckgo", {});
+		assert.ok(out.available);
+		assert.equal(out.engine, "duckduckgo");
+		assert.match(out.reason, /chosen/);
+		assert.equal(out.key, null);
+	});
+
+	it("no keys at all: DDG auto-activates first (preference order DDG → Tavily → Brave)", () => {
+		const out = resolveSearchEngineFor(undefined, {});
+		assert.ok(out.available);
+		assert.equal(out.engine, "duckduckgo");
+		assert.match(out.reason, /auto/);
+	});
+
+	it("DDG + Tavily keys: DDG wins (first in preference order)", () => {
+		const out = resolveSearchEngineFor(undefined, {
+			duckduckgo: "x",
+			tavily: "tvly-abc123def456ghi78",
+		});
+		assert.ok(out.available);
+		assert.equal(out.engine, "duckduckgo");
+		assert.match(out.reason, /auto/);
+	});
+
+	it("pin DuckDuckGo always available even without its 'key'", () => {
+		const out = resolveSearchEngineFor("duckduckgo", { tavily: "tvly-abc123def456ghi78" });
+		assert.ok(out.available);
+		assert.equal(out.engine, "duckduckgo");
+		assert.match(out.reason, /chosen/);
+	});
+});
+
+/** One-shot stub fetch: asserts the request shape and returns canned HTML. */
+function stubFetch(html: string, expect: (url: string, init: RequestInit) => void) {
+	return async (url: string, init: RequestInit): Promise<Response> => {
+		expect(url, init);
+		return new Response(html, { status: 200, headers: { "content-type": "text/html" } });
+	};
+}
+
+describe("duckduckgoProvider (HTML scraping — no key)", () => {
+	it("GETs html.duckduckgo.com/html/ with a User-Agent and parses .result rows", async () => {
+		const provider = duckduckgoProvider("", stubFetch(
+			`<html><body>
+			  <div class="result">
+			    <a class="result__a" href="https://example.com/a">Example Title</a>
+			    <div class="result__snippet">Example snippet here</div>
+			  </div>
+			  <div class="result">
+			    <div class="result__snippet">no link — dropped</div>
+			  </div>
+			</body></html>`,
+			(url, init) => {
+				assert.equal(url, "https://html.duckduckgo.com/html/?q=test+query");
+				assert.ok(String(init.headers["user-agent"]).includes("Mozilla/5.0"));
+			},
+		));
+		const hits = await provider.search("test query", 5);
+		assert.deepEqual(hits, [{ title: "Example Title", url: "https://example.com/a", snippet: "Example snippet here" }]);
+	});
+
+	it("limits results to count", async () => {
+		const provider = duckduckgoProvider("", stubFetch(
+			`<html><body>
+			  <div class="result"><a class="result__a" href="https://a.com">A</a><div class="result__snippet">snippet A</div></div>
+			  <div class="result"><a class="result__a" href="https://b.com">B</a><div class="result__snippet">snippet B</div></div>
+			</body></html>`,
+			(url, init) => {
+				assert.ok(url.includes("q=test+query"));
+			},
+		));
+		const hits = await provider.search("test query", 1);
+		assert.equal(hits.length, 1);
+		assert.equal(hits[0].title, "A");
+	});
+});
 });

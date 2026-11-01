@@ -11,7 +11,7 @@
 
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { resolveSearchEngineFor, tavilyProvider, braveProvider } from "../src/server/search.ts";
+import { resolveSearchEngineFor, duckduckgoProvider, tavilyProvider, braveProvider } from "../src/server/search.ts";
 
 describe("resolveSearchEngineFor (the auto-detect decision)", () => {
 	it("no keys: honestly unavailable, no default", () => {
@@ -129,5 +129,42 @@ describe("braveProvider (wire shape per Brave's dashboard docs, verified 2026-09
 			new Response("rate limited", { status: 429 }),
 		);
 		await assert.rejects(provider.search("q", 5), /Brave search API 429/);
+	});
+
+	describe("duckduckgoProvider (HTML scraping — no key)", () => {
+		it("GETs html.duckduckgo.com/html/ with a User-Agent and parses .result rows", async () => {
+			const provider = duckduckgoProvider("", stubFetch(
+				`<html><body>
+				  <div class="result">
+				    <a class="result__a" href="https://example.com/a">Example Title</a>
+				    <div class="result__snippet">Example snippet here</div>
+				  </div>
+				  <div class="result">
+				    <div class="result__snippet">no link — dropped</div>
+				  </div>
+				</body></html>`,
+				(url, init) => {
+					assert.equal(url, "https://html.duckduckgo.com/html/?q=test+query");
+					assert.ok(String(init.headers["user-agent"]).includes("Mozilla/5.0"));
+				},
+			));
+			const hits = await provider.search("test query", 5);
+			assert.deepEqual(hits, [{ title: "Example Title", url: "https://example.com/a", snippet: "Example snippet here" }]);
+		});
+
+		it("limits results to count", async () => {
+			const provider = duckduckgoProvider("", stubFetch(
+				`<html><body>
+				  <div class="result"><a class="result__a" href="https://a.com">A</a><div class="result__snippet">snippet A</div></div>
+				  <div class="result"><a class="result__a" href="https://b.com">B</a><div class="result__snippet">snippet B</div></div>
+				</body></html>`,
+				(url, init) => {
+					assert.ok(url.includes("q=test+query"));
+				},
+			));
+			const hits = await provider.search("test query", 1);
+			assert.equal(hits.length, 1);
+			assert.equal(hits[0].title, "A");
+		});
 	});
 });

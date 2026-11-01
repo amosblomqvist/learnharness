@@ -66,10 +66,13 @@ describe("parseAgentSettingsBody", () => {
 		// cross-validation — the parser only sees shapes.
 	});
 
-	it("search: engine pin is tavily|brave; anything else is a 400 (search wave, 2026-09-20)", () => {
-		const ok = parseAgentSettingsBody({ search: { engine: "tavily" } });
+	it("search: engine pin is tavily|brave|duckduckgo; anything else is a 400 (search wave, 2026-09-20)", () => {
+		const ok = parseAgentSettingsBody({ search: { engine: "duckduckgo" } });
 		assert.ok(ok.ok);
-		assert.deepEqual(ok.settings.search, { engine: "tavily" });
+		assert.deepEqual(ok.settings.search, { engine: "duckduckgo" });
+		const tavily = parseAgentSettingsBody({ search: { engine: "tavily" } });
+		assert.ok(tavily.ok);
+		assert.deepEqual(tavily.settings.search, { engine: "tavily" });
 		const clear = parseAgentSettingsBody({ search: {} });
 		assert.ok(clear.ok);
 		assert.equal(clear.settings.search, undefined, "absent engine = back to auto-detect");
