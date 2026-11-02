@@ -75,3 +75,19 @@
 .lh-phone [data-testid="group-external-cli"] {
 	display: none;
 }
+
+/* ── Knowledge graph home ────────────────────────────────────────────── */
+
+/* The toolbar never wraps (owner, desktop); on a phone its labelled
+   buttons become icon-only so the row fits beside the sidebar button. */
+.lh-phone [data-testid="open-chain-table"],
+.lh-phone [data-testid="import-notes"] {
+	font-size: 0;
+	gap: 0;
+	padding-inline: 0.5rem;
+}
+/* Keep the row inside its column's width cap so the search box shrinks
+   instead of the row sliding under the sidebar button. */
+.lh-phone .lh-wco-floating > div:first-child {
+	max-width: 100%;
+}
