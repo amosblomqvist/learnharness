@@ -9,7 +9,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { Rating } from "ts-fsrs";
 
-import { ratingOf, reviewDayStart, reviewQueue } from "../src/core/review.ts";
+import { formatReviewBrief, ratingOf, reviewBriefOf, reviewDayStart, reviewQueue } from "../src/core/review.ts";
 import type { ReviewEvent, ReviewOutcome, ReviewRung } from "../src/core/contracts/review.ts";
 import { resolveSettings } from "../src/core/settings-resolution.ts";
 import { sanitizeUserSettings } from "../src/core/settings.ts";
@@ -173,6 +173,78 @@ describe("reviewQueue", () => {
 			now: local(9, 12),
 		};
 		assert.deepEqual(reviewQueue(input), reviewQueue(input));
+	});
+});
+
+describe("reviewBriefOf — the history brief", () => {
+	const facts = (r: ReviewEvent, extra: Partial<ReviewEvent>): ReviewEvent => ({ ...r, ...extra });
+
+	it("a never-practiced pick is new", () => {
+		const [entry] = reviewBriefOf({ reviews: [], pickIds: ["n_a"], now: local(9, 12) });
+		assert.deepEqual(entry, {
+			id: "n_a",
+			status: { kind: "new" },
+			reviews: 0,
+			misses: 0,
+			highestCleanMode: null,
+			last: null,
+			recentSurfaces: [],
+		});
+		assert.deepEqual(formatReviewBrief([entry!]), ["- [n_a] new — never practiced"]);
+	});
+
+	it("counts reviews and misses, keeps pick order, and ignores other targets", () => {
+		const reviews = [
+			review(["n_a"], local(1, 12)),
+			review(["n_a", "n_z"], local(2, 12), "surrendered", "R5"),
+			review(["n_b"], local(3, 12)),
+		];
+		const entries = reviewBriefOf({ reviews, pickIds: ["n_b", "n_a"], now: local(4, 12) });
+		assert.deepEqual(entries.map((e) => [e.id, e.reviews, e.misses]), [["n_b", 1, 0], ["n_a", 2, 1]]);
+	});
+
+	it("the highest clean mode needs a solve at R1 or below", () => {
+		const reviews = [
+			facts(review(["n_a"], local(1, 12), "solved", "R0"), { mode: "recall" }),
+			facts(review(["n_a"], local(2, 12), "solvedWithHints", "R1"), { mode: "discrimination" }),
+			facts(review(["n_a"], local(3, 12), "solved", "R2"), { mode: "composition" }),
+			facts(review(["n_a"], local(4, 12), "surrendered", null), { mode: "composition" }),
+		];
+		const [entry] = reviewBriefOf({ reviews, pickIds: ["n_a"], now: local(5, 12) });
+		assert.equal(entry!.highestCleanMode, "discrimination");
+	});
+
+	it("overdue vs scheduled follows the FSRS replay; days are whole", () => {
+		const reviews = [review(["n_a"], local(1, 12))];
+		const [soon] = reviewBriefOf({ reviews, pickIds: ["n_a"], now: local(1, 12, 1) }); // short-term step: minutes, not days
+		assert.deepEqual(soon!.status, { kind: "scheduled", days: 0 });
+		assert.match(formatReviewBrief([soon!])[0]!, / due within a day · /);
+		const [late] = reviewBriefOf({ reviews, pickIds: ["n_a"], now: new Date(2026, 11, 30, 12) });
+		assert.equal(late!.status.kind, "overdue");
+		assert.ok(late!.status.kind === "overdue" && late!.status.days > 0);
+	});
+
+	it("lists the newest surfaces first, at most three", () => {
+		const reviews = ["s1", "s2", "s3", "s4"].map((surface, i) => facts(review(["n_a"], local(1 + i, 12)), { surface }));
+		reviews.push(review(["n_a"], local(6, 12))); // an old-format line: no surface
+		const [entry] = reviewBriefOf({ reviews, pickIds: ["n_a"], now: local(7, 12) });
+		assert.deepEqual(entry!.recentSurfaces, ["s4", "s3", "s2"]);
+	});
+
+	it("the last review carries only the facts it recorded", () => {
+		const [entry] = reviewBriefOf({ reviews: [review(["n_a"], local(1, 12), "movedOn", "R3")], pickIds: ["n_a"], now: local(3, 13) });
+		assert.deepEqual(entry!.last, { outcome: "movedOn", rung: "R3", daysAgo: 2 });
+	});
+
+	it("formats one line per pick, ids first", () => {
+		const reviews = [
+			facts(review(["n_a"], local(1, 12), "solved", null), { mode: "recall", missClass: null, surface: "a ladder" }),
+			facts(review(["n_a"], local(2, 12), "surrendered", "R4"), { mode: "discrimination", missClass: "discrimination", surface: "a ramp" }),
+		];
+		const [line] = formatReviewBrief(reviewBriefOf({ reviews, pickIds: ["n_a"], now: local(2, 12) }));
+		assert.match(line!, /^- \[n_a\] (due now|overdue \d+ days?|due within a day|due in \d+ days?) · 2 reviews, 1 miss · highest clean mode: recall · /);
+		assert.ok(line!.includes("last (today): surrendered, rung R4, mode discrimination, miss discrimination"));
+		assert.ok(line!.endsWith('recent surfaces: "a ramp"; "a ladder"'));
 	});
 });
 

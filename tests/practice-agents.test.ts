@@ -76,6 +76,7 @@ const ctxOf = (messages: LhMessage[]) => ({ chatId: "c1", chatStore: recordStore
 const PROBLEM_INPUT = {
 	statement: "Prove the sum is even.",
 	mode: "recall",
+	surface: "sum of paired integers, prove parity",
 	target: ["parity-sum"],
 	modelSolution: "Pair them; each pair is even.",
 } as const;

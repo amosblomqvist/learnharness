@@ -13,7 +13,7 @@
  */
 
 import { getGraph } from "../core/graph.ts";
-import { practiceReviewsOf, reviewQueue } from "../core/review.ts";
+import { formatReviewBrief, practiceReviewsOf, reviewBriefOf, reviewQueue } from "../core/review.ts";
 import type { ChatStore, GraphStore, ReviewStore } from "../core/ports.ts";
 import { effectiveSettings, stores } from "./stores.ts";
 
@@ -110,4 +110,22 @@ export function reviewSummary(
 			return { id, name: node.name, statement: node.statement };
 		}),
 	};
+}
+
+/** The history brief's session-context lines for a practice session's
+ *  picks (chat creation). Backfills first, so the log holds every saved
+ *  practice chat. A brief must never fail the creation it rides on — log
+ *  and start the session without one. */
+export function reviewBriefLines(
+	pickIds: readonly string[],
+	now: Date = new Date(),
+	deps: { reviewStore: ReviewStore } = stores,
+): string[] {
+	try {
+		ensureReviewBackfill();
+		return formatReviewBrief(reviewBriefOf({ reviews: deps.reviewStore.readReviews(), pickIds, now }));
+	} catch (err) {
+		console.error("review brief failed:", err);
+		return [];
+	}
 }

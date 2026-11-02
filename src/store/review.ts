@@ -70,7 +70,10 @@ const isReviewEvent = (v: unknown): v is ReviewEvent => {
 		r.targets.length > 0 &&
 		r.targets.every(isString) &&
 		isString(r.outcome) &&
-		(r.rung === null || isString(r.rung))
+		(r.rung === null || isString(r.rung)) &&
+		(r.mode === undefined || isString(r.mode)) &&
+		(r.missClass === undefined || r.missClass === null || isString(r.missClass)) &&
+		(r.surface === undefined || isString(r.surface))
 	);
 };
 

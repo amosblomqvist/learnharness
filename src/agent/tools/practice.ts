@@ -78,6 +78,11 @@ export const problemInputObject = Type.Object({
 	mode: Type.Union([Type.Literal("recall"), Type.Literal("discrimination"), Type.Literal("composition")], {
 		description: "REQUIRED — the demand mode: recall, discrimination, or composition (bare words, no quotes).",
 	}),
+	surface: Type.String({
+		description:
+			"REQUIRED — one line naming the problem's situation class (e.g. \"projectile launched up an incline, find the range\"): " +
+			"the kind of situation, never the target proposition. Recorded so later sessions pose fresh surfaces.",
+	}),
 	target: Type.Optional(
 		Type.Array(Type.String(), {
 			minItems: 1,

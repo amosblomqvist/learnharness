@@ -9,6 +9,8 @@
  *    Easy is never assigned — the agent has no effortlessness signal).
  *  - reviewQueue: the log + the live graph → what is due, what new
  *    propositions today's allowance admits, and the next session's picks.
+ *  - reviewBriefOf: the log + a session's picks → each pick's history,
+ *    for the practice agent's session context (the history brief).
  *
  * Memory state is DERIVED by replaying the log through FSRS on every
  * read — never stored (contracts/review.ts).
@@ -16,7 +18,7 @@
 
 import { createEmptyCard, fsrs, Rating, type Card, type Grade } from "ts-fsrs";
 import type { GraphChain, GraphNode } from "./contracts/graph.ts";
-import type { ReviewEvent, ReviewOutcome, ReviewRung } from "./contracts/review.ts";
+import type { ReviewEvent, ReviewMissClass, ReviewMode, ReviewOutcome, ReviewRung } from "./contracts/review.ts";
 import {
 	PRACTICE_CONCLUDE_TOOL,
 	PRACTICE_PROBLEM_TOOL,
@@ -28,9 +30,14 @@ import {
 export const REVIEW_DAY_START_HOUR = 4;
 /** How many propositions one review session picks. */
 export const REVIEW_SESSION_SIZE = 8;
+/** How many recent surfaces the history brief lists per pick. */
+export const REVIEW_BRIEF_SURFACES = 3;
+const DAY_MS = 86_400_000;
 
 const OUTCOMES: readonly ReviewOutcome[] = ["solved", "solvedWithHints", "movedOn", "surrendered", "dismissed"];
 const RUNGS: readonly Exclude<ReviewRung, null>[] = ["R0", "R1", "R2", "R3", "R4", "R5"];
+const MODES: readonly ReviewMode[] = ["recall", "discrimination", "composition"];
+const MISS_CLASSES: readonly Exclude<ReviewMissClass, null>[] = ["cue", "discrimination", "execution", "careless", "structural"];
 
 // ─── record → reviews ────────────────────────────────────────────────────────
 
@@ -44,6 +51,21 @@ function targetsOf(args: unknown): string[] {
 
 function rungOf(raw: unknown): ReviewRung {
 	return RUNGS.includes(raw as Exclude<ReviewRung, null>) ? (raw as ReviewRung) : null;
+}
+
+/** The pose's brief facts — each only when the call carried a valid one
+ *  (unknown stays absent, never guessed). */
+function poseFactsOf(args: unknown): Pick<ReviewEvent, "mode" | "surface"> {
+	const { mode, surface } = (args ?? {}) as { mode?: unknown; surface?: unknown };
+	return {
+		...(MODES.includes(mode as ReviewMode) ? { mode: mode as ReviewMode } : {}),
+		...(typeof surface === "string" && surface.trim().length > 0 ? { surface: surface.trim() } : {}),
+	};
+}
+
+function missClassOf(raw: unknown): Pick<ReviewEvent, "missClass"> {
+	if (raw === null) return { missClass: null };
+	return MISS_CLASSES.includes(raw as Exclude<ReviewMissClass, null>) ? { missClass: raw as ReviewMissClass } : {};
 }
 
 /**
@@ -64,7 +86,7 @@ export function practiceReviewsOf(chatId: string, messages: readonly LhMessage[]
 	const posed = new Map<string, unknown>(); // clean problem call id → its arguments
 	const reviews: ReviewEvent[] = [];
 	const seen = new Set<string>();
-	const emit = (problemCallId: string, at: number, outcome: unknown, rung: unknown) => {
+	const emit = (problemCallId: string, at: number, outcome: unknown, rung: unknown, missClass?: unknown) => {
 		if (seen.has(problemCallId) || !posed.has(problemCallId)) return;
 		if (!OUTCOMES.includes(outcome as ReviewOutcome)) return;
 		const targets = targetsOf(posed.get(problemCallId));
@@ -78,6 +100,8 @@ export function practiceReviewsOf(chatId: string, messages: readonly LhMessage[]
 			targets,
 			outcome: outcome as ReviewOutcome,
 			rung: outcome === "dismissed" ? null : rungOf(rung),
+			...poseFactsOf(posed.get(problemCallId)),
+			...(outcome === "dismissed" ? {} : missClassOf(missClass)),
 		});
 	};
 
@@ -101,8 +125,8 @@ export function practiceReviewsOf(chatId: string, messages: readonly LhMessage[]
 				posed.set(call.id, call.arguments);
 				active = call.id;
 			} else if (call.name === PRACTICE_CONCLUDE_TOOL && active !== null) {
-				const args = (call.arguments ?? {}) as { outcome?: unknown; rung?: unknown };
-				emit(active, at, args.outcome, args.rung);
+				const args = (call.arguments ?? {}) as { outcome?: unknown; rung?: unknown; missClass?: unknown };
+				emit(active, at, args.outcome, args.rung, args.missClass);
 				active = null;
 			}
 		}
@@ -203,6 +227,30 @@ function introductionOrder(
 	return order;
 }
 
+type HistoryEvent = { at: Date; grade: Grade; review: ReviewEvent };
+
+/** Each live target's reviews, oldest first (ties by review id).
+ *  Unparseable times are skipped; a multi-target review lands on every
+ *  live target. */
+function historiesOf(reviews: readonly ReviewEvent[], live: ReadonlySet<string>): Map<string, HistoryEvent[]> {
+	const history = new Map<string, HistoryEvent[]>();
+	for (const review of reviews) {
+		const at = new Date(review.at);
+		if (Number.isNaN(at.getTime())) continue;
+		const grade = ratingOf(review.outcome, review.rung);
+		for (const target of review.targets) {
+			if (!live.has(target)) continue;
+			const list = history.get(target) ?? [];
+			list.push({ at, grade, review });
+			history.set(target, list);
+		}
+	}
+	for (const events of history.values()) {
+		events.sort((a, b) => a.at.getTime() - b.at.getTime() || a.review.id.localeCompare(b.review.id));
+	}
+	return history;
+}
+
 /**
  * What to practice now. Every live proposition is enrolled: practiced
  * ones are scheduled by their FSRS replay; never-practiced ones enter at
@@ -215,24 +263,12 @@ export function reviewQueue(input: ReviewQueueInput): ReviewQueue {
 	const sessionSize = input.sessionSize ?? REVIEW_SESSION_SIZE;
 	const live = new Set(input.nodes.map((n) => n.id));
 
-	const history = new Map<string, { at: Date; grade: Grade; id: string }[]>();
-	for (const review of input.reviews) {
-		const at = new Date(review.at);
-		if (Number.isNaN(at.getTime())) continue;
-		const grade = ratingOf(review.outcome, review.rung);
-		for (const target of review.targets) {
-			if (!live.has(target)) continue;
-			const list = history.get(target) ?? [];
-			list.push({ at, grade, id: review.id });
-			history.set(target, list);
-		}
-	}
+	const history = historiesOf(input.reviews, live);
 
 	const dayStart = reviewDayStart(input.now, dayStartHour).getTime();
 	const dueAt: { id: string; due: number }[] = [];
 	let introducedToday = 0;
 	for (const [id, events] of history) {
-		events.sort((a, b) => a.at.getTime() - b.at.getTime() || a.id.localeCompare(b.id));
 		if (events[0]!.at.getTime() >= dayStart) introducedToday++;
 		const due = replay(events).due.getTime();
 		if (due <= input.now.getTime()) dueAt.push({ id, due });
@@ -244,4 +280,116 @@ export function reviewQueue(input: ReviewQueueInput): ReviewQueue {
 	const newAvailable = allowance === 0 ? [] : introductionOrder(fresh, input.chains, allowance);
 
 	return { due, newAvailable, picks: [...due, ...newAvailable].slice(0, sessionSize) };
+}
+
+// ─── the history brief ───────────────────────────────────────────────────────
+
+/** Where a pick stands on the schedule when its session starts. */
+export type ReviewBriefStatus =
+	| { kind: "new" }
+	| { kind: "overdue"; days: number }
+	| { kind: "scheduled"; days: number };
+
+/** One pick's history, from every earlier review of it. */
+export interface ReviewBriefEntry {
+	id: string;
+	status: ReviewBriefStatus;
+	reviews: number;
+	/** Reviews that rated Again (ratingOf). */
+	misses: number;
+	/** The deepest mode solved cleanly — solved or solvedWithHints with no
+	 *  rung above R1; null when none (or no review recorded a mode). */
+	highestCleanMode: ReviewMode | null;
+	last: (Pick<ReviewEvent, "outcome" | "rung" | "mode" | "missClass"> & { daysAgo: number }) | null;
+	/** The newest recorded surfaces, newest first, at most REVIEW_BRIEF_SURFACES. */
+	recentSurfaces: string[];
+}
+
+const isClean = (review: ReviewEvent) =>
+	(review.outcome === "solved" || review.outcome === "solvedWithHints") &&
+	(review.rung === null || review.rung === "R0" || review.rung === "R1");
+
+/** Each pick's history, in pick order: schedule status (the FSRS replay
+ *  reviewQueue uses), record, deepest clean mode, last review, recent
+ *  surfaces. Facts older lines never recorded stay unknown. */
+export function reviewBriefOf(input: {
+	reviews: readonly ReviewEvent[];
+	pickIds: readonly string[];
+	now: Date;
+}): ReviewBriefEntry[] {
+	const history = historiesOf(input.reviews, new Set(input.pickIds));
+	const now = input.now.getTime();
+	return input.pickIds.map((id): ReviewBriefEntry => {
+		const events = history.get(id);
+		if (!events) {
+			return { id, status: { kind: "new" }, reviews: 0, misses: 0, highestCleanMode: null, last: null, recentSurfaces: [] };
+		}
+		const due = replay(events).due.getTime();
+		let highest = -1;
+		for (const { review } of events) {
+			if (review.mode && isClean(review)) highest = Math.max(highest, MODES.indexOf(review.mode));
+		}
+		const lastEvent = events[events.length - 1]!;
+		const { outcome, rung, mode, missClass } = lastEvent.review;
+		return {
+			id,
+			status:
+				due <= now
+					? { kind: "overdue", days: Math.floor((now - due) / DAY_MS) }
+					: { kind: "scheduled", days: Math.floor((due - now) / DAY_MS) },
+			reviews: events.length,
+			misses: events.filter((e) => e.grade === Rating.Again).length,
+			highestCleanMode: highest < 0 ? null : MODES[highest]!,
+			last: {
+				outcome,
+				rung,
+				...(mode ? { mode } : {}),
+				...(missClass !== undefined ? { missClass } : {}),
+				daysAgo: Math.floor((now - lastEvent.at.getTime()) / DAY_MS),
+			},
+			recentSurfaces: events
+				.map((e) => e.review.surface)
+				.filter((surface): surface is string => surface !== undefined)
+				.slice(-REVIEW_BRIEF_SURFACES)
+				.reverse(),
+		};
+	});
+}
+
+const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
+
+function daysText(days: number): string {
+	return plural(days, "day", "days");
+}
+
+/** The brief as session-context lines (one per pick, ids first — the
+ *  graph-context marker's id convention). */
+export function formatReviewBrief(entries: readonly ReviewBriefEntry[]): string[] {
+	return entries.map((entry) => {
+		if (entry.status.kind === "new") return `- [${entry.id}] new — never practiced`;
+		const parts = [
+			entry.status.kind === "overdue"
+				? entry.status.days === 0
+					? "due now"
+					: `overdue ${daysText(entry.status.days)}`
+				: entry.status.days === 0
+					? "due within a day"
+					: `due in ${daysText(entry.status.days)}`,
+			`${plural(entry.reviews, "review", "reviews")}, ${plural(entry.misses, "miss", "misses")}`,
+			`highest clean mode: ${entry.highestCleanMode ?? "none"}`,
+		];
+		const last = entry.last!;
+		const when = last.daysAgo === 0 ? "today" : `${daysText(last.daysAgo)} ago`;
+		const facts = [
+			last.outcome,
+			`rung ${last.rung ?? "none"}`,
+			...(last.mode ? [`mode ${last.mode}`] : []),
+			...(last.missClass !== undefined ? [`miss ${last.missClass ?? "none"}`] : []),
+		];
+		parts.push(`last (${when}): ${facts.join(", ")}`);
+		if (entry.recentSurfaces.length > 0) {
+			parts.push(`recent surfaces: ${entry.recentSurfaces.map((surface) => JSON.stringify(surface)).join("; ")}`);
+		}
+		return `- [${entry.id}] ${parts.join(" · ")}`;
+	});
 }

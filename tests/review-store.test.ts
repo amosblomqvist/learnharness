@@ -110,6 +110,19 @@ describe("the review log", () => {
 		assert.equal(reviewStore.readReviews().length, 1);
 	});
 
+	it("lines with and without the brief's facts both read; a mistyped fact skips the line", () => {
+		const base = { chatId: "c", problemCallId: "p", at: "2026-11-01T12:00:00.000Z", targets: ["n_a"], outcome: "solved", rung: null };
+		reviewStore.appendReviews([
+			{ ...base, id: "c:old" } as never,
+			{ ...base, id: "c:new", mode: "recall", missClass: null, surface: "a ladder" } as never,
+		]);
+		fs.appendFileSync(REVIEW_FILES.reviews, JSON.stringify({ ...base, id: "c:bad", surface: 7 }) + "\n");
+		assert.deepEqual(
+			reviewStore.readReviews().map((r) => [r.id, r.mode, r.surface]),
+			[["c:old", undefined, undefined], ["c:new", "recall", "a ladder"]],
+		);
+	});
+
 	it("a newer format stamp is refused honestly", () => {
 		fs.mkdirSync(path.dirname(REVIEW_FILES.format), { recursive: true });
 		fs.writeFileSync(REVIEW_FILES.format, JSON.stringify({ version: 99 }));

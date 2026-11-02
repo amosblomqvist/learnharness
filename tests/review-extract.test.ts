@@ -54,11 +54,11 @@ function call(callId: string, name: string, args: JsonObject, at: number, isErro
 	return [assistant, result];
 }
 
-const pose = (callId: string, target: string[] | undefined, at = 1_000) =>
-	call(callId, PRACTICE_PROBLEM_TOOL, { statement: "s", mode: "recall", modelSolution: "m", ...(target ? { target } : {}) }, at);
+const pose = (callId: string, target: string[] | undefined, at = 1_000, extra: JsonObject = {}) =>
+	call(callId, PRACTICE_PROBLEM_TOOL, { statement: "s", mode: "recall", modelSolution: "m", ...(target ? { target } : {}), ...extra }, at);
 
-const conclude = (callId: string, outcome: string, rung: string | null, at = 5_000, isError = false) =>
-	call(callId, PRACTICE_CONCLUDE_TOOL, { outcome, verdict: "v", rung, missClass: null, retest: false }, at, isError);
+const conclude = (callId: string, outcome: string, rung: string | null, at = 5_000, isError = false, missClass: string | null = null) =>
+	call(callId, PRACTICE_CONCLUDE_TOOL, { outcome, verdict: "v", rung, missClass, retest: false }, at, isError);
 
 describe("practiceReviewsOf", () => {
 	it("a clean conclude reviews its problem's targets at the conclude result's time", () => {
@@ -72,8 +72,30 @@ describe("practiceReviewsOf", () => {
 				targets: ["n_a"],
 				outcome: "solvedWithHints",
 				rung: "R1",
+				mode: "recall",
+				missClass: null,
 			},
 		]);
+	});
+
+	it("records the brief's facts: mode and trimmed surface from the pose, miss class from the conclude", () => {
+		const [review] = practiceReviewsOf("c", [
+			...pose("p1", ["n_a"], 1_000, { mode: "composition", surface: "  ladder against a wall, find the angle  " }),
+			...conclude("c1", "surrendered", "R4", 5_000, false, "discrimination"),
+		]);
+		assert.equal(review!.mode, "composition");
+		assert.equal(review!.surface, "ladder against a wall, find the angle");
+		assert.equal(review!.missClass, "discrimination");
+	});
+
+	it("unknown facts stay absent — never guessed", () => {
+		const [review] = practiceReviewsOf("c", [
+			...pose("p1", ["n_a"], 1_000, { mode: "drill", surface: "   " }),
+			...conclude("c1", "solved", null, 5_000, false, "weird"),
+		]);
+		assert.equal("mode" in review!, false);
+		assert.equal("surface" in review!, false);
+		assert.equal("missClass" in review!, false);
 	});
 
 	it("multi-target problems carry every target; duplicates collapse", () => {
@@ -115,6 +137,8 @@ describe("practiceReviewsOf", () => {
 		assert.equal(alone[0]!.outcome, "dismissed");
 		assert.equal(alone[0]!.rung, null);
 		assert.equal(alone[0]!.at, new Date(3_000).toISOString());
+		assert.equal("missClass" in alone[0]!, false);
+		assert.equal(alone[0]!.mode, "recall");
 		const withPair = practiceReviewsOf("c", [...pose("p1", ["n_a"]), marker, ...pair]);
 		assert.deepEqual(withPair, alone);
 	});

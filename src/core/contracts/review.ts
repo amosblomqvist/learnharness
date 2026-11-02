@@ -22,6 +22,12 @@ export type ReviewOutcome = "solved" | "solvedWithHints" | "movedOn" | "surrende
 /** The hint-ladder rung the problem needed; null = no hint given. */
 export type ReviewRung = "R0" | "R1" | "R2" | "R3" | "R4" | "R5" | null;
 
+/** The problem tool's demand mode. */
+export type ReviewMode = "recall" | "discrimination" | "composition";
+
+/** The conclude tool's miss classification; null = no miss. */
+export type ReviewMissClass = "cue" | "discrimination" | "execution" | "careless" | "structural" | null;
+
 /** One review: one concluded practice problem. Identity is the problem
  *  — a dismissal marker and its later synthesized conclude are the same
  *  review. Every target shares the problem's outcome. */
@@ -38,4 +44,12 @@ export interface ReviewEvent {
 	targets: string[];
 	outcome: ReviewOutcome;
 	rung: ReviewRung;
+	/* THE HISTORY BRIEF's facts (2026-11-02): absent on lines logged
+	 * before they were recorded — unknown, never guessed. */
+	/** The problem's demand mode. */
+	mode?: ReviewMode;
+	/** The conclude's miss classification (absent on dismissals). */
+	missClass?: ReviewMissClass;
+	/** The problem's one-line situation class (the problem tool's surface). */
+	surface?: string;
 }

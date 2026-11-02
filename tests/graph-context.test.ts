@@ -58,6 +58,14 @@ describe("newGraphContextMessage", () => {
 		assert.deepEqual(m.details, { propositions: PICKS, chains: ["Modus ponens → Soundness"] });
 	});
 
+	it("the history brief rides the content only — the card's details never carry it", () => {
+		const m = newGraphContextMessage(PICKS, [], ["- [n_x] new — never practiced"]);
+		assert.ok(m.content.includes("History from earlier practice sessions"));
+		assert.ok(m.content.includes("- [n_x] new — never practiced"));
+		assert.deepEqual(m.details, { propositions: PICKS, chains: [] });
+		assert.ok(!newGraphContextMessage(PICKS, []).content.includes("History from earlier practice"));
+	});
+
 	it("no chains: the chains section stays out entirely", () => {
 		const m = newGraphContextMessage(PICKS, []);
 		assert.ok(!m.content.includes("Reasoning chains"));
@@ -138,6 +146,9 @@ describe("POST /api/chats — graphContext becomes message[0]", () => {
 		assert.ok(m.content.includes("- [n_a] Modus ponens: If P implies Q and P holds, Q holds."));
 		// the chain AMONG the picks rides the marker (formatChainLine shape — names)
 		assert.ok(m.content.includes("- Modus ponens → Soundness"));
+		// a practice session's picks carry the history brief (none practiced yet)
+		assert.ok(m.content.includes("History from earlier practice sessions"));
+		assert.ok(m.content.includes("- [n_a] new — never practiced"));
 	});
 
 	it("no picks (or malformed) → no marker, an empty record as before", async () => {
