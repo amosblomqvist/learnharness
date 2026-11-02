@@ -41,6 +41,10 @@ class Worklet {
 	frame(bytes: Uint8Array) {
 		this.port.onmessage?.({ data: { type: "audio", buffer: bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) } });
 	}
+	/** The shape public/worklets/pcm-capture.js really posts: the Int16Array itself. */
+	frameInt16(samples: Int16Array) {
+		this.port.onmessage?.({ data: { type: "audio", buffer: samples } });
+	}
 }
 
 const globals = globalThis as Record<string, unknown>;
@@ -476,4 +480,21 @@ test("regression: hookless provider change releases audio permanently", async ()
 	assert.equal(f.dictation.canRetry, false);
 	assert.equal(f.dictation.error, null);
 	assert.equal(isDictationRetained(), false);
+});
+
+test("regression: frames posted as the worklet's real Int16Array reach the server as the same little-endian PCM", async () => {
+	const f = await fixture("parakeet");
+	await act(async () => { f.dictation.toggle(); });
+	await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
+	assert.equal(f.dictation.phase, "recording");
+	await act(async () => { Worklet.last!.frameInt16(new Int16Array([1000, -2000, 300, 32767])); });
+	await act(async () => { Worklet.last!.frameInt16(new Int16Array([-32768, 5])); });
+	const pending = deferred<Response>();
+	f.state.nextTranscribe = pending.promise;
+	await act(async () => { f.dictation.stop(); });
+	assert.equal(f.state.posts.length, 1);
+	const sent = f.state.posts[0]!.body;
+	assert.equal(sent.byteLength, 12, "two bytes per sample, not one");
+	assert.deepEqual([...new Int16Array(sent.buffer, sent.byteOffset, 6)], [1000, -2000, 300, 32767, -32768, 5]);
+	await act(async () => { pending.resolve(Response.json({ text: "ok" })); await f.dictation.finish(); });
 });

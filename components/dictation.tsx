@@ -603,7 +603,10 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 			const worklet = new AudioWorkletNode(ctx, "pcm-capture");
 			workletRef.current = worklet;
 			worklet.port.onmessage = (e) => {
-				const msg = e.data as { type: string; rms?: number; buffer?: ArrayBuffer };
+				// The worklet posts the Int16Array itself (typed array, not a bare
+				// ArrayBuffer); the socket path sends it as-is, the local path
+				// below must view its memory, never convert it element-wise.
+				const msg = e.data as { type: string; rms?: number; buffer?: ArrayBuffer | ArrayBufferView };
 				if (msg.type === "level") {
 					levelRef.current = msg.rms ?? 0; // never reset to zero (dictate pattern)
 				} else if (msg.type === "audio" && localRef.current) {
@@ -611,7 +614,10 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 					// stop by itself and transcribe what was captured.
 					const room = PARAKEET_MAX_AUDIO_BYTES - chunkBytesRef.current;
 					if (room <= 0) return;
-					const frame = new Uint8Array(msg.buffer!);
+					const raw = msg.buffer!;
+					const frame = ArrayBuffer.isView(raw)
+						? new Uint8Array(raw.buffer, raw.byteOffset, raw.byteLength)
+						: new Uint8Array(raw);
 					const kept = frame.byteLength > room ? frame.subarray(0, room) : frame;
 					chunksRef.current.push(kept);
 					chunkBytesRef.current += kept.byteLength;
@@ -622,7 +628,7 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 					// Mitigation A: not OPEN yet (handshake or reconnect gap) —
 					// queue, capped; the open handler flushes in order.
 					else {
-						pendingRef.current.push(msg.buffer!);
+						pendingRef.current.push(msg.buffer as ArrayBuffer);
 						if (pendingRef.current.length > 256) pendingRef.current.shift();
 					}
 				}
