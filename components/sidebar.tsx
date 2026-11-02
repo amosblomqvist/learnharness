@@ -715,7 +715,7 @@ function SessionsSidebar() {
 					<button
 						type="button"
 						data-testid="new-session-practice"
-						onClick={() => router.push("/chat/new?mode=practice")}
+						onClick={() => { window.dispatchEvent(new Event("lh:flush-views")); window.dispatchEvent(new Event("lh:show-practice")); router.push("/chat/new?mode=practice"); }}
 						className="flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-xs uppercase tracking-wider text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
 					>
 						<DumbbellIcon className="size-3" />
