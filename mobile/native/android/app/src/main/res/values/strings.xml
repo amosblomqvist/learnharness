@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">LearnHarness</string>
+    <string name="title_activity_main">LearnHarness</string>
+    <string name="package_name">com.learnharness.app</string>
+    <string name="custom_url_scheme">com.learnharness.app</string>
+</resources>

@@ -1,0 +1,67 @@
+name: Android APK
+
+# The phone app's native Android shell (docs/mobile.md, Phase 5): builds the
+# web app, wraps it with Capacitor (mobile/native) and uploads a debug-signed
+# APK as the run's artifact. Debug signing (owner decision): no secrets; the
+# key differs per run, so installing a newer APK means uninstalling the old
+# one first (back up via Settings → Phone data).
+
+on:
+  push:
+    paths:
+      - "app/**"
+      - "components/**"
+      - "src/**"
+      - "config.ts"
+      - "public/**"
+      - "mobile/native/**"
+      - "scripts/build-mobile.mjs"
+      - "package.json"
+      - "package-lock.json"
+      - ".github/workflows/android.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: android-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  apk:
+    name: Debug APK
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      # The desktop Electron binary is not needed for the phone build.
+      ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "26"
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            mobile/native/package-lock.json
+      - run: npm ci
+      - name: Build the phone web app
+        run: npm run mobile:dist
+      - name: Install Capacitor and sync the Android project
+        working-directory: mobile/native
+        run: |
+          npm ci
+          npx cap sync android
+      - name: Build the APK
+        working-directory: mobile/native/android
+        run: |
+          # The runner image ships JDK 21 and the Android SDK (ANDROID_HOME).
+          export JAVA_HOME="$JAVA_HOME_21_X64"
+          chmod +x gradlew
+          ./gradlew assembleDebug --no-daemon --console=plain
+      - uses: actions/upload-artifact@v7
+        with:
+          name: learnharness-android-debug
+          path: mobile/native/android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error

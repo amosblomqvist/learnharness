@@ -1,6 +1,6 @@
-# Phone app (iPhone home-screen app → Capacitor later)
+# Phone app (iPhone home-screen app + native Android/iOS shells)
 
-Status: **Phase 4 done: lessons, the knowledge graph, practice, and the background helpers, your files and notes import on the phone.** The real LearnHarness app (same screens, same server code) runs entirely on the device as an installable web app. There is no PC and no server; your API keys and data stay on the phone.
+Status: **All five phases done.** Lessons, the knowledge graph, practice, background helpers, your files and notes import run on the phone, as a home-screen web app and in native Android/iOS shells. The real LearnHarness app (same screens, same server code) runs entirely on the device as an installable web app. There is no PC and no server; your API keys and data stay on the phone.
 
 ## The plan (owner-approved)
 
@@ -13,7 +13,7 @@ Standalone, API keys only. Claude subscription logins need the `claude` CLI, whi
 | 2 | Knowledge graph | **Done.** On-device extraction, graph home usable by touch (pinch, pan, tap a node, double-tap to re-frame) |
 | 3 | Practice sets | **Done.** Practice sessions (topic or picked graph ideas) by touch; a shared reveal bug fixed; on-device saves made durable |
 | 4 | Helpers, files & voice | **Done.** Researcher (Tavily + Jina Reader), visual maker, demos *with* their check, PDFs, notes import, "Your files" for the file tools; dictation via the iPhone keyboard |
-| 5 | Native wrap | Capacitor Android APK; iOS with a Mac |
+| 5 | Native wrap | **Done.** Capacitor shell (`mobile/native`): debug-signed Android APK from GitHub Actions; iOS Xcode project ready for a Mac |
 
 ## Put it on your iPhone
 
@@ -54,6 +54,41 @@ Cloudflare serves `index.html` for every unknown path, which the app's on-device
    - Linux: `~/.config/LearnHarness/data`
 2. Get the zip onto the phone (AirDrop, iCloud Drive, …).
 3. In the app, go to **Settings → Phone data → Restore**.
+
+## The native apps (Phase 5)
+
+The same web app, wrapped by Capacitor in `mobile/native`. That folder has its own `package.json` and lockfile, so the desktop lockfile never changes. Owner decisions:
+- **Same behavior as the web app.** No native HTTP, so research uses Tavily + Jina and dictation uses the keyboard.
+- **App ID** `com.learnharness.app`, name "LearnHarness".
+- **Android:** a debug-signed APK built in CI.
+- **iOS:** the Xcode project only, for now.
+
+**Android APK.** Every push that touches the app runs `.github/workflows/android.yml`, which builds the web app, runs `cap sync`, builds the APK and attaches it to the run as the artifact **learnharness-android-debug**. To install:
+1. Download the artifact from the run's page on GitHub and unzip it.
+2. Open `app-debug.apk` on the phone and allow installing from that source.
+
+Each CI run signs with a fresh debug key, so to update you uninstall the old app first. Back up via Settings → Phone data beforehand.
+
+Building locally needs JDK 21 and the Android SDK (platform 36):
+
+```bash
+npm run mobile:dist
+```
+
+```bash
+cd mobile/native && npm ci && npm run android:apk
+```
+
+The APK lands in `mobile/native/android/app/build/outputs/apk/debug/`.
+
+**iOS.** `mobile/native/ios` is a complete Xcode project using Swift Package Manager, so no CocoaPods are needed. On a Mac with Xcode: run `npm run mobile:dist`, then `cd mobile/native && npm ci && npx cap sync ios`, then open `ios/App/App.xcodeproj` and Run. Until then, the home-screen web app on the iPhone is the same app.
+
+**What differs inside the native shell** (`src/browser/app/native.ts`): Capacitor injects `window.Capacitor` with the native plugins, so the web bundle carries no Capacitor JavaScript.
+- **Backups** (and the automatic backup before a restore) go through the native share sheet (`@capacitor/filesystem` + `@capacitor/share`). The WebView supports neither Web Share with files nor blob downloads.
+- **No service worker:** the app's files are already on the device.
+- **Android Back** goes back through the app's screens (`@capacitor/app`'s default handler over the WebView history) and exits only from the first screen.
+- **Status bar:** the page doesn't opt into drawing under the system bars, so Capacitor's `SystemBars` handling keeps it clear of them, with light icons on the app's dark background.
+- **Icons and splash screens** come from the app mark: `node scripts/mobile-icons.mjs`. That includes Android adaptive icons and the iOS 1024px icon.
 
 ## How it works
 
@@ -187,7 +222,7 @@ The browser engines in `src/browser/headless.ts` were also checked directly in C
 
 The demo and visual-maker *jobs* use these same engines through the same job runner as the research and PDF jobs the smoke test exercises.
 
-## Known gaps after Phase 4
+## Known gaps
 
 - **Not yet run on a real iPhone or against the live Anthropic API.** All browser verification is headless Chromium with scripted provider replies; this build environment reaches neither. Safari-specific behavior is the main risk: the share sheet, downloads from a home-screen app, IndexedDB persistence, and Safari before 17.4 (covered by small fallbacks).
 - **On first open the graph is framed before its layout finishes settling**, so it can spread past the screen edges; double-tap re-frames it. The desktop app has the same behavior.

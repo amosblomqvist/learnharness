@@ -14,6 +14,7 @@ import { Button } from "@/components/ui/button";
 import { applyRestore, backupFileName, DESKTOP_DATA_FOLDER, exportBackup, planRestore } from "../backup.ts";
 import { addFile, listAddedFiles, removeAddedFile, type AddedFile } from "../files.ts";
 import { flushPersistence } from "../persist.ts";
+import { isNativeApp, shareFileNative } from "./native.ts";
 
 function download(blob: Blob, name: string): void {
 	const url = URL.createObjectURL(blob);
@@ -25,8 +26,10 @@ function download(blob: Blob, name: string): void {
 }
 
 /** iOS: the share sheet ("Save to Files") is the reliable way to keep a
- *  file from a home-screen app; elsewhere a plain download. */
+ *  file from a home-screen app; elsewhere a plain download. In the native
+ *  app (Capacitor) the native share sheet does it. */
 async function saveFile(blob: Blob, name: string): Promise<void> {
+	if (isNativeApp()) return shareFileNative(blob, name);
 	const file = new File([blob], name, { type: "application/zip" });
 	if (navigator.canShare?.({ files: [file] })) {
 		try {
@@ -118,7 +121,10 @@ export function PhoneDataSection() {
 			setStatus("Saving a backup of the current data…");
 			await flushPersistence();
 			const current = await exportBackup();
-			download(current.blob, backupFileName().replace("backup", "backup-before-restore"));
+			const safetyName = backupFileName().replace("backup", "backup-before-restore");
+			// The native WebView can't download a blob: hand it to the share sheet.
+			if (isNativeApp()) await shareFileNative(current.blob, safetyName);
+			else download(current.blob, safetyName);
 			setStatus("Restoring…");
 			applyRestore(plan);
 			await flushPersistence();

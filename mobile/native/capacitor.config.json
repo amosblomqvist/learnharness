@@ -1,0 +1,12 @@
+{
+	"appId": "com.learnharness.app",
+	"appName": "LearnHarness",
+	"webDir": "../../dist-mobile",
+	"backgroundColor": "#141414",
+	"plugins": {
+		"SystemBars": {
+			"insetsHandling": "css",
+			"style": "DARK"
+		}
+	}
+}

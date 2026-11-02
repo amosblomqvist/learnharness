@@ -10,6 +10,7 @@ import { installApiEventSource } from "./event-source.ts";
 import { App } from "./app.tsx";
 import { registerSettingsSection } from "@/components/settings/extra-sections";
 import { PhoneDataSection } from "./phone-data.tsx";
+import { isNativeApp } from "./native.ts";
 
 registerSettingsSection({ id: "phone-data", label: "Phone data", render: () => <PhoneDataSection /> });
 
@@ -29,7 +30,8 @@ async function main(): Promise<void> {
 	createRoot(root).render(<App />);
 	// Offline support (src/browser/app/sw.template.js). Best effort: an
 	// unsupported or failed registration leaves the app working online.
-	if ("serviceWorker" in navigator && window.isSecureContext) {
+	// The native app (Capacitor) serves the files from the device already.
+	if ("serviceWorker" in navigator && window.isSecureContext && !isNativeApp()) {
 		navigator.serviceWorker.register("/sw.js").catch((err) => console.warn("[sw] registration failed:", err));
 	}
 }
