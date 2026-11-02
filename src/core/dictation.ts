@@ -77,6 +77,16 @@ export const DICTATION_LANGUAGES: readonly { code: DictationLanguage; label: str
 	).sort((a, b) => a.label.localeCompare(b.label, "en")),
 ];
 
+/** Who transcribes: Deepgram streams from the cloud; Parakeet runs locally
+ * and transcribes when the run stops. */
+export const DICTATION_PROVIDERS = ["deepgram", "parakeet"] as const;
+
+export type DictationProvider = (typeof DICTATION_PROVIDERS)[number];
+
+export function isDictationProvider(value: unknown): value is DictationProvider {
+	return DICTATION_PROVIDERS.some((provider) => provider === value);
+}
+
 export function isDictationLanguage(value: unknown): value is DictationLanguage {
 	return DICTATION_LANGUAGES.some(({ code }) => code === value);
 }
