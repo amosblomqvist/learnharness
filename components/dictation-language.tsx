@@ -14,19 +14,27 @@ type LanguagePreference = ReturnType<typeof useDictationLanguage>;
 export function DictationLanguageSetting() {
 	const preference = useDictationLanguage();
 	const active = useDictationActive();
-	return <SettingsRow label="Language" testid="row-dictation-language" dimmed={active}>
-		<DictationLanguagePicker preference={preference} disabled={active} />
+	// Parakeet detects the language itself: the row stays, inert.
+	const local = preference.provider === "parakeet";
+	return <SettingsRow
+		label="Language"
+		testid="row-dictation-language"
+		dimmed={active || local}
+		hint={local ? "Parakeet detects it automatically" : undefined}
+	>
+		<DictationLanguagePicker preference={preference} disabled={active || local} autoDetect={local} />
 	</SettingsRow>;
 }
 
-function DictationLanguagePicker({ preference, disabled }: {
+function DictationLanguagePicker({ preference, disabled, autoDetect }: {
 	preference: LanguagePreference;
 	disabled: boolean;
+	autoDetect: boolean;
 }) {
 	const { language, saving, error, load, save } = preference;
 	const [open, setOpen] = useState(false);
 	const triggerRef = useRef<HTMLButtonElement>(null);
-	const label = DICTATION_LANGUAGES.find((item) => item.code === language)?.label ?? "—";
+	const label = autoDetect ? "Auto-detect" : DICTATION_LANGUAGES.find((item) => item.code === language)?.label ?? "—";
 
 	useEffect(() => { if (disabled) setOpen(false); }, [disabled]);
 	useEffect(() => {

@@ -41,6 +41,9 @@ import { ProviderMenuList } from "./model-menu.tsx";
 import { MenuShell } from "@/components/menu-shell";
 import { notifySettingsSaved } from "@/components/settings-signal";
 import { DictationLanguageSetting } from "@/components/dictation-language";
+import { DictationModelSetting, DictationProviderSetting, ParakeetNote } from "@/components/dictation-provider";
+import { useDictationLanguage } from "@/components/dictation-preference";
+import { DICTATION_PROVIDER_ROW_ID } from "@/components/dictation-state";
 
 /** One pi-ai provider with plain API-key auth (the Platform seam —
  *  derived from pi-ai's own env-key table; no drift possible). */
@@ -366,6 +369,9 @@ function AddProviderRow({
 	);
 }
 
+/** The dictation group deep link names no key row: nothing to unfold. */
+const keyRowOf = (row: string | undefined) => (row === undefined || row === DICTATION_PROVIDER_ROW_ID ? null : row);
+
 export function KeysSection({
 	/** A deep-linked row to unfold on arrival (zero-keys wave): the
 	 *  dictation error's click lands here on DEEPGRAM_API_KEY. Followed
@@ -375,12 +381,13 @@ export function KeysSection({
 }: {
 	initialRow?: string;
 }) {
+	const { provider: dictationProvider } = useDictationLanguage();
 	const [statuses, setStatuses] = useState<AuthKeyStatus[] | null>(null);
 	const [providers, setProviders] = useState<ProviderKeyInfo[] | undefined>(undefined);
 	const [loading, setLoading] = useState(true);
 	/** The unfolded row (its id), null = all folded. Seeded by the
 	 *  deep-link (initialRow) and re-followed when it retargets. */
-	const [openRow, setOpenRow] = useState<string | null>(initialRow ?? null);
+	const [openRow, setOpenRow] = useState<string | null>(keyRowOf(initialRow));
 	/** The paste editor for a freshly chosen Add-provider target. */
 	const [adding, setAdding] = useState<ProviderKeyInfo | null>(null);
 	const [addError, setAddError] = useState<string | null>(null);
@@ -398,7 +405,7 @@ export function KeysSection({
 			if (e.key !== "Escape") return;
 			// A language dropdown above this editor in the dismissal stack owns
 			// the first Escape; do not swallow it at document capture phase.
-			if (document.querySelector('[data-testid="dictation-language-menu"]')) return;
+			if (document.querySelector('[data-testid="dictation-language-menu"], [data-testid="dictation-provider-menu"]')) return;
 			e.preventDefault();
 			e.stopPropagation();
 			setOpenRow(null);
@@ -436,8 +443,16 @@ export function KeysSection({
 	// same while-open pattern the dialog's section nav uses) unfolds the
 	// named row; a fresh mount seeds it via the useState initializer.
 	useEffect(() => {
-		if (initialRow !== undefined) setOpenRow(initialRow);
+		if (initialRow !== undefined) setOpenRow(keyRowOf(initialRow));
 	}, [initialRow]);
+
+	// The model-missing deep link names no key row: it asks for the Dictation
+	// group itself. The group only exists once the section has loaded.
+	const ready = !loading && statuses !== null;
+	useEffect(() => {
+		if (!ready || initialRow !== DICTATION_PROVIDER_ROW_ID) return;
+		document.querySelector('[data-testid="group-dictation"]')?.scrollIntoView({ block: "start" });
+	}, [ready, initialRow]);
 
 	async function saveKey(id: string, value: string): Promise<string | null> {
 		const res = await fetch(`/api/keys/${id}`, {
@@ -599,15 +614,17 @@ export function KeysSection({
 					/>
 				))}
 				{label === "Dictation" && <>
+					<DictationProviderSetting />
 					<DictationLanguageSetting />
-					<p data-testid="dictation-setup-hint" className="px-1 text-[11px] leading-relaxed text-muted-foreground/70">
+					{dictationProvider === "parakeet" && <DictationModelSetting />}
+					{dictationProvider === "parakeet" ? <ParakeetNote /> : <p data-testid="dictation-setup-hint" className="px-1 text-[11px] leading-relaxed text-muted-foreground/70">
 						Create a <a
 							href="https://console.deepgram.com/"
 							target="_blank"
 							rel="noreferrer"
 							className="underline underline-offset-2 hover:text-foreground"
 						>Deepgram API key</a> with the Member role or higher, then add it above.
-					</p>
+					</p>}
 				</>}
 			</SettingsGroup>)}
 
