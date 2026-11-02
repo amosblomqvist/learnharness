@@ -11,12 +11,18 @@
  *    propositions today's allowance admits, and the next session's picks.
  *  - reviewBriefOf: the log + a session's picks → each pick's history,
  *    for the practice agent's session context (the history brief).
+ *  - reviewSchedule: the log + the live graph → per-day activity behind
+ *    and due dates ahead (the Settings > Review heatmap).
+ *
+ * The FSRS scheduler is built from the review settings' knobs
+ * (ReviewSchedulerSettings — retention, maximum interval, fuzz, learning
+ * steps); absent, the factory values.
  *
  * Memory state is DERIVED by replaying the log through FSRS on every
  * read — never stored (contracts/review.ts).
  */
 
-import { createEmptyCard, fsrs, Rating, type Card, type Grade } from "ts-fsrs";
+import { createEmptyCard, fsrs, Rating, State, type Card, type FSRS, type Grade, type StepUnit } from "ts-fsrs";
 import type { GraphChain, GraphNode } from "./contracts/graph.ts";
 import type { ReviewEvent, ReviewMissClass, ReviewMode, ReviewOutcome, ReviewRung } from "./contracts/review.ts";
 import {
@@ -25,6 +31,7 @@ import {
 	type LhMarkerMessage,
 	type LhMessage,
 } from "./native-messages.ts";
+import { FACTORY_SETTINGS, type ReviewSettings } from "./settings.ts";
 
 /** Anki's rollover: study before 4 AM counts toward the previous day. */
 export const REVIEW_DAY_START_HOUR = 4;
@@ -157,6 +164,8 @@ export interface ReviewQueueInput {
 	newPerDay: number;
 	dayStartHour?: number;
 	sessionSize?: number;
+	/** The FSRS knobs (resolved review settings); absent = factory. */
+	scheduler?: ReviewSchedulerSettings;
 }
 
 export interface ReviewQueue {
@@ -168,7 +177,33 @@ export interface ReviewQueue {
 	picks: string[];
 }
 
-const scheduler = fsrs({ request_retention: 0.9, enable_short_term: true, enable_fuzz: false });
+/** The review settings that shape the FSRS scheduler. */
+export type ReviewSchedulerSettings = Pick<
+	Required<ReviewSettings>,
+	"desiredRetention" | "maximumIntervalDays" | "fuzz" | "shortTerm" | "learningSteps" | "relearningSteps"
+>;
+
+const FACTORY_SCHEDULER: ReviewSchedulerSettings = FACTORY_SETTINGS.review;
+
+/** One scheduler per distinct knob set (a read builds at most one). */
+const schedulers = new Map<string, FSRS>();
+function schedulerFor(settings: ReviewSchedulerSettings = FACTORY_SCHEDULER): FSRS {
+	const params = {
+		request_retention: settings.desiredRetention,
+		maximum_interval: settings.maximumIntervalDays,
+		enable_fuzz: settings.fuzz,
+		enable_short_term: settings.shortTerm,
+		learning_steps: settings.learningSteps as StepUnit[],
+		relearning_steps: settings.relearningSteps as StepUnit[],
+	};
+	const key = JSON.stringify(params);
+	let scheduler = schedulers.get(key);
+	if (!scheduler) {
+		scheduler = fsrs(params);
+		schedulers.set(key, scheduler);
+	}
+	return scheduler;
+}
 
 /** The start of the review day containing `now` (local time). */
 export function reviewDayStart(now: Date, dayStartHour = REVIEW_DAY_START_HOUR): Date {
@@ -178,7 +213,7 @@ export function reviewDayStart(now: Date, dayStartHour = REVIEW_DAY_START_HOUR):
 }
 
 /** Replay one proposition's reviews (oldest first) into its FSRS card. */
-function replay(events: readonly { at: Date; grade: Grade }[]): Card {
+function replay(events: readonly { at: Date; grade: Grade }[], scheduler: FSRS): Card {
 	let card = createEmptyCard(events[0]!.at);
 	for (const event of events) card = scheduler.next(card, event.at, event.grade).card;
 	return card;
@@ -262,6 +297,7 @@ export function reviewQueue(input: ReviewQueueInput): ReviewQueue {
 	const dayStartHour = input.dayStartHour ?? REVIEW_DAY_START_HOUR;
 	const sessionSize = input.sessionSize ?? REVIEW_SESSION_SIZE;
 	const live = new Set(input.nodes.map((n) => n.id));
+	const scheduler = schedulerFor(input.scheduler);
 
 	const history = historiesOf(input.reviews, live);
 
@@ -270,7 +306,7 @@ export function reviewQueue(input: ReviewQueueInput): ReviewQueue {
 	let introducedToday = 0;
 	for (const [id, events] of history) {
 		if (events[0]!.at.getTime() >= dayStart) introducedToday++;
-		const due = replay(events).due.getTime();
+		const due = replay(events, scheduler).due.getTime();
 		if (due <= input.now.getTime()) dueAt.push({ id, due });
 	}
 	const due = dueAt.sort((a, b) => a.due - b.due || a.id.localeCompare(b.id)).map((d) => d.id);
@@ -316,7 +352,9 @@ export function reviewBriefOf(input: {
 	reviews: readonly ReviewEvent[];
 	pickIds: readonly string[];
 	now: Date;
+	scheduler?: ReviewSchedulerSettings;
 }): ReviewBriefEntry[] {
+	const scheduler = schedulerFor(input.scheduler);
 	const history = historiesOf(input.reviews, new Set(input.pickIds));
 	const now = input.now.getTime();
 	return input.pickIds.map((id): ReviewBriefEntry => {
@@ -324,7 +362,7 @@ export function reviewBriefOf(input: {
 		if (!events) {
 			return { id, status: { kind: "new" }, reviews: 0, misses: 0, highestCleanMode: null, last: null, recentSurfaces: [] };
 		}
-		const due = replay(events).due.getTime();
+		const due = replay(events, scheduler).due.getTime();
 		let highest = -1;
 		for (const { review } of events) {
 			if (review.mode && isClean(review)) highest = Math.max(highest, MODES.indexOf(review.mode));
@@ -392,4 +430,156 @@ export function formatReviewBrief(entries: readonly ReviewBriefEntry[]): string[
 		}
 		return `- [${entry.id}] ${parts.join(" · ")}`;
 	});
+}
+
+// ─── the schedule (Settings > Review heatmap) ────────────────────────────────
+
+/** A review day's key: the local calendar date its day STARTED on
+ *  (YYYY-MM-DD) — 2 AM on the 3rd is the 2nd's day under a 4 AM rollover. */
+export function reviewDayKey(at: Date, dayStartHour = REVIEW_DAY_START_HOUR): string {
+	const start = reviewDayStart(at, dayStartHour);
+	const pad = (n: number) => String(n).padStart(2, "0");
+	return `${start.getFullYear()}-${pad(start.getMonth() + 1)}-${pad(start.getDate())}`;
+}
+
+/** One day behind (today included): what was studied, no per-problem detail. */
+export interface ReviewPastDay {
+	date: string;
+	/** Review lines logged (one per concluded problem). */
+	reviews: number;
+	/** Distinct live propositions those reviews rated. */
+	propositions: number;
+	/** Per-proposition ratings that day (a multi-target review rates each target). */
+	again: number;
+	hard: number;
+	good: number;
+	/** Propositions whose FIRST review fell on that day. */
+	introduced: number;
+}
+
+/** A practiced proposition's replayed FSRS card, as of `now`. */
+export interface ReviewCardFacts {
+	id: string;
+	state: "learning" | "review" | "relearning";
+	/** ISO — when it comes due. */
+	due: string;
+	/** ISO — its newest review. */
+	lastReview: string;
+	/** The interval FSRS last scheduled, in whole days (0 inside the steps). */
+	intervalDays: number;
+	stability: number;
+	difficulty: number;
+	/** Recall probability at `now` (0–1). */
+	retrievability: number;
+	reviews: number;
+	lapses: number;
+}
+
+/** One day ahead (today included): what comes due. Today's day also holds
+ *  everything overdue. */
+export interface ReviewFutureDay {
+	date: string;
+	due: ReviewCardFacts[];
+}
+
+export interface ReviewSchedule {
+	/** Today's review-day key. */
+	today: string;
+	/** The window's first and last day keys (inclusive). */
+	start: string;
+	end: string;
+	/** Days with activity, oldest first. */
+	past: ReviewPastDay[];
+	/** Days with something due, soonest first; each day's cards soonest first. */
+	future: ReviewFutureDay[];
+	/** Never-practiced propositions today's allowance admits (reviewQueue's newAvailable). */
+	newToday: string[];
+	/** Practiced propositions due after the window's end. */
+	later: number;
+}
+
+const STATE_NAMES: Partial<Record<State, ReviewCardFacts["state"]>> = {
+	[State.Learning]: "learning",
+	[State.Review]: "review",
+	[State.Relearning]: "relearning",
+};
+
+/**
+ * The heatmap's data: `pastDays` days back and `futureDays` days ahead of
+ * today's review day. Past days count logged reviews (live targets only,
+ * reviewQueue's rule); future days place every practiced proposition on
+ * its replayed due day — overdue ones on today. New propositions appear
+ * only as today's allowance (newToday).
+ */
+export function reviewSchedule(input: ReviewQueueInput & { pastDays: number; futureDays: number }): ReviewSchedule {
+	const dayStartHour = input.dayStartHour ?? REVIEW_DAY_START_HOUR;
+	const scheduler = schedulerFor(input.scheduler);
+	const live = new Set(input.nodes.map((n) => n.id));
+	const history = historiesOf(input.reviews, live);
+	const now = input.now.getTime();
+
+	const todayStart = reviewDayStart(input.now, dayStartHour);
+	const shifted = (days: number) =>
+		new Date(todayStart.getFullYear(), todayStart.getMonth(), todayStart.getDate() + days, dayStartHour);
+	const today = reviewDayKey(input.now, dayStartHour);
+	const start = reviewDayKey(shifted(-input.pastDays), dayStartHour);
+	const end = reviewDayKey(shifted(input.futureDays), dayStartHour);
+
+	type PastAccumulator = ReviewPastDay & { ids: Set<string>; lines: Set<string> };
+	const pastByDay = new Map<string, PastAccumulator>();
+	const pastDay = (date: string): PastAccumulator => {
+		let day = pastByDay.get(date);
+		if (!day) {
+			day = { date, reviews: 0, propositions: 0, again: 0, hard: 0, good: 0, introduced: 0, ids: new Set(), lines: new Set() };
+			pastByDay.set(date, day);
+		}
+		return day;
+	};
+	const futureByDay = new Map<string, ReviewCardFacts[]>();
+	let later = 0;
+
+	for (const [id, events] of history) {
+		events.forEach((event, i) => {
+			const date = reviewDayKey(event.at, dayStartHour);
+			if (date < start || date > today) return;
+			const day = pastDay(date);
+			day.lines.add(event.review.id);
+			day.ids.add(id);
+			if (event.grade === Rating.Again) day.again++;
+			else if (event.grade === Rating.Hard) day.hard++;
+			else day.good++;
+			if (i === 0) day.introduced++;
+		});
+
+		const card = replay(events, scheduler);
+		const date = card.due.getTime() <= now ? today : reviewDayKey(card.due, dayStartHour);
+		if (date > end) {
+			later++;
+			continue;
+		}
+		const facts: ReviewCardFacts = {
+			id,
+			state: STATE_NAMES[card.state] ?? "learning",
+			due: card.due.toISOString(),
+			lastReview: events[events.length - 1]!.at.toISOString(),
+			intervalDays: card.scheduled_days,
+			stability: card.stability,
+			difficulty: card.difficulty,
+			retrievability: scheduler.get_retrievability(card, input.now, false),
+			reviews: events.length,
+			lapses: card.lapses,
+		};
+		const list = futureByDay.get(date) ?? [];
+		list.push(facts);
+		futureByDay.set(date, list);
+	}
+
+	const past = [...pastByDay.values()]
+		.sort((a, b) => a.date.localeCompare(b.date))
+		.map(({ ids, lines, ...day }) => ({ ...day, reviews: lines.size, propositions: ids.size }));
+	const future = [...futureByDay.entries()]
+		.sort(([a], [b]) => a.localeCompare(b))
+		.map(([date, due]) => ({ date, due: due.sort((a, b) => a.due.localeCompare(b.due) || a.id.localeCompare(b.id)) }));
+
+	return { today, start, end, past, future, newToday: reviewQueue(input).newAvailable, later };
 }

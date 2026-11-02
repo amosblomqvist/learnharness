@@ -27,7 +27,17 @@ import type {
 	ReviewSettings,
 	RoleModelOverride,
 } from "../core/settings.ts";
-import { BACKGROUND_MODEL_ROLES, CACHE_RETENTIONS, COMPACTION_THRESHOLD_FLOOR, CUSTOM_MODEL_PIN_FLOOR, EXTRACTION_CHUNK_TOKENS_FLOOR, MODEL_SLOTS } from "../core/settings.ts";
+import {
+	BACKGROUND_MODEL_ROLES,
+	CACHE_RETENTIONS,
+	COMPACTION_THRESHOLD_FLOOR,
+	CUSTOM_MODEL_PIN_FLOOR,
+	EXTRACTION_CHUNK_TOKENS_FLOOR,
+	MODEL_SLOTS,
+	parseReviewSteps,
+	REVIEW_RETENTION_CEILING,
+	REVIEW_RETENTION_FLOOR,
+} from "../core/settings.ts";
 import { WRITABLE_TOOL_KEYS } from "../core/pending.ts";
 import { isDictationLanguage } from "../core/dictation.ts";
 
@@ -397,10 +407,11 @@ export function parseCompactionSettingsBody(body: unknown): SettingsBodyResult<C
 	return { ok: true, settings };
 }
 
-/** review (scheduled practice): never-practiced propositions admitted per
- *  day. Strict write side: a present newPerDay must be a whole number
- *  ≥ 0 (the read side floors, this rejects — the compaction discipline).
- *  Absent = factory 10 at resolution. Replace-whole, like every section. */
+/** review (scheduled practice): the new-item allowance and the FSRS
+ *  scheduler knobs (core/settings.ts ReviewSettings). Strict write side:
+ *  a present value outside its range rejects (the read side clamps — the
+ *  compaction discipline). Absent = factory at resolution. Replace-whole,
+ *  like every section. */
 export function parseReviewSettingsBody(body: unknown): SettingsBodyResult<ReviewSettings> {
 	const raw = asRecord(body);
 	if (!raw) return { ok: false, error: "Invalid JSON body" };
@@ -410,6 +421,32 @@ export function parseReviewSettingsBody(body: unknown): SettingsBodyResult<Revie
 			return { ok: false, error: "newPerDay must be a whole number, 0 or more" };
 		}
 		settings.newPerDay = raw.newPerDay;
+	}
+	if (raw.desiredRetention !== undefined) {
+		const r = raw.desiredRetention;
+		if (typeof r !== "number" || !Number.isFinite(r) || r < REVIEW_RETENTION_FLOOR || r > REVIEW_RETENTION_CEILING) {
+			return { ok: false, error: `desiredRetention must be between ${REVIEW_RETENTION_FLOOR} and ${REVIEW_RETENTION_CEILING}` };
+		}
+		settings.desiredRetention = r;
+	}
+	if (raw.maximumIntervalDays !== undefined) {
+		const d = raw.maximumIntervalDays;
+		if (typeof d !== "number" || !Number.isInteger(d) || d < 1) {
+			return { ok: false, error: "maximumIntervalDays must be a whole number, 1 or more" };
+		}
+		settings.maximumIntervalDays = d;
+	}
+	for (const key of ["fuzz", "shortTerm"] as const) {
+		const v = raw[key];
+		if (v === undefined) continue;
+		if (typeof v !== "boolean") return { ok: false, error: `${key} must be true or false` };
+		settings[key] = v;
+	}
+	for (const key of ["learningSteps", "relearningSteps"] as const) {
+		if (raw[key] === undefined) continue;
+		const steps = parseReviewSteps(raw[key]);
+		if (!steps) return { ok: false, error: `${key} must be a list of steps like "1m", "10m", "1h", "2d"` };
+		settings[key] = steps;
 	}
 	return { ok: true, settings };
 }

@@ -99,7 +99,8 @@ export interface EffectiveSettings {
 	/** Compaction (owner round 14): resolved concrete — absent record
 	 *  section resolves to the factory 150k. */
 	compaction: Required<CompactionSettings>;
-	/** Review (scheduled practice): absent resolves to the factory 10/day. */
+	/** Review (scheduled practice): each absent knob resolves to its factory
+	 *  value (10/day; ts-fsrs's scheduler defaults). */
 	review: Required<ReviewSettings>;
 	/** Custom endpoint, resolved concrete: baseUrl defaults "", models and
 	 *  user pins default to empty. */
@@ -235,6 +236,12 @@ export function resolveSettings(record: UserSettings | null): EffectiveSettings 
 		},
 		review: {
 			newPerDay: record?.review?.newPerDay ?? FACTORY_SETTINGS.review.newPerDay,
+			desiredRetention: record?.review?.desiredRetention ?? FACTORY_SETTINGS.review.desiredRetention,
+			maximumIntervalDays: record?.review?.maximumIntervalDays ?? FACTORY_SETTINGS.review.maximumIntervalDays,
+			fuzz: record?.review?.fuzz ?? FACTORY_SETTINGS.review.fuzz,
+			shortTerm: record?.review?.shortTerm ?? FACTORY_SETTINGS.review.shortTerm,
+			learningSteps: record?.review?.learningSteps ?? FACTORY_SETTINGS.review.learningSteps,
+			relearningSteps: record?.review?.relearningSteps ?? FACTORY_SETTINGS.review.relearningSteps,
 		},
 		customProvider: {
 			baseUrl: record?.customProvider?.baseUrl ?? "",

@@ -20,6 +20,7 @@ const { reviewStore } = await import("../src/store/review.ts");
 const { chatStore } = await import("../src/store/chats.ts");
 const { backfillReviews, reviewSummary, syncChatReviews } = await import("../src/server/review.ts");
 const { deleteChatSession } = await import("../src/server/chats.ts");
+const { FACTORY_SETTINGS } = await import("../src/core/settings.ts");
 const { PRACTICE_CONCLUDE_TOOL, PRACTICE_PROBLEM_TOOL } = await import("../src/core/native-messages.ts");
 type LhMessage = import("../src/core/native-messages.ts").LhMessage;
 
@@ -156,7 +157,7 @@ describe("reviewSummary", () => {
 			],
 			appendReviews: () => {},
 		};
-		const summary = reviewSummary(new Date("2026-11-02T12:00:00.000Z"), { graphStore, reviewStore: reviews }, 10);
+		const summary = reviewSummary(new Date("2026-11-02T12:00:00.000Z"), { graphStore, reviewStore: reviews }, FACTORY_SETTINGS.review);
 		assert.deepEqual(summary, {
 			dueCount: 1,
 			newCount: 1,

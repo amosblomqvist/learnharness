@@ -10,10 +10,22 @@
  *  - chat deletion, before the record goes (the log outlives the chat);
  *  - a lazy whole-store backfill on the first queue read per process.
  * Every sync is idempotent by review id (chatId:problemCallId).
+ *
+ * Every read schedules with the resolved review settings (newPerDay and
+ * the FSRS knobs — core/settings.ts ReviewSettings).
  */
 
 import { getGraph } from "../core/graph.ts";
-import { formatReviewBrief, practiceReviewsOf, reviewBriefOf, reviewQueue } from "../core/review.ts";
+import {
+	formatReviewBrief,
+	practiceReviewsOf,
+	reviewBriefOf,
+	reviewQueue,
+	reviewSchedule,
+	type ReviewCardFacts,
+	type ReviewSchedule,
+} from "../core/review.ts";
+import type { ReviewSettings } from "../core/settings.ts";
 import type { ChatStore, GraphStore, ReviewStore } from "../core/ports.ts";
 import { effectiveSettings, stores } from "./stores.ts";
 
@@ -87,11 +99,13 @@ export interface ReviewSummary {
 	picks: ReviewPick[];
 }
 
+type ReviewReadDeps = { graphStore: Pick<GraphStore, "readNodes" | "readChains">; reviewStore: ReviewStore };
+
 /** GET /api/review's payload: the queue over the live graph. */
 export function reviewSummary(
 	now: Date = new Date(),
-	deps: { graphStore: Pick<GraphStore, "readNodes" | "readChains">; reviewStore: ReviewStore } = stores,
-	newPerDay: number = effectiveSettings().review.newPerDay,
+	deps: ReviewReadDeps = stores,
+	review: Required<ReviewSettings> = effectiveSettings().review,
 ): ReviewSummary {
 	const graph = getGraph(deps.graphStore);
 	const queue = reviewQueue({
@@ -99,7 +113,8 @@ export function reviewSummary(
 		nodes: graph.nodes,
 		chains: graph.chains,
 		now,
-		newPerDay,
+		newPerDay: review.newPerDay,
+		scheduler: review,
 	});
 	const byId = new Map(graph.nodes.map((n) => [n.id, n]));
 	return {
@@ -123,9 +138,50 @@ export function reviewBriefLines(
 ): string[] {
 	try {
 		ensureReviewBackfill();
-		return formatReviewBrief(reviewBriefOf({ reviews: deps.reviewStore.readReviews(), pickIds, now }));
+		const scheduler = effectiveSettings().review;
+		return formatReviewBrief(reviewBriefOf({ reviews: deps.reviewStore.readReviews(), pickIds, now, scheduler }));
 	} catch (err) {
 		console.error("review brief failed:", err);
 		return [];
 	}
+}
+
+/** The heatmap window: 26 weeks either side of today (owner, 2026-11-02). */
+export const REVIEW_SCHEDULE_WINDOW_DAYS = 26 * 7;
+
+/** A due card with the live proposition's name and statement. */
+export type ReviewScheduleCard = ReviewCardFacts & { name: string; statement: string };
+
+/** GET /api/review/schedule's payload: the Settings > Review heatmap. */
+export interface ReviewScheduleView extends Omit<ReviewSchedule, "future" | "newToday"> {
+	future: { date: string; due: ReviewScheduleCard[] }[];
+	newToday: ReviewPick[];
+}
+
+export function reviewScheduleView(
+	now: Date = new Date(),
+	deps: ReviewReadDeps = stores,
+	review: Required<ReviewSettings> = effectiveSettings().review,
+): ReviewScheduleView {
+	const graph = getGraph(deps.graphStore);
+	const schedule = reviewSchedule({
+		reviews: deps.reviewStore.readReviews(),
+		nodes: graph.nodes,
+		chains: graph.chains,
+		now,
+		newPerDay: review.newPerDay,
+		scheduler: review,
+		pastDays: REVIEW_SCHEDULE_WINDOW_DAYS,
+		futureDays: REVIEW_SCHEDULE_WINDOW_DAYS,
+	});
+	const byId = new Map(graph.nodes.map((n) => [n.id, n]));
+	const named = (id: string) => {
+		const node = byId.get(id)!;
+		return { name: node.name, statement: node.statement };
+	};
+	return {
+		...schedule,
+		future: schedule.future.map((day) => ({ ...day, due: day.due.map((card) => ({ ...card, ...named(card.id) })) })),
+		newToday: schedule.newToday.map((id) => ({ id, ...named(id) })),
+	};
 }

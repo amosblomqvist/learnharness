@@ -462,15 +462,53 @@ export interface CompactionSettings {
 }
 
 /**
- * REVIEW (scheduled practice, 2026-11-02): the spaced-repetition knob.
+ * REVIEW (scheduled practice, 2026-11-02): the spaced-repetition knobs.
  * Every graph proposition is enrolled; never-practiced ones enter the
  * review queue at newPerDay a day (core/review.ts).
  *
- * FACTORY DEFAULT 10. FLOOR 0 (zero pauses new material; reviews still
- * come due). NO CEILING: a big allowance just front-loads the queue.
+ * newPerDay: FACTORY DEFAULT 10. FLOOR 0 (zero pauses new material;
+ * reviews still come due). NO CEILING: a big allowance just front-loads
+ * the queue.
+ *
+ * THE TUNABLE SCHEDULER (2026-11-02, owner): the FSRS parameters below,
+ * factory values = ts-fsrs's own defaults. Memory state is replayed from
+ * the log on every read, so a change reschedules the WHOLE history at once.
+ *  - desiredRetention: [REVIEW_RETENTION_FLOOR, REVIEW_RETENTION_CEILING],
+ *    factory 0.9.
+ *  - maximumIntervalDays: whole days >= 1, factory 36500.
+ *  - fuzz: interval jitter, factory off (ts-fsrs seeds it from the card,
+ *    so a replay lands on the same dates every read).
+ *  - shortTerm: the (re)learning steps, factory on; off skips both lists.
+ *  - learningSteps / relearningSteps: Anki-style steps ("1m", "10m",
+ *    "1h", "2d" — REVIEW_STEP_PATTERN), factory ["1m", "10m"] / ["10m"].
  */
 export interface ReviewSettings {
 	newPerDay?: number;
+	desiredRetention?: number;
+	maximumIntervalDays?: number;
+	fuzz?: boolean;
+	shortTerm?: boolean;
+	learningSteps?: string[];
+	relearningSteps?: string[];
+}
+
+/** desiredRetention's validated range (the settings PUT rejects outside
+ *  it, the sanitizer clamps into it). */
+export const REVIEW_RETENTION_FLOOR = 0.7;
+export const REVIEW_RETENTION_CEILING = 0.99;
+
+/** One (re)learning step: a positive number + m/h/d (ts-fsrs StepUnit). */
+export const REVIEW_STEP_PATTERN = /^(?:\d+(?:\.\d+)?|\.\d+)[mhd]$/;
+
+/** A step list, or null when any entry is not a step (or is zero long). */
+export function parseReviewSteps(raw: unknown): string[] | null {
+	if (!Array.isArray(raw)) return null;
+	const steps: string[] = [];
+	for (const step of raw) {
+		if (typeof step !== "string" || !REVIEW_STEP_PATTERN.test(step) || parseFloat(step) <= 0) return null;
+		steps.push(step);
+	}
+	return steps;
 }
 
 /** THE record. Every section optional (delta); unknown top-level keys are
@@ -533,7 +571,15 @@ export const FACTORY_SETTINGS: FactorySettings = {
 	},
 	graph: { enabled: true, rendering: true, extractionChunkTokens: 4096 },
 	compaction: { thresholdTokens: 150_000 },
-	review: { newPerDay: 10 },
+	review: {
+		newPerDay: 10,
+		desiredRetention: 0.9,
+		maximumIntervalDays: 36500,
+		fuzz: false,
+		shortTerm: true,
+		learningSteps: ["1m", "10m"],
+		relearningSteps: ["10m"],
+	},
 };
 
 /** The chunk budget's validated floor (GraphSettings.extractionChunkTokens
@@ -806,14 +852,30 @@ function sanitizeCompaction(raw: Record<string, unknown>): CompactionSettings {
 	return out;
 }
 
-/** clamp-never-reject: a finite non-negative number floors to an integer,
- *  anything else drops (the factory default resolves at read time). */
+/** clamp-never-reject: a finite non-negative newPerDay floors to an
+ *  integer, retention clamps into its range, the interval floors to a
+ *  whole day >= 1, a step list with any bad entry drops whole; anything
+ *  else drops (the factory default resolves at read time). */
 function sanitizeReview(raw: Record<string, unknown>): ReviewSettings {
 	const out: ReviewSettings = {};
 	const rawNew = raw.newPerDay;
 	if (typeof rawNew === "number" && Number.isFinite(rawNew) && rawNew >= 0) {
 		out.newPerDay = Math.floor(rawNew);
 	}
+	const rawRetention = raw.desiredRetention;
+	if (typeof rawRetention === "number" && Number.isFinite(rawRetention)) {
+		out.desiredRetention = Math.min(REVIEW_RETENTION_CEILING, Math.max(REVIEW_RETENTION_FLOOR, rawRetention));
+	}
+	const rawInterval = raw.maximumIntervalDays;
+	if (typeof rawInterval === "number" && Number.isFinite(rawInterval)) {
+		out.maximumIntervalDays = Math.max(1, Math.floor(rawInterval));
+	}
+	if (typeof raw.fuzz === "boolean") out.fuzz = raw.fuzz;
+	if (typeof raw.shortTerm === "boolean") out.shortTerm = raw.shortTerm;
+	const learningSteps = parseReviewSteps(raw.learningSteps);
+	if (learningSteps) out.learningSteps = learningSteps;
+	const relearningSteps = parseReviewSteps(raw.relearningSteps);
+	if (relearningSteps) out.relearningSteps = relearningSteps;
 	return out;
 }
 

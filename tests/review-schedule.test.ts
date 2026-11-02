@@ -9,7 +9,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { Rating } from "ts-fsrs";
 
-import { formatReviewBrief, ratingOf, reviewBriefOf, reviewDayStart, reviewQueue } from "../src/core/review.ts";
+import { formatReviewBrief, ratingOf, reviewBriefOf, reviewDayStart, reviewQueue, reviewSchedule } from "../src/core/review.ts";
 import type { ReviewEvent, ReviewOutcome, ReviewRung } from "../src/core/contracts/review.ts";
 import { resolveSettings } from "../src/core/settings-resolution.ts";
 import { sanitizeUserSettings } from "../src/core/settings.ts";
@@ -266,5 +266,126 @@ describe("the review settings section", () => {
 		assert.equal(parseReviewSettingsBody({ newPerDay: 2.5 }).ok, false);
 		assert.equal(parseReviewSettingsBody({ newPerDay: -1 }).ok, false);
 		assert.equal(parseReviewSettingsBody(null).ok, false);
+	});
+});
+
+describe("the tunable scheduler settings", () => {
+	it("resolve to ts-fsrs's defaults", () => {
+		const { newPerDay: _newPerDay, ...scheduler } = resolveSettings(null).review;
+		assert.deepEqual(scheduler, {
+			desiredRetention: 0.9,
+			maximumIntervalDays: 36500,
+			fuzz: false,
+			shortTerm: true,
+			learningSteps: ["1m", "10m"],
+			relearningSteps: ["10m"],
+		});
+	});
+
+	it("the read side clamps retention, floors the interval, drops bad step lists", () => {
+		const read = (review: Record<string, unknown>) => sanitizeUserSettings({ version: 1, review })?.review;
+		assert.deepEqual(read({ desiredRetention: 0.5 }), { desiredRetention: 0.7 });
+		assert.deepEqual(read({ desiredRetention: 1 }), { desiredRetention: 0.99 });
+		assert.deepEqual(read({ maximumIntervalDays: 0.4 }), { maximumIntervalDays: 1 });
+		assert.deepEqual(read({ fuzz: true, shortTerm: false }), { fuzz: true, shortTerm: false });
+		assert.deepEqual(read({ learningSteps: ["1m", "2x"], relearningSteps: ["30m", "1d"] }), { relearningSteps: ["30m", "1d"] });
+		assert.deepEqual(read({ learningSteps: ["0m"], fuzz: "yes" }), {});
+	});
+
+	it("the write side rejects out-of-range values", () => {
+		assert.deepEqual(parseReviewSettingsBody({ desiredRetention: 0.85, maximumIntervalDays: 365, fuzz: true, learningSteps: ["1h"] }), {
+			ok: true,
+			settings: { desiredRetention: 0.85, maximumIntervalDays: 365, fuzz: true, learningSteps: ["1h"] },
+		});
+		assert.deepEqual(parseReviewSettingsBody({ learningSteps: [] }), { ok: true, settings: { learningSteps: [] } });
+		assert.equal(parseReviewSettingsBody({ desiredRetention: 0.6 }).ok, false);
+		assert.equal(parseReviewSettingsBody({ maximumIntervalDays: 0 }).ok, false);
+		assert.equal(parseReviewSettingsBody({ maximumIntervalDays: 1.5 }).ok, false);
+		assert.equal(parseReviewSettingsBody({ shortTerm: "no" }).ok, false);
+		assert.equal(parseReviewSettingsBody({ relearningSteps: "10m" }).ok, false);
+	});
+
+	const FACTORY = resolveSettings(null).review;
+	const dueOf = (scheduler: typeof FACTORY, reviews: ReviewEvent[], now: Date) =>
+		reviewSchedule({ reviews, nodes: [node("n_a", 1)], chains: [], now, newPerDay: 0, scheduler, pastDays: 0, futureDays: 400 })
+			.future.flatMap((d) => d.due)[0]!;
+
+	it("higher retention schedules sooner", () => {
+		const reviews = [review(["n_a"], local(1, 12)), review(["n_a"], local(2, 12))];
+		const at90 = dueOf(FACTORY, reviews, local(2, 13));
+		const at97 = dueOf({ ...FACTORY, desiredRetention: 0.97 }, reviews, local(2, 13));
+		assert.ok(new Date(at97.due) < new Date(at90.due));
+	});
+
+	it("the maximum interval caps the schedule", () => {
+		const reviews = Array.from({ length: 6 }, (_, i) => review(["n_a"], local(1 + i * 4, 12)));
+		const capped = dueOf({ ...FACTORY, maximumIntervalDays: 2 }, reviews, local(22, 12));
+		const uncapped = dueOf(FACTORY, reviews, local(22, 12));
+		// ts-fsrs keeps Good one day past Hard, so a 2-day cap can land on 3.
+		assert.ok(capped.intervalDays <= 3 && uncapped.intervalDays > 30, `${capped.intervalDays} vs ${uncapped.intervalDays}`);
+	});
+
+	it("short-term off sends a first miss a day out instead of minutes", () => {
+		const reviews = [review(["n_a"], local(1, 12), "surrendered", "R5")];
+		const withSteps = dueOf(FACTORY, reviews, local(1, 12, 1));
+		const without = dueOf({ ...FACTORY, shortTerm: false }, reviews, local(1, 12, 1));
+		assert.ok(new Date(withSteps.due).getTime() - local(1, 12).getTime() < 3_600_000);
+		assert.ok(new Date(without.due).getTime() - local(1, 12).getTime() >= 86_400_000);
+	});
+});
+
+describe("reviewSchedule — the heatmap's data", () => {
+	const base = { chains: [], newPerDay: 2, pastDays: 30, futureDays: 30 };
+
+	it("past days bucket by the 4 AM day, count ratings per target and first reviews", () => {
+		const schedule = reviewSchedule({
+			...base,
+			nodes: [node("n_a", 1), node("n_b", 1)],
+			reviews: [
+				review(["n_a", "n_b"], local(3, 12)), // day 3: two Goods, two introduced
+				review(["n_a"], local(4, 2), "surrendered", "R5"), // 2 AM on the 4th is still day 3
+				review(["n_b"], local(4, 5), "solvedWithHints", "R1"), // day 4
+			],
+			now: local(10, 12),
+		});
+		assert.deepEqual(schedule.past, [
+			{ date: "2026-11-03", reviews: 2, propositions: 2, again: 1, hard: 0, good: 2, introduced: 2 },
+			{ date: "2026-11-04", reviews: 1, propositions: 1, again: 0, hard: 1, good: 0, introduced: 0 },
+		]);
+		assert.equal(schedule.today, "2026-11-10");
+		assert.equal(schedule.start, "2026-10-11");
+		assert.equal(schedule.end, "2026-12-10");
+	});
+
+	it("overdue cards land on today; later ones on their due day; beyond the window counts as later", () => {
+		const schedule = reviewSchedule({
+			...base,
+			futureDays: 5,
+			nodes: [node("n_over", 1), node("n_soon", 1), node("n_far", 1), node("n_new", 1)],
+			reviews: [
+				review(["n_over"], local(1, 12)),
+				review(["n_soon"], local(9, 12)),
+				review(["n_soon"], local(10, 11)),
+				...Array.from({ length: 4 }, (_, i) => review(["n_far"], local(1 + i * 3, 12))),
+			],
+			now: local(20, 12),
+		});
+		const today = schedule.future.find((d) => d.date === schedule.today);
+		assert.ok(today?.due.some((c) => c.id === "n_over"), "overdue is on today");
+		const placed = schedule.future.flatMap((d) => d.due.map((c) => c.id));
+		assert.equal(placed.length + schedule.later, 3);
+		assert.deepEqual(schedule.newToday, ["n_new"]);
+		for (const day of schedule.future) assert.ok(day.date >= schedule.today && day.date <= schedule.end);
+	});
+
+	it("facts come from the replayed card", () => {
+		const schedule = reviewSchedule({ ...base, nodes: [node("n_a", 1)], reviews: [review(["n_a"], local(1, 12))], now: local(20, 12) });
+		const [card] = schedule.future.flatMap((d) => d.due);
+		assert.equal(card!.id, "n_a");
+		assert.equal(card!.reviews, 1);
+		assert.equal(card!.lapses, 0);
+		assert.equal(card!.lastReview, local(1, 12).toISOString());
+		assert.ok(card!.retrievability > 0 && card!.retrievability < 1);
+		assert.ok(["learning", "review", "relearning"].includes(card!.state));
 	});
 });

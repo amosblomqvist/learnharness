@@ -33,6 +33,9 @@
 import { useEffect, useRef, useState } from "react";
 import {
 	EXTRACTION_CHUNK_TOKENS_FLOOR,
+	parseReviewSteps,
+	REVIEW_RETENTION_CEILING,
+	REVIEW_RETENTION_FLOOR,
 	resolveSettings,
 	type AppearanceSettings,
 	type GraphSettings,
@@ -42,7 +45,8 @@ import { MenuShell } from "@/components/menu-shell";
 import { Hint } from "@/components/ui/hint";
 import { useAppearance } from "./appearance.tsx";
 import { FontMenuList } from "./model-menu";
-import { CommitInput, SettingsMenuTrigger, SettingsRow, ThinSelect, Toggle } from "./controls.tsx";
+import { CommitInput, SettingsGroup, SettingsMenuTrigger, SettingsRow, ThinSelect, Toggle } from "./controls.tsx";
+import { ReviewHeatmap } from "./review-heatmap.tsx";
 
 /** The factory reading family — the DEFAULT row's identity (unset =
  *  this). Exported for tests. */
@@ -420,9 +424,14 @@ export function GraphSection({
 		</>
 	);
 }
-/** The Review section (scheduled practice, 2026-11-02): the one knob —
- *  never-practiced propositions admitted to the review queue per day.
- *  Resolved through the core resolver, like the chunk budget above. */
+/** "1m 10m" ↔ ["1m", "10m"] — the Anki step-list spelling. */
+const stepsText = (steps: readonly string[]) => steps.join(" ");
+
+/** The Review section (scheduled practice, 2026-11-02): the new-item
+ *  allowance, the FSRS scheduler knobs (tunable scheduler, 2026-11-02),
+ *  and the schedule heatmap below them. Resolved through the core
+ *  resolver, like the chunk budget above; every empty field is the
+ *  factory default. */
 export function ReviewSection({
 	review,
 	onSectionChange,
@@ -431,29 +440,129 @@ export function ReviewSection({
 	onSectionChange: (next: ReviewSettings) => void;
 }) {
 	const resolved = resolveSettings(review === undefined ? null : { version: 1, review }).review;
+	const stepsInput = (key: "learningSteps" | "relearningSteps", label: string, testid: string) => (
+		<CommitInput
+			value={review?.[key] ? stepsText(review[key]) : ""}
+			placeholder={stepsText(resolved[key]) || "none"}
+			ariaLabel={label}
+			testid={testid}
+			onCommit={(v) => {
+				if (v === "") {
+					onSectionChange({ ...review, [key]: undefined });
+					return;
+				}
+				const steps = parseReviewSteps(v.split(/[\s,]+/).filter(Boolean));
+				if (!steps) return; // bad input: no write
+				onSectionChange({ ...review, [key]: steps });
+			}}
+		/>
+	);
 	return (
-		<SettingsRow
-			label="New propositions per day"
-			hint={`${resolved.newPerDay} a day`}
-			testid="review-row-new-per-day"
-		>
-			<CommitInput
-				type="number"
-				value={String(review?.newPerDay ?? "")}
-				placeholder={String(resolved.newPerDay)}
-				ariaLabel="new propositions per day"
-				testid="input-new-per-day"
-				onCommit={(v) => {
-					// Empty = factory default (the chunk-budget discipline).
-					if (v === "") {
-						onSectionChange({ ...review, newPerDay: undefined });
-						return;
-					}
-					const n = Number(v);
-					if (!Number.isFinite(n) || n < 0) return; // bad input: no write
-					onSectionChange({ ...review, newPerDay: Math.round(n) });
-				}}
-			/>
-		</SettingsRow>
+		<>
+			<SettingsGroup label="Queue" testid="review-group-queue">
+				<SettingsRow
+					label="New propositions per day"
+					hint={`${resolved.newPerDay} a day`}
+					testid="review-row-new-per-day"
+				>
+					<CommitInput
+						type="number"
+						value={String(review?.newPerDay ?? "")}
+						placeholder={String(resolved.newPerDay)}
+						ariaLabel="new propositions per day"
+						testid="input-new-per-day"
+						onCommit={(v) => {
+							// Empty = factory default (the chunk-budget discipline).
+							if (v === "") {
+								onSectionChange({ ...review, newPerDay: undefined });
+								return;
+							}
+							const n = Number(v);
+							if (!Number.isFinite(n) || n < 0) return; // bad input: no write
+							onSectionChange({ ...review, newPerDay: Math.round(n) });
+						}}
+					/>
+				</SettingsRow>
+			</SettingsGroup>
+			<SettingsGroup label="Scheduler" testid="review-group-scheduler">
+				<SettingsRow
+					label="Desired retention"
+					hint={`${Math.round(resolved.desiredRetention * 100)}%`}
+					testid="review-row-retention"
+				>
+					<CommitInput
+						type="number"
+						value={review?.desiredRetention === undefined ? "" : String(Math.round(review.desiredRetention * 100))}
+						placeholder={String(Math.round(resolved.desiredRetention * 100))}
+						ariaLabel="desired retention percent"
+						testid="input-retention"
+						onCommit={(v) => {
+							if (v === "") {
+								onSectionChange({ ...review, desiredRetention: undefined });
+								return;
+							}
+							const r = Number(v) / 100;
+							if (!Number.isFinite(r) || r < REVIEW_RETENTION_FLOOR || r > REVIEW_RETENTION_CEILING) return;
+							onSectionChange({ ...review, desiredRetention: r });
+						}}
+					/>
+				</SettingsRow>
+				<SettingsRow
+					label="Maximum interval"
+					hint={`${resolved.maximumIntervalDays} days`}
+					testid="review-row-max-interval"
+				>
+					<CommitInput
+						type="number"
+						value={String(review?.maximumIntervalDays ?? "")}
+						placeholder={String(resolved.maximumIntervalDays)}
+						ariaLabel="maximum interval days"
+						testid="input-max-interval"
+						onCommit={(v) => {
+							if (v === "") {
+								onSectionChange({ ...review, maximumIntervalDays: undefined });
+								return;
+							}
+							const n = Number(v);
+							if (!Number.isFinite(n) || n < 1) return;
+							onSectionChange({ ...review, maximumIntervalDays: Math.round(n) });
+						}}
+					/>
+				</SettingsRow>
+				<SettingsRow label="Interval fuzz" hint="Jitter due dates so reviews spread out" testid="review-row-fuzz">
+					<Toggle
+						checked={resolved.fuzz}
+						label="interval fuzz"
+						onChange={(on) => onSectionChange({ ...review, fuzz: on })}
+					/>
+				</SettingsRow>
+				<SettingsRow label="Short-term steps" hint="Off skips both step lists" testid="review-row-short-term">
+					<Toggle
+						checked={resolved.shortTerm}
+						label="learning steps enabled"
+						onChange={(on) => onSectionChange({ ...review, shortTerm: on })}
+					/>
+				</SettingsRow>
+				<SettingsRow
+					label="Learning steps"
+					hint="New propositions, e.g. 1m 10m"
+					testid="review-row-learning-steps"
+					dimmed={!resolved.shortTerm}
+				>
+					{stepsInput("learningSteps", "learning steps", "input-learning-steps")}
+				</SettingsRow>
+				<SettingsRow
+					label="Relearning steps"
+					hint="After a miss, e.g. 10m"
+					testid="review-row-relearning-steps"
+					dimmed={!resolved.shortTerm}
+				>
+					{stepsInput("relearningSteps", "relearning steps", "input-relearning-steps")}
+				</SettingsRow>
+			</SettingsGroup>
+			<SettingsGroup label="Schedule" testid="review-group-schedule">
+				<ReviewHeatmap />
+			</SettingsGroup>
+		</>
 	);
 }
