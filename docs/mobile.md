@@ -1,6 +1,6 @@
 # Phone app (iPhone home-screen app → Capacitor later)
 
-Status: **Phase 1 done: lessons on the phone.** The real LearnHarness app (same screens, same server code) runs entirely on the device as an installable web app. There is no PC and no server; your API keys and data stay on the phone.
+Status: **Phase 2 done: lessons and the knowledge graph on the phone.** The real LearnHarness app (same screens, same server code) runs entirely on the device as an installable web app. There is no PC and no server; your API keys and data stay on the phone.
 
 ## The plan (owner-approved)
 
@@ -10,7 +10,7 @@ Standalone, API keys only. Claude subscription logins need the `claude` CLI, whi
 |---|---|---|
 | 0 | Proof run | **Done.** A lesson turn runs in the browser with on-device storage |
 | 1 | Lessons on iPhone | **Done.** Real UI on the phone, phone layout polish, installable + offline, Cloudflare Pages hosting, backup/restore in the desktop data layout |
-| 2 | Knowledge graph | Extraction + touch graph view |
+| 2 | Knowledge graph | **Done.** On-device extraction, graph home usable by touch (pinch, pan, tap a node, double-tap to re-frame) |
 | 3 | Practice sets | |
 | 4 | Helpers, files & voice | Researcher (Google CSE + Jina reader), visual maker, demos (no headless check), PDFs, notes import, dictation, and a "files you added" version of the learner-file tools |
 | 5 | Native wrap | Capacitor Android APK; iOS with a Mac |
@@ -94,6 +94,21 @@ The desktop route handlers (`app/api/**/route.ts`) are plain `Request → Respon
   - a new version takes over after the app is closed.
 - **Interrupted turns:** iOS pauses a backgrounded web app, so a turn in flight can be cut off. The existing turn machinery already handles it. A dropped provider connection, or the app being killed mid-turn and reopened, leaves the session showing "Something went wrong: Connection error." with **Retry**, and Retry completes the turn (verified in the browser).
 
+### The knowledge graph (Phase 2)
+
+- **Extraction needs no phone-specific code.** It is model calls only: the extractor's `submit_findings` and the auditor's `submit_review`. The embedder was removed from the desktop app earlier. So the same pipeline runs in the page and writes the same ledgers (`/lh/data/graph/*.jsonl`).
+  - It triggers as on desktop: automatically once enough of a session is uncovered, or from the session's coverage meter.
+  - If iOS suspends the app mid-run, nothing is merged and the coverage ledger leaves those messages uncovered, so the next trigger redoes them.
+- **Touch works through the existing canvas.** Pan and pinch are d3-zoom's touch support. A tap selects a node and opens its card (name, statement, source sessions).
+- **Phone polish:**
+  - the graph toolbar's Chains and Import buttons become icon-only, and the row stays inside its width cap, so it fits beside the sidebar button;
+  - framing keeps clear of the toolbar and the composer through `--lh-fit-inset-*` CSS variables on the canvas, set in `phone.css`.
+- **Desktop changes** (`components/graph-canvas.ts`, owner-approved):
+  - **Double-tap or double-click on empty space re-frames the whole graph.** The camera is remembered between visits, so this is the way back after zooming away. On desktop, double-click previously did nothing.
+  - **`fit()` frames the nodes where they are now**, not where they were when the data arrived; the layout simulation keeps moving them.
+  - **`fitTransform` takes optional insets**, which default to none, so desktop framing is unchanged.
+- **Notes import** reads file contents, not paths, so it also works on the phone. It has not been exercised end to end there yet; that's Phase 4.
+
 `src/browser/` is the phone build's composition root. A lint zone keeps every other layer from importing it.
 
 ## Commands
@@ -114,19 +129,22 @@ npm run mobile:smoke   # dev build + the end-to-end browser check below
 1. Configure a key and models; start a lesson from the home composer.
 2. The agent's question appears; answer it and the reply streams in.
 3. The provider request carried the bundled prompt, the tools minus the learner-file set, the browser-access header, and the on-device key.
-4. The drawer opens over the page and closes on navigation.
-5. Backup produces a desktop-layout zip without keys.
-6. Restore of a zipped desktop folder replaces the phone's sessions and keeps the key.
-7. Everything survives a reload, and the app starts offline from the service worker.
-8. Nothing else left the page, and there were no page errors.
+4. Extraction runs on the device (scripted extractor and auditor) and the graph holds the ideas. The graph toolbar fits beside the sidebar button. After a pinch-zoom, a double-tap on empty space re-frames every node between the toolbar and the composer, and a tap on a node opens its card.
+5. The drawer opens over the page and closes on navigation.
+6. Backup produces a desktop-layout zip without keys.
+7. Restore of a zipped desktop folder replaces the phone's sessions and keeps the key.
+8. Everything survives a reload, and the app starts offline from the service worker.
+9. Nothing else left the page, and there were no page errors.
 
 It passes on both the dev and the minified build.
 
 Unit tests: `tests/browser-shims.test.ts` checks the shims against real Node. `tests/browser-backup.test.ts` covers the zip codec (including interop with `zip`/`unzip`), finding the data folder in a zip, and restore keeping the keys.
 
-## Known gaps after Phase 1
+## Known gaps after Phase 2
 
 - **Not yet run on a real iPhone or against the live Anthropic API.** All browser verification is headless Chromium with scripted provider replies; this build environment reaches neither. Safari-specific behavior is the main risk: the share sheet, downloads from a home-screen app, IndexedDB persistence, and Safari before 17.4 (covered by small fallbacks).
-- **The knowledge graph home** renders, but extraction and the touch graph view are Phase 2. Practice sessions are untested on the phone (Phase 3).
+- **On first open the graph is framed before its layout finishes settling**, so it can spread past the screen edges; double-tap re-frames it. The desktop app has the same behavior.
+- **Node labels appear when zoomed in.** Desktop's hover glow has no touch equivalent; a tap shows the node's card instead.
+- **Practice sessions** are untested on the phone (Phase 3).
 - **Fonts load from Google on first launch**, then come from the cache.
 - **Bundle:** about 4 MB of JS gzipped in total, split into lazily loaded chunks. The startup shell is 2.9 MB minified.

@@ -91,3 +91,9 @@
 .lh-phone .lh-wco-floating > div:first-child {
 	max-width: 100%;
 }
+/* Framing the graph (first open, and double-tap on empty space) keeps it
+   clear of the toolbar above and the composer below (graph-canvas.ts). */
+.lh-phone canvas {
+	--lh-fit-inset-top: 56px;
+	--lh-fit-inset-bottom: 140px;
+}

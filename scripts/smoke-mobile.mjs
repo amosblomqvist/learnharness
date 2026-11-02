@@ -10,11 +10,14 @@
  *      streams in — and the provider request carried the bundled system
  *      prompt, the tools (WITHOUT the learner-file tools), the browser-access
  *      header and the on-device key;
- *   3. the sidebar drawer opens over the page and closes on navigation;
- *   4. Settings → Phone data saves a backup zip (keys excluded) and restores
+ *   3. the knowledge graph: extraction runs on the device (scripted
+ *      extractor + auditor), the graph home draws it, a tap on a node opens
+ *      its card, a double-tap on empty space re-frames the whole graph;
+ *   4. the sidebar drawer opens over the page and closes on navigation;
+ *   5. Settings → Phone data saves a backup zip (keys excluded) and restores
  *      a zipped desktop data folder, replacing the phone's sessions;
- *   5. after a reload the restored data is still there (IndexedDB);
- *   6. offline, the app still starts (service worker app shell).
+ *   6. after a reload the restored data is still there (IndexedDB);
+ *   7. offline, the app still starts (service worker app shell).
  *
  * Needs Playwright with Chromium (`require("playwright")`); a developer
  * gate, not part of `npm test`. SMOKE_VERBOSE=1 echoes the page console.
@@ -78,6 +81,18 @@ const SCRIPT = [
 	{ text: REPLY },
 ];
 
+/** What the scripted extractor "finds" in the lesson. */
+const FINDINGS = {
+	propositions: [
+		{ id: "p1", name: "Rayleigh scattering", statement: "Small particles scatter short wavelengths far more than long ones." },
+		{ id: "p2", name: "Blue scatters most", statement: "Blue light is scattered across the sky much more than red." },
+		{ id: "p3", name: "Sky looks blue", statement: "Scattered blue light reaches the eye from every direction, so the sky looks blue." },
+	],
+	chains: [{ premises: ["p1"], conclusion: "p2" }, { premises: ["p2"], conclusion: "p3" }],
+};
+let extractorCalls = 0;
+let auditorCalls = 0;
+
 const failures = [];
 const check = (ok, what) => {
 	console.log(`${ok ? "  ok " : "FAIL "} ${what}`);
@@ -100,8 +115,21 @@ try {
 	const providerRequests = [];
 	await context.route("https://api.anthropic.com/**", async (route) => {
 		const req = route.request();
-		providerRequests.push({ headers: req.headers(), body: req.postDataJSON() });
-		const reply = SCRIPT[Math.min(providerRequests.length - 1, SCRIPT.length - 1)];
+		const body = req.postDataJSON();
+		const tools = (body.tools ?? []).map((t) => t.name);
+		let reply;
+		if (tools.includes("submit_findings")) {
+			extractorCalls++;
+			// The extractor anchors each idea to a teacher passage by its label.
+			const anchor = /TEACHER \[([^\]]+)\]/.exec(JSON.stringify(body.messages))?.[1] ?? "missing";
+			reply = { tools: [{ id: "toolu_smoke_x", name: "submit_findings", input: { ...FINDINGS, propositions: FINDINGS.propositions.map((p) => ({ ...p, messageId: anchor })) } }] };
+		} else if (tools.includes("submit_review")) {
+			auditorCalls++;
+			reply = { tools: [{ id: "toolu_smoke_a", name: "submit_review", input: { links: [] } }] };
+		} else {
+			providerRequests.push({ headers: req.headers(), body });
+			reply = SCRIPT[Math.min(providerRequests.length - 1, SCRIPT.length - 1)];
+		}
 		await route.fulfill({ status: 200, headers: { "content-type": "text/event-stream" }, body: anthropicStream(reply) });
 	});
 	// Fonts come from Google in production; offline here. Anything else
@@ -152,7 +180,71 @@ try {
 	await page.getByText(REPLY).waitFor({ timeout: 30_000 });
 	check(true, "answer submitted; the reply streamed in");
 
-	// ── 3. drawer ────────────────────────────────────────────────────────
+	// ── 3. knowledge graph ───────────────────────────────────────────────
+	const chatId = chatUrl.split("/").pop();
+	const started = await page.evaluate(
+		async (id) => (await fetch("/api/graph/coverage/extract", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ chatId: id }) })).status,
+		chatId,
+	);
+	const graphNodes = async () => page.evaluate(async () => (await (await fetch("/api/graph")).json()).propositions?.length ?? 0);
+	let nodes = 0;
+	for (let i = 0; i < 40 && nodes < 3; i++) {
+		await page.waitForTimeout(250);
+		nodes = await graphNodes();
+	}
+	check(started === 202 && extractorCalls === 1 && auditorCalls === 1, `extraction ran on the device (extractor ${extractorCalls}, auditor ${auditorCalls})`);
+	check(nodes === 3, `the graph holds the extracted ideas (${nodes} propositions)`);
+
+	await page.goto(`${base}/`);
+	await page.waitForSelector("canvas");
+	await page.waitForTimeout(2500); // let the layout settle
+	const toggleBox = await page.getByRole("button", { name: "Open sidebar" }).boundingBox();
+	const searchBox = await page.getByRole("textbox", { name: "Search nodes" }).boundingBox();
+	check(toggleBox && searchBox && searchBox.x > toggleBox.x + toggleBox.width, "graph toolbar fits beside the sidebar button");
+
+	const camera = () => page.evaluate(() => ({ ...document.querySelector("canvas").__zoom }));
+	const screenNodes = () =>
+		page.evaluate(async () => {
+			const c = document.querySelector("canvas");
+			const r = c.getBoundingClientRect();
+			const t = c.__zoom;
+			const { positions, propositions } = await (await fetch("/api/graph")).json();
+			return propositions.map((p) => ({ name: p.name, x: r.left + t.x + positions[p.id].x * t.k, y: r.top + t.y + positions[p.id].y * t.k }));
+		});
+	// Zoom far in (pinch), then double-tap empty space to re-frame.
+	const cdp = await context.newCDPSession(page);
+	const touch = (type, pts) => cdp.send("Input.dispatchTouchEvent", { type, touchPoints: pts.map(([x, y], id) => ({ x, y, id })) });
+	await touch("touchStart", [[170, 380], [220, 430]]);
+	for (let i = 1; i <= 8; i++) await touch("touchMove", [[170 - i * 8, 380 - i * 8], [220 + i * 8, 430 + i * 8]]);
+	await touch("touchEnd", []);
+	await page.waitForTimeout(300);
+	const zoomed = (await camera()).k;
+	// Empty space = the grid point farthest from every node (layouts vary).
+	const zoomedNodes = await screenNodes();
+	let empty = { x: 195, y: 330 };
+	let best = -1;
+	for (let x = 40; x <= 350; x += 30) {
+		for (let y = 90; y <= 500; y += 30) {
+			const d = Math.min(...zoomedNodes.map((n) => Math.hypot(n.x - x, n.y - y)));
+			if (d > best) [best, empty] = [d, { x, y }];
+		}
+	}
+	await page.touchscreen.tap(empty.x, empty.y);
+	await page.waitForTimeout(120);
+	await page.touchscreen.tap(empty.x + 2, empty.y + 2);
+	await page.waitForTimeout(400);
+	const framed = await screenNodes();
+	const viewport = page.viewportSize();
+	check(
+		(await camera()).k < zoomed && framed.every((n) => n.x > 0 && n.x < viewport.width && n.y > 56 && n.y < viewport.height - 140),
+		"pinch zooms in; double-tap on empty space re-frames every node between toolbar and composer",
+	);
+	const target = framed[0];
+	await page.touchscreen.tap(target.x, target.y);
+	await page.getByText(FINDINGS.propositions.find((p) => p.name === target.name).statement).waitFor({ timeout: 5000 });
+	check(true, `tapping a node opens its card ("${target.name}")`);
+
+	// ── 4. drawer ────────────────────────────────────────────────────────
 	await page.getByRole("button", { name: "Open sidebar" }).click();
 	const listed = page.locator("aside").getByText("Why is the sky blue?");
 	await listed.waitFor();
@@ -163,7 +255,7 @@ try {
 	await page.waitForTimeout(400);
 	check((await page.getByRole("button", { name: "Open sidebar" }).count()) === 1, "drawer closes after navigating");
 
-	// ── 4. backup + restore ──────────────────────────────────────────────
+	// ── 5. backup + restore ──────────────────────────────────────────────
 	await page.getByRole("button", { name: "Open sidebar" }).click();
 	await page.locator("aside").getByText(/^settings$/i).click();
 	await page.locator('[data-testid="settings-nav-phone-data"]').click();
@@ -187,7 +279,7 @@ try {
 	await page.waitForURL(`${base}/`, { timeout: 15_000 });
 	await page.waitForSelector("[contenteditable=true]");
 
-	// ── 5. persistence ───────────────────────────────────────────────────
+	// ── 6. persistence ───────────────────────────────────────────────────
 	await page.reload();
 	await page.waitForSelector("[contenteditable=true]");
 	const chats = await page.evaluate(async () => (await (await fetch("/api/chats")).json()).chats.map((c) => c.title));
@@ -197,7 +289,7 @@ try {
 	const gone = await page.evaluate(async (u) => (await fetch(`/api/chats/${u.split("/").pop()}`)).status, chatUrl);
 	check(gone === 404, "restore replaced the phone's previous session");
 
-	// ── 6. offline start ─────────────────────────────────────────────────
+	// ── 7. offline start ─────────────────────────────────────────────────
 	await page.evaluate(async () => {
 		const reg = await navigator.serviceWorker.ready;
 		return reg.active?.state;

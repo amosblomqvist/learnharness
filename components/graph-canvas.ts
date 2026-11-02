@@ -419,20 +419,41 @@ export function labelAlpha(
 	return clamp01(1 - (ratio - labelZoom) / span);
 }
 
-/** The camera transform that frames `bbox` in a w×h viewport with padding. */
+/** Extra screen space to keep clear when framing (overlaid chrome). */
+export type FitInsets = { top: number; right: number; bottom: number; left: number };
+const NO_INSETS: FitInsets = { top: 0, right: 0, bottom: 0, left: 0 };
+
+/** The camera transform that frames `bbox` in a w×h viewport with padding,
+ *  inside the area left after `insets` (default none). */
 export function fitTransform(
 	bbox: { minX: number; maxX: number; minY: number; maxY: number },
 	w: number,
 	h: number,
 	padding: number,
+	insets: FitInsets = NO_INSETS,
 ): { x: number; y: number; k: number } {
 	const bw = Math.max(bbox.maxX - bbox.minX, 1e-6);
 	const bh = Math.max(bbox.maxY - bbox.minY, 1e-6);
-	const k = Math.min((w - 2 * padding) / bw, (h - 2 * padding) / bh);
+	const aw = Math.max(w - insets.left - insets.right, 1);
+	const ah = Math.max(h - insets.top - insets.bottom, 1);
+	const k = Math.max(Math.min((aw - 2 * padding) / bw, (ah - 2 * padding) / bh), 1e-6);
 	const cx = (bbox.minX + bbox.maxX) / 2;
 	const cy = (bbox.minY + bbox.maxY) / 2;
-	return { x: w / 2 - cx * k, y: h / 2 - cy * k, k };
+	return { x: insets.left + aw / 2 - cx * k, y: insets.top + ah / 2 - cy * k, k };
 }
+
+/** Insets from the canvas's --lh-fit-inset-{top,right,bottom,left} CSS
+ *  variables (px; unset = 0). A host layout whose chrome covers the graph
+ *  (the phone build's toolbar and composer) declares them in CSS. */
+function cssFitInsets(el: HTMLElement): FitInsets {
+	const style = getComputedStyle(el);
+	const px = (side: string) => Number.parseFloat(style.getPropertyValue(`--lh-fit-inset-${side}`)) || 0;
+	return { top: px("top"), right: px("right"), bottom: px("bottom"), left: px("left") };
+}
+
+/** Two empty-stage taps/clicks this close in time and space = re-frame. */
+const DOUBLE_TAP_MS = 350;
+const DOUBLE_TAP_SLOP = 24;
 
 /** The arrowhead geometry for a directed edge a→b: shaft endpoints
  *  (clear of both node discs) and the head triangle (tip on the target
@@ -629,6 +650,8 @@ export class GraphCanvasRenderer {
 
 	private resizeObserver: ResizeObserver;
 	private downPos: Pt | null = null;
+	/** The last empty-stage click, for double-tap / double-click re-frame. */
+	private lastStageClick: { at: number; pos: Pt } | null = null;
 
 	// ── Cached world geometry ─────────────────────────────────────────────
 	// Everything above is drawn per frame; everything below is derived from
@@ -681,7 +704,8 @@ export class GraphCanvasRenderer {
 			});
 		select(canvas)
 			.call(this.zoomBehavior)
-			// No surprise dblclick-zoom (sigma had none).
+			// No dblclick-zoom: a double-click/tap on empty space RE-FRAMES
+			// the graph instead (onPointerUp).
 			.on("dblclick.zoom", null)
 			// Wheel is OURS now: d3's instant per-notch jump felt janky; the
 			// eased glide below replaces it (pan and pinch stay d3's).
@@ -752,17 +776,7 @@ export class GraphCanvasRenderer {
 	setData(data: CanvasData): void {
 		this.data = data;
 		this.nodeById = new Map(data.nodes.map((n) => [n.id, n]));
-		let minX = Infinity;
-		let minY = Infinity;
-		let maxX = -Infinity;
-		let maxY = -Infinity;
-		for (const n of data.nodes) {
-			if (n.x < minX) minX = n.x;
-			if (n.y < minY) minY = n.y;
-			if (n.x > maxX) maxX = n.x;
-			if (n.y > maxY) maxY = n.y;
-		}
-		this.worldBBox = { minX, maxX, minY, maxY };
+		this.worldBBox = this.liveBBox();
 		if (!this.hasFit && data.nodes.length > 0) this.fit();
 		// The camera may be user-restored (constructor initialCamera) — the
 		// gate's "1×" reference still needs the fresh bbox's fit zoom.
@@ -777,6 +791,7 @@ export class GraphCanvasRenderer {
 		this.simActive = false;
 		this.dragId = null;
 		this.simMoved = false;
+		const { minX, maxX, minY, maxY } = this.worldBBox;
 		this.simCenter = { x: (minX + maxX) / 2, y: (minY + maxY) / 2 };
 		this.buildSim();
 		this.geoVersion++; // new data → rebuild world geometry
@@ -870,17 +885,35 @@ export class GraphCanvasRenderer {
 	 *  setData calls — call fit() only for an explicit re-frame (the
 	 *  first-ever open; afterwards the caller-persisted camera wins). */
 	fit(): void {
-		if (!this.data || this.data.nodes.length === 0 || !this.worldBBox) return;
+		if (!this.data || this.data.nodes.length === 0) return;
+		// The sim moves the node objects in place: frame where they are NOW
+		// (a re-frame after the layout settled must see the settled bounds).
+		this.worldBBox = this.liveBBox();
 		const w = this.canvas.clientWidth;
 		const h = this.canvas.clientHeight;
 		if (w < 10 || h < 10) return; // layout not ready yet; the ResizeObserver retries
-		const t = fitTransform(this.worldBBox, w, h, 40);
+		const t = fitTransform(this.worldBBox, w, h, 40, cssFitInsets(this.canvas));
 		this.kFit = t.k;
 		this.hasFit = true;
 		select(this.canvas).call(
 			this.zoomBehavior.transform,
 			zoomIdentity.translate(t.x, t.y).scale(t.k),
 		);
+	}
+
+	/** World bounds of the nodes at their current (possibly simulated) positions. */
+	private liveBBox(): { minX: number; maxX: number; minY: number; maxY: number } {
+		let minX = Infinity;
+		let minY = Infinity;
+		let maxX = -Infinity;
+		let maxY = -Infinity;
+		for (const n of this.data?.nodes ?? []) {
+			if (n.x < minX) minX = n.x;
+			if (n.y < minY) minY = n.y;
+			if (n.x > maxX) maxX = n.x;
+			if (n.y > maxY) maxY = n.y;
+		}
+		return { minX, maxX, minY, maxY };
 	}
 
 	/** Refresh the label-gate's "1×" reference from the current bbox +
@@ -890,7 +923,7 @@ export class GraphCanvasRenderer {
 		if (!this.worldBBox) return;
 		const w = this.canvas.clientWidth;
 		const h = this.canvas.clientHeight;
-		if (w >= 10 && h >= 10) this.kFit = fitTransform(this.worldBBox, w, h, 40).k;
+		if (w >= 10 && h >= 10) this.kFit = fitTransform(this.worldBBox, w, h, 40, cssFitInsets(this.canvas)).k;
 	}
 
 	destroy(): void {
@@ -1026,8 +1059,23 @@ export class GraphCanvasRenderer {
 		this.downPos = null;
 		if (moved > CLICK_SLOP) return; // that was a drag (pan), not a click
 		const node = this.pickAt(pos.x, pos.y);
-		if (node) this.callbacks.onSelect(node.id, pos);
-		else this.callbacks.onStageClick();
+		if (node) {
+			this.lastStageClick = null;
+			this.callbacks.onSelect(node.id, pos);
+			return;
+		}
+		this.callbacks.onStageClick();
+		// Double-tap / double-click on empty space: frame the whole graph
+		// (owner, mobile Phase 2) — the way back after zooming or panning
+		// away, since the camera is remembered between visits.
+		const now = performance.now();
+		const prev = this.lastStageClick;
+		if (prev && now - prev.at < DOUBLE_TAP_MS && Math.hypot(pos.x - prev.pos.x, pos.y - prev.pos.y) < DOUBLE_TAP_SLOP) {
+			this.lastStageClick = null;
+			this.fit();
+		} else {
+			this.lastStageClick = { at: now, pos };
+		}
 	};
 
 	/** Right-click: pick the node under the pointer, hand the position to

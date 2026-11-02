@@ -111,6 +111,14 @@ describe("fitTransform", () => {
 		assert.ok(Math.abs(0 * t.k + t.x - 250) < 1e-9);
 	});
 
+	test("frames inside the insets (overlaid chrome) when given", () => {
+		// 500x300 viewport, top 50 + bottom 100 covered: available 500x150.
+		const t = fitTransform({ minX: -50, maxX: 50, minY: -25, maxY: 25 }, 500, 300, 10, { top: 50, right: 0, bottom: 100, left: 0 });
+		assert.ok(Math.abs(t.k - 2.6) < 1e-9, `k=${t.k}`); // min(480/100, 130/50)
+		assert.ok(Math.abs(t.y - 125) < 1e-9, `y=${t.y}`); // centered in [50, 200]
+		assert.ok(Math.abs(t.x - 250) < 1e-9, `x=${t.x}`);
+	});
+
 	test("never returns a non-positive scale for degenerate bboxes", () => {
 		const t = fitTransform({ minX: 5, maxX: 5, minY: 5, maxY: 5 }, 100, 100, 10);
 		assert.ok(t.k > 0 && Number.isFinite(t.k));
