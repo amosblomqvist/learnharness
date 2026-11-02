@@ -1,6 +1,6 @@
 # Phone app (iPhone home-screen app → Capacitor later)
 
-Status: **Phase 2 done: lessons and the knowledge graph on the phone.** The real LearnHarness app (same screens, same server code) runs entirely on the device as an installable web app. There is no PC and no server; your API keys and data stay on the phone.
+Status: **Phase 3 done: lessons, the knowledge graph and practice on the phone.** The real LearnHarness app (same screens, same server code) runs entirely on the device as an installable web app. There is no PC and no server; your API keys and data stay on the phone.
 
 ## The plan (owner-approved)
 
@@ -11,7 +11,7 @@ Standalone, API keys only. Claude subscription logins need the `claude` CLI, whi
 | 0 | Proof run | **Done.** A lesson turn runs in the browser with on-device storage |
 | 1 | Lessons on iPhone | **Done.** Real UI on the phone, phone layout polish, installable + offline, Cloudflare Pages hosting, backup/restore in the desktop data layout |
 | 2 | Knowledge graph | **Done.** On-device extraction, graph home usable by touch (pinch, pan, tap a node, double-tap to re-frame) |
-| 3 | Practice sets | |
+| 3 | Practice sets | **Done.** Practice sessions (topic or picked graph ideas) by touch; a shared reveal bug fixed; on-device saves made durable |
 | 4 | Helpers, files & voice | Researcher (Google CSE + Jina reader), visual maker, demos (no headless check), PDFs, notes import, dictation, and a "files you added" version of the learner-file tools |
 | 5 | Native wrap | Capacitor Android APK; iOS with a Mac |
 
@@ -58,7 +58,7 @@ Cloudflare serves `index.html` for every unknown path, which the app's on-device
 
 The desktop route handlers (`app/api/**/route.ts`) are plain `Request → Response` functions, and the stores (`src/store/*`) are synchronous `node:fs` code. The phone build reuses both unchanged:
 
-- **`node:fs` → an in-memory file tree** (`src/browser/shims/vfs.ts`, `fs.ts`). It loads from IndexedDB at boot and writes back after every change (`src/browser/persist.ts`). On-device data keeps the desktop layout under `/lh/data` (`chats/*.json`, `graph/*.jsonl`, `settings.json`, …). Keys live in `/lh/data/auth.json`.
+- **`node:fs` → an in-memory file tree** (`src/browser/shims/vfs.ts`, `fs.ts`). It loads from IndexedDB at boot and writes back after every change (`src/browser/persist.ts`). Each change gets its own IndexedDB transaction straight away, committed at once, and pending writes are flushed when the app is hidden or closed, so a save survives closing the app right after it. On-device data keeps the desktop layout under `/lh/data` (`chats/*.json`, `graph/*.jsonl`, `settings.json`, …). Keys live in `/lh/data/auth.json`.
 - **Other Node built-ins → shims** (`src/browser/shims/`): `path`, `os`, `url`, `crypto` (sync SHA-256/HMAC, byte-identical to Node), `Buffer`, and a `process` global. Desktop-only modules and native packages become stubs that throw only when called.
 - **`/api/*` → an in-page router** (`src/browser/router.ts`) over every route module, using Next's precedence. `installApiFetch()` (`src/browser/backend.ts`) answers the page's same-origin `/api/*` fetches on the device. Provider calls go straight to the network via pi-ai, which sends Anthropic's browser-access header.
 - **Prompts** (`src/agent/**/*.md`) are embedded in the bundle at `/lh/app/…`, where `config.ts`'s `ROOT` points.
@@ -93,6 +93,14 @@ The desktop route handlers (`app/api/**/route.ts`) are plain `Request → Respon
   - a service worker generated from `sw.template.js`, which pre-caches the app shell (2.9 MB minified) and caches other files on first use;
   - a new version takes over after the app is closed.
 - **Interrupted turns:** iOS pauses a backgrounded web app, so a turn in flight can be cut off. The existing turn machinery already handles it. A dropped provider connection, or the app being killed mid-turn and reopened, leaves the session showing "Something went wrong: Connection error." with **Retry**, and Retry completes the turn (verified in the browser).
+
+### Practice (Phase 3)
+
+- **Practice sessions run unchanged on the phone.** The agent's `problem` and `conclude` tools drive the same problem card and "Your thinking" box as desktop. Starting points:
+  - type a topic in Practice mode;
+  - or tap **Pick nodes**, tick ideas in the Chains table, tap **Done**; the picked ideas ride the session's first message.
+- **Bug fix in shared code** (`src/core/native-messages.ts` `problemInputForConclude`): when one reply concluded a problem *and* posed the next (the designed flow), the concluded card revealed the **next** problem's model solution. The search now starts before the conclude call within its own message. Desktop shares the fix, and there's a regression test in `tests/practice-record.test.ts`.
+- **Storage durability fix** (`src/browser/persist.ts`): writes used to wait in a chain, one batch after another, so closing or reloading the app moments after a save could lose it (3 in 8 saves survived an instant reload in the test). Now every batch starts its own transaction immediately and commits (8 in 8). The smoke test checks this.
 
 ### The knowledge graph (Phase 2)
 
@@ -130,21 +138,22 @@ npm run mobile:smoke   # dev build + the end-to-end browser check below
 2. The agent's question appears; answer it and the reply streams in.
 3. The provider request carried the bundled prompt, the tools minus the learner-file set, the browser-access header, and the on-device key.
 4. Extraction runs on the device (scripted extractor and auditor) and the graph holds the ideas. The graph toolbar fits beside the sidebar button. After a pinch-zoom, a double-tap on empty space re-frames every node between the toolbar and the composer, and a tap on a node opens its card.
-5. The drawer opens over the page and closes on navigation.
-6. Backup produces a desktop-layout zip without keys.
-7. Restore of a zipped desktop folder replaces the phone's sessions and keeps the key.
-8. Everything survives a reload, and the app starts offline from the service worker.
-9. Nothing else left the page, and there were no page errors.
+5. Practice: in Practice mode, pick the graph's ideas through the Chains table and start a session; the agent receives the picked ideas. Answer the problem: the verdict shows, the concluded card reveals that problem's own solution, and the next problem is posed.
+6. The drawer opens over the page and closes on navigation.
+7. Backup produces a desktop-layout zip without keys.
+8. Restore of a zipped desktop folder replaces the phone's sessions and keeps the key.
+9. Everything survives a reload, and the app starts offline from the service worker.
+10. A save survives reloading the app the instant it lands (4 of 4 fresh runs).
+11. Nothing else left the page, and there were no page errors.
 
 It passes on both the dev and the minified build.
 
 Unit tests: `tests/browser-shims.test.ts` checks the shims against real Node. `tests/browser-backup.test.ts` covers the zip codec (including interop with `zip`/`unzip`), finding the data folder in a zip, and restore keeping the keys.
 
-## Known gaps after Phase 2
+## Known gaps after Phase 3
 
 - **Not yet run on a real iPhone or against the live Anthropic API.** All browser verification is headless Chromium with scripted provider replies; this build environment reaches neither. Safari-specific behavior is the main risk: the share sheet, downloads from a home-screen app, IndexedDB persistence, and Safari before 17.4 (covered by small fallbacks).
 - **On first open the graph is framed before its layout finishes settling**, so it can spread past the screen edges; double-tap re-frames it. The desktop app has the same behavior.
 - **Node labels appear when zoomed in.** Desktop's hover glow has no touch equivalent; a tap shows the node's card instead.
-- **Practice sessions** are untested on the phone (Phase 3).
 - **Fonts load from Google on first launch**, then come from the cache.
 - **Bundle:** about 4 MB of JS gzipped in total, split into lazily loaded chunks. The startup shell is 2.9 MB minified.

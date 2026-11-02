@@ -398,6 +398,33 @@ describe("modelSolutionForConclude (the conclusion's hero is the pose's commitme
 		assert.equal(modelSolutionForConclude(messages, "call_conclude_solved"), "first");
 	});
 
+	it("conclude + next pose in ONE reply: the reveal is the problem before the conclude, not the next one", () => {
+		// The designed flow (tools/practice.ts): conclude, then pose the next
+		// problem in the same assistant message.
+		const reply: LhMessage & AssistantMessage = {
+			id: "msg_a_both",
+			role: "assistant",
+			content: [
+				{ type: "toolCall", id: "call_conclude_solved", name: PRACTICE_CONCLUDE_TOOL, arguments: { outcome: "solved" } },
+				{ type: "toolCall", id: "call_p2", name: PRACTICE_PROBLEM_TOOL, arguments: { statement: "second", mode: "recall", modelSolution: "second" } },
+			],
+			timestamp: 3,
+			...STAMPS,
+		};
+		const ack = (toolCallId: string, toolName: string): LhMessage & ToolResultMessage => ({
+			id: `msg_r_${toolCallId}`,
+			role: "toolResult",
+			toolCallId,
+			toolName,
+			content: [{ type: "text", text: "ok" }],
+			details: null,
+			isError: false,
+			timestamp: 4,
+		});
+		const messages = [...problemPose("call_p1", "first"), reply, ack("call_conclude_solved", PRACTICE_CONCLUDE_TOOL), ack("call_p2", PRACTICE_PROBLEM_TOOL)];
+		assert.equal(modelSolutionForConclude(messages, "call_conclude_solved"), "first");
+	});
+
 	it("projectView enriches the conclude part with the reveal", () => {
 		const messages = [...problemPose(), ...concludeCall("solved")];
 		const view = projectView(messages);

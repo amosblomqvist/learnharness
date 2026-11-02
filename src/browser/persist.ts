@@ -33,17 +33,21 @@ function openDb(): Promise<IDBDatabase> {
 
 let db: IDBDatabase | null = null;
 const pending = new Map<string, Op>();
-/** The batch chain: each batch starts after the previous one commits. */
-let chain: Promise<void> = Promise.resolve();
-let queued = false;
+/** Transactions started and not yet settled. Each batch gets its own
+ *  transaction AT ONCE (no waiting on the previous one): IndexedDB runs
+ *  readwrite transactions on one store in creation order, so order holds,
+ *  and the window in which closing the app could lose a write is a single
+ *  microtask instead of "until every earlier batch committed". */
+const inflight = new Set<Promise<void>>();
+let scheduled = false;
 let lastError: unknown = null;
 
-function writeBatch(): Promise<void> {
-	queued = false;
+function writeBatch(): void {
+	scheduled = false;
 	const batch = [...pending];
 	pending.clear();
-	if (!db || batch.length === 0) return Promise.resolve();
-	return new Promise<void>((resolve) => {
+	if (!db || batch.length === 0) return;
+	const done = new Promise<void>((resolve) => {
 		const tx = db!.transaction(STORE, "readwrite");
 		const store = tx.objectStore(STORE);
 		for (const [path, op] of batch) {
@@ -56,14 +60,25 @@ function writeBatch(): Promise<void> {
 			console.error("[persist] IndexedDB write failed:", tx.error);
 			resolve();
 		};
+		// Commit now rather than when the event loop idles (Safari 15+).
+		(tx as IDBTransaction & { commit?: () => void }).commit?.();
 	});
+	inflight.add(done);
+	void done.then(() => inflight.delete(done));
 }
 
 function enqueue(path: string, op: Op): void {
 	pending.set(path, op);
-	if (queued) return;
-	queued = true;
-	chain = chain.then(writeBatch);
+	if (scheduled) return;
+	scheduled = true;
+	// One microtask: writes made in the same synchronous run share a batch.
+	queueMicrotask(writeBatch);
+}
+
+/** The app is being hidden or closed (iOS may then suspend or kill it):
+ *  hand anything still batching to IndexedDB right now. */
+function writeNow(): void {
+	if (pending.size > 0) writeBatch();
 }
 
 /** Load every stored file into memory, then start write-behind persistence.
@@ -82,6 +97,10 @@ export async function bootPersistence(assets: Record<string, string>): Promise<{
 		},
 		remove: (path) => enqueue(path, { kind: "remove" }),
 	});
+	addEventListener("pagehide", writeNow);
+	document.addEventListener("visibilitychange", () => {
+		if (document.visibilityState === "hidden") writeNow();
+	});
 	// Ask the browser not to evict this origin's storage under pressure.
 	// Best effort: unsupported or refused simply leaves default behavior.
 	await navigator.storage?.persist?.().catch(() => false);
@@ -94,11 +113,10 @@ function isAsset(path: string, assets: Record<string, string>): boolean {
 
 /** Resolves once every mutation made so far is committed to IndexedDB. */
 export async function flushPersistence(): Promise<void> {
-	let seen: Promise<void>;
-	do {
-		seen = chain;
-		await seen;
-	} while (seen !== chain);
+	while (scheduled || pending.size > 0 || inflight.size > 0) {
+		writeNow();
+		await Promise.all([...inflight]);
+	}
 	if (lastError) {
 		const err = lastError;
 		lastError = null;

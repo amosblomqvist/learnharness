@@ -461,11 +461,18 @@ export function problemInputForConclude(
 	);
 	if (mi < 0) return undefined;
 	const clean = cleanToolCallIds(messages);
+	// In the conclude's OWN message, only blocks BEFORE the conclude count:
+	// the designed flow concludes and poses the next problem in one reply,
+	// and that next pose must not become this conclusion's reveal.
+	const own = messages[mi] as AssistantMessage;
+	let startBlock: number | undefined = own.content.findIndex((b) => b.type === "toolCall" && b.id === concludeCallId) - 1;
 	for (; mi >= 0; mi--) {
 		const m = messages[mi]!;
 		if ((m as { role?: string }).role !== "assistant") continue;
 		const assistant = m as AssistantMessage;
-		for (let bi = assistant.content.length - 1; bi >= 0; bi--) {
+		const from = startBlock ?? assistant.content.length - 1;
+		startBlock = undefined;
+		for (let bi = from; bi >= 0; bi--) {
 			const block = assistant.content[bi]!;
 			if (block.type !== "toolCall" || block.name !== PRACTICE_PROBLEM_TOOL) continue;
 			if (!clean.has(block.id)) continue; // a refused pose revealed nothing

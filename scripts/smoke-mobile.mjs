@@ -13,11 +13,14 @@
  *   3. the knowledge graph: extraction runs on the device (scripted
  *      extractor + auditor), the graph home draws it, a tap on a node opens
  *      its card, a double-tap on empty space re-frames the whole graph;
+ *   3b. practice: pick the graph's ideas by touch, practice on them, answer;
+ *      the conclusion reveals that problem's solution and the next is posed;
  *   4. the sidebar drawer opens over the page and closes on navigation;
  *   5. Settings → Phone data saves a backup zip (keys excluded) and restores
  *      a zipped desktop data folder, replacing the phone's sessions;
  *   6. after a reload the restored data is still there (IndexedDB);
- *   7. offline, the app still starts (service worker app shell).
+ *   7. offline, the app still starts (service worker app shell);
+ *   8. a save survives reloading the app the instant it lands.
  *
  * Needs Playwright with Chromium (`require("playwright")`); a developer
  * gate, not part of `npm test`. SMOKE_VERBOSE=1 echoes the page console.
@@ -90,6 +93,21 @@ const FINDINGS = {
 	],
 	chains: [{ premises: ["p1"], conclusion: "p2" }, { premises: ["p2"], conclusion: "p3" }],
 };
+/** The scripted practice agent: pose → (answer) → conclude + next pose. */
+const PROBLEM_1 = { statement: "Red light is about 700 nm, blue about 450 nm. Roughly how many times more is blue scattered?", mode: "composition", modelSolution: "Scattering goes as 1/λ⁴: (700/450)⁴ ≈ 5.9, about six times." };
+const PROBLEM_2 = { statement: "Why are sunsets red rather than blue?", mode: "recall", modelSolution: "The long path through air scatters the blue out of the beam, leaving red." };
+const PRACTICE = [
+	{ text: "Let's use what you know.", tools: [{ id: "toolu_smoke_pp1", name: "problem", input: PROBLEM_1 }] },
+	{
+		text: "Right, the fourth power does the work.",
+		tools: [
+			{ id: "toolu_smoke_pc1", name: "conclude", input: { outcome: "solved", verdict: "You applied the 1/λ⁴ law correctly.", rung: null, missClass: null, retest: false } },
+			{ id: "toolu_smoke_pp2", name: "problem", input: PROBLEM_2 },
+		],
+	},
+	{ text: "Done for now." },
+];
+const practiceRequests = [];
 let extractorCalls = 0;
 let auditorCalls = 0;
 
@@ -126,6 +144,10 @@ try {
 		} else if (tools.includes("submit_review")) {
 			auditorCalls++;
 			reply = { tools: [{ id: "toolu_smoke_a", name: "submit_review", input: { links: [] } }] };
+		} else if (tools.includes("problem")) {
+			// Practice: pose, then (one reply) conclude + pose the next.
+			practiceRequests.push(body);
+			reply = PRACTICE[Math.min(practiceRequests.length - 1, PRACTICE.length - 1)];
 		} else {
 			providerRequests.push({ headers: req.headers(), body });
 			reply = SCRIPT[Math.min(providerRequests.length - 1, SCRIPT.length - 1)];
@@ -244,6 +266,31 @@ try {
 	await page.getByText(FINDINGS.propositions.find((p) => p.name === target.name).statement).waitFor({ timeout: 5000 });
 	check(true, `tapping a node opens its card ("${target.name}")`);
 
+	// ── 3b. practice on picked graph nodes ───────────────────────────────
+	await page.goto(`${base}/`);
+	await page.waitForSelector("[contenteditable=true]");
+	await page.locator('[data-testid="home-mode-practice"]').click();
+	await page.locator('[data-testid="practice-props-chip"]').click();
+	await page.locator('[data-testid="chain-table"]').waitFor();
+	await page.locator('[data-testid^="cluster-group-"]').first().getByRole("checkbox").first().click();
+	await page.locator('[data-testid="chain-practice-done"]').click();
+	const chip = await page.locator('[data-testid="practice-props-chip"]').textContent();
+	check(/3 nodes selected/.test(chip ?? ""), `picked the graph's ideas by touch ("${chip}")`);
+	await page.locator("[contenteditable=true]").first().click();
+	await page.keyboard.type("Scattering");
+	await page.keyboard.press("Enter");
+	await page.waitForURL(/\/chat\/chat_/, { timeout: 15_000 });
+	await page.getByText(PROBLEM_1.statement).first().waitFor({ timeout: 30_000 });
+	const practiceContext = JSON.stringify(practiceRequests[0]?.messages ?? "");
+	check(FINDINGS.propositions.every((p) => practiceContext.includes(p.name)), "practice started; the agent received the picked ideas");
+	await page.locator('[data-placeholder="Work here, think out loud."]').click();
+	await page.keyboard.type("It goes as 1/λ⁴, so about six times.");
+	await page.getByRole("button", { name: /submit thinking/i }).click();
+	await page.getByText(PROBLEM_2.statement).first().waitFor({ timeout: 30_000 });
+	const practiceText = await page.textContent("main");
+	check(practiceText.includes("You applied the 1/λ⁴ law correctly."), "answer submitted; the verdict is shown");
+	check(practiceText.includes(PROBLEM_1.modelSolution) && !practiceText.includes(PROBLEM_2.modelSolution), "the concluded card reveals ITS problem's solution (not the next one's)");
+
 	// ── 4. drawer ────────────────────────────────────────────────────────
 	await page.getByRole("button", { name: "Open sidebar" }).click();
 	const listed = page.locator("aside").getByText("Why is the sky blue?");
@@ -299,6 +346,27 @@ try {
 	const offline = await page.waitForSelector("[contenteditable=true]", { timeout: 15_000 }).then(() => true, () => false);
 	check(offline, "offline: the app still starts from the service worker cache");
 	await context.setOffline(false);
+
+	// ── 8. a save survives closing the app immediately after it ──────────
+	// (the old write-behind chain lost ~5 in 8 saves here)
+	let survived = 0;
+	for (let i = 0; i < 4; i++) {
+		const fresh = await browser.newContext();
+		await fresh.route(/fonts\./, (route) => route.abort());
+		const tab = await fresh.newPage();
+		await tab.goto(`${base}/`);
+		await tab.waitForSelector("[contenteditable=true]");
+		await tab
+			.evaluate(async () => {
+				await fetch("/api/keys/ANTHROPIC_API_KEY", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ value: "sk-ant-api03-" + "y".repeat(93) + "AA" }) });
+				location.reload(); // no flush, no wait
+			})
+			.catch(() => {});
+		await tab.waitForSelector("[contenteditable=true]");
+		if (await tab.evaluate(async () => (await (await fetch("/api/keys")).json()).keys.some((k) => k.id === "ANTHROPIC_API_KEY" && k.present))) survived++;
+		await fresh.close();
+	}
+	check(survived === 4, `a save survives an immediate reload (${survived}/4)`);
 
 	check(offPage.length === 0, `no other network requests${offPage.length ? `: ${offPage.join(", ")}` : ""}`);
 	check(pageErrors.length === 0, `no page errors${pageErrors.length ? `:\n${pageErrors.join("\n")}` : ""}`);
