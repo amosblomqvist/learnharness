@@ -1,5 +1,7 @@
 "use client";
 
+import { usePane, usePaneCommand } from "@/components/workspace/pane-context";
+
 import { createContext, Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useChatSession } from "@/components/session";
 import { visibleQueuedSteers } from "@/components/session-core";
@@ -249,6 +251,8 @@ export function Chat({
 	// Reattach plumbing (background-turn runner wave): the hook holds the
 	// settled terminal's callback — a stable ref assigned below, once
 	// syncFromServer exists (refs, not closures: no stale capture).
+	const pane = usePane();
+	const paneCommand = usePaneCommand();
 	const reattachSettledRef = useRef<() => void>(() => {});
 
 	// THE SESSION HOOK (Wave D, owner-approved 2026-09-26): the app-owned
@@ -262,6 +266,23 @@ export function Chat({
 
 	const sessionFindScopeRef = useRef<HTMLDivElement | null>(null);
 	const scrollContextRef = useRef<StickToBottomContext | null>(null);
+	useEffect(() => {
+		if (!pane) return;
+		const scroll = scrollContextRef.current?.scrollRef.current;
+		if (!scroll) return;
+		const saved = pane.getView().scrollTop;
+		let frame = 0;
+		if (typeof saved === "number") {
+			scrollContextRef.current?.stopScroll();
+			frame = requestAnimationFrame(() => { scroll.scrollTop = saved; });
+		}
+		const save = () => pane.saveView({ scrollTop: scroll.scrollTop });
+		let timer: ReturnType<typeof setTimeout> | undefined;
+		const onScroll = () => { clearTimeout(timer); timer = setTimeout(save, 200); };
+		scroll.addEventListener("scroll", onScroll, { passive: true });
+		window.addEventListener("lh:flush-views", save);
+		return () => { clearTimeout(timer); cancelAnimationFrame(frame); save(); window.removeEventListener("lh:flush-views", save); scroll.removeEventListener("scroll", onScroll); };
+	}, []);
 	const sourceTextParts = useMemo(() => firstSourceTextParts(messages), [messages]);
 
 	// The reattach settled terminal → the sync-and-continue seam (below).
@@ -325,6 +346,7 @@ export function Chat({
 	// F2 opens the title rename (the chat header owns the editing state).
 	useEffect(() => {
 		const onRename = () => {
+			if (!paneCommand()) return;
 			setTitleDraft(titleText);
 			setRenaming(true);
 		};
@@ -377,6 +399,7 @@ export function Chat({
 	abortAskRef.current = abortAsk;
 	useEffect(() => {
 		const onAbort = () => {
+			if (!paneCommand()) return;
 			const target = escAbortTarget({
 				abortAsk: abortAskRef.current !== null,
 				mermaidFocus: mermaidFocusRef.current !== null || figureFocusRef.current !== null,
@@ -454,8 +477,6 @@ export function Chat({
 	const malformedQuestions = malformedQuestionsOf(nativeMessages);
 	// The abort handler reads the pending question from a ref (the window
 	// listener is mount-scoped; the value it needs is render-scoped).
-	const pendingRef = useRef(pending);
-	pendingRef.current = pending;
 
 	// THE ACTIVE PRACTICE PROBLEM (practice sessions, 2026-10-04): the
 	// same dock-ownership rule as a pending question — an active problem
@@ -528,13 +549,16 @@ export function Chat({
 	// thinking row to one state — transcript rows default open, so the
 	// first press collapses everything, the second re-expands.
 	useEffect(() => {
-		const onToggle = () => setAllUserThinkingOpen(!currentUserThinkingOpen());
+		const onToggle = () => paneCommand() && setAllUserThinkingOpen(!currentUserThinkingOpen(pane?.id), pane?.id);
 		window.addEventListener(kbdEventForChat("toggle-user-thinking"), onToggle);
 		return () => window.removeEventListener(kbdEventForChat("toggle-user-thinking"), onToggle);
 	}, []);
+	const pendingRef = useRef(pending);
+	pendingRef.current = pending;
 	const applyReadingThinking = useCallback((v: string) => {
 		readingThinkingRef.current = v;
-	}, []);
+		if (pendingRef.current) saveQuestionDraft(pendingRef.current.key, { readingThinking: v });
+	}, [saveQuestionDraft]);
 	const clearReadingThinking = useCallback(() => {
 		readingThinkingRef.current = "";
 		setReadingThinkingSeed((previous) => ({ ...previous, value: "", revision: previous.revision + 1 }));
@@ -561,13 +585,15 @@ export function Chat({
 	/* The composer draft ref is synchronous, so sends and dictation flushes
 	 * read the latest text without a parent render per input event. Explicit
 	 * resets still bump a revision so the local field can sync. */
-	const textRef = useRef("");
+	const textRef = useRef(pane?.getView().draft ?? "");
 	const applyText = useCallback((v: string) => {
 		textRef.current = v;
+		if (v) pane?.saveView({ draft: v });
 		setComposerDraftRevision((revision) => revision + 1);
 	}, []);
 	const recordComposerText = useCallback((v: string) => {
 		textRef.current = v;
+		pane?.saveView({ draft: v });
 	}, []);
 	// Saved slot completeness is live, but the session's selected route
 	// comes from its own ordinary model control, never today's Strong pin.
@@ -604,6 +630,7 @@ export function Chat({
 		applyText("");
 		void send({ type: "text", text: prompt }, () => {
 			clearOpeningPrompt(chatId);
+			if (!textRef.current) pane?.saveView({ draft: "" });
 			openingDraftRef.current = null;
 			if (draftRef.current === prompt) draftRef.current = null;
 		}).then(accepted => {
@@ -697,7 +724,7 @@ export function Chat({
 	// DOM at event time — the docks mount and unmount, refs would go
 	// stale. The quiz dock's rows↔thinking claim never reaches here.
 	const cycleChatFields = useCallback((): readonly HTMLElement[] => {
-		const pick = (sel: string) => Array.from(document.querySelectorAll<HTMLElement>(sel));
+		const pick = (sel: string) => Array.from((pane?.root.current ?? document).querySelectorAll<HTMLElement>(sel));
 		return [
 			...pick('[data-testid="reading-thinking-field"] [data-file-path-input]'),
 			...pick('[data-testid="question-dock"] [data-file-path-input]'),
@@ -1229,7 +1256,7 @@ export function Chat({
 		}
 		draftRef.current = t; // the refusal flow's preserve-and-replay seam
 		applyText("");
-		void send({ type: "text", text: t });
+		void send({ type: "text", text: t }, () => { if (!textRef.current) pane?.saveView({ draft: "" }); }).then(accepted => { if (!accepted && !textRef.current) applyText(t); });
 	};
 
 	/* STEER VS SEND (owner arc 2026-10-03): a send while a turn runs steers
@@ -1247,7 +1274,7 @@ export function Chat({
 		if (!t) return;
 		if (busy) {
 			applyText("");
-			void steer(t);
+			void steer(t, () => { if (!textRef.current) pane?.saveView({ draft: "" }); });
 			return;
 		}
 		doSend();
@@ -2221,6 +2248,7 @@ function DockOverlay({
 		setExpanded(true);
 		void suppressFoldDuringReveal();
 	};
+	const paneCommand = usePaneCommand();
 	const expandAndRevealRef = useRef(expandAndReveal);
 	expandAndRevealRef.current = expandAndReveal;
 	// ENTER OPENS THE WAITING CHECK (owner, keyboard round 2026-10-06):
@@ -2235,6 +2263,7 @@ function DockOverlay({
 	useEffect(() => {
 		if (!pending || expanded) return;
 		const onKeyDown = (e: KeyboardEvent) => {
+			if (!paneCommand()) return;
 			if (e.key !== "Enter" || e.altKey) return;
 			if (e.shiftKey && !e.metaKey && !e.ctrlKey) return;
 			const t = e.target as HTMLElement | null;

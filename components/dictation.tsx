@@ -1,5 +1,7 @@
 "use client";
 
+import { usePaneActive, usePaneCommand } from "@/components/workspace/pane-context";
+
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Loader2Icon, MicIcon } from "lucide-react";
 import { useSettingsDialog } from "@/components/settings/settings-dialog";
@@ -233,13 +235,14 @@ export function joinDictation(current: string, final: string): string {
  * can't clear another claimant.
  */
 export function useDictationTarget(append: (text: string) => void, claimed: boolean) {
+	const paneActive = usePaneActive();
 	useEffect(() => {
-		if (!claimed) return;
+		if (!claimed || !paneActive) return;
 		questionTarget = append;
 		return () => {
 			if (questionTarget === append) questionTarget = null;
 		};
-	}, [append, claimed]);
+	}, [append, claimed, paneActive]);
 }
 
 export type DictationPhase = "idle" | "connecting" | "recording" | "stopping";
@@ -282,6 +285,9 @@ export type Dictation = {
  * question waits.
  */
 export function useDictation({ append }: { append: (text: string) => void }): Dictation {
+	const paneActive = usePaneActive();
+	const paneCommand = usePaneCommand();
+	const targetRef = useRef<((text: string) => void) | null>(null);
 	const { getLanguage } = useDictationLanguage();
 	const [phase, setPhase] = useState<DictationPhase>("idle");
 	const [error, setError] = useState<string | null>(null);
@@ -292,12 +298,13 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 	const appendRef = useRef(append);
 	appendRef.current = append;
 	useEffect(() => {
+		if (!paneActive) return;
 		const target = (text: string) => appendRef.current(text);
 		composerTarget = target;
 		return () => {
 			if (composerTarget === target) composerTarget = null;
 		};
-	}, []);
+	}, [paneActive]);
 
 	// Live machinery (non-render values). The MediaStream tracks stop and
 	// the per-run nodes disconnect on teardown; the socket is recreated per
@@ -328,7 +335,7 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 		if (bufferRef.current.length === 0) return;
 		const text = bufferRef.current.join(" ");
 		bufferRef.current = [];
-		(questionTarget ?? appendRef.current)(text);
+		(targetRef.current ?? appendRef.current)(text);
 	}, []);
 
 	/** Full teardown of one run's machinery. Idempotent; generation-guarded by callers. */
@@ -583,13 +590,16 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 	// Publish finish() for the sibling subtrees (the pending question's
 	// dock) — registered for as long as this page owns the hook.
 	useEffect(() => {
+		if (!paneActive) return;
 		dictationFinisher = finish;
 		return () => {
 			if (dictationFinisher === finish) dictationFinisher = null;
 		};
-	}, [finish]);
+	}, [finish, paneActive]);
 
 	const toggle = useCallback(() => {
+		if (!paneCommand()) return;
+		targetRef.current = questionTarget ?? appendRef.current;
 		if (phase === "idle") void start();
 		else if (phase === "recording" || phase === "connecting") stop();
 		// "stopping" presses are ignored — the flush is in flight.
@@ -613,8 +623,9 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 		return () => window.removeEventListener("lh:kbd-toggle-dictation", toggle);
 	}, [toggle]);
 	useEffect(() => {
-		window.addEventListener("lh:kbd-cancel-dictation", cancel);
-		return () => window.removeEventListener("lh:kbd-cancel-dictation", cancel);
+		const onCancel = () => { if (paneCommand()) cancel(); };
+		window.addEventListener("lh:kbd-cancel-dictation", onCancel);
+		return () => window.removeEventListener("lh:kbd-cancel-dictation", onCancel);
 	}, [cancel]);
 
 	return {

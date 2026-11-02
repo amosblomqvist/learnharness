@@ -117,7 +117,8 @@ export function KeyboardShortcuts() {
 			// ride the window event for the mounted surface to catch.
 			switch (action) {
 				case "new-session":
-					handlersRef.current.router.push("/chat/new");
+					if (window.lh?.workspace) void (window.dispatchEvent(new Event("lh:flush-views")), window.dispatchEvent(new Event("lh:show-workspace")), window.lh.workspace.open(null, "active"));
+					else handlersRef.current.router.push("/chat/new");
 					break;
 				case "open-settings":
 					// Settings-app wave: the dialog is the surface, the URL is
@@ -125,6 +126,7 @@ export function KeyboardShortcuts() {
 					handlersRef.current.openSettings();
 					break;
 				case "jump-graph":
+					window.dispatchEvent(new Event("lh:show-graph"));
 					handlersRef.current.router.push("/");
 					break;
 				case "cheat-sheet":

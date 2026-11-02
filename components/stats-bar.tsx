@@ -1,5 +1,7 @@
 "use client";
 
+import { usePaneCommand } from "@/components/workspace/pane-context";
+
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { CLAUDE_CODE_PROVIDER, sessionCacheHitRate, subscriptionLabels, subscriptionLabel, type cliContextWindowOf, type SessionPricing, type TurnUsage } from "@/src/core";
 import { formatTokens, formatUsd, planCostLabel, prettyModel } from "@/components/usage-format";
@@ -68,6 +70,7 @@ export function StatsBar({
 	 *  data (which renders nothing pre-chat on that surface). */
 	leadingSlot?: ReactNode;
 }) {
+	const paneCommand = usePaneCommand();
 	const [open, setOpen] = useState(false);
 	const [selectedModel, setSelectedModel] = useState<string | undefined>();
 	const modelChanged = useCallback((model: string | undefined) => {
@@ -83,6 +86,7 @@ export function StatsBar({
 			if (barRef.current && !barRef.current.contains(e.target as Node)) setOpen(false);
 		};
 		const onKeyDown = (e: KeyboardEvent) => {
+			if (!paneCommand()) return;
 			if (e.key === "Escape") {
 				// THE ONE-ESC LAW (keyboard round 2026-10-06): claim — the
 				// window chain must not also act under this popover.

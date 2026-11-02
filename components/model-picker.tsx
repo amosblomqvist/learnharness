@@ -1,5 +1,7 @@
 "use client";
 
+import { usePaneCommand } from "@/components/workspace/pane-context";
+
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ChatSettings, ModelCatalogEntry, ModelCatalogResponse, ModelsSettings, UserSettings } from "@/src/core";
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
@@ -38,6 +40,7 @@ export function catalogLimits(catalog: Pick<ModelCatalogResponse, "models">): Ma
  * no-factory-fallback language: the UI never presents a default model).
  */
 export function ModelControl({ chatId, onModelChange }: { chatId?: string; onModelChange?: (model: string | undefined) => void }) {
+	const paneCommand = usePaneCommand();
 	const { catalog, refresh } = useModelCatalog();
 	const [models, setModels] = useState<ModelsSettings | undefined>();
 	// A successful read with no settings is a legacy session; undefined
@@ -128,6 +131,7 @@ export function ModelControl({ chatId, onModelChange }: { chatId?: string; onMod
 			}
 		};
 		const onKeyDown = (e: KeyboardEvent) => {
+			if (!paneCommand()) return;
 			if (e.key === "Escape") {
 				// Claim the Esc (keyboard wave A): the window-level chain must
 				// not ALSO stop dictation / abort the turn under this menu.
@@ -227,6 +231,7 @@ export function ModelControl({ chatId, onModelChange }: { chatId?: string; onMod
 	// tab-focus. Both work from any focus, including mid-typing.
 	useEffect(() => {
 		const onOpenPicker = () => {
+			if (!paneCommand()) return;
 			setOpen("model");
 			setError(null);
 			refresh(); // mid-session key changes widen the menu (cache fix)
@@ -237,6 +242,7 @@ export function ModelControl({ chatId, onModelChange }: { chatId?: string; onMod
 
 	useEffect(() => {
 		const onCycleThinking = () => {
+			if (!paneCommand()) return;
 			if (levels.length === 0) return;
 			const idx = effectiveLevel === undefined ? -1 : levels.indexOf(effectiveLevel);
 			const next = levels[(idx + 1) % levels.length];

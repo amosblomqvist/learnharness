@@ -36,6 +36,8 @@
  * CMU title, z-50.
  */
 
+import { usePaneActive, usePaneCommand } from "@/components/workspace/pane-context";
+
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useBackdropDismiss } from "@/components/backdrop-dismiss";
@@ -251,10 +253,12 @@ interface SetupDialogProps {
 export function SetupDialog(props: SetupDialogProps) {
 	// An open owns its draft. Mount-time cache seeding avoids a key-screen
 	// first frame, and reopening cannot reuse a previous open's edits.
-	return props.open ? <OpenSetupDialog {...props} /> : null;
+	const paneActive = usePaneActive();
+	return props.open && paneActive ? <OpenSetupDialog {...props} /> : null;
 }
 
 function OpenSetupDialog({ onClose, onDone }: SetupDialogProps) {
+	const paneCommand = usePaneCommand();
 	const backdropDismiss = useBackdropDismiss(onClose);
 	const { catalog, failed, refresh } = useModelCatalog();
 	const providerStageSeen = useRef(false);
@@ -336,6 +340,7 @@ function OpenSetupDialog({ onClose, onDone }: SetupDialogProps) {
 	// (and any click outside it); only a bare Esc closes the dialog.
 	useEffect(() => {
 		const onKey = (e: KeyboardEvent) => {
+			if (!paneCommand()) return;
 			if (e.key !== "Escape") return;
 			// THE ONE-ESC LAW (owner, keyboard round 2026-10-06): claim at
 			// the document level before the layered dismissal — every branch

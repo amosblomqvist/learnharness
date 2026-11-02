@@ -1,5 +1,7 @@
 "use client";
 
+import { usePane, usePaneCommand } from "@/components/workspace/pane-context";
+
 import { useEffect } from "react";
 
 /**
@@ -18,9 +20,12 @@ import { useEffect } from "react";
  * ever hears Tab on surfaces WITHOUT an active claim — no double act.
  */
 export function useFieldCycle(fields: () => readonly HTMLElement[]) {
+	const pane = usePane();
+	const paneCommand = usePaneCommand();
 	useEffect(() => {
 		const onCycle = () => {
-			const list = fields().filter((el) => el.isConnected);
+			if (!paneCommand()) return;
+			const list = fields().filter((el) => el.isConnected && (!pane || el.closest("[data-workspace-pane]")?.getAttribute("data-workspace-pane") === pane.id));
 			if (list.length === 0) return;
 			const active = document.activeElement;
 			const idx = active ? list.findIndex((el) => el === active || el.contains(active)) : -1;

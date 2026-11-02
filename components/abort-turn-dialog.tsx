@@ -1,5 +1,7 @@
 "use client";
 
+import { usePaneActive, usePaneCommand } from "@/components/workspace/pane-context";
+
 import { useEffect } from "react";
 import { createPortal } from "react-dom";
 import { useBackdropDismiss } from "@/components/backdrop-dismiss";
@@ -119,10 +121,13 @@ export function AbortTurnDialog({
 	onConfirm: (mode: AbortMode) => void;
 	busy?: boolean;
 }) {
+	const paneCommand = usePaneCommand();
+	const paneActive = usePaneActive();
 	// Esc cancels the popup (claimed — never a chained abort).
 	useEffect(() => {
 		if (mode === null) return;
 		const onKeyDown = (e: KeyboardEvent) => {
+			if (!paneCommand()) return;
 			if (e.key === "Escape") {
 				// THE ONE-ESC LAW (keyboard round 2026-10-06): claim at the
 				// document level — a window-level stopPropagation cannot stop
@@ -136,7 +141,7 @@ export function AbortTurnDialog({
 		return () => document.removeEventListener("keydown", onKeyDown);
 	}, [mode, onClose]);
 
-	if (mode === null || typeof document === "undefined") return null;
+	if (!paneActive || mode === null || typeof document === "undefined") return null;
 	return createPortal(
 		<AbortTurnBody mode={mode} onClose={onClose} onConfirm={() => onConfirm(mode)} busy={busy} />,
 		document.body,

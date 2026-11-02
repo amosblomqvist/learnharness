@@ -1,5 +1,6 @@
 "use client";
 
+import { usePaneCommand } from "@/components/workspace/pane-context";
 import { useEffect, useLayoutEffect, useRef, type RefObject } from "react";
 import { sessionFindHasForegroundLayer } from "./session-find";
 
@@ -45,6 +46,7 @@ export function navigateChainRows(rows: ChainNavigationRow[], active: string | n
 }
 
 export function useChainNavigation(rootRef: RefObject<HTMLDivElement | null>, searchRef: RefObject<HTMLInputElement | null>, enabled: boolean) {
+	const paneCommand = usePaneCommand();
 	const active = useRef<string | null>(null);
 	const pendingEnter = useRef<string | null>(null);
 	const pendingFocus = useRef<string | null>(null);
@@ -79,6 +81,7 @@ export function useChainNavigation(rootRef: RefObject<HTMLDivElement | null>, se
 		if (!enabled) return;
 		const root = rootRef.current;
 		const onFind = () => {
+			if (!paneCommand()) return;
 			if (sessionFindHasForegroundLayer(document)) return;
 			searchRef.current?.focus({ preventScroll: true }); searchRef.current?.select();
 		};
@@ -93,6 +96,7 @@ export function useChainNavigation(rootRef: RefObject<HTMLDivElement | null>, se
 			}
 		};
 		const onKeyDown = (event: KeyboardEvent) => {
+			if (!paneCommand()) return;
 			if (event.defaultPrevented || event.isComposing || event.metaKey || event.ctrlKey || event.altKey || event.shiftKey || !["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", " "].includes(event.key)) return;
 			if (sessionFindHasForegroundLayer(document)) return;
 			const target = event.target instanceof Element ? event.target : null;
@@ -121,7 +125,7 @@ export function useChainNavigation(rootRef: RefObject<HTMLDivElement | null>, se
 		root?.addEventListener("pointerdown", onPointerDown);
 		return () => { window.removeEventListener("lh:kbd-find", onFind); document.removeEventListener("keydown", onKeyDown); root?.removeEventListener("pointerdown", onPointerDown); };
 	});
-	useEffect(() => { if (enabled && !sessionFindHasForegroundLayer(document)) rootRef.current?.focus({ preventScroll: true }); }, [enabled, rootRef]);
+	useEffect(() => { if (paneCommand() && enabled && !sessionFindHasForegroundLayer(document)) rootRef.current?.focus({ preventScroll: true }); }, [enabled, rootRef]);
 	return { focusRow(parts: string[]) {
 		const key = JSON.stringify(parts);
 		if (readRows().some((row) => row.key === key)) highlight(key, true);

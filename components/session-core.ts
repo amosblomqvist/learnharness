@@ -803,7 +803,7 @@ export class SessionModel {
 	 *  settled mid-send (the race): fall back to the plain text send —
 	 *  the entry is dropped and send() pushes its own optimistic card.
 	 */
-	async steer(text: string): Promise<void> {
+	async steer(text: string, onAccepted?: () => void): Promise<void> {
 		const t = text.trim();
 		if (!t) return;
 		const id = `steer_${localId()}`;
@@ -819,10 +819,10 @@ export class SessionModel {
 				headers: { "Content-Type": "application/json" },
 				body: JSON.stringify({ input: { type: "steer", id, text: t } }),
 			});
-			if (res.ok) return; // parked or delivered — the stream lands the card
+			if (res.ok) { onAccepted?.(); return; } // parked or delivered — the stream lands the card
 			if (res.status === 409) {
 				dropSteer();
-				await this.send({ type: "text", text: t }); // the settle race: plain send
+				await this.send({ type: "text", text: t }, onAccepted); // the settle race: plain send
 				return;
 			}
 			dropSteer();
@@ -835,9 +835,9 @@ export class SessionModel {
 
 	/** The answer path (the dock): the answer IS the question call's tool
 	 *  result (fork 1), riding as its input event. */
-	submitAnswer(tool: string, toolCallId: string, output: QuestionAnswerData, questionKey?: string): Promise<void> {
+	submitAnswer(tool: string, toolCallId: string, output: QuestionAnswerData, questionKey?: string, onAccepted?: () => void): Promise<void> {
 		void tool;
-		return this.send({ type: "answer", toolCallId, answer: output }, undefined, questionKey).then(() => undefined);
+		return this.send({ type: "answer", toolCallId, answer: output }, onAccepted, questionKey).then(() => undefined);
 	}
 
 	/** The dismissal path (owner design 2026-10-03, "A2"): the skipped
@@ -846,7 +846,7 @@ export class SessionModel {
 	 * user's choice; the next plain send is the wake. On failure the
 	 * durable record wins: the error surfaces, the record-changed sync
 	 * (or any later refetch) replaces the optimistic append with truth. */
-	async dismissQuestion(toolCallId: string, answer: QuestionAnswerData, questionKey?: string): Promise<void> {
+	async dismissQuestion(toolCallId: string, answer: QuestionAnswerData, questionKey?: string, onAccepted?: () => void): Promise<void> {
 		if (!this.readyRef) return;
 		const subject = pendingQuestionOf([...this.base, ...this.tail]);
 		if (questionKey !== undefined && (subject?.key !== questionKey || subject.toolCallId !== toolCallId)) return;
@@ -861,6 +861,7 @@ export class SessionModel {
 				body: JSON.stringify({ input: { type: "dismiss", toolCallId, answer } }),
 			});
 			if (!res.ok) throw new Error(`The dismissal failed (${res.status}).`);
+			onAccepted?.();
 		} catch (err) {
 			this.setError((err as Error).message);
 		}

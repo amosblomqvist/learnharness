@@ -1,5 +1,7 @@
 "use client";
 
+import { SessionWorkspace } from "@/components/workspace/session-workspace";
+import type { WorkspaceBridge } from "@/components/workspace/pane-context";
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
@@ -62,6 +64,7 @@ declare global {
 		lh?: {
 			/** Read-only host OS; determines the native-control gutter. */
 			platform?: string;
+			workspace?: WorkspaceBridge;
 			/** Resolve an OS-backed File without copying/uploading its contents. */
 			getPathForFile?: (file: File) => string;
 			/** External Next desktop-dev uses the server's web connections. */
@@ -411,7 +414,8 @@ function SessionsSidebar() {
 	   message is sent (and that message becomes its title). Search: a
 	   client-side filter over the poll snapshot — no server round trip. */
 	const newSession = useCallback(() => {
-		router.push("/chat/new");
+		if (window.lh?.workspace) void (window.dispatchEvent(new Event("lh:flush-views")), window.dispatchEvent(new Event("lh:show-workspace")), window.lh.workspace.open(null, "active"));
+		else router.push("/chat/new");
 	}, [router]);
 
 	/* FUZZY (owner round 8, 2026-10-05): subsequence match ranked by
@@ -674,6 +678,7 @@ function SessionsSidebar() {
 						<Link
 							href="/"
 							aria-label="Home"
+							onClick={() => window.dispatchEvent(new Event("lh:show-graph"))}
 							className="lh-no-drag flex size-9 shrink-0 items-center justify-center rounded-md transition-colors hover:bg-accent hover:text-accent-foreground dark:hover:bg-accent/50"
 						>
 							<LhMark className="size-6" />
@@ -766,7 +771,8 @@ function SessionsSidebar() {
 									const target = shown![kbdIndex !== null && kbdIndex < n ? kbdIndex : 0];
 									if (!target) return;
 									e.preventDefault();
-									router.push(`/chat/${target.id}`);
+									if (window.lh?.workspace) void (window.dispatchEvent(new Event("lh:flush-views")), window.dispatchEvent(new Event("lh:show-workspace")), window.lh.workspace.open(target.id, "active"));
+								else router.push(`/chat/${target.id}`);
 									setKbdIndex(null);
 									e.currentTarget.blur();
 								}
@@ -830,7 +836,8 @@ function SessionsSidebar() {
 									kbdSelected={i === kbdIndex}
 									onOpen={() => {
 										setKbdIndex(null);
-										router.push(`/chat/${c.id}`);
+										if (window.lh?.workspace) void (window.dispatchEvent(new Event("lh:flush-views")), window.dispatchEvent(new Event("lh:show-workspace")), window.lh.workspace.open(c.id, "active"));
+										else router.push(`/chat/${c.id}`);
 									}}
 									onContextMenu={(e) => openContext(e, c)}
 								/>
@@ -881,6 +888,7 @@ function SessionsSidebar() {
 						    hairline — the block is info + a stateful affordance, the
 						    actions above it. Fetched on menu open (the block mounts WITH
 						    the menu); 409 = benign. Renders nothing on a failed read. */}
+						{typeof window !== "undefined" && window.lh?.workspace && ([ ["beside", "Open Beside"], ["window", "Open in New Window"] ] as const).map(([disposition, label]) => <button key={disposition} type="button" data-testid={`ctx-open-${disposition}`} className="rounded-lg px-2.5 py-1.5 text-left hover:bg-accent" onClick={() => { window.dispatchEvent(new Event("lh:flush-views")), window.dispatchEvent(new Event("lh:show-workspace")); void window.lh?.workspace?.open(ctxChatId, disposition); setCtxChatId(null); }}>{label}</button>)}
 						<button
 							type="button"
 							data-testid="ctx-rename"
@@ -947,7 +955,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 	return (
 		<SettingsDialogProvider>
 			<SessionsSidebar />
-			<FilePathDropZone className="relative min-w-0 flex-1">{children}</FilePathDropZone>
+			<FilePathDropZone className="relative min-w-0 flex-1"><SessionWorkspace>{children}</SessionWorkspace></FilePathDropZone>
 			{/* The single document-level keydown listener (keyboard wave A) —
 			    after the content in the tree, but it's window-level so order only
 			    matters for the events it dispatches, never for DOM priority. */}

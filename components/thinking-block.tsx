@@ -1,5 +1,6 @@
 "use client";
 
+import { usePane } from "@/components/workspace/pane-context";
 import { useEffect, useRef, useState } from "react";
 import { ChevronDownIcon } from "lucide-react";
 import { blurAfterPointerClick } from "@/components/focus-hygiene";
@@ -41,11 +42,12 @@ import { PathText } from "@/components/file-path-chip";
 // ── The ⌘T store (module-scope, one per page load) ─────────────────────────
 // null = "rows run their own defaults" (the pre-toggle state); the first ⌘T
 // resolves from `true` (transcript rows default open) and then alternates.
+const paneThinking = new Map<string, boolean>();
 let allUserThinkingOpen: boolean | null = null;
-const userThinkingListeners = new Set<(open: boolean) => void>();
+const userThinkingListeners = new Set<(open: boolean, paneId?: string) => void>();
 
-export function currentUserThinkingOpen(): boolean {
-	return allUserThinkingOpen ?? true;
+export function currentUserThinkingOpen(paneId?: string): boolean {
+	return paneId ? paneThinking.get(paneId) ?? true : allUserThinkingOpen ?? true;
 }
 
 /** The row's starting state: an explicit ⌘T set wins over the row's own
@@ -55,12 +57,12 @@ function resolveUserThinkingOpen(defaultOpen: boolean): boolean {
 	return allUserThinkingOpen ?? defaultOpen;
 }
 
-export function setAllUserThinkingOpen(open: boolean) {
-	allUserThinkingOpen = open;
-	for (const l of userThinkingListeners) l(open);
+export function setAllUserThinkingOpen(open: boolean, paneId?: string) {
+	if (paneId) paneThinking.set(paneId, open); else allUserThinkingOpen = open;
+	for (const l of userThinkingListeners) l(open, paneId);
 }
 
-function subscribeUserThinking(fn: (open: boolean) => void): () => void {
+function subscribeUserThinking(fn: (open: boolean, paneId?: string) => void): () => void {
 	userThinkingListeners.add(fn);
 	if (allUserThinkingOpen !== null) fn(allUserThinkingOpen); // late mounts honor the last set
 	return () => userThinkingListeners.delete(fn);
@@ -84,11 +86,12 @@ export function ThinkingBlock({
 	/** On the card's own background: no band (the accent read too light). */
 	inCard?: boolean;
 }) {
-	const [open, setOpen] = useState(() => resolveUserThinkingOpen(defaultOpen));
+	const pane = usePane();
+	const [open, setOpen] = useState(() => pane ? paneThinking.get(pane.id) ?? defaultOpen : resolveUserThinkingOpen(defaultOpen));
 	// ⌘T: an explicit global set overrides every row (once set, rows re-sync).
 	const syncedRef = useRef(false);
 	useEffect(
-		() => subscribeUserThinking((o) => { syncedRef.current = true; setOpen(o); }),
+		() => subscribeUserThinking((o, paneId) => { if (paneId !== pane?.id) return; syncedRef.current = true; setOpen(o); }),
 		[],
 	);
 	return (
