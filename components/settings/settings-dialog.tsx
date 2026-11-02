@@ -433,6 +433,10 @@ export function SettingsDialogBody({
 										onSectionChange={(next: ReviewSettings) =>
 											void write("review", next)
 										}
+										appearance={record.appearance}
+										onAppearanceChange={(next: AppearanceSettings) =>
+											void write("appearance", next)
+										}
 									/>
 								</SettingsSection>
 							)}

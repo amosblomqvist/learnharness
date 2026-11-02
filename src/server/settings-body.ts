@@ -232,7 +232,7 @@ function parseHexOrNull(value: unknown, field: string): { color?: string | null;
 }
 
 /** appearance: { mode?, background?, fontFamily?, proseFontSize?,
- *  sessionNameSerif?, mdRendering? } */
+ *  sessionNameSerif?, mdRendering?, reviewHeatmapColor? } */
 export function parseAppearanceSettingsBody(body: unknown): SettingsBodyResult<AppearanceSettings> {
 	const raw = asRecord(body);
 	if (!raw) return { ok: false, error: "Invalid JSON body" };
@@ -297,6 +297,11 @@ export function parseAppearanceSettingsBody(body: unknown): SettingsBodyResult<A
 			rendering.italicColor = parsed.color ?? null;
 		}
 		if (Object.keys(rendering).length) settings.mdRendering = rendering;
+	}
+	if (raw.reviewHeatmapColor !== undefined) {
+		const parsed = parseHexOrNull(raw.reviewHeatmapColor, "reviewHeatmapColor");
+		if (parsed.error) return { ok: false, error: parsed.error };
+		settings.reviewHeatmapColor = parsed.color ?? null;
 	}
 	return { ok: true, settings };
 }

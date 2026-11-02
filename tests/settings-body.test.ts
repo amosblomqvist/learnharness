@@ -106,6 +106,7 @@ describe("parseAppearanceSettingsBody", () => {
 			proseFontSize: 20,
 			sessionNameSerif: false,
 			mdRendering: { headingWeight: 700, boldColor: "#ff8800", italicColor: null },
+			reviewHeatmapColor: "#3366ff",
 		});
 		assert.ok(r.ok);
 		assert.deepEqual(r.settings, {
@@ -115,6 +116,7 @@ describe("parseAppearanceSettingsBody", () => {
 			proseFontSize: 20,
 			sessionNameSerif: false,
 			mdRendering: { headingWeight: 700, boldColor: "#ff8800", italicColor: null },
+			reviewHeatmapColor: "#3366ff",
 		});
 	});
 
@@ -130,6 +132,7 @@ describe("parseAppearanceSettingsBody", () => {
 			{ sessionNameSerif: 1 },
 			{ mdRendering: { headingWeight: 1000 } },
 			{ mdRendering: { boldColor: "red" } },
+			{ reviewHeatmapColor: "green" },
 		];
 		for (const body of cases) {
 			assert.equal(parseAppearanceSettingsBody(body).ok, false, JSON.stringify(body));

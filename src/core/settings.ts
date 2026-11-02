@@ -396,7 +396,14 @@ export interface AppearanceSettings {
 	/** Session names in CMU Serif (default true — today's look). */
 	sessionNameSerif?: boolean;
 	mdRendering?: MdRenderingSettings;
+	/** The schedule heatmap's past-day ink (Settings > Review, 2026-11-02,
+	 *  owner): reviewed days shade in it, brighter = more. null = the
+	 *  heatmap's own green (REVIEW_HEATMAP_DEFAULT_COLOR). */
+	reviewHeatmapColor?: string | null;
 }
+
+/** reviewHeatmapColor's null: GitHub's dark-mode contribution green. */
+export const REVIEW_HEATMAP_DEFAULT_COLOR = "#39d353";
 
 /** Knowledge-graph settings — a strict dependency ladder (owner decision
  *  2026-09-19): graph → embedding → clustering → labeling, each rung only
@@ -551,6 +558,7 @@ export interface FactorySettings {
 			boldColor: string | null;
 			italicColor: string | null;
 		};
+		reviewHeatmapColor: string | null;
 	};
 	graph: Required<GraphSettings>;
 	compaction: Required<CompactionSettings>;
@@ -568,6 +576,7 @@ export const FACTORY_SETTINGS: FactorySettings = {
 		proseFontSize: 16,
 		sessionNameSerif: true,
 		mdRendering: { headingWeight: 900, boldColor: null, italicColor: null },
+		reviewHeatmapColor: null, // REVIEW_HEATMAP_DEFAULT_COLOR
 	},
 	graph: { enabled: true, rendering: true, extractionChunkTokens: 4096 },
 	compaction: { thresholdTokens: 150_000 },
@@ -808,6 +817,7 @@ function sanitizeAppearance(raw: Record<string, unknown>): AppearanceSettings {
 	const sessionNameSerif = boolOrDrop(raw.sessionNameSerif);
 	if (sessionNameSerif !== undefined) out.sessionNameSerif = sessionNameSerif;
 	if (raw.mdRendering !== undefined) out.mdRendering = sanitizeMdRendering(raw.mdRendering);
+	if (raw.reviewHeatmapColor !== undefined) out.reviewHeatmapColor = sanitizeHexOrNull(raw.reviewHeatmapColor);
 	return out;
 }
 

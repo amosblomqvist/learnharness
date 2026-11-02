@@ -34,6 +34,7 @@ import { useEffect, useRef, useState } from "react";
 import {
 	EXTRACTION_CHUNK_TOKENS_FLOOR,
 	parseReviewSteps,
+	REVIEW_HEATMAP_DEFAULT_COLOR,
 	REVIEW_RETENTION_CEILING,
 	REVIEW_RETENTION_FLOOR,
 	resolveSettings,
@@ -431,15 +432,40 @@ const stepsText = (steps: readonly string[]) => steps.join(" ");
  *  allowance, the FSRS scheduler knobs (tunable scheduler, 2026-11-02),
  *  and the schedule heatmap below them. Resolved through the core
  *  resolver, like the chunk budget above; every empty field is the
- *  factory default. */
+ *  factory default. The heatmap's colour row writes the APPEARANCE
+ *  section (owner, 2026-11-02: it's a visual preference) but sits here,
+ *  over the grid it tints. */
 export function ReviewSection({
 	review,
 	onSectionChange,
+	appearance,
+	onAppearanceChange,
 }: {
 	review: ReviewSettings | undefined;
 	onSectionChange: (next: ReviewSettings) => void;
+	appearance: AppearanceSettings | undefined;
+	onAppearanceChange: (next: AppearanceSettings) => void;
 }) {
 	const resolved = resolveSettings(review === undefined ? null : { version: 1, review }).review;
+	const storedColor = appearance?.reviewHeatmapColor ?? null;
+	// The native picker fires input on every drag tick; the grid follows the
+	// draft live, and only the picker's change (dialog closed) writes — every
+	// write is a section PUT.
+	const [draftColor, setDraftColor] = useState<string | null>(null);
+	const heatmapColor = draftColor ?? storedColor ?? REVIEW_HEATMAP_DEFAULT_COLOR;
+	const colorInput = useRef<HTMLInputElement>(null);
+	useEffect(() => {
+		const input = colorInput.current;
+		if (!input) return;
+		const commit = () => {
+			setDraftColor(null);
+			if (input.value !== (storedColor ?? REVIEW_HEATMAP_DEFAULT_COLOR)) {
+				onAppearanceChange({ ...appearance, reviewHeatmapColor: input.value });
+			}
+		};
+		input.addEventListener("change", commit);
+		return () => input.removeEventListener("change", commit);
+	}, [appearance, storedColor, onAppearanceChange]);
 	const stepsInput = (key: "learningSteps" | "relearningSteps", label: string, testid: string) => (
 		<CommitInput
 			value={review?.[key] ? stepsText(review[key]) : ""}
@@ -561,7 +587,34 @@ export function ReviewSection({
 				</SettingsRow>
 			</SettingsGroup>
 			<SettingsGroup label="Schedule" testid="review-group-schedule">
-				<ReviewHeatmap />
+				<SettingsRow
+					label="Review colour"
+					hint={storedColor === null ? "Default green" : storedColor}
+					testid="review-row-heatmap-color"
+				>
+					<span className="flex items-center gap-2">
+						{storedColor !== null && (
+							<button
+								type="button"
+								data-testid="review-heatmap-color-reset"
+								onClick={() => onAppearanceChange({ ...appearance, reviewHeatmapColor: null })}
+								className="text-xs text-muted-foreground hover:text-foreground"
+							>
+								Reset
+							</button>
+						)}
+						<input
+							ref={colorInput}
+							type="color"
+							value={heatmapColor}
+							aria-label="review heatmap colour"
+							data-testid="input-review-heatmap-color"
+							onChange={(e) => setDraftColor(e.target.value)}
+							className="h-7 w-10 cursor-pointer rounded-sm border border-border bg-background p-0.5"
+						/>
+					</span>
+				</SettingsRow>
+				<ReviewHeatmap color={heatmapColor} />
 			</SettingsGroup>
 		</>
 	);

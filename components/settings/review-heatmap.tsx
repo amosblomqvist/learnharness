@@ -3,9 +3,10 @@
  * The schedule heatmap (Settings > Review, 2026-11-02 — owner: "like the
  * Anki heatmap add-on"): one tile per review day, weeks as columns, 26
  * weeks either side of today (GET /api/review/schedule). Days behind are
- * shaded by reviews logged, days ahead by propositions due; darker =
- * more, each side on its own scale. Today is ringed and holds everything
- * overdue plus today's new allowance.
+ * shaded by reviews logged in the chosen colour (appearance
+ * reviewHeatmapColor, owner 2026-11-02), brighter = more; days ahead in
+ * grey by propositions due — each side on its own scale. Today is ringed,
+ * stays grey, and holds everything overdue plus today's new allowance.
  *
  * Clicking a tile opens its day below the grid: a past day shows counts
  * only (owner: the full problems are too much); today and later days list
@@ -117,10 +118,14 @@ function weeksOf(start: string, end: string): string[][] {
 /** GitHub's four shades: 0 = empty, 1–4 by share of the side's busiest day. */
 const levelOf = (count: number, max: number) => (count <= 0 || max <= 0 ? 0 : Math.max(1, Math.ceil((count / max) * 4)));
 const SHADES = ["bg-accent","bg-foreground/15", "bg-foreground/35", "bg-foreground/60", "bg-foreground/90"];
+/** The past side's levels 1–4: the review colour's share over the card. */
+const INK = [0, 30, 50, 75, 100];
+const inkOf = (color: string, level: number) =>
+	level === 0 ? undefined : { backgroundColor: `color-mix(in srgb, ${color} ${INK[level]}%, transparent)` };
 
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 
-export function ReviewHeatmap() {
+export function ReviewHeatmap({ color }: { color: string }) {
 	const { schedule, failed } = useReviewSchedule();
 	const [selected, setSelected] = useState<string | null>(null);
 
@@ -183,7 +188,9 @@ export function ReviewHeatmap() {
 								{week.map((key) => {
 									if (key < schedule.start || key > schedule.end) return <span key={key} className="size-2.5" />;
 									const n = view.countOf(key);
-									const level = levelOf(n, key < schedule.today ? view.maxPast : view.maxFuture);
+									const isPast = key < schedule.today;
+									const level = levelOf(n, isPast ? view.maxPast : view.maxFuture);
+									const inked = isPast && level > 0;
 									return (
 										<button
 											key={key}
@@ -193,9 +200,10 @@ export function ReviewHeatmap() {
 											aria-pressed={key === active}
 											data-testid={`review-tile-${key}`}
 											onClick={() => setSelected(key)}
+											style={inked ? inkOf(color, level) : undefined}
 											className={cn(
 												"size-2.5 rounded-[2px] outline-offset-1 transition-colors hover:outline hover:outline-muted-foreground",
-												SHADES[level],
+												!inked && SHADES[level],
 												key === schedule.today && "ring-1 ring-foreground",
 												key === active && "outline outline-1 outline-foreground",
 											)}
@@ -207,15 +215,25 @@ export function ReviewHeatmap() {
 					</div>
 				</div>
 			</div>
-			<div className="flex items-center gap-3 text-[11px] text-muted-foreground">
-				<span className="flex items-center gap-1">
-					Less
+			<div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
+				<span className="flex items-center gap-1" data-testid="review-heatmap-legend-reviews">
+					Reviews: Less
+					{INK.map((_, level) => (
+						<span
+							key={level}
+							style={inkOf(color, level)}
+							className={cn("size-2.5 rounded-[2px]", level === 0 && SHADES[0])}
+						/>
+					))}
+					More
+				</span>
+				<span className="flex items-center gap-1" data-testid="review-heatmap-legend-due">
+					Due: Less
 					{SHADES.map((shade) => (
 						<span key={shade} className={cn("size-2.5 rounded-[2px]", shade)} />
 					))}
 					More
 				</span>
-				<span>Behind today: reviews done · ahead: propositions due</span>
 				{schedule.later > 0 && <span data-testid="review-heatmap-later">later: {schedule.later}</span>}
 			</div>
 			<DayDetail schedule={schedule} date={active} past={view.past.get(active)} due={view.future.get(active) ?? []} />
