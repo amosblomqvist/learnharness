@@ -12,7 +12,7 @@ import * as path from "node:path";
 import { PATHS } from "../../config.ts";
 import { emit } from "../core/events.ts";
 import type { ChatStore } from "../core/ports.ts";
-import type { ChatRecord, ChatSettings, ChatSummary, ExtractionRunUsage, PlanTree, TurnUsage } from "../core/contracts.ts";
+import type { ChatRecord, ChatSettings, ChatSummary, ExtractionRunUsage, PlanTree, SideChatThread, TurnUsage } from "../core/contracts.ts";
 import { CURRENT_CHAT_VERSION } from "../core/contracts.ts";
 import type { LhMessage } from "../core/native-messages.ts";
 import { activeProblemOf, danglingQuestionOf } from "../core/native-messages.ts";
@@ -84,7 +84,7 @@ function listChats(): ChatSummary[] {
 			.filter((f) => f.endsWith(".json"))
 			.map((f) => getChat(f.slice(0, -5)))
 			.filter((r): r is ChatRecord => r !== null)
-			.map(({ messages, tree, turns, extractions, ...summary }) => {
+			.map(({ messages, tree, turns, extractions, sideChats: _sideChats, ...summary }) => {
 				// Per-record isolation (Wave B): a record whose messages fail the
 				// projection (e.g. pre-Wave-B UIMessage-format scratch — the
 				// zero-back-compat wipe makes these "corrupt") must not blank the
@@ -205,6 +205,21 @@ function saveTree(id: string, tree: PlanTree): void {
 	writeChat(record);
 }
 
+/** Side-question threads (2026-11-02): one synchronous read-modify-write,
+ *  so a concurrent turn's saveMessages (which re-reads the record) never
+ *  loses a thread and a thread write never loses messages. Null when the
+ *  chat is gone (a side answer finishing after session deletion). Silent
+ *  and not conversation activity, like saveSettings. */
+function updateSideChats(id: string, update: (threads: SideChatThread[]) => SideChatThread[]): SideChatThread[] | null {
+	const record = getChat(id);
+	if (!record) return null;
+	const next = update(record.sideChats ?? []);
+	if (next.length > 0) record.sideChats = next;
+	else delete record.sideChats;
+	writeChat(record);
+	return next;
+}
+
 export const chatStore: ChatStore = {
 	createChat,
 	getChat,
@@ -216,4 +231,5 @@ export const chatStore: ChatStore = {
 	deleteChat,
 	appendTurnUsage,
 	appendExtractionUsage,
+	updateSideChats,
 };

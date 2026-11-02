@@ -78,6 +78,12 @@ A disconnected browser detaches a **view**, not the agent. Turns run without sub
 
 Submitted question drafts survive optimistic unmount in memory. An uncertain answer submission reconciles the canonical record and running-turn state before another send, and is scoped to the same question occurrence. It must not blindly replay an already-accepted answer. Saved provider failures are distinct from transient transport/settlement notices; retrying a failed response is an explicit action, not mount-time continuation. Retry retains failed attempts on disk and omits only the eligible failed tail from the temporary agent context.
 
+### Side questions
+
+A learner can open an inline side question on any paragraph-level block of teacher prose, in teaching and practice sessions alike: a hover question-mark icon in the block's corner, or **Ask about this** on a text selection inside teacher prose. The window opens right after that block (splitting the passage) and closes to a one-line bar in place. Every Ask opens a new thread with its own follow-ups; a block's windows stack in opening order. Blocks are Streamdown's own markdown split, reached through its `BlockComponent` seam for teacher prose only (`components/side-chat.tsx`); an anchor is `(text-part id, block index)`, stable because settled prose never changes.
+
+A side answer is **not an application turn**. `src/server/side-chat.ts` runs one tool-less streamed call on the session's own model (the same gates as a turn: configured model, provider key), without claiming turn liveness, so it works while a check is pending, a problem is active or a teaching turn runs. It never touches `messages`: threads live in `ChatRecord.sideChats`, written through the store's per-field `updateSideChats`, so the teaching/practice agents, extraction, coverage and compaction never see them. The side model receives the lesson as a quoted document inside its first user turn (`src/core/side-chat.ts`, honoring the active compaction cut), never as its own history. The open check and the active practice problem appear without their hidden half (answer key, explanation, committed answer, model solution); answered checks and concluded problems appear in full. The run is server-owned: a closed view detaches, the answer still saves; Stop keeps the partial answer. Usage lands in the session's `turns` log keyed to the side answer's id (the compaction precedent), so the cost meter counts it while the context meter, which reads messages, does not. Changes announce on `side-chats-changed`; the routes are `app/api/chats/[id]/side-chats/`.
+
 ## 3. Teaching lifecycle and tools
 
 The teaching agents share one record but have different prompts and registries (`src/agent/teacher-agent.ts`, `src/agent/tools.ts`).
@@ -206,7 +212,7 @@ Notifications generally follow the corresponding mutation. Chat content-store op
 
 | Data | Persistence |
 |---|---|
-| Conversations, plans, outcomes and usage | `chats/*.json` |
+| Conversations, plans, outcomes, usage and side questions | `chats/*.json` |
 | Worker computation and delivery obligations | `jobs/*.json` |
 | Proposition assertions, chain assertions, extraction checkpoints/coverage | `graph/{nodes,chains,sessions,coverage}.jsonl` |
 | Imported source metadata/usage, resting positions, render preferences | JSON maps in `graph/` |

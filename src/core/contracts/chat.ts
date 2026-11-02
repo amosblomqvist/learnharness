@@ -52,6 +52,12 @@ export interface ChatRecord {
 	extractions?: ExtractionRunUsage[];
 	/** Per-chat model/thinking overrides for the conversation agents. */
 	settings?: ChatSettings;
+	/** Side questions (inline clarification threads, 2026-11-02): learner
+	 *  questions anchored to a teacher-prose block, answered by a separate
+	 *  tool-less call on the session's model. DELIBERATELY outside
+	 *  `messages`: the teaching/practice agents, extraction, coverage and
+	 *  compaction never read this field. Absent = none. */
+	sideChats?: SideChatThread[];
 	/** SCHEMA STAMP (schema-versioning wave, owner 2026-10-10): LAZY v1 —
 	 *  existing records stay unstamped (absence reads as v1); every write
 	 *  stamps the current version. A record stamped NEWER than this build
@@ -113,6 +119,53 @@ export interface ExtractionRunUsage {
 }
 
 // ─── Usage accounting (the money channel) ─────────────────────────────────────
+
+// ─── Side questions (inline clarification threads, 2026-11-02) ──────────────
+
+/** Where a side thread sits in the transcript: after one paragraph-level
+ *  block (Streamdown's markdown block split) of one teacher prose part.
+ *  Settled teacher prose never changes, so (partId, blockIndex) is stable. */
+export interface SideChatAnchor {
+	/** The native assistant message carrying the prose. */
+	messageId: string;
+	/** projectView's text-part identity (`<messageId>-t<n>`). */
+	partId: string;
+	/** 0-based block index inside that part's rendered markdown. */
+	blockIndex: number;
+	/** The block's markdown source when the thread was opened — the
+	 *  default quote, and the anchor's text if the record is ever re-split. */
+	blockText: string;
+}
+
+/** One message in a side thread. Plain text, never native pi history: the
+ *  thread is replayed to the side model as user/assistant text turns. */
+export interface SideChatMessage {
+	id: string;
+	role: "user" | "assistant";
+	/** The learner's question, or the side answer (markdown). */
+	text: string;
+	/** user only: the passages the learner attached to this question. */
+	quotes?: string[];
+	/** ISO time the message was saved. */
+	at: string;
+	/** assistant only: provider-qualified model ("provider:id"). */
+	model?: string;
+	/** assistant only: the learner stopped the answer; `text` is partial. */
+	stopped?: boolean;
+	/** assistant only: the call failed; `text` is whatever arrived. */
+	error?: string;
+}
+
+/** One side thread = one inline window. A block may carry several,
+ *  stacked in creation order. */
+export interface SideChatThread {
+	id: string;
+	anchor: SideChatAnchor;
+	/** Window state (open window vs. the one-line closed bar). */
+	open: boolean;
+	createdAt: string;
+	messages: SideChatMessage[];
+}
 
 /** One model call's token accounting — the SDK's LanguageModelUsage
  * flattened to the fields we persist (undefined = provider didn't report;
