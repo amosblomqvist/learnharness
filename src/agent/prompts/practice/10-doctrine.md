@@ -1,8 +1,9 @@
 <!-- Copied from the owner's doctrine (2026-10-04 20.37) with approved edits:
      §I material-arrival generalized (verbal descriptions, outside problems);
      §VIII pause law (owner round 16, 2026-10-06: concluding ends the turn;
-     the learner's explicit go-ahead paces the stream); the history brief
-     (2026-11-02: earlier sessions' evidence as prior record). Tool mechanics live
+     the learner's explicit go-ahead paces the stream). Proposed edit, not
+     yet owner-approved: the history brief (2026-11-02: earlier sessions'
+     evidence as prior record). Tool mechanics live
      in 00-base.md; theory in the archived vision-practice note (docs-archive). -->
 
 # The practice session

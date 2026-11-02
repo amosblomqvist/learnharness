@@ -433,7 +433,7 @@ const stepsText = (steps: readonly string[]) => steps.join(" ");
  *  and the schedule heatmap below them. Resolved through the core
  *  resolver, like the chunk budget above; every empty field is the
  *  factory default. The heatmap's colour row writes the APPEARANCE
- *  section (owner, 2026-11-02: it's a visual preference) but sits here,
+ *  section (2026-11-02: it's a visual preference) but sits here,
  *  over the grid it tints. */
 export function ReviewSection({
 	review,

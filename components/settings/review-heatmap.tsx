@@ -1,15 +1,15 @@
 "use client";
 /**
- * The schedule heatmap (Settings > Review, 2026-11-02 — owner: "like the
+ * The schedule heatmap (Settings > Review, 2026-11-02: "like the
  * Anki heatmap add-on"): one tile per review day, weeks as columns, 26
  * weeks either side of today (GET /api/review/schedule). Days behind are
  * shaded by reviews logged in the chosen colour (appearance
- * reviewHeatmapColor, owner 2026-11-02), brighter = more; days ahead in
+ * reviewHeatmapColor, 2026-11-02), brighter = more; days ahead in
  * grey by propositions due — each side on its own scale. Today is ringed,
  * stays grey, and holds everything overdue plus today's new allowance.
  *
  * Clicking a tile opens its day below the grid: a past day shows counts
- * only (owner: the full problems are too much); today and later days list
+ * only (the full problems are too much); today and later days list
  * what comes due, with the replayed FSRS facts for debugging.
  *
  * Refetched on the review pill's signals: a settled turn, a chat-list

@@ -146,7 +146,7 @@ export function reviewBriefLines(
 	}
 }
 
-/** The heatmap window: 26 weeks either side of today (owner, 2026-11-02). */
+/** The heatmap window: 26 weeks either side of today (2026-11-02). */
 export const REVIEW_SCHEDULE_WINDOW_DAYS = 26 * 7;
 
 /** A due card with the live proposition's name and statement. */

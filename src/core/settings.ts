@@ -396,8 +396,8 @@ export interface AppearanceSettings {
 	/** Session names in CMU Serif (default true — today's look). */
 	sessionNameSerif?: boolean;
 	mdRendering?: MdRenderingSettings;
-	/** The schedule heatmap's past-day ink (Settings > Review, 2026-11-02,
-	 *  owner): reviewed days shade in it, brighter = more. null = the
+	/** The schedule heatmap's past-day ink (Settings > Review, 2026-11-02):
+	 *  reviewed days shade in it, brighter = more. null = the
 	 *  heatmap's own green (REVIEW_HEATMAP_DEFAULT_COLOR). */
 	reviewHeatmapColor?: string | null;
 }
@@ -477,7 +477,7 @@ export interface CompactionSettings {
  * reviews still come due). NO CEILING: a big allowance just front-loads
  * the queue.
  *
- * THE TUNABLE SCHEDULER (2026-11-02, owner): the FSRS parameters below,
+ * THE TUNABLE SCHEDULER (2026-11-02): the FSRS parameters below,
  * factory values = ts-fsrs's own defaults. Memory state is replayed from
  * the log on every read, so a change reschedules the WHOLE history at once.
  *  - desiredRetention: [REVIEW_RETENTION_FLOOR, REVIEW_RETENTION_CEILING],
