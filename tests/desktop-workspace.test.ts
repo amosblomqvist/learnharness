@@ -85,3 +85,10 @@ test("asynchronous session creation targets its originating pane after focus cha
 	assert.equal(w.panes[1].sessionId, "other");
 	assert.throws(() => ws.open(w.id, "bad", "active", "unknown-pane"));
 });
+
+test("window limit cannot write a workspace that restore would reject", (t) => {
+	const { workspace: ws, file } = fixture(t);
+	for (let i = 0; i < 32; i++) ws.newWindow();
+	assert.throws(() => ws.newWindow(), /Close a window/);
+	ws.persist(); assert.equal(new Workspace(file).state.windows.length, 32);
+});

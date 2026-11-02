@@ -131,7 +131,7 @@ if (process.argv.includes("--browser-service")) {
 			if (win) {
 				if (win.isMinimized()) win.restore();
 				win.focus();
-			}
+			} else reopenWindow?.();
 		});
 		main();
 	}
@@ -669,8 +669,8 @@ function installMenu() {
 async function main() {
 	app.on("window-all-closed", () => {
 		// Generation and provider connections remain live after view closure.
-		// macOS convention: the app stays resident, reactivated from the Dock.
-		if (process.platform !== "darwin") app.quit();
+		// Keep the shared server alive on every platform. Explicit Quit ends
+		// the process; Dock activation or another launch opens an empty view.
 	});
 
 	// The child must not outlive us — cover every quit path.

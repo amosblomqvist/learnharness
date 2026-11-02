@@ -3,7 +3,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const { randomUUID } = require("node:crypto");
 const own = (value) => value && typeof value === "object" && !Array.isArray(value);
-const validId = (value) => typeof value === "string" && /^[a-zA-Z0-9_-]{1,160}$/.test(value);
+const validId = (value) => typeof value === "string" && /^[a-zA-Z0-9_-]{1,160}$/.test(value) && !["__proto__", "constructor", "prototype"].includes(value);
 const validViewId = (value) => validId(value) || (typeof value === "string" && value.startsWith("pane:") && validId(value.slice(5)));
 const finite = (value) => typeof value === "number" && Number.isFinite(value);
 const copy = (value) => JSON.parse(JSON.stringify(value));
@@ -66,6 +66,7 @@ class Workspace {
 		fs.renameSync(temporary, this.file);
 	}
 	newWindow(pane = { id: randomUUID(), sessionId: null }) {
+		if (this.state.windows.length >= 32) throw new Error("Close a window before opening another window.");
 		const w = { id: randomUUID(), panes: [pane], activePaneId: pane.id, split: .5, zoom: 1 };
 		this.state.windows.push(w); return w;
 	}
@@ -82,7 +83,7 @@ class Workspace {
 		if (sessionId !== null && !validId(sessionId)) throw new Error("Invalid session.");
 		if (!["active", "beside", "window"].includes(disposition)) throw new Error("Invalid destination.");
 		const source = this.window(windowId);
-		if (paneId !== undefined && (!validId(paneId) || !source.panes.some((p) => p.id === paneId))) throw new Error("Unknown target pane.");
+		if (paneId !== undefined && (disposition !== "active" || !validId(paneId) || !source.panes.some((p) => p.id === paneId))) throw new Error("Unknown target pane.");
 		if (sessionId !== null) for (const w of this.state.windows) {
 			const pane = w.panes.find((p) => p.sessionId === sessionId);
 			if (pane) { w.activePaneId = pane.id; return w; }
@@ -97,6 +98,7 @@ class Workspace {
 		pane.sessionId = sessionId; target.activePaneId = pane.id; return target;
 	}
 	move(windowId, paneId) {
+		if (this.state.windows.length >= 32) throw new Error("Close a window before moving this pane.");
 		const source = this.window(windowId); const pane = source.panes.find((p) => p.id === paneId);
 		if (!pane) throw new Error("Unknown pane.");
 		this.close(windowId, paneId); return this.newWindow(pane);
