@@ -16,8 +16,8 @@ export function usePopoverDismiss(
 	open: boolean,
 	close: () => void,
 ): void {
-const paneCommand = usePaneCommand();
-		useEffect(() => {
+	const paneCommand = usePaneCommand();
+	useEffect(() => {
 		if (!open) return;
 		const onPointerDown = (e: PointerEvent) => {
 			if (rootRef.current && !rootRef.current.contains(e.target as Node)) close();

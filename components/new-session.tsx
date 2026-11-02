@@ -310,9 +310,13 @@ export function NewSession({ initialConfigured, mode = "teach" }: { initialConfi
 		setStartError(false);
 		void startDraftSession(draft, fetch, mode === "practice" ? "practice" : undefined, mode === "practice" ? picksRef.current : undefined,
 			starterRef.current, JSON.stringify(catalog?.slots.strong))
-			.then((target) => {
+			.then(async (target) => {
 				if (target) {
-					if (window.lh?.workspace) void window.lh.workspace.open(new URL(target, window.location.origin).pathname.split("/")[2]!, "active", pane?.id);
+					if (window.lh?.workspace) {
+						const sessionId = new URL(target, window.location.origin).pathname.split("/")[2]!;
+						await window.lh.workspace.save({ views: { [sessionId]: { draft }, ...(pane ? { [`pane:${pane.id}`]: { draft: "" } } : {}) } });
+						await window.lh.workspace.open(sessionId, "active", pane?.id);
+					}
 					else router.push(target);
 				}
 				else { startingRef.current = false; setBusy(false); }
