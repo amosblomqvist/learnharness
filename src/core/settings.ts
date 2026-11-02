@@ -461,6 +461,18 @@ export interface CompactionSettings {
 	thresholdTokens?: number;
 }
 
+/**
+ * REVIEW (scheduled practice, 2026-11-02): the spaced-repetition knob.
+ * Every graph proposition is enrolled; never-practiced ones enter the
+ * review queue at newPerDay a day (core/review.ts).
+ *
+ * FACTORY DEFAULT 10. FLOOR 0 (zero pauses new material; reviews still
+ * come due). NO CEILING: a big allowance just front-loads the queue.
+ */
+export interface ReviewSettings {
+	newPerDay?: number;
+}
+
 /** THE record. Every section optional (delta); unknown top-level keys are
  *  preserved verbatim by the sanitizer (forward-compat with newer records). */
 export interface UserSettings {
@@ -477,6 +489,7 @@ export interface UserSettings {
 	appearance?: AppearanceSettings;
 	graph?: GraphSettings;
 	compaction?: CompactionSettings;
+	review?: ReviewSettings;
 	[key: string]: unknown;
 }
 
@@ -503,6 +516,7 @@ export interface FactorySettings {
 	};
 	graph: Required<GraphSettings>;
 	compaction: Required<CompactionSettings>;
+	review: Required<ReviewSettings>;
 }
 
 export const FACTORY_SETTINGS: FactorySettings = {
@@ -519,6 +533,7 @@ export const FACTORY_SETTINGS: FactorySettings = {
 	},
 	graph: { enabled: true, rendering: true, extractionChunkTokens: 4096 },
 	compaction: { thresholdTokens: 150_000 },
+	review: { newPerDay: 10 },
 };
 
 /** The chunk budget's validated floor (GraphSettings.extractionChunkTokens
@@ -791,6 +806,17 @@ function sanitizeCompaction(raw: Record<string, unknown>): CompactionSettings {
 	return out;
 }
 
+/** clamp-never-reject: a finite non-negative number floors to an integer,
+ *  anything else drops (the factory default resolves at read time). */
+function sanitizeReview(raw: Record<string, unknown>): ReviewSettings {
+	const out: ReviewSettings = {};
+	const rawNew = raw.newPerDay;
+	if (typeof rawNew === "number" && Number.isFinite(rawNew) && rawNew >= 0) {
+		out.newPerDay = Math.floor(rawNew);
+	}
+	return out;
+}
+
 /**
  * Coerce arbitrary JSON (disk file, network body) into a valid delta record:
  * known fields validated strictly (invalid ones drop/clamp per module doc),
@@ -837,6 +863,9 @@ export function sanitizeUserSettings(raw: unknown): UserSettings | null {
 		if (r.compaction !== undefined && r.compaction !== null && typeof r.compaction === "object") {
 			out.compaction = sanitizeCompaction(r.compaction as Record<string, unknown>);
 		}
+	}
+	if (r.review !== null && typeof r.review === "object" && !Array.isArray(r.review)) {
+		out.review = sanitizeReview(r.review as Record<string, unknown>);
 	}
 	// Unknown top-level keys ride along untouched (forward-compat). One
 	// known-DEAD key is stripped instead of riding: `chat` (the old

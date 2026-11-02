@@ -34,7 +34,7 @@ Secrets and machine-specific paths may be supplied through the process environme
 | `TAVILY_API_KEY` / `BRAVE_API_KEY` | Optional search adapters. Research remains available without a search key and can fetch known URLs. |
 | `DEEPGRAM_API_KEY` | Optional dictation: short-lived token minting on the server; audio streams directly from the browser to Deepgram. |
 | `CHROME_PATH` | Optional Chrome/Chromium executable fallback for demo verification. The Electron browser helper is primary; no extra Chromium is downloaded. PDFs/SVGs use native rendering. |
-| `LH_DATA_DIR` | Relocates mutable chats, jobs, graph, settings and prompt overrides; default is repo `data/`. |
+| `LH_DATA_DIR` | Relocates mutable chats, jobs, graph, review log, settings and prompt overrides; default is repo `data/`. |
 | `LH_AUTH_FILE` | Relocates the API-key/custom-endpoint credential file; default is repo-root `auth.json`, separate from `data/`. |
 
 The packaged desktop host sets its own data/auth locations under Electron `userData`; it does not use the repository's development profile. Auth files are owner-only plaintext, not an encrypted vault. Keep `.env.local`, auth/connection files and learning data out of commits and build artifacts. Do not copy a personal profile into fixtures or a reproduction workspace.
@@ -76,7 +76,7 @@ The import law is the specific set of ESLint zones in `eslint.config.mjs`: shell
 
 ## Data and safe local work
 
-Chats are native conversation JSON, jobs are JSON, and the graph combines proposition/chain/checkpoint/coverage JSONL with JSON maps for sources and presentation state. Practice is conversational `kind: "practice"` chat history, not a separate problem-set database. See [storage and compatibility](architecture.md#8-storage-and-compatibility) before changing formats: chat versions, the graph-family sidecar and settings versions have different read/write policies.
+Chats are native conversation JSON, jobs are JSON, and the graph combines proposition/chain/checkpoint/coverage JSONL with JSON maps for sources and presentation state. Practice is conversational `kind: "practice"` chat history, not a separate problem-set database; concluded, targeted problems are also copied into the spaced-repetition review log under `review/`. See [storage and compatibility](architecture.md#8-storage-and-compatibility) before changing formats: chat versions, the graph-family sidecar and settings versions have different read/write policies.
 
 For an isolated reproduction, create a disposable data directory and a separate empty `{}` auth file, then set both paths for the process you launch:
 

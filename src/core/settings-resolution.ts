@@ -37,6 +37,7 @@ import {
 	type GeneralSettings,
 	type DictationSettings,
 	type CompactionSettings,
+	type ReviewSettings,
 	type CustomModel,
 	type CustomModelOverride,
 	type GraphSettings,
@@ -98,6 +99,8 @@ export interface EffectiveSettings {
 	/** Compaction (owner round 14): resolved concrete — absent record
 	 *  section resolves to the factory 150k. */
 	compaction: Required<CompactionSettings>;
+	/** Review (scheduled practice): absent resolves to the factory 10/day. */
+	review: Required<ReviewSettings>;
 	/** Custom endpoint, resolved concrete: baseUrl defaults "", models and
 	 *  user pins default to empty. */
 	customProvider: { baseUrl: string; models: CustomModel[]; overrides: Record<string, CustomModelOverride>; manualModels: string[] };
@@ -229,6 +232,9 @@ export function resolveSettings(record: UserSettings | null): EffectiveSettings 
 		},
 		compaction: {
 			thresholdTokens: record?.compaction?.thresholdTokens ?? FACTORY_SETTINGS.compaction.thresholdTokens,
+		},
+		review: {
+			newPerDay: record?.review?.newPerDay ?? FACTORY_SETTINGS.review.newPerDay,
 		},
 		customProvider: {
 			baseUrl: record?.customProvider?.baseUrl ?? "",

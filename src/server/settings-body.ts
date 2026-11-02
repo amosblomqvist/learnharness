@@ -24,6 +24,7 @@ import type {
 	GraphSettings,
 	ModelsSettings,
 	ModelSlot,
+	ReviewSettings,
 	RoleModelOverride,
 } from "../core/settings.ts";
 import { BACKGROUND_MODEL_ROLES, CACHE_RETENTIONS, COMPACTION_THRESHOLD_FLOOR, CUSTOM_MODEL_PIN_FLOOR, EXTRACTION_CHUNK_TOKENS_FLOOR, MODEL_SLOTS } from "../core/settings.ts";
@@ -396,6 +397,23 @@ export function parseCompactionSettingsBody(body: unknown): SettingsBodyResult<C
 	return { ok: true, settings };
 }
 
+/** review (scheduled practice): never-practiced propositions admitted per
+ *  day. Strict write side: a present newPerDay must be a whole number
+ *  ≥ 0 (the read side floors, this rejects — the compaction discipline).
+ *  Absent = factory 10 at resolution. Replace-whole, like every section. */
+export function parseReviewSettingsBody(body: unknown): SettingsBodyResult<ReviewSettings> {
+	const raw = asRecord(body);
+	if (!raw) return { ok: false, error: "Invalid JSON body" };
+	const settings: ReviewSettings = {};
+	if (raw.newPerDay !== undefined) {
+		if (typeof raw.newPerDay !== "number" || !Number.isInteger(raw.newPerDay) || raw.newPerDay < 0) {
+			return { ok: false, error: "newPerDay must be a whole number, 0 or more" };
+		}
+		settings.newPerDay = raw.newPerDay;
+	}
+	return { ok: true, settings };
+}
+
 /** dictation: { language?: one of Nova-3's supported language codes } */
 export function parseDictationSettingsBody(body: unknown): SettingsBodyResult<DictationSettings> {
 	const raw = asRecord(body);
@@ -453,6 +471,7 @@ export const SETTINGS_SECTIONS = {
 	appearance: parseAppearanceSettingsBody,
 	graph: parseGraphSettingsBody,
 	compaction: parseCompactionSettingsBody,
+	review: parseReviewSettingsBody,
 	models: parseModelsSettingsBody,
 	dictation: parseDictationSettingsBody,
 	claudeCode: parseClaudeCodeSettingsBody,

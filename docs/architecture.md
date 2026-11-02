@@ -109,7 +109,15 @@ A practice session can start with graph selections or free-form material. Sessio
 - A turn-scoped gate, seeded from the record, enforces one active problem and rejects conclusion without one. The gate updates during tool execution, so it does not depend on the settlement-only transcript write.
 - After conclusion, the prompt and tool acknowledgement tell the agent to close the turn and wait for explicit learner go-ahead. This pause is not a tool-level terminating gate on `conclude`. The Next problem action adds a native marker; dismissals use a synthesized conclusion and the separate dismissal path.
 
-Practice outcomes are evidence in the session, not graph mastery levels, certification or a spaced-repetition state store. The normal turn-settlement path skips extraction for practice sessions. Problem/solution/outcome projection lives in `src/core/native-messages.ts` and `src/core/view.ts`; the tools live in `src/agent/tools/practice.ts`.
+Practice outcomes are evidence in the session, not graph mastery levels or certification. The normal turn-settlement path skips extraction for practice sessions. Problem/solution/outcome projection lives in `src/core/native-messages.ts` and `src/core/view.ts`; the tools live in `src/agent/tools/practice.ts`.
+
+### Scheduled practice (spaced repetition)
+
+Concluded practice problems that carry `target` proposition IDs also feed an append-only **review log** (`review/reviews.jsonl`). Each line records one problem's raw facts (targets, outcome, hint rung, time) under the ID `chatId:problemCallId`. Ratings and memory state are not stored. `src/core/review.ts` maps outcome and rung to an FSRS rating (Again/Hard/Good, never Easy) and replays the log through `ts-fsrs` (retention 0.9, short-term steps, no fuzz) on every read. Every target of a problem gets the same rating; untagged problems are not reviews.
+
+- **Sync points.** Reviews are read from the *saved* record, never from mid-turn tool execution: at practice-turn settlement (after `persistTurn` and parked dismissals), after an idle dismissal, before a chat record is deleted (the log outlives the chat), and in a once-per-process backfill on the first `GET /api/review`. All syncs are idempotent by review ID. A dismissal marker and its later synthesized conclusion are one review. Sync failures are logged and never fail the turn or the deletion.
+- **Queue.** Every live graph proposition is enrolled. Practiced propositions are due when their FSRS due date passes, most overdue first. Never-practiced propositions enter at `review.newPerDay` per day (default 10), premises before their conclusions in chain order, then oldest first; a proposition spends its slot on its first logged review. Days roll over at 4 AM server-local time. Reviews of deleted propositions are skipped.
+- **Surface.** `GET /api/review` returns due/new counts and up to eight picks (due first). The home composer's Review pill creates an ordinary practice session with those picks as its graph-context marker; the practice agent, tools and prompts are unchanged.
 
 ## 5. Background work and delivery
 
@@ -210,12 +218,13 @@ Notifications generally follow the corresponding mutation. Chat content-store op
 | Worker computation and delivery obligations | `jobs/*.json` |
 | Proposition assertions, chain assertions, extraction checkpoints/coverage | `graph/{nodes,chains,sessions,coverage}.jsonl` |
 | Imported source metadata/usage, resting positions, render preferences | JSON maps in `graph/` |
+| Practice review history (spaced repetition) | `review/reviews.jsonl` |
 | Non-secret settings deltas and prompt overrides | `settings.json`, `prompts/` |
 | API keys/custom endpoint credential binding | Separate `auth.json`, located by `LH_AUTH_FILE` |
 
 The adapters use synchronous filesystem operations. JSONL readers skip corrupt or shape-invalid lines; graph derivation unions repeated identities/provenance. Some replacements use temp-file rename; whole-file chat/settings/source writes do not provide a database transaction. A synchronous read/modify/write section cannot interleave in the same event loop, but that is not cross-process locking or crash atomicity. Use one server owner for a data/auth profile.
 
-Chat writes stamp the supported chat schema version; an unstamped record reads as the original version, while a newer-version chat is refused. Graph-family files share lazy `graph/format.json`; newer graph formats throw on guarded reads. Positions are rebuildable and unstamped. Settings use their own schema counter and sanitizer/default resolution, not the same newer-version refusal policy. These counters are not app release versions and do not promise migration from every historical scratch format. The graph adapter also removes retired `edges.jsonl`/`events.jsonl` at initialization, so importing a store module is not a universally side-effect-free inspection method.
+Chat writes stamp the supported chat schema version; an unstamped record reads as the original version, while a newer-version chat is refused. Graph-family files share lazy `graph/format.json`; newer graph formats throw on guarded reads. The review log follows the same contract with its own lazy `review/format.json`; an empty sync writes nothing. Positions are rebuildable and unstamped. Settings use their own schema counter and sanitizer/default resolution, not the same newer-version refusal policy. These counters are not app release versions and do not promise migration from every historical scratch format. The graph adapter also removes retired `edges.jsonl`/`events.jsonl` at initialization, so importing a store module is not a universally side-effect-free inspection method.
 
 Golden fixtures under `tests/fixtures/golden-data/` exercise real saved records through the data-directory seam. Intentional format changes must keep their compatibility expectations and fixture documentation consistent.
 

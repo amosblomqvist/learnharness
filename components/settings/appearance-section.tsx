@@ -36,6 +36,7 @@ import {
 	resolveSettings,
 	type AppearanceSettings,
 	type GraphSettings,
+	type ReviewSettings,
 } from "@/src/core";
 import { MenuShell } from "@/components/menu-shell";
 import { Hint } from "@/components/ui/hint";
@@ -417,5 +418,42 @@ export function GraphSection({
 				/>
 			</SettingsRow>
 		</>
+	);
+}
+/** The Review section (scheduled practice, 2026-11-02): the one knob —
+ *  never-practiced propositions admitted to the review queue per day.
+ *  Resolved through the core resolver, like the chunk budget above. */
+export function ReviewSection({
+	review,
+	onSectionChange,
+}: {
+	review: ReviewSettings | undefined;
+	onSectionChange: (next: ReviewSettings) => void;
+}) {
+	const resolved = resolveSettings(review === undefined ? null : { version: 1, review }).review;
+	return (
+		<SettingsRow
+			label="New propositions per day"
+			hint={`${resolved.newPerDay} a day`}
+			testid="review-row-new-per-day"
+		>
+			<CommitInput
+				type="number"
+				value={String(review?.newPerDay ?? "")}
+				placeholder={String(resolved.newPerDay)}
+				ariaLabel="new propositions per day"
+				testid="input-new-per-day"
+				onCommit={(v) => {
+					// Empty = factory default (the chunk-budget discipline).
+					if (v === "") {
+						onSectionChange({ ...review, newPerDay: undefined });
+						return;
+					}
+					const n = Number(v);
+					if (!Number.isFinite(n) || n < 0) return; // bad input: no write
+					onSectionChange({ ...review, newPerDay: Math.round(n) });
+				}}
+			/>
+		</SettingsRow>
 	);
 }

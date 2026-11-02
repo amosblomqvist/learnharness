@@ -15,6 +15,7 @@ import { StatsBar } from "@/components/stats-bar";
 import { OPENING_PROMPT_FAILURE } from "@/components/opening-prompt";
 import { PathInput } from "@/components/path-input";
 import { SessionStarter } from "@/components/start-session";
+import { ReviewPill, useReviewQueue, type ReviewPick } from "@/components/review-pill";
 import type { TurnUsage } from "@/src/core";
 
 /**
@@ -109,14 +110,14 @@ export function Home({
 		}
 		void dictation.finish().then(() => begin());
 	};
-	const begin = async () => {
-		const t = topicRef.current.trim();
-		if (!t || startingRef.current) return;
+	/** The pre-send guards shared by the topic send and the review pill:
+	 *  false when a guard intercepted (setup or the model picker opened). */
+	const readyToStart = () => {
 		// Unconfigured: the send INTERCEPTS into the setup flow (the draft
 		// stays in the textarea; the learner sends it after Save).
 		if (!configured) {
 			setSetupOpen(true);
-			return;
+			return false;
 		}
 		// The pre-send KEY guards (owner interlude, no-orphan-chats): the
 		// models case guards BEFORE creation; the key cases must too — a
@@ -127,13 +128,19 @@ export function Home({
 		// picker. The server's admission gate remains the belt.
 		if (zeroKeys) {
 			setSetupOpen(true);
-			return;
+			return false;
 		}
 		const strong = catalog?.slots.strong?.model;
 		if (selectedModelUnavailable(catalog, strong ? `${strong.provider}:${strong.id}` : undefined)) {
 			openModelPicker();
-			return; // Preserve the draft and never create an orphan session.
+			return false; // Preserve the draft and never create an orphan session.
 		}
+		return true;
+	};
+	const begin = async () => {
+		const t = topicRef.current.trim();
+		if (!t || startingRef.current) return;
+		if (!readyToStart()) return;
 		startingRef.current = true;
 		setBusy(true);
 		setStartError(false);
@@ -147,6 +154,33 @@ export function Home({
 				title: t,
 				...(mode === "practice" ? { kind: "practice" } : {}),
 				...(practiceProps.length > 0 ? { graphContext: { propositions: practiceProps } } : {}),
+			}, fetch, JSON.stringify(catalog?.slots.strong));
+			router.push(target);
+		} catch {
+			startingRef.current = false;
+			setBusy(false);
+			setStartError(true);
+		}
+	};
+
+	/* SCHEDULED PRACTICE (spaced repetition, 2026-11-02): the review pill
+	 *  starts a practice session over the queue's picks in one click — the
+	 *  same creation contract as a practice send with picks; the title is
+	 *  the opening prompt. Its own starter, so a retry never reuses the
+	 *  topic draft's created session. */
+	const reviewQueue = useReviewQueue();
+	const reviewStarterRef = useRef(new SessionStarter());
+	const beginReview = async (picks: ReviewPick[]) => {
+		if (startingRef.current || picks.length === 0) return;
+		if (!readyToStart()) return;
+		startingRef.current = true;
+		setBusy(true);
+		setStartError(false);
+		try {
+			const target = await reviewStarterRef.current.start({
+				title: `Review: ${picks.length} ${picks.length === 1 ? "proposition" : "propositions"}`,
+				kind: "practice",
+				graphContext: { propositions: picks },
 			}, fetch, JSON.stringify(catalog?.slots.strong));
 			router.push(target);
 		} catch {
@@ -219,12 +253,17 @@ export function Home({
 					    shows the pick HINT so the affordance is discoverable;
 					    teaching mode with nothing picked renders nothing. */}
 					<ComposerActions
-						picker={(practiceProps.length > 0 || mode === "practice") && (
-							<NodePickerControl
-								count={practiceProps.length}
-								onOpen={() => setChainSelectOpen(true)}
-								onClear={() => setPracticeProps([])}
-							/>
+						picker={((practiceProps.length > 0 || mode === "practice") || (reviewQueue?.picks.length ?? 0) > 0) && (
+							<>
+								<ReviewPill queue={reviewQueue} busy={busy} onStart={(picks) => void beginReview(picks)} />
+								{(practiceProps.length > 0 || mode === "practice") && (
+									<NodePickerControl
+										count={practiceProps.length}
+										onOpen={() => setChainSelectOpen(true)}
+										onClear={() => setPracticeProps([])}
+									/>
+								)}
+							</>
 						)}
 						setup={zeroKeys ? (
 							<ZeroKeysPill inline onOpen={() => setSetupOpen(true)} />
