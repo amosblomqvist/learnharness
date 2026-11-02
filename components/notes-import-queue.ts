@@ -2,8 +2,8 @@ import { IMPORT_EXTENSIONS, MAX_IMPORT_BYTES, validNotesPath } from "@/lib/notes
 import type { NotesImportResult } from "./notes-import";
 
 export const notesPath = (file: File): string => file.webkitRelativePath || file.name;
-/** Folder picks carry dot-entries (.DS_Store, .obsidian/, .git/, .trash/) that are never
- * notes. The chosen root is segment 0 and stays importable even when hidden. */
+/** Folder imports silently exclude dot-prefixed files and directories below
+ * the chosen root. The root is segment 0 and stays importable even when hidden. */
 const hiddenInFolder = (file: File): boolean => file.webkitRelativePath.split("/").slice(1).some((part) => part.startsWith("."));
 export interface ImportQueueSnapshot {
 	importing: boolean;
