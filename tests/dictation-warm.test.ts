@@ -10,7 +10,8 @@
 
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { createWarmMinter, deepgramUrl } from "../components/dictation.tsx";
+import { createWarmMinter } from "../components/dictation.tsx";
+import { deepgramListenUrl } from "../src/core/dictation.ts";
 import { effectiveDictationLanguage } from "../src/core/i18n.ts";
 import { resolveSettings } from "../src/core/settings-resolution.ts";
 
@@ -104,12 +105,12 @@ describe("warm-token cache (mitigation D, owner 2026-09-27)", () => {
 	});
 });
 
-describe("deepgramUrl (dictation language setting)", () => {
+describe("deepgramListenUrl (dictation language setting)", () => {
 	it("appends the chosen language to the nova-3 streaming params", () => {
-		const url = new URL(deepgramUrl("es"));
+		const url = new URL(deepgramListenUrl("es"));
 		assert.equal(url.searchParams.get("model"), "nova-3");
 		assert.equal(url.searchParams.get("language"), "es");
-		assert.equal(new URL(deepgramUrl("multi")).searchParams.get("language"), "multi");
+		assert.equal(new URL(deepgramListenUrl("multi")).searchParams.get("language"), "multi");
 	});
 });
 

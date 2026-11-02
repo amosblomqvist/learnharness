@@ -461,6 +461,54 @@ async function renderSvg(svg: string, opts: RenderSvgOptions = {}): Promise<Buff
 
 // ─── PDF page rasterization (pdfjs paints, Skia hosts) ─────────────────
 
+/** Decimal megapixels: at four bytes per pixel this is about 61 MiB per
+ *  page canvas, before pdfjs/Skia's other working memory. */
+export const MAX_PDF_CANVAS_PIXELS = 16_000_000;
+export const MAX_PDF_CANVAS_SIDE = 8192;
+
+/** Plan the allocation from the scale-1 viewport (including PDF rotation).
+ *  Keep ordinary DPI/ceil arithmetic unchanged; oversized pages lose scale,
+ *  never gain it. Exported as a pure seam so extreme geometry needs no canvas. */
+export function pdfCanvasGeometry(baseWidth: number, baseHeight: number, dpi: number): {
+	scale: number;
+	width: number;
+	height: number;
+} {
+	if (![baseWidth, baseHeight].every((n) => Number.isFinite(n) && n > 0)) {
+		throw new Error("PDF page dimensions must be finite and positive");
+	}
+	if (!Number.isFinite(dpi) || dpi <= 0 || dpi / 72 === 0) {
+		throw new Error("PDF render DPI must be finite and positive");
+	}
+	// Limit sides first, so the area calculation cannot overflow even when
+	// the unscaled page dimensions or requested DPI are enormous.
+	let scale = Math.min(dpi / 72, MAX_PDF_CANVAS_SIDE / baseWidth, MAX_PDF_CANVAS_SIDE / baseHeight);
+	const area = (baseWidth * scale) * (baseHeight * scale);
+	if (area > MAX_PDF_CANVAS_PIXELS) scale *= Math.sqrt(MAX_PDF_CANVAS_PIXELS / area);
+	const dimensions = (s: number) => ({
+		width: Math.max(1, Math.ceil(baseWidth * s)),
+		height: Math.max(1, Math.ceil(baseHeight * s)),
+	});
+	const fits = ({ width, height }: { width: number; height: number }) =>
+		width <= MAX_PDF_CANVAS_SIDE && height <= MAX_PDF_CANVAS_SIDE && width * height <= MAX_PDF_CANVAS_PIXELS;
+	// Ceil can put an otherwise bounded floating-point viewport over budget.
+	// Find a safe scale rather than clipping the viewport or allocating first.
+	if (!fits(dimensions(scale))) {
+		let low = 0;
+		let high = scale;
+		for (let i = 0; i < 64; i++) {
+			const mid = low + (high - low) / 2;
+			if (fits(dimensions(mid))) low = mid;
+			else high = mid;
+		}
+		scale = low;
+	}
+	if (scale <= 0 || baseWidth * scale === 0 || baseHeight * scale === 0) {
+		throw new Error("PDF page dimensions cannot be rendered at a positive scale");
+	}
+	return { scale, ...dimensions(scale) };
+}
+
 /** Render PDF pages to PNGs — the sources-v0 pdf-reader's eyes.
  *
  *  History: pdfjs ALWAYS painted the pages (scale = dpi/72, the skill's
@@ -475,6 +523,9 @@ async function renderPdfPages(
 	opts: RenderPdfOptions = {},
 ): Promise<RenderedPdfPage[]> {
 	const dpi = opts.dpi ?? 150;
+	if (!Number.isFinite(dpi) || dpi <= 0 || dpi / 72 === 0) {
+		throw new Error("PDF render DPI must be finite and positive");
+	}
 	// NATIVE CANVAS (Wave E, owner 2026-10-10): pdfjs paints into
 	// @napi-rs/canvas in this process — no browser involved. pdfjs-dist v6's
 	// own Node integration IS @napi-rs/canvas (its optionalDependency: the
@@ -495,8 +546,10 @@ async function renderPdfPages(
 		for (const pageNo of pages) {
 			if (pageNo < 1 || pageNo > doc.numPages) continue;
 			const pg = await doc.getPage(pageNo);
-			const vp = pg.getViewport({ scale: dpi / 72 });
-			const canvas = createCanvas(Math.ceil(vp.width), Math.ceil(vp.height));
+			const base = pg.getViewport({ scale: 1 });
+			const geometry = pdfCanvasGeometry(base.width, base.height, dpi);
+			const vp = pg.getViewport({ scale: geometry.scale });
+			const canvas = createCanvas(geometry.width, geometry.height);
 			const ctx = canvas.getContext("2d");
 			// pdfjs's render types speak the DOM context; @napi-rs/canvas's
 			// context is the same 2D API implemented over Skia.

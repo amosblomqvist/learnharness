@@ -47,4 +47,7 @@ export const chat = {
 	"chat.session.dismissFailed": "The dismissal failed ({status}).",
 	"chat.session.attachFailed": "Failed to attach to the running turn.",
 	"chat.session.emptyStream": "The turn stream body is empty.",
+	"chat.question.malformed": "This question could not be displayed.",
+	"chat.question.retryHint": " Retry it or send a message to continue.",
+	"chat.question.retry": "Retry question",
 } as const;

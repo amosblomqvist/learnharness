@@ -1,10 +1,12 @@
 import { randomUUID } from "node:crypto";
 import type { AssistantMessage, Message, ToolResultMessage, Usage, Tool } from "@earendil-works/pi-ai";
 import { normalizeContext } from "@earendil-works/pi-ai";
+import { processImage, type ProcessImageResult } from "../image-processing/index.ts";
 import { Type } from "typebox";
 import { resolveSourcePath } from "../tools/fs-shared.ts";
 import { piEngineFor, type PiEngine, type ThinkingLevel } from "../models.ts";
 import { providerEventObserver, type ProviderEventObserver } from "../provider-events.ts";
+import { backgroundCaptureStream, createBackgroundCapture, type BackgroundCapture } from "../background-capture.ts";
 import type { PdfResult, PdfToolInput } from "../../core/contracts.ts";
 import type { AppLanguage } from "../../core/i18n.ts";
 import { workerPrompt } from "./worker-prompts.ts";
@@ -190,6 +192,8 @@ export async function runPdfReaderAgent(
 	// factory pin to consult (engine.level is the resolved/clamped value).
 	const reasoning = engine.level;
 	const sessionId = randomUUID();
+	const capture = createBackgroundCapture({ role: "pdfReader", runId: sessionId, sourceId: opts.chatId });
+	const streamEngine = { ...engine, streamFn: backgroundCaptureStream(engine.streamFn, capture) };
 	const prompt = [
 		`PDF path: ${pdfPath}`,
 		`Question (what the teacher needs from this document): ${input.question || "(no question — give a structural overview)"}`,
@@ -206,11 +210,12 @@ export async function runPdfReaderAgent(
 	const read = new Set<number>();
 	let finalText = "";
 	let nudged = false;
+	let captureError: unknown;
 
 	try {
 		for (let iteration = 0; iteration < maxIterations; iteration++) {
 			const result = await streamOnce(
-				engine,
+				streamEngine,
 				workerPrompt("pdfReader", INSTRUCTIONS, opts.language),
 				messages,
 				toolDeclarations,
@@ -218,6 +223,7 @@ export async function runPdfReaderAgent(
 				reasoning,
 				opts.abortSignal,
 				opts.chatId ? providerEventObserver(opts.chatId, "job:pdfReader") : undefined,
+				capture,
 			);
 			// Money channel: each iteration is one model call.
 			opts.onUsage?.(result.usage);
@@ -250,7 +256,7 @@ export async function runPdfReaderAgent(
 			const toolResults: ToolResultMessage[] = [];
 			/** Rendered pages this batch, appended as images AFTER the tool
 			 *  results — the visual-maker's image-in-the-loop idiom. */
-			let renderedImages: { page: number; png: Buffer }[] | null = null;
+			let renderedImages: { page: number; image: ProcessImageResult }[] | null = null;
 
 			for (const call of toolCalls) {
 				const args = (call.arguments ?? {}) as Record<string, unknown>;
@@ -291,19 +297,26 @@ export async function runPdfReaderAgent(
 						const wanted = specNumbers(spec, RENDER_BATCH_CAP);
 						opts.onActivity?.(`pdf_render: ${spec} @${dpi}dpi`);
 						const pages = await headless.renderPdfPages(pdfPath, wanted, { dpi });
+						const processed: { page: number; image: ProcessImageResult }[] = [];
 						for (const p of pages) {
-							consulted.add(p.page);
-							read.add(p.page);
+							const image = await processImage(p.png, "image/png", { resizeOptions: engine.model.inputLimits?.images?.resize });
+							opts.abortSignal?.throwIfAborted();
+							processed.push({ page: p.page, image });
+							// Only images actually delivered to the model count as read.
+							if (image.ok) {
+								consulted.add(p.page);
+								read.add(p.page);
+							}
 						}
 						if (pages.length === 0) {
 							toolResults.push(toolText(call.id, call.name, "ERROR: no pages rendered (spec matched nothing?)"));
 						} else {
-							renderedImages = pages;
+							renderedImages = [...(renderedImages ?? []), ...processed];
 							toolResults.push(
 								toolText(
 									call.id,
 									call.name,
-									`Rendered ${pages.length} page(s) at ${dpi} DPI — the images follow below. Read them carefully (equations, diagrams, layout).`,
+									`Rendered ${pages.length} page(s) at ${dpi} DPI — processed images or explicit omission notes follow below. Read the images carefully (equations, diagrams, layout).`,
 								),
 							);
 						}
@@ -316,6 +329,7 @@ export async function runPdfReaderAgent(
 				}
 			}
 
+			for (const result of toolResults) capture?.toolResult(result);
 			messages = [...messages, ...toolResults];
 			if (renderedImages) {
 				messages = [
@@ -327,11 +341,12 @@ export async function runPdfReaderAgent(
 								type: "text",
 								text: `The rendered page(s), in order (${renderedImages.map((p) => `p${p.page}`).join(", ")}):`,
 							},
-							...renderedImages.map((p) => ({
-								type: "image" as const,
-								data: p.png.toString("base64"),
-								mimeType: "image/png",
-							})),
+							...renderedImages.flatMap(({ page, image }) => image.ok
+								? [
+									{ type: "text" as const, text: [`Page ${page}`, ...image.hints].join("\n") },
+									{ type: "image" as const, data: image.data, mimeType: image.mimeType },
+								]
+								: [{ type: "text" as const, text: `Page ${page}: ${image.message}` }]),
 						],
 						timestamp: Date.now(),
 					},
@@ -339,8 +354,11 @@ export async function runPdfReaderAgent(
 			}
 		}
 	} catch (err) {
+		captureError = err;
 		const msg = err instanceof Error ? err.message : String(err);
 		return { path: pdfPath, question: input.question, brief: `PDF failed: the reader crashed — ${msg}`, pagesRead: [...read].sort((a, b) => a - b), pagesConsulted: [...consulted].sort((a, b) => a - b) };
+	} finally {
+		capture?.finish(captureError);
 	}
 
 	// Iteration limit: deliver whatever was honestly consulted (never invention).
@@ -407,6 +425,7 @@ async function streamOnce(
 	reasoning: ThinkingLevel | undefined,
 	abortSignal?: AbortSignal,
 	onProviderStreamEvent?: ProviderEventObserver,
+	capture?: BackgroundCapture,
 ): Promise<AssistantMessage> {
 	// 0.87.1: provider-facing contexts are TranscriptContexts — the prompt
 	// and tool declarations fold into a leading system message.
@@ -418,8 +437,9 @@ async function streamOnce(
 		onProviderStreamEvent: onProviderStreamEvent as never,
 	} as never);
 	for await (const event of stream) {
-		if (event.type === "done") return event.message;
+		if (event.type === "done") { capture?.reply(event.message); return event.message; }
 		if (event.type === "error") {
+			capture?.reply(event.error);
 			if (event.reason === "aborted") {
 				const err = new Error("aborted");
 				const abortedErr = err as Error & { name: string };

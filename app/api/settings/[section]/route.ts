@@ -5,12 +5,13 @@
  * discipline, same as the per-chat and defaults routes); sections are
  * independent, so partial writes can never clobber each other.
  *
- *   section ∈ general | chat | agent | appearance | graph | compaction
+ *   section ∈ general | chat | agent | appearance | graph | compaction | models | dictation
  *   Body: the complete desired section object. Parse + validate strictly
  *   (server/settings-body.ts): a bad shape/type is a 400 carrying the
  *   supported list where one exists. The chat and models sections
  *   additionally pass the catalog gate (validateChatSettings /
- *   validateModelsSettings — unknown provider/model = 400). Thinking
+ *   validateModelsSettings — unknown provider/model = 400, except unchanged
+ *   model-slot selections may remain saved while unavailable). Thinking
  *   levels never reject a write (owner, interlude 2026-09-22): a pinned
  *   level CLAMPS to the named model's nearest supported level and the
  *   clamped value is stored — model swaps just work, same as the
@@ -63,6 +64,8 @@ export async function PUT(request: Request, ctx: { params: Promise<{ section: st
 	if (!parsed.ok) {
 		return Response.json({ error: parsed.error }, { status: 400 });
 	}
+	// Compare against the same record that this whole-section write replaces.
+	const record = readSettingsRecord() ?? { version: 1 };
 	let agentHealed: AgentSettings | undefined;
 
 	// Section-specific cross-validation (against the catalog / the prompt
@@ -73,11 +76,11 @@ export async function PUT(request: Request, ctx: { params: Promise<{ section: st
 			return Response.json({ error: verdict.error, supported: verdict.supported }, { status: 400 });
 		}
 	}
-	// Model slots wave (2026-09-20): the models section gets the same
-	// catalog gate the chat section gets — a slot must name a real
-	// provider+model and a thinking level it supports.
+	// New/replaced slot models pass the catalog gate. Unchanged saved model
+	// references may survive disconnect, including thinking-preference edits,
+	// so each unavailable slot can be repaired independently of the others.
 	if (section === "models") {
-		const verdict = validateModelsSettings(parsed.settings as ModelsSettings);
+		const verdict = validateModelsSettings(parsed.settings as ModelsSettings, record.models);
 		if (!verdict.ok) {
 			return Response.json({ error: verdict.error, supported: verdict.supported }, { status: 400 });
 		}
@@ -124,7 +127,6 @@ export async function PUT(request: Request, ctx: { params: Promise<{ section: st
 
 	// Read-modify-write ONE section of the record; everything else rides
 	// along untouched (other sections, unknown keys — sanitize preserves).
-	const record = readSettingsRecord() ?? { version: 1 };
 	const next = { ...record, [section]: sectionOut };
 	writeSettingsRecord(next);
 	return Response.json({ settings: next });

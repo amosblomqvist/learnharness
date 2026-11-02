@@ -13,12 +13,13 @@ import * as path from "node:path";
 import { after, describe, it } from "node:test";
 import { probeDoneTool } from "../src/agent/tools/probe.ts";
 import type { SteerMessage } from "../src/core/contracts.ts";
-import type { LhMessage } from "../src/core/native-messages.ts";
+import { hasProbeDone, type LhMessage } from "../src/core/native-messages.ts";
+import { phaseAt3Lh } from "../src/core/phases.ts";
 import { HANDOFF_TEXT } from "../src/core/contracts.ts";
 import { chatStore } from "../src/store/chats.ts";
 import { PATHS } from "../config.ts";
 
-const dataDir = path.join(PATHS.root, "data");
+const dataDir = PATHS.data;
 fs.mkdirSync(dataDir, { recursive: true });
 
 const createdChats: string[] = [];
@@ -141,4 +142,62 @@ describe("probe_done: the probe→planning seam", () => {
 		const res = await execute(tools, { assessment: ASSESSMENT });
 		assert.equal(res.ok, true, "ok:true even when the queue is lost — the next client message constructs the teacher off the transcript seam");
 	});
+});
+
+/** A real record result, distinct from the calling assistant message. */
+function probeResult(overrides: Partial<Extract<LhMessage, { role: "toolResult" }>> = {}): LhMessage {
+	return {
+		id: "probe-result", role: "toolResult", toolCallId: "call_probe", toolName: "probe_done",
+		content: [{ type: "text", text: "ok" }], isError: false, timestamp: 1,
+		...overrides,
+	};
+}
+
+const probeCall = () => assistantWithCall("probe", "probe_done", { assessment: ASSESSMENT });
+const failedProbeCall = (stopReason: "error" | "aborted"): LhMessage => ({ ...probeCall(), stopReason } as LhMessage);
+const incompleteProbes: Array<[string, () => LhMessage[]]> = [
+	["unmatched call", () => [probeCall()]],
+	["errored result", () => [probeCall(), probeResult({ isError: true })]],
+	["explicit refusal without isError", () => [probeCall(), probeResult({ details: { ok: false, error: "refused" } })]],
+	["result without a call", () => [probeResult()]],
+	["wrong call id", () => [probeCall(), probeResult({ toolCallId: "other" })]],
+	["wrong result tool name", () => [probeCall(), probeResult({ toolName: "plan_init" })]],
+	["wrong call tool name", () => [assistantWithCall("probe", "plan_init", {}), probeResult()]],
+	["result before the call", () => [probeResult(), probeCall()]],
+	["failed calling generation", () => [failedProbeCall("error"), probeResult({ details: { ok: true } })]],
+	["aborted calling generation", () => [failedProbeCall("aborted"), probeResult({ details: { ok: true } })]],
+];
+
+describe("probe completion: matched successful results only (PR130 foundation)", () => {
+	for (const [name, messages] of incompleteProbes) {
+		it(`${name} keeps probing open and allows a fresh conclusion`, async () => {
+			const chatId = newChat(`Probe recovery: ${name}`);
+			const before = messages();
+			const snapshot = structuredClone(before);
+			chatStore.saveMessages(chatId, before);
+			assert.equal(hasProbeDone(before), false);
+			assert.equal(phaseAt3Lh(before), "probe");
+			const delivered: SteerMessage[] = [];
+			const tools = probeDoneTool({ chatId, chatStore, deliver: (s) => delivered.push(s) });
+			assert.equal((await execute(tools, { assessment: ASSESSMENT })).ok, true);
+			assert.equal(delivered.length, 1, "only the fresh invocation queues a handoff");
+			assert.deepEqual(before, snapshot, "the scans never mutate history");
+			assert.deepEqual(chatStore.getChat(chatId)!.messages, snapshot, "the tool does not delete or replay saved attempts");
+		});
+	}
+
+	for (const [name, result] of [
+		["current acknowledgment", probeResult({ details: { ok: true } })],
+		["older clean acknowledgment without details", probeResult()],
+		["older clean acknowledgment without ok", probeResult({ details: { assessment: ASSESSMENT } })],
+	] as const) {
+		it(`${name} concludes exactly at the matching result`, () => {
+			const messages = [probeCall(), result];
+			const before = structuredClone(messages);
+			assert.equal(hasProbeDone(messages), true);
+			assert.equal(phaseAt3Lh(messages, 0), "probe", "a future result cannot conclude an earlier prefix");
+			assert.equal(phaseAt3Lh(messages, 1), "plan");
+			assert.deepEqual(messages, before);
+		});
+	}
 });

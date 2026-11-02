@@ -1,9 +1,11 @@
 import { randomUUID } from "node:crypto";
 import type { AssistantMessage, Message, Tool, ToolResultMessage, Usage } from "@earendil-works/pi-ai";
 import { normalizeContext } from "@earendil-works/pi-ai";
+import { processImage, type ProcessImageResult } from "../image-processing/index.ts";
 import { Type } from "typebox";
 import { piEngineFor, type PiEngine, type ThinkingLevel } from "../models.ts";
 import { providerEventObserver, type ProviderEventObserver } from "../provider-events.ts";
+import { backgroundCaptureStream, createBackgroundCapture, type BackgroundCapture } from "../background-capture.ts";
 import type { VisualResult } from "../../core/contracts.ts";
 import type { AppLanguage } from "../../core/i18n.ts";
 import { workerPrompt } from "./worker-prompts.ts";
@@ -148,6 +150,8 @@ export async function runVisualMaker(input: VisualMakerInput, opts: VisualMakerO
 	// factory pin to consult (engine.level is the resolved/clamped value).
 	const reasoning = engine.level;
 	const sessionId = randomUUID();
+	const capture = createBackgroundCapture({ role: "visualMaker", runId: sessionId, sourceId: opts.chatId });
+	const streamEngine = { ...engine, streamFn: backgroundCaptureStream(engine.streamFn, capture) };
 	const prompt = [
 		"Brief for ONE precise figure (from the teacher, verbatim — it is everything you know):",
 		brief,
@@ -160,13 +164,14 @@ export async function runVisualMaker(input: VisualMakerInput, opts: VisualMakerO
 	/** The svg shown in the most recent render (null = never rendered). */
 	let renderedSvg: string | null = null;
 	let finalText = "";
+	let captureError: unknown;
 
 	try {
 		for (let iteration = 0; iteration < maxIterations; iteration++) {
 			// One model call per iteration (streamSimple, no agent loop — this
 			// loop owns tool execution and the image-in-the-loop injection).
 			const result = await streamOnce(
-				engine,
+				streamEngine,
 				workerPrompt("visualMaker", INSTRUCTIONS, opts.language),
 				messages,
 				toolDeclarations,
@@ -174,6 +179,7 @@ export async function runVisualMaker(input: VisualMakerInput, opts: VisualMakerO
 				reasoning,
 				opts.abortSignal,
 				opts.chatId ? providerEventObserver(opts.chatId, "job:visualMaker") : undefined,
+				capture,
 			);
 			// Money channel: each iteration is one model call.
 			opts.onUsage?.(result.usage);
@@ -197,6 +203,9 @@ export async function runVisualMaker(input: VisualMakerInput, opts: VisualMakerO
 						const msg = err instanceof Error ? err.message : String(err);
 						return { svg: "", notes: `FAILED: rendering the final SVG failed — ${msg}` };
 					}
+					const image = await processImage(png, "image/png", { resizeOptions: engine.model.inputLimits?.images?.resize });
+					opts.abortSignal?.throwIfAborted();
+					if (!image.ok) return { svg: "", notes: `FAILED: inspecting the final SVG failed — ${image.message}` };
 					opts.onActivity?.("render_svg: inspecting final render");
 					renderedSvg = currentSvg;
 					messages = [
@@ -204,8 +213,8 @@ export async function runVisualMaker(input: VisualMakerInput, opts: VisualMakerO
 						{
 							role: "user",
 							content: [
-								{ type: "text", text: UNLOOKED_FINISH_MESSAGE },
-								{ type: "image", data: png.toString("base64"), mimeType: "image/png" },
+								{ type: "text", text: [UNLOOKED_FINISH_MESSAGE, ...image.hints].join("\n") },
+								{ type: "image", data: image.data, mimeType: image.mimeType },
 							],
 							timestamp: Date.now(),
 						},
@@ -216,7 +225,7 @@ export async function runVisualMaker(input: VisualMakerInput, opts: VisualMakerO
 			}
 
 			const toolResults: ToolResultMessage[] = [];
-			let renderPng: Buffer | null = null; // appended as the image message AFTER the tool results
+			let renderImage: Extract<ProcessImageResult, { ok: true }> | null = null; // appended AFTER the tool results
 			for (const call of toolCalls) {
 				if (call.name === "write_svg") {
 					const svg = (call.arguments as { svg?: unknown }).svg;
@@ -264,7 +273,10 @@ export async function runVisualMaker(input: VisualMakerInput, opts: VisualMakerO
 					}
 					try {
 						const png = await headless.renderSvg(currentSvg);
-						renderPng = png;
+						const image = await processImage(png, "image/png", { resizeOptions: engine.model.inputLimits?.images?.resize });
+						opts.abortSignal?.throwIfAborted();
+						if (!image.ok) throw new Error(image.message);
+						renderImage = image;
 						renderedSvg = currentSvg;
 						opts.onActivity?.("render_svg: inspecting render");
 						toolResults.push(toolText(call.id, call.name, "Rendered — the PNG follows in the next message. Look at it."));
@@ -278,15 +290,16 @@ export async function runVisualMaker(input: VisualMakerInput, opts: VisualMakerO
 				}
 			}
 			// Message order: assistant tool-calls → tool results → render image.
+			for (const result of toolResults) capture?.toolResult(result);
 			messages = [...messages, ...toolResults];
-			if (renderPng) {
+			if (renderImage) {
 				messages = [
 					...messages,
 					{
 						role: "user",
 						content: [
-							{ type: "text", text: LOOK_MESSAGE },
-							{ type: "image", data: renderPng.toString("base64"), mimeType: "image/png" },
+							{ type: "text", text: [LOOK_MESSAGE, ...renderImage.hints].join("\n") },
+							{ type: "image", data: renderImage.data, mimeType: renderImage.mimeType },
 						],
 						timestamp: Date.now(),
 					},
@@ -294,8 +307,11 @@ export async function runVisualMaker(input: VisualMakerInput, opts: VisualMakerO
 			}
 		}
 	} catch (err) {
+		captureError = err;
 		const msg = err instanceof Error ? err.message : String(err);
 		return { svg: "", notes: `FAILED: the maker crashed — ${msg}` };
+	} finally {
+		capture?.finish(captureError);
 	}
 
 	// Iteration limit: deliver the last written SVG only if it was looked at.
@@ -328,6 +344,7 @@ async function streamOnce(
 	reasoning: ThinkingLevel | undefined,
 	abortSignal?: AbortSignal,
 	onProviderStreamEvent?: ProviderEventObserver,
+	capture?: BackgroundCapture,
 ): Promise<AssistantMessage> {
 	// 0.87.1: provider-facing contexts are TranscriptContexts — the prompt
 	// and tool declarations fold into a leading system message.
@@ -339,8 +356,9 @@ async function streamOnce(
 		onProviderStreamEvent: onProviderStreamEvent as never,
 	} as never);
 	for await (const event of stream) {
-		if (event.type === "done") return event.message;
+		if (event.type === "done") { capture?.reply(event.message); return event.message; }
 		if (event.type === "error") {
+			capture?.reply(event.error);
 			if (event.reason === "aborted") {
 				const err = new Error("aborted");
 				err.name = "AbortError";

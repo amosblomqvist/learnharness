@@ -35,7 +35,10 @@ import {
 	type BackgroundModelRole,
 	type FactorySettings,
 	type ResolvedGeneralSettings,
+	type DictationSettings,
 	type CompactionSettings,
+	type CustomModel,
+	type CustomModelOverride,
 	type GraphSettings,
 	type ModelSlot,
 	type ModelSlotName,
@@ -49,6 +52,7 @@ import {
  *  supports; owner, 2026-09-22). A slot is CONFIGURED iff its model is
  *  present; a level-only slot is inert (kept on disk, resolved as null). */
 export interface EffectiveSlot {
+	cacheRetention?: ModelSlot["cacheRetention"];
 	provider: string;
 	id: string;
 	thinkingLevel?: ThinkingLevel;
@@ -69,6 +73,7 @@ export type EffectiveAppearance = FactorySettings["appearance"];
 /** The concrete view: every knob resolved, no absent fields. */
 export interface EffectiveSettings {
 	general: ResolvedGeneralSettings;
+	dictation: Required<DictationSettings>;
 	agent: {
 		models: Record<BackgroundModelRole, EffectiveModelSpec | undefined>;
 		/** Delta map as stored — consumers resolve absent key → enabled. */
@@ -93,6 +98,9 @@ export interface EffectiveSettings {
 	/** Compaction (owner round 14): resolved concrete — absent record
 	 *  section resolves to the factory 150k. */
 	compaction: Required<CompactionSettings>;
+	/** Custom endpoint, resolved concrete: baseUrl defaults "", models and
+	 *  user pins default to empty. */
+	customProvider: { baseUrl: string; models: CustomModel[]; overrides: Record<string, CustomModelOverride>; manualModels: string[] };
 }
 
 /** The conversation pair's chain (BYOK, owner 2026-09-22): the chat's own
@@ -131,7 +139,10 @@ export function resolveRoleSpec(role: ModelRole, record: UserSettings | null): E
  *  to ride without the factory floor). */
 export function resolveSlot(slot: ModelSlot | undefined): EffectiveSlot | null {
 	if (!slot?.model) return null;
-	return { provider: slot.model.provider, id: slot.model.id, thinkingLevel: slot.thinkingLevel };
+	return {
+		provider: slot.model.provider, id: slot.model.id, thinkingLevel: slot.thinkingLevel,
+		...(slot.cacheRetention !== undefined ? { cacheRetention: slot.cacheRetention } : {}),
+	};
 }
 
 /** Resolve one role's spec — the BYOK chain (owner 2026-09-22): role
@@ -179,6 +190,9 @@ export function resolveSettings(record: UserSettings | null): EffectiveSettings 
 			dictationOverride: record?.general?.dictationOverride ?? FACTORY_SETTINGS.general.dictationOverride,
 			...(record?.general?.dictationLanguage ? { dictationLanguage: record.general.dictationLanguage } : {}),
 		},
+		dictation: {
+			language: record?.dictation?.language ?? FACTORY_SETTINGS.dictation.language,
+		},
 		agent: {
 			models,
 			tools: agent.tools ?? {},
@@ -218,6 +232,12 @@ export function resolveSettings(record: UserSettings | null): EffectiveSettings 
 		},
 		compaction: {
 			thresholdTokens: record?.compaction?.thresholdTokens ?? FACTORY_SETTINGS.compaction.thresholdTokens,
+		},
+		customProvider: {
+			baseUrl: record?.customProvider?.baseUrl ?? "",
+			models: record?.customProvider?.models ?? [],
+			overrides: record?.customProvider?.overrides ?? {},
+			manualModels: record?.customProvider?.manualModels ?? [],
 		},
 	};
 }

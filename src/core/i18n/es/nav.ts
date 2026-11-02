@@ -118,11 +118,13 @@ export const nav: Record<keyof typeof en, string> = {
 	"nav.update.readyVersion": "LearnHarness {version} está listo",
 	"nav.update.restartHint": "— reinicia para terminar de instalar.",
 	"nav.update.restart": "Reiniciar",
+	"nav.update.dismiss": "Descartar notificación de actualización",
 
 	"nav.stats.title": "Estadísticas de la sesión",
 	"nav.stats.context": "Contexto (última llamada)",
 	"nav.stats.usage": "Uso",
 	"nav.stats.totalCost": "Costo total",
+	"nav.stats.cacheHitRate": "Tasa de aciertos de caché",
 	"nav.stats.manageChatGPT": "Administrar el uso de ChatGPT",
 	"nav.stats.unpriced": "Turnos sin precio",
 	"nav.stats.turns": "Turnos",

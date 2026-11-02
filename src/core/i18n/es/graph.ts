@@ -125,4 +125,13 @@ export const graph: Record<keyof typeof en, string> = {
 	"graph.deleteNode.permanence.other": "Esto elimina los {n} nodos de forma permanente — no se puede deshacer.",
 	"graph.deleteNode.extractionRunning":
 		"Hay una extracción en curso — inténtalo de nuevo cuando se vacíe el panel de actividad.",
+
+	"graph.deleteSource.title": "¿Eliminar fuente?",
+	"graph.deleteFolder.title": "¿Eliminar carpeta?",
+	"graph.deleteSourcesAndFolders.title": "¿Eliminar fuentes y carpetas seleccionadas?",
+	"graph.folders.add": "Añadir carpeta",
+	"graph.folders.namePlaceholder": "Nombre de carpeta",
+	"graph.folders.new": "Nueva carpeta",
+	"graph.import.files": "Archivos",
+	"graph.import.folder": "Carpeta",
 };

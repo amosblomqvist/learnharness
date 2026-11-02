@@ -33,6 +33,7 @@ export const EXTRACTION_RETRY_LINE = translate("en", "graph.deleteNode.extractio
  *  body pattern). The wrapper owns state + effects + the portal. */
 export function DeleteNodeBody({
 	nodes,
+	folders = [],
 	busy,
 	failure,
 	onClose,
@@ -42,6 +43,7 @@ export function DeleteNodeBody({
 	 *  selection). One names it alone; many pluralize the title and
 	 *  list the names. */
 	nodes: { id: string; name: string }[];
+	folders?: { id: string; name: string }[];
 	busy: boolean;
 	failure: { code: string; error: string } | null;
 	onClose: () => void;
@@ -58,7 +60,7 @@ export function DeleteNodeBody({
 			className="w-[32rem] max-w-[calc(100vw-2rem)] rounded-xl border bg-card p-5 shadow-xl"
 		>
 			<h2 className="text-sm font-semibold text-destructive">
-				{nodes.length === 1 ? t("graph.deleteNode.title.one") : t("graph.deleteNode.title.other", { n: nodes.length })}
+				{folders.length > 0 ? (nodes.length > 0 ? (nodes.length === 1 ? t("graph.deleteNode.title.one") : t("graph.deleteNode.title.other", { n: nodes.length })) : "Remove empty folders?") : nodes.length === 1 ? t("graph.deleteNode.title.one") : t("graph.deleteNode.title.other", { n: nodes.length })}
 			</h2>
 			{/* The node name(s) below the title in JetBrains Mono (owner,
 			    2026-09-24): the name is the payload — mono suits it, and
@@ -81,10 +83,14 @@ export function DeleteNodeBody({
 					</code>
 				)}
 			</div>
-			<p className="mt-2 text-sm text-muted-foreground" data-testid="node-permanence-line">
+			{folders.length > 0 && <p className="mt-2 text-sm" data-testid="folder-removal-names">Empty folders: {folders.map((f) => f.name).join(", ")}</p>}
+			{nodes.length > 0 && <p className="mt-2 text-sm text-muted-foreground" data-testid="node-permanence-line">
 				{nodes.length === 1
 					? t("graph.deleteNode.permanence.one")
 					: t("graph.deleteNode.permanence.other", { n: nodes.length })}
+			</p>}
+			<p className="mt-2 text-xs text-muted-foreground" data-testid="folder-removal-explanation">
+				{folders.length > 0 ? "Only the named empty folders are removed. " : ""}Sessions, imported source records, and non-empty folders are kept.
 			</p>
 			{failure && (
 				<div
@@ -135,6 +141,9 @@ export function DeleteNodeBody({
 
 export function DeleteNodeDialog({
 	nodes,
+	folders = [],
+	onRemoveFolder,
+	onFoldersDeleted,
 	onClose,
 	onDeleted,
 }: {
@@ -143,6 +152,9 @@ export function DeleteNodeDialog({
 	 *  the client's snapshot — what the user sees is what the dialog
 	 *  names. */
 	nodes: { id: string; name: string }[] | null;
+	folders?: { id: string; name: string }[];
+	onRemoveFolder?: (id: string) => Promise<void>;
+	onFoldersDeleted?: (ids: string[]) => void;
 	onClose: () => void;
 	/** Success path — the callers announce lh:graph-revision so the
 	 *  snapshot refetches. The deleted ids ride along so
@@ -151,6 +163,7 @@ export function DeleteNodeDialog({
 }) {
 	const t = useT();
 	const [busy, setBusy] = useState(false);
+	const hasItems = Boolean(nodes?.length || folders.length);
 	const backdropDismiss = useBackdropDismiss(() => {
 		if (!busy) onClose();
 	});
@@ -158,15 +171,15 @@ export function DeleteNodeDialog({
 
 	// Fresh state per dialog: closing resets.
 	useEffect(() => {
-		if (!nodes || nodes.length === 0) {
+		if (!hasItems) {
 			setBusy(false);
 			setFailure(null);
 		}
-	}, [nodes]);
+	}, [hasItems]);
 
 	// Esc closes (claimed — a dialog Esc must not also abort a turn).
 	useEffect(() => {
-		if (!nodes || nodes.length === 0) return;
+		if (!hasItems) return;
 		const onKeyDown = (e: KeyboardEvent) => {
 			if (e.key === "Escape") {
 				// THE ONE-ESC LAW (keyboard round 2026-10-06): claim at the
@@ -179,7 +192,7 @@ export function DeleteNodeDialog({
 		};
 		document.addEventListener("keydown", onKeyDown);
 		return () => document.removeEventListener("keydown", onKeyDown);
-	}, [nodes, onClose]);
+	}, [hasItems, onClose]);
 
 	// Sequential full deaths — never parallel (the store's revision
 	// counter and the sweep must observe them in order). A failure STOPS
@@ -187,13 +200,14 @@ export function DeleteNodeDialog({
 	// still stands (extraction_running especially must not be plowed
 	// through). onDeleted fires with everything that actually died.
 	const run = async () => {
-		if (!nodes || nodes.length === 0 || busy) return;
+		if (!hasItems || busy) return;
 		setBusy(true);
 		setFailure(null);
 		const dead: string[] = [];
+		const removedFolders: string[] = [];
 		let revision = 0;
 		try {
-			for (const n of nodes) {
+			for (const n of nodes ?? []) {
 				const res = await fetch(`/api/graph/nodes/${encodeURIComponent(n.id)}`, { method: "DELETE" });
 				const body = (await res.json()) as {
 					error?: string;
@@ -209,15 +223,22 @@ export function DeleteNodeDialog({
 				dead.push(n.id);
 				revision = body.graphRevision ?? revision;
 			}
+			for (const folder of folders) {
+				if (!onRemoveFolder) throw new Error("Folder removal is unavailable.");
+				await onRemoveFolder(folder.id);
+				removedFolders.push(folder.id);
+			}
+			if (removedFolders.length > 0) onFoldersDeleted?.(removedFolders);
 			onDeleted(dead, revision);
-		} catch {
-			setFailure({ code: "network", error: t("graph.delete.networkError") });
+		} catch (error) {
+			setFailure({ code: "network", error: folders.length > 0 && error instanceof Error ? error.message : t("graph.delete.networkError") });
+			if (removedFolders.length > 0) onFoldersDeleted?.(removedFolders);
 			setBusy(false);
 			if (dead.length > 0) onDeleted(dead, revision);
 		}
 	};
 
-	if (!nodes || nodes.length === 0) return null;
+	if (!hasItems) return null;
 
 	return createPortal(
 		<div
@@ -225,7 +246,8 @@ export function DeleteNodeDialog({
 			{...backdropDismiss}
 		>
 			<DeleteNodeBody
-				nodes={nodes}
+				nodes={nodes ?? []}
+				folders={folders}
 				busy={busy}
 				failure={failure}
 				onClose={onClose}

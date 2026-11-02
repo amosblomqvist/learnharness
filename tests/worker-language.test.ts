@@ -26,12 +26,17 @@ describe("worker prompts", () => {
 	it("English returns the English source; a language without the key falls back to it", () => {
 		assert.equal(workerPrompt("researcher", "EN SOURCE", "en"), "EN SOURCE");
 		assert.notEqual(workerPrompt("researcher", "EN SOURCE", "es"), "EN SOURCE");
+		assert.notEqual(workerPrompt("researcher", "EN SOURCE", "ar"), "EN SOURCE");
 	});
 
 	it("the researcher runs on its Spanish prompt when the language is es", async () => {
 		const es = capturingEngine();
 		await runResearcherAgent("¿Qué es una derivada?", { engine: es.engine, language: "es" });
 		assert.match(es.seen.system ?? "", /español/i);
+
+		const ar = capturingEngine();
+		await runResearcherAgent("ما هي المشتقة؟", { engine: ar.engine, language: "ar" });
+		assert.match(ar.seen.system ?? "", /العربية/i);
 
 		const en = capturingEngine();
 		await runResearcherAgent("What is a derivative?", { engine: en.engine });

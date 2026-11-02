@@ -94,7 +94,7 @@ export function parseQuizInput(input: unknown): QuizToolInput | undefined {
  * keying, so they parse to undefined exactly like the zod seam did).
  */
 export function parseAskInput(input: unknown): AskToolInput | undefined {
-	const cleaned = boundaryParse<AskToolInput>(askInputSchema, input);
+	const cleaned = boundaryParse<AskToolInput>(askInputSchema, healEncodedArguments(input, askInputSchema));
 	if (!cleaned) return undefined;
 	if (askOptionProblems(cleaned.options ?? []).length > 0) return undefined;
 	return cleaned;
@@ -107,10 +107,21 @@ export function parseAskInput(input: unknown): AskToolInput | undefined {
  *  variants share the same fields; the teacher's nodeId is an unknown
  *  key Value.Clean strips, same as the quiz seam. */
 export function parseExplainInput(input: unknown): ExplainToolInput | undefined {
-	const cleaned = boundaryParse<ExplainToolInput>(explainDisplayInputSchema, input);
+	const cleaned = boundaryParse<ExplainToolInput>(explainDisplayInputSchema, healEncodedArguments(input, explainDisplayInputSchema));
 	if (!cleaned) return undefined;
 	if (explainInputProblems(cleaned).length > 0) return undefined;
 	return cleaned;
+}
+
+/** One display-validity decision for dock authority and recovery. Does not
+ * mutate the recorded input or invent missing authoring fields. */
+export function parseQuestionInput(tool: string, input: unknown): QuizToolInput | AskToolInput | ExplainToolInput | undefined {
+	switch (tool) {
+		case "quiz": case "probe": return parseQuizInput(input);
+		case "explain": case "recall": return parseExplainInput(input);
+		case "ask_user_question": return parseAskInput(input);
+		default: return undefined;
+	}
 }
 
 /** probe_done parse — the core-owned schema the tool itself declares. */

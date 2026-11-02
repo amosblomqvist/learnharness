@@ -197,4 +197,33 @@ export const settings = {
 	"settings.subscription.controlError": "The connection could not be changed. Try again.",
 	"settings.subscription.signInFailed": "Sign-in did not complete. Try connecting again.",
 	"settings.subscription.browserFailed": "The browser could not be opened. Try again.",
+
+	"settings.keys.group.externalCli": "External CLI",
+	"settings.keys.dictationHint.prefix": "Create a ",
+	"settings.keys.dictationHint.link": "Deepgram API key",
+	"settings.keys.dictationHint.suffix": " with the Member role or higher, then add it above.",
+	"settings.keys.customEndpoint": "Custom endpoint",
+	"settings.keys.baseUrl": "Base URL",
+	"settings.keys.contextWindow": "Context window",
+	"settings.keys.maxOutputTokens": "Max output tokens",
+
+	"settings.menu.cliBilling": "CLI billing",
+	"settings.menu.cliBillingTitle": "Billing is determined by your Claude Code configuration; LearnHarness does not estimate it.",
+
+	"settings.general.autoUpdate.label": "Automatic updates",
+	"settings.general.autoUpdate.subhint": "Check at startup and every 24 hours. Turning this off does not stop updates already in progress or ready to install.",
+	"settings.general.manualUpdate.hint": "Checking downloads available updates. Downloaded updates install when you quit the app.",
+
+	"settings.claudeCode.checkAgain": "Check again",
+	"settings.claudeCode.versionCheckFailed": "Version could not be checked",
+	"settings.claudeCode.installNotice.strong": "Install and authenticate Claude Code in your terminal, then select a Claude Code model here.",
+	"settings.claudeCode.installNotice.rest": " LearnHarness starts it when needed—no background process required.",
+	"settings.claudeCode.checkNotice": "Checks installation/version only—not authentication, model access, or quota. Claude Code controls billing. Requires v{version}+.",
+	"settings.claudeCode.setupLink": "Setup ↗",
+	"settings.claudeCode.verifyNotice": "Verify AI claims independently—they may be inaccurate, incomplete, misleading, or outdated.",
+
+	"settings.agent.cacheRetention.label": "Cache retention",
+	"settings.agent.cacheRetention.hint": "Controls the cache-retention preference sent to Pi.",
+	"settings.agent.advanced.show": "Show advanced settings",
+	"settings.agent.advanced.hide": "Hide advanced settings",
 } as const;

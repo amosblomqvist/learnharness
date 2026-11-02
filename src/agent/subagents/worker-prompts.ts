@@ -7,6 +7,7 @@
  */
 
 import { DEFAULT_LANGUAGE, type AppLanguage } from "../../core/i18n.ts";
+import { ar } from "./locales/ar.ts";
 import { es } from "./locales/es.ts";
 
 export type WorkerPromptKey =
@@ -22,7 +23,7 @@ export type WorkerPromptKey =
 
 export type WorkerPromptTranslations = Partial<Record<WorkerPromptKey, string>>;
 
-const TRANSLATIONS: Partial<Record<AppLanguage, WorkerPromptTranslations>> = { es };
+const TRANSLATIONS: Partial<Record<AppLanguage, WorkerPromptTranslations>> = { es, ar };
 
 export function workerPrompt(key: WorkerPromptKey, english: string, language: AppLanguage = DEFAULT_LANGUAGE): string {
 	if (language === DEFAULT_LANGUAGE) return english;

@@ -12,7 +12,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { createProberTools } from "../src/agent/tools.ts";
-import { auditorGraphTools } from "../src/agent/tools/graph.ts";
+import { prepareAuditorReview, type AuditorCandidateBatch } from "../src/agent/tools/graph.ts";
 import type { ChatStore, GraphStore, JobStore } from "../src/core/ports.ts";
 import type { ChatSummary } from "../src/core/contracts/chat.ts";
 import type { GraphChain, GraphNode } from "../src/core/contracts/graph.ts";
@@ -188,28 +188,79 @@ describe("auditor graph tools", () => {
 	];
 	const { chatStore, graphStore } = fakeStores(nodes);
 
-	it("find: glob over names + statements + aliases, returning id + name + statement + BIRTH SESSION (owner, 2026-09-29)", async () => {
-		const tools = auditorGraphTools({ chatStore, graphStore });
-		const out = (await tools.find!.execute!("tc", { query: "*will to power*" })).details as string;
-		assert.match(out, /1 match\(es\):/);
-		assert.match(out, /- n1 :: Will to power/);
-		assert.match(out, /statement: The will to power is Nietzsche's central drive\./);
-		// The born-in pointer: hits compose with list_propositions.
-		assert.match(out, /born in: c1/);
-		// Statements and aliases hit too — and a bare term gets implicit stars.
-		const byStatement = (await tools.find!.execute!("tc", { query: "living again" })).details as string;
-		assert.match(byStatement, /n2 :: Eternal recurrence/);
-		const byAlias = (await tools.find!.execute!("tc", { query: "power drive" })).details as string;
-		assert.match(byAlias, /n1/);
-		const miss = (await tools.find!.execute!("tc", { query: "*nothing matches this*" })).details as string;
-		assert.equal(miss, 'No existing proposition matches "*nothing matches this*".');
+	it("find_candidates uses the actual findings and returns full deduplicated statements, aliases and source pointers", async () => {
+		const { tools, initialCandidates } = prepareAuditorReview({ chatStore, graphStore }, [
+			{ id: "p1", name: "Power drive", statement: "power drive", aliases: [] },
+			{ id: "p2", name: "Power", statement: "Nietzsche's central drive", aliases: [] },
+		]);
+		assert.equal("find" in tools, false, "the auditor's glob interface is replaced; the prober remains separate");
+		const result = await tools.find_candidates!.execute!("tc", { propositions: [{ id: "p1" }, { id: "p2" }] });
+		const out = result.details as AuditorCandidateBatch;
+		assert.deepEqual(out, initialCandidates, "the initial page is prepared without any model call");
+		assert.deepEqual(Object.keys(out.matches[0]!), ["propositionId", "candidateIds", "nextCursor"], "no lexical totals, offsets or hasMore become a coverage challenge");
+		assert.deepEqual(out.matches.map((match) => match.candidateIds), [["n1"], ["n1"]]);
+		assert.equal(out.candidates.length, 1);
+		assert.equal(out.candidates[0]!.statement, nodes[0]!.statement);
+		assert.deepEqual(out.candidates[0]!.sessions, ["c1"]);
+		assert.ok(out.candidates[0]!.matchedAliases.includes("power drive"));
+		assert.deepEqual(result.content, [{ type: "text", text: JSON.stringify(out) }], "the model receives the structured result, not just record metadata");
+		const repeat = await tools.find_candidates!.execute!("tc2", { propositions: [{ id: "p1" }, { id: "p2" }] });
+		assert.deepEqual(repeat.details, out, "there is no hidden cross-call suppression");
+	});
+
+	it("a candidate tool instance never reuses another audit's graph or findings", async () => {
+		const first = prepareAuditorReview({ chatStore, graphStore }, [{ id: "p1", name: "Recurrence", statement: "living again", aliases: [] }]).tools;
+		const second = prepareAuditorReview(fakeStores([]), [{ id: "p2", name: "Recurrence", statement: "living again", aliases: [] }]).tools;
+		const one = (await first.find_candidates!.execute!("tc", { propositions: [{ id: "p1" }] })).details as AuditorCandidateBatch;
+		const two = (await second.find_candidates!.execute!("tc", { propositions: [{ id: "p2" }] })).details as AuditorCandidateBatch;
+		assert.equal(one.candidates[0]!.id, "n2");
+		assert.deepEqual(two.candidates, []);
+		await assert.rejects(second.find_candidates!.execute!("bad", { propositions: [{ id: "p1" }] }), /Unknown proposition id/);
+	});
+
+	it("continuations retain their exact query; fresh hints always start at the first page", async () => {
+		const graph = [...Array.from({ length: 7 }, (_, i) => ({ ...node(`n${i}`, "Amber", [pt("c1")]), statement: "Amber canoe", aliases: [] })),
+			{ ...node("violet", "Other", [pt("c1")]), statement: "Violet kayak", aliases: [] }];
+		const findings = [{ id: "p", name: "Amber", statement: "Amber canoe", aliases: [] }];
+		const review = prepareAuditorReview(fakeStores(graph), findings);
+		const cursor = review.initialCandidates.matches[0]!.nextCursor!;
+		assert.ok(cursor);
+		const tool = review.tools.find_candidates!;
+		const next = (await tool.execute!("next", { propositions: [{ id: "p", cursor }] })).details as AuditorCandidateBatch;
+		assert.deepEqual(next.matches[0]!.candidateIds, ["n5", "n6"]);
+		assert.equal(next.matches[0]!.nextCursor, null);
+		await assert.rejects(tool.execute!("mixed", { propositions: [{ id: "p", cursor, hints: ["violet kayak"] }] }), /Omit hints/);
+		const fresh = (await tool.execute!("fresh", { propositions: [{ id: "p", hints: ["violet kayak"] }] })).details as AuditorCandidateBatch;
+		assert.ok(fresh.matches[0]!.candidateIds.includes("violet"), "new wording cannot accidentally skip its first page");
+		assert.deepEqual((await tool.execute!("repeat", { propositions: [{ id: "p", cursor }] })).details, next);
+		assert.deepEqual((await tool.execute!("first-again", { propositions: [{ id: "p" }] })).details, review.initialCandidates);
+		const other = prepareAuditorReview(fakeStores(graph), findings);
+		await assert.rejects(other.tools.find_candidates!.execute!("foreign", { propositions: [{ id: "p", cursor }] }), /Unknown cursor/);
+	});
+
+	it("a continuation cannot be used for another finding", async () => {
+		const graph = Array.from({ length: 6 }, (_, i) => ({ ...node(`n${i}`, "Amber", [pt("c1")]), statement: "Amber canoe", aliases: [] }));
+		const review = prepareAuditorReview(fakeStores(graph), [
+			{ id: "p1", name: "Amber", statement: "Amber canoe", aliases: [] },
+			{ id: "p2", name: "Amber", statement: "Amber canoe", aliases: [] },
+		]);
+		await assert.rejects(review.tools.find_candidates!.execute!("wrong-id", { propositions: [{ id: "p2", cursor: review.initialCandidates.matches[0]!.nextCursor }] }), /Unknown cursor/);
+	});
+
+	it("initial preparation deduplicates finding ids with the merger's first-occurrence meaning", () => {
+		const review = prepareAuditorReview({ chatStore, graphStore }, [
+			{ id: "p1", name: "Power", statement: "power drive", aliases: [] },
+			{ id: "p1", name: "Recurrence", statement: "living again", aliases: [] },
+		]);
+		assert.equal(review.initialCandidates.matches.length, 1);
+		assert.deepEqual(review.initialCandidates.matches[0]!.candidateIds, ["n1"]);
 	});
 
 	it("list_sessions: names, kinds, counts, ids — NO timestamps (identity work needs content, not chronology)", async () => {
 		const { chatStore: cs, graphStore: gs } = fakeStores(nodes, {
 			chats: [{ id: "c1", title: "Nietzsche seminar", createdAt: "2026-09-20T10:00:00.000Z", updatedAt: "2026-09-21T10:00:00.000Z" }],
 		});
-		const tools = auditorGraphTools({ chatStore: cs, graphStore: gs });
+		const { tools } = prepareAuditorReview({ chatStore: cs, graphStore: gs });
 		const out = (await tools.list_sessions!.execute!("tc", {})).details as string;
 		assert.match(out, /1 session\(s\):/);
 		assert.match(out, /Nietzsche seminar \(chat, 2 propositions\) — id: c1/);
@@ -218,7 +269,7 @@ describe("auditor graph tools", () => {
 
 	it("list_propositions: FULL statement text (identity work), no dates", async () => {
 		const { chatStore: cs, graphStore: gs } = fakeStores(nodes);
-		const tools = auditorGraphTools({ chatStore: cs, graphStore: gs });
+		const { tools } = prepareAuditorReview({ chatStore: cs, graphStore: gs });
 		const out = (await tools.list_propositions!.execute!("tc", { session: "c1" })).details as string;
 		assert.match(out, /2 proposition\(s\) born in this session:/);
 		assert.match(out, /- n1 :: Will to power/);

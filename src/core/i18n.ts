@@ -13,15 +13,20 @@
  */
 
 import { en, type Dictionary, type TranslationKey } from "./i18n/en/index.ts";
+import { ar } from "./i18n/ar/index.ts";
 import { es } from "./i18n/es/index.ts";
-import type { DictationLanguage, ResolvedGeneralSettings } from "./settings.ts";
+import type { DictationLanguage } from "./dictation.ts";
+import type { ResolvedGeneralSettings } from "./settings.ts";
 
 export type { Dictionary, TranslationKey };
 
+export type TextDirection = "ltr" | "rtl";
+
 export const APP_LANGUAGES = [
-	{ id: "en", label: "English", dictation: "en" },
-	{ id: "es", label: "Español", dictation: "es" },
-] as const satisfies readonly { id: string; label: string; dictation: DictationLanguage }[];
+	{ id: "en", label: "English", dictation: "en", dir: "ltr" as TextDirection },
+	{ id: "ar", label: "العربية", dictation: "ar", dir: "rtl" as TextDirection },
+	{ id: "es", label: "Español", dictation: "es", dir: "ltr" as TextDirection },
+] as const satisfies readonly { id: string; label: string; dictation: DictationLanguage; dir: TextDirection }[];
 
 export type AppLanguage = (typeof APP_LANGUAGES)[number]["id"];
 
@@ -29,6 +34,20 @@ export const DEFAULT_LANGUAGE: AppLanguage = "en";
 
 export function isAppLanguage(value: unknown): value is AppLanguage {
 	return APP_LANGUAGES.some((lang) => lang.id === value);
+}
+
+export function getLanguageDirection(language: AppLanguage): TextDirection {
+	return APP_LANGUAGES.find((lang) => lang.id === language)?.dir ?? "ltr";
+}
+
+/** Detect text direction from the first strongly typed directional letter.
+ *  Returns "ltr" if Latin/English appears first, "rtl" if Arabic/Hebrew,
+ *  or fallback (defaulting to "ltr") if empty/neutral. */
+export function getTextDirection(text?: string | null, fallback: TextDirection = "ltr"): TextDirection {
+	if (!text) return fallback;
+	const match = text.match(/[\p{Script=Arabic}\p{Script=Hebrew}]|[\p{Script=Latin}]/u);
+	if (!match) return fallback;
+	return /[\p{Script=Latin}]/u.test(match[0]) ? "ltr" : "rtl";
 }
 
 /** Per-language variants of one text; English is required, the rest fall back to it. */
@@ -40,7 +59,7 @@ export function pickLocalized<T>(map: Localized<T>, language: AppLanguage = DEFA
 
 /** Every registered language's UI dictionary (adding a language to
  *  APP_LANGUAGES makes this fail typecheck until its dictionary exists). */
-export const DICTIONARIES: Record<AppLanguage, Dictionary> = { en, es };
+export const DICTIONARIES: Record<AppLanguage, Dictionary> = { en, ar, es };
 
 /** The UI copy for `key` in `language`, with `{name}` placeholders filled from `vars`. */
 export function translate(language: AppLanguage, key: TranslationKey, vars?: Record<string, string | number>): string {

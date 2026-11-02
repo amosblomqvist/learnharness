@@ -25,7 +25,6 @@ const chrome = (
 		noMatch
 		importing={false}
 		searchInputRef={{ current: null }}
-		fileInputRef={{ current: null }}
 		onImportFiles={() => {}}
 		settings={DEFAULT_RENDER_SETTINGS}
 		changeSettings={() => {}}

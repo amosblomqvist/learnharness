@@ -5,9 +5,11 @@ import { ArrowDownIcon, ChevronRightIcon, PlayIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { finishDictation, isDictationActive, joinDictation, useDictationTarget } from "@/components/dictation";
 import { useEnterSubmits } from "@/components/enter-submits";
+import { PathInput } from "@/components/path-input";
+import { MalformedQuestion } from "@/components/malformed-question";
 import { ToolContentResponse } from "@/components/ai-elements/message";
 import { cn } from "@/lib/utils";
-import { useT } from "@/components/i18n";
+import { useDirection, useTextDirection, useT } from "@/components/i18n";
 import {
 	buildAnswer,
 	repairMathForDisplay,
@@ -134,11 +136,7 @@ export function QuestionDock({
 	const parsed =
 		canonical === "quiz" ? parseQuizInput(input) : canonical === "explain" ? parseExplainInput(input) : parseAskInput(input);
 	if (!parsed) {
-		return (
-			<div data-testid="malformed-question" className="rounded-xl border border-dashed bg-card/60 p-3 text-sm text-muted-foreground">
-				{t("composer.dock.malformed")}
-			</div>
-		);
+		return <MalformedQuestion />;
 	}
 	return (
 		<>
@@ -274,6 +272,8 @@ function QuestionDockForm({
 	compactionRunning = false,
 }: Omit<QuestionDockProps, "expanded" | "onExpand" | "reveal">) {
 	const t = useT();
+	const dir = useDirection();
+	const isRtl = dir === "rtl";
 	const kind = toolQuestionKind(toolName);
 
 	// Canonical QuestionData, built once per question. Quiz options are
@@ -336,6 +336,8 @@ function QuestionDockForm({
 	const [thinking, setThinking] = useState(initialDraft?.thinking ?? "");
 	const [other, setOther] = useState(initialDraft?.other ?? "");
 	const [text, setText] = useState(initialDraft?.text ?? "");
+	const answerDir = useTextDirection(text);
+	const thinkingDir = useTextDirection(thinking);
 	/* Refs MIRROR the two dictation-target fields ("nothing gets lost"
 	 * round, owner 2026-10-01): the run's flush lands via setState, which
 	 * a closure waiting through `await finishDictation()` cannot observe
@@ -448,8 +450,8 @@ function QuestionDockForm({
 	   expanded — collapsed, the bar's native Enter expands it. */
 	const [kbdIdx, setKbdIdx] = useState<number | null>(null);
 	const rootRef = useRef<HTMLDivElement>(null);
-	const otherInputRef = useRef<HTMLInputElement>(null);
-	const thinkingRef = useRef<HTMLTextAreaElement>(null);
+	const otherInputRef = useRef<HTMLDivElement>(null);
+	const thinkingRef = useRef<HTMLDivElement>(null);
 	// One row past the options is the trailing row: quiz → don't-know,
 	// ask → Other (a question never has both). Text mode (ask/explain)
 	// has no rows — the composer IS the answer surface.
@@ -482,7 +484,7 @@ function QuestionDockForm({
 	const focusRow = (idx: number) => {
 		const row = rootRef.current?.querySelector(`[data-kbdrow="${idx}"]`) as HTMLElement | null;
 		if (!row) return;
-		const el = (row.querySelector("input") as HTMLElement | null) ?? row;
+		const el = (row.querySelector("input, [data-file-path-input]") as HTMLElement | null) ?? row;
 		el.focus();
 	};
 
@@ -540,10 +542,11 @@ function QuestionDockForm({
 				// (the slider grays out and nothing is sent).
 				if (kind !== "quiz" || sel.dontKnow) return;
 				e.preventDefault();
+				const step = e.key === "ArrowRight" ? (isRtl ? -1 : 1) : (isRtl ? 1 : -1);
 				setConfIdx((i) =>
 					Math.min(
 						CONFIDENCE_STOPS.length - 1,
-						Math.max(0, i + (e.key === "ArrowRight" ? 1 : -1)),
+						Math.max(0, i + step),
 					),
 				);
 			} else if (e.key === " ") {
@@ -573,7 +576,7 @@ function QuestionDockForm({
 			{/* Question area — scrolls internally if very tall; the bottom row stays put.
 			    Capped by the measured column (--dock-max-h; the old fixed 55dvh cut
 			    long questions short — owner round, 2026-10-05). */}
-			<div data-session-find-root="" className="max-h-[var(--dock-max-h,55dvh)] overflow-y-auto px-4 pt-3">
+			<div data-dock-scroll-area="" data-session-find-root="" className="max-h-[var(--dock-max-h,55dvh)] overflow-y-auto px-4 pt-3">
 				<div className="mb-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">
 					{toolName === "probe"
 						? t("composer.kind.probe")
@@ -610,7 +613,7 @@ function QuestionDockForm({
 									data-kbdrow={i}
 									onClick={() => toggle(i)}
 									className={cn(
-										"flex items-start gap-3 rounded-lg border px-3 py-2 text-left text-sm outline-none transition-colors",
+										"flex items-start gap-3 rounded-lg border px-3 py-2 text-start text-sm outline-none transition-colors",
 										isSel ? "border-primary bg-accent" : "hover:bg-accent/50",
 										i === kbdIdx && !isSel && "ring-1 ring-border bg-accent/40",
 									)}
@@ -658,7 +661,7 @@ function QuestionDockForm({
 								className={cn(
 									// Option-row layout + radio circle (owner); the dashed
 									// outline stays — this is the deliberate non-answer.
-									"flex items-start gap-3 rounded-lg border border-dashed px-3 py-2 text-left text-sm outline-none transition-colors",
+									"flex items-start gap-3 rounded-lg border border-dashed px-3 py-2 text-start text-sm outline-none transition-colors",
 									sel.dontKnow ? "border-primary text-foreground" : "text-muted-foreground",
 									kbdIdx === optionCount && !sel.dontKnow && "ring-1 ring-border bg-accent/40",
 								)}
@@ -685,7 +688,7 @@ function QuestionDockForm({
 								data-kbdrow={optionCount}
 								onClick={selectOther}
 								className={cn(
-									"flex items-start gap-3 rounded-lg border px-3 py-2 text-left text-sm outline-none transition-colors",
+									"flex items-start gap-3 rounded-lg border px-3 py-2 text-start text-sm outline-none transition-colors",
 									sel.otherSelected ? "border-primary bg-accent" : "border-dashed hover:bg-accent/50",
 									kbdIdx === optionCount && !sel.otherSelected && "ring-1 ring-border bg-accent/40",
 								)}
@@ -705,11 +708,12 @@ function QuestionDockForm({
 										</span>
 									)}
 								</span>
-								<input
+								<PathInput
 									ref={otherInputRef}
+									singleLine
 									value={other}
-									onChange={(e) => {
-										setOther(e.target.value);
+									onValueChange={(value) => {
+										setOther(value);
 										// Typing selects the row — displacing in
 										// single-select, alongside the siblings in multi.
 										setSel((prev) => (prev.otherSelected ? prev : toggleOther(selectMode, prev)));
@@ -791,7 +795,7 @@ function QuestionDockForm({
 								aria-hidden
 								data-testid="confidence-rail"
 								className="pointer-events-none absolute top-1/2 left-2 right-2 h-1.5 -translate-y-1/2 rounded-full border border-border"
-								style={confidenceRailStyle(CONFIDENCE_STOPS[confIdx]!)}
+								style={confidenceRailStyle(CONFIDENCE_STOPS[confIdx]!, isRtl)}
 							/>
 							<input
 								type="range"
@@ -860,11 +864,12 @@ function QuestionDockForm({
 						{qd.mode === "text" ? t("composer.dock.yourAnswer") : t("composer.dock.yourThinking")}
 					</div>
 					{qd.mode === "text" ? (
-						<textarea
+						<PathInput
+							dir={answerDir}
 							value={text}
-							onChange={(e) => {
-								answerTextRef.current = e.target.value;
-								setText(e.target.value);
+							onValueChange={(value) => {
+								answerTextRef.current = value;
+								setText(value);
 							}}
 							onKeyDown={(e) => {
 								// Esc ends dictation (the dictate decisions: click-again
@@ -884,16 +889,16 @@ function QuestionDockForm({
 								}
 							}}
 							placeholder={t("composer.dock.answerPlaceholder")}
-							rows={1}
 							className="field-sizing-content lh-input max-h-48 min-h-10 w-full resize-none bg-transparent px-2.5 py-2 outline-none placeholder:text-muted-foreground"
 						/>
 					) : (
-						<textarea
+						<PathInput
+							dir={thinkingDir}
 							ref={thinkingRef}
 							value={thinking}
-							onChange={(e) => {
-								thinkingTextRef.current = e.target.value;
-								setThinking(e.target.value);
+							onValueChange={(value) => {
+								thinkingTextRef.current = value;
+								setThinking(value);
 							}}
 							onKeyDown={(e) => {
 								// Esc ends dictation (the dictate decisions: click-again
@@ -914,7 +919,6 @@ function QuestionDockForm({
 								}
 							}}
 							placeholder={t("composer.dock.thinkingPlaceholder")}
-							rows={1}
 							className={cn(
 								"field-sizing-content lh-input max-h-48 w-full resize-none bg-transparent px-2.5 py-2 outline-none placeholder:text-muted-foreground/70",
 								// Phase-scaled prominence: teaching invites depth,

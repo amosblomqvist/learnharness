@@ -53,6 +53,7 @@ const STORAGE_KEY = "lh:sidebar-open";
  */
 import type { ChatGPTControlBridge, NativeSubscriptionControlBridge } from "@/src/core";
 import type { UpdateState } from "@/components/settings/update-settings.tsx";
+import { FilePathDropZone } from "@/components/file-path-drop-zone";
 const SIDEBAR_AUTOCLOSE = 928;
 
 // Module scope, guarded for SSR (the server has no navigator).
@@ -64,6 +65,8 @@ declare global {
 		lh?: {
 			/** Read-only host OS; determines the native-control gutter. */
 			platform?: string;
+			/** Resolve an OS-backed File without copying/uploading its contents. */
+			getPathForFile?: (file: File) => string;
 			/** External Next desktop-dev uses the server's web connections. */
 			subscriptionTransport?: "desktop" | "web";
 			openSubscriptionBrowser?: (action: string) => Promise<void>;
@@ -221,7 +224,7 @@ export function SidebarToggle() {
 				{/* Owner, round 6: size-4, SAME as the close glyph — the toggle
 				    must not grow when the sidebar is closed (it did: size-5 here).
 				    The small look is the standard, both directions. */}
-				<PanelLeftOpenIcon className="size-4" />
+				<PanelLeftOpenIcon className="size-4 rtl:scale-x-[-1]" />
 			</Button>
 			</Hint>
 		</span>
@@ -655,7 +658,7 @@ function SessionsSidebar() {
 			className={cn("sidebar-motion shrink-0 overflow-hidden duration-200", open ? "w-72" : "w-0")}
 			aria-hidden={!open}
 		>
-			<div className="flex h-full w-72 flex-col border-r bg-background">
+			<div className="flex h-full w-72 flex-col border-r rtl:border-r-0 rtl:border-l bg-background">
 				{/* LH wordmark — the owner's header; close toggle sits at the edge.
 				    Merged chrome (2026-09-17): in Electron this band is the
 				    window's drag surface and starts after the traffic lights
@@ -692,7 +695,7 @@ function SessionsSidebar() {
 							onClick={toggle}
 							className="lh-no-drag"
 						>
-							<PanelLeftCloseIcon className="size-4" />
+							<PanelLeftCloseIcon className="size-4 rtl:scale-x-[-1]" />
 						</Button>
 					</Hint>
 				</div>
@@ -778,9 +781,9 @@ function SessionsSidebar() {
 							}}
 							placeholder={t("nav.sidebar.search.placeholder")}
 							aria-label={t("nav.sidebar.search")}
-							className="h-6 rounded-sm border-border bg-background pl-6 text-xs placeholder:text-muted-foreground/60"
+							className="h-6 rounded-sm border-border bg-background pl-6 rtl:pl-2 rtl:pr-6 text-xs placeholder:text-muted-foreground/60"
 						/>
-						<SearchIcon className="pointer-events-none absolute left-1.5 top-1/2 size-3 -translate-y-1/2 text-muted-foreground/70" />
+						<SearchIcon className="pointer-events-none absolute left-1.5 rtl:left-auto rtl:right-1.5 top-1/2 size-3 -translate-y-1/2 text-muted-foreground/70" />
 					</span>
 					</Hint>
 				</div>
@@ -952,7 +955,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 	return (
 		<SettingsDialogProvider>
 			<SessionsSidebar />
-			<main className="min-w-0 flex-1">{children}</main>
+			<FilePathDropZone className="relative min-w-0 flex-1">{children}</FilePathDropZone>
 			{/* The single document-level keydown listener (keyboard wave A) —
 			    after the content in the tree, but it's window-level so order only
 			    matters for the events it dispatches, never for DOM priority. */}

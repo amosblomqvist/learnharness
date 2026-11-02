@@ -3,18 +3,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Loader2Icon, MicIcon } from "lucide-react";
 import { useSettingsDialog } from "@/components/settings/settings-dialog";
-import { useSettingsSaved } from "@/components/settings-signal";
 import { Hint } from "@/components/ui/hint";
-import { useLanguage, useT } from "@/components/i18n";
-import {
-	dictationCodeFor,
-	effectiveDictationLanguage,
-	resolveSettings,
-	translate,
-	type DictationLanguage,
-	type TranslationKey,
-	type UserSettings,
-} from "@/src/core";
+import { deepgramListenUrl, type DictationLanguage } from "@/src/core";
+import { useDictationLanguage } from "@/components/dictation-preference";
+import { setDictationActive } from "@/components/dictation-state";
+export { isDictationActive } from "@/components/dictation-state";
 
 /**
  * Voice dictation — the cloud engine (STT wave 1, 2026-09-17).
@@ -95,38 +88,9 @@ import {
 /*
  * Deepgram streaming params (the owner's live-tuned dictate config): nova-3,
  * endpointing=300, no interims. Silence streams too (the worklet never
- * pauses), so the socket never idles — no KeepAlive needed. The language
- * is the app language's dictation code unless settings override it
- * (effectiveDictationLanguage, core/i18n.ts).
+ * pauses), so the socket never idles — no KeepAlive needed.
  */
-const DG_URL =
-	"wss://api.deepgram.com/v1/listen" +
-	"?model=nova-3" +
-	"&encoding=linear16" +
-	"&sample_rate=16000" +
-	"&channels=1" +
-	"&smart_format=true" +
-	"&punctuate=true" +
-	"&endpointing=300";
-
-export function deepgramUrl(language: DictationLanguage): string {
-	return `${DG_URL}&language=${language}`;
-}
-
-/** The resolved dictation language — module-level like the warm token, so
- *  the click path never waits on a settings read. Re-read at page mount
- *  and on every general-section save; a failed read keeps the last value.
- *  null until the first read lands: the app language stands in. */
-let dictationLanguage: DictationLanguage | null = null;
-
-function refreshDictationLanguage(): void {
-	fetch("/api/settings")
-		.then((r) => r.json() as Promise<{ settings?: UserSettings | null }>)
-		.then((body) => {
-			dictationLanguage = effectiveDictationLanguage(resolveSettings(body.settings ?? null).general);
-		})
-		.catch(() => {});
-}
+// URL construction lives in the browser-safe core; only language varies.
 
 /** Meter tuning — the owner's tested values, see the file header. */
 const METER_FLOOR_DB = -50;
@@ -144,17 +108,7 @@ export const DEEPGRAM_KEY_ID = "DEEPGRAM_API_KEY";
  * (desktop) or .env.local (dev)") — the surface says the short truth
  * instead. Exported for pins; the errored idle button's click recognizes
  * it and deep-links Settings → Keys → the Deepgram row. */
-export const DICTATION_KEYLESS = translate("en", "composer.dictation.error.keyless");
-
-/** A terminal dictation failure as copy the bar translates: client-authored
- *  lines carry their own key; raw route/browser messages ride verbatim. */
-export type DictationError = { key: TranslationKey; vars?: Record<string, string | number> };
-
-function errorFrom(e: unknown, fallback: TranslationKey): DictationError {
-	if (!(e instanceof Error)) return { key: fallback };
-	if (e.message === DICTATION_KEYLESS) return { key: "composer.dictation.error.keyless" };
-	return { key: "composer.dictation.error.raw", vars: { message: e.message } };
-}
+export const DICTATION_KEYLESS = "Dictation needs a Deepgram key";
 
 /** Mint a fresh short-lived token (the route holds the real key
  *  server-side). Module-level: the start path's warm cache and the
@@ -245,15 +199,16 @@ export function rmsToMeter(rms: number): number {
  * window, one pending question, one target at a time.
  */
 let questionTarget: ((text: string) => void) | null = null;
+let composerTarget: ((text: string) => void) | null = null;
 
-/* Is a dictation run live on this page? The Esc chain (keyboard wave A,
- * components/keyboard-shortcuts.tsx) needs a SYNCHRONOUS answer — the
- * stop handler can't report back through a CustomEvent. Set at start(),
- * cleared in cleanup() (every terminal path runs through cleanup). */
-let dictationActiveFlag = false;
-
-export function isDictationActive(): boolean {
-	return dictationActiveFlag;
+/** File references use the very same default destination as dictation,
+ * including claims whose dock is currently collapsed. A focused editor can
+ * insert at its caret instead; callers use this only as the fallback. */
+export function appendToPrimaryInput(text: string): boolean {
+	const target = questionTarget ?? composerTarget;
+	if (!target) return false;
+	target(text);
+	return true;
 }
 
 /* The finisher registry: submit paths FAR from the hook's owner (the
@@ -292,7 +247,7 @@ export type DictationPhase = "idle" | "connecting" | "recording" | "stopping";
 export type Dictation = {
 	phase: DictationPhase;
 	/** Terminal-state explanation, shown inside the wide button (cleared on the next start). */
-	error: DictationError | null;
+	error: string | null;
 	/** Latest observed RMS, 0..1 — sampled by the meter's own tick, never reset. */
 	levelRef: { current: number };
 	/** Not idle — from the click until the stop completes (the optimistic window). */
@@ -327,17 +282,22 @@ export type Dictation = {
  * question waits.
  */
 export function useDictation({ append }: { append: (text: string) => void }): Dictation {
+	const { getLanguage } = useDictationLanguage();
 	const [phase, setPhase] = useState<DictationPhase>("idle");
-	const [error, setError] = useState<DictationError | null>(null);
+	const [error, setError] = useState<string | null>(null);
 	/** Latest RMS from the worklet — the meter samples this (dictate pattern). */
 	const levelRef = useRef(0);
 	/** The page's fallback append — kept fresh per render so a mid-recording
 	 *  retarget (composer↔question) is honored on the very next final. */
 	const appendRef = useRef(append);
 	appendRef.current = append;
-	const dictationCode = dictationCodeFor(useLanguage());
-	const languageRef = useRef(dictationCode);
-	languageRef.current = dictationCode;
+	useEffect(() => {
+		const target = (text: string) => appendRef.current(text);
+		composerTarget = target;
+		return () => {
+			if (composerTarget === target) composerTarget = null;
+		};
+	}, []);
 
 	// Live machinery (non-render values). The MediaStream tracks stop and
 	// the per-run nodes disconnect on teardown; the socket is recreated per
@@ -372,9 +332,9 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 	}, []);
 
 	/** Full teardown of one run's machinery. Idempotent; generation-guarded by callers. */
-	const cleanup = useCallback(() => {
+	const cleanup = useCallback((warmNext = true) => {
 		genRef.current++;
-		dictationActiveFlag = false;
+		setDictationActive(false);
 		flush(); // the deferred transcript appears when the run ends (owner round 2)
 		if (safetyRef.current) {
 			clearTimeout(safetyRef.current);
@@ -402,16 +362,16 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 		for (const w of waitersRef.current.splice(0)) w();
 		// Pre-mint for the next run (mitigation D) — best-effort; a keyless
 		// page just doesn't warm.
-		warmTokens.refresh();
+		if (warmNext) warmTokens.refresh();
 	}, []);
 
 	/** Open the Deepgram socket and wire its messages. `gen` guards staleness. */
 	const openSocket = useCallback(
-		(gen: number, token: string) => {
+		(gen: number, token: string, language: DictationLanguage) => {
 			// Minted JWTs authenticate via the "bearer" subprotocol — ["token",
 			// jwt] is rejected at the handshake (verified live; "token" is for
 			// raw API keys only, as in the owner's pi dictate extension).
-			const ws = new WebSocket(deepgramUrl(dictationLanguage ?? languageRef.current), ["bearer", token]);
+			const ws = new WebSocket(deepgramListenUrl(language), ["bearer", token]);
 			wsRef.current = ws;
 
 			ws.addEventListener("open", () => {
@@ -453,16 +413,16 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 					reconnectsRef.current++;
 					mintFreshToken() // always FRESH — a stale warm token is the likely culprit
 						.then((t) => {
-							if (gen === genRef.current) openSocket(gen, t);
+							if (gen === genRef.current) openSocket(gen, t, language);
 						})
 						.catch(() => {
 							if (gen === genRef.current) {
-								setError({ key: "composer.dictation.error.reconnect" });
+								setError("Deepgram reconnect failed");
 								cleanup();
 							}
 						});
 				} else {
-					setError({ key: "composer.dictation.error.connectionLost", vars: { code: ev.code } });
+					setError(`Deepgram connection lost (${ev.code})`);
 					cleanup();
 				}
 			});
@@ -471,13 +431,23 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 	);
 
 	const start = useCallback(async () => {
-		dictationActiveFlag = true;
+		setDictationActive(true);
 		setError(null);
 		setPhase("connecting");
 		reconnectsRef.current = 0;
 		bufferRef.current = []; // fresh run, fresh buffer (round 2)
 		pendingRef.current = []; // fresh run, fresh queue (mitigation A)
 		const gen = ++genRef.current;
+		let language: DictationLanguage;
+		try {
+			language = await getLanguage();
+		} catch (e) {
+			if (gen !== genRef.current) return;
+			setError(e instanceof Error ? e.message : "Dictation language unavailable");
+			cleanup();
+			return;
+		}
+		if (gen !== genRef.current) return;
 
 		// Mitigation D: the warm token (pre-minted at mount / after the last
 		// run) resolves ~instantly; a cold/keyless mint surfaces below. The
@@ -531,11 +501,13 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 			worklet.connect(ctx.destination);
 		} catch (e) {
 			if (gen !== genRef.current) return;
-			setError(
+			const msg =
 				e instanceof DOMException && (e.name === "NotAllowedError" || e.name === "SecurityError")
-					? { key: "composer.dictation.error.micDenied" }
-					: errorFrom(e, "composer.dictation.error.micUnavailable"),
-			);
+					? "Microphone permission denied"
+					: e instanceof Error
+						? e.message
+						: "mic unavailable";
+			setError(msg);
 			cleanup();
 			return;
 		}
@@ -545,15 +517,15 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 			token = await tokenPromise;
 		} catch (e) {
 			if (gen !== genRef.current) return;
-			setError(errorFrom(e, "composer.dictation.error.tokenUnavailable"));
+			setError(e instanceof Error ? e.message : "token unavailable");
 			cleanup();
 			return;
 		}
 		if (gen !== genRef.current) return;
 		// Mitigation B: the handshake fires the moment the graph is live,
 		// overlapping any remaining token wait — mic-gated, never before it.
-		openSocket(gen, token);
-	}, [openSocket, cleanup]);
+		openSocket(gen, token, language);
+	}, [openSocket, cleanup, getLanguage]);
 
 	const stop = useCallback(() => {
 		const gen = genRef.current;
@@ -629,11 +601,13 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 	// attached.
 	useEffect(() => {
 		warmTokens.refresh(); // pre-mint at mount (mitigation D) — silent if keyless
-		refreshDictationLanguage();
-	}, []);
-	useSettingsSaved((section) => {
-		if (section === "general") refreshDictationLanguage();
-	});
+		return () => {
+			// Navigation cancels capture: invalidate every pending await before
+			// releasing resources, and never append into a different page's input.
+			bufferRef.current = [];
+			cleanup(false);
+		};
+	}, [cleanup]);
 	useEffect(() => {
 		window.addEventListener("lh:kbd-toggle-dictation", toggle);
 		return () => window.removeEventListener("lh:kbd-toggle-dictation", toggle);
@@ -671,15 +645,12 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 export function DictationBar({ dictation }: { dictation: Dictation }) {
 	const { phase, error, levelRef, toggle, active, clearError } = dictation;
 	const { open: openSettings } = useSettingsDialog();
-	const t = useT();
-	const errorText = error ? t(error.key, error.vars) : null;
 	/** The keyless click (zero-keys wave, owner dictation trio): the errored
 	 *  idle button deep-links Settings → Keys → the Deepgram row and clears
 	 *  the error — the surface is clean when the user returns. Any other
 	 *  error keeps the old behavior (click = retry, which clears). */
-	const keyless = error?.key === "composer.dictation.error.keyless";
+	const keyless = error === DICTATION_KEYLESS;
 	const [levels, setLevels] = useState<number[]>(() => new Array(METER_CELLS).fill(0));
-	const recording = phase === "recording" || phase === "stopping";
 	/** Adaptive cell count (owner round 2): derived from the meter's
 	 *  measured width — narrow rows show fewer bars instead of
 	 *  overflowing under neighbors. */
@@ -723,11 +694,8 @@ export function DictationBar({ dictation }: { dictation: Dictation }) {
 	if (!active) {
 		return (
 			<Hint
-				// Errored: the button span truncates the line — the tooltip is its
-				// full reveal (the keyless line KEEPS "Deepgram" — owner overrule:
-				// it's the Keys row label, the truth the user needs). Otherwise the
-				// quiet label + the live ⌘D binding.
-				label={errorText ?? t("composer.dictation.dictate")}
+				// The error line truncates in the button; its tooltip reveals it.
+				label={error ?? "Dictate"}
 				action={error ? undefined : "toggle-dictation"}
 				side="top"
 			>
@@ -741,14 +709,12 @@ export function DictationBar({ dictation }: { dictation: Dictation }) {
 							toggle();
 						}
 					}}
-					aria-label={errorText ? t("composer.dictation.failed", { error: errorText }) : t("composer.dictation.start")}
+					aria-label={error ? `Dictation failed: ${error}` : "Start dictation"}
 					data-testid="dictation-toggle"
-				// Same blurring as the floating chrome (owner, fix wave round 3),
-			// but lower opacity — the mic stays quieter than the model pills.
-			className="flex h-7 w-full items-center justify-center gap-1.5 rounded-md border border-border/50 bg-card/50 text-xs text-muted-foreground/70 shadow-lg backdrop-blur transition-colors hover:border-border hover:text-muted-foreground"
-			>
+					className="flex h-7 w-full items-center justify-center gap-1.5 rounded-md border border-border/50 bg-card/50 text-xs text-muted-foreground/70 shadow-lg backdrop-blur transition-colors hover:border-border hover:text-muted-foreground"
+				>
 					<MicIcon className="size-3.5" />
-					<span className="max-w-full truncate">{errorText ?? t("composer.dictation.dictate")}</span>
+					<span className="max-w-full truncate">{error ?? "Dictate"}</span>
 				</button>
 			</Hint>
 		);
@@ -756,32 +722,20 @@ export function DictationBar({ dictation }: { dictation: Dictation }) {
 
 	return (
 		<div className="flex w-full min-w-0 items-center gap-2" data-testid="dictation-bar">
-			<Hint
-				// The owner flagged this copy good ("Stop dictation (Esc)") —
-				// kept verbatim; only the machinery moved to the styled tooltip.
-				label={t("composer.dictation.stopHint")}
-				side="top"
-			>
+			<Hint label="Stop dictation (Esc)" side="top">
 				<button
 					type="button"
 					onClick={toggle}
 					disabled={phase === "stopping"}
-					aria-label={t("composer.dictation.stopAria")}
-				data-testid="dictation-toggle"
-				className="flex h-7 shrink-0 items-center gap-1.5 rounded-md bg-destructive/10 px-2 text-xs font-medium text-destructive transition-colors hover:bg-destructive/20"
-			>
-				{phase === "stopping" ? (
-					<Loader2Icon className="size-3.5 animate-spin" />
-				) : (
-					<MicIcon className="size-3.5" />
-				)}
-					{t("composer.dictation.stop")}
+					aria-label="Stop dictation"
+					data-testid="dictation-toggle"
+					className="flex h-7 shrink-0 items-center gap-1.5 rounded-md bg-destructive/10 px-2 text-xs font-medium text-destructive transition-colors hover:bg-destructive/20"
+				>
+					{phase === "stopping" ? <Loader2Icon className="size-3.5 animate-spin" /> : <MicIcon className="size-3.5" />}
+					Stop
 				</button>
 			</Hint>
 			<span className="size-1.5 shrink-0 animate-pulse rounded-full bg-destructive" aria-hidden />
-			{/* Fixed width while recording — nothing ever appends text beside it
-			    (no interims, owner round 1). Cells carry no minimum width; the
-			    COUNT adapts to the measured row space (owner round 2). */}
 			<div ref={meterRef} className="flex h-4 min-w-0 flex-1 items-center gap-[2px]" data-testid="dictation-meter">
 				{levels.slice(-cellCount).map((v, i) => (
 					<span

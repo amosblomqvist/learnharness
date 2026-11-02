@@ -273,9 +273,9 @@ export function newCompactionMarker(summary: string, details: CompactionDetails)
 	};
 }
 
-/** The ACTIVE compaction marker: the newest one in the record (chained
- * compactions — the last one rules; older markers fall inside the
- * dropped span and never render). */
+/** The ACTIVE compaction marker: the newest one with a retained-message
+ * id. Its summary supersedes older markers even when their stored
+ * positions remain inside its retained tail. */
 export function activeCompactionOf(messages: readonly LhMessage[]): (LhMarkerMessage & { details: CompactionDetails }) | null {
 	for (let i = messages.length - 1; i >= 0; i--) {
 		const m = messages[i]!;
@@ -389,6 +389,7 @@ type CompactionPromptTemplate = (spanText: string, planTreeText: string | null) 
 const COMPACTION_PROMPTS: Localized<CompactionPromptTemplate> = {
 	en: englishCompactionPrompt,
 	es: spanishCompactionPrompt,
+	ar: arabicCompactionPrompt,
 };
 
 function englishCompactionPrompt(spanText: string, planTreeText: string | null): string {
@@ -441,6 +442,33 @@ Qué está pasando AHORA MISMO en el corte: cualquier pregunta o problema que es
 Reglas: nada de elogios, nada de relleno, nada de especulación más allá de la transcripción. Toda afirmación sobre el aprendiz debe poder rastrearse a lo que realmente dijo o respondió. Conserva exactos todos los identificadores (ids de proposiciones, ids de nodos, rutas de archivos).
 
 TRANSCRIPCIÓN A RESUMIR:
+
+${spanText}`;
+}
+
+function arabicCompactionPrompt(spanText: string, planTreeText: string | null): string {
+	const planSection = planTreeText ?? "لا توجد شجرة خطة في هذه الجلسة (لم يتم حفظ أي شيء).";
+	return `أنت تقوم بضغط الجزء السابق من جلسة تعليمية — وتكتب الملخص الذي سيقرأه مستقبلك بَدَلاً من ذلك النص. يتم استبدال كل شيء قبل نقطة الاقتطاع بما تكتبه هنا؛ بينما يبقى كل شيء بعد نقطة الاقتطاع حرفياً كما هو. يُعرّف نص المتعلم أدناه المتعلم بـ [LEARNER]، والوكيل المعلم بـ [TUTOR]، ومخرجات الأدوات بـ [RESULT …]/[SYSTEM NOTE].
+
+اكتب الملخص باللغة العربية مع هذه الأقسام بالضبط، بهذا الترتيب:
+
+## فهم المتعلم
+أدق وأشمل صورة يمكنك تقديمها لما يعرفه هذا المتعلم وكيف تَطوّر ذلك عبر الجلسة: ما الذي أجاب عنه ومدى جودة إجابته (نتائج الاختبارات القصيرة، الاستدلال الصحيح، الأخطاء)، ثقته المعلنة أو الظاهرة، المفاهيم الخاطئة التي ظهرت، ما تم تصحيحه منها وما لا يزال قائماً. يحمل هذا القسم الوزن الأكبر — فقرارات التدريس المستقبلية تعتمد عليه.
+
+## مسار التدريس
+كيف تقدمت الجلسة: ما تم تغطيته وبأي ترتيب، أي التفسيرات أجدت نفعاً وأيها لم تنجح، كيف استجاب المتعلم، وأين اتجه الزخم. ضمّن نتائج مرحلة السبر/الاستكشاف إن وجدت.
+
+## شجرة تبعيات الخطة
+أعد إنتاج شجرة الخطة الحالية للجلسة حرفياً من البنية أدناه — لا تُسقط أي عقد أو حواف أو حالات.
+
+${planSection}
+
+## اللحظة الحالية
+ما الذي يحدث الآن تحديداً عند نقطة الاقتطاع: أي سؤال أو مسألة بانتظار إجابة المتعلم، أي التزام قطعه الوكيل يجب أن يفي به في دور لاحق، والخطوة التالية المباشرة.
+
+القواعد: لا ثناء، لا حشو، لا تكهنات تتجاوز النص. كل ادعاء عن المتعلم يجب أن يكون قابلاً للتتبع لما قاله أو أجاب عليه بالفعل. حافظ على جميع المعرفات (معرفات القضايا، معرفات العقد، مسارات الملفات) دقيقة وحرفية.
+
+النص المراد تلخيصه:
 
 ${spanText}`;
 }

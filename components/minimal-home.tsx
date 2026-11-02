@@ -18,11 +18,11 @@
  * The practice pick flow mirrors GraphView's contract verbatim (home
  * lifts the pick set; the chip opens the overlay in select mode).
  */
-import { useCallback, useEffect, useRef, useState } from "react";
-import { ListTreeIcon, UploadIcon } from "lucide-react";
+import { useCallback, useEffect, useState } from "react";
+import { ListTreeIcon } from "lucide-react";
 import { ChainTableOverlay } from "@/components/chain-table.tsx";
 import { GraphCostControl } from "@/components/graph-view.tsx";
-import { NotesImportErrors, useNotesImport } from "@/components/notes-import.tsx";
+import { NotesImportControl, NotesImportErrors, NotesImportNotices, useNotesImport } from "@/components/notes-import.tsx";
 import { Hint } from "@/components/ui/hint";
 import type { ChatSummary, GraphCostSummary, GraphSnapshot, TranslationKey } from "@/src/core";
 import { useT } from "@/components/i18n";
@@ -101,7 +101,6 @@ export function MinimalHome({
 	const [costs, setCosts] = useState<GraphCostSummary | null>(null);
 	const [chats, setChats] = useState<ChatSummary[]>([]);
 	const [chainsOpen, setChainsOpen] = useState(false);
-	const fileInputRef = useRef<HTMLInputElement>(null);
 
 	const readState = useCallback(() => {
 		fetch("/api/graph")
@@ -119,6 +118,8 @@ export function MinimalHome({
 	}, []);
 	useEffect(() => {
 		readState();
+		window.addEventListener("lh:graph-revision", readState);
+		return () => window.removeEventListener("lh:graph-revision", readState);
 	}, [readState]);
 
 	// The practice chip opens the table in select mode (GraphView's law):
@@ -136,18 +137,6 @@ export function MinimalHome({
 
 	return (
 		<div className="relative h-full">
-			<input
-				ref={fileInputRef}
-				type="file"
-				multiple
-				accept=".md,.markdown,.txt"
-				className="hidden"
-				onChange={(e) => {
-					onImportFiles(e.target.files);
-					e.target.value = ""; // allow re-picking the same file
-				}}
-			/>
-
 			{/* The quiet summary — centered, biased up off the composer. */}
 			<div className="pointer-events-none flex h-full items-center justify-center pb-40">
 				<KnowledgeSummary
@@ -168,7 +157,7 @@ export function MinimalHome({
 			    window instead. Node search and the render-settings gear are
 			    canvas things and stay gone; Import ALWAYS renders (the
 			    entry law). */}
-			<div className="lh-no-drag lh-wco-floating absolute right-2 top-2 z-10 flex max-w-[calc(100%-5.5rem)] flex-col items-end gap-2">
+			<div className="lh-no-drag lh-wco-floating absolute right-2 rtl:right-auto top-2 z-10 flex max-w-[calc(100%-6.5rem)] flex-col items-end rtl:items-start gap-2">
 				<div className="flex min-w-0 items-start gap-2">
 					<div className="graph-chrome-fade-in shrink-0 rounded-xl border bg-card/85 px-1 py-[3px] shadow-lg backdrop-blur">
 						<Hint label={t("nav.minimal.chains.hint")} side="bottom">
@@ -183,22 +172,10 @@ export function MinimalHome({
 							</button>
 						</Hint>
 					</div>
-					<div className="shrink-0 rounded-xl border bg-card/85 px-1 py-[3px] shadow-lg backdrop-blur">
-						<Hint label={t("nav.minimal.import.hint")} side="bottom">
-							<button
-								type="button"
-								disabled={importing}
-								onClick={() => fileInputRef.current?.click()}
-								data-testid="import-notes"
-								className="flex h-7 items-center gap-1.5 rounded-lg px-2.5 text-xs text-muted-foreground transition-colors hover:bg-accent disabled:opacity-50"
-							>
-								<UploadIcon className="size-3" />
-								{importing ? t("nav.minimal.importing") : t("nav.minimal.import")}
-							</button>
-						</Hint>
-					</div>
+					<NotesImportControl importing={importing} onImportFiles={onImportFiles} />
 				</div>
 				<NotesImportErrors errors={notesImport.errors} />
+				<NotesImportNotices notices={notesImport.notices} />
 				{costs && costs.runs.length > 0 && <GraphCostControl costs={costs} />}
 			</div>
 
@@ -208,7 +185,7 @@ export function MinimalHome({
 			    order, so a full-bleed surface covering the drag band must
 			    paint after everything it covers. */}
 			<ChainTableOverlay
-				open={chainsOpen && (snapshot?.propositions.length ?? 0) > 0}
+				open={chainsOpen}
 				nodes={snapshot?.propositions ?? []}
 				chains={snapshot?.chains ?? []}
 				sessions={snapshot?.sessions ?? {}}

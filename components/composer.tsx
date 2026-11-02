@@ -1,9 +1,11 @@
 "use client";
 
+import { useCallback, useLayoutEffect, useState } from "react";
 import { ArrowRightIcon, CornerDownLeftIcon, SquareIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Hint } from "@/components/ui/hint";
-import { useT } from "@/components/i18n";
+import { PathInput } from "@/components/path-input";
+import { useTextDirection, useT } from "@/components/i18n";
 
 /**
  * The chat composer — content row ONLY (the persistent rounded shell lives in
@@ -37,6 +39,68 @@ export function enterAction(state: {
 	return "none";
 }
 
+/**
+ * Session composer with local keystroke state. The owning Chat keeps the
+ * current draft in a ref for send/dictation, so typing doesn't rerender the
+ * transcript; revision signals explicit parent-driven draft resets.
+ */
+export function ChatSessionComposer({
+	busy,
+	value,
+	revision,
+	onChange,
+	onSend,
+	onStop,
+	sendAllowed,
+	dictationActive,
+	autoFocus,
+	inputRef,
+	onEscape,
+	placeholder,
+	nextProblem,
+	onNext,
+}: {
+	busy: boolean;
+	value: string;
+	revision: number;
+	onChange: (value: string) => void;
+	onSend: () => void;
+	onStop: () => void;
+	sendAllowed: boolean;
+	dictationActive: boolean;
+	autoFocus?: boolean;
+	inputRef?: React.RefObject<HTMLDivElement | null>;
+	onEscape?: () => void;
+	placeholder?: string;
+	nextProblem?: boolean;
+	onNext?: () => void;
+}) {
+	const [draft, setDraft] = useState(value);
+	useLayoutEffect(() => { setDraft(value); }, [revision, value]);
+	const canSend = sendAllowed && (draft.trim().length > 0 || dictationActive);
+	const applyDraft = useCallback((next: string) => {
+		setDraft(next);
+		onChange(next);
+	}, [onChange]);
+
+	return (
+		<Composer
+			busy={busy}
+			value={draft}
+			onChange={applyDraft}
+			onSend={onSend}
+			onStop={onStop}
+			canSend={canSend}
+			autoFocus={autoFocus}
+			inputRef={inputRef}
+			onEscape={onEscape}
+			placeholder={placeholder}
+			nextProblem={nextProblem}
+			onNext={onNext}
+		/>
+	);
+}
+
 export function Composer({
 	busy,
 	value,
@@ -60,7 +124,7 @@ export function Composer({
 	autoFocus?: boolean;
 	/** The page's handle to the textarea — the dictation-end focus (owner,
 	 *  2026-10-01): a run ending hands the cursor to the bare composer. */
-	inputRef?: React.RefObject<HTMLTextAreaElement | null>;
+	inputRef?: React.RefObject<HTMLDivElement | null>;
 	/** Escape while a dictation runs stops it (STT wave, 2026-09-17). No-op
 	 *  when absent — Esc otherwise means nothing in the composer. */
 	onEscape?: () => void;
@@ -77,6 +141,7 @@ export function Composer({
 	onNext?: () => void;
 }) {
 	const t = useT();
+	const dir = useTextDirection(value);
 	const act = () => {
 		const action = enterAction({ busy, canSend, nextProblem });
 		if (action === "stop") onStop();
@@ -92,10 +157,12 @@ export function Composer({
 				act();
 			}}
 		>
-			<textarea
+			<PathInput
+				dir={dir}
 				ref={inputRef}
 				value={value}
-				onChange={(e) => onChange(e.target.value)}
+				onValueChange={onChange}
+				defaultDropTarget
 				onKeyDown={(e) => {
 					// Esc ends dictation before anything else Esc might someday mean
 					// here (the dictate decisions: click-again or Esc to stop).
@@ -117,7 +184,6 @@ export function Composer({
 				}}
 				placeholder={placeholder ?? t("composer.input.placeholder")}
 				autoFocus={autoFocus}
-				rows={1}
 				className="field-sizing-content lh-input max-h-48 min-h-10 flex-1 resize-none bg-transparent px-2.5 py-2 outline-none placeholder:text-muted-foreground"
 			/>
 			{/* The button follows the text (owner report 2026-10-03): while

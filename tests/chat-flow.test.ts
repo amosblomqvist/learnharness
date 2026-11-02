@@ -1427,8 +1427,8 @@ describe("the silent dismissal (A2)", () => {
 				id: "a1",
 				role: "assistant",
 				content: [
-					{ type: "toolCall", id: "call-a", name: "quiz", arguments: { question: "A?" } as never },
-					{ type: "toolCall", id: "call-b", name: "quiz", arguments: { question: "B?" } as never },
+					{ type: "toolCall", id: "call-a", name: "quiz", arguments: { ...QUIZ_INPUT, question: "A?" } as never },
+					{ type: "toolCall", id: "call-b", name: "quiz", arguments: { ...QUIZ_INPUT, question: "B?" } as never },
 				],
 				api: "openai-completions",
 				provider: "openrouter",

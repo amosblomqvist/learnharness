@@ -6,17 +6,18 @@
 
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { APP_LANGUAGES, isAppLanguage, pickLocalized } from "../src/core/i18n.ts";
+import { APP_LANGUAGES, getTextDirection, isAppLanguage, pickLocalized } from "../src/core/i18n.ts";
 import { FACTORY_SETTINGS, sanitizeUserSettings } from "../src/core/settings.ts";
 import { resolveSettings } from "../src/core/settings-resolution.ts";
 import { parseGeneralSettingsBody } from "../src/server/settings-body.ts";
 
 describe("the language registry", () => {
-	it("offers English and Spanish, each labelled in its own language", () => {
+	it("offers English, Arabic, and Spanish, each labelled in its own language", () => {
 		assert.deepEqual(
 			APP_LANGUAGES.map((l) => [l.id, l.label]),
 			[
 				["en", "English"],
+				["ar", "العربية"],
 				["es", "Español"],
 			],
 		);
@@ -64,5 +65,28 @@ describe("general.language", () => {
 		assert.deepEqual(es.settings, { autoUpdate: true, language: "es" });
 		assert.equal(parseGeneralSettingsBody({ language: "klingon" }).ok, false);
 		assert.equal(parseGeneralSettingsBody({ language: 3 }).ok, false);
+	});
+});
+
+describe("getTextDirection", () => {
+	it("detects LTR when text starts with English/Latin", () => {
+		assert.equal(getTextDirection("sdfdsf\nتجربة", "rtl"), "ltr");
+		assert.equal(getTextDirection("Hello world", "rtl"), "ltr");
+		assert.equal(getTextDirection("  123 abc", "rtl"), "ltr");
+		assert.equal(getTextDirection("Émile", "rtl"), "ltr");
+	});
+
+	it("detects RTL when text starts with Arabic", () => {
+		assert.equal(getTextDirection("تجربة\nsdfdsf", "ltr"), "rtl");
+		assert.equal(getTextDirection("مرحباً بك", "ltr"), "rtl");
+		assert.equal(getTextDirection("  123 تجربة", "ltr"), "rtl");
+	});
+
+	it("falls back to the specified default when empty or neutral", () => {
+		assert.equal(getTextDirection("", "rtl"), "rtl");
+		assert.equal(getTextDirection("   ", "rtl"), "rtl");
+		assert.equal(getTextDirection("12345", "rtl"), "rtl");
+		assert.equal(getTextDirection(undefined, "rtl"), "rtl");
+		assert.equal(getTextDirection(null, "ltr"), "ltr");
 	});
 });

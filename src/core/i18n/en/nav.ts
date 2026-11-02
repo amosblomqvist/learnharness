@@ -117,11 +117,13 @@ export const nav = {
 	"nav.update.readyVersion": "LearnHarness {version} is ready",
 	"nav.update.restartHint": "— restart to finish installing.",
 	"nav.update.restart": "Restart",
+	"nav.update.dismiss": "Dismiss update notification",
 
 	"nav.stats.title": "Session stats",
 	"nav.stats.context": "Context (last call)",
 	"nav.stats.usage": "Usage",
 	"nav.stats.totalCost": "Total cost",
+	"nav.stats.cacheHitRate": "Cache hit rate",
 	"nav.stats.manageChatGPT": "Manage ChatGPT usage",
 	"nav.stats.unpriced": "Unpriced turns",
 	"nav.stats.turns": "Turns",

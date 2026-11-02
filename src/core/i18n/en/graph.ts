@@ -122,4 +122,13 @@ export const graph = {
 	"graph.deleteNode.permanence.one": "This permanently deletes the node — this cannot be undone.",
 	"graph.deleteNode.permanence.other": "This permanently deletes all {n} nodes — this cannot be undone.",
 	"graph.deleteNode.extractionRunning": "An extraction is running — try again when the activity dock drains.",
+
+	"graph.deleteSource.title": "Delete source?",
+	"graph.deleteFolder.title": "Delete folder?",
+	"graph.deleteSourcesAndFolders.title": "Delete selected sources and folders?",
+	"graph.folders.add": "Add folder",
+	"graph.folders.namePlaceholder": "Folder name",
+	"graph.folders.new": "New folder",
+	"graph.import.files": "Files",
+	"graph.import.folder": "Folder",
 } as const;

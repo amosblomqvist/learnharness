@@ -8,7 +8,7 @@ import { ServerEventsProvider } from "@/components/server-events";
 import { AppearanceProvider } from "@/components/settings/appearance";
 import UpdateBanner from "@/components/update-banner";
 import { I18nProvider } from "@/components/i18n";
-import { resolveSettings, translate } from "@/src/core";
+import { resolveSettings, translate, getLanguageDirection } from "@/src/core";
 import { readSettingsRecord } from "@/src/server";
 
 // Chrome = JetBrains Mono, teaching prose = Source Sans 3, titles = CMU
@@ -29,8 +29,9 @@ export const dynamic = "force-dynamic";
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
 	const language = resolveSettings(readSettingsRecord()).general.language;
+	const dir = getLanguageDirection(language);
 	return (
-		<html lang={language} className={`dark ${ui.variable} ${prose.variable}`}>
+		<html lang={language} dir={dir} className={`dark ${ui.variable} ${prose.variable}`} suppressHydrationWarning>
 			<body className="min-h-dvh antialiased">
 			<I18nProvider initialLanguage={language}>
 			{/* The notification channel rides OUTSIDE everything: sidebar, dock,

@@ -1,6 +1,9 @@
+"use client";
+
 import type { CSSProperties } from "react";
 import { cn } from "@/lib/utils";
 import { CONFIDENCE_STOPS } from "@/src/core";
+import { useDirection } from "@/components/i18n";
 
 /**
  * The confidence RAIL — the slider's paint, shared by two surfaces so they
@@ -32,30 +35,38 @@ export const CONFIDENCE_COLORS: readonly string[] = [
 ];
 
 /** The rail's paint for a stop value (0–100). */
-export function confidenceRailStyle(value: number): CSSProperties {
+export function confidenceRailStyle(value: number, rtl = false): CSSProperties {
 	const color = CONFIDENCE_COLORS[CONFIDENCE_STOPS.indexOf(value)] ?? CONFIDENCE_COLORS[2]!;
+	const isRtl = rtl;
+	const gradientDir = isRtl ? "to left" : "to right";
+	const tickPositions = isRtl
+		? [30, 50, 70, 90].map((p) => `${100 - p}% 0`)
+		: [30, 50, 70, 90].map((p) => `${p}% 0`);
+
 	return {
 		backgroundColor: "#141414",
 		backgroundImage: [
-			`linear-gradient(90deg, ${color} 0%, ${color} ${value}%, transparent ${value}%, transparent 100%)`,
+			`linear-gradient(${gradientDir}, ${color} 0%, ${color} ${value}%, transparent ${value}%, transparent 100%)`,
 			...[30, 50, 70, 90].map(
 				() => "linear-gradient(90deg, rgba(230,230,230,0.35), rgba(230,230,230,0.35))",
 			),
 		].join(", "),
 		backgroundSize: ["100% 100%", "1px 100%", "1px 100%", "1px 100%", "1px 100%"].join(", "),
-		backgroundPosition: ["0 0", ...[30, 50, 70, 90].map((p) => `${p}% 0`)].join(", "),
+		backgroundPosition: ["0 0", ...tickPositions].join(", "),
 		backgroundRepeat: "no-repeat",
 	};
 }
 
 /** The static rail — the slider's look, disc removed. */
-export function ConfidenceRail({ value, className }: { value: number; className?: string }) {
+export function ConfidenceRail({ value, className, rtl }: { value: number; className?: string; rtl?: boolean }) {
+	const dir = useDirection();
+	const isRtl = rtl ?? (dir === "rtl");
 	return (
 		<div
 			aria-hidden
 			data-testid="confidence-rail"
 			className={cn("h-1.5 w-full rounded-full border border-border", className)}
-			style={confidenceRailStyle(value)}
+			style={confidenceRailStyle(value, isRtl)}
 		/>
 	);
 }

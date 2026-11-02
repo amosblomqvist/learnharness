@@ -64,9 +64,9 @@
  */
 
 import { useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { NotesImportErrors, useNotesImport } from "@/components/notes-import.tsx";
+import { NotesImportControl, NotesImportErrors, NotesImportNotices, useNotesImport } from "@/components/notes-import.tsx";
 import Link from "next/link";
-import { FileTextIcon, ListTreeIcon, Loader2Icon, SearchIcon, SettingsIcon, UploadIcon, WaypointsIcon } from "lucide-react";
+import { FileTextIcon, ListTreeIcon, Loader2Icon, SearchIcon, SettingsIcon, WaypointsIcon } from "lucide-react";
 import { incrementalLayout, propositionSessionHref, type GraphCostSummary, type GraphNode, type GraphSnapshot, type TranslationKey } from "@/src/core";
 import { planCostLabel } from "@/components/usage-format";
 import { useT, type Translate } from "@/components/i18n";
@@ -376,7 +376,7 @@ export function GraphCostControl({ costs }: { costs: GraphCostSummary }) {
 			</button>
 			</Hint>
 			{open && (
-				<div className="absolute right-0 top-full mt-2 max-h-[60vh] overflow-y-auto">
+				<div className="absolute right-0 rtl:right-auto rtl:left-0 top-full mt-2 max-h-[60vh] overflow-y-auto">
 					<GraphCostPanel costs={costs} />
 				</div>
 			)}
@@ -505,7 +505,7 @@ function GraphSettingsControl({
 				// (pr-2.5) -> scrollbar -> 10px (p-2.5) -> panel edge. The
 				// scrollbar itself does NOT move: it stays pinned at the same
 				// distance from the panel's right border.
-				<div className="absolute right-0 top-full mt-2 flex max-h-[60vh] w-72 flex-col rounded-xl border bg-card/85 p-2.5 shadow-lg backdrop-blur">
+				<div className="absolute right-0 rtl:right-auto rtl:left-0 top-full mt-2 flex max-h-[60vh] w-72 flex-col rounded-xl border bg-card/85 p-2.5 shadow-lg backdrop-blur">
 					<div className="flex flex-col gap-2 overflow-y-auto pr-2.5">
 							{/* Size/zoom/region sliders: LADDER-mapped 0-100, step 10 (11
 							    stops, every DEFAULT dead-center at 50, every value a nice
@@ -858,7 +858,6 @@ export function GraphChromeRow({
 	noMatch,
 	importing,
 	searchInputRef,
-	fileInputRef,
 	onImportFiles,
 	settings,
 	changeSettings,
@@ -872,7 +871,6 @@ export function GraphChromeRow({
 	noMatch: boolean;
 	importing: boolean;
 	searchInputRef: React.RefObject<HTMLInputElement | null>;
-	fileInputRef: React.RefObject<HTMLInputElement | null>;
 	onImportFiles: (files: FileList | null) => void;
 	settings: GraphRenderSettings;
 	changeSettings: (update: (cur: RenderSettings) => RenderSettings) => void;
@@ -911,8 +909,7 @@ export function GraphChromeRow({
 			)}
 			{/* The chain table (chains overlay, owner plan 2026-09-29). Own
 			    container (36px band), between the search and Import. */}
-			{!isEmpty && (
-				<div className="graph-chrome-fade-in shrink-0 rounded-xl border bg-card/85 px-1 py-[3px] shadow-lg backdrop-blur">
+			<div className="graph-chrome-fade-in shrink-0 rounded-xl border bg-card/85 px-1 py-[3px] shadow-lg backdrop-blur">
 					<Hint label={t("graph.chrome.chainsHint")} side="bottom">
 						<button
 							type="button"
@@ -925,40 +922,9 @@ export function GraphChromeRow({
 						</button>
 					</Hint>
 				</div>
-			)}
 			{/* Import notes — its own container (36px, header band); ALWAYS
 			    rendered (the empty-graph ruling above — the entry point). */}
-			<div className="shrink-0 rounded-xl border bg-card/85 px-1 py-[3px] shadow-lg backdrop-blur">
-				<input
-					ref={fileInputRef}
-					type="file"
-					multiple
-					accept=".md,.markdown,.txt"
-					className="hidden"
-					onChange={(e) => {
-						onImportFiles(e.target.files);
-						e.target.value = ""; // allow re-picking the same file
-					}}
-				/>
-				<Hint
-					// The one button whose action isn't obvious from its label:
-					// the missing fact is where imports go (owner, subtlety
-					// round 2026-09-25).
-					label={t("graph.chrome.importHint")}
-					side="bottom"
-				>
-					<button
-						type="button"
-						disabled={importing}
-						onClick={() => fileInputRef.current?.click()}
-						data-testid="import-notes"
-					className="flex h-7 items-center gap-1.5 rounded-lg px-2.5 text-xs text-muted-foreground transition-colors hover:bg-accent disabled:opacity-50"
-				>
-						<UploadIcon className="size-3" />
-						{importing ? t("graph.chrome.importing") : t("graph.chrome.import")}
-					</button>
-				</Hint>
-			</div>
+			<NotesImportControl importing={importing} onImportFiles={onImportFiles} />
 			{!isEmpty && (
 				// Rendering settings — own component; the gear toggles it. The
 				// gear sits at the far right (owner, round 3) so its panel drops
@@ -1002,14 +968,8 @@ export function GraphView({
 
 	// Search panel state: the query text + the settings section toggle.
 	const [query, setQuery] = useState("");
-	// ⌘F (shortcut wave C): the find event focuses the node search —
-	// surface-scoped, dispatched as lh:kbd-find (only this page listens).
+	// Surface-scoped Find: the chains overlay owns it while open.
 	const searchInputRef = useRef<HTMLInputElement>(null);
-	useEffect(() => {
-		const onFind = () => searchInputRef.current?.focus();
-		window.addEventListener("lh:kbd-find", onFind);
-		return () => window.removeEventListener("lh:kbd-find", onFind);
-	}, []);
 	// Render settings: SERVER-persisted (data/render-settings.json via
 	// /api/graph/render-settings) — sizes AND the region/physics sections
 	// (user-facing since 2026-09-13; the dev-session era is over). Loaded
@@ -1093,6 +1053,12 @@ export function GraphView({
 	// The chain table overlay (chains-overlay plan, 2026-09-29) —
 	// component-local: a browsing surface, not graph state.
 	const [chainsOpen, setChainsOpen] = useState(false);
+	useEffect(() => {
+		if (chainsOpen) return;
+		const onFind = () => searchInputRef.current?.focus();
+		window.addEventListener("lh:kbd-find", onFind);
+		return () => window.removeEventListener("lh:kbd-find", onFind);
+	}, [chainsOpen]);
 	// PRACTICE SELECT (2026-10-04): the parent's chip drives the select
 	// mode; closing (either the picker's confirm or its X) reports back so
 	// the chip's open state and the table's never disagree.
@@ -1115,7 +1081,6 @@ export function GraphView({
 	// Notes import (the format-agnostic front door): file picker → POST
 	// /api/graph/import; the runs surface in the status chips below, and the
 	// graph refetches when they finish (the runs-empty transition).
-	const fileInputRef = useRef<HTMLInputElement>(null);
 	// The dock's start-site nudge (accuracy wave, 2026-09-19): the import
 	// POST awaits the WHOLE pipeline server-side, so the run registers long
 	// before the response — nudge at click and again at +600ms to catch the
@@ -1244,8 +1209,15 @@ export function GraphView({
 			rendererRef.current?.setClusterLabels(new Map([[id, title]]));
 			setLabelTick((t) => t + 1);
 		};
+		const onSourceRenamed = (event: Event) => {
+			const { id, title } = (event as CustomEvent<{ id?: string; title?: string }>).detail ?? {};
+			if (typeof id !== "string" || typeof title !== "string") return;
+			// Label-only channel: never rebuild geometry or rewrite fileSources.
+			rendererRef.current?.setClusterLabels(new Map([[id, title]]));
+		};
 		window.addEventListener("lh:chat-renamed", onRenamed);
-		return () => window.removeEventListener("lh:chat-renamed", onRenamed);
+		window.addEventListener("lh:source-renamed", onSourceRenamed);
+		return () => { window.removeEventListener("lh:chat-renamed", onRenamed); window.removeEventListener("lh:source-renamed", onSourceRenamed); };
 	}, []);
 
 	// The node context menu (node interlude): right-click a node → Delete.
@@ -1605,7 +1577,7 @@ export function GraphView({
 			    against the full-bleed parent) — the row NEVER wraps (owner
 			    rejected the two-row fold); in narrow windows the search is
 			    the flexible element and shrinks instead. */}
-			<div className="lh-no-drag lh-wco-floating absolute right-2 top-2 z-10 flex max-w-[calc(100%-5.5rem)] flex-col items-end gap-2">
+			<div className="lh-no-drag lh-wco-floating absolute right-2 rtl:right-auto top-2 z-10 flex max-w-[calc(100%-6.5rem)] flex-col items-end rtl:items-start gap-2">
 			{/* z-20 (2026-09-20): the row paints above the cost number below
 			    it — without this, the later-in-DOM cost control layered over
 			    the settings/coverage dropdowns (owner report), still hoverable
@@ -1622,7 +1594,6 @@ export function GraphView({
 					noMatch={snapshot !== null && visibleIds.size === 0 && query.trim() !== ""}
 					importing={importing}
 					searchInputRef={searchInputRef}
-					fileInputRef={fileInputRef}
 					onImportFiles={onImportFiles}
 					settings={settings}
 					changeSettings={changeSettings}
@@ -1631,6 +1602,7 @@ export function GraphView({
 			</div>
 
 			<NotesImportErrors errors={notesImport.errors} />
+			<NotesImportNotices notices={notesImport.notices} />
 			{/* Top-right tail (owner, 2026-09-20): the pipeline cost number —
 			    just a number, hover-highlighted, dropdown breakdown — then
 			    the running-pipeline pills under it. Lives BELOW the actions
@@ -1713,7 +1685,7 @@ export function GraphView({
 			    covers. (DeleteNodeDialog is body-portaled — DOM-irrelevant
 			    here.) */}
 			<ChainTableOverlay
-				open={chainsOpen && !isEmpty}
+				open={chainsOpen}
 				nodes={snapshot?.propositions ?? []}
 				chains={snapshot?.chains ?? []}
 				sessions={snapshot?.sessions ?? {}}

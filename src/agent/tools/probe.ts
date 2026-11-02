@@ -1,7 +1,7 @@
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { serverExecute } from "../tool-execute.ts";
 import { probeDoneInputSchema, PROBE_DONE_ACK_TEXT } from "../../core/contracts.ts";
-import { danglingQuestionOf, hasProbeDone, type LhMessage } from "../../core/native-messages.ts";
+import { hasUnresolvedQuestion, hasProbeDone, type LhMessage } from "../../core/native-messages.ts";
 import type { ChatStore } from "../../core/ports.ts";
 import { buildProbeHandoffSteer, type SteerMessage } from "../../core/contracts.ts";
 
@@ -42,8 +42,9 @@ function probeConcluded(messages: readonly LhMessage[]): boolean {
  *     live), so the agent sees the fixed PROBE_DONE_ACK_TEXT — never an
  *     echo. details = {ok:true} only.
  *
- * The first probe_done in the transcript is also the construction seam:
- * from that message on, every request builds the TEACHER agent.
+ * The first concluded probe_done (non-failed call plus matching successful
+ * result) is also the construction seam: from that result on, every request
+ * builds the TEACHER agent. Bare calls and refused results keep probing.
  */
 export function probeDoneTool(ctx: ProbeDoneContext): Record<string, AgentTool<any>> {
 	return {
@@ -65,7 +66,7 @@ export function probeDoneTool(ctx: ProbeDoneContext): Record<string, AgentTool<a
 				const record = ctx.chatStore.getChat(ctx.chatId);
 				if (!record) return { ok: false, error: `Chat not found: ${ctx.chatId}` };
 
-				if (danglingQuestionOf(record.messages) !== null) {
+				if (hasUnresolvedQuestion(record.messages)) {
 					return {
 						ok: false,
 						error:

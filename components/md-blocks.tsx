@@ -259,7 +259,7 @@ export function MarkdownCode(props: ComponentProps<"code"> & ExtraProps) {
 	const startLine = startMatch ? Number.parseInt(startMatch[1]!, 10) : undefined;
 	const lineNumbers = !/\bnoLineNumbers\b/.test(meta);
 	return (
-		<div className="group/md relative" data-testid="md-code">
+		<div className="group/md relative" data-testid="md-code" dir="ltr">
 			<CopyCorner className="absolute top-1.5 right-2 z-10" getText={() => source} label={t("artifacts.md.copyCode")} />
 			<CodeBlock
 				code={source}
@@ -351,7 +351,7 @@ export function MarkdownBlockquote(props: ComponentProps<"blockquote"> & ExtraPr
 		return (
 			<blockquote
 				{...rest}
-				className="my-4 border-l-4 border-muted-foreground/30 pl-4 text-muted-foreground italic"
+				className="my-4 border-l-4 rtl:border-l-0 rtl:border-r-4 border-muted-foreground/30 pl-4 rtl:pl-0 rtl:pr-4 text-muted-foreground italic text-start"
 				data-streamdown="blockquote"
 			>
 				{children}
@@ -388,7 +388,7 @@ export function MarkdownTable(props: ComponentProps<"table"> & ExtraProps) {
 				// offset, so it straddled the top outline). 4px inset, z above the
 				// cells it hovers over; the scroll container stays under it (the
 				// corner is fixed to the wrapper, not the scrolling table).
-				className="absolute top-1 right-1 z-10"
+				className="absolute top-1 right-1 z-10 rtl:right-auto rtl:left-1"
 				label={t("artifacts.md.copyTable")}
 				getText={() => (ref.current ? tableDataToMarkdown(extractTableDataFromElement(ref.current)) : "")}
 			/>
@@ -438,7 +438,7 @@ export function MathDisplay(props: ComponentProps<"span"> & ExtraProps) {
 		// real box; z-10 keeps it above the equation spans it overlays.
 		<span className="group/md relative block z-0" data-testid="md-math">
 			<CopyCorner
-				className="absolute top-0 right-0 z-10"
+				className="absolute top-0 right-0 z-10 rtl:right-auto rtl:left-0"
 				label={t("artifacts.md.copyEquation")}
 				getText={() => ref.current?.querySelector("annotation")?.textContent ?? ""}
 			/>
@@ -468,10 +468,28 @@ export function MarkdownStrong(props: ComponentProps<"strong"> & ExtraProps) {
 	);
 }
 
+/** Markdown images rendered with <span> wrapper rather than <div> to prevent
+ *  DOM hydration nesting violations (<div> inside <p>). */
+export function MarkdownImage(props: ComponentProps<"img"> & ExtraProps) {
+	const { src, alt, className, node, ...rest } = props;
+	return (
+		<span className="group/img relative my-4 inline-block max-w-full" data-streamdown="image-wrapper">
+			<img
+				src={src}
+				alt={alt ?? ""}
+				className={cn("max-h-96 w-auto max-w-full rounded-lg object-contain", className)}
+				loading="lazy"
+				{...rest}
+			/>
+		</span>
+	);
+}
+
 export const mdComponents = {
 	code: MarkdownCode,
 	table: MarkdownTable,
 	span: MathDisplay,
 	strong: MarkdownStrong,
 	blockquote: MarkdownBlockquote,
+	img: MarkdownImage,
 };

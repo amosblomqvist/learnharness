@@ -283,7 +283,7 @@ export function SettingsDialogBody({
 			onClick={(e) => e.stopPropagation()}
 		>
 			{/* Header — the app's quiet CMU title language. */}
-			<header className="flex h-15 shrink-0 items-center gap-3 border-b border-border px-5">
+			<header className="flex h-15 shrink-0 items-center justify-between border-b border-border px-5">
 				<h2 className="font-title text-2xl tracking-tight">{t("settings.title")}</h2>
 				<Hint
 						// Esc closes the dialog (its own listener) — surface it.
@@ -295,7 +295,7 @@ export function SettingsDialogBody({
 					type="button"
 					aria-label={t("settings.close")}
 					data-testid="settings-close"
-					className="ml-auto size-7 rounded-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+					className="size-7 rounded-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground cursor-pointer"
 					onClick={onClose}
 				>
 					<svg
@@ -312,12 +312,11 @@ export function SettingsDialogBody({
 			</header>
 
 			<div className="flex min-h-0 flex-1">
-				{/* Left nav — text-only, the session-list mono language,
-					    active = bg-accent. */}
+				{/* Section nav */}
 				<nav
 					aria-label={t("settings.nav")}
 					data-testid="settings-nav"
-					className="flex w-44 shrink-0 flex-col gap-1 border-r border-border p-2"
+					className="flex w-48 shrink-0 flex-col gap-1 border-r rtl:border-r-0 rtl:border-l border-border p-2"
 				>
 					{SECTIONS.map((s) => (
 						<button
@@ -325,7 +324,7 @@ export function SettingsDialogBody({
 							type="button"
 							data-testid={`settings-nav-${s.id}`}
 							aria-current={active === s.id}
-							className={`rounded-sm px-3 py-1.5 text-left font-ui text-sm transition-colors ${
+							className={`rounded-sm px-3 py-1.5 text-start font-ui text-sm transition-colors cursor-pointer ${
 								active === s.id
 									? "bg-accent text-foreground"
 									: "text-muted-foreground hover:bg-accent hover:text-foreground"
@@ -512,8 +511,8 @@ export function GeneralSection({
 					}}
 				>
 					{DICTATION_LANGUAGES.map((lang) => (
-						<option key={lang.id} value={lang.id}>
-							{lang.id === "multi" ? t("settings.general.dictationLanguage.multi") : lang.label}
+						<option key={lang.code} value={lang.code}>
+							{lang.code === "multi" ? t("settings.general.dictationLanguage.multi") : lang.label}
 						</option>
 					))}
 				</ThinSelect>

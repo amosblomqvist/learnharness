@@ -34,7 +34,7 @@ function Transcript() {
 			<PhaseDivider phase="plan" nodeCount={1} />
 			<CompactionMomentDivider data={compaction} />
 			<CompactionCutDivider data={compaction} />
-			<ReadingThinkingField value="" onChange={() => {}} claim={false} />
+			<ReadingThinkingField value="" revision={0} onChange={() => {}} claim={false} />
 			<ThinkingBlock text="hmm" />
 			<MermaidError chart="graph TD" error="parse error" retry={() => {}} />
 			<ConversationEmptyState />

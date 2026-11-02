@@ -198,4 +198,33 @@ export const settings: Record<keyof typeof en, string> = {
 	"settings.subscription.controlError": "No se pudo cambiar la conexión. Inténtalo de nuevo.",
 	"settings.subscription.signInFailed": "No se completó el inicio de sesión. Intenta conectarte de nuevo.",
 	"settings.subscription.browserFailed": "No se pudo abrir el navegador. Inténtalo de nuevo.",
+
+	"settings.keys.group.externalCli": "CLI externa",
+	"settings.keys.dictationHint.prefix": "Crea una clave de ",
+	"settings.keys.dictationHint.link": "API de Deepgram",
+	"settings.keys.dictationHint.suffix": " con el rol de Member o superior y agrégala arriba.",
+	"settings.keys.customEndpoint": "Endpoint personalizado",
+	"settings.keys.baseUrl": "URL base",
+	"settings.keys.contextWindow": "Ventana de contexto",
+	"settings.keys.maxOutputTokens": "Máximo de tokens de salida",
+
+	"settings.menu.cliBilling": "Facturación CLI",
+	"settings.menu.cliBillingTitle": "La facturación la determina la configuración de Claude Code; LearnHarness no la calcula.",
+
+	"settings.general.autoUpdate.label": "Actualizaciones automáticas",
+	"settings.general.autoUpdate.subhint": "Comprobar al inicio y cada 24 horas. Desactivar esto no detiene las actualizaciones en curso o listas para instalar.",
+	"settings.general.manualUpdate.hint": "Al comprobar se descargan las actualizaciones disponibles. Se instalan al salir de la aplicación.",
+
+	"settings.claudeCode.checkAgain": "Comprobar de nuevo",
+	"settings.claudeCode.versionCheckFailed": "No se pudo comprobar la versión",
+	"settings.claudeCode.installNotice.strong": "Instala y autentica Claude Code en tu terminal, luego selecciona un modelo de Claude Code aquí.",
+	"settings.claudeCode.installNotice.rest": " LearnHarness lo inicia cuando es necesario—sin proceso en segundo plano.",
+	"settings.claudeCode.checkNotice": "Comprueba solo la instalación/versión—no la autenticación, acceso al modelo o cuota. Claude Code controla la facturación. Requiere v{version}+.",
+	"settings.claudeCode.setupLink": "Configuración ↗",
+	"settings.claudeCode.verifyNotice": "Verifica las afirmaciones de la IA de forma independiente—pueden ser inexactas, incompletas, engañosas o desactualizadas.",
+
+	"settings.agent.cacheRetention.label": "Retención de caché",
+	"settings.agent.cacheRetention.hint": "Controla la preferencia de retención de caché enviada a Pi.",
+	"settings.agent.advanced.show": "Mostrar configuración avanzada",
+	"settings.agent.advanced.hide": "Ocultar configuración avanzada",
 };
