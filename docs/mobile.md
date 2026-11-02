@@ -81,6 +81,15 @@ cd mobile/native && npm ci && npm run android:apk
 
 The APK lands in `mobile/native/android/app/build/outputs/apk/debug/`.
 
+**Verified here:** a local `assembleDebug` built the APK (11.5 MB). It contains:
+- package `com.learnharness.app`, label "LearnHarness", target SDK 36;
+- the internet permission only;
+- the minified web app and the pdf.js worker;
+- the app, filesystem and share plugins;
+- a debug signature.
+
+The first CI run (the Android APK workflow, run #1) also built it and attached the artifact. It has not been run on a device or emulator yet: this environment has no KVM for an emulator.
+
 **iOS.** `mobile/native/ios` is a complete Xcode project using Swift Package Manager, so no CocoaPods are needed. On a Mac with Xcode: run `npm run mobile:dist`, then `cd mobile/native && npm ci && npx cap sync ios`, then open `ios/App/App.xcodeproj` and Run. Until then, the home-screen web app on the iPhone is the same app.
 
 **What differs inside the native shell** (`src/browser/app/native.ts`): Capacitor injects `window.Capacitor` with the native plugins, so the web bundle carries no Capacitor JavaScript.
@@ -230,4 +239,5 @@ The demo and visual-maker *jobs* use these same engines through the same job run
 - **The demo-builder and visual-maker jobs** haven't been run end to end with a scripted model; their engines were tested directly (above).
 - **Jina Reader without an account is rate-limited**, so heavy research may hit its limits. It also sees the URLs the researcher reads.
 - **Fonts load from Google on first launch**, then come from the cache.
+- **The native apps haven't run on a device yet.** The Android APK builds and its contents check out. The iOS project hasn't been built (no Mac). The share-sheet backup path, Back button handling and status-bar layout need a first look on a real phone.
 - **Bundle:** about 4 MB of JS gzipped in total, split into lazily loaded chunks. The startup shell is 2.9 MB minified.
