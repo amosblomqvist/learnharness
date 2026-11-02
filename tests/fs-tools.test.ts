@@ -1,11 +1,12 @@
 import assert from "node:assert";
 import * as fs from "node:fs/promises";
+import { realpathSync } from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { describe, it } from "node:test";
 
 import type { AgentTool } from "@earendil-works/pi-agent-core";
-import { expandBraces, globToRegex, matchGlob, resolveSourcePath, walkFiles } from "../src/agent/tools/fs-shared.ts";
+import { expandBraces, globToRegex, isSensitivePath, matchGlob, resolveSourcePath, walkFiles } from "../src/agent/tools/fs-shared.ts";
 import { findTool } from "../src/agent/tools/find.ts";
 import { grepTool } from "../src/agent/tools/grep.ts";
 import { lsTool } from "../src/agent/tools/ls.ts";
@@ -87,39 +88,80 @@ describe("glob helpers (fs-shared)", () => {
 });
 
 describe("resolveSourcePath (fs-shared)", () => {
-	it("a leading ~ is the learner's home, as a shell expands it", () => {
-		const home = os.homedir();
+	it("expands a leading ~ and returns the canonical learner-home path", () => {
+		const home = realpathSync.native(os.homedir());
 		assert.equal(resolveSourcePath("~"), home);
 		assert.equal(resolveSourcePath("~/notes/calculus.md"), path.join(home, "notes", "calculus.md"));
 		assert.equal(resolveSourcePath(`~${path.sep}notes${path.sep}calculus.md`), path.join(home, "notes", "calculus.md"));
 	});
 
-	it("preserves default, ordinary relative, and absolute paths", () => {
-		const home = os.homedir();
+	it("returns canonical default, ordinary relative, and absolute paths", () => {
+		const home = realpathSync.native(os.homedir());
 		const absolute = path.join(os.tmpdir(), "course", "notes.md");
 		assert.equal(resolveSourcePath(), home);
 		assert.equal(resolveSourcePath(""), home);
 		assert.equal(resolveSourcePath("notes/calculus.md"), path.join(home, "notes", "calculus.md"));
-		assert.equal(resolveSourcePath(absolute), absolute);
+		assert.equal(resolveSourcePath(absolute), path.join(realpathSync.native(os.tmpdir()), "course", "notes.md"));
 	});
 
 	it("backslash is a home separator only on Windows", () => {
+		const home = realpathSync.native(os.homedir());
 		const input = "~\\notes\\calculus.md";
 		const expected = process.platform === "win32"
-			? path.join(os.homedir(), "notes", "calculus.md")
-			: path.join(os.homedir(), input);
+			? path.join(home, "notes", "calculus.md")
+			: path.join(home, input);
 		assert.equal(resolveSourcePath(input), expected);
 	});
 
 	it("~user and non-leading tildes stay literal", () => {
-		const home = os.homedir();
+		const home = realpathSync.native(os.homedir());
 		assert.equal(resolveSourcePath("~other/notes.md"), path.join(home, "~other", "notes.md"));
 		assert.equal(resolveSourcePath("notes/~draft.md"), path.join(home, "notes", "~draft.md"));
-		assert.equal(resolveSourcePath("/tmp/~/x.md"), "/tmp/~/x.md");
+		assert.equal(resolveSourcePath(path.join(os.tmpdir(), "~", "x.md")), path.join(realpathSync.native(os.tmpdir()), "~", "x.md"));
 	});
 });
 
 describe("learner tools share leading-tilde resolution", () => {
+	it("canonicalizes an explicitly aliased synthetic HOME without changing path semantics", async () => {
+		const home = await setup();
+		const alias = `${home}-alias`;
+		const realHome = await fs.realpath(home);
+		await fs.symlink(home, alias, process.platform === "win32" ? "junction" : "dir");
+		const originalHome = process.env.HOME;
+		const originalUserProfile = process.env.USERPROFILE;
+		try {
+			process.env.HOME = process.env.USERPROFILE = alias;
+			assert.equal(os.homedir(), alias, "the caller retains the non-canonical HOME");
+			assert.notEqual(alias, realHome);
+			for (const input of [undefined, "", "~"]) assert.equal(resolveSourcePath(input), realHome);
+			for (const input of ["notes/calculus.md", "~/notes/calculus.md", `~${path.sep}notes${path.sep}calculus.md`]) {
+				assert.equal(resolveSourcePath(input), path.join(realHome, "notes", "calculus.md"));
+			}
+			assert.equal(resolveSourcePath("~other/notes.md"), path.join(realHome, "~other", "notes.md"));
+			assert.equal(resolveSourcePath("notes/~draft.md"), path.join(realHome, "notes", "~draft.md"));
+			const backslash = "~\\notes\\calculus.md";
+			assert.equal(resolveSourcePath(backslash), process.platform === "win32"
+				? path.join(realHome, "notes", "calculus.md") : path.join(realHome, backslash));
+			assert.match(await runText(readTool, { path: "~/notes/calculus.md" }), /The derivative measures force/);
+			const seen: string[] = [];
+			await walkFiles(alias, (file) => {
+				assert.ok(file.startsWith(realHome + path.sep), "walk emits canonical file paths");
+				seen.push(path.relative(realHome, file).split(path.sep).join("/"));
+				return false;
+			});
+			assert.ok(seen.includes("notes/calculus.md"));
+			assert.ok(!seen.some((file) => file.startsWith("node_modules/") || file.startsWith("Library/")));
+			assert.equal(os.homedir(), alias, "tool execution does not rewrite caller configuration");
+		} finally {
+			if (originalHome === undefined) delete process.env.HOME;
+			else process.env.HOME = originalHome;
+			if (originalUserProfile === undefined) delete process.env.USERPROFILE;
+			else process.env.USERPROFILE = originalUserProfile;
+			await fs.unlink(alias);
+			await fs.rm(home, { recursive: true, force: true });
+		}
+	});
+
 	it("read, ls, find, and grep reach the same synthetic home", async () => {
 		const home = await setup();
 		const originalHome = process.env.HOME;
@@ -143,6 +185,92 @@ describe("learner tools share leading-tilde resolution", () => {
 			else process.env.USERPROFILE = originalUserProfile;
 			await fs.rm(home, { recursive: true, force: true });
 		}
+	});
+});
+
+describe("sensitive locations under home are off-limits", () => {
+	/** Synthetic home: an agent's session transcripts, an ssh key, a dotenv
+	 *  file, a symlink into .ssh, and ordinary notes alongside. */
+	async function withSensitiveHome(fn: (home: string) => Promise<void>): Promise<void> {
+		const home = await setup();
+		const transcripts = path.join(home, ".claude", "projects", "p", "subagents");
+		await fs.mkdir(transcripts, { recursive: true });
+		await fs.writeFile(path.join(transcripts, "agent-1.jsonl"), '{"text":"eigenvector sk-secret-token"}\n');
+		await fs.mkdir(path.join(home, ".ssh"), { recursive: true });
+		await fs.writeFile(path.join(home, ".ssh", "id_ed25519"), "eigenvector PRIVATE KEY\n");
+		await fs.writeFile(path.join(home, "code", ".env.local"), "EIGENVECTOR_API_KEY=sk-secret-token\n");
+		await fs.symlink(path.join(home, ".ssh"), path.join(home, "notes", "keys"), process.platform === "win32" ? "junction" : "dir");
+		await fs.mkdir(path.join(home, ".claudette"), { recursive: true });
+		await fs.writeFile(path.join(home, ".claudette", "ok.md"), "eigenvector lookalike\n");
+		const originalHome = process.env.HOME;
+		const originalUserProfile = process.env.USERPROFILE;
+		try {
+			process.env.HOME = home;
+			process.env.USERPROFILE = home;
+			await fn(home);
+		} finally {
+			if (originalHome === undefined) delete process.env.HOME;
+			else process.env.HOME = originalHome;
+			if (originalUserProfile === undefined) delete process.env.USERPROFILE;
+			else process.env.USERPROFILE = originalUserProfile;
+			await fs.rm(home, { recursive: true, force: true });
+		}
+	}
+
+	it("isSensitivePath matches listed dirs, dotenv files, and nothing that merely looks alike", () => {
+		const home = path.join(os.tmpdir(), "h");
+		assert.equal(isSensitivePath(path.join(home, ".claude"), home), true);
+		assert.equal(isSensitivePath(path.join(home, ".claude", "projects", "x.jsonl"), home), true);
+		assert.equal(isSensitivePath(path.join(home, ".SSH", "id_rsa"), home), true);
+		assert.equal(isSensitivePath(path.join(home, ".config", "gcloud", "credentials.db"), home), true);
+		assert.equal(isSensitivePath(path.join(home, "Library", "Keychains", "login.keychain-db"), home), true);
+		assert.equal(isSensitivePath(path.join(home, "work", ".env"), home), true);
+		assert.equal(isSensitivePath(path.join(os.tmpdir(), "elsewhere", ".env.production"), home), true);
+		assert.equal(isSensitivePath(home, home), false);
+		assert.equal(isSensitivePath(path.join(home, ".claudette", "ok.md"), home), false);
+		assert.equal(isSensitivePath(path.join(home, "notes", "claude.md"), home), false);
+		assert.equal(isSensitivePath(path.join(home, ".config", "nvim", "init.lua"), home), false);
+		assert.equal(isSensitivePath(path.join(home, "notes", "environment.md"), home), false);
+		assert.equal(isSensitivePath(path.join(os.tmpdir(), ".ssh", "id_rsa"), home), false);
+	});
+
+	it("walkFiles never enters them", async () => {
+		await withSensitiveHome(async (home) => {
+			const realHome = await fs.realpath(home);
+			const seen: string[] = [];
+			await walkFiles(home, (f) => {
+				seen.push(path.relative(realHome, f).split(path.sep).join("/"));
+				return false;
+			});
+			assert.ok(seen.includes("notes/calculus.md"));
+			assert.ok(seen.includes(".claudette/ok.md"), "a lookalike name is still walked");
+			assert.ok(!seen.some((f) => f.startsWith(".claude/") || f.startsWith(".ssh/") || f.endsWith(".env.local")), seen.join(", "));
+		});
+	});
+
+	it("find and grep from home skip transcripts, keys, and dotenv files", async () => {
+		await withSensitiveHome(async () => {
+			const found = await runText(findTool, { pattern: "**/subagents/*.jsonl" });
+			assert.equal(found, "No files found matching pattern");
+			const matched = await runText(grepTool, { pattern: "sk-secret-token" });
+			assert.equal(matched, "No matches found");
+			const ordinary = await runText(grepTool, { pattern: "eigenvector", ignoreCase: true });
+			assert.match(ordinary, /notes\/linear\.txt:1:/);
+			assert.doesNotMatch(ordinary, /\.claude\/|\.ssh\/|\.env/);
+		});
+	});
+
+	it("explicit paths are refused by read, ls, find, and grep — symlinks included", async () => {
+		await withSensitiveHome(async (home) => {
+			const denied = /Access denied: .* is a protected location/;
+			await assert.rejects(readTool.execute!("c", { path: "~/.ssh/id_ed25519" }), denied);
+			await assert.rejects(readTool.execute!("c", { path: path.join(home, "code", ".env.local") }), denied);
+			await assert.rejects(readTool.execute!("c", { path: "~/notes/keys/id_ed25519" }), denied);
+			await assert.rejects(lsTool.execute!("c", { path: "~/.claude" }), denied);
+			await assert.rejects(findTool.execute!("c", { path: ".claude/projects", pattern: "*.jsonl" }), denied);
+			await assert.rejects(grepTool.execute!("c", { path: "~/.ssh", pattern: "KEY" }), denied);
+			assert.match(await runText(readTool, { path: "~/.claudette/ok.md" }), /lookalike/);
+		});
 	});
 });
 
