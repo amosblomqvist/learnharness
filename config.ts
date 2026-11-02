@@ -143,3 +143,12 @@ export const PROMPTS_OVERRIDE_DIR = path.join(DATA_ROOT, "prompts");
 export const AUTH_FILE = process.env.LH_AUTH_FILE
 	? path.resolve(process.env.LH_AUTH_FILE)
 	: path.join(ROOT, "auth.json");
+
+/**
+ * The learner-filesystem tools (read / ls / find / grep — sources v1) need a
+ * real home directory to search. The phone build (docs/mobile.md) has none,
+ * so it sets LH_LEARNER_FILES=off: the agents are built without those four
+ * tools and the build leaves out the shared learner-files prompt fragment.
+ * Unset everywhere else — desktop and web keep the always-on set.
+ */
+export const LEARNER_FILES_AVAILABLE = process.env.LH_LEARNER_FILES !== "off";

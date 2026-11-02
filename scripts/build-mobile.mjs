@@ -12,11 +12,18 @@
  *   - `lh:routes` enumerates every app/api/**\/route.ts (lazy imports);
  *   - `lh:assets` embeds the agent prompt files read at runtime.
  *
- * Usage: node scripts/build-mobile.mjs [--outdir dist-mobile]
+ * It also builds the phone app itself (src/browser/app/): the desktop
+ * components bundled as a single-page app, with `next/navigation` and
+ * `next/link` resolved to a small client router, Tailwind compiled from
+ * app/globals.css, and public/ copied alongside.
+ *
+ * Usage: node scripts/build-mobile.mjs [--outdir dist-mobile] [--minify]
  */
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as esbuild from "esbuild";
+import postcss from "postcss";
+import tailwind from "@tailwindcss/postcss";
 
 const ROOT = path.resolve(import.meta.dirname, "..");
 const SHIMS = path.join(ROOT, "src", "browser", "shims");
@@ -79,6 +86,10 @@ const phonePlugin = {
 		const stubbed = new RegExp(`^(${STUB_PACKAGES.map((p) => p.replace(/[/.]/g, "\\$&")).join("|")})(/.*)?$`);
 		build.onResolve({ filter: stubbed }, () => ({ path: path.join(SHIMS, "unsupported.ts") }));
 
+		// The components' Next.js surface (useRouter/usePathname/Link) → the
+		// phone build's client router.
+		build.onResolve({ filter: /^next\/(navigation|link)$/ }, () => ({ path: path.join(ROOT, "src", "browser", "app", "navigation.tsx") }));
+
 		build.onResolve({ filter: /^lh:(routes|assets)$/ }, (args) => ({ path: args.path, namespace: "lh-virtual" }));
 		build.onLoad({ filter: /^lh:routes$/, namespace: "lh-virtual" }, () => {
 			const files = walk(path.join(ROOT, "app", "api"), (f) => path.basename(f) === "route.ts").sort();
@@ -89,7 +100,9 @@ const phonePlugin = {
 			return { contents: `export const routes = [\n${lines.join("\n")}\n];\n`, loader: "js", resolveDir: ROOT };
 		});
 		build.onLoad({ filter: /^lh:assets$/, namespace: "lh-virtual" }, () => {
-			const files = walk(path.join(ROOT, "src", "agent"), (f) => f.endsWith(".md"));
+			// The learner-files fragment teaches tools the phone build does not
+			// have (config.ts LEARNER_FILES_AVAILABLE): leave it out.
+			const files = walk(path.join(ROOT, "src", "agent"), (f) => f.endsWith(".md") && !f.endsWith(path.join("shared", "30-learner-files.md")));
 			const assets = Object.fromEntries(
 				files.map((file) => [`${VIRTUAL_ROOT}/${toPosix(path.relative(ROOT, file))}`, fs.readFileSync(file, "utf-8")]),
 			);
@@ -109,10 +122,16 @@ fs.rmSync(OUTDIR, { recursive: true, force: true });
 
 const result = await esbuild.build({
 	absWorkingDir: ROOT,
-	entryPoints: { "spike/main": path.join(ROOT, "src", "browser", "spike", "main.ts") },
+	entryPoints: {
+		"app/main": path.join(ROOT, "src", "browser", "app", "main.tsx"),
+		"spike/main": path.join(ROOT, "src", "browser", "spike", "main.ts"),
+	},
 	outdir: OUTDIR,
 	entryNames: "[dir]/[name]",
 	chunkNames: "chunks/[name]-[hash]",
+	assetNames: "assets/[name]-[hash]",
+	loader: { ".woff2": "file", ".woff": "file", ".ttf": "file", ".svg": "file", ".png": "file" },
+	jsx: "automatic",
 	bundle: true,
 	splitting: true,
 	format: "esm",
@@ -121,7 +140,7 @@ const result = await esbuild.build({
 	conditions: ["browser", "import", "default"],
 	mainFields: ["browser", "module", "main"],
 	inject: [path.join(SHIMS, "globals.ts")],
-	define: { global: "globalThis" },
+	define: { global: "globalThis", "process.env.NODE_ENV": '"production"' },
 	plugins: [phonePlugin],
 	sourcemap: true,
 	minify: process.argv.includes("--minify"),
@@ -131,7 +150,24 @@ const result = await esbuild.build({
 });
 
 fs.copyFileSync(path.join(ROOT, "src", "browser", "spike", "index.html"), path.join(OUTDIR, "spike", "index.html"));
+
+// The app shell: index.html at the root (the host serves it for every
+// unknown path — single-page-app routing), public/ (fonts, worklets) and
+// the phone-only static files (manifest, icons, service worker).
+fs.copyFileSync(path.join(ROOT, "src", "browser", "app", "index.html"), path.join(OUTDIR, "index.html"));
+fs.cpSync(path.join(ROOT, "public"), OUTDIR, { recursive: true });
+const STATIC = path.join(ROOT, "src", "browser", "static");
+if (fs.existsSync(STATIC)) fs.cpSync(STATIC, OUTDIR, { recursive: true });
+
+// Tailwind: the same globals.css the desktop app compiles (its automatic
+// source scan covers components/ and src/).
+const cssFrom = path.join(ROOT, "app", "globals.css");
+const css = await postcss([tailwind({ base: ROOT, optimize: process.argv.includes("--minify") })]).process(fs.readFileSync(cssFrom, "utf-8"), {
+	from: cssFrom,
+	to: path.join(OUTDIR, "app", "app.css"),
+});
+fs.writeFileSync(path.join(OUTDIR, "app", "app.css"), css.css);
 fs.writeFileSync(path.join(OUTDIR, "meta.json"), JSON.stringify(result.metafile));
 
-const bytes = Object.values(result.metafile.outputs).reduce((n, o) => n + o.bytes, 0);
+const bytes = fs.statSync(path.join(OUTDIR, "app", "app.css")).size + Object.values(result.metafile.outputs).reduce((n, o) => n + o.bytes, 0);
 console.log(`[build-mobile] ${OUTDIR} — ${Object.keys(result.metafile.outputs).length} files, ${(bytes / 1024 / 1024).toFixed(1)} MB (incl. sourcemaps)`);

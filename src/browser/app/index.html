@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en" class="dark">
+	<head>
+		<meta charset="utf-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content" />
+		<meta name="theme-color" content="#141414" />
+		<meta name="color-scheme" content="dark" />
+		<meta name="apple-mobile-web-app-capable" content="yes" />
+		<meta name="mobile-web-app-capable" content="yes" />
+		<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+		<meta name="apple-mobile-web-app-title" content="LearnHarness" />
+		<title>LearnHarness</title>
+		<meta name="description" content="A teacher agent with a memory — sessions, quizzes, and a knowledge graph of what you know." />
+		<link rel="manifest" href="/manifest.webmanifest" />
+		<link rel="icon" href="/icons/icon-192.png" />
+		<link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
+		<link rel="preconnect" href="https://fonts.googleapis.com" />
+		<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+		<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Source+Sans+3:ital,wght@0,400;0,600;0,700;1,400&display=swap" />
+		<link rel="stylesheet" href="/app/main.css" />
+		<link rel="stylesheet" href="/app/app.css" />
+		<style>
+			/* next/font's variables, pointed at the Google-hosted families. */
+			:root {
+				--font-jetbrains: "JetBrains Mono";
+				--font-sans3: "Source Sans 3";
+			}
+		</style>
+	</head>
+	<body class="min-h-dvh antialiased">
+		<div id="root"></div>
+		<script type="module" src="/app/main.js"></script>
+	</body>
+</html>
