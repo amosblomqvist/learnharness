@@ -1,0 +1,326 @@
+From eec611a9932b64a87f72713047e56ae6e503b36e Mon Sep 17 00:00:00 2001
+From: hmty11 <darrenjeho@gmail.com>
+Date: Thu, 29 Oct 2026 15:31:24 +0800
+Subject: [PATCH 2/5] feat(prompt-segments): support custom skills and
+ personalization segment composition
+
+---
+ src/agent/prompt-segments.ts   | 44 +++++++++++++++++++-
+ src/core/prompt-segments.ts    | 63 +++++++++++++++++++++++++++--
+ tests/prompt-overrides.test.ts | 73 +++++++++++++++++++++++++++++++++-
+ tests/settings-pure.test.ts    | 12 ++++++
+ 4 files changed, 185 insertions(+), 7 deletions(-)
+
+diff --git a/src/agent/prompt-segments.ts b/src/agent/prompt-segments.ts
+index 5d8cc5a..5dfe3ec 100644
+--- a/src/agent/prompt-segments.ts
++++ b/src/agent/prompt-segments.ts
+@@ -30,7 +30,14 @@
+ import fs from "node:fs";
+ import path from "node:path";
+ import { PATHS, PROMPTS_OVERRIDE_DIR } from "../../config.ts";
+-import { FRAGMENT_RE, isValidSegmentPath, type PromptAgent, type PromptSegmentInfo } from "../core/prompt-segments.ts";
++import {
++	FRAGMENT_RE,
++	PERSONALIZATION_SEGMENT,
++	isCustomSkillPath,
++	isValidSegmentPath,
++	type PromptAgent,
++	type PromptSegmentInfo,
++} from "../core/prompt-segments.ts";
+ 
+ const PROMPTS_DIR = path.join(PATHS.root, "src", "agent", "prompts");
+ 
+@@ -96,6 +103,25 @@ export function listSourceSegments(agent: PromptAgent): Array<{ path: string; sh
+ 	return segments;
+ }
+ 
++/** List user-created custom segments (personalization.md + skills/*.md) present on disk. */
++export function listCustomSegments(): string[] {
++	const out: string[] = [];
++	if (readPromptOverride(PERSONALIZATION_SEGMENT) !== null) {
++		out.push(PERSONALIZATION_SEGMENT);
++	}
++	const skillsDir = path.join(PROMPTS_OVERRIDE_DIR, "skills");
++	try {
++		const files = fs
++			.readdirSync(skillsDir)
++			.filter((f) => isCustomSkillPath(`skills/${f}`))
++			.sort();
++		for (const f of files) out.push(`skills/${f}`);
++	} catch {
++		// skills dir absent = none
++	}
++	return out;
++}
++
+ /**
+  * The effective segment view for one agent — every segment with its source
+  * text, override text, and effective switch state. `switches` is the
+@@ -106,7 +132,7 @@ export function effectivePromptSegments(
+ 	agent: PromptAgent,
+ 	switches: Record<string, boolean>,
+ ): PromptSegmentInfo[] {
+-	return listSourceSegments(agent).map((segment) => {
++	const base = listSourceSegments(agent).map((segment) => {
+ 		let sourceText: string;
+ 		try {
+ 			sourceText = fs.readFileSync(segment.file, "utf-8");
+@@ -122,6 +148,19 @@ export function effectivePromptSegments(
+ 			shared: segment.shared,
+ 		};
+ 	});
++	for (const customPath of listCustomSegments()) {
++		const overrideText = readPromptOverride(customPath);
++		if (overrideText !== null) {
++			base.push({
++				path: customPath,
++				sourceText: "",
++				overrideText,
++				enabled: switches[customPath] === true,
++				shared: true,
++			});
++		}
++	}
++	return base;
+ }
+ 
+ /** Every known segment path across both agents (route validation). */
+@@ -130,5 +169,6 @@ export function allSegmentPaths(): string[] {
+ 	for (const agent of ["prober", "teacher", "practice"] as const) {
+ 		for (const segment of listSourceSegments(agent)) paths.add(segment.path);
+ 	}
++	for (const customPath of listCustomSegments()) paths.add(customPath);
+ 	return [...paths].sort();
+ }
+diff --git a/src/core/prompt-segments.ts b/src/core/prompt-segments.ts
+index 87edabe..7121b27 100644
+--- a/src/core/prompt-segments.ts
++++ b/src/core/prompt-segments.ts
+@@ -9,8 +9,10 @@
+  *
+  * Path grammar: "system-prompt.md" (the shared base), "shared/<fragment>"
+  * (sources v1: fragments composed by BOTH agents), "prober/<fragment>" /
+- * "teacher/<fragment>" — where <fragment> is numeric-prefixed + .md
+- * (e.g. 20-teaching.md). POSIX-relative, no traversal, no nesting.
++ * "teacher/<fragment>" / "practice/<fragment>" — where <fragment> is
++ * numeric-prefixed + .md (e.g. 20-teaching.md), plus user-created custom
++ * segments ("personalization.md" and "skills/<slug>.md"). POSIX-relative,
++ * no traversal.
+  */
+ 
+ /** A prompt fragment: numeric order key + .md (e.g. 20-teaching.md). Nothing else loads. */
+@@ -39,11 +41,66 @@ export interface PromptSegmentInfo {
+ 	shared: boolean;
+ }
+ 
++export const PERSONALIZATION_SEGMENT = "personalization.md";
++export const SKILL_FILE_RE = /^[\w][\w.-]*\.md$/;
++
++export const PERSONALIZATION_PRESETS = [
++	{
++		id: "id",
++		label: "Bahasa Indonesia",
++		snippet: "Use Bahasa Indonesia for explanations, questions, and feedback.",
++	},
++	{
++		id: "analogy",
++		label: "Practical analogies",
++		snippet: "Ground abstract concepts in concrete, practical analogies and real-world examples first.",
++	},
++	{
++		id: "socratic",
++		label: "Socratic code tutor",
++		snippet: "When teaching code or math, guide me to trace state and derive the fix myself before showing the full answer.",
++	},
++] as const;
++
++/** Pure helper: append a preset snippet to the personalization draft if not already included. */
++export function applyPersonalizationPreset(current: string, snippet: string): string {
++	const trimmed = current.trim();
++	if (trimmed.includes(snippet)) return trimmed;
++	return trimmed ? `${trimmed}\n${snippet}` : snippet;
++}
++
++export function isCustomSkillPath(segmentPath: string): boolean {
++	if (segmentPath === PERSONALIZATION_SEGMENT) return true;
++	const m = /^skills\/([\w.-]+\.md)$/.exec(segmentPath);
++	if (!m || m[1] === undefined) return false;
++	return SKILL_FILE_RE.test(m[1]) && !m[1].includes("..");
++}
++
++function slugifySkillName(raw: string): string {
++	return raw
++		.trim()
++		.toLowerCase()
++		.replace(/[^a-z0-9_-]+/g, "-")
++		.replace(/^-+|-+$/g, "");
++}
++
++export function sanitizeSkillPath(fileName: string, content?: string): string {
++	const rawBase = fileName.replace(/\.md$/i, "").trim();
++	let candidate = slugifySkillName(rawBase);
++	if ((!candidate || candidate === "skill") && content) {
++		const fmMatch = /^---\r?\n[\s\S]*?^name:\s*["']?([^\r\n"']+)["']?/m.exec(content);
++		const headingMatch = /^#\s+([^\r\n]+)/m.exec(content);
++		const derived = slugifySkillName(fmMatch?.[1] ?? headingMatch?.[1] ?? "");
++		if (derived) candidate = derived;
++	}
++	return `skills/${candidate || "skill"}.md`;
++}
++
+ /** Validate a segment path against the mirror-layout rules (see module
+  *  doc). Exported for the routes, which also check membership in the
+  *  CURRENT source segment list. */
+ export function isValidSegmentPath(segmentPath: string): boolean {
+-	if (segmentPath === "system-prompt.md") return true;
++	if (segmentPath === "system-prompt.md" || isCustomSkillPath(segmentPath)) return true;
+ 	const m = /^(prober|teacher|practice|shared)\/([\w.-]+\.md)$/.exec(segmentPath);
+ 	if (!m || m[2] === undefined) return false;
+ 	return FRAGMENT_RE.test(m[2]);
+diff --git a/tests/prompt-overrides.test.ts b/tests/prompt-overrides.test.ts
+index 47a444d..3576bcf 100644
+--- a/tests/prompt-overrides.test.ts
++++ b/tests/prompt-overrides.test.ts
+@@ -38,12 +38,12 @@ process.env.LH_DATA_DIR = TMP_DATA;
+ const { PROMPTS_OVERRIDE_DIR } = await import("../config.ts");
+ const teacherAgent = await import("../src/agent/teacher-agent.ts");
+ const { allSegmentPaths, effectivePromptSegments } = await import("../src/agent/prompt-segments.ts");
+-const { isValidSegmentPath } = await import("../src/core/prompt-segments.ts");
++const { isValidSegmentPath, isCustomSkillPath, sanitizeSkillPath } = await import("../src/core/prompt-segments.ts");
+ const { promptOverrides } = await import("../src/store/prompt-overrides.ts");
+ // Route-level pins drive the actual app/api handlers (framework-free
+ // Request/Response), isolated under the same temp LH_DATA_DIR.
+ const { PUT: putSettingsSection } = await import("../app/api/settings/[section]/route.ts");
+-const { DELETE: deletePromptText } = await import("../app/api/settings/prompts/[...segment]/route.ts");
++const { PUT: putPromptText, DELETE: deletePromptText } = await import("../app/api/settings/prompts/[...segment]/route.ts");
+ const { readSettingsRecord } = await import("../src/server/index.ts");
+ 
+ /** The REAL repo prompts dir this suite must never touch (read-only). */
+@@ -95,6 +95,18 @@ function putSection(section: string, body: unknown): Promise<Response> {
+ 	);
+ }
+ 
++/** PUT /api/settings/prompts/<segment...> with a fabricated params context. */
++function putSegment(segment: string[], text: string): Promise<Response> {
++	return putPromptText(
++		new Request("http://test/api/settings/prompts", {
++			method: "PUT",
++			headers: { "Content-Type": "application/json" },
++			body: JSON.stringify({ text }),
++		}),
++		{ params: Promise.resolve({ segment }) },
++	);
++}
++
+ /** DELETE /api/settings/prompts/<segment...> with a fabricated params context. */
+ function deleteSegment(segment: string[]): Promise<Response> {
+ 	return deletePromptText(new Request("http://test/api/settings/prompts", { method: "DELETE" }), {
+@@ -126,6 +138,23 @@ describe("isValidSegmentPath (the mirror-layout discipline)", () => {
+ 			assert.equal(isValidSegmentPath(bad), false, bad);
+ 		}
+ 	});
++
++	it("accepts personalization.md and skills/<slug>.md as custom user segments", () => {
++		assert.equal(isValidSegmentPath("personalization.md"), true);
++		assert.equal(isValidSegmentPath("skills/socratic-tutor.md"), true);
++		assert.equal(isValidSegmentPath("skills/SKILL.md"), true);
++		assert.equal(isCustomSkillPath("personalization.md"), true);
++		assert.equal(isCustomSkillPath("skills/socratic-tutor.md"), true);
++		assert.equal(isCustomSkillPath("system-prompt.md"), false);
++		assert.equal(isCustomSkillPath("shared/10-voice.md"), false);
++		assert.equal(sanitizeSkillPath("My Custom Skill.md"), "skills/my-custom-skill.md");
++		assert.equal(sanitizeSkillPath("SKILL.md"), "skills/skill.md");
++		assert.equal(sanitizeSkillPath("SKILL.md", "---\nname: Socratic Tutor\n---\nBody"), "skills/socratic-tutor.md");
++		assert.equal(sanitizeSkillPath("SKILL.md", "# Rigorous Math\nBody"), "skills/rigorous-math.md");
++		for (const bad of ["skills/", "skills/.md", "skills/../evil.md", "skills/sub/a.md", "skills/a.txt"]) {
++			assert.equal(isValidSegmentPath(bad), false, bad);
++		}
++	});
+ });
+ 
+ describe("the override store", () => {
+@@ -319,6 +348,26 @@ describe("composeInstructions: override honoring + the byte-identical source pat
+ 			promptOverrides.deleteOverride("system-prompt.md");
+ 		}
+ 	});
++
++	it("composes personalization.md and uploaded skills/*.md into all agents when enabled", () => {
++		promptOverrides.writeOverride("personalization.md", "PREFER BAHASA INDONESIA DAN ANALOGI PRAKTIS");
++		promptOverrides.writeOverride("skills/code-tutor.md", "# Skill: Socratic Code Tutor\nAlways ask user to trace variables.");
++		try {
++			const switches = { "personalization.md": true, "skills/code-tutor.md": true };
++			for (const kind of ["prober", "teacher", "practice"] as const) {
++				const composed = composeInstructions(kind, switches);
++				assert.ok(composed.includes("PREFER BAHASA INDONESIA DAN ANALOGI PRAKTIS"), `${kind} includes personalization`);
++				assert.ok(composed.includes("# Skill: Socratic Code Tutor"), `${kind} includes skill`);
++			}
++			// When switches are off, neither composes:
++			const off = composeInstructions("teacher", { "personalization.md": false, "skills/code-tutor.md": false });
++			assert.ok(!off.includes("PREFER BAHASA INDONESIA DAN ANALOGI PRAKTIS"));
++			assert.ok(!off.includes("# Skill: Socratic Code Tutor"));
++		} finally {
++			promptOverrides.deleteOverride("personalization.md");
++			promptOverrides.deleteOverride("skills/code-tutor.md");
++		}
++	});
+ });
+ 
+ // ─── the orphan-heal contract (interlude, 2026-09-26) ────────────────────────
+@@ -357,6 +406,26 @@ describe("delete clears the switch — the record and file agree by construction
+ 		const body = (await res.json()) as { switchCleared: boolean };
+ 		assert.equal(body.switchCleared, false, "no switch was present — nothing cleared");
+ 	});
++
++	it("PUT /api/settings/prompts/[...segment] accepts new personalization.md and skills/<name>.md, then PUT /api/settings/agent enables them", async () => {
++		const putPers = await putSegment(["personalization.md"], "Prefer Bahasa Indonesia.");
++		assert.equal(putPers.status, 200);
++		const putSkill = await putSegment(["skills", "socratic.md"], "# Skill: Socratic\nAsk why.");
++		assert.equal(putSkill.status, 200);
++
++		const enableRes = await putSection("agent", {
++			prompts: { "personalization.md": true, "skills/socratic.md": true },
++		});
++		assert.equal(enableRes.status, 200);
++		assert.equal(readSettingsRecord()?.agent?.prompts?.["personalization.md"], true);
++		assert.equal(readSettingsRecord()?.agent?.prompts?.["skills/socratic.md"], true);
++
++		// Deleting the uploaded skill removes the file AND clears the switch:
++		const delRes = await deleteSegment(["skills", "socratic.md"]);
++		assert.equal(delRes.status, 200);
++		assert.equal(readSettingsRecord()?.agent?.prompts?.["skills/socratic.md"], undefined);
++		await deleteSegment(["personalization.md"]);
++	});
+ });
+ 
+ describe("an orphaned ON heals to OFF on write — never a 400 (the invariant: a user can never get stuck)", () => {
+diff --git a/tests/settings-pure.test.ts b/tests/settings-pure.test.ts
+index 3c38f1d..8be10fd 100644
+--- a/tests/settings-pure.test.ts
++++ b/tests/settings-pure.test.ts
+@@ -17,6 +17,7 @@ import {
+ 	composeQuizMechanics,
+ 	sectionedSegments,
+ } from "../components/settings/agent-section.tsx";
++import { applyPersonalizationPreset } from "../src/core";
+ import { nextOverrides } from "../components/settings/keyboard-section.tsx";
+ import { classifyKeys, keyStatusLine, type ProviderKeyInfo } from "../components/settings/keys-section.tsx";
+ import type { AgentSettings, AuthKeyStatus, ModelsSettings } from "../src/core";
+@@ -389,3 +390,14 @@ describe("composeQuizMechanics (the segmented control's write)", () => {
+ 		}
+ 	});
+ });
++
++describe("applyPersonalizationPreset (personalization chip helper)", () => {
++	it("appends preset snippet cleanly when absent and is idempotent when already present", () => {
++		const first = applyPersonalizationPreset("", "Gunakan Bahasa Indonesia.");
++		assert.equal(first, "Gunakan Bahasa Indonesia.");
++		const second = applyPersonalizationPreset(first, "Beri analogi praktis.");
++		assert.equal(second, "Gunakan Bahasa Indonesia.\nBeri analogi praktis.");
++		const duplicate = applyPersonalizationPreset(second, "Gunakan Bahasa Indonesia.");
++		assert.equal(duplicate, second, "does not duplicate an already-present snippet");
++	});
++});
+-- 
+2.53.0.windows.1
+

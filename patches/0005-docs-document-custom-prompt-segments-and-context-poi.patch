@@ -1,0 +1,50 @@
+From 12a1ad0a4939b31d3d813338604be6cd10f842c2 Mon Sep 17 00:00:00 2001
+From: hmty11 <darrenjeho@gmail.com>
+Date: Thu, 29 Oct 2026 15:31:39 +0800
+Subject: [PATCH 5/5] docs: document custom prompt segments and context
+ pointers
+
+---
+ AGENTS.md                   | 6 ++++++
+ src/agent/prompts/README.md | 4 ++++
+ 2 files changed, 10 insertions(+)
+
+diff --git a/AGENTS.md b/AGENTS.md
+index 5cc36a8..5ba7cf5 100644
+--- a/AGENTS.md
++++ b/AGENTS.md
+@@ -13,3 +13,9 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
+ All design authority belongs to the human. **Never guess a design or implementation decision.** If anything is ambiguous — naming, behavior, data shapes, UX, defaults, scope boundaries, prompt wording — STOP and ask with the ask-user-question tool before proceeding. If you are "a little unsure," you are unsure: ask. A wrong guess is far more expensive than a question. Ask early, ask specific, one question per call.
+ 
+ Concretely: first investigate and plan rigorously (asking the user design questions along the way), get the plan approved by the user, and only then implement. Implementation should be mechanical execution of an approved plan — not interpretation.
++
++# Pointers & Checks
++
++- Architecture, hexagon import law (`eslint.config.mjs`), and store ports: read [`docs/architecture.md`](docs/architecture.md).
++- Prompt segments, overrides, and custom skills/personalization (`data/prompts/`): read [`src/agent/prompts/README.md`](src/agent/prompts/README.md) and [`src/core/prompt-segments.ts`](src/core/prompt-segments.ts).
++- Verification gate: run `npm run typecheck`, `npm run lint`, and targeted `npx tsx --test tests/<file>.test.ts` (`package.json`'s `npm test` uses POSIX `NODE_ENV=test` syntax).
+diff --git a/src/agent/prompts/README.md b/src/agent/prompts/README.md
+index 8ce1621..9f4e83b 100644
+--- a/src/agent/prompts/README.md
++++ b/src/agent/prompts/README.md
+@@ -4,6 +4,8 @@ The runtime composes prompts for **prober**, **teacher** and **practice** agents
+ 
+ ## Composition order
+ 
++User-created custom segments under `data/prompts/` (`personalization.md` and `skills/<slug>.md`): composed as a trailing appendix across agents when enabled in `settings.agent.prompts`.
++
+ | Agent | Segments, in order |
+ |---|---|
+ | Prober | [`system-prompt.md`](../system-prompt.md) → sorted `prober/` fragments → sorted `shared/` fragments |
+@@ -24,6 +26,8 @@ prober/<fragment>.md
+ teacher/<fragment>.md
+ practice/<fragment>.md
+ shared/<fragment>.md
++personalization.md
++skills/<slug>.md
+ ```
+ 
+ An override is effective only when **both** its `settings.json` → `agent.prompts[segmentPath]` switch is `true` **and** its file can be read. Absent/off switches and missing/unreadable files use source text. File presence alone does not enable anything. An enabled empty override contributes no text after trimming; it does not fall back to source.
+-- 
+2.53.0.windows.1
+

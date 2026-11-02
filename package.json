@@ -21,7 +21,13 @@
 		"typecheck": "tsc --noEmit",
 		"desktop:dev": "concurrently -k \"next dev\" \"LH_DEV_URL=http://localhost:3000 electron .\"",
 		"dev:fresh": "bash scripts/dev-fresh.sh",
-		"desktop:dist": "rm -rf dist .next/standalone && next build && node scripts/smoke-provider-runtime.mjs && node scripts/build-server.mjs && node scripts/smoke-server.mjs && DEVELOPER_DIR=${DEVELOPER_DIR:-/Applications/Xcode.app/Contents/Developer} APPLE_KEYCHAIN_PROFILE=LH_NOTARY APPLE_TEAM_ID=JS6XN22HY6 electron-builder --mac --arm64"
+		"desktop:dist": "rm -rf dist .next/standalone && next build && node scripts/smoke-provider-runtime.mjs && node scripts/build-server.mjs && node scripts/smoke-server.mjs && DEVELOPER_DIR=${DEVELOPER_DIR:-/Applications/Xcode.app/Contents/Developer} APPLE_KEYCHAIN_PROFILE=LH_NOTARY APPLE_TEAM_ID=JS6XN22HY6 electron-builder --mac --arm64",
+		"patch:export": "node scripts/patch-sync.mjs export",
+		"patch:sync": "node scripts/patch-sync.mjs sync",
+		"patch:apply": "node scripts/patch-sync.mjs apply",
+		"patch:continue": "node scripts/patch-sync.mjs continue",
+		"patch:abort": "node scripts/patch-sync.mjs abort",
+		"patch:status": "node scripts/patch-sync.mjs status"
 	},
 	"dependencies": {
 		"@earendil-works/pi-agent-core": "1.4.0",
