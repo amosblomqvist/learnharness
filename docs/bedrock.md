@@ -95,7 +95,8 @@ and [AWS SDK credential providers](https://docs.aws.amazon.com/sdk-for-javascrip
 
 ## Verification
 
-Validated on macOS with Node 22.23.2 against upstream `dc4c398`:
+Merge validation on macOS with Node 26.13.0 against upstream `e69e852`
+(v0.4.1), matching the Node major used by CI:
 
 - Credential detection is checked against Pi's native resolver, including absent
   and incomplete credentials, profiles, access keys, bearer tokens, ECS and web identity.
@@ -107,14 +108,18 @@ Validated on macOS with Node 22.23.2 against upstream `dc4c398`:
   request overrides, and bearer precedence. Storage tests verify failed writes
   preserve damaged files and active credentials, and failed deletes remain
   visible and retryable in the UI.
+- A merge regression verifies live slot cache-retention changes and AWS profile
+  precedence together in the same engine, including fallback to caller options.
 - Live `us-east-1` requests through LearnHarness verified Sonnet 4.6 text
   streaming and Haiku 4.5 tool calls, tool-result continuation, and image input.
-  Browser setup and a real Sonnet teaching turn also completed.
+  Browser setup and a real Sonnet teaching turn also completed. These live checks
+  were performed during the initial integration on Node 22.23.2, not repeated
+  during the upstream merge.
 - Typecheck, lint, production build, and the standalone provider-runtime smoke
-  check passed. After the review fixes, the full suite passed 2,968 of 2,970 tests. The two failures also
-  reproduce on untouched upstream: a local-date expectation in
-  `render-sidebar.test.tsx` and import-only package resolution in
-  `subscription-auth.test.ts`.
+  check passed. The full suite passed all 3,219 tests on Node 26.
+  Node 22 passed 3,218 of 3,219 tests, retaining the pre-existing import-only
+  package resolution failure in `subscription-auth.test.ts`. The earlier
+  sidebar date-fixture failure is fixed upstream.
 
 These checks do not establish access to every catalog model, region, or AWS
 authentication method. Bearer, ECS, and web-identity paths were tested offline;

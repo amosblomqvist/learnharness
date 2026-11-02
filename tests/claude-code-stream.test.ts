@@ -164,14 +164,14 @@ async function runScenario(
 	return { events, calls };
 }
 
-function toToolUseMessage(toolUses: ToolUse[]): string[] {
+function toToolUseMessage(toolUses: ToolUse[], bareIds?: ReadonlySet<string>): string[] {
 	return [
 		streamEvent({ type: "message_start", message: { usage: {} } }),
 		...toolUses.flatMap((toolUse, index) => [
 			streamEvent({
 				type: "content_block_start",
 				index,
-				content_block: { type: "tool_use", id: toolUse.id, name: `mcp__learnharness__${toolUse.name}`, input: {} },
+				content_block: { type: "tool_use", id: toolUse.id, name: bareIds?.has(toolUse.id) ? toolUse.name : `mcp__learnharness__${toolUse.name}`, input: {} },
 			}),
 			streamEvent({
 				type: "content_block_delta",
@@ -416,6 +416,189 @@ test("unsupported native tool intent fails without exposing executable calls", a
 	assert.match(getErrorMessage(events) ?? "", /unsupported native tool/);
 });
 
+function bareToolUse(index: number, toolUse: ToolUse): string[] {
+	return [
+		streamEvent({ type: "content_block_start", index, content_block: { type: "tool_use", id: toolUse.id, name: toolUse.name, input: {} } }),
+		streamEvent({ type: "content_block_delta", index, delta: { type: "input_json_delta", partial_json: JSON.stringify(toolUse.arguments) } }),
+		streamEvent({ type: "content_block_stop", index }),
+	];
+}
+
+function rejectBareCall(toolUse: ToolUse): string {
+	const content = `<tool_use_error>Error: No such tool available: ${toolUse.name}</tool_use_error>`;
+	return JSON.stringify({ type: "user", message: { content: [{ type: "tool_result", tool_use_id: toolUse.id, is_error: true, content }] } });
+}
+
+test("a harness tool called by its bare name is left to the CLI, and the prefixed retry is admitted", async (t) => {
+	const bare: ToolUse = { id: "toolu_bare_only", name: "read", arguments: { path: "a" } };
+	const retry: ToolUse = { id: "toolu_bare_retry", name: "read", arguments: { path: "a" } };
+	const { runClaude, calls } = createFakeRun(t, [
+		streamEvent({ type: "message_start", message: { usage: {} } }),
+		...bareToolUse(0, bare),
+		streamEvent({ type: "message_delta", delta: { stop_reason: "tool_use" }, usage: {} }),
+		streamEvent({ type: "message_stop" }),
+		rejectBareCall(bare),
+		...toToolUseMessage([retry]),
+		callTool(retry),
+		REPLY,
+	]);
+	const streamFunction = createClaudeCodeStreamFunction(runClaude);
+	const toolMessage = await runTurn(streamFunction, [HI]);
+
+	assert.deepEqual(toolMessage.content, [{ type: "toolCall", id: retry.id, name: "read", arguments: { path: "a" } }]);
+	const reply = await runTurn(streamFunction, [HI, toolMessage, toToolResult(retry, "contents of a")]);
+	assert.equal(getText(reply), "contents of a");
+	await assertCleanedUp(getOnlyCall(calls));
+});
+
+test("a bare harness call beside a prefixed one admits only the prefixed call", async (t) => {
+	const bare: ToolUse = { id: "toolu_bare_mixed", name: "read", arguments: { path: "b" } };
+	const prefixed: ToolUse = { id: "toolu_prefixed_mixed", name: "read", arguments: { path: "a" } };
+	const prefixedMessage = toToolUseMessage([prefixed]);
+	const { runClaude, calls } = createFakeRun(t, [
+		...prefixedMessage.slice(0, -2),
+		...bareToolUse(1, bare),
+		...prefixedMessage.slice(-2),
+		rejectBareCall(bare),
+		callTool(prefixed),
+		REPLY,
+	]);
+	const streamFunction = createClaudeCodeStreamFunction(runClaude);
+	const toolMessage = await runTurn(streamFunction, [HI]);
+
+	assert.deepEqual(toolMessage.content, [{ type: "toolCall", id: prefixed.id, name: "read", arguments: { path: "a" } }]);
+	const reply = await runTurn(streamFunction, [HI, toolMessage, toToolResult(prefixed, "contents of a")]);
+	assert.equal(getText(reply), "contents of a");
+	await assertCleanedUp(getOnlyCall(calls));
+});
+
+function toBareToolUseMessage(toolUses: ToolUse[]): string[] {
+	return toToolUseMessage(toolUses, new Set(toolUses.map((call) => call.id)));
+}
+
+test("repeated bare-only messages admit only the eventual MCP correction and reuse the process", async (t) => {
+	const first: ToolUse = { id: "toolu_bare_first", name: "read", arguments: { path: "a" } };
+	const second: ToolUse = { ...first, id: "toolu_bare_second" };
+	const retry: ToolUse = { ...first, id: "toolu_corrected" };
+	const { runClaude, calls } = createFakeRun(t, [
+		...toBareToolUseMessage([first]), rejectBareCall(first),
+		...toBareToolUseMessage([second]), rejectBareCall(second),
+		...toToolUseMessage([retry]), callTool(retry), REPLY,
+	]);
+	const stream = createClaudeCodeStreamFunction(runClaude);
+	const message = await runTurn(stream, [HI]);
+	assert.deepEqual(message.content, [{ type: "toolCall", ...retry }]);
+	const reply = await runTurn(stream, [HI, message, toToolResult(retry, "contents of a")]);
+	assert.equal(getText(reply), "contents of a");
+	await assertCleanedUp(getOnlyCall(calls));
+});
+
+test("a bare call before a prefixed sibling cannot become executable or corrupt its arguments", async (t) => {
+	const bare: ToolUse = { id: "toolu_bare_before", name: "read", arguments: { path: "not admitted" } };
+	const prefixed: ToolUse = { id: "toolu_prefixed_after", name: "read", arguments: { path: "a" } };
+	const { runClaude, calls } = createFakeRun(t, [
+		...toToolUseMessage([bare, prefixed], new Set([bare.id])),
+		rejectBareCall(bare), callTool(prefixed), REPLY,
+	]);
+	const stream = createClaudeCodeStreamFunction(runClaude);
+	const message = await runTurn(stream, [HI]);
+	assert.deepEqual(message.content, [{ type: "toolCall", ...prefixed }]);
+	const reply = await runTurn(stream, [HI, message, toToolResult(prefixed, "contents of a")]);
+	assert.equal(getText(reply), "contents of a");
+	await assertCleanedUp(getOnlyCall(calls));
+});
+
+for (const name of ["recall", "send_to_user"]) test(`a declared ${name} can recover from a bare name without exposing the rejected call`, async (t) => {
+	const bare: ToolUse = { id: `toolu_bare_${name}`, name, arguments: {} };
+	const retry: ToolUse = { ...bare, id: `toolu_corrected_${name}` };
+	const { runClaude, calls } = createFakeRun(t, [
+		...toBareToolUseMessage([bare]), rejectBareCall(bare),
+		...toToolUseMessage([retry]), callTool(retry), HOLD,
+	]);
+	const controller = new AbortController();
+	t.after(() => controller.abort());
+	const context = normalizeContext({ messages: [HI], tools: [{ name, description: "Test harness tool", parameters: Type.Object({}) }] });
+	const events = await collectEvents(createClaudeCodeStreamFunction(runClaude)(getModel(), context, { sessionId: SESSION_ID, signal: controller.signal }));
+	const done = getLastEvent(events);
+	assert.ok(done.type === "done");
+	assert.deepEqual(done.message.content, [{ type: "toolCall", ...retry }]);
+	assert.deepEqual(events.filter((event) => event.type === "toolcall_end").map((event) => event.toolCall.id), [retry.id]);
+	controller.abort();
+	await assertCleanedUp(getOnlyCall(calls));
+});
+
+test("a bare-only rejection may finish with ordinary text instead of an MCP retry", async (t) => {
+	const bare: ToolUse = { id: "toolu_bare_then_text", name: "read", arguments: {} };
+	const { events, calls } = await runScenario(t, [
+		...toBareToolUseMessage([bare]), rejectBareCall(bare), ...readFixtureLines("text.jsonl"), HOLD,
+	]);
+	const done = getLastEvent(events);
+	assert.ok(done.type === "done");
+	assert.equal(done.reason, "stop");
+	assert.equal(getText(done.message), "hello there");
+	assert.equal(events.some((event) => event.type === "toolcall_end"), false);
+	await assertCleanedUp(getOnlyCall(calls));
+});
+
+{
+	const bare: ToolUse = { id: "toolu_bare_before_failure", name: "read", arguments: { path: "a" } };
+	const retry: ToolUse = { ...bare, id: "toolu_retry_before_failure" };
+	const failures = [
+		{ name: "an unknown native Bash call", lines: toBareToolUseMessage([{ ...retry, name: "Bash" }]), error: /unsupported native tool/ },
+		{ name: "a bare tool absent from the current declarations", lines: toBareToolUseMessage([{ ...retry, name: "send_to_user" }]), error: /unsupported native tool/ },
+		{ name: "an empty tool-use batch in the next message", lines: toToolUseMessage([]), error: /invalid tool batch/ },
+		{ name: "duplicate corrected intent IDs", lines: toToolUseMessage([retry, retry]), error: /invalid tool batch/ },
+		{ name: "a prefixed retry with no MCP request", lines: [...toToolUseMessage([retry]), exitWith(1, "")], error: /exited with code 1/ },
+		{ name: "a prefixed retry rejected before MCP admission", lines: [...toToolUseMessage([retry]), rejectBareCall(retry)], error: /refused.*before MCP admission/ },
+		{ name: "missing MCP identity", lines: [...toToolUseMessage([retry]), JSON.stringify({ fake: "call", name: retry.name, arguments: retry.arguments })], error: /compatibility error.*claudecode\/toolUseId/ },
+		{ name: "mismatched MCP identity", lines: [...toToolUseMessage([retry]), callTool({ ...retry, id: "toolu_not_the_retry" })], error: /does not match its streamed tool intent/ },
+		{ name: "mismatched MCP arguments", lines: [...toToolUseMessage([retry]), callTool({ ...retry, arguments: { path: "different" } })], error: /does not match its streamed tool intent/ },
+		{ name: "a terminal CLI error", lines: [JSON.stringify({ type: "result", is_error: true, result: "Synthetic CLI failure" })], error: /Synthetic CLI failure/ },
+		{ name: "CLI exit before correction", lines: [exitWith(1, "")], error: /exited with code 1/ },
+	];
+	for (const failure of failures) test(`bare-call tolerance still rejects ${failure.name}`, async (t) => {
+		const { events, calls } = await runScenario(t, [
+			...toBareToolUseMessage([bare]), rejectBareCall(bare), ...failure.lines, HOLD,
+		]);
+		assert.match(getErrorMessage(events) ?? "", failure.error);
+		assert.equal(events.some((event) => event.type === "toolcall_start" || event.type === "toolcall_end"), false);
+		await assertCleanedUp(getOnlyCall(calls));
+	});
+}
+
+test("a bare name from a removed tool is not tolerated when no tools are declared", async (t) => {
+	const bare: ToolUse = { id: "toolu_removed_read", name: "read", arguments: {} };
+	const { runClaude, calls } = createFakeRun(t, [...toBareToolUseMessage([bare]), HOLD]);
+	const events = await collectEvents(createClaudeCodeStreamFunction(runClaude)(getModel(), normalizeContext({ messages: [HI], tools: [] })));
+	assert.match(getErrorMessage(events) ?? "", /unsupported native tool/);
+	assert.equal(events.some((event) => event.type === "toolcall_end"), false);
+	await assertCleanedUp(getOnlyCall(calls));
+});
+
+test("cancellation after a bare-only rejection aborts the wait and cleans up the process", async (t) => {
+	const bare: ToolUse = { id: "toolu_bare_cancelled", name: "read", arguments: {} };
+	const fake = createFakeRun(t, [
+		...toBareToolUseMessage([bare]), rejectBareCall(bare), JSON.stringify({ fake: "checkpoint" }), HOLD,
+	]);
+	const controller = new AbortController();
+	t.after(() => controller.abort());
+	let checkpointSeen = false;
+	const runClaude: RunClaude = async (args, options) => {
+		const child = await fake.runClaude(args, options);
+		assert.ok(child);
+		child.once("message", () => { checkpointSeen = true; controller.abort(); });
+		return child;
+	};
+	const context = normalizeContext({ messages: [HI], tools: [READ_TOOL] });
+	const events = await collectEvents(createClaudeCodeStreamFunction(runClaude)(getModel(), context, { signal: controller.signal }));
+	const error = getLastEvent(events);
+	assert.ok(error.type === "error");
+	assert.equal(error.reason, "aborted");
+	assert.equal(checkpointSeen, true);
+	assert.equal(events.some((event) => event.type === "toolcall_end"), false);
+	await assertCleanedUp(getOnlyCall(fake.calls));
+});
+
 test("usage maps input/output/cacheRead/cacheWrite with zero cost, message_delta overriding message_start", async (t) => {
 	const { events } = await runScenario(t, getToolScenario());
 	const done = getLastEvent(events);
@@ -575,15 +758,36 @@ test("cwd is an empty temp dir; prompt and mcp config live in a separate private
 	assert.match(mcpConfig.mcpServers.learnharness?.url ?? "", /^http:\/\/127\.0\.0\.1:\d+\/mcp$/);
 });
 
-test("spawns with the model alias, effort, bridge tools, MCP_TOOL_TIMEOUT and the caller's HOME", async (t) => {
+test("spawns with the model alias, effort, bridge tools, MCP timeout headroom and the caller's HOME", async (t) => {
 	const { calls } = await runScenario(t, readFixtureLines("text.jsonl"), { reasoning: "xhigh" });
 	const call = getOnlyCall(calls);
 	assert.equal(getFlagValue(call.args, "--model"), "opus");
 	assert.equal(getFlagValue(call.args, "--effort"), "xhigh");
 	assert.equal(getFlagValue(call.args, "--allowedTools"), "mcp__learnharness__read,mcp__learnharness__get_weather");
 	assert.equal(call.env.MCP_TOOL_TIMEOUT, "1800000");
+	assert.equal(call.env.CLAUDE_CODE_MCP_TOOL_IDLE_TIMEOUT, "1800000");
+	assert.equal(LIVE_PROCESS_IDLE_TIMEOUT_MS, 600000, "learner-wait retention stays at ten minutes");
+	for (const name of ["MCP_TOOL_TIMEOUT", "CLAUDE_CODE_MCP_TOOL_IDLE_TIMEOUT"]) {
+		assert.ok(Number(call.env[name]) > LIVE_PROCESS_IDLE_TIMEOUT_MS, `${name} must outlast LearnHarness retention`);
+	}
 	assert.equal(call.env.HOME, process.env.HOME);
 	assert.equal(call.env.CLAUDE_CONFIG_DIR, process.env.CLAUDE_CONFIG_DIR);
+});
+
+test("MCP timeout headroom overrides inherited shorter timeouts", async (t) => {
+	const names = ["MCP_TOOL_TIMEOUT", "CLAUDE_CODE_MCP_TOOL_IDLE_TIMEOUT"] as const;
+	const saved = names.map((name) => [name, process.env[name]] as const);
+	t.after(() => {
+		for (const [name, value] of saved) {
+			if (value === undefined) delete process.env[name];
+			else process.env[name] = value;
+		}
+	});
+	for (const name of names) process.env[name] = "300000";
+
+	const { calls } = await runScenario(t, readFixtureLines("text.jsonl"));
+	const call = getOnlyCall(calls);
+	for (const name of names) assert.equal(call.env[name], "1800000");
 });
 
 test("preserves existing CLI environment authentication without a subscription guarantee", async (t) => {

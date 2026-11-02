@@ -5,7 +5,7 @@ import * as path from "node:path";
 import { describe, it } from "node:test";
 
 import type { AgentTool } from "@earendil-works/pi-agent-core";
-import { expandBraces, globToRegex, matchGlob, walkFiles } from "../src/agent/tools/fs-shared.ts";
+import { expandBraces, globToRegex, matchGlob, resolveSourcePath, walkFiles } from "../src/agent/tools/fs-shared.ts";
 import { findTool } from "../src/agent/tools/find.ts";
 import { grepTool } from "../src/agent/tools/grep.ts";
 import { lsTool } from "../src/agent/tools/ls.ts";
@@ -14,8 +14,8 @@ import { readTool } from "../src/agent/tools/read.ts";
 /**
  * The learner-filesystem tools (sources v1, 2026-09-19): ls/find/grep as
  * pure-Node pi ports, read re-anchored to the home directory. All calls go
- * through absolute paths — the tools' relative resolution targets the real
- * home, which tests must not touch.
+ * through absolute paths, except the tilde integration case which temporarily
+ * points home resolution at a throwaway fixture. Never touch the real home.
  *
  * Fixture tree (tmpdir):
  *   notes/calculus.md         "The derivative measures force…"
@@ -83,6 +83,66 @@ describe("glob helpers (fs-shared)", () => {
 		assert.equal(globToRegex("a?c").test("abc"), true);
 		assert.equal(globToRegex("a?c").test("ac"), false);
 		assert.equal(matchGlob("a.b.txt", "a.b*"), true, "the dot is literal, not any-char");
+	});
+});
+
+describe("resolveSourcePath (fs-shared)", () => {
+	it("a leading ~ is the learner's home, as a shell expands it", () => {
+		const home = os.homedir();
+		assert.equal(resolveSourcePath("~"), home);
+		assert.equal(resolveSourcePath("~/notes/calculus.md"), path.join(home, "notes", "calculus.md"));
+		assert.equal(resolveSourcePath(`~${path.sep}notes${path.sep}calculus.md`), path.join(home, "notes", "calculus.md"));
+	});
+
+	it("preserves default, ordinary relative, and absolute paths", () => {
+		const home = os.homedir();
+		const absolute = path.join(os.tmpdir(), "course", "notes.md");
+		assert.equal(resolveSourcePath(), home);
+		assert.equal(resolveSourcePath(""), home);
+		assert.equal(resolveSourcePath("notes/calculus.md"), path.join(home, "notes", "calculus.md"));
+		assert.equal(resolveSourcePath(absolute), absolute);
+	});
+
+	it("backslash is a home separator only on Windows", () => {
+		const input = "~\\notes\\calculus.md";
+		const expected = process.platform === "win32"
+			? path.join(os.homedir(), "notes", "calculus.md")
+			: path.join(os.homedir(), input);
+		assert.equal(resolveSourcePath(input), expected);
+	});
+
+	it("~user and non-leading tildes stay literal", () => {
+		const home = os.homedir();
+		assert.equal(resolveSourcePath("~other/notes.md"), path.join(home, "~other", "notes.md"));
+		assert.equal(resolveSourcePath("notes/~draft.md"), path.join(home, "notes", "~draft.md"));
+		assert.equal(resolveSourcePath("/tmp/~/x.md"), "/tmp/~/x.md");
+	});
+});
+
+describe("learner tools share leading-tilde resolution", () => {
+	it("read, ls, find, and grep reach the same synthetic home", async () => {
+		const home = await setup();
+		const originalHome = process.env.HOME;
+		const originalUserProfile = process.env.USERPROFILE;
+		try {
+			process.env.HOME = home;
+			process.env.USERPROFILE = home;
+			assert.equal(os.homedir(), home);
+			const read = await runText(readTool, { path: "~/notes/calculus.md" });
+			assert.match(read, /The derivative measures force/);
+			const listed = await runText(lsTool, { path: "~/notes" });
+			assert.match(listed, /calculus\.md/);
+			const found = await runText(findTool, { path: "~/notes", pattern: "*.md" });
+			assert.match(found, /calculus\.md/);
+			const matched = await runText(grepTool, { path: "~/notes", pattern: "derivative" });
+			assert.match(matched, /calculus\.md:2: The derivative measures force/);
+		} finally {
+			if (originalHome === undefined) delete process.env.HOME;
+			else process.env.HOME = originalHome;
+			if (originalUserProfile === undefined) delete process.env.USERPROFILE;
+			else process.env.USERPROFILE = originalUserProfile;
+			await fs.rm(home, { recursive: true, force: true });
+		}
 	});
 });
 

@@ -3,6 +3,7 @@
 LearnHarness supports **one custom OpenAI-compatible endpoint with multiple models**.
 The setup and Settings UI are based on PR #62 by Daniel Buckner and Abhishek Thakur.
 Pi owns inference, message conversion, tools, streaming, and reasoning-effort handling.
+For the separate external CLI provider, see [Claude Code](claude-code.md).
 
 ## Configure an endpoint
 
@@ -24,15 +25,18 @@ Pi owns inference, message conversion, tools, streaming, and reasoning-effort ha
 5. Click **Connect**, then choose models for Strong, Cheap, and Vision.
 
 HTTP and HTTPS, including localhost/private-network servers, are supported. URLs
-with embedded credentials, query strings, or fragments are rejected. Put a key in
-the authentication field, not the URL. Discovery redirects are rejected.
+with embedded credentials, query strings, or fragments are rejected. URLs are
+canonicalized and trailing slashes removed before binding credentials; `/v1` is
+still never appended. Put a key in the authentication field, not the URL.
+Discovery redirects are rejected.
 
 Connect requests `GET <base>/models`. Discovery metadata wins over duplicate manually
-entered IDs. A failed probe can fall back to entered IDs; a failed probe for the
-same URL preserves its previous model snapshot and pins. A different URL starts
-with its own models. **401/403 always fails**, even with entered IDs. Response-size,
-model-count, and redirect violations also fail explicitly rather than silently
-truncating or bypassing a discovery limit.
+entered IDs. A nonfatal failed probe can fall back to entered IDs; a successful
+fallback connect at the same URL preserves its previous model snapshot and pins.
+Without entered IDs, the failed connect leaves existing configuration unchanged.
+A different URL starts with its own models. **401/403 always fails**, even with
+entered IDs. Response-size, model-count, and redirect violations also fail
+explicitly rather than silently truncating or bypassing a discovery limit.
 
 Configuration is not a continuous health check. An endpoint may be configured while
 offline, and model capability or output quality is not proven by listing its ID.
@@ -129,5 +133,22 @@ profile reset, history rewrite, or silent model remapping. Existing development
 profiles need manual endpoint configuration and model reselection. Unbound early
 GUI development configurations also require explicit reconnect/new-key entry or
 the existing reuse-consent checkbox, even at the same URL; they are never silently
-trusted or migrated. This release
-supports one OpenAI-compatible custom endpoint, not multiple arbitrary protocols.
+trusted or migrated. This release supports one OpenAI-compatible custom endpoint,
+not multiple arbitrary protocols. See [compaction and accounting](compaction-accounting.md)
+for how context measurements and unpriced usage are displayed.
+
+## Implementation and regression references
+
+- [Endpoint registration and discovery](../src/server/custom-provider.ts),
+  [HTTP mutations/revisions](../src/server/custom-provider-http.ts), and
+  [canonical URLs and budgets](../src/core/settings.ts).
+- [Private authorization resolution](../src/server/custom-provider-auth.ts),
+  [durable binding contract](../src/core/custom-provider-auth.ts),
+  [request-boundary tests](../tests/custom-provider-boundaries.test.ts), and
+  [crash/restart tests](../tests/custom-provider-restart.test.ts).
+- [Per-operation engine resolution and image allowance](../src/agent/models.ts),
+  [native payload/lifecycle tests](../tests/custom-provider-lifecycle.test.ts), and
+  [Vision model filtering](../components/settings/model-menu.tsx). Synthetic image payload tests
+  establish delivery, not real-model image-understanding quality.
+- [Editor tests](../tests/custom-provider-ui.test.tsx) and
+  [connect snapshot/pin tests](../tests/custom-provider-route.test.ts).

@@ -136,6 +136,7 @@ export function catalogSlots(): SlotPins {
 			? {
 					model: { provider: slot.provider, id: slot.id },
 					...(slot.thinkingLevel !== undefined ? { thinkingLevel: slot.thinkingLevel } : {}),
+					...(slot.cacheRetention !== undefined ? { cacheRetention: slot.cacheRetention } : {}),
 				}
 			: null;
 	}
@@ -327,7 +328,7 @@ export function clampModelsLevels(settings: ModelsSettings): ModelsSettings {
 		out[name] =
 			slot.thinkingLevel !== undefined
 				? {
-						model: slot.model,
+						...slot,
 						thinkingLevel: clampLevelFor(slot.model.provider, slot.model.id, slot.thinkingLevel),
 					}
 				: slot;

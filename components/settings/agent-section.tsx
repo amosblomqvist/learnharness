@@ -52,6 +52,8 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import type { CacheRetention } from "@earendil-works/pi-ai";
+import { CacheRetentionMenu, cacheRetentionLabel } from "./cache-retention-menu.tsx";
 import { MenuShell } from "@/components/menu-shell";
 import { useSettingsSaved } from "@/components/settings-signal";
 import { defaultOrderLevel, populateLevel } from "@/components/thinking-default";
@@ -143,10 +145,19 @@ export function composeSlotModel(
 		return next;
 	}
 	next[slot] = {
+		...(prev?.cacheRetention !== undefined ? { cacheRetention: prev.cacheRetention } : {}),
 		...(provider && id ? { model: { provider, id } } : prev?.model ? { model: prev.model } : {}),
 		...(thinking ? { thinkingLevel: thinking as ThinkingLevel } : {}),
 	};
 	return next;
+}
+
+/** Retention is slot-only; selecting Pi default removes the field entirely. */
+export function composeSlotCacheRetention(models: ModelsSettings | undefined, slot: ModelSlotName, value: CacheRetention | undefined): ModelsSettings {
+	const next = { ...models?.[slot] };
+	if (value === undefined) delete next.cacheRetention;
+	else next.cacheRetention = value;
+	return { ...models, [slot]: next };
 }
 
 /** Compose: the search-engine preference. null = the explicit pin is
@@ -306,7 +317,8 @@ export function AgentSection({
 	const [segmentStatus, setSegmentStatus] = useState<string | null>(null);
 	/** One open dropdown for the whole section: which slot (or the search
 	 *  row), which kind. */
-	const [openMenu, setOpenMenu] = useState<{ target: ModelSlotName | "search"; kind: "model" | "thinking" | "engine" } | null>(null);
+	const [openMenu, setOpenMenu] = useState<{ target: ModelSlotName | "search"; kind: "model" | "thinking" | "engine" | "cache" } | null>(null);
+	const [advancedModels, setAdvancedModels] = useState(false);
 	const menuAnchorRef = useRef<HTMLSpanElement>(null);
 
 	const refreshSearch = () =>
@@ -581,6 +593,13 @@ export function AgentSection({
 	return (
 		<>
 			<SettingsGroup label="Models" testid="group-models">
+				<button
+					type="button"
+					data-testid="models-advanced"
+					aria-expanded={advancedModels}
+					onClick={() => { setAdvancedModels(!advancedModels); setOpenMenu(null); }}
+					className="mb-1 self-start text-xs text-muted-foreground hover:text-foreground"
+				>{advancedModels ? "Hide advanced settings" : "Show advanced settings"}</button>
 				{catalogFailed && <p role="alert" className="text-xs text-red-400">Model catalog could not be loaded. Check the connection and retry. <button type="button" className="underline" onClick={refreshCatalog}>Retry</button></p>}
 				{MODEL_SLOTS.map((slot) => {
 					const override = models?.[slot];
@@ -611,7 +630,13 @@ export function AgentSection({
 							    span holding BOTH triggers of the open menu. */}
 							<span
 								ref={thisMenuOpen ? menuAnchorRef : undefined}
-								className="relative flex items-center gap-2"
+								className={`relative flex items-center gap-2 ${advancedModels ? "shrink-0" : ""}`}
+								onKeyDown={(event) => {
+									// Portal events bubble here too: close this menu, not the dialog.
+									if (thisMenuOpen === "cache" && event.key === "Escape") {
+										event.preventDefault(); event.stopPropagation(); setOpenMenu(null);
+									}
+								}}
 							>
 								{slot !== "strong" && <><ChatGPTBackgroundAccess provider={coord?.provider} /><NativeSubscriptionBackgroundAccess provider={coord?.provider} /></>}
 								<MenuTrigger
@@ -636,6 +661,27 @@ export function AgentSection({
 									onClick={() => setOpenMenu(thisMenuOpen === "thinking" ? null : { target: slot, kind: "thinking" })}
 									widthClass="w-20"
 								/>
+								{advancedModels && <MenuTrigger
+									value={cacheRetentionLabel(override?.cacheRetention)}
+									emptyLabel="Cache: default"
+									ariaLabel={`${SLOT_META[slot].label} cache retention`}
+									testid={`slot-cache-${slot}`}
+									open={thisMenuOpen === "cache"}
+									disabled={!override?.model}
+									onClick={() => setOpenMenu(thisMenuOpen === "cache" ? null : { target: slot, kind: "cache" })}
+									widthClass="w-40"
+								/>}
+								{advancedModels && thisMenuOpen === "cache" && <MenuShell
+									preferredSide="down"
+									anchorTestid={`slot-cache-${slot}`}
+									testid={`slot-cache-menu-${slot}`}
+									menuClass="flex w-80 flex-col gap-0.5 rounded-xl border border-border bg-card p-2 text-xs shadow-xl"
+								>
+									<CacheRetentionMenu value={override?.cacheRetention} onPick={(value) => {
+										onModelsChange(composeSlotCacheRetention(models, slot, value));
+										setOpenMenu(null);
+									}} />
+								</MenuShell>}
 								{thisMenuOpen === "model" && (
 									<MenuShell
 										preferredSide="down"

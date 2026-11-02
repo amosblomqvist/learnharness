@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { BedrockRuntimeClient } from "@aws-sdk/client-bedrock-runtime";
-import { normalizeContext, type SimpleStreamOptions } from "@earendil-works/pi-ai";
+import { normalizeContext, type CacheRetention, type SimpleStreamOptions } from "@earendil-works/pi-ai";
 import { piEngineForSpec } from "../src/agent/models.ts";
 
 const directory = mkdtempSync(join(tmpdir(), "lh-bedrock-credentials-"));
@@ -67,4 +67,28 @@ it("Bedrock bearer authentication retains precedence over a profile", async () =
 	assert.equal(selected, "fixture-env-bearer");
 	assert.equal((await invoke({ apiKey: "fixture-request-bearer" })).errorMessage, "STOP_BEFORE_NETWORK");
 	assert.equal(selected, "fixture-request-bearer");
+});
+
+it("live slot cache retention and AWS profile precedence survive together in the same engine", async () => {
+	let retention: CacheRetention | undefined;
+	const engine = piEngineForSpec(
+		{ provider: "amazon-bedrock", id: "us.anthropic.claude-haiku-4-5-20251001-v1:0", thinkingLevel: "off" },
+		true, undefined, () => retention,
+	);
+	const context = normalizeContext({
+		systemPrompt: "Stable synthetic instructions",
+		messages: [{ role: "user", content: "Synthetic cache test", timestamp: 0 }],
+	});
+	for (const value of ["long", "none", undefined] as const) {
+		retention = value;
+		let payload = "";
+		const result = await engine.streamFn(engine.model, context, {
+			cacheRetention: "short",
+			onPayload: (body) => { payload = JSON.stringify(body); },
+		}).result();
+		assert.equal(result.errorMessage, "STOP_BEFORE_NETWORK");
+		assert.equal(selected, "PROFILE_INTENDED");
+		assert.equal(payload.includes('"cachePoint"'), value !== "none");
+		assert.equal(payload.includes('"ttl":"1h"'), value === "long");
+	}
 });
