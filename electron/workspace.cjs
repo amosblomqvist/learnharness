@@ -78,17 +78,18 @@ class Workspace {
 		if (!own(parsed) || !Object.entries(parsed).every(([key, binding]) => validId(key) && typeof binding === "string" && binding.length <= 200)) throw new Error("Invalid keyboard preferences.");
 		return JSON.stringify(parsed);
 	}
-	open(windowId, sessionId, disposition) {
+	open(windowId, sessionId, disposition, paneId) {
 		if (sessionId !== null && !validId(sessionId)) throw new Error("Invalid session.");
 		if (!["active", "beside", "window"].includes(disposition)) throw new Error("Invalid destination.");
 		const source = this.window(windowId);
+		if (paneId !== undefined && (!validId(paneId) || !source.panes.some((p) => p.id === paneId))) throw new Error("Unknown target pane.");
 		if (sessionId !== null) for (const w of this.state.windows) {
 			const pane = w.panes.find((p) => p.sessionId === sessionId);
 			if (pane) { w.activePaneId = pane.id; return w; }
 		}
 		let target = source;
 		if (disposition === "window") target = this.newWindow();
-		let pane = target.panes.find((p) => p.id === target.activePaneId);
+		let pane = target.panes.find((p) => p.id === (disposition === "active" && paneId ? paneId : target.activePaneId));
 		if (disposition === "beside") {
 			if (target.panes.length < 2) { pane = { id: randomUUID(), sessionId: null }; target.panes.push(pane); }
 			else pane = target.panes.find((p) => p.id !== target.activePaneId);

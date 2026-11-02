@@ -794,8 +794,8 @@ async function main() {
 		return win;
 	};
 	ipcMain.handle("lh:workspace:get", (event) => workspace.snapshot(senderWindow(event)));
-	ipcMain.handle("lh:workspace:open", (event, sessionId, disposition = "active") => {
-		const target = workspace.open(senderWindow(event), sessionId, disposition);
+	ipcMain.handle("lh:workspace:open", (event, sessionId, disposition = "active", paneId) => {
+		const target = workspace.open(senderWindow(event), sessionId, disposition, paneId);
 		showWindow(target); notifyWorkspace();
 	});
 	ipcMain.handle("lh:workspace:move", (event, paneId) => {

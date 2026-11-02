@@ -47,7 +47,7 @@ contextBridge.exposeInMainWorld("lh", {
 			ipcRenderer.on("lh:workspace:changed", listener);
 			return () => ipcRenderer.removeListener("lh:workspace:changed", listener);
 		},
-		open: (sessionId, disposition = "active") => ipcRenderer.invoke("lh:workspace:open", sessionId, disposition),
+		open: (sessionId, disposition = "active", paneId) => ipcRenderer.invoke("lh:workspace:open", sessionId, disposition, paneId),
 		move: (paneId) => ipcRenderer.invoke("lh:workspace:move", paneId),
 		close: (paneId) => ipcRenderer.invoke("lh:workspace:close", paneId),
 		save: (patch) => ipcRenderer.invoke("lh:workspace:save", patch),

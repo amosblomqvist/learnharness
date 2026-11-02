@@ -75,3 +75,13 @@ test("missing displays and oversized windows restore inside primary work area", 
 	const second = { x: 1512, y: 0, width: 1920, height: 1080 };
 	assert.deepEqual(constrainBounds({ x: 1600, y: 50, width: 1000, height: 700 }, [primary, second], primary), { x: 1600, y: 50, width: 1000, height: 700 });
 });
+
+test("asynchronous session creation targets its originating pane after focus changes", (t) => {
+	const { workspace: ws } = fixture(t); const w = ws.newWindow();
+	const original = w.panes[0].id;
+	ws.open(w.id, "other", "beside");
+	ws.open(w.id, "created", "active", original);
+	assert.equal(w.panes.find((p: { id: string }) => p.id === original).sessionId, "created");
+	assert.equal(w.panes[1].sessionId, "other");
+	assert.throws(() => ws.open(w.id, "bad", "active", "unknown-pane"));
+});
