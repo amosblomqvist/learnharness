@@ -10,6 +10,8 @@ SCOPE.md
 # raw real-data import sources (user directive 2026-09-13: never commit)
 real-data-extraction/
 dist/
+# phone build output (scripts/build-mobile.mjs)
+dist-mobile/
 
 # dev auth/keys store (auth-keys wave): repo-root auth.json — secrets never committed
 auth.json

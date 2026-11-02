@@ -15,6 +15,8 @@ import importPlugin from "eslint-plugin-import";
  *   src/agent/**   →  never imports src/server, src/store (dependencies —
  *                    the storage ports, the composition — arrive via
  *                    factories/closures from the chat-handler)
+ *   src/browser/** →  the phone build's composition root (docs/mobile.md):
+ *                    nothing else imports it
  *
  * tests/ and scripts/ are internal — unrestricted.
  */
@@ -22,7 +24,7 @@ import importPlugin from "eslint-plugin-import";
 export default defineConfig([
 	// electron/** — the desktop shell: plain Node, no framework, outside the
 // import law (same rationale as scripts/).
-	globalIgnores([".next/**", "node_modules/**", "data/**", "next-env.d.ts", "scripts/**", "electron/**", "dist/**"]),
+	globalIgnores([".next/**", "node_modules/**", "data/**", "next-env.d.ts", "scripts/**", "electron/**", "dist/**", "dist-mobile/**"]),
 	{
 		files: ["**/*.{js,mjs,ts,tsx}"],
 		languageOptions: {
@@ -65,6 +67,12 @@ export default defineConfig([
 							from: ["./src/server", "./src/store"],
 							message:
 								"The agent layer receives its dependencies (storage ports via factories/closures) — it never imports the server layer or store adapters (architecture: docs/architecture.md).",
+						},
+						{
+							target: ["./app", "./components", "./src/core", "./src/agent", "./src/server", "./src/store"],
+							from: "./src/browser",
+							message:
+								"src/browser is the phone build's composition root (docs/mobile.md): it wires the app together for the browser, so nothing else may import it.",
 						},
 					],
 				},
