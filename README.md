@@ -11,7 +11,7 @@
 <p align="center">
   <a href="https://learnharness.ai">Download</a> ·
   <a href="#how-it-works">How it works</a> ·
-  <a href="docs/development.md">Documentation</a> ·
+  <a href="docs/README.md">Documentation</a> ·
   <a href="https://github.com/amosblomqvist/learnharness/issues">Issues</a> ·
   <a href="https://discord.gg/5tCHHQEB2e">Discord</a>
 </p>
@@ -53,11 +53,9 @@ Future teaching sessions can read the graph instead of starting from scratch. Pr
 
 Choose your models, then start a session with what you want to understand. You can use provider API keys, supported subscription connections in the desktop app, an installed [Claude Code CLI](docs/claude-code.md), or a [custom OpenAI-compatible endpoint](docs/custom-providers.md), including a local model server. Optional dictation and web search use separate service keys.
 
-Advanced users can set a [prompt-cache retention preference](docs/compaction-accounting.md#prompt-cache-retention) for each model slot under **Settings → Agent → Models → Show advanced settings**. Leaving it at **Pi default** preserves existing provider behavior; longer retention can increase cache-write costs.
+See [Getting started](docs/getting-started.md) for model setup, dictation, files, and notes imports, and [context, caching, and costs](docs/compaction-accounting.md) for advanced cache preferences.
 
 All three platforms support in-app updates.
-
-**Dictation:** Create a [Deepgram API key](https://console.deepgram.com/) with the **Member role or higher** ([required for token minting](https://developers.deepgram.com/reference/auth/tokens/grant)) and add it under **Settings → Providers → Dictation**. Choose the language below the key; **Multilingual** supports automatic recognition and mixed-language speech. A `403 Insufficient permissions` error during token minting can indicate an insufficient key role.
 
 ## Your keys, your data
 
@@ -69,12 +67,12 @@ All three platforms support in-app updates.
 ## Development and support
 
 ```bash
-npm install
+npm ci
 npm run dev        # http://localhost:3000
-npm test           # deterministic, no LLM, no network
+npm test           # fixtures and fake providers
 ```
 
-See the [development guide](docs/development.md) for setup and checks, [architecture](docs/architecture.md) for the shipped runtime, [keyboard reference](docs/keyboard.md) for shortcuts, and [desktop release guide](docs/desktop-release.md) for packaging and updates.
+See the [documentation index](docs/README.md) for all guides, [development](docs/development.md) for setup and checks, [architecture](docs/architecture.md) for the runtime, [keyboard shortcuts](docs/keyboard.md), and [desktop builds and releases](docs/desktop-release.md).
 
 Questions, bug reports, and feature requests: [GitHub Issues](https://github.com/amosblomqvist/learnharness/issues).
 

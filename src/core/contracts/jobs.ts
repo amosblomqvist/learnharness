@@ -4,13 +4,13 @@
  * Part of the domain-split contracts (src/core/contracts/): each domain file
  * is owned outright by its stream — cross-domain schema changes go through
  * master. Pure types + protocol docs + tiny pure helpers; type-only imports
- * of "ai" (safe everywhere: server, client, tests). See docs/vision.md.
+ * of "ai" (safe everywhere: server, client, tests). See docs/archive/vision.md.
  */
 import type { CallUsage } from "./chat.ts";
 import type { LhMessage, LhMarkerMessage } from "../native-messages.ts";
 import { newHandoffMessage } from "../native-messages.ts";
 
-// ─── Async sub-agent jobs (vision §2.5; plan.md Wave 0 protocol) ────────────
+// ─── Async sub-agent jobs (docs/archive/vision.md §2.5; docs/archive/plan.md Wave 0 protocol) ────────────
 
 export type JobKind = "research" | "demo" | "visual" | "pdf";
 export type JobStatus = "running" | "done" | "error";
@@ -426,7 +426,7 @@ function abortText(kind: JobKind): string {
 	return "The figure job was aborted by the learner — no figure is coming. Acknowledge it in one line and teach without it (a re-dispatch is fine if the learner wants it).";
 }
 
-// ─── the probe handoff steer (the probe→teach split, docs/probe-teach-split.md §2) ──
+// ─── the probe handoff steer (the probe→teach split, docs/archive/probe-teach-split.md §2) ──
 //
 // probe_done's execute queues this through the same wake pipeline; the
 // pump fires it once the prober's turn ends (gates + grace). It carries no

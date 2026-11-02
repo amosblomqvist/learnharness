@@ -1,5 +1,5 @@
 /**
- * Plan-block emission (docs/probe-teach-split.md §6): the INTERIM plan
+ * Plan-block emission (docs/archive/probe-teach-split.md §6): the INTERIM plan
  * presentation seam. The plan renders IN FLOW once, at authoring — a
  * frozen snapshot attached right after the assistant group carrying the
  * successful plan_init call. It is the presentation moment for the plan

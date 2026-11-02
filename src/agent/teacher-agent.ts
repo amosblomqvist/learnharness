@@ -26,11 +26,11 @@ import type { ChatGPTRequestCycle } from "./chatgpt-request-cycle.ts";
 import { usageWasAdmitted } from "./subscription-request-cycle.ts";
 
 /**
- * The two teaching-side agents (docs/probe-teach-split.md): the PROBER and
+ * The two teaching-side agents (docs/archive/probe-teach-split.md): the PROBER and
  * the TEACHER. Same transcript, different prompts and tool sets; the
  * chat-handler constructs ONE per request off the transcript's seam
  * (probe_done = teacher) — the STATELESS per-turn engine (docs/
- * pi-engine-swap.md §2): the persisted record is the source of truth, the
+ * docs/archive/pi-engine-swap.md §2): the persisted record is the source of truth, the
  * agent is rebuilt from it every POST and discarded at turn end.
  *
  * Engines are injectable so tests can pass a scripted faux engine and drive
@@ -133,7 +133,7 @@ export interface AgentBuildOptions {
 }
 
 /**
- * The turn's question-stop rule (docs/pi-engine-swap.md §2; Wave A
+ * The turn's question-stop rule (docs/archive/pi-engine-swap.md §2; Wave A
  * 2026-09-26, owner Option A): a question tool call (quiz /
  * ask_user_question) that RESOLVED — its synthetic "question posed" result
  * is not an error — ends the run: the learner's answer arrives as the next

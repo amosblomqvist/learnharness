@@ -101,7 +101,7 @@ function listChats(): ChatSummary[] {
 						messageCount: messages.length,
 						// Record-derived status for the session picker: phase from the
 						// transcript's explicit events (probe_done concluded / verdict
-						// accepted — docs/probe-teach-split.md §4), pending question
+						// accepted — docs/archive/probe-teach-split.md §4), pending question
 						// from the native dangling-call scan. Wave D: both folds read
 						// the NATIVE record (core/phases.ts phaseAt3Lh +
 						// native-messages.ts danglingQuestionOf). Liveness (busy) is

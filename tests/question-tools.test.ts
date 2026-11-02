@@ -1,5 +1,5 @@
 /**
- * The agent-split question tools (docs/probe-teach-split.md §1):
+ * The agent-split question tools (docs/archive/probe-teach-split.md §1):
  *
  *  - teachQuizToolFor — the TEACHER's quiz: the shared authoring contract +
  *    the per-session plan-nodeId validation (position signal; a mismatched id
