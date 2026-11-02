@@ -13,7 +13,9 @@
  *   4. marker COVERAGE: every custom-marker kind of the current contract
  *      appears in real data here (a new marker without a fixture update
  *      fails this suite);
- *   5. reads are READ-ONLY: after everything above, the copy is
+ *   5. the review log replays into the queue and the schedule, and agrees
+ *      with the practice record it was backfilled from;
+ *   6. reads are READ-ONLY: after everything above, the copy is
  *      byte-identical to the fixture source.
  *
  * THE FIXTURE LAW: an intentional format change updates the fixtures in the
@@ -45,9 +47,13 @@ const { sanitizeRenderSettings } = await import("../src/core/render-settings.ts"
 const { toLlmMessages } = await import("../src/core/native-messages.ts");
 const { phaseAt3Lh } = await import("../src/core/phases.ts");
 const { danglingQuestionOf, activeProblemOf } = await import("../src/core/native-messages.ts");
+const { reviewStore } = await import("../src/store/review.ts");
+const { backfillReviews, reviewScheduleView, reviewSummary } = await import("../src/server/review.ts");
 
 const TEACH = "chat_mv27rrra_feff23b6";
 const PRACTICE = "chat_mv293wv5_10656952";
+/** The practice record's two targeted problems: solved, then dismissed. */
+const PRACTICE_TARGETS = ["n_9b19474daaf7", "n_ed4b233efa54"];
 
 function snapshotTree(dir: string): Map<string, Buffer> {
 	const out = new Map<string, Buffer>();
@@ -217,6 +223,34 @@ test("settings: the stamped record parses", () => {
 	assert.ok(s, "settings record reads");
 	assert.equal(s!.version, 1, "settings carry their version stamp");
 	assert.ok(s!.models && typeof s!.models === "object", "model slots present");
+});
+
+// ── the review log: backfilled by the app from the practice record ──────────
+
+test("review: the real log parses through the review store", () => {
+	const reviews = reviewStore.readReviews();
+	assert.deepEqual(
+		reviews.map((r) => r.id).sort(),
+		[`${PRACTICE}:call_3413e7014ab74b0383cc1024`, `${PRACTICE}:call_4346ebc77ffd408997a78857`],
+		"one line per concluded targeted problem",
+	);
+	assert.deepEqual(reviews.flatMap((r) => r.targets).sort(), PRACTICE_TARGETS);
+});
+
+test("review: a backfill over the fixture chats finds nothing new — log and record agree", () => {
+	// An empty append writes nothing, so the read-only check below still holds.
+	assert.equal(backfillReviews(), 0);
+});
+
+test("review: the queue and the schedule heatmap build from the real log", () => {
+	const now = new Date("2026-10-20T12:00:00Z"); // ten days after both reviews
+	const summary = reviewSummary(now);
+	assert.equal(summary.dueCount, 2, "both practiced propositions are due");
+	assert.deepEqual(summary.picks.slice(0, 2).map((p) => p.id).sort(), PRACTICE_TARGETS, "due picks come first");
+
+	const view = reviewScheduleView(now);
+	assert.equal(view.past.reduce((n, day) => n + day.reviews, 0), 2, "both reviews land on past days");
+	assert.deepEqual(view.future.flatMap((day) => day.due.map((card) => card.id)).sort(), PRACTICE_TARGETS, "overdue cards sit on today");
 });
 
 // ── read-only: readers never write ──────────────────────────────────────────
