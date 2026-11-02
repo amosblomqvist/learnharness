@@ -4,6 +4,11 @@
  * `data/settings.json`, … — so the same zip moves sessions between the
  * desktop app's data folder and the phone in either direction.
  *
+ * The files the learner added ("Your files", ./files.ts) ride along in a
+ * sibling `files/` folder (owner decision). A restore replaces them only
+ * when the zip carries a `files/` folder — a zipped desktop data folder
+ * has none, and leaves the phone's added files alone.
+ *
  * API keys are not data: on desktop they live beside the data folder
  * (userData/auth.json), so a backup never contains them and a restore
  * never touches the phone's keys. Restore REPLACES the phone's data
@@ -14,6 +19,7 @@ import fs from "./shims/fs.ts";
 import { allFiles } from "./shims/vfs.ts";
 import { BROWSER_DATA_DIR } from "./shims/process.ts";
 import { readZip, writeZip, type ZipEntry } from "./zip.ts";
+import { FILES_DIR, listAddedFiles } from "./files.ts";
 
 const KEYS_FILE = `${BROWSER_DATA_DIR}/auth.json`;
 /** Entries a desktop data folder may hold at its top level. */
@@ -32,12 +38,16 @@ function dataFiles(): string[] {
 	return allFiles().filter((p) => p.startsWith(prefix) && p !== KEYS_FILE);
 }
 
-/** Every phone data file (keys excluded), zipped under `data/`. */
+/** Every phone data file (keys excluded) under `data/`, and the added
+ *  files under `files/`. */
 export async function exportBackup(): Promise<{ blob: Blob; files: number }> {
 	const entries: ZipEntry[] = dataFiles().map((p) => {
 		const content = fs.readFileSync(p) as Uint8Array;
 		return { path: `data/${p.slice(BROWSER_DATA_DIR.length + 1)}`, data: new Uint8Array(content) };
 	});
+	for (const f of listAddedFiles()) {
+		entries.push({ path: `files/${f.name}`, data: new Uint8Array(fs.readFileSync(`${FILES_DIR}/${f.name}`) as Uint8Array) });
+	}
 	return { blob: await writeZip(entries), files: entries.length };
 }
 
@@ -46,7 +56,12 @@ export function backupFileName(now = new Date()): string {
 	return `learnharness-backup-${stamp}.zip`;
 }
 
-export type RestorePlan = { files: { rel: string; data: Uint8Array }[]; sessions: number };
+export type RestorePlan = {
+	files: { rel: string; data: Uint8Array }[];
+	sessions: number;
+	/** The zip's `files/` folder (added files), or null when it has none. */
+	added: { name: string; data: Uint8Array }[] | null;
+};
 
 /** Find the data folder inside a zip (it may be zipped as `data/`, as its
  *  contents, or nested deeper) and list the files to restore. Throws a
@@ -75,16 +90,29 @@ export async function planRestore(zip: Uint8Array): Promise<RestorePlan> {
 		throw new Error("This zip doesn’t contain LearnHarness data (no chats/, graph/ or settings.json found). Zip the desktop app’s data folder.");
 	}
 	const prefix = best[0];
+	// Added files sit beside the data folder: <parent of prefix>files/<name>
+	// (never part of the data, even when the data was zipped at the root).
+	const parent = prefix.replace(/[^/]+\/$/, "");
+	const filesPrefix = `${parent}files/`;
 	const files = entries
-		.filter((e) => e.path.startsWith(prefix))
+		.filter((e) => e.path.startsWith(prefix) && !e.path.startsWith(filesPrefix))
 		.map((e) => ({ rel: e.path.slice(prefix.length), data: e.data }))
 		.filter((f) => f.rel && f.rel !== "auth.json" && !f.rel.split("/").includes(".."));
 	const sessions = files.filter((f) => /^chats\/[^/]+\.json$/.test(f.rel)).length;
-	return { files, sessions };
+	const added = entries
+		.filter((e) => e.path.startsWith(filesPrefix))
+		.map((e) => ({ name: e.path.slice(filesPrefix.length), data: e.data }))
+		.filter((f) => f.name && !f.name.includes("/"));
+	return { files, sessions, added: added.length > 0 ? added : null };
 }
 
 /** Replace every phone data file (keys kept) with the plan's files. */
 export function applyRestore(plan: RestorePlan): void {
+	if (plan.added) {
+		for (const f of listAddedFiles()) fs.unlinkSync(`${FILES_DIR}/${f.name}`);
+		fs.mkdirSync(FILES_DIR, { recursive: true });
+		for (const f of plan.added) fs.writeFileSync(`${FILES_DIR}/${f.name}`, f.data);
+	}
 	for (const p of dataFiles()) fs.unlinkSync(p);
 	const decoder = new TextDecoder();
 	for (const f of plan.files) {

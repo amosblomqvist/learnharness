@@ -14,10 +14,10 @@ import { PhoneDataSection } from "./phone-data.tsx";
 registerSettingsSection({ id: "phone-data", label: "Phone data", render: () => <PhoneDataSection /> });
 
 async function main(): Promise<void> {
-	// The drawer starts closed on a phone (the desktop default is open);
-	// an explicit choice the user made later is kept.
+	// The drawer starts closed every time the phone app opens (the desktop
+	// remembers an open sidebar; on a phone it would cover the page).
 	try {
-		if (localStorage.getItem("lh:sidebar-open") === null) localStorage.setItem("lh:sidebar-open", "0");
+		localStorage.setItem("lh:sidebar-open", "0");
 	} catch {
 		// storage unavailable: the desktop default applies
 	}

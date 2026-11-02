@@ -1,6 +1,6 @@
 # Phone app (iPhone home-screen app → Capacitor later)
 
-Status: **Phase 3 done: lessons, the knowledge graph and practice on the phone.** The real LearnHarness app (same screens, same server code) runs entirely on the device as an installable web app. There is no PC and no server; your API keys and data stay on the phone.
+Status: **Phase 4 done: lessons, the knowledge graph, practice, and the background helpers, your files and notes import on the phone.** The real LearnHarness app (same screens, same server code) runs entirely on the device as an installable web app. There is no PC and no server; your API keys and data stay on the phone.
 
 ## The plan (owner-approved)
 
@@ -12,7 +12,7 @@ Standalone, API keys only. Claude subscription logins need the `claude` CLI, whi
 | 1 | Lessons on iPhone | **Done.** Real UI on the phone, phone layout polish, installable + offline, Cloudflare Pages hosting, backup/restore in the desktop data layout |
 | 2 | Knowledge graph | **Done.** On-device extraction, graph home usable by touch (pinch, pan, tap a node, double-tap to re-frame) |
 | 3 | Practice sets | **Done.** Practice sessions (topic or picked graph ideas) by touch; a shared reveal bug fixed; on-device saves made durable |
-| 4 | Helpers, files & voice | Researcher (Google CSE + Jina reader), visual maker, demos (no headless check), PDFs, notes import, dictation, and a "files you added" version of the learner-file tools |
+| 4 | Helpers, files & voice | **Done.** Researcher (Tavily + Jina Reader), visual maker, demos *with* their check, PDFs, notes import, "Your files" for the file tools; dictation via the iPhone keyboard |
 | 5 | Native wrap | Capacitor Android APK; iOS with a Mac |
 
 ## Put it on your iPhone
@@ -42,7 +42,10 @@ Cloudflare serves `index.html` for every unknown path, which the app's on-device
 
 **2. Install.** Open `https://<project>.pages.dev` in **Safari**, then **Share → Add to Home Screen**. Open it from the home screen.
 
-**3. Set up.** Tap **Set up your models**, add an API key (Anthropic, OpenRouter, OpenAI, Google, …), and pick the models. Then start a lesson.
+**3. Set up.** Tap **Set up your models**, add an API key (Anthropic, OpenRouter, OpenAI, Google, …), and pick the models. Then start a lesson. Optional extras:
+- add a **Tavily** key (Settings → Providers → Search) to let the researcher search the web;
+- add notes and PDFs in **Settings → Phone data → Your files** to let the teacher read them;
+- use the iPhone keyboard's mic to dictate.
 
 **4. Bring your desktop sessions (optional).**
 1. On the computer, zip the desktop app's `data` folder:
@@ -78,10 +81,7 @@ The desktop route handlers (`app/api/**/route.ts`) are plain `Request → Respon
   Desktop changes for this are inert there:
   - an `lh-kbd-hint` class on the two dock hints;
   - `components/settings/extra-sections.ts`, through which the phone build registers **Phone data**.
-- **Learner-file tools** (`read`/`ls`/`find`/`grep`) need a home directory to search, so on the phone (owner decision):
-  - the phone build sets `LH_LEARNER_FILES=off` (`config.ts` `LEARNER_FILES_AVAILABLE`), so the agents are built without those tools;
-  - the build leaves out the `shared/30-learner-files.md` prompt fragment;
-  - a few other prompt lines still mention the tools in passing, and are unchanged.
+- **Learner-file tools** (`read`/`ls`/`find`/`grep`) were switched off in Phase 1. Since Phase 4 they are back unchanged, searching the files you add (see "Your files" below).
 - **Phone data** (`phone-data.tsx`, `src/browser/backup.ts`, `src/browser/zip.ts`):
   - shows storage use;
   - **Save a backup** zips the data folder in the desktop layout. It uses the share sheet on iOS, so you can choose **Save to Files**.
@@ -93,6 +93,33 @@ The desktop route handlers (`app/api/**/route.ts`) are plain `Request → Respon
   - a service worker generated from `sw.template.js`, which pre-caches the app shell (2.9 MB minified) and caches other files on first use;
   - a new version takes over after the app is closed.
 - **Interrupted turns:** iOS pauses a backgrounded web app, so a turn in flight can be cut off. The existing turn machinery already handles it. A dropped provider connection, or the app being killed mid-turn and reopened, leaves the session showing "Something went wrong: Connection error." with **Retry**, and Retry completes the turn (verified in the browser).
+
+### Helpers, files and notes (Phase 4)
+
+Four owner decisions shaped this phase, made after probing which services a web app may call (CORS):
+
+| Service | From a phone web app |
+|---|---|
+| Tavily search | ✅ allowed |
+| Brave search | ❌ blocked |
+| Jina Reader | ✅ allowed |
+| Arbitrary web pages | ❌ blocked |
+| Deepgram token minting | ❌ blocked |
+
+- **Research: Tavily + Jina.** On the phone, search uses Tavily (Brave is hidden in Settings). Every page, and every web PDF, is read through Jina Reader: the phone build sets `LH_WEB_READER=only` (`config.ts` `WEB_PAGES_VIA_READER`).
+  - `web_fetch` goes straight to the reader.
+  - `web_fetch_pdf` (a raw download) tells the researcher to use `web_fetch`.
+  - Desktop is unchanged: it fetches pages directly and uses Jina only as a fallback.
+- **Dictation: hidden.** The iPhone keyboard's own mic dictates into every field. The Dictate button and the Deepgram settings group are hidden in `phone.css`.
+- **Your files: in Settings → Phone data.** Files you add are stored in the phone's virtual home folder (`/lh/home`, `src/browser/files.ts`), which is the folder the learner-file tools already search. So `read`/`ls`/`find`/`grep`, the `pdf` job and their prompt section work unchanged. The list shows each file with Remove, plus **Add files…**.
+- **Backups include your files** in a `files/` folder beside `data/`. A restore replaces the added files only when the zip has a `files/` folder; a zipped desktop data folder has none, and leaves them alone.
+- **Background helpers run in the page.** The sub-agents' engines (`headless.ts`) are swapped at build time for `src/browser/headless.ts`:
+  - **demos** run in a hidden iframe sandboxed *without* same-origin access, so model-written code can't reach the app's storage or keys. An injected script reports console errors, uncaught errors and failed loads, then evaluates the probe. So the demo check works on the phone too.
+  - **SVGs** are drawn onto a canvas and exported as PNG.
+  - **PDF pages** are rendered by pdf.js on a canvas. Its worker ships as `/app/pdf.worker.js`, set up in `src/browser/pdfjs.ts`, and its standard fonts are copied to the URL `pdf-ops.ts` derives.
+- **Images** (the `read` tool, visual maker, PDF reader): Photon in a worker thread is replaced by the browser's own decoder and a canvas (`src/browser/image.ts`), with the same keep / resize / re-encode contract. On iOS this also decodes HEIC photos.
+- **Notes import** (graph toolbar → Import) works unchanged.
+- **The drawer starts closed on every launch.** The desktop remembers an open sidebar; on a phone it would cover the page.
 
 ### Practice (Phase 3)
 
@@ -115,7 +142,7 @@ The desktop route handlers (`app/api/**/route.ts`) are plain `Request → Respon
   - **Double-tap or double-click on empty space re-frames the whole graph.** The camera is remembered between visits, so this is the way back after zooming away. On desktop, double-click previously did nothing.
   - **`fit()` frames the nodes where they are now**, not where they were when the data arrived; the layout simulation keeps moving them.
   - **`fitTransform` takes optional insets**, which default to none, so desktop framing is unchanged.
-- **Notes import** reads file contents, not paths, so it also works on the phone. It has not been exercised end to end there yet; that's Phase 4.
+- **Notes import** reads file contents, not paths, so it also works on the phone (verified in Phase 4).
 
 `src/browser/` is the phone build's composition root. A lint zone keeps every other layer from importing it.
 
@@ -136,24 +163,36 @@ npm run mobile:smoke   # dev build + the end-to-end browser check below
 `scripts/smoke-mobile.mjs` serves `dist-mobile/` with single-page-app fallback and drives the real app at iPhone size in headless Chromium. Anthropic is replaced by scripted streaming replies, so no key, network, or spend is involved. The checks, in order:
 1. Configure a key and models; start a lesson from the home composer.
 2. The agent's question appears; answer it and the reply streams in.
-3. The provider request carried the bundled prompt, the tools minus the learner-file set, the browser-access header, and the on-device key.
+3. The provider request carried the bundled prompt, the tools (learner-file set included), the browser-access header, and the on-device key. Dictate is hidden.
 4. Extraction runs on the device (scripted extractor and auditor) and the graph holds the ideas. The graph toolbar fits beside the sidebar button. After a pinch-zoom, a double-tap on empty space re-frames every node between the toolbar and the composer, and a tap on a node opens its card.
 5. Practice: in Practice mode, pick the graph's ideas through the Chains table and start a session; the agent receives the picked ideas. Answer the problem: the verdict shows, the concluded card reveals that problem's own solution, and the next problem is posed.
-6. The drawer opens over the page and closes on navigation.
-7. Backup produces a desktop-layout zip without keys.
-8. Restore of a zipped desktop folder replaces the phone's sessions and keeps the key.
-9. Everything survives a reload, and the app starts offline from the service worker.
-10. A save survives reloading the app the instant it lands (4 of 4 fresh runs).
-11. Nothing else left the page, and there were no page errors.
+6. Your files and helpers: add a note and a PDF in Phone data. The teacher reads the note. A research job (scripted Tavily + Jina) and a PDF job (pdf.js `pdf_info` plus a canvas-rendered page image) run in the background, and both briefs come back into the lesson. A notes file imported from the graph toolbar is extracted into the graph.
+7. The drawer opens over the page and closes on navigation. Settings shows Tavily and hides Brave, Deepgram and the desktop-only sections.
+8. Backup produces a desktop-layout zip without keys, with added files under `files/`.
+9. Restore of a zipped desktop folder replaces the phone's sessions and keeps the key.
+10. Everything survives a reload, and the app starts offline from the service worker.
+11. A save survives reloading the app the instant it lands (4 of 4 fresh runs).
+12. Nothing else left the page, and there were no page errors.
 
 It passes on both the dev and the minified build.
 
-Unit tests: `tests/browser-shims.test.ts` checks the shims against real Node. `tests/browser-backup.test.ts` covers the zip codec (including interop with `zip`/`unzip`), finding the data folder in a zip, and restore keeping the keys.
+Unit tests: `tests/browser-shims.test.ts` checks the shims against real Node. `tests/browser-backup.test.ts` covers the zip codec (including interop with `zip`/`unzip`), finding the data folder in a zip, restore keeping the keys, and added files in backups.
 
-## Known gaps after Phase 3
+The browser engines in `src/browser/headless.ts` were also checked directly in Chromium during development:
+- a broken demo's console error, uncaught error and failed image load were all caught;
+- a working demo passed, and its probe returned a value;
+- a demo trying to read the app's storage hit a SecurityError;
+- an SVG rendered to PNG;
+- a 2-page PDF rendered.
+
+The demo and visual-maker *jobs* use these same engines through the same job runner as the research and PDF jobs the smoke test exercises.
+
+## Known gaps after Phase 4
 
 - **Not yet run on a real iPhone or against the live Anthropic API.** All browser verification is headless Chromium with scripted provider replies; this build environment reaches neither. Safari-specific behavior is the main risk: the share sheet, downloads from a home-screen app, IndexedDB persistence, and Safari before 17.4 (covered by small fallbacks).
 - **On first open the graph is framed before its layout finishes settling**, so it can spread past the screen edges; double-tap re-frames it. The desktop app has the same behavior.
 - **Node labels appear when zoomed in.** Desktop's hover glow has no touch equivalent; a tap shows the node's card instead.
+- **The demo-builder and visual-maker jobs** haven't been run end to end with a scripted model; their engines were tested directly (above).
+- **Jina Reader without an account is rate-limited**, so heavy research may hit its limits. It also sees the URLs the researcher reads.
 - **Fonts load from Google on first launch**, then come from the cache.
 - **Bundle:** about 4 MB of JS gzipped in total, split into lazily loaded chunks. The startup shell is 2.9 MB minified.

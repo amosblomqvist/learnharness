@@ -21,9 +21,9 @@ export const browserProcess = {
 		// The phone has no shell environment: keys come only from the
 		// on-device auth.json, never from process env.
 		LH_IGNORE_ENV_KEYS: "1",
-		// No home directory to search: build the agents without the
-		// learner-file tools (config.ts LEARNER_FILES_AVAILABLE).
-		LH_LEARNER_FILES: "off",
+		// Browsers can't download arbitrary pages: read them through the
+		// reader service (config.ts WEB_PAGES_VIA_READER).
+		LH_WEB_READER: "only",
 	} as Record<string, string | undefined>,
 	platform: "browser" as string,
 	versions: {} as Record<string, string | undefined>,

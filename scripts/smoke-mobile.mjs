@@ -15,6 +15,9 @@
  *      its card, a double-tap on empty space re-frames the whole graph;
  *   3b. practice: pick the graph's ideas by touch, practice on them, answer;
  *      the conclusion reveals that problem's solution and the next is posed;
+ *   3c. files: add a note and a PDF in Phone data; the teacher reads the
+ *      note, and a research job (scripted Tavily + Jina) and a PDF job
+ *      (pdf.js + page render) run in the background and report back;
  *   4. the sidebar drawer opens over the page and closes on navigation;
  *   5. Settings → Phone data saves a backup zip (keys excluded) and restores
  *      a zipped desktop data folder, replacing the phone's sessions;
@@ -108,6 +111,68 @@ const PRACTICE = [
 	{ text: "Done for now." },
 ];
 const practiceRequests = [];
+
+/** Phase 4: the teacher reads an added file and sends the added PDF and a
+ *  research question off as background jobs; the sub-agents' replies are
+ *  scripted by step (the number of tool results already in the request). */
+const FILES_PROMPT = "Use my optics notes and paper.pdf";
+const NOTES = "# Optics notes\nRayleigh scattering goes as 1/wavelength^4.\n";
+const FILES_LESSON = [
+	{
+		text: "Let me look at your files.",
+		tools: [
+			{ id: "toolu_smoke_read", name: "read", input: { path: "optics notes.md" } },
+			{ id: "toolu_smoke_pdf", name: "pdf", input: { path: "paper.pdf", question: "What does page 1 say?" } },
+			{ id: "toolu_smoke_res", name: "research", input: { question: "Why is the sky blue?" } },
+		],
+	},
+	{ text: "Reading them now; I will continue when the briefs arrive." },
+	{ text: "Both briefs are in." },
+];
+const RESEARCHER = [
+	{ tools: [{ id: "toolu_smoke_ws", name: "web_search", input: { query: "why is the sky blue" } }] },
+	{ tools: [{ id: "toolu_smoke_wf", name: "web_fetch", input: { url: "https://example.org/sky" } }] },
+	{ text: "RESEARCH BRIEF: the sky is blue because air molecules scatter short wavelengths most (example.org/sky)." },
+];
+const PDF_READER = [
+	{ tools: [{ id: "toolu_smoke_pi", name: "pdf_info", input: {} }] },
+	{ tools: [{ id: "toolu_smoke_pr", name: "pdf_render", input: { pages: "1", dpi: 100 } }] },
+	{ text: "PDF BRIEF: page 1 states that blue light scatters most." },
+];
+const researcherRequests = [];
+const pdfReaderRequests = [];
+const filesLessonRequests = [];
+let tavilyCalls = 0;
+let jinaCalls = 0;
+const toolResultCount = (body) =>
+	(body.messages ?? []).flatMap((m) => (Array.isArray(m.content) ? m.content : [])).filter((b) => b.type === "tool_result").length;
+
+/** A one-page PDF with the given line of text (hand-built; no PDF library). */
+function tinyPdf(text) {
+	const content = `BT /F1 18 Tf 24 100 Td (${text}) Tj ET`;
+	const objects = [
+		"<< /Type /Catalog /Pages 2 0 R >>",
+		"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+		"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 400 200] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>",
+		`<< /Length ${content.length} >>\nstream\n${content}\nendstream`,
+		"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+	];
+	let pdf = "%PDF-1.4\n";
+	const offsets = objects.map((body, i) => {
+		const at = pdf.length;
+		pdf += `${i + 1} 0 obj\n${body}\nendobj\n`;
+		return at;
+	});
+	const xref = pdf.length;
+	pdf += `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n${offsets.map((o) => `${String(o).padStart(10, "0")} 00000 n \n`).join("")}`;
+	pdf += `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`;
+	return Buffer.from(pdf, "latin1");
+}
+/** What the scripted extractor finds in an imported notes file. */
+const NOTES_FINDINGS = {
+	propositions: [{ id: "p1", name: "Red sunsets", statement: "At sunset the long path through air scatters blue away, leaving red." }],
+	chains: [],
+};
 let extractorCalls = 0;
 let auditorCalls = 0;
 
@@ -139,11 +204,23 @@ try {
 		if (tools.includes("submit_findings")) {
 			extractorCalls++;
 			// The extractor anchors each idea to a teacher passage by its label.
-			const anchor = /TEACHER \[([^\]]+)\]/.exec(JSON.stringify(body.messages))?.[1] ?? "missing";
-			reply = { tools: [{ id: "toolu_smoke_x", name: "submit_findings", input: { ...FINDINGS, propositions: FINDINGS.propositions.map((p) => ({ ...p, messageId: anchor })) } }] };
+			const anchor = /TEACHER \[([^\]]+)\]/.exec(JSON.stringify(body.messages))?.[1];
+			// A session is anchored to teacher passages; imported notes are not.
+			reply = anchor
+				? { tools: [{ id: "toolu_smoke_x", name: "submit_findings", input: { ...FINDINGS, propositions: FINDINGS.propositions.map((p) => ({ ...p, messageId: anchor })) } }] }
+				: { tools: [{ id: "toolu_smoke_n", name: "submit_findings", input: NOTES_FINDINGS }] };
 		} else if (tools.includes("submit_review")) {
 			auditorCalls++;
 			reply = { tools: [{ id: "toolu_smoke_a", name: "submit_review", input: { links: [] } }] };
+		} else if (tools.includes("web_search")) {
+			researcherRequests.push(body);
+			reply = RESEARCHER[Math.min(toolResultCount(body), RESEARCHER.length - 1)];
+		} else if (tools.includes("pdf_info")) {
+			pdfReaderRequests.push(body);
+			reply = PDF_READER[Math.min(toolResultCount(body), PDF_READER.length - 1)];
+		} else if (JSON.stringify(body.messages).includes(FILES_PROMPT)) {
+			filesLessonRequests.push(body);
+			reply = FILES_LESSON[Math.min(filesLessonRequests.length - 1, FILES_LESSON.length - 1)];
 		} else if (tools.includes("problem")) {
 			// Practice: pose, then (one reply) conclude + pose the next.
 			practiceRequests.push(body);
@@ -162,6 +239,24 @@ try {
 		offPage.push(route.request().url());
 		return route.abort();
 	});
+	// The researcher's services (Playwright runs later routes first).
+	await context.route("https://api.tavily.com/**", (route) => {
+		tavilyCalls++;
+		return route.fulfill({
+			status: 200,
+			headers: { "content-type": "application/json", "access-control-allow-origin": "*" },
+			body: JSON.stringify({ results: [{ title: "Why is the sky blue?", url: "https://example.org/sky", content: "Rayleigh scattering." }] }),
+		});
+	});
+	await context.route("https://r.jina.ai/**", (route) => {
+		jinaCalls++;
+		const page = "Blue light is scattered by air molecules far more than red light. ".repeat(8);
+		return route.fulfill({
+			status: 200,
+			headers: { "content-type": "text/plain", "access-control-allow-origin": "*" },
+			body: `Title: Why is the sky blue?\nURL Source: https://example.org/sky\n\nMarkdown Content:\n${page}`,
+		});
+	});
 
 	// ── 1. configure, start a lesson ─────────────────────────────────────
 	await page.goto(`${base}/`);
@@ -179,6 +274,7 @@ try {
 	await page.reload();
 	await page.waitForSelector("[contenteditable=true]");
 	check((await page.getByRole("button", { name: "Open sidebar" }).count()) === 1, "drawer starts closed on a phone");
+	check(!(await page.locator('[data-testid="dictation-toggle"]').isVisible()), "Dictate hidden (the iPhone keyboard dictates)");
 
 	await page.locator("[contenteditable=true]").first().click();
 	await page.keyboard.type("Why is the sky blue?");
@@ -192,8 +288,7 @@ try {
 	const toolNames = (first?.tools ?? []).map((t) => t.name);
 	check(JSON.stringify(first?.system ?? "").length > 2000, "system prompt sent (bundled prompt files)");
 	check(toolNames.includes("ask_user_question"), `tools sent: ${toolNames.join(", ")}`);
-	check(!toolNames.some((n) => ["read", "ls", "find", "grep"].includes(n)), "learner-file tools absent on the phone");
-	check(!JSON.stringify(first?.system ?? "").includes("## Learner files"), "learner-files prompt section absent");
+	check(["read", "ls", "find", "grep"].every((n) => toolNames.includes(n)), "learner-file tools present (they search the files you added)");
 	check(providerRequests[0]?.headers["anthropic-dangerous-direct-browser-access"] === "true", "browser-access header present");
 	check(providerRequests[0]?.headers["x-api-key"]?.startsWith("sk-ant-"), "key read from the on-device store");
 
@@ -291,6 +386,63 @@ try {
 	check(practiceText.includes("You applied the 1/λ⁴ law correctly."), "answer submitted; the verdict is shown");
 	check(practiceText.includes(PROBLEM_1.modelSolution) && !practiceText.includes(PROBLEM_2.modelSolution), "the concluded card reveals ITS problem's solution (not the next one's)");
 
+	// ── 3c. your files + background jobs (research, PDF) ─────────────────
+	const savedKey = await page.evaluate(async () =>
+		(await fetch("/api/keys/TAVILY_API_KEY", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ value: "tvly-smoke-" + "z".repeat(24) }) })).ok,
+	);
+	check(savedKey, "Tavily key saved");
+	await page.goto(`${base}/`);
+	await page.waitForSelector("[contenteditable=true]");
+	await page.getByRole("button", { name: "Open sidebar" }).click();
+	await page.locator("aside").getByText(/^settings$/i).click();
+	await page.locator('[data-testid="settings-nav-phone-data"]').click();
+	await page.locator('[data-testid="phone-add-files-input"]').setInputFiles([
+		{ name: "optics notes.md", mimeType: "text/markdown", buffer: Buffer.from(NOTES) },
+		{ name: "paper.pdf", mimeType: "application/pdf", buffer: tinyPdf("Blue light scatters most.") },
+	]);
+	await page.locator('[data-testid="phone-data-status"]', { hasText: "Added 2 files" }).waitFor();
+	check((await page.locator('[data-testid="phone-file"]').count()) === 2, "two files added in Settings → Phone data");
+	await page.keyboard.press("Escape");
+	await page.goto(`${base}/`);
+	await page.waitForSelector("[contenteditable=true]");
+	await page.locator('[data-testid="home-mode-teach"]').click();
+	await page.locator("[contenteditable=true]").first().click();
+	await page.keyboard.type(FILES_PROMPT);
+	await page.keyboard.press("Enter");
+	const briefsIn = () =>
+		filesLessonRequests.some((r) => {
+			const s = JSON.stringify(r.messages);
+			return s.includes("RESEARCH BRIEF") && s.includes("PDF BRIEF");
+		});
+	for (let i = 0; i < 120 && !briefsIn(); i++) await page.waitForTimeout(250);
+	const readResult = JSON.stringify(filesLessonRequests[1]?.messages ?? "");
+	check(readResult.includes("Rayleigh scattering goes as 1/wavelength^4"), "the teacher read an added file (read tool → its contents)");
+	check(tavilyCalls >= 1 && jinaCalls >= 1, `research job ran: Tavily search ${tavilyCalls}×, page read via Jina ${jinaCalls}×`);
+	const infoResult = JSON.stringify(pdfReaderRequests[1]?.messages ?? "");
+	check(/page_count|pages?\D{0,12}1/i.test(infoResult), "PDF job: pdf_info read the added PDF (pdf.js on the device)");
+	const renderStep = JSON.stringify(pdfReaderRequests[2]?.messages ?? "");
+	check(/"type":"image"/.test(renderStep), "PDF job: pdf_render produced a page image (canvas render)");
+	check(briefsIn(), "both job briefs came back into the lesson");
+
+	// Notes import into the graph (the graph toolbar's Import button).
+	await page.goto(`${base}/`);
+	await page.waitForSelector("canvas");
+	await page.locator('input[type="file"][accept=".md,.markdown,.txt"]').setInputFiles({
+		name: "sunsets.md",
+		mimeType: "text/markdown",
+		buffer: Buffer.from("# Sunsets\nAt sunset light crosses far more air, so the blue is scattered away and red remains.\n".repeat(3)),
+	});
+	let imported = null;
+	for (let i = 0; i < 80 && !imported; i++) {
+		await page.waitForTimeout(250);
+		imported = await page.evaluate(async () => {
+			const g = await (await fetch("/api/graph")).json();
+			const node = g.propositions.find((p) => p.name === "Red sunsets");
+			return node ? { nodes: g.propositions.length, sources: JSON.stringify(g.fileSources ?? g.sources ?? "") } : null;
+		});
+	}
+	check(imported !== null && imported.sources.includes("sunsets.md"), `notes import: "sunsets.md" extracted into the graph (${imported?.nodes ?? 0} ideas)`);
+
 	// ── 4. drawer ────────────────────────────────────────────────────────
 	await page.getByRole("button", { name: "Open sidebar" }).click();
 	const listed = page.locator("aside").getByText("Why is the sky blue?");
@@ -307,6 +459,15 @@ try {
 	await page.locator("aside").getByText(/^settings$/i).click();
 	await page.locator('[data-testid="settings-nav-phone-data"]').click();
 	check((await page.locator('[data-testid="settings-nav-keyboard"]').isVisible()) === false, "desktop-only settings hidden");
+	await page.locator('[data-testid="settings-nav-keys"]').click();
+	await page.locator('[data-testid="group-search"]').waitFor();
+	check(
+		!(await page.locator('[data-testid="key-brave_api_key"]').isVisible()) &&
+			(await page.locator('[data-testid="key-tavily_api_key"]').isVisible()) &&
+			!(await page.locator('[data-testid="group-dictation"]').isVisible()),
+		"Settings: Tavily shown; Brave and Deepgram dictation hidden",
+	);
+	await page.locator('[data-testid="settings-nav-phone-data"]').click();
 	const [download] = await Promise.all([page.waitForEvent("download"), page.locator('[data-testid="phone-backup"]').click()]);
 	const backupZip = path.join(scratch, "backup.zip");
 	await download.saveAs(backupZip);

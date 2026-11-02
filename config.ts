@@ -145,10 +145,11 @@ export const AUTH_FILE = process.env.LH_AUTH_FILE
 	: path.join(ROOT, "auth.json");
 
 /**
- * The learner-filesystem tools (read / ls / find / grep — sources v1) need a
- * real home directory to search. The phone build (docs/mobile.md) has none,
- * so it sets LH_LEARNER_FILES=off: the agents are built without those four
- * tools and the build leaves out the shared learner-files prompt fragment.
- * Unset everywhere else — desktop and web keep the always-on set.
+ * Web pages through a reader service only. A browser cannot download
+ * arbitrary pages itself (cross-origin requests are blocked), so the phone
+ * build (docs/mobile.md) sets LH_WEB_READER=only: the researcher's web_fetch
+ * reads every page — web PDFs included — through Jina Reader, and
+ * web_fetch_pdf (a raw download) points back to web_fetch. Unset elsewhere:
+ * desktop fetches pages directly and uses the reader only as a fallback.
  */
-export const LEARNER_FILES_AVAILABLE = process.env.LH_LEARNER_FILES !== "off";
+export const WEB_PAGES_VIA_READER = process.env.LH_WEB_READER === "only";

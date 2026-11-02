@@ -97,3 +97,18 @@
 	--lh-fit-inset-top: 56px;
 	--lh-fit-inset-bottom: 140px;
 }
+
+/* ── Phase 4: services the phone can't use ──────────────────────────── */
+
+/* Brave's search API refuses calls from web apps (no CORS); Tavily works. */
+.lh-phone [data-testid="key-brave_api_key"] {
+	display: none;
+}
+
+/* Dictation (owner): hidden on the phone — the iPhone keyboard's own mic
+   dictates into every field, and Deepgram's token call is blocked for web
+   apps. */
+.lh-phone [data-testid="dictation-toggle"],
+.lh-phone [data-testid="group-dictation"] {
+	display: none;
+}

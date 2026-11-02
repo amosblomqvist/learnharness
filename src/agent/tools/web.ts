@@ -8,6 +8,7 @@ export type { WebSearchResult };
 import { Readability } from "@mozilla/readability";
 import { parseHTML } from "linkedom";
 import TurndownService from "turndown";
+import { WEB_PAGES_VIA_READER } from "../../../config.ts";
 
 /**
  * Server-side web tools for the researcher sub-agent — a minimal port of the
@@ -81,6 +82,13 @@ function htmlToMarkdown(html: string): { title: string; content: string } | null
 }
 
 async function fetchAndExtract(url: string): Promise<string> {
+	if (WEB_PAGES_VIA_READER) {
+		// Phone build: no direct downloads from a browser — the reader
+		// service fetches the page (or PDF) and returns its text.
+		const markdown = await fetchViaJina(url);
+		if (markdown) return `Source: ${url} (read via Jina Reader)\n\n---\n\n${truncate(markdown)}`;
+		throw new Error("The reader service could not read this page (it may be empty, blocked, or rate-limited)");
+	}
 	const resp = await fetch(url, {
 		headers: {
 			"User-Agent": USER_AGENT,

@@ -112,6 +112,27 @@ const phonePlugin = {
 		// phone build's client router.
 		build.onResolve({ filter: /^next\/(navigation|link)$/ }, () => ({ path: path.join(ROOT, "src", "browser", "app", "navigation.tsx") }));
 
+		// The sub-agents' verification engines (headless Chrome, resvg,
+		// pdf.js + Skia) → the browser stand-in (src/browser/headless.ts).
+		build.onResolve({ filter: /^\.\/headless\.ts$/ }, (args) =>
+			args.resolveDir === path.join(ROOT, "src", "agent", "subagents")
+				? { path: path.join(ROOT, "src", "browser", "headless.ts") }
+				: undefined,
+		);
+		// Image conversion/resizing (Photon in a worker thread on desktop) →
+		// the browser's own decoder + canvas (src/browser/image.ts).
+		build.onResolve({ filter: /^\.\/(resize\.ts|convert\.mjs)$/ }, (args) =>
+			args.resolveDir === path.join(ROOT, "src", "agent", "image-processing")
+				? { path: path.join(ROOT, "src", "browser", "image.ts") }
+				: undefined,
+		);
+		// pdf.js needs its worker configured in a browser: every import goes
+		// through src/browser/pdfjs.ts (except that module's own).
+		const pdfjsShim = path.join(ROOT, "src", "browser", "pdfjs.ts");
+		build.onResolve({ filter: /^pdfjs-dist\/legacy\/build\/pdf\.mjs$/ }, (args) =>
+			args.importer === pdfjsShim ? undefined : { path: pdfjsShim },
+		);
+
 		build.onResolve({ filter: /^lh:(routes|assets)$/ }, (args) => ({ path: args.path, namespace: "lh-virtual" }));
 		build.onLoad({ filter: /^lh:routes$/, namespace: "lh-virtual" }, () => {
 			const files = walk(path.join(ROOT, "app", "api"), (f) => path.basename(f) === "route.ts").sort();
@@ -122,9 +143,7 @@ const phonePlugin = {
 			return { contents: `export const routes = [\n${lines.join("\n")}\n];\n`, loader: "js", resolveDir: ROOT };
 		});
 		build.onLoad({ filter: /^lh:assets$/, namespace: "lh-virtual" }, () => {
-			// The learner-files fragment teaches tools the phone build does not
-			// have (config.ts LEARNER_FILES_AVAILABLE): leave it out.
-			const files = walk(path.join(ROOT, "src", "agent"), (f) => f.endsWith(".md") && !f.endsWith(path.join("shared", "30-learner-files.md")));
+			const files = walk(path.join(ROOT, "src", "agent"), (f) => f.endsWith(".md"));
 			const assets = Object.fromEntries(
 				files.map((file) => [`${VIRTUAL_ROOT}/${toPosix(path.relative(ROOT, file))}`, fs.readFileSync(file, "utf-8")]),
 			);
@@ -176,6 +195,13 @@ const result = await esbuild.build({
 // the phone-only static files (manifest, icons, service worker).
 fs.copyFileSync(path.join(ROOT, "src", "browser", "app", "index.html"), path.join(OUTDIR, "index.html"));
 fs.cpSync(path.join(ROOT, "public"), OUTDIR, { recursive: true });
+// pdf.js: the worker script (src/browser/pdfjs.ts points at it; named .js so
+// any static host serves it with a JavaScript MIME type) and the
+// standard fonts. pdf-ops.ts derives the fonts URL from its own module URL,
+// which in this bundle resolves to /node_modules/pdfjs-dist/standard_fonts/.
+const PDFJS = path.join(ROOT, "node_modules", "pdfjs-dist");
+fs.copyFileSync(path.join(PDFJS, "legacy", "build", "pdf.worker.min.mjs"), path.join(OUTDIR, "app", "pdf.worker.js"));
+fs.cpSync(path.join(PDFJS, "standard_fonts"), path.join(OUTDIR, "node_modules", "pdfjs-dist", "standard_fonts"), { recursive: true });
 const STATIC = path.join(ROOT, "src", "browser", "static");
 if (fs.existsSync(STATIC)) fs.cpSync(STATIC, OUTDIR, { recursive: true });
 

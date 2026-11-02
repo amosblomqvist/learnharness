@@ -19,7 +19,10 @@ import { jobTools, type DemoInput, type PdfInput, type ResearchInput, type Visua
 import { planTools, type PlanToolContext } from "./tools/plan.ts";
 import { probeDoneTool, type ProbeDoneContext } from "./tools/probe.ts";
 import { proberGraphTools } from "./tools/graph.ts";
-import { learnerFileTools } from "./tools/learner-files.ts";
+import { readTool } from "./tools/read.ts";
+import { lsTool } from "./tools/ls.ts";
+import { findTool } from "./tools/find.ts";
+import { grepTool } from "./tools/grep.ts";
 import { healToolRecord } from "./tools/heal.ts";
 import type { GraphStore } from "../core/ports.ts";
 
@@ -319,8 +322,10 @@ export function createProberTools(
 				// The learner-filesystem set is always-on (user-decided 2026-09,
 				// sources v1): the prober inspects and LOCATES learner-referenced
 				// files while assessing the edge. Read-only by construction.
-				// (Absent in the phone build — tools/learner-files.ts.)
-				...learnerFileTools(),
+				read: readTool,
+				ls: lsTool,
+				find: findTool,
+				grep: grepTool,
 				// Job dispatch in the probe phase (owner ruling, 2026-09-20):
 				// research + pdf are ALWAYS available in every phase — the
 				// prober can verify facts or read learner PDFs while assessing.
@@ -447,9 +452,11 @@ export function createTeacherTools(
 			// The learner-filesystem set is always-on (user-decided 2026-09,
 			// sources v1): the teacher locates and reads learner-referenced
 			// files on its own terms — nothing auto-injects. Read-only by
-			// construction (fs-shared.ts). (Absent in the phone build —
-			// tools/learner-files.ts.)
-			...learnerFileTools(),
+			// construction (fs-shared.ts).
+			read: readTool,
+			ls: lsTool,
+			find: findTool,
+			grep: grepTool,
 			...planTools(ctx),
 			...jobTools({ chatId: ctx.chatId, jobStore: ctx.jobStore, spawn: ctx.spawn, searchAvailable: ctx.searchAvailable }),
 		},

@@ -3,6 +3,7 @@ import * as path from "node:path";
 import { Type } from "typebox";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { serverExecute } from "../tool-execute.ts";
+import { WEB_PAGES_VIA_READER } from "../../../config.ts";
 import { pdfExtract, pdfInfo, pdfProbe, pdfSearch } from "../subagents/pdf-ops.ts";
 
 /**
@@ -109,6 +110,9 @@ export function createPdfReadTools(dir: string): Record<string, AgentTool<any>> 
 						throw new Error("Only http(s) URLs are supported");
 				} catch {
 					return `web_fetch_pdf failed: invalid URL "${url}"`;
+				}
+				if (WEB_PAGES_VIA_READER) {
+					return "web_fetch_pdf is not available in this app (it cannot download files directly). Call web_fetch on the same URL instead — it reads PDFs as text.";
 				}
 				try {
 					const resp = await fetch(url, {
