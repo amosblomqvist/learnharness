@@ -55,3 +55,9 @@ export { claudeCodeInstallationResponse } from "./claude-code.ts";
 // No import side effects; the boot sync lives in stores.ts.
 export * from "./custom-provider.ts";
 export { customProviderGet, customProviderMutation } from "./custom-provider-http.ts";
+
+// Local dictation: the Parakeet model on disk and its transcriber.
+export * from "./parakeet.ts";
+export { DOWNLOAD_CANCELLED } from "./parakeet-model.ts";
+export type { ParakeetModelStatus } from "./parakeet-model.ts";
+export { ParakeetNotReadyError } from "./parakeet-transcriber.ts";
