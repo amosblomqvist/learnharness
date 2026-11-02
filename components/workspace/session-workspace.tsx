@@ -91,7 +91,7 @@ export function SessionWorkspace({ children }: { children: ReactNode }) {
 		const observer = new ResizeObserver(([entry]) => { if (entry) { setNarrow(entry.contentRect.width < 1288); setWidth(entry.contentRect.width); } });
 		observer.observe(root.current);
 		return () => observer.disconnect();
-	}, [!!state]);
+	}, [!!state, pathname]);
 	useEffect(() => {
 		if (!state) return;
 		const match = /^\/chat\/([^/]+)$/.exec(pathname);
