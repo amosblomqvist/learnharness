@@ -463,13 +463,20 @@ expanding the note into a full treatment of the subject.`,
 /** The session extractor's instructions in `language` (English = EXTRACTOR_INSTRUCTIONS). */
 export function extractorInstructions(language?: AppLanguage): string {
 	if (!language || language === "en") return EXTRACTOR_INSTRUCTIONS;
-	return workerPrompt("sessionPreamble", EXTRACTOR_INSTRUCTIONS, language);
+	return [
+		workerPrompt("sessionPreamble", SESSION_PREAMBLE, language),
+		workerPrompt("extractionCore", Object.values(EXTRACTION_CORE).join("\n\n"), language),
+		workerPrompt("sessionMessageIdRule", SESSION_MESSAGE_ID_RULE, language),
+	].join("\n\n");
 }
 
 /** The notes extractor's instructions in `language` (English = NOTES_EXTRACTOR_INSTRUCTIONS). */
 export function notesExtractorInstructions(language?: AppLanguage): string {
 	if (!language || language === "en") return NOTES_EXTRACTOR_INSTRUCTIONS;
-	return workerPrompt("notesPreamble", NOTES_EXTRACTOR_INSTRUCTIONS, language);
+	return [
+		workerPrompt("notesPreamble", NOTES_PREAMBLE, language),
+		workerPrompt("extractionCore", Object.values(EXTRACTION_CORE).join("\n\n"), language),
+	].join("\n\n");
 }
 
 // ── the same-source digest (owner, 2026-09-30 evening) ──
