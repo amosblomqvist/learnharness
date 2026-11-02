@@ -47,6 +47,7 @@ import type { ModelsSettings } from "@/src/core";
 import { MENU_CLOSE_EVENT, MENU_OPEN_EVENT } from "@/components/menu-shell";
 import { notifySettingsSaved } from "@/components/settings-signal";
 import { KeysSection } from "./keys-section.tsx";
+import { extraSettingsSections } from "./extra-sections.ts";
 import { Hint } from "@/components/ui/hint";
 import { AppearanceSection, GraphSection } from "./appearance-section.tsx";
 import { KeyboardSection } from "./keyboard-section.tsx";
@@ -64,7 +65,8 @@ const SECTIONS = [
 	{ id: "keyboard", label: "Keyboard", hint: "Stored on this device" },
 	{ id: "general", label: "General" },
 ] as const;
-type SectionId = (typeof SECTIONS)[number]["id"];
+/** A built-in section id, or one registered via ./extra-sections.ts. */
+type SectionId = (typeof SECTIONS)[number]["id"] | (string & {});
 
 /** `open(section?, row?)` — the optional ROW deep-links into the Keys
  *  section with that row unfolded (zero-keys wave: the dictation error's
@@ -307,7 +309,7 @@ export function SettingsDialogBody({
 					data-testid="settings-nav"
 					className="flex w-44 shrink-0 flex-col gap-1 border-r border-border p-2"
 				>
-					{SECTIONS.map((s) => (
+					{[...SECTIONS, ...extraSettingsSections()].map((s) => (
 						<button
 							key={s.id}
 							type="button"
@@ -429,6 +431,14 @@ export function SettingsDialogBody({
 								>
 									<KeyboardSection />
 								</SettingsSection>
+							)}
+							{extraSettingsSections().map(
+								(s) =>
+									active === s.id && (
+										<SettingsSection key={s.id} title={s.label} hint={s.hint} testid={`section-${s.id}`}>
+											{s.render()}
+										</SettingsSection>
+									),
 							)}
 						</div>
 					)}

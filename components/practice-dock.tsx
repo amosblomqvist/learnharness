@@ -154,7 +154,8 @@ export function PracticeDock({ problemCallId, input, expanded, onExpand, onSubmi
 				    one p-1 row. Corner radii concentric: shell 16 − m-1.5 (6) =
 				    field 10 − p-1 (4) = button 6. */}
 				<div className="flex items-center justify-between gap-2 p-1">
-					<span aria-hidden className="pl-1.5 text-xs text-muted-foreground">
+					{/* lh-kbd-hint: the phone build hides keyboard-only hints. */}
+					<span aria-hidden className={cn("pl-1.5 text-xs text-muted-foreground", !compactionRunning && "lh-kbd-hint")}>
 						{compactionRunning ? "compacting session…" : "↵ submits · ⇧↵ newline"}
 					</span>
 					<Button

@@ -14,3 +14,6 @@ declare module "lh:assets" {
 	/** Read-only app files (agent prompts) keyed by virtual absolute path. */
 	export const assets: Record<string, string>;
 }
+
+/** The source code URL of this build (AGPL-3.0 §13), set by scripts/build-mobile.mjs. */
+declare const __LH_SOURCE_URL__: string;

@@ -1,0 +1,77 @@
+/*
+ * Phone-only layout polish (mobile Phase 1, owner: "polish existing").
+ * Every rule is scoped to .lh-phone, the class the phone build's
+ * index.html puts on <html> — the desktop app never loads this file.
+ */
+
+/* The sidebar slides OVER the page instead of squeezing it. Its own
+   width animation (w-72 ↔ w-0) still drives the slide. */
+.lh-phone aside.sidebar-motion {
+	position: fixed;
+	inset-block: 0;
+	left: 0;
+	z-index: 50;
+	height: 100dvh;
+	max-width: 85vw;
+}
+.lh-phone aside.sidebar-motion > div {
+	max-width: 85vw;
+}
+
+/* Tap outside the open drawer to close it (rendered by the phone app). */
+.lh-phone .lh-phone-scrim {
+	position: fixed;
+	inset: 0;
+	z-index: 49;
+	background: rgb(0 0 0 / 0.5);
+}
+
+/* Keyboard-only hints mean nothing on a touchscreen. */
+.lh-phone .lh-kbd-hint {
+	visibility: hidden;
+}
+
+/* No rubber-band bounce of the whole app shell; inner panes still scroll. */
+.lh-phone body {
+	overscroll-behavior: none;
+}
+
+/* iOS zooms into any focused field under 16px; keep inputs at 16px. */
+@media (pointer: coarse) {
+	.lh-phone input,
+	.lh-phone textarea,
+	.lh-phone select,
+	.lh-phone [contenteditable="true"] {
+		font-size: max(16px, 1em);
+	}
+}
+
+/* ── Settings dialog ─────────────────────────────────────────────────── */
+
+/* Section list becomes a scrollable row above the content. */
+.lh-phone div:has(> [data-testid="settings-nav"]) {
+	flex-direction: column;
+}
+.lh-phone [data-testid="settings-nav"] {
+	width: auto;
+	flex-direction: row;
+	overflow-x: auto;
+	border-right: 0;
+	border-bottom: 1px solid var(--border);
+	scrollbar-width: none;
+}
+.lh-phone [data-testid="settings-nav"] > button {
+	flex-shrink: 0;
+}
+.lh-phone [data-testid="settings-content"] section {
+	padding-inline: 1rem;
+}
+
+/* Desktop-only settings: keyboard shortcuts, auto-update (General), and the
+   connections that need a computer (subscription logins, the Claude CLI). */
+.lh-phone [data-testid="settings-nav-keyboard"],
+.lh-phone [data-testid="settings-nav-general"],
+.lh-phone [data-testid="group-subscriptions"],
+.lh-phone [data-testid="group-external-cli"] {
+	display: none;
+}

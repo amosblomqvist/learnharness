@@ -7,9 +7,9 @@
  */
 "use client";
 
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { resolveSettings, slotsConfigured, type LhMessage, type UserSettings } from "@/src/core";
-import { AppShell, SidebarProvider } from "@/components/sidebar";
+import { AppShell, SidebarProvider, useSidebar } from "@/components/sidebar";
 import { ActivityProvider } from "@/components/activity-dock";
 import { ServerEventsProvider } from "@/components/server-events";
 import { AppearanceProvider } from "@/components/settings/appearance";
@@ -105,6 +105,22 @@ function Pages() {
 	}
 }
 
+/** The sidebar as a phone drawer (phone.css slides it over the page): a
+ *  scrim closes it on tap, and any navigation closes it — picking a
+ *  session or "new" should land on that page, not leave the drawer up. */
+function PhoneDrawer() {
+	const { open, toggle } = useSidebar();
+	const { pathname, search } = useLocation();
+	const route = pathname + search;
+	const seen = useRef(route);
+	useEffect(() => {
+		if (seen.current === route) return;
+		seen.current = route;
+		if (open) toggle();
+	}, [route, open, toggle]);
+	return open ? <div className="lh-phone-scrim" aria-hidden onClick={toggle} /> : null;
+}
+
 function Missing() {
 	return (
 		<div className="flex min-h-dvh flex-col items-center justify-center gap-3 p-6 text-center">
@@ -125,6 +141,7 @@ export function App({ children }: { children?: ReactNode }) {
 						<ActivityProvider>
 							<AppShell>
 								<Pages />
+								<PhoneDrawer />
 								{children}
 							</AppShell>
 						</ActivityProvider>
