@@ -187,7 +187,7 @@ describe("learner image loader", () => {
 		const bytes = raster(40, 30);
 		const p = file("small.png", bytes);
 		const image = await loadLearnerImage(p);
-		assert.equal(image.path, p);
+		assert.equal(image.path, fs.realpathSync.native(p));
 		assert.equal(image.mimeType, "image/png");
 		assert.equal(image.width, 40);
 		assert.equal(image.height, 30);
@@ -241,9 +241,10 @@ describe("show_image", () => {
 		const p = file("board.png", bytes);
 		const image = await loadLearnerImage(p);
 		const result = await showImageTool.execute("call-s1", { path: p, caption: "  The breadboard, top view  " });
-		assert.deepEqual(result.content, [{ type: "text", text: `Shown to the learner: ${p} (40×30).` }], "no image part reaches the model");
+		const expectedPath = fs.realpathSync.native(p);
+		assert.deepEqual(result.content, [{ type: "text", text: `Shown to the learner: ${expectedPath} (40×30).` }], "no image part reaches the model");
 		assert.deepEqual(result.details, {
-			path: p,
+			path: expectedPath,
 			caption: "The breadboard, top view",
 			mimeType: "image/png",
 			snapshotId: image.snapshotId,
@@ -447,7 +448,7 @@ describe("visual job runner with an image", () => {
 		}
 		const result = jobStore.getJob(job.id)!.result as VisualResult;
 		const image = await loadLearnerImage(p);
-		assert.deepEqual(result.image, { path: p, snapshotId: image.snapshotId });
+		assert.deepEqual(result.image, { path: fs.realpathSync.native(p), snapshotId: image.snapshotId });
 		assert.ok(result.svg.includes('href="learner-image"'));
 		assert.ok(!result.svg.includes(image.data));
 		assert.equal(chatStore.getChat(job.chatId)?.imageSnapshots?.[image.snapshotId]?.data, image.data);
