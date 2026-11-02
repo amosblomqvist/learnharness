@@ -355,6 +355,13 @@ export const streamdownPlugins = {
   math: createMathPlugin({ singleDollarTextMath: true }),
 } as unknown as PluginConfig;
 
+// KaTeX's hidden MathML otherwise lands in copied text; copy-tex copies each
+// formula as its $...$ source instead. Browser-only: it binds to document.
+if (typeof document !== "undefined") {
+  // @ts-expect-error -- copy-tex ships no type declarations
+  void import("katex/contrib/copy-tex");
+}
+
 // Remend's incomplete-HTML heuristic mistakes `<b` in `$a<b$` for a
 // partial tag and deletes the remaining source before math can tokenize.
 // Preserve that text (unfinished prose HTML may show literally); Streamdown's
