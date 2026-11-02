@@ -73,7 +73,7 @@ describe("AuthStore adapter", () => {
 
 	it("atomic writes: no tmp leftovers, valid JSON on disk every time", () => {
 		authStore.setAuthVar("OPENROUTER_API_KEY", "sk-or-v1-final");
-		const files = fs.readdirSync(TMP).filter((f) => f.startsWith(".auth.json.tmp"));
+		const files = fs.readdirSync(TMP).filter((f) => f.includes(".tmp-"));
 		assert.deepEqual(files, [], "no tmp file survives the rename");
 		JSON.parse(fs.readFileSync(AUTH_FILE, "utf-8")); // must parse
 	});
