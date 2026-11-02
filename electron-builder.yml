@@ -87,6 +87,9 @@ extraResources:
   # Attribution/license for the bounded local Pi cutoff-selector port.
   - from: docs/compaction-accounting.md
     to: licenses/pi-compaction.md
+  # CC BY 4.0 attribution for the downloadable Parakeet dictation model.
+  - from: docs/parakeet-attribution.md
+    to: licenses/parakeet-model.md
   # Copy from the PARENT dir (.next), not .next/standalone itself:
   # electron-builder hard-excludes a copy's root node_modules and the
   # default no-filter pattern is a literal path match (empirically both

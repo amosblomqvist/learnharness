@@ -161,7 +161,7 @@ Read-only file tools default to the server user's home, not a selected project o
 
 The **sensitive-path guard** refuses known private home locations, `.env` files, configured auth/subscription files, and recognized credential temporary files. It checks named/canonical paths and aliases; walks skip protected locations. It is path-based defense in depth, not a content scanner, sandbox, or allowed-folders setting. Other sensitive files and learning records can remain readable. See [`fs-shared.ts`](../src/agent/tools/fs-shared.ts).
 
-File/PDF/visual images share image postprocessing. Search supports Tavily, Brave, Exa, Firecrawl, and hosted Ollama adapters; page fetching is independent and does not need a search key. Dictation mints short-lived tokens server-side and streams audio browser → Deepgram. These external effects are not isolated by a scratch data directory alone.
+File/PDF/visual images share image postprocessing. Search supports Tavily, Brave, Exa, Firecrawl, and hosted Ollama adapters; page fetching is independent and does not need a search key. Dictation mints short-lived tokens server-side and streams audio browser → Deepgram. The `dictation.provider` setting can instead select local Parakeet: the browser captures the same 16 kHz PCM, and on stop posts it to the app server (`/api/stt/parakeet/transcribe`), which transcribes it with sherpa-onnx from a model downloaded on demand into the data directory; audio then never leaves the machine and the language is detected automatically. These external effects are not isolated by a scratch data directory alone.
 
 ## Verification starting points
 
