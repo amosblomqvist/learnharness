@@ -86,6 +86,7 @@ import {
 } from "@/src/core";
 import { ReadingThinkingField } from "@/components/reading-thinking";
 import { currentUserThinkingOpen, setAllUserThinkingOpen } from "@/components/thinking-block";
+import { NarrationSessionProvider, ReadAloud } from "@/components/narration";
 
 /** One width for everything: transcript, cards, and the bottom blob share this column. */
 /**
@@ -1264,6 +1265,7 @@ export function Chat({
 				openSetup: () => setSetupOpen(true),
 			}}
 		>
+		<NarrationSessionProvider key={chatId} sessionId={chatId} messages={nativeMessages} running={status === "streaming" || status === "submitted"} failed={status === "error"}>
 		<SessionMermaidContext.Provider
 			value={{
 				openMermaid: setMermaidFocus,
@@ -1560,6 +1562,7 @@ export function Chat({
 														return (
 															<div key={part.id || pi} id={anchor} data-source-message-id={sourceId ?? undefined} className="lh-source-passage">
 																<MessageResponse>{part.text}</MessageResponse>
+																<ReadAloud partId={part.id} />
 															</div>
 														);
 													}
@@ -1797,6 +1800,7 @@ export function Chat({
 		</div>
 		</JobsContext.Provider>
 		</SessionMermaidContext.Provider>
+		</NarrationSessionProvider>
 		{/* The BYOK setup flow (owner, 2026-09-22): one mount serves the
 		    persistent CTA, the refused-send interception, and the job cards'
 		    deep-link. Save keeps the draft in the composer — it never sends
@@ -2396,6 +2400,7 @@ function DockOverlay({
 								<QuestionDock
 									toolName={pending.tool as "quiz" | "probe" | "ask_user_question" | "explain" | "recall"}
 									toolCallId={pending.toolCallId}
+									sourceKey={pending.key}
 									input={pending.input as never}
 									expanded={expanded}
 									reveal={revealPending}
@@ -2405,7 +2410,7 @@ function DockOverlay({
 									initialDraft={initialQuestionDraft}
 									onSaveDraft={onSaveQuestionDraft}
 									onEscape={dictationCancel}
-									dictationClaim={!revealPending}
+									revealed={!revealPending}
 									compactionRunning={compactionRunning}
 								/>
 							) : practice ? (

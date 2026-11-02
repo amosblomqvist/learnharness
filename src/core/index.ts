@@ -87,3 +87,9 @@ export * from "./coverage.ts";
 // ONE session→markdown formatter — the extractor's view and the user-facing
 // export share it. Pure, browser-safe.
 export * from "./session-markdown.ts";
+export * from "./narration.ts";
+export * from "./narration-controller.ts";
+export * from "./narration-sources.ts";
+export * from "./visible-question.ts";
+
+export * from "./speech.ts";

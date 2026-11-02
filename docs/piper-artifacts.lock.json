@@ -1,0 +1,165 @@
+{
+  "engine": "piper",
+  "engineVersion": "1.8.0",
+  "engineCommit": "639388b6317fc4731e91d53da42aea68fd4166ff",
+  "repository": "https://huggingface.co/rhasspy/piper-voices",
+  "revision": "b4e358ffcb232591bf73a540e70f7de528e4174a",
+  "voices": [
+    {
+      "id": "en_US-danny-low",
+      "name": "Danny · English (US)",
+      "quality": "low",
+      "directory": "en/en_US/danny/low",
+      "license": "CC BY-SA 4.0 (mimic3-voices repository)",
+      "licenseUrl": "https://github.com/MycroftAI/mimic3-voices/blob/master/LICENSE",
+      "dataset": "https://github.com/MycroftAI/mimic3-voices",
+      "files": [
+        {
+          "name": "en_US-danny-low.onnx",
+          "bytes": 63104526,
+          "sha256": "56a9ae9499e961514f060aac2866cb323a21e5989592fc4f208e56fdc323ab64"
+        },
+        {
+          "name": "en_US-danny-low.onnx.json",
+          "bytes": 4166,
+          "sha256": "191dea1ba9863199d8ca2e9048f83b219219fb450f62767ee02f1bc4568ce4f4"
+        },
+        {
+          "name": "MODEL_CARD",
+          "bytes": 275,
+          "sha256": "28a96e3a87f774b964f9b8ce21d9a504dc2fd1c685ab7992ba2487a8a883f5f7"
+        }
+      ]
+    },
+    {
+      "id": "en_US-joe-medium",
+      "name": "Joe · English (US)",
+      "quality": "medium",
+      "directory": "en/en_US/joe/medium",
+      "license": "CC0 1.0",
+      "licenseUrl": "https://creativecommons.org/publicdomain/zero/1.0/",
+      "dataset": "https://github.com/OHF-Voice/voice-datasets",
+      "files": [
+        {
+          "name": "en_US-joe-medium.onnx",
+          "bytes": 63201294,
+          "sha256": "58afce0321b8d9c46d7cdf9c16500cc55a793b4220212dba6b70fb788b3baf06"
+        },
+        {
+          "name": "en_US-joe-medium.onnx.json",
+          "bytes": 4794,
+          "sha256": "3d6d5410b3795cb1950595247ef8f06190719e6fdbfa3a2356d8ec368e1aad33"
+        },
+        {
+          "name": "MODEL_CARD",
+          "bytes": 281,
+          "sha256": "d2caa63aca0fccb155105e959e393e5c0c0f03a1f388ef5ba217b83ef860c760"
+        }
+      ]
+    },
+    {
+      "id": "en_US-amy-medium",
+      "name": "Amy · English (US)",
+      "quality": "medium",
+      "directory": "en/en_US/amy/medium",
+      "license": "CC BY-SA 4.0 (mimic3-voices repository)",
+      "licenseUrl": "https://github.com/MycroftAI/mimic3-voices/blob/master/LICENSE",
+      "dataset": "https://github.com/MycroftAI/mimic3-voices",
+      "files": [
+        {
+          "name": "en_US-amy-medium.onnx",
+          "bytes": 63201294,
+          "sha256": "b3a6e47b57b8c7fbe6a0ce2518161a50f59a9cdd8a50835c02cb02bdd6206c18"
+        },
+        {
+          "name": "en_US-amy-medium.onnx.json",
+          "bytes": 4882,
+          "sha256": "95a23eb4d42909d38df73bb9ac7f45f597dbfcde2d1bf9526fdeaf5466977d77"
+        },
+        {
+          "name": "MODEL_CARD",
+          "bytes": 284,
+          "sha256": "858419ea604c427ff2e9918556345667eb46397da3c965de75f4f7f0bb50a962"
+        }
+      ]
+    },
+    {
+      "id": "en_GB-alba-medium",
+      "name": "Alba · English (GB)",
+      "quality": "medium",
+      "directory": "en/en_GB/alba/medium",
+      "license": "CC BY 4.0",
+      "licenseUrl": "https://creativecommons.org/licenses/by/4.0/",
+      "dataset": "https://datashare.ed.ac.uk/handle/10283/3270",
+      "files": [
+        {
+          "name": "en_GB-alba-medium.onnx",
+          "bytes": 63201294,
+          "sha256": "401369c4a81d09fdd86c32c5c864440811dbdcc66466cde2d64f7133a66ad03b"
+        },
+        {
+          "name": "en_GB-alba-medium.onnx.json",
+          "bytes": 4888,
+          "sha256": "aa965a2f02ecced632c2694e1fc72bbff6d65f265fab567ca945918c73dd89f4"
+        },
+        {
+          "name": "MODEL_CARD",
+          "bytes": 324,
+          "sha256": "fa166b1779404c470b0b6b4ba0238bc4a35bf89d2cd130c6788f697188b737d6"
+        }
+      ]
+    },
+    {
+      "id": "en_GB-northern_english_male-medium",
+      "name": "Northern English Male · English (GB)",
+      "quality": "medium",
+      "directory": "en/en_GB/northern_english_male/medium",
+      "license": "CC BY-SA 4.0",
+      "licenseUrl": "https://creativecommons.org/licenses/by-sa/4.0/",
+      "dataset": "http://www.openslr.org/83/",
+      "files": [
+        {
+          "name": "en_GB-northern_english_male-medium.onnx",
+          "bytes": 63201294,
+          "sha256": "57a219ae8e638873db7d18893304be5069c42868f392bb95c3ff17f0690d0689"
+        },
+        {
+          "name": "en_GB-northern_english_male-medium.onnx.json",
+          "bytes": 4847,
+          "sha256": "69557ed3d974463453e9b0c09dd99a7ed0e52b8b87b64b357dbeeb2540a97d47"
+        },
+        {
+          "name": "MODEL_CARD",
+          "bytes": 305,
+          "sha256": "75661c3a50c0ba82b32b3a438e54103d8dfe5bbe8fbb864ac687a040e79948bb"
+        }
+      ]
+    },
+    {
+      "id": "en_US-ljspeech-high",
+      "name": "LJ Speech · English (US)",
+      "quality": "high",
+      "directory": "en/en_US/ljspeech/high",
+      "license": "Public domain (LJ Speech dataset); MIT (Piper repository)",
+      "licenseUrl": "https://keithito.com/LJ-Speech-Dataset/",
+      "dataset": "https://keithito.com/LJ-Speech-Dataset/",
+      "files": [
+        {
+          "name": "en_US-ljspeech-high.onnx",
+          "bytes": 114199011,
+          "sha256": "5d4f08ba6a2a48c44592eed3ce56bf85e9de3dd4e20df90541ae68a8310c029a"
+        },
+        {
+          "name": "en_US-ljspeech-high.onnx.json",
+          "bytes": 4970,
+          "sha256": "7e1f4634af596d83cca997fb7a931ba80b70f8a316a2655ee69c55365e0ace14"
+        },
+        {
+          "name": "MODEL_CARD",
+          "bytes": 513,
+          "sha256": "289f7421072d689a3d91f6c632f486af46f9b8b04417536104a4ea667b8a394b"
+        }
+      ]
+    }
+  ]
+}

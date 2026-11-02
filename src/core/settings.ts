@@ -1,3 +1,4 @@
+import { sanitizeSpeechSettings, type SpeechSettings } from "./speech.ts";
 /**
  * THE USER SETTINGS RECORD's shape + sanitizer (settings-storage wave,
  * 2026-09-19): one versioned, DELTA-shaped record at the data-dir seam
@@ -464,6 +465,7 @@ export interface CompactionSettings {
 /** THE record. Every section optional (delta); unknown top-level keys are
  *  preserved verbatim by the sanitizer (forward-compat with newer records). */
 export interface UserSettings {
+	speech?: SpeechSettings;
 	version: number;
 	general?: GeneralSettings;
 	dictation?: DictationSettings;
@@ -806,6 +808,7 @@ export function sanitizeUserSettings(raw: unknown): UserSettings | null {
 	if (r.general !== null && typeof r.general === "object" && !Array.isArray(r.general)) {
 		out.general = sanitizeGeneral(r.general as Record<string, unknown>);
 	}
+	if (r.speech !== undefined) out.speech = sanitizeSpeechSettings(r.speech);
 	if (r.dictation !== undefined) {
 		const raw = r.dictation;
 		out.dictation = raw !== null && typeof raw === "object" && !Array.isArray(raw) &&

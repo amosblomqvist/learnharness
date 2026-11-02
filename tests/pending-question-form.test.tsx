@@ -32,7 +32,7 @@ for (const reusedId of [false, true]) {
 			const pending = pendingQuestionOf(messages)!;
 			await act(async () => root.render(<QuestionDock key={`question:${pending.key}`}
 				toolName="quiz" toolCallId={pending.toolCallId} input={pending.input as QuizToolInput}
-				expanded onExpand={() => {}} onSubmit={() => {}} dictationClaim={false} />));
+				expanded onExpand={() => {}} onSubmit={() => {}} revealed={false} />));
 		};
 		try {
 			const old = question("old", "q1", "OLD question");
@@ -62,7 +62,7 @@ test("live question validation → turn_end placeholder → canonical sync keeps
 		const pending = findPendingToolCall(state.messages, pendingQuestionOf(state.nativeMessages));
 		root.render(pending ? <QuestionDock key={`question:${pending.key}`}
 			toolName="quiz" toolCallId={pending.toolCallId} input={pending.input as QuizToolInput}
-			expanded onExpand={() => {}} onSubmit={answer => { submitted = answer; }} dictationClaim={false} /> : null);
+			expanded onExpand={() => {}} onSubmit={answer => { submitted = answer; }} revealed={false} /> : null);
 	};
 	model.onChange = render;
 	const event = async (value: unknown) => {
@@ -117,7 +117,7 @@ test("saving a unique live question preserves its mounted form and selection", a
 		const pending = pendingQuestionOf(messages)!;
 		await act(async () => root.render(<QuestionDock key={`question:${pending.key}`}
 			toolName="quiz" toolCallId={pending.toolCallId} input={pending.input as QuizToolInput}
-			expanded onExpand={() => {}} onSubmit={() => {}} dictationClaim={false} />));
+			expanded onExpand={() => {}} onSubmit={() => {}} revealed={false} />));
 	};
 	try {
 		await render([live]);
