@@ -292,7 +292,7 @@ function readSourceMap(): Record<string, NotesSource> {
 function writeSourceMap(map: Record<string, NotesSource>): void {
 	fs.mkdirSync(path.dirname(SOURCES_FILE), { recursive: true });
 	ensureGraphFormat(); // the lazy format stamp (graph-format.ts)
-	writeFileAtomicSync(SOURCES_FILE, JSON.stringify(map, null, "\t"));
+	writeFileAtomicSync(SOURCES_FILE, JSON.stringify(map, null, "\t"), { allowInPlaceFallback: true });
 }
 
 // ─── one-way purges at adapter load: dead ledgers are exactly the confusion

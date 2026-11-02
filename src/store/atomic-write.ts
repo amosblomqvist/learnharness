@@ -1,29 +1,27 @@
 /**
  * Crash-safe file replacement for the store adapters (#403).
  *
- * writeFileAtomicSync(file, text) replaces files so readers, or the next
- * boot, see the old bytes or the new bytes, never empty or half-written
- * files. It writes the temp file beside the target, fsyncs it, and renames it
- * over the target. Every store write goes through here instead of
- * fs.writeFileSync. Callers keep building the exact bytes and keep their own
- * mkdirSync.
+ * writeFileAtomicSync(file, text) writes a temp beside the target, fsyncs it,
+ * and renames it over the target. On this path readers see the old bytes or
+ * the complete new bytes. Callers keep building the exact bytes and keep
+ * their own mkdirSync. Previously in-place writers explicitly opt into the
+ * Windows compatibility fallback; previously atomic writers do not.
  *
  *   writeFileAtomicSync(file, JSON.stringify(record, null, "\t"));
  *   writeFileAtomicSync(AUTH_FILE, text, { mode: 0o600 }); // secrets
  *   removeLeftoverTemps(file); // after deleting `file`
  *
  * Limits:
- *  - Safe against process crashes and, because the temp file is fsynced,
- *    against power cuts. The folder is not fsynced, so after power cuts the
- *    file may still hold the old version, complete.
+ *  - The rename path protects against process interruption during writes.
+ *    The folder is not fsynced: this is not a power-loss durability guarantee.
  *  - No locking: two writers of one file still race, and the last one wins.
  *  - Windows refuses to rename over files another process holds open
  *    (antivirus, the Search indexer, backup tools). The rename is retried for
- *    about 100 ms, blocking the thread. If the file is still held, the save
- *    falls back to writing in place, which is only as safe as before #403;
- *    the fsynced temp file stays until that write lands, and is kept if it
- *    fails midway.
- *  - Symlinked targets are written in place, so the link survives.
+ *    about 100 ms, blocking the thread. If still held, only callers with
+ *    allowInPlaceFallback save in place (the pre-#403 interruption risk).
+ *    The fsynced temp stays until that write lands, and is kept if it fails
+ *    midway. Other callers throw, leaving the old file untouched.
+ *  - Rename replaces the named path, including a symlink, not its referent.
  *  - Crashes can leave `<file>.tmp-<uuid>` beside the target. Store listings
  *    only read names ending in .json or .md, so they skip it.
  *  - New files get `mode` (default 0o666 minus umask), not the old file's.
@@ -39,11 +37,7 @@ const RENAME_RETRY_MS = 100;
 /** Replace `file` with `text` (UTF-8). Throws on failure, with the old file
  *  untouched, except when the in-place fallback fails midway: then the temp
  *  file beside it keeps the complete new bytes. */
-export function writeFileAtomicSync(file: string, text: string, options?: { mode?: number }): void {
-	if (isSymlink(file)) {
-		fs.writeFileSync(file, text, { encoding: "utf-8", mode: options?.mode });
-		return;
-	}
+export function writeFileAtomicSync(file: string, text: string, options?: { mode?: number; allowInPlaceFallback?: boolean }): void {
 	const tmp = `${file}${TEMP_MARKER}${randomUUID()}`;
 	let target: number;
 	try {
@@ -56,7 +50,7 @@ export function writeFileAtomicSync(file: string, text: string, options?: { mode
 			fs.closeSync(fd);
 		}
 		// `file` goes to renameSync exactly as given: test fault hooks match on it.
-		if (renameRetryingSync(tmp, file)) return;
+		if (renameRetryingSync(tmp, file, options?.allowInPlaceFallback ?? false)) return;
 		target = fs.openSync(file, "w"); // held past the retry: save in place, as before #403
 	} catch (error) {
 		removeTemp(tmp); // the target was not touched
@@ -87,9 +81,9 @@ export function removeLeftoverTemps(file: string): void {
 	for (const name of names) if (name.startsWith(prefix)) removeTemp(path.join(path.dirname(file), name));
 }
 
-/** True when the rename landed, false when Windows kept refusing because
- *  another process holds the target. Every other failure throws. */
-function renameRetryingSync(tmp: string, file: string): boolean {
+/** True when the rename landed. False only when the caller allows the
+ *  Windows compatibility fallback and sharing violations outlast the retry. */
+function renameRetryingSync(tmp: string, file: string, allowInPlaceFallback: boolean): boolean {
 	const deadline = Date.now() + RENAME_RETRY_MS;
 	for (let delay = 5; ; delay = Math.min(delay * 2, 40)) {
 		try {
@@ -97,7 +91,10 @@ function renameRetryingSync(tmp: string, file: string): boolean {
 			return true;
 		} catch (error) {
 			if (!isSharingViolation(error, file)) throw error;
-			if (Date.now() >= deadline) return false;
+			if (Date.now() >= deadline) {
+				if (allowInPlaceFallback) return false;
+				throw error;
+			}
 			Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, delay); // sleep without spinning
 		}
 	}
@@ -117,10 +114,6 @@ function isSharingViolation(error: unknown, file: string): boolean {
 	}
 	if (!stat) return true; // no target yet: the handle is on the temp file
 	return stat.isFile() && (stat.mode & 0o200) !== 0;
-}
-
-function isSymlink(file: string): boolean {
-	return fs.lstatSync(file, { throwIfNoEntry: false })?.isSymbolicLink() ?? false; // missing: plain new file
 }
 
 function removeTemp(tmp: string): void {

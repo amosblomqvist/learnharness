@@ -74,7 +74,7 @@ export const promptOverrides: PromptOverrideStore = {
 		if (!isValidSegmentPath(segmentPath)) return;
 		const file = overrideFileFor(segmentPath);
 		fs.mkdirSync(path.dirname(file), { recursive: true });
-		writeFileAtomicSync(file, text);
+		writeFileAtomicSync(file, text, { allowInPlaceFallback: true });
 	},
 
 	deleteOverride(segmentPath: string): void {

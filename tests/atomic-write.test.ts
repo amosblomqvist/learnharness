@@ -1,7 +1,8 @@
 /**
  * Crash-safe store writes (#403): src/store/atomic-write.ts. Each save must
- * leave the old bytes or the new bytes, never empty or partial files, and
- * no temp file after it returns or throws. The Windows cases fake the
+ * leave the old bytes or the complete new bytes on the rename path. The
+ * opt-in Windows in-place fallback retains the old interruption risk and
+ * keeps the temp if writing fails midway. The Windows cases fake the
  * rename errors that held files raise; scripts in the verify skill hold real
  * files open.
  */
@@ -11,7 +12,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
-import { after, describe, it } from "node:test";
+import { after, describe, it, type TestContext } from "node:test";
 import { removeLeftoverTemps, writeFileAtomicSync } from "../src/store/atomic-write.ts";
 
 const root = fs.mkdtempSync(path.join(os.tmpdir(), "lh-atomic-write-"));
@@ -26,6 +27,13 @@ function target(name: string, text?: string, folder = "case-"): string {
 }
 const temps = (file: string) => fs.readdirSync(path.dirname(file)).filter((f) => f.includes(".tmp-"));
 const fail = (code: string) => Object.assign(new Error(code), { code });
+
+function modelWindows(t: TestContext): void {
+	// Only the platform gate is modeled. These are not native held-handle tests.
+	const platform = Object.getOwnPropertyDescriptor(process, "platform")!;
+	Object.defineProperty(process, "platform", { value: "win32" });
+	t.after(() => Object.defineProperty(process, "platform", platform));
+}
 
 describe("writeFileAtomicSync", () => {
 	it("replaces the file with exactly the given text and leaves no temp file", () => {
@@ -69,7 +77,8 @@ describe("writeFileAtomicSync", () => {
 		assert.equal(seen.files.filter((f: string) => f.includes(".tmp-")).length, 1, "the crash left its temp file");
 	});
 
-	it("Windows: briefly held files are renamed once released", onWindows, (t) => {
+	it("modeled Windows: briefly held files are renamed once released", (t) => {
+		modelWindows(t);
 		const file = target("record.json", "old");
 		const rename = fs.renameSync;
 		let refusals = 2;
@@ -84,7 +93,8 @@ describe("writeFileAtomicSync", () => {
 		assert.equal(warn.mock.callCount(), 0, "the rename landed; no in-place fallback");
 	});
 
-	it("Windows: new files whose temp is briefly held still land by rename", onWindows, (t) => {
+	it("modeled Windows: new files whose temp is briefly held still land by rename", (t) => {
+		modelWindows(t);
 		const file = target("new.json");
 		const rename = fs.renameSync;
 		let refusals = 2;
@@ -98,19 +108,21 @@ describe("writeFileAtomicSync", () => {
 		assert.equal(warn.mock.callCount(), 0, "the rename landed; no in-place fallback");
 	});
 
-	it("Windows: files held past the retry are saved in place instead of failing", onWindows, (t) => {
+	it("modeled Windows: files held past the retry are saved in place instead of failing", (t) => {
+		modelWindows(t);
 		const file = target("record.json", "old");
 		t.mock.method(fs, "renameSync", () => { throw fail("EPERM"); });
 		const warn = t.mock.method(console, "warn", () => {});
 		const started = Date.now();
-		writeFileAtomicSync(file, "new");
+		writeFileAtomicSync(file, "new", { allowInPlaceFallback: true });
 		assert.ok(Date.now() - started < 1000, "the retry is short");
 		assert.equal(fs.readFileSync(file, "utf-8"), "new");
 		assert.deepEqual(temps(file), []);
 		assert.match(String(warn.mock.calls[0]?.arguments[0]), /held open/);
 	});
 
-	it("Windows: fallbacks that cannot open the file fail and keep the old file", onWindows, (t) => {
+	it("modeled Windows: fallbacks that cannot open the file fail and keep the old file", (t) => {
+		modelWindows(t);
 		const file = target("record.json", "old");
 		t.mock.method(fs, "renameSync", () => { throw fail("EPERM"); });
 		const open = fs.openSync;
@@ -119,13 +131,14 @@ describe("writeFileAtomicSync", () => {
 			return open(...args);
 		});
 		const warn = t.mock.method(console, "warn", () => {});
-		assert.throws(() => writeFileAtomicSync(file, "new"), { code: "EBUSY" });
+		assert.throws(() => writeFileAtomicSync(file, "new", { allowInPlaceFallback: true }), { code: "EBUSY" });
 		assert.equal(fs.readFileSync(file, "utf-8"), "old");
 		assert.deepEqual(temps(file), []);
 		assert.equal(warn.mock.callCount(), 0, "nothing was saved");
 	});
 
-	it("Windows: fallbacks that fail midway keep the complete temp file", onWindows, (t) => {
+	it("modeled Windows: fallbacks that fail midway keep the complete temp file", (t) => {
+		modelWindows(t);
 		const file = target("record.json", "old");
 		t.mock.method(fs, "renameSync", () => { throw fail("EPERM"); });
 		const write = fs.writeFileSync;
@@ -134,7 +147,7 @@ describe("writeFileAtomicSync", () => {
 			if (++writes === 2) throw fail("ENOSPC"); // the in-place write, after the temp's
 			return write(...args);
 		});
-		assert.throws(() => writeFileAtomicSync(file, "new"), { code: "ENOSPC" });
+		assert.throws(() => writeFileAtomicSync(file, "new", { allowInPlaceFallback: true }), { code: "ENOSPC" });
 		const kept = temps(file);
 		assert.equal(kept.length, 1);
 		assert.equal(fs.readFileSync(path.join(path.dirname(file), kept[0]!), "utf-8"), "new");
@@ -160,7 +173,7 @@ describe("writeFileAtomicSync", () => {
 		assert.deepEqual(temps(file), []);
 	});
 
-	it("symlinked files stay links and their target gets the text", (t) => {
+	it("rename replaces a symlink without changing its referent", (t) => {
 		const real = target("real.json", "old");
 		const link = path.join(path.dirname(real), "link.json");
 		try {
@@ -169,10 +182,34 @@ describe("writeFileAtomicSync", () => {
 			t.skip("symlinks need extra rights on this machine");
 			return;
 		}
-		writeFileAtomicSync(link, "new");
-		assert.ok(fs.lstatSync(link).isSymbolicLink());
-		assert.equal(fs.readFileSync(real, "utf-8"), "new");
+		writeFileAtomicSync(link, "new", { mode: 0o600 });
+		assert.ok(fs.lstatSync(link).isFile());
+		assert.equal(fs.readFileSync(link, "utf-8"), "new");
+		assert.equal(fs.readFileSync(real, "utf-8"), "old");
+		if (process.platform !== "win32") assert.equal(fs.statSync(link).mode & 0o777, 0o600);
 	});
+
+	for (const code of ["EPERM", "EACCES", "EBUSY"]) {
+		for (const allowInPlaceFallback of [false, true]) {
+			it(`modeled Windows ${code}: in-place fallback is ${allowInPlaceFallback ? "enabled" : "disabled by default"}`, (t) => {
+				modelWindows(t);
+				const file = target("record.json", "old");
+				const rename = t.mock.method(fs, "renameSync", () => { throw fail(code); });
+				const warn = t.mock.method(console, "warn", () => {});
+				if (allowInPlaceFallback) {
+					writeFileAtomicSync(file, "new", { allowInPlaceFallback: true });
+					assert.equal(fs.readFileSync(file, "utf-8"), "new");
+					assert.equal(warn.mock.callCount(), 1);
+				} else {
+					assert.throws(() => writeFileAtomicSync(file, "new"), { code });
+					assert.equal(fs.readFileSync(file, "utf-8"), "old");
+					assert.equal(warn.mock.callCount(), 0);
+				}
+				assert.ok(rename.mock.callCount() > 1, "sharing violations were retried");
+				assert.deepEqual(temps(file), []);
+			});
+		}
+	}
 
 	it("mode applies to the new file", { skip: process.platform === "win32" && "Windows has no POSIX modes" }, () => {
 		const file = target("secret.json", "old");

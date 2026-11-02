@@ -11,7 +11,7 @@
  */
 
 import assert from "node:assert/strict";
-import * as fs from "node:fs";
+import fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { after, before, describe, it } from "node:test";
@@ -22,6 +22,7 @@ process.env.LH_AUTH_FILE = path.join(TMP, "auth.json");
 // Import AFTER the env redirect — module-load-bound seam.
 const { authStore } = await import("../src/store/auth.ts");
 const { AUTH_FILE } = await import("../config.ts");
+const { isSensitivePath, resolveSourcePath } = await import("../src/agent/tools/fs-shared.ts");
 
 after(() => {
 	fs.rmSync(TMP, { recursive: true, force: true });
@@ -69,6 +70,42 @@ describe("AuthStore adapter", () => {
 		assert.deepEqual(authStore.authVars(), { B: "2" });
 		authStore.deleteAuthVar("NOT_THERE");
 		assert.deepEqual(authStore.authVars(), { B: "2" });
+	});
+
+	it("the actual auth writer's complete 0600 temp is denied before replacement", (t) => {
+		const rename = fs.renameSync;
+		let observed = false;
+		t.mock.method(fs, "renameSync", (...[tmp, destination]: Parameters<typeof rename>) => {
+			assert.equal(destination, AUTH_FILE);
+			const name = String(tmp);
+			assert.match(name, /auth\.json\.tmp-[0-9a-f-]{36}$/);
+			assert.equal(JSON.parse(fs.readFileSync(tmp, "utf8")).TEMP_CONTRACT, "synthetic-key");
+			if (process.platform !== "win32") assert.equal(fs.statSync(tmp).mode & 0o777, 0o600);
+			assert.equal(isSensitivePath(name), true);
+			assert.throws(() => resolveSourcePath(name), /Access denied/);
+			observed = true;
+			return rename(tmp, destination);
+		});
+		authStore.setAuthVar("TEMP_CONTRACT", "synthetic-key");
+		assert.equal(observed, true);
+	});
+
+	it("auth replaces a symlink with a 0600 record without modifying its referent", (t) => {
+		const referent = path.join(TMP, "referent.json");
+		const original = JSON.stringify({ KEEP: "original" });
+		fs.writeFileSync(referent, original);
+		fs.unlinkSync(AUTH_FILE);
+		try { fs.symlinkSync(referent, AUTH_FILE); }
+		catch {
+			fs.writeFileSync(AUTH_FILE, original, { mode: 0o600 });
+			t.skip("symlinks need extra rights on this machine");
+			return;
+		}
+		authStore.setAuthVar("NEW", "synthetic");
+		assert.ok(fs.lstatSync(AUTH_FILE).isFile());
+		assert.deepEqual(authStore.authVars(), { KEEP: "original", NEW: "synthetic" });
+		assert.equal(fs.readFileSync(referent, "utf8"), original);
+		if (process.platform !== "win32") assert.equal(fs.statSync(AUTH_FILE).mode & 0o777, 0o600);
 	});
 
 	it("atomic writes: no tmp leftovers, valid JSON on disk every time", () => {

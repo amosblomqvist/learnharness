@@ -55,7 +55,7 @@ export function writeSettings(raw: unknown): UserSettings {
 	const settings = sanitizeUserSettings(raw);
 	if (!settings) throw new Error("settings record must be a JSON object");
 	fs.mkdirSync(path.dirname(SETTINGS_FILE), { recursive: true });
-	writeFileAtomicSync(SETTINGS_FILE, JSON.stringify(settings, null, "\t"));
+	writeFileAtomicSync(SETTINGS_FILE, JSON.stringify(settings, null, "\t"), { allowInPlaceFallback: true });
 	return settings;
 }
 

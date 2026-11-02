@@ -43,7 +43,7 @@ function createJob(init: CreateJobInit): JobRecord {
 		updatedAt: now,
 	};
 	fs.mkdirSync(JOBS_DIR, { recursive: true });
-	writeFileAtomicSync(jobFile(record.id), JSON.stringify(record, null, "\t"));
+	writeFileAtomicSync(jobFile(record.id), JSON.stringify(record, null, "\t"), { allowInPlaceFallback: true });
 	emit("jobs-changed", { chatId: init.chatId });
 	return record;
 }
@@ -63,7 +63,7 @@ function updateJob(id: string, patch: JobPatch): JobRecord | null {
 	const record = getJob(id);
 	if (!record) return null;
 	const next: JobRecord = { ...record, ...patch, updatedAt: patch.updatedAt ?? new Date().toISOString() };
-	writeFileAtomicSync(jobFile(id), JSON.stringify(next, null, "\t"));
+	writeFileAtomicSync(jobFile(id), JSON.stringify(next, null, "\t"), { allowInPlaceFallback: true });
 	// EVERY write, not just status flips: progress-line updates must reach
 	// the dispatch cards (the view debounces the fetch bursts). A missing id
 	// wrote nothing and stays silent.

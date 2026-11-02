@@ -37,7 +37,7 @@ export function writeRenderSettings(raw: unknown): GraphRenderSettings {
 	const settings = sanitizeRenderSettings(raw);
 	fs.mkdirSync(path.dirname(RENDER_SETTINGS_FILE), { recursive: true });
 	ensureGraphFormat(); // the lazy format stamp (graph-format.ts)
-	writeFileAtomicSync(RENDER_SETTINGS_FILE, JSON.stringify(settings, null, "\t"));
+	writeFileAtomicSync(RENDER_SETTINGS_FILE, JSON.stringify(settings, null, "\t"), { allowInPlaceFallback: true });
 	return settings;
 }
 
