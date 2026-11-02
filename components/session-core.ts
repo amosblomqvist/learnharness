@@ -400,6 +400,10 @@ export class SessionModel {
 					// live stream dropped the marker until the settle sync.
 					const mid = message.id;
 					if (mid === undefined) return false;
+					// Adoption/refetch may already carry this durable message before
+					// its start/end is replayed. The record owns that identity;
+					// adding it to the tail would duplicate it until the next sync.
+					if (this.base.some((m) => m.id === mid)) return false;
 					this.mutate(() => {
 						const idx = this.tail.findIndex((m) => m.id === mid);
 						this.tail =
