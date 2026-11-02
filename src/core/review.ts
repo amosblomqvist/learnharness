@@ -160,12 +160,15 @@ function replay(events: readonly { at: Date; grade: Grade }[]): Card {
 	return card;
 }
 
-/** Never-practiced propositions in introduction order: premises before
- *  the conclusions they feed (chain edges among the new set), ties and
- *  cycles broken by creation date, then id. */
+/** The first `limit` never-practiced propositions in introduction order:
+ *  premises before the conclusions they feed (chain edges among the new
+ *  set), ties and cycles broken by creation date, then id. Each step
+ *  scans the remaining set, so the walk stops at `limit` — only today's
+ *  allowance is ever needed, never the whole order. */
 function introductionOrder(
 	fresh: readonly Pick<GraphNode, "id" | "createdAt">[],
 	chains: readonly Pick<GraphChain, "premises" | "conclusion">[],
+	limit: number,
 ): string[] {
 	const ids = new Set(fresh.map((n) => n.id));
 	const rank = new Map(
@@ -185,7 +188,7 @@ function introductionOrder(
 	}
 	const order: string[] = [];
 	const remaining = new Set(ids);
-	while (remaining.size > 0) {
+	while (remaining.size > 0 && order.length < limit) {
 		let next: string | null = null;
 		for (const id of remaining) {
 			if (blockers.get(id)!.size > 0) continue;
@@ -238,7 +241,7 @@ export function reviewQueue(input: ReviewQueueInput): ReviewQueue {
 
 	const allowance = Math.max(0, input.newPerDay - introducedToday);
 	const fresh = input.nodes.filter((n) => !history.has(n.id));
-	const newAvailable = allowance === 0 ? [] : introductionOrder(fresh, input.chains).slice(0, allowance);
+	const newAvailable = allowance === 0 ? [] : introductionOrder(fresh, input.chains, allowance);
 
 	return { due, newAvailable, picks: [...due, ...newAvailable].slice(0, sessionSize) };
 }
