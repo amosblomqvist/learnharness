@@ -126,6 +126,7 @@ export function useAppearance() {
 export function AppearanceProvider({ children }: { children: React.ReactNode }) {
 	const [delta, setDelta] = useState<AppearanceSettings | undefined>(undefined);
 	const appliedRef = useRef<string>("");
+	const acknowledgedChange = useRef(false);
 
 	// The vars apply on every change — stringified as the change signal.
 	const vars = useMemo(() => appearanceVars(resolveAppearance(delta)), [delta]);
@@ -158,7 +159,7 @@ export function AppearanceProvider({ children }: { children: React.ReactNode }) 
 		fetch("/api/settings")
 			.then((r) => r.json())
 			.then((body: { settings?: Record<string, unknown> }) => {
-				if (!alive) return;
+				if (!alive || acknowledgedChange.current) return;
 				// The record arrives sanitized server-side; the appearance
 				// slice is unknown-shaped here, so it goes through the same
 				// resolve (absent/invalid fields = factory anyway).
@@ -174,6 +175,9 @@ export function AppearanceProvider({ children }: { children: React.ReactNode }) 
 	}, []);
 
 	const onAppearanceChange = useCallback((next: AppearanceSettings | undefined) => {
+		// A canonical save has authority over the older startup GET, even if
+		// that GET's response arrives after this live update.
+		acknowledgedChange.current = true;
 		setDelta(next);
 	}, []);
 

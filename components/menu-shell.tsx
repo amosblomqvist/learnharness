@@ -2,15 +2,15 @@
 
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from "react";
 import { createPortal } from "react-dom";
+import { INTERACTION_LAYER_Z_BASE } from "./host-dialog";
+import { InteractionLayerOwner, useInteractionLayer, useInteractionLayers, type CloseOutcome, type CloseReason } from "./interaction-layers";
 
 /**
  * THE shared menu shell (menu standardization, fix wave chunk B): one
- * placement body for the app's dropdown menus — portaled to document.body
- * (never clipped by an ancestor's overflow), fixed-anchored to the trigger's
- * rect, viewport-capped. PLACEMENT-ONLY by design: every site keeps its own
- * open/close/Esc contract (the layered-dismissal machinery differs
- * legitimately by surface — settings sections, the keys editor, the setup
- * dialog each own their Escape).
+ * placement body for the app's dropdown menus — portaled into the owning
+ * modal's unclipped popup host (or document.body), fixed-anchored to the
+ * trigger's rect, viewport-capped. Escape ownership is shared; each site
+ * supplies its close outcome and retains its own outside-pointer policy.
  *
  *  - Side: each site declares its preferred side — the composer opens UP
  *    (its control sits at screen bottom), the settings rows open DOWN;
@@ -109,6 +109,8 @@ export function MenuShell({
 	align = "right",
 	menuClass,
 	children,
+	onClose,
+	ownerId,
 }: {
 	anchorRef?: RefObject<HTMLElement | null>;
 	anchorTestid?: string;
@@ -122,10 +124,23 @@ export function MenuShell({
 	 *  shell adds position, z-index, the height cap, and scrolling. */
 	menuClass: string;
 	children: ReactNode;
+	onClose?: (reason: CloseReason) => CloseOutcome | void;
+	ownerId?: string;
 }) {
 	const menuRef = useRef<HTMLDivElement>(null);
 	const [placed, setPlaced] = useState<MenuPlacement | null>(null);
 	const focusedOnceRef = useRef(false);
+	const controller = useInteractionLayers();
+	const anchor = () => {
+		if (anchorRef) return anchorRef.current;
+		if (anchorTestid !== undefined && typeof document !== "undefined") return document.querySelector(`[data-testid="${anchorTestid}"]`);
+		return null;
+	};
+	const resolvedAnchorRef = useRef<HTMLElement | null>(null);
+	useLayoutEffect(() => { resolvedAnchorRef.current = anchor() as HTMLElement | null; });
+	const originOwner = controller.ownerOf(anchor());
+	const layer = useInteractionLayer({ kind: "popup", enabled: true, rootRef: menuRef, anchorRef: anchorRef ?? resolvedAnchorRef, ownerId: ownerId ?? originOwner?.id, onClose });
+	const portal = controller.getPortalContainer(anchor(), ownerId ?? originOwner?.id);
 
 	// Announce open↔close for lockable surfaces (see MENU_OPEN_EVENT).
 	useEffect(() => {
@@ -143,13 +158,13 @@ export function MenuShell({
 	// fails (visibility: hidden subtrees are not focusable) — this seam is
 	// the one that actually lands.
 	useEffect(() => {
-		if (placed === null || focusedOnceRef.current) return;
+		if (placed === null || focusedOnceRef.current || !layer.isTop) return;
 		focusedOnceRef.current = true;
 		const el = menuRef.current;
 		if (!el) return;
 		const input = el.querySelector<HTMLElement>("input");
 		(input ?? el).focus();
-	}, [placed]);
+	}, [placed, layer.isTop]);
 
 	// The standard arrow machine for menus WITHOUT a search (owner: when a
 	// dropdown is expanded, the arrow keys cycle the options and never
@@ -159,6 +174,7 @@ export function MenuShell({
 	// input (their clamped-walk machine, 2026-09-17) — those events never
 	// bubble here, and the input/textarea guard is belt-and-braces.
 	const onBodyKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
+		if (!controller.isElementEligible(menuRef.current)) return;
 		if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
 		const { key } = e;
 		if (key !== "ArrowDown" && key !== "ArrowUp" && key !== "Home" && key !== "End") return;
@@ -182,12 +198,6 @@ export function MenuShell({
 		const base = idx === -1 ? (delta > 0 ? -1 : 0) : idx;
 		const next = (base + delta + buttons.length) % buttons.length;
 		buttons[next]?.focus();
-	};
-
-	const anchor = () => {
-		if (anchorRef) return anchorRef.current;
-		if (anchorTestid !== undefined) return document.querySelector(`[data-testid="${anchorTestid}"]`);
-		return null;
 	};
 
 	// Measure + (re)place: on mount, then on every capture-phase scroll and
@@ -224,9 +234,10 @@ export function MenuShell({
 	// First pass: mounted hidden at the viewport's top-left so the layout
 	// effect can measure the real content height before anything is seen.
 	// The menu is positioned ONCE and then only re-anchored — no flash.
+	if (!portal) return null;
 	if (placed === null) {
 		return createPortal(
-			<div
+			<InteractionLayerOwner.Provider value={layer.id}><div
 				ref={menuRef}
 				data-testid={testid}
 				data-lh-menu=""
@@ -234,18 +245,18 @@ export function MenuShell({
 				className={menuClass}
 			>
 				{children}
-			</div>,
-			document.body,
+			</div></InteractionLayerOwner.Provider>,
+			portal,
 		);
 	}
 	return createPortal(
-		<div
+		<InteractionLayerOwner.Provider value={layer.id}><div
 			ref={menuRef}
 			data-testid={testid}
 			data-lh-menu=""
 			tabIndex={-1}
 			onKeyDown={onBodyKeyDown}
-			style={{ position: "fixed", zIndex: 60, ...placed.style, maxHeight: placed.maxHeight, overflowY: "auto" }}
+			style={{ position: "fixed", zIndex: INTERACTION_LAYER_Z_BASE + layer.order, ...placed.style, maxHeight: placed.maxHeight, overflowY: "auto" }}
 			// The body is the arrow machine's focus home (input-less menus
 			// land focus here on open) — the focus STAYS, but the browser's
 			// default blue ring around it must not draw (owner, polish
@@ -254,7 +265,7 @@ export function MenuShell({
 			className={`${menuClass} outline-none`}
 		>
 			{children}
-		</div>,
-		document.body,
+		</div></InteractionLayerOwner.Provider>,
+		portal,
 	);
 }

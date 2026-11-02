@@ -32,6 +32,8 @@ import { forwardDockWheel, useDockHeight } from "@/components/dock-height";
 import { QueuedSteersBody, type QueuedSteerLine } from "@/components/queued-steers";
 import { DictationBar, finishDictation, joinDictation, useDictation } from "@/components/dictation";
 import { useFieldCycle } from "@/components/field-cycle";
+import { useOptionalInteractionLayers } from "./interaction-layers";
+import { isInteractionScopeEligible } from "./plugin-input-focus";
 import { JobsContext } from "@/components/jobs-context";
 import { StatsBar } from "@/components/stats-bar";
 import { useServerEvent, useServerResync } from "@/components/server-events";
@@ -260,6 +262,7 @@ export function Chat({
 	const { messages, nativeMessages, hasConfirmedConversation, contextTokens, send, continueIfOwed, steer, steerQueue, submitAnswer, dismissQuestion, dismissProblem, questionDraft, saveQuestionDraft, setMessages, adoptRecord, status, error, stop, clearError, resumeStream, setReattachSettled } =
 		useChatSession({ chatId, initialMessages, initialError, initiallyInFlight });
 
+	const controller = useOptionalInteractionLayers();
 	const sessionFindScopeRef = useRef<HTMLDivElement | null>(null);
 	const scrollContextRef = useRef<StickToBottomContext | null>(null);
 	const sourceTextParts = useMemo(() => firstSourceTextParts(messages), [messages]);
@@ -325,12 +328,13 @@ export function Chat({
 	// F2 opens the title rename (the chat header owns the editing state).
 	useEffect(() => {
 		const onRename = () => {
+			if (!isInteractionScopeEligible(sessionFindScopeRef.current, controller)) return;
 			setTitleDraft(titleText);
 			setRenaming(true);
 		};
 		window.addEventListener("lh:kbd-rename-session", onRename);
 		return () => window.removeEventListener("lh:kbd-rename-session", onRename);
-	}, [titleText]);
+	}, [titleText, controller]);
 
 	// The OTHER rename surface (wave 6: the sidebar's inline rename): its
 	// commit dispatches the same lh:chat-renamed event this header's rename
@@ -377,6 +381,7 @@ export function Chat({
 	abortAskRef.current = abortAsk;
 	useEffect(() => {
 		const onAbort = () => {
+			if (!isInteractionScopeEligible(sessionFindScopeRef.current, controller)) return;
 			const target = escAbortTarget({
 				abortAsk: abortAskRef.current !== null,
 				mermaidFocus: mermaidFocusRef.current !== null || figureFocusRef.current !== null,
@@ -395,7 +400,7 @@ export function Chat({
 		};
 		window.addEventListener("lh:kbd-abort-turn", onAbort);
 		return () => window.removeEventListener("lh:kbd-abort-turn", onAbort);
-	}, []);
+	}, [controller]);
 	const confirmAbort = useCallback(
 		(mode: AbortMode) => {
 			setAbortAsk(null);
@@ -528,10 +533,12 @@ export function Chat({
 	// thinking row to one state — transcript rows default open, so the
 	// first press collapses everything, the second re-expands.
 	useEffect(() => {
-		const onToggle = () => setAllUserThinkingOpen(!currentUserThinkingOpen());
+		const onToggle = () => {
+			if (isInteractionScopeEligible(sessionFindScopeRef.current, controller)) setAllUserThinkingOpen(!currentUserThinkingOpen());
+		};
 		window.addEventListener(kbdEventForChat("toggle-user-thinking"), onToggle);
 		return () => window.removeEventListener(kbdEventForChat("toggle-user-thinking"), onToggle);
-	}, []);
+	}, [controller]);
 	const applyReadingThinking = useCallback((v: string) => {
 		readingThinkingRef.current = v;
 	}, []);
@@ -723,9 +730,9 @@ export function Chat({
 			dictationWasActiveRef.current = true;
 		} else if (dictationWasActiveRef.current) {
 			dictationWasActiveRef.current = false;
-			composerInputRef.current?.focus();
+			if (isInteractionScopeEligible(composerInputRef.current, controller)) composerInputRef.current!.focus();
 		}
-	}, [dictation.active]);
+	}, [dictation.active, controller]);
 
 	// Jobs never gate the composer (contracts.ts "THE ASYNC PROTOCOL" §4): job
 	// tools resolve with an ack mid-turn, so the learner can interject while
@@ -784,7 +791,7 @@ export function Chat({
 	 * self-guards on nextReady, so the listener is inert outside the
 	 * pause — the dock-mounted listeners are gone by then (docks unmount
 	 * when nothing is active; the two never overlap). */
-	useEnterSubmits(sendNext);
+	useEnterSubmits(sendNext, sessionFindScopeRef);
 
 	const syncFromServer = useCallback(async () => {
 		const res = await fetch(`/api/chats/${chatId}`);
@@ -1310,10 +1317,12 @@ export function Chat({
 								value={titleDraft}
 								onChange={(e) => setTitleDraft(e.target.value)}
 								onKeyDown={(e) => {
+									if (!isInteractionScopeEligible(e.currentTarget, controller)) return;
 									if (e.key === "Enter") void commitRename(titleDraft);
 									// stopPropagation claims the Esc (keyboard wave A):
 									// closing rename must not also abort a turn.
 									else if (e.key === "Escape") {
+										controller?.claimEscape(e);
 										e.stopPropagation();
 										setRenaming(false);
 									}
@@ -1996,6 +2005,7 @@ function DockOverlay({
 	 *  home and /chat/new carry, above the composer while slots are unset. */
 	setupCta?: React.ReactNode;
 }) {
+	const controller = useOptionalInteractionLayers();
 	const { isAtBottom, scrollToBottom, scrollRef } = useStickToBottomContext();
 	// Render-fresh bottom state (flicker round): the arrival block below reads
 	// it DURING RENDER — the same value the after-paint effect used to read a
@@ -2226,7 +2236,7 @@ function DockOverlay({
 	useEffect(() => {
 		if (!pending || expanded) return;
 		const onKeyDown = (e: KeyboardEvent) => {
-			if (e.key !== "Enter" || e.altKey) return;
+			if (e.key !== "Enter" || e.altKey || e.defaultPrevented || !isInteractionScopeEligible(blockRef.current, controller)) return;
 			if (e.shiftKey && !e.metaKey && !e.ctrlKey) return;
 			const t = e.target as HTMLElement | null;
 			if (
@@ -2244,7 +2254,7 @@ function DockOverlay({
 		};
 		document.addEventListener("keydown", onKeyDown);
 		return () => document.removeEventListener("keydown", onKeyDown);
-	}, [pending, expanded]);
+	}, [pending, expanded, controller]);
 
 	useEffect(() => {
 		const el = scrollRef.current;

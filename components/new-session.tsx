@@ -6,6 +6,8 @@ import { Conversation, ConversationContent, ConversationEmptyState } from "@/com
 import { Composer } from "@/components/composer";
 import { DictationBar, joinDictation, useDictation } from "@/components/dictation";
 import { useFieldCycle } from "@/components/field-cycle";
+import { useOptionalInteractionLayers } from "./interaction-layers";
+import { isInteractionScopeEligible } from "./plugin-input-focus";
 import { SidebarToggle } from "@/components/sidebar";
 import { SetupDialog } from "@/components/setup-dialog";
 import { useModelSetup, selectedModelUnavailable, openModelPicker, ZeroKeysPill } from "@/components/setup-cta";
@@ -108,6 +110,7 @@ export function DraftShell({
 	 *  Passed as a node so the pick state stays in NewSession. */
 	overlay?: ReactNode;
 }) {
+	const controller = useOptionalInteractionLayers();
 	// Voice dictation (STT wave, 2026-09-17): finals append at the end of the
 	// draft text (via the parent's onChange — the truth lives there); the
 	// strip lives in the stats bar's middle slot.
@@ -145,9 +148,9 @@ export function DraftShell({
 			dictationWasActiveRef.current = true;
 		} else if (dictationWasActiveRef.current) {
 			dictationWasActiveRef.current = false;
-			composerInputRef.current?.focus();
+			if (isInteractionScopeEligible(composerInputRef.current, controller)) composerInputRef.current!.focus();
 		}
-	}, [dictation.active]);
+	}, [dictation.active, controller]);
 	return (
 		/* CHROME-LESS CREATION SURFACE (owner round 11, 2026-10-05): the
 		 * drafts join home's register — no TopBar, no title (the serif title

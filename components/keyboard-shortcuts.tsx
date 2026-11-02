@@ -1,16 +1,15 @@
 "use client";
 
 /**
- * Keyboard shortcuts (shortcut wave A, 2026-09-17) — the single document-level
- * keydown listener. Owns the pieces that belong to no surface in particular:
+ * Keyboard shortcuts — window-bubble fallback and registry dispatch.
+ * Shared interaction layers own early event snapshots and dismissal:
  *
  * - Tab is DEAD: browser tab-focus navigation is abandoned by owner decision
- *   (2026-09-17). Tab is suppressed everywhere (preventDefault, no-op) and
- *   Shift+Tab cycles the thinking level instead.
- * - Esc is a layered dismiss: topmost popover first (popovers stopPropagation
- *   on their own Esc — usePopoverDismiss + ModelControl), then dictation
- *   CANCEL (discard the transcript, owner 2026-09-17 round 3), then abort of
- *   an in-flight turn.
+ *   (2026-09-17). Provider capture prevents native defaults without stopping
+ *   leaf handlers. Explicit field/row and thinking cycles remain scoped.
+ * - Escape reaches dictation cancellation / turn abort only if no original
+ *   layer or leaf editor owned it. Closing a layer never exposes this
+ *   fallback to the same physical key.
  * - Global actions dispatch lh:kbd-<action> window events; surfaces that are
  *   mounted listen (the lh:chat-renamed pattern). A surface that isn't
  *   mounted simply doesn't listen — an F2 on the graph view is a no-op, not
@@ -23,8 +22,9 @@
  * event first and can claim it with stopPropagation.
  */
 
-import { useEffect, useRef, useState } from "react";
-import { useBackdropDismiss } from "@/components/backdrop-dismiss";
+import { useEffect, useId, useRef, useState } from "react";
+import { HostDialog } from "@/components/host-dialog";
+import { useOptionalInteractionLayers } from "@/components/interaction-layers";
 import { useRouter } from "next/navigation";
 import {
 	actionForBinding,
@@ -36,9 +36,8 @@ import {
 	KEYBOARD_ACTIONS,
 } from "@/src/core";
 import { isDictationActive } from "@/components/dictation";
-import { dispatchFocusedPluginShortcut } from "@/components/plugin-input-focus";
+import { dispatchFocusedPluginShortcut, hasLegacyInteractionForeground, isInteractionScopeEligible } from "@/components/plugin-input-focus";
 import { useSettingsDialog } from "@/components/settings/settings-dialog.tsx";
-import { useKnowledgePickerForeground } from "@/components/knowledge-picker-foreground";
 
 // Re-exported for the contract pin (tests/keyboard-toggle-sidebar.test.ts):
 // the dispatcher composes event names through the ONE helper — a second
@@ -49,7 +48,7 @@ export function KeyboardShortcuts() {
 	const router = useRouter();
 	const [cheatOpen, setCheatOpen] = useState(false);
 	const { open: openSettings } = useSettingsDialog();
-	const { store: pickerForeground } = useKnowledgePickerForeground();
+	const controller = useOptionalInteractionLayers();
 
 	// Router + cheat + settings state inside a ref so the keydown listener
 	// (attached once) never goes stale.
@@ -62,15 +61,12 @@ export function KeyboardShortcuts() {
 
 	useEffect(() => {
 		const onKeyDown = (e: KeyboardEvent) => {
-			// ── Tab is dead (owner, 2026-09-17): preventDefault even when
-			// nothing is bound to it — browser tab-focus is abandoned, and
-			// the default action runs after dispatch, so suppressing it here
-			// works from any focus.
+			// Provider capture already suppressed native Tab without stopping
+			// target propagation. Keep the legacy unprovided fixture fallback.
 			if (e.key === "Tab") {
-				e.preventDefault();
-				if (pickerForeground?.hasActivePicker()) return;
+				if (!controller) e.preventDefault();
 				if (e.shiftKey) {
-					if (!dispatchFocusedPluginShortcut("cycle-thinking"))
+					if (!dispatchFocusedPluginShortcut("cycle-thinking", controller))
 						window.dispatchEvent(new CustomEvent("lh:kbd-cycle-thinking"));
 				}
 				// Plain Tab cycles the active surface's text fields (owner,
@@ -84,12 +80,9 @@ export function KeyboardShortcuts() {
 			}
 
 			if (e.key === "Escape") {
-				// Our own overlay is the topmost layer.
-				if (cheatOpen) {
-					setCheatOpen(false);
-					e.preventDefault();
-					return;
-				}
+				// The provider snapshots before leaf handlers. A closed/blocked
+				// original owner never exposes this fallback to the same event.
+				if (e.defaultPrevented || (controller ? controller.isEscapeOwned(e) : hasLegacyInteractionForeground(document))) return;
 				// THE ONE-ESC LAW (owner, keyboard round 2026-10-06): one
 				// Esc, one action, on the topmost active layer. Field-level
 				// handlers claim at their element (focus in a field: the
@@ -111,7 +104,8 @@ export function KeyboardShortcuts() {
 				return;
 			}
 
-			// ── Registry dispatch.
+			// ── Registry dispatch. Leaf editors/rebinding keep their claims.
+			if (e.defaultPrevented) return;
 			const action = actionForBinding(eventBinding(e));
 			if (!action) return;
 
@@ -144,13 +138,16 @@ export function KeyboardShortcuts() {
 					window.dispatchEvent(new CustomEvent(kbdEventForAction(action)));
 					break;
 				default:
-					if (!dispatchFocusedPluginShortcut(action))
-						window.dispatchEvent(new CustomEvent(kbdEventForAction(action)));
+					if (dispatchFocusedPluginShortcut(action, controller)) break;
+					// Core dictation is a background-page service, not a modal
+					// command. A foreground plugin gets its focused claim above.
+					if (action === "toggle-dictation" && !isInteractionScopeEligible(document.body, controller)) break;
+					window.dispatchEvent(new CustomEvent(kbdEventForAction(action)));
 			}
 		};
 		window.addEventListener("keydown", onKeyDown);
 		return () => window.removeEventListener("keydown", onKeyDown);
-	}, [cheatOpen, pickerForeground]);
+	}, [controller]);
 
 	return <CheatSheet open={cheatOpen} onClose={() => setCheatOpen(false)} />;
 }
@@ -159,8 +156,7 @@ export function KeyboardShortcuts() {
  *  Until the settings milestone ships an editor, this is how shortcuts
  *  stay discoverable. */
 function CheatSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
-	const backdropDismiss = useBackdropDismiss(onClose);
-	if (!open) return null;
+	const headingId = useId();
 	const scopes = ["global", "chat", "graph"] as const;
 	const scopeLabels: Record<(typeof scopes)[number], string> = {
 		global: "Global",
@@ -168,17 +164,18 @@ function CheatSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
 		graph: "Graph view",
 	};
 	return (
-		<div
-			data-testid="cheat-sheet"
-			className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
-			{...backdropDismiss}
-		>
-			<div
+		<HostDialog open={open} onClose={() => { onClose(); return "closed"; }} aria-labelledby={headingId}
+			backdropProps={{
+				"data-testid": "cheat-sheet",
+				className: "fixed inset-0 z-50 flex items-center justify-center bg-black/50",
+			}}
+			frame={<div
 				className="max-h-[80vh] w-full max-w-[36rem] overflow-y-auto rounded-xl border bg-card p-5 shadow-2xl"
 				onClick={(e) => e.stopPropagation()}
-			>
+			/>}
+		>
 				<div className="mb-4 flex items-baseline justify-between">
-					<span className="text-sm font-medium text-card-foreground">Keyboard shortcuts</span>
+					<span id={headingId} role="heading" aria-level={2} className="text-sm font-medium text-card-foreground">Keyboard shortcuts</span>
 					<span className="text-xs text-muted-foreground">Esc to close</span>
 				</div>
 				{scopes.map((scope) => {
@@ -202,7 +199,6 @@ function CheatSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
 						</div>
 					);
 				})}
-			</div>
-		</div>
+		</HostDialog>
 	);
 }

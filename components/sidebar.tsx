@@ -25,7 +25,8 @@ import { notifySettingsSaved } from "@/components/settings-signal";
 import { PluginWidgets } from "@/components/plugins";
 import { PluginSidebarActions } from "@/components/plugin-chrome";
 import { HostContentRootContext } from "@/components/host-content-root";
-import { KnowledgePickerForegroundProvider } from "@/components/knowledge-picker-foreground";
+import { isInteractionScopeEligible } from "@/components/plugin-input-focus";
+import { InteractionLayersProvider, useInteractionLayers, useOptionalInteractionLayers } from "@/components/interaction-layers";
 
 /**
  * Toggleable sidebar — NOT a modal drawer: no backdrop, no focus theft. It
@@ -343,6 +344,7 @@ export function SessionRow({
  *  The meta line stays so the row never changes height mid-edit. */
 export function RenameRow({ chat, onCommit, onCancel }: { chat: ChatListItem; onCommit: (next: string) => void; onCancel: () => void }) {
 	const [draft, setDraft] = useState(chat.title);
+	const interactions = useOptionalInteractionLayers();
 	const inputRef = useRef<HTMLInputElement | null>(null);
 	useEffect(() => {
 		const el = inputRef.current;
@@ -373,6 +375,8 @@ export function RenameRow({ chat, onCommit, onCancel }: { chat: ChatListItem; on
 					onKeyDown={(e) => {
 						if (e.key === "Enter") e.currentTarget.blur();
 						if (e.key === "Escape") {
+							if (interactions && !interactions.isElementEligible(e.currentTarget)) return;
+							interactions?.claimEscape(e);
 							e.stopPropagation(); // discard, not also the sidebar/chat chains
 							onCancel();
 						}
@@ -394,6 +398,7 @@ export type SessionKindFilter = "teach" | "all" | "practice";
 const KIND_FILTER_KEY = "lh:session-kind-filter";
 
 function SessionsSidebar() {
+	const interactions = useInteractionLayers();
 	const { open, toggle } = useSidebar();
 	const [chats, setChats] = useState<ChatListItem[] | null>(null);
 	const [query, setQuery] = useState("");
@@ -568,24 +573,15 @@ function SessionsSidebar() {
 	useEffect(() => {
 		if (ctxChatId === null) return;
 		const onPointerDown = (e: PointerEvent) => {
+			if (!interactions.isElementEligible(document.querySelector<HTMLElement>('[data-testid="session-context-menu"]'))) return;
 			const target = e.target as Node;
 			if (target instanceof Element && target.closest("[data-lh-menu]")) return;
 			if (ctxAnchorRef.current?.contains(target)) return;
 			setCtxChatId(null);
 		};
-		const onKeyDown = (e: KeyboardEvent) => {
-			if (e.key === "Escape") {
-				e.stopPropagation();
-				setCtxChatId(null);
-			}
-		};
 		document.addEventListener("pointerdown", onPointerDown);
-		document.addEventListener("keydown", onKeyDown);
-		return () => {
-			document.removeEventListener("pointerdown", onPointerDown);
-			document.removeEventListener("keydown", onKeyDown);
-		};
-	}, [ctxChatId]);
+		return () => document.removeEventListener("pointerdown", onPointerDown);
+	}, [ctxChatId, interactions]);
 
 	// Inline rename (owner ruling, wave 6): the row swaps to a text input;
 	// commit rides the SAME plumbing as the header rename — PUT the title,
@@ -626,14 +622,15 @@ function SessionsSidebar() {
 
 	useEffect(() => {
 		const onFocusSearch = () => {
+			if (interactions.getActiveModal() || interactions.getTopLayer()?.kind === "popup") return;
 			if (!open) toggle();
 			// A clipped (overflow-hidden) input still focuses — the sidebar's
 			// slide-in doesn't gate the keystroke.
-			requestAnimationFrame(() => searchRef.current?.focus());
+			requestAnimationFrame(() => { if (isInteractionScopeEligible(searchRef.current, interactions)) searchRef.current?.focus(); });
 		};
 		window.addEventListener("lh:kbd-sessions-search", onFocusSearch);
 		return () => window.removeEventListener("lh:kbd-sessions-search", onFocusSearch);
-	}, [open, toggle]);
+	}, [open, toggle, interactions]);
 
 	// Keep the kbd-selected row in view (the rows are the container's only
 	// buttons, so the index matches).
@@ -748,6 +745,8 @@ function SessionsSidebar() {
 							// doesn't also fire.
 							onKeyDown={(e) => {
 								if (e.key === "Escape") {
+									if (!interactions.isElementEligible(e.currentTarget)) return;
+									interactions.claimEscape(e);
 									e.stopPropagation();
 									e.currentTarget.blur();
 									return;
@@ -872,7 +871,7 @@ function SessionsSidebar() {
 				    (owner ruling — no more). MenuShell owns placement/focus/arrow
 				    cycling; the dismissal effect above owns the contract. */}
 				{ctxChatId !== null && (
-					<MenuShell
+					<MenuShell onClose={() => { setCtxChatId(null); return "closed"; }}
 						anchorRef={ctxAnchorRef}
 						testid="session-context-menu"
 						preferredSide="down"
@@ -950,7 +949,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 	const [contentRoot, setContentRoot] = useState<HTMLElement | null>(null);
 	return (
 		<HostContentRootContext.Provider value={contentRoot}>
-			<KnowledgePickerForegroundProvider><SettingsDialogProvider>
+			<InteractionLayersProvider><SettingsDialogProvider>
 				<SessionsSidebar />
 				<FilePathDropZone className="relative min-w-0 flex-1" onContentRoot={setContentRoot}>{children}</FilePathDropZone>
 				{/* The single document-level keydown listener (keyboard wave A) —
@@ -958,7 +957,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 				    matters for the events it dispatches, never for DOM priority. */}
 				<KeyboardShortcuts />
 				<PluginWidgets />
-			</SettingsDialogProvider></KnowledgePickerForegroundProvider>
+			</SettingsDialogProvider></InteractionLayersProvider>
 		</HostContentRootContext.Provider>
 	);
 }

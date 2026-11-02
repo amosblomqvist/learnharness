@@ -6,6 +6,8 @@ import os from "node:os";
 import path from "node:path";
 import { parseHTML } from "linkedom";
 import { createRoot } from "react-dom/client";
+import { AppRouterContext } from "next/dist/shared/lib/app-router-context.shared-runtime.js";
+import { installModalDom } from "./modal-dom.ts";
 import type { GraphSnapshot, SourceDirectory } from "../src/core/index.ts";
 import type { PluginKnowledgePickerProps, PluginWidgetHandle } from "../src/core/plugin-ui.ts";
 
@@ -19,11 +21,13 @@ fs.mkdirSync(process.env.HOME, { recursive: true });
 fs.writeFileSync(process.env.LH_AUTH_FILE, "{}");
 after(() => { process.env = environment; fs.rmSync(scratch, { recursive: true, force: true }); });
 const { createPluginUiStore, PluginUiHost } = await import("../components/plugin-ui-host.tsx");
-const { HostContentRootContext } = await import("../components/host-content-root.tsx");
+const { InteractionLayersProvider, useInteractionLayers } = await import("../components/interaction-layers.tsx");
+const { KeyboardShortcuts } = await import("../components/keyboard-shortcuts.tsx");
+const { useFieldCycle } = await import("../components/field-cycle.ts");
 const { ServerEventsProvider } = await import("../components/server-events.tsx");
 const { DeleteSourceDialog } = await import("../components/delete-source-dialog.tsx");
-const { KnowledgePickerForegroundProvider } = await import("../components/knowledge-picker-foreground.tsx");
 const { SessionFind } = await import("../components/session-find.tsx");
+const { SettingsDialogProvider, useSettingsDialog } = await import("../components/settings/settings-dialog.tsx");
 
 const graph: GraphSnapshot = {
 	nodes: [], edges: [], logicalEdges: [], impLinks: [], nodeSessions: {}, clusters: [],
@@ -43,13 +47,9 @@ function deferred<T>() {
 }
 
 type Fixture = Awaited<ReturnType<typeof fixture>>;
-async function fixture(options: { withSessionFind?: boolean; missingProvider?: boolean; missingRoot?: boolean; value?: readonly string[]; disabled?: boolean; fetch?: typeof fetch } = {}) {
-	const dom = parseHTML("<html><body><div id='root'></div><aside id='sidebar'></aside><main id='content'><div id='transcript'>Session text</div><div id='target'>plugin-owned</div></main></body></html>");
-	let active: Element = dom.document.body;
-	Object.defineProperty(dom.document, "activeElement", { get: () => active });
-	const nativeFocus = dom.window.HTMLElement.prototype.focus;
+async function fixture(options: { withSessionFind?: boolean; withKeyboard?: boolean; withSettings?: boolean; missingProvider?: boolean; value?: readonly string[]; disabled?: boolean; fetch?: typeof fetch } = {}) {
+	const dom = parseHTML("<!doctype html><html><body><div id='root'></div><aside id='sidebar'></aside><main id='content'><div id='transcript'>Session text</div><input id='background-composer' /><div id='target'>plugin-owned</div><div id='second-target'></div></main></body></html>");
 	const nativeSelect = dom.window.HTMLInputElement.prototype.select;
-	dom.window.HTMLElement.prototype.focus = function () { active = this; };
 	dom.window.HTMLInputElement.prototype.select = function () {};
 	const nativeClick = dom.window.HTMLInputElement.prototype.click;
 	dom.window.HTMLInputElement.prototype.click = function () { if (this.type === "checkbox") this.checked = !this.checked; nativeClick.call(this); };
@@ -59,12 +59,12 @@ async function fixture(options: { withSessionFind?: boolean; missingProvider?: b
 		React, window: dom.window, self: dom.window, document: dom.document, HTMLElement: dom.window.HTMLElement,
 		Element: dom.window.Element, Node: dom.window.Node, HTMLInputElement: dom.window.HTMLInputElement,
 		HTMLTextAreaElement: dom.window.HTMLTextAreaElement, CustomEvent: dom.window.CustomEvent,
-		MutationObserver: class { observe() {} disconnect() {} },
 		IS_REACT_ACT_ENVIRONMENT: true, innerWidth: 1024, innerHeight: 800,
 		requestAnimationFrame: () => 0, cancelAnimationFrame: () => {},
 		fetch: (async (url, init) => {
 			requests.push({ url: String(url), init });
 			if (options.fetch) return options.fetch(url, init);
+			if (url === "/api/settings") return Response.json({ settings: { version: 1, appearance: { background: "#141414" } } });
 			assert.equal(init?.method, undefined, "opening/selecting must never mutate data");
 			if (url === "/api/graph") return Response.json(graph);
 			assert.equal(url, "/api/graph/sources");
@@ -73,6 +73,7 @@ async function fixture(options: { withSessionFind?: boolean; missingProvider?: b
 	};
 	const saved = new Map(Object.keys(values).map((key) => [key, Object.getOwnPropertyDescriptor(globalThis, key)]));
 	Object.assign(globalThis, values);
+	const cleanupModalDom = installModalDom(dom);
 	const store = createPluginUiStore();
 	const lifetime = new AbortController(); const scope = new AbortController();
 	const ui = store.createUi({ signal: lifetime.signal, onError: (error) => errors.push(error) });
@@ -86,15 +87,26 @@ async function fixture(options: { withSessionFind?: boolean; missingProvider?: b
 	let handle!: PluginWidgetHandle<PluginKnowledgePickerProps>;
 	let showDialog!: () => void;
 	let dialogClosed = 0;
+	let controller: ReturnType<typeof useInteractionLayers> | undefined;
+	let openSettings: ReturnType<typeof useSettingsDialog>["open"] = () => {};
+	function Controls() {
+		controller = useInteractionLayers();
+		openSettings = useSettingsDialog().open;
+		useFieldCycle(() => [document.querySelector<HTMLInputElement>("#background-composer")!]);
+		return options.withKeyboard ? <KeyboardShortcuts /> : null;
+	}
+	const router = { bfcacheId: "fixture", back() {}, forward() {}, refresh() {}, hmrRefresh() {}, push() {}, replace() {}, async prefetch() {} };
 	function Host() {
 		const [dialog, setDialog] = useState(false);
 		showDialog = () => setDialog(true);
-		const body = <HostContentRootContext.Provider value={options.missingRoot ? null : content}>
+		const body = <>
 				<PluginUiHost store={store} />
+				{!options.missingProvider && <Controls />}
 				{options.withSessionFind && <SessionFind scopeRef={{ current: document.querySelector<HTMLDivElement>("#transcript") }} scrollContextRef={{ current: null }} />}
 				<DeleteSourceDialog open={dialog} sources={[]} folders={[]} onDelete={async () => {}} onClose={() => { dialogClosed++; setDialog(false); }} />
-			</HostContentRootContext.Provider>;
-		return <ServerEventsProvider connect={connect}>{options.missingProvider ? body : <KnowledgePickerForegroundProvider>{body}</KnowledgePickerForegroundProvider>}</ServerEventsProvider>;
+			</>;
+		const settingsBody = options.withSettings ? <SettingsDialogProvider>{body}</SettingsDialogProvider> : body;
+		return <AppRouterContext.Provider value={router}><ServerEventsProvider connect={connect}>{options.missingProvider ? settingsBody : <InteractionLayersProvider>{settingsBody}</InteractionLayersProvider>}</ServerEventsProvider></AppRouterContext.Provider>;
 	}
 	await act(async () => {
 		root.render(<Host />);
@@ -102,12 +114,15 @@ async function fixture(options: { withSessionFind?: boolean; missingProvider?: b
 	});
 	return {
 		dom, store, ui, lifetime, scope, handle, target, content, requests, errors, calls, showDialog,
+		get controller() { assert.ok(controller); return controller; },
+		async openSettings(section = "appearance") { await act(async () => { openSettings(section); }); },
 		notify(name: string) { notifications.get(name)?.("{}"); }, resync() { resync(); },
 		get dialogClosed() { return dialogClosed; },
 		async dispose() {
 			await act(async () => { lifetime.abort(); root.unmount(); });
+			await new Promise(resolve => setTimeout(resolve, 0));
+			cleanupModalDom();
 			dom.window.HTMLInputElement.prototype.click = nativeClick;
-			dom.window.HTMLElement.prototype.focus = nativeFocus;
 			dom.window.HTMLInputElement.prototype.select = nativeSelect;
 			for (const [key, descriptor] of saved) {
 				if (descriptor) Object.defineProperty(globalThis, key, descriptor); else Reflect.deleteProperty(globalThis, key);
@@ -116,15 +131,20 @@ async function fixture(options: { withSessionFind?: boolean; missingProvider?: b
 		async unmountHost() { await act(async () => root.unmount()); },
 	};
 }
-async function click(f: Fixture, testid: string) {
-	const target = document.querySelector<HTMLElement>(`[data-testid="${testid}"]`);
+async function click(f: Fixture, testid: string, within: ParentNode = document) {
+	const target = within.querySelector<HTMLElement>(`[data-testid="${testid}"]`);
 	assert.ok(target, testid);
-	await act(async () => target.dispatchEvent(new f.dom.window.Event("click", { bubbles: true })));
+	await act(async () => {
+		if (target.matches("button:not([disabled])")) target.focus();
+		target.dispatchEvent(new f.dom.window.Event("click", { bubbles: true }));
+	});
+	await new Promise(resolve => setTimeout(resolve, 0));
 }
 async function escape(f: Fixture, target: EventTarget = document) {
 	const event = new f.dom.window.Event("keydown", { bubbles: true, cancelable: true });
 	Object.assign(event, { key: "Escape" });
 	await act(async () => { target.dispatchEvent(event); });
+	await new Promise(resolve => setTimeout(resolve, 0));
 	return event;
 }
 const overlay = () => document.querySelector('[data-testid="chain-table-overlay"]');
@@ -154,21 +174,28 @@ it("an already-open chat finder keeps its state and yields Escape to the foregro
 	} finally { await f.dispose(); }
 });
 
-it("a missing foreground provider reports normally without private ownership fallback", async () => {
+it("a missing interaction provider reports normally without private ownership fallback", async () => {
 	const f = await fixture({ missingProvider: true });
 	try {
 		await click(f, "practice-props-chip"); assert.equal(overlay(), null); assert.equal(f.requests.length, 0); assert.equal(f.errors.length, 1);
 	} finally { await f.dispose(); }
 });
 
-it("lazily loads the actual shared picker inside the host column, with its sidebar toggle and source controls", async () => {
+it("lazily loads the real Chains interface as one full-window modal, preserving its source controls", async () => {
 	const f = await fixture();
 	try {
 		assert.equal(f.requests.length, 0);
 		assert.equal(f.target.querySelector('[data-testid="practice-props-chip"]')?.textContent, "Pick nodes");
 		await click(f, "practice-props-chip");
 		assert.deepEqual(f.requests.map((r) => r.url), ["/api/graph", "/api/graph/sources"]);
-		assert.equal(overlay()?.parentElement, f.content);
+		const modal = overlay()!.closest<HTMLElement>('[role="dialog"]'); assert.ok(modal);
+		assert.equal(modal.style.position, "fixed"); assert.equal(modal.style.inset, "0");
+		assert.equal(f.content.contains(overlay()), false, "picker is no longer limited to the content column");
+		assert.equal(document.body.contains(modal), true);
+		assert.equal(f.controller.getSnapshot().filter(layer => layer.kind === "modal").length, 1);
+		assert.equal(f.controller.getSnapshot().filter(layer => layer.kind === "view").length, 0, "one physical picker surface has one interaction owner");
+		assert.equal(document.querySelector("#sidebar")!.getAttribute("aria-hidden"), "true");
+		assert.equal((document.querySelector("#sidebar") as HTMLElement).style.display, "");
 		assert.match(overlay()!.className, /absolute inset-0/);
 		assert.equal(document.querySelector("#sidebar")!.children.length, 0);
 		assert.ok(overlay()!.querySelector('[data-testid="chain-table"]'));
@@ -289,7 +316,7 @@ for (const ending of ["dispose", "widget abort", "navigation abort", "host unmou
 	});
 }
 
-it("graph HTTP failures are observed and can be retried; missing host context reports without a body fallback", async () => {
+it("graph HTTP failures are observed and can be retried", async () => {
 	let failed = true;
 	const f = await fixture({ fetch: async (url) => {
 		if (failed) return Response.json({}, { status: 500 });
@@ -299,11 +326,6 @@ it("graph HTTP failures are observed and can be retried; missing host context re
 		await click(f, "practice-props-chip"); assert.equal(overlay(), null); assert.equal(f.errors.length, 1);
 		failed = false; await click(f, "practice-props-chip"); assert.ok(overlay());
 	} finally { await f.dispose(); }
-	const missing = await fixture({ missingRoot: true });
-	try {
-		await click(missing, "practice-props-chip");
-		assert.equal(missing.errors.length, 1); assert.equal(overlay(), null); assert.equal(missing.requests.length, 0);
-	} finally { await missing.dispose(); }
 });
 
 it("one Escape closes an actual foreground core dialog, not the picker beneath it", async () => {
@@ -325,7 +347,7 @@ it("an actual host menu takes Escape before the picker and preserves controlled 
 	try {
 		await click(f, "practice-props-chip");
 		await act(async () => {
-			f.ui.openMenu(f.target, { items: [{ key: "item", label: "Item", onSelect() {} }] }, { signal: f.scope.signal });
+			f.ui.openMenu(document.querySelector<HTMLElement>('[data-testid="chain-table-close"]')!, { items: [{ key: "item", label: "Item", onSelect() {} }] }, { signal: f.scope.signal });
 		});
 		assert.ok(document.querySelector("[data-lh-menu]"));
 		await escape(f);
@@ -373,5 +395,219 @@ for (const stale of ["response", "error"] as const) it(`source reads abort on cl
 		await act(async () => { f.lifetime.abort(); });
 		assert.equal(second.aborted, true); assert.equal(overlay(), null);
 		assert.deepEqual(f.errors, []);
+	} finally { await f.dispose(); }
+});
+
+async function publicOrigin(f: Fixture) {
+	let mounts = 0, cleanups = 0;
+	const input = document.createElement("input"); input.value = "parent draft";
+	const target = document.createElement("div");
+	let picker!: PluginWidgetHandle<PluginKnowledgePickerProps>;
+	let dialog!: ReturnType<typeof f.ui.openDialog>;
+	const selections: string[][] = [];
+	await act(async () => {
+		dialog = f.ui.openDialog({ title: "Origin", content(container, signal) {
+			mounts++; container.append(input, target);
+			picker = f.ui.mountKnowledgePicker(target, { value: ["a"], onChange(ids) { selections.push([...ids]); picker.update({ value: ids }); } }, { signal });
+			return () => { cleanups++; picker.dispose(); };
+		} }, { signal: f.scope.signal });
+	});
+	return { input, target, picker, dialog, selections, get mounts() { return mounts; }, get cleanups() { return cleanups; } };
+}
+
+for (const action of ["Done", "X", "Escape"] as const) it(`a public dialog origin stays painted/mounted and regains its own state/focus after picker ${action}`, async () => {
+	const f = await fixture();
+	try {
+		const origin = await publicOrigin(f);
+		const parent = origin.input.closest<HTMLElement>('[role="dialog"]')!;
+		const frame = origin.input.closest<HTMLElement>("[data-plugin-ui-dialog]")!;
+		origin.input.value = "edited parent draft";
+		await click(f, "practice-props-chip", origin.target);
+		assert.ok(overlay()); assert.equal(origin.mounts, 1); assert.equal(origin.cleanups, 0);
+		assert.equal(parent.isConnected, true); assert.equal(parent.hidden, false); assert.notEqual(parent.style.display, "none");
+		assert.equal(frame.hidden, false); assert.notEqual(frame.style.display, "none");
+		assert.equal(parent.hasAttribute("inert"), true); assert.equal(parent.getAttribute("aria-hidden"), "true");
+		assert.equal(f.controller.getSnapshot().length, 2, "parent modal + picker modal, no duplicate table view");
+		if (action === "Done") await click(f, "chain-practice-done");
+		else if (action === "X") await click(f, "chain-table-close");
+		else await escape(f);
+		assert.equal(overlay(), null); assert.equal(origin.mounts, 1); assert.equal(origin.cleanups, 0);
+		assert.equal(origin.input.isConnected, true); assert.equal(origin.input.value, "edited parent draft");
+		assert.equal(parent.hasAttribute("inert"), false); assert.notEqual(parent.getAttribute("aria-hidden"), "true");
+		assert.equal(document.activeElement, origin.target.querySelector('[data-testid="practice-props-chip"]'));
+		assert.match(origin.target.textContent!, /1 node selected/); assert.equal(origin.selections.length, 0);
+	} finally { await f.dispose(); }
+});
+
+it("a newer public dialog owns Escape/focus without hiding or destroying the picker underneath", async () => {
+	const f = await fixture({ value: ["a"] });
+	try {
+		await click(f, "practice-props-chip"); const picker = overlay()!;
+		const input = document.createElement("input"); input.value = "new dialog draft";
+		await act(async () => { f.ui.openDialog({ title: "Later", content: input }, { signal: f.scope.signal }); });
+		const parent = picker.closest<HTMLElement>('[role="dialog"]')!;
+		assert.equal(parent.hidden, false); assert.notEqual(parent.style.display, "none"); assert.equal(parent.hasAttribute("inert"), true);
+		await escape(f); assert.equal(input.isConnected, false); assert.equal(overlay(), picker);
+		assert.equal(parent.contains(document.activeElement), true, "closing a later dialog resumes focus within the picker");
+		await escape(f); assert.equal(overlay(), null);
+	} finally { await f.dispose(); }
+});
+
+it("disposing a public origin while its picker is open cleans up owned content without resurrection", async () => {
+	const f = await fixture();
+	try {
+		const origin = await publicOrigin(f); await click(f, "practice-props-chip", origin.target);
+		assert.ok(overlay());
+		await act(async () => { origin.dialog.dispose(); });
+		await new Promise(resolve => setTimeout(resolve, 0));
+		assert.equal(overlay(), null); assert.equal(origin.input.isConnected, false);
+		assert.equal(origin.cleanups, 1); assert.equal(f.controller.getSnapshot().length, 0);
+	} finally { await f.dispose(); }
+});
+
+it("Tab retains native-default prevention and never cycles into covered composer fields", async () => {
+	const f = await fixture({ withKeyboard: true });
+	try {
+		await click(f, "practice-props-chip");
+		const search = document.querySelector<HTMLInputElement>('[data-testid="chain-table-search"]')!; search.focus();
+		for (const shiftKey of [false, true]) {
+			const event = new f.dom.window.Event("keydown", { bubbles: true, cancelable: true });
+			Object.assign(event, { key: "Tab", shiftKey });
+			await act(async () => { search.dispatchEvent(event); });
+			assert.equal(event.defaultPrevented, true); assert.equal(document.activeElement, search);
+		}
+		await click(f, "chain-table-close");
+		await act(async () => { window.dispatchEvent(new f.dom.window.CustomEvent("lh:kbd-cycle-fields")); });
+		assert.equal(document.activeElement, document.querySelector("#background-composer"), "the existing explicit binding still works after dismissal");
+	} finally { await f.dispose(); }
+});
+
+it("a newer modal revokes an outstanding graph read and its late response never promotes", async () => {
+	const read = deferred<Response>();
+	const f = await fixture({ fetch: async url => url === "/api/graph" ? read.promise : Response.json(directory) });
+	try {
+		await click(f, "practice-props-chip");
+		const signal = f.requests[0]!.init!.signal!;
+		const input = document.createElement("input");
+		await act(async () => { f.ui.openDialog({ title: "Later", content: input }, { signal: f.scope.signal }); });
+		assert.equal(signal.aborted, true);
+		await act(async () => { read.resolve(Response.json(graph)); });
+		assert.equal(overlay(), null); assert.equal(input.isConnected, true); assert.deepEqual(f.errors, []);
+		await escape(f); assert.equal(overlay(), null, "closing later UI never resumes a revoked request");
+	} finally { await f.dispose(); }
+});
+
+for (const stale of ["response", "error"] as const) it(`a newer pending picker aborts the old read, ignores its late ${stale}, and survives old disposal`, async () => {
+	const reads = [deferred<Response>(), deferred<Response>()]; let nextRead = 0;
+	const f = await fixture({ value: ["a"], fetch: async url => url === "/api/graph" ? reads[nextRead++]!.promise : Response.json(directory) });
+	try {
+		const secondTarget = document.querySelector<HTMLElement>("#second-target")!;
+		let second!: PluginWidgetHandle<PluginKnowledgePickerProps>;
+		await act(async () => { second = f.ui.mountKnowledgePicker(secondTarget, { value: ["b"], onChange() {} }, { signal: f.scope.signal }); });
+		await click(f, "practice-props-chip", f.target); const first = f.requests[0]!.init!.signal!;
+		await click(f, "practice-props-chip", secondTarget); assert.equal(first.aborted, true);
+		await act(async () => { reads[1]!.resolve(Response.json(graph)); }); assert.ok(overlay());
+		assert.equal(document.querySelectorAll('[data-testid="chain-table-overlay"]').length, 1);
+		await act(async () => {
+			f.handle.dispose();
+			if (stale === "response") reads[0]!.resolve(Response.json(graph)); else reads[0]!.reject(new Error("late read failure"));
+		});
+		assert.ok(overlay()); assert.deepEqual(f.errors, []);
+		await click(f, "chain-table-close"); assert.equal(overlay(), null);
+		assert.match(secondTarget.textContent!, /1 node selected/);
+		await act(async () => { second.dispose(); });
+	} finally { await f.dispose(); }
+});
+
+it("cached selectors replace the exact retiring registration once, retaining IDs and ignoring stale cleanup", async () => {
+	const f = await fixture({ value: ["a"] });
+	try {
+		const secondTarget = document.querySelector<HTMLElement>("#second-target")!;
+		let second!: PluginWidgetHandle<PluginKnowledgePickerProps>;
+		await act(async () => { second = f.ui.mountKnowledgePicker(secondTarget, { value: ["b"], onChange() {} }, { signal: f.scope.signal }); });
+		await click(f, "practice-props-chip", secondTarget); await click(f, "chain-table-close");
+		await click(f, "practice-props-chip", f.target);
+		await click(f, "practice-props-chip", secondTarget);
+		assert.equal(document.querySelectorAll('[data-testid="chain-table-overlay"]').length, 1);
+		assert.equal(f.controller.getSnapshot().filter(layer => layer.kind === "modal").length, 1);
+		assert.match(f.target.textContent!, /1 node selected/); assert.match(secondTarget.textContent!, /1 node selected/);
+		await act(async () => { f.handle.dispose(); }); assert.ok(overlay());
+		await click(f, "chain-table-close"); assert.equal(overlay(), null);
+		await click(f, "practice-props-chip", secondTarget); assert.ok(overlay());
+		assert.equal(f.requests.filter(request => request.url === "/api/graph").length, 2);
+		await act(async () => { second.dispose(); });
+	} finally { await f.dispose(); }
+});
+
+it("accepted source writes outlive picker disposal and do not mutate selection or resurrect its modal", async () => {
+	const write = deferred<Response>(); let accepted = false;
+	const f = await fixture({ value: ["a"], fetch: async (url, init) => {
+		if (init?.method === "POST") { accepted = true; assert.equal(init.signal, undefined); return write.promise; }
+		return Response.json(url === "/api/graph" ? graph : directory);
+	} });
+	try {
+		await click(f, "practice-props-chip");
+		const event = new f.dom.window.Event("drop", { bubbles: true, cancelable: true });
+		Object.assign(event, { dataTransfer: { getData: () => JSON.stringify({ kind: "source", id: "chat" }) } });
+		await act(async () => { document.querySelector('[data-testid="source-root-drop"]')!.dispatchEvent(event); });
+		assert.equal(accepted, true);
+		await act(async () => { f.handle.dispose(); }); assert.equal(overlay(), null);
+		await act(async () => { write.resolve(Response.json(directory)); });
+		assert.equal(overlay(), null); assert.deepEqual(f.calls, []); assert.deepEqual(f.errors, []);
+	} finally { await f.dispose(); }
+});
+
+for (const action of ["Done", "X", "Escape"] as const) it(`Settings origin stays painted with state and scroll intact after picker ${action}`, async () => {
+	const f = await fixture({ withSettings: true });
+	try {
+		await f.openSettings();
+		const frame = document.querySelector<HTMLElement>('[data-testid="settings-dialog"]')!;
+		const boundary = frame.closest<HTMLElement>('[role="dialog"]')!;
+		const content = document.querySelector<HTMLElement>('[data-testid="settings-content"]')!;
+		const background = document.querySelector('[data-testid="input-background"]'); assert.ok(background);
+		content.scrollTop = 53;
+		const custom = document.createElement("div"), input = document.createElement("input");
+		input.value = "custom settings draft"; frame.append(custom); custom.append(input);
+		let handle!: PluginWidgetHandle<PluginKnowledgePickerProps>;
+		await act(async () => { handle = f.ui.mountKnowledgePicker(custom, { value: ["a"], onChange(ids) { handle.update({ value: ids }); } }, { signal: f.scope.signal }); });
+		await click(f, "practice-props-chip", custom);
+		assert.ok(overlay()); assert.equal(boundary.hidden, false); assert.notEqual(boundary.style.display, "none");
+		assert.equal(frame.hidden, false); assert.notEqual(frame.style.display, "none"); assert.equal(boundary.hasAttribute("inert"), true);
+		assert.equal(document.querySelector('[data-testid="input-background"]'), background);
+		if (action === "Done") await click(f, "chain-practice-done");
+		else if (action === "X") await click(f, "chain-table-close");
+		else await escape(f);
+		assert.equal(overlay(), null); assert.equal(document.querySelector('[data-testid="settings-dialog"]'), frame);
+		assert.equal(document.querySelector('[data-testid="input-background"]'), background);
+		assert.equal(content.scrollTop, 53); assert.equal(input.value, "custom settings draft");
+		assert.equal(document.activeElement, custom.querySelector('[data-testid="practice-props-chip"]'));
+		assert.equal(boundary.hasAttribute("inert"), false);
+		await act(async () => { handle.dispose(); }); custom.remove();
+	} finally { await f.dispose(); }
+});
+
+it("fresh Settings nests above an active picker and closing it returns focus into the still-active picker", async () => {
+	const f = await fixture({ withSettings: true });
+	try {
+		await click(f, "practice-props-chip"); const picker = overlay()!;
+		await f.openSettings(); assert.ok(document.querySelector('[data-testid="settings-dialog"]'));
+		const boundary = picker.closest<HTMLElement>('[role="dialog"]')!;
+		assert.equal(boundary.isConnected, true); assert.equal(boundary.hidden, false); assert.notEqual(boundary.style.display, "none");
+		assert.equal(boundary.hasAttribute("inert"), true);
+		await escape(f); assert.equal(document.querySelector('[data-testid="settings-dialog"]'), null);
+		assert.equal(overlay(), picker); assert.equal(boundary.contains(document.activeElement), true);
+		await escape(f); assert.equal(overlay(), null);
+	} finally { await f.dispose(); }
+});
+
+it("successful explicit Settings opening revokes a pending picker instead of letting its graph completion promote", async () => {
+	const read = deferred<Response>();
+	const f = await fixture({ withSettings: true, fetch: async url => url === "/api/graph" ? read.promise : Response.json({ settings: { version: 1 } }) });
+	try {
+		await click(f, "practice-props-chip"); const signal = f.requests.find(request => request.url === "/api/graph")!.init!.signal!;
+		await f.openSettings(); assert.equal(signal.aborted, true);
+		await act(async () => { read.resolve(Response.json(graph)); });
+		assert.equal(overlay(), null); assert.ok(document.querySelector('[data-testid="settings-dialog"]'));
+		await escape(f); assert.equal(overlay(), null); assert.deepEqual(f.errors, []);
 	} finally { await f.dispose(); }
 });

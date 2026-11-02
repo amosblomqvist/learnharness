@@ -2,7 +2,7 @@ import React from "react";
 (globalThis as Record<string, unknown>).React = React;
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { renderToStaticMarkup } from "react-dom/server";
+import { renderWithInteractionLayers as renderToStaticMarkup } from "./interaction-layer-render.tsx";
 import { PluginViewScreen } from "../components/plugin-view.tsx";
 import { SettingsDialogProvider } from "../components/settings/settings-dialog.tsx";
 import { mountPluginChrome } from "./helpers/plugin-chrome.tsx";

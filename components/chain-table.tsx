@@ -54,7 +54,7 @@
  * Read-only toward the graph.
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import {
 	ChevronDownIcon,
 	ChevronRightIcon,
@@ -74,7 +74,7 @@ import { EditableSourceName, SourceDragRow, sourceNameMatches, SourceFolderTree,
 import { chainRow, useChainNavigation } from "./chain-navigation";
 import { useServerEvent, useServerResync } from "./server-events";
 import { TopBar } from "@/components/top-bar";
-import { sessionFindHasForegroundLayer } from "./session-find";
+import { InteractionLayerOwner, useInteractionLayer } from "./interaction-layers";
 import { DeleteSourceDialog } from "@/components/delete-source-dialog";
 import { LatexGlyph } from "@/components/latex-glyph";
 
@@ -694,8 +694,11 @@ export function ChainTableOverlay({
 	controlledSelection,
 	onSelectionChange,
 	keyboardActive = true,
+	registerInteraction = true,
 }: {
 	open: boolean;
+	/** A full-window picker already registers this surface through its modal shell. */
+	registerInteraction?: boolean;
 	/** Internal host ownership; ordinary practice keeps the existing default. */
 	keyboardActive?: boolean;
 	nodes: GraphNode[];
@@ -782,26 +785,12 @@ export function ChainTableOverlay({
 		else setInternalSelection(next);
 	};
 
-	// Esc dismisses (unless a dialog has focus — each dialog's own Esc
-	// owns its layer; all listen on window, so the guards are explicit).
-	useEffect(() => {
-		if (!open || deleteOpen || !keyboardActive) return;
-		const onKeyDown = (e: KeyboardEvent) => {
-			if (e.key === "Escape") {
-				// App Router delegates React events on document too: a child's
-				// stopPropagation cannot silence a sibling document listener.
-				if (e.defaultPrevented || sessionFindHasForegroundLayer(document) || (e.target instanceof Element && e.target.closest('[data-testid="source-name-input"]'))) return;
-				// THE ONE-ESC LAW (owner, keyboard round 2026-10-06): claim
-				// at the document level — the window chain (dictation →
-				// abort) must not also act. One Esc, one action.
-				e.preventDefault();
-				e.stopPropagation();
-				onClose();
-			}
-		};
-		document.addEventListener("keydown", onKeyDown);
-		return () => document.removeEventListener("keydown", onKeyDown);
-	}, [open, deleteOpen, keyboardActive, onClose]);
+	const rootRef = useRef<HTMLDivElement>(null);
+	const inheritedOwner = useContext(InteractionLayerOwner);
+	const layer = useInteractionLayer({
+		kind: "view", enabled: open && keyboardActive && registerInteraction, rootRef,
+		onClose: () => { onClose(); return "closed"; },
+	});
 
 	if (!open) return null;
 
@@ -821,8 +810,9 @@ export function ChainTableOverlay({
 	};
 
 	return (
-		<>
+		<InteractionLayerOwner.Provider value={registerInteraction && keyboardActive ? layer.id : inheritedOwner}>
 			<div
+				ref={rootRef}
 				data-testid="chain-table-overlay"
 				className="absolute inset-0 z-40 flex flex-col bg-background/80 backdrop-blur-sm"
 			>
@@ -890,6 +880,6 @@ export function ChainTableOverlay({
 					mutationTail.current = operation; return operation;
 				}}
 			/>}
-		</>
+		</InteractionLayerOwner.Provider>
 	);
 }

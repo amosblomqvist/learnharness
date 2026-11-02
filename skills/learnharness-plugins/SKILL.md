@@ -5,7 +5,8 @@ description: Build, inspect, or debug a trusted-local LearnHarness plugin using 
 
 # LearnHarness plugin authoring
 
-First read `docs/plugin-authoring.md`, `docs/plugin-architecture.md`, and the actual
+First read `docs/plugin-authoring.md`, `docs/plugin-architecture.md`, the authoritative
+`docs/dialog-overlay-contract.md`, and the actual
 contracts `src/core/plugins.ts`, `src/core/plugin-ui.ts`, `src/core/plugin-agents.ts`,
 and `src/core/plugin-workers.ts` in the matching app
 checkout. These paths are repository-relative, not relative to an installed plugin.
@@ -46,42 +47,56 @@ bundles can be emitted with `node scripts/build-plugin-types.mjs`.
   returns `update(partialProps)`/`dispose()`; updates are shallow, so replace whole
   nested preset props. Plugin callbacks own values/persistence; feed accepted values
   back into handles. Model/thinking selectors never write core settings.
-- The additive API v1 knowledge picker (Settings/dialog foreground extension final
-  verification pending)
-  uses `ctx.ui.mountKnowledgePicker(container, { value, onChange, disabled? }, { signal })`:
+- The additive API v1 knowledge picker uses
+  `ctx.ui.mountKnowledgePicker(container, { value, onChange, disabled? }, { signal })`:
   `value: readonly string[]` of node IDs, `onChange(ids)`, standard `update`/`dispose`.
   Plugins own bubble placement, controlled selection and persistence; the host never
   writes plugin state. Reuse the exact `NodePickerControl` and real `ChainTableOverlay`,
-  not copies: Pick nodes/count/Clear (`[]`), opening full app content-column Chains
-  including the top-bar area with sidebar accessible, never an inline embed. Checkbox
-  changes update immediately; feed IDs back with `handle.update({ value: ids })`.
-  Done/X/Escape close keeping selection; reopening retains it. Support ordinary views,
-  plugin Settings and public `ctx.ui.openDialog` content with the same API/props/signal;
-  no new plugin-side lifetime requirement. A launching modal stays mounted/stateful but
-  temporarily hidden while the selector is active; Done/X/Escape close only the selector
-  and restore origin state/focus. The selector foregrounds on opening, not above all
-  future UI: a newer public dialog or menu foregrounds normally. **Any Settings open**
-  closes the active/pending selector from any origin (view, Settings, public dialog),
-  retains controlled selection and opens/deep-links Settings normally. Closing Settings
-  never auto-resumes that picker; do not merely cover it for later restoration. This
-  does not approve broader Settings/public-dialog overlap or a general modal-stack rule.
-  Only one selector is active; another opening closes the previous picker without clearing
-  its controlled IDs, with no auto-resume. Old async loads must not promote old selectors
-  over newer UI. App-shell/provider coordination is host-internal, not a general overlay
-  framework. The host supplies canonical
-  graph/source organization, lazy first-open loading following new-practice behavior,
-  focus/portals and abort cleanup. Preserve user-driven source rename, folder creation
-  and drag organization: selection mode is **not read-only**. Management Delete stays
-  unavailable in practice-picker mode. The backend learning API remains read-only;
-  existing host UI edits do not expose new programmable core writes. No generic host
-  deck/library-tree API exists; deck tree/state/membership/limits stay plugin-owned.
+  not copies: Pick nodes/count/Clear (`[]`), immediate checkbox updates reflected via
+  `handle.update({ value: ids })`. The plugin picker is a **full-window modal** with
+  existing translucent/blurred Chains visuals; background/sidebar are inactive. Core
+  Graph/Practice Chains remain nonmodal, content-column bounded and sidebar-interactive.
+  Done/X and unconsumed selector-owned Escape close only it, retain selection and restore
+  eligible focus. Ordinary views, plugin Settings and public `ctx.ui.openDialog` content
+  use the same API/props/signal and lifetime contract. Launching parents stay mounted,
+  **painted/visible underneath and inert**, preserving state/scroll—not `display: none`.
+  New public dialogs/menus foreground normally. Fresh Settings nests above the picker
+  without discarding it; returning to existing Settings uses guarded top-down close
+  callbacks, stopping on blocked/handled/pending, with no queued navigation or forced
+  cancellation. Retarget only after return-to succeeds. One selector uses a shared
+  exclusive opening slot and normal close guards; closing the previous selector retains
+  controlled IDs without auto-reopening it. Newer UI/retarget invalidates older pending
+  graph loads so they cannot promote stale UI. The host supplies canonical graph/source
+  organization, lazy first-open loading, focus/portals and abort cleanup. Preserve source
+  rename, folder creation and dragging: selection mode is **not read-only**. Management
+  Delete stays unavailable in practice-picker mode. Backend learning APIs remain read-only;
+  no programmable core-write/deck-tree API is added. Deck state/membership/limits stay
+  plugin-owned. The shared foundation/modal picker passed the final 3,665-test and packaged
+  gates recorded in `docs/plugin-architecture.md`; older checkpoints remain historical.
+- Follow the app-wide shared interaction contract, not the removed picker-only hiding or
+  unconditional Settings-cancels-picker experiment. Private HostDialog/interaction layers,
+  menu/popup ownership and content-view scopes expose no new public SDK APIs. One Escape
+  has one original owner, leaf-first; handled/blocked Escape cannot dismiss a parent or
+  trigger dictation/turn fallback. Tooltips are passive help, never Escape owners; keep
+  their portals associated with the owning modal and painted above its frame. Native
+  Tab/Shift+Tab navigation and focus looping stay
+  off; keep existing explicit field/thinking/question/rebinding actions scoped to eligible
+  controls. Preserve explicit initial focus, else first eligible editable field/heading,
+  not an action button. Child close restores only eligible invoking focus. Settings field
+  Escape retains/commits via normal validated blur/save without closing Settings, preserving
+  failed drafts; explicit credential Save and rename-cancel remain distinct. Newer
+  acknowledged canonical snapshots stay authoritative across close/reopen: stale responses
+  and Settings/startup GETs cannot roll back saved values/appearance; pending saves finishing
+  after reopen update the current instance. Fresh loads still read normally. Busy deletion
+  guards consume Escape without closing.
 - Composer, dictation, model and thinking are independent controls; the standard
   composer is only a convenience preset. It excludes usage/practice controls,
   attachments and default file/drop insertion. Do not turn it into a teaching dock.
   Dictation must have an explicit `onTranscript` destination; never redirect it to
   core inputs. One window-wide recording owner is shared with core; competing starts
   report “Dictation is active elsewhere”. Only focused controls claim matching
-  shortcuts; mounting alone does not steal them. Escape cancels the actual owner.
+  shortcuts; mounting alone does not steal them. A dictation-owned Escape cancels the
+  actual recording owner; Escape consumed by a higher layer must not also cancel it.
   The preset awaits finish/transcript delivery before send; coordinate that yourself
   for independent widgets. Dictation handles also expose `toggle`, `finish`, `cancel`.
 - Every enabled plugin has a dedicated Settings page, even without custom settings.

@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useLayoutEffect, useRef, type RefObject } from "react";
-import { sessionFindHasForegroundLayer } from "./session-find";
+import { isInteractionScopeEligible } from "./plugin-input-focus";
+import { useOptionalInteractionLayers } from "./interaction-layers";
 
 export interface ChainNavigationRow { key: string; depth: number; expanded?: boolean }
 export function chainRow(parts: string[], depth: number, expanded?: boolean) {
@@ -45,6 +46,7 @@ export function navigateChainRows(rows: ChainNavigationRow[], active: string | n
 }
 
 export function useChainNavigation(rootRef: RefObject<HTMLDivElement | null>, searchRef: RefObject<HTMLInputElement | null>, enabled: boolean) {
+	const controller = useOptionalInteractionLayers();
 	const active = useRef<string | null>(null);
 	const pendingEnter = useRef<string | null>(null);
 	const pendingFocus = useRef<string | null>(null);
@@ -59,7 +61,7 @@ export function useChainNavigation(rootRef: RefObject<HTMLDivElement | null>, se
 		active.current = row ? key : null;
 		if (row) {
 			row.dataset.chainNavActive = "true";
-			if (focus) { row.focus({ preventScroll: true }); row.scrollIntoView({ block: "nearest", inline: "nearest" }); }
+			if (focus && isInteractionScopeEligible(row, controller)) { row.focus({ preventScroll: true }); row.scrollIntoView({ block: "nearest", inline: "nearest" }); }
 		}
 	};
 	useLayoutEffect(() => {
@@ -79,7 +81,7 @@ export function useChainNavigation(rootRef: RefObject<HTMLDivElement | null>, se
 		if (!enabled) return;
 		const root = rootRef.current;
 		const onFind = () => {
-			if (sessionFindHasForegroundLayer(document)) return;
+			if (!isInteractionScopeEligible(rootRef.current, controller)) return;
 			searchRef.current?.focus({ preventScroll: true }); searchRef.current?.select();
 		};
 		const onPointerDown = (event: PointerEvent) => {
@@ -94,7 +96,7 @@ export function useChainNavigation(rootRef: RefObject<HTMLDivElement | null>, se
 		};
 		const onKeyDown = (event: KeyboardEvent) => {
 			if (event.defaultPrevented || event.isComposing || event.metaKey || event.ctrlKey || event.altKey || event.shiftKey || !["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", " "].includes(event.key)) return;
-			if (sessionFindHasForegroundLayer(document)) return;
+			if (!isInteractionScopeEligible(rootRef.current, controller)) return;
 			const target = event.target instanceof Element ? event.target : null;
 			if (target && !root?.contains(target) && target !== document.body && target !== document.documentElement) return;
 			const fromSearch = target === searchRef.current;
@@ -121,7 +123,7 @@ export function useChainNavigation(rootRef: RefObject<HTMLDivElement | null>, se
 		root?.addEventListener("pointerdown", onPointerDown);
 		return () => { window.removeEventListener("lh:kbd-find", onFind); document.removeEventListener("keydown", onKeyDown); root?.removeEventListener("pointerdown", onPointerDown); };
 	});
-	useEffect(() => { if (enabled && !sessionFindHasForegroundLayer(document)) rootRef.current?.focus({ preventScroll: true }); }, [enabled, rootRef]);
+	useEffect(() => { if (enabled && isInteractionScopeEligible(rootRef.current, controller)) rootRef.current?.focus({ preventScroll: true }); }, [enabled, rootRef, controller]);
 	return { focusRow(parts: string[]) {
 		const key = JSON.stringify(parts);
 		if (readRows().some((row) => row.key === key)) highlight(key, true);

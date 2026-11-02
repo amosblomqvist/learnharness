@@ -108,7 +108,8 @@ default file/drop insertion. Dictation has an explicit plugin text destination, 
 an implicit core composer/question target. There is one recording owner across core
 and plugin instances in a window; another start reports “Dictation is active elsewhere”.
 Only focused plugin controls claim their matching shortcuts, with core fallback otherwise;
-Escape cancels the actual recording owner. The preset finishes dictation and awaits
+An Escape owned by dictation cancels the recording owner; a handled Escape in a higher
+interaction layer cannot also cancel it. The preset finishes dictation and awaits
 transcript delivery before send. Independent widgets leave that coordination to the plugin.
 
 Every enabled plugin gets a dedicated Settings navigation page, even without registered
@@ -127,6 +128,38 @@ and backend validation, publishing rows only after a successful save; a custom m
 is not required for live updates, but may use `mountSettingsRows` itself. No general
 declarative UI language or host-owned plugin settings store is added.
 
+### Shared interaction foundation
+
+The [human-approved dialog/overlay contract](dialog-overlay-contract.md) governs the
+shared foundation, replacing the provisional picker-specific hiding/coordinator experiment.
+Core and plugin surfaces share private `HostDialog`/`InteractionLayersProvider`,
+`MenuShell`, popup ownership and content-view scopes. Existing visuals and domain flows
+remain; this exposes no new SDK primitives or general public overlay framework.
+
+Nested parents remain mounted and painted with state/scroll intact, but covered parents
+are inert. One physical Escape belongs to its original topmost interaction, with leaf
+handlers first; handled or blocked dismissal cannot cascade to a parent or fallback action.
+Tooltips remain passive help, not Escape-owning layers; owned portals keep them painted
+above the modal frame without intercepting the field/menu/dialog's Escape.
+Native Tab/Shift+Tab navigation and primitive looping remain off. Existing explicit
+field-cycle, question/thinking and rebinding actions remain scoped to eligible controls.
+Preserve explicit initial focus; otherwise choose the first eligible editable field or
+heading, never an action button. Child close restores eligible invoking focus only.
+Settings field Escape follows validated blur/save, retains unsuccessful drafts and keeps
+Settings open; credential Save and explicit rename cancellation retain their own rules.
+Acknowledged full settings snapshots remain authoritative across close/reopen: older
+responses and Settings/startup appearance GETs cannot undo a newer save or its appearance.
+The newest full snapshot applies its appearance slice regardless of the section written.
+A save finishing after reopen updates the current instance; fresh loads still read normally.
+Busy deletion guards consume Escape without dismissal. See the contract for canonical-save
+acknowledgements, editor-first ordering, popup-specific restoration and close outcomes.
+
+Settings is a singleton. A fresh open nests above existing surfaces without discarding
+them. Returning to existing Settings requests top-down closure through normal callbacks,
+stopping on blocked, handled-without-closing or pending outcomes. Callbacks run at most
+once per request, with no queued navigation or forced cancellation; retarget only when
+return-to succeeds. Visual ordering is not lifetime ownership.
+
 ### Knowledge selection through existing host UI
 
 The approved additive API v1 method is
@@ -138,39 +171,36 @@ host never writes plugin state.
 
 The host reuses the exact existing `NodePickerControl` and real `ChainTableOverlay`, not
 copies. The bubble shows **Pick nodes**, selected count and **Clear**; Clear emits `[]`.
-Opening it presents Chains across the full app content column, including the top-bar
-area, while the sidebar remains accessible—not an inline embed. Checkbox changes are
-immediate controlled updates. Done, X and Escape close without resetting selection;
-reopening retains the controlled IDs. The host supplies canonical graph/source organization,
+Opening it presents a **full-window modal** using the existing translucent/blurred Chains
+appearance. The background, including the sidebar, is inactive. Existing core
+Graph/Practice Chains remain nonmodal content-area views with unchanged bounds and
+sidebar interaction; only the new plugin picker gets this modal presentation. Checkbox
+changes are immediate controlled updates. Done, X and an unconsumed selector-owned
+Escape close only the selector, retain controlled IDs and restore eligible invoking focus.
+Reopening retains selection. The host supplies canonical graph/source organization,
 loads lazily at first open following the existing new-practice pattern, and handles focus,
 portals and mount-signal/disable cleanup.
 
-The approved foreground extension supports ordinary plugin views, plugin Settings and
-content inside public `ctx.ui.openDialog`, without changing the API, adding props or
-requiring a new plugin-side lifetime arrangement. An internal host provider coordinates
-with the app shell. A launching modal stays mounted and retains state, but is temporarily
-hidden while the full-column selector is active. Done, X and Escape close only the
-selector and restore the origin's state and focus.
+Ordinary plugin views, plugin Settings and public `ctx.ui.openDialog` content use the
+same public API, props and mount-signal contract. Launching Settings/public dialogs stay
+mounted, **painted and visible underneath**, preserving state and scroll, but are inert
+while covered—not `display: none`. New public dialogs and menus foreground normally.
+Fresh Settings opens above the picker without discarding it; returning to already-open
+Settings uses the shared guarded return-to rules above, not unconditional picker cancellation.
 
-Foregrounding happens at opening, not as a permanent always-on-top claim. A newer public
-dialog or menu can foreground normally. **Any Settings open** closes the active or pending
-selector from **any origin**: ordinary view, Settings or public dialog. It preserves the
-controlled IDs and performs normal Settings opening/deep-linking; closing Settings never
-automatically resumes the old picker. Settings does not merely cover the picker for later
-restoration. Broader Settings/public-dialog overlap rules remain undecided; this is not a
-general modal-stack policy.
-
-There is one active selector: opening a new one closes the previous selector without clearing its
-controlled IDs; the previous picker does not auto-resume. An older asynchronous load
-must not promote its selector over newer UI. These are scoped host-picker rules, not
-a general overlay framework.
+A generic exclusive opening slot allows one active selector through the shared controller's
+normal close guards. Closing a previous selector retains its controlled IDs; it is not
+automatically reopened. Newer UI openings or retargets invalidate old pending graph loads,
+preventing stale promotion. The old picker-only foreground coordinator is not the foundation;
+shared ordering, focus, close guards and lifecycle remain host-private.
 
 Selection mode retains user-driven source **rename**, folder **creation** and **drag
 organization**. It must not become a read-only source tree. Management Delete is not
 available in practice-picker mode, as before. These existing host UI edits do not expose
 new programmable core-write APIs or change the read-only backend learning API. Deck trees,
 state, membership and selection limits remain plugin-owned; no generic deck/library-tree
-host API is added. Final verification of the Settings/dialog foreground extension is pending.
+host API is added. The shared foundation and modal picker passed the
+[final verification gates](#shared-interaction-final-verification--2026-11-02).
 
 ## Managed agents
 
@@ -363,8 +393,9 @@ Uninstall/data deletion and automatic community updates are not part of v1.
 9. Host view shell, explicit action placements, controlled UI helpers, dedicated plugin
    settings pages and shared collapsed result presentation.
 10. Shared host worker-request admission and standalone worker activity integration.
-11. Knowledge-picker control reusing the existing host Chains/source-organization UI,
-    with an approved Settings/dialog foreground extension; final extension verification pending.
+11. Knowledge-picker control reusing the existing host Chains/source-organization UI.
+12. App-wide shared dialog/menu/popup/view-scope foundation and full-window modal plugin
+    picker integration.
 
 Validation includes focused lifecycle/storage/interaction tests, existing teaching/practice
 regressions, typecheck/lint, production build and a packaged-server smoke with disposable
@@ -384,19 +415,48 @@ teaching-extension examples now consume these public APIs. This scope does not a
 automatic sidebar chrome, core settings writes, a general UI schema, or a new worker
 execution model. Existing installed example copies are not overwritten.
 
-### Knowledge picker foreground extension — final verification pending
+### Shared interaction final verification — 2026-11-02
 
-The ordinary-view picker checkpoint passed its tests and packaged actual-browser checks,
-including source rename, folder creation and drag organization, alongside the full admission
-checks. The SDK consumer check also passed. These results do **not** verify the newly
-approved Settings/dialog foreground extension or its revised any-Settings-open closure
-rule. Final gates and actual Settings/dialog-origin browser proof remain pending; no new
-extension pass counts are claimed. Broader Settings/public-dialog overlap behavior is not
-approved by this scoped rule.
-The completed admission/activity checkpoint below is retained separately and does not
-establish picker-extension verification.
+The [approved contract](dialog-overlay-contract.md) is implemented by the shared modal,
+menu/popup, keyboard and view-scope foundation, superseding the provisional hidden-parent
+picker coordinator and unconditional any-Settings-open picker cancellation.
 
-### Worker admission and activity verification checkpoint — 2026-11-01
+Final source verification passed **3,665 / 3,665 tests across 555 suites** with fresh
+HOME/data/auth, **four example tests**, strict packaged-SDK consumer compilation **without
+`skipLibCheck`**, typecheck, ESLint (only the existing no-head warning), and diff checks.
+The final isolated production build, including the latest tooltip fixes, and full source-free smoke
+passed using **Electron's bundled Node and real Chrome**. Privacy audit of **96 NFT traces /
+273,464 entries** found **zero private roots**; all **392 app/components/src/lib files**
+were byte-identical from checkout to isolated source to standalone payload.
+
+Browser evidence covers the full-window picker, source rename/folder creation/dragging,
+painted/inert nested parents, and guarded Settings singleton return-to/deep-linking. A
+modal-owned passive Close tooltip was painted above Settings, yet one Escape closed Settings;
+a focused menu tooltip likewise left one Escape to close only the menu. Native Chromium
+editing-viewport inspection proved visible incomplete **`1e`** retained before/after Escape
+in Agent and Appearance, with no invalid writes and no input-type/stepper change or human
+fallback required. Existing field-specific canonical normalization (**`3.0 → 3`** and
+**`-5 → 12`**) also passed. Admission regression exercised **1 → 2 → 1**, FIFO/live decrease
+and panel END cancellation with **zero completed mock responses**, not paid-provider or
+real-model generation.
+
+Local artifacts: tests under `/tmp/lh-overlay-final-suite-kS7nJV`; packaged browser log
+`/tmp/lh-overlay-isolated-package-tq6SQm/final-browser.log`, evidence `evidence-A6JwY3`.
+These results do not establish signed/notarized installer behavior, a full Electron-window
+run, Windows/Linux runtime behavior or real-provider inference. The older checkpoints below
+remain historical and are not substitutes for this final verification.
+
+### Historical ordinary-view picker checkpoint — 3,530 tests
+
+The ordinary-view picker checkpoint passed **3,530 tests**, packaged actual-browser checks
+including source rename, folder creation and drag organization, the full admission checks,
+and the SDK consumer check. This is historical evidence, not verification of the current
+full-window modal picker or app-wide interaction migration.
+
+The human-requested WIP checkpoint `2c44868` recorded **3,559 tests** before this migration.
+It includes the provisional foreground experiment and is not final migration proof.
+
+### Historical worker admission and activity verification checkpoint — 2026-11-01
 
 The admission/activity increment passed **3,513 tests / 552 suites** under the default
 test runner, plus **four separate example-UI tests**, typecheck and lint (zero errors;

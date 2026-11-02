@@ -7,6 +7,7 @@ import { ConnectionDialog, ConnectionFooter, ConnectionRow } from "./connection-
 import { ChatGPTConnection } from "./chatgpt-connection";
 import { Toggle } from "./controls";
 import { useNativeSubscriptionBridge } from "./subscription-client";
+import type { CloseOutcome } from "@/components/interaction-layers";
 
 export const COPILOT_POLICY_NOTICE = "Pi's native Copilot sign-in may enable additional models whose policy is not yet configured. Models explicitly disabled by policy are not enabled. Organization restrictions still apply.";
 export const SUBSCRIPTION_BACKGROUND_HINT = "Allow LearnHarness helper agents and automatic follow-ups to use this connection.";
@@ -62,11 +63,12 @@ export function NativeSubscriptionUIProvider({ children }: { children: React.Rea
 		catch { if (mounted.current && owner === generation.current) setError(CONTROL_ERROR); }
 		finally { if (mounted.current && owner === generation.current) setOperation(null); }
 	}
-	function close() {
-		if (!dialog || busy) return;
-		if (confirm) { setConfirm(false); setError(null); return; }
-		if ((status?.pending || operation === "login") && bridge) { void control(() => bridge.cancel(dialog), true); return; }
+	function close(): CloseOutcome {
+		if (!dialog || busy) return "blocked";
+		if (confirm) { setConfirm(false); setError(null); return "handled-without-close"; }
+		if ((status?.pending || operation === "login") && bridge) { void control(() => bridge.cancel(dialog), true); return "pending"; }
 		generation.current++; setDialog(null); setError(null);
+		return "closed";
 	}
 	function beginSignIn() {
 		if (operation || busy || !status) return;

@@ -3,6 +3,8 @@
 import { useCallback, useLayoutEffect, useRef, useState } from "react";
 import { joinDictation, useDictationTarget } from "@/components/dictation";
 import { PathInput } from "@/components/path-input";
+import { useOptionalInteractionLayers } from "./interaction-layers";
+import { isInteractionScopeEligible } from "./plugin-input-focus";
 
 /**
  * The reading-thinking field (owner design 2026-10-03, "two questions per
@@ -40,6 +42,7 @@ export function ReadingThinkingField({
 	/** Primary dictation claim — true while the check is behind its reveal. */
 	claim: boolean;
 }) {
+	const controller = useOptionalInteractionLayers();
 	const [draft, setDraft] = useState(value);
 	// Appends may arrive back-to-back before React commits. Like Chat's
 	// submit mirror, this ref includes every edit synchronously.
@@ -75,7 +78,9 @@ export function ReadingThinkingField({
 				   get implicitly from their py-2. Line-height stays 1.25 (the
 				   caret law, typography round 2). */
 				onKeyDown={(e) => {
+					if (!isInteractionScopeEligible(e.currentTarget, controller)) return;
 					if (e.key === "Escape") {
+						controller?.claimEscape(e);
 						// Esc stops dictation (the strip's rule) — claimed so the
 						// window chain doesn't also read it as abort-turn.
 						e.preventDefault();

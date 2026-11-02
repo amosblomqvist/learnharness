@@ -1,22 +1,26 @@
 "use client";
 
-import { useContext, useEffect, useLayoutEffect, useRef, useState } from "react";
-import { createPortal } from "react-dom";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { GraphSnapshot, PluginKnowledgePickerProps } from "@/src/core";
 import { ChainTableOverlay } from "@/components/chain-table";
 import { NodePickerControl } from "@/components/composer-actions";
-import { HostContentRootContext } from "@/components/host-content-root";
-import { focusKnowledgePickerElement, useKnowledgePickerForeground, type KnowledgePickerLease } from "@/components/knowledge-picker-foreground";
+import { HostDialog } from "@/components/host-dialog";
+import { useOptionalInteractionLayers, type OpeningLease } from "@/components/interaction-layers";
+
+/** One replaceable selector slot in the shared controller, not a private stack. */
+const PICKER_SLOT = "knowledge-picker";
+const PICKER_LAYER = "knowledge-picker";
 
 /** The practice picker, controlled by a plugin; graph/source IO remains host-owned. */
 export function PluginKnowledgePicker({ value, onChange, disabled, signal, onError }: PluginKnowledgePickerProps & {
 	signal: AbortSignal;
 	onError: (error: unknown) => void;
 }) {
-	const contentRoot = useContext(HostContentRootContext);
-	const { store: foreground } = useKnowledgePickerForeground();
-	const lease = useRef<KnowledgePickerLease | null>(null);
-	const restoreFocus = useRef<KnowledgePickerLease | null>(null);
+	const controller = useOptionalInteractionLayers();
+	const lease = useRef<OpeningLease | null>(null);
+	const presented = useRef<OpeningLease | null>(null);
+	const waitingForRetirement = useRef(false);
+	const graphCache = useRef<GraphSnapshot | null>(null);
 	const trigger = useRef<HTMLButtonElement>(null);
 	const pending = useRef<AbortController | null>(null);
 	const alive = useRef(false);
@@ -25,45 +29,54 @@ export function PluginKnowledgePicker({ value, onChange, disabled, signal, onErr
 	const [snapshot, setSnapshot] = useState<GraphSnapshot | null>(null);
 	const [open, setOpen] = useState(false);
 	const cancelLoad = () => { pending.current?.abort(); pending.current = null; };
-	const close = () => {
+	const close = useCallback(() => {
 		cancelLoad();
-		restoreFocus.current = lease.current?.canRestoreFocus() ? lease.current : null;
-		lease.current?.release(); lease.current = null;
-		setOpen(false);
-	};
+		const owner = lease.current;
+		lease.current = null; presented.current = null; waitingForRetirement.current = false;
+		owner?.release();
+		if (alive.current) setOpen(false);
+		return "closed" as const;
+	}, []);
+	const promote = useCallback(() => {
+		const owner = lease.current;
+		if (!alive.current || signal.aborted || latest.current.disabled || !graphCache.current || !owner?.owns() || presented.current === owner) return;
+		if (!owner.ready()) { waitingForRetirement.current = true; return; }
+		waitingForRetirement.current = false;
+		if (owner.activate()) { presented.current = owner; setOpen(true); }
+	}, [signal]);
 
 	useLayoutEffect(() => {
 		alive.current = true;
-		const abort = () => { cancelLoad(); lease.current?.release(); lease.current = null; setOpen(false); };
+		// Only retry a graph-ready request waiting for its exact predecessor's
+		// unregister barrier. Other UI changes revoke pending leases centrally.
+		const unsubscribe = controller?.subscribe(() => { if (waitingForRetirement.current) promote(); });
+		const abort = () => { close(); };
 		signal.addEventListener("abort", abort, { once: true });
 		if (signal.aborted) abort();
-		return () => { alive.current = false; signal.removeEventListener("abort", abort); cancelLoad(); lease.current?.release(); lease.current = null; };
-	}, [signal]);
-	useEffect(() => {
-		if (disabled) { cancelLoad(); lease.current?.release(); lease.current = null; setOpen(false); }
-	}, [disabled]);
+		return () => {
+			alive.current = false;
+			signal.removeEventListener("abort", abort); unsubscribe?.(); close();
+		};
+	}, [controller, signal, close, promote]);
+	useEffect(() => { if (disabled) close(); }, [disabled, close]);
 
-	const visible = open && !disabled && !signal.aborted && !!contentRoot && !!lease.current?.owns();
-	const keyboardActive = visible && !!lease.current?.isForeground();
-	useEffect(() => {
-		const previous = restoreFocus.current;
-		restoreFocus.current = null;
-		if (previous?.canRestoreFocus() && !document.querySelector('[data-lh-menu],[role="menu"]')) focusKnowledgePickerElement(trigger.current);
-	});
-
+	const visible = open && !disabled && !signal.aborted && !!lease.current?.owns();
 	const change = (ids: readonly string[]) => {
 		if (!alive.current || signal.aborted || latest.current.disabled) return;
 		try { void Promise.resolve(latest.current.onChange(ids)).catch(latest.current.onError); }
 		catch (error) { latest.current.onError(error); }
 	};
 	const show = () => {
-		if (!alive.current || signal.aborted || latest.current.disabled) return;
-		if (!contentRoot) { latest.current.onError(new Error("Knowledge picker requires a host content root.")); return; }
-		if (!foreground) { latest.current.onError(new Error("Knowledge picker requires a foreground provider.")); return; }
-		if (pending.current) return;
-		const owner = foreground.reservePicker(() => { cancelLoad(); lease.current = null; restoreFocus.current = null; setOpen(false); });
+		if (!alive.current || signal.aborted || latest.current.disabled || pending.current) return;
+		if (!controller) { latest.current.onError(new Error("Interaction layers require InteractionLayersProvider in AppShell (or the test fixture)")); return; }
+		const owner: OpeningLease | null = controller.reserveOpening(PICKER_SLOT, { opener: trigger.current, onRevoke: () => {
+			if (lease.current !== owner) return;
+			cancelLoad(); lease.current = null; presented.current = null; waitingForRetirement.current = false;
+			if (alive.current) setOpen(false);
+		} });
+		if (!owner) return;
 		lease.current = owner;
-		if (snapshot) { if (owner.activate()) setOpen(true); return; }
+		if (graphCache.current) { promote(); return; }
 		const request = new AbortController();
 		pending.current = request;
 		void (async () => {
@@ -72,11 +85,10 @@ export function PluginKnowledgePicker({ value, onChange, disabled, signal, onErr
 				if (!response.ok) throw new Error("Could not read knowledge graph.");
 				const graph = await response.json() as GraphSnapshot;
 				if (!alive.current || signal.aborted || request.signal.aborted || pending.current !== request || latest.current.disabled || !owner.owns()) return;
-				setSnapshot(graph);
-				if (owner.activate()) setOpen(true);
+				graphCache.current = graph; setSnapshot(graph); promote();
 			} catch (error) {
 				if (alive.current && !signal.aborted && !request.signal.aborted && pending.current === request && owner.owns()) {
-					owner.release(); lease.current = null; latest.current.onError(error);
+					close(); latest.current.onError(error);
 				}
 			} finally { if (pending.current === request) pending.current = null; }
 		})();
@@ -84,17 +96,20 @@ export function PluginKnowledgePicker({ value, onChange, disabled, signal, onErr
 
 	return <>
 		<NodePickerControl count={new Set(value).size} onOpen={show} onClear={() => change([])} disabled={disabled} triggerRef={trigger} />
-		{snapshot && contentRoot && createPortal(<ChainTableOverlay
-			open={visible}
-			keyboardActive={keyboardActive}
-			nodes={snapshot.propositions}
-			chains={snapshot.chains}
-			sessions={snapshot.sessions}
-			fileSources={snapshot.fileSources}
-			onClose={close}
-			selectMode
-			controlledSelection={new Set(value)}
-			onSelectionChange={(ids) => change([...ids])}
-		/>, contentRoot)}
+		{snapshot && <HostDialog open={visible} layerId={PICKER_LAYER} openingLease={lease.current ?? undefined}
+			onClose={close} aria-label="Pick nodes" frame={<div className="absolute inset-0" />}>
+			<ChainTableOverlay
+				open={visible}
+				registerInteraction={false}
+				nodes={snapshot.propositions}
+				chains={snapshot.chains}
+				sessions={snapshot.sessions}
+				fileSources={snapshot.fileSources}
+				onClose={close}
+				selectMode
+				controlledSelection={new Set(value)}
+				onSelectionChange={(ids) => change([...ids])}
+			/>
+		</HostDialog>}
 	</>;
 }

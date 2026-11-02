@@ -16,7 +16,9 @@
  * both. Detection belongs to the designed wave.
  */
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { useOptionalInteractionLayers } from "../interaction-layers";
+import { isInteractionScopeEligible } from "../plugin-input-focus";
 import {
 	KEYBOARD_ACTIONS,
 	eventBinding,
@@ -48,6 +50,8 @@ export function nextOverrides(
 }
 
 export function KeyboardSection() {
+	const controller = useOptionalInteractionLayers();
+	const rootRef = useRef<HTMLDivElement>(null);
 	const [overrides, setOverrides] = useState<Partial<Record<KeyAction, string>>>({});
 	const [rebinding, setRebinding] = useState<KeyAction | null>(null);
 	const [nonce, setNonce] = useState(0);
@@ -61,6 +65,8 @@ export function KeyboardSection() {
 	useEffect(() => {
 		if (!rebinding) return;
 		const onKey = (e: KeyboardEvent) => {
+			if (!isInteractionScopeEligible(rootRef.current, controller)) return;
+			if (e.key === "Escape") controller?.claimEscape(e);
 			e.preventDefault();
 			e.stopPropagation();
 			if (e.key === "Escape") {
@@ -80,7 +86,7 @@ export function KeyboardSection() {
 		};
 		window.addEventListener("keydown", onKey, true);
 		return () => window.removeEventListener("keydown", onKey, true);
-	}, [rebinding]);
+	}, [rebinding, controller]);
 
 	function resetOne(id: KeyAction) {
 		saveOverrides(nextOverrides(loadOverrides(), id, null));
@@ -100,7 +106,7 @@ export function KeyboardSection() {
 				const actions = KEYBOARD_ACTIONS.filter((a) => a.scope === scope);
 				if (!actions.length) return null;
 				return (
-					<div key={scope} data-testid={`kbd-scope-${scope}`}>
+					<div key={scope} ref={scope === "global" ? rootRef : undefined} data-testid={`kbd-scope-${scope}`}>
 						<p className="mb-1 text-xs uppercase tracking-widest text-muted-foreground/70">{label}</p>
 						<div className="flex flex-col gap-2">
 							{actions.map((def) => {

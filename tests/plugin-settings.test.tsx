@@ -9,6 +9,8 @@ import { createPluginWindowOwner, PluginsProvider } from "../components/plugins.
 import { ServerEventsProvider } from "../components/server-events.tsx";
 import { SettingsDialogBody, SettingsDialogProvider } from "../components/settings/settings-dialog.tsx";
 import type { PluginFrontendModule, PluginInfo } from "../src/core/index.ts";
+import { InteractionLayersProvider } from "../components/interaction-layers.tsx";
+import { installModalDom } from "./modal-dom.ts";
 
 function info(id: string, enabled = true): PluginInfo {
 	return { id, enabled, status: enabled ? "active" : "disabled", revision: "one", manifest: {
@@ -19,13 +21,14 @@ function info(id: string, enabled = true): PluginInfo {
 
 it("dedicated plugin settings pages cover schema/custom/empty/loading/error, deep links, and removal", async () => {
 	const dom = parseHTML("<html><head></head><body><div id='root'></div></body></html>");
-	const keys = ["window", "self", "document", "HTMLElement", "fetch", "IS_REACT_ACT_ENVIRONMENT"] as const;
+	const keys = ["window", "self", "document", "HTMLElement", "Element", "fetch", "IS_REACT_ACT_ENVIRONMENT"] as const;
 	const saved = new Map(keys.map(key => [key, Object.getOwnPropertyDescriptor(globalThis, key)]));
 	const coreRequests: string[] = [];
 	let rejectCore!: (error: Error) => void;
 	const coreSettings = new Promise<Response>((_resolve, reject) => { rejectCore = reject; });
-	Object.assign(globalThis, { window: dom.window, self: dom.window, document: dom.document, HTMLElement: dom.window.HTMLElement,
+	Object.assign(globalThis, { window: dom.window, self: dom.window, document: dom.document, HTMLElement: dom.window.HTMLElement, Element: dom.window.Element,
 		fetch: (url: string) => { coreRequests.push(String(url)); return coreSettings; }, IS_REACT_ACT_ENVIRONMENT: true });
+	const restoreModalDom = installModalDom(dom);
 	let customMounts = 0, customCleanups = 0;
 	const changes: boolean[] = [];
 	const loading = new Promise<void>(() => {});
@@ -47,7 +50,7 @@ it("dedicated plugin settings pages cover schema/custom/empty/loading/error, dee
 	window.__lhPluginWindow = owner;
 	const router = { bfcacheId: "fixture", back() {}, forward() {}, refresh() {}, hmrRefresh() {}, push() {}, replace() {}, async prefetch() {} };
 	const connect = () => ({ close() {}, onOpen() {}, onEvent() {} });
-	const shell = (children: React.ReactNode) => <AppRouterContext.Provider value={router}><ServerEventsProvider connect={connect}><PluginsProvider>{children}</PluginsProvider></ServerEventsProvider></AppRouterContext.Provider>;
+	const shell = (children: React.ReactNode) => <InteractionLayersProvider><AppRouterContext.Provider value={router}><ServerEventsProvider connect={connect}><PluginsProvider>{children}</PluginsProvider></ServerEventsProvider></AppRouterContext.Provider></InteractionLayersProvider>;
 	const root = createRoot(document.querySelector("#root")!);
 	const click = async (selector: string) => {
 		const element = document.querySelector(selector);
@@ -101,6 +104,9 @@ it("dedicated plugin settings pages cover schema/custom/empty/loading/error, dee
 		assert.ok(document.querySelector('[data-testid="section-plugin-backend"]'), "repeating the same open request retargets after manual navigation");
 	} finally {
 		await act(async () => { root.unmount(); });
+		// Let FocusScope finish its unmount event before restoring globals.
+		await new Promise(resolve => setTimeout(resolve, 5));
+		restoreModalDom();
 		for (const key of keys) {
 			const descriptor = saved.get(key);
 			if (descriptor) Object.defineProperty(globalThis, key, descriptor); else Reflect.deleteProperty(globalThis, key);

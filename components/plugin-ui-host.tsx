@@ -11,8 +11,8 @@ import { PluginSettingsRows } from "@/components/plugin-settings-rows";
 import { Button } from "@/components/ui/button";
 import { PluginWorkerResultSurface } from "@/components/plugin-worker-result";
 import { MenuShell } from "@/components/menu-shell";
-import { useBackdropDismiss } from "@/components/backdrop-dismiss";
-import { focusKnowledgePickerElement, useKnowledgePickerModal } from "@/components/knowledge-picker-foreground";
+import { HostDialog } from "@/components/host-dialog";
+import { isInteractionElementVisible, useInteractionLayers, type CloseOutcome, type CloseReason } from "@/components/interaction-layers";
 export { PluginSettingsRows } from "@/components/plugin-settings-rows";
 
 export interface PluginUiFactoryOptions { signal: AbortSignal; onError?: (error: unknown) => void }
@@ -169,24 +169,29 @@ export function PluginUiHost({ store }: { store: PluginUiStore }) {
 function PluginMenu({ anchor, items, label, preferredSide = "down", onClose, runtime }: PluginMenuProps & { anchor: HTMLElement; runtime: Runtime }) {
 	const root = useRef<HTMLDivElement>(null);
 	const anchorRef = useRef(anchor);
-	const close = () => { invoke(onClose, runtime.report); runtime.dispose(); };
+	const controller = useInteractionLayers();
+	const closing = useRef(false);
+	const close = (reason: CloseReason = "action"): CloseOutcome => {
+		if (closing.current || runtime.signal.aborted) return "closed";
+		closing.current = true;
+		invoke(onClose, runtime.report); runtime.dispose();
+		const owner = controller.ownerOf(anchor);
+		if (reason === "escape" && isInteractionElementVisible(anchor) && (!owner || controller.isLayerEligible(owner.id))) anchor.focus();
+		return "closed";
+	};
 	useEffect(() => {
 		const pointer = (event: PointerEvent) => {
-			if (event.target instanceof Node && !root.current?.contains(event.target) && !anchor.contains(event.target)) close();
-		};
-		const key = (event: KeyboardEvent) => {
-			if (event.key !== "Escape") return;
-			event.preventDefault(); event.stopPropagation(); close(); anchor.focus();
+			if (!controller.isElementEligible(root.current)) return;
+			if (event.target instanceof Node && !root.current?.contains(event.target) && !anchor.contains(event.target)) close("outside");
 		};
 		document.addEventListener("pointerdown", pointer);
-		document.addEventListener("keydown", key, true);
-		return () => { document.removeEventListener("pointerdown", pointer); document.removeEventListener("keydown", key, true); };
+		return () => document.removeEventListener("pointerdown", pointer);
 	});
-	return <MenuShell anchorRef={anchorRef} testid="plugin-menu" preferredSide={preferredSide} menuClass="flex w-56 flex-col gap-0.5 rounded-xl border bg-card p-2 text-xs shadow-xl">
+	return <MenuShell anchorRef={anchorRef} testid="plugin-menu" onClose={close} preferredSide={preferredSide} menuClass="flex w-56 flex-col gap-0.5 rounded-xl border bg-card p-2 text-xs shadow-xl">
 		<div ref={root} role="menu" aria-label={label}>{items.map((item) => <button type="button" role="menuitem" key={item.key} disabled={item.disabled}
 			className="flex w-full rounded-lg px-2 py-1.5 text-left text-card-foreground transition-colors hover:bg-muted disabled:opacity-40"
 			onClick={() => {
-				try { void Promise.resolve(item.onSelect()).then(close).catch(runtime.report); } catch (error) { runtime.report(error); }
+				try { void Promise.resolve(item.onSelect()).then(() => close()).catch(runtime.report); } catch (error) { runtime.report(error); }
 			}}>{item.label}</button>)}</div>
 	</MenuShell>;
 }
@@ -219,51 +224,21 @@ function PluginContent({ content, runtime }: Pick<PluginDialogProps, "content"> 
 }
 
 function PluginDialog({ title, content, onClose, runtime }: PluginDialogProps & { runtime: Runtime }) {
-	const foreground = useKnowledgePickerModal();
-	const { frame, modal } = foreground;
 	const closing = useRef(false);
 	const latestOnClose = useRef(onClose);
 	latestOnClose.current = onClose;
-	const close = () => {
-		if (closing.current || runtime.signal.aborted) return;
+	const close = (): CloseOutcome => {
+		if (closing.current || runtime.signal.aborted) return "closed";
 		closing.current = true;
 		invoke(latestOnClose.current, runtime.report);
 		runtime.dispose();
+		return "closed";
 	};
-	const backdropDismiss = useBackdropDismiss(close);
-	useLayoutEffect(() => {
-		const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-		modal?.activate();
-		if (foreground.canHandle()) focusKnowledgePickerElement(frame.current);
-		return () => {
-			modal?.close();
-			if (!modal || modal.canRestoreFocus()) focusKnowledgePickerElement(previous);
-		};
-	}, [modal, frame]);
-	useEffect(() => {
-		const key = (event: KeyboardEvent) => {
-			if (!foreground.canHandle()) return;
-			// Only the uppermost plugin modal owns dismissal. A menu above it
-			// gets first refusal, and core dialogs never consume the same Esc.
-			const dialogs = document.querySelectorAll("[data-plugin-ui-dialog]:not([hidden])");
-			if (document.querySelector("[data-lh-menu]") || dialogs.item(dialogs.length - 1) !== frame.current) return;
-			if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); close(); }
-			if (event.key !== "Tab") return;
-			if (foreground.store?.hasActivePicker()) event.stopPropagation();
-			const controls = Array.from(frame.current?.querySelectorAll<HTMLElement>('button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled]),a[href],[tabindex="0"],[contenteditable="true"]') ?? []);
-			const first = controls[0]; const last = controls.at(-1);
-			if (!first) { event.preventDefault(); frame.current?.focus(); return; }
-			if (event.shiftKey && (document.activeElement === first || document.activeElement === frame.current)) { event.preventDefault(); last?.focus(); }
-			else if (!event.shiftKey && (document.activeElement === last || document.activeElement === frame.current)) { event.preventDefault(); first.focus(); }
-		};
-		document.addEventListener("keydown", key, true);
-		return () => { document.removeEventListener("keydown", key, true); };
-	});
-	return createPortal(<div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 backdrop-blur-sm" hidden={foreground.suspended} inert={foreground.suspended} style={foreground.suspended ? { display: "none" } : undefined} {...backdropDismiss}>
-		<div ref={frame} hidden={foreground.suspended} inert={foreground.suspended} style={foreground.suspended ? { display: "none" } : undefined} data-plugin-ui-dialog="" role="dialog" aria-modal="true" aria-label={title} tabIndex={-1} className="mx-4 flex max-h-[85vh] w-full max-w-lg flex-col overflow-y-auto rounded-xl border bg-card p-5 shadow-lg outline-none">
-			<div className="mb-4 flex items-center justify-between gap-4"><h2 className="text-sm font-semibold text-card-foreground">{title}</h2>
-				<Button type="button" variant="ghost" size="sm" aria-label="Close dialog" onClick={close}>Close</Button></div>
-			<PluginContent content={content} runtime={runtime} />
-		</div>
-	</div>, document.body);
+	return <HostDialog open onClose={close} aria-label={title}
+		backdropProps={{ className: "fixed inset-0 z-50 flex items-center justify-center bg-background/80 backdrop-blur-sm" }}
+		frame={<div data-plugin-ui-dialog="" tabIndex={-1} className="mx-4 flex max-h-[85vh] w-full max-w-lg flex-col overflow-y-auto rounded-xl border bg-card p-5 shadow-lg outline-none" />}>
+		<div className="mb-4 flex items-center justify-between gap-4"><h2 className="text-sm font-semibold text-card-foreground">{title}</h2>
+			<Button type="button" variant="ghost" size="sm" aria-label="Close dialog" onClick={close}>Close</Button></div>
+		<PluginContent content={content} runtime={runtime} />
+	</HostDialog>;
 }

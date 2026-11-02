@@ -5,6 +5,8 @@ import { AppRouterContext } from "next/dist/shared/lib/app-router-context.shared
 import { PluginsProvider, createPluginWindowOwner } from "../../components/plugins.tsx";
 import { ServerEventsProvider, type NotifySource } from "../../components/server-events.tsx";
 import type { PluginFrontendModule, PluginInfo } from "../../src/core/plugins.ts";
+import { InteractionLayersProvider } from "../../components/interaction-layers.tsx";
+import { installModalDom } from "../modal-dom.ts";
 
 export const pluginInfo = (id = "fixture"): PluginInfo => ({
 	id, enabled: true, status: "active", revision: "fixture-1",
@@ -31,6 +33,11 @@ export async function mountPluginChrome(frontend: PluginFrontendModule, children
 	};
 	const saved = new Map(Object.keys(globals).map(key => [key, Object.getOwnPropertyDescriptor(globalThis, key)]));
 	Object.assign(globalThis, globals);
+	const restoreModalDom = installModalDom(dom);
+	// Chrome measurement keeps its fixture-specific geometry; modal shims
+	// still supply focus, legacy-input, traversal and event support.
+	Object.assign(globalThis, { getComputedStyle: globals.getComputedStyle });
+	Object.assign(dom.window, { getComputedStyle: globals.getComputedStyle });
 	Object.defineProperty(dom.window, "innerWidth", { configurable: true, value: 900, writable: true });
 	Object.defineProperty(dom.window, "innerHeight", { configurable: true, value: 700, writable: true });
 	let width = 900;
@@ -49,14 +56,16 @@ export async function mountPluginChrome(frontend: PluginFrontendModule, children
 	const router = { bfcacheId: "fixture", back() {}, forward() {}, refresh() {}, hmrRefresh() {}, push() {}, replace() {}, async prefetch() {} };
 	const root = createRoot(document.querySelector("#root")!);
 	const render = async (content: ReactNode) => {
-		await act(async () => { root.render(<AppRouterContext.Provider value={router}><ServerEventsProvider connect={connect}><PluginsProvider>{content}</PluginsProvider></ServerEventsProvider></AppRouterContext.Provider>); });
+		await act(async () => { root.render(<InteractionLayersProvider><AppRouterContext.Provider value={router}><ServerEventsProvider connect={connect}><PluginsProvider>{content}</PluginsProvider></ServerEventsProvider></AppRouterContext.Provider></InteractionLayersProvider>); });
 	};
 	try { await render(children); }
 	catch (error) {
 		await act(async () => { root.unmount(); });
+		await new Promise(resolve => setTimeout(resolve, 5));
 		restore(); throw error;
 	}
 	function restore() {
+		restoreModalDom();
 		for (const [key, descriptor] of saved) {
 			if (descriptor) Object.defineProperty(globalThis, key, descriptor); else Reflect.deleteProperty(globalThis, key);
 		}
@@ -65,6 +74,11 @@ export async function mountPluginChrome(frontend: PluginFrontendModule, children
 		document: dom.document, owner, render,
 		async resize(value: number) { width = value; Object.defineProperty(dom.window, "innerWidth", { configurable: true, value }); await act(async () => { window.dispatchEvent(new dom.window.Event("resize")); }); },
 		async click(element: HTMLElement) { await act(async () => { element.dispatchEvent(new dom.window.Event("click", { bubbles: true })); }); },
-		async close() { await act(async () => { root.unmount(); }); restore(); },
+		async close() {
+			await act(async () => { root.unmount(); });
+			// FocusScope's delayed unmount event still needs the fixture DOM.
+			await new Promise(resolve => setTimeout(resolve, 5));
+			restore();
+		},
 	};
 }

@@ -5,6 +5,8 @@ import { ArrowRightIcon, CornerDownLeftIcon, SquareIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Hint } from "@/components/ui/hint";
 import { PathInput } from "@/components/path-input";
+import { useOptionalInteractionLayers } from "./interaction-layers";
+import { isInteractionScopeEligible } from "./plugin-input-focus";
 
 /**
  * The chat composer — content row ONLY (the persistent rounded shell lives in
@@ -144,6 +146,7 @@ export function Composer({
 	defaultDropTarget?: boolean;
 	fileInsertion?: boolean;
 }) {
+	const controller = useOptionalInteractionLayers();
 	const act = () => {
 		const action = enterAction({ busy, canSend, nextProblem });
 		if (action === "stop") onStop();
@@ -166,11 +169,13 @@ export function Composer({
 				defaultDropTarget={defaultDropTarget}
 				fileInsertion={fileInsertion}
 				onKeyDown={(e) => {
+					if (!isInteractionScopeEligible(e.currentTarget, controller)) return;
 					// Esc ends dictation before anything else Esc might someday mean
 					// here (the dictate decisions: click-again or Esc to stop).
 					// stopPropagation claims the Esc (keyboard wave A): the
 					// window-level chain must not also abort a turn under us.
 					if (e.key === "Escape" && onEscape) {
+						controller?.claimEscape(e);
 						e.preventDefault();
 						e.stopPropagation();
 						onEscape();

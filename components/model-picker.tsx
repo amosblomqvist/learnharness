@@ -7,6 +7,8 @@ import { prettyModel } from "@/components/usage-format";
 import { ModelMenuList, ThinkingMenuList } from "@/components/settings/model-menu";
 import { composeSlotModel } from "@/components/settings/agent-section";
 import { MenuShell } from "@/components/menu-shell";
+import { useInteractionLayers } from "@/components/interaction-layers";
+import { isInputShortcutScopeEligible } from "@/components/plugin-input-focus";
 import { ModelPickerPill } from "@/components/model-picker-pill";
 import { Hint } from "@/components/ui/hint";
 import { notifySettingsSaved, useSettingsSaved } from "@/components/settings-signal";
@@ -47,6 +49,7 @@ export function ModelControl({ chatId, onModelChange }: { chatId?: string; onMod
 	const [open, setOpen] = useState<"model" | "thinking" | null>(null);
 	const [error, setError] = useState<string | null>(null);
 	const containerRef = useRef<HTMLDivElement>(null);
+	const interactions = useInteractionLayers();
 
 	// The record read — BOTH mount and the cross-surface signal land
 	// here (fix wave: another surface's models write re-reads into the
@@ -122,27 +125,19 @@ export function ModelControl({ chatId, onModelChange }: { chatId?: string; onMod
 	useEffect(() => {
 		if (open === null) return;
 		const onPointerDown = (e: PointerEvent) => {
+			const popup = interactions.getTopLayer();
+			if (popup?.kind !== "popup" || !containerRef.current?.contains(popup.anchorRef?.current ?? null) || !interactions.isElementEligible(popup.rootRef.current)) return;
 			const t = e.target as Element;
 			if (t instanceof Element && t.closest("[data-lh-menu]")) return;
 			if (containerRef.current && !containerRef.current.contains(t)) {
 				setOpen(null);
 			}
 		};
-		const onKeyDown = (e: KeyboardEvent) => {
-			if (e.key === "Escape") {
-				// Claim the Esc (keyboard wave A): the window-level chain must
-				// not ALSO stop dictation / abort the turn under this menu.
-				e.stopPropagation();
-				setOpen(null);
-			}
-		};
 		document.addEventListener("pointerdown", onPointerDown);
-		document.addEventListener("keydown", onKeyDown);
 		return () => {
 			document.removeEventListener("pointerdown", onPointerDown);
-			document.removeEventListener("keydown", onKeyDown);
 		};
-	}, [open]);
+	}, [open, interactions]);
 
 	// One write seam: composeSlotModel preserves the cheap/vision siblings
 	// (replace-whole-section discipline) and the per-field independence of
@@ -228,16 +223,18 @@ export function ModelControl({ chatId, onModelChange }: { chatId?: string; onMod
 	// tab-focus. Both work from any focus, including mid-typing.
 	useEffect(() => {
 		const onOpenPicker = () => {
+			if (!isInputShortcutScopeEligible(containerRef.current, interactions)) return;
 			setOpen("model");
 			setError(null);
 			refresh(); // mid-session key changes widen the menu (cache fix)
 		};
 		window.addEventListener("lh:kbd-open-model-picker", onOpenPicker);
 		return () => window.removeEventListener("lh:kbd-open-model-picker", onOpenPicker);
-	}, [refresh]);
+	}, [refresh, interactions]);
 
 	useEffect(() => {
 		const onCycleThinking = () => {
+			if (!isInputShortcutScopeEligible(containerRef.current, interactions)) return;
 			if (levels.length === 0) return;
 			const idx = effectiveLevel === undefined ? -1 : levels.indexOf(effectiveLevel);
 			const next = levels[(idx + 1) % levels.length];
@@ -246,7 +243,7 @@ export function ModelControl({ chatId, onModelChange }: { chatId?: string; onMod
 		};
 		window.addEventListener("lh:kbd-cycle-thinking", onCycleThinking);
 		return () => window.removeEventListener("lh:kbd-cycle-thinking", onCycleThinking);
-	}, [levels, effectiveLevel, effectiveProvider, effectiveId, apply]);
+	}, [levels, effectiveLevel, effectiveProvider, effectiveId, apply, interactions]);
 
 	// Selecting a model (click and Enter share one path): keep the
 	// thinking level only when the new model supports it — otherwise
@@ -310,7 +307,7 @@ export function ModelControl({ chatId, onModelChange }: { chatId?: string; onMod
 			{open === "model" && (
 				<MenuShell
 					anchorRef={containerRef}
-					testid="model-menu"
+					testid="model-menu" onClose={() => { setOpen(null); return "closed"; }}
 					preferredSide="up"
 					menuClass="flex w-[22rem] flex-col rounded-xl border bg-card p-2 text-xs shadow-xl"
 				>
@@ -334,7 +331,7 @@ export function ModelControl({ chatId, onModelChange }: { chatId?: string; onMod
 			{open === "thinking" && (
 				<MenuShell
 					anchorRef={containerRef}
-					testid="thinking-menu"
+					testid="thinking-menu" onClose={() => { setOpen(null); return "closed"; }}
 					preferredSide="up"
 					menuClass="flex w-44 flex-col gap-0.5 rounded-xl border bg-card p-2 text-xs shadow-xl"
 				>

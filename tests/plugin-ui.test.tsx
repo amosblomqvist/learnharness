@@ -5,7 +5,10 @@ import { describe, it } from "node:test";
 import { parseHTML } from "linkedom";
 import { createRoot } from "react-dom/client";
 import { renderToStaticMarkup } from "react-dom/server";
-import { createPluginUiStore, PluginUiHost, PluginSettingsRows } from "../components/plugin-ui-host.tsx";
+import { createPluginUiStore, PluginUiHost as Host, PluginSettingsRows } from "../components/plugin-ui-host.tsx";
+import { InteractionLayersProvider } from "../components/interaction-layers.tsx";
+import { installModalDom } from "./modal-dom.ts";
+function PluginUiHost(props: React.ComponentProps<typeof Host>) { return <InteractionLayersProvider><Host {...props} /></InteractionLayersProvider>; }
 import { createTranscriptDelivery, PluginComposer } from "../components/plugin-composer.tsx";
 import { SettingsSlider } from "../components/settings/controls.tsx";
 import type { PluginWidgetHandle, PluginButtonProps, PluginSettingsSchema, PluginMenuProps, PluginDialogProps } from "../src/core/plugin-ui.ts";
@@ -20,8 +23,11 @@ async function withDom(run: (dom: ReturnType<typeof parseHTML>) => Promise<void>
 	};
 	const saved = new Map(Object.keys(values).map((key) => [key, Object.getOwnPropertyDescriptor(globalThis, key)]));
 	Object.assign(globalThis, values);
+	const restoreModalDom = installModalDom(dom);
 	try { await run(dom); }
 	finally {
+		await new Promise(resolve => setTimeout(resolve, 5));
+		restoreModalDom();
 		for (const [key, descriptor] of saved) {
 			if (descriptor) Object.defineProperty(globalThis, key, descriptor); else Reflect.deleteProperty(globalThis, key);
 		}
@@ -147,7 +153,7 @@ describe("controlled plugin UI", () => {
 					root.render(<PluginUiHost store={store} />);
 					handle = ui.openDialog({ title: "Mutable dialog", content: document.createElement("div") }, { signal: scope.signal });
 				});
-				const frame = document.querySelector<HTMLElement>('[role="dialog"]')!;
+				const frame = document.querySelector<HTMLElement>('[data-plugin-ui-dialog]')!;
 				frame.focus = () => { refocused++; };
 				await act(async () => { handle.update({ onClose: () => { closed++; } }); });
 				assert.equal(refocused, 0, "controlled callback updates must not reset dialog focus");

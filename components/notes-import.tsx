@@ -3,6 +3,8 @@
 import { useEffect, useRef, useState, useSyncExternalStore, type ChangeEvent } from "react";
 import { UploadIcon } from "lucide-react";
 import { Hint } from "@/components/ui/hint";
+import { useInteractionLayer, useInteractionLayers } from "@/components/interaction-layers";
+import { INTERACTION_LAYER_Z_BASE } from "@/components/host-dialog";
 import { createNotesImportQueue, EMPTY_IMPORT_QUEUE, notesPath } from "./notes-import-queue";
 
 export { MAX_IMPORT_BYTES } from "@/lib/notes-import-limits.ts";
@@ -95,11 +97,15 @@ export function NotesImportControl({ importing, onImportFiles }: { importing: bo
 		onImportFiles(event.target.files);
 		event.target.value = "";
 	};
+	const rootRef = useRef<HTMLDivElement>(null);
+	const panelRef = useRef<HTMLDivElement>(null);
+	const interactions = useInteractionLayers();
+	const popupLayer = useInteractionLayer({ kind: "popup", enabled: open, rootRef: panelRef, anchorRef: rootRef,
+		onClose: () => { setOpen(false); return "closed"; } });
 	const choices = [["Files", filesRef], ["Folder", folderRef]] as const;
 	return (
-		<div className="relative shrink-0 rounded-xl border bg-card/85 px-1 py-[3px] shadow-lg backdrop-blur"
-			onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget)) setOpen(false); }}
-			onKeyDown={(event) => { if (event.key === "Escape") setOpen(false); }}>
+		<div ref={rootRef} className="relative shrink-0 rounded-xl border bg-card/85 px-1 py-[3px] shadow-lg backdrop-blur"
+			onBlur={(event) => { if (interactions.isElementEligible(panelRef.current) && !event.currentTarget.contains(event.relatedTarget)) setOpen(false); }}>
 			<input ref={filesRef} type="file" multiple accept=".md,.markdown,.txt,.pdf" className="hidden" onChange={onChange} />
 			<input ref={folderRef} type="file" {...{ webkitdirectory: "" }} className="hidden" onChange={onChange} />
 			<Hint label="Import notes into the graph" side="bottom">
@@ -109,7 +115,7 @@ export function NotesImportControl({ importing, onImportFiles }: { importing: bo
 				</button>
 			</Hint>
 			{open && (
-				<div role="menu" aria-label="Import notes" className="absolute right-0 top-full z-50 mt-1 min-w-32 rounded-lg border bg-card p-1 shadow-lg">
+				<div ref={panelRef} role="menu" aria-label="Import notes" style={{ zIndex: INTERACTION_LAYER_Z_BASE + popupLayer.order }} className="absolute right-0 top-full mt-1 min-w-32 rounded-lg border bg-card p-1 shadow-lg">
 					{choices.map(([label, input]) => <button key={label} type="button" role="menuitem" className="block w-full rounded px-2 py-1 text-left text-xs hover:bg-accent"
 						onClick={() => { setOpen(false); input.current?.click(); }}>{label}</button>)}
 				</div>

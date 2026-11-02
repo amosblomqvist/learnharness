@@ -13,9 +13,12 @@ import { KeysSection } from "../components/settings/keys-section.tsx";
 import { ModelControl } from "../components/model-picker.tsx";
 import type { ChatGPTStatus, ChatGPTControlBridge } from "../src/core/index.ts";
 import { completedWithin } from "./completion.ts";
+import { InteractionLayersProvider } from "../components/interaction-layers.tsx";
+import { installModalDom } from "./modal-dom.ts";
 
 const dom = parseHTML("<html><body></body></html>");
 Object.assign(globalThis, { window: dom.window, document: dom.document, Element: dom.window.Element, HTMLElement: dom.window.HTMLElement, CustomEvent: dom.window.CustomEvent, IS_REACT_ACT_ENVIRONMENT: true, localStorage: { getItem: () => null, setItem() {} } });
+installModalDom(dom);
 const originalFetch = globalThis.fetch;
 let root: Root | undefined, host: HTMLDivElement | undefined;
 const account = (id = "private-registration-id", email = "learner@example.invalid", connected = true) => ({ id, email, registration: "private-issued-client", connected, planEnabled: connected, canSignInAgain: !connected });
@@ -55,7 +58,7 @@ function recoveryController({ writeFails = false, tokens = "valid" }: { writeFai
 }
 async function mount(children: React.ReactNode = <ChatGPTConnection />) {
  host = document.createElement("div"); document.body.append(host); root = createRoot(host);
- await act(async () => root!.render(<ChatGPTUIProvider>{children}</ChatGPTUIProvider>));
+ await act(async () => root!.render(<InteractionLayersProvider><ChatGPTUIProvider>{children}</ChatGPTUIProvider></InteractionLayersProvider>));
 }
 const byTest = (id: string) => document.querySelector<HTMLElement>(`[data-testid="${id}"]`)!;
 async function click(element: HTMLElement) { assert(element); await act(async () => element.click()); }
@@ -315,12 +318,12 @@ test("connected setup row retains the email dropdown before muted Manage", async
  fixture(connected()); await mount(<ChatGPTConnection setup />);
  const row = byTest("chatgpt-connection").firstElementChild!; assert.equal(row.children[1]!.tagName, "SELECT"); assert.equal(row.children[2]!.textContent, "Manage…"); assert.match(row.children[2]!.className, /text-muted-foreground/);
 });
-test("Add accounts reuses the existing dialog's initial focus for the pre-auth transition", async () => {
+test("Add accounts applies heading default focus for the pre-auth transition", async () => {
  const previous = HTMLElement.prototype.focus; const focused: HTMLElement[] = [];
  HTMLElement.prototype.focus = function () { focused.push(this); };
  try {
   fixture(connected()); await mount(); await click(button("Manage…")); await click(byTest("chatgpt-add-accounts"));
-  assert(focused.at(-1) === document.querySelector('select[aria-label="Saved ChatGPT account"]'));
+  assert(focused.at(-1) === byTest("chatgpt-account-dialog").querySelector("h2"));
  } finally { HTMLElement.prototype.focus = previous; }
 });
 

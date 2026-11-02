@@ -119,9 +119,20 @@ exports.activate = async (ctx) => {
 export const message = "External module loaded";
 export function mountPickerProof(ctx, container, signal, scope, mountCount) {
   const root = document.createElement("div"); root.dataset.smokePickerScope = scope;
-  root.dataset.mountCount = String(mountCount); container.append(root);
+  root.dataset.mountCount = String(mountCount);
+  root.dataset.instance = scope + ":" + mountCount;
+  root.dataset.signalAborted = String(signal.aborted); root.dataset.cleanupCount = "0";
+  signal.addEventListener("abort", () => { root.dataset.signalAborted = "true"; }, { once: true });
+  container.append(root);
   const input = document.createElement("input"); input.type = "text";
   input.dataset.smokePickerDraft = scope; input.setAttribute("aria-label", scope + " picker draft"); root.append(input);
+  const menuTrigger = document.createElement("button"); menuTrigger.type = "button";
+  menuTrigger.dataset.smokePickerMenu = scope; menuTrigger.textContent = "Open owned menu"; root.append(menuTrigger);
+  root.dataset.menuCloses = "0";
+  menuTrigger.addEventListener("click", () => ctx.ui.openMenu(menuTrigger, {
+    label: scope + " owned menu", items: [{ key: "proof", label: "Owned menu item", onSelect() {} }],
+    onClose() { root.dataset.menuCloses = String(Number(root.dataset.menuCloses) + 1); }
+  }, { signal }));
   const state = document.createElement("p"); state.dataset.smokePickerSelection = scope;
   state.dataset.callbacks = "0"; state.textContent = "[]"; root.append(state);
   let value = [];
@@ -132,7 +143,7 @@ export function mountPickerProof(ctx, container, signal, scope, mountCount) {
       state.dataset.callbacks = String(Number(state.dataset.callbacks) + 1);
     }
   }, { signal });
-  return () => root.remove();
+  return () => { root.dataset.cleanupCount = String(Number(root.dataset.cleanupCount) + 1); root.remove(); };
 }
 `;
 	fs.writeFileSync(path.join(directory, "assets", "helper.js"), helper);

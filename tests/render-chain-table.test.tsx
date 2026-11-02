@@ -25,7 +25,9 @@ import React from "react";
 (globalThis as Record<string, unknown>).React = React;
 
 import assert from "node:assert/strict";
-import { renderToStaticMarkup } from "react-dom/server";
+import { renderToStaticMarkup as renderMarkup } from "react-dom/server";
+import { InteractionLayersProvider } from "../components/interaction-layers.tsx";
+const renderToStaticMarkup = (node: React.ReactNode) => renderMarkup(<InteractionLayersProvider>{node}</InteractionLayersProvider>);
 import { describe, it } from "node:test";
 import { ChainTableBody, ChainTableOverlay } from "../components/chain-table.tsx";
 import type { ChainSort } from "../components/chain-table.tsx";

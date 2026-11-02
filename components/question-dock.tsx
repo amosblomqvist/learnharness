@@ -5,6 +5,8 @@ import { ArrowDownIcon, ChevronRightIcon, PlayIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { finishDictation, isDictationActive, joinDictation, useDictationTarget } from "@/components/dictation";
 import { useEnterSubmits } from "@/components/enter-submits";
+import { useOptionalInteractionLayers } from "./interaction-layers";
+import { isInteractionScopeEligible } from "./plugin-input-focus";
 import { PathInput } from "@/components/path-input";
 import { MalformedQuestion } from "@/components/malformed-question";
 import { ToolContentResponse } from "@/components/ai-elements/message";
@@ -264,6 +266,8 @@ function QuestionDockForm({
 	compactionRunning = false,
 }: Omit<QuestionDockProps, "expanded" | "onExpand" | "reveal">) {
 	const kind = toolQuestionKind(toolName);
+	const controller = useOptionalInteractionLayers();
+	const rootRef = useRef<HTMLDivElement>(null);
 
 	// Canonical QuestionData, built once per question. Quiz options are
 	// deterministically shuffled (seeded by toolCallId) so position never leaks
@@ -414,7 +418,7 @@ function QuestionDockForm({
 	/* ENTER SUBMITS FROM ANYWHERE (owner round 6, 2026-10-05): the same
 	 * law as the practice dock — dictated answers rarely focus the field.
 	 * Rides submit() so the dictation-flush law is shared, not forked. */
-	useEnterSubmits(submit);
+	useEnterSubmits(submit, rootRef);
 
 	// Selecting Other never clears the thinking field — two channels, the
 	// answer and the reasoning behind it, side by side.
@@ -436,7 +440,6 @@ function QuestionDockForm({
 	   The listener is document-level and lives only while the dock is
 	   expanded — collapsed, the bar's native Enter expands it. */
 	const [kbdIdx, setKbdIdx] = useState<number | null>(null);
-	const rootRef = useRef<HTMLDivElement>(null);
 	const otherInputRef = useRef<HTMLDivElement>(null);
 	const thinkingRef = useRef<HTMLDivElement>(null);
 	// One row past the options is the trailing row: quiz → don't-know,
@@ -478,6 +481,9 @@ function QuestionDockForm({
 	useEffect(() => {
 		if (!active || rowCount === 0) return;
 		const onKeyDown = (e: KeyboardEvent) => {
+			// Tab is already default-prevented by provider capture; do not
+			// treat that as a claim. Eligibility, not focus alone, owns rows.
+			if (!isInteractionScopeEligible(rootRef.current, controller)) return;
 			const t = e.target as HTMLElement | null;
 			// A TYPING field is where keys mean text (owner round 4): the
 			// thinking/answer fields, search boxes, renames — never a range
@@ -705,6 +711,7 @@ function QuestionDockForm({
 										setSel((prev) => (prev.otherSelected ? prev : toggleOther(selectMode, prev)));
 									}}
 									onKeyDown={(e) => {
+										if (!isInteractionScopeEligible(e.currentTarget, controller)) return;
 										// Esc escapes the typing (owner refinement round,
 										// 2026-09-24): focus leaves the input, the row STAYS
 										// selected — deselection is the next Space's job, acting
@@ -712,6 +719,7 @@ function QuestionDockForm({
 										// row (kbdIdx pins it). stopPropagation keeps the
 										// window chain from reading this Esc as abort-turn.
 										if (e.key === "Escape") {
+											controller?.claimEscape(e);
 											e.preventDefault();
 											e.stopPropagation();
 											e.currentTarget.blur();
@@ -857,12 +865,14 @@ function QuestionDockForm({
 								setText(value);
 							}}
 							onKeyDown={(e) => {
+								if (!isInteractionScopeEligible(e.currentTarget, controller)) return;
 								// Esc ends dictation (the dictate decisions: click-again
 								// or Esc) — stopPropagation claims it (keyboard wave
 								// A) so the window chain doesn't also abort a turn.
 								if (e.key === "Escape" && onEscape) {
 									e.preventDefault();
 									e.stopPropagation();
+									controller?.claimEscape(e);
 									onEscape();
 									return;
 								}
@@ -885,12 +895,14 @@ function QuestionDockForm({
 								setThinking(value);
 							}}
 							onKeyDown={(e) => {
+								if (!isInteractionScopeEligible(e.currentTarget, controller)) return;
 								// Esc ends dictation (the dictate decisions: click-again
 								// or Esc) — stopPropagation claims it (keyboard wave
 								// A) so the window chain doesn't also abort a turn.
 								if (e.key === "Escape" && onEscape) {
 									e.preventDefault();
 									e.stopPropagation();
+									controller?.claimEscape(e);
 									onEscape();
 									return;
 								}

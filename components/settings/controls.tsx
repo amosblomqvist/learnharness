@@ -9,7 +9,7 @@
  * control together) and the control itself locks — the row owns the dim.
  */
 
-import { useState, type ComponentPropsWithRef, type ReactNode } from "react";
+import { useLayoutEffect, useRef, useState, type ComponentPropsWithRef, type ReactNode } from "react";
 import { cn } from "@/lib/utils";
 
 /** A section block: pronounced mono heading + content. */
@@ -224,6 +224,9 @@ export function SettingsSlider({ label, min, max, step, value, display, onChange
 	</label>;
 }
 
+/** Internal acknowledgement: false retains a rejected/unsaved draft. */
+export type SettingsCommitResult = boolean | Promise<boolean>;
+
 /** A thin hex/text input committing on blur + Enter (settings pace, not
  *  typing pace — every commit is a section PUT). */
 export function CommitInput({
@@ -244,7 +247,7 @@ export function CommitInput({
 	 *  displaying "-5" while 12 was stored). */
 	value: string;
 	placeholder?: string;
-	onCommit: (next: string) => void;
+	onCommit: (next: string) => SettingsCommitResult;
 	ariaLabel: string;
 	testid?: string;
 	type?: "text" | "number";
@@ -253,15 +256,52 @@ export function CommitInput({
 	max?: number;
 	step?: number;
 }) {
-	// The draft exists only while editing; a blur shows the record's value
-	// again — commit-on-blur/Enter (owner ruling), the field honest about
-	// what landed.
-	const [draft, setDraft] = useState(value);
-	const [editing, setEditing] = useState(false);
+	// Keep the native editing buffer: number inputs can display an incomplete
+	// token while exposing value="" and badInput=true. Writing a controlled
+	// value back on blur/render would erase text we cannot reconstruct.
+	const [initialValue] = useState(value);
+	const [, renderAcknowledgement] = useState(0);
+	const input = useRef<HTMLInputElement>(null);
+	const dirty = useRef(false);
+	const revision = useRef(0);
+	const latestCommit = useRef(0);
+	const pending = useRef(new Set<number>());
+	useLayoutEffect(() => {
+		if (!dirty.current && input.current && input.current.value !== value) {
+			input.current.value = value;
+		}
+	});
+
+	const commit = async (element: HTMLInputElement) => {
+		if (disabled || !dirty.current || element.validity?.badInput) return;
+		const version = revision.current;
+		if (pending.current.has(version)) return;
+		const next = element.value.trim();
+		if (next === value && pending.current.size === 0) {
+			dirty.current = false;
+			renderAcknowledgement((n) => n + 1);
+			return;
+		}
+		const ticket = ++latestCommit.current;
+		pending.current.add(version);
+		try {
+			const accepted = await onCommit(next);
+			if (accepted && input.current === element && revision.current === version && latestCommit.current === ticket) {
+				dirty.current = false;
+				// Reconcile even when normalization accepted the old canonical value.
+				renderAcknowledgement((n) => n + 1);
+			}
+		} catch {
+			// Domain adapters own error presentation; a rejected save keeps text.
+		} finally {
+			pending.current.delete(version);
+		}
+	};
 	return (
 		<input
+			ref={input}
 			type={type}
-			value={editing ? draft : value}
+			defaultValue={initialValue}
 			placeholder={placeholder}
 			aria-label={ariaLabel}
 			data-testid={testid}
@@ -269,20 +309,16 @@ export function CommitInput({
 			min={min}
 			max={max}
 			step={step}
-			onChange={(e) => {
-				setEditing(true);
-				setDraft(e.target.value);
+			onInput={() => {
+				dirty.current = true;
+				revision.current++;
 			}}
-			onBlur={() => {
-				if (!editing) return;
-				setEditing(false);
-				const next = draft.trim();
-				if (next !== value) onCommit(next);
-			}}
+			onBlur={(e) => { void commit(e.currentTarget); }}
 			onKeyDown={(e) => {
 				if (e.key === "Enter") e.currentTarget.blur();
 				if (e.key === "Escape") {
-					setEditing(false);
+					e.preventDefault();
+					e.stopPropagation();
 					e.currentTarget.blur();
 				}
 			}}

@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import { it } from "node:test";
 import { parseHTML } from "linkedom";
 import { AgentSection } from "../components/settings/agent-section.tsx";
+import { InteractionLayersProvider } from "../components/interaction-layers.tsx";
 import type { AgentSettings } from "../src/core/index.ts";
 
 it("keyless settings keep Research interactive while search-engine setup retains its own disabled state", async () => {
@@ -36,15 +37,15 @@ it("keyless settings keep Research interactive while search-engine setup retains
 	let written: AgentSettings | undefined;
 	try {
 		await act(async () => {
-			root.render(<AgentSection
+			root.render(<InteractionLayersProvider><AgentSection
 				agent={{ tools: { research: true } }}
 				models={undefined}
 				graph={undefined}
 				compaction={undefined}
-				onSectionChange={(next) => { written = next; }}
+				onSectionChange={(next) => { written = next; return true; }}
 				onModelsChange={() => {}}
-				onCompactionChange={() => {}}
-			/>);
+				onCompactionChange={() => true}
+			/></InteractionLayersProvider>);
 		});
 		const row = document.querySelector<HTMLElement>('[data-testid="tool-row-research"]')!;
 		const toggle = row.querySelector<HTMLButtonElement>('[data-testid="toggle-tool-research"]')!;

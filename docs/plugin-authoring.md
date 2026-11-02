@@ -214,8 +214,9 @@ plugins using independent controls must coordinate that themselves.
 Dictation has one exclusive recording owner per window, including core and plugin
 controls. A competing start reports **“Dictation is active elsewhere”**, rather than
 stealing the recording. Focused plugin controls own their matching shortcuts; merely
-mounting one does not take over core shortcuts. Escape cancels the actual recording
-owner. Plugin dictation always delivers to its explicit `onTranscript` callback, never
+mounting one does not take over core shortcuts. An Escape owned by dictation cancels the
+actual recording owner; an Escape consumed by a higher layer must not also cancel it.
+Plugin dictation always delivers to its explicit `onTranscript` callback, never
 silently into a core composer/question. The plugin decides where that text goes.
 
 ### Knowledge picker
@@ -225,36 +226,39 @@ The approved knowledge-picker increment adds
 to API v1, with types in `src/core/plugin-ui.ts` included in the generated type bundle.
 `value` is a `readonly string[]` of selected node IDs; `onChange(ids)` receives the new
 ID array. It returns the standard handle with `update(partialProps)` and `dispose()`.
-Final verification of the approved Settings/dialog foreground extension is pending.
+The app-wide dialog/interaction foundation and modal picker passed
+[final verification](plugin-architecture.md#shared-interaction-final-verification--2026-11-02).
+The [dialog and overlay contract](dialog-overlay-contract.md) is authoritative and replaces
+the provisional picker-only foreground/hiding policies.
 
 The plugin chooses where to place the bubble, controls selection IDs, and owns any
 persistence. The host does not write plugin state. The bubble reuses the **exact existing
 `NodePickerControl`**: **Pick nodes**, selected count and **Clear**. Clear emits the
-controlled empty array `[]`. Clicking opens the real **`ChainTableOverlay`** in the full
-app **content column**, including the top-bar area, with the sidebar still accessible;
-it is not an inline Chains embed or a copied picker. Checkbox selection changes are
-immediate through `onChange`; reflect the new array with `handle.update({ value: ids })`,
-not a later Done commit. **Done**, **X** and **Escape** close the picker without discarding
-selection; reopening retains the controlled value.
+controlled empty array `[]`. Clicking opens the real **`ChainTableOverlay`** as a
+**full-window modal**, retaining the existing translucent/blurred Chains appearance.
+The background, **including the sidebar, is inactive**. This modal presentation is only
+for the new plugin picker: existing Graph/Practice Chains views remain nonmodal,
+content-column bounded and sidebar-interactive. It is not an inline embed or a copied
+table. Checkbox selection changes are immediate through `onChange`; reflect the new
+array with `handle.update({ value: ids })`, not a later Done commit. **Done**, **X** and
+an unconsumed **Escape** owned by the selector close only it, retain controlled selection
+and return focus to an eligible invoking element. Reopening retains the controlled value.
 
-The picker is supported from ordinary plugin views, plugin Settings and content mounted
-inside public `ctx.ui.openDialog`. When launched from a modal, that origin stays mounted
-with its state preserved but is temporarily hidden while the full-column picker is active.
-Done, X and Escape close **only the selector**, restoring the origin's state and focus.
-The picker is foregrounded when opened, not pinned above all future UI: a newer public
-dialog or menu may foreground normally. **Any Settings open** instead closes the active
-or pending picker, regardless of whether it originated in a view, Settings or a public
-dialog. Controlled selection is retained; Settings opens or deep-links normally, and
-closing Settings does **not** automatically resume the picker. This special Settings
-rule supersedes merely covering a picker and restoring it afterward. It does not define
-a broader Settings/public-dialog overlap or general modal-stack policy.
+The picker supports ordinary plugin views, plugin Settings and public `ctx.ui.openDialog`
+content without new props or plugin-side lifetime requirements. A launching Settings or
+public dialog stays **mounted, painted and visible underneath**, preserving state and
+scroll position; it is inert while covered, not hidden with `display: none`. New public
+dialogs and menus can foreground normally. A fresh Settings open nests **above** the
+picker without discarding it. Returning to an already-open Settings singleton requests
+closure of intervening layers top-down through normal callbacks, stopping on blocked,
+handled-without-closing or pending outcomes. There is no queued navigation or forced
+cancellation; Settings retargets/deep-links only after return-to succeeds.
 
-Only **one selector** is active. Opening another closes the previous selector without
-clearing its controlled selection, and the old picker does not automatically resume.
-An older asynchronous graph load cannot promote its selector over subsequently opened
-UI. The host's internal app-shell coordination owns these foreground transitions; plugins
-use the same API and mount signal, with no new props or plugin-side lifetime requirement.
-This is scoped picker integration, not a general overlay framework.
+Only **one selector** is active. Its exclusive opening slot uses the shared controller's
+normal close guards; closing a previous selector does not clear its controlled IDs or
+automatically reopen it later. Newer UI openings or retargets invalidate older pending
+graph loads so they cannot promote a stale picker. These are host-private shared
+interaction mechanisms, not a new public overlay framework or SDK API.
 
 The host supplies the graph and source organization, loading lazily on first open using
 the existing new-practice pattern, and owns focus, portals and abort/disposal cleanup.
@@ -265,6 +269,29 @@ practice-picker mode, matching existing behavior. These are existing host UI ope
 not new programmable core-write APIs: the backend learning-data API remains read-only.
 There is no generic deck/library-tree host API; deck trees, state, membership and
 selection limits remain plugin-owned.
+
+### Shared dialog and keyboard behavior
+
+Core and plugin UI use the same private modal/menu/popup/view-scope foundation;
+see the [authoritative interaction contract](dialog-overlay-contract.md). Nested parents
+remain painted and stateful; only the active modal and its owned children are interactive.
+One physical Escape has one original owner, with leaf handlers first. A handled or blocked
+Escape cannot also close a parent, cancel dictation or abort a turn. Tooltips are passive
+help, not Escape owners; their owned portals preserve visibility above the modal frame
+without intercepting the field/menu/dialog's Escape. Native Tab/Shift+Tab
+navigation stays disabled, including modal boundary looping; existing explicit field-cycle,
+question/thinking and shortcut-rebinding actions remain scoped to eligible content.
+
+Existing explicit initial-focus targets remain. Otherwise a modal focuses its first
+eligible editable text field, or its heading—not an action button. Closing a child restores
+only eligible invoking focus, falling back to the active surface's initial-focus policy.
+Settings text/number-field Escape uses normal blur/save, retains invalid/failed drafts and
+does not close Settings; acknowledged canonical values replace accepted drafts. Save
+authority survives close/reopen: older responses and Settings/startup GETs cannot overwrite
+a newer acknowledged full snapshot or its appearance. A pending save finishing after reopen
+updates the current Settings instance; fresh loads still read the server normally. Explicit
+credential Save and rename-cancel workflows retain their own rules. Busy deletion close
+guards consume dismissal without closing. These are app-wide rules, not per-picker hacks.
 
 ### Dedicated plugin settings
 

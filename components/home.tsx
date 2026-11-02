@@ -10,6 +10,8 @@ import { ComposerActions, NodePickerControl } from "@/components/composer-action
 import { useModelSetup, selectedModelUnavailable, openModelPicker, ZeroKeysPill } from "@/components/setup-cta";
 import { DictationBar, joinDictation, useDictation } from "@/components/dictation";
 import { useFieldCycle } from "@/components/field-cycle";
+import { useOptionalInteractionLayers } from "./interaction-layers";
+import { isInteractionScopeEligible } from "./plugin-input-focus";
 import { SidebarToggle } from "@/components/sidebar";
 import { StatsBar } from "@/components/stats-bar";
 import { OPENING_PROMPT_FAILURE } from "@/components/opening-prompt";
@@ -33,6 +35,7 @@ export function Home({
 	 * changing the setting applies on the next visit home. */
 	rendering?: boolean;
 }) {
+	const controller = useOptionalInteractionLayers();
 	const router = useRouter();
 	const [topic, setTopic] = useState("");
 	/* The topic MIRROR ("nothing gets lost" round, 2026-10-01 — same
@@ -82,9 +85,9 @@ export function Home({
 			dictationWasActiveRef.current = true;
 		} else if (dictationWasActiveRef.current) {
 			dictationWasActiveRef.current = false;
-			topicInputRef.current?.focus();
+			if (isInteractionScopeEligible(topicInputRef.current, controller)) topicInputRef.current!.focus();
 		}
-	}, [dictation.active]);
+	}, [dictation.active, controller]);
 
 	/* PRACTICE MODE (owner, 2026-10-04): the graph composer's teach |
 	 *  practice switch — practice creates a kind:"practice" session and
@@ -258,10 +261,12 @@ export function Home({
 						}}
 						defaultDropTarget
 						onKeyDown={(e) => {
+							if (!isInteractionScopeEligible(e.currentTarget, controller)) return;
 							// Esc ends dictation (the dictate decisions: click-again or
 							// Esc) — stopPropagation claims it (keyboard wave A) so
 							// the window chain doesn't also abort a turn.
 							if (e.key === "Escape" && dictation.active) {
+								controller?.claimEscape(e);
 								e.preventDefault();
 								e.stopPropagation();
 								dictation.cancel();

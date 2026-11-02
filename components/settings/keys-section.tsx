@@ -38,6 +38,8 @@ import { SettingsGroup } from "./controls.tsx";
 import { SubscriptionConnections } from "./subscription-connections.tsx";
 import { ClaudeCodeInstallationStatus } from "./claude-code-status.tsx";
 import { ProviderMenuList } from "./model-menu.tsx";
+import { useInteractionLayer, useInteractionLayers, useOptionalInteractionLayers } from "@/components/interaction-layers";
+import { isInteractionScopeEligible } from "@/components/plugin-input-focus";
 import { MenuShell } from "@/components/menu-shell";
 import { notifySettingsSaved } from "@/components/settings-signal";
 import { DictationLanguageSetting } from "@/components/dictation-language";
@@ -309,28 +311,20 @@ function AddProviderRow({
 }) {
 	const [open, setOpen] = useState(false);
 	const anchorRef = useRef<HTMLDivElement>(null);
+	const interactions = useInteractionLayers();
 
 	useEffect(() => {
 		if (!open) return;
 		const onPointerDown = (e: PointerEvent) => {
+			if (!interactions.isElementEligible(document.querySelector<HTMLElement>('[data-testid="add-provider-menu"]'))) return;
 			const target = e.target as Node;
 			if (anchorRef.current?.contains(target)) return;
 			if (target instanceof Element && target.closest("[data-lh-menu]")) return;
 			if (target instanceof Element && target.closest('[role="dialog"]')) setOpen(false);
 		};
-		const onKeyDown = (e: KeyboardEvent) => {
-			if (e.key === "Escape") {
-				e.stopPropagation();
-				setOpen(false);
-			}
-		};
 		document.addEventListener("pointerdown", onPointerDown);
-		document.addEventListener("keydown", onKeyDown);
-		return () => {
-			document.removeEventListener("pointerdown", onPointerDown);
-			document.removeEventListener("keydown", onKeyDown);
-		};
-	}, [open]);
+		return () => document.removeEventListener("pointerdown", onPointerDown);
+	}, [open, interactions]);
 
 	return (
 		<div ref={anchorRef} className="relative">
@@ -348,6 +342,7 @@ function AddProviderRow({
 				<MenuShell
 					anchorRef={anchorRef}
 					testid="add-provider-menu"
+					onClose={() => { setOpen(false); return "closed"; }}
 					preferredSide="down"
 					menuClass="flex w-72 flex-col rounded-xl border border-border bg-card p-2 text-xs shadow-xl"
 				>
@@ -383,31 +378,30 @@ export function KeysSection({
 	const [openRow, setOpenRow] = useState<string | null>(initialRow ?? null);
 	/** The paste editor for a freshly chosen Add-provider target. */
 	const [adding, setAdding] = useState<ProviderKeyInfo | null>(null);
+	// Only previously opened providers are cached. Escape folds their editors
+	// without destroying drafts; explicit Save/Cancel still discard them.
+	const [addingEditors, setAddingEditors] = useState<ProviderKeyInfo[]>([]);
 	const [addError, setAddError] = useState<string | null>(null);
 	/** The custom endpoint's status + whether its connect editor is open. */
 	const [custom, setCustom] = useState<CustomStatus | null>(null);
 	const [addingCustom, setAddingCustom] = useState(false);
-
-	// Escape folds any open editor (unfolded row or the Add-provider paste)
-	// WITHOUT closing the dialog. Claimed at document CAPTURE phase — the
-	// only stopPropagation that outruns both the input's React handler and
-	// the dialog's window-level listener.
-	useEffect(() => {
-		if (openRow === null && adding === null && !addingCustom) return;
-		const onKeyDown = (e: KeyboardEvent) => {
-			if (e.key !== "Escape") return;
-			// A language dropdown above this editor in the dismissal stack owns
-			// the first Escape; do not swallow it at document capture phase.
-			if (document.querySelector('[data-testid="dictation-language-menu"]')) return;
-			e.preventDefault();
-			e.stopPropagation();
+	const [customEditorMounted, setCustomEditorMounted] = useState(false);
+	const editorScopeRef = useRef<HTMLDivElement>(null);
+	useInteractionLayer({
+		kind: "view", rootRef: editorScopeRef,
+		enabled: openRow !== null || adding !== null || addingCustom,
+		onClose: () => {
 			setOpenRow(null);
 			setAdding(null);
 			setAddingCustom(false);
-		};
-		document.addEventListener("keydown", onKeyDown, true);
-		return () => document.removeEventListener("keydown", onKeyDown, true);
-	}, [openRow, adding, addingCustom]);
+			return "closed";
+		},
+	});
+	const discardCustomEditor = () => { setAddingCustom(false); setCustomEditorMounted(false); };
+	const discardProviderEditor = (id: string) => {
+		setAdding(null);
+		setAddingEditors(editors => editors.filter(provider => provider.id !== id));
+	};
 
 	const reload = async () => {
 		try {
@@ -468,7 +462,7 @@ export function KeysSection({
 	async function disconnectCustom(revision: string): Promise<string | null> {
 		const res = await fetch("/api/custom-provider", { method: "DELETE", headers: { "content-type": "application/json", "if-match": revision }, body: JSON.stringify({}) }).catch(() => null);
 		if (!res?.ok) return res ? ((await res.json().catch(() => ({}))).error ?? "Disconnect failed.") : "Disconnect failed. Check your connection.";
-		setAddingCustom(false);
+		discardCustomEditor();
 		await reload();
 		notifySettingsSaved("keys");
 		return null;
@@ -484,13 +478,13 @@ export function KeysSection({
 		const err = await saveKey(p.envVar, value);
 		if (err) setAddError(err);
 		else {
-			setAdding(null);
+			discardProviderEditor(p.id);
 			setAddError(null);
 		}
 	}
 
 	return (
-		<>
+		<div ref={editorScopeRef} className="contents">
 			<SettingsGroup label="Model API keys" testid="group-provider-keys">
 				{providerRows.map((status) => (
 					<KeyTableRow
@@ -514,23 +508,25 @@ export function KeysSection({
 					<CustomEndpointRow
 						status={custom}
 						expanded={addingCustom}
-						onToggle={() => setAddingCustom((v) => !v)}
+						onToggle={() => { setCustomEditorMounted(true); setAddingCustom((v) => !v); }}
 					/>
 				)}
-				{addingCustom && (
+				{customEditorMounted && (
+					<div hidden={!addingCustom} inert={!addingCustom} style={{ display: addingCustom ? undefined : "none" }}>
 					<CustomEndpointEditor
+						active={addingCustom}
 						revision0={custom?.revision ?? ""}
 						authMode0={custom?.authMode ?? "keyless"}
 						keySource0={custom?.keySource ?? "none"}
 						keyReuseRequired0={custom?.keyReuseRequired ?? false}
-						onReload={async () => { await reload(); setAddingCustom(false); }}
+						onReload={async () => { await reload(); discardCustomEditor(); }}
 						baseUrl0={custom?.baseUrl ?? ""}
 						keyPresent={custom?.keyPresent ?? false}
 						models={custom?.models ?? []}
 						overrides={custom?.overrides ?? {}}
 						manualModels0={custom?.manualModels ?? []}
 						onSaved={async () => {
-							setAddingCustom(false);
+							discardCustomEditor();
 							await reload();
 							notifySettingsSaved("keys");
 						}}
@@ -539,8 +535,9 @@ export function KeysSection({
 							notifySettingsSaved("keys");
 						}}
 						onDelete={disconnectCustom}
-						onCancel={() => setAddingCustom(false)}
+						onCancel={discardCustomEditor}
 					/>
+					</div>
 				)}
 				{providers !== undefined && (
 					<AddProviderRow
@@ -549,20 +546,24 @@ export function KeysSection({
 							setAddError(null);
 							if (p.id === CUSTOM_PROVIDER.id) {
 								setAdding(null);
+								setCustomEditorMounted(true);
 								setAddingCustom(true);
 							} else {
 								setAddingCustom(false);
+								setAddingEditors(editors => editors.some(provider => provider.id === p.id) ? editors : [...editors, p]);
 								setAdding(p);
 							}
 						}}
 					/>
 				)}
-				{adding && (
-					<div className="flex items-center gap-2 rounded-sm px-1 py-1.5" data-testid={`key-${adding.id}-editor`}>
-						<span className="shrink-0 font-ui text-xs text-foreground">{adding.label}</span>
-						<AddProviderEditor provider={adding} onSave={(v) => void saveNewProvider(adding, v)} onCancel={() => setAdding(null)} error={addError} />
+				{addingEditors.map(provider => (
+					<div key={provider.id} hidden={adding?.id !== provider.id} inert={adding?.id !== provider.id}
+						style={{ display: adding?.id === provider.id ? undefined : "none" }}
+						className="flex items-center gap-2 rounded-sm px-1 py-1.5" data-testid={`key-${provider.id}-editor`}>
+						<span className="shrink-0 font-ui text-xs text-foreground">{provider.label}</span>
+						<AddProviderEditor provider={provider} active={adding?.id === provider.id} onSave={(v) => void saveNewProvider(provider, v)} onCancel={() => discardProviderEditor(provider.id)} error={addError} />
 					</div>
-				)}
+				))}
 				{unknownRows.length > 0 && <div data-testid="group-unknown-keys">
 					{unknownRows.map((status) => <div key={status.id} data-testid={`unknown-${status.id}`} className="flex items-center justify-between gap-3 px-1 py-1.5 opacity-40">
 						<span className="font-mono text-xs text-foreground">{status.id}</span>
@@ -611,7 +612,7 @@ export function KeysSection({
 				</>}
 			</SettingsGroup>)}
 
-		</>
+		</div>
 	);
 }
 
@@ -619,19 +620,27 @@ export function KeysSection({
  *  beneath the Add row until saved or cancelled. */
 function AddProviderEditor({
 	provider,
+	active,
 	onSave,
 	onCancel,
 	error,
 }: {
 	provider: ProviderKeyInfo;
+	active: boolean;
 	onSave: (value: string) => void;
 	onCancel: () => void;
 	error: string | null;
 }) {
 	const [value, setValue] = useState("");
+	const inputRef = useRef<HTMLInputElement>(null);
+	const interactions = useInteractionLayers();
+	useEffect(() => {
+		if (active && isInteractionScopeEligible(inputRef.current, interactions)) inputRef.current?.focus();
+	}, [active, interactions]);
 	return (
 		<>
 			<input
+				ref={inputRef}
 				type="text"
 				value={value}
 				onChange={(e) => setValue(e.target.value)}
@@ -641,7 +650,7 @@ function AddProviderEditor({
 				placeholder="Paste key…"
 				aria-label={`${provider.label} key`}
 				data-testid={`key-${provider.id}-input`}
-				autoFocus
+				autoFocus={active}
 				className="h-7 min-w-0 flex-1 rounded-sm border border-border bg-background px-1.5 font-mono text-xs text-foreground outline-none placeholder:text-muted-foreground/60 focus:border-muted-foreground/50"
 			/>
 			<button
@@ -759,6 +768,7 @@ const pinTestid = (prefix: string, id: string) => `${prefix}-${id.replace(/[^a-z
  *  detected automatically. */
 function CustomEndpointEditor({
 	setup = false,
+	active = true,
 	revision0, authMode0, keySource0, keyReuseRequired0, onReload,
 	baseUrl0,
 	keyPresent: initialKeyPresent,
@@ -771,6 +781,7 @@ function CustomEndpointEditor({
 	onDelete,
 }: {
 	setup?: boolean;
+	active?: boolean;
 	revision0: string;
 	authMode0: "keyless" | "apiKey";
 	keySource0: "env" | "file" | "none";
@@ -789,6 +800,11 @@ function CustomEndpointEditor({
 	onCancel: () => void;
 	onDelete?: (revision: string) => Promise<string | null>;
 }) {
+	const baseUrlRef = useRef<HTMLInputElement>(null);
+	const interactions = useOptionalInteractionLayers();
+	useEffect(() => {
+		if (active && isInteractionScopeEligible(baseUrlRef.current, interactions)) baseUrlRef.current?.focus();
+	}, [active, interactions]);
 	const [revision, setRevision] = useState(revision0);
 	const [authMode, setAuthMode] = useState(authMode0);
 	const [keySource, setKeySource] = useState(keySource0);
@@ -880,6 +896,7 @@ function CustomEndpointEditor({
 			<div className="flex items-center gap-2">
 				<span className="shrink-0 font-ui text-xs text-foreground">Custom endpoint</span>
 				<input
+					ref={baseUrlRef}
 					type="text"
 					value={baseUrl}
 					onChange={(e) => setBaseUrl(e.target.value)}
@@ -887,7 +904,7 @@ function CustomEndpointEditor({
 					aria-label="Custom endpoint base URL"
 					data-testid="custom-baseurl-input"
 					disabled={busy}
-					autoFocus
+					autoFocus={active}
 					className="h-7 min-w-0 flex-1 rounded-sm border border-border bg-background px-1.5 font-mono text-xs text-foreground outline-none placeholder:text-muted-foreground/60 focus:border-muted-foreground/50"
 				/>
 			</div>

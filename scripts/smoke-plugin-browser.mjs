@@ -30,7 +30,7 @@ const WORKER_ROW = '[data-testid="activity-blob-plugin-worker"]';
 const CONCURRENCY_INPUT = 'input[type="number"][aria-label="Concurrent worker requests"]';
 const KNOWLEDGE_OVERLAY = '[data-testid="chain-table-overlay"]';
 const KNOWLEDGE_CHIP = `${MOUNT} [data-testid="practice-props-chip"]`;
-const PICKER_DIALOG = '[data-plugin-ui-dialog][aria-label="Picker dialog proof"]';
+const PICKER_DIALOG = '[role="dialog"][aria-label="Picker dialog proof"] [data-plugin-ui-dialog]';
 const PICKER_SETTINGS_ROW = `[data-testid="plugin-${PICKER_SETTINGS.id}"]`;
 const PICKER_SETTINGS_TOGGLE = `${PICKER_SETTINGS_ROW} [role="switch"][aria-label="Enable ${PICKER_SETTINGS.name}"]`;
 
@@ -72,7 +72,7 @@ export async function verifyPluginBrowser(url, options = {}) {
 	const evidence = {
 		origin: base, executablePath, stage: "launch", console: [], pageErrors: [],
 		requests: [], responses: [], failedRequests: [], blockedRequests: [], expectedPickerReadAborts: [],
-		rpc: [], admission: [], knowledge: [], knowledgeOrganization: [], foreground: [], settingsWrites: [], disabledProbes: [], screenshots: [], assertions: [],
+		rpc: [], admission: [], knowledge: [], knowledgeOrganization: [], foreground: [], tooltips: [], settingsWrites: [], nativeNumbers: [], disabledProbes: [], screenshots: [], assertions: [],
 	};
 	let browser;
 	let page;
@@ -80,6 +80,11 @@ export async function verifyPluginBrowser(url, options = {}) {
 	let knowledgePickerOpened = false;
 	const requestStages = new WeakMap();
 	let failed;
+	const modifier = process.platform === "darwin" ? "Meta" : "Control";
+	const chord = async key => {
+		await page.keyboard.down(modifier);
+		try { await page.keyboard.press(key); } finally { await page.keyboard.up(modifier); }
+	};
 	const screenshot = async name => {
 		if (!options.scratchDirectory || !page || page.isClosed()) return;
 		await mkdir(options.scratchDirectory, { recursive: true });
@@ -120,7 +125,7 @@ export async function verifyPluginBrowser(url, options = {}) {
 		return entry.knowledgePickerOpened === true && entry.method === "GET"
 			&& target.origin === base && target.pathname === "/api/graph/sources" && target.search === ""
 			&& entry.failure?.errorText === "net::ERR_ABORTED"
-			&& ["controlled knowledge bubble and full-content shared picker", "knowledge picker retains normal source rename/folder/drag editing", "SPA Home navigation and view reattach", "public dialog-origin picker foreground", "Settings open closes an active main picker", "custom Settings-origin picker foreground"].includes(entry.requestStage ?? entry.stage);
+			&& ["controlled knowledge bubble and full-content shared picker", "knowledge picker retains normal source rename/folder/drag editing", "SPA Home navigation and view reattach", "public dialog-origin picker foreground", "fresh Settings nests above an active main picker", "custom Settings-origin picker foreground"].includes(entry.requestStage ?? entry.stage);
 	};
 	const health = async () => {
 		evidence.expectedPickerReadAborts = evidence.failedRequests.filter(expectedPickerReadAbort);
@@ -217,11 +222,24 @@ export async function verifyPluginBrowser(url, options = {}) {
 		knowledgePickerOpened = true;
 		assert.equal(await page.$$eval(KNOWLEDGE_OVERLAY, nodes => nodes.length), 1, "Foreground selector must reuse one shared overlay");
 		await page.waitForSelector(`${KNOWLEDGE_OVERLAY} [data-testid="add-source-folder"]`, { visible: true });
-		assert.deepEqual(await page.$eval(KNOWLEDGE_OVERLAY, overlay => {
+		await assertFullWindowPicker();
+	};
+	const assertFullWindowPicker = async () => {
+		const geometry = await page.$eval(KNOWLEDGE_OVERLAY, overlay => {
 			const bounds = overlay.getBoundingClientRect();
-			const hit = document.elementFromPoint(bounds.left + bounds.width / 2, bounds.top + bounds.height / 2);
-			return { inMain: overlay.parentElement === document.querySelector("main"), zIndex: getComputedStyle(overlay).zIndex, foreground: overlay.contains(hit) };
-		}), { inMain: true, zIndex: "40", foreground: true }, "Launching modal must yield to the actual main-column z40 picker, not promote it above all later surfaces");
+			const modal = overlay.closest('[role="dialog"][data-interaction-layer]');
+			const sidebar = document.querySelector("aside");
+			const side = sidebar.getBoundingClientRect();
+			const hit = document.elementFromPoint(side.left + side.width / 2, side.top + Math.min(side.height / 2, 150));
+			return { x: bounds.x, y: bounds.y, width: bounds.width, height: bounds.height,
+				viewportWidth: innerWidth, viewportHeight: innerHeight, modal: !!modal, active: modal?.getAttribute("aria-modal") === "true",
+				inMain: !!overlay.closest("main"), coversSidebar: overlay.contains(hit), sidebarIsolated: !!sidebar.closest('[inert], [aria-hidden="true"]') };
+		});
+		assert.equal(geometry.modal && geometry.active, true, "Picker must use the shared active semantic modal boundary");
+		assert.equal(geometry.inMain, false, "Picker must not remain portaled beneath a content-area z40 surface");
+		for (const [dimension, value] of Object.entries({ x: 0, y: 0, width: geometry.viewportWidth, height: geometry.viewportHeight })) assert.ok(Math.abs(geometry[dimension] - value) <= 1, `Picker must fill the viewport: ${dimension}`);
+		assert.equal(geometry.coversSidebar && geometry.sidebarIsolated, true, "The full-window picker must cover and isolate the sidebar");
+		return geometry;
 	};
 	const capturePickerOrigin = async (scope, draft) => {
 		const root = `[data-smoke-picker-scope="${scope}"]`;
@@ -229,11 +247,11 @@ export async function verifyPluginBrowser(url, options = {}) {
 		await page.locator(selector).fill(draft);
 		const input = await page.$(selector);
 		assert.ok(input);
-		const mountCount = await page.$eval(root, element => Number(element.dataset.mountCount));
-		return { root, selector, input, draft, mountCount };
+		const identity = await page.$eval(root, element => ({ mountCount: Number(element.dataset.mountCount), instance: element.dataset.instance }));
+		return { root, selector, input, draft, ...identity };
 	};
-	const assertPickerOrigin = async (label, origin, ids, callbacks, hidden, focused = false) => {
-		await page.waitForFunction((input, { hidden, root, ids, callbacks }) => {
+	const assertPickerOrigin = async (label, origin, ids, callbacks, inactive, focused = false) => {
+		await page.waitForFunction((input, { inactive, root, ids, callbacks }) => {
 			if (!input.isConnected) return false;
 			const state = document.querySelector(`${root} [data-smoke-picker-selection]`);
 			if (!state || Number(state.dataset.callbacks) !== callbacks || JSON.stringify(JSON.parse(state.textContent).sort()) !== JSON.stringify([...ids].sort())) return false;
@@ -242,24 +260,38 @@ export async function verifyPluginBrowser(url, options = {}) {
 				const style = getComputedStyle(node);
 				if (node.hidden || style.display === "none" || style.visibility === "hidden") invisible = true;
 			}
-			return invisible === hidden && (!hidden || !!input.closest("[inert]"));
-		}, { timeout: timeoutMs }, origin.input, { hidden, root: origin.root, ids, callbacks });
+			return !invisible && !!input.closest("[inert]") === inactive;
+		}, { timeout: timeoutMs }, origin.input, { inactive, root: origin.root, ids, callbacks });
 		if (focused) await page.waitForFunction(root => document.querySelector(`${root} [data-testid="practice-props-chip"]`) === document.activeElement, { timeout: timeoutMs }, origin.root);
 		const snapshot = await page.evaluate((input, { root, selector }) => {
 			const container = document.querySelector(root);
 			const state = container.querySelector("[data-smoke-picker-selection]");
 			return { sameInput: document.querySelector(selector) === input, connected: input.isConnected, draft: input.value,
-				mountCount: Number(container.dataset.mountCount), ids: JSON.parse(state.textContent), callbacks: Number(state.dataset.callbacks),
+				mountCount: Number(container.dataset.mountCount), instance: container.dataset.instance, signalAborted: container.dataset.signalAborted, cleanupCount: Number(container.dataset.cleanupCount), ids: JSON.parse(state.textContent), callbacks: Number(state.dataset.callbacks),
 				chip: container.querySelector('[data-testid="practice-props-chip"]').textContent.trim(), inert: !!input.closest("[inert]") };
 		}, origin.input, { root: origin.root, selector: origin.selector });
 		assert.equal(snapshot.sameInput && snapshot.connected, true, "Launching modal/input must stay mounted while its selector is active");
 		assert.equal(snapshot.mountCount, origin.mountCount, "Closing a picker must not remount its launching Settings/dialog content");
+		assert.equal(snapshot.instance, origin.instance);
+		assert.equal(snapshot.signalAborted, "false", "Coverage must not abort plugin content's lifetime signal");
+		assert.equal(snapshot.cleanupCount, 0, "Coverage must not run plugin content cleanup");
 		assert.equal(snapshot.draft, origin.draft);
 		assert.deepEqual([...snapshot.ids].sort(), [...ids].sort());
 		assert.equal(snapshot.callbacks, callbacks);
 		assert.equal(snapshot.chip, ids.length ? `${ids.length} ${ids.length === 1 ? "node" : "nodes"} selected` : "Pick nodes");
-		assert.equal(snapshot.inert, hidden, "Restored origin must become interactive again");
-		evidence.foreground.push({ label, hidden, focused, ...snapshot });
+		assert.equal(snapshot.inert, inactive, "Painted covered origins are inactive; resumed origins become interactive again");
+		evidence.foreground.push({ label, painted: true, inactive, focused, ...snapshot });
+	};
+	const assertOriginOwnedMenu = async origin => {
+		const trigger = `${origin.root} [data-smoke-picker-menu]`;
+		await page.locator(trigger).click();
+		await page.waitForSelector('[data-testid="plugin-menu"]', { visible: true });
+		assert.equal(await page.$eval('[data-testid="plugin-menu"]', (menu, root) => menu.closest('[role="dialog"][data-interaction-layer]') === document.querySelector(root).closest('[role="dialog"][data-interaction-layer]'), origin.root), true, "App-root plugin menu portals must resolve their actual modal anchor owner");
+		await page.keyboard.press("Escape");
+		await page.waitForSelector('[data-testid="plugin-menu"]', { hidden: true });
+		await page.waitForFunction(selector => document.activeElement === document.querySelector(selector), {}, trigger);
+		assert.equal(await origin.input.evaluate(input => input.isConnected && !input.closest("[inert]")), true, "Menu Escape must leave its parent modal mounted and active");
+		assert.equal(await page.$eval(origin.root, root => Number(root.dataset.menuCloses)), 1, "One Escape must invoke only the original popup close callback");
 	};
 	const togglePickerSettings = async enabled => {
 		const saved = page.waitForResponse(response => new URL(response.url()).pathname === `/api/plugins/${PICKER_SETTINGS.id}`
@@ -364,7 +396,6 @@ export async function verifyPluginBrowser(url, options = {}) {
 		await page.locator(`${MOUNT} [aria-label="Send"]`).click();
 		await page.waitForFunction(() => document.querySelector('[data-smoke-submitted]')?.textContent === "Controlled plugin message");
 		await page.locator(`${MOUNT} [contenteditable="true"]`).click();
-		const modifier = process.platform === "darwin" ? "Meta" : "Control";
 		await page.keyboard.down(modifier);
 		await page.keyboard.press("k");
 		await page.keyboard.up(modifier);
@@ -386,23 +417,17 @@ export async function verifyPluginBrowser(url, options = {}) {
 		evidence.knowledgeBounds = await page.evaluate(selector => {
 			const overlay = document.querySelector(selector);
 			const main = document.querySelector("main");
-			const sidebar = document.querySelector('aside[aria-hidden="false"]');
+			const sidebar = document.querySelector("aside");
 			const header = overlay.querySelector("header");
 			const bounds = element => { const { x, y, width, height } = element.getBoundingClientRect(); return { x, y, width, height }; };
-			const side = sidebar.getBoundingClientRect();
-			const hit = document.elementFromPoint(side.left + side.width / 2, side.top + Math.min(side.height / 2, 150));
 			return { overlay: bounds(overlay), main: bounds(main), header: bounds(header), sidebar: bounds(sidebar),
-				directMainChild: overlay.parentElement === main, sidebarUncovered: sidebar.contains(hit),
 				sharedDragHeader: header.classList.contains("lh-drag"), counts: header.textContent };
 		}, KNOWLEDGE_OVERLAY);
 		const geometry = evidence.knowledgeBounds;
-		assert.equal(geometry.directMainChild, true, "Picker must portal into actual host main, not plugin body/sidebar");
-		for (const dimension of ["x", "y", "width", "height"]) assert.ok(Math.abs(geometry.overlay[dimension] - geometry.main[dimension]) <= 1, `Picker must fill the full host content column: ${dimension}`);
-		assert.ok(geometry.overlay.x >= geometry.sidebar.x + geometry.sidebar.width - 1, "Picker must not extend over the sidebar");
-		assert.equal(geometry.sidebarUncovered, true);
+		evidence.knowledgeModalBounds = await assertFullWindowPicker();
 		assert.equal(geometry.sharedDragHeader, true);
 		assert.equal(geometry.header.height, 60, "Picker must retain the standard TopBar");
-		assert.equal(geometry.header.y, geometry.main.y);
+		assert.equal(geometry.header.y, 0);
 		assert.match(geometry.counts, /1 chain · 2 nodes/);
 		await expandKnowledge(`cluster-toggle-${KNOWLEDGE.sourceId}`);
 		await page.locator(`${KNOWLEDGE_OVERLAY} [data-testid="chain-checkbox-${KNOWLEDGE.chainId}"]`).click();
@@ -444,7 +469,7 @@ export async function verifyPluginBrowser(url, options = {}) {
 		await expandKnowledge(`cluster-toggle-${KNOWLEDGE.sourceId}`);
 		assert.equal(await page.$eval(`[data-testid="chain-checkbox-${KNOWLEDGE.chainId}"]`, input => input.checked), false);
 		await screenshot("knowledge-cleared");
-		evidence.assertions.push("Public controlled knowledge picker reuses native bubble and full-main ChainTableOverlay/TopBar, leaves sidebar uncovered, reports chain/proposition IDs and count immediately, retains values through Done/X/Escape and clears via callback");
+		evidence.assertions.push("Public controlled knowledge picker reuses native bubble and full-window modal ChainTableOverlay/TopBar, covers and isolates the sidebar, reports chain/proposition IDs and count immediately, retains values through Done/X/Escape and clears via callback");
 
 		evidence.stage = "knowledge picker retains normal source rename/folder/drag editing";
 		const sourceRow = `${KNOWLEDGE_OVERLAY} [data-source-drag-row="${KNOWLEDGE.sourceId}"]`;
@@ -497,11 +522,12 @@ export async function verifyPluginBrowser(url, options = {}) {
 		await assertKnowledge("organization edits do not change selected IDs", [], 4);
 		await health();
 		evidence.assertions.push("The same picker permits actual source rename (restored), folder creation, native HTML5 drag into that folder and back to root; dedicated inert notes source leaves transcript identity/title untouched");
-		// Leave it OPEN: the existing real Home/remount proof must dispose the
-		// content-column portal with the view signal, without extra proof RPCs.
+		// Leave it OPEN: the existing global Graph/Home chord must dispose the
+		// modal with the view signal, without interacting with the inert sidebar
+		// or adding proof RPCs.
 
 		evidence.stage = "SPA Home navigation and view reattach";
-		await page.locator('aside a[aria-label="Home"]').click();
+		await chord("g");
 		await page.waitForFunction(mount => window.location.pathname === "/" && document.querySelectorAll(mount).length === 0, {}, MOUNT);
 		assert.equal(await page.$$eval(KNOWLEDGE_OVERLAY, nodes => nodes.length), 0, "Route-away must dispose the open knowledge portal, not leave an orphan over Home");
 		assert.equal(await page.$$eval(SIDEBAR_LINK, elements => elements.length), 1, "Activation must survive leaving the view");
@@ -545,7 +571,7 @@ export async function verifyPluginBrowser(url, options = {}) {
 		await openKnowledge();
 		await page.locator(`${KNOWLEDGE_OVERLAY} [data-testid="chain-table-close"]`).click();
 		await page.waitForSelector(KNOWLEDGE_OVERLAY, { hidden: true });
-		evidence.assertions.push("Leaving an open picker disposes its full-column portal; return mounts one bubble and reopens exactly one shared overlay without changing proof-RPC counts");
+		evidence.assertions.push("Leaving an open picker disposes its full-window modal; return mounts one bubble and reopens exactly one shared overlay without changing proof-RPC counts");
 		evidence.assertions.push("Home navigation disposes view DOM; return remounts once without duplicating activation, links, roots, or SSE");
 		await screenshot("reattached");
 
@@ -553,9 +579,10 @@ export async function verifyPluginBrowser(url, options = {}) {
 		await page.locator(`${MOUNT} button[title="Open knowledge dialog"]`).click();
 		await page.waitForSelector(PICKER_DIALOG, { visible: true });
 		const dialogOrigin = await capturePickerOrigin("dialog", "Dialog draft survives selector foreground");
+		await assertOriginOwnedMenu(dialogOrigin);
 		await openForegroundPicker(dialogOrigin.root);
-		await page.waitForSelector(PICKER_DIALOG, { hidden: true });
-		await assertPickerOrigin("dialog origin is hidden/inert but its input remains mounted", dialogOrigin, [], 0, true);
+		await page.waitForSelector(PICKER_DIALOG, { visible: true });
+		await assertPickerOrigin("dialog origin remains painted/inert and its input remains mounted", dialogOrigin, [], 0, true);
 		await expandKnowledge(`cluster-toggle-${KNOWLEDGE.sourceId}`);
 		await expandKnowledge(`chain-toggle-${KNOWLEDGE.chainId}`);
 		await page.locator(`${KNOWLEDGE_OVERLAY} [data-testid="prop-checkbox-${KNOWLEDGE.conclusionId}"]`).click();
@@ -582,41 +609,64 @@ export async function verifyPluginBrowser(url, options = {}) {
 		assert.equal(await dialogOrigin.input.evaluate(input => input.isConnected), false, "Normal dialog close must still dispose its content");
 		await dialogOrigin.input.dispose();
 		await health();
-		evidence.assertions.push("Public dialog-origin knowledge picker hides/inerts but retains its launching dialog/input instance; controlled IDs update; Escape/Done/X close only selector and restore original draft, mount count and trigger focus; normal dialog close still disposes content");
+		evidence.assertions.push("Public dialog-origin knowledge picker keeps its launching dialog painted/inert and retains its input instance/lifetime signal; controlled IDs update; Escape/Done/X close only selector and restore original draft, mount count and trigger focus; normal dialog close still disposes content");
 
-		evidence.stage = "Settings open closes an active main picker";
+		evidence.stage = "fresh Settings nests above an active main picker";
 		await openKnowledge();
 		await expandKnowledge(`cluster-toggle-${KNOWLEDGE.sourceId}`);
 		await expandKnowledge(`chain-toggle-${KNOWLEDGE.chainId}`);
-		await page.locator(`${KNOWLEDGE_OVERLAY} [data-testid="prop-checkbox-${KNOWLEDGE.premiseId}"]`).click();
+		const selectedPremise = `${KNOWLEDGE_OVERLAY} [data-testid="prop-checkbox-${KNOWLEDGE.premiseId}"]`;
+		await page.locator(selectedPremise).click();
 		await assertKnowledge("main picker selection before a newer Settings surface", [KNOWLEDGE.premiseId], 1);
-		await page.locator('[data-testid="settings-entry"]').click();
+		const retainedPicker = await page.$(KNOWLEDGE_OVERLAY);
+		const retainedSelection = await page.$(selectedPremise);
+		const pickerFocus = await page.evaluateHandle(() => document.activeElement);
+		// The sidebar is isolated by the picker. Use the existing global command,
+		// not a synthetic click into the inactive background.
+		await chord(",");
 		await page.waitForSelector('[data-testid="settings-dialog"]', { visible: true });
-		await page.waitForSelector(KNOWLEDGE_OVERLAY, { hidden: true });
-		assert.equal(await page.$$eval(KNOWLEDGE_OVERLAY, nodes => nodes.length), 0, "Any Settings open must close the active picker, not stack over it");
+		assert.equal(await page.$$eval('[data-testid="settings-dialog"]', nodes => nodes.length), 1);
+		assert.equal(await retainedPicker.evaluate(overlay => overlay.isConnected && !!overlay.closest("[inert]") && getComputedStyle(overlay).display !== "none"), true, "Fresh Settings must cover the same painted picker, not close/remount it");
+		assert.equal(await retainedSelection.evaluate(input => input.isConnected && input.checked), true);
 		assert.equal(await page.$eval('[data-testid="settings-dialog"]', dialog => {
 			const bounds = dialog.getBoundingClientRect();
 			return dialog.contains(document.elementFromPoint(bounds.left + bounds.width / 2, bounds.top + bounds.height / 2));
-		}), true, "Settings must open normally in the foreground");
-		await assertKnowledge("Settings closes the picker without clearing controlled IDs", [KNOWLEDGE.premiseId], 1);
+		}), true, "Fresh Settings opens above the retained picker");
+		await assertKnowledge("Settings covers the picker without clearing controlled IDs", [KNOWLEDGE.premiseId], 1);
 		await screenshot("foreground-newer-settings");
-		await closeSettings();
-		await page.waitForFunction(({ selector, earliest }) => !document.querySelector(selector) && Date.now() >= earliest,
-			{ timeout: timeoutMs, polling: 100 }, { selector: KNOWLEDGE_OVERLAY, earliest: Date.now() + 300 });
-		assert.equal(await page.$$eval(KNOWLEDGE_OVERLAY, nodes => nodes.length), 0, "Closing Settings must not automatically resume the picker");
-		await assertKnowledge("picker remains closed after Settings closes; selected IDs remain owned by fixture", [KNOWLEDGE.premiseId], 1);
-		await openKnowledge();
-		await expandKnowledge(`cluster-toggle-${KNOWLEDGE.sourceId}`);
-		await expandKnowledge(`chain-toggle-${KNOWLEDGE.chainId}`);
-		assert.equal(await page.$eval(`${KNOWLEDGE_OVERLAY} [data-testid="prop-checkbox-${KNOWLEDGE.premiseId}"]`, input => input.checked), true, "Explicit bubble reopen must retain the selection from before Settings opened");
-		await screenshot("foreground-settings-explicit-reopen");
-		evidence.foreground.push({ label: "Settings open closes picker without automatic resumption", pickerClosedBySettings: true, autoResumed: false, explicitReopenRetainsIds: true, ids: [KNOWLEDGE.premiseId] });
+		// Passive help must paint above its owning modal without becoming an
+		// Escape owner. One physical Escape still closes Settings, not just help.
+		await page.hover('[data-testid="settings-close"]');
+		await page.waitForFunction(() => [...document.querySelectorAll('[data-slot="tooltip-content"]')].some(tooltip => {
+			const bounds = tooltip.getBoundingClientRect();
+			return tooltip.textContent === "Close (Esc)" && bounds.width > 0 && bounds.height > 0 && getComputedStyle(tooltip).visibility !== "hidden";
+		}));
+		const tooltipPaint = await page.evaluate(() => {
+			const tooltip = [...document.querySelectorAll('[data-slot="tooltip-content"]')].find(node => node.textContent === "Close (Esc)" && node.getBoundingClientRect().width > 0);
+			const bounds = tooltip.getBoundingClientRect();
+			return { text: tooltip.textContent, owned: !!tooltip.closest("[data-interaction-popup-host]"),
+				painted: tooltip.contains(document.elementFromPoint(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2)) };
+		});
+		assert.deepEqual(tooltipPaint, { text: "Close (Esc)", owned: true, painted: true });
+		evidence.tooltips.push(tooltipPaint);
+		await screenshot("foreground-settings-passive-tooltip");
+		await page.keyboard.press("Escape");
+		await page.waitForSelector('[data-testid="settings-dialog"]', { hidden: true });
+		await page.mouse.move(0, 0);
+		await page.waitForFunction(input => document.activeElement === input, { timeout: timeoutMs }, pickerFocus);
+		assert.equal(await retainedPicker.evaluate((overlay, selector) => overlay.isConnected && document.querySelector(selector) === overlay && !overlay.closest("[inert]"), KNOWLEDGE_OVERLAY), true);
+		assert.equal(await retainedSelection.evaluate(input => input.isConnected && input.checked), true, "Resuming the same picker retains the actual selection control");
+		await assertFullWindowPicker();
+		await assertKnowledge("closing fresh Settings resumes the mounted picker and its controlled selection", [KNOWLEDGE.premiseId], 1);
+		await screenshot("foreground-settings-picker-resumed");
+		evidence.foreground.push({ label: "Fresh Settings nests above the same picker and returns focus on close", pickerRetained: true, selectionRetained: true, focusRestored: true, ids: [KNOWLEDGE.premiseId] });
+		await retainedPicker.dispose(); await retainedSelection.dispose(); await pickerFocus.dispose();
 		await page.keyboard.press("Escape");
 		await page.waitForSelector(KNOWLEDGE_OVERLAY, { hidden: true });
 		await page.locator(`${MOUNT} [data-testid="practice-props-clear"]`).click();
 		await assertKnowledge("main selection cleared explicitly after Settings dismissal proof", [], 2);
 		await health();
-		evidence.assertions.push("Sidebar Settings open closes the active picker without clearing controlled IDs; closing Settings leaves picker closed; only explicit bubble reopen shows the retained selected IDs again");
+		evidence.assertions.push("Global Mod+, opens absent Settings above the same painted/inert picker; its passive tooltip paints in the owned portal and does not intercept the single Escape closing Settings; the mounted picker selection and eligible focus resume, and the next Escape closes only picker");
 
 		evidence.stage = "custom Settings-origin picker foreground";
 		await openPlugins();
@@ -627,9 +677,10 @@ export async function verifyPluginBrowser(url, options = {}) {
 		await page.locator(settingsNav).click();
 		await page.waitForSelector(`[data-testid="section-plugin-${PICKER_SETTINGS.id}"]`, { visible: true });
 		const settingsOrigin = await capturePickerOrigin("settings", "Custom Settings draft survives selector foreground");
+		await assertOriginOwnedMenu(settingsOrigin);
 		await openForegroundPicker(settingsOrigin.root);
-		await page.waitForSelector('[data-testid="settings-dialog"]', { hidden: true });
-		await assertPickerOrigin("custom Settings origin is hidden/inert without remounting", settingsOrigin, [], 0, true);
+		await page.waitForSelector('[data-testid="settings-dialog"]', { visible: true });
+		await assertPickerOrigin("custom Settings origin remains painted/inert without remounting", settingsOrigin, [], 0, true);
 		await expandKnowledge(`cluster-toggle-${KNOWLEDGE.sourceId}`);
 		await page.locator(`${KNOWLEDGE_OVERLAY} [data-testid="chain-checkbox-${KNOWLEDGE.chainId}"]`).click();
 		const settingsIds = [KNOWLEDGE.premiseId, KNOWLEDGE.conclusionId];
@@ -649,7 +700,28 @@ export async function verifyPluginBrowser(url, options = {}) {
 		await page.keyboard.press("Escape");
 		await page.waitForSelector(KNOWLEDGE_OVERLAY, { hidden: true });
 		await assertPickerOrigin("Escape closes only selector and restores custom Settings", settingsOrigin, settingsIds, 1, false, true);
+		const retainedSettings = await page.$('[data-testid="settings-dialog"]');
+		await openForegroundPicker(settingsOrigin.root);
+		await assertPickerOrigin("existing Settings remains painted/inert below child before return-to", settingsOrigin, settingsIds, 1, true);
+		// Existing same-section deep-link: prove retained plugin content without
+		// confusing normal section navigation with a modal remount.
+		await page.evaluate(pluginId => window.dispatchEvent(new CustomEvent("lh:open-plugin-settings", { detail: pluginId })), PICKER_SETTINGS.id);
+		await page.waitForSelector(KNOWLEDGE_OVERLAY, { hidden: true });
+		assert.equal(await page.$$eval('[data-testid="settings-dialog"]', nodes => nodes.length), 1, "Return-to must not create another Settings instance");
+		assert.equal(await retainedSettings.evaluate(dialog => dialog.isConnected && document.querySelector('[data-testid="settings-dialog"]') === dialog), true);
+		await assertPickerOrigin("same-section deep-link closes child through return-to and retains Settings frame/input/mount/IDs", settingsOrigin, settingsIds, 1, false, true);
 		await screenshot("foreground-settings-restored");
+		await openForegroundPicker(settingsOrigin.root);
+		await assertPickerOrigin("custom input is retained until intentional section navigation", settingsOrigin, settingsIds, 1, true);
+		await chord(",");
+		await page.waitForSelector(KNOWLEDGE_OVERLAY, { hidden: true });
+		await page.waitForSelector('[data-testid="section-keys"]', { visible: true });
+		assert.equal(await retainedSettings.evaluate(dialog => dialog.isConnected && document.querySelector('[data-testid="settings-dialog"]') === dialog), true, "Mod+, must reuse the same Settings frame while retargeting Providers");
+		assert.equal(await page.$$eval('[data-testid="settings-dialog"]', nodes => nodes.length), 1);
+		assert.equal(await settingsOrigin.input.evaluate(input => input.isConnected), false, "Existing Mod+, default intentionally leaves the custom Settings section");
+		evidence.foreground.push({ label: "Mod+, guarded return-to reuses Settings frame and retargets existing Providers default", sameSettingsFrame: true, pickerClosed: true, providersVisible: true, customSectionDisposedOnNavigation: true });
+		await retainedSettings.dispose();
+		await screenshot("foreground-settings-return-providers");
 		await page.locator('[data-testid="settings-nav-plugins"]').click();
 		await page.waitForSelector(`${PICKER_SETTINGS_TOGGLE}[aria-checked="true"]:not(:disabled)`, { visible: true });
 		await togglePickerSettings(false);
@@ -663,7 +735,7 @@ export async function verifyPluginBrowser(url, options = {}) {
 		await assertKnowledge("foreground cases retain the underlying view's controlled state", [], 2);
 		assert.equal(await page.$$eval(KNOWLEDGE_OVERLAY, nodes => nodes.length), 0);
 		await health();
-		evidence.assertions.push("Frontend-only auxiliary custom Settings uses the public registration/widget API; selector retains hidden/inert Settings DOM, uncontrolled draft, mount count and controlled IDs; Done/X/Escape restore trigger focus; auxiliary package disables through normal UI without remounting the view or replacing native-smoke schema Settings");
+		evidence.assertions.push("Frontend-only auxiliary custom Settings uses the public registration/widget API; selector retains painted/inert Settings DOM, uncontrolled draft, mount count, lifetime signal and controlled IDs; Done/X/Escape and same-section return-to restore trigger focus; separate Mod+, returns to the same frame and existing Providers default; auxiliary package disables through normal UI without remounting the view or replacing native-smoke schema Settings");
 
 		evidence.stage = "shared lesson renderers with stored native history";
 		await openTranscript();
@@ -767,6 +839,114 @@ export async function verifyPluginBrowser(url, options = {}) {
 			await page.locator(`${selector} [data-testid="activity-abort"]`).click();
 			assert.equal((await ended).status(), 200, "Actual panel END must cancel the namespaced standalone task");
 		};
+
+		evidence.stage = "Settings native number Escape retention and canonical acknowledgment";
+		await chord(",");
+		await page.waitForSelector('[data-testid="settings-dialog"]', { visible: true });
+		const settingsRecord = () => page.evaluate(async () => {
+			const response = await fetch("/api/settings");
+			if (!response.ok) throw new Error("Native-number verification Settings GET failed: " + response.status);
+			return response.json();
+		});
+		const cdp = await page.createCDPSession();
+		const selectNativeNumber = async selector => {
+			await page.focus(selector);
+			// Headless synthetic Mod+A does not invoke macOS's native editing
+			// command reliably for number inputs (also reproduced without React).
+			// Dispatch Chromium's native selectAll command, never assign .value
+			// or replace the number input/native incomplete-token buffer.
+			const event = { key: "a", code: "KeyA", modifiers: modifier === "Meta" ? 4 : 2 };
+			await cdp.send("Input.dispatchKeyEvent", { ...event, type: "keyDown", commands: ["selectAll"] });
+			await cdp.send("Input.dispatchKeyEvent", { ...event, type: "keyUp" });
+		};
+		const numberSnapshot = async selector => {
+			const state = await page.$eval(selector, input => ({ value: input.value, badInput: input.validity.badInput,
+				focused: document.activeElement === input, type: input.type, min: input.getAttribute("min"), max: input.getAttribute("max"), step: input.getAttribute("step"),
+				appearance: getComputedStyle(input).appearance, spinAppearance: getComputedStyle(input, "::-webkit-inner-spin-button").appearance }));
+			// Chromium exposes its native editing buffer through the DevTools UA
+			// shadow tree on versions that include that tree. DOM .value alone is
+			// deliberately NOT used as proof of the visible incomplete token.
+			try {
+				const { root } = await cdp.send("DOM.getDocument", { depth: 0 });
+				const { nodeId } = await cdp.send("DOM.querySelector", { nodeId: root.nodeId, selector });
+				const { node } = await cdp.send("DOM.describeNode", { nodeId, depth: -1, pierce: true });
+				const descendants = current => [...(current.children ?? []), ...(current.shadowRoots ?? [])];
+				const editor = current => {
+					const attributes = current.attributes ?? [];
+					if (attributes.some((name, index) => index % 2 === 0 && name === "id" && attributes[index + 1] === "editing-view-port")) return current;
+					return descendants(current).map(editor).find(Boolean);
+				};
+				const viewport = editor(node);
+				if (!viewport) throw new Error("Chromium native editing viewport unavailable; paired screenshot review required");
+				const text = current => current.nodeName === "STYLE" ? "" : (current.nodeType === 3 ? current.nodeValue : "") + descendants(current).map(text).join("");
+				// The sibling UA placeholder retains its hidden text (e.g. 8/16).
+				// Read only the actual native editor, never concatenate placeholder.
+				state.nativeEditorText = text(viewport);
+				state.nativeEditorSource = "Chromium user-agent #editing-view-port";
+			} catch (error) { state.nativeEditorReadError = String(error); }
+			return state;
+		};
+		const numberScreenshot = async (selector, name) => {
+			const input = await page.$(selector);
+			assert.ok(input);
+			const base64 = await input.screenshot({ encoding: "base64" });
+			await input.dispose();
+			const image = { encoding: "base64", mimeType: "image/png", data: base64 };
+			if (options.scratchDirectory) {
+				await mkdir(options.scratchDirectory, { recursive: true });
+				image.path = path.join(options.scratchDirectory, `plugin-browser-${name}.png`);
+				await writeFile(image.path, Buffer.from(base64, "base64"));
+				evidence.screenshots.push(image.path);
+			}
+			return image;
+		};
+		const numericCases = [
+			{ section: "agent", selector: CONCURRENCY_INPUT, key: "workerRequestConcurrency", valid: "3.0", canonical: 3, expectedMin: "1", expectedStep: "1" },
+			{ section: "appearance", selector: '[data-testid="input-prose-size"]', key: "proseFontSize", valid: "-5", canonical: 12, expectedMin: null, expectedStep: null },
+		];
+		try {
+			for (const sample of numericCases) {
+				await page.locator(`[data-testid="settings-nav-${sample.section}"]`).click();
+				await page.waitForSelector(sample.selector, { visible: true });
+				const before = await settingsRecord();
+				const writesBefore = evidence.requests.filter(entry => entry.method === "PUT" && new URL(entry.url).pathname === `/api/settings/${sample.section}`).length;
+				await selectNativeNumber(sample.selector); await page.keyboard.type("1e");
+				const invalidBefore = await numberSnapshot(sample.selector);
+				const imageBefore = await numberScreenshot(sample.selector, `native-number-${sample.section}-invalid-before-escape`);
+				assert.equal(invalidBefore.type, "number", "Native number type/steppers must not be replaced by a text workaround");
+				assert.equal(invalidBefore.min, sample.expectedMin); assert.equal(invalidBefore.step, sample.expectedStep);
+				assert.equal(invalidBefore.badInput, true, "Real Chromium typing must produce an incomplete numeric token, not intentional blank input");
+				await page.keyboard.press("Escape");
+				const invalidAfter = await numberSnapshot(sample.selector);
+				const imageAfter = await numberScreenshot(sample.selector, `native-number-${sample.section}-invalid-after-escape`);
+				const after = await settingsRecord();
+				const visibleTextProved = invalidBefore.nativeEditorText === "1e" && invalidAfter.nativeEditorText === "1e";
+				evidence.nativeNumbers.push({ section: sample.section, token: "1e", invalidBefore, invalidAfter, before: before.settings?.[sample.section], after: after.settings?.[sample.section], imageBefore, imageAfter,
+					visibleTextProof: visibleTextProved ? "Chromium native UA editing-buffer text before/after Escape" : "Requires human review of paired actual Chromium input screenshots; DOM value is not visual proof" });
+				assert.equal(invalidAfter.badInput, true, "Native invalid buffer was erased on Escape/blur: human decision required; do not change input type or production behavior as a smoke workaround");
+				assert.equal(invalidAfter.focused, false, "Escape must leave the numeric field");
+				assert.equal(await page.$$eval('[data-testid="settings-dialog"]', nodes => nodes.length), 1, "Invalid field Escape must not close Settings");
+				assert.deepEqual(after.settings?.[sample.section], before.settings?.[sample.section], "Invalid native buffer must not accidentally unset or persist any setting");
+				assert.equal(evidence.requests.filter(entry => entry.method === "PUT" && new URL(entry.url).pathname === `/api/settings/${sample.section}`).length, writesBefore, "Invalid field Escape must issue no settings PUT");
+				for (const attribute of ["type", "min", "max", "step", "appearance", "spinAppearance"]) assert.equal(invalidAfter[attribute], invalidBefore[attribute], `Native number ${attribute} must survive Escape`);
+				if (invalidBefore.nativeEditorText === "1e" && invalidAfter.nativeEditorText !== "1e") assert.fail("Chromium erased the visible incomplete token on blur; human review required (see native-number screenshots)");
+				await selectNativeNumber(sample.selector); await page.keyboard.type(sample.valid);
+				const saved = page.waitForResponse(response => new URL(response.url()).pathname === `/api/settings/${sample.section}` && response.request().method() === "PUT");
+				await page.keyboard.press("Escape");
+				const response = await saved;
+				assert.equal(response.status(), 200); const acknowledgment = await response.json();
+				assert.equal(acknowledgment.settings?.[sample.section]?.[sample.key], sample.canonical, "Successful settings response must acknowledge the canonical normalized section value");
+				await page.waitForFunction(({ selector, canonical }) => document.querySelector(selector)?.value === String(canonical), {}, sample);
+				const canonical = await settingsRecord();
+				assert.equal(canonical.settings?.[sample.section]?.[sample.key], sample.canonical);
+				assert.equal(await page.$$eval('[data-testid="settings-dialog"]', nodes => nodes.length), 1, "Valid field Escape commits but leaves Settings open");
+				evidence.nativeNumbers.push({ section: sample.section, typed: sample.valid, canonical: sample.canonical, acknowledgment, stored: canonical.settings?.[sample.section] });
+			}
+		} finally { await cdp.detach(); }
+		await screenshot("native-number-settings");
+		await closeSettings(); await health();
+		evidence.nativeNumberVisualReviewRequired = evidence.nativeNumbers.some(sample => sample.token && !sample.visibleTextProof.startsWith("Chromium native UA"));
+		evidence.assertions.push("Actual Chromium native-number 1e buffers consume Escape without writes/unset or dialog dismissal; visible token retention is proved by native UA text when available, otherwise paired input screenshots require human review; valid concurrency 3.0→3 and prose size -5→12 display canonical acknowledgments without changing number types/stepper attributes");
 
 		evidence.stage = "worker admission: UI limit 1 and keyless LOOPBACK provider";
 		const untouched = await admissionCall("admission-status");
@@ -878,7 +1058,7 @@ export async function verifyPluginBrowser(url, options = {}) {
 		evidence.expectedFrameworkAborts = evidence.failedRequests.filter(expectedFrameworkAbort);
 		evidence.stage = "passed";
 		console.log("[smoke-plugin-browser] expected keyless-app baseline responses:", evidence.expectedFixtureResponses.map(entry => `${new URL(entry.url).pathname} ${entry.status}`).join(", "));
-		console.log("[smoke-plugin-browser] Settings enable → native ESM/relative asset → backend RPC → controlled full-content knowledge picker + native source editing → Home/remount → dialog/Settings foreground restoration → Agent UI 1→2→1 + held loopback admission/FIFO + panel END cancellations (no generation) → Settings disable/assets denied");
+		console.log("[smoke-plugin-browser] Settings enable → native ESM/relative asset → backend RPC → controlled full-window modal knowledge picker + native source editing → Home/remount → painted/inert dialog + Settings stack/return-to → native-number Escape/canonical acknowledgment → Agent UI 1→2→1 + held loopback admission/FIFO + panel END cancellations (no generation) → Settings disable/assets denied");
 	} catch (error) {
 		failed = error;
 		try { await screenshot("failure"); }
@@ -906,6 +1086,8 @@ export async function verifyPluginBrowser(url, options = {}) {
 			failedRequests: evidence.failedRequests, expectedPickerReadAborts: evidence.expectedPickerReadAborts, blockedRequests: evidence.blockedRequests,
 			unsuccessfulResponses: evidence.responses.filter(entry => entry.status >= 400),
 			recentResponses: evidence.responses.slice(-12), screenshots: evidence.screenshots,
+			nativeNumbers: evidence.nativeNumbers.map(({ imageBefore, imageAfter, ...sample }) => ({ ...sample, imageBefore: imageBefore?.path, imageAfter: imageAfter?.path })),
+			nativeNumberVisualReviewRequired: evidence.nativeNumberVisualReviewRequired,
 		};
 		const error = new Error(`Plugin browser smoke failed during ${evidence.stage}: ${failed.message ?? failed}\n${JSON.stringify(diagnostic, null, 2)}`, { cause: failed });
 		error.evidence = evidence;

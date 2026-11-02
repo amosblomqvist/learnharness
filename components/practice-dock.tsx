@@ -6,6 +6,8 @@ import { ToolContentResponse } from "@/components/ai-elements/message";
 import { Button } from "@/components/ui/button";
 import { joinDictation, useDictationTarget } from "@/components/dictation";
 import { useEnterSubmits } from "@/components/enter-submits";
+import { useOptionalInteractionLayers } from "./interaction-layers";
+import { isInteractionScopeEligible } from "./plugin-input-focus";
 import { PathInput } from "@/components/path-input";
 import { cn } from "@/lib/utils";
 
@@ -50,6 +52,8 @@ export interface PracticeDockProps {
 }
 
 export function PracticeDock({ problemCallId, input, expanded, onExpand, onSubmit, onEscape, compactionRunning = false }: PracticeDockProps) {
+	const controller = useOptionalInteractionLayers();
+	const rootRef = useRef<HTMLElement>(null);
 	const [thinking, setThinking] = useState("");
 	// Ref MIRRORS the field ("nothing gets lost", the question-dock
 	// discipline): a submit resuming after `await finishDictation()` reads
@@ -81,12 +85,13 @@ export function PracticeDock({ problemCallId, input, expanded, onExpand, onSubmi
 	 * means the field is often never focused — the window-level Enter
 	 * (typing surfaces and buttons excluded) submits the trace. Mounted
 	 * while the dock is — collapsed bar included (the trace survives). */
-	useEnterSubmits(submit);
+	useEnterSubmits(submit, rootRef);
 
 	/* ── the collapsed bar ── */
 	if (!expanded) {
 		return (
 			<button
+				ref={element => { rootRef.current = element; }}
 				type="button"
 				data-testid="practice-dock-bar"
 				onClick={onExpand}
@@ -101,7 +106,7 @@ export function PracticeDock({ problemCallId, input, expanded, onExpand, onSubmi
 
 	/* ── the expanded form ── */
 	return (
-		<div data-testid="practice-dock" data-problem={problemCallId}>
+		<div ref={element => { rootRef.current = element; }} data-testid="practice-dock" data-problem={problemCallId}>
 			{/* The agent's half: the 'Problem' eyebrow (mirroring the quiz
 			    cards' label row — owner round, 2026-10-05) + the statement,
 			    markdown + LaTeX rendered, capped by the measured column
@@ -129,9 +134,11 @@ export function PracticeDock({ problemCallId, input, expanded, onExpand, onSubmi
 						setThinking(value);
 					}}
 					onKeyDown={(e) => {
+						if (!isInteractionScopeEligible(e.currentTarget, controller)) return;
 						// Esc ends dictation — stopPropagation claims it (the
 						// keyboard machine) so the window chain doesn't also fire.
 						if (e.key === "Escape" && onEscape) {
+							controller?.claimEscape(e);
 							e.preventDefault();
 							e.stopPropagation();
 							onEscape();

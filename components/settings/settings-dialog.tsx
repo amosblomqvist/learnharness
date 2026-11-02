@@ -26,12 +26,15 @@ import {
 	useCallback,
 	useContext,
 	useEffect,
-	useLayoutEffect,
+	useId,
 	useRef,
 	useState,
+	type ReactElement,
+	type ReactNode,
+	type RefObject,
 } from "react";
-import { createPortal } from "react-dom";
-import { useBackdropDismiss } from "@/components/backdrop-dismiss";
+import { HostDialog } from "@/components/host-dialog";
+import { useInteractionLayers, type CloseOutcome } from "@/components/interaction-layers";
 import {
 	CURRENT_SETTINGS_VERSION,
 	type AgentSettings,
@@ -56,7 +59,6 @@ import { PluginSettingsPage } from "./plugin-settings-page.tsx";
 import { usePlugins } from "@/components/plugins";
 import { ChatGPTUIProvider } from "./chatgpt-connection.tsx";
 import { NativeSubscriptionUIProvider } from "./subscription-connections.tsx";
-import { focusKnowledgePickerElement, useKnowledgePickerModal, type KnowledgePickerModal } from "@/components/knowledge-picker-foreground";
 
 /** Owner (2026-09-20): hints earn their place — mechanics-explaining
  *  prose is out; only the keyboard note stays (storage location is a
@@ -77,6 +79,15 @@ type SectionId = (typeof SECTIONS)[number]["id"] | "plugins" | `plugin:${string}
  *  name, e.g. DEEPGRAM_API_KEY — KeysSection's openRow state), not the
  *  row's testid. */
 const DialogContext = createContext<{ open: (section?: string, row?: string) => void }>({ open: () => {} });
+// Authority belongs to the persistent Settings host, not a particular field or
+// open/close lifetime: a delayed response must not roll back a newer ACK.
+interface SettingsWriteOrder {
+	issued: number;
+	acknowledged: number;
+	record?: UserSettings;
+	listeners: Set<(record: UserSettings) => void>;
+}
+const WriteOrderContext = createContext<RefObject<SettingsWriteOrder> | null>(null);
 
 /** AppShell-level mount: the sidebar row and the mod+, chord call this.
  *  `open(section)` lands the dialog on a specific section (the first-run
@@ -86,24 +97,24 @@ export function SettingsDialogProvider({
 }: {
 	children: React.ReactNode;
 }) {
-	const foreground = useKnowledgePickerModal();
-	const { modal } = foreground;
+	const interactions = useInteractionLayers();
+	const layerId = useId();
+	const writeOrder = useRef<SettingsWriteOrder>({ issued: 0, acknowledged: 0, listeners: new Set() });
 	const [show, setShow] = useState(false);
 	const [landOn, setLandOn] = useState<SectionId>("keys");
 	const [landOnRow, setLandOnRow] = useState<string | null>(null);
 	const [navigationRequest, setNavigationRequest] = useState(0);
 	const open = useCallback((section?: string, row?: string) => {
-		foreground.store?.cancelPicker();
-		modal?.activate();
+		// Returning to this singleton is a bounded request, not a forced pop.
+		// Controlled layers may accept closure before React commits it.
+		if (interactions.getLayer(layerId) && interactions.popTo(layerId) !== "closed") return;
+		interactions.invalidateOpening();
 		setNavigationRequest(request => request + 1);
 		setLandOn(section ? section as SectionId : "keys");
 		setLandOnRow(row ?? null);
 		setShow(true);
-	}, [modal, foreground.store]);
-	const close = useCallback(() => { modal?.close(); setShow(false); }, [modal]);
-	useLayoutEffect(() => {
-		if (show && modal?.canHandle()) focusKnowledgePickerElement(foreground.frame.current);
-	}, [show, navigationRequest, modal, foreground.frame]);
+	}, [interactions, layerId]);
+	const close = useCallback((): CloseOutcome => { setShow(false); return "closed"; }, []);
 	useEffect(() => window.lh?.onOpenSettings?.((section) => open(section)), [open]);
 	useEffect(() => {
 		const onPluginSettings = (event: Event) => {
@@ -114,12 +125,12 @@ export function SettingsDialogProvider({
 		return () => window.removeEventListener("lh:open-plugin-settings", onPluginSettings);
 	}, [open]);
 	return (
-		<ChatGPTUIProvider><NativeSubscriptionUIProvider><DialogContext.Provider value={{ open }}>
+		<ChatGPTUIProvider><NativeSubscriptionUIProvider><WriteOrderContext.Provider value={writeOrder}><DialogContext.Provider value={{ open }}>
 			{children}
 			{show && (
-				<SettingsDialog onClose={close} initialSection={landOn} initialRow={landOnRow} navigationRequest={navigationRequest} foreground={foreground} />
+				<SettingsDialog onClose={close} initialSection={landOn} initialRow={landOnRow} navigationRequest={navigationRequest} layerId={layerId} />
 			)}
-		</DialogContext.Provider></NativeSubscriptionUIProvider></ChatGPTUIProvider>
+		</DialogContext.Provider></WriteOrderContext.Provider></NativeSubscriptionUIProvider></ChatGPTUIProvider>
 	);
 }
 
@@ -132,31 +143,25 @@ function SettingsDialog({
 	initialSection,
 	initialRow,
 	navigationRequest,
-	foreground,
+	layerId,
 }: {
-	onClose: () => void;
+	onClose: () => CloseOutcome;
 	initialSection: SectionId;
 	navigationRequest: number;
-	foreground: KnowledgePickerModal;
+	layerId: string;
 	/** The keys-section row to unfold (see DialogContext above). */
 	initialRow: string | null;
 }) {
-	const backdropDismiss = useBackdropDismiss(onClose);
-	// Plain dim backdrop (no blur — nothing decorative); a genuine
-	// backdrop click closes, the dialog body stops propagation.
-	return createPortal(
-		<div
-			className="fixed inset-0 z-50 flex items-center justify-center bg-background/80"
-			data-testid="settings-backdrop"
-			hidden={foreground.suspended}
-			inert={foreground.suspended}
-			style={foreground.suspended ? { display: "none" } : undefined}
-			{...backdropDismiss}
-		>
-			<SettingsDialogBody onClose={onClose} initialSection={initialSection} initialRow={initialRow} navigationRequest={navigationRequest} foreground={foreground} />
-		</div>,
-		document.body,
-	);
+	// Keep the original visual frame and plain dim backdrop. The shared
+	// untransformed boundary also contains this modal's portaled menus.
+	return <SettingsDialogBody onClose={onClose} initialSection={initialSection}
+		initialRow={initialRow} navigationRequest={navigationRequest}
+		renderFrame={frame => <HostDialog open layerId={layerId} ownerId={null}
+			onClose={onClose} frame={frame} aria-label="Settings"
+			backdropProps={{
+				className: "fixed inset-0 z-50 flex items-center justify-center bg-background/80",
+				"data-testid": "settings-backdrop",
+			}}>{frame.props.children}</HostDialog>} />;
 }
 
 /** The dialog without the portal/backdrop — the SSR-testable frame
@@ -166,11 +171,11 @@ export function SettingsDialogBody({
 	initialSection = "keys",
 	initialRow = null,
 	navigationRequest = 0,
-	foreground,
+	renderFrame,
 }: {
 	onClose: () => void;
-	/** Internal host coordination; isolated/SSR bodies retain legacy behavior. */
-	foreground?: KnowledgePickerModal;
+	/** The runtime supplies the shared modal shell; standalone SSR retains the frame. */
+	renderFrame?: (frame: ReactElement<{ children: ReactNode }>) => ReactNode;
 	initialSection?: SectionId;
 	/** Repeated opens must retarget even when the requested section is unchanged. */
 	navigationRequest?: number;
@@ -179,6 +184,9 @@ export function SettingsDialogBody({
 	initialRow?: string | null;
 }) {
 	const { onAppearanceChange } = useAppearance();
+	const inheritedWriteOrder = useContext(WriteOrderContext);
+	const standaloneWriteOrder = useRef<SettingsWriteOrder>({ issued: 0, acknowledged: 0, listeners: new Set() });
+	const writeOrder = inheritedWriteOrder ?? standaloneWriteOrder;
 	const { snapshot } = usePlugins();
 	const [record, setRecord] = useState<UserSettings | null | undefined>(
 		undefined,
@@ -242,38 +250,34 @@ export function SettingsDialogBody({
 		...enabledPlugins.map(plugin => ({ id: `plugin:${plugin.info.id}` as const, label: plugin.info.manifest?.name ?? plugin.info.id })),
 	];
 
-	// Fetch once per dialog mount. 200 {settings: null} is FIRST BOOT
-	// (no record = factory everything), not a failure — the error state is
-	// a non-200 or a network throw only.
+	// A save may finish after its original dialog closes. Publish its
+	// acknowledged snapshot to whichever Settings instance is mounted now.
 	useEffect(() => {
+		const authority = writeOrder.current;
+		authority.listeners.add(setRecord);
+		return () => { authority.listeners.delete(setRecord); };
+	}, [writeOrder]);
+
+	// Fetch once per dialog mount. 200 {settings: null} is FIRST BOOT.
+	// A GET started before a newer acknowledged save cannot roll it back.
+	useEffect(() => {
+		const authority = writeOrder.current;
+		const acknowledgedAtRead = authority.acknowledged;
+		let alive = true;
+		const applyLoaded = (loaded: UserSettings | null) => {
+			if (!alive) return;
+			setRecord(authority.acknowledged === acknowledgedAtRead ? loaded : authority.record ?? loaded);
+		};
 		fetch("/api/settings")
 			.then((r) =>
 				r.ok ? r.json() : Promise.reject(new Error(`status ${r.status}`)),
 			)
 			.then((body: { settings: UserSettings | null }) =>
-				setRecord(body.settings ?? { version: CURRENT_SETTINGS_VERSION }),
+				applyLoaded(body.settings ?? { version: CURRENT_SETTINGS_VERSION }),
 			)
-			.catch(() => setRecord(null));
-	}, []);
-
-	// Escape closes — the layered-dismiss convention (Esc is dead for the
-	// sections' own editors while they hold focus; this listener is the
-	// dialog's outer layer).
-	useEffect(() => {
-		const onKey = (e: KeyboardEvent) => {
-			if (foreground && (!foreground.canHandle() || e.defaultPrevented)) return;
-			if (e.key === "Escape") {
-				// THE ONE-ESC LAW (owner, keyboard round 2026-10-06): claim
-				// at the document level — the window chain (dictation →
-				// abort) must not also act. One Esc, one action.
-				e.preventDefault();
-				e.stopPropagation();
-				onClose();
-			}
-		};
-		document.addEventListener("keydown", onKey);
-		return () => document.removeEventListener("keydown", onKey);
-	}, [onClose, foreground]);
+			.catch(() => applyLoaded(null));
+		return () => { alive = false; };
+	}, [writeOrder]);
 
 	/** ONE writer for the whole dialog: PUT the whole section, keep the
 	 *  record mirror in sync, surface route errors inline (a 400 is a
@@ -282,45 +286,52 @@ export function SettingsDialogBody({
 		async (
 			section: "general" | "agent" | "models" | "appearance" | "graph" | "compaction",
 			body: object,
-		) => {
+		): Promise<boolean> => {
+			const ticket = ++writeOrder.current.issued;
 			setError(null);
-			const res = await fetch(`/api/settings/${section}`, {
-				method: "PUT",
-				headers: { "content-type": "application/json" },
-				body: JSON.stringify(body),
-			});
-			if (!res.ok) {
-				const detail = (await res.json().catch(() => ({}))) as {
-					error?: string;
-				};
-				setError(`${section}: ${detail.error ?? res.status}`);
-				return;
+			try {
+				const res = await fetch(`/api/settings/${section}`, {
+					method: "PUT",
+					headers: { "content-type": "application/json" },
+					body: JSON.stringify(body),
+				});
+				if (!res.ok) {
+					const detail = (await res.json().catch(() => ({}))) as {
+						error?: string;
+					};
+					if (ticket === writeOrder.current.issued) setError(`${section}: ${detail.error ?? res.status}`);
+					return false;
+				}
+				// Only the acknowledged record is canonical: never substitute the
+				// request body, including when normalization leaves the old value.
+				const stored = (
+					(await res.json().catch(() => null)) as { settings?: UserSettings } | null
+				)?.settings;
+				if (!stored || typeof stored !== "object" || Array.isArray(stored) || stored.version !== 1 ||
+					!stored[section] || typeof stored[section] !== "object" || Array.isArray(stored[section])) {
+					if (ticket === writeOrder.current.issued) setError(`${section}: Could not confirm saved settings. Your input has been kept.`);
+					return false;
+				}
+				if (ticket >= writeOrder.current.acknowledged) {
+					writeOrder.current.acknowledged = ticket;
+					writeOrder.current.record = stored;
+					for (const apply of writeOrder.current.listeners) apply(stored);
+					// Every accepted response is a full canonical record, including
+					// appearance saved by an earlier, still-pending section request.
+					onAppearanceChange(stored.appearance);
+				}
+				notifySettingsSaved(section);
+				return true;
+			} catch (error) {
+				if (ticket === writeOrder.current.issued) setError(`${section}: ${error instanceof Error ? error.message : String(error)}`);
+				return false;
 			}
-			// Server truth, never the request body (fix wave, owner repro):
-			// the models section clamps pinned thinking levels on write
-			// (bd68486) — a swap that rides an unsupported level lands
-			// CLAMPED in the record, and the writing surface must show the
-			// stored value in this same interaction, not the optimistic one.
-			const stored = (
-				(await res.json().catch(() => null)) as { settings?: UserSettings } | null
-			)?.settings;
-			setRecord(
-				(prev) =>
-					stored ?? ({ ...(prev ?? {}), [section]: body }) as UserSettings,
-			);
-			notifySettingsSaved(section);
-			if (section === "appearance")
-				onAppearanceChange(body as AppearanceSettings);
 		},
-		[onAppearanceChange],
+		[onAppearanceChange, writeOrder],
 	);
 
-	return (
+	const frame = (
 		<div
-			ref={foreground?.frame}
-			hidden={foreground?.suspended}
-			inert={foreground?.suspended}
-			style={foreground?.suspended ? { display: "none" } : undefined}
 			tabIndex={-1}
 			role="dialog"
 			aria-modal="true"
@@ -333,7 +344,7 @@ export function SettingsDialogBody({
 			<header className="flex h-15 shrink-0 items-center gap-3 border-b border-border px-5">
 				<h2 className="font-title text-2xl tracking-tight">Settings</h2>
 				<Hint
-						// Esc closes the dialog (its own listener) — surface it.
+						// Esc closes through the shared interaction owner.
 						label="Close"
 						binding="escape"
 						side="left"
@@ -452,10 +463,10 @@ export function SettingsDialogBody({
 											void write("models", next)
 										}
 										onSectionChange={(next: AgentSettings) =>
-											void write("agent", next)
+											write("agent", next)
 										}
 										onCompactionChange={(next: CompactionSettings) =>
-											void write("compaction", next)
+											write("compaction", next)
 										}
 									/>
 								</SettingsSection>
@@ -468,7 +479,7 @@ export function SettingsDialogBody({
 									<AppearanceSection
 										appearance={record.appearance}
 										onSectionChange={(next: AppearanceSettings) =>
-											void write("appearance", next)
+											write("appearance", next)
 										}
 									/>
 								</SettingsSection>
@@ -481,7 +492,7 @@ export function SettingsDialogBody({
 									<GraphSection
 										graph={record.graph}
 										onSectionChange={(next: GraphSettings) =>
-											void write("graph", next)
+											write("graph", next)
 										}
 									/>
 								</SettingsSection>
@@ -501,4 +512,5 @@ export function SettingsDialogBody({
 			</div>
 		</div>
 	);
+	return renderFrame ? renderFrame(frame) : frame;
 }

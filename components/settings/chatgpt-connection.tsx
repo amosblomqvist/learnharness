@@ -6,6 +6,7 @@ import { ConnectionDialog, ConnectionFooter, ConnectionRow } from "./connection-
 import { Button } from "@/components/ui/button";
 import { Toggle } from "./controls";
 import { useChatGPTBridge } from "./subscription-client";
+import type { CloseOutcome } from "@/components/interaction-layers";
 
 export const CHATGPT_NOTICE = "LearnHarness stores your ChatGPT account details and credentials in an unencrypted local file on this device. When this connection is used, relevant conversation context, learning material, and tool results are sent directly to OpenAI. ChatGPT plan limits apply; any additional credits are authorized and managed in ChatGPT, not LearnHarness.";
 export function chatGPTNotice(web = false): string { return web ? `${CHATGPT_NOTICE.replace("on this device", "on the machine running LearnHarness")} Complete ChatGPT sign-in in a browser on that same machine.` : CHATGPT_NOTICE; }
@@ -149,10 +150,10 @@ export function ChatGPTUIProvider({ children }: { children: React.ReactNode }) {
 		setDismissedError(status.error);
 		showDialog({ kind: "connect" });
 	}
-	function close() {
-		if (operation.current === "disconnect" || operation.current === "change" || operation.current === "cancel") return;
+	function close(): CloseOutcome {
+		if (operation.current === "disconnect" || operation.current === "change" || operation.current === "cancel") return "blocked";
 		const current = dialogRef.current;
-		if (current?.kind === "manage" && current.confirm) { showDialog({ ...current, confirm: false }); setError(null); return; }
+		if (current?.kind === "manage" && current.confirm) { showDialog({ ...current, confirm: false }); setError(null); return "handled-without-close"; }
 		const cancel = loginAttempt.current !== null || statusRef.current.pending;
 		const intent = ++generation.current;
 		const owner = dialogRef.current;
@@ -181,7 +182,9 @@ export function ChatGPTUIProvider({ children }: { children: React.ReactNode }) {
 			}).catch(() => { if (mounted.current && generation.current === intent) setError(CONTROL_ERROR); }).finally(() => {
 				if (mounted.current && generation.current === intent) { operation.current = null; setBusy(false); }
 			});
+			return "pending";
 		}
+		return "closed";
 	}
 	async function control(kind: "change" | "disconnect", action: () => Promise<ChatGPTStatus>, target?: string) {
 		if (operation.current) return;
@@ -323,7 +326,7 @@ function ContinueButton({ onClick, disabled, testid = "chatgpt-login" }: { onCli
 	</Button>;
 }
 
-function AccountDialog({ children, onClose, busy }: { children: React.ReactNode; onClose: () => void; busy: boolean }) {
+function AccountDialog({ children, onClose, busy }: { children: React.ReactNode; onClose: () => CloseOutcome; busy: boolean }) {
 	return <ConnectionDialog label="ChatGPT account" testid="chatgpt-account-dialog" backdropTestid="chatgpt-dialog-backdrop" onClose={onClose} busy={busy}>{children}</ConnectionDialog>;
 }
 

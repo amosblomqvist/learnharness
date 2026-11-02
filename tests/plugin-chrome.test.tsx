@@ -2,7 +2,7 @@ import React, { act } from "react";
 (globalThis as Record<string, unknown>).React = React;
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { renderToStaticMarkup } from "react-dom/server";
+import { renderWithInteractionLayers as renderToStaticMarkup } from "./interaction-layer-render.tsx";
 import { placedPluginActions, pluginActionDisabled, fitPluginTopBarActions, PluginSidebarActions, PluginGraphActions, PluginTopBarActions } from "../components/plugin-chrome.tsx";
 import { TopBar } from "../components/top-bar.tsx";
 import type { FrontendPlugin } from "../components/plugin-manager.ts";

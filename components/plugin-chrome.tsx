@@ -6,6 +6,7 @@ import type { PluginAction, PluginActionContext } from "@/src/core";
 import type { FrontendPlugin } from "@/components/plugin-manager";
 import { usePlugins } from "@/components/plugins";
 import { useSidebar } from "@/components/sidebar";
+import { useInteractionLayers } from "@/components/interaction-layers";
 import { MenuShell } from "@/components/menu-shell";
 import { Hint } from "@/components/ui/hint";
 
@@ -115,6 +116,7 @@ export function PluginTopBarActions({ context }: { context: Extract<PluginAction
 	const trigger = useRef<HTMLButtonElement>(null);
 	const [visible, setVisible] = useState(0);
 	const [menuOpen, setMenuOpen] = useState(false);
+	const interactions = useInteractionLayers();
 	const count = Math.min(visible, actions.length);
 	const excess = actions.slice(count);
 	const signature = actions.map(item => `${item.key}:${item.action.name}`).join("|");
@@ -158,17 +160,14 @@ export function PluginTopBarActions({ context }: { context: Extract<PluginAction
 	useEffect(() => {
 		if (!menuOpen) return;
 		const dismiss = (event: PointerEvent) => {
+			const popup = interactions.getTopLayer();
+			if (popup?.kind !== "popup" || popup.anchorRef?.current !== trigger.current || !interactions.isElementEligible(popup.rootRef.current)) return;
 			const target = event.target as Node;
-			if (!root.current?.contains(target) && !document.querySelector('[data-testid="plugin-top-bar-menu"]')?.contains(target)) setMenuOpen(false);
-		};
-		const escape = (event: KeyboardEvent) => {
-			if (event.key !== "Escape") return;
-			event.stopPropagation(); setMenuOpen(false); trigger.current?.focus();
+			if (!root.current?.contains(target) && !popup.rootRef.current?.contains(target)) setMenuOpen(false);
 		};
 		document.addEventListener("pointerdown", dismiss);
-		document.addEventListener("keydown", escape);
-		return () => { document.removeEventListener("pointerdown", dismiss); document.removeEventListener("keydown", escape); };
-	}, [menuOpen]);
+		return () => { document.removeEventListener("pointerdown", dismiss); };
+	}, [menuOpen, interactions]);
 
 	if (!actions.length) return null;
 	return <div ref={root} data-testid="plugin-top-bar-actions" className="lh-no-drag relative flex shrink-0 items-center gap-1">
@@ -180,7 +179,7 @@ export function PluginTopBarActions({ context }: { context: Extract<PluginAction
 		{excess.length > 0 && <Hint label="More plugin actions" side="bottom"><button ref={trigger} type="button" title="More plugin actions" aria-label="More plugin actions"
 			aria-haspopup="menu" aria-expanded={menuOpen} onClick={() => setMenuOpen(open => !open)}
 			className="flex size-9 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"><EllipsisIcon className="size-4" /></button></Hint>}
-		{menuOpen && excess.length > 0 && <MenuShell anchorRef={trigger} testid="plugin-top-bar-menu" preferredSide="down" align="right"
+		{menuOpen && excess.length > 0 && <MenuShell anchorRef={trigger} testid="plugin-top-bar-menu" onClose={(reason) => { setMenuOpen(false); if (reason === "escape") trigger.current?.focus(); return "closed"; }} preferredSide="down" align="right"
 			menuClass="lh-no-drag w-64 rounded-xl border border-border bg-popover p-1 shadow-lg">
 			<div role="menu" aria-label="More plugin actions">
 			{excess.map(item => <ActionButton key={item.key} item={item} context={context} menuItem onRun={() => setMenuOpen(false)}

@@ -25,6 +25,8 @@ import { createPortal } from "react-dom";
 
 import { ThinkingBlock } from "@/components/thinking-block";
 import { usePopoverDismiss } from "@/components/popover-dismiss";
+import { INTERACTION_LAYER_Z_BASE } from "@/components/host-dialog";
+import { useInteractionLayers } from "@/components/interaction-layers";
 
 /* TARGET NAMES (owner round 17, 2026-10-06): targets are normalized to
  * opaque node ids at the record seam (owner round 9 — the mastery trace
@@ -180,6 +182,8 @@ function MetadataPopover({
 	const [open, setOpen] = useState(false);
 	const triggerRef = useRef<HTMLButtonElement | null>(null);
 	const rootRef = useRef<HTMLDivElement | null>(null);
+	const panelRef = useRef<HTMLDivElement | null>(null);
+	const interactions = useInteractionLayers();
 	// The portal's anchor (owner fix, 2026-10-06): the box is placed from
 	// the trigger's viewport rect AT OPEN TIME — any scroll closes the
 	// box, so there is nothing to track.
@@ -200,15 +204,15 @@ function MetadataPopover({
 		};
 	}, [open, targets.length, names]);
 
-	usePopoverDismiss(rootRef, open, () => setOpen(false));
+	const popupLayer = usePopoverDismiss(rootRef, open, () => setOpen(false), { layerRootRef: panelRef });
 	// ANY scroll closes it (owner law): capture-phase, so every scroller
 	// in the tree counts — the transcript's own scroll included.
 	useEffect(() => {
 		if (!open) return;
-		const close = () => setOpen(false);
+		const close = () => { if (interactions.isElementEligible(panelRef.current)) setOpen(false); };
 		window.addEventListener("scroll", close, { capture: true, passive: true });
 		return () => window.removeEventListener("scroll", close, { capture: true });
-	}, [open]);
+	}, [open, interactions]);
 
 	const mode = typeof problemInput.mode === "string" ? problemInput.mode : "";
 	const rung = typeof concludeInput.rung === "string" ? concludeInput.rung : "";
@@ -245,6 +249,7 @@ function MetadataPopover({
 				anchor &&
 				createPortal(
 					<div
+						ref={panelRef}
 						data-testid="metadata-box"
 						// PORTALED TO BODY (owner fix, 2026-10-06): the transcript's
 						// MessageContent boxes carry overflow-hidden — an absolutely
@@ -252,8 +257,8 @@ function MetadataPopover({
 						// cut-off bug). A fixed-position portal sits on top of
 						// EVERYTHING, the dialogs' law. Node-card info-box register;
 						// opening BELOW the trigger — always.
-						style={{ position: "fixed", top: anchor.top, left: anchor.left }}
-						className="z-50 w-80 max-w-[calc(100vw-1rem)] rounded-xl border bg-card p-4 text-left shadow-lg"
+						style={{ position: "fixed", top: anchor.top, left: anchor.left, zIndex: INTERACTION_LAYER_Z_BASE + popupLayer.order }}
+						className="w-80 max-w-[calc(100vw-1rem)] rounded-xl border bg-card p-4 text-left shadow-lg"
 					>
 				<dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-xs">
 						<dt className="text-muted-foreground">Mode</dt>
@@ -283,7 +288,7 @@ function MetadataPopover({
 						<dd className="font-mono">{retest === undefined ? "—" : retest ? "yes" : "no"}</dd>
 					</dl>
 					</div>,
-					document.body,
+					interactions.getPortalContainer(triggerRef.current)!,
 				)}
 		</div>
 	);

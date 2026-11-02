@@ -55,6 +55,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { CacheRetention } from "@earendil-works/pi-ai";
 import { CacheRetentionMenu, cacheRetentionLabel } from "./cache-retention-menu.tsx";
 import { MenuShell } from "@/components/menu-shell";
+import { useInteractionLayers } from "@/components/interaction-layers";
 import { useSettingsSaved } from "@/components/settings-signal";
 import { defaultOrderLevel, populateLevel } from "@/components/thinking-default";
 import { useModelCatalog } from "@/components/model-catalog";
@@ -328,11 +329,11 @@ export function AgentSection({
 	 *  behavior, not an agent-section key; owner round 14, Agent tab). */
 	compaction: CompactionSettings | undefined;
 	/** Writes the composed WHOLE agent section (replace-PUT discipline). */
-	onSectionChange: (next: AgentSettings) => void;
+	onSectionChange: (next: AgentSettings) => boolean | Promise<boolean>;
 	/** Writes the composed models section (slots — replace-PUT discipline). */
 	onModelsChange: (next: ModelsSettings) => void;
 	/** Writes the whole compaction section (replace-PUT discipline). */
-	onCompactionChange: (next: CompactionSettings) => void;
+	onCompactionChange: (next: CompactionSettings) => boolean | Promise<boolean>;
 }) {
 	const { catalog: body, failed: catalogFailed, refresh: refreshCatalog } = useModelCatalog();
 	const catalog = body?.models;
@@ -352,6 +353,7 @@ export function AgentSection({
 	const [advancedModels, setAdvancedModels] = useState(false);
 	const [workerConcurrencyError, setWorkerConcurrencyError] = useState<string | null>(null);
 	const menuAnchorRef = useRef<HTMLSpanElement>(null);
+	const interactions = useInteractionLayers();
 
 	const refreshSearch = () =>
 		fetch("/api/search")
@@ -417,6 +419,8 @@ export function AgentSection({
 	useEffect(() => {
 		if (openMenu === null) return;
 		const onPointerDown = (e: PointerEvent) => {
+			const testid = openMenu.target === "search" ? "search-engine-menu" : `slot-${openMenu.kind}-menu-${openMenu.target}`;
+			if (!interactions.isElementEligible(document.querySelector<HTMLElement>(`[data-testid="${testid}"]`))) return;
 			const target = e.target as Node;
 			if (menuAnchorRef.current?.contains(target)) return;
 			if (target instanceof Element && target.closest("[data-lh-menu]")) return;
@@ -425,19 +429,9 @@ export function AgentSection({
 			}
 			// else: outside the dialog — the dialog's own close handles it.
 		};
-		const onKeyDown = (e: KeyboardEvent) => {
-			if (e.key === "Escape") {
-				e.stopPropagation();
-				setOpenMenu(null);
-			}
-		};
 		document.addEventListener("pointerdown", onPointerDown);
-		document.addEventListener("keydown", onKeyDown);
-		return () => {
-			document.removeEventListener("pointerdown", onPointerDown);
-			document.removeEventListener("keydown", onKeyDown);
-		};
-	}, [openMenu]);
+		return () => document.removeEventListener("pointerdown", onPointerDown);
+	}, [openMenu, interactions]);
 
 	async function saveSegment(path: string, text: string) {
 		setSegmentStatus(null);
@@ -664,12 +658,6 @@ export function AgentSection({
 							<span
 								ref={thisMenuOpen ? menuAnchorRef : undefined}
 								className={`relative flex items-center gap-2 ${advancedModels ? "shrink-0" : ""}`}
-								onKeyDown={(event) => {
-									// Portal events bubble here too: close this menu, not the dialog.
-									if (thisMenuOpen === "cache" && event.key === "Escape") {
-										event.preventDefault(); event.stopPropagation(); setOpenMenu(null);
-									}
-								}}
 							>
 								{slot !== "strong" && <><ChatGPTBackgroundAccess provider={coord?.provider} /><NativeSubscriptionBackgroundAccess provider={coord?.provider} /></>}
 								<MenuTrigger
@@ -708,6 +696,7 @@ export function AgentSection({
 									preferredSide="down"
 									anchorTestid={`slot-cache-${slot}`}
 									testid={`slot-cache-menu-${slot}`}
+									onClose={() => { setOpenMenu(null); return "closed"; }}
 									menuClass="flex w-80 flex-col gap-0.5 rounded-xl border border-border bg-card p-2 text-xs shadow-xl"
 								>
 									<CacheRetentionMenu value={override?.cacheRetention} onPick={(value) => {
@@ -720,6 +709,7 @@ export function AgentSection({
 										preferredSide="down"
 											anchorTestid={`slot-model-${slot}`}
 										testid={`slot-model-menu-${slot}`}
+										onClose={() => { setOpenMenu(null); return "closed"; }}
 										menuClass="flex w-[22rem] flex-col rounded-xl border border-border bg-card p-2 text-xs shadow-xl"
 									>
 										<ModelMenuList
@@ -748,6 +738,7 @@ export function AgentSection({
 										preferredSide="down"
 											anchorTestid={`slot-thinking-${slot}`}
 										testid={`slot-thinking-menu-${slot}`}
+										onClose={() => { setOpenMenu(null); return "closed"; }}
 										menuClass="flex w-44 flex-col gap-0.5 rounded-xl border border-border bg-card p-2 text-xs shadow-xl"
 									>
 										<ThinkingMenuList
@@ -794,7 +785,7 @@ export function AgentSection({
 							onCommit={(value) => {
 								const next = composeWorkerRequestConcurrency(agent, value);
 								setWorkerConcurrencyError(next.ok ? null : next.error);
-								if (next.ok) onSectionChange(next.settings);
+								return next.ok ? onSectionChange(next.settings) : false;
 							}}
 						/>
 						{workerConcurrencyError && <p role="alert" className="text-xs text-red-400">{workerConcurrencyError}</p>}
@@ -908,6 +899,7 @@ export function AgentSection({
 										preferredSide="down"
 											anchorTestid="search-engine-trigger"
 										testid="search-engine-menu"
+										onClose={() => { setOpenMenu(null); return "closed"; }}
 										menuClass="flex w-44 flex-col gap-0.5 rounded-xl border border-border bg-card p-2 text-xs shadow-xl"
 									>
 										{engineOption("auto", "Automatic", engine === null, null, () => {
@@ -944,15 +936,14 @@ export function AgentSection({
 							// Empty = factory default (the budget row's discipline):
 							// absence is the unset for numbers.
 							if (v === "") {
-								onCompactionChange({ ...compaction, thresholdTokens: undefined });
-								return;
+								return onCompactionChange({ ...compaction, thresholdTokens: undefined });
 							}
 							const n = Number(v);
-							if (!Number.isFinite(n) || n <= 0) return; // bad input: no write
+							if (!Number.isFinite(n) || n <= 0) return false; // bad input: no write
 							// Mirror the server floor (anti-churn: each compaction
 							// keeps a ~20k-token tail); no ceiling — the effective
 							// trigger is min(threshold, contextWindow − 16k) anyway.
-							onCompactionChange({
+							return onCompactionChange({
 								...compaction,
 								thresholdTokens: Math.max(COMPACTION_THRESHOLD_FLOOR, Math.round(n)),
 							});

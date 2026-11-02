@@ -8,6 +8,7 @@ import { renderMermaid } from "@/components/mermaid-render";
 import { MermaidError } from "@/components/mermaid-error";
 import { Hint } from "@/components/ui/hint";
 import { SvgImage } from "@/components/artifacts/svg-image";
+import { InteractionLayerOwner, useInteractionLayer } from "./interaction-layers";
 
 /**
  * SESSION-SCOPED OVERLAYS (owner wave, 2026-09-19): the "fullscreen"
@@ -110,20 +111,11 @@ export function MermaidOverlay({
 		};
 	}, [rawSvg, chart, attempt]);
 
-	// Esc closes — claimed at the document level (THE ONE-ESC LAW, owner
-	// keyboard round 2026-10-06): one Esc, one action; the window chain
-	// (dictation → abort) never fires under a surfaced layer.
-	useEffect(() => {
-		const onKey = (e: KeyboardEvent) => {
-			if (e.key === "Escape") {
-				e.preventDefault();
-				e.stopPropagation();
-				onClose();
-			}
-		};
-		document.addEventListener("keydown", onKey);
-		return () => document.removeEventListener("keydown", onKey);
-	}, [onClose]);
+	const rootRef = useRef<HTMLDivElement>(null);
+	const layer = useInteractionLayer({
+		kind: "view", enabled: true, rootRef,
+		onClose: () => { onClose(); return "closed"; },
+	});
 
 	// ── pan/zoom viewport (same wiring as the plan popup) ──
 	const viewportRef = useRef<HTMLDivElement>(null);
@@ -210,15 +202,16 @@ export function MermaidOverlay({
 	};
 
 	return (
+		<InteractionLayerOwner.Provider value={layer.id}>
 		<div
+			ref={rootRef}
 			data-testid="mermaid-overlay"
 			// SESSION-SCOPED (not fixed): mounts absolute inside the chat
 			// page's session-area div — below the drag bar, right of the
 			// sidebar. 80% + blur: the transcript ghosts through (owner
 			// decision, 2026-09-19).
 			className="absolute inset-0 z-40 flex flex-col bg-background/80 p-4 backdrop-blur-sm"
-			role="dialog"
-			aria-modal="true"
+			role="region"
 			aria-label="Diagram focus"
 		>
 			<div className="mb-2 flex items-center gap-2">
@@ -333,5 +326,6 @@ export function MermaidOverlay({
 				)}
 			</div>
 		</div>
+		</InteractionLayerOwner.Provider>
 	);
 }
