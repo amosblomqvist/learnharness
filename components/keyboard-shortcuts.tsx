@@ -35,7 +35,8 @@ import {
 	kbdEventForAction,
 	KEYBOARD_ACTIONS,
 } from "@/src/core";
-import { isDictationActive } from "@/components/dictation";
+import { discardRetainedDictation, isDictationActive } from "@/components/dictation";
+import { isDictationRetained } from "@/components/dictation-state";
 import { useSettingsDialog } from "@/components/settings/settings-dialog.tsx";
 
 // Re-exported for the contract pin (tests/keyboard-toggle-sidebar.test.ts):
@@ -90,13 +91,15 @@ export function KeyboardShortcuts() {
 				// overlays, dialogs) claims at the DOCUMENT level, which
 				// fires before this window listener — so reaching here means
 				// NOTHING is surfaced and no field is focused. This chain is
-				// the fallback, bottom-up: dictation (a live capture, not a
-				// surface — it survives Esc that closes a plan or overlay),
+				// the fallback, bottom-up: dictation (a live capture, or a failed
+				// recording kept for Retry — not a surface; it survives Esc
+				// that closes a plan or overlay),
 				// then abort the turn (a server-side turn has no client
 				// request to abort — the abort seam in Chat decides what's
 				// honestly stoppable, layered by escAbortTarget).
-				if (isDictationActive()) {
+				if (isDictationActive() || isDictationRetained()) {
 					e.preventDefault();
+					discardRetainedDictation(); // also with no dictation hook mounted
 					window.dispatchEvent(new CustomEvent("lh:kbd-cancel-dictation"));
 					return;
 				}
