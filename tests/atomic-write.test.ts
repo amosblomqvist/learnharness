@@ -189,6 +189,25 @@ describe("writeFileAtomicSync", () => {
 		if (process.platform !== "win32") assert.equal(fs.statSync(link).mode & 0o777, 0o600);
 	});
 
+	it("modeled Windows: a held symlink never falls back to overwriting its referent", (t) => {
+		const real = target("real.json", "old");
+		const link = path.join(path.dirname(real), "link.json");
+		try { fs.symlinkSync(real, link); }
+		catch {
+			t.skip("symlinks need extra rights on this machine");
+			return;
+		}
+		modelWindows(t);
+		const rename = t.mock.method(fs, "renameSync", () => { throw fail("EACCES"); });
+		const warn = t.mock.method(console, "warn", () => {});
+		assert.throws(() => writeFileAtomicSync(link, "new", { allowInPlaceFallback: true }), { code: "EACCES" });
+		assert.ok(rename.mock.callCount() > 1, "replacement was retried before failing");
+		assert.ok(fs.lstatSync(link).isSymbolicLink(), "the unsuccessful replacement leaves the link intact");
+		assert.equal(fs.readFileSync(real, "utf-8"), "old", "the referent was never truncated or written");
+		assert.equal(warn.mock.callCount(), 0, "no in-place save was performed");
+		assert.deepEqual(temps(link), []);
+	});
+
 	for (const code of ["EPERM", "EACCES", "EBUSY"]) {
 		for (const allowInPlaceFallback of [false, true]) {
 			it(`modeled Windows ${code}: in-place fallback is ${allowInPlaceFallback ? "enabled" : "disabled by default"}`, (t) => {

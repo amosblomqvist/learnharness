@@ -18,7 +18,8 @@
  *  - Windows refuses to rename over files another process holds open
  *    (antivirus, the Search indexer, backup tools). The rename is retried for
  *    about 100 ms, blocking the thread. If still held, only callers with
- *    allowInPlaceFallback save in place (the pre-#403 interruption risk).
+ *    allowInPlaceFallback save in place (the pre-#403 interruption risk),
+ *    and never through a symlink.
  *    The fsynced temp stays until that write lands, and is kept if it fails
  *    midway. Other callers throw, leaving the old file untouched.
  *  - Rename replaces the named path, including a symlink, not its referent.
@@ -92,7 +93,9 @@ function renameRetryingSync(tmp: string, file: string, allowInPlaceFallback: boo
 		} catch (error) {
 			if (!isSharingViolation(error, file)) throw error;
 			if (Date.now() >= deadline) {
-				if (allowInPlaceFallback) return false;
+				// Opening a symlink with "w" would truncate its referent instead of
+				// replacing the named path. Retrying may succeed; fallback must not.
+				if (allowInPlaceFallback && !fs.lstatSync(file, { throwIfNoEntry: false })?.isSymbolicLink()) return false;
 				throw error;
 			}
 			Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, delay); // sleep without spinning
