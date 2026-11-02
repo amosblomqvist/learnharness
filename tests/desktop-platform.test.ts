@@ -21,19 +21,21 @@ function windowOptions(platform: string, env: Record<string, string> = {}) {
 		webContents = { on() {}, setWindowOpenHandler() {} };
 		loadURL() {}
 		once() {}
+		on() {}
 	}
 	const electron = {
 		app: { setName() {}, getPath: () => "/fixture/LearnHarness", setPath() {}, requestSingleInstanceLock: () => false, quit() {} },
 		BrowserWindow: FakeWindow,
-		session: { defaultSession: { setPermissionRequestHandler() {}, setPermissionCheckHandler() {} } },
+		session: { fromPartition: () => ({ webRequest: { onBeforeSendHeaders() {} }, setPermissionRequestHandler() {}, setPermissionCheckHandler() {} }) },
+		screen: { getAllDisplays: () => [{ workArea: { x: 0, y: 0, width: 1920, height: 1080 } }], getPrimaryDisplay: () => ({ workArea: { x: 0, y: 0, width: 1920, height: 1080 } }) },
 	};
 	const context = {
 		require: (id: string) => id === "electron" ? electron : mainRequire(id),
 		process: { platform, argv: [], env, on() {} },
-		__dirname: dirname(mainFile),
+		__dirname: dirname(mainFile), URL,
 	};
 	runInNewContext(mainSource, context, { filename: mainFile });
-	const win = runInNewContext('createWindow("http://127.0.0.1:9000")', context) as FakeWindow;
+	const win = runInNewContext('createWindow("http://127.0.0.1:9000", {id:"fixture",panes:[],zoom:1})', context) as FakeWindow;
 	// The options originate in a VM realm; normalize prototypes for assertions.
 	return JSON.parse(JSON.stringify(win.options));
 }
@@ -96,7 +98,7 @@ describe("desktop window chrome", () => {
 		runInNewContext(readFileSync(new URL("../electron/preload.cjs", import.meta.url), "utf8"), context);
 		assert.equal(bridge.platform, "win32");
 		assert.deepEqual(Object.keys(bridge).sort(), [
-			"chatgpt", "checkForUpdates", "expandWindow", "getPathForFile", "getUpdateState", "getZoom", "installUpdate", "onOpenSettings", "onUpdateStatus", "onZoom", "platform", "subscriptions",
+			"chatgpt", "checkForUpdates", "expandWindow", "getPathForFile", "getUpdateState", "getZoom", "installUpdate", "onOpenSettings", "onUpdateStatus", "onZoom", "platform", "subscriptions", "workspace",
 		]);
 		assert.deepEqual(Object.keys(bridge.subscriptions as object).sort(), ["cancel", "consent", "disconnect", "login", "onChange", "open", "respond", "retry", "status"]);
 	});

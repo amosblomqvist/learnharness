@@ -51,6 +51,7 @@ function fixture({ packaged = true, updaterMissing = false } = {}) {
 		isLoadingMainFrame() { return this.loading; }
 		setWindowOpenHandler() {}
 		getZoomFactor() { return 1; }
+		setZoomFactor() {}
 	}
 	class FakeWindow extends EventEmitter {
 		webContents = new FakeWebContents();
@@ -62,6 +63,8 @@ function fixture({ packaged = true, updaterMissing = false } = {}) {
 		restore() { this.minimized = false; }
 		focus() { this.focused = true; }
 		show() {}
+		isDestroyed() { return false; }
+		getNormalBounds() { return { x: 0, y: 0, width: 1440, height: 900 }; }
 		static getAllWindows() {
 			if (enumerationFails) throw new Error("window enumeration failed");
 			return windows;
@@ -82,11 +85,16 @@ function fixture({ packaged = true, updaterMissing = false } = {}) {
 		app, BrowserWindow: FakeWindow,
 		Menu: { buildFromTemplate: (value: typeof menu) => value, setApplicationMenu: (value: typeof menu) => { menu = value; } },
 		ipcMain: { on() {}, handle: (channel: string, fn: (event: unknown) => unknown) => handles.set(channel, fn) },
-		session: { defaultSession: { setPermissionRequestHandler() {}, setPermissionCheckHandler() {} } },
+		session: { fromPartition: () => ({ webRequest: { onBeforeSendHeaders() {} }, setPermissionRequestHandler() {}, setPermissionCheckHandler() {} }) },
+		screen: { getAllDisplays: () => [{ workArea: { x: 0, y: 0, width: 1920, height: 1080 } }], getPrimaryDisplay: () => ({ workArea: { x: 0, y: 0, width: 1920, height: 1080 } }) },
 	};
 	const context = createContext({
 		require: (id: string) => {
 			if (id === "electron") return electron;
+			if (id === "./workspace.cjs") {
+				const module = mainRequire(id);
+				return { ...module, Workspace: class extends module.Workspace { persist() {} } };
+			}
 			if (id === "electron-updater") {
 				if (updaterMissing) throw new Error("missing updater");
 				return { autoUpdater: updater };

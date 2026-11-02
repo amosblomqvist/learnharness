@@ -40,6 +40,18 @@ ipcRenderer.on("lh:open-settings", (_event, section) => {
 
 contextBridge.exposeInMainWorld("lh", {
 	platform: process.platform,
+	workspace: {
+		get: () => ipcRenderer.invoke("lh:workspace:get"),
+		onChanged: (cb) => {
+			const listener = (_event, value) => cb(value);
+			ipcRenderer.on("lh:workspace:changed", listener);
+			return () => ipcRenderer.removeListener("lh:workspace:changed", listener);
+		},
+		open: (sessionId, disposition = "active") => ipcRenderer.invoke("lh:workspace:open", sessionId, disposition),
+		move: (paneId) => ipcRenderer.invoke("lh:workspace:move", paneId),
+		close: (paneId) => ipcRenderer.invoke("lh:workspace:close", paneId),
+		save: (patch) => ipcRenderer.invoke("lh:workspace:save", patch),
+	},
 	// Resolve only a renderer-supplied, OS-backed File. No filesystem API,
 	// uploads, copies, or DOM File IPC to main; sandbox/isolation stay on.
 	getPathForFile: (file) => webUtils.getPathForFile(file),
