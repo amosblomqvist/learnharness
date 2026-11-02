@@ -10,7 +10,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { after, describe, it, mock } from "node:test";
-import { createFauxCore, fauxAssistantMessage, fauxText, fauxToolCall, type FauxResponseStep } from "@earendil-works/pi-ai";
+import { createFauxCore, fauxAssistantMessage, fauxText, fauxThinking, fauxToolCall, type FauxResponseStep } from "@earendil-works/pi-ai";
 import { transformMessages } from "@earendil-works/pi-ai/api/transform-messages";
 import { Type } from "typebox";
 import type { AgentBuildOptions, TeachingAgent } from "../src/agent/teacher-agent.ts";
@@ -568,6 +568,101 @@ describe("the Retry button's client path", () => {
 		assert.equal(posted.length, 1, "send() recovers from error without stop()");
 		assert.deepEqual(JSON.parse(posted[0]!).input, { type: "retry" });
 		assert.deepEqual(m.getState().nativeMessages, failedTurn, "there is no optimistic learner message or deletion");
+	});
+});
+
+describe("automatic continuation after an empty answer reaction", () => {
+	const pose = () => fauxAssistantMessage([fauxToolCall("quiz", QUIZ_INPUT, { id: "call-1" })], { stopReason: "toolUse" });
+	for (const [label, blank] of [
+		["empty text", () => fauxAssistantMessage([fauxText("")])],
+		["no blocks", () => fauxAssistantMessage([])],
+		["reasoning and whitespace", () => fauxAssistantMessage([fauxThinking("Considering the answer."), fauxText(" \n\t")])],
+	] as const) {
+		it(`${label}: one answer advances to the next question without another learner message`, async () => {
+			const { engine, histories } = scripted([
+				pose, blank,
+				() => fauxAssistantMessage([fauxText("Correct. Predict the next step."), fauxToolCall("quiz", { ...QUIZ_INPUT, type: "predict" }, { id: "call-2" })], { stopReason: "toolUse" }),
+				() => fauxAssistantMessage("The next answer also continues normally."),
+			]);
+			const chat = createConfiguredChat(`Test: recover ${label}`);
+			await turn(engine, chat.id, { type: "text", text: "teach me the planets" });
+			const before = chatStore.getChat(chat.id)!.messages;
+			await turn(engine, chat.id, { type: "answer", toolCallId: "call-1", answer: gradedAnswer() });
+			const saved = chatStore.getChat(chat.id)!;
+			assertPreserved(before, saved.messages);
+			assert.equal(histories.length, 3, "pose, empty reaction, one recovery request");
+			assert.match(histories[2]!, /learner has answered the question/);
+			assert.match(histories[2]!, /Mercury is the innermost/);
+			assert.equal(saved.messages.filter((m) => m.role === "user").length, 1);
+			assert.equal(saved.messages.filter((m) => m.role === "toolResult" && m.toolCallId === "call-1").length, 1);
+			assert.equal(saved.messages.at(-1)?.role, "assistant", "the next question stops normally, with no saved placeholder");
+			assert.match(JSON.stringify(saved.messages.at(-1)), /call-2/);
+			assert.doesNotMatch(JSON.stringify(saved.messages), /Your previous response was empty/);
+			assert.equal(saved.turns?.at(-1)?.steps.length, 2, "both provider requests retain their usage in one application turn");
+			assert.equal(endsInFailedTurn(saved.messages), false);
+			await turn(engine, chat.id, { type: "answer", toolCallId: "call-2", answer: gradedAnswer() });
+			assert.equal(histories.length, 4);
+			assert.doesNotMatch(histories[3]!, /Your previous response was empty/);
+		});
+	}
+
+	it("two empty responses stop with a live and persisted Retry error; Retry keeps the saved answer", async () => {
+		const { engine, contexts, histories } = scripted([
+			pose, () => fauxAssistantMessage(""), () => fauxAssistantMessage(""),
+			() => fauxAssistantMessage("Continuing from the saved answer."),
+		]);
+		const chat = createConfiguredChat("Test: repeated empty answer reaction");
+		await turn(engine, chat.id, { type: "text", text: "teach me the planets" });
+		const view = new SessionModel({ chatId: chat.id, initialMessages: chatStore.getChat(chat.id)!.messages });
+		await turn(engine, chat.id, { type: "answer", toolCallId: "call-1", answer: gradedAnswer() }, (opts) => {
+			const agent = createTeacherAgent(undefined, { ...opts, engine });
+			agent.subscribe((event) => { view.applyWireEvent(JSON.parse(JSON.stringify(event))); });
+			return agent;
+		});
+		const before = chatStore.getChat(chat.id)!.messages;
+		assert.equal(histories.length, 3, "the second blank cannot start a third automatic request");
+		assert.match(view.getState().error?.message ?? "", /empty response twice/);
+		assert.match(new SessionModel({ chatId: chat.id, initialMessages: before }).getState().error?.message ?? "", /empty response twice/);
+		assert.ok(endsInFailedTurn(before));
+		assert.equal(retryDrops(before).size, 2, "Retry omits both blank attempts from temporary history");
+		assert.equal(isTurnRunning(chat.id), false);
+		assert.equal((await turn(engine, chat.id, { type: "retry" })).status, 200);
+		const after = chatStore.getChat(chat.id)!.messages;
+		assertPreserved(before, after);
+		assert.deepEqual(contexts.at(-1), ["user", "assistant", "toolResult"]);
+		assert.equal(after.filter((m) => m.role === "toolResult" && m.toolCallId === "call-1").length, 1);
+		assert.equal(after.filter((m) => m.role === "user").length, 1);
+		assert.equal(new SessionModel({ chatId: chat.id, initialMessages: after }).getState().error, null);
+	});
+
+	it("a failed recovery remains retryable without replaying the answer", async () => {
+		const { engine, contexts, histories } = scripted([pose, () => fauxAssistantMessage(""), networkFailure, () => fauxAssistantMessage("Recovered.")]);
+		const chat = createConfiguredChat("Test: empty then failed response");
+		await turn(engine, chat.id, { type: "text", text: "teach me" });
+		await turn(engine, chat.id, { type: "answer", toolCallId: "call-1", answer: gradedAnswer() });
+		assert.equal(histories.length, 3);
+		assert.ok(endsInFailedTurn(chatStore.getChat(chat.id)!.messages));
+		await turn(engine, chat.id, { type: "retry" });
+		assert.deepEqual(contexts.at(-1), ["user", "assistant", "toolResult"]);
+		assert.equal(endsInFailedTurn(chatStore.getChat(chat.id)!.messages), false);
+	});
+
+	for (const stopReason of ["error", "aborted", "length"] as const) {
+		it(`${stopReason} is never treated as a recoverable blank completion`, async () => {
+			const { engine, histories } = scripted([pose, () => fauxAssistantMessage("", { stopReason })]);
+			const chat = createConfiguredChat(`Test: no blank recovery for ${stopReason}`);
+			await turn(engine, chat.id, { type: "text", text: "teach me" });
+			await turn(engine, chat.id, { type: "answer", toolCallId: "call-1", answer: gradedAnswer() });
+			assert.equal(histories.length, 2);
+			assert.equal(chatStore.getChat(chat.id)!.messages.at(-1)?.role, "assistant");
+		});
+	}
+
+	it("a blank ordinary text response does not create an automatic continuation", async () => {
+		const { engine, histories } = scripted([() => fauxAssistantMessage("")]);
+		const chat = createConfiguredChat("Test: blank without an answer");
+		await turn(engine, chat.id, { type: "text", text: "hello" });
+		assert.equal(histories.length, 1);
 	});
 });
 

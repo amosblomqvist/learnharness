@@ -54,6 +54,9 @@ export class SubscriptionRequestCycle implements SubscriptionDispatchLifecycle {
  }
  get dispatched(): boolean { return this.anyDispatch; }
  get deniedBeforeDispatch(): boolean { return this.denied !== undefined; }
+ /** A completed but empty learner response still owes its foreground
+  * continuation if an automatic delivery is denied before dispatch. */
+ oweForegroundContinuation(): void { this.foregroundOwed = true; }
  abort(): void { this.userAborted = true; }
  bindRelease(release: (event: AgentEvent) => void): () => void { this.release = release; return () => { this.release = undefined; }; }
  prepare(request: PrepareRequestContext): void {

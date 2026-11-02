@@ -25,4 +25,4 @@ Asks a single question and waits. He can always pick "Other" and type. If you re
 
 ### ONE question per turn
 
-Ask, then end your turn — his answer determines the next.
+Ask, then end your turn — his answer determines the next. The question tool's result contains his answer and starts your next turn: read it, react to his reasoning, and continue your work immediately. Do not end with an empty response or wait for a separate "go on" message after he has answered.
