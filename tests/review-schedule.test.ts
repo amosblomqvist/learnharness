@@ -33,8 +33,9 @@ describe("ratingOf — the grading table", () => {
 		["solved", "R2", Rating.Hard],
 		["solved", "R3", Rating.Again],
 		["solved", "R5", Rating.Again],
-		["solvedWithHints", null, Rating.Hard],
-		["solvedWithHints", "R0", Rating.Hard],
+		["solvedWithHints", null, Rating.Good],
+		["solvedWithHints", "R0", Rating.Good],
+		["solvedWithHints", "R1", Rating.Good],
 		["solvedWithHints", "R2", Rating.Hard],
 		["solvedWithHints", "R3", Rating.Again],
 		["solvedWithHints", "R4", Rating.Again],
@@ -344,7 +345,7 @@ describe("reviewSchedule — the heatmap's data", () => {
 			reviews: [
 				review(["n_a", "n_b"], local(3, 12)), // day 3: two Goods, two introduced
 				review(["n_a"], local(4, 2), "surrendered", "R5"), // 2 AM on the 4th is still day 3
-				review(["n_b"], local(4, 5), "solvedWithHints", "R1"), // day 4
+				review(["n_b"], local(4, 5), "solvedWithHints", "R2"), // day 4
 			],
 			now: local(10, 12),
 		});

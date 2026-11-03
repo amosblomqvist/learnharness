@@ -143,12 +143,14 @@ export function practiceReviewsOf(chatId: string, messages: readonly LhMessage[]
 
 // ─── outcome → rating ────────────────────────────────────────────────────────
 
-/** The grading table: the hint record wins over the outcome word — a
- *  "solved" that needed R2 rates like a hinted solve. */
+/** The grading table: a solve rates by its rung alone — "solved" and
+ *  "solvedWithHints" alike. No hint, R0 or R1 is Good (the doctrine's
+ *  "about right"), R2 Hard, R3 and above Again; an unsolved problem is
+ *  Again. */
 export function ratingOf(outcome: ReviewOutcome, rung: ReviewRung): Grade {
 	if (outcome !== "solved" && outcome !== "solvedWithHints") return Rating.Again;
 	if (rung === "R3" || rung === "R4" || rung === "R5") return Rating.Again;
-	if (outcome === "solvedWithHints" || rung === "R2") return Rating.Hard;
+	if (rung === "R2") return Rating.Hard;
 	return Rating.Good;
 }
 
@@ -333,17 +335,16 @@ export interface ReviewBriefEntry {
 	reviews: number;
 	/** Reviews that rated Again (ratingOf). */
 	misses: number;
-	/** The deepest mode solved cleanly — solved or solvedWithHints with no
-	 *  rung above R1; null when none (or no review recorded a mode). */
+	/** The deepest mode solved cleanly — a review ratingOf grades Good;
+	 *  null when none (or no review recorded a mode). */
 	highestCleanMode: ReviewMode | null;
 	last: (Pick<ReviewEvent, "outcome" | "rung" | "mode" | "missClass"> & { daysAgo: number }) | null;
 	/** The newest recorded surfaces, newest first, at most REVIEW_BRIEF_SURFACES. */
 	recentSurfaces: string[];
 }
 
-const isClean = (review: ReviewEvent) =>
-	(review.outcome === "solved" || review.outcome === "solvedWithHints") &&
-	(review.rung === null || review.rung === "R0" || review.rung === "R1");
+/** Clean is the scheduler's Good — one definition for brief and replay. */
+const isClean = (review: ReviewEvent) => ratingOf(review.outcome, review.rung) === Rating.Good;
 
 /** Each pick's history, in pick order: schedule status (the FSRS replay
  *  reviewQueue uses), record, deepest clean mode, last review, recent
