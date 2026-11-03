@@ -11,9 +11,8 @@
  *    chooses an engine to make search work — setting the key is enough);
  *    agent.search.engine is only an explicit preference.
  *  - Nothing silently falls back: no engine live = search is honestly
- *    unavailable (the tool says so; the researcher sub-agent is disabled
- *    by the agent layer on the same signal — that rewiring is the Teacher
- *    stream's, on this port).
+ *    unavailable (the tool says so). Research remains available keylessly
+ *    through web_fetch for known URLs.
  *
  * Pure types, the engine table + protocol docs only (browser-safe, no node
  * imports): the adapters are server-side (src/server/search.ts) and arrive
@@ -35,6 +34,7 @@ export const SEARCH_ENGINES = [
 	{ id: "brave", label: "Brave", envVar: "BRAVE_API_KEY" },
 	{ id: "exa", label: "Exa", envVar: "EXA_API_KEY" },
 	{ id: "firecrawl", label: "Firecrawl", envVar: "FIRECRAWL_API_KEY" },
+	{ id: "ollama", label: "Ollama", envVar: "OLLAMA_API_KEY" },
 ] as const;
 
 export type SearchEngineId = (typeof SEARCH_ENGINES)[number]["id"];

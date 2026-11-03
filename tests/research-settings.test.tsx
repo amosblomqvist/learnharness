@@ -5,6 +5,7 @@ import { it } from "node:test";
 import { parseHTML } from "linkedom";
 import { AgentSection } from "../components/settings/agent-section.tsx";
 import type { AgentSettings } from "../src/core/index.ts";
+import { SEARCH_ENGINES } from "../src/core/search.ts";
 
 it("keyless settings keep Research interactive while search-engine setup retains its own disabled state", async () => {
 	const dom = parseHTML("<html><body><div id='root'></div></body></html>");
@@ -13,7 +14,7 @@ it("keyless settings keep Research interactive while search-engine setup retains
 	const reason = "No search engine is configured.";
 	const bodies: Record<string, unknown> = {
 		"/api/search": { available: false, engine: null, reason },
-		"/api/keys": { keys: [{ id: "TAVILY_API_KEY", present: false }, { id: "BRAVE_API_KEY", present: false }, { id: "FIRECRAWL_API_KEY", present: false }] },
+		"/api/keys": { keys: SEARCH_ENGINES.map(({ envVar }) => ({ id: envVar, present: false })) },
 		"/api/models": { models: [], slots: { strong: null, cheap: null, vision: null } },
 		"/api/settings/prompts": { prober: [], teacher: [] },
 	};
@@ -69,14 +70,15 @@ it("keyless settings keep Research interactive while search-engine setup retains
 	}
 });
 
-it("an Exa-only key enables the engine menu and selecting Exa saves the pin", async () => {
+for (const { id, label, envVar } of SEARCH_ENGINES) {
+it(`a ${label}-only key enables the engine menu and selecting ${label} saves the pin`, async () => {
 	const dom = parseHTML("<html><body><div id='root'></div></body></html>");
 	Object.assign(dom.window, { innerWidth: 1280, innerHeight: 800 });
 	const globals = globalThis as Record<string, unknown>;
 	const previous = new Map<string, PropertyDescriptor | undefined>();
 	const bodies: Record<string, unknown> = {
-		"/api/search": { available: true, engine: "exa", reason: "search engine: exa (auto)" },
-		"/api/keys": { keys: [{ id: "EXA_API_KEY", present: true }] },
+		"/api/search": { available: true, engine: id, reason: `search engine: ${id} (auto)` },
+		"/api/keys": { keys: [{ id: envVar, present: true }] },
 		"/api/models": { models: [], slots: { strong: null, cheap: null, vision: null } },
 		"/api/settings/prompts": { prober: [], teacher: [] },
 	};
@@ -103,11 +105,19 @@ it("an Exa-only key enables the engine menu and selecting Exa saves the pin", as
 		const trigger = document.querySelector<HTMLButtonElement>('[data-testid="search-engine-trigger"]')!;
 		assert.ok(!trigger.hasAttribute("disabled"));
 		await act(async () => trigger.click());
-		const exa = document.querySelector<HTMLButtonElement>('[data-testid="engine-option-exa"]');
-		assert.ok(exa);
-		assert.match(exa.textContent ?? "", /Exa.*key/);
-		act(() => exa.click());
-		assert.deepEqual(written?.search, { engine: "exa" });
+		const optionIds = [...document.querySelectorAll('[data-testid^="engine-option-"]')].map((row) => row.getAttribute("data-testid"));
+		assert.deepEqual(optionIds, ["engine-option-auto", ...SEARCH_ENGINES.map(({ id }) => `engine-option-${id}`)]);
+		const option = document.querySelector<HTMLButtonElement>(`[data-testid="engine-option-${id}"]`);
+		assert.ok(option);
+		assert.ok(option.textContent?.includes(label));
+		assert.match(option.textContent ?? "", /key/);
+		act(() => option.click());
+		assert.deepEqual(written?.search, { engine: id });
+		await act(async () => trigger.click());
+		const auto = document.querySelector<HTMLButtonElement>('[data-testid="engine-option-auto"]')!;
+		assert.ok(auto);
+		act(() => auto.click());
+		assert.equal(written?.search, undefined, "Automatic clears the explicit pin");
 	} finally {
 		act(() => root.unmount());
 		for (const [key, descriptor] of previous) {
@@ -116,3 +126,4 @@ it("an Exa-only key enables the engine menu and selecting Exa saves the pin", as
 		}
 	}
 });
+}

@@ -11,7 +11,8 @@
 
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { resolveSearchEngineFor, tavilyProvider, braveProvider, exaProvider, firecrawlProvider } from "../src/server/search.ts";
+import { resolveSearchEngineFor, tavilyProvider, braveProvider, exaProvider, firecrawlProvider, ollamaProvider } from "../src/server/search.ts";
+import { SEARCH_ENGINES, isSearchEngineId, type SearchEngineId } from "../src/core/search.ts";
 
 describe("resolveSearchEngineFor (the auto-detect decision)", () => {
 	it("no keys: honestly unavailable, no default", () => {
@@ -46,7 +47,7 @@ describe("resolveSearchEngineFor (the auto-detect decision)", () => {
 		assert.equal(out.engine, "tavily");
 	});
 
-	it("Firecrawl ranks last — adding its key never changes an existing auto engine", () => {
+	it("Tavily and Brave keep their priority over Firecrawl", () => {
 		const all = resolveSearchEngineFor(undefined, {
 			tavily: "tvly-throwaway-key-00001",
 			brave: "brave-throwaway-key-00001",
@@ -246,17 +247,122 @@ describe("firecrawlProvider (wire shape per docs.firecrawl.dev, verified 2026-10
 		]);
 	});
 
-	it("maps the {success:false, error} body into the message", async () => {
+	it("reports HTTP status without exposing the provider error body", async () => {
 		const provider = firecrawlProvider("fc-throwaway-key-000001", async () =>
 			new Response(JSON.stringify({ success: false, error: "Unauthorized: Invalid token" }), { status: 401 }),
 		);
-		await assert.rejects(provider.search("q", 5), /Firecrawl search API 401: Unauthorized: Invalid token/);
+		await assert.rejects(provider.search("q", 5), /Firecrawl search API 401$/);
 	});
 
-	it("keeps the raw slice when the error body is not JSON", async () => {
+	it("reports HTTP status without exposing a non-JSON error body", async () => {
 		const provider = firecrawlProvider("fc-throwaway-key-000001", async () =>
 			new Response("Payment Required", { status: 402 }),
 		);
-		await assert.rejects(provider.search("q", 5), /Firecrawl search API 402: Payment Required/);
+		await assert.rejects(provider.search("q", 5), /Firecrawl search API 402$/);
 	});
+});
+
+// Search-only subset of chiranjivsethi's PR #81, source commit a216fa8.
+// No fetchPage, local model server, or model pricing is part of this adapter.
+describe("ollamaProvider (hosted search only)", () => {
+	it("POSTs ollama.com/api/web_search with Bearer auth and bounded snippets", async () => {
+		const provider = ollamaProvider("ollama-fake-key-123456", stubFetch({ results: [
+			{ title: "Ollama", url: "https://ollama.com", content: "line1\nline2" },
+			{ url: "https://example.org", content: "x".repeat(600) },
+			{ content: "no URL" }, { url: "javascript:alert(1)" }, null,
+		] }, (url, init) => {
+			assert.equal(url, "https://ollama.com/api/web_search");
+			assert.equal(init.method, "POST");
+			assert.equal((init.headers as Record<string, string>).authorization, "Bearer ollama-fake-key-123456");
+			assert.deepEqual(JSON.parse(init.body as string), { query: "test query", max_results: 5 });
+			assert.ok(init.signal);
+		}));
+		assert.deepEqual(await provider.search("test query", 5), [
+			{ title: "Ollama", url: "https://ollama.com", snippet: "line1 line2" },
+			{ title: "https://example.org", url: "https://example.org", snippet: "x".repeat(500) },
+		]);
+		assert.equal("fetchPage" in provider, false);
+	});
+});
+
+describe("five-engine catalog and resolution", () => {
+	it("pins the approved Automatic order independently of table-driven tests", () => {
+		assert.deepEqual(SEARCH_ENGINES.map(({ id }) => id), ["tavily", "brave", "exa", "firecrawl", "ollama"]);
+		assert.equal(isSearchEngineId("chatgpt"), false);
+		assert.equal(isSearchEngineId("deepseek"), false);
+		for (const value of [null, {}, 1, "", "toString"]) assert.equal(isSearchEngineId(value), false);
+	});
+
+	it("resolves every combination of configured keys without changing precedence", () => {
+		for (let mask = 0; mask < 2 ** SEARCH_ENGINES.length; mask++) {
+			const configured = SEARCH_ENGINES.filter((_, index) => mask & (1 << index));
+			const keys = Object.fromEntries(configured.map(({ id }) => [id, `fake-${id}`]));
+			const result = resolveSearchEngineFor(undefined, keys);
+			assert.equal(result.engine, configured[0]?.id ?? null, `key mask ${mask}`);
+			assert.equal(result.available, configured.length > 0);
+		}
+	});
+
+	for (const { id, envVar } of SEARCH_ENGINES) {
+		it(`${id}: an explicit pin wins, but a missing pinned key never falls back`, () => {
+			const keys: Partial<Record<SearchEngineId, string>> = Object.fromEntries(SEARCH_ENGINES.map(({ id }) => [id, `fake-${id}`]));
+			assert.equal(resolveSearchEngineFor(id, keys).engine, id);
+			delete keys[id];
+			const missing = resolveSearchEngineFor(id, keys);
+			assert.equal(missing.available, false);
+			assert.equal(missing.engine, null);
+			assert.ok(missing.reason.includes(envVar));
+		});
+	}
+});
+
+const NEW_ADAPTERS = [
+	{ label: "Exa", create: exaProvider, body: { results: [] }, field: "numResults", max: 100 },
+	{ label: "Firecrawl", create: firecrawlProvider, body: { success: true, data: { web: [] } }, field: "limit", max: 100 },
+	{ label: "Ollama", create: ollamaProvider, body: { results: [] }, field: "max_results", max: 10 },
+] as const;
+
+for (const { label, create, body, field, max } of NEW_ADAPTERS) {
+	describe(`${label}: search adapter failure/shape contract`, () => {
+		it("returns an empty result array for a successful empty search", async () => {
+			assert.deepEqual(await create("fake-key", stubFetch(body, () => {})).search("q", 5), []);
+		});
+		it("sends integer counts within the provider range", async () => {
+			const counts: number[] = [];
+			const provider = create("fake-key", stubFetch(body, (_url, init) => counts.push(JSON.parse(init.body as string)[field])));
+			for (const count of [1, 5, 10, 200, 0, 2.8]) await provider.search("q", count);
+			assert.deepEqual(counts, [1, 5, 10, max, 1, 2]);
+		});
+		it("rejects malformed envelopes and invalid JSON without echoing bodies", async () => {
+			for (const invalid of [null, {}, [], { results: null }, { success: false, error: "fake-secret-123456" }]) {
+				const provider = create("fake-secret-123456", async () => new Response(JSON.stringify(invalid)));
+				await assert.rejects(provider.search("q", 5), { message: `${label} search API returned an invalid response` });
+			}
+			const provider = create("fake-secret-123456", async () => new Response("invalid fake-secret-123456"));
+			await assert.rejects(provider.search("q", 5), { message: `${label} search API returned an invalid response` });
+		});
+		it("reports auth, quota, rate-limit and server failures without response bodies or retries", async () => {
+			for (const status of [401, 402, 429, 500]) {
+				let calls = 0;
+				const provider = create("fake-secret-123456", async () => {
+					calls++;
+					return new Response("fake-secret-123456", { status });
+				});
+				await assert.rejects(provider.search("q", 5), { message: `${label} search API ${status}` });
+				assert.equal(calls, 1);
+			}
+		});
+	});
+}
+
+it("Firecrawl drops invalid result rows and normalizes only search descriptions", async () => {
+	const provider = firecrawlProvider("fc-fake-key-123456789", stubFetch({ success: true, data: { web: [
+		null, 1, { url: "file:///tmp/private" }, { url: "not a URL" },
+		{ title: 42, url: "https://example.org", description: "x".repeat(700), markdown: "not returned" },
+		{ url: "https://example.com", description: 123 },
+	] } }, () => {}));
+	assert.deepEqual(await provider.search("q", 5), [
+		{ title: "https://example.org", url: "https://example.org", snippet: "x".repeat(500) },
+		{ title: "https://example.com", url: "https://example.com", snippet: "" },
+	]);
 });

@@ -9,7 +9,7 @@
  *    store or env — env wins, keyed via server/keys.ts keyValue).
  *  - Setting a key is ALL the user does — auto-detection: explicit
  *    agent.search.engine pins the preference (when several keys are
- *    present the preference order is Tavily → Brave → Exa → Firecrawl);
+ *    present the order is Tavily → Brave → Exa → Firecrawl → Ollama);
  *    without a pin, the first keyed engine wins.
  *  - An explicit choice does NOT silently fall back to another engine:
  *    engine pinned but its key missing = honestly unavailable (reason
@@ -108,6 +108,15 @@ export function braveProvider(apiKey: string, fetchFn: FetchLike = fetch): Searc
 	};
 }
 
+/** Invalid JSON must not echo provider response bodies into tool results. */
+async function searchJson(response: Response, label: string): Promise<unknown> {
+	try {
+		return await response.json();
+	} catch {
+		throw new Error(`${label} search API returned an invalid response`);
+	}
+}
+
 /** Exa's Search API returns highlights when requested. Its result snippets
  * are normalized to the same bounded, provider-neutral shape as the other
  * adapters. Do not expose error bodies, which may contain credentials. */
@@ -122,7 +131,7 @@ export function exaProvider(apiKey: string, fetchFn: FetchLike = fetch): SearchP
 				signal: AbortSignal.timeout(30_000),
 			});
 			if (!resp.ok) throw new Error(`Exa search API ${resp.status}`);
-			const data: unknown = await resp.json();
+			const data = await searchJson(resp, "Exa");
 			if (!data || typeof data !== "object" || !Array.isArray((data as { results?: unknown }).results)) {
 				throw new Error("Exa search API returned an invalid response");
 			}
@@ -142,12 +151,9 @@ export function exaProvider(apiKey: string, fetchFn: FetchLike = fetch): SearchP
 	};
 }
 
-/** Firecrawl: POST https://api.firecrawl.dev/v2/search — Bearer auth,
- *  query + limit (1–100) in the JSON body. No scrapeOptions: a bare search
- *  costs 2 credits per 10 results, and web_fetch owns page bodies.
- *  VERIFIED against docs.firecrawl.dev, 2026-10-29: response
- *  {success, data: {web: [{title, url, description, position}]}}, errors
- *  {success: false, error}. */
+/** Firecrawl's v2 search API: no scrapeOptions, so web_fetch still owns
+ *  page bodies. Wire shape checked against the official 2026-11-03 snapshot;
+ *  live account access and pricing are not inferred from configuration. */
 export function firecrawlProvider(apiKey: string, fetchFn: FetchLike = fetch): SearchProvider {
 	return {
 		id: "firecrawl",
@@ -158,34 +164,65 @@ export function firecrawlProvider(apiKey: string, fetchFn: FetchLike = fetch): S
 					"content-type": "application/json",
 					authorization: `Bearer ${apiKey}`,
 				},
-				body: JSON.stringify({ query, limit: Math.min(count, 100) }),
+				body: JSON.stringify({ query, limit: Math.min(100, Math.max(1, Math.floor(count))) }),
 				signal: AbortSignal.timeout(30_000),
 			});
-			if (!resp.ok) {
-				const body = await resp.text();
-				// Their error body is {success: false, error: "…"} — surface the
-				// message when present, else the raw slice.
-				let detail = body.slice(0, 200);
-				try {
-					const parsed = JSON.parse(body) as { error?: string };
-					if (parsed.error) detail = parsed.error.slice(0, 200);
-				} catch {
-					/* keep the raw slice */
-				}
-				throw new Error(`Firecrawl search API ${resp.status}: ${detail}`);
+			if (!resp.ok) throw new Error(`Firecrawl search API ${resp.status}`);
+			const data = await searchJson(resp, "Firecrawl");
+			if (!data || typeof data !== "object" || (data as { success?: unknown }).success !== true) {
+				throw new Error("Firecrawl search API returned an invalid response");
 			}
-			const data = (await resp.json()) as {
-				data?: { web?: Array<{ title?: string; url?: string; description?: string }> };
-			};
-			return (data.data?.web ?? [])
-				.filter((r) => typeof r.url === "string" && r.url)
-				.map((r) => ({
-					title: r.title ?? r.url ?? "",
-					url: r.url ?? "",
-					snippet: (r.description ?? "").replace(/\n/g, " ").slice(0, 500),
-				}));
+			const payload = (data as { data?: unknown }).data;
+			if (!payload || typeof payload !== "object" || !Array.isArray((payload as { web?: unknown }).web)) {
+				throw new Error("Firecrawl search API returned an invalid response");
+			}
+			return (payload as { web: unknown[] }).web.flatMap((result): SearchHit[] => {
+				if (!result || typeof result !== "object") return [];
+				const row = result as { title?: unknown; url?: unknown; description?: unknown };
+				return searchHit(row.title, row.url, row.description);
+			});
 		},
 	};
+}
+
+/** Hosted search only, adapted from chiranjivsethi's PR #81 (a216fa8).
+ *  No local model URL, model registration, or provider-backed page fetch. */
+export function ollamaProvider(apiKey: string, fetchFn: FetchLike = fetch): SearchProvider {
+	return {
+		id: "ollama",
+		async search(query: string, count: number): Promise<SearchHit[]> {
+			const resp = await fetchFn("https://ollama.com/api/web_search", {
+				method: "POST",
+				headers: { "content-type": "application/json", authorization: `Bearer ${apiKey}` },
+				body: JSON.stringify({ query, max_results: Math.min(10, Math.max(1, Math.floor(count))) }),
+				signal: AbortSignal.timeout(30_000),
+			});
+			if (!resp.ok) throw new Error(`Ollama search API ${resp.status}`);
+			const data = await searchJson(resp, "Ollama");
+			if (!data || typeof data !== "object" || !Array.isArray((data as { results?: unknown }).results)) {
+				throw new Error("Ollama search API returned an invalid response");
+			}
+			return (data as { results: unknown[] }).results.flatMap((result): SearchHit[] => {
+				if (!result || typeof result !== "object") return [];
+				const row = result as { title?: unknown; url?: unknown; content?: unknown };
+				return searchHit(row.title, row.url, row.content);
+			});
+		},
+	};
+}
+
+/** Match Exa's bounded result contract for the other new adapters. */
+function searchHit(title: unknown, url: unknown, snippet: unknown): SearchHit[] {
+	if (typeof url !== "string" || !url.trim()) return [];
+	try {
+		const protocol = new URL(url).protocol;
+		if (protocol !== "http:" && protocol !== "https:") return [];
+	} catch { return []; }
+	return [{
+		title: typeof title === "string" && title ? title : url,
+		url,
+		snippet: typeof snippet === "string" ? snippet.replace(/\s+/g, " ").trim().slice(0, 500) : "",
+	}];
 }
 
 /** The engine's key (env-or-file; env wins) — null when the engine is
@@ -233,7 +270,7 @@ export function resolveSearchEngineFor(
 	return {
 		available: false,
 		engine: null,
-		reason: "no search engine configured — set a Tavily, Brave, Exa, or Firecrawl search API key",
+		reason: "no search engine configured — set a Tavily, Brave, Exa, Firecrawl, or Ollama search API key",
 		key: null,
 	};
 }
@@ -249,8 +286,7 @@ export function searchStatus(): SearchStatus {
 	return { available, engine, reason };
 }
 
-/** Search available at all? (the settings UI's gray-out signal + the
- *  researcher's enable/disable pin — Teacher stream's rewiring reads this.) */
+/** Search status only — research itself remains available without a key. */
 export function searchAvailable(): boolean {
 	return searchStatus().available;
 }
@@ -270,6 +306,8 @@ export function searchProvider(): SearchProvider | null {
 			return exaProvider(resolved.key);
 		case "firecrawl":
 			return firecrawlProvider(resolved.key);
+		case "ollama":
+			return ollamaProvider(resolved.key);
 		default:
 			return null;
 	}
