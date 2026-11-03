@@ -1,39 +1,27 @@
-/**
- * The learner-filesystem policy provider (file-access wave): plugs the
- * settings record and the app's private locations into the agent layer's
- * seam (src/agent/tools/file-access.ts). Installed by the turn composition
- * root (chat-handler.ts) — every tool registry is built there.
- *
- * Read FRESH per tool call: a folder added or removed in the settings page
- * applies to the very next read/ls/find/grep/pdf call, no restart.
- */
-
+/** Current optional learner-source preferences, wired by the server
+ * composition root into the #157 policy seam. Mandatory #421 protection
+ * stays in fs-shared; do NOT add a whole data/userData denial here. */
 import os from "node:os";
 import path from "node:path";
-import { AUTH_FILE, PATHS, ROOT } from "../../config.ts";
 import type { FileAccessPolicy } from "../agent/tools/file-access.ts";
-import { settingsStore } from "../store/settings.ts";
+import { readFileAccessSettings } from "../store/settings.ts";
 
-/** "~" / "~/x" → the home directory; everything else resolved as given. */
 export function expandFolder(folder: string, home: string = os.homedir()): string {
 	if (folder === "~") return home;
 	if (folder.startsWith("~/")) return path.join(home, folder.slice(2));
+	if (!path.isAbsolute(folder)) throw new Error("Invalid file-access folder for this server filesystem");
 	return path.resolve(folder);
 }
 
-/**
- * The paths the tutor may NEVER read: the BYOK key store, the dev env file,
- * the data dir (chats, graph, jobs, debug recordings), and — in the desktop
- * app — the whole userData directory, which also holds the ChatGPT and
- * subscription credential stores and the logs.
- */
-export function privatePaths(env: Record<string, string | undefined> = process.env): string[] {
-	const denied = [AUTH_FILE, path.join(ROOT, ".env.local"), PATHS.data];
-	if (env.LH_DESKTOP_SERVER === "1") denied.push(path.dirname(AUTH_FILE));
-	return denied;
+export function fileAccessPolicy(): FileAccessPolicy {
+	const result = readFileAccessSettings();
+	if (!result.ok) return { restricted: true, folders: [], error: result.error };
+	return { restricted: result.settings.restricted, folders: result.settings.folders.map((folder) => expandFolder(folder)) };
 }
 
-export function fileAccessPolicy(): FileAccessPolicy {
-	const folders = settingsStore.readSettings()?.agent?.fileAccess?.folders ?? [];
-	return { folders: folders.map((f) => expandFolder(f)), denied: privatePaths() };
+/** Safe UI diagnostic, no raw JSON/file contents. A corrupt record must
+ * not make the restriction toggle appear safely OFF while reads are blocked. */
+export function fileAccessConfigurationError(): string | null {
+	const result = readFileAccessSettings();
+	return result.ok ? null : result.error;
 }

@@ -1,103 +1,102 @@
-import * as fs from "node:fs/promises";
-import * as os from "node:os";
+import * as fs from "node:fs";
 import * as path from "node:path";
 
-/**
- * The learner-filesystem ACCESS POLICY (file-access wave): which paths the
- * read/ls/find/grep tools and the pdf job may touch. The agent layer may not
- * import settings or config-derived secrets locations, so the policy
- * arrives through this seam — the server composition root installs a
- * provider (src/server/file-access.ts) that reads settings FRESH per call,
- * so a folder change in the settings page applies on the next tool call.
- *
- * Two rules, checked on the REAL path (symlinks resolved first, so a link
- * inside an allowed folder cannot reach outside it):
- *   - denied: the app's own private files (keys, credentials, data dir) are
- *     refused ALWAYS — the tutor has no reason to read them, and a prompt-
- *     injected tutor must not be able to;
- *   - folders: when non-empty, every path must sit inside one of them.
- *     Empty = the home-wide sources-v1 scope.
- */
-
+/** Learner-source policy seam, based on lickbot's #157. The server supplies
+ * current preferences per operation; agents never import the settings store.
+ * Mandatory sensitive/credential denials remain in fs-shared, independently
+ * of this OPTIONAL boundary. Empty is closed only when restricted is true. */
 export interface FileAccessPolicy {
-	/** Absolute folders the tools may read inside; empty = unrestricted. */
+	restricted: boolean;
 	folders: readonly string[];
-	/** Absolute files/folders never readable, whatever `folders` says. */
-	denied: readonly string[];
+	error?: string;
+}
+export interface ResolvedFileAccessPolicy {
+	restricted: boolean;
+	folders: readonly string[];
+	unavailable: readonly string[];
 }
 
-const OPEN_POLICY: FileAccessPolicy = { folders: [], denied: [] };
+const OPEN_POLICY: FileAccessPolicy = { restricted: false, folders: [] };
 let currentPolicy: () => FileAccessPolicy = () => OPEN_POLICY;
 
-/** Install the policy provider (composition root only; tests reset it). */
-export function setFileAccessPolicy(provider: () => FileAccessPolicy): void {
-	currentPolicy = provider;
-}
+export function setFileAccessPolicy(provider: () => FileAccessPolicy): void { currentPolicy = provider; }
 
 export function fileAccessPolicy(): FileAccessPolicy {
-	return currentPolicy();
+	let policy: FileAccessPolicy;
+	try { policy = currentPolicy(); }
+	catch { throw new Error("File-access configuration error: preferences cannot be read. Repair File access in Settings → Agent → Tools."); }
+	if (policy?.error) throw new Error(policy.error);
+	if (!policy || typeof policy.restricted !== "boolean" || !Array.isArray(policy.folders) || policy.folders.some((folder) => typeof folder !== "string" || !path.isAbsolute(folder) || folder.includes("\0"))) {
+		throw new Error("File-access configuration error: invalid policy. Repair File access in Settings → Agent → Tools.");
+	}
+	return policy;
 }
 
-/** The anchor for relative/absent paths: the first allowed folder when the
- *  scope is restricted (home would be refused anyway), else home. */
-export function sourceAnchor(policy: FileAccessPolicy = fileAccessPolicy()): string {
-	return policy.folders[0] ?? os.homedir();
+/** Comparison only: preserve the accepted #421 Windows namespace/ADS
+ * semantics. The returned spelling is never used for opening a file. */
+export function comparisonPath(absolute: string): string {
+	let normalized = path.resolve(absolute);
+	if (process.platform === "win32") {
+		if (normalized.startsWith("\\\\?\\UNC\\")) normalized = `\\\\${normalized.slice(8)}`;
+		else if (normalized.startsWith("\\\\?\\")) normalized = normalized.slice(4);
+		const base = path.basename(normalized);
+		const stream = base.indexOf(":");
+		if (stream !== -1) normalized = path.join(path.dirname(normalized), base.slice(0, stream));
+	}
+	return normalized;
 }
 
-/** `child` is `parent` or lies beneath it (both absolute, normalized). */
-export function isWithin(child: string, parent: string): boolean {
+/** Segment-aware containment; ignoreCase is ONLY for the existing home
+ * denylist. Do not globally casefold configured allowed folders. */
+export function isWithin(absolute: string, root: string, ignoreCase = false): boolean {
+	let child = comparisonPath(absolute);
+	let parent = comparisonPath(root);
+	if (ignoreCase) { child = child.toLowerCase(); parent = parent.toLowerCase(); }
 	const rel = path.relative(parent, child);
-	return rel === "" || (!rel.startsWith("..") && !path.isAbsolute(rel));
+	return rel === "" || (rel !== ".." && !rel.startsWith(`..${path.sep}`) && !path.isAbsolute(rel));
 }
 
-/** realpath when the path exists; otherwise the resolved path (a denied
- *  file that doesn't exist yet must still match once it does). */
-async function realOrResolved(p: string): Promise<string> {
-	try {
-		return await fs.realpath(p);
-	} catch {
-		return path.resolve(p);
+/** The accepted strict canonical resolver, including missing descendants.
+ * Loops/permissions must not turn a source into an unchecked lexical path. */
+export function realSourcePath(absolute: string): string {
+	try { return fs.realpathSync.native(/* turbopackIgnore: true */ absolute); }
+	catch (error) {
+		const code = (error as NodeJS.ErrnoException).code;
+		if (code !== "ENOENT" && code !== "ENOTDIR") throw error;
+		const parent = path.dirname(absolute);
+		return parent === absolute ? absolute : path.join(/* turbopackIgnore: true */ realSourcePath(parent), path.basename(absolute));
 	}
 }
 
-/** The policy with every entry realpath-resolved — compare like with like
- *  (macOS: /var → /private/var, /tmp → /private/tmp). */
-export async function resolvePolicy(policy: FileAccessPolicy = fileAccessPolicy()): Promise<FileAccessPolicy> {
-	const [folders, denied] = await Promise.all([
-		Promise.all(policy.folders.map(realOrResolved)),
-		Promise.all(policy.denied.map(realOrResolved)),
-	]);
-	return { folders, denied };
+/** One snapshot per tool call, shared by every root in a multi-root search.
+ * Unmounted/unreadable roots never become a default-home fallback. */
+export function resolvePolicy(policy: FileAccessPolicy = fileAccessPolicy()): ResolvedFileAccessPolicy {
+	if (policy.error) throw new Error(policy.error);
+	if (!policy.restricted) return { restricted: false, folders: [], unavailable: [] };
+	const folders: string[] = [];
+	const unavailable: string[] = [];
+	for (const folder of policy.folders) {
+		try {
+			const real = fs.realpathSync.native(/* turbopackIgnore: true */ folder);
+			if (!fs.statSync(/* turbopackIgnore: true */ real).isDirectory()) throw new Error("not a directory");
+			fs.accessSync(/* turbopackIgnore: true */ real, fs.constants.R_OK | fs.constants.X_OK);
+			if (folders.some((root) => isWithin(real, root))) continue;
+			for (let i = folders.length - 1; i >= 0; i--) if (isWithin(folders[i]!, real)) folders.splice(i, 1);
+			folders.push(real);
+		} catch { unavailable.push(`Unavailable allowed folder: ${folder}`); }
+	}
+	return { restricted: true, folders, unavailable };
 }
 
-/** True when a REAL path is refused by an already-resolved policy. */
-export function isRefused(realPath: string, resolved: FileAccessPolicy): boolean {
-	if (resolved.denied.some((d) => isWithin(realPath, d))) return true;
-	return resolved.folders.length > 0 && !resolved.folders.some((f) => isWithin(realPath, f));
-}
-
-/**
- * Gate one tool path: resolve it to its real location and refuse it per the
- * policy. Returns the real path — callers read THAT, never the raw input, so
- * the checked path and the opened path are the same file. Missing paths
- * throw "Path not found" (the tools' existing wording) with the errno code.
- */
-export async function guardSourcePath(absolute: string): Promise<string> {
-	let real: string;
-	try {
-		real = await fs.realpath(absolute);
-	} catch (err) {
-		const code = (err as NodeJS.ErrnoException).code;
-		throw new Error(`Path not found: ${absolute}${code ? ` (${code})` : ""}`);
-	}
-	const resolved = await resolvePolicy();
-	if (resolved.denied.some((d) => isWithin(real, d))) {
-		throw new Error(`Access denied: ${absolute} is LearnHarness's private app data (keys, credentials, records) and is never readable by the tutor.`);
-	}
-	if (isRefused(real, resolved)) {
+/** Accept only canonical source locations contained by the snapshot. Source
+ * symlinks resolve before containment; a link cannot escape the chosen roots.
+ * fs-shared runs its mandatory named AND canonical denials before this gate. */
+export function guardSourcePath(absolute: string, policy: ResolvedFileAccessPolicy = resolvePolicy()): string {
+	const real = realSourcePath(absolute);
+	if (policy.restricted && !policy.folders.some((folder) => isWithin(real, folder))) {
 		throw new Error(
-			`Access denied: ${absolute} is outside the folders the learner allowed (${fileAccessPolicy().folders.join(", ")}). ` +
-				"Ask the learner to move the file into an allowed folder or add its folder in Settings → Agent → File access.",
+			`Access denied: ${absolute} is outside the allowed folders, or no allowed folders are available. ` +
+			"Use ls without a path to list allowed folders, or ask the learner to adjust File access in Settings → Agent → Tools.",
 		);
 	}
 	return real;
