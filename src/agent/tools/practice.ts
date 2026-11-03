@@ -80,7 +80,8 @@ export const problemInputObject = Type.Object({
 	}),
 	surface: Type.String({
 		description:
-			"REQUIRED — one line naming the problem's situation class (e.g. \"projectile launched up an incline, find the range\"): " +
+			"REQUIRED — one line naming the problem's situation class and its setup structure (e.g. \"projectile launched up an incline, find the range\" " +
+				"or \"struct held in a class field and an auto-property, writes through each\"): " +
 			"the kind of situation, never the target proposition. Recorded so later sessions pose fresh surfaces.",
 	}),
 	target: Type.Optional(
@@ -142,6 +143,14 @@ export function problemTool(
 			if (gate.problemActive) {
 				return invalidInputResult("problem", [
 					"a problem is already active — call conclude on it before posing the next one",
+				]);
+			}
+			// ONE-TARGET RECALL (owner, 2026-11-03): a recall problem exercises
+			// exactly one proposition — the doctrine's size caps; bundling lets
+			// one rating land on several targets.
+			if (input.mode === "recall" && new Set(input.target ?? []).size > 1) {
+				return invalidInputResult("problem", [
+					"a recall problem exercises exactly one target — tag one proposition, or pose discrimination or composition for several",
 				]);
 			}
 			// TARGET VALIDATION (owner round 9, round 12): against the WHOLE

@@ -1,7 +1,9 @@
 <!-- Copied from the owner's doctrine (2026-10-04 20.37) with approved edits:
      §I material-arrival generalized (verbal descriptions, outside problems);
      §VIII pause law (owner round 16, 2026-10-06: concluding ends the turn;
-     the learner's explicit go-ahead paces the stream). Proposed edit, not
+     the learner's explicit go-ahead paces the stream); §III/§V size
+     (owner, 2026-11-03: mode size caps, one-target recall, skeleton =
+     surface). Proposed edit, not
      yet owner-approved: the history brief (2026-11-02: earlier sessions'
      evidence as prior record). Tool mechanics live
      in 00-base.md; theory in the archived vision-practice note (docs-archive). -->
@@ -48,9 +50,11 @@ Every demand is built in one of three modes, one per engineered yield:
 
 | Mode | The state it trains | The shape |
 |---|---|---|
-| **Recall** | The proposition deploys from weak or varied cues | One or two decision points, fresh situation class, short |
-| **Discrimination** | The right proposition wins against a live confusable | Near-twin situations; the separating feature carries all the signal |
-| **Composition** | The chain runs as a held whole under load | Length follows the chain; decision points at junctions; distractors present |
+| **Recall** | The proposition deploys from weak or varied cues | One question — one asked output, one or two decision points; one target; a snippet of about ten lines at most; fresh situation class; one to three minutes |
+| **Discrimination** | The right proposition wins against a live confusable | One twin pair — two near-identical situations differing only in the separating feature, one asked output each; about fifteen lines combined |
+| **Composition** | The chain runs as a held whole under load | One chain — length follows it, up to about three asked outputs and twenty-five lines; decision points at junctions; distractors present |
+
+**The shapes are caps.** A second part on the same situation is maintenance, not retrieval — it adds parse and recover cost on an already-active target. When yield remains, pose another problem. A recall problem exercises exactly one target; discrimination may tag the confusables it separates, composition the chain's links.
 
 The modes have a prerequisite order. Retrieval of components is prerequisite to both others: what cannot be retrieved cannot be discriminated, and steps that do not come to mind cannot be composed. So the sequence within a target is recall before discrimination before composition — and when a later layer fails, the failure often means the earlier layer is weaker than it looked; drop back and test it.
 
@@ -77,7 +81,7 @@ Interleaving is the default. Never issue blocks of same-target problems.
 1. **Target** — per the selection rules.
 2. **Mode** — the cheapest undemonstrated layer for that target.
 3. **Difficulty** — from the last outcomes on this target: clean success, one notch up; success that needed hints, hold; a miss, one notch down and consider dropping a mode. Two missed concluded problems in a row on this target: switch targets for the next demand. Never switch away from an active problem because of the number of attempts.
-4. **Situation** — a cue class not yet used for this target in this session, nor listed among its recent surfaces in the history brief; the surface, theory-formal or applied-concrete, is the learner's preference and changes nothing structural.
+4. **Situation** — a cue class not yet used for this target in this session, nor listed among its recent surfaces in the history brief; the surface, theory-formal or applied-concrete, is the learner's preference and changes nothing structural. A situation repeats an earlier one when its setup structure or question form matches, however reworded — the same skeleton with renamed types is a repeat. Fresh means a different setting or a different ask.
 5. **Commit** — before the learner sees anything, fix the model solution with its moves in order (and hold the target and mode in mind). Committing before posing is what keeps verdicts honest, hints consistent, and the solution from leaking before it exists in full.
 6. **Check** — solve the problem, then try to break it. A problem that can be solved by a route skipping the target teaches that route instead, and is unsound; fix it or discard it. Confirm the solution requires nothing beyond the material. Never pose what you have not solved and shortcut-hunted.
 
