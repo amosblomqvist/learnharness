@@ -59,6 +59,17 @@ interface ProviderSource {
 	isCustom(id: string): boolean;
 }
 let providerSource: ProviderSource | undefined;
+interface NativeProviderSource {
+	sync(models: MutableModels): void;
+	owns(id: string): boolean;
+	isReady(id: string): boolean;
+}
+let nativeProviderSource: NativeProviderSource | undefined;
+
+/** Independent from the settings-owned custom endpoint. IO is server-injected. */
+export function configureNativeProviderSource(source: NativeProviderSource): void {
+	nativeProviderSource = source;
+}
 
 /** Configuration IO is injected by the server; the agent never imports stores. */
 export function configureProviderSource(source: ProviderSource): void {
@@ -94,6 +105,7 @@ export function piModels() {
 		collection.setProvider(createClaudeCodeProvider(streamClaudeCode));
 	}
 	providerSource?.sync(collection);
+	nativeProviderSource?.sync(collection);
 	return collection;
 }
 
@@ -165,6 +177,9 @@ export function piEngineForSpec(spec: ResolvedModelSpec, background: boolean | (
 				...(retention !== undefined ? { cacheRetention: retention } : {}),
 				reasoning: level === "off" ? undefined : level,
 			};
+			if (nativeProviderSource?.owns(spec.provider) && !nativeProviderSource.isReady(spec.provider)) {
+				return lazyStream(requestModel, async () => { throw new Error("The selected native provider is unavailable."); });
+			}
 			if (custom) {
 				// Revalidate before EVERY upstream model operation, including later
 				// tool-loop steps. Resolve thinking from the ORIGINAL preference (or

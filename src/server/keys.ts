@@ -58,6 +58,8 @@ import { customProviderAvailable, installCustomProviderSource } from "./custom-p
 import { claudeCodeAvailable } from "./claude-code-config.ts";
 import { CLAUDE_CODE_PROVIDER } from "../agent/claude-code/constants.ts";
 import { CUSTOM_AUTH_BINDING } from "../core/custom-provider-auth.ts";
+import { installNativeProviderSource, nativeProviderAvailable } from "./native-providers.ts";
+import { piModels } from "../agent/models.ts";
 
 // Shared HMR-stable provenance lets external CLIs exclude file-only injections
 // without importing this store-backed module into the agent layer.
@@ -194,16 +196,20 @@ export function keyValue(id: string): string | undefined {
  * 2026-09-25): would this provider's key be present at request time?
  * Reads through keyValue — the SAME env-first lookup pi-ai performs
  * natively at every request — so an env-shadowed key counts as present
- * (gate by what would run). Providers absent from AUTH_PROVIDER_KEYS take
- * no key at all: nothing to gate, present by definition. */
+ * (gate by what would run). Native modules use their local readiness check;
+ * other keyless providers must actually be registered. Unknown or removed
+ * providers are unavailable, never admitted by a keyless fallback. */
 export function providerKeyPresent(provider: string): boolean {
 	if (provider === CUSTOM_PROVIDER.id) return customProviderAvailable();
 	// Explicit opt-in + installation only, never authentication readiness.
 	// Consulted at admission, not inside already-running agent loops.
 	if (provider === CLAUDE_CODE_PROVIDER) return claudeCodeAvailable();
 	if (isSubscriptionProvider(provider)) return subscriptionConnected(provider);
+	const nativeReady = nativeProviderAvailable(provider);
+	if (nativeReady !== undefined) return nativeReady;
 	const info = AUTH_PROVIDER_KEYS.find((p) => p.id === provider);
-	return info ? keyValue(info.envVar) !== undefined : true;
+	// Removed or failed native modules must not inherit the keyless-provider bypass.
+	return info ? keyValue(info.envVar) !== undefined : piModels().getProvider(provider) !== undefined;
 }
 
 /**
@@ -247,3 +253,4 @@ export function deleteKey(id: string): AuthKeyStatus {
 // imported by every route/handler path that touches keys).
 initAuthEnv();
 installCustomProviderSource();
+installNativeProviderSource();

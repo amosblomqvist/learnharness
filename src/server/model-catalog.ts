@@ -21,6 +21,7 @@ import { clampThinkingLevel, getSupportedThinkingLevels, type Api, type Model } 
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import { piModels } from "../agent/models.ts";
 import { customProviderAvailable } from "./custom-provider.ts";
+import { nativeProviderAvailable, nativeProviderPricingUnknown, nativeProviderStatuses } from "./native-providers.ts";
 import { chatGPTConnected, chatGPTModel, chatGPTModels, refreshChatGPTModels } from "../agent/chatgpt-bridge.ts";
 import { NATIVE_SUBSCRIPTIONS } from "../core/contracts/subscriptions.ts";
 import { nativeSubscriptionId, nativeSubscriptionConnected, nativeSubscriptionModel, nativeSubscriptionModels, refreshSubscriptionModels } from "../agent/subscription-bridge.ts";
@@ -33,6 +34,7 @@ export async function refreshConnectionCatalog(provider?: string): Promise<void>
 }
 function connectionModel(provider: string, id: string): Model<Api> | undefined {
 	if (provider === CLAUDE_CODE_PROVIDER && !claudeCodeAvailable()) return undefined;
+	if (nativeProviderAvailable(provider) === false) return undefined;
 	return provider === "chatgpt" ? chatGPTModel(id) : nativeSubscriptionId(provider) ? nativeSubscriptionModel(provider, id) : piModels().getModel(provider, id);
 }
 function connectionProviderIds(): string[] { return [...piModels().getProviders().map((p) => p.id), "chatgpt", ...NATIVE_SUBSCRIPTIONS.map((p) => p.logicalId)]; }
@@ -156,6 +158,7 @@ export function catalogProviders(): CatalogProvider[] {
 		{ id: "chatgpt", envVar: "", keyPresent: chatGPTConnected() },
 		{ id: CLAUDE_CODE_PROVIDER, envVar: "", keyPresent: claudeCodeAvailable() },
 		...NATIVE_SUBSCRIPTIONS.map((p) => ({ id: p.logicalId, envVar: "", keyPresent: nativeSubscriptionConnected(p.providerId) })),
+		...nativeProviderStatuses(),
 		// The custom endpoint: a row only when usable (base URL set). keyPresent
 		// reflects usability, not key presence (keyless local servers are allowed).
 		...(customProviderUsable(effectiveSettings().customProvider)
@@ -180,7 +183,7 @@ export function toModelDto(model: Model<Api>): ModelDto {
 		reasoning: model.reasoning,
 		input: [...model.input],
 		supportedLevels: getSupportedThinkingLevels(model),
-		cost: model.provider === CLAUDE_CODE_PROVIDER || model.provider === CUSTOM_PROVIDER.id ? null : {
+		cost: model.provider === CLAUDE_CODE_PROVIDER || model.provider === CUSTOM_PROVIDER.id || nativeProviderPricingUnknown(model.provider) ? null : {
 			input: model.cost.input,
 			output: model.cost.output,
 			cacheRead: model.cost.cacheRead,

@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import { createRequire } from "node:module";
 import { describe, it } from "node:test";
-import nextConfig from "../next.config.ts";
+import { nextConfig } from "../next.config.ts";
 
 const require = createRequire(import.meta.url);
 // Use Next's actual bundled matcher, not a different glob implementation.
