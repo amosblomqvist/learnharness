@@ -3,9 +3,7 @@
  *
  * Search engines are pluggable behind ONE seam: the settings record names a
  * preferred engine (agent.search.engine — optional), keys live in the auth
- * store (TAVILY_API_KEY / BRAVE_API_KEY — curated catalog), and the server
- * composes the live adapter. The Google CSE engine retired with this wave
- * (closed to new customers; dies Jan 2027) — replaced by Tavily + Brave.
+ * store (the curated key catalog), and the server composes the live adapter.
  *
  * Owner decisions baked here:
  *  - NO default engine in the factory record: an engine is live iff its
@@ -30,8 +28,19 @@ export interface SearchHit {
 	snippet: string;
 }
 
-/** The engine ids this wave ships (the catalog: curated keys + adapters). */
-export type SearchEngineId = "tavily" | "brave";
+/** Search engines in automatic preference order. Keep existing preferences
+ * stable when adding an engine: an explicit pin always wins. */
+export const SEARCH_ENGINES = [
+	{ id: "tavily", label: "Tavily", envVar: "TAVILY_API_KEY" },
+	{ id: "brave", label: "Brave", envVar: "BRAVE_API_KEY" },
+	{ id: "exa", label: "Exa", envVar: "EXA_API_KEY" },
+] as const;
+
+export type SearchEngineId = (typeof SEARCH_ENGINES)[number]["id"];
+
+export function isSearchEngineId(value: unknown): value is SearchEngineId {
+	return SEARCH_ENGINES.some((engine) => engine.id === value);
+}
 
 /** A live search engine: an id (for status/labels) + one operation. The
  *  adapters own their wire protocol (fetch, timeouts, error mapping) —
