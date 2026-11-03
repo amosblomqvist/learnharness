@@ -29,7 +29,7 @@ export function createShowImageTool(ctx: { chatId: string; chatStore: Pick<ChatS
 			"Show one of the learner's image files (jpg, png, gif, webp, bmp) in the lesson as-is, with an optional caption. " +
 			"Instant. The result only confirms what was shown — the image is not sent back to you; use read to look at it. " +
 			"To draw marks on the image, call visual with its path instead. Visual results display automatically: do not repeat a newly delivered result. " +
-			"Show a picture again only when resurfacing it meaningfully helps the current explanation.",
+			"Show a picture again only when resurfacing it meaningfully helps the current explanation. Local paths follow File access settings; use ls to discover allowed folders.",
 		parameters: showImageInput,
 		execute: serverExecute("show_image", showImageInput, async ({ path, caption }, { signal }): Promise<ImageFileResult> => {
 			const image = await loadLearnerImage(path, signal);

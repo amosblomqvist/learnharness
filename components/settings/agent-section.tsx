@@ -65,6 +65,7 @@ import {
 	MODEL_SLOTS,
 	SEARCH_ENGINES,
 	resolveSettings,
+	isFileAccessFolder,
 	type AgentSettings,
 	type CompactionSettings,
 	type GraphSettings,
@@ -107,6 +108,30 @@ interface SegmentInfo {
  *  Pure — exported for tests. */
 export function composeTool(agent: AgentSettings | undefined, id: string, on: boolean): AgentSettings {
 	return { ...agent, tools: { ...agent?.tools, [id]: on } };
+}
+
+/** A file-access folder entry the server will accept: absolute (POSIX or
+ *  Windows drive/UNC) or "~"-anchored. Pure — exported for tests. */
+export function isFolderEntry(folder: string): boolean { return isFileAccessFolder(folder); }
+
+/** The switch changes ONLY restriction, never discards saved folders. */
+export function composeFileRestriction(agent: AgentSettings | undefined, restricted: boolean): AgentSettings {
+	return { ...agent, fileAccess: { restricted, folders: agent?.fileAccess?.folders ?? [] } };
+}
+
+/** Compose: add one allowed folder (trimmed; duplicates and invalid entries
+ *  are no-ops). Pure — exported for tests. */
+export function composeAddFolder(agent: AgentSettings | undefined, folder: string): AgentSettings {
+	const next = folder.trim();
+	const folders = agent?.fileAccess?.folders ?? [];
+	const restricted = agent?.fileAccess?.restricted ?? false;
+	if (!isFolderEntry(next) || folders.includes(next)) return { ...agent, fileAccess: { restricted, folders } };
+	return { ...agent, fileAccess: { restricted, folders: [...folders, next] } };
+}
+
+/** Removing the last folder NEVER changes the restriction switch. */
+export function composeRemoveFolder(agent: AgentSettings | undefined, folder: string): AgentSettings {
+	return { ...agent, fileAccess: { restricted: agent?.fileAccess?.restricted ?? false, folders: (agent?.fileAccess?.folders ?? []).filter((f) => f !== folder) } };
 }
 
 /** The quizzing mechanics (owner 2026-09-27): a segmented control, not a
@@ -278,6 +303,7 @@ function MenuTrigger({
 
 export function AgentSection({
 	agent,
+	fileAccessError,
 	models,
 	graph,
 	compaction,
@@ -286,6 +312,7 @@ export function AgentSection({
 	onCompactionChange,
 }: {
 	agent: AgentSettings | undefined;
+	fileAccessError?: string | null;
 	/** The `models` section (slot pins — engine-level, PUT /api/settings/models). */
 	models: ModelsSettings | undefined;
 	/** The `graph` section — READ ONLY here: the graphTools row composes its
@@ -306,6 +333,8 @@ export function AgentSection({
 	const catalog = body?.models;
 	const slots = body?.slots;
 	/** The live search state (/api/search) — the row's reason line. */
+	const [folderInput, setFolderInput] = useState("");
+	const [folderError, setFolderError] = useState<string | null>(null);
 	const [search, setSearch] = useState<{ available: boolean; engine: string | null; reason: string } | null>(null);
 	/** Which search engines have a key (/api/keys) — the no-keys-anywhere
 	 *  state grays the row; per-engine marks ride the menu rows. */
@@ -812,6 +841,48 @@ export function AgentSection({
 						/>
 					</SettingsRow>
 				))}
+				{(() => {
+					const folders = agent?.fileAccess?.folders ?? [];
+					const restricted = Boolean(fileAccessError) || agent?.fileAccess?.restricted === true;
+					const effectiveAgent = fileAccessError ? { ...agent, fileAccess: { restricted: true, folders } } : agent;
+					const addFolder = () => {
+						const next = folderInput.trim();
+						if (!isFolderEntry(next)) { setFolderError("Enter an absolute path or ~/folder."); return; }
+						if (!folders.includes(next)) onSectionChange(composeAddFolder(effectiveAgent, next));
+						setFolderInput("");
+						setFolderError(null);
+					};
+					return (
+						<div data-testid="file-access-row" className="flex flex-col gap-2">
+							<SettingsRow label="File access" hint={!restricted
+								? "Broad local source access, except protected locations"
+								: folders.length ? "Only listed folders and subfolders. Protected locations remain blocked."
+									: "Restricted: no folders allowed. Add a folder to enable access."}>
+								<div className="flex items-center gap-2 text-xs">
+									<span>Restrict to listed folders</span>
+									<Toggle checked={restricted} label="Restrict to listed folders" onChange={(on) => onSectionChange(composeFileRestriction(effectiveAgent, on))} />
+								</div>
+							</SettingsRow>
+							{fileAccessError && <p role="alert" data-testid="file-access-config-error" className="text-xs text-red-500">{fileAccessError}</p>}
+							<div className="flex gap-2 pl-3">
+								<input value={folderInput} aria-label="Allowed folder path" data-testid="file-access-add" placeholder="Absolute path or ~/folder"
+									onChange={(event) => { setFolderInput(event.target.value); setFolderError(null); }}
+									onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); addFolder(); } }}
+									className="min-w-0 flex-1 rounded-sm border border-border bg-background px-2 py-1 font-ui text-xs" />
+								<button type="button" data-testid="file-access-add-button" disabled={!folderInput.trim()} onClick={addFolder} className="rounded-sm border border-border px-2 text-xs disabled:opacity-40">Add folder</button>
+							</div>
+							{folderError && <p role="alert" data-testid="file-access-input-error" className="pl-3 text-xs text-red-500">{folderError}</p>}
+							{folders.map((folder) => (
+								<div key={folder} data-testid="file-access-folder" className="flex items-center justify-between gap-4 pl-3 text-xs">
+									<span title={folder} className="min-w-0 truncate font-ui text-muted-foreground">{folder}</span>
+									<button type="button" aria-label={`Remove ${folder}`} data-testid="file-access-remove"
+										onClick={() => onSectionChange(composeRemoveFolder(effectiveAgent, folder))}
+										className="rounded-sm px-1.5 text-muted-foreground hover:text-foreground">Remove</button>
+								</div>
+							))}
+						</div>
+					);
+				})()}
 				{(() => {
 					const engine = agent?.search?.engine ?? null;
 					const anyKey = SEARCH_ENGINES.some(({ id }) => engineKeys[id] === true);
