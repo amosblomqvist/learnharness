@@ -1,9 +1,18 @@
-import { compactionInFlight, deleteChatSession, getChat, isTurnRunning, sessionCoverage, sessionCost, stores, turnFailure, type ChatDeleteMode } from "@/src/server";
+import { compactionInFlight, deleteChatSession, getChat, isTurnRunning, sessionCoverage, sessionCost, stores, turnFailure, type ChatDeleteMode, pluginQuestionAvailabilityOf, reconcilePluginQuestionCompatibility, type QuestionTypeResolver, getPluginQuestionTypeResolver } from "@/src/server";
+import { pendingPluginQuestionOf } from "@/src/core";
 
 export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
 	const { id } = await params;
-	const chat = getChat(id);
+	await reconcilePluginQuestionCompatibility(stores.chatStore, id);
+	let chat = getChat(id);
 	if (!chat) return Response.json({ error: "Not found" }, { status: 404 });
+	let questionResolver: QuestionTypeResolver | undefined;
+	if (pendingPluginQuestionOf(chat.messages)) {
+		try { questionResolver = await getPluginQuestionTypeResolver(); } catch { /* unavailable fallback */ }
+		// No awaited plugin startup may separate this read from the response projection.
+		chat = getChat(id);
+		if (!chat) return Response.json({ error: "Not found" }, { status: 404 });
+	}
 	// turnInFlight lets a returning client re-attach to a running turn
 	// (chat-handler write-ahead + registry — see src/server/turn-liveness.ts).
 	// coverage (extraction-UX redesign, 2026-09-24): the chat view's ring
@@ -17,6 +26,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
 	return Response.json({
 		...chat,
 		messages: chat.messages,
+		pluginQuestionAvailability: pluginQuestionAvailabilityOf(chat, questionResolver),
 		pricing: sessionCost(chat),
 		turnInFlight: isTurnRunning(id),
 		// Also reaches idle views that missed the failing turn's stream.

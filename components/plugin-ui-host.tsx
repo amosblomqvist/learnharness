@@ -10,8 +10,11 @@ import { PluginKnowledgePicker } from "@/components/plugin-knowledge-picker";
 import { PluginSettingsRows } from "@/components/plugin-settings-rows";
 import { Button } from "@/components/ui/button";
 import { PluginWorkerResultSurface } from "@/components/plugin-worker-result";
+import { HostMarkdown } from "@/components/host-markdown";
 import { MenuShell } from "@/components/menu-shell";
 import { HostDialog } from "@/components/host-dialog";
+import { requireSessionSurfaceBoundary } from "./plugin-session-surface-targets";
+import { PluginSessionSurface } from "./plugin-session-surface-shell";
 import { isInteractionElementVisible, useInteractionLayers, type CloseOutcome, type CloseReason } from "@/components/interaction-layers";
 export { PluginSettingsRows } from "@/components/plugin-settings-rows";
 
@@ -23,6 +26,7 @@ interface Runtime {
 }
 interface WidgetEntry {
 	id: number;
+	surface: boolean;
 	target: HTMLElement;
 	props: unknown;
 	runtime: Runtime;
@@ -48,10 +52,12 @@ export function createPluginUiStore() {
 				try { if (onError) onError(error); else console.error("Plugin UI failed", error); }
 				catch (reportError) { console.error("Plugin UI error reporter failed", reportError); }
 			};
-			function mount<Props>(container: HTMLElement, props: Props, options: PluginWidgetOptions, render: (props: Props, runtime: Runtime) => ReactNode): PluginWidgetHandle<Props> {
+			function mount<Props>(container: HTMLElement, props: Props, options: PluginWidgetOptions, render: (props: Props, runtime: Runtime) => ReactNode, nativeSignal?: AbortSignal, surface = false): PluginWidgetHandle<Props> {
 				const scope = new AbortController();
 				const target = container.ownerDocument.createElement("div");
 				target.dataset.pluginUiWidget = "";
+				// Surface portal wrappers are transparent to the shared local paint stack.
+				if (surface) target.style.display = "contents";
 				let current = props;
 				let disposed = false;
 				const id = ++serial;
@@ -60,6 +66,7 @@ export function createPluginUiStore() {
 					disposed = true;
 					lifetime.removeEventListener("abort", dispose);
 					options.signal.removeEventListener("abort", dispose);
+					nativeSignal?.removeEventListener("abort", dispose);
 					scope.abort();
 					snapshot = snapshot.filter((entry) => entry.id !== id);
 					target.remove();
@@ -98,12 +105,13 @@ export function createPluginUiStore() {
 					}
 					return value;
 				}
-				const entry = (): WidgetEntry => ({ id, target, props: protect(current), runtime, render: render as WidgetEntry["render"] });
-				if (lifetime.aborted || options.signal.aborted) { disposed = true; scope.abort(); }
+				const entry = (): WidgetEntry => ({ id, surface, target, props: protect(current), runtime, render: render as WidgetEntry["render"] });
+				if (lifetime.aborted || options.signal.aborted || nativeSignal?.aborted) { disposed = true; scope.abort(); }
 				else {
 					container.append(target);
 					lifetime.addEventListener("abort", dispose, { once: true });
 					options.signal.addEventListener("abort", dispose, { once: true });
+					nativeSignal?.addEventListener("abort", dispose, { once: true });
 					snapshot = [...snapshot, entry()];
 					publish();
 				}
@@ -135,11 +143,33 @@ export function createPluginUiStore() {
 				},
 				mountButton: (target, props, options) => mount(target, props, options, (props, runtime) => <Button type="button" variant={props.variant} size={props.size} disabled={props.disabled} title={props.title} onClick={() => invoke(props.onClick, runtime.report)}>{props.label}</Button>),
 				mountSettingsRows: (target, props, options) => mount(target, props, options, (schema, runtime) => <PluginSettingsRows schema={schema} onError={runtime.report} />),
+				mountMarkdown: (target, props, options) => mount(target, props, options, props => <HostMarkdown text={props.text} />),
 				mountWorkerResult: (target, props, options) => mount(target, props, options, (props, runtime) => <PluginWorkerResultSurface label={props.label} status={props.status} text={props.text} presentation={props.presentation}>
 					{props.content && <PluginContent content={props.content} runtime={runtime} />}
 				</PluginWorkerResultSurface>),
-				openMenu: (anchor, props, options) => mount(anchor.ownerDocument.body, props, options, (props, runtime) => <PluginMenu anchor={anchor} {...props} runtime={runtime} />),
-				openDialog: (props, options) => mount(document.body, props, options, (props, runtime) => <PluginDialog {...props} runtime={runtime} />),
+				openMenu: (anchor, props, options) => {
+					// A menu is an anchored interactive child, not another visual stack
+					// sibling. It cannot outlive its surface and reportal to the body.
+					if (lifetime.aborted || options.signal.aborted || !anchor.isConnected) return { update() {}, dispose() {} };
+					const owner = [...snapshot].reverse().find(entry => entry.surface && entry.target.contains(anchor));
+					return mount(anchor.ownerDocument.body, props, options, (props, runtime) => <PluginMenu anchor={anchor} {...props} runtime={runtime} />, owner?.runtime.signal);
+				},
+				openDialog: (props, options) => {
+					const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+					return mount(document.body, props, options, (props, runtime) => <PluginDialog {...props} opener={opener} runtime={runtime} />);
+				},
+				openSurface: (target, props, options) => {
+					// Abort wins over target validation, matching existing inert handles.
+					if (lifetime.aborted || options.signal.aborted) return { update() {}, dispose() {} };
+					const boundary = requireSessionSurfaceBoundary(target);
+					const opener = boundary.body.ownerDocument.activeElement;
+					const handle = mount(boundary.stack!.querySelector<HTMLElement>("[data-session-surface-mounts]")!, props, options,
+						(props, runtime) => <PluginSessionSurface title={props.title} onClose={props.onClose} runtime={runtime} boundary={boundary}
+							opener={opener instanceof HTMLElement ? opener : null}>
+							<PluginContent content={props.content} runtime={runtime} className="h-full w-full" />
+						</PluginSessionSurface>, boundary.signal, true);
+					return handle;
+				},
 			};
 		},
 	};
@@ -196,7 +226,7 @@ function PluginMenu({ anchor, items, label, preferredSide = "down", onClose, run
 	</MenuShell>;
 }
 
-function PluginContent({ content, runtime }: Pick<PluginDialogProps, "content"> & { runtime: Runtime }) {
+function PluginContent({ content, runtime, className }: Pick<PluginDialogProps, "content"> & { runtime: Runtime; className?: string }) {
 	const root = useRef<HTMLDivElement>(null);
 	useLayoutEffect(() => {
 		const scope = new AbortController();
@@ -220,10 +250,12 @@ function PluginContent({ content, runtime }: Pick<PluginDialogProps, "content"> 
 		} else root.current!.append(content);
 		return () => { runtime.signal.removeEventListener("abort", dispose); dispose(); };
 	}, [content, runtime]);
-	return <div ref={root} />;
+	return <div ref={root} className={className} />;
 }
 
-function PluginDialog({ title, content, onClose, runtime }: PluginDialogProps & { runtime: Runtime }) {
+function PluginDialog({ title, content, onClose, runtime, opener }: PluginDialogProps & { runtime: Runtime; opener: HTMLElement | null }) {
+	const controller = useInteractionLayers();
+	const ownerId = useRef(controller.ownerOf(opener)?.id ?? null);
 	const closing = useRef(false);
 	const latestOnClose = useRef(onClose);
 	latestOnClose.current = onClose;
@@ -234,7 +266,7 @@ function PluginDialog({ title, content, onClose, runtime }: PluginDialogProps & 
 		runtime.dispose();
 		return "closed";
 	};
-	return <HostDialog open onClose={close} aria-label={title}
+	return <HostDialog open onClose={close} ownerId={ownerId.current} aria-label={title}
 		backdropProps={{ className: "fixed inset-0 z-50 flex items-center justify-center bg-background/80 backdrop-blur-sm" }}
 		frame={<div data-plugin-ui-dialog="" tabIndex={-1} className="mx-4 flex max-h-[85vh] w-full max-w-lg flex-col overflow-y-auto rounded-xl border bg-card p-5 shadow-lg outline-none" />}>
 		<div className="mb-4 flex items-center justify-between gap-4"><h2 className="text-sm font-semibold text-card-foreground">{title}</h2>

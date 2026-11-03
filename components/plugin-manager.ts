@@ -4,6 +4,9 @@ import type {
 	PluginActionContext, PluginActionPlacement, PluginSettingsRegistration,
 } from "@/src/core";
 
+import { copyPluginSubmissionTarget, preparePluginSubmissionInterceptor, type PluginSubmissionInterceptor, type PluginSubmissionTarget } from "../src/core/index.ts";
+import { orderSubmissionInterceptors, type SubmissionInterceptorRegistration } from "./plugin-submission-runner.ts";
+
 export type PluginMount = (container: HTMLElement, signal: AbortSignal) => ReturnType<PluginView["mount"]>;
 export interface PluginRendererRegistration<T> {
 	readonly pluginId: string;
@@ -11,6 +14,7 @@ export interface PluginRendererRegistration<T> {
 }
 export type CodeBlockRegistration = PluginRendererRegistration<PluginCodeBlockRenderer>;
 export type ToolRendererRegistration = PluginRendererRegistration<PluginToolRenderer>;
+export type QuestionRendererRegistration = PluginRendererRegistration<import("@/src/core").PluginQuestionRenderer>;
 export interface FrontendPlugin {
 	info: PluginInfo;
 	phase: "disabled" | "loading" | "active" | "error";
@@ -26,6 +30,7 @@ export interface PluginSnapshot {
 	plugins: FrontendPlugin[];
 	readonly codeBlocks: readonly CodeBlockRegistration[];
 	readonly toolRenderers: readonly ToolRendererRegistration[];
+	readonly questionRenderers?: readonly QuestionRendererRegistration[];
 	directory: string;
 	loading: boolean;
 	refreshing: boolean;
@@ -46,6 +51,8 @@ interface Lifecycle {
 	actionBusy: Set<string>;
 	codeBlocks: Map<string, CodeBlockRegistration>;
 	toolRenderers: Map<string, ToolRendererRegistration>;
+	questionRenderers: Map<string, QuestionRendererRegistration>;
+	submissionInterceptors: Map<string, SubmissionInterceptorRegistration>;
 	settings?: PluginSettingsRegistration;
 	notifications: Set<(event: PluginNotification) => void>;
 	events: Set<(event: ServerEvent) => void>;
@@ -112,6 +119,7 @@ export class PluginFrontendManager {
 	private pending = new Set<string>();
 	private cleanupErrors = new Map<string, string>();
 	private rendererMounts = new WeakMap<object, Set<() => void>>();
+	private submissionPredicateErrors = new WeakMap<object, string>();
 	private requestGeneration = 0;
 	private mutations = 0;
 	private disposed = false;
@@ -128,6 +136,7 @@ export class PluginFrontendManager {
 		this.snapshot = { ...this.snapshot, ...patch,
 			codeBlocks: Object.freeze([...this.lives.values()].flatMap(life => [...life.codeBlocks.values()])),
 			toolRenderers: Object.freeze([...this.lives.values()].flatMap(life => [...life.toolRenderers.values()])),
+			questionRenderers: Object.freeze([...this.lives.values()].flatMap(life => [...life.questionRenderers.values()])),
 			plugins: this.infos.map(info => {
 			const life = this.lives.get(info.id);
 			return {
@@ -185,7 +194,7 @@ export class PluginFrontendManager {
 		if (life.teardown) return life.teardown;
 		life.controller.abort();
 		life.views.clear(); life.actions.clear(); life.placements.clear(); life.actionBusy.clear(); life.settings = undefined;
-		life.codeBlocks.clear(); life.toolRenderers.clear();
+		life.codeBlocks.clear(); life.toolRenderers.clear(); life.questionRenderers.clear(); life.submissionInterceptors.clear();
 		life.notifications.clear(); life.events.clear(); life.resyncs.clear();
 		const cleanups = [...life.cleanups].reverse();
 		life.cleanups.clear();
@@ -235,7 +244,7 @@ export class PluginFrontendManager {
 			const life: Lifecycle = {
 				id: info.id, revision: info.revision, controller: new AbortController(), cleanups: new Set(),
 				activation: Promise.resolve(), tasks: new Set(),
-				views: new Map(), actions: new Map(), placements: new Map(), actionBusy: new Set(), codeBlocks: new Map(), toolRenderers: new Map(),
+				views: new Map(), actions: new Map(), placements: new Map(), actionBusy: new Set(), codeBlocks: new Map(), toolRenderers: new Map(), questionRenderers: new Map(), submissionInterceptors: new Map(),
 				notifications: new Set(), events: new Set(), resyncs: new Set(), phase: "loading",
 			};
 			this.cleanupErrors.delete(info.id);
@@ -361,6 +370,26 @@ export class PluginFrontendManager {
 				return () => { if (life.placements.get(owned.id) === owned) { life.placements.delete(owned.id); this.publish(); } };
 			},
 			refreshActions: () => { if (this.current(life)) this.publish(); },
+			refreshSubmissions: () => { if (this.current(life)) this.publish(); },
+			registerSubmissionInterceptor: (definition: PluginSubmissionInterceptor) => {
+				if (!this.current(life)) return () => {};
+				const validated = preparePluginSubmissionInterceptor(definition);
+				const interceptor = Object.freeze({ ...validated, intercept: definition.intercept.bind(definition), ...(definition.hasPendingInput ? { hasPendingInput: definition.hasPendingInput.bind(definition) } : {}) });
+				if (life.submissionInterceptors.has(interceptor.id)) throw new Error(`Duplicate submission interceptor: ${interceptor.id}`);
+				const controller = new AbortController();
+				const abort = () => controller.abort();
+				life.controller.signal.addEventListener("abort", abort, { once: true });
+				const registration: SubmissionInterceptorRegistration = Object.freeze({ pluginId: life.id, pluginName: manifest.name, interceptor, signal: controller.signal,
+					isCurrent: () => this.current(life) && life.submissionInterceptors.get(interceptor.id) === registration,
+					report: (error: unknown) => this.report(life, error),
+				});
+				life.submissionInterceptors.set(interceptor.id, registration); this.publish();
+				return () => {
+					if (life.submissionInterceptors.get(interceptor.id) !== registration) return;
+					life.submissionInterceptors.delete(interceptor.id); controller.abort();
+					life.controller.signal.removeEventListener("abort", abort); this.publish();
+				};
+			},
 			get ui() {
 				if (!ui) {
 					if (!thisManager.host.createUi) throw new Error("Plugin UI host is unavailable");
@@ -370,6 +399,17 @@ export class PluginFrontendManager {
 			},
 			registerCodeBlock: renderer => registerRenderer(life.codeBlocks, renderer, "language"),
 			registerToolRenderer: renderer => registerRenderer(life.toolRenderers, renderer, "toolName"),
+			registerQuestionRenderer: renderer => {
+				if (!this.current(life)) return () => {};
+				if (!renderer || typeof renderer.id !== "string" || !/^[A-Za-z0-9_-]{1,128}$/.test(renderer.id)) rejectRenderer("Invalid question renderer id");
+				if (!Array.isArray(renderer.supportedContractVersions) || !renderer.supportedContractVersions.length || renderer.supportedContractVersions.some(v => !Number.isSafeInteger(v) || v < 1) || new Set(renderer.supportedContractVersions).size !== renderer.supportedContractVersions.length) rejectRenderer("Invalid question renderer contract versions");
+				if (typeof renderer.mountAnswerEditor !== "function" || (renderer.mountQuestion !== undefined && typeof renderer.mountQuestion !== "function") || (renderer.mountAnswered !== undefined && typeof renderer.mountAnswered !== "function")) rejectRenderer("Invalid question renderer mount");
+				if (life.questionRenderers.has(renderer.id)) rejectRenderer(`Duplicate question renderer: ${renderer.id}`);
+				const owned = Object.freeze({ id: renderer.id, supportedContractVersions: Object.freeze([...renderer.supportedContractVersions]) as unknown as number[], mountAnswerEditor: renderer.mountAnswerEditor.bind(renderer), ...(renderer.mountQuestion ? { mountQuestion: renderer.mountQuestion.bind(renderer) } : {}), ...(renderer.mountAnswered ? { mountAnswered: renderer.mountAnswered.bind(renderer) } : {}) });
+				const registration = Object.freeze({ pluginId: life.id, renderer: owned });
+				life.questionRenderers.set(owned.id, registration); this.publish();
+				return () => { if (life.questionRenderers.get(owned.id) === registration) { life.questionRenderers.delete(owned.id); this.publish(); } };
+			},
 			registerSettings,
 			call: async <T>(operation: string, input?: unknown) => {
 				if (!this.current(life)) throw new Error("Plugin is no longer active");
@@ -472,6 +512,25 @@ export class PluginFrontendManager {
 			await action.run(context);
 		} catch (error) { this.report(life, error); }
 		finally { if (life.actionBusy.delete(action.id) && this.current(life)) this.publish(); }
+	}
+	captureSubmissionInterceptors(): readonly SubmissionInterceptorRegistration[] {
+		return Object.freeze([...this.lives.values()].filter(life => this.current(life)).flatMap(life => [...life.submissionInterceptors.values()]).sort(orderSubmissionInterceptors));
+	}
+	hasPendingSubmissionInput(target: PluginSubmissionTarget): boolean {
+		let pending = false;
+		const frozen = copyPluginSubmissionTarget(target);
+		for (const owner of this.captureSubmissionInterceptors()) {
+			try { if (owner.interceptor.hasPendingInput?.(frozen) === true) pending = true; this.submissionPredicateErrors.delete(owner); }
+			catch (error) {
+				// Readiness is queried during render. Report after render, and do
+				// not make one consistently failing predicate a render loop.
+				if (this.submissionPredicateErrors.get(owner) !== message(error)) {
+					this.submissionPredicateErrors.set(owner, message(error));
+					queueMicrotask(() => { if (owner.isCurrent()) owner.report(error); });
+				}
+			}
+		}
+		return pending;
 	}
 	getCodeBlock(language: string): CodeBlockRegistration | undefined {
 		for (const life of this.lives.values()) {

@@ -231,7 +231,7 @@ export function rmsToMeter(rms: number): number {
  * sibling subtree far from the hook's owner, and there is exactly one
  * window, one pending question, one target at a time.
  */
-let questionTarget: ((text: string) => void) | null = null;
+let questionTarget: ((text: string) => void | Promise<void>) | null = null;
 let composerTarget: ((text: string) => void) | null = null;
 
 /** File references use the very same default destination as dictation,
@@ -264,6 +264,20 @@ export function joinDictation(current: string, final: string): string {
  * unmount guard is identity-based so dev-mode double-invoked effects
  * can't clear another claimant.
  */
+export function usePluginQuestionDictationTarget(append: (text: string) => void | Promise<void>, claimed: boolean) {
+	useEffect(() => {
+		if (!claimed) return;
+		questionTarget = append;
+		return () => {
+			if (questionTarget === append) {
+				// Cancel/discard an obsolete capture before releasing its destination.
+				cancelGlobalDictation();
+				questionTarget = null;
+			}
+		};
+	}, [append, claimed]);
+}
+
 export function useDictationTarget(append: (text: string) => void, claimed: boolean) {
 	useEffect(() => {
 		if (!claimed) return;

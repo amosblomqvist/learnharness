@@ -25,6 +25,7 @@ import type { PluginToolContext } from "../core/plugins.ts";
 import { toLlmMessages, nativeInputCause, PRACTICE_PROBLEM_TOOL } from "../core/native-messages.ts";
 import type { ChatGPTRequestCycle } from "./chatgpt-request-cycle.ts";
 import { usageWasAdmitted } from "./subscription-request-cycle.ts";
+import { PluginQuestionLedger, type NativePluginQuestionContribution } from "./plugin-question-tools.ts";
 
 /**
  * The two teaching-side agents (docs/probe-teach-split.md): the PROBER and
@@ -124,6 +125,7 @@ export interface AgentBuildOptions {
 	pluginContributions?: (context: PluginToolContext, reservedToolNames: readonly string[]) => {
 		instructions: readonly string[];
 		tools: readonly AgentTool<any>[];
+		questionTypes?: readonly NativePluginQuestionContribution[];
 	};
 	/** The resolved per-user tool toggles (core/pending EnabledTools — the
 	 *  2026-09-19 P2 bridge: Platform's chat-handler passes
@@ -190,7 +192,7 @@ function makeQuestionStopper(kind: AgentKind) {
 	};
 }
 
-function baseAgentOptions(kind: AgentKind, opts: AgentBuildOptions, tools: AgentTool<any, any>[]) {
+function baseAgentOptions(kind: AgentKind, opts: AgentBuildOptions, tools: AgentTool<any, any>[], nodeExists?: (nodeId: string) => boolean) {
 	// Practice never reaches the role fallback (the handler ALWAYS injects
 	// the session's conversation engine — practice rides the same
 	// conversation-spec resolution as teaching); the cast keeps AgentKind
@@ -213,6 +215,8 @@ function baseAgentOptions(kind: AgentKind, opts: AgentBuildOptions, tools: Agent
 	const contributions = opts.tools === undefined && opts.chatId && opts.pluginContributions
 		? opts.pluginContributions({ chatId: opts.chatId, agent: kind }, [...CONVERSATION_TOOL_NAMES, ...builtinTools.map(tool => tool.name)])
 		: undefined;
+	const questionLedger = contributions?.questionTypes?.length && opts.chatId
+		? new PluginQuestionLedger(contributions.questionTypes, opts.chatId, nodeExists) : undefined;
 	// Never replace the builtin prompt or tools, or mutate an already-running Agent.
 	const systemPrompt = contributions?.instructions.length
 		? [builtinPrompt, ...contributions.instructions].join("\n\n---\n\n")
@@ -229,17 +233,18 @@ function baseAgentOptions(kind: AgentKind, opts: AgentBuildOptions, tools: Agent
 			systemPrompt,
 			model: engine.model,
 			thinkingLevel: engine.level,
-			tools: contributions ? [...builtinTools, ...contributions.tools] : builtinTools,
+			tools: contributions ? [...builtinTools, ...contributions.tools, ...(questionLedger?.tools ?? [])] : builtinTools,
 			messages: opts.messages ?? [],
 		},
 		streamFn: engine.streamFn,
+		...(questionLedger ? { beforeToolCall: async (context: import("@earendil-works/pi-agent-core").BeforeToolCallContext) => { questionLedger.validatedCall(context); return undefined; } } : {}),
 		...(providerEvents ? { onProviderStreamEvent: providerEvents } : {}),
 		// 0.87.1: shouldStopAfterTurn → finishTurn. Same call point (after
 		// tool results attach, before turn_end) and `{ action: "end" }` still
 		// exits BEFORE the steering poll — the parked-marker stranding our
 		// Wave C registerLiveAgent-before-runPiTurn design depends on.
 		// undefined preserves normal scheduling (the old boolean false).
-		finishTurn: (turn) => (stopper(turn) ? { action: "end" } : undefined),
+		finishTurn: (turn) => (turn.toolResults.some(result => questionLedger?.isAcknowledgment(result)) || stopper(turn) ? { action: "end" } : undefined),
 		// Wave C (2026-09-26, owner correction same day): markers handed to a
 		// live run drain from pi's STEERING queue — the lesson loop is one
 		// continuous teach→quiz→teach run, so delivery must inject at turn
@@ -274,6 +279,7 @@ function baseAgentOptions(kind: AgentKind, opts: AgentBuildOptions, tools: Agent
 			opts.requestCycle?.prepare(request);
 		},
 	});
+	questionLedger?.bind(agent);
 	if (opts.onUsage) {
 		agent.subscribe((event: AgentEvent) => {
 			if (event.type === "message_end" && event.message.role === "assistant" && "usage" in event.message) {
@@ -313,7 +319,9 @@ export function createTeacherAgent(
 	opts: AgentBuildOptions = {},
 ) {
 	const tools = opts.tools ?? (ctx ? createTeacherTools(ctx, opts.toolToggles) : bareQuestionTools());
-	return baseAgentOptions("teacher", opts, Object.values(tools));
+	return baseAgentOptions("teacher", opts, Object.values(tools), ctx
+		? nodeId => ctx.chatStore.getChat(ctx.chatId)?.tree?.nodes.some(node => node.id === nodeId) ?? false
+		: undefined);
 }
 
 /** The bare teach question set (tests, bare agents): quiz with the shared

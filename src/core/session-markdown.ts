@@ -28,7 +28,9 @@ import {
 	problemInputForConclude,
 	SEND_TO_USER_TOOL,
 	userFacingTextOf,
+	pluginQuestionResultMatches,
 } from "./native-messages.ts";
+import { readPluginQuestionMessageAnnotation, readPluginQuestionAnswer, readPluginQuestionCancellation } from "./plugin-questions.ts";
 import type { ToolResultMessage } from "@earendil-works/pi-ai";
 
 /** The practice join context (owner-approved, 2026-10-06 export round):
@@ -71,6 +73,21 @@ function outcomeLabel(outcome: string): string {
 
 /** One tool result's learner-visible outcome, rendered as body lines. */
 function toolResultBody(result: ToolResultMessage, ctx?: MarkdownContext): { heading: string; body: string[] } {
+	const pluginAnswer = readPluginQuestionAnswer(result.details);
+	const cancellation = readPluginQuestionCancellation(result.details);
+	if (pluginAnswer || cancellation) {
+		const bound = ctx?.messages.some(message => message.role === "assistant" && Array.isArray(message.content) && message.content.some((block, contentIndex) => {
+			if (block.type !== "toolCall") return false;
+			const annotation = readPluginQuestionMessageAnnotation(message, contentIndex);
+			return annotation.status !== "absent" && pluginQuestionResultMatches(result as LhMessage, { messageId: message.id, contentIndex, toolCallId: block.id, toolName: block.name }, annotation);
+		}));
+		if (!bound) return { heading: "Question", body: ["Question unavailable"] };
+		if (cancellation) return { heading: "Question", body: ["The question was cancelled without a learner answer."] };
+		const body = [`**Answer:** ${typeof pluginAnswer!.answer === "string" ? pluginAnswer!.answer : JSON.stringify(pluginAnswer!.answer)}`];
+		if (pluginAnswer!.thinking !== undefined) body.push(`**Thinking:** ${pluginAnswer!.thinking}`);
+		if (pluginAnswer!.readingThinking !== undefined) body.push(`**Reading thinking:** ${pluginAnswer!.readingThinking}`);
+		return { heading: "Learner answer", body };
+	}
 	const out = result.details as
 		| Partial<{
 				questionText: string;
@@ -172,6 +189,13 @@ export function messageMarkdown(
 	} else if (role === "assistant") {
 		for (const text of userFacingTextOf((message as { content: unknown }).content, ctx?.failedOutputCalls ?? failedOutputCallIds([message]))) {
 			parts.push(`### Teacher${anchor}\n\n${text.trim()}`);
+		}
+		if (message.role === "assistant" && Array.isArray(message.content)) {
+			for (const [contentIndex, block] of message.content.entries()) {
+				if (block.type !== "toolCall") continue;
+				const annotation = readPluginQuestionMessageAnnotation(message, contentIndex);
+				if (annotation.status === "posed") parts.push(`### Question${anchor}\n\n${annotation.snapshot.input.question}`);
+			}
 		}
 	} else if (role === "toolResult") {
 		const result = message as ToolResultMessage;

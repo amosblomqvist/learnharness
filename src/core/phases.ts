@@ -36,6 +36,9 @@
  * Pure: only browser-safe core helpers — safe on server, client, and tests.
  */
 
+import { posedPluginQuestionOfPart } from "./tool-parts.ts";
+import { readPluginQuestionMessageAnnotation } from "./plugin-questions.ts";
+
 /** The three phases of a session, as the picker / header / dividers see them. */
 export type Phase3 = "probe" | "plan" | "teach";
 
@@ -45,7 +48,7 @@ export type Phase3 = "probe" | "plan" | "teach";
  * calls) an output.
  */
 export interface PhaseMessage {
-	parts: ReadonlyArray<{ type: string; state?: string; input?: unknown; output?: unknown }>;
+	parts: ReadonlyArray<{ type: string; state?: string; input?: unknown; output?: unknown; pluginQuestion?: unknown }>;
 }
 
 /** A quiz call's part input carries `nodeId` iff it is tagged (teach-only —
@@ -57,6 +60,14 @@ function taggedNodeId(input: unknown): boolean {
 		typeof (input as { nodeId?: unknown }).nodeId === "string" &&
 		(input as { nodeId: string }).nodeId.length > 0
 	);
+}
+
+function isTeachQuestionPart(part: PhaseMessage["parts"][number]): boolean {
+	if (part.pluginQuestion !== undefined) {
+		const snapshot = posedPluginQuestionOfPart(part);
+		return snapshot?.variant === "teach" && taggedNodeId(snapshot.input);
+	}
+	return (part.type === "tool-quiz" || part.type === "tool-explain") && taggedNodeId(part.input);
 }
 
 /** The phase at `upToIndex` (inclusive; default: the last message). */
@@ -72,7 +83,7 @@ export function phaseAt3(messages: readonly PhaseMessage[], upToIndex?: number):
 /** One message's advance of the phase (pure fold step). */
 function advance(
 	phase: Phase3,
-	parts: ReadonlyArray<{ type: string; state?: string; input?: unknown; output?: unknown }> | undefined,
+	parts: PhaseMessage["parts"] | undefined,
 ): Phase3 {
 	if (!parts) return phase;
 	for (const part of parts) {
@@ -89,9 +100,7 @@ function advance(
 		// plan → teach via the first nodeId-tagged quizzing CALL — quiz OR
 		// explain, whichever mechanic the settings armed (both carry nodeId).
 		if (
-			phase === "plan" &&
-			(part.type === "tool-quiz" || part.type === "tool-explain") &&
-			taggedNodeId(part.input)
+			phase === "plan" && isTeachQuestionPart(part)
 		) {
 			phase = "teach";
 		}
@@ -113,7 +122,7 @@ function advance(
  * between the plan presentation and the teaching block.
  */
 export function teachStepIndex(
-	parts: ReadonlyArray<{ type: string; state?: string; input?: unknown }>,
+	parts: PhaseMessage["parts"],
 ): number {
 	let stepStarts = 0; // how many step-start parts seen so far
 	let latest = -1; // index of the latest step-start
@@ -124,10 +133,7 @@ export function teachStepIndex(
 			latest = i;
 			continue;
 		}
-		if (
-			(part.type === "tool-quiz" || part.type === "tool-explain") &&
-			taggedNodeId(part.input)
-		) {
+		if (isTeachQuestionPart(part)) {
 			// The call's governing step: 0–1 step-starts seen = the message's
 			// FIRST step → -1 (the divider belongs before the whole message);
 			// a later step → that step-start's index (the divider renders at
@@ -175,7 +181,12 @@ export function phaseAt3Lh(messages: readonly LhMessage[], upToIndex?: number): 
 		} else if (role === "assistant") {
 			const content = (m as { content?: ReadonlyArray<{ type?: string; name?: string; arguments?: unknown }> }).content ?? [];
 			if (phase === "plan") {
-				for (const block of content) {
+				for (const [contentIndex, block] of content.entries()) {
+					const annotation = readPluginQuestionMessageAnnotation(m, contentIndex);
+					if (annotation.status !== "absent") {
+						if (annotation.status === "posed" && annotation.snapshot.variant === "teach" && taggedNodeId(annotation.snapshot.input)) { phase = "teach"; break; }
+						continue;
+					}
 					if (
 						block.type === "toolCall" &&
 						(block.name === "quiz" || block.name === "explain") &&

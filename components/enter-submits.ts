@@ -37,6 +37,7 @@
 import { useEffect, useRef, type RefObject } from "react";
 import { useOptionalInteractionLayers } from "./interaction-layers";
 import { isInteractionScopeEligible } from "./plugin-input-focus";
+import { pluginQuestionKeySuppressed, composingQuestionKey } from "./plugin-question-keys";
 import { isTypingSurface } from "@/src/core";
 
 /** Overlay roots whose buttons keep native Enter (hand-rolled menus mark
@@ -67,7 +68,7 @@ export function useEnterSubmits(submit: () => void, scopeRef?: RefObject<HTMLEle
 	submitRef.current = submit;
 	useEffect(() => {
 		const onKey = (e: KeyboardEvent) => {
-			if (e.key !== "Enter" || e.defaultPrevented) return;
+			if (e.key !== "Enter" || e.defaultPrevented || pluginQuestionKeySuppressed(e) || composingQuestionKey(e)) return;
 			if (!isInteractionScopeEligible(scopeRef ? scopeRef.current : document.body, controller)) return;
 			if (e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return;
 			if (isTypingSurface(e)) return;

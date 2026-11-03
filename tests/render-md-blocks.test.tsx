@@ -115,7 +115,9 @@ describe("md-blocks — codeSource (pure)", () => {
 describe("session-scoped overlays (chrome-melt wave, 2026-09-19)", () => {
 	it("mermaid overlay mounts inside the session area — absolute (not fixed), 80% + blur, closeable", () => {
 		const html = renderToStaticMarkup(<MermaidOverlay chart="graph TD\nA --> B" onClose={() => {}} />);
-		assert.match(html, /class="absolute inset-0[^"]*z-40/, "absolute inset-0 z-40 — scoped, not fullscreen");
+		assert.match(html, /class="[^"]*absolute inset-0[^"]*z-40/, "absolute inset-0 — scoped, not fullscreen");
+		assert.match(html, /style="z-index:100"/, "native view participates in the shared ordered local paint stack");
+		assert.ok(html.includes("pointer-events-auto"), "the frame opts into hit testing inside the transparent stack");
 		assert.ok(html.includes("bg-background/80"), "80% background: the transcript ghosts through");
 		assert.ok(html.includes("backdrop-blur"), "blur surface");
 		assert.ok(!html.includes("fixed inset-0"), "never fixed — the drag bar stays uncovered");
@@ -129,7 +131,9 @@ describe("session-scoped overlays (chrome-melt wave, 2026-09-19)", () => {
 		assert.match(html, /data-testid="plan-popup"/);
 		assert.match(html, /role="region"/);
 		assert.ok(!html.includes("aria-modal"));
-		assert.match(html, /class="absolute inset-0[^"]*z-40/, "absolute inset-0 z-40 — scoped, not fullscreen");
+		assert.match(html, /class="[^"]*absolute inset-0[^"]*z-40/, "absolute inset-0 — scoped, not fullscreen");
+		assert.match(html, /style="z-index:100"/, "plan views share the ordered local paint stack");
+		assert.ok(html.includes("pointer-events-auto"), "the frame remains interactive inside the transparent stack");
 		assert.ok(html.includes("bg-background/80"), "80% background");
 		assert.ok(html.includes("backdrop-blur"), "blur surface");
 		assert.ok(!html.includes("fixed inset-0"), "never fixed — the drag bar stays uncovered");

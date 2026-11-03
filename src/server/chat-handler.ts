@@ -31,8 +31,10 @@ import { runPiTurn } from "./pi/ui-stream.ts";
 import { collectToolCallIds } from "./pi/call-ids.ts";
 import { providerEventNote } from "../agent/provider-events.ts";
 import { effectiveSettings, stores } from "./stores.ts";
-import { getPluginAgentContributions } from "./plugins.ts";
+import { getPluginAgentContributions, getPluginHost } from "./plugins.ts";
+import { preparePluginQuestionAnswer, reconcilePluginQuestionCompatibility, type QuestionTypeResolver } from "./plugin-questions.ts";
 import { searchAvailable, searchProvider } from "./search.ts";
+import { prepareSubmissionImages, prepareSubmissionImageChannels, submissionImagePolicyKey } from "./submission-images.ts";
 import { providerKeyPresent } from "./keys.ts";
 import { CLAUDE_CODE_PROVIDER } from "../core/contracts/claude-code.ts";
 import {
@@ -42,11 +44,12 @@ import {
 	resolveRoleSpec,
 } from "../core/settings-resolution.ts";
 import { modelsNotConfigured, providerKeyMissing as providerKeyMissingEnvelope, ROLE_SLOT, type ModelSlotName, type ProviderKeyMissing } from "../core/settings.ts";
-import { beginTurn, endTurn } from "./turn-liveness.ts";
+import { beginTurn, endTurn, isTurnRunning } from "./turn-liveness.ts";
 import { applyParkedDismissal } from "./dismissal-park.ts";
 import { registerTurn, rememberTurnFailure, unregisterTurn } from "./turn-runs.ts";
 import { persistTurn, triggerExtraction, TurnPersistenceError } from "./turn-service.ts";
-import { hasProbeDone, hasUnresolvedQuestion } from "../core/native-messages.ts";
+import { hasProbeDone, hasUnresolvedQuestion, pendingPluginQuestionOf } from "../core/native-messages.ts";
+import { samePluginQuestionOccurrence } from "../core/plugin-questions.ts";
 import { composeInstructions } from "../agent/teacher-agent.ts";
 import { ensureCompacted, kickCompaction, effectiveThresholdTokens } from "./compaction.ts";
 import { catalogContextLimits, refreshConnectionCatalog } from "./model-catalog.ts";
@@ -55,6 +58,8 @@ import { settledTurnResponse } from "./turn-runs.ts";
 import { asAgentMessages } from "../core/native-messages.ts";
 import {
 	ChatInputError,
+	assertPluginQuestionInputAllowed,
+	assertNativeSubmissionTarget,
 	inputAppends,
 	parseChatInput,
 	questionRecoveryAppends,
@@ -197,9 +202,35 @@ export async function handleChatInput(
 	input: TurnInput,
 	buildAgent?: (opts: AgentBuildOptions & { teaching: boolean }) => TeachingAgent,
 ): Promise<Response> {
+	await reconcilePluginQuestionCompatibility(stores.chatStore, chatId);
 	let record = stores.chatStore.getChat(chatId);
 	if (!record) {
 		return Response.json({ error: "Unknown chat" }, { status: 404 });
+	}
+
+	const capturedSession = { createdAt: record.createdAt, kind: record.kind };
+	const freshSubmission = input.type === "text" || input.type === "thinking" || input.type === "answer" || input.type === "plugin-question-answer";
+	try {
+		assertPluginQuestionInputAllowed(record.messages, input);
+		if (input.type !== "steers") assertNativeSubmissionTarget(record.messages, input);
+		if (input.type === "plugin-question-answer") {
+			const pending = pendingPluginQuestionOf(record.messages);
+			if (!pending || pending.questionId !== input.questionId || !samePluginQuestionOccurrence(pending.occurrence, input.occurrence))
+				throw new ChatInputError("This question is no longer pending. Sync the saved session before trying again.");
+		}
+	}
+	catch (err) {
+		if (err instanceof ChatInputError) return Response.json({ error: err.message }, { status: 400 });
+		throw err;
+	}
+	if (input.type === "plugin-question-answer" && isTurnRunning(chatId))
+		return Response.json({ error: "A turn is already running for this session" }, { status: 409 });
+	let questionResolver: QuestionTypeResolver | undefined;
+	if (input.type === "plugin-question-answer") {
+		try {
+			const host = await getPluginHost();
+			questionResolver = (pluginId, typeId, version) => host.resolveQuestionType(pluginId, typeId, version);
+		} catch { return Response.json({ error: "Question unavailable" }, { status: 400 }); }
 	}
 
 	// Refuse an ineligible Retry before catalog refresh, compaction, or any
@@ -275,13 +306,35 @@ export async function handleChatInput(
 		noDispatch: (kind) => requestCycle?.noDispatch(kind),
 	};
 	let conversationEngine: PiEngine;
-	try { conversationEngine = piEngineForSpec(conversation, () => callPurpose.background, lifecycle, retentionForSlot("strong")); }
+	let compactionEngine: PiEngine;
+	try {
+		conversationEngine = piEngineForSpec(conversation, () => callPurpose.background, lifecycle, retentionForSlot("strong"));
+		compactionEngine = piEngineForSpec(conversation, true, undefined, retentionForSlot("strong"));
+	}
 	catch { return Response.json({ error: conversation.provider === "chatgpt" ? chatGPTStreamError("model catalog") : isSubscriptionProvider(conversation.provider) ? nativeSubscriptionError(conversation.provider, "model catalog") : "The selected model is unavailable." }, { status: 503 }); }
+	const capturedPolicy = submissionImagePolicyKey(conversationEngine);
+	const capturedConversation = JSON.stringify(conversation);
+	try {
+		switch (input.type) {
+			case "text": case "thinking":
+				input = { ...input, images: await prepareSubmissionImages(input.images, conversationEngine) };
+				break;
+			case "answer":
+				input = { ...input, answer: { ...input.answer, images: await prepareSubmissionImageChannels(input.answer.images, conversationEngine) } };
+				break;
+			case "plugin-question-answer":
+				input = { ...input, images: await prepareSubmissionImageChannels(input.images, conversationEngine) };
+				break;
+		}
+	} catch (err) {
+		if (err instanceof ChatInputError) return Response.json({ error: err.message }, { status: 400 });
+		throw err;
+	}
 	const modelIdForCompaction = `${conversationEngine.model.provider}:${conversationEngine.model.id}`;
 	await ensureCompacted(
 		{
 			chatStore: stores.chatStore,
-			engine: piEngineForSpec(conversation, true, undefined, retentionForSlot("strong")),
+			engine: compactionEngine,
 			canStart: () => connectionBackgroundAllowed(conversation.provider),
 			modelId: modelIdForCompaction,
 			kind: record.kind === "practice" ? "practice" : hasProbeDone(record.messages) ? "teach" : "probe",
@@ -293,9 +346,36 @@ export async function handleChatInput(
 		},
 		chatId,
 	);
+	let pluginContributions: AgentBuildOptions["pluginContributions"];
+	if (!buildAgent) {
+		try { pluginContributions = await getPluginAgentContributions(); }
+		catch (error) {
+			// Plugin startup failures must not make the native lesson unusable.
+			console.error("[plugins] Agent contributions unavailable:", error);
+		}
+	}
 	const compactedRecord = stores.chatStore.getChat(chatId);
 	if (!compactedRecord) return Response.json({ error: "Unknown chat" }, { status: 404 });
 	record = compactedRecord;
+	// Final admission seam: every image/preflight await is over. Resolve via
+	// the SAME conversation chain, never a parallel role catalog. No await
+	// may intervene before the save-only write or beginTurn/write below.
+	const staleSubmission = () => Response.json({ code: "submission-stale", error: "The submission target or selected model changed. Your input has been kept." }, { status: 412 });
+	if (freshSubmission) {
+		if (record.createdAt !== capturedSession.createdAt || record.kind !== capturedSession.kind) return staleSubmission();
+		try {
+			const spec = resolveConversationSpec(record.settings, effectiveSettings().models.strong);
+			if (!spec || JSON.stringify(spec) !== capturedConversation) return staleSubmission();
+			const checked = piEngineForSpec(spec, () => callPurpose.background, lifecycle, retentionForSlot("strong"));
+			if (submissionImagePolicyKey(checked) !== capturedPolicy || checked.level !== conversationEngine.level) return staleSubmission();
+			assertPluginQuestionInputAllowed(record.messages, input);
+			if (input.type !== "steers") assertNativeSubmissionTarget(record.messages, input);
+			if (input.type === "plugin-question-answer") {
+				const pending = pendingPluginQuestionOf(record.messages);
+				if (!pending || pending.questionId !== input.questionId || !samePluginQuestionOccurrence(pending.occurrence, input.occurrence)) return staleSubmission();
+			}
+		} catch { return staleSubmission(); }
+	}
 	// Recompute Retry eligibility on current truth, still before beginTurn.
 	// A compaction marker or another writer may have landed during awaits.
 	// These omissions affect ONLY the agent context, never the saved record.
@@ -318,8 +398,12 @@ export async function handleChatInput(
 	// follow-up queue and never builds an input event at all.
 	let appends;
 	try {
-		appends =
-			input.type === "steers"
+		assertPluginQuestionInputAllowed(record.messages, input);
+		if (input.type === "plugin-question-answer" && isTurnRunning(chatId))
+			return Response.json({ error: "A turn is already running for this session" }, { status: 409 });
+		appends = input.type === "plugin-question-answer"
+			? preparePluginQuestionAnswer({ id: chatId, messages: record.messages }, input, questionResolver!)
+			: input.type === "steers"
 				? input.steers.filter((s) => !steerDelivered(record.messages, s.id))
 				: inputAppends(record, input);
 	} catch (err) {
@@ -339,7 +423,7 @@ export async function handleChatInput(
 	// the sibling question permanently pre-fix). Nothing else can generate
 	// while a question dangles (job wakes wait, continuation folds refuse,
 	// the composer gates), so adjacency holds by construction.
-	if (input.type === "answer" && hasUnresolvedQuestion([...record.messages, ...appends])) {
+	if ((input.type === "answer" || input.type === "plugin-question-answer") && hasUnresolvedQuestion([...record.messages, ...appends])) {
 		const merged = [...record.messages, ...appends];
 		try { stores.chatStore.saveMessages(chatId, merged); }
 		catch (err) {
@@ -441,15 +525,6 @@ export async function handleChatInput(
 		},
 		restoreAutomatic: (automaticIds, retainedIds) => restoreUncommittedAutomatic(chatId, constructed, automaticIds, retainedIds),
 	});
-	let pluginContributions: AgentBuildOptions["pluginContributions"];
-	if (!buildAgent) {
-		try { pluginContributions = await getPluginAgentContributions(); }
-		catch (error) {
-			// Fatal plugin storage/startup errors stay visible through plugin APIs,
-			// but must not make the core lesson unusable. Test factories remain owned.
-			console.error("[plugins] Agent contributions unavailable:", error);
-		}
-	}
 	const agentOpts: AgentBuildOptions = {
 		pluginContributions,
 		engine,

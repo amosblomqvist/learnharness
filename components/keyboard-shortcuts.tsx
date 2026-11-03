@@ -35,6 +35,7 @@ import {
 	kbdEventForAction,
 	KEYBOARD_ACTIONS,
 } from "@/src/core";
+import { pluginQuestionKeySuppressed, composingQuestionKey } from "./plugin-question-keys";
 import { isDictationActive } from "@/components/dictation";
 import { dispatchFocusedPluginShortcut, hasLegacyInteractionForeground, isInteractionScopeEligible } from "@/components/plugin-input-focus";
 import { useSettingsDialog } from "@/components/settings/settings-dialog.tsx";
@@ -61,6 +62,7 @@ export function KeyboardShortcuts() {
 
 	useEffect(() => {
 		const onKeyDown = (e: KeyboardEvent) => {
+			if (pluginQuestionKeySuppressed(e) || composingQuestionKey(e)) return;
 			// Provider capture already suppressed native Tab without stopping
 			// target propagation. Keep the legacy unprovided fixture fallback.
 			if (e.key === "Tab") {

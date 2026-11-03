@@ -5,6 +5,8 @@ import { createRequire } from "node:module";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { PLUGIN_ID_PATTERN, parsePluginManifest } from "../core/plugins.ts";
 import { validatePluginSchema } from "../core/plugin-validation.ts";
+import { createPluginQuestionParameters, preparePluginQuestionType } from "../core/plugin-questions.ts";
+import type { PluginQuestionTypeDefinition, PluginQuestionVariant } from "../core/plugin-questions.ts";
 import type { PluginAgentKind, PluginBackendContext, PluginBackendModule, PluginCleanup, PluginInfo, PluginInference, PluginInstructions, PluginLearningData, PluginManifest, PluginNotification, PluginToolContext, PluginTools } from "../core/plugins.ts";
 import type { PluginAgentService } from "../core/plugin-agents.ts";
 import type { PluginWorkerService } from "../core/plugin-workers.ts";
@@ -44,13 +46,27 @@ export interface PluginHostDependencies {
 }
 interface Instructions { agents: Set<PluginAgentKind>; text: string }
 interface Tools { agents: Set<PluginAgentKind>; create: PluginTools["create"] }
-export interface PluginAgentContributions { instructions: string[]; tools: AgentTool<any>[] }
+type QuestionDefinition = PluginQuestionTypeDefinition<any, any>;
+/** Frozen per-turn provenance, admitted atomically with ordinary package contributions. */
+export interface PluginQuestionContribution {
+	pluginId: string;
+	definition: QuestionDefinition;
+	variant: PluginQuestionVariant;
+	signal: AbortSignal;
+	requireActive(): void;
+}
+export type PluginQuestionResolution =
+	| { status: "available"; definition: QuestionDefinition; signal: AbortSignal; requireActive(): void }
+	| { status: "incompatible" }
+	| { status: "unavailable" };
+export interface PluginAgentContributions { instructions: string[]; tools: AgentTool<any>[]; questionTypes?: PluginQuestionContribution[] }
 interface Activation {
 	controller: AbortController;
 	cleanups: PluginCleanup[];
 	handlers: Map<string, (input: unknown) => unknown | Promise<unknown>>;
 	instructions: Set<Instructions>;
 	tools: Set<Tools>;
+	questions: Map<string, QuestionDefinition>;
 	ready: boolean;
 }
 interface Package {
@@ -165,6 +181,7 @@ export function createPluginHost(deps: PluginHostDependencies) {
 		activation.handlers.clear();
 		activation.instructions.clear();
 		activation.tools.clear();
+		activation.questions.clear();
 		activation.controller.abort();
 		const failures: string[] = [];
 		for (const cleanup of activation.cleanups.splice(0).reverse()) {
@@ -179,7 +196,7 @@ export function createPluginHost(deps: PluginHostDependencies) {
 			return;
 		}
 		const manifest = pkg.info.manifest;
-		const activation: Activation = { controller: new AbortController(), cleanups: [], handlers: new Map(), instructions: new Set(), tools: new Set(), ready: false };
+		const activation: Activation = { controller: new AbortController(), cleanups: [], handlers: new Map(), instructions: new Set(), tools: new Set(), questions: new Map(), ready: false };
 		pkg.activation = activation;
 		const requireLive = () => { if (!live(pkg, activation)) throw new Error("Plugin activation is no longer active"); };
 		const cleanup = (fn: PluginCleanup) => {
@@ -213,6 +230,18 @@ export function createPluginHost(deps: PluginHostDependencies) {
 						const registered = { agents, create: contribution.create.bind(contribution) };
 						activation.tools.add(registered);
 						return () => { activation.tools.delete(registered); };
+					},
+					registerQuestionType(definition) {
+						requireLive();
+						const registered = preparePluginQuestionType(definition);
+						if (activation.questions.has(registered.id)) throw new Error(`Duplicate plugin question type: ${registered.id}`);
+						activation.questions.set(registered.id, registered);
+						if (activation.ready) change();
+						return () => {
+							if (activation.questions.get(registered.id) !== registered) return;
+							activation.questions.delete(registered.id);
+							if (activation.ready && live(pkg, activation)) change();
+						};
 					},
 					handle(name, handler) {
 						requireLive();
@@ -326,10 +355,10 @@ export function createPluginHost(deps: PluginHostDependencies) {
 		const contributions = [...packages.keys()].sort().flatMap(id => {
 			const pkg = packages.get(id)!, activation = pkg.activation;
 			return pkg.info.enabled && activation?.ready && live(pkg, activation)
-				? [{ pkg, activation, instructions: [...activation.instructions], factories: [...activation.tools] }]
+				? [{ pkg, activation, instructions: [...activation.instructions], factories: [...activation.tools], questions: [...activation.questions.values()] }]
 				: [];
 		});
-		for (const { pkg, activation, instructions, factories } of contributions) {
+		for (const { pkg, activation, instructions, factories, questions } of contributions) {
 			try {
 				const texts = instructions.filter(item => item.agents.has(turn.agent)).map(item => item.text);
 				const tools: AgentTool<any>[] = [];
@@ -372,10 +401,24 @@ export function createPluginHost(deps: PluginHostDependencies) {
 						});
 					}
 				}
+				const questionTypes: PluginQuestionContribution[] = [];
+				const variant = turn.agent === "prober" ? "probe" : turn.agent === "teacher" ? "teach" : undefined;
+				if (variant) for (const definition of questions) {
+					const tool = definition[variant];
+					if (!tool) continue;
+					if (names.has(tool.toolName) || packageNames.has(tool.toolName)) throw new Error(`Plugin tool name collision: ${tool.toolName}`);
+					validatePluginSchema(createPluginQuestionParameters(definition, variant));
+					packageNames.add(tool.toolName);
+					questionTypes.push(Object.freeze({
+						pluginId: pkg.info.id, definition, variant, signal: activation.controller.signal,
+						requireActive() { if (!live(pkg, activation)) throw new PluginHostError(409, `Plugin ${pkg.info.id} is disabled or unavailable`); },
+					}));
+				}
 				if (!live(pkg, activation)) continue;
 				for (const name of packageNames) names.add(name);
 				result.instructions.push(...texts);
 				result.tools.push(...tools);
+				if (questionTypes.length) (result.questionTypes ??= []).push(...questionTypes);
 				if (pkg.contributionWarning !== undefined) {
 					delete pkg.contributionWarning;
 					if (pkg.restart) pkg.info.error = pkg.restart;
@@ -398,6 +441,20 @@ export function createPluginHost(deps: PluginHostDependencies) {
 	return {
 		initialize: () => enqueue(initializeInternal),
 		agentContributions,
+		resolveQuestionType(pluginId: string, typeId: string, contractVersion: number): PluginQuestionResolution {
+			assertOpen();
+			if (!initialized) throw new PluginHostError(503, "Plugin host is not initialized");
+			const pkg = packages.get(pluginId), activation = pkg?.activation;
+			if (!pkg || !pkg.info.enabled || !activation?.ready || !live(pkg, activation)) return { status: "unavailable" };
+			const definition = activation.questions.get(typeId);
+			if (!definition) return { status: "unavailable" };
+			if (definition.incompatibleContractVersions?.includes(contractVersion)) return { status: "incompatible" };
+			if (definition.contractVersion !== contractVersion) return { status: "unavailable" };
+			return { status: "available", definition, signal: activation.controller.signal,
+				requireActive() {
+					if (!live(pkg, activation) || activation.questions.get(typeId) !== definition) throw new PluginHostError(409, `Plugin ${pkg.info.id} is disabled or unavailable`);
+				} };
+		},
 		list(): PluginInfo[] {
 			assertOpen();
 			return [...packages.values()].map(({ info }) => ({ ...info, ...(info.manifest ? { manifest: { ...info.manifest } } : {}) })).sort((a, b) => a.id.localeCompare(b.id));

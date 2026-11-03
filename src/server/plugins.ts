@@ -110,4 +110,8 @@ export async function getPluginHost(): Promise<Host> {
 export async function getPluginAgentContributions(): Promise<NonNullable<AgentBuildOptions["pluginContributions"]>> {
 	return (await getPluginHost()).agentContributions;
 }
+/** Await startup before reading canonical truth; the returned resolver itself is synchronous. */
+export async function getPluginQuestionTypeResolver(): Promise<Host["resolveQuestionType"]> {
+	return (await getPluginHost()).resolveQuestionType;
+}
 export const pluginTransport = createPluginTransport({ getHost: getPluginHost, directory: pluginDirectory });

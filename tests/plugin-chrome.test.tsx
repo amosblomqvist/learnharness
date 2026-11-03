@@ -7,10 +7,13 @@ import { placedPluginActions, pluginActionDisabled, fitPluginTopBarActions, Plug
 import { TopBar } from "../components/top-bar.tsx";
 import type { FrontendPlugin } from "../components/plugin-manager.ts";
 import type { PluginActionContext, PluginFrontendContext } from "../src/core/plugins.ts";
+import type { PluginSurfaceTarget } from "../src/core/plugin-ui.ts";
 import { mountPluginChrome, pluginInfo } from "./helpers/plugin-chrome.tsx";
 
 const sidebar = { placement: "sidebar", surface: "sidebar" } as const;
-const session = { placement: "top-bar", surface: "session", sessionId: "session-1", kind: "teaching" } as const;
+// Chrome forwards the opaque target; this fixture never mounts a surface.
+const surfaceTarget = Object.freeze({}) as PluginSurfaceTarget;
+const session = { placement: "top-bar", surface: "session", sessionId: "session-1", kind: "teaching", surfaceTarget } as const;
 function plugin(id = "fixture"): FrontendPlugin {
 	return { info: pluginInfo(id), phase: "active", views: [{ id: "overview", name: "Overview", mount() {} }],
 		actions: [{ id: "run", name: "Run", run() {} }], placements: [], actionBusy: [], busy: false };

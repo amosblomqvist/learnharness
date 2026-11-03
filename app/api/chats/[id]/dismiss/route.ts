@@ -19,11 +19,12 @@
  * ESC-discard now doubles as the turn abort's bookkeeper (the client
  * fires both).
  */
-import { ChatInputError, dismissAppends, emit, parseDismissInput } from "@/src/core";
-import { getChat, isTurnRunning, parkDismissal, stores } from "@/src/server";
+import { assertPluginQuestionInputAllowed, ChatInputError, dismissAppends, emit, parseDismissInput } from "@/src/core";
+import { getChat, isTurnRunning, parkDismissal, stores, preparePluginQuestionDismissal, reconcilePluginQuestionCompatibility } from "@/src/server";
 
 export async function POST(req: Request, ctx: { params: Promise<{ id: string }> }): Promise<Response> {
 	const { id } = await ctx.params;
+	await reconcilePluginQuestionCompatibility(stores.chatStore, id);
 	const chat = getChat(id);
 	if (!chat) return Response.json({ error: "Unknown chat" }, { status: 404 });
 
@@ -34,6 +35,12 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
 		const body = (await req.json().catch(() => null)) as { input?: unknown } | null;
 		input = parseDismissInput(body?.input ?? null);
 	} catch (err) {
+		if (err instanceof ChatInputError) return Response.json({ error: err.message }, { status: 400 });
+		throw err;
+	}
+
+	try { assertPluginQuestionInputAllowed(chat.messages, input); }
+	catch (err) {
 		if (err instanceof ChatInputError) return Response.json({ error: err.message }, { status: 400 });
 		throw err;
 	}
@@ -51,7 +58,8 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
 
 	let appends;
 	try {
-		appends = dismissAppends(chat, input);
+		appends = input.type === "dismiss-plugin-question"
+			? preparePluginQuestionDismissal(chat, input) : dismissAppends(chat, input);
 	} catch (err) {
 		if (err instanceof ChatInputError) return Response.json({ error: err.message }, { status: 400 });
 		throw err;

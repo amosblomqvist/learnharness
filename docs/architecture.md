@@ -1,6 +1,6 @@
 # LearnHarness architecture
 
-This is the current implementation reference for the released app: a Next.js application with an Electron host, native Pi conversations, adaptive teaching and conversational practice, and a persistent knowledge graph. [Development](development.md) covers setup and commands; [teaching methodology](teaching-methodology.md) covers the pedagogical method. Older design documents and the [archived architecture](archive/architecture-2026-09-08.md) are history, not runtime specifications.
+This is the current implementation reference for LearnHarness (the plugin increments below are implemented and verified on `feature/plugin-architecture`, not released): a Next.js application with an Electron host, native Pi conversations, adaptive teaching and conversational practice, and a persistent knowledge graph. [Development](development.md) covers setup and commands; [teaching methodology](teaching-methodology.md) covers the pedagogical method. Older design documents and the [archived architecture](archive/architecture-2026-09-08.md) are history, not runtime specifications.
 
 ## 1. Code boundaries
 
@@ -88,9 +88,9 @@ The teaching agents share one record but have different prompts and registries (
 | Teacher | `quiz` or `explain`, `ask_user_question`, `plan_init` | Read-only file tools and research/PDF/demo/visual dispatch |
 | Practitioner | `problem`, `conclude` | Read-only file tools, research/PDF dispatch; graph readers when enabled |
 
-The choice/free-recall mechanic selects one graded tool per teaching phase. Tool toggles and availability gates affect the registry; the table is not a promise that every dispatch tool is always enabled. Practice side tools are composed separately, without the teaching toggle filter. Claude-family agents can also receive `send_to_user` for explicit learner-facing output. All ordinary registries pass through argument healing; semantic validation failures return error results so the model can correct the call.
+The builtin choice/free-recall mechanic selects one graded tool per teaching phase. Tool toggles and availability gates affect the registry; the table is not a promise that every dispatch tool is always enabled. Practice side tools are composed separately, without the teaching toggle filter. Claude-family agents can also receive `send_to_user` for explicit learner-facing output. All ordinary registries pass through argument healing; semantic validation failures return error results so the model can correct the call.
 
-**Questions execute on the server but are answered in the browser.** Their execute function validates authoring and returns a synthetic terminating “question posed” result. Clean question poses stop the run, including mixed tool batches; invalid poses leave the model able to retry. The dock deterministically shuffles options, builds the learner's answer (including choice grading via `question-core`) and sends an answer event. Free-recall answers expose the precommitted answer and return to the agent for judgment. These are not server-less tools and not a universal deterministic grading system.
+**Builtin questions execute on the server but are answered in the browser.** Their execute function validates authoring and returns a synthetic terminating “question posed” result. Clean question poses stop the run, including mixed tool batches; invalid poses leave the model able to retry. The dock deterministically shuffles options, builds the learner's answer (including choice grading via `question-core`) and sends an answer event. Free-recall answers expose the precommitted answer and return to the agent for judgment. These are not server-less tools and not a universal deterministic grading system.
 
 Pending calls are record-derived, so reopening an unanswered question needs no new model call. If a model emitted sibling questions, answering one persists its result without starting inference while another remains pending; the last answer starts the reaction turn.
 
@@ -244,6 +244,20 @@ File tools are read-only, but not confined to `data/` or a selected project: rel
 
 Tests use injected engines/ports, fake provider transports and renderer seams rather than requiring real accounts. Useful starting points are `tests/chat-flow.test.ts`, `tests/session-core.test.ts`, `tests/turn-recovery.test.ts`, `tests/job-delivery-recovery.test.ts`, `tests/extraction.test.ts`, `tests/notes-import-route.test.ts`, `tests/practice-flow.test.ts`, `tests/prompt-overrides.test.ts` and `tests/golden-fixtures.test.ts`. Local fixture/loopback tests establish their exercised behavior, not real model quality, account entitlements or cross-process durability. Commands and runtime-gate prerequisites live in [development](development.md#checks).
 
+The bounded-question host increment, implemented and verified on `feature/plugin-architecture` but not released, passed the [3,778-test verification checkpoint](plugin-architecture.md#plugin-question-verification-checkpoint--2026-11-02), strict packaged SDK, isolated production/privacy audit and the exercised packaged-browser flows; these results do not establish every interaction or actual OS microphone/IME behavior.
+
+The later [native session-extension increment](plugin-session-extension-contract.md)
+(submission interception, explicit learner images and session-body surfaces) is
+**implemented and verified on `feature/plugin-architecture`, not released**, at its separate
+[3,869-test / 564-suite checkpoint](plugin-architecture.md#native-session-extension-verification-checkpoint--2026-11-02).
+Whole-project TypeScript, lint (zero errors, existing head warning only), strict external
+SDK, isolated Next/standalone build and privacy/source-byte audits passed. The packaged
+Electron-Node/Chrome scenario passed 23 assertion groups with zero page errors, blocked
+external requests or unexpected HTTP responses; see the checkpoint for exercised proofs
+and limits. Historical question/Markdown/interaction results remain separate evidence.
+
+Unresolved browser follow-up: a trusted wheel over native prose at point 5 had `defaultPrevented: false` but left transcript scroll at `2769`, while blank-margin wheel moved and folded; cause and preexisting-versus-question-state causality remain unestablished, with no intentional wheel surface identified.
+
 ## 11. Trusted local plugins (API v1)
 
 The [plugin architecture](plugin-architecture.md) specifies the runtime and [authoring guide](plugin-authoring.md) documents its public contract. Plugins are optional, disabled by default, and trusted like other local programs: no sandbox or permission fiction. Bundled and externally installed packages use the same context API. A package under `data/plugins/<id>/` has a manifest, optional browser ES module and Node backend, optional CSS/assets, and persistent `data/` of its own. The backend runs inside the existing Next Node server; disable is cooperative.
@@ -256,11 +270,81 @@ Supported services are thin read-only access to all learning records, configured
 
 Backend contributions append instructions and native Pi tools to the existing prober/teacher/practice registries, with per-turn factories and package-level failure isolation. Frontend fenced-block and tool-result renderers mount through the same HTMLElement/cleanup model; built-in presentations retain precedence, and missing or failing renderers leave readable raw fallbacks. This does not introduce a new learner-answer protocol.
 
+The [approved bounded question-v1 contract](plugin-question-contract.md) adds backend `registerQuestionType` and owner-scoped frontend `registerQuestionRenderer`, with actual types in `src/core/plugin-questions.ts`; the implementation passed the [3,778-test question checkpoint](plugin-architecture.md#plugin-question-verification-checkpoint--2026-11-02) and is implemented and verified on `feature/plugin-architecture`, not released; `792671e` remains a historical migration checkpoint. Optional explicit probe/teach variants enroll only their respective teaching roles; required `showThinking` is host policy. Host-generated native parameters are common `{ question, payload }` plus teach `{ type, nodeId }`, preserving predict/check positioning. Saved schemas, required historical refinements and exact canonical occurrence identity—not current tool-name lookup or reused call IDs—govern answer authority. Editors become actionable only after canonical persistence/adoption and terminal reconciliation; the host saves genuine results before ordinary continuation and blocks stale/duplicate/legacy bypasses. Failed/live/unavailable attempts have safe common-question fallback, never generic raw-payload traces. This remains a presentation boundary, not a sandbox.
+
+Question renderers own only optional question/answered content and the required controlled editor. Atomic empty/unready/ready state preserves finite JSON, falsy values and verbatim strings. Exact contract-version support, explicit incompatible-version quiet cancellation and unavailable/pending fallback replace automatic migrations; unknown versions alone never cancel. Stats/microphone/model/model-thinking and host Thinking/ReadingThinking rules stay host-owned, with explicit Thinking-off `appendTranscript` opt-in or visible disabled microphone—no hidden composer. Narrow editing-key/focus integration remains within the host keyboard contract. Folding/adoption/remounts preserve drafts in the existing in-memory session model, but model-destroying navigation/reload/restart do not promise draft persistence; posed questions/accepted answers are durable. V1 returns valid answers to the ordinary teacher, with no assessment/node hook or grading stage; separate existing tools remain available. Builtins and grading are unchanged, with no generic pending-input/form/field SDK, global chat migration or product resumption. The historical 3,681-test Markdown checkpoint remains separate from the question verification record.
+
+### Native session extensions — implemented and verified
+
+The [native session-extension contract](plugin-session-extension-contract.md) is normative;
+**implemented and verified on `feature/plugin-architecture`, not released**. The human
+separately authorized committing all changes and preparing the branch for a human-performed
+push, not an agent push or release. Public definitions are in
+`src/core/plugin-submissions.ts`, `src/core/plugin-ui.ts` and the frontend context. Frontend
+`registerSubmissionInterceptor`/`refreshSubmissions` prepare raw learner text, practice
+thinking, builtin answers and plugin JSON answers. Hooks run serially with finite integer
+priority (default 0, high-first, plugin-ID/interceptor-ID ties). Input/context/history are
+detached, recursively readonly and frozen; history is the browser's native snapshot,
+possibly streamed/not durable, not canonical persisted history. Targets preserve exact
+occurrence/view identity and expose an opaque `surfaceTarget`, also available on native
+session top-bar action context. Hooks cannot author routing/grading identity. Builtin
+transformed fields receive strict mode/choice/channel validation and existing host
+regrading against the captured rendered/shuffled question; plugin saved-schema/refinement
+and occurrence authority remains unchanged. Pending plugin input may start builtin
+preparation before native fields are filled, but cannot bypass final validity or plugin
+question editor readiness.
+
+Preparation reserves before awaits, finalizes dictation for the original target and
+rechecks target/plugin/model ownership rather than retargeting. **Preparing submission…**
+with pre-POST **Cancel** and native error reporting retain drafts and fence late hook
+results; failures are fail-closed. `onAccepted` is live/best-effort API acknowledgment,
+including successful memory-only parked steers, not durable history, replay, model success
+or exactly-once delivery. Refusal/lost acknowledgment never authorizes clearing pending
+plugin material. Model retries reuse accepted stored/transformed input; busy retries and
+steer-to-send fallback reuse a single preparation without rerunning hooks. The lease ends
+on acknowledgment/refusal, not model stream completion.
+
+Only explicit native inline `{ type: "image", data: <base64>, mimeType }` blocks are
+images; `.png` paths remain paths. Image-only and separate answer/thinking/reading channels
+use additive transport/storage fields, existing image processing and actual-engine
+capability/resize checks with strict async occurrence/model guards. Accepted normalized
+bytes reach both native model content and host baseline figures in their matching UI
+containers, outside plugin-owned question/answer slots, never metadata alone. Processing
+or explicitly text-only-model refusal retains input; no image-omitted fallback is added.
+Instant optimistic previews remain. To avoid raw-preview/normalized-canonical duplication,
+the host defers transcript adoption during the owning image-bearing POST, discards deferred
+snapshots and makes a fresh canonical read when delivery resolves—including refusal or
+lost acknowledgment. Failure/ownership loss retires only that attempt's provisional images,
+preserving drafts/plugin pending data without inferring acceptance callbacks. This bounded
+policy was human-approved and is covered by eleven permanent causal regressions.
+
+`ctx.ui.openSurface(target, { title, content, onClose? }, { signal })` uses existing content
+mounts/update/dispose and `view` interaction scopes. Its opaque token expires with one
+mounted teaching/practice view; returning to the same session ID cannot revive it. Live
+unknown/expired targets throw `Surface target is no longer active`; aborted signals are
+inert and late mounts/cleanup are fenced. Surfaces cover the **whole body including
+inputs, not top bar/sidebar**, using a body-bounded blurred backdrop and slim title/Close-X
+header. Covered native/plugin bodies stay mounted and painted; stacked entries are visual
+siblings, not automatic lifetime owners. Lower-owner unload/disposal never removes another
+owner's foreground surface or Settings merely painted above it. Navigation/caller abort/
+plugin unload/dispose tear down only their scopes. Existing one-Escape, eligible focus
+entry/return and covered-input action guards apply without app-wide modal hiding, scroll
+lock or focus trap. Additional regions, navigation suspension and broader message/card/
+composer slots remain deferred, as do backend submission hooks, generic native send/agent
+hooks, image pickers/path inference/asset stores and generic rich-transcript renderers.
+See the [plugin architecture](plugin-architecture.md#native-session-extensions--implemented-and-verified)
+and [authoring guide](plugin-authoring.md#native-session-extensions--implemented-and-verified)
+for details. This increment does not resume either paused product implementation.
+
+### Existing worker and controlled-UI services
+
 The result-oriented `ctx.workers` service complements managed conversations: immutable accepted input, explicit model/purpose and turn budget, schema/semantic validation through a native terminal submission tool, and one durable accepted result. Unfinished tasks become interrupted on disable/restart; they are never automatically replayed. `createBackgroundTool` binds a worker to the existing acknowledgement-now/result-steer-later job pipeline. Task outcomes and delivery state remain distinct. Host admission (§5) includes all detached tasks in the shared request pool and projects standalone tasks into the existing Background agents panel (plugin name · worker definition ID; elapsed/activity/model/usage when available, no invented session link; END cancels computing work). A linked background-tool host job suppresses a duplicate standalone row. No automatic retry, new history screen or public agent framework is added.
 
 The additive API v1 `ctx.ui.mountKnowledgePicker(container, { value, onChange, disabled? }, { signal })` keeps controlled node IDs (`value: readonly string[]`) and the standard update/dispose handle. Plugins own bubble placement, selection and persistence; the host writes no plugin state. The exact `NodePickerControl` and real `ChainTableOverlay` supply Pick nodes/count/Clear (`[]`), immediate checkbox updates and retained controlled IDs. The new plugin picker is a **full-window modal** with the existing translucent/blurred Chains appearance; its background, including the sidebar, is inactive. Core Graph/Practice Chains remain nonmodal content-column views with unchanged bounds and sidebar interaction. The host supplies canonical graph/source organization, lazy first-open loading, focus/portals and abort cleanup. User-driven source rename, folder creation and drag organization remain available, while practice-picker management Delete remains absent. Backend learning-data APIs stay read-only; no programmable core writes or deck/library-tree API is added. Deck state, membership, limits and persistence remain plugin-owned.
 
-Ordinary plugin views, plugin Settings and public `ctx.ui.openDialog` content use the same picker API and lifetime contract. Launching parents stay mounted, painted and visible underneath, preserving state/scroll while inert—not hidden. Done/X and unconsumed selector-owned Escape close only the picker and restore eligible focus. New public dialogs/menus foreground normally. Fresh Settings opens above a picker without discarding it; return-to existing Settings follows the shared guarded rules in §12. A shared-controller exclusive opening slot allows one selector through normal close guards, retaining controlled IDs when a previous selector closes. Newer UI openings/retargets invalidate older pending graph loads so they cannot promote stale UI. The provisional picker-only hiding/coordinator and unconditional Settings-cancels-picker rules are superseded. Historical admission/ordinary-picker checkpoints remain distinct from the completed [3,665-test final interaction verification](plugin-architecture.md#shared-interaction-final-verification--2026-11-02).
+Ordinary plugin views, plugin Settings and public `ctx.ui.openDialog` content use the same picker API and lifetime contract. Launching parents stay mounted, painted and visible underneath, preserving state/scroll while inert—not hidden. Done/X and unconsumed selector-owned Escape close only the picker and restore eligible focus. New public dialogs/menus foreground normally. Fresh Settings opens above a picker without discarding it; return-to existing Settings follows the shared guarded rules in §12. A shared-controller exclusive opening slot allows one selector through normal close guards, retaining controlled IDs when a previous selector closes. Newer UI openings/retargets invalidate older pending graph loads so they cannot promote stale UI. The provisional picker-only hiding/coordinator and unconditional Settings-cancels-picker rules are superseded. Historical admission/ordinary-picker checkpoints remain distinct from the completed [historical 3,665-test interaction verification](plugin-architecture.md#historical-shared-interaction-final-verification--2026-11-02).
+
+The additive API v1 `ctx.ui.mountMarkdown(container, props, { signal }): PluginWidgetHandle<PluginMarkdownProps>` uses `PluginMarkdownProps { text: string }`, standard update/dispose and existing per-mount signals. Private `HostMarkdown` reuses the actual shared host Markdown/math/highlighted-code/tables/callout/Mermaid/images/typography pipeline for complete static content. Only built-ins run, not registered plugin code-block renderers. Auxiliary copy/download/retry/expand/zoom/disclosure controls are omitted; ordinary links retain host-native new-tab behavior (`target="_blank"`, `rel="noopener noreferrer"`) without an extra confirmation modal. Invalid Mermaid shows the existing error heading/message and source directly, without retry/details. Plugins own content/data/layout; no storage, inference, React import, dependency or API-version bump is added. This generic static renderer can serve content such as card fronts/backs without inventing worker results. The implementation passed [3,681-test final Markdown verification](plugin-architecture.md#static-markdown-final-verification--2026-11-02), including strict SDK and actual packaged-browser checks; checkpoint `792671e`'s 3,665-test interaction results remain historical, not proof of this later API.
 
 Bundled updates run before activation with a durable recovery journal and manifest-last replacement. A failed package is blocked while unrelated plugins remain usable; corrupt shared ownership metadata is refused. Updates never replace plugin `data/`. Source-free payload smoke checks cover a post-build installed backend, browser ESM/relative assets, UI enable/disable/remount, and disabled asset denial. See `scripts/smoke-server.mjs --isolated --browser` (optionally `--electron`).
 
@@ -270,4 +354,4 @@ The [human-approved dialog, popup and interaction contract](dialog-overlay-contr
 
 Each physical Escape has one snapshotted original owner, with leaf handlers first; closing, handled or blocked outcomes cannot cascade to another layer or fallback action. Tooltips are passive help, not Escape owners; their modal-owned portals preserve visibility without intercepting the active field/menu/dialog's Escape. Native Tab/Shift+Tab navigation and primitive focus looping stay disabled; existing explicit field-cycle/question/thinking/rebinding actions remain scoped to eligible controls. Preserve explicit initial focus, otherwise choose the first eligible editable field or heading, not an action button. Child close restores eligible invoking focus or the active surface's initial-focus policy. Settings field Escape follows validated blur/save without closing Settings and retains unsuccessful drafts; credential Save and rename cancellation retain their distinct workflows. Busy deletion consumes dismissal without closing. Acknowledged full settings snapshots stay authoritative across close/reopen: older responses and Settings/startup appearance GETs cannot roll back a newer save. The newest full snapshot applies its appearance slice regardless of the section written, and a pending save finishing after reopen updates the current instance; fresh loads still read the server normally.
 
-Settings remains one instance. A fresh open nests above the current surface. Returning to an existing instance requests intervening closures top-down through normal callbacks, once each, stopping on blocked, handled-without-closing or pending outcomes. There is no forced cancellation or queued surprise navigation; retarget/deep-link only after return-to succeeds. Paint order does not determine lifetime ownership. The [final verification record](plugin-architecture.md#shared-interaction-final-verification--2026-11-02) reports 3,665 passing tests, strict SDK compilation and isolated packaged-browser/privacy gates; the contract specifies the preservation and interaction matrix.
+Settings remains one instance. A fresh open nests above the current surface. Returning to an existing instance requests intervening closures top-down through normal callbacks, once each, stopping on blocked, handled-without-closing or pending outcomes. There is no forced cancellation or queued surprise navigation; retarget/deep-link only after return-to succeeds. Paint order does not determine lifetime ownership. The [historical interaction verification record](plugin-architecture.md#historical-shared-interaction-final-verification--2026-11-02) reports 3,665 passing tests, strict SDK compilation and isolated packaged-browser/privacy gates, not verification of the later static Markdown API; the contract specifies the preservation and interaction matrix.

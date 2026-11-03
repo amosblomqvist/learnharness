@@ -69,9 +69,12 @@ function sseResponse(...events: unknown[]): Response {
 function dietFetch(opts: {
 	stream: () => Response;
 	userText?: string;
+	/** Canonical truth returned by the explicit post-terminal GET. */
+	settledMessages?: LhMessage[];
 	post?: () => Response;
 	onPost?: (body: string) => void;
 }): typeof globalThis.fetch {
+	let attached = false;
 	return (async (input: RequestInfo | URL, init?: RequestInit) => {
 		const url = String(input);
 		if (url === "/api/chat") {
@@ -81,9 +84,9 @@ function dietFetch(opts: {
 		if (url === "/api/chats/chat_x") {
 			const messages =
 				opts.userText === undefined ? [] : [{ id: "u1", role: "user", content: opts.userText, timestamp: 1 }];
-			return Response.json({ messages });
+			return Response.json({ messages: attached && opts.settledMessages ? [...messages, ...opts.settledMessages] : messages });
 		}
-		if (url === "/api/chats/chat_x/stream") return opts.stream();
+		if (url === "/api/chats/chat_x/stream") { attached = true; return opts.stream(); }
 		throw new Error(`unexpected fetch: ${url}`);
 	}) as typeof globalThis.fetch;
 }
@@ -236,6 +239,7 @@ describe("send (one input event, verbatim consumption)", () => {
 		globalThis.fetch = dietFetch({
 			onPost: (b) => posts.push(b),
 			userText: "my topic", // the write-ahead the record refetch absorbs
+			settledMessages: [assistantMsg("saved-reply", "hello there")],
 			stream: () =>
 				sseResponse(
 					{ type: "agent_start" },
@@ -277,7 +281,7 @@ describe("send (one input event, verbatim consumption)", () => {
 				push = (e) => controller.enqueue(enc.encode(e === "[DONE]" ? "data: [DONE]\n\n" : `data: ${JSON.stringify(e)}\n\n`));
 			},
 		});
-		globalThis.fetch = dietFetch({ userText: "go", stream: () => new Response(body, { status: 200 }) });
+		globalThis.fetch = dietFetch({ userText: "go", settledMessages: [{ ...assistantMsg("saved-reply", "Hello world"), content: [{ type: "thinking", thinking: "hmm" }, { type: "text", text: "Hello world" }] } as LhMessage], stream: () => new Response(body, { status: 200 }) });
 		const m = model();
 		const done = m.send({ type: "text", text: "go" });
 		const settle = () => new Promise((r) => setTimeout(r, 0));
@@ -299,12 +303,14 @@ describe("send (one input event, verbatim consumption)", () => {
 		assert.match(idMid ?? "", /^c_/, "client-minted slot id");
 
 		push({ type: "message_end", message: { role: "assistant", content: [{ type: "thinking", thinking: "hmm" }, { type: "text", text: "Hello world" }], stopReason: "stop" } });
+		await settle();
+		assert.equal(m.getState().nativeMessages.at(-1)?.id, idMid, "same live slot through message_end, before canonical adoption");
 		push({ type: "agent_end", messages: [] });
 		push("[DONE]");
 		await done;
 		const final = m.getState().nativeMessages.filter((x) => (x as { role?: string }).role === "assistant");
 		assert.equal(final.length, 1);
-		assert.equal((final[0] as { id?: string }).id, idMid, "same slot through message_end");
+		assert.equal((final[0] as { id?: string }).id, "saved-reply", "terminal GET replaces the live slot with the canonical server id");
 	});
 
 	it("a 503 refusal surfaces the RAW body text (parseModelsRefusal's contract)", async () => {
@@ -468,6 +474,7 @@ it("Wave C: markers injected mid-run (custom role, follow-up delivery) append to
 	it("a provider error rides VERBATIM (owner ruling) — no masking anywhere", async () => {
 		globalThis.fetch = dietFetch({
 			userText: "q",
+			settledMessages: [{ ...assistantMsg("saved-error", ""), stopReason: "error", errorMessage: "OpenRouter 429: rate limited" } as LhMessage],
 			stream: () =>
 				sseResponse(
 					partial([{ type: "text", text: "" }]),
@@ -583,16 +590,18 @@ describe("provider-error banner (live and saved)", () => {
 			const ack = new Promise<Response>((resolve) => { acknowledge = resolve; });
 			const old = failed("old", "old failure");
 			const fresh = failed("fresh", "new failure");
+			let settled = false;
 			let finish!: () => void;
 			const stream = new ReadableStream<Uint8Array>({ start(controller) {
 				finish = () => {
+					settled = true;
 					controller.enqueue(new TextEncoder().encode(sse("[DONE]")));
 					controller.close();
 				};
 			} });
 			const m = model({ initialMessages: [old], fetch: async (url) => {
 				if (url === "/api/chat") return ack;
-				if (url === "/api/chats/chat_x") return Response.json({ messages: [old] });
+				if (url === "/api/chats/chat_x") return Response.json({ messages: settled ? [old, fresh] : [old] });
 				if (url === "/api/chats/chat_x/stream") return new Response(stream);
 				throw new Error(`unexpected fetch: ${url}`);
 			} });
@@ -713,7 +722,7 @@ describe("truncated stream recovery", () => {
 
 	it("reattaches once after EOF without DONE and replaces the incomplete replay", async () => {
 		let streams = 0;
-		const m = model({ fetch: dietFetch({ userText: "go", stream: () => ++streams === 1 ? truncated() : completed() }) });
+		const m = model({ fetch: dietFetch({ userText: "go", settledMessages: [assistantMsg("saved-complete", "complete")], stream: () => ++streams === 1 ? truncated() : completed() }) });
 		await m.send({ type: "text", text: "go" });
 		assert.equal(streams, 2);
 		assert.equal(m.status, "ready");
@@ -819,7 +828,7 @@ describe("truncated stream recovery", () => {
 		let closeFirst!: () => void;
 		let beganReading!: () => void;
 		const reading = new Promise<void>(resolve => { beganReading = resolve; });
-		const m = model({ fetch: dietFetch({ stream: () => ++streams === 1 ? new Response(new ReadableStream({
+		const m = model({ fetch: dietFetch({ settledMessages: [assistantMsg("saved-complete", "complete")], stream: () => ++streams === 1 ? new Response(new ReadableStream({
 			start(controller) { closeFirst = () => controller.close(); },
 			pull() { beganReading(); },
 		}, { highWaterMark: 0 })) : completed() }) });
@@ -954,7 +963,7 @@ describe("answer submission recovery", () => {
 		} });
 		await m.submitAnswer("quiz", "q1", answer);
 		await m.submitAnswer("quiz", "q1", answer);
-		assert.deepEqual(calls, ["/api/chat", "/api/chats/chat_x", "/api/chats/chat_x/stream"]);
+		assert.deepEqual(calls, ["/api/chat", "/api/chats/chat_x", "/api/chats/chat_x/stream", "/api/chats/chat_x"]);
 		assert.equal(m.status, "ready");
 	});
 
@@ -1145,14 +1154,14 @@ describe("resumeStream (the reattach path)", () => {
 		globalThis.fetch = (async (input: RequestInfo | URL) => {
 			const url = String(input);
 			urls.push(url);
-			if (url === "/api/chats/chat_x") return Response.json({ messages: [] });
+			if (url === "/api/chats/chat_x") return Response.json({ messages: urls.length > 1 ? [assistantMsg("saved-hi", "hi")] : [] });
 			if (url === "/api/chats/chat_x/stream")
 				return dripped(sse({ type: "message_start", message: { role: "assistant", content: [{ type: "text", text: "hi" }] } }, "[DONE]"), 8);
 			throw new Error(`unexpected fetch: ${url}`);
 		}) as typeof globalThis.fetch;
 		const m = model();
 		await m.resumeStream();
-		assert.deepEqual(urls, ["/api/chats/chat_x", "/api/chats/chat_x/stream"]);
+		assert.deepEqual(urls, ["/api/chats/chat_x", "/api/chats/chat_x/stream", "/api/chats/chat_x"]);
 		assert.equal(m.getState().status, "ready");
 	});
 
@@ -1161,6 +1170,7 @@ describe("resumeStream (the reattach path)", () => {
 		globalThis.fetch = (async (input: RequestInfo | URL) => {
 			const url = String(input);
 			urls.push(url);
+			if (url === "/api/chats/chat_x") return Response.json({ messages: [assistantMsg("saved-hi", "hi")] });
 			if (url === "/api/chats/chat_x/stream")
 				return sseResponse(
 					{ type: "message_start", message: { role: "assistant", content: [{ type: "text", text: "hi" }] } },
@@ -1172,9 +1182,9 @@ describe("resumeStream (the reattach path)", () => {
 		}) as typeof globalThis.fetch;
 		const m = model();
 		await m.resumeStream(false);
-		// one round-trip: straight to the stream — the page render already
-		// read the record; the replay rebuilds the partial regardless.
-		assert.deepEqual(urls, ["/api/chats/chat_x/stream"]);
+		// Still attach FIRST: no blocking canonical GET before replay. The
+		// newly required GET occurs only after the explicit terminal marker.
+		assert.deepEqual(urls, ["/api/chats/chat_x/stream", "/api/chats/chat_x"]);
 		assert.equal(m.getState().status, "ready");
 		// the mid-session caller (handoff watch) keeps the default refetch
 		// (the earlier test in this block pins that order).
@@ -1372,16 +1382,22 @@ describe("resumeStream (the reattach path)", () => {
 		// turn continues with its OWN assistant message — the view groups
 		// them as one document with a step separator (pixel-identical to a
 		// live continuation; the settle sync lands the canon).
+		let attached = false;
 		globalThis.fetch = (async (input: RequestInfo | URL) => {
 			const url = String(input);
-			if (url === "/api/chats/chat_x") return Response.json({ messages: [assistantMsg("seed", "the question")] });
-			if (url === "/api/chats/chat_x/stream")
+			if (url === "/api/chats/chat_x") {
+				if (attached) assert.deepEqual(m.getState().messages[0]!.parts.map(p => p.type), ["step-start", "text", "step-start", "text"], "wire continuation already renders beside the seed before canonical adoption");
+				return Response.json({ messages: [assistantMsg("seed", "the question"), ...(attached ? [assistantMsg("saved-reaction", "the reaction")] : [])] });
+			}
+			if (url === "/api/chats/chat_x/stream") {
+				attached = true;
 				return sseResponse(
 					{ type: "message_start", message: { role: "assistant", content: [{ type: "text", text: "the reaction" }] } },
 					{ type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "the reaction" }], stopReason: "stop" } },
 					{ type: "agent_end", messages: [] },
 					"[DONE]",
 				);
+			}
 			throw new Error(`unexpected fetch: ${url}`);
 		}) as typeof globalThis.fetch;
 		const m = model({ initialMessages: [assistantMsg("seed", "the question")] });
@@ -1396,9 +1412,14 @@ describe("resumeStream (the reattach path)", () => {
 	});
 
 	it("survives a body split byte-by-byte across reads (the framing pin)", async () => {
+		let reads = 0;
 		globalThis.fetch = (async (input: RequestInfo | URL) => {
 			const url = String(input);
-			if (url === "/api/chats/chat_x") return Response.json({ messages: [] });
+			if (url === "/api/chats/chat_x") {
+				if (++reads === 1) return Response.json({ messages: [] });
+				assert.equal(m.getState().messages.at(-1)!.parts.at(-1)!.text, "hi", "byte-split wire text was decoded before canonical GET");
+				return Response.json({ messages: [assistantMsg("saved-hi", "hi")] });
+			}
 			if (url === "/api/chats/chat_x/stream")
 				return dripped(
 					sse(

@@ -40,6 +40,7 @@ import {
 	type SelectMode,
 	type Phase3,
 } from "@/src/core";
+import type { PrepareBuiltinSubmission } from "./plugin-submission-adapters";
 import { CONFIDENCE_COLORS, confidenceRailStyle } from "@/components/confidence-rail";
 
 /**
@@ -77,6 +78,9 @@ export interface QuestionDockProps {
 	reveal?: boolean;
 	onExpand: () => void;
 	onSubmit: (output: QuestionAnswerData) => void;
+	onPrepareSubmission?: PrepareBuiltinSubmission;
+	hasPendingInput?: (question: QuestionData) => boolean;
+	preparing?: boolean;
 	/** Restore only this call's unconfirmed submission after recovery. */
 	initialDraft?: QuestionFormDraft;
 	onSaveDraft?: (draft: QuestionFormDraft) => void;
@@ -109,6 +113,9 @@ export function QuestionDock({
 	reveal = false,
 	onExpand,
 	onSubmit,
+	onPrepareSubmission,
+	hasPendingInput,
+	preparing,
 	initialDraft,
 	onSaveDraft,
 	onEscape,
@@ -132,8 +139,8 @@ export function QuestionDock({
 	// bridge), so this is pure defense in depth — but it is STRUCTURAL now:
 	// anything that slips through renders the quiet fallback, never a
 	// crash on `.map` over model-authored bytes.
-	const parsed =
-		canonical === "quiz" ? parseQuizInput(input) : canonical === "explain" ? parseExplainInput(input) : parseAskInput(input);
+	const parsed = useMemo(() =>
+		canonical === "quiz" ? parseQuizInput(input) : canonical === "explain" ? parseExplainInput(input) : parseAskInput(input), [canonical, input]);
 	if (!parsed) {
 		return <MalformedQuestion />;
 	}
@@ -162,6 +169,9 @@ export function QuestionDock({
 					phase={phase}
 					active={expanded}
 					onSubmit={onSubmit}
+					onPrepareSubmission={onPrepareSubmission}
+					hasPendingInput={hasPendingInput}
+					preparing={preparing}
 					initialDraft={initialDraft}
 					onSaveDraft={onSaveDraft}
 					onEscape={onEscape}
@@ -259,6 +269,9 @@ function QuestionDockForm({
 	phase = "probe",
 	active,
 	onSubmit,
+	onPrepareSubmission,
+	hasPendingInput,
+	preparing,
 	initialDraft,
 	onSaveDraft,
 	onEscape,
@@ -372,13 +385,22 @@ function QuestionDockForm({
 
 	const toggle = (idx: number) => setSel(toggleOption(selectMode, sel, idx));
 
-	const canSubmit =
+	const nativeCanSubmit =
 		qd.mode === "text"
 			? text.trim().length > 0
 			: sel.dontKnow || (sel.otherSelected && other.trim().length > 0) || sel.selected.size > 0;
 
+	const canSubmit = nativeCanSubmit || hasPendingInput?.(qd) === true;
+	const currentQuestion = useRef(qd); currentQuestion.current = qd;
+	const mounted = useRef(true);
+	useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
+	const formValues = useRef({ sel, other, confIdx }); formValues.current = { sel, other, confIdx };
 	const submit = () => {
-		if (!canSubmit || compactionRunning) return;
+		if (!canSubmit || compactionRunning || preparing) return;
+		if (onPrepareSubmission) {
+			onPrepareSubmission({ question: qd, isCurrent: () => mounted.current && currentQuestion.current === qd && isInteractionScopeEligible(rootRef.current, controller), capture: captureRequest });
+			return;
+		}
 		/* FINISH DICTATION FIRST (owner, 2026-10-01): Enter may arrive while
 		 * a run is live with reasoning still in Deepgram's hands. Stop the
 		 * run, let the last finals land in the target field, and only then
@@ -391,8 +413,8 @@ function QuestionDockForm({
 		}
 		void finishDictation().then(doSubmit);
 	};
-	const doSubmit = () => {
-		if (!canSubmit) return;
+	const captureRequest = (): AnswerRequest => {
+		const { sel, other, confIdx } = formValues.current;
 		const req: AnswerRequest = {
 			dontKnow: sel.dontKnow,
 			values: [...sel.selected].map((i) => qd.options[i]!.value),
@@ -412,7 +434,11 @@ function QuestionDockForm({
 			text: answerTextRef.current,
 			confidenceIndex: confIdx,
 		});
-		onSubmit(buildAnswer(qd, req, toolName));
+		return req;
+	};
+	const doSubmit = () => {
+		if (!canSubmit) return;
+		onSubmit(buildAnswer(qd, captureRequest(), toolName));
 	};
 
 	/* ENTER SUBMITS FROM ANYWHERE (owner round 6, 2026-10-05): the same
@@ -929,7 +955,7 @@ function QuestionDockForm({
 						</span>
 						<Button
 							type="submit"
-							disabled={!canSubmit || compactionRunning}
+							disabled={!canSubmit || compactionRunning || preparing}
 							className="ml-auto h-9 rounded-[6px] px-3.5 text-sm font-medium"
 						>
 							Submit answer

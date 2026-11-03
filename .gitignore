@@ -4,7 +4,11 @@ data/
 *.log
 .DS_Store
 *.tsbuildinfo
-.env.local
+# Local environment secrets; example templates may be committed.
+.env
+.env.*
+!.env.example
+!.env.*.example
 .memory/
 SCOPE.md
 # raw real-data import sources (user directive 2026-09-13: never commit)

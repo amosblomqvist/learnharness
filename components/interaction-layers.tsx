@@ -5,6 +5,8 @@ import {
 	useSyncExternalStore, type ReactNode, type RefObject,
 } from "react";
 
+import { capturePluginQuestionKey, pluginQuestionKeySuppressed } from "./plugin-question-keys";
+
 export type LayerKind = "modal" | "popup" | "view";
 export type CloseReason = "escape" | "backdrop" | "outside" | "return-to" | "action" | "dismiss";
 export type CloseOutcome = "closed" | "blocked" | "handled-without-close" | "pending";
@@ -15,7 +17,8 @@ export interface InteractionLayer {
 	ownerId?: LayerId | null;
 	rootRef: RefObject<HTMLElement | null>;
 	onClose?: (reason: CloseReason) => CloseOutcome | void;
-	/** Modal-owned popup container, outside the visual/clipping frame. */
+	/** Owned popup container outside the visual/clipping frame. Views opt in;
+	 * native views without a portalRef retain their existing body portals. */
 	portalRef?: RefObject<HTMLElement | null>;
 	/** Popup origin, for its own explicit thinking/model shortcut only. */
 	anchorRef?: RefObject<HTMLElement | null>;
@@ -319,14 +322,16 @@ export function createInteractionLayers() {
 			const seen = new Set<LayerId>();
 			while (owner && !seen.has(owner.id)) {
 				if (owner.kind === "modal") return owner.portalRef?.current ?? owner.rootRef.current;
+				if (owner.kind === "view" && owner.portalRef?.current) return owner.portalRef.current;
 				seen.add(owner.id);
 				owner = owner.ownerId ? get(owner.ownerId) : undefined;
 			}
 			return anchor?.ownerDocument.body ?? (typeof document === "undefined" ? null : document.body);
 		},
 		captureKeyDown(event: KeyboardEvent) {
-			if (event.key === "Tab") event.preventDefault();
 			if (event.key === "Escape") snapshotEscape(event);
+			capturePluginQuestionKey(event);
+			if (event.key === "Tab") event.preventDefault();
 		},
 		getEventOwner(event: KeyEvent): InteractionLayer | null { return snapshotEscape(event).owner; },
 		isEscapeOwned(event: KeyEvent): boolean {
@@ -342,7 +347,7 @@ export function createInteractionLayers() {
 			const snapshot = snapshotEscape(event);
 			if (snapshot.dispatched) return null;
 			snapshot.dispatched = true;
-			if (event.defaultPrevented || snapshot.claimed) return null;
+			if (event.defaultPrevented || snapshot.claimed || pluginQuestionKeySuppressed(event)) return null;
 			if (!snapshot.owner) return null;
 			snapshot.claimed = true;
 			event.preventDefault();

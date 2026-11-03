@@ -20,7 +20,10 @@ standalone server, under the app's resources. It contains these docs, examples, 
 coding-agent skill, and the generated type-only API tree. This is read-only authoring
 material, separate from the writable installed plugins directory.
 
-No npm command is run by LearnHarness. Packages contain built JavaScript. A production
+No npm command is run by LearnHarness. Packages contain built JavaScript. Install the
+**built package contents** with `manifest.json` at the package root and its referenced
+bundles present—not the source project root. Preserve existing plugin `data/` when replacing
+package code. A production
 plugin can use TypeScript, React, and a bundler during authoring; ship the browser
 bundle as an ES module and the Node bundle as CommonJS. Bundle JavaScript libraries;
 leave Node built-ins external in the backend. Native dependency installation/rebuilds
@@ -30,7 +33,11 @@ to existing lessons: a normal native tool, a background-worker tool, and shared 
 The background example may incur model cost, but runs only when explicitly requested.
 
 The exact API contracts are `src/core/plugins.ts`, `src/core/plugin-ui.ts`,
-`src/core/plugin-agents.ts`, and `src/core/plugin-workers.ts`.
+`src/core/plugin-agents.ts`, `src/core/plugin-workers.ts`, `src/core/plugin-questions.ts`,
+and `src/core/plugin-submissions.ts`.
+The [native session-extension contract](plugin-session-extension-contract.md) is normative
+for the session-extension increment, implemented and verified on
+`feature/plugin-architecture`, not released.
 For TypeScript in a checkout, use **type-only** imports from those files. Do not import
 application implementation modules at runtime. `scripts/build-plugin-types.mjs` emits
 a portable declaration tree for authors who do not use a source checkout. Pi native
@@ -154,7 +161,7 @@ sessions: ["teaching"], views: ["library"] })`.
 
 | Placement/surface | Additional fields |
 | --- | --- |
-| `"top-bar"` / `"session"` | `sessionId`, `kind: "teaching" \| "practice"` |
+| `"top-bar"` / `"session"` | `sessionId`, `kind: "teaching" \| "practice"`, opaque `surfaceTarget` |
 | `"top-bar"` / `"plugin-view"` | `pluginId`, `viewId` |
 | `"sidebar"` / `"sidebar"` | none |
 | `"graph"` / `"graph"` | none |
@@ -183,6 +190,7 @@ Callbacks may return Promises; errors are surfaced rather than treated as succes
 | `mountButton(container, props, options)` | `label`, `onClick`; optional `disabled`, `variant`, `size`, `title` |
 | `mountSettingsRows(container, schema, options)` | `{ rows }`, as below |
 | `mountWorkerResult(container, props, options)` | `label`, terminal `status`, `text`, optional `content`, `presentation` |
+| `mountMarkdown(container, props, options)` | `text: string`; static complete Markdown through the actual host pipeline, built-ins only |
 | `openMenu(anchor, props, options)` | `items: [{ key, label, onSelect, disabled? }]`; optional `label`, `preferredSide`, `onClose` |
 | `openDialog(props, options)` | `title`, `content`, optional `onClose` |
 
@@ -219,6 +227,40 @@ actual recording owner; an Escape consumed by a higher layer must not also cance
 Plugin dictation always delivers to its explicit `onTranscript` callback, never
 silently into a core composer/question. The plugin decides where that text goes.
 
+### Static Markdown
+
+The additive API v1 method is
+`ctx.ui.mountMarkdown(container, props, { signal }): PluginWidgetHandle<PluginMarkdownProps>`,
+with `PluginMarkdownProps { text: string }`. It uses the standard `update`/`dispose` handle
+and per-mount signal; no React imports, storage or inference service is involved. The
+implementation passed [final Markdown verification](plugin-architecture.md#static-markdown-final-verification--2026-11-02),
+separate from the historical interaction checkpoint. No API version bump or new dependency
+is required.
+
+For example, inside a view mount:
+
+```js
+const markdown = ctx.ui.mountMarkdown(container, {
+  text: "# Notes\n\nA **complete** explanation with $x^2$."
+}, { signal });
+// On a content change: markdown.update({ text: nextText });
+return () => markdown.dispose();
+```
+
+The plugin owns content, data and surrounding layout. The host renders complete, static
+content through its **actual shared Markdown pipeline**: math, syntax-highlighted code,
+tables, callouts, Mermaid, images and host typography—not a copied renderer. Only built-in
+renderers run; registered plugin code-block renderers do **not** participate in this mount.
+All auxiliary copy, download, retry, expand, zoom and disclosure controls are omitted.
+Ordinary links keep the host's native new-tab behavior (`target="_blank"`,
+`rel="noopener noreferrer"`), with no additional confirmation modal. Invalid Mermaid
+shows the existing error heading/message and source directly, without retry or details UI.
+
+Use this generic content renderer for static bodies such as card fronts/backs; do not
+fabricate a worker result merely to obtain Markdown styling. If a required capability is
+missing, request an explicit host API decision rather than importing private host/React
+components, copying the Markdown pipeline or inventing unsupported props.
+
 ### Knowledge picker
 
 The approved knowledge-picker increment adds
@@ -227,7 +269,7 @@ to API v1, with types in `src/core/plugin-ui.ts` included in the generated type 
 `value` is a `readonly string[]` of selected node IDs; `onChange(ids)` receives the new
 ID array. It returns the standard handle with `update(partialProps)` and `dispose()`.
 The app-wide dialog/interaction foundation and modal picker passed
-[final verification](plugin-architecture.md#shared-interaction-final-verification--2026-11-02).
+[historical interaction verification](plugin-architecture.md#historical-shared-interaction-final-verification--2026-11-02).
 The [dialog and overlay contract](dialog-overlay-contract.md) is authoritative and replaces
 the provisional picker-only foreground/hiding policies.
 
@@ -436,7 +478,9 @@ ctx.registerToolRenderer({
 });
 ```
 
-Fence dispatch applies across shared Markdown surfaces, not just a plugin's own view.
+Fence dispatch applies across shared extensible Markdown surfaces, not just a plugin's
+own view. The static `ctx.ui.mountMarkdown` helper deliberately uses built-ins only and
+does not dispatch registered plugin code-block renderers.
 Tool props carry input, state, details as `output`, and optional native `result` content.
 A separate background-result card additionally sets `background`; it never pretends to
 be a native result replacing the original acknowledgement. Presentation plugins may render
@@ -451,6 +495,415 @@ fall back to readable source/results rather than hiding saved lesson content. Us
 `textContent`, not unsanitized model-generated HTML; bundle chemistry/music libraries in
 normal distributable assets if needed. These hooks do not introduce a new pending
 learner-answer type into the question dock.
+
+## Native plugin questions — bounded v1
+
+The [approved question contract](plugin-question-contract.md) is authoritative; exact
+public names live in `src/core/plugin-questions.ts` and `src/core/plugins.ts`.
+The implementation passed the [3,778-test question verification checkpoint](plugin-architecture.md#plugin-question-verification-checkpoint--2026-11-02)
+and is implemented and verified on `feature/plugin-architecture`, not released.
+Migration checkpoint `792671e` and the historical 3,681-test Markdown checkpoint remain
+separate evidence. Both product implementations remain paused.
+
+This adds question formats to teaching conversations, not a generic pending-input/forms
+SDK. Builtin question behavior and grading stay unchanged. V1 is **teacher-review only**:
+the host saves a valid answer and returns it to the ordinary teacher, without inferring
+correctness. There is no assessment hook/schema/result, node-assessment hook, async grading
+stage or execution service. A plugin that needs separate grading/execution can contribute
+ordinary existing tools; that is not part of question submission. General field-scope,
+extra form/button/dialog-layout catalogues, source metadata and installer extensions remain
+outside this scope. No builtin migration, global chat-format bump or chat migration is added.
+
+### Backend registration and native arguments
+
+`ctx.registerQuestionType(definition): () => void` takes a
+`PluginQuestionTypeDefinition<Q, A>` with:
+
+- `id`: stable local `[A-Za-z0-9_-]` ID, 1–128 characters; `label`: non-whitespace text.
+- `contractVersion`: positive safe integer independent of package version; optional
+  `incompatibleContractVersions` explicitly names other incompatible saved contracts.
+- Required `showThinking: boolean`, `questionSchema` for payload and `answerSchema`.
+- Optional `probe` and `teach`, each `{ toolName, description }`; at least one is required.
+  Names follow native collision rules; descriptions must be non-whitespace. Probe enrolls
+  only the prober, teach only the teacher; no practice enrollment is added.
+- Optional synchronous, side-effect-free `validateQuestion` and `validateAnswer` refinements.
+  Return `undefined` or `[]` to accept, otherwise readable problem strings. Async/thenable
+  validation is rejected. Wrong-but-schema-valid answers are not validation failures.
+
+The host constructs native question tools—there is no question `execute` callback:
+
+```ts
+// Probe: payload is governed by questionSchema.
+{ question: string, payload: Q }
+// Teach: existing predict/check rules; nodeId must be an applicable live plan node.
+{ type: "predict" | "check", nodeId: string, question: string, payload: Q }
+```
+
+Common `question` is required learner-visible Markdown, preserved verbatim but rejecting
+whitespace-only text; it is the durable teaser/fallback, not a guessed payload property.
+`validateQuestion({ chatId, variant, contractVersion, input })` sees normalized immutable
+input. `validateAnswer({ chatId, questionId, variant, contractVersion, input, answer })`
+sees historical input and the submitted answer. Authoring failures use native correction
+feedback without posing a question; answer rejection keeps the question/draft pending.
+The package's ordinary tools, questions and instructions are admitted together through
+one accepted per-turn snapshot; a rejected package contributes none of that turn's loadout.
+
+A minimal text-format definition, inside backend activation:
+
+```js
+return ctx.registerQuestionType({
+  id: "sample-text", label: "Text response", contractVersion: 1,
+  showThinking: false,
+  questionSchema: { type: "object", properties: {}, additionalProperties: false },
+  answerSchema: { type: "string" },
+  teach: { toolName: "sample_text_question", description: "Ask for a text response." }
+});
+```
+
+Schemas must be self-contained persistable JSON supported by the installed TypeBox
+compiler. Local JSON Pointer references retain their meaning under the native payload
+wrapper. External references, `$id`/anchors/dynamic references, runtime-dependent functions
+or RegExp objects, non-JSON extensions and unsupported formats are rejected. Do not
+coerce, trim, clean or truthiness-filter answers. Finite JSON preserves raw strings and
+values such as `0`, `false`, `null`, `""` and arrays exactly when the schema allows them.
+
+### Owner-scoped question/editor slots
+
+Frontend `ctx.registerQuestionRenderer(renderer): () => void` accepts
+`PluginQuestionRenderer<Q, A>` keyed by the **owning plugin** and backend `id`:
+`{ id, supportedContractVersions, mountQuestion?, mountAnswerEditor, mountAnswered? }`.
+These are host question-card slots, not generic tool renderers or cross-plugin claims.
+Presentation mounts return optional cleanup (possibly asynchronously); the editor returns
+its handle, synchronously or asynchronously. `mountQuestion` defaults to host Markdown for the saved common question; `mountAnswered`
+defaults to readable accepted learner-answer presentation. Host ThinkingBlocks stay
+outside custom answered content. Cancellation always has host fallback presentation.
+
+Every slot receives immutable `input`, `chatId`, stable `questionId`, historical
+`contractVersion`, `variant` and `signal`. `mountAnswered` additionally receives accepted
+plugin `answer`; `mountAnswerEditor` receives `PluginQuestionEditorProps` with `active`,
+controlled `answer` and synchronous `onChange(state)`. Its atomic
+`PluginQuestionAnswerState` is exactly:
+
+```ts
+{ status: "empty" } // no retained value
+// or
+{ status: "unready" | "ready", value: JsonValue }
+```
+
+A current editor handle must publish ready before submission is possible. `empty` discards
+its value; use `unready` to retain incomplete/whitespace drafts. Ready may contain falsy or
+empty values; drafts need not yet pass the saved answer schema, accepted answers must.
+The `PluginQuestionEditorHandle` has `update({ answer, active })`, `focus()`, `dispose()`,
+optional `handleKeyDown(key): "handled" | "pass"` and optional
+`appendTranscript(text): void | Promise<void>`. Update never echoes `onChange`; identical
+updates preserve selection/composition. `PluginQuestionEditorKey` is exactly
+`"Tab" | "Enter" | "Shift+Enter" | "Escape"`, not a general shortcut API.
+
+A matching simple editor, inside frontend activation (empty strings are valid here):
+
+```js
+return ctx.registerQuestionRenderer({
+  id: "sample-text", supportedContractVersions: [1],
+  mountAnswerEditor(container, props) {
+    const field = document.createElement("textarea");
+    field.setAttribute("aria-label", "Text response");
+    let current = props;
+    const render = () => {
+      const value = current.answer.status === "empty" ? "" : current.answer.value;
+      if (field.value !== value) field.value = value;
+      field.disabled = !current.active;
+    };
+    const publish = () => {
+      if (current.active) current.onChange({ status: "ready", value: field.value });
+    };
+    field.addEventListener("input", publish);
+    container.append(field);
+    render();
+    return {
+      update(next) { current = { ...current, ...next }; render(); },
+      focus() { if (current.active) field.focus(); },
+      dispose() { field.removeEventListener("input", publish); field.remove(); }
+    };
+  }
+});
+```
+
+Mounts may be async: honor abort, dispose late handles, and bind callbacks/keys/focus/speech
+to the exact question and mount generation. Stale instances cannot publish or submit.
+Folding retains mounts and updates `active`; repeated canonical adoption does not remount
+the same question. Draft answers/thinking live in the existing **in-memory session model**,
+keyed by occurrence, surviving editor/dock remounts while that model lives. Navigation that
+destroys the model, reload and restart do **not** promise draft persistence. Saved posed
+questions and accepted answers are durable; no persistent editor-draft format is added.
+
+### Host controls, keyboard and dictation
+
+The host retains the card/dock, fold/reveal, submit/dismiss, StatsBar/session metadata,
+microphone, model and model-thinking controls. These common controls remain present.
+Required `showThinking` controls the host Thinking field, not a nonempty-answer requirement;
+it is not model-authored. The existing check ReadingThinking/reveal flow is independent.
+
+Host commands retain precedence: Shift+Tab cycles model thinking and Cmd/Ctrl+Enter
+submits subject to readiness/IME gates. Only the active eligible editor may receive the
+narrow editing-key callback. Handled keys are claimed once; passed plain Tab enters the
+private host field chain, never native Tab navigation. Unclaimed editor Enter belongs to
+editing, not an accidental native form submission. Host Thinking Enter remains newline.
+Composition/229 must not trigger commands; the host owns suppression and eligibility,
+not fabricated keyboard dispatch or plugin DOM inspection.
+
+Dictation goes to host ReadingThinking for an unrevealed check, regardless of showThinking;
+after reveal/open probe or predict it goes to host Thinking when enabled. With Thinking
+off, only an explicit editor `appendTranscript` opts into answer dictation; otherwise the
+microphone stays **visible but disabled**, never routed into a hidden composer. An answer
+transcript callback must publish before its promise resolves. The host finishes capture
+and final deliveries before reveal/submit and settles/cancels capture before retiring an
+obsolete destination. Folding neither erases drafts nor redirects speech to the composer.
+
+### Saved authority, results and compatibility
+
+Live tool attempts are non-actionable placeholders. Only a successfully validated host pose,
+canonical persistence and client adoption authorize an editor; terminal reconciliation
+must finish before actions become ready. A sync failure offers reconciliation-only retry,
+not a new teacher turn. Private saved metadata binds a host-minted stable question ID to
+an exact native occurrence, not tool-name coincidence or a reused call ID. Attempts,
+failures and missing renderers never expose raw authored payload/reference material in
+an expandable generic trace; fallback uses saved common question Markdown and safe status.
+This is a presentation boundary, not a sandbox or a guarantee about authored prose.
+
+The host validates finite JSON and **saved historical schemas** on submission. A saved
+required answer refinement needs an available same-contract implementation; newly adding a
+refinement cannot alter old acceptance. Plugins publish only their answer value. The host
+constructs `PluginQuestionAnswer` (`kind: "plugin-question"`, canonical question/plugin/type
+identity, contract version, `answer`, applicable `thinking`/`readingThinking`, `answeredAt`),
+saves the genuine native result before continuation, and enforces single-submit and
+sibling-question discipline. Normal text/continue/retry and legacy answer routes cannot
+bypass a pending plugin question. Dismissal is a host cancellation, not a fabricated answer
+or an automatic teacher run.
+
+Backend `contractVersion` supports **exactly that version**. Compatible package changes
+retain it; package version/hash changes or an unknown contract number alone do not cancel
+a question. `incompatibleContractVersions` explicitly authorizes quiet cancellation of an
+old incompatible contract through the host, without rewriting history or auto-running the
+teacher. A genuinely unreadable host protocol may also be quietly cancelled only with
+sufficient exact occurrence binding—never a guessed target. Missing/disabled backend,
+unknown version, missing required refinement, unsupported/missing/failing renderer keep
+the question unavailable/pending with saved fallback and host **Dismiss question**.
+Frontend failure cannot declare incompatibility. No version ranges, automatic upgrades
+or plugin migrations over chat records are added.
+
+## Native session extensions — implemented and verified
+
+The [human-approved session-extension contract](plugin-session-extension-contract.md)
+is authoritative for submission interception, explicit learner images and session-body
+surfaces. **Implemented and verified on `feature/plugin-architecture`; not released.**
+The human separately authorized committing all changes and preparing the branch for a
+human-performed push; this does not authorize an agent push or release. The increment passed
+the [3,869-test session-extension checkpoint](plugin-architecture.md#native-session-extension-verification-checkpoint--2026-11-02),
+including strict external SDK, isolated packaging/privacy and exercised packaged-browser
+checks. The historical Markdown and 3,778-test question checkpoints remain separate. Public
+names are defined in `src/core/plugin-submissions.ts`, `src/core/plugin-ui.ts` and the
+frontend context in `src/core/plugins.ts`; use matching type-only SDK declarations,
+not private runtime imports. The packaged authoring bundle includes this contract.
+
+### Frontend submission interception
+
+Register during frontend activation:
+
+```ts
+ctx.registerSubmissionInterceptor({
+  id: "prepare-input",
+  priority: 0,
+  hasPendingInput(target) { /* synchronous, side-effect-free readiness */ return false; },
+  async intercept(input, context) {
+    // May await this plugin's existing backend operations. Honor context.signal.
+    // Return a same-type replacement, undefined to pass through, or null to cancel.
+    return input;
+  }
+});
+// After plugin-owned external input changes:
+ctx.refreshSubmissions();
+```
+
+`registerSubmissionInterceptor(definition)` returns an unregister function. IDs follow
+lowercase-hyphen conventions and are unique within a plugin activation. `priority` is
+a finite integer, default **0**; higher runs first, then ties sort by plugin ID and
+interceptor ID. The host captures the ordered set once per attempt and runs it serially;
+later hooks see earlier output. Unregister/unload invalidates captured participation
+and cancels preparation; new registrations join the next attempt. There is no backend
+hook registration or user-facing ordering setting.
+
+`PluginSubmission` is raw, readonly learner input, not a derived native answer envelope:
+
+| `type` | Replaceable learner fields (input remains readonly) |
+| --- | --- |
+| `"text"` | `content: PluginSubmissionContent`; host chooses send versus steer |
+| `"thinking"` | `content` for the captured active practice problem |
+| `"answer"` | `answer: PluginBuiltinSubmissionAnswer`, separate `thinking` and `readingThinking` content |
+| `"plugin-question-answer"` | finite JSON `answer`, `answerImages`, separate `thinking` and `readingThinking` content |
+
+`PluginSubmissionContent` is `{ text: string, images: readonly ImageContent[] }`:
+text followed by images, not arbitrary interleaving. Builtin answer fields are optional
+`dontKnow`, `values` (stable option values, not displayed indices), `other`, `text`,
+`confidence`, plus required `images`. Correctness, committed answers, snapshots,
+timestamps, routing identity and tool results remain host-owned. Hooks may transform
+actual selections or plugin JSON, but cannot choose a new target or submission type.
+
+`PluginSubmissionTarget` and `PluginSubmissionContext` share the input discriminant.
+Every target supplies `sessionId`, `sessionKind`, `type`, applicable `channels` and an
+opaque `surfaceTarget`. Text/practice-thinking use `channels: ["content"]`; thinking
+also supplies `problem: { occurrence, statement }`. Builtin `question` is learner-facing
+`ClientQuestion` plus exact `occurrence` and optional `questionType`, including displayed
+labels/stable values, not grading keys. Plugin `question` supplies `questionId`,
+`occurrence`, `pluginId`, `typeId`, `contractVersion`, `label`, `variant`, `showThinking`.
+`PluginSubmissionOccurrence` is `{ messageId, contentIndex, toolCallId, toolName }`.
+Applicable answer channels are `"answer"`, `"thinking"`, `"readingThinking"`.
+
+Context adds `messages`, `signal` and `onAccepted(callback)`. Input, context data and
+history are detached, recursively readonly and deeply frozen. `messages` is the
+browser's current native history, possibly including streamed, not-yet-durable content;
+it is neither rendered transcript text nor a canonical persisted-history guarantee.
+This trusted API is not a new data-security sandbox. Surface targets and signals are
+opaque host references: do not JSON-clone or persist them.
+
+`hasPendingInput(target)` advertises external input that can initiate preparation;
+it is not final answer validity. Call `refreshSubmissions()` after state changes.
+Predicate exceptions report a plugin error and contribute no readiness. Pending input
+can enable builtin preparation before an initial native selection/text exists, but the
+final transformed answer must satisfy the captured question. Plugin questions still
+require a current ready editor and retained answer state **before** preparation; pending
+material cannot bypass that requirement or missing-renderer fallback authority.
+
+### Strict validation, preparation and acceptance
+
+The host reserves one attempt before any await, finishes dictation/editor delivery for
+the original target, then captures final learner input and history. It rechecks the exact
+native view, question/problem occurrence, readiness and plugin ownership after awaits;
+it never silently retargets. Returned learner input is cloned, validated and frozen
+before the next hook. `undefined` passes through; `null` intentionally cancels and keeps
+drafts. Exceptions, rejected promises, type changes or invalid output **fail closed**.
+
+Builtin answers are revalidated against the privately captured rendered/shuffled
+question and rebuilt through existing host `buildAnswer` grading, not by spreading
+plugin fields into a derived answer. Unknown/duplicate values, invalid cardinality,
+incompatible dontKnow/selections, mode-inapplicable fields or nonfinite confidence
+fail; existing confidence rounding/clamping stays host-owned. Text answers require
+nonempty answer text or answer-channel images; thinking/reading images alone do not satisfy
+answer readiness. Select answers still need a valid final selection/Other/dontKnow.
+Plugin JSON preserves raw strings/falsy values apart from deliberate transformations,
+and still passes canonical saved-schema/refinement, availability and exact-occurrence
+checks. Images sit alongside JSON, never become mandatory arbitrary schema keys.
+
+Inapplicable content channels are empty in public DTOs and must stay empty; nonempty
+text/images there fail preparation, rather than being silently discarded. Host adapters
+omit inapplicable channels from transport/persistence. Builtin thinking is available
+across builtin kinds; reading follows the existing reveal/phase policy. Plugin thinking
+requires `showThinking`; reading follows teach/check policy.
+
+During preparation the native input shows **Preparing submission…** and **Cancel**.
+Pre-POST cancel retains drafts/final dictated text and ignores late hook results, even
+if a hook ignores its signal. Failure uses the native error area:
+`Could not prepare submission ({plugin name}): {message}. Your input has been kept.`
+The preparation signal cannot cancel an accepted POST. Draft clearing follows confirmed
+boundaries without erasing newer edits; the host never clears plugin-owned pending data.
+The attempt lease ends on acknowledgment/refusal, not at model-stream completion, so
+ordinary busy composer steering remains available.
+
+Use `context.onAccepted(callback)` to consume **only the captured revision** of pending
+plugin data after acknowledged API acceptance. This is live/best-effort notification,
+not a durable event, replay, exactly-once guarantee or model-success signal. A successful
+memory-only parked-steer acknowledgment may notify; it does not guarantee durable
+history. Refusal or lost acknowledgment does not notify or authorize clearing input.
+Callback failures report plugin errors without failing accepted input; live callbacks
+run independently of stream consumption. Late registration after invocation completion
+or cancellation is ignored.
+
+Model failure retry, Continue, malformed-question retry, control-only Next and silent
+dismissals do not intercept content again: retries reuse stored/transformed accepted
+input. An internal busy retry or steer-to-send fallback reuses one prepared payload and
+its acceptance observers, with no second interception/notification. Explicit resubmission
+of an unaccepted form is a fresh attempt. Uncertain acceptance uses existing canonical
+reconciliation/exact-question guards, not an invented automatic replay. Between practice
+problems, empty text plus pending plugin material is content submission, not control-only
+Next.
+
+### Explicit inline learner images
+
+Only native blocks `{ type: "image", data: <base64>, mimeType: <string> }` are images.
+Image-only messages, practice thinking and applicable answer/thinking/reading channels
+are supported by the approved contract. A `.png` attachment path remains a path chip/text;
+there is no path inference or automatic file read. No Blob/File/object URL/data URL is
+accepted. PNG, JPEG, WebP and GIF require nonempty base64 and byte/declared-format
+validation. The host uses existing image processing and the actual effective model's
+resize policy (existing defaults: 2000×2000 bounds, 4.5 MiB base64 per processed image;
+model overrides apply). Processing failure refuses submission, never silently omits an
+image or injects processor hints as learner text. Explicitly text-only engines refuse
+fresh images; custom endpoints retain existing attempt-transport policy.
+
+Successfully prepared bytes are the accepted persisted/UI/model representation; original
+editable material remains plugin-owned. Instant optimistic image previews remain visible.
+While their owning image-bearing POST is unresolved, transcript adoption is deferred so
+normalized canonical bytes cannot duplicate the original preview. On delivery resolution,
+including refusal or lost acknowledgment, the host discards deferred snapshots and makes
+a fresh canonical read. Failure or ownership loss retires only that attempt's provisional
+image entries, preserving native drafts and plugin pending data; reconciliation never
+invents an acceptance notification. Additive image arrays sit beside existing text
+fields, with empty arrays omitted. `PluginSubmissionImages` has optional `answer`,
+`thinking`, `readingThinking` arrays. Images reach native model content and the matching
+user, answer, practice-thinking, question-thinking or reading-thinking container—not
+metadata alone. Host image rendering is outside custom question/answer slots: centered,
+natural-width, container-constrained, aspect-preserving figures labelled **Submitted
+image**, including image-only containers, with no new toolbar or dimmed thinking pixels.
+Existing PathText/Markdown text behavior remains. Model/target changes during async
+admission are stale refusals, not silent delivery to a replacement engine or occurrence.
+
+### Session-body surfaces
+
+`ctx.ui.openSurface(target, { title, content, onClose? }, { signal })` returns
+`PluginWidgetHandle<PluginSurfaceProps>` with standard shallow update/dispose. `content`
+is existing `PluginUiContent` (HTMLElement or signal-scoped mount with optional async
+cleanup). Obtain the opaque `PluginSurfaceTarget` from an existing native session top-bar
+`PluginActionContext.surfaceTarget` or submission target/context; never infer one from a
+session ID, selector, DOM parent or global current session.
+
+The target identifies **one mounted teaching/practice view instance**. With live signals,
+unknown/expired targets synchronously throw `Surface target is no longer active`;
+already-aborted signals return an inert disposed handle. Mount commit rechecks lifetime.
+Leaving and returning to the same session ID never revives a token. Navigation, owning
+plugin unload, caller abort and explicit dispose tear down scoped surfaces; late async
+cleanup runs exactly once, and content replacement cleans up its prior mount.
+
+Surfaces cover the **whole session body including inputs**, not its top bar or sidebar.
+The parent session stays mounted. Stacked covered surfaces stay mounted and painted but
+only eligible foreground content receives covered-body interaction. Ordinary stack
+entries are visual siblings, **not each other's lifetime owners**: disposing a lower
+plugin surface cannot dispose another plugin's foreground surface. Explicit caller
+signals may bind lifetimes. Global Settings is not lifetime-owned merely because it
+paints above a surface.
+
+The host uses existing `view` interaction layers/owner propagation, not an app-wide
+modal, viewport scroll lock or second overlay registry. A body-bounded background/80
+blurred backdrop, p-4 frame, visible title/accessibility label and slim upper-right
+Close/X header leave content filling the remaining width/height; plugin content owns
+its layout, without a forced diagram pan/zoom border. Existing one-Escape rules apply;
+covered native inputs never receive submit/Tab/dictation actions. Top bar/sidebar stay
+exposed, without a focus trap.
+
+Entry honors eligible focus already placed inside the foreground surface; otherwise it
+chooses the first eligible editable text/number field or textarea, then the title heading
+(`tabIndex=-1`). Delayed covered mounts do not steal focus. Closing foreground restores
+an eligible uncovered opener (including chrome), else surviving foreground remembered
+focus/entry policy, or native-body policy when no surfaces remain. Covered disposal
+never steals focus; expired views never receive focus restoration. `onClose` is a close
+notification, not an async veto; programmatic dispose/abort keep normal handle semantics.
+
+### Deferred extension points
+
+This increment adds no message/card/composer slots, generic rich-transcript renderer,
+backend submission hooks, native send/steer API, mutable agent/event/context hooks, image
+picker/clipboard/drop importer, path inference, asset store or image export redesign.
+Additional surface regions (including transcript-only), plugin-route/graph targets and
+navigation suspension/restoration remain deferred. Existing tools/question renderers
+remain the supported presentation contributions; no broader UI catalogue is implied.
 
 ## Learning data
 

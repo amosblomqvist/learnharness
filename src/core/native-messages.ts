@@ -34,7 +34,8 @@
  */
 
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
-import type { AssistantMessage, Message, ToolResultMessage, UserMessage } from "@earendil-works/pi-ai";
+import type { AssistantMessage, ImageContent, Message, TextContent, ToolResultMessage, UserMessage } from "@earendil-works/pi-ai";
+import type { PluginSubmissionImages, PluginSubmissionOccurrence } from "./plugin-submissions.ts";
 import { QUESTION_TOOLS, type PendingQuestion } from "./pending.ts";
 import { CLAUDE_CODE_PROVIDER } from "./contracts/claude-code.ts";
 import {
@@ -46,6 +47,7 @@ import {
 import { compactAnswerForModel, type QuestionAnswerData } from "./question-core.ts";
 import { activeCompactionOf, keptIndexFor } from "./compaction.ts";
 import { parseQuestionInput } from "./tool-parts.ts";
+import { readPluginQuestionMessageAnnotation, readPluginQuestionAnswer, readPluginQuestionCancellation, samePluginQuestionOccurrence, type PluginQuestionAnnotationRead, type PluginQuestionOccurrence, type PluginQuestionOccurrenceMap, type PluginQuestionSnapshot } from "./plugin-questions.ts";
 
 /** The hard-invariant wording for an aborted turn's unanswered calls —
  *  carried over verbatim from the pre-native era so the model's view
@@ -80,7 +82,8 @@ export interface LhMarkerMessage {
 	/** The model-facing text ("" for plan blocks — UI-only). */
 	content: string;
 	display: boolean;
-	/** The UI payload — per-customType, never model-visible. */
+	/** Per-customType UI payload. Practice-thinking images also project to
+	 * native model blocks; its content string remains the text authority. */
 	details: unknown;
 	timestamp: number;
 }
@@ -97,6 +100,10 @@ export type LhMessage = (UserMessage | AssistantMessage | ToolResultMessage | Lh
 	/** CLI-reported effective context budget, not a catalog model maximum.
 	 * App-only metadata: never transmitted as provider/model message content. */
 	cliContextWindow?: number;
+	/** Host-owned occurrence annotations, never model input. */
+	lhQuestions?: PluginQuestionOccurrenceMap;
+	/** Exact binding for genuine plugin-question results (details stays public envelope). */
+	lhQuestionOccurrence?: PluginQuestionOccurrence;
 };
 
 /** Latest response only: never borrow an older process/model's window when
@@ -179,11 +186,26 @@ export function newMessageId(): string {
 //     core/input-events.ts; steers in core/contracts/jobs.ts) ─────────────────
 
 /** A learner-authored user message (text input, verdict note). */
-export function newUserMessage(text: string): LhMessage & UserMessage {
+/** Keep legacy text-only storage unchanged; explicit images become native blocks. */
+export function nativeInlineImageContent(text: string, images?: readonly ImageContent[]): string | (TextContent | ImageContent)[] {
+	return images?.length ? [...(text ? [{ type: "text" as const, text }] : []), ...images.map(image => ({ ...image }))] : text;
+}
+
+/** Compact answer text is the sole text authority; labels identify image channels. */
+export function nativeAnswerContent(answerText: string, images?: PluginSubmissionImages): ToolResultMessage["content"] {
+	const content: ToolResultMessage["content"] = [{ type: "text", text: answerText }];
+	for (const [channel, label] of [["answer", "Answer images"], ["thinking", "Question thinking images"], ["readingThinking", "Reading thinking images"]] as const) {
+		if (!images?.[channel]?.length) continue;
+		content.push({ type: "text", text: `${label}:` }, ...images[channel]!.map(image => ({ ...image })));
+	}
+	return content;
+}
+
+export function newUserMessage(text: string, images?: readonly ImageContent[]): LhMessage & UserMessage {
 	return {
 		id: newMessageId(),
 		role: "user",
-		content: text,
+		content: nativeInlineImageContent(text, images),
 		timestamp: Date.now(),
 	};
 }
@@ -193,8 +215,8 @@ export function newUserMessage(text: string): LhMessage & UserMessage {
  *  rides agent.steer(), the live stream's message events, and the settled
  *  record, so the optimistic queued indicator and the transcript card
  *  upsert by one identity. */
-export function newUserSteer(text: string, id: string): LhMessage & UserMessage {
-	return { id, role: "user", content: text, timestamp: Date.now() };
+export function newUserSteer(text: string, id: string, images?: readonly ImageContent[]): LhMessage & UserMessage {
+	return { id, role: "user", content: nativeInlineImageContent(text, images), timestamp: Date.now() };
 }
 
 /** The learner's answer — the question call's tool result (fork 1).
@@ -213,7 +235,7 @@ export function newAnswerResult(
 		role: "toolResult",
 		toolCallId,
 		toolName,
-		content: [{ type: "text", text: JSON.stringify(compactAnswerForModel(answer as QuestionAnswerData)) }],
+		content: nativeAnswerContent(JSON.stringify(compactAnswerForModel(answer as QuestionAnswerData)), (answer as QuestionAnswerData).images),
 		// 0.87.1 narrowed ToolResultMessage.details to JsonRepresentation —
 		// our payloads are JSON-safe answer structures, so the cast is honest.
 		details: answer as ToolResultMessage["details"],
@@ -313,14 +335,14 @@ export function newGraphContextMessage(picks: readonly GraphContextPick[], chain
  *  content label is the single "Your thinking"; `details` keeps the raw
  *  payload for the transcript card. One problem may carry many
  *  submissions. */
-export function newThinkingMessage(problemCallId: string, text: string): LhMarkerMessage {
+export function newThinkingMessage(problemCallId: string, text: string, images?: readonly ImageContent[]): LhMarkerMessage {
 	return {
 		id: newMessageId(),
 		role: "custom",
 		customType: "practice-thinking",
 		content: `${THINKING_LABEL}:\n${text}`,
 		display: true,
-		details: { problemCallId, text },
+		details: { problemCallId, text, ...(images?.length ? { images: images.map(image => ({ ...image })) } : {}) },
 		timestamp: Date.now(),
 	};
 }
@@ -481,6 +503,16 @@ export function problemInputForConclude(
 export function activeProblemOf(
 	messages: readonly LhMessage[],
 ): { toolCallId: string; input: unknown } | null {
+	const active = activeProblemCallOf(messages);
+	return active ? { toolCallId: active.occurrence.toolCallId, input: active.input } : null;
+}
+
+/** Exact source of the same clean activation selected by activeProblemOf. */
+export function activeProblemOccurrenceOf(messages: readonly LhMessage[]): PluginSubmissionOccurrence | null {
+	return activeProblemCallOf(messages)?.occurrence ?? null;
+}
+
+function activeProblemCallOf(messages: readonly LhMessage[]): { occurrence: PluginSubmissionOccurrence; input: unknown } | null {
 	// HONEST ACTIVATION (owner ruling, 2026-10-05 — the BKT incident):
 	// calls count only through their RESULTS — a problem activates on its
 	// clean ack, a conclude frees on its clean ack; errored and dangling
@@ -504,7 +536,9 @@ export function activeProblemOf(
 					continue; // errored/dangling conclude: the free never happened
 				}
 				if (block.name !== PRACTICE_PROBLEM_TOOL) continue;
-				if (cleanCallIds.has(block.id)) return { toolCallId: block.id, input: block.arguments };
+				if (cleanCallIds.has(block.id)) return {
+					occurrence: { messageId: m.id, contentIndex: bi, toolCallId: block.id, toolName: block.name }, input: block.arguments,
+				};
 				// errored/dangling pose — it did not go through; keep scanning
 			}
 			continue;
@@ -633,13 +667,15 @@ export function toLlmMessages(messages: readonly AgentMessage[]): Message[] {
 			if (marker.customType === "compaction" && head !== null) continue;
 			out.push({
 				role: "user",
-				content: [{ type: "text", text: marker.content }],
-			timestamp: marker.timestamp,
+				content: [{ type: "text", text: marker.content }, ...(marker.customType === "practice-thinking"
+					? (marker.details as { images?: ImageContent[] } | null)?.images ?? []
+					: [])],
+				timestamp: marker.timestamp,
 			});
 			continue;
 		}
 		// Strip app-only id/CLI context metadata: the wire carries the native shape only.
-		const { id: _id, cliContextWindow: _cliContextWindow, ...native } = m as LhMessage;
+		const { id: _id, cliContextWindow: _cliContextWindow, lhQuestions: _lhQuestions, lhQuestionOccurrence: _lhQuestionOccurrence, ...native } = m as LhMessage;
 		out.push(native as Message);
 		// Repair unanswered calls from completed generations, not calls in
 		// failed generations. Pi filters error/aborted assistants itself;
@@ -651,7 +687,10 @@ export function toLlmMessages(messages: readonly AgentMessage[]): Message[] {
 			if (calls.length === 0) continue;
 			const answered = resultIdsFrom(messages.slice(i + 1));
 			for (const call of calls) {
-				if (answered.has(call.id)) continue;
+				const contentIndex = assistant.content.indexOf(call);
+				const annotation = readPluginQuestionMessageAnnotation(m, contentIndex);
+				const occurrence = { messageId: (m as LhMessage).id, contentIndex, toolCallId: call.id, toolName: call.name };
+				if (annotation.status === "absent" || annotation.status === "attempt" ? answered.has(call.id) : messages.slice(i + 1).some(result => pluginQuestionResultMatches(result as LhMessage, occurrence, annotation))) continue;
 				out.push({
 					role: "toolResult",
 					toolCallId: call.id,
@@ -667,6 +706,60 @@ export function toLlmMessages(messages: readonly AgentMessage[]): Message[] {
 }
 
 // ─── native scans (the UIMessage-era pending/phase seams, natively) ──────────
+
+/** Match host results to the exact occurrence. Neither a reused native id,
+ * a temporary ack nor an arbitrary result grants answer authority. */
+export function pluginQuestionResultMatches(
+	message: LhMessage,
+	occurrence: PluginQuestionOccurrence,
+	annotation: PluginQuestionAnnotationRead,
+): boolean {
+	if (message.role !== "toolResult" || message.isError || message.toolCallId !== occurrence.toolCallId || message.toolName !== occurrence.toolName) return false;
+	const cancellation = readPluginQuestionCancellation(message.details, annotation.status === "posed" ? annotation.snapshot : undefined);
+	if (cancellation && samePluginQuestionOccurrence(cancellation.occurrence, occurrence)) {
+		return annotation.status !== "unreadable" || !annotation.identity || cancellation.questionId === annotation.identity.questionId;
+	}
+	if (annotation.status !== "posed" || !message.lhQuestionOccurrence || !samePluginQuestionOccurrence(message.lhQuestionOccurrence, occurrence)) return false;
+	return readPluginQuestionAnswer(message.details, annotation.snapshot) !== null;
+}
+
+export interface PluginQuestionCall {
+	occurrence: PluginQuestionOccurrence;
+	annotation: Exclude<PluginQuestionAnnotationRead, { status: "absent" }>;
+	status: "answerable" | "unreadable" | "attempt" | "failed" | "streaming";
+	/** Present only when canonical saved authority parsed successfully. */
+	snapshot?: PluginQuestionSnapshot;
+}
+
+/** Unresolved saved questions and visibility-only attempts, newest message
+ * first and siblings in source order. Answered/cancelled occurrences are
+ * omitted. Attempts (including failed ones) NEVER grant pending authority.
+ * Unlike builtin history, saved plugin authority survives later assistants. */
+export function pluginQuestionCallsOf(messages: readonly LhMessage[]): PluginQuestionCall[] {
+	const calls: PluginQuestionCall[] = [];
+	for (let mi = messages.length - 1; mi >= 0; mi--) {
+		const message = messages[mi]!;
+		if (message.role !== "assistant") continue;
+		for (const [contentIndex, block] of message.content.entries()) {
+			if (block.type !== "toolCall") continue;
+			const annotation = readPluginQuestionMessageAnnotation(message, contentIndex);
+			if (annotation.status === "absent") continue;
+			const occurrence = { messageId: message.id, contentIndex, toolCallId: block.id, toolName: block.name };
+			if (messages.slice(mi + 1).some(result => pluginQuestionResultMatches(result, occurrence, annotation))) continue;
+			const status = annotation.status === "posed" ? "answerable" : annotation.status === "unreadable" ? "unreadable"
+				: message.stopReason === "error" || message.stopReason === "aborted" ? "failed"
+				: message.stopReason === "pending" ? "streaming" : "attempt";
+			calls.push({ occurrence, annotation, status, ...(annotation.status === "posed" ? { snapshot: annotation.snapshot } : {}) });
+		}
+	}
+	return calls;
+}
+
+/** Saved authority only; no current registry/tool-name lookup or live ack. */
+export function pendingPluginQuestionOf(messages: readonly LhMessage[]): PluginQuestionSnapshot | undefined {
+	return pluginQuestionCallsOf(messages).find(call => call.status === "answerable")?.snapshot;
+}
+export const danglingPluginQuestionOf = pendingPluginQuestionOf;
 
 /** The pending-question gate (findPendingToolCall's native twin): the
  *  NEWEST assistant message's FIRST answerable question-tool call with no
@@ -729,6 +822,7 @@ export function questionCallsOf(messages: readonly LhMessage[]): QuestionCall[] 
 		const calls: QuestionCall[] = [];
 		for (const [contentIndex, block] of assistant.content.entries()) {
 			if (block.type !== "toolCall" || !(QUESTION_TOOLS as readonly string[]).includes(block.name) || answered.has(block.id)) continue;
+			if (readPluginQuestionMessageAnnotation(assistant, contentIndex).status !== "absent") continue;
 			const status = assistant.stopReason === "error" || assistant.stopReason === "aborted" ? "failed"
 				: assistant.stopReason === "pending" ? "streaming"
 				: assistant.stopReason === "length" || block.argumentsError || !parseQuestionInput(block.name, block.arguments) ? "malformed"
@@ -744,7 +838,7 @@ export function questionCallsOf(messages: readonly LhMessage[]): QuestionCall[] 
 /** Background wakes must still wait for an explicit learner action when a
  * question is unusable. Releasing the composer is not permission to retry. */
 export function hasUnresolvedQuestion(messages: readonly LhMessage[]): boolean {
-	return questionCallsOf(messages).length > 0;
+	return questionCallsOf(messages).length > 0 || pluginQuestionCallsOf(messages).some(call => call.status === "answerable" || call.status === "unreadable");
 }
 
 /** Client placeholders are loop acknowledgements, not learner answers. */
@@ -814,7 +908,7 @@ export function answeredCallIds(messages: readonly LhMessage[]): Set<string> {
 function isDismissedResult(m: LhMessage): boolean {
 	if ((m as { role?: string }).role !== "toolResult") return false;
 	const details = (m as { details?: unknown }).details as { dismissed?: unknown } | undefined;
-	return details?.dismissed === true;
+	return details?.dismissed === true || readPluginQuestionCancellation((m as ToolResultMessage).details) !== null;
 }
 
 /** The dismissal pause (owner design 2026-10-03, "A2"): the record ends
@@ -850,6 +944,11 @@ export function nativeInputCause(message: AgentMessage, history: readonly AgentM
 		return ["graph-context", "plan-block", "problem-dismissed", "compaction"].includes(message.customType) ? "neutral" : "unrecognizable";
 	}
 	if (message.role === "toolResult") {
+		const pluginAnswer = readPluginQuestionAnswer(message.details);
+		if (pluginAnswer) {
+			return pluginQuestionCallsOf(history as readonly LhMessage[]).some(call => call.annotation.status === "posed" && pluginQuestionResultMatches(message as LhMessage, call.occurrence, call.annotation)) ? "learner" : "unrecognizable";
+		}
+		if (readPluginQuestionCancellation(message.details)) return "neutral";
 		if (message.isError && (message.details as { questionRecovery?: unknown } | null)?.questionRecovery === true) {
 			return questionCallsOf(history as readonly LhMessage[]).some(call => call.status === "malformed" && call.toolCallId === message.toolCallId && call.tool === message.toolName) ? "learner" : "unrecognizable";
 		}
@@ -892,6 +991,7 @@ export function reconstructRequestCause(messages: readonly LhMessage[]): Reconst
 }
 
 export function needsContinuation(messages: readonly LhMessage[]): boolean {
+	if (pluginQuestionCallsOf(messages).some(call => call.status === "answerable" || call.status === "unreadable")) return false;
 	const last = messages[messages.length - 1];
 	if (!last || (last as { role?: string }).role !== "toolResult") return false;
 	// The trailing results batch (contiguous by construction — the agent
@@ -930,8 +1030,14 @@ export function needsContinuation(messages: readonly LhMessage[]): boolean {
 	);
 	if (posedProblem) return false;
 	const answered = new Set(results.map((m) => m.toolCallId));
-	const calls = (content as Array<{ type?: string; id?: string }>).filter(
+	const calls = (content as Array<{ type?: string; id?: string; name?: string }>).filter(
 		(b) => b.type === "toolCall" && typeof b.id === "string",
 	);
-	return calls.length > 0 && calls.every((b) => answered.has(b.id!));
+	return calls.length > 0 && calls.every((b) => {
+		const contentIndex = content.indexOf(b);
+		const annotation = readPluginQuestionMessageAnnotation(owner, contentIndex);
+		return annotation.status === "absent" || annotation.status === "attempt" ? answered.has(b.id!) : results.some(result => pluginQuestionResultMatches(result as LhMessage, {
+			messageId: owner.id, contentIndex, toolCallId: b.id!, toolName: b.name!,
+		}, annotation));
+	});
 }

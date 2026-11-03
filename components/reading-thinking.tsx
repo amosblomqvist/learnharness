@@ -1,7 +1,8 @@
 "use client";
 
-import { useCallback, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useLayoutEffect, useRef, useState, type RefObject } from "react";
 import { joinDictation, useDictationTarget } from "@/components/dictation";
+import { composingQuestionKey, pluginQuestionKeySuppressed } from "./plugin-question-keys";
 import { PathInput } from "@/components/path-input";
 import { useOptionalInteractionLayers } from "./interaction-layers";
 import { isInteractionScopeEligible } from "./plugin-input-focus";
@@ -28,6 +29,7 @@ export function ReadingThinkingField({
 	onEscape,
 	onOpen,
 	claim,
+	inputRef,
 }: {
 	value: string;
 	revision: number;
@@ -41,6 +43,7 @@ export function ReadingThinkingField({
 	onOpen?: () => void;
 	/** Primary dictation claim — true while the check is behind its reveal. */
 	claim: boolean;
+	inputRef?: RefObject<HTMLDivElement | null>;
 }) {
 	const controller = useOptionalInteractionLayers();
 	const [draft, setDraft] = useState(value);
@@ -66,6 +69,7 @@ export function ReadingThinkingField({
 				Thinking while reading
 			</div>
 			<PathInput
+				ref={inputRef}
 				value={draft}
 				onValueChange={applyDraft}
 				/* py-0.5 (owner round, 2026-10-07): the scrollbar fix. Source
@@ -78,6 +82,7 @@ export function ReadingThinkingField({
 				   get implicitly from their py-2. Line-height stays 1.25 (the
 				   caret law, typography round 2). */
 				onKeyDown={(e) => {
+					if (composingQuestionKey(e) || pluginQuestionKeySuppressed(e)) return;
 					if (!isInteractionScopeEligible(e.currentTarget, controller)) return;
 					if (e.key === "Escape") {
 						controller?.claimEscape(e);

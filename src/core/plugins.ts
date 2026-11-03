@@ -12,6 +12,10 @@ import type { ServerEvent } from "./events.ts";
 import type { PluginAgentService, PluginCallPurpose, PluginModelSpec } from "./plugin-agents.ts";
 import type { PluginBackgroundMeta, PluginBackgroundTool, PluginWorkerService } from "./plugin-workers.ts";
 export type * from "./plugin-workers.ts";
+import type { PluginQuestionRenderer, PluginQuestionTypeDefinition } from "./plugin-questions.ts";
+export type * from "./plugin-questions.ts";
+import type { PluginSubmissionInterceptor } from "./plugin-submissions.ts";
+export type * from "./plugin-submissions.ts";
 
 export const PLUGIN_API_VERSION = 1 as const;
 export const PLUGIN_ID_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
@@ -111,6 +115,8 @@ export interface PluginBackendContext {
 	createBackgroundTool<T extends TSchema>(context: PluginToolContext, definition: PluginBackgroundTool<T>): AgentTool<T>;
 	registerInstructions(contribution: PluginInstructions): () => void;
 	registerTools(contribution: PluginTools): () => void;
+	/** Host-owned native probe/teach question tools; no plugin execution/grading hook. */
+	registerQuestionType(definition: PluginQuestionTypeDefinition): () => void;
 	/** JSON-compatible operation results, not arbitrary HTTP endpoints. */
 	handle(name: string, handler: (input: unknown) => unknown | Promise<unknown>): () => void;
 	events: {
@@ -128,7 +134,7 @@ export interface PluginView {
 	mount(container: HTMLElement, signal: AbortSignal): void | PluginCleanup | Promise<void | PluginCleanup>;
 }
 export type PluginActionContext =
-	| { placement: "top-bar"; surface: "session"; sessionId: string; kind: "teaching" | "practice" }
+	| { placement: "top-bar"; surface: "session"; sessionId: string; kind: "teaching" | "practice"; surfaceTarget: import("./plugin-ui.ts").PluginSurfaceTarget }
 	| { placement: "top-bar"; surface: "plugin-view"; pluginId: string; viewId: string }
 	| { placement: "sidebar"; surface: "sidebar" }
 	| { placement: "graph"; surface: "graph" };
@@ -185,12 +191,17 @@ export interface PluginFrontendContext {
 	placeAction(placement: PluginActionPlacement): () => void;
 	/** Explicitly notify the host when dynamic action enabled state changes. */
 	refreshActions(): void;
+	registerSubmissionInterceptor(definition: PluginSubmissionInterceptor): () => void;
+	/** Notify the host when plugin-owned pending submission input changes. */
+	refreshSubmissions(): void;
 	registerSettings(mount: PluginView["mount"]): () => void;
 	registerSettings(schema: import("./plugin-ui.ts").PluginSettingsSchema): import("./plugin-ui.ts").PluginWidgetHandle<import("./plugin-ui.ts").PluginSettingsSchema>;
 	registerSettings(settings: PluginSettingsRegistration): (() => void) | import("./plugin-ui.ts").PluginWidgetHandle<import("./plugin-ui.ts").PluginSettingsSchema>;
 	readonly ui: import("./plugin-ui.ts").PluginUi;
 	registerCodeBlock(renderer: PluginCodeBlockRenderer): () => void;
 	registerToolRenderer(renderer: PluginToolRenderer): () => void;
+	/** Owner-scoped slots inside the host question card. */
+	registerQuestionRenderer(renderer: PluginQuestionRenderer): () => void;
 	call<T = unknown>(operation: string, input?: unknown): Promise<T>;
 	/** Live-only notifications. Re-read state on resync; no implied durable replay. */
 	onNotification(listener: (event: PluginNotification) => void): () => void;

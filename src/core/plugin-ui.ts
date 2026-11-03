@@ -59,12 +59,22 @@ export interface PluginButtonProps {
 }
 /** Content stays plugin-owned; mount may return cleanup, including asynchronously. */
 export type PluginUiContent = HTMLElement | ((container: HTMLElement, signal: AbortSignal) => void | (() => void) | Promise<void | (() => void)>);
+/** Built-in host Markdown rendering without auxiliary controls or plugin code-block widgets. */
+export interface PluginMarkdownProps { text: string }
 export interface PluginWorkerResultProps {
 	label: string;
 	status: "succeeded" | "failed" | "cancelled" | "interrupted";
 	text: string;
 	content?: PluginUiContent;
 	presentation?: "collapsed" | "card" | "plain";
+}
+declare const pluginSurfaceTargetBrand: unique symbol;
+/** Opaque host-created identity for one mounted native session view. */
+export interface PluginSurfaceTarget { readonly [pluginSurfaceTargetBrand]: true }
+export interface PluginSurfaceProps {
+	title: string;
+	content: PluginUiContent;
+	onClose?: () => void | Promise<void>;
 }
 export interface PluginDialogProps {
 	title: string;
@@ -107,7 +117,9 @@ export interface PluginUi {
 	mountStandardComposer(container: HTMLElement, props: PluginStandardComposerProps, options: PluginWidgetOptions): PluginWidgetHandle<PluginStandardComposerProps>;
 	mountButton(container: HTMLElement, props: PluginButtonProps, options: PluginWidgetOptions): PluginWidgetHandle<PluginButtonProps>;
 	mountSettingsRows(container: HTMLElement, props: PluginSettingsSchema, options: PluginWidgetOptions): PluginWidgetHandle<PluginSettingsSchema>;
+	mountMarkdown(container: HTMLElement, props: PluginMarkdownProps, options: PluginWidgetOptions): PluginWidgetHandle<PluginMarkdownProps>;
 	mountWorkerResult(container: HTMLElement, props: PluginWorkerResultProps, options: PluginWidgetOptions): PluginWidgetHandle<PluginWorkerResultProps>;
 	openMenu(anchor: HTMLElement, props: PluginMenuProps, options: PluginWidgetOptions): PluginWidgetHandle<PluginMenuProps>;
 	openDialog(props: PluginDialogProps, options: PluginWidgetOptions): PluginWidgetHandle<PluginDialogProps>;
+	openSurface(target: PluginSurfaceTarget, props: PluginSurfaceProps, options: PluginWidgetOptions): PluginWidgetHandle<PluginSurfaceProps>;
 }

@@ -66,8 +66,9 @@ import {
 	type JobRecord,
 	type SteerMessage,
 } from "../core/contracts.ts";
-import type { TurnInput } from "../core/input-events.ts";
-import { hasUnresolvedQuestion, endsInDismissal, endsInQuestionRecovery, type LhMessage } from "../core/native-messages.ts";
+import type { TurnInput, UserSteerInput } from "../core/input-events.ts";
+import { hasUnresolvedQuestion, endsInDismissal, endsInQuestionRecovery, newUserSteer, type LhMessage } from "../core/native-messages.ts";
+import { prepareSubmissionImages, submissionImagePolicyKey } from "./submission-images.ts";
 import { fireJobAbort, isJobLive } from "../agent/subagents/aborts.ts";
 import { stores, effectiveSettings } from "./stores.ts";
 import { resolveConversationSpec } from "../core/settings-resolution.ts";
@@ -313,14 +314,30 @@ export interface UserSteerEntry {
 	handedTo?: Agent;
 }
 
-/** The steer route's live hand-off (composer steering, 2026-10-03).
- *  Synchronous by design — no interleaving between the live-agent check
- *  and the queue() means a settling turn can never race the hand-off.
- *  Returns false when no turn is live: the caller 409s and the client
- *  falls back to a plain text send (the settle race). The registry copy
- *  is the stranding safety net: if this agent dies undelivered (question
- *  termination, abort), reconcileUserSteers keeps it parked for the
- *  chat's next run. */
+/** Async composer admission keeps the live agent private. Future chat settings
+ * are deliberately irrelevant: this steer belongs to the captured live run.
+ * Settling keeps the existing send fallback; replacements must never retarget. */
+export async function prepareAndSteerChat(chatId: string, input: UserSteerInput): Promise<"accepted" | "settled" | "stale"> {
+	const agent = state().liveAgents.get(chatId);
+	if (!agent) return "settled";
+	const model = agent.state.model;
+	const session = stores.chatStore.getChat(chatId);
+	if (!model || !session) return "stale";
+	const policy = submissionImagePolicyKey({ model });
+	const { text, id } = input;
+	const images = await prepareSubmissionImages(input.images, { model });
+	const currentSession = stores.chatStore.getChat(chatId);
+	if (!currentSession || currentSession.createdAt !== session.createdAt || currentSession.kind !== session.kind) return "stale";
+	const current = state().liveAgents.get(chatId);
+	if (!current) return "settled";
+	if (current !== agent || current.state.model !== model || submissionImagePolicyKey({ model }) !== policy) return "stale";
+	// No await may separate the identity/policy check from this registry handoff.
+	return steerLiveChat(chatId, newUserSteer(text, id, images)) ? "accepted" : "settled";
+}
+
+/** Synchronous live handoff. The registry copy preserves the existing
+ * memory-only stranding safety net: undelivered steers ride the next run.
+ * No live agent means the caller may fall back to an ordinary send. */
 export function steerLiveChat(chatId: string, message: LhMessage): boolean {
 	const agent = state().liveAgents.get(chatId);
 	if (!agent) return false;

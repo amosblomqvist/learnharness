@@ -20,9 +20,20 @@ it("generated plugin API declarations are portable and usable as type-only impor
 		fs.symlinkSync(path.join(root, "node_modules"), path.join(home, "node_modules"), "dir");
 		const consumer = path.join(home, "consumer.mts");
 		fs.writeFileSync(consumer, `
-import type { PluginBackendContext, PluginFrontendContext, PluginAgentTool, GraphNode, GraphSnapshot } from "./api/index.d.ts";
+import type { PluginBackendContext, PluginFrontendContext, PluginAgentTool, PluginMarkdownProps, GraphNode, GraphSnapshot } from "./api/index.d.ts";
 declare const backend: PluginBackendContext;
 declare const frontend: PluginFrontendContext;
+declare const container: HTMLElement;
+const markdownProps: PluginMarkdownProps = { text: "**Host rendering**" };
+const markdown = frontend.ui.mountMarkdown(container, markdownProps, { signal: frontend.signal });
+markdown.update({ text: "Replacement" });
+markdown.dispose();
+// @ts-expect-error Markdown source is a string, not a React element or arbitrary data.
+frontend.ui.mountMarkdown(container, { text: 123 }, { signal: frontend.signal });
+// @ts-expect-error Every renderer requires an explicit mount lifetime.
+frontend.ui.mountMarkdown(container, markdownProps);
+// @ts-expect-error Static rendering exposes no streaming or interactive-control options.
+markdown.update({ streaming: true });
 const stop = backend.handle("test", async () => backend.learning.listSessions());
 backend.registerInstructions({ agents: ["teacher", "practice"], text: "Use the example tool when asked." });
 backend.registerTools({ agents: ["teacher"], create: context => [{
