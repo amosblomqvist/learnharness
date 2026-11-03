@@ -68,7 +68,7 @@ import {
 	SearchIcon,
 	XIcon,
 } from "lucide-react";
-import { chainsForSelection, folderEntryCheck, toggleSourceEntries, formatChainLine, fuzzyScore, sourceFileLabel } from "@/src/core";
+import { chainsForSelection, chainSourceDirectory, folderEntryCheck, toggleSourceEntries, formatChainLine, fuzzyScore, sourceFileLabel } from "@/src/core";
 import type { GraphChain, GraphNode, SourceDirectory, SourceEntry, SourceFolder, SourceEntrySelection } from "@/src/core";
 import { EditableSourceName, SourceDragRow, sourceNameMatches, SourceFolderTree, type OrganizationChange } from "./source-folder-tree";
 import { chainRow, useChainNavigation } from "./chain-navigation";
@@ -120,14 +120,16 @@ export function ChainTableBody({
 	onClose,
 	selectMode,
 	onSelect,
-	directory,
+	directory: fullDirectory,
 	onOrganizationChange,
 	selectedFolders = new Set<string>(),
 	selectedSources = new Set<string>(),
 	onToggleSource = () => {},
 	onToggleFolder = () => {},
 	keyboardActive = true,
+	sourceInventoryPending = false,
 }: {
+	sourceInventoryPending?: boolean;
 	keyboardActive?: boolean;
 	directory?: SourceDirectory;
 	onOrganizationChange?: OrganizationChange;
@@ -179,15 +181,21 @@ export function ChainTableBody({
 		});
 	};
 	const byId = useMemo(() => new Map(nodes.map((n) => [n.id, n])), [nodes]);
+	const directory = useMemo(() => fullDirectory && chainSourceDirectory(fullDirectory), [fullDirectory]);
+	const hiddenSourceIds = useMemo(() => new Set(fullDirectory?.sources.filter((s) => s.chatKind === "practice").map((s) => s.id)), [fullDirectory]);
 	const sourceRecords = useMemo(() => new Map(directory?.sources.map((s) => [s.id, s])), [directory]);
 	const matchesSource = useCallback((birth: string) => sourceNameMatches(directory, birth,
 		sourceRecords.get(birth)?.label ?? sessions[birth] ?? (fileSources[birth] === undefined ? null : sourceFileLabel(fileSources[birth])), query),
 	[directory, sourceRecords, sessions, fileSources, query]);
 	const chains = useMemo(() => chainsForSelection(nodes, storedChains), [nodes, storedChains]);
+	// Filter source groups, not global nodes: shared premises remain visible
+	// in teaching/notes groups. Keep the graph-wide header and pick set intact.
+	const sourceChains = useMemo(() => chains.filter((chain) =>
+		!hiddenSourceIds.has(byId.get(chain.conclusion)?.provenance[0]?.chatId ?? "")), [chains, byId, hiddenSourceIds]);
 	const searching = query.trim() !== "";
 	const allSourceNodes = useMemo(() => {
 		const membership = new Map<string, Set<string>>();
-		for (const chain of chains) {
+		for (const chain of sourceChains) {
 			const birth = byId.get(chain.conclusion)?.provenance[0]?.chatId;
 			if (!birth) continue;
 			const members = membership.get(birth) ?? new Set<string>();
@@ -195,13 +203,13 @@ export function ChainTableBody({
 			membership.set(birth, members);
 		}
 		return membership;
-	}, [chains, byId]);
+	}, [sourceChains, byId]);
 
 	// The fuzzy filter: a chain is visible when ANY member matches on
 	// name, aliases, or statement; chains rank by best member score.
 	const visibleChains = useMemo(() => {
-		if (!searching) return chains;
-		const scored = chains
+		if (!searching) return sourceChains;
+		const scored = sourceChains
 			.map((chain) => {
 				const birth = byId.get(chain.conclusion)?.provenance[0]?.chatId;
 				let best: number | null = birth && matchesSource(birth) ? 0 : null;
@@ -218,12 +226,14 @@ export function ChainTableBody({
 		return scored
 			.sort((a, b) => b.best - a.best || (a.chain.id < b.chain.id ? -1 : 1))
 			.map(({ chain }) => chain);
-	}, [chains, byId, query, searching, matchesSource]);
+	}, [sourceChains, byId, query, searching, matchesSource]);
 
 	// Group the visible chains by their CONCLUSION's birth (owner ruling).
 	// Unlabeled births (provenance gone / never named) form one honest
 	// muted group, sorted last under name-sort.
 	const groups = useMemo(() => {
+		// Session kinds must arrive before provenance-only source rows can render.
+		if (sourceInventoryPending) return [];
 		const map = new Map<string, ClusterGroup>();
 		for (const source of directory?.sources ?? []) {
 			if (searching && !matchesSource(source.id)) continue;
@@ -281,7 +291,7 @@ export function ChainTableBody({
 			);
 		}
 		return list;
-	}, [visibleChains, byId, sessions, fileSources, sort, directory, sourceRecords, searching, matchesSource]);
+	}, [visibleChains, byId, sessions, fileSources, sort, directory, sourceRecords, searching, matchesSource, sourceInventoryPending]);
 
 	// The derived shape under the floating bar (the agents' ACTUAL input).
 	const derived = useMemo(() => {
@@ -393,6 +403,7 @@ export function ChainTableBody({
 					renderSource={(group, depth) => {
 					const open = searching ? !foldedClusters.has(group.key) : expandedClusters.has(group.key);
 					const selectedCount = group.nodeIds.filter((id) => selection.has(id)).length;
+					const empty = group.birth === null ? group.nodeIds.length === 0 : !allSourceNodes.get(group.birth)?.size;
 					return (
 						<div
 							key={group.key}
@@ -432,8 +443,8 @@ export function ChainTableBody({
 									{open ? <BookOpenIcon className="size-3.5 shrink-0" /> : <BookIcon className="size-3.5 shrink-0" />}
 								</button>
 								{onOrganizationChange && group.birth && group.kind !== null
-									? <EditableSourceName name={group.label ?? ""} onSave={(name) => onOrganizationChange({ action: "rename-source", id: group.birth!, name })} />
-									: <span className="min-w-0 flex-1 truncate text-sm font-medium">{group.label ?? <span className="text-muted-foreground/60">unlabeled</span>}</span>}
+									? <EditableSourceName name={group.label ?? ""} muted={empty} onSave={(name) => onOrganizationChange({ action: "rename-source", id: group.birth!, name })} />
+									: <span className={`min-w-0 flex-1 truncate text-sm font-medium${empty ? " text-muted-foreground" : ""}`}>{group.label ?? <span className="text-muted-foreground/60">unlabeled</span>}</span>}
 								{group.kind === "notes" && <span className="text-[11px] uppercase tracking-widest text-muted-foreground/60">notes</span>}
 								<span className="w-14 shrink-0 text-right text-xs tabular-nums text-muted-foreground">
 									{group.nodeIds.length}
@@ -711,16 +722,17 @@ export function ChainTableOverlay({
 	const [deletion, setDeletion] = useState<{ sources: SourceEntry[]; folders: SourceFolder[] } | null>(null);
 	const deleteOpen = deletion !== null;
 	const [directory, setDirectory] = useState<SourceDirectory>();
+	const visibleDirectory = useMemo(() => directory && chainSourceDirectory(directory), [directory]);
 	const [directoryFailure, setDirectoryFailure] = useState("");
 	const [entrySelection, setEntrySelection] = useState<SourceEntrySelection>(() => ({ sources: new Set(), folders: new Set() }));
 	useEffect(() => {
-		if (!directory) return;
+		if (!visibleDirectory) return;
 		setEntrySelection((previous) => {
-			const sources = new Set([...previous.sources].filter((id) => directory.sources.some((s) => s.id === id)));
-			const folders = new Set([...previous.folders].filter((id) => directory.organization.folders.some((f) => f.id === id)));
+			const sources = new Set([...previous.sources].filter((id) => visibleDirectory.sources.some((s) => s.id === id)));
+			const folders = new Set([...previous.folders].filter((id) => visibleDirectory.organization.folders.some((f) => f.id === id)));
 			return sources.size === previous.sources.size && folders.size === previous.folders.size ? previous : { sources, folders };
 		});
-	}, [directory]);
+	}, [visibleDirectory]);
 	const requestVersion = useRef(0);
 	const mutationTail = useRef<Promise<unknown>>(Promise.resolve());
 	const readDirectory = useCallback(async () => {
@@ -759,11 +771,11 @@ export function ChainTableOverlay({
 		mutationTail.current = operation;
 		return operation;
 	};
-	const selectedSources = new Set([...entrySelection.sources].filter((id) => directory?.sources.some((s) => s.id === id)));
+	const selectedSources = new Set([...entrySelection.sources].filter((id) => visibleDirectory?.sources.some((s) => s.id === id)));
 	const selectedFolders = new Set([...entrySelection.folders].filter((id) => directory?.organization.folders.some((f) => f.id === id)));
-	const fullySelectedFolders = new Set([...selectedFolders].filter((id) => directory && folderEntryCheck(directory, id, { sources: selectedSources, folders: selectedFolders }).checked));
+	const fullySelectedFolders = new Set([...selectedFolders].filter((id) => visibleDirectory && folderEntryCheck(visibleDirectory, id, { sources: selectedSources, folders: selectedFolders }).checked));
 	const toggleEntries = (kind: "source" | "folder", id: string, checked: boolean) => {
-		if (directory) setEntrySelection((previous) => toggleSourceEntries(directory, previous, kind, id, checked));
+		if (visibleDirectory) setEntrySelection((previous) => toggleSourceEntries(visibleDirectory, previous, kind, id, checked));
 	};
 
 	// Controlled when the caller lifts the selection (the practice pick
@@ -827,6 +839,7 @@ export function ChainTableOverlay({
 					selectedSources={selectedSources}
 					onToggleSource={(id, next) => toggleEntries("source", id, next)}
 					onToggleFolder={(id, next) => toggleEntries("folder", id, next)}
+					sourceInventoryPending={!directory}
 					nodes={nodes}
 					chains={storedChains}
 					sessions={sessions}
