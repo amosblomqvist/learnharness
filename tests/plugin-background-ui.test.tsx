@@ -37,7 +37,7 @@ describe("persisted plugin worker result UI without an active plugin", () => {
 		const marker = buildSubagentSteer(job, { ...result, data: null, formatError: "formatter was removed" });
 		const message = projectView([marker])[0]!;
 		const html = renderToStaticMarkup(<SubagentSteerCard message={message} />);
-		assert.match(html, /Background result/); assert.match(html, /check_sources/); assert.match(html, /succeeded/);
+		assert.doesNotMatch(html, /Background result/); assert.match(html, /check_sources/); assert.match(html, /class="sr-only"> succeeded/);
 		assert.match(html, /The persisted plugin background answer/); assert.match(html, /raw authoritative worker result/);
 		assert.match(html, /original accepted input/); assert.match(html, /&quot;data&quot;: null/);
 		assert.match(html, /role="alert"/); assert.match(html, /formatter was removed/);
@@ -116,7 +116,8 @@ describe("default plugin worker transcript presentation", () => {
 		const html = renderToStaticMarkup(<SubagentSteerCard message={projectView([buildSubagentSteer(job, { ...result, text: "A **verified** answer." })])[0]!} />);
 		assert.match(html, /<details[^>]*data-testid="plugin-worker-result"/);
 		assert.doesNotMatch(html, /<details[^>]*data-testid="plugin-worker-result"[^>]*\sopen[\s=>]/);
-		assert.match(html, /<strong[^>]*>verified<\/strong>/); assert.match(html, /view result/);
+		assert.match(html, /<strong[^>]*>verified<\/strong>/); assert.match(html, /lucide-chevron-right/);
+		assert.doesNotMatch(html, /view result|hide result/);
 		assert.match(html, /Task details/); assert.match(html, /raw authoritative worker result/);
 		assert.doesNotMatch(html, /plugin-worker-result-card|dispatch-card/);
 	});

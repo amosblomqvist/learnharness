@@ -1,12 +1,16 @@
 # Dialog, popup, and interaction contract
 
+> **Commit closeout — 2026-11-04:** The verified UI-polish, question-card, native-default/reconnection and opening-animation changes are included in this feature-branch commit, together with Coding Questions and UI Showcase. “Uncommitted” notices below retain their original verification-time status; this note supersedes them for the current Git state. No push or release is implied.
+
 **Status:** Human-approved contract (approved 2026-11-01), implemented and verified 2026-11-02. The behavior decisions below are authoritative. The pre-migration checkpoint is `2c44868`; verification does not imply a subsequent commit, push or release.
 
 ## Purpose and preservation boundary
 
 Standardize the application's interaction infrastructure without redesigning its existing surfaces or changing their domain workflows. Core UI and plugin UI use the same foundation.
 
-Preserve current typography, spacing, dimensions, position, frame/scrim classes, content, labels, buttons, menu positioning, search/arrow behavior, mutation sequencing, and established flow-specific close actions. Do not substitute a library theme. A difference between two flows is not automatically a defect.
+Preserve current typography, spacing, dimensions, position, frame/scrim classes, content, labels, buttons, menu positioning, search/arrow behavior, mutation sequencing, and established flow-specific close actions except for the subsequent human-approved UI-polish amendment below. Do not substitute a library theme. A difference between two flows is not automatically a defect.
+
+**Subsequent approved UI-polish amendment — implemented and verified, uncommitted:** public plugin dialogs and session surfaces no longer reserve a visible host title/header row. Their required title supplies the accessible name; a quiet muted corner X floats above edge-aligned scrolling content. Plugins own visible headings and bottom actions. Surface content fills the session-body bounds, with `background?: "dimmed" | "opaque"` (`"dimmed"` preserves the Chains-like translucent/blurred default). Context-sensitive knowledge-picker bounds below supersede the original always-modal presentation. These approved presentation changes do not alter leaf-first Escape, focus ownership, covered-parent retention, domain operations or close guards. The original migration and the later amendment have separate verification checkpoints below.
 
 The checkpoint includes a **provisional picker-specific foreground experiment**. Its hidden-parent presentation, independent activation ordering, and special-case routing are not the preservation baseline. Replace that experiment with the common contract rather than extending it.
 
@@ -65,7 +69,8 @@ Acknowledged-save authority persists across Settings close/reopen. A late older 
 Preserve existing explicit initial-focus targets. Where a modal has no explicit target:
 
 1. Focus the first eligible editable text/number field, if one exists.
-2. Otherwise focus its heading programmatically.
+2. Otherwise focus its eligible content heading programmatically, if present.
+3. With no eligible field or content heading, focus the accessible modal boundary or painted surface frame—not the close action. Headerless surfaces must not try to focus a non-rendering `display: contents` wrapper.
 
 Exclude disabled, read-only, hidden, or inactive controls. Do not default to an action button. This does not enable Tab navigation.
 
@@ -112,11 +117,11 @@ A layer's visual position is not its lifetime ownership. For example, unloading 
 
 ### New plugin knowledge picker
 
-The intended presentation is a full-window modal using the existing Chains interface and its translucent/blurred appearance, rather than a separately designed selection screen. Its modal parent stays mounted underneath. The background, including the sidebar, is inactive while this modal is active.
+The picker reuses the existing Chains interface and translucent/blurred appearance. The later human-approved presentation is origin-sensitive: opening from a plugin/native page or session surface uses a main-content-pane `view`, excluding the sidebar and leaving sidebar interaction available, like native Chains. Opening from a dialog, Settings or another modal ancestor uses the full-window modal presentation, with its painted parent and background/sidebar inactive. The host captures the actual invocation owner and bounds; plugins do not guess a context or supply a public origin option. Navigation away from an originating page or expiry of the exact owner/widget closes pending and open pickers; merely covering a live origin retains mounted state. A global-modal origin follows its actual modal/widget lifetime, not an unrelated background pathname. This supersedes the original always-full-window plugin-picker policy.
 
 Reuse the real Chains content, controlled selection, source organization operations and data handling. Do not duplicate the table or move deck/library ownership into the host. Existing Graph/Practice content-area presentation remains unchanged.
 
-The public controlled `mountKnowledgePicker` API stays unchanged. Do not carry the provisional per-picker modal-hiding coordinator forward as the application foundation.
+The public controlled `mountKnowledgePicker` API stays unchanged. Both presentations reserve the applicable native-window control clearance without adding a sidebar-reopen control to the picker or mutating the background sidebar preference. The generic selection action is **Done**, without a practice-specific dumbbell. Shared local view paint ranks must agree with interaction order, including session surfaces and owned popup hosts; global modal dialogs remain above this main-local stratum. Do not carry the provisional per-picker modal-hiding coordinator forward as the application foundation.
 
 ## Approved implementation architecture
 
@@ -180,7 +185,7 @@ Do not ship an intermediate mixed behavior as the completed migration. No releas
 - Parent content/state/scroll survive children; plugin unload/navigation/abort clean up only owned content; late reads cannot resurrect a surface.
 - Existing genuine-backdrop gestures survive drag/text selection; per-flow scroll/outside policies remain intact.
 - Chains selection, rename, folder creation, dragging, controlled updates and cleanup still use the real host implementation.
-- Existing dialogs and content views retain their visual appearance and bounds; new picker modal is the explicitly new presentation.
+- Existing dialogs and content views retain their visual appearance and bounds except for the explicitly approved later plugin presentation and origin-sensitive picker amendments.
 
 ## Verification — 2026-11-02
 
@@ -190,3 +195,11 @@ Do not ship an intermediate mixed behavior as the completed migration. No releas
 - All four sampled legacy dialog/menu frames retained identical bounds and computed styles. Public-dialog and font-menu pixel crops matched exactly; Settings crops differed only at six rounded-border anti-aliasing pixels. Tooltip bounds matched and tooltip paint remained above its owning Settings frame.
 - All 392 production-source files under `app`, `components`, `src` and `lib` matched their isolated source and standalone copies byte-for-byte. The 96 tracing manifests contained no private-root entries.
 - Independent review's confirmed ownership and settings-ordering findings were fixed and causally retested. Final review reported no further confirmed P1/P2 findings. Historical admission/picker/checkpoint counts are separate evidence, not this migration's verification.
+
+## UI-polish amendment verification — 2026-11-03
+
+The later approved amendment is implemented and verified, **uncommitted and not released**. Full offline verification passed **3,908 tests / 564 suites**, plus **17 UI Showcase tests**, whole-project typecheck/lint, a strict consumer of the curated SDK, a fresh isolated production/standalone build, and a privacy/byte audit (**96 manifests / 277,329 entries / zero private-root hits / 410 identical production files**).
+
+Expanded packaged Electron-Node/Chrome verification passed headerless accessible dialogs/surfaces, pinned muted X controls and edge-aligned scrolling, both surface backgrounds, real Hint tooltips, nested painted parents, command/focus ownership and disable cleanup. Eleven knowledge-picker origin/geometry cases covered interactive sidebar main-pane views versus modal-origin viewport dialogs, source navigation expiry and simulated native-window clearance. Global-modal origins remain independent of background routes. Cross-region view coverage preserves source DOM/draft/registration and blocks covered field commands; it does not imply a new universal DOM-inertness rule. Reverse programmatic picker/surface ordering has a separate causal host-integration regression.
+
+The native run recorded **223 requests / 217 responses**, zero off-origin/generation/microphone/WebSocket/page errors, unchanged settings/synthetic graph/approved host bytes, and one narrowly expected canceled source read. Evidence and boundaries are detailed in [the session-extension contract, section 11](plugin-session-extension-contract.md#11-subsequent-ui-polish-verification--2026-11-03). The Windows/Linux checks are CSS geometry simulations, not physical OS verification; no paid provider, microphone recording, OS IME, signed installer, real-profile install or commit is claimed.

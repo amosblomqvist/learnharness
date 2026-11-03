@@ -9,7 +9,8 @@ import { createPluginUiStore, PluginUiHost as Host, PluginSettingsRows } from ".
 import { InteractionLayersProvider } from "../components/interaction-layers.tsx";
 import { installModalDom } from "./modal-dom.ts";
 function PluginUiHost(props: React.ComponentProps<typeof Host>) { return <InteractionLayersProvider><Host {...props} /></InteractionLayersProvider>; }
-import { createTranscriptDelivery, PluginComposer } from "../components/plugin-composer.tsx";
+import { createTranscriptDelivery, PluginComposer, PluginStandardComposer } from "../components/plugin-composer.tsx";
+import { ModelPickerPill } from "../components/model-picker-pill.tsx";
 import { SettingsSlider } from "../components/settings/controls.tsx";
 import type { PluginWidgetHandle, PluginButtonProps, PluginSettingsSchema, PluginMenuProps, PluginDialogProps } from "../src/core/plugin-ui.ts";
 
@@ -101,6 +102,40 @@ describe("controlled plugin UI", () => {
 		} finally { await act(async () => { lifetime.abort(); root.unmount(); }); }
 	}));
 
+	it("dialog title is an accessible name only, with edge scrolling and a stationary quiet X", async () => withDom(async () => {
+		const store = createPluginUiStore(), scope = new AbortController();
+		const ui = store.createUi({ signal: scope.signal }), root = createRoot(document.querySelector("#root")!);
+		let handle!: PluginWidgetHandle<PluginDialogProps>;
+		let mounted = 0;
+		try {
+			await act(async () => {
+				root.render(<PluginUiHost store={store} />);
+				handle = ui.openDialog({ title: "Accessible dialog name", content(container) {
+					mounted++;
+					const heading = document.createElement("h2"); heading.textContent = "Plugin-owned heading";
+					container.append(heading);
+				} }, { signal: scope.signal });
+			});
+			const dialog = document.querySelector('[role="dialog"]')!;
+			const frame = document.querySelector<HTMLElement>("[data-plugin-ui-dialog]")!;
+			const scroller = frame.querySelector<HTMLElement>("[data-plugin-ui-dialog-scroll]")!;
+			const close = frame.querySelector<HTMLElement>('button[aria-label="Close dialog"]')!;
+			assert.equal(dialog.getAttribute("aria-label"), "Accessible dialog name");
+			assert.deepEqual([...frame.querySelectorAll("h2")].map(heading => heading.textContent), ["Plugin-owned heading"]);
+			assert.equal(document.activeElement, frame.querySelector("h2"), "plugin heading remains the initial-focus fallback");
+			assert.equal(frame.querySelector("header"), null);
+			assert.match(frame.className, /overflow-hidden/); assert.doesNotMatch(frame.className, /overflow-y-auto|p-5/);
+			assert.match(scroller.className, /overflow-y-auto p-5/);
+			assert.equal(close.parentElement, frame); assert.equal(scroller.contains(close), false);
+			assert.equal(close.textContent, ""); assert.ok(close.querySelector("svg"));
+			assert.match(close.className, /absolute right-2 top-2.*text-muted-foreground/);
+			scroller.scrollTop = 200;
+			await act(async () => handle.update({ title: "Updated accessible name" }));
+			assert.equal(dialog.getAttribute("aria-label"), "Updated accessible name");
+			assert.equal(scroller.scrollTop, 200); assert.equal(mounted, 1);
+		} finally { await act(async () => { scope.abort(); root.unmount(); }); }
+	}));
+
 	it("held settings controls resolve latest callbacks by key across synchronous reorder/removal", async () => withDom(async (dom) => {
 		const store = createPluginUiStore(); const scope = new AbortController();
 		const ui = store.createUi({ signal: scope.signal }); const root = createRoot(document.querySelector("#root")!);
@@ -185,6 +220,36 @@ describe("controlled plugin UI", () => {
 		assert.match(html, /data-testid="composer"/);
 		assert.match(html, /Message…/);
 		assert.doesNotMatch(html, /data-file-path-input|data-file-path-default|Next problem|Ask, answer|Usage/);
+	});
+
+	it("shared model/thinking triggers own their canonical chrome typography", () => {
+		const { document } = parseHTML(renderToStaticMarkup(<ModelPickerPill>Fixture model</ModelPickerPill>));
+		const trigger = document.querySelector("button")!;
+		for (const token of ["font-ui", "text-xs"]) assert.ok(trigger.classList.contains(token), token);
+		assert.equal(trigger.querySelector("span")!.className, "text-card-foreground", "label color stays native foreground");
+		assert.equal(trigger.querySelector("[aria-hidden]")!.className, "text-xs text-muted-foreground");
+	});
+
+	it("standard composer keeps only the input row inside the frame and controls below it", () => {
+		const html = renderToStaticMarkup(<InteractionLayersProvider><PluginStandardComposer
+			composer={{ value: "", autoFocus: false, onChange() {}, onSend() {} }}
+			model={{ value: undefined, onChange() {} }}
+			thinking={{ model: undefined, value: undefined, onChange() {} }}
+			dictation={{ onTranscript() {} }}
+		/></InteractionLayersProvider>);
+		const { document } = parseHTML(html);
+		const preset = document.querySelector("[data-plugin-standard-composer]")!;
+		const frame = preset.children[0]!, controls = preset.children[1]!;
+		assert.equal(preset.children.length, 2);
+		assert.ok(!preset.classList.contains("border"));
+		for (const token of ["rounded-2xl", "border", "bg-card", "shadow-lg"]) assert.ok(frame.classList.contains(token), token);
+		assert.ok(frame.querySelector('[data-testid="composer"]'));
+		assert.equal(frame.querySelector("[data-testid=plugin-dictation-control], [data-plugin-model-picker], [data-plugin-thinking-picker]"), null);
+		for (const selector of ["[data-testid=plugin-dictation-control]", "[data-plugin-model-picker]", "[data-plugin-thinking-picker]"]) assert.ok(controls.querySelector(selector), selector);
+		for (const token of ["font-ui", "text-xs", "text-muted-foreground", "pt-2"]) assert.ok(controls.classList.contains(token), token);
+		assert.equal(controls.querySelector('[data-testid="composer"]'), null);
+		assert.ok(document.querySelector('button[aria-label="Send"]')!.hasAttribute("disabled"));
+		assert.doesNotMatch(html, /data-file-path-input|data-file-path-default|Next problem|Usage/);
 	});
 
 	it("schema rows reuse the shared settings controls with controlled values", () => {

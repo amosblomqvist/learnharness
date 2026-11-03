@@ -4,7 +4,6 @@ import type { LhViewPart } from "@/src/core";
 import { readPluginQuestionAnswer, readPluginQuestionCancellation } from "@/src/core";
 import { usePlugins } from "./plugins";
 import { SubmittedImages } from "./submitted-images";
-import { ThinkingBlock } from "./thinking-block";
 import { PluginQuestionAnswered } from "./plugin-question-slots";
 
 /** Visibility boundary precedes all generic tool/input/error rendering. */
@@ -18,10 +17,8 @@ export function PluginQuestionPart({ part, chatId }: { part: LhViewPart; chatId:
 		if (answer) {
 			const registration = plugins.questionRenderers?.find(entry => entry.pluginId === snapshot.pluginId && entry.renderer.id === snapshot.typeId && entry.renderer.supportedContractVersions.includes(snapshot.contractVersion));
 			return <>
-				{answer.images?.readingThinking?.length ? <ThinkingBlock text="" label="THINKING WHILE READING" images={answer.images.readingThinking} defaultOpen /> : null}
 				<PluginQuestionAnswered snapshot={snapshot} answer={answer} chatId={chatId} registration={registration} />
 				<SubmittedImages images={answer.images?.answer} />
-				{answer.images?.thinking?.length ? <ThinkingBlock text="" images={answer.images.thinking} defaultOpen /> : null}
 			</>;
 		}
 		const cancellation = readPluginQuestionCancellation(part.result?.details ?? part.output, snapshot);

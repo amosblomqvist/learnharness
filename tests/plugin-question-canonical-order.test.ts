@@ -130,6 +130,42 @@ test("a legitimately invalidated current terminal GET exposes reconciliation-onl
 	assert.equal(await model.reconcile(), true); assert.equal(model.getState().reconciliation, "ready"); assert.equal(model.readyRef, true);
 });
 
+test("reconciliation after stop starts a fresh null-owner read and only joins its current connection", async () => {
+	const detached = deferred<Response>(), replacement = deferred<Response>(); let reads = 0;
+	const model = new SessionModel({ chatId: "fixture", initialMessages: current, fetch: async () => ++reads === 1 ? detached.promise : replacement.promise });
+	const old = model.reconcile();
+	model.stop();
+	const fresh = model.reconcile();
+	assert.equal(reads, 2, "null stream ownership does not make detached work current");
+	const joined = model.reconcile();
+	assert.equal(reads, 2, "the current connection still deduplicates its own task");
+	detached.resolve(saved()); assert.equal(await old, false);
+	assert.equal(model.getState().reconciliation, "syncing"); assert.equal(model.readyRef, false);
+	const stillJoined = model.reconcile(); assert.equal(reads, 2, "detached finalization must not clear the replacement task");
+	replacement.resolve(saved());
+	assert.deepEqual(await Promise.all([fresh, joined, stillJoined]), [true, true, true]);
+	assert.equal(model.getState().reconciliation, "ready"); assert.equal(model.readyRef, true);
+	assert.equal(model.getState().pluginQuestionAvailability?.status, "available");
+});
+
+for (const oldResult of ["success", "failure"] as const) {
+	for (const replacementResult of ["success", "failure"] as const) test(`detached ${oldResult} cannot overwrite replacement ${replacementResult}`, async () => {
+		const detached = deferred<Response>(), replacement = deferred<Response>(); let reads = 0;
+		const model = new SessionModel({ chatId: "fixture", initialMessages: current, fetch: async () => ++reads === 1 ? detached.promise : replacement.promise });
+		const old = model.reconcile(); model.stop(); const fresh = model.reconcile();
+		assert.equal(reads, 2);
+		if (replacementResult === "success") replacement.resolve(saved()); else replacement.reject(new Error("current offline"));
+		assert.equal(await fresh, replacementResult === "success");
+		const expected = replacementResult === "success" ? "ready" : "failed";
+		assert.equal(model.getState().reconciliation, expected);
+		if (oldResult === "success") detached.resolve(saved()); else detached.reject(new Error("detached offline"));
+		assert.equal(await old, false);
+		assert.equal(model.getState().reconciliation, expected);
+		assert.equal(model.readyRef, replacementResult === "success");
+		assert.equal(model.getState().pluginQuestionAvailability?.status, replacementResult === "success" ? "available" : undefined);
+	});
+}
+
 for (const method of ["setMessages", "adoptRecord"] as const) test(`direct ${method} authority invalidates older canonical GETs`, async () => {
 	const oldRead = deferred<Response>();
 	const model = new SessionModel({ chatId: "fixture", initialMessages: older, fetch: async () => oldRead.promise });

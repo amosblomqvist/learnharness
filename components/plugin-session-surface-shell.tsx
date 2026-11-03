@@ -1,9 +1,9 @@
 "use client";
 
 import { useCallback, useId, useLayoutEffect, useRef, type ReactNode } from "react";
-import { XIcon } from "lucide-react";
 import { InteractionLayerOwner, useInteractionLayer, type CloseOutcome } from "./interaction-layers";
 import type { SessionSurfaceBoundary } from "./plugin-session-surface-targets";
+import type { PluginSurfaceProps } from "@/src/core";
 
 interface SurfaceRuntime {
 	signal: AbortSignal;
@@ -28,14 +28,17 @@ function enterRegion(boundary: SessionSurfaceBoundary, root: HTMLElement, rememb
 		if (!heading.hasAttribute("tabindex")) heading.setAttribute("tabindex", "-1");
 		heading.focus({ preventScroll: true });
 	} else {
-		if (!root.hasAttribute("tabindex")) root.setAttribute("tabindex", "-1");
-		root.focus({ preventScroll: true });
+		// The semantic surface root is display:contents; focus its painted frame.
+		const fallback = root.querySelector<HTMLElement>("[data-plugin-session-surface-frame]") ?? root;
+		if (!fallback.hasAttribute("tabindex")) fallback.setAttribute("tabindex", "-1");
+		fallback.focus({ preventScroll: true });
 	}
 }
 
 /** A view, not a modal: no trap, global hiding, viewport portal or scroll lock. */
-export function PluginSessionSurface({ title, onClose, runtime, boundary, opener, children }: {
+export function PluginSessionSurface({ title, background = "dimmed", onClose, runtime, boundary, opener, children }: {
 	title: string;
+	background?: PluginSurfaceProps["background"];
 	onClose?: () => void | Promise<void>;
 	runtime: SurfaceRuntime;
 	boundary: SessionSurfaceBoundary;
@@ -44,7 +47,6 @@ export function PluginSessionSurface({ title, onClose, runtime, boundary, opener
 }) {
 	const root = useRef<HTMLDivElement>(null);
 	const popup = useRef<HTMLDivElement>(null);
-	const headingId = useId();
 	const layerId = useId();
 	const controller = boundary.controller;
 	const closing = useRef(false);
@@ -91,18 +93,17 @@ export function PluginSessionSurface({ title, onClose, runtime, boundary, opener
 	}, [boundary, runtime, layer.isTop, focusInitial]);
 	return <InteractionLayerOwner.Provider value={layer.id}>
 		<div ref={root} data-plugin-session-surface="" data-interaction-layer={layer.id}
-			role="region" aria-labelledby={headingId} style={{ display: "contents" }}>
-			<div data-plugin-session-surface-frame=""
-				className="pointer-events-auto absolute inset-0 flex min-h-0 flex-col bg-background/80 p-4 backdrop-blur-sm"
+			role="region" aria-label={title} style={{ display: "contents" }}>
+			<div data-plugin-session-surface-frame="" tabIndex={-1} aria-label={title}
+				className={`pointer-events-auto absolute inset-0 flex min-h-0 flex-col overflow-hidden outline-none ${background === "opaque" ? "bg-background" : "bg-background/80 backdrop-blur-sm"}`}
 				style={{ zIndex: 100 + layer.order }}>
-			<div className="mb-2 flex shrink-0 items-center gap-2">
-				<h2 id={headingId} tabIndex={-1} className="text-sm font-medium outline-none">{title}</h2>
-				<button type="button" onClick={close} aria-label="Close" title="Close"
-					className="ml-auto rounded-lg p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground">
-					<XIcon className="size-4" />
-				</button>
-			</div>
-			<div className="min-h-0 w-full flex-1">{children}</div>
+			<div className="min-h-0 w-full flex-1 overflow-y-auto">{children}</div>
+			<button type="button" onClick={close} aria-label="Close" title="Close"
+				className="absolute right-2 top-2 z-10 size-7 rounded-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground">
+				<svg viewBox="0 0 16 16" className="mx-auto size-3.5" fill="none" stroke="currentColor" strokeWidth="1.5">
+					<path d="M4 4l8 8M12 4l-8 8" />
+				</svg>
+			</button>
 			</div>
 			{/* Same INTEGER rank, after the frame: even passive z-50 tooltips
 			    paint above this frame, while the host remains below newer views.

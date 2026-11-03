@@ -47,7 +47,7 @@ it("registered renderers override native plugin dispatch/result bodies; disable 
 		assert.match(document.body.textContent!, /Custom result body/);
 		const details = document.querySelector('[data-testid="plugin-worker-result"]')!;
 		assert.equal(details.hasAttribute("open"), false);
-		assert.match(document.querySelector('[data-testid="plugin-worker-header"]')!.textContent!, /Background resultcheck_sourcessucceeded/);
+		assert.match(document.querySelector('[data-testid="plugin-worker-header"]')!.textContent!, /check_sources succeeded/);
 		assert.match(document.querySelector('[role="alert"]')!.textContent!, /Formatter unavailable/);
 		assert.equal(document.querySelector('[data-testid="plugin-worker-fallback"]'), null);
 		assert.equal(seen[0]!.signal.aborted, true);
@@ -57,7 +57,7 @@ it("registered renderers override native plugin dispatch/result bodies; disable 
 			assert.ok(surface, `the registered ${presentation} presentation controls the host surface`);
 			assert.equal(document.querySelector("details"), null, "elaborate/unframed custom results are not nested inside collapsed results");
 			assert.ok(surface.querySelector('[data-testid="custom-rich-body"]'));
-			assert.equal(surface.querySelector('[data-testid="plugin-worker-header"]')!.textContent, `Background resultcheck_sources_${presentation}succeeded`);
+			assert.equal(surface.querySelector('[data-testid="plugin-worker-header"]')!.textContent, `check_sources_${presentation} succeeded`);
 			assert.equal(surface.className.includes("border"), presentation === "card");
 			assert.match(document.querySelector('[role="alert"]')!.textContent!, /Formatter unavailable/);
 		}

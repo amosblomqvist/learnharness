@@ -538,6 +538,12 @@ body {
 .lh-electron[data-lh-platform="darwin"] .lh-closed-toggle {
 	margin-left: calc(92px / var(--lh-zoom));
 }
+/* Picker headers have no sidebar-reopen control. Clear only the portion of
+   the physical traffic-light gutter that actually overlaps their pane;
+   an open sidebar already moves the main pane beyond the native buttons. */
+.lh-electron[data-lh-platform="darwin"] .lh-native-window-clearance {
+	padding-left: calc(0.75rem + max(0px, calc(92px / var(--lh-zoom) - var(--lh-header-left, 0px))));
+}
 
 /* Windows/Linux Window Controls Overlay: Chromium publishes the usable
    titlebar rectangle in CSS coordinates (including resize/zoom changes).

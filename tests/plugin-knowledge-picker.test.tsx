@@ -6,6 +6,7 @@ import os from "node:os";
 import path from "node:path";
 import { parseHTML } from "linkedom";
 import { createRoot } from "react-dom/client";
+import { createPortal } from "react-dom";
 import { AppRouterContext } from "next/dist/shared/lib/app-router-context.shared-runtime.js";
 import { installModalDom } from "./modal-dom.ts";
 import type { GraphSnapshot, SourceDirectory } from "../src/core/index.ts";
@@ -28,6 +29,8 @@ const { ServerEventsProvider } = await import("../components/server-events.tsx")
 const { DeleteSourceDialog } = await import("../components/delete-source-dialog.tsx");
 const { SessionFind } = await import("../components/session-find.tsx");
 const { SettingsDialogProvider, useSettingsDialog } = await import("../components/settings/settings-dialog.tsx");
+const { HostContentRootContext, HostRouteLifetimeContext, HostRouteLifetimeProvider } = await import("../components/host-content-root.tsx");
+const { SessionSurfaceRegion, useSessionSurfaceBoundary } = await import("../components/plugin-session-surfaces.tsx");
 
 const graph: GraphSnapshot = {
 	nodes: [], edges: [], logicalEdges: [], impLinks: [], nodeSessions: {}, clusters: [],
@@ -47,8 +50,8 @@ function deferred<T>() {
 }
 
 type Fixture = Awaited<ReturnType<typeof fixture>>;
-async function fixture(options: { withSessionFind?: boolean; withKeyboard?: boolean; withSettings?: boolean; missingProvider?: boolean; value?: readonly string[]; disabled?: boolean; fetch?: typeof fetch } = {}) {
-	const dom = parseHTML("<!doctype html><html><body><div id='root'></div><aside id='sidebar'></aside><main id='content'><div id='transcript'>Session text</div><input id='background-composer' /><div id='target'>plugin-owned</div><div id='second-target'></div></main></body></html>");
+async function fixture(options: { withSessionFind?: boolean; withKeyboard?: boolean; withSettings?: boolean; missingProvider?: boolean; missingPane?: boolean; value?: readonly string[]; disabled?: boolean; fetch?: typeof fetch } = {}) {
+	const dom = parseHTML("<!doctype html><html><body><div id='root'></div><aside id='sidebar'></aside><main id='content' style='isolation:isolate'><button id='chrome'>Page chrome</button><div id='session-body'><div id='transcript'>Session text</div><input id='background-composer' /><div id='target'>plugin-owned</div><div id='second-target'></div></div></main></body></html>");
 	const nativeSelect = dom.window.HTMLInputElement.prototype.select;
 	dom.window.HTMLInputElement.prototype.select = function () {};
 	const nativeClick = dom.window.HTMLInputElement.prototype.click;
@@ -75,7 +78,7 @@ async function fixture(options: { withSessionFind?: boolean; withKeyboard?: bool
 	Object.assign(globalThis, values);
 	const cleanupModalDom = installModalDom(dom);
 	const store = createPluginUiStore();
-	const lifetime = new AbortController(); const scope = new AbortController();
+	const lifetime = new AbortController(); const scope = new AbortController(); const routeLifetime = new AbortController();
 	const ui = store.createUi({ signal: lifetime.signal, onError: (error) => errors.push(error) });
 	const root = createRoot(document.querySelector("#root")!);
 	const content = document.querySelector<HTMLElement>("#content")!;
@@ -89,11 +92,14 @@ async function fixture(options: { withSessionFind?: boolean; withKeyboard?: bool
 	let dialogClosed = 0;
 	let controller: ReturnType<typeof useInteractionLayers> | undefined;
 	let openSettings: ReturnType<typeof useSettingsDialog>["open"] = () => {};
+	let surfaceTarget: ReturnType<typeof useSessionSurfaceBoundary>;
 	function Controls() {
 		controller = useInteractionLayers();
 		openSettings = useSettingsDialog().open;
 		useFieldCycle(() => [document.querySelector<HTMLInputElement>("#background-composer")!]);
-		return options.withKeyboard ? <KeyboardShortcuts /> : null;
+		const body = React.useRef(document.querySelector<HTMLDivElement>("#session-body"));
+		surfaceTarget = useSessionSurfaceBoundary({ active: true, viewKey: "fixture", bodyRef: body });
+		return <>{options.withKeyboard && <KeyboardShortcuts />}{createPortal(<SessionSurfaceRegion target={surfaceTarget} />, body.current!)}</>;
 	}
 	const router = { bfcacheId: "fixture", back() {}, forward() {}, refresh() {}, hmrRefresh() {}, push() {}, replace() {}, async prefetch() {} };
 	function Host() {
@@ -106,14 +112,15 @@ async function fixture(options: { withSessionFind?: boolean; withKeyboard?: bool
 				<DeleteSourceDialog open={dialog} sources={[]} folders={[]} onDelete={async () => {}} onClose={() => { dialogClosed++; setDialog(false); }} />
 			</>;
 		const settingsBody = options.withSettings ? <SettingsDialogProvider>{body}</SettingsDialogProvider> : body;
-		return <AppRouterContext.Provider value={router}><ServerEventsProvider connect={connect}>{options.missingProvider ? settingsBody : <InteractionLayersProvider>{settingsBody}</InteractionLayersProvider>}</ServerEventsProvider></AppRouterContext.Provider>;
+		return <AppRouterContext.Provider value={router}><ServerEventsProvider connect={connect}><HostContentRootContext.Provider value={options.missingPane ? null : content}><HostRouteLifetimeContext.Provider value={{ pathname: "/fixture", signal: routeLifetime.signal }}>{options.missingProvider ? settingsBody : <InteractionLayersProvider>{settingsBody}</InteractionLayersProvider>}</HostRouteLifetimeContext.Provider></HostContentRootContext.Provider></ServerEventsProvider></AppRouterContext.Provider>;
 	}
 	await act(async () => {
 		root.render(<Host />);
 		handle = ui.mountKnowledgePicker(target, { value: options.value ?? [], disabled: options.disabled, onChange: (ids) => { calls.push([...ids]); } }, { signal: scope.signal });
 	});
 	return {
-		dom, store, ui, lifetime, scope, handle, target, content, requests, errors, calls, showDialog,
+		dom, store, ui, lifetime, scope, routeLifetime, handle, target, content, requests, errors, calls, showDialog,
+		get surfaceTarget() { assert.ok(surfaceTarget); return surfaceTarget; },
 		get controller() { assert.ok(controller); return controller; },
 		async openSettings(section = "appearance") { await act(async () => { openSettings(section); }); },
 		notify(name: string) { notifications.get(name)?.("{}"); }, resync() { resync(); },
@@ -181,25 +188,29 @@ it("a missing interaction provider reports normally without private ownership fa
 	} finally { await f.dispose(); }
 });
 
-it("lazily loads the real Chains interface as one full-window modal, preserving its source controls", async () => {
+it("lazily loads the real Chains interface as one nonmodal main-pane view, preserving its source controls", async () => {
 	const f = await fixture();
 	try {
 		assert.equal(f.requests.length, 0);
 		assert.equal(f.target.querySelector('[data-testid="practice-props-chip"]')?.textContent, "Pick nodes");
 		await click(f, "practice-props-chip");
 		assert.deepEqual(f.requests.map((r) => r.url), ["/api/graph", "/api/graph/sources"]);
-		const modal = overlay()!.closest<HTMLElement>('[role="dialog"]'); assert.ok(modal);
-		assert.equal(modal.style.position, "fixed"); assert.equal(modal.style.inset, "0");
-		assert.equal(f.content.contains(overlay()), false, "picker is no longer limited to the content column");
-		assert.equal(document.body.contains(modal), true);
-		assert.equal(f.controller.getSnapshot().filter(layer => layer.kind === "modal").length, 1);
-		assert.equal(f.controller.getSnapshot().filter(layer => layer.kind === "view").length, 0, "one physical picker surface has one interaction owner");
-		assert.equal(document.querySelector("#sidebar")!.getAttribute("aria-hidden"), "true");
+		const pane = overlay()!.closest<HTMLElement>('[data-plugin-knowledge-picker-pane]'); assert.ok(pane);
+		assert.equal(pane.parentElement, f.content);
+		assert.equal(overlay()!.closest('[role="dialog"]'), null);
+		assert.equal(f.controller.getSnapshot().filter(layer => layer.kind === "modal").length, 0);
+		assert.equal(f.controller.getSnapshot().filter(layer => layer.kind === "view").length, 1, "one physical picker surface has one interaction owner");
+		assert.equal(document.querySelector("#sidebar")!.getAttribute("aria-hidden"), null);
+		assert.equal(document.querySelector("#sidebar")!.closest("[inert]"), null);
+		assert.equal(document.body.style.overflow ?? "", "");
+		assert.equal(f.controller.isElementEligible(document.querySelector("#chrome")), true);
+		assert.equal(document.activeElement, document.querySelector('[data-testid="chain-table-search"]'));
 		assert.equal((document.querySelector("#sidebar") as HTMLElement).style.display, "");
 		assert.match(overlay()!.className, /absolute inset-0/);
 		assert.equal(document.querySelector("#sidebar")!.children.length, 0);
 		assert.ok(overlay()!.querySelector('[data-testid="chain-table"]'));
-		assert.ok(overlay()!.querySelector('[aria-label="Open sidebar"]'));
+		assert.equal(overlay()!.querySelector('[aria-label="Open sidebar"]'), null);
+		assert.ok(overlay()!.querySelector('header.lh-native-window-clearance'));
 		assert.ok(overlay()!.querySelector('[data-testid="add-source-folder"]'));
 		assert.ok(overlay()!.querySelector('button[title="Rename"]'));
 		assert.equal(overlay()!.querySelector("[data-source-drag-row]")?.getAttribute("draggable"), "true");
@@ -304,14 +315,14 @@ for (const ending of ["dispose", "widget abort", "navigation abort", "host unmou
 			await act(async () => {
 				if (ending === "dispose") f.handle.dispose();
 				else if (ending === "widget abort") f.scope.abort();
-				else if (ending === "navigation abort") f.lifetime.abort();
+				else if (ending === "navigation abort") f.routeLifetime.abort();
 				else if (ending === "host unmount") await f.unmountHost();
 				else f.handle.update({ disabled: true });
 			});
 			assert.equal(signal.aborted, true);
 			await act(async () => { pending.resolve(Response.json(graph)); });
 			assert.equal(overlay(), null); assert.equal(f.requests.length, 1); assert.deepEqual(f.errors, []);
-			if (ending !== "disable" && ending !== "host unmount") assert.equal(f.target.textContent, "plugin-owned");
+			if (ending !== "disable" && ending !== "host unmount" && ending !== "navigation abort") assert.equal(f.target.textContent, "plugin-owned");
 		} finally { await f.dispose(); }
 	});
 }
@@ -439,14 +450,48 @@ for (const action of ["Done", "X", "Escape"] as const) it(`a public dialog origi
 	} finally { await f.dispose(); }
 });
 
+for (const phase of ["pending", "open"] as const) it(`a global modal's ${phase} picker survives unrelated background route expiry, but not actual modal owner retirement`, async () => {
+	const read = deferred<Response>();
+	const f = await fixture(phase === "pending" ? { fetch: async url => url === "/api/graph" ? read.promise : Response.json(directory) } : {});
+	try {
+		const origin = await publicOrigin(f);
+		await click(f, "practice-props-chip", origin.target);
+		const signal = f.requests.find(request => request.url === "/api/graph")!.init!.signal!;
+		await act(async () => { f.routeLifetime.abort(); });
+		assert.equal(signal.aborted, false, "the background page is not the modal's lifetime owner");
+		if (phase === "pending") await act(async () => { read.resolve(Response.json(graph)); });
+		assert.ok(overlay()); assert.ok(overlay()!.closest('[role="dialog"]'));
+		assert.equal(f.controller.getSnapshot().filter(layer => layer.kind === "modal").length, 2);
+		await act(async () => { origin.dialog.dispose(); });
+		assert.equal(overlay(), null); assert.equal(origin.cleanups, 1);
+	} finally { await f.dispose(); }
+});
+
+it("invocation ownership walks a popup's actual modal ancestor instead of treating its portal as a page", async () => {
+	const f = await fixture();
+	try {
+		const origin = await publicOrigin(f);
+		let menu!: ReturnType<typeof f.ui.openMenu>;
+		await act(async () => { menu = f.ui.openMenu(origin.input, { items: [{ key: "row", label: "Row", onSelect() {} }] }, { signal: f.scope.signal }); });
+		const target = document.createElement("div"); document.querySelector("[data-lh-menu]")!.append(target);
+		await act(async () => { f.ui.mountKnowledgePicker(target, { value: [], onChange() {} }, { signal: f.scope.signal }); });
+		await click(f, "practice-props-chip", target);
+		assert.ok(overlay()!.closest('[role="dialog"]'));
+		assert.equal(document.querySelector("[data-plugin-knowledge-picker-pane]"), null);
+		assert.equal(f.controller.getSnapshot().filter(layer => layer.kind === "modal").length, 2);
+		await act(async () => { f.routeLifetime.abort(); }); assert.ok(overlay());
+		await act(async () => { menu.dispose(); }); assert.equal(overlay(), null, "exact popup owner retirement expires its selector");
+	} finally { await f.dispose(); }
+});
+
 it("a newer public dialog owns Escape/focus without hiding or destroying the picker underneath", async () => {
 	const f = await fixture({ value: ["a"] });
 	try {
 		await click(f, "practice-props-chip"); const picker = overlay()!;
 		const input = document.createElement("input"); input.value = "new dialog draft";
 		await act(async () => { f.ui.openDialog({ title: "Later", content: input }, { signal: f.scope.signal }); });
-		const parent = picker.closest<HTMLElement>('[role="dialog"]')!;
-		assert.equal(parent.hidden, false); assert.notEqual(parent.style.display, "none"); assert.equal(parent.hasAttribute("inert"), true);
+		const parent = picker.closest<HTMLElement>('[data-plugin-knowledge-picker-pane]')!;
+		assert.equal(parent.hidden, false); assert.notEqual(parent.style.display, "none"); assert.ok(parent.closest('[aria-hidden="true"]'));
 		await escape(f); assert.equal(input.isConnected, false); assert.equal(overlay(), picker);
 		assert.equal(parent.contains(document.activeElement), true, "closing a later dialog resumes focus within the picker");
 		await escape(f); assert.equal(overlay(), null);
@@ -529,7 +574,7 @@ it("cached selectors replace the exact retiring registration once, retaining IDs
 		await click(f, "practice-props-chip", f.target);
 		await click(f, "practice-props-chip", secondTarget);
 		assert.equal(document.querySelectorAll('[data-testid="chain-table-overlay"]').length, 1);
-		assert.equal(f.controller.getSnapshot().filter(layer => layer.kind === "modal").length, 1);
+		assert.equal(f.controller.getSnapshot().filter(layer => layer.kind === "view").length, 1);
 		assert.match(f.target.textContent!, /1 node selected/); assert.match(secondTarget.textContent!, /1 node selected/);
 		await act(async () => { f.handle.dispose(); }); assert.ok(overlay());
 		await click(f, "chain-table-close"); assert.equal(overlay(), null);
@@ -591,13 +636,176 @@ it("fresh Settings nests above an active picker and closing it returns focus int
 	try {
 		await click(f, "practice-props-chip"); const picker = overlay()!;
 		await f.openSettings(); assert.ok(document.querySelector('[data-testid="settings-dialog"]'));
-		const boundary = picker.closest<HTMLElement>('[role="dialog"]')!;
+		const boundary = picker.closest<HTMLElement>('[data-plugin-knowledge-picker-pane]')!;
 		assert.equal(boundary.isConnected, true); assert.equal(boundary.hidden, false); assert.notEqual(boundary.style.display, "none");
-		assert.equal(boundary.hasAttribute("inert"), true);
+		assert.ok(boundary.closest('[aria-hidden="true"]'));
 		await escape(f); assert.equal(document.querySelector('[data-testid="settings-dialog"]'), null);
 		assert.equal(overlay(), picker); assert.equal(boundary.contains(document.activeElement), true);
 		await escape(f); assert.equal(overlay(), null);
 	} finally { await f.dispose(); }
+});
+
+it("missing trusted pane fails closed without a viewport fallback", async () => {
+	const f = await fixture({ missingPane: true });
+	try {
+		await click(f, "practice-props-chip");
+		assert.equal(overlay(), null); assert.equal(f.requests.length, 0);
+		assert.equal(f.errors.length, 1); assert.equal(f.controller.getSnapshot().length, 0);
+	} finally { await f.dispose(); }
+});
+
+it("route expiry closes an active pane picker without disposing its retained widget or selection", async () => {
+	const f = await fixture({ value: ["a"] });
+	try {
+		await click(f, "practice-props-chip");
+		const sourceRead = f.requests.find(request => request.url === "/api/graph/sources")!.init!.signal!;
+		await act(async () => { f.routeLifetime.abort(); });
+		assert.equal(overlay(), null); assert.equal(sourceRead.aborted, true);
+		assert.match(f.target.textContent!, /1 node selected/);
+		await click(f, "practice-props-chip");
+		assert.equal(overlay(), null); assert.equal(f.requests.length, 2, "expired source never falls back to a body modal");
+	} finally { await f.dispose(); }
+});
+
+for (const phase of ["pending", "open"] as const) it(`exact invocation owner retirement expires a ${phase} picker even when its layer ID is immediately reused`, async () => {
+	const read = deferred<Response>();
+	const f = await fixture(phase === "pending" ? { fetch: async () => read.promise } : {});
+	try {
+		const body = document.querySelector<HTMLElement>("#session-body")!;
+		let unregister!: () => void;
+		await act(async () => { unregister = f.controller.register({ id: "reused-source", kind: "view", rootRef: { current: body } }); });
+		await click(f, "practice-props-chip");
+		const signal = f.requests[0]!.init!.signal!;
+		await act(async () => {
+			unregister();
+			unregister = f.controller.register({ id: "reused-source", kind: "view", rootRef: { current: body } });
+		});
+		assert.equal(overlay(), null);
+		if (phase === "pending") {
+			assert.equal(signal.aborted, true);
+			await act(async () => { read.resolve(Response.json(graph)); });
+			assert.equal(overlay(), null);
+		}
+		await act(async () => unregister());
+	} finally { await f.dispose(); }
+});
+
+it("session surfaces, their popup hosts, and pane pickers share causal local paint ranks while global dialogs stay outside", async () => {
+	const f = await fixture({ value: ["a"] });
+	try {
+		const nestedTarget = document.createElement("div");
+		let older!: ReturnType<typeof f.ui.openSurface>;
+		await act(async () => {
+			older = f.ui.openSurface(f.surfaceTarget, { title: "Older surface", content: nestedTarget }, { signal: f.scope.signal });
+			f.ui.mountKnowledgePicker(nestedTarget, { value: ["a"], onChange() {} }, { signal: f.scope.signal });
+		});
+		const olderLayer = f.controller.getTopLayer()!;
+		const olderRoot = olderLayer.rootRef.current!;
+		const olderFrame = olderRoot.querySelector<HTMLElement>("[data-plugin-session-surface-frame]")!;
+		const olderPopup = f.controller.getPortalContainer(nestedTarget)!;
+		assert.ok(olderPopup.hasAttribute("data-interaction-popup-host"));
+		const passive = document.createElement("div"); passive.textContent = "Older owned popup"; passive.style.zIndex = "9999"; olderPopup.append(passive);
+		await click(f, "practice-props-chip", nestedTarget);
+		const picker = document.querySelector<HTMLElement>("[data-plugin-knowledge-picker-pane]")!;
+		assert.ok(picker); assert.equal(picker.parentElement, f.content);
+		assert.equal(f.controller.getTopLayer()!.rootRef.current, picker);
+		assert.ok(Number(picker.style.zIndex) > Number(olderPopup.style.zIndex));
+		assert.equal(Number(olderPopup.style.zIndex), Number(olderFrame.style.zIndex));
+		assert.equal(olderRoot.isConnected, true, "covering preserves the source DOM");
+		assert.equal(f.controller.getLayer(olderLayer.id), olderLayer, "covering preserves the exact invocation owner registration; inertness is not lifetime expiry");
+		assert.equal(f.controller.getPortalContainer(picker.querySelector("button")), picker.querySelector("[data-interaction-popup-host]"));
+		const input = document.createElement("input");
+		let newer!: ReturnType<typeof f.ui.openSurface>;
+		await act(async () => { newer = f.ui.openSurface(f.surfaceTarget, { title: "Newer surface", content: input }, { signal: f.scope.signal }); });
+		const newerLayer = f.controller.getTopLayer()!;
+		const newerFrame = newerLayer.rootRef.current!.querySelector<HTMLElement>("[data-plugin-session-surface-frame]")!;
+		assert.ok(Number(newerFrame.style.zIndex) > Number(picker.style.zIndex));
+		assert.equal(document.querySelector("[data-plugin-knowledge-picker-pane]"), picker, "covering is not expiry");
+		assert.equal(olderRoot.hasAttribute("inert"), true, "session-region coverage policy remains intact");
+		assert.doesNotMatch(document.querySelector("[data-session-surface-region]")!.className, /\bz-40\b/);
+		await act(async () => { f.ui.openDialog({ title: "Global dialog", content: document.createElement("input") }, { signal: f.scope.signal }); });
+		const modal = f.controller.getActiveModal()!;
+		assert.equal(f.controller.getTopLayer(), modal);
+		assert.equal(modal.rootRef.current!.parentElement, document.body);
+		assert.equal(f.content.style.isolation, "isolate"); assert.equal(f.content.contains(modal.rootRef.current), false);
+		await escape(f);
+		await act(async () => { newer.dispose(); });
+		assert.equal(f.controller.getTopLayer()!.rootRef.current, picker);
+		await click(f, "chain-practice-done");
+		assert.equal(overlay(), null); assert.equal(olderRoot.isConnected, true);
+		await act(async () => { older.dispose(); });
+	} finally { await f.dispose(); }
+});
+
+it("pane view does not trap sidebar focus or mutate sidebar attributes, and Done has no practice glyph", async () => {
+	const f = await fixture({ value: ["a"] });
+	try {
+		const sidebar = document.querySelector<HTMLElement>("#sidebar")!;
+		sidebar.setAttribute("data-sidebar-state", "unchanged");
+		const button = document.createElement("button"); sidebar.append(button);
+		const before = sidebar.outerHTML;
+		await click(f, "practice-props-chip");
+		assert.equal(document.querySelector('[data-testid="chain-practice-done"] svg'), null);
+		button.focus(); await Promise.resolve();
+		assert.equal(document.activeElement, button);
+		assert.equal(sidebar.outerHTML, before);
+	} finally { await f.dispose(); }
+});
+
+it("picker-only native clearance tracks real pane position through resize, scroll, and zoom without observer loops", async () => {
+	const f = await fixture();
+	const originalObserver = Object.getOwnPropertyDescriptor(globalThis, "ResizeObserver");
+	const prototype = f.dom.window.HTMLElement.prototype;
+	const originalRect = prototype.getBoundingClientRect;
+	let left = 0, resize = () => {}, zoom = () => {};
+	Object.defineProperty(globalThis, "ResizeObserver", { configurable: true, writable: true, value: class {
+		constructor(callback: () => void) { resize = callback; }
+		observe() {} disconnect() {}
+	} });
+	prototype.getBoundingClientRect = function () {
+		return this.matches("header.lh-native-window-clearance") ? { left } as DOMRect : originalRect.call(this);
+	};
+	window.lh = { platform: "darwin", expandWindow() {}, onZoom(callback) { zoom = () => callback(1.5); return () => {}; } };
+	try {
+		document.documentElement.classList.add("lh-electron"); document.documentElement.dataset.lhPlatform = "darwin";
+		document.documentElement.style.setProperty("--lh-zoom", "1.5");
+		await click(f, "practice-props-chip");
+		const header = overlay()!.querySelector<HTMLElement>("header")!;
+		assert.equal(header.style.getPropertyValue("--lh-header-left"), "0px");
+		left = 288; resize(); assert.equal(header.style.getPropertyValue("--lh-header-left"), "288px");
+		header.style.setProperty("--lh-header-left", "sentinel");
+		resize(); resize(); assert.equal(header.style.getPropertyValue("--lh-header-left"), "sentinel", "unchanged observer notifications never write another style");
+		left = 144; window.dispatchEvent(new f.dom.window.Event("resize"));
+		assert.equal(header.style.getPropertyValue("--lh-header-left"), "144px");
+		left = 72; zoom(); assert.equal(header.style.getPropertyValue("--lh-header-left"), "72px");
+		left = 0; window.dispatchEvent(new f.dom.window.Event("scroll"));
+		assert.equal(header.style.getPropertyValue("--lh-header-left"), "0px");
+		assert.equal(header.querySelector('[aria-label="Open sidebar"]'), null);
+		const css = fs.readFileSync(new URL("../app/globals.css", import.meta.url), "utf8");
+		assert.match(css, /\[data-lh-platform="darwin"\] \.lh-native-window-clearance\s*\{\s*padding-left: calc\(0\.75rem \+ max\(0px, calc\(92px \/ var\(--lh-zoom\) - var\(--lh-header-left, 0px\)\)\)\);/);
+		assert.match(css, /--lh-wco-right: max\(0px, calc\(100vw - env\(titlebar-area-x, 0px\) - env\(titlebar-area-width, 100vw\)\)\);/);
+		assert.match(header.className, /lh-wco-gutter/, "Windows/Linux still use the existing CSS-coordinate right gutter");
+	} finally {
+		prototype.getBoundingClientRect = originalRect;
+		if (originalObserver) Object.defineProperty(globalThis, "ResizeObserver", originalObserver); else Reflect.deleteProperty(globalThis, "ResizeObserver");
+		await f.dispose();
+	}
+});
+
+it("host route lifetimes rotate on departure/re-entry and survive StrictMode's effect replay", async () => {
+	const f = await fixture();
+	const mount = document.createElement("div"); f.content.append(mount);
+	const root = createRoot(mount);
+	let current: React.ContextType<typeof HostRouteLifetimeContext> = null;
+	function Capture() { current = React.useContext(HostRouteLifetimeContext); return null; }
+	const render = async (pathname: string) => { await act(async () => { root.render(<React.StrictMode><HostRouteLifetimeProvider pathname={pathname}><Capture /></HostRouteLifetimeProvider></React.StrictMode>); }); };
+	try {
+		await render("/a"); const first = current!; assert.equal(first.signal.aborted, false);
+		await render("/b"); assert.equal(first.signal.aborted, true); const second = current!;
+		assert.equal(second.signal.aborted, false);
+		await render("/a"); assert.equal(second.signal.aborted, true); assert.notEqual(current!.signal, first.signal);
+		assert.equal(current!.signal.aborted, false);
+	} finally { await act(async () => { root.unmount(); }); await f.dispose(); }
 });
 
 it("successful explicit Settings opening revokes a pending picker instead of letting its graph completion promote", async () => {

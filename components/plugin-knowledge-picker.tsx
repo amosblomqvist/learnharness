@@ -1,15 +1,64 @@
 "use client";
 
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useContext, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import type { GraphSnapshot, PluginKnowledgePickerProps } from "@/src/core";
 import { ChainTableOverlay } from "@/components/chain-table";
 import { NodePickerControl } from "@/components/composer-actions";
 import { HostDialog } from "@/components/host-dialog";
-import { useOptionalInteractionLayers, type OpeningLease } from "@/components/interaction-layers";
+import { InteractionLayerOwner, useInteractionLayer, useInteractionLayers, useOptionalInteractionLayers, type InteractionLayer, type OpeningLease } from "@/components/interaction-layers";
+import { HostContentRootContext, HostRouteLifetimeContext, type HostRouteLifetime } from "./host-content-root";
 
 /** One replaceable selector slot in the shared controller, not a private stack. */
 const PICKER_SLOT = "knowledge-picker";
 const PICKER_LAYER = "knowledge-picker";
+interface PickerOrigin {
+	pane: HTMLElement | null;
+	route: HostRouteLifetime | null;
+	owner: InteractionLayer | null;
+	modal: boolean;
+}
+
+/** A local view, never a modal: sidebar and native page chrome remain available. */
+function PanePicker({ origin, openingLease, onClose, children }: {
+	origin: PickerOrigin; openingLease: OpeningLease; onClose: () => "closed"; children: ReactNode;
+}) {
+	const controller = useInteractionLayers();
+	const root = useRef<HTMLDivElement>(null);
+	const popup = useRef<HTMLDivElement>(null);
+	const entered = useRef(false);
+	const focusInitial = useCallback(() => {
+		if (controller.getTopLayer()?.id !== PICKER_LAYER) return;
+		const search = root.current?.querySelector<HTMLElement>('input[aria-label="Search nodes"]');
+		if (search && controller.isElementEligible(search)) search.focus({ preventScroll: true });
+	}, [controller]);
+	// Snapshot authority before registration cleanup; covered/expired views do
+	// not return focus into an old route or steal it from a newer interaction.
+	useLayoutEffect(() => () => {
+		if (origin.route?.signal.aborted || controller.getTopLayer()?.id !== PICKER_LAYER) return;
+		const generation = controller.getGeneration() + 1;
+		const revision = controller.getFocusRevision();
+		queueMicrotask(() => {
+			if (!origin.route?.signal.aborted) controller.restoreFocus(null, generation, revision, openingLease);
+		});
+	}, [controller, origin, openingLease]);
+	const layer = useInteractionLayer({
+		id: PICKER_LAYER, kind: "view", enabled: true, ownerId: origin.owner?.id ?? null,
+		rootRef: root, portalRef: popup, onClose, focusInitial, openingLease,
+	});
+	useEffect(() => {
+		if (!layer.isTop || entered.current) return;
+		entered.current = true; focusInitial();
+	}, [layer.isTop, focusInitial]);
+	return createPortal(<InteractionLayerOwner.Provider value={layer.id}>
+		<div ref={root} role="region" aria-label="Pick nodes" data-plugin-knowledge-picker-pane=""
+			className="absolute inset-0" style={{ zIndex: 100 + layer.order }}>
+			{children}
+			<div ref={popup} data-interaction-popup-host={layer.id}
+				className="pointer-events-none absolute inset-0 z-50 [&>*]:pointer-events-auto" />
+		</div>
+	</InteractionLayerOwner.Provider>, origin.pane!);
+}
 
 /** The practice picker, controlled by a plugin; graph/source IO remains host-owned. */
 export function PluginKnowledgePicker({ value, onChange, disabled, signal, onError }: PluginKnowledgePickerProps & {
@@ -17,6 +66,10 @@ export function PluginKnowledgePicker({ value, onChange, disabled, signal, onErr
 	onError: (error: unknown) => void;
 }) {
 	const controller = useOptionalInteractionLayers();
+	const pane = useContext(HostContentRootContext);
+	const route = useContext(HostRouteLifetimeContext);
+	const origin = useRef<PickerOrigin | null>(null);
+	const detachOriginAbort = useRef<(() => void) | null>(null);
 	const lease = useRef<OpeningLease | null>(null);
 	const presented = useRef<OpeningLease | null>(null);
 	const waitingForRetirement = useRef(false);
@@ -31,7 +84,9 @@ export function PluginKnowledgePicker({ value, onChange, disabled, signal, onErr
 	const cancelLoad = () => { pending.current?.abort(); pending.current = null; };
 	const close = useCallback(() => {
 		cancelLoad();
+		detachOriginAbort.current?.(); detachOriginAbort.current = null;
 		const owner = lease.current;
+		origin.current = null;
 		lease.current = null; presented.current = null; waitingForRetirement.current = false;
 		owner?.release();
 		if (alive.current) setOpen(false);
@@ -49,7 +104,11 @@ export function PluginKnowledgePicker({ value, onChange, disabled, signal, onErr
 		alive.current = true;
 		// Only retry a graph-ready request waiting for its exact predecessor's
 		// unregister barrier. Other UI changes revoke pending leases centrally.
-		const unsubscribe = controller?.subscribe(() => { if (waitingForRetirement.current) promote(); });
+		const unsubscribe = controller?.subscribe(() => {
+			const source = origin.current;
+			if (source && ((source.owner && controller.getLayer(source.owner.id) !== source.owner) || source.route?.signal.aborted)) { close(); return; }
+			if (waitingForRetirement.current) promote();
+		});
 		const abort = () => { close(); };
 		signal.addEventListener("abort", abort, { once: true });
 		if (signal.aborted) abort();
@@ -69,12 +128,35 @@ export function PluginKnowledgePicker({ value, onChange, disabled, signal, onErr
 	const show = () => {
 		if (!alive.current || signal.aborted || latest.current.disabled || pending.current) return;
 		if (!controller) { latest.current.onError(new Error("Interaction layers require InteractionLayersProvider in AppShell (or the test fixture)")); return; }
+		// React portals originate at the global widget host. Resolve actual DOM
+		// ownership at invocation instead of inheriting that root's context.
+		const invocationOwner = controller.ownerOf(trigger.current);
+		let ancestor = invocationOwner;
+		let modal = false;
+		const seen = new Set<string>();
+		while (ancestor && !seen.has(ancestor.id)) {
+			seen.add(ancestor.id);
+			if (ancestor.kind === "modal") { modal = true; break; }
+			ancestor = ancestor.ownerId ? controller.getLayer(ancestor.ownerId) ?? null : null;
+		}
+		if (!modal && (!pane?.isConnected || !pane.contains(trigger.current) || !route || route.signal.aborted)) {
+			latest.current.onError(new Error("Knowledge picker source is no longer in an active host pane")); return;
+		}
+		// Global dialogs own their own lifetime; the unrelated page behind a
+		// modal may navigate without expiring its still-live picker.
+		const source: PickerOrigin = { pane, route: modal ? null : route, owner: invocationOwner, modal };
 		const owner: OpeningLease | null = controller.reserveOpening(PICKER_SLOT, { opener: trigger.current, onRevoke: () => {
 			if (lease.current !== owner) return;
-			cancelLoad(); lease.current = null; presented.current = null; waitingForRetirement.current = false;
+			cancelLoad(); detachOriginAbort.current?.(); detachOriginAbort.current = null;
+			origin.current = null;
+			lease.current = null; presented.current = null; waitingForRetirement.current = false;
 			if (alive.current) setOpen(false);
 		} });
 		if (!owner) return;
+		origin.current = source;
+		const abortOrigin = () => { close(); };
+		source.route?.signal.addEventListener("abort", abortOrigin, { once: true });
+		detachOriginAbort.current = () => source.route?.signal.removeEventListener("abort", abortOrigin);
 		lease.current = owner;
 		if (graphCache.current) { promote(); return; }
 		const request = new AbortController();
@@ -94,22 +176,19 @@ export function PluginKnowledgePicker({ value, onChange, disabled, signal, onErr
 		})();
 	};
 
+	const table = snapshot && <ChainTableOverlay
+		open={visible} registerInteraction={false} pickerChrome
+		nodes={snapshot.propositions} chains={snapshot.chains}
+		sessions={snapshot.sessions} fileSources={snapshot.fileSources}
+		onClose={close} selectMode controlledSelection={new Set(value)}
+		onSelectionChange={(ids) => change([...ids])}
+	/>;
+	const source = origin.current;
 	return <>
 		<NodePickerControl count={new Set(value).size} onOpen={show} onClear={() => change([])} disabled={disabled} triggerRef={trigger} />
-		{snapshot && <HostDialog open={visible} layerId={PICKER_LAYER} openingLease={lease.current ?? undefined}
-			onClose={close} aria-label="Pick nodes" frame={<div className="absolute inset-0" />}>
-			<ChainTableOverlay
-				open={visible}
-				registerInteraction={false}
-				nodes={snapshot.propositions}
-				chains={snapshot.chains}
-				sessions={snapshot.sessions}
-				fileSources={snapshot.fileSources}
-				onClose={close}
-				selectMode
-				controlledSelection={new Set(value)}
-				onSelectionChange={(ids) => change([...ids])}
-			/>
-		</HostDialog>}
+		{visible && source && (source.modal
+			? <HostDialog open layerId={PICKER_LAYER} ownerId={source.owner?.id ?? null} openingLease={lease.current!}
+				onClose={close} aria-label="Pick nodes" frame={<div className="absolute inset-0" />}>{table}</HostDialog>
+			: <PanePicker origin={source} openingLease={lease.current!} onClose={close}>{table}</PanePicker>)}
 	</>;
 }

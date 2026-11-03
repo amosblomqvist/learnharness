@@ -72,11 +72,15 @@ declare const pluginSurfaceTargetBrand: unique symbol;
 /** Opaque host-created identity for one mounted native session view. */
 export interface PluginSurfaceTarget { readonly [pluginSurfaceTargetBrand]: true }
 export interface PluginSurfaceProps {
+	/** Accessible name only; visible headings belong to plugin content. */
 	title: string;
+	/** Defaults to the translucent, blurred Chains-like background. */
+	background?: "dimmed" | "opaque";
 	content: PluginUiContent;
 	onClose?: () => void | Promise<void>;
 }
 export interface PluginDialogProps {
+	/** Accessible name only; visible headings belong to plugin content. */
 	title: string;
 	content: PluginUiContent;
 	onClose?: () => void | Promise<void>;

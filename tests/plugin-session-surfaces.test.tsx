@@ -58,10 +58,10 @@ async function withFixture(run: (fixture: Fixture) => Promise<void>) {
 		const body = useRef<HTMLDivElement>(null);
 		token = useSessionSurfaceBoundary({ active: state.active, viewKey: state.viewKey, bodyRef: body });
 		return <><button data-chrome="">Top bar</button><aside>Sidebar</aside>
-			<div ref={body} data-session-body="" className="relative flex min-h-0 flex-1">
+			<main data-host-main="" style={{ isolation: "isolate" }}><div ref={body} data-session-body="" className="relative flex min-h-0 flex-1">
 				<div data-native-body=""><h2 tabIndex={-1}>Session</h2><input data-native-input="" /><button>Native Submit</button></div>
 				<SessionSurfaceRegion target={token}>{state.nativeView && <NativeFocus />}</SessionSurfaceRegion>
-			</div>
+			</div></main>
 			{state.tooltipContainer && createPortal(<TooltipProvider><Tooltip open><TooltipTrigger>Owned hint trigger</TooltipTrigger><TooltipContent>Owned passive hint</TooltipContent></Tooltip></TooltipProvider>, state.tooltipContainer)}
 			<HostDialog open={state.settings} onClose={() => "blocked"} aria-label="Global Settings"><h2>Settings</h2><input data-settings-input="" /></HostDialog>
 		</>;
@@ -97,14 +97,15 @@ async function withFixture(run: (fixture: Fixture) => Promise<void>) {
 const inputContent = (label: string): PluginUiContent => container => {
 	const input = document.createElement("input"); input.setAttribute("aria-label", label); container.append(input);
 };
-const surface = (title: string) => [...document.querySelectorAll<HTMLElement>("[data-plugin-session-surface]")].find(root => root.querySelector("h2")?.textContent === title)!;
+const surface = (title: string) => [...document.querySelectorAll<HTMLElement>("[data-plugin-session-surface]")].find(root => root.getAttribute("aria-label") === title)!;
 const frame = (root: HTMLElement) => root.querySelector<HTMLElement>("[data-plugin-session-surface-frame]")!;
 
 it("surfaces share the exact session body/local paint stratum, leaving chrome and empty native input eligible", async () => withFixture(async f => {
 	const native = document.querySelector<HTMLElement>("[data-native-input]")!;
 	const region = document.querySelector<HTMLElement>("[data-session-surface-region]")!;
 	assert.equal(region.parentElement?.hasAttribute("data-session-body"), true);
-	assert.match(region.className, /absolute inset-0 z-40/);
+	assert.match(region.className, /absolute inset-0/);
+	assert.doesNotMatch(region.className, /\bz-40\b/, "session geometry must not isolate its ranks from main-pane picker siblings");
 	assert.match(region.className, /pointer-events-none/);
 	assert.equal(f.controller.isElementEligible(native), true);
 	await f.open("Drawing", inputContent("Canvas note"));
@@ -117,9 +118,57 @@ it("surfaces share the exact session body/local paint stratum, leaving chrome an
 	assert.equal(isInteractionScopeEligible(native, f.controller), false, "covered Enter/Tab/dictation scope is ineligible");
 	assert.equal(f.controller.isElementEligible(document.querySelector("[data-chrome]")), true);
 	assert.equal(document.querySelector("aside")?.closest("[inert]"), null);
-	assert.match(root.querySelector("h2")!.textContent!, /Drawing/);
+	assert.equal(root.getAttribute("aria-label"), "Drawing");
+	assert.equal(root.querySelector("h2"), null, "the accessible title creates no host heading or row");
+	assert.doesNotMatch(frame(root).className, /\bp-4\b/);
+	const scroller = root.querySelector("input")!.parentElement!.parentElement!;
+	assert.match(scroller.className, /overflow-y-auto/);
+	const close = root.querySelector('button[aria-label="Close"]')!;
+	assert.equal(close.parentElement, frame(root), "floating X is outside the content scroller");
+	assert.match(close.className, /absolute right-2 top-2/);
 	assert.equal(root.querySelector("[data-plugin-ui-widget]"), null);
 	assert.match(root.querySelector("input")!.parentElement!.className, /h-full w-full/);
+}));
+
+it("surface background defaults to dimmed and controlled presets preserve content, focus, and lifetime", async () => withFixture(async f => {
+	let mounts = 0;
+	let signal!: AbortSignal;
+	const handle = await f.open("Background", (container, mountedSignal) => {
+		mounts++; signal = mountedSignal;
+		container.append(document.createElement("input"));
+	});
+	const root = surface("Background"), painted = frame(root), focus = document.activeElement;
+	assert.match(painted.className, /bg-background\/80 backdrop-blur-sm/);
+	await act(async () => handle.update({ background: "opaque" }));
+	assert.equal(frame(surface("Background")), painted);
+	assert.match(painted.className, /\bbg-background\b/);
+	assert.doesNotMatch(painted.className, /bg-background\/80|backdrop-blur/);
+	assert.equal(document.activeElement, focus); assert.equal(mounts, 1); assert.equal(signal.aborted, false);
+	await act(async () => handle.update({ background: "dimmed" }));
+	assert.match(painted.className, /bg-background\/80 backdrop-blur-sm/);
+	await act(async () => handle.update({ background: undefined }));
+	assert.match(painted.className, /bg-background\/80 backdrop-blur-sm/);
+	assert.equal(mounts, 1); assert.equal(signal.aborted, false);
+}));
+
+it("surface background rejects unsupported open/update values without publishing or mutating accepted props", async () => withFixture(async f => {
+	const options = { signal: new AbortController().signal };
+	for (const background of ["transparent", "", null, 0]) {
+		assert.throws(() => f.ui.openSurface(f.target(), { title: "Invalid", content: document.createElement("div"), background } as unknown as PluginSurfaceProps, options), /Surface background must be/);
+		assert.equal(f.store.getSnapshot().length, 0);
+	}
+	let handle!: Handle;
+	await act(async () => { handle = f.ui.openSurface(f.target(), { title: "Opaque", content: document.createElement("div"), background: "opaque" }, options); });
+	const snapshot = f.store.getSnapshot();
+	assert.doesNotMatch(frame(surface("Opaque")).className, /backdrop-blur/);
+	assert.throws(() => handle.update({ background: "invalid" } as unknown as Partial<PluginSurfaceProps>), /Surface background must be/);
+	assert.equal(f.store.getSnapshot(), snapshot);
+	await act(async () => handle.update({ title: "Still opaque" }));
+	assert.doesNotMatch(frame(surface("Still opaque")).className, /backdrop-blur/);
+	await act(async () => handle.dispose());
+	handle.update({ background: "ignored" } as unknown as Partial<PluginSurfaceProps>);
+	const aborted = new AbortController(); aborted.abort();
+	f.ui.openSurface(f.target(), { title: "Ignored", content: document.createElement("div"), background: "ignored" } as unknown as PluginSurfaceProps, { signal: aborted.signal }).dispose();
 }));
 
 it("visual siblings stay mounted and painted; unloading a lower owner cannot close another owner's foreground", async () => withFixture(async f => {
@@ -231,7 +280,7 @@ it("native-view expiry before the portal commits aborts content without a late m
 	assert.equal(mounts, 0); assert.equal(f.store.getSnapshot().length, 0);
 }));
 
-it("entry honors explicit eligible focus, otherwise first editable field, otherwise the supplied title", async () => withFixture(async f => {
+it("entry honors explicit eligible focus, otherwise first editable field, plugin heading, or painted frame", async () => withFixture(async f => {
 	let explicit!: HTMLButtonElement;
 	const one = await f.open("Explicit", container => {
 		container.append(document.createElement("input"));
@@ -246,9 +295,22 @@ it("entry honors explicit eligible focus, otherwise first editable field, otherw
 	});
 	assert.equal(document.activeElement?.hasAttribute("data-entry"), true);
 	await act(async () => two.dispose());
-	await f.open("Heading only");
+	const three = await f.open("Heading only", container => {
+		const heading = document.createElement("h2"); heading.textContent = "Plugin heading"; container.append(heading);
+	});
 	assert.equal(document.activeElement, surface("Heading only").querySelector("h2"));
 	assert.equal(document.activeElement?.getAttribute("tabindex"), "-1");
+	await act(async () => three.dispose());
+	const native = document.querySelector<HTMLElement>("[data-native-input]")!;
+	native.focus();
+	await f.open("Accessible name only");
+	const root = surface("Accessible name only"), painted = frame(root);
+	assert.equal(root.style.display, "contents");
+	assert.equal(root.getAttribute("aria-label"), "Accessible name only");
+	assert.equal(painted.getAttribute("aria-label"), "Accessible name only");
+	assert.equal(painted.getAttribute("tabindex"), "-1");
+	assert.equal(document.activeElement, painted, "empty content focuses the painted frame, not the display:contents root, floating X, or covered composer");
+	assert.equal(f.controller.isElementEligible(native), false);
 }));
 
 it("foreground close restores an uncovered chrome opener, else remembered surviving region focus; covered disposal never steals", async () => withFixture(async f => {
@@ -302,8 +364,11 @@ it("native views and surfaces share ordered local paint; an older global modal r
 	assert.equal(f.controller.isElementEligible(settings), true);
 	assert.equal(document.activeElement, settingsFocus);
 	const region = document.querySelector<HTMLElement>("[data-session-surface-region]")!;
-	assert.match(region.className, /z-40/);
-	assert.ok(Number(modal.rootRef.current!.style.zIndex) > 40, "global modal stratum remains above local view stratum");
+	assert.doesNotMatch(region.className, /\bz-40\b/);
+	const main = region.closest<HTMLElement>("[data-host-main]")!;
+	assert.equal(main.style.isolation, "isolate");
+	assert.equal(main.contains(modal.rootRef.current), false, "global dialogs escape the isolated main-pane paint stratum");
+	assert.equal(modal.rootRef.current!.parentElement, document.body);
 	await act(async () => f.lifetime.abort());
 	assert.equal(f.controller.getActiveModal(), modal, "global Settings is not lifetime-owned by a plugin surface");
 }));

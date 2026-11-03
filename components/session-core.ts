@@ -276,6 +276,11 @@ export class SessionModel {
 	private pluginQuestionAvailability?: PluginQuestionAvailability;
 	private reconciliationTask: Promise<boolean> | null = null;
 	private reconciliationOwner: AbortController | null = null;
+	// Effect reconnections may have no stream owner on either side of stop().
+	// Their read tasks still belong to distinct connections, unlike data epochs
+	// whose invalidation can legitimately require a current terminal retry.
+	private connectionGeneration = 0;
+	private reconciliationConnectionGeneration = 0;
 	// Shared authority for EVERY canonical GET writer, including independent
 	// Chat refreshes. Issuing a read does not invalidate another response:
 	// only accepted canonical adoption or an action/stream epoch does.
@@ -443,19 +448,22 @@ export class SessionModel {
 
 	/** Read-only canonical adoption: never sends a replacement teacher turn. */
 	async reconcile(): Promise<boolean> {
-		if (this.reconciliationTask && this.reconciliationOwner === this.consumeAbort) return this.reconciliationTask;
+		if (this.reconciliationTask && this.reconciliationOwner === this.consumeAbort && this.reconciliationConnectionGeneration === this.connectionGeneration) return this.reconciliationTask;
 		this.reconciliationValue = "syncing";
 		this.readyRef = false;
 		this.onChange?.();
 		const owner = this.consumeAbort;
+		const connection = this.connectionGeneration;
+		const isCurrent = () => this.consumeAbort === owner && this.connectionGeneration === connection;
 		const epoch = this.canonicalEpoch;
 		const requiredTicket = this.canonicalIssued + 1;
 		this.reconciliationOwner = owner;
+		this.reconciliationConnectionGeneration = connection;
 		let task!: Promise<boolean>;
 		task = (async () => {
 			try {
-				const record = await this.readRecord({ allowInFlight: true, isCurrent: () => this.consumeAbort === owner });
-				if (this.consumeAbort !== owner) return false;
+				const record = await this.readRecord({ allowInFlight: true, isCurrent });
+				if (!isCurrent()) return false;
 				if (this.canonicalEpoch !== epoch) throw new Error("Canonical read was invalidated.");
 				// A newer successfully adopted GET is authority too; a merely
 				// issued/pending read cannot suppress this terminal response.
@@ -464,7 +472,7 @@ export class SessionModel {
 				this.readyRef = this.statusValue === "ready";
 				return true;
 			} catch {
-				if (this.consumeAbort !== owner) return false;
+				if (!isCurrent()) return false;
 				if (this.canonicalEpoch === epoch && this.canonicalAcknowledged >= requiredTicket) {
 					this.reconciliationValue = "ready";
 					this.readyRef = this.statusValue === "ready";
@@ -473,7 +481,10 @@ export class SessionModel {
 				this.reconciliationValue = "failed";
 				this.readyRef = false;
 				return false;
-			} finally { if (this.reconciliationTask === task) this.reconciliationTask = null; this.onChange?.(); }
+			} finally {
+				if (this.reconciliationTask === task) this.reconciliationTask = null;
+				if (isCurrent()) this.onChange?.();
+			}
 		})();
 		this.reconciliationTask = task;
 		return task;
@@ -1081,6 +1092,7 @@ export class SessionModel {
 	/** Local detach: cancel the consume, keep the partial tail. The page's
 	 *  settle watch adopts the record when the server turn finishes. */
 	stop(): void {
+		this.connectionGeneration++;
 		this.retireImagePreview(this.imagePreview?.owner ?? null);
 		this.releaseImagePost(this.imagePostOwner);
 		this.invalidateCanonicalReads();

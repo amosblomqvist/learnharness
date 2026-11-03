@@ -2,7 +2,7 @@
 
 import { Component, useEffect, useLayoutEffect, useRef, useSyncExternalStore, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import type { PluginDialogProps, PluginMenuProps, PluginUi, PluginWidgetHandle, PluginWidgetOptions } from "@/src/core";
+import type { PluginDialogProps, PluginMenuProps, PluginSurfaceProps, PluginUi, PluginWidgetHandle, PluginWidgetOptions } from "@/src/core";
 import type { Dictation } from "@/components/dictation";
 import { PluginComposer, PluginDictation, PluginStandardComposer } from "@/components/plugin-composer";
 import { PluginModelPicker, PluginThinkingPicker } from "@/components/plugin-model-picker";
@@ -37,6 +37,12 @@ function invoke(callback: (() => void | Promise<void>) | undefined, report: Runt
 	try { void Promise.resolve(callback?.()).catch(report); } catch (error) { report(error); }
 }
 
+function validateSurfaceBackground({ background }: PluginSurfaceProps) {
+	if (background !== undefined && background !== "dimmed" && background !== "opaque") {
+		throw new TypeError('Surface background must be "dimmed" or "opaque".');
+	}
+}
+
 /** Imperative plugin calls become portals in the host tree, never isolated React roots. */
 export function createPluginUiStore() {
 	let serial = 0;
@@ -52,7 +58,7 @@ export function createPluginUiStore() {
 				try { if (onError) onError(error); else console.error("Plugin UI failed", error); }
 				catch (reportError) { console.error("Plugin UI error reporter failed", reportError); }
 			};
-			function mount<Props>(container: HTMLElement, props: Props, options: PluginWidgetOptions, render: (props: Props, runtime: Runtime) => ReactNode, nativeSignal?: AbortSignal, surface = false): PluginWidgetHandle<Props> {
+			function mount<Props>(container: HTMLElement, props: Props, options: PluginWidgetOptions, render: (props: Props, runtime: Runtime) => ReactNode, nativeSignal?: AbortSignal, surface = false, validate?: (props: Props) => void): PluginWidgetHandle<Props> {
 				const scope = new AbortController();
 				const target = container.ownerDocument.createElement("div");
 				target.dataset.pluginUiWidget = "";
@@ -108,6 +114,7 @@ export function createPluginUiStore() {
 				const entry = (): WidgetEntry => ({ id, surface, target, props: protect(current), runtime, render: render as WidgetEntry["render"] });
 				if (lifetime.aborted || options.signal.aborted || nativeSignal?.aborted) { disposed = true; scope.abort(); }
 				else {
+					validate?.(current);
 					container.append(target);
 					lifetime.addEventListener("abort", dispose, { once: true });
 					options.signal.addEventListener("abort", dispose, { once: true });
@@ -118,7 +125,9 @@ export function createPluginUiStore() {
 				return {
 					update(next) {
 						if (disposed) return;
-						current = { ...current, ...next };
+						const updated = { ...current, ...next };
+						validate?.(updated);
+						current = updated;
 						snapshot = snapshot.map((item) => item.id === id ? entry() : item);
 						publish();
 					},
@@ -164,10 +173,10 @@ export function createPluginUiStore() {
 					const boundary = requireSessionSurfaceBoundary(target);
 					const opener = boundary.body.ownerDocument.activeElement;
 					const handle = mount(boundary.stack!.querySelector<HTMLElement>("[data-session-surface-mounts]")!, props, options,
-						(props, runtime) => <PluginSessionSurface title={props.title} onClose={props.onClose} runtime={runtime} boundary={boundary}
+						(props, runtime) => <PluginSessionSurface title={props.title} background={props.background} onClose={props.onClose} runtime={runtime} boundary={boundary}
 							opener={opener instanceof HTMLElement ? opener : null}>
 							<PluginContent content={props.content} runtime={runtime} className="h-full w-full" />
-						</PluginSessionSurface>, boundary.signal, true);
+						</PluginSessionSurface>, boundary.signal, true, validateSurfaceBackground);
 					return handle;
 				},
 			};
@@ -268,9 +277,15 @@ function PluginDialog({ title, content, onClose, runtime, opener }: PluginDialog
 	};
 	return <HostDialog open onClose={close} ownerId={ownerId.current} aria-label={title}
 		backdropProps={{ className: "fixed inset-0 z-50 flex items-center justify-center bg-background/80 backdrop-blur-sm" }}
-		frame={<div data-plugin-ui-dialog="" tabIndex={-1} className="mx-4 flex max-h-[85vh] w-full max-w-lg flex-col overflow-y-auto rounded-xl border bg-card p-5 shadow-lg outline-none" />}>
-		<div className="mb-4 flex items-center justify-between gap-4"><h2 className="text-sm font-semibold text-card-foreground">{title}</h2>
-			<Button type="button" variant="ghost" size="sm" aria-label="Close dialog" onClick={close}>Close</Button></div>
-		<PluginContent content={content} runtime={runtime} />
+		frame={<div data-plugin-ui-dialog="" tabIndex={-1} className="relative mx-4 flex max-h-[85vh] w-full max-w-lg flex-col overflow-hidden rounded-xl border bg-card shadow-lg outline-none" />}>
+		<div data-plugin-ui-dialog-scroll="" className="min-h-0 overflow-y-auto p-5">
+			<PluginContent content={content} runtime={runtime} />
+		</div>
+		<button type="button" aria-label="Close dialog" title="Close" onClick={close}
+			className="absolute right-2 top-2 z-10 size-7 rounded-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground">
+			<svg viewBox="0 0 16 16" className="mx-auto size-3.5" fill="none" stroke="currentColor" strokeWidth="1.5">
+				<path d="M4 4l8 8M12 4l-8 8" />
+			</svg>
+		</button>
 	</HostDialog>;
 }

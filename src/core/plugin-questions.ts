@@ -53,6 +53,9 @@ export type PluginQuestionEditorKey = "Tab" | "Enter" | "Shift+Enter" | "Escape"
 export interface PluginQuestionEditorHandle {
 	update(props: { answer: PluginQuestionAnswerState; active: boolean }): void;
 	focus(): void;
+	/** Optional editing override. Omission or "pass" uses host defaults:
+	 * Enter submits, Shift+Enter keeps native newline editing, Tab cycles fields.
+	 * Meta/Ctrl+Enter remains reserved host submission. */
 	handleKeyDown?(key: PluginQuestionEditorKey): "handled" | "pass";
 	appendTranscript?(text: string): void | Promise<void>;
 	dispose(): void;

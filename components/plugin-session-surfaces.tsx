@@ -23,8 +23,9 @@ export function useSessionSurfaceBoundary({ active, viewKey, bodyRef }: {
 	return active && current?.viewKey === viewKey && findSessionSurfaceBoundary(current.target) ? current.target : undefined;
 }
 
-/** Common LOCAL paint stratum for native focuses and plugin surfaces. Global
- * modals retain their own higher stratum even when a view opens asynchronously. */
+/** Geometry and coverage for session views, without a separate stacking context.
+ * Frames share the host main pane's isolated paint stratum with pane pickers;
+ * global body dialogs remain above it even when a view opens asynchronously. */
 export function SessionSurfaceRegion({ target, children }: { target: PluginSurfaceTarget | undefined; children?: ReactNode }) {
 	const controller = useInteractionLayers();
 	const [stack, setStack] = useState<HTMLDivElement | null>(null);
@@ -74,7 +75,7 @@ export function SessionSurfaceRegion({ target, children }: { target: PluginSurfa
 			for (const element of retained.keys()) restore(element);
 		};
 	}, [target, stack, controller]);
-	return <div ref={setStack} data-session-surface-region="" className="pointer-events-none absolute inset-0 z-40">
+	return <div ref={setStack} data-session-surface-region="" className="pointer-events-none absolute inset-0">
 		{children}
 		<div data-session-surface-mounts="" style={{ display: "contents" }} />
 	</div>;

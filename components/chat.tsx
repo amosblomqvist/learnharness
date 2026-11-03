@@ -39,6 +39,7 @@ import { blurAfterPointerClick } from "@/components/focus-hygiene";
 import { dockStateKey } from "@/components/dock-state-key";
 import { clearOpeningPrompt, readOpeningPromptEntry, stashOpeningPrompt, OPENING_PROMPT_FAILURE } from "@/components/opening-prompt";
 import { forwardDockWheel, useDockHeight } from "@/components/dock-height";
+import { createDockMorph } from "@/components/dock-morph";
 import { QueuedSteersBody, type QueuedSteerLine } from "@/components/queued-steers";
 import { DictationBar, finishDictation, joinDictation, useDictation } from "@/components/dictation";
 import { useFieldCycle } from "@/components/field-cycle";
@@ -505,13 +506,12 @@ export function Chat({
 	const unreadablePlugin = pluginQuestionCallsOf(canonicalMessages).find(call => call.status === "unreadable");
 	const pluginOwnsDock = !!pendingPlugin || !!unreadablePlugin;
 	const [pluginMicAvailable, setPluginMicAvailable] = useState(false);
-	const pluginCanonicalInitial = useRef<string | null>(null);
+	const pluginCanonicalIdentity = pendingPlugin?.questionId ?? (unreadablePlugin ? pluginQuestionOccurrenceKey(unreadablePlugin.occurrence) : null);
 	useEffect(() => {
-		const identity = pendingPlugin?.questionId ?? (unreadablePlugin ? pluginQuestionOccurrenceKey(unreadablePlugin.occurrence) : null);
-		if (!identity || pluginCanonicalInitial.current === identity) return;
-		pluginCanonicalInitial.current = identity;
-		void reconcile();
-	}, [pendingPlugin?.questionId, unreadablePlugin, reconcile]);
+		// Effect reconnection (including StrictMode replay) must renew the
+		// canonical read; a retained identity ref cannot certify a connection.
+		if (pluginCanonicalIdentity) void reconcile();
+	}, [pluginCanonicalIdentity, reconcile]);
 	useServerEvent("plugins-changed", () => {
 		if (pluginOwnsDock && status !== "submitted" && status !== "streaming") void reconcile();
 	});
@@ -2310,9 +2310,15 @@ function DockOverlay({
 	// effect below. Short windows scroll the reading/question/answer body;
 	// the stats/model toolbar remains outside that overflow viewport.
 	const [sbInset, setSbInset] = useState(0);
+	const stateKey = dockStateKey(mode, ownsDock, expanded);
+	const heightMorphRef = useRef<ReturnType<typeof createDockMorph> | null>(null);
+	if (!heightMorphRef.current) heightMorphRef.current = createDockMorph();
+	const retargetOpening = useCallback(() => heightMorphRef.current?.retarget(stateKey), [stateKey]);
+	useIsoLayoutEffect(() => () => heightMorphRef.current?.dispose(), []);
 	useDockHeight({
 		scrollRef, blockRef, viewportRef, bodyRef, shellRef, contentRef,
 		expanded, enabled: ownsDock, mode, onScrollbarInset: setSbInset, onHeight: offer,
+		onLayout: retargetOpening,
 	});
 
 	// GROWTH MUTE (owner round, 2026-10-05 — the generation churn): during a
@@ -2478,35 +2484,13 @@ function DockOverlay({
 	// term (the fold) belongs to EVERY docked variant — question AND
 	// practice (owner fix, 2026-10-06). Typing growth keeps the key and
 	// never animates; the fold/unfold morphs like teaching always has.
-	const stateKey = dockStateKey(mode, ownsDock, expanded);
-	const prevRef = useRef<{ key: string; height: number } | null>(null);
 	useIsoLayoutEffect(() => {
 		const el = shellRef.current;
 		if (!el) return;
-		const p = prevRef.current;
-		if (p && p.key === stateKey) {
-			// Same variant: keep the settled height fresh, but never measure while
-			// a morph is in flight — getBoundingClientRect would read the ANIMATED
-			// value and corrupt the start height of the next morph.
-			if (el.getAnimations().length === 0) {
-				const h = el.getBoundingClientRect().height;
-				p.height = h;
-				measureBlock(); // typing growth → the spacer grows with the box
-			}
-			return;
-		}
-		el.getAnimations().forEach((a) => a.cancel()); // flush to natural height before measuring
-		const h = el.getBoundingClientRect().height;
-		// Variant change → re-reserve. Growth applies instantly; a drop (the
-		// fold, or question → composer) is filtered by the offer policy.
-		measureBlock();
-		if (p && Math.abs(p.height - h) > 1) {
-			el.animate([{ height: `${p.height}px` }, { height: `${h}px` }], {
-				duration: 120,
-				easing: "cubic-bezier(0.2, 0.8, 0.2, 1)",
-			});
-		}
-		prevRef.current = { key: stateKey, height: h };
+		// The private controller owns only this shell's height animation. Late
+		// child layout can retarget an opening over its remaining original time;
+		// closing and ordinary typing retain their existing behavior.
+		heightMorphRef.current?.layout(el, stateKey, ownsDock && expanded, measureBlock);
 	});
 
 	return (
@@ -2556,9 +2540,12 @@ function DockOverlay({
 							className={mode === initialModeRef.current ? "flow-root" : "flow-root dock-variant"}
 						>
 							{pluginQuestion && pluginDraft ? (
-								<PluginQuestionDock snapshot={pluginQuestion} chatId={chatId} draft={pluginDraft} expanded={expanded} reveal={revealPending} onExpand={expandAndReveal} ready={pluginReady} available={pluginAvailable} readingRef={readingInputRef} onMicAvailable={onPluginMicAvailable} send={onPluginSend} dismiss={onPluginDismiss} prepareSubmission={onPreparePluginQuestion} />
+								<PluginQuestionDock snapshot={pluginQuestion} chatId={chatId} draft={pluginDraft} expanded={expanded} reveal={revealPending} onExpand={expandAndReveal} ready={pluginReady} available={pluginAvailable} reconciliation={reconciliation} readingRef={readingInputRef} onMicAvailable={onPluginMicAvailable} send={onPluginSend} dismiss={onPluginDismiss} prepareSubmission={onPreparePluginQuestion} />
 							) : unreadablePlugin ? (
-								<div className="px-4 py-3"><p role="status" className="text-sm text-muted-foreground">Question unavailable</p><Button type="button" variant="ghost" disabled={!pluginReady} onClick={() => { void finishDictation().then(onPluginDismiss); }}>Dismiss question</Button></div>
+								<div className="px-4 py-3">
+									{reconciliation === "syncing" && <p role="status" className="text-sm text-muted-foreground">Preparing question…</p>}
+									{reconciliation === "ready" && <><p role="status" className="text-sm text-muted-foreground">Question unavailable</p><Button type="button" variant="ghost" disabled={!pluginReady} onClick={() => { void finishDictation().then(onPluginDismiss); }}>Dismiss question</Button></>}
+								</div>
 							) : pending ? (
 								<QuestionDock
 									toolName={pending.tool as "quiz" | "probe" | "ask_user_question" | "explain" | "recall"}

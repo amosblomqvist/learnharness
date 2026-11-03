@@ -1,6 +1,8 @@
 # Native session extensions: images, submission interception and surfaces
 
-**Status: human-approved contract, implemented and verified. The human approved this plan and authorized implementation in this session. Verification evidence is recorded in section 10. The human subsequently authorized committing this checkpoint on `feature/plugin-architecture`; it is not released.**
+> **Commit closeout — 2026-11-04:** The verified UI-polish, question-card, native-default/reconnection and opening-animation changes are included in this feature-branch commit, together with Coding Questions and UI Showcase. “Uncommitted” notices below retain their original verification-time status; this note supersedes them for the current Git state. No push or release is implied.
+
+**Status: human-approved contract, implemented and verified. The human approved this plan and authorized implementation in this session. Original verification evidence is recorded in section 10. The human subsequently authorized committing that checkpoint on `feature/plugin-architecture`; it is not released. Section 11 records the later approved UI-polish amendment, implemented and verified but uncommitted.**
 
 This increment extends native teaching/practice sessions through three primitives. Existing verified Markdown/question work and peer plugin work must be preserved and are included in the separately authorized feature-branch checkpoint. No push or release is implied.
 
@@ -218,7 +220,8 @@ Extend existing UI contracts:
 interface PluginSurfaceTarget { /* private unique-symbol brand */ }
 
 interface PluginSurfaceProps {
-  title: string;
+  title: string; // Required accessible name; not a host-rendered heading.
+  background?: "dimmed" | "opaque"; // Default: dimmed (Chains-like tint + blur).
   content: PluginUiContent;
   onClose?: () => void | Promise<void>;
 }
@@ -239,13 +242,13 @@ openSurface(
 - Reuse PluginUiContent mounting, controlled update/dispose handles, async cleanup, error reporting and abort lifetimes. Content wrappers fill available width/height; replacing content cleans up exactly once, including late async cleanup.
 - Use existing `view` interaction layers and explicit owner propagation; no body-modal semantics, app-wide background hiding, viewport scroll lock or second overlay registry.
 - Keep logical ordering and painted stacking in agreement, including menus/dialogs above a surface. Follow the approved one-Escape rules; never dispatch submit/Tab/dictation actions into covered native inputs.
-- Focus entry reuses the existing initial-focus preference: honor eligible focus already explicitly placed inside the new foreground surface; otherwise focus its first eligible editable text/number field or textarea, falling back to its title heading (`tabIndex=-1`). Do not steal focus when a delayed mount finishes under a newer foreground layer.
+- Focus entry reuses the existing initial-focus preference: honor eligible focus already explicitly placed inside the new foreground surface; otherwise focus its first eligible editable text/number field or textarea, then an eligible plugin-content heading. With neither, focus the painted, labelled surface frame (`tabIndex=-1`), not the floating close action or a non-rendering semantic wrapper. Do not steal focus when a delayed mount finishes under a newer foreground layer.
 - On foreground close, restore its captured opener if still eligible and uncovered, including exposed app chrome. Otherwise use the surviving foreground region's remembered eligible focus or its entry policy. With no plugin surface remaining, apply that policy within the native session body. Never focus covered/detached controls.
 - Disposing a covered surface does not steal foreground focus. Native-view expiry never restores into the departed view. These entry/return rules do not trap focus or disable the exposed top bar/sidebar.
 - Leaving/disabling an owning plugin closes only owned surfaces. Global Settings is not lifetime-owned by a plugin surface merely because it is painted above it.
 - `onClose` follows existing dialog notification semantics, not a new asynchronous close veto. Programmatic disposal/abort retain existing handle cleanup semantics.
 
-Visual proposal: reuse the session-focus body bounds, background/80 backdrop blur, p-4 frame and slim title/header with upper-right Close/X affordance. Use the supplied title visibly and as the region's accessible label; omit diagram-specific provenance and controls. The content wrapper fills the remaining body area, without imposing the diagram's bordered pan/zoom viewport. Plugin content owns its internal layout. No redesign of existing core overlays.
+**Subsequent human-approved visual amendment — implemented and verified, uncommitted:** retain the exact session-body bounds but remove the host title/header row and inset frame padding. The required `title` is the region's accessible name, not an automatic visible heading. A quiet muted X floats above content without consuming a row and stays pinned while content scrolls; the content mount fills the body, reaches the session top bar and outer right edge, and does not inset its scrollbar. Plugins own visible headings and bottom action rows. `background` accepts only `"dimmed"` or `"opaque"`, validated on mount/update: omitted/`"dimmed"` uses the existing Chains-like background/80 and blur; `"opaque"` uses solid background without blur. The public widget update/lifetime contract is unchanged. Plugin dialogs receive the same headerless/floating-X treatment while retaining their existing modal frame bounds, backdrop and mechanics. No broader core-overlay redesign is included. Section 10 records the original visible-title presentation; section 11 verifies this amendment.
 
 ## 9. Implementation sequence and verification
 
@@ -304,3 +307,18 @@ The fresh packaged Electron + Chrome smoke passed **23 assertion groups** across
 - Browser JSON and screenshots: `/var/folders/3x/m0pk52v160jcprrhcb6qkd340000gn/T/lh-plugin-browser-evidence-8jOHFr/` (`plugin-browser-evidence.json`).
 
 Verification used isolated temporary storage and loopback fixtures, not paid providers or real learner data. The earlier wheel-over-transcript-prose follow-up is not claimed fixed by this increment. Broader UI placements, a native send/steer API, model-context hooks and additional surface coverage regions remain deferred. Nothing is staged, committed, pushed or released by this verification.
+
+## 11. Subsequent UI-polish verification — 2026-11-03
+
+The human-approved presentation amendment is implemented and verified on `feature/plugin-architecture`, **uncommitted and not released**. It does not change submission interception, grading, image projection or native question authority.
+
+- Full offline suite: **3,908 tests / 564 suites**, zero failures, cancellations or skips. Whole-project TypeScript, ESLint (only the existing test-fixture `<head>` warning) and whitespace checks passed.
+- UI Showcase: **17 tests**, strict public-SDK type checks and a frontend-only **18,421-byte** bundle passed. A separate consumer compiled against the freshly curated SDK with `skipLibCheck: false`, including both background presets and negative checks for invented targets, arbitrary opacity and plugin-selected knowledge-picker origins.
+- Fresh isolated production build and standalone curation passed. **96 tracing manifests / 277,329 entries / zero private-root hits**; all **410 production files** matched the working tree, isolated source and raw payload byte-for-byte.
+- Expanded packaged Electron-Node/Chrome proof passed with **223 requests / 217 responses**, zero off-origin, generation, microphone, WebSocket or page-error events. Only `GET /v1/models` reached the loopback catalog; settings, synthetic knowledge and the approved host payload remained unchanged. One canceled source read was narrowly expected.
+
+Native proofs include accessible-only overlay titles, pinned floating X controls, outer-edge scrolling, transparent showcase content, dimmed **0.8 alpha / 8px blur** versus opaque **1 alpha / no blur**, nested surfaces/menus/dialogs/Settings, focus return and disable cleanup. They also cover self-contained 11px model controls, configured reading typography, the native standard-composer layout, continuous slider dragging (**52 → 44 → 36 → 26 → 16**, same enabled node, no disabled mutations), and all twelve worker status/presentation combinations with application Hint tooltips.
+
+The unchanged knowledge-picker API now uses actual invocation ownership: page/session-surface origins get a main-pane view with interactive sidebar; modal origins retain a full-viewport modal. Eleven native origin/geometry cases cover sidebar configurations, native-control clearance simulations and route expiry. A global-modal picker belongs to its actual owner/widget, **not an unrelated background route**; a causal review finding here was fixed with pending/open regressions and independently re-reviewed. Covered-source retention is proved by hit-testing, unchanged DOM/draft/owner and trusted Tab/Shift+Tab/Find isolation—not by assuming that every cross-region view sets DOM `inert`. Existing modal and session-surface inertness policies remain intact. Reverse programmatic surface-over-picker ordering is a host-integration proof, not a claimed visible browser flow.
+
+Evidence: `/tmp/lh-ui-polish-isolated-package-rPMHuU/source`, `/tmp/lh-ui-polish-tests-final.log`, `/tmp/lh-ui-polish-build.log`, `/tmp/lh-ui-polish-sdk-strict.log`, and `/private/tmp/lh-ui-showcase-native-ssfmL3/result.json` with nine viewport screenshots. Independent source/delta audits reported no remaining confirmed P1/P2. Windows/Linux checks simulate CSS window-control geometry; physical OS chrome, real microphone capture, OS IME, signed installers, paid providers and real-profile installation are not claimed. The separate proposed coding-question UI changes are not part of this checkpoint.

@@ -1,6 +1,8 @@
 # LearnHarness architecture
 
-This is the current implementation reference for LearnHarness (the plugin increments below are implemented and verified on `feature/plugin-architecture`, not released): a Next.js application with an Electron host, native Pi conversations, adaptive teaching and conversational practice, and a persistent knowledge graph. [Development](development.md) covers setup and commands; [teaching methodology](teaching-methodology.md) covers the pedagogical method. Older design documents and the [archived architecture](archive/architecture-2026-09-08.md) are history, not runtime specifications.
+> **Commit closeout — 2026-11-04:** The verified UI-polish, question-card, native-default/reconnection and opening-animation changes are included in this feature-branch commit, together with Coding Questions and UI Showcase. “Uncommitted” notices below retain their original verification-time status; this note supersedes them for the current Git state. No push or release is implied.
+
+This is the current implementation reference for LearnHarness (the historical plugin increments, later UI polish, question defaults/navigation and continuous-opening correction are implemented and verified on `feature/plugin-architecture`, not released): a Next.js application with an Electron host, native Pi conversations, adaptive teaching and conversational practice, and a persistent knowledge graph. [Development](development.md) covers setup and commands; [teaching methodology](teaching-methodology.md) covers the pedagogical method. Older design documents and the [archived architecture](archive/architecture-2026-09-08.md) are history, not runtime specifications.
 
 ## 1. Code boundaries
 
@@ -256,6 +258,54 @@ Electron-Node/Chrome scenario passed 23 assertion groups with zero page errors, 
 external requests or unexpected HTTP responses; see the checkpoint for exercised proofs
 and limits. Historical question/Markdown/interaction results remain separate evidence.
 
+The later [UI-polish checkpoint](plugin-architecture.md#ui-polish-status--2026-11-03) is
+**implemented and verified, uncommitted on `feature/plugin-architecture`, not released**.
+It passed **3,908 root tests / 564 suites, zero failures** (including the final scrubbed
+rerun), typecheck/lint/diff checks, **17 showcase tests**, strict showcase types/build,
+fresh isolated Next 16.4.3/standalone curation and strict external curated-SDK compilation
+with `skipLibCheck: false`. Privacy proof checked **96 NFT manifests / 277,329 entries**,
+zero private-root hits and **410 byte-identical production files**. Expanded packaged
+Electron-Node/Chrome proof recorded **223 requests / 217 responses**, nine screenshots,
+zero off-origin/forbidden-generation/microphone/WebSocket/page-error activity, only provider
+catalog `GET /v1/models`, and unchanged settings/graph/host source. One cancelled graph-source
+read and expected fixture favicon/dictation-token errors are narrowly recorded, not a
+clean-console or all-requests-succeeded claim. See the checkpoint for measured slider,
+worker-tooltip, dialog/surface and 11 picker-origin/geometry proofs. Reverse programmatic
+surface-over-picker ordering has host integration proof only; Windows/Linux window-controls
+checks simulate CSS, not physical OS chrome. No actual microphone/IME, paid-provider,
+signed-installer, real-profile installation, full Electron-window or Windows/Linux runtime
+proof, commit, push or release is implied. Separately held question fixes are not included.
+Historical 3,778/3,869/3,665-test checkpoints retain their original scope.
+
+The later [question-defaults/navigation checkpoint](plugin-architecture.md#question-defaults-and-navigation-recovery--implemented-and-verified)
+is **implemented and verified, uncommitted on `feature/plugin-architecture`, not released**.
+It passed **3,965 host tests / 564 suites, zero failures/cancellations/skips**, typecheck,
+lint, fresh isolated build and strict external SDK checks. The **62 card/frontend**, **39
+core/lifecycle** and earlier **90 session-core** focused checks are separate runs, not an
+aggregate total. Privacy proof checked **96 NFT manifests / 277,497 entries**, zero
+private-root hits and **410 byte-identical production source files**.
+
+The pre-fix development failure was **10/10 pending prediction/check mount returns despite
+all 162 GETs returning 200**. Recovery now uses private connection-generation task ownership
+and stable-identity effect reconnect reads, preserving stale/identity fences and StrictMode.
+Final current-transcript/async-initial-publication P2 findings were closed by restoring
+original draft-ownership guards while retaining canonical admission/Submit gates; no
+confirmed P1/P2 findings remain. Final native plus dev/production browser proof passed
+**20 healthy returns/mounts, ten per mode**, with held GETs retaining Preparing and no
+healthy-return Retry/error/false Unavailable/Dismiss. Trusted code Enter submitted a
+prediction and Thinking Enter submitted a check; both Shift+Enter paths, exact canonical/
+model channels, 40px empty Thinking/76px three-line growth and fresh disabled-backend
+recovery passed. No page errors, external requests, navigation model calls or microphone
+attempts occurred. The native pre-curation payload retained **5,535 runtime files / 130
+plugin files byte-identical**. Five product unit/catalog tests and real Chrome component
+proof also passed. See the checkpoint for evidence and scope limits.
+
+Historical **3,925-test native-parity** and **3,908-test UI-polish** records remain frozen.
+React Activity lifecycle reproduction is fixture-only; Cache Components remains false.
+Composition guards were tested synthetically, not through actual OS IME. No actual
+microphone recording, paid-provider, signed-installer, real-profile installation, commit,
+push or release claim follows.
+
 Unresolved browser follow-up: a trusted wheel over native prose at point 5 had `defaultPrevented: false` but left transcript scroll at `2769`, while blank-margin wheel moved and folded; cause and preexisting-versus-question-state causality remain unestablished, with no intentional wheel surface identified.
 
 ## 11. Trusted local plugins (API v1)
@@ -271,6 +321,19 @@ Supported services are thin read-only access to all learning records, configured
 Backend contributions append instructions and native Pi tools to the existing prober/teacher/practice registries, with per-turn factories and package-level failure isolation. Frontend fenced-block and tool-result renderers mount through the same HTMLElement/cleanup model; built-in presentations retain precedence, and missing or failing renderers leave readable raw fallbacks. This does not introduce a new learner-answer protocol.
 
 The [approved bounded question-v1 contract](plugin-question-contract.md) adds backend `registerQuestionType` and owner-scoped frontend `registerQuestionRenderer`, with actual types in `src/core/plugin-questions.ts`; the implementation passed the [3,778-test question checkpoint](plugin-architecture.md#plugin-question-verification-checkpoint--2026-11-02) and is implemented and verified on `feature/plugin-architecture`, not released; `792671e` remains a historical migration checkpoint. Optional explicit probe/teach variants enroll only their respective teaching roles; required `showThinking` is host policy. Host-generated native parameters are common `{ question, payload }` plus teach `{ type, nodeId }`, preserving predict/check positioning. Saved schemas, required historical refinements and exact canonical occurrence identity—not current tool-name lookup or reused call IDs—govern answer authority. Editors become actionable only after canonical persistence/adoption and terminal reconciliation; the host saves genuine results before ordinary continuation and blocks stale/duplicate/legacy bypasses. Failed/live/unavailable attempts have safe common-question fallback, never generic raw-payload traces. This remains a presentation boundary, not a sandbox.
+
+The host question defaults now make **Enter submit and Shift+Enter insert a
+newline** in both plugin answer editors and host Thinking. An optional explicit editor
+`handleKeyDown` override remains allowed; `"pass"`/no hook means host Enter-submit, not
+an editing newline. Mod+Enter stays reserved Submit; IME/229 and interaction-scope guards
+are unchanged. The coding plugin now omits a plain-Enter override while retaining Tab
+indentation and Shift+Enter newline indentation. Native footer wording is **↵ submits ·
+⇧↵ newline**, button **Submit answer**. The human chose **40px minimum Thinking height
+for all variants**, replacing the teaching 72px minimum. Unknown/failed canonical sync is
+not confirmed unavailability: keep readable saved content and genuine Retry, without
+fabricating Unavailable or recovery Dismiss. This delta passed the separate 3,965-test
+checkpoint and changes no grading, saved-data, blank/whitespace filtering, public API shapes
+or `ctx.ui`.
 
 Question renderers own only optional question/answered content and the required controlled editor. Atomic empty/unready/ready state preserves finite JSON, falsy values and verbatim strings. Exact contract-version support, explicit incompatible-version quiet cancellation and unavailable/pending fallback replace automatic migrations; unknown versions alone never cancel. Stats/microphone/model/model-thinking and host Thinking/ReadingThinking rules stay host-owned, with explicit Thinking-off `appendTranscript` opt-in or visible disabled microphone—no hidden composer. Narrow editing-key/focus integration remains within the host keyboard contract. Folding/adoption/remounts preserve drafts in the existing in-memory session model, but model-destroying navigation/reload/restart do not promise draft persistence; posed questions/accepted answers are durable. V1 returns valid answers to the ordinary teacher, with no assessment/node hook or grading stage; separate existing tools remain available. Builtins and grading are unchanged, with no generic pending-input/form/field SDK, global chat migration or product resumption. The historical 3,681-test Markdown checkpoint remains separate from the question verification record.
 
@@ -318,13 +381,19 @@ lost acknowledgment. Failure/ownership loss retires only that attempt's provisio
 preserving drafts/plugin pending data without inferring acceptance callbacks. This bounded
 policy was human-approved and is covered by eleven permanent causal regressions.
 
-`ctx.ui.openSurface(target, { title, content, onClose? }, { signal })` uses existing content
+`ctx.ui.openSurface(target, { title, content, background?, onClose? }, { signal })` uses existing content
 mounts/update/dispose and `view` interaction scopes. Its opaque token expires with one
 mounted teaching/practice view; returning to the same session ID cannot revive it. Live
 unknown/expired targets throw `Surface target is no longer active`; aborted signals are
 inert and late mounts/cleanup are fenced. Surfaces cover the **whole body including
-inputs, not top bar/sidebar**, using a body-bounded blurred backdrop and slim title/Close-X
-header. Covered native/plugin bodies stay mounted and painted; stacked entries are visual
+inputs, not top bar/sidebar**. Approved polish adds `background?: "dimmed" | "opaque"`,
+default `"dimmed"` (Chains-style 80%-background plus blur); `"opaque"` is solid with no
+blur. Opening and handle updates validate the enum. `title` remains required for the
+accessible name, with **no host-visible title/header row**. Quiet muted Close/X floats
+above content independently of scroll. The content fills the body, with its scrollbar at
+the outer edge rather than inset by a host frame; plugins own visible headings and bottom
+actions. No extra header/appearance props are added. This presentation change passed the
+separate UI-polish checkpoint. Covered native/plugin bodies stay mounted and painted; stacked entries are visual
 siblings, not automatic lifetime owners. Lower-owner unload/disposal never removes another
 owner's foreground surface or Settings merely painted above it. Navigation/caller abort/
 plugin unload/dispose tear down only their scopes. Existing one-Escape, eligible focus
@@ -340,9 +409,11 @@ for details. This increment does not resume either paused product implementation
 
 The result-oriented `ctx.workers` service complements managed conversations: immutable accepted input, explicit model/purpose and turn budget, schema/semantic validation through a native terminal submission tool, and one durable accepted result. Unfinished tasks become interrupted on disable/restart; they are never automatically replayed. `createBackgroundTool` binds a worker to the existing acknowledgement-now/result-steer-later job pipeline. Task outcomes and delivery state remain distinct. Host admission (§5) includes all detached tasks in the shared request pool and projects standalone tasks into the existing Background agents panel (plugin name · worker definition ID; elapsed/activity/model/usage when available, no invented session link; END cancels computing work). A linked background-tool host job suppresses a duplicate standalone row. No automatic retry, new history screen or public agent framework is added.
 
-The additive API v1 `ctx.ui.mountKnowledgePicker(container, { value, onChange, disabled? }, { signal })` keeps controlled node IDs (`value: readonly string[]`) and the standard update/dispose handle. Plugins own bubble placement, selection and persistence; the host writes no plugin state. The exact `NodePickerControl` and real `ChainTableOverlay` supply Pick nodes/count/Clear (`[]`), immediate checkbox updates and retained controlled IDs. The new plugin picker is a **full-window modal** with the existing translucent/blurred Chains appearance; its background, including the sidebar, is inactive. Core Graph/Practice Chains remain nonmodal content-column views with unchanged bounds and sidebar interaction. The host supplies canonical graph/source organization, lazy first-open loading, focus/portals and abort cleanup. User-driven source rename, folder creation and drag organization remain available, while practice-picker management Delete remains absent. Backend learning-data APIs stay read-only; no programmable core writes or deck/library-tree API is added. Deck state, membership, limits and persistence remain plugin-owned.
+The additive API v1 `ctx.ui.mountKnowledgePicker(container, { value, onChange, disabled? }, { signal })` keeps controlled node IDs (`value: readonly string[]`) and the standard update/dispose handle. Plugins own bubble placement, selection and persistence; the host writes no plugin state. The exact `NodePickerControl` and real `ChainTableOverlay` supply Pick nodes/count/Clear (`[]`), immediate checkbox updates and retained controlled IDs. The latest approved policy supersedes the always-full-window picker: the host captures actual origin, with no public options. Plugin/native pages and session-body surfaces open a **main-pane view overlay excluding the interactive sidebar**, expiring on source-view navigation; dialog/Settings/modal origins open a **full-viewport modal** with painted/stateful but inert parents and common modal focus rules. Existing translucent/blurred Chains visuals and core Graph/Practice content-area behavior remain. This policy is implemented and verified at the separate UI-polish checkpoint. The host supplies canonical graph/source organization, lazy loading, focus/portals and abort cleanup. User-driven source rename, folder creation and drag organization remain available, while practice-picker management Delete remains absent. Backend learning-data APIs stay read-only; no programmable core writes or deck/library-tree API is added. Deck state, membership, limits and persistence remain plugin-owned.
 
-Ordinary plugin views, plugin Settings and public `ctx.ui.openDialog` content use the same picker API and lifetime contract. Launching parents stay mounted, painted and visible underneath, preserving state/scroll while inert—not hidden. Done/X and unconsumed selector-owned Escape close only the picker and restore eligible focus. New public dialogs/menus foreground normally. Fresh Settings opens above a picker without discarding it; return-to existing Settings follows the shared guarded rules in §12. A shared-controller exclusive opening slot allows one selector through normal close guards, retaining controlled IDs when a previous selector closes. Newer UI openings/retargets invalidate older pending graph loads so they cannot promote stale UI. The provisional picker-only hiding/coordinator and unconditional Settings-cancels-picker rules are superseded. Historical admission/ordinary-picker checkpoints remain distinct from the completed [historical 3,665-test interaction verification](plugin-architecture.md#historical-shared-interaction-final-verification--2026-11-02).
+Ordinary plugin/native pages, session surfaces, plugin Settings and public `ctx.ui.openDialog` content use the same picker API/lifetime contract. Modal launching parents stay mounted, painted and visible underneath, preserving state/scroll while inert—not hidden. Done/X and unconsumed selector-owned Escape close only the picker, retain controlled IDs and restore eligible focus; picker Done has no dumbbell/practice glyph (native practice keeps its glyph). There is no picker sidebar-reopen button. Left-edge clearance applies only where the picker reaches the viewport left edge, including full-viewport modal/closed-pane cases; Windows/Linux window-controls-overlay gutter calculation and sidebar-state persistence stay unchanged. New public dialogs/menus foreground normally. Fresh Settings opens above a picker without discarding it; return-to existing Settings follows the shared guarded rules in §12. One exclusive selector slot uses normal close guards and retains IDs on replacement without auto-reopening. Newer UI/retargets invalidate pending graph work; loading must respect the captured origin/lifetime and cannot promote stale UI. Private AppShell main-pane isolation and `HostRouteLifetimeContext` bind nonmodal origins only; modal-origin selection follows its actual modal and widget, not an unrelated background route. Covered view-source DOM/drafts and exact interaction owners are retained without imposing blanket cross-region DOM `inert`; existing modal/session-surface inert policies are unchanged. The provisional picker-only hiding/coordinator and unconditional Settings-cancels-picker rules are superseded. Historical admission/ordinary-picker checkpoints remain distinct from [historical 3,665-test interaction verification](plugin-architecture.md#historical-shared-interaction-final-verification--2026-11-02), not proof of this later policy.
+
+Other approved polish keeps the exact independent model/thinking controls plugin-local and read-only toward core settings, makes their 11px typography self-contained, leaves the standalone composer bare, and frames only standard-composer text with the control row below/outside. These do not replace native writing controls. Gallery explanations use configured reading size (16px default), Settings headings remain compact, and button palettes are preserved. Synchronous slider changes avoid transient disabling; actual Promise-pending disabling is unchanged. Plugin worker headers become status icon plus label only, without Background prefix/raw status text; collapsed results use a chevron without View result / Hide result text, with full accessible/tooltip status and native failure X. Native Research/PDF disclosure grammar is unchanged. These changes passed the separate UI-polish checkpoint and remain uncommitted, not released.
 
 The additive API v1 `ctx.ui.mountMarkdown(container, props, { signal }): PluginWidgetHandle<PluginMarkdownProps>` uses `PluginMarkdownProps { text: string }`, standard update/dispose and existing per-mount signals. Private `HostMarkdown` reuses the actual shared host Markdown/math/highlighted-code/tables/callout/Mermaid/images/typography pipeline for complete static content. Only built-ins run, not registered plugin code-block renderers. Auxiliary copy/download/retry/expand/zoom/disclosure controls are omitted; ordinary links retain host-native new-tab behavior (`target="_blank"`, `rel="noopener noreferrer"`) without an extra confirmation modal. Invalid Mermaid shows the existing error heading/message and source directly, without retry/details. Plugins own content/data/layout; no storage, inference, React import, dependency or API-version bump is added. This generic static renderer can serve content such as card fronts/backs without inventing worker results. The implementation passed [3,681-test final Markdown verification](plugin-architecture.md#static-markdown-final-verification--2026-11-02), including strict SDK and actual packaged-browser checks; checkpoint `792671e`'s 3,665-test interaction results remain historical, not proof of this later API.
 
@@ -350,7 +421,7 @@ Bundled updates run before activation with a durable recovery journal and manife
 
 ## 12. Shared dialog and interaction foundation
 
-The [human-approved dialog, popup and interaction contract](dialog-overlay-contract.md) is authoritative. Core and plugin modals use private `HostDialog`/`InteractionLayersProvider` composition, with `MenuShell`, shared popup ownership and nonmodal content-view scopes. Existing visuals, geometry, domain actions and explicit cancellation remain; these are not new SDK APIs. Nested modal parents remain painted and stateful underneath, but only the active modal and its owned children are interactive/accessibility-active.
+The [human-approved dialog, popup and interaction contract](dialog-overlay-contract.md) is authoritative. Core and plugin modals use private `HostDialog`/`InteractionLayersProvider` composition, with `MenuShell`, shared popup ownership and nonmodal content-view scopes. Domain actions and explicit cancellation remain; the later approved plugin presentation polish and origin-sensitive picker policy are explicit exceptions to the historical visual-preservation baseline. Plugin dialogs require `title` for the accessible name but have no host-visible title/header row, with a quiet muted Close/X floating above content independently of scroll; plugins own visible headings and bottom actions. This polish is implemented and verified, not new public header/appearance APIs. Nested modal parents remain painted and stateful underneath, but only the active modal and its owned children are interactive/accessibility-active.
 
 Each physical Escape has one snapshotted original owner, with leaf handlers first; closing, handled or blocked outcomes cannot cascade to another layer or fallback action. Tooltips are passive help, not Escape owners; their modal-owned portals preserve visibility without intercepting the active field/menu/dialog's Escape. Native Tab/Shift+Tab navigation and primitive focus looping stay disabled; existing explicit field-cycle/question/thinking/rebinding actions remain scoped to eligible controls. Preserve explicit initial focus, otherwise choose the first eligible editable field or heading, not an action button. Child close restores eligible invoking focus or the active surface's initial-focus policy. Settings field Escape follows validated blur/save without closing Settings and retains unsuccessful drafts; credential Save and rename cancellation retain their distinct workflows. Busy deletion consumes dismissal without closing. Acknowledged full settings snapshots stay authoritative across close/reopen: older responses and Settings/startup appearance GETs cannot roll back a newer save. The newest full snapshot applies its appearance slice regardless of the section written, and a pending save finishing after reopen updates the current instance; fresh loads still read the server normally.
 

@@ -89,10 +89,13 @@ export function PluginStandardComposer({ composer, model, thinking, dictation: d
 			cycleThinking: () => thinkingCommand.current?.invoke(),
 		});
 	});
-	return <div ref={root} className="rounded-2xl border bg-card" data-plugin-standard-composer="">
-		<PluginComposer {...composer} canSend={composer.canSend ?? (composer.value.trim().length > 0 || dictation.active)}
-			onSend={async () => { await dictation.finish(); await latest.current.composer.onSend(); }} onError={onError} />
-		<div className="flex items-center gap-1.5 px-3 pb-2">
+	return <div ref={root} data-plugin-standard-composer="">
+		<div className="overflow-hidden rounded-2xl border bg-card shadow-lg">
+			<PluginComposer {...composer} canSend={composer.canSend ?? (composer.value.trim().length > 0 || dictation.active)}
+				onSend={async () => { await dictation.finish(); await latest.current.composer.onSend(); }} onError={onError} />
+		</div>
+		{/* Like the native dock, controls sit below the text-only shell. */}
+		<div className="flex items-center gap-1.5 px-3 pt-2 font-ui text-xs text-muted-foreground">
 			<PluginDictationControl dictation={dictation} disabled={dictationProps.disabled} />
 			<PluginModelPicker {...model} commandRef={modelCommand} onError={onError} />
 			<PluginThinkingPicker {...thinking} commandRef={thinkingCommand} onError={onError} />

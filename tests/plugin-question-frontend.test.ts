@@ -61,11 +61,35 @@ describe("bounded plugin question frontend", () => {
 		inside = false; capturePluginQuestionKey(event("Tab")); assert.equal(cycles, 1);
 		eligible = false; capturePluginQuestionKey(event("Enter")); assert.equal(calls, 1); off();
 	});
-	it("passing Enter inside arbitrary editor DOM never triggers host submit or cancels editing default", () => {
+	for (const hook of ["absent", "pass"] as const) it(`${hook} key hook delegates Enter submission and Shift+Enter editing to host defaults`, () => {
 		let submits = 0;
-		const off = ownPluginQuestionKeys({ eligible: () => true, contains: () => true, key: () => "pass", cycle() {}, submit() { submits++; } });
-		const event = { key: "Enter", preventDefault() { assert.fail("native editing must survive"); } } as unknown as KeyboardEvent;
-		capturePluginQuestionKey(event); assert.equal(pluginQuestionKeySuppressed(event), true); assert.equal(submits, 0); off();
+		const lease = createQuestionEditorLease({ props: props(), publish() {}, changed() {}, failed() { assert.fail("unexpected failure"); } });
+		lease.adopt({ ...handle(), ...(hook === "pass" ? { handleKeyDown: () => "pass" as const } : {}) });
+		const off = ownPluginQuestionKeys({ eligible: () => true, contains: () => true, key: key => lease.key(key), cycle() {}, submit() { submits++; } });
+		const event = (extra = {}) => ({ key: "Enter", defaultPrevented: false, preventDefault(this: { defaultPrevented: boolean }) { this.defaultPrevented = true; }, ...extra }) as unknown as KeyboardEvent;
+		try {
+			const enter = event(); capturePluginQuestionKey(enter);
+			assert.equal(enter.defaultPrevented, true); assert.equal(pluginQuestionKeySuppressed(enter), true); assert.equal(submits, 1);
+			const newline = event({ shiftKey: true }); capturePluginQuestionKey(newline);
+			assert.equal(newline.defaultPrevented, false); assert.equal(pluginQuestionKeySuppressed(newline), true); assert.equal(submits, 1);
+			for (const extra of [{ ctrlKey: true }, { metaKey: true }, { ctrlKey: true, shiftKey: true }]) {
+				const chord = event(extra); capturePluginQuestionKey(chord); assert.equal(chord.defaultPrevented, true);
+			}
+			assert.equal(submits, 4);
+			for (const extra of [{ altKey: true }, { ctrlKey: true, altKey: true }, { isComposing: true }, { keyCode: 229 }]) {
+				const editing = event(extra); capturePluginQuestionKey(editing); assert.equal(editing.defaultPrevented, false);
+			}
+			assert.equal(submits, 4);
+		} finally { off(); lease.dispose(); }
+	});
+	it("an explicit handled Enter overrides the host default, but cannot override reserved submit chords", () => {
+		const calls: string[] = []; let submits = 0;
+		const off = ownPluginQuestionKeys({ eligible: () => true, contains: () => true, key(key) { calls.push(key); return "handled"; }, cycle() {}, submit() { submits++; } });
+		const event = (extra = {}) => ({ key: "Enter", defaultPrevented: false, preventDefault(this: { defaultPrevented: boolean }) { this.defaultPrevented = true; }, ...extra }) as unknown as KeyboardEvent;
+		try {
+			const enter = event(); capturePluginQuestionKey(enter); assert.equal(enter.defaultPrevented, true); assert.equal(submits, 0); assert.deepEqual(calls, ["Enter"]);
+			const chord = event({ metaKey: true }); capturePluginQuestionKey(chord); assert.equal(chord.defaultPrevented, true); assert.equal(submits, 1); assert.deepEqual(calls, ["Enter"]);
+		} finally { off(); }
 	});
 	it("terminal readiness waits explicit GET adoption even without any global settlement event", async () => {
 		const saved = deferred<Response>(); const requests: string[] = [];

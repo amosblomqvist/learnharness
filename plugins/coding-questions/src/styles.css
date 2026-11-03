@@ -1,0 +1,45 @@
+.lh-coding-question {
+  overflow: hidden;
+  border: 1px solid var(--border, #434343);
+  border-radius: 0.5rem;
+  background: var(--background, #141414);
+  color: var(--foreground, #e6e6e6);
+}
+.lh-coding-question__header {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.4rem 0.75rem;
+  border-bottom: 1px solid var(--border, #434343);
+  color: var(--muted-foreground, #8d8d8d);
+  font-family: var(--font-mono, monospace);
+  font-size: 0.75rem;
+  overflow-wrap: anywhere;
+}
+.lh-coding-question .cm-editor {
+  background: transparent;
+  color: inherit;
+  font-size: 0.875rem;
+}
+.lh-coding-question .cm-editor.cm-focused { outline: none; }
+.lh-coding-question:focus-within { outline: 1px solid var(--muted-foreground, #8d8d8d); }
+.lh-coding-question .cm-scroller {
+  min-height: 8em;
+  max-height: min(24em, 40vh);
+  overflow: auto;
+  font-family: var(--font-mono, monospace);
+  line-height: 1.6;
+}
+.lh-coding-question .cm-content { padding: 0.5rem 0; caret-color: var(--foreground, #e6e6e6); }
+.lh-coding-question .cm-line { padding: 0 0.75rem; }
+.lh-coding-question .cm-gutters {
+  background: transparent;
+  color: var(--muted-foreground, #8d8d8d);
+  border: none;
+}
+.lh-coding-question .cm-cursor { border-left-color: var(--foreground, #e6e6e6); }
+.lh-coding-question .cm-selectionBackground,
+.lh-coding-question .cm-editor.cm-focused .cm-selectionBackground {
+  background: color-mix(in srgb, var(--foreground, #e6e6e6) 20%, transparent);
+}
+.lh-coding-question .cm-matchingBracket { background: color-mix(in srgb, var(--foreground, #e6e6e6) 18%, transparent); }

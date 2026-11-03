@@ -59,7 +59,6 @@ import {
 	ChevronDownIcon,
 	ChevronRightIcon,
 	ChevronUpIcon,
-	DumbbellIcon,
 	BookIcon,
 	BookOpenIcon,
 	FolderPlusIcon,
@@ -128,7 +127,9 @@ export function ChainTableBody({
 	onToggleSource = () => {},
 	onToggleFolder = () => {},
 	keyboardActive = true,
+	pickerChrome = false,
 }: {
+	pickerChrome?: boolean;
 	keyboardActive?: boolean;
 	directory?: SourceDirectory;
 	onOrganizationChange?: OrganizationChange;
@@ -305,7 +306,7 @@ export function ChainTableBody({
 			    chain table names nothing, so its bar carries counts + search +
 			    close only. Search + close carve out with lh-no-drag (the mask
 			    law: later in the DOM). */}
-			<TopBar>
+			<TopBar sidebarToggle={!pickerChrome}>
 				<span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">
 					{chains.length} {chains.length === 1 ? "chain" : "chains"} · {nodes.length} {nodes.length === 1 ? "node" : "nodes"}
 				</span>
@@ -593,7 +594,6 @@ export function ChainTableBody({
 								aria-label={`Done picking — ${selection.size} ${selection.size === 1 ? "proposition" : "propositions"} selected`}
 								className="flex items-center gap-1.5 rounded-full bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground transition-colors hover:bg-primary/80"
 							>
-								<DumbbellIcon aria-hidden="true" className="size-3.5" />
 								Done
 							</button>
 						) : (
@@ -695,9 +695,12 @@ export function ChainTableOverlay({
 	onSelectionChange,
 	keyboardActive = true,
 	registerInteraction = true,
+	pickerChrome = false,
 }: {
 	open: boolean;
-	/** A full-window picker already registers this surface through its modal shell. */
+	/** Host knowledge picker has clearance, but no sidebar-reopen action. */
+	pickerChrome?: boolean;
+	/** A host knowledge picker registers once through its pane or modal shell. */
 	registerInteraction?: boolean;
 	/** Internal host ownership; ordinary practice keeps the existing default. */
 	keyboardActive?: boolean;
@@ -815,9 +818,11 @@ export function ChainTableOverlay({
 				ref={rootRef}
 				data-testid="chain-table-overlay"
 				className="absolute inset-0 z-40 flex flex-col bg-background/80 backdrop-blur-sm"
+				style={registerInteraction ? { zIndex: 100 + layer.order } : undefined}
 			>
 				{directoryFailure && <p role="alert" className="px-3 py-1 text-xs text-red-400">{directoryFailure}</p>}
 				<ChainTableBody
+					pickerChrome={pickerChrome}
 					keyboardActive={keyboardActive && !deleteOpen}
 					directory={directory}
 					onOrganizationChange={directory ? changeOrganization : undefined}

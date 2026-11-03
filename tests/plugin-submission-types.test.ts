@@ -64,7 +64,15 @@ const hook: PluginSubmissionInterceptor = {
 frontend.registerSubmissionInterceptor(hook)();
 frontend.refreshSubmissions();
 const props: PluginSurfaceProps = { title: "Drawing", content: document.createElement("div"), onClose: async () => {} };
-frontend.ui.openSurface(target.surfaceTarget, props, { signal: context.signal }).update({ title: "Updated" });
+const surface = frontend.ui.openSurface(target.surfaceTarget, { ...props, background: "dimmed" }, { signal: context.signal });
+surface.update({ title: "Updated", background: "opaque" });
+surface.update({ background: undefined });
+// @ts-expect-error Only the approved surface background presets are public.
+surface.update({ background: "transparent" });
+// @ts-expect-error Surface background is not a general CSS style object.
+frontend.ui.openSurface(target.surfaceTarget, { ...props, background: { opacity: 0.8 } }, { signal: context.signal });
+// @ts-expect-error The accessible title remains required even without a host heading.
+frontend.ui.openSurface(target.surfaceTarget, { content: document.createElement("div") }, { signal: context.signal });
 // @ts-expect-error Surface targets cannot be manufactured from session IDs.
 const forged: PluginSurfaceTarget = { sessionId: "s" };
 // @ts-expect-error Surface API does not take an arbitrary DOM parent.

@@ -1,14 +1,15 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import type { PluginSettingsRow, PluginSettingsSchema } from "@/src/core";
 import { CommitInput, SettingsRow, SettingsSlider, ThinSelect, Toggle } from "@/components/settings/controls";
 
 function SchemaRow({ row, onError }: { row: PluginSettingsRow; onError?: (error: unknown) => void }) {
 	const [error, setError] = useState<string>();
 	const [pending, setPending] = useState(false);
+	const changing = useRef(false);
 	const change = async (value: string | number | boolean): Promise<boolean> => {
-		if (pending || row.disabled) return false;
+		if (changing.current || row.disabled) return false;
 		try {
 			// The discriminant controls the editor; no coercion outside that editor.
 			const validate = row.validate as ((value: typeof row.value) => string | undefined) | undefined;
@@ -20,14 +21,20 @@ function SchemaRow({ row, onError }: { row: PluginSettingsRow; onError?: (error:
 				setError("Value is outside the allowed range."); return false;
 			}
 			setError(undefined);
-			setPending(true);
-			await (row.onChange as (value: typeof row.value) => void | Promise<void>)(value);
+			changing.current = true;
+			const result = (row.onChange as (value: typeof row.value) => void | Promise<void>)(value);
+			// Disabling a native range mid-gesture cancels its drag. Synchronous
+			// controlled acknowledgements need no pending state; async saves do.
+			if (result && typeof result.then === "function") {
+				setPending(true);
+				await result;
+			}
 			return true;
 		} catch (error) {
 			setError(error instanceof Error ? error.message : String(error));
 			onError?.(error);
 			return false;
-		} finally { setPending(false); }
+		} finally { changing.current = false; setPending(false); }
 	};
 	const disabled = row.disabled || pending;
 	let control;

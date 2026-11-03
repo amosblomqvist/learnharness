@@ -256,7 +256,7 @@ describe("plugin background result rendering", () => {
 		} }); } });
 		try {
 			await h.render(<PluginWorkerCard result={{ ...result, formatError: "formatter unavailable" }} toolCallId="original-call" />);
-			assert.match(document.querySelector('[data-testid="plugin-worker-header"]')!.textContent!, /Background resultcustom_toolsucceeded/);
+			assert.match(document.querySelector('[data-testid="plugin-worker-header"]')!.textContent!, /custom_tool succeeded/);
 			assert.match(document.querySelector('[role="alert"]')!.textContent!, /formatter unavailable/);
 			assert.ok(document.body.textContent?.includes("custom task result"));
 			assert.equal(document.querySelector('[data-testid="plugin-worker-fallback"]'), null);

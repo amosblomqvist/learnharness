@@ -40,7 +40,8 @@ export function capturePluginQuestionKey(event: KeyboardEvent): void {
 	if (key !== "Tab" && key !== "Enter" && key !== "Shift+Enter" && key !== "Escape") return;
 	if (current.key(key) === "handled") { claim(); return; }
 	if (key === "Tab") { claim(); current.cycle(); }
-	// Passing Enter remains the editor's native editing action. It is marked
-	// separately from default prevention so no host Enter hook submits it.
-	if (key === "Enter" || key === "Shift+Enter") claimed.add(event);
+	// A missing hook or "pass" delegates to native host defaults: Enter
+	// submits, Shift+Enter keeps native editing without a second host submit.
+	if (key === "Enter") { claim(); current.submit(); }
+	if (key === "Shift+Enter") claimed.add(event);
 }
