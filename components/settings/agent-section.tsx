@@ -26,9 +26,9 @@
  * Search engine (search wave, 2026-09-20, owner: no default — an engine
  * is live iff its key is present; with a key the engine AUTO-activates,
  * the explicit choice is only a preference between live engines): a row
- * in the Tools group, with the same shared-menu look, with
+ * in the Tools group, with the same shared-menu look and
  * the live reason line from /api/search. No engine key at all → the row
- * grays whole-row (a choice without a key would only BLOCK the other
+ * grays whole-row (a choice without a key would only BLOCK another
  * engine's auto-activation).
  *
  * Tools — the owner's final list (2026-09-19): research, demo, visual, pdf.

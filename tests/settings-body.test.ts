@@ -66,13 +66,16 @@ describe("parseAgentSettingsBody", () => {
 		// cross-validation — the parser only sees shapes.
 	});
 
-	it("search: recognizes Exa and rejects unknown engines", () => {
+	it("search: recognizes Exa and Firecrawl and rejects unknown engines", () => {
 		const ok = parseAgentSettingsBody({ search: { engine: "tavily" } });
 		assert.ok(ok.ok);
 		assert.deepEqual(ok.settings.search, { engine: "tavily" });
 		const exa = parseAgentSettingsBody({ search: { engine: "exa" } });
 		assert.ok(exa.ok);
 		assert.deepEqual(exa.settings.search, { engine: "exa" });
+		const fc = parseAgentSettingsBody({ search: { engine: "firecrawl" } });
+		assert.ok(fc.ok);
+		assert.deepEqual(fc.settings.search, { engine: "firecrawl" });
 		const clear = parseAgentSettingsBody({ search: {} });
 		assert.ok(clear.ok);
 		assert.equal(clear.settings.search, undefined, "absent engine = back to auto-detect");

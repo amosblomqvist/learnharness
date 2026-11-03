@@ -151,6 +151,10 @@ describe("AgentSection (thin SSR)", () => {
 			<AgentSection agent={{ search: { engine: "exa" } }} models={undefined} graph={undefined} onSectionChange={() => {}} onModelsChange={() => {}} />,
 		);
 		assert.ok(exa.includes("Exa"), "an Exa pin retains its label in the trigger");
+		const html3 = renderToStaticMarkup(
+			<AgentSection agent={{ search: { engine: "firecrawl" } }} models={undefined} graph={undefined} onSectionChange={() => {}} onModelsChange={() => {}} />,
+		);
+		assert.ok(html3.includes("Firecrawl"), "a Firecrawl pin reads by its label");
 	});
 
 	it("the prober graph-tools row: FIRST in the Tools group, default ON, its own key (wave 7)", () => {

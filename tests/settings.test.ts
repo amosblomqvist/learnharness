@@ -181,6 +181,8 @@ describe("sanitizeUserSettings", () => {
 		assert.deepEqual(good?.agent?.search, { engine: "tavily" });
 		const exa = sanitizeUserSettings({ version: 1, agent: { search: { engine: "exa" } } });
 		assert.deepEqual(exa?.agent?.search, { engine: "exa" });
+		const fc = sanitizeUserSettings({ version: 1, agent: { search: { engine: "firecrawl" } } });
+		assert.deepEqual(fc?.agent?.search, { engine: "firecrawl" });
 		const bad = sanitizeUserSettings({ version: 1, agent: { search: { engine: "google" } } });
 		assert.equal(bad?.agent?.search, undefined);
 		const notObject = sanitizeUserSettings({ version: 1, agent: { search: "tavily" } });

@@ -15,9 +15,9 @@
  *    by the agent layer on the same signal — that rewiring is the Teacher
  *    stream's, on this port).
  *
- * Pure types + protocol docs only (browser-safe, no node imports): the
- * adapters are server-side (src/server/search.ts) and arrive as injected
- * dependencies — the agent-layer tool depends on THIS port only.
+ * Pure types, the engine table + protocol docs only (browser-safe, no node
+ * imports): the adapters are server-side (src/server/search.ts) and arrive
+ * as injected dependencies — the agent-layer tool depends on THIS port only.
  */
 
 /** One search result row — the shape every adapter must produce (the
@@ -34,10 +34,12 @@ export const SEARCH_ENGINES = [
 	{ id: "tavily", label: "Tavily", envVar: "TAVILY_API_KEY" },
 	{ id: "brave", label: "Brave", envVar: "BRAVE_API_KEY" },
 	{ id: "exa", label: "Exa", envVar: "EXA_API_KEY" },
+	{ id: "firecrawl", label: "Firecrawl", envVar: "FIRECRAWL_API_KEY" },
 ] as const;
 
 export type SearchEngineId = (typeof SEARCH_ENGINES)[number]["id"];
 
+/** The read/write guards' membership check (settings record + PUT body). */
 export function isSearchEngineId(value: unknown): value is SearchEngineId {
 	return SEARCH_ENGINES.some((engine) => engine.id === value);
 }
