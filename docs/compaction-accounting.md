@@ -3,8 +3,9 @@
 ## Retention
 
 [`src/core/compaction.ts`](../src/core/compaction.ts) locally ports the
-cutoff-selection behavior and relevant message-size heuristic from
-**@earendil-works/pi-coding-agent 1.4.0**. There is no coding-agent dependency.
+cutoff-selection behavior and default message-size heuristic from
+**@earendil-works/pi-coding-agent 1.4.0**, with an optional reasoning-aware
+extension described below. There is no coding-agent dependency.
 Upgrade this port deliberately; the native golden fixtures are in
 [`tests/compaction-native-parity.test.ts`](../tests/compaction-native-parity.test.ts).
 
@@ -15,12 +16,53 @@ assistant call. Preserve adjacent context-invisible metadata. LearnHarness adapt
 its visible custom markers to user-like entries, excludes UI-only markers, and
 uses the active compaction's retained history rather than discarded messages.
 
-Text, visible thinking, tool-call names/arguments use characters divided by four;
-images receive the native fixed 1,200-token allowance. Encrypted signatures are
-not measured or stripped. Whole-message boundaries can overshoot. This does
-**not** guarantee a measured 20k tail or a fixed post-compaction request size.
+By default, text, visible thinking, and tool-call names/arguments use characters
+divided by four; images receive the native fixed 1,200-token allowance. Encrypted
+signatures are not measured or stripped. Whole-message boundaries can overshoot.
+This does **not** guarantee a measured 20k tail or a fixed post-compaction request
+size.
 
-Only cutoff selection is ported. LearnHarness retains its educational summary
+### Optional reasoning-aware estimates
+
+Under **Settings → Agent → Context**, **Include reasoning in token estimates**
+switches between the original estimator (off) and reasoning-aware estimation
+(on). It defaults **off**, including for existing settings without the field.
+The persisted setting is `compaction.includeReasoning`. Changes apply to future
+compaction checks; they do not recut existing summaries or alter a compaction
+already in progress.
+
+The original readable-content heuristic can substantially undercount a retained
+tail containing opaque reasoning, even when provider usage correctly triggers
+compaction. With the option on, saved response-level output usage supplies a
+**floor** on the readable-content estimate for assistant responses that:
+
+- use `openai-responses` and match the selected model's API, provider, and model ID;
+- contain at least one thinking block with a nonempty `thinkingSignature`, even
+  when readable thinking is empty;
+- have valid positive safe-integer output usage and are not errored or aborted.
+
+Output usage already includes reasoning: it is charged **once per response**, not
+per thinking block, and is not added to the readable estimate. The estimator
+never converts ciphertext length to tokens or uses context-wide input/total
+usage as a per-message size. Other models, APIs, unsigned messages, and unusable
+output readings retain the original heuristic.
+
+The option affects retained-tail cutoff selection and next-request estimates in
+both the turn-start gate and background settle check, including the fallback
+immediately after compaction invalidates the previous provider-usage anchor.
+Provider-reported usage anchors otherwise remain unchanged. Saved output usage
+is a replay-size proxy, not an exact measurement of the next request: neither
+mode guarantees a measured 20k tail. The threshold, recent-tail budget, and
+assistant/tool/question boundary rules are unchanged.
+
+This option does **not** add thinking text to the summarizer's input, strip
+signatures, or rewrite saved history. Regression coverage:
+[reasoning accounting](../tests/compaction-reasoning.test.ts),
+[both service entrypoints and post-marker fallback](../tests/compaction-service.test.ts),
+[settings persistence/defaults](../tests/settings-store.test.ts), and
+[Settings toggle](../tests/render-settings.test.tsx).
+
+Only cutoff selection and its default size heuristic are ported. LearnHarness retains its educational summary
 prompt, plan continuity, persistence, threshold, scheduling, and authorization
 lifecycle. It does not adopt Pi's coding summary or separate split-turn summary
 calls. A cut that drops no active history does not launch a summarizer.

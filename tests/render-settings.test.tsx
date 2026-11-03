@@ -110,6 +110,21 @@ describe("Providers settings-label typography", () => {
 });
 
 describe("AgentSection (thin SSR)", () => {
+	it("reasoning token estimation is an accessible Context toggle, off by default and reflecting saved choices", () => {
+		for (const includeReasoning of [undefined, false, true]) {
+			const html = renderToStaticMarkup(<AgentSection
+				agent={undefined} models={undefined} graph={undefined}
+				compaction={includeReasoning === undefined ? undefined : { thresholdTokens: 120_000, includeReasoning }}
+				onSectionChange={() => {}} onModelsChange={() => {}} onCompactionChange={() => {}}
+			/>);
+			const context = html.split('data-testid="group-context"')[1]?.split('data-testid="group-prompts"')[0] ?? "";
+			const toggle = tagOf(context, "toggle-include-reasoning-in-token-estimates");
+			assert.ok(toggle.includes('role="switch"'));
+			assert.ok(toggle.includes(`aria-checked="${includeReasoning === true}"`));
+			assert.ok(toggle.includes('aria-label="Include reasoning in token estimates"'));
+			assert.ok(context.includes("Off uses the original text-based estimate."));
+		}
+	});
 	it("renders the three model SLOT rows (slots-only, fix wave: unpicked reads —, no Default option)", () => {
 		const html = renderToStaticMarkup(<AgentSection agent={undefined} models={undefined} graph={undefined} onSectionChange={() => {}} onModelsChange={() => {}} />);
 		for (const slot of ["strong", "cheap", "vision"]) {

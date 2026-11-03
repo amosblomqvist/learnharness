@@ -892,6 +892,17 @@ export function AgentSection({
 						}}
 					/>
 				</SettingsRow>
+				<SettingsRow
+					label="Include reasoning in token estimates"
+					hint="Use saved output-token usage to account for replayed reasoning on matching OpenAI Responses models. Off uses the original text-based estimate."
+					testid="compaction-row-reasoning"
+				>
+					<Toggle
+						label="Include reasoning in token estimates"
+						checked={resolvedCompaction.includeReasoning}
+						onChange={(includeReasoning) => onCompactionChange({ ...compaction, includeReasoning })}
+					/>
+				</SettingsRow>
 			</SettingsGroup>
 
 			<SettingsGroup label="System prompts" testid="group-prompts">

@@ -229,6 +229,7 @@ export function resolveSettings(record: UserSettings | null): EffectiveSettings 
 		},
 		compaction: {
 			thresholdTokens: record?.compaction?.thresholdTokens ?? FACTORY_SETTINGS.compaction.thresholdTokens,
+			includeReasoning: record?.compaction?.includeReasoning ?? FACTORY_SETTINGS.compaction.includeReasoning,
 		},
 		customProvider: {
 			baseUrl: record?.customProvider?.baseUrl ?? "",

@@ -368,7 +368,7 @@ export function parseModelsSettingsBody(body: unknown): SettingsBodyResult<Model
 	return { ok: true, settings };
 }
 
-/** compaction (owner round 14): the context-compaction threshold — the
+/** compaction: opt-in reasoning accounting (boolean, default off) and the
  *  projected-token budget over which a session summarizes its own history
  *  into the compaction marker. Strict write side: a present
  *  thresholdTokens must be a number at or above the floor (the floor is
@@ -380,6 +380,12 @@ export function parseCompactionSettingsBody(body: unknown): SettingsBodyResult<C
 	const raw = asRecord(body);
 	if (!raw) return { ok: false, error: "Invalid JSON body" };
 	const settings: CompactionSettings = {};
+	if (raw.includeReasoning !== undefined) {
+		if (typeof raw.includeReasoning !== "boolean") {
+			return { ok: false, error: "includeReasoning must be true or false" };
+		}
+		settings.includeReasoning = raw.includeReasoning;
+	}
 	if (raw.thresholdTokens !== undefined) {
 		if (typeof raw.thresholdTokens !== "number" || !Number.isFinite(raw.thresholdTokens)) {
 			return { ok: false, error: "thresholdTokens must be a number" };
