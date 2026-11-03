@@ -1,12 +1,37 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { createDictationLanguageStore } from "../components/dictation-preference.ts";
+import { createDictationStore } from "../components/dictation-preference.ts";
+
+test("the replace-whole merge keeps the sibling field across language and device writes", async () => {
+	const bodies: Record<string, unknown>[] = [];
+	const store = createDictationStore(async (_url, init) => {
+		if (init?.method === "PUT") {
+			const section = JSON.parse(init.body as string);
+			bodies.push(section);
+			return Response.json({ settings: { version: 1, dictation: section } });
+		}
+		return Response.json({ settings: { version: 1, dictation: { language: "pl" } } });
+	});
+	assert.equal(await store.load(), "pl");
+	// A device write must carry the confirmed language, not wipe it.
+	assert.equal(await store.save({ inputDeviceId: "mic-1", inputDeviceLabel: "Built-in" }), true);
+	assert.deepEqual(bodies.at(-1), { language: "pl", inputDeviceId: "mic-1", inputDeviceLabel: "Built-in" });
+	assert.equal(await store.getInputDeviceId(), "mic-1");
+	// A language write must preserve the pinned device.
+	assert.equal(await store.save({ language: "multi" }), true);
+	assert.deepEqual(bodies.at(-1), { language: "multi", inputDeviceId: "mic-1", inputDeviceLabel: "Built-in" });
+	// Clearing to system default drops both the id and the label.
+	assert.equal(await store.save({ inputDeviceId: "" }), true);
+	assert.deepEqual(bodies.at(-1), { language: "multi" });
+	assert.equal(await store.getInputDeviceId(), undefined);
+	assert.equal(store.getSnapshot().inputDeviceLabel, undefined);
+});
 
 test("all readers immediately receive the confirmed write without another GET", async () => {
 	let reads = 0;
 	let notifications = 0;
 	let failReads = false;
-	const store = createDictationLanguageStore(async (_url, init) => {
+	const store = createDictationStore(async (_url, init) => {
 		if (init?.method === "PUT") return Response.json({ settings: { version: 1, dictation: JSON.parse(init.body as string) } });
 		reads++;
 		return failReads ? Response.json({}, { status: 500 }) : Response.json({ settings: null });
@@ -15,7 +40,7 @@ test("all readers immediately receive the confirmed write without another GET", 
 	const observed: string[] = [];
 	const off = store.subscribe(() => { observed.push(`${store.getSnapshot().language}:${store.getSnapshot().saving}`); });
 	failReads = true;
-	assert.equal(await store.save("multi"), true);
+	assert.equal(await store.save({ language: "multi" }), true);
 	assert.equal(await store.getLanguage(), "multi");
 	assert.equal(reads, 1);
 	assert.equal(notifications, 1);
@@ -26,7 +51,7 @@ test("all readers immediately receive the confirmed write without another GET", 
 
 test("ordinary loads and repeated recordings reuse the initial confirmed value", async () => {
 	let reads = 0;
-	const store = createDictationLanguageStore(async () => {
+	const store = createDictationStore(async () => {
 		reads++;
 		if (reads > 1) throw new Error("should not reread");
 		return Response.json({ settings: { version: 1, dictation: { language: "fr" } } });
@@ -43,7 +68,7 @@ test("ordinary loads and repeated recordings reuse the initial confirmed value",
 
 test("a failed external refresh invalidates the cache until a successful retry", async () => {
 	let fail = false;
-	const store = createDictationLanguageStore(async () => fail
+	const store = createDictationStore(async () => fail
 		? Response.json({}, { status: 500 })
 		: Response.json({ settings: { version: 1, dictation: { language: "pl" } } }));
 	await store.load();
@@ -58,7 +83,7 @@ test("a failed external refresh invalidates the cache until a successful retry",
 test("stale reads cannot overwrite a newer write and subscribers see busy before transport runs", async () => {
 	let stale!: (response: Response) => void;
 	let nextRead: Promise<Response> | undefined;
-	const store = createDictationLanguageStore(async (_url, init) => {
+	const store = createDictationStore(async (_url, init) => {
 		if (init?.method === "PUT") return Response.json({ settings: { version: 1, dictation: { language: "multi" } } });
 		if (nextRead) { const response = nextRead; nextRead = undefined; return response; }
 		return Response.json({ settings: { version: 1, dictation: { language: "pl" } } });
@@ -71,7 +96,7 @@ test("stale reads cannot overwrite a newer write and subscribers see busy before
 	const off = store.subscribe(() => {
 		if (store.getSnapshot().saving && !startedDuringPublish) startedDuringPublish = store.getLanguage();
 	});
-	assert.equal(await store.save("multi"), true);
+	assert.equal(await store.save({ language: "multi" }), true);
 	stale(Response.json({ settings: { version: 1, dictation: { language: "pl" } } }));
 	assert.equal(await oldRead, "multi");
 	assert.equal(await startedDuringPublish, "multi");
@@ -81,7 +106,7 @@ test("stale reads cannot overwrite a newer write and subscribers see busy before
 
 for (const newestFirst of [false, true]) test(`overlapping reads keep the newest value, newest resolves first: ${newestFirst}`, async () => {
 	const responses: ((response: Response) => void)[] = [];
-	const store = createDictationLanguageStore(() => new Promise((resolve) => { responses.push(resolve); }));
+	const store = createDictationStore(() => new Promise((resolve) => { responses.push(resolve); }));
 	const first = store.load();
 	await Promise.resolve();
 	const second = store.load(true);
@@ -95,14 +120,14 @@ for (const newestFirst of [false, true]) test(`overlapping reads keep the newest
 });
 
 test("capture also waits for a write initiated as a pending read publishes its result", async () => {
-	const store = createDictationLanguageStore(async (_url, init) => Response.json({ settings: {
+	const store = createDictationStore(async (_url, init) => Response.json({ settings: {
 		version: 1, dictation: { language: init?.method === "PUT" ? "multi" : "en" },
 	} }));
 	let started = false;
 	const off = store.subscribe(() => {
 		if (!started && store.getSnapshot().language === "en") {
 			started = true;
-			void store.save("multi");
+			void store.save({ language: "multi" });
 		}
 	});
 	assert.equal(await store.getLanguage(), "multi");

@@ -81,6 +81,56 @@ export function isDictationLanguage(value: unknown): value is DictationLanguage 
 	return DICTATION_LANGUAGES.some(({ code }) => code === value);
 }
 
+/** The "System default" choice (input-device selection wave): an EMPTY
+ *  deviceId means "no pin" — getUserMedia runs unconstrained and the OS
+ *  picks. It is the first option in every list and clearing the preference
+ *  resolves back to it (absent inputDeviceId in the record = this). */
+export const DICTATION_DEFAULT_DEVICE_ID = "";
+export const DICTATION_DEFAULT_DEVICE_LABEL = "System default";
+
+/** One selectable microphone — a live enumerateDevices() entry mapped to the
+ *  minimal shape the picker and the stored preference share. */
+export interface DictationInputDevice {
+	deviceId: string;
+	label: string;
+}
+
+/** The platform's own "follow the OS default" aliases (Chromium lists a real
+ *  audioinput with deviceId "default", and "communications" on Windows). Our
+ *  synthetic "System default" already IS that choice — keeping the aliases
+ *  would duplicate it (with a confusing moving label like "Default -
+ *  Headphones") AND collide with the synthetic's key/testid. Dropped. */
+const PLATFORM_DEFAULT_IDS = new Set(["default", "communications"]);
+
+/**
+ * Build the microphone option list from a raw enumerateDevices() result:
+ * keep audio inputs only, drop the platform default aliases (see above) and
+ * duplicate deviceIds (enumerateDevices can list the same device twice),
+ * supply a stable fallback label for entries whose label is still empty (no
+ * mic permission yet — the browser blanks labels until the first grant), and
+ * ALWAYS prepend "System default" so the user can revert to the
+ * unconstrained pick. Pure + browser-safe (types only, no `navigator`) so
+ * the mapping is unit-testable away from the DOM.
+ */
+export function dictationInputDeviceOptions(devices: readonly MediaDeviceInfo[]): DictationInputDevice[] {
+	const out: DictationInputDevice[] = [
+		{ deviceId: DICTATION_DEFAULT_DEVICE_ID, label: DICTATION_DEFAULT_DEVICE_LABEL },
+	];
+	const seen = new Set<string>([DICTATION_DEFAULT_DEVICE_ID]);
+	let unnamed = 0;
+	for (const device of devices) {
+		if (device.kind !== "audioinput") continue;
+		const deviceId = device.deviceId;
+		// An empty id (never selectable), a platform default alias (the
+		// synthetic above covers it), or a duplicate id adds nothing.
+		if (!deviceId || PLATFORM_DEFAULT_IDS.has(deviceId) || seen.has(deviceId)) continue;
+		seen.add(deviceId);
+		const label = device.label.trim() || `Microphone ${++unnamed}`;
+		out.push({ deviceId, label });
+	}
+	return out;
+}
+
 /** Only language varies. Keep the owner's tuned streaming parameters. */
 export function deepgramListenUrl(language: DictationLanguage): string {
 	return "wss://api.deepgram.com/v1/listen" +

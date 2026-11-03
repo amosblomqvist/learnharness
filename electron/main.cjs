@@ -356,8 +356,18 @@ function createWindow(url) {
 		const requestOrigin = details.requestingUrl ? new URL(details.requestingUrl).origin : null;
 		callback(fromOwnOrigin(requestOrigin, permission));
 	});
-	session.defaultSession.setPermissionCheckHandler((_wc, permission, origin) => {
-		return fromOwnOrigin(origin, permission);
+	session.defaultSession.setPermissionCheckHandler((wc, permission, origin) => {
+		if (fromOwnOrigin(origin, permission)) return true;
+		// enumerateDevices()'s 'media' check reaches this handler with an
+		// EMPTY/opaque origin (Chromium does not tie the device-enumeration
+		// check to a requesting origin), so the origin test above rejects it —
+		// and Electron then hides every device id and label from the renderer,
+		// leaving the dictation mic picker with nothing to show. Fall back to
+		// the file's trusted-window guard (the same one the desktop IPC uses),
+		// but ONLY for the already-allowed permissions: our windows load the
+		// loopback origin exclusively and navigation away is blocked, so this
+		// stays as loopback-only as the origin test it backstops.
+		return allowedPermissions.has(permission) && !!wc && trustedAppWindows.has(BrowserWindow.fromWebContents(wc));
 	});
 
 	win.webContents.on("will-navigate", (event, target) => {

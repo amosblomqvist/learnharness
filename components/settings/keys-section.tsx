@@ -41,6 +41,7 @@ import { ProviderMenuList } from "./model-menu.tsx";
 import { MenuShell } from "@/components/menu-shell";
 import { notifySettingsSaved } from "@/components/settings-signal";
 import { DictationLanguageSetting } from "@/components/dictation-language";
+import { DictationInputDeviceSetting } from "@/components/dictation-device";
 
 /** One pi-ai provider with plain API-key auth (the Platform seam —
  *  derived from pi-ai's own env-key table; no drift possible). */
@@ -600,6 +601,7 @@ export function KeysSection({
 				))}
 				{label === "Dictation" && <>
 					<DictationLanguageSetting />
+					<DictationInputDeviceSetting />
 					<p data-testid="dictation-setup-hint" className="px-1 text-[11px] leading-relaxed text-muted-foreground/70">
 						Create a <a
 							href="https://console.deepgram.com/"

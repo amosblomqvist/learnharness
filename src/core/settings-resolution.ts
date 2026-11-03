@@ -25,6 +25,7 @@
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import type { ModelRole } from "../../config.ts";
 import type { ChatSettings } from "./contracts/chat.ts";
+import type { DictationLanguage } from "./dictation.ts";
 import type { SearchEngineId } from "./search.ts";
 import {
 	BACKGROUND_MODEL_ROLES,
@@ -35,7 +36,6 @@ import {
 	type BackgroundModelRole,
 	type FactorySettings,
 	type GeneralSettings,
-	type DictationSettings,
 	type CompactionSettings,
 	type CustomModel,
 	type CustomModelOverride,
@@ -73,7 +73,9 @@ export type EffectiveAppearance = FactorySettings["appearance"];
 /** The concrete view: every knob resolved, no absent fields. */
 export interface EffectiveSettings {
 	general: Required<GeneralSettings>;
-	dictation: Required<DictationSettings>;
+	/** Language only — the input device is a client/getUserMedia concern,
+	 *  never resolved server-side (see FactorySettings.dictation). */
+	dictation: { language: DictationLanguage };
 	agent: {
 		models: Record<BackgroundModelRole, EffectiveModelSpec | undefined>;
 		/** Delta map as stored — consumers resolve absent key → enabled. */
