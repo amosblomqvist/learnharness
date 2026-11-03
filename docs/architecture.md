@@ -98,6 +98,14 @@ Pending calls are record-derived, so reopening an unanswered question needs no n
 
 **Plan:** `plan_init` parses a restricted Mermaid graph and validates its DAG structure. It writes/replaces the whole plan; it is intentionally re-callable, not mechanically author-once. Question node IDs validate against the current tree. Current/visited/upcoming statuses derive from tagged calls, not grades or explicit “done” writes. Presenting the plan and waiting for a natural learner reply is prompt doctrine, not a separate acceptance transaction.
 
+### Course library
+
+A shared library of the learner's course files (PDF, DOCX, PPTX, JPG/PNG/GIF/WEBP; 100 MB each) that chats attach. Files are copied into `data/library/` by `src/store/library.ts`, the library's only writer: `index.json` holds the tree, `files/<id>/` the original plus derived `converted.pdf`, `extracted.json` and `summary.json`. Folders nest freely; an optional tag (Lecture, Quiz, Practice Test, Answer Key, Homework, Notes, Syllabus) is inherited from the nearest tagged folder. Pure tree folds live in `src/core/contracts/library.ts`.
+
+Import (`src/server/library.ts`) runs one file at a time: PDFs are probed, images content-sniffed, and Office files converted to PDF with LibreOffice when installed, otherwise read by the in-app OOXML extractor (`src/agent/library/office-extract.ts`). Uploads are one file per request because `proxy.ts` makes Next buffer request bodies; `experimental.proxyClientMaxBodySize` is raised to 110 MB, since the 10 MB default silently truncates.
+
+`ChatRecord.attachments` names attached folders/files (a folder covers everything beneath it). Practice sessions started from picked propositions inherit their birth chats' attachments. Deleting a library item lists the chats using it and detaches direct references. Before a turn composes, `src/server/library-agent.ts` awaits a summary for every attached file (the library reader on the pdf-reader slot, cached by content hash; failures don't block later turns), then appends a COURSE MATERIALS manifest to the system prompt and registers `library_ls`/`library_read`/`library_search`/`library_view`, scoped to the chat's files, plus `library_brief` (a pdf job carrying `fileId`, gated by the pdf toggle). Chats without attachments get none of this. Summary spend is recorded in each `summary.json`, not a chat's cost meter.
+
 ## 4. Conversational practice
 
 Practice uses the same chats store, admission, native turn runner, steering, usage and recovery as teaching. It is **not** the former partitioner → problem-generator → grader problem-set service: there are no current `/api/practice/sets` routes or separate practice store.

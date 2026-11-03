@@ -293,7 +293,8 @@ export async function handleChatInput(
 				effective.compaction?.thresholdTokens,
 				catalogContextLimits().get(modelIdForCompaction),
 			),
-			systemPromptTokens: Math.ceil(composeInstructions(record.kind === "practice" ? "practice" : "teacher").length / 4),
+			// The COURSE MATERIALS block rides the system prompt too.
+			systemPromptTokens: Math.ceil((composeInstructions(record.kind === "practice" ? "practice" : "teacher").length + (materialsManifest(chatId)?.length ?? 0)) / 4),
 		},
 		chatId,
 	);
@@ -690,7 +691,7 @@ export async function handleChatInput(
 								fresh.compaction?.thresholdTokens,
 								catalogContextLimits().get(kickModelId),
 							),
-							systemPromptTokens: Math.ceil(composeInstructions(freshRecord.kind === "practice" ? "practice" : "teacher").length / 4),
+							systemPromptTokens: Math.ceil((composeInstructions(freshRecord.kind === "practice" ? "practice" : "teacher").length + (materialsManifest(chatId)?.length ?? 0)) / 4),
 						};
 					}, chatId);
 			},
