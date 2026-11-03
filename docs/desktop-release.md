@@ -1,10 +1,12 @@
 # Desktop builds and releases
 
+> **Fork build — Learnharness-FS (2026-10-29).** This fork ships as its own app: product name `Learnharness-FS` (its own data folder, so it never shares chats, graph, or keys with an installed official LearnHarness), app id `io.github.josh-torrez.learnharness-fs`, and updates from **josh-torrez/learnharness** releases. There is no Apple Developer ID: the Mac app is **ad-hoc signed and not notarized** (first launch: right-click → Open, or System Settings → Privacy & Security → Open Anyway), and because Squirrel.Mac only installs updates into a Developer-ID-signed app, **the Mac updater is off** — install new versions from the `.dmg`. Windows (and Linux) update in-app from the fork's releases. Where the text below mentions signing, notarization, or the macOS secrets, it describes the upstream setup this fork no longer uses.
+
 ## Platforms
 
 | Platform | Build runner | Packages | In-app update |
 |---|---|---|---|
-| macOS, Apple Silicon | `macos-26` (arm64) | signed/notarized DMG + ZIP | ZIP via Squirrel.Mac |
+| macOS, Apple Silicon | `macos-26` (arm64) | ad-hoc signed DMG + ZIP (fork) | off in the fork — install from the DMG |
 | Windows, x64 | `windows-2025` | unsigned per-user NSIS installer | NSIS |
 | Linux, x64 | `ubuntu-24.04` | AppImage + `.deb` | AppImage replacement; `.deb` through dpkg/apt with elevation if needed |
 
@@ -38,7 +40,7 @@ Image resizing uses the shipped Photon 0.3.4 JS/WASM engine and unbundled worker
 
 ### Local packaging
 
-`npm run desktop:dist` is the local macOS signing path, using the `LH_NOTARY` keychain profile. It clears local `dist` and `.next/standalone`, builds, checks the fresh provider trace, curates the payload, runs the server smoke under host Node, then packages. Unlike CI's `--electron` smoke, that script does not itself check Electron's Node runtime or run the post-package probes. It has no publish flag and is not the tag-upload workflow.
+`npm run desktop:dist` is the local macOS build: an ad-hoc signed, un-notarized `dist/Learnharness-FS-<version>-arm64.dmg` (needs macOS 26+ and Xcode 26+ for the Icon Composer icon). It clears local `dist` and `.next/standalone`, builds, checks the fresh provider trace, curates the payload, runs the server smoke under host Node, then packages. Unlike CI's `--electron` smoke, that script does not itself check Electron's Node runtime or run the post-package probes. It has no publish flag and is not the tag-upload workflow.
 
 For a local Windows/Linux build, run steps 1–6 above, then:
 
@@ -87,7 +89,7 @@ The job only reads (release list + asset downloads); it never creates, edits, pu
 
 ## macOS CI secrets
 
-Add these under repository **Settings → Secrets and variables → Actions**:
+**Not used by this fork** — the release workflow packages the Mac app ad-hoc signed with no secrets. The upstream setup, kept for reference — add these under repository **Settings → Secrets and variables → Actions**:
 
 | Secret | Value |
 |---|---|

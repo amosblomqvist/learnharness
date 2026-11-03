@@ -42,10 +42,19 @@ const path = require("node:path");
 // renderer owns the number; this is the IPC widen target).
 const SIDEBAR_AUTOCLOSE = 928;
 
-const PRODUCT_NAME = "LearnHarness";
+// FORK BUILD (2026-10-29): the fork's own name — its own userData, so it
+// never shares chats, graph, or keys with an installed official LearnHarness.
+const PRODUCT_NAME = "Learnharness-FS";
+
+// FORK BUILD (2026-10-29): the Mac app is ad-hoc signed (no Apple Developer
+// ID), and Squirrel.Mac only installs updates into a Developer-ID-signed
+// app — so on macOS the updater stays off (status "disabled": Settings
+// hides the check button and toggle, the menu drops its item) and new
+// versions install from the .dmg. Windows/Linux update from the fork.
+const UPDATES_SUPPORTED = process.platform !== "darwin";
 
 // APP NAME → userData (owner, 2026-10-10): the Application Support dir is
-// exactly "LearnHarness" in dev AND packaged. Packaged Electron would
+// exactly PRODUCT_NAME in dev AND packaged. Packaged Electron would
 // otherwise derive it from package.json "name" (now lowercase
 // "learnharness"), and productName metadata alone doesn't reach app.name.
 // Must run before the LH_DEV_URL suffix below — dev becomes
@@ -509,6 +518,11 @@ function setupAutoUpdater() {
 		reportUpdateStatus("disabled");
 		return;
 	}
+	if (!UPDATES_SUPPORTED) {
+		log("auto-update: ad-hoc signed macOS build — updater disabled (install new versions from the .dmg)");
+		reportUpdateStatus("disabled");
+		return;
+	}
 	try {
 		autoUpdater = require("electron-updater").autoUpdater;
 	} catch (err) {
@@ -588,7 +602,7 @@ function installMenu() {
 			submenu: [
 				{ role: "about" },
 				// Manual checks report their result in Settings → General.
-				{ label: "Check for Updates…", click: () => checkForUpdatesFromMenu() },
+				...(UPDATES_SUPPORTED ? [{ label: "Check for Updates…", click: () => checkForUpdatesFromMenu() }] : []),
 				{ type: "separator" },
 				{ role: "hide" },
 				{ role: "hideOthers" },

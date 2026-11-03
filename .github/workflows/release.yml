@@ -133,55 +133,28 @@ jobs:
       - run: node scripts/smoke-provider-runtime.mjs
       - run: node scripts/build-server.mjs
       - run: node scripts/smoke-server.mjs --electron
-      - name: Validate macOS release secrets
-        if: github.event_name == 'push' && runner.os == 'macOS'
-        env:
-          CSC_LINK: ${{ secrets.MAC_CSC_LINK }}
-          CSC_KEY_PASSWORD: ${{ secrets.MAC_CSC_KEY_PASSWORD }}
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-        run: |
-          for name in CSC_LINK CSC_KEY_PASSWORD APPLE_ID APPLE_APP_SPECIFIC_PASSWORD APPLE_TEAM_ID; do
-            if [[ -z "${!name}" ]]; then
-              echo "::error::Missing signing/notarization secret: $name"
-              exit 1
-            fi
-          done
-      - name: Signed and notarized macOS release → draft
-        if: github.event_name == 'push' && runner.os == 'macOS'
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          CSC_LINK: ${{ secrets.MAC_CSC_LINK }}
-          CSC_KEY_PASSWORD: ${{ secrets.MAC_CSC_KEY_PASSWORD }}
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-        run: npx electron-builder ${{ matrix.builder_args }} --publish always -c.forceCodeSigning=true
-      - name: Windows/Linux release → draft
-        if: github.event_name == 'push' && runner.os != 'macOS'
+      # FORK BUILD (Learnharness-FS, 2026-10-29): no Apple Developer ID —
+      # electron-builder.yml ad-hoc signs the Mac app and never notarizes,
+      # so every platform packages the same way and no signing secrets exist.
+      - name: Release → draft
+        if: github.event_name == 'push'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: npx electron-builder ${{ matrix.builder_args }} --publish always
-      - name: Unsigned macOS rehearsal (no publish, no notarization)
-        if: github.event_name == 'workflow_dispatch' && runner.os == 'macOS'
-        env:
-          CSC_IDENTITY_AUTO_DISCOVERY: "false"
-        run: npx electron-builder ${{ matrix.builder_args }} --publish never -c.mac.notarize=false
-      - name: Windows/Linux rehearsal (no publish)
-        if: github.event_name == 'workflow_dispatch' && runner.os != 'macOS'
+      - name: Rehearsal (no publish)
+        if: github.event_name == 'workflow_dispatch'
         run: npx electron-builder ${{ matrix.builder_args }} --publish never
       - name: Initialize packaged providers offline (host and packaged Electron Node)
         run: |
           case "$RUNNER_OS" in
             macOS)
-              app="dist/mac-arm64/LearnHarness.app/Contents"
+              app="dist/mac-arm64/Learnharness-FS.app/Contents"
               payload="$app/Resources/server/standalone"
-              runtime="$app/MacOS/LearnHarness"
+              runtime="$app/MacOS/Learnharness-FS"
               ;;
             Windows)
               payload="dist/win-unpacked/resources/server/standalone"
-              runtime="dist/win-unpacked/LearnHarness.exe"
+              runtime="dist/win-unpacked/Learnharness-FS.exe"
               ;;
             Linux)
               payload="dist/linux-unpacked/resources/server/standalone"
@@ -194,11 +167,11 @@ jobs:
         run: |
           case "$RUNNER_OS" in
             macOS)
-              app="dist/mac-arm64/LearnHarness.app/Contents"
-              node scripts/smoke-demo-runtime.mjs --standalone "$app/Resources/server/standalone" --runtime "$app/MacOS/LearnHarness" --browser
+              app="dist/mac-arm64/Learnharness-FS.app/Contents"
+              node scripts/smoke-demo-runtime.mjs --standalone "$app/Resources/server/standalone" --runtime "$app/MacOS/Learnharness-FS" --browser
               ;;
             Windows)
-              node scripts/smoke-demo-runtime.mjs --standalone dist/win-unpacked/resources/server/standalone --runtime dist/win-unpacked/LearnHarness.exe --browser
+              node scripts/smoke-demo-runtime.mjs --standalone dist/win-unpacked/resources/server/standalone --runtime dist/win-unpacked/Learnharness-FS.exe --browser
               ;;
             Linux)
               xvfb-run -a node scripts/smoke-demo-runtime.mjs --standalone dist/linux-unpacked/resources/server/standalone --runtime dist/linux-unpacked/learnharness --browser
