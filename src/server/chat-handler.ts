@@ -403,7 +403,7 @@ export async function handleChatInput(
 		});
 	};
 
-	// AGENT CONSTRUCTION BRANCH (docs/probe-teach-split.md §2): the transcript
+	// AGENT CONSTRUCTION BRANCH (docs/archive/probe-teach-split.md §2): the transcript
 	// is the seam — a probe_done call in the record means the probe is
 	// concluded: build the TEACHER (planning + the full toolset). Otherwise
 	// the session is still probing: build the PROBER (quiz/ask + probe_done).
