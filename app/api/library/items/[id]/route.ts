@@ -3,8 +3,8 @@ import { isLibraryTag, type LibraryTag } from "@/src/core";
 
 /**
  * PATCH /api/library/items/[id] {name?, parentId?, tag?} — rename, move
- * (parentId null = top level), retag (tag null clears the item's own tag;
- * it then inherits again). The store enforces tree integrity.
+ * (parentId null = top level), retag (files only; tag null clears it — a
+ * folder tag is a 400). The store enforces tree integrity.
  */
 export async function PATCH(req: Request, { params }: { params: Promise<{ id: string }> }) {
 	const { id } = await params;

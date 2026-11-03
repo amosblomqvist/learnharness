@@ -50,7 +50,17 @@ function readIndex(): LibraryIndex {
 		throw new Error(`Library index stamped with schema version ${v} > ${CURRENT_LIBRARY_VERSION} — this app build is older`);
 	}
 	const items = (parsed as { items?: unknown }).items;
-	return { items: Array.isArray(items) ? (items as LibraryItem[]) : [] };
+	// File-only tags (owner ruling 2026-11-03): a folder tag left from before
+	// is dropped on read, and so disappears from disk at the next write.
+	return {
+		items: Array.isArray(items)
+			? (items as LibraryItem[]).map((item) => {
+					if (item.kind !== "folder" || item.tag === undefined) return item;
+					const { tag: _dropped, ...folder } = item;
+					return folder;
+				})
+			: [],
+	};
 }
 
 function writeIndex(items: LibraryItem[]): void {
@@ -150,6 +160,7 @@ function updateItem(id: string, patch: { name?: string; parentId?: string | null
 		next.parentId = patch.parentId;
 	}
 	if (patch.tag !== undefined) {
+		if (next.kind === "folder" && patch.tag !== null) throw new Error("Only files can be tagged");
 		if (patch.tag === null) delete next.tag;
 		else next.tag = patch.tag;
 	}

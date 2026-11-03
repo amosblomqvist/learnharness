@@ -1,6 +1,6 @@
 /**
  * COURSE LIBRARY — contracts + store pins (course library wave,
- * 2026-10-29). The pure tree folds (tag inheritance, attachment
+ * 2026-10-29). The pure tree folds (file-only tags, attachment
  * resolution, move gate, upload gate) and the fs adapter's integrity
  * rules + events, under an isolated LH_DATA_DIR (the seam is set before
  * any config-loading import, so every app-module import is dynamic).
@@ -56,21 +56,13 @@ describe("library contracts (pure)", () => {
 	const items = [
 		folder("course", null, "Math 3339"),
 		folder("u1", "course", "Unit 1"),
-		folder("quizzes", "u1", "Quizzes", "quiz"),
+		folder("quizzes", "u1", "Quizzes"),
 		file("q1", "quizzes", "quiz1.pdf"),
 		file("q1key", "quizzes", "quiz1-key.pdf", "answer-key"),
-		folder("lectures", "u1", "Lectures", "lecture"),
+		folder("lectures", "u1", "Lectures"),
 		file("l1", "lectures", "lecture1.pptx"),
 		file("syll", "course", "syllabus.pdf", "syllabus"),
 	];
-
-	it("effectiveTag: own tag wins, else nearest tagged ancestor, else none", () => {
-		assert.equal(lib.effectiveTag(items, "q1"), "quiz");
-		assert.equal(lib.effectiveTag(items, "q1key"), "answer-key");
-		assert.equal(lib.effectiveTag(items, "l1"), "lecture");
-		assert.equal(lib.effectiveTag(items, "u1"), undefined);
-		assert.equal(lib.effectiveTag(items, "missing"), undefined);
-	});
 
 	it("libraryPath joins the ancestor chain", () => {
 		assert.equal(lib.libraryPath(items, "q1"), "Math 3339/Unit 1/Quizzes/quiz1.pdf");
@@ -120,11 +112,14 @@ describe("library store (fs adapter)", () => {
 		assert.throws(() => libraryStore.createFolder(f.id, "X"), /inside folders/);
 	});
 
-	it("updateItem renames, retags, clears tags, and refuses cyclic moves", () => {
+	it("updateItem renames, retags files only, clears tags, and refuses cyclic moves", () => {
 		const a = libraryStore.createFolder(null, "A");
 		const b = libraryStore.createFolder(a.id, "B");
-		assert.equal(libraryStore.updateItem(b.id, { tag: "lecture" }).tag, "lecture");
-		assert.equal(libraryStore.updateItem(b.id, { tag: null }).tag, undefined);
+		const f = libraryStore.addFile(b.id, "slides.pdf", new Uint8Array([1]), PDF);
+		assert.equal(libraryStore.updateItem(f.id, { tag: "lecture" }).tag, "lecture");
+		assert.equal(libraryStore.updateItem(f.id, { tag: null }).tag, undefined);
+		assert.throws(() => libraryStore.updateItem(b.id, { tag: "lecture" }), /Only files can be tagged/);
+		assert.equal(libraryStore.updateItem(b.id, { tag: null }).tag, undefined, "clearing a folder is a harmless no-op");
 		assert.equal(libraryStore.updateItem(b.id, { name: "Bee" }).name, "Bee");
 		assert.throws(() => libraryStore.updateItem(a.id, { parentId: b.id }), /into itself/);
 		assert.throws(() => libraryStore.updateItem(a.id, { parentId: a.id }), /into itself/);
@@ -160,6 +155,18 @@ describe("library store (fs adapter)", () => {
 		assert.deepEqual(libraryStore.readSummary(f.id), summary);
 		libraryStore.writeDerived(f.id, "extracted.json", "{}");
 		assert.equal(fs.readFileSync(libraryStore.derivedPath(f.id, "extracted.json"), "utf-8"), "{}");
+	});
+
+	it("a folder tag left from before file-only tags is dropped on read and on the next write", () => {
+		const indexFile = path.join(TMP_DATA, "library", "index.json");
+		const folder = libraryStore.createFolder(null, "Legacy tagged");
+		const raw = JSON.parse(fs.readFileSync(indexFile, "utf-8"));
+		raw.items.find((i: { id: string }) => i.id === folder.id).tag = "quiz";
+		fs.writeFileSync(indexFile, JSON.stringify(raw));
+		assert.equal("tag" in (libraryStore.getItem(folder.id) ?? {}), false);
+		libraryStore.updateItem(folder.id, { name: "Legacy" });
+		const after = JSON.parse(fs.readFileSync(indexFile, "utf-8"));
+		assert.equal("tag" in after.items.find((i: { id: string }) => i.id === folder.id), false);
 	});
 
 	it("refuses a newer-stamped index instead of rewriting it", () => {

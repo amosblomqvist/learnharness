@@ -19,19 +19,10 @@ export function FormatGlyph({ format, className = "size-4" }: { format: LibraryF
 	return <Icon aria-hidden="true" className={`${className} shrink-0 text-muted-foreground`} />;
 }
 
-/** A tag chip. `inherited` renders it quieter (dashed) — the effective
- *  tag comes from a folder above, not the item itself. */
-export function TagBadge({ tag, inherited = false }: { tag: LibraryTag; inherited?: boolean }) {
+/** A file's tag chip (tags are file-only — nothing inherits). */
+export function TagBadge({ tag }: { tag: LibraryTag }) {
 	return (
-		<span
-			data-testid="library-tag"
-			data-inherited={inherited ? "true" : undefined}
-			title={inherited ? "Inherited from a folder above" : undefined}
-			className={
-				"shrink-0 rounded-full border px-2 py-0.5 font-ui text-[10px] uppercase tracking-wider " +
-				(inherited ? "border-dashed border-border/70 text-muted-foreground/80" : "border-border text-foreground")
-			}
-		>
+		<span data-testid="library-tag" className="shrink-0 rounded-full border border-border px-2 py-0.5 font-ui text-[10px] uppercase tracking-wider text-foreground">
 			{LIBRARY_TAG_LABELS[tag]}
 		</span>
 	);

@@ -2,53 +2,103 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { ChevronRightIcon, ExternalLinkIcon, FolderInputIcon, FolderPlusIcon, LibraryIcon, PencilIcon, Trash2Icon, UploadIcon } from "lucide-react";
+import { ArrowDownIcon, ArrowUpIcon, ExternalLinkIcon, FolderPlusIcon, LibraryIcon, SearchIcon, UploadIcon } from "lucide-react";
 import { TopBar } from "@/components/top-bar";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { useBackdropDismiss } from "@/components/backdrop-dismiss";
+import { EditableSourceName, SourceDragRow, SourceFolderTree, sourceNameMatches, type OrganizationChange } from "@/components/source-folder-tree";
+import type { ChainSort, ChainSortCol } from "@/components/chain-table";
 import {
-	effectiveTag,
-	isInLibrarySubtree,
 	LIBRARY_TAG_LABELS,
 	LIBRARY_TAGS,
 	libraryAncestors,
-	libraryChildren,
 	librarySubtree,
+	toggleSourceEntries,
 	type LibraryDeletionImpact,
 	type LibraryItem,
 	type LibrarySnapshot,
 	type LibraryTag,
+	type SourceEntrySelection,
 } from "@/src/core";
 import { createFolder, deleteItem, deletionImpact, updateItem, uploadFiles, useLibrary, type UploadOutcome } from "./library-client";
-import { FileStatus, formatBytes, ItemGlyph, LIBRARY_ACCEPT, TagBadge, unitsText } from "./library-shared";
+import { FileStatus, FormatGlyph, formatBytes, ItemGlyph, LIBRARY_ACCEPT, TagBadge, unitsText } from "./library-shared";
+import {
+	EMPTY_SELECTION,
+	libraryDirectory,
+	libraryTreeFiles,
+	pruneSelection,
+	singleCheckedFolder,
+	topMostSelected,
+	type LibraryTreeFile,
+} from "./library-tree";
 
 /**
- * THE LIBRARY PAGE (course library wave, owner-approved plan 2026-10-29):
- * the full management surface for the shared course library. Left: the
- * folder tree (also drop targets for moves). Right: the open folder's
- * contents — upload (picker or drag-and-drop from the desktop), new
- * folder, and per-item rename / tag / move / delete. The shared TopBar
- * carries no serif title (the title law: the serif title names sessions).
+ * THE LIBRARY PAGE (course library wave; owner ruling 2026-11-03: built on
+ * main's SourceFolderTree, reused as-is through library-tree.ts). One
+ * indented tree like the Chains table — folder rows are main's own
+ * (checkbox, expand, inline rename, file count, date, drag to move); file
+ * rows are lean (checkbox, icon, inline rename, pages/size, status, tag).
+ * Tags are FILE-ONLY. A toolbar acts on checked items: Tag (every checked
+ * file), Move to…, Delete… (top-most checked items), Clear. Upload goes into
+ * the single checked folder, else the top level; a desktop drop onto a
+ * folder row goes into that folder. The shared TopBar carries no serif
+ * title (the title law: the serif title names sessions).
  */
 
-const ITEM_MIME = "application/x-lh-library-item";
+const EXPANDED_KEY = "lh:library-expanded";
+const DEFAULT_SORT: ChainSort = { col: "name", dir: 1 };
+
+function readExpanded(): Set<string> {
+	try {
+		const raw = window.localStorage.getItem(EXPANDED_KEY);
+		const ids = raw ? (JSON.parse(raw) as unknown) : [];
+		return new Set(Array.isArray(ids) ? ids.filter((x): x is string => typeof x === "string") : []);
+	} catch {
+		return new Set();
+	}
+}
+
+function writeExpanded(ids: ReadonlySet<string>): void {
+	try {
+		window.localStorage.setItem(EXPANDED_KEY, JSON.stringify([...ids]));
+	} catch {
+		/* storage unavailable — the tree still works, just forgets on reload */
+	}
+}
 
 export function LibraryView() {
 	const { snapshot, error } = useLibrary();
-	const [folderId, setFolderId] = useState<string | null>(null);
-	const [renamingId, setRenamingId] = useState<string | null>(null);
-	const [moving, setMoving] = useState<LibraryItem | null>(null);
-	const [deleting, setDeleting] = useState<LibraryItem | null>(null);
+	const items = useMemo(() => snapshot?.items ?? [], [snapshot]);
+	const directory = useMemo(() => libraryDirectory(items), [items]);
+	const [query, setQuery] = useState("");
+	const [sort, setSort] = useState<ChainSort>(DEFAULT_SORT);
+	const [selection, setSelection] = useState<SourceEntrySelection>(EMPTY_SELECTION);
+	// Folders the user clicked (the Upload / New folder target — see
+	// singleCheckedFolder); main's selection auto-checks parents too.
+	const [picked, setPicked] = useState<ReadonlySet<string>>(() => new Set());
+	const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
 	const [creatingFolder, setCreatingFolder] = useState(false);
+	const [moving, setMoving] = useState<LibraryItem[] | null>(null);
+	const [deleting, setDeleting] = useState<LibraryItem[] | null>(null);
 	const [uploads, setUploads] = useState<{ total: number; done: number; failures: UploadOutcome[] } | null>(null);
 	const [actionError, setActionError] = useState<string | null>(null);
 	const fileInput = useRef<HTMLInputElement>(null);
 
-	const items = useMemo(() => snapshot?.items ?? [], [snapshot]);
-	// The open folder vanished (deleted elsewhere): fall back to the top.
-	useEffect(() => {
-		if (folderId && snapshot && !items.some((i) => i.id === folderId)) setFolderId(null);
-	}, [folderId, items, snapshot]);
+	// Expanded folders persist per window (localStorage), read after mount so
+	// the server render and the first client render agree.
+	useEffect(() => setExpanded(readExpanded()), []);
+	// Items deleted elsewhere (or by this page) leave the selection.
+	useEffect(() => setSelection((s) => pruneSelection(items, s)), [items]);
+
+	const files = useMemo(
+		() => libraryTreeFiles(items).filter((f) => sourceNameMatches(directory, f.key, f.label, query)),
+		[items, directory, query],
+	);
+	const checked = useMemo(() => topMostSelected(items, selection), [items, selection]);
+	const checkedFiles = useMemo(() => items.filter((i) => i.kind === "file" && selection.sources.has(i.id)), [items, selection]);
+	const target = singleCheckedFolder(items, selection, picked);
+	const targetName = target ? items.find((i) => i.id === target)?.name : undefined;
 
 	const act = useCallback(async (run: () => Promise<unknown>) => {
 		try {
@@ -59,15 +109,46 @@ export function LibraryView() {
 		}
 	}, []);
 
-	const startUpload = async (files: File[]) => {
-		if (files.length === 0) return;
-		setUploads({ total: files.length, done: 0, failures: [] });
-		const results = await uploadFiles(folderId, files, (done) => setUploads((u) => (u ? { ...u, done } : u)));
+	const toggleExpanded = (id: string) =>
+		setExpanded((prev) => {
+			const next = new Set(prev);
+			if (next.has(id)) next.delete(id);
+			else next.add(id);
+			writeExpanded(next);
+			return next;
+		});
+
+	const startUpload = async (picked: File[], parentId: string | null) => {
+		if (picked.length === 0) return;
+		setUploads({ total: picked.length, done: 0, failures: [] });
+		const results = await uploadFiles(parentId, picked, (done) => setUploads((u) => (u ? { ...u, done } : u)));
 		const failures = results.filter((r) => !r.ok);
-		setUploads(failures.length ? { total: files.length, done: files.length, failures } : null);
+		setUploads(failures.length ? { total: picked.length, done: picked.length, failures } : null);
 	};
 
-	const moveTo = (id: string, parentId: string | null) => act(() => updateItem(id, { parentId }));
+	// Main's tree speaks OrganizationAction; each maps onto the library API.
+	const onAction: OrganizationChange = async (action) => {
+		setActionError(null);
+		switch (action.action) {
+			case "create-folder":
+				return (await createFolder(action.parentId, action.name)).item.id;
+			case "rename-folder":
+			case "rename-source":
+				await updateItem(action.id, { name: action.name });
+				return;
+			case "move":
+				await updateItem(action.id, { parentId: action.parentId });
+				return;
+			case "delete-folder": {
+				const folder = items.find((i) => i.id === action.id);
+				if (folder) setDeleting([folder]);
+				return;
+			}
+		}
+	};
+
+	const onSort = (col: ChainSortCol) =>
+		setSort((s) => (s.col === col ? { col, dir: s.dir === 1 ? -1 : 1 } : { col, dir: col === "name" ? 1 : -1 }));
 
 	return (
 		<div className="flex h-dvh flex-col">
@@ -77,11 +158,29 @@ export function LibraryView() {
 					Library
 				</span>
 				<div className="min-w-4 flex-1" aria-hidden="true" />
-				<Button variant="ghost" size="sm" data-testid="library-new-folder" onClick={() => setCreatingFolder(true)}>
+				<span className="relative w-56">
+					<SearchIcon aria-hidden="true" className="pointer-events-none absolute left-2 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+					<Input
+						data-testid="library-search"
+						value={query}
+						onChange={(e) => setQuery(e.target.value)}
+						onKeyDown={(e) => {
+							if (e.key === "Escape") {
+								e.stopPropagation();
+								setQuery("");
+								e.currentTarget.blur();
+							}
+						}}
+						placeholder="Search…"
+						aria-label="Search the library"
+						className="h-8 pl-7 text-sm"
+					/>
+				</span>
+				<Button variant="ghost" size="sm" data-testid="library-new-folder" onClick={() => setCreatingFolder(true)} title={targetName ? `New folder inside ${targetName}` : "New folder at the top level"}>
 					<FolderPlusIcon aria-hidden="true" />
 					New folder
 				</Button>
-				<Button size="sm" data-testid="library-upload" onClick={() => fileInput.current?.click()}>
+				<Button size="sm" data-testid="library-upload" onClick={() => fileInput.current?.click()} title={targetName ? `Upload into ${targetName}` : "Upload to the top level"}>
 					<UploadIcon aria-hidden="true" />
 					Upload
 				</Button>
@@ -92,408 +191,353 @@ export function LibraryView() {
 					accept={LIBRARY_ACCEPT}
 					className="hidden"
 					onChange={(e) => {
-						const files = Array.from(e.target.files ?? []);
+						const picked = Array.from(e.target.files ?? []);
 						e.target.value = "";
-						void startUpload(files);
+						void startUpload(picked, target);
 					}}
 				/>
 			</TopBar>
 
-			<div className="flex min-h-0 flex-1">
-				<nav aria-label="Library folders" className="w-64 shrink-0 overflow-y-auto border-r border-border p-2">
-					<FolderRow
-						label="Library"
-						active={folderId === null}
-						depth={0}
-						onOpen={() => setFolderId(null)}
-						onDropItem={(id) => void moveTo(id, null)}
-					/>
-					<FolderTree items={items} parentId={null} depth={1} activeId={folderId} onOpen={setFolderId} onDropItem={(id, target) => void moveTo(id, target)} />
-				</nav>
+			{snapshot && !snapshot.libreOffice && items.some((i) => i.file?.format === "docx" || i.file?.format === "pptx") && (
+				<p className="mx-4 mt-3 rounded-md border border-border/60 px-3 py-2 text-xs text-muted-foreground">
+					LibreOffice isn’t installed, so Word and PowerPoint files are read as text plus their embedded pictures. Install LibreOffice and upload
+					them again to have slides read exactly as they look.
+				</p>
+			)}
+			{(error || actionError) && <p role="alert" className="mx-4 mt-3 text-sm text-destructive">{actionError ?? error}</p>}
+			{uploads && <UploadStatus uploads={uploads} onDismiss={() => setUploads(null)} />}
 
-				<UploadZone onFiles={(files) => void startUpload(files)}>
-					<Breadcrumb items={items} folderId={folderId} onOpen={setFolderId} />
-					{snapshot && !snapshot.libreOffice && items.some((i) => i.file?.format === "docx" || i.file?.format === "pptx") && (
-						<p className="mx-4 mb-2 rounded-md border border-border/60 px-3 py-2 text-xs text-muted-foreground">
-							LibreOffice isn’t installed, so Word and PowerPoint files are read as text plus their embedded pictures. Install LibreOffice and
-							upload them again to have slides read exactly as they look.
-						</p>
-					)}
-					{(error || actionError) && <p role="alert" className="mx-4 mb-2 text-sm text-destructive">{actionError ?? error}</p>}
-					{uploads && (
-						<div className="mx-4 mb-2 rounded-md border border-border/60 px-3 py-2 text-xs" data-testid="library-upload-status">
-							{uploads.done < uploads.total ? (
-								<span className="text-muted-foreground">Uploading {uploads.done + 1} of {uploads.total}…</span>
-							) : (
-								<div className="flex flex-col gap-1">
-									{uploads.failures.map((f) => (
-										<span key={f.name} className="text-destructive">
-											{f.name}: {f.ok ? "" : f.error}
-										</span>
-									))}
-									<button type="button" className="self-start text-muted-foreground underline" onClick={() => setUploads(null)}>
-										Dismiss
-									</button>
-								</div>
-							)}
-						</div>
-					)}
-					{creatingFolder && (
-						<NameField
-							initial=""
-							placeholder="Folder name"
-							onCommit={(name) => {
-								setCreatingFolder(false);
-								if (name) void act(() => createFolder(folderId, name));
-							}}
+			{checked.length > 0 && (
+				<SelectionToolbar
+					checked={checked}
+					files={checkedFiles}
+					onTag={(tag) => void act(async () => {
+						for (const f of checkedFiles) await updateItem(f.id, { tag });
+					})}
+					onMove={() => setMoving(checked)}
+					onDelete={() => setDeleting(checked)}
+					onClear={() => {
+						setSelection(EMPTY_SELECTION);
+						setPicked(new Set());
+					}}
+				/>
+			)}
+
+			<TreeHeader sort={sort} onSort={onSort} />
+
+			<UploadZone items={items} onFiles={(picked, parentId) => void startUpload(picked, parentId)}>
+				{creatingFolder && (
+					<div className="flex items-center px-3 py-2" data-testid="library-new-folder-row">
+						<EditableSourceName
+							name=""
+							initiallyEditing
 							onCancel={() => setCreatingFolder(false)}
+							onSave={async (name) => {
+								const id = await onAction({ action: "create-folder", name, parentId: target });
+								if (target) setExpanded((prev) => {
+									const next = new Set(prev).add(target);
+									writeExpanded(next);
+									return next;
+								});
+								if (typeof id === "string") setQuery("");
+								setCreatingFolder(false);
+							}}
 						/>
-					)}
-					<FolderContents
+					</div>
+				)}
+				{snapshot && items.length === 0 && !creatingFolder && <EmptyLibrary />}
+				{!snapshot && !error && <p className="px-4 py-3 text-sm text-muted-foreground">Loading…</p>}
+				{snapshot && items.length > 0 && (
+					<LibraryTree
+						files={files}
 						snapshot={snapshot}
-						folderId={folderId}
-						renamingId={renamingId}
-						onOpenFolder={setFolderId}
-						onRename={setRenamingId}
-						onCommitRename={(id, name) => {
-							setRenamingId(null);
-							if (name) void act(() => updateItem(id, { name }));
+						directory={directory}
+						query={query}
+						sort={sort}
+						selection={selection}
+						expanded={expanded}
+						onToggleExpanded={toggleExpanded}
+						onSelect={(kind, id, next) => {
+							setSelection((s) => toggleSourceEntries(directory, s, kind, id, next));
+							if (kind === "folder") {
+								setPicked((prev) => {
+									const nextPicked = new Set(prev);
+									if (next) nextPicked.add(id);
+									else for (const sub of librarySubtree(items, id)) nextPicked.delete(sub.id);
+									return nextPicked;
+								});
+							}
 						}}
-						onTag={(id, tag) => void act(() => updateItem(id, { tag }))}
-						onMove={setMoving}
-						onDelete={setDeleting}
-						onDropItem={(id, target) => void moveTo(id, target)}
+						onAction={(action) => onAction(action).catch((e: unknown) => {
+							setActionError(e instanceof Error ? e.message : String(e));
+							throw e;
+						})}
 					/>
-				</UploadZone>
-			</div>
+				)}
+			</UploadZone>
 
 			<MoveDialog
-				items={items}
-				item={moving}
+				allItems={items}
+				moving={moving}
 				onClose={() => setMoving(null)}
-				onMove={(target) => {
-					const item = moving;
+				onMove={(parentId) => {
+					const batch = moving ?? [];
 					setMoving(null);
-					if (item) void moveTo(item.id, target);
+					void act(async () => {
+						for (const item of batch) await updateItem(item.id, { parentId });
+					});
 				}}
 			/>
-			<DeleteLibraryDialog
-				item={deleting}
-				onClose={() => setDeleting(null)}
-				onDeleted={() => setDeleting(null)}
-			/>
+			<DeleteLibraryDialog targets={deleting} onClose={() => setDeleting(null)} onDeleted={() => setDeleting(null)} />
 		</div>
 	);
 }
 
-// ─── Folder tree ──────────────────────────────────────────────────────────────
+// ─── The tree (main's SourceFolderTree + library file rows) ──────────────────
 
-function FolderTree({
-	items,
-	parentId,
-	depth,
-	activeId,
-	onOpen,
-	onDropItem,
-}: {
-	items: readonly LibraryItem[];
-	parentId: string | null;
-	depth: number;
-	activeId: string | null;
-	onOpen: (id: string) => void;
-	onDropItem: (id: string, target: string) => void;
-}) {
-	const folders = libraryChildren(items, parentId).filter((i) => i.kind === "folder");
-	return (
-		<>
-			{folders.map((folder) => {
-				const open = activeId !== null && isInLibrarySubtree(items, folder.id, activeId);
-				return (
-					<div key={folder.id}>
-						<FolderRow
-							label={folder.name}
-							tag={folder.tag}
-							active={activeId === folder.id}
-							open={open}
-							depth={depth}
-							onOpen={() => onOpen(folder.id)}
-							onDropItem={(id) => {
-								if (!isInLibrarySubtree(items, id, folder.id)) onDropItem(id, folder.id);
-							}}
-						/>
-						{open && <FolderTree items={items} parentId={folder.id} depth={depth + 1} activeId={activeId} onOpen={onOpen} onDropItem={onDropItem} />}
-					</div>
-				);
-			})}
-		</>
-	);
-}
-
-function FolderRow({
-	label,
-	tag,
-	active,
-	open = false,
-	depth,
-	onOpen,
-	onDropItem,
-}: {
-	label: string;
-	tag?: LibraryTag;
-	active: boolean;
-	open?: boolean;
-	depth: number;
-	onOpen: () => void;
-	onDropItem: (id: string) => void;
-}) {
-	const [over, setOver] = useState(false);
-	return (
-		<button
-			type="button"
-			onClick={onOpen}
-			onDragOver={(e) => {
-				if (!e.dataTransfer.types.includes(ITEM_MIME)) return;
-				e.preventDefault();
-				e.stopPropagation();
-				setOver(true);
-			}}
-			onDragLeave={() => setOver(false)}
-			onDrop={(e) => {
-				const id = e.dataTransfer.getData(ITEM_MIME);
-				setOver(false);
-				if (!id) return;
-				e.preventDefault();
-				e.stopPropagation();
-				onDropItem(id);
-			}}
-			style={{ paddingLeft: `${depth * 14 + 8}px` }}
-			className={
-				"flex w-full items-center gap-2 rounded-md py-1.5 pr-2 text-left text-sm transition-colors " +
-				(over ? "bg-primary/15 ring-1 ring-primary/50 " : active ? "bg-accent text-foreground " : "text-muted-foreground hover:bg-accent/60 hover:text-foreground ")
-			}
-		>
-			{depth === 0 ? (
-				<LibraryIcon aria-hidden="true" className="size-4 shrink-0" />
-			) : (
-				<ItemGlyph item={{ kind: "folder" }} open={open} />
-			)}
-			<span className="min-w-0 flex-1 truncate">{label}</span>
-			{tag && <TagBadge tag={tag} />}
-		</button>
-	);
-}
-
-function Breadcrumb({ items, folderId, onOpen }: { items: readonly LibraryItem[]; folderId: string | null; onOpen: (id: string | null) => void }) {
-	const folder = folderId ? items.find((i) => i.id === folderId) : undefined;
-	const chain = folder ? [...libraryAncestors(items, folder.id), folder] : [];
-	return (
-		<div className="flex flex-wrap items-center gap-1 px-4 pb-2 pt-4 text-sm" data-testid="library-breadcrumb">
-			<button type="button" onClick={() => onOpen(null)} className="rounded px-1 text-muted-foreground hover:text-foreground">
-				Library
-			</button>
-			{chain.map((f) => (
-				<span key={f.id} className="flex items-center gap-1">
-					<ChevronRightIcon aria-hidden="true" className="size-3.5 text-muted-foreground/60" />
-					<button type="button" onClick={() => onOpen(f.id)} className="rounded px-1 text-foreground hover:bg-accent">
-						{f.name}
-					</button>
-				</span>
-			))}
-		</div>
-	);
-}
-
-// ─── Folder contents ──────────────────────────────────────────────────────────
-
-/** The open folder's rows — exported for render pins (pure over props). */
-export function FolderContents({
+/** Pure over props — render pins cover it. */
+export function LibraryTree({
+	files,
 	snapshot,
-	folderId,
-	renamingId,
-	onOpenFolder,
-	onRename,
-	onCommitRename,
-	onTag,
-	onMove,
-	onDelete,
-	onDropItem,
+	directory,
+	query,
+	sort,
+	selection,
+	expanded,
+	onToggleExpanded,
+	onSelect,
+	onAction,
 }: {
-	snapshot: LibrarySnapshot | null;
-	folderId: string | null;
-	renamingId: string | null;
-	onOpenFolder: (id: string) => void;
-	onRename: (id: string) => void;
-	onCommitRename: (id: string, name: string) => void;
-	onTag: (id: string, tag: LibraryTag | null) => void;
-	onMove: (item: LibraryItem) => void;
-	onDelete: (item: LibraryItem) => void;
-	onDropItem: (id: string, target: string) => void;
+	files: LibraryTreeFile[];
+	snapshot: LibrarySnapshot;
+	directory: ReturnType<typeof libraryDirectory>;
+	query: string;
+	sort: ChainSort;
+	selection: SourceEntrySelection;
+	expanded: ReadonlySet<string>;
+	onToggleExpanded: (id: string) => void;
+	onSelect: (kind: "source" | "folder", id: string, next: boolean) => void;
+	onAction?: OrganizationChange;
 }) {
-	if (!snapshot) return <p className="px-4 text-sm text-muted-foreground">Loading…</p>;
-	const items = snapshot.items;
-	const children = libraryChildren(items, folderId);
-	if (children.length === 0) {
-		return (
-			<div data-testid="library-empty" className="mx-4 mt-6 flex flex-col items-center gap-2 rounded-xl border border-dashed border-border px-6 py-12 text-center text-sm text-muted-foreground">
-				<UploadIcon aria-hidden="true" className="size-5" />
-				{folderId === null
-					? "Create a folder for each course (e.g. Math 3339 → Unit 1 → Quizzes), then drop PDFs, Word and PowerPoint files, or images here."
-					: "This folder is empty. Drop files here or use Upload."}
-			</div>
-		);
-	}
 	return (
-		<ul className="flex flex-col px-2 pb-6" data-testid="library-rows">
-			{children.map((item) => {
-				const tag = effectiveTag(items, item.id);
-				const parentTag = item.parentId ? effectiveTag(items, item.parentId) : undefined;
-				return (
-					<li
-						key={item.id}
-						draggable={renamingId !== item.id}
-						onDragStart={(e) => {
-							e.dataTransfer.setData(ITEM_MIME, item.id);
-							e.dataTransfer.effectAllowed = "move";
-						}}
-						onDragOver={(e) => {
-							if (item.kind !== "folder" || !e.dataTransfer.types.includes(ITEM_MIME)) return;
-							e.preventDefault();
-							e.stopPropagation();
-						}}
-						onDrop={(e) => {
-							if (item.kind !== "folder") return;
-							const id = e.dataTransfer.getData(ITEM_MIME);
-							if (!id || isInLibrarySubtree(items, id, item.id)) return;
-							e.preventDefault();
-							e.stopPropagation();
-							onDropItem(id, item.id);
-						}}
-						data-testid="library-row"
-						className="group flex items-center gap-2.5 rounded-lg px-2 py-2 hover:bg-accent/40"
-					>
-						<ItemGlyph item={item} />
-						{renamingId === item.id ? (
-							<NameField inline initial={item.name} onCommit={(name) => onCommitRename(item.id, name)} onCancel={() => onCommitRename(item.id, "")} />
-						) : item.kind === "folder" ? (
-							<button type="button" onClick={() => onOpenFolder(item.id)} className="min-w-0 flex-1 truncate text-left text-sm hover:underline">
-								{item.name}
-							</button>
-						) : (
-							<a
-								href={`/api/library/files/${item.id}/content`}
-								target="_blank"
-								rel="noreferrer"
-								className="flex min-w-0 flex-1 items-center gap-1.5 truncate text-sm hover:underline"
-							>
-								<span className="truncate">{item.name}</span>
-								<ExternalLinkIcon aria-hidden="true" className="size-3 shrink-0 opacity-0 group-hover:opacity-60" />
-							</a>
-						)}
-						{item.kind === "file" && (
-							<span className="shrink-0 text-[11px] text-muted-foreground">
-								{unitsText(item)} · {formatBytes(item.file?.bytes ?? 0)}
-							</span>
-						)}
-						{item.file && <FileStatus status={item.file.status} error={item.file.error} summary={snapshot.summaries[item.id]} />}
-						{tag && !item.tag && <TagBadge tag={tag} inherited />}
-						<TagSelect value={item.tag} inherited={parentTag} onChange={(next) => onTag(item.id, next)} />
-						<RowAction label="Rename" onClick={() => onRename(item.id)}>
-							<PencilIcon aria-hidden="true" className="size-3.5" />
-						</RowAction>
-						<RowAction label="Move to…" onClick={() => onMove(item)}>
-							<FolderInputIcon aria-hidden="true" className="size-3.5" />
-						</RowAction>
-						<RowAction label="Delete…" onClick={() => onDelete(item)} danger>
-							<Trash2Icon aria-hidden="true" className="size-3.5" />
-						</RowAction>
-					</li>
-				);
-			})}
-		</ul>
-	);
-}
-
-/** The item's OWN tag; "Inherit" clears it (the folder above decides). */
-export function TagSelect({ value, inherited, onChange }: { value?: LibraryTag; inherited?: LibraryTag; onChange: (tag: LibraryTag | null) => void }) {
-	return (
-		<select
-			aria-label="Tag"
-			data-testid="library-tag-select"
-			value={value ?? ""}
-			onChange={(e) => onChange(e.target.value === "" ? null : (e.target.value as LibraryTag))}
-			className="h-7 shrink-0 rounded-md border border-border bg-background px-1.5 text-xs text-muted-foreground hover:text-foreground"
-		>
-			<option value="">{inherited ? `Inherit (${LIBRARY_TAG_LABELS[inherited]})` : "No tag"}</option>
-			{LIBRARY_TAGS.map((t) => (
-				<option key={t} value={t}>
-					{LIBRARY_TAG_LABELS[t]}
-				</option>
-			))}
-		</select>
-	);
-}
-
-function RowAction({ label, onClick, danger = false, children }: { label: string; onClick: () => void; danger?: boolean; children: React.ReactNode }) {
-	return (
-		<button
-			type="button"
-			aria-label={label}
-			title={label}
-			onClick={onClick}
-			className={`flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100 hover:bg-accent ${danger ? "hover:text-destructive" : "hover:text-foreground"}`}
-		>
-			{children}
-		</button>
-	);
-}
-
-function NameField({
-	initial,
-	placeholder,
-	inline = false,
-	onCommit,
-	onCancel,
-}: {
-	initial: string;
-	placeholder?: string;
-	inline?: boolean;
-	onCommit: (name: string) => void;
-	onCancel: () => void;
-}) {
-	const [value, setValue] = useState(initial);
-	const done = useRef(false);
-	const finish = (commit: boolean) => {
-		if (done.current) return;
-		done.current = true;
-		if (commit && value.trim() && value.trim() !== initial) onCommit(value.trim());
-		else onCancel();
-	};
-	return (
-		<input
-			autoFocus
-			value={value}
-			placeholder={placeholder}
-			aria-label={placeholder ?? "Name"}
-			onChange={(e) => setValue(e.target.value)}
-			onKeyDown={(e) => {
-				if (e.key === "Enter") finish(true);
-				else if (e.key === "Escape") {
-					e.stopPropagation();
-					finish(false);
-				}
-			}}
-			onBlur={() => finish(true)}
-			className={`${inline ? "min-w-0 flex-1" : "mx-4 mb-2 w-72"} rounded-md border border-border bg-background px-2 py-1 text-sm outline-none focus:ring-1 focus:ring-ring`}
+		<SourceFolderTree
+			groups={files}
+			directory={directory}
+			query={query}
+			sort={sort}
+			onAction={onAction}
+			sourceSelection={selection}
+			expanded={expanded}
+			collapsedForSearch={new Set()}
+			onToggleExpanded={onToggleExpanded}
+			selection={selection.sources}
+			selectedFolders={selection.folders}
+			onToggleNodes={() => {}}
+			onToggleFolder={(id, next) => onSelect("folder", id, next)}
+			renderSource={(file, depth) => (
+				<LibraryFileRow
+					key={file.key}
+					file={file.item}
+					depth={depth}
+					summary={snapshot.summaries[file.key]}
+					checked={selection.sources.has(file.key)}
+					onCheck={(next) => onSelect("source", file.key, next)}
+					onRename={onAction ? (name) => onAction({ action: "rename-source", id: file.key, name }) : undefined}
+				/>
+			)}
 		/>
 	);
 }
 
-/** The content pane doubles as the desktop-drop upload target; it claims
- *  file drags so the app-wide path-insertion zone stays out of it. */
-function UploadZone({ onFiles, children }: { onFiles: (files: File[]) => void; children: React.ReactNode }) {
-	const [over, setOver] = useState(false);
+/** A lean file row: checkbox, icon, inline rename (main's EditableSourceName)
+ *  + an open link, pages/size, status, tag; the columns line up with main's
+ *  folder rows (count, then date). Draggable onto folders via main's row. */
+export function LibraryFileRow({
+	file,
+	depth,
+	summary,
+	checked,
+	onCheck,
+	onRename,
+}: {
+	file: LibraryItem;
+	depth: number;
+	summary?: LibrarySnapshot["summaries"][string];
+	checked: boolean;
+	onCheck: (next: boolean) => void;
+	onRename?: (name: string) => Promise<unknown>;
+}) {
+	return (
+		<SourceDragRow
+			kind="source"
+			id={file.id}
+			name={file.name}
+			enabled={Boolean(onRename)}
+			data-testid={`library-file-${file.id}`}
+			className="group flex items-center gap-1 border-b border-transparent py-1.5 pr-3"
+			style={{ paddingLeft: 12 + depth * 36 }}
+		>
+			<input
+				type="checkbox"
+				aria-label={`Select ${file.name}`}
+				data-testid={`library-file-checkbox-${file.id}`}
+				checked={checked}
+				onChange={(e) => onCheck(e.target.checked)}
+				className="size-3.5 shrink-0 accent-primary"
+			/>
+			{/* The expander column stays empty for files so names align with folders. */}
+			<span className="w-3.5 shrink-0" aria-hidden="true" />
+			<span data-source-icon className="flex h-5 w-3.5 shrink-0 items-center justify-center">
+				{file.file ? <FormatGlyph format={file.file.format} className="size-3.5" /> : <ItemGlyph item={file} className="size-3.5" />}
+			</span>
+			{onRename ? <EditableSourceName name={file.name} onSave={onRename} /> : <span className="min-w-0 flex-1 truncate text-sm font-medium">{file.name}</span>}
+			<a
+				href={`/api/library/files/${file.id}/content`}
+				target="_blank"
+				rel="noreferrer"
+				aria-label={`Open ${file.name}`}
+				title="Open"
+				className="flex size-5 shrink-0 items-center justify-center rounded text-muted-foreground opacity-0 transition-opacity hover:bg-accent hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100"
+			>
+				<ExternalLinkIcon aria-hidden="true" className="size-3" />
+			</a>
+			<span className="shrink-0 text-[11px] text-muted-foreground">
+				{unitsText(file)} · {formatBytes(file.file?.bytes ?? 0)}
+			</span>
+			{file.file && <FileStatus status={file.file.status} error={file.file.error} summary={summary} />}
+			{file.tag && <TagBadge tag={file.tag} />}
+			{/* Files column: a file is one file — left blank so folder counts read cleanly. */}
+			<span className="w-14 shrink-0" aria-hidden="true" />
+			<span className="w-20 shrink-0 text-right text-xs tabular-nums text-muted-foreground">{file.createdAt.slice(0, 10)}</span>
+		</SourceDragRow>
+	);
+}
+
+function TreeHeader({ sort, onSort }: { sort: ChainSort; onSort: (col: ChainSortCol) => void }) {
+	const dirIcon = (col: ChainSortCol) =>
+		sort.col !== col ? null : sort.dir === 1 ? <ArrowUpIcon aria-hidden="true" className="size-3" /> : <ArrowDownIcon aria-hidden="true" className="size-3" />;
+	const aria = (col: ChainSortCol) => (sort.col === col ? (sort.dir === 1 ? "ascending" : "descending") : "none");
+	return (
+		<div className="mt-2 flex items-center gap-1 border-b border-border/60 px-3 pb-1.5 text-[11px] uppercase tracking-wider text-muted-foreground" data-testid="library-tree-header">
+			<button type="button" data-testid="library-sort-name" onClick={() => onSort("name")} aria-sort={aria("name")} className="flex flex-1 items-center gap-1 pl-[42px] text-left transition-colors hover:text-foreground">
+				Name {dirIcon("name")}
+			</button>
+			<button type="button" data-testid="library-sort-files" onClick={() => onSort("props")} aria-sort={aria("props")} className="flex w-14 shrink-0 items-center justify-end gap-1 text-right transition-colors hover:text-foreground">
+				Files {dirIcon("props")}
+			</button>
+			<button type="button" data-testid="library-sort-created" onClick={() => onSort("created")} aria-sort={aria("created")} className="flex w-20 shrink-0 items-center justify-end gap-1 text-right transition-colors hover:text-foreground">
+				Created {dirIcon("created")}
+			</button>
+		</div>
+	);
+}
+
+/** The checked-items toolbar — pure over props (render pins). Tag applies to
+ *  every checked FILE (tags are file-only); Move/Delete to the top-most
+ *  checked items. With exactly one checked file, the tag menu shows its tag. */
+export function SelectionToolbar({
+	checked,
+	files,
+	onTag,
+	onMove,
+	onDelete,
+	onClear,
+}: {
+	checked: readonly LibraryItem[];
+	files: readonly LibraryItem[];
+	onTag: (tag: LibraryTag | null) => void;
+	onMove: () => void;
+	onDelete: () => void;
+	onClear: () => void;
+}) {
+	const folders = checked.filter((i) => i.kind === "folder").length;
+	const parts = [
+		files.length > 0 ? `${files.length} file${files.length === 1 ? "" : "s"}` : null,
+		folders > 0 ? `${folders} folder${folders === 1 ? "" : "s"}` : null,
+	].filter(Boolean);
+	const single = files.length === 1 ? files[0]!.tag ?? "" : undefined;
+	return (
+		<div className="mx-3 mt-3 flex flex-wrap items-center gap-2 rounded-lg border border-border/60 bg-card px-3 py-1.5" data-testid="library-toolbar">
+			<span className="text-xs text-muted-foreground" data-testid="library-toolbar-count">
+				{parts.join(", ")} selected
+			</span>
+			<span className="flex-1" />
+			<select
+				aria-label="Tag the selected files"
+				data-testid="library-toolbar-tag"
+				disabled={files.length === 0}
+				value={single ?? "__mixed"}
+				onChange={(e) => {
+					if (e.target.value === "__mixed") return;
+					onTag(e.target.value === "" ? null : (e.target.value as LibraryTag));
+				}}
+				className="h-7 rounded-md border border-border bg-background px-1.5 text-xs text-muted-foreground hover:text-foreground disabled:opacity-50"
+			>
+				{single === undefined && <option value="__mixed">Tag…</option>}
+				<option value="">No tag</option>
+				{LIBRARY_TAGS.map((t) => (
+					<option key={t} value={t}>
+						{LIBRARY_TAG_LABELS[t]}
+					</option>
+				))}
+			</select>
+			<Button variant="ghost" size="xs" data-testid="library-toolbar-move" onClick={onMove}>
+				Move to…
+			</Button>
+			<Button variant="ghost" size="xs" data-testid="library-toolbar-delete" onClick={onDelete} className="hover:text-destructive">
+				Delete…
+			</Button>
+			<Button variant="ghost" size="xs" data-testid="library-toolbar-clear" onClick={onClear}>
+				Clear
+			</Button>
+		</div>
+	);
+}
+
+function UploadStatus({ uploads, onDismiss }: { uploads: { total: number; done: number; failures: UploadOutcome[] }; onDismiss: () => void }) {
+	return (
+		<div className="mx-4 mt-3 rounded-md border border-border/60 px-3 py-2 text-xs" data-testid="library-upload-status">
+			{uploads.done < uploads.total ? (
+				<span className="text-muted-foreground">Uploading {uploads.done + 1} of {uploads.total}…</span>
+			) : (
+				<div className="flex flex-col gap-1">
+					{uploads.failures.map((f) => (
+						<span key={f.name} className="text-destructive">
+							{f.name}: {f.ok ? "" : f.error}
+						</span>
+					))}
+					<button type="button" className="self-start text-muted-foreground underline" onClick={onDismiss}>
+						Dismiss
+					</button>
+				</div>
+			)}
+		</div>
+	);
+}
+
+function EmptyLibrary() {
+	return (
+		<div data-testid="library-empty" className="mx-4 mt-6 flex flex-col items-center gap-2 rounded-xl border border-dashed border-border px-6 py-12 text-center text-sm text-muted-foreground">
+			<UploadIcon aria-hidden="true" className="size-5" />
+			Create a folder for each course (e.g. Math 3339 → Unit 1 → Quizzes), then drop PDFs, Word and PowerPoint files, or images here.
+		</div>
+	);
+}
+
+/** The tree area doubles as the desktop-drop upload target. A drop onto a
+ *  folder row (main's rows carry data-source-drag-row) uploads into that
+ *  folder; anywhere else, the top level. It claims file drags so the
+ *  app-wide path-insertion zone stays out — main's tree ignores them. */
+function UploadZone({ items, onFiles, children }: { items: readonly LibraryItem[]; onFiles: (files: File[], parentId: string | null) => void; children: React.ReactNode }) {
+	const [over, setOver] = useState<{ folder: string | null } | null>(null);
 	const depth = useRef(0);
 	const hasFiles = (e: React.DragEvent) => e.dataTransfer.types.includes("Files");
+	const folderAt = (target: EventTarget | null): string | null => {
+		const row = target instanceof Element ? target.closest("[data-source-drag-row]") : null;
+		const id = row?.getAttribute("data-source-drag-row") ?? null;
+		return id && items.some((i) => i.id === id && i.kind === "folder") ? id : null;
+	};
+	const overName = over?.folder ? items.find((i) => i.id === over.folder)?.name : null;
 	return (
 		<section
 			data-testid="library-content"
@@ -502,30 +546,37 @@ function UploadZone({ onFiles, children }: { onFiles: (files: File[]) => void; c
 				e.preventDefault();
 				e.stopPropagation();
 				depth.current++;
-				setOver(true);
+				setOver({ folder: folderAt(e.target) });
 			}}
 			onDragOver={(e) => {
 				if (!hasFiles(e)) return;
 				e.preventDefault();
 				e.stopPropagation();
 				e.dataTransfer.dropEffect = "copy";
+				const folder = folderAt(e.target);
+				if (over?.folder !== folder) setOver({ folder });
 			}}
 			onDragLeave={(e) => {
 				if (!hasFiles(e)) return;
 				e.stopPropagation();
 				depth.current = Math.max(0, depth.current - 1);
-				if (depth.current === 0) setOver(false);
+				if (depth.current === 0) setOver(null);
 			}}
 			onDrop={(e) => {
 				if (!hasFiles(e)) return;
 				e.preventDefault();
 				e.stopPropagation();
 				depth.current = 0;
-				setOver(false);
-				onFiles(Array.from(e.dataTransfer.files));
+				setOver(null);
+				onFiles(Array.from(e.dataTransfer.files), folderAt(e.target));
 			}}
-			className={`relative min-w-0 flex-1 overflow-y-auto ${over ? "bg-primary/5 ring-2 ring-inset ring-primary/40" : ""}`}
+			className={`relative flex min-w-0 flex-1 flex-col overflow-y-auto ${over ? "bg-primary/5 ring-2 ring-inset ring-primary/40" : ""}`}
 		>
+			{over && (
+				<p className="pointer-events-none sticky top-0 z-10 mx-auto mt-2 rounded-full border border-primary/40 bg-card px-3 py-1 text-xs text-foreground shadow" data-testid="library-drop-target">
+					{overName ? `Drop to upload into ${overName}` : "Drop to upload to the top level"}
+				</p>
+			)}
 			{children}
 		</section>
 	);
@@ -548,20 +599,22 @@ function useEscape(active: boolean, onEscape: () => void) {
 	}, [active, onEscape]);
 }
 
-function MoveDialog({ items, item, onClose, onMove }: { items: readonly LibraryItem[]; item: LibraryItem | null; onClose: () => void; onMove: (target: string | null) => void }) {
+function MoveDialog({ allItems, moving, onClose, onMove }: { allItems: readonly LibraryItem[]; moving: LibraryItem[] | null; onClose: () => void; onMove: (target: string | null) => void }) {
 	const backdrop = useBackdropDismiss(onClose);
-	useEscape(item !== null, onClose);
-	if (!item) return null;
-	// Destinations: the top level and every folder outside the item's own subtree.
-	const blocked = new Set(librarySubtree(items, item.id).map((i) => i.id));
-	const folders = items.filter((i) => i.kind === "folder" && !blocked.has(i.id));
-	const pathOf = (f: LibraryItem) => [...libraryAncestors(items, f.id), f].map((x) => x.name).join(" / ");
+	useEscape(moving !== null, onClose);
+	if (!moving || moving.length === 0) return null;
+	// Destinations: the top level and every folder outside the moving items' subtrees.
+	const blocked = new Set(moving.flatMap((m) => librarySubtree(allItems, m.id).map((i) => i.id)));
+	const folders = allItems.filter((i) => i.kind === "folder" && !blocked.has(i.id));
+	const pathOf = (f: LibraryItem) => [...libraryAncestors(allItems, f.id), f].map((x) => x.name).join(" / ");
+	const alreadyIn = (parentId: string | null) => moving.every((m) => m.parentId === parentId);
+	const title = moving.length === 1 ? `Move “${moving[0]!.name}” to…` : `Move ${moving.length} items to…`;
 	return createPortal(
 		<div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80" {...backdrop}>
-			<div role="dialog" aria-modal="true" aria-label="Move item" onClick={(e) => e.stopPropagation()} className="flex max-h-[70vh] w-[28rem] max-w-[calc(100vw-2rem)] flex-col rounded-xl border bg-card p-5 shadow-xl">
-				<h2 className="text-sm font-semibold">Move “{item.name}” to…</h2>
+			<div role="dialog" aria-modal="true" aria-label="Move items" onClick={(e) => e.stopPropagation()} className="flex max-h-[70vh] w-[28rem] max-w-[calc(100vw-2rem)] flex-col rounded-xl border bg-card p-5 shadow-xl">
+				<h2 className="text-sm font-semibold">{title}</h2>
 				<div className="mt-3 flex-1 overflow-y-auto rounded-lg border border-border/60 p-1">
-					<button type="button" disabled={item.parentId === null} onClick={() => onMove(null)} className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent disabled:opacity-40">
+					<button type="button" disabled={alreadyIn(null)} onClick={() => onMove(null)} className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent disabled:opacity-40">
 						<LibraryIcon aria-hidden="true" className="size-4" />
 						Library (top level)
 					</button>
@@ -569,7 +622,7 @@ function MoveDialog({ items, item, onClose, onMove }: { items: readonly LibraryI
 						.map((f) => ({ f, path: pathOf(f) }))
 						.sort((a, b) => a.path.localeCompare(b.path, undefined, { numeric: true, sensitivity: "base" }))
 						.map(({ f, path }) => (
-							<button key={f.id} type="button" disabled={item.parentId === f.id} onClick={() => onMove(f.id)} className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent disabled:opacity-40">
+							<button key={f.id} type="button" disabled={alreadyIn(f.id)} onClick={() => onMove(f.id)} className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent disabled:opacity-40">
 								<ItemGlyph item={f} />
 								<span className="truncate">{path}</span>
 							</button>
@@ -586,32 +639,38 @@ function MoveDialog({ items, item, onClose, onMove }: { items: readonly LibraryI
 	);
 }
 
-function DeleteLibraryDialog({ item, onClose, onDeleted }: { item: LibraryItem | null; onClose: () => void; onDeleted: () => void }) {
+function DeleteLibraryDialog({ targets, onClose, onDeleted }: { targets: LibraryItem[] | null; onClose: () => void; onDeleted: () => void }) {
 	const [impact, setImpact] = useState<LibraryDeletionImpact | null>(null);
 	const [busy, setBusy] = useState(false);
 	const [failure, setFailure] = useState<string | null>(null);
 	const backdrop = useBackdropDismiss(() => {
 		if (!busy) onClose();
 	});
-	useEscape(item !== null, onClose);
+	useEscape(targets !== null, onClose);
 	useEffect(() => {
 		setImpact(null);
 		setFailure(null);
 		setBusy(false);
-		if (!item) return;
+		if (!targets || targets.length === 0) return;
 		let live = true;
-		deletionImpact(item.id)
-			.then((r) => live && setImpact(r.impact))
+		// One combined warning: every removed id and every affected chat, once.
+		Promise.all(targets.map((t) => deletionImpact(t.id)))
+			.then((rs) => {
+				if (!live) return;
+				const chats = new Map<string, { id: string; title: string }>();
+				for (const r of rs) for (const c of r.impact.chats) chats.set(c.id, c);
+				setImpact({ itemIds: [...new Set(rs.flatMap((r) => r.impact.itemIds))], chats: [...chats.values()] });
+			})
 			.catch((e: unknown) => live && setFailure(e instanceof Error ? e.message : String(e)));
 		return () => {
 			live = false;
 		};
-	}, [item]);
-	if (!item) return null;
+	}, [targets]);
+	if (!targets || targets.length === 0) return null;
 	const run = async () => {
 		setBusy(true);
 		try {
-			await deleteItem(item.id);
+			for (const t of targets) await deleteItem(t.id);
 			onDeleted();
 		} catch (e) {
 			setFailure(e instanceof Error ? e.message : String(e));
@@ -620,47 +679,54 @@ function DeleteLibraryDialog({ item, onClose, onDeleted }: { item: LibraryItem |
 	};
 	return createPortal(
 		<div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80" {...backdrop}>
-			<DeleteLibraryBody item={item} impact={impact} busy={busy} failure={failure} onClose={onClose} onRun={() => void run()} />
+			<DeleteLibraryBody items={targets} impact={impact} busy={busy} failure={failure} onClose={onClose} onRun={() => void run()} />
 		</div>,
 		document.body,
 	);
 }
 
 /** The delete confirm's pure body (SSR pins). Lists the chats that use the
- *  item (owner ruling: warn, then detach). */
+ *  items (owner ruling: warn, then detach). */
 export function DeleteLibraryBody({
-	item,
+	items,
 	impact,
 	busy,
 	failure,
 	onClose,
 	onRun,
 }: {
-	item: Pick<LibraryItem, "name" | "kind">;
+	items: readonly Pick<LibraryItem, "name" | "kind">[];
 	impact: LibraryDeletionImpact | null;
 	busy: boolean;
 	failure: string | null;
 	onClose: () => void;
 	onRun: () => void;
 }) {
-	const fileCount = impact ? impact.itemIds.length - 1 : 0;
+	const single = items.length === 1 ? items[0]! : null;
+	const inside = impact ? impact.itemIds.length - items.length : 0;
+	const title = single ? `Delete ${single.kind === "folder" ? "folder" : "file"}?` : `Delete ${items.length} items?`;
 	return (
-		<div role="dialog" aria-modal="true" aria-label="Delete library item" data-testid="library-delete-dialog" onClick={(e) => e.stopPropagation()} className="w-[32rem] max-w-[calc(100vw-2rem)] rounded-xl border bg-card p-5 shadow-xl">
-			<h2 className="text-sm font-semibold text-destructive">Delete {item.kind === "folder" ? "folder" : "file"}?</h2>
-			<div className="mt-1.5">
-				<code className="font-mono text-sm text-foreground">{item.name}</code>
+		<div role="dialog" aria-modal="true" aria-label="Delete library items" data-testid="library-delete-dialog" onClick={(e) => e.stopPropagation()} className="w-[32rem] max-w-[calc(100vw-2rem)] rounded-xl border bg-card p-5 shadow-xl">
+			<h2 className="text-sm font-semibold text-destructive">{title}</h2>
+			<div className="mt-1.5 flex flex-col">
+				{items.slice(0, 8).map((i) => (
+					<code key={i.name} className="truncate font-mono text-sm text-foreground">
+						{i.name}
+					</code>
+				))}
+				{items.length > 8 && <span className="text-xs text-muted-foreground">and {items.length - 8} more</span>}
 			</div>
 			<p className="mt-2 text-sm text-muted-foreground">
-				{item.kind === "folder" && impact && fileCount > 0
-					? `This permanently removes the folder and the ${fileCount} item${fileCount === 1 ? "" : "s"} inside it from your library. `
-					: "This permanently removes it from your library. "}
-				Past messages that used it stay as they are. This cannot be undone.
+				{impact && inside > 0
+					? `This permanently removes ${single ? "it" : "them"} and the ${inside} item${inside === 1 ? "" : "s"} inside from your library. `
+					: `This permanently removes ${single ? "it" : "them"} from your library. `}
+				Past messages that used {single ? "it" : "them"} stay as they are. This cannot be undone.
 			</p>
-			{impact === null && !failure && <p className="mt-3 text-xs text-muted-foreground">Checking which chats use it…</p>}
+			{impact === null && !failure && <p className="mt-3 text-xs text-muted-foreground">Checking which chats use {single ? "it" : "them"}…</p>}
 			{impact && impact.chats.length > 0 && (
 				<div className="mt-3 rounded-lg border border-border/60 px-3 py-2" data-testid="library-delete-chats">
 					<p className="text-xs text-foreground">
-						Used by {impact.chats.length} chat{impact.chats.length === 1 ? "" : "s"}. It will be detached from:
+						Used by {impact.chats.length} chat{impact.chats.length === 1 ? "" : "s"}. {single ? "It" : "They"} will be detached from:
 					</p>
 					<ul className="mt-1 list-disc pl-5 text-xs text-muted-foreground">
 						{impact.chats.slice(0, 8).map((c) => (

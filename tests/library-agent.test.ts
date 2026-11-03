@@ -73,11 +73,11 @@ async function upload(parentId: string | null, name: string, bytes: Uint8Array) 
 const course = stores.libraryStore.createFolder(null, "Math 3339");
 const unit = stores.libraryStore.createFolder(course.id, "Unit 1");
 const lectures = stores.libraryStore.createFolder(unit.id, "Lectures");
-stores.libraryStore.updateItem(lectures.id, { tag: "lecture" });
 const deck = await upload(lectures.id, "limits.pptx", buildPptx([
 	{ title: "Limits", body: ["epsilon-delta definition"], notes: "Quantifier order matters.", image: true },
 	{ title: "Continuity", body: ["f is continuous at a"] },
 ]));
+stores.libraryStore.updateItem(deck.id, { tag: "lecture" });
 const quiz = await upload(unit.id, "quiz1.pdf", PDF_FIXTURE);
 stores.libraryStore.updateItem(quiz.id, { tag: "quiz" });
 const photo = await upload(unit.id, "board.png", TINY_PNG);
@@ -91,7 +91,7 @@ describe("reading surface", () => {
 	const readables = () => agentSeam.chatLibraryReadables(chat.id);
 	const byId = (id: string) => readables().find((r) => r.id === id)!;
 
-	it("scope: an attached folder brings its files with inherited tags; other courses stay out", () => {
+	it("scope: an attached folder brings its files with their own tags; other courses stay out", () => {
 		const files = readables();
 		assert.deepEqual(new Set(files.map((f) => f.id)), new Set([deck.id, quiz.id, photo.id]));
 		assert.equal(byId(deck.id).tag, "lecture");

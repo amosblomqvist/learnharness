@@ -5,7 +5,7 @@ import { createPortal } from "react-dom";
 import { ChevronRightIcon, LibraryIcon } from "lucide-react";
 import { useBackdropDismiss } from "@/components/backdrop-dismiss";
 import { Button } from "@/components/ui/button";
-import { effectiveTag, libraryChildren, type LibraryItem } from "@/src/core";
+import { libraryChildren, type LibraryItem } from "@/src/core";
 import { useLibrary } from "./library-client";
 import { ItemGlyph, TagBadge, unitsText } from "./library-shared";
 
@@ -151,7 +151,6 @@ function PickerRow({
 }) {
 	const [open, setOpen] = useState(depth === 0);
 	const checked = coveredBy !== null || picked.includes(item.id);
-	const tag = effectiveTag(items, item.id);
 	const hasChildren = item.kind === "folder" && items.some((i) => i.parentId === item.id);
 	return (
 		<li>
@@ -176,7 +175,7 @@ function PickerRow({
 				<ItemGlyph item={item} open={open && item.kind === "folder"} />
 				<span className="min-w-0 flex-1 truncate text-sm">{item.name}</span>
 				{item.kind === "file" && <span className="shrink-0 text-[11px] text-muted-foreground">{unitsText(item)}</span>}
-				{tag && <TagBadge tag={tag} inherited={!item.tag} />}
+				{item.kind === "file" && item.tag && <TagBadge tag={item.tag} />}
 			</div>
 			{open && hasChildren && (
 				<PickerTree

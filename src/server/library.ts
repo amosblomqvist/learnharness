@@ -19,7 +19,7 @@ import * as fs from "node:fs";
 import { stores } from "./stores.ts";
 import { emit } from "../core/events.ts";
 import type { ChatAttachmentsSnapshot, LibraryDeletionImpact, LibraryItem, LibrarySnapshot, LibrarySummaryState } from "../core/contracts.ts";
-import { classifyUpload, effectiveTag, libraryAncestors, libraryPath, librarySubtree, resolveAttachmentFiles } from "../core/contracts.ts";
+import { classifyUpload, libraryAncestors, libraryPath, librarySubtree, resolveAttachmentFiles } from "../core/contracts.ts";
 import { pdfPageCount } from "../agent/subagents/pdf-ops.ts";
 import { detectSupportedImageMimeType } from "../agent/image-processing/index.ts";
 import { extractOffice, type ExtractedDocument } from "../agent/library/office-extract.ts";
@@ -237,7 +237,7 @@ export function chatAttachmentsSnapshot(chatId: string): ChatAttachmentsSnapshot
 		items: attachments.flatMap((id) => {
 			const item = items.find((i) => i.id === id);
 			if (!item) return [];
-			const tag = effectiveTag(items, id);
+			const tag = item.kind === "file" ? item.tag : undefined;
 			return [{
 				id,
 				kind: item.kind,
@@ -248,7 +248,7 @@ export function chatAttachmentsSnapshot(chatId: string): ChatAttachmentsSnapshot
 			}];
 		}),
 		files: resolveAttachmentFiles(items, attachments).map((f) => {
-			const tag = effectiveTag(items, f.id);
+			const tag = f.tag;
 			const summary = summaryStateOf(f);
 			return {
 				id: f.id,

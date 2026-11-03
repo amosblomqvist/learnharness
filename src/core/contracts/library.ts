@@ -3,10 +3,10 @@
  * (course library wave, owner-approved plan 2026-10-29).
  *
  * The library is ONE tree shared by every chat: free-form nested folders
- * holding copied-in files (PDF / DOCX / PPTX / images). Any folder or file
- * may carry an optional tag; a file without its own tag inherits the
- * nearest tagged ancestor's. Chats ATTACH items (folders or files) and only
- * attached files are ever in an agent's scope.
+ * holding copied-in files (PDF / DOCX / PPTX / images). Each FILE may carry
+ * an optional tag — folders never do, and nothing inherits (owner ruling
+ * 2026-11-03: tags belong to the individual uploads). Chats ATTACH items
+ * (folders or files) and only attached files are ever in an agent's scope.
  *
  * Pure types + tiny pure helpers (browser-safe — the library page and the
  * Materials panel fold the same tree the server does). The single writer is
@@ -121,7 +121,8 @@ export interface LibraryItem {
 	parentId: string | null;
 	kind: "folder" | "file";
 	name: string;
-	/** The item's OWN tag (absent = inherit). */
+	/** Files only (absent = untagged). A folder never carries one — the
+	 *  store refuses it and drops any left from before file-only tags. */
 	tag?: LibraryTag;
 	createdAt: string;
 	updatedAt: string;
@@ -191,18 +192,6 @@ export function libraryPath(items: readonly LibraryItem[], id: string): string {
 	const item = libraryItemById(items, id);
 	if (!item) return "";
 	return [...libraryAncestors(items, id), item].map((i) => i.name).join("/");
-}
-
-/** The item's own tag, else the nearest tagged ancestor's. */
-export function effectiveTag(items: readonly LibraryItem[], id: string): LibraryTag | undefined {
-	const item = libraryItemById(items, id);
-	if (!item) return undefined;
-	if (item.tag) return item.tag;
-	const ancestors = libraryAncestors(items, id);
-	for (let i = ancestors.length - 1; i >= 0; i--) {
-		if (ancestors[i]!.tag) return ancestors[i]!.tag;
-	}
-	return undefined;
 }
 
 /** The item and everything beneath it (pre-order, tree-sorted). */

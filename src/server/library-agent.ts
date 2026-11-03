@@ -11,7 +11,7 @@ import type { Usage } from "@earendil-works/pi-ai";
 import { stores } from "./stores.ts";
 import { emit } from "../core/events.ts";
 import type { CallUsage, LibraryItem } from "../core/contracts.ts";
-import { effectiveTag, LIBRARY_TAG_LABELS, libraryPath, resolveAttachmentFiles } from "../core/contracts.ts";
+import { LIBRARY_TAG_LABELS, libraryPath, resolveAttachmentFiles } from "../core/contracts.ts";
 import { resolveRoleSpec } from "../core/settings-resolution.ts";
 import { piEngineForSpec } from "../agent/models.ts";
 import { unitLabel, type LibraryReadable } from "../agent/library/readable.ts";
@@ -26,7 +26,7 @@ const library = () => stores.libraryStore;
 
 function toReadable(items: LibraryItem[], item: LibraryItem): LibraryReadable {
 	const file = item.file!;
-	const tag = effectiveTag(items, item.id);
+	const tag = item.tag;
 	const summary = library().readSummary(item.id);
 	return {
 		id: item.id,

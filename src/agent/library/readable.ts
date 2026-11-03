@@ -25,7 +25,7 @@ export interface LibraryReadable {
 	name: string;
 	/** Library display path ("Math 3339/Unit 1/Quizzes/quiz1.pdf"). */
 	path: string;
-	/** Effective tag (own or inherited). */
+	/** The file's tag (files only; nothing inherits). */
 	tag?: LibraryTag;
 	format: LibraryFileFormat;
 	status: LibraryFileMeta["status"];
