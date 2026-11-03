@@ -722,6 +722,7 @@ export function ChainTableOverlay({
 	const [deletion, setDeletion] = useState<{ sources: SourceEntry[]; folders: SourceFolder[] } | null>(null);
 	const deleteOpen = deletion !== null;
 	const [directory, setDirectory] = useState<SourceDirectory>();
+	const [directoryPending, setDirectoryPending] = useState(true);
 	const visibleDirectory = useMemo(() => directory && chainSourceDirectory(directory), [directory]);
 	const [directoryFailure, setDirectoryFailure] = useState("");
 	const [entrySelection, setEntrySelection] = useState<SourceEntrySelection>(() => ({ sources: new Set(), folders: new Set() }));
@@ -734,6 +735,7 @@ export function ChainTableOverlay({
 		});
 	}, [visibleDirectory]);
 	const requestVersion = useRef(0);
+	const directoryOpening = useRef(0);
 	const mutationTail = useRef<Promise<unknown>>(Promise.resolve());
 	const readDirectory = useCallback(async () => {
 		const version = ++requestVersion.current;
@@ -741,26 +743,33 @@ export function ChainTableOverlay({
 			const response = await fetch("/api/graph/sources", { cache: "no-store" });
 			if (!response.ok) throw new Error("Could not read source organization.");
 			const body = await response.json() as SourceDirectory;
-			if (version === requestVersion.current) { setDirectory(body); setDirectoryFailure(""); }
+			if (version === requestVersion.current) { setDirectory(body); setDirectoryPending(false); setDirectoryFailure(""); }
 		} catch (error) { if (version === requestVersion.current) setDirectoryFailure(error instanceof Error ? error.message : String(error)); }
 	}, []);
 	useEffect(() => {
 		if (open) void readDirectory();
-		return () => { requestVersion.current++; };
+		return () => {
+			requestVersion.current++;
+			directoryOpening.current++;
+			// Keep cached organization, but require fresh source kinds on EACH opening.
+			setDirectoryPending(true);
+		};
 	}, [open, readDirectory]);
 	useServerEvent("sources-changed", () => { if (open) void readDirectory(); });
 	useServerEvent("chats-changed", () => { if (open) void readDirectory(); });
 	useServerResync(() => { if (open) void readDirectory(); });
 	const changeOrganization: OrganizationChange = (action) => {
+		const opening = directoryOpening.current;
 		// Serialize this page's edits, and invalidate older notify-then-fetch reads.
 		const operation = mutationTail.current.catch(() => {}).then(async () => {
 			try {
 				const response = await fetch("/api/graph/sources", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(action) });
 				const body = await response.json();
 				if (!response.ok) throw new Error(typeof body.error === "string" ? body.error : "Could not save source organization.");
-				requestVersion.current++;
-				setDirectory(body as SourceDirectory);
-				setDirectoryFailure("");
+				if (opening === directoryOpening.current) {
+					requestVersion.current++;
+					setDirectory(body as SourceDirectory); setDirectoryPending(false); setDirectoryFailure("");
+				}
 				if (action.action === "rename-source") {
 					const entry = (body as SourceDirectory).sources.find((s) => s.id === action.id);
 					window.dispatchEvent(new CustomEvent(entry?.kind === "chat" ? "lh:chat-renamed" : "lh:source-renamed", { detail: { id: action.id, title: action.name } }));
@@ -839,7 +848,7 @@ export function ChainTableOverlay({
 					selectedSources={selectedSources}
 					onToggleSource={(id, next) => toggleEntries("source", id, next)}
 					onToggleFolder={(id, next) => toggleEntries("folder", id, next)}
-					sourceInventoryPending={!directory}
+					sourceInventoryPending={directoryPending}
 					nodes={nodes}
 					chains={storedChains}
 					sessions={sessions}
@@ -875,6 +884,7 @@ export function ChainTableOverlay({
 				folders={deletion?.folders ?? []}
 				onClose={() => setDeletion(null)}
 				onDelete={(deleteSessions) => {
+					const opening = directoryOpening.current;
 					const operation = mutationTail.current.catch(() => {}).then(async () => {
 						let graphRevision: number | undefined;
 						try {
@@ -883,7 +893,9 @@ export function ChainTableOverlay({
 							const body = await response.json();
 							if (!response.ok) throw new Error(typeof body.error === "string" ? body.error : "Could not delete sources.");
 							graphRevision = body.graphRevision;
-							requestVersion.current++; setDirectory(body as SourceDirectory); setDirectoryFailure("");
+							if (opening === directoryOpening.current) {
+								requestVersion.current++; setDirectory(body as SourceDirectory); setDirectoryPending(false); setDirectoryFailure("");
+							}
 							setEntrySelection({ sources: new Set(), folders: new Set() });
 						} finally {
 							// A failed response can still follow partial disk writes.

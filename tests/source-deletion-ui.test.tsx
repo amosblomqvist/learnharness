@@ -20,6 +20,9 @@ afterEach(async () => { await act(async () => { root?.unmount(); }); root = unde
 const directory = (): SourceDirectory => ({ organization: { version: 1, folders: [], placements: {} }, sources: ["a", "b"].map((id) => ({ id, kind: "notes", label: `${id} book`, createdAt: "now" })) });
 async function mount(children: React.ReactNode) {
 	host = document.createElement("div"); document.body.appendChild(host); root = createRoot(host);
+	await update(children);
+}
+async function update(children: React.ReactNode) {
 	await act(async () => { root!.render(<ServerEventsProvider connect={() => ({ close() {}, onOpen() {}, onEvent() {} })}>{children}</ServerEventsProvider>); });
 }
 async function click(id: string) {
@@ -72,6 +75,45 @@ it("practice provenance rows never flash before the source inventory arrives", a
 	assert.equal(document.querySelector('[data-testid="cluster-group-practice"]'), null);
 	assert.ok(document.querySelector('[data-testid="folder-checkbox-f"]'));
 });
+for (const selectMode of [false, true]) it(`reopening ${selectMode ? "practice picking" : "chains browsing"} waits for fresh source kinds before showing cached/provenance groups`, async () => {
+	globalThis.fetch = async () => Response.json(directory());
+	const changes: string[][] = [];
+	const visible = sourceNode("visible", "a"), historical = sourceNode("historical", "practice"), unknown = sourceNode("legacy-unknown", "unknown");
+	const overlay = (open: boolean, nodes = [visible]) => <ChainTableOverlay open={open} selectMode={selectMode} nodes={nodes} chains={[]} sessions={{ practice: "New practice" }} fileSources={{}} controlledSelection={new Set(["visible"])} onSelectionChange={(next) => changes.push([...next])} onClose={() => {}} />;
+	await mount(overlay(true));
+	assert.ok(document.querySelector('[data-testid="cluster-group-a"]'), "first opening loads and caches the inventory");
+	await update(overlay(false));
+	let respond!: (response: Response) => void;
+	globalThis.fetch = () => new Promise((resolve) => { respond = resolve; });
+	await update(overlay(true, [visible, historical, unknown]));
+	assert.equal(document.querySelector('[data-testid="cluster-group-practice"]') === null, true, "a new practice source cannot flash through the old inventory");
+	assert.equal(document.querySelector('[data-testid="cluster-checkbox-practice"]') === null, true, "the stale source cannot be selected while the refresh is delayed");
+	assert.equal(document.querySelector('[data-testid="cluster-group-unknown"]') === null, true, "wait for classification, not just an old nonempty inventory");
+	await act(async () => { respond(Response.json({ ...directory(), sources: [...directory().sources, { id: "practice", kind: "chat", chatKind: "practice", label: "New practice", createdAt: "now" }] })); });
+	assert.equal(document.querySelector('[data-testid="cluster-group-practice"]'), null);
+	assert.ok(document.querySelector('[data-testid="cluster-group-a"]'));
+	assert.ok(document.querySelector('[data-testid="cluster-group-unknown"]'), "genuinely unknown provenance remains visible after a successful read");
+	if (selectMode) assert.equal(document.querySelector('[data-testid="chain-selected-summary"]')!.textContent, "1 node → 1 chain");
+	assert.deepEqual(changes, [], "closing/refreshing never rewrites caller-owned picks");
+});
+
+it("an older opening's late mutation reply cannot unlock a reopened tree with stale source kinds", async () => {
+	let finishDelete!: (response: Response) => void;
+	globalThis.fetch = (_url, init) => init?.method === "DELETE" ? new Promise((resolve) => { finishDelete = resolve; }) : Promise.resolve(Response.json(directory()));
+	const overlay = (open: boolean, nodes: GraphNode[] = []) => <ChainTableOverlay open={open} nodes={nodes} chains={[]} sessions={{ practice: "New practice" }} fileSources={{}} onClose={() => {}} />;
+	await mount(overlay(true)); await click("cluster-checkbox-a"); await click("chain-delete"); await click("source-delete-confirm");
+	await update(overlay(false));
+	const reads: ((response: Response) => void)[] = [];
+	globalThis.fetch = () => new Promise((resolve) => { reads.push(resolve); });
+	await update(overlay(true, [sourceNode("historical", "practice")]));
+	await act(async () => { finishDelete(Response.json({ ...directory(), graphRevision: 1 })); });
+	assert.equal(document.querySelector('[data-testid="cluster-group-practice"]') === null, true, "the old response cannot reinstall stale visible groups");
+	assert.equal(reads.length, 2, "reopening and the completed deletion each request fresh metadata");
+	await act(async () => { for (const respond of reads) respond(Response.json({ ...directory(), sources: [...directory().sources, { id: "practice", kind: "chat", chatKind: "practice", label: "New practice", createdAt: "now" }] })); });
+	assert.equal(document.querySelector('[data-testid="cluster-group-practice"]'), null);
+	assert.ok(document.querySelector('[data-testid="cluster-group-a"]'));
+});
+
 it("folder selection, counts and confirmed source deletion exclude hidden practice sessions", async () => {
 	let current = practiceDirectory();
 	const requests: { sourceIds: string[]; folderIds: string[]; deleteSessions: boolean }[] = [];
