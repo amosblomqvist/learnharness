@@ -87,6 +87,7 @@ const ENV_FILE = /^\.env(\..*)?$/i;
 const SUBSCRIPTION_FILES = ["chatgpt-credentials.json", "github-copilot-credentials.json", "xai-credentials.json"];
 // Match the actual writers in store/auth.ts and electron/{chatgpt,subscription-store}.cjs.
 const CREDENTIAL_TEMP = /^(?:\.auth\.json\.tmp-\d+|(?:chatgpt|github-copilot|xai)-credentials\.json\.[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\.tmp)$/i;
+const ATOMIC_TEMP_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 /** Windows namespace aliases and alternate data streams must not change policy.
  *  The returned spelling is for comparison only, never for opening a file. */
@@ -115,9 +116,13 @@ function credentialFiles(authFile: string): string[] {
 	return [authFile, ...SUBSCRIPTION_FILES.map((name) => path.join(/* turbopackIgnore: true */ path.dirname(authFile), name))];
 }
 
-function isCredentialTemp(absolute: string, directory: string): boolean {
+function isCredentialTemp(absolute: string, directory: string, authBasename: string): boolean {
 	const file = comparisonPath(absolute);
-	return path.relative(comparisonPath(directory), path.dirname(file)) === "" && CREDENTIAL_TEMP.test(path.basename(file));
+	if (path.relative(comparisonPath(directory), path.dirname(file)) !== "") return false;
+	const name = path.basename(file);
+	const prefix = `${authBasename}.tmp-`;
+	return CREDENTIAL_TEMP.test(name) ||
+		(name.toLowerCase().startsWith(prefix.toLowerCase()) && ATOMIC_TEMP_UUID.test(name.slice(prefix.length)));
 }
 
 /** String-only check, also usable with synthetic home/credential locations.
@@ -128,7 +133,7 @@ export function isSensitivePath(absolute: string, home: string = os.homedir(), a
 	return ENV_FILE.test(path.basename(file)) ||
 		SENSITIVE_HOME_PATHS.some((p) => isWithin(file, path.join(home, p), true)) ||
 		credentialFiles(authFile).some((p) => isWithin(file, p)) ||
-		isCredentialTemp(file, path.dirname(authFile));
+		isCredentialTemp(file, path.dirname(authFile), path.basename(comparisonPath(authFile)));
 }
 
 /** Resolve existing ancestors too, so absent descendants of symlinked roots
@@ -192,7 +197,7 @@ function sourcePathCheck(home = os.homedir()): (absolute: string) => boolean {
 	const credentialDir = protectedRealPath(path.dirname(AUTH_FILE));
 	return (absolute) => isSensitivePath(absolute, home) ||
 		homeRoots.some((p) => isWithin(absolute, p, true)) ||
-		files.some((p) => isWithin(absolute, p)) || isCredentialTemp(absolute, credentialDir);
+		files.some((p) => isWithin(absolute, p)) || isCredentialTemp(absolute, credentialDir, path.basename(comparisonPath(AUTH_FILE)));
 }
 
 function checkedSourcePath(absolute: string, denied: (absolute: string) => boolean): string {

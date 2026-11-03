@@ -44,6 +44,7 @@ await write("keyfiles/github-copilot-credentials.json");
 await write("keyfiles/xai-credentials.json");
 await write("keyfiles/.auth.json.tmp-123");
 const uuid = "12345678-1234-4123-8123-123456789abc";
+const authTemp = await write(`keyfiles/custom-keys.json.tmp-${uuid}`);
 for (const name of ["chatgpt", "github-copilot", "xai"]) await write(`keyfiles/${name}-credentials.json.${uuid}.tmp`);
 const targetKey = await write("relocated-token");
 await link(path.join(root, "keyfiles"), path.join(root, "private"), true);
@@ -51,11 +52,15 @@ await link(targetKey, auth);
 await link(path.join(root, "transcripts"), path.join(home, ".claude"), true);
 await link(path.join(home, ".ssh"), path.join(home, "notes", "keys"), true);
 await link(targetKey, path.join(home, "notes", "key-alias"));
+await link(authTemp, path.join(home, "notes", "key-temp-alias"));
 await link(home, path.join(root, "home-alias"), true);
 await link(home, path.join(root, "home-alias-2"), true);
 await write("keyfiles/data/chats/session.json", "synthetic learning conversation\n");
 await write("keyfiles/logs/main.log", "ordinary synthetic app log\n");
 await write("keyfiles/custom-keys.json.backup-not-managed", "ordinary file\n");
+await write(`keyfiles/other.json.tmp-${uuid}`, "ordinary file\n");
+await write("keyfiles/custom-keys.json.tmp-not-a-uuid", "ordinary file\n");
+await write(`unrelated/custom-keys.json.tmp-${uuid}`, "ordinary file\n");
 await write("unrelated/.ssh/notes.md", "ordinary outside-home directory\n");
 for (const name of [".env", ".env.example", ".env.template", ".ENV.production"]) await write(`elsewhere/${name}`);
 
@@ -78,6 +83,7 @@ const denied = /Access denied: .* is a protected location/;
 describe("source access: configured credentials only", () => {
 	const protectedFiles = [
 		auth, targetKey, path.join(home, "notes", "key-alias"),
+		authTemp, `${auth}.tmp-${uuid}`, path.join(home, "notes", "key-temp-alias"),
 		...(["chatgpt", "github-copilot", "xai"].flatMap((name) => [
 			path.join(root, "private", `${name}-credentials.json`),
 			path.join(root, "keyfiles", `${name}-credentials.json`),
@@ -95,7 +101,7 @@ describe("source access: configured credentials only", () => {
 
 	it("still reads app learning records, ordinary files and non-managed lookalikes", async () => {
 		assert.match(await text(readTool, { path: path.join(data, "chats", "session.json") }), /synthetic learning conversation/);
-		for (const file of ["home/notes/topic.md", "home/..notes/also.md", "home/.claudette/ok.md", "unrelated/.ssh/notes.md", "keyfiles/custom-keys.json.backup-not-managed", "private/logs/main.log"]) {
+		for (const file of ["home/notes/topic.md", "home/..notes/also.md", "home/.claudette/ok.md", "unrelated/.ssh/notes.md", "keyfiles/custom-keys.json.backup-not-managed", `keyfiles/other.json.tmp-${uuid}`, "keyfiles/custom-keys.json.tmp-not-a-uuid", `unrelated/custom-keys.json.tmp-${uuid}`, "private/logs/main.log"]) {
 			assert.match(await text(readTool, { path: path.join(root, file) }), /ordinary/);
 		}
 		assert.match(await text(lsTool, { path: path.dirname(auth) }), /chatgpt-credentials\.json/);
@@ -107,6 +113,17 @@ describe("source access: configured credentials only", () => {
 		const found = await text(findTool, { path: root, pattern: "*" });
 		assert.match(found, /data\/chats\/session\.json/);
 		assert.doesNotMatch(found, /relocated-token|credentials\.json|\.auth\.json\.tmp|transcripts\/|id_ed25519|elsewhere\/\.env/i);
+		assert.ok(!found.split("\n").includes(`keyfiles/custom-keys.json.tmp-${uuid}`));
+	});
+
+	it("matches the configured auth basename literally, not arbitrary temp files", () => {
+		const configured = path.join(root, "synthetic", "keys.[custom]+.json");
+		assert.equal(isSensitivePath(`${configured}.tmp-${uuid}`, home, configured), true);
+		for (const file of [
+			`${configured}.tmp-${uuid}.backup`, `${configured}.tmp-not-a-uuid`,
+			path.join(path.dirname(configured), `keys.custom.json.tmp-${uuid}`),
+			path.join(root, "synthetic-sibling", `${path.basename(configured)}.tmp-${uuid}`),
+		]) assert.equal(isSensitivePath(file, home, configured), false, file);
 	});
 
 	it("does not confuse an allowed credential-directory sibling with the credential directory", () => {
@@ -304,6 +321,7 @@ describe("source access: credential case aliases on the fixture filesystem", () 
 			path.join(root, "RELOCATED-TOKEN"),
 			path.join(root, "KEYFILES", ".auth.json.tmp-123"),
 			path.join(root, "KEYFILES", `chatgpt-credentials.json.${uuid}.tmp`),
+			path.join(root, "KEYFILES", `CUSTOM-KEYS.JSON.tmp-${uuid}`),
 		];
 		for (const alias of aliases) {
 			if (process.platform === "darwin") {
@@ -355,6 +373,8 @@ describe("source access: path spelling", () => {
 			const prefix = winHome.startsWith("\\\\") ? `\\\\?\\UNC\\${winHome.slice(2)}` : `\\\\?\\${winHome}`;
 			assert.equal(isSensitivePath(path.join(prefix, ".ssh", "key"), winHome, winAuth), true);
 			assert.equal(isSensitivePath(`${winAuth}:stream`, winHome, winAuth), true);
+			assert.equal(isSensitivePath(`${winAuth}.tmp-${uuid}:stream`, winHome, winAuth), true);
+			assert.equal(isSensitivePath(path.join(prefix, "app", `auth.json.tmp-${uuid}`), winHome, winAuth), true);
 			assert.equal(isSensitivePath(path.join(winHome, "notes", ".env:stream"), winHome, winAuth), true);
 			assert.equal(isSensitivePath(path.join(winHome, ".sship", "key"), winHome, winAuth), false);
 		}

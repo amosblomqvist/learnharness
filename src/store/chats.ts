@@ -18,6 +18,7 @@ import { CURRENT_CHAT_VERSION } from "../core/contracts.ts";
 import type { LhMessage } from "../core/native-messages.ts";
 import { activeProblemOf, danglingQuestionOf } from "../core/native-messages.ts";
 import { phaseAt3Lh } from "../core/phases.ts";
+import { removeLeftoverTemps, writeFileAtomicSync } from "./atomic-write.ts";
 
 function chatFile(id: string): string {
 	if (!/^[A-Za-z0-9_-]+$/.test(id)) throw new Error(`Invalid chat id: ${id}`);
@@ -56,7 +57,7 @@ function createChat(title: string, kind?: "practice"): ChatRecord {
  *  lazy migration means existing files only get stamped on their next write.
  *  A future-version guard lives on the read side (getChat). */
 function writeChat(record: ChatRecord): void {
-	fs.writeFileSync(chatFile(record.id), JSON.stringify({ ...record, version: CURRENT_CHAT_VERSION }, null, "\t"), "utf-8");
+	writeFileAtomicSync(chatFile(record.id), JSON.stringify({ ...record, version: CURRENT_CHAT_VERSION }, null, "\t"), { allowInPlaceFallback: true });
 }
 
 function getChat(id: string): ChatRecord | null {
@@ -207,6 +208,7 @@ function renameChat(id: string, title: string): ChatRecord {
 function deleteChat(id: string): boolean {
 	try {
 		fs.unlinkSync(chatFile(id));
+		removeLeftoverTemps(chatFile(id));
 		emit("chats-changed", {}); // only a real removal — the present-entry law
 		return true;
 	} catch {
