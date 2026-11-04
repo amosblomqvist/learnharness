@@ -86,7 +86,8 @@ describe("runSideQuestion", () => {
 			["find", { pattern: "*.json", path: PATHS.data }],
 			["read", { path: AUTH_FILE }],
 		] as const) {
-			await assert.rejects(() => run(name, args), /app's own data/, `${name} ${JSON.stringify(args)}`);
+			// The shared file-tool protection (v0.5.0) refuses the auth file first.
+			await assert.rejects(() => run(name, args), /app's own data|protected location/, `${name} ${JSON.stringify(args)}`);
 		}
 		await assert.doesNotReject(() => run("ls", { path: "/definitely/missing/dir" }).catch((err: Error) => {
 			if (/app's own data/.test(err.message)) throw err;
