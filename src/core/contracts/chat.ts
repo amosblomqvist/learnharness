@@ -344,3 +344,37 @@ export interface ArtifactPartProps {
 		reveal?: unknown;
 	};
 }
+
+
+// ─── Document attachments ───────────────────────────────────────────────────
+
+export type DocumentCategory = "lecture" | "exam";
+
+export interface DocumentAttachmentMeta {
+	id: string;
+	fileName: string;
+	category: DocumentCategory;
+	extension: string;
+	size: number;
+	summary?: {
+		pageOrSlideCount?: number;
+		charCount: number;
+	};
+}
+
+export interface DocumentContextData {
+	documents: DocumentAttachmentMeta[];
+}
+
+export interface ParsedDocument {
+	id: string;
+	fileName: string;
+	category: DocumentCategory;
+	extension?: string;
+	size?: number;
+	text: string;
+	summary?: {
+		pageOrSlideCount?: number;
+		charCount: number;
+	};
+}

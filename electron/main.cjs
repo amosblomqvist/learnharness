@@ -381,6 +381,14 @@ function createWindow(url) {
 	win.webContents.on("did-finish-load", () => {
 		win.webContents.send("lh:zoom", win.webContents.getZoomFactor());
 	});
+	win.webContents.on("did-fail-load", (_event, errorCode, errorDescription, validatedURL) => {
+		log(`load failed (${errorCode}: ${errorDescription}) on ${validatedURL}`);
+		if (process.env.LH_DEV_URL && errorCode === -102 /* ERR_CONNECTION_REFUSED */) {
+			setTimeout(() => {
+				if (!win.isDestroyed()) void win.loadURL(url);
+			}, 1000);
+		}
+	});
 	win.webContents.on("before-input-event", (event, input) => {
 		if (input.type !== "keyDown" || !(input.meta || input.control)) return;
 		if (input.key === "=" || input.key === "+") zoomStep(win, +1);
@@ -684,6 +692,8 @@ async function main() {
 		log(`server up: ${url}`);
 	} else {
 		log(`dev mode: ${devUrl}`);
+		await waitUntilUp(url);
+		log(`dev server up: ${url}`);
 	}
 
 	// Renderer controls contain no token/URL/code operation. The separate server
