@@ -143,6 +143,37 @@ it("picker stays enabled during imports, offers Files/Folder, and keeps PDF supp
 	const html = renderToStaticMarkup(<NotesImportControl importing onImportFiles={() => {}} />);
 	assert.match(html, /webkitdirectory/); assert.match(html, /accept=".md,.markdown,.txt,.pdf,.png,.jpg,.jpeg,.gif,.webp,.bmp"/); assert.doesNotMatch(html, /disabled/);
 });
+it("graph menu clearly distinguishes extraction from lesson material, above unchanged Files/Folder choices", async () => {
+	const selected: unknown[] = [];
+	host = document.createElement("div"); document.body.appendChild(host); root = createRoot(host);
+	await act(async () => { root!.render(<NotesImportControl importing={false} onImportFiles={(files) => selected.push(files)} />); });
+	const trigger = host.querySelector<HTMLButtonElement>('[data-testid="import-notes"]')!;
+	assert.equal(trigger.textContent, "Extract files…");
+	assert.ok(trigger.querySelector(".lucide-waypoints"));
+	await act(async () => { trigger.click(); });
+	const menu = host.querySelector('[role="menu"]')!;
+	assert.equal(menu.getAttribute("aria-label"), "Extract files into the graph");
+	assert.equal(menu.querySelector("p")!.textContent, "For lessons, attach material to a session instead.");
+	assert.equal(menu.getAttribute("aria-describedby"), menu.querySelector("p")!.id);
+	assert.ok(menu.className.includes("w-52"), "compact width wraps the short hint");
+	assert.deepEqual(Array.from(menu.querySelectorAll('[role="menuitem"]')).map((item) => item.textContent), ["Files", "Folder"]);
+	assert.equal(menu.firstElementChild!.textContent, "For lessons, attach material to a session instead.");
+	const inputs = host.querySelectorAll<HTMLInputElement>('input[type="file"]');
+	let filesClicks = 0, folderClicks = 0;
+	inputs[0]!.click = () => { filesClicks++; }; inputs[1]!.click = () => { folderClicks++; };
+	await act(async () => { menu.querySelector<HTMLButtonElement>("button")!.click(); });
+	assert.equal(filesClicks, 1);
+	await act(async () => { trigger.click(); });
+	await act(async () => { host!.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')[1]!.click(); });
+	assert.equal(folderClicks, 1);
+	assert.deepEqual(selected, [], "opening either picker itself never enqueues work");
+});
+it("busy graph action names extraction, and preserves the enabled queue picker", () => {
+	const html = renderToStaticMarkup(<NotesImportControl importing onImportFiles={() => {}} />);
+	assert.match(html, /Extracting…/);
+	assert.doesNotMatch(html, /Import notes|Importing…|disabled/);
+});
+
 it("alerts/notices stay plain and escaped", () => {
 	assert.equal(renderToStaticMarkup(<NotesImportErrors errors={[]} />), "");
 	const html = renderToStaticMarkup(<NotesImportErrors errors={["one.md: failure", "two.md: failure"]} />);

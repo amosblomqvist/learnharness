@@ -2,11 +2,11 @@
 
 import { useEffect, useRef, useState } from "react";
 import { FileSymlinkIcon, XIcon } from "lucide-react";
-import { quoteFilePath } from "@/src/core";
+import { directoryReferencePath, quoteFilePath } from "@/src/core";
 import { appendToPrimaryInput } from "@/components/dictation";
 import { INSERT_FILE_PATHS_EVENT } from "@/components/path-input";
 
-const BROWSER_NOTICE = "Local file paths can only be attached in the desktop app. You can paste a full path instead.";
+export const BROWSER_NOTICE = "Local file paths can only be attached in the desktop app. You can paste a full path instead.";
 
 /** The content area only: the sidebar is deliberately outside this zone.
  * Existing files stay where they are; only quoted path strings enter drafts. */
@@ -61,21 +61,24 @@ export function FilePathDropZone({ children, className }: { children: React.Reac
 				clearDrag();
 				const resolve = window.lh?.getPathForFile;
 				if (!resolve) { setNotice(BROWSER_NOTICE); return; }
-				// Directories are not file references. This check uses drag metadata,
-				// never a server request or a new filesystem capability.
+				// Inspect only the dropped item's type, never traverse its entries.
+				// Positively known directories get a durable trailing separator.
 				const entries = Array.from(event.dataTransfer.items).filter((item) => item.kind === "file");
 				const paths: string[] = [];
 				let skipped = 0;
 				for (const [index, file] of Array.from(event.dataTransfer.files).entries()) {
 					try {
-						if (entries[index]?.webkitGetAsEntry?.()?.isDirectory) { skipped++; continue; }
-						const path = resolve(file);
+						let directory = false;
+						try { directory = entries[index]?.webkitGetAsEntry?.()?.isDirectory === true; }
+						catch { /* Unknown type stays unmarked, not guessed. */ }
+						const original = resolve(file);
+						const path = directory ? directoryReferencePath(original) : original;
 						quoteFilePath(path); // Same rooted-path validity rule as typed chips.
 						paths.push(path);
 					} catch { skipped++; }
 				}
 				if (paths.length === 0) {
-					setNotice("No local file paths were available. Drop existing files from your computer.");
+					setNotice("No local file paths were available. Drop existing files or folders from your computer.");
 					return;
 				}
 				const focused = document.activeElement?.closest<HTMLElement>("[data-file-path-input]");

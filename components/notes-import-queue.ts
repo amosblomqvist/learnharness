@@ -2,6 +2,9 @@ import { IMAGE_IMPORT_EXTENSIONS, IMPORT_EXTENSIONS, MAX_IMPORT_BYTES, validNote
 import type { NotesImportResult } from "./notes-import";
 
 export const notesPath = (file: File): string => file.webkitRelativePath || file.name;
+/** Folder imports silently exclude dot-prefixed files and directories below
+ * the chosen root. The root is segment 0 and stays importable even when hidden. */
+const hiddenInFolder = (file: File): boolean => file.webkitRelativePath.split("/").slice(1).some((part) => part.startsWith("."));
 export interface ImportQueueSnapshot {
 	importing: boolean;
 	errors: string[];
@@ -59,7 +62,7 @@ export function createNotesImportQueue(post: (files: readonly File[]) => Promise
 			for (const file of files) {
 				const index = sequence++;
 				const path = notesPath(file);
-				if (file.webkitRelativePath && file.name === ".DS_Store") continue;
+				if (file.webkitRelativePath && hiddenInFolder(file)) continue;
 				// Images only from the Files picker; a folder's images stay unsupported.
 				const supported = IMPORT_EXTENSIONS.test(path) || (!file.webkitRelativePath && IMAGE_IMPORT_EXTENSIONS.test(path));
 				if (!supported || !validNotesPath(path, file.name)) failures.set(index, `${path}: Unsupported format or unsafe relative path.`);
