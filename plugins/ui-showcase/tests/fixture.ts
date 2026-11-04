@@ -6,9 +6,17 @@ import { createRequire } from "node:module";
 // lib.dom. Keep this test double behind a narrow typed runtime boundary rather
 // than weakening the product's skipLibCheck:false policy.
 const { parseHTML } = createRequire(import.meta.url)("linkedom") as { parseHTML(html: string): { document: Document } };
-import type { PluginFrontendContext, PluginUi } from "learnharness-plugin-api";
+import type { PluginFrontendContext, PluginTreeRow, PluginUi, PluginUiContent } from "learnharness-plugin-api";
 
 type AnyProps = Record<string, any>;
+export interface TreeContentRecord {
+  key: string;
+  content: PluginUiContent;
+  container: HTMLElement;
+  signal: AbortSignal;
+  disposed: number;
+  dispose(): void;
+}
 export interface MountRecord {
   method: string;
   container: HTMLElement;
@@ -16,10 +24,41 @@ export interface MountRecord {
   signal: AbortSignal;
   disposed: number;
   updates: AnyProps[];
+  treeContents: TreeContentRecord[];
   target?: unknown;
   dictation: { toggle: number; finish: number; cancel: number };
   handle: { update(props: AnyProps): void; dispose(): void };
 }
+/** Only plugin-owned primary content lifetimes are simulated. No native tree
+ * rows, controls, layout or keyboard behavior are implemented by this recorder. */
+function renderTreeContent(record: MountRecord): void {
+  const visible = new Map<string, PluginUiContent>();
+  const visit = (rows: readonly PluginTreeRow[]) => {
+    for (const row of rows) {
+      if (typeof row.content !== "string") visible.set(row.key, row.content);
+      if (row.children && (!row.disclosure || row.disclosure.expanded)) visit(row.children);
+    }
+  };
+  visit(record.props.rows);
+  for (const mounted of record.treeContents) if (!mounted.disposed && visible.get(mounted.key) !== mounted.content) mounted.dispose();
+  for (const [key, content] of visible) {
+    if (record.treeContents.some(mounted => !mounted.disposed && mounted.key === key && mounted.content === content)) continue;
+    const controller = new AbortController();
+    const container = record.container.ownerDocument.createElement("div"); record.container.append(container);
+    let cleanup: void | (() => void);
+    const mounted: TreeContentRecord = { key, content, container, signal: controller.signal, disposed: 0, dispose() {
+      if (mounted.disposed) return;
+      mounted.disposed++; controller.abort(); cleanup?.(); container.remove();
+    } };
+    record.treeContents.push(mounted);
+    if (typeof content === "function") {
+      const result = content(container, controller.signal);
+      if (typeof result === "function") cleanup = result;
+      else if (result) void result.then(next => { if (mounted.disposed) next?.(); else cleanup = next; });
+    } else container.append(content);
+  }
+}
+
 export function createFixture() {
   const previous = Object.getOwnPropertyDescriptor(globalThis, "document");
   const { document } = parseHTML("<!doctype html><html><body><main></main></body></html>");
@@ -40,13 +79,14 @@ export function createFixture() {
         if (overlay) root.append(container);
         const contentLife = new AbortController();
         let contentCleanup: void | (() => void);
-        const record: MountRecord = { method: key, container, props, signal: options.signal, disposed: 0, updates: [], dictation: { toggle: 0, finish: 0, cancel: 0 }, handle: null! };
+        const record: MountRecord = { method: key, container, props, signal: options.signal, disposed: 0, updates: [], treeContents: [], dictation: { toggle: 0, finish: 0, cancel: 0 }, handle: null! };
         if (key === "openSurface") record.target = args[0];
         const handle = {
-          update(next: AnyProps) { record.updates.push(next); record.props = { ...record.props, ...next }; },
+          update(next: AnyProps) { record.updates.push(next); record.props = { ...record.props, ...next }; if (key === "mountTree" && !record.disposed) renderTreeContent(record); },
           dispose() {
             if (record.disposed) return;
             record.disposed++; contentLife.abort(); contentCleanup?.();
+            for (const content of record.treeContents) content.dispose();
             if (overlay) container.remove();
           },
           toggle() { record.dictation.toggle++; },
@@ -56,6 +96,7 @@ export function createFixture() {
         record.handle = handle; records.push(record);
         options.signal.addEventListener("abort", handle.dispose, { once: true });
         if (overlay && typeof props.content === "function") contentCleanup = props.content(container, contentLife.signal);
+        if (key === "mountTree") renderTreeContent(record);
         return handle;
       };
     },

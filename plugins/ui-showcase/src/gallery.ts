@@ -5,9 +5,10 @@ import type {
 } from "learnharness-plugin-api";
 import { Scope, button, element, example, family, note, readout, row } from "./dom.ts";
 import { mountOverlayExamples } from "./surfaces.ts";
+import { mountTreeDemo } from "./tree.ts";
 
 type Thinking = PluginThinkingPickerProps["value"];
-export const FAMILY_IDS = ["pickers", "composer", "dictation", "standard-composer", "buttons", "settings", "markdown", "worker-results", "menus", "dialogs", "surfaces"] as const;
+export const FAMILY_IDS = ["pickers", "composer", "dictation", "standard-composer", "buttons", "settings", "markdown", "tree", "worker-results", "menus", "dialogs", "surfaces"] as const;
 
 export function mountGallery(container: HTMLElement, ctx: PluginFrontendContext, signal: AbortSignal): () => void {
   const scope = new Scope(signal);
@@ -165,6 +166,8 @@ export function mountGallery(container: HTMLElement, ctx: PluginFrontendContext,
     life.widget(ui.mountMarkdown(example(body, "markdown"), { text: MARKDOWN }, { signal: life.signal }));
     readout(body, "markdown")({ mode: "static", lastCallback: "none" });
   });
+
+  family(ui, root, scope, "tree", "Directory / tree", (body, life) => mountTreeDemo(ui, body, life));
 
   family(ui, root, scope, "worker-results", "Worker results", (body, life) => {
     note(body, "Twelve static examples: all four terminal statuses with all three presentations. No workers are started.");

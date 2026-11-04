@@ -5,21 +5,21 @@ import { openSurfaceDemo } from "../src/surfaces.ts";
 import { Scope } from "../src/dom.ts";
 import { createFixture } from "./fixture.ts";
 
-const families = ["pickers", "composer", "dictation", "standard-composer", "buttons", "settings", "markdown", "worker-results", "menus", "dialogs", "surfaces"];
+const families = ["pickers", "composer", "dictation", "standard-composer", "buttons", "settings", "markdown", "tree", "worker-results", "menus", "dialogs", "surfaces"];
 function mounted() {
   const f = createFixture();
   const dispose = mountGallery(f.root, f.context, f.controller.signal);
   return { ...f, dispose };
 }
 
-test("single gallery, eleven families cover thirteen public APIs without backend/app/storage calls", () => {
+test("single gallery, twelve families cover fourteen public APIs without backend/app/storage calls", () => {
   const f = mounted();
   try {
     assert.deepEqual([...FAMILY_IDS], families);
     assert.equal(f.root.querySelectorAll('[data-showcase="gallery"]').length, 1);
     assert.deepEqual([...f.root.querySelectorAll("[data-family]")].map(node => (node as HTMLElement).dataset.family), families);
     for (const family of families) { f.find(`reset-${family}`, "mountButton"); assert.ok(f.root.querySelector(`[data-state="${family}"]`)); }
-    for (const method of ["mountModelPicker", "mountThinkingPicker", "mountKnowledgePicker", "mountComposer", "mountDictation", "mountStandardComposer", "mountButton", "mountSettingsRows", "mountMarkdown", "mountWorkerResult"]) assert.ok(f.records.some(entry => entry.method === method), method);
+    for (const method of ["mountModelPicker", "mountThinkingPicker", "mountKnowledgePicker", "mountComposer", "mountDictation", "mountStandardComposer", "mountButton", "mountSettingsRows", "mountMarkdown", "mountTree", "mountWorkerResult"]) assert.ok(f.records.some(entry => entry.method === method), method);
     assert.deepEqual(f.calls, []);
     assert.equal(f.records.filter(entry => entry.method === "openSurface").length, 0, "Plugin gallery cannot fabricate a native target");
     f.dispose(); f.dispose();

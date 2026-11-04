@@ -175,7 +175,21 @@ export async function runPackagedProof(verify) {
     // Closing the real picker aborts its outstanding, read-only source fetch.
     // Do not suppress arbitrary network failures or unexpected HTTP errors.
     evidence.expectedCanceledReads = evidence.failedRequests.filter(request => ["real pickers", "knowledge origin scopes", "native session surface", "disable cleanup"].includes(request.stage) && request.failure?.errorText === "net::ERR_ABORTED" && new URL(request.url).pathname === "/api/graph/sources");
-    assert.deepEqual(evidence.failedRequests.filter(request => !evidence.expectedCanceledReads.includes(request)), []);
+    // Navigation can cancel a completed, read-only Next router prefetch. Require
+    // positive prefetch headers and its matching successful response; API reads,
+    // page loads, provider requests and all other failures remain strict.
+    const expectedCanceledPrefetchRequests = evidence.failedRequests.filter(request =>
+      request.method === "GET" && request.type === "fetch" && new URL(request.url).origin === base &&
+      !/^\/api(?:\/|$)/.test(new URL(request.url).pathname) && new URL(request.url).searchParams.has("_rsc") &&
+      request.requestHeaders.rsc === "1" && request.requestHeaders["next-router-prefetch"] === "1" &&
+      request.failure?.errorText === "net::ERR_ABORTED" &&
+      (request.stage === "native session surface" || (request.stage === "gallery" && request.requestHeaders["next-router-segment-prefetch"] === "/_tree")) &&
+      evidence.responses.some(response => response.url === request.url && response.status === 200 && response.stage === request.stage)
+    );
+    evidence.expectedCanceledPrefetches = expectedCanceledPrefetchRequests.map(request => ({ ...request,
+      matchingResponse: evidence.responses.find(response => response.url === request.url && response.status === 200 && response.stage === request.stage),
+    }));
+    assert.deepEqual(evidence.failedRequests.filter(request => !evidence.expectedCanceledReads.includes(request) && !expectedCanceledPrefetchRequests.includes(request)), []);
     evidence.expectedHttpErrors = evidence.responses.filter(response => response.status === 404 && new URL(response.url).pathname === "/favicon.ico" || response.status === 503 && new URL(response.url).pathname === "/api/stt/token");
     assert.deepEqual(evidence.responses.filter(response => response.status >= 400 && !evidence.expectedHttpErrors.includes(response)), []);
     if (failure) throw failure;

@@ -51,6 +51,15 @@ test("every required capability fails closed with no partial registrations or fa
   }
 });
 
+test("Tree is a required current-feature capability, never an optional fallback", () => {
+  assert.equal(REQUIRED_UI_METHODS.length, 14);
+  assert.ok(REQUIRED_UI_METHODS.includes("mountTree"));
+  const ui = Object.fromEntries(REQUIRED_UI_METHODS.filter(method => method !== "mountTree").map(method => [method, () => {}])) as unknown as PluginUi;
+  const f = registrationContext(ui);
+  assert.throws(() => activate(f.context), /Missing capabilities: ui\.mountTree.*No fallback UI/);
+  assert.deepEqual(f.views, []); assert.deepEqual(f.actions, []); assert.deepEqual(f.placements, []);
+});
+
 test("already-aborted activation is inert", () => {
   const ui = Object.fromEntries(REQUIRED_UI_METHODS.map(method => [method, () => {}])) as unknown as PluginUi;
   const f = registrationContext(ui); f.controller.abort(); activate(f.context)();

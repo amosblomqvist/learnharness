@@ -2,7 +2,7 @@
  * No host implementation imports and no runtime test or provider calls. */
 import type {
   PluginFrontendContext, PluginKnowledgePickerProps, PluginSettingsRow,
-  PluginStandardComposerProps, PluginSurfaceProps, PluginSurfaceTarget, PluginUi,
+  PluginStandardComposerProps, PluginSurfaceProps, PluginSurfaceTarget, PluginTreeProps, PluginUi,
 } from "learnharness-plugin-api";
 import type { mountGallery } from "../src/gallery.ts";
 import type { REQUIRED_UI_METHODS } from "../src/main.ts";
@@ -22,3 +22,21 @@ export type KnowledgeSelectionUsesStableIds = Assert<Equal<PluginKnowledgePicker
 export type KnowledgeContextRemainsHostOwned = Assert<Equal<keyof PluginKnowledgePickerProps, "value" | "onChange" | "disabled">>;
 export type SettingsCoverFiveTypes = Assert<Equal<PluginSettingsRow["type"], "toggle" | "text" | "dropdown" | "number" | "slider">>;
 export type PresetReadinessRemainsOptional = Assert<Equal<PluginStandardComposerProps["composer"]["canSend"], boolean | undefined>>;
+export type TreeMountConsumesPublicProps = Assert<Equal<Parameters<PluginUi["mountTree"]>[1], PluginTreeProps>>;
+export type TreeUpdatesRemainControlled = Assert<Equal<Parameters<ReturnType<PluginUi["mountTree"]>["update"]>[0], Partial<PluginTreeProps>>>;
+
+// Positive SDK-only fixture: strings, rich content, hierarchy, metadata and
+// independent controlled callbacks must compile without implementation imports.
+export const publicTreeExample: PluginTreeProps = {
+  label: "Compile-only tree", header: "Name",
+  columns: [{ key: "kind", header: "Kind", width: "5rem" }, { key: "count", header: "Count", width: 56, align: "right" }],
+  rows: [{
+    key: "parent", content: "Folder", cells: { kind: "Folder", count: "1" },
+    disclosure: { label: "Toggle folder", expanded: true, onChange(expanded: boolean) { void expanded; } },
+    selection: { label: "Select folder", checked: false, onChange(checked: boolean) { void checked; } },
+    children: [{ key: "parent/child", content(container, signal) {
+      const input = document.createElement("input"); input.disabled = signal.aborted; container.append(input);
+      return () => input.remove();
+    } }],
+  }],
+};

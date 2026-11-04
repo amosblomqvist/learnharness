@@ -236,8 +236,10 @@ column positions despite retained declared widths. Callers provide sufficient wi
 minimum width with a scroll container, or fewer/narrower columns; there is no minimum-width
 calculator, clipping policy or responsive engine. Native behavior is unchanged. Native thin
 separators appear between top-level groups only, not nested rows or after the last group. Root
-selectors remain private. The public UI method count is 14, including `mountTree`; this
-does not update historical showcase coverage or migrate its plugin.
+selectors remain private. The public UI method count is 14, including `mountTree`.
+UI Showcase demonstrates these methods in 12 families, including Directory / tree, as a
+separate reference-plugin increment. Its historical 13-method checkpoint remains
+historical evidence; Flashcards has not been migrated.
 
 ### Shared interaction foundation
 

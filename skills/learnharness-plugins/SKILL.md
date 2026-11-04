@@ -179,7 +179,7 @@ is implied. No grading, data, blank filtering, API-shape or `ctx.ui` changes are
   or controller/business-logic changes. Defaults match native `font-ui`: primary labels
   `text-sm`/12.5px/500, metadata and headers `text-xs`/11px/400. Width-bearing header/body
   cells share font metrics for `em`/`ch` widths; rich content can override its style.
-  Width/fit/scrolling are caller-owned: underconstrained columns plus maximum hierarchy
+  Width/fit/scrolling are caller-owned: insufficient width for columns plus maximum hierarchy
   indentation/control prefixes can overflow and column positions can diverge despite
   retained declared widths. Supply sufficient width/minimum width with a scroll container
   or fewer/narrower columns; no universal alignment, host minimum-width calculator,
@@ -188,8 +188,9 @@ is implied. No grading, data, blank filtering, API-shape or `ctx.ui` changes are
   Thin native separators only between top-level groups, not nested rows or after the last
   group; internal root selectors are not API. No column resize/sticky system, automatic
   opening or product-plugin migration; knowledge picker/surfaces remain separate. The UI
-  API now has 14 methods, not a migrated showcase; do not change its historical 13-method
-  proof or claim Flashcards has migrated.
+  API now has 14 methods. UI Showcase demonstrates all 14 in 12 families, including
+  Directory / tree; retain its historical 13-method proof as historical evidence and do
+  not claim Flashcards has migrated.
 - The additive API v1 knowledge picker uses
   `ctx.ui.mountKnowledgePicker(container, { value, onChange, disabled? }, { signal })`:
   `value: readonly string[]` of node IDs, `onChange(ids)`, standard `update`/`dispose`.

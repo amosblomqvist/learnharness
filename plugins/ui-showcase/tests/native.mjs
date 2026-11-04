@@ -10,7 +10,7 @@ import { runPackagedProof } from "./isolated.mjs";
 const gallery = '[data-showcase="gallery"]';
 const example = (id, root = gallery) => `${root} [data-example="${id}"]`;
 const button = (id, root = gallery) => `${example(id, root)} button`;
-const familyIds = ["pickers", "composer", "dictation", "standard-composer", "buttons", "settings", "markdown", "worker-results", "menus", "dialogs", "surfaces"];
+const familyIds = ["pickers", "composer", "dictation", "standard-composer", "buttons", "settings", "markdown", "tree", "worker-results", "menus", "dialogs", "surfaces"];
 
 await runPackagedProof(async ({ page, api, base, fixture, evidence, screenshot }) => {
   const cdp = await page.createCDPSession();
@@ -81,7 +81,7 @@ await runPackagedProof(async ({ page, api, base, fixture, evidence, screenshot }
   assert.deepEqual(await page.$$eval(`${gallery} [data-family]`, nodes => nodes.map(node => node.dataset.family)), familyIds);
   for (const id of familyIds) { await page.waitForSelector(button(`reset-${id}`)); assert.ok(await state(id)); }
   assert.equal(await page.$$eval('[data-plugin-session-surface]', nodes => nodes.length), 0);
-  evidence.assertions.push("Built frontend mounts one scroll gallery with all eleven families/thirteen public UI APIs; native target cannot be minted by gallery.");
+  evidence.assertions.push("Built frontend mounts one scroll gallery with all twelve families/fourteen public UI APIs; native target cannot be minted by gallery.");
   const typography = await page.$eval(gallery, root => {
     const note = getComputedStyle(root.querySelector('.ui-showcase-note')), heading = getComputedStyle(root.querySelector('.ui-showcase-heading'));
     const model = getComputedStyle(root.querySelector('[data-example="model-picker"] button'));
@@ -100,6 +100,147 @@ await runPackagedProof(async ({ page, api, base, fixture, evidence, screenshot }
   assert.ok(Math.abs(parseFloat(typography.note.leading) - tokenPx(typography.note.configuredLeading, parseFloat(typography.note.size))) < .1);
   evidence.typography = typography;
   await screenshot('gallery-top', { fullPage: false });
+
+  evidence.stage = "Directory / tree gallery";
+  const treeRoot = `${example('tree')} [data-plugin-tree]`;
+  const treeRow = key => `${treeRoot} [data-plugin-tree-row="${key}"]`;
+  const treeCheckbox = key => `${treeRow(key)} input[data-plugin-tree-control="selection"]`;
+  const treeDisclosure = key => `${treeRow(key)} button[data-plugin-tree-control="disclosure"]`;
+  const directoryDraft = `${example('tree')} input[aria-label="Directory draft"]`;
+  const treeDefaults = { selectionEnabled: false, selectedOccurrenceKeys: [], expanded: { 'example-folder': true, 'another-folder': true }, draft: 'Local draft', lastCallback: 'none' };
+  const selectedOccurrences = () => state('tree').then(value => [...value.selectedOccurrenceKeys].sort());
+  const treeActive = () => page.$eval(treeRoot, root => root.querySelector('[data-plugin-tree-active="true"]')?.getAttribute('data-plugin-tree-row') ?? null);
+  const settleTree = async () => {
+    await page.evaluate(() => document.fonts.ready.then(() => undefined));
+    await page.waitForFunction(selector => {
+      const root = document.querySelector(selector), sidebar = document.querySelector('aside');
+      if (!root) return false;
+      const running = document.getAnimations().some(animation => animation.playState === 'running' && animation.effect?.getComputedTiming().iterations !== Infinity);
+      const key = JSON.stringify([root, sidebar].map(node => { if (!node) return null; const box = node.getBoundingClientRect(); return [box.x, box.y, box.width, box.height]; }));
+      const last = window.__showcaseTreeSettled;
+      window.__showcaseTreeSettled = { key, count: !running && last?.key === key ? last.count + 1 : 0 };
+      return !running && window.__showcaseTreeSettled.count >= 3;
+    }, { polling: 'raf' }, treeRoot);
+    await settlePaint();
+  };
+  const treeColumns = () => page.$eval(treeRoot, root => {
+    const box = node => { const rect = node.getBoundingClientRect(), style = getComputedStyle(node); return { x: rect.x, left: rect.left, right: rect.right, width: rect.width, align: style.textAlign, fontSize: style.fontSize }; };
+    return { width: root.getBoundingClientRect().width, columns: [...root.querySelectorAll('[data-plugin-tree-column]')].map(header => ({ key: header.getAttribute('data-plugin-tree-column'), label: header.textContent.trim(), ...box(header) })), rows: [...root.querySelectorAll('[data-plugin-tree-row]')].map(row => ({ key: row.getAttribute('data-plugin-tree-row'), cells: Object.fromEntries([...row.querySelectorAll('[data-plugin-tree-cell]')].map(cell => [cell.getAttribute('data-plugin-tree-cell'), box(cell)])) })) };
+  });
+  const assertTreeColumns = geometry => {
+    assert.deepEqual(geometry.columns.map(column => [column.label, column.width]), [['Kind', 56], ['State', 80]]);
+    for (const row of geometry.rows) for (const header of geometry.columns) {
+      const cell = row.cells[header.key]; assert.ok(cell);
+      for (const edge of ['x', 'left', 'right', 'width']) assert.equal(cell[edge], header[edge], `Directory ${row.key}/${header.key} aligns ${edge}`);
+      assert.equal(cell.fontSize, '11px');
+    }
+  };
+  // Detached controls cannot receive trusted browser input. Dispatch solely to
+  // prove their expired content/family callbacks cannot mutate the live family.
+  const mutateDetachedDraft = handle => handle.evaluate(node => {
+    node.value = 'Forbidden expired Directory draft';
+    node.dispatchEvent(new Event('input', { bubbles: true }));
+    node.dispatchEvent(new Event('change', { bubbles: true }));
+  });
+  await waitState('tree', treeDefaults); await settleTree();
+  assert.equal(await page.$eval('[data-family="tree"] h2', node => node.textContent), 'Directory / tree');
+  assert.equal(await treeActive(), null, 'Directory does not autofocus on mount');
+  assert.equal(await page.$$eval(`${treeRoot} input[type="checkbox"]`, nodes => nodes.length), 0);
+  assert.equal(await page.$eval(button('toggle-tree-selection'), node => node.textContent), 'Enable selection');
+  const guides = () => page.$$eval(`${treeRoot} [aria-hidden="true"]`, nodes => nodes.filter(node => getComputedStyle(node).position === 'absolute' && getComputedStyle(node).width === '1px').map(node => getComputedStyle(node).left));
+  assert.ok((await guides()).includes('19px'));
+  const primaryLeft = await page.$eval(`${treeRow('example-folder')} > div`, node => node.getBoundingClientRect().left);
+  const initialColumns = await treeColumns(); assertTreeColumns(initialColumns);
+  await page.$eval('[data-family="tree"]', node => node.scrollIntoView({ block: 'start' }));
+  await screenshot('gallery-directory-no-selection', { fullPage: false });
+  await fill(directoryDraft, 'Retained Directory learner draft'); await waitState('tree', { draft: 'Retained Directory learner draft' });
+  const retainedTreeDraft = await page.$(directoryDraft); assert.ok(retainedTreeDraft);
+  await click('toggle-tree-selection'); await waitState('tree', { selectionEnabled: true }); await settleTree();
+  assert.equal(await page.$eval(button('toggle-tree-selection'), node => node.textContent), 'Disable selection');
+  assert.equal(await page.$eval(`${treeRow('example-folder')} > div`, node => node.getBoundingClientRect().left), primaryLeft + 18);
+  assert.ok((await guides()).includes('37px'));
+  await page.locator(treeCheckbox('example-folder/shared-item')).click(); await settleTree();
+  assert.deepEqual(await selectedOccurrences(), ['example-folder/shared-item']);
+  assert.equal(await page.$eval(treeCheckbox('another-folder/shared-item'), node => node.checked), false, 'Repeated Shared item occurrences are independent');
+  assert.equal(await page.$eval(treeCheckbox('example-folder'), node => node.checked), false, 'Child selection never auto-selects the parent');
+  await page.locator(treeCheckbox('example-folder')).click(); await settleTree();
+  assert.deepEqual(await selectedOccurrences(), ['example-folder', 'example-folder/shared-item']);
+  assert.equal(await page.$eval(treeCheckbox('example-folder/draft-note'), node => node.checked), false, 'Parent checkbox never cascades to children');
+  assert.equal(await retainedTreeDraft.evaluate((node, selector) => node.isConnected && node === document.querySelector(selector) && node.value === 'Retained Directory learner draft', directoryDraft), true, 'Rich content keeps DOM/draft through selection and metadata updates');
+  await page.$eval('[data-family="tree"]', node => node.scrollIntoView({ block: 'start' }));
+  await screenshot('gallery-directory-selection-independent', { fullPage: false });
+  await click('toggle-tree-selection'); await waitState('tree', { selectionEnabled: false });
+  assert.equal(await page.$$eval(`${treeRoot} input[type="checkbox"]`, nodes => nodes.length), 0);
+  assert.deepEqual(await selectedOccurrences(), ['example-folder', 'example-folder/shared-item'], 'Hiding checkboxes preserves selected occurrence keys');
+  await click('toggle-tree-selection'); await waitState('tree', { selectionEnabled: true });
+  for (const key of ['example-folder', 'example-folder/shared-item']) assert.equal(await page.$eval(treeCheckbox(key), node => node.checked), true);
+  await page.focus(directoryDraft);
+  const inputArrowActive = await treeActive(); await page.keyboard.press('ArrowLeft');
+  assert.equal(await retainedTreeDraft.evaluate(node => node === document.activeElement), true);
+  assert.equal(await treeActive(), inputArrowActive, 'Editable input arrows do not navigate rows');
+  await retainedTreeDraft.evaluate(node => { window.__showcaseTreeTab = []; node.addEventListener('keydown', event => { if (event.key === 'Tab') queueMicrotask(() => window.__showcaseTreeTab.push({ defaultPrevented: event.defaultPrevented })); }); });
+  await page.keyboard.press('Tab');
+  assert.equal(await retainedTreeDraft.evaluate(node => node === document.activeElement), true, 'Global Tab policy is unchanged');
+  assert.deepEqual(await page.evaluate(() => window.__showcaseTreeTab), [{ defaultPrevented: true }]);
+  const navigateDirectory = async (key, expected) => { await page.keyboard.press(key); await settleTree(); assert.equal(await treeActive(), expected); assert.equal(await page.$eval(treeRow(expected), node => node === document.activeElement), true); };
+  await page.locator(`${treeRow('example-folder')} > div`).click();
+  await navigateDirectory('ArrowDown', 'another-folder'); await navigateDirectory('ArrowUp', 'example-folder');
+  await navigateDirectory('ArrowRight', 'example-folder/shared-item'); await navigateDirectory('ArrowDown', 'example-folder/draft-note');
+  await navigateDirectory('ArrowLeft', 'example-folder');
+  assert.equal((await state('tree')).expanded['example-folder'], false);
+  assert.equal(await retainedTreeDraft.evaluate(node => node.isConnected), false, 'Controlled fold unmounts rich content');
+  await page.$eval('[data-family="tree"]', node => node.scrollIntoView({ block: 'start' }));
+  await screenshot('gallery-directory-controlled-collapse', { fullPage: false });
+  const foldedState = await state('tree'); await mutateDetachedDraft(retainedTreeDraft); await settlePaint();
+  assert.deepEqual(await state('tree'), foldedState, 'Folded content listeners/callbacks are cleaned or aborted');
+  await navigateDirectory('ArrowRight', 'example-folder/shared-item');
+  await waitState('tree', { draft: 'Retained Directory learner draft' });
+  assert.equal(await page.$eval(directoryDraft, node => node.value), 'Retained Directory learner draft', 'Caller draft survives content remount');
+  await page.$eval('[data-family="tree"]', node => node.scrollIntoView({ block: 'start' }));
+  await screenshot('gallery-directory-reopened-retained-draft', { fullPage: false });
+  await retainedTreeDraft.dispose();
+  const selectionBeforeSpace = await selectedOccurrences();
+  await page.keyboard.press('Space'); await settleTree();
+  assert.deepEqual(await selectedOccurrences(), selectionBeforeSpace.filter(key => key !== 'example-folder/shared-item'), 'Space toggles only the active occurrence');
+  const withSelectionColumns = await treeColumns(); assertTreeColumns(withSelectionColumns);
+  const directoryViewport = page.viewport();
+  await page.setViewport({ width: 850, height: 1000, deviceScaleFactor: 1 }); await settleTree();
+  const compactColumns = await treeColumns(); assertTreeColumns(compactColumns);
+  const minimumTreeWidth = await page.evaluate(() => 36 * parseFloat(getComputedStyle(document.documentElement).fontSize));
+  assert.equal(compactColumns.width, minimumTreeWidth, 'Caller supplies its 36rem minimum, not automatic Tree responsiveness');
+  const horizontalWrap = await page.$eval(treeRoot, root => {
+    let node = root.parentElement;
+    while (node && !/auto|scroll/.test(getComputedStyle(node).overflowX)) node = node.parentElement;
+    if (!node) return null;
+    const rect = node.getBoundingClientRect();
+    return { clientWidth: node.clientWidth, scrollWidth: node.scrollWidth, scrollLeft: node.scrollLeft, overflowX: getComputedStyle(node).overflowX, x: rect.x, y: rect.y, width: rect.width, height: rect.height };
+  });
+  assert.ok(horizontalWrap && horizontalWrap.scrollWidth > horizontalWrap.clientWidth, 'Caller supplies a genuinely overflowing horizontal wrapper');
+  await page.$eval('[data-family="tree"]', node => node.scrollIntoView({ block: 'start' }));
+  await screenshot('gallery-directory-caller-scroll', { fullPage: false });
+  await page.setViewport(directoryViewport); await settleTree();
+  evidence.directoryColumns = { initial: initialColumns, selection: withSelectionColumns, compact: compactColumns, horizontalWrap };
+  await click('button-variant-default'); await waitState('buttons', { clicks: 1 });
+  const siblingBeforeTreeReset = await state('buttons');
+  const expiredDraft = await page.$(directoryDraft), expiredCheckbox = await page.$(treeCheckbox('example-folder')), expiredDisclosure = await page.$(treeDisclosure('example-folder')); assert.ok(expiredDraft && expiredCheckbox && expiredDisclosure);
+  await reset('tree'); await waitState('tree', treeDefaults);
+  assert.deepEqual(await state('buttons'), siblingBeforeTreeReset, 'Reset tree cannot reset a sibling family');
+  for (const handle of [expiredDraft, expiredCheckbox, expiredDisclosure]) assert.equal(await handle.evaluate(node => node.isConnected), false, 'Reset disposes old family scope nodes');
+  await mutateDetachedDraft(expiredDraft); await expiredCheckbox.evaluate(node => node.click()); await expiredDisclosure.evaluate(node => node.click()); await settlePaint();
+  await waitState('tree', treeDefaults);
+  await reset('buttons'); await waitState('buttons', { clicks: 0 });
+  for (const handle of [expiredDraft, expiredCheckbox, expiredDisclosure]) await handle.dispose();
+  await fill(directoryDraft, 'Route-local Directory draft'); await waitState('tree', { draft: 'Route-local Directory draft' });
+  const routeExpiredDraft = await page.$(directoryDraft); assert.ok(routeExpiredDraft);
+  await page.locator('[data-testid="session-row"]').click();
+  await page.waitForFunction(id => location.pathname === `/chat/${id}`, {}, fixture.chatId);
+  await page.waitForSelector(gallery, { hidden: true });
+  await openGallery(); await waitState('tree', treeDefaults);
+  assert.equal(await routeExpiredDraft.evaluate(node => node.isConnected), false);
+  await mutateDetachedDraft(routeExpiredDraft); await settlePaint(); await waitState('tree', treeDefaults); await routeExpiredDraft.dispose();
+  await reset('tree'); await waitState('tree', treeDefaults);
+  evidence.directoryTree = { defaults: treeDefaults, selectionHiddenPreservesKeys: true, occurrenceIndependent: true, controlledDraftRetainedAcrossCollapse: true, stableRichContentDuringMetadataUpdates: true, nativeArrowAndSpace: true, hostTabUnchanged: true, resetAndRouteExpiredNodesInert: true, siblingResetIsolation: true };
+  evidence.assertions.push('Actual public Directory/tree gallery: optional selection preserves hidden keys with no occurrence/parent cascade; rich content keeps DOM/draft through metadata updates and restores local draft after fold; native root arrows/Space isolate input keys and preserve global Tab; two compact columns align by x/left/right at every depth within a caller-owned 36rem horizontal wrapper; Reset isolates sibling state and aborts old control callbacks; real sidebar navigation remounts defaults. Synthetic graph untouched.');
 
   evidence.stage = "buttons";
   for (const variant of ["default", "destructive", "outline", "secondary", "ghost", "link"]) { await click(`button-variant-${variant}`); }

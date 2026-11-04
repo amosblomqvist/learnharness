@@ -1,11 +1,11 @@
 # UI Showcase
 
-A frontend-only LearnHarness plugin demonstrating **all 13 public `ctx.ui` methods** in one scrollable, host-themed gallery, plus a real native-session surface demo. No backend, runtime dependencies, storage, workers or model generation are used.
+A frontend-only LearnHarness plugin demonstrating **all 14 public `ctx.ui` methods** across **12 families** in one scrollable, host-themed gallery, plus a real native-session surface demo. No backend, runtime dependencies, storage, workers or model generation are used.
 
 ## Requirements
 
-- The current **`feature/plugin-architecture`** LearnHarness checkout with the public Markdown, knowledge-picker and native session-surface APIs. These additive API v1 capabilities are not a released-version compatibility promise.
-- Manifest: API version **1**, minimum app version **0.4.1**. The version number alone does not prove these feature-branch methods exist. Activation checks all 13 UI methods and required registrations and fails with an explicit missing-capability error; there is no copied or hand-rolled fallback.
+- The current **`feature/plugin-architecture`** LearnHarness checkout with the public Tree, Markdown, knowledge-picker and native session-surface APIs. These additive API v1 capabilities are not a released-version compatibility promise.
+- Manifest: API version **1**, minimum app version **0.4.1**. The version number alone does not prove these feature-branch methods exist. Activation checks all 14 UI methods (including `mountTree`) and required registrations and fails with an explicit missing-capability error; there is no copied or hand-rolled fallback.
 - Node/npm for development only. LearnHarness does not run npm when loading the built plugin.
 
 ## Build
@@ -35,6 +35,7 @@ To try it, copy the **built `ui-showcase` folder**, not this source project, int
 - **Start async example** returns an actually pending callback Promise. **Complete async example** resolves it. The host button currently does not automatically show a pending or disabled style while that Promise awaits; the pending readout and completion control are local to this demo. Reset, navigation or plugin disable also releases the pending Promise; no timer is used.
 - In an actual teaching or practice session, choose **UI Showcase surface** in its native top bar. This passes the actual opaque `context.surfaceTarget` directly to `openSurface`; the gallery cannot invent a target. Open the nested surface to test retained parent text, and open menus/dialogs above either surface. Dialog/surface titles are accessible names, not automatic visible heading rows. The quiet X floats above scrolling content without consuming layout space; plugins own visible headings and bottom actions. The host still owns Escape routing and focus behavior.
 - Switch **Dimmed background** / **Opaque background** in the surface example. These call the public `background: "dimmed" | "opaque"` option; Reset restores the dimmed, Chains-like translucent/blurred default without remounting the surface. The example content does not paint an opaque layer over the chosen treatment.
+- **Directory / tree** is a small synthetic fixture rendered by `mountTree`, not a source-management view. Both folders start expanded. The same **Shared item** has a distinct occurrence key in each folder; selection is independent, including parent rows, and never cascades. **Enable selection** shows the host checkboxes; **Disable selection** hides them without clearing their values. Click a row for the host's arrow/row navigation and use Space for an enabled host checkbox. The **Directory draft** input keeps its editing keys; its local value survives collapse/re-expand through a stable content factory. This family's Reset clears selection and draft and expands both folders without changing siblings. The two compact **Kind**/**State** columns are host-rendered; the caller owns the horizontal scroller and 36rem minimum width, not a responsive layout engine. Nothing is persisted.
 - Knowledge selection is also available inside an ordinary dialog and the parent surface. Page/surface origins use a main-pane view that leaves the sidebar visible and interactive; a dialog/Settings origin uses a full-viewport modal. Leaving an originating page closes its picker. A live modal's picker belongs to that modal, not an unrelated background route.
 
 ## Safety boundaries
@@ -62,6 +63,7 @@ All widgets use per-mount abort signals. Reset/abort disposes owned widgets, ove
 | Buttons | `mountButton`; all 6 variants, all 8 sizes, descriptive icon titles, disabled, manually completable async callback with local pending readout |
 | Settings rows | `mountSettingsRows`; toggle, text, dropdown, number, slider; descriptions, text/integer/range validation, disabled example |
 | Markdown | `mountMarkdown`; prose/list, TypeScript code, table, inline/display math, Mermaid |
+| Directory / tree | `mountTree`; synthetic folders, repeated logical item with unique occurrence keys, optional independent controlled selection, host arrow/row navigation, rich draft lifecycle, Kind/State metadata and caller-owned horizontal scrolling |
 | Worker results | `mountWorkerResult`; succeeded/failed/cancelled/interrupted × collapsed/card/plain, 12 static examples, zero workers |
 | Menus | `openMenu`; enabled/disabled items, local selection, preferred up/down side |
 | Dialogs | `openDialog`; ordinary, long-scroll and nested, accessible names, floating X, retained local text and modal-origin knowledge selection |
@@ -80,7 +82,17 @@ LH_STANDALONE=/path/to/verified/.next/standalone npm run test:native
 
 The test harness is kept in `tests/`. Native verification requires `LH_POLISH_BUILD_READY=1`, the exact separately approved standalone tree digest in `LH_APPROVED_HOST_DIGEST`, and `LH_STANDALONE` pointing to that already built and verified payload. The runner rejects the earlier pre-polish host. A built plugin alone is not a running host. Native verification must use only temporary synthetic app data and must not start real speech recording, contact paid providers or run model generation. Follow the harness's prerequisite/environment instructions. A simulated API test is not evidence of actual native host rendering or Escape/focus behavior.
 
-### Verified UI-polish checkpoint
+### Verified Directory / tree checkpoint — 2026-11-04
+
+Strict TypeScript, all **23 plugin tests**, and the plugin build pass for the **14-method/12-family** gallery. The added unit checks cover required Tree capability detection, controlled occurrence-local selection without cascade, preservation when hiding selection, stable rich-content identity and draft restoration after collapse, family-local Reset, abort/stale-callback cleanup, and public SDK types. The unit recorder mounts only plugin-owned content lifetimes; it does not simulate native tree controls, layout or keyboard navigation.
+
+The literal **`npm run test:native` passed** against the approved packaged host, covering **11 assertion groups and 14 screenshots**, including all five directory states. Actual native controls demonstrated optional selection/no gutter, independent repeated occurrences and parent selection, hide/re-enable preservation, stable rich DOM/drafts through updates, controlled collapse/reopen, native arrows/Space, editable-input isolation, unchanged global Tab, exact metadata boundaries, caller-owned horizontal scrolling, isolated Reset and expired controls after navigation. Existing picker, composer, slider, worker-result, overlay and native-session-surface regressions also passed.
+
+Evidence: `/private/tmp/lh-ui-showcase-native-Yu2cEV/{result.json,proof-summary.json,literal-entrypoint-proof.json,final-byte-comparison.json}`. The exercised host digest was `dcfed5d65a68faacd6cc3026f13d74bfc0aeed9988889d4fea1fd71810d1ae4f`; the pre-document-closeout showcase package digest was `700b9b9db189cd93124f765a5e721ec93af57b78be6bacd12fb9d1f742cb0853`. All **5,545 host files and 5 plugin files** matched the exercised copies. Settings and the original preboot synthetic graph baseline remained unchanged; page errors, off-origin requests, microphone attempts, generation calls and WebSockets were all zero. One expected picker-close read cancellation was recorded. Precisely identified successful router-prefetch cancellations are retained separately by the harness, not treated as API/page/provider failures; the final run needed none.
+
+This directory example was gallery-mounted; the existing session-surface example was verified separately. Microphone recording and OS IME were not tested, and simulated window-control CSS geometry is not physical Windows/Linux chrome verification. No live-profile installation, push or release is implied.
+
+### Verified UI-polish checkpoint (historical)
 
 Strict TypeScript, all **17 plugin tests**, and the expanded packaged Electron-Node/Chrome proof passed against the updated host. The native proof covers continuous slider dragging on the same enabled node, all twelve worker outcome tooltips, typography/composer layout, headerless overlays and pinned close controls, dimmed/opaque surfaces, eleven contextual-picker origin/geometry cases, covered-field command isolation, nested ownership/focus and disable cleanup. Settings, synthetic knowledge and the approved host payload remained unchanged; no generation, off-origin request, microphone request, WebSocket or page error occurred. Windows/Linux clearance checks simulate CSS geometry, not physical OS chrome. Microphone recording and OS IME are not tested. Reverse programmatic surface-over-picker ordering is covered by host integration tests, not an invented visible browser flow.
 
@@ -89,10 +101,11 @@ Source modules:
 - `src/main.ts`: capability checks and sidebar/native top-bar registrations.
 - `src/gallery.ts`: `mountGallery(root, ctx, signal)` and exported `FAMILY_IDS`.
 - `src/surfaces.ts`: native-target surfaces and real menu/dialog demos.
+- `src/tree.ts`: the controlled synthetic directory fixture, independent selection and family-local rich draft.
 - `src/dom.ts`: plugin-owned layout/readouts and scoped cleanup.
 - `src/styles.css`: plugin-specific layout/text classes only; no host-widget selectors or restyling.
 
-Stable test selectors: `[data-showcase="gallery"]`, `[data-family="<family>"]`, `[data-example="<semantic-id>"]`, `[data-state="<family>"]`. Reset buttons are inside `[data-example="reset-<family>"]`. Native surfaces use `data-showcase="surface"` and `"surface-nested"`; dialogs use `"dialog-ordinary"`, `"dialog-long"`, and `"dialog-nested"`.
+Stable test selectors: `[data-showcase="gallery"]`, `[data-family="<family>"]`, `[data-example="<semantic-id>"]`, `[data-state="<family>"]`. Reset buttons are inside `[data-example="reset-<family>"]`. The directory uses `[data-example="tree"]`, `[data-example="toggle-tree-selection"]`, `[data-state="tree"]` and `input[aria-label="Directory draft"]`. Its readout contains `selectionEnabled`, `selectedOccurrenceKeys`, `expanded`, `draft` and `lastCallback`. Native surfaces use `data-showcase="surface"` and `"surface-nested"`; dialogs use `"dialog-ordinary"`, `"dialog-long"`, and `"dialog-nested"`.
 
 ## Limits
 
