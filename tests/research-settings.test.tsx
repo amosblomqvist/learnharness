@@ -16,7 +16,7 @@ it("keyless settings keep Research interactive while search-engine setup retains
 		"/api/search": { available: false, engine: null, reason },
 		"/api/keys": { keys: SEARCH_ENGINES.map(({ envVar }) => ({ id: envVar, present: false })) },
 		"/api/models": { models: [], slots: { strong: null, cheap: null, vision: null } },
-		"/api/settings/prompts": { prober: [], teacher: [] },
+		"/api/settings/prompts": { prober: [], teacher: [], practice: [] },
 	};
 	for (const [key, value] of Object.entries({
 		window: dom.window,
@@ -80,7 +80,7 @@ it(`a ${label}-only key enables the engine menu and selecting ${label} saves the
 		"/api/search": { available: true, engine: id, reason: `search engine: ${id} (auto)` },
 		"/api/keys": { keys: [{ id: envVar, present: true }] },
 		"/api/models": { models: [], slots: { strong: null, cheap: null, vision: null } },
-		"/api/settings/prompts": { prober: [], teacher: [] },
+		"/api/settings/prompts": { prober: [], teacher: [], practice: [] },
 	};
 	for (const [key, value] of Object.entries({
 		window: dom.window,
