@@ -34,7 +34,7 @@ const {
 import type { CompactionDeps } from "../src/server/compaction.ts";
 import { createFauxCore, fauxAssistantMessage } from "@earendil-works/pi-ai";
 const { subscribe } = await import("../src/core/events.ts");
-const { activeCompactionOf, newCompactionMarker, newUserMessage, measuredContextTokens, toLlmMessages, COMPACTED_HISTORY_HEADER, activeProblemOf, buildSubagentSteer, danglingQuestionOf, dismissedAnswer, newMessageId } = await import("../src/core/index.ts");
+const { activeCompactionOf, newCompactionMarker, newUserMessage, measuredContextTokens, toLlmMessages, COMPACTED_HISTORY_HEADER, activeProblemOf, buildSubagentSteer, danglingQuestionOf, dismissedAnswer, endsInDismissal, newMessageId } = await import("../src/core/index.ts");
 const dismissRoute = await import("../app/api/chats/[id]/dismiss/route.ts");
 const artifactUiRoute = await import("../app/api/chats/[id]/artifact-ui/route.ts");
 import type { LhMessage } from "../src/core/index.ts";
@@ -398,6 +398,13 @@ describe("learner writes while compaction runs", () => {
 		const messages = chatStore.getChat(id)!.messages;
 		assert.ok(activeCompactionOf(messages), "compaction landed");
 		assert.equal(danglingQuestionOf(messages), null, "the skip survived compaction");
+	});
+
+	it("a skip during compaction leaves the chat paused, same as a skip after it", async () => {
+		const { id, finish } = await compactingChat("518: skip pause", quiz("q-518-pause"));
+		await post(dismissRoute, id, { type: "dismiss", toolCallId: "q-518-pause", answer: dismissedAnswer("quiz", "Q?") });
+		await finish();
+		assert.equal(endsInDismissal(chatStore.getChat(id)!.messages), true, "job deliveries still hold until the learner speaks");
 	});
 
 	it("a discarded practice problem stays discarded", async () => {
