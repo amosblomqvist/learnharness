@@ -13,6 +13,7 @@ import { createTranscriptDelivery, PluginComposer, PluginStandardComposer } from
 import { ModelPickerPill } from "../components/model-picker-pill.tsx";
 import { SettingsSlider } from "../components/settings/controls.tsx";
 import type { PluginWidgetHandle, PluginButtonProps, PluginSettingsSchema, PluginMenuProps, PluginDialogProps } from "../src/core/plugin-ui.ts";
+import type { PluginTreeProps, PluginTreeRow } from "../src/core/plugin-tree.ts";
 
 async function withDom(run: (dom: ReturnType<typeof parseHTML>) => Promise<void>) {
 	const dom = parseHTML("<html><body><div id='root'></div><div id='target'></div></body></html>");
@@ -34,6 +35,110 @@ async function withDom(run: (dom: ReturnType<typeof parseHTML>) => Promise<void>
 		}
 	}
 }
+
+describe("controlled plugin tree integration", () => {
+	it("resolves nested controls by occurrence key across immediate updates, reorder and removal", () => withDom(async () => {
+		const store = createPluginUiStore(), scope = new AbortController();
+		const ui = store.createUi({ signal: scope.signal });
+		const calls: string[] = [];
+		const row = (key: string, version: string): PluginTreeRow => ({ key, content: key,
+			selection: { label: `Select ${key}`, checked: false, onChange: next => { calls.push(`${key}:${version}:${next}`); } },
+			disclosure: { label: `Expand ${key}`, expanded: true, onChange: next => { calls.push(`expand:${key}:${version}:${next}`); } },
+		});
+		const rows = (version: string, keys: string[]): PluginTreeRow[] => [{ key: "parent", content: "Parent", children: keys.map(key => row(key, version)) }];
+		try {
+			const handle = ui.mountTree(document.querySelector("#target")!, { label: "Generic data", rows: rows("old", ["A", "B"]) }, { signal: scope.signal });
+			const held = (store.getSnapshot()[0]!.props as PluginTreeProps).rows[0]!.children![0]!;
+			handle.update({ rows: rows("latest", ["B", "A"]) });
+			await held.selection!.onChange(true); await held.disclosure!.onChange(false);
+			assert.deepEqual(calls, ["A:latest:true", "expand:A:latest:false"]);
+			handle.update({ rows: rows("removed", ["B"]) });
+			await held.selection!.onChange(false); await held.disclosure!.onChange(true);
+			assert.equal(calls.length, 2, "a removed occurrence must never invoke its replacement");
+			const remaining = (store.getSnapshot()[0]!.props as PluginTreeProps).rows[0]!.children![0]!;
+			scope.abort(); await remaining.selection!.onChange(true);
+			assert.equal(calls.length, 2, "disposed controls are inert");
+		} finally { scope.abort(); }
+	}));
+
+	it("keeps content factories in arbitrary on-prefixed columns stable on unrelated updates", () => withDom(async () => {
+		const store = createPluginUiStore(), scope = new AbortController();
+		const ui = store.createUi({ signal: scope.signal }), target = document.querySelector<HTMLElement>("#target")!;
+		const root = createRoot(document.querySelector("#root")!);
+		const mounts = new Map<string, number>(), signals = new Map<string, AbortSignal>();
+		const keys = ["onDetails", "onChange"];
+		const cells = Object.fromEntries(keys.map(key => [key, (container: HTMLElement, signal: AbortSignal) => {
+			mounts.set(key, (mounts.get(key) ?? 0) + 1); signals.set(key, signal);
+			const input = document.createElement("input"); input.setAttribute("aria-label", key); container.append(input);
+		}]));
+		let handle!: PluginWidgetHandle<PluginTreeProps>;
+		try {
+			await act(async () => {
+				root.render(<PluginUiHost store={store} />);
+				handle = ui.mountTree(target, { label: "Cell content", columns: keys.map(key => ({ key, header: key, width: 100 })), rows: [{ key: "row", content: "Row", cells }] }, { signal: scope.signal });
+			});
+			const inputs = keys.map(key => target.querySelector<HTMLInputElement>(`input[aria-label="${key}"]`)!);
+			inputs.forEach((input, index) => { input.value = `draft-${index}`; });
+			await act(async () => handle.update({ label: "Unrelated label update" }));
+			keys.forEach((key, index) => {
+				assert.equal(target.querySelector(`input[aria-label="${key}"]`), inputs[index]);
+				assert.equal(inputs[index]!.value, `draft-${index}`); assert.equal(mounts.get(key), 1); assert.equal(signals.get(key)!.aborted, false);
+			});
+		} finally { await act(async () => { scope.abort(); root.unmount(); }); }
+		keys.forEach(key => assert.equal(signals.get(key)!.aborted, true));
+	}));
+
+	it("validates mount/update before mutating owned DOM and leaves aborted handles inert", () => withDom(async () => {
+		const store = createPluginUiStore(), scope = new AbortController();
+		const ui = store.createUi({ signal: scope.signal }), target = document.querySelector<HTMLElement>("#target")!;
+		target.textContent = "caller-owned";
+		const valid: PluginTreeProps = { label: "Files", rows: [{ key: "one", content: "One" }] };
+		const duplicate = [{ key: "same", content: "One" }, { key: "same", content: "Two" }];
+		try {
+			assert.throws(() => ui.mountTree(target, { ...valid, rows: duplicate }, { signal: scope.signal }), TypeError);
+			assert.equal(target.textContent, "caller-owned"); assert.equal(store.getSnapshot().length, 0);
+			const handle = ui.mountTree(target, valid, { signal: scope.signal }), snapshot = store.getSnapshot();
+			assert.equal(snapshot[0]!.surface, false, "this is an ordinary container widget, not a surface");
+			assert.throws(() => handle.update({ rows: duplicate }), TypeError);
+			assert.equal(store.getSnapshot(), snapshot, "invalid updates cannot replace the current tree");
+			scope.abort(); handle.dispose(); handle.update({ rows: duplicate });
+			ui.mountTree(target, { ...valid, rows: duplicate }, { signal: scope.signal });
+			assert.equal(store.getSnapshot().length, 0); assert.equal(target.textContent, "caller-owned");
+		} finally { scope.abort(); }
+	}));
+
+	it("keeps plugin content through updates/reorder and cleans late mounts exactly once on collapse", () => withDom(async () => {
+		const store = createPluginUiStore(), scope = new AbortController();
+		const ui = store.createUi({ signal: scope.signal }), target = document.querySelector<HTMLElement>("#target")!;
+		const root = createRoot(document.querySelector("#root")!);
+		let mounted = 0, cleaned = 0, contentSignal!: AbortSignal, finish!: (cleanup: () => void) => void;
+		const child: PluginTreeRow = { key: "child", content(container, signal) {
+			mounted++; contentSignal = signal;
+			const input = document.createElement("input"); input.setAttribute("aria-label", "Draft"); input.value = "kept draft"; container.append(input);
+			return new Promise<() => void>(resolve => { finish = resolve; });
+		} };
+		const parent = (expanded: boolean): PluginTreeRow => ({ key: "parent", content: "Parent", children: [child],
+			disclosure: { label: "Expand parent", expanded, onChange() {} } });
+		const other: PluginTreeRow = { key: "other", content: "Other" };
+		let handle!: PluginWidgetHandle<PluginTreeProps>;
+		try {
+			await act(async () => {
+				root.render(<PluginUiHost store={store} />);
+				handle = ui.mountTree(target, { label: "Drafts", rows: [parent(true), other] }, { signal: scope.signal });
+			});
+			const input = target.querySelector<HTMLInputElement>('input[aria-label="Draft"]')!;
+			assert.ok(input); assert.equal(mounted, 1); assert.equal(contentSignal.aborted, false);
+			await act(async () => { handle.update({ label: "Updated drafts", rows: [other, parent(true)] }); });
+			assert.equal(target.querySelector('input[aria-label="Draft"]'), input); assert.equal(input.value, "kept draft"); assert.equal(mounted, 1);
+			await act(async () => { handle.update({ rows: [other, parent(false)] }); });
+			assert.equal(target.querySelector('input[aria-label="Draft"]'), null); assert.equal(contentSignal.aborted, true);
+			await act(async () => { finish(() => { cleaned++; }); });
+			assert.equal(cleaned, 1);
+			await act(async () => { handle.dispose(); scope.abort(); }); assert.equal(cleaned, 1);
+			assert.equal(target.children.length, 0);
+		} finally { await act(async () => { scope.abort(); root.unmount(); }); }
+	}));
+});
 
 describe("controlled plugin UI", () => {
 	it("mounts shared buttons through the host, updates callbacks, and disposes only owned DOM", async () => withDom(async (dom) => {

@@ -57,7 +57,6 @@
 import { useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import {
 	ChevronDownIcon,
-	ChevronRightIcon,
 	ChevronUpIcon,
 	BookIcon,
 	BookOpenIcon,
@@ -76,6 +75,7 @@ import { TopBar } from "@/components/top-bar";
 import { InteractionLayerOwner, useInteractionLayer } from "./interaction-layers";
 import { DeleteSourceDialog } from "@/components/delete-source-dialog";
 import { LatexGlyph } from "@/components/latex-glyph";
+import { TreeCell, TreeCheckbox, TreeDisclosure, TreeGuide, TreeHeader, TreeSelectionSpacer, TreeSeparator, treeBranchLayout, treeColumnLayout, treeRowLayout } from "./tree-presentation";
 
 /** The sortable columns (owner ruling: all three — consistency). */
 export type ChainSortCol = "name" | "props" | "created";
@@ -345,13 +345,13 @@ export function ChainTableBody({
 			<div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
 				{/* The TOP rule (owner round 5: the table is framed — a line under
 			    the header, a line under the last group, lines between groups). */}
-				<div className="sticky top-0 z-10 flex shrink-0 items-center gap-1 border-b border-border/60 bg-background/80 px-3 py-1.5 text-[11px] uppercase tracking-widest text-muted-foreground/70 backdrop-blur">
+				<TreeHeader sticky>
 					<button
 						type="button"
 						data-testid="sort-name"
 						onClick={() => onSort("name")}
 						aria-sort={sort.col === "name" ? (sort.dir === 1 ? "ascending" : "descending") : "none"}
-						className="flex flex-1 items-center gap-1 text-left transition-colors hover:text-foreground"
+						{...treeColumnLayout({ grow: true, align: "left", className: "flex items-center gap-1 transition-colors hover:text-foreground" })}
 					>
 						Name {dirIcon("name")}
 					</button>
@@ -360,7 +360,7 @@ export function ChainTableBody({
 						data-testid="sort-props"
 						onClick={() => onSort("props")}
 						aria-sort={sort.col === "props" ? (sort.dir === 1 ? "ascending" : "descending") : "none"}
-						className="flex w-14 shrink-0 items-center justify-end gap-1 text-right transition-colors hover:text-foreground"
+						{...treeColumnLayout({ widthClassName: "w-14", align: "right", className: "flex items-center justify-end gap-1 transition-colors hover:text-foreground" })}
 					>
 						Props {dirIcon("props")}
 					</button>
@@ -369,11 +369,11 @@ export function ChainTableBody({
 						data-testid="sort-created"
 						onClick={() => onSort("created")}
 						aria-sort={sort.col === "created" ? (sort.dir === 1 ? "ascending" : "descending") : "none"}
-						className="flex w-20 shrink-0 items-center justify-end gap-1 text-right transition-colors hover:text-foreground"
+						{...treeColumnLayout({ widthClassName: "w-20", align: "right", className: "flex items-center justify-end gap-1 transition-colors hover:text-foreground" })}
 					>
 						Created {dirIcon("created")}
 					</button>
-				</div>
+				</TreeHeader>
 
 				{creatingFolder && onOrganizationChange && <div className="flex items-center px-3 py-2" data-testid="new-folder-row">
 					<EditableSourceName name="" initiallyEditing onCancel={() => setCreatingFolder(false)}
@@ -402,8 +402,7 @@ export function ChainTableBody({
 							// The horizontal rules (owner rulings, rounds 2 + 5): between
 							// cluster groups AND under the last one — the table is framed
 							// top (header) and bottom. Never on individual rows.
-							className="relative border-b border-transparent"
-							style={{ marginLeft: depth * 36 }}
+							{...treeBranchLayout({ depth, className: "border-b border-transparent", style: { marginLeft: depth * 36 } })}
 						>
 							{/* The TREE THREAD (owner rounds 5–6): a vertical guide at the
 							    expander arrow's column (center 37px: pl-3 + checkbox 14 +
@@ -413,13 +412,10 @@ export function ChainTableBody({
 							    gap, live-measured) and terminates exactly at the LAST
 							    checkbox bottom (bottom-[8px] = 9px from the border box minus the 1px group rule, measured). */}
 							{open && group.chains.length > 0 && (
-								<div
-									data-testid={`cluster-thread-${group.key}`}
-									className="pointer-events-none absolute bottom-[8px] left-[37px] top-[23px] w-px bg-border/50"
-								/>
+								<TreeGuide selectionColumn depth={0} data-testid={`cluster-thread-${group.key}`} />
 							)}
 							{/* The cluster row: birth-session group header. */}
-							<SourceDragRow {...chainRow(["source", group.key], depth, open)} kind="source" id={group.key} name={group.label ?? "unlabeled"} enabled={Boolean(onOrganizationChange && group.birth)} className="flex items-center gap-1 px-3 py-1.5">
+							<SourceDragRow {...chainRow(["source", group.key], depth, open)} kind="source" id={group.key} name={group.label ?? "unlabeled"} enabled={Boolean(onOrganizationChange && group.birth)} {...treeRowLayout()}>
 								<RowCheckbox
 									disabled={selectMode ? group.nodeIds.length === 0 : !directory?.sources.some((s) => s.id === group.birth)}
 									checked={selectMode ? selectedCount === group.nodeIds.length && group.nodeIds.length > 0 : group.birth !== null && selectedSources.has(group.birth)}
@@ -437,12 +433,12 @@ export function ChainTableBody({
 									? <EditableSourceName name={group.label ?? ""} onSave={(name) => onOrganizationChange({ action: "rename-source", id: group.birth!, name })} />
 									: <span className="min-w-0 flex-1 truncate text-sm font-medium">{group.label ?? <span className="text-muted-foreground/60">unlabeled</span>}</span>}
 								{group.kind === "notes" && <span className="text-[11px] uppercase tracking-widest text-muted-foreground/60">notes</span>}
-								<span className="w-14 shrink-0 text-right text-xs tabular-nums text-muted-foreground">
+								<TreeCell widthClassName="w-14" align="right" className="text-xs tabular-nums text-muted-foreground">
 									{group.nodeIds.length}
-								</span>
-								<span className="w-20 shrink-0 text-right text-xs tabular-nums text-muted-foreground">
+								</TreeCell>
+								<TreeCell widthClassName="w-20" align="right" className="text-xs tabular-nums text-muted-foreground">
 									{group.newestCreatedAt.slice(0, 10)}
-								</span>
+								</TreeCell>
 							</SourceDragRow>
 
 							{/* The chain rows — clearly indented under the folder
@@ -454,23 +450,20 @@ export function ChainTableBody({
 									const chainOpen = expandedChains.has(chain.id);
 									const selectedInChain = memberIds.filter((id) => selection.has(id)).length;
 									return (
-										<div key={chain.id} data-testid={`chain-block-${chain.id}`} className="relative">
+										<div key={chain.id} data-testid={`chain-block-${chain.id}`} {...treeBranchLayout()}>
 												{/* The chain's own thread (owner rounds 5–6): the same
 												    bracket law one level down — at the chain arrow's column
 												    (center 73px), from the chain row's checkbox bottom
 												    (top-[22px]) to the LAST statement row's checkbox bottom
 												    (bottom-[8px]) — live-measured anchors. */}
 												{chainOpen && memberIds.length > 0 && (
-													<div
-														data-testid={`chain-thread-${chain.id}`}
-														className="pointer-events-none absolute bottom-[8px] left-[73px] top-[22px] w-px bg-border/50"
-													/>
+													<TreeGuide selectionColumn depth={1} variant="compact" data-testid={`chain-thread-${chain.id}`} />
 												)}
 											<div
 												{...chainRow(["chain", group.key, chain.id], depth + 1, chainOpen)}
 												data-testid={`chain-row-${chain.id}`}
 												aria-label={formatChainLine(chain, Object.fromEntries([...byId.entries()].map(([id, n]) => [id, { name: n.name }])))}
-												className="flex items-center gap-1 py-1 pl-12 pr-3"
+												{...treeRowLayout({ depth: 1, variant: "compact" })}
 											>
 												{selectMode ? <RowCheckbox
 													checked={selectedInChain === memberIds.length && memberIds.length > 0}
@@ -478,7 +471,7 @@ export function ChainTableBody({
 													onToggle={(next) => onToggleNodes(memberIds, next)}
 													testid={`chain-checkbox-${chain.id}`}
 													label={`Select chain ${nameOf(chain.conclusion)}`}
-												/> : <span aria-hidden="true" className="size-3.5 shrink-0" />}
+												/> : <TreeSelectionSpacer />}
 												<Expander open={chainOpen} onClick={() => onToggleChain(chain.id)} testid={`chain-toggle-${chain.id}`} label={`Expand chain ${nameOf(chain.conclusion)}`} />
 												{/* The chain line: proposition names as faint-outlined
 												    chips. THE LOGIC IS THE PAYLOAD (owner rulings,
@@ -518,12 +511,12 @@ export function ChainTableBody({
 														);
 													})}
 												</span>
-												<span className="w-14 shrink-0 text-right text-xs tabular-nums text-muted-foreground">
+												<TreeCell widthClassName="w-14" align="right" className="text-xs tabular-nums text-muted-foreground">
 													{memberIds.length}
-												</span>
-												<span className="w-20 shrink-0 text-right text-xs tabular-nums text-muted-foreground">
+												</TreeCell>
+												<TreeCell widthClassName="w-20" align="right" className="text-xs tabular-nums text-muted-foreground">
 													{dateOf(chain.conclusion)}
-												</span>
+												</TreeCell>
 											</div>
 
 											{/* The propositions — their STATEMENT text directly (owner
@@ -540,26 +533,26 @@ export function ChainTableBody({
 															key={id}
 															{...chainRow(["prop", group.key, chain.id, id], depth + 2)}
 															data-testid={`prop-row-${id}`}
-															className="flex items-start gap-2 py-1 pl-21 pr-3"
+															{...treeRowLayout({ depth: 2, variant: "detail" })}
 														>
 															{selectMode ? <RowCheckbox
 																checked={selection.has(id)}
 																onToggle={(next) => onToggleNodes([id], next)}
 																testid={`prop-checkbox-${id}`}
 																label={`Select node ${node.name}`}
-															/> : <span aria-hidden="true" className="size-3.5 shrink-0" />}
+															/> : <TreeSelectionSpacer />}
 															<span className="min-w-0 flex-1 text-xs leading-relaxed text-muted-foreground">
 																{node.statement}
 															</span>
-															<span className="w-14 shrink-0" />
-															<span className="w-20 shrink-0" />
+															<TreeCell widthClassName="w-14" />
+															<TreeCell widthClassName="w-20" />
 														</div>
 													);
 												})}
 										</div>
 									);
 								})}
-							<div data-testid={`source-separator-${group.key}`} className="pointer-events-none absolute bottom-[-1px] right-0 border-b border-border/60" style={{ left: depth === 0 ? 0 : 1 }} />
+							<TreeSeparator data-testid={`source-separator-${group.key}`} outside inset={depth === 0 ? 0 : 1} />
 						</div>
 					);
 				}} />
@@ -625,18 +618,7 @@ export function ChainTableBody({
 /** The rotating chevron — collapsed points right, expanded rotates down
  *  (owner ruling: the affordance must read on every expandable row). */
 function Expander({ open, onClick, testid, label }: { open: boolean; onClick: () => void; testid: string; label: string }) {
-	return (
-		<button
-			type="button"
-			data-testid={testid}
-			onClick={onClick}
-			aria-label={label}
-			aria-expanded={open}
-			className="flex h-5 w-3.5 shrink-0 items-center justify-center rounded text-muted-foreground/70 transition-colors hover:bg-accent hover:text-foreground"
-		>
-			<ChevronRightIcon className={`size-3.5 transition-transform ${open ? "rotate-90" : ""}`} />
-		</button>
-	);
+	return <TreeDisclosure open={open} onClick={onClick} data-testid={testid} aria-label={label} />;
 }
 
 /** The checkbox — checked/indeterminate (partial chains/clusters); DOM
@@ -657,18 +639,8 @@ function RowCheckbox({
 	label: string;
 }) {
 	return (
-		<input
-			type="checkbox"
-			disabled={disabled}
-			checked={checked}
-			ref={(el) => {
-				if (el) el.indeterminate = indeterminate;
-			}}
-			data-testid={testid}
-			aria-label={label}
-			onChange={(e) => onToggle(e.target.checked)}
-			className="size-3.5 shrink-0 accent-primary"
-		/>
+		<TreeCheckbox disabled={disabled} checked={checked} indeterminate={indeterminate}
+			data-testid={testid} aria-label={label} onChange={(e) => onToggle(e.target.checked)} />
 	);
 }
 

@@ -32,6 +32,7 @@ function withPayload(test: (fixture: {
 		write(path.join("docs", "plugin-architecture.md"));
 		write(path.join("docs", "plugin-question-contract.md"));
 		write(path.join("docs", "plugin-session-extension-contract.md"));
+		write(path.join("docs", "plugin-tree-contract.md"));
 		write(path.join("examples", "plugins", "hello-plugin", "manifest.json"));
 		write(path.join("examples", "plugins", "hello-plugin", "main.js"));
 		write(path.join("skills", "learnharness-plugins", "SKILL.md"));
@@ -73,7 +74,7 @@ describe("desktop standalone payload", () => {
 			for (const file of runtime) assert.ok(fs.existsSync(path.join(root, STANDALONE, file)), file);
 			assert.ok(fs.existsSync(path.join(root, STANDALONE, ".next", "static", "runtime.js")));
 			assert.ok(fs.existsSync(path.join(root, STANDALONE, "public", "asset.txt")));
-			for (const asset of ["scripts/plugin-loader.cjs", "public/plugin-loader.js", "plugin-authoring/docs/plugin-authoring.md", "plugin-authoring/docs/plugin-question-contract.md", "plugin-authoring/docs/plugin-session-extension-contract.md", "plugin-authoring/types/index.d.ts", "plugin-authoring/examples/plugins/hello-plugin/main.js", "plugin-authoring/skills/learnharness-plugins/SKILL.md"]) {
+			for (const asset of ["scripts/plugin-loader.cjs", "public/plugin-loader.js", "plugin-authoring/docs/plugin-authoring.md", "plugin-authoring/docs/plugin-question-contract.md", "plugin-authoring/docs/plugin-session-extension-contract.md", "plugin-authoring/docs/plugin-tree-contract.md", "plugin-authoring/types/index.d.ts", "plugin-authoring/examples/plugins/hello-plugin/main.js", "plugin-authoring/skills/learnharness-plugins/SKILL.md"]) {
 				assert.ok(fs.existsSync(path.join(root, STANDALONE, asset)), asset);
 			}
 		});

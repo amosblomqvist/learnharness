@@ -11,6 +11,7 @@ import { PluginSettingsRows } from "@/components/plugin-settings-rows";
 import { Button } from "@/components/ui/button";
 import { PluginWorkerResultSurface } from "@/components/plugin-worker-result";
 import { HostMarkdown } from "@/components/host-markdown";
+import { PluginTree, validatePluginTree } from "@/components/plugin-tree";
 import { MenuShell } from "@/components/menu-shell";
 import { HostDialog } from "@/components/host-dialog";
 import { requireSessionSurfaceBoundary } from "./plugin-session-surface-targets";
@@ -58,7 +59,7 @@ export function createPluginUiStore() {
 				try { if (onError) onError(error); else console.error("Plugin UI failed", error); }
 				catch (reportError) { console.error("Plugin UI error reporter failed", reportError); }
 			};
-			function mount<Props>(container: HTMLElement, props: Props, options: PluginWidgetOptions, render: (props: Props, runtime: Runtime) => ReactNode, nativeSignal?: AbortSignal, surface = false, validate?: (props: Props) => void): PluginWidgetHandle<Props> {
+			function mount<Props>(container: HTMLElement, props: Props, options: PluginWidgetOptions, render: (props: Props, runtime: Runtime) => ReactNode, nativeSignal?: AbortSignal, surface = false, validate?: (props: Props) => void, contentRecords: readonly string[] = []): PluginWidgetHandle<Props> {
 				const scope = new AbortController();
 				const target = container.ownerDocument.createElement("div");
 				target.dataset.pluginUiWidget = "";
@@ -107,7 +108,9 @@ export function createPluginUiStore() {
 						return protect(child, [...path, identity]);
 					});
 					if (value && typeof value === "object" && Object.getPrototypeOf(value) === Object.prototype) {
-						return Object.fromEntries(Object.entries(value).map(([key, child]) => [key, protect(child, [...path, key])]));
+						// Content dictionaries have arbitrary author-defined keys. An
+						// "on..." cell is a mount function, not an event callback.
+						return Object.fromEntries(Object.entries(value).map(([key, child]) => [key, contentRecords.includes(key) ? child : protect(child, [...path, key])]));
 					}
 					return value;
 				}
@@ -153,6 +156,8 @@ export function createPluginUiStore() {
 				mountButton: (target, props, options) => mount(target, props, options, (props, runtime) => <Button type="button" variant={props.variant} size={props.size} disabled={props.disabled} title={props.title} onClick={() => invoke(props.onClick, runtime.report)}>{props.label}</Button>),
 				mountSettingsRows: (target, props, options) => mount(target, props, options, (schema, runtime) => <PluginSettingsRows schema={schema} onError={runtime.report} />),
 				mountMarkdown: (target, props, options) => mount(target, props, options, props => <HostMarkdown text={props.text} />),
+				mountTree: (target, tree, options) => mount(target, tree, options, (tree, runtime) => <PluginTree {...tree} signal={runtime.signal} onError={runtime.report}
+					renderContent={content => <PluginContent content={content} runtime={runtime} />} />, undefined, false, validatePluginTree, ["cells"]),
 				mountWorkerResult: (target, props, options) => mount(target, props, options, (props, runtime) => <PluginWorkerResultSurface label={props.label} status={props.status} text={props.text} presentation={props.presentation}>
 					{props.content && <PluginContent content={props.content} runtime={runtime} />}
 				</PluginWorkerResultSurface>),

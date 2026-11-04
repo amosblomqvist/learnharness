@@ -1,5 +1,9 @@
 # Plugin architecture — API v1
 
+> **Shared-tree commit closeout — 2026-11-04:** the verified tree foundation is
+> included in its feature-branch commit. Tree-checkpoint “uncommitted” notices below
+> retain verification-time status; no push, installation or release is implied.
+
 > **Commit closeout — 2026-11-04:** The verified UI-polish, question-card, native-default/reconnection and opening-animation changes are included in this feature-branch commit, together with Coding Questions and UI Showcase. “Uncommitted” notices below retain their original verification-time status; this note supersedes them for the current Git state. No push or release is implied.
 
 ## Approved scope
@@ -108,7 +112,8 @@ repeat invocation of the same action until its Promise settles, and surfaces err
 `ctx.ui` is a framework-neutral controlled facade, implemented in the host tree rather
 than exported private React components. It provides independently mountable composer,
 dictation, model picker, thinking picker, knowledge picker, button, settings rows,
-static Markdown and worker-result presentation; `mountStandardComposer` combines composer, dictation, model
+static Markdown, worker-result presentation and the implemented and verified tree widget;
+`mountStandardComposer` combines composer, dictation, model
 and thinking controls as a preset. Menus and
 dialogs are available via `openMenu` and `openDialog`. Every call takes
 `options: { signal }` and returns a handle with shallow `update(partialProps)` and
@@ -176,6 +181,63 @@ Use it for generic static content such as card fronts/backs, not fabricated work
 shells. Missing capabilities require an explicit host contract decision rather than
 private imports or a copied renderer. The implementation passed
 [final Markdown verification](#static-markdown-final-verification--2026-11-02).
+
+### Shared tree presentation — implemented and verified
+
+The [human-approved tree contract](plugin-tree-contract.md) adds API v1
+`ctx.ui.mountTree(container, tree, { signal }): PluginWidgetHandle<PluginTreeProps>`;
+`src/core/plugin-tree.ts` is the exact type contract. This increment is **implemented and
+verified, uncommitted on `feature/plugin-architecture` above `bdd0666`, not released or
+installed**. Its separate [4,021-test / 568-suite checkpoint](plugin-tree-contract.md#verification-checkpoint--2026-11-04)
+records fresh build/SDK/privacy gates, eight exact native geometry/style states and public
+widget proof within caller-owned width limits. Universal raster identity, underconstrained
+alignment and whole-app manual UX coverage are not claimed. Earlier checkpoints stay frozen.
+`tree` is generic configuration; the conventional `PluginTreeProps` name is unrelated to
+the Chains Props/proposition-count column.
+
+A small shared presentation foundation is consumed by existing native Chains without
+moving its controllers/business logic or changing its appearance/navigation. The plugin
+adapter (`components/plugin-tree.tsx`) retains native row/header/cell shells, accepting
+strings or existing `PluginUiContent` inside them—not arbitrary replacement row markup.
+Globally unique row-occurrence keys are independent of represented entities; any string,
+including empty, is valid if unique throughout the hierarchy. No `itemId` or selection
+cascade is inferred. Controlled optional checkboxes/disclosures and aligned trailing
+columns leave primary content filling the remaining width. Widths are finite nonnegative
+pixel numbers (including zero) or non-whitespace CSS-width strings; align defaults left,
+with right also supported. `label` is accessible-only; a visible primary header is optional.
+
+The widget owns no search/sort/actions, rename/move/storage, scroll container, loading or
+empty UI, and opens no picker or surface. It adds no public keyboard controller, column
+resizing or sticky system. No selection anywhere, even collapsed rows, removes the
+checkbox gutter; any selection reserves it for all rows. Flat branchless lists have no
+disclosure gutter; hierarchy reserves alignment. Native guides use 19px without selection,
+37px with selection, plus 36px per depth. Children without disclosure stay visible;
+controlled collapse unmounts descendant content/cleanup and reopening remounts it. Stable
+content-function identities prevent unnecessary update remounts; plugins retain drafts.
+Normal mount-signal/update/dispose and async-cleanup rules apply. Widget abort or plugin
+deactivation disposes mounts; a disabled checkbox does not unmount content. This does not
+migrate Flashcards or other product plugins or add a deck/library domain service.
+
+The root-local widget adapter reuses the pure private `components/tree-navigation.ts`
+kernel mechanically extracted from `chain-navigation.ts`; native exports alias it, with
+native hook/metadata/event policy unchanged. Existing Chains rules apply: Up/Down siblings,
+Right open/enter child, Left parent/fold parent, Space only for the active row's optional
+enabled host-owned checkbox. Nested widgets navigate independently; plugin text inputs,
+contenteditable and handled keys stay isolated. There is no autofocus, Find/search,
+global handler or new public keyboard-controller API/props. App-wide Tab policy remains
+unchanged in every context, with no Tab exception or native browser-focus promise.
+
+Native defaults are `font-ui`, primary `text-sm`/12.5px at weight 500, metadata/headers
+`text-xs`/11px at weight 400. Width-bearing header/body cells share font metrics for CSS
+`em`/`ch` widths, not a guarantee of positional alignment under width constraints; rich
+content may override its own styles. Fit/width/scrolling remain caller-owned: insufficient
+space for columns plus hierarchy indentation/control prefixes can overflow and shift
+column positions despite retained declared widths. Callers provide sufficient width or
+minimum width with a scroll container, or fewer/narrower columns; there is no minimum-width
+calculator, clipping policy or responsive engine. Native behavior is unchanged. Native thin
+separators appear between top-level groups only, not nested rows or after the last group. Root
+selectors remain private. The public UI method count is 14, including `mountTree`; this
+does not update historical showcase coverage or migrate its plugin.
 
 ### Shared interaction foundation
 
@@ -266,8 +328,8 @@ Selection mode retains user-driven source **rename**, folder **creation** and **
 organization**. It must not become a read-only source tree. Management Delete is not
 available in practice-picker mode, as before. These existing host UI edits do not expose
 new programmable core-write APIs or change the read-only backend learning API. Deck trees,
-state, membership and selection limits remain plugin-owned; no generic deck/library-tree
-host API is added. The shared foundation and then-full-window modal picker passed the
+state, membership and selection limits remain plugin-owned; `mountTree` is generic
+presentation, not a deck/library domain API. The shared foundation and then-full-window modal picker passed the
 [historical interaction verification gates](#historical-shared-interaction-final-verification--2026-11-02);
 those gates do not verify the later origin-sensitive policy.
 
@@ -732,6 +794,11 @@ Uninstall/data deletion and automatic community updates are not part of v1.
     recovery — **implemented and verified, uncommitted on `feature/plugin-architecture`,
     not released**, at the separate 3,965-test checkpoint. The 3,925-test native-parity and
     3,908-test UI-polish checkpoints remain separate historical evidence.
+18. Shared native tree presentation foundation and controlled plugin `mountTree` —
+    **implemented and verified, uncommitted on `feature/plugin-architecture` above
+    `bdd0666`, not released or installed**, at the separate
+    [4,021-test / 568-suite checkpoint](plugin-tree-contract.md#verification-checkpoint--2026-11-04).
+    No native controller/business-logic or product-plugin migration is included.
 
 Validation includes focused lifecycle/storage/interaction tests, existing teaching/practice
 regressions, typecheck/lint, production build and a packaged-server smoke with disposable

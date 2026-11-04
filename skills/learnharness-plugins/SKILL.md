@@ -5,14 +5,18 @@ description: Build, inspect, or debug a trusted-local LearnHarness plugin using 
 
 # LearnHarness plugin authoring
 
+> **Shared-tree commit closeout — 2026-11-04:** the verified tree foundation is
+> included in its feature-branch commit. Tree-checkpoint “uncommitted” notices below
+> retain verification-time status; no push, installation or release is implied.
+
 > **Commit closeout — 2026-11-04:** The verified UI-polish, question-card, native-default/reconnection and opening-animation changes are included in this feature-branch commit, together with Coding Questions and UI Showcase. “Uncommitted” notices below retain their original verification-time status; this note supersedes them for the current Git state. No push or release is implied.
 
 First read `docs/plugin-authoring.md`, `docs/plugin-architecture.md`, the authoritative
 `docs/dialog-overlay-contract.md`, `docs/plugin-question-contract.md`, the
 [authoritative session-extension contract](../../docs/plugin-session-extension-contract.md),
-and the actual contracts `src/core/plugins.ts`, `src/core/plugin-ui.ts`, `src/core/plugin-agents.ts`,
+the [approved tree contract](../../docs/plugin-tree-contract.md), and the actual contracts `src/core/plugins.ts`, `src/core/plugin-ui.ts`, `src/core/plugin-agents.ts`,
 `src/core/plugin-workers.ts`, `src/core/plugin-questions.ts`, and
-`src/core/plugin-submissions.ts` in the matching app checkout. Native session extensions
+`src/core/plugin-submissions.ts` and `src/core/plugin-tree.ts` in the matching app checkout. Native session extensions
 are **implemented and verified on `feature/plugin-architecture`, not released**, at the
 separate 3,869-test/564-suite
 checkpoint in `docs/plugin-architecture.md`, including whole-project TypeScript, lint
@@ -117,7 +121,7 @@ is implied. No grading, data, blank filtering, API-shape or `ctx.ui` changes are
 - Use `ctx.ui` controlled helpers rather than private host component imports:
   `mountComposer`, `mountDictation`, `mountModelPicker`, `mountThinkingPicker`,
   `mountKnowledgePicker`, `mountStandardComposer`, `mountButton`, `mountSettingsRows`,
-  `mountWorkerResult`, `mountMarkdown`,
+  `mountWorkerResult`, `mountMarkdown`, `mountTree`,
   `openMenu`, and `openDialog`. Every call takes final `options: { signal }` and
   returns `update(partialProps)`/`dispose()`; updates are shallow, so replace whole
   nested preset props. Plugin callbacks own values/persistence; feed accepted values
@@ -141,6 +145,51 @@ is implied. No grading, data, blank filtering, API-shape or `ctx.ui` changes are
   the API. Markdown passed the 3,681-test, strict SDK and actual packaged-browser gates
   recorded in `docs/plugin-architecture.md`; the earlier 3,665-test interaction checkpoint
   `792671e` remains historical, not proof of this later API.
+- The approved API v1 tree method is
+  `ctx.ui.mountTree(container, tree, { signal }): PluginWidgetHandle<PluginTreeProps>`;
+  it is **implemented and verified, uncommitted on `feature/plugin-architecture` above
+  `bdd0666`, not released or installed**, at the separate
+  [4,021-test / 568-suite checkpoint](../../docs/plugin-tree-contract.md#verification-checkpoint--2026-11-04).
+  Earlier checkpoints remain historical. Exact eight-state native geometry/styles and
+  fitting-width column boundaries passed; universal pixel identity, underconstrained
+  alignment, actual session-surface/microphone/real-profile installation or native rename/
+  drag browser coverage are not claimed. Read `docs/plugin-tree-contract.md` and exact
+  `src/core/plugin-tree.ts` types. `tree` is generic configuration, not Chains' Props
+  proposition column. Use globally unique occurrence keys (any string, including empty),
+  independent of item identity; no `itemId` or selection cascade. Strings/existing
+  `PluginUiContent` occupy fixed native row/header/cell slots, never replace row markup.
+  Optional controlled checkbox/disclosure and trailing columns leave the primary content
+  filling available width; optional primary header is distinct from accessible-only label.
+  Width is finite nonnegative pixels (0 allowed) or non-whitespace CSS width, align left
+  by default or right. No selection anywhere, including collapsed rows, removes the gutter;
+  any selection reserves it for all rows. Flat branchless lists need no disclosure gutter;
+  hierarchy keeps alignment (guide 19px without selection / 37px with selection, +36px/depth).
+  Children without disclosure stay visible; collapse unmounts descendant mounts/cleanup,
+  reopen remounts. Keep mount functions stable across updates and persist drafts in plugin
+  state; normal AbortSignal/update/dispose/async cleanup applies. Widget abort/plugin
+  deactivation disposes mounts; `selection.disabled` does not unmount content. Caller owns
+  search/sort, actions/rename/move/storage, scroll/loading/empty UI. Root-local navigation
+  reuses Chains arrow-row rules: Up/Down siblings, Right open/enter child, Left parent/fold
+  parent, Space only for an optional enabled host-owned checkbox. Nested widgets are
+  independent; plugin text inputs/contenteditable/handled keys are isolated. No autofocus,
+  Find/search, global handler or public keyboard-controller API/new props. App-wide Tab
+  policy is unchanged in all contexts: no Tab exception or native Tab-focus promise.
+  The pure private `components/tree-navigation.ts` kernel is mechanically extracted from
+  `chain-navigation.ts`; native exports alias it, without native hook/metadata/event-policy
+  or controller/business-logic changes. Defaults match native `font-ui`: primary labels
+  `text-sm`/12.5px/500, metadata and headers `text-xs`/11px/400. Width-bearing header/body
+  cells share font metrics for `em`/`ch` widths; rich content can override its style.
+  Width/fit/scrolling are caller-owned: underconstrained columns plus maximum hierarchy
+  indentation/control prefixes can overflow and column positions can diverge despite
+  retained declared widths. Supply sufficient width/minimum width with a scroll container
+  or fewer/narrower columns; no universal alignment, host minimum-width calculator,
+  clipping policy or responsive engine is promised. See the caller-wrapper example;
+  its width budget is illustrative, not a host requirement. Native behavior is unchanged.
+  Thin native separators only between top-level groups, not nested rows or after the last
+  group; internal root selectors are not API. No column resize/sticky system, automatic
+  opening or product-plugin migration; knowledge picker/surfaces remain separate. The UI
+  API now has 14 methods, not a migrated showcase; do not change its historical 13-method
+  proof or claim Flashcards has migrated.
 - The additive API v1 knowledge picker uses
   `ctx.ui.mountKnowledgePicker(container, { value, onChange, disabled? }, { signal })`:
   `value: readonly string[]` of node IDs, `onChange(ids)`, standard `update`/`dispose`.
@@ -177,8 +226,8 @@ is implied. No grading, data, blank filtering, API-shape or `ctx.ui` changes are
   organization, lazy first-open loading, focus/portals and abort cleanup. Preserve source
   rename, folder creation and dragging: selection mode is **not read-only**. Management
   Delete stays unavailable in practice-picker mode. Backend learning APIs remain read-only;
-  no programmable core-write/deck-tree API is added. Deck state/membership/limits stay
-  plugin-owned. The shared foundation/then-full-window picker passed the historical
+  no programmable core-write/deck-domain API is added. `mountTree` is presentation only;
+  deck hierarchy/state/membership/limits stay plugin-owned. The shared foundation/then-full-window picker passed the historical
   3,665-test and packaged gates in `docs/plugin-architecture.md`; this verifies neither
   the later origin-sensitive picker policy nor static Markdown API.
 - Follow the app-wide shared interaction contract, not the removed picker-only hiding or

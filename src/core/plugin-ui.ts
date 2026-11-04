@@ -1,5 +1,6 @@
 /** Framework-neutral, controlled host UI. No widget reads or writes plugin storage. */
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
+import type { PluginTreeProps } from "./plugin-tree.ts";
 
 export type PluginUiCallback<T = void> = (value: T) => void | Promise<void>;
 export interface PluginWidgetOptions { signal: AbortSignal }
@@ -122,6 +123,7 @@ export interface PluginUi {
 	mountButton(container: HTMLElement, props: PluginButtonProps, options: PluginWidgetOptions): PluginWidgetHandle<PluginButtonProps>;
 	mountSettingsRows(container: HTMLElement, props: PluginSettingsSchema, options: PluginWidgetOptions): PluginWidgetHandle<PluginSettingsSchema>;
 	mountMarkdown(container: HTMLElement, props: PluginMarkdownProps, options: PluginWidgetOptions): PluginWidgetHandle<PluginMarkdownProps>;
+	mountTree(container: HTMLElement, tree: PluginTreeProps, options: PluginWidgetOptions): PluginWidgetHandle<PluginTreeProps>;
 	mountWorkerResult(container: HTMLElement, props: PluginWorkerResultProps, options: PluginWidgetOptions): PluginWidgetHandle<PluginWorkerResultProps>;
 	openMenu(anchor: HTMLElement, props: PluginMenuProps, options: PluginWidgetOptions): PluginWidgetHandle<PluginMenuProps>;
 	openDialog(props: PluginDialogProps, options: PluginWidgetOptions): PluginWidgetHandle<PluginDialogProps>;

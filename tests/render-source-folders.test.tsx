@@ -3,6 +3,7 @@ import React from "react";
 import assert from "node:assert/strict";
 import { it } from "node:test";
 import { renderToStaticMarkup } from "react-dom/server";
+import { parseHTML } from "linkedom";
 import { ChainTableBody } from "../components/chain-table.tsx";
 import { DeleteSourceBody } from "../components/delete-source-dialog.tsx";
 import { sourceNameMatches } from "../components/source-folder-tree.tsx";
@@ -53,6 +54,37 @@ it("collapsed folders have no dangling rail, while expanded folders reuse the so
 	assert.match(html, /data-testid="folder-thread-f1"[^>]*bottom-\[8px\][^>]*top-\[23px\]/);
 	assert.doesNotMatch(html, /data-testid="folder-thread-f2"/);
 });
+it("shared presentation preserves deep folder rows, direct controls and native guide/column geometry", () => {
+	const deepDirectory: SourceDirectory = {
+		...directory,
+		organization: {
+			...directory.organization,
+			folders: [...directory.organization.folders,
+				{ id: "f3", name: "Section", parentId: "f2", createdAt: "2026-10-30" },
+				{ id: "f4", name: "Topic", parentId: "f3", createdAt: "2026-10-30" },
+			],
+			placements: { notes: { folderId: "f4", name: "Named book" } },
+		},
+	};
+	const { document } = parseHTML(render({ directory: deepDirectory, expandedClusters: new Set(["f1", "f2", "f3", "f4"]) }));
+	for (const [depth, id] of ["f1", "f2", "f3", "f4"].entries()) {
+		const row = document.querySelector<HTMLElement>(`[data-testid="folder-row-${id}"]`)!;
+		assert.equal(row.tagName, "DIV");
+		assert.equal(row.getAttribute("data-chain-nav-row"), JSON.stringify(["folder", id]));
+		assert.equal(row.getAttribute("data-chain-nav-depth"), String(depth));
+		assert.equal(row.style.paddingLeft, `${12 + depth * 36}px`);
+		assert.equal(document.querySelector(`[data-testid="folder-checkbox-${id}"]`)?.parentElement, row);
+		const disclosure = document.querySelector(`[data-testid="folder-toggle-${id}"]`)!;
+		assert.equal(disclosure.parentElement, row);
+		assert.equal(disclosure.getAttribute("aria-expanded"), "true");
+		assert.doesNotMatch(disclosure.outerHTML, /rounded|transition-|hover:/);
+		assert.equal(row.querySelectorAll(":scope > .w-14").length, 1);
+		assert.equal(row.querySelectorAll(":scope > .w-20").length, 1);
+		assert.equal(document.querySelector<HTMLElement>(`[data-testid="folder-thread-${id}"]`)?.style.left, `${37 + depth * 36}px`);
+	}
+	assert.equal(document.querySelector<HTMLElement>('[data-testid="cluster-group-notes"]')?.style.marginLeft, "144px");
+});
+
 it("re-import record dates do not change existing graph groups' Created dates", () => {
 	const newer = { ...directory, sources: directory.sources.map((s) => s.id === "notes" ? { ...s, createdAt: "2099-01-01" } : s) };
 	const html = render({ nodes, directory: newer, expandedClusters: new Set(["f1", "f2"]) });

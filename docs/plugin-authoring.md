@@ -1,5 +1,9 @@
 # Build a LearnHarness plugin
 
+> **Shared-tree commit closeout — 2026-11-04:** the verified tree foundation is
+> included in its feature-branch commit. Tree-checkpoint “uncommitted” notices below
+> retain verification-time status; no push, installation or release is implied.
+
 > **Commit closeout — 2026-11-04:** The verified UI-polish, question-card, native-default/reconnection and opening-animation changes are included in this feature-branch commit, together with Coding Questions and UI Showcase. “Uncommitted” notices below retain their original verification-time status; this note supersedes them for the current Git state. No push or release is implied.
 
 Plugins are **trusted local code**. Only install code you trust: backend modules have
@@ -36,7 +40,7 @@ The background example may incur model cost, but runs only when explicitly reque
 
 The exact API contracts are `src/core/plugins.ts`, `src/core/plugin-ui.ts`,
 `src/core/plugin-agents.ts`, `src/core/plugin-workers.ts`, `src/core/plugin-questions.ts`,
-and `src/core/plugin-submissions.ts`.
+`src/core/plugin-submissions.ts`, and `src/core/plugin-tree.ts`.
 The [native session-extension contract](plugin-session-extension-contract.md) is normative
 for the session-extension increment, implemented and verified on
 `feature/plugin-architecture`, not released.
@@ -190,6 +194,7 @@ handle with `update(partialProps)` and idempotent `dispose()`. Updates shallow-m
 props; for a preset, supply a complete replacement for any nested props you change.
 Aborting the mount signal or disabling the plugin disposes its widgets and overlays.
 Callbacks may return Promises; errors are surfaced rather than treated as success.
+The API has 14 methods, including the implemented and verified `mountTree` increment.
 
 | Method | Controlled inputs and callbacks |
 | --- | --- |
@@ -203,8 +208,10 @@ Callbacks may return Promises; errors are surfaced rather than treated as succes
 | `mountSettingsRows(container, schema, options)` | `{ rows }`, as below |
 | `mountWorkerResult(container, props, options)` | `label`, terminal `status`, `text`, optional `content`, `presentation` |
 | `mountMarkdown(container, props, options)` | `text: string`; static complete Markdown through the actual host pipeline, built-ins only |
+| `mountTree(container, tree, options)` | accessible `label`, controlled `rows`; optional primary `header`, aligned trailing `columns`; presentation only |
 | `openMenu(anchor, props, options)` | `items: [{ key, label, onSelect, disabled? }]`; optional `label`, `preferredSide`, `onClose` |
 | `openDialog(props, options)` | `title`, `content`, optional `onClose` |
+| `openSurface(target, props, options)` | mounted session-view target; accessible `title`, `content`, optional `background`, `onClose` |
 
 These controls are controlled, not persistence or inference services. The plugin owns
 values, backend persistence, and any model fallback policy. Model/thinking selectors
@@ -283,6 +290,68 @@ fabricate a worker result merely to obtain Markdown styling. If a required capab
 missing, request an explicit host API decision rather than importing private host/React
 components, copying the Markdown pipeline or inventing unsupported props.
 
+### Shared tree presentation — implemented and verified
+
+The [approved tree contract](plugin-tree-contract.md) adds
+`ctx.ui.mountTree(container, tree, { signal }): PluginWidgetHandle<PluginTreeProps>`.
+Exact types live in `src/core/plugin-tree.ts`. This increment is **implemented and
+verified, uncommitted on `feature/plugin-architecture` above `bdd0666`, not released or
+installed**, at its own [4,021-test / 568-suite checkpoint](plugin-tree-contract.md#verification-checkpoint--2026-11-04).
+Earlier checkpoints remain historical. The generic `tree` configuration is not the Chains
+Props/proposition column; `PluginTreeProps` simply names its properties. The checkpoint
+records exact native geometry/styles and fitting-width column proof, not universal pixel
+identity, underconstrained alignment or whole-app manual UX coverage.
+
+Use globally unique row-occurrence keys (any string, including empty), independent of
+item identities. There is no `itemId` or automatic selection cascade. Optional controlled
+checkboxes/disclosures, primary content/header and width/alignment-defined trailing cells
+use fixed native shells; content slots accept strings or existing `PluginUiContent`, not
+replacement row markup. Keep content-mount function identities stable to avoid remounts
+on unrelated updates. Collapse unmounts descendant content and cleanup; reopening
+remounts it, so retain drafts/data in plugin state. The normal signal/update/dispose
+contract applies: widget abort/plugin deactivation disposes mounts, but checkbox
+`selection.disabled` does not unmount content. See the contract's concrete plugin-owned
+folder/file example.
+
+The shared foundation is presentation only, also consumed by native Chains without
+controller/business-logic migration or native navigation changes. The caller owns
+search/sort/actions, rename/move/storage, selection policy, scroll containers, loading and
+empty UI. The widget opens nothing and adds no public keyboard-controller API, column
+resizing or sticky system. Its root-local adapter reuses Chains arrow-row rules:
+Up/Down siblings, Right open/enter child, Left parent/fold parent; Space toggles only an
+enabled, host-owned row checkbox. Nested widgets are independent; plugin inputs,
+contenteditable and handled keys are isolated. No autofocus, Find/search or global handler
+is added. The app-wide Tab policy stays unchanged; there is no native Tab-focus promise.
+
+Defaults match native `font-ui`: primary labels `text-sm`/12.5px, weight 500; metadata and
+headers `text-xs`/11px, weight 400. Width-bearing header/body cells share font metrics,
+including for CSS `em`/`ch` widths; this is not universal positional alignment under width
+constraints. Rich content may style itself. Thin native separators
+appear only between top-level groups, not nested rows or after the last group. Internal
+selectors are not public API. Knowledge pickers and surfaces remain separate. No product
+plugin, including Flashcards, is migrated by this increment.
+
+**Width/fit/scrolling warning:** if configured columns plus maximum indentation and
+control/prefix space exceed the available width, the tree can overflow and header/body
+column positions can diverge even when declared widths are retained. Provide sufficient
+width/minimum width and your own horizontal scroll container, or fewer/narrower columns.
+There is no host minimum-width calculator, clipping policy or responsive engine. For
+your controlled `tree` inside a view mount, a tiny wrapper is:
+
+```js
+const scroller = document.createElement("div");
+scroller.style.overflowX = "auto";
+const inner = document.createElement("div");
+inner.style.minWidth = "32rem"; // Example only: caller chooses a sufficient budget.
+scroller.append(inner);
+container.append(scroller);
+const handle = ctx.ui.mountTree(inner, tree, { signal });
+return () => { handle.dispose(); scroller.remove(); };
+```
+
+`32rem` is not a host requirement; choose for your hierarchy, controls, primary content
+and column widths. Native layout behavior is unchanged.
+
 ### Knowledge picker
 
 The approved knowledge-picker increment adds
@@ -350,8 +419,8 @@ Selection mode is **not read-only**: user-driven source **rename**, folder **cre
 and **drag organization** remain available. Management **Delete** remains unavailable in
 practice-picker mode, matching existing behavior. These are existing host UI operations,
 not new programmable core-write APIs: the backend learning-data API remains read-only.
-There is no generic deck/library-tree host API; deck trees, state, membership and
-selection limits remain plugin-owned.
+There is no deck/library domain API: the new `mountTree` is generic presentation only.
+Deck hierarchy, state, membership and selection limits remain plugin-owned.
 
 ### Shared dialog and keyboard behavior
 
