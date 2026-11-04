@@ -8,7 +8,7 @@ import { describe, it } from "node:test";
 import { createWebTools } from "../src/agent/tools/web.ts";
 import { jobTools } from "../src/agent/tools/jobs.ts";
 import { runResearcherAgent } from "../src/agent/subagents/researcher.ts";
-import { createFauxCore, fauxAssistantMessage, fauxText, fauxToolCall, type FauxResponseStep } from "@earendil-works/pi-ai";
+import { createFauxCore, fauxAssistantMessage, fauxText, fauxToolCall, getCurrentTools, type FauxResponseStep } from "@earendil-works/pi-ai";
 import type { JobStore } from "../src/core/ports.ts";
 import type { JobRecord } from "../src/core/contracts.ts";
 import type { SearchHit, SearchProvider } from "../src/core/search.ts";
@@ -109,6 +109,58 @@ describe("web_search on the injected port (web.ts)", () => {
 });
 
 describe("keyless researcher loop", () => {
+	it("recovers an empty final response using the collected evidence, without replaying research tools", async () => {
+		const faux = createFauxCore({});
+		const brief = "## Summary\nVerified finding from the supplied source.";
+		let calls = 0;
+		let usageCalls = 0;
+		let toolCalls = 0;
+		faux.setResponses([
+			() => {
+				calls++;
+				return fauxAssistantMessage([fauxText("Still researching."), fauxToolCall("web_search", { query: "source" }, { id: "source1" })], { stopReason: "toolUse" });
+			},
+			() => { calls++; return fauxAssistantMessage([]); },
+			(context) => {
+				calls++;
+				assert.ok(context.messages.some((m) => m.role === "toolResult" && m.toolCallId === "source1"));
+				assert.deepEqual(getCurrentTools(context.messages), []);
+				assert.match(JSON.stringify(context.messages.at(-1)), /final.*brief/i);
+				return fauxAssistantMessage([fauxText(brief)]);
+			},
+		]);
+		assert.equal(await runResearcherAgent("Verify a finding", {
+			engine: { model: faux.getModel(), streamFn: faux.streamSimple }, search: () => stubProvider(),
+			onUsage: () => { usageCalls++; }, onToolStart: () => { toolCalls++; },
+		}), brief);
+		assert.equal(calls, 3);
+		assert.equal(usageCalls, 3, "finalization usage reaches the existing money channel");
+		assert.equal(toolCalls, 1, "the finalization cannot repeat the search");
+	});
+
+	it("bounds empty-response recovery to one finalization call", async () => {
+		const faux = createFauxCore({});
+		let calls = 0;
+		faux.setResponses(Array.from({ length: 3 }, () => () => { calls++; return fauxAssistantMessage([]); }));
+		assert.equal(await runResearcherAgent("Verify a finding", {
+			engine: { model: faux.getModel(), streamFn: faux.streamSimple },
+		}), "");
+		assert.equal(calls, 2);
+	});
+
+	it("propagates a provider error without trying to turn it into a brief", async () => {
+		const faux = createFauxCore({});
+		let calls = 0;
+		faux.setResponses([() => {
+			calls++;
+			return fauxAssistantMessage([], { stopReason: "error", errorMessage: "synthetic provider failure" });
+		}]);
+		await assert.rejects(runResearcherAgent("Verify a finding", {
+			engine: { model: faux.getModel(), streamFn: faux.streamSimple },
+		}), /synthetic provider failure/);
+		assert.equal(calls, 1);
+	});
+
 	it("sends the exact approved missing-credentials guidance in the researcher system prompt", async () => {
 		const approved = "If web_search reports that search is unavailable because credentials are missing, do not retry it with different queries. Use web_fetch when you have source URLs, and continue with any other available sources. If the missing search capability materially limits your work, state the limitation and the missing-key setup needed in your brief. Never invent search results or sources.";
 		const faux = createFauxCore({});

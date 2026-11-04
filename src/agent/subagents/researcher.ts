@@ -94,18 +94,32 @@ export interface ResearcherRunOptions {
 export async function runResearcherAgent(prompt: string, opts: ResearcherRunOptions = {}): Promise<string> {
 	const tools = Object.values(createWebTools(opts.search ?? (() => null)));
 	if (opts.pdfDir) tools.push(...Object.values(createPdfReadTools(opts.pdfDir)));
-	const { text } = await runSubagent(tools, {
+	const runOptions = {
 		role: "researcher",
-		prompt,
 		engine: opts.engine,
 		systemPrompt: INSTRUCTIONS,
-		maxTurns: 12,
 		abortSignal: opts.abortSignal,
 		onUsage: opts.onUsage,
 		onToolStart: opts.onToolStart,
 		chatId: opts.chatId,
+	} as const;
+	const { text, newMessages } = await runSubagent(tools, {
+		...runOptions, prompt, maxTurns: 12,
 	});
-	return text;
+	if (text.trim()) return text;
+	// A provider can end cleanly without a text deliverable. Ask once for the
+	// brief using the existing evidence; earlier progress prose is not a brief.
+	// Removing tools prevents this recovery from starting another research loop.
+	const finalized = await runSubagent([], {
+		...runOptions,
+		messages: [...newMessages, {
+			role: "user",
+			content: "Your last response contained no final brief. Return the final research brief now using the evidence already collected. State any gaps honestly; do not invent findings or sources.",
+			timestamp: Date.now(),
+		}],
+		maxTurns: 1,
+	});
+	return finalized.text;
 }
 
 export type ResearcherAgent = ReturnType<typeof runResearcherAgent>;

@@ -105,13 +105,15 @@ The flag must reach the **Next server** process; `desktop:dev` starts both Next 
 ## Checks
 
 ```bash
-npm test               # node:test via tsx: injected engines, fixtures and fake transports
+npm test               # node:test via tsx: disposable data/auth, injected engines and fixtures
 npm run typecheck      # tsc --noEmit
 npm run lint           # ESLint, including import restrictions
 npm run build          # Next production build
 ```
 
 The suite does not require paid models or real account sign-in. Tests cover pure domain logic, native turn/session flows, delivery recovery, extraction/import, conversational practice, provider fixtures, rendering and stored-data compatibility. Some tests use filesystem/native-process or local fake-endpoint seams; “offline” is not a promise that every test is a pure function. Review a focused suite's setup before running it alongside a live app.
+
+`npm test` creates temporary data and auth paths before loading any test modules, overrides inherited `LH_DATA_DIR` / `LH_AUTH_FILE`, and removes its scratch directory after success or failure. To run selected files with the same isolation, use `npm test -- tests/question-tools.test.ts`. Direct `tsx --test` invocations bypass this launcher and must supply their own isolated storage paths.
 
 Golden data under `tests/fixtures/golden-data/` is copied into disposable roots and read through production paths. Keep intentional format changes and fixture expectations together; follow the fixture README rather than editing saved records to make a test pass.
 

@@ -32,7 +32,7 @@ import { probeQuizInputSchema, quizInputObject, quizInputProblems } from "../src
 import { chatStore } from "../src/store/chats.ts";
 import { PATHS } from "../config.ts";
 
-const dataDir = path.join(PATHS.root, "data");
+const dataDir = PATHS.data;
 fs.mkdirSync(dataDir, { recursive: true });
 
 const createdChats: string[] = [];
@@ -439,6 +439,10 @@ describe("tool descriptions carry mechanics only, no question-craft", () => {
 		["teach quiz", teachQuiz],
 		["probe quiz", probeQuizTool],
 	] as const) {
+		it(`${name}: explanations refer to content because display order is shuffled`, () => {
+			assert.match(tool.description, /options are shuffled for display and shown without letters/i);
+			assert.match(tool.description, /refer to options by their content, never by letter or position/i);
+		});
 		it(`${name}: no craft doctrine, mechanics intact`, () => {
 			const d = tool.description;
 			for (const banned of ["asymmetry", "distractor", "believable", "misconception"]) {
