@@ -230,3 +230,63 @@ export interface AuthStore {
 	deleteAuthVar(name: string): void;
 }
 
+// ─── PiGlobalStore — the user's global Pi setup ─────────────────────────────
+
+/** One models.json custom model, raw (Pi's schema; only the fields the
+ *  app projects are named — everything optional, defaults applied by the
+ *  server the way Pi applies them). */
+export interface PiGlobalModelConfig {
+	id: string;
+	name?: string;
+	api?: string;
+	baseUrl?: string;
+	reasoning?: boolean;
+	input?: ("text" | "image")[];
+	cost?: { input: number; output: number; cacheRead: number; cacheWrite: number };
+	contextWindow?: number;
+	maxTokens?: number;
+	thinkingLevelMap?: Record<string, string | null>;
+	compat?: Record<string, unknown>;
+}
+
+/** One models.json provider entry, raw. */
+export interface PiGlobalProviderConfig {
+	id: string;
+	name?: string;
+	baseUrl?: string;
+	api?: string;
+	/** Literal, "$VAR"/"${VAR}" template, or "!command" (Pi's syntax). */
+	apiKey?: string;
+	headers?: Record<string, string>;
+	compat?: Record<string, unknown>;
+	models?: PiGlobalModelConfig[];
+}
+
+/** One auth.json credential, raw (Pi's schema): an api key, or an OAuth
+ *  login whose tokens Pi alone refreshes and stores. */
+export type PiGlobalCredential =
+	| { type: "api_key"; key?: string; env?: Record<string, string> }
+	| { type: "oauth"; access: string; refresh: string; expires: number; [key: string]: unknown };
+
+/** One snapshot of a Pi config directory. Fields are referentially stable
+ *  while their file is unchanged — consumers may diff by identity. */
+export interface PiGlobalSetup {
+	/** The agent dir actually read (Pi's home resolves to its agent/). */
+	dir: string;
+	/** Whether the dir holds auth.json or models.json at all. */
+	found: boolean;
+	/** auth.json, provider id → credential (unknown shapes dropped). */
+	credentials: Readonly<Record<string, PiGlobalCredential>>;
+	/** models.json's providers, in file order. */
+	providers: readonly PiGlobalProviderConfig[];
+}
+
+/**
+ * The user's GLOBAL Pi setup, read-only and live: every read re-checks the
+ * files (mtime-cached), so edits in Pi apply without a restart. Absent or
+ * corrupt files read as empty. Never throws, never writes.
+ */
+export interface PiGlobalStore {
+	/** Read the setup at `dir` — Pi's home (~/.pi) or its agent dir. */
+	read(dir: string): PiGlobalSetup;
+}
