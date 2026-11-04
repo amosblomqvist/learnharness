@@ -35,11 +35,14 @@ test("meter keeps its measured numerator across selected-model/catalog changes, 
 		selected = "b";
 		await act(async () => notifySettingsSaved("models"));
 		assert.equal(context(), "83k / 200k", "only denominator changes");
+		catalog.models[1]!.contextWindow = 872_000;
+		await act(async () => notifySettingsSaved("compaction"));
+		assert.equal(context(), "83k / 872k", "a context-window change refreshes the meter");
 		await act(async () => root.render(<StatsBar chatId="fixture" turns={[turn]} contextTokens={null} pricing={pricing} />));
-		assert.equal(context(), "? / 200k");
+		assert.equal(context(), "? / 872k");
 		assert.equal(host.querySelector('[data-testid="stats-cost"]')?.textContent, "$0.0030", "summary spending is still visible");
 		await act(async () => root.render(<StatsBar chatId="fixture" turns={[turn]} contextTokens={72_000} pricing={pricing} />));
-		assert.equal(context(), "72k / 200k");
+		assert.equal(context(), "72k / 872k");
 	} finally {
 		await act(async () => root.unmount()); host.remove(); globalThis.fetch = originalFetch;
 	}

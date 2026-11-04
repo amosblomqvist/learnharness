@@ -60,6 +60,7 @@ All three platforms support in-app updates.
 ## Your keys, your data
 
 - **Your keys and models.** No LearnHarness subscription or markup. Billing depends on your provider, CLI configuration, subscription, or local setup. The live cost meter estimates known API costs, not subscription, CLI, or custom-endpoint charges.
+- **ChatGPT context.** Settings → Agent → Context shows the account's advertised default and maximum windows. You can choose a window per account and model. The separate compaction threshold defaults to 150,000 tokens; raising it can increase plan usage. Provider limits may change.
 - **Local storage.** Your chats, graph, settings, and API keys live on your machine. Learning records are plain files you can inspect.
 - **External services.** Models run through your configured providers. Model requests send the context needed for the task; web research and dictation also contact external services. Local storage does not mean offline processing.
 - **Inspectable behavior.** System prompts are visible and editable. The app is open source under the AGPL-3.0 license.

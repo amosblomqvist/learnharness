@@ -11,6 +11,7 @@ import { appearanceVars, derivedPalette, resolveAppearance, staleVarNames } from
 import {
 	PROMPT_IN_USE_HINT,
 	composePromptSwitch,
+	composeContextWindow,
 	composeSearchEngine,
 	composeSlotModel,
 	composeTool,
@@ -193,6 +194,14 @@ describe("agent section compose helpers — the replace-whole PUT body", () => {
 
 	it("composeSearchEngine: the explicit preference writes agent.search.engine", () => {
 		assert.deepEqual(composeSearchEngine(undefined, "brave").search, { engine: "brave" });
+	});
+
+	it("context windows preserve other account choices and respect the advertised maximum", () => {
+		const a = "chatgpt:a:gpt-6.1-sol", b = "chatgpt:b:gpt-6-astra";
+		const previous = { thresholdTokens: 800_000, contextWindows: { [a]: 500_000, [b]: 600_000 } };
+		assert.deepEqual(composeContextWindow(previous, a, "900000", 872_000), { thresholdTokens: 800_000, contextWindows: { [a]: 872_000, [b]: 600_000 } });
+		assert.deepEqual(composeContextWindow(previous, a, "", 872_000), { thresholdTokens: 800_000, contextWindows: { [b]: 600_000 } });
+		assert.equal(composeContextWindow(previous, a, "invalid", 872_000), null);
 	});
 
 	it("composePromptSwitch: on = explicit true, off = key REMOVED (absent = off)", () => {

@@ -81,6 +81,9 @@ test("unset preference reselects the existing default against current reasoning 
 test("catalog capabilities remain reported and prices unknown despite runtime image permission", () => {
 	const engine = piEngineForSpec({ provider: "custom", id: "m" });
 	assert.deepEqual(engine.model.input, ["text", "image"]);
+	const resolved = piEngineForSpec({ provider: "custom", id: "m", contextWindow: 24_576 });
+	assert.deepEqual(resolved.model.input, ["text", "image"], "a resolved context keeps the runtime image permission");
+	assert.equal(resolved.model.contextWindow, 24_576);
 	const dto = modelCatalog().models.find((m) => m.provider === "custom")!;
 	assert.deepEqual(dto.input, ["text"]); assert.equal(dto.cost, null);
 	assert.equal(callCost({ inputTokens: 100, outputTokens: 100 }, "custom:m"), null);

@@ -42,7 +42,7 @@ export function useModelCatalog(): { catalog: ModelCatalogResponse | undefined; 
 				if (section === "keys" || section === "claudeCode") {
 					catalogGeneration++; catalogInflight = undefined; catalogCache = undefined;
 					fetchCatalog();
-				} else if (section === "models") fetchCatalog(true);
+				} else if (section === "models" || section === "compaction") fetchCatalog(true);
 			});
 			fetchCatalog(true);
 		} else fetchCatalog();
