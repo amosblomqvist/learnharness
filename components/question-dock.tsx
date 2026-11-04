@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowDownIcon, ChevronRightIcon, PlayIcon } from "lucide-react";
+import { ArrowDownIcon, ChevronRightIcon, PaperclipIcon, PlayIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { finishDictation, isDictationActive, joinDictation, useDictationTarget } from "@/components/dictation";
 import { useEnterSubmits } from "@/components/enter-submits";
@@ -87,6 +87,8 @@ export interface QuestionDockProps {
 	/** Session phase at the question — scales the thinking field: probing
 	 *  stays quick (one row), teaching invites dumping (three rows). */
 	phase?: Phase3;
+	/** Optional callback to open document upload modal */
+	onAttach?: () => void;
 	/** Dictation claim (owner 2026-10-03): false while a teach-phase check
 	 *  sits UNREVEALED — the reading-thinking field owns dictated speech
 	 *  during the reading; the dock reclaims on reveal. Default true (probe
@@ -113,6 +115,7 @@ export function QuestionDock({
 	phase = "probe",
 	dictationClaim = true,
 	compactionRunning = false,
+	onAttach,
 }: QuestionDockProps) {
 	// The probe-phase names (owner, 2026-10-09) canonicalize onto their
 	// teach twins for every dock concern — parse dispatch, labels, kinds:
@@ -165,6 +168,7 @@ export function QuestionDock({
 					onEscape={onEscape}
 					dictationClaim={dictationClaim}
 					compactionRunning={compactionRunning}
+					onAttach={onAttach}
 				/>
 			</div>
 		</>
@@ -262,6 +266,7 @@ function QuestionDockForm({
 	onEscape,
 	dictationClaim = true,
 	compactionRunning = false,
+	onAttach,
 }: Omit<QuestionDockProps, "expanded" | "onExpand" | "reveal">) {
 	const kind = toolQuestionKind(toolName);
 
@@ -912,9 +917,22 @@ function QuestionDockForm({
 						/>
 					)}
 					<div className="flex items-center justify-between gap-2 p-1">
-						<span aria-hidden className="pl-1.5 text-xs text-muted-foreground">
+						<div className="flex items-center gap-2">
+							{onAttach && (
+								<button
+									type="button"
+									onClick={onAttach}
+									title="Tải lên tài liệu & đề thi"
+									className="flex cursor-pointer items-center gap-1 rounded-md border border-border/80 px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+								>
+									<PaperclipIcon className="size-3.5 text-primary" />
+									<span>Đính kèm tài liệu</span>
+								</button>
+							)}
+							<span aria-hidden className="pl-1.5 text-xs text-muted-foreground">
 								{compactionRunning ? "compacting session…" : "↵ submits · ⇧↵ newline"}
-						</span>
+							</span>
+						</div>
 						<Button
 							type="submit"
 							disabled={!canSubmit || compactionRunning}

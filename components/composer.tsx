@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useLayoutEffect, useRef, useState } from "react";
-import { ArrowRightIcon, CornerDownLeftIcon, SquareIcon } from "lucide-react";
+import { ArrowRightIcon, CornerDownLeftIcon, PaperclipIcon, SquareIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { PathInput } from "@/components/path-input";
 import { AttachFilesButton } from "@/components/attach-files-button";
@@ -28,10 +28,6 @@ export function enterAction(state: {
 	 *  active, no turn/compaction in flight (the caller's fold). */
 	nextProblem?: boolean;
 }): "stop" | "send" | "next" | "none" {
-	// Composer steering (owner arc 2026-10-03): while a turn runs, typed
-	// text makes Enter a STEER (the queue-and-redirect send); Enter with
-	// an empty composer stays the stop shortcut. The button itself keeps
-	// the square — Stop stays one click away at all times.
 	if (state.busy) return state.canSend ? "send" : "stop";
 	if (state.canSend) return "send";
 	if (state.nextProblem) return "next";
@@ -58,6 +54,8 @@ export function ChatSessionComposer({
 	placeholder,
 	nextProblem,
 	onNext,
+	onAttach,
+	attachedDocs,
 }: {
 	busy: boolean;
 	value: string;
@@ -73,6 +71,8 @@ export function ChatSessionComposer({
 	placeholder?: string;
 	nextProblem?: boolean;
 	onNext?: () => void;
+	onAttach?: () => void;
+	attachedDocs?: React.ReactNode;
 }) {
 	const [draft, setDraft] = useState(value);
 	useLayoutEffect(() => { setDraft(value); }, [revision, value]);
@@ -96,6 +96,8 @@ export function ChatSessionComposer({
 			placeholder={placeholder}
 			nextProblem={nextProblem}
 			onNext={onNext}
+			onAttach={onAttach}
+			attachedDocs={attachedDocs}
 		/>
 	);
 }
@@ -113,6 +115,8 @@ export function Composer({
 	placeholder = "Ask, answer, or steer the lesson…",
 	nextProblem = false,
 	onNext,
+	onAttach,
+	attachedDocs,
 }: {
 	busy: boolean;
 	value: string;
@@ -138,6 +142,10 @@ export function Composer({
 	/** The signal's dispatcher (send({type:"next"})) — the chip and the
 	 *  empty-Enter share it. */
 	onNext?: () => void;
+	/** Attachment button click handler */
+	onAttach?: () => void;
+	/** Rendered badge list for attached documents */
+	attachedDocs?: React.ReactNode;
 }) {
 	const act = () => {
 		const action = enterAction({ busy, canSend, nextProblem });
@@ -150,55 +158,67 @@ export function Composer({
 	return (
 		<form
 			data-testid="composer"
-			className="flex items-end gap-1.5 p-1.5"
+			className="flex flex-col gap-1 p-1.5"
 			onSubmit={(e) => {
 				e.preventDefault();
 				act();
 			}}
 		>
-			<PathInput
-				ref={editorRef}
-				value={value}
-				onValueChange={onChange}
-				defaultDropTarget
-				onKeyDown={(e) => {
-					// Esc ends dictation before anything else Esc might someday mean
-					// here (the dictate decisions: click-again or Esc to stop).
-					// stopPropagation claims the Esc (keyboard wave A): the
-					// window-level chain must not also abort a turn under us.
-					if (e.key === "Escape" && onEscape) {
-						e.preventDefault();
-						e.stopPropagation();
-						onEscape();
-						return;
-					}
-					// Chat convention: Enter sends, Shift+Enter is a newline.
-					// ⌘/Ctrl+Enter also sends — the universal submit shortcut
-					// across every input in the app (thinking field, answers).
-					if (e.key === "Enter" && (e.metaKey || e.ctrlKey || !e.shiftKey)) {
-						e.preventDefault();
-						act();
-					}
-				}}
-				placeholder={placeholder}
-				autoFocus={autoFocus}
-				className="field-sizing-content lh-input max-h-48 min-h-10 flex-1 resize-none bg-transparent px-2.5 py-2 outline-none placeholder:text-muted-foreground"
-			/>
-			<AttachFilesButton editorRef={editorRef} />
-			{/* The button follows the text (owner report 2026-10-03): while
-				 a turn runs WITH text typed it stays the SEND affordance
-				 (click = steer — steering must be clickable, not Enter-only);
-				 only an empty composer morphs it to Stop. ESC keeps its
-				 confirm-popup abort in every state, so stop is never
-				 unreachable. No tooltip — the ↵ glyph is the affordance
-				 (owner, subtlety round 2026-09-25).
+			{attachedDocs}
+			<div className="flex items-end gap-1.5">
+				{onAttach && (
+					<button
+						type="button"
+						onClick={onAttach}
+						title="Đính kèm tài liệu học tập hoặc đề thi"
+						className="flex size-10 shrink-0 cursor-pointer items-center justify-center rounded-[10px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+					>
+						<PaperclipIcon className="size-4" />
+					</button>
+				)}
+				<PathInput
+					ref={editorRef}
+					value={value}
+					onValueChange={onChange}
+					defaultDropTarget
+					onKeyDown={(e) => {
+						// Esc ends dictation before anything else Esc might someday mean
+						// here (the dictate decisions: click-again or Esc to stop).
+						// stopPropagation claims the Esc (keyboard wave A): the
+						// window-level chain must not also abort a turn under us.
+						if (e.key === "Escape" && onEscape) {
+							e.preventDefault();
+							e.stopPropagation();
+							onEscape();
+							return;
+						}
+						// Chat convention: Enter sends, Shift+Enter is a newline.
+						// ⌘/Ctrl+Enter also sends — the universal submit shortcut
+						// across every input in the app (thinking field, answers).
+						if (e.key === "Enter" && (e.metaKey || e.ctrlKey || !e.shiftKey)) {
+							e.preventDefault();
+							act();
+						}
+					}}
+					placeholder={placeholder}
+					autoFocus={autoFocus}
+					className="field-sizing-content lh-input max-h-48 min-h-10 flex-1 resize-none bg-transparent px-2.5 py-2 outline-none placeholder:text-muted-foreground"
+				/>
+				<AttachFilesButton editorRef={editorRef} />
+				{/* The button follows the text (owner report 2026-10-03): while
+					 a turn runs WITH text typed it stays the SEND affordance
+					 (click = steer — steering must be clickable, not Enter-only);
+					 only an empty composer morphs it to Stop. ESC keeps its
+					 confirm-popup abort in every state, so stop is never
+					 unreachable. No tooltip — the ↵ glyph is the affordance
+					 (owner, subtlety round 2026-09-25).
 
-				 THE NEXT MORPH (owner round 16 refinement, 2026-10-06): an
-				 empty composer in the practice pause morphs the button into
-				 a wide green NEXT PROBLEM — the affordance IS the button
-				 (click and Enter share one lane), and typing anything
-				 returns the regular send. The green is the app's correct-
-				 answer register (answered-card's green-500/600). */}
+					 THE NEXT MORPH (owner round 16 refinement, 2026-10-06): an
+					 empty composer in the practice pause morphs the button into
+					 a wide green NEXT PROBLEM — the affordance IS the button
+					 (click and Enter share one lane), and typing anything
+					 returns the regular send. The green is the app's correct-
+					 answer register (answered-card's green-500/600). */}
 				{nextProblem && !busy && !canSend ? (
 					<button
 						type="submit"
@@ -224,6 +244,7 @@ export function Composer({
 						{busy && !canSend ? <SquareIcon className="size-4" /> : <CornerDownLeftIcon className="size-5" />}
 					</button>
 				)}
+			</div>
 		</form>
 	);
 }

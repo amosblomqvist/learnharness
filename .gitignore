@@ -3,8 +3,12 @@ data/
 .next/
 *.log
 .DS_Store
+Thumbs.db
+ehthumbs.db
+[Dd]esktop.ini
 *.tsbuildinfo
-.env.local
+.env*
+!.env.example
 .memory/
 SCOPE.md
 # raw real-data import sources (user directive 2026-09-13: never commit)
@@ -19,3 +23,10 @@ xai-credentials.json*
 
 # dev-fresh launcher scratch (fresh-user sim): disposable per launch
 .fresh-data/
+
+# IDE files
+.vscode/
+.idea/
+
+# local dev scripts
+launch-learnharness.*

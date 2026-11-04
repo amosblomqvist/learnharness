@@ -69,6 +69,7 @@ export interface LhMarkerMessage {
 	role: "custom";
 	customType:
 		| "graph-context"
+		| "document-context"
 		| "probe-handoff"
 		| "subagent-steer"
 		| "subagent-abort"
@@ -276,6 +277,71 @@ export interface GraphContextPick {
  *  to a user message by toLlmMessages like every marker); `details`
  *  feeds the transcript's collapsible GraphContextCard. No more seed
  *  text glued into the first prompt. */
+
+export interface DocumentContextItem {
+	id: string;
+	fileName: string;
+	category: "lecture" | "exam";
+	extension?: string;
+	size?: number;
+	text: string;
+	summary?: {
+		pageOrSlideCount?: number;
+		charCount: number;
+	};
+}
+
+export function formatDocumentContextText(docs: readonly DocumentContextItem[]): string {
+	const lines = [
+		"[Course Materials & Exams Context] - Course materials and past exams provided by the learner:",
+		"",
+		"The learner has provided official course materials (lecture notes/slides) and past exam papers/formats.",
+		"Your PRIMARY GOAL is to guide and teach the learner step-by-step until they have complete mastery to solve all problems in the exams.",
+		"When planning (plan_init), structure the plan tree around the concepts and notations from the lecture materials, with the exam problem types as sink nodes.",
+		"",
+	];
+	const lectures = docs.filter((d) => d.category === "lecture");
+	const exams = docs.filter((d) => d.category === "exam");
+	if (lectures.length > 0) {
+		lines.push("### 📚 COURSE & LECTURE MATERIALS:");
+		for (const l of lectures) {
+			lines.push("\n#### File: " + l.fileName + (l.summary?.pageOrSlideCount ? " (" + l.summary.pageOrSlideCount + " pages/slides)" : ""));
+			lines.push(l.text.length > 50000 ? l.text.slice(0, 50000) + "\n\n[...truncated...]" : l.text);
+		}
+		lines.push("");
+	}
+	if (exams.length > 0) {
+		lines.push("### 📝 EXAMS & TEST FORMATS:");
+		for (const e of exams) {
+			lines.push("\n#### File: " + e.fileName + (e.summary?.pageOrSlideCount ? " (" + e.summary.pageOrSlideCount + " pages)" : ""));
+			lines.push(e.text.length > 50000 ? e.text.slice(0, 50000) + "\n\n[...truncated...]" : e.text);
+		}
+		lines.push("");
+	}
+	return lines.join("\n");
+}
+
+export function newDocumentContextMessage(docs: readonly DocumentContextItem[]): LhMarkerMessage {
+	return {
+		id: newMessageId(),
+		role: "custom",
+		customType: "document-context",
+		content: formatDocumentContextText(docs),
+		display: true,
+		details: {
+			documents: docs.map((d) => ({
+				id: d.id,
+				fileName: d.fileName,
+				category: d.category,
+				extension: d.extension ?? d.fileName.slice(d.fileName.lastIndexOf(".")),
+				size: d.size ?? d.text.length,
+				summary: d.summary ?? { charCount: d.text.length },
+			})),
+		},
+		timestamp: Date.now(),
+	};
+}
+
 export function newGraphContextMessage(picks: readonly GraphContextPick[], chains: readonly string[]): LhMarkerMessage {
 	// IDS FIRST (owner round 9, 2026-10-05 — the mastery-trace contract):
 	// each proposition is introduced ONCE with its id, name, and statement;
@@ -626,7 +692,7 @@ export function toLlmMessages(messages: readonly AgentMessage[]): Message[] {
 			const marker = m as LhMarkerMessage;
 			// UI-only markers: plan blocks, and problem dismissals (the
 			// synthesized conclude pair carries the model's face).
-			if (marker.customType === "plan-block" || marker.customType === "problem-dismissed") continue;
+			if (marker.customType === "plan-block" || marker.customType === "problem-dismissed" || marker.customType === "document-context") continue;
 			// The head supersedes every compaction marker, not only its own
 			// stored position. Without a resolved head, preserve the existing
 			// full-history fallback, including the summary text.
@@ -847,7 +913,7 @@ export function nativeInputCause(message: AgentMessage, history: readonly AgentM
 	if (message.role === "custom") {
 		if (["probe-handoff", "subagent-steer", "subagent-abort"].includes(message.customType)) return "automatic";
 		if (["practice-thinking", "practice-next"].includes(message.customType)) return "learner";
-		return ["graph-context", "plan-block", "problem-dismissed", "compaction"].includes(message.customType) ? "neutral" : "unrecognizable";
+		return ["graph-context", "document-context", "plan-block", "problem-dismissed", "compaction"].includes(message.customType) ? "neutral" : "unrecognizable";
 	}
 	if (message.role === "toolResult") {
 		if (message.isError && (message.details as { questionRecovery?: unknown } | null)?.questionRecovery === true) {

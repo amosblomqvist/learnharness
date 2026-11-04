@@ -1,5 +1,6 @@
 import { chainsForSelection, formatChainLine } from "@/src/core";
-import { newGraphContextMessage, type GraphContextPick } from "@/src/core";
+import { newGraphContextMessage, newDocumentContextMessage, type GraphContextPick } from "@/src/core";
+import { saveDocument, type ParsedDocument } from "@/src/server";
 import { compactionInFlight, createChat, isTurnRunning, listChats, readSettingsRecord, stores, titleFromPrompt } from "@/src/server";
 import type { ChatListItem } from "@/src/core";
 
@@ -66,6 +67,19 @@ export async function POST(req: Request) {
 			formatChainLine(c, Object.fromEntries(byId)),
 		);
 		stores.chatStore.saveMessages(chat.id, [newGraphContextMessage(picks, chainLines)]);
+	}
+
+	const rawDocs = (body as { documents?: unknown })?.documents;
+	if (Array.isArray(rawDocs) && rawDocs.length > 0) {
+		const validDocs = rawDocs.filter((d): d is ParsedDocument =>
+			typeof d === "object" && d !== null && typeof d.fileName === "string" && typeof d.text === "string"
+		);
+		if (validDocs.length > 0) {
+			for (const doc of validDocs) {
+				await saveDocument(chat.id, doc);
+			}
+			stores.chatStore.saveMessages(chat.id, [newDocumentContextMessage(validDocs)]);
+		}
 	}
 	return Response.json({ id: chat.id, title: chat.title });
 }

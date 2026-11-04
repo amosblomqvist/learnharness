@@ -194,7 +194,7 @@ export function estimateTokens(messages: readonly (LhMessage | AgentMessage)[]):
  * markers have no context, just like native metadata entries. */
 function cutMessage(message: LhMessage): LhMessage | null {
 	if (message.role !== "custom") return message;
-	if (["compaction", "plan-block", "problem-dismissed"].includes(message.customType)) return null;
+	if (["compaction", "plan-block", "problem-dismissed", "document-context"].includes(message.customType)) return null;
 	return message;
 }
 
@@ -335,6 +335,14 @@ export function serializeForSummary(messages: readonly LhMessage[]): string {
 		} else if (role === "custom") {
 			const marker = m as LhMarkerMessage;
 			if (marker.customType === "plan-block") continue; // UI-only
+			if (marker.customType === "document-context") {
+				const docDetails = (marker.details as { documents?: Array<{ fileName?: string }> })?.documents;
+				const names = docDetails?.map((d) => d.fileName).filter(Boolean);
+				if (names && names.length > 0) {
+					lines.push(`[SYSTEM NOTE] Note: The user is currently learning based on these documents: ${names.join(", ")}`);
+				}
+				continue;
+			}
 			lines.push(`[SYSTEM NOTE] ${marker.content}`);
 		}
 	}
@@ -377,11 +385,17 @@ export function buildCompactionPrompt(input: {
 	planTreeText: string | null;
 	/** The session kind (wording: tutor vs practice agent). */
 	kind: "teach" | "practice" | "probe";
+	/** Optional list of document file names currently in use. */
+	documentNames?: readonly string[];
 }): string {
 	const planSection =
 		input.planTreeText ?? "No plan tree exists in this session (nothing was persisted).";
+	const docNote =
+		input.documentNames && input.documentNames.length > 0
+			? `\nNote: The user is currently learning based on these documents: ${input.documentNames.join(", ")}.\n`
+			: "";
 	return `You are compacting the earlier part of a tutoring session — writing the summary your future self will read INSTEAD of that transcript. Everything before the cut is replaced by what you write; everything after stays verbatim. The learner's transcript below labels the learner as [LEARNER], the tutoring agent as [TUTOR], tool traffic as [RESULT …]/[SYSTEM NOTE].
-
+${docNote}
 Write the summary with EXACTLY these sections, in this order:
 
 ## The learner's understanding

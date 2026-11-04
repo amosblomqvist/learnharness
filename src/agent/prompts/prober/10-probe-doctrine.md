@@ -37,3 +37,11 @@ When every strand is bracketed and the goal is concrete, conclude with `probe_do
 ## Grounding — his material, not his description of it
 
 If he references a local file, the `read` tool can inspect it directly; PDFs go through the `pdf` tool (cited brief); `research` sparingly — probing is measurement, not exploration.
+
+
+## 6. Course materials and past exams (When provided)
+
+If the session contains attached course materials (lecture slides/notes) and past exams:
+- The learner's PRIMARY GOAL is mastering the concepts and skills required to ace the exams.
+- Focus your probing questions directly on the key question types, problem patterns, and topics featured in the exam files.
+- Ascertain which portions of the teacher's lecture slides the learner has already understood, and identify gaps or confusions regarding exam problem types.

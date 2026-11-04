@@ -217,10 +217,16 @@ async function compact(deps: CompactionDeps, chatId: string): Promise<void> {
 	const spanText = serializeForSummary(summaryMessages);
 	const fullSpan = priorSummary ? `[SYSTEM NOTE — prior compaction summary, still authoritative where not superseded]\n${priorSummary}\n\n${spanText}` : spanText;
 
+	const docMarker = messages.find(
+		(m) => m.role === "custom" && (m as { customType?: string }).customType === "document-context",
+	) as { details?: { documents?: Array<{ fileName?: string }> } } | undefined;
+	const docNames = docMarker?.details?.documents?.map((d) => d.fileName).filter((n): n is string => Boolean(n));
+
 	const prompt = buildCompactionPrompt({
 		spanText: fullSpan,
 		planTreeText: planTreeToText(record.tree, messages),
 		kind: deps.kind,
+		documentNames: docNames,
 	});
 
 	emit("compaction-changed", { chatId, running: true });

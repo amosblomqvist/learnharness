@@ -210,7 +210,11 @@ export const ReasoningContent = memo(
       {...props}
     >
       <Streamdown components={mdComponents} plugins={streamdownPlugins} remend={streamdownRemend}>
-        {transformMathDelimiters(children)}
+        {transformMathDelimiters(
+          typeof children === "string"
+            ? children.replace(/`\$([a-zA-Z0-9_]+)\$`/g, "`$1`")
+            : children,
+        )}
       </Streamdown>
     </CollapsibleContent>
   )

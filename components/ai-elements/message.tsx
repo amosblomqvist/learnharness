@@ -366,10 +366,15 @@ export const MessageResponse = memo(
     // Legacy backslash delimiters are converted in a single linear scan;
     // native dollar math passes through to Streamdown unchanged. Incomplete
     // legacy spans are left for a later render when their closer arrives.
-    const content =
+    // Strip accidental dollar signs from code-identifier wrappers like `$n$` -> `n`.
+    const sanitized =
       typeof children === "string"
-        ? transformMathDelimiters(children)
+        ? children.replace(/`\$([a-zA-Z0-9_]+)\$`/g, "`$1`")
         : children;
+    const content =
+      typeof sanitized === "string"
+        ? transformMathDelimiters(sanitized)
+        : sanitized;
 
     return (
       <Streamdown
