@@ -137,7 +137,9 @@ function builtin(name: string, mode: ThemeMode, c: ThemeColors): Theme {
  *  iris/rose/gold emphasis. Gruvbox: dark medium (bg0/bg0_s/bg2) with the
  *  bright accents; light hard (bg0_h/bg0_s/bg2) with the faded, darker
  *  accents so the ink stays quiet on the pale page. Orange accent,
- *  blue/purple/aqua emphasis. NvChad Onedark: base46's onedark. */
+ *  blue/purple/aqua emphasis. Ivory: warm ivory page, terracotta accent,
+ *  blue/green/clay emphasis. Pastel: a gray-cream page with soft green,
+ *  purple and orange inks. NvChad Onedark: base46's onedark. */
 export const BUILTIN_THEMES: readonly Theme[] = [
 	{
 		id: DEFAULT_THEME_ID,
@@ -194,6 +196,16 @@ export const BUILTIN_THEMES: readonly Theme[] = [
 		background: "#f9f5d7", surface: "#f2e5bc", border: "#d5c4a1", text: "#3c3836", textMuted: "#7c6f64",
 		accent: "#af3a03", bold: "#076678", italic: "#8f3f71", code: "#427b58",
 		error: "#9d0006", success: "#79740e", warning: "#b57614",
+	}),
+	builtin("Ivory", "light", {
+		background: "#faf9f5", surface: "#f0eee6", border: "#e0ddd2", text: "#3d3d3a", textMuted: "#83827d",
+		accent: "#d97757", bold: "#3266c9", italic: "#3f8f6b", code: "#c4613f",
+		error: "#c43d3d", success: "#3f8f6b", warning: "#b8822a",
+	}),
+	builtin("Pastel", "light", {
+		background: "#f2f0e8", surface: "#e8e6dc", border: "#d6d3c6", text: "#4a4842", textMuted: "#8f8b80",
+		accent: "#4f8a46", bold: "#4f8a46", italic: "#8a5cb5", code: "#b8623b",
+		error: "#c0533f", success: "#4f8a46", warning: "#b8862c",
 	}),
 	builtin("NvChad Onedark", "dark", {
 		background: "#1e222a", surface: "#282c34", border: "#42464e", text: "#abb2bf", textMuted: "#565c64",
