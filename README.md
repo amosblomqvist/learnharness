@@ -33,6 +33,8 @@ Instead of just giving you an explanation, it uses your answers and thinking to 
 
 The agent can also research questions in the background, create visual explanations, and build interactive demonstrations.
 
+**Bring your own material.** Attach images, PDFs, or EPUBs to a session with **Add context**, or any time from the **Files** chip in the session's top bar, where you can also remove a file and undo the removal. The agent reads books and papers the way a coding agent reads a codebase: structure first, then only the pages or chapters the lesson needs.
+
 ## Knowledge that carries forward
 
 What you are taught accumulates as propositions and reasoning chains: individual claims and the premises that lead to them. The graph shows this structure, with links back to the source sessions. You can also import notes.

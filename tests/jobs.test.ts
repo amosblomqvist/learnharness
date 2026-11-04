@@ -19,8 +19,13 @@
  *      happy path (fires the injected turn runner, flips the job), pending-
  *      quiz deferral, 409 retry, idempotent redelivery
  *
- * Cleanup follows tests/chat-flow.test.ts: created chat/job files removed in
- * finally blocks / the after() hook.
+ * Hermetic: LH_DATA_DIR → a temp dir, set BEFORE the first import of the
+ * app modules (the seam is env-at-module-load, see
+ * tests/data-dir-seam.test.ts), so every app-module import is dynamic.
+ * Without it the wake tests resolve the developer's own strong slot — a
+ * subscription provider with no live connection parks every steer and
+ * the awaited deliveries never settle. Created chat/job files are still
+ * removed in finally blocks / the after() hook (tests/chat-flow.test.ts).
  */
 
 import assert from "node:assert/strict";
@@ -29,27 +34,39 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { after, afterEach, before, describe, it } from "node:test";
 import { createFauxCore, fauxAssistantMessage, fauxText, fauxToolCall, type AssistantMessage, type FauxResponseStep } from "@earendil-works/pi-ai";
-import {
+import type { SteerInput } from "../src/core/input-events.ts";
+import type {
+	DemoResult,
+	JobUsage,
+	PdfResult,
+	ResearchResult,
+	SteerMessage,
+	VisualResult,
+} from "../src/core/contracts.ts";
+import type { TurnRunner } from "../src/server/jobs.ts";
+import type { ModelSlotName } from "../src/core/settings.ts";
+import type { PiEngine } from "../src/agent/models.ts";
+import type { SearchProvider } from "../src/core/search.ts";
+import type { LhMessage } from "../src/core/native-messages.ts";
+
+const TMP_DATA = fs.mkdtempSync(path.join(os.tmpdir(), "lh-jobs-"));
+process.env.LH_DATA_DIR = TMP_DATA;
+after(() => fs.rmSync(TMP_DATA, { recursive: true, force: true }));
+
+const {
 	accumulateJobUsage,
 	buildAbortSteer,
 	buildSubagentSteer,
 	isSubagentFailure,
 	steerDelivered,
-	type DemoResult,
-	type JobUsage,
-	type PdfResult,
-	type ResearchResult,
-	type SubagentArtifactData,
-	type SteerMessage,
-	type VisualResult,
 	buildProbeHandoffSteer,
-} from "../src/core/contracts.ts";
-import { composeInstructions, createTeacherAgent } from "../src/agent/teacher-agent.ts";
-import { createTeacherTools } from "../src/agent/tools.ts";
-import { webTools } from "../src/agent/tools/web.ts";
-import { handleChatRequest } from "../src/server/chat-handler.ts";
-import { runningTurn } from "../src/server/turn-runs.ts";
-import {
+} = await import("../src/core/contracts.ts");
+const { composeInstructions, createTeacherAgent } = await import("../src/agent/teacher-agent.ts");
+const { createTeacherTools } = await import("../src/agent/tools.ts");
+const { webTools } = await import("../src/agent/tools/web.ts");
+const { handleChatRequest } = await import("../src/server/chat-handler.ts");
+const { runningTurn } = await import("../src/server/turn-runs.ts");
+const {
 	abortJob,
 	deliverJobResult,
 	noteSteersDurable,
@@ -58,26 +75,21 @@ import {
 	recoverStaleJobs,
 	registerLiveAgent,
 	setJobRespawn,
-	setTurnRunner as setRawTurnRunner,
-	type TurnRunner,
+	setTurnRunner: setRawTurnRunner,
 	settleSteers,
 	steerLiveChat,
 	unregisterLiveAgent,
-} from "../src/server/jobs.ts";
-import { isJobLive, registerJobAbort, unregisterJobAbort } from "../src/agent/subagents/aborts.ts";
-import { beginTurn, endTurn, isTurnRunning } from "../src/server/turn-liveness.ts";
-import { persistTurn } from "../src/server/turn-service.ts";
-import { chatStore } from "../src/store/chats.ts";
-import { jobStore } from "../src/store/jobs.ts";
-import { createJobRunner, pdfModelOverride, researchModelOverride } from "../src/agent/subagents/runner.ts";
-import { providerKeyMissing, type ModelSlotName } from "../src/core/settings.ts";
-import type { PiEngine } from "../src/agent/models.ts";
-import type { SearchProvider } from "../src/core/search.ts";
-import { PATHS } from "../config.ts";
-import { projectView as projectNative } from "../src/core/view.ts";
-import { subscribe } from "../src/core/events.ts";
-import type { LhMessage } from "../src/core/native-messages.ts";
-import type { SteerInput, TurnInput } from "../src/core/input-events.ts";
+} = await import("../src/server/jobs.ts");
+const { registerJobAbort, unregisterJobAbort } = await import("../src/agent/subagents/aborts.ts");
+const { beginTurn, endTurn } = await import("../src/server/turn-liveness.ts");
+const { persistTurn } = await import("../src/server/turn-service.ts");
+const { chatStore } = await import("../src/store/chats.ts");
+const { jobStore } = await import("../src/store/jobs.ts");
+const { createJobRunner, pdfModelOverride, researchModelOverride } = await import("../src/agent/subagents/runner.ts");
+const { providerKeyMissing } = await import("../src/core/settings.ts");
+const { PATHS } = await import("../config.ts");
+const { projectView: projectNative } = await import("../src/core/view.ts");
+const { subscribe } = await import("../src/core/events.ts");
 
 const JOBS_DIR = path.join(PATHS.data, "jobs");
 

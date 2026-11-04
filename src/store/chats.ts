@@ -12,7 +12,7 @@ import * as path from "node:path";
 import { PATHS } from "../../config.ts";
 import { emit } from "../core/events.ts";
 import type { ChatStore } from "../core/ports.ts";
-import type { ChatRecord, ChatSettings, ChatSummary, ExtractionRunUsage, PlanTree, TurnUsage } from "../core/contracts.ts";
+import type { AttachmentRecord, ChatRecord, ChatSettings, ChatSummary, ExtractionRunUsage, PlanTree, TurnUsage } from "../core/contracts.ts";
 import { CURRENT_CHAT_VERSION } from "../core/contracts.ts";
 import type { LhMessage } from "../core/native-messages.ts";
 import { activeProblemOf, danglingQuestionOf } from "../core/native-messages.ts";
@@ -195,6 +195,59 @@ function deleteChat(id: string): boolean {
 	}
 }
 
+/** Append attachment records — the files are already on disk (store/
+ *  attachments.ts). Not conversation activity: updatedAt stays put. */
+function addAttachments(id: string, attachments: AttachmentRecord[]): void {
+	const record = getChat(id);
+	if (!record) throw new Error(`Chat not found: ${id}`);
+	record.attachments = [...(record.attachments ?? []), ...attachments];
+	writeChat(record);
+}
+
+/** Detach (soft-remove) or restore one attachment record; idempotent —
+ *  detaching twice keeps the first time. Null (no write) when the id isn't
+ *  on the chat. Not conversation activity: updatedAt stays put. */
+function setAttachmentDetached(id: string, attachmentId: string, detached: boolean): AttachmentRecord | null {
+	const record = getChat(id);
+	if (!record) throw new Error(`Chat not found: ${id}`);
+	const attachments = record.attachments ?? [];
+	const index = attachments.findIndex((a) => a.id === attachmentId);
+	if (index === -1) return null;
+	const current = attachments[index]!;
+	let updated: AttachmentRecord;
+	if (detached) {
+		updated = current.detachedAt ? current : { ...current, detachedAt: new Date().toISOString() };
+	} else {
+		const { detachedAt: _detachedAt, ...rest } = current;
+		updated = rest;
+	}
+	record.attachments = attachments.map((a, i) => (i === index ? updated : a));
+	writeChat(record);
+	return updated;
+}
+
+/** Every attachment blob some chat record names — the sweep's live set.
+ *  Reads the raw JSON, NOT getChat/listChats: a record this build refuses
+ *  (newer schema) or can't project still holds its files. */
+function referencedAttachmentFiles(): Set<string> {
+	const files = new Set<string>();
+	let names: string[] = [];
+	try {
+		names = fs.readdirSync(PATHS.chats).filter((f) => f.endsWith(".json"));
+	} catch {
+		return files;
+	}
+	for (const name of names) {
+		try {
+			const record = JSON.parse(fs.readFileSync(path.join(PATHS.chats, name), "utf-8")) as { attachments?: Array<{ file?: unknown }> };
+			for (const a of record.attachments ?? []) if (typeof a.file === "string") files.add(a.file);
+		} catch {
+			// Unreadable record: nothing to learn from it.
+		}
+	}
+	return files;
+}
+
 /** Persist the session plan tree (plan tools call this in execute). */
 function saveTree(id: string, tree: PlanTree): void {
 	const record = getChat(id);
@@ -214,6 +267,9 @@ export const chatStore: ChatStore = {
 	saveSettings,
 	renameChat,
 	deleteChat,
+	addAttachments,
+	setAttachmentDetached,
+	referencedAttachmentFiles,
 	appendTurnUsage,
 	appendExtractionUsage,
 };

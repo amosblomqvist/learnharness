@@ -187,7 +187,15 @@ export function projectView(messages: readonly LhMessage[], live?: LiveTurnState
 				typeof content === "string"
 					? [content]
 					: content.filter((c) => c.type === "text").map((c) => (c as { text: string }).text);
-			out.push({ id: m.id, role: "user", parts: texts.map(textPart) });
+			const attachmentIds = (m as LhMessage).attachmentIds;
+			out.push({
+				id: m.id,
+				role: "user",
+				parts: [
+					...texts.map(textPart),
+					...(attachmentIds?.length ? [{ type: "data-attachments", data: { ids: attachmentIds } }] : []),
+				],
+			});
 			continue;
 		}
 

@@ -5,7 +5,9 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { DraftShell, startDraftSession } from "../components/new-session.tsx";
-import { clearOpeningPrompt, readOpeningPrompt, OPENING_PROMPT_FAILURE } from "../components/opening-prompt.ts";
+import { clearOpeningPrompt, readOpeningPrompt, readOpeningPromptEntry, OPENING_PROMPT_FAILURE } from "../components/opening-prompt.ts";
+import { SessionStarter } from "../components/start-session.ts";
+import type { AttachmentDraft } from "../components/attachments.tsx";
 
 const originalStorage = Object.getOwnPropertyDescriptor(globalThis, "sessionStorage");
 beforeEach(() => {
@@ -252,5 +254,59 @@ describe("the practice draft (?mode=practice, 2026-10-04)", () => {
 		}) as unknown as typeof fetch;
 		await startDraftSession("orbital mechanics", f);
 		assert.deepEqual(body, { title: "orbital mechanics" });
+	});
+});
+
+describe("context attachments on a new session (2026-10-29)", () => {
+	it("uploads the picked files once the session exists, and hands their ids to the chat page with the text", async () => {
+		const { f, calls } = fakeFetch("c_att");
+		const uploads: string[] = [];
+		const target = await startDraftSession("teach me from my book", f, undefined, undefined, new SessionStarter(), undefined, {
+			identity: "book.epub",
+			upload: async (chatId) => {
+				uploads.push(chatId);
+				return ["att_1"];
+			},
+		});
+		assert.equal(target, "/chat/c_att");
+		assert.equal(calls.length, 1, "one create");
+		assert.deepEqual(uploads, ["c_att"], "uploads target the new session, before navigation");
+		assert.deepEqual(readOpeningPromptEntry("c_att"), { text: "teach me from my book", attempted: false, attachmentIds: ["att_1"] });
+	});
+
+	it("a failed upload keeps the created session; the retry reuses it instead of creating another", async () => {
+		const { f, calls } = fakeFetch("c_retry");
+		const starter = new SessionStarter();
+		let attempt = 0;
+		const attach = {
+			identity: "notes.pdf",
+			upload: async () => {
+				if (attempt++ === 0) throw new Error("notes.pdf: upload failed");
+				return ["att_9"];
+			},
+		};
+		await assert.rejects(startDraftSession("hello", f, undefined, undefined, starter, undefined, attach), /upload failed/);
+		assert.equal(await startDraftSession("hello", f, undefined, undefined, starter, undefined, attach), "/chat/c_retry");
+		assert.equal(calls.length, 1, "no second session");
+		assert.deepEqual(readOpeningPromptEntry("c_retry")?.attachmentIds, ["att_9"]);
+	});
+
+	it("shows the Add context control and the picked files as removable chips", () => {
+		const file = new File(["x"], "mechanics.epub");
+		const draft: AttachmentDraft = {
+			files: [{ key: "k1", file }],
+			error: null,
+			add() {},
+			remove() {},
+			clear() {},
+			upload: async () => [],
+			identity: () => "k1",
+		};
+		const html = renderToStaticMarkup(<DraftShell busy={false} text="" onChange={() => {}} onSend={() => {}} attachments={draft} />);
+		assert.match(html, /data-testid="attach-context"/);
+		assert.match(html, /Add context/);
+		assert.match(html, /accept="[^"]*\.epub[^"]*"/);
+		assert.match(html, /mechanics\.epub/);
+		assert.match(html, /aria-label="Remove mechanics\.epub"/);
 	});
 });

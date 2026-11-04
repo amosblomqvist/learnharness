@@ -119,6 +119,7 @@ Additional runtime gates are separate from ordinary model use:
 
 - `node scripts/smoke-web-subscriptions.mjs` — after a build, with no dev server running; launches isolated Next start/dev checks with synthetic credentials and external traffic blocked. It briefly changes/restores a source mtime to exercise reload behavior.
 - `node scripts/smoke-provider-runtime.mjs` — after a build; checks traced provider payload/runtime behavior with fixtures. Packaging invokes it too.
+- `node scripts/smoke-attachments.mjs` — starts `next dev` and drives headless Chrome (`LH_TEST_CHROME`) through attach → send → stored → session-files panel.
 - Other `scripts/smoke-*.mjs` cover standalone/native renderers, compression, file paths and opening flows. Consult their prerequisites and [desktop release](desktop-release.md) before running packaging checks.
 
 These checks prove the exercised fixture/runtime contracts, not real provider entitlements or the quality of model-authored lessons. For frontend failures, reproduce through the actual UI and inspect runtime requests/console/state rather than inferring success from a static render alone.

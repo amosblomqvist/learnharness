@@ -61,7 +61,9 @@ import { PracticeDock } from "@/components/practice-dock";
 import { ThinkingCard, type PracticeThinkingData } from "@/components/practice-cards";
 import { GraphContextCard, type GraphContextData } from "@/components/graph-context-card";
 import { TopBar } from "@/components/top-bar";
-import type { ArtifactPartProps, JobRecord, Phase3, QuestionAnswerData, QuestionFormDraft, TurnUsage, SessionPricing } from "@/src/core";
+import type { ArtifactPartProps, AttachmentRecord, JobRecord, Phase3, QuestionAnswerData, QuestionFormDraft, TurnUsage, SessionPricing } from "@/src/core";
+import { AttachmentChips, ContextAttachControl, mergeAttachments, SessionFilesControl, useAttachmentDraft } from "@/components/attachments";
+import { ComposerActions } from "@/components/composer-actions";
 import type { LhViewMessage } from "@/src/core";
 import { PhaseChip, PhaseDivider } from "@/components/phase-divider";
 import {
@@ -222,6 +224,7 @@ export function Chat({
 	initiallyCompacting = false,
 	initialConfigured = false,
 	kind = "teach",
+	initialAttachments = [],
 }: {
 	chatId: string;
 	title: string;
@@ -245,7 +248,24 @@ export function Chat({
 	 *  it (BYOK, owner 2026-09-22). The server gate stays the truth; this
 	 *  only decides whether the pill rides the composer. */
 	initialConfigured?: boolean;
+	/** The session's context attachments (2026-10-29) — names for the
+	 *  transcript's chips; grows as the composer uploads more. */
+	initialAttachments?: AttachmentRecord[];
 }) {
+	// Session context attachments: the record's list + the composer's draft.
+	const [sessionAttachments, setSessionAttachments] = useState(initialAttachments);
+	const attachmentDraft = useAttachmentDraft((records) => setSessionAttachments((prev) => mergeAttachments(prev, records)));
+	const attachmentItem = (id: string) => {
+		const a = sessionAttachments.find((r) => r.id === id);
+		return { id, name: a?.name ?? "attachment", detached: !!a?.detachedAt };
+	};
+	// The top bar's session-files panel; a transcript chip opens it on its file.
+	const [filesOpen, setFilesOpen] = useState(false);
+	const [filesHighlight, setFilesHighlight] = useState<string | null>(null);
+	const onFilesOpenChange = (open: boolean) => {
+		setFilesOpen(open);
+		if (!open) setFilesHighlight(null);
+	};
 	// Reattach plumbing (background-turn runner wave): the hook holds the
 	// settled terminal's callback — a stable ref assigned below, once
 	// syncFromServer exists (refs, not closures: no stale capture).
@@ -590,11 +610,14 @@ export function Chat({
 		return () => { openingMountedRef.current = false; };
 	}, []);
 
-	const deliverOpeningPrompt = useCallback((prompt: string) => {
+	/** The opening's attachments (uploaded on the new-session page; ids only). */
+	const openingAttachmentIdsRef = useRef<string[]>([]);
+	const deliverOpeningPrompt = useCallback((prompt: string, attachmentIds: string[] = openingAttachmentIdsRef.current) => {
 		openingDraftRef.current = prompt;
+		openingAttachmentIdsRef.current = attachmentIds;
 		// Persist uncertainty BEFORE the POST: another mount must restore,
 		// not race the still-arriving request. No storage means no auto-send.
-		if (!stashOpeningPrompt(chatId, prompt, true)) {
+		if (!stashOpeningPrompt(chatId, prompt, true, attachmentIds)) {
 			applyText(prompt);
 			setOpeningError(true);
 			return;
@@ -602,7 +625,7 @@ export function Chat({
 		setOpeningError(false);
 		draftRef.current = prompt; // The existing 503 flow must restore it too.
 		applyText("");
-		void send({ type: "text", text: prompt }, () => {
+		void send({ type: "text", text: prompt, ...(attachmentIds.length ? { attachmentIds } : {}) }, () => {
 			clearOpeningPrompt(chatId);
 			openingDraftRef.current = null;
 			if (draftRef.current === prompt) draftRef.current = null;
@@ -624,6 +647,7 @@ export function Chat({
 			return;
 		}
 		openingDraftRef.current = prompt!;
+		openingAttachmentIdsRef.current = entry?.attachmentIds ?? [];
 		if (entry?.attempted || initiallyInFlight) {
 			applyText(prompt!); // Interrupted start: the learner explicitly resends.
 			return;
@@ -746,6 +770,7 @@ export function Chat({
 	// server's registry mutex is the structural gate; this is the
 	// affordance).
 	const [compacting, setCompacting] = useState(initiallyCompacting);
+	const [uploading, setUploading] = useState(false);
 	// A failed model response (issue #110): Retry keeps the saved input
 	// and completed work, without another learner message. Offered from
 	// "error" too: a dropped stream leaves the model there, and send()
@@ -1212,7 +1237,7 @@ export function Chat({
 		void dictation.finish().then(doSteerOrSend);
 	};
 	const doSend = () => {
-		if (busy || pending || compacting) return;
+		if (busy || pending || compacting || uploading) return;
 		const t = textRef.current.trim();
 		if (!t) return;
 		if (zeroKeys) {
@@ -1223,13 +1248,30 @@ export function Chat({
 			openModelPicker();
 			return; // No optimistic send and no change to the learner's draft.
 		}
+		// Context attachments upload first (one request per file); the text
+		// stays in the composer until they're on the server.
+		if (attachmentDraft.files.length === 0) {
+			sendText(t, []);
+			return;
+		}
+		setUploading(true);
+		attachmentDraft.upload(chatId).then(
+			(ids) => {
+				setUploading(false);
+				attachmentDraft.clear();
+				sendText(t, ids);
+			},
+			() => setUploading(false), // the control shows the reason; nothing sent
+		);
+	};
+	const sendText = (t: string, attachmentIds: string[]) => {
 		if (openingDraftRef.current !== null) {
-			deliverOpeningPrompt(t);
+			deliverOpeningPrompt(t, [...openingAttachmentIdsRef.current, ...attachmentIds]);
 			return;
 		}
 		draftRef.current = t; // the refusal flow's preserve-and-replay seam
 		applyText("");
-		void send({ type: "text", text: t });
+		void send({ type: "text", text: t, ...(attachmentIds.length ? { attachmentIds } : {}) });
 	};
 
 	/* STEER VS SEND (owner arc 2026-10-03): a send while a turn runs steers
@@ -1246,6 +1288,8 @@ export function Chat({
 		const t = textRef.current.trim();
 		if (!t) return;
 		if (busy) {
+			// A steer carries text only: picked files wait for the turn to end.
+			if (attachmentDraft.files.length > 0) return;
 			applyText("");
 			void steer(t);
 			return;
@@ -1353,6 +1397,16 @@ export function Chat({
 							<div className="min-w-4 flex-1" aria-hidden="true" />
 					</>
 					)}
+					{/* Session files (2026-10-29): every kind — the add path while a
+					    question or probe card blocks the composer. */}
+					<SessionFilesControl
+						chatId={chatId}
+						attachments={sessionAttachments}
+						setAttachments={setSessionAttachments}
+						open={filesOpen}
+						onOpenChange={onFilesOpenChange}
+						highlightId={filesHighlight}
+					/>
 					{/* The plan chip (owner, plan-placement round): session-level
 					    structure beside the phase chip — access to the full-DAG popup
 					    at every width; the marginalia is the wide-screen glance view. */}
@@ -1520,6 +1574,15 @@ export function Chat({
 												<div className="lh-prose whitespace-pre-wrap text-foreground">
 													<PathText text={m.parts.filter((p) => p.type === "text").map((p) => p.text).join("\n")} />
 												</div>
+												<AttachmentChips
+													items={m.parts
+														.filter((p) => p.type === "data-attachments")
+														.flatMap((p) => (p.data as { ids: string[] }).ids.map(attachmentItem))}
+													onOpen={(id) => {
+														setFilesHighlight(id);
+														setFilesOpen(true);
+													}}
+												/>
 											</div>
 									) : (
 									<Message from="assistant" className="max-w-full">
@@ -1732,6 +1795,9 @@ export function Chat({
 								</div>
 							)
 						)
+					}
+					composerActions={
+						<ComposerActions picker={<ContextAttachControl draft={attachmentDraft} disabled={busy || uploading} lockRemoval={uploading} />} />
 					}
 					composer={
 						<ChatSessionComposer
@@ -1951,6 +2017,7 @@ function DockOverlay({
 	dictationSlot,
 	dictationCancel,
 	setupCta,
+	composerActions,
 	queuedSteers,
 }: {
 	pending: ReturnType<typeof pendingQuestionOf>;
@@ -2004,6 +2071,9 @@ function DockOverlay({
 	/** The persistent setup CTA (BYOK, owner 2026-09-22): the same pill
 	 *  home and /chat/new carry, above the composer while slots are unset. */
 	setupCta?: React.ReactNode;
+	/** The composer's action row (session context attachments, 2026-10-29):
+	 *  shown only while the composer itself is (no question, no problem). */
+	composerActions?: React.ReactNode;
 }) {
 	const { isAtBottom, scrollToBottom, scrollRef } = useStickToBottomContext();
 	// Render-fresh bottom state (flicker round): the arrival block below reads
@@ -2357,6 +2427,7 @@ function DockOverlay({
 					<div ref={viewportRef} data-dock-viewport="" className="pointer-events-auto">
 					<div ref={bodyRef}>
 					{setupCta}
+					{!pending && !practice && composerActions}
 					{/* The queued-steer indicator (owner spec 2026-10-03): quiet
 					    one-liners above the shell - right-aligned to where its corner
 					    rounding starts, truncated, no background, no container. A

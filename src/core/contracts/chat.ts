@@ -52,12 +52,63 @@ export interface ChatRecord {
 	extractions?: ExtractionRunUsage[];
 	/** Per-chat model/thinking overrides for the conversation agents. */
 	settings?: ChatSettings;
+	/** Session context attachments (2026-10-29): files the learner attached
+	 *  from the composer, stored once by content under data/attachments/. The agent
+	 *  sees them through the system prompt's attachments section and reads
+	 *  them on demand — contents never ride the record. Records are never
+	 *  deleted: removal sets `detachedAt`, Undo clears it. */
+	attachments?: AttachmentRecord[];
 	/** SCHEMA STAMP (schema-versioning wave, owner 2026-10-10): LAZY v1 —
 	 *  existing records stay unstamped (absence reads as v1); every write
 	 *  stamps the current version. A record stamped NEWER than this build
 	 *  (the downgrade scenario) is REFUSED on read: a read-modify-write
 	 *  store must never rewrite what it doesn't understand. */
 	version?: number;
+}
+
+export type AttachmentKind = "image" | "pdf" | "epub";
+
+/** One attached file. `file` is the content-addressed blob name
+ *  (`<sha256><ext>` under data/attachments/ — relative, so LH_DATA_DIR can
+ *  move; chats attaching the same bytes share it); `name` is what the
+ *  learner picked. Structure facts are captured once, at upload. */
+export interface AttachmentRecord {
+	id: string;
+	name: string;
+	kind: AttachmentKind;
+	mimeType: string;
+	bytes: number;
+	file: string;
+	addedAt: string;
+	/** PDF page count. */
+	pages?: number;
+	/** EPUB chapter count (spine items). */
+	chapters?: number;
+	/** EPUB title metadata. */
+	title?: string;
+	/** Set when the learner removed the file from the session's context (ISO time); absent = active. The record and its blob stay so Undo needs no re-upload. */
+	detachedAt?: string;
+}
+
+/** Accepted attachment types by extension — single-sourced for the
+ *  composer's file picker and the upload route's validation. */
+export const ATTACHMENT_TYPES: Readonly<Record<string, { kind: AttachmentKind; mimeType: string }>> = {
+	".png": { kind: "image", mimeType: "image/png" },
+	".jpg": { kind: "image", mimeType: "image/jpeg" },
+	".jpeg": { kind: "image", mimeType: "image/jpeg" },
+	".gif": { kind: "image", mimeType: "image/gif" },
+	".webp": { kind: "image", mimeType: "image/webp" },
+	".pdf": { kind: "pdf", mimeType: "application/pdf" },
+	".epub": { kind: "epub", mimeType: "application/epub+zip" },
+};
+
+/** Per-file upload ceiling. */
+export const ATTACHMENT_MAX_BYTES = 50 * 1024 * 1024;
+
+/** The lowercased extension of a file name ("" when none). */
+export function attachmentExtension(name: string): string {
+	const dot = name.lastIndexOf(".");
+	return dot > 0 ? name.slice(dot).toLowerCase() : "";
 }
 
 /** The chat record format this build writes and understands. */

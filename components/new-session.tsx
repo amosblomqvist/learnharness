@@ -14,6 +14,7 @@ import { ChainTableOverlay } from "@/components/chain-table.tsx";
 import { ComposerActions, NodePickerControl } from "@/components/composer-actions";
 import { OPENING_PROMPT_FAILURE } from "@/components/opening-prompt";
 import { SessionStarter } from "@/components/start-session";
+import { ContextAttachControl, useAttachmentDraft, type AttachmentDraft } from "@/components/attachments";
 import type { ChatSettings, GraphSnapshot } from "@/src/core";
 
 /** The draft's pick set (owner round 10): the SAME shape the home pick
@@ -47,6 +48,7 @@ export async function startDraftSession(
 	picks?: readonly DraftPick[],
 	starter = new SessionStarter(),
 	settingsIdentity?: string,
+	attach?: Parameters<SessionStarter["start"]>[3],
 ): Promise<string | null> {
 	const t = text.trim();
 	if (!t) return null;
@@ -60,6 +62,7 @@ export async function startDraftSession(
 			: { title: t },
 		fetchLike,
 		settingsIdentity,
+		attach,
 	);
 }
 
@@ -80,6 +83,7 @@ export function DraftShell({
 	onOpenPicker,
 	onClearPicks,
 	overlay,
+	attachments,
 }: {
 	busy: boolean;
 	text: string;
@@ -107,6 +111,9 @@ export function DraftShell({
 	 *  the graph view (the overlay fills its column, never the sidebar).
 	 *  Passed as a node so the pick state stays in NewSession. */
 	overlay?: ReactNode;
+	/** Session context attachments (2026-10-29): the draft's picked files,
+	 *  uploaded once the session exists (NewSession's send). */
+	attachments?: AttachmentDraft;
 }) {
 	// Voice dictation (STT wave, 2026-09-17): finals append at the end of the
 	// draft text (via the parent's onChange — the truth lives there); the
@@ -183,9 +190,14 @@ export function DraftShell({
 						<div className="bg-background pb-4">
 							<div className={DOCK}>
 								<ComposerActions
-									picker={(picks.length > 0 || mode === "practice") && (
-										<NodePickerControl count={picks.length} onOpen={onOpenPicker} onClear={onClearPicks} />
-									)}
+									picker={
+										<>
+											{(picks.length > 0 || mode === "practice") && (
+												<NodePickerControl count={picks.length} onOpen={onOpenPicker} onClear={onClearPicks} />
+											)}
+											{attachments && <ContextAttachControl draft={attachments} disabled={busy} />}
+										</>
+									}
 									setup={setupCta}
 								/>
 								{startError && <p role="alert" className="pointer-events-auto mb-2 text-sm text-destructive">{OPENING_PROMPT_FAILURE}</p>}
@@ -245,6 +257,7 @@ export function NewSession({ initialConfigured, mode = "teach" }: { initialConfi
 	const startingRef = useRef(false);
 	const starterRef = useRef(new SessionStarter());
 	const [startError, setStartError] = useState(false);
+	const attachments = useAttachmentDraft();
 	// THE PICK BAR (owner round 10): the draft's lifted pick set + the
 	// snapshot the standalone chain-table picker reads. Lazy — the graph
 	// is fetched on FIRST open only, then reused.
@@ -306,7 +319,8 @@ export function NewSession({ initialConfigured, mode = "teach" }: { initialConfi
 		setBusy(true);
 		setStartError(false);
 		void startDraftSession(draft, fetch, mode === "practice" ? "practice" : undefined, mode === "practice" ? picksRef.current : undefined,
-			starterRef.current, JSON.stringify(catalog?.slots.strong))
+			starterRef.current, JSON.stringify(catalog?.slots.strong),
+			attachments.files.length > 0 ? { identity: attachments.identity(), upload: (chatId) => attachments.upload(chatId) } : undefined)
 			.then((target) => {
 				if (target) router.push(target);
 				else { startingRef.current = false; setBusy(false); }
@@ -316,7 +330,7 @@ export function NewSession({ initialConfigured, mode = "teach" }: { initialConfi
 				setBusy(false);
 				setStartError(true);
 			});
-	}, [router, configured, zeroKeys, catalog, mode]);
+	}, [router, configured, zeroKeys, catalog, mode, attachments]);
 
 	return (
 		<>
@@ -330,6 +344,7 @@ export function NewSession({ initialConfigured, mode = "teach" }: { initialConfi
 				picks={picks}
 				onOpenPicker={openPicker}
 				onClearPicks={() => applyPicks([])}
+				attachments={attachments}
 				overlay={
 					// THE PICKER (owner round 10b): hosted INSIDE the content
 					// column — absolute inset-0 resolves to the column's relative

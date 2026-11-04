@@ -17,6 +17,12 @@ import {
 import { practiceTools, type PracticeToolContext } from "./tools/practice.ts";
 import { healToolRecord, withArgumentHeal } from "./tools/heal.ts";
 import { sendToUserTool } from "./tools/send-to-user.ts";
+import {
+	attachmentImageParts,
+	attachmentsPromptSection,
+	attachmentTools,
+	type SessionAttachment,
+} from "./tools/attachments.ts";
 import { createReadTool, readTool } from "./tools/read.ts";
 import { CLAUDE_CODE_PROVIDER } from "./claude-code/constants.ts";
 import { quizInputObject, quizInputProblems } from "../core/question-core.ts";
@@ -93,6 +99,17 @@ const composedInstructions: Record<AgentKind, string> = {
 	practice: composeInstructions("practice"),
 };
 
+/** The full system prompt of one turn: the composed doctrine, then the session-attachments section.
+ *  The section goes last so the doctrine prefix stays cacheable. */
+export function systemPromptFor(
+	kind: AgentKind,
+	opts: { promptSwitches?: Record<string, boolean>; attachments?: readonly SessionAttachment[] } = {},
+): string {
+	const instructions = opts.promptSwitches ? composeInstructions(kind, opts.promptSwitches) : composedInstructions[kind]!;
+	const section = attachmentsPromptSection(opts.attachments ?? []);
+	return section ? `${instructions}\n\n---\n\n${section}` : instructions;
+}
+
 // Money channel (wave 4): the chat-handler passes a per-turn collector;
 // every model call's usage lands in the chat record's turns log
 // (ChatStore.appendTurnUsage). The narrow param keeps the seam honest.
@@ -130,6 +147,12 @@ export interface AgentBuildOptions {
 	 *  <chatId>.jsonl via providerEventObserver — the GLM-truncation /
 	 *  DeepSeek-id incident layer. Absent or env-off → no observer. */
 	chatId?: string;
+	/** The session's ACTIVE context attachments, paths resolved (2026-10-29):
+	 *  the system prompt's manifest section, the scoped pdf_* / epub_*
+	 *  readers (joined to every kind's registry unless an explicit `tools`
+	 *  registry is passed), and inline images for vision models.
+	 *  Absent/empty = none. */
+	attachments?: readonly SessionAttachment[];
 }
 
 /**
@@ -183,9 +206,11 @@ function baseAgentOptions(kind: AgentKind, opts: AgentBuildOptions, tools: Agent
 	// ("practice" is not a ModelRole) honest about that.
 	const engine = opts.engine ?? piEngineFor(kind as "prober" | "teacher");
 	const stopper = makeQuestionStopper(kind);
-	const systemPrompt = opts.promptSwitches
-		? composeInstructions(kind, opts.promptSwitches)
-		: composedInstructions[kind]!;
+	const systemPrompt = systemPromptFor(kind, opts);
+	const sessionTools = opts.tools === undefined ? Object.values(healToolRecord(attachmentTools(opts.attachments ?? []))) : [];
+	const attachedImages = engine.model.input?.includes("image")
+		? attachmentImageParts(opts.attachments ?? [], engine.model)
+		: null;
 	// Debug recorder (owner, 2026-10-04): raw provider events when
 	// LH_PROVIDER_EVENTS=1 and the caller handed a chatId; undefined is
 	// the normal no-observer path (tests, env-off).
@@ -206,6 +231,7 @@ function baseAgentOptions(kind: AgentKind, opts: AgentBuildOptions, tools: Agent
 				...tools.map((tool) => tool.name === "read" && tool.execute === readTool.execute
 					? { ...tool, execute: createReadTool(engine.model).execute as AgentTool<any>["execute"] }
 					: tool),
+				...sessionTools,
 				...(opts.tools === undefined && (engine.model.provider === CLAUDE_CODE_PROVIDER || engine.model.id.toLowerCase().includes("claude"))
 					? [withArgumentHeal(sendToUserTool)]
 					: []),
@@ -234,7 +260,11 @@ function baseAgentOptions(kind: AgentKind, opts: AgentBuildOptions, tools: Agent
 		// UI-only markers (plan-block) drop, the app's id fields strip, and
 		// an abort's dangling question call gets its INTERRUPTED result. It
 		// must never throw (pi's convertToLlm contract).
-		convertToLlm: toLlmMessages,
+		// Attached images ride the message they were sent with — vision
+		// models only, processed for the model like every other image; for
+		// the rest the ids just strip (the manifest names it).
+		convertToLlm: async (messages) =>
+			toLlmMessages(messages, attachedImages ? { attachmentParts: await attachedImages(messages) } : {}),
 		prepareRequest: (request) => {
 			if (opts.callPurpose) {
 				let learner = false, automatic = false;

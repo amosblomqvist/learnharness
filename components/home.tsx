@@ -15,6 +15,7 @@ import { StatsBar } from "@/components/stats-bar";
 import { OPENING_PROMPT_FAILURE } from "@/components/opening-prompt";
 import { PathInput } from "@/components/path-input";
 import { SessionStarter } from "@/components/start-session";
+import { ContextAttachControl, useAttachmentDraft } from "@/components/attachments";
 import type { TurnUsage } from "@/src/core";
 
 /**
@@ -61,6 +62,9 @@ export function Home({
 	const [busy, setBusy] = useState(false);
 	const startingRef = useRef(false);
 	const starterRef = useRef(new SessionStarter());
+	// Session context attachments (2026-10-29): picked files upload on send,
+	// after the session exists and before navigation (same as /chat/new).
+	const attachments = useAttachmentDraft();
 	const [startError, setStartError] = useState(false);
 	/* Run end focuses the topic input (owner, 2026-10-01): the hands are on
 	 * the keyboard from the stop. Falling edge only; this surface's only
@@ -147,7 +151,8 @@ export function Home({
 				title: t,
 				...(mode === "practice" ? { kind: "practice" } : {}),
 				...(practiceProps.length > 0 ? { graphContext: { propositions: practiceProps } } : {}),
-			}, fetch, JSON.stringify(catalog?.slots.strong));
+			}, fetch, JSON.stringify(catalog?.slots.strong),
+			attachments.files.length > 0 ? { identity: attachments.identity(), upload: (chatId) => attachments.upload(chatId) } : undefined);
 			router.push(target);
 		} catch {
 			startingRef.current = false;
@@ -219,13 +224,18 @@ export function Home({
 					    shows the pick HINT so the affordance is discoverable;
 					    teaching mode with nothing picked renders nothing. */}
 					<ComposerActions
-						picker={(practiceProps.length > 0 || mode === "practice") && (
-							<NodePickerControl
-								count={practiceProps.length}
-								onOpen={() => setChainSelectOpen(true)}
-								onClear={() => setPracticeProps([])}
-							/>
-						)}
+						picker={
+							<>
+								{(practiceProps.length > 0 || mode === "practice") && (
+									<NodePickerControl
+										count={practiceProps.length}
+										onOpen={() => setChainSelectOpen(true)}
+										onClear={() => setPracticeProps([])}
+									/>
+								)}
+								<ContextAttachControl draft={attachments} disabled={busy} />
+							</>
+						}
 						setup={zeroKeys ? (
 							<ZeroKeysPill inline onOpen={() => setSetupOpen(true)} />
 						) : (

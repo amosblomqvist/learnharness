@@ -5,8 +5,11 @@ import * as path from "node:path";
 /**
  * Shared plumbing for the learner-filesystem tools (ls / find / grep) —
  * sources v1 (2026-09-19): the agent locates and reads the learner's files
- * itself, so paths need no UI affordance (user decision: no attachments —
- * the learner references files in messages; the agent finds them).
+ * itself, so paths need no UI affordance (user decision, 2026-09: the
+ * learner references files in messages; the agent finds them). Since
+ * 2026-10-29 the learner can ALSO attach files from the composer — those
+ * are stored once by content and read by the record-scoped tools in
+ * attachments.ts; these tools stay the path for everything else.
  *
  * Safety posture (user-locked): READ-ONLY by construction — no shell-out,
  * no user-controlled process args, no mutation APIs anywhere here. The one

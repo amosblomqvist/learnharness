@@ -26,7 +26,7 @@ These are not a complete hexagonal-architecture proof. Some core modules are Nod
 
 These are different lifetimes:
 
-- **Conversation:** a durable `ChatRecord` in `data/chats/<id>.json`, containing native `LhMessage[]`, settings, an optional plan tree and usage logs. Missing `kind` means teaching; `kind: "practice"` selects the practitioner.
+- **Conversation:** a durable `ChatRecord` in `data/chats/<id>.json`, containing native `LhMessage[]`, settings, an optional plan tree and usage logs. Missing `kind` means teaching; `kind: "practice"` selects the practitioner. Uploaded session attachments (images, PDFs, EPUBs) are recorded on the chat and stored once by content under `data/attachments/<sha256><ext>`, shared across sessions; a blob is deleted only when no chat record names it.
 - **Engine:** a resolved Pi model, stream function and thinking level (`PiEngine` in `src/agent/models.ts`). It is provider-aware, not an OpenRouter-only abstraction.
 - **Agent:** a fresh `@earendil-works/pi-agent-core` `Agent` constructed for one application turn, with that conversation's history, current prompt and current tool registry.
 - **Application turn:** one accepted input followed by a server-owned agent run. A run can make several model calls and execute tools before it ends. It is not an HTTP connection or a single provider generation.
@@ -232,7 +232,7 @@ Ordinary API credentials are read through the key seam, with real environment va
 - [Compaction, context and accounting](compaction-accounting.md)
 - [Development credential and shared-server boundaries](development.md#subscription-connections-in-webdev)
 
-File tools are read-only, but not confined to `data/` or a selected project: relative/default paths resolve against the server user's home. Walk exclusions reduce noise, not access authority. Existing-file attachments carry paths for the agent to read; they are not a new file-upload sandbox. Read/PDF/visual image results share image postprocessing; tool content retained outside the model-facing result follows [tool content recovery](tool-content-recovery.md). Search uses configured Tavily/Brave adapters; research can still use direct web fetching without a search key. Dictation mints short-lived Deepgram tokens server-side, then streams audio browser → Deepgram, not through the app server; its language preference is shared app settings.
+File tools are read-only, but not confined to `data/` or a selected project: relative/default paths resolve against the server user's home. Walk exclusions reduce noise, not access authority. Existing-file attachments carry paths for the agent to read; they are not a new file-upload sandbox. Uploaded session attachments are different: each turn's system prompt lists the session's active ones, and scoped `pdf_*`/`epub_*` readers accept only those files. Read/PDF/visual image results and inline attachment images share image postprocessing; tool content retained outside the model-facing result follows [tool content recovery](tool-content-recovery.md). Search uses configured Tavily/Brave adapters; research can still use direct web fetching without a search key. Dictation mints short-lived Deepgram tokens server-side, then streams audio browser → Deepgram, not through the app server; its language preference is shared app settings.
 
 ## 10. Verification seams
 
