@@ -4,6 +4,7 @@
  */
 import { calculateCost, type Usage } from "@earendil-works/pi-ai";
 import { piModels } from "../agent/models.ts";
+import { nativeProviderPricingUnknown } from "./native-providers.ts";
 import { CUSTOM_PROVIDER } from "../core/auth-keys.ts";
 import { CLAUDE_CODE_PROVIDER } from "../core/contracts/claude-code.ts";
 import type { CallUsage, ChatRecord, JobRecord, TurnUsage } from "../core/contracts.ts";
@@ -14,10 +15,17 @@ function catalogModel(id: string) {
 	// Native CLI routing determines billing. Adapter zero-rate placeholders
 	// must never become an apparent $0 estimate or subscription classification.
 	if (colon < 0 || isSubscriptionModel(id) || [CLAUDE_CODE_PROVIDER, CUSTOM_PROVIDER.id].includes(id.slice(0, colon))) return undefined;
+	if (nativeProviderPricingUnknown(id.slice(0, colon))) return undefined;
 	return piModels().getModel(id.slice(0, colon), id.slice(colon + 1));
 }
 
 export function callCost(call: Partial<CallUsage>, modelId: string): number | null {
+	// Native catalogs are provider-owned and may change after registration.
+	// Malformed rates must not break session or job observability reads.
+	try { return estimateCallCost(call, modelId); } catch { return null; }
+}
+
+function estimateCallCost(call: Partial<CallUsage>, modelId: string): number | null {
 	const model = catalogModel(modelId);
 	if (!model || call.inputTokens === undefined || call.outputTokens === undefined) return null;
 	const input = call.inputTokens;

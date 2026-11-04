@@ -1,10 +1,11 @@
 import { readFileSync } from "node:fs";
 import type { NextConfig } from "next";
+import { PHASE_PRODUCTION_BUILD } from "next/constants.js";
 import { MAX_IMPORT_BODY_BYTES } from "./lib/notes-import-limits.ts";
 
 const pkg = JSON.parse(readFileSync(new URL("./package.json", import.meta.url), "utf8")) as { version: string; homepage: string };
 
-const nextConfig: NextConfig = {
+export const nextConfig: NextConfig = {
 	// Public build metadata only; no new runtime Electron version API.
 	env: { LH_VERSION: pkg.version, LH_HOMEPAGE: pkg.homepage },
 	// Leave multipart headroom above the 25 MiB file allowance. This is a
@@ -121,4 +122,9 @@ const nextConfig: NextConfig = {
 	],
 };
 
-export default nextConfig;
+export default function config(phase: string): NextConfig {
+	if (phase === PHASE_PRODUCTION_BUILD && process.env.LH_NATIVE_PROVIDER_CONFIG) {
+		throw new Error("Unset LH_NATIVE_PROVIDER_CONFIG before building. Native providers are private runtime configuration, never build inputs.");
+	}
+	return nextConfig;
+}

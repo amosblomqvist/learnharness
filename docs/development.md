@@ -10,10 +10,10 @@ Use a current Node.js/npm installation compatible with the lockfile and native d
 
 ```bash
 npm ci                 # install the locked dependencies
-npm run dev            # Next development server, normally http://localhost:3000
+npm run dev            # Next development server, loopback only (http://127.0.0.1:3000)
 
 npm run build          # production Next build, including standalone output
-npm start              # serve the production build with Next
+npm start              # serve the production build with Next, loopback only
 
 npm run desktop:dev    # Next dev + Electron pointed at localhost:3000
 ```
@@ -36,6 +36,7 @@ Secrets and machine-specific paths may be supplied through the process environme
 | `CHROME_PATH` | Optional Chrome/Chromium executable fallback for demo verification. The Electron browser helper is primary; no extra Chromium is downloaded. PDFs/SVGs use native rendering. |
 | `LH_DATA_DIR` | Relocates mutable chats, jobs, graph, settings and prompt overrides; default is repo `data/`. |
 | `LH_AUTH_FILE` | Relocates the API-key/custom-endpoint credential file; default is repo-root `auth.json`, separate from `data/`. |
+| `LH_NATIVE_PROVIDER_CONFIG` | Opt-in absolute path to a private [native-provider manifest](native-providers.md); runtime only, unset for production builds. |
 
 The packaged desktop host sets its own data/auth locations under Electron `userData`; it does not use the repository's development profile. Auth files are owner-only plaintext, not an encrypted vault. Keep `.env.local`, auth/connection files and learning data out of commits and build artifacts. Do not copy a personal profile into fixtures or a reproduction workspace.
 
@@ -43,6 +44,7 @@ Provider-specific references:
 
 - [Claude Code](claude-code.md): opt-in local CLI setup, native authentication, process/tool bridge and session lifecycle. Its CLI authentication is not configured by adding an ordinary LearnHarness API key.
 - [Custom providers](custom-providers.md): the supported OpenAI-compatible endpoint editor, authentication binding, models and limits.
+- [Native provider modules](native-providers.md): trusted external compiled Pi providers, private runtime configuration, SDK compatibility and offline standalone/Electron checks.
 - [Compaction and accounting](compaction-accounting.md): context fitting, usage and current-catalog pricing. There is no generated local rate-table maintenance step.
 
 ### Subscription connections in web/dev
@@ -53,7 +55,7 @@ Web/dev stores `chatgpt-credentials.json`, `github-copilot-credentials.json` and
 
 Sign-in opens a tab in the browser that initiated it; allow that tab if blocked. **Complete ChatGPT sign-in in a browser on the server's machine**, because the callback listener is `127.0.0.1` on that machine. Copilot/Grok use device codes. The Electron dev shell opens provider pages in the system browser. Credentials/refresh remain server-owned; other browsers connected to the same server share its connections and background-use consent, just as they share its keys and learning data.
 
-This is a **trusted local/shared developer-server mode**, not multi-user hosting. Same-origin JSON/custom-header checks and short-lived, origin-bound, one-use browser-opening actions prevent ordinary cross-origin browser controls. They are **not user authentication or DNS-rebinding protection**. Subscription support does not change Next's listening/LAN behavior. Do not expose the server to untrusted users or the public Internet without an independent access/host gate. Remote ChatGPT callback routing, per-user isolation and credential import are not implemented.
+This is a **trusted local/shared developer-server mode**, not multi-user hosting. Same-origin JSON/custom-header checks and short-lived, origin-bound, one-use browser-opening actions prevent ordinary cross-origin browser controls. They are **not user authentication or DNS-rebinding protection**. The npm web/dev scripts bind to `127.0.0.1` by default; subscription support does not authorize widening that listener. Do not expose the server to untrusted users or the public Internet without an independent access/host gate. Remote ChatGPT callback routing, per-user isolation and credential import are not implemented.
 
 ## Source map
 
@@ -119,6 +121,7 @@ Additional runtime gates are separate from ordinary model use:
 
 - `node scripts/smoke-web-subscriptions.mjs` — after a build, with no dev server running; launches isolated Next start/dev checks with synthetic credentials and external traffic blocked. It briefly changes/restores a source mtime to exercise reload behavior.
 - `node scripts/smoke-provider-runtime.mjs` — after a build; checks traced provider payload/runtime behavior with fixtures. Packaging invokes it too.
+- `node scripts/smoke-native-providers.mjs` — after a fresh build with `LH_NATIVE_PROVIDER_CONFIG` unset and `scripts/build-server.mjs`, with no active dev server; tests external synthetic modules through real standalone model/settings routes under host and available Electron Node, with outbound network blocked.
 - Other `scripts/smoke-*.mjs` cover standalone/native renderers, compression, file paths and opening flows. Consult their prerequisites and [desktop release](desktop-release.md) before running packaging checks.
 
 These checks prove the exercised fixture/runtime contracts, not real provider entitlements or the quality of model-authored lessons. For frontend failures, reproduce through the actual UI and inspect runtime requests/console/state rather than inferring success from a static render alone.

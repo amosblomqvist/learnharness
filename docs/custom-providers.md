@@ -4,6 +4,8 @@ LearnHarness supports **one custom OpenAI-compatible endpoint with multiple mode
 The setup and Settings UI are based on PR #62 by Daniel Buckner and Abhishek Thakur.
 Pi owns inference, message conversion, tools, streaming, and reasoning-effort handling.
 For the separate external CLI provider, see [Claude Code](claude-code.md).
+For trusted external compiled native Pi providers with operator-managed runtime
+configuration (not a browser editor), see [native provider modules](native-providers.md).
 
 ## Configure an endpoint
 
