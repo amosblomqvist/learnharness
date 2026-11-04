@@ -336,6 +336,9 @@ function QuestionDockForm({
 	// deliberate (the same number, the same meaning). The dock unmounts
 	// between questions, so each question starts fresh at 50.
 	const [confIdx, setConfIdx] = useState<number>(initialDraft?.confidenceIndex ?? DEFAULT_CONFIDENCE_INDEX);
+	// The same slider, same stops, on every graded answer: quiz picks and
+	// explain/recall free text. `ask` has no right answer — no probability.
+	const hasConfidence = kind === "quiz" || kind === "explain";
 	const selectMode: SelectMode = qd.mode === "multi-select" ? "multi-select" : "single-select";
 
 	// The PRIMARY dictation input (owner, STT round 1): while a question
@@ -395,9 +398,9 @@ function QuestionDockForm({
 			other: sel.otherSelected ? other : undefined,
 			text: qd.mode === "text" ? answerTextRef.current : undefined,
 			thinking: qd.mode !== "text" ? thinkingTextRef.current.trim() || undefined : undefined,
-			// Always sent on quiz answers (owner: 50 must mean 50, never
-			// "untouched"); buildAnswer drops it on "I don't know".
-			confidence: kind === "quiz" ? CONFIDENCE_STOPS[confIdx] : undefined,
+			// Always sent on quiz and explain answers (owner: 50 must mean 50,
+			// never "untouched"); buildAnswer drops it on "I don't know".
+			confidence: hasConfidence ? CONFIDENCE_STOPS[confIdx] : undefined,
 		};
 		// Snapshot before optimistic submission unmounts the form. Ref values
 		// include the dictation finals that just landed, unlike stale closures.
@@ -526,8 +529,10 @@ function QuestionDockForm({
 				// Global confidence cycling (owner, UI round 2026-10-01): the
 				// SAME pattern as ↑/↓ over the rows — works wherever focus
 				// sits, no click-in, no focus ring. Dead on "I don't know"
-				// (the slider grays out and nothing is sent).
-				if (kind !== "quiz" || sel.dontKnow) return;
+				// (the slider grays out and nothing is sent). Text mode is
+				// mouse-only for the slider (owner Q5): this listener never
+				// mounts there — no rows, rowCount 0.
+				if (!hasConfidence || sel.dontKnow) return;
 				e.preventDefault();
 				setConfIdx((i) =>
 					Math.min(
@@ -740,8 +745,8 @@ function QuestionDockForm({
 			</div>
 
 			{/* Confidence (owner, 2026-10-01; UI rounds same day): a snapped
-				slider below the options and above "Your thinking" — the
-				learner's stated probability that his selected answer is
+				slider above the answer field — on quiz picks and on explain/recall
+				free text — the learner's stated probability that his answer is
 				correct. The thumb's POSITION is the raw fraction; the painted
 				RAIL overlays exactly the thumb-center range (inset half a disc
 				per side), so 0 and 100 rest flush against the rail's very
@@ -752,7 +757,7 @@ function QuestionDockForm({
 				app-wide). Clicking and dragging are native. "I don't know"
 				GRAYS it out — the layout holds, no value is sent, the IDK
 				signal stands alone. */}
-			{kind === "quiz" && (
+			{hasConfidence && (
 				<div className="border-t border-border/60 px-4 py-2.5">
 					<div className="flex items-center gap-3">
 						<span
@@ -790,9 +795,9 @@ function QuestionDockForm({
 								step={1}
 								value={CONFIDENCE_STOPS[confIdx]}
 								disabled={sel.dontKnow}
-								aria-label="Confidence — the probability your selected answer is correct"
+								aria-label="Confidence — the probability your answer is correct"
 								aria-valuetext={`${CONFIDENCE_STOPS[confIdx]} percent`}
-								title="The probability your selected answer is correct — 50% is a coin flip. Adjust with ←/→."
+								title="The probability your answer is correct — 50% is a coin flip. Adjust with ←/→."
 								data-testid="confidence-slider"
 								onChange={(e) => {
 									// Snap to the nearest stop; the rendered VALUE is the stop's own
