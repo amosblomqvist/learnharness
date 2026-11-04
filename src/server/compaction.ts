@@ -238,7 +238,10 @@ async function compact(deps: CompactionDeps, chatId: string): Promise<void> {
 			at: new Date().toISOString(),
 		};
 		const marker = newCompactionMarker(trimmed, details);
-		deps.chatStore.saveMessages(chatId, [...messages, marker]);
+		// Re-read: the learner may skip or toggle while the summary runs.
+		const current = deps.chatStore.getChat(chatId);
+		if (!current) throw new Error(`Chat not found: ${chatId}`);
+		deps.chatStore.saveMessages(chatId, [...current.messages, marker]);
 		// The money channel: the summary is a real model call on the
 		// session's own engine — its usage keys to the marker (provenance:
 		// the transcript shows the compaction divider at the marker).
