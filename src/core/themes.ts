@@ -133,13 +133,13 @@ function builtin(name: string, mode: ThemeMode, c: ThemeColors): Theme {
  *  (app/globals.css carries it as literals; tests pin the two equal).
  *  Catppuccin: base/surface0/surface1, mauve accent, lavender/pink/peach
  *  emphasis; Latte takes mantle/surface0 instead, because surface0 on a
- *  light page reads as a heavy gray slab (owner, 2026-11-04). Rosé Pine: base/surface/highlight-med, iris accent,
- *  iris/rose/gold emphasis. Gruvbox: dark medium (bg0/bg0_s/bg2) with the
- *  bright accents; light hard (bg0_h/bg0_s/bg2) with the faded, darker
- *  accents so the ink stays quiet on the pale page. Orange accent,
- *  blue/purple/aqua emphasis. Ivory: warm ivory page, terracotta accent,
- *  blue/green/clay emphasis. Pastel: a gray-cream page with soft green,
- *  purple and orange inks. NvChad Onedark: base46's onedark. */
+ *  light page reads as a heavy gray slab (owner, 2026-11-04).
+ *  Rosé Pine: base/surface/highlight-med, iris accent, iris/rose/gold
+ *  emphasis. Gruvbox Dark: medium (bg0/bg0_s/bg2) with the bright
+ *  accents; orange accent, blue/purple/aqua emphasis. Ivory: warm ivory
+ *  page, terracotta accent, blue/green/clay emphasis. Pastel: a gray-cream
+ *  page with soft green, purple and orange inks. NvChad Onedark: base46's
+ *  onedark. */
 export const BUILTIN_THEMES: readonly Theme[] = [
 	{
 		id: DEFAULT_THEME_ID,
@@ -191,11 +191,6 @@ export const BUILTIN_THEMES: readonly Theme[] = [
 		background: "#282828", surface: "#32302f", border: "#504945", text: "#ebdbb2", textMuted: "#a89984",
 		accent: "#fe8019", bold: "#83a598", italic: "#d3869b", code: "#8ec07c",
 		error: "#fb4934", success: "#b8bb26", warning: "#fabd2f",
-	}),
-	builtin("Gruvbox Light", "light", {
-		background: "#f9f5d7", surface: "#f2e5bc", border: "#d5c4a1", text: "#3c3836", textMuted: "#7c6f64",
-		accent: "#af3a03", bold: "#076678", italic: "#8f3f71", code: "#427b58",
-		error: "#9d0006", success: "#79740e", warning: "#b57614",
 	}),
 	builtin("Ivory", "light", {
 		background: "#faf9f5", surface: "#f0eee6", border: "#e0ddd2", text: "#3d3d3a", textMuted: "#83827d",
