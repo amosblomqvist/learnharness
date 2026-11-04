@@ -223,6 +223,7 @@ function startServer(port) {
 					LH_AUTH_FILE: AUTH_FILE(),
 					LH_DESKTOP_SERVER: "1",
 					LH_DESKTOP_API_SECRET: desktopAPISecret,
+					LH_SPEECH_RESOURCES: path.join(process.resourcesPath, "speech-runtime"),
 				},
 				stdio: ["ignore", "pipe", "pipe", "ipc"],
 			},
@@ -264,20 +265,42 @@ function waitUntilUp(url, tries = 150) {
 	});
 }
 
+let serverShutdown = null;
+let serverStopping = false;
 function killServer() {
 	chatgpt?.close();
 	subscriptions?.close();
-	if (!serverProcess) return;
+	if (!serverProcess) return serverShutdown ?? Promise.resolve();
 	const child = serverProcess;
 	serverProcess = null;
-	child.kill("SIGTERM");
-	setTimeout(() => {
-		try {
-			child.kill("SIGKILL");
-		} catch {
-			/* already gone */
-		}
-	}, 3000);
+	serverStopping = true;
+	serverShutdown = new Promise((resolve) => {
+		let terminating = false;
+		let fallback;
+		const terminate = () => {
+			if (terminating) return;
+			terminating = true;
+			clearTimeout(fallback);
+			child.removeListener?.("message", stopped);
+			try { child.kill("SIGTERM"); } catch { /* Already gone. */ }
+			serverStopping = false;
+			resolve();
+		};
+		const stopped = (message) => {
+			if (message?.channel === "lh:speech-shutdown-complete") terminate();
+		};
+		child.on?.("message", stopped);
+		fallback = setTimeout(terminate, 250);
+		fallback?.unref();
+		if (child.connected) {
+			try { child.send({ channel: "lh:speech-shutdown" }, (error) => { if (error) terminate(); }); }
+			catch { terminate(); }
+		} else terminate();
+		setTimeout(() => {
+			try { child.kill("SIGKILL"); } catch { /* Already gone. */ }
+		}, 3000)?.unref();
+	});
+	return serverShutdown;
 }
 
 /** Security posture (all defaults asserted explicitly; the guards are the
@@ -494,10 +517,10 @@ function checkForUpdates({ manual = false } = {}) {
 		});
 }
 
-function installUpdateNow() {
+async function installUpdateNow() {
 	// Kill the server BEFORE the quit-and-install (see block comment).
 	try {
-		killServer();
+		await killServer();
 	} catch {
 		/* already dead */
 	}
@@ -641,7 +664,11 @@ async function main() {
 	});
 
 	// The child must not outlive us — cover every quit path.
-	app.on("before-quit", killServer);
+	app.on("before-quit", (event) => {
+		if (!serverProcess && !serverStopping) return;
+		event.preventDefault();
+		void killServer().finally(() => app.quit());
+	});
 	process.on("exit", killServer);
 	process.on("SIGHUP", killServer);
 
@@ -652,6 +679,15 @@ async function main() {
 	// (guards, menu, single instance).
 	const devUrl = process.env.LH_DEV_URL;
 	const url = devUrl ?? `http://127.0.0.1:${await freePort()}`;
+	// Dev shell with a shared secret (scripts/desktop-dev.mjs): the same secret
+	// the `next dev` server requires, so the window's /api calls carry it.
+	if (devUrl && process.env.LH_DESKTOP_API_SECRET?.length >= 64) {
+		desktopAPISecret = process.env.LH_DESKTOP_API_SECRET;
+		const devOrigin = new URL(devUrl).origin;
+		session.defaultSession.webRequest.onBeforeSendHeaders({ urls: ["<all_urls>"] }, (details, callback) => {
+			callback({ requestHeaders: desktopAPIHeaders(details, devOrigin, desktopAPISecret, [...trustedAppWindows]) });
+		});
+	}
 	if (!devUrl) {
 		desktopAPISecret = randomBytes(32).toString("hex");
 		const ownedOrigin = new URL(url).origin;

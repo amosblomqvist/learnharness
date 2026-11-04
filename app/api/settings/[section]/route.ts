@@ -1,3 +1,4 @@
+import { emit } from "@/src/core";
 /**
  * PUT /api/settings/[section] — section-scoped record writes
  * (settings-storage wave, 2026-09-19). One PUT replaces ONE section
@@ -33,6 +34,7 @@
 import type { AgentSettings, ChatSettings, ModelsSettings } from "@/src/core";
 import {
 	SETTINGS_SECTIONS,
+	speechAuthorized,
 	allSegmentPaths,
 	clampChatLevel,
 	clampModelsLevels,
@@ -53,6 +55,7 @@ type AnySectionParser = (body: unknown) => SettingsBodyResult<unknown>;
 
 export async function PUT(request: Request, ctx: { params: Promise<{ section: string }> }) {
 	const { section } = await ctx.params;
+	if (section === "speech" && !speechAuthorized(request.headers)) return Response.json({error: "Local speech requires a verified desktop connection."}, {status: 403});
 	const parser = (SETTINGS_SECTIONS as Record<string, AnySectionParser>)[section];
 	if (!parser) {
 		return Response.json(
@@ -129,7 +132,8 @@ export async function PUT(request: Request, ctx: { params: Promise<{ section: st
 	// Read-modify-write ONE section of the record; everything else rides
 	// along untouched (other sections, unknown keys — sanitize preserves).
 	const next = { ...record, [section]: sectionOut };
-	const stored = writeSettingsRecord(next);
-	const fileAccessError = fileAccessConfigurationError();
-	return Response.json({ settings: stored, ...(fileAccessError ? { fileAccessError } : {}) });
+    const stored = writeSettingsRecord(next);
+    if (section === "speech") emit("speech-changed", {});
+    const fileAccessError = fileAccessConfigurationError();
+    return Response.json({ settings: stored, ...(fileAccessError ? { fileAccessError } : {}) });
 }

@@ -7,6 +7,7 @@ import { isSubagentFailure } from "@/src/core";
 import { DemoOutputCard } from "@/components/artifacts/demo-card";
 import { PdfBriefCard, ResearchBriefCard } from "@/components/artifacts/job-card";
 import { VisualOutputCard } from "@/components/artifacts/visual-card";
+import { ReadAloud } from "@/components/narration";
 
 /**
  * The sub-agent result delivery card (contracts.ts "THE ASYNC PROTOCOL" §4).
@@ -56,7 +57,7 @@ export function SubagentSteerCard({ message }: { message: LhViewMessage }) {
 				<PdfCompleteBadge result={data.result as PdfResult} />
 			);
 		case "demo":
-			return <DemoOutputCard output={data.result} messageId={message.id} initialInverted={data.ui?.inverted ?? false} />;
+			return <><DemoOutputCard output={data.result} messageId={message.id} initialInverted={data.ui?.inverted ?? false} /><ReadAloud partId={`sa_${message.id}`} /></>;
 		case "visual":
 			return <VisualOutputCard output={data.result} messageId={message.id} initialInverted={data.ui?.inverted ?? false} />;
 	}

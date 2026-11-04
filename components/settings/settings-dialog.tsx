@@ -41,6 +41,7 @@ import {
 } from "@/src/core";
 import { useAppearance } from "./appearance.tsx";
 import { SettingsSection } from "./controls.tsx";
+import { SpeechSection } from "./speech-section.tsx";
 import { UpdateSettings } from "./update-settings.tsx";
 import { AgentSection } from "./agent-section.tsx";
 import type { ModelsSettings } from "@/src/core";
@@ -62,6 +63,7 @@ const SECTIONS = [
 	{ id: "appearance", label: "Appearance" },
 	{ id: "graph", label: "Graph" },
 	{ id: "keyboard", label: "Keyboard", hint: "Stored on this device" },
+	{ id: "speech", label: "Speech" },
 	{ id: "general", label: "General" },
 ] as const;
 type SectionId = (typeof SECTIONS)[number]["id"];
@@ -228,7 +230,7 @@ export function SettingsDialogBody({
 	 *  schema mistake caught by the validation surface). */
 	const write = useCallback(
 		async (
-			section: "general" | "agent" | "models" | "appearance" | "graph" | "compaction",
+			section: "general" | "agent" | "models" | "appearance" | "graph" | "compaction" | "speech",
 			body: object,
 		) => {
 			setError(null);
@@ -242,7 +244,7 @@ export function SettingsDialogBody({
 					error?: string;
 				};
 				setError(`${section}: ${detail.error ?? res.status}`);
-				return;
+				return false;
 			}
 			// Server truth, never the request body (fix wave, owner repro):
 			// the models section clamps pinned thinking levels on write
@@ -259,6 +261,7 @@ export function SettingsDialogBody({
 			notifySettingsSaved(section);
 			if (section === "appearance")
 				onAppearanceChange(body as AppearanceSettings);
+			return true;
 		},
 		[onAppearanceChange],
 	);
@@ -357,6 +360,7 @@ export function SettingsDialogBody({
 						</p>
 					) : (
 						<div>
+							{active === "speech" && <SettingsSection title="Speech" testid="section-speech"><SpeechSection settings={record.speech} onChange={next => write("speech", next)} /></SettingsSection>}
 							{active === "general" && (
 								<SettingsSection
 									title="General"
