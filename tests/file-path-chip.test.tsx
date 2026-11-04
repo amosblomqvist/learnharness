@@ -51,6 +51,19 @@ describe("FilePathChip", () => {
 		}
 	});
 
+	it("uses Folder for explicit directory syntax, including dotted folders and roots, without probing or guessing", () => {
+		for (const path of ["/course/", "/course/folder.pdf/", "/", "~/", "C:\\", "C:\\course\\", "\\\\server\\share\\", "/POSIX-name\\/"]) {
+			const document = documentFor(<FilePathChip path={path} />);
+			assert.ok(document.querySelector(".lucide-folder"), path);
+			assert.equal(document.body.firstElementChild!.getAttribute("title"), path);
+		}
+		for (const path of ["/course/README", "/historical/unmarked-folder", "/POSIX-name\\"]) {
+			const document = documentFor(<FilePathChip path={path} />);
+			assert.equal(document.querySelector(".lucide-folder"), null, path);
+			assert.ok(document.querySelector(".lucide-file"), path);
+		}
+	});
+
 	it("keeps dangerous filename HTML inert in both label and title", () => {
 		const path = '/tmp/<img src=x onerror="alert(1)">.pdf';
 		const document = documentFor(<FilePathChip path={path} />);
@@ -78,6 +91,15 @@ describe("PathText", () => {
 		assert.deepEqual(Array.from(chips, (chip) => chip.getAttribute("title")), paths);
 		assert.equal(document.body.textContent, "beforea.pdf then b.md then c.png then d`e.txtafter");
 		assert.equal(text, `before${paths.map(quoteFilePath).join(" then ")}after`, "presentation never rewrites saved text");
+	});
+
+	it("saved plain path text retains folder icons after serialization/reload, without a new data format", () => {
+		const paths = ["/course/folder.with.dots/", "C:\\course\\", "\\\\server\\share\\"];
+		const text = paths.map(quoteFilePath).join(" then ");
+		const restored = JSON.parse(JSON.stringify({ text })).text;
+		const document = documentFor(<PathText text={restored} />);
+		assert.equal(document.querySelectorAll(".lucide-folder").length, paths.length);
+		assert.deepEqual(Array.from(document.querySelectorAll('[role="img"]'), (chip) => chip.getAttribute("title")), paths);
 	});
 
 	it("does not interpret HTML in ordinary text or path labels", () => {
