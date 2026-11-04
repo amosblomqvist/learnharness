@@ -10,6 +10,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { AUTH_KEYS, genericProviderKeyGuard, isKnownAuthKey, maskKey, validateKeyShape } from "../src/core/auth-keys.ts";
+import { resolveSearchEngineFor } from "../src/server/search.ts";
 
 describe("the catalog", () => {
 	it("is exactly the three CURATED app-service keys (provider keys live in the provider table)", () => {
@@ -105,5 +106,45 @@ describe("maskKey (plaintext never leaves)", () => {
 
 	it("trims before masking", () => {
 		assert.equal(maskKey("  sk-or-v1-xyzw9  "), "…yzw9");
+	});
+
+	describe("resolveSearchEngineFor with DuckDuckGo (no key needed)", () => {
+		it("DuckDuckGo is always available — no key required", () => {
+			const out = resolveSearchEngineFor("duckduckgo", {});
+			assert.ok(out.available);
+			assert.equal(out.engine, "duckduckgo");
+			assert.match(out.reason, /chosen/);
+		});
+
+		it("no keys at all: DDG auto-activates first (preference order DDG → Tavily → Brave)", () => {
+			const out = resolveSearchEngineFor(undefined, {});
+			assert.ok(out.available);
+			assert.equal(out.engine, "duckduckgo");
+			assert.match(out.reason, /auto/);
+		});
+
+		it("DDG + Tavily keys: DDG wins (first in preference order)", () => {
+			const out = resolveSearchEngineFor(undefined, {
+				duckduckgo: "x",
+				tavily: "tvly-abc123def456ghi78",
+			});
+			assert.ok(out.available);
+			assert.equal(out.engine, "duckduckgo");
+		});
+
+		it("pin Tavily with its key: Tavily wins over DDG when explicitly pinned", () => {
+			const out = resolveSearchEngineFor("tavily", {
+				duckduckgo: "x",
+				tavily: "tvly-abc123def456ghi78",
+			});
+			assert.ok(out.available);
+			assert.equal(out.engine, "tavily");
+		});
+
+		it("pin DuckDuckGo always available even without its 'key'", () => {
+			const out = resolveSearchEngineFor("duckduckgo", { tavily: "tvly-abc123def456ghi78" });
+			assert.ok(out.available);
+			assert.equal(out.engine, "duckduckgo");
+		});
 	});
 });
