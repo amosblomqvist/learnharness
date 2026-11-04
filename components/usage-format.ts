@@ -8,9 +8,9 @@ export function formatUsd(c: number): string {
 	return c >= 1 ? `$${c.toFixed(2)}` : `$${c.toFixed(4)}`;
 }
 
-export function planCostLabel(dollars: number | null, subscription: boolean, format = formatUsd): string {
-	if (subscription) return dollars === null ? "ChatGPT plan" : `${format(dollars)} API + ChatGPT plan`;
-	return dollars === null ? "—" : format(dollars);
+export function planCostLabel(dollars: number | null, subscription: boolean | string | readonly string[] | undefined, format = formatUsd): string {
+	const labels = subscription === true ? ["ChatGPT"] : typeof subscription === "string" ? [subscription] : Array.isArray(subscription) ? [...new Set(subscription)] : [];
+	return [...(dollars === null ? [] : [format(dollars)]), ...labels].join(" + ") || "—";
 }
 
 /** 38000 → "38k", 1234567 → "1.2M" — trimmed, never "38.0k". */
@@ -29,25 +29,11 @@ export function splitQualified(id: string): { provider: string | null; id: strin
 	return { provider: id.slice(0, colon), id: id.slice(colon + 1) };
 }
 
-/**
- * "z-ai/glm-5.3-flash" → "glm-5.3-flash" — vendor prefix dropped, the
- * name KEPT EXACTLY as its provider writes it (dashes stay, no
- * auto-caps — owner rounds 4-5, 2026-10-05); a trailing all-digit
- * segment (OpenRouter's date suffix, "qwen3.8-max-0902") is dropped.
- * Quiet-chip friendly.
- *
- * With `qualified` (usage stamps are "provider:id", model-slots wave):
- * the provider rides as a quiet suffix — "glm-5.3-flash · openrouter" —
- * because with federation the same model via two providers is genuinely
- * different bookkeeping. Bare catalog ids are unchanged.
- */
+/** Model-only labels omit the vendor path, never versions, dates or variants.
+ * Only usage callers pass `qualified`: a bare catalog id's colon belongs to
+ * the model (e.g. :free), not a provider. Usage retains its provider suffix. */
 export function prettyModel(id: string, qualified = false): string {
-	const { provider, id: bare } = splitQualified(id);
+	const { provider, id: bare } = qualified ? splitQualified(id) : { provider: null, id };
 	const short = bare.includes("/") ? bare.slice(bare.lastIndexOf("/") + 1) : bare;
-	const parts = short.split("-");
-	const trimmed = /^\d+$/.test(parts[parts.length - 1] ?? "") ? parts.slice(0, -1) : parts;
-	// No auto-capitalization, dashes KEPT (owner rounds 4-5, 2026-10-05):
-	// model names render exactly as their providers write them.
-	const pretty = trimmed.join("-");
-	return qualified && provider ? `${pretty} · ${provider}` : pretty;
+	return provider ? `${short} · ${provider}` : short;
 }

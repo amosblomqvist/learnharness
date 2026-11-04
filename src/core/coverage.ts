@@ -1,9 +1,9 @@
 /**
  * Extraction coverage — the pure core. THE TEACHER'S PROSE IS THE UNIT
  * (owner ruling, 2026-09-28): the extractor sees ONLY the teacher agent's
- * text blocks — no learner messages, no thinking, no tool calls or
- * results, no quiz blocks. Everything else is INVISIBLE to coverage: it
- * neither opens nor joins a run, so answering a quiz or editing a learner
+ * prose — ordinary text blocks and explicit send_to_user messages. No
+ * learner messages, thinking, other tool calls/results, or quiz blocks.
+ * Everything else is INVISIBLE to coverage: it neither opens nor joins a run, so answering a quiz or editing a learner
  * message triggers nothing. "Covered" is by construction exactly "what
  * the extractor saw": the fingerprint (sha256 of a message's view lines)
  * and the extractor's prompt share ONE selection — the teacher prose.
@@ -22,33 +22,27 @@
 import { createHash } from "node:crypto";
 
 import type { CoverageEntry } from "./contracts/graph.ts";
-import type { LhMessage } from "./native-messages.ts";
+import { failedOutputCallIds, userFacingTextOf, type LhMessage } from "./native-messages.ts";
 
 export type { CoverageEntry };
-
-/** The user-facing text of a native message (string or text blocks). */
-function textOf(content: unknown): string[] {
-	if (typeof content === "string") return content.trim() ? [content] : [];
-	if (!Array.isArray(content)) return [];
-	return content
-		.filter((c): c is { type: "text"; text: string } => (c as { type?: string }).type === "text")
-		.map((c) => c.text)
-		.filter((t) => t.trim().length > 0);
-}
 
 /**
  * The extraction-relevant lines of ONE native message — the shared seam
  * between the extractor's prompt and messageFingerprint (coverage).
  * TEACHER PROSE ONLY (owner, 2026-09-28): an assistant message yields one
- * line per text block; everything else (user messages, tool results,
- * markers) yields NOTHING and is invisible to coverage. `mid` is the
- * message id — part of the hash input, so the same prose in two messages
+ * line per learner-facing prose block; everything else (user messages,
+ * tool results, markers) yields NOTHING and is invisible to coverage.
+ * `mid` is the message id — part of the hash input, so the same prose in two messages
  * is two slots (per-message coverage).
  */
-export function messageViewLines(message: LhMessage, mid: string): string[] {
+export function messageViewLines(
+	message: LhMessage,
+	mid: string,
+	failedOutputCalls: ReadonlySet<string> = failedOutputCallIds([message]),
+): string[] {
 	const lines: string[] = [];
 	if ((message as { role?: string }).role !== "assistant") return lines;
-	for (const text of textOf((message as { content: unknown }).content)) {
+	for (const text of userFacingTextOf((message as { content: unknown }).content, failedOutputCalls)) {
 		lines.push(`TEACHER [${mid}] ${text.trim()}`);
 	}
 	return lines;
@@ -62,9 +56,10 @@ export function messageViewLines(message: LhMessage, mid: string): string[] {
  */
 export function teacherProseBlocks(messages: ReadonlyArray<LhMessage>): string[] {
 	const out: string[] = [];
+	const failedOutputCalls = failedOutputCallIds(messages);
 	for (const message of messages) {
 		if ((message as { role?: string }).role !== "assistant") continue;
-		for (const text of textOf((message as { content: unknown }).content)) out.push(text.trim());
+		for (const text of userFacingTextOf((message as { content: unknown }).content, failedOutputCalls)) out.push(text.trim());
 	}
 	return out;
 }
@@ -79,9 +74,9 @@ export function viewTokens(lines: string[]): number {
  * teacher prose, with the message id as the tag). Changes exactly when
  * the teacher prose of the message changes — nothing else can re-open it.
  */
-export function messageFingerprint(message: LhMessage): string {
+export function messageFingerprint(message: LhMessage, failedOutputCalls?: ReadonlySet<string>): string {
 	const h = createHash("sha256");
-	h.update(JSON.stringify([(message as { role?: string }).role, messageViewLines(message, message.id)]));
+	h.update(JSON.stringify([(message as { role?: string }).role, messageViewLines(message, message.id, failedOutputCalls)]));
 	return h.digest("hex");
 }
 
@@ -95,7 +90,12 @@ export interface CoverageSlot {
 /** Fingerprint a whole transcript, in order (used by the trigger, the run,
  *  and the coverage view — one derivation everywhere). */
 export function coverageSlots(messages: ReadonlyArray<LhMessage>): CoverageSlot[] {
-	return messages.map((message) => ({ message, fp: messageFingerprint(message), tokens: viewTokens(messageViewLines(message, message.id)) }));
+	const failedOutputCalls = failedOutputCallIds(messages);
+	return messages.map((message) => ({
+		message,
+		fp: messageFingerprint(message, failedOutputCalls),
+		tokens: viewTokens(messageViewLines(message, message.id, failedOutputCalls)),
+	}));
 }
 
 /** The covered-fingerprint set for one chat, from the ledger. */
@@ -131,16 +131,14 @@ export function coverageOf(
 	let uncoveredTokens = 0;
 	for (let i = 0; i < slots.length; i++) {
 		const slot = slots[i]!;
-		if (messageViewLines(slot.message, slot.message.id).length === 0) continue; // invisible
+		if (slot.tokens === 0) continue; // invisible (including failed output calls)
 		if (covered.has(slot.fp)) coveredTokens += slot.tokens;
 		else {
 			uncovered.push(i);
 			uncoveredTokens += slot.tokens;
 		}
 	}
-	const visibleCount = slots.length - slots.filter(
-		(s) => messageViewLines(s.message, s.message.id).length === 0,
-	).length;
+	const visibleCount = slots.filter((s) => s.tokens > 0).length;
 	return {
 		slots,
 		uncovered,

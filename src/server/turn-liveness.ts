@@ -21,6 +21,7 @@
  */
 
 import { emit } from "../core/events.ts";
+import { clearTurnFailure } from "./turn-runs.ts";
 
 interface LhGlobal {
 	__lhTurnRegistry?: Map<string, number>;
@@ -43,15 +44,17 @@ const MAX_TURN_MS = 30 * 60_000;
  */
 export function beginTurn(chatId: string): boolean {
 	if (isTurnRunning(chatId)) return false;
+	clearTurnFailure(chatId);
 	inFlight.set(chatId, Date.now());
 	emit("turn-started", { chatId });
 	return true;
 }
 
 /**
- * Mark the chat's turn as finished (runs in onFinish, aborted or not —
- * AFTER persistTurn, so "turn-settled" guarantees a subsequent fetch reads
- * durable truth). Emits only when an entry was actually present: a
+ * Mark the chat's turn as finished after normal settlement, or after the
+ * failure notice has been retained by settlement cleanup. A subsequent
+ * fetch reads durable truth, never a promise that an unsaved reply landed.
+ * Emits only when an entry was actually present: a
  * defensive no-op endTurn must not fire a spurious settle.
  */
 export function endTurn(chatId: string): void {

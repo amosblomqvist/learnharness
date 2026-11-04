@@ -194,6 +194,9 @@ function createChatGPT({ store, openExternal, fetch: request = globalThis.fetch,
 					registration: r.clientId,
 					connected: !storageDenied && !closed && !paused && !suspended && !r.reconnectRequired && planScopes(r.tokens),
 					planEnabled: !storageDenied && !r.reconnectRequired && planScopes(r.tokens),
+					// Recovery is authorization-only, not a response to storage failure
+					// or temporary transport suspension. Never infer it from error copy.
+					canSignInAgain: !storageDenied && !closed && !paused && (r.reconnectRequired === true || !planScopes(r.tokens)),
 				};
 			}),
 			error: lastError,

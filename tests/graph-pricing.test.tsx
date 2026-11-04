@@ -34,8 +34,8 @@ test("known zero, mixed priced/unknown, and subscription headline semantics stay
 	assert.ok(mixed.totalDollars > 0);
 	assert.match(headline([priced, historical]), new RegExp(`>\\$${mixed.totalDollars.toFixed(2).replace(".", "\\.")}<\\/button>`));
 	const plan = run([usage()], "chatgpt:fixture");
-	assert.match(headline([plan]), />ChatGPT plan<\/button>/);
-	assert.match(headline([plan, zero]), />\$0\.00 API \+ ChatGPT plan<\/button>/);
+	assert.match(headline([plan]), />ChatGPT<\/button>/);
+	assert.match(headline([plan, zero]), />\$0\.00 \+ ChatGPT<\/button>/);
 });
 
 test("graph stage and recent-run aggregates preserve known one-hour cache writes", () => {

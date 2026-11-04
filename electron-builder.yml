@@ -100,6 +100,11 @@ extraResources:
     filter:
       - "standalone/**/*"
 mac:
+  # The backend's --require runs before Next loads. Keep this resource
+  # outside app.asar so early Node-mode loading needs no ASAR support.
+  extraResources:
+    - from: electron/server-title-guard.cjs
+      to: server-title-guard.cjs
   icon: build/icon.icon
   # zip rides next to dmg (flipped 2026-10-08): Squirrel.Mac — Electron's
   # macOS auto-updater — installs from ZIP and cannot read DMGs. DMG is

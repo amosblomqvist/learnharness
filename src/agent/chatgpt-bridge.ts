@@ -1,4 +1,5 @@
 import type { Model } from "@earendil-works/pi-ai";
+import { onWebSubscriptionPacket, webSubscriptionRequest, webSubscriptionsEnabled } from "./subscription-runtime.ts";
 import type { ChatGPTStatus } from "../core/contracts/chatgpt.ts";
 import type { AdmissionScope, NoDispatchKind } from "./chatgpt-request-cycle.ts";
 export type { ChatGPTStatus } from "../core/contracts/chatgpt.ts";
@@ -20,14 +21,15 @@ const validStamp = (s: Stamp) => s && [s.epoch, s.authorityRevision, s.revision]
 function desktopIPCConnected(): boolean {
  return process.env.LH_DESKTOP_SERVER === "1" && (process.env.LH_DESKTOP_API_SECRET?.length ?? 0) >= 64 && typeof process.send === "function" && process.connected === true;
 }
+function runtimeConnected(): boolean { return desktopIPCConnected() || webSubscriptionsEnabled(); }
 function bridge(): BridgeState {
  const global = globalThis as typeof globalThis & { [key]?: BridgeState };
  if (!global[key]) {
   const state: BridgeState = { status: unavailable(), stamp: { epoch: 0, authorityRevision: 0, revision: 0 }, models: [], catalogAccount: null, pending: new Map(), controllers: new Map(), listeners: new Set(), counter: 0, catalogRequest: 0 };
   global[key] = state;
-  process.on("message", (raw: unknown) => {
+  const receive = (raw: unknown) => {
    const m = raw as { channel?: string; kind?: string; id?: string; op?: string; ok?: boolean; value?: unknown; stamp: Stamp; status: ChatGPTStatus; invalidate?: string; error?: string };
-   if (!desktopIPCConnected() || m?.channel !== "lh:chatgpt") return;
+   if (m?.channel !== "lh:chatgpt") return;
    if (m.kind === "state" && validStamp(m.stamp) && m.stamp.revision >= state.stamp.revision) {
     acceptStatus(state, { ...m.stamp, status: m.status });
     if (m.invalidate === "all") { state.catalogRequest++; clearCatalog(state); }
@@ -43,8 +45,11 @@ function bridge(): BridgeState {
     if (m.ok === true) call.resolve(m.value);
     else call.reject(new Error(m.error ?? "ChatGPT connection failed."));
    }
-  });
+  };
+  process.on("message", (raw: unknown) => { if (desktopIPCConnected()) receive(raw); });
+  onWebSubscriptionPacket("lh:chatgpt", (packet) => { if (webSubscriptionsEnabled()) receive(packet); });
   process.on("disconnect", () => {
+   if (webSubscriptionsEnabled()) return;
    state.status = unavailable(); clearCatalog(state); state.catalogRequest++;
    for (const controller of state.controllers.keys()) controller.abort("all");
    for (const call of state.pending.values()) { clearTimeout(call.timer); call.reject(new Error("The desktop connection closed.")); }
@@ -60,9 +65,10 @@ function acceptStatus(state: BridgeState, value: StatusValue) {
  if (value.epoch !== state.stamp.epoch || value.authorityRevision !== state.stamp.authorityRevision || value.status.activeId !== state.status.activeId) clearCatalog(state);
  state.status = value.status; state.stamp = { epoch: value.epoch, authorityRevision: value.authorityRevision, revision: value.revision };
 }
-/** Runtime-only inherited IPC. No HTTP credential route or renderer method. */
+/** Runtime-only: inherited desktop IPC or direct web owner. Never HTTP leases. */
 export function chatGPTRequest<T>(op: "status" | "models" | "lease", fields: Record<string, unknown> = {}): Promise<T> {
  const state = bridge();
+ if (webSubscriptionsEnabled()) return webSubscriptionRequest<T>("lh:chatgpt", op, fields);
  if (!desktopIPCConnected()) return Promise.reject(new Error("ChatGPT sign-in is available only in the desktop app with a private server connection."));
  return new Promise<T>((resolve, reject) => {
   const id = `${process.pid}:${++state.counter}`;
@@ -74,7 +80,7 @@ export function chatGPTRequest<T>(op: "status" | "models" | "lease", fields: Rec
  });
 }
 export function chatGPTStatus(): ChatGPTStatus { return bridge().status; }
-export function chatGPTConnected(): boolean { const s = chatGPTStatus(); return desktopIPCConnected() && s.available && s.accounts.some((a) => a.id === s.activeId && a.connected && a.planEnabled === true); }
+export function chatGPTConnected(): boolean { const s = chatGPTStatus(); return runtimeConnected() && s.available && s.accounts.some((a) => a.id === s.activeId && a.connected && a.planEnabled === true); }
 export function chatGPTBackgroundAllowed(): boolean { const s = chatGPTStatus(); return chatGPTConnected() && s.allowBackgroundUse === true; }
 export function onChatGPTChange(listener: () => void): () => void { bridge().listeners.add(listener); return () => { bridge().listeners.delete(listener); }; }
 export function chatGPTModels(): Model<"openai-responses">[] { return bridge().models; }
@@ -86,7 +92,7 @@ export function chatGPTScope(selectedModelId: string): AdmissionScope {
 }
 export function chatGPTScopeCurrent(scope: AdmissionScope): boolean {
  const s = bridge();
- return desktopIPCConnected() && chatGPTConnected() && scope.accountId === s.catalogAccount && scope.accountId === s.status.activeId && scope.epoch === s.stamp.epoch && scope.authorityRevision === s.stamp.authorityRevision && !!chatGPTModel(scope.selectedModelId);
+ return runtimeConnected() && chatGPTConnected() && scope.accountId === s.catalogAccount && scope.accountId === s.status.activeId && scope.epoch === s.stamp.epoch && scope.authorityRevision === s.stamp.authorityRevision && !!chatGPTModel(scope.selectedModelId);
 }
 export async function chatGPTLease(scope: AdmissionScope, background: boolean): Promise<LeaseValue> {
  if (!chatGPTScopeCurrent(scope)) throw new Error("ChatGPT catalog authority changed");
@@ -108,7 +114,7 @@ export async function chatGPTDenial(scope: AdmissionScope | undefined, controlle
 /** Preserve account order; unknown capabilities/windows are never fabricated. */
 export async function refreshChatGPTModels(supported: Model<"openai-responses">[]): Promise<void> {
  const state = bridge();
- if (!desktopIPCConnected()) { clearCatalog(state); return; }
+ if (!runtimeConnected()) { clearCatalog(state); return; }
  const sequence = ++state.catalogRequest;
  try {
   const value = await chatGPTRequest<ModelsValue>("models");

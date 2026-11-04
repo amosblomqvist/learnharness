@@ -1,10 +1,15 @@
 import { randomUUID } from "node:crypto";
 import type { AssistantMessage, Message, Tool, ToolResultMessage, Usage } from "@earendil-works/pi-ai";
 import { normalizeContext } from "@earendil-works/pi-ai";
+import { processImage, type ProcessImageResult } from "../image-processing/index.ts";
 import { Type } from "typebox";
 import { piEngineFor, type PiEngine, type ThinkingLevel } from "../models.ts";
 import { providerEventObserver, type ProviderEventObserver } from "../provider-events.ts";
+import { backgroundCaptureStream, createBackgroundCapture, type BackgroundCapture } from "../background-capture.ts";
 import type { VisualResult } from "../../core/contracts.ts";
+import type { LearnerImage } from "../tools/learner-image.ts";
+import { embedLearnerImage, LEARNER_IMAGE_HREF } from "../../core/learner-image-svg.ts";
+import { annotationPlacementProblem } from "./annotation-svg.ts";
 import { getHeadless, type HeadlessApi } from "./headless.ts";
 
 /**
@@ -28,11 +33,22 @@ import { getHeadless, type HeadlessApi } from "./headless.ts";
  * finishing. Nothing is delivered without having been looked at.
  *
  * Failure semantics mirror the demo-builder: { svg: "", notes: "FAILED: …" }.
+ *
+ * IMAGE MODE (issue #363): with a learner image the maker annotates it
+ * instead. The model sees the picture and places it with a placeholder
+ * href (LEARNER_IMAGE_HREF); the loop embeds bytes only for rendering.
+ * Delivered SVGs retain the placeholder and a session snapshot reference.
+ * The maker receives native image content, never base64 in SVG text/edits.
  */
 
 export interface VisualMakerInput {
 	brief: string;
+	/** The learner image to annotate, already bounded for storage. */
+	image?: LearnerImage;
 }
+
+/** The placeholder href the model gives the learner's picture. */
+export { LEARNER_IMAGE_HREF };
 
 export interface VisualMakerOptions {
 	/** Test seam: scripted engine; production uses the visualMaker role. */
@@ -93,6 +109,23 @@ Your FINAL message: 1-2 sentences of notes for the teacher (what the figure show
 NEVER the SVG source itself. If you genuinely cannot make a correct picture of the brief, say exactly
 that in your final message and why.`;
 
+const IMAGE_INSTRUCTIONS = `ANNOTATING THE LEARNER'S IMAGE — this brief comes with one of the learner's own pictures. Your
+figure is that picture with marks on it, not a new drawing:
+
+- Place it EXACTLY ONCE, at its natural size, before your marks so they sit on top:
+  <image href="${LEARNER_IMAGE_HREF}" x="…" y="…" width="W" height="H"/> — W×H is given with the image.
+  The loop substitutes the real picture; never draw or describe its content yourself.
+- Use static SVG marks and inline attributes only: no scripts, animation, foreignObject, style blocks,
+  external resources, or escaped resource syntax. Local #fragment references are allowed.
+- Annotate in the picture's own pixel coordinates (shifted by your x/y if you add margins for labels).
+- Every mark must land on the exact feature it names — an arrow at the wrong part is a false statement.
+  Locate the feature in the picture first, then check each mark against the render.
+- Marks must read against any background: thick strokes in one or two high-contrast colors, and labels
+  with a white halo (stroke="white" paint-order="stroke") or set in a margin with a leader line.
+- Never hide what the brief is about under a label or a fill.
+- If a feature the brief names is not in the picture, never guess where it is: leave it unmarked and say
+  so in your notes.`;
+
 /** The wire declarations (pi-ai Tool, TypeBox parameters): this loop owns
  *  execution itself — write/edit dispatch inline below, render feeds the
  *  image-in-the-loop message — so the declarations carry no execute. */
@@ -144,32 +177,70 @@ export async function runVisualMaker(input: VisualMakerInput, opts: VisualMakerO
 	// factory pin to consult (engine.level is the resolved/clamped value).
 	const reasoning = engine.level;
 	const sessionId = randomUUID();
+	const capture = createBackgroundCapture({ role: "visualMaker", runId: sessionId, sourceId: opts.chatId });
+	const streamEngine = { ...engine, streamFn: backgroundCaptureStream(engine.streamFn, capture) };
+	const learnerImage = input.image;
+	const systemPrompt = learnerImage ? `${INSTRUCTIONS}\n\n${IMAGE_INSTRUCTIONS}` : INSTRUCTIONS;
 	const prompt = [
-		"Brief for ONE precise figure (from the teacher, verbatim — it is everything you know):",
+		learnerImage
+			? "Brief for ONE annotated image (from the teacher, verbatim — it is everything you know):"
+			: "Brief for ONE precise figure (from the teacher, verbatim — it is everything you know):",
 		brief,
 		"",
+		...(learnerImage
+			? [
+					`The learner's image follows: ${learnerImage.width}×${learnerImage.height} px. Place it with <image href="${LEARNER_IMAGE_HREF}" … width="${learnerImage.width}" height="${learnerImage.height}"/>.`,
+				]
+			: []),
 		"Author the SVG, render it, look at it, iterate until correct, then finish with your notes.",
 	].join("\n");
 
 	let messages: Message[] = [{ role: "user", content: prompt, timestamp: Date.now() }];
+	if (learnerImage) {
+		const shown = await processImage(Buffer.from(learnerImage.data, "base64"), learnerImage.mimeType, {
+			resizeOptions: engine.model.inputLimits?.images?.resize,
+		});
+		if (!shown.ok) return { svg: "", notes: `FAILED: showing the learner's image to the maker failed — ${shown.message}` };
+		messages = [
+			{
+				role: "user",
+				content: [
+					{ type: "text", text: [prompt, ...shown.hints].join("\n") },
+					{ type: "image", data: shown.data, mimeType: shown.mimeType },
+				],
+				timestamp: Date.now(),
+			},
+		];
+	}
+	/** Render-only embedding; persisted SVGs keep the small placeholder. */
+	const embed = (svg: string): string => learnerImage ? embedLearnerImage(svg, learnerImage) : svg;
+	const render = (svg: string) => headless.renderSvg(embed(svg), learnerImage ? { nativeOnly: true } : undefined);
+	/** Image mode: the problem with an SVG that doesn't place the picture
+	 *  exactly once (null = fine, and always fine without an image). */
+	const placementProblem = (svg: string): string | null => {
+		if (!learnerImage) return null;
+		return annotationPlacementProblem(svg, learnerImage.width, learnerImage.height);
+	};
 	let currentSvg: string | null = null;
 	/** The svg shown in the most recent render (null = never rendered). */
 	let renderedSvg: string | null = null;
 	let finalText = "";
+	let captureError: unknown;
 
 	try {
 		for (let iteration = 0; iteration < maxIterations; iteration++) {
 			// One model call per iteration (streamSimple, no agent loop — this
 			// loop owns tool execution and the image-in-the-loop injection).
 			const result = await streamOnce(
-				engine,
-				INSTRUCTIONS,
+				streamEngine,
+				systemPrompt,
 				messages,
 				toolDeclarations,
 				sessionId,
 				reasoning,
 				opts.abortSignal,
 				opts.chatId ? providerEventObserver(opts.chatId, "job:visualMaker") : undefined,
+				capture,
 			);
 			// Money channel: each iteration is one model call.
 			opts.onUsage?.(result.usage);
@@ -188,11 +259,14 @@ export async function runVisualMaker(input: VisualMakerInput, opts: VisualMakerO
 				if (currentSvg && renderedSvg !== currentSvg) {
 					let png: Buffer;
 					try {
-						png = await headless.renderSvg(currentSvg);
+						png = await render(currentSvg);
 					} catch (err) {
 						const msg = err instanceof Error ? err.message : String(err);
 						return { svg: "", notes: `FAILED: rendering the final SVG failed — ${msg}` };
 					}
+					const image = await processImage(png, "image/png", { resizeOptions: engine.model.inputLimits?.images?.resize });
+					opts.abortSignal?.throwIfAborted();
+					if (!image.ok) return { svg: "", notes: `FAILED: inspecting the final SVG failed — ${image.message}` };
 					opts.onActivity?.("render_svg: inspecting final render");
 					renderedSvg = currentSvg;
 					messages = [
@@ -200,24 +274,29 @@ export async function runVisualMaker(input: VisualMakerInput, opts: VisualMakerO
 						{
 							role: "user",
 							content: [
-								{ type: "text", text: UNLOOKED_FINISH_MESSAGE },
-								{ type: "image", data: png.toString("base64"), mimeType: "image/png" },
+								{ type: "text", text: [UNLOOKED_FINISH_MESSAGE, ...image.hints].join("\n") },
+								{ type: "image", data: image.data, mimeType: image.mimeType },
 							],
 							timestamp: Date.now(),
 						},
 					];
 					continue;
 				}
-				return finish(currentSvg, finalText);
+				return finish(currentSvg, finalText, learnerImage);
 			}
 
 			const toolResults: ToolResultMessage[] = [];
-			let renderPng: Buffer | null = null; // appended as the image message AFTER the tool results
+			let renderImage: Extract<ProcessImageResult, { ok: true }> | null = null; // appended AFTER the tool results
 			for (const call of toolCalls) {
 				if (call.name === "write_svg") {
 					const svg = (call.arguments as { svg?: unknown }).svg;
 					if (typeof svg !== "string" || !svg.includes("<svg")) {
 						toolResults.push(toolText(call.id, call.name, "ERROR: expected a complete <svg>…</svg> document in the `svg` field."));
+						continue;
+					}
+					const problem = placementProblem(svg);
+					if (problem) {
+						toolResults.push(toolText(call.id, call.name, `ERROR: ${problem}.`));
 						continue;
 					}
 					currentSvg = svg;
@@ -250,7 +329,13 @@ export async function runVisualMaker(input: VisualMakerInput, opts: VisualMakerO
 						);
 						continue;
 					}
-					currentSvg = currentSvg.replace(edit.old_text, edit.new_text);
+					const edited: string = currentSvg.replace(edit.old_text, edit.new_text);
+					const problem = placementProblem(edited);
+					if (problem) {
+						toolResults.push(toolText(call.id, call.name, `ERROR: edit not applied — ${problem}.`));
+						continue;
+					}
+					currentSvg = edited;
 					opts.onActivity?.("edit_svg: applied");
 					toolResults.push(toolText(call.id, call.name, "OK — replaced 1 occurrence. Call render_svg to look at the edited SVG."));
 				} else if (call.name === "render_svg") {
@@ -259,8 +344,11 @@ export async function runVisualMaker(input: VisualMakerInput, opts: VisualMakerO
 						continue;
 					}
 					try {
-						const png = await headless.renderSvg(currentSvg);
-						renderPng = png;
+						const png = await render(currentSvg);
+						const image = await processImage(png, "image/png", { resizeOptions: engine.model.inputLimits?.images?.resize });
+						opts.abortSignal?.throwIfAborted();
+						if (!image.ok) throw new Error(image.message);
+						renderImage = image;
 						renderedSvg = currentSvg;
 						opts.onActivity?.("render_svg: inspecting render");
 						toolResults.push(toolText(call.id, call.name, "Rendered — the PNG follows in the next message. Look at it."));
@@ -274,15 +362,16 @@ export async function runVisualMaker(input: VisualMakerInput, opts: VisualMakerO
 				}
 			}
 			// Message order: assistant tool-calls → tool results → render image.
+			for (const result of toolResults) capture?.toolResult(result);
 			messages = [...messages, ...toolResults];
-			if (renderPng) {
+			if (renderImage) {
 				messages = [
 					...messages,
 					{
 						role: "user",
 						content: [
-							{ type: "text", text: LOOK_MESSAGE },
-							{ type: "image", data: renderPng.toString("base64"), mimeType: "image/png" },
+							{ type: "text", text: [LOOK_MESSAGE, ...renderImage.hints].join("\n") },
+							{ type: "image", data: renderImage.data, mimeType: renderImage.mimeType },
 						],
 						timestamp: Date.now(),
 					},
@@ -290,13 +379,16 @@ export async function runVisualMaker(input: VisualMakerInput, opts: VisualMakerO
 			}
 		}
 	} catch (err) {
+		captureError = err;
 		const msg = err instanceof Error ? err.message : String(err);
 		return { svg: "", notes: `FAILED: the maker crashed — ${msg}` };
+	} finally {
+		capture?.finish(captureError);
 	}
 
 	// Iteration limit: deliver the last written SVG only if it was looked at.
 	if (currentSvg && renderedSvg === currentSvg) {
-		return { svg: currentSvg, notes: finalText || "Iteration limit reached — delivering the last verified SVG." };
+		return finish(currentSvg, finalText || "Iteration limit reached — delivering the last verified SVG.", learnerImage);
 	}
 	return { svg: "", notes: `FAILED: iteration limit (${maxIterations}) reached without a verified SVG.` };
 }
@@ -324,6 +416,7 @@ async function streamOnce(
 	reasoning: ThinkingLevel | undefined,
 	abortSignal?: AbortSignal,
 	onProviderStreamEvent?: ProviderEventObserver,
+	capture?: BackgroundCapture,
 ): Promise<AssistantMessage> {
 	// 0.87.1: provider-facing contexts are TranscriptContexts — the prompt
 	// and tool declarations fold into a leading system message.
@@ -335,8 +428,9 @@ async function streamOnce(
 		onProviderStreamEvent: onProviderStreamEvent as never,
 	} as never);
 	for await (const event of stream) {
-		if (event.type === "done") return event.message;
+		if (event.type === "done") { capture?.reply(event.message); return event.message; }
 		if (event.type === "error") {
+			capture?.reply(event.error);
 			if (event.reason === "aborted") {
 				const err = new Error("aborted");
 				err.name = "AbortError";
@@ -373,12 +467,12 @@ function snippetAround(svg: string, target: string): string {
 		.join("\n");
 }
 
-function finish(svg: string | null, finalText: string): VisualResult {
+function finish(svg: string | null, finalText: string, image?: LearnerImage): VisualResult {
 	if (!svg) {
 		return {
 			svg: "",
 			notes: `FAILED: the maker never wrote an SVG.${finalText ? ` (${finalText.slice(0, 300)})` : ""}`,
 		};
 	}
-	return { svg, notes: finalText || undefined };
+	return { svg, notes: finalText || undefined, ...(image ? { image: { path: image.path, snapshotId: image.snapshotId } } : {}) };
 }

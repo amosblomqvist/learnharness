@@ -19,16 +19,35 @@
  *
  *   window.lh.onUpdateStatus(cb) / window.lh.installUpdate() — the
  *   auto-update channel (Wave C, 2026-10-10): "lh:update-status" pushes
- *   {status:"downloaded", version} once an update is staged; installUpdate
- *   asks main to kill the server and quit-and-install. Browser builds:
- *   both absent, the banner never renders.
+ *   {status, version, revision} on updater events; installUpdate asks main
+ *   to kill the server and quit-and-install. getUpdateState retrieves the
+ *   snapshot for a late subscriber; checkForUpdates requests a manual
+ *   check (including download/install-on-quit, even with automatic checks OFF).
+ *
+ *   window.lh.onOpenSettings(cb) — menu navigation, buffered until React
+ *   subscribes after a window is reopened. Browser builds have no bridge.
  *
  * Channel names are mirrored in electron/main.cjs — keep them in sync.
  */
-const { contextBridge, ipcRenderer } = require("electron");
+const { contextBridge, ipcRenderer, webUtils } = require("electron");
+
+let openSettingsListener = null;
+let pendingOpenSettings = null;
+ipcRenderer.on("lh:open-settings", (_event, section) => {
+	if (openSettingsListener) openSettingsListener(section);
+	else pendingOpenSettings = section;
+});
 
 contextBridge.exposeInMainWorld("lh", {
 	platform: process.platform,
+	// Resolve only a renderer-supplied, OS-backed File. No filesystem API,
+	// uploads, copies, or DOM File IPC to main; sandbox/isolation stay on.
+	getPathForFile: (file) => webUtils.getPathForFile(file),
+	chooseAttachmentFolder: () => ipcRenderer.invoke("lh:attachment:pick", "folder"),
+	...(process.argv?.includes("--lh-web-subscriptions") ? {
+		subscriptionTransport: "web",
+		openSubscriptionBrowser: (action) => ipcRenderer.invoke("lh:subscriptions:web-browser", action),
+	} : {}),
 	chatgpt: {
 		status: () => ipcRenderer.invoke("lh:chatgpt:control", { op: "status" }),
 		login: (id) => ipcRenderer.invoke("lh:chatgpt:control", { op: "login", id }),
@@ -41,6 +60,21 @@ contextBridge.exposeInMainWorld("lh", {
 			const listener = () => cb();
 			ipcRenderer.on("lh:chatgpt:changed", listener);
 			return () => ipcRenderer.removeListener("lh:chatgpt:changed", listener);
+		},
+	},
+	subscriptions: {
+		status: () => ipcRenderer.invoke("lh:subscriptions:control", { op: "status" }),
+		login: (providerId, enabled) => ipcRenderer.invoke("lh:subscriptions:control", { op: "login", providerId, enabled }),
+		cancel: (providerId) => ipcRenderer.invoke("lh:subscriptions:control", { op: "cancel", providerId }),
+		respond: (providerId, attemptId, promptId, value) => ipcRenderer.invoke("lh:subscriptions:control", { op: "respond", providerId, attemptId, promptId, value }),
+		open: (providerId, attemptId, actionId) => ipcRenderer.invoke("lh:subscriptions:control", { op: "open", providerId, attemptId, actionId }),
+		retry: (providerId) => ipcRenderer.invoke("lh:subscriptions:control", { op: "retry", providerId }),
+		disconnect: (providerId) => ipcRenderer.invoke("lh:subscriptions:control", { op: "disconnect", providerId }),
+		consent: (providerId, enabled) => ipcRenderer.invoke("lh:subscriptions:control", { op: "consent", providerId, enabled }),
+		onChange: (cb) => {
+			const listener = () => cb();
+			ipcRenderer.on("lh:subscriptions:changed", listener);
+			return () => ipcRenderer.removeListener("lh:subscriptions:changed", listener);
 		},
 	},
 	expandWindow: () => ipcRenderer.send("lh:expand-window"),
@@ -56,4 +90,17 @@ contextBridge.exposeInMainWorld("lh", {
 		return () => ipcRenderer.removeListener("lh:update-status", listener);
 	},
 	installUpdate: () => ipcRenderer.send("lh:update-install"),
+	getUpdateState: () => ipcRenderer.invoke("lh:update:get"),
+	checkForUpdates: () => ipcRenderer.invoke("lh:update:check"),
+	onOpenSettings: (cb) => {
+		openSettingsListener = cb;
+		if (pendingOpenSettings !== null) {
+			const section = pendingOpenSettings;
+			pendingOpenSettings = null;
+			cb(section);
+		}
+		return () => {
+			if (openSettingsListener === cb) openSettingsListener = null;
+		};
+	},
 });

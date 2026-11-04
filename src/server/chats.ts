@@ -1,10 +1,13 @@
 import { abortExtraction, extractionStatuses } from "../agent/subagents/extraction.ts";
+import { isJobLive } from "../agent/subagents/aborts.ts";
 import { coverageOf } from "../core/coverage.ts";
 import { deleteChatTraces, type ChatDeleteMode, type ChatDeletionStats } from "../core/graph-deletion.ts";
 import { titleFromPrompt } from "../core/contracts.ts";
 import { graphRevision } from "./graph.ts";
 import { stores } from "./stores.ts";
 import { isTurnRunning } from "./turn-liveness.ts";
+import { clearTurnFailure } from "./turn-runs.ts";
+import { discardChatDeliveries } from "./jobs.ts";
 
 /**
  * Server-side chat entries for the transport layer (app/api/chats*,
@@ -65,10 +68,7 @@ export type ChatDeleteOutcome =
  *      the wind-down finds the chat gone at its merge and aborts with
  *      nothing merged.
  */
-export async function deleteChatSession(chatId: string, mode: ChatDeleteMode): Promise<ChatDeleteOutcome> {
-	if (!stores.chatStore.getChat(chatId)) {
-		return { ok: false, status: 404, code: "not_found", error: "No such session" };
-	}
+export function runningWorkBlocker(chatId: string): Extract<ChatDeleteOutcome, { status: 409 }> | null {
 	if (isTurnRunning(chatId)) {
 		return {
 			ok: false,
@@ -78,7 +78,11 @@ export async function deleteChatSession(chatId: string, mode: ChatDeleteMode): P
 			jobIds: [],
 		};
 	}
-	const runningJobs = stores.jobStore.listJobs(chatId).filter((job) => job.status === "running");
+	// Legacy records kept completed workers running until delivery. A saved
+	// result without a live loop is pending session data, not computing work;
+	// deletion must not depend on a prior recovery poll to recognize it.
+	const runningJobs = stores.jobStore.listJobs(chatId).filter((job) =>
+		job.status === "running" && (!job.result || isJobLive(job.id)));
 	if (runningJobs.length > 0) {
 		return {
 			ok: false,
@@ -88,6 +92,15 @@ export async function deleteChatSession(chatId: string, mode: ChatDeleteMode): P
 			jobIds: runningJobs.map((job) => job.id),
 		};
 	}
+	return null;
+}
+
+export async function deleteChatSession(chatId: string, mode: ChatDeleteMode): Promise<ChatDeleteOutcome> {
+	if (!stores.chatStore.getChat(chatId)) {
+		return { ok: false, status: 404, code: "not_found", error: "No such session" };
+	}
+	const blocker = runningWorkBlocker(chatId);
+	if (blocker) return blocker;
 	if (extractionStatuses().some((run) => run.chatId === chatId)) {
 		abortExtraction(chatId); // true cancellation — spend stops, nothing merges
 		const deadline = Date.now() + WIND_DOWN_TIMEOUT_MS;
@@ -104,12 +117,43 @@ export async function deleteChatSession(chatId: string, mode: ChatDeleteMode): P
 		}
 	}
 
+	// A result wake or a worker may have started during extraction wind-down.
+	// Recheck immediately before the synchronous purge, with no await gap.
+	const lateBlocker = runningWorkBlocker(chatId);
+	if (lateBlocker) return lateBlocker;
+
+	return finishChatDeletion(chatId, mode);
+}
+
+/** Source deletion has already purged the selected batch's graph traces.
+ * Remove the remaining session data with the same gates/cleanup and no await. */
+export function deleteIdleChatRecord(chatId: string): Extract<ChatDeleteOutcome, { ok: false }> | { ok: true } {
+	if (!stores.chatStore.getChat(chatId)) return { ok: false, status: 404, code: "not_found", error: "No such session" };
+	const blocker = runningWorkBlocker(chatId);
+	if (blocker) return blocker;
+	if (extractionStatuses().some((run) => run.chatId === chatId)) return { ok: false, status: 503, code: "extraction_winding_down", error: "The session's extraction is still winding down — try again in a moment" };
+	finishChatRecordDeletion(chatId);
+	// ChatStore can swallow unlink failures. Do not tell source deletion to
+	// discard placement/folders while the conversation still exists.
+	if (stores.chatStore.getChat(chatId)) throw new Error("Could not remove the selected session record.");
+	return { ok: true };
+}
+
+function finishChatDeletion(chatId: string, mode: ChatDeleteMode): Extract<ChatDeleteOutcome, { ok: true }> {
 	// THE SYNC BLOCK — no awaits below (see the doc comment). Order:
 	// ledgers → jobs → the chat record.
 	const stats = deleteChatTraces(stores.graphStore, chatId, mode);
-	const jobsRemoved = stores.jobStore.deleteJobsForChat(chatId);
-	stores.chatStore.deleteChat(chatId);
+	const jobsRemoved = finishChatRecordDeletion(chatId);
 	return { ok: true, mode, stats, jobsRemoved, graphRevision: graphRevision() };
+}
+
+function finishChatRecordDeletion(chatId: string): number {
+	const jobsRemoved = stores.jobStore.deleteJobsForChat(chatId);
+	if (stores.chatStore.deleteChat(chatId)) {
+		discardChatDeliveries(chatId);
+		clearTurnFailure(chatId);
+	}
+	return jobsRemoved;
 }
 
 /** One session's coverage read (extraction-UX redesign, owner dispatch

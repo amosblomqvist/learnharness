@@ -27,12 +27,14 @@ const {
 	ensureCompacted,
 	kickCompaction,
 	awaitCompaction,
+	compactionInFlight,
 	effectiveThresholdTokens,
 	projectedContextTokens,
 } = await import("../src/server/compaction.ts");
 import type { CompactionDeps } from "../src/server/compaction.ts";
+import { createFauxCore, fauxAssistantMessage } from "@earendil-works/pi-ai";
 const { subscribe } = await import("../src/core/events.ts");
-const { activeCompactionOf, newUserMessage, measuredContextTokens, COMPACTED_HISTORY_HEADER } = await import("../src/core/index.ts");
+const { activeCompactionOf, newCompactionMarker, newUserMessage, measuredContextTokens, toLlmMessages, COMPACTED_HISTORY_HEADER } = await import("../src/core/index.ts");
 import type { LhMessage } from "../src/core/index.ts";
 
 after(() => {
@@ -167,10 +169,118 @@ describe("the compaction service", () => {
 		await ensureCompacted(deps, chatId);
 		assert.ok(seenPrompt.includes("prior compaction summary"), "the prior summary rides the span");
 		assert.ok(seenPrompt.includes(COMPACTED_HISTORY_HEADER), "as the marker's canonical text");
+		assert.equal(seenPrompt.split(COMPACTED_HISTORY_HEADER).length - 1, 1, "the prior summary is supplied exactly once");
 		const record = chatStore.getChat(chatId)!;
 		const markers = record.messages.filter((m) => (m as { customType?: string }).customType === "compaction");
 		assert.equal(markers.length, 2, "both markers persist (history is never rewritten)");
 		assert.ok(activeCompactionOf(record.messages)!.content.includes("SECOND SUMMARY"), "the newest rules");
+	});
+
+	it("ten successive compactions keep one summary on the wire and preserve the complete record", async () => {
+		const chat = chatStore.createChat("repeated-cycle fixture");
+		chatStore.saveMessages(chat.id, Array.from({ length: 20 }, (_, i) => big(`exchange-${i}`, 8)));
+		let calls = 0;
+		const deps: CompactionDeps = {
+			...depsOf(chat.id, 150_000),
+			summarize: async (prompt) => {
+				assert.equal(prompt.split(COMPACTED_HISTORY_HEADER).length - 1, calls === 0 ? 0 : 1);
+				if (calls > 0) assert.ok(prompt.includes(`SUMMARY-${calls}.`), "only the immediately prior summary rides forward");
+				return {
+					summary: `SUMMARY-${++calls}.`,
+					usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 2, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
+				};
+			},
+		};
+		for (let cycle = 1; cycle <= 10; cycle++) {
+			const messages = [...chatStore.getChat(chat.id)!.messages];
+			if (cycle > 1) messages.push(big(`growth-${cycle}`, 8));
+			// Controlled provider readings trigger compaction while the visible
+			// retained tail advances slowly enough to contain older markers.
+			messages.push({ id: `usage-${cycle}`, role: "assistant", content: [{ type: "text", text: "measured response" }], stopReason: "stop", usage: { input: 150_001, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 150_002 }, timestamp: cycle } as LhMessage);
+			chatStore.saveMessages(chat.id, messages);
+			await ensureCompacted(deps, chat.id);
+			assert.equal(calls, cycle);
+			const record = chatStore.getChat(chat.id)!;
+			assert.deepEqual(record.messages.slice(0, -1), messages, "every original message and marker remains stored");
+			assert.equal(record.messages.filter((m) => m.role === "custom" && m.customType === "compaction").length, cycle);
+			const wire = JSON.stringify(toLlmMessages(record.messages));
+			assert.equal(wire.split(COMPACTED_HISTORY_HEADER).length - 1, 1, `cycle ${cycle}: one summary on the wire`);
+			assert.ok(wire.includes(`SUMMARY-${cycle}.`));
+			assert.equal(measuredContextTokens(record.messages), null, "committing a marker invalidates pre-compaction readings");
+		}
+	});
+
+	it("a resolved prior summary replaces all summary markers in the newly superseded span", async () => {
+		const chat = chatStore.createChat("summary span fixture");
+		const kept = big("previously retained");
+		const details = { firstKeptMessageId: kept.id, tokensBefore: 150_000, at: "fixture" };
+		const steer: LhMessage = { id: "steer", role: "custom", customType: "subagent-steer", content: "RESEARCH DELIVERY", display: true, details: {}, timestamp: 1 };
+		const messages = [big("discarded"), kept, newCompactionMarker("SUPERSEDED SUMMARY", details), steer, newCompactionMarker("LATEST SUMMARY", details), big("growth"), big("recent")];
+		chatStore.saveMessages(chat.id, messages);
+		let seenPrompt = "";
+		await ensureCompacted({ ...depsOf(chat.id, 40_000), summarize: async (prompt, engine) => {
+			seenPrompt = prompt;
+			return depsOf(chat.id, 40_000).summarize!(prompt, engine);
+		} }, chat.id);
+		assert.ok(seenPrompt.includes("previously retained"));
+		assert.ok(seenPrompt.includes("RESEARCH DELIVERY"), "non-compaction context markers still ride the span");
+		assert.ok(!seenPrompt.includes("SUPERSEDED SUMMARY"));
+		assert.equal(seenPrompt.split("LATEST SUMMARY").length - 1, 1);
+		assert.equal(seenPrompt.split(COMPACTED_HISTORY_HEADER).length - 1, 1);
+		assert.deepEqual(chatStore.getChat(chat.id)!.messages.slice(0, -1), messages);
+	});
+
+	it("an unresolved cutoff preserves legacy summary text in the next compaction input", async () => {
+		const chat = chatStore.createChat("legacy summary fixture");
+		const legacy = newCompactionMarker("LEGACY-ONLY INFORMATION", { firstKeptMessageId: "missing", tokensBefore: 150_000, at: "fixture" });
+		const messages = [big("old"), legacy, big("recent"), newUserMessage("latest")];
+		chatStore.saveMessages(chat.id, messages);
+		let seenPrompt = "";
+		await ensureCompacted({ ...depsOf(chat.id, 40_000), summarize: async (prompt, engine) => {
+			seenPrompt = prompt;
+			return depsOf(chat.id, 40_000).summarize!(prompt, engine);
+		} }, chat.id);
+		assert.equal(seenPrompt.split("LEGACY-ONLY INFORMATION").length - 1, 1);
+		assert.ok(!seenPrompt.includes("prior compaction summary"), "no separate prior summary exists for an unresolved cutoff");
+		assert.deepEqual(chatStore.getChat(chat.id)!.messages.slice(0, -1), messages);
+	});
+
+	it("the production summarizer rejects a length-stopped checkpoint and a complete retry can commit", async () => {
+		const chatId = overThresholdChat("incomplete summary fixture");
+		await ensureCompacted(depsOf(chatId, 40_000), chatId);
+		chatStore.saveMessages(chatId, [...chatStore.getChat(chatId)!.messages, big("growth 1"), big("growth 2")]);
+		const faux = createFauxCore({});
+		const { summarize: _injected, ...base } = depsOf(chatId, 40_000);
+		const deps: CompactionDeps = { ...base, engine: { model: faux.getModel(), streamFn: faux.streamSimple } };
+		const before = chatStore.getChat(chatId)!;
+		assert.ok(activeCompactionOf(before.messages), "the failed replacement must preserve an existing checkpoint too");
+		const events: string[] = [];
+		const off = subscribe((event) => {
+			const { chatId: id, running } = event as { chatId?: string; running?: boolean };
+			if (event.type === "compaction-changed" && id === chatId) events.push(`${running}`);
+		});
+		// Exercise the actual zero-tool summarizer with an offline provider;
+		// NODE_ENV=test otherwise deliberately skips non-injected summaries.
+		const env: Record<string, string | undefined> = process.env;
+		const originalNodeEnv = env.NODE_ENV;
+		env.NODE_ENV = "development";
+		try {
+			faux.setResponses([fauxAssistantMessage("INCOMPLETE SUMMARY", { stopReason: "length" })]);
+			await ensureCompacted(deps, chatId);
+			assert.deepEqual(chatStore.getChat(chatId), before, "an explicitly unfinished summary must not become a checkpoint");
+			assert.equal(compactionInFlight(chatId), false, "the failed run releases its gate");
+			assert.deepEqual(events, ["true", "false"]);
+			faux.setResponses([fauxAssistantMessage("COMPLETE SUMMARY")]);
+			await ensureCompacted(deps, chatId);
+			const record = chatStore.getChat(chatId)!;
+			assert.ok(activeCompactionOf(record.messages)!.content.includes("COMPLETE SUMMARY"));
+			assert.deepEqual(record.messages.slice(0, -1), before.messages);
+			assert.ok(!JSON.stringify(record.messages).includes("INCOMPLETE SUMMARY"));
+		} finally {
+			if (originalNodeEnv === undefined) delete env.NODE_ENV;
+			else env.NODE_ENV = originalNodeEnv;
+			off();
+		}
 	});
 
 	it("effectiveThresholdTokens: the setting rules big windows; the window rule binds small ones", () => {

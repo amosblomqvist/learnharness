@@ -48,6 +48,24 @@ export const AUTH_KEYS: readonly AuthKeyInfo[] = [
 		description: "Web-search engine for the researcher sub-agent — the alternative to Tavily. Setting the key activates it.",
 		docsUrl: "https://brave.com/search/api/",
 	},
+	{
+		id: "EXA_API_KEY",
+		label: "Exa",
+		description: "Web-search engine for the researcher. Search requests use your Exa account and its pricing.",
+		docsUrl: "https://dashboard.exa.ai/api-keys",
+	},
+	{
+		id: "FIRECRAWL_API_KEY",
+		label: "Firecrawl",
+		description: "Web-search engine for the researcher sub-agent — an alternative to Tavily and Brave. Setting the key activates it.",
+		docsUrl: "https://www.firecrawl.dev/app/api-keys",
+	},
+	{
+		id: "OLLAMA_API_KEY",
+		label: "Ollama",
+		description: "Hosted web search at ollama.com — requires an Ollama API key. Setting it activates search, not local models.",
+		docsUrl: "https://ollama.com/settings/keys",
+	},
 ] as const;
 
 const AUTH_KEY_IDS: ReadonlySet<string> = new Set(AUTH_KEYS.map((k) => k.id));
@@ -122,6 +140,19 @@ export const AUTH_PROVIDER_KEYS: readonly AuthProviderInfo[] = [
 	{ id: "zai-coding-cn", envVar: "ZAI_CODING_CN_API_KEY", label: "Z.AI Coding CN" },
 ] as const;
 
+/**
+ * THE single custom endpoint's identity: a user-configured OpenAI-compatible
+ * server registered into pi-ai at runtime (server/custom-provider.ts). NOT part
+ * of AUTH_PROVIDER_KEYS (that table is test-pinned to pi-ai's built-ins and is
+ * env-var-keyed); this one is keyed by a user-supplied base URL, and its key
+ * rides this reserved env var (optional — keyless local servers allowed).
+ */
+export const CUSTOM_PROVIDER = {
+	id: "custom",
+	envVar: "CUSTOM_OPENAI_API_KEY",
+	label: "Custom endpoint",
+} as const;
+
 /** Every distinct env var a model-provider key rides in (the write side's
  *  writability check — see isProviderEnvVar below; also drives which
  *  PRESENT provider vars surface as status rows). */
@@ -140,8 +171,8 @@ export type KeyShapeResult = { ok: true } | { ok: false; error: string };
  * a truncated or wrong-family key can never land in the store). Values are
  * TRIMMED first (paste hygiene); empty-after-trim always fails.
  *
- * CURATED keys carry family rules (Tavily's tvly-… prefix; Brave and
- * Deepgram publish no format — length floors + paste hygiene only).
+ * CURATED keys carry family rules (Tavily's tvly-… and Firecrawl's fc-…
+ * prefixes; Brave, Exa, Ollama and Deepgram use length floors + paste hygiene only).
  * MODEL-PROVIDER keys use genericProviderKeyGuard below instead (families
  * vary by provider — only paste hygiene applies; owner spec: min length
  * ~12, no whitespace). OPENROUTER_API_KEY moved to the generic guard with
@@ -161,6 +192,14 @@ export function validateKeyShape(id: string, rawValue: string): KeyShapeResult {
 		case "BRAVE_API_KEY":
 			// No public format — a length floor + paste hygiene only.
 			return nonEmpty(20);
+		case "EXA_API_KEY":
+		case "OLLAMA_API_KEY":
+			// No documented key prefix: use the provider-key paste guard.
+			return nonEmpty(12);
+		case "FIRECRAWL_API_KEY":
+			return value.startsWith("fc-")
+				? nonEmpty(20)
+				: { ok: false, error: `${id} must start with "fc-" (Firecrawl's key format)` };
 		case "DEEPGRAM_API_KEY":
 			// No public format — the length floor only catches truncated pastes.
 			return nonEmpty(20);
@@ -194,7 +233,8 @@ export interface AuthKeyStatus {
 	info: AuthKeyInfo | null;
 	/** A key is present when EITHER the environment or the file has it. */
 	present: boolean;
-	/** The masked tail + character count, e.g. "…ab12 (64 chars)". */
+	/** Ordinary masked tail + count, e.g. "…ab12 (64 chars)"; custom keys
+	 * use full redaction, with no credential characters at any length. */
 	masked: string | null;
 	/** Where the live value comes from, given env-wins precedence. */
 	source: "env" | "file" | "none";

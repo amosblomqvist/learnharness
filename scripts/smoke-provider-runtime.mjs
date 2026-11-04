@@ -1,7 +1,7 @@
 /**
- * OFFLINE native Pi Google initialization gate (no generation or provider calls).
- * Unlike /api/models, this traverses Pi's lazy adapter and constructs GoogleGenAI.
- * The real onPayload hook throws a unique sentinel BEFORE generateContentStream.
+ * OFFLINE native Pi Google/Bedrock initialization gate (no generation or provider calls).
+ * Unlike /api/models, this traverses Pi's lazy adapters and constructs real SDK clients.
+ * The real onPayload hook throws a unique sentinel BEFORE SDK request dispatch.
  * All file modules must resolve inside the payload, including nested dependencies.
  *
  * node scripts/smoke-provider-runtime.mjs [--standalone <dir>] [--runtime <Node/Electron>]
@@ -80,18 +80,31 @@ async function probe(standalone) {
 		// factories, never the checkout's module or a direct/fake Google adapter.
 		const entry = pathToFileURL(path.join(root, "node_modules/@earendil-works/pi-ai/dist/index.js"));
 		const { createModels } = await import(entry.href);
+		// Keep every native chat implementation evaluable in the standalone
+		// payload even though the custom-provider UI intentionally exposes one API.
+		for (const api of ["anthropic-messages", "openai-completions", "openai-responses", "openai-codex-responses", "azure-openai-responses", "google-generative-ai", "google-vertex", "bedrock-converse-stream", "mistral-conversations", "pi-messages"]) {
+			const implementation = await import(new URL(`api/${api}.js`, entry).href);
+			assert.equal(typeof implementation.streamSimple, "function", `${api}: native implementation missing`);
+		}
+		noNetwork();
+		console.log("[smoke-provider-runtime] all 10 native chat implementations evaluated offline");
 		const models = createModels();
-		for (const [name, factory] of [["google", "googleProvider"], ["opencode", "opencodeProvider"], ["opencode-go", "opencodeGoProvider"]]) {
+		for (const [name, factory, api, label] of [
+			["google", "googleProvider", "google-generative-ai", "Google"],
+			["opencode", "opencodeProvider", "google-generative-ai", "Google"],
+			["opencode-go", "opencodeGoProvider", "google-generative-ai", "Google"],
+			["amazon-bedrock", "amazonBedrockProvider", "bedrock-converse-stream", "Bedrock"],
+		]) {
 			const provider = (await import(new URL(`providers/${name}.js`, entry).href))[factory]();
 			models.setProvider(provider);
-			const model = provider.getModels().find((candidate) => candidate.api === "google-generative-ai");
-			assert.ok(model, `${name}: missing Google-backed catalog model`);
+			const model = provider.getModels().find((candidate) => candidate.api === api);
+			assert.ok(model, `${name}: missing ${api} catalog model`);
 			const sentinel = `LH_OFFLINE_ON_PAYLOAD_${randomUUID()}`;
 			let reached = 0;
 			const result = await models.streamSimple(model, { messages: [{ role: "user", content: "Offline initialization only", timestamp: 0 }] }, {
 				apiKey: "dummy-offline-provider-gate-not-a-key",
 				onPayload(payload, selected) {
-					assert.equal(selected.api, "google-generative-ai");
+					assert.equal(selected.api, api);
 					assert.ok(payload && typeof payload === "object");
 					reached++;
 					throw new Error(sentinel);
@@ -101,7 +114,30 @@ async function probe(standalone) {
 			assert.equal(result.stopReason, "error");
 			assert.equal(result.errorMessage, sentinel, `${name}: unexpected initialization error`);
 			noNetwork();
-			console.log(`[smoke-provider-runtime] ${name}: native lazy Google adapter reached onPayload; generation stopped`);
+			console.log(`[smoke-provider-runtime] ${name}: native lazy ${label} adapter reached onPayload; generation stopped`);
+		}
+		// Exercise the public lazy OAuth surface offline. toAuth evaluates the
+		// real flow module and its imports but neither logs in nor refreshes.
+		for (const [name, factory] of [["github-copilot", "githubCopilotProvider"], ["xai", "xaiProvider"]]) {
+			const provider = (await import(new URL(`providers/${name}.js`, entry).href))[factory]();
+			const credential = { type: "oauth", access: name === "github-copilot" ? "tid=offline;proxy-ep=proxy.individual.githubcopilot.com;" : "offline-xai-oauth-not-a-token", refresh: "offline-refresh-not-a-token", expires: Date.now() + 3600000, availableModelIds: provider.getModels().map((model) => model.id) };
+			const auth = await provider.auth.oauth.toAuth(credential);
+			assert.equal(auth.apiKey, credential.access);
+			if (name === "github-copilot") assert.equal(auth.baseUrl, "https://api.individual.githubcopilot.com");
+			const seenApis = new Set();
+			for (const model of provider.getModels()) {
+				if (seenApis.has(model.api)) continue;
+				seenApis.add(model.api);
+				const sentinel = `LH_OFFLINE_SUBSCRIPTION_${randomUUID()}`;
+				let reached = 0;
+				const result = await provider.streamSimple({ ...model, ...(auth.baseUrl ? { baseUrl: auth.baseUrl } : {}) }, { messages: [{ role: "user", content: "Offline initialization only", timestamp: 0 }] }, {
+					...auth, maxRetries: 0, onPayload() { reached++; throw new Error(sentinel); },
+				}).result();
+				assert.equal(reached, 1, `${name}/${model.api}: ${result.errorMessage}`);
+				assert.equal(result.errorMessage, sentinel);
+			}
+			noNetwork();
+			console.log(`[smoke-provider-runtime] ${name}: public native OAuth and ${seenApis.size} transport APIs initialized offline`);
 		}
 		// Resolution/evaluation, not folder-exists checks. This also covers the
 		// previously missing transitive edge and permits legitimate nested deps.

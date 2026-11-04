@@ -13,12 +13,12 @@ test("subscription usage is neither API dollars nor an unpriced-model mistake, i
 	assert.equal(callCost(step, plan.model), null);
 	assert.equal(turnCost(turn(plan.model, [])), null);
 	assert.equal(jobCost({ usage: { model: plan.model, ...step, steps: 1 } }), null);
-	assert.deepEqual(sessionCost({ turns: [plan, turn(plan.model, [])] }), { cost: 0, unpriced: 0, subscription: 2, turnCosts: { "scratch-turn": null } });
+	assert.deepEqual(sessionCost({ turns: [plan, turn(plan.model, [])] }), { cost: 0, unpriced: 0, subscription: 2, subscriptionProviders: ["ChatGPT"], turnCosts: { "scratch-turn": null } });
 	const api = turn("openai:gpt-5");
 	const mixed = sessionCost({ turns: [plan, api, turn("unknown:missing")] });
 	assert.equal(mixed.cost, turnCost(api)); assert.equal(mixed.unpriced, 1); assert.equal(mixed.subscription, 1);
-	assert.equal(planCostLabel(null, true), "ChatGPT plan");
-	assert.match(planCostLabel(mixed.cost, true), /API \+ ChatGPT plan$/);
+	assert.equal(planCostLabel(null, true), "ChatGPT");
+	assert.match(planCostLabel(mixed.cost, true), /\$[\d.]+ \+ ChatGPT$/);
 });
 
 test("graph extraction and audit preserve subscription identity separately from priced and unknown stages", () => {

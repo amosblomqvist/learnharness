@@ -25,9 +25,13 @@
  */
 
 const { app, BrowserWindow, Menu, ipcMain, session, shell, dialog } = require("electron");
+const { pickAttachmentPath } = require("./attachment-picker.cjs");
 const { createChatGPT, fileStore } = require("./chatgpt.cjs");
 const { attachChatGPTChild, trustedSender, chatGPTControl } = require("./chatgpt-ipc.cjs");
+const { createSubscriptions, loadSubscriptionSDK } = require("./subscriptions.cjs");
+const { attachSubscriptionChild, subscriptionControl } = require("./subscription-ipc.cjs");
 const { desktopAPIHeaders } = require("./desktop-api.cjs");
+const { openWebSubscriptionBrowser } = require("./web-subscription-browser.cjs");
 const { randomBytes } = require("node:crypto");
 const { spawn } = require("node:child_process");
 const fs = require("node:fs");
@@ -134,8 +138,11 @@ if (process.argv.includes("--browser-service")) {
 let serverProcess = null;
 let chatgpt = null;
 let chatgptChild = null;
+let subscriptions = null;
+let subscriptionChild = null;
 // Per-launch request capability, never OAuth tokens and never renderer state.
 let desktopAPISecret = null;
+let reopenWindow = null;
 const trustedAppWindows = new Set();
 
 // A GUI shell must never die to a stray exception (EPIPE dialogs, a race
@@ -196,7 +203,11 @@ function startServer(port) {
 	return new Promise((resolve, reject) => {
 		const child = spawn(
 			process.execPath,
-			[serverEntry()],
+			// Only the macOS backend needs this: Next's native title setter
+			// otherwise checks this Node-mode process in as a foreground app.
+			process.platform === "darwin"
+				? ["--require", path.join(process.resourcesPath, "server-title-guard.cjs"), serverEntry()]
+				: [serverEntry()],
 			{
 				cwd: path.dirname(serverEntry()),
 				env: {
@@ -218,6 +229,7 @@ function startServer(port) {
 		);
 		serverProcess = child;
 		chatgptChild = attachChatGPTChild(child, chatgpt);
+		subscriptionChild = attachSubscriptionChild(child, subscriptions);
 		const fwd = (buf) => buf.toString().trimEnd().split("\n").forEach((l) => l && log(`server: ${l}`));
 		child.stdout.on("data", fwd);
 		child.stderr.on("data", fwd);
@@ -226,7 +238,10 @@ function startServer(port) {
 			serverProcess = null;
 			chatgptChild?.dispose();
 			chatgptChild = null;
+			subscriptionChild?.dispose();
+			subscriptionChild = null;
 			chatgpt?.close();
+			subscriptions?.close();
 		});
 		resolve(child);
 	});
@@ -251,6 +266,7 @@ function waitUntilUp(url, tries = 150) {
 
 function killServer() {
 	chatgpt?.close();
+	subscriptions?.close();
 	if (!serverProcess) return;
 	const child = serverProcess;
 	serverProcess = null;
@@ -301,6 +317,7 @@ function createWindow(url) {
 			contextIsolation: true,
 			sandbox: true,
 			nodeIntegration: false,
+			...(process.env.LH_DEV_URL ? { additionalArguments: ["--lh-web-subscriptions"] } : {}),
 			preload: path.join(__dirname, "preload.cjs"),
 		},
 		// Live-resize + first-paint flash (owner, 2026-09-17): during a resize
@@ -423,31 +440,57 @@ const ZOOM_LADDER = [0.75, 0.9, 1, 1.1, 1.25, 1.5, 1.75, 2];
  * and before-quit alone would race the swap. */
 const UPDATE_CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000;
 let autoUpdater = null; // electron-updater's, packaged builds only
+// Observational only: this snapshot NEVER gates a check, download or install.
+// The revision lets late subscribers reject an older in-flight IPC snapshot.
+let updateState = { status: "idle", version: null, revision: 0 };
 
-function broadcastUpdateStatus(status) {
-	for (const win of BrowserWindow.getAllWindows()) {
-		try {
-			win.webContents.send("lh:update-status", status);
-		} catch {
-			/* window mid-teardown — the next push retries */
+function reportUpdateStatus(status, version = null) {
+	try {
+		// A later check/error must not hide an update already staged for quit.
+		if (updateState.status === "downloaded" && status !== "downloaded") return;
+		updateState = { status, version: typeof version === "string" ? version : null, revision: updateState.revision + 1 };
+		for (const win of BrowserWindow.getAllWindows()) {
+			try {
+				win.webContents.send("lh:update-status", updateState);
+			} catch {
+				/* window mid-teardown — snapshot retrieval covers a later load */
+			}
 		}
+	} catch {
+		/* Status reporting must never interrupt the updater. */
+	}
+}
+
+/** Read the SAME data directory passed to the packaged server. Only an
+ * explicit false opts out; absent/corrupt/unreadable settings keep updates ON.
+ * Re-read for each automatic check so saving the toggle needs no restart. */
+function automaticUpdatesEnabled() {
+	try {
+		const settings = JSON.parse(fs.readFileSync(path.join(DATA_DIR(), "settings.json"), "utf8"));
+		return settings?.general?.autoUpdate !== false;
+	} catch {
+		return true;
 	}
 }
 
 function checkForUpdates({ manual = false } = {}) {
 	if (!autoUpdater) return;
+	if (!manual && !automaticUpdatesEnabled()) {
+		log("auto-update: automatic check skipped (turned off in Settings)");
+		return;
+	}
+	// Do not gate on display state: a stale spinner/error must never disable
+	// future background checks. electron-updater owns its in-flight work.
 	autoUpdater
 		.checkForUpdates()
 		.then((result) => {
-			// The download itself is silent (autoDownload); the banner fires on
-			// update-downloaded. Manual checks additionally answer directly.
-			if (!manual) return;
-			const version = result?.updateInfo?.version;
-			if (!version) dialog.showMessageBox({ type: "info", message: "You're up to date.", detail: `LearnHarness ${app.getVersion()} is the latest version.` });
+			// A declined check (e.g. an unsupported package) establishes no
+			// latest-version claim. Real results arrive through updater events.
+			if (!result) reportUpdateStatus("idle");
 		})
 		.catch((err) => {
 			log(`update check failed: ${err?.message ?? err}`);
-			if (manual) dialog.showMessageBox({ type: "warning", message: "Couldn't check for updates.", detail: String(err?.message ?? err) });
+			reportUpdateStatus("error");
 		});
 }
 
@@ -464,12 +507,14 @@ function installUpdateNow() {
 function setupAutoUpdater() {
 	if (!app.isPackaged) {
 		log("auto-update: dev build — updater disabled");
+		reportUpdateStatus("disabled");
 		return;
 	}
 	try {
 		autoUpdater = require("electron-updater").autoUpdater;
 	} catch (err) {
 		log(`auto-update: electron-updater unavailable (${err?.message ?? err}) — updates disabled`);
+		reportUpdateStatus("disabled");
 		return;
 	}
 	const feed = process.env.LH_UPDATE_FEED;
@@ -487,11 +532,37 @@ function setupAutoUpdater() {
 		debug: (m) => {}, // too chatty for the persistent log
 		error: (m) => log(`updater error: ${m}`),
 	};
+	autoUpdater.on("checking-for-update", () => reportUpdateStatus("checking"));
+	autoUpdater.on("update-available", (info) => reportUpdateStatus("downloading", info?.version));
+	autoUpdater.on("update-not-available", () => reportUpdateStatus("up-to-date"));
 	autoUpdater.on("update-downloaded", (info) => {
 		log(`update downloaded: ${info?.version} — banner shown`);
-		broadcastUpdateStatus({ status: "downloaded", version: info?.version ?? null });
+		reportUpdateStatus("downloaded", info?.version);
 	});
-	autoUpdater.on("error", (err) => log(`updater error: ${err?.message ?? err}`));
+	autoUpdater.on("error", (err) => {
+		log(`updater error: ${err?.message ?? err}`);
+		reportUpdateStatus("error");
+	});
+}
+
+/** One result surface for manual checks. Preload buffers the navigation
+ * request until React subscribes, including when all macOS windows closed. */
+function checkForUpdatesFromMenu() {
+	try {
+		const win = BrowserWindow.getAllWindows()[0] ?? reopenWindow?.();
+		if (win) {
+			if (win.isMinimized()) win.restore();
+			win.focus();
+			const openSettings = () => {
+				try { win.webContents.send("lh:open-settings", "general"); } catch { /* window closed */ }
+			};
+			if (win.webContents.isLoadingMainFrame()) win.webContents.once("did-finish-load", openSettings);
+			else openSettings();
+		}
+	} catch {
+		/* Navigation failure must not prevent the manual check. */
+	}
+	checkForUpdates({ manual: true });
 }
 
 function zoomStep(win, dir) {
@@ -517,9 +588,8 @@ function installMenu() {
 			label: app.name,
 			submenu: [
 				{ role: "about" },
-				// Manual check (Wave C): answers via native dialog — no renderer
-				// round-trip. The 24h automatic checks stay silent.
-				{ label: "Check for Updates…", click: () => checkForUpdates({ manual: true }) },
+				// Manual checks report their result in Settings → General.
+				{ label: "Check for Updates…", click: () => checkForUpdatesFromMenu() },
 				{ type: "separator" },
 				{ role: "hide" },
 				{ role: "hideOthers" },
@@ -565,6 +635,7 @@ function installMenu() {
 async function main() {
 	app.on("window-all-closed", () => {
 		chatgpt?.pause();
+		subscriptions?.pause();
 		// macOS convention: the app stays resident, reactivated from the Dock.
 		if (process.platform !== "darwin") app.quit();
 	});
@@ -596,6 +667,16 @@ async function main() {
 				for (const win of BrowserWindow.getAllWindows()) win.webContents.send("lh:chatgpt:changed");
 			},
 		});
+		subscriptions = createSubscriptions({
+			directory: app.getPath("userData"),
+			loadSDK: () => loadSubscriptionSDK(path.dirname(serverEntry())),
+			openExternal: (target) => shell.openExternal(target),
+			onChange: (snapshot) => {
+				subscriptionChild?.send(snapshot);
+				for (const win of BrowserWindow.getAllWindows()) win.webContents.send("lh:subscriptions:changed");
+			},
+		});
+		await subscriptions.ready;
 		log(`starting server: ${serverEntry()}`);
 		log(`data dir: ${DATA_DIR()}${fs.existsSync(AUTH_FILE()) ? " · auth.json: present" : " · auth.json: ABSENT (no BYOK keys yet)"}`);
 		await startServer(new URL(url).port);
@@ -613,6 +694,26 @@ async function main() {
 		return chatGPTControl(command, chatgpt);
 	});
 
+	ipcMain.handle("lh:subscriptions:control", async (event, command) => {
+		if (!trustedAppWindows.has(BrowserWindow.fromWebContents(event.sender)) || !trustedSender(event, new URL(url).origin, BrowserWindow)) throw new Error("Untrusted desktop request.");
+		if (!subscriptions || !serverProcess?.connected) {
+			if (command?.op === "status") return [];
+			throw new Error("Subscription sign-in requires the desktop app's private server connection.");
+		}
+		return subscriptionControl(command, subscriptions);
+	});
+
+	// The dev shell has no browser tabs. Only a one-use action on its own
+	// Next server may be resolved here; never accept an arbitrary external URL.
+	ipcMain.handle("lh:subscriptions:web-browser", async (event, action) => {
+		if (!devUrl || !trustedAppWindows.has(BrowserWindow.fromWebContents(event.sender)) || !trustedSender(event, new URL(url).origin, BrowserWindow)) throw new Error("Untrusted development request.");
+		await openWebSubscriptionBrowser(action, new URL(url).origin, { openExternal: (target) => shell.openExternal(target) });
+	});
+
+	ipcMain.handle("lh:attachment:pick", (event, mode) => pickAttachmentPath(event, mode, {
+		BrowserWindow, dialog, trustedAppWindows, origin: new URL(url).origin,
+	}));
+
 	installMenu();
 
 	// Auto-update (Wave C): wire the updater before the window so the
@@ -621,6 +722,14 @@ async function main() {
 	// are log lines — this can never block boot.
 	setupAutoUpdater();
 	ipcMain.on("lh:update-install", () => installUpdateNow());
+	ipcMain.handle("lh:update:get", (event) => {
+		if (!trustedAppWindows.has(BrowserWindow.fromWebContents(event.sender)) || !trustedSender(event, new URL(url).origin, BrowserWindow)) throw new Error("Untrusted desktop request.");
+		return updateState;
+	});
+	ipcMain.handle("lh:update:check", (event) => {
+		if (!trustedAppWindows.has(BrowserWindow.fromWebContents(event.sender)) || !trustedSender(event, new URL(url).origin, BrowserWindow)) throw new Error("Untrusted desktop request.");
+		checkForUpdates({ manual: true });
+	});
 
 	// Sidebar-at-narrow-window (owner, 2026-09-17): the renderer auto-closes
 	// the sidebar below SIDEBAR_AUTOCLOSE (928px); opening it again at that
@@ -637,13 +746,14 @@ async function main() {
 		const target = SIDEBAR_AUTOCLOSE;
 		if (width < target) win.setBounds({ x, y, width: target, height });
 	});
+	reopenWindow = () => { chatgpt?.resume(); subscriptions?.resume(); return createWindow(url); };
 	app.on("activate", () => {
-		if (BrowserWindow.getAllWindows().length === 0) { chatgpt?.resume(); createWindow(url); }
+		if (BrowserWindow.getAllWindows().length === 0) reopenWindow();
 	});
 	createWindow(url);
 	log(`window open: ${url}`);
-	// First update check AFTER the window exists (the downloaded-banner
-	// push needs a listener); dev builds no-op (no autoUpdater).
+	// Startup + 24h checks stay main-owned and read the current preference.
+	// No renderer subscription is required; late loads retrieve the snapshot.
 	if (autoUpdater) {
 		checkForUpdates();
 		setInterval(() => checkForUpdates(), UPDATE_CHECK_INTERVAL_MS);

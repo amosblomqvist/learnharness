@@ -15,18 +15,22 @@ import {
 	type TeacherToolContext,
 } from "./tools.ts";
 import { practiceTools, type PracticeToolContext } from "./tools/practice.ts";
-import { healToolRecord } from "./tools/heal.ts";
+import { healToolRecord, withArgumentHeal } from "./tools/heal.ts";
+import { sendToUserApplies, sendToUserTool } from "./tools/send-to-user.ts";
+import { makeNarrationGuard, narrationGuardApplies, SEND_TO_USER_DELIVERY_RULE } from "./narration-guard.ts";
+import { createReadTool, readTool } from "./tools/read.ts";
 import { quizInputObject, quizInputProblems } from "../core/question-core.ts";
 import { QUESTION_TOOLS, type EnabledTools } from "../core/pending.ts";
-import { toLlmMessages, nativeInputCause } from "../core/native-messages.ts";
+import { toLlmMessages, nativeInputCause, PRACTICE_PROBLEM_TOOL } from "../core/native-messages.ts";
 import type { ChatGPTRequestCycle } from "./chatgpt-request-cycle.ts";
+import { usageWasAdmitted } from "./subscription-request-cycle.ts";
 
 /**
- * The two teaching-side agents (docs/probe-teach-split.md): the PROBER and
+ * The two teaching-side agents (docs/archive/probe-teach-split.md): the PROBER and
  * the TEACHER. Same transcript, different prompts and tool sets; the
  * chat-handler constructs ONE per request off the transcript's seam
  * (probe_done = teacher) — the STATELESS per-turn engine (docs/
- * pi-engine-swap.md §2): the persisted record is the source of truth, the
+ * docs/archive/pi-engine-swap.md §2): the persisted record is the source of truth, the
  * agent is rebuilt from it every POST and discarded at turn end.
  *
  * Engines are injectable so tests can pass a scripted faux engine and drive
@@ -129,7 +133,7 @@ export interface AgentBuildOptions {
 }
 
 /**
- * The turn's question-stop rule (docs/pi-engine-swap.md §2; Wave A
+ * The turn's question-stop rule (docs/archive/pi-engine-swap.md §2; Wave A
  * 2026-09-26, owner Option A): a question tool call (quiz /
  * ask_user_question) that RESOLVED — its synthetic "question posed" result
  * is not an error — ends the run: the learner's answer arrives as the next
@@ -144,22 +148,27 @@ export interface AgentBuildOptions {
  * belt-and-suspenders HALF for the mixed batch (a question + other calls
  * in one message) that terminate-only semantics would let run on — the
  * learner cannot answer while a turn is in flight (per-chat 409), so a
- * cleanly-posed question MUST always end the turn. maxTurns is gone
+ * cleanly-posed question MUST always end the turn. Practice's problem pose
+ * has the same wait-for-the-learner contract, including mixed output/problem
+ * batches; failed poses must still retry. maxTurns is gone
  * (owner ruling 2026-09-25: no maximum-agent-turns net on the teaching
  * turn).
  */
-function makeQuestionStopper() {
+function makeQuestionStopper(kind: AgentKind) {
 	return (context: {
 		message: { content: Array<{ type: string; id?: string; name?: string }> };
 		toolResults: Array<{ toolCallId: string; isError?: boolean }>;
 	}): boolean => {
 		const called = new Set(
 			context.message.content
-				.filter((c) => c.type === "toolCall" && c.name !== undefined && (QUESTION_TOOLS as readonly string[]).includes(c.name!))
+				.filter((c) => c.type === "toolCall" && c.name !== undefined && (
+					(QUESTION_TOOLS as readonly string[]).includes(c.name) ||
+					(kind === "practice" && c.name === PRACTICE_PROBLEM_TOOL)
+				))
 				.map((c) => c.id!),
 		);
 		if (called.size === 0) return false;
-		// Stop only when every question call of this turn resolved cleanly.
+		// Stop only when every question/problem pose resolved cleanly.
 		for (const result of context.toolResults) {
 			if (called.has(result.toolCallId) && result.isError) return false;
 		}
@@ -173,10 +182,12 @@ function baseAgentOptions(kind: AgentKind, opts: AgentBuildOptions, tools: Agent
 	// conversation-spec resolution as teaching); the cast keeps AgentKind
 	// ("practice" is not a ModelRole) honest about that.
 	const engine = opts.engine ?? piEngineFor(kind as "prober" | "teacher");
-	const stopper = makeQuestionStopper();
-	const systemPrompt = opts.promptSwitches
+	const stopper = makeQuestionStopper(kind);
+	const narrationGuard = narrationGuardApplies(kind, engine.model, opts.tools !== undefined);
+	const composedPrompt = opts.promptSwitches
 		? composeInstructions(kind, opts.promptSwitches)
 		: composedInstructions[kind]!;
+	const systemPrompt = narrationGuard ? `${composedPrompt}\n\n---\n\n${SEND_TO_USER_DELIVERY_RULE}` : composedPrompt;
 	// Debug recorder (owner, 2026-10-04): raw provider events when
 	// LH_PROVIDER_EVENTS=1 and the caller handed a chatId; undefined is
 	// the normal no-observer path (tests, env-off).
@@ -189,11 +200,25 @@ function baseAgentOptions(kind: AgentKind, opts: AgentBuildOptions, tools: Agent
 			systemPrompt,
 			model: engine.model,
 			thinkingLevel: engine.level,
-			tools,
+			// Conditional registry inclusion, like the graph-tool gates: when
+			// closed, neither the tool nor its usage instructions reach the model.
+			// Match Claude across providers (including OpenRouter), not the API
+			// transport. Explicit test registries remain caller-owned.
+			tools: [
+				...tools.map((tool) => tool.name === "read" && tool.execute === readTool.execute
+					? { ...tool, execute: createReadTool(engine.model).execute as AgentTool<any>["execute"] }
+					: tool),
+				...(sendToUserApplies(kind, engine.model, opts.tools !== undefined)
+					? [withArgumentHeal(sendToUserTool)]
+					: []),
+			],
 			messages: opts.messages ?? [],
 		},
 		streamFn: engine.streamFn,
 		...(providerEvents ? { onProviderStreamEvent: providerEvents } : {}),
+		// Narration-marked thinking is not learner-facing delivery. The
+		// paired hooks track successful output before allowing its question.
+		...(narrationGuard ? makeNarrationGuard() : {}),
 		// 0.87.1: shouldStopAfterTurn → finishTurn. Same call point (after
 		// tool results attach, before turn_end) and `{ action: "end" }` still
 		// exits BEFORE the steering poll — the parked-marker stranding our
@@ -239,7 +264,7 @@ function baseAgentOptions(kind: AgentKind, opts: AgentBuildOptions, tools: Agent
 			if (event.type === "message_end" && event.message.role === "assistant" && "usage" in event.message) {
 				// A cancelled call is not a billed step (partial/estimated
 				// usage on an aborted message is not money spent).
-				if (event.message.stopReason === "aborted" || (opts.requestCycle && !opts.requestCycle.acceptsUsage(event.message))) return;
+				if (event.message.stopReason === "aborted" || !usageWasAdmitted(event.message.usage) || (opts.requestCycle && !opts.requestCycle.acceptsUsage(event.message))) return;
 				opts.onUsage!(event.message.usage);
 			}
 		});
@@ -311,10 +336,10 @@ export function bareQuestionTools(): Record<string, AgentTool<any>> {
  * from turn 1 of a kind:"practice" session — no prober→teacher split,
  * no plan tools, no question tools. Its ENTIRE registry is
  * problem + conclude (tools/practice.ts); the doctrine prompt
- * (prompts/practice/) carries the method. The question-stop rule does
- * not apply (problem rides terminate: true natively —
- * QUESTION_TOOLS does not include it), so baseAgentOptions's stopper is
- * a no-op here; it stays wired for uniformity.
+ * (prompts/practice/) carries the method. A successful problem pose ends
+ * the run, natively for a problem-only batch and via the shared stop hook
+ * for a mixed batch (including caller-injected legacy output tools).
+ * Practice uses ordinary final prose, not the explicit output tool.
  */
 export function createPracticeAgent(ctx: PracticeToolContext, opts: AgentBuildOptions = {}) {
 	const tools = opts.tools ?? practiceTools(ctx);

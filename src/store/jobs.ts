@@ -15,6 +15,7 @@ import { emit } from "../core/events.ts";
 import type { JobStore } from "../core/ports.ts";
 import type { CreateJobInit, JobPatch } from "../core/ports.ts";
 import type { JobRecord } from "../core/contracts.ts";
+import { removeLeftoverTemps, writeFileAtomicSync } from "./atomic-write.ts";
 
 /** Background jobs (data/jobs). Not in config.ts PATHS (orchestrator-owned). */
 const JOBS_DIR = path.join(PATHS.data, "jobs");
@@ -35,13 +36,14 @@ function createJob(init: CreateJobInit): JobRecord {
 		kind: init.kind,
 		chatId: init.chatId,
 		toolCallId: init.toolCallId,
+		...(init.input !== undefined ? { input: init.input } : {}),
 		status: "running",
 		activity: init.activity ?? "starting",
 		createdAt: now,
 		updatedAt: now,
 	};
 	fs.mkdirSync(JOBS_DIR, { recursive: true });
-	fs.writeFileSync(jobFile(record.id), JSON.stringify(record, null, "\t"), "utf-8");
+	writeFileAtomicSync(jobFile(record.id), JSON.stringify(record, null, "\t"), { allowInPlaceFallback: true });
 	emit("jobs-changed", { chatId: init.chatId });
 	return record;
 }
@@ -61,7 +63,7 @@ function updateJob(id: string, patch: JobPatch): JobRecord | null {
 	const record = getJob(id);
 	if (!record) return null;
 	const next: JobRecord = { ...record, ...patch, updatedAt: patch.updatedAt ?? new Date().toISOString() };
-	fs.writeFileSync(jobFile(id), JSON.stringify(next, null, "\t"), "utf-8");
+	writeFileAtomicSync(jobFile(id), JSON.stringify(next, null, "\t"), { allowInPlaceFallback: true });
 	// EVERY write, not just status flips: progress-line updates must reach
 	// the dispatch cards (the view debounces the fetch bursts). A missing id
 	// wrote nothing and stays silent.
@@ -98,6 +100,7 @@ function deleteJobsForChat(chatId: string): number {
 	for (const job of listJobs(chatId)) {
 		try {
 			fs.unlinkSync(jobFile(job.id));
+			removeLeftoverTemps(jobFile(job.id));
 			removed++;
 		} catch {
 			/* already gone — the count is best-effort truth */

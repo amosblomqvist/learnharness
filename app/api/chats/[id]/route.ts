@@ -1,4 +1,4 @@
-import { compactionInFlight, deleteChatSession, getChat, isTurnRunning, sessionCoverage, sessionCost, stores, type ChatDeleteMode } from "@/src/server";
+import { compactionInFlight, deleteChatSession, getChat, isTurnRunning, sessionCoverage, sessionCost, stores, turnFailure, type ChatDeleteMode } from "@/src/server";
 
 export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
 	const { id } = await params;
@@ -14,11 +14,15 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
 	// agent history, served VERBATIM — the client derives its view
 	// (core/view.ts projectView). turnInFlight lets a returning client
 	// re-attach to a running turn; coverage is the chat view's ring meter.
+	// Snapshot bytes have a session-scoped endpoint; do not resend the whole image pool on every poll.
+	const { imageSnapshots: _imageSnapshots, ...record } = chat;
 	return Response.json({
-		...chat,
+		...record,
 		messages: chat.messages,
 		pricing: sessionCost(chat),
 		turnInFlight: isTurnRunning(id),
+		// Also reaches idle views that missed the failing turn's stream.
+		turnError: turnFailure(id),
 		compacting: compactionInFlight(id),
 		coverage: sessionCoverage(id),
 	});

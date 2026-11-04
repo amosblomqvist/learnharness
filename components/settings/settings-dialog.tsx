@@ -40,7 +40,8 @@ import {
 	type UserSettings,
 } from "@/src/core";
 import { useAppearance } from "./appearance.tsx";
-import { SettingsSection, SettingsRow, Toggle } from "./controls.tsx";
+import { SettingsSection } from "./controls.tsx";
+import { UpdateSettings } from "./update-settings.tsx";
 import { AgentSection } from "./agent-section.tsx";
 import type { ModelsSettings } from "@/src/core";
 import { MENU_CLOSE_EVENT, MENU_OPEN_EVENT } from "@/components/menu-shell";
@@ -50,6 +51,7 @@ import { Hint } from "@/components/ui/hint";
 import { AppearanceSection, GraphSection } from "./appearance-section.tsx";
 import { KeyboardSection } from "./keyboard-section.tsx";
 import { ChatGPTUIProvider } from "./chatgpt-connection.tsx";
+import { NativeSubscriptionUIProvider } from "./subscription-connections.tsx";
 
 /** Owner (2026-09-20): hints earn their place — mechanics-explaining
  *  prose is out; only the keyboard note stays (storage location is a
@@ -74,10 +76,6 @@ const DialogContext = createContext<{ open: (section?: string, row?: string) => 
 /** AppShell-level mount: the sidebar row and the mod+, chord call this.
  *  `open(section)` lands the dialog on a specific section (the first-run
  *  setup flow deep-links to Keys when no provider key exists yet). */
-/** The auto-update row's hint (tooltip wave): honest user language — no
- *  stream vocabulary. Exported for the copy pin (tooltip-mechanism test). */
-export const AUTO_UPDATE_HINT = "Automatic updates arrive in an upcoming release";
-
 export function SettingsDialogProvider({
 	children,
 }: {
@@ -91,13 +89,14 @@ export function SettingsDialogProvider({
 		setLandOnRow(row ?? null);
 		setShow(true);
 	}, []);
+	useEffect(() => window.lh?.onOpenSettings?.((section) => open(section)), [open]);
 	return (
-		<ChatGPTUIProvider><DialogContext.Provider value={{ open }}>
+		<ChatGPTUIProvider><NativeSubscriptionUIProvider><DialogContext.Provider value={{ open }}>
 			{children}
 			{show && (
 				<SettingsDialog onClose={() => setShow(false)} initialSection={landOn} initialRow={landOnRow} />
 			)}
-		</DialogContext.Provider></ChatGPTUIProvider>
+		</DialogContext.Provider></NativeSubscriptionUIProvider></ChatGPTUIProvider>
 	);
 }
 
@@ -148,6 +147,7 @@ export function SettingsDialogBody({
 		undefined,
 	);
 	const [error, setError] = useState<string | null>(null);
+	const [fileAccessError, setFileAccessError] = useState<string | null>(null);
 	// MenuShell open-count — drives the content column's scroll lock.
 	const [openMenus, setOpenMenus] = useState(0);
 	const contentRef = useRef<HTMLDivElement | null>(null);
@@ -198,9 +198,10 @@ export function SettingsDialogBody({
 			.then((r) =>
 				r.ok ? r.json() : Promise.reject(new Error(`status ${r.status}`)),
 			)
-			.then((body: { settings: UserSettings | null }) =>
-				setRecord(body.settings ?? { version: CURRENT_SETTINGS_VERSION }),
-			)
+			.then((body: { settings: UserSettings | null; fileAccessError?: string }) => {
+				setRecord(body.settings ?? { version: CURRENT_SETTINGS_VERSION });
+				setFileAccessError(body.fileAccessError ?? null);
+			})
 			.catch(() => setRecord(null));
 	}, []);
 
@@ -248,9 +249,9 @@ export function SettingsDialogBody({
 			// (bd68486) — a swap that rides an unsupported level lands
 			// CLAMPED in the record, and the writing surface must show the
 			// stored value in this same interaction, not the optimistic one.
-			const stored = (
-				(await res.json().catch(() => null)) as { settings?: UserSettings } | null
-			)?.settings;
+			const reply = (await res.json().catch(() => null)) as { settings?: UserSettings; fileAccessError?: string } | null;
+			const stored = reply?.settings;
+			setFileAccessError(reply?.fileAccessError ?? null);
 			setRecord(
 				(prev) =>
 					stored ?? ({ ...(prev ?? {}), [section]: body }) as UserSettings,
@@ -361,19 +362,12 @@ export function SettingsDialogBody({
 									title="General"
 									testid="section-general"
 								>
-									<SettingsRow
-										label="Auto-update"
-										hint={AUTO_UPDATE_HINT}
-										testid="row-auto-update"
-									>
-										<Toggle
-											checked={record.general?.autoUpdate ?? true}
-											label="auto update"
-											onChange={(on) =>
-												void write("general", { autoUpdate: on })
-											}
-										/>
-									</SettingsRow>
+									<UpdateSettings
+										autoUpdate={record.general?.autoUpdate ?? true}
+										onAutoUpdateChange={(on) =>
+											void write("general", { ...record.general, autoUpdate: on })
+										}
+									/>
 								</SettingsSection>
 							)}
 							{active === "keys" && (
@@ -388,6 +382,7 @@ export function SettingsDialogBody({
 								>
 									<AgentSection
 										agent={record.agent}
+										fileAccessError={fileAccessError}
 										models={record.models}
 										graph={record.graph}
 										compaction={record.compaction}

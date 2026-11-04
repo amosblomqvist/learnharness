@@ -199,7 +199,7 @@ export const quizInputBase = Type.Object({
 // purely MECHANICAL — no instructions on what the questions should be);
 // the enum's one-liners below say only WHEN each kind fires.
 // nodeId means "this question is ABOUT this node" — a position signal,
-// never a completion signal (docs/probe-teach-split.md §3). BOTH teaching
+// never a completion signal (docs/archive/probe-teach-split.md §3). BOTH teaching
 // types carry it. The cross-field authoring contract (the Gate-3
 // hardening: a quiz whose correctAnswer can't be graded NEVER reaches the
 // learner — schema-valid ⇔ gradeable, the rules exactly what the grading
@@ -510,6 +510,21 @@ export interface DockSelection {
 }
 
 export const emptyDockSelection = (): DockSelection => ({ selected: new Set(), otherSelected: false, dontKnow: false });
+
+/** In-memory submission snapshot: survives the question form's optimistic
+ * unmount, never written to storage. Indices use the call's stable shuffle. */
+export interface QuestionFormDraft {
+	selection: DockSelection;
+	thinking: string;
+	other: string;
+	text: string;
+	confidenceIndex: number;
+}
+
+export interface QuestionDraft {
+	form?: QuestionFormDraft;
+	readingThinking?: string;
+}
 
 /**
  * Toggling a listed option. Single-select: the option becomes THE answer and

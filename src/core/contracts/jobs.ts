@@ -4,13 +4,13 @@
  * Part of the domain-split contracts (src/core/contracts/): each domain file
  * is owned outright by its stream — cross-domain schema changes go through
  * master. Pure types + protocol docs + tiny pure helpers; type-only imports
- * of "ai" (safe everywhere: server, client, tests). See docs/vision.md.
+ * of "ai" (safe everywhere: server, client, tests). See docs/archive/vision.md.
  */
 import type { CallUsage } from "./chat.ts";
 import type { LhMessage, LhMarkerMessage } from "../native-messages.ts";
 import { newHandoffMessage } from "../native-messages.ts";
 
-// ─── Async sub-agent jobs (vision §2.5; plan.md Wave 0 protocol) ────────────
+// ─── Async sub-agent jobs (docs/archive/vision.md §2.5; docs/archive/plan.md Wave 0 protocol) ────────────
 
 export type JobKind = "research" | "demo" | "visual" | "pdf";
 export type JobStatus = "running" | "done" | "error";
@@ -21,6 +21,12 @@ export interface JobRecord {
 	chatId: string;
 	/** The tool part this job fulfills. */
 	toolCallId: string;
+	/** Dispatch-time arguments, saved before spawn. Older jobs resolve from history. */
+	input?: unknown;
+	/** Session-owned delivery, independent of the worker's terminal outcome.
+	 * Absent on legacy records: old terminal jobs must never be replayed. */
+	delivery?: { kind: "result" | "abort"; status: "pending" | "delivered" };
+	/** Worker computation only; a pending delivery does not keep it running. */
 	status: JobStatus;
 	/** Latest human-readable activity line, e.g. `web_search: "sigma.js v3"`. */
 	activity: string;
@@ -148,42 +154,32 @@ export function accumulateJobUsage(
  *     sourced briefs) — tracking a live activity line in the job record.
  *     ONE central client poll of GET /api/jobs?chatId=… (in Chat) drives every
  *     job surface: the transcript dispatch cards (live activity by
- *     toolCallId, quiet one-liner after delivery), the sub-agents sidebar
+ *     toolCallId, quiet one-liner after worker completion), the sub-agents sidebar
  *     panel, and the single re-sync when a job settles.
  *
- *  3. On completion the runner builds a STEER MESSAGE (buildSubagentSteer)
- *     and hands it to the wake pipeline (src/server/jobs.ts): a user-role
- *     result-carrying native marker — the content is what the MODEL needs
- *     (the research brief, the builder's notes), plus a data-subagent-artifact
- *     part with what the UI renders (the full result: brief + sources /
- *     SVG / demo HTML). Provider conversion drops data parts, so artifact
- *     payloads never enter the teacher's context. metadata.subagentResult
- *     identifies the job; the UI renders these as sub-agent result cards,
- *     NEVER as learner interjections.
+ *  3. Dispatch saves input on the job before spawn. On completion the
+ *     runner saves result + terminal worker status + pending delivery in
+ *     one job update, then queues buildSubagentSteer WITHOUT waiting for
+ *     delivery. The native custom marker's content is model-facing text;
+ *     details carry the full artifact payload for the UI. Worker resources
+ *     are released even if a question keeps the result pending indefinitely.
+ *     Only computing workers appear in Background agents or accept abort.
  *
- *  4. The wake pipeline delivers the steer by firing a SERVER-SIDE teacher
- *     turn through the same turn composition as a client request
- *     (handleChatRequest) — write-ahead persist, turn liveness, extraction
- *     trigger: one code path. A per-chat serialized queue: a steer waits
- *     while a turn is in flight OR a question tool part is pending (an
- *     unanswered client-side tool call breaks provider conversion — the
- *     steer fires right after the learner's continuation), then fires; a 409
- *     (a client turn raced in) retries. Delivery is idempotent per jobId, so
- *     a crashed wake can be re-entered by the stale-job recovery sweep. The
- *     job's status flips to done/error only AFTER the wake turn completes —
- *     a polling client that sees the flip re-syncs once and gets the
- *     finished record.
+ *  4. Session delivery owns one registry entry per deterministic steer ID,
+ *     including while a wake is in flight or a 409/403 returns its cargo.
+ *     A live agent takes it via pi steering; registration restores saved
+ *     pending jobs before the answer run's first poll. Otherwise the idle
+ *     wake uses the normal turn composition and respects pending questions,
+ *     dismissal, and background consent. A saved transcript marker completes
+ *     delivery; HTTP 200 or streamed visibility alone does not.
  *
- *     CONTINUATION COALESCING: the idle window above can starve — a
- *     quiz-chaining teacher ends every turn with a new pending check, so
- *     the gates never stay open long enough for a wake to fire. The fix:
- *     when a client turn wins the turn registry, the handler CLAIMS every
- *     queued, undelivered steer (jobs.ts claimSteers) and appends it after
- *     the learner's answer in that very turn — conversion-safe, because the
- *     answered quiz carries its output. Every answer flushes pending
- *     steers immediately; the wake pump remains for turns that end with no
- *     pending question. The pump re-checks steerDelivered right before
- *     firing, so a claim racing the pump converges to exactly one delivery.
+ *     Failed starts remain quietly pending until a learner run or restart
+ *     recovery, without new timers, visible delivery errors, or worker-status
+ *     changes. Existing 409 backoff and consent deferral remain. Accepted
+ *     turns are never automatically replayed. Legacy running records with a
+ *     result become finished/pending; legacy terminal records with no
+ *     delivery metadata remain untouched. Session deletion discards pending
+ *     deliveries rather than treating them as running work.
  *
  *  5. No pending job parts ever exist, so the composer never gates on jobs
  *     (the learner can interject mid-job; the steer queues behind their
@@ -220,12 +216,19 @@ export interface DemoResult {
 export interface VisualToolInput {
 	/** Precise brief for ONE visual (what it must show, exactly). */
 	brief: string;
+	/** A learner image file to annotate (issue #363): the maker draws its
+	 *  marks on top of it instead of authoring a figure from scratch. */
+	image?: string;
 }
 
 export interface VisualResult {
-	/** Complete SVG markup (verified by the maker looking at the render). */
+	/** Complete SVG markup (verified by the maker looking at the render).
+	 *  Annotation SVGs retain a learner-image placeholder; image identifies the session snapshot. */
 	svg: string;
 	notes?: string;
+	/** Present when the figure annotates a learner image: its absolute
+	 *  path. Photos never invert, so the card hides the switch. */
+	image?: { path: string; snapshotId: string };
 }
 
 /** The pdf-reader (sources v0, 2026-09): reads a learner-provided PDF on
@@ -359,6 +362,10 @@ function steerText(kind: JobKind, result: ResearchResult | DemoResult | VisualRe
 		return `The demo "${(result as DemoResult).title}" is built, headlessly tested, and rendered in the lesson. Builder notes: ${
 			(result as DemoResult).notes ?? "(none)"
 		}.\nTeach with it — reference its controls by name and point the learner at what to try.`;
+	if ((result as VisualResult).image)
+		return `The annotated image is drawn, verified by inspection, and rendered in the lesson. Maker notes: ${
+			(result as VisualResult).notes ?? "(none)"
+		}.\nReference its marks as you teach.`;
 	return `The figure is drawn, verified by inspection, and rendered in the lesson. Maker notes: ${
 		(result as VisualResult).notes ?? "(none)"
 	}.\nReference its elements as you teach.`;
@@ -419,7 +426,7 @@ function abortText(kind: JobKind): string {
 	return "The figure job was aborted by the learner — no figure is coming. Acknowledge it in one line and teach without it (a re-dispatch is fine if the learner wants it).";
 }
 
-// ─── the probe handoff steer (the probe→teach split, docs/probe-teach-split.md §2) ──
+// ─── the probe handoff steer (the probe→teach split, docs/archive/probe-teach-split.md §2) ──
 //
 // probe_done's execute queues this through the same wake pipeline; the
 // pump fires it once the prober's turn ends (gates + grace). It carries no
