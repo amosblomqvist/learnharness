@@ -12,10 +12,10 @@ import { describe, it } from "node:test";
 import { AUTH_KEYS, genericProviderKeyGuard, isKnownAuthKey, maskKey, validateKeyShape } from "../src/core/auth-keys.ts";
 
 describe("the catalog", () => {
-	it("is exactly the three CURATED app-service keys (provider keys live in the provider table)", () => {
+	it("is exactly the four CURATED app-service keys (provider keys live in the provider table)", () => {
 		assert.deepEqual(
 			AUTH_KEYS.map((k) => k.id),
-			["DEEPGRAM_API_KEY", "TAVILY_API_KEY", "BRAVE_API_KEY"],
+			["DEEPGRAM_API_KEY", "TAVILY_API_KEY", "BRAVE_API_KEY", "DEEPSEEK_API_KEY"],
 		);
 		for (const k of AUTH_KEYS) {
 			assert.ok(k.label.length > 0, `${k.id} has a label`);
