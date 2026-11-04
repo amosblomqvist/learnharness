@@ -223,13 +223,14 @@ export function newAnswerResult(
 }
 
 /** The probe→teach handoff wake: scaffolding, not speech — the model reads
- *  HANDOFF_TEXT, the UI renders the quiet system line. */
-export function newHandoffMessage(chatId: string): LhMarkerMessage {
+ *  HANDOFF_TEXT (plus the deterministic calibration block, when the probe
+ *  produced one: issue #390), the UI renders the quiet system line. */
+export function newHandoffMessage(chatId: string, calibration?: string): LhMarkerMessage {
 	return {
 		id: `steer_probe_${chatId}`,
 		role: "custom",
 		customType: "probe-handoff",
-		content: HANDOFF_TEXT,
+		content: calibration ? `${HANDOFF_TEXT}\n\n${calibration}` : HANDOFF_TEXT,
 		display: true,
 		details: { chatId },
 		timestamp: Date.now(),
