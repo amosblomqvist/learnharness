@@ -1,5 +1,6 @@
 "use client";
 
+import { usePane } from "@/components/workspace/pane-context";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { Conversation, ConversationContent, ConversationEmptyState } from "@/components/ai-elements/conversation";
@@ -231,16 +232,31 @@ export function DraftShell({
 
 export function NewSession({ initialConfigured, mode = "teach" }: { initialConfigured: boolean; mode?: "teach" | "practice" }) {
 	const router = useRouter();
-	const [text, setText] = useState("");
+	const pane = usePane();
+	const [text, setText] = useState(pane?.getView().draft ?? "");
 	/* The draft MIRROR ("nothing gets lost" round, 2026-10-01): the shell's
 	 * finish-first send calls THIS send after the dictation flush — which
 	 * landed via setState and may not have re-rendered yet. The send reads
 	 * the mirror; every write keeps it current. */
-	const textRef = useRef("");
+	const textRef = useRef(pane?.getView().draft ?? "");
+	const fallbackViewKey = useRef<string | null>(null);
 	const applyText = (v: string) => {
 		textRef.current = v;
+		pane?.saveView({ draft: v });
+		if (!pane && fallbackViewKey.current) void window.lh?.workspace?.save({ views: { [fallbackViewKey.current]: { draft: v } } }).catch(() => {});
 		setText(v);
 	};
+	useEffect(() => {
+		const bridge = window.lh?.workspace;
+		if (pane || !bridge) return;
+		let mounted = true;
+		void bridge.get().then((state) => {
+			if (!mounted) return;
+			fallbackViewKey.current = `draft_practice_${state.id}`;
+			if (!textRef.current) applyText(state.views[fallbackViewKey.current]?.draft ?? "");
+		}).catch(() => {});
+		return () => { mounted = false; };
+	}, []);
 	const [busy, setBusy] = useState(false);
 	const startingRef = useRef(false);
 	const starterRef = useRef(new SessionStarter());
@@ -307,8 +323,16 @@ export function NewSession({ initialConfigured, mode = "teach" }: { initialConfi
 		setStartError(false);
 		void startDraftSession(draft, fetch, mode === "practice" ? "practice" : undefined, mode === "practice" ? picksRef.current : undefined,
 			starterRef.current, JSON.stringify(catalog?.slots.strong))
-			.then((target) => {
-				if (target) router.push(target);
+			.then(async (target) => {
+				if (target) {
+					if (window.lh?.workspace) {
+						const sessionId = new URL(target, window.location.origin).pathname.split("/")[2]!;
+						await window.lh.workspace.save({ views: { [sessionId]: { draft }, ...(pane ? { [`pane:${pane.id}`]: { draft: "" } } : fallbackViewKey.current ? { [fallbackViewKey.current]: { draft: "" } } : {}) } });
+						await window.lh.workspace.open(sessionId, "active", pane?.id);
+						if (!pane) { window.dispatchEvent(new Event("lh:show-workspace")); router.push(target); }
+					}
+					else router.push(target);
+				}
 				else { startingRef.current = false; setBusy(false); }
 			})
 			.catch(() => {

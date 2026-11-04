@@ -34,6 +34,7 @@
  * never checks answer validity, only focus honesty.
  */
 
+import { usePaneCommand } from "@/components/workspace/pane-context";
 import { useEffect, useRef } from "react";
 import { isTypingSurface } from "@/src/core";
 
@@ -60,10 +61,12 @@ export function buttonKeepsNativeEnter(el: HTMLElement): boolean {
 /** Mount-scoped: while the dock is mounted (a problem/question is active),
  *  plain Enter anywhere outside a typing surface or button submits it. */
 export function useEnterSubmits(submit: () => void): void {
+	const paneCommand = usePaneCommand();
 	const submitRef = useRef(submit);
 	submitRef.current = submit;
 	useEffect(() => {
 		const onKey = (e: KeyboardEvent) => {
+			if (!paneCommand()) return;
 			if (e.key !== "Enter") return;
 			if (e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return;
 			if (isTypingSurface(e)) return;

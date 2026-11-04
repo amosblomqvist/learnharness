@@ -1,5 +1,7 @@
 "use client";
 
+import { usePaneCommand } from "@/components/workspace/pane-context";
+
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { MaximizeIcon, MinusIcon, PlusIcon, XIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -749,6 +751,7 @@ const POPUP_PAD = GLOW_REACH;
  * through while the focus owns the session area.
  */
 export function PlanPopup({ messages, onClose }: { messages: readonly PopupMessage[]; onClose: () => void }) {
+	const paneCommand = usePaneCommand();
 	const tree = useMemo(() => latestTree(messages), [messages]);
 	const statuses = useMemo(
 		() => (tree ? derivePlanStatuses(tree, messages as Parameters<typeof derivePlanStatuses>[1]) : null),
@@ -765,6 +768,7 @@ export function PlanPopup({ messages, onClose }: { messages: readonly PopupMessa
 	// cancelled the dictation).
 	useEffect(() => {
 		const onKey = (e: KeyboardEvent) => {
+			if (!paneCommand()) return;
 			if (e.key === "Escape") {
 				e.preventDefault();
 				e.stopPropagation();

@@ -1,5 +1,7 @@
 "use client";
 
+import { usePane, usePaneCommand } from "@/components/workspace/pane-context";
+
 import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
 import { ChevronDownIcon, ChevronUpIcon, SearchIcon, XIcon } from "lucide-react";
 import { kbdEventForAction, stepSessionMatch } from "@/src/core";
@@ -16,32 +18,32 @@ export const SESSION_FIND_ACTIVE_HIGHLIGHT = "lh-session-find-active";
  *  parse error, which downed the whole stylesheet. A tiny <style> element,
  *  injected once on first client mount, ships them verbatim. */
 const FIND_STYLE_ID = "lh-session-find-style";
-export function injectFindStyles(): void {
-	if (document.getElementById(FIND_STYLE_ID)) return;
+export function injectFindStyles(suffix = ""): void {
+	if (document.getElementById(FIND_STYLE_ID + suffix)) return;
 	const style = document.createElement("style");
-	style.id = FIND_STYLE_ID;
+	style.id = FIND_STYLE_ID + suffix;
 	style.textContent = `
-::highlight(${SESSION_FIND_HIGHLIGHT}) { background-color: color-mix(in oklab, var(--primary) 25%, transparent); }
-::highlight(${SESSION_FIND_ACTIVE_HIGHLIGHT}) { background-color: var(--primary); color: var(--primary-foreground); }`;
+::highlight(${SESSION_FIND_HIGHLIGHT}${suffix}) { background-color: color-mix(in oklab, var(--primary) 25%, transparent); }
+::highlight(${SESSION_FIND_ACTIVE_HIGHLIGHT}${suffix}) { background-color: var(--primary); color: var(--primary-foreground); }`;
 	document.head.appendChild(style);
 }
 
-export function clearSessionFindHighlights(): void {
+export function clearSessionFindHighlights(suffix = ""): void {
 	if (typeof CSS === "undefined") return;
-	CSS.highlights?.delete(SESSION_FIND_HIGHLIGHT);
-	CSS.highlights?.delete(SESSION_FIND_ACTIVE_HIGHLIGHT);
+	CSS.highlights?.delete(SESSION_FIND_HIGHLIGHT + suffix);
+	CSS.highlights?.delete(SESSION_FIND_ACTIVE_HIGHLIGHT + suffix);
 }
 
-function publishHighlights(ranges: readonly Range[], index: number): void {
+function publishHighlights(ranges: readonly Range[], index: number, suffix = ""): void {
 	if (typeof CSS === "undefined" || !CSS.highlights || typeof Highlight === "undefined") return;
 	// Avoid a huge argument spread when a short query matches many times.
 	const all = new Highlight();
 	for (const range of ranges) all.add(range);
-	CSS.highlights.set(SESSION_FIND_HIGHLIGHT, all);
+	CSS.highlights.set(SESSION_FIND_HIGHLIGHT + suffix, all);
 	const active = new Highlight();
 	active.priority = 1;
 	if (ranges[index]) active.add(ranges[index]!);
-	CSS.highlights.set(SESSION_FIND_ACTIVE_HIGHLIGHT, active);
+	CSS.highlights.set(SESSION_FIND_ACTIVE_HIGHLIGHT + suffix, active);
 }
 
 /** One-Esc law: a surfaced menu/dialog/cheat sheet outranks this non-modal
@@ -66,10 +68,13 @@ export function SessionFind({ scopeRef, scrollContextRef }: {
 	scopeRef: RefObject<HTMLDivElement | null>;
 	scrollContextRef: RefObject<SessionScrollContext | null>;
 }) {
+	const pane = usePane();
+	const suffix = pane ? `-${pane.id}` : "";
+	const paneCommand = usePaneCommand();
 	const [open, setOpen] = useState(false);
 	const [query, setQuery] = useState("");
 	const [result, setResult] = useState({ index: -1, count: 0 });
-	useEffect(injectFindStyles, []);
+	useEffect(() => injectFindStyles(suffix), [suffix]);
 	const inputRef = useRef<HTMLInputElement | null>(null);
 	const previousFocus = useRef<HTMLElement | null>(null);
 	const rangesRef = useRef<Range[]>([]);
@@ -78,13 +83,14 @@ export function SessionFind({ scopeRef, scrollContextRef }: {
 	const lastQueryRef = useRef<string | null>(null);
 
 	const close = useCallback(() => {
-		clearSessionFindHighlights();
+		clearSessionFindHighlights(suffix);
 		setOpen(false);
 		if (previousFocus.current?.isConnected) previousFocus.current.focus({ preventScroll: true });
 	}, []);
 
 	useEffect(() => {
 		const onFind = () => {
+			if (!paneCommand()) return;
 			if (sessionFindHasForegroundLayer(document)) return;
 			if (!open) previousFocus.current = document.activeElement as HTMLElement | null;
 			setOpen(true);
@@ -100,6 +106,7 @@ export function SessionFind({ scopeRef, scrollContextRef }: {
 		inputRef.current?.focus({ preventScroll: true });
 		inputRef.current?.select();
 		const onEscape = (event: KeyboardEvent) => {
+			if (!paneCommand()) return;
 			if (event.key !== "Escape" || sessionFindHasForegroundLayer(document)) return;
 			event.preventDefault();
 			event.stopPropagation();
@@ -122,7 +129,7 @@ export function SessionFind({ scopeRef, scrollContextRef }: {
 			indexRef.current = index;
 			identityRef.current = ranges[index] ? sessionRangeIdentity(ranges[index]!) : null;
 			setResult((old) => old.index === index && old.count === ranges.length ? old : { index, count: ranges.length });
-			publishHighlights(ranges, index);
+			publishHighlights(ranges, index, suffix);
 			if (selectFirst && ranges[index]) scrollSessionTarget(ranges[index]!, scope, scrollContextRef.current);
 		};
 		// New queries start at the session's first match. Reopening the retained
@@ -141,12 +148,12 @@ export function SessionFind({ scopeRef, scrollContextRef }: {
 			observer.disconnect();
 			window.removeEventListener("resize", schedule);
 			if (frame !== null) window.cancelAnimationFrame(frame);
-			clearSessionFindHighlights();
+			clearSessionFindHighlights(suffix);
 		};
 	}, [open, query, scopeRef, scrollContextRef]);
 
 	// Also clear on a session switch when Find was already closed.
-	useEffect(() => clearSessionFindHighlights, []);
+	useEffect(() => () => clearSessionFindHighlights(suffix), [suffix]);
 
 	const step = (direction: 1 | -1) => {
 		const ranges = rangesRef.current;
@@ -154,7 +161,7 @@ export function SessionFind({ scopeRef, scrollContextRef }: {
 		indexRef.current = index;
 		identityRef.current = ranges[index] ? sessionRangeIdentity(ranges[index]!) : null;
 		setResult({ index, count: ranges.length });
-		publishHighlights(ranges, index);
+		publishHighlights(ranges, index, suffix);
 		if (ranges[index] && scopeRef.current) scrollSessionTarget(ranges[index]!, scopeRef.current, scrollContextRef.current);
 	};
 

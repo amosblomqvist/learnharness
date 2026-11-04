@@ -113,6 +113,7 @@ export function saveOverrides(overrides: Partial<Record<KeyAction, string>>): vo
 	try {
 		if (Object.keys(overrides).length) window.localStorage.setItem(STORAGE_KEY, JSON.stringify(overrides));
 		else window.localStorage.removeItem(STORAGE_KEY);
+		window.dispatchEvent(new Event("lh:keymap-changed"));
 	} catch {
 		/* storage unavailable = overrides don't persist, defaults keep working */
 	}

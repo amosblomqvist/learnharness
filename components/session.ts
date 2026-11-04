@@ -15,6 +15,9 @@
  */
 
 import { useCallback, useEffect, useMemo, useReducer, useRef } from "react";
+import { usePane } from "@/components/workspace/pane-context";
+import { restoreQuestionDraft, serializeQuestionDraft } from "@/components/workspace/question-draft";
+import { pendingQuestionOf } from "@/src/core";
 import type { ChatInput, LhMessage, QuestionAnswerData } from "@/src/core";
 import { SessionModel, type SessionState } from "@/components/session-core";
 
@@ -29,11 +32,17 @@ export interface UseChatSessionOptions {
 }
 
 export function useChatSession({ chatId, initialMessages, initialError, initiallyInFlight }: UseChatSessionOptions) {
+	const pane = usePane();
+	const paneRef = useRef(pane);
+	paneRef.current = pane;
 	// The model is per-mount (chatId-keyed component); onChange forces the
 	// re-render. The ref pattern keeps it stable across renders.
 	const modelRef = useRef<SessionModel | null>(null);
 	if (modelRef.current === null) {
 		modelRef.current = new SessionModel({ chatId, initialMessages, initialError });
+		const key = pendingQuestionOf(initialMessages)?.key;
+		const draft = restoreQuestionDraft(pane?.getView().questionDraft, key);
+		if (key && draft) modelRef.current.saveQuestionDraft(key, draft);
 	}
 	const model = modelRef.current;
 	// The render VERSION — bumped by every model change, so the state memo
@@ -94,6 +103,7 @@ export function useChatSession({ chatId, initialMessages, initialError, initiall
 		window.dispatchEvent(new CustomEvent("lh:turn-state", { detail: { id: chatId, running } }));
 	}, [state.status, chatId]);
 
+
 	// The reattach settled terminal → the sync-and-continue seam (chat.tsx).
 	const setReattachSettled = useCallback(
 		(fn: () => void) => {
@@ -104,14 +114,14 @@ export function useChatSession({ chatId, initialMessages, initialError, initiall
 
 	const send = useCallback((input: ChatInput, onAccepted?: () => void) => model.send(input, onAccepted), [model]);
 	const continueIfOwed = useCallback((record: readonly LhMessage[]) => void model.continueIfOwed(record), [model]);
-	const steer = useCallback((text: string) => void model.steer(text), [model]);
+	const steer = useCallback((text: string, onAccepted?: () => void) => void model.steer(text, onAccepted), [model]);
 	const submitAnswer = useCallback(
 		(tool: string, toolCallId: string, output: QuestionAnswerData, questionKey?: string) =>
-			void model.submitAnswer(tool, toolCallId, output, questionKey),
+			void model.submitAnswer(tool, toolCallId, output, questionKey, () => { if (paneRef.current?.getView().questionDraft?.questionId === questionKey) paneRef.current?.saveView({ questionDraft: null }); }),
 		[model],
 	);
 	const dismissQuestion = useCallback(
-		(toolCallId: string, answer: QuestionAnswerData, questionKey?: string) => void model.dismissQuestion(toolCallId, answer, questionKey),
+		(toolCallId: string, answer: QuestionAnswerData, questionKey?: string) => void model.dismissQuestion(toolCallId, answer, questionKey, () => { if (paneRef.current?.getView().questionDraft?.questionId === questionKey) paneRef.current?.saveView({ questionDraft: null }); }),
 		[model],
 	);
 	const dismissProblem = useCallback(
@@ -119,8 +129,15 @@ export function useChatSession({ chatId, initialMessages, initialError, initiall
 		[model],
 	);
 	const questionDraft = useCallback((questionKey: string) => model.questionDraft(questionKey), [model]);
-	const saveQuestionDraft = useCallback((questionKey: string, draft: Parameters<SessionModel["saveQuestionDraft"]>[1]) => model.saveQuestionDraft(questionKey, draft), [model]);
-	const setMessages = useCallback((record: LhMessage[], turnError?: string) => model.setMessages(record, turnError), [model]);
+	const saveQuestionDraft = useCallback((questionKey: string, draft: Parameters<SessionModel["saveQuestionDraft"]>[1]) => {
+		model.saveQuestionDraft(questionKey, draft);
+		paneRef.current?.saveView({ questionDraft: { questionId: questionKey, text: serializeQuestionDraft(model.questionDraft(questionKey) ?? {}) } });
+	}, [model]);
+	const setMessages = useCallback((record: LhMessage[], turnError?: string) => {
+		model.setMessages(record, turnError);
+		const saved = paneRef.current?.getView().questionDraft;
+		if (saved && saved.questionId !== pendingQuestionOf(record)?.key) paneRef.current?.saveView({ questionDraft: null });
+	}, [model]);
 	const adoptRecord = useCallback((record: LhMessage[]) => model.adoptRecord(record), [model]);
 	const stop = useCallback(() => model.stop(), [model]);
 	const clearError = useCallback(() => model.clearError(), [model]);

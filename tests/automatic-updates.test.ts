@@ -51,6 +51,7 @@ function fixture({ packaged = true, updaterMissing = false } = {}) {
 		isLoadingMainFrame() { return this.loading; }
 		setWindowOpenHandler() {}
 		getZoomFactor() { return 1; }
+		setZoomFactor() {}
 	}
 	class FakeWindow extends EventEmitter {
 		webContents = new FakeWebContents();
@@ -62,6 +63,8 @@ function fixture({ packaged = true, updaterMissing = false } = {}) {
 		restore() { this.minimized = false; }
 		focus() { this.focused = true; }
 		show() {}
+		isDestroyed() { return false; }
+		getNormalBounds() { return { x: 0, y: 0, width: 1440, height: 900 }; }
 		static getAllWindows() {
 			if (enumerationFails) throw new Error("window enumeration failed");
 			return windows;
@@ -82,11 +85,16 @@ function fixture({ packaged = true, updaterMissing = false } = {}) {
 		app, BrowserWindow: FakeWindow,
 		Menu: { buildFromTemplate: (value: typeof menu) => value, setApplicationMenu: (value: typeof menu) => { menu = value; } },
 		ipcMain: { on() {}, handle: (channel: string, fn: (event: unknown) => unknown) => handles.set(channel, fn) },
-		session: { defaultSession: { setPermissionRequestHandler() {}, setPermissionCheckHandler() {} } },
+		session: { fromPartition: () => ({ webRequest: { onBeforeSendHeaders() {} }, setPermissionRequestHandler() {}, setPermissionCheckHandler() {} }) },
+		screen: { getAllDisplays: () => [{ workArea: { x: 0, y: 0, width: 1920, height: 1080 } }], getPrimaryDisplay: () => ({ workArea: { x: 0, y: 0, width: 1920, height: 1080 } }) },
 	};
 	const context = createContext({
 		require: (id: string) => {
 			if (id === "electron") return electron;
+			if (id === "./workspace.cjs") {
+				const workspaceModule = mainRequire(id);
+				return { ...workspaceModule, Workspace: class extends workspaceModule.Workspace { persist() {} } };
+			}
 			if (id === "electron-updater") {
 				if (updaterMissing) throw new Error("missing updater");
 				return { autoUpdater: updater };
@@ -295,5 +303,31 @@ describe("startup, timer, trusted IPC and menu wiring", () => {
 		const f = fixture(); f.setSettings({ general: { autoUpdate: false } }); await f.run("main()");
 		f.windows[0]!.webContents.fails = true; f.windows[0]!.webContents.loading = false;
 		f.menuCheck(); assert.equal(f.updater.checks, 1);
+	});
+});
+
+describe("workspace view lifecycle", () => {
+	it("closing all views keeps the server resident on Windows as well as Mac", async () => {
+		const f = fixture(); await f.run("main()");
+		let quitCalls = 0; f.app.quit = () => { quitCalls++; };
+		f.run('process.platform = "win32"');
+		f.windows[0]!.emit("closed"); f.windows.length = 0;
+		f.app.emit("window-all-closed");
+		assert.equal(quitCalls, 0);
+		assert.equal(f.run("workspace.state.windows.length"), 0);
+	});
+	it("explicit Quit retains open assignments while a deliberate window close removes them", async () => {
+		const f = fixture(); await f.run("main()");
+		f.app.emit("before-quit");
+		f.windows[0]!.emit("closed");
+		assert.equal(f.run("workspace.state.windows.length"), 1);
+	});
+	it("workspace IPC rejects a foreign frame before it reads or changes state", async () => {
+		const f = fixture(); await f.run("main()");
+		const sender = f.windows[0]!.webContents;
+		const foreign = { sender, senderFrame: { url: sender.mainFrame.url } };
+		for (const channel of ["get", "open", "move", "close", "save"]) {
+			assert.throws(() => f.handles.get(`lh:workspace:${channel}`)!(foreign), /Untrusted/);
+		}
 	});
 });

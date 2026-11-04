@@ -1,3 +1,5 @@
+import { usePaneCommand } from "@/components/workspace/pane-context";
+
 import { useEffect, type RefObject } from "react";
 
 /**
@@ -14,12 +16,14 @@ export function usePopoverDismiss(
 	open: boolean,
 	close: () => void,
 ): void {
+	const paneCommand = usePaneCommand();
 	useEffect(() => {
 		if (!open) return;
 		const onPointerDown = (e: PointerEvent) => {
 			if (rootRef.current && !rootRef.current.contains(e.target as Node)) close();
 		};
 		const onKeyDown = (e: KeyboardEvent) => {
+			if (!paneCommand()) return;
 			if (e.key === "Escape") {
 				// Claim the Esc (keyboard wave A): the window-level dismiss
 				// chain must not ALSO stop dictation / abort a turn under

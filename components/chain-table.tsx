@@ -54,6 +54,7 @@
  * Read-only toward the graph.
  */
 
+import { usePaneActive, usePaneCommand } from "@/components/workspace/pane-context";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
 	ChevronDownIcon,
@@ -703,6 +704,8 @@ export function ChainTableOverlay({
 	controlledSelection?: ReadonlySet<string>;
 	onSelectionChange?: (next: ReadonlySet<string>) => void;
 }) {
+	const paneActive = usePaneActive();
+	const paneCommand = usePaneCommand();
 	const [query, setQuery] = useState("");
 	const [sort, setSort] = useState<ChainSort>({ col: "name", dir: 1 });
 	const [internalSelection, setInternalSelection] = useState<ReadonlySet<string>>(() => new Set());
@@ -779,6 +782,7 @@ export function ChainTableOverlay({
 	useEffect(() => {
 		if (!open || deleteOpen) return;
 		const onKeyDown = (e: KeyboardEvent) => {
+			if (!paneCommand()) return;
 			if (e.key === "Escape") {
 				// App Router delegates React events on document too: a child's
 				// stopPropagation cannot silence a sibling document listener.
@@ -795,7 +799,7 @@ export function ChainTableOverlay({
 		return () => document.removeEventListener("keydown", onKeyDown);
 	}, [open, deleteOpen, onClose]);
 
-	if (!open) return null;
+	if (!open || !paneActive) return null;
 
 	const toggleNodes = (ids: string[], next: boolean) => {
 		const s = new Set(selection);

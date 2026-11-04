@@ -24,7 +24,7 @@
  *     would shadow every settings-page key change until restart.
  */
 
-const { app, BrowserWindow, Menu, ipcMain, session, shell } = require("electron");
+const { app, BrowserWindow, Menu, ipcMain, session, shell, screen } = require("electron");
 const { createChatGPT, fileStore } = require("./chatgpt.cjs");
 const { attachChatGPTChild, trustedSender, chatGPTControl } = require("./chatgpt-ipc.cjs");
 const { createSubscriptions, loadSubscriptionSDK } = require("./subscriptions.cjs");
@@ -43,6 +43,7 @@ const path = require("node:path");
 const SIDEBAR_AUTOCLOSE = 928;
 
 const PRODUCT_NAME = "LearnHarness";
+const { Workspace, constrainBounds } = require("./workspace.cjs");
 
 // APP NAME → userData (owner, 2026-10-10): the Application Support dir is
 // exactly "LearnHarness" in dev AND packaged. Packaged Electron would
@@ -117,6 +118,8 @@ if (process.argv.includes("--browser-service")) {
 		app.setPath("userData", `${app.getPath("userData")}-dev`);
 	}
 
+	if (process.env.LH_PROFILE_DIR) app.setPath("userData", path.resolve(process.env.LH_PROFILE_DIR));
+
 	// The whole normal boot — lock included — lives in this else: a helper is
 	// a SECOND instance of this very binary on purpose (the running app owns
 	// the lock), so it must never reach this check.
@@ -128,7 +131,7 @@ if (process.argv.includes("--browser-service")) {
 			if (win) {
 				if (win.isMinimized()) win.restore();
 				win.focus();
-			}
+			} else reopenWindow?.();
 		});
 		main();
 	}
@@ -143,6 +146,9 @@ let subscriptionChild = null;
 let desktopAPISecret = null;
 let reopenWindow = null;
 const trustedAppWindows = new Set();
+const workspaceWindows = new Map();
+let workspace = null;
+let quitting = false;
 
 // A GUI shell must never die to a stray exception (EPIPE dialogs, a race
 // in an event handler): the window + child server are the product, and
@@ -286,10 +292,15 @@ function killServer() {
  *    default, we do not);
  *  - will-navigate pinned to the app origin; window.open always denied —
  *    external links go to the real browser via shell.openExternal. */
-function createWindow(url) {
+function createWindow(url, state = workspace.newWindow()) {
+	const partition = session.fromPartition(`persist:lh-window-${state.id}`);
+	const ownedOrigin = new URL(url).origin;
+	partition.webRequest.onBeforeSendHeaders({ urls: ["<all_urls>"] }, (details, callback) => {
+		callback({ requestHeaders: desktopAPIHeaders(details, ownedOrigin, desktopAPISecret, [...trustedAppWindows]) });
+	});
+	const bounds = constrainBounds(state.bounds, screen.getAllDisplays().map((d) => d.workArea), screen.getPrimaryDisplay().workArea);
 	const win = new BrowserWindow({
-		width: 1440,
-		height: 900,
+		...bounds,
 		title: PRODUCT_NAME,
 		// Merged chrome (owner, 2026-09-17): the system title bar is gone;
 		// the app's own 60px header bands ARE the title bar. The traffic
@@ -316,6 +327,7 @@ function createWindow(url) {
 			contextIsolation: true,
 			sandbox: true,
 			nodeIntegration: false,
+			session: partition,
 			...(process.env.LH_DEV_URL ? { additionalArguments: ["--lh-web-subscriptions"] } : {}),
 			preload: path.join(__dirname, "preload.cjs"),
 		},
@@ -339,7 +351,24 @@ function createWindow(url) {
 	});
 
 	trustedAppWindows.add(win);
-	win.once("closed", () => trustedAppWindows.delete(win));
+	workspaceWindows.set(state.id, win);
+	const saveWindow = () => {
+		if (win.isDestroyed()) return;
+		state.bounds = win.getNormalBounds();
+		state.zoom = win.webContents.getZoomFactor();
+		workspace.persist();
+	};
+	win.on("resize", saveWindow);
+	win.on("move", saveWindow);
+	win.on("close", saveWindow);
+	win.once("closed", () => {
+		trustedAppWindows.delete(win);
+		workspaceWindows.delete(state.id);
+		if (!quitting) {
+			workspace.state.windows = workspace.state.windows.filter((w) => w.id !== state.id);
+			workspace.persist();
+		}
+	});
 	const allowedOrigin = () => new URL(url).origin;
 	// Deny-by-default; the ONLY grants are media (mic/STT groundwork) and
 	// clipboard-sanitized-write — the copy affordances in the transcript
@@ -352,11 +381,11 @@ function createWindow(url) {
 	const allowedPermissions = new Set(["media", "clipboard-sanitized-write", "local-fonts"]);
 	const fromOwnOrigin = (origin, permission) =>
 		origin === allowedOrigin() && allowedPermissions.has(permission);
-	session.defaultSession.setPermissionRequestHandler((_wc, permission, callback, details) => {
+	partition.setPermissionRequestHandler((_wc, permission, callback, details) => {
 		const requestOrigin = details.requestingUrl ? new URL(details.requestingUrl).origin : null;
 		callback(fromOwnOrigin(requestOrigin, permission));
 	});
-	session.defaultSession.setPermissionCheckHandler((_wc, permission, origin) => {
+	partition.setPermissionCheckHandler((_wc, permission, origin) => {
 		return fromOwnOrigin(origin, permission);
 	});
 
@@ -378,6 +407,7 @@ function createWindow(url) {
 	// claimed keys never reach before-input-event, so exactly one of the
 	// two applies any given zoom keypress.
 	win.webContents.on("did-finish-load", () => {
+		win.webContents.setZoomFactor(state.zoom ?? 1);
 		win.webContents.send("lh:zoom", win.webContents.getZoomFactor());
 	});
 	win.webContents.on("before-input-event", (event, input) => {
@@ -565,6 +595,7 @@ function checkForUpdatesFromMenu() {
 }
 
 function zoomStep(win, dir) {
+	if (!win || win.isDestroyed()) return;
 	const current = win.webContents.getZoomFactor();
 	const next =
 		dir > 0
@@ -574,9 +605,12 @@ function zoomStep(win, dir) {
 }
 
 function applyZoom(win, factor) {
+	if (!win || win.isDestroyed()) return;
 	factor = Math.min(2, Math.max(0.75, factor)); // ladder clamps; ⌘0 = 1
 	win.webContents.setZoomFactor(factor);
 	win.webContents.send("lh:zoom", factor);
+	for (const [id, candidate] of workspaceWindows) if (candidate === win) workspace.window(id).zoom = factor;
+	workspace?.persist();
 }
 
 /** macOS needs an application menu with the Edit roles — without one,
@@ -596,6 +630,7 @@ function installMenu() {
 				{ role: "quit" },
 			],
 		},
+		{ label: "File", submenu: [{ label: "New Window", accelerator: "CommandOrControl+Shift+N", click: () => reopenWindow?.() }, { role: "close" }] },
 		{ label: "Edit", submenu: [{ role: "undo" }, { role: "redo" }, { type: "separator" }, { role: "cut" }, { role: "copy" }, { role: "paste" }, { role: "selectAll" }] },
 		{
 			label: "View",
@@ -610,17 +645,17 @@ function installMenu() {
 				{
 					label: "Actual Size",
 					accelerator: "CommandOrControl+0",
-					click: () => applyZoom(BrowserWindow.getAllWindows()[0], 1),
+					click: () => applyZoom(BrowserWindow.getFocusedWindow(), 1),
 				},
 				{
 					label: "Zoom In",
 					accelerator: "CommandOrControl+Plus",
-					click: () => zoomStep(BrowserWindow.getAllWindows()[0], +1),
+					click: () => zoomStep(BrowserWindow.getFocusedWindow(), +1),
 				},
 				{
 					label: "Zoom Out",
 					accelerator: "CommandOrControl+-",
-					click: () => zoomStep(BrowserWindow.getAllWindows()[0], -1),
+					click: () => zoomStep(BrowserWindow.getFocusedWindow(), -1),
 				},
 				{ type: "separator" },
 				{ role: "togglefullscreen" },
@@ -633,14 +668,17 @@ function installMenu() {
 
 async function main() {
 	app.on("window-all-closed", () => {
-		chatgpt?.pause();
-		subscriptions?.pause();
-		// macOS convention: the app stays resident, reactivated from the Dock.
-		if (process.platform !== "darwin") app.quit();
+		// Generation and provider connections remain live after view closure.
+		// Keep the shared server alive on every platform. Explicit Quit ends
+		// the process; Dock activation or another launch opens an empty view.
 	});
 
 	// The child must not outlive us — cover every quit path.
-	app.on("before-quit", killServer);
+	app.on("before-quit", () => {
+		quitting = true;
+		workspace?.persist();
+		killServer();
+	});
 	process.on("exit", killServer);
 	process.on("SIGHUP", killServer);
 
@@ -653,11 +691,6 @@ async function main() {
 	const url = devUrl ?? `http://127.0.0.1:${await freePort()}`;
 	if (!devUrl) {
 		desktopAPISecret = randomBytes(32).toString("hex");
-		const ownedOrigin = new URL(url).origin;
-		// All URLs, not only /api: remove the header again on external redirects.
-		session.defaultSession.webRequest.onBeforeSendHeaders({ urls: ["<all_urls>"] }, (details, callback) => {
-			callback({ requestHeaders: desktopAPIHeaders(details, ownedOrigin, desktopAPISecret, [...trustedAppWindows]) });
-		});
 		chatgpt = createChatGPT({
 			store: fileStore(path.join(app.getPath("userData"), "chatgpt-credentials.json")),
 			openExternal: (target) => shell.openExternal(target),
@@ -741,11 +774,47 @@ async function main() {
 		const target = SIDEBAR_AUTOCLOSE;
 		if (width < target) win.setBounds({ x, y, width: target, height });
 	});
-	reopenWindow = () => { chatgpt?.resume(); subscriptions?.resume(); return createWindow(url); };
+	workspace = new Workspace(path.join(app.getPath("userData"), "workspace-v1.json"));
+	const notifyWorkspace = () => {
+		workspace.persist();
+		for (const [id, win] of workspaceWindows) {
+			if (!win.isDestroyed()) win.webContents.send("lh:workspace:changed", workspace.snapshot(id));
+		}
+	};
+	const senderWindow = (event) => {
+		const win = BrowserWindow.fromWebContents(event.sender);
+		if (!trustedAppWindows.has(win) || !trustedSender(event, new URL(url).origin, BrowserWindow)) throw new Error("Untrusted workspace request.");
+		for (const [id, candidate] of workspaceWindows) if (candidate === win) return id;
+		throw new Error("Unknown workspace window.");
+	};
+	const showWindow = (state) => {
+		const win = workspaceWindows.get(state.id) ?? createWindow(url, state);
+		if (win.isMinimized()) win.restore();
+		win.focus();
+		return win;
+	};
+	ipcMain.handle("lh:workspace:get", (event) => workspace.snapshot(senderWindow(event)));
+	ipcMain.handle("lh:workspace:open", (event, sessionId, disposition = "active", paneId) => {
+		const target = workspace.open(senderWindow(event), sessionId, disposition, paneId);
+		showWindow(target); notifyWorkspace();
+	});
+	ipcMain.handle("lh:workspace:move", (event, paneId) => {
+		const target = workspace.move(senderWindow(event), paneId);
+		showWindow(target); notifyWorkspace();
+	});
+	ipcMain.handle("lh:workspace:close", (event, paneId) => {
+		workspace.close(senderWindow(event), paneId); notifyWorkspace();
+	});
+	ipcMain.handle("lh:workspace:save", (event, patch) => {
+		workspace.save(senderWindow(event), patch); notifyWorkspace();
+	});
+	reopenWindow = () => { const win = createWindow(url); notifyWorkspace(); return win; };
 	app.on("activate", () => {
 		if (BrowserWindow.getAllWindows().length === 0) reopenWindow();
 	});
-	createWindow(url);
+	if (!workspace.state.windows.length) workspace.newWindow();
+	for (const state of workspace.state.windows) createWindow(url, state);
+	workspace.persist();
 	log(`window open: ${url}`);
 	// Startup + 24h checks stay main-owned and read the current preference.
 	// No renderer subscription is required; late loads retrieve the snapshot.

@@ -1,5 +1,6 @@
 "use client";
 
+import { usePane } from "@/components/workspace/pane-context";
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from "react";
 import { createPortal } from "react-dom";
 
@@ -123,6 +124,7 @@ export function MenuShell({
 	menuClass: string;
 	children: ReactNode;
 }) {
+	const pane = usePane();
 	const menuRef = useRef<HTMLDivElement>(null);
 	const [placed, setPlaced] = useState<MenuPlacement | null>(null);
 	const focusedOnceRef = useRef(false);
@@ -224,6 +226,7 @@ export function MenuShell({
 	// First pass: mounted hidden at the viewport's top-left so the layout
 	// effect can measure the real content height before anything is seen.
 	// The menu is positioned ONCE and then only re-anchored — no flash.
+	if (pane && !pane.active) return null;
 	if (placed === null) {
 		return createPortal(
 			<div
