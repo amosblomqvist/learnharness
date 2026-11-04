@@ -13,6 +13,7 @@ import { formatReviewBrief, ratingOf, reviewBriefOf, reviewDayStart, reviewQueue
 import type { ReviewEvent, ReviewOutcome, ReviewRung } from "../src/core/contracts/review.ts";
 import { resolveSettings } from "../src/core/settings-resolution.ts";
 import { sanitizeUserSettings } from "../src/core/settings.ts";
+import { groupNewBacklog } from "../src/server/review.ts";
 import { parseReviewSettingsBody } from "../src/server/settings-body.ts";
 
 // Local-time dates: the day boundary is the server's local 4 AM.
@@ -388,5 +389,73 @@ describe("reviewSchedule — the heatmap's data", () => {
 		assert.equal(card!.lastReview, local(1, 12).toISOString());
 		assert.ok(card!.retrievability > 0 && card!.retrievability < 1);
 		assert.ok(["learning", "review", "relearning"].includes(card!.state));
+	});
+});
+
+describe("reviewSchedule — the new backlog", () => {
+	it("lists every never-practiced proposition in introduction order; newToday is its prefix", () => {
+		const schedule = reviewSchedule({
+			chains: [{ premises: ["n_p"], conclusion: "n_c" }],
+			newPerDay: 2,
+			pastDays: 30,
+			futureDays: 30,
+			// n_c is oldest but waits for its premise n_p.
+			nodes: [node("n_c", 1), node("n_p", 2), node("n_x", 3), node("n_y", 4), node("n_done", 1)],
+			reviews: [review(["n_done"], local(5, 12))],
+			now: local(10, 12),
+		});
+		assert.deepEqual(schedule.newBacklog, ["n_p", "n_c", "n_x", "n_y"]);
+		assert.deepEqual(schedule.newToday, ["n_p", "n_c"]);
+	});
+
+	it("is the whole backlog even when today's allowance is spent", () => {
+		const schedule = reviewSchedule({
+			chains: [],
+			newPerDay: 1,
+			pastDays: 30,
+			futureDays: 30,
+			nodes: [node("n_a", 1), node("n_b", 2), node("n_done", 1)],
+			reviews: [review(["n_done"], local(10, 11))],
+			now: local(10, 12),
+		});
+		assert.deepEqual(schedule.newToday, []);
+		assert.deepEqual(schedule.newBacklog, ["n_a", "n_b"]);
+	});
+});
+
+describe("groupNewBacklog — topics for the new-problems block", () => {
+	const pick = (id: string) => ({ id, name: id, statement: `${id} holds` });
+
+	it("groups by labeled region, largest first, ties by label, Other last; keeps introduction order", () => {
+		const topics = groupNewBacklog(
+			["n_1", "n_2", "n_3", "n_4", "n_5", "n_6", "n_7", "n_8"].map(pick),
+			["n_1", "n_2"],
+			[
+				{ id: "chat_b", label: "Beta", members: ["n_2", "n_9"] },
+				{ id: "chat_a", label: "Alpha", members: ["n_5", "n_6"] },
+				{ id: "chat_big", label: "Zeta", members: ["n_3", "n_4", "n_7"] },
+				{ id: "chat_gone", label: null, members: ["n_8"] }, // a region whose chat was deleted
+			],
+		);
+		assert.deepEqual(
+			topics.map((t) => [t.label, t.problems.map((p) => p.id)]),
+			[
+				["Zeta", ["n_3", "n_4", "n_7"]],
+				["Alpha", ["n_5", "n_6"]],
+				["Beta", ["n_2"]],
+				[null, ["n_1", "n_8"]], // n_1: in no region (a small session); n_8: unnamed region
+			],
+		);
+		assert.equal(topics.at(-1)!.id, null);
+		assert.deepEqual(
+			topics.flatMap((t) => t.problems.filter((p) => p.today).map((p) => p.id)).sort(),
+			["n_1", "n_2"],
+		);
+	});
+
+	it("omits Other when everything has a topic, and is empty for an empty backlog", () => {
+		const topics = groupNewBacklog([pick("n_1")], [], [{ id: "chat_a", label: "Alpha", members: ["n_1"] }]);
+		assert.deepEqual(topics.map((t) => t.label), ["Alpha"]);
+		assert.deepEqual(groupNewBacklog([], [], []), []);
 	});
 });

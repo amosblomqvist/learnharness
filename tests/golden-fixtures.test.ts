@@ -251,6 +251,17 @@ test("review: the queue and the schedule heatmap build from the real log", () =>
 	const view = reviewScheduleView(now);
 	assert.equal(view.past.reduce((n, day) => n + day.reviews, 0), 2, "both reviews land on past days");
 	assert.deepEqual(view.future.flatMap((day) => day.due.map((card) => card.id)).sort(), PRACTICE_TARGETS, "overdue cards sit on today");
+
+	const backlog = view.newBacklog.flatMap((topic) => topic.problems);
+	assert.ok(backlog.length > 0, "the fixture graph has never-practiced propositions");
+	assert.equal(new Set(backlog.map((p) => p.id)).size, backlog.length, "each new problem appears once");
+	assert.ok(!backlog.some((p) => PRACTICE_TARGETS.includes(p.id)), "practiced propositions are not new");
+	assert.deepEqual(
+		backlog.filter((p) => p.today).map((p) => p.id).sort(),
+		view.newToday.map((p) => p.id).sort(),
+		"today badges match today's allowance",
+	);
+	assert.ok(view.newBacklog.slice(0, -1).every((topic) => topic.label !== null), "Other, if any, is last");
 });
 
 // ── read-only: readers never write ──────────────────────────────────────────

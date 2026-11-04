@@ -224,8 +224,10 @@ function replay(events: readonly { at: Date; grade: Grade }[], scheduler: FSRS):
 /** The first `limit` never-practiced propositions in introduction order:
  *  premises before the conclusions they feed (chain edges among the new
  *  set), ties and cycles broken by creation date, then id. Each step
- *  scans the remaining set, so the walk stops at `limit` — only today's
- *  allowance is ever needed, never the whole order. */
+ *  scans the remaining set, so the walk stops at `limit`: the queue asks
+ *  for today's allowance only; the schedule's backlog (newBacklog) asks
+ *  for the whole order (limit Infinity). The walk is deterministic, so a
+ *  shorter limit is always a prefix of a longer one. */
 function introductionOrder(
 	fresh: readonly Pick<GraphNode, "id" | "createdAt">[],
 	chains: readonly Pick<GraphChain, "premises" | "conclusion">[],
@@ -495,6 +497,10 @@ export interface ReviewSchedule {
 	future: ReviewFutureDay[];
 	/** Never-practiced propositions today's allowance admits (reviewQueue's newAvailable). */
 	newToday: string[];
+	/** EVERY never-practiced live proposition, in introduction order
+	 *  (Settings > Review's new-problems block, 2026-11-03). newToday is
+	 *  its prefix. */
+	newBacklog: string[];
 	/** Practiced propositions due after the window's end. */
 	later: number;
 }
@@ -509,8 +515,8 @@ const STATE_NAMES: Partial<Record<State, ReviewCardFacts["state"]>> = {
  * The heatmap's data: `pastDays` days back and `futureDays` days ahead of
  * today's review day. Past days count logged reviews (live targets only,
  * reviewQueue's rule); future days place every practiced proposition on
- * its replayed due day — overdue ones on today. New propositions appear
- * only as today's allowance (newToday).
+ * its replayed due day — overdue ones on today. New propositions never
+ * sit on a day: newToday is today's allowance, newBacklog all of them.
  */
 export function reviewSchedule(input: ReviewQueueInput & { pastDays: number; futureDays: number }): ReviewSchedule {
 	const dayStartHour = input.dayStartHour ?? REVIEW_DAY_START_HOUR;
@@ -582,5 +588,8 @@ export function reviewSchedule(input: ReviewQueueInput & { pastDays: number; fut
 		.sort(([a], [b]) => a.localeCompare(b))
 		.map(([date, due]) => ({ date, due: due.sort((a, b) => a.due.localeCompare(b.due) || a.id.localeCompare(b.id)) }));
 
-	return { today, start, end, past, future, newToday: reviewQueue(input).newAvailable, later };
+	const fresh = input.nodes.filter((n) => !history.has(n.id));
+	const newBacklog = introductionOrder(fresh, input.chains, Infinity);
+
+	return { today, start, end, past, future, newToday: reviewQueue(input).newAvailable, newBacklog, later };
 }

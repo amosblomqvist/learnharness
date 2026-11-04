@@ -12,6 +12,9 @@
  * only (the full problems are too much); today and later days list
  * what comes due, with the replayed FSRS facts for debugging.
  *
+ * Under the day detail: the new-problems block (review-new-problems.tsx),
+ * from the same read.
+ *
  * Refetched on the review pill's signals: a settled turn, a chat-list
  * change, a review-settings save, every channel resync.
  */
@@ -20,6 +23,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useServerEvent, useServerResync } from "@/components/server-events";
 import { useSettingsSaved } from "@/components/settings-signal";
 import { cn } from "@/lib/utils";
+import { ReviewNewProblems, type NewProblemTopicView } from "./review-new-problems.tsx";
 
 type PastDay = {
 	date: string;
@@ -53,13 +57,14 @@ type ScheduleView = {
 	past: PastDay[];
 	future: { date: string; due: DueCard[] }[];
 	newToday: { id: string; name: string; statement: string }[];
+	newBacklog: NewProblemTopicView[];
 	later: number;
 };
 
 function isScheduleView(v: unknown): v is ScheduleView {
 	if (typeof v !== "object" || v === null) return false;
 	const r = v as Record<string, unknown>;
-	return typeof r.today === "string" && Array.isArray(r.past) && Array.isArray(r.future) && Array.isArray(r.newToday);
+	return typeof r.today === "string" && Array.isArray(r.past) && Array.isArray(r.future) && Array.isArray(r.newToday) && Array.isArray(r.newBacklog);
 }
 
 function useReviewSchedule(): { schedule: ScheduleView | null; failed: boolean } {
@@ -237,6 +242,7 @@ export function ReviewHeatmap({ color }: { color: string }) {
 				{schedule.later > 0 && <span data-testid="review-heatmap-later">later: {schedule.later}</span>}
 			</div>
 			<DayDetail schedule={schedule} date={active} past={view.past.get(active)} due={view.future.get(active) ?? []} />
+			<ReviewNewProblems topics={schedule.newBacklog} />
 		</div>
 	);
 }
