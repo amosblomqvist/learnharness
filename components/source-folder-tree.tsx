@@ -88,7 +88,7 @@ export function EditableSourceName({ name, onSave, onCancel, initiallyEditing = 
 				if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); cancelled.current = true; setEditing(false); setFailure(""); onCancel?.(); }
 				if (e.key === "Enter") { e.preventDefault(); e.stopPropagation(); void commit(); }
 			}} onDragStart={(e) => { e.preventDefault(); e.stopPropagation(); }} />
-			: <button type="button" className={`block max-w-full truncate rounded-sm text-left text-sm font-medium leading-5 transition-colors hover:bg-accent${muted ? " text-muted-foreground" : ""}`} title="Rename"
+			: <button type="button" className={`block max-w-full truncate rounded-sm text-left text-sm font-medium leading-5 transition-colors hover:bg-accent${muted ? " text-muted-foreground/60" : ""}`} title="Rename"
 				onClick={() => { cancelled.current = false; setDraft(name); setEditing(true); }}>{name}</button>}
 		{failure && <span role="alert" className="block text-xs text-red-400">{failure}</span>}
 	</span>;
