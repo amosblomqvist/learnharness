@@ -16,8 +16,12 @@
  */
 
 export * from "./contracts.ts";
+export { embedLearnerImage } from "./learner-image-svg.ts";
 export * from "./ports.ts";
 export * from "./chains.ts";
+export * from "./source-organization.ts";
+export * from "./source-selection.ts";
+export * from "./source-label.ts";
 export * from "./render-settings.ts";
 
 export * from "./question-core.ts";
@@ -42,7 +46,7 @@ export * from "./math-delims.ts";
 export * from "./native-messages.ts";
 export * from "./compaction.ts";
 export * from "./input-events.ts";
-export { parseFilePaths, quoteFilePath, filePathLabel } from "./file-paths.ts";
+export { parseFilePaths, quoteFilePath, filePathLabel, isDirectoryReference, directoryReferencePath } from "./file-paths.ts";
 export type { FilePathPart } from "./file-paths.ts";
 // Wave D (owner-approved 2026-09-26): the client view model — the grouping
 // canon (one continuous assistant document, step separators) ported from
@@ -65,6 +69,7 @@ export * from "./settings.ts";
 // appearance-palette.ts (light-mode wave, 2026-10-29): the mode resolver and
 // the per-variant palette curves — pure, shared by the provider and Settings.
 export * from "./appearance-palette.ts";
+export * from "./file-access.ts";
 export * from "./dictation.ts";
 // graph-deletion.ts (wave 6): the whole module is PURE but storage-port
 // driven — the deletion RUNS server-side only. The shell needs exactly one

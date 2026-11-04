@@ -47,6 +47,7 @@ contextBridge.exposeInMainWorld("lh", {
 	// Resolve only a renderer-supplied, OS-backed File. No filesystem API,
 	// uploads, copies, or DOM File IPC to main; sandbox/isolation stay on.
 	getPathForFile: (file) => webUtils.getPathForFile(file),
+	chooseAttachmentFolder: () => ipcRenderer.invoke("lh:attachment:pick", "folder"),
 	...(process.argv?.includes("--lh-web-subscriptions") ? {
 		subscriptionTransport: "web",
 		openSubscriptionBrowser: (action) => ipcRenderer.invoke("lh:subscriptions:web-browser", action),

@@ -6,6 +6,7 @@ import { Type } from "typebox";
 import { resolveSourcePath } from "../tools/fs-shared.ts";
 import { piEngineFor, type PiEngine, type ThinkingLevel } from "../models.ts";
 import { providerEventObserver, type ProviderEventObserver } from "../provider-events.ts";
+import { backgroundCaptureStream, createBackgroundCapture, type BackgroundCapture } from "../background-capture.ts";
 import type { PdfResult, PdfToolInput } from "../../core/contracts.ts";
 import { getHeadless, type HeadlessApi } from "./headless.ts";
 import { pdfExtract, pdfInfo, pdfProbe, pdfSearch, type PdfSearchHit } from "./pdf-ops.ts";
@@ -166,16 +167,21 @@ export async function runPdfReaderAgent(
 	input: PdfReaderInput,
 	opts: PdfReaderOptions = {},
 ): Promise<PdfResult> {
-	const headless = opts.headless ?? getHeadless();
 	const maxIterations = opts.maxIterations ?? MAX_ITERATIONS;
-	const pdfPath = resolveSourcePath(input.path);
-
-	// Deterministic upfront failure: unreadable / unparseable
-	// for renders — the brief never starts on a broken source.
-	const openError = await probeReadable(pdfPath);
+	let pdfPath = input.path;
+	let openError: string | null;
+	// Source denial is an ordinary upfront PDF failure, before parsing,
+	// rendering or any model request (including direct reader invocations).
+	try {
+		pdfPath = resolveSourcePath(input.path);
+		openError = await probeReadable(pdfPath);
+	} catch (err) {
+		openError = err instanceof Error ? err.message : String(err);
+	}
 	if (openError) {
 		return { path: pdfPath, question: input.question, brief: `PDF failed: ${openError}`, pagesRead: [], pagesConsulted: [] };
 	}
+	const headless = opts.headless ?? getHeadless();
 	// No Chrome gate (Wave E, 2026-10-10): pdf_render is native now
 	// (pdfjs paints into @napi-rs/canvas in-process) — the whole pdf-reader
 	// runs browser-free; text tools always worked without one.
@@ -187,6 +193,8 @@ export async function runPdfReaderAgent(
 	// factory pin to consult (engine.level is the resolved/clamped value).
 	const reasoning = engine.level;
 	const sessionId = randomUUID();
+	const capture = createBackgroundCapture({ role: "pdfReader", runId: sessionId, sourceId: opts.chatId });
+	const streamEngine = { ...engine, streamFn: backgroundCaptureStream(engine.streamFn, capture) };
 	const prompt = [
 		`PDF path: ${pdfPath}`,
 		`Question (what the teacher needs from this document): ${input.question || "(no question — give a structural overview)"}`,
@@ -203,11 +211,12 @@ export async function runPdfReaderAgent(
 	const read = new Set<number>();
 	let finalText = "";
 	let nudged = false;
+	let captureError: unknown;
 
 	try {
 		for (let iteration = 0; iteration < maxIterations; iteration++) {
 			const result = await streamOnce(
-				engine,
+				streamEngine,
 				INSTRUCTIONS,
 				messages,
 				toolDeclarations,
@@ -215,6 +224,7 @@ export async function runPdfReaderAgent(
 				reasoning,
 				opts.abortSignal,
 				opts.chatId ? providerEventObserver(opts.chatId, "job:pdfReader") : undefined,
+				capture,
 			);
 			// Money channel: each iteration is one model call.
 			opts.onUsage?.(result.usage);
@@ -320,6 +330,7 @@ export async function runPdfReaderAgent(
 				}
 			}
 
+			for (const result of toolResults) capture?.toolResult(result);
 			messages = [...messages, ...toolResults];
 			if (renderedImages) {
 				messages = [
@@ -344,8 +355,11 @@ export async function runPdfReaderAgent(
 			}
 		}
 	} catch (err) {
+		captureError = err;
 		const msg = err instanceof Error ? err.message : String(err);
 		return { path: pdfPath, question: input.question, brief: `PDF failed: the reader crashed — ${msg}`, pagesRead: [...read].sort((a, b) => a - b), pagesConsulted: [...consulted].sort((a, b) => a - b) };
+	} finally {
+		capture?.finish(captureError);
 	}
 
 	// Iteration limit: deliver whatever was honestly consulted (never invention).
@@ -412,6 +426,7 @@ async function streamOnce(
 	reasoning: ThinkingLevel | undefined,
 	abortSignal?: AbortSignal,
 	onProviderStreamEvent?: ProviderEventObserver,
+	capture?: BackgroundCapture,
 ): Promise<AssistantMessage> {
 	// 0.87.1: provider-facing contexts are TranscriptContexts — the prompt
 	// and tool declarations fold into a leading system message.
@@ -423,8 +438,9 @@ async function streamOnce(
 		onProviderStreamEvent: onProviderStreamEvent as never,
 	} as never);
 	for await (const event of stream) {
-		if (event.type === "done") return event.message;
+		if (event.type === "done") { capture?.reply(event.message); return event.message; }
 		if (event.type === "error") {
+			capture?.reply(event.error);
 			if (event.reason === "aborted") {
 				const err = new Error("aborted");
 				const abortedErr = err as Error & { name: string };
