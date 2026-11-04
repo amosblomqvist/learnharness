@@ -171,8 +171,8 @@ export function projectedContextTokens(messages: readonly LhMessage[], systemPro
 
 /** Run one compaction for the chat (the registry mutex is HELD by the
  *  caller — ensureCompacted). Reads the record fresh, cuts, summarizes,
- *  appends the marker, records usage, notifies. Never throws upward
- *  past the registry cleanup. */
+ *  inserts the marker after the summarized messages, records usage,
+ *  notifies. Never throws upward past the registry cleanup. */
 async function compact(deps: CompactionDeps, chatId: string): Promise<void> {
 	const record = deps.chatStore.getChat(chatId);
 	if (!record) return;
@@ -238,7 +238,13 @@ async function compact(deps: CompactionDeps, chatId: string): Promise<void> {
 			at: new Date().toISOString(),
 		};
 		const marker = newCompactionMarker(trimmed, details);
-		deps.chatStore.saveMessages(chatId, [...messages, marker]);
+		// Re-read: the learner may skip or toggle while the summary runs.
+		// The marker goes where the summarized chat ended, so the result
+		// matches compacting first and acting after (#518).
+		const current = deps.chatStore.getChat(chatId);
+		if (!current) throw new Error(`Chat not found: ${chatId}`);
+		const end = messages.length;
+		deps.chatStore.saveMessages(chatId, [...current.messages.slice(0, end), marker, ...current.messages.slice(end)]);
 		// The money channel: the summary is a real model call on the
 		// session's own engine — its usage keys to the marker (provenance:
 		// the transcript shows the compaction divider at the marker).
