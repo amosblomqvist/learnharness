@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { probeArrivalExpanded, revealArrival, shouldStampGeometryMute } from "../components/chat.tsx";
+import { probeArrivalExpanded, revealArrival, shouldFold, shouldStampGeometryMute } from "../components/chat.tsx";
 
 /**
  * Teach-question arrival states (owner ruling, scroll-honesty round
@@ -58,5 +58,27 @@ describe("probeArrivalExpanded — how a probe question lands", () => {
 
 	it("scrolled up in history: arrive already-collapsed (owner ruling)", () => {
 		assert.equal(probeArrivalExpanded(false), false);
+	});
+});
+
+/**
+ * The scroll fold (owner, 2026-10-27): opening the bar while scrolled up
+ * pins the question open until answered — reading history beside it.
+ */
+describe("shouldFold — when scrolling up folds the open question", () => {
+	const free = { intent: false, atBottom: false, pinned: false };
+
+	it("left the bottom past the threshold: folds", () => {
+		assert.equal(shouldFold(400, free), true);
+	});
+
+	it("pinned by an in-place open: never folds, however far up", () => {
+		assert.equal(shouldFold(4000, { ...free, pinned: true }), false);
+	});
+
+	it("within the dead band, mid-reveal, or still at the bottom: stays open", () => {
+		assert.equal(shouldFold(50, free), false);
+		assert.equal(shouldFold(400, { ...free, intent: true }), false);
+		assert.equal(shouldFold(400, { ...free, atBottom: true }), false);
 	});
 });

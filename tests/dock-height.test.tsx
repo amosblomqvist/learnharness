@@ -66,6 +66,12 @@ describe("dockHeightBudget — whole dock, not just its question", () => {
 		assert.equal(result.questionMaxHeight, 0);
 		assert.equal(result.scrollWholeContent, true);
 	});
+	it("pinned open while scrolled up: the question area takes at most a quarter of the column", () => {
+		assert.equal(dockHeightBudget(normal, true).questionMaxHeight, 175);
+		// never taller than the unpinned fit
+		assert.equal(dockHeightBudget({ ...normal, beforeShellHeight: 170, contentHeight: 880 }, true).questionMaxHeight, 156);
+		assert.equal(dockHeightBudget({ ...normal, questionHeight: null, contentHeight: 42 }, true).questionMaxHeight, null);
+	});
 	it("collapsed bars use their visible height, and a tall reading draft can still scroll", () => {
 		assert.equal(dockHeightBudget({ ...normal, questionHeight: null, contentHeight: 42 }).scrollWholeContent, false);
 		assert.equal(dockHeightBudget({ ...normal, questionHeight: null, contentHeight: 42, beforeShellHeight: 650 }).scrollWholeContent, true);
@@ -102,7 +108,7 @@ function Fixture({ expanded = true, practice = false, enabled = true, inspected,
 	const contentRef = useRef<HTMLDivElement>(null);
 	const [inset, setInset] = useState(0);
 	useDockHeight({ scrollRef, blockRef, viewportRef, bodyRef, shellRef, contentRef,
-		expanded, enabled, mode: practice ? "practice:p1" : "question:q1", onScrollbarInset: setInset, onHeight });
+		expanded, pinned: false, enabled, mode: practice ? "practice:p1" : "question:q1", onScrollbarInset: setInset, onHeight });
 	// Like DockOverlay's later morph/reserve layout effect: constraints must
 	// already be applied in this same commit, not an after-paint correction.
 	useLayoutEffect(() => { if (blockRef.current) inspected?.(blockRef.current); });
