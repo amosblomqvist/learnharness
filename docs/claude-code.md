@@ -76,8 +76,9 @@ service.
 Processes are spawned directly without a shell. Each has an empty temporary
 working directory; the system prompt and token-bearing MCP configuration are in
 a separate temporary directory, with files created in owner-only mode. Launch
-arguments select user settings only, disable hooks and slash commands, disable
-CLI session persistence and permission prompts, and restrict tools/MCP as above.
+arguments select user settings only, disable hooks, slash commands and permission
+prompts, and restrict tools/MCP as above. CLI session persistence is disabled
+only for callers without a session ID (see below).
 These are integration boundaries, **not an OS sandbox, legal certification, or a
 blanket claim about provider-policy compliance**. User CLI settings and native
 authentication are intentionally retained. Provider terms and account limits still
@@ -86,9 +87,9 @@ server logs can therefore contain CLI diagnostic information.
 
 ### Ownership, reuse, and recovery
 
-LearnHarness's persisted transcript is authoritative, not a Claude Code saved
-session. [Conversation agents](../src/agent/teacher-agent.ts) pass the existing
-chat ID as Pi's `sessionId`; [background subagent runs](../src/agent/subagents/pi-run.ts)
+LearnHarness's persisted transcript is authoritative; a Claude Code saved session
+is only a cache of it. [Conversation agents](../src/agent/teacher-agent.ts) pass the
+existing chat ID as Pi's `sessionId`; [background subagent runs](../src/agent/subagents/pi-run.ts)
 get a fresh identity per invocation, stable across that run's tool turns.
 
 A child normally exits after its final response. It is retained only while
@@ -99,15 +100,31 @@ model, effort, system prompt, tools, and child environment. Colliding tool IDs i
 two chats or runs do not grant cross-session reuse. A direct caller without a
 session ID can run, but never retains a reusable child.
 
-If there is no eligible held child—for example after timeout/restart, a changed
-configuration, or history replacement—the next call starts fresh and replays the
-active LearnHarness history. [Replay](../src/agent/claude-code/transcript.ts) is
-labelled user/assistant/tool-call/tool-result text in a new user input, preserving
-user/tool-result images; it is **not** CLI `--resume` or exact native-role/thinking
-history restoration. The current system prompt and tool schemas are supplied
-separately. A compatibility failure after admission is reported on continuation,
-not silently hidden by replay. Recovery is not a guarantee that arbitrary CLI
-failures will retry automatically.
+Callers with a session ID also get a CLI session per chat
+([registry](../src/agent/claude-code/cli-sessions.ts)). The first launch passes
+`--session-id <uuid>`. When that turn ends with a clean `stop` or `length`, the
+registry records the UUID with hashes of the configuration and history. The next
+fresh launch for the same session ID passes `--resume <uuid>` and sends only the
+new learner messages, so the CLI carries native history, prompt cache and signed
+thinking. Resume requires an unchanged configuration, an unchanged history prefix
+(ignoring thinking blocks, which the CLI streams without text), and only learner
+messages after it. The registry is in memory and each launch claims its record,
+so an error, abort, held tool, restart or changed history makes the next call
+start a new CLI session. If `--resume` fails before any output reaches Pi (for
+example `No conversation found with session ID`), the same turn starts a new
+session instead. The CLI writes these session files under
+`~/.claude/projects/`; LearnHarness neither reads nor deletes them.
+
+A new CLI session, or any fresh launch without a session ID, replays the active
+LearnHarness history. [Replay](../src/agent/claude-code/transcript.ts) is labelled
+user/assistant/tool-call/tool-result text in a new user input, preserving
+user/tool-result images; it is not exact native-role/thinking history restoration.
+The first learner message is sent unlabelled as its own block, and a text block
+closes after each later learner message, so consecutive replays share block
+boundaries the prompt cache can match. The current system prompt and tool schemas
+are supplied separately. A compatibility failure after admission is reported on
+continuation, not silently hidden by replay. Apart from a failed resume, recovery
+is not a guarantee that arbitrary CLI failures will retry automatically.
 
 ### Waiting, cancellation, and cleanup
 
@@ -151,7 +168,8 @@ entitlements, or the final bill. Check billing with the CLI/provider independent
 | Not found / unchecked / update required | Repair or update the external executable, then use **Check again**. The probe has a five-second timeout and accepts a bounded version response; it does not install or authenticate anything. |
 | Meets minimum, but request fails | Verify native CLI authentication, routing, model access, and quota externally. Installation readiness does not test them. |
 | MCP identity/admission error | The installed CLI did not satisfy the bridge contract. No stdout-only tool fallback is available; investigate compatibility rather than bypassing admission. |
-| Answer resumes with a new process | Expected after idle expiry, restart, or reuse-validation failure; history is replayed, not resumed from a CLI session file. |
+| Answer resumes with a new process | Expected after idle expiry, restart, or reuse-validation failure; a held question's answer is replayed in a new CLI session. |
+| Server log shows `claude CLI resume failed` | The CLI could not resume the chat's session (for example its file was removed); that turn continued in a new session with a replay. |
 | No context maximum or dollar estimate | Expected when window metadata is unavailable or billing is CLI-controlled; neither is evidence of zero usage. |
 
 ## Source and regression map
@@ -165,6 +183,6 @@ approval.
 | Discovery, version checks, default-off gating | [binary](../src/agent/claude-code/binary.ts), [installation](../src/agent/claude-code/installation.ts), [launcher](../src/agent/claude-code/launch.ts), [opt-in tests](../tests/claude-code-opt-in.test.ts), [version-runner tests](../tests/claude-code-version-runner.test.ts) |
 | Actual Settings controls and status HTTP boundary | [UI](../components/settings/claude-code-status.tsx), [HTTP handler](../src/server/claude-code.ts), [UI tests](../tests/claude-code-status-ui.test.tsx), [HTTP tests](../tests/claude-code-status-http.test.ts) |
 | MCP transport and identity admission | [bridge](../src/agent/claude-code/tool-bridge.ts), [bridge tests](../tests/claude-code-tool-bridge.test.ts), [stream tests](../tests/claude-code-stream.test.ts) |
-| Launch isolation, auth provenance, reuse, abort, cleanup | [stream](../src/agent/claude-code/stream.ts), [reuse comparison](../src/agent/claude-code/reuse-context.ts), [live-process registry](../src/agent/claude-code/live-processes.ts), [stream tests](../tests/claude-code-stream.test.ts) |
+| Launch isolation, auth provenance, reuse, CLI sessions, abort, cleanup | [stream](../src/agent/claude-code/stream.ts), [reuse comparison](../src/agent/claude-code/reuse-context.ts), [live-process registry](../src/agent/claude-code/live-processes.ts), [CLI session registry](../src/agent/claude-code/cli-sessions.ts), [stream tests](../tests/claude-code-stream.test.ts), [harness tests](../tests/claude-code-harness.test.ts) |
 | Replay and learner-question lifecycle | [transcript](../src/agent/claude-code/transcript.ts), [transcript tests](../tests/claude-code-transcript.test.ts), [harness tests](../tests/claude-code-harness.test.ts) |
 | Context and pricing | [window probe](../src/agent/claude-code/context-window.ts), [server pricing](../src/server/pricing.ts), [context tests](../tests/claude-code-context-window.test.ts), [usage/UI tests](../tests/claude-code-usage.test.tsx) |

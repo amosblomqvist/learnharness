@@ -44,7 +44,7 @@ const ASK_ID = "toolu_harness_ask";
 const ASK_INPUT = { question: "What do you already know about sockets?" };
 const ANSWER_TEXT = "Only that they carry bytes between programs";
 
-type FakeRun = { runClaude: RunClaude; children: ChildProcessWithoutNullStreams[]; stdinFiles: string[] };
+type FakeRun = { runClaude: RunClaude; children: ChildProcessWithoutNullStreams[]; stdinFiles: string[]; args: string[][] };
 
 function streamEvent(event: object): string {
 	return JSON.stringify({ type: "stream_event", event });
@@ -82,6 +82,7 @@ function createFakeRun(t: TestContext, scenarios: string[][]): FakeRun {
 
 	const children: ChildProcessWithoutNullStreams[] = [];
 	const stdinFiles: string[] = [];
+	const spawnArgs: string[][] = [];
 
 	const runClaude: RunClaude = (args, options) => {
 		const scenario = scenarios[children.length];
@@ -100,10 +101,11 @@ function createFakeRun(t: TestContext, scenarios: string[][]): FakeRun {
 
 		children.push(child);
 		stdinFiles.push(stdinFile);
+		spawnArgs.push(args);
 		return child;
 	};
 
-	return { runClaude, children, stdinFiles };
+	return { runClaude, children, stdinFiles, args: spawnArgs };
 }
 
 function createClaudeCodeChat(t: TestContext): string {
@@ -163,6 +165,15 @@ async function waitForExit(child: ChildProcessWithoutNullStreams): Promise<void>
 	if (child.exitCode !== null || child.signalCode !== null) return;
 
 	await once(child, "exit", { signal: AbortSignal.timeout(TURN_TIMEOUT_MS) });
+}
+
+function textScenario(): string[] {
+	return readFileSync(TEXT_FIXTURE, "utf8").split("\n").filter(Boolean);
+}
+
+function flagValue(args: string[] | undefined, flag: string): string | undefined {
+	const index = args?.indexOf(flag) ?? -1;
+	return index === -1 ? undefined : args?.[index + 1];
 }
 
 test("disabled opt-in refuses a saved CLI chat before write-ahead, liveness, or agent creation", async (t) => {
@@ -310,10 +321,66 @@ test("a question answered after the idle timeout starts a fresh CLI process that
 
 	assert.equal(fakeRun.children.length, 2);
 	assert.equal(getLastAssistantText(chatId), "hello there");
+	assert.ok(flagValue(fakeRun.args[1], "--session-id"), "a turn that ended on a held question is not resumable");
+	assert.equal(fakeRun.args[1]?.includes("--resume"), false);
 
 	const replay = readFileSync(fakeRun.stdinFiles[1] ?? "", "utf8");
 	assert.ok(replay.includes("[tool call ask_user_question]"), replay);
 	assert.ok(replay.includes(ASK_INPUT.question), replay);
 	assert.ok(replay.includes("[tool result ask_user_question]"), replay);
 	assert.ok(replay.includes(ANSWER_TEXT), replay);
+});
+
+test("a second learner message resumes the chat's CLI session and sends only the new message", async (t) => {
+	const fakeRun = createFakeRun(t, [textScenario(), textScenario()]);
+	const agentFactory = createAgentFactory(fakeRun);
+	const chatId = createClaudeCodeChat(t);
+
+	await runChatTurn(chatId, { type: "text", text: "teach me sockets" }, agentFactory);
+	await runChatTurn(chatId, { type: "text", text: "and TLS?" }, agentFactory);
+
+	assert.equal(fakeRun.children.length, 2);
+	const sessionId = flagValue(fakeRun.args[0], "--session-id");
+	assert.ok(sessionId);
+	assert.equal(flagValue(fakeRun.args[1], "--resume"), sessionId);
+	const stdin = readFileSync(fakeRun.stdinFiles[1] ?? "", "utf8");
+	assert.ok(stdin.includes("and TLS?"), stdin);
+	assert.equal(stdin.includes("teach me sockets"), false, stdin);
+});
+
+test("a failed turn is not resumed: the next learner message starts a new CLI session", async (t) => {
+	const fakeRun = createFakeRun(t, [[JSON.stringify({ fake: "exit", code: 1 })], textScenario()]);
+	const agentFactory = createAgentFactory(fakeRun);
+	const chatId = createClaudeCodeChat(t);
+
+	await runChatTurn(chatId, { type: "text", text: "teach me sockets" }, agentFactory);
+	await runChatTurn(chatId, { type: "text", text: "and TLS?" }, agentFactory);
+
+	assert.equal(fakeRun.children.length, 2);
+	assert.ok(flagValue(fakeRun.args[1], "--session-id"));
+	assert.equal(fakeRun.args[1]?.includes("--resume"), false);
+});
+
+test("a resume whose CLI session is missing recovers within the turn through a new session with a replay", async (t) => {
+	const missingSession = [
+		JSON.stringify({ type: "result", subtype: "error_during_execution", is_error: true }),
+		JSON.stringify({ fake: "exit", code: 1, stderr: "No conversation found with session ID: x" }),
+	];
+	const fakeRun = createFakeRun(t, [textScenario(), missingSession, textScenario()]);
+	const agentFactory = createAgentFactory(fakeRun);
+	const chatId = createClaudeCodeChat(t);
+
+	await runChatTurn(chatId, { type: "text", text: "teach me sockets" }, agentFactory);
+	await runChatTurn(chatId, { type: "text", text: "and TLS?" }, agentFactory);
+
+	assert.equal(fakeRun.children.length, 3);
+	assert.ok(flagValue(fakeRun.args[1], "--resume"));
+	const freshId = flagValue(fakeRun.args[2], "--session-id");
+	assert.ok(freshId);
+	assert.notEqual(freshId, flagValue(fakeRun.args[1], "--resume"));
+	assert.ok(readFileSync(fakeRun.stdinFiles[2] ?? "", "utf8").includes("teach me sockets"));
+	assert.equal(getLastAssistantText(chatId), "hello there");
+	const messages = chatStore.getChat(chatId)?.messages ?? [];
+	assert.equal(messages.filter((message) => message.role === "assistant").length, 2);
+	assert.equal(messages.some((message) => message.role === "assistant" && message.stopReason === "error"), false);
 });

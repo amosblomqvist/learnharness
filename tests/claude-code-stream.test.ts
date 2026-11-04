@@ -919,6 +919,27 @@ test("user message after tool results starts fresh with unfinished calls in the 
 	assert.ok(stdin.includes("wait, explain sockets first"), stdin);
 });
 
+test("a changed history starts a new CLI session whose replay keeps the first message as its own block", async (t) => {
+	const stdinFile = join(mkdtempSync(join(tmpdir(), "claude-code-stdin-")), "stdin.jsonl");
+	t.after(() => rmSync(dirname(stdinFile), { recursive: true, force: true }));
+
+	const { runClaude, calls } = createFakeRun(t, readFixtureLines("text.jsonl"), { FAKE_CLAUDE_STDIN: stdinFile });
+	const streamFunction = createClaudeCodeStreamFunction(runClaude);
+	const first = await runTurn(streamFunction, [HI]);
+	const edited: Message = { ...HI, content: "hi, I edited this" };
+	await runTurn(streamFunction, [edited, first, { role: "user", content: "next", timestamp: 0 }]);
+
+	assert.equal(calls.length, 2);
+	const [one, two] = calls.map((call) => call.args);
+	assert.ok(one && two);
+	assert.notEqual(getFlagValue(two, "--session-id"), getFlagValue(one, "--session-id"));
+	assert.equal(two.includes("--resume"), false);
+	const userLine = readFileSync(stdinFile, "utf8").split("\n").filter(Boolean).map((line) => JSON.parse(line) as { type: string; message?: { content: { type: string; text?: string }[] } }).find((line) => line.type === "user");
+	const content = userLine?.message?.content ?? [];
+	assert.deepEqual(content[0], { type: "text", text: "hi, I edited this" });
+	assert.ok(content[1]?.text?.startsWith("[assistant]"), JSON.stringify(content));
+});
+
 test("output while waiting for tool results kills the process", async (t) => {
 	const readA: ToolUse = { id: "toolu_moved_on_a", name: "read", arguments: { path: "a" } };
 	const { runClaude, calls } = createFakeRun(t, [...toToolUseMessage([readA]), REPLY, HOLD]);

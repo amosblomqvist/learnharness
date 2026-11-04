@@ -79,18 +79,32 @@ function toUnlabelledBlocks(content: string | (TextContent | ImageContent)[]): C
 
 function toUserContent(conversation: Message[]): ClaudeContentBlock[] {
 	const [first] = conversation;
-	if (conversation.length === 1 && first?.role === "user") return toUnlabelledBlocks(first.content);
+	const leadsWithUser = first?.role === "user";
+	const blocks: ClaudeContentBlock[] = leadsWithUser ? toUnlabelledBlocks(first.content) : [];
+	let pending: ReplayPart[] = [];
 
-	return toContentBlocks(conversation.flatMap(getReplayParts));
+	const flush = () => {
+		blocks.push(...toContentBlocks(pending));
+		pending = [];
+	};
+
+	for (const message of leadsWithUser ? conversation.slice(1) : conversation) {
+		pending.push(...getReplayParts(message));
+		if (message.role === "user") flush();
+	}
+
+	flush();
+
+	return blocks;
 }
 
-export function toClaudeInput(messages: Message[]): ClaudeInput {
+export function toClaudeInput(messages: Message[], resumeAfter = 0): ClaudeInput {
 	const conversation = messages.filter((message) => message.role !== "system");
 
 	return {
 		systemPrompt: getCurrentSystemPrompt(messages),
 		tools: getCurrentTools(messages),
-		userContent: toUserContent(conversation),
+		userContent: toUserContent(conversation.slice(resumeAfter)),
 	};
 }
 
