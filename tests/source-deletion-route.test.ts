@@ -78,6 +78,22 @@ it("kept conversations retain messages and folder placement but lose contributio
 	const result = sourceDirectory.read(); assert.deepEqual(result.organization.folders.map((f) => f.id), ["outer", "inner"]);
 	assert.equal(result.organization.placements[chat.id]?.folderId, "inner"); assert.equal(result.sources[0]?.id, chat.id);
 });
+it("deleting visible entries retains hidden practice conversations, graph contributions, coverage and their folder containers", async () => {
+	const practice = stores.chatStore.createChat("Hidden practice", "practice"); book("visible");
+	stores.graphStore.appendNode(node("historical", [practice.id]));
+	stores.graphStore.appendCoverage({ chatId: practice.id, fp: "practice", tokens: 10, foldedAt: "now" });
+	stores.graphStore.appendCheckpoint({ chatId: practice.id, foldedAt: "now" });
+	folders({ [practice.id]: { folderId: "inner" }, visible: { folderId: "inner" } });
+	const before = { chat: stores.chatStore.getChat(practice.id), nodes: stores.graphStore.readNodes(), coverage: stores.graphStore.readCoverage(), checkpoints: stores.graphStore.readCheckpoints() };
+	assert.equal((await remove(["visible"], ["outer", "inner", "empty"], true)).status, 200);
+	assert.deepEqual(stores.chatStore.getChat(practice.id), before.chat);
+	assert.deepEqual(stores.graphStore.readNodes(), before.nodes);
+	assert.deepEqual(stores.graphStore.readCoverage(), before.coverage); assert.deepEqual(stores.graphStore.readCheckpoints(), before.checkpoints);
+	const directory = sourceDirectory.read();
+	assert.equal(directory.organization.placements[practice.id]?.folderId, "inner");
+	assert.deepEqual(directory.organization.folders.map((f) => f.id), ["outer", "inner"]);
+});
+
 it("explicit session deletion uses existing cleanup, including jobs, while other sources preserve shared nodes", async () => {
 	const chat = stores.chatStore.createChat("Delete me"); book("b");
 	const job = stores.jobStore.createJob({ kind: "research", chatId: chat.id, toolCallId: "call" }); stores.jobStore.updateJob(job.id, { status: "done" });

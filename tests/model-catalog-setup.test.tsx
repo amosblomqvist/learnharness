@@ -50,7 +50,7 @@ function installFetch() {
 		if (path === "/api/models") { const request = deferred<Response>(); requests.push(request); return request.promise; }
 		if (path === "/api/settings/models") { writes.push(JSON.parse(String(init?.body))); return Response.json({ settings: { models: writes.at(-1) } }); }
 		if (path === "/api/keys") return Response.json({ providers: [provider], keys: [] });
-		if (path === "/api/settings/prompts") return Response.json({ prober: [], teacher: [] });
+		if (path === "/api/settings/prompts") return Response.json({ prober: [], teacher: [], practice: [] });
 		if (path === "/api/search") return Response.json({ available: false, engine: null, reason: "fixture" });
 		throw new Error(`Unexpected request ${path}`);
 	};

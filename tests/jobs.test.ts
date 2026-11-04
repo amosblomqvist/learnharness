@@ -733,6 +733,7 @@ describe("pdf runner (sources v0)", () => {
 	const PDF_INPUT = { path: PDF_FIXTURE, question: "What is the integral of x dx?" };
 	const relativePath = path.join("Course notes", "sample document.pdf");
 	let home: string;
+	let homeAlias: string;
 	const originalHome = process.env.HOME;
 	const originalUserProfile = process.env.USERPROFILE;
 
@@ -741,8 +742,12 @@ describe("pdf runner (sources v0)", () => {
 		const target = path.join(home, relativePath);
 		fs.mkdirSync(path.dirname(target), { recursive: true });
 		fs.copyFileSync(PDF_FIXTURE, target);
-		process.env.HOME = home;
-		process.env.USERPROFILE = home;
+		// Exercise a genuine alias even when the outer test HOME/TMPDIR are
+		// canonical. Callers need not canonicalize their environment first.
+		homeAlias = `${home}-alias`;
+		fs.symlinkSync(home, homeAlias, process.platform === "win32" ? "junction" : "dir");
+		process.env.HOME = homeAlias;
+		process.env.USERPROFILE = homeAlias;
 	});
 
 	after(() => {
@@ -750,6 +755,7 @@ describe("pdf runner (sources v0)", () => {
 		else process.env.HOME = originalHome;
 		if (originalUserProfile === undefined) delete process.env.USERPROFILE;
 		else process.env.USERPROFILE = originalUserProfile;
+		fs.unlinkSync(homeAlias);
 		fs.rmSync(home, { recursive: true, force: true });
 	});
 
@@ -795,7 +801,9 @@ describe("pdf runner (sources v0)", () => {
 	});
 
 	for (const mode of ["dispatch", "recovery"] as const) {
-		it(`resolves a home-relative PDF from ${mode} input without rewriting history`, async () => {
+		it(`resolves a home-relative PDF through aliased HOME from ${mode} input without rewriting history`, async () => {
+			assert.equal(os.homedir(), homeAlias);
+			assert.notEqual(homeAlias, fs.realpathSync.native(homeAlias));
 			const chat = chatStore.createChat(`Test: relative PDF ${mode}`);
 			trackChat(chat.id);
 			const toolCallId = `call-pdf-relative-${mode}`;
@@ -821,7 +829,7 @@ describe("pdf runner (sources v0)", () => {
 			assert.equal(done.status, "done");
 			assert.deepEqual(done.delivery, { kind: "result", status: "delivered" });
 			const result = done.result as PdfResult;
-			assert.equal(result.path, path.join(home, relativePath));
+			assert.equal(result.path, fs.realpathSync.native(path.join(home, relativePath)));
 			assert.match(result.brief, /integral rule/);
 			assert.deepEqual(result.pagesRead, [1, 2]);
 			assert.deepEqual(result.pagesConsulted, [1, 2]);

@@ -16,6 +16,7 @@
  */
 
 export * from "./contracts.ts";
+export { embedLearnerImage } from "./learner-image-svg.ts";
 export * from "./ports.ts";
 export * from "./chains.ts";
 export * from "./source-organization.ts";
@@ -45,7 +46,7 @@ export * from "./math-delims.ts";
 export * from "./native-messages.ts";
 export * from "./compaction.ts";
 export * from "./input-events.ts";
-export { parseFilePaths, quoteFilePath, filePathLabel } from "./file-paths.ts";
+export { parseFilePaths, quoteFilePath, filePathLabel, isDirectoryReference, directoryReferencePath } from "./file-paths.ts";
 export type { FilePathPart } from "./file-paths.ts";
 export * from "./citations.ts";
 export * from "./side-questions.ts";
@@ -69,6 +70,7 @@ export * from "./fuzzy.ts";
 // the user-settings record's shape/sanitizer (pure) and its fully-resolved
 // view. Browser-safe — the Wave-4 panel imports these directly.
 export * from "./settings.ts";
+export * from "./file-access.ts";
 export * from "./dictation.ts";
 // graph-deletion.ts (wave 6): the whole module is PURE but storage-port
 // driven — the deletion RUNS server-side only. The shell needs exactly one
