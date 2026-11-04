@@ -81,6 +81,9 @@ export interface QuestionDockProps {
 	/** Escape in a question field stops dictation (STT wave) — threaded
 	 *  from the page that owns the dictation hook. */
 	onEscape?: () => void;
+	/** The learner's current unsubmitted working (thinking, or the typed
+	 *  answer in text mode), kept current for the side thread's nudges. */
+	workingRef?: { current: string };
 	/** The keyboard machine (wave B) is armed only while the dock is
 	 *  expanded — the collapsed bar keeps its native Enter-to-expand. */
 	active?: boolean;
@@ -113,6 +116,7 @@ export function QuestionDock({
 	phase = "probe",
 	dictationClaim = true,
 	compactionRunning = false,
+	workingRef,
 }: QuestionDockProps) {
 	// The probe-phase names (owner, 2026-10-09) canonicalize onto their
 	// teach twins for every dock concern — parse dispatch, labels, kinds:
@@ -163,6 +167,7 @@ export function QuestionDock({
 					initialDraft={initialDraft}
 					onSaveDraft={onSaveDraft}
 					onEscape={onEscape}
+					workingRef={workingRef}
 					dictationClaim={dictationClaim}
 					compactionRunning={compactionRunning}
 				/>
@@ -262,6 +267,7 @@ function QuestionDockForm({
 	onEscape,
 	dictationClaim = true,
 	compactionRunning = false,
+	workingRef,
 }: Omit<QuestionDockProps, "expanded" | "onExpand" | "reveal">) {
 	const kind = toolQuestionKind(toolName);
 
@@ -325,6 +331,11 @@ function QuestionDockForm({
 	const [thinking, setThinking] = useState(initialDraft?.thinking ?? "");
 	const [other, setOther] = useState(initialDraft?.other ?? "");
 	const [text, setText] = useState(initialDraft?.text ?? "");
+	// Mirrors the working out for the side thread (nudges respond to it).
+	useEffect(() => {
+		if (workingRef) workingRef.current = (qd.mode === "text" ? text : thinking).trim();
+	}, [workingRef, qd.mode, text, thinking]);
+	useEffect(() => () => { if (workingRef) workingRef.current = ""; }, [workingRef]);
 	/* Refs MIRROR the two dictation-target fields ("nothing gets lost"
 	 * round, owner 2026-10-01): the run's flush lands via setState, which
 	 * a closure waiting through `await finishDictation()` cannot observe

@@ -51,6 +51,10 @@ export const BACKGROUND_MODEL_ROLES = [
 	"visualMaker",
 	"extractor",
 	"auditor",
+	// Side questions (#16): listed here for the schema-level override only
+	// (agent.models.sideQuestion). The role itself runs in the foreground,
+	// despite the list's name.
+	"sideQuestion",
 ] as const;
 
 export type BackgroundModelRole = (typeof BACKGROUND_MODEL_ROLES)[number];
@@ -328,6 +332,7 @@ export const ROLE_SLOT: Readonly<Record<ModelRole, ModelSlotName>> = {
 	auditor: "cheap",
 	visualMaker: "vision",
 	pdfReader: "vision",
+	sideQuestion: "strong", // the conversation chain, like prober/teacher (resolveSideQuestionSpec)
 };
 
 /** General settings — app-level behavior. Version DISPLAY and plans login

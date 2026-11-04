@@ -45,6 +45,7 @@ import {
 import { modelsNotConfigured, providerKeyMissing as providerKeyMissingEnvelope, ROLE_SLOT, type ModelSlotName, type ProviderKeyMissing } from "../core/settings.ts";
 import { beginTurn, endTurn } from "./turn-liveness.ts";
 import { applyParkedDismissal } from "./dismissal-park.ts";
+import { flushParkedSideQuestions, restoreParkedSideQuestions, takeFlushableSideQuestions } from "./side-questions.ts";
 import { registerTurn, rememberTurnFailure, unregisterTurn } from "./turn-runs.ts";
 import { persistTurn, triggerExtraction, TurnPersistenceError } from "./turn-service.ts";
 import { hasProbeDone, hasUnresolvedQuestion } from "../core/native-messages.ts";
@@ -369,6 +370,14 @@ export async function handleChatInput(
 	// truth instead of the pre-answer record. (Wave C: the wake's markers
 	// ride this same write-ahead - the pump de-queued them at fire, so this
 	// is the ONLY copy ever appended.)
+	// PARKED SIDE QUESTIONS (#16): a closed side thread held behind a
+	// question lands with the answer, right AFTER its result (the call and
+	// its result stay adjacent, and the reaction turn reads the note); a
+	// thread held behind a running turn rides a text message, just BEFORE it.
+	const sideQuestions = input.type === "answer"
+		? takeFlushableSideQuestions(chatId, [...record.messages, ...appends])
+		: input.type === "text" ? takeFlushableSideQuestions(chatId, record.messages) : [];
+	if (sideQuestions.length) appends = input.type === "answer" ? [...appends, ...sideQuestions] : [...sideQuestions, ...appends];
 	const merged = [...record.messages, ...appends];
 	// Retry preserves every persisted attempt. Pi needs a non-assistant
 	// tail to start continue(), so its temporary history omits the trailing
@@ -381,6 +390,7 @@ export async function handleChatInput(
 		if (!stagedAutomatic) stores.chatStore.saveMessages(chatId, merged);
 	} catch (err) {
 		console.error(`[chat ${chatId}] write-ahead persist failed:`, err);
+		restoreParkedSideQuestions(chatId, sideQuestions);
 		endTurn(chatId);
 		return new Response("Your input could not be saved. Please try again.", { status: 500 });
 	}
@@ -575,6 +585,10 @@ export async function handleChatInput(
 				// POST only acknowledges acceptance; the submitter may attach
 				// after this turn has already failed and left the registry.
 				rememberTurnFailure(chatId, reportedErrorText ?? settlementErrorText(error));
+				// Side threads closed during the failed turn land now (Retry
+				// looks past them), unless a question still waits.
+				try { flushParkedSideQuestions(stores.chatStore, chatId); }
+				catch (err) { console.error(`[chat ${chatId}] parked side questions failed to save:`, err); }
 				endTurn(chatId);
 				unregisterTurn(chatId);
 				unregisterLiveAgent(chatId);
@@ -621,6 +635,11 @@ export async function handleChatInput(
 				// subsequent fetch reads the dismissal already in the record
 				// (the same ordering law as persistTurn itself).
 				applyParkedDismissal(stores.chatStore, chatId);
+				// PARKED SIDE QUESTIONS (#16): threads closed during the turn
+				// land after its messages (and after a parked dismissal), with
+				// the same ordering law — unless the turn ended on a question,
+				// whose answer they then follow.
+				flushParkedSideQuestions(stores.chatStore, chatId);
 				// LAST: a poller that sees not-in-flight must read an already-persisted
 				// record — endTurn only after persistTurn has done its job.
 				endTurn(chatId);

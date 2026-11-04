@@ -5,6 +5,7 @@ import { useChatSession } from "@/components/session";
 import { visibleQueuedSteers } from "@/components/session-core";
 import { SetupDialog } from "@/components/setup-dialog";
 import { Hint } from "@/components/ui/hint";
+import { cn } from "@/lib/utils";
 import { useModelSetup, selectedModelUnavailable, openModelPicker, ZeroKeysPill } from "@/components/setup-cta";
 import { useStickToBottomContext, type StickToBottomContext } from "use-stick-to-bottom";
 import {
@@ -52,11 +53,20 @@ import { PlanBlock, PlanPopup, latestTree } from "@/components/plan-block";
 import { PlanMarginalia, planExists } from "@/components/plan-window";
 import { MermaidOverlay, SessionMermaidContext } from "@/components/session-overlay";
 import { AbortTurnDialog, type AbortMode } from "@/components/abort-turn-dialog";
-import { ArrowRightIcon, DumbbellIcon, WaypointsIcon } from "lucide-react";
-import type { PlanBlockData } from "@/src/core";
+import { ArrowRightIcon, DumbbellIcon, MessageCircleQuestionIcon, WaypointsIcon } from "lucide-react";
+import type { PlanBlockData, SideQuestionDetails } from "@/src/core";
 import { QuestionDock } from "@/components/question-dock";
 import { SessionFind } from "@/components/session-find";
 import { SessionMessageNavigation } from "@/components/session-navigation";
+import { SelectionToolbar } from "@/components/selection-toolbar";
+import { createCiteAction, type CitationEditTarget } from "@/components/citation-actions";
+import { CitationActionsContext, type CitationActions } from "@/components/citation-chip";
+import { CitationCommentPopover } from "@/components/citation-comment-popover";
+import { revealCitationSource } from "@/components/citation-source";
+import { createSideQuestionActions, parseBtw, SideThreadBody, SideThreadPanel, SideThreadPopover } from "@/components/side-thread";
+import { useSideThread } from "@/components/use-side-thread";
+import { SideQuestionChip } from "@/components/side-question-chip";
+import { useRouter } from "next/navigation";
 import { PracticeDock } from "@/components/practice-dock";
 import { ThinkingCard, type PracticeThinkingData } from "@/components/practice-cards";
 import { GraphContextCard, type GraphContextData } from "@/components/graph-context-card";
@@ -379,6 +389,7 @@ export function Chat({
 		const onAbort = () => {
 			const target = escAbortTarget({
 				abortAsk: abortAskRef.current !== null,
+				sideThread: sideThreadOpenRef.current,
 				mermaidFocus: mermaidFocusRef.current !== null || figureFocusRef.current !== null,
 				planOpen: planOpenRef.current,
 				setupOpen: setupOpenRef.current,
@@ -386,7 +397,8 @@ export function Chat({
 				problem: activeProblemRef.current !== null,
 				busy: busyRef.current,
 			});
-			if (target === "question") setAbortAsk("question");
+			if (target === "side-thread") closeSideThreadRef.current();
+			else if (target === "question") setAbortAsk("question");
 			else if (target === "problem") setAbortAsk("problem");
 			else if (target === "turn") setAbortAsk("turn");
 			else if (target === "mermaid") setMermaidFocus(null);
@@ -414,6 +426,7 @@ export function Chat({
 				const question = (p.input as { question?: string } | null)?.question ?? "";
 				const reading = readingThinkingRef.current.trim() || undefined;
 				clearReadingThinking();
+				void closeSideThreadRef.current(); // its note lands after the skip
 				const answer = dismissedAnswer(toolQuestionKind(p.tool), question);
 				void dismissQuestion(
 					p.toolCallId,
@@ -718,6 +731,72 @@ export function Chat({
 	 * is null, and the thinking field is left alone by design. */
 	const dictationWasActiveRef = useRef(false);
 	const composerInputRef = useRef<HTMLDivElement>(null);
+
+	// CITE (2026-10-31): selected tutor text → a citation chip in the
+	// composer, then its comment popover. The transcript's scroll element
+	// arrives late (StickToBottom attaches it), so it is reported up.
+	const [transcriptElement, setTranscriptElement] = useState<HTMLElement | null>(null);
+	const [citationEdit, setCitationEdit] = useState<CitationEditTarget | null>(null);
+	const citeAction = useMemo(
+		() => createCiteAction({ chatId, composer: () => composerInputRef.current, openEditor: setCitationEdit }),
+		[chatId],
+	);
+	// SIDE QUESTIONS (#16): a side thread asked from a selection or /btw;
+	// teaching sessions only. It commits to the record when it closes.
+	// The learner's unsubmitted working on the waiting question, kept by
+	// the dock, so a nudge can respond to it.
+	const workingRef = useRef("");
+	const sideThread = useSideThread(chatId, () => workingRef.current);
+	const sideThreadOpen = sideThread.state !== null && sideThread.state.readOnly === undefined;
+	const sideThreadOpenRef = useRef(false);
+	sideThreadOpenRef.current = sideThread.state !== null;
+	const closeSideThreadRef = useRef(sideThread.close);
+	closeSideThreadRef.current = sideThread.close;
+	const sideOpenForActionsRef = useRef(sideThreadOpen);
+	sideOpenForActionsRef.current = sideThreadOpen;
+	const { open: openSideThread, addPassage: addSidePassage } = sideThread;
+	// Ask about the WAITING question (⌘J or the top-bar button): neither
+	// /btw (the composer is replaced) nor a text selection reaches it.
+	const questionThreadOn = sideThread.state?.questionCallId !== undefined && pending?.toolCallId === sideThread.state.questionCallId;
+	const toggleQuestionThread = useCallback(() => {
+		const current = pendingRef.current;
+		if (!current || kind === "practice") return;
+		if (sideThreadOpenRef.current && questionThreadOnRef.current) void closeSideThreadRef.current();
+		else openSideThread({ anchor: { kind: "composer" }, questionCallId: current.toolCallId });
+	}, [kind, openSideThread]);
+	const questionThreadOnRef = useRef(questionThreadOn);
+	questionThreadOnRef.current = questionThreadOn;
+	useEffect(() => {
+		window.addEventListener(kbdEventForChat("toggle-question-thread"), toggleQuestionThread);
+		return () => window.removeEventListener(kbdEventForChat("toggle-question-thread"), toggleQuestionThread);
+	}, [toggleQuestionThread]);
+	// The question left (answered, skipped, replaced): its thread commits.
+	const threadQuestionId = sideThread.state?.questionCallId;
+	useEffect(() => {
+		if (threadQuestionId && pending?.toolCallId !== threadQuestionId) void closeSideThreadRef.current();
+	}, [threadQuestionId, pending?.toolCallId]);
+	const sideActions = useMemo(
+		() => (kind === "practice" ? [] : createSideQuestionActions({ threadOpen: () => sideOpenForActionsRef.current, open: openSideThread, addPassage: addSidePassage })),
+		[kind, openSideThread, addSidePassage],
+	);
+	// Rebuilt when a thread opens or closes, so the buttons follow (F7).
+	const selectionActions = useMemo(() => [citeAction, ...sideActions], [citeAction, sideActions, sideThreadOpen]);
+	const router = useRouter();
+	const transcriptElementRef = useRef<HTMLElement | null>(null);
+	transcriptElementRef.current = transcriptElement;
+	const citationActions = useMemo<CitationActions>(() => ({
+		editComment: (citation, source) => setCitationEdit({ citation, link: source.link, start: source.start, host: source.host }),
+		openSource: (citation) => {
+			const context = scrollContextRef.current;
+			revealCitationSource({
+				transcript: transcriptElementRef.current,
+				scroll: context ? { scrollRef: context.scrollRef, stopScroll: context.stopScroll } : null,
+				citation,
+				currentChatId: chatId,
+				navigate: (href) => router.push(href),
+			});
+		},
+	}), [chatId, router]);
 	useEffect(() => {
 		if (dictation.active) {
 			dictationWasActiveRef.current = true;
@@ -1245,6 +1324,14 @@ export function Chat({
 		if (pending || compacting) return;
 		const t = textRef.current.trim();
 		if (!t) return;
+		// /btw <question> (#16): a side question, never sent to the tutor —
+		// before both steer and send. Practice sends it as ordinary text.
+		const btw = kind === "practice" ? null : parseBtw(t);
+		if (btw) {
+			applyText("");
+			sideThread.open({ anchor: { kind: "composer" }, question: btw.question });
+			return;
+		}
 		if (busy) {
 			applyText("");
 			void steer(t);
@@ -1271,6 +1358,7 @@ export function Chat({
 			}}
 		>
 		<JobsContext.Provider value={jobs}>
+		<CitationActionsContext.Provider value={citationActions}>
 		{/* The session surface: the transcript column (header + scroller) and
 		    the plan-tree panel as full-height SIBLINGS — the panel spans top to
 		    bottom exactly like the left sidebar, and the header (name + phase
@@ -1380,6 +1468,28 @@ export function Chat({
 				    practice never extracts, so an ever-filling ring with no
 				    run behind it would lie. */}
 					{kind !== "practice" && <CoverageRing chatId={chatId} refreshKey={coverageTick} />}
+					{pending && kind !== "practice" && (
+						<Hint label={questionThreadOn ? "Close the side thread" : "Ask for a nudge on this question"} action="toggle-question-thread" side="bottom">
+							<button
+								type="button"
+								data-testid="question-thread-button"
+								aria-pressed={questionThreadOn}
+								onClick={(e) => {
+									blurAfterPointerClick(e);
+									toggleQuestionThread();
+								}}
+								className={cn(
+									"lh-no-drag flex shrink-0 items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium transition-colors",
+									questionThreadOn
+										? "border-primary/50 bg-primary/10 text-foreground"
+										: "border-border/80 text-muted-foreground hover:border-border hover:text-foreground",
+								)}
+							>
+								<MessageCircleQuestionIcon className="size-3.5 text-primary" aria-hidden />
+								Ask{questionThreadOn && sideThread.state!.pairs.length > 0 ? ` (${sideThread.state!.pairs.length})` : ""}
+							</button>
+						</Hint>
+					)}
 					{/* Practice sessions: no phase arc — a quiet Practice tag
 					    instead of the phase chip. */}
 					{kind === "practice" ? (
@@ -1401,6 +1511,7 @@ export function Chat({
 				<div ref={sessionFindScopeRef} className="relative flex min-h-0 flex-1">
 				<Conversation className="h-full min-w-0 flex-1" initial="instant" contextRef={scrollContextRef}>
 					<SessionMessageNavigation />
+					<TranscriptElementReporter onElement={setTranscriptElement} />
 					<ConversationContent className="min-h-full gap-0 p-0">
 						<div data-session-find-root="" className={`${COLUMN} flex flex-1 flex-col gap-4 pt-4`}>
 							{messages.length === 0 && !busy && (
@@ -1447,6 +1558,15 @@ export function Chat({
 												return <CompactionCutDivider key={pi} data={part.data as CompactionDividerData} />;
 											case "data-practice-thinking":
 												return <ThinkingCard key={pi} data={part.data as PracticeThinkingData} />;
+											case "data-side-question":
+												return (
+													<SideQuestionChip
+														key={pi}
+														details={part.data as SideQuestionDetails}
+														onOpen={(element) => sideThread.reopenReadOnly(m.id, part.data as SideQuestionDetails, { kind: "element", element })}
+														onTell={() => sideThread.tellTutor(m.id)}
+													/>
+												);
 											case "data-practice-next":
 												// The learner's move-on signal (owner round 16): a compact
 												// centered mono-caps line — chrome, the dismissal register.
@@ -1695,6 +1815,7 @@ export function Chat({
 					pending={pending}
 					initialQuestionDraft={pending ? questionDraft(pending.key)?.form : undefined}
 					onSaveQuestionDraft={(form) => { if (pending) saveQuestionDraft(pending.key, { form }); }}
+					workingRef={workingRef}
 					practice={activeProblem}
 					compactionRunning={compacting}
 					onSubmitThinking={submitThinking}
@@ -1771,10 +1892,28 @@ export function Chat({
 						const reading = readingThinkingRef.current.trim() || undefined;
 						// The pending-id effect clears this only when the question
 						// actually leaves. An offline preflight keeps the draft visible.
-						submitAnswer(pending.tool, pending.toolCallId, reading ? { ...output, readingThinking: reading } : output, pending.key);
+						const send = () => submitAnswer(pending.tool, pending.toolCallId, reading ? { ...output, readingThinking: reading } : output, pending.key);
+						// An open side thread commits FIRST, so it is parked behind the
+						// waiting question and lands right after this answer's result,
+						// where the tutor's reaction reads its note.
+						if (sideThreadOpenRef.current) void sideThread.closeBeforeAnswer().then(send);
+						else send();
 					}}
 				/>
 				</Conversation>
+				{sideThread.state?.mode === "panel" && (
+					<SideThreadPanel>
+						<SideThreadBody
+							state={sideThread.state}
+							chatId={chatId}
+							onAsk={sideThread.ask}
+							onSetTell={sideThread.setTell}
+							onExpand={sideThread.expand}
+							onClose={sideThread.close}
+							onTellTutor={sideThread.state.readOnly ? () => void sideThread.tellTutor(sideThread.state!.threadId) : undefined}
+						/>
+					</SideThreadPanel>
+				)}
 
 				{/* The session-scoped focuses (chrome-melt wave, 2026-09-19): mounted
 				    INSIDE the session area — absolute inset-0 siblings of the scroller,
@@ -1791,10 +1930,34 @@ export function Chat({
 					/>
 				)}
 				{planOpen && <PlanPopup messages={messages} onClose={() => setPlanOpen(false)} />}
+				<SelectionToolbar viewport={transcriptElement} actions={selectionActions} />
+				{sideThread.state?.mode === "popover" && (
+					<SideThreadPopover
+						state={sideThread.state}
+						chatId={chatId}
+						composer={() => composerInputRef.current}
+						onAsk={sideThread.ask}
+						onSetTell={sideThread.setTell}
+						onExpand={sideThread.expand}
+						onClose={sideThread.close}
+						onTellTutor={sideThread.state.readOnly ? () => void sideThread.tellTutor(sideThread.state!.threadId) : undefined}
+					/>
+				)}
+				{citationEdit && (
+					<CitationCommentPopover
+						key={`${citationEdit.start}:${citationEdit.link}`}
+						target={citationEdit}
+						transcript={transcriptElement}
+						composer={() => composerInputRef.current}
+						onClose={() => setCitationEdit(null)}
+						onSend={onSend}
+					/>
+				)}
 				<AbortTurnDialog mode={abortAsk} onClose={() => setAbortAsk(null)} onConfirm={confirmAbort} busy={busy} />
 				</div>
 			</div>
 		</div>
+		</CitationActionsContext.Provider>
 		</JobsContext.Provider>
 		</SessionMermaidContext.Provider>
 		{/* The BYOK setup flow (owner, 2026-09-22): one mount serves the
@@ -1855,7 +2018,7 @@ export function Chat({
  *  then the session overlays (mermaid paints above plan — later in DOM),
  *  then setup (self-closing — the gate only must not fire), then the
  *  2026-10-02 abort chain proper (question before turn). */
-export type EscAbortTarget = "mermaid" | "plan" | "setup" | "question" | "problem" | "turn" | null;
+export type EscAbortTarget = "side-thread" | "mermaid" | "plan" | "setup" | "question" | "problem" | "turn" | null;
 	/**
  * Does the opening topic still owe its first send? The topic is the
  * server's ?prompt= or the sessionStorage stash. The gate is "no real
@@ -1872,6 +2035,9 @@ export function initialPromptOwed(messages: readonly { role: string }[], prompt:
 
 export function escAbortTarget(s: {
 	abortAsk: boolean;
+	/** An open side thread (#16, F11): Esc closes (and commits) it before
+	 *  anything else on the ladder. */
+	sideThread?: boolean;
 	mermaidFocus: boolean;
 	planOpen: boolean;
 	setupOpen: boolean;
@@ -1885,6 +2051,7 @@ export function escAbortTarget(s: {
 	busy: boolean;
 }): EscAbortTarget {
 	if (s.abortAsk) return null; // the popup's own Esc — claimed by the dialog
+	if (s.sideThread) return "side-thread";
 	if (s.mermaidFocus) return "mermaid";
 	if (s.planOpen) return "plan";
 	if (s.setupOpen) return "setup";
@@ -1925,10 +2092,27 @@ export function shouldStampGeometryMute(nextH: number, prevH: number, pending: b
 	return pending && nextH > prevH + 1;
 }
 
+/** Reports the transcript's scroll element once StickToBottom attaches it
+ *  (its ref lands after first render, like SessionMessageNavigation's). */
+function TranscriptElementReporter({ onElement }: { onElement: (element: HTMLElement | null) => void }) {
+	const { scrollRef } = useStickToBottomContext();
+	useEffect(() => {
+		if (scrollRef.current) { onElement(scrollRef.current); return () => onElement(null); }
+		const id = window.setInterval(() => {
+			if (!scrollRef.current) return;
+			window.clearInterval(id);
+			onElement(scrollRef.current);
+		}, 50);
+		return () => { window.clearInterval(id); onElement(null); };
+	}, [scrollRef, onElement]);
+	return null;
+}
+
 function DockOverlay({
 	pending,
 	initialQuestionDraft,
 	onSaveQuestionDraft,
+	workingRef,
 	practice,
 	compactionRunning,
 	onSubmitThinking,
@@ -1956,6 +2140,8 @@ function DockOverlay({
 	pending: ReturnType<typeof pendingQuestionOf>;
 	initialQuestionDraft?: QuestionFormDraft;
 	onSaveQuestionDraft: (draft: QuestionFormDraft) => void;
+	/** The dock's current unsubmitted working, for the side thread. */
+	workingRef: { current: string };
 	/** Compaction running for this chat (round 14) — the docks' submit
 	 *  affordance gate (the server's registry is the real one). */
 	compactionRunning: boolean;
@@ -2404,6 +2590,7 @@ function DockOverlay({
 									onSubmit={onSubmitAnswer}
 									initialDraft={initialQuestionDraft}
 									onSaveDraft={onSaveQuestionDraft}
+									workingRef={workingRef}
 									onEscape={dictationCancel}
 									dictationClaim={!revealPending}
 									compactionRunning={compactionRunning}

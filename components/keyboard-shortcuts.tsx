@@ -130,6 +130,12 @@ export function KeyboardShortcuts() {
 				case "cheat-sheet":
 					handlersRef.current.setCheatOpen(true);
 					break;
+				case "toggle-question-thread":
+					// The chat view owns it (only while a question waits); claim the
+					// chord so a browser tab's own ⌘J (Downloads) never fires too.
+					e.preventDefault();
+					window.dispatchEvent(new CustomEvent(kbdEventForAction(action)));
+					break;
 				case "find":
 					// The mounted surface owns Find (session text / graph nodes).
 					// Claim Mod+F so Chromium's whole-window finder cannot open too.

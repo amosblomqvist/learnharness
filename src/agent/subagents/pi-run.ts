@@ -41,6 +41,9 @@ export interface SubagentRunOptions {
 	onAssistantMessage?: (message: AssistantMessage, step: number) => void;
 	/** Extra stop rule (extractor: stop after a clean submit). */
 	shouldStop?: (message: AssistantMessage, toolResults: ToolResultMessage[]) => boolean;
+	/** Every agent event, before the runner's own handling (the side
+	 *  question's live answer stream). */
+	onEvent?: (event: AgentEvent) => void;
 	/** Debug: when set AND LH_PROVIDER_EVENTS=1, raw provider stream
 	 *  events append to data/debug/provider-events/<chatId>.jsonl (context
 	 *  "job:<role>"). Absent or env-off → no observer.
@@ -103,6 +106,7 @@ export async function runSubagent(tools: AgentTool<any, any>[], opts: SubagentRu
 
 	try {
 		agent.subscribe((event: AgentEvent) => {
+			opts.onEvent?.(event);
 			switch (event.type) {
 				case "message_end":
 					if ((event.message as { role?: string }).role === "assistant") {

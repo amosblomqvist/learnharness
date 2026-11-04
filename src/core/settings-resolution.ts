@@ -121,6 +121,16 @@ export function resolveConversationSpec(
 	};
 }
 
+/** Side questions (#16): the chat's own conversation chain, under the
+ *  optional agent.models.sideQuestion override (field by field). */
+export function resolveSideQuestionSpec(chat: ChatSettings | undefined, record: UserSettings | null): EffectiveModelSpec | null {
+	const conversation = resolveConversationSpec(chat, resolveSlot(record?.models?.strong));
+	const override = record?.agent?.models?.sideQuestion;
+	const model = override?.model ?? (conversation ? { provider: conversation.provider, id: conversation.id } : undefined);
+	if (!model) return null;
+	return { provider: model.provider, id: model.id, thinkingLevel: override?.thinkingLevel ?? conversation?.thinkingLevel };
+}
+
 /** Full-chain resolution for ANY role (BYOK, owner 2026-09-22):
  *  per-role override (background roles only) → SLOT → NOTHING. The
  *  conversation pair (prober/teacher) resolves the same chain MINUS the
