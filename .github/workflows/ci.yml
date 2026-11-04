@@ -1,28 +1,45 @@
-name: CI
+name: Linux startup test artifact
 
+# TEST BRANCH ONLY. The existing ci.yml workflow identity permits manual
+# dispatch without changing the default branch or publishing a release.
 on:
-  push:
-    branches: [main]
-  pull_request:
   workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: ci-${{ github.ref }}
-  cancel-in-progress: true
-
-env:
-  NEXT_TELEMETRY_DISABLED: "1"
+  group: linux-startup-test-45f9593
+  cancel-in-progress: false
 
 jobs:
-  quality:
-    name: Typecheck, tests, lint
+  appimage:
+    name: Reviewed Linux x86-64 startup candidate
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/test/linux-startup-45f9593'
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: bash
+    env:
+      NEXT_TELEMETRY_DISABLED: "1"
+      SOURCE_SHA: 45f9593abda1439185c108628863e7aa7283fc94
+      TEST_FILENAME: LearnHarness-linux-startup-test-45f9593-x86_64.AppImage
+      WORKFLOW_SHA: ${{ github.workflow_sha }}
+      WORKFLOW_REF: ${{ github.workflow_ref }}
+      LH_DATA_DIR: ${{ runner.temp }}/lh-startup-build/data
+      LH_AUTH_FILE: ${{ runner.temp }}/lh-startup-build/auth.json
     steps:
-      - uses: actions/checkout@v7
+      - name: Check out exactly the independently reviewed application source
+        uses: actions/checkout@v7
+        with:
+          ref: 45f9593abda1439185c108628863e7aa7283fc94
+          persist-credentials: false
+      - name: Verify source and create empty build-time state
+        run: |
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          mkdir -p "$LH_DATA_DIR" "$(dirname "$LH_AUTH_FILE")"
+          printf '{}\n' > "$LH_AUTH_FILE"
       - uses: actions/setup-node@v7
         with:
           node-version: "26"
@@ -31,39 +48,160 @@ jobs:
       - run: npm run typecheck
       - run: npm test
       - run: npm run lint
-
-  standalone:
-    name: Standalone (${{ matrix.platform }})
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          # Standard macos-15 runners are Apple Silicon (not macos-15-intel).
-          - os: macos-15
-            platform: mac-arm64
-          - os: windows-2025
-            platform: windows-x64
-          - os: ubuntu-24.04
-            platform: linux-x64
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 25
-    defaults:
-      run:
-        shell: bash
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
-        with:
-          node-version: "26"
-          cache: npm
-      - run: npm ci
-      - name: Native renderer tests on this OS
+      - name: Existing Linux native renderer checks
         run: npx electron --import tsx --test tests/pdf-native-render.test.ts tests/pdf-ops.test.ts tests/svg-native-render.test.ts tests/browser-service.test.ts
         env:
           NODE_ENV: test
           ELECTRON_RUN_AS_NODE: "1"
       - run: npm run build
-      # Check the fresh trace before any static copying/curation.
       - run: node scripts/smoke-provider-runtime.mjs
       - run: node scripts/build-server.mjs
       - run: node scripts/smoke-server.mjs --electron
+      - name: Generate build-only AppImage and updater-isolation configuration
+        run: |
+          node <<'NODE'
+          const assert = require('node:assert/strict');
+          const fs = require('node:fs');
+          const path = require('node:path');
+          const yaml = require('js-yaml');
+          const original = yaml.load(fs.readFileSync('electron-builder.yml', 'utf8'));
+          assert.equal(original.toolsets.appimage, '1.0.3');
+          assert.equal(JSON.parse(fs.readFileSync('package.json', 'utf8')).version, '0.4.1');
+          const config = {
+            extends: path.resolve('electron-builder.yml'),
+            publish: null,
+            linux: {
+              target: [{ target: 'AppImage', arch: ['x64'] }],
+              artifactName: process.env.TEST_FILENAME,
+            },
+          };
+          fs.writeFileSync(path.join(process.env.RUNNER_TEMP, 'linux-startup-builder.json'), JSON.stringify(config, null, 2));
+          NODE
+      - name: Build one AppImage, never publish or generate a production feed
+        run: npx electron-builder --linux AppImage --x64 --publish never --config "$RUNNER_TEMP/linux-startup-builder.json"
+      - name: Existing packaged-provider and owned-browser smoke checks
+        run: |
+          node scripts/smoke-provider-runtime.mjs --standalone dist/linux-unpacked/resources/server/standalone
+          node scripts/smoke-provider-runtime.mjs --standalone dist/linux-unpacked/resources/server/standalone --runtime dist/linux-unpacked/learnharness
+          xvfb-run -a node scripts/smoke-demo-runtime.mjs --standalone dist/linux-unpacked/resources/server/standalone --runtime dist/linux-unpacked/learnharness --browser
+      - name: Verify the actual image payload and absent updater configuration
+        run: |
+          test -f "dist/$TEST_FILENAME"
+          test "$(find dist -maxdepth 1 -type f -name '*.AppImage' | wc -l)" -eq 1
+          test "$(find dist -maxdepth 1 -type f \( -name '*.deb' -o -name '*.rpm' -o -name 'latest*.yml' \) | wc -l)" -eq 0
+          test ! -e dist/linux-unpacked/resources/app-update.yml
+          mkdir -p "$RUNNER_TEMP/linux-startup-extracted"
+          image="$PWD/dist/$TEST_FILENAME"
+          chmod +x "$image"
+          (cd "$RUNNER_TEMP/linux-startup-extracted" && "$image" --appimage-extract > "$RUNNER_TEMP/linux-startup-extraction.log")
+          test ! -e "$RUNNER_TEMP/linux-startup-extracted/squashfs-root/resources/app-update.yml"
+          node <<'NODE'
+          const assert = require('node:assert/strict');
+          const fs = require('node:fs');
+          const path = require('node:path');
+          const crypto = require('node:crypto');
+          const asar = require('@electron/asar');
+          const extracted = path.join(process.env.RUNNER_TEMP, 'linux-startup-extracted/squashfs-root');
+          const archive = path.join(extracted, 'resources/app.asar');
+          const unpackedArchive = 'dist/linux-unpacked/resources/app.asar';
+          const hash = file => crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
+          assert.equal(hash(archive), hash(unpackedArchive), 'verified the archive inside the actual AppImage');
+          for (const name of ['electron/main.cjs', 'electron/appimage-shortcuts.cjs']) {
+            assert.deepEqual(asar.extractFile(archive, name), fs.readFileSync(name), 'packaged source must equal reviewed checkout: ' + name);
+          }
+          assert.equal(JSON.parse(asar.extractFile(archive, 'package.json').toString('utf8')).version, '0.4.1');
+          assert.ok(!fs.existsSync(path.join(extracted, 'resources/app-update.yml')));
+          assert.ok(!fs.existsSync('dist/linux-unpacked/resources/app-update.yml'));
+          console.log('PASS: actual image source matches reviewed candidate; both updater configurations are absent; internal version unchanged.');
+          NODE
+          git diff --exit-code -- . ':(exclude)next-env.d.ts'
+      - name: Assemble the startup-only test bundle
+        run: |
+          mkdir "$RUNNER_TEMP/linux-startup-bundle"
+          cp "dist/$TEST_FILENAME" "$RUNNER_TEMP/linux-startup-bundle/"
+          node <<'NODE'
+          const fs = require('node:fs');
+          const path = require('node:path');
+          const crypto = require('node:crypto');
+          const image = path.join(process.env.RUNNER_TEMP, 'linux-startup-bundle', process.env.TEST_FILENAME);
+          const manifest = {
+            purpose: 'STARTUP-ONLY TEST ARTIFACT, NOT A RELEASE',
+            applicationSourceSha: process.env.SOURCE_SHA,
+            workflowSha: process.env.WORKFLOW_SHA,
+            workflowRef: process.env.WORKFLOW_REF,
+            runUrl: `${process.env.GITHUB_SERVER_URL}/${process.env.GITHUB_REPOSITORY}/actions/runs/${process.env.GITHUB_RUN_ID}`,
+            runAttempt: process.env.GITHUB_RUN_ATTEMPT,
+            architecture: 'Linux x86-64',
+            internalAppVersion: '0.4.1',
+            filename: process.env.TEST_FILENAME,
+            bytes: fs.statSync(image).size,
+            sha256: crypto.createHash('sha256').update(fs.readFileSync(image)).digest('hex'),
+            appImageToolset: '1.0.3',
+            buildOnlyPublishOverride: null,
+            updaterConfigAbsentInUnpackedAndActualImage: true,
+            gates: 'typecheck, full tests, ESLint, native renderer checks, production standalone build and packaged runtime smoke checks',
+            limitations: 'No Fedora/no-libfuse2 acceptance, update drill, first-upgrade repair, #277 fix or release inclusion established.',
+          };
+          fs.writeFileSync(path.join(path.dirname(image), 'source-build-manifest.json'), JSON.stringify(manifest, null, 2) + '\n');
+          NODE
+          cat > "$RUNNER_TEMP/linux-startup-bundle/STARTUP-README.txt" <<'TEXT'
+          LEARNHARNESS LINUX STARTUP TEST — NOT A PUBLIC RELEASE
+
+          Reviewed application source: 45f9593abda1439185c108628863e7aa7283fc94.
+          This x86-64 AppImage tests startup of the static-runtime candidate.
+          The app still reports internal version 0.4.1. Identify this test by its
+          test filename and source-build-manifest.json, not by the About version.
+          These Linux changes are excluded from the imminent production release.
+
+          Download the Actions artifact ZIP while signed in to GitHub; extract it
+          into a new directory. The artifact expires after seven days.
+          In that directory, check the supplied hashes:
+            sha256sum -c SHA256SUMS
+          Then:
+            chmod +x ./LearnHarness-linux-startup-test-45f9593-x86_64.AppImage
+
+          Use a fresh profile/cache, not your normal learning data. The test keeps
+          the normal app identity, so changing its filename does NOT isolate data.
+          Close other LearnHarness instances and launch from a terminal:
+            testroot=$(mktemp -d "${TMPDIR:-/tmp}/learnharness-linux-startup.XXXXXX")
+            mkdir -p "$testroot/config" "$testroot/cache" "$testroot/share"
+            env -u LH_UPDATE_FEED -u LH_DEV_URL -u ELECTRON_RUN_AS_NODE \
+              -u LH_DATA_DIR -u LH_AUTH_FILE \
+              XDG_CONFIG_HOME="$testroot/config" \
+              XDG_CACHE_HOME="$testroot/cache" \
+              XDG_DATA_HOME="$testroot/share" \
+              ./LearnHarness-linux-startup-test-45f9593-x86_64.AppImage
+
+          Keep the testroot path if logs are needed; nothing asks you to delete it.
+          Do not add --no-sandbox, extract AppRun as a startup workaround, configure
+          provider credentials, sign in, or send learning messages for this smoke.
+          A successful extraction/build in CI is NOT proof of no-libfuse2 startup.
+
+          Built-in production updater metadata is deliberately absent. An updater
+          unavailable/missing app-update.yml warning is EXPECTED for this artifact;
+          it is not the startup bug. Do not set LH_UPDATE_FEED, install an update,
+          or change the production feed. The fresh cache also avoids pending updates.
+
+          Report distro/version, architecture, desktop/display session, whether
+          libfuse2 is already installed (do not install it just for this test), the
+          exact launch command and whether the window opens and stays usable.
+          Capture terminal output and relevant main.log errors, stripping private
+          information before sharing. User logs are under the fresh config root.
+
+          This is STARTUP ONLY: no released-old->A or A->B updater/shortcut drills.
+          Startup does not validate the future-update desktop-entry repair and does
+          not resolve #277, add RPM support or repair existing stale shortcuts.
+          This bundle does not authorize public posting or contact anyone for you.
+          TEXT
+          (cd "$RUNNER_TEMP/linux-startup-bundle" && sha256sum "$TEST_FILENAME" source-build-manifest.json STARTUP-README.txt > SHA256SUMS)
+      - name: Upload only the single-image test bundle
+        uses: actions/upload-artifact@v7
+        with:
+          name: learnharness-linux-startup-45f9593
+          retention-days: 7
+          if-no-files-found: error
+          path: |
+            ${{ runner.temp }}/linux-startup-bundle/*.AppImage
+            ${{ runner.temp }}/linux-startup-bundle/SHA256SUMS
+            ${{ runner.temp }}/linux-startup-bundle/source-build-manifest.json
+            ${{ runner.temp }}/linux-startup-bundle/STARTUP-README.txt
