@@ -538,6 +538,30 @@ function setupAutoUpdater() {
 		log(`update downloaded: ${info?.version} — banner shown`);
 		reportUpdateStatus("downloaded", info?.version);
 	});
+  autoUpdater.on("appimage-filename-updated", (newPath) => {
+    try {
+      const oldPath = process.env.APPIMAGE;
+      if (!oldPath || !newPath || oldPath === newPath) return;
+      const dataHome = process.env.XDG_DATA_HOME || path.join(app.getPath("home"), ".local", "share");
+      const dir = path.join(dataHome, "applications");
+      for (const name of fs.readdirSync(dir)) {
+        if (!name.endsWith(".desktop")) continue;
+        const file = path.join(dir, name);
+        const text = fs.readFileSync(file, "utf8");
+        if (!text.includes(oldPath)) continue;
+        const next = text
+          .split("\n")
+          .map((line) => (/^(Exec|TryExec)=/.test(line) ? line.split(oldPath).join(newPath) : line))
+          .join("\n");
+        if (next !== text) {
+          fs.writeFileSync(file, next);
+          log(`auto-update: desktop entry ${name} → ${newPath}`);
+        }
+      }
+    } catch (err) {
+      log(`auto-update: desktop entry rewrite skipped (${err?.message ?? err})`);
+    }
+  });
 	autoUpdater.on("error", (err) => {
 		log(`updater error: ${err?.message ?? err}`);
 		reportUpdateStatus("error");
@@ -754,3 +778,4 @@ async function main() {
 		setInterval(() => checkForUpdates(), UPDATE_CHECK_INTERVAL_MS);
 	}
 }
+
