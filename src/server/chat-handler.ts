@@ -491,6 +491,7 @@ export async function handleChatInput(
 					{
 						chatId,
 						chatStore: stores.chatStore,
+						deliver: (steer) => void deliverJobResult(steer),
 						jobStore: stores.jobStore,
 						spawn: (job, input) => void jobRunner.runJob(job.id, input),
 						// The registry drop's signal (2026-09-20): no live engine

@@ -162,7 +162,7 @@ function makeQuestionStopper(kind: AgentKind) {
 		const called = new Set(
 			context.message.content
 				.filter((c) => c.type === "toolCall" && c.name !== undefined && (
-					(QUESTION_TOOLS as readonly string[]).includes(c.name) ||
+					(QUESTION_TOOLS as readonly string[]).includes(c.name) || c.name === "resume_probe" ||
 					(kind === "practice" && c.name === PRACTICE_PROBLEM_TOOL)
 				))
 				.map((c) => c.id!),
