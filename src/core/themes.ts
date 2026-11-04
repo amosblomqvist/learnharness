@@ -177,11 +177,6 @@ export const BUILTIN_THEMES: readonly Theme[] = [
 		accent: "#c4a7e7", bold: "#c4a7e7", italic: "#ebbcba", code: "#f6c177",
 		error: "#eb6f92", success: "#9ccfd8", warning: "#f6c177",
 	}),
-	builtin("Rosé Pine Moon", "dark", {
-		background: "#232136", surface: "#2a273f", border: "#44415a", text: "#e0def4", textMuted: "#908caa",
-		accent: "#c4a7e7", bold: "#c4a7e7", italic: "#ea9a97", code: "#f6c177",
-		error: "#eb6f92", success: "#9ccfd8", warning: "#f6c177",
-	}),
 	builtin("Rosé Pine Dawn", "light", {
 		background: "#faf4ed", surface: "#fffaf3", border: "#dfdad9", text: "#575279", textMuted: "#797593",
 		accent: "#907aa9", bold: "#907aa9", italic: "#d7827e", code: "#ea9d34",

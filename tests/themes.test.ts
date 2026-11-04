@@ -67,7 +67,7 @@ describe("presets", () => {
 		}
 		assert.deepEqual([...ids], [
 			"default", "catppuccin-latte", "catppuccin-frappe", "catppuccin-macchiato", "catppuccin-mocha",
-			"rose-pine", "rose-pine-moon", "rose-pine-dawn", "gruvbox-dark", "ivory", "pastel", "nvchad-onedark",
+			"rose-pine", "rose-pine-dawn", "gruvbox-dark", "ivory", "pastel", "nvchad-onedark",
 		]);
 	});
 
