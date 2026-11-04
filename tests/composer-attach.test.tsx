@@ -31,6 +31,7 @@ async function fixture({ desktop = true } = {}) {
 	};
 	Object.assign(doc, { getSelection: () => selection, oninput: null });
 	win.HTMLElement.prototype.focus = function () { active = this; };
+	win.HTMLElement.prototype.getBoundingClientRect = () => ({ x: 200, y: 600, left: 200, right: 240, top: 600, bottom: 640, width: 40, height: 40, toJSON() {} });
 	const backingPaths = new Map<File, string>();
 	let pickerClicks = 0;
 	let folderCalls = 0;
@@ -41,7 +42,7 @@ async function fixture({ desktop = true } = {}) {
 	const previous = new Map<string, PropertyDescriptor | undefined>();
 	for (const [name, next] of Object.entries({
 		React, window: win, document: doc, Node: win.Node, HTMLElement: win.HTMLElement, Element: win.Element,
-		Event: win.Event, CustomEvent: win.CustomEvent, IS_REACT_ACT_ENVIRONMENT: true,
+		Event: win.Event, CustomEvent: win.CustomEvent, IS_REACT_ACT_ENVIRONMENT: true, innerWidth: 1000, innerHeight: 800,
 	})) {
 		previous.set(name, Object.getOwnPropertyDescriptor(globalThis, name));
 		Object.defineProperty(globalThis, name, { configurable: true, writable: true, value: next });
@@ -56,7 +57,7 @@ async function fixture({ desktop = true } = {}) {
 	const { createRoot } = await import("react-dom/client");
 	const root = createRoot(doc.getElementById("root")!);
 	function draw() {
-		root.render(<Composer busy={false} value={value} onChange={(next) => { value = next; draw(); }} onSend={() => { sends++; }} onStop={() => {}} canSend />);
+		root.render(<div data-testid="clipping-dock" style={{ overflow: "hidden" }}><Composer busy={false} value={value} onChange={(next) => { value = next; draw(); }} onSend={() => { sends++; }} onStop={() => {}} canSend /></div>);
 	}
 	await act(async () => { draw(); });
 	const picker = doc.querySelector<HTMLInputElement>('[data-testid="attach-files-input"]')!;
@@ -170,6 +171,26 @@ describe("composer attach button", () => {
 		assert.equal(f.sends, 0);
 		assert.equal(f.pickerClicks, 0);
 		assert.equal(f.doc.querySelector('[role="status"]') !== null, result !== null);
+	});
+
+	it("choices and errors portal outside the dock's clipping boundary, without removing dock clipping", async () => {
+		const f = await fixture();
+		const dock = f.doc.querySelector('[data-testid="clipping-dock"]')!;
+		await act(async () => { f.button.click(); });
+		const menu = f.doc.querySelector<HTMLElement>('[role="menu"]')!;
+		assert.equal(menu.parentElement, f.doc.body);
+		assert.equal(dock.contains(menu), false);
+		assert.equal(menu.style.position, "fixed");
+		assert.equal(menu.style.bottom, "204px");
+		assert.notEqual(menu.style.visibility, "hidden");
+		f.setFolderResult(new Error("fixture failure"));
+		await f.choice("Folder");
+		const notice = f.doc.querySelector<HTMLElement>('[role="status"]')!;
+		assert.equal(notice.parentElement, f.doc.body);
+		assert.equal(dock.contains(notice), false);
+		assert.equal(notice.style.position, "fixed");
+		assert.equal((dock as HTMLElement).style.overflow, "hidden");
+		assert.equal(f.value, "readthis");
 	});
 
 	it("paperclip menu focuses choices, supports arrows/Escape, and never submits a draft", async () => {

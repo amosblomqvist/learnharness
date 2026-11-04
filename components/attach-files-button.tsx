@@ -1,11 +1,13 @@
 "use client";
 
-import { useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
+import { createPortal } from "react-dom";
 import { PaperclipIcon } from "lucide-react";
 import { quoteFilePath } from "@/src/core";
 import { Hint } from "@/components/ui/hint";
 import { INSERT_FILE_PATHS_EVENT } from "@/components/path-input";
 import { BROWSER_NOTICE } from "@/components/file-path-drop-zone";
+import { computeMenuPlacement, type MenuPlacement } from "@/components/menu-shell";
 
 /** Picked files → the rooted paths an editor chips (issue #285), via the
  *  desktop bridge. Same validity rule as drops: a file without a usable
@@ -43,11 +45,38 @@ export function AttachFilesButton({ editorRef }: { editorRef: React.RefObject<HT
 	const pickerRef = useRef<HTMLInputElement>(null);
 	const desktop = useDesktopPaths();
 	const buttonRef = useRef<HTMLButtonElement>(null);
-	const menuRef = useRef<HTMLDivElement>(null);
+	const popupRef = useRef<HTMLDivElement>(null);
 	const choosingFolder = useRef(false);
 	const [open, setOpen] = useState(false);
 	const [notice, setNotice] = useState("");
-	useEffect(() => { if (open) menuRef.current?.querySelector<HTMLButtonElement>("button")?.focus(); }, [open]);
+	const [placement, setPlacement] = useState<MenuPlacement | null>(null);
+	const positioned = placement !== null;
+	// Like MenuShell, portal to body and use its viewport-capped placement.
+	// The production chat/new-session docks deliberately clip their children.
+	// Keep notice focus passive; only the choice menu takes keyboard focus.
+	useLayoutEffect(() => {
+		if (!open && !notice) { setPlacement(null); return; }
+		const place = () => {
+			if (!buttonRef.current || !popupRef.current) return;
+			setPlacement(computeMenuPlacement(buttonRef.current.getBoundingClientRect(),
+				{ width: window.innerWidth, height: window.innerHeight }, popupRef.current.scrollHeight, "up", "right"));
+		};
+		place();
+		window.addEventListener("scroll", place, true);
+		window.addEventListener("resize", place);
+		return () => { window.removeEventListener("scroll", place, true); window.removeEventListener("resize", place); };
+	}, [open, notice]);
+	useEffect(() => { if (open && positioned) popupRef.current?.querySelector<HTMLButtonElement>("button")?.focus(); }, [open, positioned]);
+	useEffect(() => {
+		if (!open && !notice) return;
+		const dismissOutside = (event: PointerEvent) => {
+			if (event.target instanceof Node && !popupRef.current?.contains(event.target) && !buttonRef.current?.contains(event.target)) {
+				setOpen(false); setNotice("");
+			}
+		};
+		document.addEventListener("pointerdown", dismissOutside);
+		return () => document.removeEventListener("pointerdown", dismissOutside);
+	}, [open, notice]);
 	const chooseFolder = async () => {
 		if (choosingFolder.current) return;
 		const editor = editorRef.current;
@@ -66,7 +95,7 @@ export function AttachFilesButton({ editorRef }: { editorRef: React.RefObject<HT
 	};
 	return (
 		<div className="relative shrink-0"
-			onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget)) setOpen(false); }}
+			onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget) && !popupRef.current?.contains(event.relatedTarget)) setOpen(false); }}
 			onKeyDown={(event) => {
 				if (event.key === "Escape" && open) { event.preventDefault(); event.stopPropagation(); setOpen(false); buttonRef.current?.focus(); }
 			}}>
@@ -98,20 +127,24 @@ export function AttachFilesButton({ editorRef }: { editorRef: React.RefObject<HT
 					<PaperclipIcon className="size-4" />
 				</button>
 			</Hint>
-			{open && <div ref={menuRef} role="menu" aria-label="Attach files or a folder"
-				className="absolute bottom-full right-0 z-50 mb-1 min-w-32 rounded-lg border bg-card p-1 shadow-lg"
+			{(open || notice) && createPortal(<div ref={popupRef} role={open ? "menu" : "status"}
+				aria-label={open ? "Attach files or a folder" : undefined}
+				data-testid="attachment-popup"
+				style={{ position: "fixed", zIndex: 60, ...(placement?.style ?? { left: 0, top: 0, visibility: "hidden" }), maxHeight: placement?.maxHeight, overflowY: "auto" }}
+				className={open ? "min-w-32 rounded-lg border bg-card p-1 shadow-lg" : "w-64 rounded-lg border bg-card p-2 text-xs text-muted-foreground shadow-lg"}
 				onKeyDown={(event) => {
-					const buttons = Array.from(menuRef.current?.querySelectorAll<HTMLButtonElement>("button") ?? []);
+					const buttons = Array.from(popupRef.current?.querySelectorAll<HTMLButtonElement>("button") ?? []);
 					const index = buttons.indexOf(document.activeElement as HTMLButtonElement);
 					const next = event.key === "Home" ? 0 : event.key === "End" ? buttons.length - 1 : event.key === "ArrowDown" ? (index + 1) % buttons.length : event.key === "ArrowUp" ? (index - 1 + buttons.length) % buttons.length : -1;
 					if (next >= 0) { event.preventDefault(); buttons[next]?.focus(); }
 				}}>
-				<button type="button" role="menuitem" className="block w-full rounded px-2 py-1 text-left text-xs hover:bg-accent"
-					onClick={() => { setOpen(false); pickerRef.current?.click(); }}>Files</button>
-				<button type="button" role="menuitem" className="block w-full rounded px-2 py-1 text-left text-xs hover:bg-accent"
-					onClick={() => { void chooseFolder(); }}>Folder</button>
-			</div>}
-			{notice && <div role="status" className="absolute bottom-full right-0 z-50 mb-1 w-64 rounded-lg border bg-card p-2 text-xs text-muted-foreground shadow-lg">{notice}</div>}
+				{open ? <>
+					<button type="button" role="menuitem" className="block w-full rounded px-2 py-1 text-left text-xs hover:bg-accent"
+						onClick={() => { setOpen(false); pickerRef.current?.click(); }}>Files</button>
+					<button type="button" role="menuitem" className="block w-full rounded px-2 py-1 text-left text-xs hover:bg-accent"
+						onClick={() => { void chooseFolder(); }}>Folder</button>
+				</> : notice}
+			</div>, document.body)}
 		</div>
 	);
 }
