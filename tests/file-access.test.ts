@@ -313,6 +313,10 @@ describe("settings parsing and UI", () => {
 		const empty = render({ fileAccess: { restricted: true, folders: [] } });
 		assert.match(empty, /Restricted: no folders allowed/);
 		assert.match(empty, /aria-checked="true"[^>]*aria-label="Restrict to listed folders"/);
+		const populated = render({ fileAccess: { restricted: true, folders: [a] } });
+		assert.match(populated, />Only listed folders and subfolders\.<\/span>/);
+		assert.doesNotMatch(populated, /Protected locations remain blocked/);
+		assert.match(populated, /aria-checked="true"[^>]*aria-label="Restrict to listed folders"/);
 		assert.match(render({ fileAccess: { restricted: false, folders: [a] } }), /file-access-remove/);
 		const failed = render(undefined, "File-access configuration error: blocked");
 		assert.match(failed, /file-access-config-error/);

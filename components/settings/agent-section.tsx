@@ -863,7 +863,7 @@ export function AgentSection({
 						<div data-testid="file-access-row" className="flex flex-col gap-2">
 							<SettingsRow label="File access" hint={!restricted
 								? "Broad local source access, except protected locations"
-								: folders.length ? "Only listed folders and subfolders. Protected locations remain blocked."
+								: folders.length ? "Only listed folders and subfolders."
 									: "Restricted: no folders allowed. Add a folder to enable access."}>
 								<div className="flex items-center gap-2 text-xs">
 									<span>Restrict to listed folders</span>
