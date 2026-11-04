@@ -2,6 +2,9 @@ import { readFileSync } from "node:fs";
 import type { NextConfig } from "next";
 import { MAX_IMPORT_BODY_BYTES } from "./lib/notes-import-limits.ts";
 
+/** One 100 MB course-library file plus multipart framing headroom. */
+const LIBRARY_UPLOAD_BODY_BYTES = 110 * 1024 * 1024;
+
 const pkg = JSON.parse(readFileSync(new URL("./package.json", import.meta.url), "utf8")) as { version: string; homepage: string };
 
 const nextConfig: NextConfig = {
@@ -10,7 +13,11 @@ const nextConfig: NextConfig = {
 	// Leave multipart headroom above the 25 MiB file allowance. This is a
 	// proxy buffer, not a rejection gate: the import route also bounds reads,
 	// validates actual file bytes and handles incomplete multipart bodies.
-	experimental: { proxyClientMaxBodySize: MAX_IMPORT_BODY_BYTES },
+	// ONE buffer serves every /api route behind proxy.ts, and beyond it Next
+	// SILENTLY TRUNCATES the body — so it must fit the largest upload: the
+	// course library takes files up to 100 MB, one per request (2026-10-29).
+	// Each route still enforces its own limit.
+	experimental: { proxyClientMaxBodySize: Math.max(MAX_IMPORT_BODY_BYTES, LIBRARY_UPLOAD_BODY_BYTES) },
 	// Desktop target (Electron wrapper, 2026-09-17): standalone output = a
 	// self-contained .next/standalone/server.js the Electron shell spawns
 	// on 127.0.0.1. Harmless for plain web deploys (extra build output).

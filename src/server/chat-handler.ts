@@ -48,6 +48,8 @@ import { persistTurn, triggerExtraction, TurnPersistenceError } from "./turn-ser
 import { hasProbeDone, hasUnresolvedQuestion } from "../core/native-messages.ts";
 import { composeInstructions } from "../agent/teacher-agent.ts";
 import { ensureCompacted, kickCompaction, effectiveThresholdTokens } from "./compaction.ts";
+import { awaitAttachmentSummaries, chatLibraryReadable, chatLibraryReadables, materialsManifest } from "./library-agent.ts";
+import { libraryTools } from "../agent/tools/library.ts";
 import { catalogContextLimits, refreshConnectionCatalog } from "./model-catalog.ts";
 import { emit } from "../core/events.ts";
 import { settledTurnResponse } from "./turn-runs.ts";
@@ -113,6 +115,9 @@ const jobRunner = createJobRunner({
 	// null = honestly unavailable; the dispatch-level drop (below) uses the
 	// same signal so keyless servers never see the research tool at all.
 	searchProvider,
+	// Course library (2026-10-29): library_brief jobs read an ATTACHED file
+	// — scoped fresh at run time (a detach mid-job fails it honestly).
+	libraryFile: chatLibraryReadable,
 });
 /** The app's ONE extraction pipeline instance — both front doors share it:
  *  quiz-triggered session runs (turn-service) and notes imports
@@ -288,10 +293,18 @@ export async function handleChatInput(
 				effective.compaction?.thresholdTokens,
 				catalogContextLimits().get(modelIdForCompaction),
 			),
-			systemPromptTokens: Math.ceil(composeInstructions(record.kind === "practice" ? "practice" : "teacher").length / 4),
+			// The COURSE MATERIALS block rides the system prompt too.
+			systemPromptTokens: Math.ceil((composeInstructions(record.kind === "practice" ? "practice" : "teacher").length + (materialsManifest(chatId)?.length ?? 0)) / 4),
 		},
 		chatId,
 	);
+	// THE MATERIALS GATE (course library, owner ruling 2026-10-29): every
+	// attached file gets its summary BEFORE the turn composes, so the agent
+	// plans with the whole manifest; the chat view shows progress via
+	// library-summaries-changed. Failures don't block (the manifest says
+	// "no summary — read it directly"). Same placement discipline as the
+	// compaction gate: no liveness effects, nothing durable changes.
+	await awaitAttachmentSummaries(chatId);
 	const compactedRecord = stores.chatStore.getChat(chatId);
 	if (!compactedRecord) return Response.json({ error: "Unknown chat" }, { status: 404 });
 	record = compactedRecord;
@@ -454,6 +467,21 @@ export async function handleChatInput(
 		// point as the tool delta — the agent layer composes the system
 		// prompt fresh per turn, swapping in any enabled override segments.
 		promptSwitches: effective.agent.prompts,
+		// Course library (2026-10-29): only a chat WITH attachments gets the
+		// materials block and the library tools. library_brief rides the pdf
+		// job's toggle (it is a pdf job naming a library file).
+		...(record.attachments?.length
+			? {
+					materials: materialsManifest(chatId),
+					libraryTools: libraryTools({
+						files: () => chatLibraryReadables(chatId),
+						model: engine.model,
+						...(effective.agent.tools?.pdf === false
+							? {}
+							: { jobs: { chatId, jobStore: stores.jobStore, spawn: (job, input) => void jobRunner.runJob(job.id, input) } }),
+					}),
+				}
+			: {}),
 	};
 	// PRACTICE BRANCH (owner design, 2026-10-04): a kind:"practice"
 	// session builds the practitioner from turn 1 — no prober→teacher
@@ -663,7 +691,7 @@ export async function handleChatInput(
 								fresh.compaction?.thresholdTokens,
 								catalogContextLimits().get(kickModelId),
 							),
-							systemPromptTokens: Math.ceil(composeInstructions(freshRecord.kind === "practice" ? "practice" : "teacher").length / 4),
+							systemPromptTokens: Math.ceil((composeInstructions(freshRecord.kind === "practice" ? "practice" : "teacher").length + (materialsManifest(chatId)?.length ?? 0)) / 4),
 						};
 					}, chatId);
 			},

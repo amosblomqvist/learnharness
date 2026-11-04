@@ -11,7 +11,8 @@ import { SetupDialog } from "@/components/setup-dialog";
 import { useModelSetup, selectedModelUnavailable, openModelPicker, ZeroKeysPill } from "@/components/setup-cta";
 import { StatsBar } from "@/components/stats-bar";
 import { ChainTableOverlay } from "@/components/chain-table.tsx";
-import { ComposerActions, NodePickerControl } from "@/components/composer-actions";
+import { ComposerActions, MaterialsControl, NodePickerControl } from "@/components/composer-actions";
+import { LibraryPicker } from "@/components/library/library-picker";
 import { OPENING_PROMPT_FAILURE } from "@/components/opening-prompt";
 import { SessionStarter } from "@/components/start-session";
 import type { ChatSettings, GraphSnapshot } from "@/src/core";
@@ -47,6 +48,7 @@ export async function startDraftSession(
 	picks?: readonly DraftPick[],
 	starter = new SessionStarter(),
 	settingsIdentity?: string,
+	attachments: readonly string[] = [],
 ): Promise<string | null> {
 	const t = text.trim();
 	if (!t) return null;
@@ -54,10 +56,13 @@ export async function startDraftSession(
 	// from the pick bar creates its session WITH the graph context — the
 	// same contract as the home screen's practice send (the marker with
 	// [id] name: statement lines, target validation's truth set).
+	// Course-library attachments ride the create in either mode (course
+	// library wave, 2026-10-29).
+	const withMaterials = attachments.length > 0 ? { attachments } : {};
 	return starter.start(
 		mode === "practice"
-			? { title: t, kind: "practice", ...(picks && picks.length > 0 ? { graphContext: { propositions: picks } } : {}) }
-			: { title: t },
+			? { title: t, kind: "practice", ...(picks && picks.length > 0 ? { graphContext: { propositions: picks } } : {}), ...withMaterials }
+			: { title: t, ...withMaterials },
 		fetchLike,
 		settingsIdentity,
 	);
@@ -79,6 +84,7 @@ export function DraftShell({
 	picks = [],
 	onOpenPicker,
 	onClearPicks,
+	materials,
 	overlay,
 }: {
 	busy: boolean;
@@ -102,6 +108,9 @@ export function DraftShell({
 	picks?: DraftPick[];
 	onOpenPicker?: () => void;
 	onClearPicks?: () => void;
+	/** The course-library attach control (MaterialsControl), owned by
+	 *  NewSession like the picks. */
+	materials?: ReactNode;
 	/** THE PICKER SLOT (owner round 10b): the chain-table overlay hosts
 	 *  INSIDE the content column's relative container — the same law as
 	 *  the graph view (the overlay fills its column, never the sidebar).
@@ -186,6 +195,7 @@ export function DraftShell({
 									picker={(picks.length > 0 || mode === "practice") && (
 										<NodePickerControl count={picks.length} onOpen={onOpenPicker} onClear={onClearPicks} />
 									)}
+									materials={materials}
 									setup={setupCta}
 								/>
 								{startError && <p role="alert" className="pointer-events-auto mb-2 text-sm text-destructive">{OPENING_PROMPT_FAILURE}</p>}
@@ -256,6 +266,10 @@ export function NewSession({ initialConfigured, mode = "teach" }: { initialConfi
 	};
 	const [pickerOpen, setPickerOpen] = useState(false);
 	const [snapshot, setSnapshot] = useState<GraphSnapshot | null>(null);
+	const [materials, setMaterials] = useState<string[]>([]);
+	const materialsRef = useRef<string[]>([]);
+	materialsRef.current = materials;
+	const [materialsOpen, setMaterialsOpen] = useState(false);
 	const openPicker = () => {
 		if (snapshot) {
 			setPickerOpen(true);
@@ -306,7 +320,7 @@ export function NewSession({ initialConfigured, mode = "teach" }: { initialConfi
 		setBusy(true);
 		setStartError(false);
 		void startDraftSession(draft, fetch, mode === "practice" ? "practice" : undefined, mode === "practice" ? picksRef.current : undefined,
-			starterRef.current, JSON.stringify(catalog?.slots.strong))
+			starterRef.current, JSON.stringify(catalog?.slots.strong), materialsRef.current)
 			.then((target) => {
 				if (target) router.push(target);
 				else { startingRef.current = false; setBusy(false); }
@@ -330,6 +344,7 @@ export function NewSession({ initialConfigured, mode = "teach" }: { initialConfi
 				picks={picks}
 				onOpenPicker={openPicker}
 				onClearPicks={() => applyPicks([])}
+				materials={<MaterialsControl count={materials.length} onOpen={() => setMaterialsOpen(true)} onClear={() => setMaterials([])} />}
 				overlay={
 					// THE PICKER (owner round 10b): hosted INSIDE the content
 					// column — absolute inset-0 resolves to the column's relative
@@ -371,6 +386,15 @@ export function NewSession({ initialConfigured, mode = "teach" }: { initialConfi
 						)
 					)
 				}
+			/>
+			<LibraryPicker
+				open={materialsOpen}
+				initial={materials}
+				onClose={() => setMaterialsOpen(false)}
+				onConfirm={(ids) => {
+					setMaterials(ids);
+					setMaterialsOpen(false);
+				}}
 			/>
 			{/* First-run setup: the send interception's landing surface — stage
 			    1 is the self-contained first-key screen (zero-keys wave). */}

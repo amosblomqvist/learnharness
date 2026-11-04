@@ -111,6 +111,15 @@ export async function pdfProbe(filePath: string): Promise<void> {
 	await task.destroy();
 }
 
+/** Page count alone — the course library's import stat (no per-page walk,
+ *  unlike pdfInfo). Throws like pdfProbe on an unreadable file. */
+export async function pdfPageCount(filePath: string): Promise<number> {
+	const { doc, task } = await openDocument(filePath);
+	const count = doc.numPages;
+	await task.destroy();
+	return count;
+}
+
 /** pdf_info: page count + per-page triage signals. ALWAYS run first. */
 export async function pdfInfo(filePath: string): Promise<PdfInfo> {
 	const pdfjs = await loadPdfjs(); // OPS constant for the operator-list scan

@@ -52,7 +52,9 @@ import { PlanBlock, PlanPopup, latestTree } from "@/components/plan-block";
 import { PlanMarginalia, planExists } from "@/components/plan-window";
 import { MermaidOverlay, SessionMermaidContext } from "@/components/session-overlay";
 import { AbortTurnDialog, type AbortMode } from "@/components/abort-turn-dialog";
-import { ArrowRightIcon, DumbbellIcon, WaypointsIcon } from "lucide-react";
+import { ArrowRightIcon, DumbbellIcon, LibraryIcon, WaypointsIcon } from "lucide-react";
+import { MaterialsPanel } from "@/components/library/materials-panel";
+import { useChatAttachments } from "@/components/library/library-client";
 import type { PlanBlockData } from "@/src/core";
 import { QuestionDock } from "@/components/question-dock";
 import { SessionFind } from "@/components/session-find";
@@ -220,6 +222,7 @@ export function Chat({
 	initialPrompt,
 	initiallyInFlight,
 	initiallyCompacting = false,
+	initiallyReadingMaterials = false,
 	initialConfigured = false,
 	kind = "teach",
 }: {
@@ -241,6 +244,9 @@ export function Chat({
 	 * compaction-changed event already fired). The transcript spinner
 	 * and send gates key on it. */
 	initiallyCompacting?: boolean;
+	/** Course library (2026-10-29): summaries for this chat's attachments
+	 *  are being written at mount — the next turn waits for them. */
+	initiallyReadingMaterials?: boolean;
 	/** slotsConfigured(server record) — the persistent setup CTA keys on
 	 *  it (BYOK, owner 2026-09-22). The server gate stays the truth; this
 	 *  only decides whether the pill rides the composer. */
@@ -1179,6 +1185,18 @@ export function Chat({
 		// Fully idle — a turn we never saw (every window missed): adopt now.
 		void syncFromServer();
 	});
+	// COURSE MATERIALS (course library wave, 2026-10-29): the attachments
+	// snapshot drives the header chip + the drawer; library-summaries-
+	// changed is the turn-wait signal (the server holds the next turn until
+	// every attached file has its summary).
+	const [materialsOpen, setMaterialsOpen] = useState(false);
+	const [readingMaterials, setReadingMaterials] = useState(initiallyReadingMaterials);
+	const chatMaterials = useChatAttachments(chatId);
+	const materialsCount = chatMaterials.snapshot?.items.length ?? 0;
+	useServerEvent("library-summaries-changed", (p) => {
+		if (p.chatId === chatId) setReadingMaterials(p.running);
+	});
+
 	useServerEvent("compaction-changed", (p) => {
 		// The settle-kick's background summary: while it runs, sends gate
 		// (the next turn's server-side ensureCompacted awaits it anyway —
@@ -1353,6 +1371,26 @@ export function Chat({
 							<div className="min-w-4 flex-1" aria-hidden="true" />
 					</>
 					)}
+					{/* The materials chip (course library, 2026-10-29): opens the
+					    Materials drawer — attached course files, attach/detach. */}
+					<Hint label={materialsCount > 0 ? "Course materials" : "Attach course materials"} side="bottom">
+						<button
+							type="button"
+							data-testid="materials-toggle"
+							aria-pressed={materialsOpen}
+							onClick={(e) => {
+								blurAfterPointerClick(e);
+								setMaterialsOpen((o) => !o);
+							}}
+							className={
+								"lh-no-drag flex shrink-0 cursor-pointer items-center gap-1.5 rounded-full border px-2 py-0.5 text-xs font-medium uppercase tracking-wide transition-colors hover:border-border hover:text-foreground " +
+								(materialsOpen ? "border-border text-foreground" : "border-border/80 text-muted-foreground")
+							}
+						>
+							<LibraryIcon className="size-3.5 text-primary" aria-hidden />
+							{materialsCount > 0 ? `Materials · ${materialsCount}` : "Materials"}
+						</button>
+					</Hint>
 					{/* The plan chip (owner, plan-placement round): session-level
 					    structure beside the phase chip — access to the full-DAG popup
 					    at every width; the marginalia is the wide-screen glance view. */}
@@ -1657,6 +1695,14 @@ export function Chat({
 									<Shimmer duration={1}>COMPACTING CONTEXT…</Shimmer>
 								</span>
 							)}
+							{/* The materials gate (course library): attached files are
+							    being summarized; the server holds the turn until done. */}
+							{readingMaterials && (
+								<span data-testid="reading-materials" className="flex items-center gap-2 font-ui text-xs font-medium uppercase tracking-wide text-muted-foreground">
+									<BrailleSpinner label="Reading course materials" />
+									<Shimmer duration={1}>READING COURSE MATERIALS…</Shimmer>
+								</span>
+							)}
 							{(status === "submitted" || turnInFlight) && (
 								<span className="flex items-center gap-2 font-ui text-xs font-medium uppercase tracking-wide text-muted-foreground">
 									<BrailleSpinner label="Thinking" />
@@ -1775,6 +1821,15 @@ export function Chat({
 					}}
 				/>
 				</Conversation>
+				{materialsOpen && (
+					<MaterialsPanel
+						snapshot={chatMaterials.snapshot}
+						reading={readingMaterials}
+						error={chatMaterials.error}
+						onSetAttachments={(ids) => void chatMaterials.setAttachments(ids)}
+						onClose={() => setMaterialsOpen(false)}
+					/>
+				)}
 
 				{/* The session-scoped focuses (chrome-melt wave, 2026-09-19): mounted
 				    INSIDE the session area — absolute inset-0 siblings of the scroller,

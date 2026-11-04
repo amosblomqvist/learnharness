@@ -234,6 +234,10 @@ export interface PdfToolInput {
 	path: string;
 	/** What the teacher needs from the document — focuses the brief. */
 	question: string;
+	/** Course-library brief (library_brief, 2026-10-29): the attached
+	 *  library file to read instead of `path` (which then carries the
+	 *  library display path, for the job card). Any library format. */
+	fileId?: string;
 }
 
 export interface PdfResult {

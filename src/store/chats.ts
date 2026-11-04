@@ -84,7 +84,7 @@ function listChats(): ChatSummary[] {
 			.filter((f) => f.endsWith(".json"))
 			.map((f) => getChat(f.slice(0, -5)))
 			.filter((r): r is ChatRecord => r !== null)
-			.map(({ messages, tree, turns, extractions, ...summary }) => {
+			.map(({ messages, tree, turns, extractions, attachments, ...summary }) => {
 				// Per-record isolation (Wave B): a record whose messages fail the
 				// projection (e.g. pre-Wave-B UIMessage-format scratch — the
 				// zero-back-compat wipe makes these "corrupt") must not blank the
@@ -167,6 +167,18 @@ function saveSettings(id: string, settings: ChatSettings): void {
 	writeChat(record);
 }
 
+/** Persist the chat's course-library attachments — replace-whole, like
+ * saveSettings: attaching is not conversation activity, so updatedAt stays
+ * put. SILENT by the events law; the attachments route announces
+ * record-changed. An empty list removes the field (absent = none). */
+function saveAttachments(id: string, attachments: string[]): void {
+	const record = getChat(id);
+	if (!record) throw new Error(`Chat not found: ${id}`);
+	if (attachments.length > 0) record.attachments = [...attachments];
+	else delete record.attachments;
+	writeChat(record);
+}
+
 /** Rename a session (the header's click-to-edit title, 2026-09-17). Like
  * saveSettings, a rename is NOT conversation activity: updatedAt stays put
  * so sidebar order never churns. Same fallback as createChat — the empty
@@ -212,6 +224,7 @@ export const chatStore: ChatStore = {
 	saveMessages,
 	saveTree,
 	saveSettings,
+	saveAttachments,
 	renameChat,
 	deleteChat,
 	appendTurnUsage,

@@ -39,6 +39,19 @@ export function SourceDragRow({ kind, id, name, enabled, children, ...props }: H
 	</RowEditing.Provider>;
 }
 
+/** Clicks on a row's own controls (checkbox, rename, expander, links) keep
+ *  their behavior and never count as a row click. */
+export function isRowControlClick(target: EventTarget | null): boolean {
+	return target instanceof Element && target.closest('input,button,a,textarea,select,[contenteditable="true"]') !== null;
+}
+
+/** How a row click selects (the Library page): plain = only this row,
+ *  Cmd/Ctrl = add/remove it, Shift = the range from the anchor. */
+export type RowClickMode = "only" | "toggle" | "range";
+export function rowClickMode(event: { shiftKey: boolean; metaKey: boolean; ctrlKey: boolean }): RowClickMode {
+	return event.shiftKey ? "range" : event.metaKey || event.ctrlKey ? "toggle" : "only";
+}
+
 /** Source/folder names are also searchable, including sources without nodes. */
 export function sourceNameMatches(directory: SourceDirectory | undefined, id: string, label: string | null, query: string): boolean {
 	if (!query.trim()) return true;
@@ -98,7 +111,7 @@ interface TreeSource {
 	key: string; birth: string | null; label: string | null; nodeIds: string[]; newestCreatedAt: string;
 }
 export function SourceFolderTree<T extends TreeSource>({ groups, directory, query, sort, renderSource, onAction, expanded,
-	onToggleExpanded, selection, selectedFolders, onToggleNodes, onToggleFolder, allSourceNodes, allowEmptySelection = true, collapsedForSearch, sourceSelection }: {
+	onToggleExpanded, selection, selectedFolders, onToggleNodes, onToggleFolder, onSelectFolderRow, onFolderRowDoubleClick, folderRename, hideFolderCheckbox = false, allSourceNodes, allowEmptySelection = true, collapsedForSearch, sourceSelection }: {
 	groups: T[]; directory?: SourceDirectory; query: string; sort: ChainSort;
 	renderSource: (source: T, depth: number) => ReactNode;
 	allSourceNodes?: ReadonlyMap<string, ReadonlySet<string>>;
@@ -108,6 +121,17 @@ export function SourceFolderTree<T extends TreeSource>({ groups, directory, quer
 	onAction?: OrganizationChange; expanded: ReadonlySet<string>; onToggleExpanded: (id: string) => void;
 	selection: ReadonlySet<string>; selectedFolders: ReadonlySet<string>;
 	onToggleNodes: (ids: string[], next: boolean) => void; onToggleFolder: (id: string, next: boolean) => void;
+	/** Opt-in (the Library page): a click on the folder row outside its
+	 *  checkbox, expander, icon and name selects only that folder. */
+	onSelectFolderRow?: (id: string, mode: RowClickMode) => void;
+	/** After a folder row double-click (which expands/collapses it). */
+	onFolderRowDoubleClick?: (id: string) => void;
+	/** Opt-in (the Library page): folder names are plain text and rename only
+	 *  when an outside control (the toolbar) names the folder in `id`. */
+	folderRename?: { id: string | null; onDone: () => void };
+	/** Opt-in (the Library page): no folder checkboxes; the row highlight
+	 *  alone shows selection. */
+	hideFolderCheckbox?: boolean;
 }) {
 	const [dropTarget, setDropTarget] = useState<string | null | undefined>(undefined);
 	const [draggedItem, setDraggedItem] = useState<{ kind: "source" | "folder"; id: string }>();
@@ -175,16 +199,21 @@ export function SourceFolderTree<T extends TreeSource>({ groups, directory, quer
 			const selectedCount = members.filter((id) => selection.has(id)).length;
 			const entryCheck = sourceSelection ? folderEntryCheck(directory, folder.id, sourceSelection) : undefined;
 			const hasChildren = state.folders.some((f) => f.parentId === folder.id && visibleFolder(f.id)) || groups.some((g) => parentOf(g) === folder.id);
+			const rowSelected = Boolean(onSelectFolderRow && entryCheck?.checked);
 			return <div key={folder.id} data-testid={`source-folder-${folder.id}`} className="relative" {...dropProps(folder.id)}>
 				<SourceDragRow {...chainRow(["folder", folder.id], depth, open)} kind="folder" id={folder.id} name={folder.name} enabled={Boolean(onAction)} data-testid={`folder-row-${folder.id}`}
 					data-drop-active={dropTarget === folder.id}
-					className={`flex items-center gap-1 py-1.5 pr-3 transition-colors ${!open || !hasChildren ? "border-b border-transparent" : ""} ${dropTarget === folder.id ? "bg-accent/50" : ""}`}
-					style={{ paddingLeft: 12 + depth * 36 }}>
-					<input type="checkbox" aria-label={`Select ${sourceSelection ? "folder" : "contents of"} ${folder.name}`} data-testid={`folder-checkbox-${folder.id}`}
+					data-selected={rowSelected || undefined}
+					className={`flex items-center gap-1 py-1.5 pr-3 transition-colors ${!open || !hasChildren ? "border-b border-transparent" : ""} ${onSelectFolderRow ? "cursor-pointer outline-none hover:bg-accent/50 focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring" : ""} ${dropTarget === folder.id ? "bg-accent/50" : rowSelected ? "bg-primary/10" : ""}`}
+					style={{ paddingLeft: 12 + depth * 36 }}
+					onMouseDown={onSelectFolderRow ? (e) => { if (e.shiftKey && !isRowControlClick(e.target)) e.preventDefault(); } : undefined}
+					onClick={onSelectFolderRow ? (e) => { if (e.detail <= 1 && !isRowControlClick(e.target)) onSelectFolderRow(folder.id, rowClickMode(e)); } : undefined}
+					onDoubleClick={onSelectFolderRow ? (e) => { if (!isRowControlClick(e.target)) { onToggleExpanded(folder.id); onFolderRowDoubleClick?.(folder.id); } } : undefined}>
+					{!hideFolderCheckbox && <input type="checkbox" aria-label={`Select ${sourceSelection ? "folder" : "contents of"} ${folder.name}`} data-testid={`folder-checkbox-${folder.id}`}
 						className="size-3.5 shrink-0 accent-primary" disabled={entryCheck ? false : empty ? !allowEmptySelection : members.length === 0}
 						checked={entryCheck?.checked ?? (empty ? selectedFolders.has(folder.id) : members.length > 0 && selectedCount === members.length)}
 						ref={(el) => { if (el) el.indeterminate = entryCheck?.indeterminate ?? (!empty && selectedCount > 0 && selectedCount < members.length); }}
-						onChange={(e) => { if (entryCheck || empty) onToggleFolder(folder.id, e.target.checked); else onToggleNodes(members, e.target.checked); }} />
+						onChange={(e) => { if (entryCheck || empty) onToggleFolder(folder.id, e.target.checked); else onToggleNodes(members, e.target.checked); }} />}
 					<button type="button" aria-expanded={open} aria-label={`Expand folder ${folder.name}`} data-testid={`folder-toggle-${folder.id}`}
 						onClick={() => onToggleExpanded(folder.id)} className="flex h-5 w-3.5 shrink-0 items-center justify-center text-muted-foreground/70">
 						<ChevronRightIcon className={`size-3.5 ${open ? "rotate-90" : ""}`} />
@@ -193,7 +222,10 @@ export function SourceFolderTree<T extends TreeSource>({ groups, directory, quer
 						onClick={() => onToggleExpanded(folder.id)} className="flex h-5 w-3.5 shrink-0 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground">
 						{open ? <FolderOpenIcon className="size-3.5 shrink-0" /> : <FolderIcon className="size-3.5 shrink-0" />}
 					</button>
-					{onAction ? <EditableSourceName name={folder.name} onSave={(name) => onAction({ action: "rename-folder", id: folder.id, name })} />
+					{onAction && folderRename?.id === folder.id
+						? <EditableSourceName name={folder.name} initiallyEditing onCancel={folderRename.onDone}
+							onSave={async (name) => { if (name !== folder.name) await onAction({ action: "rename-folder", id: folder.id, name }); folderRename.onDone(); }} />
+						: onAction && !folderRename ? <EditableSourceName name={folder.name} onSave={(name) => onAction({ action: "rename-folder", id: folder.id, name })} />
 						: <span className="min-w-0 flex-1 truncate text-sm font-medium">{folder.name}</span>}
 					<span className="w-14 shrink-0 text-right text-xs tabular-nums text-muted-foreground">{members.length}</span>
 					<span className="w-20 shrink-0 text-right text-xs tabular-nums text-muted-foreground">{folder.createdAt.slice(0, 10)}</span>

@@ -411,8 +411,9 @@ async function probeReadable(pdfPath: string): Promise<string | null> {
 }
 
 /** One raw model call (no agent loop): the visual-maker's streamOnce,
- *  duplicated here because its module keeps it private. */
-async function streamOnce(
+ *  duplicated here because its module keeps it private. Exported for the
+ *  course library's reader (subagents/library-reader.ts). */
+export async function streamOnce(
 	engine: PiEngine,
 	systemPrompt: string,
 	messages: Message[],
