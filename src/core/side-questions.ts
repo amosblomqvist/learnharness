@@ -29,6 +29,8 @@ export const SIDE_QUESTION_MAX_CHARS = 2_000;
 /** The Cite limit (core/citations.ts CITATION_MAX_TEXT_LENGTH). */
 export const SIDE_PASSAGE_MAX_CHARS = 8_000;
 export const SIDE_THREAD_MAX_PAIRS = 20;
+/** The learner's unsubmitted working on a waiting question. */
+export const SIDE_WORKING_MAX_CHARS = 8_000;
 const SIDE_THREAD_ID_MAX_CHARS = 128;
 /** A note is ≤ 600 chars from the agent; the fallback quotes the first
  *  question, so the close wire allows a question's worth more. */
@@ -71,6 +73,13 @@ export interface SideQuestionInput {
 	/** The agent's newest note, which the next one rewrites to cover the
 	 *  whole thread (F10). */
 	note?: string;
+	/** Set when the thread was opened from the question waiting for the
+	 *  learner's answer (its tool call id): the agent nudges, never answers,
+	 *  and the server checks the call really is the waiting question. */
+	questionCallId?: string;
+	/** The learner's current, unsubmitted working on that question, so a
+	 *  nudge can respond to it. Only with `questionCallId`. */
+	working?: string;
 }
 
 /** POST /api/chats/[id]/side-question/close. `learnerTell` is the
@@ -176,6 +185,14 @@ export function parseSideQuestionInput(raw: unknown): SideQuestionInput {
 		}
 		out.note = raw.note;
 	}
+	if (raw.questionCallId !== undefined) out.questionCallId = threadIdOf(raw.questionCallId);
+	if (raw.working !== undefined) {
+		if (out.questionCallId === undefined) throw new ChatInputError("working needs questionCallId");
+		if (typeof raw.working !== "string" || raw.working.length > SIDE_WORKING_MAX_CHARS) {
+			throw new ChatInputError(`working must be a string of at most ${SIDE_WORKING_MAX_CHARS} characters`);
+		}
+		if (raw.working.trim()) out.working = raw.working.trim();
+	}
 	return out;
 }
 
@@ -275,9 +292,16 @@ function passageLine(passage: string | undefined): string[] {
 /** The side agent's user message, rebuilt for every answer (stateless). */
 export function sideUserMessage(
 	transcript: string,
-	input: Pick<SideQuestionInput, "thread" | "question" | "passage" | "note">,
+	input: Pick<SideQuestionInput, "thread" | "question" | "passage" | "note" | "questionCallId" | "working">,
 ): string {
 	const parts = [`<tutor_transcript>\n${transcript}\n</tutor_transcript>`];
+	if (input.questionCallId) {
+		parts.push(
+			`<waiting_question>The learner opened this thread from the question that is waiting for their answer (the last question in the transcript marked "waiting").${
+				input.working ? `\nTheir working so far, not yet submitted:\n${input.working}` : "\nThey have not written any working yet."
+			}</waiting_question>`,
+		);
+	}
 	if (input.thread.length) {
 		const pairs = input.thread.map((p) => [...passageLine(p.passage), `Learner: ${p.question}`, `You: ${p.answer}`].join("\n"));
 		if (input.note) pairs.push(`Your last note: ${input.note}`);

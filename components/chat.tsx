@@ -5,6 +5,7 @@ import { useChatSession } from "@/components/session";
 import { visibleQueuedSteers } from "@/components/session-core";
 import { SetupDialog } from "@/components/setup-dialog";
 import { Hint } from "@/components/ui/hint";
+import { cn } from "@/lib/utils";
 import { useModelSetup, selectedModelUnavailable, openModelPicker, ZeroKeysPill } from "@/components/setup-cta";
 import { useStickToBottomContext, type StickToBottomContext } from "use-stick-to-bottom";
 import {
@@ -52,7 +53,7 @@ import { PlanBlock, PlanPopup, latestTree } from "@/components/plan-block";
 import { PlanMarginalia, planExists } from "@/components/plan-window";
 import { MermaidOverlay, SessionMermaidContext } from "@/components/session-overlay";
 import { AbortTurnDialog, type AbortMode } from "@/components/abort-turn-dialog";
-import { ArrowRightIcon, DumbbellIcon, WaypointsIcon } from "lucide-react";
+import { ArrowRightIcon, DumbbellIcon, MessageCircleQuestionIcon, WaypointsIcon } from "lucide-react";
 import type { PlanBlockData, SideQuestionDetails } from "@/src/core";
 import { QuestionDock } from "@/components/question-dock";
 import { SessionFind } from "@/components/session-find";
@@ -425,6 +426,7 @@ export function Chat({
 				const question = (p.input as { question?: string } | null)?.question ?? "";
 				const reading = readingThinkingRef.current.trim() || undefined;
 				clearReadingThinking();
+				void closeSideThreadRef.current(); // its note lands after the skip
 				const answer = dismissedAnswer(toolQuestionKind(p.tool), question);
 				void dismissQuestion(
 					p.toolCallId,
@@ -741,7 +743,10 @@ export function Chat({
 	);
 	// SIDE QUESTIONS (#16): a side thread asked from a selection or /btw;
 	// teaching sessions only. It commits to the record when it closes.
-	const sideThread = useSideThread(chatId);
+	// The learner's unsubmitted working on the waiting question, kept by
+	// the dock, so a nudge can respond to it.
+	const workingRef = useRef("");
+	const sideThread = useSideThread(chatId, () => workingRef.current);
 	const sideThreadOpen = sideThread.state !== null && sideThread.state.readOnly === undefined;
 	const sideThreadOpenRef = useRef(false);
 	sideThreadOpenRef.current = sideThread.state !== null;
@@ -750,6 +755,26 @@ export function Chat({
 	const sideOpenForActionsRef = useRef(sideThreadOpen);
 	sideOpenForActionsRef.current = sideThreadOpen;
 	const { open: openSideThread, addPassage: addSidePassage } = sideThread;
+	// Ask about the WAITING question (⌘J or the top-bar button): neither
+	// /btw (the composer is replaced) nor a text selection reaches it.
+	const questionThreadOn = sideThread.state?.questionCallId !== undefined && pending?.toolCallId === sideThread.state.questionCallId;
+	const toggleQuestionThread = useCallback(() => {
+		const current = pendingRef.current;
+		if (!current || kind === "practice") return;
+		if (sideThreadOpenRef.current && questionThreadOnRef.current) void closeSideThreadRef.current();
+		else openSideThread({ anchor: { kind: "composer" }, questionCallId: current.toolCallId });
+	}, [kind, openSideThread]);
+	const questionThreadOnRef = useRef(questionThreadOn);
+	questionThreadOnRef.current = questionThreadOn;
+	useEffect(() => {
+		window.addEventListener(kbdEventForChat("toggle-question-thread"), toggleQuestionThread);
+		return () => window.removeEventListener(kbdEventForChat("toggle-question-thread"), toggleQuestionThread);
+	}, [toggleQuestionThread]);
+	// The question left (answered, skipped, replaced): its thread commits.
+	const threadQuestionId = sideThread.state?.questionCallId;
+	useEffect(() => {
+		if (threadQuestionId && pending?.toolCallId !== threadQuestionId) void closeSideThreadRef.current();
+	}, [threadQuestionId, pending?.toolCallId]);
 	const sideActions = useMemo(
 		() => (kind === "practice" ? [] : createSideQuestionActions({ threadOpen: () => sideOpenForActionsRef.current, open: openSideThread, addPassage: addSidePassage })),
 		[kind, openSideThread, addSidePassage],
@@ -1443,6 +1468,28 @@ export function Chat({
 				    practice never extracts, so an ever-filling ring with no
 				    run behind it would lie. */}
 					{kind !== "practice" && <CoverageRing chatId={chatId} refreshKey={coverageTick} />}
+					{pending && kind !== "practice" && (
+						<Hint label={questionThreadOn ? "Close the side thread" : "Ask for a nudge on this question"} action="toggle-question-thread" side="bottom">
+							<button
+								type="button"
+								data-testid="question-thread-button"
+								aria-pressed={questionThreadOn}
+								onClick={(e) => {
+									blurAfterPointerClick(e);
+									toggleQuestionThread();
+								}}
+								className={cn(
+									"lh-no-drag flex shrink-0 items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium transition-colors",
+									questionThreadOn
+										? "border-primary/50 bg-primary/10 text-foreground"
+										: "border-border/80 text-muted-foreground hover:border-border hover:text-foreground",
+								)}
+							>
+								<MessageCircleQuestionIcon className="size-3.5 text-primary" aria-hidden />
+								Ask{questionThreadOn && sideThread.state!.pairs.length > 0 ? ` (${sideThread.state!.pairs.length})` : ""}
+							</button>
+						</Hint>
+					)}
 					{/* Practice sessions: no phase arc — a quiet Practice tag
 					    instead of the phase chip. */}
 					{kind === "practice" ? (
@@ -1768,6 +1815,7 @@ export function Chat({
 					pending={pending}
 					initialQuestionDraft={pending ? questionDraft(pending.key)?.form : undefined}
 					onSaveQuestionDraft={(form) => { if (pending) saveQuestionDraft(pending.key, { form }); }}
+					workingRef={workingRef}
 					practice={activeProblem}
 					compactionRunning={compacting}
 					onSubmitThinking={submitThinking}
@@ -1844,7 +1892,12 @@ export function Chat({
 						const reading = readingThinkingRef.current.trim() || undefined;
 						// The pending-id effect clears this only when the question
 						// actually leaves. An offline preflight keeps the draft visible.
-						submitAnswer(pending.tool, pending.toolCallId, reading ? { ...output, readingThinking: reading } : output, pending.key);
+						const send = () => submitAnswer(pending.tool, pending.toolCallId, reading ? { ...output, readingThinking: reading } : output, pending.key);
+						// An open side thread commits FIRST, so it is parked behind the
+						// waiting question and lands right after this answer's result,
+						// where the tutor's reaction reads its note.
+						if (sideThreadOpenRef.current) void sideThread.closeBeforeAnswer().then(send);
+						else send();
 					}}
 				/>
 				</Conversation>
@@ -2059,6 +2112,7 @@ function DockOverlay({
 	pending,
 	initialQuestionDraft,
 	onSaveQuestionDraft,
+	workingRef,
 	practice,
 	compactionRunning,
 	onSubmitThinking,
@@ -2086,6 +2140,8 @@ function DockOverlay({
 	pending: ReturnType<typeof pendingQuestionOf>;
 	initialQuestionDraft?: QuestionFormDraft;
 	onSaveQuestionDraft: (draft: QuestionFormDraft) => void;
+	/** The dock's current unsubmitted working, for the side thread. */
+	workingRef: { current: string };
 	/** Compaction running for this chat (round 14) — the docks' submit
 	 *  affordance gate (the server's registry is the real one). */
 	compactionRunning: boolean;
@@ -2534,6 +2590,7 @@ function DockOverlay({
 									onSubmit={onSubmitAnswer}
 									initialDraft={initialQuestionDraft}
 									onSaveDraft={onSaveQuestionDraft}
+									workingRef={workingRef}
 									onEscape={dictationCancel}
 									dictationClaim={!revealPending}
 									compactionRunning={compactionRunning}

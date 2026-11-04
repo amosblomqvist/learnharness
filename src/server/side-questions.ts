@@ -20,7 +20,7 @@ import { isSubscriptionProvider } from "../agent/subscription-connections.ts";
 import { runSideQuestion } from "../agent/subagents/side-question.ts";
 import type { CallUsage } from "../core/contracts.ts";
 import { emit } from "../core/events.ts";
-import { hasUnresolvedQuestion, type LhMarkerMessage, type LhMessage } from "../core/native-messages.ts";
+import { danglingQuestionOf, hasUnresolvedQuestion, type LhMarkerMessage, type LhMessage } from "../core/native-messages.ts";
 import type { ChatStore } from "../core/ports.ts";
 import { ChatInputError } from "../core/input-events.ts";
 import { modelsNotConfigured, providerKeyMissing } from "../core/settings.ts";
@@ -115,6 +115,10 @@ export async function handleSideQuestion(chatId: string, body: unknown, deps: Si
 		if (err instanceof ChatInputError) return Response.json({ error: err.message }, { status: 400 });
 		throw err;
 	}
+	// A thread opened from the waiting question must name that very call.
+	if (input.questionCallId !== undefined && danglingQuestionOf(record.messages)?.toolCallId !== input.questionCallId) {
+		return Response.json({ error: "questionCallId is not the question waiting for the learner" }, { status: 400 });
+	}
 
 	const spec = resolveSideQuestionSpec(record.settings, stores.settingsStore.readSettings());
 	if (!spec) return Response.json(modelsNotConfigured(["strong"]), { status: 503 });
@@ -156,6 +160,7 @@ export async function handleSideQuestion(chatId: string, body: unknown, deps: Si
 				engine,
 				userMessage,
 				chatId,
+				pendingQuestion: input.questionCallId !== undefined,
 				onText: (delta) => send({ type: "text", delta }),
 				onTool: (name, label) => send({ type: "tool", name, label }),
 			});
