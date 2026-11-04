@@ -36,6 +36,7 @@ import {
 	danglingQuestionOf,
 	newAnswerResult,
 	newNextMessage,
+	newAttachmentUserMessage,
 	newProblemDismissedMarker,
 	newThinkingMessage,
 	newUserMessage,
@@ -45,9 +46,18 @@ import {
 } from "./native-messages.ts";
 import { QUESTION_TOOLS, toolQuestionKind } from "./pending.ts";
 
+export type ChatAttachment = {
+	name: string;
+	mimeType: "application/pdf" | "image/png" | "image/jpeg" | "image/webp";
+	data: string;
+};
+export const MAX_ATTACHMENTS = 4;
+export const MAX_ATTACHMENT_BYTES = 5 * 1024 * 1024;
+export const MAX_TOTAL_ATTACHMENT_BYTES = 10 * 1024 * 1024;
+
 /** One client-originated input event (the POST body's `input`). */
 export type ChatInput =
-	| { type: "text"; text: string }
+	| { type: "text"; text: string; attachments?: ChatAttachment[] }
 	| { type: "answer"; toolCallId: string; answer: QuestionAnswerData }
 	| { type: "continue" }
 	/** The failed-turn retry (issue #110): the banner's Retry button. */
@@ -165,10 +175,7 @@ export function parseChatInput(input: unknown): ChatInput {
 	const i = input as Record<string, unknown>;
 	switch (i.type) {
 		case "text":
-			if (typeof i.text !== "string" || (i.text as string).trim().length === 0) {
-				throw new ChatInputError("text input requires non-empty text");
-			}
-			return { type: "text", text: i.text };
+			return parseTextInput(i);
 		case "answer":
 			if (typeof i.toolCallId !== "string" || i.toolCallId.length === 0) {
 				throw new ChatInputError("answer input requires toolCallId");
@@ -202,6 +209,42 @@ export function parseChatInput(input: unknown): ChatInput {
 	}
 }
 
+function parseTextInput(input: Record<string, unknown>): ChatInput {
+	if (typeof input.text !== "string") throw new ChatInputError("text input requires text");
+	const raw = input.attachments;
+	if (raw !== undefined && !Array.isArray(raw)) throw new ChatInputError("attachments must be an array");
+	if (Array.isArray(raw) && raw.length > MAX_ATTACHMENTS) throw new ChatInputError(`at most ${MAX_ATTACHMENTS} attachments are allowed`);
+	const attachments = (raw ?? []).map(parseAttachment);
+	if (!input.text.trim() && attachments.length === 0) throw new ChatInputError("text input requires text or attachments");
+	let totalBytes = 0;
+	for (const attachment of attachments) {
+		const bytes = decodedBase64Length(attachment.data);
+		if (bytes > MAX_ATTACHMENT_BYTES) throw new ChatInputError(`each attachment must be at most ${MAX_ATTACHMENT_BYTES} bytes`);
+		totalBytes += bytes;
+	}
+	if (totalBytes > MAX_TOTAL_ATTACHMENT_BYTES) throw new ChatInputError(`attachments must total at most ${MAX_TOTAL_ATTACHMENT_BYTES} bytes`);
+	return { type: "text", text: input.text, ...(attachments.length ? { attachments } : {}) };
+}
+
+function decodedBase64Length(value: string): number {
+	return (value.length / 4) * 3 - (value.endsWith("==") ? 2 : value.endsWith("=") ? 1 : 0);
+}
+
+function parseAttachment(value: unknown): ChatAttachment {
+	if (!value || typeof value !== "object" || Array.isArray(value)) throw new ChatInputError("attachment must be an object");
+	const item = value as Record<string, unknown>;
+	const allowed = ["application/pdf", "image/png", "image/jpeg", "image/webp"];
+	if (typeof item.name !== "string" || !item.name.trim() || item.name.length > 255 || item.name.includes("/") || item.name.includes("\\") || /[\u0000-\u001f\u007f]/.test(item.name)) throw new ChatInputError("attachment name is invalid");
+	if (typeof item.mimeType !== "string" || !allowed.includes(item.mimeType)) throw new ChatInputError("attachment type is not supported");
+	if (typeof item.data !== "string" || !item.data || item.data.length > Math.ceil(MAX_ATTACHMENT_BYTES / 3) * 4 || item.data.length % 4 !== 0 || /[^A-Za-z0-9+/=]/.test(item.data)) throw new ChatInputError("attachment data must be canonical base64 within the size limit");
+	let decoded: string;
+	try { decoded = atob(item.data); }
+	catch { throw new ChatInputError("attachment data must be canonical base64"); }
+	if (btoa(decoded) !== item.data) throw new ChatInputError("attachment data must be canonical base64");
+	if (decodedBase64Length(item.data) > MAX_ATTACHMENT_BYTES) throw new ChatInputError(`each attachment must be at most ${MAX_ATTACHMENT_BYTES} bytes`);
+	return { name: item.name, mimeType: item.mimeType as ChatAttachment["mimeType"], data: item.data };
+}
+
 /**
  * The native appends an input event makes to the record (pure). The caller
  * persists them write-ahead; the agent's context is the record plus these.
@@ -214,10 +257,22 @@ export function parseChatInput(input: unknown): ChatInput {
 export function inputAppends(
 	record: { messages: LhMessage[]; kind?: string },
 	input: ChatInput,
+	preparedAttachments?: Array<ChatAttachment & { text?: string }>,
 ): LhMessage[] {
 	switch (input.type) {
-		case "text":
-			return [...dismissalConclusion(record), newUserMessage(input.text)];
+		case "text": {
+			let userMessage: LhMessage;
+			if (preparedAttachments?.length) {
+				const metadata = preparedAttachments.map(({ name, mimeType, data }) => ({ name, mimeType, data }));
+				const attachmentContext = preparedAttachments
+					.filter((attachment) => attachment.text)
+					.map((attachment) => `Attached PDF: ${attachment.name}\n${attachment.text}`)
+					.join("\n\n");
+				userMessage = newAttachmentUserMessage(input.text, metadata, attachmentContext);
+			} else if (input.attachments?.length) userMessage = newAttachmentUserMessage(input.text, input.attachments);
+			else userMessage = newUserMessage(input.text);
+			return [...dismissalConclusion(record), userMessage];
+		}
 		case "answer": {
 			const pending = danglingQuestionOf(record.messages);
 			if (!pending || pending.toolCallId !== input.toolCallId) {

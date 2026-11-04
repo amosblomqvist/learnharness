@@ -182,12 +182,17 @@ export function projectView(messages: readonly LhMessage[], live?: LiveTurnState
 		}
 
 		if (role === "user") {
+			const user = m as LhMessage & { attachments?: Array<{ name: string; mimeType: string; data: string }> };
 			const content = m.content as string | Array<{ type: string; text?: string }>;
 			const texts =
 				typeof content === "string"
 					? [content]
 					: content.filter((c) => c.type === "text").map((c) => (c as { text: string }).text);
-			out.push({ id: m.id, role: "user", parts: texts.map(textPart) });
+			const parts = texts.map(textPart);
+			for (const attachment of user.attachments ?? []) {
+				parts.push({ type: "attachment", data: { name: attachment.name, mimeType: attachment.mimeType, data: attachment.data } });
+			}
+			out.push({ id: m.id, role: "user", parts });
 			continue;
 		}
 

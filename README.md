@@ -33,6 +33,8 @@ Instead of just giving you an explanation, it uses your answers and thinking to 
 
 The agent can also research questions in the background, create visual explanations, and build interactive demonstrations.
 
+**Attach source material.** In an existing session, use the paperclip in the reply bar to send PDFs or PNG, JPEG, and WebP photos, with an optional caption. You can remove files before sending and download them from the conversation afterward. Drafts stay visible until the server accepts the message. Attach up to four files, 5 MB each and 10 MB total. PDFs must contain selectable text (up to 100 pages and 200,000 extracted characters per file); scans without text and encrypted PDFs are rejected. Photos require a model that accepts images. Files are saved with the local conversation; their text or image content is sent to the selected model when you submit.
+
 ## Knowledge that carries forward
 
 What you are taught accumulates as propositions and reasoning chains: individual claims and the premises that lead to them. The graph shows this structure, with links back to the source sessions. You can also import notes.
