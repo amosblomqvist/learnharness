@@ -27,14 +27,29 @@ import { SvgImage } from "@/components/artifacts/svg-image";
  * would cover the scrollable extent, not the visible area).
  */
 
+/** What the demo card hands the chat page to focus it (2026-10-30). The
+ *  iframe itself never moves: it stays in the card and zooms over the
+ *  overlay's slot, so the overlay only needs the chrome's data and the
+ *  callbacks that route invert / close back to the card. */
+export type DemoFocus = {
+	title: string;
+	inverted: boolean;
+	onInvertedChange: (next: boolean) => void;
+	onClose: () => void;
+};
+
 /** The expand seam: md-blocks' mermaid hover button calls openMermaid with
  *  the chart source; the figure card's fullscreen button calls openFigure
- *  with the raw svg (+ its invert state). The chat page (which provides
- *  this context) opens the overlay. Null when no chat page is mounted
- *  (sidebar previews etc.) — the buttons simply don't render there. */
+ *  with the raw svg (+ its invert state); the demo card's fullscreen button
+ *  calls openDemo (closeDemo ends it, notifying the card). The chat page
+ *  (which provides this context) opens the overlay. Null when no chat page
+ *  is mounted (sidebar previews etc.) — the buttons simply don't render
+ *  there. */
 export const SessionMermaidContext = createContext<{
 	openMermaid: (chart: string) => void;
 	openFigure: (svg: string, inverted: boolean) => void;
+	openDemo: (demo: DemoFocus) => void;
+	closeDemo: () => void;
 } | null>(null);
 
 export function useSessionMermaid() {

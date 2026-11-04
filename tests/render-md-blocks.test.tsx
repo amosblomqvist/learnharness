@@ -165,6 +165,8 @@ describe("mermaid expand — the context seam", () => {
 				value={{
 					openMermaid: (chart) => void opened.push(chart),
 					openFigure: () => {},
+					openDemo: () => {},
+					closeDemo: () => {},
 				}}
 			>
 				<div />
