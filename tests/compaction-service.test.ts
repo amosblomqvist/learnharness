@@ -34,7 +34,9 @@ const {
 import type { CompactionDeps } from "../src/server/compaction.ts";
 import { createFauxCore, fauxAssistantMessage } from "@earendil-works/pi-ai";
 const { subscribe } = await import("../src/core/events.ts");
-const { activeCompactionOf, newCompactionMarker, newUserMessage, measuredContextTokens, toLlmMessages, COMPACTED_HISTORY_HEADER } = await import("../src/core/index.ts");
+const { activeCompactionOf, newCompactionMarker, newUserMessage, measuredContextTokens, toLlmMessages, COMPACTED_HISTORY_HEADER, activeProblemOf, buildSubagentSteer, danglingQuestionOf, dismissedAnswer, newMessageId } = await import("../src/core/index.ts");
+const dismissRoute = await import("../app/api/chats/[id]/dismiss/route.ts");
+const artifactUiRoute = await import("../app/api/chats/[id]/artifact-ui/route.ts");
 import type { LhMessage } from "../src/core/index.ts";
 
 after(() => {
@@ -360,5 +362,65 @@ describe("the compaction service", () => {
 		await ensureCompacted(depsOf(chatId, 40_000), chatId);
 		assert.ok(activeCompactionOf(chatStore.getChat(chatId)!.messages));
 		assert.equal(summarizeCalls, before + 1);
+	});
+});
+
+// Issue #518: the learner can skip or toggle while the summary call runs.
+describe("learner writes while compaction runs", () => {
+	/** Over-threshold chat ending in `tail`, with a kicked compaction held
+	 *  inside its summary call until `finish()`. */
+	async function compactingChat(label: string, ...tail: LhMessage[]) {
+		const id = overThresholdChat(label);
+		chatStore.saveMessages(id, [...chatStore.getChat(id)!.messages, ...tail]);
+		let release!: () => void, entered!: () => void;
+		const gate = new Promise<void>((done) => { release = done; });
+		const started = new Promise<void>((done) => { entered = done; });
+		const deps = depsOf(id, 40_000);
+		kickCompaction(() => ({
+			...deps,
+			summarize: async (prompt, engine) => { entered(); await gate; return deps.summarize!(prompt, engine); },
+		}), id);
+		await started;
+		return { id, finish: async () => { release(); await awaitCompaction(id); } };
+	}
+	const post = (route: typeof dismissRoute, id: string, input: unknown) =>
+		route.POST(new Request(`http://test/api/chats/${id}`, { method: "POST", body: JSON.stringify({ input }) }), { params: Promise.resolve({ id }) });
+	const toolCallMessage = (callId: string, name: string, args: unknown) =>
+		({ id: newMessageId(), role: "assistant", content: [{ type: "toolCall", id: callId, name, arguments: args }] }) as never as LhMessage;
+	const quiz = (callId: string) =>
+		toolCallMessage(callId, "quiz", { question: "Q?", options: [{ label: "A" }, { label: "B" }], correctAnswer: "A", explanation: "A is right." });
+
+	it("a skipped question stays skipped", async () => {
+		const { id, finish } = await compactingChat("518: question skip", quiz("q-518"));
+		const res = await post(dismissRoute, id, { type: "dismiss", toolCallId: "q-518", answer: dismissedAnswer("quiz", "Q?") });
+		assert.equal(res.status, 200);
+		await finish();
+		const messages = chatStore.getChat(id)!.messages;
+		assert.ok(activeCompactionOf(messages), "compaction landed");
+		assert.equal(danglingQuestionOf(messages), null, "the skip survived compaction");
+	});
+
+	it("a discarded practice problem stays discarded", async () => {
+		const problem = toolCallMessage("p-518", "problem", { statement: "Prove |G|=p ⇒ cyclic", mode: "recall" });
+		const posed = { id: newMessageId(), role: "toolResult", toolCallId: "p-518", toolName: "problem", content: [{ type: "text", text: "Problem posed." }], details: null } as never as LhMessage;
+		const { id, finish } = await compactingChat("518: problem skip", problem, posed);
+		const res = await post(dismissRoute, id, { type: "dismiss-problem", problemCallId: "p-518" });
+		assert.equal(res.status, 200);
+		await finish();
+		const messages = chatStore.getChat(id)!.messages;
+		assert.ok(activeCompactionOf(messages), "compaction landed");
+		assert.equal(activeProblemOf(messages), null, "the discard survived compaction");
+	});
+
+	it("the invert switch stays on", async () => {
+		const steer = buildSubagentSteer({ id: "j-518", kind: "demo", toolCallId: "c-518" }, { title: "T", html: "<p>x</p>", tested: true });
+		const { id, finish } = await compactingChat("518: invert", steer as never);
+		const res = await post(artifactUiRoute, id, { messageId: steer.id, inverted: true });
+		assert.equal(res.status, 200);
+		await finish();
+		const messages = chatStore.getChat(id)!.messages;
+		const saved = messages.find((m) => m.id === steer.id) as { details: { ui?: { inverted?: boolean } } };
+		assert.ok(activeCompactionOf(messages), "compaction landed");
+		assert.equal(saved.details.ui?.inverted, true, "the switch survived compaction");
 	});
 });
