@@ -105,10 +105,12 @@ export function toClaudeArgs(input: ClaudeArgsInput): string[] {
 		"--strict-mcp-config",
 		"--mcp-config",
 		input.mcpConfigFile,
+		// Keep native user auth/routing, but override its instruction channels.
+		// Settings env can replace inherited env, so pin the memory switch here too.
 		"--setting-sources",
 		"user",
 		"--settings",
-		JSON.stringify({ disableAllHooks: true }),
+		JSON.stringify({ disableAllHooks: true, outputStyle: "default", env: { CLAUDE_CODE_DISABLE_CLAUDE_MDS: "1" } }),
 		"--disable-slash-commands",
 		"--no-session-persistence",
 		"--permission-prompts",
@@ -628,7 +630,14 @@ function continueLiveProcess(turn: ClaudeTurn, owner: symbol, sessionId: string 
 function toClaudeEnv(): NodeJS.ProcessEnv {
 	// Preserve native CLI auth/routing, including launch-environment credentials.
 	// Claude Code chooses the account and billing method, not LearnHarness.
-	return { ...externalCliEnv(), MCP_TOOL_TIMEOUT: String(MCP_TOOL_TIMEOUT_MS), CLAUDE_CODE_MCP_TOOL_IDLE_TIMEOUT: String(MCP_TOOL_TIMEOUT_MS) };
+	// Loading user settings also loads ~/.claude/CLAUDE.md and memory files;
+	// the tutor's system prompt must not inherit them.
+	return {
+		...externalCliEnv(),
+		MCP_TOOL_TIMEOUT: String(MCP_TOOL_TIMEOUT_MS),
+		CLAUDE_CODE_MCP_TOOL_IDLE_TIMEOUT: String(MCP_TOOL_TIMEOUT_MS),
+		CLAUDE_CODE_DISABLE_CLAUDE_MDS: "1",
+	};
 }
 
 async function startProcess(
