@@ -655,7 +655,7 @@ describe("graph ledger store", () => {
 
 // ─── session deletion (wave 6 — the first destructive ledger operation) ─────
 
-import { deleteChatTraces, type ChatDeletionStats } from "../src/core/graph-deletion.ts";
+import { deleteChatTraces, deleteMessageTraces, type ChatDeletionStats, type MessageDeletionStats } from "../src/core/graph-deletion.ts";
 import { deleteChatSession, sessionCoverage } from "../src/server/chats.ts";
 import { rememberTurnFailure, settledTurnResponse } from "../src/server/turn-runs.ts";
 import { beginTurn, endTurn } from "../src/server/turn-liveness.ts";
@@ -837,6 +837,198 @@ describe("session deletion (deleteChatTraces + deleteChatSession, wave 6)", () =
 		assert.equal(jobStore.getJob(doneJob.id), null, "the chat's job records are gone");
 		// And a second call is an honest 404.
 		assert.deepEqual(await deleteChatSession(dA.id, "delete-nodes"), { ok: false, status: 404, code: "not_found", error: "No such session" });
+	});
+});
+
+// ─── message-granular rewind purge (issue #321 follow-up: edit a sent message) ──
+
+import { coverageOf } from "../src/core/coverage.ts";
+
+describe("message-granular rewind purge (deleteMessageTraces)", () => {
+	const tick = () => new Promise<void>((resolve) => setTimeout(resolve, 5));
+
+	/** u1 t1 | u2 t2 — the learner edits u2, so {ru2, rt2} is the cut. */
+	function rewindChat(title: string) {
+		return fixtureChat(title, [
+			user("ru1", "teach me"),
+			teacher("rt1", "First lesson prose"),
+			user("ru2", "go deeper"),
+			teacher("rt2", "Second lesson prose"),
+		].flat());
+	}
+
+	/** One extraction run: merge the findings, then cover the named messages
+	 *  with ONE shared foldedAt (a batch), exactly as the pipeline does. */
+	function fold(chatId: string, coveredIds: string[], findings: SessionFindings, verdicts: AuditVerdicts = { links: [] }): string {
+		const slots = coverageSlots(chatStore.getChat(chatId)!.messages);
+		const foldedAt = new Date().toISOString();
+		mergeFindings(chatId, findings, verdicts, graphDeps, {
+			foldedAt,
+			coverage: slots
+				.filter((s) => coveredIds.includes(s.message.id) && s.tokens > 0)
+				.map((s) => ({ chatId, fp: s.fp, tokens: s.tokens, foldedAt })),
+		});
+		return foldedAt;
+	}
+
+	function cutOf(chatId: string, ids: string[]) {
+		const slots = coverageSlots(chatStore.getChat(chatId)!.messages).filter((s) => ids.includes(s.message.id));
+		return { messageIds: new Set(ids), fingerprints: new Set(slots.map((s) => s.fp)) };
+	}
+
+	const idOf = (chatId: string, statement: string): string =>
+		graphStore.readNodes().find((n) => n.statement === statement && n.provenance.some((pt) => pt.chatId === chatId))!.id;
+
+	const linesOf = (ids: string[]) => graphStore.readNodes().filter((n) => ids.includes(n.id));
+
+	it("rolls back the runs at or after the cut — nodes, chains and coverage rows — and leaves earlier runs byte-identical", async () => {
+		const chat = rewindChat("Rewind purge A");
+		fold(chat.id, ["rt1"], {
+			propositions: [
+				{ id: "p1", name: "Keep one", statement: "Rewind keep one", aliases: ["k1"], messageId: "rt1" },
+				{ id: "p2", name: "Keep two", statement: "Rewind keep two", aliases: [], messageId: "rt1" },
+			],
+			chains: [{ premises: ["p1"], conclusion: "p2" }],
+		});
+		const keepOne = idOf(chat.id, "Rewind keep one");
+		const keepTwo = idOf(chat.id, "Rewind keep two");
+		await tick();
+		// Run 2 (the cut): a new node, a chain onto it, and a chain over two
+		// SURVIVING nodes — chains are chat-level, only the fold time dates them.
+		fold(chat.id, ["rt2"], {
+			propositions: [{ id: "q1", name: "Cut one", statement: "Rewind cut one", aliases: ["c1"], messageId: "rt2" }],
+			chains: [
+				{ premises: [keepOne], conclusion: "q1" },
+				{ premises: [keepTwo], conclusion: keepOne },
+			],
+		});
+		const cutOne = idOf(chat.id, "Rewind cut one");
+		graphStore.writePositions({ ...graphStore.readPositions(), [keepOne]: { x: 1, y: 1 }, [cutOne]: { x: 2, y: 2 } });
+		const keptNodesBefore = linesOf([keepOne, keepTwo]);
+		const keptChainBefore = graphStore.readChains().find((c) => c.premises.length === 1 && c.premises[0] === keepOne && c.conclusion === keepTwo)!;
+
+		const stats = deleteMessageTraces(graphStore, chat.id, cutOf(chat.id, ["ru2", "rt2"]));
+		assert.deepEqual(stats, { nodesRemoved: 1, chainsRemoved: 2, coverageRemoved: 1 } satisfies MessageDeletionStats);
+
+		assert.equal(graphStore.readNodes().some((n) => n.id === cutOne), false, "the cut node died");
+		assert.deepEqual(linesOf([keepOne, keepTwo]), keptNodesBefore, "earlier nodes are byte-identical");
+		const chatChains = graphStore.readChains().filter((c) => c.provenance.some((pt) => pt.chatId === chat.id));
+		assert.deepEqual(chatChains, [keptChainBefore], "only the earlier run's chain remains — including the one over surviving nodes");
+		const rows = graphStore.readCoverage().filter((row) => row.chatId === chat.id);
+		assert.equal(rows.length, 1, "only the kept message's coverage row remains");
+		const cov = coverageOf(chatStore.getChat(chat.id)!.messages, graphStore.readCoverage(), chat.id);
+		assert.equal(cov.uncoveredCount, 1, "the cut message is uncovered again");
+		const positions = graphStore.readPositions();
+		assert.equal(positions[cutOne], undefined, "the dead node's resting spot is pruned");
+		assert.deepEqual(positions[keepOne], { x: 1, y: 1 });
+		assert.equal(fs.readdirSync(PATHS.graph).filter((f) => f.includes(".tmp-")).length, 0);
+		// Idempotent: a second run finds nothing.
+		assert.deepEqual(deleteMessageTraces(graphStore, chat.id, cutOf(chat.id, ["ru2", "rt2"])), { nodesRemoved: 0, chainsRemoved: 0, coverageRemoved: 0 } satisfies MessageDeletionStats);
+	});
+
+	it("a node another session also references survives: identity stays, the rolled-back phrasings and provenance go", async () => {
+		const chat = rewindChat("Rewind purge shared A");
+		fold(chat.id, ["rt1"], { propositions: [{ id: "p1", name: "Anchor", statement: "Rewind shared anchor", aliases: [], messageId: "rt1" }], chains: [] });
+		await tick();
+		fold(chat.id, ["rt2"], { propositions: [{ id: "q1", name: "Shared core", statement: "Rewind shared core", aliases: ["A feel"], messageId: "rt2" }], chains: [] });
+		const sharedId = idOf(chat.id, "Rewind shared core");
+		const other = rewindChat("Rewind purge shared B");
+		mergeFindings(other.id, { propositions: [{ id: "s1", name: "Shared again", statement: "Rewind shared rephrased", aliases: ["B phrasing"] }], chains: [] }, { links: [{ id: "s1", linkTo: sharedId }] }, graphDeps, sessionSource(other.id));
+		const otherLinesBefore = JSON.stringify(graphStore.readNodes().filter((n) => n.provenance.some((pt) => pt.chatId === other.id)));
+
+		const stats = deleteMessageTraces(graphStore, chat.id, cutOf(chat.id, ["ru2", "rt2"]));
+		assert.equal(stats.nodesRemoved, 0, "the shared node is not removed");
+		const shared = getGraph(graphStore).nodes.find((n) => n.id === sharedId)!;
+		assert.equal(shared.statement, "Rewind shared core", "the shared identity survives");
+		assert.ok(!shared.aliases.includes("A feel"), "the rolled-back session's phrasings are stripped");
+		assert.ok(shared.aliases.includes("B phrasing"));
+		assert.deepEqual(shared.provenance, [{ chatId: other.id, messageId: "" }]);
+		assert.equal(JSON.stringify(graphStore.readNodes().filter((n) => n.provenance.some((pt) => pt.chatId === other.id))), otherLinesBefore, "the other session's lines are byte-identical");
+		assert.equal(graphStore.readNodes().some((n) => n.statement === "Rewind shared anchor"), true, "the earlier run's node stays");
+	});
+
+	it("a batch that mixes a kept and a cut message is rolled back whole, and the kept message is uncovered again", () => {
+		const chat = rewindChat("Rewind purge batch");
+		fold(chat.id, ["rt1", "rt2"], {
+			propositions: [
+				{ id: "p1", name: "Kept side", statement: "Rewind batch kept side", aliases: [], messageId: "rt1" },
+				{ id: "p2", name: "Cut side", statement: "Rewind batch cut side", aliases: [], messageId: "rt2" },
+			],
+			chains: [{ premises: ["p1"], conclusion: "p2" }],
+		});
+		assert.equal(coverageOf(chatStore.getChat(chat.id)!.messages, graphStore.readCoverage(), chat.id).uncoveredCount, 0);
+
+		const stats = deleteMessageTraces(graphStore, chat.id, cutOf(chat.id, ["ru2", "rt2"]));
+		assert.equal(stats.nodesRemoved, 2, "the whole run is rolled back");
+		assert.equal(stats.coverageRemoved, 2);
+		assert.equal(graphStore.readNodes().some((n) => n.provenance.some((pt) => pt.chatId === chat.id)), false);
+		const cov = coverageOf(chatStore.getChat(chat.id)!.messages, graphStore.readCoverage(), chat.id);
+		assert.equal(cov.uncoveredCount, 2, "both messages re-open — the next extraction re-folds the kept one");
+	});
+
+	it("nothing extracted from the cut: the ledgers are untouched and the stats are zero", () => {
+		const chat = rewindChat("Rewind purge untouched");
+		fold(chat.id, ["rt1"], { propositions: [{ id: "p1", name: "Only", statement: "Rewind only earlier", aliases: [], messageId: "rt1" }], chains: [] });
+		const before = { nodes: graphStore.readNodes(), chains: graphStore.readChains(), coverage: graphStore.readCoverage(), positions: graphStore.readPositions() };
+
+		const stats = deleteMessageTraces(graphStore, chat.id, cutOf(chat.id, ["ru2", "rt2"]));
+		assert.deepEqual(stats, { nodesRemoved: 0, chainsRemoved: 0, coverageRemoved: 0 } satisfies MessageDeletionStats);
+		assert.deepEqual(graphStore.readNodes(), before.nodes);
+		assert.deepEqual(graphStore.readChains(), before.chains);
+		assert.deepEqual(graphStore.readCoverage(), before.coverage);
+		assert.deepEqual(graphStore.readPositions(), before.positions);
+	});
+
+	it("a kept run that merged AFTER the cut's run is rolled back too, and its message re-opens (the over-reach heals by re-extraction)", async () => {
+		const chat = rewindChat("Rewind purge order");
+		// Chunks extract in parallel and merge in any order: the discarded
+		// message's run lands FIRST, the kept message's run after it.
+		fold(chat.id, ["rt2"], { propositions: [{ id: "p2", name: "Cut side", statement: "Rewind order cut", aliases: [], messageId: "rt2" }], chains: [] });
+		await tick();
+		fold(chat.id, ["rt1"], { propositions: [{ id: "p1", name: "Kept side", statement: "Rewind order kept", aliases: [], messageId: "rt1" }], chains: [] });
+
+		const stats = deleteMessageTraces(graphStore, chat.id, cutOf(chat.id, ["ru2", "rt2"]));
+		assert.equal(stats.nodesRemoved, 2, "both runs are at or after the earliest cut fold");
+		assert.equal(stats.coverageRemoved, 2);
+		assert.equal(coverageOf(chatStore.getChat(chat.id)!.messages, graphStore.readCoverage(), chat.id).uncoveredCount, 2, "the kept message is uncovered again");
+	});
+
+	it("a positions write that fails leaves the ledgers whole, and the retry finishes", async () => {
+		const chat = rewindChat("Rewind purge crash");
+		fold(chat.id, ["rt1"], { propositions: [{ id: "p1", name: "Kept", statement: "Rewind crash kept", aliases: [], messageId: "rt1" }], chains: [] });
+		await tick();
+		fold(chat.id, ["rt2"], { propositions: [{ id: "q1", name: "Cut", statement: "Rewind crash cut", aliases: [], messageId: "rt2" }], chains: [] });
+		const keptId = idOf(chat.id, "Rewind crash kept");
+		const cutId = idOf(chat.id, "Rewind crash cut");
+		graphStore.writePositions({ ...graphStore.readPositions(), [keptId]: { x: 1, y: 1 }, [cutId]: { x: 2, y: 2 } });
+		const nodesBefore = graphStore.readNodes();
+		const flaky = { ...graphStore, writePositions: () => { throw new Error("disk full"); } } as typeof graphStore;
+
+		assert.throws(() => deleteMessageTraces(flaky, chat.id, cutOf(chat.id, ["ru2", "rt2"])), /disk full/);
+		assert.deepEqual(graphStore.readNodes(), nodesBefore, "the ledgers are whole after the failed positions write");
+
+		const stats = deleteMessageTraces(graphStore, chat.id, cutOf(chat.id, ["ru2", "rt2"]));
+		assert.equal(stats.nodesRemoved, 1, "the retry finishes the rollback");
+		assert.equal(graphStore.readPositions()[cutId], undefined, "the dead node's resting spot is gone");
+		assert.deepEqual(graphStore.readPositions()[keptId], { x: 1, y: 1 });
+	});
+
+	it("an anchored node dies by its message id even without a coverage row; chats other than this one are untouched", () => {
+		const chat = rewindChat("Rewind purge anchored");
+		const foreign = rewindChat("Rewind purge foreign");
+		mergeFindings(foreign.id, { propositions: [{ id: "f1", name: "Foreign", statement: "Rewind foreign node", aliases: [], messageId: "rt2" }], chains: [] }, { links: [] }, graphDeps, { foldedAt: new Date().toISOString(), coverage: [] });
+		// No coverage rows at all (a run whose bookkeeping was lost).
+		mergeFindings(chat.id, { propositions: [
+			{ id: "p1", name: "Anchored", statement: "Rewind anchored node", aliases: [], messageId: "rt2" },
+			{ id: "p2", name: "Earlier", statement: "Rewind anchored earlier", aliases: [], messageId: "rt1" },
+		], chains: [] }, { links: [] }, graphDeps, { foldedAt: new Date().toISOString(), coverage: [] });
+		const foreignBefore = JSON.stringify(graphStore.readNodes().filter((n) => n.provenance.some((pt) => pt.chatId === foreign.id)));
+
+		const stats = deleteMessageTraces(graphStore, chat.id, cutOf(chat.id, ["ru2", "rt2"]));
+		assert.deepEqual(stats, { nodesRemoved: 1, chainsRemoved: 0, coverageRemoved: 0 } satisfies MessageDeletionStats);
+		assert.equal(graphStore.readNodes().some((n) => n.statement === "Rewind anchored node"), false);
+		assert.equal(graphStore.readNodes().some((n) => n.statement === "Rewind anchored earlier"), true);
+		assert.equal(JSON.stringify(graphStore.readNodes().filter((n) => n.provenance.some((pt) => pt.chatId === foreign.id))), foreignBefore, "the same message id in another chat is not this chat's trace");
 	});
 });
 

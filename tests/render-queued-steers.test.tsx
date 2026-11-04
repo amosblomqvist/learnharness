@@ -6,7 +6,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { renderToStaticMarkup } from "react-dom/server";
-import { QueuedSteersBody } from "../components/queued-steers.tsx";
+import { QueuedSteerEditor, QueuedSteersBody, steerEditKey } from "../components/queued-steers.tsx";
 import { visibleQueuedSteers } from "../components/session-core.ts";
 
 describe("QueuedSteersBody (the quiet queue above the composer)", () => {
@@ -47,5 +47,45 @@ describe("visibleQueuedSteers (the fold: a line dies when its card lands)", () =
 			{ id: "steer_a", role: "user", content: "a" } as never,
 		]);
 		assert.deepEqual(after.map((s) => s.id), ["steer_b"], "the drained steer's line dropped");
+	});
+});
+
+describe("QueuedSteersBody with onEdit (click a queued line to edit it — issue #321)", () => {
+	const steers = [{ id: "steer_a", text: "also cover Venus" }];
+
+	it("without onEdit the lines stay read-only spans, exactly as before", () => {
+		const html = renderToStaticMarkup(<QueuedSteersBody steers={steers} />);
+		assert.doesNotMatch(html, /<button/);
+	});
+
+	it("with onEdit each line is a button that keeps the quiet look", () => {
+		const html = renderToStaticMarkup(<QueuedSteersBody steers={steers} onEdit={() => {}} />);
+		assert.match(html, /<button[^>]*type="button"/);
+		assert.match(html, /aria-label="Edit queued message"/);
+		assert.match(html, /truncate/);
+		assert.match(html, /muted-foreground\/60/);
+		assert.doesNotMatch(html, /bg-|border|rounded/, "still no chrome in the resting state");
+		assert.match(html, /also cover Venus/);
+	});
+});
+
+describe("QueuedSteerEditor (the inline field)", () => {
+	it("renders a single-line input seeded with the queued text", () => {
+		const html = renderToStaticMarkup(<QueuedSteerEditor initial="also cover Venus" onSave={() => {}} onCancel={() => {}} />);
+		assert.match(html, /<input/);
+		assert.match(html, /value="also cover Venus"/);
+		assert.match(html, /aria-label="Edit queued message"/);
+	});
+});
+
+describe("steerEditKey (which keys save or cancel an edit)", () => {
+	it("Enter saves, Escape cancels, anything else types", () => {
+		assert.equal(steerEditKey({ key: "Enter" }), "save");
+		assert.equal(steerEditKey({ key: "Escape" }), "cancel");
+		assert.equal(steerEditKey({ key: "a" }), null);
+	});
+
+	it("Enter while an IME composition is open is not a save", () => {
+		assert.equal(steerEditKey({ key: "Enter", isComposing: true }), null);
 	});
 });

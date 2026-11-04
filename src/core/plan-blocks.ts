@@ -49,6 +49,19 @@ function snapshot(tree: PlanTree, messages: readonly LhMessage[]): PlanBlockData
 	};
 }
 
+/** The plan tree a transcript implies: the tree of its last SUCCESSFUL
+ *  plan_init (the one the plan tool saved), or undefined when none ran. A
+ *  rewind restores the record's tree from the messages it keeps. */
+export function latestPlanTreeOf(messages: readonly LhMessage[]): PlanTree | undefined {
+	for (let i = messages.length - 1; i >= 0; i--) {
+		const m = messages[i] as ToolResultMessage | undefined;
+		if (m?.role !== "toolResult" || m.toolName !== "plan_init") continue;
+		const details = m.details as { ok?: unknown; tree?: PlanTree } | undefined;
+		if (details?.ok === true && details.tree && Array.isArray(details.tree.nodes)) return details.tree;
+	}
+	return undefined;
+}
+
 /** The record's plan-block markers, keyed by the plan_init call they
  *  present — the idempotency set for emission. */
 export function emittedPlanBlockCalls(messages: readonly LhMessage[]): Set<string> {
