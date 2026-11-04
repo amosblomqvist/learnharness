@@ -317,7 +317,8 @@ export function serializeForSummary(messages: readonly LhMessage[]): string {
 			const blocks: string[] = [];
 			for (const b of assistant.content) {
 				if (b.type === "text") blocks.push(b.text);
-				else if (b.type === "toolCall") blocks.push(`(tool call ${b.name}: ${JSON.stringify(b.arguments)})`);
+				// A question figure is raw SVG markup (up to 20k chars): no gist to summarize.
+				else if (b.type === "toolCall") blocks.push(`(tool call ${b.name}: ${JSON.stringify(b.arguments, (k, v) => (k === "figure" ? "[figure]" : v))})`);
 				// thinking blocks: the model's private scratch — its
 				// conclusions land in text; skip the noise
 			}

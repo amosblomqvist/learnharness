@@ -100,6 +100,9 @@ function toolResultBody(result: ToolResultMessage, ctx?: MarkdownContext): { hea
 						: "Recall check"; // explain — the teach free-recall name
 		const question = typeof out?.questionText === "string" && out.questionText ? out.questionText : "(no question text)";
 		const body = [`**Q:** ${question}`];
+		// The question's figure, inline (owner, 2026-10-27) — it rides the call, not the answer.
+		const figure = ctx?.calls.get(result.toolCallId)?.args?.figure;
+		if (typeof figure === "string" && figure.trim()) body.push(figure.trim());
 		if (out?.dismissed === true) body.push("The learner skipped this check.");
 		else if (out?.dontKnow === true) body.push("The learner did not know.");
 		else if (out?.correct === true) body.push("The learner answered correctly.");

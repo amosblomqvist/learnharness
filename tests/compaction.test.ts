@@ -335,6 +335,14 @@ describe("serializeForSummary + buildCompactionPrompt", () => {
 		assert.ok(!text.toLowerCase().includes("plan-block"), "UI-only markers never serialize");
 	});
 
+	it("a question's figure is a placeholder, the rest of its call stays", () => {
+		const call = { id: "a1", role: "assistant", content: [{ type: "toolCall", id: "c1", name: "quiz", arguments: { question: "Read the graph.", figure: `<svg>${"p".repeat(5_000)}</svg>` } }], timestamp: 1 } as never;
+		const text = serializeForSummary([call]);
+		assert.ok(text.includes(`"question":"Read the graph."`));
+		assert.ok(text.includes(`"figure":"[figure]"`));
+		assert.ok(!text.includes("<svg>"));
+	});
+
 	it("preserves legacy summary text when the caller has no separately supplied prior summary", () => {
 		const marker = newCompactionMarker("LEGACY SUMMARY", { firstKeptMessageId: "missing", tokensBefore: 1, at: "fixture" });
 		assert.ok(serializeForSummary([marker]).includes("LEGACY SUMMARY"));

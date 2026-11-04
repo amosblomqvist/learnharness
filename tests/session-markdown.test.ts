@@ -134,6 +134,17 @@ describe("messageMarkdown", () => {
 	});
 });
 
+describe("sessionMarkdown — question figures (owner, 2026-10-27)", () => {
+	it("a quiz call's figure is embedded inline under the question", () => {
+		const svg = "<svg xmlns='http://www.w3.org/2000/svg' width='10' height='10'/>";
+		const md = sessionMarkdown([
+			callMsg("a1", "call-q1", "quiz", { question: "Read the graph.", figure: svg }),
+			result("r1", "call-q1", "quiz", { questionText: "Read the graph.", correct: true, dontKnow: false }),
+		]);
+		assert.ok(md.includes(`**Q:** Read the graph.\n\n${svg}\n\nThe learner answered correctly.`));
+	});
+});
+
 describe("sessionMarkdown — the practice join (owner-approved, 2026-10-06)", () => {
 	it("a problem result renders the POSE's statement, joined off the call id", () => {
 		const messages = [
