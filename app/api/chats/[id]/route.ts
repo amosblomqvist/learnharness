@@ -16,6 +16,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
 	// re-attach to a running turn; coverage is the chat view's ring meter.
 	return Response.json({
 		...chat,
+		awaitingInput: !!stores.chatStore.pendingImport?.(id),
 		messages: chat.messages,
 		pricing: sessionCost(chat),
 		turnInFlight: isTurnRunning(id),

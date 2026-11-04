@@ -194,6 +194,10 @@ export function createJobRunner(deps: JobRunnerDeps): JobRunner {
 			console.error(`[job ${jobId}] not found — nothing to run`);
 			return;
 		}
+		if (chatStore.pendingImport?.(job.chatId)) {
+			if (job.status === "running") jobStore.updateJob(jobId, { status: "error", error: "Continue the lesson before starting background work", activity: "stopped" });
+			return;
+		}
 		if (job.status !== "running") return; // already finished / re-run after crash recovery
 		const run = KIND_RUNNERS[job.kind];
 		if (!run) {

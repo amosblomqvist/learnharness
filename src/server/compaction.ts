@@ -308,7 +308,7 @@ export async function ensureCompacted(deps: CompactionDeps, chatId: string): Pro
 export function kickCompaction(buildDeps: () => CompactionDeps | null, chatId: string): void {
 	if (state().inFlight.has(chatId)) return;
 	const deps = buildDeps();
-	if (!deps || deps.canStart?.() === false) return;
+	if (!deps || deps.chatStore.pendingImport?.(chatId) || deps.canStart?.() === false) return;
 	const record = deps.chatStore.getChat(chatId);
 	if (!record) return;
 	if (projectedContextTokens(record.messages, deps.systemPromptTokens) <= deps.thresholdTokens) return;

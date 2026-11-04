@@ -21,6 +21,8 @@
  */
 
 import type { LhMessage } from "./native-messages.ts";
+import { pendingQuestionOf } from "./native-messages.ts";
+import { parseAskInput, parseExplainInput, parseQuizInput } from "./tool-parts.ts";
 import {
 	failedOutputCallIds,
 	PRACTICE_CONCLUDE_TOOL,
@@ -42,6 +44,8 @@ export interface MarkdownContext {
 	/** toolCallId → the call part's name + arguments. */
 	calls: Map<string, { name: string; args: Record<string, unknown> | undefined }>;
 	failedOutputCalls?: ReadonlySet<string>;
+	/** Readable exports omit generic service acknowledgements; extraction keeps its existing view. */
+	toolNotes?: boolean;
 }
 
 function markdownContext(messages: ReadonlyArray<LhMessage>): MarkdownContext {
@@ -70,7 +74,7 @@ function outcomeLabel(outcome: string): string {
 }
 
 /** One tool result's learner-visible outcome, rendered as body lines. */
-function toolResultBody(result: ToolResultMessage, ctx?: MarkdownContext): { heading: string; body: string[] } {
+function toolResultBody(result: ToolResultMessage, ctx?: MarkdownContext): { heading: string; body: string[] } | null {
 	const out = result.details as
 		| Partial<{
 				questionText: string;
@@ -78,12 +82,16 @@ function toolResultBody(result: ToolResultMessage, ctx?: MarkdownContext): { hea
 				dontKnow: boolean;
 				note: string;
 				text: string;
-				answers: string[];
+				answers: (string | { label: string })[];
+				thinking: string;
+				readingThinking: string;
 				other: string;
 				dismissed: boolean;
 		  }>
 		| undefined;
 
+	const chosenAnswers = Array.isArray(out?.answers) ? out.answers.flatMap(answer => typeof answer === "string" ? [answer] : answer && typeof answer.label === "string" ? [answer.label] : []) : [];
+	const thinking = out?.thinking ?? out?.note;
 	if (
 		result.toolName === "quiz" ||
 		result.toolName === "probe" ||
@@ -105,7 +113,9 @@ function toolResultBody(result: ToolResultMessage, ctx?: MarkdownContext): { hea
 		else if (out?.correct === true) body.push("The learner answered correctly.");
 		else if (out?.correct === false) body.push("The learner answered incorrectly.");
 		else if (typeof out?.text === "string" && out.text.trim()) body.push(`The learner answered in his own words: ${out.text.trim()}`);
-		if (typeof out?.note === "string" && out.note) body.push(`*(his thinking: ${out.note})*`);
+		if (chosenAnswers.length && !out?.dismissed && !out?.dontKnow) body.push(`The learner chose: ${chosenAnswers.join(", ")}`);
+		if (typeof thinking === "string" && thinking) body.push(`*(his thinking: ${thinking})*`);
+		if (typeof out?.readingThinking === "string" && out.readingThinking) body.push(`*(while reading: ${out.readingThinking})*`);
 		return { heading, body };
 	}
 
@@ -136,18 +146,18 @@ function toolResultBody(result: ToolResultMessage, ctx?: MarkdownContext): { hea
 		const question = typeof out?.questionText === "string" && out.questionText ? out.questionText : "(no question text)";
 		const body = [`**Q:** ${question}`];
 		const chosen = [
-			...(Array.isArray(out?.answers) ? out!.answers! : []),
+			...chosenAnswers,
 			...(typeof out?.other === "string" && out.other.trim() ? [out.other.trim()] : []),
 		];
 		if (typeof out?.text === "string" && out.text.trim()) body.push(`The learner answered: ${out.text.trim()}`);
 		else if (chosen.length > 0) body.push(`The learner chose: ${chosen.join(", ")}`);
 		else if (out?.dismissed === true) body.push("The learner skipped this question.");
-		if (typeof out?.note === "string" && out.note) body.push(`*(his thinking: ${out.note})*`);
+		if (typeof thinking === "string" && thinking) body.push(`*(his thinking: ${thinking})*`);
 		return { heading: "Question", body };
 	}
 
 	// Parity with the line builder: other clean tool results are one line.
-	return { heading: "Tool", body: [`*${result.toolName} result delivered*`] };
+	return ctx?.toolNotes === false ? null : { heading: "Tool", body: [`*${result.toolName} result delivered*`] };
 }
 
 /**
@@ -176,8 +186,9 @@ export function messageMarkdown(
 	} else if (role === "toolResult") {
 		const result = message as ToolResultMessage;
 		if (result.isError || result.toolName === SEND_TO_USER_TOOL) return null; // retry context or output ack, not learning evidence
-		const { heading, body } = toolResultBody(result, ctx);
-		parts.push(`### ${heading}${anchor}\n\n${body.join("\n\n")}`);
+		const rendered = toolResultBody(result, ctx);
+		if (rendered === null) return null;
+		parts.push(`### ${rendered.heading}${anchor}\n\n${rendered.body.join("\n\n")}`);
 	}
 
 	// custom markers are invisible, same as the extraction view.
@@ -192,14 +203,29 @@ export function messageMarkdown(
  */
 export function sessionMarkdown(
 	messages: ReadonlyArray<LhMessage>,
-	opts: { title?: string; anchors?: boolean } = {},
+	opts: { title?: string; anchors?: boolean; pendingQuestion?: boolean; toolNotes?: boolean } = {},
 ): string {
 	const blocks: string[] = [];
 	if (opts.title !== undefined && opts.title.length > 0) blocks.push(`# ${opts.title}`);
 	const ctx = markdownContext(messages);
+	ctx.toolNotes = opts.toolNotes;
 	for (const message of messages) {
 		const block = messageMarkdown(message, (message as { id?: string }).id ?? "", opts.anchors ?? true, ctx);
 		if (block !== null) blocks.push(block);
+	}
+	// Export only: the extractor's default view must not grow pending calls.
+	// Use the same pending authority and display parsers as the dock; never serialize
+	// raw arguments (which contain commitments and unrevealed explanations).
+	if (opts.pendingQuestion && messages.every(m => m.role !== "assistant" || Array.isArray(m.content))) {
+		const pending = pendingQuestionOf(messages);
+		if (pending) {
+			const input = pending.tool === "ask_user_question" ? parseAskInput(pending.input) :
+				pending.tool === "recall" || pending.tool === "explain" ? parseExplainInput(pending.input) : parseQuizInput(pending.input);
+			if (input) {
+				const options = "options" in input && Array.isArray(input.options) ? input.options.map(o => `- ${o.label}`) : [];
+				blocks.push(["### Pending question", input.question, ...options].join("\n\n"));
+			}
+		}
 	}
 	return blocks.join("\n\n");
 }

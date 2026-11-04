@@ -27,7 +27,7 @@ export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> 
 	const { id } = await ctx.params;
 	const record = getChat(id);
 	if (!record) return Response.json({ error: "Unknown chat" }, { status: 404 });
-	const markdown = sessionMarkdown(record.messages, { title: record.title, anchors: false });
+	const markdown = sessionMarkdown(record.messages, { title: record.title, anchors: false, pendingQuestion: true, toolNotes: false });
 	return new Response(markdown, {
 		headers: {
 			"content-type": "text/markdown; charset=utf-8",

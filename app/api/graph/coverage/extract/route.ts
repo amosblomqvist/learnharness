@@ -10,7 +10,7 @@
  * flight (the dock is the source of truth for that); failures are logged
  * by the pipeline and leave coverage untouched — the button stays honest.
  */
-import { extraction, extractionStatuses } from "@/src/server";
+import { extraction, extractionStatuses, stores } from "@/src/server";
 
 export const dynamic = "force-dynamic";
 
@@ -25,6 +25,7 @@ export async function POST(request: Request) {
 	if (typeof chatId !== "string" || chatId === "") {
 		return Response.json({ error: 'Body must be {chatId: string}' }, { status: 400 });
 	}
+	if (stores.chatStore.pendingImport?.(chatId)) return Response.json({ error: "Continue the lesson before starting background work" }, { status: 409 });
 	if (extractionStatuses().some((run) => run.kind === "chat" && run.chatId === chatId)) {
 		return Response.json({ error: "An extraction run is already in flight for this session" }, { status: 409 });
 	}

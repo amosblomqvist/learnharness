@@ -18,6 +18,13 @@ import type { LhMessage } from "../core/native-messages.ts";
 import { activeProblemOf, danglingQuestionOf } from "../core/native-messages.ts";
 import { phaseAt3Lh } from "../core/phases.ts";
 
+import { importPause, saveImportPause, recoverTransfers } from "./lesson-import.ts";
+
+// Fail closed on recovery failure, before this adapter serves any records.
+recoverTransfers(PATHS.data);
+const pendingImport = (id: string) => importPause(PATHS.data, id)?.packageSha;
+const acceptInput = (id: string) => saveImportPause(PATHS.data, id, undefined);
+
 function chatFile(id: string): string {
 	if (!/^[A-Za-z0-9_-]+$/.test(id)) throw new Error(`Invalid chat id: ${id}`);
 	return path.join(PATHS.chats, `${id}.json`);
@@ -56,6 +63,8 @@ function createChat(title: string, kind?: "practice"): ChatRecord {
  *  A future-version guard lives on the read side (getChat). */
 function writeChat(record: ChatRecord): void {
 	fs.writeFileSync(chatFile(record.id), JSON.stringify({ ...record, version: CURRENT_CHAT_VERSION }, null, "\t"), "utf-8");
+	const pause = importPause(PATHS.data, record.id);
+	if (pause) saveImportPause(PATHS.data, record.id, { ...pause, settings: record.settings ?? {} });
 }
 
 function getChat(id: string): ChatRecord | null {
@@ -73,7 +82,9 @@ function getChat(id: string): ChatRecord | null {
 		console.error(`[chat ${id}] record stamped with schema version ${v} > ${CURRENT_CHAT_VERSION} — this app build is older; refusing to read it`);
 		return null;
 	}
-	return parsed as ChatRecord;
+	const pause = importPause(PATHS.data, id);
+	// Foreign model/provider overrides stay inert; only the local picker can set them.
+	return pause ? { ...(parsed as ChatRecord), settings: pause.settings ?? {} } : parsed as ChatRecord;
 }
 
 function listChats(): ChatSummary[] {
@@ -206,6 +217,8 @@ function saveTree(id: string, tree: PlanTree): void {
 }
 
 export const chatStore: ChatStore = {
+	pendingImport,
+	acceptInput,
 	createChat,
 	getChat,
 	listChats,

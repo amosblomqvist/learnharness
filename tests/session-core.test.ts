@@ -88,6 +88,28 @@ function dietFetch(opts: {
 	}) as typeof globalThis.fetch;
 }
 
+it("imports pause automatic continuation but accept explicit learner input", async () => {
+	const messages = [
+		{ ...assistantMsg("a", ""), content: [{ type: "toolCall", id: "t", name: "recall", arguments: {} }] },
+		{ id: "r", role: "toolResult", toolCallId: "t", toolName: "recall", content: [{ type: "text", text: "[]" }], isError: false, timestamp: 1 },
+	] as LhMessage[];
+	assert.equal(needsContinuation(messages), true);
+	let requests = 0;
+	const model = new SessionModel({ chatId: "chat_x", initialMessages: messages, awaitingInput: true,
+		fetch: dietFetch({ stream: () => sseResponse({ type: "turn-settled" }), onPost: () => requests++ }) });
+	await model.continueIfOwed(messages);
+	assert.equal(requests, 0); assert.deepEqual(model.getState().nativeMessages, messages);
+	assert.equal(await model.send({ type: "text", text: "Continue" }), true);
+	assert.equal(requests, 1); assert.equal(model.awaitingInput, false);
+	// A fresh import/replacement arriving by idle sync must restore the pause immediately.
+	model.setMessages(messages, undefined, true);
+	await model.continueIfOwed(messages);
+	assert.equal(requests, 1);
+	model.setMessages(messages, undefined, false);
+	await model.continueIfOwed(messages);
+	assert.equal(requests, 2);
+});
+
 function assistantMsg(id: string, text: string): LhMessage {
 	return {
 		id,

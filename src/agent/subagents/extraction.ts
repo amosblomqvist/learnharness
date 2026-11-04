@@ -1111,6 +1111,7 @@ export function createExtractionPipeline(deps: ExtractionPipelineDeps): Extracti
 	}
 
 	async function runExtraction(chatId: string): Promise<EmissionStats> {
+		if (chatStore.pendingImport?.(chatId)) throw new Error("Continue the lesson before starting background work");
 		if (inFlight.has(chatId)) return { nodes: 0, chains: 0 };
 		inFlight.add(chatId);
 		const t0 = performance.now();

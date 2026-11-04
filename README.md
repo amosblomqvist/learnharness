@@ -74,6 +74,8 @@ npm test           # deterministic, no LLM, no network
 
 See the [development guide](docs/development.md) for setup and checks, [architecture](docs/architecture.md) for the shipped runtime, [keyboard reference](docs/keyboard.md) for shortcuts, and [desktop release guide](docs/desktop-release.md) for packaging and updates.
 
+Experimental [lesson transfer](docs/lesson-transfer.md) is available under Settings → Export/import: export readable Markdown/text, original native JSON, or a ZIP with selected graph data and reviewed source files. Import accepts source-free native ZIP or one lesson JSON, validates automatically and prompts only for conflicts. Original versions are retained. Continue imported lessons with your local model settings; importing or opening them starts no model request. There are no separate preview buttons or acknowledgement checkboxes. The same screen also offers **Connect a device** with one-click QR pairing, online indicators and experimental paired-HTTPS LAN send/receive, without replacing file downloads or manual Google Drive transfer. Source-file import and automatic/background sync are not implemented; physical LAN/camera and browser/Electron transfer acceptance remain open.
+
 Questions, bug reports, and feature requests: [GitHub Issues](https://github.com/amosblomqvist/learnharness/issues).
 
 ## License

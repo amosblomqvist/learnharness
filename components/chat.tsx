@@ -220,6 +220,7 @@ export function Chat({
 	initialPrompt,
 	initiallyInFlight,
 	initiallyCompacting = false,
+	initialAwaitingInput = false,
 	initialConfigured = false,
 	kind = "teach",
 }: {
@@ -245,6 +246,7 @@ export function Chat({
 	 *  it (BYOK, owner 2026-09-22). The server gate stays the truth; this
 	 *  only decides whether the pill rides the composer. */
 	initialConfigured?: boolean;
+	initialAwaitingInput?: boolean;
 }) {
 	// Reattach plumbing (background-turn runner wave): the hook holds the
 	// settled terminal's callback — a stable ref assigned below, once
@@ -257,8 +259,8 @@ export function Chat({
 	// (core/view.ts projectView); sends are ONE explicit input event each
 	// ({chatId, input} — the stash indirection died with the SDK), and the
 	// turn stream is the VERBATIM AgentEvent passthrough the server emits.
-	const { messages, nativeMessages, hasConfirmedConversation, contextTokens, send, continueIfOwed, steer, steerQueue, submitAnswer, dismissQuestion, dismissProblem, questionDraft, saveQuestionDraft, setMessages, adoptRecord, status, error, stop, clearError, resumeStream, setReattachSettled } =
-		useChatSession({ chatId, initialMessages, initialError, initiallyInFlight });
+	const { awaitingInput, messages, nativeMessages, hasConfirmedConversation, contextTokens, send, continueIfOwed, steer, steerQueue, submitAnswer, dismissQuestion, dismissProblem, questionDraft, saveQuestionDraft, setMessages, adoptRecord, status, error, stop, clearError, resumeStream, setReattachSettled } =
+		useChatSession({ chatId, initialMessages, initialError, initiallyInFlight, initialAwaitingInput });
 
 	const sessionFindScopeRef = useRef<HTMLDivElement | null>(null);
 	const scrollContextRef = useRef<StickToBottomContext | null>(null);
@@ -446,7 +448,7 @@ export function Chat({
 	useEffect(() => {
 		if (mountContinuation.current) return;
 		mountContinuation.current = true;
-		if (!turnInFlight) continueIfOwed(initialMessages);
+		if (!awaitingInput && !turnInFlight) continueIfOwed(initialMessages);
 		// mount-only by design (turnInFlight read at initial value)
 	}, []);
 
@@ -615,6 +617,7 @@ export function Chat({
 
 	const sentInitial = useRef(false);
 	useEffect(() => {
+		if (awaitingInput) { sentInitial.current = true; return; }
 		if (sentInitial.current) return;
 		sentInitial.current = true;
 		const entry = readOpeningPromptEntry(chatId);
@@ -629,7 +632,7 @@ export function Chat({
 			return;
 		}
 		deliverOpeningPrompt(prompt!);
-	}, [chatId, initialPrompt, initialMessages, initiallyInFlight, deliverOpeningPrompt, applyText]);
+	}, [chatId, initialPrompt, initialMessages, initiallyInFlight, deliverOpeningPrompt, applyText, awaitingInput]);
 
 	useEffect(() => {
 		if (!hasConfirmedConversation) return;
@@ -789,11 +792,11 @@ export function Chat({
 	const syncFromServer = useCallback(async () => {
 		const res = await fetch(`/api/chats/${chatId}`);
 		if (!res.ok) return;
-		const record = (await res.json()) as { messages?: LhMessage[]; turns?: TurnUsage[]; pricing?: SessionPricing; turnError?: string };
+		const record = (await res.json()) as { messages?: LhMessage[]; turns?: TurnUsage[]; pricing?: SessionPricing; turnError?: string; awaitingInput?: boolean };
 		if (Array.isArray(record.turns)) setTurns(record.turns);
 		setPricing(record.pricing);
 		if (!Array.isArray(record.messages)) return;
-		setMessages(record.messages, record.turnError);
+		setMessages(record.messages, record.turnError, record.awaitingInput);
 		// The continuation seam (contracts.ts protocol §4): a job result
 		// landing in the record leaves the agent owing a continuation — the
 		// record ENDS on un-consumed results, the dock owns no question, and
@@ -1716,7 +1719,14 @@ export function Chat({
 					dictationCancel={dictation.cancel}
 					queuedSteers={visibleQueuedSteers(steerQueue, nativeMessages)}
 					setupCta={
-						zeroKeys ? (
+						awaitingInput && configured && !zeroKeys && !pending && !activeProblem && !busy && !compacting && !retryable && !nextReady ? (
+							<div className="pointer-events-auto mb-2 flex justify-center">
+								<button type="button" onClick={() => void send({ type: "text", text: "Continue" })}
+									className="rounded-sm border border-border bg-card px-3 py-1.5 font-ui text-xs text-foreground transition-colors hover:border-muted-foreground/50 hover:bg-accent cursor-pointer">
+									Continue
+								</button>
+							</div>
+						) : zeroKeys ? (
 							<ZeroKeysPill onOpen={() => setSetupOpen(true)} />
 						) : (
 							!configured && (
