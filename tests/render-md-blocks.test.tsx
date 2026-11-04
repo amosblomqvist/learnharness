@@ -11,6 +11,7 @@ import React from "react";
 (globalThis as Record<string, unknown>).React = React;
 
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
 import { renderToStaticMarkup } from "react-dom/server";
 import { MessageResponse } from "../components/ai-elements/message.tsx";
@@ -27,8 +28,19 @@ describe("md-blocks — code", () => {
 	it("inline code passes through with the house inline styling", () => {
 		const html = render("a `term` b");
 		assert.ok(html.includes('data-streamdown="inline-code"'), "inline code keeps the inline-code path");
-		assert.match(html, /bg-muted/);
-		assert.match(html, /text-\(--lh-ink-code\)/, "inline code takes the theme's code ink");
+		assert.match(html, /a <code class="rounded px-1\.5 py-0\.5 font-mono text-sm text-\(--lh-ink-code\)"[^>]*>term<\/code> b/, "inline semantics, spacing and typography stay intact, in the theme's code ink");
+		assert.ok(!html.includes("bg-muted"), "inline code no longer uses the question-card surface");
+	});
+
+	it("inline and fenced code share only the existing block background and border", () => {
+		const css = readFileSync("app/globals.css", "utf8");
+		const surface = css.match(/\[data-streamdown="inline-code"\],\s*\[data-streamdown="code-block"\]\s*\{([^}]+)\}/)?.[1];
+		assert.ok(surface, "both code paths share one surface rule");
+		assert.deepEqual(surface.trim().split(/;\s*/).filter(Boolean), [
+			"border: 1px solid var(--border)",
+			"background: color-mix(in oklab, var(--background) 86%, black)",
+		], "share the existing block surface, not block layout, padding or radius");
+		assert.match(css, /\[data-streamdown="code-block"\]\s*\{\s*border-radius: 0\.75rem;\s*padding: 0\.375rem;\s*\}/, "block geometry stays block-only and unchanged");
 	});
 
 	it("code fences delegate to streamdown's CodeBlock with a hover copy corner", () => {

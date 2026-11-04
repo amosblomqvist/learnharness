@@ -90,6 +90,10 @@ test("Providers has five ordered sections including External CLI; unknown variab
  assert(byTest("key-deepgram_api_key").closest('[data-testid="group-dictation"]'));
  assert(byTest("key-tavily_api_key").closest('[data-testid="group-search"]'));
  assert(byTest("key-brave_api_key").closest('[data-testid="group-search"]'));
+ assert(byTest("key-exa_api_key").closest('[data-testid="group-search"]'));
+ assert(byTest("key-firecrawl_api_key").closest('[data-testid="group-search"]'));
+ assert(byTest("key-ollama_api_key").closest('[data-testid="group-search"]'));
+ assert(!document.querySelector('[data-testid="key-ollama_base_url"]'));
  assert(byTest("unknown-FUTURE_VAR").closest('[data-testid="group-provider-keys"]'));
  assert(byTest("group-unknown-keys").parentElement?.lastElementChild === byTest("group-unknown-keys"));
  assert.equal(byTest("unknown-FUTURE_VAR").textContent, "FUTURE_VAR…abcd"); assert(!byTest("unknown-FUTURE_VAR").querySelector("input, button"));

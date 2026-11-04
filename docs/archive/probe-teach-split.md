@@ -2,8 +2,8 @@
 
 > **Historical design record, not current implementation documentation.**
 > The original decisions below may be superseded or unimplemented.
-> See [Architecture](architecture.md) and [Development](development.md) for the
-> shipped agent structure and current development guidance.
+> See [Architecture](../architecture.md) and [Development](../development.md) for the
+> current agent structure and development guidance, or the [archive index](README.md) for context.
 
 Shared understanding reached 2026-09-11 (user + master session). This is the
 convergence record — the decided design, with reasoning. It is not a task
