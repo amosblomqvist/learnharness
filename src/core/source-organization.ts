@@ -1,3 +1,5 @@
+import type { ChatKind } from "./contracts/chat.ts";
+
 /** Source organization is presentation metadata, never graph/extraction identity.
  * A source has one parent; folders have stable IDs independent of names/paths. */
 export interface SourceFolder {
@@ -21,6 +23,8 @@ export interface SourceOrganization {
 export interface SourceEntry {
 	id: string;
 	kind: "chat" | "notes" | "missing";
+	/** Read projection only; session records remain the source of truth. */
+	chatKind?: ChatKind;
 	label: string | null;
 	createdAt: string | null;
 	filePath?: string;
@@ -28,6 +32,11 @@ export interface SourceEntry {
 export interface SourceDirectory {
 	organization: SourceOrganization;
 	sources: SourceEntry[];
+}
+/** Chains browsing and practice picking share this presentation inventory.
+ * Keep the full organization: hidden sessions still own their placements. */
+export function chainSourceDirectory(directory: SourceDirectory): SourceDirectory {
+	return { ...directory, sources: directory.sources.filter((s) => s.chatKind !== "practice") };
 }
 export type OrganizationAction =
 	| { action: "create-folder"; name: string; parentId: string | null }

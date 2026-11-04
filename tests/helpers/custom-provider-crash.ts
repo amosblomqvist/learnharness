@@ -9,7 +9,6 @@ globalThis.fetch = async (url, init) => {
 	return new Response('data: {"choices":[{"index":0,"delta":{"role":"assistant","content":"ok"},"finish_reason":null}]}\n\ndata: {"choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n', { headers: { "content-type": "text/event-stream" } });
 };
 const rename = fs.renameSync;
-const write = fs.writeFileSync;
 const read = fs.readFileSync;
 let authRenames = 0;
 fs.renameSync = (...args: Parameters<typeof rename>) => {
@@ -20,12 +19,9 @@ fs.renameSync = (...args: Parameters<typeof rename>) => {
 		if (fault === "after-auth") process.exit(77);
 		return;
 	}
+	if (args[1] === SETTINGS_FILE && fault === "double-io") throw new Error("fixture settings I/O failure");
+	if (args[1] === SETTINGS_FILE && fault === "settings-landed") { rename(...args); throw new Error("fixture ambiguous settings completion"); }
 	return rename(...args);
-};
-fs.writeFileSync = (...args: Parameters<typeof write>) => {
-	if (args[0] === SETTINGS_FILE && fault === "double-io") throw new Error("fixture settings I/O failure");
-	if (args[0] === SETTINGS_FILE && fault === "settings-landed") { write(...args); throw new Error("fixture ambiguous settings completion"); }
-	return write(...args);
 };
 fs.readFileSync = ((...args: Parameters<typeof read>) => {
 	if (args[0] === AUTH_FILE && fault === "unreadable") throw Object.assign(new Error("fixture unreadable auth"), { code: "EACCES" });

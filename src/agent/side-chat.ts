@@ -3,7 +3,7 @@
  * 2026-11-02): one tool-less streamed generation on the session's own
  * engine. No agent loop, no tools, no session identity — a Claude Code
  * call without a session id never retains or reuses the lesson's live
- * CLI process (docs/claude-code.md "Ownership, reuse, and recovery").
+ * CLI process (docs/claude-code.md "Questions, reuse, and cancellation").
  *
  * Instructions: the side-chat base, then the curated shared appendix the
  * practice agent also composes (voice, accuracy, formatting — one law

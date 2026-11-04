@@ -49,6 +49,75 @@ it("unsupported-only directories are never sent; picker .DS_Store is ignored and
 	assert.deepEqual(queue.getSnapshot().errors, ["Root/Images/a.png: Unsupported format or unsafe relative path.", "../bad.txt: Unsupported format or unsafe relative path."]);
 });
 
+it("folder picks skip dot-directories such as .obsidian/ silently, even when the chosen root itself is hidden", async () => {
+	const paths: string[] = [];
+	const queue = createNotesImportQueue(async ([f]) => { const path = f!.webkitRelativePath || f!.name; paths.push(path); return [success(path)]; });
+	queue.append([file("app.json", "Vault/.obsidian/app.json"), file("old.md", "Vault/.trash/old.md"), file("notes.md", "Vault/Sub/notes.md")]);
+	queue.append([file("a.md", ".notes/a.md")]);
+	await tick();
+	assert.deepEqual(paths, ["Vault/Sub/notes.md", ".notes/a.md"]);
+	assert.deepEqual(queue.getSnapshot().errors, []);
+});
+
+it("folder picks skip .git, nested dot-directories and hidden note files, not ordinary names containing dots", async () => {
+	const paths: string[] = [];
+	const queue = createNotesImportQueue(async ([f]) => { const path = f!.webkitRelativePath; paths.push(path); return [success(path)]; });
+	queue.append([
+		file("config", "Vault/.git/config"),
+		file("README.md", "Vault/.git/README.md"),
+		file("topic.md", "Vault/Course/Week/.private/Sub/topic.md"),
+		file(".draft.md", "Vault/.draft.md"),
+		file(".summary.txt", "Vault/Course/.summary.txt"),
+		file("notes.v2.md", "Vault/Course.v2/notes.v2.md"),
+	]);
+	await tick();
+	assert.deepEqual(paths, ["Vault/Course.v2/notes.v2.md"]);
+	assert.deepEqual(queue.getSnapshot().errors, []);
+});
+
+it("individual file picks still import hidden notes and report unsupported dotfiles", async () => {
+	const paths: string[] = [];
+	const queue = createNotesImportQueue(async ([f]) => { paths.push(f!.name); return [success(f!.name)]; });
+	queue.append([file(".draft.md"), file(".summary.txt"), file(".DS_Store")]);
+	await tick();
+	assert.deepEqual(paths, [".draft.md", ".summary.txt"]);
+	assert.deepEqual(queue.getSnapshot().errors, [".DS_Store: Unsupported format or unsafe relative path."]);
+});
+
+it("an all-skipped selection publishes completion without validation errors or uploads and allows later work", async () => {
+	const paths: string[] = [];
+	const queue = createNotesImportQueue(async ([f]) => { paths.push(f!.name); return [success(f!.name)]; });
+	let publications = 0;
+	const unsubscribe = queue.subscribe(() => { publications++; });
+	const oversized = file("large.pdf", "Vault/.private/large.pdf");
+	Object.defineProperty(oversized, "size", { value: Number.MAX_SAFE_INTEGER });
+	queue.append([file("config", "Vault/.git/config"), file(".draft.md", "Vault/.draft.md"), oversized]);
+	assert.equal(publications, 1);
+	assert.deepEqual(queue.getSnapshot(), { importing: false, errors: [], notices: [], completion: 1 });
+	await tick();
+	assert.deepEqual(paths, []);
+	assert.equal(publications, 1, "no asynchronous settlement for skipped files");
+	queue.append([file("notes.md")]);
+	await tick();
+	assert.deepEqual(paths, ["notes.md"]);
+	assert.deepEqual(queue.getSnapshot(), { importing: false, errors: [], notices: [], completion: 2 });
+	unsubscribe();
+});
+
+it("an all-skipped append does not complete or disturb an active import", async () => {
+	let calls = 0;
+	let resolve!: (rows: NotesImportResult[]) => void;
+	const queue = createNotesImportQueue(() => { calls++; return new Promise((done) => { resolve = done; }); });
+	queue.append([file("notes.md")]);
+	queue.append([file("config", "Vault/.git/config"), file(".draft.md", "Vault/.draft.md")]);
+	assert.equal(calls, 1);
+	assert.deepEqual(queue.getSnapshot(), { importing: true, errors: [], notices: [], completion: 0 });
+	resolve([success("notes.md")]);
+	await tick();
+	assert.equal(calls, 1);
+	assert.deepEqual(queue.getSnapshot(), { importing: false, errors: [], notices: [], completion: 1 });
+});
+
 it("synchronous transport failures settle one wave once without reentrant pump recursion", async () => {
 	let calls = 0;
 	const queue = createNotesImportQueue(() => { calls++; throw new Error("transport failure"); });
