@@ -41,14 +41,14 @@ import {
 } from "@/components/drawing/strokes";
 
 /**
- * The drawing pad (owner design, 2026-11-04): a big overlay over the
+ * The drawing pad (2026-11-04): a big overlay over the
  * session for hand-drawn reasoning — a Wacom pen first, a mouse works.
  *
  *   - the question/problem stays visible in a strip on top (math
  *     rendered); the chat composer has none;
  *   - pen (pressure → width), whole-stroke eraser (also the pen's eraser
  *     END, buttons & 32), lasso Select, four inks, undo/redo/clear;
- *   - the pen's side buttons (owner, 2026-11-04): HOLD the lower one to
+ *   - the pen's side buttons (2026-11-04): HOLD the lower one to
  *     erase, HOLD the upper one to lasso-select. A selection moves (drag
  *     inside its box), resizes (drag a corner — proportional, line
  *     thickness kept), and deletes (its trash button, Delete/Backspace);
@@ -153,7 +153,7 @@ export function DrawingPad({
 	// A move/resize is in flight: the trash button hides until it lands.
 	const [editing, setEditing] = useState(false);
 	// Each pointer's last `buttons`, to see a tip touch down or lift while
-	// a side button stays held (4 → 5 → 4 on the owner's pen).
+	// a side button stays held (4 → 5 → 4 on a Wacom pen under XWayland).
 	const lastButtons = useRef(new Map<number, number>());
 	const onDoneRef = useRef(onDone);
 	onDoneRef.current = onDone;

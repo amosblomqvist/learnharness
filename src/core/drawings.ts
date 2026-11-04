@@ -14,7 +14,7 @@
 
 import type { ImageContent } from "@earendil-works/pi-ai";
 
-/** Drawings per submission (owner, 2026-11-04: "several", capped). */
+/** Drawings per submission (2026-11-04: "several", capped). */
 export const MAX_DRAWINGS = 4;
 
 /** Upper bound on one upload's base64 text — a parse-time guard only;

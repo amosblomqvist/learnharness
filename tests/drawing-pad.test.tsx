@@ -101,7 +101,7 @@ describe("stroke model", () => {
 	});
 
 	it("a split pen continues the gesture: mouse press (id 1), pen contact motion (id 3)", () => {
-		// The owner's XWayland Wacom trace, 2026-11-04.
+		// A Wacom CTL-672 trace under XWayland, 2026-11-04.
 		assert.ok(continuesGesture(1, { pointerId: 3, pointerType: "pen", buttons: 1 }), "pen contact motion under another id");
 		assert.ok(continuesGesture(1, { pointerId: 1, pointerType: "mouse", buttons: 1 }), "its own pointer");
 		assert.ok(continuesGesture(1, { pointerId: 4, pointerType: "pen", buttons: 32 }), "the eraser end in contact");
@@ -134,7 +134,7 @@ describe("stroke model", () => {
 	});
 });
 
-describe("pen side buttons (the owner's tablet, 2026-11-04)", () => {
+describe("pen side buttons (Wacom CTL-672 via OpenTabletDriver, 2026-11-04)", () => {
 	it("lower button held erases, upper held selects, eraser end erases — pens only", () => {
 		const pen = (buttons: number) => ({ pointerType: "pen", buttons });
 		assert.equal(contactMode(pen(1 | LOWER_BUTTON), "pen"), "erase", "lower (middle) + tip");

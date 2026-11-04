@@ -7,7 +7,7 @@ import type { DrawingInk, DrawingPoint, DrawingStroke } from "@/src/core";
  */
 
 /** Ink colors on the exported white page. The colored inks stay as drawn;
- *  the theme ink exports black (owner: always dark ink on white). */
+ *  the theme ink exports black (always dark ink on white). */
 export const EXPORT_INK: Record<DrawingInk, string> = {
 	ink: "#000000",
 	red: "#ef4444",
@@ -94,7 +94,7 @@ export function exportGeometry(bounds: InkBounds, scale = 2): { width: number; h
 export const PRESSURE_WAIT_SAMPLES = 6;
 
 /** A pen reports pressure 0 at contact and the real value with its first
- *  motion (OpenTabletDriver Artist Mode via XWayland, the owner's probe,
+ *  motion (OpenTabletDriver Artist Mode via XWayland, probed on a Wacom CTL-672,
  *  2026-11-04): give the stroke's opening points that first real value so
  *  a light stroke never starts with a mid-pressure blob. */
 export function backfillStartPressure(points: DrawingPoint[], p: number): void {
@@ -112,7 +112,7 @@ const CONTACT_BUTTONS = 1 | 32;
  * under XWayland (Electron's --ozone-platform=x11 on a Wayland compositor)
  * a Wacom pen's press and release arrive as MOUSE events while its
  * contact motion arrives as PEN events under another pointerId (probe on
- * the owner's tablet, 2026-11-04) — matching ids alone drew only dots.
+ * a Wacom CTL-672, 2026-11-04) — matching ids alone drew only dots.
  */
 export function continuesGesture(gesturePointerId: number, e: { pointerId: number; pointerType: string; buttons: number }): boolean {
 	if (e.pointerId === gesturePointerId) return true;
@@ -126,12 +126,12 @@ export function endsGesture(gesturePointerId: number, e: { pointerId: number; po
 	return e.pointerId === gesturePointerId || e.pointerType !== "touch";
 }
 
-// ─── pen side buttons (owner design, 2026-11-04) ───────────────────────────
+// ─── pen side buttons (2026-11-04) ─────────────────────────────────────────
 
 export type PadTool = "pen" | "eraser" | "select";
 export type ContactMode = "draw" | "erase" | "select";
 
-/** Pointer Events button bits as the owner's tablet reports them
+/** Pointer Events button bits as a Wacom CTL-672 reports them
  *  (OpenTabletDriver Artist Mode via XWayland, probe 2026-11-04): the
  *  LOWER side button arrives as the middle button, the UPPER as the right
  *  (barrel) button, the eraser end as bit 32. */
@@ -231,7 +231,7 @@ export function translateStrokes(strokes: readonly DrawingStroke[], dx: number, 
 }
 
 /** Scaled copies about an anchor — positions only, so line thickness stays
- *  as drawn (owner, 2026-11-04). */
+ *  as drawn (2026-11-04). */
 export function scaleStrokes(strokes: readonly DrawingStroke[], anchor: { x: number; y: number }, s: number): DrawingStroke[] {
 	return strokes.map((st) => ({
 		ink: st.ink,

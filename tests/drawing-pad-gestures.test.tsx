@@ -1,8 +1,8 @@
 /**
  * The drawing pad's live gestures (2026-11-04), mounted: the lasso from
  * the toolbar Select tool and from the pen's held UPPER button, then the
- * selection's Esc and Delete. Pointer events carry the owner's probe
- * values (Artist Mode via XWayland: upper button = buttons & 2).
+ * selection's Esc and Delete. Pointer events carry probe values from a
+ * Wacom CTL-672 (Artist Mode via XWayland: upper button = buttons & 2).
  */
 import React, { act } from "react";
 (globalThis as Record<string, unknown>).React = React;
