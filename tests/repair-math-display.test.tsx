@@ -12,7 +12,7 @@ import { PracticeDock } from "../components/practice-dock.tsx";
 import { QuestionDock } from "../components/question-dock.tsx";
 import { LatexGlyph } from "../components/latex-glyph.tsx";
 import { ProblemCard, ConcludeCard } from "../components/practice-cards.tsx";
-import { MessageResponse, ToolContentResponse } from "../components/ai-elements/message.tsx";
+import { AssistantTextResponse, MessageResponse, ToolContentResponse } from "../components/ai-elements/message.tsx";
 import {
 	repairMathForDisplay, healOverescapedCommands, restoreMathEscapes,
 	parseQuizInput, parseAskInput, parseExplainInput, activeProblemOf, projectView,
@@ -248,5 +248,27 @@ describe("practice display surfaces", () => {
 		assertMath(revealHtml, [tex, tex]);
 		assert.deepEqual(concluded, before);
 		assert.deepEqual(toLlmMessages(concluded), history);
+	});
+});
+
+describe("assistant prose (#111)", () => {
+	// The reporter's formula as GPT wrote it: every command backslash doubled.
+	const healedChainRule = String.raw`\frac{\partial L}{\partial w} = \frac{\partial L}{\partial a}`;
+	const chainRule = healedChainRule.replace(/\\/g, "\\\\");
+	it("heals doubled command backslashes in inline and display math", () => {
+		assertMath(renderToStaticMarkup(<AssistantTextResponse mode="static">{`Gradient ${doubled}.`}</AssistantTextResponse>));
+		const html = renderToStaticMarkup(<AssistantTextResponse mode="static">{`$$\n${chainRule}\n$$`}</AssistantTextResponse>);
+		assertMath(html, [healedChainRule], ["∂"]);
+		assert.ok(!math(html).glyphs.includes("frac"), "no bare command names");
+	});
+	it("keeps clean math, real row breaks and code untouched", () => {
+		assertMath(renderToStaticMarkup(<AssistantTextResponse mode="static">{clean}</AssistantTextResponse>));
+		const rows = "$$\n" + repairedMatrix + "\n$$";
+		assert.deepEqual(math(renderToStaticMarkup(<AssistantTextResponse mode="static">{rows}</AssistantTextResponse>)).annotations, [repairedMatrix]);
+		const code = "`" + doubled + "`";
+		assert.ok(parseHTML(renderToStaticMarkup(<AssistantTextResponse mode="static">{code}</AssistantTextResponse>)).document.querySelector("code")?.textContent?.includes(doubled));
+	});
+	it("leaves plain MessageResponse (user text) unchanged", () => {
+		assert.deepEqual(math(renderToStaticMarkup(<MessageResponse mode="static">{doubled}</MessageResponse>)).annotations, [doubled.slice(1, -1)]);
 	});
 });
