@@ -914,6 +914,36 @@ function SessionsSidebar() {
 						>
 							Export as Markdown…
 						</button>
+						{/* Export Anki cards (owner, 2026-11-01): the recall cards the agent
+						    wrote during the session, as an Anki TSV import file. Fetches
+						    first to report an empty session; still above Delete. */}
+						<button
+							type="button"
+							data-testid="ctx-export-anki"
+							onClick={() => {
+								const chatId = ctxChatId;
+								setCtxChatId(null);
+								// One fetch: the route answers 204 for a session with nothing to
+								// export, which an anchor download would swallow silently.
+								void fetch(`/api/chats/${chatId}/anki`)
+									.then(async (res) => {
+										if (res.status === 204) return window.alert("Nothing to export from this session.");
+										if (!res.ok) throw new Error(String(res.status));
+										const name = /filename="([^"]+)"/.exec(res.headers.get("content-disposition") ?? "")?.[1] ?? "anki.txt";
+										const a = document.createElement("a");
+										a.href = URL.createObjectURL(await res.blob());
+										a.download = name;
+										document.body.appendChild(a);
+										a.click();
+										a.remove();
+										URL.revokeObjectURL(a.href);
+									})
+									.catch(() => window.alert("Could not export Anki cards."));
+							}}
+							className="flex items-center rounded-lg px-2.5 py-1.5 text-left text-foreground transition-colors hover:bg-accent"
+						>
+							Export Anki cards…
+						</button>
 						<button
 							type="button"
 							data-testid="ctx-delete"

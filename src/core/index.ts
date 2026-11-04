@@ -87,3 +87,6 @@ export * from "./coverage.ts";
 // ONE session→markdown formatter — the extractor's view and the user-facing
 // export share it. Pure, browser-safe.
 export * from "./session-markdown.ts";
+// anki-cards.ts (2026-11-01): the recall cards the agent wrote, scanned
+// from their `recall_cards` tool calls. Pure.
+export * from "./anki-cards.ts";

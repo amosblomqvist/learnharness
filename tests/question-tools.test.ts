@@ -200,6 +200,7 @@ describe("the prober's quiz: no nodeId field at all", () => {
 	it("the prober's tool registry carries the nodeId-less quiz, probe_done, and the learner-filesystem set", () => {
 		const chatId = newChat("Prober: registry");
 		const tools = createProberTools({ chatId, chatStore, deliver: () => {}, jobStore, spawn: () => {} });
+		assert.ok(!tools.recall_cards, "the prober probes — nothing is taught yet, so no recall cards");
 		// Fix wave (2026-09-20): the owner ruling adds research + pdf dispatch
 		// to the probe phase's registry (demo/visual stay teach-only).
 		assert.deepEqual(Object.keys(tools).sort(), [
@@ -295,10 +296,10 @@ describe("tool toggles (core/pending.ts + factories)", () => {
 			spawn: () => {},
 		};
 		const full = Object.keys(createTeacherTools(ctx)).sort();
-		assert.deepEqual(full, ["ask_user_question", "demo", "find", "grep", "ls", "pdf", "plan_init", "quiz", "read", "research", "visual"]);
+		assert.deepEqual(full, ["ask_user_question", "demo", "find", "grep", "ls", "pdf", "plan_init", "quiz", "read", "recall_cards", "research", "visual"]);
 
 		const noResearch = Object.keys(createTeacherTools(ctx, { research: false })).sort();
-		assert.deepEqual(noResearch, ["ask_user_question", "demo", "find", "grep", "ls", "pdf", "plan_init", "quiz", "read", "visual"]);
+		assert.deepEqual(noResearch, ["ask_user_question", "demo", "find", "grep", "ls", "pdf", "plan_init", "quiz", "read", "recall_cards", "visual"]);
 
 		// absent = enabled: an empty record and undefined behave identically
 		assert.deepEqual(
@@ -309,7 +310,7 @@ describe("tool toggles (core/pending.ts + factories)", () => {
 
 		// The mechanic switch (owner 2026-09-27): free-recall swaps the teach
 		// quiz for the teach explain — one quizzing tool, whichever is armed.
-		const freeFull = ["ask_user_question", "demo", "explain", "find", "grep", "ls", "pdf", "plan_init", "read", "research", "visual"];
+		const freeFull = ["ask_user_question", "demo", "explain", "find", "grep", "ls", "pdf", "plan_init", "read", "recall_cards", "research", "visual"];
 		assert.deepEqual(Object.keys(createTeacherTools(ctx, { explain: true })).sort(), freeFull);
 		assert.deepEqual(
 			Object.keys(createTeacherTools(ctx, { explain: true, research: false })).sort(),

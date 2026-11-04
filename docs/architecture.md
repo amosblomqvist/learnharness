@@ -85,8 +85,8 @@ The teaching agents share one record but have different prompts and registries (
 | Agent | Main interaction | Other capabilities |
 |---|---|---|
 | Prober | `probe` (multiple choice) or `recall` (free recall), `ask_user_question`, `probe_done` | Read-only file tools, research/PDF dispatch; graph readers when enabled |
-| Teacher | `quiz` or `explain`, `ask_user_question`, `plan_init` | Read-only file tools and research/PDF/demo/visual dispatch |
-| Practitioner | `problem`, `conclude` | Read-only file tools, research/PDF dispatch; graph readers when enabled |
+| Teacher | `quiz` or `explain`, `ask_user_question`, `plan_init`, `recall_cards` | Read-only file tools and research/PDF/demo/visual dispatch |
+| Practitioner | `problem`, `conclude`, `recall_cards` | Read-only file tools, research/PDF dispatch; graph readers when enabled |
 
 The choice/free-recall mechanic selects one graded tool per teaching phase. Tool toggles and availability gates affect the registry; the table is not a promise that every dispatch tool is always enabled. Practice side tools are composed separately, without the teaching toggle filter. Claude-family agents can also receive `send_to_user` for explicit learner-facing output. All ordinary registries pass through argument healing; semantic validation failures return error results so the model can correct the call.
 
