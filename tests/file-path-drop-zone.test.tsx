@@ -169,7 +169,7 @@ test("browser drop prevents navigation, explains desktop-only local paths and ne
 	f.assertPathOnly();
 });
 
-test("invalid, virtual and directory items are skipped while valid backing paths stay ordered", async () => {
+test("mixed files and directories retain one original path each in drop order; invalid paths are skipped", async () => {
 	const f = await fixture();
 	const files = [
 		f.file("virtual.pdf"), f.file("bad.pdf", "relative.pdf"), f.file("broken.pdf", new Error("not backed")),
@@ -177,9 +177,22 @@ test("invalid, virtual and directory items are skipped while valid backing paths
 		f.file("multiline.pdf", "/a\nb.pdf"), f.file("NUL.pdf", "/a\0b.pdf"), f.file("url.pdf", "file:///a.pdf"),
 	];
 	await f.event("drop", f.transfer(files, [3]));
-	assert.deepEqual(f.appends, ["`/existing/valid.pdf`"]);
-	assert.equal(f.resolved.includes(files[3]!), false, "directory metadata prevents resolving a folder");
+	assert.deepEqual(f.appends, ["`/directory` `/existing/valid.pdf`"]);
+	assert.equal(f.resolved.includes(files[3]!), true, "a directory resolves through the same OS backing-path bridge");
 	assert.match(f.status, /Some dropped items had no available file path/);
+	f.assertPathOnly();
+});
+
+test("an empty folder attaches once, without touching directory metadata or enumerating descendants", async () => {
+	const f = await fixture();
+	f.focusEditor(4);
+	const folder = f.file("empty folder", "/course/empty folder");
+	const transfer = f.transfer([folder], [0]);
+	Object.defineProperty(transfer, "items", { get() { throw new Error("Must not inspect/traverse entries"); } });
+	await f.event("drop", transfer);
+	assert.equal(f.value, "read `/course/empty folder` this");
+	assert.deepEqual(f.resolved, [folder]);
+	assert.equal(f.editor.querySelectorAll("[data-file-path-source]").length, 1);
 	f.assertPathOnly();
 });
 
