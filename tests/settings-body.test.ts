@@ -16,8 +16,10 @@ import {
 	parseGeneralSettingsBody,
 	parseCompactionSettingsBody,
 	parseGraphSettingsBody,
+	parseDictationSettingsBody,
 	SETTINGS_SECTIONS,
 } from "../src/server/settings-body.ts";
+import { DICTATION_DEVICE_LABEL_MAX } from "../src/core/settings.ts";
 
 describe("parseGeneralSettingsBody", () => {
 	it("parses {} and {autoUpdate} replace-whole", () => {
@@ -241,6 +243,34 @@ describe("parseCompactionSettingsBody (owner round 14)", () => {
 		const r = parseCompactionSettingsBody({ thresholdTokens: "big" });
 		assert.ok(!r.ok);
 		assert.match(r.error ?? "", /must be a number/);
+	});
+});
+
+describe("parseDictationSettingsBody (input-device selection wave)", () => {
+	it("accepts an empty body and a bare language", () => {
+		assert.deepEqual(parseDictationSettingsBody({}), { ok: true, settings: {} });
+		assert.deepEqual(parseDictationSettingsBody({ language: "pl" }), { ok: true, settings: { language: "pl" } });
+	});
+	it("rejects an unsupported language", () => {
+		assert.equal(parseDictationSettingsBody({ language: "klingon" }).ok, false);
+	});
+	it("keeps a device id with its label", () => {
+		const r = parseDictationSettingsBody({ language: "en", inputDeviceId: "mic-1", inputDeviceLabel: "Built-in" });
+		assert.deepEqual(r, { ok: true, settings: { language: "en", inputDeviceId: "mic-1", inputDeviceLabel: "Built-in" } });
+	});
+	it("treats an empty inputDeviceId as clear-to-default (drops id and label)", () => {
+		const r = parseDictationSettingsBody({ language: "en", inputDeviceId: "", inputDeviceLabel: "Ignored" });
+		assert.deepEqual(r, { ok: true, settings: { language: "en" } });
+	});
+	it("accepts a device id without a label", () => {
+		const r = parseDictationSettingsBody({ inputDeviceId: "mic-1" });
+		assert.deepEqual(r, { ok: true, settings: { inputDeviceId: "mic-1" } });
+	});
+	it("rejects wrong types and an over-long label", () => {
+		assert.equal(parseDictationSettingsBody({ inputDeviceId: 7 }).ok, false);
+		assert.equal(parseDictationSettingsBody({ inputDeviceId: "mic-1", inputDeviceLabel: 7 }).ok, false);
+		assert.equal(parseDictationSettingsBody({ inputDeviceId: "mic-1", inputDeviceLabel: "x".repeat(DICTATION_DEVICE_LABEL_MAX + 1) }).ok, false);
+		assert.equal(parseDictationSettingsBody("nope").ok, false);
 	});
 });
 

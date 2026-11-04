@@ -340,7 +340,21 @@ export interface GeneralSettings {
 /** One app-wide dictation preference, shared by every composer. */
 export interface DictationSettings {
 	language?: DictationLanguage;
+	/** The pinned capture microphone (input-device selection wave). ABSENT =
+	 *  system default (getUserMedia runs unconstrained). Per-machine by nature
+	 *  — a deviceId from one machine is meaningless on another, so capture
+	 *  pins it with `ideal` and silently falls back to the default when it is
+	 *  gone (unplugged, or a record copied to another machine). */
+	inputDeviceId?: string;
+	/** The chosen device's human label, stored alongside the id so the setting
+	 *  can still name it ("MacBook Microphone") while the device is
+	 *  disconnected — the live list can't supply a label then. Display only. */
+	inputDeviceLabel?: string;
 }
+
+/** Longest device label we store — a guard against an absurd label bloating
+ *  the record; real device names are far shorter. */
+export const DICTATION_DEVICE_LABEL_MAX = 200;
 
 /** Agent settings — everything about the non-conversation machinery. */
 export interface AgentSettings {
@@ -495,7 +509,9 @@ export interface UserSettings {
 export interface FactorySettings {
 	version: number;
 	general: Required<GeneralSettings>;
-	dictation: Required<DictationSettings>;
+	/** Language has a factory pin; the input device does NOT (absent = system
+	 *  default), so the factory record only carries language. */
+	dictation: { language: DictationLanguage };
 	appearance: {
 		mode: "dark" | "light";
 		background: string | null;
@@ -796,6 +812,24 @@ function sanitizeGraph(raw: Record<string, unknown>): GraphSettings {
  *  reject-with-rationale (the graph chunk-budget precedent). */
 export const COMPACTION_THRESHOLD_FLOOR = 32_000;
 
+/** The dictation section (input-device selection wave): a valid language is
+ *  kept, an invalid one drops to the factory default at resolution; a
+ *  non-empty-string inputDeviceId and a string inputDeviceLabel (clamped to
+ *  DICTATION_DEVICE_LABEL_MAX) ride along, anything malformed drops. The
+ *  label only survives WITH an id — a label without a device would be a
+ *  dangling name. Clamp-never-reject. */
+function sanitizeDictation(raw: Record<string, unknown>): DictationSettings {
+	const out: DictationSettings = {};
+	if (isDictationLanguage(raw.language)) out.language = raw.language;
+	if (typeof raw.inputDeviceId === "string" && raw.inputDeviceId !== "") {
+		out.inputDeviceId = raw.inputDeviceId;
+		if (typeof raw.inputDeviceLabel === "string" && raw.inputDeviceLabel.trim()) {
+			out.inputDeviceLabel = raw.inputDeviceLabel.slice(0, DICTATION_DEVICE_LABEL_MAX);
+		}
+	}
+	return out;
+}
+
 function sanitizeCompaction(raw: Record<string, unknown>): CompactionSettings {
 	const out: CompactionSettings = {};
 	const rawTokens = raw.thresholdTokens;
@@ -822,9 +856,8 @@ export function sanitizeUserSettings(raw: unknown): UserSettings | null {
 	}
 	if (r.dictation !== undefined) {
 		const raw = r.dictation;
-		out.dictation = raw !== null && typeof raw === "object" && !Array.isArray(raw) &&
-			isDictationLanguage((raw as Record<string, unknown>).language)
-			? { language: (raw as DictationSettings).language }
+		out.dictation = raw !== null && typeof raw === "object" && !Array.isArray(raw)
+			? sanitizeDictation(raw as Record<string, unknown>)
 			: {};
 	}
 	if (r.claudeCode !== undefined) {

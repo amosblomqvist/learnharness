@@ -27,7 +27,7 @@ import type {
 	ModelSlot,
 	RoleModelOverride,
 } from "../core/settings.ts";
-import { BACKGROUND_MODEL_ROLES, CACHE_RETENTIONS, COMPACTION_THRESHOLD_FLOOR, CUSTOM_MODEL_PIN_FLOOR, EXTRACTION_CHUNK_TOKENS_FLOOR, MODEL_SLOTS } from "../core/settings.ts";
+import { BACKGROUND_MODEL_ROLES, CACHE_RETENTIONS, COMPACTION_THRESHOLD_FLOOR, CUSTOM_MODEL_PIN_FLOOR, DICTATION_DEVICE_LABEL_MAX, EXTRACTION_CHUNK_TOKENS_FLOOR, MODEL_SLOTS } from "../core/settings.ts";
 import { WRITABLE_TOOL_KEYS } from "../core/pending.ts";
 import { isSearchEngineId, SEARCH_ENGINES } from "../core/search.ts";
 import { isDictationLanguage } from "../core/dictation.ts";
@@ -407,13 +407,38 @@ export function parseCompactionSettingsBody(body: unknown): SettingsBodyResult<C
 	return { ok: true, settings };
 }
 
-/** dictation: { language?: one of Nova-3's supported language codes } */
+/** dictation: {
+ *    language?: one of Nova-3's supported language codes,
+ *    inputDeviceId?: an opaque getUserMedia deviceId (non-empty string),
+ *    inputDeviceLabel?: that device's display name (≤ DICTATION_DEVICE_LABEL_MAX)
+ *  }
+ *  Replace-whole like every section: an absent field clears that preference
+ *  (absent inputDeviceId = system default). The label is accepted only
+ *  alongside an id — a label without a device would be a dangling name. */
 export function parseDictationSettingsBody(body: unknown): SettingsBodyResult<DictationSettings> {
 	const raw = asRecord(body);
 	if (!raw) return { ok: false, error: "Invalid JSON body" };
-	if (raw.language === undefined) return { ok: true, settings: {} };
-	if (!isDictationLanguage(raw.language)) return { ok: false, error: "Unsupported dictation language" };
-	return { ok: true, settings: { language: raw.language } };
+	const settings: DictationSettings = {};
+	if (raw.language !== undefined) {
+		if (!isDictationLanguage(raw.language)) return { ok: false, error: "Unsupported dictation language" };
+		settings.language = raw.language;
+	}
+	if (raw.inputDeviceId !== undefined) {
+		if (typeof raw.inputDeviceId !== "string") return { ok: false, error: "inputDeviceId must be a string" };
+		// A non-empty id pins a device; "" is the explicit "system default"
+		// clear — both legal, so only the wrong TYPE rejects.
+		if (raw.inputDeviceId !== "") {
+			settings.inputDeviceId = raw.inputDeviceId;
+			if (raw.inputDeviceLabel !== undefined) {
+				if (typeof raw.inputDeviceLabel !== "string") return { ok: false, error: "inputDeviceLabel must be a string" };
+				if (raw.inputDeviceLabel.length > DICTATION_DEVICE_LABEL_MAX) {
+					return { ok: false, error: `inputDeviceLabel must be at most ${DICTATION_DEVICE_LABEL_MAX} characters` };
+				}
+				if (raw.inputDeviceLabel.trim()) settings.inputDeviceLabel = raw.inputDeviceLabel;
+			}
+		}
+	}
+	return { ok: true, settings };
 }
 
 /** The custom endpoint's per-model pins (PATCH /api/custom-provider): the
