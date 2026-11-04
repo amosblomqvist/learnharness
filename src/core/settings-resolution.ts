@@ -203,8 +203,9 @@ export function resolveSettings(record: UserSettings | null): EffectiveSettings 
 			vision: resolveSlot(modelsSection.vision),
 		},
 		appearance: {
-			mode: appearance.mode ?? factoryAppearance.mode,
+			theme: appearance.theme ?? factoryAppearance.theme,
 			background: appearance.background ?? factoryAppearance.background,
+			colors: appearance.colors ?? factoryAppearance.colors,
 			fontFamily: appearance.fontFamily ?? factoryAppearance.fontFamily,
 			proseFontSize: appearance.proseFontSize ?? factoryAppearance.proseFontSize,
 			sessionNameSerif: appearance.sessionNameSerif ?? factoryAppearance.sessionNameSerif,

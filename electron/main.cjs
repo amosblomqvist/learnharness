@@ -24,7 +24,7 @@
  *     would shadow every settings-page key change until restart.
  */
 
-const { app, BrowserWindow, Menu, ipcMain, session, shell } = require("electron");
+const { app, BrowserWindow, Menu, ipcMain, nativeTheme, session, shell } = require("electron");
 const { createChatGPT, fileStore } = require("./chatgpt.cjs");
 const { attachChatGPTChild, trustedSender, chatGPTControl } = require("./chatgpt-ipc.cjs");
 const { createSubscriptions, loadSubscriptionSDK } = require("./subscriptions.cjs");
@@ -53,6 +53,53 @@ const PRODUCT_NAME = "LearnHarness";
 app.setName(PRODUCT_NAME);
 const AUTH_FILE = () => path.join(app.getPath("userData"), "auth.json");
 const DATA_DIR = () => path.join(app.getPath("userData"), "data");
+
+// NATIVE CHROME FOLLOWS THE THEME (theme wave, 2026-11-04): the window's own
+// background (resize lag, first paint) and the Windows/Linux control
+// overlay paint the active theme's mode and background. The renderer
+// resolves the theme (presets live in src/core/themes.ts) and reports
+// { mode, background } on load and on every write; before that, main
+// knows only the record's background override and assumes dark (the
+// Default theme, #141414).
+const WINDOW_CHROME = {
+	dark: { background: "#141414", symbol: "#e5e5e5" },
+	light: { background: "#f5f5f3", symbol: "#1a1a1a" },
+};
+const HEX = /^#[0-9a-f]{3}([0-9a-f]{3})?$/i;
+
+/** The appearance the renderer reports (or settings.json holds), reduced
+ *  to what the chrome needs. Anything unknown → the dark factory. */
+function normalizeAppearance(a) {
+	return {
+		mode: a?.mode === "light" ? "light" : "dark",
+		background: typeof a?.background === "string" && HEX.test(a.background) ? a.background : null,
+	};
+}
+
+/** The background override of the SAME settings file the server reads.
+ *  Absent/corrupt → dark, the factory default. */
+function readAppearance() {
+	try {
+		const record = JSON.parse(fs.readFileSync(path.join(DATA_DIR(), "settings.json"), "utf8"));
+		return normalizeAppearance({ background: record?.appearance?.background });
+	} catch {
+		return normalizeAppearance(null);
+	}
+}
+let appearance = normalizeAppearance(null);
+
+/** Native colors for the active theme's variant. */
+function chromeColors() {
+	const mode = appearance.mode;
+	return { color: appearance.background ?? WINDOW_CHROME[mode].background, symbolColor: WINDOW_CHROME[mode].symbol };
+}
+
+function applyChrome(win) {
+	if (win.isDestroyed()) return;
+	const colors = chromeColors();
+	win.setBackgroundColor(colors.color);
+	if (process.platform !== "darwin") win.setTitleBarOverlay(colors);
+}
 
 /** The packaged standalone server (extraResources → Resources/server).
  *  In dev LH_DEV_URL short-circuits everything: no spawn, no packaging —
@@ -308,7 +355,7 @@ function createWindow(url) {
 				// height. Do not force the zoom-invariant native overlay to match
 				// the renderer's 60 CSS px bar: zooming out would cover its border.
 				// The renderer reserves the actual width via env(titlebar-area-*).
-				titleBarOverlay: { color: "#141414", symbolColor: "#e5e5e5" },
+				titleBarOverlay: chromeColors(),
 				// Keep the custom bar alone; Alt reveals the native menu.
 				autoHideMenuBar: true,
 			}),
@@ -323,10 +370,11 @@ function createWindow(url) {
 		// the native window surface changes size before Chromium's compositor
 		// has a frame at the new size, and the gap shows the window's NATIVE
 		// background — Electron's default is white, glaring on a dark app.
-		// The app background (#141414) fills the lag instead. `show: false` +
-		// ready-to-show is the same treatment for first paint: the window
-		// appears only once the page has actually rendered.
-		backgroundColor: "#141414",
+		// The app's background for the rendered mode fills the lag instead
+		// (chromeColors). `show: false` + ready-to-show is the same treatment
+		// for first paint: the window appears only once the page has
+		// actually rendered.
+		backgroundColor: chromeColors().color,
 		show: false,
 		// Narrow-window behavior (owner, 2026-09-17): 640px is the floor —
 		// below it even a wrapped chrome row gets cramped and the chat header
@@ -646,6 +694,11 @@ async function main() {
 
 	await app.whenReady();
 
+	// The chrome before the first window: the record's background override
+	// on dark; the renderer reports the active theme right after load.
+	appearance = readAppearance();
+	nativeTheme.themeSource = appearance.mode;
+
 	// Dev mode: point at a running `next dev` server (LH_DEV_URL) — no
 	// spawn, no packaging, full HMR. The rest of this shell still applies
 	// (guards, menu, single instance).
@@ -740,6 +793,14 @@ async function main() {
 		const { x, y, width, height } = win.getBounds();
 		const target = SIDEBAR_AUTOCLOSE;
 		if (width < target) win.setBounds({ x, y, width: target, height });
+	});
+	// The renderer reports every appearance write (and the record on load):
+	// the chrome follows without a restart.
+	ipcMain.on("lh:appearance", (event, next) => {
+		if (!trustedAppWindows.has(BrowserWindow.fromWebContents(event.sender))) return;
+		appearance = normalizeAppearance(next);
+		nativeTheme.themeSource = appearance.mode;
+		for (const win of BrowserWindow.getAllWindows()) applyChrome(win);
 	});
 	reopenWindow = () => { chatgpt?.resume(); subscriptions?.resume(); return createWindow(url); };
 	app.on("activate", () => {

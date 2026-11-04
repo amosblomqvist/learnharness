@@ -90,7 +90,7 @@ export function EditableSourceName({ name, onSave, onCancel, initiallyEditing = 
 			}} onDragStart={(e) => { e.preventDefault(); e.stopPropagation(); }} />
 			: <button type="button" className="block max-w-full truncate rounded-sm text-left text-sm font-medium leading-5 transition-colors hover:bg-accent" title="Rename"
 				onClick={() => { cancelled.current = false; setDraft(name); setEditing(true); }}>{name}</button>}
-		{failure && <span role="alert" className="block text-xs text-red-400">{failure}</span>}
+		{failure && <span role="alert" className="block text-xs text-error">{failure}</span>}
 	</span>;
 }
 

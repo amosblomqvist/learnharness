@@ -61,6 +61,7 @@ describe("the curated dev-browser fallback", () => {
 	it("is the app's knowns + ubiquitous macOS families — and never a fabricated system list member for the factory family", () => {
 		assert.ok(CURATED_FALLBACK_FONTS.includes("CMU Serif"));
 		assert.ok(CURATED_FALLBACK_FONTS.includes("Georgia"));
+		assert.ok(CURATED_FALLBACK_FONTS.includes("JetBrains Mono"), "the bundled mono is always offered");
 		// the factory family lives ONLY as the DEFAULT row — never a
 		// duplicated family row
 		assert.ok(!CURATED_FALLBACK_FONTS.includes(DEFAULT_READING_FONT));
@@ -138,17 +139,24 @@ describe("the emphasis-ink factory ruling (globals.css)", () => {
 		assert.ok(!css.includes("--lh-ink-italic: #6fa9d6"), "italic factory is not the old blue");
 	});
 
-	it("both blocks default the inks to the regular text color", () => {
+	it("the Default theme's inks are the regular text color", () => {
 		const css = fs.readFileSync("app/globals.css", "utf-8");
-		assert.equal((css.match(/--lh-ink-strong: var\(--foreground\)/g) ?? []).length, 2, "both theme blocks");
-		assert.equal((css.match(/--lh-ink-italic: var\(--foreground\)/g) ?? []).length, 2, "both theme blocks");
+		const text = css.match(/--foreground: (#[0-9a-f]{6});/)?.[1];
+		assert.ok(text, "the factory text color");
+		assert.ok(css.includes(`--lh-ink-strong: ${text};`), "bold ink = text");
+		assert.ok(css.includes(`--lh-ink-italic: ${text};`), "italic ink = text");
 	});
 
-	it("the appearance rows' empty-state labels say 'same as text'", () => {
+	it("the bold and italic override rows' empty-state hints name the text color", () => {
 		const html = renderToStaticMarkup(
 			<AppearanceSection appearance={undefined} onSectionChange={() => {}} />,
 		);
-		assert.equal((html.match(/Empty = same as text/g) ?? []).length, 2, "bold + italic rows");
+		const text = html.match(/data-testid="row-color-text"[\s\S]*?Empty = (#[0-9a-f]{6})/)?.[1];
+		assert.ok(text, "the text row's hint");
+		for (const key of ["bold", "italic"]) {
+			const hint = html.match(new RegExp(`data-testid="row-color-${key}"[\\s\\S]*?Empty = (#[0-9a-f]{6})`))?.[1];
+			assert.equal(hint, text, `${key} row`);
+		}
 		assert.ok(!html.includes("#ee928c"));
 		assert.ok(!html.includes("#6fa9d6"));
 	});

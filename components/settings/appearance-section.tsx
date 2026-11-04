@@ -5,11 +5,11 @@
  * Appearance controls resolve against the factory in the provider; writes
  * PUT the whole appearance section and hand the delta back so the CSS
  * variables move IMMEDIATELY (the section's whole point — it must DO
- * something). Hex inputs commit on blur/Enter; the background derives the
- * raised/accent/edge palette in code (components/settings/appearance.tsx).
- * Mode is dark-only this wave: control rendered DISABLED with a note — the
- * light palette is the design wave's work, and a lying control is worse
- * than an honest disabled one.
+ * something). Theme wave (2026-11-04): the theme grid (./theme-cards.tsx)
+ * sits on top and sets every color; the "Colors" block below holds one
+ * hex override per theme color (empty = the theme's), kept across theme
+ * switches; "Typography" holds the type knobs. Hex inputs commit on
+ * blur/Enter.
  *
  * Graph graying (owner, 2026-09-20) follows the graph viewer's render-panel
  * convention: the whole row dims when a parent is off (stored values
@@ -25,23 +25,27 @@
  * The custom-family input inside the menu is the manual escape path.
  * Empty/unset keeps meaning Source Sans 3.
  *
- * Emphasis inks (same wave): the factory tokens default to the regular
- * text color now (globals.css); the rows' empty-state labels say "same
- * as text".
+ * Overrides live in two homes by design: `background` and
+ * `mdRendering.boldColor/italicColor` keep their pre-theme keys (existing
+ * records keep their colors); the other nine sit in `colors`. core/
+ * themes.ts effectiveColors is the one place they merge.
  */
 
 import { useEffect, useRef, useState } from "react";
 import {
 	EXTRACTION_CHUNK_TOKENS_FLOOR,
 	resolveSettings,
+	THEME_COLOR_KEYS,
 	type AppearanceSettings,
 	type GraphSettings,
+	type ThemeColorKey,
 } from "@/src/core";
 import { MenuShell } from "@/components/menu-shell";
 import { Hint } from "@/components/ui/hint";
-import { useAppearance } from "./appearance.tsx";
+import { BUNDLED_READING_FONTS, useAppearance } from "./appearance.tsx";
 import { FontMenuList } from "./model-menu";
-import { CommitInput, SettingsMenuTrigger, SettingsRow, ThinSelect, Toggle } from "./controls.tsx";
+import { ThemeCards } from "./theme-cards.tsx";
+import { CommitInput, SettingsMenuTrigger, SettingsRow, Toggle } from "./controls.tsx";
 
 /** The factory reading family — the DEFAULT row's identity (unset =
  *  this). Exported for tests. */
@@ -59,6 +63,7 @@ export const CURATED_FALLBACK_FONTS: readonly string[] = [
 	"Georgia",
 	"Helvetica",
 	"Helvetica Neue",
+	"JetBrains Mono",
 	"Menlo",
 	"Times New Roman",
 	"Trebuchet MS",
@@ -88,6 +93,100 @@ export function composeFontFamily(
 	return { ...appearance, fontFamily: value === "" ? null : value };
 }
 
+/** The Colors grid's labels and the one hint that explains a key. */
+const COLOR_LABELS: Record<ThemeColorKey, { label: string; note?: string }> = {
+	background: { label: "Background" },
+	accent: { label: "Accent", note: "Focus rings, toggles, selection" },
+	surface: { label: "Surface", note: "Cards, inputs, sidebar" },
+	bold: { label: "Bold" },
+	border: { label: "Border" },
+	italic: { label: "Italic" },
+	text: { label: "Text" },
+	code: { label: "Inline code" },
+	textMuted: { label: "Muted text" },
+	error: { label: "Error" },
+	success: { label: "Success" },
+	warning: { label: "Warning" },
+};
+
+/** The legacy test ids of the three pre-theme rows (kept stable). */
+const LEGACY_TESTIDS: Partial<Record<ThemeColorKey, string>> = {
+	background: "input-background",
+	bold: "input-bold-color",
+	italic: "input-italic-color",
+};
+
+/** The stored override for one theme color ("" = none). Pure — exported
+ *  for tests. */
+export function colorOverride(appearance: AppearanceSettings | undefined, key: ThemeColorKey): string {
+	if (key === "background") return appearance?.background ?? "";
+	if (key === "bold") return appearance?.mdRendering?.boldColor ?? "";
+	if (key === "italic") return appearance?.mdRendering?.italicColor ?? "";
+	return appearance?.colors?.[key] ?? "";
+}
+
+/** Compose one override into the section ("" = back to the theme's).
+ *  Every other field rides along untouched. Pure — exported for tests. */
+export function composeColorOverride(
+	appearance: AppearanceSettings | undefined,
+	key: ThemeColorKey,
+	value: string,
+): AppearanceSettings {
+	const v = value === "" ? null : value;
+	if (key === "background") return { ...appearance, background: v };
+	if (key === "bold") return { ...appearance, mdRendering: { ...appearance?.mdRendering, boldColor: v } };
+	if (key === "italic") return { ...appearance, mdRendering: { ...appearance?.mdRendering, italicColor: v } };
+	const colors = { ...appearance?.colors };
+	if (v === null) delete colors[key];
+	else colors[key] = v;
+	return { ...appearance, colors };
+}
+
+/** "Reset all": every color back to the theme's; type knobs untouched. */
+export function clearColorOverrides(appearance: AppearanceSettings | undefined): AppearanceSettings {
+	const { background: _bg, colors: _colors, ...rest } = appearance ?? {};
+	const md = appearance?.mdRendering;
+	if (!md) return rest;
+	const { boldColor: _b, italicColor: _i, ...mdRest } = md;
+	return { ...rest, mdRendering: mdRest };
+}
+
+function ColorOverrideRow({
+	colorKey,
+	value,
+	themeColor,
+	effective,
+	onCommit,
+}: {
+	colorKey: ThemeColorKey;
+	value: string;
+	themeColor: string;
+	effective: string;
+	onCommit: (next: string) => void;
+}) {
+	const { label, note } = COLOR_LABELS[colorKey];
+	const empty = `Empty = ${themeColor}`;
+	return (
+		<SettingsRow label={label} hint={note ? `${note} · ${empty}` : empty} testid={`row-color-${colorKey}`}>
+			<span className="flex items-center gap-2">
+				<span
+					aria-hidden
+					data-testid={`swatch-${colorKey}`}
+					className="size-4 shrink-0 rounded-sm border border-border"
+					style={{ background: effective }}
+				/>
+				<CommitInput
+					value={value}
+					placeholder={themeColor}
+					ariaLabel={`${label.toLowerCase()} hex`}
+					testid={LEGACY_TESTIDS[colorKey] ?? `input-color-${colorKey}`}
+					onCommit={onCommit}
+				/>
+			</span>
+		</SettingsRow>
+	);
+}
+
 export function AppearanceSection({
 	appearance,
 	onSectionChange,
@@ -97,7 +196,7 @@ export function AppearanceSection({
 	/** PUT the whole appearance section; the page re-applies on success. */
 	onSectionChange: (next: AppearanceSettings) => void;
 }) {
-	const { appearance: resolved } = useAppearance();
+	const { appearance: resolved, activeTheme, colors, themes, refreshThemes } = useAppearance();
 	const md = appearance?.mdRendering;
 
 	// The font dropdown's open state + its enumeration cache. undefined =
@@ -128,7 +227,11 @@ export function AppearanceSection({
 				} else {
 					void api()
 						.then((fonts) => {
-							const families = [...new Set(fonts.map((f) => f.family))]
+							const installed = fonts.map((f) => f.family);
+							// The bundled families join the installed ones (they
+							// render whether or not the OS has them), but only
+							// when the OS list was actually read.
+							const families = [...new Set(installed.length ? [...installed, ...Object.keys(BUNDLED_READING_FONTS)] : [])]
 								.filter((f) => f !== DEFAULT_READING_FONT)
 								.sort((a, b) => a.localeCompare(b));
 							if (families.length === 0) {
@@ -186,24 +289,50 @@ export function AppearanceSection({
 
 	return (
 		<>
-			<SettingsRow label="Mode" hint="Coming soon" testid="row-mode" dimmed>
-				<ThinSelect value="dark" ariaLabel="mode" onChange={() => {}} testid="select-mode" disabled>
-					<option value="dark">Dark</option>
-				</ThinSelect>
-			</SettingsRow>
-			<SettingsRow
-				label="Background"
-				hint={`Empty = ${resolved.background ?? "#141414"}`}
-				testid="row-background"
-			>
-				<CommitInput
-					value={appearance?.background ?? ""}
-					placeholder="#141414"
-					ariaLabel="background hex"
-					testid="input-background"
-					onCommit={(v) => onSectionChange({ ...appearance, background: v === "" ? null : v })}
-				/>
-			</SettingsRow>
+			<ThemeCards
+				themes={themes}
+				active={activeTheme}
+				appearance={appearance}
+				onSelect={(id) => onSectionChange({ ...appearance, theme: id })}
+				onImported={() => void refreshThemes()}
+				onRemoved={(removed) => {
+					void refreshThemes();
+					// The server already fell back to Default; the write keeps the
+					// dialog's record mirror and the live vars in step with it.
+					if (removed.id === activeTheme.id) onSectionChange({ ...appearance, theme: "default" });
+				}}
+			/>
+			<div data-testid="group-colors" className="mt-5 flex flex-col gap-2">
+				<div className="flex items-end justify-between gap-4">
+					<p className="text-xs uppercase tracking-widest text-muted-foreground">
+						Colors{" "}
+						<span className="normal-case tracking-normal text-muted-foreground/70">
+							· overrides on top of the theme, kept when you switch
+						</span>
+					</p>
+					<button
+						type="button"
+						data-testid="colors-reset"
+						onClick={() => onSectionChange(clearColorOverrides(appearance))}
+						className="h-6 shrink-0 rounded-sm px-2 font-ui text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+					>
+						Reset all
+					</button>
+				</div>
+				<div className="grid grid-cols-2 gap-x-10 gap-y-2">
+					{THEME_COLOR_KEYS.map((key) => (
+						<ColorOverrideRow
+							key={key}
+							colorKey={key}
+							value={colorOverride(appearance, key)}
+							themeColor={activeTheme.colors[key]}
+							effective={colors[key]}
+							onCommit={(v) => onSectionChange(composeColorOverride(appearance, key, v))}
+						/>
+					))}
+				</div>
+			</div>
+			<p className="mt-5 mb-2 text-xs uppercase tracking-widest text-muted-foreground">Typography</p>
 			<SettingsRow
 				label="Reading font"
 				hint={`Empty = ${DEFAULT_READING_FONT}`}
@@ -309,27 +438,6 @@ export function AppearanceSection({
 							mdRendering: { ...md, headingWeight: Math.min(900, Math.max(100, Math.round(n))) },
 						});
 					}}
-				/>
-			</SettingsRow>
-			{/* The emphasis inks default to the REGULAR TEXT COLOR now
-			    (appearance wave, 2026-09-26) — the empty-state labels say
-			    so; explicit hex overrides ride unchanged. */}
-			<SettingsRow label="Bold color" hint="Empty = same as text" testid="row-bold-color">
-				<CommitInput
-					value={md?.boldColor ?? ""}
-					placeholder="same as text"
-					ariaLabel="bold color"
-					testid="input-bold-color"
-					onCommit={(v) => onSectionChange({ ...appearance, mdRendering: { ...md, boldColor: v === "" ? null : v } })}
-				/>
-			</SettingsRow>
-			<SettingsRow label="Italic color" hint="Empty = same as text" testid="row-italic-color">
-				<CommitInput
-					value={md?.italicColor ?? ""}
-					placeholder="same as text"
-					ariaLabel="italic color"
-					testid="input-italic-color"
-					onCommit={(v) => onSectionChange({ ...appearance, mdRendering: { ...md, italicColor: v === "" ? null : v } })}
 				/>
 			</SettingsRow>
 		</>
