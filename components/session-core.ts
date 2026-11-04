@@ -26,7 +26,9 @@ import {
 	newThinkingMessage,
 	newUserMessage,
 	projectView,
+	userMessageText,
 	type ChatInput,
+	type DrawingUpload,
 	type LhMarkerMessage,
 	type LhMessage,
 	type LhViewMessage,
@@ -34,6 +36,7 @@ import {
 	type QuestionAnswerData,
 	type QuestionDraft,
 } from "../src/core";
+import { localIngest } from "./drawing/pad-state";
 
 export type SessionStatus = "ready" | "submitted" | "streaming" | "error";
 
@@ -140,9 +143,16 @@ export function absorbed(m: LhMessage, record: readonly LhMessage[]): boolean {
 	if (typeof m.id !== "string" || !m.id.startsWith("c_")) return false;
 	const role = (m as { role?: string }).role;
 	if (role === "user") {
-		const content = (m as { content?: unknown }).content;
+		// Drawings (2026-11-04) make content a block list whose images exist
+		// only on the record copy: match the typed text plus the drawing
+		// count (the optimistic refs are local keys).
+		const text = userMessageText((m as { content?: unknown }).content);
+		const drawings = m.drawings?.length ?? 0;
 		return record.some(
-			(r) => (r as { role?: string }).role === "user" && (r as { content?: unknown }).content === content,
+			(r) =>
+				(r as { role?: string }).role === "user" &&
+				userMessageText((r as { content?: unknown }).content) === text &&
+				(r.drawings?.length ?? 0) === drawings,
 		);
 	}
 	if (role === "toolResult") {
@@ -174,7 +184,14 @@ export function absorbed(m: LhMessage, record: readonly LhMessage[]): boolean {
 /** Structural deep-equal for marker details (JSON-stable payloads — the
  *  constructors mint plain data). */
 function sameDetails(a: unknown, b: unknown): boolean {
-	return JSON.stringify(a) === JSON.stringify(b);
+	return JSON.stringify(detailsKey(a)) === JSON.stringify(detailsKey(b));
+}
+
+/** Drawing refs differ between the optimistic copy (local keys) and the
+ *  record's (snapshot ids) — compare them by count. */
+function detailsKey(details: unknown): unknown {
+	if (!details || typeof details !== "object" || !Array.isArray((details as { drawings?: unknown }).drawings)) return details;
+	return { ...(details as object), drawings: (details as { drawings: unknown[] }).drawings.length };
 }
 
 export interface SessionState {
@@ -697,19 +714,19 @@ export class SessionModel {
 		// write-ahead will persist (inputAppends), with LOCAL ids so
 		// adoption can tell them from the record's absorbed copies.
 		const optimistic: LhMessage[] = [];
-		if (input.type === "text") optimistic.push({ ...newUserMessage(input.text), id: localId() });
+		if (input.type === "text") optimistic.push({ ...newUserMessage(input.text, localIngest(input.drawings)), id: localId() });
 		else if (input.type === "thinking") {
 			// The practice submissions (2026-10-04): the marker lands
 			// optimistically — the card renders from its details the
 			// moment the button fires.
-			optimistic.push({ ...newThinkingMessage(input.problemCallId, input.text), id: localId() });
+			optimistic.push({ ...newThinkingMessage(input.problemCallId, input.text, localIngest(input.drawings)), id: localId() });
 		} else if (input.type === "next") {
 			// The move-on signal (owner round 16): the NEXT PROBLEM line
 			// renders the instant the chip/Enter fires.
 			optimistic.push({ ...newNextMessage(), id: localId() });
 		} else if (input.type === "answer") {
 			const tool = pendingCallTool([...this.base, ...this.tail], input.toolCallId) ?? "quiz";
-			const result = { ...newAnswerResult(input.toolCallId, tool, input.answer), id: localId() };
+			const result = { ...newAnswerResult(input.toolCallId, tool, input.answer, localIngest(input.drawings)), id: localId() };
 			optimistic.push(result);
 			this.unconfirmedAnswers.set(result.id, expectedKey ?? input.toolCallId);
 		}
@@ -807,11 +824,11 @@ export class SessionModel {
 	 *  settled mid-send (the race): fall back to the plain text send —
 	 *  the entry is dropped and send() pushes its own optimistic card.
 	 */
-	async steer(text: string): Promise<void> {
+	async steer(text: string, drawings?: DrawingUpload[]): Promise<void> {
 		const t = text.trim();
-		if (!t) return;
+		if (!t && !drawings?.length) return;
 		const id = `steer_${localId()}`;
-		this.steerQueueValue = [...this.steerQueueValue, { id, text: t }];
+		this.steerQueueValue = [...this.steerQueueValue, { id, text: t || "(drawing)" }];
 		this.onChange?.();
 		const dropSteer = () => {
 			this.steerQueueValue = this.steerQueueValue.filter((s) => s.id !== id);
@@ -821,12 +838,12 @@ export class SessionModel {
 			const res = await this.fetch(`/api/chats/${this.chatId}/steer`, {
 				method: "POST",
 				headers: { "Content-Type": "application/json" },
-				body: JSON.stringify({ input: { type: "steer", id, text: t } }),
+				body: JSON.stringify({ input: { type: "steer", id, text: t, ...(drawings?.length ? { drawings } : {}) } }),
 			});
 			if (res.ok) return; // parked or delivered — the stream lands the card
 			if (res.status === 409) {
 				dropSteer();
-				await this.send({ type: "text", text: t }); // the settle race: plain send
+				await this.send({ type: "text", text: t, ...(drawings?.length ? { drawings } : {}) }); // the settle race: plain send
 				return;
 			}
 			dropSteer();
@@ -839,9 +856,9 @@ export class SessionModel {
 
 	/** The answer path (the dock): the answer IS the question call's tool
 	 *  result (fork 1), riding as its input event. */
-	submitAnswer(tool: string, toolCallId: string, output: QuestionAnswerData, questionKey?: string): Promise<void> {
+	submitAnswer(tool: string, toolCallId: string, output: QuestionAnswerData, questionKey?: string, drawings?: DrawingUpload[]): Promise<void> {
 		void tool;
-		return this.send({ type: "answer", toolCallId, answer: output }, undefined, questionKey).then(() => undefined);
+		return this.send({ type: "answer", toolCallId, answer: output, ...(drawings?.length ? { drawings } : {}) }, undefined, questionKey).then(() => undefined);
 	}
 
 	/** The dismissal path (owner design 2026-10-03, "A2"): the skipped

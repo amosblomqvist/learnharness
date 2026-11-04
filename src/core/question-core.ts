@@ -19,6 +19,7 @@
 
 import { Type, type Static } from "typebox";
 import { stripModelValueDebris } from "./value-debris.ts";
+import type { DrawingAttachment, DrawingRef } from "./drawings.ts";
 
 // ─── shared types ───────────────────────────────────────────────────────────
 
@@ -462,6 +463,10 @@ export interface QuestionAnswerData {
 	 *  2026-10-03) — a separate channel from `thinking`, captured by the
 	 *  reading field and riding the check answer. Absent when empty. */
 	readingThinking?: string;
+	/** The learner's drawings riding this answer (2026-11-04) — UI refs,
+	 *  stamped server-side at ingestion; the model reads the images that
+	 *  follow the compact record. Absent when none. */
+	drawings?: DrawingRef[];
 	confidence?: number; // quiz only: the learner's stated probability (0-100, raw) that his selected answer is correct — never sent on "I don't know" (owner, 2026-10-01)
 	correct?: boolean; // quiz only
 	correctIndices?: number[]; // quiz only (rendering)
@@ -489,16 +494,27 @@ export interface AnswerRequest {
 	text?: string; // ask text-mode
 	thinking?: string; // the reasoning-on-the-question channel (was `note`)
 	readingThinking?: string; // the thinking-while-reading channel (check answers)
-	confidence?: number; // quiz only: 0-100 raw probability — 50 is a real coin flip, always sent (owner, 2026-10-01)
+	confidence?: number; // quiz only: 0-100 raw probability — 50 is a real coin flip; the learner must pick one before submitting (2026-11-04)
 }
 
 /** The confidence slider's snap stops (owner, 2026-10-01): raw probability
  *  that the selected answer is correct, uneven on purpose — resolution
  *  concentrates at the top where the calibration signal lives (90 vs 100
- *  separates knows from mastered). 50 is a genuine coin flip and the
- *  resting default — untouched and deliberate 50 are the same number. */
+ *  separates knows from mastered). 50 is a genuine coin flip. The slider
+ *  starts UNSET (2026-11-04): a forgotten slider must never record 50. */
 export const CONFIDENCE_STOPS: readonly number[] = [0, 30, 50, 70, 90, 100];
-export const DEFAULT_CONFIDENCE_INDEX = 2;
+/** Where the first ←/→ press lands on an unset slider: 50, the coin flip.
+ *  Later presses step from there. */
+export const CONFIDENCE_ARROW_START_INDEX = 2;
+
+/** The stop index nearest a raw 0–100 position (ties go to the lower stop). */
+export function nearestConfidenceIndex(value: number): number {
+	let best = 0;
+	for (let i = 1; i < CONFIDENCE_STOPS.length; i++) {
+		if (Math.abs(CONFIDENCE_STOPS[i]! - value) < Math.abs(CONFIDENCE_STOPS[best]! - value)) best = i;
+	}
+	return best;
+}
 
 // ─── dock selection (the client state machine, pure for tests) ─────────────
 
@@ -518,7 +534,10 @@ export interface QuestionFormDraft {
 	thinking: string;
 	other: string;
 	text: string;
-	confidenceIndex: number;
+	/** null = the learner has not picked a confidence yet. */
+	confidenceIndex: number | null;
+	/** The field's drawings, still editable (2026-11-04). */
+	drawings?: DrawingAttachment[];
 }
 
 export interface QuestionDraft {
@@ -798,5 +817,7 @@ export function compactAnswerForModel(ad: QuestionAnswerData): Record<string, un
 	const thinking = ad.thinking ?? ad.note;
 	if (thinking) out.thinking = thinking;
 	if (ad.readingThinking) out.thinkingWhileReading = ad.readingThinking;
+	// The count ties the images that FOLLOW this record to it (2026-11-04).
+	if (Array.isArray(ad.drawings) && ad.drawings.length > 0) out.drawings = ad.drawings.length;
 	return out;
 }

@@ -34,7 +34,7 @@
  */
 
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
-import type { AssistantMessage, Message, ToolResultMessage, UserMessage } from "@earendil-works/pi-ai";
+import type { AssistantMessage, ImageContent, Message, TextContent, ToolResultMessage, UserMessage } from "@earendil-works/pi-ai";
 import { QUESTION_TOOLS, type PendingQuestion } from "./pending.ts";
 import { CLAUDE_CODE_PROVIDER } from "./contracts/claude-code.ts";
 import {
@@ -44,6 +44,7 @@ import {
 	THINKING_LABEL,
 } from "./contracts/chat.ts";
 import { compactAnswerForModel, type QuestionAnswerData } from "./question-core.ts";
+import type { DrawingRef, IngestedDrawings } from "./drawings.ts";
 import { activeCompactionOf, keptIndexFor } from "./compaction.ts";
 import { parseQuestionInput } from "./tool-parts.ts";
 
@@ -82,6 +83,9 @@ export interface LhMarkerMessage {
 	display: boolean;
 	/** The UI payload — per-customType, never model-visible. */
 	details: unknown;
+	/** Model-facing images that ride `content` (practice thinking with
+	 *  drawings, 2026-11-04) — toLlmMessages appends them. */
+	images?: ImageContent[];
 	timestamp: number;
 }
 
@@ -97,6 +101,9 @@ export type LhMessage = (UserMessage | AssistantMessage | ToolResultMessage | Lh
 	/** CLI-reported effective context budget, not a catalog model maximum.
 	 * App-only metadata: never transmitted as provider/model message content. */
 	cliContextWindow?: number;
+	/** A user message's drawings as UI refs (2026-11-04) — the model reads
+	 * the image blocks in `content`. App-only: stripped at the wire. */
+	drawings?: DrawingRef[];
 };
 
 /** Latest response only: never borrow an older process/model's window when
@@ -178,12 +185,14 @@ export function newMessageId(): string {
 // ─── constructors (the input-event → native append mapping lives in
 //     core/input-events.ts; steers in core/contracts/jobs.ts) ─────────────────
 
-/** A learner-authored user message (text input, verdict note). */
-export function newUserMessage(text: string): LhMessage & UserMessage {
+/** A learner-authored user message (text input, verdict note). With
+ *  drawings (2026-11-04) the content becomes [text?, ...images] — the
+ *  model reads both together — and `drawings` carries the UI refs. */
+export function newUserMessage(text: string, drawings?: IngestedDrawings): LhMessage & UserMessage {
 	return {
 		id: newMessageId(),
 		role: "user",
-		content: text,
+		...userContent(text, drawings),
 		timestamp: Date.now(),
 	};
 }
@@ -193,8 +202,24 @@ export function newUserMessage(text: string): LhMessage & UserMessage {
  *  rides agent.steer(), the live stream's message events, and the settled
  *  record, so the optimistic queued indicator and the transcript card
  *  upsert by one identity. */
-export function newUserSteer(text: string, id: string): LhMessage & UserMessage {
-	return { id, role: "user", content: text, timestamp: Date.now() };
+export function newUserSteer(text: string, id: string, drawings?: IngestedDrawings): LhMessage & UserMessage {
+	return { id, role: "user", ...userContent(text, drawings), timestamp: Date.now() };
+}
+
+function userContent(text: string, drawings?: IngestedDrawings): Pick<UserMessage, "content"> & { drawings?: DrawingRef[] } {
+	if (!drawings || drawings.refs.length === 0) return { content: text };
+	const blocks: (TextContent | ImageContent)[] = text.trim() ? [{ type: "text", text }] : [];
+	return { content: [...blocks, ...drawings.images], drawings: drawings.refs };
+}
+
+/** The learner's typed text of a user message (string or block content). */
+export function userMessageText(content: unknown): string {
+	if (typeof content === "string") return content;
+	if (!Array.isArray(content)) return "";
+	return content
+		.filter((c): c is TextContent => (c as { type?: unknown })?.type === "text")
+		.map((c) => c.text)
+		.join("\n");
 }
 
 /** The learner's answer — the question call's tool result (fork 1).
@@ -207,16 +232,25 @@ export function newAnswerResult(
 	toolCallId: string,
 	toolName: string,
 	answer: unknown,
+	drawings?: IngestedDrawings,
 ): LhMessage & ToolResultMessage {
+	// Drawings (2026-11-04): the refs stamp the record (details) and the
+	// images FOLLOW the compact JSON, which counts them (`drawings: n`).
+	const record = drawings && drawings.refs.length > 0
+		? { ...(answer as QuestionAnswerData), drawings: drawings.refs }
+		: answer;
 	return {
 		id: newMessageId(),
 		role: "toolResult",
 		toolCallId,
 		toolName,
-		content: [{ type: "text", text: JSON.stringify(compactAnswerForModel(answer as QuestionAnswerData)) }],
+		content: [
+			{ type: "text", text: JSON.stringify(compactAnswerForModel(record as QuestionAnswerData)) },
+			...(drawings?.images ?? []),
+		],
 		// 0.87.1 narrowed ToolResultMessage.details to JsonRepresentation —
 		// our payloads are JSON-safe answer structures, so the cast is honest.
-		details: answer as ToolResultMessage["details"],
+		details: record as ToolResultMessage["details"],
 		isError: false,
 		timestamp: Date.now(),
 	};
@@ -313,14 +347,16 @@ export function newGraphContextMessage(picks: readonly GraphContextPick[], chain
  *  content label is the single "Your thinking"; `details` keeps the raw
  *  payload for the transcript card. One problem may carry many
  *  submissions. */
-export function newThinkingMessage(problemCallId: string, text: string): LhMarkerMessage {
+export function newThinkingMessage(problemCallId: string, text: string, drawings?: IngestedDrawings): LhMarkerMessage {
+	const drawn = drawings && drawings.refs.length > 0 ? drawings : undefined;
 	return {
 		id: newMessageId(),
 		role: "custom",
 		customType: "practice-thinking",
 		content: `${THINKING_LABEL}:\n${text}`,
 		display: true,
-		details: { problemCallId, text },
+		details: drawn ? { problemCallId, text, drawings: drawn.refs } : { problemCallId, text },
+		...(drawn ? { images: drawn.images } : {}),
 		timestamp: Date.now(),
 	};
 }
@@ -633,13 +669,13 @@ export function toLlmMessages(messages: readonly AgentMessage[]): Message[] {
 			if (marker.customType === "compaction" && head !== null) continue;
 			out.push({
 				role: "user",
-				content: [{ type: "text", text: marker.content }],
+				content: [{ type: "text", text: marker.content }, ...(marker.images ?? [])],
 			timestamp: marker.timestamp,
 			});
 			continue;
 		}
-		// Strip app-only id/CLI context metadata: the wire carries the native shape only.
-		const { id: _id, cliContextWindow: _cliContextWindow, ...native } = m as LhMessage;
+		// Strip app-only id/CLI context/drawing-ref metadata: the wire carries the native shape only.
+		const { id: _id, cliContextWindow: _cliContextWindow, drawings: _drawings, ...native } = m as LhMessage;
 		out.push(native as Message);
 		// Repair unanswered calls from completed generations, not calls in
 		// failed generations. Pi filters error/aborted assistants itself;

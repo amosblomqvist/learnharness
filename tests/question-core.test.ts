@@ -15,7 +15,8 @@ import {
 	dismissedAnswer,
 	coerceCorrectAnswer,
 	CONFIDENCE_STOPS,
-	DEFAULT_CONFIDENCE_INDEX,
+	CONFIDENCE_ARROW_START_INDEX,
+	nearestConfidenceIndex,
 	isCorrect,
 	normalizeOptions,
 	quizInputProblems,
@@ -439,7 +440,17 @@ function quizData(overrides?: Partial<QuestionData>): QuestionData {
 describe("confidence stops", () => {
 	it("the owner-decided grid (2026-10-01): resolution concentrates at the top", () => {
 		assert.deepEqual(CONFIDENCE_STOPS, [0, 30, 50, 70, 90, 100]);
-		assert.equal(CONFIDENCE_STOPS[DEFAULT_CONFIDENCE_INDEX], 50, "rests at a real coin flip");
+		assert.equal(CONFIDENCE_STOPS[CONFIDENCE_ARROW_START_INDEX], 50, "the first arrow press lands on a real coin flip");
+	});
+
+	it("snaps a raw position to the nearest stop", () => {
+		assert.equal(CONFIDENCE_STOPS[nearestConfidenceIndex(-12)], 0);
+		assert.equal(CONFIDENCE_STOPS[nearestConfidenceIndex(14)], 0);
+		assert.equal(CONFIDENCE_STOPS[nearestConfidenceIndex(16)], 30);
+		assert.equal(CONFIDENCE_STOPS[nearestConfidenceIndex(52)], 50);
+		assert.equal(CONFIDENCE_STOPS[nearestConfidenceIndex(81)], 90);
+		assert.equal(CONFIDENCE_STOPS[nearestConfidenceIndex(97)], 100);
+		assert.equal(CONFIDENCE_STOPS[nearestConfidenceIndex(140)], 100);
 	});
 });
 

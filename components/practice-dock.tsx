@@ -7,7 +7,9 @@ import { Button } from "@/components/ui/button";
 import { joinDictation, useDictationTarget } from "@/components/dictation";
 import { useEnterSubmits } from "@/components/enter-submits";
 import { PathInput } from "@/components/path-input";
+import { DrawButton, DrawingChips, DrawingPadHost, drawingUploads, useDrawingAttachments } from "@/components/drawing/drawing-attachments";
 import { cn } from "@/lib/utils";
+import type { DrawingUpload } from "@/src/core";
 
 /**
  * The practice dock (practice sessions, owner design 2026-10-04): an
@@ -38,8 +40,9 @@ export interface PracticeDockProps {
 	/** Collapse state, owned by the DockOverlay. */
 	expanded: boolean;
 	onExpand: () => void;
-	/** text — POST {type:"thinking"} (one lane; the register is read from the text). */
-	onSubmit: (text: string) => void;
+	/** text — POST {type:"thinking"} (one lane; the register is read from the text).
+	 *  `drawings` (2026-11-04): a drawing alone is a whole submission. */
+	onSubmit: (text: string, drawings?: DrawingUpload[]) => void;
 	/** Escape in the thinking field stops dictation (threaded from the page). */
 	onEscape?: () => void;
 	/** Compaction is running for this chat (owner round 14): the thinking
@@ -55,6 +58,8 @@ export function PracticeDock({ problemCallId, input, expanded, onExpand, onSubmi
 	// discipline): a submit resuming after `await finishDictation()` reads
 	// the tail, never a stale closure.
 	const thinkingRef = useRef("");
+	// Hand-drawn work (2026-11-04) rides the submission beside the text.
+	const draw = useDrawingAttachments();
 
 	useDictationTarget(
 		useCallback(
@@ -71,10 +76,12 @@ export function PracticeDock({ problemCallId, input, expanded, onExpand, onSubmi
 	const submit = () => {
 		if (compactionRunning) return;
 		const text = thinkingRef.current.trim();
-		if (text.length === 0) return;
+		const drawings = drawingUploads(draw.ref.current);
+		if (text.length === 0 && !drawings) return;
 		thinkingRef.current = "";
 		setThinking("");
-		onSubmit(text);
+		draw.clear();
+		onSubmit(text, drawings);
 	};
 
 	/* ENTER SUBMITS FROM ANYWHERE (owner round 6, 2026-10-05): dictation
@@ -153,16 +160,19 @@ export function PracticeDock({ problemCallId, input, expanded, onExpand, onSubmi
 				    question dock's — hint left, the SAME Button (h-9, px-3.5),
 				    one p-1 row. Corner radii concentric: shell 16 − m-1.5 (6) =
 				    field 10 − p-1 (4) = button 6. */}
+				<DrawingChips api={draw} className="px-2.5 pt-1" />
+				<DrawingPadHost api={draw} context={input.statement} contextLabel="Problem" />
 				<div className="flex items-center justify-between gap-2 p-1">
 					<span aria-hidden className="pl-1.5 text-xs text-muted-foreground">
 						{compactionRunning ? "compacting session…" : "↵ submits · ⇧↵ newline"}
 					</span>
+					<DrawButton api={draw} className="ml-auto size-9 rounded-[6px]" />
 					<Button
 						type="button"
 						data-testid="practice-send"
-						disabled={thinking.trim().length === 0 || compactionRunning}
+						disabled={(thinking.trim().length === 0 && draw.drawings.length === 0) || compactionRunning}
 						onClick={() => submit()}
-						className="ml-auto h-9 rounded-[6px] px-3.5 text-sm font-medium"
+						className="h-9 rounded-[6px] px-3.5 text-sm font-medium"
 					>
 						Submit thinking
 					</Button>

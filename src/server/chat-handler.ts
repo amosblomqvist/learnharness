@@ -63,6 +63,7 @@ import {
 	type TurnInput,
 } from "../core/input-events.ts";
 import { steerDelivered } from "../core/contracts.ts";
+import { ingestDrawings, saveDrawingSnapshots, type DrawingIngest } from "./drawings.ts";
 import type {CallUsage} from "../core/contracts.ts";
 
 /**
@@ -263,6 +264,21 @@ export async function handleChatInput(
 		return Response.json(envelope, { status: 503 });
 	}
 
+	// DRAWINGS (2026-11-04): decode and bound the learner's pad exports
+	// BEFORE the compaction gate's record re-read, so no await sits between
+	// that read and the appends. Nothing is stored until the appends are
+	// accepted (saveDrawingSnapshots at each write-ahead below).
+	let drawings: DrawingIngest | undefined;
+	const uploads = "drawings" in input ? input.drawings : undefined;
+	if (uploads && uploads.length > 0) {
+		try {
+			drawings = await ingestDrawings(uploads);
+		} catch (err) {
+			if (err instanceof ChatInputError) return Response.json({ error: err.message }, { status: 400 });
+			throw err;
+		}
+	}
+
 	// THE COMPACTION GATE (owner round 14, 2026-10-05 — the structural
 	// ruling: NOTHING model-facing for this chat interleaves with a
 	// running compaction): await any in-flight compaction (the settle
@@ -326,7 +342,7 @@ export async function handleChatInput(
 		appends =
 			input.type === "steers"
 				? input.steers.filter((s) => !steerDelivered(record.messages, s.id))
-				: inputAppends(record, input);
+				: inputAppends(record, input, drawings);
 	} catch (err) {
 		if (err instanceof ChatInputError) {
 			return Response.json({ error: err.message }, { status: 400 });
@@ -346,7 +362,10 @@ export async function handleChatInput(
 	// the composer gates), so adjacency holds by construction.
 	if (input.type === "answer" && hasUnresolvedQuestion([...record.messages, ...appends])) {
 		const merged = [...record.messages, ...appends];
-		try { stores.chatStore.saveMessages(chatId, merged); }
+		try {
+			saveDrawingSnapshots(stores.chatStore, chatId, drawings);
+			stores.chatStore.saveMessages(chatId, merged);
+		}
 		catch (err) {
 			console.error(`[chat ${chatId}] write-ahead persist failed:`, err);
 			return new Response("Your input could not be saved. Please try again.", { status: 500 });
@@ -378,7 +397,10 @@ export async function handleChatInput(
 	const stagedAutomatic = isSubscriptionProvider(conversation.provider) && input.type === "steers";
 	let persistBaseCount = stagedAutomatic ? record.messages.length : agentMessages.length;
 	try {
-		if (!stagedAutomatic) stores.chatStore.saveMessages(chatId, merged);
+		if (!stagedAutomatic) {
+			saveDrawingSnapshots(stores.chatStore, chatId, drawings);
+			stores.chatStore.saveMessages(chatId, merged);
+		}
 	} catch (err) {
 		console.error(`[chat ${chatId}] write-ahead persist failed:`, err);
 		endTurn(chatId);

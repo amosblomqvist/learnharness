@@ -2,7 +2,8 @@
 
 import { ToolContentResponse } from "@/components/ai-elements/message";
 import { cn } from "@/lib/utils";
-import type { ArtifactPartProps } from "@/src/core";
+import { drawingRefsOf, type ArtifactPartProps, type DrawingRef } from "@/src/core";
+import { DrawingThumbnails } from "@/components/drawing/drawing-thumbnails";
 
 /**
  * The practice transcript cards (practice sessions, owner design
@@ -53,6 +54,8 @@ export interface PracticeThinkingData {
 	/** Legacy records (pre 2026-10-05) carry the old two-lane flag; ignored. */
 	commit?: boolean;
 	text: string;
+	/** The submission's drawings (2026-11-04). */
+	drawings?: DrawingRef[];
 }
 
 export function ProblemCard({ part }: ArtifactPartProps) {
@@ -294,5 +297,14 @@ export function ThinkingCard({ data }: { data: PracticeThinkingData }) {
 	// 50%-italic quote block on expand. Legacy records' commit flag is
 	// deliberately unread (one lane now). A TRANSCRIPT row (owner round,
 	// 2026-10-07): full-width band + rail, arriving expanded.
-	return <ThinkingBlock testId="thinking-card" label="YOUR THINKING" text={data.text} defaultOpen />;
+	const drawings = drawingRefsOf(data.drawings);
+	if (drawings.length === 0) return <ThinkingBlock testId="thinking-card" label="YOUR THINKING" text={data.text} defaultOpen />;
+	// A drawing may be the whole submission (2026-11-04): thumbnails sit
+	// under the row, on its text inset.
+	return (
+		<div data-testid="thinking-card-drawings">
+			{data.text.trim() && <ThinkingBlock testId="thinking-card" label="YOUR THINKING" text={data.text} defaultOpen />}
+			<DrawingThumbnails drawings={drawings} className="mt-1 mb-2 pl-[3ch]" />
+		</div>
+	);
 }

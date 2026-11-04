@@ -58,10 +58,13 @@ import { QuestionDock } from "@/components/question-dock";
 import { SessionFind } from "@/components/session-find";
 import { SessionMessageNavigation } from "@/components/session-navigation";
 import { PracticeDock } from "@/components/practice-dock";
+import { drawingUploads, useDrawingAttachments } from "@/components/drawing/drawing-attachments";
+import { DrawingThumbnails } from "@/components/drawing/drawing-thumbnails";
+import { isDrawingPadOpen } from "@/components/drawing/pad-state";
 import { ThinkingCard, type PracticeThinkingData } from "@/components/practice-cards";
 import { GraphContextCard, type GraphContextData } from "@/components/graph-context-card";
 import { TopBar } from "@/components/top-bar";
-import type { ArtifactPartProps, JobRecord, Phase3, QuestionAnswerData, QuestionFormDraft, TurnUsage, SessionPricing } from "@/src/core";
+import type { ArtifactPartProps, DrawingAttachment, DrawingRef, DrawingUpload, JobRecord, Phase3, QuestionAnswerData, QuestionFormDraft, TurnUsage, SessionPricing } from "@/src/core";
 import type { LhViewMessage } from "@/src/core";
 import { PhaseChip, PhaseDivider } from "@/components/phase-divider";
 import {
@@ -379,6 +382,7 @@ export function Chat({
 		const onAbort = () => {
 			const target = escAbortTarget({
 				abortAsk: abortAskRef.current !== null,
+				drawPad: isDrawingPadOpen(),
 				mermaidFocus: mermaidFocusRef.current !== null || figureFocusRef.current !== null,
 				planOpen: planOpenRef.current,
 				setupOpen: setupOpenRef.current,
@@ -498,10 +502,10 @@ export function Chat({
 	// the dock stays mounted (the problem is still active until the agent
 	// concludes).
 	const submitThinking = useCallback(
-		(text: string) => {
+		(text: string, drawings?: DrawingUpload[]) => {
 			const problem = activeProblemRef.current;
 			if (!problem) return;
-			void send({ type: "thinking", problemCallId: problem.toolCallId, text });
+			void send({ type: "thinking", problemCallId: problem.toolCallId, text, ...(drawings ? { drawings } : {}) });
 		},
 		[send],
 	);
@@ -569,6 +573,10 @@ export function Chat({
 	const recordComposerText = useCallback((v: string) => {
 		textRef.current = v;
 	}, []);
+	// The composer's drawings (2026-11-04): sent with the text (or alone),
+	// steered with it, and restored with it when a send is refused.
+	const composerDrawings = useDrawingAttachments();
+	const draftDrawingsRef = useRef<DrawingAttachment[] | null>(null);
 	// Saved slot completeness is live, but the session's selected route
 	// comes from its own ordinary model control, never today's Strong pin.
 	const { catalog, configured, zeroKeys } = useModelSetup(initialConfigured);
@@ -676,6 +684,10 @@ export function Chat({
 			if (draftRef.current !== null) {
 				applyText(draftRef.current);
 				draftRef.current = null;
+			}
+			if (draftDrawingsRef.current !== null) {
+				composerDrawings.replace(draftDrawingsRef.current);
+				draftDrawingsRef.current = null;
 			}
 			clearError();
 			if (keyRefused && catalogRef.current?.providers.some((p) => p.keyPresent)) openModelPicker();
@@ -1214,7 +1226,8 @@ export function Chat({
 	const doSend = () => {
 		if (busy || pending || compacting) return;
 		const t = textRef.current.trim();
-		if (!t) return;
+		const drawings = composerDrawings.ref.current;
+		if (!t && drawings.length === 0) return;
 		if (zeroKeys) {
 			setSetupOpen(true);
 			return;
@@ -1223,13 +1236,18 @@ export function Chat({
 			openModelPicker();
 			return; // No optimistic send and no change to the learner's draft.
 		}
-		if (openingDraftRef.current !== null) {
+		// A drawing makes this an ordinary send: the opening-prompt
+		// delivery replays text only.
+		if (openingDraftRef.current !== null && drawings.length === 0) {
 			deliverOpeningPrompt(t);
 			return;
 		}
 		draftRef.current = t; // the refusal flow's preserve-and-replay seam
+		draftDrawingsRef.current = drawings.length > 0 ? drawings : null;
+		const uploads = drawingUploads(drawings);
 		applyText("");
-		void send({ type: "text", text: t });
+		composerDrawings.clear();
+		void send({ type: "text", text: t, ...(uploads ? { drawings: uploads } : {}) });
 	};
 
 	/* STEER VS SEND (owner arc 2026-10-03): a send while a turn runs steers
@@ -1244,10 +1262,12 @@ export function Chat({
 	const doSteerOrSend = () => {
 		if (pending || compacting) return;
 		const t = textRef.current.trim();
-		if (!t) return;
+		if (!t && composerDrawings.ref.current.length === 0) return;
 		if (busy) {
+			const uploads = drawingUploads(composerDrawings.ref.current);
 			applyText("");
-			void steer(t);
+			composerDrawings.clear();
+			void steer(t, uploads);
 			return;
 		}
 		doSend();
@@ -1428,7 +1448,7 @@ export function Chat({
 								// assistant group — is gone). Never a user bubble: the wake is
 								// scaffolding; the model-facing instruction lives in the adapter.
 								<PhaseDivider key={m.id || `m-${mi}`} phase="plan" />
-							) : m.role === "user" && m.parts.length > 0 && m.parts.every((p) => p.type.startsWith("data-")) ? (
+							) : m.role === "user" && m.parts.length > 0 && m.parts.every((p) => p.type.startsWith("data-") && p.type !== "data-drawings") ? (
 								// Marker cards (custom messages, 2026-10-04): user-side
 								// scaffolding — the graph-context pick, the practice
 								// thinking trace — render as cards in the transcript
@@ -1520,6 +1540,11 @@ export function Chat({
 												<div className="lh-prose whitespace-pre-wrap text-foreground">
 													<PathText text={m.parts.filter((p) => p.type === "text").map((p) => p.text).join("\n")} />
 												</div>
+												{m.parts.map((p) =>
+													p.type === "data-drawings" ? (
+														<DrawingThumbnails key={p.id} drawings={(p.data as { drawings: DrawingRef[] }).drawings} className="mt-1.5 mb-1" />
+													) : null,
+												)}
 											</div>
 									) : (
 									<Message from="assistant" className="max-w-full">
@@ -1747,6 +1772,7 @@ export function Chat({
 							onSend={onSend}
 							onStop={abortInFlightTurn}
 							sendAllowed={sendAllowed}
+							drawings={composerDrawings}
 							dictationActive={dictation.active}
 							onEscape={dictation.active ? dictation.cancel : undefined}
 							// The pause affordance (owner round 16): the placeholder
@@ -1757,7 +1783,7 @@ export function Chat({
 							placeholder={nextReady ? "Ask anything, or press Enter for the next one." : undefined}
 						/>
 					}
-					onSubmitAnswer={(output) => {
+					onSubmitAnswer={(output, drawings) => {
 						if (!pending) return;
 						// THE ANSWER IS THE QUESTION CALL'S TOOL RESULT (fork 1, owner
 						// 2026-09-26): one input event, one turn — the hook appends
@@ -1771,7 +1797,7 @@ export function Chat({
 						const reading = readingThinkingRef.current.trim() || undefined;
 						// The pending-id effect clears this only when the question
 						// actually leaves. An offline preflight keeps the draft visible.
-						submitAnswer(pending.tool, pending.toolCallId, reading ? { ...output, readingThinking: reading } : output, pending.key);
+						submitAnswer(pending.tool, pending.toolCallId, reading ? { ...output, readingThinking: reading } : output, pending.key, drawings);
 					}}
 				/>
 				</Conversation>
@@ -1872,6 +1898,8 @@ export function initialPromptOwed(messages: readonly { role: string }[], prompt:
 
 export function escAbortTarget(s: {
 	abortAsk: boolean;
+	/** A drawing pad is open (2026-11-04): it claims Esc itself (Done). */
+	drawPad: boolean;
 	mermaidFocus: boolean;
 	planOpen: boolean;
 	setupOpen: boolean;
@@ -1885,6 +1913,7 @@ export function escAbortTarget(s: {
 	busy: boolean;
 }): EscAbortTarget {
 	if (s.abortAsk) return null; // the popup's own Esc — claimed by the dialog
+	if (s.drawPad) return null; // the pad's own Esc keeps the drawing
 	if (s.mermaidFocus) return "mermaid";
 	if (s.planOpen) return "plan";
 	if (s.setupOpen) return "setup";
@@ -1964,7 +1993,7 @@ function DockOverlay({
 	 *  question (the composer is replaced); null in teaching sessions. */
 	practice: { toolCallId: string; input: unknown } | null;
 	/** (commit, text) — the practice dock's two submit lanes. */
-	onSubmitThinking: (text: string) => void;
+	onSubmitThinking: (text: string, drawings?: DrawingUpload[]) => void;
 	/** Teach-phase pending question: arrives collapsed behind the reveal button (W5). */
 	requiresReveal: boolean;
 	/** The reading-thinking draft (owner 2026-10-03) — owned by ChatView so
@@ -1980,7 +2009,7 @@ function DockOverlay({
 	cliContextWindow: ReturnType<typeof cliContextWindowOf>;
 	pricing?: SessionPricing;
 	composer: React.ReactNode;
-	onSubmitAnswer: (output: QuestionAnswerData) => void;
+	onSubmitAnswer: (output: QuestionAnswerData, drawings?: DrawingUpload[]) => void;
 	/** The model control's pass-through (the stats bar hosts it). */
 	chatId: string;
 	onModelChange: (model: string | undefined) => void;

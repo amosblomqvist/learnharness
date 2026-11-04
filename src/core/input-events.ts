@@ -30,6 +30,7 @@
 
 import type { QuestionAnswerData } from "./question-core.ts";
 import type { LhMessage } from "./native-messages.ts";
+import { MAX_DRAWING_BASE64_CHARS, MAX_DRAWINGS, type DrawingUpload, type IngestedDrawings } from "./drawings.ts";
 import {
 	activeProblemOf,
 	concludedByDismissalPair,
@@ -47,8 +48,11 @@ import { QUESTION_TOOLS, toolQuestionKind } from "./pending.ts";
 
 /** One client-originated input event (the POST body's `input`). */
 export type ChatInput =
-	| { type: "text"; text: string }
-	| { type: "answer"; toolCallId: string; answer: QuestionAnswerData }
+	/** `drawings` (2026-11-04): the learner's pad exports, ingested
+	 *  server-side before the appends — a drawing alone is a whole
+	 *  message, so text may then be empty. */
+	| { type: "text"; text: string; drawings?: DrawingUpload[] }
+	| { type: "answer"; toolCallId: string; answer: QuestionAnswerData; drawings?: DrawingUpload[] }
 	| { type: "continue" }
 	/** The failed-turn retry (issue #110): the banner's Retry button. */
 	| { type: "retry" }
@@ -58,7 +62,7 @@ export type ChatInput =
 	 *  thinking on the ACTIVE problem — one lane (owner 2026-10-05):
 	 *  whether it claims an answer is read from the text. One
 	 *  problem may carry many submissions; each is its own turn. */
-	| { type: "thinking"; problemCallId: string; text: string }
+	| { type: "thinking"; problemCallId: string; text: string; drawings?: DrawingUpload[] }
 	/** The practice move-on signal (owner round 16): the learner's
 	 *  explicit go-ahead during the between-problems pause — the Next
 	 *  chip or Enter on an empty composer. Practice sessions only, and
@@ -119,7 +123,7 @@ export function parseDismissInput(input: unknown): DismissInput {
  *  (a send with no live turn is a plain text send, which already exists).
  *  The id is client-minted (steer_<localid>): the queued indicator keys on
  *  it, and the drain's message events upsert the real card by the same id. */
-export type UserSteerInput = { type: "steer"; id: string; text: string };
+export type UserSteerInput = { type: "steer"; id: string; text: string; drawings?: DrawingUpload[] };
 
 /** Parse and validate a steer event off a request body. */
 export function parseUserSteerInput(input: unknown): UserSteerInput {
@@ -129,10 +133,29 @@ export function parseUserSteerInput(input: unknown): UserSteerInput {
 	if (typeof i.id !== "string" || i.id.length === 0) {
 		throw new ChatInputError("steer input requires a client-minted id");
 	}
-	if (typeof i.text !== "string" || i.text.trim().length === 0) {
-		throw new ChatInputError("steer input requires non-empty text");
+	const drawings = parseDrawingUploads(i.drawings);
+	if (typeof i.text !== "string" || (i.text.trim().length === 0 && !drawings)) {
+		throw new ChatInputError("steer input requires non-empty text or a drawing");
 	}
-	return { type: "steer", id: i.id, text: i.text };
+	return { type: "steer", id: i.id, text: i.text, ...(drawings ? { drawings } : {}) };
+}
+
+/** Parse an input's optional `drawings` (absent or empty → undefined).
+ *  Shape and size only — the server's ingestion decodes and bounds the
+ *  pixels (an invalid image is an honest 400 there). */
+export function parseDrawingUploads(raw: unknown): DrawingUpload[] | undefined {
+	if (raw === undefined) return undefined;
+	if (!Array.isArray(raw)) throw new ChatInputError("drawings must be an array");
+	if (raw.length > MAX_DRAWINGS) throw new ChatInputError(`at most ${MAX_DRAWINGS} drawings per submission`);
+	const out: DrawingUpload[] = [];
+	for (const d of raw) {
+		const data = (d as { data?: unknown } | null)?.data;
+		if (typeof data !== "string" || data.length === 0 || data.length > MAX_DRAWING_BASE64_CHARS || !/^[A-Za-z0-9+/]+={0,2}$/.test(data)) {
+			throw new ChatInputError("each drawing must be base64 image data");
+		}
+		out.push({ data });
+	}
+	return out.length > 0 ? out : undefined;
 }
 
 /** The native appends a dismissal makes (pure — same orphan discipline
@@ -164,19 +187,23 @@ export function parseChatInput(input: unknown): ChatInput {
 	if (typeof input !== "object" || input === null) throw new ChatInputError("input must be an object");
 	const i = input as Record<string, unknown>;
 	switch (i.type) {
-		case "text":
-			if (typeof i.text !== "string" || (i.text as string).trim().length === 0) {
-				throw new ChatInputError("text input requires non-empty text");
+		case "text": {
+			const drawings = parseDrawingUploads(i.drawings);
+			if (typeof i.text !== "string" || ((i.text as string).trim().length === 0 && !drawings)) {
+				throw new ChatInputError("text input requires non-empty text or a drawing");
 			}
-			return { type: "text", text: i.text };
-		case "answer":
+			return { type: "text", text: i.text, ...(drawings ? { drawings } : {}) };
+		}
+		case "answer": {
 			if (typeof i.toolCallId !== "string" || i.toolCallId.length === 0) {
 				throw new ChatInputError("answer input requires toolCallId");
 			}
 			if (typeof i.answer !== "object" || i.answer === null) {
 				throw new ChatInputError("answer input requires the graded answer object");
 			}
-			return { type: "answer", toolCallId: i.toolCallId, answer: i.answer as QuestionAnswerData };
+			const drawings = parseDrawingUploads(i.drawings);
+			return { type: "answer", toolCallId: i.toolCallId, answer: i.answer as QuestionAnswerData, ...(drawings ? { drawings } : {}) };
+		}
 		case "continue":
 			return { type: "continue" };
 		case "retry":
@@ -187,14 +214,16 @@ export function parseChatInput(input: unknown): ChatInput {
 				throw new ChatInputError("retry-question input requires an exact question occurrence");
 			}
 			return { type: "retry-question", messageId: i.messageId, contentIndex: i.contentIndex, toolCallId: i.toolCallId };
-		case "thinking":
+		case "thinking": {
 			if (typeof i.problemCallId !== "string" || i.problemCallId.length === 0) {
 				throw new ChatInputError("thinking input requires problemCallId");
 			}
-			if (typeof i.text !== "string" || i.text.trim().length === 0) {
-				throw new ChatInputError("thinking input requires non-empty text");
+			const drawings = parseDrawingUploads(i.drawings);
+			if (typeof i.text !== "string" || (i.text.trim().length === 0 && !drawings)) {
+				throw new ChatInputError("thinking input requires non-empty text or a drawing");
 			}
-			return { type: "thinking", problemCallId: i.problemCallId, text: i.text };
+			return { type: "thinking", problemCallId: i.problemCallId, text: i.text, ...(drawings ? { drawings } : {}) };
+		}
 		case "next":
 			return { type: "next" };
 		default:
@@ -210,20 +239,24 @@ export function parseChatInput(input: unknown): ChatInput {
  * DANGLING QUESTION call in the record (posed, never answered) — anything
  * else 400s honestly instead of silently interrupting a question or
  * double-answering.
+ *
+ * `drawings` are the input's uploads AFTER server ingestion (the caller
+ * decodes and stores them); the raw uploads on `input` are never read here.
  */
 export function inputAppends(
 	record: { messages: LhMessage[]; kind?: string },
 	input: ChatInput,
+	drawings?: IngestedDrawings,
 ): LhMessage[] {
 	switch (input.type) {
 		case "text":
-			return [...dismissalConclusion(record), newUserMessage(input.text)];
+			return [...dismissalConclusion(record), newUserMessage(input.text, drawings)];
 		case "answer": {
 			const pending = danglingQuestionOf(record.messages);
 			if (!pending || pending.toolCallId !== input.toolCallId) {
 				throw new ChatInputError("answer input targets no pending question call");
 			}
-			return [newAnswerResult(input.toolCallId, pending.tool, input.answer)];
+			return [newAnswerResult(input.toolCallId, pending.tool, input.answer, drawings)];
 		}
 		case "continue":
 			return dismissalConclusion(record);
@@ -238,7 +271,7 @@ export function inputAppends(
 			if (!active || active.toolCallId !== input.problemCallId) {
 				throw new ChatInputError("thinking input targets no active problem");
 			}
-			return [...dismissalConclusion(record), newThinkingMessage(input.problemCallId, input.text)];
+			return [...dismissalConclusion(record), newThinkingMessage(input.problemCallId, input.text, drawings)];
 		}
 		case "next": {
 			// Honest 400s, the thinking gate's discipline: the signal is a

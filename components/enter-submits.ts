@@ -36,6 +36,7 @@
 
 import { useEffect, useRef } from "react";
 import { isTypingSurface } from "@/src/core";
+import { isDrawingPadOpen } from "@/components/drawing/pad-state";
 
 /** Overlay roots whose buttons keep native Enter (hand-rolled menus mark
  *  themselves data-lh-menu; Radix poppers/dialogs carry their own attrs). */
@@ -66,6 +67,8 @@ export function useEnterSubmits(submit: () => void): void {
 		const onKey = (e: KeyboardEvent) => {
 			if (e.key !== "Enter") return;
 			if (e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return;
+			// The drawing pad is a surfaced layer: Enter never submits under it.
+			if (isDrawingPadOpen()) return;
 			if (isTypingSurface(e)) return;
 			const target = e.target as HTMLElement | null;
 			if (target?.tagName === "BUTTON" && buttonKeepsNativeEnter(target)) return;

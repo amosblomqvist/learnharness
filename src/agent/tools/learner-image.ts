@@ -72,12 +72,22 @@ export async function loadLearnerImage(rawPath: string, signal?: AbortSignal): P
 	signal?.throwIfAborted();
 	const absolute = await checkLearnerImage(rawPath);
 	const bytes = await readBounded(absolute, signal);
+	if (!detectSupportedImageMimeType(bytes)) throw new Error(`Not a supported image: ${absolute}`);
+	return { path: absolute, ...await normalizeLearnerImageBytes(bytes, signal) };
+}
+
+/** The bytes half of loadLearnerImage, shared with pad drawings (which
+ *  arrive as bytes, never a path): bounds, upright/metadata-free storage
+ *  form, and the SHA-256 snapshot identity. */
+export async function normalizeLearnerImageBytes(bytes: Uint8Array, signal?: AbortSignal): Promise<ImageSnapshot & { snapshotId: string }> {
+	signal?.throwIfAborted();
+	if (bytes.length > MAX_LEARNER_IMAGE_BYTES) throw new Error("Image exceeds 25 MiB; provide a smaller image");
 	const mime = detectSupportedImageMimeType(bytes);
-	if (!mime) throw new Error(`Not a supported image: ${absolute}`);
+	if (!mime) throw new Error("Not a supported image (jpg, png, gif, webp, or bmp)");
 	checkImageDimensions(bytes, mime);
 	const stored = await normalize(bytes, signal);
 	signal?.throwIfAborted();
 	if (stored.mimeType !== "image/png" && stored.mimeType !== "image/jpeg") throw new Error("Unexpected stored image format");
 	const snapshotId = createHash("sha256").update(Buffer.from(stored.data, "base64")).digest("hex");
-	return { path: absolute, snapshotId, mimeType: stored.mimeType, data: stored.data, width: stored.width, height: stored.height };
+	return { snapshotId, mimeType: stored.mimeType, data: stored.data, width: stored.width, height: stored.height };
 }

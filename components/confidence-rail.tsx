@@ -31,13 +31,15 @@ export const CONFIDENCE_COLORS: readonly string[] = [
 	"#10b981", // 100
 ];
 
-/** The rail's paint for a stop value (0–100). */
-export function confidenceRailStyle(value: number): CSSProperties {
-	const color = CONFIDENCE_COLORS[CONFIDENCE_STOPS.indexOf(value)] ?? CONFIDENCE_COLORS[2]!;
+/** The rail's paint for a stop value (0–100). null = unset (2026-11-04):
+ *  base and ticks only, no fill — nothing has been claimed yet. */
+export function confidenceRailStyle(value: number | null): CSSProperties {
+	const fill = value ?? 0;
+	const color = value === null ? "transparent" : CONFIDENCE_COLORS[CONFIDENCE_STOPS.indexOf(value)] ?? CONFIDENCE_COLORS[2]!;
 	return {
 		backgroundColor: "#141414",
 		backgroundImage: [
-			`linear-gradient(90deg, ${color} 0%, ${color} ${value}%, transparent ${value}%, transparent 100%)`,
+			`linear-gradient(90deg, ${color} 0%, ${color} ${fill}%, transparent ${fill}%, transparent 100%)`,
 			...[30, 50, 70, 90].map(
 				() => "linear-gradient(90deg, rgba(230,230,230,0.35), rgba(230,230,230,0.35))",
 			),

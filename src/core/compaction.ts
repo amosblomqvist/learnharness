@@ -37,7 +37,7 @@ import type { PlanTree } from "./contracts/plan.ts";
 import { derivePlanStatusesLh, derivedNodeStatus } from "./contracts/plan.ts";
 import { COMPACTED_HISTORY_HEADER } from "./contracts/chat.ts";
 import type { LhMessage, LhMarkerMessage } from "./native-messages.ts";
-import { newMessageId } from "./native-messages.ts";
+import { newMessageId, userMessageText } from "./native-messages.ts";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { AssistantMessage, ToolResultMessage, SystemMessage } from "@earendil-works/pi-ai";
 
@@ -311,7 +311,11 @@ export function serializeForSummary(messages: readonly LhMessage[]): string {
 	for (const m of messages) {
 		const role = (m as { role?: string }).role;
 		if (role === "user") {
-			lines.push(`[LEARNER] ${(m as { content: string }).content}`);
+			// Drawings (2026-11-04) make content a block list: text plus a
+			// count — the summary carries the gist, never image bytes.
+			const drawings = (m as LhMessage).drawings?.length ?? 0;
+			const note = drawings > 0 ? ` (attached ${drawings} drawing${drawings === 1 ? "" : "s"})` : "";
+			lines.push(`[LEARNER] ${userMessageText((m as { content: unknown }).content)}${note}`);
 		} else if (role === "assistant") {
 			const assistant = m as AssistantMessage;
 			const blocks: string[] = [];
@@ -325,7 +329,7 @@ export function serializeForSummary(messages: readonly LhMessage[]): string {
 		} else if (role === "toolResult") {
 			const result = m as ToolResultMessage;
 			const text = result.content
-				.map((c) => (c.type === "text" ? c.text : JSON.stringify(c)))
+				.map((c) => (c.type === "text" ? c.text : c.type === "image" ? "(image)" : JSON.stringify(c)))
 				.join("\n");
 			lines.push(
 				`[RESULT for ${result.toolName}${result.isError ? " (error)" : ""}] ${
@@ -335,7 +339,9 @@ export function serializeForSummary(messages: readonly LhMessage[]): string {
 		} else if (role === "custom") {
 			const marker = m as LhMarkerMessage;
 			if (marker.customType === "plan-block") continue; // UI-only
-			lines.push(`[SYSTEM NOTE] ${marker.content}`);
+			const drawings = marker.images?.length ?? 0;
+			const note = drawings > 0 ? ` (attached ${drawings} drawing${drawings === 1 ? "" : "s"})` : "";
+			lines.push(`[SYSTEM NOTE] ${marker.content}${note}`);
 		}
 	}
 	return lines.join("\n\n");

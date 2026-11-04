@@ -2,13 +2,14 @@
 
 import { useState } from "react";
 import { ConfidenceRail } from "@/components/confidence-rail";
+import { DrawingThumbnails } from "@/components/drawing/drawing-thumbnails";
 import { GlyphMark } from "@/components/ui/glyph-mark";
 import { ThinkingBlock } from "@/components/thinking-block";
 import { PathText } from "@/components/file-path-chip";
 import { cn } from "@/lib/utils";
 import { ToolContentResponse } from "@/components/ai-elements/message";
 import type { QuestionAnswerData } from "@/src/core";
-import { answerForPresentation, parseAskInput, parseQuizInput } from "@/src/core";
+import { answerForPresentation, drawingRefsOf, parseAskInput, parseQuizInput } from "@/src/core";
 
 /**
  * Static rendering of an answered question (tool part in `output-available`).
@@ -193,6 +194,9 @@ export function AnsweredCard({ answer: savedAnswer, input }: { answer: QuestionA
 					inCard
 				/>
 			)}
+
+			{/* The learner's drawings (2026-11-04): thumbnails, click to enlarge. */}
+			<DrawingThumbnails drawings={drawingRefsOf(answer.drawings)} className="mt-2" />
 
 			{/* px-3→removed: card p-4 + box px-3 double-inset sat the "Why" label deeper
 			    than the option box edges (owner, round 3). Sides flush with everything

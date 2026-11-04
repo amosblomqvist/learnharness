@@ -39,6 +39,7 @@ import { activeCompactionOf, type CompactionDetails } from "./compaction.ts";
 import { QUESTION_TOOLS } from "./pending.ts";
 import type { SubagentArtifactData, SubagentResultMeta } from "./contracts/jobs.ts";
 import type { PlanBlockData } from "./contracts/chat.ts";
+import { drawingRefsOf } from "./drawings.ts";
 
 /** A view part — the loose part vocabulary the renderers consume (the same
  *  shape names the pre-Wave-D UIMessage dialect used, so the renderer
@@ -187,7 +188,12 @@ export function projectView(messages: readonly LhMessage[], live?: LiveTurnState
 				typeof content === "string"
 					? [content]
 					: content.filter((c) => c.type === "text").map((c) => (c as { text: string }).text);
-			out.push({ id: m.id, role: "user", parts: texts.map(textPart) });
+			const parts: LhViewPart[] = texts.map(textPart);
+			// Drawings (2026-11-04): refs only — the thumbnails fetch their
+			// snapshots; base64 never rides the projected view.
+			const drawings = drawingRefsOf(m.drawings);
+			if (drawings.length > 0) parts.push({ type: "data-drawings", id: `dr_${m.id}`, data: { drawings } });
+			out.push({ id: m.id, role: "user", parts });
 			continue;
 		}
 

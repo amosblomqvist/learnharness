@@ -12,7 +12,7 @@ import { escAbortTarget } from "../components/chat.tsx";
  * pure) is the defense. Priority = stacking order.
  */
 describe("escAbortTarget (the layered-Esc ruling)", () => {
-	const none = { abortAsk: false, mermaidFocus: false, planOpen: false, setupOpen: false, pending: false, problem: false, busy: false };
+	const none = { abortAsk: false, drawPad: false, mermaidFocus: false, planOpen: false, setupOpen: false, pending: false, problem: false, busy: false };
 
 	it("no overlays: the 2026-10-02 chain stands (question before turn)", () => {
 		assert.equal(escAbortTarget({ ...none, pending: true }), "question");
@@ -25,6 +25,12 @@ describe("escAbortTarget (the layered-Esc ruling)", () => {
 		assert.equal(escAbortTarget({ ...none, problem: true }), "problem");
 		assert.equal(escAbortTarget({ ...none, problem: true, busy: true }), "problem", "the problem card outranks the turn abort");
 		assert.equal(escAbortTarget({ ...none, planOpen: true, problem: true }), "plan", "an open popup still outranks the problem");
+	});
+
+	it("an open drawing pad claims Esc over everything underneath (2026-11-04)", () => {
+		for (const under of ["pending", "problem", "busy", "planOpen", "mermaidFocus"] as const) {
+			assert.equal(escAbortTarget({ ...none, drawPad: true, [under]: true }), null, `the pad outranks ${under}`);
+		}
 	});
 
 	it("an open overlay claims Esc over a pending question — the owner's report", () => {

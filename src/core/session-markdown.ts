@@ -63,6 +63,10 @@ function markdownContext(messages: ReadonlyArray<LhMessage>): MarkdownContext {
 	return { messages, calls, failedOutputCalls: failedOutputCallIds(messages) };
 }
 
+function drawingsLine(count: number): string {
+	return count === 1 ? "_(drawing attached)_" : `_(${count} drawings attached)_`;
+}
+
 /** solvedWithHints → "Solved with hints" — the outcome enum reads as prose. */
 function outcomeLabel(outcome: string): string {
 	const spaced = outcome.replace(/([a-z])([A-Z])/g, (_, lo: string, hi: string) => `${lo} ${hi.toLowerCase()}`);
@@ -81,6 +85,7 @@ function toolResultBody(result: ToolResultMessage, ctx?: MarkdownContext): { hea
 				answers: string[];
 				other: string;
 				dismissed: boolean;
+				drawings: unknown[];
 		  }>
 		| undefined;
 
@@ -106,6 +111,7 @@ function toolResultBody(result: ToolResultMessage, ctx?: MarkdownContext): { hea
 		else if (out?.correct === false) body.push("The learner answered incorrectly.");
 		else if (typeof out?.text === "string" && out.text.trim()) body.push(`The learner answered in his own words: ${out.text.trim()}`);
 		if (typeof out?.note === "string" && out.note) body.push(`*(his thinking: ${out.note})*`);
+		if (Array.isArray(out?.drawings) && out.drawings.length > 0) body.push(drawingsLine(out.drawings.length));
 		return { heading, body };
 	}
 
@@ -168,6 +174,12 @@ export function messageMarkdown(
 	if (role === "user") {
 		for (const text of userFacingTextOf((message as { content: unknown }).content)) {
 			parts.push(`### Learner${anchor}\n\n${text.trim()}`);
+		}
+		// Drawings (2026-11-04): the export names them; the pixels stay in the record.
+		const drawings = message.drawings?.length ?? 0;
+		if (drawings > 0) {
+			if (parts.length > 0) parts[parts.length - 1] += `\n\n${drawingsLine(drawings)}`;
+			else parts.push(`### Learner${anchor}\n\n${drawingsLine(drawings)}`);
 		}
 	} else if (role === "assistant") {
 		for (const text of userFacingTextOf((message as { content: unknown }).content, ctx?.failedOutputCalls ?? failedOutputCallIds([message]))) {

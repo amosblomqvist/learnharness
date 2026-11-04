@@ -92,6 +92,13 @@ describe("question submission draft restoration", () => {
 		assert.match(html, /role="radio" aria-checked="true" data-kbdrow="0"/);
 		assert.ok(html.includes("preserved reasoning"));
 		assert.ok(html.includes("90%"));
+		assert.ok(!html.includes("set your confidence to submit"), "a restored pick satisfies the gate");
+	});
+
+	it("restores an unset confidence as unset", () => {
+		const html = renderToStaticMarkup(<QuestionDock toolName="quiz" toolCallId="q1" input={quizInput} expanded onExpand={() => {}} onSubmit={() => {}} initialDraft={{ ...draft, confidenceIndex: null }} />);
+		assert.match(html, /data-testid="confidence-value"[^>]*>—</);
+		assert.match(html, /set your confidence to submit/);
 	});
 
 	it("restores an ask's custom answer and a free-text answer", () => {
@@ -162,6 +169,43 @@ describe("DispatchCard — the BYOK refusal tone (owner, 2026-09-22)", () => {
 	});
 });
 
+describe("required confidence (2026-11-04)", () => {
+	const selected = {
+		selection: { selected: new Set([0]), otherSelected: false, dontKnow: false },
+		thinking: "",
+		other: "",
+		text: "",
+		confidenceIndex: null,
+	};
+
+	it("starts unset: empty rail, hidden disc, '—', Submit disabled with the reason", () => {
+		const html = renderToStaticMarkup(<QuestionDock toolName="quiz" toolCallId="q1" input={quizInput} expanded onExpand={() => {}} onSubmit={() => {}} initialDraft={selected} />);
+		assert.match(html, /data-testid="confidence-value"[^>]*>—</);
+		assert.match(html, /aria-valuetext="not set"/);
+		assert.match(html, /data-unset=""/);
+		assert.match(html, /set your confidence to submit/);
+		assert.match(html, /<button[^>]*type="submit"[^>]*disabled=""/, "an answer alone cannot submit");
+	});
+
+	it("a picked confidence unlocks Submit", () => {
+		const html = renderToStaticMarkup(<QuestionDock toolName="quiz" toolCallId="q1" input={quizInput} expanded onExpand={() => {}} onSubmit={() => {}} initialDraft={{ ...selected, confidenceIndex: 2 }} />);
+		assert.match(html, /data-testid="confidence-value"[^>]*>50%</);
+		assert.doesNotMatch(html, /<button[^>]*type="submit"[^>]*disabled=""/);
+		assert.match(html, /↵ submits · ⇧↵ newline/);
+	});
+
+	it("'I don't know' needs no confidence", () => {
+		const html = renderToStaticMarkup(<QuestionDock toolName="quiz" toolCallId="q1" input={quizInput} expanded onExpand={() => {}} onSubmit={() => {}} initialDraft={{ ...selected, selection: { selected: new Set<number>(), otherSelected: false, dontKnow: true } }} />);
+		assert.doesNotMatch(html, /<button[^>]*type="submit"[^>]*disabled=""/);
+		assert.ok(!html.includes("set your confidence to submit"));
+	});
+
+	it("probe questions share the gate (same quiz kind)", () => {
+		const html = renderToStaticMarkup(<QuestionDock toolName="probe" toolCallId="p1" input={quizInput} expanded onExpand={() => {}} onSubmit={() => {}} initialDraft={selected} />);
+		assert.match(html, /set your confidence to submit/);
+	});
+});
+
 describe("render smoke tests", () => {
 	it("QuizCard renders question, options, and the automatic 'I don't know'", () => {
 		const html = renderDock({ toolName: "quiz", toolCallId: "q1", input: quizInput as never });
@@ -175,7 +219,10 @@ describe("render smoke tests", () => {
 		assert.match(html, /Why this answer\? Whatever comes to mind/, "placeholder invites, not apologizes (owner, placeholder round 2026-10-07)");
 		assert.ok(!html.includes("optional"), "the field is never called optional");
 		assert.match(html, /Submit answer/, "send becomes Submit answer");
-		assert.match(html, /↵ submits · ⇧↵ newline/, "the standard chord is discoverable (owner round 5)");
+		// An unset confidence owns the hint row until it is picked (2026-11-04).
+		assert.match(html, /set your confidence to submit/);
+		const ask = renderDock({ toolName: "ask_user_question", toolCallId: "a1", input: { question: "Which?", options: [{ label: "A" }, { label: "B" }] } as never });
+		assert.match(ask, /↵ submits · ⇧↵ newline/, "the standard chord is discoverable (owner round 5)");
 		// The v1 desync bug: options are buttons with ARIA roles, not native inputs.
 		assert.ok(!html.includes('type="radio"'), "no native radio inputs");
 		assert.ok(html.includes('role="radio"'), "button-based radio role present");

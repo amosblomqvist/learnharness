@@ -86,6 +86,10 @@ test("live question validation → turn_end placeholder → canonical sync keeps
 			const editor = host.querySelector<HTMLElement>('[data-testid="thinking-field"] [data-file-path-input]')!;
 			editor.textContent = "Keep my typed reasoning";
 			editor.dispatchEvent(new window.Event("input", { bubbles: true }));
+			// Confidence starts unset (2026-11-04): the first → picks 50.
+			const arrow = new window.Event("keydown", { bubbles: true, cancelable: true });
+			Object.defineProperty(arrow, "key", { value: "ArrowRight" });
+			document.dispatchEvent(arrow);
 		});
 		await event({ type: "turn_end", message, toolResults: [{ role: "toolResult", toolCallId: "q1", toolName: "quiz",
 			content: [{ type: "text", text: "Question posed" }], details: null, isError: false, timestamp: 1 }] });
@@ -97,6 +101,7 @@ test("live question validation → turn_end placeholder → canonical sync keeps
 		assert.equal(host.querySelector('[data-testid="thinking-field"] [data-file-path-input]')!.textContent, "Keep my typed reasoning");
 		await act(async () => { host.querySelector('form')!.dispatchEvent(new window.Event("submit", { bubbles: true, cancelable: true })); });
 		assert.equal(submitted?.thinking, "Keep my typed reasoning", "the React form state, not only DOM text, survived");
+		assert.equal((submitted as { confidence?: number } | undefined)?.confidence, 50, "the picked confidence survived too");
 	} finally {
 		await act(async () => {
 			wire.enqueue(encoder.encode("data: [DONE]\n\n")); wire.close();

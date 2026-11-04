@@ -19,7 +19,9 @@ Optional web search supports Tavily, Brave, Exa, Firecrawl, and hosted Ollama se
 
 Choose **Teach** and describe what you want to understand. The agent probes your starting point, presents a plan, and teaches through explanations and checks. Reply naturally to accept or revise the plan.
 
-Use the thinking fields to explain your reasoning, uncertainty, or reaction—not only your selected answer. You can type or dictate. Your confidence is self-reported, not an independent assessment.
+Use the thinking fields to explain your reasoning, uncertainty, or reaction—not only your selected answer. You can type or dictate. Quiz answers ask for your confidence, which starts unset and must be picked before you submit. It is self-reported, not an independent assessment.
+
+To work something out by hand, use the pen button beside **Submit** (or beside the paperclip in the chat box). It opens a drawing pad with the question above it; a pen tablet's pressure and eraser end both work. **Done** attaches the drawing as a thumbnail you can reopen; up to four can ride one submission, and a drawing alone is enough for written answers, practice submissions, and chat messages. The teacher sees the drawing as an image beside your typed text, so it needs a model that accepts images.
 
 Choose **Practice** for problems rather than a lesson. Start from selected graph material or describe material directly. Submit your thinking as you work; the model's committed solution is revealed when the problem concludes. Use **Next problem** when ready to continue.
 

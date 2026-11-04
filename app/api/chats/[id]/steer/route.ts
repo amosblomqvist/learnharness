@@ -11,7 +11,7 @@
 // registry copy survives a question termination or abort and rides the
 // chat's next run.
 import { ChatInputError, newUserSteer, parseUserSteerInput } from "@/src/core";
-import { getChat, steerLiveChat } from "@/src/server";
+import { getChat, ingestDrawings, saveDrawingSnapshots, steerLiveChat, stores, type DrawingIngest } from "@/src/server";
 
 export async function POST(request: Request, ctx: { params: Promise<{ id: string }> }): Promise<Response> {
 	const { id } = await ctx.params;
@@ -24,9 +24,21 @@ export async function POST(request: Request, ctx: { params: Promise<{ id: string
 		if (err instanceof ChatInputError) return Response.json({ error: err.message }, { status: 400 });
 		throw err;
 	}
-	const message = newUserSteer(input.text, input.id);
+	// Drawings (2026-11-04) ride steers too; stored only once the live
+	// agent accepts the message.
+	let drawings: DrawingIngest | undefined;
+	if (input.drawings) {
+		try {
+			drawings = await ingestDrawings(input.drawings);
+		} catch (err) {
+			if (err instanceof ChatInputError) return Response.json({ error: err.message }, { status: 400 });
+			throw err;
+		}
+	}
+	const message = newUserSteer(input.text, input.id, drawings);
 	if (!steerLiveChat(id, message)) {
 		return Response.json({ error: "no live turn to steer" }, { status: 409 });
 	}
+	saveDrawingSnapshots(stores.chatStore, id, drawings);
 	return Response.json({ ok: true });
 }

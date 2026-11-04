@@ -5,6 +5,7 @@ import { ArrowRightIcon, CornerDownLeftIcon, SquareIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { PathInput } from "@/components/path-input";
 import { AttachFilesButton } from "@/components/attach-files-button";
+import { DrawButton, DrawingChips, DrawingPadHost, type DrawingAttachmentsApi } from "@/components/drawing/drawing-attachments";
 
 /**
  * The chat composer — content row ONLY (the persistent rounded shell lives in
@@ -58,6 +59,7 @@ export function ChatSessionComposer({
 	placeholder,
 	nextProblem,
 	onNext,
+	drawings,
 }: {
 	busy: boolean;
 	value: string;
@@ -73,10 +75,13 @@ export function ChatSessionComposer({
 	placeholder?: string;
 	nextProblem?: boolean;
 	onNext?: () => void;
+	/** The composer's drawings (2026-11-04) — owned by the Chat, which sends them. */
+	drawings?: DrawingAttachmentsApi;
 }) {
 	const [draft, setDraft] = useState(value);
 	useLayoutEffect(() => { setDraft(value); }, [revision, value]);
-	const canSend = sendAllowed && (draft.trim().length > 0 || dictationActive);
+	// A drawing alone is a whole message (2026-11-04).
+	const canSend = sendAllowed && (draft.trim().length > 0 || dictationActive || (drawings?.drawings.length ?? 0) > 0);
 	const applyDraft = useCallback((next: string) => {
 		setDraft(next);
 		onChange(next);
@@ -96,6 +101,7 @@ export function ChatSessionComposer({
 			placeholder={placeholder}
 			nextProblem={nextProblem}
 			onNext={onNext}
+			drawings={drawings}
 		/>
 	);
 }
@@ -113,6 +119,7 @@ export function Composer({
 	placeholder = "Ask, answer, or steer the lesson…",
 	nextProblem = false,
 	onNext,
+	drawings,
 }: {
 	busy: boolean;
 	value: string;
@@ -138,6 +145,9 @@ export function Composer({
 	/** The signal's dispatcher (send({type:"next"})) — the chip and the
 	 *  empty-Enter share it. */
 	onNext?: () => void;
+	/** Hand-drawn pages riding the next send (2026-11-04): chips above the
+	 *  row, the pen beside the paperclip. Absent = no pen. */
+	drawings?: DrawingAttachmentsApi;
 }) {
 	const act = () => {
 		const action = enterAction({ busy, canSend, nextProblem });
@@ -150,12 +160,14 @@ export function Composer({
 	return (
 		<form
 			data-testid="composer"
-			className="flex items-end gap-1.5 p-1.5"
+			className="flex flex-wrap items-end gap-1.5 p-1.5"
 			onSubmit={(e) => {
 				e.preventDefault();
 				act();
 			}}
 		>
+			{drawings && <DrawingChips api={drawings} className="basis-full px-1 pt-1" />}
+			{drawings && <DrawingPadHost api={drawings} />}
 			<PathInput
 				ref={editorRef}
 				value={value}
@@ -182,9 +194,10 @@ export function Composer({
 				}}
 				placeholder={placeholder}
 				autoFocus={autoFocus}
-				className="field-sizing-content lh-input max-h-48 min-h-10 flex-1 resize-none bg-transparent px-2.5 py-2 outline-none placeholder:text-muted-foreground"
+				className="field-sizing-content lh-input max-h-48 min-h-10 min-w-0 flex-1 resize-none bg-transparent px-2.5 py-2 outline-none placeholder:text-muted-foreground"
 			/>
 			<AttachFilesButton editorRef={editorRef} />
+			{drawings && <DrawButton api={drawings} className="size-10 rounded-[10px]" />}
 			{/* The button follows the text (owner report 2026-10-03): while
 				 a turn runs WITH text typed it stays the SEND affordance
 				 (click = steer — steering must be clickable, not Enter-only);

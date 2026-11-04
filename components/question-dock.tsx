@@ -14,7 +14,8 @@ import {
 	repairMathForDisplay,
 	normalizeQuizType,
 	CONFIDENCE_STOPS,
-	DEFAULT_CONFIDENCE_INDEX,
+	CONFIDENCE_ARROW_START_INDEX,
+	nearestConfidenceIndex,
 	emptyDockSelection,
 	normalizeOptions,
 	resolveCorrect,
@@ -30,6 +31,7 @@ import {
 	type AskToolInput,
 	type DockSelection,
 	type ExplainToolInput,
+	type DrawingUpload,
 	type QuestionAnswerData,
 	type QuestionFormDraft,
 	type QuestionData,
@@ -39,6 +41,8 @@ import {
 	type Phase3,
 } from "@/src/core";
 import { CONFIDENCE_COLORS, confidenceRailStyle } from "@/components/confidence-rail";
+import { DrawButton, DrawingChips, DrawingPadHost, drawingUploads, useDrawingAttachments } from "@/components/drawing/drawing-attachments";
+import { isDrawingPadOpen } from "@/components/drawing/pad-state";
 
 /**
  * The question dock — a pending quiz/ask REPLACES the chat composer: the
@@ -74,7 +78,9 @@ export interface QuestionDockProps {
 	 */
 	reveal?: boolean;
 	onExpand: () => void;
-	onSubmit: (output: QuestionAnswerData) => void;
+	/** `drawings` (2026-11-04): the field's pad exports, riding the answer's
+	 *  input event beside (never inside) the client-built answer. */
+	onSubmit: (output: QuestionAnswerData, drawings?: DrawingUpload[]) => void;
 	/** Restore only this call's unconfirmed submission after recovery. */
 	initialDraft?: QuestionFormDraft;
 	onSaveDraft?: (draft: QuestionFormDraft) => void;
@@ -331,12 +337,14 @@ function QuestionDockForm({
 	 * in time — submit reads these, kept current at every write site. */
 	const thinkingTextRef = useRef(initialDraft?.thinking ?? "");
 	const answerTextRef = useRef(initialDraft?.text ?? "");
-	// Confidence (owner, 2026-10-01): an index into CONFIDENCE_STOPS,
-	// resting at 50 — a real coin flip by definition, untouched or
-	// deliberate (the same number, the same meaning). The dock unmounts
-	// between questions, so each question starts fresh at 50.
-	const [confIdx, setConfIdx] = useState<number>(initialDraft?.confidenceIndex ?? DEFAULT_CONFIDENCE_INDEX);
+	// Confidence (owner, 2026-10-01): an index into CONFIDENCE_STOPS, or
+	// null until the learner picks one (2026-11-04) — a forgotten slider
+	// must never record 50. The dock unmounts between questions, so each
+	// question starts unset.
+	const [confIdx, setConfIdx] = useState<number | null>(initialDraft?.confidenceIndex ?? null);
 	const selectMode: SelectMode = qd.mode === "multi-select" ? "multi-select" : "single-select";
+	// Hand-drawn reasoning (2026-11-04): the pad's pages ride the answer.
+	const draw = useDrawingAttachments(initialDraft?.drawings);
 
 	// The PRIMARY dictation input (owner, STT round 1): while a question
 	// waits, dictated finals land HERE, never in the hidden composer — text
@@ -368,10 +376,13 @@ function QuestionDockForm({
 
 	const toggle = (idx: number) => setSel(toggleOption(selectMode, sel, idx));
 
+	// A quiz answer needs a picked confidence; "I don't know" sends none.
+	const needsConfidence = kind === "quiz" && !sel.dontKnow && confIdx === null;
 	const canSubmit =
 		qd.mode === "text"
-			? text.trim().length > 0
-			: sel.dontKnow || (sel.otherSelected && other.trim().length > 0) || sel.selected.size > 0;
+			? text.trim().length > 0 || draw.drawings.length > 0
+			: !needsConfidence &&
+				(sel.dontKnow || (sel.otherSelected && other.trim().length > 0) || sel.selected.size > 0);
 
 	const submit = () => {
 		if (!canSubmit || compactionRunning) return;
@@ -395,9 +406,10 @@ function QuestionDockForm({
 			other: sel.otherSelected ? other : undefined,
 			text: qd.mode === "text" ? answerTextRef.current : undefined,
 			thinking: qd.mode !== "text" ? thinkingTextRef.current.trim() || undefined : undefined,
-			// Always sent on quiz answers (owner: 50 must mean 50, never
-			// "untouched"); buildAnswer drops it on "I don't know".
-			confidence: kind === "quiz" ? CONFIDENCE_STOPS[confIdx] : undefined,
+			// Always sent on quiz answers — canSubmit guarantees it was
+			// picked (50 must mean 50, never "untouched"); buildAnswer
+			// drops it on "I don't know".
+			confidence: kind === "quiz" && confIdx !== null ? CONFIDENCE_STOPS[confIdx] : undefined,
 		};
 		// Snapshot before optimistic submission unmounts the form. Ref values
 		// include the dictation finals that just landed, unlike stale closures.
@@ -407,8 +419,9 @@ function QuestionDockForm({
 			other,
 			text: answerTextRef.current,
 			confidenceIndex: confIdx,
+			drawings: draw.ref.current,
 		});
-		onSubmit(buildAnswer(qd, req, toolName));
+		onSubmit(buildAnswer(qd, req, toolName), drawingUploads(draw.ref.current));
 	};
 
 	/* ENTER SUBMITS FROM ANYWHERE (owner round 6, 2026-10-05): the same
@@ -478,6 +491,8 @@ function QuestionDockForm({
 	useEffect(() => {
 		if (!active || rowCount === 0) return;
 		const onKeyDown = (e: KeyboardEvent) => {
+			// The drawing pad owns the keyboard while it is up (2026-11-04).
+			if (isDrawingPadOpen()) return;
 			const t = e.target as HTMLElement | null;
 			// A TYPING field is where keys mean text (owner round 4): the
 			// thinking/answer fields, search boxes, renames — never a range
@@ -526,14 +541,17 @@ function QuestionDockForm({
 				// Global confidence cycling (owner, UI round 2026-10-01): the
 				// SAME pattern as ↑/↓ over the rows — works wherever focus
 				// sits, no click-in, no focus ring. Dead on "I don't know"
-				// (the slider grays out and nothing is sent).
+				// (the slider grays out and nothing is sent). An unset slider's
+				// first press lands on 50; later presses step from there.
 				if (kind !== "quiz" || sel.dontKnow) return;
 				e.preventDefault();
 				setConfIdx((i) =>
-					Math.min(
-						CONFIDENCE_STOPS.length - 1,
-						Math.max(0, i + (e.key === "ArrowRight" ? 1 : -1)),
-					),
+					i === null
+						? CONFIDENCE_ARROW_START_INDEX
+						: Math.min(
+								CONFIDENCE_STOPS.length - 1,
+								Math.max(0, i + (e.key === "ArrowRight" ? 1 : -1)),
+							),
 				);
 			} else if (e.key === " ") {
 				if (kbdIdx === null) return; // plain Space keeps scrolling the page
@@ -557,6 +575,19 @@ function QuestionDockForm({
 			?.scrollIntoView({ block: "nearest" });
 	}, [kbdIdx]);
 
+	const dockLabel =
+		toolName === "probe"
+			? "Probe"
+			: toolName === "recall"
+				? "Recall"
+				: kind === "quiz"
+					? qd.questionType === "predict"
+						? "Prediction"
+						: "Check"
+					: kind === "explain"
+						? "Explain"
+						: "Question";
+
 	return (
 		<div ref={rootRef} data-testid="question-dock">
 			{/* Question area — scrolls internally if very tall; the bottom row stays put.
@@ -564,17 +595,7 @@ function QuestionDockForm({
 			    long questions short — owner round, 2026-10-05). */}
 			<div data-dock-scroll-area="" data-session-find-root="" className="max-h-[var(--dock-max-h,55dvh)] overflow-y-auto px-4 pt-3">
 				<div className="mb-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-					{toolName === "probe"
-						? "Probe"
-						: toolName === "recall"
-							? "Recall"
-							: kind === "quiz"
-								? qd.questionType === "predict"
-									? "Prediction"
-									: "Check"
-									: kind === "explain"
-										? "Explain"
-											: "Question"}
+					{dockLabel}
 					{qd.mode === "multi-select" && " · select all that apply"}
 				</div>
 				<div className="mb-3 font-medium">
@@ -751,7 +772,9 @@ function QuestionDockForm({
 				them). Keyboard: GLOBAL ←/→ (the ↑/↓ pattern; the ring is gone
 				app-wide). Clicking and dragging are native. "I don't know"
 				GRAYS it out — the layout holds, no value is sent, the IDK
-				signal stands alone. */}
+				signal stands alone. UNSET (2026-11-04): until the learner
+				picks, the rail is empty, the disc is hidden, and the value
+				reads "—"; Submit waits for a pick. */}
 			{kind === "quiz" && (
 				<div className="border-t border-border/60 px-4 py-2.5">
 					<div className="flex items-center gap-3">
@@ -781,39 +804,47 @@ function QuestionDockForm({
 								aria-hidden
 								data-testid="confidence-rail"
 								className="pointer-events-none absolute top-1/2 left-2 right-2 h-1.5 -translate-y-1/2 rounded-full border border-border"
-								style={confidenceRailStyle(CONFIDENCE_STOPS[confIdx]!)}
+								style={confidenceRailStyle(confIdx === null ? null : CONFIDENCE_STOPS[confIdx]!)}
 							/>
 							<input
 								type="range"
 								min={0}
 								max={100}
 								step={1}
-								value={CONFIDENCE_STOPS[confIdx]}
+								value={CONFIDENCE_STOPS[confIdx ?? CONFIDENCE_ARROW_START_INDEX]}
 								disabled={sel.dontKnow}
 								aria-label="Confidence — the probability your selected answer is correct"
-								aria-valuetext={`${CONFIDENCE_STOPS[confIdx]} percent`}
+								aria-valuetext={confIdx === null ? "not set" : `${CONFIDENCE_STOPS[confIdx]} percent`}
 								title="The probability your selected answer is correct — 50% is a coin flip. Adjust with ←/→."
 								data-testid="confidence-slider"
+								data-unset={confIdx === null ? "" : undefined}
+								onPointerDown={(e) => {
+									// The unset slider still renders a value (50), and a native
+									// range fires no change when the click lands on its current
+									// value — so the FIRST pick reads the pointer itself. The
+									// track spans the thumb-center range (8px inset per side).
+									if (confIdx !== null || sel.dontKnow) return;
+									const r = e.currentTarget.getBoundingClientRect();
+									const span = Math.max(1, r.width - 16);
+									setConfIdx(nearestConfidenceIndex(((e.clientX - r.left - 8) / span) * 100));
+								}}
 								onChange={(e) => {
 									// Snap to the nearest stop; the rendered VALUE is the stop's own
 									// percent, so the thumb always rests at its true fraction (50 =
 									// halfway). Keyboard needs no handler here: the dock machine treats
 									// a focused range as non-typing (see the guard above) and its ←/→
 									// branch preventDefaults, which also cancels the native 1% step.
-									const v = Number(e.target.value);
-									let best = 0;
-									for (let i = 1; i < CONFIDENCE_STOPS.length; i++) {
-										if (Math.abs(CONFIDENCE_STOPS[i]! - v) < Math.abs(CONFIDENCE_STOPS[best]! - v)) best = i;
-									}
-									setConfIdx(best);
+									setConfIdx(nearestConfidenceIndex(Number(e.target.value)));
 								}}
-								style={{ color: CONFIDENCE_COLORS[confIdx] }}
+								style={{ color: confIdx === null ? undefined : CONFIDENCE_COLORS[confIdx] }}
 								className={cn(
 									"absolute inset-0 h-4 w-full cursor-pointer appearance-none bg-transparent outline-none",
 									"[&::-webkit-slider-runnable-track]:h-4 [&::-webkit-slider-runnable-track]:bg-transparent",
 									"[&::-webkit-slider-thumb]:size-4 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-current",
 									"[&::-moz-range-track]:h-4 [&::-moz-range-track]:bg-transparent",
 									"[&::-moz-range-thumb]:size-4 [&::-moz-range-thumb]:appearance-none [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:border-0 [&::-moz-range-thumb]:bg-current",
+									// Unset: no disc until the learner picks.
+									confIdx === null && "[&::-webkit-slider-thumb]:opacity-0 [&::-moz-range-thumb]:opacity-0",
 								)}
 							/>
 						</div>
@@ -824,7 +855,7 @@ function QuestionDockForm({
 								sel.dontKnow && "text-muted-foreground/50",
 							)}
 						>
-							{sel.dontKnow ? "—" : `${CONFIDENCE_STOPS[confIdx]}%`}
+							{sel.dontKnow || confIdx === null ? "—" : `${CONFIDENCE_STOPS[confIdx]}%`}
 						</span>
 					</div>
 				</div>
@@ -911,14 +942,27 @@ function QuestionDockForm({
 							)}
 						/>
 					)}
+					{/* Drawings ride the answer (2026-11-04): chips above the row,
+					    the pen beside Submit; the pad keeps the question in view. */}
+					<DrawingChips api={draw} className="px-2.5 pt-1" />
+					<DrawingPadHost
+						api={draw}
+						context={qd.context ? `${qd.question}\n\n${qd.context}` : qd.question}
+						contextLabel={dockLabel}
+					/>
 					<div className="flex items-center justify-between gap-2 p-1">
 						<span aria-hidden className="pl-1.5 text-xs text-muted-foreground">
-								{compactionRunning ? "compacting session…" : "↵ submits · ⇧↵ newline"}
+								{compactionRunning
+									? "compacting session…"
+									: needsConfidence
+										? "set your confidence to submit"
+										: "↵ submits · ⇧↵ newline"}
 						</span>
+						<DrawButton api={draw} className="ml-auto size-9 rounded-[6px]" />
 						<Button
 							type="submit"
 							disabled={!canSubmit || compactionRunning}
-							className="ml-auto h-9 rounded-[6px] px-3.5 text-sm font-medium"
+							className="h-9 rounded-[6px] px-3.5 text-sm font-medium"
 						>
 							Submit answer
 						</Button>

@@ -53,7 +53,9 @@ stored history.
 Messages carry an application `id` and usually a millisecond Unix `timestamp`.
 Native roles are:
 
-- `user`: learner prose; `content` can be a string or text/image blocks.
+- `user`: learner prose; `content` can be a string or text/image blocks. Image
+  blocks with a `drawings` list beside them are the learner's hand drawings;
+  `drawings` holds `{snapshotId, width, height}` refs into `imageSnapshots`.
 - `assistant`: `content` is an array of `text`, `thinking`, and `toolCall` blocks.
   `thinking` here is **agent reasoning**, not learner thinking.
 - `toolResult`: result of a call, identified by `toolCallId` and `toolName`.
@@ -117,15 +119,16 @@ Important answer-detail fields:
 | `note` | Legacy name for that same channel; use `thinking ?? note` |
 | `readingThinking` | Separate learner thinking while reading the teaching |
 | `confidence` | Self-reported 0–100 probability that the selected quiz answer is correct |
+| `drawings` | Optional `{snapshotId, width, height}` refs to the learner's hand drawings; the images follow the compact record in the result's `content` |
 | `correct`, `correctIndices` | Mechanical quiz grading in displayed-option order |
 | `committed`, `explanation` | Teacher's committed answer / quiz explanation, not learner speech |
 | `answeredAt` | ISO answer timestamp |
 
 **Options are shuffled.** Never apply a learner's display index to the raw call's
 authored option order. Use the answer snapshot and its label/value tuples. Missing
-confidence is not zero, and no confidence is sent for don't-know. The slider's 50%
-resting value is a real recorded 50%, but the record cannot tell whether it was
-left untouched or chosen deliberately.
+confidence is not zero, and no confidence is sent for don't-know. Since
+2026-11-04 the slider starts unset and must be picked, so a recorded 50% is a
+deliberate choice; in older records it may be the untouched resting value.
 
 Retain incorrect responses, failed attempts, skipped questions, and don't-know;
 they are evidence, not noise to clean up. Do not invent a numeric grade for a
@@ -135,7 +138,7 @@ recall/explain response: the teacher's subsequent prose is its interpretation.
 
 | `customType` | Interpretation |
 | --- | --- |
-| `practice-thinking` | **Learner-authored work**, including intermediate attempts and claimed answers; raw text is `details.text`, associated through `details.problemCallId` |
+| `practice-thinking` | **Learner-authored work**, including intermediate attempts and claimed answers; raw text is `details.text`, associated through `details.problemCallId`; hand drawings are `details.drawings` refs with model-facing `images` |
 | `graph-context` | Picked propositions/chains supplied as session context; app-injected, not learner speech |
 | `plan-block` | Historical plan presentation snapshot in `details.block` |
 | `subagent-steer` | Delivered teaching artifact; `details.kind` and `details.result` identify the payload |

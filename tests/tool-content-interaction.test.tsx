@@ -30,6 +30,12 @@ test("actual select → submit → saved result → historical Why uses source d
 		await act(async () => choice.click());
 		assert.equal(choice.getAttribute("aria-checked"), "true");
 		const submit = [...host.querySelectorAll<HTMLButtonElement>("button")].find(button => button.textContent?.includes("Submit answer"))!;
+		assert.equal(submit.disabled, true, "confidence starts unset (2026-11-04)");
+		await act(async () => {
+			const arrow = new window.Event("keydown", { bubbles: true, cancelable: true });
+			Object.defineProperty(arrow, "key", { value: "ArrowRight" });
+			document.dispatchEvent(arrow);
+		});
 		assert.equal(submit.disabled, false);
 		// linkedom does not implement the browser's default button→form
 		// action; dispatch its native submit event through React instead.
@@ -40,6 +46,7 @@ test("actual select → submit → saved result → historical Why uses source d
 		assert.equal(answer.answers[0]!.value, label, "display recovery must not alter the submitted identity");
 		assert.equal(answer.answers[0]!.label, label);
 		assert.equal(answer.correct, true);
+		assert.equal(answer.confidence, 50, "the first arrow press lands on 50");
 		const persisted = JSON.parse(JSON.stringify(newAnswerResult("interactive_source", "probe", answer)));
 		assert.deepEqual(persisted.details, JSON.parse(JSON.stringify(answer)));
 		assert.equal(persisted.details.explanation, explanation);
