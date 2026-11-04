@@ -4,10 +4,13 @@
  * survives session navigation and restarts. Modeled on the dismissal
  * route's SILENCE: no wake, no agent, no tokens, no SSE — the record is
  * the only state that moves, and the client already holds the toggled
- * state optimistically (no refetch churn).
+ * state optimistically (no refetch churn). `inverted: null` clears the pin
+ * back to auto — the figure follows the rendered mode again (auto-invert,
+ * 2026-10-29).
  *
  * Guards: 404 unknown chat, 400 for a body that isn't
- * { input: { messageId, inverted } } or targets no demo/visual steer.
+ * { input: { messageId, inverted: boolean | null } } or targets no
+ * demo/visual steer.
  */
 import { setSteerUiInverted, type SteerDetails } from "@/src/core";
 import { getChat, stores } from "@/src/server";
@@ -23,9 +26,9 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
 		!input ||
 		typeof input !== "object" ||
 		typeof input.messageId !== "string" ||
-		typeof input.inverted !== "boolean"
+		(typeof input.inverted !== "boolean" && input.inverted !== null)
 	) {
-		return Response.json({ error: "input must be { messageId: string, inverted: boolean }" }, { status: 400 });
+		return Response.json({ error: "input must be { messageId: string, inverted: boolean | null }" }, { status: 400 });
 	}
 
 	// Honesty: the target must actually be a demo/figure steer.
@@ -35,7 +38,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
 		return Response.json({ error: "No demo/figure steer with that message id" }, { status: 400 });
 	}
 
-	const messages = setSteerUiInverted(chat.messages, input.messageId, input.inverted);
+	const messages = setSteerUiInverted(chat.messages, input.messageId, input.inverted as boolean | null);
 	stores.chatStore.saveMessages(id, messages);
 	return Response.json({ ok: true });
 }
