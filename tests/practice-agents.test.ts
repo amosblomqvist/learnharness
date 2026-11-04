@@ -19,7 +19,7 @@ import {
 	type LhMessage,
 } from "../src/core/native-messages.ts";
 import { CONCLUDE_ACK_TEXT } from "../src/core/contracts/chat.ts";
-import { concludeInputObject, concludeTool, createPracticeGate, problemTool, practiceTools } from "../src/agent/tools/practice.ts";
+import { concludeInputObject, concludeTool, createPracticeGate, problemInputObject, problemTool, practiceTools } from "../src/agent/tools/practice.ts";
 import { composeInstructions, createPracticeAgent } from "../src/agent/teacher-agent.ts";
 import { allSegmentPaths } from "../src/agent/prompt-segments.ts";
 
@@ -134,6 +134,45 @@ describe("the practice tool gating law", () => {
 		assert.equal(pose.isError, undefined, "the freed gate lets the next problem through — SAME turn");
 		const greedy = await tools.problem.execute("call_p3", PROBLEM_INPUT as never);
 		assert.equal(greedy.isError, true, "the gate re-arms on the successful pose");
+	});
+});
+
+// ── worksheets (issue #408): one pose, many exercises + a reference sheet ──
+
+describe("a worksheet is one problem pose carrying a reference sheet", () => {
+	const SHEET = {
+		...PROBLEM_INPUT,
+		statement: "1) Factor $x^2-1$. 2) Factor $x^3-1$. 3) Factor $x^4-1$.",
+		mode: "composition",
+		reference: "| rule | form |\n| --- | --- |\n| difference of squares | $a^2-b^2$ |",
+		modelSolution: "1) $(x-1)(x+1)$. 2) $(x-1)(x^2+x+1)$. 3) $(x-1)(x+1)(x^2+1)$.",
+	};
+
+	it("problem accepts a reference sheet and still ends the turn (the worksheet's pose)", async () => {
+		const result = await problemTool(createPracticeGate(ctxOf([]))).execute("call_w1", SHEET as never);
+		assert.equal(result.isError, undefined);
+		assert.equal(result.terminate, true);
+	});
+
+	it("the field is OPTIONAL — a pose without a reference is unchanged (back-compat)", async () => {
+		assert.ok("reference" in problemInputObject.properties, "the sheet's field exists");
+		assert.ok(!(problemInputObject.required as readonly string[]).includes("reference"), "and it is never required");
+		const result = await problemTool(createPracticeGate(ctxOf([]))).execute("call_x", PROBLEM_INPUT as never);
+		assert.equal(result.isError, undefined);
+	});
+
+	it("the gate is unchanged — a sheet does not let an agent pose over an active problem", async () => {
+		const result = await problemTool(createPracticeGate(ctxOf(activeProblemRecord()))).execute("call_w1", SHEET as never);
+		assert.equal(result.isError, true);
+		assert.deepEqual((result.details as { problems: string[] }).problems, [
+			"a problem is already active — call conclude on it before posing the next one",
+		]);
+	});
+
+	it("the description names the worksheet (mechanics only)", () => {
+		const description = problemTool(createPracticeGate(ctxOf([]))).description;
+		assert.match(description, /worksheet/);
+		assert.match(description, /`reference`/);
 	});
 });
 

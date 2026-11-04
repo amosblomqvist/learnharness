@@ -90,6 +90,14 @@ export const problemInputObject = Type.Object({
 	modelSolution: Type.String({
 		description: "REQUIRED — the full solution, moves in order, committed BEFORE the learner sees the problem. This IS the reveal — conclude shows it verbatim; never re-author it.",
 	}),
+	reference: Type.Optional(
+		Type.String({
+			description:
+				"OPTIONAL — a reference sheet shown beside the exercises (markdown/LaTeX tables: formulas, grammar rules). " +
+				"Present = the problem opens as a fullscreen worksheet. The statement then holds the numbered exercises; " +
+				"modelSolution holds the numbered answer key.",
+		}),
+	),
 });
 
 export type ProblemInput = Static<typeof problemInputObject>;
@@ -105,7 +113,8 @@ export function problemTool(
 			"Pose one practice problem. Ends the turn — the learner works in the thinking field; their thinking " +
 			"traces and answer commits arrive back as labeled messages. The modelSolution rides this call's " +
 			"arguments and stays hidden from the learner until you conclude (conclude shows it verbatim — the " +
-			"reveal needs no new field). Only one problem may be active — conclude it before posing the next.",
+			"reveal needs no new field). Only one problem may be active — conclude it before posing the next. Optional " +
+			"`reference` turns the problem into a fullscreen worksheet (exercises in `statement`, key in `modelSolution`).",
 		parameters: problemInputObject,
 		executionMode: "sequential",
 		prepareArguments: (args: unknown) => {

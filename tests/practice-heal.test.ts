@@ -105,6 +105,33 @@ describe("healEncodedArguments — the sibling encodings", () => {
 		assert.equal(healed, args);
 	});
 
+	it("a worksheet's reference passes through untouched — a string schema has nothing to heal", () => {
+		// The sheet is free-form markdown/LaTeX: even text that LOOKS JSON
+		// must arrive verbatim, never JSON.parse-d into something else.
+		const sheet = '"| rule | form |\\n| --- | --- |"';
+		const args = { statement: "1) …", mode: "composition", reference: sheet, modelSolution: "1) …" };
+		assert.equal(healEncodedArguments(args, problemInputObject), args);
+	});
+
+	it("END-TO-END: the reference survives a healed call (the GLM wobble beside a worksheet)", () => {
+		const reference = "| rule | form |\n| --- | --- |\n| difference of squares | $a^2-b^2$ |";
+		const healed = healEncodedArguments(
+			{
+				statement: "1) Factor $x^2-1$.",
+				mode: QUOTED("composition"),
+				reference,
+				modelSolution: "1) $(x-1)(x+1)$.",
+			},
+			problemInputObject,
+		);
+		const validated = validateToolArguments(
+			{ name: "problem", parameters: problemInputObject } as never,
+			{ id: "call_w", type: "toolCall", name: "problem", arguments: healed } as never,
+		) as { mode: unknown; reference: unknown };
+		assert.equal(validated.mode, "composition");
+		assert.equal(validated.reference, reference);
+	});
+
 	it("passes non-object shapes through (null, arrays, strings)", () => {
 		assert.equal(healEncodedArguments(null, problemInputObject), null);
 		const arr = [1, 2];

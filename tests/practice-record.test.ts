@@ -380,6 +380,25 @@ describe("modelSolutionForConclude (the conclusion's hero is the pose's commitme
 		assert.equal(modelSolutionForConclude(messages, "call_conclude_solved"), "Show that…");
 	});
 
+	it("a worksheet pose is a pose like any other — active, and its reveal is still modelSolution", () => {
+		// The sheet's reference is extra input, never a new record shape.
+		const pose = problemPose("call_w1", "1) Factor $x^2-1$. 2) Factor $x^3-1$.");
+		(pose[0] as unknown as { content: Array<{ arguments: Record<string, unknown> }> }).content[0]!.arguments = {
+			statement: "1) Factor $x^2-1$. 2) Factor $x^3-1$.",
+			mode: "composition",
+			reference: "| rule | form |",
+			modelSolution: "1) $(x-1)(x+1)$. 2) $(x-1)(x^2+x+1)$.",
+		};
+		assert.equal(activeProblemOf(pose)?.toolCallId, "call_w1", "the worksheet is active until concluded");
+		const messages = [...pose, ...concludeCall("solved")];
+		assert.equal(activeProblemOf(messages), null);
+		assert.equal(
+			modelSolutionForConclude(messages, "call_conclude_solved"),
+			"1) $(x-1)(x+1)$. 2) $(x-1)(x^2+x+1)$.",
+			"the numbered answer key IS the reveal",
+		);
+	});
+
 	it("skips refused poses — a rejected pose revealed nothing", () => {
 		const rejected = problemPose("call_bad", "A different student…");
 		(rejected[1]! as unknown as { isError: boolean }).isError = true;
