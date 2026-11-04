@@ -1209,7 +1209,7 @@ export function Chat({
 			doSteerOrSend();
 			return;
 		}
-		void dictation.finish().then(doSteerOrSend);
+		void dictation.finish().then((ok) => { if (ok) doSteerOrSend(); });
 	};
 	const doSend = () => {
 		if (busy || pending || compacting) return;
@@ -2247,8 +2247,8 @@ function DockOverlay({
 			)
 				return;
 			e.preventDefault();
-			void finishDictation().then(() => {
-				expandAndRevealRef.current();
+			void finishDictation().then((ok) => {
+				if (ok) expandAndRevealRef.current();
 			});
 		};
 		document.addEventListener("keydown", onKeyDown);
@@ -2375,8 +2375,8 @@ function DockOverlay({
 							onOpen={
 								!expanded
 									? () => {
-											void finishDictation().then(() => {
-												expandAndRevealRef.current();
+											void finishDictation().then((ok) => {
+												if (ok) expandAndRevealRef.current();
 											});
 										}
 									: undefined

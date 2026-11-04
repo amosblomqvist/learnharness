@@ -27,11 +27,15 @@ describe("parseGeneralSettingsBody", () => {
 		const on = parseGeneralSettingsBody({ autoUpdate: true });
 		assert.ok(on.ok);
 		assert.deepEqual(on.settings, { autoUpdate: true });
+		const openai = parseGeneralSettingsBody({ autoUpdate: false, dictationProvider: "openai" });
+		assert.ok(openai.ok);
+		assert.deepEqual(openai.settings, { autoUpdate: false, dictationProvider: "openai" });
 	});
 
 	it("rejects non-objects and non-boolean autoUpdate", () => {
 		assert.equal(parseGeneralSettingsBody("x").ok, false);
 		assert.equal(parseGeneralSettingsBody({ autoUpdate: "yes" }).ok, false);
+		assert.equal(parseGeneralSettingsBody({ dictationProvider: "unknown" }).ok, false);
 	});
 });
 

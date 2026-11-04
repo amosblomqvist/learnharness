@@ -315,6 +315,7 @@ export function AgentSection({
 	graph,
 	compaction,
 	onSectionChange,
+	onSectionEdit,
 	onModelsChange,
 	onCompactionChange,
 }: {
@@ -331,11 +332,22 @@ export function AgentSection({
 	compaction: CompactionSettings | undefined;
 	/** Writes the composed WHOLE agent section (replace-PUT discipline). */
 	onSectionChange: (next: AgentSettings) => void;
+	/** Queue an edit against the latest saved agent section when available. */
+	onSectionEdit?: (edit: (current: AgentSettings | undefined) => AgentSettings) => void;
 	/** Writes the composed models section (slots — replace-PUT discipline). */
 	onModelsChange: (next: ModelsSettings) => void;
 	/** Writes the whole compaction section (replace-PUT discipline). */
 	onCompactionChange: (next: CompactionSettings) => void;
 }) {
+	// A corrupt persisted policy is fail-closed for every whole-agent edit,
+	// not only for edits made from the File access controls.
+	const effectiveAgent: AgentSettings | undefined = fileAccessError
+		? { ...agent, fileAccess: { restricted: true, folders: agent?.fileAccess?.folders ?? [] } }
+		: agent;
+	const editAgent = (edit: (current: AgentSettings | undefined) => AgentSettings) => {
+		if (onSectionEdit) onSectionEdit(edit);
+		else onSectionChange(edit(effectiveAgent));
+	};
 	const { catalog: body, failed: catalogFailed, refresh: refreshCatalog } = useModelCatalog();
 	const catalog = body?.models;
 	const slots = body?.slots;
@@ -462,7 +474,7 @@ export function AgentSection({
 		// switch) is the safe one. Saving an edit while already on rides
 		// through — the switch write is idempotent at the record level.
 		if (agent?.prompts?.[path] !== true) {
-			onSectionChange(composePromptSwitch(agent, path, true));
+			editAgent((current) => composePromptSwitch(current, path, true));
 		}
 	}
 
@@ -479,7 +491,7 @@ export function AgentSection({
 		// longer reach the OFF escape hatch — the trap found in live verify
 		// 2026-09-26). Composing the OFF here keeps the record clean.
 		if (agent?.prompts?.[path] === true) {
-			onSectionChange(composePromptSwitch(agent, path, false));
+			editAgent((current) => composePromptSwitch(current, path, false));
 		}
 		readPrompts();
 		setSegmentStatus("Deleted");
@@ -540,7 +552,7 @@ export function AgentSection({
 							checked={info.enabled}
 							disabled={!fileExists}
 							label={`prompt ${info.path}`}
-							onChange={(on) => onSectionChange(composePromptSwitch(agent, info.path, on))}
+							onChange={(on) => editAgent((current) => composePromptSwitch(current, info.path, on))}
 						/>
 					</span>
 				</SettingsRow>
@@ -790,7 +802,7 @@ export function AgentSection({
 								checked={agent?.graphTools?.enabled ?? true}
 								disabled={!graphOn}
 								label="graph tools"
-								onChange={(on) => onSectionChange(composeGraphTools(agent, on))}
+								onChange={(on) => editAgent((current) => composeGraphTools(current, on))}
 							/>
 						</SettingsRow>
 					);
@@ -821,7 +833,7 @@ export function AgentSection({
 											role="radio"
 											aria-checked={active}
 											data-testid={`quiz-mechanics-${m}`}
-											onClick={() => onSectionChange(composeQuizMechanics(agent, m))}
+											onClick={() => editAgent((current) => composeQuizMechanics(current, m))}
 											className={cn(
 												"h-8 rounded-md px-3 text-sm font-medium transition-colors",
 												active ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground",
@@ -844,18 +856,17 @@ export function AgentSection({
 						<Toggle
 							checked={agent?.tools?.[id] ?? true}
 							label={`tool ${id}`}
-							onChange={(on) => onSectionChange(composeTool(agent, id, on))}
+							onChange={(on) => editAgent((current) => composeTool(current, id, on))}
 						/>
 					</SettingsRow>
 				))}
 				{(() => {
 					const folders = agent?.fileAccess?.folders ?? [];
 					const restricted = Boolean(fileAccessError) || agent?.fileAccess?.restricted === true;
-					const effectiveAgent = fileAccessError ? { ...agent, fileAccess: { restricted: true, folders } } : agent;
 					const addFolder = () => {
 						const next = folderInput.trim();
 						if (!isFolderEntry(next)) { setFolderError("Enter an absolute path or ~/folder."); return; }
-						if (!folders.includes(next)) onSectionChange(composeAddFolder(effectiveAgent, next));
+						editAgent((current) => composeAddFolder(current, next));
 						setFolderInput("");
 						setFolderError(null);
 					};
@@ -867,7 +878,7 @@ export function AgentSection({
 									: "Restricted: no folders allowed. Add a folder to enable access."}>
 								<div className="flex items-center gap-2 text-xs">
 									<span>Restrict to listed folders</span>
-									<Toggle checked={restricted} label="Restrict to listed folders" onChange={(on) => onSectionChange(composeFileRestriction(effectiveAgent, on))} />
+									<Toggle checked={restricted} label="Restrict to listed folders" onChange={(on) => editAgent((current) => composeFileRestriction(current, on))} />
 								</div>
 							</SettingsRow>
 							{fileAccessError && <p role="alert" data-testid="file-access-config-error" className="text-xs text-red-500">{fileAccessError}</p>}
@@ -883,7 +894,7 @@ export function AgentSection({
 								<div key={folder} data-testid="file-access-folder" className="flex items-center justify-between gap-4 pl-3 text-xs">
 									<span title={folder} className="min-w-0 truncate font-ui text-muted-foreground">{folder}</span>
 									<button type="button" aria-label={`Remove ${folder}`} data-testid="file-access-remove"
-										onClick={() => onSectionChange(composeRemoveFolder(effectiveAgent, folder))}
+										onClick={() => editAgent((current) => composeRemoveFolder(current, folder))}
 										className="rounded-sm px-1.5 text-muted-foreground hover:text-foreground">Remove</button>
 								</div>
 							))}
@@ -920,12 +931,12 @@ export function AgentSection({
 										menuClass="flex w-44 flex-col gap-0.5 rounded-xl border border-border bg-card p-2 text-xs shadow-xl"
 									>
 										{engineOption("auto", "Automatic", engine === null, null, () => {
-											onSectionChange(composeSearchEngine(agent, null));
+											editAgent((current) => composeSearchEngine(current, null));
 											setOpenMenu(null);
 										})}
 										{SEARCH_ENGINES.map(({ id, label }) =>
 											engineOption(id, label, engine === id, engineKeys[id] ?? false, () => {
-												onSectionChange(composeSearchEngine(agent, id));
+												editAgent((current) => composeSearchEngine(current, id));
 												setOpenMenu(null);
 											}),
 										)}
