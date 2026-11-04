@@ -56,9 +56,17 @@ export function SubagentSteerCard({ message }: { message: LhViewMessage }) {
 				<PdfCompleteBadge result={data.result as PdfResult} />
 			);
 		case "demo":
-			return <DemoOutputCard output={data.result} messageId={message.id} initialInverted={data.ui?.inverted ?? false} />;
+			return (
+				<div className="lh-bleed">
+					<DemoOutputCard output={data.result} messageId={message.id} initialInverted={data.ui?.inverted ?? false} />
+				</div>
+			);
 		case "visual":
-			return <VisualOutputCard output={data.result} messageId={message.id} initialInverted={data.ui?.inverted ?? false} />;
+			return (
+				<div className="lh-bleed">
+					<VisualOutputCard output={data.result} messageId={message.id} initialInverted={data.ui?.inverted ?? false} />
+				</div>
+			);
 	}
 }
 
