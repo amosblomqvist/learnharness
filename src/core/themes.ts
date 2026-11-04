@@ -134,7 +134,10 @@ function builtin(name: string, mode: ThemeMode, c: ThemeColors): Theme {
  *  Catppuccin: base/surface0/surface1, mauve accent, lavender/pink/peach
  *  emphasis; Latte takes mantle/surface0 instead, because surface0 on a
  *  light page reads as a heavy gray slab (owner, 2026-11-04). Rosé Pine: base/surface/highlight-med, iris accent,
- *  iris/rose/gold emphasis. NvChad Onedark: base46's onedark. */
+ *  iris/rose/gold emphasis. Gruvbox: dark medium (bg0/bg0_s/bg2) with the
+ *  bright accents; light hard (bg0_h/bg0_s/bg2) with the faded, darker
+ *  accents so the ink stays quiet on the pale page. Orange accent,
+ *  blue/purple/aqua emphasis. NvChad Onedark: base46's onedark. */
 export const BUILTIN_THEMES: readonly Theme[] = [
 	{
 		id: DEFAULT_THEME_ID,
@@ -181,6 +184,16 @@ export const BUILTIN_THEMES: readonly Theme[] = [
 		background: "#faf4ed", surface: "#fffaf3", border: "#dfdad9", text: "#575279", textMuted: "#797593",
 		accent: "#907aa9", bold: "#907aa9", italic: "#d7827e", code: "#ea9d34",
 		error: "#b4637a", success: "#56949f", warning: "#ea9d34",
+	}),
+	builtin("Gruvbox Dark", "dark", {
+		background: "#282828", surface: "#32302f", border: "#504945", text: "#ebdbb2", textMuted: "#a89984",
+		accent: "#fe8019", bold: "#83a598", italic: "#d3869b", code: "#8ec07c",
+		error: "#fb4934", success: "#b8bb26", warning: "#fabd2f",
+	}),
+	builtin("Gruvbox Light", "light", {
+		background: "#f9f5d7", surface: "#f2e5bc", border: "#d5c4a1", text: "#3c3836", textMuted: "#7c6f64",
+		accent: "#af3a03", bold: "#076678", italic: "#8f3f71", code: "#427b58",
+		error: "#9d0006", success: "#79740e", warning: "#b57614",
 	}),
 	builtin("NvChad Onedark", "dark", {
 		background: "#1e222a", surface: "#282c34", border: "#42464e", text: "#abb2bf", textMuted: "#565c64",

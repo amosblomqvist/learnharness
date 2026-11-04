@@ -61,6 +61,7 @@ describe("the curated dev-browser fallback", () => {
 	it("is the app's knowns + ubiquitous macOS families — and never a fabricated system list member for the factory family", () => {
 		assert.ok(CURATED_FALLBACK_FONTS.includes("CMU Serif"));
 		assert.ok(CURATED_FALLBACK_FONTS.includes("Georgia"));
+		assert.ok(CURATED_FALLBACK_FONTS.includes("JetBrains Mono"), "the bundled mono is always offered");
 		// the factory family lives ONLY as the DEFAULT row — never a
 		// duplicated family row
 		assert.ok(!CURATED_FALLBACK_FONTS.includes(DEFAULT_READING_FONT));

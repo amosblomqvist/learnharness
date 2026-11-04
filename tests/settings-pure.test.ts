@@ -60,6 +60,14 @@ describe("appearanceVars — the mapping the provider applies", () => {
 		assert.equal(vars["--font-title"], undefined, "CMU stays");
 	});
 
+	it("JetBrains Mono renders from the bundled face when it is not installed", () => {
+		const vars = appearanceVars(resolveAppearance({ fontFamily: "JetBrains Mono" }), mocha);
+		assert.equal(
+			vars["--font-prose"],
+			`"JetBrains Mono", var(--font-jetbrains), var(--font-sans3), ui-sans-serif, system-ui, sans-serif`,
+		);
+	});
+
 	it("full delta: every knob lands on its token, overrides over the theme", () => {
 		const vars = appearanceVars(
 			resolveAppearance({
