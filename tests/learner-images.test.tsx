@@ -510,6 +510,16 @@ describe("image cards", () => {
 		assert.ok(!html.includes('data-testid="image-open"'), "fullscreen needs the session overlay context");
 	});
 
+	for (const [width, height] of [[600, 1600], [1600, 400], [40, 30]] as const) {
+		it(`inline ${width}×${height}: caps height with automatic aspect-preserving sizing, without rewriting natural dimensions`, () => {
+			const html = renderToStaticMarkup(<ImagePresentation image={{ ...details, width, height }} />);
+			assert.ok(html.includes('class="block h-auto w-auto max-h-[60vh] max-w-full"'));
+			assert.ok(html.includes(`width="${width}" height="${height}"`));
+			assert.ok(html.includes(`src="data:image/png;base64,${details.data}"`));
+			assert.ok(!html.includes('object-cover'), 'never crop');
+		});
+	}
+
 	it("a failed call keeps the quiet tool-call card with the path; a malformed output falls back", () => {
 		const failed = renderToStaticMarkup(
 			<ImageCard part={{ type: "tool-show_image", state: "output-error", toolCallId: "c2", input: { path: "~/gone.png" } }} />,
@@ -529,6 +539,7 @@ describe("image cards", () => {
 		const doc = imageSvgDocument(details);
 		assert.match(doc, /^<svg xmlns="http:\/\/www\.w3\.org\/2000\/svg" width="40" height="30" viewBox="0 0 40 30">/);
 		assert.ok(doc.includes(`href="data:image/png;base64,${details.data}"`));
+		assert.ok(!doc.includes('60vh'), 'fullscreen document does not inherit inline sizing');
 	});
 
 	it("the registry renders show_image parts with the image card", () => {

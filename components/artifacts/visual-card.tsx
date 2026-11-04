@@ -104,21 +104,21 @@ export function VisualOutputCard({
 		   so the row hugs a centered narrow figure, not the column). */
 		<div
 			className={
-				natural !== null
+				!invertible || natural !== null
 					? "my-4 mx-auto w-fit max-w-full"
 					: "my-4 w-full"
 			}
 			data-testid="visual-card"
 		>
-			{/* Natural sizing (owner, 2026-10-07): a declared-width svg sits at
-			   ITS size; max-w-full still shrinks oversized ones to fit. No
-			   declared size (viewBox-only, %-width) keeps the full-width law.
+			{/* Ordinary figures keep their natural-width/full-width sizing law.
+			   Learner-image annotations use intrinsic auto sizing with a 60vh cap;
+			   width and height shrink together, with no cropping or enlargement.
 			   The invert filter rides the bg-white holder, so the backing flips
 			   white→black together with the strokes; transparent areas ARE the
 			   backing. */}
 			<div
 				className={
-					natural !== null
+					!invertible || natural !== null
 						? "w-fit max-w-full overflow-hidden rounded-lg bg-white"
 						: "w-full overflow-hidden rounded-lg bg-white"
 				}
@@ -128,12 +128,20 @@ export function VisualOutputCard({
 				<SvgImage
 					svg={svg}
 					width={natural ?? undefined}
-					className={natural !== null ? "block h-auto max-w-full" : "block h-auto w-full"}
+					className={
+						!invertible
+							? "block h-auto w-auto max-h-[60vh] max-w-full"
+							: natural !== null ? "block h-auto max-w-full" : "block h-auto w-full"
+					}
 				/>
 			</div>
-			<div className="mt-2 flex items-center justify-between gap-2">
+			<div className={
+				!invertible
+					? "mt-2 flex w-0 min-w-full flex-wrap items-center justify-between gap-2"
+					: "mt-2 flex items-center justify-between gap-2"
+			}>
 				<div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Figure</div>
-				<div className="flex items-center gap-1.5">
+				<div className={!invertible ? "ml-auto flex items-center gap-1.5" : "flex items-center gap-1.5"}>
 					{/* The invert affordance (owner round, 2026-10-07): the disc IS
 					    the half-filled contrast circle; the tooltip names it. */}
 					{invertible && (

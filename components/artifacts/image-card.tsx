@@ -73,9 +73,9 @@ export function ImagePresentation({ image }: { image: ImageSnapshot & Pick<ShowI
 		downloadFile(imageDownloadName(image), bytes, image.mimeType);
 	};
 	return (
-		/* The figure card's sizing law: the wrapper hugs the picture's natural
-		   width (max-w-full shrinks a wide one), and the caption row follows
-		   it — w-0 + min-w-full keeps a long caption from widening the card. */
+		/* Auto dimensions let the width/60vh constraints scale the whole picture
+		   proportionally, never enlarge it. The wrapper hugs its displayed width;
+		   w-0 + min-w-full keeps the caption from widening the card. */
 		<figure className="my-4 mx-auto w-fit max-w-full" data-testid="image-card">
 			<div className="w-fit max-w-full overflow-hidden rounded-lg">
 				{/* An in-memory image from the record; no Next image optimization. */}
@@ -85,7 +85,7 @@ export function ImagePresentation({ image }: { image: ImageSnapshot & Pick<ShowI
 					alt={image.caption ?? baseName(image.path)}
 					width={image.width}
 					height={image.height}
-					className="block h-auto max-w-full"
+					className="block h-auto w-auto max-h-[60vh] max-w-full"
 					draggable={false}
 				/>
 			</div>
