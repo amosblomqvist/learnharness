@@ -30,10 +30,12 @@ import {
 } from "react";
 import remarkBreaks from "remark-breaks";
 import {
+  defaultRehypePlugins,
   Streamdown,
   type PluginConfig,
 } from "streamdown";
 import { mdComponents } from "@/components/md-blocks";
+import { rehypeTextDirection } from "@/components/text-direction";
 import { repairMathForDisplay, transformMathDelimiters } from "@/src/core";
 
 export type MessageProps = HTMLAttributes<HTMLDivElement> & {
@@ -361,6 +363,16 @@ export const streamdownPlugins = {
 // separate sanitization/hardening and all other Markdown repairs stay enabled.
 export const streamdownRemend = { htmlTags: false };
 
+// Per-block text direction (components/text-direction.ts). The bare
+// `rehypePlugins` prop REPLACES Streamdown's defaults (raw, sanitize,
+// harden), so they are restated first; the math plugin still runs after.
+// Streamdown's own dir="auto" follows the first strong character, which
+// turns Persian sentences that open with an English term left-to-right.
+export const streamdownRehypePlugins = [
+  ...Object.values(defaultRehypePlugins),
+  rehypeTextDirection,
+];
+
 export const MessageResponse = memo(
   ({ className, children, ...props }: MessageResponseProps) => {
     // Legacy backslash delimiters are converted in a single linear scan;
@@ -381,6 +393,7 @@ export const MessageResponse = memo(
         )}
         components={mdComponents}
         plugins={streamdownPlugins}
+        rehypePlugins={streamdownRehypePlugins}
         remend={streamdownRemend}
         {...props}
       >

@@ -8,6 +8,7 @@ import { ChatActionsContext } from "@/components/chat";
 import { downloadFile, slugFilename } from "@/components/artifacts/download";
 import { DispatchCard } from "@/components/artifacts/dispatch-card";
 import type { ArtifactPartProps, DemoResult } from "@/src/core";
+import { rtlDir } from "@/components/text-direction";
 
 /**
  * Demo artifact card (W6): while the part is input-available, a job activity
@@ -179,7 +180,7 @@ function DemoFrame({
 					<span className="shrink-0 text-xs font-medium uppercase tracking-wide text-muted-foreground">
 						interactive demo
 					</span>
-					<span className="truncate text-xs font-medium tracking-wide text-foreground">{title}</span>
+					<span dir={rtlDir(title)} className="truncate text-xs font-medium tracking-wide text-foreground">{title}</span>
 				</div>
 				<div className="flex shrink-0 items-center gap-1.5">
 					<Toggle

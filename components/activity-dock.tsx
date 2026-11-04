@@ -7,6 +7,7 @@ import type { CallUsage, JobKind, JobRecord } from "@/src/core";
 import { isModelsRefusal, isProviderKeyRefusal, subscriptionLabel, subscriptionLabels } from "@/src/core";
 import { formatTokens, planCostLabel } from "@/components/usage-format";
 import { useServerEvent, useServerResync } from "@/components/server-events";
+import { rtlDir } from "@/components/text-direction";
 
 /**
  * THE BACKGROUND-AGENTS SECTION (owner, sidebar round — the successor of
@@ -415,7 +416,7 @@ function ActivityBlobRow({
 			>
 				<Icon className="size-3.5 shrink-0 text-muted-foreground" />
 				<span className="min-w-0 flex-1">
-					<span className="block truncate font-medium text-card-foreground">{blob.title}</span>
+					<span dir={rtlDir(blob.title)} className="block truncate font-medium text-card-foreground">{blob.title}</span>
 					{blob.activity ? (
 						<span className="block truncate text-muted-foreground" title={blob.activity}>
 							{blob.activity}
@@ -457,7 +458,7 @@ function ActivityBlobRow({
 						</span>
 					</div>
 					<div className="flex flex-col gap-1 text-muted-foreground">
-						<div className="truncate text-card-foreground" title={blob.title}>
+						<div dir={rtlDir(blob.title)} className="truncate text-card-foreground" title={blob.title}>
 							{blob.title}
 						</div>
 						{blob.activity && <div className="break-words">{blob.activity}</div>}

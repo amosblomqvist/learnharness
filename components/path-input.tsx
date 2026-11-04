@@ -3,6 +3,7 @@
 import * as React from "react";
 import { createPortal } from "react-dom";
 import { FilePathChip } from "./file-path-chip";
+import { textDirection } from "./text-direction";
 import { cn } from "../lib/utils";
 import {
 	adjacentPathRange, atomicPathRange, clampPathSelection, insertFilePaths,
@@ -72,6 +73,12 @@ export const PathInput = React.forwardRef<HTMLDivElement, PathInputProps>(functi
 		}
 		function paint(selection: TextSelection, restore: boolean) {
 			setChips(renderPathInput(root, current));
+			// One direction for the whole draft, by word vote, explicit either
+			// way: an English answer typed inside a Persian question's list stays
+			// LTR. Empty inherits its surroundings.
+			const dir = textDirection(current);
+			if (dir) root.dir = dir;
+			else root.removeAttribute("dir");
 			saved = clampPathSelection(current, selection);
 			if (restore) restorePathSelection(root, saved);
 		}

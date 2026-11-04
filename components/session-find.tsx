@@ -7,6 +7,7 @@ import {
 	sameSessionRange, sessionFindRanges, sessionRangeIdentity, type SessionRangeIdentity,
 } from "@/components/session-find-dom";
 import { scrollSessionTarget, type SessionScrollContext } from "@/components/session-navigation";
+import { rtlDir } from "@/components/text-direction";
 
 export const SESSION_FIND_HIGHLIGHT = "lh-session-find";
 export const SESSION_FIND_ACTIVE_HIGHLIGHT = "lh-session-find-active";
@@ -185,6 +186,7 @@ export function SessionFind({ scopeRef, scrollContextRef }: {
 				aria-label="Find in session"
 				placeholder="Find in session…"
 				value={query}
+				dir={rtlDir(query)}
 				onChange={(event) => setQuery(event.target.value)}
 				spellCheck={false}
 				className="lh-input min-w-0 flex-1 bg-transparent outline-none placeholder:text-muted-foreground"

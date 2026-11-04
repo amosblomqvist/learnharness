@@ -15,6 +15,7 @@ import {
 } from "@/components/ai-elements/conversation";
 import { Message, MessageContent, MessageResponse } from "@/components/ai-elements/message";
 import { PathText } from "@/components/file-path-chip";
+import { rtlDir } from "@/components/text-direction";
 import { Reasoning, ReasoningContent, ReasoningTrigger } from "@/components/ai-elements/reasoning";
 import { Shimmer } from "@/components/ai-elements/shimmer";
 import { BrailleSpinner } from "@/components/braille-spinner";
@@ -201,6 +202,10 @@ function SystemLine({ children, testId }: { children: React.ReactNode; testId?: 
 
 function isSubagentSteer(m: LhViewMessage): boolean {
 	return (m.metadata as { subagentResult?: unknown } | undefined)?.subagentResult != null;
+}
+
+function userText(m: LhViewMessage): string {
+	return m.parts.filter((p) => p.type === "text").map((p) => p.text).join("\n");
 }
 
 /**
@@ -1308,6 +1313,7 @@ export function Chat({
 							<input
 								ref={titleInputRef}
 								value={titleDraft}
+								dir={rtlDir(titleDraft)}
 								onChange={(e) => setTitleDraft(e.target.value)}
 								onKeyDown={(e) => {
 									if (e.key === "Enter") void commitRename(titleDraft);
@@ -1343,6 +1349,7 @@ export function Chat({
 								setTitleDraft(titleText);
 								setRenaming(true);
 							}}
+							dir={rtlDir(titleText)}
 							className="lh-no-drag -mx-1.5 min-w-4 shrink cursor-text truncate rounded-md px-1.5 text-left font-title text-3xl tracking-tight transition-colors hover:bg-accent"
 						>
 							{titleText}
@@ -1517,8 +1524,8 @@ export function Chat({
 												    sits INSIDE the rail, same mono-xs register and same 1ch
 												    rail as the thinking rows — one quote geometry. */}
 												<div className="font-medium uppercase tracking-wide text-muted-foreground">You</div>
-												<div className="lh-prose whitespace-pre-wrap text-foreground">
-													<PathText text={m.parts.filter((p) => p.type === "text").map((p) => p.text).join("\n")} />
+												<div dir={rtlDir(userText(m))} className="lh-prose whitespace-pre-wrap text-foreground">
+													<PathText text={userText(m)} />
 												</div>
 											</div>
 									) : (

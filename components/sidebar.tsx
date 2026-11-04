@@ -51,6 +51,7 @@ const STORAGE_KEY = "lh:sidebar-open";
 import type { ChatGPTControlBridge, NativeSubscriptionControlBridge } from "@/src/core";
 import type { UpdateState } from "@/components/settings/update-settings.tsx";
 import { FilePathDropZone } from "@/components/file-path-drop-zone";
+import { rtlDir } from "@/components/text-direction";
 const SIDEBAR_AUTOCLOSE = 928;
 
 // Module scope, guarded for SSR (the server has no navigator).
@@ -320,7 +321,7 @@ export function SessionRow({
 				    the meta line below stays JetBrains Mono (machine data). One
 				    rule, finally applied to the picker too (owner, typography
 				    round): mono = chrome, Source Sans = human words. */}
-				<span className="block truncate font-prose text-(length:--lh-prose-size)">{chat.title}</span>
+				<span dir={rtlDir(chat.title)} className="block truncate font-prose text-(length:--lh-prose-size)">{chat.title}</span>
 				<span className="block text-xs text-muted-foreground">{sessionMeta(chat)}</span>
 			</span>
 			{/* The dumbbell rides the FAR RIGHT (owner round 6, 2026-10-05) —
@@ -363,6 +364,7 @@ export function RenameRow({ chat, onCommit, onCancel }: { chat: ChatListItem; on
 				<input
 					ref={inputRef}
 					value={draft}
+					dir={rtlDir(draft)}
 					spellCheck={false}
 					onChange={(e) => setDraft(e.target.value)}
 					onBlur={() => onCommit(draft)}
@@ -727,6 +729,7 @@ function SessionsSidebar() {
 							ref={searchRef}
 							data-testid="session-search"
 							value={query}
+							dir={rtlDir(query)}
 							onChange={(e) => {
 								setQuery(e.target.value);
 								// The list reorders under the query every keystroke —
