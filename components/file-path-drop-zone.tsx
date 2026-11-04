@@ -61,21 +61,19 @@ export function FilePathDropZone({ children, className }: { children: React.Reac
 				clearDrag();
 				const resolve = window.lh?.getPathForFile;
 				if (!resolve) { setNotice(BROWSER_NOTICE); return; }
-				// Directories are not file references. This check uses drag metadata,
-				// never a server request or a new filesystem capability.
-				const entries = Array.from(event.dataTransfer.items).filter((item) => item.kind === "file");
+				// OS-backed directories resolve just like files: one original path,
+				// never traverse drag entries or enumerate/copy their contents.
 				const paths: string[] = [];
 				let skipped = 0;
-				for (const [index, file] of Array.from(event.dataTransfer.files).entries()) {
+				for (const file of Array.from(event.dataTransfer.files)) {
 					try {
-						if (entries[index]?.webkitGetAsEntry?.()?.isDirectory) { skipped++; continue; }
 						const path = resolve(file);
 						quoteFilePath(path); // Same rooted-path validity rule as typed chips.
 						paths.push(path);
 					} catch { skipped++; }
 				}
 				if (paths.length === 0) {
-					setNotice("No local file paths were available. Drop existing files from your computer.");
+					setNotice("No local file paths were available. Drop existing files or folders from your computer.");
 					return;
 				}
 				const focused = document.activeElement?.closest<HTMLElement>("[data-file-path-input]");

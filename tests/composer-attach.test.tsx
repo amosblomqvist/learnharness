@@ -33,7 +33,10 @@ async function fixture({ desktop = true } = {}) {
 	win.HTMLElement.prototype.focus = function () { active = this; };
 	const backingPaths = new Map<File, string>();
 	let pickerClicks = 0;
+	let folderCalls = 0;
+	let folderResult: string | null | Error = null;
 	let byteReads = 0;
+	let sends = 0;
 	let value = "readthis";
 	const previous = new Map<string, PropertyDescriptor | undefined>();
 	for (const [name, next] of Object.entries({
@@ -45,12 +48,15 @@ async function fixture({ desktop = true } = {}) {
 	}
 	Object.defineProperty(win, "lh", {
 		configurable: true,
-		value: desktop ? { getPathForFile: (file: File) => backingPaths.get(file) ?? "" } : undefined,
+		value: desktop ? {
+			getPathForFile: (file: File) => backingPaths.get(file) ?? "",
+			chooseAttachmentFolder: async () => { folderCalls++; if (folderResult instanceof Error) throw folderResult; return folderResult; },
+		} : undefined,
 	});
 	const { createRoot } = await import("react-dom/client");
 	const root = createRoot(doc.getElementById("root")!);
 	function draw() {
-		root.render(<Composer busy={false} value={value} onChange={(next) => { value = next; draw(); }} onSend={() => {}} onStop={() => {}} canSend />);
+		root.render(<Composer busy={false} value={value} onChange={(next) => { value = next; draw(); }} onSend={() => { sends++; }} onStop={() => {}} canSend />);
 	}
 	await act(async () => { draw(); });
 	const picker = doc.querySelector<HTMLInputElement>('[data-testid="attach-files-input"]')!;
@@ -66,7 +72,19 @@ async function fixture({ desktop = true } = {}) {
 	return {
 		button: doc.querySelector<HTMLButtonElement>('[data-testid="attach-files"]')!,
 		get value() { return value; },
+		doc,
 		get pickerClicks() { return pickerClicks; },
+		get folderCalls() { return folderCalls; },
+		get sends() { return sends; },
+		setFolderResult(result: typeof folderResult) { folderResult = result; },
+		async choice(label: string) {
+			await act(async () => { Array.from(doc.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')).find((button) => button.textContent === label)!.click(); });
+		},
+		async key(key: string) {
+			const event = Object.assign(new win.Event("keydown", { bubbles: true, cancelable: true }), { key });
+			await act(async () => { doc.activeElement!.dispatchEvent(event); });
+			return event;
+		},
 		get byteReads() { return byteReads; },
 		file(name: string, path?: string) {
 			const result = new File(["synthetic bytes must never be read"], name, { type: "application/pdf" });
@@ -112,16 +130,77 @@ describe("composer attach button", () => {
 		assert.ok(html.includes('type="file"') && !html.includes("accept="), "any file type");
 	});
 
-	it("desktop: the button opens the picker and picked files become chips at the caret", async () => {
+	it("desktop: the button offers Files/Folder, and Files keeps multi-file any-type chips at the caret", async () => {
 		const f = await fixture();
 		assert.equal(f.button.getAttribute("aria-disabled"), "false");
-		await act(async () => { f.button.click(); });
-		assert.equal(f.pickerClicks, 1);
 		f.caret(4);
+		await act(async () => { f.button.click(); });
+		assert.equal(f.pickerClicks, 0);
+		assert.deepEqual(Array.from(f.doc.querySelectorAll('[role="menuitem"]')).map((item) => item.textContent), ["Files", "Folder"]);
+		await f.choice("Files");
+		assert.equal(f.pickerClicks, 1);
 		const paths = ["/course/week 3.pdf", "/photos/board.jpg"];
 		await f.pick([f.file("week 3.pdf", paths[0]), f.file("board.jpg", paths[1]), f.file("virtual.pdf")]);
 		assert.equal(f.value, `read ${paths.map(quoteFilePath).join(" ")} this`);
 		assert.equal(f.byteReads, 0, "paths only — file contents are never read");
+	});
+
+	it("Folder inserts exactly one directory path (including empty folders) at the saved caret, without file selection or submits", async () => {
+		const f = await fixture();
+		f.caret(4);
+		f.setFolderResult("/course/empty folder");
+		await act(async () => { f.button.click(); });
+		await f.choice("Folder");
+		assert.equal(f.value, "read `/course/empty folder` this");
+		assert.equal(f.folderCalls, 1);
+		assert.equal(f.pickerClicks, 0);
+		assert.equal(f.byteReads, 0);
+		assert.equal(f.sends, 0);
+		assert.equal(f.doc.querySelector('[role="menu"]'), null);
+		assert.equal(f.doc.querySelector("[webkitdirectory]"), null);
+	});
+
+	for (const result of [null, "relative/folder", new Error("cancel/failure")]) it(`folder cancellation or error preserves the draft (${String(result)})`, async () => {
+		const f = await fixture();
+		f.caret(4);
+		f.setFolderResult(result);
+		await act(async () => { f.button.click(); });
+		await f.choice("Folder");
+		assert.equal(f.value, "readthis");
+		assert.equal(f.sends, 0);
+		assert.equal(f.pickerClicks, 0);
+		assert.equal(f.doc.querySelector('[role="status"]') !== null, result !== null);
+	});
+
+	it("paperclip menu focuses choices, supports arrows/Escape, and never submits a draft", async () => {
+		const f = await fixture();
+		f.caret(4);
+		await act(async () => { f.button.click(); });
+		assert.equal(f.doc.activeElement!.textContent, "Files");
+		assert.equal((await f.key("ArrowDown")).defaultPrevented, true);
+		assert.equal(f.doc.activeElement!.textContent, "Folder");
+		await f.key("ArrowDown");
+		assert.equal(f.doc.activeElement!.textContent, "Files");
+		await f.key("End");
+		assert.equal(f.doc.activeElement!.textContent, "Folder");
+		await f.key("Home");
+		assert.equal(f.doc.activeElement!.textContent, "Files");
+		assert.equal((await f.key("Escape")).defaultPrevented, true);
+		assert.equal(f.doc.activeElement, f.button);
+		assert.equal(f.doc.querySelector('[role="menu"]'), null);
+		assert.equal(f.button.getAttribute("aria-expanded"), "false");
+		assert.equal(f.value, "readthis");
+		assert.equal(f.sends, 0);
+	});
+
+	it("cancelled Files selection preserves draft and opens no folder chooser", async () => {
+		const f = await fixture();
+		await act(async () => { f.button.click(); });
+		await f.choice("Files");
+		await f.pick([]);
+		assert.equal(f.value, "readthis");
+		assert.equal(f.folderCalls, 0);
+		assert.equal(f.sends, 0);
 	});
 
 	it("browser: the button stays inert and the picker never opens", async () => {

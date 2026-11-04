@@ -35,15 +35,15 @@ Audio streams from your browser directly to Deepgram using a short-lived token. 
 
 ## Use local files in a session
 
-In the desktop app, use the paperclip or drag files into an input to insert their local paths. The agent can then locate/read supported content on the machine running LearnHarness. This is **not an upload**: the original stays where it is. Ordinary browsers cannot expose these local paths through the picker or drag-and-drop.
+In the desktop app, use the paperclip's **Files** or **Folder** choice, or drag files/folders into the content area, to insert their local paths. Files supports any file type and multiple selections; Folder attaches one original directory path, including an empty folder, without expanding or reading its contents. The agent can then locate/read supported content on the machine running LearnHarness under the existing file-access guards; attaching a path does not grant permissions. This is **not an upload**: originals stay where they are. Ordinary browsers cannot expose these local paths through the picker or drag-and-drop; you can paste a full path instead.
 
 The teacher can show a local raster image or request an annotated visual based on it. Displayed/annotated pictures are saved as session-owned snapshots, so those saved results no longer depend on the original file. This does not snapshot every file attachment. Offline regression tests cover snapshot/payload behavior, not the quality of model-generated annotations.
 
 File tools are read-only but have broad filesystem access under the server's user; they are not confined to a selected folder. The sensitive-path guard blocks known credential/private locations, not all sensitive content. Review what you make available: file content read by an agent may be sent to its configured model provider. See [file-access boundaries](architecture.md#file-access-and-external-services).
 
-## Import notes into the graph
+## Extract into the graph
 
-Use the graph's **Files** or **Folder** picker for Markdown, plain text, or PDFs. This is a separate import flow, not the session's path attachments. Each supported file is uploaded for processing; folders organize imported sources.
+For lessons, attach material to a session instead. Use the graph's **Extract into graph… → Files** or **Folder** picker for Markdown, plain text, or PDFs. This is a separate import flow, not the session's path attachments. Each supported file is uploaded for processing; folders organize imported sources.
 
 - Files are limited to **25 MiB each**. Imports queue independently, with up to three files in flight.
 - PDF conversion is local text extraction, not OCR. Image-only pages are skipped and counted; scanner text can be inaccurate. Check the import's notices.
