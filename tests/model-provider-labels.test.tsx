@@ -66,7 +66,7 @@ function installFetch() {
 		if (path === "/api/models") return Response.json(catalog);
 		if (path === "/api/settings") return Response.json({ settings: { models: strongGo } });
 		if (path === "/api/keys") return Response.json({ providers: [], keys: [] });
-		if (path === "/api/settings/prompts") return Response.json({ prober: [], teacher: [] });
+		if (path === "/api/settings/prompts") return Response.json({ prober: [], teacher: [], practice: [] });
 		if (path === "/api/search") return Response.json({ available: false, engine: null, reason: "fixture" });
 		throw new Error(`Unexpected request ${path}`);
 	};
