@@ -1,0 +1,355 @@
+{
+  "_comment": "Language manifest for the LearnHarness sandbox runner. `file` is the source filename written into the run's tmpfs. `compile` is optional (interpreted languages). `run` always executes the program. `limits.compileSec`/`runSec` are enforced by `timeout(1)` INSIDE the sandbox, and the whole unit is additionally capped by RuntimeMaxSec.",
+  "languages": {
+    "c": {
+      "label": "C",
+      "file": "main.c",
+      "compile": "gcc -O1 -std=c11 -Wall -o prog main.c",
+      "run": "./prog",
+      "version": "gcc -dumpversion",
+      "limits": {
+        "compileSec": 15,
+        "runSec": 5
+      }
+    },
+    "cpp": {
+      "label": "C++",
+      "file": "main.cpp",
+      "compile": "g++ -O1 -std=c++17 -Wall -o prog main.cpp",
+      "run": "./prog",
+      "version": "g++ -dumpversion",
+      "limits": {
+        "compileSec": 20,
+        "runSec": 5
+      }
+    },
+    "rust": {
+      "label": "Rust",
+      "file": "main.rs",
+      "compile": "rustc -O -o prog main.rs",
+      "run": "./prog",
+      "version": "rustc --version",
+      "limits": {
+        "compileSec": 25,
+        "runSec": 5
+      }
+    },
+    "go": {
+      "label": "Go",
+      "file": "main.go",
+      "compile": "go build -o prog main.go",
+      "run": "./prog",
+      "version": "go version",
+      "limits": {
+        "compileSec": 25,
+        "runSec": 5
+      },
+      "env": {
+        "GOFLAGS": "-mod=mod",
+        "GOPATH": "$PWD/.gopath",
+        "GOCACHE": "$PWD/.gocache"
+      }
+    },
+    "java": {
+      "label": "Java",
+      "file": "Main.java",
+      "compile": "javac -d . Main.java",
+      "run": "java Main",
+      "version": "javac -version",
+      "limits": {
+        "compileSec": 25,
+        "runSec": 5
+      },
+      "classFromCode": true
+    },
+    "kotlin": {
+      "label": "Kotlin",
+      "file": "Main.kt",
+      "compile": "kotlinc Main.kt -include-runtime -d prog.jar",
+      "run": "java -jar prog.jar",
+      "version": "kotlinc -version",
+      "limits": {
+        "compileSec": 45,
+        "runSec": 8
+      }
+    },
+    "csharp": {
+      "label": "C#",
+      "file": "Main.cs",
+      "compile": "mcs -out:prog.exe Main.cs",
+      "run": "mono prog.exe",
+      "version": "mcs --version",
+      "limits": {
+        "compileSec": 20,
+        "runSec": 5
+      }
+    },
+    "python": {
+      "label": "Python",
+      "file": "main.py",
+      "run": "python3 main.py",
+      "version": "python3 --version",
+      "limits": {
+        "runSec": 5
+      },
+      "checkAppend": "\nimport json as _lh_json\n_lh_checks = _lh_json.loads(r\"\"\"__LH_CHECKS__\"\"\")\nfor _lh_c in _lh_checks:\n    try:\n        _lh_v = eval(_lh_c[\"expr\"])\n        _lh_ok = _lh_c[\"expect\"] in (str(_lh_v), repr(_lh_v))\n    except Exception:\n        _lh_ok = False\n    print(\"@@LH_CHECK\", \"PASS\" if _lh_ok else \"FAIL\", _lh_c[\"label\"])\n"
+    },
+    "ruby": {
+      "label": "Ruby",
+      "file": "main.rb",
+      "run": "ruby main.rb",
+      "version": "ruby --version",
+      "limits": {
+        "runSec": 5
+      },
+      "checkAppend": "\nrequire \"json\"\nchecks = JSON.parse(%q{__LH_CHECKS__})\nchecks.each do |c|\n  ok = begin\n    v = eval(c[\"expr\"])\n    c[\"expect\"] == v.to_s\n  rescue StandardError\n    false\n  end\n  puts(\"@@LH_CHECK #{ok ? \"PASS\" : \"FAIL\"} #{c[\"label\"]}\")\nend\n"
+    },
+    "php": {
+      "label": "PHP",
+      "file": "main.php",
+      "run": "php main.php",
+      "version": "php --version",
+      "limits": {
+        "runSec": 5
+      }
+    },
+    "lua": {
+      "label": "Lua",
+      "file": "main.lua",
+      "run": "lua5.4 main.lua",
+      "version": "lua5.4 -v",
+      "limits": {
+        "runSec": 5
+      }
+    },
+    "perl": {
+      "label": "Perl",
+      "file": "main.pl",
+      "run": "perl main.pl",
+      "version": "perl -v",
+      "limits": {
+        "runSec": 5
+      }
+    },
+    "bash": {
+      "label": "Bash",
+      "file": "main.sh",
+      "run": "bash main.sh",
+      "version": "bash --version",
+      "limits": {
+        "runSec": 5
+      }
+    },
+    "r": {
+      "label": "R",
+      "file": "main.R",
+      "run": "Rscript main.R",
+      "version": "R --version",
+      "limits": {
+        "runSec": 8
+      }
+    },
+    "octave": {
+      "label": "Octave",
+      "file": "main.m",
+      "run": "octave --no-gui --quiet main.m",
+      "version": "octave --version",
+      "limits": {
+        "runSec": 10
+      }
+    },
+    "haskell": {
+      "label": "Haskell",
+      "file": "main.hs",
+      "run": "runghc main.hs",
+      "version": "ghc --version",
+      "limits": {
+        "runSec": 10
+      }
+    },
+    "lisp": {
+      "label": "Lisp (SBCL)",
+      "file": "main.lisp",
+      "run": "sbcl --script main.lisp",
+      "version": "sbcl --version",
+      "limits": {
+        "runSec": 8
+      }
+    },
+    "fortran": {
+      "label": "Fortran",
+      "file": "main.f90",
+      "compile": "gfortran -O1 -o prog main.f90",
+      "run": "./prog",
+      "version": "gfortran -dumpversion",
+      "limits": {
+        "compileSec": 20,
+        "runSec": 5
+      }
+    },
+    "sql": {
+      "label": "SQL (SQLite)",
+      "file": "main.sql",
+      "run": "sqlite3 :memory: < main.sql",
+      "version": "sqlite3 --version",
+      "limits": {
+        "runSec": 5
+      }
+    },
+    "julia": {
+      "label": "Julia",
+      "file": "main.jl",
+      "run": "julia main.jl",
+      "version": "julia --version",
+      "limits": {
+        "runSec": 10
+      }
+    },
+    "dart": {
+      "label": "Dart",
+      "file": "main.dart",
+      "run": "dart run main.dart",
+      "version": "dart --version",
+      "limits": {
+        "compileSec": 30,
+        "runSec": 8
+      }
+    },
+    "swift": {
+      "label": "Swift",
+      "file": "main.swift",
+      "compile": "/opt/codetools/swift-6.0.3-RELEASE-ubuntu24.04/usr/bin/swiftc main.swift -o prog",
+      "run": "LD_LIBRARY_PATH=/opt/codetools/swift-6.0.3-RELEASE-ubuntu24.04/usr/lib/swift/linux ./prog",
+      "version": "/opt/codetools/swift-6.0.3-RELEASE-ubuntu24.04/usr/bin/swift --version",
+      "limits": {
+        "compileSec": 60,
+        "runSec": 8
+      },
+      "env": {
+        "TMPDIR": "$PWD",
+        "HOME": "$PWD"
+      }
+    },
+    "erlang": {
+      "label": "Erlang",
+      "file": "main.escript",
+      "run": "escript main.escript",
+      "version": "erl -noshell -eval 'io:format(\"OTP ~s~n\",[erlang:system_info(otp_release)]),halt().'",
+      "limits": {
+        "runSec": 10
+      },
+      "prepend": "#!/usr/bin/env escript"
+    },
+    "elixir": {
+      "label": "Elixir",
+      "file": "main.exs",
+      "run": "elixir main.exs",
+      "version": "elixir --version",
+      "limits": {
+        "runSec": 12
+      },
+      "env": {
+        "HOME": "$PWD"
+      }
+    },
+    "clojure": {
+      "label": "Clojure",
+      "file": "main.clj",
+      "run": "clojure main.clj",
+      "version": "clojure -e '(println \"clojure ok\")'",
+      "limits": {
+        "runSec": 25
+      },
+      "env": {
+        "HOME": "$PWD"
+      }
+    },
+    "ocaml": {
+      "label": "OCaml",
+      "file": "main.ml",
+      "run": "ocaml main.ml",
+      "version": "ocaml -version",
+      "limits": {
+        "runSec": 10
+      }
+    },
+    "nim": {
+      "label": "Nim",
+      "file": "main.nim",
+      "run": "nim r --hints:off --verbosity:0 main.nim",
+      "version": "nim --version",
+      "limits": {
+        "compileSec": 40,
+        "runSec": 10
+      },
+      "env": {
+        "HOME": "$PWD",
+        "XDG_CACHE_HOME": "$PWD/.cache"
+      }
+    },
+    "crystal": {
+      "label": "Crystal",
+      "file": "main.cr",
+      "run": "crystal run main.cr",
+      "version": "crystal --version",
+      "limits": {
+        "compileSec": 45,
+        "runSec": 10
+      },
+      "env": {
+        "HOME": "$PWD"
+      }
+    },
+    "groovy": {
+      "label": "Groovy",
+      "file": "main.groovy",
+      "run": "groovy main.groovy",
+      "version": "groovy --version",
+      "limits": {
+        "runSec": 25
+      },
+      "env": {
+        "HOME": "$PWD"
+      }
+    },
+    "prolog": {
+      "label": "Prolog (SWI)",
+      "file": "main.pl",
+      "run": "swipl -q -t halt main.pl",
+      "version": "swipl --version",
+      "limits": {
+        "runSec": 10
+      }
+    },
+    "racket": {
+      "label": "Racket",
+      "file": "main.rkt",
+      "run": "racket main.rkt",
+      "version": "racket --version",
+      "limits": {
+        "runSec": 15
+      },
+      "env": {
+        "HOME": "$PWD"
+      }
+    },
+    "tcl": {
+      "label": "Tcl",
+      "file": "main.tcl",
+      "run": "tclsh main.tcl",
+      "version": "sh -c \"echo 'puts [info patchlevel]' | tclsh\"",
+      "limits": {
+        "runSec": 8
+      }
+    },
+    "awk": {
+      "label": "AWK",
+      "file": "main.awk",
+      "run": "gawk -f main.awk",
+      "version": "gawk --version",
+      "limits": {
+        "runSec": 8
+      }
+    }
+  }
+}

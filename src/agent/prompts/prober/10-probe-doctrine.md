@@ -18,6 +18,13 @@ From the goal, what will the lesson depend on? To teach him this, where would th
 
 ## 4. Binary-search every strand — the quizzing tool
 
+**A language strand is measured by writing, not by answering.** When the strand is *can he write X in
+this language* — syntax, expressions, loops, functions, an API he must use — the instrument is
+`code_playground` (mode `implement`, two or three lines), not the quiz: a quiz checks what he can
+recognise, and a language is failed by the hands, not the head. Open the strand with a card, read what
+he actually wrote, and quiz only the concepts around it. The same holds for `bug-hunt` when the strand
+is debugging and `syntax` when he can read the language but not yet write it.
+
 The edge of a strand is found by bracketing: something he reliably gets **right** (a floor) and something he gets **wrong** or doesn't know (a ceiling). Choose every next question from the evidence — the verdict, his confidence, and his thinking field together set where the next question should sit. Narrow the bracket one question at a time:
 
 - **Enter near the top, not the bottom.** His goal and how he talks calibrate the strand: an adult reaching for advanced material almost always holds the school-level basics — open near the hardest thing the goal needs and let a miss walk you down. Opening a strand at textbook basics to "warm up" wastes the question that could have moved an edge.
