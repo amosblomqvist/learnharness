@@ -159,6 +159,22 @@ describe("desktop packaging policy", () => {
 		assert.equal(config.publish[0].releaseType, "draft");
 	});
 
+	it("selects the static AppImage runtime without changing updater dependency inclusion", () => {
+		assert.equal(config.toolsets?.appimage, "1.0.3");
+		assert.ok(config.files.includes("node_modules/lodash.escaperegexp/**/*"));
+		// Production config normalization combines string filters into one file
+		// set. Exercise the installed per-dependency matcher, not a glob copy.
+		const { getNodeModuleFileMatcher } = require("app-builder-lib/out/fileMatcher.js");
+		const matcher = getNodeModuleFileMatcher("/app", "/out", (s: string) => s, {}, {
+			config: { files: [{ filter: config.files }] }, debugLogger: { isEnabled: false },
+		});
+		const filter = matcher.createFilter();
+		for (const name of ["index.js", "package.json"]) {
+			const relative = `node_modules/lodash.escaperegexp/${name}`;
+			assert.equal(filter(`/app/${relative}`, { moduleFullFilePath: relative, isDirectory: () => false }), true, relative);
+		}
+	});
+
 	it("deb has public maintainer metadata and a matching desktop identity", () => {
 		const pkg = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
 		assert.equal(pkg.author.name, "Amos Blomqvist");

@@ -26,6 +26,7 @@
 
 const { app, BrowserWindow, Menu, ipcMain, session, shell, dialog } = require("electron");
 const { pickAttachmentPath } = require("./attachment-picker.cjs");
+const { updateAppImageShortcuts } = require("./appimage-shortcuts.cjs");
 const { createChatGPT, fileStore } = require("./chatgpt.cjs");
 const { attachChatGPTChild, trustedSender, chatGPTControl } = require("./chatgpt-ipc.cjs");
 const { createSubscriptions, loadSubscriptionSDK } = require("./subscriptions.cjs");
@@ -539,6 +540,16 @@ function setupAutoUpdater() {
 		log(`update downloaded: ${info?.version} — banner shown`);
 		reportUpdateStatus("downloaded", info?.version);
 	});
+	if (process.platform === "linux") {
+		autoUpdater.on("appimage-filename-updated", (newPath) => {
+			try {
+				updateAppImageShortcuts({ oldPath: process.env.APPIMAGE, newPath,
+					home: app.getPath("home"), dataHome: process.env.XDG_DATA_HOME, log });
+			} catch (err) {
+				log(`auto-update: desktop entry rewrite skipped (${err?.message ?? err})`);
+			}
+		});
+	}
 	autoUpdater.on("error", (err) => {
 		log(`updater error: ${err?.message ?? err}`);
 		reportUpdateStatus("error");

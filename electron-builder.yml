@@ -13,6 +13,8 @@ appId: com.learnharness.LearnHarness
 productName: LearnHarness
 directories:
   output: dist
+toolsets:
+  appimage: "1.0.3"
 # Icons (owner ruling, 2026-10-13) — per-platform sources in build/:
 #   mac   build/icon.icon  — the Icon Composer document (layered Liquid
 #         Glass); actool (Xcode 26+) compiles Assets.car (CFBundleIconName,

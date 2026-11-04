@@ -16,6 +16,28 @@ macOS icon compilation requires **macOS 26+ and Xcode 26+** for `build/icon.icon
 
 The custom app bar remains on all platforms. macOS has left traffic lights/system menu; Windows/Linux use right-side native Window Controls Overlay and reveal the native menu with Alt.
 
+## Linux AppImage runtime and validation
+
+AppImage builds select `toolsets.appimage: "1.0.3"` using the existing pinned electron-builder. This selects the static runtime to avoid the legacy runtime's `libfuse.so.2` dependency (#84); it does **not** add RPM packaging or change the updater, artifact names, feeds, or 11-asset release inventory. Keep the shell's recursive dependency includes intact, including `node_modules/lodash.escaperegexp/**/*`: omitting that package's contents can disable updates on every platform.
+
+The builder labels this toolset beta. Its defaults use **zstd** payload compression instead of the legacy default gzip, and omit the unconditional `--no-sandbox` desktop-entry argument; upstream AppRun can still add that argument when its namespace probe fails. No custom sandbox override is applied. The static runtime still requires working FUSE mounting support and a suitable `fusermount3`/`fusermount` helper; it is not FUSE-free. Manual extraction is not equivalent update validation because the updater needs `APPIMAGE`.
+
+### Future-update shortcut maintenance
+
+On Linux, the updater's `appimage-filename-updated` event repairs supported shortcuts in `$XDG_DATA_HOME/applications`, or `~/.local/share/applications` when the data home is unset/relative. Only regular `.desktop` files and exact direct executable references are changed: plain or double-quoted `Exec` paths in the desktop-entry/action groups, and literal `TryExec` paths in the main group. Arguments, field codes and unrelated content are preserved. Escaped executable paths, wrapper/shell commands, symlinks and unfamiliar forms are left alone. Individual file failures are isolated; replacements use a same-directory temporary and atomic rename, retaining ordinary permission bits and leaving originals intact on write failure.
+
+This is a **future-updates-only partial repair** for #242. The old process performs the rename/event, so an already-released version without the handler cannot repair its transition into the first version containing it. There is no startup migration, no scanning of system directories/Desktop folders, and no repair of #242's separately unexplained flag-rejection or silent-exit reports. Existing stale shortcuts may need manual correction.
+
+### Required packaged Linux checks
+
+Offline synthetic regressions are not AppImage startup/update acceptance. Use x86-64 Linux (a real desktop or VM; an ARM guest is not a substitute) and disposable data without provider credentials:
+
+1. **Runtime startup:** on Fedora 44 Workstation without libfuse2 but with working FUSE mounting support, open candidate A directly and through a desktop shortcut, without extraction or manually adding workaround flags.
+2. **Incoming update:** on a setup where a prior released AppImage works, use the test-only `LH_UPDATE_FEED` generic-feed override to update to A. Confirm replacement and relaunch into A, not merely a successful download. The first-transition stale-shortcut limitation is expected here.
+3. **Future shortcut update:** A contains the handler; B is a higher test-only version of the same candidate. Start A using a supported versioned shortcut, update to B, close it, then reopen via that shortcut. Confirm the new executable path, preserved arguments and successful opening.
+
+The no-libfuse2 startup setup cannot run an old AppImage that requires libfuse2: use a separate working setup/snapshot for the incoming-update drill. Build/distribution/test-feed setup requires separate approval; these steps do not authorize publication or a production version/feed change. Startup and real update/relaunch checks remain acceptance gates, not claims established by macOS unit tests or unpacked CI smoke checks.
+
 ## Build pipeline
 
 Build **on each target OS**. Next traces native binaries for its build machine; a macOS standalone tree is not a Windows/Linux payload.
