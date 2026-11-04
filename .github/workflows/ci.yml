@@ -27,8 +27,6 @@ jobs:
       TEST_FILENAME: LearnHarness-linux-startup-test-45f9593-x86_64.AppImage
       WORKFLOW_SHA: ${{ github.workflow_sha }}
       WORKFLOW_REF: ${{ github.workflow_ref }}
-      LH_DATA_DIR: ${{ runner.temp }}/lh-startup-build/data
-      LH_AUTH_FILE: ${{ runner.temp }}/lh-startup-build/auth.json
     steps:
       - name: Check out exactly the independently reviewed application source
         uses: actions/checkout@v7
@@ -38,8 +36,10 @@ jobs:
       - name: Verify source and create empty build-time state
         run: |
           test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
-          mkdir -p "$LH_DATA_DIR" "$(dirname "$LH_AUTH_FILE")"
-          printf '{}\n' > "$LH_AUTH_FILE"
+          state="$RUNNER_TEMP/lh-startup-build"
+          mkdir -p "$state/data"
+          printf '{}\n' > "$state/auth.json"
+          printf 'LH_DATA_DIR=%s\nLH_AUTH_FILE=%s\n' "$state/data" "$state/auth.json" >> "$GITHUB_ENV"
       - uses: actions/setup-node@v7
         with:
           node-version: "26"
