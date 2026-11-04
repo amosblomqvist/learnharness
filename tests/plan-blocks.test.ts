@@ -1,5 +1,5 @@
 /**
- * plan-blocks — the INTERIM plan presentation seam (docs/probe-teach-split.md
+ * plan-blocks — the INTERIM plan presentation seam (docs/archive/probe-teach-split.md
  * §6): the full block renders IN FLOW exactly once, attached to the
  * assistant group carrying the successful plan_init call. Wave B: emission
  * is a NATIVE plan-block marker (one per TURN, for the last successful

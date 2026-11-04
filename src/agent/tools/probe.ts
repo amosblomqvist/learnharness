@@ -1,7 +1,7 @@
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { serverExecute } from "../tool-execute.ts";
 import { probeDoneInputSchema, PROBE_DONE_ACK_TEXT } from "../../core/contracts.ts";
-import { danglingQuestionOf, hasProbeDone, type LhMessage } from "../../core/native-messages.ts";
+import { hasUnresolvedQuestion, hasProbeDone, type LhMessage } from "../../core/native-messages.ts";
 import type { ChatStore } from "../../core/ports.ts";
 import { buildProbeHandoffSteer, type SteerMessage } from "../../core/contracts.ts";
 
@@ -23,7 +23,7 @@ function probeConcluded(messages: readonly LhMessage[]): boolean {
 }
 
 /**
- * probe_done — the probe→planning seam (docs/probe-teach-split.md §2).
+ * probe_done — the probe→planning seam (docs/archive/probe-teach-split.md §2).
  *
  * SERVER-SIDE. The prober concludes the probe by authoring the learner
  * assessment (the tool INPUT — it streams to the learner live and is
@@ -66,7 +66,7 @@ export function probeDoneTool(ctx: ProbeDoneContext): Record<string, AgentTool<a
 				const record = ctx.chatStore.getChat(ctx.chatId);
 				if (!record) return { ok: false, error: `Chat not found: ${ctx.chatId}` };
 
-				if (danglingQuestionOf(record.messages) !== null) {
+				if (hasUnresolvedQuestion(record.messages)) {
 					return {
 						ok: false,
 						error:

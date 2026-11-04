@@ -11,6 +11,7 @@
  * a different concern and are preserved by the sanitizer (core/settings.ts).
  */
 
+import path from "node:path";
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import { isHexColor, type ChatSettings } from "../core";
 import type {
@@ -23,11 +24,14 @@ import type {
 	DictationSettings,
 	GraphSettings,
 	ModelsSettings,
+	ModelSlot,
 	RoleModelOverride,
 } from "../core/settings.ts";
-import { BACKGROUND_MODEL_ROLES, COMPACTION_THRESHOLD_FLOOR, CUSTOM_MODEL_PIN_FLOOR, EXTRACTION_CHUNK_TOKENS_FLOOR, MODEL_SLOTS } from "../core/settings.ts";
+import { BACKGROUND_MODEL_ROLES, CACHE_RETENTIONS, COMPACTION_THRESHOLD_FLOOR, CUSTOM_MODEL_PIN_FLOOR, EXTRACTION_CHUNK_TOKENS_FLOOR, MODEL_SLOTS } from "../core/settings.ts";
 import { WRITABLE_TOOL_KEYS } from "../core/pending.ts";
+import { isSearchEngineId, SEARCH_ENGINES } from "../core/search.ts";
 import { isDictationLanguage } from "../core/dictation.ts";
+import { parseFileAccessSettings } from "../core/file-access.ts";
 
 /** Parsed-or-rejected — `ok: false` carries the 400's error message. */
 export type SettingsBodyResult<T> =
@@ -195,8 +199,8 @@ export function parseAgentSettingsBody(body: unknown): SettingsBodyResult<AgentS
 		const search = asRecord(raw.search);
 		if (!search) return { ok: false, error: "search must be an object" };
 		if (search.engine !== undefined) {
-			if (search.engine !== "tavily" && search.engine !== "brave") {
-				return { ok: false, error: 'search.engine must be "tavily" or "brave"' };
+			if (!isSearchEngineId(search.engine)) {
+				return { ok: false, error: `search.engine must be ${SEARCH_ENGINES.map((engine) => `"${engine.id}"`).join(", ")}` };
 			}
 			settings.search = { engine: search.engine };
 		}
@@ -212,6 +216,14 @@ export function parseAgentSettingsBody(body: unknown): SettingsBodyResult<AgentS
 			return { ok: false, error: "graphTools.enabled must be a boolean" };
 		}
 		settings.graphTools = graphTools.enabled === undefined ? {} : { enabled: graphTools.enabled };
+	}
+	if (raw.fileAccess !== undefined) {
+		const parsed = parseFileAccessSettings(raw.fileAccess);
+		if (!parsed.ok) return parsed;
+		if (parsed.settings.folders.some((folder) => folder !== "~" && !folder.startsWith("~/") && !path.isAbsolute(folder))) {
+			return { ok: false, error: "fileAccess.folders must be absolute on the server filesystem (or start with ~/)" };
+		}
+		settings.fileAccess = parsed.settings;
 	}
 	return { ok: true, settings };
 }
@@ -360,7 +372,15 @@ export function parseModelsSettingsBody(body: unknown): SettingsBodyResult<Model
 		if (!parsed.override.model) {
 			return { ok: false, error: `slot "${key}" must set a model (thinkingLevel alone cannot run — absent slot = unset)` };
 		}
-		settings[key as (typeof MODEL_SLOTS)[number]] = parsed.override;
+		const slot: ModelSlot = parsed.override;
+		const retention = (raw[key] as Record<string, unknown>).cacheRetention;
+		if (retention !== undefined) {
+			if (!CACHE_RETENTIONS.some((value) => value === retention)) {
+				return { ok: false, error: `${key}.cacheRetention must be none, short, or long` };
+			}
+			slot.cacheRetention = retention as ModelSlot["cacheRetention"];
+		}
+		settings[key as (typeof MODEL_SLOTS)[number]] = slot;
 	}
 	return { ok: true, settings };
 }

@@ -168,7 +168,10 @@ export function SettingsDialogBody({
 	const confirmedRecord = useRef<UserSettings | null>(null);
 	const visibleRecord = useRef<UserSettings | null>(null);
 	const sectionWrites = useRef<Partial<Record<WritableSection, PendingSectionWrite[]>>>({});
+	const agentWriteEpoch = useRef(0);
 	const [error, setError] = useState<string | null>(null);
+	const [fileAccessError, setFileAccessError] = useState<string | null>(null);
+	const fileAccessErrorRef = useRef<string | null>(null);
 	// MenuShell open-count — drives the content column's scroll lock.
 	const [openMenus, setOpenMenus] = useState(0);
 	const contentRef = useRef<HTMLDivElement | null>(null);
@@ -222,12 +225,14 @@ export function SettingsDialogBody({
 				if (!live) return;
 				const response = await fetch("/api/settings");
 				if (!response.ok) throw new Error(`status ${response.status}`);
-				const body = await response.json() as { settings: UserSettings | null };
+				const body = await response.json() as { settings: UserSettings | null; fileAccessError?: string };
 				if (!live) return;
 				const loaded = body.settings ?? { version: CURRENT_SETTINGS_VERSION };
 				confirmedRecord.current = loaded;
 				visibleRecord.current = loaded;
 				setRecord(loaded);
+				fileAccessErrorRef.current = body.fileAccessError ?? null;
+				setFileAccessError(fileAccessErrorRef.current);
 			} catch {
 				if (live) setRecord(null);
 			}
@@ -262,11 +267,14 @@ export function SettingsDialogBody({
 			change: object | ((current: UserSettings[S]) => object),
 		) => {
 			setError(null);
+			if (section === "agent") agentWriteEpoch.current++;
 			const queue: PendingSectionWrite[] = sectionWrites.current[section] ?? (sectionWrites.current[section] = []);
 			const idle = queue.length === 0;
 			queue.push({
 				compose: typeof change === "function" ? (current) => change(current as UserSettings[S]) : () => change,
-				optimistic: typeof change === "function",
+				// Agent controls continue to show confirmed server state while
+				// their queued functional edits rebase on earlier saves.
+				optimistic: typeof change === "function" && section !== "agent",
 			});
 
 			const refreshVisibleSection = () => {
@@ -287,6 +295,7 @@ export function SettingsDialogBody({
 			const drain = async () => {
 				while (queue.length) {
 					const body = queue[0]!.compose(confirmedRecord.current?.[section]);
+					const agentEpochAtSend = agentWriteEpoch.current;
 					try {
 						const res = await fetch(`/api/settings/${section}`, {
 							method: "PUT",
@@ -297,16 +306,39 @@ export function SettingsDialogBody({
 							const detail = (await res.json().catch(() => ({}))) as { error?: string };
 							setError(`${section}: ${detail.error ?? res.status}`);
 						} else {
-							const stored = ((await res.json().catch(() => null)) as { settings?: UserSettings } | null)?.settings;
+							const reply = (await res.json().catch(() => null)) as { settings?: UserSettings; fileAccessError?: string } | null;
+							const stored = reply?.settings;
 							// Only this section belongs to this response: other sections
 							// may have newer writes or pending edits of their own.
 							const saved = stored && section in stored ? stored[section] : body;
 							confirmedRecord.current = { ...confirmedRecord.current, [section]: saved } as UserSettings;
+							// An unrelated save can repair corrupt settings into a fail-closed
+							// file policy. Mirror that policy only if no agent write has raced
+							// this response; its other agent fields may be stale.
+							if (stored && (section === "agent" || (agentWriteEpoch.current === agentEpochAtSend && !sectionWrites.current.agent?.length))) {
+								fileAccessErrorRef.current = reply?.fileAccessError ?? null;
+								setFileAccessError(fileAccessErrorRef.current);
+								if (section !== "agent") {
+									const syncFileAccess = (record: UserSettings | null): UserSettings | null => {
+										if (!record) return record;
+										const fileAccess = stored.agent?.fileAccess;
+										if (!record.agent && fileAccess === undefined) return record;
+										const agent = { ...record.agent };
+										if (fileAccess === undefined) delete agent.fileAccess;
+										else agent.fileAccess = fileAccess;
+										return { ...record, agent };
+									};
+									confirmedRecord.current = syncFileAccess(confirmedRecord.current);
+									visibleRecord.current = syncFileAccess(visibleRecord.current);
+								}
+							}
 							notifySettingsSaved(section);
 							if (section === "appearance") onAppearanceChange(body as AppearanceSettings);
 						}
 					} catch {
 						setError(`${section}: could not save`);
+					} finally {
+						if (section === "agent") agentWriteEpoch.current++;
 					}
 					queue.shift();
 					refreshVisibleSection();
@@ -458,7 +490,14 @@ export function SettingsDialogBody({
 									testid="section-agent"
 								>
 									<AgentSection
+										onSectionEdit={(edit) => void write("agent", (current) => {
+											const safeCurrent = fileAccessErrorRef.current
+												? { ...current, fileAccess: { restricted: true, folders: current?.fileAccess?.folders ?? [] } }
+												: current;
+											return edit(safeCurrent);
+										})}
 										agent={record.agent}
+										fileAccessError={fileAccessError}
 										models={record.models}
 										graph={record.graph}
 										compaction={record.compaction}

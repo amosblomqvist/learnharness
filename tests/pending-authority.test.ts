@@ -7,7 +7,7 @@ import { projectView } from "../src/core/view.ts";
 
 function assistant(id: string, ...calls: string[]): LhMessage {
 	return {
-		id, role: "assistant", content: calls.map(id => ({ type: "toolCall", id, name: "quiz", arguments: { question: id } })),
+		id, role: "assistant", content: calls.map(id => ({ type: "toolCall", id, name: "quiz", arguments: { question: id, options: [{ label: "Yes", value: "yes" }, { label: "No", value: "no" }], correctAnswer: "yes", explanation: "Yes is correct." } })),
 		stopReason: "toolUse", timestamp: 1, api: "openai-completions", provider: "fixture", model: "fixture",
 		usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
 	};
@@ -48,14 +48,14 @@ test("reused ids select the newest native question's input, not an older availab
 	const old = assistant("old", "call_0");
 	const newer = assistant("new", "call_0");
 	if (newer.role === "assistant") newer.content.unshift({ type: "text", text: "new teaching" });
-	if (newer.role === "assistant" && newer.content[1]?.type === "toolCall") newer.content[1].arguments = { question: "NEW" };
+	if (newer.role === "assistant" && newer.content[1]?.type === "toolCall") newer.content[1].arguments = { ...newer.content[1].arguments, question: "NEW" };
 	const messages = [old, newer];
 	const question = pending(messages)!;
 	assert.equal(question.messageId, "new");
 	assert.equal(question.contentIndex, 1);
-	assert.deepEqual(question.input, { question: "NEW" });
+	assert.equal((question.input as { question: string }).question, "NEW");
 	assert.notEqual(question.key, pending([old])!.key);
-	assert.deepEqual(danglingQuestionOf(messages), { toolCallId: "call_0", tool: "quiz", input: { question: "NEW" } }, "server authority/shape unchanged");
+	assert.deepEqual(danglingQuestionOf(messages), { toolCallId: "call_0", tool: "quiz", input: question.input }, "server authority/shape unchanged");
 	const answered = inputAppends({ messages }, { type: "answer", toolCallId: question.toolCallId, answer: { kind: "quiz", answers: [] } as never });
 	const parts = projectView([...messages, ...answered]).flatMap(m => m.parts).filter(p => p.type === "tool-quiz");
 	assert.equal(parts[0]!.state, "input-available", "old transcript card is untouched");

@@ -162,6 +162,43 @@ describe("General update rows", () => {
 		assert.equal(b.calls.check, 0);
 	});
 
+	for (const version of ["0.3.8", null]) {
+		it(`dismisses ${version ?? "an unnamed update"} without installing, keeps Settings available, and shows a new version`, async () => {
+			const b = bridge(state({ status: "downloaded", version, revision: 1 }));
+			const host = await mount(<><UpdateSettings {...props} /><UpdateBanner /></>);
+			const dismiss = host.querySelector<HTMLElement>("[aria-label='Dismiss update notification']");
+			await click(dismiss);
+			assert.equal(q(host, "update-banner"), null);
+			assert.equal(b.calls.install, 0, "dismiss must not restart or install");
+			assert.equal(b.calls.check, 0, "dismiss must not check for updates");
+
+			await b.push(state({ status: "downloaded", version, revision: 2 }));
+			assert.equal(q(host, "update-banner"), null, "repeated status must stay dismissed");
+			await click(q(host, "update-restart"));
+			assert.equal(b.calls.install, 1, "Settings still offers installation");
+
+			await b.push(state({ status: "downloaded", version: "0.4.0", revision: 3 }));
+			assert.ok(q(host, "update-banner")!.textContent!.includes("0.4.0"));
+		});
+	}
+
+	it("dismissal survives status transitions but is forgotten when the banner remounts", async () => {
+		const b = bridge(state({ status: "downloaded", version: "0.4.1", revision: 1 }));
+		const host = await mount(<UpdateBanner />);
+		await click(host.querySelector("[aria-label='Dismiss update notification']"));
+		await b.push(state({ status: "checking", revision: 2 }));
+		await b.push(state({ status: "downloaded", version: "0.4.1", revision: 3 }));
+		assert.equal(q(host, "update-banner"), null, "the same staged version stays hidden");
+
+		const { root } = roots.pop()!;
+		await act(async () => { root.unmount(); });
+		host.remove();
+		assert.equal(b.listeners.size, 0);
+		bridge(state({ status: "downloaded", version: "0.4.1", revision: 3 }));
+		const reopened = await mount(<UpdateBanner />);
+		assert.ok(q(reopened, "update-banner"), "dismissal is local state, not a persisted preference");
+	});
+
 	it("a delayed older snapshot cannot overwrite a newer push in Settings or the banner", async () => {
 		const snapshot = deferred<UpdateState>(); const b = bridge(state(), snapshot.promise);
 		const host = await mount(<><UpdateSettings {...props} /><UpdateBanner /></>);

@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { finishDictation, isDictationActive, joinDictation, useDictationTarget } from "@/components/dictation";
 import { useEnterSubmits } from "@/components/enter-submits";
 import { PathInput } from "@/components/path-input";
+import { MalformedQuestion } from "@/components/malformed-question";
 import { ToolContentResponse } from "@/components/ai-elements/message";
 import { cn } from "@/lib/utils";
 import {
@@ -132,11 +133,7 @@ export function QuestionDock({
 	const parsed =
 		canonical === "quiz" ? parseQuizInput(input) : canonical === "explain" ? parseExplainInput(input) : parseAskInput(input);
 	if (!parsed) {
-		return (
-			<div data-testid="malformed-question" className="rounded-xl border border-dashed bg-card/60 p-3 text-sm text-muted-foreground">
-				This question arrived malformed — the transcript keeps the retry.
-			</div>
-		);
+		return <MalformedQuestion />;
 	}
 	return (
 		<>

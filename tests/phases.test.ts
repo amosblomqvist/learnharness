@@ -1,5 +1,5 @@
 /**
- * phases — the event-driven phase chain (docs/probe-teach-split.md §4).
+ * phases — the event-driven phase chain (docs/archive/probe-teach-split.md §4).
  *
  * probe ends at the first CONCLUDED probe_done (output-available); teaching
  * begins at the FIRST nodeId-tagged quiz CALL (the inferred seam, owner

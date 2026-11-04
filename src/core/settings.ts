@@ -21,19 +21,22 @@
  * unknown keys verbatim (a newer record must never be destroyed by an
  * older app reading it). Invalid known values degrade gracefully:
  * out-of-range numbers CLAMP, wrong-typed/invalid fields DROP (resolve to
- * factory default), never throw.
+ * factory default), never throw. File-access policy is the exception:
+ * malformed policy stays restricted/empty, never default-unrestricted.
  *
  * Browser-safe: pure logic + types only, no node imports. The resolved
  * (fully concrete) view lives in settings-resolution.ts.
  */
 
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
+import type { CacheRetention } from "@earendil-works/pi-ai";
 import { AUTH_PROVIDER_KEYS } from "./auth-keys.ts";
 import { CLAUDE_CODE_PROVIDER } from "./contracts/claude-code.ts";
 import type { ModelRole } from "../../config.ts";
 import type { ChatSettings } from "./contracts/chat.ts";
-import type { SearchEngineId } from "./search.ts";
+import { isSearchEngineId, type SearchEngineId } from "./search.ts";
 import { isDictationLanguage, type DictationLanguage } from "./dictation.ts";
+import { parseFileAccessSettings, type FileAccessSettings } from "./file-access.ts";
 
 /** The schema version this code understands. Bump ONLY for breaking shape
  *  changes (a field renamed/meaning changed); pure additions never bump. */
@@ -187,11 +190,15 @@ export class ProviderKeyMissingError extends Error {
 	}
 }
 
+export const CACHE_RETENTIONS = ["none", "short", "long"] as const satisfies readonly CacheRetention[];
+
 /** One slot's stored state. BYOK (owner, 2026-09-22): the WRITE side
  *  requires model (a level alone can never run — no factory floor); the
  *  sanitizer keeps whatever is on disk, but RESOLUTION treats a slot
  *  without a model as unset (inert level, no phantom default). */
 export interface ModelSlot {
+	/** Native Pi preference. Absent leaves Pi/environment behavior unchanged. */
+	cacheRetention?: CacheRetention;
 	/** The model swap: both coordinates or neither. */
 	model?: { provider: string; id: string };
 	/** The thinking budget swap. */
@@ -364,6 +371,11 @@ export interface AgentSettings {
 	 *  route); the switch is explicit so users keep a file on disk but run
 	 *  the source default to compare (owner decision 2026-09-19). */
 	prompts?: Record<string, boolean>;
+	/** Optional learner-source boundary, OFF when absent. ON with no folders
+	 *  refuses all learner-source reads. Paths are absolute or ~/ anchored;
+	 *  the current policy is read per new tool call/job start. Existing
+	 *  sensitive-location/credential denials always win, not a whole-data ban. */
+	fileAccess?: FileAccessSettings;
 }
 
 /** Markdown-rendering knobs — the bare-bones set (owner decision). */
@@ -592,8 +604,13 @@ function sanitizeRoleOverride(raw: unknown): RoleModelOverride | undefined {
 function sanitizeModels(raw: Record<string, unknown>): ModelsSettings {
 	const out: ModelsSettings = {};
 	for (const slot of MODEL_SLOTS) {
-		const cleaned = sanitizeRoleOverride(raw[slot]);
-		if (cleaned) out[slot] = cleaned;
+		const cleaned: ModelSlot = sanitizeRoleOverride(raw[slot]) ?? {};
+		const value = raw[slot];
+		if (value && typeof value === "object" && !Array.isArray(value)) {
+			const retention = (value as Record<string, unknown>).cacheRetention;
+			if (CACHE_RETENTIONS.includes(retention as CacheRetention)) cleaned.cacheRetention = retention as CacheRetention;
+		}
+		if (Object.keys(cleaned).length) out[slot] = cleaned;
 	}
 	return out;
 }
@@ -702,7 +719,7 @@ function sanitizeAgent(raw: Record<string, unknown>): AgentSettings {
 	// record, it just loses the pin and auto-detection resumes).
 	if (raw.search !== null && typeof raw.search === "object" && !Array.isArray(raw.search)) {
 		const engine = (raw.search as Record<string, unknown>).engine;
-		if (engine === "tavily" || engine === "brave") out.search = { engine };
+		if (isSearchEngineId(engine)) out.search = { engine };
 	}
 	// Prober graph tools (wave 7): its own agent-section subsection —
 	// lenient read side (a bad shape drops the key and the default ON
@@ -711,6 +728,13 @@ function sanitizeAgent(raw: Record<string, unknown>): AgentSettings {
 		const enabled = (raw.graphTools as Record<string, unknown>).enabled;
 		if (enabled === undefined) out.graphTools = {};
 		else if (typeof enabled === "boolean") out.graphTools = { enabled };
+	}
+	// Never drop a malformed access policy into the unrestricted default.
+	// The strict store reader separately reports its configuration error;
+	// this safe view also preserves the boundary during unrelated UI writes.
+	if (raw.fileAccess !== undefined) {
+		const parsed = parseFileAccessSettings(raw.fileAccess);
+		out.fileAccess = parsed.ok ? parsed.settings : { restricted: true, folders: [] };
 	}
 	return out;
 }
