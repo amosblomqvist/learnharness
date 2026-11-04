@@ -53,6 +53,7 @@ describe("displayCostTotals (naming-free cost fold)", () => {
 	});
 	const costs = {
 		stages: {
+			transcription: stage(0),
 			extraction: stage(1.25, 1),
 			audit: stage(0.75),
 			naming: stage(9.99, 2), // dead channel — must never reach the display

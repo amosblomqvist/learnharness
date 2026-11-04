@@ -141,7 +141,7 @@ it("25 MiB is per file, not per selection; oversized files fail locally while sm
 });
 it("picker stays enabled during imports, offers Files/Folder, and keeps PDF support", () => {
 	const html = renderToStaticMarkup(<NotesImportControl importing onImportFiles={() => {}} />);
-	assert.match(html, /webkitdirectory/); assert.match(html, /accept=".md,.markdown,.txt,.pdf"/); assert.doesNotMatch(html, /disabled/);
+	assert.match(html, /webkitdirectory/); assert.match(html, /accept=".md,.markdown,.txt,.pdf,.png,.jpg,.jpeg,.gif,.webp,.bmp"/); assert.doesNotMatch(html, /disabled/);
 });
 it("graph menu clearly distinguishes extraction from lesson material, above unchanged Files/Folder choices", async () => {
 	const selected: unknown[] = [];

@@ -13,6 +13,8 @@ export * from "./source-deletion.ts";
 export { NotesImportError } from "../agent/subagents/extraction.ts";
 export { convertPdf } from "../agent/subagents/pdf-ops.ts";
 export { joinPages } from "../agent/subagents/pdf-markdown.ts";
+// PDF/image imports (issue #285): the route sniffs images by content.
+export { detectSupportedImageMimeType } from "../agent/image-processing/index.ts";
 export * from "./commit-positions.ts";
 export * from "./jobs.ts";
 export * from "./stores.ts";

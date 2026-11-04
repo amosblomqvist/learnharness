@@ -1,4 +1,4 @@
-import { IMPORT_EXTENSIONS, MAX_IMPORT_BYTES, validNotesPath } from "@/lib/notes-import-limits";
+import { IMAGE_IMPORT_EXTENSIONS, IMPORT_EXTENSIONS, MAX_IMPORT_BYTES, validNotesPath } from "@/lib/notes-import-limits";
 import type { NotesImportResult } from "./notes-import";
 
 export const notesPath = (file: File): string => file.webkitRelativePath || file.name;
@@ -63,7 +63,9 @@ export function createNotesImportQueue(post: (files: readonly File[]) => Promise
 				const index = sequence++;
 				const path = notesPath(file);
 				if (file.webkitRelativePath && hiddenInFolder(file)) continue;
-				if (!IMPORT_EXTENSIONS.test(path) || !validNotesPath(path, file.name)) failures.set(index, `${path}: Unsupported format or unsafe relative path.`);
+				// Images only from the Files picker; a folder's images stay unsupported.
+				const supported = IMPORT_EXTENSIONS.test(path) || (!file.webkitRelativePath && IMAGE_IMPORT_EXTENSIONS.test(path));
+				if (!supported || !validNotesPath(path, file.name)) failures.set(index, `${path}: Unsupported format or unsafe relative path.`);
 				else if (file.size > MAX_IMPORT_BYTES) failures.set(index, `${path}: Too big. Max 25 MB.`);
 				else pending.push({ file, index });
 			}

@@ -49,6 +49,15 @@ it("unsupported-only directories are never sent; picker .DS_Store is ignored and
 	assert.deepEqual(queue.getSnapshot().errors, ["Root/Images/a.png: Unsupported format or unsafe relative path.", "../bad.txt: Unsupported format or unsafe relative path."]);
 });
 
+it("images import from the Files picker but stay unsupported inside a folder (issue #285)", async () => {
+	const paths: string[] = [];
+	const queue = createNotesImportQueue(async ([f]) => { const path = f!.webkitRelativePath || f!.name; paths.push(path); return [success(path)]; });
+	queue.append([file("board.PNG"), file("photo.jpeg"), file("shot.png", "Vault/attachments/shot.png")]);
+	await tick();
+	assert.deepEqual(paths.sort(), ["board.PNG", "photo.jpeg"]);
+	assert.deepEqual(queue.getSnapshot().errors, ["Vault/attachments/shot.png: Unsupported format or unsafe relative path."]);
+});
+
 it("folder picks skip dot-directories such as .obsidian/ silently, even when the chosen root itself is hidden", async () => {
 	const paths: string[] = [];
 	const queue = createNotesImportQueue(async ([f]) => { const path = f!.webkitRelativePath || f!.name; paths.push(path); return [success(path)]; });

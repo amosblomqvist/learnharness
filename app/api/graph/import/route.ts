@@ -8,8 +8,11 @@
  * extractor → auditor → merger over the raw text.
  *
  * A PDF (spotted by its %PDF- header, not its name) is converted to
- * Markdown first. A PDF with nothing to extract is refused before any
- * model call or source record.
+ * Markdown first; an unreadable or over-long PDF is refused before any
+ * model call or source record. The pipeline's vision pass (issue #285)
+ * then reads the pages text can't carry — picture-only, math-heavy, or
+ * text-poor — so scans are transcribed rather than skipped. An image
+ * (also sniffed by content) is transcribed whole.
  *
  * Small concurrency cap: the model calls are the slow part, and a burst of
  * 25 simultaneous runs would trip provider rate limits — a 3-wide worker
@@ -17,7 +20,7 @@
  * healthy. The dock's chips + graph refetch track progress live through
  * /api/graph/status, as with session runs.
  */
-import { convertPdf, extraction, joinPages, NotesImportError, sourceDirectory } from "@/src/server";
+import { convertPdf, detectSupportedImageMimeType, extraction, NotesImportError, sourceDirectory } from "@/src/server";
 import { MAX_IMPORT_BODY_BYTES, MAX_IMPORT_BYTES, validNotesPath } from "@/lib/notes-import-limits.ts";
 import {
 	emit,
@@ -51,25 +54,27 @@ interface ImportResult {
 const MAX_PDF_PAGES = 1000;
 const PDF_MAGIC = [0x25, 0x50, 0x44, 0x46, 0x2d]; // "%PDF-"
 
-type NotesFile = { kind: "notes"; text: string; notice?: string } | { kind: "refused"; error: string };
+type NotesImportInput = Parameters<typeof extraction.importNotes>[0];
+type NotesFile = { kind: "notes"; input: NotesImportInput; notice?: string } | { kind: "refused"; error: string };
 
-/** A PDF becomes page-marked Markdown; any other file is read as text, as before. */
-async function readNotesFile(file: File): Promise<NotesFile> {
+/** A PDF keeps its converted pages AND its bytes (the vision pass renders
+ * the pages text can't carry); an image goes to the vision pass whole; any
+ * other file is read as text, as before. */
+async function readNotesFile(file: File, filePath: string): Promise<NotesFile> {
 	const bytes = new Uint8Array(await file.arrayBuffer());
-	if (!PDF_MAGIC.every((byte, i) => bytes[i] === byte)) return { kind: "notes", text: new TextDecoder().decode(bytes) };
-	const pdf = await convertPdf(bytes, MAX_PDF_PAGES);
+	const mimeType = detectSupportedImageMimeType(bytes);
+	if (mimeType) return { kind: "notes", input: { filePath, image: bytes, mimeType } };
+	if (!PDF_MAGIC.every((byte, i) => bytes[i] === byte)) return { kind: "notes", input: { filePath, text: new TextDecoder().decode(bytes) } };
+	// pdfjs takes over (detaches) the buffer it reads; the vision pass needs
+	// these bytes intact, so the converter gets a copy.
+	const pdf = await convertPdf(bytes.slice(), MAX_PDF_PAGES);
 	switch (pdf.kind) {
 		case "unreadable":
 			return { kind: "refused", error: "Could not open this PDF." };
 		case "too-long":
 			return { kind: "refused", error: "Too long. Max 1,000 pages." };
-		case "converted": {
-			const text = joinPages(pdf.pages);
-			if (!text) return { kind: "refused", error: "OCR not supported yet." };
-			const skipped = pdf.pages.filter((page) => page.kind === "image-only").length;
-			const omission = skipped > 0 ? ` Skipped ${skipped} image-only ${skipped === 1 ? "page" : "pages"}; OCR is not supported.` : "";
-			return { kind: "notes", text, notice: `Scanned pages may have errors.${omission}` };
-		}
+		case "converted":
+			return { kind: "notes", input: { filePath, pdf: bytes, pages: pdf.pages }, notice: "Scanned pages may have errors." };
 	}
 }
 
@@ -145,13 +150,13 @@ export async function POST(request: Request) {
 			if (!next) return;
 			const { file, requestIndex, filePath } = next;
 			try {
-				const notes = await readNotesFile(file);
+				const notes = await readNotesFile(file, filePath);
 				if (notes.kind === "refused") {
 					results.push({ filePath, requestIndex, outcome: "failed", ok: false, error: notes.error });
 					continue;
 				}
 				sourceDirectory.registerImport(filePath);
-				const stats = await extraction.importNotes({ filePath, text: notes.text });
+				const stats = await extraction.importNotes(notes.input);
 				results.push({ filePath, requestIndex, outcome: "completed", ok: true, stats, ...(notes.notice ? { notice: notes.notice } : {}) });
 			} catch (err) {
 				if (err instanceof ModelsNotConfiguredError) {
