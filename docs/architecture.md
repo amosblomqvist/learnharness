@@ -109,6 +109,8 @@ A practice session can start with graph selections or free-form material. Sessio
 - A turn-scoped gate, seeded from the record, enforces one active problem and rejects conclusion without one. The gate updates during tool execution, so it does not depend on the settlement-only transcript write.
 - After conclusion, the prompt and tool acknowledgement tell the agent to close the turn and wait for explicit learner go-ahead. This pause is not a tool-level terminating gate on `conclude`. The Next problem action adds a native marker; dismissals use a synthesized conclusion and the separate dismissal path.
 
+- The problem counter (`practiceTallyOf`, `components/problem-tally.tsx`) shows "N done · solved hinted unsolved" in green/amber/red in the practice session's top bar and the dock's Problem eyebrow. It buckets clean concludes by outcome (movedOn, surrendered and dismissed are unsolved); a dismissal counts from its marker, once.
+
 Practice outcomes are evidence in the session, not graph mastery levels or certification. The normal turn-settlement path skips extraction for practice sessions. Problem/solution/outcome projection lives in `src/core/native-messages.ts` and `src/core/view.ts`; the tools live in `src/agent/tools/practice.ts`.
 
 ### Scheduled practice (spaced repetition)

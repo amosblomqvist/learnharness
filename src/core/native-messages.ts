@@ -527,6 +527,57 @@ export function activeProblemOf(
 	return null;
 }
 
+/** A practice session's concluded problems, bucketed by outcome (the
+ *  problem counter, 2026-11-03): solved; solvedWithHints; and everything
+ *  else — movedOn, surrendered, dismissed. Only clean conclude calls
+ *  count (the honest-activation ruling). A dismissal counts from its
+ *  marker, before the synthesized conclude lands with the next input,
+ *  and once: the synthesized pair names the same problem. */
+export interface PracticeTally {
+	solved: number;
+	hinted: number;
+	unsolved: number;
+}
+
+export function practiceTallyOf(messages: readonly LhMessage[]): PracticeTally {
+	const cleanCallIds = cleanToolCallIds(messages);
+	const tally: PracticeTally = { solved: 0, hinted: 0, unsolved: 0 };
+	const dismissed = new Set<string>();
+	for (const m of messages) {
+		const role = (m as { role?: string }).role;
+		if (role === "custom") {
+			const marker = m as LhMarkerMessage;
+			const problemCallId = (marker.details as { problemCallId?: unknown } | undefined)?.problemCallId;
+			if (marker.customType === "problem-dismissed" && typeof problemCallId === "string") dismissed.add(problemCallId);
+			continue;
+		}
+		if (role === "toolResult") {
+			// The synthesized dismissal conclude names its problem in details.
+			const result = m as ToolResultMessage;
+			const details = result.details as { outcome?: unknown; problemCallId?: unknown } | undefined;
+			if (
+				!result.isError &&
+				result.toolName === PRACTICE_CONCLUDE_TOOL &&
+				details?.outcome === "dismissed" &&
+				typeof details.problemCallId === "string"
+			) {
+				dismissed.add(details.problemCallId);
+			}
+			continue;
+		}
+		if (role !== "assistant") continue;
+		for (const block of (m as AssistantMessage).content) {
+			if (block.type !== "toolCall" || block.name !== PRACTICE_CONCLUDE_TOOL || !cleanCallIds.has(block.id)) continue;
+			const outcome = (block.arguments as { outcome?: unknown } | undefined)?.outcome;
+			if (outcome === "solved") tally.solved++;
+			else if (outcome === "solvedWithHints") tally.hinted++;
+			else if (outcome === "movedOn" || outcome === "surrendered") tally.unsolved++;
+		}
+	}
+	tally.unsolved += dismissed.size;
+	return tally;
+}
+
 /** Is a problem-dismissal marker waiting for its conclude synthesis? The
  *  text/continue appends read this: the pair rides the user's next input
  *  (input-events). Newest-marker-wins scan: the first dismissal marker or

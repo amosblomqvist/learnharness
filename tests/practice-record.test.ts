@@ -21,6 +21,7 @@ import {
 	needsContinuation,
 	newUserMessage,
 	pendingProblemDismissalOf,
+	practiceTallyOf,
 	toLlmMessages,
 	PRACTICE_CONCLUDE_TOOL,
 	PRACTICE_PROBLEM_TOOL,
@@ -424,5 +425,49 @@ describe("projectView renders the move-on signal", () => {
 			parts.some((p) => p.type === "data-practice-next"),
 			"the data-practice-next part rides the view",
 		);
+	});
+});
+
+// ── the problem counter ──────────────────────────────────────────────────────
+
+describe("practiceTallyOf (the problem counter)", () => {
+	const concluded = (callId: string, outcome: string, isError = false): LhMessage[] => {
+		const [call, ack] = concludeCall(outcome) as [LhMessage & AssistantMessage, LhMessage & ToolResultMessage];
+		return [
+			{ ...call, id: `msg_${callId}`, content: [{ type: "toolCall", id: callId, name: PRACTICE_CONCLUDE_TOOL, arguments: { outcome } }] },
+			{ ...ack, id: `msg_r_${callId}`, toolCallId: callId, isError },
+		];
+	};
+
+	it("a fresh session counts nothing", () => {
+		assert.deepEqual(practiceTallyOf([]), { solved: 0, hinted: 0, unsolved: 0 });
+	});
+
+	it("buckets clean concludes by outcome: solved, with hints, everything else", () => {
+		const messages: LhMessage[] = [
+			...problemPose("call_p1"),
+			...concluded("call_c1", "solved"),
+			...problemPose("call_p2"),
+			...concluded("call_c2", "solvedWithHints"),
+			...problemPose("call_p3"),
+			...concluded("call_c3", "movedOn"),
+			...problemPose("call_p4"),
+			...concluded("call_c4", "surrendered"),
+			...problemPose("call_p5"),
+			...concluded("call_c5", "solved"),
+		];
+		assert.deepEqual(practiceTallyOf(messages), { solved: 2, hinted: 1, unsolved: 2 });
+	});
+
+	it("an errored conclude never counts", () => {
+		const messages = [...problemPose("call_p1"), ...concluded("call_c1", "solved", true)];
+		assert.deepEqual(practiceTallyOf(messages), { solved: 0, hinted: 0, unsolved: 0 });
+	});
+
+	it("a dismissal counts from its marker, and once after the synthesized conclude lands", () => {
+		const dismissedOnly: LhMessage[] = [...problemPose("call_p1"), newProblemDismissedMarker("call_p1")];
+		assert.deepEqual(practiceTallyOf(dismissedOnly), { solved: 0, hinted: 0, unsolved: 1 });
+		const withPair: LhMessage[] = [...dismissedOnly, ...concludedByDismissalPair("call_p1")];
+		assert.deepEqual(practiceTallyOf(withPair), { solved: 0, hinted: 0, unsolved: 1 });
 	});
 });
