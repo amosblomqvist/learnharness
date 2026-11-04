@@ -839,7 +839,7 @@ export function ChainTableOverlay({
 				data-testid="chain-table-overlay"
 				className="absolute inset-0 z-40 flex flex-col bg-background/80 backdrop-blur-sm"
 			>
-				{directoryFailure && <p role="alert" className="px-3 py-1 text-xs text-red-400">{directoryFailure}</p>}
+				{directoryFailure && <p role="alert" className="px-3 py-1 text-xs text-error">{directoryFailure}</p>}
 				<ChainTableBody
 					keyboardActive={!deleteOpen}
 					directory={directory}

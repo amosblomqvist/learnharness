@@ -28,6 +28,7 @@ import type {
 	NotesSource,
 } from "./contracts.ts";
 import type { UserSettings } from "./settings.ts";
+import type { Theme, ThemeFile } from "./themes.ts";
 
 // ─── ChatStore — the session record's home (data/chats) ─────────────────────
 
@@ -187,6 +188,25 @@ export interface SettingsStore {
 	readSettings(): UserSettings | null;
 	/** Persist the record (replace-whole). Callers pass a SANITIZED record. */
 	writeSettings(settings: UserSettings): void;
+}
+
+// ─── ThemeStore — imported custom themes (theme wave, 2026-11-04) ──────────
+
+/**
+ * Custom themes as `<id>.json` files under config.THEMES_DIR, one per
+ * imported theme (core/themes.ts ThemeFile shape). The store persists
+ * what it is given; validation and id choice are the route's concern.
+ * Unreadable or invalid files are skipped on list, never thrown.
+ */
+export interface ThemeStore {
+	/** Every valid custom theme on disk, sorted by id. */
+	listThemes(): Theme[];
+	/** One custom theme, or null when the file is absent or invalid. */
+	readTheme(id: string): Theme | null;
+	/** Persist a theme file at `<id>.json` (creates the dir). */
+	writeTheme(id: string, theme: ThemeFile): void;
+	/** Remove `<id>.json`, if present. */
+	deleteTheme(id: string): void;
 }
 
 // ─── PromptOverrideStore — per-segment system-prompt overrides (2026-09-19) ──

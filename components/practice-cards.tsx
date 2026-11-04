@@ -86,10 +86,10 @@ const OUTCOME_LABEL: Record<string, string> = {
  * cost), surrendered red (the problem beat the learner), moved on muted
  * (the agent's call, not a verdict against him). */
 const OUTCOME_CHIP: Record<string, string> = {
-	solved: "bg-green-500/15 text-green-500",
-	solvedWithHints: "bg-amber-500/15 text-amber-500",
+	solved: "bg-success/15 text-success",
+	solvedWithHints: "bg-warning/15 text-warning",
 	movedOn: "bg-muted text-muted-foreground",
-	surrendered: "bg-red-500/15 text-red-500",
+	surrendered: "bg-error/15 text-error",
 	dismissed: "bg-muted text-muted-foreground",
 };
 

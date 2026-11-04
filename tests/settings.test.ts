@@ -27,8 +27,9 @@ describe("FACTORY_SETTINGS (the compiled factory layer)", () => {
 		// with the message anchors (owner, 2026-10-13)
 		assert.deepEqual(FACTORY_SETTINGS.graph, { enabled: true, rendering: true, extractionChunkTokens: 4096 });
 		const a = FACTORY_SETTINGS.appearance;
-		assert.equal(a.mode, "dark");
-		assert.equal(a.background, null); // the mode's own default, not a factory hex
+		assert.equal(a.theme, "default");
+		assert.equal(a.background, null); // the theme's own background, not a factory hex
+		assert.deepEqual(a.colors, {});
 		assert.equal(a.fontFamily, null); // Source Sans 3
 		assert.equal(a.proseFontSize, 16);
 		assert.equal(a.sessionNameSerif, true);
@@ -71,7 +72,7 @@ describe("sanitizeUserSettings", () => {
 				cheap: { thinkingLevel: "medium" },
 			},
 			appearance: {
-				mode: "light",
+				theme: "catppuccin-latte",
 				background: "#ffffff",
 				fontFamily: "Some Font",
 				proseFontSize: 18,
@@ -101,7 +102,7 @@ describe("sanitizeUserSettings", () => {
 		const out = sanitizeUserSettings({
 			general: { autoUpdate: "yes" },
 			agent: { tools: { research: "no" }, prompts: { "system-prompt.md": 1 }, models: { researcher: "fast" } },
-			appearance: { mode: "sepia", sessionNameSerif: "true" },
+			appearance: { theme: "Sepia!", sessionNameSerif: "true" },
 			graph: { enabled: 0 },
 		});
 		assert.ok(out);
@@ -147,6 +148,25 @@ describe("sanitizeUserSettings", () => {
 		assert.equal(out.appearance?.background, null);
 		assert.equal(out.appearance?.mdRendering?.boldColor, "#f00");
 		assert.equal(out.appearance?.mdRendering?.italicColor, null);
+	});
+
+	it("appearance: theme id and color overrides survive; junk drops", () => {
+		const out = sanitizeUserSettings({
+			appearance: { theme: "catppuccin-mocha", colors: { warning: "#fab387", surface: null, sepia: "#000" } },
+		});
+		assert.ok(out);
+		assert.equal(out.appearance?.theme, "catppuccin-mocha");
+		assert.deepEqual(out.appearance?.colors, { warning: "#fab387", surface: null });
+		const junk = sanitizeUserSettings({ appearance: { theme: "Not A Slug!", colors: { error: "red" } } });
+		assert.ok(junk);
+		assert.equal(junk.appearance?.theme, undefined);
+		assert.deepEqual(junk.appearance?.colors, { error: null });
+	});
+
+	it("appearance: the light-mode wave's mode/lightBackground are no longer read", () => {
+		const out = sanitizeUserSettings({ appearance: { mode: "light", lightBackground: "#eeeeee", background: "#101010" } });
+		assert.ok(out);
+		assert.deepEqual(out.appearance, { background: "#101010" });
 	});
 
 	it("empty strings/whitespace fontFamily → null (Source Sans 3); wrong-type → null too (the default)", () => {

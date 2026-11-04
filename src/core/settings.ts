@@ -37,6 +37,7 @@ import type { ChatSettings } from "./contracts/chat.ts";
 import { isSearchEngineId, type SearchEngineId } from "./search.ts";
 import { isDictationLanguage, type DictationLanguage } from "./dictation.ts";
 import { parseFileAccessSettings, type FileAccessSettings } from "./file-access.ts";
+import { COLOR_OVERRIDE_KEYS, isThemeId, type AppearanceColorOverrides } from "./themes.ts";
 
 /** The schema version this code understands. Bump ONLY for breaking shape
  *  changes (a field renamed/meaning changed); pure additions never bump. */
@@ -387,13 +388,19 @@ export interface MdRenderingSettings {
 	italicColor?: string | null;
 }
 
-/** Appearance settings — mode, colors, type, markdown emphasis. */
+/** Appearance settings — theme, color overrides, type, markdown emphasis. */
 export interface AppearanceSettings {
-	/** "dark" | "light" (default dark). */
-	mode?: "dark" | "light";
-	/** The one user-chosen color; everything else derives per-mode in code.
-	 *  null = the mode's default background. */
+	/** The active theme id (core/themes.ts presets or a custom file under
+	 *  THEMES_DIR). Absent or gone = "default". The theme declares the
+	 *  mode (dark/light) — the old `mode`/`lightBackground` keys are no
+	 *  longer read (theme wave, 2026-11-04). */
+	theme?: string;
+	/** The background override (null = the theme's). Kept at its pre-theme
+	 *  key so existing records keep their color. */
 	background?: string | null;
+	/** Per-color overrides on top of the theme (null/absent = the theme's).
+	 *  Preserved across theme switches. Bold/italic live in mdRendering. */
+	colors?: AppearanceColorOverrides;
 	/** The main reading font (everything that is Source Sans 3 today), by
 	 *  name — user-chosen from installed fonts. null = Source Sans 3. */
 	fontFamily?: string | null;
@@ -497,8 +504,9 @@ export interface FactorySettings {
 	general: Required<GeneralSettings>;
 	dictation: Required<DictationSettings>;
 	appearance: {
-		mode: "dark" | "light";
+		theme: string;
 		background: string | null;
+		colors: AppearanceColorOverrides;
 		fontFamily: string | null;
 		proseFontSize: number;
 		sessionNameSerif: boolean;
@@ -517,8 +525,9 @@ export const FACTORY_SETTINGS: FactorySettings = {
 	general: { autoUpdate: true },
 	dictation: { language: "en" },
 	appearance: {
-		mode: "dark",
-		background: null, // the dark default (#141414) lives in the mode's derivation curve
+		theme: "default",
+		background: null, // null = the active theme's background
+		colors: {}, // no overrides: every color is the theme's
 		fontFamily: null, // Source Sans 3
 		proseFontSize: 16,
 		sessionNameSerif: true,
@@ -750,8 +759,19 @@ function sanitizeMdRendering(raw: unknown): MdRenderingSettings {
 
 function sanitizeAppearance(raw: Record<string, unknown>): AppearanceSettings {
 	const out: AppearanceSettings = {};
-	if (raw.mode === "dark" || raw.mode === "light") out.mode = raw.mode;
+	// Theme wave (2026-11-04): `mode`/`lightBackground` (light-mode wave)
+	// are no longer read — the theme declares the mode. Dropped here like
+	// the graph's dead rungs; the next appearance write flushes them.
+	if (isThemeId(raw.theme)) out.theme = raw.theme;
 	if (raw.background !== undefined) out.background = sanitizeHexOrNull(raw.background);
+	if (raw.colors !== null && typeof raw.colors === "object" && !Array.isArray(raw.colors)) {
+		const colors: AppearanceColorOverrides = {};
+		const c = raw.colors as Record<string, unknown>;
+		for (const key of COLOR_OVERRIDE_KEYS) {
+			if (c[key] !== undefined) colors[key] = sanitizeHexOrNull(c[key]);
+		}
+		out.colors = colors;
+	}
 	if (raw.fontFamily !== undefined) {
 		out.fontFamily = typeof raw.fontFamily === "string" && raw.fontFamily.trim() ? raw.fontFamily : null;
 	}
