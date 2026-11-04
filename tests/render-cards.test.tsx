@@ -424,6 +424,20 @@ describe("math rendering (streamdown + KaTeX)", () => {
 	});
 });
 
+describe("escaped tool-content newlines", () => {
+	it("renders a literal-escaped code block in both pending and answered questions", () => {
+		const question = "What does `?` do here?\\n\\n```rust\\nenum MyError {\\n    Io(std::io::Error),\\n}\\n```";
+		const input = { ...quizInput, question };
+		const pendingHtml = renderDock({ toolName: "quiz", toolCallId: "escaped-n1", input: input as never });
+		assert.ok(pendingHtml.includes('data-testid="md-code"'), `pending code block missing: ${pendingHtml.slice(0, 500)}`);
+
+		const answeredHtml = renderToStaticMarkup(
+			<AnsweredCard answer={buildAnswer({ ...quizQD(), question }, { values: ["Mercury"] })} />,
+		);
+		assert.ok(answeredHtml.includes('data-testid="md-code"'), `answered code block missing: ${answeredHtml.slice(0, 500)}`);
+	});
+});
+
 describe("teach-check reveal (W5 phase separation)", () => {
 	// The collapsed dock renders the bar AND the hidden form (it stays mounted
 	// so a half-made selection survives) — assertions target the bar species.
