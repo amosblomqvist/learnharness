@@ -936,7 +936,7 @@ export function Chat({
 	const [dockReserve, setDockReserve] = useState(208);
 	const syncTurns = useCallback(async () => {
 		try {
-			const res = await fetch(`/api/chats/${chatId}`);
+			const res = await fetch(`/api/chats/${chatId}?only=stats`);
 			if (!res.ok) return;
 			const record = (await res.json()) as { turns?: TurnUsage[]; pricing?: SessionPricing };
 			if (Array.isArray(record.turns)) setTurns(record.turns);
