@@ -148,11 +148,11 @@ it("graph menu clearly distinguishes extraction from lesson material, above unch
 	host = document.createElement("div"); document.body.appendChild(host); root = createRoot(host);
 	await act(async () => { root!.render(<NotesImportControl importing={false} onImportFiles={(files) => selected.push(files)} />); });
 	const trigger = host.querySelector<HTMLButtonElement>('[data-testid="import-notes"]')!;
-	assert.equal(trigger.textContent, "Extract into graph…");
+	assert.equal(trigger.textContent, "Extract files…");
 	assert.ok(trigger.querySelector(".lucide-waypoints"));
 	await act(async () => { trigger.click(); });
 	const menu = host.querySelector('[role="menu"]')!;
-	assert.equal(menu.getAttribute("aria-label"), "Extract into graph…");
+	assert.equal(menu.getAttribute("aria-label"), "Extract files into the graph");
 	assert.equal(menu.querySelector("p")!.textContent, "For lessons, attach material to a session instead.");
 	assert.equal(menu.getAttribute("aria-describedby"), menu.querySelector("p")!.id);
 	assert.ok(menu.className.includes("w-52"), "compact width wraps the short hint");

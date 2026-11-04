@@ -12,7 +12,7 @@ import { afterEach, describe, it } from "node:test";
 import { parseHTML } from "linkedom";
 import { renderToStaticMarkup } from "react-dom/server";
 import { Composer } from "../components/composer.tsx";
-import { pathsForFiles } from "../components/attach-files-button.tsx";
+import { attachmentPopupPlacement, pathsForFiles } from "../components/attach-files-button.tsx";
 import { restorePathSelection } from "../components/path-input-dom.ts";
 import { quoteFilePath } from "../src/core/file-paths.ts";
 
@@ -57,7 +57,7 @@ async function fixture({ desktop = true } = {}) {
 	const { createRoot } = await import("react-dom/client");
 	const root = createRoot(doc.getElementById("root")!);
 	function draw() {
-		root.render(<div data-testid="clipping-dock" style={{ overflow: "hidden" }}><Composer busy={false} value={value} onChange={(next) => { value = next; draw(); }} onSend={() => { sends++; }} onStop={() => {}} canSend /></div>);
+		root.render(<div data-testid="clipping-dock" data-attachment-composer="" style={{ overflow: "hidden" }}><Composer busy={false} value={value} onChange={(next) => { value = next; draw(); }} onSend={() => { sends++; }} onStop={() => {}} canSend /></div>);
 	}
 	await act(async () => { draw(); });
 	const picker = doc.querySelector<HTMLInputElement>('[data-testid="attach-files-input"]')!;
@@ -81,6 +81,7 @@ async function fixture({ desktop = true } = {}) {
 		async choice(label: string) {
 			await act(async () => { Array.from(doc.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')).find((button) => button.textContent === label)!.click(); });
 		},
+		async resize() { await act(async () => { win.dispatchEvent(new win.Event("resize")); }); },
 		async key(key: string) {
 			const event = Object.assign(new win.Event("keydown", { bubbles: true, cancelable: true }), { key });
 			await act(async () => { doc.activeElement!.dispatchEvent(event); });
@@ -106,6 +107,30 @@ async function fixture({ desktop = true } = {}) {
 		},
 	};
 }
+
+describe("attachment popup placement", () => {
+	it("centers content-sized choices over the paperclip and leaves 4px above the entire short/multiline composer", () => {
+		for (const top of [540, 420]) {
+			const placed = attachmentPopupPlacement({ left: 680, right: 720 }, { top }, 58, { width: 1000, height: 800 });
+			assert.equal(placed.left + 58 / 2, 700);
+			assert.equal(800 - placed.bottom, top - 4);
+		}
+	});
+	it("contains choices and wider error notices at both viewport edges", () => {
+		for (const width of [58, 256]) {
+			for (const left of [0, 980]) {
+				const placed = attachmentPopupPlacement({ left, right: left + 40 }, { top: 540 }, width, { width: 1000, height: 800 });
+				assert.ok(placed.left >= 8 && placed.left + width <= 992);
+			}
+		}
+	});
+	it("caps to the room above the composer instead of flipping across it", () => {
+		const placed = attachmentPopupPlacement({ left: 120, right: 160 }, { top: 70 }, 58, { width: 300, height: 800 });
+		assert.equal(placed.maxHeight, 58);
+		assert.equal(placed.bottom, 734);
+		assert.equal(placed.maxWidth, 284);
+	});
+});
 
 describe("composer attach button", () => {
 	it("pathsForFiles keeps rooted paths and skips files the bridge can't place", () => {
@@ -152,7 +177,8 @@ describe("composer attach button", () => {
 		f.setFolderResult("/course/empty folder");
 		await act(async () => { f.button.click(); });
 		await f.choice("Folder");
-		assert.equal(f.value, "read `/course/empty folder` this");
+		assert.equal(f.value, "read `/course/empty folder/` this");
+		assert.ok(f.doc.querySelector(".lucide-folder"));
 		assert.equal(f.folderCalls, 1);
 		assert.equal(f.pickerClicks, 0);
 		assert.equal(f.byteReads, 0);
@@ -191,6 +217,15 @@ describe("composer attach button", () => {
 		assert.equal(notice.style.position, "fixed");
 		assert.equal((dock as HTMLElement).style.overflow, "hidden");
 		assert.equal(f.value, "readthis");
+	});
+
+	it("reanchors above the marked composer when its multiline boundary moves, not above the button", async () => {
+		const f = await fixture();
+		await act(async () => { f.button.click(); });
+		const dock = f.doc.querySelector<HTMLElement>('[data-testid="clipping-dock"]')!;
+		dock.getBoundingClientRect = () => ({ x: 100, y: 450, left: 100, right: 800, top: 450, bottom: 650, width: 700, height: 200, toJSON() {} });
+		await f.resize();
+		assert.equal(f.doc.querySelector<HTMLElement>('[role="menu"]')!.style.bottom, "354px");
 	});
 
 	it("paperclip menu focuses choices, supports arrows/Escape, and never submits a draft", async () => {

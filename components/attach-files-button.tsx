@@ -3,11 +3,10 @@
 import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
 import { createPortal } from "react-dom";
 import { PaperclipIcon } from "lucide-react";
-import { quoteFilePath } from "@/src/core";
+import { directoryReferencePath, quoteFilePath } from "@/src/core";
 import { Hint } from "@/components/ui/hint";
 import { INSERT_FILE_PATHS_EVENT } from "@/components/path-input";
 import { BROWSER_NOTICE } from "@/components/file-path-drop-zone";
-import { computeMenuPlacement, type MenuPlacement } from "@/components/menu-shell";
 
 /** Picked files → the rooted paths an editor chips (issue #285), via the
  *  desktop bridge. Same validity rule as drops: a file without a usable
@@ -23,6 +22,21 @@ export function pathsForFiles(files: Iterable<File>, resolve: (file: File) => st
 		} catch { skipped++; }
 	}
 	return { paths, skipped };
+}
+
+/** Center over the paperclip, but clear the whole visible composer, not just
+ * its bottom-aligned button. Clamp horizontally and scroll above the dock. */
+export function attachmentPopupPlacement(button: { left: number; right: number }, composer: { top: number }, popupWidth: number, viewport: { width: number; height: number }) {
+	const edge = 8;
+	const gap = 4;
+	const maxWidth = Math.max(0, viewport.width - edge * 2);
+	const width = Math.min(popupWidth, maxWidth);
+	return {
+		left: Math.max(edge, Math.min((button.left + button.right - width) / 2, viewport.width - edge - width)),
+		bottom: viewport.height - composer.top + gap,
+		maxWidth,
+		maxHeight: Math.max(0, Math.min(viewport.height * 0.6, composer.top - gap - edge)),
+	};
 }
 
 const noSubscribe = () => () => {};
@@ -49,22 +63,28 @@ export function AttachFilesButton({ editorRef }: { editorRef: React.RefObject<HT
 	const choosingFolder = useRef(false);
 	const [open, setOpen] = useState(false);
 	const [notice, setNotice] = useState("");
-	const [placement, setPlacement] = useState<MenuPlacement | null>(null);
+	const [placement, setPlacement] = useState<ReturnType<typeof attachmentPopupPlacement> | null>(null);
 	const positioned = placement !== null;
-	// Like MenuShell, portal to body and use its viewport-capped placement.
+	// Like MenuShell, portal to body with viewport-capped, reanchored placement.
 	// The production chat/new-session docks deliberately clip their children.
 	// Keep notice focus passive; only the choice menu takes keyboard focus.
 	useLayoutEffect(() => {
 		if (!open && !notice) { setPlacement(null); return; }
+		const button = buttonRef.current;
+		const popup = popupRef.current;
+		if (!button || !popup) return;
+		const composer = button.closest<HTMLElement>("[data-attachment-composer]") ?? button;
 		const place = () => {
-			if (!buttonRef.current || !popupRef.current) return;
-			setPlacement(computeMenuPlacement(buttonRef.current.getBoundingClientRect(),
-				{ width: window.innerWidth, height: window.innerHeight }, popupRef.current.scrollHeight, "up", "right"));
+			setPlacement(attachmentPopupPlacement(button.getBoundingClientRect(), composer.getBoundingClientRect(),
+				popup.getBoundingClientRect().width, { width: window.innerWidth, height: window.innerHeight }));
 		};
 		place();
+		const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(place);
+		observer?.observe(composer);
+		observer?.observe(popup);
 		window.addEventListener("scroll", place, true);
 		window.addEventListener("resize", place);
-		return () => { window.removeEventListener("scroll", place, true); window.removeEventListener("resize", place); };
+		return () => { observer?.disconnect(); window.removeEventListener("scroll", place, true); window.removeEventListener("resize", place); };
 	}, [open, notice]);
 	useEffect(() => { if (open && positioned) popupRef.current?.querySelector<HTMLButtonElement>("button")?.focus(); }, [open, positioned]);
 	useEffect(() => {
@@ -86,9 +106,9 @@ export function AttachFilesButton({ editorRef }: { editorRef: React.RefObject<HT
 		if (!choose) { setNotice(BROWSER_NOTICE); return; }
 		choosingFolder.current = true;
 		try {
-			const path = await choose();
-			if (path === null) return; // Native cancellation leaves the draft intact.
-			quoteFilePath(path);
+			const chosen = await choose();
+			if (chosen === null) return; // Native cancellation leaves the draft intact.
+			const path = directoryReferencePath(chosen);
 			if (editor?.isConnected && editor === editorRef.current) editor.dispatchEvent(new CustomEvent(INSERT_FILE_PATHS_EVENT, { detail: [path] }));
 		} catch { setNotice("Could not choose a folder. Try again."); }
 		finally { choosingFolder.current = false; }
@@ -130,8 +150,8 @@ export function AttachFilesButton({ editorRef }: { editorRef: React.RefObject<HT
 			{(open || notice) && createPortal(<div ref={popupRef} role={open ? "menu" : "status"}
 				aria-label={open ? "Attach files or a folder" : undefined}
 				data-testid="attachment-popup"
-				style={{ position: "fixed", zIndex: 60, ...(placement?.style ?? { left: 0, top: 0, visibility: "hidden" }), maxHeight: placement?.maxHeight, overflowY: "auto" }}
-				className={open ? "min-w-32 rounded-lg border bg-card p-1 shadow-lg" : "w-64 rounded-lg border bg-card p-2 text-xs text-muted-foreground shadow-lg"}
+				style={{ position: "fixed", zIndex: 60, ...(placement ?? { left: 0, top: 0, visibility: "hidden" }), overflowY: "auto" }}
+				className={open ? "w-max rounded-lg border bg-card p-1 shadow-lg" : "w-64 rounded-lg border bg-card p-2 text-xs text-muted-foreground shadow-lg"}
 				onKeyDown={(event) => {
 					const buttons = Array.from(popupRef.current?.querySelectorAll<HTMLButtonElement>("button") ?? []);
 					const index = buttons.indexOf(document.activeElement as HTMLButtonElement);

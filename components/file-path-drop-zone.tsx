@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { FileSymlinkIcon, XIcon } from "lucide-react";
-import { quoteFilePath } from "@/src/core";
+import { directoryReferencePath, quoteFilePath } from "@/src/core";
 import { appendToPrimaryInput } from "@/components/dictation";
 import { INSERT_FILE_PATHS_EVENT } from "@/components/path-input";
 
@@ -61,13 +61,18 @@ export function FilePathDropZone({ children, className }: { children: React.Reac
 				clearDrag();
 				const resolve = window.lh?.getPathForFile;
 				if (!resolve) { setNotice(BROWSER_NOTICE); return; }
-				// OS-backed directories resolve just like files: one original path,
-				// never traverse drag entries or enumerate/copy their contents.
+				// Inspect only the dropped item's type, never traverse its entries.
+				// Positively known directories get a durable trailing separator.
+				const entries = Array.from(event.dataTransfer.items).filter((item) => item.kind === "file");
 				const paths: string[] = [];
 				let skipped = 0;
-				for (const file of Array.from(event.dataTransfer.files)) {
+				for (const [index, file] of Array.from(event.dataTransfer.files).entries()) {
 					try {
-						const path = resolve(file);
+						let directory = false;
+						try { directory = entries[index]?.webkitGetAsEntry?.()?.isDirectory === true; }
+						catch { /* Unknown type stays unmarked, not guessed. */ }
+						const original = resolve(file);
+						const path = directory ? directoryReferencePath(original) : original;
 						quoteFilePath(path); // Same rooted-path validity rule as typed chips.
 						paths.push(path);
 					} catch { skipped++; }
