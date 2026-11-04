@@ -66,7 +66,7 @@ import {
 	type SteerMessage,
 } from "../core/contracts.ts";
 import type { TurnInput } from "../core/input-events.ts";
-import { danglingQuestionOf, endsInDismissal, type LhMessage } from "../core/native-messages.ts";
+import { hasUnresolvedQuestion, endsInDismissal, endsInQuestionRecovery, type LhMessage } from "../core/native-messages.ts";
 import { fireJobAbort, isJobLive } from "../agent/subagents/aborts.ts";
 import { stores, effectiveSettings } from "./stores.ts";
 import { resolveConversationSpec } from "../core/settings-resolution.ts";
@@ -564,7 +564,9 @@ async function pump(chatId: string): Promise<void> {
 			// hands them to that turn once the text-claim lands — until then,
 			// settlement re-pumps and lands them right after it). The pause is
 			// derived from the tail, so any user message un-holds by construction.
-			if (endsInDismissal(fresh.messages) || !automaticFollowUpAllowed(chatId)) {
+			// An interrupted question-recovery request also waits for explicit
+			// input; a queued job must not restart its replacement turn.
+			if (endsInDismissal(fresh.messages) || endsInQuestionRecovery(fresh.messages) || !automaticFollowUpAllowed(chatId)) {
 				parked = true;
 				return;
 			}
@@ -696,14 +698,14 @@ async function waitForIdle(chatId: string): Promise<void> {
 	for (;;) {
 		const record = stores.chatStore.getChat(chatId);
 		if (!record || !(state().queues.get(chatId) ?? []).some((entry) => !entry.waking && !entry.deferred && !entry.handedTo)) return;
-		const blocked = isTurnRunning(chatId) || danglingQuestionOf(record.messages) !== null;
+		const blocked = isTurnRunning(chatId) || hasUnresolvedQuestion(record.messages);
 		if (!blocked) {
 			await delay(GRACE_MS);
 			const recheck = stores.chatStore.getChat(chatId);
 			if (
 				!isTurnRunning(chatId) &&
 				recheck &&
-				danglingQuestionOf(recheck.messages) === null
+				!hasUnresolvedQuestion(recheck.messages)
 			) {
 				return;
 			}

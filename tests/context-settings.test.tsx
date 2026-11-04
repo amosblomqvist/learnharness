@@ -18,7 +18,7 @@ it("shows account-specific default, maximum and effective compaction for the sel
 		"/api/search": { available: false, engine: null, reason: "No search engine" },
 		"/api/keys": { keys: [] },
 		"/api/models": { models: entries, slots: { strong: { model: { provider: "chatgpt", id: "gpt-6.1-sol" } }, cheap: null, vision: null } },
-		"/api/settings/prompts": { prober: [], teacher: [] },
+		"/api/settings/prompts": { prober: [], teacher: [], practice: [] },
 	};
 	for (const [key, value] of Object.entries({
 		window: dom.window, document: dom.document, HTMLElement: dom.window.HTMLElement,

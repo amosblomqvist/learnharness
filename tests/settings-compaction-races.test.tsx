@@ -45,7 +45,7 @@ async function withDialog(run: (harness: {
 		if (url === "/api/models") return Response.json({ models, slots: { strong: { model: { provider: "chatgpt", id: "gpt-6.1-sol" } }, cheap: null, vision: null } });
 		if (url === "/api/search") return Response.json({ available: false, engine: null, reason: "No search engine" });
 		if (url === "/api/keys") return Response.json({ keys: [] });
-		if (url === "/api/settings/prompts") return Response.json({ prober: [], teacher: [] });
+		if (url === "/api/settings/prompts") return Response.json({ prober: [], teacher: [], practice: [] });
 		throw new Error(`Unexpected request ${url}`);
 	};
 	for (const [key, value] of Object.entries({ window: dom.window, document: dom.document, HTMLElement: dom.window.HTMLElement, CustomEvent: dom.window.CustomEvent, IS_REACT_ACT_ENVIRONMENT: true, fetch: fetchStub })) {

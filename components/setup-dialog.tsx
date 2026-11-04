@@ -410,6 +410,8 @@ function OpenSetupDialog({ onClose, onDone }: SetupDialogProps) {
 		for (const slot of SLOT_ORDER) {
 			const level = levels[slot];
 			models[slot] = {
+				// Advanced controls stay out of setup; never erase their saved choice.
+				...(catalog?.slots[slot]?.cacheRetention !== undefined ? { cacheRetention: catalog.slots[slot]!.cacheRetention } : {}),
 				model: { provider: picked[slot]!.provider, id: picked[slot]!.id },
 				...(level ? { thinkingLevel: level } : {}),
 			};

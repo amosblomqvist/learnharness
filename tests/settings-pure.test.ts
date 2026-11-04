@@ -262,6 +262,9 @@ describe("classifyKeys — the Keys section's two-group projection", () => {
 			"DEEPGRAM_API_KEY",
 			"TAVILY_API_KEY",
 			"BRAVE_API_KEY",
+			"EXA_API_KEY",
+			"FIRECRAWL_API_KEY",
+			"OLLAMA_API_KEY",
 		]);
 		assert.ok(out.toolRows[0]!.present);
 		assert.ok(!out.toolRows[1]!.present);
@@ -336,26 +339,31 @@ describe("first-run gate — slotsConfigured + setupStage (model-slots wave)", (
 	});
 });
 
-describe("sectionedSegments — the prompts overhaul (2026-09-26)", () => {
-	// The server contract: BOTH per-agent lists include the shared
-	// segments (same paths) — the view must list them ONCE.
+describe("sectionedSegments — actual per-agent prompt membership", () => {
+	// Each agent lists its own shared subset; the view lists their union ONCE.
 	const view = {
 		prober: [
 			{ path: "system-prompt.md", sourceText: "b", overrideText: null, enabled: false, shared: true },
 			{ path: "shared/10-personality.md", sourceText: "s1", overrideText: "custom", enabled: true, shared: true },
 			{ path: "prober/10-probe-doctrine.md", sourceText: "p1", overrideText: null, enabled: false, shared: false },
 		],
+		practice: [
+			{ path: "practice/00-base.md", sourceText: "r1", overrideText: null, enabled: false, shared: false },
+			{ path: "practice/10-doctrine.md", sourceText: "r2", overrideText: "practice custom", enabled: true, shared: false },
+			{ path: "shared/10-personality.md", sourceText: "s1", overrideText: "custom", enabled: true, shared: true },
+		],
 		teacher: [
 			{ path: "system-prompt.md", sourceText: "b", overrideText: null, enabled: false, shared: true },
+			{ path: "shared/20-question-tools.md", sourceText: "q", overrideText: null, enabled: false, shared: true },
 			{ path: "shared/10-personality.md", sourceText: "s1", overrideText: "custom", enabled: true, shared: true },
 			{ path: "teacher/05-method.md", sourceText: "t1", overrideText: null, enabled: false, shared: false },
 			{ path: "teacher/10-planning.md", sourceText: "t2", overrideText: null, enabled: false, shared: false },
 		],
 	};
 
-	it("the owner's ruled order: Teacher, Prober, Shared — Shared last", () => {
+	it("the approved order: Teacher, Prober, Practice, Shared — Shared last", () => {
 		const ids = sectionedSegments(view).map((s) => s.id);
-		assert.deepEqual(ids, ["teacher", "prober", "shared"]);
+		assert.deepEqual(ids, ["teacher", "prober", "practice", "shared"]);
 	});
 
 	it("shared chunks appear exactly ONCE across all sections (no duplication)", () => {
@@ -367,15 +375,30 @@ describe("sectionedSegments — the prompts overhaul (2026-09-26)", () => {
 	});
 
 	it("the Shared section holds the shared chunks in assembly order; the agents' sections hold their own", () => {
-		const [teacher, prober, shared] = sectionedSegments(view);
-		assert.ok(teacher && prober && shared, "all three sections present");
+		const [teacher, prober, practice, shared] = sectionedSegments(view);
+		assert.ok(teacher && prober && practice && shared, "all four sections present");
 		assert.deepEqual(teacher.segments.map((s) => s.path), ["teacher/05-method.md", "teacher/10-planning.md"]);
 		assert.deepEqual(prober.segments.map((s) => s.path), ["prober/10-probe-doctrine.md"]);
 		// assembly order: the base file first, then the shared fragments
-		assert.deepEqual(shared.segments.map((s) => s.path), ["system-prompt.md", "shared/10-personality.md"]);
-		// the Shared header carries the one hint that earns its place
-		assert.equal(shared.hint, "Used by both agents");
-		assert.equal(teacher.hint, undefined);
+		assert.deepEqual(shared.segments.map((s) => s.path), ["system-prompt.md", "shared/20-question-tools.md", "shared/10-personality.md"]);
+		assert.deepEqual(practice.segments.map((s) => s.path), ["practice/00-base.md", "practice/10-doctrine.md"]);
+		assert.equal(practice.segments[1]!.overrideText, "practice custom");
+		assert.equal(practice.segments[1]!.enabled, true);
+		assert.ok(practice.segments.every((s) => s.usageHint === undefined));
+	});
+
+	it("labels each shared fragment from actual membership, independently of override state", () => {
+		const shared = sectionedSegments(view).at(-1)!;
+		assert.equal(shared.segments[0]!.usageHint, "Used by Teacher and Prober");
+		assert.equal(shared.segments[2]!.usageHint, "Used by Teacher, Prober and Practice");
+		assert.equal(shared.segments[2]!.enabled, true, "in-use state is not replaced by usage");
+		// A synthetic new path/membership proves there is no duplicated allowlist.
+		const fragment = { path: "shared/99-new.md", sourceText: "new", overrideText: null, enabled: false, shared: true };
+		const changed = { teacher: [fragment], prober: [fragment], practice: [fragment] };
+		assert.equal(sectionedSegments(changed).at(-1)!.segments[0]!.usageHint, "Used by Teacher, Prober and Practice");
+		changed.practice = [];
+		assert.equal(sectionedSegments(changed).at(-1)!.segments[0]!.usageHint, "Used by Teacher and Prober");
+		assert.equal(sectionedSegments({ teacher: [], prober: [], practice: [fragment] }).at(-1)!.segments[0]!.usageHint, "Used by Practice");
 	});
 
 	it("the indicator copy is pinned — it states WHICH VERSION IS IN USE (refined 2026-09-26)", () => {
