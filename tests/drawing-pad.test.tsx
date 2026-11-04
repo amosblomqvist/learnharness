@@ -11,6 +11,8 @@ import {
 	EXPORT_MARGIN,
 	EXPORT_MAX_SIDE,
 	commit,
+	continuesGesture,
+	endsGesture,
 	exportGeometry,
 	historyOf,
 	inkBounds,
@@ -82,6 +84,17 @@ describe("stroke model", () => {
 		assert.equal(g.width, (100 + EXPORT_MARGIN * 2) * 2);
 		const huge = exportGeometry({ minX: 0, minY: 0, maxX: 5000, maxY: 100 }, 2);
 		assert.ok(huge.width <= EXPORT_MAX_SIDE, "never past the cap");
+	});
+
+	it("a split pen continues the gesture: mouse press (id 1), pen contact motion (id 3)", () => {
+		// The owner's XWayland Wacom trace, 2026-11-04.
+		assert.ok(continuesGesture(1, { pointerId: 3, pointerType: "pen", buttons: 1 }), "pen contact motion under another id");
+		assert.ok(continuesGesture(1, { pointerId: 1, pointerType: "mouse", buttons: 1 }), "its own pointer");
+		assert.ok(continuesGesture(1, { pointerId: 4, pointerType: "pen", buttons: 32 }), "the eraser end in contact");
+		assert.ok(!continuesGesture(1, { pointerId: 2, pointerType: "pen", buttons: 0 }), "a hovering pen is not contact");
+		assert.ok(!continuesGesture(1, { pointerId: 9, pointerType: "touch", buttons: 1 }), "a resting palm never joins");
+		assert.ok(endsGesture(1, { pointerId: 3, pointerType: "pen" }), "either half of the split pen can release");
+		assert.ok(!endsGesture(1, { pointerId: 9, pointerType: "touch" }));
 	});
 
 	it("undo/redo walk snapshot history; a new commit clears redo", () => {

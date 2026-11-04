@@ -11,6 +11,8 @@ import {
 	EXPORT_INK,
 	INKS,
 	commit,
+	continuesGesture,
+	endsGesture,
 	historyOf,
 	paintStrokes,
 	redo,
@@ -188,7 +190,7 @@ export function DrawingPad({
 
 	const onPointerMove = (e: React.PointerEvent<HTMLCanvasElement>) => {
 		const g = gesture.current;
-		if (!g || g.pointerId !== e.pointerId) return;
+		if (!g || !continuesGesture(g.pointerId, e)) return;
 		const rect = e.currentTarget.getBoundingClientRect();
 		const samples = e.nativeEvent.getCoalescedEvents?.() ?? [];
 		const events = samples.length > 0 ? samples : [e.nativeEvent];
@@ -208,6 +210,8 @@ export function DrawingPad({
 		for (const ev of events) {
 			const pt = pointOf(ev, rect);
 			const prev = g.stroke.points[g.stroke.points.length - 1]!;
+			// A split pen can report one position through both devices.
+			if (pt.x === prev.x && pt.y === prev.y) continue;
 			g.stroke.points.push(pt);
 			// Incremental: paint only the new segment.
 			if (ctx) paintStrokes(ctx, [{ ink: g.stroke.ink, points: [prev, pt] }], screenColor);
@@ -216,7 +220,7 @@ export function DrawingPad({
 
 	const endGesture = (e: React.PointerEvent<HTMLCanvasElement>) => {
 		const g = gesture.current;
-		if (!g || g.pointerId !== e.pointerId) return;
+		if (!g || !endsGesture(g.pointerId, e)) return;
 		gesture.current = null;
 		if (g.kind === "erase") {
 			// One sweep = one undo step; a sweep that touched nothing is no step.

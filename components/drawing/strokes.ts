@@ -89,6 +89,31 @@ export function exportGeometry(bounds: InkBounds, scale = 2): { width: number; h
 	return { width: Math.max(1, Math.round(w * s)), height: Math.max(1, Math.round(h * s)), scale: s, originX, originY };
 }
 
+// ─── gesture pointer matching ──────────────────────────────────────────────
+
+/** Primary contact (tip or left button) or a pen's eraser end. */
+const CONTACT_BUTTONS = 1 | 32;
+
+/**
+ * Does this pointer event belong to the live gesture? Its own pointer
+ * always does. So does any other non-touch pointer still in contact:
+ * under XWayland (Electron's --ozone-platform=x11 on a Wayland compositor)
+ * a Wacom pen's press and release arrive as MOUSE events while its
+ * contact motion arrives as PEN events under another pointerId (probe on
+ * the owner's tablet, 2026-11-04) — matching ids alone drew only dots.
+ */
+export function continuesGesture(gesturePointerId: number, e: { pointerId: number; pointerType: string; buttons: number }): boolean {
+	if (e.pointerId === gesturePointerId) return true;
+	return e.pointerType !== "touch" && (e.buttons & CONTACT_BUTTONS) !== 0;
+}
+
+/** Does this release end the live gesture? Its own pointer's does; so does
+ *  any other non-touch pointer's (the split pen above may release under
+ *  either id — a gesture must never outlive the contact). */
+export function endsGesture(gesturePointerId: number, e: { pointerId: number; pointerType: string }): boolean {
+	return e.pointerId === gesturePointerId || e.pointerType !== "touch";
+}
+
 // ─── undo history ──────────────────────────────────────────────────────────
 
 /** Snapshot history: strokes are immutable, so a step is just an array. */
