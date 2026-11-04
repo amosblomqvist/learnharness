@@ -34,6 +34,7 @@ import { CLAUDE_CODE_PROVIDER } from "./contracts/claude-code.ts";
 import type { ModelRole } from "../../config.ts";
 import type { ChatSettings } from "./contracts/chat.ts";
 import type { SearchEngineId } from "./search.ts";
+import { isAppLanguage, type AppLanguage } from "./i18n.ts";
 import { isDictationLanguage, type DictationLanguage } from "./dictation.ts";
 
 /** The schema version this code understands. Bump ONLY for breaking shape
@@ -333,7 +334,22 @@ export const ROLE_SLOT: Readonly<Record<ModelRole, ModelSlotName>> = {
 export interface GeneralSettings {
 	/** Automatic startup/24h update checks (default ON). Manual checks bypass this. */
 	autoUpdate?: boolean;
+	/** The app language (default "en"): the UI copy, the agents' system
+	 *  prompts and, unless overridden, the dictation language all follow
+	 *  it (core/i18n.ts). */
+	language?: AppLanguage;
+	/** Dictate in dictationLanguage instead of the app language (default OFF). */
+	dictationOverride?: boolean;
+	/** Deepgram's `language` param while dictationOverride is on. No
+	 *  factory default: absent until picked, and kept when the override
+	 *  goes off so turning it back on restores the pick. "multi" is
+	 *  nova-3's multilingual code-switching mode. */
+	dictationLanguage?: DictationLanguage;
 }
+
+/** General with every default resolved — dictationLanguage has none. */
+export type ResolvedGeneralSettings = Required<Omit<GeneralSettings, "dictationLanguage">> &
+	Pick<GeneralSettings, "dictationLanguage">;
 
 /** One app-wide dictation preference, shared by every composer. */
 export interface DictationSettings {
@@ -487,7 +503,7 @@ export interface UserSettings {
  *  prompts default off — hence their absence here. */
 export interface FactorySettings {
 	version: number;
-	general: Required<GeneralSettings>;
+	general: ResolvedGeneralSettings;
 	dictation: Required<DictationSettings>;
 	appearance: {
 		mode: "dark" | "light";
@@ -507,7 +523,7 @@ export interface FactorySettings {
 
 export const FACTORY_SETTINGS: FactorySettings = {
 	version: CURRENT_SETTINGS_VERSION,
-	general: { autoUpdate: true },
+	general: { autoUpdate: true, language: "en", dictationOverride: false },
 	dictation: { language: "en" },
 	appearance: {
 		mode: "dark",
@@ -553,6 +569,10 @@ function sanitizeGeneral(raw: Record<string, unknown>): GeneralSettings {
 	const out: GeneralSettings = {};
 	const autoUpdate = boolOrDrop(raw.autoUpdate);
 	if (autoUpdate !== undefined) out.autoUpdate = autoUpdate;
+	if (isAppLanguage(raw.language)) out.language = raw.language;
+	const dictationOverride = boolOrDrop(raw.dictationOverride);
+	if (dictationOverride !== undefined) out.dictationOverride = dictationOverride;
+	if (isDictationLanguage(raw.dictationLanguage)) out.dictationLanguage = raw.dictationLanguage;
 	return out;
 }
 

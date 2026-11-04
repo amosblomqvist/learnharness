@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState, useSyncExternalStore, type ChangeEvent } from "react";
 import { UploadIcon } from "lucide-react";
 import { Hint } from "@/components/ui/hint";
+import { useT } from "@/components/i18n";
 import { createNotesImportQueue, EMPTY_IMPORT_QUEUE, notesPath } from "./notes-import-queue";
 
 export { MAX_IMPORT_BYTES } from "@/lib/notes-import-limits.ts";
@@ -88,6 +89,7 @@ export function useNotesImport(callbacks: { onStart?: () => void; onFinish?: () 
 /** PR198's shared Files / Folder native picker. Unlike the donor, it remains
  * available while work is running; later selections join the SAME queue. */
 export function NotesImportControl({ importing, onImportFiles }: { importing: boolean; onImportFiles: (files: FileList | null) => void }) {
+	const t = useT();
 	const filesRef = useRef<HTMLInputElement>(null);
 	const folderRef = useRef<HTMLInputElement>(null);
 	const [open, setOpen] = useState(false);
@@ -95,17 +97,17 @@ export function NotesImportControl({ importing, onImportFiles }: { importing: bo
 		onImportFiles(event.target.files);
 		event.target.value = "";
 	};
-	const choices = [["Files", filesRef], ["Folder", folderRef]] as const;
+	const choices = [[t("graph.import.files"), filesRef], [t("graph.import.folder"), folderRef]] as const;
 	return (
 		<div className="relative shrink-0 rounded-xl border bg-card/85 px-1 py-[3px] shadow-lg backdrop-blur"
 			onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget)) setOpen(false); }}
 			onKeyDown={(event) => { if (event.key === "Escape") setOpen(false); }}>
 			<input ref={filesRef} type="file" multiple accept=".md,.markdown,.txt,.pdf" className="hidden" onChange={onChange} />
 			<input ref={folderRef} type="file" {...{ webkitdirectory: "" }} className="hidden" onChange={onChange} />
-			<Hint label="Import notes into the graph" side="bottom">
+			<Hint label={t("graph.chrome.importHint")} side="bottom">
 				<button type="button" onClick={() => setOpen(!open)} aria-expanded={open} aria-haspopup="menu" data-testid="import-notes"
 					className="flex h-7 items-center gap-1.5 rounded-lg px-2.5 text-xs text-muted-foreground transition-colors hover:bg-accent">
-					<UploadIcon className="size-3" />{importing ? "Importing…" : "Import notes…"}
+					<UploadIcon className="size-3" />{importing ? t("graph.chrome.importing") : t("graph.chrome.import")}
 				</button>
 			</Hint>
 			{open && (

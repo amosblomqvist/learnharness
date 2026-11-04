@@ -3,6 +3,7 @@
 import { createContext, useContext, useLayoutEffect, useRef, useState, type DragEvent, type HTMLAttributes, type ReactNode } from "react";
 import { ChevronRightIcon, FolderIcon, FolderOpenIcon } from "lucide-react";
 import { canMoveFolder, folderIsEmpty, fuzzyScore, placementOf, folderEntryCheck, type SourceEntrySelection, type OrganizationAction, type SourceDirectory } from "@/src/core";
+import { useT } from "@/components/i18n";
 import type { ChainSort } from "./chain-table";
 import { chainRow } from "./chain-navigation";
 
@@ -61,6 +62,7 @@ export function sourceNameMatches(directory: SourceDirectory | undefined, id: st
 export function EditableSourceName({ name, onSave, onCancel, initiallyEditing = false }: {
 	name: string; onSave: (name: string) => Promise<unknown>; onCancel?: () => void; initiallyEditing?: boolean;
 }) {
+	const t = useT();
 	const [editing, setEditing] = useState(initiallyEditing);
 	const [draft, setDraft] = useState(name);
 	const [failure, setFailure] = useState("");
@@ -81,7 +83,7 @@ export function EditableSourceName({ name, onSave, onCancel, initiallyEditing = 
 		finally { submitting.current = false; }
 	};
 	return <span className="min-w-0 flex-1">
-		{editing ? <input ref={input} value={draft} placeholder="Folder name" aria-label="Source or folder name" data-testid="source-name-input"
+		{editing ? <input ref={input} value={draft} placeholder={t("graph.folders.namePlaceholder")} aria-label="Source or folder name" data-testid="source-name-input"
 			className="block h-5 w-full min-w-0 border-0 bg-transparent p-0 text-sm font-medium leading-5 outline-none shadow-none focus:ring-0"
 			onChange={(e) => setDraft(e.target.value)} onBlur={() => { void commit(); }}
 			onKeyDown={(e) => {

@@ -8,13 +8,15 @@ import { SettingsMenuTrigger, SettingsRow } from "@/components/settings/controls
 import { SearchMenuList } from "@/components/settings/search-menu-list";
 import { useDictationActive } from "@/components/dictation-state";
 import { useDictationLanguage } from "@/components/dictation-preference";
+import { useT } from "@/components/i18n";
 
 type LanguagePreference = ReturnType<typeof useDictationLanguage>;
 
 export function DictationLanguageSetting() {
+	const t = useT();
 	const preference = useDictationLanguage();
 	const active = useDictationActive();
-	return <SettingsRow label="Language" testid="row-dictation-language" dimmed={active}>
+	return <SettingsRow label={t("settings.general.language")} testid="row-dictation-language" dimmed={active}>
 		<DictationLanguagePicker preference={preference} disabled={active} />
 	</SettingsRow>;
 }

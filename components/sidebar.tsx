@@ -20,8 +20,11 @@ import { cn } from "@/lib/utils";
 import { fuzzyScore } from "@/src/core";
 import { useServerEvent, useServerResync } from "@/components/server-events";
 import type { ChatListItem } from "@/src/core";
-import { kbdEventForAction } from "@/src/core";
+import { kbdEventForAction, translate } from "@/src/core";
 import { notifySettingsSaved } from "@/components/settings-signal";
+import { useT, type Translate } from "@/components/i18n";
+
+const ENGLISH: Translate = (key, vars) => translate("en", key, vars);
 
 /**
  * Toggleable sidebar — NOT a modal drawer: no backdrop, no focus theft. It
@@ -200,6 +203,7 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
  *  no popping in either direction. */
 export function SidebarToggle() {
 	const { open, toggle } = useSidebar();
+	const t = useT();
 	return (
 		<span
 			className={cn(
@@ -207,11 +211,11 @@ export function SidebarToggle() {
 				open ? "w-0 -mr-3" : "w-9 mr-0 lh-closed-toggle",
 			)}
 		>
-			<Hint label="Open sidebar" action="toggle-sidebar">
+			<Hint label={t("nav.sidebar.open")} action="toggle-sidebar">
 			<Button
 				variant="ghost"
 				size="icon"
-				aria-label="Open sidebar"
+				aria-label={t("nav.sidebar.open")}
 				aria-hidden={open}
 				tabIndex={open ? -1 : 0}
 				onClick={toggle}
@@ -220,7 +224,7 @@ export function SidebarToggle() {
 				{/* Owner, round 6: size-4, SAME as the close glyph — the toggle
 				    must not grow when the sidebar is closed (it did: size-5 here).
 				    The small look is the standard, both directions. */}
-				<PanelLeftOpenIcon className="size-4" />
+				<PanelLeftOpenIcon className="size-4 rtl:scale-x-[-1]" />
 			</Button>
 			</Hint>
 		</span>
@@ -250,15 +254,15 @@ function SessionStatus({ busy }: { busy: boolean }) {
  *  in any locale and it sorts (owner, typography round 5; the old
  *  M/D/YYYY was the US convention. A user-locale setting can come later
  *  — trivial, a format function swap). Pure — exported for tests. */
-export function timeAgo(iso: string, now = new Date()): string {
+export function timeAgo(iso: string, now = new Date(), t: Translate = ENGLISH): string {
 	const ms = now.getTime() - new Date(iso).getTime();
-	if (ms < 60_000) return "just now";
+	if (ms < 60_000) return t("nav.time.justNow");
 	const min = Math.floor(ms / 60_000);
-	if (min < 60) return `${min}m ago`;
+	if (min < 60) return t("nav.time.minutes", { n: min });
 	const h = Math.floor(min / 60);
-	if (h < 24) return `${h}h ago`;
+	if (h < 24) return t("nav.time.hours", { n: h });
 	const d = Math.floor(h / 24);
-	if (d < 7) return `${d}d ago`;
+	if (d < 7) return t("nav.time.days", { n: d });
 	const date = new Date(iso);
 	const mm = String(date.getMonth() + 1).padStart(2, "0");
 	const dd = String(date.getDate()).padStart(2, "0");
@@ -270,14 +274,15 @@ export function timeAgo(iso: string, now = new Date()): string {
  *  typography round 5): it informed no decision — clutter. messageCount
  *  still rides the API payload, so this is a one-line flip back if it's
  *  ever wanted. */
-function sessionMeta(chat: ChatListItem): string {
-	if (chat.compacting) return `Compacting context · ${timeAgo(chat.updatedAt)}`;
-	if (chat.pendingQuestion) return `Waiting for input · ${timeAgo(chat.updatedAt)}`;
+function sessionMeta(chat: ChatListItem, t: Translate): string {
+	const ago = () => timeAgo(chat.updatedAt, new Date(), t);
+	if (chat.compacting) return t("nav.session.meta.compacting", { ago: ago() });
+	if (chat.pendingQuestion) return t("nav.session.meta.waiting", { ago: ago() });
 	if ((chat.kind ?? "teach") === "practice" && chat.pendingProblem) {
-		return `Problem waiting · ${timeAgo(chat.updatedAt)}`;
+		return t("nav.session.meta.problem", { ago: ago() });
 	}
-	if (chat.busy) return "Working…";
-	return timeAgo(chat.updatedAt);
+	if (chat.busy) return t("nav.session.meta.working");
+	return ago();
 }
 
 /**
@@ -301,6 +306,7 @@ export function SessionRow({
 	/** Right-click opens the context menu (wave 6: Rename / Delete). */
 	onContextMenu?: (e: React.MouseEvent<HTMLButtonElement>) => void;
 }) {
+	const t = useT();
 	return (
 		<button
 			type="button"
@@ -321,13 +327,13 @@ export function SessionRow({
 				    rule, finally applied to the picker too (owner, typography
 				    round): mono = chrome, Source Sans = human words. */}
 				<span className="block truncate font-prose text-(length:--lh-prose-size)">{chat.title}</span>
-				<span className="block text-xs text-muted-foreground">{sessionMeta(chat)}</span>
+				<span className="block text-xs text-muted-foreground">{sessionMeta(chat, t)}</span>
 			</span>
 			{/* The dumbbell rides the FAR RIGHT (owner round 6, 2026-10-05) —
 			    was left of the name; right-aligned keeps the titles flush with
 			    the teaching rows and reads cleaner. */}
 			{(chat.kind ?? "teach") === "practice" && (
-				<DumbbellIcon className="size-3.5 shrink-0 text-muted-foreground/70" aria-label="Practice session" />
+				<DumbbellIcon className="size-3.5 shrink-0 text-muted-foreground/70" aria-label={t("nav.session.practiceIcon")} />
 			)}
 		</button>
 	);
@@ -338,6 +344,7 @@ export function SessionRow({
  *  "replace", the header rename's rule), Enter/blur commits, Esc discards.
  *  The meta line stays so the row never changes height mid-edit. */
 export function RenameRow({ chat, onCommit, onCancel }: { chat: ChatListItem; onCommit: (next: string) => void; onCancel: () => void }) {
+	const t = useT();
 	const [draft, setDraft] = useState(chat.title);
 	const inputRef = useRef<HTMLInputElement | null>(null);
 	useEffect(() => {
@@ -373,11 +380,11 @@ export function RenameRow({ chat, onCommit, onCancel }: { chat: ChatListItem; on
 							onCancel();
 						}
 					}}
-					aria-label="Rename session"
+					aria-label={t("nav.session.rename")}
 					data-testid="session-rename-input"
 					className="lh-input w-full min-w-0 truncate border-0 border-b border-border bg-transparent px-0 text-foreground outline-none"
 				/>
-				<span className="block truncate text-xs text-muted-foreground">{sessionMeta(chat)}</span>
+				<span className="block truncate text-xs text-muted-foreground">{sessionMeta(chat, t)}</span>
 			</span>
 		</div>
 	);
@@ -391,6 +398,7 @@ const KIND_FILTER_KEY = "lh:session-kind-filter";
 
 function SessionsSidebar() {
 	const { open, toggle } = useSidebar();
+	const t = useT();
 	const [chats, setChats] = useState<ChatListItem[] | null>(null);
 	const [query, setQuery] = useState("");
 	const [kindFilter, setKindFilter] = useState<SessionKindFilter>("all");
@@ -590,16 +598,16 @@ function SessionsSidebar() {
 	// it too). Esc discards; empty commit discards (the header's rules).
 	const commitRename = useCallback(async (id: string, next: string) => {
 		setRenamingId(null);
-		const t = next.trim();
-		if (t === "") return;
+		const title = next.trim();
+		if (title === "") return;
 		try {
 			const res = await fetch(`/api/chats/${id}`, {
 				method: "PUT",
 				headers: { "Content-Type": "application/json" },
-				body: JSON.stringify({ title: t }),
+				body: JSON.stringify({ title }),
 			});
 			if (!res.ok) throw new Error(`rename failed: ${res.status}`);
-			window.dispatchEvent(new CustomEvent("lh:chat-renamed", { detail: { id, title: t } }));
+			window.dispatchEvent(new CustomEvent("lh:chat-renamed", { detail: { id, title } }));
 		} catch (err) {
 			console.error("rename failed:", err); // keep the old title
 		}
@@ -650,7 +658,7 @@ function SessionsSidebar() {
 			className={cn("sidebar-motion shrink-0 overflow-hidden duration-200", open ? "w-72" : "w-0")}
 			aria-hidden={!open}
 		>
-			<div className="flex h-full w-72 flex-col border-r bg-background">
+			<div className="flex h-full w-72 flex-col border-r rtl:border-r-0 rtl:border-l bg-background">
 				{/* LH wordmark — the owner's header; close toggle sits at the edge.
 				    Merged chrome (2026-09-17): in Electron this band is the
 				    window's drag surface and starts after the traffic lights
@@ -667,27 +675,27 @@ function SessionsSidebar() {
 						// of the logo, carrying its real shortcut: ⌘G jumps to
 						// the graph view (keyboard-shortcuts routes it to "/",
 						// the same destination as this logo).
-						label="Home"
+						label={t("nav.sidebar.home")}
 						action="jump-graph"
 						side="right"
 					>
 						<Link
 							href="/"
-							aria-label="Home"
+							aria-label={t("nav.sidebar.home")}
 							className="lh-no-drag flex size-9 shrink-0 items-center justify-center rounded-md transition-colors hover:bg-accent hover:text-accent-foreground dark:hover:bg-accent/50"
 						>
 							<LhMark className="size-6" />
 						</Link>
 					</Hint>
-					<Hint label="Close sidebar" action="toggle-sidebar">
+					<Hint label={t("nav.sidebar.close")} action="toggle-sidebar">
 						<Button
 							variant="ghost"
 							size="icon"
-							aria-label="Close sidebar"
+							aria-label={t("nav.sidebar.close")}
 							onClick={toggle}
 							className="lh-no-drag"
 						>
-							<PanelLeftCloseIcon className="size-4" />
+							<PanelLeftCloseIcon className="size-4 rtl:scale-x-[-1]" />
 						</Button>
 					</Hint>
 				</div>
@@ -704,8 +712,8 @@ function SessionsSidebar() {
 						className="flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-xs uppercase tracking-wider text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
 					>
 						<PlusIcon className="size-3" />
-						Teaching
-						<span className="sr-only">create a new teaching session</span>
+						{t("nav.sidebar.newTeaching")}
+						<span className="sr-only">{t("nav.sidebar.newTeaching.sr")}</span>
 					</button>
 					<button
 						type="button"
@@ -714,14 +722,14 @@ function SessionsSidebar() {
 						className="flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-xs uppercase tracking-wider text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
 					>
 						<DumbbellIcon className="size-3" />
-						Practice
-						<span className="sr-only">create a new practice session</span>
+						{t("nav.sidebar.newPractice")}
+						<span className="sr-only">{t("nav.sidebar.newPractice.sr")}</span>
 					</button>
 				</div>
 
 				<div className="mx-3 mb-2 flex items-center gap-2">
-					<span className="text-xs uppercase tracking-widest text-muted-foreground/70">Sessions</span>
-					<Hint label="Search sessions" action="sessions-search" side="bottom">
+					<span className="text-xs uppercase tracking-widest text-muted-foreground/70">{t("nav.sidebar.sessions")}</span>
+					<Hint label={t("nav.sidebar.search")} action="sessions-search" side="bottom">
 					<span className="relative flex-1">
 						<Input
 							ref={searchRef}
@@ -771,11 +779,11 @@ function SessionsSidebar() {
 									e.currentTarget.blur();
 								}
 							}}
-							placeholder="Search…"
-							aria-label="Search sessions"
-							className="h-6 rounded-sm border-border bg-background pl-6 text-xs placeholder:text-muted-foreground/60"
+							placeholder={t("nav.sidebar.search.placeholder")}
+							aria-label={t("nav.sidebar.search")}
+							className="h-6 rounded-sm border-border bg-background pl-6 rtl:pl-2 rtl:pr-6 text-xs placeholder:text-muted-foreground/60"
 						/>
-						<SearchIcon className="pointer-events-none absolute left-1.5 top-1/2 size-3 -translate-y-1/2 text-muted-foreground/70" />
+						<SearchIcon className="pointer-events-none absolute left-1.5 rtl:left-auto rtl:right-1.5 top-1/2 size-3 -translate-y-1/2 text-muted-foreground/70" />
 					</span>
 					</Hint>
 				</div>
@@ -801,17 +809,17 @@ function SessionsSidebar() {
 									: "text-muted-foreground hover:text-foreground",
 							)}
 						>
-							{f === "teach" ? "Teaching" : f === "all" ? "All" : "Practice"}
+							{t(`nav.sidebar.filter.${f}`)}
 						</button>
 					))}
 				</div>
 
 				<div ref={listRef} className="flex-1 overflow-y-auto p-2">
 					{shown === null ? (
-						<div className="px-2 py-4 text-xs text-muted-foreground">Loading…</div>
+						<div className="px-2 py-4 text-xs text-muted-foreground">{t("nav.sidebar.loading")}</div>
 					) : shown.length === 0 ? (
 						<div className="px-2 py-4 text-xs text-muted-foreground">
-							{query.trim() ? "No sessions match." : "No sessions yet."}
+							{query.trim() ? t("nav.sidebar.noMatch") : t("nav.sidebar.empty")}
 						</div>
 					) : (
 						shown.map((c, i) =>
@@ -850,7 +858,7 @@ function SessionsSidebar() {
 					    New session — quiet, bottom-pinned, opens the centered
 					    dialog (also mod+, in the keyboard registry). */}
 					<div className="px-3 pb-3 pt-1">
-						<Hint label="Settings" action="open-settings" side="right">
+						<Hint label={t("nav.sidebar.settings")} action="open-settings" side="right">
 							<button
 								type="button"
 								onClick={() => openSettings()}
@@ -858,7 +866,7 @@ function SessionsSidebar() {
 								className="flex items-center gap-1.5 rounded-md px-2 py-1.5 text-xs uppercase tracking-wider text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
 							>
 								<SettingsIcon className="size-3" />
-								Settings
+								{t("nav.sidebar.settings")}
 							</button>
 						</Hint>
 					</div>
@@ -890,7 +898,7 @@ function SessionsSidebar() {
 							}}
 							className="flex items-center rounded-lg px-2.5 py-1.5 text-left text-foreground transition-colors hover:bg-accent"
 						>
-							Rename
+							{t("nav.sidebar.ctx.rename")}
 						</button>
 						{/* Export as Markdown (owner, release polish 2026-10-06): the
 					    session-markdown engine's user-facing debut — same-origin
@@ -912,7 +920,7 @@ function SessionsSidebar() {
 							}}
 							className="flex items-center rounded-lg px-2.5 py-1.5 text-left text-foreground transition-colors hover:bg-accent"
 						>
-							Export as Markdown…
+							{t("nav.sidebar.ctx.exportMarkdown")}
 						</button>
 						<button
 							type="button"
@@ -924,7 +932,7 @@ function SessionsSidebar() {
 							}}
 							className="flex items-center rounded-lg px-2.5 py-1.5 text-left text-muted-foreground/80 transition-colors hover:bg-accent hover:text-foreground"
 						>
-							Delete…
+							{t("nav.sidebar.ctx.delete")}
 						</button>
 						<div className="my-0.5 border-t border-border/60" aria-hidden="true" />
 						<CoverageMenuBlock chatId={ctxChatId} />

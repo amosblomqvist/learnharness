@@ -2,7 +2,8 @@
 
 import { ToolContentResponse } from "@/components/ai-elements/message";
 import { cn } from "@/lib/utils";
-import type { ArtifactPartProps } from "@/src/core";
+import type { ArtifactPartProps, TranslationKey } from "@/src/core";
+import { useT } from "@/components/i18n";
 
 /**
  * The practice transcript cards (practice sessions, owner design
@@ -60,11 +61,12 @@ export function ProblemCard({ part }: ArtifactPartProps) {
 	// statement — same container + eyebrow discipline as the answered card
 	// and the dock (which mirrors this in Slice D). The commitment never
 	// renders — only the call's statement.
+	const t = useT();
 	const input = (part.input ?? {}) as { statement?: string };
 	const statement = typeof input.statement === "string" ? input.statement : "";
 	return (
 		<div data-testid="problem-card" className="lh-card-enter my-1 rounded-xl border bg-card p-4">
-			<div className="mb-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">Problem</div>
+			<div className="mb-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">{t("artifacts.practice.problem")}</div>
 			<div className="lh-prose text-[15px]">
 				<ToolContentResponse>{statement}</ToolContentResponse>
 			</div>
@@ -72,12 +74,12 @@ export function ProblemCard({ part }: ArtifactPartProps) {
 	);
 }
 
-const OUTCOME_LABEL: Record<string, string> = {
-	solved: "Solved",
-	solvedWithHints: "Solved with hints",
-	movedOn: "Moved on",
-	surrendered: "Surrendered",
-	dismissed: "Dismissed",
+const OUTCOME_LABEL: Record<string, TranslationKey> = {
+	solved: "artifacts.practice.outcome.solved",
+	solvedWithHints: "artifacts.practice.outcome.solvedWithHints",
+	movedOn: "artifacts.practice.outcome.movedOn",
+	surrendered: "artifacts.practice.outcome.surrendered",
+	dismissed: "artifacts.practice.outcome.dismissed",
 };
 
 /* The outcome chips (owner round 3, 2026-10-05): the EXACT register of the
@@ -100,6 +102,7 @@ export function ConcludeCard({ part }: ArtifactPartProps) {
 	// below in the quiz-explanation register (small, muted, low-key).
 	// Nothing collapsible. Legacy inputs (pre-slim records) that carry
 	// their own solutionReveal fall back to it.
+	const t = useT();
 	const input = (part.input ?? {}) as { outcome?: string; verdict?: string; solutionReveal?: string };
 	const outcome = typeof input.outcome === "string" ? input.outcome : "";
 	const verdict = typeof input.verdict === "string" ? input.verdict : "";
@@ -111,7 +114,7 @@ export function ConcludeCard({ part }: ArtifactPartProps) {
 	if (outcome === "dismissed") {
 		return (
 			<div data-testid="conclude-card" className="my-1 px-1 text-sm text-muted-foreground/70">
-				Problem dismissed.
+				{t("artifacts.practice.dismissed")}
 			</div>
 		);
 	}
@@ -122,10 +125,10 @@ export function ConcludeCard({ part }: ArtifactPartProps) {
 			    eyebrow + the outcome in the quiz cards' EXACT chip register —
 			    no more two same-weight headings stacked. */}
 			<div className="mb-1 flex items-center gap-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-				Concluded
-				{(OUTCOME_LABEL[outcome] ?? "") !== "" && outcome !== "dismissed" && (
+				{t("artifacts.practice.concluded")}
+				{OUTCOME_LABEL[outcome] !== undefined && outcome !== "dismissed" && (
 					<span className={cn("rounded px-1.5 py-0.5", OUTCOME_CHIP[outcome] ?? OUTCOME_CHIP.movedOn)}>
-						{OUTCOME_LABEL[outcome]}
+						{t(OUTCOME_LABEL[outcome])}
 					</span>
 				)}
 			</div>
@@ -142,7 +145,7 @@ export function ConcludeCard({ part }: ArtifactPartProps) {
 				<>
 					<div className="my-3 border-t" />
 					<div>
-						<div className="mb-0.5 text-xs font-medium uppercase tracking-wide text-muted-foreground">Model solution</div>
+						<div className="mb-0.5 text-xs font-medium uppercase tracking-wide text-muted-foreground">{t("artifacts.practice.modelSolution")}</div>
 						<div className="lh-prose text-[15px]">
 							<ToolContentResponse>{reveal}</ToolContentResponse>
 						</div>
@@ -177,6 +180,7 @@ function MetadataPopover({
 	concludeInput: { outcome?: string; rung?: unknown; missClass?: unknown; retest?: unknown };
 	problemInput: { mode?: unknown; target?: unknown };
 }) {
+	const t = useT();
 	const [open, setOpen] = useState(false);
 	const triggerRef = useRef<HTMLButtonElement | null>(null);
 	const rootRef = useRef<HTMLDivElement | null>(null);
@@ -239,7 +243,7 @@ function MetadataPopover({
 				aria-expanded={open}
 				className="flex items-center gap-1 text-xs font-medium uppercase tracking-wide text-muted-foreground transition-colors hover:text-foreground"
 			>
-				Metadata
+				{t("artifacts.practice.metadata.toggle")}
 			</button>
 			{open &&
 				anchor &&
@@ -256,12 +260,12 @@ function MetadataPopover({
 						className="z-50 w-80 max-w-[calc(100vw-1rem)] rounded-xl border bg-card p-4 text-left shadow-lg"
 					>
 				<dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-xs">
-						<dt className="text-muted-foreground">Mode</dt>
+						<dt className="text-muted-foreground">{t("artifacts.practice.metadata.mode")}</dt>
 						<dd className="font-mono">{mode || "—"}</dd>
-						<dt className="text-muted-foreground">Targets</dt>
+						<dt className="text-muted-foreground">{t("artifacts.practice.metadata.targets")}</dt>
 						<dd className="font-mono">
 							{targets.length === 0 ? (
-								"untagged"
+								t("artifacts.practice.metadata.untagged")
 							) : (
 								<span>
 									{targets.map((t, i) => (
@@ -273,14 +277,20 @@ function MetadataPopover({
 								</span>
 							)}
 						</dd>
-						<dt className="text-muted-foreground">Outcome</dt>
+						<dt className="text-muted-foreground">{t("artifacts.practice.metadata.outcome")}</dt>
 						<dd className="font-mono">{outcome || "—"}</dd>
-						<dt className="text-muted-foreground">Hint rung</dt>
-						<dd className="font-mono">{rung || "none"}</dd>
-						<dt className="text-muted-foreground">Miss class</dt>
-						<dd className="font-mono">{miss || "none"}</dd>
-						<dt className="text-muted-foreground">Retest</dt>
-						<dd className="font-mono">{retest === undefined ? "—" : retest ? "yes" : "no"}</dd>
+						<dt className="text-muted-foreground">{t("artifacts.practice.metadata.hintRung")}</dt>
+						<dd className="font-mono">{rung || t("artifacts.practice.metadata.none")}</dd>
+						<dt className="text-muted-foreground">{t("artifacts.practice.metadata.missClass")}</dt>
+						<dd className="font-mono">{miss || t("artifacts.practice.metadata.none")}</dd>
+						<dt className="text-muted-foreground">{t("artifacts.practice.metadata.retest")}</dt>
+						<dd className="font-mono">
+							{retest === undefined
+								? "—"
+								: retest
+									? t("artifacts.practice.metadata.yes")
+									: t("artifacts.practice.metadata.no")}
+						</dd>
 					</dl>
 					</div>,
 					document.body,
@@ -294,5 +304,6 @@ export function ThinkingCard({ data }: { data: PracticeThinkingData }) {
 	// 50%-italic quote block on expand. Legacy records' commit flag is
 	// deliberately unread (one lane now). A TRANSCRIPT row (owner round,
 	// 2026-10-07): full-width band + rail, arriving expanded.
-	return <ThinkingBlock testId="thinking-card" label="YOUR THINKING" text={data.text} defaultOpen />;
+	const t = useT();
+	return <ThinkingBlock testId="thinking-card" label={t("artifacts.practice.yourThinking")} text={data.text} defaultOpen />;
 }

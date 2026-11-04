@@ -350,6 +350,26 @@ describe("serializeForSummary + buildCompactionPrompt", () => {
 		assert.ok(prompt.includes("- [done] A (a1)"));
 	});
 
+	it("in Spanish the prompt keeps the four sections in order, the markers and the plan tree", () => {
+		const prompt = buildCompactionPrompt({ spanText: "TRANSCRIPT", planTreeText: "- [done] A (a1)", kind: "teach", language: "es" });
+		const order = ["La comprensión del aprendiz", "El arco de enseñanza", "El árbol de dependencias del plan", "El momento actual"].map(
+			(s) => prompt.indexOf(s),
+		);
+		assert.ok(order.every((i) => i >= 0), "every Spanish section is present");
+		assert.deepEqual(order, [...order].sort((a, b) => a - b));
+		for (const marker of ["[LEARNER]", "[TUTOR]", "[SYSTEM NOTE]", "TRANSCRIPT", "- [done] A (a1)"]) assert.ok(prompt.includes(marker), marker);
+	});
+
+	it("in Arabic the prompt keeps the four sections in order, the markers and the plan tree", () => {
+		const prompt = buildCompactionPrompt({ spanText: "TRANSCRIPT", planTreeText: "- [done] A (a1)", kind: "teach", language: "ar" });
+		const order = ["فهم المتعلم", "مسار التدريس", "شجرة تبعيات الخطة", "اللحظة الحالية"].map(
+			(s) => prompt.indexOf(s),
+		);
+		assert.ok(order.every((i) => i >= 0), "every Arabic section is present");
+		assert.deepEqual(order, [...order].sort((a, b) => a - b));
+		for (const marker of ["[LEARNER]", "[TUTOR]", "[SYSTEM NOTE]", "TRANSCRIPT", "- [done] A (a1)"]) assert.ok(prompt.includes(marker), marker);
+	});
+
 	it("planTreeToText: statuses derive from the transcript; edges render; empty tree → null", () => {
 		assert.equal(planTreeToText(undefined, []), null);
 		const tree = {

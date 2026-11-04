@@ -119,9 +119,9 @@
 	   SYSTEM stacks — a fourth font the app never chose — and streamdown's
 	   code-block chrome + mermaid-error + demo-card all use them. */
 	--font-ui: var(--font-jetbrains), ui-monospace, SFMono-Regular, monospace;
-	--font-prose: var(--font-sans3), ui-sans-serif, system-ui, sans-serif;
+	--font-prose: var(--font-sans3), "Noto Sans Arabic", "Tajawal", "Cairo", ui-sans-serif, system-ui, sans-serif;
 	--font-mono: var(--font-jetbrains), ui-monospace, SFMono-Regular, monospace;
-	--font-sans: var(--font-sans3), ui-sans-serif, system-ui, sans-serif;
+	--font-sans: var(--font-sans3), "Noto Sans Arabic", "Tajawal", "Cairo", ui-sans-serif, system-ui, sans-serif;
 	/* The modular type ladder — each size carries its own line-height.
 	   Component sizes must pull from this ladder. (owner, typography
 	   round 4: the 10px rung is merged into 11 — one pixel apart was a
@@ -194,6 +194,81 @@ body {
 	line-height: var(--lh-prose-leading);
 }
 
+/* BiDi / RTL auto-detection for Arabic mixed with English — scoped to [dir="rtl"] */
+[dir="rtl"] body {
+	unicode-bidi: plaintext;
+	text-align: start;
+}
+
+[dir="rtl"] [dir="auto"], [dir="rtl"] .lh-prose, [dir="rtl"] [data-streamdown] {
+	text-align: start;
+}
+
+[dir="rtl"] .lh-prose :is(p, div, h1, h2, h3, h4, h5, h6) {
+	unicode-bidi: plaintext;
+	text-align: start;
+}
+
+[dir="rtl"] .lh-prose :is(code, a) {
+	unicode-bidi: isolate;
+}
+
+/* Code blocks: MUST ALWAYS be strictly LTR and left-aligned */
+[dir="rtl"] pre,
+[dir="rtl"] code,
+[dir="rtl"] [data-streamdown="code-block"],
+[dir="rtl"] [data-streamdown="code-block"] pre,
+[dir="rtl"] [data-streamdown="code-block"] code,
+[dir="rtl"] .shiki {
+	direction: ltr !important;
+	text-align: left !important;
+	unicode-bidi: isolate !important;
+}
+
+/* Inline code inside RTL text */
+[dir="rtl"] .lh-prose :not(pre) > code {
+	direction: ltr !important;
+	unicode-bidi: isolate !important;
+	display: inline-block;
+	vertical-align: baseline;
+}
+
+/* Blockquotes in RTL: vertical bar on the right side */
+[dir="rtl"] blockquote,
+[dir="rtl"] .lh-prose blockquote {
+	border-left: none !important;
+	border-right: 2px solid var(--border) !important;
+	padding-left: 0 !important;
+	padding-right: 1rem !important;
+	margin-right: 0 !important;
+	margin-left: 0 !important;
+}
+
+/* Table column separators in RTL: right border instead of left border */
+[dir="rtl"] [data-streamdown="table"] :where(th, td):not(:first-child) {
+	border-left: none;
+	border-right: 1px solid var(--border);
+}
+
+/* Mermaid SVG RTL & BiDi styling for Arabic */
+[dir="rtl"] [data-streamdown="mermaid"] svg, [dir="rtl"] .mermaid svg {
+	direction: rtl;
+}
+[dir="rtl"] [data-streamdown="mermaid"] svg text,
+[dir="rtl"] [data-streamdown="mermaid"] svg .nodeLabel,
+[dir="rtl"] [data-streamdown="mermaid"] svg .label,
+[dir="rtl"] [data-streamdown="mermaid"] svg foreignObject div,
+[dir="rtl"] [data-streamdown="mermaid"] svg foreignObject span,
+[dir="rtl"] .mermaid svg .nodeLabel {
+	direction: rtl !important;
+	unicode-bidi: plaintext !important;
+	text-align: center !important;
+}
+[dir="rtl"] [data-streamdown="mermaid"] svg .nodeLabel span:not([class*="node"]),
+[dir="rtl"] [data-streamdown="mermaid"] svg .nodeLabel code {
+	unicode-bidi: isolate !important;
+}
+
 /* Session-name weight (owner, fix wave round 3): with the serif toggle
    OFF, --font-title resolves to the prose font — Source Sans 3 is loaded
    as a VARIABLE font, and without an explicit weight the titles render at
@@ -221,6 +296,26 @@ body {
    layer; :where keeps specificity zero. */
 .lh-prose :where(ul, ol) {
 	padding-left: 1.5rem;
+}
+[dir="rtl"] .lh-prose :where(ul, ol) {
+	padding-left: 0;
+	padding-right: 1.5rem;
+}
+
+/* Task lists (checkboxes): remove redundant bullet marker */
+.lh-prose li:has(> input[type="checkbox"]),
+.lh-prose li:has(> p > input[type="checkbox"]),
+.lh-prose li:has(span[data-streamdown]) {
+	list-style-position: outside;
+}
+.lh-prose li:has(> input[type="checkbox"]),
+.lh-prose li:has(> p > input[type="checkbox"]) {
+	list-style-type: none;
+}
+[dir="rtl"] .lh-prose li:has(> input[type="checkbox"]),
+[dir="rtl"] .lh-prose li:has(> p > input[type="checkbox"]) {
+	padding-right: 0;
+	margin-right: -1rem;
 }
 
 /* Markdown headings render at the font's BLACK weight (owner ask,
@@ -317,6 +412,42 @@ body {
 .katex-display {
 	overflow-x: auto;
 	overflow-y: hidden;
+}
+
+/* ============================================================
+ * KaTeX BiDi / RTL Isolation
+ * When the page is in Arabic (dir="rtl"), KaTeX formulas must be
+ * strictly LTR-isolated so matrices, delimiters, signs, and sub/superscripts
+ * never get flipped or scrambled by the Unicode BiDi algorithm.
+ * ============================================================ */
+[dir="rtl"] .katex,
+[dir="rtl"] .katex-display,
+[dir="rtl"] [data-testid="md-math"],
+[dir="rtl"] .katex-display > .katex {
+	direction: ltr !important;
+	unicode-bidi: isolate !important;
+	text-align: center !important;
+}
+
+[dir="rtl"] .katex-html {
+	direction: ltr !important;
+	unicode-bidi: isolate !important;
+}
+
+/* Inline math inside RTL text */
+[dir="rtl"] p .katex,
+[dir="rtl"] span .katex,
+[dir="rtl"] li .katex {
+	display: inline-block;
+	vertical-align: middle;
+}
+
+/* Stats bar numbers & tokens LTR isolation */
+[dir="rtl"] [data-testid="stats-context"],
+[dir="rtl"] [data-testid="stats-cost"],
+[dir="rtl"] [data-testid="stats-summary"] {
+	direction: ltr !important;
+	unicode-bidi: isolate !important;
 }
 
 /* ============================================================
@@ -551,9 +682,22 @@ body {
 .lh-electron .lh-wco-gutter {
 	padding-right: calc(0.75rem + var(--lh-wco-right, 0px));
 }
+[dir="rtl"] .lh-wco-gutter,
+[dir="rtl"] .lh-electron .lh-wco-gutter {
+	padding-right: 0.75rem;
+	padding-left: max(4.5rem, calc(0.75rem + var(--lh-wco-right, 0px)));
+}
 .lh-electron .lh-wco-floating {
 	right: calc(0.5rem + var(--lh-wco-right, 0px));
 	max-width: max(0px, calc(100% - 5.5rem - var(--lh-wco-right, 0px)));
+}
+
+[dir="rtl"] .lh-electron .lh-wco-floating,
+[dir="rtl"] .lh-wco-floating {
+	right: auto !important;
+	left: max(5rem, calc(0.5rem + var(--lh-wco-right, 0px)));
+	max-width: max(0px, calc(100% - 6.5rem - var(--lh-wco-right, 0px)));
+	align-items: flex-start;
 }
 
 /* --font-title deliberately NOT @theme inline (see comment above): the

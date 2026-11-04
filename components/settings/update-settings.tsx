@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { BrailleSpinner } from "@/components/braille-spinner";
+import { useLanguage, useT } from "@/components/i18n";
 import { SettingsRow, Toggle } from "./controls.tsx";
 
 /** Observational snapshot from electron/main.cjs; never updater permission. */
@@ -81,16 +82,21 @@ export function UpdateSettings({
 		void window.lh?.checkForUpdates?.().catch(() => setCheckFailed(true));
 	};
 
+	const t = useT();
+	const language = useLanguage();
+	const versionLabel = language === "ar" ? `الإصدار ${version || "غير معروف"}` : `Version ${version || "unknown"}`;
+	const releaseNotesLabel = language === "ar" ? "ملاحظات الإصدار" : "Release notes";
+
 	return (
 		<>
 			<SettingsRow
-				label={`Version ${version || "unknown"}`}
+				label={versionLabel}
 				testid="row-version"
 				hint={
 					<>
 						{status && <span className="block" role="status" data-testid="update-status">{status}</span>}
-						{active && <span className="block">{MANUAL_UPDATE_HINT}</span>}
-						{releaseNotes && <a href={releaseNotes} target="_blank" rel="noopener noreferrer" className="underline-offset-2 hover:text-foreground hover:underline" data-testid="release-notes">Release notes</a>}
+						{active && <span className="block">{t("settings.general.manualUpdate.hint")}</span>}
+						{releaseNotes && <a href={releaseNotes} target="_blank" rel="noopener noreferrer" className="underline-offset-2 hover:text-foreground hover:underline" data-testid="release-notes">{releaseNotesLabel}</a>}
 					</>
 				}
 			>
@@ -104,7 +110,7 @@ export function UpdateSettings({
 				))}
 			</SettingsRow>
 			{active && (
-				<SettingsRow label="Automatic updates" hint={AUTO_UPDATE_HINT} testid="row-auto-update">
+				<SettingsRow label={t("settings.general.autoUpdate.label")} hint={t("settings.general.autoUpdate.subhint")} testid="row-auto-update">
 					<Toggle checked={autoUpdate} label="auto update" onChange={onAutoUpdateChange} />
 				</SettingsRow>
 			)}

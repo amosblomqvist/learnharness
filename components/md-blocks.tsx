@@ -42,6 +42,7 @@ import { MermaidError } from "@/components/mermaid-error";
 import { blurAfterPointerClick } from "@/components/focus-hygiene";
 import { chartSize, useSessionMermaid } from "@/components/session-overlay";
 import { Hint } from "@/components/ui/hint";
+import { useT } from "@/components/i18n";
 
 // ─── The one affordance: the hover-reveal corner copy ────────────────────────
 
@@ -139,6 +140,7 @@ export function codeSource(children: ReactNode): string {
  *  still streaming (the trailing open fence), a quiet skeleton instead of a
  *  doomed parse. */
 function MermaidInline({ chart }: { chart: string }) {
+	const t = useT();
 	const [svg, setSvg] = useState<string | null>(null);
 	const [error, setError] = useState<string | null>(null);
 	const [attempt, setAttempt] = useState(0);
@@ -199,17 +201,17 @@ function MermaidInline({ chart }: { chart: string }) {
 				dangerouslySetInnerHTML={{ __html: svg ?? "" }}
 			/>
 			<div className="absolute top-0 right-0 flex items-start gap-0.5">
-				<CopyCorner getText={() => chart} label="Copy diagram source" />
+				<CopyCorner getText={() => chart} label={t("artifacts.md.copyDiagram")} />
 				{overlay && (
 					<Hint
 					// Full-screen overlay copy (tooltip wave) — "session view" was
 					// internal direction-speak for the same thing.
-					label="Open full-screen"
+					label={t("artifacts.md.openFullScreen")}
 					side="bottom"
 				>
 <button
 						type="button"
-						aria-label="Expand diagram"
+						aria-label={t("artifacts.md.expandDiagram")}
 						data-testid="md-mermaid-expand"
 												className="flex size-6 items-center justify-center rounded-md text-muted-foreground/70 opacity-0 transition-opacity hover:bg-accent hover:text-foreground group-hover/md:opacity-100"
 						onClick={(e) => {
@@ -234,6 +236,7 @@ function MermaidInline({ chart }: { chart: string }) {
  *  mounts. The container/look is CSS-melted in globals.css
  *  (data-streamdown="code-block"…). */
 export function MarkdownCode(props: ComponentProps<"code"> & ExtraProps) {
+	const t = useT();
 	const incomplete = useIsCodeFenceIncomplete();
 	const { children, className, node, ...rest } = props;
 
@@ -256,8 +259,8 @@ export function MarkdownCode(props: ComponentProps<"code"> & ExtraProps) {
 	const startLine = startMatch ? Number.parseInt(startMatch[1]!, 10) : undefined;
 	const lineNumbers = !/\bnoLineNumbers\b/.test(meta);
 	return (
-		<div className="group/md relative" data-testid="md-code">
-			<CopyCorner className="absolute top-1.5 right-2 z-10" getText={() => source} label="Copy code" />
+		<div className="group/md relative" data-testid="md-code" dir="ltr">
+			<CopyCorner className="absolute top-1.5 right-2 z-10" getText={() => source} label={t("artifacts.md.copyCode")} />
 			<CodeBlock
 				code={source}
 				language={language}
@@ -348,7 +351,7 @@ export function MarkdownBlockquote(props: ComponentProps<"blockquote"> & ExtraPr
 		return (
 			<blockquote
 				{...rest}
-				className="my-4 border-l-4 border-muted-foreground/30 pl-4 text-muted-foreground italic"
+				className="my-4 border-l-4 rtl:border-l-0 rtl:border-r-4 border-muted-foreground/30 pl-4 rtl:pl-0 rtl:pr-4 text-muted-foreground italic text-start"
 				data-streamdown="blockquote"
 			>
 				{children}
@@ -374,6 +377,7 @@ export function MarkdownBlockquote(props: ComponentProps<"blockquote"> & ExtraPr
  *  horizontal-scroller for wide ones, with the corner copy. The copy
  *  serializes the REAL DOM table (the library's own extractor → Markdown). */
 export function MarkdownTable(props: ComponentProps<"table"> & ExtraProps) {
+	const t = useT();
 	const { children, node, ...rest } = props;
 	const ref = useRef<HTMLTableElement>(null);
 	return (
@@ -384,8 +388,8 @@ export function MarkdownTable(props: ComponentProps<"table"> & ExtraProps) {
 				// offset, so it straddled the top outline). 4px inset, z above the
 				// cells it hovers over; the scroll container stays under it (the
 				// corner is fixed to the wrapper, not the scrolling table).
-				className="absolute top-1 right-1 z-10"
-				label="Copy table"
+				className="absolute top-1 right-1 z-10 rtl:right-auto rtl:left-1"
+				label={t("artifacts.md.copyTable")}
 				getText={() => (ref.current ? tableDataToMarkdown(extractTableDataFromElement(ref.current)) : "")}
 			/>
 			<div className="overflow-x-auto">
@@ -414,6 +418,7 @@ export function MarkdownTable(props: ComponentProps<"table"> & ExtraProps) {
  *  in the MathML <annotation>; read from the DOM on click, no re-parse).
  *  Every other span passes through untouched. */
 export function MathDisplay(props: ComponentProps<"span"> & ExtraProps) {
+	const t = useT();
 	const { children, className, node, ...rest } = props;
 	const ref = useRef<HTMLSpanElement>(null);
 	if (!className?.includes("katex-display")) {
@@ -433,8 +438,8 @@ export function MathDisplay(props: ComponentProps<"span"> & ExtraProps) {
 		// real box; z-10 keeps it above the equation spans it overlays.
 		<span className="group/md relative block z-0" data-testid="md-math">
 			<CopyCorner
-				className="absolute top-0 right-0 z-10"
-				label="Copy equation source"
+				className="absolute top-0 right-0 z-10 rtl:right-auto rtl:left-0"
+				label={t("artifacts.md.copyEquation")}
 				getText={() => ref.current?.querySelector("annotation")?.textContent ?? ""}
 			/>
 			<span ref={ref} className={className} {...rest}>
@@ -463,10 +468,28 @@ export function MarkdownStrong(props: ComponentProps<"strong"> & ExtraProps) {
 	);
 }
 
+/** Markdown images rendered with <span> wrapper rather than <div> to prevent
+ *  DOM hydration nesting violations (<div> inside <p>). */
+export function MarkdownImage(props: ComponentProps<"img"> & ExtraProps) {
+	const { src, alt, className, node, ...rest } = props;
+	return (
+		<span className="group/img relative my-4 inline-block max-w-full" data-streamdown="image-wrapper">
+			<img
+				src={src}
+				alt={alt ?? ""}
+				className={cn("max-h-96 w-auto max-w-full rounded-lg object-contain", className)}
+				loading="lazy"
+				{...rest}
+			/>
+		</span>
+	);
+}
+
 export const mdComponents = {
 	code: MarkdownCode,
 	table: MarkdownTable,
 	span: MathDisplay,
 	strong: MarkdownStrong,
 	blockquote: MarkdownBlockquote,
+	img: MarkdownImage,
 };

@@ -42,6 +42,11 @@ describe("streamingToolActivity (the turn-activity label)", () => {
 		);
 	});
 
+	it("labels follow the app language", () => {
+		assert.equal(streamingToolActivity([msg("assistant", [toolPart("grep", "input-streaming")])], "es"), "Buscando en el contenido de los archivos…");
+		assert.equal(streamingToolActivity([msg("assistant", [toolPart("quiz", "input-streaming")])], "es"), "Escribiendo una pregunta…");
+	});
+
 	it("no activity once the call settles or the turn ends", () => {
 		// output-available = done executing → no shimmer (the transcript
 		// shows the settled card instead).
