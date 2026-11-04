@@ -110,8 +110,11 @@ submission conventions above.
 While the drawing pad is open, the dock's keys (Enter, arrows, Space) are
 inactive underneath it.
 
-- **Esc** closes the pad and keeps the drawing, the same as **Done**.
-- **Mod+Z** undoes; **Mod+Shift+Z** or **Ctrl+Y** redoes.
+- **Esc** closes the pad and keeps the drawing, the same as **Done**. With a
+  selection, the first **Esc** clears the selection instead.
+- **Delete** or **Backspace** removes the selected strokes.
+- **Mod+Z** undoes; **Mod+Shift+Z** or **Ctrl+Y** redoes. Undo and redo clear
+  the selection.
 
 ## Chains view
 

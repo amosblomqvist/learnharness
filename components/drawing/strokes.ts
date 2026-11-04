@@ -126,6 +126,149 @@ export function endsGesture(gesturePointerId: number, e: { pointerId: number; po
 	return e.pointerId === gesturePointerId || e.pointerType !== "touch";
 }
 
+// ─── pen side buttons (owner design, 2026-11-04) ───────────────────────────
+
+export type PadTool = "pen" | "eraser" | "select";
+export type ContactMode = "draw" | "erase" | "select";
+
+/** Pointer Events button bits as the owner's tablet reports them
+ *  (OpenTabletDriver Artist Mode via XWayland, probe 2026-11-04): the
+ *  LOWER side button arrives as the middle button, the UPPER as the right
+ *  (barrel) button, the eraser end as bit 32. */
+export const LOWER_BUTTON = 4;
+export const UPPER_BUTTON = 2;
+const ERASER_END = 32;
+
+/** What a new tip contact does. Only a PEN's held side buttons override
+ *  the toolbar: lower → erase, upper → lasso select (a mouse's middle and
+ *  right buttons never draw). */
+export function contactMode(e: { buttons: number; pointerType: string }, tool: PadTool): ContactMode {
+	if (e.pointerType === "pen") {
+		if (e.buttons & ERASER_END) return "erase";
+		if (e.buttons & LOWER_BUTTON) return "erase";
+		if (e.buttons & UPPER_BUTTON) return "select";
+	}
+	return tool === "pen" ? "draw" : tool === "eraser" ? "erase" : "select";
+}
+
+/** Did the tip (or eraser end) just touch? A pen holding a side button
+ *  first reports its contact as a MOVE adding bit 1 (4 → 5), not a down. */
+export function contactStarts(prevButtons: number, buttons: number): boolean {
+	return (buttons & CONTACT_BUTTONS) !== 0 && (prevButtons & CONTACT_BUTTONS) === 0;
+}
+
+/** Did the tip just lift while a side button stays held (5 → 4)? */
+export function contactEnds(prevButtons: number, buttons: number): boolean {
+	return (prevButtons & CONTACT_BUTTONS) !== 0 && (buttons & CONTACT_BUTTONS) === 0;
+}
+
+// ─── lasso selection ───────────────────────────────────────────────────────
+
+export interface Box {
+	x: number;
+	y: number;
+	w: number;
+	h: number;
+}
+export type Corner = "nw" | "ne" | "sw" | "se";
+
+/** Air around the ink inside the selection box, the corner handles' reach,
+ *  and the smallest a resize may shrink a selection to. */
+export const SELECTION_PAD = 6;
+export const HANDLE_REACH = 12;
+export const MIN_SELECTION_SIDE = 12;
+
+/** Ray casting; points on the boundary count either way. */
+export function pointInPolygon(x: number, y: number, poly: readonly { x: number; y: number }[]): boolean {
+	let inside = false;
+	for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+		const a = poly[i]!;
+		const b = poly[j]!;
+		if (a.y > y !== b.y > y && x < ((b.x - a.x) * (y - a.y)) / (b.y - a.y) + a.x) inside = !inside;
+	}
+	return inside;
+}
+
+/** A lasso takes a stroke when at least half its points are inside the loop. */
+export function lassoSelects(stroke: DrawingStroke, loop: readonly { x: number; y: number }[]): boolean {
+	if (loop.length < 3 || stroke.points.length === 0) return false;
+	let inside = 0;
+	for (const pt of stroke.points) if (pointInPolygon(pt.x, pt.y, loop)) inside++;
+	return inside * 2 >= stroke.points.length;
+}
+
+/** The selection box: the ink's bounds plus a little air; null when empty. */
+export function selectionBox(strokes: readonly DrawingStroke[]): Box | null {
+	const b = inkBounds(strokes);
+	if (!b) return null;
+	return { x: b.minX - SELECTION_PAD, y: b.minY - SELECTION_PAD, w: b.maxX - b.minX + SELECTION_PAD * 2, h: b.maxY - b.minY + SELECTION_PAD * 2 };
+}
+
+export function cornerPoint(box: Box, corner: Corner): { x: number; y: number } {
+	return { x: corner.endsWith("w") ? box.x : box.x + box.w, y: corner.startsWith("n") ? box.y : box.y + box.h };
+}
+
+export function oppositeCorner(corner: Corner): Corner {
+	return ({ nw: "se", ne: "sw", sw: "ne", se: "nw" } as const)[corner];
+}
+
+/** Which corner handle (if any) a contact lands on. */
+export function handleAt(box: Box, x: number, y: number, reach = HANDLE_REACH): Corner | null {
+	for (const c of ["nw", "ne", "sw", "se"] as const) {
+		const p = cornerPoint(box, c);
+		if (Math.abs(x - p.x) <= reach && Math.abs(y - p.y) <= reach) return c;
+	}
+	return null;
+}
+
+export function insideBox(box: Box, x: number, y: number): boolean {
+	return x >= box.x && x <= box.x + box.w && y >= box.y && y <= box.y + box.h;
+}
+
+/** Moved copies — pressure (and so line width) untouched. */
+export function translateStrokes(strokes: readonly DrawingStroke[], dx: number, dy: number): DrawingStroke[] {
+	return strokes.map((s) => ({ ink: s.ink, points: s.points.map((p) => ({ x: p.x + dx, y: p.y + dy, p: p.p })) }));
+}
+
+/** Scaled copies about an anchor — positions only, so line thickness stays
+ *  as drawn (owner, 2026-11-04). */
+export function scaleStrokes(strokes: readonly DrawingStroke[], anchor: { x: number; y: number }, s: number): DrawingStroke[] {
+	return strokes.map((st) => ({
+		ink: st.ink,
+		points: st.points.map((p) => ({ x: anchor.x + (p.x - anchor.x) * s, y: anchor.y + (p.y - anchor.y) * s, p: p.p })),
+	}));
+}
+
+/** Where a resize pivots: the far corner of the selected POINTS (widths
+ *  excluded) — widths never scale, so the box's far corner stays put. */
+export function resizeAnchor(strokes: readonly DrawingStroke[], corner: Corner): { x: number; y: number } {
+	let minX = Infinity;
+	let minY = Infinity;
+	let maxX = -Infinity;
+	let maxY = -Infinity;
+	for (const st of strokes) {
+		for (const p of st.points) {
+			minX = Math.min(minX, p.x);
+			minY = Math.min(minY, p.y);
+			maxX = Math.max(maxX, p.x);
+			maxY = Math.max(maxY, p.y);
+		}
+	}
+	const far = oppositeCorner(corner);
+	return { x: far.endsWith("w") ? minX : maxX, y: far.startsWith("n") ? minY : maxY };
+}
+
+/** The proportional scale for dragging `corner` of `box` to (x, y),
+ *  anchored at the opposite corner; never below the minimum side. */
+export function resizeFactor(box: Box, corner: Corner, x: number, y: number): number {
+	const a = cornerPoint(box, oppositeCorner(corner));
+	const c = cornerPoint(box, corner);
+	const rx = (x - a.x) / (c.x - a.x || 1);
+	const ry = (y - a.y) / (c.y - a.y || 1);
+	const min = MIN_SELECTION_SIDE / Math.max(1, Math.min(box.w, box.h));
+	return Math.max(min, Math.max(rx, ry));
+}
+
 // ─── undo history ──────────────────────────────────────────────────────────
 
 /** Snapshot history: strokes are immutable, so a step is just an array. */

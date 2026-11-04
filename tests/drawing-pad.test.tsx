@@ -11,9 +11,22 @@ import {
 	EXPORT_MARGIN,
 	EXPORT_MAX_SIDE,
 	commit,
+	LOWER_BUTTON,
+	UPPER_BUTTON,
 	backfillStartPressure,
+	contactEnds,
+	contactMode,
+	contactStarts,
 	continuesGesture,
 	endsGesture,
+	handleAt,
+	insideBox,
+	lassoSelects,
+	pointInPolygon,
+	resizeFactor,
+	scaleStrokes,
+	selectionBox,
+	translateStrokes,
 	exportGeometry,
 	historyOf,
 	inkBounds,
@@ -118,6 +131,79 @@ describe("stroke model", () => {
 		h = commit(h, []);
 		assert.equal(h.future.length, 0, "a fresh edit drops the redo branch");
 		assert.equal(undo(historyOf([])).present.length, 0, "undo on an empty history is a no-op");
+	});
+});
+
+describe("pen side buttons (the owner's tablet, 2026-11-04)", () => {
+	it("lower button held erases, upper held selects, eraser end erases — pens only", () => {
+		const pen = (buttons: number) => ({ pointerType: "pen", buttons });
+		assert.equal(contactMode(pen(1 | LOWER_BUTTON), "pen"), "erase", "lower (middle) + tip");
+		assert.equal(contactMode(pen(1 | UPPER_BUTTON), "pen"), "select", "upper (barrel) + tip");
+		assert.equal(contactMode(pen(32), "pen"), "erase", "eraser end");
+		assert.equal(contactMode(pen(1), "pen"), "draw", "tip alone follows the toolbar");
+		assert.equal(contactMode(pen(1), "eraser"), "erase");
+		assert.equal(contactMode(pen(1), "select"), "select");
+		assert.equal(contactMode(pen(1 | UPPER_BUTTON), "eraser"), "select", "a held button beats the toolbar");
+		const mouse = (buttons: number) => ({ pointerType: "mouse", buttons });
+		assert.equal(contactMode(mouse(1 | LOWER_BUTTON), "pen"), "draw", "a mouse's middle button never erases");
+		assert.equal(contactMode(mouse(1 | UPPER_BUTTON), "pen"), "draw", "a mouse's right button never selects");
+	});
+
+	it("contact follows the tip bit through a held button (the probe's 4 → 5 → 4)", () => {
+		assert.ok(!contactStarts(0, LOWER_BUTTON), "pressing the side button while hovering is not contact");
+		assert.ok(contactStarts(LOWER_BUTTON, LOWER_BUTTON | 1), "the tip touching under a held button is");
+		assert.ok(!contactStarts(LOWER_BUTTON | 1, LOWER_BUTTON | 1), "continuing contact is not a new one");
+		assert.ok(contactEnds(LOWER_BUTTON | 1, LOWER_BUTTON), "lifting the tip ends it while the button stays held");
+		assert.ok(!contactEnds(LOWER_BUTTON, 0), "releasing the button after lifting ends nothing");
+		assert.ok(contactStarts(0, 1), "a plain tip press");
+		assert.ok(contactStarts(0, 32), "the eraser end touching");
+	});
+});
+
+describe("lasso selection", () => {
+	const square = [{ x: 0, y: 0 }, { x: 100, y: 0 }, { x: 100, y: 100 }, { x: 0, y: 100 }];
+
+	it("point in polygon", () => {
+		assert.ok(pointInPolygon(50, 50, square));
+		assert.ok(!pointInPolygon(150, 50, square));
+		const concave = [{ x: 0, y: 0 }, { x: 100, y: 0 }, { x: 100, y: 100 }, { x: 50, y: 40 }, { x: 0, y: 100 }];
+		assert.ok(!pointInPolygon(50, 80, concave), "the notch of a concave loop is outside");
+	});
+
+	it("takes a stroke when at least half of it is inside the loop", () => {
+		assert.ok(lassoSelects(line(10, 10, 90, 90), square), "fully inside");
+		const half = { ink: "ink" as const, points: [{ x: 50, y: 50, p: 0.5 }, { x: 150, y: 50, p: 0.5 }] };
+		assert.ok(lassoSelects(half, square), "half inside counts");
+		const mostlyOut = { ink: "ink" as const, points: [{ x: 50, y: 50, p: 0.5 }, { x: 150, y: 50, p: 0.5 }, { x: 160, y: 50, p: 0.5 }] };
+		assert.ok(!lassoSelects(mostlyOut, square));
+		assert.ok(!lassoSelects(line(10, 10, 90, 90), square.slice(0, 2)), "a loop needs three points");
+	});
+
+	it("the box pads the ink; handles and inside hit-test against it", () => {
+		const box = selectionBox([line(100, 100, 200, 150)])!;
+		assert.ok(box.x < 100 && box.y < 100 && box.x + box.w > 200 && box.y + box.h > 150);
+		assert.equal(handleAt(box, box.x + 2, box.y - 3), "nw");
+		assert.equal(handleAt(box, box.x + box.w, box.y + box.h), "se");
+		assert.equal(handleAt(box, box.x + box.w / 2, box.y + box.h / 2), null);
+		assert.ok(insideBox(box, 150, 125));
+		assert.ok(!insideBox(box, 300, 125));
+		assert.equal(selectionBox([]), null);
+	});
+
+	it("move and resize transform positions only — pressure (line thickness) is kept", () => {
+		const s = line(10, 10, 20, 30, 0.8);
+		const [moved] = translateStrokes([s], 5, -5);
+		assert.deepEqual(moved!.points, [{ x: 15, y: 5, p: 0.8 }, { x: 25, y: 25, p: 0.8 }]);
+		const [scaled] = scaleStrokes([s], { x: 10, y: 10 }, 2);
+		assert.deepEqual(scaled!.points, [{ x: 10, y: 10, p: 0.8 }, { x: 30, y: 50, p: 0.8 }], "anchored, doubled, same pressure");
+		assert.notEqual(moved, s, "copies, never mutations (undo keeps the original)");
+	});
+
+	it("resizing is proportional from the dragged corner, with a floor", () => {
+		const box = { x: 0, y: 0, w: 100, h: 50 };
+		assert.equal(resizeFactor(box, "se", 200, 60), 2, "the larger of the two axis ratios wins");
+		assert.equal(resizeFactor(box, "nw", 50, 25), 0.5, "dragging the far corner toward the anchor shrinks");
+		assert.ok(resizeFactor(box, "se", -500, -500) > 0, "dragging past the anchor never flips or vanishes");
 	});
 });
 
