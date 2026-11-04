@@ -323,14 +323,20 @@ body {
    background #141414 and read as raised — owner note, chrome-melt tweaks
    2026-09-19) plus a subtle hairline outline. (md-blocks renders its own
    hover copy corner.) */
+/* Inline code shares only the block surface, keeping its inline geometry. */
+[data-streamdown="inline-code"],
 [data-streamdown="code-block"] {
 	border: 1px solid var(--border);
 	background: color-mix(in oklab, var(--background) 86%, black);
+}
+[data-streamdown="code-block"] {
 	border-radius: 0.75rem;
 	padding: 0.375rem;
 }
 /* The same well on the light page, gentler: 14% black over #f5f5f3 reads as
-   a heavy gray slab, 4% keeps it just darker than the page. */
+   a heavy gray slab, 4% keeps it just darker than the page. Inline code
+   shares the well, so it takes the gentler tint too. */
+.light [data-streamdown="inline-code"],
 .light [data-streamdown="code-block"] {
 	background: color-mix(in oklab, var(--background) 96%, black);
 }

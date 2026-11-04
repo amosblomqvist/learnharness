@@ -1,188 +1,64 @@
 # Claude Code
 
-LearnHarness can run its agents through an externally installed **Claude Code CLI**.
-This is a separate provider from the Anthropic API and the built-in subscription
-connections. Claude Code owns authentication, routing, model access, and billing;
-LearnHarness does **not** guarantee subscription-only use.
+LearnHarness can use an externally installed **Claude Code CLI** as a model provider. This is separate from the Anthropic API and built-in subscription connections. The CLI owns authentication, routing, model access, and billing; LearnHarness does **not** guarantee subscription-only use.
 
-## User setup
+## Set up
 
-1. [Install and authenticate Claude Code](https://code.claude.com/docs/en/setup)
-   outside LearnHarness, using a terminal on **the machine running the LearnHarness
-   server**, under its operating-system user. A CLI installed only on a remote
-   browser's computer is not sufficient. No always-running CLI process is needed.
-2. Make the executable discoverable to that server process. LearnHarness searches
-   its `PATH` and common user/native installation locations. On Windows it requires
-   a directly runnable `claude.exe`; an npm installation exposing only `claude.cmd`
-   does not qualify. Desktop launch environments can differ from terminal environments.
-3. Open **Settings → Providers → External CLI → Claude Code** and switch it on.
-   This is an app-wide, persisted opt-in, **off by default**, even when the CLI is
-   installed. Enabling reveals the installation/version result and **Check again**.
-4. Select a Claude Code model in the model controls (`opus`, `sonnet`, or `haiku`).
-   These are CLI aliases, not pinned underlying model versions.
+1. [Install and authenticate Claude Code](https://code.claude.com/docs/en/setup) outside LearnHarness, on **the machine running the LearnHarness server**, under its OS user. No always-running CLI process is needed.
+2. Make the executable discoverable in that server's `PATH` or a common user/native installation location. On Windows, a directly runnable `claude.exe` is required; `claude.cmd` alone does not qualify. Desktop launch environments may differ from terminals.
+3. Enable **Settings → Providers → External CLI → Claude Code**. This app-wide opt-in is **off by default**. Use **Check again** to refresh installation status.
+4. Select a Claude Code model: `opus`, `sonnet`, or `haiku`. These are CLI aliases, not pinned underlying versions.
 
-The current required minimum is **2.1.259**, defined in the
-[shared contract](../src/core/contracts/claude-code.ts). A check reports **Not found**,
-**meets minimum**, **update required**, or **Version could not be checked**. It runs
-only `--version`, not an authentication check or model request. Meeting the minimum
-proves neither authentication nor model access, quota, billing method, or complete
-protocol compatibility. Each fresh model process also checks the version and
-refuses an old or unverifiable installation.
+The minimum version is **2.1.259** ([contract](../src/core/contracts/claude-code.ts)). The check runs only `--version`, not authentication or inference. Fresh model processes check again and refuse old/unverifiable versions. Passing proves neither account access, quota, billing method, nor complete protocol compatibility.
 
-Install, update, sign in, and change the CLI's account/configuration externally.
-There is no LearnHarness Claude Code sign-in, reauthentication, or account-status
-control. Switching the opt-in off blocks future LearnHarness requests using this
-provider and preserves saved model selections; it does not interrupt an already
-admitted turn or sign out the CLI. Use the normal cancellation control to stop
-running work.
+Install, update, sign in, and change CLI accounts externally. LearnHarness has no CLI account-status or reauthentication control. Disabling the opt-in blocks future requests without rewriting model selections or signing out the CLI; it does not interrupt an already admitted turn. Use normal cancellation for running work.
 
-## Maintainer implementation
+## What goes through the CLI
 
-### Engine and tool bridge
+LearnHarness keeps control of its agent loop, tools, questions, saved history, and jobs. It supplies prompts, relevant history, and tool results to the CLI's configured service.
 
-[The shared engine factory](../src/agent/models.ts) registers
-[`createClaudeCodeProvider`](../src/agent/claude-code/provider.ts) in Pi's model
-collection. The provider's `claude-code-cli` stream adapter converts CLI stream-JSON
-into native Pi assistant events. Model slots and background-role resolution use
-the same engine seam as other providers; LearnHarness still owns the agent loop,
-tool execution, questions, persistence, and jobs. The availability gate requires
-opt-in plus a discoverable executable, not a successful authentication probe.
+The launcher removes credentials injected **only by LearnHarness's key store**. Original launch-environment credentials, native CLI authentication, and routing remain available and may affect billing. LearnHarness does not copy its saved API keys into this provider.
 
-For each fresh process, [the adapter](../src/agent/claude-code/stream.ts) exposes the
-current LearnHarness tool schemas through a temporary
-[Streamable HTTP MCP bridge](../src/agent/claude-code/tool-bridge.ts). It binds only
-`127.0.0.1` on an ephemeral port and requires a random per-bridge bearer token.
-CLI built-in tools are disabled; the strict MCP configuration permits the declared
-`mcp__learnharness__…` tools instead. Tool results return through the held MCP call,
-including text, images, and error status.
+Each child runs without a shell in an empty temporary working directory. LearnHarness disables built-in tools, hooks, slash commands, and permission prompts (CLI session persistence too, for callers without a session ID; see below), and exposes its own declared tools through a token-protected loopback MCP bridge. Streamed tool intent is insufficient: execution requires an authenticated MCP request whose unique identity, name, and arguments match the stream. There is no stdout-only fallback.
 
-**Streamed tool intent alone never authorizes execution.** An authenticated MCP
-request must carry a unique `claudecode/toolUseId` matching the streamed ID, tool
-name, and arguments. Missing/reused identities, undeclared tools, mismatches, and
-CLI output that advances past unresolved calls fail closed. This is a required
-compatibility seam, not an official stability guarantee for that CLI metadata.
+These are integration boundaries, **not an OS sandbox or a provider-policy certification**. User settings/authentication remain available. Managed settings still take precedence where the CLI defines them. Bounded CLI stderr is logged when the process closes, so server logs can contain CLI diagnostics.
 
-### Credentials and process boundaries
+### Instruction loading
 
-[Environment provenance](../src/core/auth-env.ts) removes credentials reflected
-into `process.env` **only by LearnHarness's key store** before launching the CLI
-or its version probe. The original launch environment, the user's `HOME`, and
-native CLI authentication/routing remain available. Thus an existing environment
-API key or native CLI configuration can affect billing. LearnHarness neither
-copies its saved API keys into this provider nor enforces a subscription-only
-account. Prompts, relevant history, and tool results go through the CLI's configured
-service.
+LearnHarness forces `CLAUDE_CODE_DISABLE_CLAUDE_MDS=1` in the child environment **and** inline settings, and pins `outputStyle: default`. User auth/routing settings otherwise remain available. The CLI's documented memory switch excludes user/project/managed-policy `CLAUDE.md` instructions, their imports/rules, and auto memory; it does not remove managed settings.
 
-Processes are spawned directly without a shell. Each has an empty temporary
-working directory; the system prompt and token-bearing MCP configuration are in
-a separate temporary directory, with files created in owner-only mode. Launch
-arguments select user settings only, disable hooks, slash commands and permission
-prompts, and restrict tools/MCP as above. CLI session persistence is disabled
-only for callers without a session ID (see below).
-These are integration boundaries, **not an OS sandbox, legal certification, or a
-blanket claim about provider-policy compliance**. User CLI settings and native
-authentication are intentionally retained. Provider terms and account limits still
-apply. CLI stderr is retained in a bounded buffer and logged on process close;
-server logs can therefore contain CLI diagnostic information.
+These controls depend on the CLI honoring them. Instruction isolation at the accepted minimum **2.1.259 has not been runtime verified**. Official documentation does not establish the switch's first supported version or exact startup evaluation order; managed settings can outrank inline settings. This is not a guarantee against every plugin instruction channel or CLI-added account context.
 
-### Ownership, reuse, and recovery
+Official references: [memory switch](https://code.claude.com/docs/en/env-vars#variables), [managed instruction files](https://code.claude.com/docs/en/memory#deploy-organization-wide-claude-md), [settings precedence](https://code.claude.com/docs/en/settings#settings-precedence), and [settings environment values](https://code.claude.com/docs/en/settings-reference#env).
 
-LearnHarness's persisted transcript is authoritative; a Claude Code saved session
-is only a cache of it. [Conversation agents](../src/agent/teacher-agent.ts) pass the
-existing chat ID as Pi's `sessionId`; [background subagent runs](../src/agent/subagents/pi-run.ts)
-get a fresh identity per invocation, stable across that run's tool turns.
+## Questions, reuse, and cancellation
 
-A child normally exits after its final response. It is retained only while
-LearnHarness tools are waiting for results, including a learner question. A held
-child can continue only for the same stream owner and nonempty session identity,
-matching tool-result IDs/names, the expected history extension, and unchanged
-model, effort, system prompt, tools, and child environment. Colliding tool IDs in
-two chats or runs do not grant cross-session reuse. A direct caller without a
-session ID can run, but never retains a reusable child.
+The persisted LearnHarness transcript is authoritative; a CLI saved session is only a cache of it. A child normally exits after its final response. It can stay alive while tools await results, including a learner question, and resume only for the same owner/session and compatible history, tools, model, prompt, effort, and environment.
 
-Callers with a session ID also get a CLI session per chat
-([registry](../src/agent/claude-code/cli-sessions.ts)). The first launch passes
-`--session-id <uuid>`. When that turn ends with a clean `stop` or `length`, the
-registry records the UUID with hashes of the configuration and history. The next
-fresh launch for the same session ID passes `--resume <uuid>` and sends only the
-new learner messages, so the CLI carries native history, prompt cache and signed
-thinking. Resume requires an unchanged configuration, an unchanged history prefix
-(ignoring thinking blocks, which the CLI streams without text), and only learner
-messages after it. The registry is in memory and each launch claims its record,
-so an error, abort, held tool, restart or changed history makes the next call
-start a new CLI session. If `--resume` fails before any output reaches Pi (for
-example `No conversation found with session ID`), the same turn starts a new
-session instead. The CLI writes these session files under
-`~/.claude/projects/`; LearnHarness neither reads nor deletes them.
+Held children expire after **10 minutes** idle. The CLI MCP timeout is **30 minutes**, providing headroom rather than a general model deadline. If no eligible child remains after timeout/restart/configuration change, the next call starts fresh and replays active history as labelled user/assistant/tool text, preserving user/tool images. Replay is not exact native-role/thinking restoration. The first learner message is sent unlabelled as its own block, and a text block closes after each later learner message, so consecutive replays share block boundaries the prompt cache can match. Admitted compatibility failures are reported, not silently hidden by replay.
 
-A new CLI session, or any fresh launch without a session ID, replays the active
-LearnHarness history. [Replay](../src/agent/claude-code/transcript.ts) is labelled
-user/assistant/tool-call/tool-result text in a new user input, preserving
-user/tool-result images; it is not exact native-role/thinking history restoration.
-The first learner message is sent unlabelled as its own block, and a text block
-closes after each later learner message, so consecutive replays share block
-boundaries the prompt cache can match. The current system prompt and tool schemas
-are supplied separately. A compatibility failure after admission is reported on
-continuation, not silently hidden by replay. Apart from a failed resume, recovery
-is not a guarantee that arbitrary CLI failures will retry automatically.
+Callers with a session ID (conversation agents pass the chat ID; background subagent runs get a fresh one per invocation) also get a CLI session per chat ([registry](../src/agent/claude-code/cli-sessions.ts)). The first launch passes `--session-id <uuid>`. When that turn ends with a clean `stop` or `length`, the registry records the UUID with hashes of the configuration and history. The next fresh launch passes `--resume <uuid>` and sends only the new learner messages, so the CLI carries native history, prompt cache and signed thinking. Resume requires an unchanged configuration, an unchanged history prefix (ignoring thinking blocks) and only learner messages after it. The registry is in memory and each launch claims its record, so an error, abort, held tool, restart or changed history starts a new CLI session with a replay. If `--resume` fails before any output reaches Pi (for example `No conversation found with session ID`), the same turn starts a new session instead. The CLI writes these session files under `~/.claude/projects/`; LearnHarness neither reads nor deletes them.
 
-### Waiting, cancellation, and cleanup
+Abort terminates the child and active stream. Cancelling a queued tool request prevents later admission but cannot undo already admitted work. Normal exit, failure, abort, and idle expiry close bridge calls/listeners and remove temporary directories, escalating process termination if necessary. Cleanup is not guaranteed after an OS crash or forced server termination.
 
-A question stops later tool work until the learner answers. An answer arriving
-while the child is still eligible resolves its held MCP call. Held children have
-a **10-minute idle timeout**; a later answer instead starts fresh with the question
-and answer in replay. The CLI MCP timeout is **30 minutes**, intentionally longer
-than LearnHarness's idle retention. These are held-tool limits, not a general
-model-request deadline.
+## Usage and troubleshooting
 
-Request abort kills the child and ends the active stream as aborted. Cancellation
-of an individual queued MCP call prevents its later admission; it cannot undo
-work already admitted to Pi. Normal completion, abort, failure, and idle expiry
-terminate the child, escalating to `SIGKILL` after one second if necessary. On
-child close the adapter settles/closes bridge calls, releases the listener, and
-removes its temporary directories. Startup failures also clean allocated
-resources. This is normal-process cleanup, not a promise of cleanup after an OS
-crash or forced server termination.
+Tokens come from CLI stream usage, including cache counts. A best-effort local CLI query may report an effective context budget; it can be lower than the nominal model window because of CLI auto-compaction. Missing metadata leaves the maximum unknown, not guessed.
 
-## Usage, context, and troubleshooting
+Dollar costs remain **unpriced** and menus say **CLI billing**. LearnHarness does not import successful CLI result-line dollar totals; internal zero rates are placeholders, not free inference. Check actual charges and entitlements independently. See [accounting](compaction-accounting.md).
 
-Token counts come from CLI message stream usage (`input`, `output`, cache read,
-and cache creation), not transcript length or a LearnHarness tokenizer. The
-conversation meter uses the last qualifying completed response. A best-effort,
-local CLI control query requests summary context metadata; a valid reported
-budget supplies the denominator only for that session's matching model. It may
-be lower than a model's nominal window because of CLI auto-compaction. Missing or
-unsupported metadata does not block inference: the meter omits the maximum
-rather than using adapter placeholders. Compaction clears earlier measurements.
-See [compaction and accounting](compaction-accounting.md) for the shared rules.
-
-LearnHarness does **not** ingest the CLI's successful result-line dollar total.
-The adapter's internal zero rates are Pi-required placeholders; CLI turns/jobs
-remain **unpriced**, and model menus say **CLI billing**, not free or subscription
-usage. Any cost reported by the CLI itself is not proof of API charges, plan
-entitlements, or the final bill. Check billing with the CLI/provider independently.
-
-| Symptom | What to check |
+| Symptom | Check |
 | --- | --- |
-| Model absent or saved choice unavailable | Enable the opt-in and check discovery under the server's OS user/environment. Saved selections are not silently remapped. |
-| Not found / unchecked / update required | Repair or update the external executable, then use **Check again**. The probe has a five-second timeout and accepts a bounded version response; it does not install or authenticate anything. |
-| Meets minimum, but request fails | Verify native CLI authentication, routing, model access, and quota externally. Installation readiness does not test them. |
-| MCP identity/admission error | The installed CLI did not satisfy the bridge contract. No stdout-only tool fallback is available; investigate compatibility rather than bypassing admission. |
-| Answer resumes with a new process | Expected after idle expiry, restart, or reuse-validation failure; a held question's answer is replayed in a new CLI session. |
+| Model absent/unavailable | Enable opt-in; check executable discovery under the server's OS user/environment. |
+| Not found, unchecked, or update required | Repair/update the external executable, then **Check again**. The bounded version probe times out after five seconds. |
+| Meets minimum but requests fail | Check native authentication, routing, model access, and quota externally. |
+| MCP identity/admission error | Investigate installed-CLI compatibility; do not bypass the bridge's admission checks. |
+| Answer starts a new process | Expected after idle expiry, restart, or failed reuse validation. |
 | Server log shows `claude CLI resume failed` | The CLI could not resume the chat's session (for example its file was removed); that turn continued in a new session with a replay. |
-| No context maximum or dollar estimate | Expected when window metadata is unavailable or billing is CLI-controlled; neither is evidence of zero usage. |
+| No context maximum/dollar estimate | Missing budget metadata or CLI-controlled billing—not zero usage. |
 
-## Source and regression map
+## Maintainer entry points
 
-These offline tests use synthetic CLI processes and MCP requests. They establish
-adapter behavior, not live account eligibility, billing, model quality, or provider
-approval.
+[`src/agent/claude-code/`](../src/agent/claude-code/) contains discovery/launch, stream adaptation, MCP admission, reuse, CLI sessions, replay, and context-window probing. The engine is registered in [`models.ts`](../src/agent/models.ts); credential provenance is in [`auth-env.ts`](../src/core/auth-env.ts). Settings status is exposed by [`server/claude-code.ts`](../src/server/claude-code.ts).
 
-| Area | Durable references |
-| --- | --- |
-| Discovery, version checks, default-off gating | [binary](../src/agent/claude-code/binary.ts), [installation](../src/agent/claude-code/installation.ts), [launcher](../src/agent/claude-code/launch.ts), [opt-in tests](../tests/claude-code-opt-in.test.ts), [version-runner tests](../tests/claude-code-version-runner.test.ts) |
-| Actual Settings controls and status HTTP boundary | [UI](../components/settings/claude-code-status.tsx), [HTTP handler](../src/server/claude-code.ts), [UI tests](../tests/claude-code-status-ui.test.tsx), [HTTP tests](../tests/claude-code-status-http.test.ts) |
-| MCP transport and identity admission | [bridge](../src/agent/claude-code/tool-bridge.ts), [bridge tests](../tests/claude-code-tool-bridge.test.ts), [stream tests](../tests/claude-code-stream.test.ts) |
-| Launch isolation, auth provenance, reuse, CLI sessions, abort, cleanup | [stream](../src/agent/claude-code/stream.ts), [reuse comparison](../src/agent/claude-code/reuse-context.ts), [live-process registry](../src/agent/claude-code/live-processes.ts), [CLI session registry](../src/agent/claude-code/cli-sessions.ts), [stream tests](../tests/claude-code-stream.test.ts), [harness tests](../tests/claude-code-harness.test.ts) |
-| Replay and learner-question lifecycle | [transcript](../src/agent/claude-code/transcript.ts), [transcript tests](../tests/claude-code-transcript.test.ts), [harness tests](../tests/claude-code-harness.test.ts) |
-| Context and pricing | [window probe](../src/agent/claude-code/context-window.ts), [server pricing](../src/server/pricing.ts), [context tests](../tests/claude-code-context-window.test.ts), [usage/UI tests](../tests/claude-code-usage.test.tsx) |
+The `tests/claude-code-*.test.*` suites use synthetic CLI processes and MCP requests. They cover adapter contracts, not live account eligibility, provider approval, billing, or lesson quality.

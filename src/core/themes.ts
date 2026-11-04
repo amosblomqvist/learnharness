@@ -133,7 +133,8 @@ function builtin(name: string, mode: ThemeMode, c: ThemeColors): Theme {
  *  (app/globals.css carries it as literals; tests pin the two equal).
  *  Catppuccin: base/surface0/surface1, mauve accent, lavender/pink/peach
  *  emphasis; Latte takes mantle/surface0 instead, because surface0 on a
- *  light page reads as a heavy gray slab (owner, 2026-11-04).
+ *  light page reads as a heavy gray slab, and Frappé's bold is flamingo
+ *  (owner, 2026-11-04).
  *  Rosé Pine: base/surface/highlight-med, iris accent, iris/rose/gold
  *  emphasis. Gruvbox Dark: medium (bg0/bg0_s/bg2) with the bright
  *  accents; orange accent, blue/purple/aqua emphasis. Ivory: warm ivory
@@ -159,7 +160,7 @@ export const BUILTIN_THEMES: readonly Theme[] = [
 	}),
 	builtin("Catppuccin Frappé", "dark", {
 		background: "#303446", surface: "#414559", border: "#51576d", text: "#c6d0f5", textMuted: "#a5adce",
-		accent: "#ca9ee6", bold: "#babbf1", italic: "#f4b8e4", code: "#ef9f76",
+		accent: "#ca9ee6", bold: "#eebebe", italic: "#f4b8e4", code: "#ef9f76",
 		error: "#e78284", success: "#a6d189", warning: "#e5c890",
 	}),
 	builtin("Catppuccin Macchiato", "dark", {
