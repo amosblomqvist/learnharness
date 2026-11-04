@@ -1,5 +1,5 @@
 /**
- * probe_done — the probe→planning seam tool (docs/probe-teach-split.md §2).
+ * probe_done — the probe→planning seam tool (docs/archive/probe-teach-split.md §2).
  * Server-side; three outcomes: refusal while a question is open, refusal
  * after the probe is already concluded, ok + handoff queued. The handoff
  * rides the wake pipeline (deliver injected here — no server seam import).
