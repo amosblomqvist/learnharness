@@ -1,4 +1,4 @@
-import { isInLibrarySubtree, librarySubtree, type LibraryItem, type SourceDirectory, type SourceEntrySelection } from "@/src/core";
+import { folderEntries, isInLibrarySubtree, librarySubtree, placementOf, type LibraryItem, type SourceDirectory, type SourceEntrySelection } from "@/src/core";
 
 /**
  * THE LIBRARY ↔ SOURCE-TREE ADAPTER (owner ruling 2026-11-03: the Library
@@ -39,6 +39,134 @@ export function libraryTreeFiles(items: readonly LibraryItem[]): LibraryTreeFile
 }
 
 export const EMPTY_SELECTION: SourceEntrySelection = { sources: new Set(), folders: new Set() };
+
+/** The Library page's check/uncheck (owner ruling 2026-11-03). Unlike
+ *  main's toggleSourceEntries, folders are never checked from below:
+ *  checking a file selects just it; checking a folder selects its whole
+ *  subtree. Unchecking removes the entry (and a folder's subtree) and every
+ *  folder above it, so Move/Delete never act on a folder you excluded
+ *  something from. */
+export function toggleLibraryEntries(
+	directory: SourceDirectory,
+	selected: SourceEntrySelection,
+	kind: "source" | "folder",
+	id: string,
+	checked: boolean,
+): SourceEntrySelection {
+	const sources = new Set(selected.sources), folders = new Set(selected.folders);
+	const entries = kind === "source" ? { sources: [id], folders: [] as string[] } : folderEntries(directory, id);
+	for (const s of entries.sources) { if (checked) sources.add(s); else sources.delete(s); }
+	for (const f of entries.folders) { if (checked) folders.add(f); else folders.delete(f); }
+	if (!checked) {
+		const org = directory.organization;
+		let parent = kind === "source" ? placementOf(org, id)?.folderId ?? null : org.folders.find((f) => f.id === id)?.parentId ?? null;
+		const seen = new Set<string>();
+		while (parent !== null && !seen.has(parent)) {
+			seen.add(parent);
+			folders.delete(parent);
+			parent = org.folders.find((f) => f.id === parent)?.parentId ?? null;
+		}
+	}
+	return { sources, folders };
+}
+
+/** One visible tree row, in on-screen order (files are "source" rows). */
+export interface TreeRow {
+	kind: "source" | "folder";
+	id: string;
+}
+
+/** Just this entry (a folder with its whole subtree). */
+export function onlySelection(directory: SourceDirectory, kind: TreeRow["kind"], id: string): SourceEntrySelection {
+	return toggleLibraryEntries(directory, EMPTY_SELECTION, kind, id, true);
+}
+
+export function isRowSelected(selection: SourceEntrySelection, kind: TreeRow["kind"], id: string): boolean {
+	return kind === "source" ? selection.sources.has(id) : selection.folders.has(id);
+}
+
+/** Cmd/Ctrl-click and Space: add the entry, or remove it if selected. */
+export function toggleRowSelection(directory: SourceDirectory, current: SourceEntrySelection, kind: TreeRow["kind"], id: string): SourceEntrySelection {
+	return toggleLibraryEntries(directory, current, kind, id, !isRowSelected(current, kind, id));
+}
+
+/** Every given row selected, folders with their subtrees (Cmd/Ctrl+A). */
+export function unionSelection(directory: SourceDirectory, rows: readonly TreeRow[]): SourceEntrySelection {
+	let selection = EMPTY_SELECTION;
+	for (const row of rows) selection = toggleLibraryEntries(directory, selection, row.kind, row.id, true);
+	return selection;
+}
+
+/** The rows from the anchor to the target, inclusive, in on-screen order;
+ *  empty when either is not visible. */
+export function rowRange(rows: readonly TreeRow[], anchorId: string, targetId: string): TreeRow[] {
+	const a = rows.findIndex((r) => r.id === anchorId), b = rows.findIndex((r) => r.id === targetId);
+	return a < 0 || b < 0 ? [] : rows.slice(Math.min(a, b), Math.max(a, b) + 1);
+}
+
+/** What a key does in the Library tree (Finder-style, owner ruling
+ *  2026-11-03). `rows` are the visible rows in order; `current` the focused
+ *  row's index (-1 when the tree itself has focus). */
+export type TreeKeyAction =
+	| { type: "select"; row: TreeRow; mode: "move" | "range" | "toggle" }
+	| { type: "expand"; id: string }
+	| { type: "open"; id: string }
+	| { type: "clear" }
+	| { type: "select-all" };
+export function treeKeyAction(
+	rows: readonly TreeRow[],
+	current: number,
+	key: { key: string; shift: boolean; mod: boolean; alt: boolean; onControl: boolean },
+	state: { expanded: (id: string) => boolean; parentOf: (id: string) => string | null; hasSelection: boolean },
+): TreeKeyAction | null {
+	const row = rows[current];
+	if (rows.length === 0) return null;
+	switch (key.key) {
+		case "ArrowDown":
+		case "ArrowUp": {
+			if (key.mod || key.alt) return null;
+			const step = key.key === "ArrowDown" ? 1 : -1;
+			const next = rows[current < 0 ? 0 : Math.max(0, Math.min(rows.length - 1, current + step))]!;
+			return { type: "select", row: next, mode: key.shift ? "range" : "move" };
+		}
+		case "ArrowRight":
+			if (!row || key.mod || key.shift || key.alt) return null;
+			return row.kind === "folder" && !state.expanded(row.id) ? { type: "expand", id: row.id } : null;
+		case "ArrowLeft": {
+			if (!row || key.mod || key.shift || key.alt) return null;
+			if (row.kind === "folder" && state.expanded(row.id)) return { type: "expand", id: row.id };
+			const parent = state.parentOf(row.id);
+			return parent ? { type: "select", row: { kind: "folder", id: parent }, mode: "move" } : null;
+		}
+		case " ":
+			if (!row || key.onControl || key.mod || key.shift || key.alt) return null;
+			return { type: "select", row, mode: "toggle" };
+		case "Enter":
+			if (!row || key.onControl || key.mod || key.shift || key.alt) return null;
+			return row.kind === "folder" ? { type: "expand", id: row.id } : { type: "open", id: row.id };
+		case "Escape":
+			return state.hasSelection ? { type: "clear" } : null;
+		case "a":
+		case "A":
+			return key.mod && !key.shift && !key.alt ? { type: "select-all" } : null;
+		default:
+			return null;
+	}
+}
+
+/** A row click (not its checkbox) selects only that entry — a folder brings
+ *  its subtree, exactly as checking it would from nothing. Clicking the row
+ *  that is already the whole selection clears it. */
+export function rowClickSelection(
+	directory: SourceDirectory,
+	current: SourceEntrySelection,
+	kind: "source" | "folder",
+	id: string,
+): SourceEntrySelection {
+	const only = onlySelection(directory, kind, id);
+	const same = (a: ReadonlySet<string>, b: ReadonlySet<string>) => a.size === b.size && [...a].every((x) => b.has(x));
+	return same(only.sources, current.sources) && same(only.folders, current.folders) ? EMPTY_SELECTION : only;
+}
 
 /** Drop ids that no longer exist (deleted elsewhere, or by this page). */
 export function pruneSelection(items: readonly LibraryItem[], selection: SourceEntrySelection): SourceEntrySelection {

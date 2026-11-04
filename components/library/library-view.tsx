@@ -7,14 +7,13 @@ import { TopBar } from "@/components/top-bar";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useBackdropDismiss } from "@/components/backdrop-dismiss";
-import { EditableSourceName, SourceDragRow, SourceFolderTree, sourceNameMatches, type OrganizationChange } from "@/components/source-folder-tree";
+import { EditableSourceName, isRowControlClick, rowClickMode, SourceDragRow, SourceFolderTree, sourceNameMatches, type OrganizationChange, type RowClickMode } from "@/components/source-folder-tree";
 import type { ChainSort, ChainSortCol } from "@/components/chain-table";
 import {
 	LIBRARY_TAG_LABELS,
 	LIBRARY_TAGS,
 	libraryAncestors,
 	librarySubtree,
-	toggleSourceEntries,
 	type LibraryDeletionImpact,
 	type LibraryItem,
 	type LibrarySnapshot,
@@ -25,13 +24,24 @@ import { createFolder, deleteItem, deletionImpact, updateItem, uploadFiles, useL
 import { FileStatus, FormatGlyph, formatBytes, ItemGlyph, LIBRARY_ACCEPT, TagBadge, unitsText } from "./library-shared";
 import {
 	EMPTY_SELECTION,
+	isRowSelected,
 	libraryDirectory,
 	libraryTreeFiles,
+	onlySelection,
 	pruneSelection,
+	rowClickSelection,
+	rowRange,
 	singleCheckedFolder,
+	toggleRowSelection,
 	topMostSelected,
+	treeKeyAction,
+	unionSelection,
 	type LibraryTreeFile,
+	type TreeRow,
 } from "./library-tree";
+
+const fileContentUrl = (id: string) => `/api/library/files/${id}/content`;
+const openFile = (id: string) => window.open(fileContentUrl(id), "_blank", "noopener,noreferrer");
 
 /**
  * THE LIBRARY PAGE (course library wave; owner ruling 2026-11-03: built on
@@ -79,11 +89,22 @@ export function LibraryView() {
 	const [picked, setPicked] = useState<ReadonlySet<string>>(() => new Set());
 	const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
 	const [creatingFolder, setCreatingFolder] = useState(false);
+	// The one item whose name is being edited (started from the toolbar's Rename).
+	const [renaming, setRenaming] = useState<string | null>(null);
+	// The selection before the latest row click: a double-click's first click
+	// selects, so the double-click puts this back (owner ruling 2026-11-03).
+	const beforeRowClick = useRef<{ selection: SourceEntrySelection; picked: ReadonlySet<string>; anchor: string | null } | null>(null);
 	const [moving, setMoving] = useState<LibraryItem[] | null>(null);
 	const [deleting, setDeleting] = useState<LibraryItem[] | null>(null);
 	const [uploads, setUploads] = useState<{ total: number; done: number; failures: UploadOutcome[] } | null>(null);
 	const [actionError, setActionError] = useState<string | null>(null);
 	const fileInput = useRef<HTMLInputElement>(null);
+	// The tree's rows in on-screen order are read from the DOM (sort, search
+	// and expansion included). The anchor is where Shift ranges start.
+	const treeRef = useRef<HTMLDivElement>(null);
+	const anchor = useRef<string | null>(null);
+	// Set by a mouse press: only keyboard focus (Tab) is redirected to a row.
+	const pointerFocus = useRef(false);
 
 	// Expanded folders persist per window (localStorage), read after mount so
 	// the server render and the first client render agree.
@@ -117,6 +138,83 @@ export function LibraryView() {
 			writeExpanded(next);
 			return next;
 		});
+
+	const rowElements = () => [...(treeRef.current?.querySelectorAll<HTMLElement>("[data-source-drag-row]") ?? [])];
+	const visibleRows = (): TreeRow[] =>
+		rowElements().map((el) => {
+			const id = el.dataset.sourceDragRow!;
+			return { id, kind: items.some((i) => i.id === id && i.kind === "folder") ? "folder" : "source" };
+		});
+	const focusRow = (id: string) => {
+		const el = rowElements().find((e) => e.dataset.sourceDragRow === id);
+		el?.focus({ preventScroll: true });
+		el?.scrollIntoView?.({ block: "nearest" });
+	};
+
+	/** Every way a row gets selected. "only" is a plain click (again =
+	 *  deselect); "move" is an arrow key (always selects); "toggle" is
+	 *  Cmd/Ctrl-click or Space; "range" is Shift from the anchor. */
+	const selectRow = (kind: TreeRow["kind"], id: string, mode: RowClickMode | "move") => {
+		const range = mode === "range" && anchor.current !== null ? rowRange(visibleRows(), anchor.current, id) : [];
+		if (mode === "range" && range.length === 0) mode = "only";
+		let next: SourceEntrySelection, nextPicked: ReadonlySet<string>;
+		if (mode === "range") {
+			next = unionSelection(directory, range);
+			nextPicked = new Set(range.filter((r) => r.kind === "folder").map((r) => r.id));
+		} else if (mode === "toggle") {
+			next = toggleRowSelection(directory, selection, kind, id);
+			const p = new Set(picked);
+			if (kind === "folder") {
+				if (next.folders.has(id)) p.add(id);
+				else for (const sub of librarySubtree(items, id)) p.delete(sub.id);
+			}
+			nextPicked = p;
+			anchor.current = id;
+		} else {
+			next = mode === "move" ? onlySelection(directory, kind, id) : rowClickSelection(directory, selection, kind, id);
+			nextPicked = kind === "folder" && next.folders.has(id) ? new Set([id]) : new Set();
+			anchor.current = id;
+		}
+		setSelection(next);
+		setPicked(nextPicked);
+		focusRow(id);
+	};
+
+	const clearSelection = () => {
+		setSelection(EMPTY_SELECTION);
+		setPicked(new Set());
+		anchor.current = null;
+	};
+
+	/** Finder-style keys (owner ruling 2026-11-03). Keys typed in the rename
+	 *  box, and Space/Enter on a row's own buttons and links, pass through. */
+	const onTreeKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
+		const t = e.target as Element;
+		if (t.closest('input,textarea,select,[contenteditable="true"]')) return;
+		const rows = visibleRows();
+		const rowEl = t.closest<HTMLElement>("[data-source-drag-row]");
+		const action = treeKeyAction(
+			rows,
+			rows.findIndex((r) => r.id === rowEl?.dataset.sourceDragRow),
+			{ key: e.key, shift: e.shiftKey, mod: e.metaKey || e.ctrlKey, alt: e.altKey, onControl: t.closest("button,a") !== null },
+			{
+				expanded: (id) => rowElements().find((el) => el.dataset.sourceDragRow === id)?.dataset.chainNavExpanded === "true",
+				parentOf: (id) => items.find((i) => i.id === id)?.parentId ?? null,
+				hasSelection: selection.sources.size > 0 || selection.folders.size > 0,
+			},
+		);
+		if (!action) return;
+		e.preventDefault();
+		e.stopPropagation();
+		if (action.type === "select") selectRow(action.row.kind, action.row.id, action.mode);
+		else if (action.type === "expand") toggleExpanded(action.id);
+		else if (action.type === "open") openFile(action.id);
+		else if (action.type === "clear") clearSelection();
+		else {
+			setSelection(unionSelection(directory, rows));
+			setPicked(new Set());
+		}
+	};
 
 	const startUpload = async (picked: File[], parentId: string | null) => {
 		if (picked.length === 0) return;
@@ -207,21 +305,32 @@ export function LibraryView() {
 			{(error || actionError) && <p role="alert" className="mx-4 mt-3 text-sm text-destructive">{actionError ?? error}</p>}
 			{uploads && <UploadStatus uploads={uploads} onDismiss={() => setUploads(null)} />}
 
-			{checked.length > 0 && (
-				<SelectionToolbar
-					checked={checked}
-					files={checkedFiles}
-					onTag={(tag) => void act(async () => {
-						for (const f of checkedFiles) await updateItem(f.id, { tag });
-					})}
-					onMove={() => setMoving(checked)}
-					onDelete={() => setDeleting(checked)}
-					onClear={() => {
-						setSelection(EMPTY_SELECTION);
-						setPicked(new Set());
-					}}
-				/>
-			)}
+			{/* Always shown (owner ruling 2026-11-03); controls disable with no selection. */}
+			<SelectionToolbar
+				checked={checked}
+				files={checkedFiles}
+				onTag={(tag) => void act(async () => {
+					for (const f of checkedFiles) await updateItem(f.id, { tag });
+				})}
+				onRename={() => {
+					const item = checked[0];
+					if (checked.length !== 1 || !item) return;
+					// Open collapsed ancestors so the row being renamed is visible.
+					const closed = libraryAncestors(items, item.id).filter((a) => !expanded.has(a.id));
+					if (closed.length) {
+						setExpanded((prev) => {
+							const next = new Set(prev);
+							for (const a of closed) next.add(a.id);
+							writeExpanded(next);
+							return next;
+						});
+					}
+					setRenaming(item.id);
+				}}
+				onMove={() => setMoving(checked)}
+				onDelete={() => setDeleting(checked)}
+				onClear={clearSelection}
+			/>
 
 			<TreeHeader sort={sort} onSort={onSort} />
 
@@ -248,31 +357,56 @@ export function LibraryView() {
 				{snapshot && items.length === 0 && !creatingFolder && <EmptyLibrary />}
 				{!snapshot && !error && <p className="px-4 py-3 text-sm text-muted-foreground">Loading…</p>}
 				{snapshot && items.length > 0 && (
-					<LibraryTree
-						files={files}
-						snapshot={snapshot}
-						directory={directory}
-						query={query}
-						sort={sort}
-						selection={selection}
-						expanded={expanded}
-						onToggleExpanded={toggleExpanded}
-						onSelect={(kind, id, next) => {
-							setSelection((s) => toggleSourceEntries(directory, s, kind, id, next));
-							if (kind === "folder") {
-								setPicked((prev) => {
-									const nextPicked = new Set(prev);
-									if (next) nextPicked.add(id);
-									else for (const sub of librarySubtree(items, id)) nextPicked.delete(sub.id);
-									return nextPicked;
-								});
-							}
+					<div
+						ref={treeRef}
+						tabIndex={0}
+						aria-label="Library items"
+						data-testid="library-tree"
+						className="flex flex-1 flex-col outline-none"
+						onKeyDown={onTreeKeyDown}
+						onMouseDown={() => {
+							pointerFocus.current = true;
 						}}
-						onAction={(action) => onAction(action).catch((e: unknown) => {
-							setActionError(e instanceof Error ? e.message : String(e));
-							throw e;
-						})}
-					/>
+						onMouseUp={() => {
+							pointerFocus.current = false;
+						}}
+						onFocus={(e) => {
+							// Tab into the tree lands on the first selected row, else the first row.
+							if (pointerFocus.current || e.target !== e.currentTarget || e.currentTarget.contains(e.relatedTarget as Node | null)) return;
+							const rows = visibleRows();
+							const first = rows.find((r) => isRowSelected(selection, r.kind, r.id)) ?? rows[0];
+							if (first) focusRow(first.id);
+						}}
+					>
+						<LibraryTree
+							files={files}
+							snapshot={snapshot}
+							directory={directory}
+							query={query}
+							sort={sort}
+							selection={selection}
+							expanded={expanded}
+							onToggleExpanded={toggleExpanded}
+							onRowDoubleClick={() => {
+								const before = beforeRowClick.current;
+								beforeRowClick.current = null;
+								if (!before) return;
+								setSelection(before.selection);
+								setPicked(before.picked);
+								anchor.current = before.anchor;
+							}}
+							renaming={renaming}
+							onRenameDone={() => setRenaming(null)}
+							onRowClick={(kind, id, mode) => {
+								beforeRowClick.current = { selection, picked, anchor: anchor.current };
+								selectRow(kind, id, mode);
+							}}
+							onAction={(action) => onAction(action).catch((e: unknown) => {
+								setActionError(e instanceof Error ? e.message : String(e));
+								throw e;
+							})}
+						/>
+					</div>
 				)}
 			</UploadZone>
 
@@ -305,7 +439,10 @@ export function LibraryTree({
 	selection,
 	expanded,
 	onToggleExpanded,
-	onSelect,
+	onRowClick,
+	onRowDoubleClick,
+	renaming = null,
+	onRenameDone = () => {},
 	onAction,
 }: {
 	files: LibraryTreeFile[];
@@ -316,7 +453,13 @@ export function LibraryTree({
 	selection: SourceEntrySelection;
 	expanded: ReadonlySet<string>;
 	onToggleExpanded: (id: string) => void;
-	onSelect: (kind: "source" | "folder", id: string, next: boolean) => void;
+	/** A row click outside its controls; the mode comes from the modifier keys. */
+	onRowClick?: (kind: TreeRow["kind"], id: string, mode: RowClickMode) => void;
+	/** After a row double-click (open/expand): undo its first click's selection. */
+	onRowDoubleClick?: () => void;
+	/** The item being renamed (names are plain text otherwise). */
+	renaming?: string | null;
+	onRenameDone?: () => void;
 	onAction?: OrganizationChange;
 }) {
 	return (
@@ -333,15 +476,22 @@ export function LibraryTree({
 			selection={selection.sources}
 			selectedFolders={selection.folders}
 			onToggleNodes={() => {}}
-			onToggleFolder={(id, next) => onSelect("folder", id, next)}
+			onToggleFolder={() => {}}
+			onSelectFolderRow={onRowClick ? (id, mode) => onRowClick("folder", id, mode) : undefined}
+			onFolderRowDoubleClick={onRowDoubleClick}
+			folderRename={{ id: renaming, onDone: onRenameDone }}
+			hideFolderCheckbox
 			renderSource={(file, depth) => (
 				<LibraryFileRow
 					key={file.key}
 					file={file.item}
 					depth={depth}
 					summary={snapshot.summaries[file.key]}
-					checked={selection.sources.has(file.key)}
-					onCheck={(next) => onSelect("source", file.key, next)}
+					selected={selection.sources.has(file.key)}
+					onRowClick={onRowClick ? (mode) => onRowClick("source", file.key, mode) : undefined}
+					onRowDoubleClick={onRowDoubleClick}
+					renaming={renaming === file.key}
+					onRenameDone={onRenameDone}
 					onRename={onAction ? (name) => onAction({ action: "rename-source", id: file.key, name }) : undefined}
 				/>
 			)}
@@ -356,15 +506,21 @@ export function LibraryFileRow({
 	file,
 	depth,
 	summary,
-	checked,
-	onCheck,
+	selected,
+	onRowClick,
+	onRowDoubleClick,
+	renaming = false,
+	onRenameDone = () => {},
 	onRename,
 }: {
 	file: LibraryItem;
 	depth: number;
 	summary?: LibrarySnapshot["summaries"][string];
-	checked: boolean;
-	onCheck: (next: boolean) => void;
+	selected: boolean;
+	onRowClick?: (mode: RowClickMode) => void;
+	onRowDoubleClick?: () => void;
+	renaming?: boolean;
+	onRenameDone?: () => void;
 	onRename?: (name: string) => Promise<unknown>;
 }) {
 	return (
@@ -374,25 +530,38 @@ export function LibraryFileRow({
 			name={file.name}
 			enabled={Boolean(onRename)}
 			data-testid={`library-file-${file.id}`}
-			className="group flex items-center gap-1 border-b border-transparent py-1.5 pr-3"
+			data-selected={selected || undefined}
+			tabIndex={-1}
+			className={`group flex items-center gap-1 border-b border-transparent py-1.5 pr-3 outline-none transition-colors focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring ${onRowClick ? "cursor-pointer hover:bg-accent/50" : ""} ${selected ? "bg-primary/10" : ""}`}
 			style={{ paddingLeft: 12 + depth * 36 }}
+			onMouseDown={onRowClick ? (e) => { if (e.shiftKey && !isRowControlClick(e.target)) e.preventDefault(); } : undefined}
+			onClick={onRowClick ? (e) => { if (e.detail <= 1 && !isRowControlClick(e.target)) onRowClick(rowClickMode(e)); } : undefined}
+			onDoubleClick={onRowClick ? (e) => {
+				if (isRowControlClick(e.target)) return;
+				openFile(file.id);
+				onRowDoubleClick?.();
+			} : undefined}
 		>
-			<input
-				type="checkbox"
-				aria-label={`Select ${file.name}`}
-				data-testid={`library-file-checkbox-${file.id}`}
-				checked={checked}
-				onChange={(e) => onCheck(e.target.checked)}
-				className="size-3.5 shrink-0 accent-primary"
-			/>
 			{/* The expander column stays empty for files so names align with folders. */}
 			<span className="w-3.5 shrink-0" aria-hidden="true" />
 			<span data-source-icon className="flex h-5 w-3.5 shrink-0 items-center justify-center">
 				{file.file ? <FormatGlyph format={file.file.format} className="size-3.5" /> : <ItemGlyph item={file} className="size-3.5" />}
 			</span>
-			{onRename ? <EditableSourceName name={file.name} onSave={onRename} /> : <span className="min-w-0 flex-1 truncate text-sm font-medium">{file.name}</span>}
+			{onRename && renaming ? (
+				<EditableSourceName
+					name={file.name}
+					initiallyEditing
+					onCancel={onRenameDone}
+					onSave={async (name) => {
+						if (name !== file.name) await onRename(name);
+						onRenameDone();
+					}}
+				/>
+			) : (
+				<span className="min-w-0 flex-1 truncate text-sm font-medium">{file.name}</span>
+			)}
 			<a
-				href={`/api/library/files/${file.id}/content`}
+				href={fileContentUrl(file.id)}
 				target="_blank"
 				rel="noreferrer"
 				aria-label={`Open ${file.name}`}
@@ -419,7 +588,7 @@ function TreeHeader({ sort, onSort }: { sort: ChainSort; onSort: (col: ChainSort
 	const aria = (col: ChainSortCol) => (sort.col === col ? (sort.dir === 1 ? "ascending" : "descending") : "none");
 	return (
 		<div className="mt-2 flex items-center gap-1 border-b border-border/60 px-3 pb-1.5 text-[11px] uppercase tracking-wider text-muted-foreground" data-testid="library-tree-header">
-			<button type="button" data-testid="library-sort-name" onClick={() => onSort("name")} aria-sort={aria("name")} className="flex flex-1 items-center gap-1 pl-[42px] text-left transition-colors hover:text-foreground">
+			<button type="button" data-testid="library-sort-name" onClick={() => onSort("name")} aria-sort={aria("name")} className="flex flex-1 items-center gap-1 pl-[24px] text-left transition-colors hover:text-foreground">
 				Name {dirIcon("name")}
 			</button>
 			<button type="button" data-testid="library-sort-files" onClick={() => onSort("props")} aria-sort={aria("props")} className="flex w-14 shrink-0 items-center justify-end gap-1 text-right transition-colors hover:text-foreground">
@@ -439,6 +608,7 @@ export function SelectionToolbar({
 	checked,
 	files,
 	onTag,
+	onRename,
 	onMove,
 	onDelete,
 	onClear,
@@ -446,6 +616,7 @@ export function SelectionToolbar({
 	checked: readonly LibraryItem[];
 	files: readonly LibraryItem[];
 	onTag: (tag: LibraryTag | null) => void;
+	onRename: () => void;
 	onMove: () => void;
 	onDelete: () => void;
 	onClear: () => void;
@@ -456,10 +627,11 @@ export function SelectionToolbar({
 		folders > 0 ? `${folders} folder${folders === 1 ? "" : "s"}` : null,
 	].filter(Boolean);
 	const single = files.length === 1 ? files[0]!.tag ?? "" : undefined;
+	const none = checked.length === 0;
 	return (
 		<div className="mx-3 mt-3 flex flex-wrap items-center gap-2 rounded-lg border border-border/60 bg-card px-3 py-1.5" data-testid="library-toolbar">
 			<span className="text-xs text-muted-foreground" data-testid="library-toolbar-count">
-				{parts.join(", ")} selected
+				{none ? "No selection" : `${parts.join(", ")} selected`}
 			</span>
 			<span className="flex-1" />
 			<select
@@ -481,13 +653,16 @@ export function SelectionToolbar({
 					</option>
 				))}
 			</select>
-			<Button variant="ghost" size="xs" data-testid="library-toolbar-move" onClick={onMove}>
+			<Button variant="ghost" size="xs" data-testid="library-toolbar-rename" disabled={checked.length !== 1} onClick={onRename}>
+				Rename…
+			</Button>
+			<Button variant="ghost" size="xs" data-testid="library-toolbar-move" disabled={none} onClick={onMove}>
 				Move to…
 			</Button>
-			<Button variant="ghost" size="xs" data-testid="library-toolbar-delete" onClick={onDelete} className="hover:text-destructive">
+			<Button variant="ghost" size="xs" data-testid="library-toolbar-delete" disabled={none} onClick={onDelete} className="hover:text-destructive">
 				Delete…
 			</Button>
-			<Button variant="ghost" size="xs" data-testid="library-toolbar-clear" onClick={onClear}>
+			<Button variant="ghost" size="xs" data-testid="library-toolbar-clear" disabled={none} onClick={onClear}>
 				Clear
 			</Button>
 		</div>

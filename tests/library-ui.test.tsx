@@ -14,7 +14,9 @@ import { createElement } from "react";
 import type { ChatAttachmentsSnapshot, LibraryItem, LibrarySnapshot } from "../src/core/contracts.ts";
 import { toggleSourceEntries } from "../src/core/source-selection.ts";
 import { DeleteLibraryBody, LibraryFileRow, LibraryTree, SelectionToolbar } from "../components/library/library-view.tsx";
-import { EMPTY_SELECTION, libraryDirectory, libraryTreeFiles, pruneSelection, singleCheckedFolder, topMostSelected } from "../components/library/library-tree.ts";
+import { EMPTY_SELECTION, libraryDirectory, libraryTreeFiles, pruneSelection, rowClickSelection, rowRange, toggleLibraryEntries, toggleRowSelection, unionSelection, singleCheckedFolder, topMostSelected } from "../components/library/library-tree.ts";
+import { SourceFolderTree } from "../components/source-folder-tree.tsx";
+import { PickerTree } from "../components/library/library-picker.tsx";
 import { MaterialsPanelBody } from "../components/library/materials-panel.tsx";
 import { MaterialsControl } from "../components/composer-actions.tsx";
 
@@ -74,6 +76,86 @@ describe("library → tree adapter", () => {
 		assert.deepEqual(topMostSelected(items, sel).map((i) => i.id).sort(), ["loose", "u1"]);
 	});
 
+	it("Library checks never check a folder from below", () => {
+		const only = [folder("c", null, "Math 3339"), folder("u1", "c", "Unit 1"), file("solo", "u1", "solo.pdf")];
+		const dir = libraryDirectory(only);
+		const sel = toggleLibraryEntries(dir, EMPTY_SELECTION, "source", "solo", true);
+		assert.deepEqual([...sel.sources], ["solo"]);
+		assert.deepEqual([...sel.folders], [], "the only file's folder stays unchecked");
+		assert.deepEqual(topMostSelected(only, sel).map((i) => i.id), ["solo"], "Rename targets the file");
+		assert.deepEqual(rowClickSelection(dir, EMPTY_SELECTION, "source", "solo"), sel);
+	});
+
+	it("checking a folder selects its whole subtree", () => {
+		const sel = toggleLibraryEntries(libraryDirectory(items), EMPTY_SELECTION, "folder", "c", true);
+		assert.deepEqual(new Set(sel.sources), new Set(["f1", "f2", "f3"]));
+		assert.deepEqual(new Set(sel.folders), new Set(["c", "u1"]));
+	});
+
+	it("unchecking inside a checked folder unchecks it and its ancestors, keeping the rest", () => {
+		const dir = libraryDirectory(items);
+		const all = toggleLibraryEntries(dir, EMPTY_SELECTION, "folder", "c", true);
+		const sel = toggleLibraryEntries(dir, all, "source", "f1", false);
+		assert.deepEqual(new Set(sel.sources), new Set(["f2", "f3"]));
+		assert.deepEqual([...sel.folders], [], "u1 and c both drop out");
+		assert.deepEqual(topMostSelected(items, sel).map((i) => i.id).sort(), ["f2", "f3"]);
+		const unit = toggleLibraryEntries(dir, all, "folder", "u1", false);
+		assert.deepEqual([...unit.sources], ["f3"]);
+		assert.deepEqual([...unit.folders], []);
+	});
+
+	it("Cmd/Ctrl-click toggles one row and leaves the rest", () => {
+		const dir = libraryDirectory(items);
+		const one = rowClickSelection(dir, EMPTY_SELECTION, "source", "f1");
+		const two = toggleRowSelection(dir, one, "source", "loose");
+		assert.deepEqual(new Set(two.sources), new Set(["f1", "loose"]));
+		assert.deepEqual([...toggleRowSelection(dir, two, "source", "f1").sources], ["loose"]);
+		const withFolder = toggleRowSelection(dir, two, "folder", "u1");
+		assert.deepEqual(new Set(withFolder.sources), new Set(["f1", "f2", "loose"]));
+		assert.deepEqual([...toggleRowSelection(dir, withFolder, "folder", "u1").sources], ["loose"]);
+	});
+
+	it("a shift range covers the rows between, and folders bring their contents", () => {
+		const dir = libraryDirectory(items);
+		const rows = [
+			{ kind: "folder" as const, id: "c" }, { kind: "folder" as const, id: "u1" }, { kind: "source" as const, id: "f2" },
+			{ kind: "source" as const, id: "f1" }, { kind: "source" as const, id: "f3" }, { kind: "source" as const, id: "loose" },
+		];
+		assert.deepEqual(rowRange(rows, "f3", "f2").map((r) => r.id), ["f2", "f1", "f3"], "either direction");
+		assert.deepEqual(rowRange(rows, "gone", "f2"), [], "no visible anchor → no range");
+		const sel = unionSelection(dir, rowRange(rows, "u1", "f1"));
+		assert.deepEqual(new Set(sel.sources), new Set(["f1", "f2"]));
+		assert.deepEqual([...sel.folders], ["u1"]);
+		const all = unionSelection(dir, rows);
+		assert.deepEqual(new Set(all.folders), new Set(["c", "u1"]));
+		assert.deepEqual(new Set(all.sources), new Set(["f1", "f2", "f3", "loose"]));
+	});
+
+	it("a file row click selects only that file", () => {
+		const dir = libraryDirectory(items);
+		const several = toggleSourceEntries(dir, toggleSourceEntries(dir, EMPTY_SELECTION, "source", "f3", true), "source", "loose", true);
+		const sel = rowClickSelection(dir, several, "source", "f1");
+		assert.deepEqual([...sel.sources], ["f1"]);
+		assert.deepEqual([...sel.folders], []);
+	});
+
+	it("a folder row click selects only that folder's subtree", () => {
+		const dir = libraryDirectory(items);
+		const sel = rowClickSelection(dir, toggleSourceEntries(dir, EMPTY_SELECTION, "source", "loose", true), "folder", "u1");
+		assert.deepEqual(new Set(sel.sources), new Set(["f1", "f2"]));
+		assert.deepEqual(new Set(sel.folders), new Set(["u1"]));
+	});
+
+	it("clicking the row that is already the whole selection clears it", () => {
+		const dir = libraryDirectory(items);
+		const file1 = rowClickSelection(dir, EMPTY_SELECTION, "source", "f1");
+		assert.equal(rowClickSelection(dir, file1, "source", "f1"), EMPTY_SELECTION);
+		const unit = rowClickSelection(dir, EMPTY_SELECTION, "folder", "u1");
+		assert.equal(rowClickSelection(dir, unit, "folder", "u1"), EMPTY_SELECTION);
+		const both = toggleSourceEntries(dir, file1, "source", "loose", true);
+		assert.deepEqual([...rowClickSelection(dir, both, "source", "f1").sources], ["f1"], "one of several stays selected alone");
+	});
+
 	it("prunes ids that disappeared", () => {
 		const sel = { sources: new Set(["f1", "gone"]), folders: new Set(["u1", "gone-folder"]) };
 		const pruned = pruneSelection(items, sel);
@@ -86,7 +168,7 @@ describe("library → tree adapter", () => {
 describe("library page tree (main's SourceFolderTree)", () => {
 	const render = (expanded: string[], selection = EMPTY_SELECTION) => renderToStaticMarkup(createElement(LibraryTree, {
 		files: libraryTreeFiles(items), snapshot, directory: libraryDirectory(items), query: "",
-		sort: { col: "name", dir: 1 }, selection, expanded: new Set(expanded), onToggleExpanded: noop, onSelect: noop,
+		sort: { col: "name", dir: 1 }, selection, expanded: new Set(expanded), onToggleExpanded: noop,
 		onAction: async () => {},
 	}));
 
@@ -111,12 +193,68 @@ describe("library page tree (main's SourceFolderTree)", () => {
 		assert.match(html, /data-testid="library-file-loose"/);
 	});
 
-	it("checked files render checked", () => {
+	it("selected files render tinted and focusable, with no checkbox", () => {
 		const html = renderToStaticMarkup(createElement(LibraryFileRow, {
-			file: items[2]!, depth: 2, checked: true, onCheck: noop, onRename: async () => {},
+			file: items[2]!, depth: 2, selected: true, onRename: async () => {},
 		}));
-		assert.match(html, /data-testid="library-file-checkbox-f1"[^>]*checked=""/);
+		assert.match(html, /data-testid="library-file-f1"[^>]*data-selected="true"[^>]*tabindex="-1"[^>]*class="[^"]*bg-primary\/10/);
+		assert.doesNotMatch(html, /type="checkbox"/);
 		assert.match(html, /padding-left:84px/);
+	});
+
+	it("the Library tree has no checkboxes at all", () => {
+		assert.doesNotMatch(render(["c", "u1"]), /type="checkbox"/);
+	});
+
+	it("names are plain text; only the row being renamed shows the edit box", () => {
+		const html = render(["c", "u1"]);
+		assert.doesNotMatch(html, /title="Rename"/, "no click-to-rename on any name");
+		assert.doesNotMatch(html, /data-testid="source-name-input"/);
+		const tree = (renaming: string) => renderToStaticMarkup(createElement(LibraryTree, {
+			files: libraryTreeFiles(items), snapshot, directory: libraryDirectory(items), query: "",
+			sort: { col: "name", dir: 1 }, selection: EMPTY_SELECTION, expanded: new Set(["c", "u1"]), onToggleExpanded: noop,
+			renaming, onAction: async () => {},
+		}));
+		assert.match(tree("f1"), /data-testid="library-file-f1"[\s\S]*?data-testid="source-name-input"[^>]*value="quiz1.pdf"/);
+		assert.match(tree("u1"), /data-testid="folder-row-u1"[\s\S]*?data-testid="source-name-input"[^>]*value="Unit 1"/);
+		assert.equal(tree("u1").match(/source-name-input/g)?.length, 1);
+	});
+
+	it("selected file and folder rows are tinted; row clicks are opt-in", () => {
+		const sel = toggleSourceEntries(libraryDirectory(items), EMPTY_SELECTION, "folder", "u1", true);
+		const plain = render(["c", "u1"], sel);
+		assert.doesNotMatch(plain, /cursor-pointer/, "no row-click handler, no pointer");
+		const html = renderToStaticMarkup(createElement(LibraryTree, {
+			files: libraryTreeFiles(items), snapshot, directory: libraryDirectory(items), query: "",
+			sort: { col: "name", dir: 1 }, selection: sel, expanded: new Set(["c", "u1"]), onToggleExpanded: noop,
+			onRowClick: noop, onAction: async () => {},
+		}));
+		assert.match(html, /data-testid="folder-row-u1"[^>]*data-selected="true"[^>]*class="[^"]*cursor-pointer[^"]*bg-primary\/10/);
+		assert.match(html, /data-testid="library-file-f1"[^>]*data-selected="true"[^>]*class="[^"]*bg-primary\/10/);
+		assert.doesNotMatch(html, /data-testid="folder-row-c"[^>]*data-selected/);
+		assert.doesNotMatch(html, /data-testid="library-file-loose"[^>]*data-selected/);
+	});
+});
+
+describe("graph sources folder tree keeps click-to-rename", () => {
+	it("without folderRename, folder names stay rename buttons", () => {
+		const html = renderToStaticMarkup(createElement(SourceFolderTree, {
+			groups: libraryTreeFiles(items), directory: libraryDirectory(items), query: "", sort: { col: "name", dir: 1 },
+			renderSource: () => null, onAction: async () => {}, expanded: new Set<string>(), onToggleExpanded: noop,
+			selection: new Set<string>(), selectedFolders: new Set<string>(), onToggleNodes: noop, onToggleFolder: noop,
+		}));
+		assert.match(html, /title="Rename"[^>]*>Math 3339</);
+		assert.match(html, /data-testid="folder-checkbox-c"/, "graph sources keep their folder checkboxes");
+	});
+});
+
+describe("attach picker rows", () => {
+	it("picked rows are tinted and clickable; covered rows are not clickable", () => {
+		const html = renderToStaticMarkup(createElement(PickerTree, { items, parentId: null, depth: 0, picked: ["c"], coveredBy: null, onToggle: noop }));
+		assert.match(html, /data-testid="pick-row-c"[^>]*data-selected="true"[^>]*class="[^"]*cursor-pointer[^"]*bg-primary\/10/);
+		assert.match(html, /data-testid="pick-row-loose"[^>]*class="[^"]*cursor-pointer/);
+		assert.doesNotMatch(html, /data-testid="pick-row-loose"[^>]*data-selected/);
+		assert.match(html, /data-testid="pick-row-u1"[^>]*data-selected="true"[^>]*class="(?![^"]*cursor-pointer)/, "covered by c");
 	});
 });
 
@@ -124,20 +262,39 @@ describe("checked-items toolbar", () => {
 	const quiz = items[2]!, deck = items[3]!, c = items[0]!;
 
 	it("counts files and folders, and shows a single file's tag", () => {
-		const html = renderToStaticMarkup(createElement(SelectionToolbar, { checked: [quiz], files: [quiz], onTag: noop, onMove: noop, onDelete: noop, onClear: noop }));
+		const html = renderToStaticMarkup(createElement(SelectionToolbar, { checked: [quiz], files: [quiz], onTag: noop, onRename: noop, onMove: noop, onDelete: noop, onClear: noop }));
 		assert.match(html, /1 file selected/);
 		assert.match(html, /<option value="quiz" selected="">Quiz<\/option>/);
 	});
 
 	it("several files show a neutral Tag… prompt; folders only disable tagging", () => {
-		const many = renderToStaticMarkup(createElement(SelectionToolbar, { checked: [c], files: [quiz, deck], onTag: noop, onMove: noop, onDelete: noop, onClear: noop }));
+		const many = renderToStaticMarkup(createElement(SelectionToolbar, { checked: [c], files: [quiz, deck], onTag: noop, onRename: noop, onMove: noop, onDelete: noop, onClear: noop }));
 		assert.match(many, /2 files, 1 folder selected/);
 		assert.match(many, /<option value="__mixed" selected="">Tag…<\/option>/);
-		const foldersOnly = renderToStaticMarkup(createElement(SelectionToolbar, { checked: [c], files: [], onTag: noop, onMove: noop, onDelete: noop, onClear: noop }));
+		const foldersOnly = renderToStaticMarkup(createElement(SelectionToolbar, { checked: [c], files: [], onTag: noop, onRename: noop, onMove: noop, onDelete: noop, onClear: noop }));
 		assert.match(foldersOnly, /data-testid="library-toolbar-tag"[^>]*disabled=""/);
 		for (const label of ["Lecture", "Quiz", "Practice Test", "Answer Key", "Homework", "Notes", "Syllabus", "No tag"]) {
 			assert.match(foldersOnly, new RegExp(`>${label}<`));
 		}
+	});
+	it("with no selection it still renders, reading No selection with every control disabled", () => {
+		const html = renderToStaticMarkup(createElement(SelectionToolbar, { checked: [], files: [], onTag: noop, onRename: noop, onMove: noop, onDelete: noop, onClear: noop }));
+		assert.match(html, />No selection</);
+		for (const id of ["tag", "move", "delete", "clear"]) assert.match(html, new RegExp(`data-testid="library-toolbar-${id}"[^>]*disabled=""|disabled=""[^>]*data-testid="library-toolbar-${id}"`));
+	});
+
+	it("Rename is enabled only for exactly one selected item", () => {
+		const disabled = (html: string) => /<button[^>]*data-testid="library-toolbar-rename"[^>]*disabled=""|<button[^>]*disabled=""[^>]*data-testid="library-toolbar-rename"/.test(html);
+		const render = (checked: LibraryItem[]) => renderToStaticMarkup(createElement(SelectionToolbar, { checked, files: [], onTag: noop, onRename: noop, onMove: noop, onDelete: noop, onClear: noop }));
+		assert.match(render([c]), />Rename…</);
+		assert.equal(disabled(render([c])), false);
+		assert.equal(disabled(render([])), true);
+		assert.equal(disabled(render([c, quiz])), true);
+	});
+
+	it("a selection enables Move, Delete, and Clear", () => {
+		const html = renderToStaticMarkup(createElement(SelectionToolbar, { checked: [c], files: [], onTag: noop, onRename: noop, onMove: noop, onDelete: noop, onClear: noop }));
+		for (const id of ["move", "delete", "clear"]) assert.doesNotMatch(html, new RegExp(`<button[^>]*data-testid="library-toolbar-${id}"[^>]*disabled=""|<button[^>]*disabled=""[^>]*data-testid="library-toolbar-${id}"`));
 	});
 });
 

@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { ChevronRightIcon, LibraryIcon } from "lucide-react";
 import { useBackdropDismiss } from "@/components/backdrop-dismiss";
+import { isRowControlClick } from "@/components/source-folder-tree";
 import { Button } from "@/components/ui/button";
 import { libraryChildren, type LibraryItem } from "@/src/core";
 import { useLibrary } from "./library-client";
@@ -154,7 +155,16 @@ function PickerRow({
 	const hasChildren = item.kind === "folder" && items.some((i) => i.parentId === item.id);
 	return (
 		<li>
-			<div className="flex items-center gap-1.5 rounded-md py-1 pr-2 hover:bg-accent/50" style={{ paddingLeft: `${depth * 18 + 4}px` }}>
+			<div
+				data-testid={`pick-row-${item.id}`}
+				data-selected={checked || undefined}
+				className={`flex items-center gap-1.5 rounded-md py-1 pr-2 hover:bg-accent/50 ${coveredBy === null ? "cursor-pointer" : ""} ${checked ? "bg-primary/10" : ""}`}
+				style={{ paddingLeft: `${depth * 18 + 4}px` }}
+				onClick={(e) => {
+					// A row click toggles like the checkbox; covered items stay unpickable.
+					if (coveredBy === null && !isRowControlClick(e.target)) onToggle(item.id);
+				}}
+			>
 				<button
 					type="button"
 					aria-label={open ? "Collapse" : "Expand"}
