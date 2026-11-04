@@ -31,9 +31,9 @@ export const APP_IDENTITY = Object.freeze({
 });
 
 /**
- * Pi has added Terra on main but has not yet published a package containing
- * it. Keep this narrow compatibility entry until the pinned pi-ai release
- * includes the model; a native Pi entry always wins. Metadata follows Pi's
+ * LearnHarness pins pi-ai 1.4.0, which does not include Terra. Pi 1.5.0
+ * includes it; keep this narrow compatibility entry until the pinned release
+ * contains the model. A native Pi entry always wins. Metadata follows Pi's
  * generator and OpenAI's published API model description. The 272k value is
  * Pi's conservative catalog default, not a claim about account entitlement.
  * https://github.com/earendil-works/pi/blob/6c384aa30f619d7b28963f2bab24d8dacbe73cb6/packages/ai/scripts/generate-models.ts
