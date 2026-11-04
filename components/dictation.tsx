@@ -1,12 +1,13 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useCodexDictation } from "./codex-dictation";
 import { Loader2Icon, MicIcon } from "lucide-react";
 import { useSettingsDialog } from "@/components/settings/settings-dialog";
 import { Hint } from "@/components/ui/hint";
 import { deepgramListenUrl, type DictationLanguage } from "@/src/core";
 import { useDictationLanguage } from "@/components/dictation-preference";
-import { setDictationActive } from "@/components/dictation-state";
+import { isDictationActive, setDictationActive } from "@/components/dictation-state";
 export { isDictationActive } from "@/components/dictation-state";
 
 /**
@@ -282,6 +283,29 @@ export type Dictation = {
  * question waits.
  */
 export function useDictation({ append }: { append: (text: string) => void }): Dictation {
+	const { getLanguage, provider: savedProvider, saving } = useDictationLanguage();
+	const selectedProvider = useRef(savedProvider);
+	// Do not move a live recording to another engine if settings refresh.
+	if (!isDictationActive()) selectedProvider.current = savedProvider;
+	const provider = selectedProvider.current;
+	const disabled = saving && !isDictationActive();
+	const deepgram = useDeepgramDictation({ append, enabled: provider === "deepgram" && !disabled });
+	const codex = useCodexDictation({
+		append: (text) => (questionTarget ?? append)(text),
+		onActive: setDictationActive,
+		getLanguage,
+		enabled: provider === "codex" && !disabled,
+	});
+	useEffect(() => {
+		if (provider !== "codex") return;
+		dictationFinisher = codex.finish;
+		return () => { if (dictationFinisher === codex.finish) dictationFinisher = null; };
+	}, [provider, codex.finish]);
+	const selected = provider === "codex" ? codex : deepgram;
+	return provider === undefined || disabled ? { ...selected, toggle: () => {} } : selected;
+}
+
+export function useDeepgramDictation({ append, enabled = true }: { append: (text: string) => void; enabled?: boolean }): Dictation {
 	const { getLanguage } = useDictationLanguage();
 	const [phase, setPhase] = useState<DictationPhase>("idle");
 	const [error, setError] = useState<string | null>(null);
@@ -583,11 +607,12 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 	// Publish finish() for the sibling subtrees (the pending question's
 	// dock) — registered for as long as this page owns the hook.
 	useEffect(() => {
+		if (!enabled) return;
 		dictationFinisher = finish;
 		return () => {
 			if (dictationFinisher === finish) dictationFinisher = null;
 		};
-	}, [finish]);
+	}, [finish, enabled]);
 
 	const toggle = useCallback(() => {
 		if (phase === "idle") void start();
@@ -600,7 +625,9 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 	// page owns ONE hook instance, and only the mounted page's listener is
 	// attached.
 	useEffect(() => {
-		warmTokens.refresh(); // pre-mint at mount (mitigation D) — silent if keyless
+		if (enabled) warmTokens.refresh(); // pre-mint when Deepgram is selected
+	}, [enabled]);
+	useEffect(() => {
 		return () => {
 			// Navigation cancels capture: invalidate every pending await before
 			// releasing resources, and never append into a different page's input.
@@ -609,13 +636,15 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 		};
 	}, [cleanup]);
 	useEffect(() => {
+		if (!enabled) return;
 		window.addEventListener("lh:kbd-toggle-dictation", toggle);
 		return () => window.removeEventListener("lh:kbd-toggle-dictation", toggle);
-	}, [toggle]);
+	}, [toggle, enabled]);
 	useEffect(() => {
+		if (!enabled) return;
 		window.addEventListener("lh:kbd-cancel-dictation", cancel);
 		return () => window.removeEventListener("lh:kbd-cancel-dictation", cancel);
-	}, [cancel]);
+	}, [cancel, enabled]);
 
 	return {
 		phase,

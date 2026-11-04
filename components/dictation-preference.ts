@@ -7,7 +7,9 @@ import {
 } from "@/src/core";
 import { notifySettingsSaved, onSettingsSaved } from "@/components/settings-signal";
 
-const INITIAL = { language: undefined as DictationLanguage | undefined, saving: false, error: null as string | null };
+type DictationProvider = "deepgram" | "codex";
+
+const INITIAL = { provider: undefined as DictationProvider | undefined, language: undefined as DictationLanguage | undefined, saving: false, error: null as string | null };
 
 /** One confirmed preference and one write in flight, shared by every surface.
  * The factory keeps transport tests isolated without a second persistence path.
@@ -41,7 +43,7 @@ export function createDictationLanguageStore(request: typeof fetch, saved: () =>
 				if (version !== revision) return getLanguage();
 				const language = record?.dictation?.language ?? FACTORY_SETTINGS.dictation.language;
 				needsRead = false;
-				publish({ language, error: null });
+				publish({ language, provider: record?.dictation?.provider ?? FACTORY_SETTINGS.dictation.provider, error: null });
 				return language;
 			} catch {
 				if (version !== revision) return getLanguage();
@@ -55,7 +57,7 @@ export function createDictationLanguageStore(request: typeof fetch, saved: () =>
 		return reading;
 	}
 
-	function save(language: DictationLanguage): Promise<boolean> {
+	function saveSelection(language: DictationLanguage, provider: DictationProvider): Promise<boolean> {
 		// A different selection must never inherit the previous write's success.
 		if (writing || snapshot.language === undefined) return Promise.resolve(false);
 		revision++;
@@ -64,18 +66,18 @@ export function createDictationLanguageStore(request: typeof fetch, saved: () =>
 			try {
 				const res = await request("/api/settings/dictation", {
 					method: "PUT", headers: { "Content-Type": "application/json" },
-					body: JSON.stringify({ language }),
+					body: JSON.stringify(provider === "deepgram" ? { language } : { language, provider }),
 				});
 				if (!res.ok) throw new Error();
 				const body = await res.json() as { settings: UserSettings };
 				const confirmed = body.settings?.dictation?.language;
-				if (!isDictationLanguage(confirmed)) throw new Error();
+				if (!isDictationLanguage(confirmed) || (body.settings?.dictation?.provider ?? "deepgram") !== provider) throw new Error();
 				needsRead = false;
-				publish({ language: confirmed, error: null });
+				publish({ language: confirmed, provider: body.settings?.dictation?.provider ?? "deepgram", error: null });
 				saved();
 				return true;
 			} catch {
-				publish({ error: "Could not save dictation language. Try again." });
+				publish({ error: "Could not save dictation settings. Try again." });
 				return false;
 			} finally {
 				writing = null;
@@ -84,6 +86,15 @@ export function createDictationLanguageStore(request: typeof fetch, saved: () =>
 		});
 		publish({ saving: true, error: null });
 		return writing;
+	}
+
+	function save(language: DictationLanguage): Promise<boolean> {
+		return saveSelection(language, snapshot.provider ?? "deepgram");
+	}
+
+	function saveProvider(provider: DictationProvider): Promise<boolean> {
+		if (snapshot.language === undefined) return Promise.resolve(false);
+		return saveSelection(snapshot.language, provider);
 	}
 
 	async function getLanguage(): Promise<DictationLanguage> {
@@ -96,7 +107,7 @@ export function createDictationLanguageStore(request: typeof fetch, saved: () =>
 	}
 
 	return {
-		load, save, getLanguage,
+		load, save, saveProvider, getLanguage,
 		getSnapshot: () => snapshot,
 		getServerSnapshot: () => INITIAL,
 		subscribe(listener: () => void) { listeners.add(listener); return () => { listeners.delete(listener); }; },
@@ -128,5 +139,5 @@ function subscribe(listener: () => void) {
 
 export function useDictationLanguage() {
 	const snapshot = useSyncExternalStore(subscribe, store.getSnapshot, store.getServerSnapshot);
-	return { ...snapshot, load: store.load, save: store.save, getLanguage: store.getLanguage };
+	return { ...snapshot, load: store.load, save: store.save, saveProvider: store.saveProvider, getLanguage: store.getLanguage };
 }

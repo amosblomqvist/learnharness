@@ -108,3 +108,19 @@ test("capture also waits for a write initiated as a pending read publishes its r
 	assert.equal(await store.getLanguage(), "multi");
 	off();
 });
+
+test("provider and language writes preserve each other", async () => {
+	let section: Record<string, string> = { language: "pl" };
+	const store = createDictationLanguageStore(async (_url, init) => {
+		if (init?.method === "PUT") section = JSON.parse(init.body as string);
+		return Response.json({ settings: { version: 1, dictation: section } });
+	});
+	await store.load();
+	assert.equal(store.getSnapshot().provider, "deepgram");
+	assert.equal(await store.saveProvider("codex"), true);
+	assert.deepEqual(section, { language: "pl", provider: "codex" });
+	assert.equal(await store.save("fr"), true);
+	assert.deepEqual(section, { language: "fr", provider: "codex" });
+	assert.equal(await store.saveProvider("deepgram"), true);
+	assert.deepEqual(section, { language: "fr" });
+});
