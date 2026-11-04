@@ -17,6 +17,10 @@
  * no-cache/no-transform, X-Accel-Buffering off — plus a `: ping` comment
  * every 25s to keep any intermediary from idling the socket out (locally
  * unnecessary, harmless, and it makes dead-connection detection cheap).
+ * The stream OPENS with a `: connected` comment: a production Next server
+ * holds the response headers until the first body byte, so without it a
+ * remote client (the iPhone app over the LAN) waited the full 25s ping
+ * before EventSource reported open.
  *
  * The DIFFERENCE from the turn stream is lifetime: a turn's stream ends at
  * settle ([DONE]); this channel ends when the CLIENT goes away — cancel()
@@ -24,7 +28,13 @@
  * The closure shape (teardown assigned in start, called in cancel) is the
  * ui-stream subscribe() pattern.
  */
-import { subscribe, type ServerEvent } from "../core/events.ts";
+import { emit, subscribe, type ServerEvent } from "../core/events.ts";
+
+/** Tells every connected device that server-wide settings changed (keys,
+ *  custom provider, a settings section) so each re-reads its copy. */
+export function announceSettingsChanged(section: string): void {
+	emit("settings-changed", { section });
+}
 
 /** One window's subscription as an SSE Response. */
 export function eventsResponse(): Response {
@@ -61,6 +71,7 @@ export function eventsResponse(): Response {
 				const { type, ...payload } = event;
 				frame(`event: ${type}\ndata: ${JSON.stringify(payload)}\n\n`);
 			});
+			frame(": connected\n\n");
 			heartbeat = setInterval(() => frame(": ping\n\n"), 25_000);
 
 			teardown = stop;

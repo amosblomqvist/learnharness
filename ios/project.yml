@@ -1,0 +1,47 @@
+# iPhone client for a self-hosted LearnHarness server (docs/ios.md).
+# Generate the Xcode project with: xcodegen generate
+name: LearnHarness
+options:
+  bundleIdPrefix: com.example
+  deploymentTarget:
+    iOS: "17.0"
+  createIntermediateGroups: true
+settings:
+  base:
+    MARKETING_VERSION: "1.0"
+    CURRENT_PROJECT_VERSION: "1"
+    SWIFT_VERSION: "5.0"
+    # Set your team in Xcode (Signing & Capabilities) to install on an iPhone.
+    DEVELOPMENT_TEAM: ""
+targets:
+  LearnHarness:
+    type: application
+    platform: iOS
+    sources: [LearnHarness]
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.example.learnharness
+        PRODUCT_NAME: LearnHarness
+        TARGETED_DEVICE_FAMILY: "1,2"
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        GENERATE_INFOPLIST_FILE: NO
+        INFOPLIST_FILE: LearnHarness/Info.plist
+        CODE_SIGN_STYLE: Automatic
+  LearnHarnessTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources: [LearnHarnessTests]
+    dependencies:
+      - target: LearnHarness
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        PRODUCT_BUNDLE_IDENTIFIER: com.example.learnharness.tests
+schemes:
+  LearnHarness:
+    build:
+      targets:
+        LearnHarness: all
+        LearnHarnessTests: [test]
+    test:
+      targets: [LearnHarnessTests]

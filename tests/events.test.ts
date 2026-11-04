@@ -8,7 +8,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { emit, subscribe, type ServerEvent } from "../src/core/events.ts";
-import { eventsResponse } from "../src/server/events-stream.ts";
+import { announceSettingsChanged, eventsResponse } from "../src/server/events-stream.ts";
 
 // ─── the bus ────────────────────────────────────────────────────────────────
 
@@ -77,7 +77,19 @@ function decode(chunk: Uint8Array): string {
 	return new TextDecoder().decode(chunk);
 }
 
+/** Consume the opening `: connected` comment every channel starts with. */
+async function skipOpening(reader: ReadableStreamDefaultReader<Uint8Array>): Promise<void> {
+	const { value } = await reader.read();
+	assert.equal(decode(value!), ": connected\n\n");
+}
+
 describe("eventsResponse (the SSE seam)", () => {
+	it("opens with a comment so the headers flush before the first event", async () => {
+		const reader = eventsResponse().body!.getReader();
+		await skipOpening(reader);
+		await reader.cancel();
+	});
+
 	it("holds an SSE response: event frames as they are emitted", async () => {
 		const res = eventsResponse();
 		assert.equal(res.status, 200);
@@ -85,6 +97,7 @@ describe("eventsResponse (the SSE seam)", () => {
 		assert.equal(res.headers.get("Cache-Control"), "no-cache, no-transform");
 		assert.equal(res.headers.get("X-Accel-Buffering"), "no");
 		const reader = res.body!.getReader();
+		await skipOpening(reader);
 		// The listener attached synchronously in start() — emit NOW lands
 		// as a queued chunk (no race, single-threaded).
 		emit("turn-started", { chatId: "chat_x" });
@@ -103,6 +116,7 @@ describe("eventsResponse (the SSE seam)", () => {
 		const second = eventsResponse();
 		const r1 = first.body!.getReader();
 		const r2 = second.body!.getReader();
+		await skipOpening(r2);
 		await r1.cancel(); // window one goes away
 		emit("turn-settled", { chatId: "chat_y" });
 		// window two still receives…
@@ -120,6 +134,7 @@ describe("eventsResponse (the SSE seam)", () => {
 		// stream — it stays live for the next event.
 		const res = eventsResponse();
 		const reader = res.body!.getReader();
+		await skipOpening(reader);
 		emit("turn-settled", { chatId: "chat_z" });
 		await reader.read();
 		emit("chats-changed", {});
@@ -127,5 +142,20 @@ describe("eventsResponse (the SSE seam)", () => {
 		assert.equal(done, false, "the channel survives every event");
 		assert.match(decode(value!), /event: chats-changed/);
 		await reader.cancel();
+	});
+});
+
+describe("announceSettingsChanged (settings shared across devices)", () => {
+	it("reaches every connected device as a settings-changed frame", async () => {
+		const phone = eventsResponse().body!.getReader();
+		const mac = eventsResponse().body!.getReader();
+		await skipOpening(phone);
+		await skipOpening(mac);
+		announceSettingsChanged("keys");
+		for (const reader of [phone, mac]) {
+			const { value } = await reader.read();
+			assert.equal(decode(value!), 'event: settings-changed\ndata: {"section":"keys"}\n\n');
+			await reader.cancel();
+		}
 	});
 });

@@ -21,6 +21,7 @@
  * switching sections never refetches.
  */
 
+import { NATIVE_OPEN_SETTINGS_EVENT, postToNative } from "@/components/native-shell";
 import {
 	createContext,
 	useCallback,
@@ -90,11 +91,27 @@ export function SettingsDialogProvider({
 		setShow(true);
 	}, []);
 	useEffect(() => window.lh?.onOpenSettings?.((section) => open(section)), [open]);
+	// The iPhone app's Settings tab opens a section directly (native-shell.ts);
+	// a request made before this provider mounted waits on the window.
+	useEffect(() => {
+		const onNativeOpen = (e: Event) => open((e as CustomEvent<string | undefined>).detail);
+		window.addEventListener(NATIVE_OPEN_SETTINGS_EVENT, onNativeOpen);
+		const pendingSection = window.lhNativePendingSettings;
+		if (pendingSection !== undefined) {
+			window.lhNativePendingSettings = undefined;
+			open(pendingSection || undefined);
+		}
+		return () => window.removeEventListener(NATIVE_OPEN_SETTINGS_EVENT, onNativeOpen);
+	}, [open]);
+	const close = useCallback(() => {
+		setShow(false);
+		postToNative({ type: "settingsClosed" });
+	}, []);
 	return (
 		<ChatGPTUIProvider><NativeSubscriptionUIProvider><DialogContext.Provider value={{ open }}>
 			{children}
 			{show && (
-				<SettingsDialog onClose={() => setShow(false)} initialSection={landOn} initialRow={landOnRow} />
+				<SettingsDialog onClose={close} initialSection={landOn} initialRow={landOnRow} />
 			)}
 		</DialogContext.Provider></NativeSubscriptionUIProvider></ChatGPTUIProvider>
 	);
@@ -267,7 +284,7 @@ export function SettingsDialogBody({
 			aria-modal="true"
 			aria-label="Settings"
 			data-testid="settings-dialog"
-			className="settings-dialog-pop flex h-[620px] max-h-[85vh] w-[920px] max-w-[90vw] flex-col overflow-hidden rounded-md border border-border bg-card shadow-xl"
+			className="lh-settings-dialog settings-dialog-pop flex h-[620px] max-h-[85vh] w-[920px] max-w-[90vw] flex-col overflow-hidden rounded-md border border-border bg-card shadow-xl"
 			onClick={(e) => e.stopPropagation()}
 		>
 			{/* Header — the app's quiet CMU title language. */}
@@ -299,13 +316,13 @@ export function SettingsDialogBody({
 					</Hint>
 			</header>
 
-			<div className="flex min-h-0 flex-1">
+			<div className="lh-settings-body flex min-h-0 flex-1">
 				{/* Left nav — text-only, the session-list mono language,
 					    active = bg-accent. */}
 				<nav
 					aria-label="Settings sections"
 					data-testid="settings-nav"
-					className="flex w-44 shrink-0 flex-col gap-1 border-r border-border p-2"
+					className="lh-settings-nav flex w-44 shrink-0 flex-col gap-1 border-r border-border p-2"
 				>
 					{SECTIONS.map((s) => (
 						<button

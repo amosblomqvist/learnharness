@@ -1,0 +1,11 @@
+node_modules
+.next
+dist
+data
+.fresh-data
+auth.json
+*-credentials.json*
+.env*
+!.env.server.example
+.git
+*.log

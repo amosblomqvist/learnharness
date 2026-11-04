@@ -82,7 +82,7 @@ function fixture({ packaged = true, updaterMissing = false } = {}) {
 		app, BrowserWindow: FakeWindow,
 		Menu: { buildFromTemplate: (value: typeof menu) => value, setApplicationMenu: (value: typeof menu) => { menu = value; } },
 		ipcMain: { on() {}, handle: (channel: string, fn: (event: unknown) => unknown) => handles.set(channel, fn) },
-		session: { defaultSession: { setPermissionRequestHandler() {}, setPermissionCheckHandler() {} } },
+		session: { defaultSession: { setPermissionRequestHandler() {}, setPermissionCheckHandler() {}, getUserAgent: () => "Electron", setUserAgent() {} } },
 	};
 	const context = createContext({
 		require: (id: string) => {

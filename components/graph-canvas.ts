@@ -292,6 +292,10 @@ const ZOOM_EASE_MS = 45; // wheel-zoom glide: exponential-ease time constant (~2
 /** Extra pickable radius (px) beyond the disc — the whole halo is
  *  hit-testable (the old flicker fix, minus the picking shader). */
 const PICKING_PAD = 10;
+/** A fingertip is far less precise than a cursor: on touch screens (the
+ *  iPhone app) a tap picks the nearest node within this many pixels. */
+const TOUCH_PICKING_PAD = 22;
+const COARSE_POINTER = typeof matchMedia !== "undefined" && matchMedia("(pointer: coarse)").matches;
 
 /** Click vs drag threshold: pointer travel under this many px is a click. */
 const CLICK_SLOP = 4;
@@ -1061,7 +1065,7 @@ export class GraphCanvasRenderer {
 		// nodeSize is world units now (2026-09-15): the on-screen hit radius
 		// is the disc's world radius × the camera zoom, plus the constant
 		// screen pad — the whole halo stays hit-testable.
-		const maxDist = this.settings.nodeSize * k + PICKING_PAD;
+		const maxDist = this.settings.nodeSize * k + (COARSE_POINTER ? TOUCH_PICKING_PAD : PICKING_PAD);
 		const projected: { id: string; x: number; y: number }[] = [];
 		for (const n of this.data.nodes) {
 			if (this.visible && !this.visible.has(n.id)) continue;

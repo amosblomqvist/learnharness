@@ -42,6 +42,11 @@ export interface ServerEvents {
 	"sources-changed": Record<string, never>;
 	/** Web subscription state changed. No account or credential data on the bus. */
 	"subscriptions-changed": Record<string, never>;
+	/** Server-wide settings changed: a provider key, a custom provider, or a
+	 *  settings section (models, agent, appearance…). Every connected device
+	 *  re-reads, so a key added on one shows on all of them. `section` uses
+	 *  the client's settings-signal names ("keys", "models", …). */
+	"settings-changed": { section: string; chatId?: never };
 	/** A chat's record changed WITHOUT a turn (the silent dismissal write).
 	 *  Same notify-then-fetch contract as the turn events: open views of
 	 *  the chat refetch and adopt the durable record. */
@@ -69,6 +74,7 @@ export const SERVER_EVENT_TYPES = [
 	"subscriptions-changed",
 	"record-changed",
 	"compaction-changed",
+	"settings-changed",
 ] as const satisfies readonly ServerEventType[];
 
 /** One notification: the type discriminates the payload. */
