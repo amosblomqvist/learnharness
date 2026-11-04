@@ -1,4 +1,4 @@
-import { isTurnRunning, listJobs } from "@/src/server";
+import { isTurnRunning, listJobs, retryDemoJob, JobRetryError } from "@/src/server";
 
 export const dynamic = "force-dynamic";
 
@@ -20,4 +20,26 @@ export async function GET(req: Request) {
 		return Response.json({ error: "Invalid chatId" }, { status: 400 });
 	}
 	return Response.json({ jobs: listJobs(chatId), turnInFlight: isTurnRunning(chatId) });
+}
+
+
+/** Retry the original failed demo request without adding a learner message. */
+export async function POST(req: Request) {
+	let body: unknown;
+	try {
+		body = await req.json();
+	} catch {
+		return Response.json({ error: "Invalid JSON body" }, { status: 400 });
+	}
+	if (!body || typeof body !== "object" || !("chatId" in body) || !("jobId" in body) ||
+		typeof body.chatId !== "string" || typeof body.jobId !== "string") {
+		return Response.json({ error: "chatId and jobId are required" }, { status: 400 });
+	}
+	try {
+		return Response.json({ job: retryDemoJob(body.chatId, body.jobId) });
+	} catch (error) {
+		if (error instanceof JobRetryError) return Response.json({ error: error.message }, { status: error.status });
+		console.error("[jobs] demo retry failed", error);
+		return Response.json({ error: "Could not retry the demo. Try again." }, { status: 500 });
+	}
 }

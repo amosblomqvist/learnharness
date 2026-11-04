@@ -142,6 +142,8 @@ export interface CreateJobInit {
 	kind: JobKind;
 	chatId: string;
 	toolCallId: string;
+	/** The failed attempt this new job retries. */
+	retryOf?: string;
 	/** First activity line (defaults to "starting"). */
 	activity?: string;
 	/** Saved on the job before its worker is spawned. */
@@ -149,7 +151,7 @@ export interface CreateJobInit {
 }
 
 /** Mergeable fields — identity (id, kind, chatId, toolCallId, createdAt) is immutable. */
-export type JobPatch = Partial<Omit<JobRecord, "id" | "kind" | "chatId" | "toolCallId" | "createdAt">>;
+export type JobPatch = Partial<Omit<JobRecord, "id" | "kind" | "chatId" | "toolCallId" | "createdAt" | "retryOf">>;
 
 export interface JobStore {
 	/** Create a running job (keyed by toolCallId for spawn dedup). */

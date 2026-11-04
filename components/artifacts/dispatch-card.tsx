@@ -1,10 +1,11 @@
 "use client";
 
-import { useContext } from "react";
+import { useContext, useRef, useState, type ReactNode } from "react";
 import { CheckIcon, SettingsIcon, XIcon } from "lucide-react";
 import { JobsContext } from "@/components/jobs-context";
 import { ChatActionsContext } from "@/components/chat";
 import { isModelsRefusal, isProviderKeyRefusal, type JobKind, type JobRecord } from "@/src/core";
+import { latestJobAttempt } from "@/components/job-attempt";
 import { BrailleSpinner } from "@/components/braille-spinner";
 
 /**
@@ -28,7 +29,42 @@ const KIND_LABEL: Record<JobKind, string> = {
 
 export function DispatchCard({ toolCallId, kind }: { toolCallId: string; kind: JobKind }) {
 	const jobs = useContext(JobsContext);
-	const job = jobs.find((j) => j.toolCallId === toolCallId) ?? null;
+	const ctx = useContext(ChatActionsContext);
+	const [accepted, setAccepted] = useState<JobRecord | null>(null);
+	const [retrying, setRetrying] = useState(false);
+	const [retryError, setRetryError] = useState<string | null>(null);
+	const inFlight = useRef(false);
+	const candidates = accepted && accepted.chatId === ctx?.chatId && accepted.toolCallId === toolCallId && !jobs.some((j) => j.id === accepted.id)
+		? [...jobs, accepted] : jobs;
+	const job = latestJobAttempt(candidates, toolCallId);
+	async function retry() {
+		if (!ctx || !job || inFlight.current) return;
+		inFlight.current = true;
+		setRetrying(true);
+		setRetryError(null);
+		try {
+			const response = await fetch("/api/jobs", {
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({ chatId: ctx.chatId, jobId: job.id }),
+			});
+			const data = await response.json() as { job?: JobRecord; error?: string };
+			if (!response.ok || !data.job) throw new Error(data.error || "Could not retry the demo. Try again.");
+			setAccepted(data.job);
+		} catch (error) {
+			setRetryError(error instanceof Error ? error.message : "Could not retry the demo. Try again.");
+		} finally {
+			inFlight.current = false;
+			setRetrying(false);
+		}
+	}
+	const retryAction = kind === "demo" && job?.status === "error" && ctx ? <>
+		<button type="button" data-testid="dispatch-retry" disabled={retrying} onClick={() => void retry()}
+			className="ml-1 rounded-sm border border-border bg-card px-2 py-0.5 font-ui normal-case tracking-normal text-foreground transition-colors hover:border-muted-foreground/50 disabled:opacity-50">
+			{retrying ? "Retrying…" : "Retry"}
+		</button>
+		{retryError && <span role="alert" className="text-red-500">{retryError}</span>}
+	</> : null;
 	const label = KIND_LABEL[kind];
 
 	if (!job || job.status === "running") {
@@ -41,10 +77,10 @@ export function DispatchCard({ toolCallId, kind }: { toolCallId: string; kind: J
 	// whose key is gone reads as the key being needed — the deep-link
 	// lands on the SetupDialog's first-key stage on its own.
 	if (isModelsRefusal(job.error)) {
-		return <DispatchRefusedCard label={label} line="needs model setup" button="Set up models" />;
+		return <DispatchRefusedCard label={label} line="needs model setup" button="Set up models">{retryAction}</DispatchRefusedCard>;
 	}
 	if (isProviderKeyRefusal(job.error)) {
-		return <DispatchRefusedCard label={label} line="needs a provider key" button="Add a key" />;
+		return <DispatchRefusedCard label={label} line="needs a provider key" button="Add a key">{retryAction}</DispatchRefusedCard>;
 	}
 	const failed = job.status === "error";
 	return (
@@ -55,12 +91,13 @@ export function DispatchCard({ toolCallId, kind }: { toolCallId: string; kind: J
 			{failed ? <XIcon className="size-3.5 text-red-500" /> : <CheckIcon className="size-3.5" />}
 			<span className="font-medium uppercase tracking-wide">{label}</span>
 			<span>{failed ? "failed" : "finished"}</span>
+			{retryAction}
 		</div>
 	);
 }
 
 /** The refused card: quiet info tone — nothing red, nothing "failed". */
-function DispatchRefusedCard({ label, line, button }: { label: string; line: string; button: string }) {
+function DispatchRefusedCard({ label, line, button, children }: { label: string; line: string; button: string; children?: ReactNode }) {
 	const ctx = useContext(ChatActionsContext);
 	return (
 		<div
@@ -80,6 +117,7 @@ function DispatchRefusedCard({ label, line, button }: { label: string; line: str
 					{button}
 				</button>
 			)}
+			{children}
 		</div>
 	);
 }

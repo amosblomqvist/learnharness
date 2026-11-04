@@ -1,3 +1,4 @@
+import { resolveJobInput } from "../../core/job-input.ts";
 import type { PiEngine } from "../models.ts";
 import type { SearchProvider } from "../../core/search.ts";
 import {
@@ -279,21 +280,7 @@ export function createJobRunner(deps: JobRunnerDeps): JobRunner {
 		input: JobToolInput | undefined,
 	): JobToolInput | undefined {
 		if (input) return input;
-		if (job.input !== undefined) return job.input as JobToolInput;
-		const chat = chatStore.getChat(job.chatId);
-		if (!chat) return undefined;
-		// Wave D: the record is native history — the scan reads the native
-		// assistant blocks directly (a toolCall's arguments are the input).
-		for (const m of chat.messages) {
-			if ((m as { role?: string }).role !== "assistant") continue;
-			const content = (m as { content?: unknown }).content;
-			if (!Array.isArray(content)) continue;
-			for (const block of content as Array<{ type?: string; id?: string; arguments?: unknown }>) {
-				if (block.type !== "toolCall" || block.id !== job.toolCallId) continue;
-				return block.arguments as JobToolInput | undefined;
-			}
-		}
-		return undefined;
+		return resolveJobInput(job, chatStore.getChat(job.chatId)?.messages ?? []) as JobToolInput | undefined;
 	}
 
 	/**
