@@ -36,6 +36,7 @@ import {
 } from "@/src/core";
 import { SettingsGroup } from "./controls.tsx";
 import { SubscriptionConnections } from "./subscription-connections.tsx";
+import { AntigravityInstallationStatus } from "./antigravity-status.tsx";
 import { ClaudeCodeInstallationStatus } from "./claude-code-status.tsx";
 import { ProviderMenuList } from "./model-menu.tsx";
 import { MenuShell } from "@/components/menu-shell";
@@ -577,6 +578,7 @@ export function KeysSection({
 
 			<SettingsGroup label="External CLI" testid="group-external-cli">
 				<ClaudeCodeInstallationStatus />
+				<AntigravityInstallationStatus />
 			</SettingsGroup>
 
 			{(["Dictation", "Search"] as const).map((label) => <SettingsGroup key={label} label={label} testid={label === "Dictation" ? "group-dictation" : "group-search"}>

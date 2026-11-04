@@ -74,6 +74,8 @@ npm test           # deterministic, no LLM, no network
 
 See the [development guide](docs/development.md) for setup and checks, [architecture](docs/architecture.md) for the shipped runtime, [keyboard reference](docs/keyboard.md) for shortcuts, and [desktop release guide](docs/desktop-release.md) for packaging and updates.
 
+LearnHarness also supports [Google Antigravity CLI with your Google account subscription](docs/antigravity.md).
+
 Questions, bug reports, and feature requests: [GitHub Issues](https://github.com/amosblomqvist/learnharness/issues).
 
 ## License
