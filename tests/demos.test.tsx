@@ -1118,3 +1118,20 @@ describe("tool + renderer registry wiring", () => {
 		assert.match(lsHtml, /~/);
 	});
 });
+
+describe("study time: the bridge forwards learner input (docs/designs/study-time.md)", () => {
+	it("DEMO_BRIDGE_SCRIPT posts throttled demo-input and demo-blur", () => {
+		assert.ok(DEMO_BRIDGE_SCRIPT.includes('{type:"demo-input"}'));
+		assert.ok(DEMO_BRIDGE_SCRIPT.includes('{type:"demo-blur"}'));
+		assert.ok(DEMO_BRIDGE_SCRIPT.includes("n-lastIn>=5000"), "at most one demo-input per 5 seconds");
+		for (const t of ["keydown", "pointerdown", "wheel", "touchmove", "pointermove"]) {
+			assert.ok(DEMO_BRIDGE_SCRIPT.includes(`"${t}"`), t);
+		}
+	});
+
+	it("reduceDemoBridgeState leaves state unchanged for both", () => {
+		const state = { height: 200, error: null };
+		assert.equal(reduceDemoBridgeState(state, { type: "demo-input" }), state);
+		assert.equal(reduceDemoBridgeState(state, { type: "demo-blur" }), state);
+	});
+});

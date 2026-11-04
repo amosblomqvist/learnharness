@@ -19,8 +19,9 @@
  * lifts the pick set; the chip opens the overlay in select mode).
  */
 import { useCallback, useEffect, useState } from "react";
-import { ListTreeIcon } from "lucide-react";
+import { ClockIcon, ListTreeIcon } from "lucide-react";
 import { ChainTableOverlay } from "@/components/chain-table.tsx";
+import { StudyTimeOverlay } from "@/components/study-time-overlay";
 import { GraphCostControl } from "@/components/graph-view.tsx";
 import { NotesImportControl, NotesImportErrors, NotesImportNotices, useNotesImport } from "@/components/notes-import.tsx";
 import { Hint } from "@/components/ui/hint";
@@ -97,6 +98,7 @@ export function MinimalHome({
 	const [costs, setCosts] = useState<GraphCostSummary | null>(null);
 	const [chats, setChats] = useState<ChatSummary[]>([]);
 	const [chainsOpen, setChainsOpen] = useState(false);
+	const [studyOpen, setStudyOpen] = useState(false);
 
 	const readState = useCallback(() => {
 		fetch("/api/graph")
@@ -155,6 +157,19 @@ export function MinimalHome({
 			    entry law). */}
 			<div className="lh-no-drag lh-wco-floating absolute right-2 top-2 z-10 flex max-w-[calc(100%-5.5rem)] flex-col items-end gap-2">
 				<div className="flex min-w-0 items-start gap-2">
+					<div className="shrink-0 rounded-xl border bg-card/85 px-1 py-[3px] shadow-lg backdrop-blur">
+						<Hint label="Your study time" side="bottom">
+							<button
+								type="button"
+								onClick={() => setStudyOpen(true)}
+								data-testid="open-study-time"
+								className="flex h-7 items-center gap-1.5 rounded-lg px-2.5 text-xs text-muted-foreground transition-colors hover:bg-accent"
+							>
+								<ClockIcon className="size-3" />
+								Study time
+							</button>
+						</Hint>
+					</div>
 					<div className="graph-chrome-fade-in shrink-0 rounded-xl border bg-card/85 px-1 py-[3px] shadow-lg backdrop-blur">
 						<Hint label="Every reasoning chain" side="bottom">
 							<button
@@ -204,6 +219,7 @@ export function MinimalHome({
 					onPracticeSelectionChange?.(picked);
 				}}
 			/>
+			<StudyTimeOverlay open={studyOpen} onClose={() => setStudyOpen(false)} />
 		</div>
 	);
 }

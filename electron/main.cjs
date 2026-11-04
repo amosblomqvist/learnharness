@@ -29,7 +29,7 @@ const { createChatGPT, fileStore } = require("./chatgpt.cjs");
 const { attachChatGPTChild, trustedSender, chatGPTControl } = require("./chatgpt-ipc.cjs");
 const { createSubscriptions, loadSubscriptionSDK } = require("./subscriptions.cjs");
 const { attachSubscriptionChild, subscriptionControl } = require("./subscription-ipc.cjs");
-const { desktopAPIHeaders } = require("./desktop-api.cjs");
+const { desktopAPIHeaders, HEADER: DESKTOP_API_HEADER } = require("./desktop-api.cjs");
 const { openWebSubscriptionBrowser } = require("./web-subscription-browser.cjs");
 const { randomBytes } = require("node:crypto");
 const { spawn } = require("node:child_process");
@@ -340,6 +340,21 @@ function createWindow(url) {
 
 	trustedAppWindows.add(win);
 	win.once("closed", () => trustedAppWindows.delete(win));
+	// Study time: the renderer's unload "stop" may be refused while the window
+	// closes (the access header is added only while the main frame is alive),
+	// so close every open timer from here. The app has one window. Fire and
+	// forget; on quit the server is already stopping and its shutdown listener
+	// has closed the timers.
+	win.on("close", () => {
+		fetch(new URL("/api/study", url), {
+			method: "POST",
+			headers: {
+				"content-type": "application/json",
+				...(desktopAPISecret ? { [DESKTOP_API_HEADER]: desktopAPISecret } : {}),
+			},
+			body: JSON.stringify({ input: { type: "closeAll" } }),
+		}).catch(() => {});
+	});
 	const allowedOrigin = () => new URL(url).origin;
 	// Deny-by-default; the ONLY grants are media (mic/STT groundwork) and
 	// clipboard-sanitized-write — the copy affordances in the transcript

@@ -19,8 +19,12 @@ function windowOptions(platform: string, env: Record<string, string> = {}) {
 	class FakeWindow {
 		constructor(readonly options: unknown) {}
 		webContents = { on() {}, setWindowOpenHandler() {} };
+		listeners: Record<string, () => void> = {};
 		loadURL() {}
 		once() {}
+		on(event: string, fn: () => void) {
+			this.listeners[event] = fn;
+		}
 	}
 	const electron = {
 		app: { setName() {}, getPath: () => "/fixture/LearnHarness", setPath() {}, requestSingleInstanceLock: () => false, quit() {} },
@@ -308,5 +312,58 @@ describe("desktop release workflow", () => {
 			{ id: 10, tag_name: "v0.3.0", draft: true },
 			{ id: 11, tag_name: "v0.3.0", draft: true },
 		]), /Multiple releases match/);
+	});
+});
+
+describe("study time: closeAll on window close", () => {
+	function closeRequest(secret: string | null) {
+		class FakeWindow {
+			constructor(readonly options: unknown) {}
+			webContents = { on() {}, setWindowOpenHandler() {} };
+			listeners: Record<string, () => void> = {};
+			loadURL() {}
+			once() {}
+			on(event: string, fn: () => void) {
+				this.listeners[event] = fn;
+			}
+		}
+		const electron = {
+			app: { setName() {}, getPath: () => "/fixture/LearnHarness", setPath() {}, requestSingleInstanceLock: () => false, quit() {} },
+			BrowserWindow: FakeWindow,
+			session: { defaultSession: { setPermissionRequestHandler() {}, setPermissionCheckHandler() {} } },
+		};
+		const calls: { url: string; init: { method: string; headers: Record<string, string>; body: string } }[] = [];
+		const context = {
+			require: (id: string) => (id === "electron" ? electron : mainRequire(id)),
+			process: { platform: "darwin", argv: [], env: {}, on() {} },
+			__dirname: dirname(mainFile),
+			URL,
+			fetch: (url: URL, init: { method: string; headers: Record<string, string>; body: string }) => {
+				calls.push({ url: String(url), init });
+				return Promise.reject(new Error("offline")); // errors are ignored
+			},
+		};
+		runInNewContext(mainSource, context, { filename: mainFile });
+		if (secret) runInNewContext(`desktopAPISecret = "${secret}"`, context);
+		const win = runInNewContext('createWindow("http://127.0.0.1:9000")', context) as FakeWindow;
+		assert.equal(typeof win.listeners.close, "function", "the window registers a close listener");
+		win.listeners.close?.();
+		return calls;
+	}
+
+	it("posts closeAll to the app's own /api/study with the desktop secret", () => {
+		const secret = "a".repeat(64);
+		const [call] = closeRequest(secret);
+		assert.equal(call?.url, "http://127.0.0.1:9000/api/study");
+		assert.equal(call?.init.method, "POST");
+		assert.deepEqual(JSON.parse(call?.init.body ?? ""), { input: { type: "closeAll" } });
+		assert.equal(call?.init.headers["x-learnharness-desktop"], secret);
+		assert.equal(call?.init.headers["content-type"], "application/json");
+	});
+
+	it("sends no secret header in desktop:dev (no secret set)", () => {
+		const [call] = closeRequest(null);
+		assert.equal(call?.url, "http://127.0.0.1:9000/api/study");
+		assert.equal("x-learnharness-desktop" in (call?.init.headers ?? {}), false);
 	});
 });

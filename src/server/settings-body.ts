@@ -22,11 +22,12 @@ import type {
 	GeneralSettings,
 	DictationSettings,
 	GraphSettings,
+	StudyTimeSettings,
 	ModelsSettings,
 	ModelSlot,
 	RoleModelOverride,
 } from "../core/settings.ts";
-import { BACKGROUND_MODEL_ROLES, CACHE_RETENTIONS, COMPACTION_THRESHOLD_FLOOR, CUSTOM_MODEL_PIN_FLOOR, EXTRACTION_CHUNK_TOKENS_FLOOR, MODEL_SLOTS } from "../core/settings.ts";
+import { STUDY_IDLE_MINUTES_MAX, STUDY_IDLE_MINUTES_MIN, BACKGROUND_MODEL_ROLES, CACHE_RETENTIONS, COMPACTION_THRESHOLD_FLOOR, CUSTOM_MODEL_PIN_FLOOR, EXTRACTION_CHUNK_TOKENS_FLOOR, MODEL_SLOTS } from "../core/settings.ts";
 import { WRITABLE_TOOL_KEYS } from "../core/pending.ts";
 import { isDictationLanguage } from "../core/dictation.ts";
 
@@ -405,6 +406,31 @@ export function parseDictationSettingsBody(body: unknown): SettingsBodyResult<Di
 	return { ok: true, settings: { language: raw.language } };
 }
 
+/** studyTime: { idleMinutes?: integer 1–60, weekStart?: "monday" | "sunday" } */
+export function parseStudyTimeSettingsBody(body: unknown): SettingsBodyResult<StudyTimeSettings> {
+	const raw = asRecord(body);
+	if (!raw) return { ok: false, error: "Invalid JSON body" };
+	const settings: StudyTimeSettings = {};
+	if (raw.idleMinutes !== undefined) {
+		if (
+			typeof raw.idleMinutes !== "number" ||
+			!Number.isInteger(raw.idleMinutes) ||
+			raw.idleMinutes < STUDY_IDLE_MINUTES_MIN ||
+			raw.idleMinutes > STUDY_IDLE_MINUTES_MAX
+		) {
+			return { ok: false, error: `idleMinutes must be a whole number from ${STUDY_IDLE_MINUTES_MIN} to ${STUDY_IDLE_MINUTES_MAX}` };
+		}
+		settings.idleMinutes = raw.idleMinutes;
+	}
+	if (raw.weekStart !== undefined) {
+		if (raw.weekStart !== "monday" && raw.weekStart !== "sunday") {
+			return { ok: false, error: 'weekStart must be "monday" or "sunday"' };
+		}
+		settings.weekStart = raw.weekStart;
+	}
+	return { ok: true, settings };
+}
+
 /** The custom endpoint's per-model pins (PATCH /api/custom-provider): the
  *  whole desired map, replace-whole like every section. Strict write side — a
  *  token count must be a whole number at or above the floor (the read side
@@ -456,6 +482,7 @@ export const SETTINGS_SECTIONS = {
 	models: parseModelsSettingsBody,
 	dictation: parseDictationSettingsBody,
 	claudeCode: parseClaudeCodeSettingsBody,
+	studyTime: parseStudyTimeSettingsBody,
 } as const;
 
 export type SettingsSectionName = keyof typeof SETTINGS_SECTIONS;
