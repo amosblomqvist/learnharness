@@ -182,9 +182,10 @@ describe("md-blocks — key-idea callouts (GitHub alerts, owner round 2026-10-07
 		assert.ok(html.includes('data-alert-kind="important"'), "the kind is recorded");
 		assert.match(html, /ALL X is done through Y\./, "the prose survives");
 		assert.ok(!html.includes("[!IMPORTANT]"), "the marker line never leaks as text");
-		// The owner's minimal law: sharp corners (no rounded), white stroke,
-		// no background, no label, no icon — and the box hugs its text.
-		assert.match(html, /border-white/, "white stroke");
+		// The owner's minimal law: sharp corners (no rounded), white stroke
+		// (the strong line ink — white in dark), no background, no label, no
+		// icon — and the box hugs its text.
+		assert.match(html, /border-line-strong/, "strong-ink stroke");
 		assert.match(html, /w-fit/, "width: fit-content — the hug");
 		assert.ok(!html.includes("rounded"), "sharp corners — no rounding anywhere");
 		assert.ok(!html.includes("bg-card") && !html.includes("bg-background"), "transparent — no background");

@@ -172,9 +172,11 @@ describe("plan block render", () => {
 		assert.match(html, /<text[^>]*x="48"[^>]*text-anchor="middle"/); // 96/2
 		assert.ok(!/x="12"/.test(html), "no left-inset text");
 		// The in-chat block speaks the dock language (owner, 2026-10-07):
-		// lighter-background boxes like the composer shells — with WHITE
-		// outlines (owner follow-up: gray fill good, box edges stay white).
-		assert.match(html, /<rect[^>]*class="fill-card stroke-white"/);
+		// lighter-background boxes like the composer shells — with the strong
+		// line ink outlines (white in dark; owner follow-up: gray fill good,
+		// box edges stay white).
+		assert.match(html, /<rect[^>]*class="fill-card stroke-line-strong"/);
+		assert.ok(!/stroke-white|fill-white/.test(html), "no hardcoded white ink");
 		// Two stacked nodes: 2*NODE_H + GAP_Y = 136 extent + GRAPH_PAD on
 		// every side (strokes/glow never clip at the edges). The width
 		// rides the hug now: 96-min boxes, not the old 160 slabs.
@@ -276,7 +278,8 @@ describe("plan popup (live derivation)", () => {
 		assert.equal(dimHeads, 1, "the gray-origin edge dims");
 		assert.equal(whiteHeads, 1, "the both-white edge stays white");
 		assert.match(html, /<path[^>]*class="fill-none stroke-border"/);
-		assert.match(html, /<path[^>]*class="fill-none stroke-white"/);
+		assert.match(html, /<path[^>]*class="fill-none stroke-line-strong"/);
+		assert.ok(!/stroke-white|fill-white/.test(html), "no hardcoded white ink");
 	});
 
 	it("renders the empty state when the session has no plan", () => {

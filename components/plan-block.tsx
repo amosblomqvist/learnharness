@@ -310,7 +310,7 @@ export const TEXT_CAP_SCALE = 16 / 12.5;
 /** Baked from arrowhead_1.svg (the CM/MJX long-arrow head), transform chain
  *  collapsed: viewBox 0 0 50.2 104, tip at (50.2, 52), notch mouth at
  *  x 27.2 with a 9.6-tall opening — at full height 104 the tail opening
- *  is ≈10, per the owner's spec. Solid white fill, no padding. */
+ *  is ≈10, per the owner's spec. Solid strong-ink fill, no padding. */
 export const ARROW_HEAD = "M48,55.2C49.4,54.6 50.2,53.4 50.2,52C50.2,50.6 49.4,49.4 48,48.8C38.2,45.6 29.2,38.8 21,28.4C15.2,21.4 11.4,13.2 9.6,3.8C9,1.2 7.4,0 4.8,0C1.6,0 0,1.6 0,5L0.2,5.6C3.6,23 12.6,36.8 27.2,47.2L27.2,56.8C12.6,67.2 3.6,81 0.2,98.4L0,99C0,102.4 1.6,104 4.8,104C7.4,104 9,102.8 9.6,100.2C11.4,90.8 15.2,82.6 21,75.6C29.2,65.2 38.2,58.4 48,55.2Z";
 /** Lines + outlines run at the app's standard border weight (owner,
  *  2026-09-26 — same 1px the UI borders use; was 1.5). */
@@ -438,30 +438,31 @@ export function edgePathD(
 
 // ─── Status styling (the retired panel's color language, unchanged) ──────────
 
-// The simple look (owner, plan-graph round 4): rectangular boxes, white
-// outlines/arrows/text; no fill on visited, today's gray look on upcoming,
+// The simple look (owner, plan-graph round 4): rectangular boxes,
+// outlines/arrows/text in the strong line ink (white in dark, the
+// foreground in light); no fill on visited, today's gray look on upcoming,
 // and the current node carries a faint yellow glow (a blurred yellow fill
-// bleeding over the edges). The IN-CHAT block is monochrome white instead
-// — no status language; the popup/window show the progression.
+// bleeding over the edges). The IN-CHAT block is monochrome instead — no
+// status language; the popup/window show the progression.
 const BOX: Record<PlanNodeStatus, string> = {
 	// 50%-opacity app background instead of true transparency: a routed
 	// edge passing behind the box composites UNDER the fill — dimmed to
 	// half, not shown straight through (owner, round 9).
-	visited: "fill-background/50 stroke-white",
-	current: "fill-background/50 stroke-white",
+	visited: "fill-background/50 stroke-line-strong",
+	current: "fill-background/50 stroke-line-strong",
 	// The grayed-out not-yet-visited look stays as-is (owner).
 	upcoming: "fill-card stroke-border",
 };
 const TEXT: Record<PlanNodeStatus, string> = {
-	visited: "fill-white text-xs",
-	current: "fill-white text-xs font-medium",
+	visited: "fill-line-strong text-xs",
+	current: "fill-line-strong text-xs font-medium",
 	upcoming: "fill-muted-foreground/80 text-xs",
 };
 // The in-chat block speaks the dock language now (owner, plan-hug
 // round 2026-10-07): boxes in the lighter background variant like
-// the composer/dock shells — but the outlines STAY white (owner
-// follow-up: the gray fill is good, white box edges).
-const MONO_BOX = "fill-card stroke-white";
+// the composer/dock shells — but the outlines STAY the strong line ink,
+// white in dark (owner follow-up: the gray fill is good, white box edges).
+const MONO_BOX = "fill-card stroke-line-strong";
 const MONO_TEXT = "fill-foreground text-xs";
 
 /** The diagram itself: positioned nodes + bezier edges. Pure-ish render —
@@ -500,7 +501,7 @@ export function PlanDiagram({
 	 *  the popup's transform math depends on it; w-full inside the popup's
 	 *  shrink-to-fit wrapper resolved to the popup width and broke fit. */
 	naturalSize?: boolean;
-	/** The in-chat block's mode: every node white (fill-none, white stroke
+	/** The in-chat block's mode: every node in the strong line ink (stroke
 	 *  and text, no glow) — statuses never show in the transcript (owner). */
 	monochrome?: boolean;
 	/** Meet-fits the diagram inside a fixed box (h-full w-full — the svg's
@@ -555,7 +556,7 @@ export function PlanDiagram({
 				>
 					{/* The owner's arrowhead. The mouth (x 27.2) sits at refX so the
 					    line ends AT the notch — the tip beyond it is solid fill. */}
-					<path d={ARROW_HEAD} className="fill-white" />
+					<path d={ARROW_HEAD} className="fill-line-strong" />
 				</marker>
 				{/* Same head, grayed — arrows into not-yet-visited nodes are
 				    grayed out like the nodes themselves (owner, round 6). */}
@@ -604,7 +605,7 @@ export function PlanDiagram({
 					<path
 						key={`${e.from}->${e.to}`}
 						d={edgePathD(pts, target)}
-						className={dim ? "fill-none stroke-border" : "fill-none stroke-white"}
+						className={dim ? "fill-none stroke-border" : "fill-none stroke-line-strong"}
 						strokeWidth={STROKE_W}
 						markerEnd={`url(#${markerId}${dim ? "-dim" : ""})`}
 					/>

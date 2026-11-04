@@ -275,12 +275,38 @@ describe("KeysSection (thin SSR)", () => {
 });
 
 describe("AppearanceSection (thin SSR)", () => {
-	it("mode is rendered DISABLED — dark-only this wave, no lying control", () => {
+	it("Mode is three preview cards; the stored mode is pressed", () => {
+		const html = renderToStaticMarkup(<AppearanceSection appearance={{ mode: "light" }} onSectionChange={() => {}} />);
+		for (const id of ["dark", "light", "system"]) assert.ok(html.includes(`data-testid="mode-card-${id}"`), id);
+		assert.ok(tagOf(html, "mode-card-light").includes('aria-pressed="true"'));
+		assert.ok(tagOf(html, "mode-card-dark").includes('aria-pressed="false"'));
+		assert.ok(tagOf(html, "mode-card-system").includes('aria-pressed="false"'));
+		assert.equal((html.match(/lucide-check/g) ?? []).length, 1, "one check, on the selected card");
+		assert.ok(!html.includes("Coming soon"));
+	});
+
+	it("absent mode = the factory dark card pressed", () => {
 		const html = renderToStaticMarkup(<AppearanceSection appearance={undefined} onSectionChange={() => {}} />);
-		assert.ok(tagOf(html, "select-mode").includes("disabled"), "mode select disabled");
-		assert.ok(html.includes("Coming soon"));
-		// The whole row dims, graph-view style (the control never adds its own).
-		assert.ok(tagOf(html, "row-mode").includes("opacity-40"), "mode row dims whole");
+		assert.ok(tagOf(html, "mode-card-dark").includes('aria-pressed="true"'));
+	});
+
+	it("previews show swatches of the effective palette (a custom background included)", () => {
+		const html = renderToStaticMarkup(<AppearanceSection appearance={{ background: "#202020" }} onSectionChange={() => {}} />);
+		assert.match(html, /202020/);
+		assert.match(html, /f5f5f3/);
+		// Five per variant card; System adopts those two and lists none.
+		assert.equal((html.match(/data-testid="mode-swatch"/g) ?? []).length, 10);
+	});
+
+	it("the Background row edits the rendered mode's field", () => {
+		// SSR context default resolvedMode = dark → the dark field and hint
+		const html = renderToStaticMarkup(
+			<AppearanceSection appearance={{ background: "#202020", lightBackground: "#eeeeee" }} onSectionChange={() => {}} />,
+		);
+		assert.match(html, /Empty = #141414/);
+		assert.ok(tagOf(html, "input-background").includes('value="#202020"'));
+		const system = renderToStaticMarkup(<AppearanceSection appearance={{ mode: "system" }} onSectionChange={() => {}} />);
+		assert.match(system, /Empty = #141414 \(from system\)/);
 	});
 
 	it("hex inputs carry the factory placeholders; prose size resolves against the factory", () => {

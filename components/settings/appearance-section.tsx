@@ -7,9 +7,10 @@
  * variables move IMMEDIATELY (the section's whole point — it must DO
  * something). Hex inputs commit on blur/Enter; the background derives the
  * raised/accent/edge palette in code (components/settings/appearance.tsx).
- * Mode is dark-only this wave: control rendered DISABLED with a note — the
- * light palette is the design wave's work, and a lying control is worse
- * than an honest disabled one.
+ * Mode (light-mode wave, 2026-10-29) is picked from three preview cards
+ * (./mode-cards.tsx). The Background row follows the RENDERED mode: it
+ * edits `background` while dark is on screen and `lightBackground` while
+ * light is — under System, whichever the OS picked.
  *
  * Graph graying (owner, 2026-09-20) follows the graph viewer's render-panel
  * convention: the whole row dims when a parent is off (stored values
@@ -33,6 +34,7 @@
 import { useEffect, useRef, useState } from "react";
 import {
 	EXTRACTION_CHUNK_TOKENS_FLOOR,
+	MODE_DEFAULT_BACKGROUND,
 	resolveSettings,
 	type AppearanceSettings,
 	type GraphSettings,
@@ -41,7 +43,8 @@ import { MenuShell } from "@/components/menu-shell";
 import { Hint } from "@/components/ui/hint";
 import { useAppearance } from "./appearance.tsx";
 import { FontMenuList } from "./model-menu";
-import { CommitInput, SettingsMenuTrigger, SettingsRow, ThinSelect, Toggle } from "./controls.tsx";
+import { ModeCards } from "./mode-cards.tsx";
+import { CommitInput, SettingsMenuTrigger, SettingsRow, Toggle } from "./controls.tsx";
 
 /** The factory reading family — the DEFAULT row's identity (unset =
  *  this). Exported for tests. */
@@ -97,8 +100,12 @@ export function AppearanceSection({
 	/** PUT the whole appearance section; the page re-applies on success. */
 	onSectionChange: (next: AppearanceSettings) => void;
 }) {
-	const { appearance: resolved } = useAppearance();
+	const { appearance: resolved, resolvedMode } = useAppearance();
 	const md = appearance?.mdRendering;
+	const mode = appearance?.mode ?? "dark";
+	// One Background row, two stored fields: whichever variant is on screen.
+	const backgroundField = resolvedMode === "dark" ? "background" : "lightBackground";
+	const backgroundDefault = MODE_DEFAULT_BACKGROUND[resolvedMode];
 
 	// The font dropdown's open state + its enumeration cache. undefined =
 	// not enumerated yet (desktop: click-bound queryLocalFonts pending);
@@ -186,22 +193,26 @@ export function AppearanceSection({
 
 	return (
 		<>
-			<SettingsRow label="Mode" hint="Coming soon" testid="row-mode" dimmed>
-				<ThinSelect value="dark" ariaLabel="mode" onChange={() => {}} testid="select-mode" disabled>
-					<option value="dark">Dark</option>
-				</ThinSelect>
-			</SettingsRow>
+			<div data-testid="row-mode" className="flex flex-col gap-2 py-1">
+				<span className="block font-prose text-(length:--lh-prose-size)">Mode</span>
+				<ModeCards
+					value={mode}
+					background={appearance?.background ?? null}
+					lightBackground={appearance?.lightBackground ?? null}
+					onSelect={(next) => onSectionChange({ ...appearance, mode: next })}
+				/>
+			</div>
 			<SettingsRow
 				label="Background"
-				hint={`Empty = ${resolved.background ?? "#141414"}`}
+				hint={`Empty = ${backgroundDefault}${mode === "system" ? " (from system)" : ""}`}
 				testid="row-background"
 			>
 				<CommitInput
-					value={appearance?.background ?? ""}
-					placeholder="#141414"
+					value={appearance?.[backgroundField] ?? ""}
+					placeholder={backgroundDefault}
 					ariaLabel="background hex"
 					testid="input-background"
-					onCommit={(v) => onSectionChange({ ...appearance, background: v === "" ? null : v })}
+					onCommit={(v) => onSectionChange({ ...appearance, [backgroundField]: v === "" ? null : v })}
 				/>
 			</SettingsRow>
 			<SettingsRow

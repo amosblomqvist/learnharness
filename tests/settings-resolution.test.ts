@@ -38,6 +38,7 @@ describe("resolveSettings", () => {
 		assert.equal(eff.models.vision, null);
 		assert.equal(eff.appearance.mode, "dark");
 		assert.equal(eff.appearance.background, null);
+		assert.equal(eff.appearance.lightBackground, null);
 		assert.equal(eff.appearance.fontFamily, null);
 		assert.equal(eff.appearance.proseFontSize, 16);
 		assert.equal(eff.appearance.sessionNameSerif, true);
@@ -58,7 +59,7 @@ describe("resolveSettings", () => {
 				prompts: { "system-prompt.md": true },
 				search: { engine: "tavily" },
 			},
-			appearance: { mode: "light", proseFontSize: 20, mdRendering: { headingWeight: 600 } },
+			appearance: { mode: "system", lightBackground: "#eeeeee", proseFontSize: 20, mdRendering: { headingWeight: 600 } },
 			graph: { enabled: false },
 		};
 		const eff = resolveSettings(record);
@@ -73,7 +74,8 @@ describe("resolveSettings", () => {
 		assert.deepEqual(eff.agent.search, { engine: "tavily" });
 		assert.deepEqual(eff.agent.tools, { research: false });
 		assert.deepEqual(eff.agent.prompts, { "system-prompt.md": true });
-		assert.equal(eff.appearance.mode, "light");
+		assert.equal(eff.appearance.mode, "system");
+		assert.equal(eff.appearance.lightBackground, "#eeeeee");
 		assert.equal(eff.appearance.proseFontSize, 20);
 		assert.equal(eff.appearance.mdRendering.headingWeight, 600);
 		// wave 7 collapse: the section IS the master switch (absent budget
