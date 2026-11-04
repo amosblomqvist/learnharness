@@ -11,6 +11,7 @@ import {
 	EXPORT_MARGIN,
 	EXPORT_MAX_SIDE,
 	commit,
+	backfillStartPressure,
 	continuesGesture,
 	endsGesture,
 	exportGeometry,
@@ -95,6 +96,13 @@ describe("stroke model", () => {
 		assert.ok(!continuesGesture(1, { pointerId: 9, pointerType: "touch", buttons: 1 }), "a resting palm never joins");
 		assert.ok(endsGesture(1, { pointerId: 3, pointerType: "pen" }), "either half of the split pen can release");
 		assert.ok(!endsGesture(1, { pointerId: 9, pointerType: "touch" }));
+	});
+
+	it("a pen's zero-pressure contact takes its first real pressure", () => {
+		// OTD Artist Mode via XWayland: pointerdown at 0, motion at 0.03 (light).
+		const points = [{ x: 0, y: 0, p: 0.5 }, { x: 1, y: 1, p: 0.03 }];
+		backfillStartPressure(points, 0.03);
+		assert.deepEqual(points.map((p) => p.p), [0.03, 0.03], "no mid-pressure blob at a light stroke's start");
 	});
 
 	it("undo/redo walk snapshot history; a new commit clears redo", () => {

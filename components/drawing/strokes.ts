@@ -89,6 +89,18 @@ export function exportGeometry(bounds: InkBounds, scale = 2): { width: number; h
 	return { width: Math.max(1, Math.round(w * s)), height: Math.max(1, Math.round(h * s)), scale: s, originX, originY };
 }
 
+/** Samples a stroke may wait for its pen's first real pressure before
+ *  painting at mid pressure anyway (a pen that never reports any). */
+export const PRESSURE_WAIT_SAMPLES = 6;
+
+/** A pen reports pressure 0 at contact and the real value with its first
+ *  motion (OpenTabletDriver Artist Mode via XWayland, the owner's probe,
+ *  2026-11-04): give the stroke's opening points that first real value so
+ *  a light stroke never starts with a mid-pressure blob. */
+export function backfillStartPressure(points: DrawingPoint[], p: number): void {
+	for (const pt of points) pt.p = p;
+}
+
 // ─── gesture pointer matching ──────────────────────────────────────────────
 
 /** Primary contact (tip or left button) or a pen's eraser end. */

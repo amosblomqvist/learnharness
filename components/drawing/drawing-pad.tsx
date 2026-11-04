@@ -10,6 +10,8 @@ import { markDrawingPadOpen } from "@/components/drawing/pad-state";
 import {
 	EXPORT_INK,
 	INKS,
+	PRESSURE_WAIT_SAMPLES,
+	backfillStartPressure,
 	commit,
 	continuesGesture,
 	endsGesture,
@@ -62,7 +64,9 @@ export function DrawingPad({
 	const canvasRef = useRef<HTMLCanvasElement>(null);
 	// The live gesture: a stroke being drawn, or an erase sweep's page.
 	const gesture = useRef<
-		| { kind: "draw"; pointerId: number; stroke: DrawingStroke }
+		/** pressurePending: a pen touched down at pressure 0 — the opening
+		 *  points wait for its first real pressure (backfillStartPressure). */
+		| { kind: "draw"; pointerId: number; stroke: DrawingStroke; pressurePending: boolean }
 		| { kind: "erase"; pointerId: number; page: DrawingStroke[] }
 		| null
 	>(null);
@@ -159,8 +163,9 @@ export function DrawingPad({
 	const pointOf = (e: PointerEvent, rect: DOMRect): DrawingPoint => ({
 		x: e.clientX - rect.left,
 		y: e.clientY - rect.top,
-		// A mouse reports 0.5 while pressed; a pen's 0 (rare first sample)
-		// reads as mid pressure rather than an invisible hairline.
+		// A mouse reports 0.5 while pressed. A pen's 0 (its contact sample,
+		// or a driver that sends none) reads as mid pressure rather than an
+		// invisible hairline; a stroke's start is backfilled once known.
 		p: e.pointerType === "pen" && e.pressure > 0 ? e.pressure : 0.5,
 	});
 
@@ -183,9 +188,12 @@ export function DrawingPad({
 			return;
 		}
 		const stroke: DrawingStroke = { ink, points: [pt] };
-		gesture.current = { kind: "draw", pointerId: e.pointerId, stroke };
+		const pressurePending = e.pointerType === "pen" && native.pressure === 0;
+		gesture.current = { kind: "draw", pointerId: e.pointerId, stroke, pressurePending };
+		// A pending start paints once its pressure is known (onPointerMove);
+		// a tap that never moves commits as a mid-pressure dot.
 		const ctx = e.currentTarget.getContext("2d");
-		if (ctx) paintStrokes(ctx, [stroke], screenColor);
+		if (ctx && !pressurePending) paintStrokes(ctx, [stroke], screenColor);
 	};
 
 	const onPointerMove = (e: React.PointerEvent<HTMLCanvasElement>) => {
@@ -213,6 +221,14 @@ export function DrawingPad({
 			// A split pen can report one position through both devices.
 			if (pt.x === prev.x && pt.y === prev.y) continue;
 			g.stroke.points.push(pt);
+			if (g.pressurePending) {
+				const known = ev.pointerType === "pen" && ev.pressure > 0;
+				if (!known && g.stroke.points.length < PRESSURE_WAIT_SAMPLES) continue;
+				backfillStartPressure(g.stroke.points, pt.p);
+				g.pressurePending = false;
+				if (ctx) paintStrokes(ctx, [g.stroke], screenColor);
+				continue;
+			}
 			// Incremental: paint only the new segment.
 			if (ctx) paintStrokes(ctx, [{ ink: g.stroke.ink, points: [prev, pt] }], screenColor);
 		}
