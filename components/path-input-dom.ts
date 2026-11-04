@@ -1,7 +1,11 @@
-import { parseFilePaths, quoteFilePath } from "@/src/core";
+import { parseComposerTokens, quoteFilePath, type ComposerToken } from "@/src/core";
 
-/** Tokens store their complete source, not their abbreviated visual label. */
+/** Tokens store their complete source, not their abbreviated visual label.
+ *  Both token kinds (file paths, tutor citations) use this one attribute. */
 export const PATH_SOURCE_ATTRIBUTE = "data-file-path-source";
+/** An atomic chip: a quoted file path or a tutor citation link. */
+export type ChipToken = Exclude<ComposerToken, { kind: "text" }>;
+export type ChipHost = { host: HTMLElement; token: ChipToken };
 /** Presentation-only line box for the caret after a final model newline. */
 export const PATH_CARET_ATTRIBUTE = "data-file-path-caret";
 export type TextSelection = { anchor: number; focus: number };
@@ -139,11 +143,11 @@ export function restorePathSelection(root: HTMLElement, selection: TextSelection
 }
 
 /** Returns portal hosts. React owns only their visual contents, never the editable tree. */
-export function renderPathInput(root: HTMLElement, value: string): Array<{ host: HTMLElement; path: string }> {
+export function renderPathInput(root: HTMLElement, value: string): ChipHost[] {
 	const document = root.ownerDocument;
 	const fragment = document.createDocumentFragment();
-	const chips: Array<{ host: HTMLElement; path: string }> = [];
-	for (const part of parseFilePaths(value)) {
+	const chips: ChipHost[] = [];
+	for (const part of parseComposerTokens(value)) {
 		if (part.kind === "text") {
 			fragment.append(document.createTextNode(part.text));
 		} else {
@@ -152,7 +156,7 @@ export function renderPathInput(root: HTMLElement, value: string): Array<{ host:
 			host.setAttribute("contenteditable", "false");
 			host.setAttribute(PATH_SOURCE_ATTRIBUTE, part.text);
 			fragment.append(host);
-			chips.push({ host, path: part.path });
+			chips.push({ host, token: part });
 		}
 	}
 	// Empty boundary text nodes allow a caret immediately before/after an atomic chip.
@@ -181,8 +185,8 @@ export function atomicPathRange(value: string, selection: TextSelection): { star
 	const clamped = clampPathSelection(value, selection);
 	let start = Math.min(clamped.anchor, clamped.focus);
 	let end = Math.max(clamped.anchor, clamped.focus);
-	for (const part of parseFilePaths(value)) {
-		if (part.kind !== "path") continue;
+	for (const part of parseComposerTokens(value)) {
+		if (part.kind === "text") continue;
 		if (start > part.start && start < part.end) start = part.start;
 		if (end > part.start && end < part.end) end = part.end;
 	}
@@ -203,11 +207,32 @@ export function insertFilePaths(value: string, selection: TextSelection, paths: 
 	return replacePathSelection(value, selection, before + text + after);
 }
 
+/** Insert a citation link at the saved range: a separating space before it
+ *  when needed, and one space after it that replaces an existing one. */
+export function insertCitation(value: string, selection: TextSelection, link: string) {
+	const { start, end: rangeEnd } = atomicPathRange(value, selection);
+	const spaceBefore = start > 0 && !/\s/.test(value[start - 1]!);
+	const swallow = value[rangeEnd] === " ";
+	const end = swallow ? rangeEnd + 1 : rangeEnd;
+	const next = replacePathSelection(value, { anchor: start, focus: end }, `${spaceBefore ? " " : ""}${link} `);
+	const linkStart = start + (spaceBefore ? 1 : 0);
+	return { ...next, inserted: { start: linkStart, end: linkStart + link.length, spaceBefore, spaceAfter: !swallow } };
+}
+
+/** Where a citation link sits now: its recorded offsets when they still hold
+ *  the same source, otherwise its only occurrence; null when gone or ambiguous. */
+export function locateToken(value: string, start: number, source: string): { start: number; end: number } | null {
+	if (value.slice(start, start + source.length) === source) return { start, end: start + source.length };
+	const first = value.indexOf(source);
+	if (first === -1 || value.indexOf(source, first + 1) !== -1) return null;
+	return { start: first, end: first + source.length };
+}
+
 export function adjacentPathRange(value: string, selection: TextSelection, direction: "backward" | "forward"): TextSelection | null {
 	if (selection.anchor !== selection.focus) return selection;
 	const caret = selection.focus;
-	for (const part of parseFilePaths(value)) {
-		if (part.kind === "path" && (direction === "backward" ? caret > part.start && caret <= part.end : caret >= part.start && caret < part.end)) {
+	for (const part of parseComposerTokens(value)) {
+		if (part.kind !== "text" && (direction === "backward" ? caret > part.start && caret <= part.end : caret >= part.start && caret < part.end)) {
 			return { anchor: part.start, focus: part.end };
 		}
 	}

@@ -46,6 +46,7 @@ import {
 import { compactAnswerForModel, type QuestionAnswerData } from "./question-core.ts";
 import { activeCompactionOf, keptIndexFor } from "./compaction.ts";
 import { parseQuestionInput } from "./tool-parts.ts";
+import { expandCitationsForModel } from "./citations.ts";
 
 /** The hard-invariant wording for an aborted turn's unanswered calls —
  *  carried over verbatim from the pre-native era so the model's view
@@ -562,6 +563,11 @@ function resultIdsFrom(messages: readonly AgentMessage[]): Set<string> {
 	return ids;
 }
 
+function expandUserCitations(message: UserMessage): UserMessage {
+	if (typeof message.content === "string") return { ...message, content: expandCitationsForModel(message.content) };
+	return { ...message, content: message.content.map((block) => (block.type === "text" ? { ...block, text: expandCitationsForModel(block.text) } : block)) };
+}
+
 /**
  * AgentMessage[] → the provider wire (the agent's convertToLlm — required
  * by pi-agent-core's loop config, the ONE place model-facing decisions
@@ -640,7 +646,9 @@ export function toLlmMessages(messages: readonly AgentMessage[]): Message[] {
 		}
 		// Strip app-only id/CLI context metadata: the wire carries the native shape only.
 		const { id: _id, cliContextWindow: _cliContextWindow, ...native } = m as LhMessage;
-		out.push(native as Message);
+		// Learner citations are links in the record; the wire carries them
+		// expanded (core/citations.ts) — the one model-facing rewrite.
+		out.push(role === "user" ? expandUserCitations(native as UserMessage) : (native as Message));
 		// Repair unanswered calls from completed generations, not calls in
 		// failed generations. Pi filters error/aborted assistants itself;
 		// adding results for their unexecuted calls would leave orphans.

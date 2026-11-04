@@ -57,6 +57,12 @@ import type { PlanBlockData } from "@/src/core";
 import { QuestionDock } from "@/components/question-dock";
 import { SessionFind } from "@/components/session-find";
 import { SessionMessageNavigation } from "@/components/session-navigation";
+import { SelectionToolbar } from "@/components/selection-toolbar";
+import { createCiteAction, type CitationEditTarget } from "@/components/citation-actions";
+import { CitationActionsContext, type CitationActions } from "@/components/citation-chip";
+import { CitationCommentPopover } from "@/components/citation-comment-popover";
+import { revealCitationSource } from "@/components/citation-source";
+import { useRouter } from "next/navigation";
 import { PracticeDock } from "@/components/practice-dock";
 import { ThinkingCard, type PracticeThinkingData } from "@/components/practice-cards";
 import { GraphContextCard, type GraphContextData } from "@/components/graph-context-card";
@@ -718,6 +724,33 @@ export function Chat({
 	 * is null, and the thinking field is left alone by design. */
 	const dictationWasActiveRef = useRef(false);
 	const composerInputRef = useRef<HTMLDivElement>(null);
+
+	// CITE (2026-10-31): selected tutor text → a citation chip in the
+	// composer, then its comment popover. The transcript's scroll element
+	// arrives late (StickToBottom attaches it), so it is reported up.
+	const [transcriptElement, setTranscriptElement] = useState<HTMLElement | null>(null);
+	const [citationEdit, setCitationEdit] = useState<CitationEditTarget | null>(null);
+	const citeAction = useMemo(
+		() => createCiteAction({ chatId, composer: () => composerInputRef.current, openEditor: setCitationEdit }),
+		[chatId],
+	);
+	const selectionActions = useMemo(() => [citeAction], [citeAction]);
+	const router = useRouter();
+	const transcriptElementRef = useRef<HTMLElement | null>(null);
+	transcriptElementRef.current = transcriptElement;
+	const citationActions = useMemo<CitationActions>(() => ({
+		editComment: (citation, source) => setCitationEdit({ citation, link: source.link, start: source.start, host: source.host }),
+		openSource: (citation) => {
+			const context = scrollContextRef.current;
+			revealCitationSource({
+				transcript: transcriptElementRef.current,
+				scroll: context ? { scrollRef: context.scrollRef, stopScroll: context.stopScroll } : null,
+				citation,
+				currentChatId: chatId,
+				navigate: (href) => router.push(href),
+			});
+		},
+	}), [chatId, router]);
 	useEffect(() => {
 		if (dictation.active) {
 			dictationWasActiveRef.current = true;
@@ -1271,6 +1304,7 @@ export function Chat({
 			}}
 		>
 		<JobsContext.Provider value={jobs}>
+		<CitationActionsContext.Provider value={citationActions}>
 		{/* The session surface: the transcript column (header + scroller) and
 		    the plan-tree panel as full-height SIBLINGS — the panel spans top to
 		    bottom exactly like the left sidebar, and the header (name + phase
@@ -1401,6 +1435,7 @@ export function Chat({
 				<div ref={sessionFindScopeRef} className="relative flex min-h-0 flex-1">
 				<Conversation className="h-full min-w-0 flex-1" initial="instant" contextRef={scrollContextRef}>
 					<SessionMessageNavigation />
+					<TranscriptElementReporter onElement={setTranscriptElement} />
 					<ConversationContent className="min-h-full gap-0 p-0">
 						<div data-session-find-root="" className={`${COLUMN} flex flex-1 flex-col gap-4 pt-4`}>
 							{messages.length === 0 && !busy && (
@@ -1791,10 +1826,22 @@ export function Chat({
 					/>
 				)}
 				{planOpen && <PlanPopup messages={messages} onClose={() => setPlanOpen(false)} />}
+				<SelectionToolbar viewport={transcriptElement} actions={selectionActions} />
+				{citationEdit && (
+					<CitationCommentPopover
+						key={`${citationEdit.start}:${citationEdit.link}`}
+						target={citationEdit}
+						transcript={transcriptElement}
+						composer={() => composerInputRef.current}
+						onClose={() => setCitationEdit(null)}
+						onSend={onSend}
+					/>
+				)}
 				<AbortTurnDialog mode={abortAsk} onClose={() => setAbortAsk(null)} onConfirm={confirmAbort} busy={busy} />
 				</div>
 			</div>
 		</div>
+		</CitationActionsContext.Provider>
 		</JobsContext.Provider>
 		</SessionMermaidContext.Provider>
 		{/* The BYOK setup flow (owner, 2026-09-22): one mount serves the
@@ -1923,6 +1970,22 @@ export function probeArrivalExpanded(isAtBottom: boolean): boolean {
  */
 export function shouldStampGeometryMute(nextH: number, prevH: number, pending: boolean): boolean {
 	return pending && nextH > prevH + 1;
+}
+
+/** Reports the transcript's scroll element once StickToBottom attaches it
+ *  (its ref lands after first render, like SessionMessageNavigation's). */
+function TranscriptElementReporter({ onElement }: { onElement: (element: HTMLElement | null) => void }) {
+	const { scrollRef } = useStickToBottomContext();
+	useEffect(() => {
+		if (scrollRef.current) { onElement(scrollRef.current); return () => onElement(null); }
+		const id = window.setInterval(() => {
+			if (!scrollRef.current) return;
+			window.clearInterval(id);
+			onElement(scrollRef.current);
+		}, 50);
+		return () => { window.clearInterval(id); onElement(null); };
+	}, [scrollRef, onElement]);
+	return null;
 }
 
 function DockOverlay({
