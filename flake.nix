@@ -25,10 +25,11 @@
         );
     in
     {
+      formatter = forEachSupportedSystem ({ pkgs, ... }: pkgs.nixfmt-tree);
+
       devShells = forEachSupportedSystem (
         { pkgs, system }:
         {
-
           default = pkgs.mkShellNoCC {
             shellHook = ''
               npm install
@@ -40,30 +41,26 @@
           };
         }
       );
-      formatter = forEachSupportedSystem ({ pkgs, ... }: pkgs.nixfmt-tree);
 
-      packages = inputs.nixpkgs.lib.genAttrs [ "x86_64-linux" ] (
-        system:
-        let
-          pkgs = import inputs.nixpkgs { inherit system; };
-        in
+      packages = forEachSupportedSystem (
+        { pkgs, ... }:
         {
           default = pkgs.callPackage ./nix/package.nix { };
         }
       );
-      checks = inputs.nixpkgs.lib.genAttrs [ "x86_64-linux" ] (
-        system:
-        let
-          pkgs = import inputs.nixpkgs { inherit system; };
-        in
+
+      checks = forEachSupportedSystem (
+        { pkgs, system }:
         {
           package = self.packages.${system}.default;
+
           formatting =
             pkgs.runCommandLocal "check-formatting" { nativeBuildInputs = [ self.formatter.${system} ]; }
               ''
                 treefmt --ci ${self}
                 touch $out
               '';
+
         }
       );
     };
