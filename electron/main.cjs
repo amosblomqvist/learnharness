@@ -54,42 +54,44 @@ app.setName(PRODUCT_NAME);
 const AUTH_FILE = () => path.join(app.getPath("userData"), "auth.json");
 const DATA_DIR = () => path.join(app.getPath("userData"), "data");
 
-// NATIVE CHROME FOLLOWS THE MODE (light-mode wave, 2026-10-29): the window's
-// own background (resize lag, first paint) and the Windows/Linux control
-// overlay paint the rendered variant. Defaults mirror the app's palettes
-// (src/core/appearance-palette.ts MODE_DEFAULT_BACKGROUND).
+// NATIVE CHROME FOLLOWS THE THEME (theme wave, 2026-11-04): the window's own
+// background (resize lag, first paint) and the Windows/Linux control
+// overlay paint the active theme's mode and background. The renderer
+// resolves the theme (presets live in src/core/themes.ts) and reports
+// { mode, background } on load and on every write; before that, main
+// knows only the record's background override and assumes dark (the
+// Default theme, #141414).
 const WINDOW_CHROME = {
 	dark: { background: "#141414", symbol: "#e5e5e5" },
 	light: { background: "#f5f5f3", symbol: "#1a1a1a" },
 };
 const HEX = /^#[0-9a-f]{3}([0-9a-f]{3})?$/i;
 
-/** The appearance slice the renderer reports (or settings.json holds),
- *  reduced to what the chrome needs. Anything unknown → the dark factory. */
+/** The appearance the renderer reports (or settings.json holds), reduced
+ *  to what the chrome needs. Anything unknown → the dark factory. */
 function normalizeAppearance(a) {
 	return {
-		mode: a?.mode === "light" || a?.mode === "system" ? a.mode : "dark",
+		mode: a?.mode === "light" ? "light" : "dark",
 		background: typeof a?.background === "string" && HEX.test(a.background) ? a.background : null,
-		lightBackground: typeof a?.lightBackground === "string" && HEX.test(a.lightBackground) ? a.lightBackground : null,
 	};
 }
 
-/** The appearance slice of the SAME settings file the server reads.
+/** The background override of the SAME settings file the server reads.
  *  Absent/corrupt → dark, the factory default. */
 function readAppearance() {
 	try {
-		return normalizeAppearance(JSON.parse(fs.readFileSync(path.join(DATA_DIR(), "settings.json"), "utf8"))?.appearance);
+		const record = JSON.parse(fs.readFileSync(path.join(DATA_DIR(), "settings.json"), "utf8"));
+		return normalizeAppearance({ background: record?.appearance?.background });
 	} catch {
 		return normalizeAppearance(null);
 	}
 }
 let appearance = normalizeAppearance(null);
 
-/** Native colors for the rendered variant (nativeTheme resolves System). */
+/** Native colors for the active theme's variant. */
 function chromeColors() {
-	const mode = nativeTheme.shouldUseDarkColors ? "dark" : "light";
-	const custom = mode === "dark" ? appearance.background : appearance.lightBackground;
-	return { color: custom ?? WINDOW_CHROME[mode].background, symbolColor: WINDOW_CHROME[mode].symbol };
+	const mode = appearance.mode;
+	return { color: appearance.background ?? WINDOW_CHROME[mode].background, symbolColor: WINDOW_CHROME[mode].symbol };
 }
 
 function applyChrome(win) {
@@ -692,14 +694,10 @@ async function main() {
 
 	await app.whenReady();
 
-	// The mode before the first window: themeSource takes the settings'
-	// "dark" | "light" | "system" verbatim, and nativeTheme then resolves
-	// System for chromeColors. Under System an OS flip recolors every window.
+	// The chrome before the first window: the record's background override
+	// on dark; the renderer reports the active theme right after load.
 	appearance = readAppearance();
 	nativeTheme.themeSource = appearance.mode;
-	nativeTheme.on("updated", () => {
-		for (const win of BrowserWindow.getAllWindows()) applyChrome(win);
-	});
 
 	// Dev mode: point at a running `next dev` server (LH_DEV_URL) — no
 	// spawn, no packaging, full HMR. The rest of this shell still applies

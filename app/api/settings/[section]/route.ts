@@ -30,7 +30,7 @@
  * lands here.
  */
 
-import type { AgentSettings, ChatSettings, ModelsSettings } from "@/src/core";
+import { isBuiltinThemeId, type AgentSettings, type AppearanceSettings, type ChatSettings, type ModelsSettings } from "@/src/core";
 import {
 	SETTINGS_SECTIONS,
 	allSegmentPaths,
@@ -39,6 +39,7 @@ import {
 	effectiveSettings,
 	promptOverrides,
 	readSettingsRecord,
+	themeStore,
 	validateChatSettings,
 	validateModelsSettings,
 	writeSettingsRecord,
@@ -83,6 +84,14 @@ export async function PUT(request: Request, ctx: { params: Promise<{ section: st
 		const verdict = validateModelsSettings(parsed.settings as ModelsSettings, record.models);
 		if (!verdict.ok) {
 			return Response.json({ error: verdict.error, supported: verdict.supported }, { status: 400 });
+		}
+	}
+	// Theme wave (2026-11-04): the active theme must exist — a preset or
+	// an imported file. (A theme deleted LATER resolves to Default.)
+	if (section === "appearance") {
+		const theme = (parsed.settings as AppearanceSettings).theme;
+		if (theme !== undefined && !isBuiltinThemeId(theme) && themeStore.readTheme(theme) === null) {
+			return Response.json({ error: `unknown theme "${theme}"` }, { status: 400 });
 		}
 	}
 	if (section === "agent") {

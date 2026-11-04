@@ -15,7 +15,7 @@ const mainRequire = createRequire(mainFile);
 /** Decline the single-instance lock so normal boot never spawns a server.
  * Then call the REAL createWindow with a stub Electron API and inspect its
  * constructor options. No rewritten copy of the production logic. */
-function windowOptions(platform: string, env: Record<string, string> = {}, osDark = true) {
+function windowOptions(platform: string, env: Record<string, string> = {}, reported?: { mode: string; background?: string }) {
 	class FakeWindow {
 		constructor(readonly options: unknown) {}
 		webContents = { on() {}, setWindowOpenHandler() {} };
@@ -25,7 +25,7 @@ function windowOptions(platform: string, env: Record<string, string> = {}, osDar
 	const electron = {
 		app: { setName() {}, getPath: () => "/fixture/LearnHarness", setPath() {}, requestSingleInstanceLock: () => false, quit() {} },
 		BrowserWindow: FakeWindow,
-		nativeTheme: { shouldUseDarkColors: osDark, themeSource: "system", on() {} },
+		nativeTheme: { shouldUseDarkColors: true, themeSource: "system", on() {} },
 		session: { defaultSession: { setPermissionRequestHandler() {}, setPermissionCheckHandler() {} } },
 	};
 	const context = {
@@ -34,6 +34,8 @@ function windowOptions(platform: string, env: Record<string, string> = {}, osDar
 		__dirname: dirname(mainFile),
 	};
 	runInNewContext(mainSource, context, { filename: mainFile });
+	// What the renderer reports over lh:appearance (the active theme).
+	if (reported) runInNewContext(`appearance = normalizeAppearance(${JSON.stringify(reported)})`, context);
 	const win = runInNewContext('createWindow("http://127.0.0.1:9000")', context) as FakeWindow;
 	// The options originate in a VM realm; normalize prototypes for assertions.
 	return JSON.parse(JSON.stringify(win.options));
@@ -62,13 +64,13 @@ describe("desktop window chrome", () => {
 		});
 	}
 
-	it("the native chrome paints the rendered variant: dark by default, light under a light OS", () => {
+	it("the native chrome paints the active theme: Default dark until the renderer reports, then its mode and background", () => {
 		const dark = windowOptions("win32");
 		assert.equal(dark.backgroundColor, "#141414");
-		const light = windowOptions("win32", {}, false);
-		assert.deepEqual(light.titleBarOverlay, { color: "#f5f5f3", symbolColor: "#1a1a1a" });
-		assert.equal(light.backgroundColor, "#f5f5f3");
-		assert.equal(windowOptions("darwin", {}, false).backgroundColor, "#f5f5f3");
+		const light = windowOptions("win32", {}, { mode: "light", background: "#faf4ed" });
+		assert.deepEqual(light.titleBarOverlay, { color: "#faf4ed", symbolColor: "#1a1a1a" });
+		assert.equal(light.backgroundColor, "#faf4ed");
+		assert.equal(windowOptions("darwin", {}, { mode: "light" }).backgroundColor, "#f5f5f3");
 	});
 
 	it("only the external dev shell receives the web subscription transport marker", () => {
@@ -109,7 +111,7 @@ describe("desktop window chrome", () => {
 		assert.deepEqual(Object.keys(bridge).sort(), [
 			"chatgpt", "checkForUpdates", "expandWindow", "getPathForFile", "getUpdateState", "getZoom", "installUpdate", "onOpenSettings", "onUpdateStatus", "onZoom", "platform", "setAppearance", "subscriptions",
 		]);
-		const appearance = { mode: "system", background: null, lightBackground: "#eeeeee" };
+		const appearance = { mode: "light", background: "#eeeeee" };
 		(bridge.setAppearance as (a: unknown) => void)(appearance);
 		assert.deepEqual(sent, [["lh:appearance", appearance]]);
 		assert.deepEqual(Object.keys(bridge.subscriptions as object).sort(), ["cancel", "consent", "disconnect", "login", "onChange", "open", "respond", "retry", "status"]);

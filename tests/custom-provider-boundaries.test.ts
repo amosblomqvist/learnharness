@@ -188,9 +188,9 @@ test("stale save, pin edit and disconnect all return reload guidance without wri
 	assert.equal(requests.length, 0); assert.deepEqual(current(), before);
 });
 test("after discovery preserves unrelated edits and rejects intervening custom edits", async () => {
-	globalThis.fetch = async () => { fs.writeFileSync(settingsFile, JSON.stringify({ ...current(), appearance: { mode: "dark" }, claudeCode: { enabled: true } })); return Response.json({ data: [{ id: "m" }] }); };
+	globalThis.fetch = async () => { fs.writeFileSync(settingsFile, JSON.stringify({ ...current(), appearance: { theme: "catppuccin-mocha" }, claudeCode: { enabled: true } })); return Response.json({ data: [{ id: "m" }] }); };
 	assert.equal((await mutate({ baseUrl: "http://h", authMode: "keyless" })).status, 200);
-	assert.deepEqual(current().appearance, { mode: "dark" }); assert.equal(current().claudeCode.enabled, true);
+	assert.deepEqual(current().appearance, { theme: "catppuccin-mocha" }); assert.equal(current().claudeCode.enabled, true);
 	globalThis.fetch = async () => { seed({ baseUrl: "http://changed", authMode: "keyless", models: [] }); return Response.json({ data: [{ id: "m" }] }); };
 	assert.equal((await mutate({ baseUrl: "http://h", authMode: "keyless" })).status, 409);
 	assert.equal(current().customProvider.baseUrl, "http://changed");

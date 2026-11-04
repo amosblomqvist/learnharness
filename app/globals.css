@@ -29,10 +29,12 @@
 
 /* Palette (owner's hexes): main #141414, raised #1C1C1C, edges #434343.
    Mono chrome = JetBrains Mono; prose = Source Sans 3; titles = CMU Serif.
-   Dark is the default variant (:root) and the `.dark` class on <html>;
-   `.light` below overrides the colors only. The color defaults here are
-   variantPalette(mode, null) in src/core/appearance-palette.ts as
-   literals — tests/appearance-palette.test.ts pins the two equal. */
+   Dark is the default variant (:root) and the `.dark` class on <html>.
+   THEMES (theme wave, 2026-11-04): the active theme's colors land as
+   inline variables on <html> (app/layout.tsx first paint, then the
+   appearance provider), so these literals are the Default theme's —
+   themeVars(DEFAULT_THEME) in src/core/themes.ts; tests/themes.test.ts
+   pins the two equal. */
 :root,
 .dark {
 	color-scheme: dark;
@@ -51,18 +53,24 @@
 	--muted-foreground: #8d8d8d;
 	--accent: #2a2a2a;
 	--accent-foreground: #e6e6e6;
-	--destructive: oklch(0.704 0.191 22.216);
+	--destructive: #ef4444;
 	--border: #434343;
 	--input: #434343;
 	--ring: #8d8d8d;
+	/* The theme accent (rings, toggles, the selected theme card). The
+	   shadcn --accent above is the HOVER surface, not this. */
+	--lh-accent: #8d8d8d;
 	/* The strong line ink: plan-map outlines, callout borders, the LH mark. */
-	--lh-line-strong: #ffffff;
+	--lh-line-strong: #e6e6e6;
 	/* Emphasis inks default to the REGULAR TEXT COLOR (owner ruling,
-	   appearance wave 2026-09-26 — the old #ee928c/#6fa9d6 factory
-	   emphasis colors are gone). Explicit overrides land via the
-	   appearance settings vars. */
-	--lh-ink-strong: var(--foreground);
-	--lh-ink-italic: var(--foreground);
+	   appearance wave 2026-09-26); themes give them their own colors. */
+	--lh-ink-strong: #e6e6e6;
+	--lh-ink-italic: #e6e6e6;
+	--lh-ink-code: #e6e6e6;
+	/* Status inks (text-error, bg-success/15, border-warning/40, …). */
+	--lh-error: #ef4444;
+	--lh-success: #22c55e;
+	--lh-warning: #f59e0b;
 	/* THE READING SIZE = the ladder's 16px rung (--text-lg). Can't be
 	   var()-linked: @theme inline inlines literals into utilities without
 	   emitting runtime vars — so this is the one documented duplication:
@@ -74,32 +82,12 @@
 	--lh-heading-weight: 900;
 }
 
-/* The light variant ("paper": #f5f5f3 page, white raised surfaces). Must
-   follow the block above: :root still matches <html class="light">, and
-   with equal specificity the later rule wins. */
+/* The light variant: the colors come from the active light theme (inline
+   on <html>); the class only flips the UA color scheme and the `.light`
+   rules below. Must follow the block above: :root still matches
+   <html class="light">, and with equal specificity the later rule wins. */
 .light {
 	color-scheme: light;
-	--background: #f5f5f3;
-	--foreground: #1a1a1a;
-	--card: #ffffff;
-	--card-foreground: #1a1a1a;
-	--popover: #ffffff;
-	--popover-foreground: #1a1a1a;
-	--primary: #1a1a1a;
-	--primary-foreground: #f5f5f3;
-	--secondary: #ffffff;
-	--secondary-foreground: #1a1a1a;
-	--muted: #ffffff;
-	--muted-foreground: #6b6b68;
-	--accent: #e8e8e6;
-	--accent-foreground: #1a1a1a;
-	--destructive: oklch(0.577 0.245 27.325);
-	--border: #d4d4d2;
-	--input: #d4d4d2;
-	--ring: #6b6b68;
-	--lh-line-strong: var(--foreground);
-	--lh-ink-strong: var(--foreground);
-	--lh-ink-italic: var(--foreground);
 }
 
 /* CMU Serif bold (titles) — bundled local file, no CDN dependency. */
@@ -174,6 +162,9 @@
 	--color-input: var(--input);
 	--color-ring: var(--ring);
 	--color-line-strong: var(--lh-line-strong);
+	--color-error: var(--lh-error);
+	--color-success: var(--lh-success);
+	--color-warning: var(--lh-warning);
 }
 
 * {

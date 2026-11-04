@@ -1,17 +1,16 @@
 "use client";
 /**
- * THE APPEARANCE APPLICATION (thin settings wave, 2026-09-19): the settings
- * record's appearance section actually DOES something — resolved against
- * the factory defaults and applied as RUNTIME CSS variables on <html>.
+ * THE APPEARANCE APPLICATION (thin settings wave, 2026-09-19; theme wave,
+ * 2026-11-04): the settings record's appearance section — the active
+ * theme, the color overrides, the type knobs — applied as RUNTIME CSS
+ * variables on <html>, plus the `dark`/`light` class the theme declares.
  *
  * Why variables and not className swaps: every seam the settings touch was
- * built token-first (--font-prose, --lh-prose-size, --lh-ink-strong, …),
- * so application is setProperty and nothing re-renders. The ONE thing the
- * variables can't reach — the mode — is a class on <html> (light-mode
- * wave, 2026-10-29): app/layout.tsx server-renders `dark`/`light` plus
- * data-lh-mode from the settings record, an inline <head> script resolves
- * System against the OS before first paint, and this provider owns every
- * live switch after that (a settings write, an OS flip under System).
+ * built token-first (--background, --font-prose, --lh-ink-strong, …), so
+ * application is setProperty and nothing re-renders. First paint is the
+ * layout's job: app/layout.tsx server-renders the theme's class and color
+ * variables on <html> from the record, so no frame ever shows the wrong
+ * theme; this provider owns every live switch after that.
  *
  * The provider is mounted at the ROOT LAYOUT level (like ActivityProvider):
  * every page picks appearance up on load. The settings page writes a
@@ -30,24 +29,26 @@ import {
 	useMemo,
 	useRef,
 	useState,
-	useSyncExternalStore,
 } from "react";
 import {
+	BUILTIN_THEMES,
+	effectiveColors,
 	FACTORY_SETTINGS,
-	resolveRenderedMode,
-	variantPalette,
-	type AppearanceMode,
+	resolveTheme,
+	themeVars,
 	type AppearanceSettings,
 	type RenderedMode,
+	type Theme,
+	type ThemeColors,
 } from "@/src/core";
 
 /** The resolved, fully-concrete appearance view (delta + factory merged). */
 export function resolveAppearance(delta: AppearanceSettings | undefined) {
 	const f = FACTORY_SETTINGS.appearance;
 	return {
-		mode: delta?.mode ?? f.mode,
+		theme: delta?.theme ?? f.theme,
 		background: delta?.background ?? f.background,
-		lightBackground: delta?.lightBackground ?? f.lightBackground,
+		colors: delta?.colors ?? f.colors,
 		fontFamily: delta?.fontFamily ?? f.fontFamily,
 		proseFontSize: delta?.proseFontSize ?? f.proseFontSize,
 		sessionNameSerif: delta?.sessionNameSerif ?? f.sessionNameSerif,
@@ -59,41 +60,15 @@ export function resolveAppearance(delta: AppearanceSettings | undefined) {
 	};
 }
 
-/** The surfaces a chosen background moves — the inks stay the stylesheet's. */
-const SURFACE_TOKENS = [
-	"--background",
-	"--card",
-	"--popover",
-	"--secondary",
-	"--muted",
-	"--accent",
-	"--border",
-	"--input",
-	"--primary-foreground",
-] as const;
-
-/** The derived palette a chosen background implies along one variant's
- *  curve (src/core/appearance-palette.ts): background itself, the raised
- *  surfaces (card/popover/secondary/muted), the accent, the edges
- *  (border/input), and primary-foreground (the inverted text on primary =
- *  the background's own color). */
-export function derivedPalette(background: string, mode: RenderedMode = "dark"): Record<string, string> {
-	const full = variantPalette(mode, background);
-	return Object.fromEntries(SURFACE_TOKENS.map((t) => [t, full[t]!]));
-}
-
-/** THE mapping: resolved appearance → the CSS variables to set on <html>.
- *  Absent entries = leave the factory stylesheet value in place. Each
- *  variant derives from its OWN background (dark `background`, light
- *  `lightBackground`), so a dark custom palette never survives a switch to
- *  light. Pure — exported for tests. */
+/** THE mapping: resolved appearance + active theme → the CSS variables to
+ *  set on <html>. Colors: the theme with every override applied
+ *  (core/themes.ts effectiveColors → themeVars). Type knobs: absent
+ *  entries leave the stylesheet value in place. Pure — exported for tests. */
 export function appearanceVars(
 	a: ReturnType<typeof resolveAppearance>,
-	mode: RenderedMode = "dark",
+	theme: Theme,
 ): Record<string, string> {
-	const vars: Record<string, string> = {};
-	const bg = mode === "dark" ? a.background : a.lightBackground;
-	if (bg !== null) Object.assign(vars, derivedPalette(bg, mode));
+	const vars: Record<string, string> = themeVars(effectiveColors(theme, a), theme.mode);
 	if (a.fontFamily !== null) {
 		vars["--font-prose"] = `"${a.fontFamily}", var(--font-sans3), ui-sans-serif, system-ui, sans-serif`;
 	}
@@ -104,11 +79,8 @@ export function appearanceVars(
 	// to the prose family — covers chat.tsx + new-session.tsx titles with
 	// zero component edits (they use the .font-title utility).
 	if (!a.sessionNameSerif) vars["--font-title"] = "var(--font-prose)";
-	// Markdown rendering: heading weight + the emphasis inks (the vars
-	// were built "ready for the settings UI").
+	// Markdown heading weight (the emphasis inks ride the theme colors).
 	vars["--lh-heading-weight"] = String(a.mdRendering.headingWeight);
-	if (a.mdRendering.boldColor !== null) vars["--lh-ink-strong"] = a.mdRendering.boldColor;
-	if (a.mdRendering.italicColor !== null) vars["--lh-ink-italic"] = a.mdRendering.italicColor;
 	return vars;
 }
 
@@ -125,34 +97,36 @@ export function staleVarNames(
 }
 
 interface AppearanceContextValue {
-	/** Resolved appearance; factory until the record arrives. */
+	/** Resolved appearance (the record's delta over the factory). */
 	appearance: ReturnType<typeof resolveAppearance>;
-	/** The variant actually on screen — System resolved against the OS. */
+	/** The raw record delta — what a section write composes onto. */
+	delta: AppearanceSettings | undefined;
+	/** The active theme's variant (the class on <html>). */
 	resolvedMode: RenderedMode;
+	/** The active theme (Default when the record's id is gone). */
+	activeTheme: Theme;
+	/** The active theme with every override applied — what is on screen. */
+	colors: ThemeColors;
+	/** Presets, then imported customs. */
+	themes: Theme[];
+	/** Re-read the catalog after an import or a removal. */
+	refreshThemes: () => Promise<void>;
 	/** Called by the settings page after a successful section PUT. */
 	onAppearanceChange: (delta: AppearanceSettings | undefined) => void;
 }
 
+const DEFAULT_CONTEXT_THEME = resolveTheme(undefined);
+
 const AppearanceContext = createContext<AppearanceContextValue>({
 	appearance: resolveAppearance(undefined),
-	resolvedMode: "dark",
+	delta: undefined,
+	resolvedMode: DEFAULT_CONTEXT_THEME.mode,
+	activeTheme: DEFAULT_CONTEXT_THEME,
+	colors: DEFAULT_CONTEXT_THEME.colors,
+	themes: [...BUILTIN_THEMES],
+	refreshThemes: async () => {},
 	onAppearanceChange: () => {},
 });
-
-const DARK_QUERY = "(prefers-color-scheme: dark)";
-
-function subscribePrefersDark(onChange: () => void): () => void {
-	const mq = window.matchMedia(DARK_QUERY);
-	mq.addEventListener("change", onChange);
-	return () => mq.removeEventListener("change", onChange);
-}
-
-/** The OS preference as an external store: the server snapshot is dark (the
- *  layout's default), so hydration matches the server HTML and React
- *  re-renders with the real value right after — no mismatch under System. */
-function usePrefersDark(): boolean {
-	return useSyncExternalStore(subscribePrefersDark, () => window.matchMedia(DARK_QUERY).matches, () => true);
-}
 
 export function useAppearance() {
 	return useContext(AppearanceContext);
@@ -160,46 +134,46 @@ export function useAppearance() {
 
 export function AppearanceProvider({
 	children,
-	initialMode,
+	initialAppearance,
+	initialTheme,
 }: {
 	children: React.ReactNode;
-	/** The mode the layout server-rendered — holds until the record arrives. */
-	initialMode: AppearanceMode;
+	/** The record's appearance delta, read server-side by the layout. */
+	initialAppearance: AppearanceSettings | undefined;
+	/** The active theme the layout resolved (a custom one included). */
+	initialTheme: Theme;
 }) {
-	const [delta, setDelta] = useState<AppearanceSettings | undefined>(undefined);
-	// The record has arrived (or a write replaced it): until then only the
-	// mode is known (server-rendered), not the custom backgrounds.
-	const [recordLoaded, setRecordLoaded] = useState(false);
+	const [delta, setDelta] = useState<AppearanceSettings | undefined>(initialAppearance);
+	const [themes, setThemes] = useState<Theme[]>(() =>
+		initialTheme.builtin ? [...BUILTIN_THEMES] : [...BUILTIN_THEMES, initialTheme],
+	);
 	const appliedRef = useRef<string>("");
-	const prefersDark = usePrefersDark();
-	const mode: AppearanceMode = delta?.mode ?? initialMode;
-	const resolvedMode = resolveRenderedMode(mode, prefersDark);
+	const appearance = useMemo(() => resolveAppearance(delta), [delta]);
+	const activeTheme = useMemo(
+		() => resolveTheme(appearance.theme, themes.filter((t) => !t.builtin)),
+		[appearance.theme, themes],
+	);
+	const mode = activeTheme.mode;
+	const colors = useMemo(() => effectiveColors(activeTheme, appearance), [activeTheme, appearance]);
 
-	// The mode lives on <html>: data-lh-mode for the pre-paint script on the
-	// next load, the class for every `.dark`/`.light` rule and variant.
-	// System reads the OS here, not resolvedMode: during hydration that still
-	// holds the server snapshot (dark) and would undo the head script's class
-	// for a commit. resolvedMode stays a dep so an OS flip re-runs this. A
-	// LAYOUT effect (like the vars below): descendants' passive effects run
-	// after it, so anything reading computed tokens (the graph canvas) sees
-	// the new mode, and the swap lands before paint.
+	// The mode lives on <html> as a class, for every `.dark`/`.light` rule
+	// and variant. A LAYOUT effect (like the vars below): descendants'
+	// passive effects run after it, so anything reading computed tokens
+	// (the graph canvas) sees the new mode, and the swap lands before paint.
 	useLayoutEffect(() => {
 		const root = document.documentElement;
-		const dark = mode === "system" ? window.matchMedia(DARK_QUERY).matches : mode === "dark";
-		root.dataset.lhMode = mode;
-		root.classList.toggle("dark", dark);
-		root.classList.toggle("light", !dark);
-	}, [mode, resolvedMode]);
+		root.classList.toggle("dark", mode === "dark");
+		root.classList.toggle("light", mode === "light");
+	}, [mode]);
 
 	// The vars apply on every change — stringified as the change signal.
-	const vars = useMemo(() => appearanceVars(resolveAppearance(delta), resolvedMode), [delta, resolvedMode]);
+	const vars = useMemo(() => appearanceVars(appearance, activeTheme), [appearance, activeTheme]);
 	const key = useMemo(() => JSON.stringify(vars), [vars]);
 	// REMOVAL is half the job (owner repro, fix wave): a later write that
-	// OMITS a var (empty field = factory, serif toggle back on) must clear
-	// the previously-set inline value or the stale one wins forever —
-	// backgrounds never reset, toggles looked dead. Every name this effect
-	// has ever set is tracked; names absent from the new set are removed so
-	// the factory stylesheet value returns.
+	// OMITS a var (empty font = factory, serif toggle back on) must clear
+	// the previously-set inline value or the stale one wins forever. Every
+	// name this effect has ever set is tracked; names absent from the new
+	// set are removed so the stylesheet value returns.
 	const appliedNamesRef = useRef<Set<string>>(new Set());
 	useLayoutEffect(() => {
 		if (appliedRef.current === key) return;
@@ -216,46 +190,35 @@ export function AppearanceProvider({
 	}, [key, vars]);
 
 	// The desktop shell's native chrome (window background, Windows/Linux
-	// control overlay) follows the mode and backgrounds — absent in a browser.
-	// Held until the record loads: main read the same settings file at
-	// launch, and the factory backgrounds would briefly undo a custom one.
-	const { background, lightBackground } = resolveAppearance(delta);
+	// control overlay) follows the theme — absent in a browser.
+	const background = colors.background;
 	useEffect(() => {
-		if (!recordLoaded) return;
-		window.lh?.setAppearance?.({ mode, background, lightBackground });
-	}, [recordLoaded, mode, background, lightBackground]);
+		window.lh?.setAppearance?.({ mode, background });
+	}, [mode, background]);
 
-	// One fetch per app load: the record (sanitized server-side) carries the
-	// delta; resolution happens here against the compiled factory.
-	useEffect(() => {
-		let alive = true;
-		fetch("/api/settings")
-			.then((r) => r.json())
-			.then((body: { settings?: Record<string, unknown> }) => {
-				if (!alive) return;
-				// The record arrives sanitized server-side; the appearance
-				// slice is unknown-shaped here, so it goes through the same
-				// resolve (absent/invalid fields = factory anyway).
-				const appearance = body.settings?.appearance;
-				setDelta(
-					appearance && typeof appearance === "object" ? (appearance as AppearanceSettings) : undefined,
-				);
-				setRecordLoaded(true);
-			})
-			.catch(() => {/* settings stay factory — not worth a crash */});
-		return () => {
-			alive = false;
-		};
+	const refreshThemes = useCallback(async () => {
+		try {
+			const res = await fetch("/api/themes");
+			if (!res.ok) return;
+			const body = (await res.json()) as { themes?: Theme[] };
+			if (Array.isArray(body.themes)) setThemes(body.themes);
+		} catch {
+			/* the presets stay — not worth a crash */
+		}
 	}, []);
+
+	// One catalog read per app load (the imported customs).
+	useEffect(() => {
+		void refreshThemes();
+	}, [refreshThemes]);
 
 	const onAppearanceChange = useCallback((next: AppearanceSettings | undefined) => {
 		setDelta(next);
-		setRecordLoaded(true);
 	}, []);
 
 	const value = useMemo(
-		() => ({ appearance: resolveAppearance(delta), resolvedMode, onAppearanceChange }),
-		[delta, resolvedMode, onAppearanceChange],
+		() => ({ appearance, delta, resolvedMode: mode, activeTheme, colors, themes, refreshThemes, onAppearanceChange }),
+		[appearance, delta, mode, activeTheme, colors, themes, refreshThemes, onAppearanceChange],
 	);
 	return <AppearanceContext.Provider value={value}>{children}</AppearanceContext.Provider>;
 }

@@ -28,6 +28,7 @@ describe("md-blocks — code", () => {
 		const html = render("a `term` b");
 		assert.ok(html.includes('data-streamdown="inline-code"'), "inline code keeps the inline-code path");
 		assert.match(html, /bg-muted/);
+		assert.match(html, /text-\(--lh-ink-code\)/, "inline code takes the theme's code ink");
 	});
 
 	it("code fences delegate to streamdown's CodeBlock with a hover copy corner", () => {

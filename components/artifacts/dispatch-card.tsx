@@ -52,7 +52,7 @@ export function DispatchCard({ toolCallId, kind }: { toolCallId: string; kind: J
 			className="flex items-center gap-2 text-xs text-muted-foreground"
 			data-testid="dispatch-settled"
 		>
-			{failed ? <XIcon className="size-3.5 text-red-500" /> : <CheckIcon className="size-3.5" />}
+			{failed ? <XIcon className="size-3.5 text-error" /> : <CheckIcon className="size-3.5" />}
 			<span className="font-medium uppercase tracking-wide">{label}</span>
 			<span>{failed ? "failed" : "finished"}</span>
 		</div>

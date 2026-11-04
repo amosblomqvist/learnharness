@@ -14,6 +14,8 @@ import { describe, it } from "node:test";
 import { renderToStaticMarkup } from "react-dom/server";
 import { TOGGLE_TOOLS, AgentSection } from "../components/settings/agent-section.tsx";
 import { AppearanceSection, GraphSection } from "../components/settings/appearance-section.tsx";
+import { AppearanceProvider } from "../components/settings/appearance.tsx";
+import { BUILTIN_THEMES, resolveTheme, THEME_COLOR_KEYS, type AppearanceSettings, type Theme } from "../src/core/index.ts";
 import { KeysSection } from "../components/settings/keys-section.tsx";
 import { KeyboardSection } from "../components/settings/keyboard-section.tsx";
 import type { GraphSettings } from "../src/core/index.ts";
@@ -274,58 +276,72 @@ describe("KeysSection (thin SSR)", () => {
 	});
 });
 
+/** The section as the app mounts it: under the provider the layout feeds
+ *  from the record (the active theme resolved server-side). */
+function renderAppearance(appearance: AppearanceSettings | undefined, customs: Theme[] = []): string {
+	const theme = resolveTheme(appearance?.theme, customs);
+	return renderToStaticMarkup(
+		<AppearanceProvider initialAppearance={appearance} initialTheme={theme}>
+			<AppearanceSection appearance={appearance} onSectionChange={() => {}} />
+		</AppearanceProvider>,
+	);
+}
+
 describe("AppearanceSection (thin SSR)", () => {
-	it("Mode is three preview cards; the stored mode is pressed", () => {
-		const html = renderToStaticMarkup(<AppearanceSection appearance={{ mode: "light" }} onSectionChange={() => {}} />);
-		for (const id of ["dark", "light", "system"]) assert.ok(html.includes(`data-testid="mode-card-${id}"`), id);
-		assert.ok(tagOf(html, "mode-card-light").includes('aria-pressed="true"'));
-		assert.ok(tagOf(html, "mode-card-dark").includes('aria-pressed="false"'));
-		assert.ok(tagOf(html, "mode-card-system").includes('aria-pressed="false"'));
+	it("the theme grid lists every preset; the stored theme is pressed", () => {
+		const html = renderAppearance({ theme: "catppuccin-latte" });
+		for (const t of BUILTIN_THEMES) assert.ok(html.includes(`data-testid="theme-card-${t.id}"`), t.id);
+		assert.ok(tagOf(html, "theme-card-catppuccin-latte").includes('aria-pressed="true"'));
+		for (const t of BUILTIN_THEMES.filter((t) => t.id !== "catppuccin-latte")) {
+			assert.ok(tagOf(html, `theme-card-${t.id}`).includes('aria-pressed="false"'), t.id);
+		}
 		assert.equal((html.match(/lucide-check/g) ?? []).length, 1, "one check, on the selected card");
-		assert.ok(!html.includes("Coming soon"));
+		assert.match(html, /Catppuccin Latte · light · sets every color below/);
+		assert.ok(html.includes('data-testid="theme-import"'));
+		assert.ok(html.includes('data-testid="theme-export"'));
+		assert.ok(!html.includes("theme-remove-"), "presets cannot be removed");
 	});
 
-	it("absent mode = the factory dark card pressed", () => {
-		const html = renderToStaticMarkup(<AppearanceSection appearance={undefined} onSectionChange={() => {}} />);
-		assert.ok(tagOf(html, "mode-card-dark").includes('aria-pressed="true"'));
+	it("absent theme = the Default card pressed", () => {
+		const html = renderAppearance(undefined);
+		assert.ok(tagOf(html, "theme-card-default").includes('aria-pressed="true"'));
 	});
 
-	it("previews show swatches of the effective palette (a custom background included)", () => {
-		const html = renderToStaticMarkup(<AppearanceSection appearance={{ background: "#202020" }} onSectionChange={() => {}} />);
-		assert.match(html, /202020/);
-		assert.match(html, /f5f5f3/);
-		// Five per variant card; System adopts those two and lists none.
-		assert.equal((html.match(/data-testid="mode-swatch"/g) ?? []).length, 10);
+	it("an imported theme gets a custom card with a remove button", () => {
+		const custom: Theme = { ...BUILTIN_THEMES[0]!, id: "my-ayu", name: "My Ayu", builtin: false };
+		const html = renderAppearance({ theme: "my-ayu" }, [custom]);
+		assert.ok(tagOf(html, "theme-card-my-ayu").includes('aria-pressed="true"'));
+		assert.ok(html.includes('data-testid="theme-remove-my-ayu"'));
+		assert.match(html, />custom</);
 	});
 
-	it("the Background row edits the rendered mode's field", () => {
-		// SSR context default resolvedMode = dark → the dark field and hint
-		const html = renderToStaticMarkup(
-			<AppearanceSection appearance={{ background: "#202020", lightBackground: "#eeeeee" }} onSectionChange={() => {}} />,
-		);
-		assert.match(html, /Empty = #141414/);
-		assert.ok(tagOf(html, "input-background").includes('value="#202020"'));
-		const system = renderToStaticMarkup(<AppearanceSection appearance={{ mode: "system" }} onSectionChange={() => {}} />);
-		assert.match(system, /Empty = #141414 \(from system\)/);
+	it("the Colors block has one override row per theme color, hinting the theme's own hex", () => {
+		const mocha = BUILTIN_THEMES.find((t) => t.id === "catppuccin-mocha")!;
+		const html = renderAppearance({ theme: "catppuccin-mocha" });
+		for (const key of THEME_COLOR_KEYS) assert.ok(html.includes(`data-testid="row-color-${key}"`), key);
+		for (const id of ["input-background", "input-bold-color", "input-italic-color", "input-color-warning"]) {
+			assert.ok(html.includes(`data-testid="${id}"`), id);
+		}
+		assert.match(html, new RegExp(`Empty = ${mocha.colors.warning}`));
+		assert.ok(tagOf(html, "input-color-surface").includes(`placeholder="${mocha.colors.surface}"`));
+		assert.ok(html.includes('data-testid="colors-reset"'));
 	});
 
-	it("hex inputs carry the factory placeholders; prose size resolves against the factory", () => {
-		const html = renderToStaticMarkup(<AppearanceSection appearance={undefined} onSectionChange={() => {}} />);
-		assert.ok(html.includes(`placeholder="#141414"`));
-		// The reading font is the searchable dropdown now (font-menu
-		// wave): its trigger shows the factory family; the emphasis
-		// inks' empty state is "same as text" (the old hexes died with
-		// the factory token change).
+	it("an override shows in its input and its swatch; the theme stays the hint", () => {
+		const html = renderAppearance({ theme: "catppuccin-mocha", background: "#101010", colors: { warning: "#fab387" } });
+		assert.ok(tagOf(html, "input-background").includes('value="#101010"'));
+		assert.ok(tagOf(html, "input-color-warning").includes('value="#fab387"'));
+		assert.ok(tagOf(html, "swatch-warning").includes("#fab387"));
+		assert.match(html, /Empty = #1e1e2e/, "the background hint is Mocha's, not the override");
+	});
+
+	it("typography keeps its rows; prose size resolves against the factory", () => {
+		const html = renderAppearance(undefined);
 		assert.ok(html.includes('data-testid="font-trigger"'));
-		assert.equal((html.match(/Empty = same as text/g) ?? []).length, 2);
+		assert.ok(html.includes('data-testid="row-prose-size"'));
+		assert.ok(html.includes('data-testid="row-heading-weight"'));
 		assert.ok(html.includes("16px"));
-	});
-
-	it("a set background shows in the input, not the placeholder", () => {
-		const html = renderToStaticMarkup(
-			<AppearanceSection appearance={{ background: "#1a1a2e" }} onSectionChange={() => {}} />,
-		);
-		assert.ok(html.includes(`value="#1a1a2e"`));
+		assert.ok(!html.includes('data-testid="row-mode"'), "the mode row is gone — the theme declares it");
 	});
 });
 
