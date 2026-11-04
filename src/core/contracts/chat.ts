@@ -3,7 +3,7 @@
  *
  * Part of the domain-split contracts (src/core/contracts/): each domain file
  * is owned outright by its stream — cross-domain schema changes go through
- * master. Pure types + protocol docs + tiny pure helpers. See docs/vision.md.
+ * master. Pure types + protocol docs + tiny pure helpers. See docs/archive/vision.md.
  */
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import type { LhMessage } from "../native-messages.ts";
@@ -33,6 +33,8 @@ export interface ChatRecord {
 	createdAt: string;
 	updatedAt: string;
 	messages: LhMessage[];
+	/** Session-local processed pictures; artifact records carry references only. */
+	imageSnapshots?: Record<string, ImageSnapshot>;
 	/** The session's kind — absent = teach (pre-practice records). */
 	kind?: ChatKind;
 	/** The session's plan tree (vision §2) — written by plan tools via saveTree. */
@@ -252,7 +254,7 @@ export interface PlanBlockData {
  *  them in listChats. Liveness (`busy`) is NOT record-derived — the API
  *  route merges it in (see ChatListItem).
  *
- *  Phase semantics (three phases, event-driven — docs/probe-teach-split.md
+ *  Phase semantics (three phases, event-driven — docs/archive/probe-teach-split.md
  *  §4): probe ends at the concluded probe_done, plan ends at the successful
  *  plan_init; derived from the transcript (core/phases.ts phaseAt3).
  */
@@ -269,7 +271,7 @@ export interface ChatSummary {
 	/** An unanswered quiz/ask question is waiting for the learner. */
 	pendingQuestion: boolean;
 	/** Practice sessions (2026-10-04): a posed problem with no conclude —
-	 *  the sidebar meta's "Problem waiting". Absent on teaching sessions. */
+	 *  the sidebar meta's "Problem waiting". False on teaching sessions. */
 	pendingProblem: boolean;
 	/** The record's model-control settings — rides the list payload via the
 	 *  summary spread (the picker never needs it from here; the full record
@@ -291,6 +293,28 @@ export interface ChatListItem extends ChatSummary {
 	 *  route attaches it from the compaction registry — never
 	 *  record-derived (the marker persists, the RUN is ephemeral). */
 	compacting: boolean;
+}
+
+// ─── Learner images in the lesson (issue #363) ──────────────────────────────
+
+/** One upright, metadata-free picture, stored once per session. */
+export interface ImageSnapshot {
+	mimeType: "image/png" | "image/jpeg";
+	data: string;
+	width: number;
+	height: number;
+}
+
+/** The show_image record payload. Its session-owned snapshot is never model-facing. */
+export interface ShowImageDetails {
+	/** The absolute path the image was read from. */
+	path: string;
+	caption?: string;
+	mimeType: "image/png" | "image/jpeg";
+	/** SHA-256 identity in ChatRecord.imageSnapshots. */
+	snapshotId: string;
+	width: number;
+	height: number;
 }
 
 // ─── Artifact renderer registry (client extension point) ────────────────────
