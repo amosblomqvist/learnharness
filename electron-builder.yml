@@ -166,6 +166,12 @@ nsis:
   oneClick: true
   perMachine: false
 linux:
+  # Server mode (`learnharness --headless`): scripts/after-pack.cjs moves the
+  # Electron binary to learnharness.bin and installs a launcher in its place
+  # that runs this file with ELECTRON_RUN_AS_NODE, outside app.asar.
+  extraResources:
+    - from: electron/server-mode.cjs
+      to: server-mode.cjs
   icon: build/icon.png
   target:
     - target: AppImage
@@ -180,6 +186,10 @@ linux:
   syncDesktopName: true
   # Both targets update via electron-updater 6.8.9. AppImage replaces its
   # own file; deb uses dpkg/apt and may request administrator permission.
+deb:
+  # Ubuntu 24+ grants Chromium's user namespaces by executable path; the
+  # default profile would attach to the launcher instead of the ELF.
+  appArmorProfile: build/apparmor-profile.tpl
 publish:
   # Update feed = GitHub Releases (decided 2026-10-08): latest-mac.yml +
   # zip/blockmap live on releases; electron-updater reads them anonymously.

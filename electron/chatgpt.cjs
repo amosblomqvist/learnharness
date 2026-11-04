@@ -28,6 +28,7 @@ const publicError = (err) => ({
 	expired: "The ChatGPT session expired. Reconnect in Providers.",
 	network: "ChatGPT could not be reached. Check your connection and try again.",
 	pending: "A ChatGPT sign-in is already pending.",
+	callback: "That address is not from this ChatGPT sign-in. Paste the full address of the page sign-in ended on.",
 	unavailable: "ChatGPT sign-in is unavailable in browser-only mode.",
 }[err?.code] || "ChatGPT sign-in failed. Try again; no API-key fallback was used.");
 
@@ -273,7 +274,8 @@ function createChatGPT({ store, openExternal, fetch: request = globalThis.fetch,
 			finish();
 			notify();
 		};
-		pending = { abort, cancel };
+		const attempt = { abort, cancel };
+		pending = attempt;
 		lastError = null;
 		notify();
 		try {
@@ -282,19 +284,16 @@ function createChatGPT({ store, openExternal, fetch: request = globalThis.fetch,
 				listener.listen(0, "127.0.0.1", resolve);
 			});
 			const redirectUri = `http://127.0.0.1:${listener.address().port}/auth/callback`;
-			listener.on("request", async (req, res) => {
-				let callback;
-				try { callback = new URL(req.url || "/", redirectUri); }
-				catch { res.writeHead(400).end(); return; }
-				res.setHeader("Cache-Control", "no-store");
-				res.setHeader("Content-Security-Policy", "default-src 'none'");
-				res.setHeader("Referrer-Policy", "no-referrer");
-				if (req.method !== "GET" || callback.origin !== new URL(redirectUri).origin || callback.pathname !== "/auth/callback" || req.headers.host !== new URL(redirectUri).host || consumed) { res.writeHead(404).end(); return; }
+			// Returns the callback parameters and consumes this attempt, or the HTTP status rejecting the callback.
+			const claim = (callback) => {
+				if (callback.origin !== new URL(redirectUri).origin || callback.pathname !== "/auth/callback" || consumed) return 404;
 				const params = callback.searchParams;
 				// Reject duplicate parameters and unsolicited callbacks without consuming a valid pending attempt.
-				if (["state", "code", "client_id", "error"].some((key) => params.getAll(key).length > 1) || params.get("state") !== expectedState) { res.writeHead(400).end("Sign-in could not be verified."); return; }
+				if (["state", "code", "client_id", "error"].some((key) => params.getAll(key).length > 1) || params.get("state") !== expectedState) return 400;
 				consumed = true;
-				res.writeHead(200, { "content-type": "text/plain; charset=utf-8" }).end("Return to LearnHarness to view the sign-in result. You may close this tab.");
+				return params;
+			};
+			const exchange = async (params) => {
 				cleanup();
 				try {
 					if (params.has("error")) throw fail(params.get("error") === "access_denied" ? "cancelled" : "identity");
@@ -331,7 +330,27 @@ function createChatGPT({ store, openExternal, fetch: request = globalThis.fetch,
 					lastError = planScopes(tokens) ? null : publicError(fail("scope"));
 				} catch (err) { if (!abort.signal.aborted) lastError = publicError(err); }
 				finally { if (pending?.abort === abort) pending = null; finish(); notify(); }
+			};
+			listener.on("request", async (req, res) => {
+				let callback;
+				try { callback = new URL(req.url || "/", redirectUri); }
+				catch { res.writeHead(400).end(); return; }
+				res.setHeader("Cache-Control", "no-store");
+				res.setHeader("Content-Security-Policy", "default-src 'none'");
+				res.setHeader("Referrer-Policy", "no-referrer");
+				if (req.method !== "GET" || req.headers.host !== new URL(redirectUri).host) { res.writeHead(404).end(); return; }
+				const params = claim(callback);
+				if (params === 404) { res.writeHead(404).end(); return; }
+				if (params === 400) { res.writeHead(400).end("Sign-in could not be verified."); return; }
+				res.writeHead(200, { "content-type": "text/plain; charset=utf-8" }).end("Return to LearnHarness to view the sign-in result. You may close this tab.");
+				await exchange(params);
 			});
+			// Paste-back for a browser on another device, where the 127.0.0.1 redirect never reaches this listener.
+			attempt.complete = async (callback) => {
+				const params = claim(callback);
+				if (typeof params === "number") throw fail("callback");
+				await exchange(params);
+			};
 			timer = setTimeout(() => cancel("timeout"), timeoutMs);
 			const url = new URL(AUTHORIZE);
 			url.search = new URLSearchParams({
@@ -350,6 +369,15 @@ function createChatGPT({ store, openExternal, fetch: request = globalThis.fetch,
 		return snapshot();
 	}
 	function cancelLogin() { pending?.cancel(); return snapshot(); }
+	async function completeLogin(address) {
+		const complete = pending?.complete;
+		let callback;
+		try { callback = new URL(address); }
+		catch { throw fail("callback"); }
+		if (!complete) throw fail("callback");
+		await complete(callback);
+		return snapshot();
+	}
 
 	function authorized(background, expected, capturedEpoch) {
 		const account = active();
@@ -536,7 +564,7 @@ function createChatGPT({ store, openExternal, fetch: request = globalThis.fetch,
 	function close() { closed = true; pending?.cancel(); stop(); }
 	function pause() { paused = true; pending?.cancel(); stop(); notify(); }
 	function resume() { paused = false; if (!storageDenied) suspended = false; notify(); }
-	return { status, login, cancelLogin, lease, models, select, consent, disconnect, logout, close, pause, resume, stamp };
+	return { status, login, cancelLogin, completeLogin, lease, models, select, consent, disconnect, logout, close, pause, resume, stamp };
 }
 
 module.exports = { createChatGPT, fileStore, publicError, allowedAuthEndpoint, SCOPES, validateState };

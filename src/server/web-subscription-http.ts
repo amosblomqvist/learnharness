@@ -21,6 +21,14 @@ function authorized(request: Request): boolean {
 	const supplied = request.headers.get("origin");
 	return request.method === "GET" ? !supplied || supplied === origin : supplied === origin;
 }
+/** Browsers send Fetch Metadata only to trustworthy origins, so plain HTTP on a
+ * LAN address falls back to the Referer, which LearnHarness pages always send. */
+function sameOriginNavigation(request: Request, origin: string): boolean {
+	const site = request.headers.get("sec-fetch-site");
+	if (site !== null) return site === "same-origin";
+	try { return new URL(request.headers.get("referer") ?? "").origin === origin; }
+	catch { return false; }
+}
 function error(message: string, status: number) { return Response.json({ error: message }, { status, headers: HEADERS }); }
 export async function subscriptionControlsResponse(request: Request): Promise<Response> {
 	if (!webSubscriptionsEnabled()) return error("Web subscription controls are unavailable in desktop-owned mode.", 404);
@@ -47,7 +55,7 @@ export async function subscriptionControlsResponse(request: Request): Promise<Re
 		const fields = command as Record<string, unknown>;
 		const providerId = fields.providerId;
 		if (providerId !== "chatgpt" && !NATIVE_SUBSCRIPTIONS.some((provider) => provider.providerId === providerId)) return error("Unsupported connection.", 400);
-		const allowed = providerId === "chatgpt" ? ["login", "cancel", "select", "disconnect", "logout", "consent"] : ["login", "cancel", "respond", "open", "retry", "disconnect", "consent"];
+		const allowed = providerId === "chatgpt" ? ["login", "cancel", "callback", "select", "disconnect", "logout", "consent"] : ["login", "cancel", "respond", "open", "retry", "disconnect", "consent"];
 		if (typeof fields.op !== "string" || !allowed.includes(fields.op)) return error("Unsupported control.", 400);
 		return Response.json(await webSubscriptionOwner().control(providerId as string, fields, subscriptionRequestOrigin(request)!), { headers: HEADERS });
 	} catch {
@@ -59,7 +67,7 @@ export async function subscriptionControlsResponse(request: Request): Promise<Re
 export async function subscriptionBrowserResponse(request: Request): Promise<Response> {
 	if (!webSubscriptionsEnabled()) return error("Unavailable.", 404);
 	const origin = subscriptionRequestOrigin(request);
-	if (!origin || (request.method === "POST" ? !authorized(request) : request.headers.get("sec-fetch-site") !== "same-origin")) return error("Open sign-in from LearnHarness.", 403);
+	if (!origin || (request.method === "POST" ? !authorized(request) : !sameOriginNavigation(request, origin))) return error("Open sign-in from LearnHarness.", 403);
 	const id = new URL(request.url).searchParams.get("id");
 	if (!id || !/^[0-9a-f-]{36}$/.test(id)) return error("This sign-in action is no longer available.", 410);
 	const target = await webSubscriptionOwner().takeBrowserAction(id, origin);

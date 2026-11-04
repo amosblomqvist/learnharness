@@ -66,12 +66,22 @@ test("Electron dev uses its narrow external-browser bridge, without attempting a
 	await createWebChatGPTBridge(null).login(); assert.deepEqual(opened, [action]);
 });
 
-test("web notices identify the server machine and same-machine ChatGPT sign-in; desktop copy stays unchanged", async () => {
+test("web ChatGPT paste-back posts the pasted address as the callback control, without opening a tab", async () => {
+	window.open = () => assert.fail("paste-back must not open a tab");
+	const safe = { available: true, pending: false, allowBackgroundUse: true, activeId: null, accounts: [], error: null };
+	globalThis.fetch = async (_url, options) => {
+		assert.deepEqual(JSON.parse(String(options?.body)), { providerId: "chatgpt", op: "callback", url: "http://127.0.0.1:1455/auth/callback?state=s&code=c" });
+		return Response.json({ value: safe });
+	};
+	assert.deepEqual(await createWebChatGPTBridge(null).callback!("http://127.0.0.1:1455/auth/callback?state=s&code=c"), safe);
+});
+
+test("web notices identify the server machine and remote-browser ChatGPT sign-in; desktop copy stays unchanged", async () => {
 	const { CHATGPT_NOTICE, chatGPTNotice } = await import("../components/settings/chatgpt-connection.tsx");
 	const { subscriptionNotice, subscriptionDisconnectCopy } = await import("../components/settings/subscription-connections.tsx");
 	assert.equal(chatGPTNotice(), CHATGPT_NOTICE); assert(CHATGPT_NOTICE.includes("on this device"));
 	assert(chatGPTNotice(true).includes("on the machine running LearnHarness"));
-	assert(chatGPTNotice(true).endsWith("Complete ChatGPT sign-in in a browser on that same machine."));
+	assert(chatGPTNotice(true).endsWith("If your browser is on another device, finish with the address it ends on."));
 	for (const label of ["GitHub Copilot", "Grok"]) {
 		assert(subscriptionNotice(label).includes("stored locally")); assert(subscriptionDisconnectCopy(label).includes("from this device"));
 		assert(subscriptionNotice(label, true).includes("on the machine running LearnHarness"));

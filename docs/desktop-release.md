@@ -50,6 +50,25 @@ npx electron-builder --win --x64 --publish never
 npx electron-builder --linux --x64 --publish never
 ```
 
+## Linux server mode
+
+The Linux AppImage and `.deb` can also serve the app to a browser. This mode uses the same package and needs no display:
+
+```sh
+./LearnHarness-<v>-x86_64.AppImage --headless --host 0.0.0.0 --port 8080
+# .deb install: learnharness --headless --host 0.0.0.0 --port 8080
+```
+
+- `--host` defaults to `127.0.0.1` and `--port` to `3000`. Both accept `--flag value` or `--flag=value`.
+- To stop it, send SIGTERM or SIGINT to the server process. It exits within about 3 seconds, even with browser tabs open, and the AppImage unmounts itself. The server's process name is `learnharness --headless` and the startup line prints its PID; `--pid-file <path>` also writes the PID to a file and removes it on exit. Ctrl-C and systemd reach the server on their own. Don't signal the process named `LearnHarness-…AppImage`: that is the AppImage's FUSE helper, and killing it unmounts the app under a still-running server.
+- Data and keys default to the desktop app's profile (`$XDG_CONFIG_HOME/LearnHarness`, else `~/.config/LearnHarness`). `LH_DATA_DIR` and `LH_AUTH_FILE` override them.
+- This is browser-only mode. Dictation needs a secure context (HTTPS or localhost).
+- Subscriptions sign in from the remote browser and their credentials stay on the server. GitHub Copilot and Grok use device codes. ChatGPT's sign-in redirects to `127.0.0.1` on the server, so a browser on another device lands on a page that won't load; paste that page's address into the ChatGPT dialog to finish. Over plain HTTP the browser sends no Fetch Metadata, so the one-use sign-in redirect accepts a same-origin `Referer` instead.
+
+**There is no login.** A non-loopback `--host` exposes every chat, setting, and saved API key to anyone who can reach the port. On an untrusted network, keep the default loopback bind behind an authenticating HTTPS reverse proxy, or firewall the port.
+
+How it works: `scripts/after-pack.cjs` moves the Electron binary to `learnharness.bin` and installs a shell launcher at `learnharness`. Without `--headless`, the launcher execs the binary unchanged. With it, the launcher runs `resources/server-mode.cjs` under `ELECTRON_RUN_AS_NODE`, and that script loads the standalone server without the desktop API secret. The `.deb` AppArmor profile (`build/apparmor-profile.tpl`) attaches to `learnharness.bin` so Chromium keeps its user-namespace exemption on Ubuntu 24+. The config sets no `electronFuses`. electron-builder flips fuses on `learnharness` after `afterPack`, which is now the launcher script, so enabling them means flipping the `.bin` in `afterPack` with `@electron/fuses`. Server mode also needs the `runAsNode` fuse left on, as the desktop backend already does.
+
 ## CI vs release
 
 [`.github/workflows/ci.yml`](../.github/workflows/ci.yml) runs on main pushes, pull requests, and manual dispatch:
