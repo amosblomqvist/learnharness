@@ -175,8 +175,15 @@
 	--color-ring: var(--ring);
 }
 
-* {
-	border-color: var(--color-border);
+/* The default edge color lives in the BASE layer: unlayered, this rule
+   outranked every Tailwind border-color utility (utilities live in a cascade
+   layer, and unlayered author CSS wins regardless of specificity), so
+   border-white / border-primary / hover:border-… all rendered as the
+   default edge. */
+@layer base {
+	* {
+		border-color: var(--color-border);
+	}
 }
 
 body {
