@@ -3,6 +3,7 @@ import type { ArtifactPartProps } from "@/src/core";
 import { DemoCard } from "@/components/artifacts/demo-card";
 import { JobCard, PdfJobCard } from "@/components/artifacts/job-card";
 import { VisualCard } from "@/components/artifacts/visual-card";
+import { ImageCard } from "@/components/artifacts/image-card";
 import { ProbeDoneCard } from "@/components/artifacts/probe-done-card";
 import { ToolCallCard } from "@/components/artifacts/tool-call-card";
 import { ProblemCard, ConcludeCard } from "@/components/practice-cards";
@@ -12,7 +13,7 @@ import { ProblemCard, ConcludeCard } from "@/components/practice-cards";
  *
  * chat.tsx renders any tool part it doesn't specially handle (i.e. not
  * quiz/ask) by looking the tool name up here. Add your renderer — do NOT
- * edit chat.tsx (see docs/plan.md file-ownership rules).
+ * edit chat.tsx (see docs/archive/plan.md file-ownership rules).
  *
  * Typical shape: while the part is input-available render an activity card
  * (the chat view's jobs feed reads GET /api/jobs?chatId=…; on completion call
@@ -28,8 +29,10 @@ export const artifactRenderers: Record<string, ComponentType<ArtifactPartProps>>
 	// Artifacts (W6 fills in the components):
 	demo: DemoCard,
 	visual: VisualCard,
+	// A learner image shown as-is (issue #363): the picture itself, inline.
+	show_image: ImageCard,
 	// The probe conclusion: the assessment belongs to the learner as much as
-	// to the transcript (docs/probe-teach-split.md §2). Plain v1 card.
+	// to the transcript (docs/archive/probe-teach-split.md §2). Plain v1 card.
 	probe_done: ProbeDoneCard,
 	// The learner-filesystem set (sources v1): one quiet expandable
 	// tool-call card each — collapsed one-liner (tool name + headline

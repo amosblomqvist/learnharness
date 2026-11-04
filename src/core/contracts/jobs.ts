@@ -4,13 +4,13 @@
  * Part of the domain-split contracts (src/core/contracts/): each domain file
  * is owned outright by its stream — cross-domain schema changes go through
  * master. Pure types + protocol docs + tiny pure helpers; type-only imports
- * of "ai" (safe everywhere: server, client, tests). See docs/vision.md.
+ * of "ai" (safe everywhere: server, client, tests). See docs/archive/vision.md.
  */
 import type { CallUsage } from "./chat.ts";
 import type { LhMessage, LhMarkerMessage } from "../native-messages.ts";
 import { newHandoffMessage } from "../native-messages.ts";
 
-// ─── Async sub-agent jobs (vision §2.5; plan.md Wave 0 protocol) ────────────
+// ─── Async sub-agent jobs (docs/archive/vision.md §2.5; docs/archive/plan.md Wave 0 protocol) ────────────
 
 export type JobKind = "research" | "demo" | "visual" | "pdf";
 export type JobStatus = "running" | "done" | "error";
@@ -216,12 +216,19 @@ export interface DemoResult {
 export interface VisualToolInput {
 	/** Precise brief for ONE visual (what it must show, exactly). */
 	brief: string;
+	/** A learner image file to annotate (issue #363): the maker draws its
+	 *  marks on top of it instead of authoring a figure from scratch. */
+	image?: string;
 }
 
 export interface VisualResult {
-	/** Complete SVG markup (verified by the maker looking at the render). */
+	/** Complete SVG markup (verified by the maker looking at the render).
+	 *  Annotation SVGs retain a learner-image placeholder; image identifies the session snapshot. */
 	svg: string;
 	notes?: string;
+	/** Present when the figure annotates a learner image: its absolute
+	 *  path. Photos never invert, so the card hides the switch. */
+	image?: { path: string; snapshotId: string };
 }
 
 /** The pdf-reader (sources v0, 2026-09): reads a learner-provided PDF on
@@ -362,6 +369,10 @@ function steerText(kind: JobKind, result: ResearchResult | DemoResult | VisualRe
 		return `The demo "${(result as DemoResult).title}" is built, headlessly tested, and rendered in the lesson. Builder notes: ${
 			(result as DemoResult).notes ?? "(none)"
 		}.\nTeach with it — reference its controls by name and point the learner at what to try.`;
+	if ((result as VisualResult).image)
+		return `The annotated image is drawn, verified by inspection, and rendered in the lesson. Maker notes: ${
+			(result as VisualResult).notes ?? "(none)"
+		}.\nReference its marks as you teach.`;
 	return `The figure is drawn, verified by inspection, and rendered in the lesson. Maker notes: ${
 		(result as VisualResult).notes ?? "(none)"
 	}.\nReference its elements as you teach.`;
@@ -422,7 +433,7 @@ function abortText(kind: JobKind): string {
 	return "The figure job was aborted by the learner — no figure is coming. Acknowledge it in one line and teach without it (a re-dispatch is fine if the learner wants it).";
 }
 
-// ─── the probe handoff steer (the probe→teach split, docs/probe-teach-split.md §2) ──
+// ─── the probe handoff steer (the probe→teach split, docs/archive/probe-teach-split.md §2) ──
 //
 // probe_done's execute queues this through the same wake pipeline; the
 // pump fires it once the prober's turn ends (gates + grace). It carries no

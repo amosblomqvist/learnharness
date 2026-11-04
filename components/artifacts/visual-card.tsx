@@ -10,7 +10,8 @@ import { DispatchCard } from "@/components/artifacts/dispatch-card";
 import { SvgImage } from "@/components/artifacts/svg-image";
 import { cachedSvgTone, measureSvgTone } from "@/components/artifacts/artifact-tone";
 import { useArtifactInvert } from "@/components/artifacts/use-artifact-invert";
-import type { ArtifactPartProps, ArtifactTone, VisualResult } from "@/src/core";
+import { embedLearnerImage, type ArtifactPartProps, type ArtifactTone, type VisualResult } from "@/src/core";
+import { useImageSnapshot } from "./use-image-snapshot";
 
 /**
  * Visual artifact card (W6 → ack protocol): the tool part's output is the
@@ -53,24 +54,27 @@ export function VisualOutputCard({
 	initialPin?: boolean;
 }) {
 	const result = output as VisualResult | undefined;
+	const snapshot = useImageSnapshot(result?.image?.snapshotId);
+	const svg = result?.image && snapshot.image ? embedLearnerImage(result.svg, snapshot.image) : result?.svg ?? "";
 	const overlay = useSessionMermaid();
 	// Brightness inversion (owner, 2026-10-07): the switch PERSISTS on the
 	// steer record (details.ui.inverted). Since auto-invert (2026-10-29) the
 	// stored value is a pin: absent = auto, so a figure MEASURED light shows
 	// inverted while the app renders dark (use-artifact-invert.ts). The
 	// displayed state also feeds the fullscreen overlay (openFigure).
-	const svg = result && typeof result.svg === "string" && result.svg.length > 0 ? result.svg : undefined;
-	const [tone, setTone] = useState<ArtifactTone | "pending">(() => (svg && cachedSvgTone(svg)) || "pending");
+	// An annotated learner image never inverts, so its tone is never measured.
+	const toneSvg = result && result.image === undefined && typeof result.svg === "string" && result.svg.length > 0 ? result.svg : undefined;
+	const [tone, setTone] = useState<ArtifactTone | "pending">(() => (toneSvg && cachedSvgTone(toneSvg)) || "pending");
 	useEffect(() => {
-		if (!svg || tone !== "pending") return;
+		if (!toneSvg || tone !== "pending") return;
 		let alive = true;
-		void measureSvgTone(svg).then((t) => {
+		void measureSvgTone(toneSvg).then((t) => {
 			if (alive) setTone(t);
 		});
 		return () => {
 			alive = false;
 		};
-	}, [svg, tone]);
+	}, [toneSvg, tone]);
 	const { inverted, held, toggle: toggleInverted } = useArtifactInvert({ initialPin, tone, messageId });
 	const natural = result && typeof result.svg === "string" ? svgNaturalWidth(result.svg) : null;
 	if (!result || typeof result.svg !== "string") {
@@ -81,6 +85,10 @@ export function VisualOutputCard({
 		);
 	}
 	const failed = result.svg.length === 0;
+	// An annotated learner image (issue #363) is a photo: inverting it
+	// shows a negative, so it never inverts and shows no switch.
+	const invertible = result.image === undefined;
+	const shownInverted = invertible && inverted;
 	if (failed) {
 		return (
 			<div className="rounded-xl border bg-card p-4 text-card-foreground" data-testid="visual-card-failed">
@@ -92,6 +100,7 @@ export function VisualOutputCard({
 			</div>
 		);
 	}
+	if (result.image && !snapshot.image) return <div className="my-4 text-sm text-muted-foreground" role="status">{snapshot.failed ? "Image snapshot could not be loaded." : "Loading image…"}</div>;
 	return (
 		/* NO CARD CHROME (owner round, 2026-10-07): the figure is document
 		   material — no border, no padding box. Image first, then the CAPTION
@@ -100,50 +109,60 @@ export function VisualOutputCard({
 		   so the row hugs a centered narrow figure, not the column). */
 		<div
 			className={
-				natural !== null
+				!invertible || natural !== null
 					? "my-4 mx-auto w-fit max-w-full"
 					: "my-4 w-full"
 			}
 			data-testid="visual-card"
 		>
-			{/* Natural sizing (owner, 2026-10-07): a declared-width svg sits at
-			   ITS size; max-w-full still shrinks oversized ones to fit. No
-			   declared size (viewBox-only, %-width) keeps the full-width law.
+			{/* Ordinary figures keep their natural-width/full-width sizing law.
+			   Learner-image annotations use intrinsic auto sizing with a 60vh cap;
+			   width and height shrink together, with no cropping or enlargement.
 			   The invert filter rides the bg-white holder, so the backing flips
 			   white→black together with the strokes; transparent areas ARE the
 			   backing. */}
 			<div
 				className={
-					natural !== null
-						? `w-fit max-w-full overflow-hidden rounded-lg bg-white${held ? " lh-artifact-hold" : ""}`
-						: `w-full overflow-hidden rounded-lg bg-white${held ? " lh-artifact-hold" : ""}`
+					!invertible || natural !== null
+						? `w-fit max-w-full overflow-hidden rounded-lg bg-white${held && invertible ? " lh-artifact-hold" : ""}`
+						: `w-full overflow-hidden rounded-lg bg-white${held && invertible ? " lh-artifact-hold" : ""}`
 				}
-				style={{ filter: inverted ? "invert(1) hue-rotate(180deg)" : undefined }}
+				style={{ filter: shownInverted ? "invert(1) hue-rotate(180deg)" : undefined }}
 				data-testid="visual-svg"
 			>
 				<SvgImage
-					svg={result.svg}
+					svg={svg}
 					width={natural ?? undefined}
-					className={natural !== null ? "block h-auto max-w-full" : "block h-auto w-full"}
+					className={
+						!invertible
+							? "block h-auto w-auto max-h-[60vh] max-w-full"
+							: natural !== null ? "block h-auto max-w-full" : "block h-auto w-full"
+					}
 				/>
 			</div>
-			<div className="mt-2 flex items-center justify-between gap-2">
+			<div className={
+				!invertible
+					? "mt-2 flex w-0 min-w-full flex-wrap items-center justify-between gap-2"
+					: "mt-2 flex items-center justify-between gap-2"
+			}>
 				<div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Figure</div>
-				<div className="flex items-center gap-1.5">
+				<div className={!invertible ? "ml-auto flex items-center gap-1.5" : "flex items-center gap-1.5"}>
 					{/* The invert affordance (owner round, 2026-10-07): the disc IS
 					    the half-filled contrast circle; the tooltip names it. */}
-					<Toggle
-						checked={inverted}
-						onChange={toggleInverted}
-						label="Invert figure brightness"
-						title="Invert colors"
-						discIcon={<InvertDiscIcon className="size-3" />}
-					/>
+					{invertible && (
+						<Toggle
+							checked={inverted}
+							onChange={toggleInverted}
+							label="Invert figure brightness"
+							title="Invert colors"
+							discIcon={<InvertDiscIcon className="size-3" />}
+						/>
+					)}
 					<button
 						type="button"
 						aria-label="Download figure as SVG"
 						title="Download as SVG"
-						onClick={() => downloadFile("figure.svg", result.svg, "image/svg+xml")}
+						onClick={() => downloadFile("figure.svg", svg, "image/svg+xml")}
 						data-testid="visual-download"
 						className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
 					>
@@ -154,7 +173,7 @@ export function VisualOutputCard({
 							type="button"
 							aria-label="Open figure fullscreen"
 							title="Open fullscreen"
-							onClick={() => overlay.openFigure(result.svg, inverted)}
+							onClick={() => overlay.openFigure(svg, shownInverted)}
 							data-testid="visual-open"
 							className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
 						>

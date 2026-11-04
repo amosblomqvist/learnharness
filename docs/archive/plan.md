@@ -1,6 +1,11 @@
 # Build Plan v1 — from vision to system
 
-Execution plan for `docs/vision.md`. Section references (§) point into that document. Not exact — a dependency-ordered wave structure with verification gates. Written 2026-08-22.
+> **Historical build plan, not a current implementation or execution runbook.**
+> The original waves and checkboxes below may be superseded or unimplemented.
+> See [Architecture](../architecture.md) and [Development](../development.md) for the
+> current system and development guidance, or the [archive index](README.md) for context.
+
+Execution plan for [`vision.md`](vision.md). Section references (§) point into that document. Not exact — a dependency-ordered wave structure with verification gates. Written 2026-08-22.
 
 ## Execution model
 
