@@ -439,12 +439,12 @@ export function ChainTableBody({
 								/>
 								<Expander open={open} onClick={() => toggleCluster(group.key)} testid={`cluster-toggle-${group.key}`} label={`Expand cluster ${group.label ?? "unlabeled"}`} />
 								<button type="button" data-source-icon data-testid={`source-icon-${group.key}`} aria-expanded={open} aria-label={`Expand source ${group.label ?? "unlabeled"}`}
-									onClick={() => toggleCluster(group.key)} className="flex h-5 w-3.5 shrink-0 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground">
+									onClick={() => toggleCluster(group.key)} className={`flex h-5 w-3.5 shrink-0 items-center justify-center rounded ${empty ? "text-muted-foreground/60" : "text-muted-foreground"} transition-colors hover:bg-accent hover:text-foreground`}>
 									{open ? <BookOpenIcon className="size-3.5 shrink-0" /> : <BookIcon className="size-3.5 shrink-0" />}
 								</button>
 								{onOrganizationChange && group.birth && group.kind !== null
 									? <EditableSourceName name={group.label ?? ""} muted={empty} onSave={(name) => onOrganizationChange({ action: "rename-source", id: group.birth!, name })} />
-									: <span className={`min-w-0 flex-1 truncate text-sm font-medium${empty ? " text-muted-foreground" : ""}`}>{group.label ?? <span className="text-muted-foreground/60">unlabeled</span>}</span>}
+									: <span className={`min-w-0 flex-1 truncate text-sm font-medium${empty ? " text-muted-foreground/60" : ""}`}>{group.label ?? <span className="text-muted-foreground/60">unlabeled</span>}</span>}
 								{group.kind === "notes" && <span className="text-[11px] uppercase tracking-widest text-muted-foreground/60">notes</span>}
 								<span className="w-14 shrink-0 text-right text-xs tabular-nums text-muted-foreground">
 									{group.nodeIds.length}
