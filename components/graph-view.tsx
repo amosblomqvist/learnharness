@@ -1405,7 +1405,7 @@ export function GraphView({
 			clusters: snapshot.clusters.map((c) => ({ id: c.id, label: c.label, members: c.members })),
 			colors: {
 				node: tokenHex(NODE_COLOR_TOKEN),
-				edge: tokenHex("--ring"),
+				edge: tokenHex("--muted-foreground"),
 				label: tokenHex("--muted-foreground"),
 				hoverText: tokenHex("--foreground"),
 				clusterLightness: CLUSTER_LIGHTNESS[resolvedMode],

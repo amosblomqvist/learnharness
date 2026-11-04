@@ -39,7 +39,7 @@ function Preview({ theme }: { theme: Theme }) {
 		<span
 			aria-hidden
 			className="flex h-11 items-center justify-between rounded-md border px-3"
-			style={{ background: c.background, borderColor: c.surface }}
+			style={{ background: c.background, borderColor: c.border }}
 		>
 			<span className="font-prose text-xl font-semibold" style={{ color: c.text }}>
 				Aa <i className="font-normal" style={{ color: c.accent }}>ai</i>

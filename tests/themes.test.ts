@@ -104,7 +104,7 @@ describe("themeVars — the adapter", () => {
 		assert.equal(dark["--lh-accent"], mocha.colors.accent);
 		assert.equal(dark["--ring"], mocha.colors.accent);
 		const latte = BUILTIN_THEMES.find((t) => t.id === "catppuccin-latte")!;
-		assert.equal(themeVars(latte.colors, "light")["--accent"], "#bec2cc", "light hovers darken: #ccd0da − 14");
+		assert.equal(themeVars(latte.colors, "light")["--accent"], "#d8dbe1", "light hovers darken: mantle #e6e9ef − 14");
 	});
 
 	it("emphasis and status inks come straight from the theme", () => {
@@ -137,6 +137,16 @@ describe("effectiveColors — overrides over the theme", () => {
 		assert.equal(c.warning, "#fab387");
 		assert.equal(c.surface, "#222");
 		assert.equal(c.text, mocha.colors.text);
+	});
+});
+
+describe("graph edges", () => {
+	it("draw in each theme's muted text, never the highlight accent", () => {
+		for (const t of BUILTIN_THEMES) {
+			assert.equal(themeVars(t.colors, t.mode)["--muted-foreground"], t.colors.textMuted, t.id);
+		}
+		const view = fs.readFileSync(new URL("../components/graph-view.tsx", import.meta.url), "utf8");
+		assert.match(view, /edge: tokenHex\("--muted-foreground"\)/);
 	});
 });
 

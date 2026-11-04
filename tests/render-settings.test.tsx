@@ -288,6 +288,15 @@ function renderAppearance(appearance: AppearanceSettings | undefined, customs: T
 }
 
 describe("AppearanceSection (thin SSR)", () => {
+	it("each preview is outlined in its own theme's border, so a theme matching the page still shows", () => {
+		const html = renderAppearance({ theme: "rose-pine-dawn" });
+		for (const t of BUILTIN_THEMES) {
+			const start = html.indexOf(`data-testid="theme-card-${t.id}"`);
+			const card = html.slice(start, html.indexOf("</button>", start));
+			assert.ok(card.includes(`border-color:${t.colors.border}`), t.id);
+		}
+	});
+
 	it("the theme grid lists every preset; the stored theme is pressed", () => {
 		const html = renderAppearance({ theme: "catppuccin-latte" });
 		for (const t of BUILTIN_THEMES) assert.ok(html.includes(`data-testid="theme-card-${t.id}"`), t.id);

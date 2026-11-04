@@ -132,7 +132,8 @@ function builtin(name: string, mode: ThemeMode, c: ThemeColors): Theme {
 /** The presets, in grid order. Default = the app's original dark palette
  *  (app/globals.css carries it as literals; tests pin the two equal).
  *  Catppuccin: base/surface0/surface1, mauve accent, lavender/pink/peach
- *  emphasis. Rosé Pine: base/surface/highlight-med, iris accent,
+ *  emphasis; Latte takes mantle/surface0 instead, because surface0 on a
+ *  light page reads as a heavy gray slab (owner, 2026-11-04). Rosé Pine: base/surface/highlight-med, iris accent,
  *  iris/rose/gold emphasis. NvChad Onedark: base46's onedark. */
 export const BUILTIN_THEMES: readonly Theme[] = [
 	{
@@ -147,7 +148,7 @@ export const BUILTIN_THEMES: readonly Theme[] = [
 		},
 	},
 	builtin("Catppuccin Latte", "light", {
-		background: "#eff1f5", surface: "#ccd0da", border: "#bcc0cc", text: "#4c4f69", textMuted: "#6c6f85",
+		background: "#eff1f5", surface: "#e6e9ef", border: "#ccd0da", text: "#4c4f69", textMuted: "#6c6f85",
 		accent: "#8839ef", bold: "#7287fd", italic: "#ea76cb", code: "#fe640b",
 		error: "#d20f39", success: "#40a02b", warning: "#df8e1d",
 	}),
