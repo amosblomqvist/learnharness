@@ -68,6 +68,8 @@ import { useSideThread } from "@/components/use-side-thread";
 import { SideQuestionChip } from "@/components/side-question-chip";
 import { useRouter } from "next/navigation";
 import { PracticeDock } from "@/components/practice-dock";
+import { SideChatProvider } from "@/components/side-chat-state";
+import { SideAskBlock, SidePassage, SideSelectionAsk } from "@/components/side-chat";
 import { ThinkingCard, type PracticeThinkingData } from "@/components/practice-cards";
 import { GraphContextCard, type GraphContextData } from "@/components/graph-context-card";
 import { TopBar } from "@/components/top-bar";
@@ -1508,6 +1510,8 @@ export function Chat({
 				</TopBar>
 
 				<SessionFind scopeRef={sessionFindScopeRef} scrollContextRef={scrollContextRef} />
+				<SideChatProvider chatId={chatId}>
+				<SideSelectionAsk />
 				<div ref={sessionFindScopeRef} className="relative flex min-h-0 flex-1">
 				<Conversation className="h-full min-w-0 flex-1" initial="instant" contextRef={scrollContextRef}>
 					<SessionMessageNavigation />
@@ -1679,7 +1683,16 @@ export function Chat({
 														const anchor = sourceId && sourceTextParts.get(sourceId) === part.id ? messageAnchorId(sourceId) : undefined;
 														return (
 															<div key={part.id || pi} id={anchor} data-source-message-id={sourceId ?? undefined} className="lh-source-passage">
-																<MessageResponse>{part.text}</MessageResponse>
+																{sourceId && part.id ? (
+																	/* Side questions (2026-11-02): every markdown block of
+																	   teacher prose can carry an inline side window. Live
+																	   (c_) messages are not in the record yet — no asks. */
+																	<SidePassage messageId={sourceId} partId={part.id} enabled={!sourceId.startsWith("c_")}>
+																		<MessageResponse BlockComponent={SideAskBlock}>{part.text}</MessageResponse>
+																	</SidePassage>
+																) : (
+																	<MessageResponse>{part.text}</MessageResponse>
+																)}
 															</div>
 														);
 													}
@@ -1955,6 +1968,7 @@ export function Chat({
 				)}
 				<AbortTurnDialog mode={abortAsk} onClose={() => setAbortAsk(null)} onConfirm={confirmAbort} busy={busy} />
 				</div>
+				</SideChatProvider>
 			</div>
 		</div>
 		</CitationActionsContext.Provider>
