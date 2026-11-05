@@ -48,7 +48,10 @@ export function createNotesImportQueue(post: (files: readonly File[]) => Promise
 					if (!r) throw new Error("Invalid import response. Check the graph before retrying.");
 					if (!r.ok) {
 						const details = [r.provider, r.missing?.join(", "), r.slots?.join(", ")].filter(Boolean);
-						failures.set(index, `${r.filePath}: ${r.error}${r.code ? `\n${[r.code, ...details].join(" — ")}` : ""}`);
+						// A quota result is fully explained by its message; its code is
+						// an internal discriminator, not something to show the learner.
+						const showCode = r.code && r.code !== QUOTA_EXHAUSTED_CODE;
+						failures.set(index, `${r.filePath}: ${r.error}${showCode ? `\n${[r.code, ...details].join(" — ")}` : ""}`);
 						// Only the route's confirmed discriminator halts the cycle;
 						// raw provider text alone never does.
 						if (r.code === QUOTA_EXHAUSTED_CODE) {

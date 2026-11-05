@@ -143,7 +143,7 @@ it("confirmed quota_exhausted stops dispatch, lets in-flight settle, drains pend
 	assert.equal(queue.getSnapshot().importing, false, "drained pending lets the cycle complete");
 	assert.equal(queue.getSnapshot().completion, 1);
 	assert.deepEqual(queue.getSnapshot().errors, [
-		`quota.md: ${QUOTA_MESSAGE}\nquota_exhausted`,
+		`quota.md: ${QUOTA_MESSAGE}`,
 		"c.md: Not attempted (daily quota exhausted).",
 		"d.md: Not attempted (daily quota exhausted).",
 	], "unattempted files are reported distinctly from the attempted quota failure");
@@ -153,6 +153,18 @@ it("confirmed quota_exhausted stops dispatch, lets in-flight settle, drains pend
 	assert.equal(queue.getSnapshot().importing, false);
 	assert.equal(queue.getSnapshot().completion, 2);
 	assert.deepEqual(queue.getSnapshot().errors, [], "fresh selection clears the drained cycle's errors");
+});
+
+it("the internal quota_exhausted code is never printed, while other config refusals keep their code line", async () => {
+	const queue = createNotesImportQueue(async (files) => [files[0]!.name === "q.md"
+		? quotaResult("q.md")
+		: { ...failureResult("k.md", "No OpenRouter key is set — add one in Settings → Keys", "provider_key_missing"), provider: "openrouter", slots: ["strong"] }]);
+	queue.append([file("q.md"), file("k.md")]);
+	await tick();
+	const errors = queue.getSnapshot().errors;
+	assert.equal(errors.some((error) => error.includes("quota_exhausted")), false, "no raw quota code anywhere");
+	assert.equal(errors[0], `q.md: ${QUOTA_MESSAGE}`);
+	assert.equal(errors[1], "k.md: No OpenRouter key is set — add one in Settings → Keys\nprovider_key_missing — openrouter — strong", "other codes are unchanged");
 });
 
 it("a selection appended while quota-stopped work is still settling is drained as unattempted, never dispatched", async () => {
@@ -168,7 +180,7 @@ it("a selection appended while quota-stopped work is still settling is drained a
 	assert.equal(queue.getSnapshot().importing, false);
 	assert.equal(queue.getSnapshot().completion, 1);
 	assert.deepEqual(queue.getSnapshot().errors, [
-		`q.md: ${QUOTA_MESSAGE}\nquota_exhausted`,
+		`q.md: ${QUOTA_MESSAGE}`,
 		"c.md: Not attempted (daily quota exhausted).",
 		"late.md: Not attempted (daily quota exhausted).",
 	]);

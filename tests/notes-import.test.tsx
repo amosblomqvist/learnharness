@@ -196,7 +196,7 @@ it("a confirmed quota_exhausted result stops dispatch, drains the rest as unatte
 	assert.equal(current.importing, false, "cycle completes instead of hanging");
 	assert.equal(finishes, 1, "onFinish fires once");
 	assert.deepEqual(current.errors, [
-		"a.md: Daily free model quota exhausted. Wait for reset or configure another model/provider.\nquota_exhausted",
+		"a.md: Daily free model quota exhausted. Wait for reset or configure another model/provider.",
 		"d.md: Not attempted (daily quota exhausted).",
 	], "successes preserved, unattempted reported distinctly");
 	globalThis.fetch = async (_url, init) => {
