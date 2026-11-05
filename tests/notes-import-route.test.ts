@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { after, it } from "node:test";
 import { POST } from "../app/api/graph/import/route.ts";
-import { extraction } from "../src/server/index.ts";
+import { extraction, sourceDirectory } from "../src/server/index.ts";
 import { ModelsNotConfiguredError, ProviderKeyMissingError } from "../src/core/settings.ts";
 import { createExtractionPipeline, NotesImportError } from "../src/agent/subagents/extraction.ts";
 import { createFauxCore, fauxAssistantMessage, fauxToolCall } from "@earendil-works/pi-ai";
@@ -22,18 +22,19 @@ function request(names: string[]) {
 it("route keeps three-worker batching, request positions and mixed per-file outcomes/config details", async () => {
 	let active = 0;
 	let peak = 0;
+	const outcomeOf: Record<string, NotesImportError["outcome"]> = { "failed.md": "failed", "partial.md": "partial", "aborted.md": "aborted", "busy.md": "busy" };
 	extraction.importNotes = async ({ filePath }) => {
 		active++; peak = Math.max(peak, active);
 		try {
 			await new Promise((resolve) => setTimeout(resolve, filePath === "slow.md" ? 25 : 1));
 			if (filePath === "models.md") throw new ModelsNotConfiguredError(["cheap"]);
 			if (filePath === "key.md") throw new ProviderKeyMissingError("openai", ["cheap"]);
-			if (["failed", "partial", "aborted", "busy"].includes(filePath)) throw new NotesImportError(filePath as NotesImportError["outcome"], { nodes: 2, chains: 1 }, `synthetic ${filePath}`);
+			if (filePath in outcomeOf) throw new NotesImportError(outcomeOf[filePath]!, { nodes: 2, chains: 1 }, `synthetic ${filePath}`);
 			if (filePath === "unknown.md") throw new Error("synthetic unknown error");
 			return { nodes: 0, chains: 0 };
 		} finally { active--; }
 	};
-	const names = ["slow.md", "same.md", "same.md", "failed", "partial", "aborted", "busy", "models.md", "key.md", "unknown.md"];
+	const names = ["slow.md", "same.md", "same.md", "failed.md", "partial.md", "aborted.md", "busy.md", "models.md", "key.md", "unknown.md"];
 	const response = await POST(request(names));
 	assert.equal(response.status, 200);
 	const { results } = await response.json();
@@ -43,8 +44,8 @@ it("route keeps three-worker batching, request positions and mixed per-file outc
 	for (const [requestIndex, filePath] of names.entries()) {
 		const result = results.find((r: { requestIndex: number }) => r.requestIndex === requestIndex);
 		assert.equal(result.filePath, filePath);
-		if (["failed", "partial", "aborted", "busy"].includes(filePath)) {
-			assert.equal(result.outcome, filePath);
+		if (filePath in outcomeOf) {
+			assert.equal(result.outcome, outcomeOf[filePath]);
 			assert.equal(result.ok, false);
 			assert.deepEqual(result.stats, { nodes: 2, chains: 1 });
 		} else if (["slow.md", "same.md"].includes(filePath)) {
@@ -132,6 +133,91 @@ it("PDFs are known by their bytes, not their names", async () => {
 	assert.deepEqual(received.sort(), ["--- Page 1 ---\n\nInside a misnamed file", "just text"]);
 });
 
+it("every type on the list is accepted, in any letter case", async () => {
+	const received: string[] = [];
+	extraction.importNotes = async ({ filePath, text }) => { received.push(`${filePath}=${text}`); return { nodes: 0, chains: 0 }; };
+	const names = ["a.txt", "b.md", "c.markdown", "d.rst", "e.org", "f.adoc", "g.tex", "NOTES.MD", "Chapter.TeX"];
+	const pdf = tinyPdf([{ runs: [{ text: "Page text", x: 72, y: 700 }] }]);
+	const response = await POST(upload([...names.map((name) => ({ name, bytes: `words in ${name}` })), { name: "h.pdf", bytes: pdf }, { name: "UPPER.PDF", bytes: pdf }]));
+	const { results } = await response.json();
+	assert.equal(results.length, names.length + 2);
+	assert.ok(results.every((r: { ok: boolean; outcome: string }) => r.ok && r.outcome === "completed"));
+	assert.deepEqual(received.sort(), [
+		...names.map((name) => `${name}=words in ${name}`),
+		"UPPER.PDF=--- Page 1 ---\n\nPage text",
+		"h.pdf=--- Page 1 ---\n\nPage text",
+	].sort());
+});
+
+it("a type that is not on the list is refused with a short message before registerImport or the pipeline", async () => {
+	let imports = 0;
+	const registered: string[] = [];
+	extraction.importNotes = async () => { imports++; return { nodes: 0, chains: 0 }; };
+	const realRegister = sourceDirectory.registerImport;
+	sourceDirectory.registerImport = (filePath) => { registered.push(filePath); };
+	try {
+		const names = ["deck.pptx", "report.docx", "memo.rtf", "table.csv", "README", "notes.md.bak"];
+		const pdf = tinyPdf([{ runs: [{ text: "Slide text", x: 72, y: 700 }] }]);
+		const response = await POST(upload([...names.map((name) => ({ name, bytes: "plain words" })), { name: "slides.pptx", bytes: pdf }]));
+		assert.equal(response.status, 200);
+		const { results } = await response.json();
+		assert.equal(results.length, names.length + 1);
+		for (const result of results) {
+			assert.equal(result.ok, false); assert.equal(result.outcome, "failed");
+			assert.equal(result.error, "This file type isn't supported. Use text, Markdown, or PDF.");
+		}
+		assert.equal(imports, 0); assert.deepEqual(registered, []);
+	} finally { sourceDirectory.registerImport = realRegister; }
+});
+
+const zip = () => new Uint8Array([0x50, 0x4b, 0x03, 0x04, 0x14, 0x00, 0x06, 0x00, 0x08, 0x00, 0x00, 0x00, 0x21, 0x00, 0x62, 0x63]);
+const utf16 = () => new Uint8Array([0xff, 0xfe, ...Buffer.from("hello notes", "utf16le")]);
+
+it("a file that is not plain text is refused with a short message before registerImport or the pipeline", async () => {
+	let imports = 0;
+	const registered: string[] = [];
+	extraction.importNotes = async () => { imports++; return { nodes: 0, chains: 0 }; };
+	const realRegister = sourceDirectory.registerImport;
+	sourceDirectory.registerImport = (filePath) => { registered.push(filePath); };
+	try {
+		const response = await POST(upload([
+			{ name: "notes.txt", bytes: zip() }, { name: "memo.md", bytes: utf16() }, { name: "archive.pdf", bytes: zip() }, { name: "paper.tex", bytes: new Uint8Array(32) },
+		]));
+		const { results } = await response.json();
+		assert.equal(results.length, 4);
+		for (const result of results) {
+			assert.equal(result.ok, false); assert.equal(result.outcome, "failed");
+			assert.equal(result.error, "This file isn't plain text.");
+		}
+		assert.equal(imports, 0); assert.deepEqual(registered, []);
+	} finally { sourceDirectory.registerImport = realRegister; }
+});
+
+it("only a zero byte in the first 8 KiB makes a file not plain text", async () => {
+	const received: string[] = [];
+	extraction.importNotes = async ({ filePath }) => { received.push(filePath); return { nodes: 0, chains: 0 }; };
+	const text = (nulAt: number) => { const bytes = new Uint8Array(9000).fill(0x61); bytes[nulAt] = 0; return bytes; };
+	const response = await POST(upload([{ name: "inside.txt", bytes: text(8191) }, { name: "outside.txt", bytes: text(8192) }, { name: "late.txt", bytes: text(8999) }]));
+	const { results } = await response.json();
+	const byName = (name: string) => results.find((r: { filePath: string }) => r.filePath === name);
+	assert.equal(byName("inside.txt").error, "This file isn't plain text.");
+	assert.equal(byName("outside.txt").outcome, "completed"); assert.equal(byName("late.txt").outcome, "completed");
+	assert.deepEqual(received.sort(), ["late.txt", "outside.txt"]);
+});
+
+it("a PDF is still converted when its bytes hold zero bytes, whatever its name", async () => {
+	const received: string[] = [];
+	extraction.importNotes = async ({ text }) => { received.push(text); return { nodes: 0, chains: 0 }; };
+	const pdf = tinyPdf([{ runs: [{ text: "Binary header", x: 72, y: 700 }] }]);
+	const eol = pdf.indexOf(0x0a) + 1;
+	const withNuls = new Uint8Array([...pdf.subarray(0, eol), 0x25, 0, 0, 0, 0, 0x0a, ...pdf.subarray(eol)]);
+	assert.ok(withNuls.includes(0));
+	const response = await POST(upload([{ name: "binary.pdf", bytes: withNuls }, { name: "renamed.txt", bytes: withNuls }]));
+	const { results } = await response.json();
+	assert.ok(results.every((r: { outcome: string }) => r.outcome === "completed"));
+	assert.deepEqual(received, ["--- Page 1 ---\n\nBinary header", "--- Page 1 ---\n\nBinary header"]);
+});
+
 it("PDFs with nothing to import are refused before any model call", async () => {
 	let calls = 0;
 	extraction.importNotes = async () => { calls++; return { nodes: 0, chains: 0 }; };
@@ -191,7 +277,7 @@ for (const split of [false, true]) it(`server refuses actual file bytes over 25 
 it("server accepts exactly 25 MiB of files with multipart overhead below 26 MiB", async () => {
 	let received = 0;
 	extraction.importNotes = async ({ text }) => { received = text.length; return { nodes: 0, chains: 0 }; };
-	const response = await POST(upload([{ name: "boundary.txt", bytes: new Uint8Array(MAX_IMPORT_BYTES) }]));
+	const response = await POST(upload([{ name: "boundary.txt", bytes: new Uint8Array(MAX_IMPORT_BYTES).fill(0x61) }]));
 	assert.equal(response.status, 200);
 	assert.equal(received, MAX_IMPORT_BYTES);
 	assert.equal((await response.json()).results[0].outcome, "completed");

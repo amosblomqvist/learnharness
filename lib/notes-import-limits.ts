@@ -9,6 +9,11 @@ const IMPORT_EXTENSION_NAMES = ["txt", "md", "markdown", "rst", "org", "adoc", "
 export const IMPORT_EXTENSIONS = new RegExp(`\\.(?:${IMPORT_EXTENSION_NAMES.join("|")})$`, "i");
 export const IMPORT_ACCEPT = IMPORT_EXTENSION_NAMES.map((name) => `.${name}`).join(",");
 export const UNSUPPORTED_TYPE_MESSAGE = "This file type isn't supported. Use text, Markdown, or PDF.";
+export const NOT_PLAIN_TEXT_MESSAGE = "This file isn't plain text.";
+
+/** A zero byte in the first 8 KiB means the file is not plain text (the same
+ * rule as the agent's grep binary skip, `isBinaryFile` in fs-shared.ts). */
+export const looksBinary = (bytes: Uint8Array): boolean => bytes.subarray(0, 8192).includes(0);
 
 /** Contributor's relative-path contract: identity only, never a disk path.
  * Chromium may serialize the basename or the full webkitRelativePath. */

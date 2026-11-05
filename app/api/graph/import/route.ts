@@ -1,11 +1,15 @@
 /**
- * POST /api/graph/import — the format-agnostic front door's transport
- * (vision §1, 2026-09-13): raw personal-notes files in, one extraction run
- * per file through the SAME pipeline the sessions use. Multipart form data
- * (field "files", any text format — the extractor is format-agnostic); the
- * pipeline mints a deterministic source id per file path, persists the
- * source record (the file's provenance + the run's usage), and runs
- * extractor → auditor → merger over the raw text.
+ * POST /api/graph/import — the front door's transport (vision §1,
+ * 2026-09-13): raw personal-notes files in, one extraction run per file
+ * through the SAME pipeline the sessions use. Multipart form data (field
+ * "files"); the pipeline mints a deterministic source id per file path,
+ * persists the source record (the file's provenance + the run's usage), and
+ * runs extractor → auditor → merger over the raw text.
+ *
+ * Only the file types on the list in lib/notes-import-limits.ts are taken
+ * (text, Markdown and PDF formats, matched by file name, any letter case).
+ * Any other type is refused, and so is a file that is not plain text (a zero
+ * byte in its first 8 KiB), each before any source record or model call.
  *
  * A PDF (spotted by its %PDF- header, not its name) is converted to
  * Markdown first. A PDF with nothing to extract is refused before any
@@ -18,7 +22,15 @@
  * /api/graph/status, as with session runs.
  */
 import { convertPdf, extraction, joinPages, NotesImportError, sourceDirectory } from "@/src/server";
-import { MAX_IMPORT_BODY_BYTES, MAX_IMPORT_BYTES, validNotesPath } from "@/lib/notes-import-limits.ts";
+import {
+	IMPORT_EXTENSIONS,
+	looksBinary,
+	MAX_IMPORT_BODY_BYTES,
+	MAX_IMPORT_BYTES,
+	NOT_PLAIN_TEXT_MESSAGE,
+	UNSUPPORTED_TYPE_MESSAGE,
+	validNotesPath,
+} from "@/lib/notes-import-limits.ts";
 import {
 	emit,
 	ModelsNotConfiguredError,
@@ -53,10 +65,15 @@ const PDF_MAGIC = [0x25, 0x50, 0x44, 0x46, 0x2d]; // "%PDF-"
 
 type NotesFile = { kind: "notes"; text: string; notice?: string } | { kind: "refused"; error: string };
 
-/** A PDF becomes page-marked Markdown; any other file is read as text, as before. */
+/** Refuses a file type that is not on the list. A PDF (by its bytes) becomes
+ * page-marked Markdown; any other file must be plain text and is read as such. */
 async function readNotesFile(file: File): Promise<NotesFile> {
+	if (!IMPORT_EXTENSIONS.test(file.name)) return { kind: "refused", error: UNSUPPORTED_TYPE_MESSAGE };
 	const bytes = new Uint8Array(await file.arrayBuffer());
-	if (!PDF_MAGIC.every((byte, i) => bytes[i] === byte)) return { kind: "notes", text: new TextDecoder().decode(bytes) };
+	if (!PDF_MAGIC.every((byte, i) => bytes[i] === byte)) {
+		if (looksBinary(bytes)) return { kind: "refused", error: NOT_PLAIN_TEXT_MESSAGE };
+		return { kind: "notes", text: new TextDecoder().decode(bytes) };
+	}
 	const pdf = await convertPdf(bytes, MAX_PDF_PAGES);
 	switch (pdf.kind) {
 		case "unreadable":
