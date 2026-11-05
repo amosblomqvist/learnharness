@@ -31,6 +31,7 @@ import { runPdfReaderAgent } from "./pdf-reader.ts";
 import { runResearcherAgent } from "./researcher.ts";
 import { runVisualMaker } from "./visual-maker.ts";
 import { loadLearnerImage, type LearnerImage } from "../tools/learner-image.ts";
+import { loadPdfFigureSource, type PdfFigureSource } from "../tools/pdf-figure.ts";
 
 /**
  * The background job runner (contracts.ts "THE ASYNC PROTOCOL" §2–3), created
@@ -456,6 +457,7 @@ export function createJobRunner(deps: JobRunnerDeps): JobRunner {
 		const input = (passedInput ?? resolveInput(job, passedInput)) as VisualToolInput | undefined;
 		const brief = typeof input?.brief === "string" ? input.brief : "";
 		const imagePath = typeof input?.image === "string" ? input.image : undefined;
+		const pdfInput = input?.pdf && typeof input.pdf.path === "string" && typeof input.pdf.page === "number" ? input.pdf : undefined;
 
 		try {
 			// Annotation (issue #363): the learner image is read once, here,
@@ -465,9 +467,16 @@ export function createJobRunner(deps: JobRunnerDeps): JobRunner {
 				jobStore.updateJob(jobId, { activity: "loading image" });
 				image = await loadLearnerImage(imagePath, loop.abortSignal);
 			}
-			jobStore.updateJob(jobId, { activity: image ? "annotating image" : "drawing figure" });
+			// A PDF page: the maker crops the figure itself, so the stored
+			// image is whichever page or crop it finally annotated.
+			let pdf: PdfFigureSource | undefined;
+			if (pdfInput) {
+				jobStore.updateJob(jobId, { activity: `rendering page ${pdfInput.page}` });
+				pdf = await loadPdfFigureSource(pdfInput.path, pdfInput.page, loop.abortSignal);
+			}
+			jobStore.updateJob(jobId, { activity: pdf ? "finding figure" : image ? "annotating image" : "drawing figure" });
 			const result = await runVisualMaker(
-				{ brief, image },
+				{ brief, image, pdf },
 				{
 					engine: model,
 					abortSignal: loop.abortSignal,
@@ -476,7 +485,8 @@ export function createJobRunner(deps: JobRunnerDeps): JobRunner {
 					onActivity: (line) => jobStore.updateJob(jobId, { activity: line }),
 				},
 			);
-			if (image && result.svg && stillRunning(jobId)) chatStore.saveImageSnapshot(job.chatId, image.snapshotId, image);
+			const annotated = image ?? (result.image ? pdf?.imageFor(result.image.snapshotId) : undefined);
+			if (annotated && result.svg && stillRunning(jobId)) chatStore.saveImageSnapshot(job.chatId, annotated.snapshotId, annotated);
 			if (isVisualFailure(result) && stillRunning(jobId))
 				jobStore.updateJob(jobId, { error: result.notes ?? "visual build failed" });
 			await finishJob(jobId, result);

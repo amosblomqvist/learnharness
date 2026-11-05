@@ -89,6 +89,8 @@ This is single-process coordination over JSON files, not a transactional queue o
 
 `show_image` displays a local raster picture; `visual` with an image path annotates it. Both use the file-access policy and shared processing: input bounds of 25 MiB, 16 megapixels, and 8192px per side; off-thread orientation/metadata cleanup; stored PNG/JPEG bounded to 1600px per side and below 1 MiB of base64.
 
+`visual` with `pdf: { path, page }` annotates a figure on one page of a learner's PDF. Dispatch checks the path, that pdfjs can open the file, and that the page exists. At job start [`pdf-figure.ts`](../src/agent/tools/pdf-figure.ts) checks again and renders the page natively (pdfjs + Skia, about 1600px on the long side). The maker finds the figure and calls `crop_page` with a box in page-image pixels. The crop is re-rendered from the PDF (at most 300 dpi) rather than cut from the page bitmap. Recropping replaces the picture and discards the SVG. Both renders go through the same snapshot processing; only the picture finally annotated is stored, and the result records its page and crop.
+
 [`learner-image.ts`](../src/agent/tools/learner-image.ts) stores processed bytes under SHA-256 identities in `ChatRecord.imageSnapshots`, deduplicated per session. Cards and annotation SVGs reference snapshots, so moving the original does not break saved results. Session-scoped image reads resolve references; SVG downloads embed their image. The annotator edits a placeholder href, not base64, and uses static native rendering. Ordinary visual SVGs retain their existing behavior. Offline regression tests exercise snapshot storage, display, and payload delivery, not model-driven annotation quality.
 
 ## Knowledge graph and imports

@@ -219,6 +219,9 @@ export interface VisualToolInput {
 	/** A learner image file to annotate (issue #363): the maker draws its
 	 *  marks on top of it instead of authoring a figure from scratch. */
 	image?: string;
+	/** A page of the learner's PDF: the maker crops the figure the brief
+	 *  names from it and annotates the crop. Never set with image. */
+	pdf?: { path: string; page: number };
 }
 
 export interface VisualResult {
@@ -227,8 +230,10 @@ export interface VisualResult {
 	svg: string;
 	notes?: string;
 	/** Present when the figure annotates a learner image: its absolute
-	 *  path. Photos never invert, so the card hides the switch. */
-	image?: { path: string; snapshotId: string };
+	 *  path. Photos never invert, so the card hides the switch. From a PDF,
+	 *  path is the PDF, page is 1-based, and crop (page fractions from the
+	 *  top-left) is absent when the whole page was annotated. */
+	image?: { path: string; snapshotId: string; page?: number; crop?: { x: number; y: number; width: number; height: number } };
 }
 
 /** The pdf-reader (sources v0, 2026-09): reads a learner-provided PDF on

@@ -8,6 +8,7 @@ import { providerEventObserver, type ProviderEventObserver } from "../provider-e
 import { backgroundCaptureStream, createBackgroundCapture, type BackgroundCapture } from "../background-capture.ts";
 import type { VisualResult } from "../../core/contracts.ts";
 import type { LearnerImage } from "../tools/learner-image.ts";
+import type { PdfFigureImage, PdfFigureSource } from "../tools/pdf-figure.ts";
 import { embedLearnerImage, LEARNER_IMAGE_HREF } from "../../core/learner-image-svg.ts";
 import { annotationPlacementProblem } from "./annotation-svg.ts";
 import { getHeadless, type HeadlessApi } from "./headless.ts";
@@ -39,12 +40,18 @@ import { getHeadless, type HeadlessApi } from "./headless.ts";
  * href (LEARNER_IMAGE_HREF); the loop embeds bytes only for rendering.
  * Delivered SVGs retain the placeholder and a session snapshot reference.
  * The maker receives native image content, never base64 in SVG text/edits.
+ *
+ * PDF MODE: with a PDF page the maker first sees the whole page, crops the
+ * figure the brief names with crop_page (re-rendered from the PDF, then
+ * shown back), and annotates the crop exactly as in image mode.
  */
 
 export interface VisualMakerInput {
 	brief: string;
 	/** The learner image to annotate, already bounded for storage. */
 	image?: LearnerImage;
+	/** A page of the learner's PDF to crop a figure from and annotate. */
+	pdf?: PdfFigureSource;
 }
 
 /** The placeholder href the model gives the learner's picture. */
@@ -126,11 +133,42 @@ figure is that picture with marks on it, not a new drawing:
 - If a feature the brief names is not in the picture, never guess where it is: leave it unmarked and say
   so in your notes.`;
 
+const PDF_INSTRUCTIONS = `FINDING THE FIGURE ON A PDF PAGE — the picture you were given is one whole page of the learner's PDF
+(often a lecture slide), and the brief names one figure on it:
+
+- Find that figure on the page first. Then call crop_page with a box, in the page image's pixels, that
+  holds the whole figure (with its labels, axes, and legend) plus a small margin, and leaves out the slide
+  title, footer, logos, and unrelated text unless the brief needs them.
+- Look at the crop that comes back. If any of the figure is cut off, or the box holds too much, call
+  crop_page again with a corrected box, always measured on the original page image.
+- The crop is the picture you annotate: place it at the W×H given with the crop. Cropping again replaces
+  it and discards any SVG you wrote, so settle the crop before you draw.
+- If the figure fills the page, skip crop_page and annotate the whole page.
+- If the figure the brief names is not on this page, write no SVG: finish with notes saying so and what
+  the page shows instead.`;
+
 /** The wire declarations (pi-ai Tool, TypeBox parameters): this loop owns
  *  execution itself — write/edit dispatch inline below, render feeds the
  *  image-in-the-loop message — so the declarations carry no execute. */
-export function createVisualTools(): Record<string, Tool> {
+export function createVisualTools(mode: { pdf?: boolean } = {}): Record<string, Tool> {
 	return {
+		...(mode.pdf
+			? {
+					crop_page: {
+						name: "crop_page",
+						description:
+							"Crop the PDF page to the figure. x, y, width and height are a box in the pixels of the page image you were shown " +
+							"(origin top-left). The crop is re-rendered sharp from the PDF, shown to you, and becomes the picture you annotate. " +
+							"Call again to adjust; that discards any SVG written so far.",
+						parameters: Type.Object({
+							x: Type.Number({ description: "Left edge, in page-image pixels." }),
+							y: Type.Number({ description: "Top edge, in page-image pixels." }),
+							width: Type.Number({ description: "Box width, in page-image pixels." }),
+							height: Type.Number({ description: "Box height, in page-image pixels." }),
+						}),
+					},
+				}
+			: {}),
 		write_svg: {
 			name: "write_svg",
 			description: "Write the complete SVG source for the figure (overwrites any previous version).",
@@ -157,20 +195,24 @@ export function createVisualTools(): Record<string, Tool> {
 
 const LOOK_MESSAGE =
 	"Here is the current render of your SVG — inspect it critically (geometry, labels, clipping, readability):";
+const cropLookMessage = (width: number, height: number) =>
+	`Here is your crop (${width}×${height} px) — check it holds the whole figure the brief names, with nothing cut off:`;
 const UNLOOKED_FINISH_MESSAGE =
 	"You finished without looking at a render of your final SVG. Above is its render. If it is correct and clean, reply with just your notes; otherwise call write_svg with fixes and render again.";
 
 export async function runVisualMaker(input: VisualMakerInput, opts: VisualMakerOptions = {}): Promise<VisualResult> {
 	const headless = opts.headless ?? getHeadless();
 	const brief = input.brief.trim() || "(no brief)";
-	const maxIterations = opts.maxIterations ?? 8;
+	const pdf = input.pdf;
+	// Finding and cropping a PDF figure costs a couple of extra rounds.
+	const maxIterations = opts.maxIterations ?? (pdf ? 10 : 8);
 
 	const reason = headless.unavailableReason();
 	if (reason) {
 		return { svg: "", notes: `FAILED: ${reason}` };
 	}
 
-	const tools = createVisualTools();
+	const tools = createVisualTools({ pdf: Boolean(pdf) });
 	const toolDeclarations = Object.values(tools);
 	const engine = opts.engine ?? piEngineFor("visualMaker");
 	// BYOK (owner, 2026-09-22): the level rides the injected engine — no
@@ -179,19 +221,30 @@ export async function runVisualMaker(input: VisualMakerInput, opts: VisualMakerO
 	const sessionId = randomUUID();
 	const capture = createBackgroundCapture({ role: "visualMaker", runId: sessionId, sourceId: opts.chatId });
 	const streamEngine = { ...engine, streamFn: backgroundCaptureStream(engine.streamFn, capture) };
-	const learnerImage = input.image;
-	const systemPrompt = learnerImage ? `${INSTRUCTIONS}\n\n${IMAGE_INSTRUCTIONS}` : INSTRUCTIONS;
+	/** The picture being annotated; in PDF mode crop_page replaces it. */
+	let learnerImage: LearnerImage | PdfFigureImage | undefined = input.image ?? pdf?.pageImage;
+	const systemPrompt = pdf
+		? `${INSTRUCTIONS}\n\n${IMAGE_INSTRUCTIONS}\n\n${PDF_INSTRUCTIONS}`
+		: learnerImage
+			? `${INSTRUCTIONS}\n\n${IMAGE_INSTRUCTIONS}`
+			: INSTRUCTIONS;
 	const prompt = [
-		learnerImage
-			? "Brief for ONE annotated image (from the teacher, verbatim — it is everything you know):"
-			: "Brief for ONE precise figure (from the teacher, verbatim — it is everything you know):",
+		pdf
+			? "Brief for ONE annotated figure from the learner's PDF (from the teacher, verbatim — it is everything you know):"
+			: learnerImage
+				? "Brief for ONE annotated image (from the teacher, verbatim — it is everything you know):"
+				: "Brief for ONE precise figure (from the teacher, verbatim — it is everything you know):",
 		brief,
 		"",
-		...(learnerImage
+		...(pdf && learnerImage
 			? [
-					`The learner's image follows: ${learnerImage.width}×${learnerImage.height} px. Place it with <image href="${LEARNER_IMAGE_HREF}" … width="${learnerImage.width}" height="${learnerImage.height}"/>.`,
+					`Page ${pdf.page} of the learner's PDF follows: ${learnerImage.width}×${learnerImage.height} px. Find the figure the brief names, then crop_page to it — or, if it fills the page, place the whole page with <image href="${LEARNER_IMAGE_HREF}" … width="${learnerImage.width}" height="${learnerImage.height}"/>.`,
 				]
-			: []),
+			: learnerImage
+				? [
+						`The learner's image follows: ${learnerImage.width}×${learnerImage.height} px. Place it with <image href="${LEARNER_IMAGE_HREF}" … width="${learnerImage.width}" height="${learnerImage.height}"/>.`,
+					]
+				: []),
 		"Author the SVG, render it, look at it, iterate until correct, then finish with your notes.",
 	].join("\n");
 
@@ -287,6 +340,7 @@ export async function runVisualMaker(input: VisualMakerInput, opts: VisualMakerO
 
 			const toolResults: ToolResultMessage[] = [];
 			let renderImage: Extract<ProcessImageResult, { ok: true }> | null = null; // appended AFTER the tool results
+			let cropImage: { image: Extract<ProcessImageResult, { ok: true }>; width: number; height: number } | null = null;
 			for (const call of toolCalls) {
 				if (call.name === "write_svg") {
 					const svg = (call.arguments as { svg?: unknown }).svg;
@@ -357,13 +411,61 @@ export async function runVisualMaker(input: VisualMakerInput, opts: VisualMakerO
 						opts.onActivity?.("render_svg: render error");
 						toolResults.push(toolText(call.id, call.name, `RENDER ERROR (the SVG may be malformed): ${msg}. Fix it with write_svg and render again.`));
 					}
+				} else if (call.name === "crop_page" && pdf) {
+					const box = call.arguments as Record<string, unknown>;
+					const [x, y, width, height] = [box.x, box.y, box.width, box.height];
+					if (typeof x !== "number" || typeof y !== "number" || typeof width !== "number" || typeof height !== "number") {
+						toolResults.push(toolText(call.id, call.name, "ERROR: expected numbers x, y, width and height (page-image pixels)."));
+						continue;
+					}
+					try {
+						const cropped = await pdf.crop({ x, y, width, height }, opts.abortSignal);
+						const shown = await processImage(Buffer.from(cropped.data, "base64"), cropped.mimeType, {
+							resizeOptions: engine.model.inputLimits?.images?.resize,
+						});
+						opts.abortSignal?.throwIfAborted();
+						if (!shown.ok) throw new Error(shown.message);
+						const discarded = currentSvg !== null;
+						learnerImage = cropped;
+						currentSvg = null;
+						renderedSvg = null;
+						renderImage = null; // a render from earlier in this batch shows a discarded SVG
+						cropImage = { image: shown, width: cropped.width, height: cropped.height };
+						opts.onActivity?.(`crop_page: ${cropped.width}×${cropped.height} px`);
+						toolResults.push(
+							toolText(
+								call.id,
+								call.name,
+								`Cropped: ${cropped.width}×${cropped.height} px — the crop follows in the next message. It is now the picture you annotate: place it with <image href="${LEARNER_IMAGE_HREF}" … width="${cropped.width}" height="${cropped.height}"/>.` +
+									(discarded ? " Your earlier SVG was discarded; write_svg again." : ""),
+							),
+						);
+					} catch (err) {
+						opts.abortSignal?.throwIfAborted();
+						const msg = err instanceof Error ? err.message : String(err);
+						toolResults.push(toolText(call.id, call.name, `ERROR: crop failed — ${msg}.`));
+					}
 				} else {
-					toolResults.push(toolText(call.id, call.name, `ERROR: unknown tool "${call.name}". Use write_svg, edit_svg, or render_svg.`));
+					const known = pdf ? "write_svg, edit_svg, render_svg, or crop_page" : "write_svg, edit_svg, or render_svg";
+					toolResults.push(toolText(call.id, call.name, `ERROR: unknown tool "${call.name}". Use ${known}.`));
 				}
 			}
 			// Message order: assistant tool-calls → tool results → render image.
 			for (const result of toolResults) capture?.toolResult(result);
 			messages = [...messages, ...toolResults];
+			if (cropImage) {
+				messages = [
+					...messages,
+					{
+						role: "user",
+						content: [
+							{ type: "text", text: [cropLookMessage(cropImage.width, cropImage.height), ...cropImage.image.hints].join("\n") },
+							{ type: "image", data: cropImage.image.data, mimeType: cropImage.image.mimeType },
+						],
+						timestamp: Date.now(),
+					},
+				];
+			}
 			if (renderImage) {
 				messages = [
 					...messages,
@@ -467,12 +569,14 @@ function snippetAround(svg: string, target: string): string {
 		.join("\n");
 }
 
-function finish(svg: string | null, finalText: string, image?: LearnerImage): VisualResult {
+function finish(svg: string | null, finalText: string, image?: LearnerImage | PdfFigureImage): VisualResult {
 	if (!svg) {
 		return {
 			svg: "",
 			notes: `FAILED: the maker never wrote an SVG.${finalText ? ` (${finalText.slice(0, 300)})` : ""}`,
 		};
 	}
-	return { svg, notes: finalText || undefined, ...(image ? { image: { path: image.path, snapshotId: image.snapshotId } } : {}) };
+	if (!image) return { svg, notes: finalText || undefined };
+	const fromPdf = "page" in image ? { page: image.page, ...(image.crop ? { crop: image.crop } : {}) } : {};
+	return { svg, notes: finalText || undefined, image: { path: image.path, snapshotId: image.snapshotId, ...fromPdf } };
 }
