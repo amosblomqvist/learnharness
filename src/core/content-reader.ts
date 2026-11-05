@@ -218,6 +218,10 @@ function decodeEscapedFence(raw: string): { factor: number; text: string } | nul
 	return { factor: 1, text: fenceText(indent, openFence, lang, body, closeFence, 1) };
 }
 
+/** The start of a Windows drive path or a UNC path (`\\host\share`), allowing
+ * leading quotes or brackets, for the whole whitespace-delimited word. */
+const LAYERED_PATH = /^["'([{<]*(?:[A-Za-z]:[\\/]|\\\\[\w$.-]+\\[\w$.-])/;
+
 /** Document escapes are not arbitrary string decoding. Complete known TeX
  * words win over the prefix `\\n`. Code spans keep every byte, with one
  * exception: a fenced block whose delimiters and line breaks are escaped
@@ -247,6 +251,10 @@ export function recoverDocumentLayout(text: string): string {
 		if (factor === 0 || knownN(name)) return whole;
 		const word = part.slice(0, offset).split(/\s/).at(-1) ?? "";
 		if (/^(?:[A-Za-z]:[\\/]|https?:\/\/|\/)/.test(word + whole)) return whole;
+		// A second layer is only evidenced by a fence, so its two-backslash token
+		// must not eat real double-backslash text: a drive or UNC path, even
+		// when quoted or in parentheses (`\\nas01\share`, `"C:\\new"`).
+		if (factor === 2 && LAYERED_PATH.test(word + whole + (part.slice(offset + whole.length, offset + whole.length + 256).split(/\s/, 1)[0] ?? ""))) return whole;
 		return slashes.slice(0, -factor) + "\n" + name.slice(1);
 	});
 	const projected = spans.map((span, i) => ({

@@ -205,3 +205,31 @@ test("escaped-fence matching stays linear on very long backslash runs", () => {
 	assert.ok(closed.ms < 3000, `closed fence took ${Math.round(closed.ms)} ms`);
 	assert.ok(open.ms < 3000, `unclosed fence took ${Math.round(open.ms)} ms`);
 });
+test("two-layer recovery keeps UNC and quoted Windows paths while the fence still recovers", () => {
+	// A UNC share starts with two backslashes and a host that may begin with n;
+	// it is real text, not an escaped newline, even though a layered fence is present.
+	const fence = "```sh\\\\nls\\\\n```";
+	const recovered = "\n\n```sh\nls\n```";
+	for (const prose of [
+		math`Open \\nas01\share`,
+		math`Map the drive to \\nas01\share\backup`,
+		math`Say ("\\nas01\share")`,
+		math`Open "C:\\new\\notes" or (C:\\new)`,
+	]) {
+		const raw = prose + math` then run:\\n\\n` + fence;
+		const expected = prose + " then run:" + recovered;
+		assert.equal(recoverDocumentLayout(raw), expected, prose);
+		assert.equal(repairMathForDisplay(raw), expected, prose);
+		assert.equal(recoverDocumentLayout(expected), expected, `${prose} (idempotence)`);
+	}
+});
+test("two-layer recovery still turns n-words after a double-backslash token into newlines", () => {
+	// The same shapes without a path: a following word, or a word that merely
+	// starts like a host name, is the start of the next line.
+	const fence = "```sh\\\\nls\\\\n```";
+	const raw = math`Next:\\nnas01 is up.\\nSELECT\\nFROM ok.\\n\\n` + fence;
+	assert.equal(recoverDocumentLayout(raw), "Next:\nnas01 is up.\nSELECT\nFROM ok.\n\n```sh\nls\n```");
+	// and the recorded SQL fixture recovers exactly as before
+	const sql = twoLayerFailedQuestion();
+	assert.equal(recoverDocumentLayout(sql), sql.replace(/\\\\n/g, "\n"));
+});
