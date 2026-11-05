@@ -113,6 +113,8 @@ export function isGroqWhisperModel(value: unknown): value is GroqWhisperModel {
 
 /** The env var holding the Groq key. It is the existing model-provider key. */
 export const GROQ_KEY_ID = "GROQ_API_KEY";
+/** Same-origin intent header the dictation client sends to /api/stt/transcribe. */
+export const GROQ_DICTATION_HEADER = "x-learnharness-dictation";
 
 /** Groq's documented upload limit is 25 MB on the free tier (100 MB on the
  * dev tier, which needs a URL upload for the top of that range). The docs do
