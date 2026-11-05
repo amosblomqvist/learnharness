@@ -73,7 +73,7 @@ describe("activity dock pure layer", () => {
 		});
 		const blob = toBlobs({ jobs: [priced], extractions: [] })[0]!;
 		// Pi-normalized fresh input is priced directly, never reduced by reads.
-		assert.equal(blob.cost, 0.00215);
+		assert.equal(blob.cost, 0.0005198);
 		const missingProjection = toBlobs({ jobs: [{ ...priced, costUsd: undefined }], extractions: [] })[0]!;
 		assert.equal(missingProjection.cost, null, "the browser must not invent a fallback price");
 		const absent = toBlobs({ jobs: [job()], extractions: [] })[0]!;
@@ -246,8 +246,7 @@ describe("activity section render", () => {
 				}}
 			/>,
 		);
-		// two identical priced jobs → 2 × $0.002 = $0.0040 total (pi prices,
-		// glm-5.3-flash drifted in pi-ai 0.87.1)
-		assert.match(html, /activity-total-cost[^>]*>\$0\.0040</);
+		// Two identical jobs, priced using Pi 1.5.0's catalog.
+		assert.match(html, /activity-total-cost[^>]*>\$0\.0008</);
 	});
 });

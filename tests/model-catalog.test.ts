@@ -59,6 +59,17 @@ function qwenModel() {
 }
 
 describe("the model catalog projection", () => {
+	it("exposes GPT-6.1 Terra when OpenAI is configured", () => {
+		const previous = process.env.OPENAI_API_KEY;
+		process.env.OPENAI_API_KEY = "test-key-openai-catalog";
+		try {
+			assert.ok(modelCatalog().models.some((m) => m.provider === "openai" && m.id === "gpt-6.1-terra"));
+			assert.deepEqual(validateModelsSettings({ strong: { model: { provider: "openai", id: "gpt-6.1-terra" } } }), { ok: true });
+		} finally {
+			if (previous === undefined) delete process.env.OPENAI_API_KEY;
+			else process.env.OPENAI_API_KEY = previous;
+		}
+	});
 	it("serves the keyed providers' catalogs with the picker's DTO shape", () => {
 		const { models, defaults, providers, slots } = modelCatalog();
 		// 0.85.1 ships 366 OpenRouter models — the exact count is pi's, but
@@ -77,9 +88,8 @@ describe("the model catalog projection", () => {
 		assert.ok(glm, "glm-5.3-flash in catalog");
 		assert.deepEqual(glm!.supportedLevels, ["low", "high", "max"]);
 		assert.deepEqual(glm!.input, ["text", "image"]);
-		// pi's current glm price (pi 1.0.2 catalog refresh: cacheRead
-		// corrected 0.05 → 0.03; input/output unchanged since 0.87.1)
-		assert.deepEqual(glm!.cost, { input: 0.15, output: 0.5, cacheRead: 0.03, cacheWrite: 0 });
+		// Pi 1.5.0's refreshed OpenRouter pricing.
+		assert.deepEqual(glm!.cost, { input: 0.0285, output: 0.0923, cacheRead: 0.0285, cacheWrite: 0 });
 		// model slots wave: the providers surface + the resolved slot pins
 		const openrouter = providers.find((p) => p.id === "openrouter");
 		assert.ok(openrouter && openrouter.keyPresent, "openrouter federated (key pinned above)");
