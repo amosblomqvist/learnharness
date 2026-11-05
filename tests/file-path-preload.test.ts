@@ -77,7 +77,7 @@ describe("path-only preload bridge", () => {
 		const f = fixture(() => "");
 		assert.deepEqual(Object.keys(f.bridge).sort(), [
 			"chatgpt", "checkForUpdates", "chooseAttachmentFolder", "expandWindow", "getPathForFile", "getUpdateState", "getZoom",
-			"installUpdate", "onOpenSettings", "onUpdateStatus", "onZoom", "platform", "subscriptions",
+			"installUpdate", "lan", "onOpenSettings", "onUpdateStatus", "onZoom", "platform", "subscriptions",
 		]);
 		assert.equal(f.bridge.platform, "darwin");
 		for (const name of ["webUtils", "ipcRenderer", "electron", "fs", "require", "readFile", "writeFile", "uploadFile", "openPath"]) {
