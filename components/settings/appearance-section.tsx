@@ -34,10 +34,10 @@ import { useEffect, useRef, useState } from "react";
 import { TextAlignCenterIcon, TextAlignEndIcon, TextAlignJustifyIcon, TextAlignStartIcon } from "lucide-react";
 import {
 	EXTRACTION_CHUNK_TOKENS_FLOOR,
+	MD_CENTER_WIDTHS,
 	resolveSettings,
 	type AppearanceSettings,
 	type GraphSettings,
-	MD_CENTER_WIDTHS,
 	type MdCenterWidth,
 	type MdTextAlign,
 } from "@/src/core";
