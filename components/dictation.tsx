@@ -4,8 +4,12 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Loader2Icon, MicIcon } from "lucide-react";
 import { useSettingsDialog } from "@/components/settings/settings-dialog";
 import { Hint } from "@/components/ui/hint";
-import { deepgramListenUrl, type DictationLanguage } from "@/src/core";
+import {
+	deepgramListenUrl, encodePcm16Wav, GROQ_MAX_PCM_BYTES, GROQ_MIN_PCM_BYTES,
+	type DictationLanguage, type DictationProvider, type GroqWhisperModel,
+} from "@/src/core";
 import { useDictationLanguage } from "@/components/dictation-preference";
+import { checkGroqReady, GROQ_DICTATION_KEYLESS, GROQ_DICTATION_ROW, transcribeGroq } from "@/components/dictation-groq";
 import { setDictationActive } from "@/components/dictation-state";
 export { isDictationActive } from "@/components/dictation-state";
 
@@ -83,6 +87,17 @@ export { isDictationActive } from "@/components/dictation-state";
  *     path, which always mints FRESH.
  *   - The honest floor stays: getUserMedia can't be pre-warmed (the mic
  *     indicator would stay lit) — hence the owner's optimistic meter.
+ *
+ * Groq engine (Settings → Providers → Dictation → Engine; Deepgram stays the
+ * default and the paths above are untouched by it): Groq has no token mint, so
+ * nothing streams. The same worklet capture graph runs, but its linear16 frames
+ * are collected instead of sent; on stop they become one WAV, POSTed to
+ * /api/stt/transcribe (the server holds GROQ_API_KEY and forwards to Groq's
+ * Whisper), and the transcript lands once, through the same deferred flush. A
+ * readiness GET runs beside the mic, so a missing key refuses before the user
+ * has spoken. Recordings cap at GROQ_MAX_PCM_BYTES (12 min): reaching it stops
+ * and transcribes, never discards. While Groq works the phase is "stopping"
+ * with `transcribing` set; Esc aborts the request and discards the audio.
  */
 
 /*
@@ -252,6 +267,9 @@ export type Dictation = {
 	levelRef: { current: number };
 	/** Not idle — from the click until the stop completes (the optimistic window). */
 	active: boolean;
+	/** Groq only: the recording is uploaded and the run waits for its transcript
+	 *  (phase is "stopping"). The bar swaps the meter for "Transcribing…". */
+	transcribing: boolean;
 	/** End + KEEP the transcript: flush the deferred buffer into the primary
 	 *  input (the Stop pill and ⌘D). */
 	toggle: () => void;
@@ -282,9 +300,10 @@ export type Dictation = {
  * question waits.
  */
 export function useDictation({ append }: { append: (text: string) => void }): Dictation {
-	const { getLanguage } = useDictationLanguage();
+	const { getPreference } = useDictationLanguage();
 	const [phase, setPhase] = useState<DictationPhase>("idle");
 	const [error, setError] = useState<string | null>(null);
+	const [transcribing, setTranscribing] = useState(false);
 	/** Latest RMS from the worklet — the meter samples this (dictate pattern). */
 	const levelRef = useRef(0);
 	/** The page's fallback append — kept fresh per render so a mid-recording
@@ -320,6 +339,18 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 	/** Resolvers waiting for the run to fully end (finish(), owner
 	 *  2026-10-01): released by cleanup() — every terminal path runs it. */
 	const waitersRef = useRef<Array<() => void>>([]);
+	/** Which engine this run uses (null until its preference is read) and, for
+	 *  Groq, what the upload needs. Set once per run, in start(). */
+	const engineRef = useRef<DictationProvider | null>(null);
+	const groqRunRef = useRef<{ language: DictationLanguage; model: GroqWhisperModel; sampleRate: number } | null>(null);
+	/** Groq: the run's linear16 frames (the cap is on bytes), the upload in
+	 *  flight, and whether the cap already triggered the stop. */
+	const pcmRef = useRef<ArrayBuffer[]>([]);
+	const pcmBytesRef = useRef(0);
+	const uploadRef = useRef<AbortController | null>(null);
+	const capRef = useRef(false);
+	/** The latest stop(), for the capture callback (created once per run). */
+	const stopRef = useRef<() => void>(() => {});
 
 	/** Flush the buffered transcript into the primary input — question claim
 	 *  first, composer fallback. Called exactly once per run, at cleanup; the
@@ -341,6 +372,12 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 			safetyRef.current = null;
 		}
 		pendingRef.current = [];
+		pcmRef.current = [];
+		pcmBytesRef.current = 0;
+		capRef.current = false;
+		uploadRef.current?.abort();
+		uploadRef.current = null;
+		setTranscribing(false);
 		for (const track of streamRef.current?.getTracks() ?? []) track.stop();
 		streamRef.current = null;
 		sourceRef.current?.disconnect();
@@ -361,8 +398,8 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 		// target field with the dictated tail already in it.
 		for (const w of waitersRef.current.splice(0)) w();
 		// Pre-mint for the next run (mitigation D) — best-effort; a keyless
-		// page just doesn't warm.
-		if (warmNext) warmTokens.refresh();
+		// page just doesn't warm. A Groq run has no Deepgram token to warm.
+		if (warmNext && engineRef.current !== "groq") warmTokens.refresh();
 	}, []);
 
 	/** Open the Deepgram socket and wire its messages. `gen` guards staleness. */
@@ -437,10 +474,17 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 		reconnectsRef.current = 0;
 		bufferRef.current = []; // fresh run, fresh buffer (round 2)
 		pendingRef.current = []; // fresh run, fresh queue (mitigation A)
+		pcmRef.current = [];
+		pcmBytesRef.current = 0;
+		capRef.current = false;
+		engineRef.current = null;
+		groqRunRef.current = null;
 		const gen = ++genRef.current;
 		let language: DictationLanguage;
+		let engine: DictationProvider;
+		let groqModel: GroqWhisperModel;
 		try {
-			language = await getLanguage();
+			({ language, provider: engine, groqModel } = await getPreference());
 		} catch (e) {
 			if (gen !== genRef.current) return;
 			setError(e instanceof Error ? e.message : "Dictation language unavailable");
@@ -448,14 +492,17 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 			return;
 		}
 		if (gen !== genRef.current) return;
+		engineRef.current = engine;
+		const groq = engine === "groq";
 
 		// Mitigation D: the warm token (pre-minted at mount / after the last
 		// run) resolves ~instantly; a cold/keyless mint surfaces below. The
 		// mic is the long pole (macOS HAL + APM init) and gates everything —
 		// the token runs concurrently with it. 127.0.0.1 is a secure
 		// context, so getUserMedia works without TLS; macOS TCC prompts on
-		// first use.
-		const tokenPromise = warmTokens.mint();
+		// first use. Groq has no token: its readiness check (is a key set?)
+		// plays the same concurrent role.
+		const tokenPromise: Promise<string> = groq ? checkGroqReady().then(() => "") : warmTokens.mint();
 		tokenPromise.catch(() => {}); // surfaced below; no unhandled rejection
 		const micPromise = navigator.mediaDevices.getUserMedia({
 			audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true },
@@ -482,6 +529,16 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 				const msg = e.data as { type: string; rms?: number; buffer?: ArrayBuffer };
 				if (msg.type === "level") {
 					levelRef.current = msg.rms ?? 0; // never reset to zero (dictate pattern)
+				} else if (msg.type === "audio" && groq) {
+					// Groq: collect, don't stream. The cap stops the run once and
+					// drops what trails it; the stop still transcribes the rest.
+					if (capRef.current) return;
+					pcmRef.current.push(msg.buffer!);
+					pcmBytesRef.current += msg.buffer!.byteLength;
+					if (pcmBytesRef.current >= GROQ_MAX_PCM_BYTES) {
+						capRef.current = true;
+						stopRef.current();
+					}
 				} else if (msg.type === "audio") {
 					const ws = wsRef.current;
 					if (ws && ws.readyState === WebSocket.OPEN) ws.send(msg.buffer!);
@@ -493,6 +550,7 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 					}
 				}
 			};
+			groqRunRef.current = { language, model: groqModel, sampleRate: ctx.sampleRate };
 			const source = ctx.createMediaStreamSource(stream);
 			sourceRef.current = source;
 			source.connect(worklet);
@@ -522,10 +580,44 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 			return;
 		}
 		if (gen !== genRef.current) return;
+		// Groq has no socket: a ready key means recording is under way — unless
+		// the user already pressed stop while the check was in flight.
+		if (groq) {
+			setPhase((p) => (p === "connecting" ? "recording" : p));
+			return;
+		}
 		// Mitigation B: the handshake fires the moment the graph is live,
 		// overlapping any remaining token wait — mic-gated, never before it.
 		openSocket(gen, token, language);
-	}, [openSocket, cleanup, getLanguage]);
+	}, [openSocket, cleanup, getPreference]);
+
+	/** Groq stop: encode what was captured, upload it, buffer the transcript for
+	 *  the one deferred flush. A run too short to mean anything is dropped without
+	 *  a request. Every outcome ends in cleanup(); a stale `gen` (cancel, unmount)
+	 *  means that already happened. */
+	const transcribeRecording = useCallback(async (gen: number) => {
+		const run = groqRunRef.current;
+		if (!run || pcmBytesRef.current < GROQ_MIN_PCM_BYTES) {
+			cleanup();
+			return;
+		}
+		const wav = encodePcm16Wav(pcmRef.current, run.sampleRate);
+		pcmRef.current = [];
+		const upload = new AbortController();
+		uploadRef.current = upload;
+		setTranscribing(true);
+		try {
+			const text = await transcribeGroq((...args) => fetch(...args), {
+				wav, model: run.model, language: run.language, signal: upload.signal,
+			});
+			if (gen !== genRef.current) return;
+			if (text) bufferRef.current.push(text);
+		} catch (e) {
+			if (gen !== genRef.current) return;
+			setError(e instanceof Error ? e.message : "Groq transcription failed");
+		}
+		cleanup();
+	}, [cleanup]);
 
 	const stop = useCallback(() => {
 		const gen = genRef.current;
@@ -540,6 +632,11 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 		sourceRef.current = null;
 		workletRef.current?.disconnect();
 		workletRef.current = null;
+
+		if (engineRef.current === "groq") {
+			void transcribeRecording(gen);
+			return;
+		}
 
 		const ws = wsRef.current;
 		if (ws && ws.readyState === WebSocket.OPEN) {
@@ -557,7 +654,8 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 		} else {
 			cleanup();
 		}
-	}, [phase, cleanup]);
+	}, [phase, cleanup, transcribeRecording]);
+	stopRef.current = stop;
 
 	const cancel = useCallback(() => {
 		if (phase === "idle") return;
@@ -600,14 +698,21 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 	// page owns ONE hook instance, and only the mounted page's listener is
 	// attached.
 	useEffect(() => {
-		warmTokens.refresh(); // pre-mint at mount (mitigation D) — silent if keyless
+		// Pre-mint at mount (mitigation D) — silent if keyless. A Groq user has no
+		// use for a Deepgram token; the preference read is one local GET.
+		let mounted = true;
+		void getPreference().then(
+			({ provider }) => { if (mounted && provider !== "groq") warmTokens.refresh(); },
+			() => { if (mounted) warmTokens.refresh(); },
+		);
 		return () => {
+			mounted = false;
 			// Navigation cancels capture: invalidate every pending await before
 			// releasing resources, and never append into a different page's input.
 			bufferRef.current = [];
 			cleanup(false);
 		};
-	}, [cleanup]);
+	}, [cleanup, getPreference]);
 	useEffect(() => {
 		window.addEventListener("lh:kbd-toggle-dictation", toggle);
 		return () => window.removeEventListener("lh:kbd-toggle-dictation", toggle);
@@ -622,6 +727,7 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 		error,
 		levelRef,
 		active: phase !== "idle",
+		transcribing,
 		toggle,
 		stop,
 		finish,
@@ -643,13 +749,14 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
  *             (full text in the tooltip), cleared on the next click.
  */
 export function DictationBar({ dictation }: { dictation: Dictation }) {
-	const { phase, error, levelRef, toggle, active, clearError } = dictation;
+	const { phase, error, levelRef, toggle, active, clearError, transcribing } = dictation;
 	const { open: openSettings } = useSettingsDialog();
 	/** The keyless click (zero-keys wave, owner dictation trio): the errored
-	 *  idle button deep-links Settings → Keys → the Deepgram row and clears
-	 *  the error — the surface is clean when the user returns. Any other
-	 *  error keeps the old behavior (click = retry, which clears). */
-	const keyless = error === DICTATION_KEYLESS;
+	 *  idle button deep-links Settings → Keys → the Deepgram row (or, for the
+	 *  Groq engine, the Dictation group's Groq row) and clears the error — the
+	 *  surface is clean when the user returns. Any other error keeps the old
+	 *  behavior (click = retry, which clears). */
+	const keylessRow = error === DICTATION_KEYLESS ? DEEPGRAM_KEY_ID : error === GROQ_DICTATION_KEYLESS ? GROQ_DICTATION_ROW : null;
 	const [levels, setLevels] = useState<number[]>(() => new Array(METER_CELLS).fill(0));
 	/** Adaptive cell count (owner round 2): derived from the meter's
 	 *  measured width — narrow rows show fewer bars instead of
@@ -702,9 +809,9 @@ export function DictationBar({ dictation }: { dictation: Dictation }) {
 				<button
 					type="button"
 					onClick={() => {
-						if (keyless) {
+						if (keylessRow) {
 							clearError();
-							openSettings("keys", DEEPGRAM_KEY_ID);
+							openSettings("keys", keylessRow);
 						} else {
 							toggle();
 						}
@@ -717,6 +824,27 @@ export function DictationBar({ dictation }: { dictation: Dictation }) {
 					<span className="max-w-full truncate">{error ?? "Dictate"}</span>
 				</button>
 			</Hint>
+		);
+	}
+
+	// Groq is uploading the recording: nothing is live, so no meter and no Stop
+	// (Esc still cancels, discarding the audio).
+	if (transcribing) {
+		return (
+			<div className="flex w-full min-w-0 items-center gap-2" data-testid="dictation-bar">
+				<Hint label="Transcribing… (Esc to cancel)" side="top">
+					<button
+						type="button"
+						disabled
+						aria-label="Transcribing dictation"
+						data-testid="dictation-toggle"
+						className="flex h-7 w-full items-center justify-center gap-1.5 rounded-md border border-border/50 bg-card/50 text-xs text-muted-foreground shadow-lg backdrop-blur"
+					>
+						<Loader2Icon className="size-3.5 animate-spin" />
+						Transcribing…
+					</button>
+				</Hint>
+			</div>
 		);
 	}
 
