@@ -1,6 +1,7 @@
 "use client";
 
 import { ClipboardCheckIcon } from "lucide-react";
+import { ToolContentResponse } from "@/components/ai-elements/message";
 import { parseProbeDoneInput, type ProbeDoneResult } from "@/src/core";
 
 /**
@@ -55,12 +56,12 @@ export function ProbeDoneCard({ part }: { part: { input?: unknown; output?: unkn
 				<div className="space-y-2">
 					{strands.map((s, i) => (
 						<div key={i} className="rounded-lg bg-background/60 px-3 py-2">
-							<div className="text-sm font-medium">{s.strand}</div>
-							<div className="mt-0.5 text-sm text-muted-foreground">{s.assessment}</div>
+							<ToolContentResponse className="text-sm font-medium">{s.strand}</ToolContentResponse>
+							<ToolContentResponse className="mt-0.5 text-sm text-muted-foreground">{s.assessment}</ToolContentResponse>
 						</div>
 					))}
 					{assessment?.summary && (
-						<p className="px-1 text-sm text-muted-foreground">{assessment.summary}</p>
+						<ToolContentResponse className="px-1 text-sm text-muted-foreground">{assessment.summary}</ToolContentResponse>
 					)}
 				</div>
 			) : (
