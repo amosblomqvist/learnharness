@@ -2,8 +2,8 @@
 
 import { useSyncExternalStore } from "react";
 import {
-	dictationSettingsBody, FACTORY_SETTINGS, isDictationLanguage, sanitizeUserSettings,
-	type DictationLanguage, type DictationProvider, type GroqWhisperModel, type UserSettings,
+	dictationSettingsBody, isDictationLanguage, resolveSettings, sanitizeUserSettings,
+	type DictationLanguage, type DictationProvider, type DictationSettings, type GroqWhisperModel, type UserSettings,
 } from "@/src/core";
 import { notifySettingsSaved, onSettingsSaved } from "@/components/settings-signal";
 
@@ -51,12 +51,10 @@ export function createDictationLanguageStore(request: typeof fetch, saved: () =>
 				const record = sanitizeUserSettings(body.settings);
 				if (body.settings !== null && record === null) throw new Error();
 				if (version !== revision) return getLanguage();
-				const language = record?.dictation?.language ?? FACTORY_SETTINGS.dictation.language;
-				const provider = record?.dictation?.provider ?? FACTORY_SETTINGS.dictation.provider;
-				const groqModel = record?.dictation?.groqModel ?? FACTORY_SETTINGS.dictation.groqModel;
+				const dictation = resolveSettings(record).dictation;
 				needsRead = false;
-				publish({ language, provider, groqModel, error: null });
-				return language;
+				publish({ ...dictation, error: null });
+				return dictation.language;
 			} catch {
 				if (version !== revision) return getLanguage();
 				const message = "Could not load dictation language. Try again.";
@@ -92,15 +90,9 @@ export function createDictationLanguageStore(request: typeof fetch, saved: () =>
 				});
 				if (!res.ok) throw new Error();
 				const body = await res.json() as { settings: UserSettings };
-				const confirmed = body.settings?.dictation;
-				if (!isDictationLanguage(confirmed?.language)) throw new Error();
+				if (!isDictationLanguage(body.settings?.dictation?.language)) throw new Error();
 				needsRead = false;
-				publish({
-					language: confirmed.language,
-					provider: confirmed.provider ?? FACTORY_SETTINGS.dictation.provider,
-					groqModel: confirmed.groqModel ?? FACTORY_SETTINGS.dictation.groqModel,
-					error: null,
-				});
+				publish({ ...resolveSettings(body.settings).dictation, error: null });
 				saved();
 				return true;
 			} catch {
@@ -116,12 +108,12 @@ export function createDictationLanguageStore(request: typeof fetch, saved: () =>
 	}
 
 	/** Wait until nothing is reading or writing, then return the confirmed snapshot. */
-	async function settled(): Promise<typeof snapshot & { language: DictationLanguage }> {
+	async function settled(): Promise<typeof snapshot & Required<DictationSettings>> {
 		for (;;) {
 			if (writing) await writing;
 			else if (reading) await reading;
 			else if (needsRead || snapshot.language === undefined) await load();
-			else return snapshot as typeof snapshot & { language: DictationLanguage };
+			else return snapshot as typeof snapshot & Required<DictationSettings>;
 		}
 	}
 
@@ -132,11 +124,7 @@ export function createDictationLanguageStore(request: typeof fetch, saved: () =>
 	/** What a run needs, read from one settled snapshot (never half old, half new). */
 	async function getPreference() {
 		const { language, provider, groqModel } = await settled();
-		return {
-			language,
-			provider: provider ?? FACTORY_SETTINGS.dictation.provider,
-			groqModel: groqModel ?? FACTORY_SETTINGS.dictation.groqModel,
-		};
+		return { language, provider, groqModel };
 	}
 
 	return {
