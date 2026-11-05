@@ -481,3 +481,13 @@ test("login redirects to a non-Latin-1 next path percent-encoded", async () => {
 	assert.equal(r.status, 303);
 	assert.equal(r.headers.location, "/lecci%C3%B3n/%E2%9C%93");
 });
+
+test("login keeps an already percent-encoded next path as is (no double encoding)", async () => {
+	const s = await setup({ password: "pw" });
+	const escaped = await login(s, "pw", { next: "/chat/new?topic=a%20b" });
+	assert.equal(escaped.status, 303);
+	assert.equal(escaped.headers.location, "/chat/new?topic=a%20b");
+	const astral = await login(s, "pw", { next: "/\u{1F600} x" });
+	assert.equal(astral.status, 303);
+	assert.equal(astral.headers.location, "/%F0%9F%98%80%20x");
+});

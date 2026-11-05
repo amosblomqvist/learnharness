@@ -173,7 +173,9 @@ function createLanGateway({ targetPort, targetHost = "127.0.0.1", getSecret, get
 		}
 		if (ok) {
 			failures.delete(ip);
-			return send(res, 303, "", { location: encodeURI(next), "set-cookie": sessionCookie(auth.sessionKey) });
+			// Encode only what a header cannot carry; existing %XX escapes stay as they are.
+			const location = next.replace(/[^\x21-\x7e]/gu, encodeURIComponent);
+			return send(res, 303, "", { location, "set-cookie": sessionCookie(auth.sessionKey) });
 		}
 		entry.fails += 1;
 		if (entry.fails >= MAX_FAILS) Object.assign(entry, { fails: 0, until: now() + LOCK_MS });
