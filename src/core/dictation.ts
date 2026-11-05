@@ -128,6 +128,10 @@ export const GROQ_MAX_BODY_BYTES = GROQ_MAX_UPLOAD_BYTES + 64 * 1024;
 export const DICTATION_SAMPLE_RATE = 16_000;
 export const GROQ_MAX_RECORDING_SECONDS = 720;
 export const GROQ_MAX_PCM_BYTES = GROQ_MAX_RECORDING_SECONDS * DICTATION_SAMPLE_RATE * 2;
+/** Whisper's `prompt` carries the end of the previous chunk's transcript. Whisper
+ * reads at most 224 tokens of it; 200 characters is well inside that for Latin
+ * scripts and a cautious cut for the scripts that need several tokens a character. */
+export const GROQ_PROMPT_MAX_CHARS = 200;
 /** A run shorter than this (a stray double-click) is dropped, not uploaded. */
 export const GROQ_MIN_PCM_BYTES = Math.round(0.3 * DICTATION_SAMPLE_RATE) * 2;
 

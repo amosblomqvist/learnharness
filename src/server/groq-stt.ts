@@ -11,9 +11,12 @@
  *
  * POST multipart fields: `audio` (WAV, required), `model` (a Groq Whisper
  * model id, default turbo), `language` (a dictation language code; mapped to
- * Whisper's code, or omitted so Whisper auto-detects). Response `{ text }`;
- * failures `{ message }`. GET answers whether a key is configured, so the
- * client can refuse before the user has spoken rather than after.
+ * Whisper's code, or omitted so Whisper auto-detects), `prompt` (optional: the
+ * end of the previous chunk's transcript, so Whisper continues it). Response
+ * `{ text }`; failures `{ message, retryable }`, where `retryable` says whether
+ * the same request may succeed if sent again (a rate limit, an outage, a
+ * timeout). GET answers whether a key is configured, so the client can refuse
+ * before the user has spoken rather than after.
  *
  * Trust: proxy.ts already gates every /api route behind the desktop
  * capability. A multipart POST is a CORS "simple request", so a page on
@@ -33,6 +36,7 @@ import {
 	GROQ_KEY_ID,
 	GROQ_MAX_BODY_BYTES,
 	GROQ_MAX_UPLOAD_BYTES,
+	GROQ_PROMPT_MAX_CHARS,
 	isDictationLanguage,
 	isGroqWhisperModel,
 	whisperLanguage,
@@ -48,8 +52,9 @@ const HEADERS = { "Cache-Control": "no-store", "X-Content-Type-Options": "nosnif
 const TOO_LARGE = "The recording is too large for Groq. Dictate in shorter runs.";
 const WAV_TYPES = new Set(["audio/wav", "audio/x-wav", "audio/wave"]);
 
-function fail(status: number, message: string, extra?: HeadersInit): Response {
-	return Response.json({ message }, { status, headers: { ...HEADERS, ...extra } });
+/** `retryable` tells the client whether sending the same request again may work. */
+function fail(status: number, message: string, options: { retryable?: boolean; headers?: HeadersInit } = {}): Response {
+	return Response.json({ message, retryable: options.retryable === true }, { status, headers: { ...HEADERS, ...options.headers } });
 }
 
 /** Same rule as the subscription controls: browsers send Origin on every POST,
@@ -116,15 +121,20 @@ async function groqDetail(res: Response, key: string): Promise<string> {
 	return detail.replaceAll(key, "[redacted]").slice(0, 200);
 }
 
-function retryAfter(res: Response): string {
+function retryAfterSeconds(res: Response): number | undefined {
 	const seconds = Number(res.headers.get("retry-after"));
-	if (!Number.isFinite(seconds) || seconds <= 0) return "";
+	return Number.isFinite(seconds) && seconds > 0 ? seconds : undefined;
+}
+
+function retryAfter(seconds: number | undefined): string {
+	if (seconds === undefined) return "";
 	return seconds < 90 ? ` Try again in ${Math.ceil(seconds)} s.` : ` Try again in ${Math.ceil(seconds / 60)} min.`;
 }
 
 /** Map a Groq failure to a user-facing message. 429 and 413 keep their status
  * (the client may react); everything else is a 502 so it is never mistaken for
- * our own 400/403/415/503. */
+ * our own 400/403/415/503. A 429 passes Groq's Retry-After on as a header, and
+ * 429 and 5xx are marked retryable. */
 async function groqFailure(res: Response, key: string): Promise<Response> {
 	const detail = await groqDetail(res, key);
 	switch (res.status) {
@@ -134,16 +144,28 @@ async function groqFailure(res: Response, key: string): Promise<Response> {
 			return fail(502, "Groq refused the request (403). The key or organization may not have access to speech-to-text.");
 		case 413:
 			return fail(413, TOO_LARGE);
-		case 429:
-			return fail(429, `Groq rate limit reached.${retryAfter(res) || " Wait a moment and try again."}`);
+		case 429: {
+			const seconds = retryAfterSeconds(res);
+			return fail(429, `Groq rate limit reached.${retryAfter(seconds) || " Wait a moment and try again."}`, {
+				retryable: true,
+				headers: seconds === undefined ? undefined : { "Retry-After": String(Math.ceil(seconds)) },
+			});
+		}
 		case 400:
 		case 422:
 			return fail(502, `Groq could not process the audio (${res.status})${detail ? `: ${detail}` : "."}`);
 		default:
-			return fail(502, res.status >= 500
-				? `Groq is unavailable (${res.status}). Try again shortly.`
-				: `Groq transcription failed (${res.status})${detail ? `: ${detail}` : "."}`);
+			return res.status >= 500
+				? fail(502, `Groq is unavailable (${res.status}). Try again shortly.`, { retryable: true })
+				: fail(502, `Groq transcription failed (${res.status})${detail ? `: ${detail}` : "."}`);
 	}
+}
+
+/** The end of the previous transcript, as Whisper's `prompt`: trimmed and cut
+ * to the last GROQ_PROMPT_MAX_CHARS characters (by code point, so a surrogate
+ * pair is never split). Whisper reads at most 224 tokens of it. */
+function whisperPrompt(text: string): string {
+	return [...text.trim()].slice(-GROQ_PROMPT_MAX_CHARS).join("").trim();
 }
 
 /** POST: validate the upload, forward it to Groq, return `{ text }`. */
@@ -176,12 +198,16 @@ export async function groqTranscribeResponse(request: Request): Promise<Response
 	const requested = form.get("language");
 	if (requested !== null && !isDictationLanguage(requested)) return fail(400, "Unsupported dictation language.");
 	const language = requested === null ? undefined : whisperLanguage(requested);
+	const rawPrompt = form.get("prompt");
+	if (rawPrompt !== null && typeof rawPrompt !== "string") return fail(400, "Unsupported dictation prompt.");
+	const prompt = rawPrompt === null ? "" : whisperPrompt(rawPrompt);
 
 	const upstream = new FormData();
 	upstream.set("file", new File([audio], "dictation.wav", { type: "audio/wav" }));
 	upstream.set("model", model);
 	upstream.set("response_format", "json");
 	if (language) upstream.set("language", language);
+	if (prompt) upstream.set("prompt", prompt);
 
 	let res: Response;
 	try {
@@ -195,8 +221,8 @@ export async function groqTranscribeResponse(request: Request): Promise<Response
 	} catch (err) {
 		if (request.signal.aborted) return fail(499, "The request was cancelled.");
 		return err instanceof DOMException && err.name === "TimeoutError"
-			? fail(502, "Groq took too long to respond. Try again.")
-			: fail(502, "Groq unreachable. Check your connection and try again.");
+			? fail(502, "Groq took too long to respond. Try again.", { retryable: true })
+			: fail(502, "Groq unreachable. Check your connection and try again.", { retryable: true });
 	}
 	if (!res.ok) return groqFailure(res, key);
 

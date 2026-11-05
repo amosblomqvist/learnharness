@@ -8,7 +8,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { after, afterEach, beforeEach, describe, it } from "node:test";
-import { GROQ_DICTATION_HEADER, GROQ_MAX_BODY_BYTES, GROQ_MAX_UPLOAD_BYTES } from "../src/core/dictation.ts";
+import { GROQ_DICTATION_HEADER, GROQ_MAX_BODY_BYTES, GROQ_MAX_UPLOAD_BYTES, GROQ_PROMPT_MAX_CHARS } from "../src/core/dictation.ts";
 import { encodePcm16Wav } from "../src/core/wav.ts";
 
 const dir = mkdtempSync(path.join(tmpdir(), "lh-groq-stt-"));
@@ -58,6 +58,7 @@ function post(body: BodyInit | null, headers: Record<string, string> = {}) {
 }
 
 const message = async (res: Response) => ((await res.json()) as { message: string }).message;
+const retryable = async (res: Response) => ((await res.json()) as { retryable: boolean }).retryable;
 
 describe("trust and configuration gates", () => {
 	it("refuses a request without the same-origin dictation header, and cross-site or foreign-origin ones", async () => {
@@ -347,5 +348,75 @@ describe("hardening", () => {
 		text = await message(await post(form()));
 		assert.ok(!text.includes(KEY));
 		assert.match(text, /raw \[redacted\] body/);
+	});
+});
+
+describe("prompt: the end of the previous chunk, so Whisper carries on", () => {
+	it("is forwarded trimmed, and left out when absent or blank", async () => {
+		await post(form({ prompt: "  and then the second term  \n" }));
+		assert.equal(calls[0]!.form.get("prompt"), "and then the second term");
+		assert.deepEqual([...calls[0]!.form.keys()].sort(), ["file", "model", "prompt", "response_format"]);
+		await post(form());
+		assert.equal(calls[1]!.form.has("prompt"), false);
+		await post(form({ prompt: "   " }));
+		assert.equal(calls[2]!.form.has("prompt"), false, "a blank prompt is not sent");
+	});
+
+	it("keeps only the last GROQ_PROMPT_MAX_CHARS characters and never splits a surrogate pair", async () => {
+		await post(form({ prompt: "x".repeat(5000) + "tail" }));
+		const sent = calls[0]!.form.get("prompt") as string;
+		assert.equal(sent.length, GROQ_PROMPT_MAX_CHARS);
+		assert.ok(sent.endsWith("tail"));
+		await post(form({ prompt: "a" + "😀".repeat(GROQ_PROMPT_MAX_CHARS) }));
+		const emoji = calls[1]!.form.get("prompt") as string;
+		assert.equal([...emoji].length, GROQ_PROMPT_MAX_CHARS);
+		assert.equal(emoji, "😀".repeat(GROQ_PROMPT_MAX_CHARS), "whole code points only, no lone surrogate");
+	});
+
+	it("rejects a prompt that is not text, before contacting Groq", async () => {
+		const res = await post(form({ prompt: new File(["x"], "prompt.txt", { type: "text/plain" }) }));
+		assert.equal(res.status, 400);
+		assert.equal(calls.length, 0);
+	});
+
+	it("is not echoed back to the client", async () => {
+		answer = () => Response.json({ text: "ok", prompt: "leak?" });
+		assert.deepEqual(await (await post(form({ prompt: "private words" }))).json(), { text: "ok" });
+	});
+});
+
+describe("failures say whether sending them again may work", () => {
+	const groqError = (status: number, headers?: HeadersInit) => () => new Response(JSON.stringify({ error: { message: "x" } }), { status, headers });
+
+	it("429 and 5xx, a timeout and an unreachable Groq are retryable; the rest are not", async () => {
+		for (const status of [429, 500, 502, 503]) {
+			answer = groqError(status);
+			assert.equal(await retryable(await post(form())), true, String(status));
+		}
+		answer = () => { throw new TypeError("fetch failed"); };
+		assert.equal(await retryable(await post(form())), true, "unreachable");
+		answer = () => { throw new DOMException("timed out", "TimeoutError"); };
+		assert.equal(await retryable(await post(form())), true, "timeout");
+		for (const status of [400, 401, 403, 404, 413, 422]) {
+			answer = groqError(status);
+			assert.equal(await retryable(await post(form())), false, String(status));
+		}
+		answer = () => Response.json({ nope: 1 });
+		assert.equal(await retryable(await post(form())), false, "a 200 without a transcript");
+		const forbidden = await route.POST(new Request(URL_, { method: "POST", body: form() }));
+		assert.equal(await retryable(forbidden), false);
+		delete process.env.GROQ_API_KEY;
+		assert.equal(await retryable(await post(form())), false, "keyless");
+	});
+
+	it("a 429 passes Groq's Retry-After on as a header, rounded up; without one there is none", async () => {
+		answer = groqError(429, { "retry-after": "11.2" });
+		let res = await post(form());
+		assert.equal(res.headers.get("retry-after"), "12");
+		answer = groqError(429);
+		res = await post(form());
+		assert.equal(res.headers.get("retry-after"), null);
+		answer = groqError(429, { "retry-after": "soon" });
+		assert.equal((await post(form())).headers.get("retry-after"), null, "an unparsable value is dropped");
 	});
 });
