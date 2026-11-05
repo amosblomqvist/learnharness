@@ -61,6 +61,9 @@ export interface ChatStore {
 	 * Like saveSettings: a rename is NOT conversation activity — updatedAt
 	 * stays put, so sidebar order never churns on a rename. */
 	renameChat(id: string, title: string): ChatRecord;
+	/** Save the session notes (blank deletes the field). Not conversation
+	 *  activity: no updatedAt bump, no event. False when the chat is unknown. */
+	saveNotes(id: string, text: string): boolean;
 	/** Delete the session record entirely (session-deletion wave 6, owner
 	 *  2026-09-22). False when the id is unknown. The graph-ledger purge and
 	 *  job cleanup are the caller's choreography (core/graph-deletion.ts +

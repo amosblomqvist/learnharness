@@ -18,6 +18,7 @@
 export * from "./contracts.ts";
 export { embedLearnerImage } from "./learner-image-svg.ts";
 export * from "./ports.ts";
+export * from "./notes.ts";
 export * from "./chains.ts";
 export * from "./source-organization.ts";
 export * from "./source-selection.ts";
