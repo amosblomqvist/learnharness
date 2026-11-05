@@ -96,6 +96,18 @@ export const RENDER_SETTINGS_FILE = path.join(PATHS.graph, "render-settings.json
 export const GRAPH_FORMAT_FILE = path.join(PATHS.graph, "format.json");
 
 /**
+ * THE REVIEW LOG (scheduled practice, 2026-11-02): spaced-repetition
+ * history, apart from chats (a deleted session keeps its reviews) and
+ * apart from the graph (no learner state in the world-model). One
+ * append-only JSONL ledger plus its own lazy format stamp — the
+ * graph-family sidecar contract (src/store/review.ts).
+ */
+export const REVIEW_FILES = {
+	reviews: path.join(DATA_ROOT, "review", "reviews.jsonl"),
+	format: path.join(DATA_ROOT, "review", "format.json"),
+} as const;
+
+/**
  * THE USER SETTINGS RECORD (settings-storage wave, 2026-09-19): one
  * versioned, DELTA-shaped JSON blob at the data-dir seam holding every
  * non-secret product preference — general, agent (background

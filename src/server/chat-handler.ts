@@ -45,6 +45,7 @@ import {
 import { modelsNotConfigured, providerKeyMissing as providerKeyMissingEnvelope, ROLE_SLOT, type ModelSlotName, type ProviderKeyMissing } from "../core/settings.ts";
 import { beginTurn, endTurn } from "./turn-liveness.ts";
 import { applyParkedDismissal } from "./dismissal-park.ts";
+import { syncChatReviewsSafely } from "./review.ts";
 import { registerTurn, rememberTurnFailure, unregisterTurn } from "./turn-runs.ts";
 import { persistTurn, triggerExtraction, TurnPersistenceError } from "./turn-service.ts";
 import { hasProbeDone, hasUnresolvedQuestion } from "../core/native-messages.ts";
@@ -621,6 +622,11 @@ export async function handleChatInput(
 				// subsequent fetch reads the dismissal already in the record
 				// (the same ordering law as persistTurn itself).
 				applyParkedDismissal(stores.chatStore, chatId);
+				// SCHEDULED PRACTICE: the turn's concluded problems (and any
+				// dismissal just applied) join the review log from the SAVED
+				// record — after the writes above, before "turn-settled", so a
+				// home refetch on that event reads the new queue.
+				if (record.kind === "practice") syncChatReviewsSafely(chatId);
 				// LAST: a poller that sees not-in-flight must read an already-persisted
 				// record — endTurn only after persistTurn has done its job.
 				endTurn(chatId);

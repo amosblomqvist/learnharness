@@ -117,6 +117,7 @@ describe("parseAppearanceSettingsBody", () => {
 			proseFontSize: 20,
 			sessionNameSerif: false,
 			mdRendering: { headingWeight: 700, boldColor: "#ff8800", italicColor: null },
+			reviewHeatmapColor: "#3366ff",
 		});
 		assert.ok(r.ok);
 		assert.deepEqual(r.settings, {
@@ -126,6 +127,7 @@ describe("parseAppearanceSettingsBody", () => {
 			proseFontSize: 20,
 			sessionNameSerif: false,
 			mdRendering: { headingWeight: 700, boldColor: "#ff8800", italicColor: null },
+			reviewHeatmapColor: "#3366ff",
 		});
 	});
 
@@ -141,6 +143,7 @@ describe("parseAppearanceSettingsBody", () => {
 			{ sessionNameSerif: 1 },
 			{ mdRendering: { headingWeight: 1000 } },
 			{ mdRendering: { boldColor: "red" } },
+			{ reviewHeatmapColor: "green" },
 		];
 		for (const body of cases) {
 			assert.equal(parseAppearanceSettingsBody(body).ok, false, JSON.stringify(body));
@@ -245,14 +248,15 @@ describe("parseCompactionSettingsBody (owner round 14)", () => {
 });
 
 describe("SETTINGS_SECTIONS (the route's section map)", () => {
-	it("maps exactly the eight record sections", () => {
+	it("maps exactly the record sections", () => {
 		// compaction joined (owner round 14): its own section PUT — the
-		// threshold is engine behavior, not an agent-section key. The custom
+		// threshold is engine behavior, not an agent-section key. review
+		// joined with scheduled practice (its newPerDay knob). The custom
 		// endpoint is NOT a section: it is one more provider in the Keys list,
 		// connected through POST /api/custom-provider.
 		assert.deepEqual(
 			Object.keys(SETTINGS_SECTIONS),
-			["general", "chat", "agent", "appearance", "graph", "compaction", "models", "dictation", "claudeCode"],
+			["general", "chat", "agent", "appearance", "graph", "compaction", "review", "models", "dictation", "claudeCode"],
 		);
 	});
 });

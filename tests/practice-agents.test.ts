@@ -76,6 +76,7 @@ const ctxOf = (messages: LhMessage[]) => ({ chatId: "c1", chatStore: recordStore
 const PROBLEM_INPUT = {
 	statement: "Prove the sum is even.",
 	mode: "recall",
+	surface: "sum of paired integers, prove parity",
 	target: ["parity-sum"],
 	modelSolution: "Pair them; each pair is even.",
 } as const;
@@ -191,6 +192,25 @@ describe("target validation — names normalize to ids, unknowns reject", () => 
 		const result = await problemTool(createPracticeGate(ctxOf([]))).execute("call_x", PROBLEM_INPUT as never);
 		assert.equal(result.isError, undefined);
 	});
+
+	it("ONE-TARGET RECALL (owner, 2026-11-03): recall with two targets rejects and frees the slot; other modes may tag several", async () => {
+		const tool = problemTool(createPracticeGate(ctxOf([])), graphNodes);
+		const rejected = await tool.execute("call_r", { ...PROBLEM_INPUT, target: ["n_parity", "n_pairing"] } as never);
+		assert.equal(rejected.isError, true);
+		assert.deepEqual((rejected.details as { problems: string[] }).problems, [
+			"a recall problem exercises exactly one target — tag one proposition, or pose discrimination or composition for several",
+		]);
+		const single = await tool.execute("call_s", { ...PROBLEM_INPUT, target: ["n_parity"] } as never);
+		assert.equal(single.isError, undefined, "the rejection did not arm the gate");
+		for (const mode of ["discrimination", "composition"]) {
+			const pose = await problemTool(createPracticeGate(ctxOf([])), graphNodes).execute("call_m", {
+				...PROBLEM_INPUT,
+				mode,
+				target: ["n_parity", "n_pairing"],
+			} as never);
+			assert.equal(pose.isError, undefined, `${mode} may tag several targets`);
+		}
+	});
 });
 
 // ── the registry + the agent ────────────────────────────────────────────────
@@ -293,6 +313,15 @@ describe("persistent practice nudges", () => {
 			assert.ok(normalized.includes(approvedIntroduction), "preserve the exact approved introduction and the rest of the not-teaching bullet");
 			assert.doesNotMatch(normalized, /Repair them in a line, surgically, and return to practice\./i);
 		}
+	});
+
+	it("composes the approved mode size caps and the skeleton-is-a-surface rule (owner, 2026-11-03)", () => {
+		const prompt = normalizeWhitespace(composeInstructions("practice"));
+		assert.ok(prompt.includes("One question — one asked output, one or two decision points; one target; a snippet of about ten lines at most"));
+		assert.ok(prompt.includes("One twin pair — two near-identical situations differing only in the separating feature, one asked output each"));
+		assert.ok(prompt.includes("One chain — length follows it, up to about three asked outputs and twenty-five lines"));
+		assert.ok(prompt.includes("**The shapes are caps.**"));
+		assert.ok(prompt.includes("the same skeleton with renamed types is a repeat"));
 	});
 
 	it("keeps the many-claims default, hint ladder, dismissal, and explicit-go-ahead pause", () => {

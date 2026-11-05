@@ -33,15 +33,21 @@
 import { useEffect, useRef, useState } from "react";
 import {
 	EXTRACTION_CHUNK_TOKENS_FLOOR,
+	parseReviewSteps,
+	REVIEW_HEATMAP_DEFAULT_COLOR,
+	REVIEW_RETENTION_CEILING,
+	REVIEW_RETENTION_FLOOR,
 	resolveSettings,
 	type AppearanceSettings,
 	type GraphSettings,
+	type ReviewSettings,
 } from "@/src/core";
 import { MenuShell } from "@/components/menu-shell";
 import { Hint } from "@/components/ui/hint";
 import { useAppearance } from "./appearance.tsx";
 import { FontMenuList } from "./model-menu";
-import { CommitInput, SettingsMenuTrigger, SettingsRow, ThinSelect, Toggle } from "./controls.tsx";
+import { CommitInput, SettingsGroup, SettingsMenuTrigger, SettingsRow, ThinSelect, Toggle } from "./controls.tsx";
+import { ReviewHeatmap } from "./review-heatmap.tsx";
 
 /** The factory reading family — the DEFAULT row's identity (unset =
  *  this). Exported for tests. */
@@ -416,6 +422,200 @@ export function GraphSection({
 					}}
 				/>
 			</SettingsRow>
+		</>
+	);
+}
+/** "1m 10m" ↔ ["1m", "10m"] — the Anki step-list spelling. */
+const stepsText = (steps: readonly string[]) => steps.join(" ");
+
+/** The Review section (scheduled practice, 2026-11-02): the new-item
+ *  allowance, the FSRS scheduler knobs (tunable scheduler, 2026-11-02),
+ *  and the schedule heatmap below them. Resolved through the core
+ *  resolver, like the chunk budget above; every empty field is the
+ *  factory default. The heatmap's colour row writes the APPEARANCE
+ *  section (2026-11-02: it's a visual preference) but sits here,
+ *  over the grid it tints. */
+export function ReviewSection({
+	review,
+	onSectionChange,
+	appearance,
+	onAppearanceChange,
+}: {
+	review: ReviewSettings | undefined;
+	onSectionChange: (next: ReviewSettings) => void;
+	appearance: AppearanceSettings | undefined;
+	onAppearanceChange: (next: AppearanceSettings) => void;
+}) {
+	const resolved = resolveSettings(review === undefined ? null : { version: 1, review }).review;
+	const storedColor = appearance?.reviewHeatmapColor ?? null;
+	// The native picker fires input on every drag tick; the grid follows the
+	// draft live, and only the picker's change (dialog closed) writes — every
+	// write is a section PUT.
+	const [draftColor, setDraftColor] = useState<string | null>(null);
+	const heatmapColor = draftColor ?? storedColor ?? REVIEW_HEATMAP_DEFAULT_COLOR;
+	const colorInput = useRef<HTMLInputElement>(null);
+	useEffect(() => {
+		const input = colorInput.current;
+		if (!input) return;
+		const commit = () => {
+			setDraftColor(null);
+			if (input.value !== (storedColor ?? REVIEW_HEATMAP_DEFAULT_COLOR)) {
+				onAppearanceChange({ ...appearance, reviewHeatmapColor: input.value });
+			}
+		};
+		input.addEventListener("change", commit);
+		return () => input.removeEventListener("change", commit);
+	}, [appearance, storedColor, onAppearanceChange]);
+	const stepsInput = (key: "learningSteps" | "relearningSteps", label: string, testid: string) => (
+		<CommitInput
+			value={review?.[key] ? stepsText(review[key]) : ""}
+			placeholder={stepsText(resolved[key]) || "none"}
+			ariaLabel={label}
+			testid={testid}
+			onCommit={(v) => {
+				if (v === "") {
+					onSectionChange({ ...review, [key]: undefined });
+					return;
+				}
+				const steps = parseReviewSteps(v.split(/[\s,]+/).filter(Boolean));
+				if (!steps) return; // bad input: no write
+				onSectionChange({ ...review, [key]: steps });
+			}}
+		/>
+	);
+	return (
+		<>
+			<SettingsGroup label="Queue" testid="review-group-queue">
+				<SettingsRow
+					label="New propositions per day"
+					hint={`${resolved.newPerDay} a day`}
+					testid="review-row-new-per-day"
+				>
+					<CommitInput
+						type="number"
+						value={String(review?.newPerDay ?? "")}
+						placeholder={String(resolved.newPerDay)}
+						ariaLabel="new propositions per day"
+						testid="input-new-per-day"
+						onCommit={(v) => {
+							// Empty = factory default (the chunk-budget discipline).
+							if (v === "") {
+								onSectionChange({ ...review, newPerDay: undefined });
+								return;
+							}
+							const n = Number(v);
+							if (!Number.isFinite(n) || n < 0) return; // bad input: no write
+							onSectionChange({ ...review, newPerDay: Math.round(n) });
+						}}
+					/>
+				</SettingsRow>
+			</SettingsGroup>
+			<SettingsGroup label="Scheduler" testid="review-group-scheduler">
+				<SettingsRow
+					label="Desired retention"
+					hint={`${Math.round(resolved.desiredRetention * 100)}%`}
+					testid="review-row-retention"
+				>
+					<CommitInput
+						type="number"
+						value={review?.desiredRetention === undefined ? "" : String(Math.round(review.desiredRetention * 100))}
+						placeholder={String(Math.round(resolved.desiredRetention * 100))}
+						ariaLabel="desired retention percent"
+						testid="input-retention"
+						onCommit={(v) => {
+							if (v === "") {
+								onSectionChange({ ...review, desiredRetention: undefined });
+								return;
+							}
+							const r = Number(v) / 100;
+							if (!Number.isFinite(r) || r < REVIEW_RETENTION_FLOOR || r > REVIEW_RETENTION_CEILING) return;
+							onSectionChange({ ...review, desiredRetention: r });
+						}}
+					/>
+				</SettingsRow>
+				<SettingsRow
+					label="Maximum interval"
+					hint={`${resolved.maximumIntervalDays} days`}
+					testid="review-row-max-interval"
+				>
+					<CommitInput
+						type="number"
+						value={String(review?.maximumIntervalDays ?? "")}
+						placeholder={String(resolved.maximumIntervalDays)}
+						ariaLabel="maximum interval days"
+						testid="input-max-interval"
+						onCommit={(v) => {
+							if (v === "") {
+								onSectionChange({ ...review, maximumIntervalDays: undefined });
+								return;
+							}
+							const n = Number(v);
+							if (!Number.isFinite(n) || n < 1) return;
+							onSectionChange({ ...review, maximumIntervalDays: Math.round(n) });
+						}}
+					/>
+				</SettingsRow>
+				<SettingsRow label="Interval fuzz" hint="Jitter due dates so reviews spread out" testid="review-row-fuzz">
+					<Toggle
+						checked={resolved.fuzz}
+						label="interval fuzz"
+						onChange={(on) => onSectionChange({ ...review, fuzz: on })}
+					/>
+				</SettingsRow>
+				<SettingsRow label="Short-term steps" hint="Off skips both step lists" testid="review-row-short-term">
+					<Toggle
+						checked={resolved.shortTerm}
+						label="learning steps enabled"
+						onChange={(on) => onSectionChange({ ...review, shortTerm: on })}
+					/>
+				</SettingsRow>
+				<SettingsRow
+					label="Learning steps"
+					hint="New propositions, e.g. 1m 10m"
+					testid="review-row-learning-steps"
+					dimmed={!resolved.shortTerm}
+				>
+					{stepsInput("learningSteps", "learning steps", "input-learning-steps")}
+				</SettingsRow>
+				<SettingsRow
+					label="Relearning steps"
+					hint="After a miss, e.g. 10m"
+					testid="review-row-relearning-steps"
+					dimmed={!resolved.shortTerm}
+				>
+					{stepsInput("relearningSteps", "relearning steps", "input-relearning-steps")}
+				</SettingsRow>
+			</SettingsGroup>
+			<SettingsGroup label="Schedule" testid="review-group-schedule">
+				<SettingsRow
+					label="Review colour"
+					hint={storedColor === null ? "Default green" : storedColor}
+					testid="review-row-heatmap-color"
+				>
+					<span className="flex items-center gap-2">
+						{storedColor !== null && (
+							<button
+								type="button"
+								data-testid="review-heatmap-color-reset"
+								onClick={() => onAppearanceChange({ ...appearance, reviewHeatmapColor: null })}
+								className="text-xs text-muted-foreground hover:text-foreground"
+							>
+								Reset
+							</button>
+						)}
+						<input
+							ref={colorInput}
+							type="color"
+							value={heatmapColor}
+							aria-label="review heatmap colour"
+							data-testid="input-review-heatmap-color"
+							onChange={(e) => setDraftColor(e.target.value)}
+							className="h-7 w-10 cursor-pointer rounded-sm border border-border bg-background p-0.5"
+						/>
+					</span>
+				</SettingsRow>
+				<ReviewHeatmap color={heatmapColor} />
+			</SettingsGroup>
 		</>
 	);
 }

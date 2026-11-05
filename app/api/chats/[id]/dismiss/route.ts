@@ -20,7 +20,7 @@
  * fires both).
  */
 import { ChatInputError, dismissAppends, emit, parseDismissInput } from "@/src/core";
-import { getChat, isTurnRunning, parkDismissal, stores } from "@/src/server";
+import { getChat, isTurnRunning, parkDismissal, stores, syncChatReviewsSafely } from "@/src/server";
 
 export async function POST(req: Request, ctx: { params: Promise<{ id: string }> }): Promise<Response> {
 	const { id } = await ctx.params;
@@ -60,6 +60,9 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
 	// Write-ahead, turn-less: the record is the only state that moves.
 	const merged = [...chat.messages, ...appends];
 	stores.chatStore.saveMessages(id, merged);
+	// A dismissed problem is a review (scheduled practice): log it now —
+	// this marker lands outside any turn, so no settlement will.
+	syncChatReviewsSafely(id);
 	emit("record-changed", { chatId: id });
 	return Response.json({ ok: true });
 }

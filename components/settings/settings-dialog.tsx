@@ -37,6 +37,7 @@ import {
 	type AppearanceSettings,
 	type CompactionSettings,
 	type GraphSettings,
+	type ReviewSettings,
 	type UserSettings,
 } from "@/src/core";
 import { useAppearance } from "./appearance.tsx";
@@ -48,7 +49,7 @@ import { MENU_CLOSE_EVENT, MENU_OPEN_EVENT } from "@/components/menu-shell";
 import { notifySettingsSaved } from "@/components/settings-signal";
 import { KeysSection } from "./keys-section.tsx";
 import { Hint } from "@/components/ui/hint";
-import { AppearanceSection, GraphSection } from "./appearance-section.tsx";
+import { AppearanceSection, GraphSection, ReviewSection } from "./appearance-section.tsx";
 import { KeyboardSection } from "./keyboard-section.tsx";
 import { ChatGPTUIProvider } from "./chatgpt-connection.tsx";
 import { NativeSubscriptionUIProvider } from "./subscription-connections.tsx";
@@ -61,6 +62,7 @@ const SECTIONS = [
 	{ id: "agent", label: "Agent" },
 	{ id: "appearance", label: "Appearance" },
 	{ id: "graph", label: "Graph" },
+	{ id: "review", label: "Review" },
 	{ id: "keyboard", label: "Keyboard", hint: "Stored on this device" },
 	{ id: "general", label: "General" },
 ] as const;
@@ -228,7 +230,7 @@ export function SettingsDialogBody({
 	 *  schema mistake caught by the validation surface). */
 	const write = useCallback(
 		async (
-			section: "general" | "agent" | "models" | "appearance" | "graph" | "compaction",
+			section: "general" | "agent" | "models" | "appearance" | "graph" | "compaction" | "review",
 			body: object,
 		) => {
 			setError(null);
@@ -420,6 +422,23 @@ export function SettingsDialogBody({
 										graph={record.graph}
 										onSectionChange={(next: GraphSettings) =>
 											void write("graph", next)
+										}
+									/>
+								</SettingsSection>
+							)}
+							{active === "review" && (
+								<SettingsSection
+									title="Review"
+									testid="section-review"
+								>
+									<ReviewSection
+										review={record.review}
+										onSectionChange={(next: ReviewSettings) =>
+											void write("review", next)
+										}
+										appearance={record.appearance}
+										onAppearanceChange={(next: AppearanceSettings) =>
+											void write("appearance", next)
 										}
 									/>
 								</SettingsSection>

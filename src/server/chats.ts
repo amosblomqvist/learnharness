@@ -8,6 +8,7 @@ import { stores } from "./stores.ts";
 import { isTurnRunning } from "./turn-liveness.ts";
 import { clearTurnFailure } from "./turn-runs.ts";
 import { discardChatDeliveries } from "./jobs.ts";
+import { syncChatReviewsSafely } from "./review.ts";
 
 /**
  * Server-side chat entries for the transport layer (app/api/chats*,
@@ -148,6 +149,9 @@ function finishChatDeletion(chatId: string, mode: ChatDeleteMode): Extract<ChatD
 }
 
 function finishChatRecordDeletion(chatId: string): number {
+	// The review log outlives the chat (scheduled practice): fold any
+	// not-yet-logged reviews in before the record goes.
+	syncChatReviewsSafely(chatId);
 	const jobsRemoved = stores.jobStore.deleteJobsForChat(chatId);
 	if (stores.chatStore.deleteChat(chatId)) {
 		discardChatDeliveries(chatId);
