@@ -17,12 +17,17 @@ const MAX_NAME_LENGTH = 100;
 /** Basename only; no separators, control characters or leading dots; capped; never empty. */
 export function sanitizeUploadName(raw: string): string {
 	const base = raw.split(/[\\/]/).pop() ?? "";
-	const clean = base.replace(/[\u0000-\u001f\u007f]/g, "").replace(/^\.+/, "").trim();
+	const clean = base.replace(/[\u0000-\u001f\u007f<>:"|?*]/g, (c) => (c < " " || c === "\u007f" ? "" : "_")).replace(/^\.+/, "").trim();
 	if (!clean) return "file";
-	if (clean.length <= MAX_NAME_LENGTH) return clean;
+	if (Buffer.byteLength(clean) <= MAX_NAME_LENGTH) return clean;
 	const ext = path.extname(clean);
 	const keepExt = ext.length > 0 && ext.length <= 16 ? ext : "";
-	return clean.slice(0, MAX_NAME_LENGTH - keepExt.length) + keepExt;
+	let stem = "";
+	for (const ch of clean.slice(0, clean.length - keepExt.length)) {
+		if (Buffer.byteLength(stem + ch + keepExt) > MAX_NAME_LENGTH) break;
+		stem += ch;
+	}
+	return stem + keepExt;
 }
 
 export type UploadResult = { status: 200; path: string } | { status: 400 | 411 | 413; error: string };

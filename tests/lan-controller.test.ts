@@ -118,4 +118,33 @@ describe("lan controller", () => {
 		await ctl.close();
 		assert.equal(log.at(-1), "close");
 	});
+
+	it("concurrent setEnabled(true) calls leave one gateway listening and a consistent state", async () => {
+		const { config, log } = setup();
+		const bound = new Set<number>();
+		let alive = 0;
+		const createGateway = () => {
+			let port = 0;
+			return {
+				listen: async (p: number) => {
+					await new Promise((r) => setTimeout(r, 10));
+					if (bound.has(p)) throw Object.assign(new Error("in use"), { code: "EADDRINUSE" });
+					bound.add(p);
+					port = p;
+					alive++;
+					log.push("up");
+				},
+				close: async () => {
+					await new Promise((r) => setTimeout(r, 5));
+					if (port) { bound.delete(port); alive--; }
+				},
+			};
+		};
+		const ctl = createLanController({ config, createGateway, targetPort: 3000, getSecret: () => "s", networkInterfaces: IFACES });
+		await Promise.all([ctl.setEnabled(true), ctl.setEnabled(true)]);
+		const st = ctl.state();
+		assert.equal(st.running, st.enabled);
+		assert.equal(st.error, null);
+		assert.equal(alive, 1);
+	});
 });

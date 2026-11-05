@@ -74,7 +74,8 @@ describe("LAN access section", () => {
 		assert.ok(q(host, "lan-urls")?.textContent?.includes("http://192.168.1.20:4747"));
 		assert.equal(q(host, "lan-warning")?.textContent, NO_PASSWORD_WARNING);
 		assert.ok(q(host, "lan-warning")?.textContent?.includes("read files on this computer"));
-		assert.ok(host.textContent?.includes("docs/lan-access.md"));
+		assert.equal(host.textContent?.includes("docs/lan-access.md"), false);
+		assert.ok(host.textContent?.includes("trusted network"));
 
 		await act(async () => { q(host, "toggle-lan-access")!.click(); });
 		assert.deepEqual(calls.at(-1), ["setEnabled", false]);

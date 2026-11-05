@@ -9,16 +9,17 @@
  *   cfg.setEnabled(boolean)
  *   cfg.setPort(n)            -> throws RangeError unless an integer in 1024..65535
  *   cfg.setPassword(str|null) -> str sets/changes, null removes; always rotates the session key
- *   cfg.checkPassword(str)    -> boolean
+ *   cfg.checkPassword(str)    -> Promise<boolean>
  *   cfg.getAuth()             -> { passwordHash, sessionKey: Buffer } | null (null = no password);
  *                                pass it straight to createLanGateway({ getAuth })
- * Also exported: hashPassword(pw), verifyPassword(pw, hash), DEFAULT_PORT.
+ * Also exported: hashPassword(pw), async verifyPassword(pw, hash), DEFAULT_PORT.
  *
  * lan.json: { enabled, port, passwordHash?, sessionKey } written atomically with mode 0600.
  */
 const crypto = require("node:crypto");
 const fs = require("node:fs");
 const path = require("node:path");
+const { promisify } = require("node:util");
 
 const DEFAULT_PORT = 4747;
 const KEY_LEN = 64;
@@ -29,12 +30,14 @@ function hashPassword(password) {
 	return `scrypt$${salt.toString("base64")}$${hash.toString("base64")}`;
 }
 
-function verifyPassword(password, stored) {
+const scryptAsync = promisify(crypto.scrypt);
+
+async function verifyPassword(password, stored) {
 	const [scheme, saltB64, hashB64] = String(stored).split("$");
 	if (scheme !== "scrypt" || !saltB64 || !hashB64) return false;
 	const expected = Buffer.from(hashB64, "base64");
 	if (expected.length !== KEY_LEN) return false;
-	const actual = crypto.scryptSync(String(password), Buffer.from(saltB64, "base64"), KEY_LEN);
+	const actual = await scryptAsync(String(password), Buffer.from(saltB64, "base64"), KEY_LEN);
 	return crypto.timingSafeEqual(actual, expected);
 }
 
@@ -85,7 +88,7 @@ function createLanConfig(file) {
 			state.sessionKey = crypto.randomBytes(32).toString("base64");
 			save();
 		},
-		checkPassword: (password) => Boolean(state.passwordHash) && verifyPassword(password, state.passwordHash),
+		checkPassword: async (password) => Boolean(state.passwordHash) && (await verifyPassword(password, state.passwordHash)),
 		getAuth: () => (state.passwordHash ? { passwordHash: state.passwordHash, sessionKey: Buffer.from(state.sessionKey, "base64") } : null),
 	};
 }

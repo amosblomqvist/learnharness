@@ -78,7 +78,7 @@ function parseHost(header) {
 function createLanGateway({ targetPort, targetHost = "127.0.0.1", getSecret, getAuth, verifyPassword = defaultVerify, now = Date.now }) {
 	const hostname = os.hostname().toLowerCase();
 	const allowedNames = new Set(["localhost", hostname, `${hostname}.local`]);
-	const failures = new Map(); // ip -> { fails, until }; ponytail: never pruned, bounded by distinct LAN IPs
+	const failures = new Map(); // ip -> { fails, pending, until }; ponytail: never pruned, bounded by distinct LAN IPs
 	let server;
 
 	const sign = (key, issued) => crypto.createHmac("sha256", key).update(String(issued)).digest("base64url");
@@ -123,36 +123,61 @@ function createLanGateway({ targetPort, targetHost = "127.0.0.1", getSecret, get
 		res.end(body);
 	}
 
-	const html = (res, status, next, error) => send(res, status, loginPage(next, error), { "content-type": "text/html; charset=utf-8" });
+	const html = (res, status, next, error, extra = {}) => send(res, status, loginPage(next, error), { "content-type": "text/html; charset=utf-8", ...extra });
 
-	function handleLogin(req, res, auth, url) {
+	async function handleLogin(req, res, auth, url) {
 		if (req.method === "GET") return html(res, 200, safeNext(url.searchParams.get("next")));
 		if (req.method !== "POST") return send(res, 405, "", { allow: "GET, POST" });
 		const ip = req.socket.remoteAddress ?? "";
-		const entry = failures.get(ip) ?? { fails: 0, until: 0 };
-		if (entry.until > now()) return html(res, 429, "/", "Too many attempts. Try again in a minute.");
+		let entry = failures.get(ip);
+		if (!entry) failures.set(ip, (entry = { fails: 0, pending: 0, until: 0 }));
+		if (entry.until && entry.until <= now()) Object.assign(entry, { fails: 0, until: 0 });
+		const tooMany = () => {
+			req.resume();
+			html(res, 429, "/", "Too many attempts. Try again in a minute.", { connection: "close" });
+		};
+		// Reserve a verification slot up front so concurrent requests cannot exceed the budget.
+		if (entry.until > now() || entry.fails + entry.pending >= MAX_FAILS) return tooMany();
+		entry.pending += 1;
+		let released = false;
+		const release = () => {
+			if (!released) {
+				released = true;
+				entry.pending -= 1;
+			}
+		};
+		res.on("close", release);
 		const chunks = [];
 		let size = 0;
+		let tooBig = false;
 		req.on("data", (c) => {
 			size += c.length;
 			if (size > MAX_LOGIN_BODY) {
-				if (!res.headersSent) send(res, 413, "", { connection: "close" });
-				req.resume();
+				if (!tooBig) send(res, 413, "", { connection: "close" });
+				tooBig = true;
 			} else chunks.push(c);
 		});
-		req.on("end", () => {
-			if (res.headersSent) return;
-			const body = new URLSearchParams(Buffer.concat(chunks).toString());
-			const next = safeNext(body.get("next"));
-			if (verifyPassword(body.get("password") ?? "", auth.passwordHash)) {
-				failures.delete(ip);
-				return send(res, 303, "", { location: next, "set-cookie": sessionCookie(auth.sessionKey) });
-			}
-			entry.fails += 1;
-			if (entry.fails >= MAX_FAILS) Object.assign(entry, { fails: 0, until: now() + LOCK_MS });
-			failures.set(ip, entry);
-			html(res, 401, next, "Incorrect password.");
-		});
+		await new Promise((r) => req.on("end", r).on("close", r));
+		if (tooBig || res.destroyed) return release();
+		if (entry.until > now()) {
+			release();
+			return tooMany();
+		}
+		const body = new URLSearchParams(Buffer.concat(chunks).toString());
+		const next = safeNext(body.get("next"));
+		let ok;
+		try {
+			ok = await verifyPassword(body.get("password") ?? "", auth.passwordHash);
+		} finally {
+			release();
+		}
+		if (ok) {
+			failures.delete(ip);
+			return send(res, 303, "", { location: encodeURI(next), "set-cookie": sessionCookie(auth.sessionKey) });
+		}
+		entry.fails += 1;
+		if (entry.fails >= MAX_FAILS) Object.assign(entry, { fails: 0, until: now() + LOCK_MS });
+		html(res, 401, next, "Incorrect password.");
 	}
 
 	function proxy(req, res) {
@@ -189,13 +214,18 @@ function createLanGateway({ targetPort, targetHost = "127.0.0.1", getSecret, get
 		req.pipe(up);
 	}
 
-	function handle(req, res) {
+	function route(req, res) {
 		if (!hostAllowed(req)) return send(res, 421, "Misdirected request");
 		if (!csrfOk(req)) return send(res, 403, "Forbidden");
-		const url = new URL(req.url, "http://gateway");
+		let url;
+		try {
+			url = new URL(req.url, "http://gateway");
+		} catch {
+			return send(res, 400, "Bad request");
+		}
 		const auth = getAuth();
 		if (auth) {
-			if (url.pathname === LOGIN_PATH) return handleLogin(req, res, auth, url);
+			if (url.pathname === LOGIN_PATH) return handleLogin(req, res, auth, url).catch(fail(res));
 			if (!authenticated(req, auth.sessionKey)) {
 				if (req.method === "GET" && String(req.headers.accept ?? "").includes("text/html")) {
 					return send(res, 303, "", { location: `${LOGIN_PATH}?next=${encodeURIComponent(req.url)}` });
@@ -204,6 +234,19 @@ function createLanGateway({ targetPort, targetHost = "127.0.0.1", getSecret, get
 			}
 		}
 		proxy(req, res);
+	}
+
+	const fail = (res) => () => {
+		if (!res.headersSent) send(res, 500, "Internal error", { "content-type": "text/plain" });
+		else res.destroy();
+	};
+
+	function handle(req, res) {
+		try {
+			route(req, res);
+		} catch {
+			fail(res)();
+		}
 	}
 
 	server = http.createServer(handle);

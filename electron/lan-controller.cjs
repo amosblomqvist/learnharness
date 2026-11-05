@@ -24,6 +24,13 @@ function createLanController({ config, createGateway, targetPort, getSecret, net
 	let gateway = null;
 	let boundPort = null;
 	let error = null;
+	let chain = Promise.resolve();
+	// Every lifecycle operation runs one at a time, so concurrent callers cannot race on the port.
+	const serial = (fn) => {
+		const run = chain.then(fn, fn);
+		chain = run.catch(() => {});
+		return run;
+	};
 
 	async function stop() {
 		const gw = gateway;
@@ -48,23 +55,23 @@ function createLanController({ config, createGateway, targetPort, getSecret, net
 	}
 
 	return {
-		start: async () => {
+		start: () => serial(async () => {
 			if (config.publicView().enabled) await bind();
-		},
-		setEnabled: async (enabled) => {
+		}),
+		setEnabled: (enabled) => serial(async () => {
 			config.setEnabled(enabled === true);
 			if (enabled === true) await bind();
 			else {
 				error = null;
 				await stop();
 			}
-		},
-		setPort: async (port) => {
+		}),
+		setPort: (port) => serial(async () => {
 			config.setPort(port); // throws RangeError before anything changes
 			if (gateway) await bind();
-		},
+		}),
 		setPassword: (password) => config.setPassword(password),
-		close: stop,
+		close: () => serial(stop),
 		state() {
 			const { enabled, port, hasPassword } = config.publicView();
 			const urls = boundPort === null ? [] : Object.values(networkInterfaces() ?? {})

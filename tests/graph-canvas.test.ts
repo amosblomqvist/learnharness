@@ -20,6 +20,7 @@ import {
 	labelAlpha,
 	pickNearest,
 	wrapRegionLabel,
+	zoomFilter,
 	zoomRatioOf,
 	LABELS_FADE_RATIO,
 } from "../components/graph-canvas.ts";
@@ -31,6 +32,20 @@ import {
 	REGION_BITMAP_OPTIONS,
 	REGION_BLUR_LADDER,
 } from "../src/core/render-settings.ts";
+
+describe("zoomFilter (touch/mouse gating)", () => {
+	const touch = { type: "touchstart", ctrlKey: false, button: 0 } as unknown as Event;
+	test("outside Electron a node drag blocks the pan; inside Electron d3's default applies", () => {
+		assert.equal(zoomFilter(touch, "n1", false), false);
+		assert.equal(zoomFilter(touch, null, false), true);
+		assert.equal(zoomFilter(touch, "n1", true), true);
+	});
+	test("ctrl-click and non-primary buttons are still refused, ctrl-wheel allowed", () => {
+		assert.equal(zoomFilter({ type: "mousedown", ctrlKey: true, button: 0 } as unknown as Event, null, true), false);
+		assert.equal(zoomFilter({ type: "mousedown", ctrlKey: false, button: 2 } as unknown as Event, null, false), false);
+		assert.equal(zoomFilter({ type: "wheel", ctrlKey: true, button: 0 } as unknown as Event, null, true), true);
+	});
+});
 
 describe("zoomRatioOf (the sigma-compatible camera ratio)", () => {
 	test("1 at fit zoom, smaller when zoomed in, larger when zoomed out", () => {

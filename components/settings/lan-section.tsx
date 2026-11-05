@@ -102,7 +102,7 @@ export function LanPanel({ lan, initial = null }: { lan: Lan; initial?: LanState
 				</span>
 			</SettingsRow>
 			<p className="text-xs text-muted-foreground/70">
-				The connection is plain HTTP. See docs/lan-access.md for sign-in, dictation, attachments, and security notes.
+				Use this only on a trusted network. The connection is plain HTTP, and the password is optional but recommended.
 			</p>
 		</>
 	);

@@ -401,6 +401,12 @@ const clamp01 = (v: number) => Math.min(Math.max(v, 0), 1);
  * in (ratio = kFit / k). The persisted labelZoom setting is denominated in
  * these units, so the gate semantics survive the renderer swap unchanged.
  */
+/** d3-zoom's default filter; outside Electron a node press (`dragId`) also owns the gesture (touch drag moves the node, not the stage). */
+export function zoomFilter(e: Event, dragId: string | null, electron: boolean): boolean {
+	if (!electron && dragId) return false;
+	return (!(e as MouseEvent).ctrlKey || e.type === "wheel") && !(e as MouseEvent).button;
+}
+
 export function zoomRatioOf(kFit: number, k: number): number {
 	return kFit / k;
 }
@@ -676,7 +682,7 @@ export class GraphCanvasRenderer {
 			// touchstart) owns the gesture, so a touch drag on a node moves the
 			// node instead of also panning the stage. Mouse is unaffected: the
 			// pointerdown preventDefault already suppresses its mousedown.
-			.filter((e: Event) => !this.dragId && (!(e as MouseEvent).ctrlKey || e.type === "wheel") && !(e as MouseEvent).button)
+			.filter((e: Event) => zoomFilter(e, this.dragId, document.documentElement.classList.contains("lh-electron")))
 			.scaleExtent([0.02, 40])
 			.on("zoom", ({ transform }) => {
 				this.transform = transform;

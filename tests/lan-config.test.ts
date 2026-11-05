@@ -41,7 +41,14 @@ test("a corrupt lan.json falls back to defaults", () => {
 	assert.deepEqual(createLanConfig(file).publicView(), { enabled: false, port: 4747, hasPassword: false });
 });
 
-test("password is stored as a scrypt hash, verified, and never in the public view", () => {
+test("verifyPassword and checkPassword are async (they must not block the main process)", async () => {
+	const cfg = createLanConfig(tmpFile());
+	cfg.setPassword("x");
+	assert.ok(verifyPassword("x", cfg.getAuth().passwordHash) instanceof Promise);
+	assert.ok(cfg.checkPassword("x") instanceof Promise);
+});
+
+test("password is stored as a scrypt hash, verified, and never in the public view", async () => {
 	const file = tmpFile();
 	const cfg = createLanConfig(file);
 	cfg.setPassword("hunter2!");
@@ -53,12 +60,12 @@ test("password is stored as a scrypt hash, verified, and never in the public vie
 	const { passwordHash, sessionKey } = cfg.getAuth();
 	assert.match(passwordHash, /^scrypt\$/);
 	assert.ok(sessionKey.length >= 32);
-	assert.equal(verifyPassword("hunter2!", passwordHash), true);
-	assert.equal(verifyPassword("hunter3!", passwordHash), false);
-	assert.equal(verifyPassword("hunter2!", "garbage"), false);
-	assert.equal(cfg.checkPassword("hunter2!"), true);
-	assert.equal(cfg.checkPassword("nope"), false);
-	assert.equal(createLanConfig(file).checkPassword("hunter2!"), true);
+	assert.equal(await verifyPassword("hunter2!", passwordHash), true);
+	assert.equal(await verifyPassword("hunter3!", passwordHash), false);
+	assert.equal(await verifyPassword("hunter2!", "garbage"), false);
+	assert.equal(await cfg.checkPassword("hunter2!"), true);
+	assert.equal(await cfg.checkPassword("nope"), false);
+	assert.equal(await createLanConfig(file).checkPassword("hunter2!"), true);
 });
 
 test("the same password hashes differently each time (random salt)", () => {

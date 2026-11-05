@@ -2,6 +2,7 @@ import { test, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { createRequire } from "node:module";
 import http from "node:http";
+import net from "node:net";
 import os from "node:os";
 import type { AddressInfo } from "node:net";
 const require = createRequire(import.meta.url);
@@ -39,7 +40,8 @@ async function startUpstream(handler?: http.RequestListener) {
 	return { server, seen, port: (server.address() as AddressInfo).port };
 }
 
-type Opts = { password?: string; now?: () => number; secret?: string | null; handler?: http.RequestListener; targetPort?: number };
+type Opts = {
+	verify?: (pw: string, hash: string) => Promise<boolean>; password?: string; now?: () => number; secret?: string | null; handler?: http.RequestListener; targetPort?: number };
 
 async function setup(o: Opts = {}) {
 	const up = await startUpstream(o.handler);
@@ -50,7 +52,7 @@ async function setup(o: Opts = {}) {
 		targetPort: o.targetPort ?? up.port,
 		getSecret: o.secret === null ? undefined : () => o.secret ?? SECRET,
 		getAuth: () => auth.value,
-		verifyPassword,
+		verifyPassword: o.verify ?? verifyPassword,
 		now: o.now,
 	});
 	await gw.listen(0, "127.0.0.1");
@@ -425,6 +427,57 @@ test("listen rejects with the bind error when the port is taken, and close frees
 	await again.close();
 });
 
-test("the exported verifyPassword is wired to the config hash", () => {
-	assert.equal(verifyPassword("a", hashPassword("a")), true);
+test("the exported verifyPassword is wired to the config hash", async () => {
+	assert.equal(await verifyPassword("a", hashPassword("a")), true);
+});
+
+function rawRequest(port: number, head: string): Promise<string> {
+	return new Promise((resolve, reject) => {
+		const sock = net.connect(port, "127.0.0.1");
+		let out = "";
+		sock.on("data", (c) => (out += c));
+		sock.on("close", () => resolve(out));
+		sock.on("error", reject);
+		sock.write(head);
+	});
+}
+
+test("concurrent pre-opened login requests cannot exceed the failure budget", async () => {
+	let verified = 0;
+	const s = await setup({ password: "pw", verify: async (p, h) => { verified++; return verifyPassword(p, h); } });
+	const N = 12;
+	const conns = Array.from({ length: N }, (_, i) => {
+		const body = form({ password: i === N - 1 ? "pw" : "bad" });
+		const sock = net.connect(s.gw.port, "127.0.0.1");
+		let out = "";
+		sock.on("data", (c) => (out += c));
+		const done = new Promise<string>((r) => sock.on("close", () => r(out)));
+		sock.on("error", () => {});
+		sock.write(`POST /__lan/login HTTP/1.1\r\nHost: ${s.base}\r\nOrigin: http://${s.base}\r\nContent-Type: application/x-www-form-urlencoded\r\nContent-Length: ${body.length}\r\nConnection: close\r\n\r\n`);
+		return { sock, body, done };
+	});
+	await new Promise((r) => setTimeout(r, 150));
+	for (const c of conns) {
+		c.sock.write(c.body);
+		await new Promise((r) => setTimeout(r, 5));
+	}
+	const outs = await Promise.all(conns.map((c) => c.done));
+	assert.ok(verified <= 5, `verified ${verified}`);
+	assert.equal(outs.filter((o) => /set-cookie/i.test(o)).length, 0);
+	assert.match(outs[N - 1]!, /^HTTP\/1\.1 429/);
+	assert.equal(outs.filter((o) => o.startsWith("HTTP/1.1 429")).length, N - 5);
+});
+
+test("a malformed request target answers 400 and the gateway keeps serving", async () => {
+	const s = await setup();
+	const out = await rawRequest(s.gw.port, `GET //[ HTTP/1.1\r\nHost: ${s.base}\r\nConnection: close\r\n\r\n`);
+	assert.match(out, /^HTTP\/1\.1 400/);
+	assert.equal((await request(s.gw.port, { headers: { host: s.base } })).status, 200);
+});
+
+test("login redirects to a non-Latin-1 next path percent-encoded", async () => {
+	const s = await setup({ password: "pw" });
+	const r = await login(s, "pw", { next: "/lecci\u00f3n/\u2713" });
+	assert.equal(r.status, 303);
+	assert.equal(r.headers.location, "/lecci%C3%B3n/%E2%9C%93");
 });

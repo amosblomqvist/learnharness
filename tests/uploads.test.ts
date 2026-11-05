@@ -48,6 +48,12 @@ describe("POST /api/uploads", () => {
 		assert.equal(sanitizeUploadName(".bashrc"), "bashrc");
 		assert.equal(sanitizeUploadName(".."), "file");
 		assert.equal(sanitizeUploadName(""), "file");
+		assert.equal(sanitizeUploadName('a<b>c:d"e|f?g*h.txt'), "a_b_c_d_e_f_g_h.txt");
+		const long = sanitizeUploadName("\u00e9".repeat(200) + ".pdf");
+		assert.ok(Buffer.byteLength(long) <= 100, String(Buffer.byteLength(long)));
+		assert.ok(long.endsWith(".pdf") && !long.includes("\ufffd"));
+		const emoji = sanitizeUploadName("\u{1F600}".repeat(60));
+		assert.ok(Buffer.byteLength(emoji) <= 100 && !emoji.includes("\ufffd"));
 		assert.ok(sanitizeUploadName("x".repeat(500) + ".md").endsWith(".md"));
 	});
 
