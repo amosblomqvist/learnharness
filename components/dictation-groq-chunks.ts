@@ -46,12 +46,12 @@ export type SessionResult =
 	| { status: "done"; text: string }
 	| { status: "failed"; error: string };
 
-export type ChunkStatus = "queued" | "sending" | "done" | "failed" | "skipped";
+export type ChunkStatus = "queued" | "sending" | "done" | "failed";
 
 type ChunkState = {
 	seconds: number;
-	/** The audio, kept until the session is dropped. Null for a skipped chunk. */
-	wav: Uint8Array<ArrayBuffer> | null;
+	/** The audio, kept until the session is dropped. */
+	wav: Uint8Array<ArrayBuffer>;
 	status: ChunkStatus;
 	text: string;
 	error: string | null;
@@ -62,7 +62,7 @@ type ChunkState = {
 
 export type ChunkSession = {
 	/** Captured audio (PCM16). Ignored once the run has been stopped or cancelled. */
-	push(audio: ArrayBuffer): void;
+	push(audio: Int16Array): void;
 	/** Seconds of audio captured so far. */
 	readonly seconds: number;
 	/** End the recording: send the last chunk, wait for every chunk, and report
@@ -115,7 +115,7 @@ export function createChunkSession(options: ChunkSessionOptions): ChunkSession {
 	const backoffMs = options.backoffMs ?? BACKOFF_MS;
 	const maxRetryWaitMs = options.maxRetryWaitMs ?? MAX_RETRY_WAIT_MS;
 	const sleep = options.sleep ?? realSleep;
-	const chunker = createChunker({ sampleRate });
+	const chunker = createChunker(sampleRate);
 	const chunks: ChunkState[] = [];
 	/** Aborted by cancel(); replaced when retry() starts afresh. */
 	let controller = new AbortController();
@@ -127,21 +127,18 @@ export function createChunkSession(options: ChunkSessionOptions): ChunkSession {
 	const enqueue = (chunk: PcmChunk) => {
 		chunks.push({
 			seconds: chunk.seconds,
-			wav: chunk.skip ? null : encodePcm16Wav(chunk.pcm, sampleRate),
-			status: chunk.skip ? "skipped" : "queued",
+			wav: encodePcm16Wav(chunk.pcm, sampleRate),
+			status: "queued",
 			text: "",
 			error: null,
 			run: 0,
 		});
 	};
 
-	/** The text to continue from: the previous chunk's transcript, looking back
-	 * over skipped (silent) chunks, if that chunk is done. */
+	/** The text to continue from: the previous chunk's transcript, if that chunk is done. */
 	const promptFor = (at: number): string | undefined => {
 		if (chunks[at]!.seconds < PROMPT_MIN_SECONDS) return undefined;
-		let before = at - 1;
-		while (before >= 0 && chunks[before]!.status === "skipped") before--;
-		const previous = chunks[before];
+		const previous = chunks[at - 1];
 		return previous?.status === "done" && previous.text ? promptTail(previous.text) : undefined;
 	};
 
@@ -159,7 +156,7 @@ export function createChunkSession(options: ChunkSessionOptions): ChunkSession {
 		chunk.status = "sending";
 		for (let attempt = 1; ; attempt++) {
 			try {
-				const text = await transcribeGroq(request, { wav: chunk.wav!, model, language, prompt: promptFor(at), signal });
+				const text = await transcribeGroq(request, { wav: chunk.wav, model, language, prompt: promptFor(at), signal });
 				if (chunk.run === run) { chunk.text = text; chunk.status = "done"; chunk.error = null; }
 				return;
 			} catch (err) {
@@ -198,11 +195,11 @@ export function createChunkSession(options: ChunkSessionOptions): ChunkSession {
 	};
 
 	const result = (): SessionResult => {
-		// Anything that is neither transcribed nor skipped counts as failed, so a
-		// chunk can never be dropped from the transcript without the user knowing.
-		const failed = chunks.find((chunk) => chunk.status !== "done" && chunk.status !== "skipped");
+		// Anything not transcribed counts as failed, so a chunk can never be
+		// dropped from the transcript without the user knowing.
+		const failed = chunks.find((chunk) => chunk.status !== "done");
 		if (failed) return { status: "failed", error: failed.error ?? "Groq transcription failed" };
-		const text = chunks.filter((chunk) => chunk.status === "done" && chunk.text).map((chunk) => chunk.text).join(" ");
+		const text = chunks.filter((chunk) => chunk.text).map((chunk) => chunk.text).join(" ");
 		return { status: "done", text };
 	};
 
@@ -242,7 +239,7 @@ export function createChunkSession(options: ChunkSessionOptions): ChunkSession {
 				if (chunk.status === "queued" || chunk.status === "sending") { chunk.status = "failed"; chunk.error = STOPPED_MESSAGE; chunk.run++; }
 			}
 		},
-		get unsent() { return chunks.filter((chunk) => chunk.status !== "done" && chunk.status !== "skipped").length; },
+		get unsent() { return chunks.filter((chunk) => chunk.status !== "done").length; },
 		get chunks() { return chunks; },
 	};
 }

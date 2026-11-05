@@ -1,6 +1,6 @@
 /**
  * The Groq dictation chunker: where it cuts, that it never exceeds its
- * maximum, and what it flags as not worth sending. Synthetic PCM only.
+ * maximum, and what it drops as not worth sending. Synthetic PCM only.
  */
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
@@ -37,7 +37,7 @@ function speech(totalSeconds: number, pauses: [number, number][] = []): Int16Arr
 
 /** Feed audio the way the worklet does, in 2048-sample frames, then finish. */
 function chunkAll(audio: Int16Array): PcmChunk[] {
-	const chunker = createChunker({ sampleRate: RATE });
+	const chunker = createChunker(RATE);
 	const chunks: PcmChunk[] = [];
 	for (let at = 0; at < audio.length; at += FRAME) chunks.push(...chunker.push(audio.slice(at, at + FRAME)));
 	const last = chunker.finish();
@@ -89,11 +89,10 @@ describe("where it cuts", () => {
 		const audio = speech(63.37, [[15.1, 0.3], [29.9, 0.4], [44, 0.3]]);
 		const chunks = chunkAll(audio);
 		assert.deepEqual(join(...chunks.map((c) => c.pcm)), audio);
-		assert.deepEqual(chunks.map((c) => c.index), chunks.map((_, i) => i));
 	});
 
 	it("waits until 18 s are buffered before cutting, so nothing is emitted early", () => {
-		const chunker = createChunker({ sampleRate: RATE });
+		const chunker = createChunker(RATE);
 		const audio = speech(40, [[16, 0.4]]);
 		let emittedAt: number | undefined;
 		for (let at = 0; at < audio.length && emittedAt === undefined; at += FRAME) {
@@ -102,44 +101,28 @@ describe("where it cuts", () => {
 		assert.ok(emittedAt! >= GROQ_CHUNK_MAX_SECONDS && emittedAt! < GROQ_CHUNK_MAX_SECONDS + 0.2, `${emittedAt} s`);
 	});
 
-	it("copies what it is given, so the capture buffer can be reused", () => {
-		const chunker = createChunker({ sampleRate: RATE });
-		const frame = loud(0.128);
-		chunker.push(frame);
-		frame.fill(0);
-		assert.ok(chunker.finish()!.pcm.some((v) => v !== 0));
-	});
-
-	it("takes an ArrayBuffer as the worklet posts it, and counts samples", () => {
-		const chunker = createChunker({ sampleRate: RATE });
-		chunker.push(loud(0.128).buffer as ArrayBuffer);
-		chunker.push(new ArrayBuffer(0));
-		assert.equal(chunker.samples, FRAME);
-	});
-
 	it("handles a burst bigger than two chunks in one push", () => {
-		const chunker = createChunker({ sampleRate: RATE });
+		const chunker = createChunker(RATE);
 		const done = chunker.push(loud(40));
 		assert.equal(done.length, 2);
-		assert.deepEqual(done.map((c) => c.index), [0, 1]);
 		assert.ok(chunker.finish()!.seconds < GROQ_CHUNK_MAX_SECONDS);
 	});
 });
 
 describe("what it will not send", () => {
-	it("flags near-silence under -50 dBFS, such as a quiet room", () => {
+	it("drops near-silence under -50 dBFS, such as a quiet room", () => {
 		const hiss = loud(20, Math.round(SILENCE_RMS * 32768 * Math.SQRT2 * 0.5));
 		assert.equal(isSilent(hiss, RATE), true);
-		assert.equal(chunkAll(hiss)[0]!.skip, "silence");
+		assert.equal(chunkAll(hiss).length, 0);
 	});
 
 	it("keeps quiet but real speech", () => {
 		assert.equal(isSilent(loud(5, 400), RATE), false, "about -41 dBFS");
 	});
 
-	it("is not fooled into skipping by a long chunk with only a little speech in it", () => {
+	it("is not fooled into dropping a long chunk with only a little speech in it", () => {
 		const audio = join(quiet(8), loud(1.2), quiet(9));
-		assert.equal(chunkAll(audio)[0]!.skip, undefined);
+		assert.equal(chunkAll(audio).length, 1, "the chunk with the speech stays; the silent rest goes");
 	});
 
 	it("does not send a lone click as speech, but does send a short word", () => {
@@ -150,41 +133,30 @@ describe("what it will not send", () => {
 		assert.equal(isSilent(word, RATE), false);
 	});
 
-	it("flags a final chunk shorter than 0.3 s as short, and sends one a little longer", () => {
+	it("drops a final chunk shorter than 0.3 s, and sends one a little longer", () => {
 		const shortest = GROQ_MIN_PCM_BYTES / 2;
 		assert.ok(Math.abs(shortest / RATE - 0.3) < 0.001);
-		const chunker = createChunker({ sampleRate: RATE });
+		const chunker = createChunker(RATE);
 		chunker.push(loud(0.28));
-		const tail = chunker.finish()!;
-		assert.equal(tail.skip, "short");
-		const again = createChunker({ sampleRate: RATE });
+		assert.equal(chunker.finish(), null);
+		const again = createChunker(RATE);
 		again.push(loud(0.4));
-		assert.equal(again.finish()!.skip, undefined);
+		assert.ok(again.finish());
 	});
 
-	it("keeps a very short tail after a full chunk, in order, flagged short", () => {
+	it("drops a very short tail after a full chunk", () => {
 		// The only pause in the window ends the chunk 0.2 s before the stop.
 		const chunks = chunkAll(speech(18.1, [[17.8, 0.2]]));
-		assert.equal(chunks.length, 2);
+		assert.equal(chunks.length, 1, "the 0.2 s tail is not a chunk");
 		assert.ok(chunks[0]!.seconds > 17.8 && chunks[0]!.seconds < 18, `cut at ${chunks[0]!.seconds} s`);
-		assert.equal(chunks[0]!.skip, undefined);
-		assert.equal(chunks[1]!.index, 1);
-		assert.ok(chunks[1]!.seconds < 0.3);
-		assert.equal(chunks[1]!.skip, "short");
 	});
 
 	it("finishing with nothing buffered gives no chunk, and finishing twice gives one", () => {
-		const empty = createChunker({ sampleRate: RATE });
+		const empty = createChunker(RATE);
 		assert.equal(empty.finish(), null);
-		const chunker = createChunker({ sampleRate: RATE });
+		const chunker = createChunker(RATE);
 		chunker.push(loud(2));
 		assert.ok(chunker.finish());
 		assert.equal(chunker.finish(), null, "the audio is handed out once");
-	});
-
-	it("a short chunk that is also silent is reported as short", () => {
-		const chunker = createChunker({ sampleRate: RATE });
-		chunker.push(quiet(0.1));
-		assert.equal(chunker.finish()!.skip, "short");
 	});
 });

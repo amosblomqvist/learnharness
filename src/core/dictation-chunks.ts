@@ -1,5 +1,4 @@
 import {
-	DICTATION_SAMPLE_RATE,
 	GROQ_CHUNK_MAX_SECONDS,
 	GROQ_CHUNK_MIN_SECONDS,
 	GROQ_CHUNK_TARGET_SECONDS,
@@ -17,11 +16,10 @@ import {
  * taken, so chunks stay near the target. 18 s is also the hard limit: a chunk
  * never runs longer, even if the speaker never pauses.
  *
- * What not to send. A chunk with almost no sound is flagged `silence`; Whisper
- * invents text ("Thank you.") for silence, and a request for it is wasted. A
- * final chunk under 0.3 s is flagged `short`: it is a stray click or the
- * moment before the stop button, not speech. Flagged chunks stay in order so
- * indices remain stable; the caller just does not send them.
+ * What not to send. A chunk with almost no sound is dropped; Whisper invents
+ * text ("Thank you.") for silence, and a request for it is wasted. So is a
+ * final chunk under 0.3 s: it is a stray click or the moment before the stop
+ * button, not speech. The caller only ever sees chunks worth sending.
  */
 
 /** Level below which a 20 ms frame counts as silent: -50 dBFS, the floor of the
@@ -41,33 +39,19 @@ const NEAR_QUIETEST = 2;
 const ENERGY_FLOOR = 1e-9;
 
 export type PcmChunk = {
-	/** 0, 1, 2 … in recording order, counting flagged chunks. */
-	index: number;
-	/** This chunk's samples (a copy: it owns its memory). */
+	/** This chunk's samples. */
 	pcm: Int16Array;
 	seconds: number;
-	/** Set when the chunk should not be transcribed. */
-	skip?: "silence" | "short";
-};
-
-export type ChunkerOptions = {
-	sampleRate?: number;
-	targetSeconds?: number;
-	minSeconds?: number;
-	maxSeconds?: number;
 };
 
 export type Chunker = {
-	/** Add captured audio (little-endian PCM16). Returns the chunks it completed: usually none, now and then one. */
-	push(audio: ArrayBuffer | Int16Array): PcmChunk[];
-	/** The recording ended: the remaining audio as the last chunk, or null if there is none. */
+	/** Add captured audio (PCM16). Returns the chunks it completed that are worth sending: usually none, now and then one. */
+	push(audio: Int16Array): PcmChunk[];
+	/** The recording ended: the remaining audio as the last chunk, or null if there is none worth sending. */
 	finish(): PcmChunk | null;
-	/** Samples pushed so far. */
+	/** Samples pushed so far, including any that were dropped. */
 	readonly samples: number;
 };
-
-const toSamples = (audio: ArrayBuffer | Int16Array): Int16Array =>
-	audio instanceof Int16Array ? audio : new Int16Array(audio, 0, audio.byteLength >> 1);
 
 /** True when `pcm` has less than MIN_VOICED_MS of 20 ms frames above SILENCE_RMS. */
 export function isSilent(pcm: Int16Array, sampleRate: number): boolean {
@@ -85,8 +69,8 @@ export function isSilent(pcm: Int16Array, sampleRate: number): boolean {
 
 /** The sample index to cut `pcm` at, between `minAt` and `maxAt`: the middle of
  * the quietest 100 ms stretch, preferring one near `targetAt` among the nearly
- * as quiet. Exported for tests. */
-export function quietestCut(pcm: Int16Array, sampleRate: number, minAt: number, targetAt: number, maxAt: number): number {
+ * as quiet. */
+function quietestCut(pcm: Int16Array, sampleRate: number, minAt: number, targetAt: number, maxAt: number): number {
 	const half = Math.max(1, Math.round((sampleRate * PAUSE_MS) / 2000));
 	const step = Math.max(1, Math.round((sampleRate * STEP_MS) / 1000));
 	const last = Math.min(pcm.length, maxAt + half);
@@ -111,21 +95,18 @@ export function quietestCut(pcm: Int16Array, sampleRate: number, minAt: number, 
 	return best;
 }
 
-export function createChunker(options: ChunkerOptions = {}): Chunker {
-	const sampleRate = options.sampleRate ?? DICTATION_SAMPLE_RATE;
-	const minAt = Math.round((options.minSeconds ?? GROQ_CHUNK_MIN_SECONDS) * sampleRate);
-	const targetAt = Math.round((options.targetSeconds ?? GROQ_CHUNK_TARGET_SECONDS) * sampleRate);
-	const maxAt = Math.round((options.maxSeconds ?? GROQ_CHUNK_MAX_SECONDS) * sampleRate);
+export function createChunker(sampleRate: number): Chunker {
+	const minAt = Math.round(GROQ_CHUNK_MIN_SECONDS * sampleRate);
+	const targetAt = Math.round(GROQ_CHUNK_TARGET_SECONDS * sampleRate);
+	const maxAt = Math.round(GROQ_CHUNK_MAX_SECONDS * sampleRate);
 	const shortest = GROQ_MIN_PCM_BYTES / 2;
 	let parts: Int16Array[] = [];
 	let buffered = 0;
 	let total = 0;
-	let index = 0;
 
-	const make = (pcm: Int16Array): PcmChunk => {
-		const skip = pcm.length < shortest ? "short" : isSilent(pcm, sampleRate) ? "silence" : undefined;
-		return { index: index++, pcm, seconds: pcm.length / sampleRate, ...(skip ? { skip } : {}) };
-	};
+	/** The chunk, or null when it is too short or has no sound worth sending. */
+	const make = (pcm: Int16Array): PcmChunk | null =>
+		pcm.length < shortest || isSilent(pcm, sampleRate) ? null : { pcm, seconds: pcm.length / sampleRate };
 	const joined = (): Int16Array => {
 		if (parts.length === 1) return parts[0]!;
 		const all = new Int16Array(buffered);
@@ -136,17 +117,16 @@ export function createChunker(options: ChunkerOptions = {}): Chunker {
 
 	return {
 		push(audio) {
-			const samples = toSamples(audio);
-			if (samples.length === 0) return [];
-			// Copy: the capture buffer is the worklet's to reuse, not ours to keep.
-			parts.push(samples.slice());
-			buffered += samples.length;
-			total += samples.length;
+			if (audio.length === 0) return [];
+			parts.push(audio);
+			buffered += audio.length;
+			total += audio.length;
 			const done: PcmChunk[] = [];
 			while (buffered >= maxAt) {
 				const all = joined();
 				const cut = quietestCut(all, sampleRate, minAt, targetAt, maxAt);
-				done.push(make(all.slice(0, cut)));
+				const chunk = make(all.slice(0, cut));
+				if (chunk) done.push(chunk);
 				const rest = all.slice(cut);
 				parts = rest.length ? [rest] : [];
 				buffered = rest.length;
