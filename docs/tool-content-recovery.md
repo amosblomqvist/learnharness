@@ -12,8 +12,9 @@ Recovery must not change persisted arguments, option identities, shuffling, grad
 
 | Content | Behavior |
 | --- | --- |
-| Literal code | Copy CommonMark/math-parser source ranges verbatim, including fences, indentation, quotes, and lists. Do not serialize a replacement AST. |
-| Document escapes | Decode literal `\n` only with evidence such as repeated layout escapes or accompanying extra-escaped TeX. Protect code, recognized paths, comments, and complete known n-prefixed commands/macros such as `\nu` and `\nabla`. |
+| Literal code | Copy CommonMark/math-parser source ranges verbatim, including fences, indentation, quotes, and lists, except the escaped fenced code below. Do not serialize a replacement AST. |
+| Escaped fenced code | A fenced block written on one line with escaped newlines becomes a real fence: delimiters and body on their own lines, language tag kept. One backslash before each newline is one JSON layer; two is a second layer. Both ends must use the same count, and a longer run stays literal. Recovery is stable on a second pass. |
+| Document escapes | Decode literal `\n` only with evidence such as repeated layout escapes, an escaped fence, or accompanying extra-escaped TeX. Protect other code, recognized paths (drive and UNC), comments, and complete known n-prefixed commands/macros such as `\nu` and `\nabla`. A second-layer fence also decodes `\\n` in the surrounding prose, but math keeps its single-layer rules. |
 | Display framing | Recovered `$$` framing puts the formula and closing fence on their own lines. |
 | JSON-swallowed prefixes | In math, reconstruct control-character + complete alphabetic word only when it names a known KaTeX command, such as TAB + `ext` → `\text`. |
 | Extra command escaping | Recover known commands using original TeX context; unknown words are not invented. Preserve genuine native row separators/comments; consistently over-escaped environments establish a factor for commands **and rows**. |
@@ -31,8 +32,9 @@ In labelled answer/Why reveals, only the first direct paragraph is inline with i
 
 ## Verification
 
-- `tests/content-recovery.test.ts`: recovery/preservation, code, rows, and comments.
+- `tests/content-recovery.test.ts`: recovery/preservation, code, rows, comments, and escaped fences (one and two layers, UNC paths, long backslash runs).
 - `tests/tool-content-presentation.test.tsx`: synthetic corpus, historical joins, ambiguity.
 - `tests/tool-content-interaction.test.tsx`: selection/submission/persistence/reveal and paragraphs.
+- `tests/fixtures/tool-rendering/escaped-fence-two-layer.txt`: a recorded two-layer escaped question used by both recovery suites. Do not edit it.
 
 `scripts/replay-tool-rendering-corpus.ts` can replay a separately supplied frozen corpus offline, checking hashes and source/render/answer preservation. Corpus collection and larger diagnostic runs are not prerequisites for unit tests. The Markdown, card, practice, shape, and grading suites remain relevant.
