@@ -1,13 +1,10 @@
 /** Size of the canonical RIFF/WAVE header written below. */
 export const WAV_HEADER_BYTES = 44;
 
-/** Wrap 16-bit little-endian mono PCM chunks in a canonical 44-byte WAV header.
+/** Wrap 16-bit little-endian mono PCM in a canonical 44-byte WAV header.
  * Dictation capture is already linear16, so no resampling or re-encoding. */
-export function encodePcm16Wav(chunks: readonly (ArrayBuffer | ArrayBufferView)[], sampleRate: number): Uint8Array<ArrayBuffer> {
-	const parts = chunks.map((chunk) => chunk instanceof ArrayBuffer
-		? new Uint8Array(chunk)
-		: new Uint8Array(chunk.buffer, chunk.byteOffset, chunk.byteLength));
-	const dataBytes = parts.reduce((total, part) => total + part.byteLength, 0);
+export function encodePcm16Wav(pcm: Int16Array, sampleRate: number): Uint8Array<ArrayBuffer> {
+	const dataBytes = pcm.byteLength;
 	const out = new Uint8Array(WAV_HEADER_BYTES + dataBytes);
 	const view = new DataView(out.buffer);
 	const ascii = (offset: number, text: string) => { for (let i = 0; i < text.length; i++) out[offset + i] = text.charCodeAt(i); };
@@ -24,8 +21,7 @@ export function encodePcm16Wav(chunks: readonly (ArrayBuffer | ArrayBufferView)[
 	view.setUint16(34, 16, true); // bits per sample
 	ascii(36, "data");
 	view.setUint32(40, dataBytes, true);
-	let offset = WAV_HEADER_BYTES;
-	for (const part of parts) { out.set(part, offset); offset += part.byteLength; }
+	out.set(new Uint8Array(pcm.buffer, pcm.byteOffset, dataBytes), WAV_HEADER_BYTES);
 	return out;
 }
 

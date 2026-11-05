@@ -127,7 +127,7 @@ export function createChunkSession(options: ChunkSessionOptions): ChunkSession {
 	const enqueue = (chunk: PcmChunk) => {
 		chunks.push({
 			seconds: chunk.seconds,
-			wav: chunk.skip ? null : encodePcm16Wav([chunk.pcm], sampleRate),
+			wav: chunk.skip ? null : encodePcm16Wav(chunk.pcm, sampleRate),
 			status: chunk.skip ? "skipped" : "queued",
 			text: "",
 			error: null,

@@ -41,7 +41,7 @@ beforeEach(() => {
 afterEach(() => { globalThis.fetch = realFetch; delete process.env.GROQ_API_KEY; });
 
 const wavFile = (samples = 1600, type = "audio/wav") =>
-	new File([encodePcm16Wav([new Int16Array(samples).buffer], 16000)], "dictation.wav", { type });
+	new File([encodePcm16Wav(new Int16Array(samples), 16000)], "dictation.wav", { type });
 
 function form(parts: Record<string, string | Blob | undefined> = {}) {
 	const body = new FormData();
@@ -168,7 +168,7 @@ describe("input validation", () => {
 
 	it("oversize: an audio part over Groq's upload limit is refused even inside the body allowance", async () => {
 		const big = new Uint8Array(GROQ_MAX_UPLOAD_BYTES + 1);
-		big.set(encodePcm16Wav([], 16000));
+		big.set(encodePcm16Wav(new Int16Array(0), 16000));
 		const res = await post(form({ audio: new File([big], "dictation.wav", { type: "audio/wav" }) }));
 		assert.equal(res.status, 413);
 		assert.equal(calls.length, 0);
