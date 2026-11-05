@@ -14,6 +14,10 @@
  */
 const os = require("node:os");
 
+// Container/VM bridges are only reachable from this host, so their URLs would mislead.
+// ponytail: name heuristic (Docker, libvirt, VMware, VirtualBox); exotic setups may still list extras.
+const VIRTUAL_BRIDGE = /^(docker|br-|virbr|veth|vmnet|vboxnet)/;
+
 function describeBindError(err, port) {
 	if (err?.code === "EADDRINUSE") return `Port ${port} is already in use.`;
 	if (err?.code === "EACCES") return `Port ${port} is not allowed on this computer.`;
@@ -74,8 +78,9 @@ function createLanController({ config, createGateway, targetPort, getSecret, net
 		close: () => serial(stop),
 		state() {
 			const { enabled, port, hasPassword } = config.publicView();
-			const urls = boundPort === null ? [] : Object.values(networkInterfaces() ?? {})
-				.flat()
+			const urls = boundPort === null ? [] : Object.entries(networkInterfaces() ?? {})
+				.filter(([name]) => !VIRTUAL_BRIDGE.test(name))
+				.flatMap(([, list]) => list ?? [])
 				.filter((i) => i && i.family === "IPv4" && !i.internal)
 				.map((i) => `http://${i.address}:${boundPort}`);
 			return { enabled, port, hasPassword, running: boundPort !== null, error, urls };

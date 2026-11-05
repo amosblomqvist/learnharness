@@ -23,7 +23,7 @@ const IFACES = () => ({
 	],
 });
 
-function setup(opts: { failWith?: string } = {}) {
+function setup(opts: { failWith?: string; interfaces?: () => object } = {}) {
 	const dir = mkdtempSync(path.join(tmpdir(), "lan-ctl-"));
 	dirs.push(dir);
 	const file = path.join(dir, "lan.json");
@@ -38,7 +38,7 @@ function setup(opts: { failWith?: string } = {}) {
 			log.push("close");
 		},
 	});
-	const make = () => createLanController({ config, createGateway, targetPort: 3000, getSecret: () => "s", networkInterfaces: IFACES });
+	const make = () => createLanController({ config, createGateway, targetPort: 3000, getSecret: () => "s", networkInterfaces: opts.interfaces ?? IFACES });
 	return { config, file, log, ctl: make(), make };
 }
 
@@ -52,6 +52,22 @@ describe("lan controller", () => {
 		assert.equal(s.enabled, true);
 		assert.deepEqual(s.urls, ["http://192.168.1.20:4747"]);
 		assert.equal(s.error, null);
+	});
+
+	it("lists only interfaces other devices can reach, not container or VM bridges", async () => {
+		const v4 = (address: string) => [{ family: "IPv4", address, internal: false }];
+		const { ctl } = setup({
+			interfaces: () => ({
+				wlan0: v4("192.168.1.30"),
+				tailscale0: v4("100.64.0.7"),
+				docker0: v4("172.17.0.1"),
+				"br-39f52c001687": v4("172.20.0.1"),
+				virbr0: v4("192.168.122.1"),
+				veth12ab: v4("172.17.0.9"),
+			}),
+		});
+		await ctl.setEnabled(true);
+		assert.deepEqual(ctl.state().urls, ["http://192.168.1.30:4747", "http://100.64.0.7:4747"]);
 	});
 
 	it("a bind failure saves enabled=false and reports a readable error", async () => {
