@@ -68,6 +68,7 @@ export * from "./fuzzy.ts";
 export * from "./settings.ts";
 export * from "./file-access.ts";
 export * from "./dictation.ts";
+export * from "./dictation-chunks.ts";
 export * from "./wav.ts";
 // graph-deletion.ts (wave 6): the whole module is PURE but storage-port
 // driven — the deletion RUNS server-side only. The shell needs exactly one
