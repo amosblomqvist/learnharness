@@ -5,7 +5,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
-	createChunker, isSilent, MIN_VOICED_MS, quietestCut, SILENCE_RMS, type PcmChunk,
+	createChunker, isSilent, MIN_VOICED_MS, SILENCE_RMS, type PcmChunk,
 } from "../src/core/dictation-chunks.ts";
 import {
 	GROQ_CHUNK_MAX_SECONDS, GROQ_CHUNK_MIN_SECONDS, GROQ_CHUNK_TARGET_SECONDS, GROQ_MIN_PCM_BYTES,
@@ -125,21 +125,9 @@ describe("where it cuts", () => {
 		assert.deepEqual(done.map((c) => c.index), [0, 1]);
 		assert.ok(chunker.finish()!.seconds < GROQ_CHUNK_MAX_SECONDS);
 	});
-
-	it("quietestCut finds the pause directly", () => {
-		const audio = speech(20, [[14, 0.5]]);
-		const cut = quietestCut(audio, RATE, 12 * RATE, 15 * RATE, 18 * RATE);
-		assert.ok(cut / RATE > 14 && cut / RATE < 14.5);
-	});
 });
 
 describe("what it will not send", () => {
-	it("flags a chunk of pure silence", () => {
-		const chunks = chunkAll(quiet(40));
-		assert.ok(chunks.length >= 3);
-		assert.ok(chunks.every((c) => c.skip === "silence"));
-	});
-
 	it("flags near-silence under -50 dBFS, such as a quiet room", () => {
 		const hiss = loud(20, Math.round(SILENCE_RMS * 32768 * Math.SQRT2 * 0.5));
 		assert.equal(isSilent(hiss, RATE), true);

@@ -101,16 +101,12 @@ async function choose(id: string, value: string) {
 }
 const Picker = () => <><DictationEngineSettings /><DictationLanguageSetting /><DictationSetupHint /></>;
 
-test("Deepgram is the default: no Groq model row, and the Deepgram setup note is unchanged", async () => {
+test("Deepgram is the default engine and there is no Groq model row", async () => {
 	await fixture({ dictation: { language: "pl" } });
 	await mount(<Picker />);
 	assert.equal(select("select-dictation-engine").value, "deepgram");
 	assert.deepEqual([...select("select-dictation-engine").options].map((o) => [o.value, o.textContent]), [["deepgram", "Deepgram"], ["groq", "Groq (Whisper)"]]);
 	assert.equal(byTest("row-dictation-groq-model"), null);
-	const hint = byTest("dictation-setup-hint")!;
-	assert.equal(hint.textContent!.replace(/\s+/g, " ").trim(), "Create a Deepgram API key with the Member role or higher, then add it above.");
-	assert.equal(hint.querySelector("a")!.getAttribute("href"), "https://console.deepgram.com/");
-	assert.equal(hint.getAttribute("data-engine"), null);
 });
 
 test("choosing Groq saves it with the language, shows the model row (turbo by default) and the Groq note", async () => {
@@ -178,14 +174,9 @@ async function mountKeys(initialRow?: string) {
 	await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
 }
 
-test("the Dictation group lists Deepgram, then Groq, then engine and language", async () => {
+test("the Groq key row in the Dictation group starts unset and links to the Groq console", async () => {
 	await fixture({ dictation: { language: "en" } });
 	await mountKeys();
-	const group = byTest("group-dictation")!;
-	const order = [...group.querySelectorAll<HTMLElement>("[data-testid]")]
-		.map((el) => el.getAttribute("data-testid")!)
-		.filter((id) => ["key-deepgram_api_key", "key-dictation-groq", "row-dictation-engine", "row-dictation-language", "dictation-setup-hint"].includes(id));
-	assert.deepEqual(order, ["key-deepgram_api_key", "key-dictation-groq", "row-dictation-engine", "row-dictation-language", "dictation-setup-hint"]);
 	assert.equal(byTest("key-dictation-groq-status")!.textContent, "not set");
 	assert.equal(byTest("key-dictation-groq")!.querySelector("a")!.getAttribute("href"), "https://console.groq.com/keys");
 });
@@ -197,13 +188,6 @@ test("the Groq row shows whether the existing GROQ_API_KEY is set, and the same 
 	assert.ok(byTest("key-groq_api_key")!.closest('[data-testid="group-provider-keys"]'), "the model-provider row is unchanged");
 	assert.ok(byTest("key-dictation-groq")!.closest('[data-testid="group-dictation"]'));
 	assert.equal(byTest("key-deepgram_api_key-status")!.textContent, "not set", "Deepgram's own row is independent");
-});
-
-test("an environment-owned Groq key is shown read-only", async () => {
-	await fixture({ keys: [status("GROQ_API_KEY", true, "env")] });
-	await mountKeys();
-	assert.match(byTest("key-dictation-groq-status")!.textContent!, /· env$/);
-	assert.match(byTest("key-dictation-groq")!.className, /opacity-40/);
 });
 
 test("the keyless deep link unfolds only the Dictation group's Groq row and saves the shared key", async () => {

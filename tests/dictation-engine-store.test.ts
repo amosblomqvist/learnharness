@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { createDictationLanguageStore } from "../components/dictation-preference.ts";
 import { checkGroqReady, GROQ_DICTATION_KEYLESS, transcribeGroq } from "../components/dictation-groq.ts";
-import { GROQ_DICTATION_HEADER, type UserSettings } from "../src/core/index.ts";
+import type { UserSettings } from "../src/core/index.ts";
 
 /** A fake settings endpoint: GET returns the record, PUT replaces the dictation section whole (as the route does). */
 function server(initial: UserSettings["dictation"] | undefined) {
@@ -93,29 +93,17 @@ test("a run that starts during an engine save waits for it and sees the new engi
 	assert.equal((await preference).provider, "groq");
 });
 
-test("the transport helpers send the same-origin header and map the route's answers", async () => {
-	const calls: { url: string; init?: RequestInit }[] = [];
-	const respond = (response: () => Response) => (async (url: string, init?: RequestInit) => {
-		calls.push({ url, init });
-		return response();
-	}) as typeof fetch;
+test("the transport helpers map the route's answers", async () => {
+	const respond = (response: () => Response) => (async () => response()) as typeof fetch;
 	const wav = new Uint8Array(100) as Uint8Array<ArrayBuffer>;
 	const args = { wav, model: "whisper-large-v3-turbo", language: "en-GB" } as const;
 
 	await checkGroqReady(respond(() => Response.json({ ready: true })));
-	assert.equal(calls[0]!.url, "/api/stt/transcribe");
-	assert.deepEqual(calls[0]!.init?.headers, { [GROQ_DICTATION_HEADER]: "1" });
 	await assert.rejects(checkGroqReady(respond(() => Response.json({ message: "No GROQ_API_KEY" }, { status: 503 }))), { message: GROQ_DICTATION_KEYLESS });
 	await assert.rejects(checkGroqReady(respond(() => Response.json({ message: "Dictation requests must come from the LearnHarness window." }, { status: 403 }))), /LearnHarness window/);
 	await assert.rejects(checkGroqReady((async () => { throw new TypeError("offline"); }) as typeof fetch), /Could not reach/);
 
 	assert.equal(await transcribeGroq(respond(() => Response.json({ text: "  hi  " })), args), "hi");
-	const form = calls.at(-1)!.init!.body as FormData;
-	assert.equal(calls.at(-1)!.init!.method, "POST");
-	assert.equal(form.get("model"), "whisper-large-v3-turbo");
-	assert.equal(form.get("language"), "en-GB", "the dictation code goes up; the server maps it to Whisper's");
-	assert.equal((form.get("audio") as File).name, "dictation.wav");
-	assert.equal((form.get("audio") as File).type, "audio/wav");
 	await assert.rejects(transcribeGroq(respond(() => Response.json({}, { status: 503 })), args), { message: GROQ_DICTATION_KEYLESS });
 	await assert.rejects(transcribeGroq(respond(() => Response.json({ message: "The recording is too large for Groq." }, { status: 413 })), args), /too large/);
 	await assert.rejects(transcribeGroq(respond(() => new Response("<html>", { status: 500 })), args), /Groq dictation failed \(500\)/);

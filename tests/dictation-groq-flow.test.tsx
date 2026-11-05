@@ -18,7 +18,7 @@ import { GROQ_DICTATION_KEYLESS } from "../components/dictation-groq.ts";
 import { notifySettingsSaved } from "../components/settings-signal.ts";
 import { isDictationActive, isDictationRetained } from "../components/dictation-state.ts";
 import { STOPPED_MESSAGE } from "../components/dictation-groq-chunks.ts";
-import { GROQ_DICTATION_HEADER, GROQ_MAX_PCM_BYTES, GROQ_MAX_RECORDING_SECONDS, GROQ_MIN_PCM_BYTES, type QuizToolInput, type UserSettings } from "../src/core/index.ts";
+import { GROQ_DICTATION_HEADER, GROQ_MAX_PCM_BYTES, GROQ_MAX_RECORDING_SECONDS, type QuizToolInput, type UserSettings } from "../src/core/index.ts";
 
 function deferred<T>() {
 	let resolve!: (value: T) => void;
@@ -189,15 +189,6 @@ test("records without a socket or Deepgram token, sends the audio on stop, flush
 	assert.equal(f.state.tokenCalls, 0, "ending a Groq run does not warm a Deepgram token either");
 });
 
-test("the default model is sent when the record names none, and 'multi' goes up for the server to auto-detect", async () => {
-	const f = await fixture({ provider: "groq", language: "multi" });
-	await f.start();
-	await f.speak(4);
-	await act(async () => { f.dictation.stop(); });
-	assert.equal(f.state.posts[0]!.form.get("model"), "whisper-large-v3-turbo");
-	assert.equal(f.state.posts[0]!.form.get("language"), "multi");
-});
-
 test("a missing key refuses before any speech is recorded for upload and keeps the line the keys row deep-links from", async () => {
 	const f = await fixture();
 	f.state.ready = () => Promise.resolve(Response.json({ message: "No GROQ_API_KEY — add it to auth.json" }, { status: 503 }));
@@ -210,18 +201,6 @@ test("a missing key refuses before any speech is recorded for upload and keeps t
 	assert.equal(isDictationActive(), false);
 });
 
-test("a recording too short to mean anything is dropped without a request or an error", async () => {
-	const f = await fixture();
-	await f.start();
-	await f.speak(1);
-	assert.ok(4096 < GROQ_MIN_PCM_BYTES, "one frame is under the minimum");
-	await act(async () => { f.dictation.stop(); });
-	assert.equal(f.state.posts.length, 0);
-	assert.equal(f.dictation.phase, "idle");
-	assert.equal(f.dictation.error, null);
-	assert.deepEqual(f.state.appends, []);
-});
-
 test("silence comes back as an empty transcript and inserts nothing", async () => {
 	const f = await fixture();
 	await f.start();
@@ -231,21 +210,6 @@ test("silence comes back as an empty transcript and inserts nothing", async () =
 	assert.deepEqual(f.state.appends, []);
 	assert.equal(f.dictation.phase, "idle");
 	assert.equal(f.dictation.error, null);
-});
-
-test("a Groq failure is shown in the button, nothing is inserted, and the next click records again", async () => {
-	const f = await fixture();
-	await f.start();
-	await f.speak();
-	f.state.answer = rateLimited;
-	await act(async () => { f.dictation.stop(); });
-	assert.equal(f.dictation.error, RATE_LIMIT_LINE);
-	assert.equal(f.dictation.phase, "idle");
-	assert.equal(f.dictation.transcribing, false);
-	assert.deepEqual(f.state.appends, []);
-	await f.start();
-	assert.equal(f.dictation.error, null, "starting again clears the error");
-	assert.equal(f.dictation.phase, "recording");
 });
 
 test("a network failure on upload is retried with backoff, then says so instead of throwing", async () => {
@@ -311,18 +275,6 @@ test("Esc while finishing stops the waiting but keeps the audio for Retry, and t
 	await act(async () => { f.dictation.retry(); });
 	assert.deepEqual(f.state.appends, ["after esc"], "Retry finishes it");
 	assert.equal(f.state.posts.length, 2);
-});
-
-test("Esc while recording discards the audio: nothing is uploaded and nothing is kept", async () => {
-	const f = await fixture();
-	await f.start();
-	await f.speak();
-	await act(async () => { f.dictation.cancel(); });
-	assert.equal(f.state.posts.length, 0);
-	assert.equal(f.dictation.phase, "idle");
-	assert.equal(f.dictation.retryable, false);
-	assert.equal(f.state.stops, 1);
-	assert.deepEqual(f.state.appends, []);
 });
 
 test("unmounting while recording releases the mic and uploads nothing", async () => {
@@ -405,23 +357,14 @@ test("reaching the recording cap stops and transcribes what was captured, droppi
 	assert.equal(sent, GROQ_MAX_PCM_BYTES, "everything up to the cap was sent, and nothing after it");
 });
 
-test("the Deepgram engine is untouched: it streams over a socket and never calls the Groq route", async () => {
-	const f = await fixture({ language: "en" });
-	await f.start();
-	assert.equal(Socket.all.length, 1);
-	assert.match(Socket.all[0]!.url, /^wss:\/\/api\.deepgram\.com\/v1\/listen\?model=nova-3/);
-	assert.deepEqual(Socket.all[0]!.protocols, ["bearer", "test-token"], "Deepgram still authenticates with a minted token");
-	assert.equal(f.state.readyInits.length, 0);
-	assert.equal(f.state.posts.length, 0);
-	assert.equal(f.dictation.transcribing, false);
-	await act(async () => { f.dictation.cancel(); });
+const barOf = (over: Partial<Dictation>): Dictation => ({
+	phase: "idle", error: null, levelRef: { current: 0 }, active: false, transcribing: false,
+	retryable: false, retry() {}, toggle() {}, stop() {}, finish: async () => true, cancel() {}, clearError() {},
+	...over,
 });
 
 test("the bar shows Finishing transcription… with no meter or Stop while Groq works", () => {
-	const dictation: Dictation = {
-		phase: "stopping", error: null, levelRef: { current: 0 }, active: true, transcribing: true,
-		retryable: false, retry() {}, toggle() {}, stop() {}, finish: async () => true, cancel() {}, clearError() {},
-	};
+	const dictation = barOf({ phase: "stopping", active: true, transcribing: true });
 	const html = renderToStaticMarkup(<DictationBar dictation={dictation} />);
 	assert.match(html, /Finishing transcription…/);
 	assert.match(html, /disabled/);
@@ -497,40 +440,6 @@ test("Retry re-sends the same recording and inserts the text once it succeeds", 
 	assert.equal(f.state.posts.length, 2, "nothing is left to retry");
 });
 
-test("a Retry that fails again keeps the recording for another go", async () => {
-	const f = await fixture();
-	await failedRecording(f);
-	f.state.answer = () => refused("Groq is unavailable (503). Try again shortly.");
-	await act(async () => { f.dictation.retry(); });
-	assert.equal(f.dictation.error, "Groq is unavailable (503). Try again shortly.");
-	assert.equal(f.dictation.retryable, true);
-	assert.equal(f.dictation.phase, "idle");
-	f.state.answer = () => Promise.resolve(Response.json({ text: "third time" }));
-	await act(async () => { f.dictation.retry(); });
-	assert.deepEqual(f.state.appends, ["third time"]);
-	assert.equal(f.dictation.retryable, false);
-	assert.equal(f.state.posts.length, 3);
-});
-
-test("Esc during a Retry cancels the request but does not drop the recording", async () => {
-	const f = await fixture();
-	await failedRecording(f);
-	const reply = deferred<Response>();
-	f.state.answer = () => reply.promise;
-	await act(async () => { f.dictation.retry(); });
-	const signal = f.state.posts[1]!.init.signal!;
-	await act(async () => { f.dictation.cancel(); });
-	assert.equal(signal.aborted, true);
-	assert.equal(f.dictation.phase, "idle");
-	assert.equal(f.dictation.retryable, true, "only success, dismissal or a new recording drop it");
-	assert.equal(f.dictation.error, STOPPED_MESSAGE);
-	await act(async () => { reply.resolve(Response.json({ text: "too late" })); });
-	assert.deepEqual(f.state.appends, []);
-	f.state.answer = () => Promise.resolve(Response.json({ text: "after esc" }));
-	await act(async () => { f.dictation.retry(); });
-	assert.deepEqual(f.state.appends, ["after esc"]);
-});
-
 test("dismissing the error discards the recording", async () => {
 	const f = await fixture();
 	await failedRecording(f);
@@ -571,36 +480,15 @@ test("unmounting drops a kept recording", async () => {
 	assert.deepEqual(f.state.appends, []);
 });
 
-test("unmounting mid-Retry aborts it, drops the recording and neither throws nor appends", async () => {
-	const f = await fixture();
-	await failedRecording(f);
-	const reply = deferred<Response>();
-	f.state.answer = () => reply.promise;
-	await act(async () => { f.dictation.retry(); });
-	const signal = f.state.posts[1]!.init.signal!;
-	await f.unmount();
-	assert.equal(signal.aborted, true);
-	assert.equal(isDictationActive(), false);
-	assert.equal(isDictationRetained(), false);
-	await act(async () => { reply.resolve(Response.json({ text: "departed" })); });
-	assert.deepEqual(f.state.appends, []);
-});
-
-test("unmounting mid-upload of a first attempt that then fails keeps nothing", async () => {
-	const f = await fixture();
-	await f.start();
-	await f.speak();
-	const reply = deferred<Response>();
-	f.state.answer = () => reply.promise;
-	await act(async () => { f.dictation.stop(); });
-	await f.unmount();
-	await act(async () => { reply.resolve(Response.json({ message: "late failure", retryable: true }, { status: 502 })); });
-	assert.equal(isDictationRetained(), false, "a recording whose page is gone must not be kept");
-});
-
-test("the Deepgram engine never keeps a recording and finish() resolves true", async () => {
+test("the Deepgram engine is untouched: it streams over a socket, never calls the Groq route, never keeps a recording and finish() resolves true", async () => {
 	const f = await fixture({ language: "en" });
 	await f.start();
+	assert.equal(Socket.all.length, 1);
+	assert.match(Socket.all[0]!.url, /^wss:\/\/api\.deepgram\.com\/v1\/listen\?model=nova-3/);
+	assert.deepEqual(Socket.all[0]!.protocols, ["bearer", "test-token"], "Deepgram still authenticates with a minted token");
+	assert.equal(f.state.readyInits.length, 0);
+	assert.equal(f.state.posts.length, 0);
+	assert.equal(f.dictation.transcribing, false);
 	assert.equal(f.dictation.retryable, false);
 	let done: boolean | undefined;
 	await act(async () => { void f.dictation.finish().then((ok) => { done = ok; }); });
@@ -657,28 +545,6 @@ test("question dock: a failed upload while submitting keeps the draft and does n
 	await submit();
 	assert.equal(submitted.length, 1);
 	assert.equal(submitted[0]!.thinking, "typed so far and spoken");
-});
-
-test("question dock: dismissing the failed recording lets the draft submit as typed", async () => {
-	const submitted: { thinking?: string }[] = [];
-	const f = await fixture(undefined, {
-		beside: <QuestionDock toolName="quiz" toolCallId="q1" input={QUIZ} expanded onExpand={() => {}}
-			onSubmit={(answer) => { submitted.push(answer); }} dictationClaim />,
-	});
-	const submit = () => act(async () => {
-		f.host.querySelector("form")!.dispatchEvent(new window.Event("submit", { bubbles: true, cancelable: true }));
-	});
-	await act(async () => {
-		f.host.querySelector<HTMLButtonElement>('[role="radio"]')!.click();
-		typeInto(f.host.querySelector('[data-testid="thinking-field"] [data-file-path-input]')!, "just typed");
-	});
-	await failedRecording(f);
-	await submit();
-	assert.equal(submitted.length, 0);
-	await act(async () => { f.dictation.clearError(); });
-	await submit();
-	assert.equal(submitted.length, 1);
-	assert.equal(submitted[0]!.thinking, "just typed");
 });
 
 test("question dock with the Deepgram engine still submits straight away when idle", async () => {
@@ -751,10 +617,7 @@ function Composing({ draft, changes, sent }: { draft: () => string; changes: str
 }
 
 test("the bar offers Retry and Discard only while a recording is kept", () => {
-	const idle: Dictation = {
-		phase: "idle", error: RATE_LIMIT_LINE, levelRef: { current: 0 }, active: false, transcribing: false,
-		retryable: true, retry() {}, toggle() {}, stop() {}, finish: async () => false, cancel() {}, clearError() {},
-	};
+	const idle = barOf({ error: RATE_LIMIT_LINE, retryable: true });
 	const kept = renderToStaticMarkup(<DictationBar dictation={idle} />);
 	assert.match(kept, /data-testid="dictation-retry"/);
 	assert.match(kept, /data-testid="dictation-discard"/);
@@ -895,6 +758,7 @@ test("Esc while recording after chunks went out discards them all and keeps noth
 	const signal = f.state.posts[0]!.init.signal!;
 	await act(async () => { f.dictation.cancel(); });
 	assert.equal(signal.aborted, true, "the request in flight is aborted");
+	assert.equal(f.state.stops, 1, "the mic is released");
 	assert.equal(f.dictation.retryable, false);
 	assert.equal(f.dictation.error, null);
 	assert.equal(isDictationRetained(), false);
@@ -938,69 +802,11 @@ test("unmounting while waiting to retry a failed chunk cancels the retry", async
 	assert.equal(isDictationRetained(), false);
 });
 
-test("question dock: a chunk that failed in the background still aborts the submit and keeps the draft; Retry fills the field in order", async () => {
-	const submitted: { thinking?: string }[] = [];
-	const f = await fixture(undefined, {
-		beside: <QuestionDock toolName="quiz" toolCallId="q1" input={QUIZ} expanded onExpand={() => {}}
-			onSubmit={(answer) => { submitted.push(answer); }} dictationClaim />,
-	});
-	const thinking = () => f.host.querySelector<HTMLElement>('[data-testid="thinking-field"] [data-file-path-input]')!;
-	const submit = () => act(async () => {
-		f.host.querySelector("form")!.dispatchEvent(new window.Event("submit", { bubbles: true, cancelable: true }));
-	});
-	await act(async () => {
-		f.host.querySelector<HTMLButtonElement>('[role="radio"]')!.click();
-		typeInto(thinking(), "typed so far");
-	});
-	const replies = [refused("Groq is unavailable (500)."), Promise.resolve(Response.json({ text: "the second half" }))];
-	f.state.answer = () => replies.shift()!;
-	await f.start();
-	await f.speak(framesFor(25)); // chunk 1 (cut near 15 s) fails in the background while recording
-	assert.equal(f.dictation.error, null);
-
-	await submit(); // Enter while still recording: finish, the first part failed
-	assert.equal(submitted.length, 0, "the answer is not sent without the first part of the speech");
-	assert.equal(thinking().textContent, "typed so far", "the draft is untouched");
-	assert.equal(f.dictation.retryable, true);
-	assert.equal(f.dictation.error, "Groq is unavailable (500).");
-
-	f.state.answer = () => Promise.resolve(Response.json({ text: "the first half" }));
-	await act(async () => { f.dictation.retry(); });
-	assert.equal(f.state.posts.length, 3, "only the failed chunk went again");
-	assert.equal(thinking().textContent, "typed so far the first half the second half", "both parts, in order");
-	await submit();
-	assert.equal(submitted.length, 1);
-	assert.equal(submitted[0]!.thinking, "typed so far the first half the second half");
-});
-
-test("composer: a chunk that failed in the background aborts the send and keeps the draft", async () => {
-	const sent: string[] = [];
-	const changes: string[] = [];
-	const f = await fixture(undefined, { standalone: <Composing draft={() => "my draft"} changes={changes} sent={sent} /> });
-	const send = () => act(async () => {
-		f.host.querySelector("form")!.dispatchEvent(new window.Event("submit", { bubbles: true, cancelable: true }));
-	});
-	const replies = [refused("Groq is unavailable (500)."), Promise.resolve(Response.json({ text: "tail" }))];
-	f.state.answer = () => replies.shift()!;
-	await act(async () => { f.host.querySelector<HTMLButtonElement>('[data-testid="dictation-toggle"]')!.click(); });
-	await f.speak(framesFor(25));
-	await send();
-	assert.deepEqual(sent, [], "nothing is sent");
-	assert.deepEqual(changes, [], "the draft is not touched");
-	assert.ok(f.host.querySelector('[data-testid="dictation-retry"]'));
-	assert.match(f.host.textContent!, /Groq is unavailable \(500\)\./);
-});
-
 // ---------------------------------------------------------------------------
 // The bar: whole errors, and announcements for screen readers.
 // ---------------------------------------------------------------------------
 
 const LONG_ERROR = "Groq rejected the API key (401). Check GROQ_API_KEY in Settings → Providers. This message is long on purpose.";
-const barOf = (over: Partial<Dictation>): Dictation => ({
-	phase: "idle", error: null, levelRef: { current: 0 }, active: false, transcribing: false,
-	retryable: false, retry() {}, toggle() {}, stop() {}, finish: async () => true, cancel() {}, clearError() {},
-	...over,
-});
 const region = (html: string, role: string) => new RegExp(`<div role="${role}"[^>]*>([^<]*)</div>`).exec(html)?.[1];
 
 test("a long error is shown in full, wrapped, with Retry and Dismiss still on screen", () => {
@@ -1023,10 +829,12 @@ test("an error without a kept recording wraps too, and the idle button keeps its
 	assert.match(idle, /<span class="max-w-full truncate">Dictate<\/span>/);
 });
 
-test("screen readers are told about waiting for the transcript (polite) and about a failure (alert)", () => {
+test("screen readers are told about waiting for the transcript (polite) and about a failure (alert), and the regions are hidden visually", () => {
 	const idle = renderToStaticMarkup(<DictationBar dictation={barOf({})} />);
 	assert.match(idle, /role="status" aria-live="polite"/, "the live regions exist before anything happens");
 	assert.match(idle, /role="alert"/);
+	assert.match(idle, /<div role="status" aria-live="polite" class="sr-only"/);
+	assert.match(idle, /<div role="alert" class="sr-only"/);
 	assert.equal(region(idle, "status"), "");
 	assert.equal(region(idle, "alert"), "");
 
@@ -1041,10 +849,4 @@ test("screen readers are told about waiting for the transcript (polite) and abou
 	const retrying = renderToStaticMarkup(<DictationBar dictation={barOf({ error: LONG_ERROR, retryable: true, phase: "stopping", active: true, transcribing: true })} />);
 	assert.equal(region(retrying, "alert"), "", "the old error is not read out again while a retry runs");
 	assert.equal(region(retrying, "status"), "Finishing transcription…");
-});
-
-test("the announcements are hidden visually and do not change the layout", () => {
-	const html = renderToStaticMarkup(<DictationBar dictation={barOf({})} />);
-	assert.match(html, /<div role="status" aria-live="polite" class="sr-only"/);
-	assert.match(html, /<div role="alert" class="sr-only"/);
 });

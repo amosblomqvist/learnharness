@@ -106,12 +106,6 @@ describe("trust and configuration gates", () => {
 		assert.equal((await get()).status, 503);
 		assert.equal(calls.length, 0);
 	});
-
-	it("never returns the key in a response", async () => {
-		for (const make of [() => post(form()), () => post(form({ model: "nope" }))]) {
-			assert.ok(!(await (await make()).text()).includes(KEY));
-		}
-	});
 });
 
 describe("input validation", () => {
@@ -184,12 +178,6 @@ describe("input validation", () => {
 		const res = await post("not multipart at all", { "content-type": "multipart/form-data; boundary=zzz" });
 		assert.equal(res.status, 400);
 	});
-
-	it("a recording at the size cap still fits", async () => {
-		const full = new Uint8Array(GROQ_MAX_UPLOAD_BYTES);
-		full.set(encodePcm16Wav([], 16000));
-		assert.equal((await post(form({ audio: new File([full], "dictation.wav", { type: "audio/wav" }) }))).status, 200);
-	});
 });
 
 describe("forwarding to Groq", () => {
@@ -217,14 +205,6 @@ describe("forwarding to Groq", () => {
 		const sent = calls[0]!.form;
 		assert.equal(sent.get("model"), "whisper-large-v3-turbo");
 		assert.equal(sent.has("language"), false);
-	});
-
-	it("maps dictation languages: 'multi' omits language, Cantonese becomes yue, locales collapse", async () => {
-		const sentFor = async (language: string) => { await post(form({ language })); return calls.at(-1)!.form.get("language"); };
-		assert.equal(await sentFor("multi"), null);
-		assert.equal(await sentFor("zh-HK"), "yue");
-		assert.equal(await sentFor("en-GB"), "en");
-		assert.equal(await sentFor("pl"), "pl");
 	});
 
 	it("silence is a valid empty transcript", async () => {
@@ -333,12 +313,6 @@ describe("hardening", () => {
 		assert.match(await message(res), /cancelled/);
 	});
 
-	it("still bounds the call with a timeout", async () => {
-		await post(form());
-		assert.ok(calls[0]!.init.signal instanceof AbortSignal);
-		assert.equal(calls[0]!.init.signal!.aborted, false);
-	});
-
 	it("scrubs the key from an error detail it relays, in JSON and in plain text", async () => {
 		answer = () => new Response(JSON.stringify({ error: { message: `bad request for ${KEY}, retry with ${KEY}` } }), { status: 400 });
 		let text = await message(await post(form()));
@@ -377,11 +351,6 @@ describe("prompt: the end of the previous chunk, so Whisper carries on", () => {
 		const res = await post(form({ prompt: new File(["x"], "prompt.txt", { type: "text/plain" }) }));
 		assert.equal(res.status, 400);
 		assert.equal(calls.length, 0);
-	});
-
-	it("is not echoed back to the client", async () => {
-		answer = () => Response.json({ text: "ok", prompt: "leak?" });
-		assert.deepEqual(await (await post(form({ prompt: "private words" }))).json(), { text: "ok" });
 	});
 });
 

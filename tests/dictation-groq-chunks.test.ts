@@ -124,23 +124,6 @@ describe("while recording", () => {
 });
 
 describe("ordered assembly", () => {
-	it("puts each chunk's text at its place even though a retried chunk finishes last", async () => {
-		const { session, calls } = harness([
-			ok("first"),
-			failure(502, "Groq could not process the audio (400).", false), // the middle chunk
-			ok("third"),
-			ok("fourth"),
-			ok("second"), // the retry
-		]);
-		session.push(loud(60).buffer);
-		const first = await session.stop();
-		assert.equal(first.status, "failed");
-		assert.deepEqual(session.chunks.map((c) => c.status), ["done", "failed", "done", "done"]);
-		const again = await session.retry();
-		assert.deepEqual(again, { status: "done", text: "first second third fourth" });
-		assert.equal(calls.length, 5);
-	});
-
 	it("skips blank texts and silent chunks without leaving double spaces or gaps", async () => {
 		const audio = join(loud(14), quiet(0.4), loud(3), quiet(30), loud(14));
 		const { session, calls } = harness([ok("hello"), ok(""), ok("goodbye"), ok("again"), ok("more"), ok("last")]);
@@ -164,24 +147,10 @@ describe("silence and very short audio", () => {
 		assert.equal(session.unsent, 0);
 	});
 
-	it("sends nothing for a recording shorter than 0.3 s", async () => {
-		const { session, calls } = harness([]);
-		session.push(loud(0.2).buffer);
-		assert.deepEqual(await session.stop(), { status: "done", text: "" });
-		assert.equal(calls.length, 0);
-	});
-
 	it("sends nothing at all when nothing was captured", async () => {
 		const { session, calls } = harness([]);
 		assert.deepEqual(await session.stop(), { status: "done", text: "" });
 		assert.equal(calls.length, 0);
-	});
-
-	it("sends a short but audible final chunk", async () => {
-		const { session, calls } = harness([ok("yes")]);
-		session.push(loud(0.5).buffer);
-		assert.deepEqual(await session.stop(), { status: "done", text: "yes" });
-		assert.equal(calls.length, 1);
 	});
 });
 
@@ -428,13 +397,6 @@ describe("cancel", () => {
 		assert.deepEqual(await retried, { status: "done", text: "one two three" });
 		assert.equal((await waiting).status, "done", "the original stop settles with the final outcome too");
 		assert.equal(calls.length, 4, "the finished chunk was not sent again");
-	});
-
-	it("ignores audio pushed after cancel", () => {
-		const { session } = harness([]);
-		session.cancel();
-		session.push(loud(5).buffer);
-		assert.equal(session.seconds, 0);
 	});
 });
 

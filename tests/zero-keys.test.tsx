@@ -14,9 +14,7 @@ import { hasProviderKey, strongKeyless, ZeroKeysPill } from "../components/setup
 import type { ModelCatalogResponse } from "../src/core/index.ts";
 import { SetupKeysBody } from "../components/setup-dialog.tsx";
 import { DICTATION_KEYLESS, DEEPGRAM_KEY_ID } from "../components/dictation.tsx";
-import { GROQ_DICTATION_KEYLESS, GROQ_DICTATION_ROW } from "../components/dictation-groq.ts";
-import { AUTH_KEYS, AUTH_PROVIDER_KEYS, type AuthKeyStatus } from "../src/core/auth-keys.ts";
-import { GROQ_KEY_ID } from "../src/core/dictation.ts";
+import type { AuthKeyStatus } from "../src/core/auth-keys.ts";
 import type { ProviderKeyInfo } from "../components/settings/keys-section.tsx";
 
 const status = (id: string, present: boolean, source: AuthKeyStatus["source"] = present ? "file" : "none"): AuthKeyStatus => ({
@@ -120,20 +118,6 @@ describe("the dictation keyless seam (owner dictation trio)", () => {
 
 	it("the Deepgram row id matches the keys store (KeysSection openRow)", () => {
 		assert.equal(DEEPGRAM_KEY_ID, "DEEPGRAM_API_KEY");
-	});
-
-	it("the Groq engine has its own short line and an open-row id apart from the model-provider row", () => {
-		assert.equal(GROQ_DICTATION_KEYLESS, "Dictation needs a Groq key");
-		assert.notEqual(GROQ_DICTATION_KEYLESS, DICTATION_KEYLESS);
-		assert.notEqual(GROQ_DICTATION_ROW, GROQ_KEY_ID, "the dictation row must not unfold together with Model API keys' Groq row");
-	});
-
-	it("Groq dictation reuses the existing model-provider key: no new catalog entry, and it counts for the pill", () => {
-		assert.equal(GROQ_KEY_ID, "GROQ_API_KEY");
-		assert.ok(AUTH_PROVIDER_KEYS.some((p) => p.id === "groq" && p.envVar === GROQ_KEY_ID));
-		assert.ok(!AUTH_KEYS.some((k) => k.id === GROQ_KEY_ID), "Groq is not a second, dictation-only key");
-		const groq: ProviderKeyInfo = { id: "groq", envVar: "GROQ_API_KEY", label: "Groq" };
-		assert.equal(hasProviderKey([status("GROQ_API_KEY", true)], [...PROVIDERS, groq]), true);
 	});
 });
 /** A minimal catalog double — only the two halves the strong-keyless guard

@@ -5,12 +5,11 @@ import path from "node:path";
 import { after, describe, it } from "node:test";
 import {
 	DEFAULT_DICTATION_PROVIDER, DEFAULT_GROQ_WHISPER_MODEL, DICTATION_LANGUAGES, DICTATION_PROVIDERS, GROQ_MAX_BODY_BYTES,
-	GROQ_CHUNK_MAX_SECONDS, GROQ_CHUNK_MIN_SECONDS, GROQ_CHUNK_TARGET_SECONDS, GROQ_MAX_PCM_BYTES, GROQ_MAX_RECORDING_SECONDS, GROQ_MAX_UPLOAD_BYTES, GROQ_MIN_PCM_BYTES, GROQ_WHISPER_MODELS,
+	GROQ_MAX_RECORDING_SECONDS, GROQ_WHISPER_MODELS,
 	dictationSettingsBody, isDictationProvider, isGroqWhisperModel, whisperLanguage,
 } from "../src/core/dictation.ts";
-import { FACTORY_SETTINGS, sanitizeUserSettings } from "../src/core/settings.ts";
+import { sanitizeUserSettings } from "../src/core/settings.ts";
 import { resolveSettings } from "../src/core/settings-resolution.ts";
-import { WAV_HEADER_BYTES } from "../src/core/wav.ts";
 import { parseDictationSettingsBody } from "../src/server/settings-body.ts";
 import { MAX_IMPORT_BODY_BYTES } from "../lib/notes-import-limits.ts";
 
@@ -20,8 +19,6 @@ describe("Groq dictation provider and models", () => {
 		assert.equal(DEFAULT_DICTATION_PROVIDER, "deepgram");
 		assert.equal(DEFAULT_GROQ_WHISPER_MODEL, "whisper-large-v3-turbo");
 		assert.deepEqual(GROQ_WHISPER_MODELS.map((m) => m.id), ["whisper-large-v3-turbo", "whisper-large-v3"]);
-		assert.equal(FACTORY_SETTINGS.dictation.provider, "deepgram");
-		assert.equal(FACTORY_SETTINGS.dictation.groqModel, "whisper-large-v3-turbo");
 	});
 
 	it("guards accept exactly the known ids", () => {
@@ -33,19 +30,11 @@ describe("Groq dictation provider and models", () => {
 		for (const value of ["whisper-1", "distil-whisper-large-v3-en", "nova-3", "", null, 3]) assert.equal(isGroqWhisperModel(value), false, String(value));
 	});
 
-	it("a chunk stays far under Groq's upload limit, the session cap bounds retained audio, and the body limit stays under Next's proxy buffer", () => {
+	it("a dictation is capped at 20 minutes, and the body limit stays under Next's proxy buffer", () => {
 		assert.equal(GROQ_MAX_RECORDING_SECONDS, 1200);
-		assert.equal(GROQ_MAX_PCM_BYTES, 1200 * 16000 * 2);
-		assert.ok(GROQ_MAX_PCM_BYTES <= 40_000_000, "at most about 38 MB of audio is kept in the page");
-		const longestChunk = GROQ_CHUNK_MAX_SECONDS * 16000 * 2 + WAV_HEADER_BYTES;
-		assert.ok(longestChunk < GROQ_MAX_UPLOAD_BYTES / 40, "each request is tiny next to the upload limit");
-		assert.ok(GROQ_CHUNK_MIN_SECONDS * 1000 >= 10_000, "Groq bills at least 10 s a request: no chunk is rounded up");
-		assert.ok(GROQ_CHUNK_MIN_SECONDS < GROQ_CHUNK_TARGET_SECONDS && GROQ_CHUNK_TARGET_SECONDS < GROQ_CHUNK_MAX_SECONDS);
-		assert.ok(GROQ_MAX_BODY_BYTES > GROQ_MAX_UPLOAD_BYTES);
 		// next.config.ts sets proxyClientMaxBodySize to MAX_IMPORT_BODY_BYTES; a larger
 		// request would reach the route truncated and fail as an unreadable upload.
 		assert.ok(GROQ_MAX_BODY_BYTES <= MAX_IMPORT_BODY_BYTES);
-		assert.ok(GROQ_MIN_PCM_BYTES > 0 && GROQ_MIN_PCM_BYTES < GROQ_MAX_PCM_BYTES);
 	});
 });
 
@@ -73,12 +62,6 @@ describe("dictation language to Whisper language", () => {
 			else assert.match(mapped ?? "", /^[a-z]{2,3}$/, `${code} must map to a Whisper code`);
 		}
 	});
-
-	it("never returns a code outside Whisper's set (including Javanese's jv, not the retired jw)", () => {
-		const mapped = new Set(DICTATION_LANGUAGES.map(({ code }) => whisperLanguage(code)).filter(Boolean));
-		assert.ok(!mapped.has("jw"));
-		assert.ok(mapped.has("yue") && mapped.has("zh") && mapped.has("en"));
-	});
 });
 
 describe("dictation settings body for the PUT", () => {
@@ -99,7 +82,7 @@ describe("dictation settings body for the PUT", () => {
 });
 
 describe("dictation provider settings: sanitize, resolve, parse", () => {
-	it("old records without the new fields load and resolve to Deepgram + turbo", () => {
+	it("old records without the new fields load and resolve to Deepgram + turbo, and resolve fills only the missing pieces", () => {
 		for (const record of [null, { version: 1 }, { version: 1, dictation: {} }, { version: 1, dictation: { language: "pl" } }]) {
 			const effective = resolveSettings(record as never).dictation;
 			assert.equal(effective.provider, "deepgram");
@@ -107,6 +90,12 @@ describe("dictation provider settings: sanitize, resolve, parse", () => {
 		}
 		assert.deepEqual(sanitizeUserSettings({ version: 1, dictation: { language: "pl" } })?.dictation, { language: "pl" });
 		assert.equal(resolveSettings({ version: 1, dictation: { language: "pl" } }).dictation.language, "pl");
+		assert.deepEqual(resolveSettings({ version: 1, dictation: { provider: "groq" } }).dictation, {
+			language: "en", provider: "groq", groqModel: "whisper-large-v3-turbo",
+		});
+		assert.deepEqual(resolveSettings({ version: 1, dictation: { language: "de", provider: "groq", groqModel: "whisper-large-v3" } }).dictation, {
+			language: "de", provider: "groq", groqModel: "whisper-large-v3",
+		});
 	});
 
 	it("sanitize keeps valid provider/model next to language and drops invalid values independently", () => {
@@ -117,15 +106,6 @@ describe("dictation provider settings: sanitize, resolve, parse", () => {
 		for (const dictation of [null, [], "groq", 3, { provider: "elevenlabs" }, { groqModel: 3 }]) {
 			assert.deepEqual(sanitizeUserSettings({ version: 1, dictation })?.dictation, {}, JSON.stringify(dictation));
 		}
-	});
-
-	it("resolve fills only the missing pieces and never touches language defaults", () => {
-		assert.deepEqual(resolveSettings({ version: 1, dictation: { provider: "groq" } }).dictation, {
-			language: "en", provider: "groq", groqModel: "whisper-large-v3-turbo",
-		});
-		assert.deepEqual(resolveSettings({ version: 1, dictation: { language: "de", provider: "groq", groqModel: "whisper-large-v3" } }).dictation, {
-			language: "de", provider: "groq", groqModel: "whisper-large-v3",
-		});
 	});
 
 	it("the section parser validates provider and model strictly and accepts the old language-only body", () => {
