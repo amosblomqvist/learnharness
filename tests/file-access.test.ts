@@ -225,6 +225,7 @@ describe("live policy and all learner-source surfaces", () => {
 			await assert.rejects(tools.pdf!.execute!("x", { path: path.join(outside, "sample.pdf"), question: "?" }), boundary);
 			if (tools.show_image) await assert.rejects(tools.show_image.execute!("x", { path: path.join(outside, "image.png") }), boundary);
 			if (tools.visual) await assert.rejects(tools.visual.execute!("x", { brief: "mark", image: path.join(outside, "image.png") }), boundary);
+			if (tools.visual) await assert.rejects(tools.visual.execute!("x", { brief: "mark", pdf: { path: path.join(outside, "sample.pdf"), page: 1 } }), boundary);
 		}
 		const faux = createFauxCore({ tokenSize: { min: 64, max: 64 } });
 		await assert.rejects(createReadTool(faux.getModel()).execute!("x", { path: path.join(outside, "image.png") }), boundary);
@@ -246,10 +247,14 @@ describe("live policy and all learner-source surfaces", () => {
 		const faux = createFauxCore({ tokenSize: { min: 64, max: 64 } });
 		let calls = 0;
 		const engine = { model: faux.getModel(), streamFn: (() => { calls++; throw new Error("must not call model"); }) as typeof faux.streamSimple };
-		for (const kind of ["pdf", "visual"] as const) {
+		const queued = [
+			{ kind: "pdf", input: { path: "StudyA/sample.pdf", question: "?" } },
+			{ kind: "visual", input: { image: "StudyA/image.png", brief: "mark" } },
+			{ kind: "visual", input: { pdf: { path: "StudyA/sample.pdf", page: 2 }, brief: "mark" } },
+		] as const;
+		for (const { kind, input } of queued) {
 			policy = { restricted: true, folders: [a] };
 			const chat = chatStore.createChat(`synthetic queued ${kind}`);
-			const input = kind === "pdf" ? { path: "StudyA/sample.pdf", question: "?" } : { image: "StudyA/image.png", brief: "mark" };
 			let spawned = 0;
 			let id = "";
 			const tools = jobTools({ chatId: chat.id, jobStore, spawn: (job) => { id = job.id; spawned++; } });
