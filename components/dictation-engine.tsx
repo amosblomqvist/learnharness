@@ -28,7 +28,7 @@ export function DictationEngineSettings() {
 	const disabled = active || saving || provider === undefined;
 
 	return <>
-		<SettingsRow label="Engine" testid="row-dictation-engine" dimmed={active}>
+		<SettingsRow label="Engine" testid="row-dictation-engine" dimmed={active} wrap>
 			<ThinSelect
 				value={provider ?? DEFAULT_DICTATION_PROVIDER}
 				ariaLabel="Dictation engine"
@@ -42,7 +42,7 @@ export function DictationEngineSettings() {
 				{ENGINES.map(({ id, label }) => <option key={id} value={id}>{label}</option>)}
 			</ThinSelect>
 		</SettingsRow>
-		{provider === "groq" && <SettingsRow label="Model" testid="row-dictation-groq-model" dimmed={active}>
+		{provider === "groq" && <SettingsRow label="Model" testid="row-dictation-groq-model" dimmed={active} wrap>
 			<ThinSelect
 				value={groqModel ?? GROQ_WHISPER_MODELS[0].id}
 				ariaLabel="Groq Whisper model"

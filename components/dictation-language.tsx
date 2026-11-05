@@ -14,7 +14,7 @@ type LanguagePreference = ReturnType<typeof useDictationLanguage>;
 export function DictationLanguageSetting() {
 	const preference = useDictationLanguage();
 	const active = useDictationActive();
-	return <SettingsRow label="Language" testid="row-dictation-language" dimmed={active}>
+	return <SettingsRow label="Language" testid="row-dictation-language" dimmed={active} wrap>
 		<DictationLanguagePicker preference={preference} disabled={active} />
 	</SettingsRow>;
 }
