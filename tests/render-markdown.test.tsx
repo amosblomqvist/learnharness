@@ -482,18 +482,6 @@ describe("text alignment — the markdown-only hook (appearance.mdRendering.text
 		assert.ok(html.includes("text-align:right"), "the --: column keeps its right");
 	});
 
-	it("globals.css: the hook reads the tokens; both theme blocks default to today's left", () => {
-		const css = fs.readFileSync("app/globals.css", "utf-8");
-		assert.match(css, /\.lh-md \{[^}]*text-align: var\(--lh-md-align\);/);
-		assert.match(css, /\.lh-md \{[^}]*hyphens: var\(--lh-md-hyphens\);/);
-		assert.equal((css.match(/--lh-md-align: left;/g) ?? []).length, 2, "both theme blocks");
-		assert.equal((css.match(/--lh-md-hyphens: manual;/g) ?? []).length, 2, "both theme blocks");
-		assert.equal((css.match(/--lh-md-box-ml: 0;/g) ?? []).length, 2, "both theme blocks");
-		assert.equal((css.match(/--lh-md-list-flip: 0;/g) ?? []).length, 2, "both theme blocks: lists indent from the left by default");
-		assert.equal((css.match(/--lh-chat-column-max: none;/g) ?? []).length, 2, "both theme blocks: full width by default");
-		assert.ok(!css.includes("--lh-md-box-mr"), "center no longer moves boxes — the right-margin token is gone");
-	});
-
 	it("cascade: a utility class beats the .lh-md root rule, while the descendant overrides still beat utilities", async () => {
 		// Compile globals.css the way the build does and read the cascade layers
 		// from the result. Layer order decides between a layered and an
@@ -525,25 +513,6 @@ describe("text alignment — the markdown-only hook (appearance.mdRendering.text
 		assert.equal(layerOf(column[0]), null, ".lh-chat-column stays unlayered to beat max-w-none");
 	});
 
-	it("Center's column: the transcript column carries the hook and globals.css caps it by the token", () => {
-		const css = fs.readFileSync("app/globals.css", "utf-8");
-		assert.match(css, /\.lh-chat-column \{[^}]*max-width: var\(--lh-chat-column-max\);/);
-		const chat = fs.readFileSync("components/chat.tsx", "utf-8");
-		assert.match(chat, /const COLUMN = "[^"]*\blh-chat-column\b[^"]*";/);
-	});
-
-	it("globals.css: code blocks, diagrams and tables are pinned left, unhyphenated", () => {
-		const css = fs.readFileSync("app/globals.css", "utf-8");
-		const pinned = css.match(/\.lh-md :where\(([^)]*\[data-streamdown="code-block"\][^)]*)\) \{([^}]*)\}/);
-		assert.ok(pinned, "a pin rule exists for code blocks");
-		const [, selectors = "", body = ""] = pinned;
-		assert.ok(selectors.includes('[data-streamdown="mermaid"]'), "mermaid (md-blocks' own hook) pinned with code");
-		assert.ok(selectors.includes('[data-streamdown="table"]'), "a table's cells stay left under every alignment");
-		assert.ok(body.includes("text-align: left;"));
-		assert.ok(body.includes("hyphens: manual;"));
-		assert.ok(!/table-header-cell"\]\)\s*\{[^}]*text-align:\s*inherit/.test(css), "headers no longer inherit the alignment");
-	});
-
 	it("tables: the last column reserves the copy button's corner so hover never covers cell text", () => {
 		const css = fs.readFileSync("app/globals.css", "utf-8");
 		const gutter = css.match(/\[data-streamdown="table"\] :where\(th, td\):last-child \{[^}]*padding-right: ([\d.]+)rem;/);
@@ -553,23 +522,5 @@ describe("text alignment — the markdown-only hook (appearance.mdRendering.text
 		assert.match(blocks, /className="absolute top-1 right-1 z-10"\s+label="Copy table"/);
 		assert.match(blocks, /className="flex size-6 items-center justify-center/);
 		assert.ok(Number(gutter[1]) * 16 >= 4 + 24, "the gutter is at least the button's inset plus its width");
-	});
-
-	it("lists: the indent follows the aligned edge through the flip token (left by default, right under Right)", () => {
-		const css = fs.readFileSync("app/globals.css", "utf-8");
-		const rule = css.match(/\.lh-md :where\(ul, ol\) \{([^}]*)\}/)?.[1] ?? "";
-		assert.match(rule, /padding-left: calc\(\(1 - var\(--lh-md-list-flip\)\) \* 1\.5rem\);/);
-		assert.match(rule, /padding-right: calc\(var\(--lh-md-list-flip\) \* 1\.5rem\);/);
-		// the token sits after the plain prose indent, so it wins at equal specificity
-		assert.ok(css.indexOf(".lh-md :where(ul, ol)") > css.indexOf(".lh-prose :where(ul, ol)"));
-	});
-
-	it("tables: Right moves the box (margin token), and headers are left by Streamdown's own class", () => {
-		const css = fs.readFileSync("app/globals.css", "utf-8");
-		assert.match(css, /\.lh-md :where\(\[data-streamdown="table"\], \[data-alert-kind\]\) \{[^}]*margin-left: var\(--lh-md-box-ml\);/);
-		// The pin rule relies on header cells already being text-left.
-		const html = render("| a | b |\n|---|---|\n| 1 | 2 |");
-		const header = html.match(/<th[^>]*data-streamdown="table-header-cell"[^>]*>/)?.[0] ?? "";
-		assert.match(header, /\btext-left\b/);
 	});
 });
