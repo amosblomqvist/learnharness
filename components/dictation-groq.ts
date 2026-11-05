@@ -40,10 +40,6 @@ async function routeFailure(res: Response): Promise<GroqRequestError> {
 	return new GroqRequestError(message, retryable, Number.isFinite(seconds) && seconds > 0 ? Math.ceil(seconds * 1000) : undefined);
 }
 
-async function routeMessage(res: Response): Promise<string> {
-	return (await routeFailure(res)).message;
-}
-
 /** Is a Groq key configured? Resolves when it is; rejects with the keyless line
  * when it is not, so a run can refuse before the user has spoken. */
 export async function checkGroqReady(request: typeof fetch = fetch): Promise<void> {
@@ -55,14 +51,14 @@ export async function checkGroqReady(request: typeof fetch = fetch): Promise<voi
 	}
 	if (res.ok) return;
 	if (res.status === 503) throw new Error(GROQ_DICTATION_KEYLESS);
-	throw new Error(await routeMessage(res));
+	throw new Error((await routeFailure(res)).message);
 }
 
 /** Send one chunk of audio (a WAV) and get its transcript, "" for silence.
  * `prompt` is the end of the previous chunk's transcript, so Whisper continues
- * it. Rejects with a GroqRequestError whose message is fit to show the user. An
- * aborted request rejects with the abort error, which the caller discards along
- * with the run. */
+ * it. Rejects with a GroqRequestError whose message is fit to show the user. A
+ * request aborted through `signal` rejects the same way, so the caller checks
+ * `signal.aborted` first and discards the error along with the run. */
 export async function transcribeGroq(request: typeof fetch, args: {
 	wav: Uint8Array<ArrayBuffer>;
 	model: GroqWhisperModel;
@@ -78,13 +74,11 @@ export async function transcribeGroq(request: typeof fetch, args: {
 	let res: Response;
 	try {
 		res = await request(ENDPOINT, { method: "POST", headers, body: form, signal: args.signal });
-	} catch (err) {
-		if (args.signal?.aborted) throw err;
+	} catch {
 		throw new GroqRequestError("Could not send the recording for transcription. Check that LearnHarness is running.", true);
 	}
 	if (res.status === 503) throw new GroqRequestError(GROQ_DICTATION_KEYLESS, false);
 	if (!res.ok) throw await routeFailure(res);
-	const body = await res.json().catch(() => ({})) as { text?: unknown };
-	if (typeof body.text !== "string") throw new GroqRequestError("Groq dictation returned no transcript.", false);
-	return body.text.trim();
+	const { text } = await res.json() as { text: string };
+	return text.trim();
 }
