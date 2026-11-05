@@ -369,12 +369,8 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 	 *  per run, in start(). */
 	const engineRef = useRef<DictationProvider | null>(null);
 	/** Groq: the chunk session of the run in progress (recording, or waiting for
-	 *  its last chunks, or being retried); and whether the cap already triggered
-	 *  the stop, and whether this recording's stop was already requested (a second
-	 *  stop() on the same render closure must not run it twice). */
+	 *  its last chunks, or being retried). */
 	const sessionRef = useRef<ChunkSession | null>(null);
-	const capRef = useRef(false);
-	const stopRequestedRef = useRef(false);
 	/** Groq: the session with a failed chunk, kept in memory for Retry. Only
 	 *  success, dismissal, a new recording or unmount drop it — cleanup() leaves
 	 *  it alone (it runs at the end of the failed run itself). */
@@ -409,7 +405,6 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 			safetyRef.current = null;
 		}
 		pendingRef.current = [];
-		capRef.current = false;
 		// A run that ends with its chunk session still working (Esc, an error,
 		// navigation) must not leave requests behind. One that finished normally
 		// has already let go of it.
@@ -514,8 +509,6 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 		reconnectsRef.current = 0;
 		bufferRef.current = []; // fresh run, fresh buffer (round 2)
 		pendingRef.current = []; // fresh run, fresh queue (mitigation A)
-		capRef.current = false;
-		stopRequestedRef.current = false;
 		engineRef.current = null;
 		sessionRef.current?.cancel();
 		sessionRef.current = null;
@@ -572,15 +565,12 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 					levelRef.current = msg.rms ?? 0; // never reset to zero (dictate pattern)
 				} else if (msg.type === "audio" && groq) {
 					// Groq: feed the chunk session, don't stream. The cap stops the
-					// run once and drops what trails it; the stop still transcribes
-					// the rest.
+					// run; audio that trails it is dropped (a stopped session ignores
+					// pushes) and the stop still transcribes the rest.
 					const session = sessionRef.current;
-					if (capRef.current || !session) return;
+					if (!session) return;
 					session.push(msg.buffer!);
-					if (session.seconds >= GROQ_MAX_RECORDING_SECONDS) {
-						capRef.current = true;
-						stopRef.current();
-					}
+					if (session.seconds >= GROQ_MAX_RECORDING_SECONDS) stopRef.current();
 				} else if (msg.type === "audio") {
 					const ws = wsRef.current;
 					if (ws && ws.readyState === WebSocket.OPEN) ws.send(msg.buffer!);
@@ -678,13 +668,6 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 	const stop = useCallback(() => {
 		const gen = genRef.current;
 		if (phase !== "recording" && phase !== "connecting") return;
-		// One stop per Groq recording: the cap's callback and a click (or the
-		// hotkey and finish()) can both reach here before React commits the new
-		// phase, and a second stop must not end the recording a second time.
-		if (engineRef.current === "groq") {
-			if (stopRequestedRef.current) return;
-			stopRequestedRef.current = true;
-		}
 		setPhase("stopping");
 
 		// Mic dies FIRST — no more audio enqueues (dictate pattern). The

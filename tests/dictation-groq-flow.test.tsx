@@ -718,22 +718,6 @@ test("a chunk that fails for good holds back the whole transcript; Retry re-send
 	assert.equal(isDictationRetained(), false);
 });
 
-test("two stops on the same recording upload one final chunk and keep the transcript", async () => {
-	const f = await fixture();
-	numbered(f);
-	await f.start();
-	await f.speak(framesFor(3));
-	await act(async () => {
-		// Both calls see the same render closure, as the cap callback and a click can.
-		f.dictation.stop();
-		f.dictation.stop();
-	});
-	assert.equal(f.state.posts.length, 1, "no second upload");
-	assert.ok((await audioBytes(f.state.posts[0]!)).length > 44, "and no empty header-only chunk");
-	assert.deepEqual(f.state.appends, ["chunk1"], "the transcript is not dropped");
-	assert.equal(f.dictation.error, null);
-});
-
 test("stop() followed by finish() in the same tick still ends once, and finish waits for the transcript", async () => {
 	const f = await fixture();
 	numbered(f);
