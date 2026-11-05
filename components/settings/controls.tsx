@@ -9,7 +9,7 @@
  * control together) and the control itself locks — the row owns the dim.
  */
 
-import { useState, type ComponentPropsWithRef, type ReactNode } from "react";
+import { useState, type ComponentPropsWithRef, type ComponentType, type KeyboardEvent, type ReactNode } from "react";
 import { cn } from "@/lib/utils";
 
 /** A section block: pronounced mono heading + content. */
@@ -61,6 +61,7 @@ export function SettingsRow({
 	children,
 	testid,
 	dimmed,
+	wrap,
 }: {
 	label: string;
 	hint?: ReactNode;
@@ -69,9 +70,12 @@ export function SettingsRow({
 	/** Dependency graying, graph-view style: the whole row dims when the
 	 *  control is inert (parent off, no file yet, …). */
 	dimmed?: boolean;
+	/** For a control that cannot shrink: it drops under the label when the dialog is too
+	 *  narrow, and the row becomes a size container so the control can pick compact labels. */
+	wrap?: boolean;
 }) {
 	return (
-		<div data-testid={testid} className={cn("flex items-center justify-between gap-4 py-1", dimmed && "opacity-40")}>
+		<div data-testid={testid} className={cn("flex items-center justify-between gap-4 py-1", wrap && "@container flex-wrap", dimmed && "opacity-40")}>
 			<span className="min-w-0">
 				<span className="block font-prose text-(length:--lh-prose-size)">{label}</span>
 				{hint && <span className="block text-xs text-muted-foreground/70">{hint}</span>}
@@ -199,6 +203,87 @@ export function ThinSelect({
 		>
 			{children}
 		</select>
+	);
+}
+
+/** A one-of-N picker: a ThinSelect-height pill of buttons in the radio role,
+ *  the chosen one raised. An icon option shows only the icon (its label rides
+ *  aria-label); a word option collapses to its first letter inside a `wrap`
+ *  row narrower than 10.5rem. The native tooltip is the option's title, else
+ *  its label. ARIA radio group: only the chosen button is a tab stop (roving
+ *  tabindex); the arrows and Home/End move focus AND choose. */
+export function SegmentedControl<V extends string>({
+	value,
+	options,
+	onChange,
+	ariaLabel,
+	testid,
+}: {
+	value: V;
+	options: readonly { value: V; label: string; icon?: ComponentType<{ className?: string }>; title?: string }[];
+	onChange: (next: V) => void;
+	ariaLabel: string;
+	testid?: string;
+}) {
+	const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+		if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
+		const n = options.length;
+		const from = Array.from(event.currentTarget.children).indexOf(event.target as Element);
+		const to = from < 0 ? -1
+			: event.key === "Home" ? 0
+			: event.key === "End" ? n - 1
+			: /^Arrow(Right|Down)$/.test(event.key) ? (from + 1) % n
+			: /^Arrow(Left|Up)$/.test(event.key) ? (from - 1 + n) % n
+			: -1;
+		if (to < 0) return;
+		// Handled here: keep the arrows from also reaching document-level
+		// listeners (a quiz dock under the dialog walks on ←/→).
+		event.preventDefault();
+		event.stopPropagation();
+		(event.currentTarget.children[to] as HTMLElement).focus();
+		if (options[to]!.value !== value) onChange(options[to]!.value);
+	};
+	return (
+		<div
+			role="radiogroup"
+			aria-label={ariaLabel}
+			data-testid={testid}
+			onKeyDown={onKeyDown}
+			className="flex h-7 min-w-0 max-w-full items-center gap-0.5 rounded-sm border border-border bg-background p-0.5"
+		>
+			{options.map((o) => {
+				const checked = o.value === value;
+				return (
+					<button
+						key={o.value}
+						type="button"
+						role="radio"
+						aria-checked={checked}
+						tabIndex={checked ? 0 : -1}
+						aria-label={o.label}
+						title={o.title ?? o.label}
+						data-testid={testid ? `${testid}-${o.value}` : undefined}
+						onClick={() => {
+							if (!checked) onChange(o.value);
+						}}
+						className={cn(
+							"flex h-5.5 items-center justify-center rounded-[3px] transition-colors focus-visible:ring-2 focus-visible:ring-ring",
+							o.icon ? "w-5.5" : "px-2 font-ui text-xs",
+							checked ? "bg-accent text-foreground" : "text-muted-foreground hover:text-foreground",
+						)}
+					>
+						{o.icon ? (
+							<o.icon className="size-3.5" />
+						) : (
+							<>
+								<span className="@max-[10.5rem]:hidden">{o.label}</span>
+								<span aria-hidden className="hidden @max-[10.5rem]:inline">{o.label[0]}</span>
+							</>
+						)}
+					</button>
+				);
+			})}
+		</div>
 	);
 }
 

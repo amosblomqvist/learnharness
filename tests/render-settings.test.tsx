@@ -307,6 +307,79 @@ describe("AppearanceSection (thin SSR)", () => {
 		assert.ok(html.includes("16px"));
 	});
 
+	it("text alignment sits right after reading font size, before the session-serif row", () => {
+		const html = renderToStaticMarkup(<AppearanceSection appearance={undefined} onSectionChange={() => {}} />);
+		const size = html.indexOf('data-testid="row-prose-size"');
+		const align = html.indexOf('data-testid="row-text-align"');
+		const serif = html.indexOf('data-testid="row-session-serif"');
+		assert.ok(size >= 0 && align > size && serif > align, "prose size → text alignment → session serif");
+		assert.ok(html.includes("Text alignment"));
+	});
+
+	it("text alignment is a radio group of four icon buttons; factory = left checked", () => {
+		const html = renderToStaticMarkup(<AppearanceSection appearance={undefined} onSectionChange={() => {}} />);
+		const group = tagOf(html, "seg-text-align");
+		assert.ok(group.includes('role="radiogroup"'));
+		assert.ok(group.includes('aria-label="Text alignment"'));
+		for (const [value, label] of [["left", "Left"], ["center", "Center column"], ["right", "Right"], ["justify", "Justify"]]) {
+			const button = tagOf(html, `seg-text-align-${value}`);
+			assert.ok(button.includes('role="radio"'), value);
+			assert.ok(button.includes(`aria-label="${label}"`), value);
+			assert.ok(button.includes(`aria-checked="${value === "left"}"`), `${value} checked state`);
+			// Center is named for what it does; the others use their name as the tooltip.
+			const title = button.match(/title="([^"]*)"/)?.[1] ?? "";
+			if (value === "center") { assert.match(title, /narrower/); assert.match(title, /left-aligned/); }
+			else assert.equal(title, label);
+		}
+	});
+
+	it("a stored alignment is the checked button (the record never lies)", () => {
+		const html = renderToStaticMarkup(
+			<AppearanceSection appearance={{ mdRendering: { textAlign: "justify" } }} onSectionChange={() => {}} />,
+		);
+		assert.ok(tagOf(html, "seg-text-align-justify").includes('aria-checked="true"'));
+		assert.ok(tagOf(html, "seg-text-align-left").includes('aria-checked="false"'));
+	});
+
+	it("the column-width row is hidden unless Center is the stored alignment", () => {
+		for (const appearance of [undefined, ...(["left", "right", "justify"] as const).map((textAlign) => ({ mdRendering: { textAlign } }))]) {
+			const html = renderToStaticMarkup(<AppearanceSection appearance={appearance} onSectionChange={() => {}} />);
+			assert.ok(!html.includes('data-testid="row-center-width"'), JSON.stringify(appearance));
+		}
+	});
+
+	it("Center reveals Small/Medium/Large right under the alignment row; factory = medium", () => {
+		const html = renderToStaticMarkup(
+			<AppearanceSection appearance={{ mdRendering: { textAlign: "center" } }} onSectionChange={() => {}} />,
+		);
+		const align = html.indexOf('data-testid="row-text-align"');
+		const width = html.indexOf('data-testid="row-center-width"');
+		const serif = html.indexOf('data-testid="row-session-serif"');
+		assert.ok(align >= 0 && width > align && serif > width, "text alignment → column width → session serif");
+		assert.ok(html.includes("Column width"));
+		const group = tagOf(html, "seg-center-width");
+		assert.ok(group.includes('role="radiogroup"'));
+		assert.ok(group.includes('aria-label="Column width"'));
+		for (const [value, label, px] of [["small", "Small", 560], ["medium", "Medium", 700], ["large", "Large", 880]] as const) {
+			const button = tagOf(html, `seg-center-width-${value}`);
+			assert.ok(button.includes('role="radio"'), value);
+			assert.ok(button.includes(`aria-label="${label}"`), value);
+			assert.ok(button.includes(`title="${label} — ${px}px"`), `${value} tooltip names its width`);
+			assert.ok(button.includes(`aria-checked="${value === "medium"}"`), `${value} checked state`);
+			assert.ok(html.includes(`<span class="@max-[10.5rem]:hidden">${label}</span>`), `${value} shows its word, not an icon`);
+			// narrow dialogs swap the word for its first letter; the accessible name stays the word
+			assert.ok(html.includes(`<span aria-hidden="true" class="hidden @max-[10.5rem]:inline">${label[0]}</span>`), `${value} has a compact form`);
+		}
+	});
+
+	it("a stored column width is the checked button", () => {
+		const html = renderToStaticMarkup(
+			<AppearanceSection appearance={{ mdRendering: { textAlign: "center", centerWidth: "large" } }} onSectionChange={() => {}} />,
+		);
+		assert.ok(tagOf(html, "seg-center-width-large").includes('aria-checked="true"'));
+		assert.ok(tagOf(html, "seg-center-width-medium").includes('aria-checked="false"'));
+	});
+
 	it("a set background shows in the input, not the placeholder", () => {
 		const html = renderToStaticMarkup(
 			<AppearanceSection appearance={{ background: "#1a1a2e" }} onSectionChange={() => {}} />,

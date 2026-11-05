@@ -209,7 +209,8 @@ export const ReasoningContent = memo(
       )}
       {...props}
     >
-      <Streamdown components={mdComponents} plugins={streamdownPlugins} remend={streamdownRemend}>
+      {/* lh-md: reasoning follows the markdown text-alignment setting. */}
+      <Streamdown className="lh-md" components={mdComponents} plugins={streamdownPlugins} remend={streamdownRemend}>
         {transformMathDelimiters(children)}
       </Streamdown>
     </CollapsibleContent>

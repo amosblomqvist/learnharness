@@ -175,8 +175,40 @@ export function outsideTexComments(body: string, transform: (part: string) => st
 	out.push(transform(body.slice(from))); return out.join("");
 }
 
+/** Escaped code fence: models emit fenced code with escaped newlines, which
+ * CommonMark reads as an inline code span. A run of two backslashes before each
+ * delimiter newline is the observed double JSON layer and is tried first;
+ * anything else falls back to the original single-layer matcher, unchanged.
+ * (`(?<!\\)`: a run is only tried from its first backslash, keeping the match
+ * linear on long runs.) */
+const SINGLE_LAYER_FENCE =
+	/^([ \t]{0,3})(`{3,}|~{3,})([^\n`\\]*)(?:\\r\\n|\\n)([\s\S]*?)(?:\\r\\n|\\n)([ \t]{0,3}(?:`{3,}|~{3,}))[ \t]*$/;
+const TWO_LAYER_FENCE =
+	/^([ \t]{0,3})(`{3,}|~{3,})([^\n`\\]*)\\\\(?:r\\\\)?n([\s\S]*?)(?<!\\)\\\\(?:r\\\\)?n([ \t]{0,3}(?:`{3,}|~{3,}))[ \t]*$/;
+function decodeEscapedFence(raw: string): { factor: number; text: string } | null {
+	for (const [pattern, factor] of [[TWO_LAYER_FENCE, 2], [SINGLE_LAYER_FENCE, 1]] as const) {
+		const m = pattern.exec(raw);
+		if (!m) continue;
+		const [, indent, openFence, lang, body, closeFence] = m;
+		const close = closeFence!.trim();
+		if (!body || close[0] !== openFence![0] || close.length < openFence!.length) continue;
+		const decoded = factor === 1
+			? body.replace(/\\r\\n|\\n/g, "\n")
+			: body.replace(/(?<!\\)(\\+)(?:r(\\+)n|n)/g, (whole: string, slashes: string, cr: string | undefined) =>
+				slashes.length % 4 === 2 && (cr === undefined || cr.length % 4 === 2) ? (cr === undefined ? slashes.slice(0, -2) : "") + "\n" : whole);
+		return { factor, text: `${indent}${openFence}${lang}\n${decoded}\n${closeFence}` };
+	}
+	return null;
+}
+
+/** The start of a Windows drive path or a UNC path (`\\host\share`), allowing
+ * leading quotes or brackets, for the whole whitespace-delimited word. */
+const LAYERED_PATH = /^["'([{<]*(?:[A-Za-z]:[\\/]|\\\\[\w$.-]+\\[\w$.-])/;
+
 /** Document escapes are not arbitrary string decoding. Complete known TeX
- * words win over the prefix `\\n`; code is never inspected or rewritten. */
+ * words win over the prefix `\\n`. Code spans keep every byte, with one
+ * exception: a fenced block whose delimiters and line breaks are escaped
+ * (see decodeEscapedFence) is rewritten into a real fence. */
 export function recoverDocumentLayout(text: string): string {
 	const spans = readContentSpans(text);
 	const candidates = spans.filter(span => span.kind !== "code").map(span => span.raw).join("\u0000");
@@ -187,19 +219,45 @@ export function recoverDocumentLayout(text: string): string {
 	const knownN = (name: string) => declared.has(name) || knownTexCommand(name);
 	const tokens = [...candidates.matchAll(/(\\+)(n[A-Za-z]*)/g)];
 	const evidence = tokens.filter(m => m[1]!.length % 2 === 1 && !knownN(m[2]!));
-	const structural = evidence.length >= 2 || candidates.includes("\\n\\n") || (evidence.length > 0 &&
+	const fenceDecodes = spans.map(span => span.kind === "code" ? decodeEscapedFence(span.raw) : null);
+	const hasEscapedFence = fenceDecodes.some(d => d !== null);
+	const hasLayeredFence = fenceDecodes.some(d => d !== null && d.factor > 1);
+	const structural = hasEscapedFence || evidence.length >= 2 || candidates.includes("\\n\\n") || (evidence.length > 0 &&
 		[...candidates.matchAll(/(\\+)([A-Za-z]+)/g)].some(m => m[1]!.length % 2 === 0 && knownTexCommand(m[2]!)));
 	if (!structural) return text;
-	const decode = (part: string) => part.replace(/(\\+)(n[A-Za-z]*)/g, (whole: string, slashes: string, name: string, offset: number) => {
-		if (slashes.length % 2 === 0 || knownN(name)) return whole;
+	// A protected math span keeps its own single-layer policy: a two-layer fence
+	// elsewhere in the document must not reinterpret native TeX row separators
+	// (`\\` + row-leading n-cell) inside math as document newlines. The layered
+	// factor decodes prose only; longer runs stay literal everywhere.
+	const decode = (part: string, layered: boolean) => part.replace(/(\\+)(n[A-Za-z]*)/g, (whole: string, slashes: string, name: string, offset: number) => {
+		const factor = slashes.length % 2 === 1 ? 1 : (layered && slashes.length % 4 === 2 ? 2 : 0);
+		if (factor === 0 || knownN(name)) return whole;
 		const word = part.slice(0, offset).split(/\s/).at(-1) ?? "";
 		if (/^(?:[A-Za-z]:[\\/]|https?:\/\/|\/)/.test(word + whole)) return whole;
-		return slashes.slice(0, -1) + "\n" + name.slice(1);
+		// A second layer is only evidenced by a fence, so its two-backslash token
+		// must not eat real double-backslash text: a drive or UNC path, even
+		// when quoted or in parentheses (`\\nas01\share`, `"C:\\new"`).
+		if (factor === 2 && LAYERED_PATH.test(word + whole + (part.slice(offset + whole.length, offset + whole.length + 256).split(/\s/, 1)[0] ?? ""))) return whole;
+		return slashes.slice(0, -factor) + "\n" + name.slice(1);
 	});
-	const projected = spans.map(span => ({ span, body: span.kind === "math" ? outsideTexComments(span.body, decode) : span.kind === "code" ? span.raw : decode(span.raw) }));
+	const projected = spans.map((span, i) => ({
+		span,
+		body: span.kind === "math"
+			? outsideTexComments(span.body, part => decode(part, false))
+			: span.kind === "code"
+				? (fenceDecodes[i]?.text ?? span.raw)
+				: decode(span.raw, hasLayeredFence),
+	}));
 	let out = "";
 	for (let i = 0; i < projected.length; i++) {
 		const { span, body } = projected[i]!;
+		if (span.kind === "code" && body !== span.raw) {
+			if (!/^[ \t]{0,3}$/.test(out.slice(out.lastIndexOf("\n") + 1))) out += "\n\n";
+			out += body;
+			const next = projected[i + 1];
+			if (next && !/^[\r\n]/.test(next.span.kind === "math" ? next.span.open : next.body)) out += "\n\n";
+			continue;
+		}
 		if (span.kind !== "math") { out += body; continue; }
 		// Decoding document layout can expose a flow opener whose close was
 		// written on the formula line. Frame BOTH ends; otherwise Markdown

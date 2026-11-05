@@ -233,6 +233,40 @@ body {
 	font-weight: var(--lh-heading-weight, 900);
 }
 
+/* Markdown alignment: RENDERED markdown only (.lh-md on the Streamdown roots
+   of replies, job briefs and reasoning). Explicit GFM column alignment is an
+   inline style and still wins. */
+.lh-md {
+	text-align: var(--lh-md-align, left);
+	hyphens: var(--lh-md-hyphens, manual);
+}
+
+/* Lists indent from the aligned edge: --lh-md-list-flip is 1 only under Right,
+   which moves the 1.5rem indent to the right so nested levels stay nested. */
+.lh-md :where(ul, ol) {
+	padding-left: calc((1 - var(--lh-md-list-flip, 0)) * 1.5rem);
+	padding-right: calc(var(--lh-md-list-flip, 0) * 1.5rem);
+}
+
+/* Tables and callouts hug their content, so Right moves the box itself (a
+   callout's text aligns too; a table's cells stay left, see the pin rule). */
+.lh-md :where([data-streamdown="table"], [data-alert-kind]) {
+	margin-left: var(--lh-md-box-ml, 0);
+}
+
+/* Justify's hyphenation stays out of headings, code, and math — a split
+   token in code or TeX is a wrong token. */
+.lh-md :where(h1, h2, h3, h4, h5, h6, code, .katex) {
+	hyphens: manual;
+}
+
+/* Code blocks, diagrams and table cells stay left and unhyphenated under every
+   alignment (headers are already text-left via Streamdown; Right moves the box). */
+.lh-md :where([data-streamdown="code-block"], [data-streamdown="mermaid"], [data-streamdown="table"]) {
+	text-align: left;
+	hyphens: manual;
+}
+
 /* lh-input (owner, typography round 2): lh-prose's 1.5 READING leading
    makes typing carets tower over the glyphs — the caret fills the line
    box (24px at 16px text, ~2× the glyph height). Inputs are not
@@ -377,6 +411,11 @@ body {
    rules and the outer border, no doubled lines anywhere. */
 [data-streamdown="table"] :where(th, td):not(:first-child) {
 	border-left: 1px solid var(--border);
+}
+/* Reserve the hover copy button's width (4px in, 24px wide) in the last column
+   so it never covers text; header and body cells share it, so columns line up. */
+[data-streamdown="table"] :where(th, td):last-child {
+	padding-right: 2rem;
 }
 [data-streamdown="table-header"] {
 	background: transparent;

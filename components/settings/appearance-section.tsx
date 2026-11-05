@@ -31,17 +31,40 @@
  */
 
 import { useEffect, useRef, useState } from "react";
+import { TextAlignCenterIcon, TextAlignEndIcon, TextAlignJustifyIcon, TextAlignStartIcon } from "lucide-react";
 import {
 	EXTRACTION_CHUNK_TOKENS_FLOOR,
+	MD_CENTER_WIDTHS,
 	resolveSettings,
 	type AppearanceSettings,
 	type GraphSettings,
+	type MdCenterWidth,
 } from "@/src/core";
 import { MenuShell } from "@/components/menu-shell";
 import { Hint } from "@/components/ui/hint";
-import { useAppearance } from "./appearance.tsx";
+import { resolveAppearance, useAppearance } from "./appearance.tsx";
 import { FontMenuList } from "./model-menu";
-import { CommitInput, SettingsMenuTrigger, SettingsRow, ThinSelect, Toggle } from "./controls.tsx";
+import { CommitInput, SegmentedControl, SettingsMenuTrigger, SettingsRow, ThinSelect, Toggle } from "./controls.tsx";
+
+/** The text-alignment row's buttons. Center is not line-centering (it narrows
+ *  the reading column and keeps the text left), so its name and tooltip say so. */
+const TEXT_ALIGN_OPTIONS = [
+	{ value: "left", label: "Left", icon: TextAlignStartIcon },
+	{
+		value: "center",
+		label: "Center column",
+		title: "Center column: a narrower, centered reading column; the text stays left-aligned",
+		icon: TextAlignCenterIcon,
+	},
+	{ value: "right", label: "Right", icon: TextAlignEndIcon },
+	{ value: "justify", label: "Justify", icon: TextAlignJustifyIcon },
+] as const;
+
+/** Center's column-width buttons; the tooltip names the text width. */
+const CENTER_WIDTH_OPTIONS = (Object.keys(MD_CENTER_WIDTHS) as MdCenterWidth[]).map((value) => {
+	const label = value[0]!.toUpperCase() + value.slice(1);
+	return { value, label, title: `${label} — ${MD_CENTER_WIDTHS[value]}px` };
+});
 
 /** The factory reading family — the DEFAULT row's identity (unset =
  *  this). Exported for tests. */
@@ -99,6 +122,7 @@ export function AppearanceSection({
 }) {
 	const { appearance: resolved } = useAppearance();
 	const md = appearance?.mdRendering;
+	const { textAlign, centerWidth } = resolveAppearance(appearance).mdRendering;
 
 	// The font dropdown's open state + its enumeration cache. undefined =
 	// not enumerated yet (desktop: click-bound queryLocalFonts pending);
@@ -281,6 +305,28 @@ export function AppearanceSection({
 					}}
 				/>
 			</SettingsRow>
+			<SettingsRow label="Text alignment" testid="row-text-align" wrap>
+				<SegmentedControl
+					value={textAlign}
+					options={TEXT_ALIGN_OPTIONS}
+					ariaLabel="Text alignment"
+					testid="seg-text-align"
+					onChange={(textAlign) => onSectionChange({ ...appearance, mdRendering: { ...md, textAlign } })}
+				/>
+			</SettingsRow>
+			{/* Center's width: shown only while Center is the stored
+			    alignment; the value stays stored when hidden. */}
+			{textAlign === "center" && (
+				<SettingsRow label="Column width" testid="row-center-width" wrap>
+					<SegmentedControl
+						value={centerWidth}
+						options={CENTER_WIDTH_OPTIONS}
+						ariaLabel="Column width"
+						testid="seg-center-width"
+						onChange={(centerWidth) => onSectionChange({ ...appearance, mdRendering: { ...md, centerWidth } })}
+					/>
+				</SettingsRow>
+			)}
 			<SettingsRow label="Session names in serif" testid="row-session-serif">
 				<Toggle
 					checked={appearance?.sessionNameSerif ?? true}
