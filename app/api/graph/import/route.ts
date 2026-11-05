@@ -57,7 +57,7 @@ const PDF_MAGIC = [0x25, 0x50, 0x44, 0x46, 0x2d]; // "%PDF-"
 
 type NotesFile = { kind: "notes"; text: string; notice?: string } | { kind: "refused"; error: string };
 
-/** A PDF becomes page-marked Markdown; any other file is read as text, as before. */
+/** A PDF becomes page-marked Markdown; any other accepted file is read as text. */
 async function readNotesFile(file: File): Promise<NotesFile> {
 	if (!IMPORT_EXTENSIONS.test(file.name)) return { kind: "refused", error: UNSUPPORTED_TYPE_MESSAGE };
 	const bytes = new Uint8Array(await file.arrayBuffer());
