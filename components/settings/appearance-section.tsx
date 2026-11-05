@@ -39,7 +39,6 @@ import {
 	type AppearanceSettings,
 	type GraphSettings,
 	type MdCenterWidth,
-	type MdTextAlign,
 } from "@/src/core";
 import { MenuShell } from "@/components/menu-shell";
 import { Hint } from "@/components/ui/hint";
@@ -47,9 +46,8 @@ import { useAppearance } from "./appearance.tsx";
 import { FontMenuList } from "./model-menu";
 import { CommitInput, SegmentedControl, SettingsMenuTrigger, SettingsRow, ThinSelect, Toggle } from "./controls.tsx";
 
-/** The text-alignment row's buttons, in MD_TEXT_ALIGNS order. Center is not
- *  line-centering (it narrows the reading column and keeps the text left),
- *  so its name and tooltip say so instead of promising centered lines. */
+/** The text-alignment row's buttons. Center is not line-centering (it narrows
+ *  the reading column and keeps the text left), so its name and tooltip say so. */
 const TEXT_ALIGN_OPTIONS = [
 	{ value: "left", label: "Left", icon: TextAlignStartIcon },
 	{
@@ -60,17 +58,13 @@ const TEXT_ALIGN_OPTIONS = [
 	},
 	{ value: "right", label: "Right", icon: TextAlignEndIcon },
 	{ value: "justify", label: "Justify", icon: TextAlignJustifyIcon },
-] as const satisfies readonly { value: MdTextAlign; label: string; title?: string; icon: unknown }[];
+] as const;
 
-/** Center's column-width buttons (words, no icons); the tooltip names the
- *  text width from MD_CENTER_WIDTHS. */
-const CENTER_WIDTH_OPTIONS = (
-	[
-		["small", "Small"],
-		["medium", "Medium"],
-		["large", "Large"],
-	] as const satisfies readonly (readonly [MdCenterWidth, string])[]
-).map(([value, label]) => ({ value, label, short: label.slice(0, 1), title: `${label} — ${MD_CENTER_WIDTHS[value]}px` }));
+/** Center's column-width buttons; the tooltip names the text width. */
+const CENTER_WIDTH_OPTIONS = (Object.keys(MD_CENTER_WIDTHS) as MdCenterWidth[]).map((value) => {
+	const label = value[0]!.toUpperCase() + value.slice(1);
+	return { value, label, title: `${label} — ${MD_CENTER_WIDTHS[value]}px` };
+});
 
 /** The factory reading family — the DEFAULT row's identity (unset =
  *  this). Exported for tests. */

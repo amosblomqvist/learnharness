@@ -9,7 +9,7 @@
  * control together) and the control itself locks — the row owns the dim.
  */
 
-import { useRef, useState, type ComponentPropsWithRef, type ComponentType, type KeyboardEvent, type ReactNode } from "react";
+import { useState, type ComponentPropsWithRef, type ComponentType, type KeyboardEvent, type ReactNode } from "react";
 import { cn } from "@/lib/utils";
 
 /** A section block: pronounced mono heading + content. */
@@ -209,37 +209,12 @@ export function ThinSelect({
 	);
 }
 
-/** The radiogroup arrow machine (WAI-ARIA radio group, with the same wrap
- *  and Home/End as MenuShell's option walk): the index a key moves to from
- *  `index` in a group of `count`, or null for a key the group does not own.
- *  Exported for tests. */
-export function radioTarget(key: string, index: number, count: number): number | null {
-	if (count <= 0) return null;
-	switch (key) {
-		case "ArrowRight":
-		case "ArrowDown":
-			return (index + 1) % count;
-		case "ArrowLeft":
-		case "ArrowUp":
-			return (index - 1 + count) % count;
-		case "Home":
-			return 0;
-		case "End":
-			return count - 1;
-		default:
-			return null;
-	}
-}
-
-/** A one-of-N picker (used by the text-alignment rows): a
- *  ThinSelect-height pill of buttons in the radio role, the chosen one
- *  raised. An option with an icon shows only the icon (its label rides
- *  aria-label); without one it shows its label as a word, or its `short`
- *  form when the control sits in a `wrap` row narrower than 10.5rem (the
- *  words need about 10rem). The native tooltip is the option's title, else
- *  its label. Keyboard follows the
- *  ARIA radio group: only the chosen button is a tab stop (roving
- *  tabindex), and the arrows and Home/End move focus AND choose. */
+/** A one-of-N picker: a ThinSelect-height pill of buttons in the radio role,
+ *  the chosen one raised. An icon option shows only the icon (its label rides
+ *  aria-label); a word option collapses to its first letter inside a `wrap`
+ *  row narrower than 10.5rem. The native tooltip is the option's title, else
+ *  its label. ARIA radio group: only the chosen button is a tab stop (roving
+ *  tabindex); the arrows and Home/End move focus AND choose. */
 export function SegmentedControl<V extends string>({
 	value,
 	options,
@@ -248,26 +223,28 @@ export function SegmentedControl<V extends string>({
 	testid,
 }: {
 	value: V;
-	options: readonly { value: V; label: string; short?: string; icon?: ComponentType<{ className?: string }>; title?: string }[];
+	options: readonly { value: V; label: string; icon?: ComponentType<{ className?: string }>; title?: string }[];
 	onChange: (next: V) => void;
 	ariaLabel: string;
 	testid?: string;
 }) {
-	const buttons = useRef<(HTMLButtonElement | null)[]>([]);
-	// The one tab stop: the chosen option, else the first.
-	const tabStop = Math.max(0, options.findIndex((o) => o.value === value));
 	const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
 		if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
-		const from = buttons.current.indexOf(event.target as HTMLButtonElement);
-		const to = from < 0 ? null : radioTarget(event.key, from, options.length);
-		if (to === null) return;
+		const n = options.length;
+		const from = Array.from(event.currentTarget.children).indexOf(event.target as Element);
+		const to = from < 0 ? -1
+			: event.key === "Home" ? 0
+			: event.key === "End" ? n - 1
+			: /^Arrow(Right|Down)$/.test(event.key) ? (from + 1) % n
+			: /^Arrow(Left|Up)$/.test(event.key) ? (from - 1 + n) % n
+			: -1;
+		if (to < 0) return;
 		// Handled here: keep the arrows from also reaching document-level
 		// listeners (a quiz dock under the dialog walks on ←/→).
 		event.preventDefault();
 		event.stopPropagation();
-		buttons.current[to]?.focus();
-		const next = options[to];
-		if (next && next.value !== value) onChange(next.value);
+		(event.currentTarget.children[to] as HTMLElement).focus();
+		if (options[to]!.value !== value) onChange(options[to]!.value);
 	};
 	return (
 		<div
@@ -277,16 +254,15 @@ export function SegmentedControl<V extends string>({
 			onKeyDown={onKeyDown}
 			className="flex h-7 min-w-0 max-w-full items-center gap-0.5 rounded-sm border border-border bg-background p-0.5"
 		>
-			{options.map((o, i) => {
+			{options.map((o) => {
 				const checked = o.value === value;
 				return (
 					<button
 						key={o.value}
-						ref={(el) => { buttons.current[i] = el; }}
 						type="button"
 						role="radio"
 						aria-checked={checked}
-						tabIndex={i === tabStop ? 0 : -1}
+						tabIndex={checked ? 0 : -1}
 						aria-label={o.label}
 						title={o.title ?? o.label}
 						data-testid={testid ? `${testid}-${o.value}` : undefined}
@@ -301,13 +277,11 @@ export function SegmentedControl<V extends string>({
 					>
 						{o.icon ? (
 							<o.icon className="size-3.5" />
-						) : o.short ? (
+						) : (
 							<>
 								<span className="@max-[10.5rem]:hidden">{o.label}</span>
-								<span aria-hidden className="hidden @max-[10.5rem]:inline">{o.short}</span>
+								<span aria-hidden className="hidden @max-[10.5rem]:inline">{o.label[0]}</span>
 							</>
-						) : (
-							o.label
 						)}
 					</button>
 				);

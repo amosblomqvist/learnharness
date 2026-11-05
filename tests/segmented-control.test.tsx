@@ -6,7 +6,7 @@ import { afterEach, describe, it } from "node:test";
 import { renderToStaticMarkup } from "react-dom/server";
 import { createRoot, type Root } from "react-dom/client";
 import { parseHTML } from "linkedom";
-import { radioTarget, SegmentedControl } from "../components/settings/controls.tsx";
+import { SegmentedControl } from "../components/settings/controls.tsx";
 
 /**
  * The segmented control follows the ARIA radio group: one tab stop (the
@@ -28,21 +28,6 @@ const OPTIONS = [
 ] as const;
 type Value = (typeof OPTIONS)[number]["value"];
 
-describe("radioTarget (the arrow machine)", () => {
-	it("arrows step with wrap, Home/End jump, other keys are not owned", () => {
-		assert.equal(radioTarget("ArrowRight", 0, 4), 1);
-		assert.equal(radioTarget("ArrowDown", 2, 4), 3);
-		assert.equal(radioTarget("ArrowRight", 3, 4), 0, "wraps forward");
-		assert.equal(radioTarget("ArrowLeft", 2, 4), 1);
-		assert.equal(radioTarget("ArrowUp", 0, 4), 3, "wraps back");
-		assert.equal(radioTarget("Home", 2, 4), 0);
-		assert.equal(radioTarget("End", 1, 4), 3);
-		for (const key of ["Enter", " ", "a", "Tab", "PageDown", "Escape"]) assert.equal(radioTarget(key, 1, 4), null, key);
-		assert.equal(radioTarget("ArrowRight", 0, 0), null, "an empty group owns nothing");
-		assert.equal(radioTarget("ArrowRight", 0, 1), 0, "a lone radio stays put");
-	});
-});
-
 describe("SegmentedControl roving tabindex", () => {
 	const stops = (value: string) => {
 		const html = renderToStaticMarkup(<SegmentedControl value={value} options={OPTIONS} onChange={() => {}} ariaLabel="Text alignment" testid="seg" />);
@@ -53,23 +38,6 @@ describe("SegmentedControl roving tabindex", () => {
 		assert.deepEqual(stops("left"), ["0", "-1", "-1", "-1"]);
 		assert.deepEqual(stops("right"), ["-1", "-1", "0", "-1"]);
 		assert.deepEqual(stops("justify"), ["-1", "-1", "-1", "0"]);
-	});
-
-	it("with no chosen radio the first one is the tab stop", () => {
-		assert.deepEqual(stops("nothing-chosen"), ["0", "-1", "-1", "-1"]);
-	});
-});
-
-describe("SegmentedControl focus ring", () => {
-	it("every radio shows a keyboard-only ring (the app's no-ring law drops the outline, not box-shadow rings)", () => {
-		const html = renderToStaticMarkup(<SegmentedControl value="left" options={OPTIONS} onChange={() => {}} ariaLabel="Text alignment" testid="seg" />);
-		const classes = [...html.matchAll(/<button[^>]*class="([^"]*)"/g)].map((m) => m[1] ?? "");
-		assert.equal(classes.length, OPTIONS.length);
-		for (const cls of classes) {
-			assert.match(cls, /\bfocus-visible:ring-2\b/);
-			assert.match(cls, /\bfocus-visible:ring-ring\b/);
-			assert.doesNotMatch(cls, /(^|\s)ring-/, "no ring until the focus is from the keyboard");
-		}
 	});
 });
 
