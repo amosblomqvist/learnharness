@@ -6,7 +6,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { MenuShell } from "@/components/menu-shell";
 import { DeleteSessionDialog } from "@/components/delete-session-dialog";
 import type { ChatDeleteMode } from "@/src/core";
-import { DumbbellIcon, PanelLeftCloseIcon, PanelLeftOpenIcon, PlusIcon, SearchIcon, SettingsIcon } from "lucide-react";
+import { DumbbellIcon, EllipsisVerticalIcon, PanelLeftCloseIcon, PanelLeftOpenIcon, PlusIcon, SearchIcon, SettingsIcon } from "lucide-react";
 import { ActivitySection } from "@/components/activity-dock";
 import { CoverageMenuBlock } from "@/components/extraction-coverage";
 import { LhMark } from "@/components/lh-mark";
@@ -43,8 +43,8 @@ const STORAGE_KEY = "lh:sidebar-open";
  * preference. Opening the sidebar while narrow asks the Electron shell to
  * widen the window to the threshold (window.lh.expandWindow, IPC in
  * electron/main.cjs) — the resize listener flips `narrow` and the sidebar
- * appears. In the plain browser there is no window to widen and no
- * suppression — a narrow tab opens the sidebar if the user says so.
+ * appears. In the plain browser there is no window to widen: a narrow tab
+ * gets the overlay drawer instead (see resolveSidebar).
  *
  * Mirrors SIDEBAR_AUTOCLOSE in electron/main.cjs — keep in sync.
  */
@@ -86,9 +86,26 @@ declare global {
 	}
 }
 
-const SidebarContext = createContext<{ open: boolean; toggle: () => void }>({
+/*
+ * Browser drawer (LAN web access S6, L12): outside Electron, below
+ * SIDEBAR_AUTOCLOSE the sidebar is an overlay drawer with a backdrop — it
+ * never pushes the content. Its open state is the ephemeral `drawer` flag,
+ * NOT the persisted preference (a phone must not reopen it on every load).
+ * Electron keeps the push/auto-close path above, untouched. Pure — exported
+ * for tests.
+ */
+export function resolveSidebar(s: { electron: boolean; narrow: boolean; pref: boolean; drawer: boolean }): {
+	open: boolean;
+	overlay: boolean;
+} {
+	if (!s.electron && s.narrow) return { open: s.drawer, overlay: true };
+	return { open: s.pref && !s.narrow, overlay: false };
+}
+
+const SidebarContext = createContext<{ open: boolean; toggle: () => void; overlay: boolean }>({
 	open: false,
 	toggle: () => {},
+	overlay: false,
 });
 
 export function useSidebar() {
@@ -108,6 +125,10 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
 	const [open, setOpen] = useState(false);
 	const [narrow, setNarrow] = useState(false);
 	const [mounted, setMounted] = useState(false);
+	const [drawer, setDrawer] = useState(false);
+	const pathname = usePathname();
+	// Picking a chat/lesson (any navigation) closes the browser drawer.
+	useEffect(() => setDrawer(false), [pathname]);
 
 	useEffect(() => {
 		// Electron shell detection (merged chrome, 2026-09-17): keys the
@@ -142,14 +163,18 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
 	// Both this and the mount effect land before the first paint, so a
 	// narrow window never flashes the open sidebar on load.
 	useEffect(() => {
-		if (!IS_ELECTRON) return; // plain-browser tabs open freely
 		const onResize = () => setNarrow(window.innerWidth < SIDEBAR_AUTOCLOSE);
 		onResize();
 		window.addEventListener("resize", onResize);
 		return () => window.removeEventListener("resize", onResize);
 	}, []);
 
+	const { overlay } = resolveSidebar({ electron: IS_ELECTRON, narrow, pref: open, drawer });
 	const toggle = useCallback(() => {
+		if (overlay) {
+			setDrawer((v) => !v);
+			return;
+		}
 		// Opening while narrow (auto-closed, or the user's own closed-at-
 		// narrow): ask the shell to widen to the threshold — the resize
 		// listener flips `narrow` and the sidebar appears. The preference
@@ -165,7 +190,7 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
 			localStorage.setItem(STORAGE_KEY, v ? "0" : "1");
 			return !v;
 		});
-	}, [narrow, open]);
+	}, [narrow, open, overlay]);
 
 	// ⌘B: the global shortcut dispatches kbdEventForAction("toggle-sidebar")
 	// and the context answers on exactly that name — the shared spelling
@@ -181,10 +206,58 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
 	}, [toggle]);
 
 	return (
-		<SidebarContext.Provider value={{ open: open && !narrow, toggle }}>
+		<SidebarContext.Provider value={{ open: resolveSidebar({ electron: IS_ELECTRON, narrow, pref: open, drawer }).open, toggle, overlay }}>
 			{/* transitions gated on mount: no slide-in flash on page load */}
 			<div className={cn("flex h-dvh", mounted && "[&_.sidebar-motion]:transition-[width,margin,opacity]")}>{children}</div>
 		</SidebarContext.Provider>
+	);
+}
+
+/** The sidebar's outer frame. Push mode is the original inline <aside>
+ *  (byte-identical to before); overlay mode (browser, narrow) is a fixed
+ *  drawer with a backdrop that closes it. */
+export function SidebarFrame({
+	open,
+	overlay,
+	onClose,
+	children,
+}: {
+	open: boolean;
+	overlay: boolean;
+	onClose: () => void;
+	children: React.ReactNode;
+}) {
+	if (!overlay) {
+		return (
+			<aside
+				className={cn("sidebar-motion shrink-0 overflow-hidden duration-200", open ? "w-72" : "w-0")}
+				aria-hidden={!open}
+			>
+				{children}
+			</aside>
+		);
+	}
+	return (
+		<>
+			{open && (
+				<div
+					data-testid="sidebar-backdrop"
+					aria-hidden="true"
+					className="fixed inset-0 z-30 bg-background/70"
+					onClick={onClose}
+				/>
+			)}
+			<aside
+				className={cn(
+					"fixed inset-y-0 left-0 z-40 w-72 overflow-hidden shadow-xl transition-transform duration-200",
+					!open && "-translate-x-full",
+				)}
+				aria-hidden={!open}
+				inert={!open}
+			>
+				{children}
+			</aside>
+		</>
 	);
 }
 
@@ -293,6 +366,7 @@ export function SessionRow({
 	onOpen,
 	kbdSelected = false,
 	onContextMenu,
+	onMenu,
 }: {
 	chat: ChatListItem;
 	active: boolean;
@@ -302,6 +376,9 @@ export function SessionRow({
 	kbdSelected?: boolean;
 	/** Right-click opens the context menu (wave 6: Rename / Delete). */
 	onContextMenu?: (e: React.MouseEvent<HTMLButtonElement>) => void;
+	/** Visible "⋯" for touch browsers (web-touch only), where right-click
+	 *  does not exist: opens the same Rename / Export / Delete menu. */
+	onMenu?: (row: HTMLButtonElement) => void;
 }) {
 	return (
 		<button
@@ -330,6 +407,22 @@ export function SessionRow({
 			    the teaching rows and reads cleaner. */}
 			{(chat.kind ?? "teach") === "practice" && (
 				<DumbbellIcon className="size-3.5 shrink-0 text-muted-foreground/70" aria-label="Practice session" />
+			)}
+			{onMenu && (
+				<span
+					role="button"
+					tabIndex={-1}
+					aria-label="Session actions"
+					data-testid="session-menu"
+					className="hidden size-8 shrink-0 items-center justify-center rounded-md text-muted-foreground web-touch:flex"
+					onClick={(e) => {
+						e.stopPropagation();
+						const row = e.currentTarget.closest("button");
+						if (row) onMenu(row);
+					}}
+				>
+					<EllipsisVerticalIcon className="size-4" />
+				</span>
 			)}
 		</button>
 	);
@@ -392,7 +485,11 @@ export type SessionKindFilter = "teach" | "all" | "practice";
 const KIND_FILTER_KEY = "lh:session-kind-filter";
 
 function SessionsSidebar() {
-	const { open, toggle } = useSidebar();
+	const { open, toggle, overlay } = useSidebar();
+	// Browser drawer: picking something closes it (navigation also does).
+	const afterPick = useCallback(() => {
+		if (overlay && open) toggle();
+	}, [overlay, open, toggle]);
 	const [chats, setChats] = useState<ChatListItem[] | null>(null);
 	const [query, setQuery] = useState("");
 	const [kindFilter, setKindFilter] = useState<SessionKindFilter>("all");
@@ -414,7 +511,8 @@ function SessionsSidebar() {
 	   client-side filter over the poll snapshot — no server round trip. */
 	const newSession = useCallback(() => {
 		router.push("/chat/new");
-	}, [router]);
+		afterPick();
+	}, [router, afterPick]);
 
 	/* FUZZY (owner round 8, 2026-10-05): subsequence match ranked by
 	 * fuzzyScore — prefix beats word-boundary beats scattered. Empty query
@@ -648,10 +746,7 @@ function SessionsSidebar() {
 	}, [open, pathname, refresh]);
 
 	return (
-		<aside
-			className={cn("sidebar-motion shrink-0 overflow-hidden duration-200", open ? "w-72" : "w-0")}
-			aria-hidden={!open}
-		>
+		<SidebarFrame open={open} overlay={overlay} onClose={toggle}>
 			<div className="flex h-full w-72 flex-col border-r bg-background">
 				{/* LH wordmark — the owner's header; close toggle sits at the edge.
 				    Merged chrome (2026-09-17): in Electron this band is the
@@ -712,7 +807,10 @@ function SessionsSidebar() {
 					<button
 						type="button"
 						data-testid="new-session-practice"
-						onClick={() => router.push("/chat/new?mode=practice")}
+						onClick={() => {
+							router.push("/chat/new?mode=practice");
+							afterPick();
+						}}
 						className="flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-xs uppercase tracking-wider text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
 					>
 						<DumbbellIcon className="size-3" />
@@ -833,8 +931,13 @@ function SessionsSidebar() {
 									onOpen={() => {
 										setKbdIndex(null);
 										router.push(`/chat/${c.id}`);
+										afterPick();
 									}}
 									onContextMenu={(e) => openContext(e, c)}
+									onMenu={(row) => {
+										ctxAnchorRef.current = row;
+										setCtxChatId(c.id);
+									}}
 								/>
 							),
 						)
@@ -940,7 +1043,7 @@ function SessionsSidebar() {
 					onClose={() => setDeleting(null)}
 					onDeleted={onDeleted}
 				/>
-			</aside>
+			</SidebarFrame>
 	);
 }
 

@@ -672,6 +672,11 @@ export class GraphCanvasRenderer {
 		// d3-zoom owns pan / wheel zoom-to-cursor / touch pinch; every
 		// transform change just marks dirty (draws happen in OUR loop).
 		this.zoomBehavior = zoom<HTMLCanvasElement, unknown>()
+			// d3's default filter, plus: a node press (pointerdown precedes
+			// touchstart) owns the gesture, so a touch drag on a node moves the
+			// node instead of also panning the stage. Mouse is unaffected: the
+			// pointerdown preventDefault already suppresses its mousedown.
+			.filter((e: Event) => !this.dragId && (!(e as MouseEvent).ctrlKey || e.type === "wheel") && !(e as MouseEvent).button)
 			.scaleExtent([0.02, 40])
 			.on("zoom", ({ transform }) => {
 				this.transform = transform;
