@@ -28,17 +28,17 @@ import { GroqRequestError, transcribeGroq } from "@/components/dictation-groq";
  */
 
 /** Tries per chunk, the first included: the request is repeated at most twice. */
-export const MAX_ATTEMPTS = 3;
+const MAX_ATTEMPTS = 3;
 /** Wait before the first repeat; doubles for the next. */
-export const BACKOFF_MS = 1000;
+const BACKOFF_MS = 1000;
 /** A Retry-After longer than this is not waited out: the chunk fails at once,
  * its message says how long to wait, and the Retry button picks it up later. */
-export const MAX_RETRY_WAIT_MS = 20_000;
+const MAX_RETRY_WAIT_MS = 20_000;
 /** How much of the previous transcript goes along as Whisper's prompt. */
 export const PROMPT_TAIL_CHARS = 100;
 /** Chunks shorter than this get no prompt: Whisper tends to echo a prompt back
  * when there is almost no audio to transcribe. */
-export const PROMPT_MIN_SECONDS = 2;
+const PROMPT_MIN_SECONDS = 2;
 /** What a chunk interrupted by cancel() reports. */
 export const STOPPED_MESSAGE = "Transcription stopped before it finished. Retry to finish it.";
 
@@ -86,9 +86,6 @@ export type ChunkSessionOptions = {
 	model: GroqWhisperModel;
 	language: DictationLanguage;
 	sampleRate: number;
-	maxAttempts?: number;
-	backoffMs?: number;
-	maxRetryWaitMs?: number;
 	/** Wait for `ms`; rejects when `signal` aborts. Replaceable so tests need no real time. */
 	sleep?: (ms: number, signal: AbortSignal) => Promise<void>;
 };
@@ -111,9 +108,6 @@ export function promptTail(text: string): string {
 
 export function createChunkSession(options: ChunkSessionOptions): ChunkSession {
 	const { request, model, language, sampleRate } = options;
-	const maxAttempts = options.maxAttempts ?? MAX_ATTEMPTS;
-	const backoffMs = options.backoffMs ?? BACKOFF_MS;
-	const maxRetryWaitMs = options.maxRetryWaitMs ?? MAX_RETRY_WAIT_MS;
 	const sleep = options.sleep ?? realSleep;
 	const chunker = createChunker(sampleRate);
 	const chunks: ChunkState[] = [];
@@ -143,9 +137,9 @@ export function createChunkSession(options: ChunkSessionOptions): ChunkSession {
 	};
 
 	const waitFor = (error: GroqRequestError, attempt: number): number | undefined => {
-		if (attempt >= maxAttempts || !error.retryable) return undefined;
-		if (error.retryAfterMs !== undefined) return error.retryAfterMs <= maxRetryWaitMs ? error.retryAfterMs : undefined;
-		return backoffMs * 2 ** (attempt - 1);
+		if (attempt >= MAX_ATTEMPTS || !error.retryable) return undefined;
+		if (error.retryAfterMs !== undefined) return error.retryAfterMs <= MAX_RETRY_WAIT_MS ? error.retryAfterMs : undefined;
+		return BACKOFF_MS * 2 ** (attempt - 1);
 	};
 
 	async function send(at: number): Promise<void> {

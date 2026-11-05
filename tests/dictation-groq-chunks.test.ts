@@ -6,7 +6,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
-	BACKOFF_MS, createChunkSession, MAX_ATTEMPTS, MAX_RETRY_WAIT_MS, PROMPT_TAIL_CHARS, promptTail, STOPPED_MESSAGE,
+	createChunkSession, PROMPT_TAIL_CHARS, promptTail, STOPPED_MESSAGE,
 	type ChunkSession,
 } from "../components/dictation-groq-chunks.ts";
 import { GROQ_DICTATION_KEYLESS } from "../components/dictation-groq.ts";
@@ -35,7 +35,7 @@ const failure = (status: number, message: string, retryable: boolean, headers?: 
 	Response.json({ message, retryable }, { status, headers });
 
 /** A fake fetch answering from a script, one entry per call, in call order. */
-function harness(script: Reply[], options: { maxAttempts?: number; maxRetryWaitMs?: number; holdSleep?: boolean } = {}) {
+function harness(script: Reply[], options: { holdSleep?: boolean } = {}) {
 	const calls: Call[] = [];
 	const sleeps: number[] = [];
 	const queue = [...script];
@@ -57,8 +57,6 @@ function harness(script: Reply[], options: { maxAttempts?: number; maxRetryWaitM
 			signal.addEventListener("abort", () => reject(signal.reason), { once: true });
 			if (!options.holdSleep) setImmediate(resolve);
 		}),
-		maxAttempts: options.maxAttempts,
-		maxRetryWaitMs: options.maxRetryWaitMs,
 	});
 	return { session, calls, sleeps, queue };
 }
@@ -208,15 +206,15 @@ describe("retrying a failing chunk", () => {
 		session.push(loud(5));
 		assert.deepEqual(await session.stop(), { status: "done", text: "finally" });
 		assert.equal(calls.length, 3);
-		assert.deepEqual(sleeps, [BACKOFF_MS, BACKOFF_MS * 2]);
+		assert.deepEqual(sleeps, [1000, 2000]);
 	});
 
 	it("gives up after a bounded number of attempts and reports the last message", async () => {
 		const { session, calls, sleeps } = harness([failure(502, "Groq is unavailable (503).", true), failure(502, "Groq is unavailable (503).", true), failure(502, "Groq is unavailable (503). Try again shortly.", true)]);
 		session.push(loud(5));
 		assert.deepEqual(await session.stop(), { status: "failed", error: "Groq is unavailable (503). Try again shortly." });
-		assert.equal(calls.length, MAX_ATTEMPTS);
-		assert.equal(sleeps.length, MAX_ATTEMPTS - 1);
+		assert.equal(calls.length, 3);
+		assert.equal(sleeps.length, 2);
 		assert.equal(session.unsent, 1);
 	});
 
@@ -248,7 +246,17 @@ describe("retrying a failing chunk", () => {
 		assert.deepEqual(await session.stop(), { status: "failed", error: "Groq rate limit reached. Try again in 10 min." });
 		assert.equal(calls.length, 1);
 		assert.deepEqual(sleeps, []);
-		assert.ok(600_000 > MAX_RETRY_WAIT_MS);
+	});
+
+	it("waits out a Retry-After of 20 s but not one a second longer", async () => {
+		const within = harness([failure(429, "x", true, { "retry-after": "20" }), ok("after")]);
+		within.session.push(loud(5));
+		assert.deepEqual(await within.session.stop(), { status: "done", text: "after" });
+		assert.deepEqual(within.sleeps, [20_000]);
+		const beyond = harness([failure(429, "x", true, { "retry-after": "21" })]);
+		beyond.session.push(loud(5));
+		assert.equal((await beyond.session.stop()).status, "failed");
+		assert.deepEqual(beyond.sleeps, []);
 	});
 
 	it("treats a dropped connection as transient and a non-route gateway error as retryable", async () => {
@@ -396,21 +404,6 @@ describe("cancel", () => {
 		assert.deepEqual(await retried, { status: "done", text: "one two three" });
 		assert.equal((await waiting).status, "done", "the original stop settles with the final outcome too");
 		assert.equal(calls.length, 4, "the finished chunk was not sent again");
-	});
-});
-
-describe("limits", () => {
-	it("uses the documented defaults", () => {
-		assert.equal(MAX_ATTEMPTS, 3);
-		assert.equal(BACKOFF_MS, 1000);
-		assert.equal(MAX_RETRY_WAIT_MS, 20_000);
-	});
-
-	it("honours custom limits", async () => {
-		const { session, calls } = harness([failure(502, "x", true), failure(502, "x", true)], { maxAttempts: 2 });
-		session.push(loud(5));
-		assert.equal((await session.stop()).status, "failed");
-		assert.equal(calls.length, 2);
 	});
 });
 
