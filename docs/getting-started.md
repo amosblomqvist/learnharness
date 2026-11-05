@@ -13,7 +13,7 @@ Open **Settings → Providers** and configure a connection:
 
 Choose **Strong**, **Cheap**, and **Vision** models in Settings. There are no factory model selections. New sessions start with Strong; background roles use their assigned slots or role overrides. A model selected inside an existing session belongs to that session and does not change background-role choices.
 
-Optional web search supports Tavily, Brave, Exa, Firecrawl, and hosted Ollama search; configure a key for the engine you want to use. Research can still fetch known URLs without a search key. Dictation has its own service key below.
+Optional web search supports Tavily, Brave, Exa, Firecrawl, and hosted Ollama search; configure a key for the engine you want to use. Research can still fetch known URLs without a search key. Dictation uses Deepgram or Groq, set up below.
 
 ## Start a session
 
@@ -27,11 +27,25 @@ Sessions are saved locally, including earlier messages when context is compacted
 
 ## Dictation
 
+Choose the engine under **Settings → Providers → Dictation → Engine**. Deepgram is the default; existing setups keep working unchanged.
+
+**Deepgram**
+
 1. Create a [Deepgram API key](https://console.deepgram.com/) with the **Member role or higher**, required for [short-lived token minting](https://developers.deepgram.com/reference/auth/tokens/grant).
 2. Add it under **Settings → Providers → Dictation** and choose the language below the key. **Multilingual** supports automatic recognition and mixed-language speech.
 3. Use the microphone or **Mod+D** to start and stop. Review the text before sending. **Esc cancellation discards the pending transcript**; stop normally to keep it.
 
 Audio streams from your browser directly to Deepgram using a short-lived token. A `403 Insufficient permissions` error while obtaining that token can mean the key's role is insufficient.
+
+**Groq (Whisper)**
+
+1. Add a [Groq API key](https://console.groq.com/keys) in the **Groq** row of the same Dictation group. It is the key the Groq model provider already uses (`GROQ_API_KEY`), so a key you added under **Model API keys** works here too.
+2. Set **Engine** to **Groq (Whisper)**, then choose a model: **Whisper Large v3 Turbo** (default, faster) or **Whisper Large v3** (most accurate). The language setting still applies; regional variants such as English (GB) use the base language, and **Multilingual** lets Whisper detect the language.
+3. Start and stop as above. Groq does not stream: LearnHarness records while you speak, and when you stop it shows **Transcribing…** and inserts the text once Groq answers. **Esc** discards the recording, including while it is transcribing.
+
+Recordings are limited to 12 minutes, which keeps them under Groq's 25 MB free-tier upload limit; at the limit the recording stops and is transcribed. Recordings under a third of a second are ignored. If Groq rejects a request, for example because of a rate limit, the message appears in the dictation button and that recording is not kept; dictate again.
+
+With Groq, the recording goes from your browser to the LearnHarness server on this machine, which uploads it to Groq with your key. The key never reaches the browser, and LearnHarness does not save the recording. Groq's own terms and usage limits apply to your account.
 
 ## Use local files in a session
 

@@ -161,7 +161,7 @@ Read-only file tools default to the server user's home, not a selected project o
 
 The **sensitive-path guard** refuses known private home locations, `.env` files, configured auth/subscription files, and recognized credential temporary files. It checks named/canonical paths and aliases; walks skip protected locations. It is path-based defense in depth, not a content scanner, sandbox, or allowed-folders setting. Other sensitive files and learning records can remain readable. See [`fs-shared.ts`](../src/agent/tools/fs-shared.ts).
 
-File/PDF/visual images share image postprocessing. Search supports Tavily, Brave, Exa, Firecrawl, and hosted Ollama adapters; page fetching is independent and does not need a search key. Dictation mints short-lived tokens server-side and streams audio browser → Deepgram. These external effects are not isolated by a scratch data directory alone.
+File/PDF/visual images share image postprocessing. Search supports Tavily, Brave, Exa, Firecrawl, and hosted Ollama adapters; page fetching is independent and does not need a search key. Dictation has two engines. Deepgram (the default) mints short-lived tokens server-side and streams audio browser → Deepgram. Groq has no token mint, so the browser records, posts one WAV to `/api/stt/transcribe`, and the local server forwards it to Groq's Whisper endpoint with the `GROQ_API_KEY` model-provider key (browser → local server → Groq; the audio is not stored). These external effects are not isolated by a scratch data directory alone.
 
 ## Verification starting points
 
