@@ -102,7 +102,10 @@ export function appearanceVars(a: ReturnType<typeof resolveAppearance>): Record<
 	const align = a.mdRendering.textAlign;
 	if (align === "right" || align === "justify") vars["--lh-md-align"] = align;
 	if (align === "justify") vars["--lh-md-hyphens"] = "auto";
-	if (align === "right") vars["--lh-md-box-ml"] = "auto";
+	if (align === "right") {
+		vars["--lh-md-box-ml"] = "auto";
+		vars["--lh-md-list-flip"] = "1"; // list indents move to the right edge
+	}
 	if (align === "center") {
 		vars["--lh-chat-column-max"] = `calc(${MD_CENTER_WIDTHS[a.mdRendering.centerWidth]}px + 3rem)`;
 	}

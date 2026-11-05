@@ -489,6 +489,7 @@ describe("text alignment — the markdown-only hook (appearance.mdRendering.text
 		assert.equal((css.match(/--lh-md-align: left;/g) ?? []).length, 2, "both theme blocks");
 		assert.equal((css.match(/--lh-md-hyphens: manual;/g) ?? []).length, 2, "both theme blocks");
 		assert.equal((css.match(/--lh-md-box-ml: 0;/g) ?? []).length, 2, "both theme blocks");
+		assert.equal((css.match(/--lh-md-list-flip: 0;/g) ?? []).length, 2, "both theme blocks: lists indent from the left by default");
 		assert.equal((css.match(/--lh-chat-column-max: none;/g) ?? []).length, 2, "both theme blocks: full width by default");
 		assert.ok(!css.includes("--lh-md-box-mr"), "center no longer moves boxes — the right-margin token is gone");
 	});
@@ -552,6 +553,15 @@ describe("text alignment — the markdown-only hook (appearance.mdRendering.text
 		assert.match(blocks, /className="absolute top-1 right-1 z-10"\s+label="Copy table"/);
 		assert.match(blocks, /className="flex size-6 items-center justify-center/);
 		assert.ok(Number(gutter[1]) * 16 >= 4 + 24, "the gutter is at least the button's inset plus its width");
+	});
+
+	it("lists: the indent follows the aligned edge through the flip token (left by default, right under Right)", () => {
+		const css = fs.readFileSync("app/globals.css", "utf-8");
+		const rule = css.match(/\.lh-md :where\(ul, ol\) \{([^}]*)\}/)?.[1] ?? "";
+		assert.match(rule, /padding-left: calc\(\(1 - var\(--lh-md-list-flip\)\) \* 1\.5rem\);/);
+		assert.match(rule, /padding-right: calc\(var\(--lh-md-list-flip\) \* 1\.5rem\);/);
+		// the token sits after the plain prose indent, so it wins at equal specificity
+		assert.ok(css.indexOf(".lh-md :where(ul, ol)") > css.indexOf(".lh-prose :where(ul, ol)"));
 	});
 
 	it("tables: Right moves the box (margin token), and headers are left by Streamdown's own class", () => {

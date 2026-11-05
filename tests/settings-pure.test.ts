@@ -108,7 +108,7 @@ describe("appearanceVars — the mapping the provider applies", () => {
 
 	it("textAlign left (factory): no alignment tokens — the stylesheet defaults stand", () => {
 		const vars = appearanceVars(resolveAppearance({ mdRendering: { textAlign: "left" } }));
-		for (const name of ["--lh-md-align", "--lh-md-hyphens", "--lh-md-box-ml", "--lh-chat-column-max"]) {
+		for (const name of ["--lh-md-align", "--lh-md-hyphens", "--lh-md-box-ml", "--lh-md-list-flip", "--lh-chat-column-max"]) {
 			assert.equal(vars[name], undefined, name);
 		}
 	});
@@ -118,6 +118,7 @@ describe("appearanceVars — the mapping the provider applies", () => {
 		assert.equal(vars["--lh-chat-column-max"], "calc(700px + 3rem)", "700px of text + the column's px-6");
 		assert.equal(vars["--lh-md-align"], undefined, "lines stay left-aligned inside the column");
 		assert.equal(vars["--lh-md-box-ml"], undefined, "boxes sit at the column's left edge");
+		assert.equal(vars["--lh-md-list-flip"], undefined, "list indents stay on the left");
 		assert.equal(vars["--lh-md-hyphens"], undefined, "hyphenation rides justify only");
 	});
 
@@ -135,10 +136,11 @@ describe("appearanceVars — the mapping the provider applies", () => {
 		}
 	});
 
-	it("textAlign right: text right-aligns and the boxes push right (left margin auto only)", () => {
+	it("textAlign right: text right-aligns, the boxes push right (left margin auto only) and list indents flip to the right", () => {
 		const vars = appearanceVars(resolveAppearance({ mdRendering: { textAlign: "right" } }));
 		assert.equal(vars["--lh-md-align"], "right");
 		assert.equal(vars["--lh-md-box-ml"], "auto");
+		assert.equal(vars["--lh-md-list-flip"], "1");
 		assert.equal(vars["--lh-md-hyphens"], undefined);
 	});
 
@@ -147,6 +149,7 @@ describe("appearanceVars — the mapping the provider applies", () => {
 		assert.equal(vars["--lh-md-align"], "justify");
 		assert.equal(vars["--lh-md-hyphens"], "auto");
 		assert.equal(vars["--lh-md-box-ml"], undefined);
+		assert.equal(vars["--lh-md-list-flip"], undefined, "justify keeps the left indent");
 	});
 
 	it("sessionNameSerif false alone: titles move, nothing else does", () => {
@@ -194,7 +197,7 @@ describe("staleVarNames — the removal half of application (owner repro: resets
 		const left = appearanceVars(resolveAppearance({ mdRendering: { textAlign: "left" } }));
 		const applied = [...Object.keys(centered), ...Object.keys(right), ...Object.keys(justified)];
 		const stale = staleVarNames(applied, left);
-		for (const name of ["--lh-md-align", "--lh-md-hyphens", "--lh-md-box-ml", "--lh-chat-column-max"]) {
+		for (const name of ["--lh-md-align", "--lh-md-hyphens", "--lh-md-box-ml", "--lh-md-list-flip", "--lh-chat-column-max"]) {
 			assert.ok(stale.includes(name), name);
 		}
 	});

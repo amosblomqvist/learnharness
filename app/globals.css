@@ -71,6 +71,7 @@
 	--lh-md-align: left;
 	--lh-md-hyphens: manual;
 	--lh-md-box-ml: 0;
+	--lh-md-list-flip: 0;
 	--lh-chat-column-max: none;
 }
 
@@ -113,6 +114,7 @@
 	--lh-md-align: left;
 	--lh-md-hyphens: manual;
 	--lh-md-box-ml: 0;
+	--lh-md-list-flip: 0;
 	--lh-chat-column-max: none;
 }
 
@@ -263,6 +265,16 @@ body {
 		text-align: var(--lh-md-align);
 		hyphens: var(--lh-md-hyphens);
 	}
+}
+
+/* Lists indent from the edge the text is aligned to (the prose-edge rule
+   above, mirrored): under Right the 1.5rem indent moves to the right side,
+   so nested levels stay visibly nested instead of all sitting flush right.
+   --lh-md-list-flip is 1 only under Right; the markers stay inline at the
+   start of each item's first line (list-inside), attached to the text. */
+.lh-md :where(ul, ol) {
+	padding-left: calc((1 - var(--lh-md-list-flip)) * 1.5rem);
+	padding-right: calc(var(--lh-md-list-flip) * 1.5rem);
 }
 
 /* Tables and callouts HUG their content, so aligning their text alone
