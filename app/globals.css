@@ -258,14 +258,6 @@ body {
 	margin-left: var(--lh-md-box-ml, 0);
 }
 
-/* Center follows a readable line length: the whole transcript column
-   (user messages, reasoning, replies, cards) narrows to the chosen width
-   and stays centered by its mx-auto; the text inside stays left-aligned.
-   The composer dock is not this column. */
-.lh-chat-column {
-	max-width: var(--lh-chat-column-max);
-}
-
 /* Justify's hyphenation stays out of headings, code, and math — a split
    token in code or TeX is a wrong token. */
 .lh-md :where(h1, h2, h3, h4, h5, h6, code, .katex) {
