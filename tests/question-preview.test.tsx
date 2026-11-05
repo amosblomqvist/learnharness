@@ -13,6 +13,57 @@ const dom = (element: React.ReactElement) => parseHTML(`<html><body>${renderToSt
 const preview = (source: string) => dom(<QuestionPreview>{source}</QuestionPreview>);
 const annotations = (root: ParentNode) => [...root.querySelectorAll('annotation[encoding="application/x-tex"]')].map((node) => node.textContent);
 
+// These controlled boxes test the measurement/cutoff lifecycle, not typography.
+// Real KaTeX geometry/centering/card-height comparisons require the browser check.
+async function withGeometry(run: (fixture: {
+	host: HTMLElement;
+	render: (source: string) => Promise<void>;
+	metrics: { budget: number; tall: number };
+	resize: () => void;
+	fontsLoaded: () => void;
+}) => Promise<void>, initialBudget = 20) {
+	const { window, document } = parseHTML("<html><body></body></html>");
+	const callbacks = new Set<() => void>();
+	class Observer {
+		constructor(private callback: () => void) {}
+		observe() { callbacks.add(this.callback); }
+		disconnect() { callbacks.delete(this.callback); }
+	}
+	const globals = { window, document, ResizeObserver: Observer, IS_REACT_ACT_ENVIRONMENT: true };
+	const previous = Object.getOwnPropertyDescriptors(globalThis);
+	const prototype = window.HTMLElement.prototype;
+	const previousRect = Object.getOwnPropertyDescriptor(prototype, "getBoundingClientRect");
+	const metrics = { budget: initialBudget, tall: 40 };
+	Object.defineProperty(prototype, "getBoundingClientRect", { configurable: true, value(this: HTMLElement) {
+		let height = 0;
+		if (this.hasAttribute("data-question-preview")) height = metrics.budget;
+		else if (this.matches(".katex, .katex-error")) height = this.querySelector("annotation")?.textContent?.includes("\\begin") ? metrics.tall : 12;
+		return { x: 0, y: 0, top: 0, left: 0, width: 280, height, right: 280, bottom: height };
+	} });
+	const fonts = document.createElement("div");
+	Object.defineProperty(document, "fonts", { value: fonts });
+	Object.assign(globalThis, globals);
+	const host = document.createElement("div"); document.body.append(host);
+	const root = createRoot(host);
+	try {
+		await run({
+			host, metrics,
+			render: async (source) => { await act(async () => root.render(<QuestionPreview>{source}</QuestionPreview>)); },
+			resize: () => { for (const callback of callbacks) callback(); },
+			fontsLoaded: () => { fonts.dispatchEvent(new window.Event("loadingdone")); },
+		});
+	} finally {
+		await act(async () => root.unmount()); host.remove();
+		if (previousRect) Object.defineProperty(prototype, "getBoundingClientRect", previousRect);
+		else Reflect.deleteProperty(prototype, "getBoundingClientRect");
+		for (const key of Object.keys(globals)) {
+			if (previous[key]) Object.defineProperty(globalThis, key, previous[key]);
+			else Reflect.deleteProperty(globalThis, key);
+		}
+		assert.equal(callbacks.size, 0, "resize observers are disconnected");
+	}
+}
+
 describe("collapsed question inline preview", () => {
 	it("preserves inline math, code bytes, emphasis and inert link labels", () => {
 		const source = String.raw`Compare $\frac{a}{b}$ and \(x_k\), **bold**, *italic*, ~~old~~, [the docs](https://example.com) and ` + '`a  b\\n $literal$`';
@@ -90,6 +141,69 @@ describe("collapsed question inline preview", () => {
 			assert.ok(!document.body.textContent.includes("BLOCK"));
 			assert.ok(document.body.textContent.includes(variant === "reveal" ? "Open" : "Answer"));
 		}
+	});
+
+	it("reserves a fixed slot and centers natural-size math without the overflow-hidden baseline shift", () => {
+		const document = preview("Plain text and $x$ and `code`.");
+		const slot = document.querySelector("[data-question-preview]")!;
+		assert.ok(slot.classList.contains("h-[1.6em]"));
+		assert.equal(slot.getAttribute("data-ready"), "false", "SSR does not expose unmeasured, potentially cropped math");
+		const renderer = document.querySelector(".lh-prose")!;
+		for (const css of ["absolute", "top-1/2", "-translate-y-1/2", "[&_.katex]:align-middle", "[&_.katex]:leading-[0]!"]) assert.ok(renderer.classList.contains(css));
+		for (const css of ["inline-block", "align-middle", "leading-none"]) assert.ok(document.querySelector("code")!.classList.contains(css), "padded inline code also fits the slot");
+	});
+
+	it("cuts before a measured over-tall inline formula, including inside formatting, and resets for a new question", async () => {
+		await withGeometry(async ({ host, render }) => {
+			const source = String.raw`Keep $x$ and **before $\begin{pmatrix}a&b\\c&d\end{pmatrix}$ AFTER_TALL** then $z$.`;
+			await render(source);
+			assert.deepEqual(annotations(host), ["x"]);
+			assert.ok(host.textContent.includes("before"));
+			assert.ok(!host.textContent.includes("AFTER_TALL"));
+			assert.equal(host.querySelector("[data-ready]")?.getAttribute("data-ready"), "true");
+			await render("New $y$ with $z$ and AFTER_SMALL.");
+			assert.deepEqual(annotations(host), ["y", "z"]);
+			assert.ok(host.textContent.includes("AFTER_SMALL"));
+			await render(String.raw`$\begin{matrix}a\\b\end{matrix}$ AFTER_FIRST_TALL`);
+			assert.equal(host.textContent, "", "a first tall formula leaves the fixed teaser slot empty, without new copy");
+			assert.ok(source.includes("AFTER_TALL"), "the source, unlike its presentation, is unchanged");
+		});
+	});
+
+	it("counts KaTeX error fallbacks before the tall formula so cutoff indexes remain aligned", async () => {
+		await withGeometry(async ({ host, render }) => {
+			await render(String.raw`Before $\frac{$ then $\begin{matrix}a\\b\end{matrix}$ AFTER_TALL`);
+			assert.equal(host.querySelectorAll(".katex-error").length, 1);
+			assert.ok(host.textContent.includes("frac"));
+			assert.ok(!host.textContent.includes("AFTER_TALL"));
+			assert.equal(host.querySelectorAll(".katex").length, 0);
+		});
+	});
+
+	it("remeasures the full prefix on size/font changes, restoring content when it fits and cutting it again when it does not", async () => {
+		await withGeometry(async ({ host, render, metrics, resize, fontsLoaded }) => {
+			await render(String.raw`Before $\begin{matrix}a\\b\end{matrix}$ AFTER_TALL and $z$.`);
+			assert.ok(!host.textContent.includes("AFTER_TALL"));
+			await act(async () => { metrics.budget = 50; resize(); });
+			assert.equal(annotations(host).length, 2);
+			assert.ok(host.textContent.includes("AFTER_TALL"));
+			await act(async () => { metrics.budget = 20; resize(); });
+			assert.equal(annotations(host).length, 0);
+			await act(async () => { metrics.tall = 15; fontsLoaded(); });
+			assert.equal(annotations(host).length, 2);
+			await act(async () => { metrics.tall = 40; fontsLoaded(); });
+			assert.equal(annotations(host).length, 0);
+		});
+	});
+
+	it("waits for layout when mounted in a hidden dock, then measures when it gains size", async () => {
+		await withGeometry(async ({ host, render, metrics, resize }) => {
+			await render(String.raw`Before $\begin{matrix}a\\b\end{matrix}$ AFTER_TALL`);
+			assert.equal(host.querySelector("[data-ready]")?.getAttribute("data-ready"), "false");
+			await act(async () => { metrics.budget = 20; resize(); });
+			assert.equal(host.querySelector("[data-ready]")?.getAttribute("data-ready"), "true");
+			assert.ok(!host.textContent.includes("AFTER_TALL"));
+		}, 0);
 	});
 
 	it("each mounted preview and its styled link label invoke the same expand action", async () => {

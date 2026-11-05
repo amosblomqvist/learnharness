@@ -483,7 +483,7 @@ changed and the final volume must be calculated from the combined gas law.`,
 				/>,
 		);
 		assert.ok(html.includes('data-testid="question-dock-bar"'), "the scroll-collapse strip");
-		assert.match(html, /data-testid="question-dock-bar"[^>]*items-baseline/, "label and actions align with the teaser text baseline");
+		assert.match(html, /data-testid="question-dock-bar"[^>]*items-center/, "label and actions are vertically centered beside the fixed-height teaser");
 		assert.ok(!html.includes("Check your understanding"), "no invitation copy outside teach phase");
 		assert.match(html, /Answer/, "the strip keeps its Answer affordance");
 	});
