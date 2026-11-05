@@ -69,7 +69,7 @@ export type Chunker = {
 const toSamples = (audio: ArrayBuffer | Int16Array): Int16Array =>
 	audio instanceof Int16Array ? audio : new Int16Array(audio, 0, audio.byteLength >> 1);
 
-/** True when `pcm` has at least MIN_VOICED_MS of 20 ms frames above SILENCE_RMS. */
+/** True when `pcm` has less than MIN_VOICED_MS of 20 ms frames above SILENCE_RMS. */
 export function isSilent(pcm: Int16Array, sampleRate: number): boolean {
 	const frame = Math.max(1, Math.round((sampleRate * FRAME_MS) / 1000));
 	const limit = (SILENCE_RMS * 32768) ** 2;

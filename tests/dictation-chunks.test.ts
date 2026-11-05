@@ -57,7 +57,6 @@ describe("where it cuts", () => {
 	it("takes the quietest pause when there are several", () => {
 		// A faint 300 ms dip at 13 s (not silent: amplitude 1000) and a true gap at 17 s.
 		const audio = speech(40, [[17.0, 0.3]]);
-		audio.fill(0, 0, 0);
 		const dip = audio.subarray(Math.round(13 * RATE), Math.round(13.3 * RATE));
 		for (let i = 0; i < dip.length; i++) dip[i] = Math.round(1000 * Math.sin((2 * Math.PI * 220 * i) / RATE));
 		const first = chunkAll(audio)[0]!;

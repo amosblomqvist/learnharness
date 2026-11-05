@@ -50,11 +50,11 @@ class Worklet {
 	constructor() { Worklet.all.push(this); }
 	connect() {}
 	disconnect() {}
-	audio(buffer: ArrayBuffer) { this.port.onmessage?.({ data: { type: "audio", buffer } }); }
+	audio(buffer: Int16Array) { this.port.onmessage?.({ data: { type: "audio", buffer } }); }
 }
 
-/** n 128 ms frames, as the real worklet posts them. */
-const frame = () => new Int16Array(2048).fill(1000).buffer;
+/** One 128 ms frame, as the real worklet posts it: an Int16Array. */
+const frame = () => new Int16Array(2048).fill(1000);
 
 interface Post { init: RequestInit; form: FormData }
 const globals = globalThis as Record<string, unknown>;
@@ -343,7 +343,7 @@ test("reaching the recording cap stops and transcribes what was captured, droppi
 	f.state.answer = () => Promise.resolve(Response.json({ text: `part${++n}` }));
 	await act(async () => {
 		const worklet = f.worklet();
-		worklet.audio(new Int16Array(GROQ_MAX_PCM_BYTES / 2).fill(1000).buffer); // the whole allowance at once
+		worklet.audio(new Int16Array(GROQ_MAX_PCM_BYTES / 2).fill(1000)); // the whole allowance at once
 		worklet.audio(frame()); // arrives after the cap: dropped
 	});
 	assert.equal(f.dictation.error, null);
