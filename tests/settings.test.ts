@@ -14,6 +14,7 @@ import {
 	FACTORY_SETTINGS,
 	BACKGROUND_MODEL_ROLES,
 	isHexColor,
+	isQuotaExhaustedError,
 	sanitizeUserSettings,
 } from "../src/core/settings.ts";
 
@@ -246,5 +247,46 @@ describe("sanitizeUserSettings", () => {
 			"extractor",
 			"auditor",
 		]);
+	});
+});
+
+describe("isQuotaExhaustedError (the confirmed daily-quota classifier)", () => {
+	const DAILY = 'upstream rate_limit [429]: {"error":{"message":"Rate limit exceeded: free-models-per-day. Add 10 credits to unlock 1000 free model requests per day","code":429}}';
+
+	it("matches the daily marker on the error itself, in an envelope, and at any depth of the cause chain", () => {
+		assert.equal(isQuotaExhaustedError(new Error(DAILY)), true);
+		const envelope = Object.assign(new Error("provider key refused"), { envelope: { error: "Rate limit exceeded: free-models-per-day" } });
+		assert.equal(isQuotaExhaustedError(envelope), true);
+		const wrapped = new Error("extraction failed", { cause: new Error("503: auth_unavailable", { cause: new Error(DAILY) }) });
+		assert.equal(isQuotaExhaustedError(wrapped), true);
+	});
+
+	it("terminates on a cause cycle, with and without the marker, and on a self-cause", () => {
+		const a = new Error("first"), b = new Error("second");
+		a.cause = b; b.cause = a;
+		assert.equal(isQuotaExhaustedError(a), false, "a cycle with no marker ends instead of looping");
+		const c = new Error("third", { cause: new Error("fourth") });
+		(c.cause as Error).cause = c;
+		(c.cause as Error).message = DAILY;
+		assert.equal(isQuotaExhaustedError(c), true, "the marker is found before the cycle closes");
+		const self = new Error("self");
+		self.cause = self;
+		assert.equal(isQuotaExhaustedError(self), false);
+	});
+
+	it("never matches a per-minute or other 429, a generic 500/503, or a non-error value", () => {
+		for (const text of [
+			'upstream rate_limit [429]: {"error":{"message":"Rate limit exceeded: free-models-per-min","code":429}}',
+			"429 Too Many Requests: rate limit exceeded, retry after 20s",
+			"Rate limit exceeded: tokens-per-day",
+			"500 Internal Server Error",
+			"503: auth_unavailable: no auth available",
+		]) {
+			assert.equal(isQuotaExhaustedError(new Error(text)), false, text);
+			assert.equal(isQuotaExhaustedError(new Error("import failed", { cause: new Error(text) })), false, `${text} (as a cause)`);
+		}
+		for (const value of [DAILY, { message: DAILY }, null, undefined, 429]) {
+			assert.equal(isQuotaExhaustedError(value), false, "only Error instances are inspected");
+		}
 	});
 });
