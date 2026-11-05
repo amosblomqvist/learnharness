@@ -61,6 +61,7 @@ export function SettingsRow({
 	children,
 	testid,
 	dimmed,
+	wrap,
 }: {
 	label: string;
 	hint?: ReactNode;
@@ -69,9 +70,15 @@ export function SettingsRow({
 	/** Dependency graying, graph-view style: the whole row dims when the
 	 *  control is inert (parent off, no file yet, …). */
 	dimmed?: boolean;
+	/** For a control that cannot shrink (a segmented control): when the
+	 *  dialog is too narrow for label and control side by side, the control
+	 *  drops under the label instead of overflowing. The row also becomes a
+	 *  size container, so the control can pick compact labels when even a
+	 *  full line is too narrow for it. */
+	wrap?: boolean;
 }) {
 	return (
-		<div data-testid={testid} className={cn("flex items-center justify-between gap-4 py-1", dimmed && "opacity-40")}>
+		<div data-testid={testid} className={cn("flex items-center justify-between gap-4 py-1", wrap && "@container flex-wrap", dimmed && "opacity-40")}>
 			<span className="min-w-0">
 				<span className="block font-prose text-(length:--lh-prose-size)">{label}</span>
 				{hint && <span className="block text-xs text-muted-foreground/70">{hint}</span>}
@@ -227,8 +234,10 @@ export function radioTarget(key: string, index: number, count: number): number |
 /** A one-of-N picker (used by the text-alignment rows): a
  *  ThinSelect-height pill of buttons in the radio role, the chosen one
  *  raised. An option with an icon shows only the icon (its label rides
- *  aria-label); without one it shows its label as a word. The native
- *  tooltip is the option's title, else its label. Keyboard follows the
+ *  aria-label); without one it shows its label as a word, or its `short`
+ *  form when the control sits in a `wrap` row narrower than 10.5rem (the
+ *  words need about 10rem). The native tooltip is the option's title, else
+ *  its label. Keyboard follows the
  *  ARIA radio group: only the chosen button is a tab stop (roving
  *  tabindex), and the arrows and Home/End move focus AND choose. */
 export function SegmentedControl<V extends string>({
@@ -239,7 +248,7 @@ export function SegmentedControl<V extends string>({
 	testid,
 }: {
 	value: V;
-	options: readonly { value: V; label: string; icon?: ComponentType<{ className?: string }>; title?: string }[];
+	options: readonly { value: V; label: string; short?: string; icon?: ComponentType<{ className?: string }>; title?: string }[];
 	onChange: (next: V) => void;
 	ariaLabel: string;
 	testid?: string;
@@ -266,7 +275,7 @@ export function SegmentedControl<V extends string>({
 			aria-label={ariaLabel}
 			data-testid={testid}
 			onKeyDown={onKeyDown}
-			className="flex h-7 items-center gap-0.5 rounded-sm border border-border bg-background p-0.5"
+			className="flex h-7 min-w-0 max-w-full items-center gap-0.5 rounded-sm border border-border bg-background p-0.5"
 		>
 			{options.map((o, i) => {
 				const checked = o.value === value;
@@ -290,7 +299,16 @@ export function SegmentedControl<V extends string>({
 							checked ? "bg-accent text-foreground" : "text-muted-foreground hover:text-foreground",
 						)}
 					>
-						{o.icon ? <o.icon className="size-3.5" /> : o.label}
+						{o.icon ? (
+							<o.icon className="size-3.5" />
+						) : o.short ? (
+							<>
+								<span className="@max-[10.5rem]:hidden">{o.label}</span>
+								<span aria-hidden className="hidden @max-[10.5rem]:inline">{o.short}</span>
+							</>
+						) : (
+							o.label
+						)}
 					</button>
 				);
 			})}

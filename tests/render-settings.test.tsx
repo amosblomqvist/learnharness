@@ -375,8 +375,24 @@ describe("AppearanceSection (thin SSR)", () => {
 			assert.ok(button.includes(`aria-label="${label}"`), value);
 			assert.ok(button.includes(`title="${label} — ${px}px"`), `${value} tooltip names its width`);
 			assert.ok(button.includes(`aria-checked="${value === "medium"}"`), `${value} checked state`);
-			assert.ok(html.includes(`>${label}</button>`), `${value} shows its word, not an icon`);
+			assert.ok(html.includes(`<span class="@max-[10.5rem]:hidden">${label}</span>`), `${value} shows its word, not an icon`);
+			// narrow dialogs swap the word for its first letter; the accessible name stays the word
+			assert.ok(html.includes(`<span aria-hidden="true" class="hidden @max-[10.5rem]:inline">${label[0]}</span>`), `${value} has a compact form`);
 		}
+	});
+
+	it("the alignment rows wrap under their label in a narrow dialog instead of overflowing", () => {
+		const html = renderToStaticMarkup(
+			<AppearanceSection appearance={{ mdRendering: { textAlign: "center" } }} onSectionChange={() => {}} />,
+		);
+		for (const row of ["row-text-align", "row-center-width"]) {
+			const open = html.match(new RegExp(`<div[^>]*data-testid="${row}"[^>]*>`))?.[0] ?? "";
+			assert.match(open, /\bflex-wrap\b/, row);
+			assert.match(open, /@container/, `${row} is the size container for the compact labels`);
+		}
+		const group = tagOf(html, "seg-text-align");
+		assert.match(group, /\bmin-w-0\b/);
+		assert.match(group, /\bmax-w-full\b/);
 	});
 
 	it("a stored column width is the checked button", () => {

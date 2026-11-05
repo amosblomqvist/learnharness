@@ -70,7 +70,7 @@ const CENTER_WIDTH_OPTIONS = (
 		["medium", "Medium"],
 		["large", "Large"],
 	] as const satisfies readonly (readonly [MdCenterWidth, string])[]
-).map(([value, label]) => ({ value, label, title: `${label} — ${MD_CENTER_WIDTHS[value]}px` }));
+).map(([value, label]) => ({ value, label, short: label.slice(0, 1), title: `${label} — ${MD_CENTER_WIDTHS[value]}px` }));
 
 /** The factory reading family — the DEFAULT row's identity (unset =
  *  this). Exported for tests. */
@@ -310,7 +310,7 @@ export function AppearanceSection({
 					}}
 				/>
 			</SettingsRow>
-			<SettingsRow label="Text alignment" testid="row-text-align">
+			<SettingsRow label="Text alignment" testid="row-text-align" wrap>
 				<SegmentedControl
 					value={md?.textAlign ?? "left"}
 					options={TEXT_ALIGN_OPTIONS}
@@ -322,7 +322,7 @@ export function AppearanceSection({
 			{/* Center's width: shown only while Center is the stored
 			    alignment; the value stays stored when hidden. */}
 			{md?.textAlign === "center" && (
-				<SettingsRow label="Column width" testid="row-center-width">
+				<SettingsRow label="Column width" testid="row-center-width" wrap>
 					<SegmentedControl
 						value={md.centerWidth ?? "medium"}
 						options={CENTER_WIDTH_OPTIONS}
