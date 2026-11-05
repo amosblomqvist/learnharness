@@ -1,6 +1,7 @@
 "use client";
 
 import { clampNotesWidth, NOTES_AUTOFOLD_BELOW, NOTES_DEFAULT_WIDTH, NOTES_WIDTH_KEY } from "@/components/notes-layout";
+import { appendBlockText, quoteAsMarkdown } from "@/src/core";
 import { createContext, useContext, useEffect, useSyncExternalStore, type ReactNode } from "react";
 
 export const NOTES_OPEN_KEY = "lh-notes-open";
@@ -9,6 +10,7 @@ const SAVE_ERROR = "Notes not saved";
 const KEEPALIVE_MAX_BYTES = 60_000;
 
 export interface NotesEditorPort {
+	append(block: string): void;
 	/** Replace the whole doc without undo history or an edit. */
 	reset(text: string): void;
 }
@@ -100,6 +102,15 @@ export class NotesController {
 
 	attach(port: NotesEditorPort | null): void {
 		this.port = port;
+	}
+
+	/** Append a tutor quote to the notes and open the panel. */
+	appendQuote(quote: string): void {
+		if (!quote.trim()) return;
+		const block = quoteAsMarkdown(quote);
+		this.setOpen(true);
+		if (this.port) this.port.append(block);
+		else this.onEdit(appendBlockText(this.current, block));
 	}
 
 	onEdit(text: string): void {

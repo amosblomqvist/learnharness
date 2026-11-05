@@ -9,7 +9,7 @@ process.env.LH_DATA_DIR = TMP_DATA;
 
 const { chatStore } = await import("../src/store/chats.ts");
 const { newUserMessage } = await import("../src/core/native-messages.ts");
-const { NOTES_MAX_CHARS, NotesInputError, parseNotesInput } = await import("../src/core/notes.ts");
+const { NOTES_MAX_CHARS, NotesInputError, appendBlockText, parseNotesInput, quoteAsMarkdown } = await import("../src/core/notes.ts");
 const { readChatNotes } = await import("../src/server/chats.ts");
 const notesRoute = await import("../app/api/chats/[id]/notes/route.ts");
 
@@ -21,6 +21,14 @@ describe("notes input", () => {
 		assert.throws(() => parseNotesInput(null), NotesInputError);
 		assert.throws(() => parseNotesInput({ text: 1 }), NotesInputError);
 		assert.throws(() => parseNotesInput({ text: "x".repeat(NOTES_MAX_CHARS + 1) }), NotesInputError);
+	});
+});
+
+describe("notes quoting", () => {
+	it("quotes every line and appends after a blank line", () => {
+		assert.equal(quoteAsMarkdown(" the pull acts\n\non where "), "> the pull acts\n>\n> on where");
+		assert.equal(appendBlockText("", "> q"), "> q\n");
+		assert.equal(appendBlockText("a\n\n\n", "> q"), "a\n\n> q\n");
 	});
 });
 

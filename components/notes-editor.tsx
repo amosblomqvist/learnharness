@@ -8,6 +8,7 @@ import { markdown } from "@codemirror/lang-markdown";
 import { tags } from "@lezer/highlight";
 import { Annotation, EditorState, Prec, StateField, Transaction, type Range, type StateCommand } from "@codemirror/state";
 import { Decoration, EditorView, WidgetType, keymap, placeholder, type DecorationSet } from "@codemirror/view";
+import { appendBlockText } from "@/src/core";
 import { mathRanges, quoteLineStarts } from "@/components/notes-markdown";
 import type { NotesController, NotesEditorPort } from "@/components/notes-state";
 
@@ -131,6 +132,15 @@ export function NotesEditor({ controller }: { controller: NotesController }) {
 			}),
 		});
 		const port: NotesEditorPort = {
+			append: (block) => {
+				const doc = view.state.doc.toString();
+				const next = appendBlockText(doc, block);
+				const from = doc.trimEnd().length;
+				view.dispatch({
+					changes: { from, to: doc.length, insert: next.slice(from) },
+					effects: EditorView.scrollIntoView(next.length),
+				});
+			},
 			reset: (text) =>
 				view.dispatch({
 					changes: { from: 0, to: view.state.doc.length, insert: text },

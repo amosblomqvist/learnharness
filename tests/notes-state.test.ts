@@ -33,7 +33,7 @@ globalThis.fetch = (async (url: string, init: RequestInit) => {
 
 function resetSpy() {
 	const resets: string[] = [];
-	const port = { reset: (t: string) => void resets.push(t) };
+	const port = { append() {}, reset: (t: string) => void resets.push(t) };
 	return { port, resets };
 }
 
@@ -195,5 +195,26 @@ describe("NotesController", () => {
 		c.setNarrow(true);
 		assert.equal(c.getSnapshot(), snap);
 		assert.equal(snap.visible, true);
+	});
+	it("appendQuote with the panel closed opens it and saves the quoted text", async () => {
+		const c = new NotesController("c1", "mine", { saveDelayMs: 0, storage: memoryStorage() });
+		c.appendQuote("the pull acts on $A^\\tau$");
+		assert.equal(c.getSnapshot().open, true);
+		assert.equal(c.text(), "mine\n\n> the pull acts on $A^\\tau$\n");
+		await c.flush();
+		assert.equal(JSON.parse(calls.at(-1)!.body).text, c.text());
+	});
+	it("appendQuote with an editor attached delegates to the port; blank quotes do nothing", () => {
+		const c = new NotesController("c1", "mine", { saveDelayMs: 60_000, storage: memoryStorage() });
+		const blocks: string[] = [];
+		c.attach({ append: (b) => void blocks.push(b), reset() {} });
+		c.appendQuote("  \n ");
+		assert.deepEqual(blocks, []);
+		assert.equal(c.getSnapshot().open, false);
+		c.appendQuote("a\nb");
+		assert.deepEqual(blocks, ["> a\n> b"]);
+		assert.equal(c.getSnapshot().open, true);
+		assert.equal(c.text(), "mine");
+		c.dispose();
 	});
 });

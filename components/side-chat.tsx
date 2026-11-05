@@ -17,15 +17,16 @@
  * windows through a per-block store subscription (side-chat-state.tsx).
  */
 
-import { createContext, memo, useContext, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
+import { createContext, memo, useContext, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { Block, type BlockProps } from "streamdown";
-import { ChevronDownIcon, ChevronRightIcon, ChevronUpIcon, CornerDownLeftIcon, MessageCircleQuestionIcon, MessageCircleReplyIcon, RotateCcwIcon, SquareIcon, Trash2Icon, XIcon } from "lucide-react";
+import { ChevronDownIcon, ChevronRightIcon, ChevronUpIcon, CornerDownLeftIcon, MessageCircleQuestionIcon, MessageCircleReplyIcon, NotebookPenIcon, RotateCcwIcon, SquareIcon, Trash2Icon, XIcon } from "lucide-react";
 import type { SideChatAnchor, SideChatMessage } from "@/src/core";
 import { MessageResponse } from "@/components/ai-elements/message";
 import { Shimmer } from "@/components/ai-elements/shimmer";
 import { BrailleSpinner } from "@/components/braille-spinner";
 import { Button } from "@/components/ui/button";
+import { useNotesController } from "@/components/notes-state";
 import { blurAfterPointerClick } from "@/components/focus-hygiene";
 import { cn } from "@/lib/utils";
 import { sideBlockKey, useSideChatStore, useSideWindows, type SideChatStore, type SideWindowView } from "@/components/side-chat-state";
@@ -570,6 +571,7 @@ interface SelectionTarget {
  *  window opens after the block where the selection ENDS. */
 export function SideSelectionAsk() {
 	const store = useSideChatStore();
+	const notes = useNotesController();
 	const [target, setTarget] = useState<SelectionTarget | null>(null);
 	useEffect(() => {
 		if (!store) return;
@@ -617,27 +619,49 @@ export function SideSelectionAsk() {
 		};
 	}, [store]);
 	if (!store || !target || typeof document === "undefined") return null;
-	const width = 132;
+	const width = notes ? 132 + 4 + 124 : 132;
 	const left = Math.max(8, Math.min(target.x - width / 2, window.innerWidth - width - 8));
 	const top = Math.min(target.y + 6, window.innerHeight - 36);
+	const button = "z-50 flex h-7 items-center justify-center gap-1.5 rounded-md border bg-popover font-ui text-xs font-medium text-popover-foreground shadow-md transition-colors hover:bg-accent";
+	// Keep the selection alive through the press.
+	const keepSelection = { onPointerDown: (e: ReactPointerEvent) => e.preventDefault(), onMouseDown: (e: ReactMouseEvent) => e.preventDefault() };
+	const dismiss = () => {
+		window.getSelection()?.removeAllRanges();
+		setTarget(null);
+	};
 	return createPortal(
-		<button
-			type="button"
-			data-testid="side-selection-ask"
-			// Keep the selection alive through the press.
-			onPointerDown={(e) => e.preventDefault()}
-			onMouseDown={(e) => e.preventDefault()}
-			onClick={() => {
-				store.openAt(target.anchor, target.quote);
-				window.getSelection()?.removeAllRanges();
-				setTarget(null);
-			}}
-			style={{ position: "fixed", left, top, width }}
-			className="z-50 flex h-7 items-center justify-center gap-1.5 rounded-md border bg-popover font-ui text-xs font-medium text-popover-foreground shadow-md transition-colors hover:bg-accent"
-		>
-			<MessageCircleQuestionIcon className="size-3.5" />
-			Ask about this
-		</button>,
+		<div style={{ position: "fixed", left, top, width }} className="z-50 flex gap-1">
+			<button
+				type="button"
+				data-testid="side-selection-ask"
+				{...keepSelection}
+				onClick={() => {
+					store.openAt(target.anchor, target.quote);
+					dismiss();
+				}}
+				style={{ width: 132 }}
+				className={button}
+			>
+				<MessageCircleQuestionIcon className="size-3.5" />
+				Ask about this
+			</button>
+			{notes && (
+				<button
+					type="button"
+					data-testid="side-selection-note"
+					{...keepSelection}
+					onClick={() => {
+						notes.appendQuote(target.quote);
+						dismiss();
+					}}
+					style={{ width: 124 }}
+					className={button}
+				>
+					<NotebookPenIcon className="size-3.5" />
+					Add to notes
+				</button>
+			)}
+		</div>,
 		document.body,
 	);
 }

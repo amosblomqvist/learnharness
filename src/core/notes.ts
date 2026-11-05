@@ -12,3 +12,16 @@ export function parseNotesInput(raw: unknown): string {
 	if (text.length > NOTES_MAX_CHARS) throw new NotesInputError(`Notes exceed ${NOTES_MAX_CHARS} characters`);
 	return text;
 }
+
+/** Format selected tutor text as a Markdown blockquote. */
+export function quoteAsMarkdown(quote: string): string {
+	return quote
+		.trim()
+		.split("\n")
+		.map((line) => (line.trim() ? `> ${line}` : ">"))
+		.join("\n");
+}
+
+export function appendBlockText(notes: string, block: string): string {
+	return notes.trim() ? `${notes.trimEnd()}\n\n${block}\n` : `${block}\n`;
+}

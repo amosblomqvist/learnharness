@@ -26,6 +26,7 @@ const { highlightingFor } = await import("@codemirror/language");
 const { tags } = await import("@lezer/highlight");
 const { NotesEditor } = await import("../components/notes-editor.tsx");
 const { NotesController } = await import("../components/notes-state.tsx");
+const { appendBlockText } = await import("../src/core/notes.ts");
 
 const puts: string[] = [];
 let serverText = "";
@@ -117,5 +118,17 @@ describe("notes editor", () => {
 		assert.ok(span, "bold, marks included, sits in a styled span");
 		assert.equal(span.className, strong);
 		assert.equal(view.contentDOM.textContent, "**bold** text");
+	});
+	it("append matches appendBlockText on empty and non-empty docs, as one undo step", async () => {
+		for (const doc of ["", "mine\n\n\n"]) {
+			const { controller, view } = await mount(doc);
+			controller.appendQuote("a\nb");
+			assert.equal(view.state.doc.toString(), appendBlockText(doc, "> a\n> b"), JSON.stringify(doc));
+			assert.equal(controller.text(), view.state.doc.toString());
+			assert.equal(undo(view), true);
+			assert.equal(view.state.doc.toString(), doc);
+			await cleanup!();
+			cleanup = null;
+		}
 	});
 });
