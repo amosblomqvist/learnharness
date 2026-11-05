@@ -182,15 +182,17 @@ export function outsideTexComments(body: string, transform: (part: string) => st
  * backslash run before each delimiter newline is the escaping factor: a run of
  * one is a single JSON layer, a run of two is the observed double layer. Only
  * factors 1 and 2 decode; anything else falls back to the original single-layer
- * matcher so prior behavior is byte-identical. */
+ * matcher so prior behavior is byte-identical. Each run is only tried from its
+ * first backslash (`(?<!\\)`): a run's tail can never match differently from its
+ * start, and retrying from every position is quadratic on a long run. */
 const ESCAPED_FENCE =
-	/^([ \t]{0,3})(`{3,}|~{3,})([^\n`\\]*?)(\\+)(?:r(\\+)n|n)([\s\S]*?)(\\+)(?:r(\\+)n|n)([ \t]{0,3}(?:`{3,}|~{3,}))[ \t]*$/;
+	/^([ \t]{0,3})(`{3,}|~{3,})([^\n`\\]*?)(\\+)(?:r(\\+)n|n)([\s\S]*?)(?<!\\)(\\+)(?:r(\\+)n|n)([ \t]{0,3}(?:`{3,}|~{3,}))[ \t]*$/;
 const SINGLE_LAYER_FENCE =
 	/^([ \t]{0,3})(`{3,}|~{3,})([^\n`\\]*)(?:\\r\\n|\\n)([\s\S]*?)(?:\\r\\n|\\n)([ \t]{0,3}(?:`{3,}|~{3,}))[ \t]*$/;
 function fenceText(indent: string | undefined, openFence: string, lang: string | undefined, body: string, closeFence: string, factor: number): string {
 	const decodedBody = factor === 1
 		? body.replace(/\\r\\n|\\n/g, "\n")
-		: body.replace(/(\\+)(?:r(\\+)n|n)/g, (whole: string, slashes: string, cr: string | undefined) =>
+		: body.replace(/(?<!\\)(\\+)(?:r(\\+)n|n)/g, (whole: string, slashes: string, cr: string | undefined) =>
 			cr !== undefined
 				? (slashes.length % 4 === 2 && cr.length % 4 === 2 ? "\n" : whole)
 				: (slashes.length % 4 === 2 ? slashes.slice(0, -2) + "\n" : whole));

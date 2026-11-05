@@ -188,3 +188,20 @@ test("two-layer fence recovery leaves native math row separators byte-identical 
 		assert.equal(repairMathForDisplay(repaired), repaired, "repairMathForDisplay not idempotent");
 	}
 });
+test("escaped-fence matching stays linear on very long backslash runs", () => {
+	const run = "\\".repeat(100_000);
+	const timed = <T>(work: () => T) => { const start = performance.now(); const value = work(); return { value, ms: performance.now() - start }; };
+	// A closed two-layer fence whose body holds one huge run: the run stays
+	// literal and must not be retried from every position inside it.
+	const layered = "```sql\\\\nSELECT 1;" + run + "x\\\\n```";
+	const closed = timed(() => recoverDocumentLayout(layered));
+	assert.equal(closed.value, "```sql\nSELECT 1;" + run + "x\n```");
+	// An opener that is never closed: the matcher has to give up quickly.
+	const unclosed = "```sql\\n" + run + "x";
+	const open = timed(() => recoverDocumentLayout(unclosed));
+	assert.equal(open.value, unclosed);
+	// Linear time is a few tens of ms here; the quadratic form took 8-16 s.
+	// The bound is generous so a slow machine cannot flake it.
+	assert.ok(closed.ms < 3000, `closed fence took ${Math.round(closed.ms)} ms`);
+	assert.ok(open.ms < 3000, `unclosed fence took ${Math.round(open.ms)} ms`);
+});
