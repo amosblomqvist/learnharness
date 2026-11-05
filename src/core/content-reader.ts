@@ -219,7 +219,9 @@ function decodeEscapedFence(raw: string): { factor: number; text: string } | nul
 }
 
 /** Document escapes are not arbitrary string decoding. Complete known TeX
- * words win over the prefix `\\n`; code is never inspected or rewritten. */
+ * words win over the prefix `\\n`. Code spans keep every byte, with one
+ * exception: a fenced block whose delimiters and line breaks are escaped
+ * (see decodeEscapedFence) is rewritten into a real fence. */
 export function recoverDocumentLayout(text: string): string {
 	const spans = readContentSpans(text);
 	const candidates = spans.filter(span => span.kind !== "code").map(span => span.raw).join("\u0000");
