@@ -19,9 +19,8 @@
  * untouched for the inheritor) — counting both sides is how a semaphore
  * slowly deadlocks at 3-with-empty-queue.
  *
- * The audit side needs no slot: audits serialize behind their own global
- * lock, so by the time a job releases its permit the audit queue is the
- * only remaining throttle.
+ * The same queue also backs the 1-permit audit gate (extraction.ts), so
+ * both FIFO gates share one abort-aware handoff (#522).
  */
 
 /** Total background LLM concurrency, process-wide, across ALL subsystems
@@ -29,41 +28,52 @@
  *  extraction chunks). */
 const PERMIT_COUNT = 3;
 
-export interface LlmSlots {
+export interface PermitGate {
+	permits: number;
+	/** The AbortError message a queued caller gets when it aborts. */
+	abortMessage: string;
 	active: number;
 	queue: { resolve: () => void; dead: boolean }[];
 }
 
-interface LhLlmSemaphoreGlobal {
-	__lhLlmSlots?: LlmSlots;
+interface LhPermitGatesGlobal {
+	__lhPermitGates?: Map<string, PermitGate>;
 }
 
-/** The process's single permit pool (globalThis — Next dev compiles each
- *  route entry as its own module instance; a module-level object would
- *  split the pool per route. One process, one truth). */
-export function bgLlmSlots(): LlmSlots {
-	const g = globalThis as typeof globalThis & LhLlmSemaphoreGlobal;
-	return (g.__lhLlmSlots ??= { active: 0, queue: [] });
+/** The process's single gate under `name` (globalThis — Next dev compiles
+ *  each route entry as its own module instance; a module-level object
+ *  would split the gate per route. One process, one truth). */
+export function permitGate(name: string, permits: number, abortMessage: string): PermitGate {
+	const g = globalThis as typeof globalThis & LhPermitGatesGlobal;
+	const gates = (g.__lhPermitGates ??= new Map());
+	let gate = gates.get(name);
+	if (!gate) gates.set(name, (gate = { permits, abortMessage, active: 0, queue: [] }));
+	return gate;
 }
 
-/** Run `critical` under one permit of the shared pool. `signal` (the
- *  caller's row/abort controller) kills a queued ticket: it marks itself
- *  dead and rejects AbortError — the handoff skips it. */
-export async function withBgLlmSlot<T>(
+/** The shared background-LLM pool. */
+export function bgLlmSlots(): PermitGate {
+	return permitGate("bg-llm", PERMIT_COUNT, "background LLM job aborted while queued for a permit");
+}
+
+/** Run `critical` under one permit of `gate`. `signal` (the caller's
+ *  row/abort controller) kills a queued ticket: it marks itself dead and
+ *  rejects AbortError — the handoff skips it. */
+export async function withPermit<T>(
+	gate: PermitGate,
 	signal: AbortSignal | undefined,
 	critical: () => Promise<T>,
 ): Promise<T> {
-	const slots = bgLlmSlots();
 	let freshTake = true;
-	if (slots.active >= PERMIT_COUNT) {
+	if (gate.active >= gate.permits) {
 		freshTake = false;
 		await new Promise<void>((resolve, reject) => {
 			const ticket: { resolve: () => void; dead: boolean } = { resolve, dead: false };
-			slots.queue.push(ticket);
+			gate.queue.push(ticket);
 			if (!signal) return;
 			const die = () => {
 				ticket.dead = true; // the permit handoff must skip us
-				const err = new Error("background LLM job aborted while queued for a permit");
+				const err = new Error(gate.abortMessage);
 				err.name = "AbortError";
 				reject(err);
 			};
@@ -71,7 +81,7 @@ export async function withBgLlmSlot<T>(
 			else signal.addEventListener("abort", die, { once: true });
 		});
 	}
-	if (freshTake) slots.active++;
+	if (freshTake) gate.active++;
 	try {
 		return await critical();
 	} finally {
@@ -79,9 +89,9 @@ export async function withBgLlmSlot<T>(
 		// (active stays); dead tickets are skipped — their job already
 		// left through the abort path.
 		for (;;) {
-			const next = slots.queue.shift();
+			const next = gate.queue.shift();
 			if (!next) {
-				slots.active--;
+				gate.active--;
 				break;
 			}
 			if (next.dead) continue;
@@ -89,4 +99,9 @@ export async function withBgLlmSlot<T>(
 			break;
 		}
 	}
+}
+
+/** Run `critical` under one permit of the shared background-LLM pool. */
+export function withBgLlmSlot<T>(signal: AbortSignal | undefined, critical: () => Promise<T>): Promise<T> {
+	return withPermit(bgLlmSlots(), signal, critical);
 }
