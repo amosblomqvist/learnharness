@@ -178,17 +178,42 @@ export function outsideTexComments(body: string, transform: (part: string) => st
 /** Escaped code fence: in unrecovered JSON strings, models emit fenced code blocks
  * with escaped newlines (`\\n`). CommonMark on the raw single-line text treats
  * this as an inlineCode span with backticks. Decode fence delimiters and inner
- * line breaks when the code span matches an opening/closing fence pair. */
-function decodeEscapedCodeFence(raw: string): string | null {
-	const m = /^([ \t]{0,3})(`{3,}|~{3,})([^\n`\\]*)(?:\\r\\n|\\n)([\s\S]*?)(?:\\r\\n|\\n)([ \t]{0,3}(?:`{3,}|~{3,}))[ \t]*$/.exec(raw);
-	if (!m) return null;
-	const [, indent, openFence, lang, body, closeFence] = m;
-	if (!openFence || !body || !closeFence) return null;
-	const openChar = openFence[0];
-	const closeTrimmed = closeFence.trim();
-	if (closeTrimmed[0] !== openChar || closeTrimmed.length < openFence.length) return null;
-	const decodedBody = body.replace(/\\r\\n|\\n/g, "\n");
+ * line breaks when the code span matches an opening/closing fence pair. The
+ * backslash run before each delimiter newline is the escaping factor: a run of
+ * one is a single JSON layer, a run of two is the observed double layer. Only
+ * factors 1 and 2 decode; anything else falls back to the original single-layer
+ * matcher so prior behavior is byte-identical. */
+const ESCAPED_FENCE =
+	/^([ \t]{0,3})(`{3,}|~{3,})([^\n`\\]*?)(\\+)(?:r(\\+)n|n)([\s\S]*?)(\\+)(?:r(\\+)n|n)([ \t]{0,3}(?:`{3,}|~{3,}))[ \t]*$/;
+const SINGLE_LAYER_FENCE =
+	/^([ \t]{0,3})(`{3,}|~{3,})([^\n`\\]*)(?:\\r\\n|\\n)([\s\S]*?)(?:\\r\\n|\\n)([ \t]{0,3}(?:`{3,}|~{3,}))[ \t]*$/;
+function fenceText(indent: string | undefined, openFence: string, lang: string | undefined, body: string, closeFence: string, factor: number): string {
+	const decodedBody = factor === 1
+		? body.replace(/\\r\\n|\\n/g, "\n")
+		: body.replace(/(\\+)(?:r(\\+)n|n)/g, (whole: string, slashes: string, cr: string | undefined) =>
+			cr !== undefined
+				? (slashes.length % 4 === 2 && cr.length % 4 === 2 ? "\n" : whole)
+				: (slashes.length % 4 === 2 ? slashes.slice(0, -2) + "\n" : whole));
 	return `${indent ?? ""}${openFence}${lang ?? ""}\n${decodedBody}\n${closeFence}`;
+}
+function decodeEscapedFence(raw: string): { factor: number; text: string } | null {
+	const m = ESCAPED_FENCE.exec(raw);
+	if (m) {
+		const [, indent, openFence, lang, , , body, , , closeFence] = m;
+		const openRun = m[4] ?? "", closeRun = m[7] ?? "";
+		const closeTrimmed = closeFence?.trim() ?? "";
+		if (openFence && body && closeFence && openRun.length === closeRun.length && openRun.length >= 1 && openRun.length <= 2
+			&& closeTrimmed[0] === openFence[0] && closeTrimmed.length >= openFence.length) {
+			return { factor: openRun.length, text: fenceText(indent, openFence, lang, body, closeFence, openRun.length) };
+		}
+	}
+	const legacy = SINGLE_LAYER_FENCE.exec(raw);
+	if (!legacy) return null;
+	const [, indent, openFence, lang, body, closeFence] = legacy;
+	if (!openFence || !body || !closeFence) return null;
+	const closeTrimmed = closeFence.trim();
+	if (closeTrimmed[0] !== openFence[0] || closeTrimmed.length < openFence.length) return null;
+	return { factor: 1, text: fenceText(indent, openFence, lang, body, closeFence, 1) };
 }
 
 /** Document escapes are not arbitrary string decoding. Complete known TeX
@@ -203,23 +228,30 @@ export function recoverDocumentLayout(text: string): string {
 	const knownN = (name: string) => declared.has(name) || knownTexCommand(name);
 	const tokens = [...candidates.matchAll(/(\\+)(n[A-Za-z]*)/g)];
 	const evidence = tokens.filter(m => m[1]!.length % 2 === 1 && !knownN(m[2]!));
-	const hasEscapedFence = spans.some(span => span.kind === "code" && decodeEscapedCodeFence(span.raw) !== null);
+	const fenceDecodes = spans.map(span => span.kind === "code" ? decodeEscapedFence(span.raw) : null);
+	const hasEscapedFence = fenceDecodes.some(d => d !== null);
+	const hasLayeredFence = fenceDecodes.some(d => d !== null && d.factor > 1);
 	const structural = hasEscapedFence || evidence.length >= 2 || candidates.includes("\\n\\n") || (evidence.length > 0 &&
 		[...candidates.matchAll(/(\\+)([A-Za-z]+)/g)].some(m => m[1]!.length % 2 === 0 && knownTexCommand(m[2]!)));
 	if (!structural) return text;
-	const decode = (part: string) => part.replace(/(\\+)(n[A-Za-z]*)/g, (whole: string, slashes: string, name: string, offset: number) => {
-		if (slashes.length % 2 === 0 || knownN(name)) return whole;
+	// A protected math span keeps its own single-layer policy: a two-layer fence
+	// elsewhere in the document must not reinterpret native TeX row separators
+	// (`\\` + row-leading n-cell) inside math as document newlines. The layered
+	// factor decodes prose only; longer runs stay literal everywhere.
+	const decode = (part: string, layered: boolean) => part.replace(/(\\+)(n[A-Za-z]*)/g, (whole: string, slashes: string, name: string, offset: number) => {
+		const factor = slashes.length % 2 === 1 ? 1 : (layered && slashes.length % 4 === 2 ? 2 : 0);
+		if (factor === 0 || knownN(name)) return whole;
 		const word = part.slice(0, offset).split(/\s/).at(-1) ?? "";
 		if (/^(?:[A-Za-z]:[\\/]|https?:\/\/|\/)/.test(word + whole)) return whole;
-		return slashes.slice(0, -1) + "\n" + name.slice(1);
+		return slashes.slice(0, -factor) + "\n" + name.slice(1);
 	});
-	const projected = spans.map(span => ({
+	const projected = spans.map((span, i) => ({
 		span,
 		body: span.kind === "math"
-			? outsideTexComments(span.body, decode)
+			? outsideTexComments(span.body, part => decode(part, false))
 			: span.kind === "code"
-				? (decodeEscapedCodeFence(span.raw) ?? span.raw)
-				: decode(span.raw),
+				? (fenceDecodes[i]?.text ?? span.raw)
+				: decode(span.raw, hasLayeredFence),
 	}));
 	let out = "";
 	for (let i = 0; i < projected.length; i++) {

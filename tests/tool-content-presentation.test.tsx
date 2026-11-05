@@ -178,3 +178,88 @@ test("escaped fenced code blocks render as syntax-highlighted code blocks with c
 	assert.ok(text.includes("WHERE o.status = 'PENDING';"));
 	assert.ok(!text.includes("\\n"));
 });
+
+test("two-layer escaped SQL fence from the failed LEFT JOIN question renders as a code block in dock and history", () => {
+	// exact failed capture (Needs-improvement.md:469): one physical line, ten tokens of TWO literal backslashes + n
+	const rawLine = readFileSync(new URL("./fixtures/tool-rendering/escaped-fence-two-layer.txt", import.meta.url), "utf8").replace(/\r?\n$/, "");
+	assert.ok(!rawLine.includes("\n"));
+	assert.equal(rawLine.match(/\\\\n/g)?.length, 10);
+	const recovered = repairMathForDisplay(rawLine);
+	assert.ok(recovered.includes("```sql\nSELECT *\nFROM users u\nLEFT JOIN orders o ON u.id =\no.user_id\nWHERE o.status = 'PENDING';\n```"));
+	assert.equal(repairMathForDisplay(recovered), recovered);
+
+	// shared ToolContentResponse surface (used by both QuestionDock and AnsweredCard)
+	const document = dom(render(rawLine));
+	const blocks = document.querySelectorAll('[data-testid="md-code"]');
+	assert.equal(blocks.length, 1);
+	const block = blocks[0]!;
+	assert.ok(block.querySelector('[data-testid="md-copy"]')); // static presence only; live clipboard is NOT verified from static markup
+	assert.equal(block.querySelector('[data-language="sql"]')?.getAttribute("data-language"), "sql");
+	const text = block.textContent ?? "";
+	assert.ok(!text.includes("\\n"));
+	// each source line is its own rendered code row (physical newlines, not literal \\n text)
+	assert.deepEqual([...block.querySelectorAll("code > span.block")].map(n => n.textContent ?? ""),
+		["SELECT *", "FROM users u", "LEFT JOIN orders o ON u.id =", "o.user_id", "WHERE o.status = 'PENDING';"]);
+	assert.equal(dom(render(recovered)).querySelectorAll('[data-testid="md-code"]').length, 1);
+
+	// active QuestionDock
+	const input = { question: rawLine, options: [{ label: "yes" }, { label: "no" }] };
+	const beforeInput = structuredClone(input);
+	const dock = dom(renderToStaticMarkup(<QuestionDock toolName="ask_user_question" toolCallId="two_layer_q" input={input} expanded onExpand={() => {}} onSubmit={() => {}} />));
+	assert.deepEqual(input, beforeInput); // source argument is never rewritten
+	assert.equal(dock.querySelectorAll('[data-testid="md-code"]').length, 1);
+	assert.equal(dock.querySelector('[data-language="sql"]')?.getAttribute("data-language"), "sql");
+	assert.ok(!(dock.querySelector('[data-testid="md-code"]')?.textContent ?? "").includes("\\n"));
+
+	// answered-history AnsweredCard
+	const answer: QuestionAnswerData = { kind: "quiz", questionText: rawLine,
+		options: [{ index: 1, label: "yes" }, { index: 2, label: "no" }],
+		answers: [{ index: 1, label: "yes", value: "yes" }], correct: true, correctIndices: [1], dontKnow: false,
+		explanation: "The WHERE clause filters the outer join.", confidence: 90, answeredAt: "synthetic" };
+	const beforeAnswer = structuredClone(answer);
+	const card = dom(renderToStaticMarkup(<AnsweredCard answer={answer} />));
+	assert.deepEqual(answer, beforeAnswer); // stored answer identity is never rewritten
+	assert.equal(card.querySelectorAll('[data-testid="md-code"]').length, 1);
+	assert.equal(card.querySelector('[data-language="sql"]')?.getAttribute("data-language"), "sql");
+	assert.ok(!(card.querySelector('[data-testid="md-code"]')?.textContent ?? "").includes("\\n"));
+});
+
+test("two-layer SQL fence plus native n-row matrix keeps the code block and both matrix rows in every surface", () => {
+	const rawLine = readFileSync(new URL("./fixtures/tool-rendering/escaped-fence-two-layer.txt", import.meta.url), "utf8").replace(/\r?\n$/, "");
+	const matrix = String.raw`$\begin{pmatrix}a&b\\n&d\end{pmatrix}$`;
+	const matrixBody = String.raw`\begin{pmatrix}a&b\\n&d\end{pmatrix}`;
+	const doc = rawLine + "\n\n" + matrix;
+
+	// shared ToolContentResponse surface
+	const html = render(doc);
+	const document = dom(html);
+	assert.equal(document.querySelectorAll('[data-testid="md-code"]').length, 1);
+	assert.equal(document.querySelector('[data-language="sql"]')?.getAttribute("data-language"), "sql");
+	assert.ok(tex(html).includes(matrixBody)); // KaTeX received the original TeX byte-for-byte
+	assert.equal(document.querySelectorAll("mtr").length, 2); // both array rows render
+	assert.equal(document.querySelectorAll(".katex-error").length, 0);
+
+	// active QuestionDock (source input must not be mutated)
+	const input = { question: doc, options: [{ label: "yes" }, { label: "no" }] };
+	const beforeInput = structuredClone(input);
+	const dockHtml = renderToStaticMarkup(<QuestionDock toolName="ask_user_question" toolCallId="two_layer_matrix_q" input={input} expanded onExpand={() => {}} onSubmit={() => {}} />);
+	assert.deepEqual(input, beforeInput);
+	const dock = dom(dockHtml);
+	assert.equal(dock.querySelectorAll('[data-testid="md-code"]').length, 1);
+	assert.equal(dock.querySelector('[data-language="sql"]')?.getAttribute("data-language"), "sql");
+	assert.ok(tex(dockHtml).includes(matrixBody));
+	assert.equal(dock.querySelectorAll("mtr").length, 2);
+
+	// answered-history AnsweredCard (stored answer must not be mutated)
+	const answer: QuestionAnswerData = { kind: "quiz", questionText: doc,
+		options: [{ index: 1, label: "yes" }, { index: 2, label: "no" }],
+		answers: [{ index: 1, label: "yes", value: "yes" }], correct: true, correctIndices: [1], dontKnow: false,
+		explanation: "The WHERE clause filters the outer join.", confidence: 90, answeredAt: "synthetic" };
+	const beforeAnswer = structuredClone(answer);
+	const cardHtml = renderToStaticMarkup(<AnsweredCard answer={answer} />);
+	assert.deepEqual(answer, beforeAnswer);
+	const card = dom(cardHtml);
+	assert.equal(card.querySelectorAll('[data-testid="md-code"]').length, 1);
+	assert.ok(tex(cardHtml).includes(matrixBody));
+	assert.equal(card.querySelectorAll("mtr").length, 2);
+});

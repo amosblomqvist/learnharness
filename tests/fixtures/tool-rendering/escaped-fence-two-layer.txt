@@ -1,0 +1,1 @@
+**Q:** Question: Consider the following SQL query:\\n\\n```sql\\nSELECT *\\nFROM users u\\nLEFT JOIN orders o ON u.id =\\no.user_id\\nWHERE o.status = 'PENDING';\\n```\\n\\nWhat is the behavioral impact of the WHERE clause on this LEFT JOIN?
