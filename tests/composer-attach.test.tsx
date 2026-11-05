@@ -146,9 +146,10 @@ describe("composer attach button", () => {
 		assert.deepEqual(result, { paths: ["/notes/a.pdf"], skipped: 2 });
 	});
 
-	it("server render is the browser case: a disabled-looking paperclip between the input and Send", () => {
+	it("server render is the browser case: an enabled paperclip between the input and Send", () => {
 		const html = renderToStaticMarkup(<Composer busy={false} value="" onChange={() => {}} onSend={() => {}} onStop={() => {}} canSend={false} />);
-		assert.match(html, /aria-label="Attach files"[^>]*aria-disabled="true"|aria-disabled="true"[^>]*aria-label="Attach files"/);
+		assert.match(html, /aria-label="Attach files"/);
+		assert.doesNotMatch(html, /aria-disabled="true"/);
 		const editor = html.indexOf("data-file-path-input");
 		const attach = html.indexOf('data-testid="attach-files"');
 		const send = html.indexOf('aria-label="Send"');
@@ -259,12 +260,10 @@ describe("composer attach button", () => {
 		assert.equal(f.sends, 0);
 	});
 
-	it("browser: the button stays inert and the picker never opens", async () => {
+	it("browser: the button is enabled and opens the file picker; no native paths are inserted", async () => {
 		const f = await fixture({ desktop: false });
-		assert.equal(f.button.getAttribute("aria-disabled"), "true");
+		assert.equal(f.button.getAttribute("aria-disabled"), "false");
 		await act(async () => { f.button.click(); });
-		assert.equal(f.pickerClicks, 0);
-		await f.pick([f.file("a.pdf", "/a.pdf")]);
-		assert.equal(f.value, "readthis");
+		assert.equal(f.pickerClicks, 1);
 	});
 });

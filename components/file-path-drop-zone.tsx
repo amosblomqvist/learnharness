@@ -5,8 +5,28 @@ import { FileSymlinkIcon, XIcon } from "lucide-react";
 import { directoryReferencePath, quoteFilePath } from "@/src/core";
 import { appendToPrimaryInput } from "@/components/dictation";
 import { INSERT_FILE_PATHS_EVENT } from "@/components/path-input";
+import { MAX_IMPORT_BODY_BYTES } from "@/lib/notes-import-limits";
 
 export const BROWSER_NOTICE = "Local file paths can only be attached in the desktop app. You can paste a full path instead.";
+
+/** Browser build (no desktop bridge): each file goes to POST /api/uploads and
+ *  comes back as an absolute host path. Oversized files are refused before
+ *  sending; failures are reported per file and never abort the rest. */
+export async function uploadBrowserFiles(files: File[]): Promise<{ paths: string[]; errors: string[] }> {
+	const paths: string[] = [];
+	const errors: string[] = [];
+	const limit = `${MAX_IMPORT_BODY_BYTES / 1024 / 1024} MiB`;
+	for (const file of files) {
+		if (file.size > MAX_IMPORT_BODY_BYTES) { errors.push(`${file.name} is larger than the ${limit} upload limit.`); continue; }
+		try {
+			const res = await fetch("/api/uploads", { method: "POST", headers: { "x-file-name": encodeURIComponent(file.name), "content-length": String(file.size) }, body: file });
+			const data = await res.json().catch(() => ({})) as { path?: string; error?: string };
+			if (!res.ok || !data.path) throw new Error(data.error ?? `HTTP ${res.status}`);
+			paths.push(data.path);
+		} catch (error) { errors.push(`Could not upload ${file.name}: ${error instanceof Error ? error.message : "failed"}`); }
+	}
+	return { paths, errors };
+}
 
 /** The content area only: the sidebar is deliberately outside this zone.
  * Existing files stay where they are; only quoted path strings enter drafts. */
@@ -60,10 +80,31 @@ export function FilePathDropZone({ children, className }: { children: React.Reac
 				event.stopPropagation();
 				clearDrag();
 				const resolve = window.lh?.getPathForFile;
-				if (!resolve) { setNotice(BROWSER_NOTICE); return; }
 				// Inspect only the dropped item's type, never traverse its entries.
 				// Positively known directories get a durable trailing separator.
 				const entries = Array.from(event.dataTransfer.items).filter((item) => item.kind === "file");
+				const target = event.currentTarget;
+				const insert = (paths: string[]): boolean => {
+					const focused = document.activeElement?.closest<HTMLElement>("[data-file-path-input]");
+					if (focused && target.contains(focused)) {
+						focused.dispatchEvent(new CustomEvent(INSERT_FILE_PATHS_EVENT, { detail: paths }));
+						return true;
+					}
+					if (appendToPrimaryInput(paths.map(quoteFilePath).join(" "))) return true;
+					setNotice("Open a chat to attach file paths.");
+					return false;
+				};
+				if (!resolve) {
+					const isDirectory = (index: number) => { try { return entries[index]?.webkitGetAsEntry?.()?.isDirectory === true; } catch { return false; } };
+					const dropped = Array.from(event.dataTransfer.files).filter((_, index) => !isDirectory(index));
+					if (dropped.length === 0) { setNotice("Folders can't be uploaded from the browser. Drop files instead."); return; }
+					setNotice(`Uploading ${dropped.length} file${dropped.length === 1 ? "" : "s"}…`);
+					void uploadBrowserFiles(dropped).then(({ paths, errors }) => {
+						if (paths.length > 0 && !insert(paths)) return;
+						setNotice(errors.join(" "));
+					});
+					return;
+				}
 				const paths: string[] = [];
 				let skipped = 0;
 				for (const [index, file] of Array.from(event.dataTransfer.files).entries()) {
@@ -81,13 +122,7 @@ export function FilePathDropZone({ children, className }: { children: React.Reac
 					setNotice("No local file paths were available. Drop existing files or folders from your computer.");
 					return;
 				}
-				const focused = document.activeElement?.closest<HTMLElement>("[data-file-path-input]");
-				if (focused && event.currentTarget.contains(focused)) {
-					focused.dispatchEvent(new CustomEvent(INSERT_FILE_PATHS_EVENT, { detail: paths }));
-				} else if (!appendToPrimaryInput(paths.map(quoteFilePath).join(" "))) {
-					setNotice("Open a chat to attach file paths.");
-					return;
-				}
+				if (!insert(paths)) return;
 				setNotice(skipped ? "Some dropped items had no available file path." : "");
 			}}
 		>
@@ -96,7 +131,7 @@ export function FilePathDropZone({ children, className }: { children: React.Reac
 				<div data-testid="file-path-drop-indicator" className="pointer-events-none absolute inset-2 z-50 flex items-center justify-center rounded-xl border-2 border-dashed border-primary bg-background/85 p-6 text-center backdrop-blur-sm">
 					<div className="flex max-w-md flex-col items-center gap-3">
 						<FileSymlinkIcon className="size-8 text-primary" aria-hidden />
-						<span className="font-ui text-sm">{window.lh?.getPathForFile ? "Drop to attach file paths" : BROWSER_NOTICE}</span>
+						<span className="font-ui text-sm">{window.lh?.getPathForFile ? "Drop to attach file paths" : "Drop to upload files"}</span>
 					</div>
 				</div>
 			)}
