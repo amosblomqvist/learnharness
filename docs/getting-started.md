@@ -33,6 +33,8 @@ Sessions are saved locally, including earlier messages when context is compacted
 
 Audio streams from your browser directly to Deepgram using a short-lived token. A `403 Insufficient permissions` error while obtaining that token can mean the key's role is insufficient.
 
+**Local dictation (no key):** Under the same **Dictation** group, set **Provider** to **Parakeet (local)** and download the model once (about 487 MB, 670 MB on disk). Audio is transcribed on your computer and never leaves it; the text appears when you stop dictating, and the language is detected automatically across 25 European languages. See the [model attribution](parakeet-attribution.md).
+
 ## Use local files in a session
 
 In the desktop app, use the paperclip's **Files** or **Folder** choice, or drag files/folders into the content area, to insert their local paths. Files supports any file type and multiple selections; Folder attaches one directory path, including an empty folder, without expanding or reading its contents. Newly picked or dropped known folders get a trailing directory separator so their Folder icon survives saved messages and reloads; files stay unchanged. Older unmarked paths are not retrospectively classified. The agent can then locate/read supported content on the machine running LearnHarness under the existing file-access guards; attaching a path does not grant permissions. This is **not an upload**: originals stay where they are. Ordinary browsers cannot expose these local paths through the picker or drag-and-drop; you can paste a full path instead.

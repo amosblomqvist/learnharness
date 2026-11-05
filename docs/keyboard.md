@@ -62,7 +62,10 @@ handling; this is not a guarantee for every OS/IME or layout-specific key.
   server, including for background turns; it also detaches any local stream.
 
 To keep dictated text, stop dictation with **Mod+D** / Stop rather than the
-fallback Esc cancellation.
+fallback Esc cancellation. With the local Parakeet provider the text appears
+only after you stop (transcription runs on stop); if it fails, the button shows
+the error and **Mod+D** or a click retries the same recording, while Esc
+discards it.
 
 ## Enter and submission
 

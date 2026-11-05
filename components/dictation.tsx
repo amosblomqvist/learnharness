@@ -4,10 +4,10 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Loader2Icon, MicIcon } from "lucide-react";
 import { useSettingsDialog } from "@/components/settings/settings-dialog";
 import { Hint } from "@/components/ui/hint";
-import { deepgramListenUrl, type DictationLanguage } from "@/src/core";
-import { useDictationLanguage } from "@/components/dictation-preference";
-import { setDictationActive } from "@/components/dictation-state";
-export { isDictationActive } from "@/components/dictation-state";
+import { deepgramListenUrl, type DictationLanguage, type DictationProvider } from "@/src/core";
+import { onDictationProviderChange, useDictationLanguage } from "@/components/dictation-preference";
+import { DICTATION_PROVIDER_ROW_ID, setDictationActive, setDictationRetained } from "@/components/dictation-state";
+export { DICTATION_PROVIDER_ROW_ID, isDictationActive } from "@/components/dictation-state";
 
 /**
  * Voice dictation — the cloud engine (STT wave 1, 2026-09-17).
@@ -109,6 +109,27 @@ export const DEEPGRAM_KEY_ID = "DEEPGRAM_API_KEY";
  * instead. Exported for pins; the errored idle button's click recognizes
  * it and deep-links Settings → Keys → the Deepgram row. */
 export const DICTATION_KEYLESS = "Dictation needs a Deepgram key";
+
+/** The Parakeet twin of DICTATION_KEYLESS: the local provider is selected
+ *  but the model is not installed. The errored idle button's click
+ *  deep-links Settings → Keys (the Dictation group, where the provider and
+ *  model rows live). */
+export const DICTATION_MODEL_MISSING = "Dictation needs the local model";
+
+
+/** The line shown when the local transcription fails (the audio is kept). */
+export const DICTATION_TRANSCRIPTION_FAILED = "Transcription failed";
+
+/** The server's cap on one Parakeet recording (PARAKEET_MAX_AUDIO_BYTES):
+ *  10 minutes of 16 kHz mono 16-bit PCM. */
+export const PARAKEET_MAX_AUDIO_BYTES = 10 * 60 * 16_000 * 2;
+
+function concatChunks(chunks: Uint8Array[]): Uint8Array {
+	const out = new Uint8Array(chunks.reduce((n, c) => n + c.byteLength, 0));
+	let at = 0;
+	for (const c of chunks) { out.set(c, at); at += c.byteLength; }
+	return out;
+}
 
 /** Mint a fresh short-lived token (the route holds the real key
  *  server-side). Module-level: the start path's warm cache and the
@@ -217,6 +238,26 @@ export function appendToPrimaryInput(text: string): boolean {
  * one finisher. Empty registry (no hook mounted) → resolve immediately. */
 let dictationFinisher: (() => Promise<void>) | null = null;
 
+/* The retained recording (S9, "a finished dictation is never lost"): the PCM
+ * of a Parakeet run whose transcription did not land. Module-level so it
+ * survives the page that recorded it (submit → navigate unmounts the hook);
+ * a newly mounted hook comes up offering Retry. Dropped on a successful
+ * transcription, on cancel/Esc, and when the provider leaves Parakeet. */
+let retainedPcm: Uint8Array | null = null;
+
+function setRetainedPcm(pcm: Uint8Array | null) {
+	retainedPcm = pcm;
+	setDictationRetained(pcm !== null);
+}
+
+/** Drop the retained recording without any hook (Esc on a page that has no
+ *  dictation; the keyboard chain calls it next to the cancel event). */
+export function discardRetainedDictation(): void { setRetainedPcm(null); }
+
+// Any confirmed provider change invalidates audio recorded under the old one,
+// even when no dictation hook is mounted to notice.
+onDictationProviderChange(discardRetainedDictation);
+
 /** Finish any live dictation run before continuing (see Dictation.finish). */
 export function finishDictation(): Promise<void> {
 	return dictationFinisher ? dictationFinisher() : Promise.resolve();
@@ -274,6 +315,11 @@ export type Dictation = {
 	 * the keyless click leaves for Settings and the surface must come
 	 * back clean. */
 	clearError: () => void;
+	/** A failed Parakeet transcription kept its audio: true until a retry
+	 *  succeeds or the audio is dropped (cancel, provider change). It outlives the page. */
+	canRetry: boolean;
+	/** Re-send the retained audio to the local transcriber. */
+	retry: () => void;
 };
 
 /**
@@ -282,9 +328,14 @@ export type Dictation = {
  * question waits.
  */
 export function useDictation({ append }: { append: (text: string) => void }): Dictation {
-	const { getLanguage } = useDictationLanguage();
+	const { getLanguage, getProvider, provider: storedProvider, language: storedLanguage } = useDictationLanguage();
+	/** The warm token only serves Deepgram: skipped once the provider is
+	 *  known to be local (unknown counts as Deepgram, as before). */
+	const providerRef = useRef(storedProvider);
+	providerRef.current = storedProvider;
 	const [phase, setPhase] = useState<DictationPhase>("idle");
-	const [error, setError] = useState<string | null>(null);
+	// Audio kept by an earlier page: this one starts with the failure showing.
+	const [error, setError] = useState<string | null>(() => (retainedPcm ? DICTATION_TRANSCRIPTION_FAILED : null));
 	/** Latest RMS from the worklet — the meter samples this (dictate pattern). */
 	const levelRef = useRef(0);
 	/** The page's fallback append — kept fresh per render so a mid-recording
@@ -303,6 +354,18 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 	// the per-run nodes disconnect on teardown; the socket is recreated per
 	// run; the AudioContext is app-lifetime (mitigation C).
 	const wsRef = useRef<WebSocket | null>(null);
+	/** Parakeet run state: frames captured so far, the audio kept after a
+	 *  failed transcription, and the request in flight. */
+	const localRef = useRef(false);
+	const chunksRef = useRef<Uint8Array[]>([]);
+	const chunkBytesRef = useRef(0);
+	const [canRetry, setCanRetry] = useState(() => retainedPcm !== null);
+	const abortRef = useRef<AbortController | null>(null);
+	const stopRef = useRef<() => void>(() => {});
+	const dropRetained = useCallback(() => {
+		setRetainedPcm(null);
+		setCanRetry(false);
+	}, []);
 	const streamRef = useRef<MediaStream | null>(null);
 	/** Per-run graph nodes — the CONTEXT outlives runs (mitigation C). */
 	const sourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
@@ -341,6 +404,10 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 			safetyRef.current = null;
 		}
 		pendingRef.current = [];
+		chunksRef.current = [];
+		chunkBytesRef.current = 0;
+		abortRef.current?.abort();
+		abortRef.current = null;
 		for (const track of streamRef.current?.getTracks() ?? []) track.stop();
 		streamRef.current = null;
 		sourceRef.current?.disconnect();
@@ -362,8 +429,38 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 		for (const w of waitersRef.current.splice(0)) w();
 		// Pre-mint for the next run (mitigation D) — best-effort; a keyless
 		// page just doesn't warm.
-		if (warmNext) warmTokens.refresh();
+		if (warmNext && providerRef.current !== "parakeet") warmTokens.refresh();
 	}, []);
+
+	/** POST the PCM to the local transcriber and land the text like Deepgram
+	 *  finals. `gen` guards staleness; on failure the audio stays retained. */
+	const transcribe = useCallback(async (gen: number, pcm: Uint8Array) => {
+		const controller = new AbortController();
+		abortRef.current = controller;
+		setRetainedPcm(pcm);
+		let text: string;
+		try {
+			const res = await fetch("/api/stt/parakeet/transcribe", {
+				method: "POST",
+				headers: { "Content-Type": "application/octet-stream" },
+				body: pcm as BodyInit,
+				signal: controller.signal,
+			});
+			if (!res.ok) throw new Error(`transcribe ${res.status}`);
+			text = ((await res.json()) as { text?: string }).text ?? "";
+		} catch {
+			if (gen !== genRef.current) return;
+			setError(DICTATION_TRANSCRIPTION_FAILED);
+			setCanRetry(true);
+			cleanup();
+			return;
+		}
+		if (gen !== genRef.current) return;
+		setRetainedPcm(null);
+		setCanRetry(false);
+		if (text.trim()) bufferRef.current.push(text.trim());
+		cleanup();
+	}, [cleanup]);
 
 	/** Open the Deepgram socket and wire its messages. `gen` guards staleness. */
 	const openSocket = useCallback(
@@ -437,10 +534,15 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 		reconnectsRef.current = 0;
 		bufferRef.current = []; // fresh run, fresh buffer (round 2)
 		pendingRef.current = []; // fresh run, fresh queue (mitigation A)
+		chunksRef.current = [];
+		chunkBytesRef.current = 0;
+		dropRetained(); // a new recording replaces any audio kept from a failure
 		const gen = ++genRef.current;
 		let language: DictationLanguage;
+		let provider: DictationProvider;
 		try {
 			language = await getLanguage();
+			provider = await getProvider();
 		} catch (e) {
 			if (gen !== genRef.current) return;
 			setError(e instanceof Error ? e.message : "Dictation language unavailable");
@@ -449,14 +551,36 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 		}
 		if (gen !== genRef.current) return;
 
+		// The local provider needs its model before the mic opens.
+		const local = provider === "parakeet";
+		localRef.current = local;
+		if (local) {
+			let ready = false;
+			try {
+				const res = await fetch("/api/stt/parakeet");
+				ready = res.ok && ((await res.json()) as { state?: string }).state === "ready";
+			} catch (e) {
+				if (gen !== genRef.current) return;
+				setError(e instanceof Error ? e.message : "Local model unavailable");
+				cleanup();
+				return;
+			}
+			if (gen !== genRef.current) return;
+			if (!ready) {
+				setError(DICTATION_MODEL_MISSING);
+				cleanup();
+				return;
+			}
+		}
+
 		// Mitigation D: the warm token (pre-minted at mount / after the last
 		// run) resolves ~instantly; a cold/keyless mint surfaces below. The
 		// mic is the long pole (macOS HAL + APM init) and gates everything —
 		// the token runs concurrently with it. 127.0.0.1 is a secure
 		// context, so getUserMedia works without TLS; macOS TCC prompts on
 		// first use.
-		const tokenPromise = warmTokens.mint();
-		tokenPromise.catch(() => {}); // surfaced below; no unhandled rejection
+		const tokenPromise = local ? null : warmTokens.mint();
+		tokenPromise?.catch(() => {}); // surfaced below; no unhandled rejection
 		const micPromise = navigator.mediaDevices.getUserMedia({
 			audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true },
 		});
@@ -479,16 +603,32 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 			const worklet = new AudioWorkletNode(ctx, "pcm-capture");
 			workletRef.current = worklet;
 			worklet.port.onmessage = (e) => {
-				const msg = e.data as { type: string; rms?: number; buffer?: ArrayBuffer };
+				// The worklet posts the Int16Array itself (typed array, not a bare
+				// ArrayBuffer); the socket path sends it as-is, the local path
+				// below must view its memory, never convert it element-wise.
+				const msg = e.data as { type: string; rms?: number; buffer?: ArrayBuffer | ArrayBufferView };
 				if (msg.type === "level") {
 					levelRef.current = msg.rms ?? 0; // never reset to zero (dictate pattern)
+				} else if (msg.type === "audio" && localRef.current) {
+					// Local provider: keep the PCM, up to the server's cap, then
+					// stop by itself and transcribe what was captured.
+					const room = PARAKEET_MAX_AUDIO_BYTES - chunkBytesRef.current;
+					if (room <= 0) return;
+					const raw = msg.buffer!;
+					const frame = ArrayBuffer.isView(raw)
+						? new Uint8Array(raw.buffer, raw.byteOffset, raw.byteLength)
+						: new Uint8Array(raw);
+					const kept = frame.byteLength > room ? frame.subarray(0, room) : frame;
+					chunksRef.current.push(kept);
+					chunkBytesRef.current += kept.byteLength;
+					if (chunkBytesRef.current >= PARAKEET_MAX_AUDIO_BYTES) stopRef.current();
 				} else if (msg.type === "audio") {
 					const ws = wsRef.current;
 					if (ws && ws.readyState === WebSocket.OPEN) ws.send(msg.buffer!);
 					// Mitigation A: not OPEN yet (handshake or reconnect gap) —
 					// queue, capped; the open handler flushes in order.
 					else {
-						pendingRef.current.push(msg.buffer!);
+						pendingRef.current.push(msg.buffer as ArrayBuffer);
 						if (pendingRef.current.length > 256) pendingRef.current.shift();
 					}
 				}
@@ -512,9 +652,13 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 			return;
 		}
 		if (gen !== genRef.current) return;
+		if (local) {
+			setPhase("recording");
+			return;
+		}
 		let token: string;
 		try {
-			token = await tokenPromise;
+			token = await tokenPromise!;
 		} catch (e) {
 			if (gen !== genRef.current) return;
 			setError(e instanceof Error ? e.message : "token unavailable");
@@ -525,7 +669,7 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 		// Mitigation B: the handshake fires the moment the graph is live,
 		// overlapping any remaining token wait — mic-gated, never before it.
 		openSocket(gen, token, language);
-	}, [openSocket, cleanup, getLanguage]);
+	}, [openSocket, cleanup, getLanguage, getProvider, dropRetained]);
 
 	const stop = useCallback(() => {
 		const gen = genRef.current;
@@ -540,6 +684,16 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 		sourceRef.current = null;
 		workletRef.current?.disconnect();
 		workletRef.current = null;
+
+		if (localRef.current) {
+			// Local provider: the mic is dead, so the chunk list is final.
+			const pcm = concatChunks(chunksRef.current);
+			chunksRef.current = [];
+			chunkBytesRef.current = 0;
+			if (pcm.byteLength === 0) cleanup();
+			else void transcribe(gen, pcm);
+			return;
+		}
 
 		const ws = wsRef.current;
 		if (ws && ws.readyState === WebSocket.OPEN) {
@@ -557,16 +711,32 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 		} else {
 			cleanup();
 		}
-	}, [phase, cleanup]);
+	}, [phase, cleanup, transcribe]);
+	stopRef.current = stop;
+
+	const retry = useCallback(() => {
+		const pcm = retainedPcm;
+		if (!pcm || phase !== "idle") return;
+		setError(null);
+		setCanRetry(false);
+		setDictationActive(true);
+		setPhase("stopping");
+		void transcribe(++genRef.current, pcm);
+	}, [phase, transcribe]);
 
 	const cancel = useCallback(() => {
-		if (phase === "idle") return;
+		if (phase === "idle") {
+			// Esc on a failed transcription discards the kept audio.
+			if (retainedPcm || canRetry) { dropRetained(); setError(null); }
+			return;
+		}
 		// Discard first, teardown second — cleanup() flushes, and the now-empty
 		// buffer makes that flush a no-op. Also kills a "stopping" run: the
 		// flush already underway is abandoned (its timer is cleared inside).
 		bufferRef.current = [];
+		dropRetained();
 		cleanup();
-	}, [phase, cleanup]);
+	}, [phase, canRetry, cleanup, dropRetained]);
 
 	const finish = useCallback((): Promise<void> => {
 		return new Promise((resolve) => {
@@ -590,17 +760,20 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 	}, [finish]);
 
 	const toggle = useCallback(() => {
-		if (phase === "idle") void start();
-		else if (phase === "recording" || phase === "connecting") stop();
+		if (phase === "idle") {
+			// Kept audio from a failed transcription is retried, never replaced.
+			if (retainedPcm) retry();
+			else void start();
+		} else if (phase === "recording" || phase === "connecting") stop();
 		// "stopping" presses are ignored — the flush is in flight.
-	}, [phase, start, stop]);
+	}, [phase, start, stop, retry]);
 
 	// Shortcut seams (keyboard wave A): ⌘D toggles from anywhere on the
 	// page; the Esc chain lands here as a CANCEL (owner, round 3). Each
 	// page owns ONE hook instance, and only the mounted page's listener is
 	// attached.
 	useEffect(() => {
-		warmTokens.refresh(); // pre-mint at mount (mitigation D) — silent if keyless
+		if (providerRef.current !== "parakeet") warmTokens.refresh(); // pre-mint at mount (mitigation D) — silent if keyless
 		return () => {
 			// Navigation cancels capture: invalidate every pending await before
 			// releasing resources, and never append into a different page's input.
@@ -608,6 +781,15 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 			cleanup(false);
 		};
 	}, [cleanup]);
+	// A provider change consumes audio kept from a failed local transcription.
+	useEffect(() => {
+		// `storedLanguage` is undefined until the preference has loaded; until then
+		// the provider is only the factory default, not a choice to react to.
+		if (storedLanguage !== undefined && storedProvider !== "parakeet" && (retainedPcm || canRetry)) {
+			dropRetained();
+			setError(null);
+		}
+	}, [storedProvider, storedLanguage, dropRetained]);
 	useEffect(() => {
 		window.addEventListener("lh:kbd-toggle-dictation", toggle);
 		return () => window.removeEventListener("lh:kbd-toggle-dictation", toggle);
@@ -627,6 +809,8 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 		finish,
 		cancel,
 		clearError: () => setError(null),
+		canRetry,
+		retry,
 	};
 }
 
@@ -643,13 +827,15 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
  *             (full text in the tooltip), cleared on the next click.
  */
 export function DictationBar({ dictation }: { dictation: Dictation }) {
-	const { phase, error, levelRef, toggle, active, clearError } = dictation;
+	const { phase, error, levelRef, toggle, active, clearError, canRetry, retry } = dictation;
 	const { open: openSettings } = useSettingsDialog();
 	/** The keyless click (zero-keys wave, owner dictation trio): the errored
 	 *  idle button deep-links Settings → Keys → the Deepgram row and clears
 	 *  the error — the surface is clean when the user returns. Any other
 	 *  error keeps the old behavior (click = retry, which clears). */
 	const keyless = error === DICTATION_KEYLESS;
+	/** The model-missing click does the same for the local provider. */
+	const modelMissing = error === DICTATION_MODEL_MISSING;
 	const [levels, setLevels] = useState<number[]>(() => new Array(METER_CELLS).fill(0));
 	/** Adaptive cell count (owner round 2): derived from the meter's
 	 *  measured width — narrow rows show fewer bars instead of
@@ -705,11 +891,16 @@ export function DictationBar({ dictation }: { dictation: Dictation }) {
 						if (keyless) {
 							clearError();
 							openSettings("keys", DEEPGRAM_KEY_ID);
+						} else if (modelMissing) {
+							clearError();
+							openSettings("keys", DICTATION_PROVIDER_ROW_ID);
+						} else if (canRetry) {
+							retry();
 						} else {
 							toggle();
 						}
 					}}
-					aria-label={error ? `Dictation failed: ${error}` : "Start dictation"}
+					aria-label={canRetry ? "Retry transcription" : error ? `Dictation failed: ${error}` : "Start dictation"}
 					data-testid="dictation-toggle"
 					className="flex h-7 w-full items-center justify-center gap-1.5 rounded-md border border-border/50 bg-card/50 text-xs text-muted-foreground/70 shadow-lg backdrop-blur transition-colors hover:border-border hover:text-muted-foreground"
 				>

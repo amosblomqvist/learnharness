@@ -27,12 +27,14 @@ Nonsecret settings are deltas in `<data root>/settings.json`; absent values reso
 
 | Variable | Purpose |
 | --- | --- |
-| `LH_DATA_DIR` | Mutable chats/jobs/graph/settings/prompts; default repo `data/`. |
+| `LH_DATA_DIR` | Mutable chats/jobs/graph/settings/prompts and the downloaded Parakeet dictation model (`models/`); default repo `data/`. |
 | `LH_AUTH_FILE` | Keys/custom-endpoint binding; default repo-root `auth.json`, outside `data/`. |
 | Provider API-key variables | Optional, selected-provider dependent; UI names are in `src/core/auth-keys.ts`. |
 | `TAVILY_API_KEY`, `BRAVE_API_KEY`, `EXA_API_KEY`, `FIRECRAWL_API_KEY`, `OLLAMA_API_KEY` | Optional search adapters. Without a Settings pin, the first keyed engine wins: Tavily → Brave → Exa → Firecrawl → Ollama. A pinned engine requires its own key; no silent fallback. Ollama search is hosted at ollama.com, not a local model server. Page fetching is independent; research can fetch known URLs without a search key. |
 | `DEEPGRAM_API_KEY` | Optional dictation token minting. |
 | `CHROME_PATH` | Chrome/Chromium executable fallback for demo verification; Electron's browser helper is primary. No extra Chromium is downloaded. |
+
+Local dictation (Settings → Providers → Dictation → Provider → Parakeet) needs no key. It downloads the pinned Parakeet TDT 0.6B v3 int8 archive (about 487 MB) from the sherpa-onnx release into `LH_DATA_DIR/models/`, unpacks it with the system `tar`, and transcribes on the server with `sherpa-onnx-node`; `LH_PARAKEET_MODEL_DIR=<unpacked model dir>` also enables the real-model test in `tests/parakeet-transcribe.test.ts`. Attribution: [parakeet-attribution.md](parakeet-attribution.md).
 
 Ordinary Next development can read `.env.local`. Real environment keys take precedence over saved keys. Saved auth is restrictive-permission plaintext, not an encrypted vault. Packaged Electron sets separate data/auth locations under `userData`; it does not use the repo development profile.
 

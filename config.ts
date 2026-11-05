@@ -113,6 +113,9 @@ export const GRAPH_FORMAT_FILE = path.join(PATHS.graph, "format.json");
  */
 export const SETTINGS_FILE = path.join(DATA_ROOT, "settings.json");
 
+/** The downloaded local dictation model (Parakeet TDT 0.6B v3, int8). */
+export const PARAKEET_MODEL_DIR = path.join(DATA_ROOT, "models", "parakeet-tdt-0.6b-v3-int8");
+
 /**
  * User prompt-override files (settings-storage wave, 2026-09-19): the
  * per-segment system-prompt overrides mirroring the SOURCE layout
