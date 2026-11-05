@@ -42,9 +42,7 @@ interface ImportResult {
 	error?: string;
 	/** The machine discriminator when ok:false is a config refusal — the
 	 * BYOK models refusal (owner, 2026-09-22) or the provider-key refusal
-	 * (2026-09-25) or CONFIRMED daily quota exhaustion (2026-11-03); the
-	 * client can open the setup/keys flow off it or stop dispatching
-	 * pending files. */
+	 * (2026-09-25) — or confirmed daily quota exhaustion (2026-11-03). */
 	code?: "models_not_configured" | (typeof PROVIDER_KEY_MISSING_CODE) | (typeof QUOTA_EXHAUSTED_CODE);
 	missing?: string[];
 	/** The key-refusal specifics (provider_key_missing only). */

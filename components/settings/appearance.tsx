@@ -94,11 +94,8 @@ export function appearanceVars(a: ReturnType<typeof resolveAppearance>): Record<
 	vars["--lh-heading-weight"] = String(a.mdRendering.headingWeight);
 	if (a.mdRendering.boldColor !== null) vars["--lh-ink-strong"] = a.mdRendering.boldColor;
 	if (a.mdRendering.italicColor !== null) vars["--lh-ink-italic"] = a.mdRendering.italicColor;
-	// Markdown alignment: left is the stylesheet's own default.
-	// Right/justify align the text (justify hyphenates; right also pushes
-	// the content-hugging boxes right). Center keeps the text left and
-	// narrows the transcript column instead: its TEXT width plus the
-	// column's px-6, so the readable line length matches the setting.
+	// Markdown alignment (left is the stylesheet default). Center keeps the text left and
+	// narrows the transcript column to its TEXT width plus the column's px-6.
 	const align = a.mdRendering.textAlign;
 	if (align === "right" || align === "justify") vars["--lh-md-align"] = align;
 	if (align === "justify") vars["--lh-md-hyphens"] = "auto";

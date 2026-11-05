@@ -190,22 +190,14 @@ export class ProviderKeyMissingError extends Error {
 	}
 }
 
-/** CONFIRMED daily quota exhaustion (2026-11-03): the provider's free-tier
- * daily allowance is spent — observed as upstream rate_limit [429] with
- * "Rate limit exceeded: free-models-per-day", sometimes re-wrapped by the
- * gateway as a generic 500 or 503 auth_unavailable. This is the machine
- * discriminator the import route stamps on a failed result and the client
- * queue switches on; generic auth/500/503 WITHOUT the marker must never
- * match. */
+/** Confirmed daily free-tier quota exhaustion (2026-11-03): the code the import
+ * route stamps on a failed result and the client queue stops on. */
 export const QUOTA_EXHAUSTED_CODE = "quota_exhausted" as const;
-/** The provider-text marker of confirmed daily quota exhaustion. Narrow on
- * purpose: it appears only in the free-tier daily-limit refusal, never in a
- * plain auth/server failure. */
+/** Appears only in the daily-limit refusal, never in a plain auth/500/503 failure. */
 const QUOTA_EXHAUSTED_MARKER = "free-models-per-day";
-/** Actionable guidance for a confirmed exhaustion — no invented reset time
- * and no hardcoded quota number. */
+/** What the learner sees for the file that hit the exhaustion. */
 export const QUOTA_EXHAUSTED_MESSAGE = "Daily free model quota exhausted. Wait for reset or configure another model/provider.";
-/** Honest wording for queued files never dispatched after the exhaustion. */
+/** What the learner sees for queued files never dispatched after it. */
 export const QUOTA_UNATTEMPTED_MESSAGE = "Not attempted (daily quota exhausted).";
 /** The marker sits in the message even when the gateway re-wrapped the upstream
  * 429 as a 500/503 and extraction wrapped that again (each wrapper copies it). */
@@ -404,9 +396,8 @@ export interface AgentSettings {
 export const MD_TEXT_ALIGNS = ["left", "center", "right", "justify"] as const;
 export type MdTextAlign = (typeof MD_TEXT_ALIGNS)[number];
 
-/** Center's reading-column TEXT widths in px. Medium (700px) matches the
- *  readable line length common in note-taking apps; small and large step
- *  down and up from it. Tests pin the set. */
+/** Center's reading-column TEXT widths in px; medium (700px) is the line length
+ *  common in note-taking apps. Tests pin the set. */
 export const MD_CENTER_WIDTHS = { small: 560, medium: 700, large: 880 } as const;
 export type MdCenterWidth = keyof typeof MD_CENTER_WIDTHS;
 
@@ -419,11 +410,8 @@ export interface MdRenderingSettings {
 	boldColor?: string | null;
 	/** Color for *italic* spans (default #ffffff). */
 	italicColor?: string | null;
-	/** Alignment of rendered transcript markdown — replies, job briefs,
-	 *  reasoning (default left — today's look); question and practice
-	 *  docks and cards keep normal alignment. Center is NOT
-	 *  line-centering: it narrows the whole transcript column to
-	 *  centerWidth and keeps the text left-aligned. */
+	/** Alignment of rendered transcript markdown: replies, job briefs, reasoning (default
+	 *  left; docks and cards keep normal alignment). Center narrows the column, text stays left. */
 	textAlign?: MdTextAlign;
 	/** Center's column width (default medium). Inert under any other
 	 *  alignment; kept so switching back to Center restores it. */

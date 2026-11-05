@@ -70,11 +70,8 @@ export function SettingsRow({
 	/** Dependency graying, graph-view style: the whole row dims when the
 	 *  control is inert (parent off, no file yet, …). */
 	dimmed?: boolean;
-	/** For a control that cannot shrink (a segmented control): when the
-	 *  dialog is too narrow for label and control side by side, the control
-	 *  drops under the label instead of overflowing. The row also becomes a
-	 *  size container, so the control can pick compact labels when even a
-	 *  full line is too narrow for it. */
+	/** For a control that cannot shrink: it drops under the label when the dialog is too
+	 *  narrow, and the row becomes a size container so the control can pick compact labels. */
 	wrap?: boolean;
 }) {
 	return (
