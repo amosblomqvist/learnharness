@@ -117,6 +117,9 @@ it("one unsupported file uses the singular line; a file with no extension is lis
 	const mixed = createNotesImportQueue(async ([f]) => [success(f!.name)]);
 	mixed.append([file("Main.java", "Course/Main.java"), file("Makefile", "Course/Makefile")]);
 	assert.deepEqual(mixed.getSnapshot().errors, ["Skipped 2 files that aren't text, Markdown, or PDF (.java, no extension)."]);
+	const trailingDot = createNotesImportQueue(async ([f]) => [success(f!.name)]);
+	trailingDot.append([file("notes.")]);
+	assert.deepEqual(trailingDot.getSnapshot().errors, ["Skipped 1 file that isn't text, Markdown, or PDF (no extension)."]);
 });
 
 it("names the import can't use are counted into one line, and path safety is checked before type", async () => {
