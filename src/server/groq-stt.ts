@@ -36,7 +36,6 @@ import {
 	GROQ_KEY_ID,
 	GROQ_MAX_BODY_BYTES,
 	GROQ_MAX_UPLOAD_BYTES,
-	GROQ_PROMPT_MAX_CHARS,
 	isDictationLanguage,
 	isGroqWhisperModel,
 	whisperLanguage,
@@ -50,7 +49,6 @@ const GROQ_TRANSCRIPTIONS_URL = "https://api.groq.com/openai/v1/audio/transcript
 const GROQ_TIMEOUT_MS = 90_000;
 const HEADERS = { "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff" };
 const TOO_LARGE = "The recording is too large for Groq. Dictate in shorter runs.";
-const WAV_TYPES = new Set(["audio/wav", "audio/x-wav", "audio/wave"]);
 
 /** `retryable` tells the client whether sending the same request again may work. */
 function fail(status: number, message: string, options: { retryable?: boolean; headers?: HeadersInit } = {}): Response {
@@ -121,16 +119,6 @@ async function groqDetail(res: Response, key: string): Promise<string> {
 	return detail.replaceAll(key, "[redacted]").slice(0, 200);
 }
 
-function retryAfterSeconds(res: Response): number | undefined {
-	const seconds = Number(res.headers.get("retry-after"));
-	return Number.isFinite(seconds) && seconds > 0 ? seconds : undefined;
-}
-
-function retryAfter(seconds: number | undefined): string {
-	if (seconds === undefined) return "";
-	return seconds < 90 ? ` Try again in ${Math.ceil(seconds)} s.` : ` Try again in ${Math.ceil(seconds / 60)} min.`;
-}
-
 /** Map a Groq failure to a user-facing message. 429 and 413 keep their status
  * (the client may react); everything else is a 502 so it is never mistaken for
  * our own 400/403/415/503. A 429 passes Groq's Retry-After on as a header, and
@@ -145,10 +133,13 @@ async function groqFailure(res: Response, key: string): Promise<Response> {
 		case 413:
 			return fail(413, TOO_LARGE);
 		case 429: {
-			const seconds = retryAfterSeconds(res);
-			return fail(429, `Groq rate limit reached.${retryAfter(seconds) || " Wait a moment and try again."}`, {
+			const seconds = Number(res.headers.get("retry-after"));
+			const known = Number.isFinite(seconds) && seconds > 0;
+			const wait = !known ? " Wait a moment and try again."
+				: seconds < 90 ? ` Try again in ${Math.ceil(seconds)} s.` : ` Try again in ${Math.ceil(seconds / 60)} min.`;
+			return fail(429, `Groq rate limit reached.${wait}`, {
 				retryable: true,
-				headers: seconds === undefined ? undefined : { "Retry-After": String(Math.ceil(seconds)) },
+				headers: known ? { "Retry-After": String(Math.ceil(seconds)) } : undefined,
 			});
 		}
 		case 400:
@@ -159,13 +150,6 @@ async function groqFailure(res: Response, key: string): Promise<Response> {
 				? fail(502, `Groq is unavailable (${res.status}). Try again shortly.`, { retryable: true })
 				: fail(502, `Groq transcription failed (${res.status})${detail ? `: ${detail}` : "."}`);
 	}
-}
-
-/** The end of the previous transcript, as Whisper's `prompt`: trimmed and cut
- * to the last GROQ_PROMPT_MAX_CHARS characters (by code point, so a surrogate
- * pair is never split). Whisper reads at most 224 tokens of it. */
-function whisperPrompt(text: string): string {
-	return [...text.trim()].slice(-GROQ_PROMPT_MAX_CHARS).join("").trim();
 }
 
 /** POST: validate the upload, forward it to Groq, return `{ text }`. */
@@ -188,7 +172,7 @@ export async function groqTranscribeResponse(request: Request): Promise<Response
 	const audio = form.get("audio");
 	if (!(audio instanceof File) || audio.size === 0) return fail(400, "Missing audio.");
 	if (audio.size > GROQ_MAX_UPLOAD_BYTES) return fail(413, TOO_LARGE);
-	if (!WAV_TYPES.has(audio.type.toLowerCase())) return fail(415, "Unsupported audio type; send a WAV file.");
+	if (audio.type !== "audio/wav") return fail(415, "Unsupported audio type; send a WAV file.");
 	if (!looksLikeWav(new Uint8Array(await audio.slice(0, WAV_HEADER_BYTES).arrayBuffer()))) {
 		return fail(400, "The audio is not a valid WAV file.");
 	}
@@ -200,7 +184,7 @@ export async function groqTranscribeResponse(request: Request): Promise<Response
 	const language = requested === null ? undefined : whisperLanguage(requested);
 	const rawPrompt = form.get("prompt");
 	if (rawPrompt !== null && typeof rawPrompt !== "string") return fail(400, "Unsupported dictation prompt.");
-	const prompt = rawPrompt === null ? "" : whisperPrompt(rawPrompt);
+	const prompt = rawPrompt?.trim();
 
 	const upstream = new FormData();
 	upstream.set("file", new File([audio], "dictation.wav", { type: "audio/wav" }));

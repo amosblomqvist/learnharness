@@ -8,7 +8,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { after, afterEach, beforeEach, describe, it } from "node:test";
-import { GROQ_DICTATION_HEADER, GROQ_MAX_BODY_BYTES, GROQ_MAX_UPLOAD_BYTES, GROQ_PROMPT_MAX_CHARS } from "../src/core/dictation.ts";
+import { GROQ_DICTATION_HEADER, GROQ_MAX_BODY_BYTES, GROQ_MAX_UPLOAD_BYTES } from "../src/core/dictation.ts";
 import { encodePcm16Wav } from "../src/core/wav.ts";
 
 const dir = mkdtempSync(path.join(tmpdir(), "lh-groq-stt-"));
@@ -127,10 +127,7 @@ describe("input validation", () => {
 		const res = await post(form({ audio: liar }));
 		assert.equal(res.status, 400);
 		assert.match(await message(res), /not a valid WAV/);
-		for (const type of ["audio/x-wav", "audio/wave", "AUDIO/WAV"]) {
-			assert.equal((await post(form({ audio: wavFile(1600, type) }))).status, 200, type);
-		}
-		assert.equal(calls.length, 3, "only the three accepted types reached Groq");
+		assert.equal(calls.length, 0, "neither reached Groq");
 	});
 
 	it("rejects an unknown model or language before contacting Groq", async () => {
@@ -334,17 +331,6 @@ describe("prompt: the end of the previous chunk, so Whisper carries on", () => {
 		assert.equal(calls[1]!.form.has("prompt"), false);
 		await post(form({ prompt: "   " }));
 		assert.equal(calls[2]!.form.has("prompt"), false, "a blank prompt is not sent");
-	});
-
-	it("keeps only the last GROQ_PROMPT_MAX_CHARS characters and never splits a surrogate pair", async () => {
-		await post(form({ prompt: "x".repeat(5000) + "tail" }));
-		const sent = calls[0]!.form.get("prompt") as string;
-		assert.equal(sent.length, GROQ_PROMPT_MAX_CHARS);
-		assert.ok(sent.endsWith("tail"));
-		await post(form({ prompt: "a" + "😀".repeat(GROQ_PROMPT_MAX_CHARS) }));
-		const emoji = calls[1]!.form.get("prompt") as string;
-		assert.equal([...emoji].length, GROQ_PROMPT_MAX_CHARS);
-		assert.equal(emoji, "😀".repeat(GROQ_PROMPT_MAX_CHARS), "whole code points only, no lone surrogate");
 	});
 
 	it("rejects a prompt that is not text, before contacting Groq", async () => {
