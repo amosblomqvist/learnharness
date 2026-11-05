@@ -47,13 +47,20 @@ import { useAppearance } from "./appearance.tsx";
 import { FontMenuList } from "./model-menu";
 import { CommitInput, SegmentedControl, SettingsMenuTrigger, SettingsRow, ThinSelect, Toggle } from "./controls.tsx";
 
-/** The text-alignment row's buttons, in MD_TEXT_ALIGNS order. */
+/** The text-alignment row's buttons, in MD_TEXT_ALIGNS order. Center is not
+ *  line-centering (it narrows the reading column and keeps the text left),
+ *  so its name and tooltip say so instead of promising centered lines. */
 const TEXT_ALIGN_OPTIONS = [
 	{ value: "left", label: "Left", icon: TextAlignStartIcon },
-	{ value: "center", label: "Center", icon: TextAlignCenterIcon },
+	{
+		value: "center",
+		label: "Center column",
+		title: "Center column: a narrower, centered reading column; the text stays left-aligned",
+		icon: TextAlignCenterIcon,
+	},
 	{ value: "right", label: "Right", icon: TextAlignEndIcon },
 	{ value: "justify", label: "Justify", icon: TextAlignJustifyIcon },
-] as const satisfies readonly { value: MdTextAlign; label: string; icon: unknown }[];
+] as const satisfies readonly { value: MdTextAlign; label: string; title?: string; icon: unknown }[];
 
 /** Center's column-width buttons (words, no icons); the tooltip names the
  *  text width from MD_CENTER_WIDTHS. */

@@ -321,11 +321,24 @@ describe("AppearanceSection (thin SSR)", () => {
 		const group = tagOf(html, "seg-text-align");
 		assert.ok(group.includes('role="radiogroup"'));
 		assert.ok(group.includes('aria-label="Text alignment"'));
-		for (const [value, label] of [["left", "Left"], ["center", "Center"], ["right", "Right"], ["justify", "Justify"]]) {
+		for (const [value, label] of [["left", "Left"], ["center", "Center column"], ["right", "Right"], ["justify", "Justify"]]) {
 			const button = tagOf(html, `seg-text-align-${value}`);
 			assert.ok(button.includes('role="radio"'), value);
 			assert.ok(button.includes(`aria-label="${label}"`), value);
 			assert.ok(button.includes(`aria-checked="${value === "left"}"`), `${value} checked state`);
+		}
+	});
+
+	it("Center is named and explained as what it does: a narrower column, text still left", () => {
+		const html = renderToStaticMarkup(<AppearanceSection appearance={undefined} onSectionChange={() => {}} />);
+		const center = tagOf(html, "seg-text-align-center");
+		assert.ok(center.includes('aria-label="Center column"'));
+		const title = center.match(/title="([^"]*)"/)?.[1] ?? "";
+		assert.match(title, /narrower/);
+		assert.match(title, /left-aligned/);
+		// the other three keep their plain names as tooltips
+		for (const [value, label] of [["left", "Left"], ["right", "Right"], ["justify", "Justify"]]) {
+			assert.ok(tagOf(html, `seg-text-align-${value}`).includes(`title="${label}"`), value);
 		}
 	});
 
