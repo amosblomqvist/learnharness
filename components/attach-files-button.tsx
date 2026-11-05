@@ -3,25 +3,29 @@
 import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
 import { createPortal } from "react-dom";
 import { PaperclipIcon } from "lucide-react";
-import { directoryReferencePath, quoteFilePath } from "@/src/core";
+import { directoryReferencePath, filePathLabel, quoteFilePath } from "@/src/core";
+import { ATTACH_ACCEPT, ATTACH_EXTENSIONS } from "@/lib/notes-import-limits";
 import { Hint } from "@/components/ui/hint";
 import { INSERT_FILE_PATHS_EVENT } from "@/components/path-input";
-import { BROWSER_NOTICE } from "@/components/file-path-drop-zone";
+import { BROWSER_NOTICE, notAttachedNotice } from "@/components/file-path-drop-zone";
 
 /** Picked files → the rooted paths an editor chips (issue #285), via the
  *  desktop bridge. Same validity rule as drops: a file without a usable
- *  path is skipped, never guessed. */
-export function pathsForFiles(files: Iterable<File>, resolve: (file: File) => string): { paths: string[]; skipped: number } {
+ *  path is skipped, never guessed. A usable path of an unsupported type is
+ *  left out and its base name reported in `unsupported`. */
+export function pathsForFiles(files: Iterable<File>, resolve: (file: File) => string): { paths: string[]; skipped: number; unsupported: string[] } {
 	const paths: string[] = [];
+	const unsupported: string[] = [];
 	let skipped = 0;
 	for (const file of files) {
 		try {
 			const path = resolve(file);
 			quoteFilePath(path);
-			paths.push(path);
+			if (ATTACH_EXTENSIONS.test(path)) paths.push(path);
+			else unsupported.push(filePathLabel(path));
 		} catch { skipped++; }
 	}
-	return { paths, skipped };
+	return { paths, skipped, unsupported };
 }
 
 /** Center over the paperclip, but clear the whole visible composer, not just
@@ -49,11 +53,12 @@ function useDesktopPaths(): boolean {
 /**
  * The attach button (issue #285): the picker's twin of a file drop — files
  * stay where they are and only their quoted paths enter the draft, at the
- * caret of `editorRef` (a PathInput root). Any file type; the agent reads
- * what it can. Desktop only: a browser File has no local path, so there the
- * button explains instead (the drop zone's notice). The separate native
- * folder choice returns the directory itself, including an empty directory.
- * aria-disabled, not disabled, so the tooltip still shows.
+ * caret of `editorRef` (a PathInput root). Only text, Markdown, PDF and common
+ * image files; others are left out with a notice. Desktop only: a browser
+ * File has no local path, so there the button explains instead (the drop
+ * zone's notice). The separate native folder choice returns the directory
+ * itself, including an empty directory. aria-disabled, not disabled, so the
+ * tooltip still shows.
  */
 export function AttachFilesButton({ editorRef }: { editorRef: React.RefObject<HTMLDivElement | null> }) {
 	const pickerRef = useRef<HTMLInputElement>(null);
@@ -123,12 +128,14 @@ export function AttachFilesButton({ editorRef }: { editorRef: React.RefObject<HT
 				ref={pickerRef}
 				type="file"
 				multiple
+				accept={ATTACH_ACCEPT}
 				hidden
 				data-testid="attach-files-input"
 				onChange={(e) => {
 					const resolve = window.lh?.getPathForFile;
-					const { paths } = resolve ? pathsForFiles(Array.from(e.currentTarget.files ?? []), resolve) : { paths: [] };
+					const { paths, unsupported } = resolve ? pathsForFiles(Array.from(e.currentTarget.files ?? []), resolve) : { paths: [], unsupported: [] };
 					if (paths.length > 0) editorRef.current?.dispatchEvent(new CustomEvent(INSERT_FILE_PATHS_EVENT, { detail: paths }));
+					if (unsupported.length > 0) setNotice(notAttachedNotice(unsupported));
 					e.currentTarget.value = ""; // allow re-picking the same file
 				}}
 			/>

@@ -13,6 +13,7 @@ import { parseHTML } from "linkedom";
 import { renderToStaticMarkup } from "react-dom/server";
 import { Composer } from "../components/composer.tsx";
 import { attachmentPopupPlacement, pathsForFiles } from "../components/attach-files-button.tsx";
+import { ATTACH_EXTENSIONS, IMPORT_ACCEPT } from "../lib/notes-import-limits.ts";
 import { restorePathSelection } from "../components/path-input-dom.ts";
 import { quoteFilePath } from "../src/core/file-paths.ts";
 
@@ -88,6 +89,7 @@ async function fixture({ desktop = true } = {}) {
 			return event;
 		},
 		get byteReads() { return byteReads; },
+		get status() { return doc.querySelector('[role="status"]')?.textContent ?? ""; },
 		file(name: string, path?: string) {
 			const result = new File(["synthetic bytes must never be read"], name, { type: "application/pdf" });
 			for (const method of ["text", "arrayBuffer", "stream"] as const) {
@@ -143,7 +145,17 @@ describe("composer attach button", () => {
 			if (!path) throw new Error("no path");
 			return path;
 		});
-		assert.deepEqual(result, { paths: ["/notes/a.pdf"], skipped: 2 });
+		assert.deepEqual(result, { paths: ["/notes/a.pdf"], skipped: 2, unsupported: [] });
+	});
+
+	it("pathsForFiles types a file by the path it would attach, not File.name, and reports base names in pick order", () => {
+		const backing = new Map<string, string>([
+			["looks-fine.pdf", "/course/deck.pptx"], ["a.md", "/course/a.md"], ["upper", "/photos/PHOTO.JPG"],
+			["win", "C:\\course\\report.docx"], ["bare", "/course/Makefile"], ["bad.pptx", "relative/bad.pptx"],
+		]);
+		const files = Array.from(backing.keys(), (name) => new File([""], name));
+		const result = pathsForFiles(files, (file) => backing.get(file.name)!);
+		assert.deepEqual(result, { paths: ["/course/a.md", "/photos/PHOTO.JPG"], skipped: 1, unsupported: ["deck.pptx", "report.docx", "Makefile"] });
 	});
 
 	it("server render is the browser case: a disabled-looking paperclip between the input and Send", () => {
@@ -153,10 +165,19 @@ describe("composer attach button", () => {
 		const attach = html.indexOf('data-testid="attach-files"');
 		const send = html.indexOf('aria-label="Send"');
 		assert.ok(editor >= 0 && editor < attach && attach < send, "the paperclip follows the input and precedes Send");
-		assert.ok(html.includes('type="file"') && !html.includes("accept="), "any file type");
+		assert.ok(html.includes('type="file"'));
+		assert.match(html, /accept=".txt,.md,.markdown,.rst,.org,.adoc,.tex,.pdf,.jpg,.jpeg,.png,.gif,.webp"/);
 	});
 
-	it("desktop: the button offers Files/Folder, and Files keeps multi-file any-type chips at the caret", async () => {
+	it("the Files input's accept is the Extract files list plus common images, and the attach check takes exactly those, in any letter case", () => {
+		const html = renderToStaticMarkup(<Composer busy={false} value="" onChange={() => {}} onSend={() => {}} onStop={() => {}} canSend={false} />);
+		const accepted = html.match(/accept="([^"]*)"/)![1]!.split(",");
+		assert.deepEqual(accepted, [...IMPORT_ACCEPT.split(","), ".jpg", ".jpeg", ".png", ".gif", ".webp"]);
+		for (const extension of accepted) assert.ok(ATTACH_EXTENSIONS.test(`PHOTO${extension.toUpperCase()}`), extension);
+		assert.ok(!ATTACH_EXTENSIONS.test("README") && !ATTACH_EXTENSIONS.test("deck.pptx") && !ATTACH_EXTENSIONS.test("photo.png.bak"));
+	});
+
+	it("desktop: the button offers Files/Folder, and Files keeps multi-file chips at the caret", async () => {
 		const f = await fixture();
 		assert.equal(f.button.getAttribute("aria-disabled"), "false");
 		f.caret(4);
@@ -169,6 +190,33 @@ describe("composer attach button", () => {
 		await f.pick([f.file("week 3.pdf", paths[0]), f.file("board.jpg", paths[1]), f.file("virtual.pdf")]);
 		assert.equal(f.value, `read ${paths.map(quoteFilePath).join(" ")} this`);
 		assert.equal(f.byteReads, 0, "paths only — file contents are never read");
+		assert.equal(f.status, "", "supported files are attached silently");
+	});
+
+	it("a mixed pick attaches the supported files and names the unsupported ones, in pick order", async () => {
+		const f = await fixture();
+		f.caret(4);
+		await act(async () => { f.button.click(); });
+		await f.choice("Files");
+		const picked: [string, string][] = [
+			["deck.pptx", "/course/deck.pptx"], ["notes.md", "/course/notes.md"], ["report.docx", "C:\\course\\report.docx"],
+			["PHOTO.JPG", "/photos/PHOTO.JPG"], ["Makefile", "/course/Makefile"],
+		];
+		await f.pick(picked.map(([name, path]) => f.file(name, path)));
+		assert.equal(f.value, `read ${["/course/notes.md", "/photos/PHOTO.JPG"].map(quoteFilePath).join(" ")} this`);
+		assert.equal(f.status, "Not attached: deck.pptx, report.docx, Makefile. Only text, Markdown, PDF, and image files are supported.");
+		assert.equal(f.sends, 0);
+		assert.equal(f.byteReads, 0, "paths only — file contents are never read");
+	});
+
+	it("a pick of only unsupported files leaves the draft alone and says why", async () => {
+		const f = await fixture();
+		await act(async () => { f.button.click(); });
+		await f.choice("Files");
+		await f.pick([f.file("deck.pptx", "/course/deck.pptx")]);
+		assert.equal(f.value, "readthis");
+		assert.equal(f.status, "Not attached: deck.pptx. Only text, Markdown, PDF, and image files are supported.");
+		assert.equal(f.doc.querySelector('[role="status"]')!.parentElement, f.doc.body);
 	});
 
 	it("Folder inserts exactly one directory path (including empty folders) at the saved caret, without file selection or submits", async () => {
