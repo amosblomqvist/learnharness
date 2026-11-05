@@ -118,10 +118,11 @@ describe("AgentSection (thin SSR)", () => {
 				onSectionChange={() => {}} onModelsChange={() => {}} onCompactionChange={() => {}}
 			/>);
 			const context = html.split('data-testid="group-context"')[1]?.split('data-testid="group-prompts"')[0] ?? "";
-			const toggle = tagOf(context, "toggle-include-reasoning-in-token-estimates");
+			const toggle = tagOf(context, "toggle-include-reasoning-in-token-estimates-openai-responses-only-");
 			assert.ok(toggle.includes('role="switch"'));
 			assert.ok(toggle.includes(`aria-checked="${includeReasoning === true}"`));
-			assert.ok(toggle.includes('aria-label="Include reasoning in token estimates"'));
+			assert.ok(toggle.includes('aria-label="Include reasoning in token estimates (OpenAI Responses only)"'));
+			assert.ok(context.includes(">Include reasoning in token estimates (OpenAI Responses only)</span>"));
 			assert.ok(context.includes("Off uses the original text-based estimate."));
 		}
 	});

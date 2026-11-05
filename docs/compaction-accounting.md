@@ -22,9 +22,9 @@ signatures are not measured or stripped. Whole-message boundaries can overshoot.
 This does **not** guarantee a measured 20k tail or a fixed post-compaction request
 size.
 
-### Optional reasoning-aware estimates
+### Optional reasoning-aware estimates (OpenAI Responses only)
 
-Under **Settings → Agent → Context**, **Include reasoning in token estimates**
+Under **Settings → Agent → Context**, **Include reasoning in token estimates (OpenAI Responses only)**
 switches between the original estimator (off) and reasoning-aware estimation
 (on). It defaults **off**, including for existing settings without the field.
 The persisted setting is `compaction.includeReasoning`. Changes apply to future
