@@ -285,7 +285,7 @@ export function SegmentedControl<V extends string>({
 							if (!checked) onChange(o.value);
 						}}
 						className={cn(
-							"flex h-5.5 items-center justify-center rounded-[3px] transition-colors",
+							"flex h-5.5 items-center justify-center rounded-[3px] transition-colors focus-visible:ring-2 focus-visible:ring-ring",
 							o.icon ? "w-5.5" : "px-2 font-ui text-xs",
 							checked ? "bg-accent text-foreground" : "text-muted-foreground hover:text-foreground",
 						)}

@@ -60,6 +60,19 @@ describe("SegmentedControl roving tabindex", () => {
 	});
 });
 
+describe("SegmentedControl focus ring", () => {
+	it("every radio shows a keyboard-only ring (the app's no-ring law drops the outline, not box-shadow rings)", () => {
+		const html = renderToStaticMarkup(<SegmentedControl value="left" options={OPTIONS} onChange={() => {}} ariaLabel="Text alignment" testid="seg" />);
+		const classes = [...html.matchAll(/<button[^>]*class="([^"]*)"/g)].map((m) => m[1] ?? "");
+		assert.equal(classes.length, OPTIONS.length);
+		for (const cls of classes) {
+			assert.match(cls, /\bfocus-visible:ring-2\b/);
+			assert.match(cls, /\bfocus-visible:ring-ring\b/);
+			assert.doesNotMatch(cls, /(^|\s)ring-/, "no ring until the focus is from the keyboard");
+		}
+	});
+});
+
 describe("SegmentedControl keyboard", () => {
 	let root: Root | undefined;
 	let host: HTMLDivElement | undefined;
