@@ -356,7 +356,7 @@ test("a tampered or malformed session cookie is rejected", async () => {
 	const cookie = cookieOf(await login(s, "pw"));
 	const [name, value] = cookie.split("=") as [string, string];
 	const [issued, sig] = value.split(".") as [string, string];
-	for (const bad of [`${name}=${Number(issued) + 1}.${sig}`, `${name}=${issued}.${sig.slice(0, -1)}A`, `${name}=${issued}`, `${name}=garbage`, `${name}=${issued}.`]) {
+	for (const bad of [`${name}=${Number(issued) + 1}.${sig}`, `${name}=${issued}.${sig.slice(0, -1)}${sig.endsWith("A") ? "B" : "A"}`, `${name}=${issued}`, `${name}=garbage`, `${name}=${issued}.`]) {
 		assert.equal((await request(s.gw.port, { path: "/api/x", headers: { host: s.base, cookie: bad } })).status, 401, bad);
 	}
 });
