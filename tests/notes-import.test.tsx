@@ -181,3 +181,30 @@ it("alerts/notices stay plain and escaped", () => {
 	const notices = renderToStaticMarkup(<NotesImportNotices notices={["a.pdf: Scanned pages may have errors."]} />);
 	assert.match(notices, /role="status"/); assert.match(notices, /text-muted-foreground/); assert.doesNotMatch(notices, /text-red/);
 });
+
+it("a confirmed quota_exhausted result stops dispatch, drains the rest as unattempted, completes, and a fresh selection works", async () => {
+	const sent: string[] = [];
+	globalThis.fetch = async (_url, init) => {
+		const file = (init!.body as FormData).get("files") as File;
+		sent.push(file.name);
+		if (file.name === "a.md") return Response.json({ results: [{ requestIndex: 0, filePath: "a.md", ok: false, outcome: "failed", code: "quota_exhausted", error: "Daily free model quota exhausted. Wait for reset or configure another model/provider." }] });
+		return Response.json({ results: [{ requestIndex: 0, filePath: file.name, ok: true, outcome: "completed", stats: { nodes: 1, chains: 0 } }] });
+	};
+	await mount();
+	await submit([new File(["1"], "a.md"), new File(["2"], "b.md"), new File(["3"], "c.md"), new File(["4"], "d.md")]);
+	assert.deepEqual(sent, ["a.md", "b.md", "c.md"], "three-wide; d.md never dispatched after quota");
+	assert.equal(current.importing, false, "cycle completes instead of hanging");
+	assert.equal(finishes, 1, "onFinish fires once");
+	assert.deepEqual(current.errors, [
+		"a.md: Daily free model quota exhausted. Wait for reset or configure another model/provider.\nquota_exhausted",
+		"d.md: Not attempted (daily quota exhausted).",
+	], "successes preserved, unattempted reported distinctly");
+	globalThis.fetch = async (_url, init) => {
+		const file = (init!.body as FormData).get("files") as File;
+		return Response.json({ results: [{ requestIndex: 0, filePath: file.name, ok: true, outcome: "completed", stats: { nodes: 2, chains: 0 } }] });
+	};
+	await submit([new File(["5"], "fresh.md")]);
+	assert.equal(current.importing, false);
+	assert.equal(finishes, 2, "a fresh selection after completion works");
+	assert.deepEqual(current.errors, [], "previous cycle's errors cleared");
+});

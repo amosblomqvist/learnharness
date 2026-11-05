@@ -1,4 +1,5 @@
 import { IMPORT_EXTENSIONS, MAX_IMPORT_BYTES, validNotesPath } from "@/lib/notes-import-limits";
+import { QUOTA_EXHAUSTED_CODE, QUOTA_UNATTEMPTED_MESSAGE } from "@/src/core";
 import type { NotesImportResult } from "./notes-import";
 
 export const notesPath = (file: File): string => file.webkitRelativePath || file.name;
@@ -23,6 +24,7 @@ export function createNotesImportQueue(post: (files: readonly File[]) => Promise
 	const notices = new Map<number, string>();
 	let active = 0, sequence = 0;
 	let snapshot = EMPTY_IMPORT_QUEUE;
+	let quotaExhausted = false;
 	const ordered = (map: Map<number, string>) => [...map].sort(([a], [b]) => a - b).map(([, text]) => text);
 	const publish = (completed = false) => {
 		snapshot = { importing: active > 0 || pending.length > 0, errors: ordered(failures), notices: ordered(notices), completion: snapshot.completion + Number(completed) };
@@ -30,8 +32,14 @@ export function createNotesImportQueue(post: (files: readonly File[]) => Promise
 	};
 	// Normalize a synchronously throwing transport to the same async settlement.
 	const send = async (file: File) => post([file]);
+	/** Confirmed quota exhaustion: stop dispatching and drain everything still
+	 * queued as distinctly unattempted; already in-flight requests settle
+	 * honestly in their own finally blocks. */
+	const drainPending = () => {
+		for (const { file, index } of pending.splice(0)) failures.set(index, `${notesPath(file)}: ${QUOTA_UNATTEMPTED_MESSAGE}`);
+	};
 	function pump(): void {
-		while (active < 3 && pending.length > 0) {
+		while (active < 3 && pending.length > 0 && !quotaExhausted) {
 			const { file, index } = pending.shift()!;
 			active++;
 			void (async () => {
@@ -41,6 +49,12 @@ export function createNotesImportQueue(post: (files: readonly File[]) => Promise
 					if (!r.ok) {
 						const details = [r.provider, r.missing?.join(", "), r.slots?.join(", ")].filter(Boolean);
 						failures.set(index, `${r.filePath}: ${r.error}${r.code ? `\n${[r.code, ...details].join(" — ")}` : ""}`);
+						// Only the route's confirmed discriminator halts the cycle;
+						// raw provider text alone never does.
+						if (r.code === QUOTA_EXHAUSTED_CODE) {
+							quotaExhausted = true;
+							drainPending();
+						}
 					} else if (r.notice) notices.set(index, `${r.filePath}: ${r.notice}`);
 				} catch (error) {
 					// Never retry an ambiguous response: the merge may have committed.
@@ -58,7 +72,7 @@ export function createNotesImportQueue(post: (files: readonly File[]) => Promise
 		subscribe(listener: () => void) { listeners.add(listener); return () => { listeners.delete(listener); }; },
 		append(files: readonly File[]) {
 			if (files.length === 0) return;
-			if (!snapshot.importing) { failures.clear(); notices.clear(); sequence = 0; }
+			if (!snapshot.importing) { failures.clear(); notices.clear(); sequence = 0; quotaExhausted = false; }
 			for (const file of files) {
 				const index = sequence++;
 				const path = notesPath(file);
@@ -67,6 +81,7 @@ export function createNotesImportQueue(post: (files: readonly File[]) => Promise
 				else if (file.size > MAX_IMPORT_BYTES) failures.set(index, `${path}: Too big. Max 25 MB.`);
 				else pending.push({ file, index });
 			}
+			if (quotaExhausted) drainPending(); // appended during settlement: never dispatched
 			const hadWork = active > 0 || pending.length > 0;
 			pump();
 			publish(!hadWork);

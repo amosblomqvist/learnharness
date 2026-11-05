@@ -190,6 +190,39 @@ export class ProviderKeyMissingError extends Error {
 	}
 }
 
+/** CONFIRMED daily quota exhaustion (2026-11-03): the provider's free-tier
+ * daily allowance is spent — observed as upstream rate_limit [429] with
+ * "Rate limit exceeded: free-models-per-day", sometimes re-wrapped by the
+ * gateway as a generic 500 or 503 auth_unavailable. This is the machine
+ * discriminator the import route stamps on a failed result and the client
+ * queue switches on; generic auth/500/503 WITHOUT the marker must never
+ * match. */
+export const QUOTA_EXHAUSTED_CODE = "quota_exhausted" as const;
+/** The provider-text marker of confirmed daily quota exhaustion. Narrow on
+ * purpose: it appears only in the free-tier daily-limit refusal, never in a
+ * plain auth/server failure. */
+const QUOTA_EXHAUSTED_MARKER = "free-models-per-day";
+/** Actionable guidance for a confirmed exhaustion — no invented reset time
+ * and no hardcoded quota number. */
+export const QUOTA_EXHAUSTED_MESSAGE = "Daily free model quota exhausted. Wait for reset or configure another model/provider.";
+/** Honest wording for queued files never dispatched after the exhaustion. */
+export const QUOTA_UNATTEMPTED_MESSAGE = "Not attempted (daily quota exhausted).";
+/** Walk an error's message, refusal envelope and cause chain for the marker
+ * (extraction re-wraps gateway-wrapped failures, so the evidence may sit at
+ * any depth). Same writer/matcher discipline as isProviderKeyRefusal. */
+export function isQuotaExhaustedError(error: unknown): boolean {
+	const seen = new Set<unknown>();
+	let current: unknown = error;
+	while (current instanceof Error && !seen.has(current)) {
+		seen.add(current);
+		if (current.message.includes(QUOTA_EXHAUSTED_MARKER)) return true;
+		const envelope = (current as { envelope?: { error?: unknown } }).envelope;
+		if (envelope && typeof envelope.error === "string" && envelope.error.includes(QUOTA_EXHAUSTED_MARKER)) return true;
+		current = current.cause;
+	}
+	return false;
+}
+
 export const CACHE_RETENTIONS = ["none", "short", "long"] as const satisfies readonly CacheRetention[];
 
 /** One slot's stored state. BYOK (owner, 2026-09-22): the WRITE side

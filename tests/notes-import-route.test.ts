@@ -246,3 +246,108 @@ it("malformed or proxy-truncated multipart is refused before any file enters the
 	}
 	assert.equal(calls, 0);
 });
+
+const tick = () => new Promise<void>((done) => setImmediate(done));
+
+it("confirmed quota exhaustion wrapped in a NotesImportError stops dispatch, preserves partial stats, and reports unattempted files distinctly", async () => {
+	const started: string[] = [];
+	const deferred = new Map<string, (stats: { nodes: number; chains?: number }) => void>();
+	extraction.importNotes = ({ filePath }) => {
+		started.push(filePath);
+		if (filePath === "quota.md") {
+			// The real-world shape: the gateway re-wraps the upstream 429 daily-quota
+			// failure as 503 auth_unavailable, and extraction wraps that again.
+			return Promise.reject(new NotesImportError("partial", { nodes: 3, chains: 1 },
+				'503: {"message":"auth_unavailable: no auth available; last upstream error: upstream rate_limit [429]: {"error":{"message":"Rate limit exceeded: free-models-per-day. Add 10 credits to unlock 1000 free model requests per day","code":429}}}'));
+		}
+		return new Promise((resolve) => deferred.set(filePath, resolve));
+	};
+	const responsePromise = POST(request(["a.md", "quota.md", "b.md", "c.md"]));
+	for (let i = 0; i < 100 && started.length < 3; i++) await tick();
+	assert.deepEqual([...started].sort(), ["a.md", "b.md", "quota.md"], "3-wide pool dispatched a/quota/b; c stays queued");
+	deferred.get("a.md")!({ nodes: 1, chains: 0 });
+	deferred.get("b.md")!({ nodes: 2, chains: 0 });
+	const response = await responsePromise;
+	assert.equal(response.status, 200);
+	const { results } = await response.json();
+	assert.equal(results.length, 4, "one correctly attributed result per requested file");
+	const byIndex = (requestIndex: number) => results.find((r: { requestIndex: number }) => r.requestIndex === requestIndex);
+	assert.equal(new Set(results.map((r: { requestIndex: number }) => r.requestIndex)).size, 4, "every requestIndex appears exactly once");
+	for (const [requestIndex, filePath] of [[0, "a.md"], [1, "quota.md"], [2, "b.md"], [3, "c.md"]] as const) {
+		assert.equal(byIndex(requestIndex).filePath, filePath, "attribution by requestIndex");
+	}
+	assert.equal(byIndex(0).ok, true, "in-flight a.md settles honestly");
+	assert.equal(byIndex(2).ok, true, "in-flight b.md settles honestly");
+	const quota = byIndex(1);
+	assert.equal(quota.ok, false);
+	assert.equal(quota.code, "quota_exhausted");
+	assert.equal(quota.outcome, "partial", "NotesImportError outcome survives the quota branch");
+	assert.deepEqual(quota.stats, { nodes: 3, chains: 1 }, "partialStats survive the quota branch");
+	assert.ok(quota.error.includes("quota exhausted"), "actionable guidance");
+	const unattempted = byIndex(3);
+	assert.equal(unattempted.ok, false);
+	assert.equal(unattempted.code, "quota_exhausted");
+	assert.ok(unattempted.error.includes("Not attempted"), "unattempted is distinct from the attempted quota failure");
+	assert.equal(started.includes("c.md"), false, "c.md was never dispatched");
+});
+
+it("a quota marker buried in an error cause chain is still confirmed, with stats preserved", async () => {
+	extraction.importNotes = async () => {
+		throw new NotesImportError("failed", { nodes: 5, chains: 2 }, "extraction pipeline failed",
+			{ cause: new Error('upstream rate_limit [429]: "Rate limit exceeded: free-models-per-day"') });
+	};
+	const response = await POST(request(["deep.md"]));
+	const { results } = await response.json();
+	assert.equal(results[0].code, "quota_exhausted");
+	assert.equal(results[0].outcome, "failed");
+	assert.deepEqual(results[0].stats, { nodes: 5, chains: 2 });
+});
+
+it("a provider-key envelope carrying the quota marker is classified quota_exhausted with actionable guidance", async () => {
+	extraction.importNotes = async () => {
+		const err = new ProviderKeyMissingError("openrouter", ["cheap"]);
+		err.envelope.error = "Rate limit exceeded: free-models-per-day. Add 10 credits to unlock 1000 free model requests per day";
+		throw err;
+	};
+	const response = await POST(request(["quota.md"]));
+	assert.equal(response.status, 200);
+	const { results } = await response.json();
+	assert.equal(results[0].code, "quota_exhausted");
+	assert.equal(results[0].error, "Daily free model quota exhausted. Wait for reset or configure another model/provider.");
+});
+
+it("generic auth/500/503 failures without the quota marker never halt the batch", async () => {
+	let started = 0;
+	extraction.importNotes = async ({ filePath }) => {
+		started++;
+		if (filePath === "auth.md") throw new Error('503: {"message":"auth_unavailable: no auth available (providers=freehub)"}');
+		if (filePath === "server.md") throw new Error('500: {"message":"internal_server_error"}');
+		if (filePath === "key.md") throw new ProviderKeyMissingError("openai", ["cheap"]);
+		return { nodes: 1, chains: 0 };
+	};
+	const response = await POST(request(["auth.md", "server.md", "key.md", "ok.md"]));
+	assert.equal(response.status, 200);
+	const { results } = await response.json();
+	assert.equal(started, 4, "every file dispatched despite non-quota failures");
+	assert.equal(results.length, 4);
+	const byPath = (name: string) => results.find((r: { filePath: string }) => r.filePath === name);
+	assert.equal(byPath("auth.md").code, undefined, "generic 503 is NOT quota");
+	assert.equal(byPath("auth.md").outcome, "failed");
+	assert.equal(byPath("server.md").code, undefined, "generic 500 is NOT quota");
+	assert.equal(byPath("key.md").code, "provider_key_missing");
+	assert.equal(byPath("ok.md").ok, true);
+});
+
+it("non-quota provider key errors still process other files", async () => {
+	let started = 0;
+	extraction.importNotes = async ({ filePath }) => {
+		started++;
+		if (filePath === "key.md") throw new ProviderKeyMissingError("openai", ["cheap"]);
+		return { nodes: 1, chains: 0 };
+	};
+	const response = await POST(request(["a.md", "key.md", "b.md"]));
+	assert.equal(response.status, 200);
+	const { results } = await response.json();
+	assert.equal(started, 3, "all files dispatched despite non-quota key error");
+	assert.equal(results.length, 3);
+});
