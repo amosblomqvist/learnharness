@@ -56,6 +56,15 @@ const SIDEBAR_AUTOCLOSE = 928;
 // Module scope, guarded for SSR (the server has no navigator).
 const IS_ELECTRON = typeof navigator !== "undefined" && navigator.userAgent.includes("Electron");
 
+export type LanState = {
+	enabled: boolean;
+	port: number;
+	hasPassword: boolean;
+	running: boolean;
+	error: string | null;
+	urls: string[];
+};
+
 declare global {
 	interface Window {
 		/** Preload bridge (electron/preload.cjs) — Electron only, absent in the browser. */
@@ -71,6 +80,14 @@ declare global {
 			openSubscriptionBrowser?: (action: string) => Promise<void>;
 			chatgpt?: ChatGPTControlBridge;
 			subscriptions?: NativeSubscriptionControlBridge;
+			/** LAN access control (desktop only); every call resolves to the fresh state. */
+			lan?: {
+				get: () => Promise<LanState>;
+				setEnabled: (enabled: boolean) => Promise<LanState>;
+				setPort: (port: number) => Promise<LanState>;
+				/** `null` removes the password. */
+				setPassword: (password: string | null) => Promise<LanState>;
+			};
 			expandWindow: () => void;
 			/** The zoom truth (owner round 7): subscribes to "lh:zoom" pushes; returns unsubscribe. */
 			onZoom?: (cb: (factor: number) => void) => () => void;
