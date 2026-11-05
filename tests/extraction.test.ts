@@ -887,19 +887,19 @@ describe("the extraction pipeline (extractor → auditor → merger)", () => {
 			chatStore,
 			graphStore: ledgers,
 			// During the auditor's generate, the registry must already carry
-			// the extractor's fully accumulated live usage (2 steps × 10/5).
+			// the extractor's fully accumulated live usage.
 			extractor: recordUsage("extractor", submitModel("submit_findings", FINDINGS)),
 			auditor: recordUsage("auditor", submitModel("submit_review", verdict, () =>
-				usageSeen.push(extractionStatuses().find((r) => r.chatId === chatId)?.usage.extractor?.steps.at(-1)?.inputTokens),
+				usageSeen.push(extractionStatuses().find((r) => r.chatId === chatId)?.usage.extractor?.steps.at(-1)?.cacheWriteTokens),
 			)),
 		});
 		await pipeline.runExtraction(chatId);
 
 		// Live: mid-audit the extractor's usage was fully accumulated (faux
 		// estimates tokens from the prompt/response text — deterministic,
-		// positive, with native first-conversation cache writes in 1.4).
+		// positive, with the cached prefix billed only as cache writes in 1.5).
 		assert.equal(usageSeen.length, 1);
-		assert.ok(typeof usageSeen[0] === "number" && usageSeen[0]! > 0, "the extractor's step billed input tokens");
+		assert.ok(typeof usageSeen[0] === "number" && usageSeen[0]! > 0, "the extractor's step billed cache-write tokens");
 
 		// Persisted: the run appended ONE usage entry to the chat's
 		// extractions log — per-stage model + steps, with merge stats.
@@ -911,9 +911,11 @@ describe("the extraction pipeline (extractor → auditor → merger)", () => {
 		assert.equal(run.stages.extractor.model, "faux:faux-1");
 		assert.equal(run.stages.extractor.steps.length, 1); // the submit call — the run STOPS after a clean submit
 		const step = run.stages.extractor.steps[0]!;
-		assert.ok(step.inputTokens! > 0 && step.outputTokens! > 0, "estimated usage captured");
+		assert.ok(step.outputTokens! > 0, "estimated output usage captured");
 		assert.equal(step.cacheReadTokens, 0);
 		assert.equal(nativeUsage.extractor.length, 1);
+		assert.equal(step.inputTokens, nativeUsage.extractor[0]!.input, "fresh input excludes cache writes");
+		assert.equal(usageSeen[0], nativeUsage.extractor[0]!.cacheWrite, "live usage preserves native cache writes");
 		assert.ok(nativeUsage.extractor[0]!.cacheWrite > 0, "fresh native conversation writes its cached prefix");
 		assert.equal(step.cacheReadTokens, nativeUsage.extractor[0]!.cacheRead);
 		assert.equal(step.cacheWriteTokens, nativeUsage.extractor[0]!.cacheWrite);
