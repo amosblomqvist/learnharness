@@ -93,8 +93,20 @@ function knowledgeExample(ui: PluginUi, root: HTMLElement, life: Scope, id: stri
 
 /** The target is passed through unchanged from the native action context. */
 export function openSurfaceDemo(ui: PluginUi, target: PluginSurfaceTarget, signal: AbortSignal): PluginWidgetHandle<PluginSurfaceProps> {
+  return openDemo(ui, signal, target);
+}
+
+/** Direct opening captures the current page body through the public host API. */
+export function openPageSurfaceDemo(ui: PluginUi, signal: AbortSignal, onClose: () => void): PluginWidgetHandle<PluginSurfaceProps> {
+  return openDemo(ui, signal, undefined, onClose);
+}
+
+function openDemo(ui: PluginUi, signal: AbortSignal, target?: PluginSurfaceTarget, onClose?: () => void): PluginWidgetHandle<PluginSurfaceProps> {
+  const open = (surface: PluginSurfaceProps, lifetime: AbortSignal) => target === undefined
+    ? ui.openSurface(surface, { signal: lifetime })
+    : ui.openSurface(target, surface, { signal: lifetime });
   let handle: PluginWidgetHandle<PluginSurfaceProps> | undefined;
-  handle = ui.openSurface(target, {
+  handle = open({
     title: "UI Showcase surface",
     content(container, contentSignal) {
       const scope = new Scope(contentSignal);
@@ -103,7 +115,7 @@ export function openSurfaceDemo(ui: PluginUi, target: PluginSurfaceTarget, signa
       root.dataset.showcase = "surface";
       container.append(root); scope.own(() => root.remove());
       family(ui, root, scope, "surfaces", "Surface examples", (body, life) => {
-        note(body, "This real host surface covers the session body, not its top bar or sidebar. Visible headings belong to this plugin; the host supplies only a floating X and an accessible name. Local text is retained while a nested surface covers it. Reset clears this demo's local examples and restores the dimmed background.");
+        note(body, "This real nonmodal host surface covers the page body, leaving its top bar or floating sidebar control outside. The sidebar and global dialogs remain available. Visible headings belong to this plugin; the host supplies only a floating X and an accessible name. Local text is retained while a nested surface covers it. Reset clears this demo's local examples and restores the dimmed background.");
         retainedField(ui, body, life, "surface-parent");
         knowledgeExample(ui, body, life, "surface-knowledge");
         let opened = 0; let closed = 0; let lastCallback = "none";
@@ -119,8 +131,9 @@ export function openSurfaceDemo(ui: PluginUi, target: PluginSurfaceTarget, signa
           } });
         }
         button(ui, body, life, "surface-nested", { label: "Open nested surface", onClick() {
-          opened++; lastCallback = "openSurface (same opaque native target)"; render();
-          life.widget(ui.openSurface(target, {
+          if (life.signal.aborted) return;
+          opened++; lastCallback = target === undefined ? "openSurface (current page body)" : "openSurface (same opaque native target)"; render();
+          life.widget(open({
             title: "Nested UI Showcase surface",
             content(childContainer, childSignal) {
               const child = new Scope(childSignal);
@@ -135,7 +148,7 @@ export function openSurfaceDemo(ui: PluginUi, target: PluginSurfaceTarget, signa
               return child.dispose;
             },
             onClose() { if (!life.signal.aborted) { closed++; lastCallback = "nested surface.onClose"; render(); } },
-          }, { signal: life.signal }));
+          }, life.signal));
         } });
         family(ui, body, life, "menus", "Menus above surface", (area, lifetime) => mountOverlayExamples(ui, area, lifetime, "menus"));
         family(ui, body, life, "dialogs", "Dialogs above surface", (area, lifetime) => mountOverlayExamples(ui, area, lifetime, "dialogs"));
@@ -143,6 +156,7 @@ export function openSurfaceDemo(ui: PluginUi, target: PluginSurfaceTarget, signa
       });
       return scope.dispose;
     },
-  }, { signal });
+    onClose,
+  }, signal);
   return handle;
 }

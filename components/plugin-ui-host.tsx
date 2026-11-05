@@ -2,7 +2,7 @@
 
 import { Component, useEffect, useLayoutEffect, useRef, useSyncExternalStore, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import type { PluginDialogProps, PluginMenuProps, PluginSurfaceProps, PluginUi, PluginWidgetHandle, PluginWidgetOptions } from "@/src/core";
+import type { PluginButtonProps, PluginDialogProps, PluginMenuProps, PluginSurfaceProps, PluginSurfaceTarget, PluginUi, PluginWidgetHandle, PluginWidgetOptions } from "@/src/core";
 import type { Dictation } from "@/components/dictation";
 import { PluginComposer, PluginDictation, PluginStandardComposer } from "@/components/plugin-composer";
 import { PluginModelPicker, PluginThinkingPicker } from "@/components/plugin-model-picker";
@@ -14,8 +14,8 @@ import { HostMarkdown } from "@/components/host-markdown";
 import { PluginTree, validatePluginTree } from "@/components/plugin-tree";
 import { MenuShell } from "@/components/menu-shell";
 import { HostDialog } from "@/components/host-dialog";
-import { requireSessionSurfaceBoundary } from "./plugin-session-surface-targets";
-import { PluginSessionSurface } from "./plugin-session-surface-shell";
+import { findCurrentSurfaceBoundary, requireSurfaceBoundary } from "./plugin-surface-targets";
+import { PluginSurface } from "./plugin-surface-shell";
 import { isInteractionElementVisible, useInteractionLayers, type CloseOutcome, type CloseReason } from "@/components/interaction-layers";
 export { PluginSettingsRows } from "@/components/plugin-settings-rows";
 
@@ -36,6 +36,37 @@ interface WidgetEntry {
 
 function invoke(callback: (() => void | Promise<void>) | undefined, report: Runtime["report"]) {
 	try { void Promise.resolve(callback?.()).catch(report); } catch (error) { report(error); }
+}
+
+function validateButtonColors(colors: PluginButtonProps["colors"]) {
+	if (colors === undefined) return;
+	const states = ["hover", "active", "focusVisible", "disabled"];
+	function validate(value: unknown, path: string, root = false, focus = false) {
+		if (!value || typeof value !== "object" || (Object.getPrototypeOf(value) !== Object.prototype && Object.getPrototypeOf(value) !== null)) {
+			throw new TypeError(`${path} must be a color object.`);
+		}
+		for (const key of Reflect.ownKeys(value)) {
+			if (typeof key !== "string") throw new TypeError(`${path} has an unsupported color slot.`);
+			const slot = (value as Record<string, unknown>)[key];
+			if (root && states.includes(key)) {
+				if (slot !== undefined) validate(slot, `${path}.${key}`, false, key === "focusVisible");
+			} else if (["background", "text", "border"].includes(key) || (focus && key === "ring")) {
+				if (slot !== undefined && (typeof slot !== "string" || !slot.trim() || !globalThis.CSS?.supports("color", slot))) {
+					throw new TypeError(`${path}.${key} must be a valid CSS color.`);
+				}
+			} else throw new TypeError(`${path}.${key} is not a supported color slot.`);
+		}
+	}
+	validate(colors, "Button colors", true);
+}
+
+function validateButton({ icon, iconOnly, label, colors }: PluginButtonProps) {
+	if (icon !== undefined && typeof icon !== "string") throw new TypeError("Button icon must be SVG markup.");
+	if (iconOnly !== undefined && typeof iconOnly !== "boolean") throw new TypeError("Button iconOnly must be a boolean.");
+	if (iconOnly && (!icon?.trim() || typeof label !== "string" || !label.trim())) {
+		throw new TypeError("Icon-only buttons require a nonblank label and icon.");
+	}
+	validateButtonColors(colors);
 }
 
 function validateSurfaceBackground({ background }: PluginSurfaceProps) {
@@ -153,7 +184,12 @@ export function createPluginUiStore() {
 						dispose: () => { actions.current?.cancel(); actions.current = null; handle.dispose(); },
 					};
 				},
-				mountButton: (target, props, options) => mount(target, props, options, (props, runtime) => <Button type="button" variant={props.variant} size={props.size} disabled={props.disabled} title={props.title} onClick={() => invoke(props.onClick, runtime.report)}>{props.label}</Button>),
+				mountButton: (target, props, options) => mount(target, props, options, (props, runtime) => <Button type="button"
+					variant={props.variant} colors={props.colors} size={props.size} disabled={props.disabled} title={props.title}
+					aria-label={props.iconOnly ? props.label : undefined} onClick={() => invoke(props.onClick, runtime.report)}>
+					{props.icon && <span data-slot="button-icon" aria-hidden="true" className="inline-flex shrink-0 items-center justify-center" dangerouslySetInnerHTML={{ __html: props.icon }} />}
+					{!props.iconOnly && props.label}
+				</Button>, undefined, false, validateButton),
 				mountSettingsRows: (target, props, options) => mount(target, props, options, (schema, runtime) => <PluginSettingsRows schema={schema} onError={runtime.report} />),
 				mountMarkdown: (target, props, options) => mount(target, props, options, props => <HostMarkdown text={props.text} />),
 				mountTree: (target, tree, options) => mount(target, tree, options, (tree, runtime) => <PluginTree {...tree} signal={runtime.signal} onError={runtime.report}
@@ -172,16 +208,18 @@ export function createPluginUiStore() {
 					const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
 					return mount(document.body, props, options, (props, runtime) => <PluginDialog {...props} opener={opener} runtime={runtime} />);
 				},
-				openSurface: (target, props, options) => {
-					// Abort wins over target validation, matching existing inert handles.
+				openSurface: (targetOrProps: PluginSurfaceTarget | PluginSurfaceProps, propsOrOptions: PluginSurfaceProps | PluginWidgetOptions, explicitOptions?: PluginWidgetOptions) => {
+					const options = explicitOptions ?? propsOrOptions as PluginWidgetOptions;
+					// Abort wins over page capture and validation, matching existing inert handles.
 					if (lifetime.aborted || options.signal.aborted) return { update() {}, dispose() {} };
-					const boundary = requireSessionSurfaceBoundary(target);
+					const props = (explicitOptions ? propsOrOptions : targetOrProps) as PluginSurfaceProps;
+					const boundary = requireSurfaceBoundary(explicitOptions ? targetOrProps as PluginSurfaceTarget : findCurrentSurfaceBoundary(document)?.target);
 					const opener = boundary.body.ownerDocument.activeElement;
 					const handle = mount(boundary.stack!.querySelector<HTMLElement>("[data-session-surface-mounts]")!, props, options,
-						(props, runtime) => <PluginSessionSurface title={props.title} background={props.background} onClose={props.onClose} runtime={runtime} boundary={boundary}
+						(props, runtime) => <PluginSurface title={props.title} background={props.background} onClose={props.onClose} runtime={runtime} boundary={boundary}
 							opener={opener instanceof HTMLElement ? opener : null}>
 							<PluginContent content={props.content} runtime={runtime} className="h-full w-full" />
-						</PluginSessionSurface>, boundary.signal, true, validateSurfaceBackground);
+						</PluginSurface>, boundary.signal, true, validateSurfaceBackground);
 					return handle;
 				},
 			};

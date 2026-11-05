@@ -1,12 +1,12 @@
 import { build } from 'esbuild';
-import { mkdir, copyFile, lstat, rm, access } from 'node:fs/promises';
+import { mkdir, copyFile, lstat, rm } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
-const out = path.join(root, 'dist', 'flashcards');
+const out = path.join(root, 'dist');
 try {
   if ((await lstat(out)).isSymbolicLink()) throw new Error('Refusing to build into a linked directory.');
-  try { await access(path.join(out, 'data')); throw new Error('Refusing to build over plugin data. Move it to a safe location first.'); }
+  try { await lstat(path.join(out, 'data')); throw new Error('Refusing to build over plugin data. Move it to a safe location first.'); }
   catch (error) { if (error.code !== 'ENOENT') throw error; }
 } catch (error) { if (error.code !== 'ENOENT') throw error; }
 await rm(out, { recursive: true, force: true });

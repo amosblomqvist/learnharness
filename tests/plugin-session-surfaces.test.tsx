@@ -1,4 +1,4 @@
-import React, { act, useRef } from "react";
+import React, { act, useEffect, useRef } from "react";
 (globalThis as Record<string, unknown>).React = React;
 import assert from "node:assert/strict";
 import { it } from "node:test";
@@ -6,7 +6,8 @@ import { parseHTML } from "linkedom";
 import { createRoot } from "react-dom/client";
 import { createPortal } from "react-dom";
 import { InteractionLayersProvider, useInteractionLayer, useInteractionLayers, type InteractionLayersController } from "../components/interaction-layers.tsx";
-import { SessionSurfaceRegion, useSessionSurfaceBoundary } from "../components/plugin-session-surfaces.tsx";
+import { SurfaceRegion, usePageSurfaceBoundary, useSurfaceChromeStyle } from "../components/plugin-surfaces.tsx";
+import { findCurrentSurfaceBoundary, findSurfaceBoundary } from "../components/plugin-surface-targets.ts";
 import { isInteractionScopeEligible } from "../components/plugin-input-focus.ts";
 import { HostDialog } from "../components/host-dialog.tsx";
 import { installModalDom } from "./modal-dom.ts";
@@ -31,6 +32,7 @@ interface Fixture {
 	target(): PluginSurfaceTarget;
 	render(options: ViewOptions): Promise<void>;
 	open(title: string, content?: PluginUiContent, ui?: PluginUi): Promise<Handle>;
+	openCurrent(title: string, content?: PluginUiContent, ui?: PluginUi): Promise<Handle>;
 	escape(): Promise<void>;
 }
 function NativeFocus() {
@@ -38,7 +40,11 @@ function NativeFocus() {
 	const layer = useInteractionLayer({ kind: "view", enabled: true, rootRef: root, onClose: () => "blocked" });
 	return <div ref={root} data-native-view="" className="pointer-events-auto absolute inset-0" style={{ zIndex: 100 + layer.order }}><h2 tabIndex={-1}>Native focus</h2><input aria-label="Native focus field" /></div>;
 }
-async function withFixture(run: (fixture: Fixture) => Promise<void>) {
+function DirectViewMount({ ui, mount }: { ui: PluginUi; mount(ui: PluginUi): void }) {
+	useEffect(() => { mount(ui); }, [ui, mount]);
+	return <div data-direct-view-mount="" />;
+}
+async function withFixture(run: (fixture: Fixture) => Promise<void>, onMount?: (ui: PluginUi) => void, strict = false) {
 	const dom = parseHTML("<!doctype html><html><head></head><body><div id='root'></div></body></html>");
 	const globals = { window: dom.window, self: dom.window, document: dom.document, HTMLElement: dom.window.HTMLElement,
 		Element: dom.window.Element, Node: dom.window.Node, HTMLInputElement: dom.window.HTMLInputElement,
@@ -56,12 +62,14 @@ async function withFixture(run: (fixture: Fixture) => Promise<void>) {
 	function Boundary() {
 		controller = useInteractionLayers();
 		const body = useRef<HTMLDivElement>(null);
-		token = useSessionSurfaceBoundary({ active: state.active, viewKey: state.viewKey, bodyRef: body });
+		token = usePageSurfaceBoundary({ active: state.active, viewKey: state.viewKey, bodyRef: body });
+		const chromeStyle = useSurfaceChromeStyle(token);
 		return <><button data-chrome="">Top bar</button><aside>Sidebar</aside>
 			<main data-host-main="" style={{ isolation: "isolate" }}><div ref={body} data-session-body="" className="relative flex min-h-0 flex-1">
 				<div data-native-body=""><h2 tabIndex={-1}>Session</h2><input data-native-input="" /><button>Native Submit</button></div>
-				<SessionSurfaceRegion target={token}>{state.nativeView && <NativeFocus />}</SessionSurfaceRegion>
-			</div></main>
+				{onMount && <DirectViewMount ui={ui} mount={onMount} />}
+				<SurfaceRegion target={token}>{state.nativeView && <NativeFocus />}</SurfaceRegion>
+			</div><div data-floating-chrome="" style={chromeStyle}>Floating page chrome</div></main>
 			{state.tooltipContainer && createPortal(<TooltipProvider><Tooltip open><TooltipTrigger>Owned hint trigger</TooltipTrigger><TooltipContent>Owned passive hint</TooltipContent></Tooltip></TooltipProvider>, state.tooltipContainer)}
 			<HostDialog open={state.settings} onClose={() => "blocked"} aria-label="Global Settings"><h2>Settings</h2><input data-settings-input="" /></HostDialog>
 		</>;
@@ -71,11 +79,17 @@ async function withFixture(run: (fixture: Fixture) => Promise<void>) {
 		target() { assert.ok(token); return token; },
 		async render(options) {
 			state = { ...state, ...options };
-			await act(async () => root.render(<InteractionLayersProvider><React.Activity mode={state.retainedHidden ? "hidden" : "visible"}><Boundary /></React.Activity><PluginUiHost store={store} /></InteractionLayersProvider>));
+			const Mode = strict ? React.StrictMode : React.Fragment;
+			await act(async () => root.render(<Mode><InteractionLayersProvider><React.Activity mode={state.retainedHidden ? "hidden" : "visible"}><Boundary /></React.Activity><PluginUiHost store={store} /></InteractionLayersProvider></Mode>));
 		},
 		async open(title, content = document.createElement("div"), owner = ui) {
 			let handle!: Handle;
 			await act(async () => { handle = owner.openSurface(fixture.target(), { title, content }, { signal: new AbortController().signal }); });
+			return handle;
+		},
+		async openCurrent(title, content = document.createElement("div"), owner = ui) {
+			let handle!: Handle;
+			await act(async () => { handle = owner.openSurface({ title, content }, { signal: new AbortController().signal }); });
 			return handle;
 		},
 		async escape() {
@@ -99,6 +113,145 @@ const inputContent = (label: string): PluginUiContent => container => {
 };
 const surface = (title: string) => [...document.querySelectorAll<HTMLElement>("[data-plugin-session-surface]")].find(root => root.getAttribute("aria-label") === title)!;
 const frame = (root: HTMLElement) => root.querySelector<HTMLElement>("[data-plugin-session-surface-frame]")!;
+
+it("a plugin view's immediate mount callback can capture its current page synchronously", async () => {
+	let failure: unknown, calls = 0;
+	await withFixture(async f => {
+		assert.equal(calls, 1, "mount is not deferred or implicitly retried");
+		assert.equal(failure, undefined);
+		assert.ok(surface("Immediate page surface"));
+		assert.equal(findCurrentSurfaceBoundary(document)?.target, f.target());
+	}, ui => {
+		calls++;
+		try { ui.openSurface({ title: "Immediate page surface", content: document.createElement("div") }, { signal: new AbortController().signal }); }
+		catch (error) { failure = error; }
+	});
+});
+
+it("targetless calls capture the page rather than a surface opener, and coexist with the legacy explicit overload", async () => withFixture(async f => {
+	const boundary = findCurrentSurfaceBoundary(document)!;
+	assert.equal(boundary.target, f.target());
+	const lower = await f.openCurrent("Direct lower", inputContent("Lower draft"));
+	const first = surface("Direct lower"), firstLayer = f.controller.getTopLayer()!;
+	assert.ok(boundary.stack!.contains(first));
+	first.querySelector<HTMLElement>("input")!.focus();
+	await f.openCurrent("Direct sibling", inputContent("Sibling draft"));
+	assert.equal(f.controller.getTopLayer()!.ownerId, f.controller.ownerOf(boundary.body)?.id ?? null, "a surface is owned by its page, not the currently focused surface");
+	assert.notEqual(f.controller.getTopLayer()!.ownerId, firstLayer.id);
+	assert.equal(findCurrentSurfaceBoundary(document), boundary);
+	const explicit = await f.open("Legacy explicit"); assert.ok(boundary.stack!.contains(surface("Legacy explicit")));
+	await act(async () => { lower.dispose(); explicit.dispose(); });
+	assert.ok(surface("Direct sibling"), "disposing siblings does not close an independent targetless surface");
+}));
+
+it("targetless calls fail synchronously without a current page and abort takes precedence over capture and background validation", async () => withFixture(async f => {
+	await f.render({ active: false });
+	assert.equal(findCurrentSurfaceBoundary(document), undefined);
+	const props = { title: "No page", content: document.createElement("div"), background: "invalid" } as unknown as PluginSurfaceProps;
+	const live = new AbortController(), aborted = new AbortController(); aborted.abort();
+	assert.throws(() => f.ui.openSurface(props, { signal: live.signal }), /^Error: Surface target is no longer active$/);
+	const inert = f.ui.openSurface(props, { signal: aborted.signal }); inert.update({ background: "still invalid" } as unknown as Partial<PluginSurfaceProps>); inert.dispose();
+	assert.equal(f.store.getSnapshot().length, 0);
+	await act(async () => f.lifetime.abort());
+	f.ui.openSurface(props, { signal: live.signal }).dispose();
+	assert.equal(f.store.getSnapshot().length, 0);
+}));
+
+it("targetless capture cannot move to a replacement page before its portal commits", async () => withFixture(async f => {
+	const captured = findCurrentSurfaceBoundary(document)!;
+	let mounts = 0, handle!: Handle;
+	await act(async () => {
+		handle = f.ui.openSurface({ title: "Captured only once", content() { mounts++; } }, { signal: new AbortController().signal });
+		assert.ok(captured.stack!.contains(f.store.getSnapshot()[0]!.target), "destination is chosen synchronously");
+		await f.render({ viewKey: "replacement-page" });
+	});
+	assert.equal(captured.signal.aborted, true); assert.equal(findSurfaceBoundary(captured.target), undefined);
+	assert.notEqual(findCurrentSurfaceBoundary(document)?.target, captured.target);
+	assert.equal(mounts, 0); assert.equal(f.store.getSnapshot().length, 0);
+	await act(async () => handle.update({ title: "Must not revive", content() { mounts++; } }));
+	assert.equal(mounts, 0); assert.equal(f.store.getSnapshot().length, 0);
+	await f.openCurrent("New call on new page"); assert.ok(surface("New call on new page"));
+}));
+
+it("late targetless content completion is cleaned once without remapping to or taking focus from the new page", async () => withFixture(async f => {
+	let complete!: () => void, cleaned = 0, signal!: AbortSignal;
+	const handle = await f.openCurrent("Old asynchronous content", async (_container, mountedSignal) => {
+		signal = mountedSignal; await new Promise<void>(resolve => { complete = resolve; }); return () => { cleaned++; };
+	});
+	await f.render({ viewKey: "different-page" });
+	assert.equal(signal.aborted, true); assert.equal(f.store.getSnapshot().length, 0);
+	await f.openCurrent("Fresh page content", inputContent("Fresh input"));
+	const focus = document.activeElement;
+	await act(async () => { complete(); handle.update({ title: "Late stale update" }); });
+	assert.equal(cleaned, 1); assert.equal(document.activeElement, focus);
+	assert.equal(surface("Late stale update"), undefined); assert.ok(surface("Fresh page content"));
+	await act(async () => handle.dispose()); assert.equal(cleaned, 1);
+}));
+
+for (const timing of ["before", "after"] as const) {
+	it(`a global modal opened ${timing} a targetless surface stays authoritative, then closing reveals the still-live page-owned surface`, async () => withFixture(async f => {
+		if (timing === "before") await f.render({ settings: true });
+		let signal!: AbortSignal;
+		const before = document.activeElement;
+		await f.openCurrent("Page-owned beneath Settings", (container, mountedSignal) => {
+			signal = mountedSignal; const input = document.createElement("input"); input.dataset.behindModal = ""; container.append(input);
+		});
+		if (timing === "after") await f.render({ settings: true });
+		else assert.equal(document.activeElement, before, "opening a late page surface cannot steal modal focus");
+		const modal = f.controller.getActiveModal()!;
+		const root = surface("Page-owned beneath Settings"), input = root.querySelector<HTMLElement>("input")!;
+		const layer = f.controller.getSnapshot().find(candidate => candidate.rootRef.current === root)!;
+		assert.equal(f.controller.getTopLayer(), modal); assert.equal(f.controller.isElementEligible(input), false);
+		assert.notEqual(layer.ownerId, modal.id, "a modal opener does not confer modal ownership on the page surface");
+		assert.equal(signal.aborted, false);
+		await f.render({ settings: false });
+		assert.equal(f.controller.getActiveModal(), null); assert.equal(f.controller.getTopLayer()?.id, layer.id);
+		assert.equal(f.controller.isElementEligible(input), true); assert.equal(signal.aborted, false); assert.equal(root.isConnected, true);
+	}));
+}
+
+it("targetless caller abort disposes content once without onClose and Activity hide expires the captured page", async () => withFixture(async f => {
+	const caller = new AbortController(); let handle!: Handle, cleaned = 0, closed = 0, signal!: AbortSignal;
+	await act(async () => { handle = f.ui.openSurface({ title: "Direct caller", onClose() { closed++; }, content(_container, mountedSignal) {
+		signal = mountedSignal; return () => { cleaned++; };
+	} }, { signal: caller.signal }); });
+	await act(async () => { caller.abort(); handle.dispose(); handle.update({ title: "Ignored" }); });
+	assert.equal(signal.aborted, true); assert.equal(cleaned, 1); assert.equal(closed, 0);
+	const old = f.target(), native = document.querySelector("[data-native-body]");
+	await f.openCurrent("Direct Activity");
+	await f.render({ retainedHidden: true });
+	assert.equal(document.querySelector("[data-native-body]"), native);
+	assert.equal(findCurrentSurfaceBoundary(document), undefined); assert.equal(findSurfaceBoundary(old), undefined);
+	assert.equal(f.store.getSnapshot().length, 0);
+	assert.throws(() => f.ui.openSurface({ title: "Hidden page", content: document.createElement("div") }, { signal: new AbortController().signal }), /Surface target is no longer active/);
+	await f.render({ retainedHidden: false }); assert.notEqual(f.target(), old);
+	assert.throws(() => f.ui.openSurface(old, { title: "Explicit old page", content: document.createElement("div") }, { signal: new AbortController().signal }), /Surface target is no longer active/);
+	await f.openCurrent("Direct re-entry"); assert.ok(surface("Direct re-entry"));
+}));
+
+it("floating chrome uses only the maximum own-plugin-surface rank, not native views, newer pane pickers or other regions", async () => withFixture(async f => {
+	const chrome = document.querySelector<HTMLElement>("[data-floating-chrome]")!;
+	assert.equal(chrome.style.zIndex || "", "");
+	await f.render({ nativeView: true }); assert.equal(chrome.style.zIndex || "", "", "a native view alone adds no chrome override");
+	const first = await f.openCurrent("Own lower");
+	assert.equal(Number(chrome.style.zIndex), Number(frame(surface("Own lower")).style.zIndex));
+	const pane = document.createElement("div"), foreign = document.createElement("div"); foreign.dataset.pluginSessionSurface = "";
+	document.querySelector("[data-host-main]")!.append(pane, foreign);
+	let removePane!: () => void, removeForeign!: () => void;
+	try {
+		await act(async () => {
+			removePane = f.controller.register({ id: "later-pane-picker", kind: "view", rootRef: { current: pane } });
+			removeForeign = f.controller.register({ id: "another-page-plugin", kind: "view", rootRef: { current: foreign } });
+		});
+		assert.ok(100 + f.controller.getLayer("later-pane-picker")!.order > Number(chrome.style.zIndex));
+		assert.equal(Number(chrome.style.zIndex), Number(frame(surface("Own lower")).style.zIndex));
+		const upper = await f.openCurrent("Own upper");
+		assert.equal(Number(chrome.style.zIndex), Number(frame(surface("Own upper")).style.zIndex));
+		await act(async () => upper.dispose());
+		assert.equal(Number(chrome.style.zIndex), Number(frame(surface("Own lower")).style.zIndex));
+		await act(async () => first.dispose()); assert.equal(chrome.style.zIndex || "", "");
+	} finally { await act(async () => { removePane?.(); removeForeign?.(); pane.remove(); foreign.remove(); }); }
+}));
 
 it("surfaces share the exact session body/local paint stratum, leaving chrome and empty native input eligible", async () => withFixture(async f => {
 	const native = document.querySelector<HTMLElement>("[data-native-input]")!;
@@ -311,6 +464,107 @@ it("entry honors explicit eligible focus, otherwise first editable field, plugin
 	assert.equal(painted.getAttribute("tabindex"), "-1");
 	assert.equal(document.activeElement, painted, "empty content focuses the painted frame, not the display:contents root, floating X, or covered composer");
 	assert.equal(f.controller.isElementEligible(native), false);
+}));
+
+for (const strict of [false, true]) it(`surface entry prefers a real marked region before fields/headings with fresh content under StrictMode=${strict}`, async () => withFixture(async f => {
+	const mounted: { region: HTMLElement; signal: AbortSignal }[] = [];
+	let keys = 0;
+	await f.openCurrent("Marked entry", (container, signal) => {
+		const owned = document.createElement("div"), region = document.createElement("section");
+		region.setAttribute("data-plugin-initial-focus", ""); region.tabIndex = -1;
+		region.setAttribute("role", "group"); region.setAttribute("aria-label", "Review card"); region.textContent = "A visible question";
+		const heading = document.createElement("h2"); heading.textContent = "Another heading";
+		owned.append(document.createElement("input"), heading, region); container.append(owned);
+		const keydown = () => { keys++; }; owned.addEventListener("keydown", keydown);
+		signal.addEventListener("abort", () => { owned.removeEventListener("keydown", keydown); owned.remove(); }, { once: true });
+		mounted.push({ region, signal });
+	});
+	assert.ok(mounted.length >= (strict ? 2 : 1), "StrictMode actually replays the content mount");
+	const latest = mounted.at(-1)!;
+	assert.ok(document.activeElement === latest.region, "entry must focus the latest visible marked region before the earlier field/heading"); assert.equal(latest.region.isConnected, true);
+	assert.equal(latest.signal.aborted, false);
+	for (const old of mounted.slice(0, -1)) { assert.equal(old.signal.aborted, true); assert.equal(old.region.isConnected, false); }
+	const event = new window.Event("keydown", { bubbles: true, cancelable: true }); Object.assign(event, { key: " ", code: "Space" });
+	document.activeElement!.dispatchEvent(event); assert.equal(keys, 1, "keys reach the content's own listener, not a host ancestor");
+}, undefined, strict));
+
+it("marked entry skips hidden/inert/disabled targets and preserves already-owned eligible focus", async () => withFixture(async f => {
+	let chosen!: HTMLElement;
+	const first = await f.open("Eligible marker", container => {
+		container.append(document.createElement("input"));
+		for (const attribute of ["hidden", "inert", "aria-hidden", "disabled", "display", "visibility"]) {
+			const wrapper = document.createElement("div"), invalid = document.createElement("button");
+			invalid.setAttribute("data-plugin-initial-focus", "");
+			if (attribute === "disabled") invalid.disabled = true;
+			else if (attribute === "display") wrapper.style.display = "none";
+			else if (attribute === "visibility") wrapper.style.visibility = "hidden";
+			else wrapper.setAttribute(attribute, attribute === "aria-hidden" ? "true" : "");
+			wrapper.append(invalid); container.append(wrapper);
+		}
+		chosen = document.createElement("div"); chosen.tabIndex = -1; chosen.setAttribute("data-plugin-initial-focus", "");
+		chosen.textContent = "Visible region"; container.append(chosen, chosen.cloneNode(true));
+	});
+	assert.ok(document.activeElement === chosen, "entry must skip ineligible markers and choose the first eligible marker");
+	await act(async () => first.dispose());
+	let explicit!: HTMLElement;
+	await f.open("Preserve explicit focus", container => {
+		const marker = chosen.cloneNode(true); explicit = document.createElement("button"); explicit.textContent = "Already focused";
+		container.append(marker, explicit); explicit.focus();
+	});
+	assert.ok(document.activeElement === explicit, "a marker never overrides eligible focus already in the surface");
+}));
+
+it("a marker that cannot receive focus falls back to the existing field, heading and painted-frame policies", async () => withFixture(async f => {
+	for (const kind of ["field", "heading", "frame"] as const) {
+		let fallback!: HTMLElement;
+		const handle = await f.open(`Unfocusable ${kind}`, container => {
+			const marker = document.createElement("div"); marker.setAttribute("data-plugin-initial-focus", "");
+			marker.focus = () => {}; // Browser refusal to focus an un-focusable plain div.
+			container.append(marker);
+			if (kind !== "frame") {
+				fallback = document.createElement(kind === "field" ? "input" : "h2"); fallback.textContent = "Fallback"; container.append(fallback);
+			}
+		});
+		assert.ok(document.activeElement === (kind === "frame" ? frame(surface(`Unfocusable ${kind}`)) : fallback), `failed marker focus preserves the ${kind} fallback`);
+		await act(async () => handle.dispose());
+	}
+}));
+
+it("remembered surviving focus wins over its marker, and native-page return does not adopt the surface-only marker", async () => withFixture(async f => {
+	const chrome = document.createElement("button"); chrome.textContent = "Temporary opener"; document.body.append(chrome); chrome.focus();
+	const one = await f.open("Remembered", container => {
+		const marker = document.createElement("div"); marker.tabIndex = -1; marker.setAttribute("data-plugin-initial-focus", "");
+		marker.textContent = "Marked region"; container.append(marker, document.createElement("input"));
+	});
+	const remembered = surface("Remembered").querySelector<HTMLElement>("input")!; remembered.focus();
+	chrome.focus();
+	const newer = await f.open("Newer", inputContent("Newer field")); chrome.remove();
+	await act(async () => newer.dispose());
+	assert.ok(document.activeElement === remembered, "remembered focus takes priority over the surviving marker");
+	const nativeMarker = document.createElement("div"); nativeMarker.tabIndex = -1; nativeMarker.setAttribute("data-plugin-initial-focus", "");
+	nativeMarker.textContent = "Not a surface marker"; document.querySelector("[data-native-body]")!.prepend(nativeMarker);
+	await act(async () => one.dispose());
+	assert.ok(document.activeElement === document.querySelector("[data-native-input]"), "the marker does not change native page entry");
+}));
+
+it("a marked surface cannot steal Settings focus, and a late marker never steals newer-view focus", async () => withFixture(async f => {
+	await f.render({ settings: true });
+	const settingsFocus = document.activeElement;
+	let marker!: HTMLElement;
+	await f.open("Below Settings", container => {
+		marker = document.createElement("div"); marker.tabIndex = -1; marker.setAttribute("data-plugin-initial-focus", "");
+		marker.textContent = "Review card"; container.append(marker);
+	});
+	assert.ok(document.activeElement === settingsFocus, "the modal stays authoritative above the marked surface");
+	await f.render({ settings: false });
+	assert.ok(document.activeElement === marker, "the marker becomes eligible only after Settings closes");
+	let complete!: () => void;
+	await f.open("Late marked content", async container => {
+		await new Promise<void>(resolve => { complete = resolve; });
+		const late = marker.cloneNode(true); container.append(late);
+	});
+	await f.open("Newer foreground", inputContent("Foreground field")); const focus = document.activeElement;
+	await act(async () => complete()); assert.ok(document.activeElement === focus, "late content never steals foreground focus");
 }));
 
 it("foreground close restores an uncovered chrome opener, else remembered surviving region focus; covered disposal never steals", async () => withFixture(async f => {

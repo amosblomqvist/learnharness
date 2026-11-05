@@ -113,8 +113,10 @@ export function PluginKnowledgePicker({ value, onChange, disabled, signal, onErr
 		signal.addEventListener("abort", abort, { once: true });
 		if (signal.aborted) abort();
 		return () => {
-			alive.current = false;
-			signal.removeEventListener("abort", abort); unsubscribe?.(); close();
+			signal.removeEventListener("abort", abort); unsubscribe?.();
+			// Activity retains state: reset the logical opening before marking
+			// this owner inactive, so a later explicit click can open it anew.
+			close(); alive.current = false;
 		};
 	}, [controller, signal, close, promote]);
 	useEffect(() => { if (disabled) close(); }, [disabled, close]);

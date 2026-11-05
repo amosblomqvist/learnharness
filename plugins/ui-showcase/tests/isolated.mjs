@@ -7,8 +7,9 @@ import http from "node:http";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import puppeteer from "puppeteer-core";
+import { surfaceProofFixture } from "./surface-fixture.mjs";
 
-export const fixture = Object.freeze({ chatId: "chat_ui_showcase_offline", model: "ui-showcase-offline", premiseId: "prop_ui_premise", conclusionId: "prop_ui_conclusion", chainId: "chain_ui_showcase", sourceId: "notes_ui_showcase", sourceLabel: "Synthetic showcase knowledge" });
+export const fixture = Object.freeze({ chatId: "chat_ui_showcase_offline", chatTitle: "Offline UI Showcase session", practiceChatId: "chat_ui_showcase_practice", practiceTitle: "Offline UI Showcase practice", model: "ui-showcase-offline", premiseId: "prop_ui_premise", conclusionId: "prop_ui_conclusion", chainId: "chain_ui_showcase", sourceId: "notes_ui_showcase", sourceLabel: "Synthetic showcase knowledge" });
 export const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 export async function until(test, label, timeout = 30_000) {
   const end = Date.now() + timeout;
@@ -43,6 +44,12 @@ async function freePort() { const s = http.createServer(); const p = await liste
 function seed(data) {
   const write = (relative, value) => { const file = path.join(data, relative); fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, value, { flag: "wx" }); };
   const createdAt = "2026-11-01T00:00:00.000Z", provenance = [{ chatId: fixture.sourceId, messageId: "" }];
+  // Explicit reversible rendering state plus a settled positions ledger allow
+  // both Home variants without weakening the original graph/settings hashes.
+  write("settings.json", JSON.stringify({ version: 1, graph: { rendering: true } }) + "\n");
+  write("graph/positions.json", JSON.stringify({ positions: {
+    [fixture.premiseId]: { x: -30, y: 0 }, [fixture.conclusionId]: { x: 30, y: 0 },
+  }, updatedAt: createdAt }) + "\n");
   write("graph/nodes.jsonl", [
     { id: fixture.premiseId, name: "Synthetic premise", statement: "The offline showcase has local state.", aliases: [], createdAt, provenance },
     { id: fixture.conclusionId, name: "Synthetic conclusion", statement: "Picker changes need no generation.", aliases: [], createdAt, provenance },
@@ -61,6 +68,14 @@ function seed(data) {
     result("seed_plan_result", "seed_plan_call", "plan_init", { ok: true, tree }),
     { ...assistant("seed_notes", [{ type: "text", text: "This synthetic session exists only to obtain the host-created native session toolbar surface target." }]), stopReason: "stop" },
   ] }, null, 2));
+  write(`chats/${fixture.practiceChatId}.json`, JSON.stringify({ version: 1, id: fixture.practiceChatId,
+    title: fixture.practiceTitle, kind: "practice", tree: { nodes: [], edges: [], version: 1 },
+    createdAt: "2026-10-31T00:00:00.000Z", updatedAt: "2026-10-31T00:00:00.000Z",
+    settings: { model: { provider: "custom", id: fixture.model } }, messages: [
+      { id: "seed_practice_user", role: "user", content: "Synthetic settled practice history; no generation.", timestamp: 1 },
+      { ...assistant("seed_practice_complete", [{ type: "text", text: "Settled offline practice fixture. No active problem or opening prompt." }]), stopReason: "stop" },
+    ],
+  }, null, 2));
 }
 
 export async function runPackagedProof(verify) {
@@ -70,7 +85,7 @@ export async function runPackagedProof(verify) {
   const source = fs.realpathSync(process.env.LH_STANDALONE);
   assert.ok(fs.statSync(path.join(source, "server.js")).isFile());
   const pluginRoot = fileURLToPath(new URL("../", import.meta.url));
-  const built = path.join(pluginRoot, "dist/ui-showcase");
+  const built = path.join(pluginRoot, "dist");
   const manifest = JSON.parse(fs.readFileSync(path.join(built, "manifest.json"), "utf8"));
   assert.equal(manifest.id, "ui-showcase"); assert.equal(manifest.backend, undefined, "Frontend-only package");
   const runtime = process.env.LH_NODE_RUNTIME ?? path.resolve(pluginRoot, "../../node_modules/electron/dist/Electron.app/Contents/MacOS/Electron");
@@ -101,12 +116,25 @@ export async function runPackagedProof(verify) {
   try {
     console.log(`UI Showcase evidence: ${scratch}`);
     fs.cpSync(source, standalone, { recursive: true, verbatimSymlinks: true }); verifyLinks(standalone);
-    fs.mkdirSync(path.join(data, "plugins"), { recursive: true });
-    fs.cpSync(built, path.join(data, "plugins", manifest.id), { recursive: true, dereference: true });
-    evidence.installedDigest = digestTree(path.join(data, "plugins", manifest.id));
+    fs.mkdirSync(path.join(data, "plugins", manifest.id), { recursive: true });
+    fs.cpSync(built, path.join(data, "plugins", manifest.id, "dist"), { recursive: true, dereference: true });
+    evidence.installedDigest = digestTree(path.join(data, "plugins", manifest.id, "dist"));
     assert.equal(evidence.installedDigest, evidence.builtDigest, "Install exact handed-off plugin bytes");
+    // The second package is an explicit, separately fingerprinted TEST fixture,
+    // never a replacement for or addition to the frozen product distribution.
+    const fixtureDirectory = path.join(data, "plugins", surfaceProofFixture.id, "dist");
+    fs.mkdirSync(fixtureDirectory, { recursive: true });
+    const fixtureHash = crypto.createHash("sha256");
+    for (const name of Object.keys(surfaceProofFixture.files).sort()) {
+      const contents = surfaceProofFixture.files[name];
+      fixtureHash.update(name + "\0"); fixtureHash.update(contents);
+      fs.writeFileSync(path.join(fixtureDirectory, name), contents, { flag: "wx" });
+    }
+    evidence.testFixture = { id: surfaceProofFixture.id, expectedDigest: fixtureHash.digest("hex"), installedDigest: digestTree(fixtureDirectory),
+      helperSha256: crypto.createHash("sha256").update(fs.readFileSync(new URL("./surface-fixture.mjs", import.meta.url))).digest("hex") };
+    assert.equal(evidence.testFixture.installedDigest, evidence.testFixture.expectedDigest);
     fs.writeFileSync(cleanEnv.LH_AUTH_FILE, "{}\n", { flag: "wx" }); seed(data);
-    assert.deepEqual(fs.readdirSync(path.join(data, "plugins")), ["ui-showcase"], "Install this plugin only");
+    assert.deepEqual(fs.readdirSync(path.join(data, "plugins")).sort(), ["surface-proof", "ui-showcase"], "Install only the exact product and approved test fixture");
     const graphBefore = digestTree(path.join(data, "graph"));
     const base = `http://127.0.0.1:${await freePort()}`, port = new URL(base).port;
     evidence.origin = base;
@@ -123,8 +151,11 @@ export async function runPackagedProof(verify) {
       return { response, payload: JSON.parse(text) };
     };
     const plugins = (await api("/api/plugins")).payload.plugins;
-    assert.equal(plugins.find(value => value.id === manifest.id)?.enabled, false);
-    assert.equal((await api(`/api/plugins/${manifest.id}`, "PUT", { enabled: true })).payload.plugins.find(value => value.id === manifest.id)?.status, "active");
+    assert.deepEqual(plugins.map(value => value.id).sort(), ["surface-proof", "ui-showcase"], "No unexpected plugin is discovered");
+    for (const id of [manifest.id, surfaceProofFixture.id]) {
+      assert.equal(plugins.find(value => value.id === id)?.enabled, false);
+      assert.equal((await api(`/api/plugins/${id}`, "PUT", { enabled: true })).payload.plugins.find(value => value.id === id)?.status, "active");
+    }
     const provider = await api("/api/custom-provider");
     await api("/api/custom-provider", "POST", { baseUrl: `http://127.0.0.1:${await listen(catalog)}/v1`, authMode: "keyless" }, { "If-Match": provider.response.headers.get("etag") });
     const settingsBefore = (await api("/api/settings")).payload;
@@ -176,14 +207,15 @@ export async function runPackagedProof(verify) {
     // Do not suppress arbitrary network failures or unexpected HTTP errors.
     evidence.expectedCanceledReads = evidence.failedRequests.filter(request => ["real pickers", "knowledge origin scopes", "native session surface", "disable cleanup"].includes(request.stage) && request.failure?.errorText === "net::ERR_ABORTED" && new URL(request.url).pathname === "/api/graph/sources");
     // Navigation can cancel a completed, read-only Next router prefetch. Require
-    // positive prefetch headers and its matching successful response; API reads,
-    // page loads, provider requests and all other failures remain strict.
+    // positive prefetch headers and its matching successful response. Stages are
+    // limited to the original cases and the two observed native-page matrix cases;
+    // API reads, page loads, provider requests and all other failures remain strict.
     const expectedCanceledPrefetchRequests = evidence.failedRequests.filter(request =>
       request.method === "GET" && request.type === "fetch" && new URL(request.url).origin === base &&
       !/^\/api(?:\/|$)/.test(new URL(request.url).pathname) && new URL(request.url).searchParams.has("_rsc") &&
       request.requestHeaders.rsc === "1" && request.requestHeaders["next-router-prefetch"] === "1" &&
       request.failure?.errorText === "net::ERR_ABORTED" &&
-      (request.stage === "native session surface" || (request.stage === "gallery" && request.requestHeaders["next-router-segment-prefetch"] === "/_tree")) &&
+      (["native session surface", "public Surface matrix: native-teach", "public Surface matrix: native-practice"].includes(request.stage) || (request.stage === "gallery" && request.requestHeaders["next-router-segment-prefetch"] === "/_tree")) &&
       evidence.responses.some(response => response.url === request.url && response.status === 200 && response.stage === request.stage)
     );
     evidence.expectedCanceledPrefetches = expectedCanceledPrefetchRequests.map(request => ({ ...request,
@@ -200,6 +232,16 @@ export async function runPackagedProof(verify) {
     if (child && child.exitCode === null) { child.kill("SIGTERM"); await Promise.race([new Promise(resolve => child.once("exit", resolve)), delay(5000)]); if (child.exitCode === null) child.kill("SIGKILL"); }
     catalog.closeAllConnections(); await new Promise(resolve => catalog.close(resolve));
     try { assert.equal(digestTree(source), sourceDigest, "Verified source payload must remain byte-identical"); evidence.sourceUnchanged = true; } catch (error) { failure ??= error; evidence.sourceUnchanged = false; }
+    try {
+      assert.equal(digestTree(built), evidence.builtDigest, "Frozen product distribution must remain byte-identical");
+      assert.equal(digestTree(path.join(data, "plugins", manifest.id, "dist")), evidence.builtDigest, "Installed product bytes must remain exact");
+      evidence.builtUnchanged = true;
+      if (evidence.testFixture) {
+        evidence.testFixture.finalDigest = digestTree(path.join(data, "plugins", surfaceProofFixture.id, "dist"));
+        assert.equal(evidence.testFixture.finalDigest, evidence.testFixture.expectedDigest, "Test fixture package must remain byte-identical");
+        assert.equal(crypto.createHash("sha256").update(fs.readFileSync(new URL("./surface-fixture.mjs", import.meta.url))).digest("hex"), evidence.testFixture.helperSha256);
+      }
+    } catch (error) { failure ??= error; evidence.builtUnchanged = false; }
     fs.writeFileSync(path.join(scratch, "result.json"), JSON.stringify(evidence, null, 2));
     console.log(`${evidence.passed && !failure ? "PASS" : "FAIL"}: UI Showcase packaged proof. Evidence: ${scratch}`);
   }

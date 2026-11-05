@@ -48,10 +48,13 @@ interface OpeningLeaseState {
 	onRevoke: () => void;
 	notified: boolean;
 	exposed: boolean;
-	phase: "pending" | "claimed" | "mounted" | "revoked";
+	phase: "pending" | "claimed" | "mounted" | "detached" | "revoked";
 	generation: number;
 	retiring: Set<InteractionLayer>;
 	layer?: InteractionLayer;
+	effectOwner?: object;
+	element?: HTMLElement | null;
+	reconnect?: { intent: number; reservation: number; focus: number };
 }
 interface EscapeSnapshot { owner: InteractionLayer | null; claimed: boolean; dispatched: boolean }
 type KeyEvent = KeyboardEvent | { nativeEvent: KeyboardEvent };
@@ -100,6 +103,7 @@ export function createInteractionLayers() {
 	const retainRetirement = (state: OpeningLeaseState) => state.retiring.size > 0 || !!(state.layer && layers.includes(state.layer));
 	const revoke = (state: OpeningLeaseState, notify: boolean) => {
 		state.phase = "revoked";
+		state.effectOwner = undefined; state.reconnect = undefined;
 		// Keep only an exact retiring-registration tombstone. A rapid next
 		// reservation must still wait when controlled close has not committed.
 		if (slots.get(state.slot) === state && !retainRetirement(state)) slots.delete(state.slot);
@@ -110,7 +114,7 @@ export function createInteractionLayers() {
 	};
 	const ownsLease = (state: OpeningLeaseState) => slots.get(state.slot) === state && state.phase !== "revoked" &&
 		(state.phase === "mounted" || state.generation === generation);
-	const changed = (kind: "register" | "unregister", changedLayer: InteractionLayer) => {
+	const changed = (kind: "register" | "unregister", changedLayer: InteractionLayer, effectOwner?: object) => {
 		// z-index accepts integers only. Re-rank declaratively after ordering
 		// changes instead of inventing fractional/per-surface foreground values.
 		layers.forEach((layer, index) => { layer.order = index + 1; });
@@ -123,8 +127,13 @@ export function createInteractionLayers() {
 				notifyAfterRetirementCleanup();
 				if (state.phase === "revoked" && slots.get(state.slot) === state && !retainRetirement(state)) slots.delete(state.slot);
 			} else if (kind === "unregister" && state.layer === changedLayer) {
-				revoke(state, false);
-			} else if (state.phase === "pending" || state.phase === "claimed") {
+				if (effectOwner && state.effectOwner === effectOwner && state.phase === "mounted" && slots.get(state.slot) === state) {
+					// A hook's visual effect may disconnect while its caller still owns
+					// the logical opening. Only that exact hook can attach it again.
+					state.phase = "detached"; state.generation = generation;
+					state.reconnect = { intent: intentSequence, reservation: reservationSequence, focus: focusRevision };
+				} else revoke(state, false);
+			} else if (state.phase === "pending" || state.phase === "claimed" || state.phase === "detached") {
 				revoke(state, true);
 			}
 		}
@@ -215,12 +224,20 @@ export function createInteractionLayers() {
 			if (modal && !(owner && belongsTo(owner.id, modal.id))) return false;
 			return element === anchor || element.contains(anchor);
 		},
-		register(input: Omit<InteractionLayer, "order">) {
+		register(input: Omit<InteractionLayer, "order">, effectOwner?: object) {
 			const opening = input.openingLease && leaseStates.get(input.openingLease);
+			const reconnecting = !!(opening?.phase === "detached" && effectOwner && opening.effectOwner === effectOwner);
+			if (opening && reconnecting && (opening.layer?.id !== input.id || opening.layer.kind !== input.kind ||
+				opening.layer.ownerId !== input.ownerId || opening.layer.rootRef !== input.rootRef ||
+				opening.element !== input.rootRef.current || !input.rootRef.current?.isConnected ||
+				opening.reconnect?.intent !== intentSequence || opening.reconnect.reservation !== reservationSequence ||
+				opening.reconnect.focus !== focusRevision)) {
+				revoke(opening, true); publish(); return () => {};
+			}
 			// A superseded React render must not register at all, even when its
 			// replacement uses the same ID in the same controlled-state batch.
-			if (input.openingLease && (!opening || !ownsLease(opening) || opening.phase !== "claimed" ||
-				opening.retiring.size > 0 || (opening.opener && !elementEligible(opening.opener)))) return () => {};
+			if (input.openingLease && (!opening || !ownsLease(opening) || (opening.phase !== "claimed" && !reconnecting) ||
+				opening.retiring.size > 0 || (!reconnecting && opening.opener && !elementEligible(opening.opener)))) return () => {};
 			if (get(input.id)) throw new Error(`Interaction layer already registered: ${input.id}`);
 			const layer = { ...input, order: layers.length + 1 };
 			layers = [...layers, layer];
@@ -230,12 +247,15 @@ export function createInteractionLayers() {
 			if (childIndex >= 0) {
 				layers = [...layers.slice(0, childIndex), layer, ...layers.slice(childIndex, -1)];
 			}
-			if (opening) { opening.layer = layer; opening.phase = "mounted"; }
+			if (opening) {
+				opening.layer = layer; opening.phase = "mounted";
+				opening.effectOwner = effectOwner; opening.element = input.rootRef.current; opening.reconnect = undefined;
+			}
 			changed("register", layer);
 			return () => {
 				if (get(input.id) !== layer) return;
 				layers = layers.filter(candidate => candidate !== layer);
-				changed("unregister", layer);
+				changed("unregister", layer, effectOwner);
 			};
 		},
 		update(id: LayerId, input: Partial<Omit<InteractionLayer, "id" | "order">>) {
@@ -313,7 +333,7 @@ export function createInteractionLayers() {
 		invalidateOpening() {
 			intentSequence++;
 			for (const state of new Set([...slots.values(), ...proposals])) {
-				if (state.phase === "pending" || state.phase === "claimed") revoke(state, true);
+				if (state.phase === "pending" || state.phase === "claimed" || state.phase === "detached") revoke(state, true);
 			}
 			publish();
 		},
@@ -425,6 +445,7 @@ export function useInteractionLayer(options: UseInteractionLayerOptions) {
 	const inheritedOwner = useContext(InteractionLayerOwner);
 	const generatedId = useId();
 	const id = options.id ?? generatedId;
+	const effectOwner = useRef({});
 	const latest = useRef(options);
 	useLayoutEffect(() => { latest.current = options; });
 	const { enabled, kind, rootRef } = options;
@@ -442,7 +463,7 @@ export function useInteractionLayer(options: UseInteractionLayerOptions) {
 			anchorRef: latest.current.anchorRef,
 			focusInitial: () => latest.current.focusInitial?.(),
 			openingLease,
-		});
+		}, effectOwner.current);
 	}, [controller, id, enabled, kind, rootRef, explicitOwner, inheritedOwner, openingLease]);
 	const layers = useSyncExternalStore(controller.subscribe, controller.getSnapshot, controller.getServerSnapshot);
 	const layer = layers.find(candidate => candidate.id === id && candidate.rootRef === rootRef && candidate.openingLease === openingLease);

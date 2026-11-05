@@ -50,11 +50,30 @@ export interface PluginStandardComposerProps {
 	thinking: PluginThinkingPickerProps;
 	dictation: PluginDictationProps;
 }
+export interface PluginButtonColorState {
+	background?: string;
+	text?: string;
+	border?: string;
+}
+/** CSS colors only; state overrides cascade per property, not as complete palettes. */
+export interface PluginButtonColors extends PluginButtonColorState {
+	hover?: PluginButtonColorState;
+	active?: PluginButtonColorState;
+	focusVisible?: PluginButtonColorState & { ring?: string };
+	disabled?: PluginButtonColorState;
+}
 export interface PluginButtonProps {
+	/** Visible text, or the accessible name when iconOnly is true. */
 	label: string;
+	/** Trusted plugin SVG markup, rendered decoratively before the label. */
+	icon?: string;
+	/** Hide visible text; requires a nonblank label and icon. Size remains independent. */
+	iconOnly?: boolean;
 	onClick: () => void | Promise<void>;
 	disabled?: boolean;
-	variant?: "default" | "destructive" | "outline" | "secondary" | "ghost" | "link";
+	variant?: "default" | "destructive" | "outline" | "secondary" | "ghost" | "link" | "custom";
+	/** Validated for every variant, applied only to custom. Updates replace this whole object. */
+	colors?: PluginButtonColors;
 	size?: "default" | "xs" | "sm" | "lg" | "icon" | "icon-xs" | "icon-sm" | "icon-lg";
 	title?: string;
 }
@@ -70,7 +89,7 @@ export interface PluginWorkerResultProps {
 	presentation?: "collapsed" | "card" | "plain";
 }
 declare const pluginSurfaceTargetBrand: unique symbol;
-/** Opaque host-created identity for one mounted native session view. */
+/** Opaque host-created identity for one mounted host page body. */
 export interface PluginSurfaceTarget { readonly [pluginSurfaceTargetBrand]: true }
 export interface PluginSurfaceProps {
 	/** Accessible name only; visible headings belong to plugin content. */
@@ -127,5 +146,8 @@ export interface PluginUi {
 	mountWorkerResult(container: HTMLElement, props: PluginWorkerResultProps, options: PluginWidgetOptions): PluginWidgetHandle<PluginWorkerResultProps>;
 	openMenu(anchor: HTMLElement, props: PluginMenuProps, options: PluginWidgetOptions): PluginWidgetHandle<PluginMenuProps>;
 	openDialog(props: PluginDialogProps, options: PluginWidgetOptions): PluginWidgetHandle<PluginDialogProps>;
+	/** Capture the active host page once, for this surface's whole lifetime. */
+	openSurface(props: PluginSurfaceProps, options: PluginWidgetOptions): PluginWidgetHandle<PluginSurfaceProps>;
+	/** Bind explicitly to an existing page instance, including native submission targets. */
 	openSurface(target: PluginSurfaceTarget, props: PluginSurfaceProps, options: PluginWidgetOptions): PluginWidgetHandle<PluginSurfaceProps>;
 }

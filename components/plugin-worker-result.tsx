@@ -26,13 +26,13 @@ export function PluginWorkerResultSurface({ label, status, text, children, prese
 	const body = children ?? <div className="text-sm [&_p:first-child]:mt-0 [&_p:last-child]:mb-0"><MessageResponse>{text}</MessageResponse></div>;
 	if (presentation === "card") return (
 		<div data-testid="plugin-worker-result-card" className="rounded-xl border bg-card p-4 text-card-foreground">
-			<Hint label={tooltip}><div data-testid="plugin-worker-header" className="mb-1 flex items-center gap-2 text-xs text-muted-foreground">{icon}{heading}</div></Hint>
+			<Hint label={tooltip}><div data-testid="plugin-worker-header" className="relative mb-1 flex items-center gap-2 text-xs text-muted-foreground">{icon}{heading}</div></Hint>
 			{body}
 		</div>
 	);
 	if (presentation === "plain") return (
 		<div data-testid="plugin-worker-result-plain">
-			<Hint label={tooltip}><div data-testid="plugin-worker-header" className="mb-1 flex items-center gap-2 text-xs text-muted-foreground">{icon}{heading}</div></Hint>
+			<Hint label={tooltip}><div data-testid="plugin-worker-header" className="relative mb-1 flex items-center gap-2 text-xs text-muted-foreground">{icon}{heading}</div></Hint>
 			{body}
 		</div>
 	);

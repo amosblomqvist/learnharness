@@ -4,7 +4,7 @@ import type {
   PluginThinkingPickerProps as ThinkingProps, PluginButtonProps,
 } from "learnharness-plugin-api";
 import { Scope, button, element, example, family, note, readout, row } from "./dom.ts";
-import { mountOverlayExamples } from "./surfaces.ts";
+import { mountOverlayExamples, openPageSurfaceDemo } from "./surfaces.ts";
 import { mountTreeDemo } from "./tree.ts";
 
 type Thinking = PluginThinkingPickerProps["value"];
@@ -184,10 +184,21 @@ export function mountGallery(container: HTMLElement, ctx: PluginFrontendContext,
 
   family(ui, root, scope, "menus", "Menus", (body, life) => mountOverlayExamples(ui, body, life, "menus"));
   family(ui, root, scope, "dialogs", "Dialogs", (body, life) => mountOverlayExamples(ui, body, life, "dialogs"));
-  family(ui, root, scope, "surfaces", "Session surfaces", body => {
-    note(body, "A surface requires the opaque target supplied by an actual native teaching or practice session context. Open a native session, then choose UI Showcase surface in its top bar. A gallery view cannot create or infer that target.");
-    note(body, "The session demo includes a visible host title and X, a retained parent under a nested surface, and menu/dialog examples above the surface. Escape and focus remain entirely host-owned.");
-    readout(body, "surfaces")({ target: "available only from a native session top-bar action", lastCallback: "none" });
+  family(ui, root, scope, "surfaces", "Surfaces", (body, life) => {
+    note(body, "Open a nonmodal host surface over the current page body. Its page top bar or floating sidebar control stays outside; the sidebar and global dialogs remain available. Navigating away closes the surface.");
+    note(body, "The same demo is also available from a native teaching or practice session's UI Showcase surface top-bar action. Both include background presets, retained text, nested surfaces, and menus/dialogs above the surface. Escape and focus remain entirely host-owned.");
+    let opens = 0; let closed = 0; let lastCallback = "none";
+    const show = readout(body, "surfaces");
+    const render = () => show({ target: "current page", opens, closed, lastCallback });
+    button(ui, body, life, "open-surface", { label: "Open surface", variant: "outline", onClick() {
+      if (life.signal.aborted) return;
+      opens++; lastCallback = "openSurface (current page body)"; render();
+      life.widget(openPageSurfaceDemo(ui, life.signal, () => {
+        if (life.signal.aborted) return;
+        closed++; lastCallback = "surface.onClose"; render();
+      }));
+    } });
+    render();
   });
   return scope.dispose;
 }

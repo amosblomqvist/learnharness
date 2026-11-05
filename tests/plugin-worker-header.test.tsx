@@ -16,6 +16,7 @@ for (const status of ["succeeded", "failed", "cancelled", "interrupted"] as cons
 			const { document } = parseHTML(html);
 			const header = document.querySelector('[data-testid="plugin-worker-header"]')!;
 			assert.ok(header);
+			assert.ok(header.classList.contains("relative"), "worker headers contain their absolutely positioned accessibility status inside the caller's scroller");
 			assert.equal(header.getAttribute("title"), null, "outcomes use the application Hint, not a browser-only tooltip");
 			assert.equal(header.getAttribute("data-slot"), "tooltip-trigger");
 			assert.equal(header.getAttribute("tabindex"), null, "Hint does not add a focus stop");

@@ -3,6 +3,7 @@ import * as path from "node:path";
 import { randomUUID } from "node:crypto";
 import { PLUGIN_ID_PATTERN, parsePluginManifest } from "../core/plugins.ts";
 
+// Ownership and journal file paths are relative to each plugin's fixed dist/ code root.
 interface Ownership { version: 1; plugins: Record<string, { files: string[] }> }
 interface Installing { version: 1; id: string; files: string[] }
 export interface BundledPluginInstallationReport { errors: Record<string, string> }
@@ -132,7 +133,8 @@ function stage(source: string, id: string, appVersion: string): Map<string, Buff
  * all package mutation. File fsync + rename run everywhere; POSIX also fsyncs
  * directory entries. Node cannot flush directory entries on Windows, so power-
  * loss durability there is filesystem-dependent. Startup retry repairs partial
- * code updates (including obsolete owned files); data/ is never read or written.
+ * dist/ code updates (including obsolete owned files); sibling data/ and project
+ * files outside dist/ are never read or written.
  * This is recoverable, not a whole-package atomic swap or a live updater.
  */
 export function installBundledPlugins(sourceDir: string, pluginsDir: string, appVersion: string): BundledPluginInstallationReport {
@@ -160,17 +162,19 @@ export function installBundledPlugins(sourceDir: string, pluginsDir: string, app
 	}
 	for (const { id, files } of packages) {
 		try {
-			const root = path.join(destination, id);
+			const pluginRoot = path.join(destination, id), root = path.join(pluginRoot, "dist");
 			const pending = readMarker(destination, id);
 			const owned = Object.hasOwn(ownership.plugins, id) ? ownership.plugins[id] : undefined;
-			if (exists(root) && !Object.hasOwn(ownership.plugins, id) && !pending) throw new Error(`Bundled plugin ${id} collides with an external installation`);
-			if (exists(root) && (!fs.lstatSync(root).isDirectory() || fs.lstatSync(root).isSymbolicLink())) throw new Error(`Unsafe installed package: ${id}`);
+			if (exists(pluginRoot) && !Object.hasOwn(ownership.plugins, id) && !pending) throw new Error(`Bundled plugin ${id} collides with an external installation`);
+			if (exists(pluginRoot) && (!fs.lstatSync(pluginRoot).isDirectory() || fs.lstatSync(pluginRoot).isSymbolicLink())) throw new Error(`Unsafe installed package: ${id}`);
 			const previous = [...new Set([...(owned?.files ?? []), ...(pending?.files ?? [])])];
 			const next = [...files.keys()].sort();
 			// This write-ahead journal also establishes ownership on an interrupted first install.
 			atomicWrite(markerPath(destination, id), JSON.stringify({ version: 1, id, files: [...new Set([...previous, ...next])].sort() } satisfies Installing));
-			directory(root);
+			directory(pluginRoot);
 			syncPluginInstallationDirectory(destination);
+			directory(root);
+			syncPluginInstallationDirectory(pluginRoot);
 			// Validate ALL destinations before replacing the first code file.
 			for (const file of new Set([...previous, ...next])) checkedTarget(root, file);
 			for (const file of next) if (file !== "manifest.json") atomicWrite(checkedTarget(root, file), files.get(file)!);

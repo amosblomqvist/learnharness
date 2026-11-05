@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 import puppeteer from "puppeteer-core";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
-const built = path.join(root, "dist/coding-questions");
+const built = path.join(root, "dist");
 const chrome = process.env.CHROME_PATH ?? ["/Applications/Google Chrome.app/Contents/MacOS/Google Chrome", "/usr/bin/google-chrome", "/usr/bin/chromium"].find(file => fs.existsSync(file));
 if (!chrome) throw new Error("Set CHROME_PATH to a local Chrome/Chromium executable.");
 const evidence = fs.mkdtempSync(path.join(os.tmpdir(), "lh-coding-browser-"));
@@ -92,20 +92,17 @@ try {
   assert.equal((await state()).value,"    x");
   await fillCode('def example():');
   await page.keyboard.press("End");
-  assert.equal(await page.evaluate(() => window.host.handle.handleKeyDown('Enter')), 'pass', 'Plain Enter delegates submission to the host');
   await page.keyboard.press("Enter");
-  assert.equal((await state()).value, 'def example():', 'Host-default Enter submits without editing the code');
-  assert.equal(await page.evaluate(() => window.host.submits), 1);
+  assert.equal((await state()).value, 'def example():\n    ', 'Plain Enter inserts an auto-indented code newline');
+  assert.equal(await page.evaluate(() => window.host.submits), 0, 'Enter in code never submits');
   const composition = await page.$eval(field, node => [{isComposing:true},{keyCode:229}].map(extra => {
     const event = new KeyboardEvent('keydown', {key:'Enter',code:'Enter',bubbles:true,cancelable:true,...extra});
     node.dispatchEvent(event);
     return {prevented:event.defaultPrevented,isComposing:event.isComposing,keyCode:event.keyCode};
   }));
   assert.deepEqual(composition, [{prevented:false,isComposing:true,keyCode:0},{prevented:false,isComposing:false,keyCode:229}]);
-  assert.equal(await page.evaluate(() => window.host.submits), 1, 'Composition-marked Enter never submits');
-  assert.equal((await state()).value, 'def example():');
-  await page.keyboard.down('Shift'); await page.keyboard.press('Enter'); await page.keyboard.up('Shift');
-  assert.equal((await state()).value,"def example():\n    ");
+  assert.equal(await page.evaluate(() => window.host.submits), 0, 'Composition-marked Enter never submits');
+  assert.equal((await state()).value, 'def example():\n    ');
   await page.keyboard.sendCharacter('return 1');
   await page.keyboard.down('Shift'); await page.keyboard.press('Enter'); await page.keyboard.up('Shift');
   assert.equal((await state()).value,"def example():\n    return 1\n    ");
@@ -116,7 +113,7 @@ try {
   await page.keyboard.up(process.platform === "darwin" ? "Meta" : "Control");
   await page.keyboard.press("Escape");
   assert.deepEqual(await state(),beforeReserved);
-  assert.equal(await page.evaluate(() => window.host.submits),2);
+  assert.equal(await page.evaluate(() => window.host.submits),1);
   assert.deepEqual(await page.evaluate(() => window.host.reserved),["Shift+Tab"]);
   await fillCode("history");
   const mod=process.platform === "darwin" ? "Meta" : "Control";
@@ -181,19 +178,111 @@ try {
   await page.waitForNetworkIdle();
   assert.equal(await page.$eval('#editor',node=>node.textContent),'sentinel');
   mode='fail';
-  await page.evaluate(() => {document.querySelector('#editor').textContent='';window.host.mount({language:'Go',starterCode:'package main'})});
+  await page.evaluate(() => {document.querySelector('#editor').textContent='';window.host.mount({language:'Ruby',starterCode:'value = 1'})});
   await page.waitForFunction(() => document.querySelector('#editor [role="status"]').textContent === 'Plain text');
-  assert.deepEqual(await state(),{status:'ready',value:'package main'});
+  assert.deepEqual(await state(),{status:'ready',value:'value = 1'});
   await fillCode('still editable');assert.equal((await state()).value,'still editable');
   mode='pass';
   page.off('request',intercept);await page.setRequestInterception(false);
+
+  const marker = '#editor .cm-lintRange-error, #editor .cm-lintPoint-error';
+  const diagnosticExamples = [
+    ['Python', 'def example():\n    return 1\n', 'def example(:\n    return 1\n'],
+    ['JavaScript', 'const value = 1;', 'const value = ;'],
+    ['TypeScript', 'const value: number = 1;', 'const value: = 1;'],
+    ['C', 'int main() { return 0; }', 'int main( { return 0; }'],
+    ['C++', 'int main() { return 0; }', 'int main( { return 0; }'],
+    ['Java', 'class Example { int value = 1; }', 'class Example { int value = ; }'],
+    ['Rust', 'fn main() {}', 'fn main( {}'],
+    ['Go', 'package main\nfunc main() {}', 'package main\nfunc main( {}'],
+    ['JSON', '{"value":1}', '{"value":}'],
+  ];
+  for (const [language, valid, invalid] of diagnosticExamples) {
+    await page.evaluate(({language,invalid}) => window.host.mount({language,starterCode:invalid}), {language,invalid});
+    await page.waitForSelector(marker);
+    assert.deepEqual(await state(), {status:'ready',value:invalid}, `${language}: diagnostics do not alter code or readiness`);
+    assert.equal(await page.$$eval('#editor .cm-panel-lint, #editor .cm-gutter-lint', nodes=>nodes.length), 0);
+    if (language === 'C') {
+      await (await page.$('#editor .cm-lintRange-error')).hover();
+      await page.waitForSelector('.cm-tooltip-lint .cm-diagnosticText', {visible:true});
+      assert.ok(await page.$$eval('.cm-tooltip-lint .cm-diagnosticText', nodes=>nodes.every(node=>node.textContent==='Syntax problem.')));
+      await page.screenshot({path:path.join(evidence,'syntax-diagnostics-hover.png')});
+      await page.mouse.move(1050,800);
+    }
+    if (language === 'Python') {
+      const point = await page.$eval('#editor .cm-lintPoint-error', node=>getComputedStyle(node,':after').borderBottomColor);
+      assert.equal(point, 'rgb(221, 17, 17)', 'Zero-width syntax problems have a red point marker');
+      const submits = await page.evaluate(()=>window.host.submits);
+      await page.focus(field);
+      await page.keyboard.down(process.platform==='darwin'?'Meta':'Control');
+      await page.keyboard.press('Enter');
+      await page.keyboard.up(process.platform==='darwin'?'Meta':'Control');
+      assert.equal(await page.evaluate(()=>window.host.submits), submits+1, 'Syntax errors never prevent host submission');
+      assert.deepEqual(await state(), {status:'ready',value:invalid});
+    }
+    await fillCode(valid);
+    await page.waitForFunction(selector=>!document.querySelector(selector), {}, marker);
+    assert.deepEqual(await state(), {status:'ready',value:valid});
+  }
+
+  // Measure the scheduled update in browser time rather than relying on Node sleeps.
+  await page.evaluate(()=>window.host.mount({language:'js',starterCode:'const value = 1;'}));
+  await page.waitForFunction(()=>document.querySelector('#editor [role="status"]').textContent==='');
+  await page.evaluate(()=> {
+    window.diagnosticDelay=null; const start=performance.now();
+    window.diagnosticObserver=new MutationObserver(()=> {
+      if(document.querySelector('#editor .cm-lintPoint-error, #editor .cm-lintRange-error')) {
+        window.diagnosticDelay=performance.now()-start; window.diagnosticObserver.disconnect();
+      }
+    });
+    window.diagnosticObserver.observe(document.querySelector('#editor'),{childList:true,subtree:true});
+    window.host.update({status:'ready',value:'const value = ;'});
+  });
+  await page.waitForFunction(()=>window.diagnosticDelay!==null);
+  const diagnosticDelay=await page.evaluate(()=>window.diagnosticDelay);
+  assert.ok(diagnosticDelay>=280, `Diagnostics wait for the configured typing pause (${diagnosticDelay}ms)`);
+  await page.evaluate(()=> {
+    window.host.update({status:'ready',value:'const value = 1;'});
+    window.host.update({status:'ready',value:'const value = ;'});
+    window.host.update({status:'ready',value:'const value = 2;'});
+  });
+  await page.waitForFunction(selector=>!document.querySelector(selector), {}, marker);
+  assert.deepEqual(await state(), {status:'ready',value:'const value = 2;'});
+
+  await page.evaluate(()=>window.host.mount({language:'JavaScript',starterCode:'const broken = ;\n'+'let value = 1;\n'.repeat(16000)}));
+  await page.waitForSelector(marker);
+  assert.equal(await page.$eval('#editor .cm-scroller',node=>node.scrollTop),0);
+  assert.ok(await page.$eval('#editor .cm-line',node=>node.textContent.includes('const broken = ;')&&!!node.querySelector('.cm-lintPoint-error, .cm-lintRange-error')),'Early errors appear without scrolling a document beyond the parse-ahead limit');
+  await page.screenshot({path:path.join(evidence,'large-answer-diagnostics.png')});
+  await page.evaluate(()=>window.host.mount({language:'JavaScript',starterCode:'function example() {\n'+'let value = 1;\n'.repeat(16000)+'}\n'}));
+  await new Promise(resolve=>setTimeout(resolve,1000));
+  assert.equal(await page.$$eval(marker,nodes=>nodes.length),0,'A valid open construct has no artificial partial-parse boundary error');
+
+  for(const [language,starterCode] of [['TypeScript','const value: number = "not a number";'],['SQL','SELECT FROM WHERE ;'],['HTML','<div>'],['unbundled-language','not code']]) {
+    await page.evaluate(({language,starterCode})=>window.host.mount({language,starterCode}), {language,starterCode});
+    await page.waitForFunction(()=>document.querySelector('#editor [role="status"]').textContent!=='Loading highlighting…');
+    await new Promise(resolve=>setTimeout(resolve,450));
+    assert.equal(await page.$$eval(marker,nodes=>nodes.length),0, `${language}: no unsupported or semantic diagnoses`);
+    assert.deepEqual(await state(),{status:'ready',value:starterCode});
+  }
+  await page.evaluate(()=>window.host.showAnswered('const value = ;','JavaScript'));
+  await page.waitForFunction(()=>document.querySelector('#answered [role="status"]').textContent==='');
+  await new Promise(resolve=>setTimeout(resolve,450));
+  assert.equal(await page.$$eval('#answered .cm-lintPoint-error, #answered .cm-lintRange-error',nodes=>nodes.length),0,'Saved answers have no diagnostics');
+  assert.equal(await page.$$eval('#answered .cm-line',nodes=>nodes.map(node=>node.textContent).join('\n')),'const value = ;');
+  await page.evaluate(()=> {
+    window.host.mount({language:'Python',starterCode:'def example(:\n    return 1\n'});
+    window.host.unmount();document.querySelector('#editor').textContent='diagnostics-unmounted';
+  });
+  await new Promise(resolve=>setTimeout(resolve,450));
+  assert.equal(await page.$eval('#editor',node=>node.textContent),'diagnostics-unmounted','Pending lint timers cannot resurrect an unmounted editor');
   await page.evaluate(() => {document.querySelector('#editor').textContent='';window.host.mount({language:'C++',starterCode:'int main() {}'});window.host.disable()});
   await page.waitForNetworkIdle();
   assert.equal(await page.$$eval('.cm-editor',nodes=>nodes.length),0);
-  assert.ok(requests.every(url=>url.startsWith(base)),"All language assets must load locally");
+  assert.ok(requests.every(url=>url.startsWith(base + '/') || url.startsWith('data:image/svg+xml,')),"Only local assets and inline CodeMirror diagnostic SVGs may load");
   assert.deepEqual(errors,[]);
-  fs.writeFileSync(path.join(evidence,'result.json'),JSON.stringify({passed:true,requests,errors},null,2));
-  console.log(`PASS: built editor, whitespace, highlighting, readiness, keyboard/history, controlled selection/fold, plain fallback, saved read-only code, late-load/unload cleanup. Evidence: ${evidence}`);
+  fs.writeFileSync(path.join(evidence,'result.json'),JSON.stringify({passed:true,requests,errors,diagnosticLanguages:diagnosticExamples.map(([name])=>name),diagnosticDelay},null,2));
+  console.log(`PASS: built editor, whitespace, highlighting, readiness, keyboard/history, controlled selection/fold, plain fallback, saved read-only code, nine-language diagnostics/hover/debounce/advisory submission, late-load/unload cleanup. Evidence: ${evidence}`);
 } finally {
   if(browser)await browser.close();
   server.closeAllConnections();await new Promise(resolve=>server.close(resolve));

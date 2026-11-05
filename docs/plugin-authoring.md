@@ -18,22 +18,35 @@ renderer isolation or grant access to OAuth/BYOK credentials through the API.
 3. Refresh the plugin list, then enable **Hello plugin**.
 4. Open its view using its explicitly placed sidebar action. Open its dedicated
    Settings page from Settings navigation or the plugin view's gear.
-5. Edit the installed code, restart LearnHarness, and enable it if necessary. Refresh
-   discovers packages; it is not a JavaScript hot-reloader.
+5. Edit the installed code in `hello-plugin/dist/`, restart LearnHarness, and enable
+   it if necessary. Refresh discovers packages; it is not a JavaScript hot-reloader.
 
 Packaged desktop builds also include a `plugin-authoring/` directory beside the
 standalone server, under the app's resources. It contains these docs, examples, a
 coding-agent skill, and the generated type-only API tree. This is read-only authoring
 material, separate from the writable installed plugins directory.
 
-No npm command is run by LearnHarness. Packages contain built JavaScript. Install the
-**built package contents** with `manifest.json` at the package root and its referenced
-bundles present—not the source project root. Preserve existing plugin `data/` when replacing
-package code. A production
-plugin can use TypeScript, React, and a bundler during authoring; ship the browser
-bundle as an ES module and the Node bundle as CommonJS. Bundle JavaScript libraries;
-leave Node built-ins external in the backend. Native dependency installation/rebuilds
-are not provided. The examples use plain JS and Node built-ins, needing no build. Besides the independent
+No npm command is run by LearnHarness. Each plugin has one workspace at
+`<learning data>/plugins/<id>/`, whether you install a distribution or author it there.
+The host requires **`<id>/dist/manifest.json`** and its referenced built bundles. A source
+project may keep `package.json`, source and build scripts alongside `dist/`; running its
+build writes directly to that `dist/`, not `dist/<id>/`. You can therefore edit and build
+in the installed workspace without copying or registering a second folder. After the
+first build of a previously unbuilt workspace, refresh the list to discover it. Changes
+to code already admitted by the host require a server restart, not just refresh.
+There is no separate development mode, registration, profile, hot reload, or legacy-layout
+fallback; an ID folder with only a root manifest is not an installable plugin.
+
+For distribution, copy the **contents of the built `dist/`** into
+`<learning data>/plugins/<id>/dist/`, never directly into `<id>/`. Keep optional source
+and development dependencies outside the runtime `dist/`, and never distribute persistent
+`data/`. Preserve the sibling
+`<id>/data/` when replacing code. A production plugin can use TypeScript, React, and a
+bundler during authoring; ship the browser bundle as an ES module and the Node bundle as
+CommonJS. Bundle JavaScript libraries; leave Node built-ins external in the backend.
+Native dependency installation/rebuilds are not provided. The examples use plain JS and
+Node built-ins, needing no build: their complete ID folders already include `dist/` and
+can be copied as-is. Besides the independent
 hello/managed-agent views, `examples/plugins/teaching-extension` demonstrates contributions
 to existing lessons: a normal native tool, a background-worker tool, and shared renderers.
 The background example may incur model cost, but runs only when explicitly requested.
@@ -46,8 +59,11 @@ for the session-extension increment, implemented and verified on
 `feature/plugin-architecture`, not released.
 For TypeScript in a checkout, use **type-only** imports from those files. Do not import
 application implementation modules at runtime. `scripts/build-plugin-types.mjs` emits
-a portable declaration tree for authors who do not use a source checkout. Pi native
-message/tool types are intentionally part of API v1 and match the app's pinned SDK;
+a portable declaration tree for authors who do not use a source checkout. The TypeScript
+plugin projects in this repository use `.sdk/`: their `npm run sdk` command invokes the
+checkout's generator. Outside a checkout, copy the packaged `plugin-authoring/types/` tree
+into the project's `.sdk/` before installing dependencies; the build itself needs no app
+checkout. Pi native message/tool types are intentionally part of API v1 and match the app's pinned SDK;
 this is not an unversioned compatibility promise for arbitrary Pi releases.
 
 ## Current UI-polish increment — implemented and verified
@@ -63,13 +79,16 @@ retroactive proof of these later changes. No commit, push or release follows fro
 ## Installed folder
 
 ```text
-my-plugin/
-  manifest.json
-  main.js           # optional browser ES module
-  backend.cjs       # optional Node CommonJS module
-  styles.css        # optional; requires a frontend entry
-  assets/           # public distributable assets/modules
-  data/             # persistent plugin-owned records, never served as static assets
+<learning data>/plugins/my-plugin/
+  package.json      # optional authoring/build configuration
+  src/              # optional source; never used as a runtime fallback
+  dist/             # REQUIRED fixed runtime directory; build output goes here
+    manifest.json
+    main.js         # optional browser ES module
+    backend.cjs     # optional Node CommonJS module
+    styles.css      # optional; requires a frontend entry
+    assets/         # public distributable assets/modules
+  data/             # persistent sibling, never distributed or served as static assets
 ```
 
 ```json
@@ -87,12 +106,17 @@ my-plugin/
 ```
 
 The folder name must match the lowercase-hyphen ID. All three entry filenames are
-optional except that at least one of `main` or `backend` is needed. They name root
-files, not paths into `data/`. Version fields initially use numeric `x.y.z`. An
+optional except that at least one of `main` or `backend` is needed. They name files at
+the root of `dist/`, not the workspace root or paths into `data/`. Version fields initially
+use numeric `x.y.z`. An
 incompatible or malformed package is reported without executing its code.
 
-Use `data/` for user-created state. Disabling never deletes it. Official code updates
-preserve it. If you manually replace an external package, preserve its data yourself.
+Use the workspace's sibling `data/` for user-created state, never `dist/data/`.
+Build cleanup must remove only generated `dist/`, never the workspace root or `data/`.
+Before cleanup, refuse a symlinked `dist/` or any `dist/data/` entry (including symlinks)
+to avoid deleting or building over misplaced persistent records. Disabling never deletes
+data. Official code updates preserve it. If you manually replace an external package,
+replace only its `dist/` code and preserve its data yourself.
 A plugin owns its data schema and migrations; refuse to rewrite a newer format you
 do not understand. Reserve `data/agents/` for the optional host-managed agent helper
 and `data/tasks/` for result-oriented workers, plus `data/usage.jsonl` for host inference
@@ -204,14 +228,14 @@ The API has 14 methods, including the implemented and verified `mountTree` incre
 | `mountComposer(container, props, options)` | `value`, `onChange`, `onSend`; optional `busy`, `onStop`, `canSend`, `placeholder`, `autoFocus` |
 | `mountDictation(container, props, options)` | `onTranscript(text)`, optional `disabled`; handle also has `toggle()`, `finish(): Promise<void>`, `cancel()` |
 | `mountStandardComposer(container, props, options)` | `{ composer, model, thinking, dictation }`, using the independent controls' props |
-| `mountButton(container, props, options)` | `label`, `onClick`; optional `disabled`, `variant`, `size`, `title` |
+| `mountButton(container, props, options)` | `label`, `onClick`; optional `icon` (trusted SVG string), `iconOnly`, `disabled`, `variant` (including `custom`), `colors`, `size`, `title` |
 | `mountSettingsRows(container, schema, options)` | `{ rows }`, as below |
 | `mountWorkerResult(container, props, options)` | `label`, terminal `status`, `text`, optional `content`, `presentation` |
 | `mountMarkdown(container, props, options)` | `text: string`; static complete Markdown through the actual host pipeline, built-ins only |
 | `mountTree(container, tree, options)` | accessible `label`, controlled `rows`; optional primary `header`, aligned trailing `columns`; presentation only |
 | `openMenu(anchor, props, options)` | `items: [{ key, label, onSelect, disabled? }]`; optional `label`, `preferredSide`, `onClose` |
 | `openDialog(props, options)` | `title`, `content`, optional `onClose` |
-| `openSurface(target, props, options)` | mounted session-view target; accessible `title`, `content`, optional `background`, `onClose` |
+| `openSurface(props, options)` / `openSurface(target, props, options)` | page-body surface; optional precise native-view target; accessible `title`, `content`, optional `background`, `onClose` |
 
 These controls are controlled, not persistence or inference services. The plugin owns
 values, backend persistence, and any model fallback policy. Model/thinking selectors
@@ -255,6 +279,99 @@ mounting one does not take over core shortcuts. An Escape owned by dictation can
 actual recording owner; an Escape consumed by a higher layer must not also cancel it.
 Plugin dictation always delivers to its explicit `onTranscript` callback, never
 silently into a core composer/question. The plugin decides where that text goes.
+
+### Button icons
+
+`mountButton` accepts `icon?: string` using the same **trusted plugin SVG markup**
+convention as `PluginAction.icon`. It is not a sanitizer or a custom-renderer slot.
+The host renders the icon decoratively before the visible label, using native button
+SVG sizing, spacing and padding. Existing text-only buttons are unchanged.
+
+Set `iconOnly: true` to hide visible text; the required `label` becomes the button's
+accessible name. Icon-only buttons require a nonblank label and icon. Invalid new
+props throw on live mount/update before changing the widget; disposed handles remain
+inert. Updates shallow-merge, so removing an icon from an icon-only button also requires
+`iconOnly: false` in that update. `size` still controls geometry only—it never implicitly
+hides text. The existing optional `title` is unchanged and is not filled automatically.
+
+```js
+ctx.ui.mountButton(container, {
+  label: "Settings",
+  icon: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor"><path d="M4 8h8M8 4v8" /></svg>',
+  iconOnly: true,
+  size: "icon-sm",
+  onClick: () => ctx.app.openSettings()
+}, { signal });
+```
+
+Omit `iconOnly` for an icon-plus-text button. Variants, disabled behavior, callbacks,
+abort/disposal and the controlled update handle retain their existing semantics.
+This additive API v1 extension does not add a UI method or require private host imports.
+
+### Custom button colors
+
+Use `variant: "custom"` for full **color** customization without overriding native
+button geometry, layout or activation behavior. The optional `colors` object has this
+public shape; every slot is optional:
+
+```ts
+interface PluginButtonColorState {
+  background?: string;
+  text?: string;
+  border?: string;
+}
+interface PluginButtonColors extends PluginButtonColorState {
+  hover?: PluginButtonColorState;
+  active?: PluginButtonColorState;
+  focusVisible?: PluginButtonColorState & { ring?: string };
+  disabled?: PluginButtonColorState;
+}
+```
+
+For example, using CSS variables defined in your own content styles:
+
+```js
+const button = ctx.ui.mountButton(container, {
+  label: "Continue",
+  variant: "custom",
+  colors: {
+    background: "var(--example-fill)",
+    text: "var(--example-text)",
+    border: "var(--example-border)",
+    hover: { background: "var(--example-hover)" },
+    focusVisible: { ring: "var(--example-focus)" }
+  },
+  onClick: () => continueFlow()
+}, { signal });
+```
+
+- Normal fallbacks use the native default button's primary background/foreground.
+  The custom variant reserves a fixed **1px border**, transparent unless colored;
+  native sizes, padding, shape, typography and icon layout remain host-owned.
+- Omitted state slots do **not** reset other applicable colors. Overrides cascade
+  **per property**: disabled > active > focus-visible > hover > normal. No new shades
+  are calculated. `active` means native CSS `:active`, not toggle state or a new
+  activation handler.
+- Native focus-visible border and ring colors remain unless explicitly overridden.
+  Ring geometry and focus-visible behavior stay native. Disabled controls retain
+  native pointer blocking and **50% opacity**, even when disabled colors are supplied.
+- Values are nonblank, browser-supported CSS color strings, including `var(...)`,
+  `currentColor` and `color-mix(...)`. Unknown slots, invalid object shapes/types and
+  invalid color syntax throw before a live mount/update is published or mutated.
+  Disposed/aborted handles remain inert. Validation checks syntax, **not** variable
+  resolution, contrast or whether the chosen focus color is visible; the plugin owns
+  those palette decisions.
+- `colors` is validated for every variant but applied **only** to `custom`. Switching
+  to another variant retains the palette without styling that variant. Set
+  `colors: undefined` to return to the custom variant's native fallbacks.
+- Updates remain shallow: `button.update({ colors: nextPalette })` **replaces the whole
+  colors object**, including its state objects. Omitted prior slots are removed; pass
+  your complete desired palette when changing one slot.
+
+No arbitrary CSS properties, selectors, geometry, opacity or keyboard overrides are
+exposed. The host implements the colors on the actual native Button; do not style its
+private descendants or depend on private host CSS-variable names. This additive API v1
+extension adds no UI method or dependency and leaves existing variants unchanged.
 
 ### Static Markdown
 
@@ -1035,29 +1152,55 @@ image**, including image-only containers, with no new toolbar or dimmed thinking
 Existing PathText/Markdown text behavior remains. Model/target changes during async
 admission are stale refusals, not silent delivery to a replacement engine or occurrence.
 
-### Session-body surfaces
+### Page-body surfaces — implemented and verified
 
-`ctx.ui.openSurface(target, { title, content, background?, onClose? }, { signal })` returns
-`PluginWidgetHandle<PluginSurfaceProps>` with standard shallow update/dispose. `content`
-is existing `PluginUiContent` (HTMLElement or signal-scoped mount with optional async
-cleanup). Obtain the opaque `PluginSurfaceTarget` from an existing native session top-bar
-`PluginActionContext.surfaceTarget` or submission target/context; never infer one from a
-session ID, selector, DOM parent or global current session.
+The [generalized-surface checkpoint](plugin-session-extension-contract.md#12-generalized-page-body-surfaces--implemented-and-verified)
+is **implemented and verified, uncommitted above `8dd7409` on `feature/plugin-architecture`**.
+The existing explicit-native-target overload remains compatible. Its own verification
+passed 4,045 host tests / 568 suites, 78 plugin tests, strict SDK/build/privacy gates and
+15 packaged-browser assertion groups across seven page variants. Section 12 records
+runtime-byte provenance, the bounded test-harness adjustment and proof limits.
 
-The target identifies **one mounted teaching/practice view instance**. With live signals,
-unknown/expired targets synchronously throw `Surface target is no longer active`;
-already-aborted signals return an inert disposed handle. Mount commit rechecks lifetime.
-Leaving and returning to the same session ID never revives a token. Navigation, owning
-plugin unload, caller abort and explicit dispose tear down scoped surfaces; late async
-cleanup runs exactly once, and content replacement cleans up its prior mount.
+`ctx.ui.openSurface({ title, content, background?, onClose? }, { signal })` captures the
+active page boundary **once at invocation**: plugin views, native chat, Home or New Draft.
+No native target is required. It returns `PluginWidgetHandle<PluginSurfaceProps>` with
+standard shallow update/dispose and existing `PluginUiContent`/async cleanup. Async work
+never silently retargets to a new page. With live signals and no active boundary, throw
+`Surface target is no longer active`; an already-aborted signal returns an inert disposed
+handle **before boundary resolution**. Leaving/hiding the page aborts its surfaces;
+re-entry creates a new boundary. Mount commit rechecks lifetime; late cleanup runs exactly
+once and content replacement cleans up its prior mount.
 
-Surfaces cover the **whole session body including inputs**, not its top bar or sidebar.
-The parent session stays mounted. Stacked covered surfaces stay mounted and painted but
+A `PluginUiContent` callback describes one content mount, not the lifetime of its
+owning surface. The host may clean up and invoke it again, including during React's
+development-mode effect replay. Each invocation should create fresh DOM and scope its
+requests, timers and cleanup to that invocation. A mount-signal abort or returned
+cleanup must release that mount's resources without unconditionally disposing the
+owning surface or aborting a longer-lived controller. Keep explicit close and caller
+or view lifetimes separate. An already-expired invocation should return inertly;
+late results or cleanup from an old mount must not remove or mutate its replacement.
+
+For precise native action/submission targeting, keep
+`ctx.ui.openSurface(target, surface, { signal })`. Obtain its opaque `PluginSurfaceTarget`
+from native top-bar `PluginActionContext.surfaceTarget` or submission context, never a
+session ID/selector/DOM parent/global-current inference. The token still identifies one
+mounted teaching/practice view; unknown/expired live targets throw the same error and
+returning to the same session ID never revives it. No native submission capture, hooks
+or public target exposure are extended beyond native chat. Both forms retain plugin
+unload, caller-abort and explicit-dispose cleanup.
+
+Surfaces cover **only the owning page body**, leaving native/plugin top bars and sidebar
+usable. Home/New Draft have no top bar: only the floating sidebar toggle and window chrome
+remain exposed; graph controls and composer are covered/inactive but mounted.
+The parent page stays mounted. Stacked covered surfaces stay mounted and painted but
 only eligible foreground content receives covered-body interaction. Ordinary stack
 entries are visual siblings, **not each other's lifetime owners**: disposing a lower
 plugin surface cannot dispose another plugin's foreground surface. Explicit caller
 signals may bind lifetimes. Global Settings is not lifetime-owned merely because it
-paints above a surface.
+paints above a surface. Dialogs and Settings always remain in front, even if the surface
+request happens while a dialog is open. The surface belongs to the page, **not its modal
+opener**; it cannot use that opener to gain focus eligibility or Escape ownership. Closing
+the dialog can reveal the surface underneath only while the caller signal remains live.
 
 The host uses existing `view` interaction layers/owner propagation, not an app-wide
 modal, viewport scroll lock or second overlay registry. Under the approved polish,
@@ -1068,27 +1211,53 @@ or appearance props are authorized.
 
 `title` remains required for the accessible name, but the host renders **no visible title
 or header row**. A quiet muted Close/X floats above content independently of scrolling.
-Content fills the whole session body, with its scrollbar at the outer edge, not inset by
+Content fills the owning page body, with its scrollbar at the outer edge, not inset by
 a host frame. The plugin owns visible headings, internal layout and bottom actions; there
 is no forced diagram pan/zoom border. These presentation changes are **implemented and
 verified** at the separate UI-polish checkpoint. Existing one-Escape rules apply; covered native inputs never
-receive submit/Tab/dictation actions. Top bar/sidebar stay exposed, without a focus trap.
+receive submit/Tab/dictation actions. Exposed page chrome stays usable, without a focus trap.
+Generalized page coverage has its own section-12 verification; the earlier polish proof is unchanged.
 
-Entry honors eligible focus already placed inside the foreground surface; otherwise it
-chooses the first eligible editable text/number field or textarea, then the accessible
-surface fallback (without requiring a host-visible title heading). Delayed covered mounts
-do not steal focus. Closing foreground restores an eligible uncovered opener (including chrome), else surviving foreground remembered
-focus/entry policy, or native-body policy when no surfaces remain. Covered disposal
-never steals focus; expired views never receive focus restoration. `onClose` is a close
-notification, not an async veto; programmatic dispose/abort keep normal handle semantics.
+Entry preserves eligible focus already inside the foreground surface, and remembered
+surviving-region focus takes priority on return. Otherwise, a surface can opt in to a
+specific entry region with the public **`data-plugin-initial-focus`** DOM marker. The host
+queries the current content afresh and tries the first eligible marked element before
+its automatic editable-field, genuine-heading and painted-frame fallbacks. For example,
+inside a content mount:
+
+```js
+const region = document.createElement("section");
+region.tabIndex = -1;
+region.setAttribute("data-plugin-initial-focus", "");
+region.setAttribute("role", "group");
+region.setAttribute("aria-label", "Review card");
+region.textContent = "A visible question"; // Replace with your actual visible content.
+container.append(region);
+```
+
+Mark a **real, visible, focusable content region**, not a hidden/fake heading. The marker
+does not add `tabindex` or make a plain div focusable. Hidden, inert or disabled candidates
+are skipped; if the first eligible candidate cannot actually receive focus, the existing
+automatic fallbacks remain. This opt-in applies to `openSurface` entry only—not dialogs
+or native/owning-page entry. It does not force focus on updates, observe later DOM changes
+or retry asynchronous content. Mount the entry region synchronously; only the active
+surface may enter, without stealing focus from Settings, dialogs or newer foreground
+views. Unmarked surfaces retain their existing entry behavior.
+
+Delayed covered mounts do not steal focus. Closing foreground restores an eligible
+uncovered opener (including chrome), else surviving foreground remembered focus/entry
+policy, or owning-page-body policy when no surfaces remain. Covered disposal never steals
+focus; expired views never receive focus restoration. `onClose` is a close notification,
+not an async veto; programmatic dispose/abort keep normal handle semantics.
 
 ### Deferred extension points
 
 This increment adds no message/card/composer slots, generic rich-transcript renderer,
 backend submission hooks, native send/steer API, mutable agent/event/context hooks, image
 picker/clipboard/drop importer, path inference, asset store or image export redesign.
-Additional surface regions (including transcript-only), plugin-route/graph targets and
-navigation suspension/restoration remain deferred. Existing tools/question renderers
+Alternate surface regions (including transcript-only) and navigation suspension/restoration
+remain deferred; the approved targetless overload adds page-body coverage only, not
+submission interception or native tokens for plugin/Home/New Draft pages. Existing tools/question renderers
 remain the supported presentation contributions; no broader UI catalogue is implied.
 
 ## Learning data

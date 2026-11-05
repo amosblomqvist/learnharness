@@ -30,7 +30,7 @@ const { DeleteSourceDialog } = await import("../components/delete-source-dialog.
 const { SessionFind } = await import("../components/session-find.tsx");
 const { SettingsDialogProvider, useSettingsDialog } = await import("../components/settings/settings-dialog.tsx");
 const { HostContentRootContext, HostRouteLifetimeContext, HostRouteLifetimeProvider } = await import("../components/host-content-root.tsx");
-const { SessionSurfaceRegion, useSessionSurfaceBoundary } = await import("../components/plugin-session-surfaces.tsx");
+const { SurfaceRegion, usePageSurfaceBoundary } = await import("../components/plugin-surfaces.tsx");
 
 const graph: GraphSnapshot = {
 	nodes: [], edges: [], logicalEdges: [], impLinks: [], nodeSessions: {}, clusters: [],
@@ -50,7 +50,7 @@ function deferred<T>() {
 }
 
 type Fixture = Awaited<ReturnType<typeof fixture>>;
-async function fixture(options: { withSessionFind?: boolean; withKeyboard?: boolean; withSettings?: boolean; missingProvider?: boolean; missingPane?: boolean; value?: readonly string[]; disabled?: boolean; fetch?: typeof fetch } = {}) {
+async function fixture(options: { strict?: boolean; activity?: boolean; withSessionFind?: boolean; withKeyboard?: boolean; withSettings?: boolean; missingProvider?: boolean; missingPane?: boolean; value?: readonly string[]; disabled?: boolean; fetch?: typeof fetch } = {}) {
 	const dom = parseHTML("<!doctype html><html><body><div id='root'></div><aside id='sidebar'></aside><main id='content' style='isolation:isolate'><button id='chrome'>Page chrome</button><div id='session-body'><div id='transcript'>Session text</div><input id='background-composer' /><div id='target'>plugin-owned</div><div id='second-target'></div></div></main></body></html>");
 	const nativeSelect = dom.window.HTMLInputElement.prototype.select;
 	dom.window.HTMLInputElement.prototype.select = function () {};
@@ -92,14 +92,14 @@ async function fixture(options: { withSessionFind?: boolean; withKeyboard?: bool
 	let dialogClosed = 0;
 	let controller: ReturnType<typeof useInteractionLayers> | undefined;
 	let openSettings: ReturnType<typeof useSettingsDialog>["open"] = () => {};
-	let surfaceTarget: ReturnType<typeof useSessionSurfaceBoundary>;
+	let surfaceTarget: ReturnType<typeof usePageSurfaceBoundary>;
 	function Controls() {
 		controller = useInteractionLayers();
 		openSettings = useSettingsDialog().open;
 		useFieldCycle(() => [document.querySelector<HTMLInputElement>("#background-composer")!]);
 		const body = React.useRef(document.querySelector<HTMLDivElement>("#session-body"));
-		surfaceTarget = useSessionSurfaceBoundary({ active: true, viewKey: "fixture", bodyRef: body });
-		return <>{options.withKeyboard && <KeyboardShortcuts />}{createPortal(<SessionSurfaceRegion target={surfaceTarget} />, body.current!)}</>;
+		surfaceTarget = usePageSurfaceBoundary({ active: true, viewKey: "fixture", bodyRef: body });
+		return <>{options.withKeyboard && <KeyboardShortcuts />}{createPortal(<SurfaceRegion target={surfaceTarget} />, body.current!)}</>;
 	}
 	const router = { bfcacheId: "fixture", back() {}, forward() {}, refresh() {}, hmrRefresh() {}, push() {}, replace() {}, async prefetch() {} };
 	function Host() {
@@ -114,8 +114,13 @@ async function fixture(options: { withSessionFind?: boolean; withKeyboard?: bool
 		const settingsBody = options.withSettings ? <SettingsDialogProvider>{body}</SettingsDialogProvider> : body;
 		return <AppRouterContext.Provider value={router}><ServerEventsProvider connect={connect}><HostContentRootContext.Provider value={options.missingPane ? null : content}><HostRouteLifetimeContext.Provider value={{ pathname: "/fixture", signal: routeLifetime.signal }}>{options.missingProvider ? settingsBody : <InteractionLayersProvider>{settingsBody}</InteractionLayersProvider>}</HostRouteLifetimeContext.Provider></HostContentRootContext.Provider></ServerEventsProvider></AppRouterContext.Provider>;
 	}
+	let hidden = false;
+	const hostTree = () => {
+		const body = options.activity ? <React.Activity mode={hidden ? "hidden" : "visible"}><Host /></React.Activity> : <Host />;
+		return options.strict ? <React.StrictMode>{body}</React.StrictMode> : body;
+	};
 	await act(async () => {
-		root.render(<Host />);
+		root.render(hostTree());
 		handle = ui.mountKnowledgePicker(target, { value: options.value ?? [], disabled: options.disabled, onChange: (ids) => { calls.push([...ids]); } }, { signal: scope.signal });
 	});
 	return {
@@ -136,6 +141,7 @@ async function fixture(options: { withSessionFind?: boolean; withKeyboard?: bool
 			}
 		},
 		async unmountHost() { await act(async () => root.unmount()); },
+		async setHidden(value: boolean) { hidden = value; await act(async () => root.render(hostTree())); },
 	};
 }
 async function click(f: Fixture, testid: string, within: ParentNode = document) {
@@ -155,6 +161,113 @@ async function escape(f: Fixture, target: EventTarget = document) {
 	return event;
 }
 const overlay = () => document.querySelector('[data-testid="chain-table-overlay"]');
+
+for (const strict of [false, true]) it(`synchronous controlled checkbox acknowledgment retains the accepted picker and selection pill (StrictMode=${strict})`, async () => {
+	const f = await fixture({ strict });
+	const leases: NonNullable<Parameters<typeof f.controller.register>[0]["openingLease"]>[] = [];
+	const register = f.controller.register;
+	f.controller.register = (...args) => { if (args[0].openingLease) leases.push(args[0].openingLease); return register(...args); };
+	const changes: string[][] = [];
+	try {
+		await act(async () => { f.handle.update({ onChange(ids) { changes.push([...ids]); f.handle.update({ value: [...ids] }); } }); });
+		const runtime = f.store.getSnapshot()[0]!.runtime;
+		await click(f, "practice-props-chip");
+		const original = overlay(), search = document.querySelector('[data-testid="chain-table-search"]');
+		const owner = leases.at(-1)!; assert.ok(owner);
+		const initiallyOwned = owner.owns();
+		await act(async () => { document.querySelector<HTMLInputElement>('[data-testid="cluster-checkbox-chat"]')!.click(); });
+		assert.deepEqual(changes, [["a", "b"]]);
+		assert.equal(overlay() === original, true, `same controlled picker stays mounted (initial lease ownership: ${initiallyOwned})`);
+		assert.ok(overlay(), "synchronous acknowledgment must not dismiss the picker");
+		assert.equal(owner.owns(), true, "effect replay retains the accepted opening's authority");
+		assert.equal(f.controller.getLayer("knowledge-picker")?.openingLease, owner);
+		assert.equal(document.querySelector('[data-testid="chain-table-search"]'), search);
+		assert.equal(document.activeElement, search, "entry focuses the actual registered picker search");
+		assert.ok(document.querySelector('[data-testid="chain-selection-bar"]'), "the existing shared native selection pill appears");
+		assert.equal(f.store.getSnapshot()[0]!.runtime, runtime); assert.equal(runtime.signal.aborted, false);
+		for (let cycle = 0; cycle < 2; cycle++) {
+			await act(async () => { document.querySelector<HTMLInputElement>('[data-testid="cluster-checkbox-chat"]')!.click(); });
+			assert.deepEqual(changes.at(-1), []); assert.equal(overlay() === original, true);
+			assert.equal(document.querySelector('[data-testid="chain-selection-bar"]'), null);
+			await act(async () => { document.querySelector<HTMLInputElement>('[data-testid="cluster-checkbox-chat"]')!.click(); });
+			assert.deepEqual(changes.at(-1), ["a", "b"]); assert.equal(overlay() === original, true);
+			assert.ok(document.querySelector('[data-testid="chain-selection-bar"]'));
+			assert.equal(owner.owns(), true); assert.equal(f.controller.getLayer("knowledge-picker")?.openingLease, owner);
+		}
+		await click(f, "chain-clear"); assert.deepEqual(changes.at(-1), []);
+		assert.equal(overlay() === original, true); assert.equal(owner.owns(), true);
+		await act(async () => { document.querySelector<HTMLInputElement>('[data-testid="cluster-checkbox-chat"]')!.click(); });
+		for (const action of ["Done", "X", "Escape"]) {
+			const closing = f.controller.getLayer("knowledge-picker")!.openingLease!;
+			if (action === "Done") await click(f, "chain-practice-done");
+			else if (action === "X") await click(f, "chain-table-close");
+			else await escape(f);
+			assert.equal(overlay(), null); assert.equal(closing.owns(), false);
+			assert.equal(f.controller.getLayer("knowledge-picker"), undefined);
+			await click(f, "practice-props-chip");
+			const reopened = f.controller.getLayer("knowledge-picker")!.openingLease!;
+			assert.notEqual(reopened, closing); assert.equal(reopened.owns(), true); assert.ok(overlay());
+			assert.equal(document.activeElement, document.querySelector('[data-testid="chain-table-search"]'));
+			assert.ok(document.querySelector('[data-testid="chain-selection-bar"]'));
+		}
+		assert.equal(f.requests.filter(request => request.url === "/api/graph").length, 1, "explicit reopen uses the widget's cached graph without replaying the logical opening");
+		assert.deepEqual(f.errors, []);
+	} finally { await f.dispose(); }
+});
+
+for (const ending of ["disable", "caller abort", "widget dispose", "plugin abort", "host unmount", "route expiry"] as const) {
+	it(`StrictMode ${ending} releases the actual picker's logical lease rather than leaving an orphaned owner`, async () => {
+		const f = await fixture({ strict: true });
+		try {
+			await click(f, "practice-props-chip");
+			const owner = f.controller.getLayer("knowledge-picker")!.openingLease!; assert.equal(owner.owns(), true);
+			if (ending === "host unmount") await f.unmountHost();
+			else await act(async () => {
+				if (ending === "disable") f.handle.update({ disabled: true });
+				if (ending === "caller abort") f.scope.abort();
+				if (ending === "widget dispose") f.handle.dispose();
+				if (ending === "plugin abort") f.lifetime.abort();
+				if (ending === "route expiry") f.routeLifetime.abort();
+			});
+			assert.equal(owner.owns(), false); assert.equal(owner.ready(), false); assert.equal(owner.activate(), false);
+			assert.equal(f.controller.getLayer("knowledge-picker"), undefined); assert.equal(overlay(), null);
+			await act(async () => f.handle.update({ value: ["a"] }));
+			assert.equal(overlay(), null, "a later controlled acknowledgment cannot revive released ownership");
+			if (ending === "disable") {
+				await act(async () => f.handle.update({ disabled: false })); await click(f, "practice-props-chip");
+				const current = f.controller.getLayer("knowledge-picker")!.openingLease!;
+				assert.notEqual(current, owner); assert.equal(current.owns(), true); assert.equal(owner.owns(), false);
+			}
+			assert.deepEqual(f.errors, []);
+		} finally { await f.dispose(); }
+	});
+}
+
+it("StrictMode Activity hide releases picker ownership and show preserves drafts without replaying an opening", async () => {
+	const f = await fixture({ strict: true, activity: true, value: ["a"] });
+	try {
+		const trigger = f.target.querySelector('[data-testid="practice-props-chip"]');
+		await click(f, "practice-props-chip"); const owner = f.controller.getLayer("knowledge-picker")!.openingLease!;
+		assert.equal(owner.owns(), true);
+		await f.setHidden(true);
+		assert.equal(owner.owns(), false); assert.equal(f.controller.getLayer("knowledge-picker"), undefined); assert.equal(overlay(), null);
+		await f.setHidden(false);
+		assert.equal(f.target.querySelector('[data-testid="practice-props-chip"]') === trigger, true, "Activity preserves the controlled widget DOM");
+		assert.equal(owner.owns(), false); assert.equal(overlay(), null, "reconnection is not permission to reopen a logically closed picker");
+		assert.match(f.target.textContent!, /1 node selected/);
+		const reserves: ReturnType<typeof f.controller.reserveOpening>[] = [];
+		const reserve = f.controller.reserveOpening;
+		f.controller.reserveOpening = (...args) => { const result = reserve(...args); reserves.push(result); return result; };
+		await click(f, "practice-props-chip");
+		assert.equal(reserves.length, 1); const next = reserves[0]!; assert.ok(next);
+		assert.equal(f.controller.getLayer("knowledge-picker")?.openingLease, next, "the explicit post-show click must render its newly accepted opening");
+		assert.notEqual(next, owner); assert.equal(next.owns(), true); assert.equal(owner.owns(), false);
+		assert.equal(f.store.getSnapshot()[0]!.runtime.signal.aborted, false);
+		assert.equal(document.activeElement, document.querySelector('[data-testid="chain-table-search"]'));
+		assert.equal(f.requests.filter(request => request.url === "/api/graph").length, 1);
+		assert.deepEqual(f.errors, []);
+	} finally { await f.dispose(); }
+});
 
 it("the actual chat finder yields Find to the foreground selector", async () => {
 	const f = await fixture({ withSessionFind: true });
@@ -419,12 +532,38 @@ async function publicOrigin(f: Fixture) {
 	await act(async () => {
 		dialog = f.ui.openDialog({ title: "Origin", content(container, signal) {
 			mounts++; container.append(input, target);
-			picker = f.ui.mountKnowledgePicker(target, { value: ["a"], onChange(ids) { selections.push([...ids]); picker.update({ value: ids }); } }, { signal });
-			return () => { cleanups++; picker.dispose(); };
+			const mountedPicker = f.ui.mountKnowledgePicker(target, { value: ["a"], onChange(ids) { selections.push([...ids]); mountedPicker.update({ value: ids }); } }, { signal });
+			picker = mountedPicker;
+			return () => { cleanups++; mountedPicker.dispose(); };
 		} }, { signal: f.scope.signal });
 	});
 	return { input, target, picker, dialog, selections, get mounts() { return mounts; }, get cleanups() { return cleanups; } };
 }
+
+it("StrictMode modal-origin acknowledgment retains the leased HostDialog, focus and native pill until explicit owner retirement", async () => {
+	const f = await fixture({ strict: true });
+	try {
+		const origin = await publicOrigin(f); const initialMounts = origin.mounts;
+		origin.input.value = "Preserved modal draft";
+		await click(f, "practice-props-chip", origin.target);
+		const original = overlay(), layer = f.controller.getLayer("knowledge-picker")!;
+		const owner = layer.openingLease!; assert.equal(layer.kind, "modal"); assert.equal(owner.owns(), true);
+		assert.equal(document.activeElement, document.querySelector('[data-testid="chain-table-search"]'));
+		await act(async () => document.querySelector<HTMLInputElement>('[data-testid="cluster-checkbox-chat"]')!.click());
+		assert.deepEqual(origin.selections.at(-1), ["a", "b"]);
+		assert.equal(overlay() === original, true); assert.equal(f.controller.getLayer("knowledge-picker")?.openingLease, owner);
+		assert.equal(owner.owns(), true); assert.ok(document.querySelector('[data-testid="chain-selection-bar"]'));
+		await click(f, "chain-clear"); assert.deepEqual(origin.selections.at(-1), []);
+		assert.equal(overlay() === original, true); assert.equal(owner.owns(), true);
+		await click(f, "chain-table-close"); assert.equal(owner.owns(), false); assert.equal(overlay(), null);
+		await click(f, "practice-props-chip", origin.target);
+		const reopened = f.controller.getLayer("knowledge-picker")!.openingLease!; assert.notEqual(reopened, owner);
+		assert.equal(reopened.owns(), true); assert.equal(origin.mounts, initialMounts); assert.equal(origin.input.value, "Preserved modal draft");
+		await act(async () => origin.dialog.dispose());
+		assert.equal(reopened.owns(), false); assert.equal(f.controller.getLayer("knowledge-picker"), undefined); assert.equal(overlay(), null);
+		assert.deepEqual(f.errors, []);
+	} finally { await f.dispose(); }
+});
 
 for (const action of ["Done", "X", "Escape"] as const) it(`a public dialog origin stays painted/mounted and regains its own state/focus after picker ${action}`, async () => {
 	const f = await fixture();
@@ -542,9 +681,9 @@ it("a newer modal revokes an outstanding graph read and its late response never 
 	} finally { await f.dispose(); }
 });
 
-for (const stale of ["response", "error"] as const) it(`a newer pending picker aborts the old read, ignores its late ${stale}, and survives old disposal`, async () => {
+for (const strict of [false, true]) for (const stale of ["response", "error"] as const) it(`a newer pending picker aborts the old read, ignores its late ${stale}, and survives old disposal (StrictMode=${strict})`, async () => {
 	const reads = [deferred<Response>(), deferred<Response>()]; let nextRead = 0;
-	const f = await fixture({ value: ["a"], fetch: async url => url === "/api/graph" ? reads[nextRead++]!.promise : Response.json(directory) });
+	const f = await fixture({ strict, value: ["a"], fetch: async url => url === "/api/graph" ? reads[nextRead++]!.promise : Response.json(directory) });
 	try {
 		const secondTarget = document.querySelector<HTMLElement>("#second-target")!;
 		let second!: PluginWidgetHandle<PluginKnowledgePickerProps>;
@@ -564,8 +703,8 @@ for (const stale of ["response", "error"] as const) it(`a newer pending picker a
 	} finally { await f.dispose(); }
 });
 
-it("cached selectors replace the exact retiring registration once, retaining IDs and ignoring stale cleanup", async () => {
-	const f = await fixture({ value: ["a"] });
+for (const strict of [false, true]) it(`cached selectors replace the exact retiring registration once, retaining IDs and ignoring stale cleanup (StrictMode=${strict})`, async () => {
+	const f = await fixture({ strict, value: ["a"] });
 	try {
 		const secondTarget = document.querySelector<HTMLElement>("#second-target")!;
 		let second!: PluginWidgetHandle<PluginKnowledgePickerProps>;
@@ -667,9 +806,9 @@ it("route expiry closes an active pane picker without disposing its retained wid
 	} finally { await f.dispose(); }
 });
 
-for (const phase of ["pending", "open"] as const) it(`exact invocation owner retirement expires a ${phase} picker even when its layer ID is immediately reused`, async () => {
+for (const strict of [false, true]) for (const phase of ["pending", "open"] as const) it(`exact invocation owner retirement expires a ${phase} picker even when its layer ID is immediately reused (StrictMode=${strict})`, async () => {
 	const read = deferred<Response>();
-	const f = await fixture(phase === "pending" ? { fetch: async () => read.promise } : {});
+	const f = await fixture({ strict, ...(phase === "pending" ? { fetch: async () => read.promise } : {}) });
 	try {
 		const body = document.querySelector<HTMLElement>("#session-body")!;
 		let unregister!: () => void;

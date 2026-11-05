@@ -71,6 +71,7 @@ interface Activation {
 }
 interface Package {
 	info: PluginInfo;
+	rootDirectory: string;
 	directory: string;
 	files: Map<string, Buffer>;
 	activation?: Activation;
@@ -128,7 +129,15 @@ function regularFile(root: string, relative: string): string {
 	}
 	return current;
 }
-function snapshot(directory: string, id: string, appVersion: string): Package {
+function pluginRoot(directory: string): void {
+	const stat = fs.lstatSync(directory);
+	if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error("Unsafe plugin directory");
+}
+function snapshot(rootDirectory: string, id: string, appVersion: string): Package {
+	pluginRoot(rootDirectory);
+	const directory = path.join(/* turbopackIgnore: true */ rootDirectory, "dist");
+	if (!exists(directory)) throw new Error("Missing plugin build: expected dist/manifest.json. Build the plugin into dist/ or install a built package there.");
+	pluginRoot(directory);
 	const files = new Map<string, Buffer>();
 	const manifestBytes = fs.readFileSync(/* turbopackIgnore: true */ regularFile(directory, "manifest.json"));
 	const manifest = Object.freeze(parsePluginManifest(JSON.parse(manifestBytes.toString("utf8")), id, appVersion));
@@ -148,7 +157,7 @@ function snapshot(directory: string, id: string, appVersion: string): Package {
 	for (const entry of [manifest.main, manifest.backend, manifest.styles]) if (entry && !files.has(entry)) throw new Error(`Missing plugin entry: ${entry}`);
 	const hash = createHash("sha256");
 	for (const [file, bytes] of files) { hash.update(`${file.length}:${file}:${bytes.length}:`); hash.update(bytes); }
-	return { directory, files, info: { id, manifest, enabled: false, status: "disabled", revision: hash.digest("hex") } };
+	return { rootDirectory, directory, files, info: { id, manifest, enabled: false, status: "disabled", revision: hash.digest("hex") } };
 }
 const mimeTypes: Record<string, string> = {
 	".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8", ".json": "application/json; charset=utf-8",
@@ -206,7 +215,8 @@ export function createPluginHost(deps: PluginHostDependencies) {
 		};
 		try {
 			if (manifest.backend) {
-				const dataDirectory = path.join(/* turbopackIgnore: true */ pkg.directory, "data");
+				pluginRoot(pkg.rootDirectory);
+				const dataDirectory = path.join(/* turbopackIgnore: true */ pkg.rootDirectory, "data");
 				if (!exists(dataDirectory)) fs.mkdirSync(dataDirectory);
 				if (!fs.lstatSync(dataDirectory).isDirectory() || fs.lstatSync(dataDirectory).isSymbolicLink()) throw new Error("Unsafe plugin data directory");
 				const services = deps.createServices({ manifest, directory: pkg.directory, dataDirectory, signal: activation.controller.signal, cleanup });
@@ -311,10 +321,12 @@ export function createPluginHost(deps: PluginHostDependencies) {
 				if (pending.has(id)) throw new Error("Bundled installation incomplete; retry installation before activation");
 				candidate = snapshot(root, id, deps.appVersion);
 			} catch (e) {
-				candidate = { directory: root, files: new Map(), info: { id, enabled: false, status: "error", error: errorText(e), revision: "" }, blocked: true };
+				candidate = { rootDirectory: root, directory: path.join(/* turbopackIgnore: true */ root, "dist"), files: new Map(), info: { id, enabled: false, status: "error", error: errorText(e), revision: "" }, blocked: true };
 			}
 			const current = packages.get(id);
-			if (current) {
+			// An unbuilt/invalid package has never admitted executable code. Its
+			// first valid build is ordinary discovery, not a code reload.
+			if (current && !(current.blocked && !current.info.manifest)) {
 				if (pending.has(id) || failed(id)) {
 					await deactivate(current); current.blocked = true; current.info.status = "error";
 					current.info.error = candidate.info.error;
@@ -504,7 +516,7 @@ export function createPluginHost(deps: PluginHostDependencies) {
 			const file = segments.join("/");
 			if (!(segments.length === 1 && (file === manifest.main || file === manifest.styles)) && !(segments.length > 1 && segments[0] === "assets")) throw new PluginHostError(404, "Plugin asset is not allowlisted");
 			if (segments.some(s => s === "data") || file === manifest.backend) throw new PluginHostError(404, "Private plugin file");
-			try { regularFile(pkg.directory, file); } catch { throw new PluginHostError(404, "Unknown or unsafe plugin asset"); }
+			try { pluginRoot(pkg.rootDirectory); regularFile(pkg.directory, file); } catch { throw new PluginHostError(404, "Unknown or unsafe plugin asset"); }
 			const bytes = pkg.files.get(file);
 			if (!bytes) throw new PluginHostError(404, "Unknown plugin asset");
 			return { bytes: Uint8Array.from(bytes), contentType: mimeTypes[path.extname(file).toLowerCase()] ?? "application/octet-stream" };

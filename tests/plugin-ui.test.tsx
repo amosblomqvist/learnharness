@@ -12,6 +12,8 @@ function PluginUiHost(props: React.ComponentProps<typeof Host>) { return <Intera
 import { createTranscriptDelivery, PluginComposer, PluginStandardComposer } from "../components/plugin-composer.tsx";
 import { ModelPickerPill } from "../components/model-picker-pill.tsx";
 import { SettingsSlider } from "../components/settings/controls.tsx";
+import { buttonVariants } from "../components/ui/button.tsx";
+import { compile } from "tailwindcss";
 import type { PluginWidgetHandle, PluginButtonProps, PluginSettingsSchema, PluginMenuProps, PluginDialogProps } from "../src/core/plugin-ui.ts";
 import type { PluginTreeProps, PluginTreeRow } from "../src/core/plugin-tree.ts";
 
@@ -141,6 +143,93 @@ describe("controlled plugin tree integration", () => {
 });
 
 describe("controlled plugin UI", () => {
+	it("renders trusted leading button icons with native sizes and accessible icon-only labels", () => withDom(async () => {
+		const store = createPluginUiStore(), scope = new AbortController();
+		const ui = store.createUi({ signal: scope.signal }), target = document.querySelector<HTMLElement>("#target")!;
+		const root = createRoot(document.querySelector("#root")!);
+		const icon = '<svg viewBox="0 0 16 16"><title>Decorative gear</title><path d="M4 8h8" /></svg>';
+		try {
+			await act(async () => {
+				root.render(<React.StrictMode><PluginUiHost store={store} /></React.StrictMode>);
+				for (const size of ["default", "xs", "sm", "lg"] as const) ui.mountButton(target, { label: "Run", icon, size, onClick() {} }, { signal: scope.signal });
+				ui.mountButton(target, { label: "Settings", icon, iconOnly: true, size: "icon-sm", title: "Open settings", onClick() {} }, { signal: scope.signal });
+				ui.mountButton(target, { label: "Still visible", size: "icon", onClick() {} }, { signal: scope.signal });
+			});
+			const buttons = [...target.querySelectorAll("button")];
+			for (const [index, size] of ["default", "xs", "sm", "lg"].entries()) {
+				const button = buttons[index]!, glyph = button.querySelector('[data-slot="button-icon"]')!;
+				assert.ok(glyph.querySelector("svg > path")); assert.equal(glyph.getAttribute("aria-hidden"), "true");
+				assert.equal(button.firstElementChild, glyph); assert.equal(button.lastChild!.textContent, "Run");
+				assert.equal(button.dataset.size, size); assert.equal(button.dataset.slot, "button");
+				assert.ok(button.className.includes("[data-slot=button-icon]"), "native icon padding also recognizes the host icon wrapper");
+			}
+			const gear = buttons[4]!;
+			assert.equal(gear.getAttribute("aria-label"), "Settings"); assert.equal(gear.getAttribute("title"), "Open settings");
+			assert.equal(gear.dataset.size, "icon-sm"); assert.equal(gear.childNodes.length, 1, "no visible label in icon-only mode");
+			assert.equal(gear.firstElementChild!.getAttribute("aria-hidden"), "true");
+			assert.equal(buttons[5]!.textContent, "Still visible", "icon size alone never hides a legacy label");
+		} finally { await act(async () => { scope.abort(); root.unmount(); }); }
+	}));
+
+	it("emits native SVG and wrapped-icon padding for all text button sizes", async () => {
+		const sizes = ["default", "xs", "sm", "lg"] as const, padding = ["3", "1.5", "2.5", "4"];
+		const candidates = sizes.flatMap(size => buttonVariants({ size }).split(" ").filter(value => value.startsWith("has-[")));
+		const compiler = await compile("@theme { --spacing: 0.25rem; } @tailwind utilities;");
+		const css = compiler.build(candidates).replace(/\s/g, "");
+		assert.equal(candidates.length, sizes.length * 2);
+		for (const value of padding) assert.equal(css.split(`padding-inline:calc(var(--spacing)*${value})`).length - 1, 2);
+		assert.equal(css.split(":has(>svg)").length - 1, sizes.length, "legacy SVG selectors keep their specificity");
+		assert.equal(css.split(":has(>[data-slot=button-icon])").length - 1, sizes.length);
+	});
+
+	it("updates icon presentation without replacing the button and preserves callbacks, disabled state and abort", () => withDom(async dom => {
+		const store = createPluginUiStore(), scope = new AbortController();
+		const ui = store.createUi({ signal: scope.signal }), target = document.querySelector<HTMLElement>("#target")!;
+		const root = createRoot(document.querySelector("#root")!);
+		const icon = '<svg viewBox="0 0 16 16"><path data-glyph="first" d="M4 8h8" /></svg>';
+		let handle!: PluginWidgetHandle<PluginButtonProps>, first = 0, latest = 0;
+		try {
+			await act(async () => { root.render(<PluginUiHost store={store} />); handle = ui.mountButton(target, { label: "Run", icon, onClick() { first++; } }, { signal: scope.signal }); });
+			const button = target.querySelector("button")!, held = store.getSnapshot()[0]!.props as PluginButtonProps;
+			await act(async () => { handle.update({ label: "Settings", iconOnly: true, size: "icon-sm", disabled: true, onClick() { latest++; } }); });
+			assert.equal(target.querySelector("button"), button); assert.equal(button.getAttribute("aria-label"), "Settings");
+			assert.equal(button.hasAttribute("disabled"), true); assert.equal(button.hasAttribute("title"), false, "no implicit tooltip change");
+			await act(async () => { button.dispatchEvent(new dom.window.Event("click", { bubbles: true })); });
+			assert.equal(latest, 0);
+			await act(async () => { handle.update({ icon: icon.replace("first", "second"), disabled: false }); });
+			assert.ok(button.querySelector('[data-glyph="second"]')); assert.equal(target.querySelector("button"), button);
+			await act(async () => { button.dispatchEvent(new dom.window.Event("click", { bubbles: true })); });
+			assert.equal(latest, 1); assert.equal(first, 0);
+			await act(async () => { handle.update({ label: "Plain", icon: undefined, iconOnly: false, size: "default" }); });
+			assert.equal(target.querySelector("button"), button); assert.equal(button.textContent, "Plain");
+			assert.equal(button.querySelector("svg"), null); assert.equal(button.hasAttribute("aria-label"), false);
+			await act(async () => { scope.abort(); handle.update({ iconOnly: true }); await held.onClick(); });
+			assert.equal(latest, 1); assert.equal(target.children.length, 0);
+		} finally { await act(async () => { scope.abort(); root.unmount(); }); }
+	}));
+
+	it("rejects invalid button icon props atomically and leaves aborted handles inert", () => withDom(async () => {
+		const store = createPluginUiStore(), scope = new AbortController();
+		const ui = store.createUi({ signal: scope.signal }), target = document.querySelector<HTMLElement>("#target")!;
+		target.textContent = "caller-owned";
+		const props: PluginButtonProps = { label: "Run", onClick() {} }, icon = '<svg viewBox="0 0 16 16"><path d="M4 8h8" /></svg>';
+		const invalid: PluginButtonProps[] = [
+			{ ...props, icon: 42 as unknown as string }, { ...props, iconOnly: "yes" as unknown as boolean },
+			{ ...props, iconOnly: true }, { ...props, iconOnly: true, icon: "  " },
+			{ ...props, iconOnly: true, icon, label: "  " },
+		];
+		try {
+			for (const value of invalid) assert.throws(() => ui.mountButton(target, value, { signal: scope.signal }), TypeError);
+			assert.equal(target.textContent, "caller-owned"); assert.equal(store.getSnapshot().length, 0);
+			const handle = ui.mountButton(target, props, { signal: scope.signal }), snapshot = store.getSnapshot();
+			assert.throws(() => handle.update({ label: "Not accepted", iconOnly: true }), TypeError);
+			assert.equal(store.getSnapshot(), snapshot); assert.equal((snapshot[0]!.props as PluginButtonProps).label, "Run");
+			scope.abort(); handle.update({ iconOnly: true }); handle.dispose();
+			ui.mountButton(target, invalid[0]!, { signal: scope.signal });
+			assert.equal(target.textContent, "caller-owned"); assert.equal(store.getSnapshot().length, 0);
+		} finally { scope.abort(); }
+	}));
+
 	it("mounts shared buttons through the host, updates callbacks, and disposes only owned DOM", async () => withDom(async (dom) => {
 		const store = createPluginUiStore();
 		const lifetime = new AbortController(); const scope = new AbortController();

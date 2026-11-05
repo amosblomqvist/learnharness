@@ -103,7 +103,9 @@ export interface PluginTools {
 }
 export interface PluginBackendContext {
 	readonly manifest: PluginManifest;
+	/** Absolute built-package directory: <plugins>/<id>/dist. */
 	readonly directory: string;
+	/** Persistent records: <plugins>/<id>/data, outside the build output. */
 	readonly dataDirectory: string;
 	readonly signal: AbortSignal;
 	cleanup(dispose: PluginCleanup): void;

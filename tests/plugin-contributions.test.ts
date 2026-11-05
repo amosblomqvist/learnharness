@@ -44,7 +44,7 @@ function fixture(t: TestContext) {
 	}) });
 	t.after(async () => { await host.dispose(); fs.rmSync(root, { recursive: true, force: true }); });
 	function plugin(id = "example", source = "exports.activate = ctx => { ctx.handle('context', () => ctx); };") {
-		const dir = path.join(directory, id); fs.mkdirSync(dir, { recursive: true });
+		const dir = path.join(directory, id, "dist"); fs.mkdirSync(dir, { recursive: true });
 		fs.writeFileSync(path.join(dir, "manifest.json"), JSON.stringify({ apiVersion: 1, id, name: id, version: "1.0.0", minAppVersion: "0.3.0", backend: "backend.cjs", main: "main.js" }));
 		fs.writeFileSync(path.join(dir, "backend.cjs"), source);
 		fs.writeFileSync(path.join(dir, "main.js"), "export function activate() {};");
@@ -262,7 +262,7 @@ test("context-specific factory errors omit that turn only; successful re-evaluat
 	await f.host.refresh(); assert.equal(f.host.list()[0]!.error, undefined);
 	f.host.agentContributions(turn("bad"), []);
 	assert.match(f.host.list()[0]!.error!, /factory context rejected/);
-	fs.writeFileSync(path.join(f.directory, "example", "main.js"), "export const updated = true;");
+	fs.writeFileSync(path.join(f.directory, "example", "dist", "main.js"), "export const updated = true;");
 	await f.host.refresh();
 	assert.match(f.host.list()[0]!.error!, /Restart required.*factory context rejected/);
 	const changes = f.changes();

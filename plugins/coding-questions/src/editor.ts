@@ -6,6 +6,7 @@ import { languages } from "@codemirror/language-data";
 import { oneDarkHighlightStyle } from "@codemirror/theme-one-dark";
 import type { PluginQuestionAnswerState, PluginQuestionEditorHandle, PluginQuestionEditorProps, PluginQuestionMountContext } from "learnharness-plugin-api";
 import { isReady, normalizeLineEndings, type CodingQuestionPayload } from "./contract.ts";
+import { supportsSyntaxDiagnostics, syntaxDiagnosticsExtension } from "./diagnostics.ts";
 
 export function findLanguage(name: string): LanguageDescription | null {
   return LanguageDescription.matchLanguageName(languages, name.trim(), false);
@@ -68,7 +69,10 @@ function createCodeView(container: HTMLElement, language: string, code: string, 
       if (disposed) return;
       // Catalog support may include tag insertion, completion keymaps or other
       // editing helpers. Install only its language/parser, never those extras.
-      view.dispatch({ effects: languageSupport.reconfigure(support.language) });
+      view.dispatch({ effects: languageSupport.reconfigure([
+        support.language,
+        ...(onChange && supportsSyntaxDiagnostics(languageDescription.name) ? [syntaxDiagnosticsExtension()] : []),
+      ]) });
       status.textContent = "";
     }).catch(() => {
       if (!disposed) status.textContent = "Plain text";
@@ -132,7 +136,7 @@ export function mountAnswerEditor(container: HTMLElement, props: PluginQuestionE
     handleKeyDown(key) {
       if (disposed || !active || props.signal.aborted) return "pass";
       if (key === "Tab") { indentMore(editor.view); return "handled"; }
-      if (key === "Shift+Enter") { insertNewlineAndIndent(editor.view); return "handled"; }
+      if (key === "Enter" || key === "Shift+Enter") { insertNewlineAndIndent(editor.view); return "handled"; }
       return "pass";
     },
     dispose,

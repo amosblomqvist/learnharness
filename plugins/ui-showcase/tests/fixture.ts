@@ -72,7 +72,9 @@ export function createFixture() {
       if (!key.startsWith("mount") && !key.startsWith("open")) throw new Error(`Unexpected UI API: ${key}`);
       return (...args: any[]) => {
         const overlay = key === "openDialog" || key === "openSurface";
-        const props: AnyProps = overlay ? args[key === "openSurface" ? 1 : 0] : args[1];
+        if (key === "openSurface") assert.ok(args.length === 2 || args.length === 3, "Surface opening uses a public overload");
+        const explicitSurface = key === "openSurface" && args.length === 3;
+        const props: AnyProps = overlay ? args[explicitSurface ? 1 : 0] : args[1];
         const options = args.at(-1) as { signal: AbortSignal };
         assert.ok(options.signal instanceof AbortSignal, `${key} must receive a real lifetime signal`);
         const container = overlay ? document.createElement("div") as unknown as HTMLElement : args[0] as HTMLElement;
@@ -80,7 +82,7 @@ export function createFixture() {
         const contentLife = new AbortController();
         let contentCleanup: void | (() => void);
         const record: MountRecord = { method: key, container, props, signal: options.signal, disposed: 0, updates: [], treeContents: [], dictation: { toggle: 0, finish: 0, cancel: 0 }, handle: null! };
-        if (key === "openSurface") record.target = args[0];
+        if (explicitSurface) record.target = args[0];
         const handle = {
           update(next: AnyProps) { record.updates.push(next); record.props = { ...record.props, ...next }; if (key === "mountTree" && !record.disposed) renderTreeContent(record); },
           dispose() {

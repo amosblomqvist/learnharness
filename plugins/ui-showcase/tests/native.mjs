@@ -32,6 +32,16 @@ await runPackagedProof(async ({ page, api, base, fixture, evidence, screenshot }
   const click = id => page.locator(button(id)).click();
   const reset = id => click(`reset-${id}`);
   const openGallery = async () => { await page.locator('[data-plugin-action="ui-showcase/gallery-sidebar"]').click(); await page.waitForSelector(gallery, { visible: true }); };
+  const openFixtureSession = async (practice = false) => {
+    const title = practice ? fixture.practiceTitle : fixture.chatTitle, id = practice ? fixture.practiceChatId : fixture.chatId;
+    const rows = '[data-testid="session-row"], [data-testid="session-row-kbd"]';
+    await page.waitForFunction(({ rows, title }) => [...document.querySelectorAll(rows)].some(node => node.textContent.includes(title)), {}, { rows, title });
+    const row = await page.evaluateHandle(({ rows, title }) => [...document.querySelectorAll(rows)].find(node => node.textContent.includes(title)), { rows, title });
+    assert.ok(row.asElement(), `Exact synthetic session row must exist: ${title}`);
+    try { await row.asElement().click(); } finally { await row.dispose(); }
+    await page.waitForFunction(id => location.pathname === `/chat/${id}`, {}, id);
+    await page.waitForSelector('main [data-testid="composer"] [contenteditable="true"]', { visible: true });
+  };
   const settlePaint = () => page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
   const paintedTop = selector => page.$eval(selector, node => {
     const b = node.getBoundingClientRect();
@@ -99,6 +109,73 @@ await runPackagedProof(async ({ page, api, base, fixture, evidence, screenshot }
   assert.ok(Math.abs(parseFloat(typography.note.size) - tokenPx(typography.note.configuredSize, parseFloat(typography.rootSize))) < .1);
   assert.ok(Math.abs(parseFloat(typography.note.leading) - tokenPx(typography.note.configuredLeading, parseFloat(typography.note.size))) < .1);
   evidence.typography = typography;
+
+  // Run before any clicks or scrollIntoView calls can mask an outer-document
+  // overflow. Worker sr-only status text must use its own header's containing
+  // block, not the page-level main outside this intentionally tall scroller.
+  await page.waitForFunction(selector => document.querySelector(selector)?.querySelectorAll('[data-testid="plugin-worker-header"]').length === 12, {}, gallery);
+  // The existing static Mermaid fixture mounts asynchronously. Wait without
+  // scrolling so it cannot change the inner-bottom target during this proof.
+  await page.waitForFunction(selector => !!document.querySelector(selector)?.querySelector('svg[id^="lh-mermaid"], [data-testid="mermaid-render"] svg, .mermaid svg'), {}, example('markdown'));
+  await page.evaluate(() => document.fonts.ready.then(() => undefined));
+  await page.waitForFunction(selector => {
+    const root = document.querySelector(selector), main = document.querySelector('main'), sidebar = document.querySelector('aside');
+    if (!root || !main || !sidebar) return false;
+    const running = document.getAnimations().some(animation => animation.playState === 'running' && animation.effect?.getComputedTiming().iterations !== Infinity);
+    const bounds = node => { const box = node.getBoundingClientRect(); return [box.x, box.y, box.width, box.height]; };
+    const key = JSON.stringify([bounds(root), bounds(main), bounds(sidebar), document.scrollingElement.scrollHeight, root.scrollHeight]);
+    const last = window.__showcaseOuterScrollSettled;
+    window.__showcaseOuterScrollSettled = { key, count: !running && last?.key === key ? last.count + 1 : 0 };
+    return !running && window.__showcaseOuterScrollSettled.count >= 3;
+  }, { polling: 'raf' }, gallery);
+  const outerScrollSnapshot = () => page.$eval(gallery, root => {
+    const box = node => { const { x, y, width, height, right, bottom } = node.getBoundingClientRect(); return { x, y, width, height, right, bottom }; };
+    const families = root.querySelectorAll('[data-family]');
+    return { viewport: { width: innerWidth, height: innerHeight }, window: { x: scrollX, y: scrollY }, document: { scrollHeight: document.scrollingElement.scrollHeight, clientHeight: document.scrollingElement.clientHeight }, main: box(document.querySelector('main')), sidebar: box(document.querySelector('aside')), gallery: { ...box(root), scrollTop: root.scrollTop, scrollHeight: root.scrollHeight, clientHeight: root.clientHeight, overflowY: getComputedStyle(root).overflowY }, lastFamily: box(families[families.length - 1]) };
+  });
+  const statusContainingBlocks = await page.$$eval(`${gallery} [data-testid="plugin-worker-header"]`, headers => headers.map(header => ({
+    example: header.closest('[data-example]')?.getAttribute('data-example'), position: getComputedStyle(header).position,
+    statuses: [...header.querySelectorAll('.sr-only')].map(status => ({ text: status.textContent, offsetParentIsOwnHeader: status.offsetParent === header, actualOffsetParentTag: status.offsetParent?.tagName, actualOffsetParentTestId: status.offsetParent?.getAttribute('data-testid') })),
+  })));
+  const initialOuterScroll = await outerScrollSnapshot();
+  evidence.outerScrollRegression = { initial: initialOuterScroll, statusContainingBlocks };
+  assert.equal(statusContainingBlocks.length, 12);
+  for (const status of ['succeeded', 'failed', 'cancelled', 'interrupted']) for (const presentation of ['collapsed', 'card', 'plain']) {
+    const header = statusContainingBlocks.find(header => header.example === `worker-${status}-${presentation}`);
+    assert.ok(header); assert.equal(header.position, 'relative'); assert.equal(header.statuses.length, 1);
+    assert.match(header.statuses[0].text, new RegExp(status, 'i'));
+    assert.equal(header.statuses[0].offsetParentIsOwnHeader, true, `${status}/${presentation} status must be contained by its own worker header`);
+  }
+  const assertBoundedOuterScroll = snapshot => {
+    assert.ok(snapshot.document.scrollHeight <= snapshot.viewport.height + 1, 'Tall gallery content must not enlarge the outer document');
+    assert.ok(Math.abs(snapshot.gallery.right - snapshot.main.right) <= 1, 'Gallery right edge remains at the main-pane edge');
+    assert.equal(snapshot.window.x, initialOuterScroll.window.x); assert.equal(snapshot.window.y, initialOuterScroll.window.y);
+    assert.ok(Math.abs(snapshot.sidebar.y - initialOuterScroll.sidebar.y) <= 1, 'Sidebar remains stationary');
+    assert.ok(Math.abs(snapshot.sidebar.bottom - initialOuterScroll.sidebar.bottom) <= 1);
+  };
+  assertBoundedOuterScroll(initialOuterScroll);
+  assert.ok(initialOuterScroll.gallery.scrollHeight > initialOuterScroll.gallery.clientHeight + 100, 'Fixture must genuinely overflow inside the gallery');
+  assert.match(initialOuterScroll.gallery.overflowY, /auto|scroll/);
+  try {
+    await page.evaluate(() => window.scrollTo({ left: 0, top: 100, behavior: 'instant' })); await settlePaint();
+    evidence.outerScrollRegression.afterWindowScroll = await outerScrollSnapshot();
+    assertBoundedOuterScroll(evidence.outerScrollRegression.afterWindowScroll);
+    await page.$eval(gallery, root => root.scrollTo({ top: root.scrollHeight, behavior: 'instant' })); await settlePaint();
+    const bottom = await outerScrollSnapshot(); evidence.outerScrollRegression.innerBottom = bottom;
+    assertBoundedOuterScroll(bottom);
+    assert.ok(bottom.gallery.scrollTop > initialOuterScroll.gallery.scrollTop, 'Gallery scrolls independently of the window');
+    assert.ok(Math.abs(bottom.gallery.scrollTop - (bottom.gallery.scrollHeight - bottom.gallery.clientHeight)) <= 1, 'Gallery can reach its actual bottom');
+    assert.ok(bottom.lastFamily.bottom <= bottom.gallery.bottom + 1 && bottom.lastFamily.bottom > bottom.gallery.y, 'Last gallery family is visible at the inner bottom');
+    await screenshot('gallery-inner-bottom-no-outer-scroll', { fullPage: false });
+  } finally {
+    await page.$eval(gallery, (root, top) => root.scrollTo({ top, behavior: 'instant' }), initialOuterScroll.gallery.scrollTop);
+    await page.evaluate(position => window.scrollTo({ left: position.x, top: position.y, behavior: 'instant' }), initialOuterScroll.window);
+    await settlePaint();
+  }
+  const restoredOuterScroll = await outerScrollSnapshot(); evidence.outerScrollRegression.restored = restoredOuterScroll;
+  assertBoundedOuterScroll(restoredOuterScroll);
+  assert.equal(restoredOuterScroll.gallery.scrollTop, initialOuterScroll.gallery.scrollTop, 'Outer-scroll proof restores the initial gallery position');
+  evidence.assertions.push('Before all interactions, every worker outcome status span uses its own relative header containing block; outer document remains viewport-bounded under window.scrollTo with a stationary sidebar, while the real gallery scrolls to its visible final family at the main-pane right edge and then restores initial scroll positions.');
   await screenshot('gallery-top', { fullPage: false });
 
   evidence.stage = "Directory / tree gallery";
@@ -232,8 +309,7 @@ await runPackagedProof(async ({ page, api, base, fixture, evidence, screenshot }
   for (const handle of [expiredDraft, expiredCheckbox, expiredDisclosure]) await handle.dispose();
   await fill(directoryDraft, 'Route-local Directory draft'); await waitState('tree', { draft: 'Route-local Directory draft' });
   const routeExpiredDraft = await page.$(directoryDraft); assert.ok(routeExpiredDraft);
-  await page.locator('[data-testid="session-row"]').click();
-  await page.waitForFunction(id => location.pathname === `/chat/${id}`, {}, fixture.chatId);
+  await openFixtureSession();
   await page.waitForSelector(gallery, { hidden: true });
   await openGallery(); await waitState('tree', treeDefaults);
   assert.equal(await routeExpiredDraft.evaluate(node => node.isConnected), false);
@@ -338,24 +414,71 @@ await runPackagedProof(async ({ page, api, base, fixture, evidence, screenshot }
     await page.locator(`${knowledge} [data-testid="${selected ? 'chain-practice-done' : 'chain-table-close'}"]`).click();
     await page.waitForSelector(knowledge, { hidden: true });
   };
+  // Shared verbatim with the temporary DEV StrictMode driver: two bounded
+  // controlled-acknowledgment cycles, using only actual native pointer controls.
+  const exerciseKnowledgeLifetime = async ({ label, root = gallery, exampleId = 'knowledge-picker', stateId = 'pickers', stateKey = 'knowledge', alreadyOpen = false }) => {
+    const trigger = `${example(exampleId, root)} [data-testid="practice-props-chip"]`, triggerClear = `${example(exampleId, root)} [data-testid="practice-props-clear"]`;
+    const searchSelector = `${knowledge} [data-testid="chain-table-search"]`, checkboxSelector = `${knowledge} [data-testid="chain-checkbox-${fixture.chainId}"]`;
+    const selectionBar = `${knowledge} [data-testid="chain-selection-bar"]`, summary = `${knowledge} [data-testid="chain-selected-summary"]`, done = `${knowledge} [data-testid="chain-practice-done"]`;
+    const chosen = [fixture.premiseId, fixture.conclusionId], cycles = [];
+    const expectValue = async value => { await waitState(stateId, { [stateKey]: value }, root); assert.deepEqual((await state(stateId, root))[stateKey], value); };
+    const open = async () => {
+      await page.locator(trigger).click(); await page.waitForSelector(knowledge, { visible: true });
+      await page.waitForSelector(`${knowledge} [data-testid="add-source-folder"]`, { visible: true });
+    };
+    const expandSource = async () => {
+      const cluster = `${knowledge} [data-testid="cluster-toggle-${fixture.sourceId}"]`;
+      await page.waitForSelector(cluster, { visible: true });
+      if (await page.$eval(cluster, node => node.getAttribute('aria-expanded')) !== 'true') await page.locator(cluster).click();
+      await page.waitForSelector(checkboxSelector, { visible: true });
+    };
+    await expectValue([]);
+    for (let cycle = 0; cycle < 2; cycle++) {
+      if (!(alreadyOpen && cycle === 0)) await open();
+      await expandSource();
+      const overlay = await page.$(knowledge), search = await page.$(searchSelector), checkbox = await page.$(checkboxSelector);
+      const keepOpen = async checked => {
+        await settlePaint();
+        for (const [handle, selector] of [[overlay, knowledge], [search, searchSelector], [checkbox, checkboxSelector]]) {
+          assert.equal(await handle.evaluate((node, selector) => node.isConnected && node === document.querySelector(selector), selector), true, `${label}: controlled acknowledgment retains the same live picker, search and checkbox DOM`);
+        }
+        assert.equal(await checkbox.evaluate(node => node.checked), checked);
+        assert.equal(await page.$eval(knowledge, node => !node.closest('[inert],[aria-hidden="true"]') && node.getBoundingClientRect().width > 0 && node.getBoundingClientRect().height > 0 && getComputedStyle(node).visibility === 'visible'), true, `${label}: selection must keep its opening lease live and visibly open`);
+      };
+      const expectPill = async () => {
+        await page.waitForSelector(selectionBar, { visible: true });
+        assert.equal((await page.$eval(summary, node => node.textContent)).replace(/\s+/g, ' ').trim(), '2 nodes → 1 chain');
+        assert.equal((await page.$eval(done, node => node.textContent)).trim(), 'Done');
+        assert.equal(await page.$$eval(`${done} svg`, nodes => nodes.length), 0, 'Selected native Done remains label-only');
+      };
+      await page.locator(checkboxSelector).click(); await expectValue(chosen); await keepOpen(true); await expectPill();
+      await page.locator(checkboxSelector).click(); await expectValue([]); await keepOpen(false); await page.waitForSelector(selectionBar, { hidden: true });
+      await page.locator(checkboxSelector).click(); await expectValue(chosen); await keepOpen(true); await expectPill();
+      await page.locator(`${knowledge} [data-testid="chain-clear"]`).click(); await expectValue([]); await keepOpen(false); await page.waitForSelector(selectionBar, { hidden: true });
+      await page.locator(checkboxSelector).click(); await expectValue(chosen); await keepOpen(true); await expectPill();
+      if (cycle === 1) await screenshot(`knowledge-lifetime-${label}-selected-pill`, { fullPage: false });
+      await page.locator(done).click(); await page.waitForSelector(knowledge, { hidden: true }); await expectValue(chosen);
+      assert.equal(await overlay.evaluate(node => node.isConnected), false, 'Real Done closes the exact selected picker');
+      await open(); await expectValue(chosen); await expandSource();
+      assert.equal(await page.$eval(checkboxSelector, node => node.checked), true); await expectPill();
+      assert.equal(await overlay.evaluate((node, selector) => node !== document.querySelector(selector), knowledge), true, 'Reopening creates a fresh, usable presentation');
+      await page.focus(searchSelector); await page.keyboard.press('Escape'); await page.waitForSelector(knowledge, { hidden: true }); await expectValue(chosen);
+      await page.locator(triggerClear).click(); await expectValue([]); await page.waitForSelector(triggerClear, { hidden: true });
+      assert.equal((await page.$eval(trigger, node => node.textContent)).trim(), 'Pick nodes');
+      cycles.push({ cycle: cycle + 1, sameDomAcrossControlledSelectDeselectAndClear: true, selectedPill: '2 nodes → 1 chain', doneRetainsSelection: true, reopenRetainsSelection: true, triggerClear: true });
+      for (const handle of [overlay, search, checkbox]) await handle.dispose();
+    }
+    (evidence.pickerLifetimeOrigins ??= []).push({ label, cycles });
+  };
   await page.locator(`${example("knowledge-picker")} [data-testid="practice-props-chip"]`).click();
   await page.waitForSelector(knowledge, { visible: true });
   await knowledgeGeometry('main', 'gallery origin/sidebar open');
   await screenshot('knowledge-page-sidebar-open', { fullPage: false });
-  const cluster = `${knowledge} [data-testid="cluster-toggle-${fixture.sourceId}"]`;
-  await page.waitForSelector(cluster);
-  if (await page.$eval(cluster, node => node.getAttribute("aria-expanded")) !== "true") await page.locator(cluster).click();
-  await page.locator(`${knowledge} [data-testid="chain-checkbox-${fixture.chainId}"]`).click();
-  await waitState("pickers", { knowledge: [fixture.premiseId, fixture.conclusionId] });
-  assert.match(await page.$eval(`${knowledge} [data-testid="chain-practice-done"]`, node => node.textContent), /Done/i);
-  assert.equal(await page.$$eval(`${knowledge} [data-testid="chain-practice-done"] svg`, nodes => nodes.length), 0, 'Selected native Done is label-only');
-  await page.locator(`${knowledge} [data-testid="chain-practice-done"]`).click(); await page.waitForSelector(knowledge, { hidden: true });
-  await page.locator(`${example("knowledge-picker")} [data-testid="practice-props-chip"]`).click();
-  await page.waitForSelector(knowledge, { visible: true }); await page.keyboard.press("Escape"); await page.waitForSelector(knowledge, { hidden: true });
-  assert.deepEqual((await state("pickers")).knowledge, [fixture.premiseId, fixture.conclusionId]);
+  await exerciseKnowledgeLifetime({ label: 'gallery', alreadyOpen: true });
+  assert.deepEqual((await state('pickers')).knowledge, [], 'Trigger Clear clears only local controlled selection');
   assert.match(await page.$eval('[data-family="pickers"]', node => node.textContent), /source.*(management|organiz|edit)|renam|real.*sources/i);
   await reset("pickers"); await waitState("pickers", { model: null, thinking: null, knowledge: [] });
-  evidence.assertions.push("Actual model/thinking and contextual knowledge picker update plugin-local values; gallery-origin picker fills only main-pane view and leaves sidebar interactive. Synthetic selection survives Done/reopen/Escape; no automated source editing.");
+  evidence.assertions.push("Actual model/thinking and contextual knowledge picker update plugin-local values; gallery-origin picker fills only main-pane view and leaves sidebar interactive. Two controlled select/deselect/Clear/reselect cycles retain overlay/search/checkbox DOM and the native 2-nodes/1-chain pill; Done/reopen/Escape retain selection, trigger Clear empties it. No automated source editing.");
 
   evidence.stage = 'knowledge origin scopes';
   const nativeEnvironment = await page.evaluate(() => ({ className: document.documentElement.className, platform: document.documentElement.getAttribute('data-lh-platform'), style: document.documentElement.getAttribute('style') }));
@@ -393,8 +516,7 @@ await runPackagedProof(async ({ page, api, base, fixture, evidence, screenshot }
   await page.evaluate(saved => { const root = document.documentElement; root.className = saved.className; if (saved.platform === null) root.removeAttribute('data-lh-platform'); else root.setAttribute('data-lh-platform', saved.platform); if (saved.style === null) root.removeAttribute('style'); else root.setAttribute('style', saved.style); }, nativeEnvironment);
   await setSidebar(true);
   await page.locator(`${example('knowledge-picker')} [data-testid="practice-props-chip"]`).click(); await page.waitForSelector(knowledge, { visible: true });
-  await page.locator('[data-testid="session-row"]').click();
-  await page.waitForFunction(id => location.pathname === `/chat/${id}`, {}, fixture.chatId);
+  await openFixtureSession();
   await page.waitForSelector(knowledge, { hidden: true }); await page.waitForSelector('[data-plugin-knowledge-picker-pane]', { hidden: true });
   await openGallery();
   evidence.contextRouteExpiry = true;
@@ -492,6 +614,7 @@ await runPackagedProof(async ({ page, api, base, fixture, evidence, screenshot }
   const parentInput = await page.$(dialogField);
   await page.locator(button("dialog-nested-child", parentDialog)).click(); await page.waitForSelector('[data-showcase="dialog-ordinary"]', { visible: true });
   assertOverlayChrome(await overlayChrome('[data-showcase="dialog-ordinary"]', 'Ordinary dialog example'));
+  await exerciseKnowledgeLifetime({ label: 'ordinary-dialog', root: '[data-showcase="dialog-ordinary"]', exampleId: 'dialog-ordinary-knowledge-picker', stateId: 'dialog-ordinary-knowledge', stateKey: 'value' });
   await page.locator(`${example('dialog-ordinary-knowledge-picker', '[data-showcase="dialog-ordinary"]')} [data-testid="practice-props-chip"]`).click();
   await page.waitForSelector(knowledge, { visible: true }); await knowledgeGeometry('modal', 'knowledge from nested ordinary dialog');
   await screenshot('knowledge-modal-dialog-origin', { fullPage: false });
@@ -557,6 +680,7 @@ await runPackagedProof(async ({ page, api, base, fixture, evidence, screenshot }
   const retained = await page.$(surfaceField);
   const retainedOwner = await retained.evaluate(node => node.closest('[data-plugin-session-surface]').getAttribute('data-interaction-layer'));
   const sessionSettingsBeforeCoveredKeys = (await api(`/api/chats/${fixture.chatId}`)).payload.settings;
+  await exerciseKnowledgeLifetime({ label: 'native-surface', root: surface, exampleId: 'surface-knowledge-picker', stateId: 'surface-knowledge', stateKey: 'value' });
   await page.locator(`${example('surface-knowledge-picker', surface)} [data-testid="practice-props-chip"]`).click();
   await page.waitForSelector(knowledge, { visible: true }); await knowledgeGeometry('main', 'knowledge launched from native surface');
   const pickerNode = await page.$(knowledge);
@@ -610,6 +734,281 @@ await runPackagedProof(async ({ page, api, base, fixture, evidence, screenshot }
   await page.locator('[data-plugin-session-surface] button[aria-label="Close"]').click(); await page.waitForSelector(surface, { hidden: true }); await retained.dispose();
   await openGallery(); await waitState("composer", { draft: "", sends: 0 });
   evidence.assertions.push("Real native session toolbar supplies opaque target. Painted surface frame exactly fills body, excludes header/sidebar and inerts native composer. Nested surface/menu/dialog/Settings stack retains parent DOM/value, closes only top Escape and restores trigger focus; host X closes parent; navigation remounts clean gallery.");
+
+  evidence.stage = "direct gallery Surface";
+  const gallerySurfaceBefore = await state('surfaces');
+  assert.equal(gallerySurfaceBefore.target, 'current page');
+  await fill(`${example('composer')} [contenteditable="true"]`, 'Retained gallery under direct Surface');
+  const coveredGallery = await page.$(gallery), coveredGalleryDraft = await page.$(`${example('composer')} [contenteditable="true"]`);
+  await click('open-surface'); await page.waitForSelector(surface, { visible: true });
+  await waitState('surfaces', { opens: gallerySurfaceBefore.opens + 1 }, gallery);
+  assert.equal(await coveredGalleryDraft.evaluate(node => node.isConnected && node.textContent === 'Retained gallery under direct Surface' && !!node.closest('[inert]')), true);
+  assertOverlayChrome(await overlayChrome(surface, 'UI Showcase surface', true));
+  const directRoot = await page.$(surface);
+  await fill(surfaceField, 'Retained direct gallery Surface draft'); await page.keyboard.press('Enter');
+  const directDraft = await page.$(surfaceField);
+  for (const background of ['opaque', 'dimmed']) {
+    await page.locator(button(`surface-background-${background}`, surface)).click(); await waitState('surfaces', { background }, surface);
+    const appearance = await surfaceAppearance();
+    assert.ok(Math.abs(appearance.frameAlpha - (background === 'opaque' ? 1 : .8)) <= .01);
+    assert.equal(appearance.backdropFilter === 'none', background === 'opaque');
+    assert.equal(await directDraft.evaluate(node => node.isConnected && node.value === 'Retained direct gallery Surface draft'), true);
+    assert.equal(await directRoot.evaluate(node => node === document.querySelector('[data-showcase="surface"]')), true);
+  }
+  await screenshot('gallery-direct-surface-dimmed', { fullPage: false });
+  await page.locator(button('surface-nested', surface)).click(); await page.waitForSelector(nested, { visible: true });
+  assert.equal(await directDraft.evaluate(node => node.isConnected && !!node.closest('[inert]')), true);
+  await page.locator(button('menu-down', nested)).click(); await page.waitForSelector('[data-testid="plugin-menu"]', { visible: true });
+  assert.equal(await paintedTop('[data-testid="plugin-menu"]'), true);
+  await page.keyboard.press('Escape'); await page.waitForSelector('[data-testid="plugin-menu"]', { hidden: true });
+  await page.locator(button('dialog-ordinary', nested)).click(); await page.waitForSelector('[data-showcase="dialog-ordinary"]', { visible: true });
+  assert.equal(await paintedTop('[role="dialog"][aria-label="Ordinary dialog example"]'), true);
+  await page.focus('[role="dialog"][aria-label="Ordinary dialog example"] button[aria-label="Close dialog"]');
+  await page.keyboard.press('Escape'); await page.waitForSelector('[data-showcase="dialog-ordinary"]', { hidden: true });
+  await chord(','); await page.waitForSelector('[data-testid="settings-dialog"]', { visible: true });
+  assert.equal(await paintedTop('[data-testid="settings-dialog"]'), true);
+  await screenshot('gallery-direct-surface-stack', { fullPage: false });
+  await page.locator('[data-testid="settings-close"]').click(); await page.waitForSelector('[data-testid="settings-dialog"]', { hidden: true });
+  assert.equal(await page.$$eval('[data-plugin-session-surface]', nodes => nodes.length), 2);
+  // The parent is inert under the nested Surface; close the active frame's X
+  // rather than attempting to focus a covered control.
+  await page.locator(`[data-plugin-session-surface-frame]:has(${nested}) button[aria-label="Close"]`).click();
+  await page.waitForSelector(nested, { hidden: true });
+  assert.equal(await directDraft.evaluate(node => node.isConnected && node.value === 'Retained direct gallery Surface draft' && !node.closest('[inert]')), true);
+  await page.waitForFunction(selector => document.activeElement === document.querySelector(selector), {}, button('surface-nested', surface));
+  await page.keyboard.press('Escape'); await page.waitForSelector(surface, { hidden: true });
+  await waitState('surfaces', { opens: gallerySurfaceBefore.opens + 1, closed: gallerySurfaceBefore.closed + 1, lastCallback: 'surface.onClose' });
+  await page.waitForFunction(selector => document.activeElement === document.querySelector(selector), {}, button('open-surface'));
+  assert.equal(await coveredGalleryDraft.evaluate(node => node.isConnected && node.textContent === 'Retained gallery under direct Surface' && !node.closest('[inert]')), true);
+  await click('open-surface'); await page.waitForSelector(surface, { visible: true });
+  const expiredGalleryOpen = await page.$(button('open-surface')), expiredGalleryBackground = await page.$(button('surface-background-opaque', surface));
+  await openFixtureSession(); await page.waitForSelector(surface, { hidden: true });
+  for (const handle of [expiredGalleryOpen, expiredGalleryBackground]) { assert.equal(await handle.evaluate(node => node.isConnected), false); await handle.evaluate(node => node.click()); }
+  await settlePaint(); assert.equal(await page.$$eval('[data-plugin-session-surface]', nodes => nodes.length), 0);
+  assert.equal(await coveredGallery.evaluate(node => node.isConnected), false);
+  await openGallery(); await waitState('surfaces', { target: 'current page', opens: 0, closed: 0, lastCallback: 'none' });
+  await waitState('composer', { draft: '', sends: 0 });
+  await screenshot('gallery-direct-surface-fresh-reentry', { fullPage: false });
+  for (const handle of [coveredGallery, coveredGalleryDraft, directRoot, directDraft, expiredGalleryOpen, expiredGalleryBackground]) await handle.dispose();
+  evidence.assertions.push('Gallery direct openSurface captures the plugin page body without an opaque target. Background updates and nested menu/dialog/Settings retain identical parent draft DOM; top-only close restores focus. Real navigation aborts the gallery and old controls, and reentry starts fresh. Original explicit Native-target proof above remains intact.');
+
+  const proofSurface = '[data-surface-proof="surface"]', proofState = '[data-surface-proof="state"]';
+  const proofAction = id => `[data-plugin-action="surface-proof/${id}"]`;
+  const openProof = async id => { await page.waitForSelector(proofAction(id), { visible: true }); await page.locator(proofAction(id)).click(); };
+  const closeProof = async () => {
+    await page.locator(`[data-plugin-session-surface-frame]:has(${proofSurface}) button[aria-label="Close"]`).click();
+    await page.waitForSelector(proofSurface, { hidden: true });
+  };
+  const readProof = () => page.$eval(proofState, node => JSON.parse(node.textContent));
+  const settleSurface = async () => {
+    await page.evaluate(() => document.fonts.ready.then(() => undefined));
+    await page.waitForFunction(() => {
+      if (document.getAnimations().some(animation => animation.playState === 'running' && Number.isFinite(animation.effect?.getComputedTiming().endTime))) return false;
+      const geometry = JSON.stringify([...document.querySelectorAll('aside,[data-session-surface-region],[data-plugin-session-surface-frame],header')].map(node => { const { x, y, width, height } = node.getBoundingClientRect(); return [x, y, width, height]; }));
+      const prior = window.__showcaseSurfaceGeometry;
+      window.__showcaseSurfaceGeometry = { geometry, frames: prior?.geometry === geometry ? prior.frames + 1 : 0 };
+      return window.__showcaseSurfaceGeometry.frames >= 3;
+    });
+  };
+  const assertPointerTarget = async selector => {
+    const result = await page.$eval(selector, node => {
+      const b = node.getBoundingClientRect(), hit = document.elementFromPoint(b.x + b.width / 2, b.y + b.height / 2);
+      return { pointerEvents: getComputedStyle(node).pointerEvents, hit: node === hit || node.contains(hit), inert: !!node.closest('[inert]') };
+    });
+    assert.equal(result.pointerEvents, 'auto', `${selector}: native pointer events must be restored locally`);
+    assert.equal(result.hit, true, `${selector}: actual painted point must hit the native control`); assert.equal(result.inert, false);
+    return result;
+  };
+  const exerciseDraftPicker = async label => {
+    await page.waitForSelector(knowledge, { visible: true }); await settleSurface();
+    const pointerRoot = await page.$eval(knowledge, node => ({ pointerEvents: getComputedStyle(node).pointerEvents,
+      inRegion: !!node.closest('[data-session-surface-region]'), regionPointerEvents: getComputedStyle(node.closest('[data-session-surface-region]')).pointerEvents, inert: !!node.closest('[inert]') }));
+    assert.deepEqual(pointerRoot, { pointerEvents: 'auto', inRegion: true, regionPointerEvents: 'none', inert: false });
+    const search = `${knowledge} [data-testid="chain-table-search"]`, disclosure = `${knowledge} [data-testid="cluster-toggle-${fixture.sourceId}"]`, close = `${knowledge} [data-testid="chain-table-close"]`;
+    const searchPointer = await assertPointerTarget(search);
+    await page.locator(search).click(); assert.equal(await page.$eval(search, node => node === document.activeElement), true);
+    await fill(search, 'Synthetic'); assert.equal(await page.$eval(search, node => node.value), 'Synthetic');
+    await page.waitForSelector(disclosure, { visible: true }); const disclosurePointer = await assertPointerTarget(disclosure);
+    const expanded = await page.$eval(disclosure, node => node.getAttribute('aria-expanded'));
+    await page.locator(disclosure).click(); await page.waitForFunction(({ selector, expanded }) => document.querySelector(selector)?.getAttribute('aria-expanded') !== expanded, {}, { selector: disclosure, expanded });
+    await page.locator(disclosure).click(); await page.waitForFunction(({ selector, expanded }) => document.querySelector(selector)?.getAttribute('aria-expanded') === expanded, {}, { selector: disclosure, expanded });
+    const closePointer = await assertPointerTarget(close); await screenshot(`native-draft-picker-${label}`, { fullPage: false });
+    await page.locator(close).click(); await page.waitForSelector(knowledge, { hidden: true });
+    (evidence.nativeDraftPickerPointers ??= []).push({ label, pointerRoot, searchPointer, disclosurePointer, closePointer, trustedClicks: true });
+  };
+
+  const matrixSettingsBefore = (await api('/api/settings')).payload;
+  assert.deepEqual(matrixSettingsBefore.settings.graph, { rendering: true }, 'Approved explicit rendering seed is reversible without dropping any other settings');
+  const matrix = [
+    { id: 'home-graph', route: '/', rendering: true, ready: 'main canvas', floating: true },
+    { id: 'home-minimal', route: '/', rendering: false, ready: '[data-testid="knowledge-summary"]', floating: true },
+    { id: 'draft', route: '/chat/new', ready: 'main [data-testid="composer"] [contenteditable="true"]', floating: true },
+    { id: 'draft-practice', route: '/chat/new?mode=practice', ready: 'main [data-testid="composer"] [contenteditable="true"]', floating: true, draftPicker: true },
+    { id: 'native-teach', route: `/chat/${fixture.chatId}`, ready: 'main [data-testid="composer"] [contenteditable="true"]' },
+    { id: 'native-practice', route: `/chat/${fixture.practiceChatId}`, ready: 'main [data-testid="composer"] [contenteditable="true"]' },
+    { id: 'plugin-route', route: '/plugins/ui-showcase/gallery', ready: gallery },
+  ];
+  evidence.publicSurfaceMatrix = [];
+  try {
+    for (const entry of matrix) {
+      evidence.stage = `public Surface matrix: ${entry.id}`;
+      if (entry.rendering !== undefined) await api('/api/settings/graph', 'PUT', { ...matrixSettingsBefore.settings.graph, rendering: entry.rendering });
+      assert.equal((await page.goto(base + entry.route, { waitUntil: 'domcontentloaded' })).status(), 200);
+      await page.waitForSelector(entry.ready, { visible: true }); await page.waitForSelector('[data-session-surface-region]'); await settleSurface();
+      if (await page.$eval('aside', node => node.getAttribute('aria-hidden') === 'true')) {
+        await page.waitForSelector('header [aria-label="Open sidebar"]', { visible: true });
+        await page.locator('header [aria-label="Open sidebar"]').click();
+      }
+      await page.waitForFunction(() => document.querySelector('aside').getBoundingClientRect().width > 250);
+      await settleSurface();
+      const composer = entry.route === '/' ? '[role="textbox"][contenteditable="true"][aria-label="What do you want to learn?"]'
+        : entry.id === 'plugin-route' ? `${example('composer')} [contenteditable="true"]` : 'main [data-testid="composer"] [contenteditable="true"]';
+      const priorDraft = await page.$eval(composer, node => node.textContent);
+      await fill(composer, `Retained ${entry.id} body draft`);
+      const underlyingDraft = await page.$(composer);
+      if (entry.id === 'plugin-route') await page.$eval('[data-family="surfaces"]', node => node.scrollIntoView({ block: 'center' }));
+      const controls = entry.route === '/' ? ['[data-testid="open-chain-table"]', composer, ...(entry.rendering ? ['[aria-label="Search nodes"]'] : [])] : [entry.id === 'plugin-route' ? button('open-surface') : composer];
+      const bodyRegion = await page.$('[data-session-surface-region]');
+      const heldGraphResponses = [];
+      if (entry.draftPicker) {
+        // Hold genuine, successful local graph response(s), without changing
+        // their bytes, until after the public sidebar Surface has mounted.
+        const gate = await page.createCDPSession(); let released = false, releaseTimeout;
+        const continuations = [], gateErrors = [];
+        let firstResponse;
+        const paused = new Promise(resolve => { firstResponse = resolve; });
+        const resume = requestId => { const result = gate.send('Fetch.continueResponse', { requestId }).catch(error => { gateErrors.push(String(error)); }); continuations.push(result); return result; };
+        gate.on('Fetch.requestPaused', event => {
+          if (released) { void resume(event.requestId); return; }
+          heldGraphResponses.push({ requestId: event.requestId, url: event.request.url, method: event.request.method, status: event.responseStatusCode }); firstResponse();
+        });
+        try {
+          await gate.send('Fetch.enable', { patterns: [{ urlPattern: base + '/api/graph', requestStage: 'Response' }] });
+          await page.locator('[data-testid="practice-props-chip"]').click();
+          await Promise.race([paused, new Promise((_, reject) => { releaseTimeout = setTimeout(() => reject(new Error('Native Draft graph response was not intercepted')), 30_000); })]);
+          assert.equal(await page.$(knowledge), null, 'Cold native picker has not mounted before its graph response');
+          await openProof('open'); await page.waitForSelector(proofSurface, { visible: true });
+          await fill(`${proofSurface} input`, 'Surface behind late native Draft picker');
+          released = true;
+          for (const response of heldGraphResponses) { assert.equal(response.method, 'GET'); assert.equal(response.status, 200); await resume(response.requestId); }
+          await exerciseDraftPicker('late-over-surface');
+          assert.equal(await page.$eval(proofSurface, node => !node.closest('[inert]') && node.querySelector('input').value === 'Surface behind late native Draft picker'), true, 'Closing newer native picker resumes its older Surface');
+        } finally {
+          clearTimeout(releaseTimeout); released = true;
+          await Promise.all(continuations); await gate.send('Fetch.disable'); await gate.detach();
+        }
+        assert.deepEqual(gateErrors, [], 'Actual graph response gate resumes without protocol errors');
+      } else { await openProof('open'); await page.waitForSelector(proofSurface, { visible: true }); }
+      await settleSurface();
+      const currentSurface = await page.$(proofSurface);
+      const geometry = await page.$eval(proofSurface, root => {
+        const frame = root.closest('[data-plugin-session-surface-frame]'), region = frame.closest('[data-session-surface-region]');
+        const box = node => { const { x, y, right, bottom, width, height } = node.getBoundingClientRect(); return { x, y, right, bottom, width, height }; };
+        return { frame: box(frame), region: box(region) };
+      });
+      for (const dimension of ['x', 'y', 'right', 'bottom', 'width', 'height']) assert.ok(Math.abs(geometry.frame[dimension] - geometry.region[dimension]) <= 1, `${entry.id}: captured Surface fills exact body ${dimension}`);
+      assert.equal(await bodyRegion.evaluate(node => node.isConnected && node === document.querySelector('[data-session-surface-region]')), true, 'Opening never replaces or migrates the captured body');
+      assert.equal(await underlyingDraft.evaluate((node, value) => node.isConnected && node.textContent === value && !!node.closest('[inert]'), `Retained ${entry.id} body draft`), true);
+      const coveredControls = [];
+      for (const selector of controls) {
+        const covered = await page.$eval(selector, node => {
+          const b = node.getBoundingClientRect(), frame = document.querySelector('[data-surface-proof="surface"]').closest('[data-plugin-session-surface-frame]');
+          return { connected: node.isConnected, inert: !!node.closest('[inert]'), paintedCover: frame.contains(document.elementFromPoint(b.x + b.width / 2, b.y + b.height / 2)) };
+        });
+        assert.deepEqual(covered, { connected: true, inert: true, paintedCover: true }, `${entry.id}: native control must be genuinely covered: ${selector}`); coveredControls.push({ selector, ...covered });
+      }
+      await fill(`${proofSurface} input`, `Local ${entry.id} Surface draft`);
+      await page.locator(`${proofSurface} [data-surface-proof="count"] button`).click();
+      await page.locator('aside [aria-label="Close sidebar"]').click();
+      await page.waitForFunction(() => document.querySelector('aside').getBoundingClientRect().width < 1);
+      await settleSurface();
+      const reopen = 'header [aria-label="Open sidebar"]'; await page.waitForSelector(reopen, { visible: true });
+      await assertPointerTarget(reopen);
+      const chrome = await page.$eval(reopen, node => {
+        const header = node.closest('header').getBoundingClientRect(), frame = document.querySelector('[data-surface-proof="surface"]').closest('[data-plugin-session-surface-frame]').getBoundingClientRect();
+        return { headerBottom: header.bottom, frameTop: frame.y, sidebarToggleVisible: true };
+      });
+      if (!entry.floating) assert.ok(chrome.headerBottom <= chrome.frameTop + 1, 'Native/plugin top bar stays outside the body Surface');
+      await screenshot(`public-surface-${entry.id}`, { fullPage: false });
+      await page.locator(reopen).click(); await page.waitForFunction(() => document.querySelector('aside').getBoundingClientRect().width > 250); await settleSurface();
+      assert.equal(await currentSurface.evaluate(node => node.isConnected && node === document.querySelector('[data-surface-proof="surface"]')), true, 'Sidebar remains usable without replacing content');
+      await closeProof();
+      assert.equal(await underlyingDraft.evaluate((node, value) => node.isConnected && node.textContent === value && !node.closest('[inert]'), `Retained ${entry.id} body draft`), true);
+      await fill(composer, priorDraft);
+      if (entry.draftPicker) { await page.locator('[data-testid="practice-props-chip"]').click(); await exerciseDraftPicker('no-plugin-surface'); assert.equal(await page.$(proofSurface), null); }
+      await openProof('pending'); await page.waitForSelector(proofSurface, { visible: true });
+      const expiredCount = await page.$(`${proofSurface} [data-surface-proof="count"] button`);
+      if (entry.id === 'native-teach') { await page.locator('aside [aria-label="Home"]').click(); await page.waitForFunction(() => location.pathname === '/'); }
+      else await openFixtureSession();
+      await page.waitForSelector(proofSurface, { hidden: true });
+      assert.equal(await expiredCount.evaluate(node => node.isConnected), false); await expiredCount.evaluate(node => node.click());
+      await openProof('evidence'); await page.waitForSelector(proofState, { visible: true });
+      const expiredState = await readProof(), pending = expiredState.records.at(-1);
+      assert.equal(pending.pending, true); assert.equal(pending.aborts, 1); assert.equal(pending.cleanups, 0); assert.equal(pending.signalAborted, true); assert.equal(pending.connected, false); assert.equal(pending.clicks, 0);
+      await openProof('complete');
+      await page.waitForFunction(selector => { const value = JSON.parse(document.querySelector(selector).textContent).records.at(-1); return value.cleanups === 1 && value.pending === false; }, {}, proofState);
+      await expiredCount.evaluate(node => node.click()); await settlePaint();
+      const finalState = await readProof(); assert.equal(finalState.records.length, 2);
+      assert.equal(finalState.records[0].clicks, 1); assert.equal(finalState.records[0].closes, 1);
+      assert.ok(finalState.records.every(record => record.aborts === 1 && record.cleanups === 1 && record.signalAborted && !record.connected));
+      assert.equal(finalState.records.at(-1).clicks, 0); assert.equal(await page.$$eval('[data-plugin-session-surface]', nodes => nodes.length), 0, 'Late cleanup and expired update never migrate into the new page');
+      evidence.publicSurfaceMatrix.push({ id: entry.id, route: entry.route, geometry, chrome, coveredControls, heldGraphResponses, expiredState, finalState });
+      for (const handle of [underlyingDraft, bodyRegion, currentSurface, expiredCount]) await handle.dispose();
+    }
+  } finally { await api('/api/settings/graph', 'PUT', matrixSettingsBefore.settings.graph); }
+  assert.deepEqual((await api('/api/settings')).payload, matrixSettingsBefore, 'Whole original settings record is restored exactly, not merely effective rendering');
+  evidence.assertions.push('Public direct Surface works on Home graph/minimal, teaching/practice Drafts, settled Native Teach/Practice and plugin route. Exact body bounds, covered retained native controls/composer, real sidebar/floating or native top-bar toggle clicks, fresh entry and navigation aborts pass. Late cleanup promises resolve once; detached host-button callbacks and expired handle updates stay inert. Native Draft picker search/disclosure/X use trusted physical clicks and hit tests with pointer-events:auto both alone and as a genuinely later async view above a Surface.');
+
+  evidence.stage = 'public Surface modal ordering';
+  evidence.publicSurfaceModalOrdering = [];
+  for (const origin of ['dialog', 'settings']) {
+    await openProof(origin);
+    const modal = origin === 'dialog' ? '[role="dialog"][aria-label="Surface proof dialog"]' : '[data-testid="settings-dialog"]';
+    await page.waitForSelector(modal, { visible: true });
+    if (origin === 'settings') await page.locator('[data-testid="settings-nav-plugin:surface-proof"]').click();
+    const trigger = `[data-surface-proof="${origin}-open"] button`;
+    await page.waitForSelector(trigger, { visible: true }); await assertPointerTarget(trigger); await page.locator(trigger).click();
+    await page.waitForSelector(proofSurface, { visible: true }); await settleSurface();
+    const modalSurface = await page.$(proofSurface);
+    assert.equal(await paintedTop(modal), true, 'An older modal stays foremost even when direct Surface opens later');
+    assert.equal(await page.$eval(proofSurface, node => !!node.closest('[aria-hidden="true"]')), true, 'Global HostDialog hides other roots with aria-hidden');
+    assert.equal(await page.$eval(modal, node => node.contains(document.activeElement) && !node.closest('[inert],[aria-hidden="true"]')), true, 'Late Surface cannot steal modal focus');
+    const modalCover = await page.$eval(proofSurface, (root, selector) => {
+      const boundary = document.querySelector(selector).closest('[role="dialog"]'), frame = root.closest('[data-plugin-session-surface-frame]');
+      return [...root.querySelectorAll('input,[data-surface-proof="count"] button')].map(node => {
+        const b = node.getBoundingClientRect(), hit = document.elementFromPoint(b.x + b.width / 2, b.y + b.height / 2);
+        return { control: node.tagName, modalOrBackdropHit: !!hit && boundary.contains(hit), surfaceHit: !!hit && frame.contains(hit) };
+      });
+    }, modal);
+    assert.deepEqual(modalCover, [{ control: 'INPUT', modalOrBackdropHit: true, surfaceHit: false }, { control: 'BUTTON', modalOrBackdropHit: true, surfaceHit: false }]);
+    // captureKeyDown deliberately prevents native Tab for every page/modal;
+    // test trusted host routing and containment, not native Tab traversal.
+    await page.$eval(modal, node => {
+      window.__showcaseSurfaceModalTabs = [];
+      node.addEventListener('keydown', event => { if (event.key === 'Tab') queueMicrotask(() => window.__showcaseSurfaceModalTabs.push({ shift: event.shiftKey, defaultPrevented: event.defaultPrevented })); });
+    });
+    const modalKeys = [];
+    for (const shift of [false, true]) {
+      if (shift) await page.keyboard.down('Shift');
+      try { await page.keyboard.press('Tab'); } finally { if (shift) await page.keyboard.up('Shift'); }
+      await settlePaint();
+      const sample = await page.$eval(modal, node => ({ modalFocused: node.contains(document.activeElement), surfaceFocused: !!document.activeElement?.closest('[data-surface-proof="surface"]') }));
+      assert.deepEqual(sample, { modalFocused: true, surfaceFocused: false }); modalKeys.push({ shift, ...sample });
+    }
+    const modalTabEvents = await page.evaluate(() => window.__showcaseSurfaceModalTabs);
+    assert.deepEqual(modalTabEvents, [{ shift: false, defaultPrevented: true }, { shift: true, defaultPrevented: true }]);
+    await screenshot(`public-surface-behind-${origin}`, { fullPage: false });
+    await page.locator(origin === 'dialog' ? `${modal} button[aria-label="Close dialog"]` : '[data-testid="settings-close"]').click();
+    await page.waitForSelector(modal, { hidden: true });
+    assert.equal(await modalSurface.evaluate(node => node.isConnected && node === document.querySelector('[data-surface-proof="surface"]') && !node.closest('[inert]')), true, 'Closing modal mount must not abort a page/plugin-owned Surface');
+    await fill(`${proofSurface} input`, `Survived ${origin} mount teardown`);
+    await page.locator(`${proofSurface} [data-surface-proof="count"] button`).click(); await closeProof();
+    await page.waitForFunction(selector => { const record = JSON.parse(document.querySelector(selector).textContent).records.at(-1); return record.cleanups === 1 && record.closes === 1; }, {}, proofState);
+    const record = (await readProof()).records.at(-1); assert.equal(record.clicks, 1); assert.equal(record.aborts, 1); assert.equal(record.cleanups, 1); assert.equal(record.closes, 1);
+    evidence.publicSurfaceModalOrdering.push({ origin, record, modalCover, modalKeys, modalTabEvents, trustedVisibleControl: true, lateSurfaceBehindModal: true, survivesModalClose: true }); await modalSurface.dispose();
+  }
+  evidence.assertions.push('Actual visible public registerSettings/mountButton control and ordinary-dialog control open page-owned Surfaces using ctx.signal. Existing modal/Settings remain painted and focused above later Surfaces; closing either mount leaves the identical Surface alive and interactive. No browser-dispatch control hook or new product API.');
+  await openGallery(); await waitState('composer', { draft: '', sends: 0 });
 
   evidence.stage = "disable cleanup";
   await click("dialog-nested"); await page.waitForSelector(parentDialog, { visible: true });

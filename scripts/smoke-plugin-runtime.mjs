@@ -26,7 +26,8 @@ export const PLUGIN_SESSION_FIXTURE = Object.freeze({
 });
 
 export function createPluginSmokeFixture(home) {
-	const directory = path.join(home, "data", "plugins", "native-smoke");
+	const pluginRoot = path.join(home, "data", "plugins", "native-smoke");
+	const directory = path.join(pluginRoot, "dist");
 	fs.mkdirSync(path.join(directory, "assets"), { recursive: true });
 	fs.writeFileSync(path.join(directory, "manifest.json"), JSON.stringify({
 		apiVersion: 1, id: "native-smoke", name: "Runtime proof", version: "1.0.0", minAppVersion: "0.3.7", main: "main.js", backend: "backend.cjs",
@@ -535,7 +536,7 @@ export function activate(ctx) {
 	// Separate frontend-only custom Settings page: preserve native-smoke's
 	// existing schema registration/update-handle proof, without host injection.
 	const settingsFixture = PLUGIN_PICKER_SETTINGS_FIXTURE;
-	const settingsDirectory = path.join(home, "data", "plugins", settingsFixture.id);
+	const settingsDirectory = path.join(home, "data", "plugins", settingsFixture.id, "dist");
 	fs.mkdirSync(path.join(settingsDirectory, "assets"), { recursive: true });
 	fs.writeFileSync(path.join(settingsDirectory, "manifest.json"), JSON.stringify({
 		apiVersion: 1, id: settingsFixture.id, name: settingsFixture.name,
@@ -549,8 +550,8 @@ export function activate(ctx) {
   ctx.registerSettings((container, signal) => mountPickerProof(ctx, container, signal, "settings", ++mounts));
 }
 `);
-	fs.mkdirSync(path.join(directory, "data"), { recursive: true });
-	fs.writeFileSync(path.join(directory, "data", "private.json"), '{"private":true}\n');
+	fs.mkdirSync(path.join(pluginRoot, "data"), { recursive: true });
+	fs.writeFileSync(path.join(pluginRoot, "data", "private.json"), '{"private":true}\n');
 	// Seed native history. Admission opens only held LOOPBACK protocol requests;
 	// the separate question proof later generates scripted offline native turns.
 	// No external provider calls, accounts, or personal learning data are used.
@@ -629,7 +630,7 @@ export function activate(ctx) {
 	fs.writeFileSync(path.join(graph, "nodes.jsonl"), nodes.map(node => JSON.stringify(node)).join("\n") + "\n", { flag: "wx" });
 	fs.writeFileSync(path.join(graph, "chains.jsonl"), JSON.stringify({ id: fixture.chainId, premises: [fixture.premiseId], conclusion: fixture.conclusionId, createdAt, provenance }) + "\n", { flag: "wx" });
 	fs.writeFileSync(path.join(graph, "sources.json"), JSON.stringify({ [fixture.sourceId]: { id: fixture.sourceId, filePath: fixture.sourceLabel + ".md", importedAt: createdAt } }) + "\n", { flag: "wx" });
-	return directory;
+	return pluginRoot;
 }
 
 export async function verifyPluginServer(url, home, headers = {}) {

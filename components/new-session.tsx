@@ -1,7 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
+import { SurfaceRegion, usePageSurfaceBoundary, useSurfaceChromeStyle } from "./plugin-surfaces";
 import { Conversation, ConversationContent, ConversationEmptyState } from "@/components/ai-elements/conversation";
 import { Composer } from "@/components/composer";
 import { DictationBar, joinDictation, useDictation } from "@/components/dictation";
@@ -111,6 +112,10 @@ export function DraftShell({
 	overlay?: ReactNode;
 }) {
 	const controller = useOptionalInteractionLayers();
+	const pathname = usePathname();
+	const bodyRef = useRef<HTMLDivElement>(null);
+	const surfaceTarget = usePageSurfaceBoundary({ active: pathname === "/chat/new", viewKey: "/chat/new", bodyRef });
+	const chromeStyle = useSurfaceChromeStyle(surfaceTarget);
 	// Voice dictation (STT wave, 2026-09-17): finals append at the end of the
 	// draft text (via the parent's onChange — the truth lives there); the
 	// strip lives in the stats bar's middle slot.
@@ -165,7 +170,7 @@ export function DraftShell({
 			    carved control later in the tree subtracts correctly). */}
 			<div className="lh-drag absolute inset-x-0 top-0 h-13" aria-hidden="true" />
 			<div className="flex min-w-0 flex-1 flex-col">
-				<div className="relative flex min-h-0 flex-1">
+				<div ref={bodyRef} className="relative flex min-h-0 flex-1">
 					{/* The pointer-events pattern (953b22b): the sticky wrapper is
 					    pointer-events-none so nothing here blocks the empty-state
 					    area; the blob and the stats row re-enable it themselves. */}
@@ -217,13 +222,15 @@ export function DraftShell({
 							</div>
 						</div>
 					</div>
-					{overlay}
+					<SurfaceRegion target={surfaceTarget}>
+						<div className="contents pointer-events-auto">{overlay}</div>
+					</SurfaceRegion>
 				</div>
 			</div>
 			{/* The floating reopen toggle — pointer-events-none except the
 			    toggle itself (home's pattern), painted AFTER the overlay's
 			    column so nothing of it blocks the canvas area. */}
-			<header className="pointer-events-none absolute inset-x-0 top-0 flex items-center gap-2 px-3 py-2">
+			<header style={chromeStyle} className="pointer-events-none absolute inset-x-0 top-0 flex items-center gap-2 px-3 py-2">
 				<div className="pointer-events-auto">
 					<SidebarToggle />
 				</div>

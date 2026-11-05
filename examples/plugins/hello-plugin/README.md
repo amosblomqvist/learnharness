@@ -1,7 +1,11 @@
 # Hello plugin
 
 Copy this directory into the plugins directory shown in **Settings → Plugins**,
-refresh, and enable **Hello plugin**. Nothing is installed or enabled automatically.
+keeping the `hello-plugin/` folder and its required `dist/manifest.json`. No build is
+needed. Refresh and enable **Hello plugin**. Edit runtime files in `dist/` and restart
+LearnHarness after changing loaded code. Persistent data, if added, belongs in sibling
+`hello-plugin/data/`, never `dist/data/`; preserve it when replacing `dist/`.
+Nothing is installed or enabled automatically.
 
 This minimal frontend-only example registers a `hello` view and a separate `open`
 action. Explicit placements expose the action in the sidebar, graph, and teaching /

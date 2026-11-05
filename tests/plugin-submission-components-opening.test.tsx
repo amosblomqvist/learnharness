@@ -4,8 +4,8 @@ import { test } from "node:test";
 import { createRoot } from "react-dom/client";
 import { parseHTML } from "linkedom";
 import { InteractionLayersProvider } from "../components/interaction-layers.tsx";
-import { useSessionSurfaceBoundary, SessionSurfaceRegion } from "../components/plugin-session-surfaces.tsx";
-import { findSessionSurfaceBoundary } from "../components/plugin-session-surface-targets.ts";
+import { usePageSurfaceBoundary, SurfaceRegion } from "../components/plugin-surfaces.tsx";
+import { findSurfaceBoundary } from "../components/plugin-surface-targets.ts";
 import { scheduleOpeningSubmission } from "../components/plugin-submission-opening.ts";
 import { PluginSubmissionRunner } from "../components/plugin-submission-runner.ts";
 import { SessionModel } from "../components/session-core.ts";
@@ -22,16 +22,16 @@ async function fixture(run: (f: { state: { active: boolean; key: string; hooks: 
 	const entered = deferred<void>(), finish = deferred<void>(); let activeRunner!: PluginSubmissionRunner;
 	function Boundary() {
 		const body = useRef<HTMLDivElement>(null), claimed = useRef(false);
-		const target = useSessionSurfaceBoundary({ active: state.active, viewKey: state.key, bodyRef: body });
+		const target = usePageSurfaceBoundary({ active: state.active, viewKey: state.key, bodyRef: body });
 		const live = useRef(target); live.current = target;
 		const [runner] = useState(() => new PluginSubmissionRunner()); activeRunner = runner;
 		useEffect(() => () => runner.dispose(), [target, runner]);
 		useEffect(() => {
 			if (!target || claimed.current) return;
-			return scheduleOpeningSubmission(() => !claimed.current && live.current === target && !!findSessionSurfaceBoundary(target), () => {
+			return scheduleOpeningSubmission(() => !claimed.current && live.current === target && !!findSurfaceBoundary(target), () => {
 				claimed.current = true;
 				const submissionTarget: PluginSubmissionTarget = { type: "text", channels: ["content"], sessionId: state.key, sessionKind: "teaching", surfaceTarget: target };
-				const attempt = runner.begin(submissionTarget, [{ pluginId: "fixture", pluginName: "Fixture", signal: new AbortController().signal, isCurrent: () => true, report() {}, interceptor: { id: "opening", async intercept() { state.hooks++; entered.resolve(); if (waitInHook) await finish.promise; } } }], () => live.current === target && !!findSessionSurfaceBoundary(target))!;
+				const attempt = runner.begin(submissionTarget, [{ pluginId: "fixture", pluginName: "Fixture", signal: new AbortController().signal, isCurrent: () => true, report() {}, interceptor: { id: "opening", async intercept() { state.hooks++; entered.resolve(); if (waitInHook) await finish.promise; } } }], () => live.current === target && !!findSurfaceBoundary(target))!;
 				void (async () => {
 					try {
 						const input = await attempt.finalize(async () => { state.finalizes++; return { type: "text", content: { text: state.draft, images: [] } } as PluginSubmission; });
@@ -43,7 +43,7 @@ async function fixture(run: (f: { state: { active: boolean; key: string; hooks: 
 				})();
 			});
 		}, [target, runner]);
-		return <div ref={body}><div>Native body</div><SessionSurfaceRegion target={target} /></div>;
+		return <div ref={body}><div>Native body</div><SurfaceRegion target={target} /></div>;
 	}
 	const render = async () => { await act(async () => { root.render(<React.StrictMode><InteractionLayersProvider><Boundary /></InteractionLayersProvider></React.StrictMode>); }); };
 	try { await render(); await run({ state, render, runner: () => activeRunner, entered: entered.promise, finish: () => finish.resolve() }); }

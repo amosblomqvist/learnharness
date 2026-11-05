@@ -37,7 +37,7 @@ function fixture(t: TestContext) {
 	const host = createPluginHost(deps);
 	t.after(() => host.dispose());
 	function plugin(id = "example", extra: Record<string, unknown> = {}, backend = "exports.activate = ctx => { ctx.handle('context', () => ctx); };") {
-		const dir = path.join(directory, id); fs.mkdirSync(dir, { recursive: true });
+		const dir = path.join(directory, id, "dist"); fs.mkdirSync(dir, { recursive: true });
 		fs.writeFileSync(path.join(dir, "manifest.json"), JSON.stringify({ apiVersion: 1, id, name: id, version: "1.0.0", minAppVersion: "0.3.0", backend: "backend.cjs", ...extra }));
 		fs.writeFileSync(path.join(dir, "backend.cjs"), backend);
 		return dir;
@@ -90,7 +90,7 @@ test("native backend path/require, fresh activations, reverse cleanup, stale cal
 		};`);
 	fs.writeFileSync(path.join(dir, "helper.cjs"), "module.exports = 42");
 	await f.host.initialize(); await f.host.setEnabled("example", true);
-	assert.deepEqual(await f.host.call("example", "native"), [fs.realpathSync(path.join(dir, "backend.cjs")), "example", 42]);
+	assert.deepEqual(await f.host.call("example", "native"), [fs.realpathSync(path.join(dir, "backend.cjs")), "dist", 42]);
 	const old = await f.host.call("example", "context") as PluginBackendContext;
 	assert.throws(() => old.handle("bad/name", () => 0), /Invalid/);
 	const off = old.handle("repeat", () => 1); off();
@@ -283,6 +283,93 @@ test("dispose/disable abort cooperative pending activation and disposed host rej
 	await assert.rejects(f.host.call("example", "context"), status(503));
 	await assert.rejects(f.host.setEnabled("example", true), status(503));
 	assert.throws(() => f.host.list(), status(503));
+});
+
+test("fixed dist loads only built code and keeps data and source outside the package", async t => {
+	const f = fixture(t), code = f.plugin(), root = path.dirname(code);
+	fs.mkdirSync(path.join(root, "src"));
+	fs.writeFileSync(path.join(root, "src", "private.js"), "source, not a public asset");
+	fs.writeFileSync(path.join(root, "package.json"), '{"scripts":{"build":"example"}}');
+	fs.writeFileSync(path.join(root, "manifest.json"), "unbuilt source metadata is not loaded");
+	fs.writeFileSync(path.join(root, "backend.cjs"), "throw Error('root code must not run')");
+	fs.mkdirSync(path.join(root, "data"));
+	fs.writeFileSync(path.join(root, "data", "records.json"), '{"progress":42}');
+	fs.mkdirSync(path.join(code, "data"));
+	fs.writeFileSync(path.join(code, "data", "records.json"), "wrong location");
+	let servicePaths: { directory: string; dataDirectory: string } | undefined;
+	const original = f.deps.createServices;
+	f.deps.createServices = info => { servicePaths = info; return original(info); };
+	await f.host.initialize(); await f.host.setEnabled("example", true);
+	const ctx = await f.host.call("example", "context") as PluginBackendContext;
+	assert.equal(ctx.directory, code);
+	assert.equal(ctx.dataDirectory, path.join(root, "data"));
+	assert.equal(servicePaths?.directory, code);
+	assert.equal(servicePaths?.dataDirectory, ctx.dataDirectory);
+	assert.equal(fs.readFileSync(path.join(ctx.dataDirectory, "records.json"), "utf8"), '{"progress":42}');
+	const revision = f.host.list()[0]!.revision;
+	fs.writeFileSync(path.join(root, "src", "private.js"), "edited source");
+	fs.writeFileSync(path.join(root, "package.json"), '{"scripts":{"build":"changed"}}');
+	fs.writeFileSync(path.join(root, "data", "records.json"), '{"progress":43}');
+	await f.host.refresh();
+	assert.equal(f.host.list()[0]!.revision, revision, "only dist contributes to the code revision");
+	assert.equal(f.host.list()[0]!.error, undefined);
+	for (const segments of [["src", "private.js"], ["package.json"], ["data", "records.json"], ["..", "data", "records.json"]]) {
+		assert.throws(() => f.host.asset("example", segments));
+	}
+	fs.rmSync(code, { recursive: true });
+	assert.equal(fs.readFileSync(path.join(ctx.dataDirectory, "records.json"), "utf8"), '{"progress":43}', "cleaning dist preserves user progress");
+	assert.equal(fs.readFileSync(path.join(root, "src", "private.js"), "utf8"), "edited source");
+});
+
+test("root-only packages are not executed and missing builds explain the fixed dist requirement", async t => {
+	const f = fixture(t), code = f.plugin(), root = path.dirname(code);
+	for (const name of fs.readdirSync(code)) fs.renameSync(path.join(code, name), path.join(root, name));
+	fs.rmdirSync(code);
+	await f.host.initialize();
+	assert.equal(f.host.list()[0]!.status, "error");
+	assert.match(f.host.list()[0]!.error!, /dist\/manifest\.json/);
+	await f.host.setEnabled("example", true);
+	assert.equal(f.host.list()[0]!.status, "error");
+	assert.equal(f.servicesCreated(), 0, "no fallback to root-level code");
+	assert.equal(fs.existsSync(path.join(root, "data")), false);
+});
+
+test("an unbuilt project is discovered on its first build without a restart or registration", async t => {
+	const f = fixture(t), root = path.join(f.directory, "example");
+	fs.mkdirSync(path.join(root, "src"), { recursive: true });
+	await f.host.initialize();
+	assert.match(f.host.list()[0]!.error!, /dist\/manifest\.json/);
+	await f.host.refresh();
+	assert.doesNotMatch(f.host.list()[0]!.error!, /Restart required/, "no code was ever loaded");
+	f.plugin();
+	await f.host.refresh();
+	assert.equal(f.host.list()[0]!.status, "disabled");
+	assert.equal(f.host.list()[0]!.error, undefined);
+	await f.host.setEnabled("example", true);
+	assert.ok(await f.host.call("example", "context"));
+	assert.equal(fs.existsSync(path.join(root, "data")), true);
+	assert.equal(fs.existsSync(path.join(root, "dist", "data")), false);
+});
+
+test("symlinked plugin roots and build directories cannot be activated", async t => {
+	for (const target of ["root", "dist"]) {
+		const f = fixture(t), code = f.plugin(), root = path.dirname(code);
+		const from = target === "root" ? root : code, outside = path.join(f.root, "outside");
+		fs.renameSync(from, outside); fs.symlinkSync(outside, from);
+		await f.host.initialize(); await f.host.setEnabled("example", true);
+		assert.equal(f.host.list()[0]!.status, "error", target);
+		assert.match(f.host.list()[0]!.error!, /Unsafe/, target);
+		assert.equal(f.servicesCreated(), 0, target);
+		assert.equal(fs.existsSync(path.join(outside, "data")), false, target);
+	}
+});
+
+test("asset access rejects a plugin-root symlink introduced after discovery", async t => {
+	const f = fixture(t), code = f.plugin("example", { backend: undefined, main: "main.js" }), root = path.dirname(code);
+	fs.writeFileSync(path.join(code, "main.js"), "export const safe = true");
+	await f.host.initialize(); await f.host.setEnabled("example", true);
+	const outside = path.join(f.root, "outside"); fs.renameSync(root, outside); fs.symlinkSync(outside, root);
+	assert.throws(() => f.host.asset("example", ["main.js"]), status(404));
 });
 
 test("expected transport errors are typed; arbitrary handler failures remain server exceptions", async t => {

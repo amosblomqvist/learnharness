@@ -21,7 +21,9 @@ test("single gallery, twelve families cover fourteen public APIs without backend
     for (const family of families) { f.find(`reset-${family}`, "mountButton"); assert.ok(f.root.querySelector(`[data-state="${family}"]`)); }
     for (const method of ["mountModelPicker", "mountThinkingPicker", "mountKnowledgePicker", "mountComposer", "mountDictation", "mountStandardComposer", "mountButton", "mountSettingsRows", "mountMarkdown", "mountTree", "mountWorkerResult"]) assert.ok(f.records.some(entry => entry.method === method), method);
     assert.deepEqual(f.calls, []);
-    assert.equal(f.records.filter(entry => entry.method === "openSurface").length, 0, "Plugin gallery cannot fabricate a native target");
+    assert.equal(f.records.filter(entry => entry.method === "openSurface").length, 0, "Gallery surfaces open only after an explicit click");
+    assert.equal(f.find("open-surface").props.label, "Open surface");
+    assert.deepEqual(f.state("surfaces"), { target: "current page", opens: 0, closed: 0, lastCallback: "none" });
     f.dispose(); f.dispose();
     assert.equal(f.root.childElementCount, 0);
     assert.ok(f.records.every(entry => entry.disposed === 1));
@@ -173,7 +175,7 @@ test("Markdown uses builtin content and worker examples cover exact four-by-thre
   } finally { f.restore(); }
 });
 
-test("menu/dialog calls retain lifetime ownership; only a supplied target can open a surface", async () => {
+test("menu/dialog calls retain lifetime ownership; explicit native surfaces preserve the supplied opaque target", async () => {
   const f = mounted();
   try {
     await f.find("menu-up").props.onClick();
@@ -197,6 +199,68 @@ test("menu/dialog calls retain lifetime ownership; only a supplied target can op
     f.controller.abort();
     assert.ok(f.records.every(entry => entry.disposed === 1));
     assert.equal(f.root.childElementCount, 0);
+  } finally { f.restore(); }
+});
+
+test("gallery opens direct page surfaces with shared nested content and local close counts", async () => {
+  const f = mounted();
+  try {
+    const open = f.find("open-surface");
+    await open.props.onClick();
+    const parent = f.records.findLast(entry => entry.method === "openSurface")!;
+    assert.equal(Object.hasOwn(parent, "target"), false, "Direct opening must not supply or manufacture a target");
+    assert.ok(parent.container.querySelector('[data-showcase="surface"]'));
+    assert.deepEqual(f.state("surfaces"), { target: "current page", opens: 1, closed: 0, lastCallback: "openSurface (current page body)" });
+    const retained = f.find("surface-parent-retained-field");
+    await retained.props.rows[0].onChange("Kept under a child");
+    await f.find("surface-nested").props.onClick();
+    const child = f.records.findLast(entry => entry.method === "openSurface")!;
+    assert.notEqual(child, parent);
+    assert.equal(Object.hasOwn(child, "target"), false, "Nested direct opening uses the same two-argument public API");
+    assert.ok(child.container.querySelector('[data-showcase="surface-nested"]'));
+    assert.equal(retained.props.rows[0].value, "Kept under a child");
+    assert.equal(retained.disposed, 0);
+    await f.find("menu-up").props.onClick();
+    assert.equal(f.records.findLast(entry => entry.method === "openMenu")!.props.preferredSide, "up");
+    await f.find("dialog-ordinary").props.onClick();
+    assert.ok(f.records.findLast(entry => entry.method === "openDialog")!.container.querySelector('[data-showcase="dialog-ordinary"]'));
+    child.props.onClose(); child.handle.dispose();
+    const parentState = JSON.parse(parent.container.querySelector('[data-state="surfaces"]')!.textContent!);
+    assert.equal(parentState.nestedOpened, 1); assert.equal(parentState.nestedClosed, 1);
+    parent.props.onClose(); parent.handle.dispose();
+    assert.deepEqual(f.state("surfaces"), { target: "current page", opens: 1, closed: 1, lastCallback: "surface.onClose" });
+    await open.props.onClick();
+    assert.equal(f.state("surfaces").opens, 2);
+    assert.equal(f.state("surfaces").closed, 1);
+    assert.equal(f.find("surface-parent-retained-field").props.rows[0].value, "Retained local text");
+    assert.deepEqual(f.calls, []);
+  } finally { f.restore(); }
+});
+
+test("surface family Reset disposes its direct overlays and stale controls/callbacks cannot reopen or change fresh state", async () => {
+  const f = mounted();
+  try {
+    const reset = f.find("reset-surfaces"), open = f.find("open-surface");
+    await open.props.onClick();
+    const parent = f.records.findLast(entry => entry.method === "openSurface")!;
+    const nested = f.find("surface-nested");
+    await nested.props.onClick();
+    const child = f.records.findLast(entry => entry.method === "openSurface")!;
+    await reset.props.onClick();
+    assert.ok(parent.signal.aborted && child.signal.aborted);
+    assert.equal(parent.disposed, 1); assert.equal(child.disposed, 1);
+    const count = f.records.length, initial = f.state("surfaces");
+    await open.props.onClick(); await nested.props.onClick();
+    parent.props.onClose(); child.props.onClose();
+    assert.equal(f.records.length, count);
+    assert.deepEqual(f.state("surfaces"), initial);
+    assert.deepEqual(initial, { target: "current page", opens: 0, closed: 0, lastCallback: "none" });
+    const fresh = f.find("open-surface");
+    assert.notEqual(fresh, open);
+    f.controller.abort();
+    await fresh.props.onClick();
+    assert.equal(f.records.length, count, "Aborted gallery lifetime rejects stale open callbacks");
+    assert.ok(f.records.every(record => record.disposed === 1));
   } finally { f.restore(); }
 });
 

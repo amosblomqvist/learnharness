@@ -3,8 +3,12 @@
 A deliberately small developer fixture for existing lessons—not an independent
 flashcard feature or a code-execution/learner-answer system.
 
-Copy this directory into the plugins directory shown in **Settings → Plugins**, refresh,
-and enable **Teaching extension example**. It is never installed/enabled automatically.
+Copy this directory into the plugins directory shown in **Settings → Plugins**,
+keeping the `teaching-extension/` folder and its required `dist/manifest.json`. No build
+is needed. Refresh and enable **Teaching extension example**. Edit runtime files in
+`dist/` and restart LearnHarness after changing loaded code. Preserve sibling
+`teaching-extension/data/` when replacing `dist/`; never distribute that persistent data
+or place it in `dist/data/`. It is never installed/enabled automatically.
 
 In a teacher or practice session:
 
@@ -33,7 +37,7 @@ as schema settings; opening this content does not start a worker.
 
 Files use only the supported public context, no private app imports or runtime npm install.
 The backend has no independent product storage or core learning-data writes. The host
-owns task records and usage accounting in the installed package's `data/` directory.
+owns task records and usage accounting in the installed workspace's sibling `data/` directory.
 
 Off-network integration coverage: `tests/plugin-teaching-integration.test.ts` loads this
 actual external CommonJS backend, constructs the real native teacher, runs a scripted

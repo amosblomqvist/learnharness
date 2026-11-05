@@ -1,7 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
+import { SurfaceRegion, usePageSurfaceBoundary, useSurfaceChromeStyle } from "./plugin-surfaces";
 import { CornerDownLeftIcon, DumbbellIcon } from "lucide-react";
 import { GraphView } from "@/components/graph-view";
 import { MinimalHome } from "@/components/minimal-home";
@@ -37,6 +38,10 @@ export function Home({
 }) {
 	const controller = useOptionalInteractionLayers();
 	const router = useRouter();
+	const pathname = usePathname();
+	const bodyRef = useRef<HTMLDivElement>(null);
+	const surfaceTarget = usePageSurfaceBoundary({ active: pathname === "/", viewKey: "/", bodyRef });
+	const chromeStyle = useSurfaceChromeStyle(surfaceTarget);
 	const [topic, setTopic] = useState("");
 	/* The topic MIRROR ("nothing gets lost" round, 2026-10-01 — same
 	 * mechanics as the chat composer, owner's consistency ruling): a
@@ -179,6 +184,7 @@ export function Home({
 			    MINIMAL HOME — a quiet knowledge-base summary + the graph
 			    chrome's survivors; data, extraction, and the pick flow are
 			    untouched, and the chain table stays behind its button. */}
+			<div ref={bodyRef} className="absolute inset-0">
 			<main className="absolute inset-0">
 				{rendering ? (
 					<GraphView
@@ -197,16 +203,6 @@ export function Home({
 				)}
 			</main>
 
-			{/* Header floats over the graph — pointer-events-none except the
-			    toggle, so the canvas stays draggable/hoverable around it. Carries
-			    no app-region of its own: the strip's drag comes from the mask
-			    div above, and the toggle's lh-no-drag subtracts from it (it is
-			    later in the tree, so the subtraction sticks). */}
-			<header className="pointer-events-none absolute inset-x-0 top-0 flex items-center gap-2 px-3 py-2">
-				<div className="pointer-events-auto">
-					<SidebarToggle />
-				</div>
-			</header>
 
 			{/* New session — same floating blob as the chat composer, docked
 			    OVER the graph (no gradient: the graph runs clean under it to the
@@ -323,6 +319,17 @@ export function Home({
 					/>
 				</div>
 			</div>
+
+			<SurfaceRegion target={surfaceTarget} />
+			</div>
+			{/* Floating host chrome stays outside page-content coverage, after
+			    the region at the same owned-surface rank. The drag mask remains
+			    first so later controls retain their Electron no-drag carve-outs. */}
+			<header style={chromeStyle} className="pointer-events-none absolute inset-x-0 top-0 flex items-center gap-2 px-3 py-2">
+				<div className="pointer-events-auto">
+					<SidebarToggle />
+				</div>
+			</header>
 
 			{/* First-run setup (unconfigured): the CTA's target and the send
 			    interception's landing surface — stage 1 is the self-contained

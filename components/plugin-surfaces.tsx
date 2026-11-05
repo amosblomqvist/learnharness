@@ -1,12 +1,12 @@
 "use client";
 
-import { useLayoutEffect, useState, type ReactNode, type RefObject } from "react";
+import { useLayoutEffect, useState, useSyncExternalStore, type CSSProperties, type ReactNode, type RefObject } from "react";
 import type { PluginSurfaceTarget } from "@/src/core";
 import { useInteractionLayers } from "./interaction-layers";
-import { findSessionSurfaceBoundary, registerSessionSurfaceBoundary } from "./plugin-session-surface-targets";
+import { findSurfaceBoundary, registerSurfaceBoundary } from "./plugin-surface-targets";
 
 /** A re-entered (even hide-retained) view always receives a fresh target. */
-export function useSessionSurfaceBoundary({ active, viewKey, bodyRef }: {
+export function usePageSurfaceBoundary({ active, viewKey, bodyRef }: {
 	active: boolean;
 	viewKey: string;
 	bodyRef: RefObject<HTMLElement | null>;
@@ -16,21 +16,35 @@ export function useSessionSurfaceBoundary({ active, viewKey, bodyRef }: {
 	useLayoutEffect(() => {
 		if (!active || !bodyRef.current) return;
 		const lifetime = new AbortController();
-		const boundary = registerSessionSurfaceBoundary(bodyRef.current, lifetime.signal, controller);
+		const boundary = registerSurfaceBoundary(bodyRef.current, lifetime.signal, controller);
 		setCurrent({ viewKey, target: boundary.target });
 		return () => lifetime.abort();
 	}, [active, viewKey, bodyRef, controller]);
-	return active && current?.viewKey === viewKey && findSessionSurfaceBoundary(current.target) ? current.target : undefined;
+	return active && current?.viewKey === viewKey && findSurfaceBoundary(current.target) ? current.target : undefined;
 }
 
-/** Geometry and coverage for session views, without a separate stacking context.
+/** Floating page chrome shares only its own plugin surfaces' integer rank.
+ * Callers render it after the body; newer pane pickers keep their higher rank. */
+export function useSurfaceChromeStyle(target: PluginSurfaceTarget | undefined): CSSProperties | undefined {
+	const controller = useInteractionLayers();
+	const layers = useSyncExternalStore(controller.subscribe, controller.getSnapshot, controller.getServerSnapshot);
+	const boundary = findSurfaceBoundary(target);
+	let order = 0;
+	for (const layer of layers) {
+		const root = layer.rootRef.current;
+		if (root?.hasAttribute("data-plugin-session-surface") && boundary?.stack?.contains(root)) order = Math.max(order, layer.order);
+	}
+	return order ? { zIndex: 100 + order } : undefined;
+}
+
+/** Geometry and coverage for page views, without a separate stacking context.
  * Frames share the host main pane's isolated paint stratum with pane pickers;
  * global body dialogs remain above it even when a view opens asynchronously. */
-export function SessionSurfaceRegion({ target, children }: { target: PluginSurfaceTarget | undefined; children?: ReactNode }) {
+export function SurfaceRegion({ target, children }: { target: PluginSurfaceTarget | undefined; children?: ReactNode }) {
 	const controller = useInteractionLayers();
 	const [stack, setStack] = useState<HTMLDivElement | null>(null);
 	useLayoutEffect(() => {
-		const boundary = findSessionSurfaceBoundary(target);
+		const boundary = findSurfaceBoundary(target);
 		if (!boundary || !stack) return;
 		boundary.stack = stack;
 		const retained = new Map<HTMLElement, { inert: string | null; hidden: string | null }>();

@@ -12,7 +12,7 @@ export function PluginsSection({ onOpenSettings }: { onOpenSettings?: (pluginId:
 	const { manager, snapshot } = usePlugins();
 	return <SettingsSection title="Plugins" testid="section-plugins">
 		<p className="font-prose text-sm text-muted-foreground">{PLUGIN_TRUST_WARNING}</p>
-		<p className="text-xs text-muted-foreground">Plugins are disabled by default. Install a plugin by placing its package folder in the writable plugins directory, then refresh.</p>
+		<p className="text-xs text-muted-foreground">Plugins are disabled by default. Place a plugin’s built package in its dist/ folder inside the writable plugins directory, then refresh. Optional source files and persistent data/ live alongside dist/.</p>
 		{snapshot.directory && <div><p className="text-xs text-muted-foreground">Plugins directory</p><code className="mt-1 block break-all text-xs select-text">{snapshot.directory}</code></div>}
 		<div><Button variant="outline" size="sm" disabled={!manager || snapshot.refreshing || snapshot.plugins.some(plugin => plugin.busy)} onClick={() => void manager?.refresh()}>
 			{snapshot.refreshing ? "Refreshing…" : "Refresh plugins"}

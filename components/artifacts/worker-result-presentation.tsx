@@ -19,7 +19,7 @@ export function WorkerResultDetails({ heading, children, icon = <CheckIcon class
 	hideLabel?: string;
 }) {
 	const summary = (
-		<summary data-testid={headerTestId} className="flex cursor-pointer select-none list-none items-center gap-2 [&::-webkit-details-marker]:hidden">
+		<summary data-testid={headerTestId} className="relative flex cursor-pointer select-none list-none items-center gap-2 [&::-webkit-details-marker]:hidden">
 			{icon}
 			{heading}
 			{disclosure === "chevron" ? (

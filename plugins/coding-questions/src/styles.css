@@ -43,3 +43,10 @@
   background: color-mix(in srgb, var(--foreground, #e6e6e6) 20%, transparent);
 }
 .lh-coding-question .cm-matchingBracket { background: color-mix(in srgb, var(--foreground, #e6e6e6) 18%, transparent); }
+.lh-coding-question .cm-tooltip {
+  border: 1px solid var(--border, #434343);
+  background: var(--popover, var(--background, #141414));
+  color: var(--popover-foreground, var(--foreground, #e6e6e6));
+  font-family: var(--font-mono, monospace);
+  font-size: 0.75rem;
+}

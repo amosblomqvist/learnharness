@@ -4,7 +4,12 @@ import { fileURLToPath } from "node:url";
 import { build } from "esbuild";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
-const output = path.join(root, "dist", "ui-showcase");
+const output = path.join(root, "dist");
+try {
+  if (fs.lstatSync(output).isSymbolicLink()) throw new Error("Refusing to build into a linked directory.");
+  try { fs.lstatSync(path.join(output, "data")); throw new Error("Refusing to build over plugin data. Move it to a safe location first."); }
+  catch (error) { if (error.code !== "ENOENT") throw error; }
+} catch (error) { if (error.code !== "ENOENT") throw error; }
 fs.rmSync(output, { recursive: true, force: true });
 fs.mkdirSync(output, { recursive: true });
 const result = await build({

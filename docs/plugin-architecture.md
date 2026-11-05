@@ -36,18 +36,30 @@ push or release and does not include separately held question-fix work.
 
 ## Package contract
 
-A writable `<learning data>/plugins/<id>/` folder contains `manifest.json`, an optional
-browser-module `main.js`, an optional Node `backend.cjs`, optional `styles.css` and
-`assets/`, and persistent plugin-owned `data/`. See `src/core/plugins.ts` for the actual
-manifest fields and public API types. Entries may use another root filename with the
-same extension. IDs are lowercase hyphen-separated words and must match the folder.
-API version is `1`; package/app version fields initially use numeric `x.y.z` versions.
-Distribute built JavaScript, with dependencies bundled. Node built-ins are available
-in backends. No runtime npm installation or native-module rebuilding is provided.
+Each plugin has one writable workspace at `<learning data>/plugins/<id>/`. Its fixed,
+required **`dist/`** directory contains `manifest.json`, an optional browser-module
+`main.js`, an optional Node `backend.cjs`, optional `styles.css` and `assets/`.
+Persistent plugin-owned **`data/` is a sibling of `dist/`**, never part of the runtime
+package or public distribution. Optional source, `package.json` and build scripts may
+live in the same workspace; builds write directly to its `dist/`, not `dist/<id>/`.
+See `src/core/plugins.ts` for the actual manifest fields and public API types. Entries
+may use another filename at the root of `dist/` with the same extension. IDs are
+lowercase hyphen-separated words and must match the workspace folder. API version is
+`1`; package/app version fields initially use numeric `x.y.z` versions. Distribute built
+JavaScript, with dependencies bundled. Node built-ins are available in backends. No
+runtime npm installation or native-module rebuilding is provided.
+
+Installation and authoring use the same workspace and fixed `dist/manifest.json`
+lookup: no development/normal split, registration, profiles, hot reload, legacy-layout
+fallback or migration. A workspace without a valid built `dist/manifest.json` cannot
+run; a root-only manifest is not a substitute. Build cleanup targets `dist/` only, never
+the workspace or sibling `data/`, and refuses symlinked `dist/` or misplaced `dist/data/`
+entries before cleanup.
 
 Disabled plugins are discovered without evaluation. New plugins, official or external,
 are disabled until explicitly enabled. Code updates apply after a server restart;
-refresh discovers manually installed folders, not hot replacement of running code.
+refresh discovers manually installed folders and the first build of a previously
+unbuilt workspace, not hot replacement of code already admitted by the host.
 Do not start timers, processes, or other side effects at module top level: activation
 creates an instance and registers its cleanup; the module itself may remain cached.
 
@@ -613,23 +625,36 @@ labels; thinking styling never dims pixels. Host image channels remain outside p
 question/answered slots so custom renderers cannot accidentally hide them. Existing text
 PathText/Markdown and historical model-switch/provider transport policies remain intact.
 
-### Native-view-scoped body surfaces
+### Page-body surfaces — implemented and verified
 
-`ctx.ui.openSurface(target, { title, content, background?, onClose? }, { signal })` returns the normal
-`PluginWidgetHandle<PluginSurfaceProps>`. Session top-bar action context and submission
-context expose host-minted opaque `PluginSurfaceTarget`, not DOM/session-ID selectors.
-Tokens expire with one mounted native teaching/practice view; return to the same ID never
-revives them. Unknown/expired live targets throw synchronously:
-`Surface target is no longer active`. Already-aborted signals yield inert handles; commit
-rechecks expiry, and late async cleanup/content replacement cleans up exactly once.
+The [generalized-surface checkpoint](plugin-session-extension-contract.md#12-generalized-page-body-surfaces--implemented-and-verified)
+is **implemented and verified, uncommitted above `8dd7409` on `feature/plugin-architecture`**.
+`ctx.ui.openSurface(surface, { signal })` captures the active page boundary **once at
+invocation**, supporting plugin views, native chat, Home and New Draft. The existing
+`openSurface(target, surface, { signal })` remains compatible for precise native
+submission/action targeting. Both return `PluginWidgetHandle<PluginSurfaceProps>`.
+Session action/submission context still exposes opaque `PluginSurfaceTarget` only for
+one mounted teaching/practice view; no native capture/hooks/tokens are extended beyond
+native chat. No DOM/session-ID selector, persisted token or async retargeting is added.
 
-The boundary covers the whole session body/inputs, **not top bar/sidebar**. Native and
-covered plugin bodies remain mounted/painted; only eligible foreground body content
-receives interaction. Ordinary stack entries are visual siblings, not lifetime owners;
+No live page boundary, or an unknown/expired explicit target, synchronously throws
+`Surface target is no longer active`. Already-aborted signals yield inert handles before
+boundary resolution. Leaving/hiding the page aborts its boundary; re-entry creates a new
+one and cannot revive earlier native tokens/surfaces. Commit rechecks expiry; late async
+cleanup and content replacement clean up exactly once.
+
+Coverage is **page body only**, leaving native/plugin top bars and sidebar usable.
+Home/New Draft have no top bar: preserve only floating sidebar toggle/window chrome;
+graph controls and composer stay mounted but covered/inactive. Parent and covered plugin
+bodies remain mounted/painted; only eligible foreground body content receives interaction. Ordinary stack entries are visual siblings, not lifetime owners;
 lower-owner disposal/unload does not remove another owner's foreground surface. Caller
 signals may explicitly bind lifetimes. Navigation, plugin unload, caller abort and explicit
 dispose tear down only the appropriate scopes; Settings above a surface is not its child
-lifetime merely by paint order. No suspension/restoration across navigation is added.
+lifetime merely by paint order. Dialogs/Settings always stay in front, including a request
+made while a dialog is open. The surface belongs to the page, not its modal opener: no
+opener-derived focus eligibility or Escape ownership. If that dialog closes while the
+caller signal stays live, the underlying surface can be revealed. No suspension/restoration
+across navigation is added.
 
 Reuse `PluginUiContent`, existing `view` layers and explicit ownership, not body-modal
 semantics, global background hiding, viewport scroll lock or another registry. The approved
@@ -640,18 +665,27 @@ or header row**. A quiet muted Close/X floats above content independently of scr
 The content fills the whole body, with the scrollbar at its outer edge rather than inset
 by a host frame; plugin content owns visible headings and bottom actions. No additional
 header/appearance props or forced diagram border are approved. These changes passed the
-separate UI-polish checkpoint.
+separate UI-polish checkpoint; generalized page coverage has its own section-12 proof.
+The shared controller/view layers remain, with private names `plugin-surface-targets.ts`,
+`plugin-surfaces.tsx` and `plugin-surface-shell.tsx`. No new overlay/window manager,
+global clipping rule or persistence is added.
 One Escape keeps one owner; covered native submit/Tab/dictation is ineligible. Entry honors
 eligible explicitly placed foreground focus, else first editable text/number/textarea,
 then the accessible surface fallback (not a required host-visible heading). Late covered
 mounts never steal it. Foreground close restores an eligible uncovered opener (including chrome), else surviving foreground remembered focus/
-entry policy, then native-body policy. Covered disposal/expired views never steal/restore
+entry policy, then owning-page-body policy. Covered disposal/expired views never steal/restore
 focus. Exposed chrome remains interactive, with no focus trap; `onClose` notifies, never
 adds an asynchronous veto.
 
 No broader message/card/composer slots, backend hooks, native send/agent catalogue, image
-importer/path inference/asset store, generic rich transcript renderer, extra surface
-regions or graph/plugin-route targets are authorized. These remain deferred.
+importer/path inference/asset store, generic rich transcript renderer, alternate surface
+regions or navigation restoration are authorized. Targetless page-body coverage adds no
+submission interception/token exposure outside native chat. Its own checkpoint passed
+4,045 host tests / 568 suites, 78 plugin tests, strict SDK/build/privacy gates and the literal
+packaged browser entrypoint: 15 assertion groups, seven page variants and 29 screenshots.
+The original native-target proof and worker-header scroll regression remain covered.
+Section 12 records the narrowly approved prefetch-classifier adjustment, prior strict
+failures, final zero-prefetch-cancellation run, byte provenance and verification limits.
 
 ## Result-oriented workers and background tools
 
@@ -756,13 +790,17 @@ cancel server execution just because a response reader disconnects.
 
 ## Distribution and updates
 
-External installation copies built package contents with a root manifest and referenced
-bundles, not the source project root, then refreshes the plugin list; preserve existing
-plugin `data/` when replacing code. Official
-packages ship in the app and are installed into the writable plugins location at startup.
+External distribution contains only the built `dist/` contents: a manifest and its
+referenced bundles/assets, never persistent `data/`. Copy those contents into
+`<learning data>/plugins/<id>/dist/`, then refresh the plugin list; replace only `dist/`
+when updating and preserve sibling `<id>/data/`. The no-build examples already include
+this workspace layout and can be copied as whole ID folders. Alternatively, author and
+build in that same installed workspace; there is no separate development registration.
+Official packages ship as flat built packages in the app and are installed into the
+writable `<id>/dist/` location at startup.
 Ownership metadata prevents silently overwriting an external package with the same ID.
 Official code updates validate/stage first, use per-file atomic replacements, write the
-manifest last, and preserve `data/`. A durable in-progress marker blocks loading an
+manifest last inside `dist/`, and preserve sibling `data/`. A durable in-progress marker blocks loading an
 incomplete update until startup retries successfully. Package-specific failure reports
 block that package only; corrupt shared ownership/enable-state metadata is refused
 rather than overwritten. This is recoverable, not a fully atomic whole-package swap.
@@ -801,6 +839,10 @@ Uninstall/data deletion and automatic community updates are not part of v1.
     `bdd0666`, not released or installed**, at the separate
     [4,021-test / 568-suite checkpoint](plugin-tree-contract.md#verification-checkpoint--2026-11-04).
     No native controller/business-logic or product-plugin migration is included.
+19. Generalized page-body `openSurface(surface, { signal })`, compatible with explicit
+    native targets — **implemented and verified, uncommitted above `8dd7409`**.
+    See [session-extension contract section 12](plugin-session-extension-contract.md#12-generalized-page-body-surfaces--implemented-and-verified).
+    No new method, native submission scope, install or release is added.
 
 Validation includes focused lifecycle/storage/interaction tests, existing teaching/practice
 regressions, typecheck/lint, production build and a packaged-server smoke with disposable

@@ -1,8 +1,12 @@
 # Managed agent example
 
 Copy this directory into the plugins directory shown in **Settings → Plugins**,
-refresh, and enable **Managed agent example**. Open it using its explicit sidebar or
-graph action. Registration of the view itself does not place it anywhere.
+keeping the `managed-agent/` folder and its required `dist/manifest.json`. No build is
+needed. Refresh and enable **Managed agent example**. Edit runtime files in `dist/`
+and restart LearnHarness after changing loaded code. Preserve sibling `managed-agent/data/`
+when replacing `dist/`; never distribute that persistent data or place it in `dist/data/`.
+Open it using its explicit sidebar or graph action. Registration of the view itself does
+not place it anywhere.
 
 This is a small developer example, not a separate showcase application. The host's
 `mountStandardComposer` supplies controlled model/thinking selection, text input,

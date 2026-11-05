@@ -307,6 +307,274 @@ test('shared schedules charge every containing deck but admission uses only the 
   assert.ok((await h.call('next-review', { deckIds: [shared.id] })).ticket);
 });
 
+test('cue-filtered new review intersects deck/proposition scope and chooses only selected active cues', async t => {
+  const h = harness(t, graph('p1', 'p2'));
+  await h.generate(cards('p1', 'Unselected', 'Selected one', 'Selected two'), cards('p2', 'Other proposition'));
+  const [p1, p2] = h.state().propositions;
+  const random = t.mock.method(Math, 'random', () => 0);
+  const scope = { deckIds: [h.state().decks[0].id], propositionIds: ['p1'], cueIds: [p1.cues[1].id, p1.cues[2].id, p2.cues[0].id] };
+  assert.equal((await h.call('next-review', scope)).ticket.cueId, p1.cues[1].id);
+  random.mock.mockImplementation(() => .999);
+  const { ticket } = await h.call('next-review', scope);
+  assert.equal(ticket.cueId, p1.cues[2].id);
+  assert.deepEqual(await h.call('next-review', { ...scope, cueIds: [p2.cues[0].id] }), { ticket: null, remaining: 0 });
+  await h.call('create-deck', { name: 'Empty' });
+  const empty = h.state().decks.find(d => d.name === 'Empty');
+  assert.equal((await h.call('next-review', { ...scope, deckIds: [empty.id] })).ticket, null);
+  // Tickets retain the original selection, rather than the caller's mutable arrays.
+  scope.cueIds.splice(0, scope.cueIds.length, p1.cues[0].id);
+  scope.propositionIds.length = 0; scope.deckIds.length = 0;
+  assert.equal((await h.call('reveal-review', { ticketId: ticket.id })).answer, 'Answer: Selected two');
+  await h.call('rate-review', { ticketId: ticket.id, rating: 4, requestId: 'filtered-new' });
+  assert.equal(h.disk().reviews[0].cueId, p1.cues[2].id);
+  assert.equal(h.disk().reviews[0].introduced, true);
+});
+
+test('normal due review retains weighted choice within the selected cue pool and never forces an early review', async t => {
+  let now = +new Date(2026, 0, 2, 12);
+  t.mock.method(Date, 'now', () => now);
+  const h = harness(t);
+  await h.generate(cards('p1', 'Reviewed easy', 'Excluded untried', 'Selected untried'));
+  const p = h.state().propositions[0], [easy, excluded, untried] = p.cues;
+  await h.grade({ cueIds: [easy.id] }, 4);
+  assert.equal((await h.call('next-review', { cueIds: [untried.id] })).ticket, null);
+  now += 30 * 86400000;
+  const before = h.state().propositions[0].schedule;
+  const random = t.mock.method(Math, 'random', () => .2);
+  const scope = { cueIds: [easy.id, untried.id] };
+  // Easy has weight 1, untried weight 3: the boundary is 1/4, not 1/7.
+  assert.equal((await h.call('next-review', scope)).ticket.cueId, easy.id);
+  random.mock.mockImplementation(() => .3);
+  assert.equal((await h.call('next-review', scope)).ticket.cueId, untried.id);
+  assert.deepEqual(h.state().propositions[0].schedule, before);
+  const ticket = await h.grade(scope, 4);
+  assert.equal(ticket.cueId, untried.id);
+  assert.equal(h.state().propositions[0].cues.find(c => c.id === excluded.id).latestRating, null);
+  assert.equal(h.state().propositions[0].schedule.reps, 2);
+  assert.deepEqual(h.disk().reviews.map(r => [r.cueId, r.introduced]), [[easy.id, true], [untried.id, false]]);
+});
+
+test('cue filters are strict for empty, unknown, deleted or archived selections and reject invalid shapes', async t => {
+  const h = harness(t, graph('p1', 'p2'));
+  await h.generate(cards('p1', 'Deleted', 'Active'), cards('p2', 'Other'));
+  const p = h.state().propositions[0];
+  await h.call('delete-cue', { propositionId: p.id, cueId: p.cues[0].id, version: p.version });
+  const before = h.disk();
+  for (const cueIds of [[], ['missing'], [p.cues[0].id]]) {
+    assert.deepEqual(await h.call('next-review', { cueIds }), { ticket: null, remaining: 0 });
+  }
+  for (const cueIds of [null, p.cues[1].id, {}, [1], [p.cues[1].id, false], [[p.cues[1].id]]]) {
+    await assert.rejects(h.call('next-review', { cueIds }), /Invalid cue selection/);
+  }
+  for (const scope of [{ deckIds: [] }, { propositionIds: [] }]) {
+    assert.equal((await h.call('next-review', { ...scope, cueIds: [p.cues[1].id] })).ticket, null);
+  }
+  h.graph.propositions = h.graph.propositions.filter(p => p.id !== 'p1');
+  assert.equal((await h.call('next-review', { cueIds: [p.cues[1].id] })).ticket, null);
+  assert.ok((await h.call('next-review')).ticket);
+  assert.deepEqual(h.disk(), before);
+});
+
+for (const mode of ['learning', 'relearning']) test(`${mode} cue filtering skips active excluded pins, including nextDue, but deleted pins fall back to selected cues`, async t => {
+  let now = +new Date(2026, 0, 2, 12);
+  t.mock.method(Date, 'now', () => now);
+  const h = harness(t, graph('p1', 'p2'));
+  await h.generate(cards('p1', 'Pinned', 'Excluded fallback', 'Selected fallback'), cards('p2', 'New proposition'));
+  const [initial, other] = h.state().propositions;
+  const [pinned, excluded, fallback] = initial.cues;
+  if (mode === 'relearning') {
+    await h.grade({ cueIds: [pinned.id] }, 4);
+    now += 30 * 86400000;
+  }
+  await h.grade({ cueIds: [pinned.id] }, 1);
+  const p = h.state().propositions[0], due = p.schedule.due;
+  assert.equal(p.schedule.state, mode === 'learning' ? 1 : 3);
+  assert.equal(p.learningCueId, pinned.id);
+  assert.deepEqual(await h.call('next-review', { cueIds: [fallback.id] }), { ticket: null, remaining: 0 });
+  assert.deepEqual(await h.call('next-review', { cueIds: [] }), { ticket: null, remaining: 0 });
+  assert.equal((await h.call('next-review', { cueIds: [pinned.id] })).nextDue, due);
+  assert.equal((await h.call('next-review', { propositionIds: ['p1'] })).nextDue, due);
+  now = due;
+  const before = h.disk();
+  assert.equal((await h.call('next-review', { cueIds: [fallback.id] })).ticket, null);
+  assert.equal((await h.call('next-review', { propositionIds: ['p1'] })).ticket.cueId, pinned.id);
+  assert.equal((await h.call('next-review', { cueIds: [pinned.id, fallback.id] })).ticket.cueId, pinned.id);
+  assert.equal((await h.call('next-review', { cueIds: [fallback.id, other.cues[0].id] })).ticket.propositionId, 'p2');
+  assert.deepEqual(h.disk(), before);
+  await h.call('delete-cue', { propositionId: 'p1', cueId: pinned.id, version: p.version });
+  const ticket = await h.grade({ cueIds: [fallback.id] }, 1);
+  assert.equal(ticket.cueId, fallback.id);
+  const after = h.state().propositions[0];
+  assert.equal(after.learningCueId, fallback.id);
+  assert.equal(after.cues.find(c => c.id === excluded.id).latestRating, null);
+  assert.equal(after.schedule.reps, p.schedule.reps + 1);
+  assert.equal(h.disk().reviews.filter(r => r.introduced).length, 1);
+});
+
+test('filtered cues share one proposition schedule, history and introduction across decks', async t => {
+  let now = +new Date(2026, 0, 2, 12);
+  t.mock.method(Date, 'now', () => now);
+  const h = harness(t);
+  await h.generate(cards('p1', 'First cue', 'Second cue'));
+  await h.call('create-deck', { name: 'Shared' });
+  const [source, shared] = h.state().decks, p = h.state().propositions[0];
+  await h.call('set-memberships', { propositionId: p.id, deckIds: [source.id, shared.id] });
+  await h.grade({ deckIds: [source.id], cueIds: [p.cues[0].id] }, 4);
+  assert.deepEqual(h.state().decks.map(d => d.newToday), [1, 1]);
+  assert.equal((await h.call('next-review', { deckIds: [shared.id], cueIds: [p.cues[1].id] })).ticket, null);
+  now += 30 * 86400000;
+  await h.grade({ deckIds: [shared.id], cueIds: [p.cues[1].id] }, 4);
+  assert.equal(h.state().propositions.length, 1);
+  assert.equal(h.state().propositions[0].schedule.reps, 2);
+  assert.deepEqual(h.state().decks.map(d => d.newToday), [0, 0]);
+  const reviews = h.disk().reviews;
+  assert.deepEqual(reviews.map(r => r.introduced), [true, false]);
+  assert.deepEqual(reviews[0].deckIds, [source.id, shared.id]);
+  assert.deepEqual(reviews[1].before, reviews[0].after);
+});
+
+test('partial deck renames preserve the latest limit and limit-only patches preserve the latest name', async t => {
+  const h = harness(t);
+  await h.call('create-deck', { name: 'Original' });
+  const original = h.state().decks[0];
+  await h.call('save-deck', { id: original.id, name: 'Full update', newLimit: 7 });
+  await h.call('save-deck', { id: original.id, newLimit: 37 });
+  await h.call('save-deck', { id: original.id, name: '  Inline rename  ' });
+  let d = h.state().decks[0];
+  assert.equal(d.name, 'Inline rename');
+  assert.equal(d.newLimit, 37);
+  await h.call('save-deck', { id: original.id, newLimit: 0 });
+  d = h.state().decks[0];
+  assert.equal(d.name, 'Inline rename');
+  assert.equal(d.newLimit, 0);
+  const before = h.disk();
+  for (const patch of [{ name: '' }, { newLimit: -1 }, { newLimit: '2' }, { name: 'Do not save', newLimit: null }]) {
+    await assert.rejects(h.call('save-deck', { id: original.id, ...patch }));
+    assert.deepEqual(h.disk(), before);
+  }
+  h.activate();
+  assert.deepEqual(h.state().decks[0], d);
+});
+
+test('remaining includes current new propositions up to the daily cap, without writes or extra cue choices', async t => {
+  t.mock.method(Date, 'now', () => +new Date(2026, 0, 2, 12));
+  const h = harness(t, graph('p1', 'p2', 'p3'));
+  await h.generate(cards('p1', 'First', 'Second cue'), cards('p2', 'Second proposition'), cards('p3', 'Third proposition'));
+  const source = h.state().decks[0];
+  let samples = 0;
+  t.mock.method(Math, 'random', () => { samples++; return 0; });
+  let before = h.disk();
+  assert.equal((await h.call('next-review')).remaining, 3);
+  assert.equal(samples, 1, 'counting makes no additional cue choices');
+  assert.deepEqual(h.disk(), before);
+  await h.call('save-deck', { id: source.id, newLimit: 2 });
+  before = h.disk();
+  const { ticket, remaining } = await h.call('next-review');
+  assert.equal(remaining, 2);
+  assert.equal(ticket.propositionId, 'p1');
+  assert.equal((await h.call('next-review')).remaining, 2, 'repeated reads do not consume admissions');
+  assert.equal(samples, 3);
+  assert.deepEqual(h.disk(), before);
+  await h.call('reveal-review', { ticketId: ticket.id });
+  await h.call('rate-review', { ticketId: ticket.id, rating: 4, requestId: 'count-first' });
+  assert.equal((await h.call('next-review')).remaining, 1);
+  assert.equal((await h.grade({})).propositionId, 'p2');
+  assert.deepEqual(await h.call('next-review'), { ticket: null, remaining: 0 });
+  assert.equal(h.state().decks[0].newToday, 2);
+});
+
+test('remaining combines ready due and admissible new propositions, excluding future learning, archives and unselected active pins', async t => {
+  let now = +new Date(2026, 0, 2, 12);
+  t.mock.method(Date, 'now', () => now);
+  const h = harness(t, graph('learning', 'review', 'future', 'new1', 'new2'));
+  await h.generate(cards('learning', 'Pinned', 'Alternate'), cards('review', 'Due review'), cards('future', 'Future learning'), cards('new1', 'New one'), cards('new2', 'New two'));
+  await h.grade({ propositionIds: ['review'] }, 4);
+  now += 30 * 86400000;
+  await h.grade({ propositionIds: ['learning'] }, 1);
+  now += 60000;
+  await h.grade({ propositionIds: ['future'] }, 1);
+  await h.call('save-deck', { id: h.state().decks[0].id, newLimit: 3 });
+  const before = h.disk();
+  const result = await h.call('next-review');
+  assert.equal(result.ticket.propositionId, 'learning', 'actual learning-first selection is unchanged');
+  assert.equal(result.remaining, 3, 'two due plus one introduction, including current');
+  assert.equal((await h.call('next-review', { propositionIds: ['learning', 'review', 'future'] })).remaining, 2);
+  assert.equal((await h.call('next-review', { propositionIds: ['learning', 'future', 'new1'] })).remaining, 2);
+  const future = h.state().propositions.find(p => p.id === 'future');
+  assert.deepEqual(await h.call('next-review', { propositionIds: ['future'] }), { ticket: null, nextDue: future.schedule.due, remaining: 0 });
+  const learning = h.state().propositions.find(p => p.id === 'learning');
+  const alternate = learning.cues.find(c => c.id !== learning.learningCueId);
+  const newCue = h.state().propositions.find(p => p.id === 'new1').cues[0];
+  assert.equal((await h.call('next-review', { cueIds: [alternate.id, future.cues[0].id, newCue.id] })).remaining, 1);
+  assert.deepEqual(await h.call('next-review', { cueIds: [] }), { ticket: null, remaining: 0 });
+  assert.deepEqual(h.disk(), before);
+  await h.call('delete-cue', { propositionId: learning.id, cueId: learning.learningCueId, version: learning.version });
+  assert.equal((await h.call('next-review', { cueIds: [alternate.id, newCue.id] })).remaining, 2, 'deleted pin falls back within the selected pool');
+  h.graph.propositions = h.graph.propositions.filter(p => p.id !== 'review');
+  assert.equal((await h.call('next-review')).remaining, 2, 'archived due propositions are excluded');
+  await h.call('save-deck', { id: h.state().decks[0].id, newLimit: 0 });
+  assert.equal((await h.call('next-review')).remaining, 1, 'ready due obligations are uncapped even when new admissions are zero');
+});
+
+test('remaining simulates deterministic shared-deck admission, charging every membership but gating only the admitting deck', async t => {
+  t.mock.method(Date, 'now', () => +new Date(2026, 0, 2, 12));
+  const h = harness(t, graph('shared', 'onlyA', 'onlyB'));
+  await h.generate(cards('shared', 'Shared cue', 'Another shared cue'), cards('onlyA', 'A cue'), cards('onlyB', 'B cue'));
+  const a = h.state().decks[0];
+  await h.call('create-deck', { name: 'B' });
+  const b = h.state().decks.find(d => d.name === 'B');
+  await h.call('set-memberships', { propositionId: 'shared', deckIds: [a.id, b.id] });
+  await h.call('set-memberships', { propositionId: 'onlyB', deckIds: [b.id] });
+  await h.call('save-deck', { id: a.id, newLimit: 1 });
+  await h.call('save-deck', { id: b.id, newLimit: 1 });
+  let before = h.disk();
+  assert.equal((await h.call('next-review')).remaining, 1, 'first shared introduction fills both allowances');
+  assert.equal((await h.call('next-review', { deckIds: [b.id] })).remaining, 1);
+  assert.deepEqual(h.disk(), before);
+  await h.call('save-deck', { id: a.id, newLimit: 2 });
+  assert.equal((await h.call('next-review')).remaining, 2, 'shared proposition is not counted twice');
+  await h.call('save-deck', { id: b.id, newLimit: 0 });
+  assert.equal((await h.call('next-review')).remaining, 2, 'zero allowance in another containing deck does not block A');
+  assert.deepEqual(await h.call('next-review', { deckIds: [b.id] }), { ticket: null, remaining: 0 });
+  await h.call('save-deck', { id: a.id, newLimit: 0 });
+  await h.call('save-deck', { id: b.id, newLimit: 2 });
+  before = h.disk();
+  const first = await h.call('next-review');
+  assert.equal(first.ticket.propositionId, 'shared');
+  assert.equal(first.remaining, 2);
+  assert.deepEqual(h.disk(), before);
+  assert.equal((await h.grade({})).propositionId, 'shared');
+  assert.equal((await h.call('next-review')).remaining, 1);
+  assert.equal((await h.grade({})).propositionId, 'onlyB');
+  assert.deepEqual(await h.call('next-review'), { ticket: null, remaining: 0 });
+  assert.deepEqual(h.state().decks.map(d => d.newToday), [1, 2]);
+});
+
+test('get-state adds read-only aggregate statistics, deduplicating shared propositions and retaining actual archived/deleted review activity', async t => {
+  t.mock.method(Date, 'now', () => +new Date(2026, 0, 2, 12));
+  const h = harness(t, graph('p1', 'p2'));
+  await h.generate(cards('p1', 'First cue', 'Second cue'), cards('p2', 'Other cue'));
+  await h.call('create-deck', { name: 'Shared' });
+  await h.call('set-memberships', { propositionId: 'p1', deckIds: h.state().decks.map(d => d.id) });
+  let stats = h.state().statistics;
+  assert.deepEqual(stats.states, { new: 2, learning: 0, review: 0, relearning: 0 });
+  assert.equal(stats.due.length, 9); assert.equal(stats.activity.length, 14);
+  await h.grade({ propositionIds: ['p1'] }, 1);
+  stats = h.state().statistics;
+  assert.deepEqual(stats.states, { new: 1, learning: 1, review: 0, relearning: 0 });
+  assert.equal(stats.due[1].count, 1, 'future learning later today is in the today bar');
+  assert.equal(stats.activity.at(-1).count, 1);
+  h.graph.propositions = h.graph.propositions.filter(p => p.id !== 'p1');
+  const p2 = h.state().propositions.find(p => p.id === 'p2');
+  await h.call('delete-cue', { propositionId: p2.id, cueId: p2.cues[0].id, version: p2.version });
+  const before = h.disk(), state = await h.call('get-state');
+  assert.deepEqual(state.statistics.states, { new: 0, learning: 0, review: 0, relearning: 0 });
+  assert.ok(state.statistics.due.every(row => row.count === 0));
+  assert.equal(state.statistics.activity.at(-1).count, 1);
+  assert.equal(Object.hasOwn(state, 'reviews'), false);
+  assert.deepEqual(h.disk(), before);
+});
+
 test('missing graph propositions archive non-destructively and return with the same content and memberships', async t => {
   const h = harness(t);
   await h.generate(cards('p1', 'Retained cue'));

@@ -5,6 +5,8 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { describe, it } from "node:test";
+import { createPluginHost } from "../src/server/plugin-host.ts";
+import { createPluginSmokeFixture } from "../scripts/smoke-plugin-runtime.mjs";
 
 const source = fs.readFileSync(new URL("../scripts/build-server.mjs", import.meta.url), "utf8");
 const STANDALONE = path.join(".next", "standalone");
@@ -33,8 +35,8 @@ function withPayload(test: (fixture: {
 		write(path.join("docs", "plugin-question-contract.md"));
 		write(path.join("docs", "plugin-session-extension-contract.md"));
 		write(path.join("docs", "plugin-tree-contract.md"));
-		write(path.join("examples", "plugins", "hello-plugin", "manifest.json"));
-		write(path.join("examples", "plugins", "hello-plugin", "main.js"));
+		write(path.join("examples", "plugins", "hello-plugin", "dist", "manifest.json"));
+		write(path.join("examples", "plugins", "hello-plugin", "dist", "main.js"));
 		write(path.join("skills", "learnharness-plugins", "SKILL.md"));
 		write(path.join(STANDALONE, "server.js"));
 		write(path.join(".next", "static", "runtime.js"));
@@ -50,6 +52,35 @@ function withPayload(test: (fixture: {
 }
 
 describe("desktop standalone payload", () => {
+	it("ships no-build examples that the fixed-dist host discovers without evaluating code", async () => {
+		const root = fs.mkdtempSync(path.join(os.tmpdir(), "lh-example-layout-"));
+		const directory = path.join(root, "plugins");
+		fs.cpSync(path.resolve("examples/plugins"), directory, { recursive: true });
+		const host = createPluginHost({ directory, appVersion: "0.4.1", createServices() { throw Error("disabled examples must not create services"); } });
+		try {
+			await host.initialize();
+			assert.deepEqual(host.list().map(plugin => [plugin.id, plugin.status]), [["hello-plugin", "disabled"], ["managed-agent", "disabled"], ["teaching-extension", "disabled"]]);
+			for (const plugin of host.list()) {
+				assert.ok(fs.existsSync(path.join(directory, plugin.id, "dist", "manifest.json")));
+				assert.equal(fs.existsSync(path.join(directory, plugin.id, "manifest.json")), false);
+			}
+		} finally { await host.dispose(); fs.rmSync(root, { recursive: true, force: true }); }
+	});
+
+	it("seeds packaged smoke fixtures with code in dist and persistent data beside it", async () => {
+		const home = fs.mkdtempSync(path.join(os.tmpdir(), "lh-smoke-layout-"));
+		const pluginRoot = createPluginSmokeFixture(home);
+		const directory = path.join(home, "data", "plugins");
+		const host = createPluginHost({ directory, appVersion: "0.4.1", createServices() { throw Error("disabled smoke fixtures must not activate"); } });
+		try {
+			await host.initialize();
+			assert.deepEqual(host.list().map(plugin => [plugin.id, plugin.status]), [["native-smoke", "disabled"], ["native-smoke-picker-settings", "disabled"]]);
+			assert.equal(fs.readFileSync(path.join(pluginRoot, "data", "private.json"), "utf8"), '{"private":true}\n');
+			assert.equal(fs.existsSync(path.join(pluginRoot, "dist", "data")), false);
+			assert.equal(fs.existsSync(path.join(pluginRoot, "data", "activated.txt")), false);
+		} finally { await host.dispose(); fs.rmSync(home, { recursive: true, force: true }); }
+	});
+
 	it("removes only traced installers/dev Electron, preserving runtime dist/ and native binaries", () => {
 		withPayload(({ root, write, run }) => {
 			for (const extra of [path.join("dist", "old.app", "nested.dmg"), path.join("node_modules", "electron", "dist", "electron.exe")]) {
@@ -74,7 +105,7 @@ describe("desktop standalone payload", () => {
 			for (const file of runtime) assert.ok(fs.existsSync(path.join(root, STANDALONE, file)), file);
 			assert.ok(fs.existsSync(path.join(root, STANDALONE, ".next", "static", "runtime.js")));
 			assert.ok(fs.existsSync(path.join(root, STANDALONE, "public", "asset.txt")));
-			for (const asset of ["scripts/plugin-loader.cjs", "public/plugin-loader.js", "plugin-authoring/docs/plugin-authoring.md", "plugin-authoring/docs/plugin-question-contract.md", "plugin-authoring/docs/plugin-session-extension-contract.md", "plugin-authoring/docs/plugin-tree-contract.md", "plugin-authoring/types/index.d.ts", "plugin-authoring/examples/plugins/hello-plugin/main.js", "plugin-authoring/skills/learnharness-plugins/SKILL.md"]) {
+			for (const asset of ["scripts/plugin-loader.cjs", "public/plugin-loader.js", "plugin-authoring/docs/plugin-authoring.md", "plugin-authoring/docs/plugin-question-contract.md", "plugin-authoring/docs/plugin-session-extension-contract.md", "plugin-authoring/docs/plugin-tree-contract.md", "plugin-authoring/types/index.d.ts", "plugin-authoring/examples/plugins/hello-plugin/dist/manifest.json", "plugin-authoring/examples/plugins/hello-plugin/dist/main.js", "plugin-authoring/skills/learnharness-plugins/SKILL.md"]) {
 				assert.ok(fs.existsSync(path.join(root, STANDALONE, asset)), asset);
 			}
 		});

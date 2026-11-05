@@ -5,9 +5,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createRequire } from "node:module";
 import { parseHTML } from "linkedom";
-import { activate as hello } from "./hello-plugin/main.js";
-import { activate as teaching } from "./teaching-extension/main.js";
-import { activate as managed } from "./managed-agent/main.js";
+import { activate as hello } from "./hello-plugin/dist/main.js";
+import { activate as teaching } from "./teaching-extension/dist/main.js";
+import { activate as managed } from "./managed-agent/dist/main.js";
 
 function fixture(t) {
 	const { document } = parseHTML("<html><body></body></html>");
@@ -141,7 +141,7 @@ test("managed composer controls model/thinking/draft, creates explicitly, and cl
 test("managed backend preserves and persists model thinking without inference requests", async (t) => {
 	const directory = mkdtempSync(join(tmpdir(), "plugin-example-"));
 	t.after(() => rmSync(directory, { recursive: true, force: true }));
-	const { activate } = createRequire(import.meta.url)("./managed-agent/backend.cjs");
+	const { activate } = createRequire(import.meta.url)("./managed-agent/dist/backend.cjs");
 	const handlers = new Map(), definitions = new Map();
 	let creates = 0;
 	const ctx = {

@@ -7,19 +7,22 @@ submission. **No learner code is executed, tested, or automatically graded.**
 ## Requirements and installation
 
 Requires LearnHarness's public native-question API (`registerQuestionType` and
-`registerQuestionRenderer`) and the current host's Enter-to-submit question-key default.
-The native-question API first appeared on the plugin-architecture branch at checkpoint
-`99373a1`; that older checkpoint alone predates the keyboard default used here.
-These capabilities are not available in the released 0.4.1 app. The manifest's
+`registerQuestionRenderer`) on the matching plugin-architecture branch. The API first
+appeared at checkpoint `99373a1`; it is not available in the released 0.4.1 app. The manifest's
 `minAppVersion: 0.4.1` is only the numeric baseline, not a promise that the released
 0.4.1 includes these APIs.
 
-Build the package as below, then copy the **contents of the built folder**
-`dist/coding-questions/` to the writable plugins directory as `coding-questions/`.
-The installed folder must directly contain `manifest.json`, `main.js`, `backend.cjs`,
-`styles.css`, and `assets/`. Do not install this source project or its `node_modules`.
-Refresh Settings → Plugins, then enable **Coding questions**. Restart LearnHarness
-when replacing loaded code. Preserve any existing plugin `data/` during replacement.
+Build the package as below. The output is this project's **`dist/`**, containing
+`manifest.json`, `main.js`, `backend.cjs`, `styles.css`, and `assets/`. For distribution,
+copy those **`dist/` contents** into `<learning data>/plugins/coding-questions/dist/`,
+not directly into `coding-questions/`. Do not distribute source, `node_modules`, or data.
+Alternatively keep this source project at `<learning data>/plugins/coding-questions/`
+and edit/build in that same workspace: the host always finds `dist/manifest.json` there.
+No separate development registration is needed, and a root-only manifest is not loaded.
+Refresh Settings → Plugins after installation or the first build, then enable
+**Coding questions**. Restart LearnHarness when replacing already loaded code.
+Build cleanup only replaces `dist/` and refuses symlinked `dist/` or misplaced
+`dist/data/`; preserve persistent sibling `coding-questions/data/` during replacement.
 App-bundled official distribution is a separate host packaging step.
 
 ## Behavior
@@ -41,13 +44,29 @@ reading-before-reveal flow. Submitted code has a read-only highlighted presentat
 the host displays thinking separately.
 
 The lean CodeMirror 6 editor includes line numbers, undo/redo, bracket matching,
-four-space Tab indentation and Shift+Enter newline auto-indentation. **Enter submits**
-through the host, from both the code editor and host thinking field; **Shift+Enter inserts
-a newline**. Cmd/Ctrl+Enter also submits. The plugin handles Tab and Shift+Enter editing
-only; it delegates plain Enter to the host and implements no submit action. Shift+Tab keeps the host's
+four-space Tab indentation and newline auto-indentation. **Enter and Shift+Enter insert
+a newline inside code**; **Cmd/Ctrl+Enter submits** through the host. The host thinking
+field keeps its normal Enter-to-submit and Shift+Enter-to-newline behavior. The plugin
+handles editing keys only and implements no submit action. Shift+Tab keeps the host's
 model-thinking shortcut; Escape has no plugin-specific action. Long lines scroll
-horizontally. No autocomplete, automatic bracket insertion, diagnostics, formatter,
-fold controls, run/copy toolbar, or IDE services are included.
+horizontally. No autocomplete, automatic bracket insertion, formatter, fold controls,
+run/copy toolbar, or IDE services are included.
+
+### Live syntax feedback
+
+Python, JavaScript, TypeScript, C, C++, Java, Rust, Go, and JSON get advisory syntax
+feedback from their bundled parsers. Catalog aliases such as `js`, `ts`, and `cpp`
+use the same policy as the canonical language name. After a 300ms typing pause,
+parser-reported problems appear as red underlines or point markers, with a
+**“Syntax problem.”** hover message. There is no extra gutter, problems panel,
+shortcut, automatic fix, or code modification. Saved read-only answers do not show
+these diagnostics.
+
+This is parser feedback, not compiler validation, type checking, test execution, or
+correctness assessment. An unmarked answer may still contain errors; large answers
+use the available parsed region without forcing a full-document parse. Other languages
+retain highlighting without these diagnostics; in particular, the bundled SQL parser
+is not a SQL validator. Diagnostics never block submission or change answer readiness.
 
 The complete standard `@codemirror/language-data` catalog ships locally. Language
 names/aliases load highlighting on demand; unknown languages or failed language loads
@@ -91,29 +110,32 @@ fixtures, never real learner data/accounts or paid provider calls.
 
 ## Verification checkpoint
 
-Strict SDK type checking, five contract/catalog tests (including loading all 143
-catalog entries), scoped ESLint, the production plugin build, and the real-Chrome
+Strict SDK type checking, contract/catalog and parser-diagnostic tests (including
+loading all 143 catalog entries), scoped ESLint, the production plugin build, and the real-Chrome
 built-plugin checks pass. Browser checks cover exact whitespace, readiness, Tab,
-plain-Enter delegation/submission without code mutation, Shift+Enter auto-indent,
-Cmd/Ctrl+Enter, synthetic composition-marked/229 Enter guards, undo/redo,
+Enter/Shift+Enter code auto-indent without submission, Cmd/Ctrl+Enter submission,
+synthetic composition-marked/229 Enter guards, undo/redo,
 selection/controlled updates, inactive editors, local language
 loading/failure, unknown-language fallback, no HTML/XML/JSX auto-tag insertion,
-read-only answers and late-load/abort cleanup. The dependency audit reports no known
+read-only answers and late-load/abort cleanup. Diagnostic checks cover malformed/valid
+examples in all nine supported languages, alias policy, red point markers and hover
+messages, the typing delay, correction/stale-result cleanup, advisory submission,
+semantic/unsupported-language exclusions, large partial parses, and unmount cleanup. The dependency audit reports no known
 vulnerabilities at this checkpoint.
 
-The earlier source-free packaged checkpoint passed under Electron's Node and real
-Chrome: genuine teacher prediction and submitted TEACH CHECK, exact code plus separate
-reading/answer thinking, natural fold/selection retention, native field framing and
-thinking placement/defaults, then a fresh disabled-plugin check with recovery-only
-occurrence-bound dismissal. All five native streams reached `[DONE]`, with no page
-errors or off-origin requests; the original verified payload digest was unchanged.
-That checkpoint preceded the new Enter default and does not prove the keyboard change.
-The revised native harness additionally submits a prediction using plain Enter from
-code and a check using plain Enter from host thinking, verifies Shift+Enter newlines,
-and probes synthetic composing/229 Enter suppression. It must run against the matching
-updated host payload, not the previous checkpoint. No real microphone, OS IME, paid
-provider, real-model evaluation, signed installer, full Electron window, or Windows/Linux
-runtime behavior is claimed.
+The source-free packaged smoke passes with the diagnostics bundle under Electron's
+Node and real Chrome: genuine teacher prediction and submitted TEACH CHECK, exact code
+plus separate reading/answer thinking, natural fold/selection retention, native field
+framing and thinking placement/defaults, then a fresh disabled-plugin check with
+recovery-only occurrence-bound dismissal. All five native streams reach `[DONE]`, with
+no page errors or off-origin requests; the original verified host payload digest is
+unchanged. The harness verifies Enter/Shift+Enter code newlines without submission,
+submits a prediction using Cmd/Ctrl+Enter from code and a check using plain Enter from
+host thinking, and probes
+synthetic composing/229 Enter suppression. It uses a disposable copy of an existing
+verified host payload, not a fresh host build, and does not revalidate unrelated newer
+host changes. No real microphone, OS IME, paid provider, real-model evaluation, signed
+installer, full Electron window, or Windows/Linux runtime behavior is claimed.
 
 ## API boundary
 

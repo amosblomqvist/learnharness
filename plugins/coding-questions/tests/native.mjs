@@ -16,7 +16,7 @@ const checkout = path.resolve(pluginRoot, "../..");
 assert.ok(process.env.LH_STANDALONE, "Supply LH_STANDALONE pointing to the existing verified payload; this smoke never builds.");
 const source = fs.realpathSync(process.env.LH_STANDALONE);
 assert.ok(fs.statSync(path.join(source, "server.js")).isFile());
-const built = path.join(pluginRoot, "dist/coding-questions");
+const built = path.join(pluginRoot, "dist");
 const manifest = JSON.parse(fs.readFileSync(path.join(built, "manifest.json"), "utf8"));
 assert.equal(manifest.id, "coding-questions");
 const runtime = path.join(checkout, "node_modules/electron/dist/Electron.app/Contents/MacOS/Electron");
@@ -138,8 +138,8 @@ try {
   assert.ok(!standalone.startsWith(source + path.sep));
   fs.cpSync(source, standalone, { recursive: true, verbatimSymlinks: true });
   verifyCopyLinks(standalone);
-  fs.mkdirSync(path.join(data, "plugins"), { recursive: true });
-  fs.cpSync(built, path.join(data, "plugins", manifest.id), { recursive: true, dereference: true });
+  fs.mkdirSync(path.join(data, "plugins", manifest.id), { recursive: true });
+  fs.cpSync(built, path.join(data, "plugins", manifest.id, "dist"), { recursive: true, dereference: true });
   fs.writeFileSync(auth, "{}\n", { flag: "wx" });
   const tree = { nodes: [{ id: "coding_node", title: "Offline code node" }], edges: [], version: 1 };
   const usage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } };
@@ -341,8 +341,10 @@ try {
   assert.equal(await page.$eval(editor, node => node.contains(document.activeElement)), true);
   await assertCompositionGuard(editor, "prediction code editor");
   await fillCode("def example():"); await page.keyboard.press("End");
-  await page.keyboard.down("Shift"); await page.keyboard.press("Enter"); await page.keyboard.up("Shift");
-  assert.equal(await code(dock), "def example():\n    ", "Host routes Shift+Enter to language indentation");
+  const postsBeforeCodeEnter = evidence.requests.filter(request => new URL(request.url).pathname === "/api/chat" && request.method === "POST").length;
+  await page.keyboard.press("Enter");
+  assert.equal(await code(dock), "def example():\n    ", "Code Enter inserts a newline with language indentation");
+  assert.equal(evidence.requests.filter(request => new URL(request.url).pathname === "/api/chat" && request.method === "POST").length, postsBeforeCodeEnter, "Enter in code must not submit an answer");
   await page.keyboard.sendCharacter("return 1"); await page.keyboard.down("Shift"); await page.keyboard.press("Enter"); await page.keyboard.up("Shift");
   assert.equal(await code(dock), "def example():\n    return 1\n    ");
   const exactAnswer = "  # verbatim learner code\n\tvalue = '<script> literal & code'  \n\n";
@@ -383,7 +385,7 @@ try {
   evidence.stage = "predict review";
   const answered = post(input => input?.type === "plugin-question-answer");
   const subscribed = page.waitForResponse(response => new URL(response.url()).pathname === route + "/stream");
-  await page.focus(editor); await page.keyboard.press("Enter");
+  await page.focus(editor); await chord("Enter");
   const answerResponse = await answered; assert.equal(answerResponse.status(), 200);
   const submitted = JSON.parse(answerResponse.request().postData()).input;
   assert.deepEqual(submitted, { type: "plugin-question-answer", questionId: predict.questionId, occurrence: predict.occurrence, answer: exactAnswer, thinking: thinkingText });
@@ -409,7 +411,7 @@ try {
   assert.equal(await page.$$eval(`${saved} .cm-line`, lines => lines.map(line => line.textContent).join("\n")), exactAnswer);
   await assertAnsweredThinking(0, thinkingText);
   evidence.predict = { snapshot: predict, submitted, result: answers[0], modelResult };
-  evidence.assertions.push("Native built-plugin predict snapshot; no pose result; starterCode; real Tab indentation and Shift+Enter auto-indented newlines; natural fold retains editor/draft; plain Enter from the code editor saves the exact string and separate thinking without inserting a newline; actual next model request reviews the genuine result; read-only saved code. Synthetic composing/229 Enter guard probes do not submit.");
+  evidence.assertions.push("Native built-plugin predict snapshot; no pose result; starterCode; real Tab indentation and Enter/Shift+Enter auto-indented code newlines without submission; natural fold retains editor/draft; Cmd/Ctrl+Enter from the code editor saves the exact string and separate thinking; actual next model request reviews the genuine result; read-only saved code. Synthetic composing/229 Enter guard probes do not submit.");
   await screenshot("predict-reviewed");
 
   evidence.stage = "check";

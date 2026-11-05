@@ -1,6 +1,6 @@
 ---
 name: learnharness-plugins
-description: Build, inspect, or debug a trusted-local LearnHarness plugin using the public plugin API. Use for host UI widgets, explicit action placements, plugin settings, custom views, native teaching tools/instructions, bounded native question formats, native submission interception/images/session-body surfaces, content renderers, validated background workers, interactive agents, learning-data readers, or plugin lifecycle problems.
+description: Build, inspect, or debug a trusted-local LearnHarness plugin using the public plugin API. Use for host UI widgets, explicit action placements, plugin settings, custom views, native teaching tools/instructions, bounded native question formats, native submission interception/images, page-body surfaces, content renderers, validated background workers, interactive agents, learning-data readers, or plugin lifecycle problems.
 ---
 
 # LearnHarness plugin authoring
@@ -98,10 +98,19 @@ is implied. No grading, data, blank filtering, API-shape or `ctx.ui` changes are
   `examples/plugins/managed-agent` (Node + managed interactive/background agent), or
   `examples/plugins/teaching-extension` (instructions, native tools, renderers and a
   detached result worker in existing lessons).
-- Installed folder ID must match `manifest.json`. Ship built ES-module frontend and
-  CommonJS backend JavaScript, with JS dependencies bundled. Install built package contents
-  with the root manifest/referenced bundles, not the source project root; preserve existing
-  plugin `data/` when replacing code. No app-side npm install.
+- Use one workspace at `<learning data>/plugins/<id>/` for installation and authoring.
+  The ID must match **`<id>/dist/manifest.json`**: `dist/` is the required fixed runtime
+  root, with referenced ES-module frontend/CommonJS backend bundles and assets inside.
+  Optional source and `package.json` live beside it; builds write to project-root `dist/`,
+  not `dist/<id>/`. Refresh can discover the first build of a previously unbuilt workspace;
+  code already admitted by the host requires a server restart after changes. No separate
+  development mode, registration, profiles, hot reload, legacy-layout fallback or migration.
+- Distribute built `dist/` contents with JS dependencies bundled, placing those contents
+  into the target `<id>/dist/`, never directly into `<id>/`. Never distribute persistent
+  `data/`; it is a sibling at `<id>/data/`, not `dist/data/`. Preserve it during updates.
+  Build cleanup must target only `dist/`, never the workspace root, and refuse symlinked
+  `dist/` or any misplaced `dist/data/` entry before deletion. The no-build examples already
+  contain `dist/` and are installable by copying their whole ID folder. No app-side npm install.
 - Only use the supported context APIs. Do not import host implementation modules or
   mutate core learning records. Trusted code can read files, but APIs offer shared
   interpretation and preserve version guards. Keep feature data under plugin `data/`.
@@ -130,6 +139,34 @@ is implied. No grading, data, blank filtering, API-shape or `ctx.ui` changes are
   controls. Approved polish makes their **11px** typography self-contained, independent of
   surrounding plugin styles. Preserve button palettes. Gallery explanations use configured
   reading size (**16px** default); Settings headings keep compact `SettingsHeading` styling.
+- For `openSurface` entry, optionally mark a real visible focusable content region
+  with `data-plugin-initial-focus` (for example `tabIndex = -1`, `role="group"` and an
+  accessible label). Preserve genuine headings only when they belong in the UI; never
+  invent a hidden focus heading. The host preserves eligible existing/remembered focus,
+  then tries the first eligible marker before automatic fields/headings/frame fallbacks.
+  It queries the current mount, respects Settings/dialog/newer-view ownership, and falls
+  back if the marked element cannot receive focus. Mount it synchronously: no async retry,
+  DOM-change autofocus or focus on updates. Dialogs/native-page entry are unchanged.
+- `mountButton` accepts optional `icon` as trusted SVG markup, matching action icons.
+  It appears before the visible required `label`. Set `iconOnly: true` to hide text
+  and use `label` as the accessible name; both label and icon must be nonblank.
+  Choose `size: "icon-sm"` (or another existing size) explicitly: size controls
+  geometry, never label visibility. `title` stays optional, with no automatic tooltip.
+  Invalid icon props reject mount/update atomically; clear `iconOnly` when removing
+  an icon. Do not supply a renderer, DOM node or private host import for button icons.
+- Use `mountButton` with `variant: "custom"` and optional `colors` for color-only
+  customization: normal `background`/`text`/`border`, optional `hover`/`active`/
+  `focusVisible`/`disabled` objects with those same slots, and `focusVisible.ring`.
+  All are optional CSS color strings (including variables), never arbitrary CSS.
+  Defaults are native primary colors plus a fixed transparent 1px border. Missing
+  state slots do not reset applicable lower states; priority per property is
+  disabled > active > focus-visible > hover > normal. Native focus border/ring remain
+  unless overridden; sizes/layout/shape/activation and disabled 50% opacity stay native.
+  Invalid shape/type/color syntax rejects atomically, including on other variants;
+  valid `colors` are ignored outside `custom`. Updates replace the whole palette,
+  not deep-merge it. Color syntax validation cannot ensure variable resolution,
+  contrast or visible focus; the plugin owns those choices. Use the public props,
+  never native-button descendant styling or private host color variables.
 - Use additive API v1 `ctx.ui.mountMarkdown(container, { text }, { signal })`
   for complete static content, with `PluginMarkdownProps { text: string }`. It returns
   `PluginWidgetHandle<PluginMarkdownProps>` with standard update/dispose and per-mount cleanup.
@@ -411,39 +448,63 @@ is implied. No grading, data, blank filtering, API-shape or `ctx.ui` changes are
   permanent causal regressions. Processing or fresh-image text-only-model refusal retains
   input; no silent image omission. Async
   target/model changes refuse stale rather than delivering to replacements.
-- `ctx.ui.openSurface(target, { title, content, background?, onClose? }, { signal })` returns standard
-  PluginWidgetHandle<PluginSurfaceProps>, with existing PluginUiContent/async cleanup.
-  Obtain opaque PluginSurfaceTarget from native session top-bar action or submission
-  context; no selector/DOM/session-ID/global-current inference or persistence. One mounted
-  teaching/practice view owns the token; navigation back to the same ID never revives it.
-  Live expired/unknown target throws `Surface target is no longer active`; already-aborted
-  signals yield inert handles. Recheck mount lifetime and clean up late results exactly once.
-- Surfaces cover the full session body/inputs, not top bar/sidebar. Keep native and covered
+- The [generalized-surface checkpoint](../../docs/plugin-session-extension-contract.md#12-generalized-page-body-surfaces--implemented-and-verified)
+  is **implemented and verified, uncommitted above `8dd7409` on `feature/plugin-architecture`**. `ctx.ui.openSurface(surface, { signal })` captures the active page
+  boundary once at invocation: plugin views, native chat, Home/New Draft. No mandatory
+  native target or async retargeting. The existing `openSurface(target, surface, { signal })`
+  stays compatible for precise native action/submission targets. Both return standard
+  `PluginWidgetHandle<PluginSurfaceProps>` and reuse content/async cleanup.
+  Explicit opaque tokens still come only from native top-bar/submission context and expire
+  with one mounted teaching/practice view; no selector/DOM/session-ID/global-current
+  inference, persistence or native capture/hooks/tokens beyond native chat. Missing live
+  page boundaries and expired/unknown live targets throw `Surface target is no longer active`;
+  already-aborted signals yield inert handles before boundary resolution. Leaving/hiding
+  the page aborts its surfaces; re-entry creates a new boundary, never revives old tokens.
+  Recheck mount lifetime and clean up late results exactly once.
+- Surfaces cover only page body, not native/plugin top bar or sidebar. Home/New Draft have
+  no top bar: preserve only floating sidebar toggle/window chrome; graph controls and
+  composer remain mounted but covered/inactive. Keep native and covered
   surfaces mounted/painted; only eligible foreground body receives actions. Stack entries
   are visual siblings, not lifetime owners: lower plugin unload/disposal cannot remove
   another owner's foreground or Settings merely painted above. Explicit signals may bind
-  lifetimes. Navigation/plugin unload/abort/dispose tear down only their scopes; no restore
+  lifetimes. Dialogs/Settings always stay in front, even for requests while a dialog is
+  open. The surface belongs to the page, not its modal opener; no modal-opener-derived
+  focus eligibility or Escape ownership. Closing the dialog can reveal the surface only
+  if the caller signal remains live. Navigation/plugin unload/abort/dispose tear down only
+  their scopes; no restore
   across navigation. Reuse view layers/owner propagation, no app-wide modal hiding, scroll
-  lock, focus trap or second registry. Approved polish adds only
+  lock, focus trap, new overlay/window manager, global clipping or persistence. Private
+  files are `plugin-surface-targets.ts`, `plugin-surfaces.tsx`, `plugin-surface-shell.tsx`;
+  never import them into plugins. Approved polish adds only
   `background?: "dimmed" | "opaque"`, default `"dimmed"` (Chains-style 80%-background/blur);
   `"opaque"` is solid with no blur. Validate the enum on open and handle updates. Required
   `title` is the accessible name, **not a visible host title/header row**. Quiet muted Close/X
   floats above scrolling content. Content fills the whole body with the scrollbar at its
   outer edge, not inset by a host frame; plugins own visible headings and bottom actions.
   No extra header/appearance props or forced diagram border. This polish passed the
-  separate UI-polish checkpoint. onClose notifies, never async-vetoes disposal.
+  separate UI-polish checkpoint, not proof of generalized page coverage. `onClose`
+  notifies, never async-vetoes disposal.
 - One Escape has one owner; covered native submit/Tab/dictation is ineligible. Surface entry
   honors eligible foreground explicit focus, else first editable text/number/textarea then
   accessible surface fallback, without requiring a host-visible heading. Delayed covered
   mount/disposal never steals focus. Foreground close restores
   eligible uncovered opener including chrome, else surviving foreground remembered focus/
-  entry policy or native-body entry policy. Expired views never receive restoration; exposed
+  entry policy or owning-page-body entry policy. Expired views never receive restoration; exposed
   chrome stays interactive. These are scoped view surfaces; the picker separately chooses
   main-pane view or full-viewport modal presentation from its captured origin.
 - Do not broaden this increment into message/card/composer slots, generic rich-transcript
   rendering, backend submission hooks, native send/steer, mutable agent/event/context hooks,
-  image picker/clipboard/drop import, path inference, asset storage/export redesign or extra
-  surface regions/graph/plugin-route targets. All remain deferred. Session extensions passed
+  image picker/clipboard/drop import, path inference, asset storage/export redesign,
+  alternate surface regions or navigation restoration. These remain deferred; targetless
+  page coverage does not broaden native submission scope. The API stays 14 methods;
+  Showcase's Surfaces family/direct Open surface button retain the native action and
+  nested/background/menu/dialog examples, still 12 families. Its own checkpoint passed
+  4,045 host tests / 568 suites, 78 plugin tests, strict SDK/build/privacy gates and the
+  literal packaged-browser entrypoint (15 assertion groups, seven page variants,
+  29 screenshots). Section 12 records prior strict prefetch failures, the human-approved
+  two-stage classifier adjustment, final zero-prefetch-cancellation run, bytes and limits.
+  Original native-target and worker-header scroll regressions remain covered.
+  Session extensions passed
   their own 3,869-test checkpoint, not the historical 3,778-test question checkpoint. Packaged
   proof includes genuine Canvas/provider image bytes, fail-closed draft retention, pending
   refresh/image-only input, separate answer/thinking/reading images, model retry without hook

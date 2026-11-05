@@ -88,8 +88,8 @@ const disabled = (error: unknown) => isPluginHostError(error) && error.status ==
 
 test("external native backend composes host, inference, persistent managed inputs and endRun publication across activation", { timeout: 8000 }, async t => {
 	const root = fs.mkdtempSync(path.join(os.tmpdir(), "lh-plugin-integration-"));
-	const plugins = path.join(root, "plugins"), packageDirectory = path.join(plugins, "integration-fixture");
-	const dataDirectory = path.join(packageDirectory, "data"), learningDirectory = path.join(root, "synthetic-learning");
+	const plugins = path.join(root, "plugins"), pluginDirectory = path.join(plugins, "integration-fixture"), packageDirectory = path.join(pluginDirectory, "dist");
+	const dataDirectory = path.join(pluginDirectory, "data"), learningDirectory = path.join(root, "synthetic-learning");
 	fs.mkdirSync(packageDirectory, { recursive: true });
 	fs.mkdirSync(learningDirectory);
 	fs.writeFileSync(path.join(packageDirectory, "manifest.json"), JSON.stringify({ apiVersion: 1, id: "integration-fixture", name: "Hypothetical integration fixture", version: "1.0.0", minAppVersion: "0.3.0", backend: "backend.cjs" }));

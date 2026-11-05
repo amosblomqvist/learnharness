@@ -2,7 +2,7 @@
 
 import { useCallback, useId, useLayoutEffect, useRef, type ReactNode } from "react";
 import { InteractionLayerOwner, useInteractionLayer, type CloseOutcome } from "./interaction-layers";
-import type { SessionSurfaceBoundary } from "./plugin-session-surface-targets";
+import type { SurfaceBoundary } from "./plugin-surface-targets";
 import type { PluginSurfaceProps } from "@/src/core";
 
 interface SurfaceRuntime {
@@ -12,13 +12,21 @@ interface SurfaceRuntime {
 }
 const EDITABLE_FIELDS = "input:not([type]), input[type='text'], input[type='search'], input[type='email'], input[type='url'], input[type='tel'], input[type='password'], input[type='number'], textarea, [contenteditable='true'], [contenteditable=''], [contenteditable='plaintext-only']";
 
-function enterRegion(boundary: SessionSurfaceBoundary, root: HTMLElement, remembered = false) {
+function enterRegion(boundary: SurfaceBoundary, root: HTMLElement, remembered = false) {
 	const { controller } = boundary;
 	if (boundary.signal.aborted || !controller.isElementEligible(root)) return;
 	const active = root.ownerDocument.activeElement;
 	if (active instanceof HTMLElement && root.contains(active) && controller.isElementEligible(active)) return;
 	const previous = remembered ? boundary.remembered.get(root) : undefined;
 	if (previous && controller.isElementEligible(previous)) { previous.focus({ preventScroll: true }); return; }
+	// Opt-in content entry only. Owning-page/native return policy is unchanged.
+	if (root.hasAttribute("data-plugin-session-surface")) {
+		const marked = [...root.querySelectorAll<HTMLElement>("[data-plugin-initial-focus]")].find(element => controller.isElementEligible(element));
+		if (marked) {
+			marked.focus({ preventScroll: true });
+			if (root.ownerDocument.activeElement === marked) return;
+		}
+	}
 	for (const field of root.querySelectorAll<HTMLElement>(EDITABLE_FIELDS)) {
 		if (field.matches("[readonly], [aria-readonly='true']") || !controller.isElementEligible(field)) continue;
 		field.focus({ preventScroll: true }); return;
@@ -36,12 +44,12 @@ function enterRegion(boundary: SessionSurfaceBoundary, root: HTMLElement, rememb
 }
 
 /** A view, not a modal: no trap, global hiding, viewport portal or scroll lock. */
-export function PluginSessionSurface({ title, background = "dimmed", onClose, runtime, boundary, opener, children }: {
+export function PluginSurface({ title, background = "dimmed", onClose, runtime, boundary, opener, children }: {
 	title: string;
 	background?: PluginSurfaceProps["background"];
 	onClose?: () => void | Promise<void>;
 	runtime: SurfaceRuntime;
-	boundary: SessionSurfaceBoundary;
+	boundary: SurfaceBoundary;
 	opener: HTMLElement | null;
 	children: ReactNode;
 }) {
@@ -62,7 +70,7 @@ export function PluginSessionSurface({ title, background = "dimmed", onClose, ru
 		if (controller.getTopLayer()?.id === layerId && root.current) enterRegion(boundary, root.current);
 	}, [boundary, controller, layerId]);
 	// Capture authority BEFORE useInteractionLayer's registration cleanup. A
-	// covered disposal and a departing native view have no return authority.
+	// covered disposal and a departing page have no return authority.
 	useLayoutEffect(() => () => {
 		if (boundary.signal.aborted || controller.getTopLayer()?.id !== layerId) return;
 		const generation = controller.getGeneration() + 1;
@@ -77,7 +85,7 @@ export function PluginSessionSurface({ title, background = "dimmed", onClose, ru
 	}, [boundary, controller, layerId, opener]);
 	const layer = useInteractionLayer({
 		id: layerId, kind: "view", enabled: !runtime.signal.aborted && !boundary.signal.aborted,
-		// Stack siblings share only the native owner, never another surface's
+		// Stack siblings share only the page owner, never another surface's
 		// lifecycle (a menu/dialog may explicitly own a surface descendant).
 		ownerId: controller.ownerOf(boundary.body)?.id ?? null,
 		rootRef: root, portalRef: popup, onClose: close, focusInitial,

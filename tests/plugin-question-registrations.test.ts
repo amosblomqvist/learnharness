@@ -22,8 +22,8 @@ function fixture(t: TestContext) {
 	}) });
 	t.after(async () => { await host.dispose(); fs.rmSync(root, { recursive: true, force: true }); });
 	function plugin(id = "example") {
-		const location = path.join(directory, id);
-		fs.mkdirSync(location);
+		const location = path.join(directory, id, "dist");
+		fs.mkdirSync(location, { recursive: true });
 		fs.writeFileSync(path.join(location, "manifest.json"), JSON.stringify({ apiVersion: 1, id, name: id, version: "1.0.0", minAppVersion: "0.4.0", backend: "backend.cjs" }));
 		fs.writeFileSync(path.join(location, "backend.cjs"), "exports.activate = ctx => { ctx.handle('context', () => ctx); };");
 	}

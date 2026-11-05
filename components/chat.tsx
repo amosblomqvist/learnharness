@@ -7,8 +7,8 @@ import { usePlugins } from "./plugins";
 import { PluginSubmissionRunner, SubmissionModelEpoch, type SubmissionAttempt } from "./plugin-submission-runner";
 import { submissionImages, type BuiltinSubmissionCapture, type PrepareBuiltinSubmission, type PrepareThinkingSubmission, type PreparePluginQuestionSubmission } from "./plugin-submission-adapters";
 import { SubmittedImages } from "./submitted-images";
-import { useSessionSurfaceBoundary, SessionSurfaceRegion } from "./plugin-session-surfaces";
-import { findSessionSurfaceBoundary } from "./plugin-session-surface-targets";
+import { usePageSurfaceBoundary, SurfaceRegion } from "./plugin-surfaces";
+import { findSurfaceBoundary } from "./plugin-surface-targets";
 import { scheduleOpeningSubmission } from "./plugin-submission-opening";
 import { activeProblemOccurrenceOf, buildAnswer, toClientQuestion, type PluginSubmission, type PluginSubmissionTarget, type QuestionData } from "@/src/core";
 import { validatePluginBuiltinSubmissionAnswer } from "@/src/core";
@@ -282,7 +282,7 @@ export function Chat({
 	const controller = useOptionalInteractionLayers();
 	const sessionFindScopeRef = useRef<HTMLDivElement | null>(null);
 	const pathname = usePathname();
-	const surfaceTarget = useSessionSurfaceBoundary({ active: pathname === `/chat/${encodeURIComponent(chatId)}`, viewKey: chatId, bodyRef: sessionFindScopeRef });
+	const surfaceTarget = usePageSurfaceBoundary({ active: pathname === `/chat/${encodeURIComponent(chatId)}`, viewKey: chatId, bodyRef: sessionFindScopeRef });
 	const { manager: pluginManager } = usePlugins();
 	const [, submissionChanged] = useState(0);
 	const [preparationError, setPreparationError] = useState<string>();
@@ -295,7 +295,7 @@ export function Chat({
 	submissionLive.current = { nativeMessages, surfaceTarget, ready: true };
 	const runSubmission = async (target: PluginSubmissionTarget, capture: () => PluginSubmission | Promise<PluginSubmission>, current: () => boolean, deliver: (prepared: PluginSubmission, attempt: SubmissionAttempt) => Promise<boolean>): Promise<boolean> => {
 		const modelRevision = submissionModel.capture();
-		const attempt = submissionRunner.begin(target, pluginManager?.captureSubmissionInterceptors() ?? [], () => submissionMounted.current && submissionModel.isCurrent(modelRevision) && submissionLive.current.surfaceTarget === target.surfaceTarget && !!findSessionSurfaceBoundary(target.surfaceTarget) && current());
+		const attempt = submissionRunner.begin(target, pluginManager?.captureSubmissionInterceptors() ?? [], () => submissionMounted.current && submissionModel.isCurrent(modelRevision) && submissionLive.current.surfaceTarget === target.surfaceTarget && !!findSurfaceBoundary(target.surfaceTarget) && current());
 		if (!attempt) return false;
 		setPreparationError(undefined);
 		try {
@@ -776,7 +776,7 @@ export function Chat({
 	useEffect(() => {
 		if (sentInitial.current || !surfaceTarget) return;
 		return scheduleOpeningSubmission(
-			() => !sentInitial.current && submissionMounted.current && submissionLive.current.surfaceTarget === surfaceTarget && !!findSessionSurfaceBoundary(surfaceTarget),
+			() => !sentInitial.current && submissionMounted.current && submissionLive.current.surfaceTarget === surfaceTarget && !!findSurfaceBoundary(surfaceTarget),
 			() => {
 				sentInitial.current = true;
 				const entry = readOpeningPromptEntry(chatId);
@@ -1916,7 +1916,7 @@ export function Chat({
 				    INSIDE the session area — absolute inset-0 siblings of the scroller,
 				    so they own the area below the drag bar, right of the sidebar, and
 				    the top bar stays sharp + draggable while a focus is open. */}
-				<SessionSurfaceRegion target={surfaceTarget}>
+				<SurfaceRegion target={surfaceTarget}>
 				{mermaidFocus !== null && (
 					<MermaidOverlay chart={mermaidFocus} onClose={() => setMermaidFocus(null)} />
 				)}
@@ -1928,7 +1928,7 @@ export function Chat({
 					/>
 				)}
 				{planOpen && <PlanPopup messages={messages} onClose={() => setPlanOpen(false)} />}
-				</SessionSurfaceRegion>
+				</SurfaceRegion>
 				<AbortTurnDialog mode={abortAsk} onClose={() => setAbortAsk(null)} onConfirm={confirmAbort} busy={busy} />
 				</div>
 			</div>

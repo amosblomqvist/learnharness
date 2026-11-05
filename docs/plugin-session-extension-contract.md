@@ -4,7 +4,9 @@
 
 **Status: human-approved contract, implemented and verified. The human approved this plan and authorized implementation in this session. Original verification evidence is recorded in section 10. The human subsequently authorized committing that checkpoint on `feature/plugin-architecture`; it is not released. Section 11 records the later approved UI-polish amendment, implemented and verified but uncommitted.**
 
-This increment extends native teaching/practice sessions through three primitives. Existing verified Markdown/question work and peer plugin work must be preserved and are included in the separately authorized feature-branch checkpoint. No push or release is implied.
+**Current additive increment — above `8dd7409`: generalized page-body surfaces are implemented and verified, uncommitted and not installed or released.** Section 8 gives the amended normative contract; section 12 records its own 4,045-test / 15-browser-group checkpoint. Prior native-session and UI-polish proofs remain historical. The previously verified worker-header scroll regression is preserved in the new browser proof.
+
+This original increment extends native teaching/practice sessions through three primitives. Existing verified Markdown/question work and peer plugin work must be preserved and are included in the separately authorized feature-branch checkpoint. No push or release is implied.
 
 ## 1. Human-settled decisions
 
@@ -34,7 +36,7 @@ Excluded:
 - New card/message/composer action slots or generic transcript renderer registration. Existing tool/question renderers remain available; broader rich transcript contributions belong to the deferred UI design.
 - A native file picker, clipboard-image import or drag/drop image importer. Plugins supply explicit image data through interception.
 - Image assets/references, editable drawing storage, image expansion/download/inversion controls or a new Markdown-export asset format. Existing text export is not redesigned.
-- Additional surface coverage regions, graph/plugin-route surface boundaries, suspension across native navigation or a migration of existing diagram/plan/Chains views.
+- In the original increment, additional coverage regions and graph/plugin-route boundaries were excluded. Section 12 subsequently approves targetless page-body surfaces; transcript-only coverage, navigation suspension/restoration and migration of existing diagram/plan/Chains views remain excluded.
 - A rewrite of existing builtin HTTP grading authority, worker admission, question protocol or provider adapters.
 
 ## 3. Public submission contracts
@@ -213,10 +215,10 @@ Do not implement a parallel provider resolver. Use the actual effective engine t
 
 ## 8. Public surface contract
 
-Extend existing UI contracts:
+The following includes the human-approved generalized-page amendment, **implemented and verified, uncommitted above `8dd7409` on `feature/plugin-architecture`**. Explicit native targets remain compatible; the targetless overload does not extend native submission interception/context beyond native chat.
 
 ```ts
-// Opaque host-created identity for one mounted native session view.
+// Opaque host-created identity for one mounted host page body.
 interface PluginSurfaceTarget { /* private unique-symbol brand */ }
 
 interface PluginSurfaceProps {
@@ -226,7 +228,13 @@ interface PluginSurfaceProps {
   onClose?: () => void | Promise<void>;
 }
 
-// New PluginUi method:
+// Capture the active page boundary once, synchronously at invocation:
+openSurface(
+  props: PluginSurfaceProps,
+  options: PluginWidgetOptions,
+): PluginWidgetHandle<PluginSurfaceProps>;
+
+// Existing precise native-view target remains supported:
 openSurface(
   target: PluginSurfaceTarget,
   props: PluginSurfaceProps,
@@ -235,20 +243,21 @@ openSurface(
 ```
 
 - Existing session top-bar `PluginActionContext` gains `surfaceTarget`; submission target/context includes the same target. It is not an HTMLElement, selector, session ID to persist or backend-serializable token.
-- A native boundary owns the target and selected body region. With live plugin/caller signals, an unknown or expired target throws synchronously: `Surface target is no longer active`. Already-aborted signals return an inert disposed handle, following existing widget convention. Recheck target lifetime when committing the mount; a late expiry disposes/reports rather than resurrecting content. Leave-and-return to the same session ID never revives a token. No arbitrary DOM-parent injection or global current-session guessing.
-- Initial supported target is native teaching/practice session body only. Future coverage can extend this API without implementing unused regions now.
-- Parent session stays mounted. New surfaces stack; covered surfaces remain mounted and painted, with only the eligible foreground content receiving covered-body interaction. Ordinary stack entries are visual siblings, not automatically each other's lifetime owners; disposing one plugin's lower surface must not dispose another plugin's foreground surface. Explicit caller signals may intentionally bind content lifetimes.
-- Scope teardown on leaving the owning native view, plugin unload, caller abort or explicit dispose. Plugin-owned data may persist independently; surfaces themselves are not suspended/restored across navigation.
+- Targetless `openSurface(surface, { signal })` captures the active page boundary **once when invoked**, supporting plugin views and native chat, Home and New Draft. No public target is required or manufactured. Async work never retargets the surface to a later page. Without a live boundary, throw synchronously: `Surface target is no longer active`. Already-aborted signals return an inert disposed handle **before boundary resolution**, following existing widget convention.
+- Explicit native targets still identify one mounted teaching/practice view. Unknown/expired live targets throw the same error; returning to the same session ID never revives a token. Both overloads recheck lifetime at mount commit; late expiry disposes/reports rather than resurrecting content. No arbitrary DOM-parent injection, persisted target or global current-session guessing is added.
+- Coverage is the owning **page body only**. Native/plugin top bars and sidebar remain usable. Home/New Draft have no top bar: preserve only the floating sidebar toggle and window chrome; graph controls and composer are covered/inactive but remain mounted. No transcript-only or alternate-region selector is added.
+- Parent page stays mounted. New surfaces stack; covered surfaces remain mounted and painted, with only the eligible foreground content receiving covered-body interaction. Ordinary stack entries are visual siblings, not automatically each other's lifetime owners; disposing one plugin's lower surface must not dispose another plugin's foreground surface. Explicit caller signals may intentionally bind content lifetimes.
+- Scope teardown on leaving or hiding the owning page, plugin unload, caller abort or explicit dispose. Re-entry creates a new boundary; it does not revive the departed boundary or its surfaces. Plugin-owned data may persist independently; surfaces themselves are not suspended/restored across navigation.
 - Reuse PluginUiContent mounting, controlled update/dispose handles, async cleanup, error reporting and abort lifetimes. Content wrappers fill available width/height; replacing content cleans up exactly once, including late async cleanup.
 - Use existing `view` interaction layers and explicit owner propagation; no body-modal semantics, app-wide background hiding, viewport scroll lock or second overlay registry.
-- Keep logical ordering and painted stacking in agreement, including menus/dialogs above a surface. Follow the approved one-Escape rules; never dispatch submit/Tab/dictation actions into covered native inputs.
+- Keep logical ordering and painted stacking in agreement, using the shared controller/view layers. Dialogs and Settings **always remain in front**, including when a surface is requested while a dialog is open. The surface belongs to the page, not the modal opener; it cannot gain focus eligibility or Escape ownership through that opener. If the dialog closes and the caller signal remains live, the underlying surface can be revealed. Preserve existing menu ownership and one-Escape rules; never dispatch submit/Tab/dictation actions into covered page inputs.
 - Focus entry reuses the existing initial-focus preference: honor eligible focus already explicitly placed inside the new foreground surface; otherwise focus its first eligible editable text/number field or textarea, then an eligible plugin-content heading. With neither, focus the painted, labelled surface frame (`tabIndex=-1`), not the floating close action or a non-rendering semantic wrapper. Do not steal focus when a delayed mount finishes under a newer foreground layer.
-- On foreground close, restore its captured opener if still eligible and uncovered, including exposed app chrome. Otherwise use the surviving foreground region's remembered eligible focus or its entry policy. With no plugin surface remaining, apply that policy within the native session body. Never focus covered/detached controls.
-- Disposing a covered surface does not steal foreground focus. Native-view expiry never restores into the departed view. These entry/return rules do not trap focus or disable the exposed top bar/sidebar.
+- On foreground close, restore its captured opener if still eligible and uncovered, including exposed app chrome. Otherwise use the surviving foreground region's remembered eligible focus or its entry policy. With no plugin surface remaining, apply that policy within the owning page body. Never focus covered/detached controls.
+- Disposing a covered surface does not steal foreground focus. Page-boundary expiry never restores into the departed view. These entry/return rules do not trap focus or disable the exposed top bar/sidebar.
 - Leaving/disabling an owning plugin closes only owned surfaces. Global Settings is not lifetime-owned by a plugin surface merely because it is painted above it.
 - `onClose` follows existing dialog notification semantics, not a new asynchronous close veto. Programmatic disposal/abort retain existing handle cleanup semantics.
 
-**Subsequent human-approved visual amendment — implemented and verified, uncommitted:** retain the exact session-body bounds but remove the host title/header row and inset frame padding. The required `title` is the region's accessible name, not an automatic visible heading. A quiet muted X floats above content without consuming a row and stays pinned while content scrolls; the content mount fills the body, reaches the session top bar and outer right edge, and does not inset its scrollbar. Plugins own visible headings and bottom action rows. `background` accepts only `"dimmed"` or `"opaque"`, validated on mount/update: omitted/`"dimmed"` uses the existing Chains-like background/80 and blur; `"opaque"` uses solid background without blur. The public widget update/lifetime contract is unchanged. Plugin dialogs receive the same headerless/floating-X treatment while retaining their existing modal frame bounds, backdrop and mechanics. No broader core-overlay redesign is included. Section 10 records the original visible-title presentation; section 11 verifies this amendment.
+**Historical native-session visual amendment — implemented and verified, uncommitted at verification time:** retain the exact session-body bounds but remove the host title/header row and inset frame padding. The required `title` is the region's accessible name, not an automatic visible heading. A quiet muted X floats above content without consuming a row and stays pinned while content scrolls; the content mount fills the body, reaches the session top bar and outer right edge, and does not inset its scrollbar. Plugins own visible headings and bottom action rows. `background` accepts only `"dimmed"` or `"opaque"`, validated on mount/update: omitted/`"dimmed"` uses the existing Chains-like background/80 and blur; `"opaque"` uses solid background without blur. The public widget update/lifetime contract is unchanged. Plugin dialogs receive the same headerless/floating-X treatment while retaining their existing modal frame bounds, backdrop and mechanics. No broader core-overlay redesign is included. Section 10 records the original visible-title presentation; section 11 verifies this amendment.
 
 ## 9. Implementation sequence and verification
 
@@ -322,3 +331,41 @@ Native proofs include accessible-only overlay titles, pinned floating X controls
 The unchanged knowledge-picker API now uses actual invocation ownership: page/session-surface origins get a main-pane view with interactive sidebar; modal origins retain a full-viewport modal. Eleven native origin/geometry cases cover sidebar configurations, native-control clearance simulations and route expiry. A global-modal picker belongs to its actual owner/widget, **not an unrelated background route**; a causal review finding here was fixed with pending/open regressions and independently re-reviewed. Covered-source retention is proved by hit-testing, unchanged DOM/draft/owner and trusted Tab/Shift+Tab/Find isolation—not by assuming that every cross-region view sets DOM `inert`. Existing modal and session-surface inertness policies remain intact. Reverse programmatic surface-over-picker ordering is a host-integration proof, not a claimed visible browser flow.
 
 Evidence: `/tmp/lh-ui-polish-isolated-package-rPMHuU/source`, `/tmp/lh-ui-polish-tests-final.log`, `/tmp/lh-ui-polish-build.log`, `/tmp/lh-ui-polish-sdk-strict.log`, and `/private/tmp/lh-ui-showcase-native-ssfmL3/result.json` with nine viewport screenshots. Independent source/delta audits reported no remaining confirmed P1/P2. Windows/Linux checks simulate CSS window-control geometry; physical OS chrome, real microphone capture, OS IME, signed installers, paid providers and real-profile installation are not claimed. The separate proposed coding-question UI changes are not part of this checkpoint.
+
+## 12. Generalized page-body surfaces — implemented and verified
+
+**Implemented and verified, uncommitted above `8dd7409` on `feature/plugin-architecture`; not installed or released.** The amended section 8 adds `ctx.ui.openSurface(surface, { signal })` while retaining `openSurface(target, surface, { signal })` for precise native submission/action targeting. No new method or props are added: the UI API remains **14 methods**.
+
+Capture the active page boundary once at invocation: plugin views, native chat, Home and New Draft. Page-body coverage, mounted covered content, page-hide/leave expiry, always-foreground dialogs/Settings and page—not modal-opener—ownership are normative in section 8. Existing headerless floating-X presentation, backgrounds, stacked-content lifecycle and interaction controller/view layers are reused. Private implementation names are `plugin-surface-targets.ts`, `plugin-surfaces.tsx` and `plugin-surface-shell.tsx`; they are not public imports. No new overlay/window manager, global clipping rule or persistence is introduced. Native submission capture, hooks and token exposure remain limited to their existing native chat scope.
+
+UI Showcase's **Surfaces** family now has a direct **Open surface** gallery button using the targetless overload; the explicit native top-bar action, nesting, background, menu and dialog demonstrations remain. The gallery stays **14 methods / 12 families**. This checkpoint is separate from earlier tree/session/UI-polish proofs and includes the previously verified worker-header scroll regression.
+
+### Final gates — 2026-11-04
+
+- **4,045 host tests / 568 suites**, zero failures; **78 plugin tests** (47 Flashcards, 5 Coding Questions, 26 UI Showcase).
+- Whole-project TypeScript, ESLint and whitespace checks passed; ESLint retains only the pre-existing test-fixture `<head>` warning.
+- Fresh isolated production/standalone build and strict generated-SDK consumer passed, including both overloads and negative invented routing/modal/missing-signal checks.
+- Payload audit: **96 tracing manifests / 278,337 entries / zero private-root hits**; **415 production files** match source and payload with no missing or mismatched files.
+- Independent final read-only review reported no remaining confirmed P1/P2. Permanent regressions cover immediate view-mount opening, stable coverage across plugin loading/error/unavailable branches, and a genuinely later native Draft picker. The latter stays inside the shared region with locally restored pointer events, without a new layout box or global Chains changes.
+
+### Packaged browser proof
+
+The literal `npm run test:native` entrypoint exited **0** at `/private/tmp/lh-ui-showcase-native-knRqpm`, passing **15 assertion groups** with **29 screenshots**:
+
+- Direct gallery invocation and the existing explicit native-target demo; retained nested/background/menu/dialog behavior, covered drafts and focus return.
+- Seven page variants: Home graph/minimal, teaching/practice Drafts, settled native teaching/practice sessions and plugin route. Exact body bounds, covered controls, usable sidebar/floating chrome or native/plugin top bar, navigation abort, once-only late cleanup and inert expired callbacks/updates.
+- Native Draft picker search/disclosure/X use trusted clicks and actual hit tests, both alone and asynchronously above an older Surface.
+- Real visible ordinary-dialog and public plugin-Settings controls open later page-owned Surfaces. Existing modals remain painted and focused above them; both hidden field/button points hit the modal/backdrop, and real Tab/Shift+Tab remain modal. This proves the unchanged host default-prevention policy and containment, **not native Tab traversal**. Modal background protection uses the existing ARIA-hiding/backdrop/focus contract, not a new `inert`-attribute requirement.
+
+Final safety: zero page errors, off-origin requests, microphone requests, WebSockets, generation/chat POSTs or browser graph writes. Settings were restored exactly and the seeded graph hash remained unchanged. One expected canceled picker source read was recorded; there were **zero canceled prefetches**. Existing permitted responses were one favicon 404 and 33 idle STT-token 503s. Verification used disposable synthetic data and a separately fingerprinted public-API test plugin, never a real profile or paid provider.
+
+Prior complete runs `CMWNKt` and `Bh11JN` also passed all 15 UI groups but exited 1 on a canceled Next prefetch in the new native-practice/native-teach matrix stages. Those failures remain preserved. The human approved adding **only those two observed stages** to the existing classifier, retaining same-origin non-API GET/fetch, positive RSC/prefetch headers, matching same-stage HTTP 200 and `ERR_ABORTED` requirements. The actual classifier passed **25 positive/negative checks**; the successful browser run had no canceled prefetch and therefore did **not** exercise the added branches. No API/provider or arbitrary-stage failure is ignored.
+
+### Evidence, bytes and limits
+
+- Native artifacts: `knRqpm/{result.json,proof-summary.json,final-byte-comparison.json}` and screenshots; consolidated report `/tmp/lh-page-surfaces-bounded-guard-evidence.json`.
+- Host build: `/tmp/lh-page-surfaces-isolated-package-dRJrno/source/.next/standalone`; gate logs `/tmp/lh-page-surfaces-final-{build,tests,types,lint}.log`; payload audit `/tmp/lh-page-surfaces-final-payload-audit.json`.
+- Native-tested host digest: `5405def55db9712c5a5c8bf9eadb52540da6943dbe52dcaabb19307ac2668c33`; product digest: `a4493b43fa2883d9db7d4bbbe3fdaf630591e1adb1f37a07fcdbb03822bbb132`; test-fixture digest: `69ef0efb5eaacb4b2d87402c77743323bdb25131a561bac606f5884bc759a4b3`.
+- All **5,547 host files / 5 product files** matched before/after the browser run with zero missing, extra or mismatched entries. These digests identify the native-tested snapshots; subsequent documentation-only curation must preserve tested runtime bytes.
+
+Physical Electron window chrome, real microphone/OS IME, and loading/error/unavailable plugin-page transitions were not exercised in this browser proof; branch transitions have offline causal regressions. No installation changes, real-profile installation, staging, commit, push or release are authorized or performed by this checkpoint.
