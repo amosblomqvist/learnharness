@@ -18,12 +18,30 @@ export const GROQ_DICTATION_ROW = "dictation:GROQ_API_KEY";
 const ENDPOINT = "/api/stt/transcribe";
 const headers = { [GROQ_DICTATION_HEADER]: "1" };
 
-async function routeMessage(res: Response): Promise<string> {
+/** A failed chunk request. `message` is fit to show the user; `retryable` says
+ * whether sending the same chunk again may work (a rate limit, an outage, a
+ * dropped connection) and `retryAfterMs` is the wait the server asked for. */
+export class GroqRequestError extends Error {
+	constructor(message: string, readonly retryable: boolean, readonly retryAfterMs?: number) {
+		super(message);
+		this.name = "GroqRequestError";
+	}
+}
+
+async function routeFailure(res: Response): Promise<GroqRequestError> {
+	let message = `Groq dictation failed (${res.status})`;
+	let retryable = res.status === 429 || res.status >= 500;
 	try {
-		const body = await res.json() as { message?: unknown };
-		if (typeof body.message === "string" && body.message) return body.message;
+		const body = await res.json() as { message?: unknown; retryable?: unknown };
+		if (typeof body.message === "string" && body.message) message = body.message;
+		if (typeof body.retryable === "boolean") retryable = body.retryable;
 	} catch {}
-	return `Groq dictation failed (${res.status})`;
+	const seconds = Number(res.headers.get("retry-after"));
+	return new GroqRequestError(message, retryable, Number.isFinite(seconds) && seconds > 0 ? Math.ceil(seconds * 1000) : undefined);
+}
+
+async function routeMessage(res: Response): Promise<string> {
+	return (await routeFailure(res)).message;
 }
 
 /** Is a Groq key configured? Resolves when it is; rejects with the keyless line
@@ -40,29 +58,33 @@ export async function checkGroqReady(request: typeof fetch = fetch): Promise<voi
 	throw new Error(await routeMessage(res));
 }
 
-/** Send one recording (a WAV) and get its transcript, "" for silence. Rejects
- * with a message fit to show the user. An aborted request rejects with the
- * abort error, which the caller discards along with the run. */
+/** Send one chunk of audio (a WAV) and get its transcript, "" for silence.
+ * `prompt` is the end of the previous chunk's transcript, so Whisper continues
+ * it. Rejects with a GroqRequestError whose message is fit to show the user. An
+ * aborted request rejects with the abort error, which the caller discards along
+ * with the run. */
 export async function transcribeGroq(request: typeof fetch, args: {
 	wav: Uint8Array<ArrayBuffer>;
 	model: GroqWhisperModel;
 	language: DictationLanguage;
+	prompt?: string;
 	signal?: AbortSignal;
 }): Promise<string> {
 	const form = new FormData();
 	form.set("audio", new Blob([args.wav], { type: "audio/wav" }), "dictation.wav");
 	form.set("model", args.model);
 	form.set("language", args.language);
+	if (args.prompt) form.set("prompt", args.prompt);
 	let res: Response;
 	try {
 		res = await request(ENDPOINT, { method: "POST", headers, body: form, signal: args.signal });
 	} catch (err) {
 		if (args.signal?.aborted) throw err;
-		throw new Error("Could not send the recording for transcription. Check that LearnHarness is running.");
+		throw new GroqRequestError("Could not send the recording for transcription. Check that LearnHarness is running.", true);
 	}
-	if (res.status === 503) throw new Error(GROQ_DICTATION_KEYLESS);
-	if (!res.ok) throw new Error(await routeMessage(res));
+	if (res.status === 503) throw new GroqRequestError(GROQ_DICTATION_KEYLESS, false);
+	if (!res.ok) throw await routeFailure(res);
 	const body = await res.json().catch(() => ({})) as { text?: unknown };
-	if (typeof body.text !== "string") throw new Error("Groq dictation returned no transcript.");
+	if (typeof body.text !== "string") throw new GroqRequestError("Groq dictation returned no transcript.", false);
 	return body.text.trim();
 }
