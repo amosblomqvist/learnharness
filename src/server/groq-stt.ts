@@ -18,9 +18,14 @@
  * Trust: proxy.ts already gates every /api route behind the desktop
  * capability. A multipart POST is a CORS "simple request", so a page on
  * another origin could fire one without a preflight and spend the user's Groq
- * quota; like the Claude Code and subscription controls this therefore also
- * demands same-origin browser intent (custom header, Sec-Fetch-Site, Origin).
- * That is not user authentication and grants no CORS.
+ * quota; like the subscription controls this therefore also demands
+ * same-origin browser intent (custom header, Sec-Fetch-Site, and an Origin
+ * equal to the Host-derived origin on POST). That is not user authentication,
+ * grants no CORS, and is no defence against DNS rebinding (a forged Host with
+ * a matching Origin passes), the same limit the subscription controls have.
+ *
+ * If the browser goes away mid-request the call to Groq is aborted too, so a
+ * closed tab stops spending quota.
  */
 import {
 	DEFAULT_GROQ_WHISPER_MODEL,
@@ -47,12 +52,15 @@ function fail(status: number, message: string, extra?: HeadersInit): Response {
 	return Response.json({ message }, { status, headers: { ...HEADERS, ...extra } });
 }
 
+/** Same rule as the subscription controls: browsers send Origin on every POST,
+ * including same-origin ones, so a POST without it is not from a page; a GET may
+ * omit it (same-origin GETs usually do). */
 function sameOriginIntent(request: Request): boolean {
 	const origin = subscriptionRequestOrigin(request);
 	if (!origin || request.headers.get(GROQ_DICTATION_HEADER) !== "1") return false;
 	if (request.headers.get("sec-fetch-site") === "cross-site") return false;
 	const supplied = request.headers.get("origin");
-	return supplied === null || supplied === origin;
+	return request.method === "GET" ? supplied === null || supplied === origin : supplied === origin;
 }
 
 const forbidden = () => fail(403, "Dictation requests must come from the LearnHarness window.");
@@ -95,14 +103,17 @@ async function readForm(request: Request): Promise<FormData> {
 	}
 }
 
-/** Groq's error body is OpenAI-shaped: { error: { message } }. */
-async function groqDetail(res: Response): Promise<string> {
+/** Groq's error body is OpenAI-shaped: { error: { message } }. It is relayed
+ * to the learner, so the key is scrubbed from it first (Groq does not echo
+ * keys; this is defence in depth). */
+async function groqDetail(res: Response, key: string): Promise<string> {
 	const text = await res.text().catch(() => "");
+	let detail = text;
 	try {
 		const message = (JSON.parse(text) as { error?: { message?: unknown } }).error?.message;
-		if (typeof message === "string") return message.slice(0, 200);
+		if (typeof message === "string") detail = message;
 	} catch {}
-	return text.slice(0, 200);
+	return detail.replaceAll(key, "[redacted]").slice(0, 200);
 }
 
 function retryAfter(res: Response): string {
@@ -114,8 +125,8 @@ function retryAfter(res: Response): string {
 /** Map a Groq failure to a user-facing message. 429 and 413 keep their status
  * (the client may react); everything else is a 502 so it is never mistaken for
  * our own 400/403/415/503. */
-async function groqFailure(res: Response): Promise<Response> {
-	const detail = await groqDetail(res);
+async function groqFailure(res: Response, key: string): Promise<Response> {
+	const detail = await groqDetail(res, key);
 	switch (res.status) {
 		case 401:
 			return fail(502, "Groq rejected the API key (401). Check GROQ_API_KEY in Settings → Providers.");
@@ -178,14 +189,16 @@ export async function groqTranscribeResponse(request: Request): Promise<Response
 			method: "POST",
 			headers: { Authorization: `Bearer ${key}` },
 			body: upstream,
-			signal: AbortSignal.timeout(GROQ_TIMEOUT_MS),
+			// Stop when the browser goes away as well as on the timeout.
+			signal: AbortSignal.any([request.signal, AbortSignal.timeout(GROQ_TIMEOUT_MS)]),
 		});
 	} catch (err) {
+		if (request.signal.aborted) return fail(499, "The request was cancelled.");
 		return err instanceof DOMException && err.name === "TimeoutError"
 			? fail(502, "Groq took too long to respond. Try again.")
 			: fail(502, "Groq unreachable. Check your connection and try again.");
 	}
-	if (!res.ok) return groqFailure(res);
+	if (!res.ok) return groqFailure(res, key);
 
 	try {
 		const data = (await res.json()) as { text?: unknown };

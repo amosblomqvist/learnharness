@@ -70,11 +70,24 @@ describe("trust and configuration gates", () => {
 		assert.equal(calls.length, 0);
 	});
 
-	it("accepts same-origin requests, with or without an Origin header", async () => {
+	it("a POST needs an Origin equal to the one it was addressed to; a GET may omit it", async () => {
 		assert.equal((await post(form())).status, 200);
-		const noOrigin = new Request(URL_, { method: "POST", body: form(), headers: { [GROQ_DICTATION_HEADER]: "1" } });
-		assert.equal((await route.POST(noOrigin)).status, 200);
 		assert.equal((await post(form(), { "sec-fetch-site": "same-origin" })).status, 200);
+		const noOrigin = new Request(URL_, { method: "POST", body: form(), headers: { [GROQ_DICTATION_HEADER]: "1" } });
+		assert.equal((await route.POST(noOrigin)).status, 403, "no browser omits Origin on a POST");
+		assert.equal((await post(form(), { origin: "http://localhost:3000" })).status, 403, "a different port is another origin");
+		assert.equal(calls.length, 2, "only the two same-origin posts reached Groq");
+		assert.equal((await route.GET(new Request(URL_, { headers: { [GROQ_DICTATION_HEADER]: "1" } }))).status, 200);
+		assert.equal((await route.GET(new Request(URL_, { headers: { [GROQ_DICTATION_HEADER]: "1", origin: "http://evil.example" } }))).status, 403);
+	});
+
+	it("the origins the app really runs on still pass: dev on localhost, a LAN address, the packaged loopback port", async () => {
+		for (const origin of ["http://localhost:3000", "http://192.168.1.20:3000", "http://127.0.0.1:48151"]) {
+			const res = await route.POST(new Request(`${origin}/api/stt/transcribe`, {
+				method: "POST", body: form(), headers: { [GROQ_DICTATION_HEADER]: "1", origin, "sec-fetch-site": "same-origin" },
+			}));
+			assert.equal(res.status, 200, origin);
+		}
 	});
 
 	it("keyless: 503 before the body is read, and nothing is sent to Groq", async () => {
@@ -151,7 +164,7 @@ describe("input validation", () => {
 		});
 		const res = await route.POST(new Request(URL_, {
 			method: "POST", body, duplex: "half",
-			headers: { [GROQ_DICTATION_HEADER]: "1", "content-type": "multipart/form-data; boundary=x" },
+			headers: { [GROQ_DICTATION_HEADER]: "1", origin: "http://localhost", "content-type": "multipart/form-data; boundary=x" },
 		} as RequestInit & { duplex: "half" }));
 		assert.equal(res.status, 413);
 		assert.ok(sent < GROQ_MAX_BODY_BYTES + 3 * chunk.byteLength, "the reader stopped pulling soon after the limit");
@@ -290,5 +303,49 @@ describe("Groq failures become clear messages", () => {
 		res = await post(form());
 		assert.equal(res.status, 502);
 		assert.match(await message(res), /no transcript/);
+	});
+});
+
+describe("hardening", () => {
+	it("aborts the call to Groq when the browser goes away, and answers without a transcript", async () => {
+		const gone = new AbortController();
+		let upstream: AbortSignal | undefined;
+		let started!: () => void;
+		const reached = new Promise<void>((resolve) => { started = resolve; });
+		globalThis.fetch = ((_: unknown, init?: RequestInit) => {
+			upstream = init!.signal!;
+			started();
+			return new Promise((_resolve, reject) => {
+				upstream!.addEventListener("abort", () => reject(upstream!.reason), { once: true });
+			});
+		}) as typeof fetch;
+		const pending = route.POST(new Request(URL_, {
+			method: "POST", body: form(), signal: gone.signal,
+			headers: { [GROQ_DICTATION_HEADER]: "1", origin: "http://localhost" },
+		}));
+		await reached;
+		assert.equal(upstream!.aborted, false, "still waiting on Groq");
+		gone.abort();
+		const res = await pending;
+		assert.equal(upstream!.aborted, true, "the Groq request was cancelled with the browser's");
+		assert.equal(res.status, 499);
+		assert.match(await message(res), /cancelled/);
+	});
+
+	it("still bounds the call with a timeout", async () => {
+		await post(form());
+		assert.ok(calls[0]!.init.signal instanceof AbortSignal);
+		assert.equal(calls[0]!.init.signal!.aborted, false);
+	});
+
+	it("scrubs the key from an error detail it relays, in JSON and in plain text", async () => {
+		answer = () => new Response(JSON.stringify({ error: { message: `bad request for ${KEY}, retry with ${KEY}` } }), { status: 400 });
+		let text = await message(await post(form()));
+		assert.ok(!text.includes(KEY));
+		assert.match(text, /\[redacted\], retry with \[redacted\]/);
+		answer = () => new Response(`raw ${KEY} body`, { status: 422 });
+		text = await message(await post(form()));
+		assert.ok(!text.includes(KEY));
+		assert.match(text, /raw \[redacted\] body/);
 	});
 });
