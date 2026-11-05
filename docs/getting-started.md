@@ -43,9 +43,9 @@ Audio streams from your browser directly to Deepgram using a short-lived token. 
 2. Set **Engine** to **Groq (Whisper)**, then choose a model: **Whisper Large v3 Turbo** (default, faster) or **Whisper Large v3** (most accurate). The language setting still applies; regional variants such as English (GB) use the base language, and **Multilingual** lets Whisper detect the language.
 3. Start and stop as above. Groq does not stream: LearnHarness records while you speak, and when you stop it shows **Transcribing…** and inserts the text once Groq answers. **Esc** discards the recording, including while it is transcribing.
 
-Recordings are limited to 12 minutes, which keeps them under Groq's 25 MB free-tier upload limit; at the limit the recording stops and is transcribed. Recordings under a third of a second are ignored. If Groq rejects a request, for example because of a rate limit, the message appears in the dictation button and that recording is not kept; dictate again.
+Recordings are limited to 12 minutes, which keeps them under Groq's 25 MB free-tier upload limit; at the limit the recording stops and is transcribed. Recordings under a third of a second are ignored. If Groq rejects a request, for example because of a rate limit, the message appears in the dictation button beside **Retry** and a discard button. LearnHarness keeps that recording in memory so **Retry** can send the same audio again. It is dropped when the transcript arrives, when you discard it, when you start a new recording, and when you leave the page; **Esc** during a retry cancels that attempt but keeps the recording. While it is kept, Enter in the composer or a question box does not send, so an answer never goes out without what you said; discard the recording to send what you typed.
 
-With Groq, the recording goes from your browser to the LearnHarness server on this machine, which uploads it to Groq with your key. The key never reaches the browser, and LearnHarness does not save the recording. Groq's own terms and usage limits apply to your account.
+With Groq, the recording goes from your browser to the LearnHarness server on this machine, which uploads it to Groq with your key. The key never reaches the browser, and LearnHarness does not write the recording to disk. Groq's own terms and usage limits apply to your account.
 
 ## Use local files in a session
 

@@ -128,10 +128,14 @@ export function DraftShell({
 	/* FINISH DICTATION FIRST (owner, 2026-10-01): stop the run, let the
 	 * last finals land through onChange, THEN call the parent's send —
 	 * which reads its REF mirror, so the post-await timing of React's
-	 * re-render cannot eat the dictated tail. */
+	 * re-render cannot eat the dictated tail. A Groq upload that failed keeps
+	 * its recording for Retry and finish resolves false: nothing is sent and
+	 * the draft stays. */
 	const handleSend = () => {
-		if (dictation.active) {
-			void dictation.finish().then(onSend);
+		if (dictation.active || dictation.retryable) {
+			void dictation.finish().then((ok) => {
+				if (ok) onSend();
+			});
 			return;
 		}
 		onSend();

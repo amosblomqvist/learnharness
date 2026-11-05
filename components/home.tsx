@@ -104,11 +104,15 @@ export function Home({
 	 * state closure) and run. Applies before the setup/key guards too, so
 	 * an intercepted draft is the complete one. */
 	const start = () => {
-		if (!dictation.active) {
+		if (!dictation.active && !dictation.retryable) {
 			void begin();
 			return;
 		}
-		void dictation.finish().then(() => begin());
+		// A failed Groq upload keeps its recording for Retry: finish resolves
+		// false, so nothing starts and the topic stays.
+		void dictation.finish().then((ok) => {
+			if (ok) void begin();
+		});
 	};
 	const begin = async () => {
 		const t = topicRef.current.trim();

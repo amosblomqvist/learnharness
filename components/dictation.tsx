@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Loader2Icon, MicIcon } from "lucide-react";
+import { Loader2Icon, MicIcon, RotateCcwIcon, XIcon } from "lucide-react";
 import { useSettingsDialog } from "@/components/settings/settings-dialog";
 import { Hint } from "@/components/ui/hint";
 import {
@@ -10,8 +10,8 @@ import {
 } from "@/src/core";
 import { useDictationLanguage } from "@/components/dictation-preference";
 import { checkGroqReady, GROQ_DICTATION_KEYLESS, GROQ_DICTATION_ROW, transcribeGroq } from "@/components/dictation-groq";
-import { setDictationActive } from "@/components/dictation-state";
-export { isDictationActive } from "@/components/dictation-state";
+import { setDictationActive, setDictationRetained } from "@/components/dictation-state";
+export { isDictationActive, isDictationRetained } from "@/components/dictation-state";
 
 /**
  * Voice dictation — the cloud engine (STT wave 1, 2026-09-17).
@@ -98,6 +98,11 @@ export { isDictationActive } from "@/components/dictation-state";
  * has spoken. Recordings cap at GROQ_MAX_PCM_BYTES (12 min): reaching it stops
  * and transcribes, never discards. While Groq works the phase is "stopping"
  * with `transcribing` set; Esc aborts the request and discards the audio.
+ * A failed upload does NOT lose the speech: the WAV stays in memory (never
+ * written anywhere), the error shows beside a Retry button, and finish()
+ * resolves false so a submit path keeps its draft instead of sending it
+ * without what was said. The recording is dropped on success, when the error
+ * is dismissed, when a new recording starts, and on unmount.
  */
 
 /*
@@ -230,11 +235,12 @@ export function appendToPrimaryInput(text: string): boolean {
  * pending question's dock) need finish() without a prop bridge. Same
  * module-level pattern as questionTarget — one window, one instance,
  * one finisher. Empty registry (no hook mounted) → resolve immediately. */
-let dictationFinisher: (() => Promise<void>) | null = null;
+let dictationFinisher: (() => Promise<boolean>) | null = null;
 
-/** Finish any live dictation run before continuing (see Dictation.finish). */
-export function finishDictation(): Promise<void> {
-	return dictationFinisher ? dictationFinisher() : Promise.resolve();
+/** Finish any live dictation run before continuing (see Dictation.finish).
+ *  Resolves false when speech was left unsent: the caller must not submit. */
+export function finishDictation(): Promise<boolean> {
+	return dictationFinisher ? dictationFinisher() : Promise.resolve(true);
 }
 
 /** Join a dictated final onto the current text (shared separator rule). */
@@ -259,6 +265,9 @@ export function useDictationTarget(append: (text: string) => void, claimed: bool
 
 export type DictationPhase = "idle" | "connecting" | "recording" | "stopping";
 
+/** A Groq recording held for Retry: the encoded WAV plus what its upload needs. */
+type KeptRecording = { wav: Uint8Array<ArrayBuffer>; model: GroqWhisperModel; language: DictationLanguage };
+
 export type Dictation = {
 	phase: DictationPhase;
 	/** Terminal-state explanation, shown inside the wide button (cleared on the next start). */
@@ -270,6 +279,14 @@ export type Dictation = {
 	/** Groq only: the recording is uploaded and the run waits for its transcript
 	 *  (phase is "stopping"). The bar swaps the meter for "Transcribing…". */
 	transcribing: boolean;
+	/** Groq only: the last upload failed and its recording is kept in memory
+	 *  (the bar offers Retry). Cleared by a successful retry, clearError(), a
+	 *  new recording or unmount. Always false for Deepgram. */
+	retryable: boolean;
+	/** Send the kept recording again. No-op when none is kept or an upload is
+	 *  already in flight. The transcript lands through the usual deferred flush;
+	 *  nothing is submitted. */
+	retry: () => void;
 	/** End + KEEP the transcript: flush the deferred buffer into the primary
 	 *  input (the Stop pill and ⌘D). */
 	toggle: () => void;
@@ -282,15 +299,20 @@ export type Dictation = {
 	 *  reasoning. Idle → resolves immediately (the common no-run submit
 	 *  pays nothing). Every terminal path runs cleanup(), and cleanup()
 	 *  resolves the waiters — cancel (Esc) resolves them too, by its
-	 *  discard semantics. */
-	finish: () => Promise<void>;
+	 *  discard semantics.
+	 *
+	 *  Resolves TRUE when nothing is left unsent and the caller may carry on.
+	 *  Resolves FALSE when the Groq upload failed and the recording is kept for
+	 *  Retry (also when idle with one already kept): the submit path must ABORT
+	 *  and leave the draft untouched, never send it without the spoken part. */
+	finish: () => Promise<boolean>;
 	/** End + DISCARD the transcript: no flush, immediate teardown. The Esc
 	 *  semantics (owner, 2026-09-17 round 3): Esc is a cancel, not a stop —
 	 *  before, it flushed exactly like the toggle did. */
 	cancel: () => void;
 	/** Clear the terminal error without starting a run (zero-keys wave):
 	 * the keyless click leaves for Settings and the surface must come
-	 * back clean. */
+	 * back clean. Dismissing also drops any recording kept for Retry. */
 	clearError: () => void;
 };
 
@@ -338,7 +360,7 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 	const bufferRef = useRef<string[]>([]);
 	/** Resolvers waiting for the run to fully end (finish(), owner
 	 *  2026-10-01): released by cleanup() — every terminal path runs it. */
-	const waitersRef = useRef<Array<() => void>>([]);
+	const waitersRef = useRef<Array<(ok: boolean) => void>>([]);
 	/** Which engine this run uses (null until its preference is read) and, for
 	 *  Groq, what the upload needs. Set once per run, in start(). */
 	const engineRef = useRef<DictationProvider | null>(null);
@@ -349,8 +371,19 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 	const pcmBytesRef = useRef(0);
 	const uploadRef = useRef<AbortController | null>(null);
 	const capRef = useRef(false);
+	/** Groq: the recording whose upload failed, kept in memory for Retry. Only
+	 *  success, dismissal, a new recording or unmount drop it — cleanup() leaves
+	 *  it alone (it runs at the end of the failed run itself). */
+	const retainedRef = useRef<KeptRecording | null>(null);
+	const [retryable, setRetryable] = useState(false);
 	/** The latest stop(), for the capture callback (created once per run). */
 	const stopRef = useRef<() => void>(() => {});
+
+	const keepRecording = useCallback((recording: KeptRecording | null) => {
+		retainedRef.current = recording;
+		setRetryable(recording !== null);
+		setDictationRetained(recording !== null);
+	}, []);
 
 	/** Flush the buffered transcript into the primary input — question claim
 	 *  first, composer fallback. Called exactly once per run, at cleanup; the
@@ -395,8 +428,10 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 		setPhase("idle");
 		// The finish() waiters ride until NOW — post-flush, post-teardown:
 		// a submit path resuming after `await finishDictation()` reads the
-		// target field with the dictated tail already in it.
-		for (const w of waitersRef.current.splice(0)) w();
+		// target field with the dictated tail already in it. A kept Groq
+		// recording means speech is still unsent: they learn it as `false`.
+		const unsent = retainedRef.current !== null;
+		for (const w of waitersRef.current.splice(0)) w(!unsent);
 		// Pre-mint for the next run (mitigation D) — best-effort; a keyless
 		// page just doesn't warm. A Groq run has no Deepgram token to warm.
 		if (warmNext && engineRef.current !== "groq") warmTokens.refresh();
@@ -479,6 +514,7 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 		capRef.current = false;
 		engineRef.current = null;
 		groqRunRef.current = null;
+		keepRecording(null); // a new recording replaces the kept one
 		const gen = ++genRef.current;
 		let language: DictationLanguage;
 		let engine: DictationProvider;
@@ -589,12 +625,35 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 		// Mitigation B: the handshake fires the moment the graph is live,
 		// overlapping any remaining token wait — mic-gated, never before it.
 		openSocket(gen, token, language);
-	}, [openSocket, cleanup, getPreference]);
+	}, [openSocket, cleanup, getPreference, keepRecording]);
 
-	/** Groq stop: encode what was captured, upload it, buffer the transcript for
-	 *  the one deferred flush. A run too short to mean anything is dropped without
-	 *  a request. Every outcome ends in cleanup(); a stale `gen` (cancel, unmount)
-	 *  means that already happened. */
+	/** Upload one Groq recording and buffer its transcript for the one deferred
+	 *  flush. Success drops the recording; failure KEEPS it (and shows the error)
+	 *  so Retry can send the same audio again. Every outcome ends in cleanup(); a
+	 *  stale `gen` (cancel, unmount) means that already happened and nothing here
+	 *  may touch the run, so an aborted upload neither keeps nor flushes anything. */
+	const uploadRecording = useCallback(async (gen: number, recording: KeptRecording) => {
+		const upload = new AbortController();
+		uploadRef.current = upload;
+		setTranscribing(true);
+		try {
+			const text = await transcribeGroq((...args) => fetch(...args), {
+				wav: recording.wav, model: recording.model, language: recording.language, signal: upload.signal,
+			});
+			if (gen !== genRef.current) return;
+			keepRecording(null);
+			setError(null);
+			if (text) bufferRef.current.push(text);
+		} catch (e) {
+			if (gen !== genRef.current) return;
+			keepRecording(recording);
+			setError(e instanceof Error ? e.message : "Groq transcription failed");
+		}
+		cleanup();
+	}, [cleanup, keepRecording]);
+
+	/** Groq stop: encode what was captured and upload it. A run too short to mean
+	 *  anything is dropped without a request. */
 	const transcribeRecording = useCallback(async (gen: number) => {
 		const run = groqRunRef.current;
 		if (!run || pcmBytesRef.current < GROQ_MIN_PCM_BYTES) {
@@ -603,21 +662,22 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 		}
 		const wav = encodePcm16Wav(pcmRef.current, run.sampleRate);
 		pcmRef.current = [];
-		const upload = new AbortController();
-		uploadRef.current = upload;
-		setTranscribing(true);
-		try {
-			const text = await transcribeGroq((...args) => fetch(...args), {
-				wav, model: run.model, language: run.language, signal: upload.signal,
-			});
-			if (gen !== genRef.current) return;
-			if (text) bufferRef.current.push(text);
-		} catch (e) {
-			if (gen !== genRef.current) return;
-			setError(e instanceof Error ? e.message : "Groq transcription failed");
-		}
-		cleanup();
-	}, [cleanup]);
+		await uploadRecording(gen, { wav, model: run.model, language: run.language });
+	}, [cleanup, uploadRecording]);
+
+	/** Send the kept recording again. Same pipeline as a first upload, so the
+	 *  phase reads "stopping" + Transcribing…, Esc cancels the request (the
+	 *  recording stays kept — only success, dismissal or a new recording drop
+	 *  it) and the transcript lands through the usual flush. */
+	const retry = useCallback(() => {
+		const recording = retainedRef.current;
+		if (!recording || uploadRef.current) return;
+		setDictationActive(true);
+		setPhase("stopping");
+		engineRef.current = "groq";
+		bufferRef.current = [];
+		void uploadRecording(++genRef.current, recording);
+	}, [uploadRecording]);
 
 	const stop = useCallback(() => {
 		const gen = genRef.current;
@@ -666,10 +726,11 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 		cleanup();
 	}, [phase, cleanup]);
 
-	const finish = useCallback((): Promise<void> => {
+	const finish = useCallback((): Promise<boolean> => {
 		return new Promise((resolve) => {
 			if (phase === "idle") {
-				resolve();
+				// Idle with a recording kept for Retry: the speech is still unsent.
+				resolve(retainedRef.current === null);
 				return;
 			}
 			waitersRef.current.push(resolve);
@@ -709,10 +770,12 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 			mounted = false;
 			// Navigation cancels capture: invalidate every pending await before
 			// releasing resources, and never append into a different page's input.
+			// A kept recording goes too: it must not outlive its page.
 			bufferRef.current = [];
+			keepRecording(null);
 			cleanup(false);
 		};
-	}, [cleanup, getPreference]);
+	}, [cleanup, getPreference, keepRecording]);
 	useEffect(() => {
 		window.addEventListener("lh:kbd-toggle-dictation", toggle);
 		return () => window.removeEventListener("lh:kbd-toggle-dictation", toggle);
@@ -728,11 +791,16 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 		levelRef,
 		active: phase !== "idle",
 		transcribing,
+		retryable,
+		retry,
 		toggle,
 		stop,
 		finish,
 		cancel,
-		clearError: () => setError(null),
+		clearError: () => {
+			keepRecording(null);
+			setError(null);
+		},
 	};
 }
 
@@ -749,7 +817,7 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
  *             (full text in the tooltip), cleared on the next click.
  */
 export function DictationBar({ dictation }: { dictation: Dictation }) {
-	const { phase, error, levelRef, toggle, active, clearError, transcribing } = dictation;
+	const { phase, error, levelRef, toggle, active, clearError, transcribing, retryable, retry } = dictation;
 	const { open: openSettings } = useSettingsDialog();
 	/** The keyless click (zero-keys wave, owner dictation trio): the errored
 	 *  idle button deep-links Settings → Keys → the Deepgram row (or, for the
@@ -799,10 +867,11 @@ export function DictationBar({ dictation }: { dictation: Dictation }) {
 	}, [active]);
 
 	if (!active) {
-		return (
+		const wide = (
 			<Hint
-				// The error line truncates in the button; its tooltip reveals it.
-				label={error ?? "Dictate"}
+				// The error line truncates in the button; its tooltip reveals it. While a
+				// recording is kept, clicking starts a new one, which drops the kept one.
+				label={error && retryable ? `${error} Dictating again discards the saved recording.` : (error ?? "Dictate")}
 				action={error ? undefined : "toggle-dictation"}
 				side="top"
 			>
@@ -810,7 +879,9 @@ export function DictationBar({ dictation }: { dictation: Dictation }) {
 					type="button"
 					onClick={() => {
 						if (keylessRow) {
-							clearError();
+							// A kept recording survives the trip: the key can be fixed in
+							// Settings and the same audio sent with Retry.
+							if (!retryable) clearError();
 							openSettings("keys", keylessRow);
 						} else {
 							toggle();
@@ -818,12 +889,43 @@ export function DictationBar({ dictation }: { dictation: Dictation }) {
 					}}
 					aria-label={error ? `Dictation failed: ${error}` : "Start dictation"}
 					data-testid="dictation-toggle"
-					className="flex h-7 w-full items-center justify-center gap-1.5 rounded-md border border-border/50 bg-card/50 text-xs text-muted-foreground/70 shadow-lg backdrop-blur transition-colors hover:border-border hover:text-muted-foreground"
+					className="flex h-7 w-full min-w-0 items-center justify-center gap-1.5 rounded-md border border-border/50 bg-card/50 text-xs text-muted-foreground/70 shadow-lg backdrop-blur transition-colors hover:border-border hover:text-muted-foreground"
 				>
-					<MicIcon className="size-3.5" />
+					<MicIcon className="size-3.5 shrink-0" />
 					<span className="max-w-full truncate">{error ?? "Dictate"}</span>
 				</button>
 			</Hint>
+		);
+		if (!retryable) return wide;
+		// A failed Groq upload kept its recording: offer to send it again, or to
+		// let it go. Nothing here submits anything.
+		return (
+			<div className="flex w-full min-w-0 items-center gap-1.5" data-testid="dictation-retry-bar">
+				{wide}
+				<Hint label="Send the saved recording again" side="top">
+					<button
+						type="button"
+						onClick={retry}
+						aria-label="Retry transcription"
+						data-testid="dictation-retry"
+						className="flex h-7 shrink-0 items-center gap-1 rounded-md bg-primary/10 px-2 text-xs font-medium text-foreground transition-colors hover:bg-primary/20"
+					>
+						<RotateCcwIcon className="size-3.5" />
+						Retry
+					</button>
+				</Hint>
+				<Hint label="Discard the saved recording" side="top">
+					<button
+						type="button"
+						onClick={clearError}
+						aria-label="Discard saved recording"
+						data-testid="dictation-discard"
+						className="flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+					>
+						<XIcon className="size-3.5" />
+					</button>
+				</Hint>
+			</div>
 		);
 	}
 

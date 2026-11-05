@@ -239,7 +239,7 @@ test("opening a present Groq key from Model API keys does not also open the dict
 
 const idleWithError = (error: string): Dictation => ({
 	phase: "idle", error, levelRef: { current: 0 }, active: false, transcribing: false,
-	toggle() {}, stop() {}, finish: async () => {}, cancel() {}, clearError() {},
+	retryable: false, retry() {}, toggle() {}, stop() {}, finish: async () => true, cancel() {}, clearError() {},
 });
 
 for (const [name, error, row, other] of [
