@@ -18,7 +18,7 @@ import { GROQ_DICTATION_KEYLESS } from "../components/dictation-groq.ts";
 import { notifySettingsSaved } from "../components/settings-signal.ts";
 import { isDictationActive, isDictationRetained } from "../components/dictation-state.ts";
 import { STOPPED_MESSAGE } from "../components/dictation-groq-chunks.ts";
-import { GROQ_DICTATION_HEADER, GROQ_MAX_PCM_BYTES, GROQ_MAX_RECORDING_SECONDS, type QuizToolInput, type UserSettings } from "../src/core/index.ts";
+import { GROQ_DICTATION_HEADER, GROQ_MAX_RECORDING_SECONDS, type QuizToolInput, type UserSettings } from "../src/core/index.ts";
 
 function deferred<T>() {
 	let resolve!: (value: T) => void;
@@ -340,10 +340,11 @@ test("reaching the recording cap stops and transcribes what was captured, droppi
 	const f = await fixture();
 	await f.start();
 	let n = 0;
+	const capBytes = GROQ_MAX_RECORDING_SECONDS * 16000 * 2;
 	f.state.answer = () => Promise.resolve(Response.json({ text: `part${++n}` }));
 	await act(async () => {
 		const worklet = f.worklet();
-		worklet.audio(new Int16Array(GROQ_MAX_PCM_BYTES / 2).fill(1000)); // the whole allowance at once
+		worklet.audio(new Int16Array(capBytes / 2).fill(1000)); // the whole allowance at once
 		worklet.audio(frame()); // arrives after the cap: dropped
 	});
 	assert.equal(f.dictation.error, null);
@@ -354,7 +355,7 @@ test("reaching the recording cap stops and transcribes what was captured, droppi
 	assert.equal(f.state.appends[0]!.split(" ").length, GROQ_MAX_RECORDING_SECONDS / 15);
 	assert.match(f.state.appends[0]!, /^part1 part2 /);
 	const sent = f.state.posts.reduce((total, p) => total + (p.form.get("audio") as File).size - 44, 0);
-	assert.equal(sent, GROQ_MAX_PCM_BYTES, "everything up to the cap was sent, and nothing after it");
+	assert.equal(sent, capBytes, "everything up to the cap was sent, and nothing after it");
 });
 
 const barOf = (over: Partial<Dictation>): Dictation => ({

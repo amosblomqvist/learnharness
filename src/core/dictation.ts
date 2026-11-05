@@ -134,7 +134,6 @@ export const DICTATION_SAMPLE_RATE = 16_000;
  * or more, so nothing is rounded up), so one 20-minute run, about 80 requests,
  * uses a sixth of an hour's allowance and nowhere near the 20 requests a minute. */
 export const GROQ_MAX_RECORDING_SECONDS = 1200;
-export const GROQ_MAX_PCM_BYTES = GROQ_MAX_RECORDING_SECONDS * DICTATION_SAMPLE_RATE * 2;
 /** Groq dictation is sent in chunks of about this long while the user is still
  * speaking (see dictation-chunks.ts). The cut goes at the quietest point
  * between MIN and MAX; MAX is also the longest a chunk can be. At 16 kHz mono
