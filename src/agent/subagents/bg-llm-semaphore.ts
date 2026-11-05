@@ -19,9 +19,8 @@
  * untouched for the inheritor) — counting both sides is how a semaphore
  * slowly deadlocks at 3-with-empty-queue.
  *
- * The audit side needs no slot: audits serialize behind their own global
- * lock, so by the time a job releases its permit the audit queue is the
- * only remaining throttle.
+ * The same queue also backs the 1-permit audit gate (extraction.ts), so
+ * both FIFO gates share one abort-aware handoff (#522).
  */
 
 /** Total background LLM concurrency, process-wide, across ALL subsystems

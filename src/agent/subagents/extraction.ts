@@ -14,7 +14,7 @@ import {
 } from "../../core/settings.ts";
 import type { PiEngine } from "../models.ts";
 import { runSubagent } from "./pi-run.ts";
-import { withBgLlmSlot } from "./bg-llm-semaphore.ts";
+import { permitGate, withBgLlmSlot, withPermit } from "./bg-llm-semaphore.ts";
 import type {
 	AuditVerdicts,
 	CallUsage,
@@ -889,37 +889,18 @@ export function createExtractionPipeline(deps: ExtractionPipelineDeps): Extracti
 	 *  other is about to change: the structural mint of duplicate nodes.
 	 *  The extractor stays parallel (source-local, graph-blind). The
 	 *  check runs BEFORE any LLM is invoked or the graph read; the lock
-	 *  is FIFO, held through the merge, reacquired per batch, and
-	 *  abort-aware on both sides of the queue (a waiter that aborts
-	 *  leaves without auditing — its chain link still resolves, so
-	 *  successors never hang). */
+	 *  is a 1-permit gate on the shared FIFO queue (bg-llm-semaphore.ts),
+	 *  held through the merge, reacquired per batch. A waiter that aborts
+	 *  leaves without auditing and the handoff skips it, so successors
+	 *  neither hang nor jump the queue (#522). */
 	async function withAuditLock<T>(jobKey: string, kind: "chat" | "notes", label: string | undefined, critical: () => Promise<T>): Promise<T> {
 		setPhase(jobKey, "waiting", kind, label);
-		const g = globalThis as typeof globalThis & LhExtractionGlobal;
-		const lock = (g.__lhAuditLock ??= { tail: Promise.resolve() });
-		const prev = lock.tail;
-		let release!: () => void;
-		lock.tail = new Promise<void>((resolve) => (release = resolve));
 		const signal = runningExtractions.get(jobKey)?.controller.signal;
-		let onAbort: (() => void) | undefined;
-		const aborted = new Promise<never>((_, reject) => {
-			if (!signal) return;
-			onAbort = () => {
-				const err = new Error("extraction aborted while waiting for the audit gate");
-				err.name = "AbortError";
-				reject(err);
-			};
-			if (signal.aborted) onAbort();
-			else signal.addEventListener("abort", onAbort, { once: true });
-		});
-		try {
-			await Promise.race([prev, aborted]);
+		const gate = permitGate("audit", 1, "extraction aborted while waiting for the audit gate");
+		return withPermit(gate, signal, () => {
 			signal?.throwIfAborted(); // aborted exactly at handoff
-			return await critical();
-		} finally {
-			if (onAbort && signal && !signal.aborted) signal.removeEventListener("abort", onAbort);
-			release();
-		}
+			return critical();
+		});
 	}
 
 	async function extract(
