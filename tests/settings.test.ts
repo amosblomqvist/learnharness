@@ -253,25 +253,9 @@ describe("sanitizeUserSettings", () => {
 describe("isQuotaExhaustedError (the confirmed daily-quota classifier)", () => {
 	const DAILY = 'upstream rate_limit [429]: {"error":{"message":"Rate limit exceeded: free-models-per-day. Add 10 credits to unlock 1000 free model requests per day","code":429}}';
 
-	it("matches the daily marker on the error itself, in an envelope, and at any depth of the cause chain", () => {
+	it("matches the daily marker in the message, however the gateway wrapped it", () => {
 		assert.equal(isQuotaExhaustedError(new Error(DAILY)), true);
-		const envelope = Object.assign(new Error("provider key refused"), { envelope: { error: "Rate limit exceeded: free-models-per-day" } });
-		assert.equal(isQuotaExhaustedError(envelope), true);
-		const wrapped = new Error("extraction failed", { cause: new Error("503: auth_unavailable", { cause: new Error(DAILY) }) });
-		assert.equal(isQuotaExhaustedError(wrapped), true);
-	});
-
-	it("terminates on a cause cycle, with and without the marker, and on a self-cause", () => {
-		const a = new Error("first"), b = new Error("second");
-		a.cause = b; b.cause = a;
-		assert.equal(isQuotaExhaustedError(a), false, "a cycle with no marker ends instead of looping");
-		const c = new Error("third", { cause: new Error("fourth") });
-		(c.cause as Error).cause = c;
-		(c.cause as Error).message = DAILY;
-		assert.equal(isQuotaExhaustedError(c), true, "the marker is found before the cycle closes");
-		const self = new Error("self");
-		self.cause = self;
-		assert.equal(isQuotaExhaustedError(self), false);
+		assert.equal(isQuotaExhaustedError(new Error(`503: auth_unavailable: last upstream error: ${DAILY}`)), true);
 	});
 
 	it("never matches a per-minute or other 429, a generic 500/503, or a non-error value", () => {

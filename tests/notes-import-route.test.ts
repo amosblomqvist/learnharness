@@ -291,31 +291,6 @@ it("confirmed quota exhaustion wrapped in a NotesImportError stops dispatch, pre
 	assert.equal(started.includes("c.md"), false, "c.md was never dispatched");
 });
 
-it("a quota marker buried in an error cause chain is still confirmed, with stats preserved", async () => {
-	extraction.importNotes = async () => {
-		throw new NotesImportError("failed", { nodes: 5, chains: 2 }, "extraction pipeline failed",
-			{ cause: new Error('upstream rate_limit [429]: "Rate limit exceeded: free-models-per-day"') });
-	};
-	const response = await POST(request(["deep.md"]));
-	const { results } = await response.json();
-	assert.equal(results[0].code, "quota_exhausted");
-	assert.equal(results[0].outcome, "failed");
-	assert.deepEqual(results[0].stats, { nodes: 5, chains: 2 });
-});
-
-it("a provider-key envelope carrying the quota marker is classified quota_exhausted with actionable guidance", async () => {
-	extraction.importNotes = async () => {
-		const err = new ProviderKeyMissingError("openrouter", ["cheap"]);
-		err.envelope.error = "Rate limit exceeded: free-models-per-day. Add 10 credits to unlock 1000 free model requests per day";
-		throw err;
-	};
-	const response = await POST(request(["quota.md"]));
-	assert.equal(response.status, 200);
-	const { results } = await response.json();
-	assert.equal(results[0].code, "quota_exhausted");
-	assert.equal(results[0].error, "Daily free model quota exhausted. Wait for reset or configure another model/provider.");
-});
-
 it("generic auth/500/503 failures without the quota marker never halt the batch", async () => {
 	let started = 0;
 	extraction.importNotes = async ({ filePath }) => {

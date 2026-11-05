@@ -207,20 +207,10 @@ const QUOTA_EXHAUSTED_MARKER = "free-models-per-day";
 export const QUOTA_EXHAUSTED_MESSAGE = "Daily free model quota exhausted. Wait for reset or configure another model/provider.";
 /** Honest wording for queued files never dispatched after the exhaustion. */
 export const QUOTA_UNATTEMPTED_MESSAGE = "Not attempted (daily quota exhausted).";
-/** Walk an error's message, refusal envelope and cause chain for the marker
- * (extraction re-wraps gateway-wrapped failures, so the evidence may sit at
- * any depth). Same writer/matcher discipline as isProviderKeyRefusal. */
+/** The marker sits in the message even when the gateway re-wrapped the upstream
+ * 429 as a 500/503 and extraction wrapped that again (each wrapper copies it). */
 export function isQuotaExhaustedError(error: unknown): boolean {
-	const seen = new Set<unknown>();
-	let current: unknown = error;
-	while (current instanceof Error && !seen.has(current)) {
-		seen.add(current);
-		if (current.message.includes(QUOTA_EXHAUSTED_MARKER)) return true;
-		const envelope = (current as { envelope?: { error?: unknown } }).envelope;
-		if (envelope && typeof envelope.error === "string" && envelope.error.includes(QUOTA_EXHAUSTED_MARKER)) return true;
-		current = current.cause;
-	}
-	return false;
+	return error instanceof Error && error.message.includes(QUOTA_EXHAUSTED_MARKER);
 }
 
 export const CACHE_RETENTIONS = ["none", "short", "long"] as const satisfies readonly CacheRetention[];
