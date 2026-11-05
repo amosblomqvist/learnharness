@@ -82,23 +82,46 @@ export interface ProvenancePoint {
 	messageId: string;
 }
 
+/** How far a notes import got through ONE file (the notes door's
+ *  resumability, mirroring chat coverage). Written after every chunk
+ *  MERGES — an abort, crash or close loses at most the in-flight chunk.
+ *  Chunks are line-aligned, so `linesDone` is the exact resume boundary:
+ *  the next import re-chunks the remaining lines. */
+export interface NotesImportProgress {
+	/** sha256 over the consumed leading lines (each line + "\n") — the
+	 *  consumed prefix's identity. Unchanged prefix → resume at
+	 *  `linesDone`; an edit anywhere in it → restart from line 0. */
+	prefixHash: string;
+	/** CONTENT lines already merged (the terminal "" of a newline-terminated
+	 *  file is not a line; counting it broke append detection). */
+	linesDone: number;
+	/** Chunks already merged (dock numbering across runs). */
+	chunksDone: number;
+	/** ISO — when the last chunk merged. */
+	updatedAt: string;
+}
+
 /** One imported notes file — the format-agnostic front door's bookkeeping
  *  (DECIDED 2026-09-13): personal notes in ARBITRARY formats run through the
  *  same extractor → auditor → merger pipeline, with the file itself as the
  *  provenance anchor. There is no chat: the detail card shows the file path
  *  as a STATIC entry (not a link). The run's usage log lives here,
  *  mirroring ChatRecord.extractions. Ids are "src_" + hash of the file
- *  path — deterministic, so re-importing the same file re-runs extraction
- *  against the same source id (mappings dedupe by it). */
+ *  path — deterministic, so re-importing the same file resolves to the
+ *  same source id (and its resume progress). */
 export interface NotesSource {
 	id: string;
 	filePath: string;
 	/** ISO — when this file was imported (the checkpoint's foldedAt). */
 	importedAt: string;
 	/** Legacy content fingerprint. Accepted when reading old records, but
-	 * ignored: every explicit notes import processes the whole file. New
-	 * imports do not compute or write this field. No migration is needed. */
+	 * ignored: re-imports resume by `progress`, never by this field. New
+	 * imports do not compute or write it. No migration is needed. */
 	contentFp?: string;
+	/** Resume state — last merged chunk (absent = never merged anything
+	 *  for the current content). Written per merged chunk; cleared when
+	 *  the consumed prefix no longer matches the selected file. */
+	progress?: NotesImportProgress;
 	/** The run's usage log — same append-only discipline as
 	 *  ChatRecord.extractions, idempotent per startedAt. */
 	extractions?: ExtractionRunUsage[];
@@ -161,7 +184,8 @@ export interface SessionCheckpoint {
  *  diff) — never dual-tracked. A quiz answer merging into the asking
  *  message changes its fingerprint: the message re-opens itself, only
  *  itself. Chat extractions write these instead of whole-chat checkpoints;
- *  notes imports keep the checkpoint (a file is one shot). */
+ *  notes imports checkpoint per merged chunk in their source record's
+ *  `progress` instead (a file resumes by consumed prefix). */
 export interface CoverageEntry {
 	chatId: string;
 	/** sha256 of the message's view lines — "covered" means exactly this. */

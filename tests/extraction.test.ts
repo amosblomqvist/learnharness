@@ -97,9 +97,14 @@ function memoryLedgers() {
 		appendCoverage: (e) => void coverage.push({ ...e }),
 		readCoverage: () => coverage.map((e) => ({ ...e })),
 		upsertSource: (s: NotesSource) => {
-			// Mirrors the real store: an upsert KEEPS the existing usage log.
+			// Mirrors the real store: an upsert KEEPS the existing usage log
+			// and resume progress.
 			const prev = sources.get(s.id);
-			sources.set(s.id, { ...s, extractions: [...(prev?.extractions ?? [])] });
+			sources.set(s.id, {
+				...s,
+				extractions: [...(prev?.extractions ?? [])],
+				...(s.progress ?? prev?.progress ? { progress: s.progress ?? prev?.progress } : {}),
+			});
 		},
 		readSources: () => [...sources.values()].map((s) => ({ ...s, extractions: [...(s.extractions ?? [])] })),
 		deleteSources: (ids: ReadonlySet<string>) => [...ids].reduce((count, id) => count + Number(sources.delete(id)), 0),
@@ -109,6 +114,12 @@ function memoryLedgers() {
 			if (!source.extractions?.some((r) => r.startedAt === entry.startedAt)) {
 				source.extractions = [...(source.extractions ?? []), entry];
 			}
+		},
+		writeSourceProgress: (id: string, progress) => {
+			const source = sources.get(id);
+			if (!source) return;
+			if (progress) source.progress = { ...progress };
+			else delete source.progress;
 		},
 		// Cluster labelings — mirrors the real store: append dedupes by id.
 		// The layout ledger — settleGraphLayout writes it after each merge.
@@ -1609,8 +1620,11 @@ describe("the notes front door (importNotes — format-agnostic)", () => {
 		const node = ledgers.readNodes()[0]!;
 		assert.equal(node.statement, "Vim starts in Normal mode, where keys are commands.");
 		assert.deepEqual(node.provenance, [{ chatId: source.id, messageId: "" }]);
-		// The checkpoint stamps the import.
-		assert.equal(ledgers.readCheckpoints()[0]!.chatId, source.id);
+		// The resume checkpoint stamps the import (notes no longer write a
+		// whole-file sessions.jsonl checkpoint — the merged chunk is the unit).
+		assert.equal(ledgers.readCheckpoints().length, 0);
+		assert.equal(source.progress?.linesDone, NOTES_TEXT.split("\n").length);
+		assert.ok(source.progress!.prefixHash);
 	});
 
 	it("chunks a large file: one extract→audit→merge per chunk, part headers in each view (owner, 2026-09-28)", async () => {
@@ -1687,33 +1701,126 @@ describe("the notes front door (importNotes — format-agnostic)", () => {
 		assert.equal(ledgers.readCoverage().length, 0, "nothing checkpointed — the messages stay re-runnable");
 	});
 
-	it("every explicit import runs the whole file, even identical text and legacy fingerprints", async () => {
+	it("re-importing an unchanged, fully extracted file skips with no model call or usage", async () => {
+		const ledgers = memoryLedgers();
+		let calls = 0;
+		const mk = () =>
+			createExtractionPipeline({
+				chatStore,
+				graphStore: ledgers,
+				extractor: submitModel("submit_findings", NOTES_FINDINGS, () => { calls++; }),
+				auditor: submitModel("submit_review", NOTES_VERDICT),
+			});
+		assert.deepEqual(await mk().importNotes({ filePath: "/vault/learn vim.md", text: NOTES_TEXT }), { nodes: 1, chains: 0 });
+		const source = ledgers.readSources()[0]!;
+		assert.equal(source.extractions?.length, 1);
+		assert.ok(source.progress?.prefixHash, "the merged chunk checkpointed the consumed prefix");
+		assert.equal(source.contentFp, undefined, "no legacy fingerprint is written");
+
+		const skipped = await mk().importNotes({ filePath: "/vault/learn vim.md", text: NOTES_TEXT });
+		assert.deepEqual(skipped, { nodes: 0, chains: 0, skipped: true });
+		assert.equal(calls, 1, "no model call for an already extracted file");
+		assert.equal(ledgers.readSources()[0]!.extractions?.length, 1, "a skip bills nothing");
+		assert.equal(ledgers.readSources()[0]!.importedAt, source.importedAt, "a skip does not touch the source record");
+		assert.equal(ledgers.readNodes().length, 1, "no duplicate nodes");
+	});
+
+	it("appending lines resumes at the new lines instead of re-extracting the file", async () => {
+		const ledgers = memoryLedgers();
+		const mk = (views?: string[]) =>
+			createExtractionPipeline({
+				chatStore,
+				graphStore: ledgers,
+				engineFor: (role) =>
+					role === "extractor"
+						? fauxEngine([(context) => {
+							views?.push(capturedView(context));
+							return fauxAssistantMessage([fauxToolCall("submit_findings", NOTES_FINDINGS as unknown as ToolCall["arguments"])], { stopReason: "toolUse" });
+						}])
+						: submitModel("submit_review", NOTES_VERDICT),
+			});
+		const filePath = "/vault/append.md";
+		// Newline-terminated on purpose: the terminal split sentinel must not
+		// count as a line, or appending would invalidate the prefix.
+		const text = "line one\nline two\n";
+		assert.deepEqual(await mk().importNotes({ filePath, text }), { nodes: 1, chains: 0 });
+
+		const views: string[] = [];
+		const resumed = await mk(views).importNotes({ filePath, text: `${text}line three\n` });
+		assert.deepEqual({ nodes: resumed.nodes, resumedFrom: resumed.resumedFrom, chunksTotal: resumed.chunksTotal },
+			{ nodes: 1, resumedFrom: 2, chunksTotal: 2 }, "only the appended line's chunk ran (file chunk 2/2)");
+		assert.equal(views.length, 1);
+		assert.match(views[0]!, /part 2\/2/);
+		assert.ok(!views[0]!.includes("line one") && views[0]!.includes("line three"), "the consumed prefix is not re-sent");
+		assert.equal(ledgers.readNodes().length, 2);
+		assert.equal(ledgers.readSources()[0]!.progress?.linesDone, 3, "content-line count, sentinel excluded");
+	});
+
+	it("leading blank lines do not skew the resume boundary", async () => {
+		const ledgers = memoryLedgers();
+		let calls = 0;
+		const text = "\nfirst chunk\nsecond chunk\nthird chunk\n";
+		const pipeline = createExtractionPipeline({
+			chatStore, graphStore: ledgers, getChunkTokens: () => 1,
+			engineFor: (role) => role === "auditor" ? submitModel("submit_review", NOTES_VERDICT) : submitModel("submit_findings", NOTES_FINDINGS, () => {
+				calls++;
+				if (calls === 2) abortExtraction(ledgers.readSources()[0]!.id);
+			}),
+		});
+		await assert.rejects(pipeline.importNotes({ filePath: "/vault/blank.md", text }),
+			(error) => error instanceof NotesImportError && error.outcome === "aborted");
+		assert.equal(ledgers.readSources()[0]!.progress?.linesDone, 2, "blank line + first chunk are consumed together");
+
+		const views: string[] = [];
+		const finisher = createExtractionPipeline({
+			chatStore, graphStore: ledgers,
+			engineFor: (role) => role === "extractor"
+				? fauxEngine([(context) => {
+					views.push(capturedView(context));
+					return fauxAssistantMessage([fauxToolCall("submit_findings", NOTES_FINDINGS as unknown as ToolCall["arguments"])], { stopReason: "toolUse" });
+				}])
+				: submitModel("submit_review", NOTES_VERDICT),
+		});
+		const outcome = await finisher.importNotes({ filePath: "/vault/blank.md", text });
+		assert.equal(outcome.resumedFrom, 2);
+		assert.ok(!views[0]!.includes("first chunk"), "the consumed prefix is not re-sent");
+		assert.equal(ledgers.readSources()[0]!.progress?.linesDone, 4, "all content lines checkpointed");
+	});
+
+	it("invalid persisted counters restart instead of resuming", async () => {
+		const ledgers = memoryLedgers();
+		const mk = () => createExtractionPipeline({
+			chatStore,
+			graphStore: ledgers,
+			extractor: submitModel("submit_findings", NOTES_FINDINGS),
+			auditor: submitModel("submit_review", NOTES_VERDICT),
+		});
+		const filePath = "/vault/counters.md";
+		const text = "alpha\nbeta\n";
+		await mk().importNotes({ filePath, text });
+		const source = ledgers.readSources()[0]!;
+		ledgers.writeSourceProgress(source.id, { ...source.progress!, chunksDone: -1 });
+		const restarted = await mk().importNotes({ filePath, text });
+		assert.equal(restarted.resumedFrom, undefined, "a negative counter is not trusted");
+		assert.equal(ledgers.readSources()[0]!.progress?.chunksDone, 1, "the restart writes a valid checkpoint");
+	});
+
+	it("editing the consumed prefix restarts the file from line 0", async () => {
 		const ledgers = memoryLedgers();
 		const mk = () =>
 			createExtractionPipeline({
 				chatStore,
 				graphStore: ledgers,
-					extractor: submitModel("submit_findings", NOTES_FINDINGS),
+				extractor: submitModel("submit_findings", NOTES_FINDINGS),
 				auditor: submitModel("submit_review", NOTES_VERDICT),
 			});
-		const first = await mk().importNotes({ filePath: "/vault/learn vim.md", text: NOTES_TEXT });
-		assert.deepEqual(first, { nodes: 1, chains: 0 });
-
-		// A legacy stamp must never suppress an explicit import.
-		ledgers.upsertSource({ ...ledgers.readSources()[0]!, contentFp: createHash("sha256").update(NOTES_TEXT).digest("hex").slice(0, 16) });
-		const second = await mk().importNotes({ filePath: "/vault/learn vim.md", text: NOTES_TEXT });
-		assert.deepEqual(second, { nodes: 1, chains: 0 }, "identical content re-extracts");
-		assert.equal(ledgers.readSources()[0]!.contentFp, undefined, "new imports write no fingerprint");
-
-		assert.equal(ledgers.readSources().length, 1, "one source identity — the path hashes to the same id");
-		assert.equal(ledgers.readSources()[0]!.extractions?.length, 2, "both runs bill usage");
-		assert.equal(ledgers.readNodes().length, 2, "the auditor, not a content skip, owns identity");
-
-		// Changed text also re-runs the whole file.
-		const third = await mk().importNotes({ filePath: "/vault/learn vim.md", text: `${NOTES_TEXT}\nA new closing line.` });
-		assert.deepEqual(third, { nodes: 1, chains: 0 }, "changed content re-extracts");
-		assert.equal(ledgers.readSources()[0]!.extractions?.length, 3, "the re-run bills its usage");
-		assert.equal(ledgers.readNodes().length, 3);
+		const filePath = "/vault/edit.md";
+		await mk().importNotes({ filePath, text: "alpha\nbeta" });
+		const changed = await mk().importNotes({ filePath, text: "ALPHA (edited)\nbeta" });
+		assert.deepEqual({ nodes: changed.nodes, resumedFrom: changed.resumedFrom }, { nodes: 1, resumedFrom: undefined },
+			"a changed consumed prefix is a fresh extraction, not a resume");
+		assert.equal(ledgers.readSources()[0]!.progress?.linesDone, 2, "the new text's prefix is checkpointed");
+		assert.equal(ledgers.readSources()[0]!.extractions?.length, 2, "the restart bills its run");
 	});
 
 	it("aborts like a chat run: true cancellation, nothing merged, partial usage in the source record", async () => {
@@ -2518,7 +2625,7 @@ describe("notes import completion and retry reliability", () => {
 		await assert.rejects(createExtractionPipeline({ chatStore, graphStore: ledgers, extractor: submitModel("submit_findings", NOTES_FINDINGS), auditor: submitModel("submit_review", NOTES_VERDICT), providerKeyMissing: () => providerKeyMissing("openai", ["cheap"]) }).importNotes(input), ProviderKeyMissingError);
 	});
 
-	it("isolates an ordinary failed chunk, reports partial, and keeps earlier/later merges and usage", async () => {
+	it("stops at the first failed chunk — a gap cannot be checkpointed — and resumes there", async () => {
 		const ledgers = memoryLedgers();
 		let calls = 0;
 		const pipeline = createExtractionPipeline({
@@ -2529,10 +2636,53 @@ describe("notes import completion and retry reliability", () => {
 				return fauxAssistantMessage([fauxToolCall("submit_findings", NOTES_FINDINGS as unknown as ToolCall["arguments"])], { stopReason: "toolUse" });
 			}]),
 		});
-		await assert.rejects(pipeline.importNotes({ ...input, text: "first chunk\nsecond chunk\nthird chunk" }), incomplete("partial", 2));
-		assert.equal(calls, 3);
-		assert.equal(ledgers.readNodes().length, 2);
-		assert.equal(ledgers.readSources()[0]!.extractions?.length, 3);
+		await assert.rejects(pipeline.importNotes({ ...input, text: "first chunk\nsecond chunk\nthird chunk" }), incomplete("partial", 1));
+		assert.equal(calls, 2, "the failed chunk ends the run; the third chunk never starts");
+		assert.equal(ledgers.readNodes().length, 1);
+		assert.equal(ledgers.readSources()[0]!.extractions?.length, 2, "only the two jobs that ran billed");
+		assert.deepEqual(
+			{ linesDone: ledgers.readSources()[0]!.progress?.linesDone, chunksDone: ledgers.readSources()[0]!.progress?.chunksDone },
+			{ linesDone: 1, chunksDone: 1 },
+			"the checkpoint stays at the last merged chunk",
+		);
+	});
+
+	it("a cancelled import resumes at the first unmerged chunk", async () => {
+		const ledgers = memoryLedgers();
+		let calls = 0;
+		const text = "first chunk\nsecond chunk\nthird chunk";
+		const pipeline = createExtractionPipeline({
+			chatStore, graphStore: ledgers, getChunkTokens: () => 1,
+			// A fresh engine per call, like the settings-resolved chain.
+			engineFor: (role) => role === "auditor"
+				? submitModel("submit_review", NOTES_VERDICT)
+				: submitModel("submit_findings", NOTES_FINDINGS, () => {
+					calls++;
+					if (calls === 2) abortExtraction(ledgers.readSources()[0]!.id);
+				}),
+		});
+		await assert.rejects(pipeline.importNotes({ filePath: "/vault/resume.md", text }), incomplete("aborted", 1));
+		const source = ledgers.readSources()[0]!;
+		assert.deepEqual({ linesDone: source.progress?.linesDone, chunksDone: source.progress?.chunksDone }, { linesDone: 1, chunksDone: 1 });
+
+		const views: string[] = [];
+		const resumed = createExtractionPipeline({
+			chatStore, graphStore: ledgers, getChunkTokens: () => 1,
+			engineFor: (role) =>
+				role === "extractor"
+					? fauxEngine([(context) => {
+						views.push(capturedView(context));
+						return fauxAssistantMessage([fauxToolCall("submit_findings", NOTES_FINDINGS as unknown as ToolCall["arguments"])], { stopReason: "toolUse" });
+					}])
+					: submitModel("submit_review", NOTES_VERDICT),
+		});
+		const outcome = await resumed.importNotes({ filePath: "/vault/resume.md", text });
+		assert.deepEqual({ nodes: outcome.nodes, resumedFrom: outcome.resumedFrom, chunksTotal: outcome.chunksTotal },
+			{ nodes: 2, resumedFrom: 2, chunksTotal: 3 }, "the two unmerged chunks run, numbered from the file's start");
+		assert.equal(views.length, 2);
+		assert.match(views[0]!, /part 2\/3/);
+		assert.ok(views[0]!.includes("second chunk") && !views[0]!.includes("first chunk"), "the merged prefix is never re-sent");
+		assert.equal(ledgers.readNodes().length, 3);
 	});
 
 	it("an abort after an earlier merge stops later chunks without losing graph or billed usage", async () => {
@@ -2581,11 +2731,13 @@ describe("notes import completion and retry reliability", () => {
 		assert.equal(ledgers.readNodes().length, abortAt - 1, "earlier graph merges retained");
 		assert.equal(ledgers.readSources()[0]!.extractions?.length, abortAt - 1, "earlier usage retained");
 		assert.equal(extractionStatuses().length, 0, "cancelled job row removed");
-		assert.deepEqual(await make(ledgers).importNotes(wholeFile), { nodes: 1, chains: 0 }, "source exclusion released for an explicit unchanged whole-file retry");
+		const retried = await make(ledgers).importNotes(wholeFile);
+		assert.deepEqual({ nodes: retried.nodes, chains: retried.chains }, { nodes: 1, chains: 0 }, "source exclusion released for an explicit unchanged retry");
+		assert.equal(retried.resumedFrom, abortAt === 2 ? 2 : undefined, "the retry resumes after the merged chunk (or starts fresh)");
 		assert.equal(ledgers.readSources()[0]!.extractions?.length, abortAt);
 	});
 
-	it("a usage-persistence error without an aborted signal remains an isolated failure and later chunks run", async () => {
+	it("a usage-persistence error ends the run at that chunk; the next import resumes there", async () => {
 		const ledgers = memoryLedgers();
 		let calls = 0;
 		const graphStore: GraphStore = { ...ledgers, appendSourceUsage: (id, entry) => {
@@ -2597,13 +2749,18 @@ describe("notes import completion and retry reliability", () => {
 			engineFor: (role) => role === "auditor" ? submitModel("submit_review", NOTES_VERDICT) : submitModel("submit_findings", NOTES_FINDINGS, () => { calls++; }),
 		});
 		await assert.rejects(pipeline.importNotes({ ...input, text: "first chunk\nsecond chunk\nthird chunk" }), (error) => {
-			incomplete("partial", 3)(error);
+			incomplete("failed", 1)(error);
 			assert.match((error as NotesImportError).message, /synthetic isolated usage failure/);
 			return true;
 		});
-		assert.equal(calls, 3, "ordinary cleanup failure does not imply cancellation");
-		assert.equal(ledgers.readNodes().length, 3);
-		assert.equal(ledgers.readSources()[0]!.extractions?.length, 2);
+		assert.equal(calls, 1, "a failed job ends the prefix chain — later chunks never start");
+		assert.equal(ledgers.readNodes().length, 1, "the merged chunk stays, its checkpoint is written");
+		assert.deepEqual(
+			{ linesDone: ledgers.readSources()[0]!.progress?.linesDone, chunksDone: ledgers.readSources()[0]!.progress?.chunksDone },
+			{ linesDone: 1, chunksDone: 1 },
+			"resume continues after the merged chunk",
+		);
+		assert.equal(ledgers.readSources()[0]!.extractions?.length, 0, "the failed usage write billed nothing");
 	});
 
 	it("overlapping identical or different contents are busy BEFORE source metadata changes, across pipeline instances", async () => {
@@ -2621,8 +2778,8 @@ describe("notes import completion and retry reliability", () => {
 			assert.deepEqual(ledgers.readSources(), sourceBefore);
 		} finally { release(); }
 		await first;
-		assert.deepEqual(await make(ledgers).importNotes(input), { nodes: 1, chains: 0 }, "lock released after lifecycle");
-		assert.equal(ledgers.readSources()[0]!.extractions?.length, 2);
+		assert.deepEqual(await make(ledgers).importNotes(input), { nodes: 0, chains: 0, skipped: true }, "lock released after lifecycle — the completed file now skips");
+		assert.equal(ledgers.readSources()[0]!.extractions?.length, 1);
 	});
 
 	it("a fulfilled zero-node chunk plus a failed chunk is partial, not failed or completed", async () => {
@@ -2641,7 +2798,7 @@ describe("notes import completion and retry reliability", () => {
 
 	it("a merger failure after a node append is incomplete without rolling back that write", async () => {
 		const ledgers = memoryLedgers();
-		const broken = { ...ledgers, appendCheckpoint: () => { throw new Error("synthetic checkpoint failure after node append"); } };
+		const broken = { ...ledgers, writeSourceProgress: () => { throw new Error("synthetic checkpoint failure after node append"); } };
 		await assert.rejects(make(broken).importNotes(input), incomplete("failed", 0));
 		assert.equal(ledgers.readNodes().length, 1, "already appended graph write retained even though merge never returned stats");
 		assert.equal(ledgers.readSources()[0]!.extractions?.length, 1);
@@ -2668,12 +2825,12 @@ describe("notes import completion and retry reliability", () => {
 		await make(ledgers).importNotes(input);
 	});
 
-	for (const filePath of ["1.md", "1.1.md", "1 notes.md", "1.1 notes.md"]) it(`imports and repeats identical text for ${filePath}`, async () => {
+	for (const filePath of ["1.md", "1.1.md", "1 notes.md", "1.1 notes.md"]) it(`imports once and skips the identical repeat for ${filePath}`, async () => {
 		const ledgers = memoryLedgers();
 		await make(ledgers).importNotes({ ...input, filePath });
-		await make(ledgers).importNotes({ ...input, filePath });
+		assert.deepEqual(await make(ledgers).importNotes({ ...input, filePath }), { nodes: 0, chains: 0, skipped: true });
 		assert.equal(ledgers.readSources().length, 1);
-		assert.equal(ledgers.readSources()[0]!.extractions?.length, 2);
-		assert.equal(ledgers.readNodes().length, 2);
+		assert.equal(ledgers.readSources()[0]!.extractions?.length, 1);
+		assert.equal(ledgers.readNodes().length, 1);
 	});
 });
