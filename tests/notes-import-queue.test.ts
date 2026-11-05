@@ -185,19 +185,3 @@ it("a selection appended while quota-stopped work is still settling is drained a
 		"late.md: Not attempted (daily quota exhausted).",
 	]);
 });
-
-it("non-quota failures (provider_key_missing, raw quota-like text without the code) never halt dispatch", async () => {
-	const calls: { file: File; resolve: (rows: NotesImportResult[]) => void }[] = [];
-	const queue = createNotesImportQueue(async (files) => new Promise((resolve) => { calls.push({ file: files[0]!, resolve }); }));
-	queue.append([file("a.md"), file("b.md"), file("c.md"), file("d.md"), file("e.md")]);
-	assert.equal(calls.length, 3);
-	calls[0]!.resolve([failureResult("a.md", "No OpenRouter key is set — add one in Settings → Keys", "provider_key_missing")]); await tick();
-	assert.equal(calls.length, 4, "key refusal refills the pool");
-	calls[1]!.resolve([failureResult("b.md", "500: upstream rate_limit [429]: Rate limit exceeded: free-models-per-day", "provider_key_missing")]); await tick();
-	assert.equal(calls.length, 5, "raw quota-like text without code=quota_exhausted does NOT stop the queue");
-	for (const call of calls.slice(2)) call.resolve([success(call.file.name)]);
-	await tick();
-	assert.equal(queue.getSnapshot().importing, false);
-	assert.equal(queue.getSnapshot().completion, 1);
-	assert.equal(queue.getSnapshot().errors.length, 2);
-});

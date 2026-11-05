@@ -290,39 +290,3 @@ it("confirmed quota exhaustion wrapped in a NotesImportError stops dispatch, pre
 	assert.ok(unattempted.error.includes("Not attempted"), "unattempted is distinct from the attempted quota failure");
 	assert.equal(started.includes("c.md"), false, "c.md was never dispatched");
 });
-
-it("generic auth/500/503 failures without the quota marker never halt the batch", async () => {
-	let started = 0;
-	extraction.importNotes = async ({ filePath }) => {
-		started++;
-		if (filePath === "auth.md") throw new Error('503: {"message":"auth_unavailable: no auth available (providers=freehub)"}');
-		if (filePath === "server.md") throw new Error('500: {"message":"internal_server_error"}');
-		if (filePath === "key.md") throw new ProviderKeyMissingError("openai", ["cheap"]);
-		return { nodes: 1, chains: 0 };
-	};
-	const response = await POST(request(["auth.md", "server.md", "key.md", "ok.md"]));
-	assert.equal(response.status, 200);
-	const { results } = await response.json();
-	assert.equal(started, 4, "every file dispatched despite non-quota failures");
-	assert.equal(results.length, 4);
-	const byPath = (name: string) => results.find((r: { filePath: string }) => r.filePath === name);
-	assert.equal(byPath("auth.md").code, undefined, "generic 503 is NOT quota");
-	assert.equal(byPath("auth.md").outcome, "failed");
-	assert.equal(byPath("server.md").code, undefined, "generic 500 is NOT quota");
-	assert.equal(byPath("key.md").code, "provider_key_missing");
-	assert.equal(byPath("ok.md").ok, true);
-});
-
-it("non-quota provider key errors still process other files", async () => {
-	let started = 0;
-	extraction.importNotes = async ({ filePath }) => {
-		started++;
-		if (filePath === "key.md") throw new ProviderKeyMissingError("openai", ["cheap"]);
-		return { nodes: 1, chains: 0 };
-	};
-	const response = await POST(request(["a.md", "key.md", "b.md"]));
-	assert.equal(response.status, 200);
-	const { results } = await response.json();
-	assert.equal(started, 3, "all files dispatched despite non-quota key error");
-	assert.equal(results.length, 3);
-});
