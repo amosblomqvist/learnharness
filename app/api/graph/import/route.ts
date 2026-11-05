@@ -11,6 +11,11 @@
  * Markdown first. A PDF with nothing to extract is refused before any
  * model call or source record.
  *
+ * RESUMABLE (2026-11): the deterministic source id means a re-import of the
+ * same path continues where the last run stopped — unchanged consumed
+ * prefix → the first unmerged chunk runs; fully extracted and unchanged →
+ * the file is skipped with no model call; changed consumed prefix → line 0.
+ *
  * Small concurrency cap: the model calls are the slow part, and a burst of
  * 25 simultaneous runs would trip provider rate limits — a 3-wide worker
  * pool keeps the run registry (the dock's status chips) and the ledgers
@@ -44,7 +49,16 @@ interface ImportResult {
 	/** The key-refusal specifics (provider_key_missing only). */
 	provider?: string;
 	slots?: string[];
-	/** Shown beside a completed import (every PDF: scanner text may be wrong). */
+	/** True when the file's stored progress already covered the whole
+	 *  unchanged text — no model call, no usage row. */
+	skipped?: boolean;
+	/** 1-based chunk index this import started at, and the file's chunk
+	 *  count — present only when a partially extracted, unchanged file
+	 *  resumed ("continued from 4/12"). */
+	resumedFrom?: number;
+	chunksTotal?: number;
+	/** Shown beside a completed import (every PDF: scanner text may be wrong;
+	 *  resumed/skipped imports explain why so little was billed). */
 	notice?: string;
 }
 
@@ -151,8 +165,19 @@ export async function POST(request: Request) {
 					continue;
 				}
 				sourceDirectory.registerImport(filePath);
-				const stats = await extraction.importNotes({ filePath, text: notes.text });
-				results.push({ filePath, requestIndex, outcome: "completed", ok: true, stats, ...(notes.notice ? { notice: notes.notice } : {}) });
+				const { skipped, resumedFrom, chunksTotal, ...stats } = await extraction.importNotes({ filePath, text: notes.text });
+				const resumeNotice = skipped
+					? "Already extracted — unchanged since the last import."
+					: resumedFrom !== undefined
+						? `Continued from chunk ${resumedFrom}/${chunksTotal ?? resumedFrom}.`
+						: undefined;
+				const notice = notes.notice && resumeNotice ? `${notes.notice} ${resumeNotice}` : notes.notice ?? resumeNotice;
+				results.push({
+					filePath, requestIndex, outcome: "completed", ok: true, stats,
+					...(skipped ? { skipped } : {}),
+					...(resumedFrom !== undefined ? { resumedFrom, chunksTotal } : {}),
+					...(notice ? { notice } : {}),
+				});
 			} catch (err) {
 				if (err instanceof ModelsNotConfiguredError) {
 					results.push({ filePath, ok: false, requestIndex, outcome: "failed", error: err.envelope.error,

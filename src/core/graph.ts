@@ -50,8 +50,7 @@
  */
 
 import { randomBytes } from "node:crypto";
-import type { CoverageEntry,
-} from "./contracts/graph.ts";
+import type { CoverageEntry, NotesImportProgress } from "./contracts/graph.ts";
 import type {
 	AuditVerdicts,
 	ExtractedChain,
@@ -94,22 +93,28 @@ function chainKey(premises: ReadonlyArray<string>, conclusion: string): string {
 }
 
 /** What one merge run merges FROM (the caller supplies it — the merger never
- *  reads the chat store): the coverage checkpoint for a session batch, or —
- *  for the format-agnostic notes front door (2026-09-13) — no coverage at
- *  all: the whole-file checkpoint stamps the import.
+ *  reads the chat store): the coverage checkpoint for a session batch, the
+ *  resume checkpoint for a notes chunk, or — legacy callers — no coverage
+ *  at all: the whole-file checkpoint stamps the merge.
  *
  *  Coverage (vision-extraction-coverage.md, settled 2026-09-15): a chat merge
  *  passes the BATCH it extracted — the caller computed the fingerprints
  *  before the run, from the same snapshot the merger sees — and the final
  *  step appends one CoverageEntry per message on success ("covered" means
- *  exactly this merge happened). The notes path passes neither and keeps
- *  the whole-file checkpoint. */
+ *  exactly this merge happened). The notes door passes `progress` instead:
+ *  its chunk's consumed-line checkpoint, written in the same final step (a
+ *  notes file resumes chunk-by-chunk, so the whole-file checkpoint no
+ *  longer applies). */
 export interface MergeSource {
 	foldedAt: string;
 	/** The batch being merged (chat path): one entry per message in the
-	 *  extracted batch — undefined (notes path / coverage-less callers) →
-	 *  the legacy whole-chat checkpoint is written instead. */
+	 *  extracted batch — undefined (notes / coverage-less callers) → a
+	 *  checkpoint-family write happens instead. */
 	coverage?: CoverageEntry[];
+	/** The notes door's resume checkpoint for THIS chunk (sources.json).
+	 *  Present → written on success in place of the whole-file checkpoint;
+	 *  null → the caller cleared it (content changed, restart from 0). */
+	progress?: NotesImportProgress | null;
 }
 
 /** The run's provenance point. Chat-level by default (submit-schema slim,
@@ -279,10 +284,14 @@ export function mergeFindings(
 	//    only now, after every append succeeded, is the batch covered. The
 	//    chat path appends one CoverageEntry per message (per-batch atomic —
 	//    an abort or failure mid-run leaves earlier batches covered, this
-	//    batch's messages uncovered); the notes path keeps the whole-file
-	//    checkpoint (a file is one shot).
+	//    batch's messages uncovered); the notes path records its consumed
+	//    lines in the source's resume progress (a file resumes chunk-by-chunk
+	//    since 2026-11); legacy coverage-less callers keep the whole-file
+	//    checkpoint.
 	if (source.coverage !== undefined) {
 		for (const entry of source.coverage) ledgers.appendCoverage(entry);
+	} else if (source.progress !== undefined) {
+		ledgers.writeSourceProgress(chatId, source.progress);
 	} else {
 		ledgers.appendCheckpoint({ chatId, foldedAt: source.foldedAt });
 	}

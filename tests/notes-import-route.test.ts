@@ -56,7 +56,7 @@ it("route keeps three-worker batching, request positions and mixed per-file outc
 	assert.equal(key.code, "provider_key_missing"); assert.equal(key.provider, "openai"); assert.deepEqual(key.slots, ["cheap"]);
 });
 
-it("real route plus in-memory ledgers and faux stages reprocess identical imports for all four filename cases", async () => {
+it("real route plus in-memory ledgers and faux stages: the first pass extracts, an identical second pass skips", async () => {
 	const nodes: GraphNode[] = [];
 	const chains: GraphChain[] = [];
 	const checkpoints: SessionCheckpoint[] = [];
@@ -66,10 +66,23 @@ it("real route plus in-memory ledgers and faux stages reprocess identical import
 		appendChain: (chain) => { chains.push(chain); }, readChains: () => [...chains],
 		appendCheckpoint: (checkpoint) => { checkpoints.push(checkpoint); }, readCheckpoints: () => [...checkpoints],
 		appendCoverage: () => {}, readCoverage: () => [],
-		upsertSource: (source) => { sources.set(source.id, { ...source, extractions: sources.get(source.id)?.extractions ?? [] }); },
+		upsertSource: (source) => {
+			const prev = sources.get(source.id);
+			sources.set(source.id, {
+				...source,
+				extractions: prev?.extractions ?? [],
+				...(source.progress ?? prev?.progress ? { progress: source.progress ?? prev?.progress } : {}),
+			});
+		},
 		readSources: () => [...sources.values()],
 		deleteSources: (ids) => [...ids].reduce((count, id) => count + Number(sources.delete(id)), 0),
 		appendSourceUsage: (id, usage) => { sources.get(id)!.extractions!.push(usage); },
+		writeSourceProgress: (id, progress) => {
+			const source = sources.get(id);
+			if (!source) return;
+			if (progress) source.progress = { ...progress };
+			else delete source.progress;
+		},
 		readPositions: () => ({}), writePositions: () => {}, rewriteLedgers: () => {},
 	};
 	let calls = 0;
@@ -92,11 +105,15 @@ it("real route plus in-memory ledgers and faux stages reprocess identical import
 		const { results } = await response.json();
 		assert.equal(results.length, 4);
 		assert.ok(results.every((r: { ok: boolean; outcome: string }) => r.ok && r.outcome === "completed"));
+		if (pass === 1)
+			assert.ok(results.every((r: { skipped?: boolean; notice?: string }) =>
+				r.skipped === true && r.notice === "Already extracted — unchanged since the last import."),
+			"an unchanged re-import reports the skip instead of re-extracting");
 	}
-	assert.equal(calls, 8, "repeat identical imports execute real faux extractor calls");
-	assert.equal(nodes.length, 8);
+	assert.equal(calls, 4, "only the first pass calls the extractor");
+	assert.equal(nodes.length, 4);
 	assert.equal(sources.size, 4);
-	assert.ok([...sources.values()].every((source) => source.extractions?.length === 2 && source.contentFp === undefined));
+	assert.ok([...sources.values()].every((source) => source.extractions?.length === 1 && source.contentFp === undefined));
 });
 
 it("route returns 400 without files", async () => {
