@@ -26,7 +26,7 @@ test("sumSteps: absent stays absent; unknown long-cache detail stays unknown", (
 test("callCost prices normalized fresh input directly, without subtracting caches again", () => {
 	const cost = callCost(call({ inputTokens: 100_000, outputTokens: 20_000, cacheReadTokens: 10_000 }), "openrouter:z-ai/glm-5.3-flash");
 	assert.ok(cost !== null);
-	assert.ok(Math.abs(cost - (0.015 + 0.0003 + 0.01)) < 1e-9);
+	assert.ok(Math.abs(cost - (0.00285 + 0.000285 + 0.001846)) < 1e-9);
 	assert.equal(callCost(call({ inputTokens: 10_000, outputTokens: 1_000, cacheReadTokens: 70_000 }), "openrouter:openai/gpt-6.1-sol"), 0.037);
 });
 

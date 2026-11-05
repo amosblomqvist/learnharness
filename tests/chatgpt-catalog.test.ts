@@ -1,5 +1,6 @@
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
+import { getSupportedThinkingLevels, type Model } from "@earendil-works/pi-ai";
 import { piModels } from "../src/agent/models.ts";
 import { refreshChatGPTModels, chatGPTModels, chatGPTStatus, chatGPTScope, chatGPTScopeCurrent, chatGPTLease, chatGPTAbortController } from "../src/agent/chatgpt-bridge.ts";
 const send = Object.getOwnPropertyDescriptor(process, "send"), connected = Object.getOwnPropertyDescriptor(process, "connected");
@@ -49,4 +50,25 @@ test("account/full and catalog authority changes reject outstanding old leases w
  const newScope = chatGPTScope(model.id); assert.equal(newScope.accountId, "B");
  ipc({ channel: "lh:chatgpt", kind: "state", stamp: { epoch: 2, authorityRevision: 3, revision: 8 }, status: status("B"), invalidate: "none" });
  assert.equal(chatGPTModels().length, 0); await assert.rejects(chatGPTLease(newScope, false));
+});
+test("GPT-6.1 Terra is supported when offered by the account, never added when absent", async () => {
+ const supported = piModels().getModels("openai").filter((m): m is Model<"openai-responses"> => m.api === "openai-responses");
+ const terra = supported.find((m) => m.id === "gpt-6.1-terra");
+ assert.ok(terra, "the bundled OpenAI Responses catalog must include GPT-6.1 Terra");
+ const refresh = refreshChatGPTModels(supported);
+ reply(pending.at(-1), { ...value("B", 9, "B", 3), models: [{ id: terra.id, name: "GPT-6.1-Terra" }, { id: "unknown-model", name: "Unknown" }] });
+ await refresh;
+ assert.equal(chatGPTModels().length, 1);
+ const logical = chatGPTModels()[0]!;
+ assert.equal(logical.id, terra.id); assert.equal(logical.name, "GPT-6.1-Terra"); assert.equal(logical.provider, "chatgpt");
+ assert.equal(logical.contextWindow, terra.contextWindow); assert.equal(logical.maxTokens, terra.maxTokens);
+ assert.deepEqual(logical.input, terra.input);
+ assert.deepEqual(getSupportedThinkingLevels(logical), getSupportedThinkingLevels(terra));
+ assert.deepEqual(logical.cost, { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 });
+ assert(chatGPTScopeCurrent(chatGPTScope(terra.id)));
+
+ const withoutTerra = refreshChatGPTModels(supported);
+ reply(pending.at(-1), value("B", 10, "B", 3)); await withoutTerra;
+ assert(!chatGPTModels().some((m) => m.id === terra.id));
+ assert.throws(() => chatGPTScope(terra.id), /unavailable/);
 });
