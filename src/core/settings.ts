@@ -409,14 +409,14 @@ export interface AgentSettings {
 	fileAccess?: FileAccessSettings;
 }
 
-/** The rendered-markdown alignments (owner, 2026-10-30): the four the
- *  settings row offers, in its button order. Tests pin the set. */
+/** The rendered-markdown alignments: the four the settings row offers, in
+ *  its button order. Tests pin the set. */
 export const MD_TEXT_ALIGNS = ["left", "center", "right", "justify"] as const;
 export type MdTextAlign = (typeof MD_TEXT_ALIGNS)[number];
 
-/** Center's reading-column TEXT widths in px (owner, 2026-10-30: medium =
- *  700px, Obsidian's readable line length; small/large are the build's
- *  call). Tests pin the set. */
+/** Center's reading-column TEXT widths in px. Medium (700px) matches the
+ *  readable line length common in note-taking apps; small and large step
+ *  down and up from it. Tests pin the set. */
 export const MD_CENTER_WIDTHS = { small: 560, medium: 700, large: 880 } as const;
 export type MdCenterWidth = keyof typeof MD_CENTER_WIDTHS;
 
@@ -432,7 +432,7 @@ export interface MdRenderingSettings {
 	/** Alignment of rendered markdown — replies, teaching/practice content,
 	 *  job briefs, reasoning (default left — today's look). Center is NOT
 	 *  line-centering: it narrows the whole transcript column to
-	 *  centerWidth and keeps the text left-aligned (owner revision). */
+	 *  centerWidth and keeps the text left-aligned. */
 	textAlign?: MdTextAlign;
 	/** Center's column width (default medium). Inert under any other
 	 *  alignment; kept so switching back to Center restores it. */

@@ -312,8 +312,8 @@ export function AppearanceSection({
 					onChange={(textAlign) => onSectionChange({ ...appearance, mdRendering: { ...md, textAlign } })}
 				/>
 			</SettingsRow>
-			{/* Center's width (owner, 2026-10-30): shown only while Center is
-			    the stored alignment; the value stays stored when hidden. */}
+			{/* Center's width: shown only while Center is the stored
+			    alignment; the value stays stored when hidden. */}
 			{md?.textAlign === "center" && (
 				<SettingsRow label="Column width" testid="row-center-width">
 					<SegmentedControl

@@ -202,7 +202,7 @@ export function ThinSelect({
 	);
 }
 
-/** A one-of-N picker (text-alignment wave, owner 2026-10-30): a
+/** A one-of-N picker (used by the text-alignment rows): a
  *  ThinSelect-height pill of buttons in the radio role, the chosen one
  *  raised. An option with an icon shows only the icon (its label rides
  *  aria-label); without one it shows its label as a word. The native

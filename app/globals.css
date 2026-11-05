@@ -247,12 +247,12 @@ body {
 	font-weight: var(--lh-heading-weight, 900);
 }
 
-/* Markdown alignment (owner, 2026-10-30): RENDERED markdown only — the
-   Streamdown roots carry .lh-md (replies, teaching/practice content, job
-   briefs, reasoning); user-typed .lh-prose text never does. Paragraphs,
-   headings, lists, quotes/callouts, table cells, and images inherit.
-   Explicit GFM column alignment is an inline style and still wins.
-   Center is not here: it keeps the text left and narrows the column. */
+/* Markdown alignment: RENDERED markdown only. The Streamdown roots carry
+   .lh-md (replies, teaching/practice content, job briefs, reasoning);
+   user-typed .lh-prose text never does. Paragraphs, headings, lists,
+   quotes/callouts, table cells, and images inherit. Explicit GFM column
+   alignment is an inline style and still wins. Center is not here: it
+   keeps the text left and narrows the column. */
 .lh-md {
 	text-align: var(--lh-md-align);
 	hyphens: var(--lh-md-hyphens);
@@ -265,15 +265,15 @@ body {
 }
 
 /* Tables and callouts HUG their content, so aligning their text alone
-   barely shows: Right moves the box itself (owner ruling). */
+   barely shows; Right moves the box itself. */
 .lh-md :where([data-streamdown="table"], [data-alert-kind]) {
 	margin-left: var(--lh-md-box-ml);
 }
 
-/* Center (owner revision, 2026-10-30 — Obsidian's readable line length):
-   the whole transcript column (user messages, reasoning, replies, cards)
-   narrows to the chosen width and stays centered by its mx-auto; the
-   text inside stays left-aligned. The composer dock is not this column. */
+/* Center follows a readable line length: the whole transcript column
+   (user messages, reasoning, replies, cards) narrows to the chosen width
+   and stays centered by its mx-auto; the text inside stays left-aligned.
+   The composer dock is not this column. */
 .lh-chat-column {
 	max-width: var(--lh-chat-column-max);
 }
