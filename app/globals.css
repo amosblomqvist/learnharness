@@ -233,22 +233,12 @@ body {
 	font-weight: var(--lh-heading-weight, 900);
 }
 
-/* Markdown alignment: RENDERED markdown only. The Streamdown roots carry
-   .lh-md (replies, job briefs, reasoning); user-typed .lh-prose text and
-   the question and practice surfaces never do. Paragraphs, headings, lists,
-   quotes/callouts, table cells, and images inherit. Explicit GFM column
-   alignment is an inline style and still wins. Center is not here: it
-   keeps the text left and narrows the column.
-   This root rule sits in the components layer on purpose: a utility such
-   as text-center on the same element (a className passed to a response)
-   must still win. The rules below target descendants that carry their
-   own utilities (Streamdown's text-left headers) or utilities on the same
-   element (the column's max-w-none), so they stay unlayered to beat them. */
-@layer components {
-	.lh-md {
-		text-align: var(--lh-md-align, left);
-		hyphens: var(--lh-md-hyphens, manual);
-	}
+/* Markdown alignment: RENDERED markdown only (.lh-md on the Streamdown roots
+   of replies, job briefs and reasoning). Explicit GFM column alignment is an
+   inline style and still wins. */
+.lh-md {
+	text-align: var(--lh-md-align, left);
+	hyphens: var(--lh-md-hyphens, manual);
 }
 
 /* Lists indent from the edge the text is aligned to (the prose-edge rule

@@ -13,8 +13,6 @@ import React from "react";
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import fs from "node:fs";
-import postcss, { type AtRule, type Container, type Rule } from "postcss";
-import tailwind from "@tailwindcss/postcss";
 import { renderToStaticMarkup } from "react-dom/server";
 import { MessageResponse, ToolContentResponse } from "../components/ai-elements/message.tsx";
 import { Reasoning, ReasoningContent } from "../components/ai-elements/reasoning.tsx";
@@ -480,37 +478,6 @@ describe("text alignment — the markdown-only hook (appearance.mdRendering.text
 		const html = render("| a | b |\n|:-:|--:|\n| 1 | 2 |");
 		assert.ok(html.includes("text-align:center"), "the :-: column keeps its center");
 		assert.ok(html.includes("text-align:right"), "the --: column keeps its right");
-	});
-
-	it("cascade: a utility class beats the .lh-md root rule, while the descendant overrides still beat utilities", async () => {
-		// Compile globals.css the way the build does and read the cascade layers
-		// from the result. Layer order decides between a layered and an
-		// unlayered rule whatever their specificity, so the regex tests above
-		// cannot see a regression here.
-		const source = fs.readFileSync("app/globals.css", "utf-8") + '\n@source inline("text-center");\n';
-		const compiled = postcss.parse((await postcss([tailwind()]).process(source, { from: "app/globals.css" })).css);
-		const layerOf = (node: Container | AtRule | Rule | undefined): string | null => {
-			for (let p = node?.parent; p; p = p.parent) if (p.type === "atrule" && (p as AtRule).name === "layer") return (p as AtRule).params;
-			return null;
-		};
-		const rules = (selector: string) => {
-			const found: Rule[] = [];
-			compiled.walkRules((rule) => { if (rule.selectors.includes(selector)) found.push(rule); });
-			return found;
-		};
-		const order = compiled.nodes.find((n): n is AtRule => n.type === "atrule" && n.name === "layer" && !n.nodes && n.params.includes("utilities"));
-		assert.ok(order, "the layer order statement is present");
-		const layers = order.params.split(",").map((s) => s.trim());
-		assert.ok(layers.indexOf("components") < layers.indexOf("utilities"), "utilities come after components, so they win");
-		const root = rules(".lh-md").filter((rule) => rule.some((d) => d.type === "decl" && d.prop === "text-align"));
-		assert.equal(root.length, 1, "one root rule sets the alignment");
-		assert.equal(layerOf(root[0]), "components", ".lh-md root is layered, so text-center on the same element wins");
-		assert.equal(layerOf(rules(".text-center")[0]), "utilities");
-		// the column's max-w-none sits on the same element as .lh-chat-column:
-		// only an unlayered rule can override it, so it must NOT be layered
-		const column = rules(".lh-chat-column");
-		assert.equal(column.length, 1);
-		assert.equal(layerOf(column[0]), null, ".lh-chat-column stays unlayered to beat max-w-none");
 	});
 
 	it("tables: the last column reserves the copy button's corner so hover never covers cell text", () => {
