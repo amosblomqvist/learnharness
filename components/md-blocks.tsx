@@ -101,7 +101,7 @@ export function CopyCorner({
 				type="button"
 				aria-label={label}
 				data-testid="md-copy"
-				className="flex size-6 items-center justify-center rounded-md text-muted-foreground/70 opacity-0 transition-opacity hover:bg-accent hover:text-foreground focus-visible:opacity-100 group-hover/md:opacity-100"
+				className="flex size-6 items-center justify-center rounded-md text-muted-foreground/70 opacity-0 transition-opacity hover:bg-accent hover:text-foreground focus-visible:opacity-100 group-hover/md:opacity-100 web-touch:opacity-100"
 				onClick={(e) => {
 					blurAfterPointerClick(e);
 					void copyText(getText()).then((ok) => {
@@ -211,7 +211,7 @@ function MermaidInline({ chart }: { chart: string }) {
 						type="button"
 						aria-label="Expand diagram"
 						data-testid="md-mermaid-expand"
-												className="flex size-6 items-center justify-center rounded-md text-muted-foreground/70 opacity-0 transition-opacity hover:bg-accent hover:text-foreground group-hover/md:opacity-100"
+												className="flex size-6 items-center justify-center rounded-md text-muted-foreground/70 opacity-0 transition-opacity hover:bg-accent hover:text-foreground group-hover/md:opacity-100 web-touch:opacity-100"
 						onClick={(e) => {
 							blurAfterPointerClick(e);
 							overlay.openMermaid(chart);

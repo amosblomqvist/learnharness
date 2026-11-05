@@ -2,6 +2,24 @@
 
 @custom-variant dark (&:is(.dark *));
 
+/* Web-only responsive variants (LAN web access). Keyed on the ABSENCE of
+   html.lh-electron (set server-side on first paint), so no rule built from
+   them can match inside the desktop window at any width or zoom. */
+@custom-variant web-phone {
+	@media (width < 48rem) {
+		html:not(.lh-electron) & {
+			@slot;
+		}
+	}
+}
+@custom-variant web-touch {
+	@media (hover: none) {
+		html:not(.lh-electron) & {
+			@slot;
+		}
+	}
+}
+
 /*
  * THE SKIN — wave 5. Design tokens, the single place to restyle the app.
  *

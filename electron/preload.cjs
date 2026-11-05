@@ -77,6 +77,12 @@ contextBridge.exposeInMainWorld("lh", {
 			return () => ipcRenderer.removeListener("lh:subscriptions:changed", listener);
 		},
 	},
+	lan: {
+		get: () => ipcRenderer.invoke("lh:lan:get"),
+		setEnabled: (enabled) => ipcRenderer.invoke("lh:lan:set-enabled", enabled),
+		setPort: (port) => ipcRenderer.invoke("lh:lan:set-port", port),
+		setPassword: (password) => ipcRenderer.invoke("lh:lan:set-password", password),
+	},
 	expandWindow: () => ipcRenderer.send("lh:expand-window"),
 	onZoom: (cb) => {
 		const listener = (_event, factor) => cb(factor);

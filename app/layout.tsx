@@ -1,4 +1,5 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
+import { headers } from "next/headers";
 import { JetBrains_Mono, Source_Sans_3 } from "next/font/google";
 import "katex/dist/katex.min.css";
 import "./globals.css";
@@ -18,9 +19,16 @@ export const metadata: Metadata = {
 	description: "A teacher agent with a memory — sessions, quizzes, and a knowledge graph of what you know.",
 };
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
+export const viewport: Viewport = { width: "device-width", initialScale: 1 };
+
+// async: the Electron window is detected from the request's user agent so the
+// `lh-electron` class is in the server HTML (correct on the first paint). Every
+// web-only responsive variant (globals.css) is keyed on its absence, so none of
+// them can ever match inside the desktop window.
+export default async function RootLayout({ children }: { children: React.ReactNode }) {
+	const electron = ((await headers()).get("user-agent") ?? "").includes("Electron");
 	return (
-		<html lang="en" className={`dark ${ui.variable} ${prose.variable}`}>
+		<html lang="en" className={`dark ${ui.variable} ${prose.variable}${electron ? " lh-electron" : ""}`}>
 			<body className="min-h-dvh antialiased">
 			{/* The notification channel rides OUTSIDE everything: sidebar, dock,
 				 and pages all subscribe as the polls retire (push S3, 2026-10-02). */}
