@@ -1,10 +1,20 @@
-import { IMPORT_EXTENSIONS, MAX_IMPORT_BYTES, UNSUPPORTED_TYPE_MESSAGE, validNotesPath } from "@/lib/notes-import-limits";
+import { IMPORT_EXTENSIONS, MAX_IMPORT_BYTES, validNotesPath } from "@/lib/notes-import-limits";
 import type { NotesImportResult } from "./notes-import";
 
 export const notesPath = (file: File): string => file.webkitRelativePath || file.name;
 /** Folder imports silently exclude dot-prefixed files and directories below
  * the chosen root. The root is segment 0 and stays importable even when hidden. */
 const hiddenInFolder = (file: File): boolean => file.webkitRelativePath.split("/").slice(1).some((part) => part.startsWith("."));
+/** From the last dot of the file name, lower-cased. A dot that starts the name (".DS_Store") is not an extension. */
+const extensionLabel = (name: string): string => {
+	const dot = name.lastIndexOf(".");
+	return dot > 0 ? name.slice(dot).toLowerCase() : "no extension";
+};
+/** One line per reason for a whole pick, so a big folder cannot flood the error list. */
+const unsupportedSummary = (extensions: readonly string[]): string =>
+	`Skipped ${extensions.length} ${extensions.length === 1 ? "file that isn't" : "files that aren't"} text, Markdown, or PDF (${[...new Set(extensions)].join(", ")}).`;
+const unsafeSummary = (count: number): string =>
+	`Skipped ${count} ${count === 1 ? "file with a name" : "files with names"} the import can't use (e.g. a ':' in the name).`;
 export interface ImportQueueSnapshot {
 	importing: boolean;
 	errors: string[];
@@ -59,15 +69,19 @@ export function createNotesImportQueue(post: (files: readonly File[]) => Promise
 		append(files: readonly File[]) {
 			if (files.length === 0) return;
 			if (!snapshot.importing) { failures.clear(); notices.clear(); sequence = 0; }
+			// Unsafe names and unsupported types are summed up per pick; each summary sits where its first file was.
+			const unsafe: number[] = [], unsupported: { index: number; extension: string }[] = [];
 			for (const file of files) {
 				const index = sequence++;
 				const path = notesPath(file);
 				if (file.webkitRelativePath && hiddenInFolder(file)) continue;
-				if (!validNotesPath(path, file.name)) failures.set(index, `${path}: Unsafe relative path.`);
-				else if (!IMPORT_EXTENSIONS.test(file.name)) failures.set(index, `${path}: ${UNSUPPORTED_TYPE_MESSAGE}`);
+				if (!validNotesPath(path, file.name)) unsafe.push(index);
+				else if (!IMPORT_EXTENSIONS.test(file.name)) unsupported.push({ index, extension: extensionLabel(file.name) });
 				else if (file.size > MAX_IMPORT_BYTES) failures.set(index, `${path}: Too big. Max 25 MB.`);
 				else pending.push({ file, index });
 			}
+			if (unsafe.length > 0) failures.set(unsafe[0]!, unsafeSummary(unsafe.length));
+			if (unsupported.length > 0) failures.set(unsupported[0]!.index, unsupportedSummary(unsupported.map(({ extension }) => extension)));
 			const hadWork = active > 0 || pending.length > 0;
 			pump();
 			publish(!hadWork);
