@@ -1,12 +1,19 @@
 "use strict";
 const { randomUUID } = require("node:crypto");
+const fs = require("node:fs");
 const path = require("node:path");
-const { createRequire, registerHooks } = require("node:module");
+const { createRequire, findPackageJSON, registerHooks } = require("node:module");
 const { pathToFileURL } = require("node:url");
 const { PROVIDERS, fileStore, validateCredential, safeHttps, failure } = require("./subscription-store.cjs");
 
-const LABELS = { "github-copilot": "GitHub Copilot", xai: "Grok" };
-const APIS = new Set(["openai-responses", "openai-completions", "anthropic-messages"]);
+const LABELS = { "github-copilot": "GitHub Copilot", xai: "Grok", "openai-codex": "OpenAI Codex" };
+const APIS = new Set(["openai-responses", "openai-completions", "anthropic-messages", "openai-codex-responses"]);
+const DEFAULT_ENDPOINTS = {
+	"github-copilot": "https://api.individual.githubcopilot.com",
+	xai: "https://api.x.ai/v1",
+	"openai-codex": "https://chatgpt.com/backend-api",
+};
+const defaultEndpoint = (providerId) => DEFAULT_ENDPOINTS[providerId];
 const clone = (value) => value === undefined ? undefined : JSON.parse(JSON.stringify(value));
 const MESSAGES = {
 	storage: "The saved connection could not be read or written safely. Reopen the app or reconnect after resolving the credential-file problem.",
@@ -20,28 +27,68 @@ const MESSAGES = {
 };
 function publicError(error) { return MESSAGES[error?.code] ?? MESSAGES.unavailable; }
 /** Resolve the SAME SDK installation as the standalone server, through public exports. */
-async function loadSubscriptionSDK(baseDirectory) {
+function exportTarget(exports, subpath) {
+	const pick = (value) => typeof value === "string" ? value : value?.import ?? value?.default;
+	const direct = exports?.[subpath];
+	if (direct) return pick(direct);
+	for (const [key, value] of Object.entries(exports ?? {})) {
+		const star = key.indexOf("*");
+		if (star < 0) continue;
+		const prefix = key.slice(0, star), suffix = key.slice(star + 1);
+		if (!subpath.startsWith(prefix) || !subpath.endsWith(suffix)) continue;
+		const wildcard = subpath.slice(prefix.length, subpath.length - suffix.length);
+		const target = pick(value);
+		if (target) return target.replaceAll("*", wildcard);
+	}
+	return undefined;
+}
+function resolvePackageExport(baseDirectory, specifier) {
+	// findPackageJSON ignores the exports map, so we can read the published
+	// export target even though this SDK is import-only.
+	if (typeof findPackageJSON === "function") {
+		const manifestPath = findPackageJSON(specifier, pathToFileURL(path.join(baseDirectory, "package.json")));
+		if (manifestPath) {
+			const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
+			const packageName = specifier.split("/").slice(0, specifier.startsWith("@") ? 2 : 1).join("/");
+			const subpath = specifier === packageName ? "." : `.${specifier.slice(packageName.length)}`;
+			const target = exportTarget(manifest.exports, subpath);
+			if (target) return pathToFileURL(path.join(path.dirname(manifestPath), target)).href;
+		}
+	}
+	// Older Node fallback: resolve through the CJS hook with the import condition.
 	const resolve = createRequire(path.join(baseDirectory, "package.json"));
-	const load = (id) => {
+	const hook = registerHooks({ resolve(specifierName, context, next) {
 		// Pi exports are import-only. Resolve the public export with ESM
 		// conditions, then remove this synchronous, exact-specifier hook
 		// BEFORE evaluation; no private package path or global hook remains.
-		const hook = registerHooks({ resolve(specifier, context, next) {
-			return next(specifier, specifier === id ? { ...context, conditions: [...context.conditions, "import"] } : context);
-		} });
-		let file;
-		try { file = resolve.resolve(id); } finally { hook.deregister(); }
-		return import(pathToFileURL(file).href);
-	};
-	const [sdk, copilot, xai] = await Promise.all([load("@earendil-works/pi-ai"), load("@earendil-works/pi-ai/providers/github-copilot"), load("@earendil-works/pi-ai/providers/xai")]);
-	return { ...sdk, ...copilot, ...xai };
+		return next(specifierName, specifierName === specifier ? { ...context, conditions: [...context.conditions, "import"] } : context);
+	} });
+	let file;
+	try { file = resolve.resolve(specifier); } finally { hook.deregister(); }
+	return pathToFileURL(file).href;
+}
+async function loadSubscriptionSDK(baseDirectory) {
+	const load = (id) => import(resolvePackageExport(baseDirectory, id));
+	// Resolve sequentially: package resolution reads one manifest at a time and
+	// the fallback hook must never overlap another resolution.
+	const sdk = await load("@earendil-works/pi-ai");
+	const copilot = await load("@earendil-works/pi-ai/providers/github-copilot");
+	const xai = await load("@earendil-works/pi-ai/providers/xai");
+	const codex = await load("@earendil-works/pi-ai/providers/openai-codex");
+	return { ...sdk, ...copilot, ...xai, ...codex };
+}
+function nativeProvider(sdk, providerId) {
+	if (providerId === "github-copilot") return sdk.githubCopilotProvider();
+	if (providerId === "xai") return sdk.xaiProvider();
+	return sdk.openaiCodexProvider();
 }
 function validEndpoint(providerId, auth, credential) {
 	if (!auth || (!(typeof auth.apiKey === "string" && auth.apiKey.length > 0) && !Object.entries(auth.headers ?? {}).some(([key, value]) => ["authorization", "x-api-key", "api-key"].includes(key.toLowerCase()) && typeof value === "string" && value.trim().length > 0))) return false;
-	const value = auth.baseUrl ?? (providerId === "xai" ? "https://api.x.ai/v1" : "https://api.individual.githubcopilot.com");
+	const value = auth.baseUrl ?? defaultEndpoint(providerId);
 	if (!safeHttps(value)) return false;
 	const url = new URL(value);
 	if (providerId === "xai") return url.origin === "https://api.x.ai" && url.pathname.replace(/\/$/, "") === "/v1" && !url.search && !url.hash;
+	if (providerId === "openai-codex") return url.origin === "https://chatgpt.com" && url.pathname.replace(/\/$/, "") === "/backend-api" && !url.search && !url.hash;
 	const domain = credential?.enterpriseUrl;
 	return !url.search && !url.hash && url.pathname === "/" && (!url.port || url.port === "443") && (url.hostname.endsWith(".githubcopilot.com") || (domain && (url.hostname === domain || url.hostname.endsWith(`.${domain}`))));
 }
@@ -82,7 +129,7 @@ function createSubscriptions(options) {
 		if (entry.state.credential) {
 			const auth = await entry.provider.auth.oauth.toAuth(entry.state.credential);
 			if (!validEndpoint(entry.providerId, auth, entry.state.credential)) throw failure("storage");
-			endpoint = auth.baseUrl ?? (entry.providerId === "xai" ? "https://api.x.ai/v1" : "https://api.individual.githubcopilot.com");
+			endpoint = auth.baseUrl ?? defaultEndpoint(entry.providerId);
 		}
 		if (entry.endpoint !== endpoint) { entry.endpoint = endpoint; entry.authorityRevision++; }
 	}
@@ -99,7 +146,7 @@ function createSubscriptions(options) {
 		await Promise.all([...entries.values()].map(async (entry) => {
 			try {
 				entry.state = clone(await entry.disk.read());
-				const native = entry.providerId === "github-copilot" ? sdk.githubCopilotProvider() : sdk.xaiProvider();
+				const native = nativeProvider(sdk, entry.providerId);
 				// No API-key auth method exists in this collection: ambient keys cannot become a fallback.
 				entry.provider = { ...native, auth: { oauth: native.auth.oauth } };
 				const store = {

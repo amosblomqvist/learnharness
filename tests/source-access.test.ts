@@ -42,10 +42,11 @@ await write("transcripts/projects/session.jsonl");
 await write("keyfiles/chatgpt-credentials.json");
 await write("keyfiles/github-copilot-credentials.json");
 await write("keyfiles/xai-credentials.json");
+await write("keyfiles/openai-codex-credentials.json");
 await write("keyfiles/.auth.json.tmp-123");
 const uuid = "12345678-1234-4123-8123-123456789abc";
 const authTemp = await write(`keyfiles/custom-keys.json.tmp-${uuid}`);
-for (const name of ["chatgpt", "github-copilot", "xai"]) await write(`keyfiles/${name}-credentials.json.${uuid}.tmp`);
+for (const name of ["chatgpt", "github-copilot", "xai", "openai-codex"]) await write(`keyfiles/${name}-credentials.json.${uuid}.tmp`);
 const targetKey = await write("relocated-token");
 await link(path.join(root, "keyfiles"), path.join(root, "private"), true);
 await link(targetKey, auth);
@@ -84,7 +85,7 @@ describe("source access: configured credentials only", () => {
 	const protectedFiles = [
 		auth, targetKey, path.join(home, "notes", "key-alias"),
 		authTemp, `${auth}.tmp-${uuid}`, path.join(home, "notes", "key-temp-alias"),
-		...(["chatgpt", "github-copilot", "xai"].flatMap((name) => [
+		...(["chatgpt", "github-copilot", "xai", "openai-codex"].flatMap((name) => [
 			path.join(root, "private", `${name}-credentials.json`),
 			path.join(root, "keyfiles", `${name}-credentials.json`),
 			path.join(root, "private", `${name}-credentials.json.${uuid}.tmp`),
