@@ -278,6 +278,17 @@ describe("render smoke tests", () => {
 		assert.ok(html.includes('data-mark="check"') && html.includes('data-mark="x"'));
 	});
 
+	it("the question dock and the answered card never carry the text-alignment hook", () => {
+		// Their labels, options and fields stay left-aligned, so aligning only
+		// the question text would leave each surface half aligned.
+		const dock = renderDock({ toolName: "quiz", toolCallId: "q1", input: quizInput as never });
+		const answered = renderToStaticMarkup(<AnsweredCard answer={buildAnswer(quizQD(), { values: ["Venus"] })} />);
+		for (const [name, html] of [["dock", dock], ["answered card", answered]] as const) {
+			assert.match(html, /lh-prose/, `${name} renders markdown`);
+			assert.doesNotMatch(html, /\blh-md\b/, `${name} must not follow the alignment setting`);
+		}
+	});
+
 	it("AnsweredCard shows the confidence rail on quiz answers (record, no disc)", () => {
 		// The slider's rail, disc removed: same paint, same ticks, the % read-out.
 		const answer = buildAnswer(quizQD(), { values: ["Venus"], confidence: 70 });

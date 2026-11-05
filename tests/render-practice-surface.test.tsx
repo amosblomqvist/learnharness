@@ -63,6 +63,20 @@ describe("PracticeDock", () => {
 		assert.match(html, /disabled/);
 	});
 
+	it("never carries the text-alignment hook (the dock stays normally aligned)", () => {
+		const html = renderToStaticMarkup(
+			<PracticeDock
+				problemCallId="call_p1"
+				input={{ statement: "Show that the sum is even." }}
+				expanded={true}
+				onExpand={() => {}}
+				onSubmit={() => {}}
+			/>,
+		);
+		assert.match(html, /lh-prose/, "the statement renders as markdown");
+		assert.doesNotMatch(html, /\blh-md\b/);
+	});
+
 	it("collapsed: the slim bar carries the statement excerpt", () => {
 		const html = renderToStaticMarkup(
 			<PracticeDock
@@ -99,6 +113,17 @@ describe("the practice transcript cards", () => {
 		assert.doesNotMatch(html, /Pair them\./, "the commitment stays hidden");
 		// No chevron, no collapsed bar (owner round, 2026-10-05).
 		assert.doesNotMatch(html, /lucide-chevron|<button/, "nothing collapsible");
+	});
+
+	it("ProblemCard and ConcludeCard never carry the text-alignment hook", () => {
+		const problem = renderToStaticMarkup(<ProblemCard part={part({ input: { statement: "Prove the parity claim.", mode: "recall" } })} />);
+		const conclude = renderToStaticMarkup(
+			<ConcludeCard part={part({ type: "tool-conclude", input: { outcome: "solvedWithHints", verdict: "The pairing came after R2." }, reveal: "Pair them; each pair is even." })} />,
+		);
+		for (const html of [problem, conclude]) {
+			assert.match(html, /lh-prose/);
+			assert.doesNotMatch(html, /\blh-md\b/);
+		}
 	});
 
 	it("ConcludeCard: the SOLUTION is the hero (the pose's modelSolution via part.reveal); the verdict rides below, low-key", () => {

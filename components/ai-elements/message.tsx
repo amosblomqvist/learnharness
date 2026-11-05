@@ -325,7 +325,13 @@ export const MessageBranchPage = ({
   );
 };
 
-export type MessageResponseProps = ComponentProps<typeof Streamdown>;
+export type MessageResponseProps = ComponentProps<typeof Streamdown> & {
+  /** Follow the text-alignment setting (the `lh-md` hook). Transcript prose
+   *  does; question and practice surfaces pass false: they are forms and
+   *  cards whose labels, options and fields stay left-aligned, so aligning
+   *  only their markdown would leave each one half aligned. */
+  aligned?: boolean;
+};
 
 // Type-only version skew: @streamdown/code bundles shiki@3 types while
 // streamdown@2.5 expects shiki@4 types. Both work at runtime (each ships its
@@ -362,7 +368,7 @@ export const streamdownPlugins = {
 export const streamdownRemend = { htmlTags: false };
 
 export const MessageResponse = memo(
-  ({ className, children, ...props }: MessageResponseProps) => {
+  ({ className, children, aligned = true, ...props }: MessageResponseProps) => {
     // Legacy backslash delimiters are converted in a single linear scan;
     // native dollar math passes through to Streamdown unchanged. Incomplete
     // legacy spans are left for a later render when their closer arrives.
@@ -377,7 +383,8 @@ export const MessageResponse = memo(
           // Source Sans 3 + emphasis-color tokens on every markdown surface
           // (labels stay JetBrains Mono). Unlayered plain CSS wins over text-sm.
           // lh-md = rendered markdown only: the text-alignment setting's hook.
-          "lh-prose lh-md size-full [&>*:first-child]:mt-0 [&>*:last-child]:mb-0",
+          "lh-prose size-full [&>*:first-child]:mt-0 [&>*:last-child]:mb-0",
+          aligned && "lh-md",
           className
         )}
         components={mdComponents}
@@ -397,10 +404,12 @@ export const MessageResponse = memo(
 MessageResponse.displayName = "MessageResponse";
 
 /** Recovery is a tool-text presentation concern, not a shape/answer-data
- * transform. Ordinary assistant/user prose keeps MessageResponse unchanged. */
+ * transform. Ordinary assistant/user prose keeps MessageResponse unchanged.
+ * Tool content fills the question and practice docks and cards, which keep
+ * their normal alignment under every text-alignment setting. */
 export function ToolContentResponse({ children, ...props }: MessageResponseProps) {
   return (
-    <MessageResponse {...props}>
+    <MessageResponse aligned={false} {...props}>
       {typeof children === "string" ? repairMathForDisplay(children) : children}
     </MessageResponse>
   );

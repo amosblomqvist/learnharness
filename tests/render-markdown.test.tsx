@@ -14,7 +14,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import fs from "node:fs";
 import { renderToStaticMarkup } from "react-dom/server";
-import { MessageResponse } from "../components/ai-elements/message.tsx";
+import { MessageResponse, ToolContentResponse } from "../components/ai-elements/message.tsx";
 import { Reasoning, ReasoningContent } from "../components/ai-elements/reasoning.tsx";
 import { MermaidError } from "../components/mermaid-error.tsx";
 import { transformMathDelimiters, healOverescapedCommands } from "../src/core/math-delims.ts";
@@ -465,6 +465,13 @@ describe("text alignment — the markdown-only hook (appearance.mdRendering.text
 			<Reasoning open><ReasoningContent>{"thinking it through"}</ReasoningContent></Reasoning>,
 		);
 		assert.match(html, /class="[^"]*\blh-md\b[^"]*"/);
+	});
+
+	it("tool content (docks and cards) opts out: no .lh-md, so it keeps its normal alignment", () => {
+		const html = renderToStaticMarkup(<ToolContentResponse>{"A question with **bold** text."}</ToolContentResponse>);
+		const tag = rootTag(html, "lh-prose");
+		assert.doesNotMatch(tag, /\blh-md\b/);
+		assert.ok(html.includes("bold"), "the markdown still renders");
 	});
 
 	it("explicit GFM column alignment stays an INLINE style (it outranks the setting)", () => {
