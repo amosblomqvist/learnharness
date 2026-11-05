@@ -443,6 +443,14 @@ body {
 [data-streamdown="table"] :where(th, td):not(:first-child) {
 	border-left: 1px solid var(--border);
 }
+/* The hover copy button sits in the wrapper's top-right corner, 4px in and
+   24px wide, which is over the last column's header whenever the table
+   reaches that corner (a wide table, or Right moving a short one there).
+   Reserve its width in the last column's cells so it never covers text;
+   header and body cells share it, keeping right-aligned columns lined up. */
+[data-streamdown="table"] :where(th, td):last-child {
+	padding-right: 2rem;
+}
 [data-streamdown="table-header"] {
 	background: transparent;
 	border-bottom: 1px solid var(--border);

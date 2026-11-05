@@ -543,6 +543,17 @@ describe("text alignment — the markdown-only hook (appearance.mdRendering.text
 		assert.ok(!/table-header-cell"\]\)\s*\{[^}]*text-align:\s*inherit/.test(css), "headers no longer inherit the alignment");
 	});
 
+	it("tables: the last column reserves the copy button's corner so hover never covers cell text", () => {
+		const css = fs.readFileSync("app/globals.css", "utf-8");
+		const gutter = css.match(/\[data-streamdown="table"\] :where\(th, td\):last-child \{[^}]*padding-right: ([\d.]+)rem;/);
+		assert.ok(gutter, "the last column's cells carry a right gutter");
+		// The button is 4px in (right-1) and 24px wide (size-6): its left edge is 28px from the corner.
+		const blocks = fs.readFileSync("components/md-blocks.tsx", "utf-8");
+		assert.match(blocks, /className="absolute top-1 right-1 z-10"\s+label="Copy table"/);
+		assert.match(blocks, /className="flex size-6 items-center justify-center/);
+		assert.ok(Number(gutter[1]) * 16 >= 4 + 24, "the gutter is at least the button's inset plus its width");
+	});
+
 	it("tables: Right moves the box (margin token), and headers are left by Streamdown's own class", () => {
 		const css = fs.readFileSync("app/globals.css", "utf-8");
 		assert.match(css, /\.lh-md :where\(\[data-streamdown="table"\], \[data-alert-kind\]\) \{[^}]*margin-left: var\(--lh-md-box-ml\);/);
