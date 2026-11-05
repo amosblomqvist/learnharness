@@ -429,8 +429,9 @@ export interface MdRenderingSettings {
 	boldColor?: string | null;
 	/** Color for *italic* spans (default #ffffff). */
 	italicColor?: string | null;
-	/** Alignment of rendered markdown — replies, teaching/practice content,
-	 *  job briefs, reasoning (default left — today's look). Center is NOT
+	/** Alignment of rendered transcript markdown — replies, job briefs,
+	 *  reasoning (default left — today's look); question and practice
+	 *  docks and cards keep normal alignment. Center is NOT
 	 *  line-centering: it narrows the whole transcript column to
 	 *  centerWidth and keeps the text left-aligned. */
 	textAlign?: MdTextAlign;
