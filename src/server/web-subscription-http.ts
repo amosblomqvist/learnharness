@@ -14,9 +14,13 @@ export function subscriptionRequestOrigin(request: Request): string | undefined 
 		return addressed.origin;
 	} catch { return; }
 }
-function authorized(request: Request): boolean {
+const SUBSCRIPTIONS_HEADER = "x-learnharness-subscriptions";
+/** Same-origin browser intent (not authentication): the custom `header` is "1", Sec-Fetch-Site is not
+ * cross-site, and Origin equals the Host-derived one. Browsers send Origin on every POST, so a POST
+ * without it is not from a page; a GET may omit it. Shared with other same-origin-only routes. */
+export function sameOriginIntent(request: Request, header: string): boolean {
 	const origin = subscriptionRequestOrigin(request);
-	if (!origin || request.headers.get("x-learnharness-subscriptions") !== "1") return false;
+	if (!origin || request.headers.get(header) !== "1") return false;
 	if (request.headers.get("sec-fetch-site") === "cross-site") return false;
 	const supplied = request.headers.get("origin");
 	return request.method === "GET" ? !supplied || supplied === origin : supplied === origin;
@@ -24,7 +28,7 @@ function authorized(request: Request): boolean {
 function error(message: string, status: number) { return Response.json({ error: message }, { status, headers: HEADERS }); }
 export async function subscriptionControlsResponse(request: Request): Promise<Response> {
 	if (!webSubscriptionsEnabled()) return error("Web subscription controls are unavailable in desktop-owned mode.", 404);
-	if (!authorized(request)) return error("Subscription controls require a same-origin LearnHarness request.", 403);
+	if (!sameOriginIntent(request, SUBSCRIPTIONS_HEADER)) return error("Subscription controls require a same-origin LearnHarness request.", 403);
 	try {
 		if (request.method === "GET") return Response.json(await webSubscriptionStatus(), { headers: HEADERS });
 		if (request.method !== "POST") return error("Unsupported method.", 405);
@@ -59,7 +63,7 @@ export async function subscriptionControlsResponse(request: Request): Promise<Re
 export async function subscriptionBrowserResponse(request: Request): Promise<Response> {
 	if (!webSubscriptionsEnabled()) return error("Unavailable.", 404);
 	const origin = subscriptionRequestOrigin(request);
-	if (!origin || (request.method === "POST" ? !authorized(request) : request.headers.get("sec-fetch-site") !== "same-origin")) return error("Open sign-in from LearnHarness.", 403);
+	if (!origin || (request.method === "POST" ? !sameOriginIntent(request, SUBSCRIPTIONS_HEADER) : request.headers.get("sec-fetch-site") !== "same-origin")) return error("Open sign-in from LearnHarness.", 403);
 	const id = new URL(request.url).searchParams.get("id");
 	if (!id || !/^[0-9a-f-]{36}$/.test(id)) return error("This sign-in action is no longer available.", 410);
 	const target = await webSubscriptionOwner().takeBrowserAction(id, origin);

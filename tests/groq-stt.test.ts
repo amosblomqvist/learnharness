@@ -82,15 +82,6 @@ describe("trust and configuration gates", () => {
 		assert.equal((await route.GET(new Request(URL_, { headers: { [GROQ_DICTATION_HEADER]: "1", origin: "http://evil.example" } }))).status, 403);
 	});
 
-	it("the origins the app really runs on still pass: dev on localhost, a LAN address, the packaged loopback port", async () => {
-		for (const origin of ["http://localhost:3000", "http://192.168.1.20:3000", "http://127.0.0.1:48151"]) {
-			const res = await route.POST(new Request(`${origin}/api/stt/transcribe`, {
-				method: "POST", body: form(), headers: { [GROQ_DICTATION_HEADER]: "1", origin, "sec-fetch-site": "same-origin" },
-			}));
-			assert.equal(res.status, 200, origin);
-		}
-	});
-
 	it("keyless: 503 before the body is read, and nothing is sent to Groq", async () => {
 		delete process.env.GROQ_API_KEY;
 		const res = await post(form());

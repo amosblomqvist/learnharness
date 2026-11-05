@@ -42,7 +42,7 @@ import {
 } from "../core/dictation.ts";
 import { looksLikeWav, WAV_HEADER_BYTES } from "../core/wav.ts";
 import { keyValue } from "./keys.ts";
-import { subscriptionRequestOrigin } from "./web-subscription-http.ts";
+import { sameOriginIntent } from "./web-subscription-http.ts";
 
 const GROQ_TRANSCRIPTIONS_URL = "https://api.groq.com/openai/v1/audio/transcriptions";
 /** Whisper turbo transcribes a capped recording in seconds; this only bounds a hang. */
@@ -55,23 +55,12 @@ function fail(status: number, message: string, options: { retryable?: boolean; h
 	return Response.json({ message, retryable: options.retryable === true }, { status, headers: { ...HEADERS, ...options.headers } });
 }
 
-/** Same rule as the subscription controls: browsers send Origin on every POST,
- * including same-origin ones, so a POST without it is not from a page; a GET may
- * omit it (same-origin GETs usually do). */
-function sameOriginIntent(request: Request): boolean {
-	const origin = subscriptionRequestOrigin(request);
-	if (!origin || request.headers.get(GROQ_DICTATION_HEADER) !== "1") return false;
-	if (request.headers.get("sec-fetch-site") === "cross-site") return false;
-	const supplied = request.headers.get("origin");
-	return request.method === "GET" ? supplied === null || supplied === origin : supplied === origin;
-}
-
 const forbidden = () => fail(403, "Dictation requests must come from the LearnHarness window.");
 const keyless = () => fail(503, `No ${GROQ_KEY_ID} — add it to auth.json (desktop) or .env.local (dev).`);
 
 /** GET: is a Groq key configured? No Groq request is made. */
 export function groqDictationReadyResponse(request: Request): Response {
-	if (!sameOriginIntent(request)) return forbidden();
+	if (!sameOriginIntent(request, GROQ_DICTATION_HEADER)) return forbidden();
 	if (!keyValue(GROQ_KEY_ID)) return keyless();
 	return Response.json({ ready: true }, { headers: HEADERS });
 }
@@ -154,7 +143,7 @@ async function groqFailure(res: Response, key: string): Promise<Response> {
 
 /** POST: validate the upload, forward it to Groq, return `{ text }`. */
 export async function groqTranscribeResponse(request: Request): Promise<Response> {
-	if (!sameOriginIntent(request)) return forbidden();
+	if (!sameOriginIntent(request, GROQ_DICTATION_HEADER)) return forbidden();
 	// Key before body: a keyless request must not make the client's upload buffer first.
 	const key = keyValue(GROQ_KEY_ID);
 	if (!key) return keyless();
