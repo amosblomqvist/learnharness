@@ -42,7 +42,7 @@ import {
 } from "@/src/core";
 import { MenuShell } from "@/components/menu-shell";
 import { Hint } from "@/components/ui/hint";
-import { useAppearance } from "./appearance.tsx";
+import { resolveAppearance, useAppearance } from "./appearance.tsx";
 import { FontMenuList } from "./model-menu";
 import { CommitInput, SegmentedControl, SettingsMenuTrigger, SettingsRow, ThinSelect, Toggle } from "./controls.tsx";
 
@@ -122,6 +122,7 @@ export function AppearanceSection({
 }) {
 	const { appearance: resolved } = useAppearance();
 	const md = appearance?.mdRendering;
+	const { textAlign, centerWidth } = resolveAppearance(appearance).mdRendering;
 
 	// The font dropdown's open state + its enumeration cache. undefined =
 	// not enumerated yet (desktop: click-bound queryLocalFonts pending);
@@ -306,7 +307,7 @@ export function AppearanceSection({
 			</SettingsRow>
 			<SettingsRow label="Text alignment" testid="row-text-align" wrap>
 				<SegmentedControl
-					value={md?.textAlign ?? "left"}
+					value={textAlign}
 					options={TEXT_ALIGN_OPTIONS}
 					ariaLabel="Text alignment"
 					testid="seg-text-align"
@@ -315,10 +316,10 @@ export function AppearanceSection({
 			</SettingsRow>
 			{/* Center's width: shown only while Center is the stored
 			    alignment; the value stays stored when hidden. */}
-			{md?.textAlign === "center" && (
+			{textAlign === "center" && (
 				<SettingsRow label="Column width" testid="row-center-width" wrap>
 					<SegmentedControl
-						value={md.centerWidth ?? "medium"}
+						value={centerWidth}
 						options={CENTER_WIDTH_OPTIONS}
 						ariaLabel="Column width"
 						testid="seg-center-width"

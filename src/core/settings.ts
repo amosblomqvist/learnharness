@@ -555,13 +555,7 @@ export interface FactorySettings {
 		fontFamily: string | null;
 		proseFontSize: number;
 		sessionNameSerif: boolean;
-		mdRendering: {
-			headingWeight: number;
-			boldColor: string | null;
-			italicColor: string | null;
-			textAlign: MdTextAlign;
-			centerWidth: MdCenterWidth;
-		};
+		mdRendering: Required<MdRenderingSettings>;
 	};
 	graph: Required<GraphSettings>;
 	compaction: Required<CompactionSettings>;
