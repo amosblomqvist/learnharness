@@ -531,13 +531,24 @@ describe("text alignment — the markdown-only hook (appearance.mdRendering.text
 		assert.match(chat, /const COLUMN = "[^"]*\blh-chat-column\b[^"]*";/);
 	});
 
-	it("globals.css: code blocks and diagrams are pinned left, unhyphenated", () => {
+	it("globals.css: code blocks, diagrams and tables are pinned left, unhyphenated", () => {
 		const css = fs.readFileSync("app/globals.css", "utf-8");
 		const pinned = css.match(/\.lh-md :where\(([^)]*\[data-streamdown="code-block"\][^)]*)\) \{([^}]*)\}/);
 		assert.ok(pinned, "a pin rule exists for code blocks");
 		const [, selectors = "", body = ""] = pinned;
 		assert.ok(selectors.includes('[data-streamdown="mermaid"]'), "mermaid (md-blocks' own hook) pinned with code");
+		assert.ok(selectors.includes('[data-streamdown="table"]'), "a table's cells stay left under every alignment");
 		assert.ok(body.includes("text-align: left;"));
 		assert.ok(body.includes("hyphens: manual;"));
+		assert.ok(!/table-header-cell"\]\)\s*\{[^}]*text-align:\s*inherit/.test(css), "headers no longer inherit the alignment");
+	});
+
+	it("tables: Right moves the box (margin token), and headers are left by Streamdown's own class", () => {
+		const css = fs.readFileSync("app/globals.css", "utf-8");
+		assert.match(css, /\.lh-md :where\(\[data-streamdown="table"\], \[data-alert-kind\]\) \{[^}]*margin-left: var\(--lh-md-box-ml\);/);
+		// The pin rule relies on header cells already being text-left.
+		const html = render("| a | b |\n|---|---|\n| 1 | 2 |");
+		const header = html.match(/<th[^>]*data-streamdown="table-header-cell"[^>]*>/)?.[0] ?? "";
+		assert.match(header, /\btext-left\b/);
 	});
 });

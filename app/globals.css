@@ -265,14 +265,9 @@ body {
 	}
 }
 
-/* Streamdown pins header cells text-left; unlayered CSS beats the utility
-   layer, so headers follow the body cells. */
-.lh-md :where([data-streamdown="table-header-cell"]) {
-	text-align: inherit;
-}
-
 /* Tables and callouts HUG their content, so aligning their text alone
-   barely shows; Right moves the box itself. */
+   barely shows; Right moves the box itself (a callout's text aligns too;
+   a table's cells stay left, see the pin rule below). */
 .lh-md :where([data-streamdown="table"], [data-alert-kind]) {
 	margin-left: var(--lh-md-box-ml);
 }
@@ -291,8 +286,14 @@ body {
 	hyphens: manual;
 }
 
-/* Code blocks and diagrams keep today's layout under every alignment. */
-.lh-md :where([data-streamdown="code-block"], [data-streamdown="mermaid"]) {
+/* Code blocks, diagrams and tables keep today's layout under every
+   alignment. A table's cells stay left-aligned (headers already are, by
+   Streamdown's own text-left): the box hugs its content, so aligning the
+   cell text barely shows, and in a table wider than the column the
+   right-aligned short cells scroll their text out of view. Right moves
+   the box instead. Explicit GFM column alignment is an inline style and
+   still wins. */
+.lh-md :where([data-streamdown="code-block"], [data-streamdown="mermaid"], [data-streamdown="table"]) {
 	text-align: left;
 	hyphens: manual;
 }
