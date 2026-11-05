@@ -72,7 +72,20 @@ for (const [name, surface] of Object.entries(surfaces)) describe(`streaming math
 		assert.equal(complete.body.textContent, "before bold TAIL");
 	});
 
-	it("keeps the other incomplete-Markdown repairs", () => {
+	// Tool text is complete when it renders (static mode): nothing to repair,
+	// and a literal "[" must survive, e.g. interval notation in quiz options.
+	if (name === "tool") it("shows unfinished Markdown literally and keeps interval brackets", () => {
+		for (const source of ["(-∞, -2) ∪ [3, ∞)", "[3, ∞)", "x ∈ [0, 1)", "[1, 2] ∪ [3, 4)"]) {
+			const text = documentFor(surface(source)).body.textContent;
+			assert.equal(text, source);
+			assert.ok(!text.includes("[blocked]") && !text.includes("incomplete-link"), source);
+		}
+		const bold = documentFor(surface("**bold TAIL"));
+		assert.equal(bold.querySelectorAll("strong").length, 0);
+		assert.ok(bold.body.textContent.includes("**bold TAIL"));
+	});
+
+	else it("keeps the other incomplete-Markdown repairs", () => {
 		const bold = documentFor(surface("**bold TAIL"));
 		assert.equal(bold.querySelector("strong")?.textContent, "bold TAIL");
 		const link = documentFor(surface("[partial TAIL"));
