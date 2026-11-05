@@ -123,7 +123,8 @@ test("choosing Groq saves it with the language, shows the model row (turbo by de
 	assert.deepEqual([...select("select-dictation-groq-model").options].map((o) => o.value), ["whisper-large-v3-turbo", "whisper-large-v3"]);
 	const hint = byTest("dictation-setup-hint")!;
 	assert.equal(hint.getAttribute("data-engine"), "groq");
-	assert.match(hint.textContent!, /through this app's local server to Groq/);
+	assert.match(hint.textContent!.replace(/\s+/g, " "), /in short pieces while you talk, through this app's local server to Groq/);
+	assert.match(hint.textContent!, /text appears when you stop \(up to 20 minutes at a time\)/);
 	assert.match(hint.textContent!, /same one as the Groq model provider/);
 	assert.equal(hint.querySelector("a")!.getAttribute("href"), "https://console.groq.com/keys");
 });

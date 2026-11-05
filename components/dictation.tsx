@@ -5,11 +5,12 @@ import { Loader2Icon, MicIcon, RotateCcwIcon, XIcon } from "lucide-react";
 import { useSettingsDialog } from "@/components/settings/settings-dialog";
 import { Hint } from "@/components/ui/hint";
 import {
-	deepgramListenUrl, encodePcm16Wav, GROQ_MAX_PCM_BYTES, GROQ_MIN_PCM_BYTES,
+	deepgramListenUrl, GROQ_MAX_RECORDING_SECONDS,
 	type DictationLanguage, type DictationProvider, type GroqWhisperModel,
 } from "@/src/core";
 import { useDictationLanguage } from "@/components/dictation-preference";
-import { checkGroqReady, GROQ_DICTATION_KEYLESS, GROQ_DICTATION_ROW, transcribeGroq } from "@/components/dictation-groq";
+import { checkGroqReady, GROQ_DICTATION_KEYLESS, GROQ_DICTATION_ROW } from "@/components/dictation-groq";
+import { createChunkSession, STOPPED_MESSAGE, type ChunkSession } from "@/components/dictation-groq-chunks";
 import { setDictationActive, setDictationRetained } from "@/components/dictation-state";
 export { isDictationActive, isDictationRetained } from "@/components/dictation-state";
 
@@ -90,19 +91,25 @@ export { isDictationActive, isDictationRetained } from "@/components/dictation-s
  *
  * Groq engine (Settings → Providers → Dictation → Engine; Deepgram stays the
  * default and the paths above are untouched by it): Groq has no token mint, so
- * nothing streams. The same worklet capture graph runs, but its linear16 frames
- * are collected instead of sent; on stop they become one WAV, POSTed to
- * /api/stt/transcribe (the server holds GROQ_API_KEY and forwards to Groq's
- * Whisper), and the transcript lands once, through the same deferred flush. A
- * readiness GET runs beside the mic, so a missing key refuses before the user
- * has spoken. Recordings cap at GROQ_MAX_PCM_BYTES (12 min): reaching it stops
- * and transcribes, never discards. While Groq works the phase is "stopping"
- * with `transcribing` set; Esc aborts the request and discards the audio.
- * A failed upload does NOT lose the speech: the WAV stays in memory (never
- * written anywhere), the error shows beside a Retry button, and finish()
- * resolves false so a submit path keeps its draft instead of sending it
- * without what was said. The recording is dropped on success, when the error
- * is dismissed, when a new recording starts, and on unmount.
+ * nothing streams to it from the browser. The same worklet capture graph runs,
+ * but its linear16 frames feed a chunk session (dictation-groq-chunks.ts): about
+ * every 15 s of speech, cut at a pause, goes to /api/stt/transcribe (the server
+ * holds GROQ_API_KEY and forwards to Groq's Whisper) in the background while the
+ * recording goes on. The texts wait in order and NOTHING shows until the user
+ * stops; then the last chunk is sent, the outstanding ones are awaited and the
+ * whole transcript lands once, through the same deferred flush. A readiness GET
+ * runs beside the mic, so a missing key refuses before the user has spoken. A
+ * recording caps at GROQ_MAX_RECORDING_SECONDS: reaching it stops and
+ * transcribes, never discards. After the stop the phase is "stopping" with
+ * `transcribing` set; Esc there stops waiting but keeps the audio (see below).
+ * A failed chunk does NOT lose the speech: after its automatic retries the
+ * session keeps every chunk's audio in memory (never written anywhere), no
+ * partial transcript is inserted, the error shows beside Retry and Dismiss,
+ * and finish() resolves false so a submit path keeps its draft instead of
+ * sending it without what was said. Retry re-sends only the failed chunks and
+ * then inserts the whole transcript. The audio is dropped on success, on
+ * Dismiss, when a new recording starts, on Esc while recording (an explicit
+ * cancel) and on unmount.
  */
 
 /*
@@ -265,9 +272,6 @@ export function useDictationTarget(append: (text: string) => void, claimed: bool
 
 export type DictationPhase = "idle" | "connecting" | "recording" | "stopping";
 
-/** A Groq recording held for Retry: the encoded WAV plus what its upload needs. */
-type KeptRecording = { wav: Uint8Array<ArrayBuffer>; model: GroqWhisperModel; language: DictationLanguage };
-
 export type Dictation = {
 	phase: DictationPhase;
 	/** Terminal-state explanation, shown inside the wide button (cleared on the next start). */
@@ -276,16 +280,16 @@ export type Dictation = {
 	levelRef: { current: number };
 	/** Not idle — from the click until the stop completes (the optimistic window). */
 	active: boolean;
-	/** Groq only: the recording is uploaded and the run waits for its transcript
-	 *  (phase is "stopping"). The bar swaps the meter for "Transcribing…". */
+	/** Groq only: the recording has ended and the run waits for its last chunks
+	 *  (phase is "stopping"). The bar swaps the meter for "Finishing transcription…". */
 	transcribing: boolean;
-	/** Groq only: the last upload failed and its recording is kept in memory
-	 *  (the bar offers Retry). Cleared by a successful retry, clearError(), a
-	 *  new recording or unmount. Always false for Deepgram. */
+	/** Groq only: a chunk failed and the recording is kept in memory (the bar
+	 *  offers Retry). Cleared by a successful retry, clearError(), a new
+	 *  recording or unmount. Always false for Deepgram. */
 	retryable: boolean;
-	/** Send the kept recording again. No-op when none is kept or an upload is
-	 *  already in flight. The transcript lands through the usual deferred flush;
-	 *  nothing is submitted. */
+	/** Send the failed chunks again. No-op when no recording is kept or a
+	 *  transcription is already running. The whole transcript lands through the
+	 *  usual deferred flush; nothing is submitted. */
 	retry: () => void;
 	/** End + KEEP the transcript: flush the deferred buffer into the primary
 	 *  input (the Stop pill and ⌘D). */
@@ -302,7 +306,7 @@ export type Dictation = {
 	 *  discard semantics.
 	 *
 	 *  Resolves TRUE when nothing is left unsent and the caller may carry on.
-	 *  Resolves FALSE when the Groq upload failed and the recording is kept for
+	 *  Resolves FALSE when a Groq chunk failed and the recording is kept for
 	 *  Retry (also when idle with one already kept): the submit path must ABORT
 	 *  and leave the draft untouched, never send it without the spoken part. */
 	finish: () => Promise<boolean>;
@@ -361,28 +365,28 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 	/** Resolvers waiting for the run to fully end (finish(), owner
 	 *  2026-10-01): released by cleanup() — every terminal path runs it. */
 	const waitersRef = useRef<Array<(ok: boolean) => void>>([]);
-	/** Which engine this run uses (null until its preference is read) and, for
-	 *  Groq, what the upload needs. Set once per run, in start(). */
+	/** Which engine this run uses (null until its preference is read). Set once
+	 *  per run, in start(). */
 	const engineRef = useRef<DictationProvider | null>(null);
-	const groqRunRef = useRef<{ language: DictationLanguage; model: GroqWhisperModel; sampleRate: number } | null>(null);
-	/** Groq: the run's linear16 frames (the cap is on bytes), the upload in
-	 *  flight, and whether the cap already triggered the stop. */
-	const pcmRef = useRef<ArrayBuffer[]>([]);
-	const pcmBytesRef = useRef(0);
-	const uploadRef = useRef<AbortController | null>(null);
+	/** Groq: the chunk session of the run in progress (recording, or waiting for
+	 *  its last chunks, or being retried); and whether the cap already triggered
+	 *  the stop, and whether this recording's stop was already requested (a second
+	 *  stop() on the same render closure must not run it twice). */
+	const sessionRef = useRef<ChunkSession | null>(null);
 	const capRef = useRef(false);
-	/** Groq: the recording whose upload failed, kept in memory for Retry. Only
+	const stopRequestedRef = useRef(false);
+	/** Groq: the session with a failed chunk, kept in memory for Retry. Only
 	 *  success, dismissal, a new recording or unmount drop it — cleanup() leaves
 	 *  it alone (it runs at the end of the failed run itself). */
-	const retainedRef = useRef<KeptRecording | null>(null);
+	const retainedRef = useRef<ChunkSession | null>(null);
 	const [retryable, setRetryable] = useState(false);
 	/** The latest stop(), for the capture callback (created once per run). */
 	const stopRef = useRef<() => void>(() => {});
 
-	const keepRecording = useCallback((recording: KeptRecording | null) => {
-		retainedRef.current = recording;
-		setRetryable(recording !== null);
-		setDictationRetained(recording !== null);
+	const keepRecording = useCallback((session: ChunkSession | null) => {
+		retainedRef.current = session;
+		setRetryable(session !== null);
+		setDictationRetained(session !== null);
 	}, []);
 
 	/** Flush the buffered transcript into the primary input — question claim
@@ -405,11 +409,12 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 			safetyRef.current = null;
 		}
 		pendingRef.current = [];
-		pcmRef.current = [];
-		pcmBytesRef.current = 0;
 		capRef.current = false;
-		uploadRef.current?.abort();
-		uploadRef.current = null;
+		// A run that ends with its chunk session still working (Esc, an error,
+		// navigation) must not leave requests behind. One that finished normally
+		// has already let go of it.
+		sessionRef.current?.cancel();
+		sessionRef.current = null;
 		setTranscribing(false);
 		for (const track of streamRef.current?.getTracks() ?? []) track.stop();
 		streamRef.current = null;
@@ -509,11 +514,11 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 		reconnectsRef.current = 0;
 		bufferRef.current = []; // fresh run, fresh buffer (round 2)
 		pendingRef.current = []; // fresh run, fresh queue (mitigation A)
-		pcmRef.current = [];
-		pcmBytesRef.current = 0;
 		capRef.current = false;
+		stopRequestedRef.current = false;
 		engineRef.current = null;
-		groqRunRef.current = null;
+		sessionRef.current?.cancel();
+		sessionRef.current = null;
 		keepRecording(null); // a new recording replaces the kept one
 		const gen = ++genRef.current;
 		let language: DictationLanguage;
@@ -566,12 +571,13 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 				if (msg.type === "level") {
 					levelRef.current = msg.rms ?? 0; // never reset to zero (dictate pattern)
 				} else if (msg.type === "audio" && groq) {
-					// Groq: collect, don't stream. The cap stops the run once and
-					// drops what trails it; the stop still transcribes the rest.
-					if (capRef.current) return;
-					pcmRef.current.push(msg.buffer!);
-					pcmBytesRef.current += msg.buffer!.byteLength;
-					if (pcmBytesRef.current >= GROQ_MAX_PCM_BYTES) {
+					// Groq: feed the chunk session, don't stream. The cap stops the
+					// run once and drops what trails it; the stop still transcribes
+					// the rest.
+					const session = sessionRef.current;
+					if (capRef.current || !session) return;
+					session.push(msg.buffer!);
+					if (session.seconds >= GROQ_MAX_RECORDING_SECONDS) {
 						capRef.current = true;
 						stopRef.current();
 					}
@@ -586,7 +592,11 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 					}
 				}
 			};
-			groqRunRef.current = { language, model: groqModel, sampleRate: ctx.sampleRate };
+			if (groq) {
+				sessionRef.current = createChunkSession({
+					request: (...args) => fetch(...args), model: groqModel, language, sampleRate: ctx.sampleRate,
+				});
+			}
 			const source = ctx.createMediaStreamSource(stream);
 			sourceRef.current = source;
 			source.connect(worklet);
@@ -627,61 +637,54 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 		openSocket(gen, token, language);
 	}, [openSocket, cleanup, getPreference, keepRecording]);
 
-	/** Upload one Groq recording and buffer its transcript for the one deferred
-	 *  flush. Success drops the recording; failure KEEPS it (and shows the error)
-	 *  so Retry can send the same audio again. Every outcome ends in cleanup(); a
-	 *  stale `gen` (cancel, unmount) means that already happened and nothing here
-	 *  may touch the run, so an aborted upload neither keeps nor flushes anything. */
-	const uploadRecording = useCallback(async (gen: number, recording: KeptRecording) => {
-		const upload = new AbortController();
-		uploadRef.current = upload;
+	/** Wait for a Groq run's chunks and buffer the whole transcript for the one
+	 *  deferred flush. `resume` re-sends the failed chunks instead of ending the
+	 *  recording. Success drops the session; failure KEEPS it (and shows the
+	 *  error) so Retry can send what failed again. Every outcome ends in
+	 *  cleanup(); a stale `gen` (cancel, unmount) means that already happened and
+	 *  nothing here may touch the run, so a cancelled run neither keeps nor
+	 *  flushes anything. */
+	const finishGroqRun = useCallback(async (gen: number, session: ChunkSession, resume: boolean) => {
+		sessionRef.current = session;
 		setTranscribing(true);
-		try {
-			const text = await transcribeGroq((...args) => fetch(...args), {
-				wav: recording.wav, model: recording.model, language: recording.language, signal: upload.signal,
-			});
-			if (gen !== genRef.current) return;
+		const result = await (resume ? session.retry() : session.stop());
+		if (gen !== genRef.current) return;
+		sessionRef.current = null;
+		if (result.status === "done") {
 			keepRecording(null);
 			setError(null);
-			if (text) bufferRef.current.push(text);
-		} catch (e) {
-			if (gen !== genRef.current) return;
-			keepRecording(recording);
-			setError(e instanceof Error ? e.message : "Groq transcription failed");
+			if (result.text) bufferRef.current.push(result.text);
+		} else {
+			keepRecording(session);
+			setError(result.error);
 		}
 		cleanup();
 	}, [cleanup, keepRecording]);
 
-	/** Groq stop: encode what was captured and upload it. A run too short to mean
-	 *  anything is dropped without a request. */
-	const transcribeRecording = useCallback(async (gen: number) => {
-		const run = groqRunRef.current;
-		if (!run || pcmBytesRef.current < GROQ_MIN_PCM_BYTES) {
-			cleanup();
-			return;
-		}
-		const wav = encodePcm16Wav(pcmRef.current, run.sampleRate);
-		pcmRef.current = [];
-		await uploadRecording(gen, { wav, model: run.model, language: run.language });
-	}, [cleanup, uploadRecording]);
-
-	/** Send the kept recording again. Same pipeline as a first upload, so the
-	 *  phase reads "stopping" + Transcribing…, Esc cancels the request (the
-	 *  recording stays kept — only success, dismissal or a new recording drop
-	 *  it) and the transcript lands through the usual flush. */
+	/** Send the failed chunks again. Same pipeline as the first pass, so the
+	 *  phase reads "stopping" + Finishing transcription…, Esc stops waiting (the
+	 *  recording stays kept — only success, dismissal or a new recording drop it)
+	 *  and the whole transcript lands through the usual flush. */
 	const retry = useCallback(() => {
-		const recording = retainedRef.current;
-		if (!recording || uploadRef.current) return;
+		const session = retainedRef.current;
+		if (!session || sessionRef.current) return;
 		setDictationActive(true);
 		setPhase("stopping");
 		engineRef.current = "groq";
 		bufferRef.current = [];
-		void uploadRecording(++genRef.current, recording);
-	}, [uploadRecording]);
+		void finishGroqRun(++genRef.current, session, true);
+	}, [finishGroqRun]);
 
 	const stop = useCallback(() => {
 		const gen = genRef.current;
 		if (phase !== "recording" && phase !== "connecting") return;
+		// One stop per Groq recording: the cap's callback and a click (or the
+		// hotkey and finish()) can both reach here before React commits the new
+		// phase, and a second stop must not end the recording a second time.
+		if (engineRef.current === "groq") {
+			if (stopRequestedRef.current) return;
+			stopRequestedRef.current = true;
+		}
 		setPhase("stopping");
 
 		// Mic dies FIRST — no more audio enqueues (dictate pattern). The
@@ -694,7 +697,9 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 		workletRef.current = null;
 
 		if (engineRef.current === "groq") {
-			void transcribeRecording(gen);
+			const session = sessionRef.current;
+			if (session) void finishGroqRun(gen, session, false);
+			else cleanup(); // stopped before the capture graph existed: nothing was recorded
 			return;
 		}
 
@@ -714,7 +719,7 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 		} else {
 			cleanup();
 		}
-	}, [phase, cleanup, transcribeRecording]);
+	}, [phase, cleanup, finishGroqRun]);
 	stopRef.current = stop;
 
 	const cancel = useCallback(() => {
@@ -723,8 +728,22 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 		// buffer makes that flush a no-op. Also kills a "stopping" run: the
 		// flush already underway is abandoned (its timer is cleared inside).
 		bufferRef.current = [];
+		const session = sessionRef.current;
+		if (session && phase === "stopping") {
+			// A Groq run the user already ended is not theirs to throw away: Esc
+			// only stops the waiting. What had not been transcribed stays kept,
+			// with Retry, until it succeeds, is dismissed or a new recording starts.
+			session.cancel();
+			sessionRef.current = null;
+			if (session.unsent > 0) {
+				keepRecording(session);
+				setError(STOPPED_MESSAGE);
+			} else {
+				keepRecording(null);
+			}
+		}
 		cleanup();
-	}, [phase, cleanup]);
+	}, [phase, cleanup, keepRecording]);
 
 	const finish = useCallback((): Promise<boolean> => {
 		return new Promise((resolve) => {
@@ -897,12 +916,12 @@ export function DictationBar({ dictation }: { dictation: Dictation }) {
 			</Hint>
 		);
 		if (!retryable) return wide;
-		// A failed Groq upload kept its recording: offer to send it again, or to
-		// let it go. Nothing here submits anything.
+		// A failed Groq chunk kept the recording: offer to send what failed again,
+		// or to let it go. Nothing here submits anything.
 		return (
 			<div className="flex w-full min-w-0 items-center gap-1.5" data-testid="dictation-retry-bar">
 				{wide}
-				<Hint label="Send the saved recording again" side="top">
+				<Hint label="Send the parts that failed again" side="top">
 					<button
 						type="button"
 						onClick={retry}
@@ -929,21 +948,21 @@ export function DictationBar({ dictation }: { dictation: Dictation }) {
 		);
 	}
 
-	// Groq is uploading the recording: nothing is live, so no meter and no Stop
-	// (Esc still cancels, discarding the audio).
+	// Groq is finishing the last chunks: nothing is live, so no meter and no Stop
+	// (Esc stops the waiting; what is not transcribed yet stays kept for Retry).
 	if (transcribing) {
 		return (
 			<div className="flex w-full min-w-0 items-center gap-2" data-testid="dictation-bar">
-				<Hint label="Transcribing… (Esc to cancel)" side="top">
+				<Hint label="Finishing transcription… (Esc to stop waiting)" side="top">
 					<button
 						type="button"
 						disabled
-						aria-label="Transcribing dictation"
+						aria-label="Finishing transcription"
 						data-testid="dictation-toggle"
 						className="flex h-7 w-full items-center justify-center gap-1.5 rounded-md border border-border/50 bg-card/50 text-xs text-muted-foreground shadow-lg backdrop-blur"
 					>
 						<Loader2Icon className="size-3.5 animate-spin" />
-						Transcribing…
+						Finishing transcription…
 					</button>
 				</Hint>
 			</div>

@@ -1,11 +1,14 @@
 /**
- * The Groq dictation path of useDictation: capture frames, wrap one WAV on
- * stop, POST it to /api/stt/transcribe, flush the transcript once. fetch,
- * the microphone and the audio graph are fakes; no network, no real key.
+ * The Groq dictation path of useDictation: capture frames, send them to
+ * /api/stt/transcribe in chunks while recording, flush the whole transcript
+ * once on stop. fetch, the microphone and the audio graph are fakes; no
+ * network, no real key. Chunk cutting, ordering, backoff and Retry are tested
+ * on their own in dictation-chunks.test.ts and dictation-groq-chunks.test.ts;
+ * this file covers how the hook wires them to the UI and the submit paths.
  */
 import React, { act } from "react";
 import assert from "node:assert/strict";
-import { afterEach, test } from "node:test";
+import { afterEach, mock, test } from "node:test";
 import { parseHTML } from "linkedom";
 import { renderToStaticMarkup } from "react-dom/server";
 import { DictationBar, useDictation, type Dictation } from "../components/dictation.tsx";
@@ -14,12 +17,14 @@ import { QuestionDock } from "../components/question-dock.tsx";
 import { GROQ_DICTATION_KEYLESS } from "../components/dictation-groq.ts";
 import { notifySettingsSaved } from "../components/settings-signal.ts";
 import { isDictationActive, isDictationRetained } from "../components/dictation-state.ts";
-import { GROQ_DICTATION_HEADER, GROQ_MAX_PCM_BYTES, GROQ_MIN_PCM_BYTES, type QuizToolInput, type UserSettings } from "../src/core/index.ts";
+import { STOPPED_MESSAGE } from "../components/dictation-groq-chunks.ts";
+import { GROQ_DICTATION_HEADER, GROQ_MAX_PCM_BYTES, GROQ_MAX_RECORDING_SECONDS, GROQ_MIN_PCM_BYTES, type QuizToolInput, type UserSettings } from "../src/core/index.ts";
 
 function deferred<T>() {
 	let resolve!: (value: T) => void;
-	const promise = new Promise<T>((done) => { resolve = done; });
-	return { promise, resolve };
+	let reject!: (reason: unknown) => void;
+	const promise = new Promise<T>((done, fail) => { resolve = done; reject = fail; });
+	return { promise, resolve, reject };
 }
 
 class Socket extends EventTarget {
@@ -68,7 +73,7 @@ async function fixture(
 		tokenCalls: 0,
 		ready: () => Promise.resolve(Response.json({ ready: true })) as Promise<Response>,
 		readyInits: [] as (RequestInit | undefined)[],
-		answer: () => Promise.resolve(Response.json({ text: "hello world" })) as Promise<Response>,
+		answer: ((_post: Post) => Promise.resolve(Response.json({ text: "hello world" }))) as (post: Post) => Promise<Response>,
 		posts: [] as Post[],
 		stops: 0,
 		appends: [] as string[],
@@ -88,7 +93,7 @@ async function fixture(
 			if (url === "/api/stt/token") { state.tokenCalls++; return Response.json({ token: "test-token" }); }
 			if (url === "/api/settings") return Response.json({ settings: state.record });
 			assert.equal(url, "/api/stt/transcribe");
-			if (init?.method === "POST") { state.posts.push({ init, form: init.body as FormData }); return state.answer(); }
+			if (init?.method === "POST") { const post = { init, form: init.body as FormData }; state.posts.push(post); return state.answer(post); }
 			state.readyInits.push(init);
 			return state.ready();
 		},
@@ -127,13 +132,19 @@ async function fixture(
 
 afterEach(async () => { await dispose?.(); restore?.(); dispose = undefined; restore = undefined; });
 
+/** A 429 whose Retry-After is too long to wait out, so it surfaces at once instead of being retried. */
+const RATE_LIMIT_LINE = "Groq rate limit reached. Try again in 10 min.";
+const rateLimited = () => Promise.resolve(Response.json({ message: RATE_LIMIT_LINE, retryable: true }, { status: 429, headers: { "retry-after": "600" } }));
+/** A Groq failure sending the same request again cannot fix. */
+const refused = (message: string) => Promise.resolve(Response.json({ message, retryable: false }, { status: 502 }));
+
 const wavHeader = (bytes: Uint8Array) => ({
 	riff: String.fromCharCode(...bytes.subarray(0, 4)),
 	wave: String.fromCharCode(...bytes.subarray(8, 12)),
 	rate: new DataView(bytes.buffer, bytes.byteOffset).getUint32(24, true),
 });
 
-test("records without a socket or Deepgram token, uploads one WAV on stop, flushes the transcript once", async () => {
+test("records without a socket or Deepgram token, sends the audio on stop, flushes the transcript once", async () => {
 	const f = await fixture({ provider: "groq", language: "pl", groqModel: "whisper-large-v3" });
 	// Deliberately the first test in the file: the window-lifetime preference
 	// store is still empty, so mounting reads this Groq record before deciding
@@ -226,9 +237,9 @@ test("a Groq failure is shown in the button, nothing is inserted, and the next c
 	const f = await fixture();
 	await f.start();
 	await f.speak();
-	f.state.answer = () => Promise.resolve(Response.json({ message: "Groq rate limit reached. Try again in 12 s." }, { status: 429 }));
+	f.state.answer = rateLimited;
 	await act(async () => { f.dictation.stop(); });
-	assert.equal(f.dictation.error, "Groq rate limit reached. Try again in 12 s.");
+	assert.equal(f.dictation.error, RATE_LIMIT_LINE);
 	assert.equal(f.dictation.phase, "idle");
 	assert.equal(f.dictation.transcribing, false);
 	assert.deepEqual(f.state.appends, []);
@@ -237,17 +248,49 @@ test("a Groq failure is shown in the button, nothing is inserted, and the next c
 	assert.equal(f.dictation.phase, "recording");
 });
 
-test("a network failure on upload says so instead of throwing", async () => {
+test("a network failure on upload is retried with backoff, then says so instead of throwing", async () => {
 	const f = await fixture();
 	await f.start();
 	await f.speak();
 	f.state.answer = () => Promise.reject(new TypeError("fetch failed"));
-	await act(async () => { f.dictation.stop(); });
+	mock.timers.enable({ apis: ["setTimeout"] });
+	try {
+		await act(async () => { f.dictation.stop(); });
+		assert.equal(f.state.posts.length, 1);
+		assert.equal(f.dictation.transcribing, true, "waiting to try again, not failed yet");
+		await act(async () => { mock.timers.tick(1000); });
+		assert.equal(f.state.posts.length, 2, "the first retry after 1 s");
+		await act(async () => { mock.timers.tick(2000); });
+		assert.equal(f.state.posts.length, 3, "the second after 2 s more, and the last");
+	} finally {
+		mock.timers.reset();
+	}
 	assert.match(f.dictation.error!, /Could not send the recording/);
 	assert.equal(f.dictation.phase, "idle");
+	assert.equal(f.dictation.retryable, true, "the audio is kept");
 });
 
-test("Esc while transcribing aborts the upload and discards the late transcript", async () => {
+test("a transient failure that clears on the automatic retry never shows an error", async () => {
+	const f = await fixture();
+	await f.start();
+	await f.speak();
+	let calls = 0;
+	f.state.answer = () => Promise.resolve(++calls === 1
+		? Response.json({ message: "Groq is unavailable (503). Try again shortly.", retryable: true }, { status: 502 })
+		: Response.json({ text: "second go" }));
+	mock.timers.enable({ apis: ["setTimeout"] });
+	try {
+		await act(async () => { f.dictation.stop(); });
+		await act(async () => { mock.timers.tick(1000); });
+	} finally {
+		mock.timers.reset();
+	}
+	assert.deepEqual(f.state.appends, ["second go"]);
+	assert.equal(f.dictation.error, null);
+	assert.equal(f.dictation.retryable, false);
+});
+
+test("Esc while finishing stops the waiting but keeps the audio for Retry, and the late transcript is discarded", async () => {
 	const f = await fixture();
 	await f.start();
 	await f.speak();
@@ -260,17 +303,24 @@ test("Esc while transcribing aborts the upload and discards the late transcript"
 	assert.equal(signal.aborted, true);
 	assert.equal(f.dictation.phase, "idle");
 	assert.equal(isDictationActive(), false);
+	assert.equal(f.dictation.retryable, true, "the user ended the recording; Esc does not throw it away");
+	assert.equal(f.dictation.error, STOPPED_MESSAGE);
 	await act(async () => { reply.resolve(Response.json({ text: "too late" })); });
 	assert.deepEqual(f.state.appends, []);
+	f.state.answer = () => Promise.resolve(Response.json({ text: "after esc" }));
+	await act(async () => { f.dictation.retry(); });
+	assert.deepEqual(f.state.appends, ["after esc"], "Retry finishes it");
+	assert.equal(f.state.posts.length, 2);
 });
 
-test("Esc while recording discards the audio: nothing is uploaded", async () => {
+test("Esc while recording discards the audio: nothing is uploaded and nothing is kept", async () => {
 	const f = await fixture();
 	await f.start();
 	await f.speak();
 	await act(async () => { f.dictation.cancel(); });
 	assert.equal(f.state.posts.length, 0);
 	assert.equal(f.dictation.phase, "idle");
+	assert.equal(f.dictation.retryable, false);
 	assert.equal(f.state.stops, 1);
 	assert.deepEqual(f.state.appends, []);
 });
@@ -337,20 +387,22 @@ test("pressing stop while the key check is still in flight keeps the run stoppin
 test("reaching the recording cap stops and transcribes what was captured, dropping what trails it", async () => {
 	const f = await fixture();
 	await f.start();
-	const reply = deferred<Response>();
-	f.state.answer = () => reply.promise;
+	let n = 0;
+	f.state.answer = () => Promise.resolve(Response.json({ text: `part${++n}` }));
 	await act(async () => {
 		const worklet = f.worklet();
-		worklet.audio(new ArrayBuffer(GROQ_MAX_PCM_BYTES));
+		worklet.audio(new Int16Array(GROQ_MAX_PCM_BYTES / 2).fill(1000).buffer); // the whole allowance at once
 		worklet.audio(frame()); // arrives after the cap: dropped
 	});
-	assert.equal(f.dictation.phase, "stopping");
-	assert.equal(f.dictation.transcribing, true);
-	assert.equal(f.state.posts.length, 1, "the cap triggers exactly one upload");
-	assert.equal((f.state.posts[0]!.form.get("audio") as File).size, 44 + GROQ_MAX_PCM_BYTES);
-	await act(async () => { reply.resolve(Response.json({ text: "long dictation" })); });
-	assert.deepEqual(f.state.appends, ["long dictation"]);
 	assert.equal(f.dictation.error, null);
+	assert.equal(f.dictation.phase, "idle");
+	assert.equal(f.state.posts.length, GROQ_MAX_RECORDING_SECONDS / 15, "twenty minutes in fifteen-second chunks");
+	assert.equal(f.state.stops, 1, "the cap stopped the run");
+	assert.equal(f.state.appends.length, 1, "one insertion for the whole run");
+	assert.equal(f.state.appends[0]!.split(" ").length, GROQ_MAX_RECORDING_SECONDS / 15);
+	assert.match(f.state.appends[0]!, /^part1 part2 /);
+	const sent = f.state.posts.reduce((total, p) => total + (p.form.get("audio") as File).size - 44, 0);
+	assert.equal(sent, GROQ_MAX_PCM_BYTES, "everything up to the cap was sent, and nothing after it");
 });
 
 test("the Deepgram engine is untouched: it streams over a socket and never calls the Groq route", async () => {
@@ -365,13 +417,13 @@ test("the Deepgram engine is untouched: it streams over a socket and never calls
 	await act(async () => { f.dictation.cancel(); });
 });
 
-test("the bar shows Transcribing… with no meter or Stop while Groq works", () => {
+test("the bar shows Finishing transcription… with no meter or Stop while Groq works", () => {
 	const dictation: Dictation = {
 		phase: "stopping", error: null, levelRef: { current: 0 }, active: true, transcribing: true,
 		retryable: false, retry() {}, toggle() {}, stop() {}, finish: async () => true, cancel() {}, clearError() {},
 	};
 	const html = renderToStaticMarkup(<DictationBar dictation={dictation} />);
-	assert.match(html, /Transcribing…/);
+	assert.match(html, /Finishing transcription…/);
 	assert.match(html, /disabled/);
 	assert.doesNotMatch(html, /dictation-meter/);
 	assert.doesNotMatch(html, />Stop</);
@@ -385,8 +437,6 @@ test("the bar shows Transcribing… with no meter or Stop while Groq works", () 
 // submit path sends a draft that is missing the spoken part.
 // ---------------------------------------------------------------------------
 
-const rateLimited = () => Promise.resolve(Response.json({ message: "Groq rate limit reached. Try again in 12 s." }, { status: 429 }));
-const RATE_LIMIT_LINE = "Groq rate limit reached. Try again in 12 s.";
 
 /** Record, then stop into an upload that fails: leaves a kept recording. */
 async function failedRecording(f: Awaited<ReturnType<typeof fixture>>) {
@@ -450,7 +500,7 @@ test("Retry re-sends the same recording and inserts the text once it succeeds", 
 test("a Retry that fails again keeps the recording for another go", async () => {
 	const f = await fixture();
 	await failedRecording(f);
-	f.state.answer = () => Promise.resolve(Response.json({ message: "Groq is unavailable (503). Try again shortly." }, { status: 502 }));
+	f.state.answer = () => refused("Groq is unavailable (503). Try again shortly.");
 	await act(async () => { f.dictation.retry(); });
 	assert.equal(f.dictation.error, "Groq is unavailable (503). Try again shortly.");
 	assert.equal(f.dictation.retryable, true);
@@ -473,7 +523,7 @@ test("Esc during a Retry cancels the request but does not drop the recording", a
 	assert.equal(signal.aborted, true);
 	assert.equal(f.dictation.phase, "idle");
 	assert.equal(f.dictation.retryable, true, "only success, dismissal or a new recording drop it");
-	assert.equal(f.dictation.error, RATE_LIMIT_LINE);
+	assert.equal(f.dictation.error, STOPPED_MESSAGE);
 	await act(async () => { reply.resolve(Response.json({ text: "too late" })); });
 	assert.deepEqual(f.state.appends, []);
 	f.state.answer = () => Promise.resolve(Response.json({ text: "after esc" }));
@@ -544,7 +594,7 @@ test("unmounting mid-upload of a first attempt that then fails keeps nothing", a
 	f.state.answer = () => reply.promise;
 	await act(async () => { f.dictation.stop(); });
 	await f.unmount();
-	await act(async () => { reply.resolve(Response.json({ message: "late failure" }, { status: 502 })); });
+	await act(async () => { reply.resolve(Response.json({ message: "late failure", retryable: true }, { status: 502 })); });
 	assert.equal(isDictationRetained(), false, "a recording whose page is gone must not be kept");
 });
 
@@ -727,4 +777,216 @@ test("a key that went missing mid-session leaves the kept recording alone when t
 	await act(async () => { f.host.querySelector<HTMLButtonElement>('[data-testid="dictation-toggle"]')!.click(); });
 	assert.ok(f.host.querySelector('[data-testid="dictation-retry"]'), "the recording is still there after the deep link");
 	assert.equal(isDictationRetained(), true);
+});
+
+// ---------------------------------------------------------------------------
+// Chunked transcription: the audio goes up in pieces while the user is still
+// talking, nothing shows until the stop, and the whole text lands once, in order.
+// ---------------------------------------------------------------------------
+
+/** Frames in a given number of seconds (the worklet posts 128 ms frames). */
+const framesFor = (seconds: number) => Math.round(seconds / 0.128);
+/** Answer each request with "chunk<n>" in call order. */
+const numbered = (f: Awaited<ReturnType<typeof fixture>>) => {
+	let n = 0;
+	f.state.answer = () => Promise.resolve(Response.json({ text: `chunk${++n}` }));
+};
+
+test("chunks are sent while recording continues; nothing shows until the stop, then one ordered insertion", async () => {
+	const f = await fixture();
+	numbered(f);
+	await f.start();
+	await f.speak(framesFor(18.1)); // 18 s buffered: the first chunk is cut and sent
+	assert.equal(f.state.posts.length, 1, "the first chunk went out during the recording");
+	assert.equal(f.dictation.phase, "recording");
+	assert.equal(f.dictation.transcribing, false);
+	assert.deepEqual(f.state.appends, [], "its text is held back");
+	assert.equal(f.dictation.error, null);
+	assert.equal(f.state.posts[0]!.form.get("prompt"), null, "the first chunk has nothing to continue from");
+
+	await f.speak(framesFor(21.9)); // about 40 s: the second chunk at ~33 s
+	assert.equal(f.state.posts.length, 2);
+	assert.equal(f.dictation.phase, "recording");
+	assert.deepEqual(f.state.appends, [], "still nothing in the composer");
+	assert.equal(f.state.posts[1]!.form.get("prompt"), "chunk1", "the second continues from the first");
+
+	const last = deferred<Response>();
+	f.state.answer = () => last.promise;
+	await act(async () => { f.dictation.stop(); });
+	assert.equal(f.state.posts.length, 3, "stop sends the last, partial chunk");
+	assert.equal(f.dictation.phase, "stopping");
+	assert.equal(f.dictation.transcribing, true, "waiting only for that last chunk");
+	assert.deepEqual(f.state.appends, []);
+	await act(async () => { last.resolve(Response.json({ text: "chunk3" })); });
+	assert.deepEqual(f.state.appends, ["chunk1 chunk2 chunk3"], "the whole transcript, once, in order");
+	assert.equal(f.dictation.phase, "idle");
+	assert.equal(f.dictation.error, null);
+	assert.equal(f.dictation.retryable, false);
+	const sizes = await Promise.all(f.state.posts.map(async (p) => (await audioBytes(p)).length - 44));
+	assert.equal(sizes.reduce((a, b) => a + b, 0), framesFor(18.1) * 4096 + framesFor(21.9) * 4096, "all the audio, once");
+});
+
+test("a chunk that fails for good holds back the whole transcript; Retry re-sends only that chunk and inserts everything in order", async () => {
+	const f = await fixture();
+	const replies = [Promise.resolve(Response.json({ text: "one" })), refused("Groq could not process the audio (400)."), Promise.resolve(Response.json({ text: "three" }))];
+	f.state.answer = () => replies.shift() ?? Promise.reject(new Error("unexpected request"));
+	await f.start();
+	await f.speak(framesFor(40));
+	assert.equal(f.state.posts.length, 2, "the failure happened in the background, silently");
+	assert.equal(f.dictation.error, null, "nothing is shown until the stop");
+	await act(async () => { f.dictation.stop(); });
+	assert.equal(f.state.posts.length, 3);
+	assert.equal(f.dictation.error, "Groq could not process the audio (400).");
+	assert.equal(f.dictation.retryable, true);
+	assert.deepEqual(f.state.appends, [], "no partial transcript");
+	let finished: boolean | undefined;
+	await act(async () => { void f.dictation.finish().then((ok) => { finished = ok; }); });
+	assert.equal(finished, false);
+
+	const failedAudio = await audioBytes(f.state.posts[1]!);
+	f.state.answer = () => Promise.resolve(Response.json({ text: "two" }));
+	await act(async () => { f.dictation.retry(); });
+	assert.equal(f.state.posts.length, 4, "exactly one more request: the failed chunk");
+	assert.deepEqual(await audioBytes(f.state.posts[3]!), failedAudio);
+	assert.equal(f.state.posts[3]!.form.get("prompt"), "one");
+	assert.deepEqual(f.state.appends, ["one two three"], "the full transcript, in order, once");
+	assert.equal(f.dictation.retryable, false);
+	assert.equal(f.dictation.error, null);
+	assert.equal(isDictationRetained(), false);
+});
+
+test("two stops on the same recording upload one final chunk and keep the transcript", async () => {
+	const f = await fixture();
+	numbered(f);
+	await f.start();
+	await f.speak(framesFor(3));
+	await act(async () => {
+		// Both calls see the same render closure, as the cap callback and a click can.
+		f.dictation.stop();
+		f.dictation.stop();
+	});
+	assert.equal(f.state.posts.length, 1, "no second upload");
+	assert.ok((await audioBytes(f.state.posts[0]!)).length > 44, "and no empty header-only chunk");
+	assert.deepEqual(f.state.appends, ["chunk1"], "the transcript is not dropped");
+	assert.equal(f.dictation.error, null);
+});
+
+test("stop() followed by finish() in the same tick still ends once, and finish waits for the transcript", async () => {
+	const f = await fixture();
+	numbered(f);
+	await f.start();
+	await f.speak(framesFor(3));
+	let finished: boolean | undefined;
+	await act(async () => {
+		f.dictation.stop();
+		void f.dictation.finish().then((ok) => { finished = ok; });
+	});
+	assert.equal(f.state.posts.length, 1);
+	assert.deepEqual(f.state.appends, ["chunk1"]);
+	assert.equal(finished, true);
+});
+
+test("Esc while recording after chunks went out discards them all and keeps nothing", async () => {
+	const f = await fixture();
+	const reply = deferred<Response>();
+	f.state.answer = () => reply.promise; // the first chunk is still in flight
+	await f.start();
+	await f.speak(framesFor(19));
+	const signal = f.state.posts[0]!.init.signal!;
+	await act(async () => { f.dictation.cancel(); });
+	assert.equal(signal.aborted, true, "the request in flight is aborted");
+	assert.equal(f.dictation.retryable, false);
+	assert.equal(f.dictation.error, null);
+	assert.equal(isDictationRetained(), false);
+	await act(async () => { reply.resolve(Response.json({ text: "late" })); });
+	assert.deepEqual(f.state.appends, []);
+	assert.equal(f.state.posts.length, 1, "nothing queued behind it was sent");
+});
+
+test("unmounting mid-run aborts the request in flight, sends nothing queued behind it, and does not throw", async () => {
+	const f = await fixture();
+	const reply = deferred<Response>();
+	f.state.answer = () => reply.promise;
+	await f.start();
+	await f.speak(framesFor(40)); // two chunks cut; the first is stuck in flight
+	assert.equal(f.state.posts.length, 1);
+	const signal = f.state.posts[0]!.init.signal!;
+	await f.unmount();
+	assert.equal(signal.aborted, true);
+	assert.equal(isDictationActive(), false);
+	assert.equal(isDictationRetained(), false);
+	await act(async () => { reply.reject(signal.reason); });
+	assert.equal(f.state.posts.length, 1, "the second chunk was never sent");
+	assert.deepEqual(f.state.appends, []);
+});
+
+test("unmounting while waiting to retry a failed chunk cancels the retry", async () => {
+	const f = await fixture();
+	f.state.answer = () => Promise.resolve(Response.json({ message: "Groq is unavailable (503).", retryable: true }, { status: 502 }));
+	await f.start();
+	await f.speak();
+	mock.timers.enable({ apis: ["setTimeout"] });
+	try {
+		await act(async () => { f.dictation.stop(); });
+		assert.equal(f.state.posts.length, 1);
+		await f.unmount();
+		await act(async () => { mock.timers.tick(10_000); });
+		assert.equal(f.state.posts.length, 1, "the backoff timer was cancelled");
+	} finally {
+		mock.timers.reset();
+	}
+	assert.equal(isDictationRetained(), false);
+});
+
+test("question dock: a chunk that failed in the background still aborts the submit and keeps the draft; Retry fills the field in order", async () => {
+	const submitted: { thinking?: string }[] = [];
+	const f = await fixture(undefined, {
+		beside: <QuestionDock toolName="quiz" toolCallId="q1" input={QUIZ} expanded onExpand={() => {}}
+			onSubmit={(answer) => { submitted.push(answer); }} dictationClaim />,
+	});
+	const thinking = () => f.host.querySelector<HTMLElement>('[data-testid="thinking-field"] [data-file-path-input]')!;
+	const submit = () => act(async () => {
+		f.host.querySelector("form")!.dispatchEvent(new window.Event("submit", { bubbles: true, cancelable: true }));
+	});
+	await act(async () => {
+		f.host.querySelector<HTMLButtonElement>('[role="radio"]')!.click();
+		typeInto(thinking(), "typed so far");
+	});
+	const replies = [refused("Groq is unavailable (500)."), Promise.resolve(Response.json({ text: "the second half" }))];
+	f.state.answer = () => replies.shift()!;
+	await f.start();
+	await f.speak(framesFor(25)); // chunk 1 (cut near 15 s) fails in the background while recording
+	assert.equal(f.dictation.error, null);
+
+	await submit(); // Enter while still recording: finish, the first part failed
+	assert.equal(submitted.length, 0, "the answer is not sent without the first part of the speech");
+	assert.equal(thinking().textContent, "typed so far", "the draft is untouched");
+	assert.equal(f.dictation.retryable, true);
+	assert.equal(f.dictation.error, "Groq is unavailable (500).");
+
+	f.state.answer = () => Promise.resolve(Response.json({ text: "the first half" }));
+	await act(async () => { f.dictation.retry(); });
+	assert.equal(f.state.posts.length, 3, "only the failed chunk went again");
+	assert.equal(thinking().textContent, "typed so far the first half the second half", "both parts, in order");
+	await submit();
+	assert.equal(submitted.length, 1);
+	assert.equal(submitted[0]!.thinking, "typed so far the first half the second half");
+});
+
+test("composer: a chunk that failed in the background aborts the send and keeps the draft", async () => {
+	const sent: string[] = [];
+	const changes: string[] = [];
+	const f = await fixture(undefined, { standalone: <Composing draft={() => "my draft"} changes={changes} sent={sent} /> });
+	const send = () => act(async () => {
+		f.host.querySelector("form")!.dispatchEvent(new window.Event("submit", { bubbles: true, cancelable: true }));
+	});
+	const replies = [refused("Groq is unavailable (500)."), Promise.resolve(Response.json({ text: "tail" }))];
+	f.state.answer = () => replies.shift()!;
+	await act(async () => { f.host.querySelector<HTMLButtonElement>('[data-testid="dictation-toggle"]')!.click(); });
+	await f.speak(framesFor(25));
+	await send();
+	assert.deepEqual(sent, [], "nothing is sent");
+	assert.deepEqual(changes, [], "the draft is not touched");
+	assert.ok(f.host.querySelector('[data-testid="dictation-retry"]'));
+	assert.match(f.host.textContent!, /Groq is unavailable \(500\)\./);
 });

@@ -118,15 +118,22 @@ export const GROQ_DICTATION_HEADER = "x-learnharness-dictation";
 
 /** Groq's documented upload limit is 25 MB on the free tier (100 MB on the
  * dev tier, which needs a URL upload for the top of that range). The docs do
- * not say MB or MiB, so the decimal figure is used. Dictation caps recordings
- * well under it: mono 16-bit PCM is 32,000 bytes/s at 16 kHz, so 12 minutes is
- * 23.04 MB plus a 44-byte WAV header. */
+ * not say MB or MiB, so the decimal figure is used. Each request is one chunk
+ * of at most 18 s, 576 KB, so the limit is far away; the route still enforces
+ * it, and its own body ceiling, on every request. */
 export const GROQ_MAX_UPLOAD_BYTES = 25_000_000;
 /** Request-body ceiling: the file plus multipart framing. It must stay inside
  * next.config.ts's proxyClientMaxBodySize, or Next hands the route a truncated body. */
 export const GROQ_MAX_BODY_BYTES = GROQ_MAX_UPLOAD_BYTES + 64 * 1024;
 export const DICTATION_SAMPLE_RATE = 16_000;
-export const GROQ_MAX_RECORDING_SECONDS = 720;
+/** The longest single dictation: 20 minutes, after which it stops and
+ * transcribes what it has. Two things set it. Memory: a run keeps the audio of
+ * every chunk until the transcript is inserted, 32 KB per second, so 20 minutes
+ * is at most 38.4 MB in the page. Quota: Groq's free tier allows about 7,200
+ * audio-seconds an hour and bills each request at least 10 s (chunks are 12 s
+ * or more, so nothing is rounded up), so one 20-minute run, about 80 requests,
+ * uses a sixth of an hour's allowance and nowhere near the 20 requests a minute. */
+export const GROQ_MAX_RECORDING_SECONDS = 1200;
 export const GROQ_MAX_PCM_BYTES = GROQ_MAX_RECORDING_SECONDS * DICTATION_SAMPLE_RATE * 2;
 /** Groq dictation is sent in chunks of about this long while the user is still
  * speaking (see dictation-chunks.ts). The cut goes at the quietest point

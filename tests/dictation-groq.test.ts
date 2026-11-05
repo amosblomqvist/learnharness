@@ -5,7 +5,7 @@ import path from "node:path";
 import { after, describe, it } from "node:test";
 import {
 	DEFAULT_DICTATION_PROVIDER, DEFAULT_GROQ_WHISPER_MODEL, DICTATION_LANGUAGES, DICTATION_PROVIDERS, GROQ_MAX_BODY_BYTES,
-	GROQ_MAX_PCM_BYTES, GROQ_MAX_RECORDING_SECONDS, GROQ_MAX_UPLOAD_BYTES, GROQ_MIN_PCM_BYTES, GROQ_WHISPER_MODELS,
+	GROQ_CHUNK_MAX_SECONDS, GROQ_CHUNK_MIN_SECONDS, GROQ_CHUNK_TARGET_SECONDS, GROQ_MAX_PCM_BYTES, GROQ_MAX_RECORDING_SECONDS, GROQ_MAX_UPLOAD_BYTES, GROQ_MIN_PCM_BYTES, GROQ_WHISPER_MODELS,
 	dictationSettingsBody, isDictationProvider, isGroqWhisperModel, whisperLanguage,
 } from "../src/core/dictation.ts";
 import { FACTORY_SETTINGS, sanitizeUserSettings } from "../src/core/settings.ts";
@@ -33,10 +33,14 @@ describe("Groq dictation provider and models", () => {
 		for (const value of ["whisper-1", "distil-whisper-large-v3-en", "nova-3", "", null, 3]) assert.equal(isGroqWhisperModel(value), false, String(value));
 	});
 
-	it("the recording cap leaves the WAV under Groq's upload limit, and the body limit under Next's proxy buffer", () => {
-		assert.equal(GROQ_MAX_RECORDING_SECONDS, 720);
-		assert.equal(GROQ_MAX_PCM_BYTES, 720 * 16000 * 2);
-		assert.ok(GROQ_MAX_PCM_BYTES + WAV_HEADER_BYTES < GROQ_MAX_UPLOAD_BYTES);
+	it("a chunk stays far under Groq's upload limit, the session cap bounds retained audio, and the body limit stays under Next's proxy buffer", () => {
+		assert.equal(GROQ_MAX_RECORDING_SECONDS, 1200);
+		assert.equal(GROQ_MAX_PCM_BYTES, 1200 * 16000 * 2);
+		assert.ok(GROQ_MAX_PCM_BYTES <= 40_000_000, "at most about 38 MB of audio is kept in the page");
+		const longestChunk = GROQ_CHUNK_MAX_SECONDS * 16000 * 2 + WAV_HEADER_BYTES;
+		assert.ok(longestChunk < GROQ_MAX_UPLOAD_BYTES / 40, "each request is tiny next to the upload limit");
+		assert.ok(GROQ_CHUNK_MIN_SECONDS * 1000 >= 10_000, "Groq bills at least 10 s a request: no chunk is rounded up");
+		assert.ok(GROQ_CHUNK_MIN_SECONDS < GROQ_CHUNK_TARGET_SECONDS && GROQ_CHUNK_TARGET_SECONDS < GROQ_CHUNK_MAX_SECONDS);
 		assert.ok(GROQ_MAX_BODY_BYTES > GROQ_MAX_UPLOAD_BYTES);
 		// next.config.ts sets proxyClientMaxBodySize to MAX_IMPORT_BODY_BYTES; a larger
 		// request would reach the route truncated and fail as an unreadable upload.

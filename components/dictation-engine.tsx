@@ -69,8 +69,8 @@ export function DictationSetupHint() {
 	if (provider === "groq") {
 		return (
 			<p data-testid="dictation-setup-hint" data-engine="groq" className={className}>
-				Groq transcribes after you stop: the recording goes through this app's local server to Groq
-				(up to {GROQ_MAX_RECORDING_SECONDS / 60} minutes at a time) and the text appears when it finishes.
+				Groq sends your speech in short pieces while you talk, through this app's local server to Groq,
+				and the text appears when you stop (up to {GROQ_MAX_RECORDING_SECONDS / 60} minutes at a time).
 				It uses your <a href="https://console.groq.com/keys" target="_blank" rel="noreferrer" className={LINK}>Groq API key</a>,
 				the same one as the Groq model provider. Multilingual lets Whisper detect the language.
 			</p>
