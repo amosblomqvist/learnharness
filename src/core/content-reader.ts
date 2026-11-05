@@ -175,47 +175,30 @@ export function outsideTexComments(body: string, transform: (part: string) => st
 	out.push(transform(body.slice(from))); return out.join("");
 }
 
-/** Escaped code fence: in unrecovered JSON strings, models emit fenced code blocks
- * with escaped newlines (`\\n`). CommonMark on the raw single-line text treats
- * this as an inlineCode span with backticks. Decode fence delimiters and inner
- * line breaks when the code span matches an opening/closing fence pair. The
- * backslash run before each delimiter newline is the escaping factor: a run of
- * one is a single JSON layer, a run of two is the observed double layer. Only
- * factors 1 and 2 decode; anything else falls back to the original single-layer
- * matcher so prior behavior is byte-identical. Each run is only tried from its
- * first backslash (`(?<!\\)`): a run's tail can never match differently from its
- * start, and retrying from every position is quadratic on a long run. */
-const ESCAPED_FENCE =
-	/^([ \t]{0,3})(`{3,}|~{3,})([^\n`\\]*?)(\\+)(?:r(\\+)n|n)([\s\S]*?)(?<!\\)(\\+)(?:r(\\+)n|n)([ \t]{0,3}(?:`{3,}|~{3,}))[ \t]*$/;
+/** Escaped code fence: models emit fenced code with escaped newlines, which
+ * CommonMark reads as an inline code span. A run of two backslashes before each
+ * delimiter newline is the observed double JSON layer and is tried first;
+ * anything else falls back to the original single-layer matcher, unchanged.
+ * (`(?<!\\)`: a run is only tried from its first backslash, keeping the match
+ * linear on long runs.) */
 const SINGLE_LAYER_FENCE =
 	/^([ \t]{0,3})(`{3,}|~{3,})([^\n`\\]*)(?:\\r\\n|\\n)([\s\S]*?)(?:\\r\\n|\\n)([ \t]{0,3}(?:`{3,}|~{3,}))[ \t]*$/;
-function fenceText(indent: string | undefined, openFence: string, lang: string | undefined, body: string, closeFence: string, factor: number): string {
-	const decodedBody = factor === 1
-		? body.replace(/\\r\\n|\\n/g, "\n")
-		: body.replace(/(?<!\\)(\\+)(?:r(\\+)n|n)/g, (whole: string, slashes: string, cr: string | undefined) =>
-			cr !== undefined
-				? (slashes.length % 4 === 2 && cr.length % 4 === 2 ? "\n" : whole)
-				: (slashes.length % 4 === 2 ? slashes.slice(0, -2) + "\n" : whole));
-	return `${indent ?? ""}${openFence}${lang ?? ""}\n${decodedBody}\n${closeFence}`;
-}
+const TWO_LAYER_FENCE =
+	/^([ \t]{0,3})(`{3,}|~{3,})([^\n`\\]*)\\\\(?:r\\\\)?n([\s\S]*?)(?<!\\)\\\\(?:r\\\\)?n([ \t]{0,3}(?:`{3,}|~{3,}))[ \t]*$/;
 function decodeEscapedFence(raw: string): { factor: number; text: string } | null {
-	const m = ESCAPED_FENCE.exec(raw);
-	if (m) {
-		const [, indent, openFence, lang, , , body, , , closeFence] = m;
-		const openRun = m[4] ?? "", closeRun = m[7] ?? "";
-		const closeTrimmed = closeFence?.trim() ?? "";
-		if (openFence && body && closeFence && openRun.length === closeRun.length && openRun.length >= 1 && openRun.length <= 2
-			&& closeTrimmed[0] === openFence[0] && closeTrimmed.length >= openFence.length) {
-			return { factor: openRun.length, text: fenceText(indent, openFence, lang, body, closeFence, openRun.length) };
-		}
+	for (const [pattern, factor] of [[TWO_LAYER_FENCE, 2], [SINGLE_LAYER_FENCE, 1]] as const) {
+		const m = pattern.exec(raw);
+		if (!m) continue;
+		const [, indent, openFence, lang, body, closeFence] = m;
+		const close = closeFence!.trim();
+		if (!body || close[0] !== openFence![0] || close.length < openFence!.length) continue;
+		const decoded = factor === 1
+			? body.replace(/\\r\\n|\\n/g, "\n")
+			: body.replace(/(?<!\\)(\\+)(?:r(\\+)n|n)/g, (whole: string, slashes: string, cr: string | undefined) =>
+				slashes.length % 4 === 2 && (cr === undefined || cr.length % 4 === 2) ? (cr === undefined ? slashes.slice(0, -2) : "") + "\n" : whole);
+		return { factor, text: `${indent}${openFence}${lang}\n${decoded}\n${closeFence}` };
 	}
-	const legacy = SINGLE_LAYER_FENCE.exec(raw);
-	if (!legacy) return null;
-	const [, indent, openFence, lang, body, closeFence] = legacy;
-	if (!openFence || !body || !closeFence) return null;
-	const closeTrimmed = closeFence.trim();
-	if (closeTrimmed[0] !== openFence[0] || closeTrimmed.length < openFence.length) return null;
-	return { factor: 1, text: fenceText(indent, openFence, lang, body, closeFence, 1) };
+	return null;
 }
 
 /** The start of a Windows drive path or a UNC path (`\\host\share`), allowing
