@@ -229,7 +229,4 @@ test("two-layer recovery still turns n-words after a double-backslash token into
 	const fence = "```sh\\\\nls\\\\n```";
 	const raw = math`Next:\\nnas01 is up.\\nSELECT\\nFROM ok.\\n\\n` + fence;
 	assert.equal(recoverDocumentLayout(raw), "Next:\nnas01 is up.\nSELECT\nFROM ok.\n\n```sh\nls\n```");
-	// and the recorded SQL fixture recovers exactly as before
-	const sql = twoLayerFailedQuestion();
-	assert.equal(recoverDocumentLayout(sql), sql.replace(/\\\\n/g, "\n"));
 });

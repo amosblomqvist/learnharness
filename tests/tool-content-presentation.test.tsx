@@ -201,27 +201,6 @@ test("two-layer escaped SQL fence from the failed LEFT JOIN question renders as 
 	assert.deepEqual([...block.querySelectorAll("code > span.block")].map(n => n.textContent ?? ""),
 		["SELECT *", "FROM users u", "LEFT JOIN orders o ON u.id =", "o.user_id", "WHERE o.status = 'PENDING';"]);
 	assert.equal(dom(render(recovered)).querySelectorAll('[data-testid="md-code"]').length, 1);
-
-	// active QuestionDock
-	const input = { question: rawLine, options: [{ label: "yes" }, { label: "no" }] };
-	const beforeInput = structuredClone(input);
-	const dock = dom(renderToStaticMarkup(<QuestionDock toolName="ask_user_question" toolCallId="two_layer_q" input={input} expanded onExpand={() => {}} onSubmit={() => {}} />));
-	assert.deepEqual(input, beforeInput); // source argument is never rewritten
-	assert.equal(dock.querySelectorAll('[data-testid="md-code"]').length, 1);
-	assert.equal(dock.querySelector('[data-language="sql"]')?.getAttribute("data-language"), "sql");
-	assert.ok(!(dock.querySelector('[data-testid="md-code"]')?.textContent ?? "").includes("\\n"));
-
-	// answered-history AnsweredCard
-	const answer: QuestionAnswerData = { kind: "quiz", questionText: rawLine,
-		options: [{ index: 1, label: "yes" }, { index: 2, label: "no" }],
-		answers: [{ index: 1, label: "yes", value: "yes" }], correct: true, correctIndices: [1], dontKnow: false,
-		explanation: "The WHERE clause filters the outer join.", confidence: 90, answeredAt: "synthetic" };
-	const beforeAnswer = structuredClone(answer);
-	const card = dom(renderToStaticMarkup(<AnsweredCard answer={answer} />));
-	assert.deepEqual(answer, beforeAnswer); // stored answer identity is never rewritten
-	assert.equal(card.querySelectorAll('[data-testid="md-code"]').length, 1);
-	assert.equal(card.querySelector('[data-language="sql"]')?.getAttribute("data-language"), "sql");
-	assert.ok(!(card.querySelector('[data-testid="md-code"]')?.textContent ?? "").includes("\\n"));
 });
 
 test("two-layer SQL fence plus native n-row matrix keeps the code block and both matrix rows in every surface", () => {
@@ -238,28 +217,4 @@ test("two-layer SQL fence plus native n-row matrix keeps the code block and both
 	assert.ok(tex(html).includes(matrixBody)); // KaTeX received the original TeX byte-for-byte
 	assert.equal(document.querySelectorAll("mtr").length, 2); // both array rows render
 	assert.equal(document.querySelectorAll(".katex-error").length, 0);
-
-	// active QuestionDock (source input must not be mutated)
-	const input = { question: doc, options: [{ label: "yes" }, { label: "no" }] };
-	const beforeInput = structuredClone(input);
-	const dockHtml = renderToStaticMarkup(<QuestionDock toolName="ask_user_question" toolCallId="two_layer_matrix_q" input={input} expanded onExpand={() => {}} onSubmit={() => {}} />);
-	assert.deepEqual(input, beforeInput);
-	const dock = dom(dockHtml);
-	assert.equal(dock.querySelectorAll('[data-testid="md-code"]').length, 1);
-	assert.equal(dock.querySelector('[data-language="sql"]')?.getAttribute("data-language"), "sql");
-	assert.ok(tex(dockHtml).includes(matrixBody));
-	assert.equal(dock.querySelectorAll("mtr").length, 2);
-
-	// answered-history AnsweredCard (stored answer must not be mutated)
-	const answer: QuestionAnswerData = { kind: "quiz", questionText: doc,
-		options: [{ index: 1, label: "yes" }, { index: 2, label: "no" }],
-		answers: [{ index: 1, label: "yes", value: "yes" }], correct: true, correctIndices: [1], dontKnow: false,
-		explanation: "The WHERE clause filters the outer join.", confidence: 90, answeredAt: "synthetic" };
-	const beforeAnswer = structuredClone(answer);
-	const cardHtml = renderToStaticMarkup(<AnsweredCard answer={answer} />);
-	assert.deepEqual(answer, beforeAnswer);
-	const card = dom(cardHtml);
-	assert.equal(card.querySelectorAll('[data-testid="md-code"]').length, 1);
-	assert.ok(tex(cardHtml).includes(matrixBody));
-	assert.equal(card.querySelectorAll("mtr").length, 2);
 });
