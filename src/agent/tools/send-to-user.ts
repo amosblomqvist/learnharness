@@ -1,7 +1,19 @@
 import { Type } from "typebox";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { SEND_TO_USER_TOOL } from "../../core/native-messages.ts";
+import { CLAUDE_CODE_PROVIDER } from "../claude-code/constants.ts";
 import { serverExecute } from "../tool-execute.ts";
+
+/** One availability rule for the tool and its teacher-only delivery guard.
+ * Practice uses ordinary final prose; explicit registries remain caller-owned. */
+export function sendToUserApplies(
+	kind: string,
+	model: { provider: string; id: string },
+	toolsOverridden: boolean,
+): boolean {
+	return (kind === "prober" || kind === "teacher") && !toolsOverridden &&
+		(model.provider === CLAUDE_CODE_PROVIDER || model.id.toLowerCase().includes("claude"));
+}
 
 const sendToUserInput = Type.Object({
 	message: Type.String({

@@ -12,6 +12,7 @@
 import type { LhMessage } from "./native-messages.ts";
 import type {
 	ChatRecord,
+	ImageSnapshot,
 	ChatSettings,
 	ChatSummary,
 	GraphChain,
@@ -43,6 +44,8 @@ export interface ChatStore {
 	/** Persist the full native message list (the record IS the agent
 	 * state — Wave B, owner-approved 2026-09-26). */
 	saveMessages(id: string, messages: LhMessage[]): void;
+	/** Save a processed picture once, without changing conversation activity/order. */
+	saveImageSnapshot(id: string, snapshotId: string, image: ImageSnapshot): void;
 	/** Persist the session plan tree (plan tools call this in execute). */
 	saveTree(id: string, tree: PlanTree): void;
 	/** Append one usage entry to the record's turn log (the money channel,

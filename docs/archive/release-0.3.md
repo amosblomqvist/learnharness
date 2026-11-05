@@ -2,9 +2,9 @@
 
 > **Historical planning notes (2026-10-06), not the current release checklist.**
 > The original ideas and statuses below may be superseded or unimplemented.
-> See [Desktop builds and releases](desktop-release.md) for the current release
-> procedure, and [Architecture](architecture.md) / [Development](development.md)
-> for the shipped system and development guidance.
+> See [Desktop builds and releases](../desktop-release.md) for the current release
+> procedure, and [Architecture](../architecture.md) / [Development](../development.md)
+> for the current system and development guidance. See also the [archive index](README.md).
 
 Started 2026-10-06, owner brain-dump round. Priority 1 — everything else (assessment levels → docs/vision-assessment.md) comes after. Items are captured as spoken; design decisions inside them are **unruled** unless marked.
 
