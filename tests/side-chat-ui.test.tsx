@@ -114,7 +114,7 @@ describe("side window render", () => {
 		const jump = document.querySelector('[data-testid="side-chat-jump"]')!;
 		assert.equal(jump.getAttribute("aria-label"), "Jump to follow-up question");
 		assert.equal(jump.closest('[data-testid="side-chat-toggle"]'), null, "the jump never collapses the window");
-		assert.equal(document.querySelector('[data-testid="side-chat-close"]')!.getAttribute("aria-label"), "Close side question");
+		assert.equal(document.querySelector('[data-testid="side-chat-close"]'), null, "no top-right collapse: the bar and the bottom ↑ do it");
 		// The whole bar is the handle: a header-wide toggle, separate from (never wrapping) its controls.
 		const toggle = document.querySelector('[data-testid="side-chat-toggle"]')!;
 		assert.equal(toggle.tagName, "BUTTON");
@@ -124,16 +124,15 @@ describe("side window render", () => {
 		assert.equal(toggle.parentElement!.tagName, "HEADER");
 		assert.equal(document.querySelector('[data-testid="side-chat-input"]')!.getAttribute("placeholder"), "Ask a follow-up…");
 		assert.ok(document.querySelector('[data-testid="side-chat-send"]'));
-		// The bottom collapse: right of the follow-up box, OUTSIDE it.
+		// The bottom collapse: left of the follow-up box, OUTSIDE it.
 		const bottom = document.querySelector('[data-testid="side-chat-collapse-bottom"]')!;
 		assert.equal(bottom.getAttribute("aria-label"), "Collapse side question");
 		assert.equal(bottom.closest("form"), null, "never inside the follow-up box");
-		assert.equal(bottom.previousElementSibling!.tagName, "FORM", "right after the box");
-		assert.ok(bottom.previousElementSibling!.querySelector('[data-testid="side-chat-send"]'));
-		// Both collapse controls show the upward "fold up" chevron.
-		for (const control of [bottom, document.querySelector('[data-testid="side-chat-close"]')!]) {
-			assert.ok(control.querySelector("svg.lucide-chevron-up"), control.getAttribute("data-testid")!);
-		}
+		assert.equal(bottom.nextElementSibling!.tagName, "FORM", "right before the box");
+		assert.ok(bottom.nextElementSibling!.querySelector('[data-testid="side-chat-send"]'));
+		assert.equal(bottom.previousElementSibling, null, "first in its row");
+		// The bottom collapse shows the upward "fold up" chevron.
+		assert.ok(bottom.querySelector("svg.lucide-chevron-up"));
 	});
 
 	it("answering: streamed text and the Stop control; no Retry while busy", () => {

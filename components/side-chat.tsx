@@ -249,19 +249,22 @@ function OpenWindow({ view, store, messages, excerpt }: { view: SideWindowView; 
 									<Trash2Icon />
 								</Button>
 							)}
-							<Button
-								size="icon-xs"
-								variant="ghost"
-								data-testid="side-chat-close"
-								aria-label={view.thread ? "Close side question" : "Discard side question"}
-								onClick={(e) => {
-									blurAfterPointerClick(e);
-									store.setOpen(view.key, false);
-								}}
-							>
-								{/* The upward chevron says "fold up" (owner, 2026-11-02). */}
-								{view.thread ? <ChevronUpIcon /> : <XIcon />}
-							</Button>
+							{/* A saved window collapses from its bar or the bottom ↑ (owner,
+							    2026-11-05: no top-right ↑). A draft has neither: its × discards. */}
+							{!view.thread && (
+								<Button
+									size="icon-xs"
+									variant="ghost"
+									data-testid="side-chat-close"
+									aria-label="Discard side question"
+									onClick={(e) => {
+										blurAfterPointerClick(e);
+										store.setOpen(view.key, false);
+									}}
+								>
+									<XIcon />
+								</Button>
+							)}
 						</>
 					)}
 				</div>
@@ -445,7 +448,27 @@ function SideComposer({
 					))}
 				</div>
 			)}
-			<div className="flex items-center gap-1.5">
+			<div className="flex items-center gap-1">
+			{onCollapse && (
+				// OUTSIDE the follow-up box (owner, 2026-11-02): it acts on the
+				// window, not on the question — the bottom twin of the top
+				// collapse. LEFT of the box (owner, 2026-11-05), where the
+				// cursor usually is.
+				<Button
+					size="icon-xs"
+					variant="ghost"
+					className="-ml-1.5"
+					data-testid="side-chat-collapse-bottom"
+					aria-label="Collapse side question"
+					title="Collapse"
+					onClick={(e) => {
+						blurAfterPointerClick(e);
+						onCollapse();
+					}}
+				>
+					<ChevronUpIcon />
+				</Button>
+			)}
 			<form
 				className="flex min-w-0 flex-1 items-end gap-1.5 rounded-lg border bg-background p-1"
 				onSubmit={(e) => {
@@ -488,23 +511,6 @@ function SideComposer({
 					</button>
 				)}
 			</form>
-			{onCollapse && (
-				// OUTSIDE the follow-up box (owner, 2026-11-02): it acts on the
-				// window, not on the question — the bottom twin of the top collapse.
-				<Button
-					size="icon-xs"
-					variant="ghost"
-					data-testid="side-chat-collapse-bottom"
-					aria-label="Collapse side question"
-					title="Collapse"
-					onClick={(e) => {
-						blurAfterPointerClick(e);
-						onCollapse();
-					}}
-				>
-					<ChevronUpIcon />
-				</Button>
-			)}
 			</div>
 		</div>
 	);
