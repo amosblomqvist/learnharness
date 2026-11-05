@@ -15,7 +15,7 @@ export function createSourceDirectory(deps: { chatStore: ChatStore; graphStore: 
 	function read(): SourceDirectory {
 		const organization = deps.sourceOrganizationStore.read();
 		const entries = new Map<string, SourceEntry>();
-		for (const c of deps.chatStore.listChats()) entries.set(c.id, { id: c.id, kind: "chat", label: c.title, createdAt: c.createdAt });
+		for (const c of deps.chatStore.listChats()) entries.set(c.id, { id: c.id, kind: "chat", chatKind: c.kind, label: c.title, createdAt: c.createdAt });
 		for (const s of deps.graphStore.readSources()) entries.set(s.id, {
 			id: s.id, kind: "notes", label: placementOf(organization, s.id)?.name ?? sourceFileLabel(s.filePath),
 			filePath: s.filePath, createdAt: s.importedAt,

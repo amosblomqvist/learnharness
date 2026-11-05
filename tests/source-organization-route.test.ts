@@ -26,8 +26,24 @@ it("GET is a non-writing read and inventories all sessions, imported records and
 	stores.graphStore.appendNode({ id: "n_orphan", name: "Orphan", statement: "A record is missing.", aliases: [], createdAt: "2026-10-30T00:00:00Z", provenance: [{ chatId: "gone", messageId: "m1" }] });
 	const { sources } = await (await GET()).json();
 	assert.equal(sources.find((s: { id: string }) => s.id === chat.id).label, "Unextracted session");
+	assert.equal(sources.find((s: { id: string }) => s.id === chat.id).chatKind, "teach", "absent persisted kind still means teaching");
 	assert.equal(sources.find((s: { kind: string }) => s.kind === "notes").label, "empty");
 	assert.equal(sources.find((s: { id: string }) => s.id === "gone").kind, "missing");
+});
+
+it("GET projects practice kind without removing or rewriting sessions, historical graph contributions or folder placements", async () => {
+	const practice = stores.chatStore.createChat("Practice source", "practice");
+	stores.graphStore.appendNode({ id: "n_practice", name: "Historical", statement: "Historical practice contribution.", aliases: [], createdAt: "2026-10-30", provenance: [{ chatId: practice.id, messageId: "m" }] });
+	const created = await (await change({ action: "create-folder", name: "Practice folder", parentId: null })).json();
+	assert.equal((await change({ action: "move", kind: "source", id: practice.id, parentId: created.createdFolderId })).status, 200);
+	const bytes = () => Object.fromEntries(fs.readdirSync(root, { recursive: true, withFileTypes: true }).filter((entry) => entry.isFile()).map((entry) => {
+		const file = path.join(entry.parentPath, entry.name); return [file, fs.readFileSync(file).toString("hex")];
+	}));
+	const before = bytes();
+	const directory = await (await GET()).json();
+	assert.deepEqual(directory.sources.find((s: { id: string }) => s.id === practice.id), { id: practice.id, kind: "chat", chatKind: "practice", label: practice.title, createdAt: practice.createdAt });
+	assert.equal(directory.organization.placements[practice.id].folderId, created.createdFolderId);
+	assert.deepEqual(bytes(), before);
 });
 
 it("rename/move operations persist independently without changing source IDs, paths, graph ledgers or usage", async () => {

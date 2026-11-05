@@ -2,12 +2,12 @@
 
 > **Historical design record, not current implementation documentation.**
 > The original decisions and plans below may be superseded or unimplemented.
-> See [Architecture](architecture.md) and [Development](development.md) for the
-> shipped system and current development guidance.
+> See [Architecture](../architecture.md) and [Development](../development.md) for the
+> current system and development guidance, or the [archive index](README.md) for context.
 
 Living document. Started 2026-08-22, capturing the current vision and all agreed decisions. Amend as things evolve.
 
-Master frame: the three-part learning model and the extensibility/plugin direction live in [`vision-extensibility.md`](vision-extensibility.md) (2026-10-02).
+Master frame: the three-part learning model and the extensibility/plugin direction live in `vision-extensibility.md` (2026-10-02; referenced historical document is not present in this repository).
 
 Prior art: `knowledge graph design.md` in the Obsidian vault (2025-08-20 ideation) — was canonical for the epistemic model; the 2026-09-02 node-theory + construction redesign in §1 amends it further (no misconception nodes, `follows`/`supports`, no taught events, message-granular provenance). This document records what today's decisions **amend** in it, and adds the session-experience and presentation layers the original doc deferred.
 

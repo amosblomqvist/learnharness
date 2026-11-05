@@ -72,9 +72,10 @@ export function KnowledgeSummary({
 				{importedNotes} {importedNotes === 1 ? "imported note" : "imported notes"}
 			</p>
 			{empty && (
-				<p className="pt-2 font-ui text-xs text-muted-foreground/70">
-					Nothing here yet — import notes to begin building the graph.
-				</p>
+				<div className="pt-2 font-ui text-xs text-muted-foreground/70">
+					<p>Start a session to begin learning.</p>
+					<p className="mt-1">Attach your material with the paperclip or drag and drop.</p>
+				</div>
 			)}
 		</div>
 	);

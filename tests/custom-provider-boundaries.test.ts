@@ -209,8 +209,8 @@ test("offline pins accept 512/1, retain support declaration, and do not probe", 
 test("settings-write failure restores previous key/config and reports failure", async () => {
 	setFileKey("old-key");
 	const before = current();
-	const write = fs.writeFileSync;
-	mock.method(fs, "writeFileSync", (...args: Parameters<typeof write>) => { if (args[0] === settingsFile) throw new Error("private-io-details"); return write(...args); });
+	const rename = fs.renameSync;
+	mock.method(fs, "renameSync", (...args: Parameters<typeof rename>) => { if (args[1] === settingsFile) throw new Error("private-io-details"); return rename(...args); });
 	const res = await mutate({ baseUrl: "http://new", authMode: "apiKey", key: "new-key" });
 	assert.equal(res.status, 500); assert.ok(!(await res.text()).includes("private-io-details"));
 	assert.equal(keys.keyValue(CUSTOM_PROVIDER.envVar), "old-key"); assert.deepEqual(current(), before);

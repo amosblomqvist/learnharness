@@ -147,6 +147,7 @@ export function SettingsDialogBody({
 		undefined,
 	);
 	const [error, setError] = useState<string | null>(null);
+	const [fileAccessError, setFileAccessError] = useState<string | null>(null);
 	// MenuShell open-count — drives the content column's scroll lock.
 	const [openMenus, setOpenMenus] = useState(0);
 	const contentRef = useRef<HTMLDivElement | null>(null);
@@ -197,9 +198,10 @@ export function SettingsDialogBody({
 			.then((r) =>
 				r.ok ? r.json() : Promise.reject(new Error(`status ${r.status}`)),
 			)
-			.then((body: { settings: UserSettings | null }) =>
-				setRecord(body.settings ?? { version: CURRENT_SETTINGS_VERSION }),
-			)
+			.then((body: { settings: UserSettings | null; fileAccessError?: string }) => {
+				setRecord(body.settings ?? { version: CURRENT_SETTINGS_VERSION });
+				setFileAccessError(body.fileAccessError ?? null);
+			})
 			.catch(() => setRecord(null));
 	}, []);
 
@@ -247,9 +249,9 @@ export function SettingsDialogBody({
 			// (bd68486) — a swap that rides an unsupported level lands
 			// CLAMPED in the record, and the writing surface must show the
 			// stored value in this same interaction, not the optimistic one.
-			const stored = (
-				(await res.json().catch(() => null)) as { settings?: UserSettings } | null
-			)?.settings;
+			const reply = (await res.json().catch(() => null)) as { settings?: UserSettings; fileAccessError?: string } | null;
+			const stored = reply?.settings;
+			setFileAccessError(reply?.fileAccessError ?? null);
 			setRecord(
 				(prev) =>
 					stored ?? ({ ...(prev ?? {}), [section]: body }) as UserSettings,
@@ -380,6 +382,7 @@ export function SettingsDialogBody({
 								>
 									<AgentSection
 										agent={record.agent}
+										fileAccessError={fileAccessError}
 										models={record.models}
 										graph={record.graph}
 										compaction={record.compaction}

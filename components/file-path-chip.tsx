@@ -8,8 +8,9 @@ import {
 	FileSpreadsheet,
 	FileText,
 	FileVideo,
+	Folder,
 } from "lucide-react";
-import { filePathLabel, parseFilePaths } from "@/src/core";
+import { filePathLabel, isDirectoryReference, parseFilePaths } from "@/src/core";
 
 function fileIcon(label: string) {
 	const extension = label.split(".").at(-1)?.toLowerCase();
@@ -33,7 +34,7 @@ export interface FilePathChipProps {
 /** Pure presentation: no links, open actions, HTML injection or path probing. */
 export function FilePathChip({ path, contentEditable, className }: FilePathChipProps) {
 	const label = filePathLabel(path);
-	const Icon = fileIcon(label);
+	const Icon = isDirectoryReference(path) ? Folder : fileIcon(label);
 	return (
 		<span
 			role="img"

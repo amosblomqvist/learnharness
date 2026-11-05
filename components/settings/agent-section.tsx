@@ -26,20 +26,20 @@
  * Search engine (search wave, 2026-09-20, owner: no default — an engine
  * is live iff its key is present; with a key the engine AUTO-activates,
  * the explicit choice is only a preference between live engines): a row
- * in the Tools group, Tavily / Brave via the same shared-menu look, with
+ * in the Tools group, with the same shared-menu look and
  * the live reason line from /api/search. No engine key at all → the row
- * grays whole-row (a choice without a key would only BLOCK the other
+ * grays whole-row (a choice without a key would only BLOCK another
  * engine's auto-activation).
  *
  * Tools — the owner's final list (2026-09-19): research, demo, visual, pdf.
  * Absent key = enabled in the schema; the UI writes explicit booleans for
  * all four (simpler to reason about, sanitize-equivalent).
  *
- * Prompts: GET /api/settings/prompts segments — THREE SECTIONS in the
- * owner's ruled order (2026-09-26 overhaul): Teacher first, Prober, then
- * Shared LAST. The server returns per-agent lists that each INCLUDE the
- * shared segments; sectionedSegments deduplicates them (shared chunks
- * once, in prompt-assembly order). The row rulings: only the TOGGLE
+ * Prompts: GET /api/settings/prompts segments — Teacher, Prober, Practice,
+ * then Shared LAST. The server returns each agent's actual segments,
+ * including its shared subset; sectionedSegments deduplicates shared
+ * chunks and derives per-fragment usage from membership in those lists.
+ * The row rulings: only the TOGGLE
  * grays when there's no override file (the file name is always
  * full-contrast); NO description line when there's no override (the empty
  * state is clean — toggle + name); the indicator ("Your version is
@@ -63,12 +63,15 @@ import type React from "react";
 import {
 	COMPACTION_THRESHOLD_FLOOR,
 	MODEL_SLOTS,
+	SEARCH_ENGINES,
 	resolveSettings,
+	isFileAccessFolder,
 	type AgentSettings,
 	type CompactionSettings,
 	type GraphSettings,
 	type ModelSlotName,
 	type ModelsSettings,
+	type SearchEngineId,
 } from "@/src/core";
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import { prettyModel } from "@/components/usage-format";
@@ -86,9 +89,6 @@ const SLOT_META: Record<ModelSlotName, { label: string; roster: string }> = {
 	vision: { label: "Vision", roster: "The assistants that draw and read PDFs" },
 };
 
-/** The search engines this wave ships (src/core/search.ts) + their labels. */
-const SEARCH_ENGINES = ["tavily", "brave"] as const;
-
 /** The owner's final toggleable-tool list (confirm with the user before
  *  changing — the Teacher stream settled this 2026-09-19). */
 export const TOGGLE_TOOLS = ["research", "demo", "visual", "pdf"] as const;
@@ -104,10 +104,37 @@ interface SegmentInfo {
 	shared: boolean;
 }
 
+type PromptView = Record<"teacher" | "prober" | "practice", SegmentInfo[]>;
+type PromptRow = SegmentInfo & { usageHint?: string };
+
 /** Compose: one tool toggled, the rest of the section carried verbatim.
  *  Pure — exported for tests. */
 export function composeTool(agent: AgentSettings | undefined, id: string, on: boolean): AgentSettings {
 	return { ...agent, tools: { ...agent?.tools, [id]: on } };
+}
+
+/** A file-access folder entry the server will accept: absolute (POSIX or
+ *  Windows drive/UNC) or "~"-anchored. Pure — exported for tests. */
+export function isFolderEntry(folder: string): boolean { return isFileAccessFolder(folder); }
+
+/** The switch changes ONLY restriction, never discards saved folders. */
+export function composeFileRestriction(agent: AgentSettings | undefined, restricted: boolean): AgentSettings {
+	return { ...agent, fileAccess: { restricted, folders: agent?.fileAccess?.folders ?? [] } };
+}
+
+/** Compose: add one allowed folder (trimmed; duplicates and invalid entries
+ *  are no-ops). Pure — exported for tests. */
+export function composeAddFolder(agent: AgentSettings | undefined, folder: string): AgentSettings {
+	const next = folder.trim();
+	const folders = agent?.fileAccess?.folders ?? [];
+	const restricted = agent?.fileAccess?.restricted ?? false;
+	if (!isFolderEntry(next) || folders.includes(next)) return { ...agent, fileAccess: { restricted, folders } };
+	return { ...agent, fileAccess: { restricted, folders: [...folders, next] } };
+}
+
+/** Removing the last folder NEVER changes the restriction switch. */
+export function composeRemoveFolder(agent: AgentSettings | undefined, folder: string): AgentSettings {
+	return { ...agent, fileAccess: { restricted: agent?.fileAccess?.restricted ?? false, folders: (agent?.fileAccess?.folders ?? []).filter((f) => f !== folder) } };
 }
 
 /** The quizzing mechanics (owner 2026-09-27): a segmented control, not a
@@ -165,7 +192,7 @@ export function composeSlotCacheRetention(models: ModelsSettings | undefined, sl
  *  Pure — exported for tests. */
 export function composeSearchEngine(
 	agent: AgentSettings | undefined,
-	engine: (typeof SEARCH_ENGINES)[number] | null,
+	engine: SearchEngineId | null,
 ): AgentSettings {
 	if (engine === null) {
 		if (!agent?.search) return { ...agent };
@@ -183,35 +210,39 @@ export function composeSearchEngine(
  *  this line). Exported for the pin. */
 export const PROMPT_IN_USE_HINT = "Your version is in use";
 
-/** One section of the prompt view — the owner's ruled order: Teacher,
- *  Prober, then Shared last. */
+/** Prompt sections in display order; Shared is deduplicated and last. */
 export interface PromptSection {
-	id: "teacher" | "prober" | "shared";
+	id: keyof PromptView | "shared";
 	label: string;
-	/** The one header that earns a hint: "Shared" alone is not
-	 *  self-evident. Teacher/Prober are. */
-	hint?: string;
-	segments: SegmentInfo[];
+	segments: PromptRow[];
 }
 
-/** Split the server's per-agent segment lists into the owner's three
- *  sections. The server contract returns the shared segments in BOTH
- *  lists (same paths, same content) — the shared chunks are listed ONCE
- *  here (taken from the teacher list; identical by construction), in
- *  assembly order: the base file, then the shared fragments sorted. The
- *  agents' own chunks keep their lists' order — which IS the prompt
- *  assembly order (numeric-prefix filename sort). Pure — exported for
- *  tests. */
-export function sectionedSegments(view: { prober: SegmentInfo[]; teacher: SegmentInfo[] }): PromptSection[] {
-	const own = (who: "prober" | "teacher") => view[who].filter((s) => !s.shared);
+/** Keep each agent's own assembly order, then list shared chunks once.
+ *  Usage is derived from the API's actual per-agent membership, never a
+ *  second copy of the runtime's Practice shared-fragment allowlist.
+ *  Pure — exported for tests. */
+export function sectionedSegments(view: PromptView): PromptSection[] {
+	const agents = [
+		{ id: "teacher", label: "Teacher" },
+		{ id: "prober", label: "Prober" },
+		{ id: "practice", label: "Practice" },
+	] as const;
+	const shared = new Map<string, SegmentInfo>();
+	for (const { id } of agents) {
+		for (const segment of view[id]) {
+			if (segment.shared && !shared.has(segment.path)) shared.set(segment.path, segment);
+		}
+	}
 	return [
-		{ id: "teacher", label: "Teacher", segments: own("teacher") },
-		{ id: "prober", label: "Prober", segments: own("prober") },
+		...agents.map(({ id, label }) => ({ id, label, segments: view[id].filter((s) => !s.shared) })),
 		{
 			id: "shared",
 			label: "Shared",
-			hint: "Used by both agents",
-			segments: view.teacher.filter((s) => s.shared),
+			segments: [...shared.values()].map((segment) => {
+				const users = agents.filter(({ id }) => view[id].some((s) => s.path === segment.path)).map(({ label }) => label);
+				const usage = users.length > 1 ? `${users.slice(0, -1).join(", ")} and ${users.at(-1)}` : users[0];
+				return { ...segment, usageHint: `Used by ${usage}` };
+			}),
 		},
 	];
 }
@@ -279,6 +310,7 @@ function MenuTrigger({
 
 export function AgentSection({
 	agent,
+	fileAccessError,
 	models,
 	graph,
 	compaction,
@@ -287,6 +319,7 @@ export function AgentSection({
 	onCompactionChange,
 }: {
 	agent: AgentSettings | undefined;
+	fileAccessError?: string | null;
 	/** The `models` section (slot pins — engine-level, PUT /api/settings/models). */
 	models: ModelsSettings | undefined;
 	/** The `graph` section — READ ONLY here: the graphTools row composes its
@@ -307,11 +340,13 @@ export function AgentSection({
 	const catalog = body?.models;
 	const slots = body?.slots;
 	/** The live search state (/api/search) — the row's reason line. */
+	const [folderInput, setFolderInput] = useState("");
+	const [folderError, setFolderError] = useState<string | null>(null);
 	const [search, setSearch] = useState<{ available: boolean; engine: string | null; reason: string } | null>(null);
 	/** Which search engines have a key (/api/keys) — the no-keys-anywhere
 	 *  state grays the row; per-engine marks ride the menu rows. */
-	const [engineKeys, setEngineKeys] = useState<Partial<Record<(typeof SEARCH_ENGINES)[number], boolean>>>({});
-	const [prompts, setPrompts] = useState<{ prober: SegmentInfo[]; teacher: SegmentInfo[] } | null>(null);
+	const [engineKeys, setEngineKeys] = useState<Partial<Record<SearchEngineId, boolean>>>({});
+	const [prompts, setPrompts] = useState<PromptView | null>(null);
 	const [openSegment, setOpenSegment] = useState<string | null>(null);
 	const [segmentDraft, setSegmentDraft] = useState<Record<string, string>>({});
 	const [segmentStatus, setSegmentStatus] = useState<string | null>(null);
@@ -337,7 +372,7 @@ export function AgentSection({
 	const readPrompts = useCallback(() => {
 		fetch("/api/settings/prompts")
 			.then((r) => r.json())
-			.then((body: { prober: SegmentInfo[]; teacher: SegmentInfo[] }) => setPrompts(body))
+			.then((body: PromptView) => setPrompts(body))
 			.catch(() => {});
 	}, []);
 
@@ -354,14 +389,13 @@ export function AgentSection({
 	useEffect(() => {
 		fetch("/api/settings/prompts")
 			.then((r) => r.json())
-			.then((body: { prober: SegmentInfo[]; teacher: SegmentInfo[] }) => setPrompts(body))
+			.then((body: PromptView) => setPrompts(body))
 			.catch(() => setPrompts(null));
 		fetch("/api/keys")
 			.then((r) => r.json())
 			.then((body: { keys: { id: string; present: boolean }[] }) => {
-				const present: Partial<Record<(typeof SEARCH_ENGINES)[number], boolean>> = {};
-				for (const id of SEARCH_ENGINES) {
-					const envVar = id === "tavily" ? "TAVILY_API_KEY" : "BRAVE_API_KEY";
+				const present: Partial<Record<SearchEngineId, boolean>> = {};
+				for (const { id, envVar } of SEARCH_ENGINES) {
 					present[id] = body.keys.some((k) => k.id === envVar && k.present);
 				}
 				setEngineKeys(present);
@@ -453,7 +487,7 @@ export function AgentSection({
 
 		/** The search-engine menu row — label + the quiet live-key mark. */
 	const engineOption = (
-		id: (typeof SEARCH_ENGINES)[number] | "auto",
+		id: SearchEngineId | "auto",
 		label: string,
 		active: boolean,
 		live: boolean | null,
@@ -475,7 +509,7 @@ export function AgentSection({
 		</button>
 	);
 
-	const segmentRow = (info: SegmentInfo) => {
+	const segmentRow = (info: PromptRow) => {
 		const fileExists = info.overrideText !== null;
 		const open = openSegment === info.path;
 		// The Save affordance (owner ruling, refined 2026-09-26): clickable
@@ -495,7 +529,7 @@ export function AgentSection({
 					// on disk unused), "Your version is in use" when the
 					// switch is on. The switch's meaning becomes legible
 					// through this line.
-					hint={info.enabled ? PROMPT_IN_USE_HINT : undefined}
+					hint={[info.usageHint, info.enabled ? PROMPT_IN_USE_HINT : undefined].filter(Boolean).join(" · ") || undefined}
 					testid={`prompt-row-${info.path}`}
 				>
 					{/* Graying ruling: ONLY the toggle dims without an
@@ -815,8 +849,50 @@ export function AgentSection({
 					</SettingsRow>
 				))}
 				{(() => {
+					const folders = agent?.fileAccess?.folders ?? [];
+					const restricted = Boolean(fileAccessError) || agent?.fileAccess?.restricted === true;
+					const effectiveAgent = fileAccessError ? { ...agent, fileAccess: { restricted: true, folders } } : agent;
+					const addFolder = () => {
+						const next = folderInput.trim();
+						if (!isFolderEntry(next)) { setFolderError("Enter an absolute path or ~/folder."); return; }
+						if (!folders.includes(next)) onSectionChange(composeAddFolder(effectiveAgent, next));
+						setFolderInput("");
+						setFolderError(null);
+					};
+					return (
+						<div data-testid="file-access-row" className="flex flex-col gap-2">
+							<SettingsRow label="File access" hint={!restricted
+								? "Broad local source access, except protected locations"
+								: folders.length ? "Only listed folders and subfolders."
+									: "Restricted: no folders allowed. Add a folder to enable access."}>
+								<div className="flex items-center gap-2 text-xs">
+									<span>Restrict to listed folders</span>
+									<Toggle checked={restricted} label="Restrict to listed folders" onChange={(on) => onSectionChange(composeFileRestriction(effectiveAgent, on))} />
+								</div>
+							</SettingsRow>
+							{fileAccessError && <p role="alert" data-testid="file-access-config-error" className="text-xs text-red-500">{fileAccessError}</p>}
+							<div className="flex gap-2 pl-3">
+								<input value={folderInput} aria-label="Allowed folder path" data-testid="file-access-add" placeholder="Absolute path or ~/folder"
+									onChange={(event) => { setFolderInput(event.target.value); setFolderError(null); }}
+									onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); addFolder(); } }}
+									className="min-w-0 flex-1 rounded-sm border border-border bg-background px-2 py-1 font-ui text-xs" />
+								<button type="button" data-testid="file-access-add-button" disabled={!folderInput.trim()} onClick={addFolder} className="rounded-sm border border-border px-2 text-xs disabled:opacity-40">Add folder</button>
+							</div>
+							{folderError && <p role="alert" data-testid="file-access-input-error" className="pl-3 text-xs text-red-500">{folderError}</p>}
+							{folders.map((folder) => (
+								<div key={folder} data-testid="file-access-folder" className="flex items-center justify-between gap-4 pl-3 text-xs">
+									<span title={folder} className="min-w-0 truncate font-ui text-muted-foreground">{folder}</span>
+									<button type="button" aria-label={`Remove ${folder}`} data-testid="file-access-remove"
+										onClick={() => onSectionChange(composeRemoveFolder(effectiveAgent, folder))}
+										className="rounded-sm px-1.5 text-muted-foreground hover:text-foreground">Remove</button>
+								</div>
+							))}
+						</div>
+					);
+				})()}
+				{(() => {
 					const engine = agent?.search?.engine ?? null;
-					const anyKey = engineKeys.tavily === true || engineKeys.brave === true;
+					const anyKey = SEARCH_ENGINES.some(({ id }) => engineKeys[id] === true);
 					const open = openMenu?.target === "search";
 					return (
 						<SettingsRow
@@ -827,7 +903,7 @@ export function AgentSection({
 						>
 							<span ref={open ? menuAnchorRef : undefined} className="relative flex items-center gap-2">
 								<MenuTrigger
-									value={engine === "tavily" ? "Tavily" : engine === "brave" ? "Brave" : ""}
+									value={SEARCH_ENGINES.find(({ id }) => id === engine)?.label ?? ""}
 									emptyLabel="Automatic"
 									ariaLabel="Search engine"
 									testid="search-engine-trigger"
@@ -847,8 +923,8 @@ export function AgentSection({
 											onSectionChange(composeSearchEngine(agent, null));
 											setOpenMenu(null);
 										})}
-										{SEARCH_ENGINES.map((id) =>
-											engineOption(id, id === "tavily" ? "Tavily" : "Brave", engine === id, engineKeys[id] ?? false, () => {
+										{SEARCH_ENGINES.map(({ id, label }) =>
+											engineOption(id, label, engine === id, engineKeys[id] ?? false, () => {
 												onSectionChange(composeSearchEngine(agent, id));
 												setOpenMenu(null);
 											}),
@@ -899,18 +975,13 @@ export function AgentSection({
 					<p className="text-xs text-muted-foreground/70">Loading prompt segments…</p>
 				) : (
 					<div className="flex flex-col gap-4">
-						{/* The owner's ruled order (2026-09-26): Teacher first,
-						    then Prober, then Shared LAST — shared chunks once
-						    (deduplicated), each section in prompt-assembly
-						    order. */}
+						{/* Teacher, Prober, Practice, Shared — shared chunks once,
+						    each agent's own section in prompt-assembly order. */}
 						{sectionedSegments(prompts).map((section) => (
 							<div key={section.id} data-testid={`prompt-section-${section.id}`}>
 								<p className="mb-1 text-xs uppercase tracking-widest text-muted-foreground/70">
 									{section.label}
 								</p>
-								{section.hint && (
-									<p className="mb-1 text-xs text-muted-foreground/60">{section.hint}</p>
-								)}
 								<div className="flex flex-col gap-2">
 									{section.segments.map((info) => segmentRow(info))}
 								</div>

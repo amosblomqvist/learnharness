@@ -400,6 +400,10 @@ export class SessionModel {
 					// live stream dropped the marker until the settle sync.
 					const mid = message.id;
 					if (mid === undefined) return false;
+					// Adoption/refetch may already carry this durable message before
+					// its start/end is replayed. The record owns that identity;
+					// adding it to the tail would duplicate it until the next sync.
+					if (this.base.some((m) => m.id === mid)) return false;
 					this.mutate(() => {
 						const idx = this.tail.findIndex((m) => m.id === mid);
 						this.tail =
@@ -935,9 +939,9 @@ export class SessionModel {
 	/**
 	 * Append-only adoption (the mid-turn steer/artifact ground rule): swap
 	 * in the record — every current base message must still be present
-	 * (the server appends only) — keeping the live tail, minus the
-	 * optimistic entries the record has absorbed (their server-stamped
-	 * copies just landed; without this the input bubble would double).
+	 * (the server appends only) — keeping the live tail, minus entries the
+	 * record already carries by id and optimistic entries it has absorbed
+	 * (their server-stamped copies just landed; without this messages double).
 	 */
 	adoptRecord(record: LhMessage[]): void {
 		const recordIds = new Set(record.map((m) => (m as { id?: string }).id));
@@ -946,7 +950,7 @@ export class SessionModel {
 		this.mutate(() => {
 			this.base = record;
 			this.forgetResolvedDrafts(record);
-			this.tail = this.tail.filter((m) => !absorbed(m, record));
+			this.tail = this.tail.filter((m) => !(typeof m.id === "string" && recordIds.has(m.id)) && !absorbed(m, record));
 		});
 	}
 

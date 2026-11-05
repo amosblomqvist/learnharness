@@ -37,6 +37,7 @@ import {
 	clampChatLevel,
 	clampModelsLevels,
 	effectiveSettings,
+	fileAccessConfigurationError,
 	promptOverrides,
 	readSettingsRecord,
 	validateChatSettings,
@@ -128,6 +129,7 @@ export async function PUT(request: Request, ctx: { params: Promise<{ section: st
 	// Read-modify-write ONE section of the record; everything else rides
 	// along untouched (other sections, unknown keys — sanitize preserves).
 	const next = { ...record, [section]: sectionOut };
-	writeSettingsRecord(next);
-	return Response.json({ settings: next });
+	const stored = writeSettingsRecord(next);
+	const fileAccessError = fileAccessConfigurationError();
+	return Response.json({ settings: stored, ...(fileAccessError ? { fileAccessError } : {}) });
 }

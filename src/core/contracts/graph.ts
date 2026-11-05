@@ -1,7 +1,7 @@
 /**
  * Knowledge-graph contracts — nodes, ledgers, extraction findings
  *
- * The minimal implementation of the graph vision (docs/vision.md §1, the
+ * The minimal implementation of the graph vision (docs/archive/vision.md §1, the
  * 2026-09-02 redesign): every node is a TRUE proposition; edges are follows
  * (derivable) and supports (grounds without entailing); provenance is
  * message-granular; extraction is free-form and post-hoc, fully decoupled
@@ -14,7 +14,7 @@
  *
  * Part of the domain-split contracts (src/core/contracts/): each domain file
  * is owned outright by its stream — cross-domain schema changes go through
- * master. Pure types + protocol docs + tiny pure helpers. See docs/vision.md.
+ * master. Pure types + protocol docs + tiny pure helpers. See docs/archive/vision.md.
  */
 // ─── Knowledge graph (vision §1 — global, cross-session) ────────────────────
 

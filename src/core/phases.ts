@@ -1,5 +1,5 @@
 /**
- * Phase derivation (docs/probe-teach-split.md §4) — EXPLICIT EVENTS, never
+ * Phase derivation (docs/archive/probe-teach-split.md §4) — EXPLICIT EVENTS, never
  * occupancy. The probe→teach agent split (2026-09-11) gave the first
  * boundary a transcript event; the second is INFERRED (owner ruling
  * 2026-09-26, the verdict death):
