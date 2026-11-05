@@ -990,3 +990,61 @@ test("composer: a chunk that failed in the background aborts the send and keeps 
 	assert.ok(f.host.querySelector('[data-testid="dictation-retry"]'));
 	assert.match(f.host.textContent!, /Groq is unavailable \(500\)\./);
 });
+
+// ---------------------------------------------------------------------------
+// The bar: whole errors, and announcements for screen readers.
+// ---------------------------------------------------------------------------
+
+const LONG_ERROR = "Groq rejected the API key (401). Check GROQ_API_KEY in Settings → Providers. This message is long on purpose.";
+const barOf = (over: Partial<Dictation>): Dictation => ({
+	phase: "idle", error: null, levelRef: { current: 0 }, active: false, transcribing: false,
+	retryable: false, retry() {}, toggle() {}, stop() {}, finish: async () => true, cancel() {}, clearError() {},
+	...over,
+});
+const region = (html: string, role: string) => new RegExp(`<div role="${role}"[^>]*>([^<]*)</div>`).exec(html)?.[1];
+
+test("a long error is shown in full, wrapped, with Retry and Dismiss still on screen", () => {
+	const html = renderToStaticMarkup(<DictationBar dictation={barOf({ error: LONG_ERROR, retryable: true })} />);
+	const button = /<button[^>]*data-testid="dictation-toggle"[\s\S]*?<\/button>/.exec(html)![0];
+	assert.ok(button.includes(LONG_ERROR), "the whole message is in the button");
+	assert.match(button, /whitespace-normal/);
+	assert.doesNotMatch(button, /truncate/, "no ellipsis cuts it off");
+	assert.match(button, /min-h-7/, "the button grows with the text instead of clipping it");
+	assert.match(html, /data-testid="dictation-retry"/);
+	assert.match(html, /data-testid="dictation-discard"[^>]*>[\s\S]*?Dismiss/);
+	assert.match(html, /shrink-0[^"]*"[^>]*data-testid="dictation-retry"|data-testid="dictation-retry"[^>]*shrink-0/, "Retry never shrinks away");
+});
+
+test("an error without a kept recording wraps too, and the idle button keeps its one-line look", () => {
+	const failed = renderToStaticMarkup(<DictationBar dictation={barOf({ error: LONG_ERROR })} />);
+	assert.match(failed, /whitespace-normal/);
+	const idle = renderToStaticMarkup(<DictationBar dictation={barOf({})} />);
+	assert.match(idle, /class="flex h-7 w-full[^"]*"/);
+	assert.match(idle, /<span class="max-w-full truncate">Dictate<\/span>/);
+});
+
+test("screen readers are told about waiting for the transcript (polite) and about a failure (alert)", () => {
+	const idle = renderToStaticMarkup(<DictationBar dictation={barOf({})} />);
+	assert.match(idle, /role="status" aria-live="polite"/, "the live regions exist before anything happens");
+	assert.match(idle, /role="alert"/);
+	assert.equal(region(idle, "status"), "");
+	assert.equal(region(idle, "alert"), "");
+
+	const finishing = renderToStaticMarkup(<DictationBar dictation={barOf({ phase: "stopping", active: true, transcribing: true })} />);
+	assert.equal(region(finishing, "status"), "Finishing transcription…");
+	assert.equal(region(finishing, "alert"), "");
+
+	const failed = renderToStaticMarkup(<DictationBar dictation={barOf({ error: LONG_ERROR, retryable: true })} />);
+	assert.equal(region(failed, "alert"), LONG_ERROR);
+	assert.equal(region(failed, "status"), "");
+
+	const retrying = renderToStaticMarkup(<DictationBar dictation={barOf({ error: LONG_ERROR, retryable: true, phase: "stopping", active: true, transcribing: true })} />);
+	assert.equal(region(retrying, "alert"), "", "the old error is not read out again while a retry runs");
+	assert.equal(region(retrying, "status"), "Finishing transcription…");
+});
+
+test("the announcements are hidden visually and do not change the layout", () => {
+	const html = renderToStaticMarkup(<DictationBar dictation={barOf({})} />);
+	assert.match(html, /<div role="status" aria-live="polite" class="sr-only"/);
+	assert.match(html, /<div role="alert" class="sr-only"/);
+});

@@ -836,6 +836,31 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
  *             (full text in the tooltip), cleared on the next click.
  */
 export function DictationBar({ dictation }: { dictation: Dictation }) {
+	return (
+		<>
+			<DictationAnnouncer dictation={dictation} />
+			<DictationBarView dictation={dictation} />
+		</>
+	);
+}
+
+/** What a screen reader hears. The two regions are always mounted, so a change
+ *  in their text is announced: waiting for the transcript is a polite status,
+ *  a failure is an alert. Visually hidden; the visible bar says the same. */
+function DictationAnnouncer({ dictation: { active, transcribing, error } }: { dictation: Dictation }) {
+	return (
+		<>
+			<div role="status" aria-live="polite" className="sr-only" data-testid="dictation-status">
+				{transcribing ? "Finishing transcription…" : ""}
+			</div>
+			<div role="alert" className="sr-only" data-testid="dictation-alert">
+				{!active && error ? error : ""}
+			</div>
+		</>
+	);
+}
+
+function DictationBarView({ dictation }: { dictation: Dictation }) {
 	const { phase, error, levelRef, toggle, active, clearError, transcribing, retryable, retry } = dictation;
 	const { open: openSettings } = useSettingsDialog();
 	/** The keyless click (zero-keys wave, owner dictation trio): the errored
@@ -888,8 +913,8 @@ export function DictationBar({ dictation }: { dictation: Dictation }) {
 	if (!active) {
 		const wide = (
 			<Hint
-				// The error line truncates in the button; its tooltip reveals it. While a
-				// recording is kept, clicking starts a new one, which drops the kept one.
+				// The error wraps in the button, so all of it shows. While a recording is
+				// kept, clicking starts a new one, which drops the kept one.
 				label={error && retryable ? `${error} Dictating again discards the saved recording.` : (error ?? "Dictate")}
 				action={error ? undefined : "toggle-dictation"}
 				side="top"
@@ -908,10 +933,14 @@ export function DictationBar({ dictation }: { dictation: Dictation }) {
 					}}
 					aria-label={error ? `Dictation failed: ${error}` : "Start dictation"}
 					data-testid="dictation-toggle"
-					className="flex h-7 w-full min-w-0 items-center justify-center gap-1.5 rounded-md border border-border/50 bg-card/50 text-xs text-muted-foreground/70 shadow-lg backdrop-blur transition-colors hover:border-border hover:text-muted-foreground"
+					className={error
+						? "flex min-h-7 w-full min-w-0 items-center justify-center gap-1.5 rounded-md border border-border/50 bg-card/50 px-2 py-1 text-xs text-muted-foreground/70 shadow-lg backdrop-blur transition-colors hover:border-border hover:text-muted-foreground"
+						: "flex h-7 w-full min-w-0 items-center justify-center gap-1.5 rounded-md border border-border/50 bg-card/50 text-xs text-muted-foreground/70 shadow-lg backdrop-blur transition-colors hover:border-border hover:text-muted-foreground"}
 				>
 					<MicIcon className="size-3.5 shrink-0" />
-					<span className="max-w-full truncate">{error ?? "Dictate"}</span>
+					{error
+						? <span className="min-w-0 whitespace-normal break-words text-left leading-snug">{error}</span>
+						: <span className="max-w-full truncate">Dictate</span>}
 				</button>
 			</Hint>
 		);
@@ -937,11 +966,12 @@ export function DictationBar({ dictation }: { dictation: Dictation }) {
 					<button
 						type="button"
 						onClick={clearError}
-						aria-label="Discard saved recording"
+						aria-label="Dismiss and discard the saved recording"
 						data-testid="dictation-discard"
-						className="flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+						className="flex h-7 shrink-0 items-center gap-1 rounded-md px-2 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
 					>
 						<XIcon className="size-3.5" />
+						Dismiss
 					</button>
 				</Hint>
 			</div>
