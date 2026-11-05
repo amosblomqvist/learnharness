@@ -15,8 +15,7 @@
  * end of the previous chunk's transcript, so Whisper continues it). Response
  * `{ text }`; failures `{ message, retryable }`, where `retryable` says whether
  * the same request may succeed if sent again (a rate limit, an outage, a
- * timeout). GET answers whether a key is configured, so the client can refuse
- * before the user has spoken rather than after.
+ * timeout).
  *
  * Trust: proxy.ts already gates every /api route behind the desktop
  * capability. A multipart POST is a CORS "simple request", so a page on
@@ -57,13 +56,6 @@ function fail(status: number, message: string, options: { retryable?: boolean; h
 
 const forbidden = () => fail(403, "Dictation requests must come from the LearnHarness window.");
 const keyless = () => fail(503, `No ${GROQ_KEY_ID} — add it to auth.json (desktop) or .env.local (dev).`);
-
-/** GET: is a Groq key configured? No Groq request is made. */
-export function groqDictationReadyResponse(request: Request): Response {
-	if (!sameOriginIntent(request, GROQ_DICTATION_HEADER)) return forbidden();
-	if (!keyValue(GROQ_KEY_ID)) return keyless();
-	return Response.json({ ready: true }, { headers: HEADERS });
-}
 
 class BodyTooLargeError extends Error {}
 

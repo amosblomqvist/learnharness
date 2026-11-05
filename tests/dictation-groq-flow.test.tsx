@@ -57,6 +57,8 @@ class Worklet {
 const frame = () => new Int16Array(2048).fill(1000);
 
 interface Post { init: RequestInit; form: FormData }
+/** What GET /api/keys says about the Groq key (the readiness check reads it). */
+const keysResponse = (present: boolean) => Response.json({ keys: [{ id: "GROQ_API_KEY", info: null, present }] });
 const globals = globalThis as Record<string, unknown>;
 let restore: (() => void) | undefined;
 let dispose: (() => Promise<void>) | undefined;
@@ -71,7 +73,7 @@ async function fixture(
 	const state = {
 		record: { version: 1, dictation } as UserSettings,
 		tokenCalls: 0,
-		ready: () => Promise.resolve(Response.json({ ready: true })) as Promise<Response>,
+		ready: () => Promise.resolve(keysResponse(true)),
 		readyInits: [] as (RequestInit | undefined)[],
 		answer: ((_post: Post) => Promise.resolve(Response.json({ text: "hello world" }))) as (post: Post) => Promise<Response>,
 		posts: [] as Post[],
@@ -92,10 +94,11 @@ async function fixture(
 		fetch: async (url: string, init?: RequestInit) => {
 			if (url === "/api/stt/token") { state.tokenCalls++; return Response.json({ token: "test-token" }); }
 			if (url === "/api/settings") return Response.json({ settings: state.record });
+			if (url === "/api/keys") { state.readyInits.push(init); return state.ready(); }
 			assert.equal(url, "/api/stt/transcribe");
-			if (init?.method === "POST") { const post = { init, form: init.body as FormData }; state.posts.push(post); return state.answer(post); }
-			state.readyInits.push(init);
-			return state.ready();
+			const post = { init: init!, form: init!.body as FormData };
+			state.posts.push(post);
+			return state.answer(post);
 		},
 	})) {
 		previous.set(key, Object.getOwnPropertyDescriptor(globalThis, key));
@@ -155,7 +158,6 @@ test("records without a socket or Deepgram token, sends the audio on stop, flush
 	assert.equal(Socket.all.length, 0, "Groq never opens a WebSocket");
 	assert.equal(f.state.tokenCalls, 0, "a Groq user mints no Deepgram token, at mount or at start");
 	assert.equal(f.state.readyInits.length, 1, "the key is checked once, before the user has spoken");
-	assert.deepEqual(f.state.readyInits[0]?.headers, { [GROQ_DICTATION_HEADER]: "1" });
 
 	await f.speak(4);
 	assert.equal(f.state.posts.length, 0, "nothing is sent while dictating");
@@ -191,7 +193,7 @@ test("records without a socket or Deepgram token, sends the audio on stop, flush
 
 test("a missing key refuses before any speech is recorded for upload and keeps the line the keys row deep-links from", async () => {
 	const f = await fixture();
-	f.state.ready = () => Promise.resolve(Response.json({ message: "No GROQ_API_KEY — add it to auth.json" }, { status: 503 }));
+	f.state.ready = () => Promise.resolve(keysResponse(false));
 	await f.start();
 	assert.equal(f.dictation.error, GROQ_DICTATION_KEYLESS);
 	assert.equal(GROQ_DICTATION_KEYLESS, "Dictation needs a Groq key");
@@ -329,7 +331,7 @@ test("pressing stop while the key check is still in flight keeps the run stoppin
 	f.state.answer = () => reply.promise;
 	await act(async () => { f.dictation.stop(); });
 	assert.equal(f.dictation.phase, "stopping");
-	await act(async () => { ready.resolve(Response.json({ ready: true })); });
+	await act(async () => { ready.resolve(keysResponse(true)); });
 	assert.equal(f.dictation.phase, "stopping", "a late ready answer must not revive the run");
 	await act(async () => { reply.resolve(Response.json({ text: "ok" })); });
 	assert.deepEqual(f.state.appends, ["ok"]);

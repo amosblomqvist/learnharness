@@ -98,9 +98,14 @@ test("the transport helpers map the route's answers", async () => {
 	const wav = new Uint8Array(100) as Uint8Array<ArrayBuffer>;
 	const args = { wav, model: "whisper-large-v3-turbo", language: "en-GB" } as const;
 
-	await checkGroqReady(respond(() => Response.json({ ready: true })));
-	await assert.rejects(checkGroqReady(respond(() => Response.json({ message: "No GROQ_API_KEY" }, { status: 503 }))), { message: GROQ_DICTATION_KEYLESS });
-	await assert.rejects(checkGroqReady(respond(() => Response.json({ message: "Dictation requests must come from the LearnHarness window." }, { status: 403 }))), /LearnHarness window/);
+	// The key check reads the masked key list; absent provider keys are not listed at all.
+	const asked: string[] = [];
+	const keyList = (...keys: { id: string; present: boolean }[]) => (async (url: string) => { asked.push(url); return Response.json({ keys }); }) as typeof fetch;
+	await checkGroqReady(keyList({ id: "DEEPGRAM_API_KEY", present: false }, { id: "GROQ_API_KEY", present: true }));
+	assert.deepEqual(asked, ["/api/keys"]);
+	await assert.rejects(checkGroqReady(keyList({ id: "GROQ_API_KEY", present: false })), { message: GROQ_DICTATION_KEYLESS });
+	await assert.rejects(checkGroqReady(keyList({ id: "DEEPGRAM_API_KEY", present: true })), { message: GROQ_DICTATION_KEYLESS });
+	await assert.rejects(checkGroqReady(respond(() => Response.json({ message: "keys unavailable" }, { status: 500 }))), /keys unavailable/);
 	await assert.rejects(checkGroqReady((async () => { throw new TypeError("offline"); }) as typeof fetch), /Could not reach/);
 
 	assert.equal(await transcribeGroq(respond(() => Response.json({ text: "  hi  " })), args), "hi");

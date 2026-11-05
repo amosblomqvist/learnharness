@@ -1,9 +1,10 @@
-import { GROQ_DICTATION_HEADER, type DictationLanguage, type GroqWhisperModel } from "@/src/core";
+import { GROQ_DICTATION_HEADER, GROQ_KEY_ID, type AuthKeyStatus, type DictationLanguage, type GroqWhisperModel } from "@/src/core";
 
 /**
- * The renderer's side of Groq (Whisper) dictation: two calls to our own
- * /api/stt/transcribe route, which holds the real key (src/server/groq-stt.ts).
- * Kept apart from the hook so the transport is testable with a fake fetch.
+ * The renderer's side of Groq (Whisper) dictation: a key check against
+ * /api/keys, and chunk uploads to our own /api/stt/transcribe route, which holds
+ * the real key (src/server/groq-stt.ts). Kept apart from the hook so the
+ * transport is testable with a fake fetch.
  */
 
 /** The client-authored keyless line, the Groq twin of DICTATION_KEYLESS. The
@@ -41,17 +42,18 @@ async function routeFailure(res: Response): Promise<GroqRequestError> {
 }
 
 /** Is a Groq key configured? Resolves when it is; rejects with the keyless line
- * when it is not, so a run can refuse before the user has spoken. */
+ * when it is not, so a run can refuse before the user has spoken. Asks the same
+ * masked key list Settings reads (GET /api/keys); no Groq request is made. */
 export async function checkGroqReady(request: typeof fetch = fetch): Promise<void> {
 	let res: Response;
 	try {
-		res = await request(ENDPOINT, { headers, cache: "no-store" });
+		res = await request("/api/keys", { cache: "no-store" });
 	} catch {
 		throw new Error("Could not reach LearnHarness to check the Groq key.");
 	}
-	if (res.ok) return;
-	if (res.status === 503) throw new Error(GROQ_DICTATION_KEYLESS);
-	throw new Error((await routeFailure(res)).message);
+	if (!res.ok) throw new Error((await routeFailure(res)).message);
+	const { keys } = await res.json() as { keys: Pick<AuthKeyStatus, "id" | "present">[] };
+	if (!keys.some((key) => key.id === GROQ_KEY_ID && key.present)) throw new Error(GROQ_DICTATION_KEYLESS);
 }
 
 /** Send one chunk of audio (a WAV) and get its transcript, "" for silence.

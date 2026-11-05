@@ -67,19 +67,16 @@ describe("trust and configuration gates", () => {
 		assert.equal((await post(form(), { "sec-fetch-site": "cross-site" })).status, 403);
 		assert.equal((await post(form(), { origin: "http://evil.example" })).status, 403);
 		assert.equal((await post(form(), { origin: "null" })).status, 403);
-		assert.equal((await route.GET(new Request(URL_))).status, 403);
 		assert.equal(calls.length, 0);
 	});
 
-	it("a POST needs an Origin equal to the one it was addressed to; a GET may omit it", async () => {
+	it("a POST needs an Origin equal to the one it was addressed to", async () => {
 		assert.equal((await post(form())).status, 200);
 		assert.equal((await post(form(), { "sec-fetch-site": "same-origin" })).status, 200);
 		const noOrigin = new Request(URL_, { method: "POST", body: form(), headers: { [GROQ_DICTATION_HEADER]: "1" } });
 		assert.equal((await route.POST(noOrigin)).status, 403, "no browser omits Origin on a POST");
 		assert.equal((await post(form(), { origin: "http://localhost:3000" })).status, 403, "a different port is another origin");
 		assert.equal(calls.length, 2, "only the two same-origin posts reached Groq");
-		assert.equal((await route.GET(new Request(URL_, { headers: { [GROQ_DICTATION_HEADER]: "1" } }))).status, 200);
-		assert.equal((await route.GET(new Request(URL_, { headers: { [GROQ_DICTATION_HEADER]: "1", origin: "http://evil.example" } }))).status, 403);
 	});
 
 	it("keyless: 503 before the body is read, and nothing is sent to Groq", async () => {
@@ -87,14 +84,6 @@ describe("trust and configuration gates", () => {
 		const res = await post(form());
 		assert.equal(res.status, 503);
 		assert.match(await message(res), /No GROQ_API_KEY/);
-		assert.equal(calls.length, 0);
-	});
-
-	it("GET reports readiness without calling Groq", async () => {
-		const get = () => route.GET(new Request(URL_, { headers: { [GROQ_DICTATION_HEADER]: "1" } }));
-		assert.deepEqual(await (await get()).json(), { ready: true });
-		delete process.env.GROQ_API_KEY;
-		assert.equal((await get()).status, 503);
 		assert.equal(calls.length, 0);
 	});
 });
