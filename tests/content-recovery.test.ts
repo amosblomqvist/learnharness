@@ -5,7 +5,7 @@ import { recoverDocumentLayout } from "../src/core/content-reader.ts";
 import { repairMathForDisplay, restoreMathEscapes, transformMathDelimiters } from "../src/core/math-delims.ts";
 
 const math = String.raw;
-/** Exact failed **Q:** line from Needs-improvement.md:469 (two-layer escaped). */
+/** The recorded real-world **Q:** line, escaped two layers deep (fixture, never edited). */
 const twoLayerFailedQuestion = () => readFileSync(new URL("./fixtures/tool-rendering/escaped-fence-two-layer.txt", import.meta.url), "utf8").replace(/\r?\n$/, "");
 test("document paragraphs and display framing recover without interpreting n-commands as newlines", () => {
 	const source = math`First.\n\nSecond: $\nabla f\neq0$.\n\n$$\n\frac{1}{2}\n$$`;

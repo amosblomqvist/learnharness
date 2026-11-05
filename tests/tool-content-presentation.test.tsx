@@ -180,7 +180,7 @@ test("escaped fenced code blocks render as syntax-highlighted code blocks with c
 });
 
 test("two-layer escaped SQL fence from the failed LEFT JOIN question renders as a code block in dock and history", () => {
-	// exact failed capture (Needs-improvement.md:469): one physical line, ten tokens of TWO literal backslashes + n
+	// recorded real-world input: one physical line, ten tokens of TWO literal backslashes + n
 	const rawLine = readFileSync(new URL("./fixtures/tool-rendering/escaped-fence-two-layer.txt", import.meta.url), "utf8").replace(/\r?\n$/, "");
 	assert.ok(!rawLine.includes("\n"));
 	assert.equal(rawLine.match(/\\\\n/g)?.length, 10);
