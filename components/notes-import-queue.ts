@@ -5,10 +5,10 @@ export const notesPath = (file: File): string => file.webkitRelativePath || file
 /** Folder imports silently exclude dot-prefixed files and directories below
  * the chosen root. The root is segment 0 and stays importable even when hidden. */
 const hiddenInFolder = (file: File): boolean => file.webkitRelativePath.split("/").slice(1).some((part) => part.startsWith("."));
-/** From the last dot of the file name, lower-cased. A dot that starts the name (".DS_Store") is not an extension. */
+/** From the last dot of the file name, lower-cased. A dot that starts the name (".DS_Store") or ends it ("notes.") is not an extension. */
 const extensionLabel = (name: string): string => {
 	const dot = name.lastIndexOf(".");
-	return dot > 0 ? name.slice(dot).toLowerCase() : "no extension";
+	return dot > 0 && dot < name.length - 1 ? name.slice(dot).toLowerCase() : "no extension";
 };
 /** One line per reason for a whole pick, so a big folder cannot flood the error list. */
 const unsupportedSummary = (extensions: readonly string[]): string =>
