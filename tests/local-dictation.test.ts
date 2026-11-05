@@ -8,8 +8,11 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import { describe, it } from "node:test";
 import {
+	DICTATION_LANGUAGES,
 	LOCAL_DICTATION_MODELS,
 	ORT_WEB_VERSION,
+	localLanguagePlan,
+	unsupportedLanguageMessage,
 	formatModelSize,
 	formatWer,
 	localMethodId,
@@ -141,5 +144,58 @@ describe("pause segmenter", () => {
 		for (let i = 0; i < 400; i++) seg.push(loud()); // 51s
 		assert.equal(out.length, 2);
 		assert.ok(out.every((a) => a.length < 30 * 16000));
+	});
+});
+
+describe("local models × the dictation language", () => {
+	const byId = (id: string) => LOCAL_DICTATION_MODELS.find((m) => m.id === id)!;
+	const english = byId("moonshine-tiny");
+	const multilingual = byId("whisper-large-v3-turbo");
+
+	it("only the non-.en Whisper checkpoints are multilingual", () => {
+		for (const m of LOCAL_DICTATION_MODELS) {
+			const expected = m.repo.includes("/whisper-") && !m.repo.endsWith(".en");
+			assert.equal(m.multilingual, expected, m.id);
+		}
+	});
+
+	it("English-only models take English (any locale) and pass no language", () => {
+		for (const code of ["en", "en-GB", "en-IN"] as const) {
+			assert.deepEqual(localLanguagePlan(english, code), { supported: true, whisper: null });
+		}
+		assert.deepEqual(localLanguagePlan(english, "pl"), { supported: false });
+		assert.deepEqual(localLanguagePlan(english, "multi"), { supported: false });
+	});
+
+	it("multilingual models run the language's base code", () => {
+		assert.deepEqual(localLanguagePlan(multilingual, "pl"), { supported: true, whisper: "pl" });
+		assert.deepEqual(localLanguagePlan(multilingual, "nl-BE"), { supported: true, whisper: "nl" });
+		assert.deepEqual(localLanguagePlan(multilingual, "zh-TW"), { supported: true, whisper: "zh" });
+		assert.deepEqual(localLanguagePlan(multilingual, "en-GB"), { supported: true, whisper: "en" });
+	});
+
+	it("no local model takes Multilingual or Cantonese", () => {
+		for (const m of LOCAL_DICTATION_MODELS) {
+			assert.equal(localLanguagePlan(m, "multi").supported, false, m.id);
+			assert.equal(localLanguagePlan(m, "zh-HK").supported, false, m.id);
+		}
+	});
+
+	it("names the model and the language in Dictate's error", () => {
+		assert.equal(unsupportedLanguageMessage(english, "pl"), "Moonshine Tiny doesn't support Polish");
+		assert.equal(unsupportedLanguageMessage(multilingual, "multi"), "Whisper Large v3 Turbo doesn't support automatic language detection");
+	});
+
+	it("pins the engine: every code we pass is a transformers.js Whisper language, and the exclusions still hold", async () => {
+		// A dependency bump that changes the engine's language table fails here.
+		const engine = "../node_modules/@huggingface/transformers/src/models/whisper/common_whisper.js";
+		const { WHISPER_LANGUAGE_MAPPING } = (await import(engine)) as { WHISPER_LANGUAGE_MAPPING: Map<string, string> };
+		for (const { code } of DICTATION_LANGUAGES) {
+			const plan = localLanguagePlan(multilingual, code);
+			if (plan.supported && plan.whisper) assert.ok(WHISPER_LANGUAGE_MAPPING.has(plan.whisper), `${code} → ${plan.whisper}`);
+		}
+		assert.equal(WHISPER_LANGUAGE_MAPPING.has("yue"), false, "Cantonese became available: allow zh-HK");
+		const modeling = fs.readFileSync(new URL("../node_modules/@huggingface/transformers/src/models/whisper/modeling_whisper.js", import.meta.url), "utf-8");
+		assert.match(modeling, /No language specified - defaulting to English/, "language detection may exist now: revisit Multilingual");
 	});
 });

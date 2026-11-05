@@ -25,7 +25,8 @@
  *
  * Protocol (components/local-dictation.ts is the only client):
  *   in  {type:"load", key, model}                 → {type:"loaded", key, device} | {type:"load-error", key, message}
- *   in  {type:"transcribe", id, key, model, audio} → {type:"result", id, text}    | {type:"transcribe-error", id, message}
+ *   in  {type:"transcribe", id, key, model, audio, language} → {type:"result", id, text} | {type:"transcribe-error", id, message}
+ *       (language: a Whisper code to force, or null to pass none)
  */
 
 import { env, pipeline } from "@huggingface/transformers";
@@ -35,7 +36,11 @@ type ModelSpec = {
 	dtype: { encoder_model: string; decoder_model_merged: string };
 	device: "wasm" | "webgpu";
 };
-type Transcriber = (audio: Float32Array) => Promise<{ text: string } | Array<{ text: string }>>;
+type Output = { text: string } | Array<{ text: string }>;
+/** `language`: the Whisper code to force (multilingual models), or null to
+ *  pass none — English-only models refuse a language/task. */
+type Transcriber = (audio: Float32Array, language: string | null) => Promise<Output>;
+type Pipe = (audio: Float32Array, options?: { language: string; task: "transcribe" }) => Promise<Output>;
 
 env.allowRemoteModels = false;
 env.allowLocalModels = true;
@@ -79,8 +84,12 @@ async function create(spec: ModelSpec, device: "wasm" | "webgpu"): Promise<Loade
 	const pipe = (await pipeline("automatic-speech-recognition", spec.id, {
 		device,
 		dtype: spec.dtype as never,
-	})) as unknown as Transcriber & { dispose: () => Promise<void> };
-	return { run: (audio) => pipe(audio), device, dispose: () => pipe.dispose() };
+	})) as unknown as Pipe & { dispose: () => Promise<void> };
+	return {
+		run: (audio, language) => (language ? pipe(audio, { language, task: "transcribe" }) : pipe(audio)),
+		device,
+		dispose: () => pipe.dispose(),
+	};
 }
 
 /** WebGPU when asked and an adapter exists; otherwise — or when the GPU
@@ -119,7 +128,7 @@ function cleanText(text: string): string {
 self.addEventListener("message", (ev: MessageEvent) => {
 	const msg = ev.data as
 		| { type: "load"; key: string; model: ModelSpec }
-		| { type: "transcribe"; id: number; key: string; model: ModelSpec; audio: Float32Array }
+		| { type: "transcribe"; id: number; key: string; model: ModelSpec; audio: Float32Array; language: string | null }
 		| {
 				type: "fetched";
 				id: number;
@@ -141,7 +150,7 @@ self.addEventListener("message", (ev: MessageEvent) => {
 		);
 	} else if (msg.type === "transcribe") {
 		load(msg.key, msg.model)
-			.then(({ run }) => run(msg.audio))
+			.then(({ run }) => run(msg.audio, msg.language))
 			.then(
 				(out) => post({ type: "result", id: msg.id, text: cleanText((Array.isArray(out) ? out[0]?.text : out.text) ?? "") }),
 				(e: unknown) => post({ type: "transcribe-error", id: msg.id, message: e instanceof Error ? e.message : String(e) }),

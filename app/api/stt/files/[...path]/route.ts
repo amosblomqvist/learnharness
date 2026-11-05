@@ -7,16 +7,16 @@
  */
 import fs from "node:fs";
 import { Readable } from "node:stream";
-import { contentTypeFor, modelFilePath } from "@/src/server";
+import { dictationContentType, dictationModelFilePath } from "@/src/server";
 
 export const dynamic = "force-dynamic";
 
 export async function GET(request: Request, ctx: { params: Promise<{ path: string[] }> }) {
 	const { path: segments } = await ctx.params;
-	const file = modelFilePath(segments);
+	const file = dictationModelFilePath(segments);
 	if (!file) return new Response("Not found", { status: 404 });
 	const size = fs.statSync(file).size;
-	const headers = { "Content-Type": contentTypeFor(file), "Accept-Ranges": "bytes", "Cache-Control": "no-store" };
+	const headers = { "Content-Type": dictationContentType(file), "Accept-Ranges": "bytes", "Cache-Control": "no-store" };
 	const range = /^bytes=(\d+)-(\d*)$/.exec(request.headers.get("range") ?? "");
 	if (range) {
 		const start = Number(range[1]);

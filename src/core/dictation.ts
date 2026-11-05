@@ -70,6 +70,9 @@ export interface LocalModelEntry {
 	 *  differ slightly. null = no published score (the row says
 	 *  "WER n/a" rather than a number from another benchmark). */
 	werPct: number | null;
+	/** Transcribes languages other than English (the multilingual Whisper
+	 *  checkpoints). English-only models: Moonshine and the ".en" Whispers. */
+	multilingual: boolean;
 }
 
 /** The GPU-ready set: full-precision encoder (the heavy pass, fast on
@@ -88,6 +91,7 @@ export const LOCAL_DICTATION_MODELS: readonly LocalModelEntry[] = [
 		dtype: GPU_READY,
 		sizeMb: 79,
 		werPct: 12.65,
+		multilingual: false,
 	},
 	{
 		id: "whisper-tiny-en",
@@ -96,6 +100,7 @@ export const LOCAL_DICTATION_MODELS: readonly LocalModelEntry[] = [
 		dtype: GPU_READY,
 		sizeMb: 123,
 		werPct: 12.81,
+		multilingual: false,
 	},
 	{
 		id: "moonshine-base",
@@ -104,6 +109,7 @@ export const LOCAL_DICTATION_MODELS: readonly LocalModelEntry[] = [
 		dtype: GPU_READY,
 		sizeMb: 157,
 		werPct: 9.99,
+		multilingual: false,
 	},
 	{
 		id: "whisper-base-en",
@@ -112,6 +118,7 @@ export const LOCAL_DICTATION_MODELS: readonly LocalModelEntry[] = [
 		dtype: GPU_READY,
 		sizeMb: 210,
 		werPct: 10.32,
+		multilingual: false,
 	},
 	{
 		id: "whisper-base",
@@ -120,6 +127,7 @@ export const LOCAL_DICTATION_MODELS: readonly LocalModelEntry[] = [
 		dtype: GPU_READY,
 		sizeMb: 210,
 		werPct: null,
+		multilingual: true,
 	},
 	{
 		id: "whisper-small-en",
@@ -128,6 +136,7 @@ export const LOCAL_DICTATION_MODELS: readonly LocalModelEntry[] = [
 		dtype: GPU_READY,
 		sizeMb: 590,
 		werPct: 8.59,
+		multilingual: false,
 	},
 	{
 		id: "whisper-large-v3-turbo",
@@ -136,6 +145,7 @@ export const LOCAL_DICTATION_MODELS: readonly LocalModelEntry[] = [
 		dtype: { encoder_model: "q4", decoder_model_merged: "q4" },
 		sizeMb: 763,
 		werPct: 7.83,
+		multilingual: true,
 	},
 ];
 
@@ -327,4 +337,40 @@ export function deepgramListenUrl(language: DictationLanguage): string {
 		"?model=nova-3&encoding=linear16&sample_rate=16000&channels=1" +
 		"&smart_format=true&punctuate=true&endpointing=300" +
 		`&language=${encodeURIComponent(language)}`;
+}
+
+// ── Local models × the dictation language ──
+
+/** How a local model runs for the selected dictation language.
+ *  `whisper` is the language code passed to the engine; null passes none
+ *  (English-only models refuse one, and need none). Unsupported:
+ *  - English-only models: anything but English (incl. Multilingual).
+ *  - Multilingual (automatic detection): the in-app engine (transformers.js)
+ *    has no language detection — an unset language runs as English.
+ *  - Cantonese (zh-HK): the engine has no Cantonese language code.
+ *  Every other Nova-3 language's base code is a Whisper language. */
+export type LocalLanguagePlan = { supported: true; whisper: string | null } | { supported: false };
+
+export function localLanguagePlan(model: LocalModelEntry, language: DictationLanguage): LocalLanguagePlan {
+	const english = language === "en" || language.startsWith("en-");
+	if (!model.multilingual) return english ? { supported: true, whisper: null } : { supported: false };
+	if (language === "multi" || language === "zh-HK") return { supported: false };
+	return { supported: true, whisper: language.split("-")[0]! };
+}
+
+/** The Language picker's label for a code ("Polish", "English (en-GB)"). */
+export function dictationLanguageLabel(language: DictationLanguage): string {
+	return DICTATION_LANGUAGES.find((l) => l.code === language)?.label ?? language;
+}
+
+/** What a local model is missing for `language`: the language's label,
+ *  or — for Multilingual — the automatic detection it stands for (so a
+ *  "Multilingual" model never reads as not supporting Multilingual). */
+export function unsupportedLanguageReason(language: DictationLanguage): string {
+	return language === "multi" ? "automatic language detection" : dictationLanguageLabel(language);
+}
+
+/** The Dictate error for a local model that can't take the language. */
+export function unsupportedLanguageMessage(model: LocalModelEntry, language: DictationLanguage): string {
+	return `${model.name} doesn't support ${unsupportedLanguageReason(language)}`;
 }

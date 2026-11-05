@@ -27,15 +27,16 @@ Sessions are saved locally, including earlier messages when context is compacted
 
 ## Dictation
 
-Dictate uses the one method selected under **Settings → Providers → Dictation**: Deepgram or a downloaded local model. Pressing Dictate with nothing set up opens a chooser.
+Dictate uses the one method selected under **Settings → Providers → Dictation**: Deepgram or a downloaded local model. Pressing Dictate with nothing set up opens a chooser. The **Language** at the top of that group applies to both.
 
-**Local model:** download one from the list (smallest first, with size and word error rate) and pick WebGPU or CPU. The model and its runtime are stored locally, so it works offline after download; it falls back to CPU when WebGPU cannot start.
+**Local model:** download one from the list (smallest first, with size and word error rate) and pick WebGPU or CPU. The model and its runtime are stored locally, so it works offline after download; it falls back to CPU when WebGPU cannot start. A downloaded **English only** model is greyed out in the method list for other languages. Whisper Base Multilingual and Whisper Large v3 Turbo take the other languages except **Multilingual** (automatic detection) and Cantonese, which need Deepgram. If the selected model can't take the chosen language, Dictate says so instead of switching methods.
 
 **Deepgram:**
 
 1. Create a [Deepgram API key](https://console.deepgram.com/) with the **Member role or higher**, required for [short-lived token minting](https://developers.deepgram.com/reference/auth/tokens/grant).
-2. Add it under **Settings → Providers → Dictation** and choose the language below the key. **Multilingual** supports automatic recognition and mixed-language speech.
-3. Use the microphone or **Mod+D** to start and stop. Review the text before sending. **Esc cancellation discards the pending transcript**; stop normally to keep it.
+2. Add it under **Settings → Providers → Dictation**, below the language. **Multilingual** supports automatic recognition and mixed-language speech.
+
+With either method, use the microphone or **Mod+D** to start and stop. Review the text before sending. **Esc cancellation discards the pending transcript**; stop normally to keep it.
 
 With Deepgram, audio streams from your browser directly to Deepgram using a short-lived token. A `403 Insufficient permissions` error while obtaining that token can mean the key's role is insufficient.
 

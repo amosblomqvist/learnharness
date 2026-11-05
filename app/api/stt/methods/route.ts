@@ -9,9 +9,10 @@
  *         uses (400 unless it is configured); `device` is where local
  *         models run (the WebGPU/CPU picker).
  *
- * Access control is the app-wide /api capability check (proxy.ts).
+ * Access control is the app-wide /api capability check (proxy.ts); PUT
+ * also needs the same-origin JSON gate (src/server/dictation-http.ts).
  */
-import { dictationStatus, selectDictationMethod, setDictationDevice } from "@/src/server";
+import { dictationMutationRefusal, dictationStatus, selectDictationMethod, setDictationDevice } from "@/src/server";
 
 export const dynamic = "force-dynamic";
 
@@ -22,6 +23,8 @@ export async function GET() {
 }
 
 export async function PUT(request: Request) {
+	const refused = dictationMutationRefusal(request);
+	if (refused) return refused;
 	const body = (await request.json().catch(() => null)) as Record<string, unknown> | null;
 	if (!body || typeof body !== "object" || Array.isArray(body)) {
 		return Response.json({ error: "Body must be a JSON object." }, { status: 400 });

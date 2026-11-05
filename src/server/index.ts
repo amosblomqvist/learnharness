@@ -59,3 +59,4 @@ export { customProviderGet, customProviderMutation } from "./custom-provider-htt
 // Local dictation (issue #15, PR #50): method selection, curated
 // model downloads, model/runtime file serving.
 export * from "./dictation.ts";
+export { dictationMutationRefusal } from "./dictation-http.ts";

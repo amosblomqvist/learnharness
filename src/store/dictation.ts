@@ -17,12 +17,14 @@
 
 import fs from "node:fs";
 import path from "node:path";
+import { randomUUID } from "node:crypto";
 import { Readable } from "node:stream";
 import type { ReadableStream as NodeReadableStream } from "node:stream/web";
 import { pipeline } from "node:stream/promises";
 import { DICTATION_DIR } from "../../config.ts";
 import { sanitizeDictationState, type DictationState } from "../core/dictation.ts";
 import type { DictationStore } from "../core/ports.ts";
+import { writeFileAtomicSync } from "./atomic-write.ts";
 
 const STATE_FILE = path.join(DICTATION_DIR, "state.json");
 const MODELS_DIR = path.join(DICTATION_DIR, "models");
@@ -31,15 +33,22 @@ const RUNTIME_DIR = path.join(DICTATION_DIR, "runtime");
 const modelDir = (id: string) => path.join(MODELS_DIR, id);
 const stagedDir = (id: string) => `${modelDir(id)}.partial`;
 
-/** Stream a body to `dest` via a sibling .partial file, renamed into place
- *  only when complete — a cut download never looks finished. */
-async function streamToFile(body: ReadableStream<Uint8Array>, dest: string, onBytes?: (n: number) => void) {
+/** Stream a body to `dest` via a sibling temp file, renamed into place
+ *  only when complete — a cut download never looks finished. The temp name
+ *  is unique per writer: two downloads that both fetch the shared runtime
+ *  each write their own file, and the rename lands one complete copy. */
+export async function streamToFile(body: ReadableStream<Uint8Array>, dest: string, onBytes?: (n: number) => void) {
 	fs.mkdirSync(path.dirname(dest), { recursive: true });
 	const source = Readable.fromWeb(body as NodeReadableStream<Uint8Array>);
 	if (onBytes) source.on("data", (chunk: Buffer) => onBytes(chunk.length));
-	const tmp = `${dest}.partial`;
-	await pipeline(source, fs.createWriteStream(tmp));
-	fs.renameSync(tmp, dest);
+	const tmp = `${dest}.${randomUUID()}.partial`;
+	try {
+		await pipeline(source, fs.createWriteStream(tmp));
+		fs.renameSync(tmp, dest);
+	} catch (e) {
+		fs.rmSync(tmp, { force: true });
+		throw e;
+	}
 }
 
 /** `rest` resolved inside `root`, or null when it escapes it. */
@@ -60,7 +69,7 @@ export const dictationStore: DictationStore = {
 	writeState(state: DictationState) {
 		const clean = sanitizeDictationState(state);
 		fs.mkdirSync(DICTATION_DIR, { recursive: true });
-		fs.writeFileSync(STATE_FILE, JSON.stringify(clean, null, "\t"), "utf-8");
+		writeFileAtomicSync(STATE_FILE, JSON.stringify(clean, null, "\t"), { allowInPlaceFallback: true });
 		return clean;
 	},
 

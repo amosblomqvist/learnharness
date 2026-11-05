@@ -71,7 +71,7 @@ function configuredMethods(): string[] {
 }
 
 /** The effective selection + the choices. Pure read — derived, never written. */
-export function currentDictationSelection(): { selected: string | null; configured: string[] } {
+function currentDictationSelection(): { selected: string | null; configured: string[] } {
 	const configured = configuredMethods();
 	return { selected: reconcileDictationSelection(store().readState().selected, configured), configured };
 }
@@ -123,7 +123,7 @@ export function dictationStatus(): DictationStatus {
 
 /** Start (or no-op on an already running/finished) download. Returns
  *  false for an unknown id. */
-export function startModelDownload(id: string): boolean {
+export function startDictationModelDownload(id: string): boolean {
 	const entry = modelEntry(id);
 	if (!entry) return false;
 	if (modelDownloaded(entry)) return true;
@@ -185,7 +185,7 @@ async function runDownload(entry: LocalModelEntry, d: Download): Promise<void> {
 }
 
 /** Cancel an in-flight download, or delete a downloaded model. */
-export function removeModel(id: string): boolean {
+export function removeDictationModel(id: string): boolean {
 	if (!modelEntry(id)) return false;
 	const d = downloads.get(id);
 	if (d) {
@@ -205,17 +205,17 @@ export function removeModel(id: string): boolean {
 // ─── File serving ────────────────────────────────────────────────────────────
 
 /** Absolute path of a downloaded model file, or null when it isn't one. */
-export function modelFilePath(segments: string[]): string | null {
+export function dictationModelFilePath(segments: string[]): string | null {
 	const [id, ...rest] = segments;
 	if (!id || !modelEntry(id) || rest.length === 0) return null;
 	return store().modelFilePath(id, rest);
 }
 
-/** The runtime file for this onnxruntime-web version — normally already
- *  cached by a model download; fetched now (and kept) otherwise. Null for
- *  anything outside the allowlist. */
-export async function runtimeFilePath(version: string, file: string): Promise<string | null> {
-	if (!/^[0-9A-Za-z.+-]{1,64}$/.test(version)) return null;
+/** The runtime file for the pinned onnxruntime-web version — normally
+ *  already cached by a model download; fetched now (and kept) otherwise.
+ *  Null for any other version or file. */
+export async function dictationRuntimeFilePath(version: string, file: string): Promise<string | null> {
+	if (version !== ORT_WEB_VERSION) return null;
 	if (!(DICTATION_RUNTIME_FILES as readonly string[]).includes(file)) return null;
 	const cached = store().runtimeFilePath(version, file);
 	if (cached) return cached;
@@ -225,7 +225,7 @@ export async function runtimeFilePath(version: string, file: string): Promise<st
 	return store().runtimeFilePath(version, file);
 }
 
-export function contentTypeFor(file: string): string {
+export function dictationContentType(file: string): string {
 	if (file.endsWith(".json")) return "application/json";
 	if (file.endsWith(".wasm")) return "application/wasm";
 	if (file.endsWith(".mjs")) return "text/javascript";

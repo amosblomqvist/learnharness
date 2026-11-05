@@ -7,20 +7,25 @@
  *            files; a removed pick falls to the default choice.
  *
  * Unknown ids are 404 — only the curated catalog downloads. Access
- * control is the app-wide /api capability check (proxy.ts).
+ * control is the app-wide /api capability check (proxy.ts) plus the
+ * same-origin JSON gate (src/server/dictation-http.ts).
  */
-import { removeModel, startModelDownload } from "@/src/server";
+import { dictationMutationRefusal, removeDictationModel, startDictationModelDownload } from "@/src/server";
 
 export const dynamic = "force-dynamic";
 
-export async function POST(_request: Request, ctx: { params: Promise<{ id: string }> }) {
+export async function POST(request: Request, ctx: { params: Promise<{ id: string }> }) {
+	const refused = dictationMutationRefusal(request);
+	if (refused) return refused;
 	const { id } = await ctx.params;
-	if (!startModelDownload(id)) return Response.json({ error: "Unknown model." }, { status: 404 });
+	if (!startDictationModelDownload(id)) return Response.json({ error: "Unknown model." }, { status: 404 });
 	return Response.json({ started: true }, { status: 202 });
 }
 
-export async function DELETE(_request: Request, ctx: { params: Promise<{ id: string }> }) {
+export async function DELETE(request: Request, ctx: { params: Promise<{ id: string }> }) {
+	const refused = dictationMutationRefusal(request);
+	if (refused) return refused;
 	const { id } = await ctx.params;
-	if (!removeModel(id)) return Response.json({ error: "Unknown model." }, { status: 404 });
+	if (!removeDictationModel(id)) return Response.json({ error: "Unknown model." }, { status: 404 });
 	return Response.json({ deleted: true });
 }

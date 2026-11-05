@@ -1,11 +1,14 @@
 "use client";
 /**
  * Settings → Providers → Dictation (issue #15, PR #50): rendered inside the Providers
- * section's Dictation group, under the Deepgram key row (keys-section.tsx).
+ * section's Dictation group, under the Language and Deepgram key rows
+ * (keys-section.tsx).
  *
  *  - METHOD: every configured method (Deepgram with a key, each
  *    downloaded model) as a pick-one list. Dictate uses only the picked
- *    one — no fallback. A new download never steals the pick.
+ *    one — no fallback. A new download never steals the pick. A local
+ *    model that can't take the selected Language is greyed out and can't
+ *    be picked; a pick it already holds stays (Dictate then says why).
  *  - RUN ON: WebGPU or CPU for local models, default
  *    WebGPU; when WebGPU can't start the same model runs on CPU.
  *  - MODELS: the curated on-device catalog, smallest first, each row
@@ -23,14 +26,19 @@ import {
 	dictationMethodLabel,
 	formatModelSize,
 	formatWer,
+	localLanguagePlan,
 	localModelOf,
+	unsupportedLanguageReason,
 	type DictationDevice,
+	type DictationLanguage,
 	type DictationStatus,
 	type LocalModelStatus,
 } from "@/src/core";
 import { notifySettingsSaved, useSettingsSaved } from "@/components/settings-signal";
+import { useDictationLanguage } from "@/components/dictation-preference";
 import { cn } from "@/lib/utils";
 import { Hint } from "@/components/ui/hint";
+import { SettingsRow } from "@/components/settings/controls";
 
 const MUTATION_HEADERS = { "Content-Type": "application/json" };
 const linkBtn =
@@ -52,6 +60,13 @@ function methodDetail(id: string): string {
 	if (id === DEEPGRAM_METHOD_ID) return "Cloud · Deepgram key";
 	const m = localModelOf(id);
 	return m ? `On device · ${formatModelSize(m.sizeMb)}` : "";
+}
+
+/** False when the method is a local model that can't take `language`
+ *  (still loading: everything counts as supported). */
+function methodSupports(id: string, language: DictationLanguage | undefined): boolean {
+	const m = localModelOf(id);
+	return !m || language === undefined || localLanguagePlan(m, language).supported;
 }
 
 export function DictationSettings({ focus }: { focus?: boolean }) {
@@ -84,8 +99,8 @@ export function DictationSettings({ focus }: { focus?: boolean }) {
 	useEffect(() => {
 		if (!focus || !loaded || scrolled.current) return;
 		scrolled.current = true;
-		// The whole Providers → Dictation group (heading + Deepgram key row
-		// above these controls), not just this body.
+		// The whole Providers → Dictation group (heading, Language and
+		// Deepgram key rows above these controls), not just this body.
 		const group = rootRef.current?.closest("[data-testid=group-dictation]") ?? rootRef.current;
 		group?.scrollIntoView({ block: "start" });
 	}, [focus, loaded]);
@@ -154,6 +169,7 @@ export function DictationSettings({ focus }: { focus?: boolean }) {
 	}
 
 	const configured = status?.configured ?? [];
+	const { language } = useDictationLanguage();
 
 	return (
 		<div ref={rootRef} className="mt-2 flex scroll-mt-4 flex-col gap-2" data-testid="dictation-settings">
@@ -171,7 +187,10 @@ export function DictationSettings({ focus }: { focus?: boolean }) {
 				</p>
 			)}
 
-			<p className="text-xs text-muted-foreground/70">Dictation method; Dictate uses the one you pick.</p>
+			<span className="block py-1" data-testid="dictation-method-label">
+				<span className="block font-prose text-(length:--lh-prose-size)">Dictation method</span>
+				<span className="block text-xs text-muted-foreground/70">Dictate uses the one you pick.</span>
+			</span>
 			{status && configured.length === 0 && (
 				<p className="text-xs text-muted-foreground" data-testid="dictation-method-empty">
 					Nothing set up yet. Add a Deepgram key above, or download a model below.
@@ -180,17 +199,21 @@ export function DictationSettings({ focus }: { focus?: boolean }) {
 			<div role="radiogroup" aria-label="Dictation method" className="flex flex-col gap-1" data-testid="dictation-methods">
 				{configured.map((id) => {
 					const picked = status?.selected === id;
+					const supported = methodSupports(id, language);
 					return (
 						<button
 							key={id}
 							type="button"
 							role="radio"
 							aria-checked={picked}
-							onClick={() => !picked && select(id)}
+							aria-disabled={!supported || undefined}
+							disabled={!supported && !picked}
+							onClick={() => supported && !picked && select(id)}
 							data-testid={`dictation-method-${id}`}
 							className={cn(
 								"flex items-center gap-2 rounded-sm border bg-background px-2 py-1.5 text-left outline-none transition-colors focus-visible:border-muted-foreground/60",
-								picked ? "border-muted-foreground/60" : "border-border hover:border-muted-foreground/40",
+								picked ? "border-muted-foreground/60" : "border-border",
+								supported ? !picked && "hover:border-muted-foreground/40" : "cursor-not-allowed opacity-40",
 							)}
 						>
 							<span
@@ -203,21 +226,25 @@ export function DictationSettings({ focus }: { focus?: boolean }) {
 								{picked && <span className="size-1.5 rounded-full bg-foreground" />}
 							</span>
 							<span className="min-w-0 flex-1 font-ui text-xs text-foreground">{dictationMethodLabel(id)}</span>
-							<span className="text-xs text-muted-foreground">{methodDetail(id)}</span>
+							<span className="text-xs text-muted-foreground">
+								{supported || language === undefined
+									? methodDetail(id)
+									: `Doesn't support ${unsupportedLanguageReason(language)}`}
+							</span>
 						</button>
 					);
 				})}
 			</div>
 
-			<div className="mt-3 flex items-center justify-between gap-4 py-1" data-testid="dictation-device">
-				<span className="min-w-0">
-					<span className="block font-ui text-xs text-foreground">Run local models on</span>
-					<span className="block text-xs text-muted-foreground/70">
-						{gpuOk === false
-							? "WebGPU isn't available on this device, so CPU is used."
-							: "WebGPU is faster. If it can't start, CPU is used."}
-					</span>
-				</span>
+			<SettingsRow
+				label="Run local models on"
+				testid="dictation-device"
+				hint={
+					gpuOk === false
+						? "WebGPU isn't available on this device, so CPU is used."
+						: "WebGPU is faster. If it can't start, CPU is used."
+				}
+			>
 				<div role="radiogroup" aria-label="Run local models on" className="flex shrink-0 rounded-sm border border-border p-0.5">
 					{(
 						[
@@ -244,7 +271,7 @@ export function DictationSettings({ focus }: { focus?: boolean }) {
 						);
 					})}
 				</div>
-			</div>
+			</SettingsRow>
 			<div className="flex flex-col" data-testid="dictation-models">
 				{(status?.models ?? []).map((m) => (
 					<ModelRow
@@ -277,6 +304,7 @@ function ModelRow({
 					<Hint label={model.werPct === null ? WER_NA_HINT : WER_HINT} side="top">
 						<span className="cursor-help">{formatWer(model.werPct)}</span>
 					</Hint>
+					{!model.multilingual && " · English only"}
 				</span>
 				{model.error && <span className="block text-xs text-red-400">{model.error}</span>}
 			</span>

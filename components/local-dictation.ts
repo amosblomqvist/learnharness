@@ -188,16 +188,34 @@ export function loadLocalModel(model: LocalModelEntry, run: LocalRun): Promise<s
 		reject = rej;
 	});
 	loads.set(key, { promise, resolve, reject });
-	ensureWorker().postMessage({ type: "load", key, model: spec(model, run) });
+	try {
+		ensureWorker().postMessage({ type: "load", key, model: spec(model, run) });
+	} catch (e) {
+		// No worker (creation refused): fail this load instead of leaving a
+		// promise that never settles for every later press to wait on.
+		loads.delete(key);
+		reject(e instanceof Error ? e : new Error(String(e)));
+	}
 	return promise;
 }
 
-export function transcribeLocal(model: LocalModelEntry, run: LocalRun, audio: Float32Array): Promise<string> {
+/** `language`: localLanguagePlan's Whisper code, or null for none. */
+export function transcribeLocal(
+	model: LocalModelEntry,
+	run: LocalRun,
+	audio: Float32Array,
+	language: string | null,
+): Promise<string> {
 	const id = nextId++;
 	return new Promise((resolve, reject) => {
 		pending.set(id, { resolve, reject });
-		ensureWorker().postMessage({ type: "transcribe", id, key: runKey(model, run), model: spec(model, run), audio }, [
-			audio.buffer,
-		]);
+		try {
+			ensureWorker().postMessage({ type: "transcribe", id, key: runKey(model, run), model: spec(model, run), audio, language }, [
+				audio.buffer,
+			]);
+		} catch (e) {
+			pending.delete(id);
+			reject(e instanceof Error ? e : new Error(String(e)));
+		}
 	});
 }
