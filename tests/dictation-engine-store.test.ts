@@ -112,5 +112,6 @@ test("the transport helpers map the route's answers", async () => {
 	await assert.rejects(transcribeGroq(respond(() => Response.json({}, { status: 503 })), args), { message: GROQ_DICTATION_KEYLESS });
 	await assert.rejects(transcribeGroq(respond(() => Response.json({ message: "The recording is too large for Groq." }, { status: 413 })), args), /too large/);
 	await assert.rejects(transcribeGroq(respond(() => new Response("<html>", { status: 500 })), args), /Groq dictation failed \(500\)/);
+	await assert.rejects(transcribeGroq(respond(() => Response.json({ nope: 1 })), args), /no transcript/);
 	await assert.rejects(transcribeGroq((async () => { throw new TypeError("offline"); }) as typeof fetch, args), /Could not send the recording/);
 });

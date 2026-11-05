@@ -80,6 +80,7 @@ export async function transcribeGroq(request: typeof fetch, args: {
 	}
 	if (res.status === 503) throw new GroqRequestError(GROQ_DICTATION_KEYLESS, false);
 	if (!res.ok) throw await routeFailure(res);
-	const { text } = await res.json() as { text: string };
-	return text.trim();
+	const body = await res.json().catch(() => ({})) as { text?: unknown };
+	if (typeof body.text !== "string") throw new GroqRequestError("Groq dictation returned no transcript.", false);
+	return body.text.trim();
 }
