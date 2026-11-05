@@ -490,4 +490,15 @@ describe("text alignment — the markdown-only hook (appearance.mdRendering.text
 		assert.match(blocks, /className="flex size-6 items-center justify-center/);
 		assert.ok(Number(gutter[1]) * 16 >= 4 + 24, "the gutter is at least the button's inset plus its width");
 	});
+
+	it("lists: the aligned-edge indent rule follows the prose indent, so it wins at equal specificity", () => {
+		const css = fs.readFileSync("app/globals.css", "utf-8");
+		const prose = css.indexOf(".lh-prose :where(ul, ol)");
+		assert.ok(prose >= 0 && css.indexOf(".lh-md :where(ul, ol)") > prose);
+	});
+
+	it("tables: header cells are text-left by Streamdown's own class, which the pin rule relies on", () => {
+		const header = render("| a | b |\n|---|---|\n| 1 | 2 |").match(/<th[^>]*data-streamdown="table-header-cell"[^>]*>/)?.[0] ?? "";
+		assert.match(header, /\btext-left\b/);
+	});
 });
