@@ -671,11 +671,6 @@ interface LhExtractionGlobal {
 		 *  same millisecond never collide on the usage idempotency key. */
 		lastStartedAt: number;
 	};
-	/** The serialized-audit mutex (owner 2026-09-28): a FIFO promise
-	 *  chain — the audit+merge critical section runs one job at a time,
-	 *  process-wide. globalThis for the same module-instance reason as
-	 *  the run registries. */
-	__lhAuditLock?: { tail: Promise<void> };
 	/** The EXTRACT SEMAPHORE (owner, 2026-09-28): 3 concurrent extractor
 	 *  calls process-wide — the provider-facing rate stance (the import
 	 *  route's old 3-wide pool doctrine, now global). Per-chunk jobs fan
