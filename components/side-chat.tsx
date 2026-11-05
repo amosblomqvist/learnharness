@@ -525,7 +525,21 @@ function elementOf(node: Node | null): Element | null {
 
 /** The selection as quotable text — KaTeX formulas become their TeX
  *  source (`$…$`, `$$…$$`) instead of the doubled MathML/HTML text. */
+/** The formula a selection boundary sits inside: a selection that starts or
+ *  ends mid-formula must take the whole formula, or its TeX is lost. */
+export function enclosingFormula(node: Node | null): Element | null {
+	const el = elementOf(node);
+	return el?.closest(".katex-display") ?? el?.closest(".katex") ?? null;
+}
+
 export function selectionQuote(range: Range, plain: string): string {
+	const start = enclosingFormula(range.startContainer);
+	const end = enclosingFormula(range.endContainer);
+	if (start || end) {
+		range = range.cloneRange();
+		if (start) range.setStartBefore(start);
+		if (end) range.setEndAfter(end);
+	}
 	const fragment = range.cloneContents();
 	if (!fragment.querySelector(".katex")) return plain.trim();
 	const texOf = (el: Element) => el.querySelector('annotation[encoding="application/x-tex"]')?.textContent ?? null;
