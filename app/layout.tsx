@@ -36,6 +36,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
 			</ServerEventsProvider>
 			{/* Auto-update banner (Wave C): fixed card, Electron-only pushes. */}
 			<UpdateBanner />
+			{/* Global copy handler: rendered math pastes as its TeX source. Renders null. */}
 			<CopyMathAsTex />
 		</body>
 		</html>
