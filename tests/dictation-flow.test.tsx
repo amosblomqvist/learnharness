@@ -58,6 +58,10 @@ async function fixture(language: "pl" | "en" = "pl", delayedRead?: Promise<Respo
 		captures: 0,
 		stops: 0,
 		appends: [] as string[],
+		/** GET /api/stt/methods: what the server reports now; a gate holds every read. */
+		methods: { selected: "deepgram" as string | null, configured: ["deepgram"], device: "webgpu", deepgram: true, models: [] as unknown[] },
+		methodsGate: undefined as Promise<void> | undefined,
+		methodReads: 0,
 	};
 	Socket.all = [];
 	const previous = new Map<string, PropertyDescriptor | undefined>();
@@ -72,6 +76,12 @@ async function fixture(language: "pl" | "en" = "pl", delayedRead?: Promise<Respo
 		IS_REACT_ACT_ENVIRONMENT: true,
 		fetch: async (url: string, init?: RequestInit) => {
 			if (url === "/api/stt/token") return Response.json({ token: "test-token" });
+			// Deepgram is the selected dictation method unless a test says otherwise.
+			if (url === "/api/stt/methods") {
+				state.methodReads++;
+				if (state.methodsGate) await state.methodsGate;
+				return Response.json(state.methods);
+			}
 			if (url === "/api/settings") {
 				state.reads++;
 				if (state.nextRead) { const response = state.nextRead; state.nextRead = undefined; return response; }
@@ -317,6 +327,92 @@ test("microphone permission resolving after unmount immediately stops the late s
 	await f.unmount();
 	await act(async () => { mic.resolve({ getTracks: () => [{ stop() { f.state.stops++; } }] }); });
 	assert.equal(f.state.stops, 1);
+	assert.equal(Socket.all.length, 0);
+	assert.equal(isDictationActive(), false);
+});
+
+// ─── Dictation method (issue #15, PR #50) ─────────────────────────────────────
+
+/** Drop the window-lifetime status cache a previous fixture left behind. */
+async function freshMethods() {
+	await act(async () => { notifySettingsSaved("dictation"); });
+}
+
+test("a local model that can't take the language stops before the microphone, naming both", async () => {
+	const f = await fixture("pl");
+	f.state.methods = { selected: "local:moonshine-tiny", configured: ["local:moonshine-tiny"], device: "webgpu", deepgram: false, models: [] };
+	await f.mount();
+	await freshMethods();
+	await act(async () => { f.dictation.toggle(); });
+	assert.equal(f.dictation.error, "Moonshine Tiny doesn't support Polish");
+	assert.equal(f.dictation.phase, "idle");
+	assert.equal(f.state.captures, 0, "no microphone");
+	assert.equal(Socket.all.length, 0, "no switch to Deepgram");
+});
+
+test("a local model that takes the language proceeds to load it", async () => {
+	const f = await fixture("en");
+	f.state.methods = { selected: "local:moonshine-tiny", configured: ["local:moonshine-tiny"], device: "webgpu", deepgram: false, models: [] };
+	await f.mount();
+	await freshMethods();
+	await act(async () => { f.dictation.toggle(); });
+	assert.equal(f.state.captures, 1);
+	// No Worker in this harness: the load fails, and the error names the model.
+	assert.equal(f.dictation.error, "Moonshine Tiny couldn't load");
+});
+
+test("a stale nothing-set-up status is re-read before the chooser opens", async () => {
+	const f = await fixture("en");
+	f.state.methods = { selected: null, configured: [], device: "webgpu", deepgram: false, models: [] };
+	await f.mount();
+	await freshMethods();
+	// A download finished after Settings closed; nothing told this page.
+	f.state.methods = { selected: "deepgram", configured: ["deepgram"], device: "webgpu", deepgram: true, models: [] };
+	await act(async () => { f.dictation.toggle(); });
+	assert.equal(f.dictation.chooser, false);
+	assert.equal(f.state.captures, 1, "started the now-selected method");
+	assert.equal(Socket.all.at(-1)?.language, "en");
+});
+
+test("nothing set up after a fresh read opens the chooser and releases the press", async () => {
+	const f = await fixture();
+	f.state.methods = { selected: null, configured: [], device: "webgpu", deepgram: false, models: [] };
+	await f.mount();
+	await freshMethods();
+	await act(async () => { f.dictation.toggle(); });
+	assert.equal(f.dictation.chooser, true);
+	assert.equal(f.dictation.phase, "idle");
+	assert.equal(f.state.active, false);
+	assert.equal(f.state.captures, 0);
+});
+
+test("a cold status read shows the run at once, and cancel during it starts nothing", async () => {
+	const f = await fixture();
+	const gate = deferred<void>();
+	f.state.methodsGate = gate.promise;
+	await f.mount();
+	await freshMethods();
+	await act(async () => { f.dictation.toggle(); });
+	assert.equal(f.dictation.phase, "connecting", "feedback before the read returns");
+	assert.equal(f.state.active, true);
+	await act(async () => { f.dictation.cancel(); });
+	await act(async () => { gate.resolve(); });
+	assert.equal(f.dictation.phase, "idle");
+	assert.equal(f.dictation.chooser, false);
+	assert.equal(f.state.captures, 0);
+	assert.equal(Socket.all.length, 0);
+});
+
+test("unmount during a cold status read starts nothing on the departed page", async () => {
+	const f = await fixture();
+	const gate = deferred<void>();
+	f.state.methodsGate = gate.promise;
+	await f.mount();
+	await freshMethods();
+	await act(async () => { f.dictation.toggle(); });
+	await f.unmount();
+	await act(async () => { gate.resolve(); });
+	assert.equal(f.state.captures, 0);
 	assert.equal(Socket.all.length, 0);
 	assert.equal(isDictationActive(), false);
 });
