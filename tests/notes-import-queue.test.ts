@@ -46,7 +46,7 @@ it("unsupported-only directories are never sent; picker .DS_Store is ignored and
 	queue.append([file(".DS_Store", "Root/.DS_Store"), file("a.png", "Root/Images/a.png"), file("notes.md", "Root/Sub/notes.md"), file("bad.txt", "../bad.txt")]);
 	await tick();
 	assert.deepEqual(paths, ["Root/Sub/notes.md"]);
-	assert.deepEqual(queue.getSnapshot().errors, ["Root/Images/a.png: Unsupported format or unsafe relative path.", "../bad.txt: Unsupported format or unsafe relative path."]);
+	assert.deepEqual(queue.getSnapshot().errors, ["Root/Images/a.png: This file type isn't supported. Use text, Markdown, or PDF.", "../bad.txt: Unsafe relative path."]);
 });
 
 it("folder picks skip dot-directories such as .obsidian/ silently, even when the chosen root itself is hidden", async () => {
@@ -81,7 +81,39 @@ it("individual file picks still import hidden notes and report unsupported dotfi
 	queue.append([file(".draft.md"), file(".summary.txt"), file(".DS_Store")]);
 	await tick();
 	assert.deepEqual(paths, [".draft.md", ".summary.txt"]);
-	assert.deepEqual(queue.getSnapshot().errors, [".DS_Store: Unsupported format or unsafe relative path."]);
+	assert.deepEqual(queue.getSnapshot().errors, [".DS_Store: This file type isn't supported. Use text, Markdown, or PDF."]);
+});
+
+it("an unsupported type is turned away at once with the exact message and nothing is uploaded", async () => {
+	let posts = 0;
+	const queue = createNotesImportQueue(async ([f]) => { posts++; return [success(f!.name)]; });
+	queue.append([file("deck.pptx"), file("report.docx", "Course/report.docx"), file("README")]);
+	assert.deepEqual(queue.getSnapshot().errors, [
+		"deck.pptx: This file type isn't supported. Use text, Markdown, or PDF.",
+		"Course/report.docx: This file type isn't supported. Use text, Markdown, or PDF.",
+		"README: This file type isn't supported. Use text, Markdown, or PDF.",
+	]);
+	assert.equal(queue.getSnapshot().importing, false);
+	await tick();
+	assert.equal(posts, 0, "no upload for a turned-away file");
+});
+
+it("an unsafe path gets its own message, ahead of the file type check", () => {
+	const queue = createNotesImportQueue(async ([f]) => [success(f!.name)]);
+	queue.append([file("bad.txt", "../bad.txt"), file("deck.pptx", "Root/sub//deck.pptx"), file("name.txt", "Root/other.txt")]);
+	assert.deepEqual(queue.getSnapshot().errors, ["../bad.txt: Unsafe relative path.", "Root/sub//deck.pptx: Unsafe relative path.", "Root/other.txt: Unsafe relative path."]);
+});
+
+it("every allowed type is queued, in any letter case, and the size check still follows the type check", async () => {
+	const names = ["a.txt", "b.md", "c.markdown", "d.rst", "e.org", "f.adoc", "g.tex", "h.pdf", "UPPER.MD", "Mixed.Tex"];
+	const paths: string[] = [];
+	const queue = createNotesImportQueue(async ([f]) => { paths.push(f!.name); return [success(f!.name)]; });
+	const oversized = file("huge.docx"); Object.defineProperty(oversized, "size", { value: Number.MAX_SAFE_INTEGER });
+	const big = file("big.tex"); Object.defineProperty(big, "size", { value: Number.MAX_SAFE_INTEGER });
+	queue.append([...names.map((name) => file(name)), oversized, big]);
+	await tick();
+	assert.deepEqual(paths.sort(), [...names].sort());
+	assert.deepEqual(queue.getSnapshot().errors, ["huge.docx: This file type isn't supported. Use text, Markdown, or PDF.", "big.tex: Too big. Max 25 MB."]);
 });
 
 it("an all-skipped selection publishes completion without validation errors or uploads and allows later work", async () => {

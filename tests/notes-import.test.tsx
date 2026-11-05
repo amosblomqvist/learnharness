@@ -5,6 +5,7 @@ import { afterEach, it } from "node:test";
 import { createRoot, type Root } from "react-dom/client";
 import { renderToStaticMarkup } from "react-dom/server";
 import { parseHTML } from "linkedom";
+import { IMPORT_EXTENSIONS } from "../lib/notes-import-limits.ts";
 import { MAX_IMPORT_BYTES, NotesImportControl, NotesImportErrors, NotesImportNotices, parseNotesImportResults, postNotesImport, useNotesImport, type NotesImportResult } from "../components/notes-import.tsx";
 
 const dom = parseHTML("<html><body></body></html>");
@@ -141,7 +142,16 @@ it("25 MiB is per file, not per selection; oversized files fail locally while sm
 });
 it("picker stays enabled during imports, offers Files/Folder, and keeps PDF support", () => {
 	const html = renderToStaticMarkup(<NotesImportControl importing onImportFiles={() => {}} />);
-	assert.match(html, /webkitdirectory/); assert.match(html, /accept=".md,.markdown,.txt,.pdf"/); assert.doesNotMatch(html, /disabled/);
+	assert.match(html, /webkitdirectory/); assert.match(html, /accept=".txt,.md,.markdown,.rst,.org,.adoc,.tex,.pdf"/); assert.doesNotMatch(html, /disabled/);
+});
+it("the Files picker's accept lists exactly the types the queue takes, and the Folder picker has none", () => {
+	const html = renderToStaticMarkup(<NotesImportControl importing={false} onImportFiles={() => {}} />);
+	const accepted = html.match(/accept="([^"]*)"/)![1]!.split(",");
+	assert.equal(html.match(/accept=/g)!.length, 1);
+	assert.ok(accepted.every((extension) => /^\.[a-z]+$/.test(extension)));
+	for (const extension of accepted) assert.ok(IMPORT_EXTENSIONS.test(`notes${extension}`) && IMPORT_EXTENSIONS.test(`NOTES${extension.toUpperCase()}`), extension);
+	for (const extension of [".pptx", ".docx", ".rtf", ".csv", ".png"]) assert.ok(!accepted.includes(extension) && !IMPORT_EXTENSIONS.test(`notes${extension}`), extension);
+	assert.ok(!IMPORT_EXTENSIONS.test("README") && !IMPORT_EXTENSIONS.test("notes.md.bak"));
 });
 it("graph menu clearly distinguishes extraction from lesson material, above unchanged Files/Folder choices", async () => {
 	const selected: unknown[] = [];
