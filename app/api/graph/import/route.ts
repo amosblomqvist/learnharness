@@ -175,7 +175,6 @@ export async function POST(request: Request) {
 						outcome: err instanceof NotesImportError ? err.outcome : "failed",
 						...(err instanceof NotesImportError ? { stats: err.partialStats } : {}),
 						error: QUOTA_EXHAUSTED_MESSAGE, code: QUOTA_EXHAUSTED_CODE });
-					return;
 				} else if (err instanceof ProviderKeyMissingError) {
 					results.push({ filePath, ok: false, requestIndex, outcome: "failed", error: err.envelope.error,
 						code: PROVIDER_KEY_MISSING_CODE, provider: err.envelope.provider, slots: err.envelope.slots });
