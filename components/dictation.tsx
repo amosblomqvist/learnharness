@@ -90,26 +90,15 @@ export { isDictationActive, isDictationRetained } from "@/components/dictation-s
  *     indicator would stay lit) — hence the owner's optimistic meter.
  *
  * Groq engine (Settings → Providers → Dictation → Engine; Deepgram stays the
- * default and the paths above are untouched by it): Groq has no token mint, so
- * nothing streams to it from the browser. The same worklet capture graph runs,
- * but its linear16 frames feed a chunk session (dictation-groq-chunks.ts): about
- * every 15 s of speech, cut at a pause, goes to /api/stt/transcribe (the server
- * holds GROQ_API_KEY and forwards to Groq's Whisper) in the background while the
- * recording goes on. The texts wait in order and NOTHING shows until the user
- * stops; then the last chunk is sent, the outstanding ones are awaited and the
- * whole transcript lands once, through the same deferred flush. A readiness GET
- * runs beside the mic, so a missing key refuses before the user has spoken. A
- * recording caps at GROQ_MAX_RECORDING_SECONDS: reaching it stops and
- * transcribes, never discards. After the stop the phase is "stopping" with
- * `transcribing` set; Esc there stops waiting but keeps the audio (see below).
- * A failed chunk does NOT lose the speech: after its automatic retries the
- * session keeps every chunk's audio in memory (never written anywhere), no
- * partial transcript is inserted, the error shows beside Retry and Dismiss,
- * and finish() resolves false so a submit path keeps its draft instead of
- * sending it without what was said. Retry re-sends only the failed chunks and
- * then inserts the whole transcript. The audio is dropped on success, on
- * Dismiss, when a new recording starts, on Esc while recording (an explicit
- * cancel) and on unmount.
+ * default and the paths above are untouched by it): the same worklet capture
+ * graph feeds a chunk session (dictation-groq-chunks.ts) instead of a socket.
+ * Chunks go to /api/stt/transcribe while recording continues, and NOTHING shows
+ * until the user stops; then the whole transcript lands once, through the same
+ * deferred flush. A recording caps at GROQ_MAX_RECORDING_SECONDS: reaching it
+ * stops and transcribes, never discards. A failed chunk does NOT lose the
+ * speech: the audio stays in memory for Retry (see finishGroqRun), no partial
+ * transcript is inserted, and finish() resolves false so a submit path keeps its
+ * draft instead of sending it without what was said.
  */
 
 /*
@@ -288,8 +277,7 @@ export type Dictation = {
 	 *  recording or unmount. Always false for Deepgram. */
 	retryable: boolean;
 	/** Send the failed chunks again. No-op when no recording is kept or a
-	 *  transcription is already running. The whole transcript lands through the
-	 *  usual deferred flush; nothing is submitted. */
+	 *  transcription is already running; nothing is submitted. */
 	retry: () => void;
 	/** End + KEEP the transcript: flush the deferred buffer into the primary
 	 *  input (the Stop pill and ⌘D). */
@@ -368,8 +356,7 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 	/** Which engine this run uses (null until its preference is read). Set once
 	 *  per run, in start(). */
 	const engineRef = useRef<DictationProvider | null>(null);
-	/** Groq: the chunk session of the run in progress (recording, or waiting for
-	 *  its last chunks, or being retried). */
+	/** Groq: the chunk session of the run in progress (recording, finishing or being retried). */
 	const sessionRef = useRef<ChunkSession | null>(null);
 	/** Groq: the session with a failed chunk, kept in memory for Retry. Only
 	 *  success, dismissal, a new recording or unmount drop it — cleanup() leaves
@@ -628,12 +615,10 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 	}, [openSocket, cleanup, getPreference, keepRecording]);
 
 	/** Wait for a Groq run's chunks and buffer the whole transcript for the one
-	 *  deferred flush. `resume` re-sends the failed chunks instead of ending the
-	 *  recording. Success drops the session; failure KEEPS it (and shows the
-	 *  error) so Retry can send what failed again. Every outcome ends in
-	 *  cleanup(); a stale `gen` (cancel, unmount) means that already happened and
-	 *  nothing here may touch the run, so a cancelled run neither keeps nor
-	 *  flushes anything. */
+	 *  deferred flush (`resume` re-sends the failed chunks instead of ending the
+	 *  recording). Success drops the session; failure keeps it, with the error,
+	 *  for Retry. A stale `gen` (cancel, unmount) means cleanup already ran and
+	 *  nothing here may touch the run. */
 	const finishGroqRun = useCallback(async (gen: number, session: ChunkSession, resume: boolean) => {
 		sessionRef.current = session;
 		setTranscribing(true);
@@ -651,10 +636,8 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 		cleanup();
 	}, [cleanup, keepRecording]);
 
-	/** Send the failed chunks again. Same pipeline as the first pass, so the
-	 *  phase reads "stopping" + Finishing transcription…, Esc stops waiting (the
-	 *  recording stays kept — only success, dismissal or a new recording drop it)
-	 *  and the whole transcript lands through the usual flush. */
+	/** Send the failed chunks again, through the same pipeline as the first pass
+	 *  (phase "stopping"; Esc stops waiting but the recording stays kept). */
 	const retry = useCallback(() => {
 		const session = retainedRef.current;
 		if (!session || sessionRef.current) return;

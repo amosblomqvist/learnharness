@@ -19,9 +19,9 @@ export const GROQ_DICTATION_ROW = "dictation:GROQ_API_KEY";
 const ENDPOINT = "/api/stt/transcribe";
 const headers = { [GROQ_DICTATION_HEADER]: "1" };
 
-/** A failed chunk request. `message` is fit to show the user; `retryable` says
- * whether sending the same chunk again may work (a rate limit, an outage, a
- * dropped connection) and `retryAfterMs` is the wait the server asked for. */
+/** A failed chunk request: `message` is fit to show the user, `retryable` says
+ * whether sending the same chunk again may work, `retryAfterMs` is the wait the
+ * server asked for. */
 export class GroqRequestError extends Error {
 	constructor(message: string, readonly retryable: boolean, readonly retryAfterMs?: number) {
 		super(message);
@@ -56,11 +56,10 @@ export async function checkGroqReady(request: typeof fetch = fetch): Promise<voi
 	if (!keys.some((key) => key.id === GROQ_KEY_ID && key.present)) throw new Error(GROQ_DICTATION_KEYLESS);
 }
 
-/** Send one chunk of audio (a WAV) and get its transcript, "" for silence.
- * `prompt` is the end of the previous chunk's transcript, so Whisper continues
- * it. Rejects with a GroqRequestError whose message is fit to show the user. A
- * request aborted through `signal` rejects the same way, so the caller checks
- * `signal.aborted` first and discards the error along with the run. */
+/** Send one chunk (a WAV) and get its transcript, "" for silence. `prompt` is the
+ * end of the previous chunk's transcript. Rejects with a GroqRequestError whose
+ * message is fit to show the user; a request aborted through `signal` rejects the
+ * same way, so the caller checks `signal.aborted` first. */
 export async function transcribeGroq(request: typeof fetch, args: {
 	wav: Uint8Array<ArrayBuffer>;
 	model: GroqWhisperModel;

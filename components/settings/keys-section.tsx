@@ -603,10 +603,8 @@ export function KeysSection({
 					/>
 				))}
 				{label === "Dictation" && <>
-					{/* Groq dictation reuses the Groq model-provider key, so this row edits that
-					    same variable. It has its own open-row id (a present key is also a row in
-					    Model API keys) and no Delete: removing the key here would silently take
-					    Groq models away too. */}
+					{/* The same GROQ_API_KEY as Model API keys, with its own open-row id and no
+					    Delete: removing it here would also take Groq models away. */}
 					<KeyTableRow
 						label="Groq"
 						docsUrl="https://console.groq.com/keys"

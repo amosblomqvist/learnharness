@@ -6,20 +6,17 @@ import {
 } from "./dictation.ts";
 
 /**
- * Cuts a live PCM16 recording into chunks of about 15 seconds for Groq's
- * Whisper, which transcribes whole files. Pure: no timers, no audio APIs.
+ * Cuts a live PCM16 recording into chunks of about 15 s for Groq's Whisper,
+ * which transcribes whole files. Pure: no timers, no audio APIs.
  *
- * Where to cut. Cutting at a fixed 15 s would split words. Once 18 s are
- * buffered, the cut goes at the quietest point between 12 s and 18 s, found by
- * short-term energy, so it lands in a pause between words or phrases. Among
- * points about as quiet as the quietest (within 3 dB) the one nearest 15 s is
- * taken, so chunks stay near the target. 18 s is also the hard limit: a chunk
- * never runs longer, even if the speaker never pauses.
+ * A fixed 15 s cut would split words, so once 18 s are buffered the cut goes at
+ * the quietest point between 12 s and 18 s (short-term energy), preferring one
+ * near 15 s among the nearly-as-quiet (within 3 dB). 18 s is also the hard
+ * limit, even if the speaker never pauses.
  *
- * What not to send. A chunk with almost no sound is dropped; Whisper invents
- * text ("Thank you.") for silence, and a request for it is wasted. So is a
- * final chunk under 0.3 s: it is a stray click or the moment before the stop
- * button, not speech. The caller only ever sees chunks worth sending.
+ * Whisper invents text ("Thank you.") for silence, so a chunk with almost no
+ * sound is dropped, and so is a final chunk under 0.3 s (a stray click or the
+ * moment before the stop button). The caller only sees chunks worth sending.
  */
 
 /** Level below which a 20 ms frame counts as silent: -50 dBFS, the floor of the
@@ -29,9 +26,7 @@ export const SILENCE_RMS = 10 ** (-50 / 20);
  * single click or pop is shorter; the shortest spoken word is longer. */
 export const MIN_VOICED_MS = 100;
 const FRAME_MS = 20;
-/** How long a stretch has to stay quiet to count as a pause when choosing a cut. */
 const PAUSE_MS = 100;
-/** How often a cut position is considered. */
 const STEP_MS = 10;
 /** Quiet points within this energy factor (3 dB) of the quietest compete on closeness to 15 s. */
 const NEAR_QUIETEST = 2;

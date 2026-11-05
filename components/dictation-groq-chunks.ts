@@ -3,38 +3,31 @@ import { GroqRequestError, transcribeGroq } from "@/components/dictation-groq";
 
 /**
  * One Groq dictation run, from the first captured frame to the finished
- * transcript. Audio is cut into chunks of about 15 s while the user is still
- * talking (src/core/dictation-chunks.ts); each chunk is sent to
- * /api/stt/transcribe in the background, and its text is kept at its place in
- * the order. Nothing is shown until the run ends: stop() sends the last,
- * partial chunk, waits for the rest and resolves with the whole transcript.
+ * transcript. Audio is cut into chunks while the user is still talking
+ * (src/core/dictation-chunks.ts), each chunk is sent to /api/stt/transcribe in
+ * the background, and its text waits at its place in the order. stop() sends the
+ * last chunk and resolves with the whole transcript.
  *
- * Chunks go ONE AT A TIME, in order, not in parallel. A chunk takes a second
- * or two to transcribe and the next one is only ready 15 s later, so a single
- * request in flight keeps up with a live recording, and the stop adds one
- * request to wait for, not a queue. In exchange each chunk is sent with the end
- * of the previous chunk's transcript as Whisper's `prompt`, so a sentence that
- * crosses a boundary keeps its spelling, casing and punctuation, which parallel
- * requests cannot do. One request at a time also means a rate limit is met
- * with one request, not a burst, and a retry's backoff holds the line.
+ * Chunks go ONE AT A TIME, in order: a chunk takes a second or two and the next
+ * is ready 15 s later, so one request in flight keeps up. Each carries the end of
+ * the previous transcript as Whisper's `prompt`, so a sentence across a boundary
+ * keeps its spelling and punctuation (parallel requests cannot do that), and a
+ * rate limit is met with one request, not a burst.
  *
- * The audio of EVERY chunk is kept until the run is dropped, which the caller
- * does once the transcript is safely inserted, on an explicit dismissal or when
- * a new recording starts. A chunk that still fails after its automatic retries
- * is marked failed and the run carries on with the later chunks; stop() then
- * reports the failure instead of a partial transcript, and retry() sends only
- * the failed chunks again before reporting the whole transcript. Memory is
- * bounded by the session limit: 32 KB per second of speech.
+ * The audio of EVERY chunk is kept until the caller drops the run (transcript
+ * inserted, dismissal, a new recording). A chunk that still fails after its
+ * automatic retries is marked failed and later chunks carry on; stop() then
+ * reports the failure instead of a partial transcript, and retry() re-sends only
+ * the failed ones. Memory is bounded by the session limit: 32 KB per second.
  */
 
 /** Tries per chunk, the first included: the request is repeated at most twice. */
 const MAX_ATTEMPTS = 3;
 /** Wait before the first repeat; doubles for the next. */
 const BACKOFF_MS = 1000;
-/** A Retry-After longer than this is not waited out: the chunk fails at once,
- * its message says how long to wait, and the Retry button picks it up later. */
+/** A Retry-After longer than this is not waited out: the chunk fails at once, its
+ * message says how long to wait, and Retry picks it up later. */
 const MAX_RETRY_WAIT_MS = 20_000;
-/** How much of the previous transcript goes along as Whisper's prompt. */
 export const PROMPT_TAIL_CHARS = 100;
 /** Chunks shorter than this get no prompt: Whisper tends to echo a prompt back
  * when there is almost no audio to transcribe. */
@@ -63,7 +56,6 @@ type ChunkState = {
 export type ChunkSession = {
 	/** Captured audio (PCM16). Ignored once the run has been stopped or cancelled. */
 	push(audio: Int16Array): void;
-	/** Seconds of audio captured so far. */
 	readonly seconds: number;
 	/** End the recording: send the last chunk, wait for every chunk, and report
 	 * the transcript or the failure. Calling it again returns the same promise. */

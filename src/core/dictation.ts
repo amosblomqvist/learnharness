@@ -90,7 +90,7 @@ export function deepgramListenUrl(language: DictationLanguage): string {
 }
 
 /** Dictation engines. Deepgram streams over a browser WebSocket and stays the
- * default; Groq records first and sends one Whisper upload through our server. */
+ * default; Groq sends chunks of the recording to Whisper through our server. */
 export const DICTATION_PROVIDERS = ["deepgram", "groq"] as const;
 export type DictationProvider = (typeof DICTATION_PROVIDERS)[number];
 export const DEFAULT_DICTATION_PROVIDER: DictationProvider = "deepgram";
@@ -116,28 +116,22 @@ export const GROQ_KEY_ID = "GROQ_API_KEY";
 /** Same-origin intent header the dictation client sends to /api/stt/transcribe. */
 export const GROQ_DICTATION_HEADER = "x-learnharness-dictation";
 
-/** Groq's documented upload limit is 25 MB on the free tier (100 MB on the
- * dev tier, which needs a URL upload for the top of that range). The docs do
- * not say MB or MiB, so the decimal figure is used. Each request is one chunk
- * of at most 18 s, 576 KB, so the limit is far away; the route still enforces
- * it, and its own body ceiling, on every request. */
+/** Groq's documented upload limit on the free tier. The docs do not say MB or
+ * MiB, so the decimal figure is used. A chunk is at most 576 KB, so the limit is
+ * far away; the route still enforces it. */
 export const GROQ_MAX_UPLOAD_BYTES = 25_000_000;
 /** Request-body ceiling: the file plus multipart framing. It must stay inside
  * next.config.ts's proxyClientMaxBodySize, or Next hands the route a truncated body. */
 export const GROQ_MAX_BODY_BYTES = GROQ_MAX_UPLOAD_BYTES + 64 * 1024;
 export const DICTATION_SAMPLE_RATE = 16_000;
-/** The longest single dictation: 20 minutes, after which it stops and
- * transcribes what it has. Two things set it. Memory: a run keeps the audio of
- * every chunk until the transcript is inserted, 32 KB per second, so 20 minutes
- * is at most 38.4 MB in the page. Quota: Groq's free tier allows about 7,200
- * audio-seconds an hour and bills each request at least 10 s (chunks are 12 s
- * or more, so nothing is rounded up), so one 20-minute run, about 80 requests,
- * uses a sixth of an hour's allowance and nowhere near the 20 requests a minute. */
+/** The longest single dictation: 20 minutes, after which it stops and transcribes
+ * what it has. A run keeps every chunk's audio (32 KB per second, 38.4 MB at the
+ * cap) until the transcript is inserted; its roughly 80 requests also stay well
+ * inside Groq's free-tier limits. */
 export const GROQ_MAX_RECORDING_SECONDS = 1200;
-/** Groq dictation is sent in chunks of about this long while the user is still
- * speaking (see dictation-chunks.ts). The cut goes at the quietest point
- * between MIN and MAX; MAX is also the longest a chunk can be. At 16 kHz mono
- * 16-bit, MAX is 576 KB, far below Groq's upload limit. */
+/** Chunk lengths for Groq dictation (see dictation-chunks.ts): the cut goes at the
+ * quietest point between MIN and MAX, preferring one near TARGET; MAX is also the
+ * longest a chunk can be. */
 export const GROQ_CHUNK_TARGET_SECONDS = 15;
 export const GROQ_CHUNK_MIN_SECONDS = 12;
 export const GROQ_CHUNK_MAX_SECONDS = 18;

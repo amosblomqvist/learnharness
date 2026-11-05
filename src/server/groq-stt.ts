@@ -1,33 +1,18 @@
 /**
- * The Groq (Whisper) dictation transport, behind /api/stt/transcribe.
+ * The Groq (Whisper) dictation transport, behind /api/stt/transcribe. Groq has
+ * no short-lived token mint, so the key stays here (GROQ_API_KEY, through
+ * keyValue) and the audio passes through the local server on its way to Groq.
  *
- * Groq has no short-lived token mint like Deepgram's, so the browser cannot
- * talk to it without holding the real key. The renderer records a dictation
- * run, wraps it in a WAV and posts it here; this reads GROQ_API_KEY
- * server-side (the existing model-provider key, through keyValue) and
- * forwards the audio to Groq's OpenAI-compatible transcription endpoint. The
- * key never reaches the browser. Audio therefore passes through the local
- * server on its way to Groq (unlike Deepgram's browser-direct stream).
+ * POST multipart: `audio` (WAV), `model`, `language` (a dictation code, mapped
+ * to Whisper's or omitted so Whisper auto-detects) and `prompt` (the end of the
+ * previous chunk's transcript). Answers `{ text }`, or `{ message, retryable }`
+ * where `retryable` says whether sending the same request again may work.
  *
- * POST multipart fields: `audio` (WAV, required), `model` (a Groq Whisper
- * model id, default turbo), `language` (a dictation language code; mapped to
- * Whisper's code, or omitted so Whisper auto-detects), `prompt` (optional: the
- * end of the previous chunk's transcript, so Whisper continues it). Response
- * `{ text }`; failures `{ message, retryable }`, where `retryable` says whether
- * the same request may succeed if sent again (a rate limit, an outage, a
- * timeout).
- *
- * Trust: proxy.ts already gates every /api route behind the desktop
- * capability. A multipart POST is a CORS "simple request", so a page on
- * another origin could fire one without a preflight and spend the user's Groq
- * quota; like the subscription controls this therefore also demands
- * same-origin browser intent (custom header, Sec-Fetch-Site, and an Origin
- * equal to the Host-derived origin on POST). That is not user authentication,
- * grants no CORS, and is no defence against DNS rebinding (a forged Host with
- * a matching Origin passes), the same limit the subscription controls have.
- *
- * If the browser goes away mid-request the call to Groq is aborted too, so a
- * closed tab stops spending quota.
+ * Trust: a multipart POST is a CORS "simple request", so a page on another
+ * origin could fire one and spend the user's quota. Like the subscription
+ * controls, this demands same-origin browser intent (sameOriginIntent). That is
+ * not user authentication and no defence against DNS rebinding. If the browser
+ * goes away mid-request the call to Groq is aborted too.
  */
 import {
 	DEFAULT_GROQ_WHISPER_MODEL,
@@ -44,12 +29,11 @@ import { keyValue } from "./keys.ts";
 import { sameOriginIntent } from "./web-subscription-http.ts";
 
 const GROQ_TRANSCRIPTIONS_URL = "https://api.groq.com/openai/v1/audio/transcriptions";
-/** Whisper turbo transcribes a capped recording in seconds; this only bounds a hang. */
+/** A chunk transcribes in seconds; this only bounds a hang. */
 const GROQ_TIMEOUT_MS = 90_000;
 const HEADERS = { "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff" };
 const TOO_LARGE = "The recording is too large for Groq. Dictate in shorter runs.";
 
-/** `retryable` tells the client whether sending the same request again may work. */
 function fail(status: number, message: string, options: { retryable?: boolean; headers?: HeadersInit } = {}): Response {
 	return Response.json({ message, retryable: options.retryable === true }, { status, headers: { ...HEADERS, ...options.headers } });
 }
@@ -87,9 +71,8 @@ async function readForm(request: Request): Promise<FormData> {
 	}
 }
 
-/** Groq's error body is OpenAI-shaped: { error: { message } }. It is relayed
- * to the learner, so the key is scrubbed from it first (Groq does not echo
- * keys; this is defence in depth). */
+/** Groq's error body is OpenAI-shaped: { error: { message } }. It is shown to
+ * the learner, so the key is scrubbed from it first (defence in depth). */
 async function groqDetail(res: Response, key: string): Promise<string> {
 	const text = await res.text().catch(() => "");
 	let detail = text;
@@ -100,10 +83,8 @@ async function groqDetail(res: Response, key: string): Promise<string> {
 	return detail.replaceAll(key, "[redacted]").slice(0, 200);
 }
 
-/** Map a Groq failure to a user-facing message. 429 and 413 keep their status
- * (the client may react); everything else is a 502 so it is never mistaken for
- * our own 400/403/415/503. A 429 passes Groq's Retry-After on as a header, and
- * 429 and 5xx are marked retryable. */
+/** Map a Groq failure to a user-facing message. 429 and 413 keep their status;
+ * everything else is a 502 so it is never mistaken for our own 400/403/415/503. */
 async function groqFailure(res: Response, key: string): Promise<Response> {
 	const detail = await groqDetail(res, key);
 	switch (res.status) {
@@ -133,7 +114,6 @@ async function groqFailure(res: Response, key: string): Promise<Response> {
 	}
 }
 
-/** POST: validate the upload, forward it to Groq, return `{ text }`. */
 export async function groqTranscribeResponse(request: Request): Promise<Response> {
 	if (!sameOriginIntent(request, GROQ_DICTATION_HEADER)) return forbidden();
 	// Key before body: a keyless request must not make the client's upload buffer first.
@@ -180,7 +160,6 @@ export async function groqTranscribeResponse(request: Request): Promise<Response
 			method: "POST",
 			headers: { Authorization: `Bearer ${key}` },
 			body: upstream,
-			// Stop when the browser goes away as well as on the timeout.
 			signal: AbortSignal.any([request.signal, AbortSignal.timeout(GROQ_TIMEOUT_MS)]),
 		});
 	} catch (err) {
