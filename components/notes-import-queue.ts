@@ -32,14 +32,10 @@ export function createNotesImportQueue(post: (files: readonly File[]) => Promise
 	};
 	// Normalize a synchronously throwing transport to the same async settlement.
 	const send = async (file: File) => post([file]);
-	/** Confirmed quota exhaustion: stop dispatching and drain everything still
-	 * queued as distinctly unattempted; already in-flight requests settle
-	 * honestly in their own finally blocks. */
-	const drainPending = () => {
-		for (const { file, index } of pending.splice(0)) failures.set(index, `${notesPath(file)}: ${QUOTA_UNATTEMPTED_MESSAGE}`);
-	};
 	function pump(): void {
-		while (active < 3 && pending.length > 0 && !quotaExhausted) {
+		// Confirmed quota exhaustion: nothing queued is dispatched; each is reported as not attempted.
+		if (quotaExhausted) for (const { file, index } of pending.splice(0)) failures.set(index, `${notesPath(file)}: ${QUOTA_UNATTEMPTED_MESSAGE}`);
+		while (active < 3 && pending.length > 0) {
 			const { file, index } = pending.shift()!;
 			active++;
 			void (async () => {
@@ -48,16 +44,10 @@ export function createNotesImportQueue(post: (files: readonly File[]) => Promise
 					if (!r) throw new Error("Invalid import response. Check the graph before retrying.");
 					if (!r.ok) {
 						const details = [r.provider, r.missing?.join(", "), r.slots?.join(", ")].filter(Boolean);
-						// A quota result is fully explained by its message; its code is
-						// an internal discriminator, not something to show the learner.
-						const showCode = r.code && r.code !== QUOTA_EXHAUSTED_CODE;
-						failures.set(index, `${r.filePath}: ${r.error}${showCode ? `\n${[r.code, ...details].join(" — ")}` : ""}`);
-						// Only the route's confirmed discriminator halts the cycle;
-						// raw provider text alone never does.
-						if (r.code === QUOTA_EXHAUSTED_CODE) {
-							quotaExhausted = true;
-							drainPending();
-						}
+						// A quota result is explained by its message; its code is internal.
+						const quota = r.code === QUOTA_EXHAUSTED_CODE;
+						failures.set(index, `${r.filePath}: ${r.error}${r.code && !quota ? `\n${[r.code, ...details].join(" — ")}` : ""}`);
+						if (quota) quotaExhausted = true; // pump() in the finally block drains the rest
 					} else if (r.notice) notices.set(index, `${r.filePath}: ${r.notice}`);
 				} catch (error) {
 					// Never retry an ambiguous response: the merge may have committed.
@@ -84,7 +74,6 @@ export function createNotesImportQueue(post: (files: readonly File[]) => Promise
 				else if (file.size > MAX_IMPORT_BYTES) failures.set(index, `${path}: Too big. Max 25 MB.`);
 				else pending.push({ file, index });
 			}
-			if (quotaExhausted) drainPending(); // appended during settlement: never dispatched
 			const hadWork = active > 0 || pending.length > 0;
 			pump();
 			publish(!hadWork);
