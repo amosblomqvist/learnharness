@@ -65,14 +65,6 @@
 	--lh-prose-leading: 1.5;
 	/* Markdown heading weight (appearance settings; 900 = the Black cut). */
 	--lh-heading-weight: 900;
-	/* Markdown alignment (appearance settings; left = today's look). The
-	   box margin pushes content-hugging tables/callouts right for Right;
-	   Center caps the transcript column instead (none = full width). */
-	--lh-md-align: left;
-	--lh-md-hyphens: manual;
-	--lh-md-box-ml: 0;
-	--lh-md-list-flip: 0;
-	--lh-chat-column-max: none;
 }
 
 /* The app is always dark (<html class="dark">); mirror the same values so
@@ -108,14 +100,6 @@
 	--lh-prose-leading: 1.5;
 	/* Markdown heading weight (appearance settings; 900 = the Black cut). */
 	--lh-heading-weight: 900;
-	/* Markdown alignment (appearance settings; left = today's look). The
-	   box margin pushes content-hugging tables/callouts right for Right;
-	   Center caps the transcript column instead (none = full width). */
-	--lh-md-align: left;
-	--lh-md-hyphens: manual;
-	--lh-md-box-ml: 0;
-	--lh-md-list-flip: 0;
-	--lh-chat-column-max: none;
 }
 
 /* CMU Serif bold (titles) — bundled local file, no CDN dependency. */
@@ -262,8 +246,8 @@ body {
    element (the column's max-w-none), so they stay unlayered to beat them. */
 @layer components {
 	.lh-md {
-		text-align: var(--lh-md-align);
-		hyphens: var(--lh-md-hyphens);
+		text-align: var(--lh-md-align, left);
+		hyphens: var(--lh-md-hyphens, manual);
 	}
 }
 
@@ -273,15 +257,15 @@ body {
    --lh-md-list-flip is 1 only under Right; the markers stay inline at the
    start of each item's first line (list-inside), attached to the text. */
 .lh-md :where(ul, ol) {
-	padding-left: calc((1 - var(--lh-md-list-flip)) * 1.5rem);
-	padding-right: calc(var(--lh-md-list-flip) * 1.5rem);
+	padding-left: calc((1 - var(--lh-md-list-flip, 0)) * 1.5rem);
+	padding-right: calc(var(--lh-md-list-flip, 0) * 1.5rem);
 }
 
 /* Tables and callouts HUG their content, so aligning their text alone
    barely shows; Right moves the box itself (a callout's text aligns too;
    a table's cells stay left, see the pin rule below). */
 .lh-md :where([data-streamdown="table"], [data-alert-kind]) {
-	margin-left: var(--lh-md-box-ml);
+	margin-left: var(--lh-md-box-ml, 0);
 }
 
 /* Center follows a readable line length: the whole transcript column
