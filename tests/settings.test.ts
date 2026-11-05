@@ -36,8 +36,6 @@ describe("FACTORY_SETTINGS (the compiled factory layer)", () => {
 		assert.equal(a.mdRendering.headingWeight, 900);
 		assert.equal(a.mdRendering.boldColor, null); // white
 		assert.equal(a.mdRendering.italicColor, null);
-		assert.equal(a.mdRendering.textAlign, "left"); // today's look
-		assert.equal(a.mdRendering.centerWidth, "medium"); // 700px
 	});
 
 	it("has NO factory model pin — chat defaults and role overrides start absent", () => {

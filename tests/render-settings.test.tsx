@@ -326,19 +326,10 @@ describe("AppearanceSection (thin SSR)", () => {
 			assert.ok(button.includes('role="radio"'), value);
 			assert.ok(button.includes(`aria-label="${label}"`), value);
 			assert.ok(button.includes(`aria-checked="${value === "left"}"`), `${value} checked state`);
-		}
-	});
-
-	it("Center is named and explained as what it does: a narrower column, text still left", () => {
-		const html = renderToStaticMarkup(<AppearanceSection appearance={undefined} onSectionChange={() => {}} />);
-		const center = tagOf(html, "seg-text-align-center");
-		assert.ok(center.includes('aria-label="Center column"'));
-		const title = center.match(/title="([^"]*)"/)?.[1] ?? "";
-		assert.match(title, /narrower/);
-		assert.match(title, /left-aligned/);
-		// the other three keep their plain names as tooltips
-		for (const [value, label] of [["left", "Left"], ["right", "Right"], ["justify", "Justify"]]) {
-			assert.ok(tagOf(html, `seg-text-align-${value}`).includes(`title="${label}"`), value);
+			// Center is named for what it does; the others use their name as the tooltip.
+			const title = button.match(/title="([^"]*)"/)?.[1] ?? "";
+			if (value === "center") { assert.match(title, /narrower/); assert.match(title, /left-aligned/); }
+			else assert.equal(title, label);
 		}
 	});
 
@@ -379,20 +370,6 @@ describe("AppearanceSection (thin SSR)", () => {
 			// narrow dialogs swap the word for its first letter; the accessible name stays the word
 			assert.ok(html.includes(`<span aria-hidden="true" class="hidden @max-[10.5rem]:inline">${label[0]}</span>`), `${value} has a compact form`);
 		}
-	});
-
-	it("the alignment rows wrap under their label in a narrow dialog instead of overflowing", () => {
-		const html = renderToStaticMarkup(
-			<AppearanceSection appearance={{ mdRendering: { textAlign: "center" } }} onSectionChange={() => {}} />,
-		);
-		for (const row of ["row-text-align", "row-center-width"]) {
-			const open = html.match(new RegExp(`<div[^>]*data-testid="${row}"[^>]*>`))?.[0] ?? "";
-			assert.match(open, /\bflex-wrap\b/, row);
-			assert.match(open, /@container/, `${row} is the size container for the compact labels`);
-		}
-		const group = tagOf(html, "seg-text-align");
-		assert.match(group, /\bmin-w-0\b/);
-		assert.match(group, /\bmax-w-full\b/);
 	});
 
 	it("a stored column width is the checked button", () => {

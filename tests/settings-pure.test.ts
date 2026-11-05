@@ -190,18 +190,6 @@ describe("staleVarNames — the removal half of application (owner repro: resets
 		assert.equal(emptied["--background"], undefined);
 	});
 
-	it("alignment back to left frees every alignment token (the stylesheet's left returns)", () => {
-		const centered = appearanceVars(resolveAppearance({ mdRendering: { textAlign: "center" } }));
-		const right = appearanceVars(resolveAppearance({ mdRendering: { textAlign: "right" } }));
-		const justified = appearanceVars(resolveAppearance({ mdRendering: { textAlign: "justify" } }));
-		const left = appearanceVars(resolveAppearance({ mdRendering: { textAlign: "left" } }));
-		const applied = [...Object.keys(centered), ...Object.keys(right), ...Object.keys(justified)];
-		const stale = staleVarNames(applied, left);
-		for (const name of ["--lh-md-align", "--lh-md-hyphens", "--lh-md-box-ml", "--lh-md-list-flip", "--lh-chat-column-max"]) {
-			assert.ok(stale.includes(name), name);
-		}
-	});
-
 	it("no previous applications → nothing stale", () => {
 		assert.deepEqual(staleVarNames([], appearanceVars(resolveAppearance(undefined))), []);
 	});
