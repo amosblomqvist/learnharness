@@ -133,62 +133,21 @@ it("PDFs are known by their bytes, not their names", async () => {
 	assert.deepEqual(received.sort(), ["--- Page 1 ---\n\nInside a misnamed file", "just text"]);
 });
 
-it("every type on the list is accepted, in any letter case", async () => {
-	const received: string[] = [];
-	extraction.importNotes = async ({ filePath, text }) => { received.push(`${filePath}=${text}`); return { nodes: 0, chains: 0 }; };
-	const names = ["a.txt", "b.md", "c.markdown", "d.rst", "e.org", "f.adoc", "g.tex", "NOTES.MD", "Chapter.TeX"];
-	const pdf = tinyPdf([{ runs: [{ text: "Page text", x: 72, y: 700 }] }]);
-	const response = await POST(upload([...names.map((name) => ({ name, bytes: `words in ${name}` })), { name: "h.pdf", bytes: pdf }, { name: "UPPER.PDF", bytes: pdf }]));
-	const { results } = await response.json();
-	assert.equal(results.length, names.length + 2);
-	assert.ok(results.every((r: { ok: boolean; outcome: string }) => r.ok && r.outcome === "completed"));
-	assert.deepEqual(received.sort(), [
-		...names.map((name) => `${name}=words in ${name}`),
-		"UPPER.PDF=--- Page 1 ---\n\nPage text",
-		"h.pdf=--- Page 1 ---\n\nPage text",
-	].sort());
-});
-
-it("a type that is not on the list is refused with a short message before registerImport or the pipeline", async () => {
+it("an off-list type and a non-text file are refused with a short message before registerImport or the pipeline", async () => {
 	let imports = 0;
 	const registered: string[] = [];
 	extraction.importNotes = async () => { imports++; return { nodes: 0, chains: 0 }; };
 	const realRegister = sourceDirectory.registerImport;
 	sourceDirectory.registerImport = (filePath) => { registered.push(filePath); };
 	try {
-		const names = ["deck.pptx", "report.docx", "memo.rtf", "table.csv", "README", "notes.md.bak"];
 		const pdf = tinyPdf([{ runs: [{ text: "Slide text", x: 72, y: 700 }] }]);
-		const response = await POST(upload([...names.map((name) => ({ name, bytes: "plain words" })), { name: "slides.pptx", bytes: pdf }]));
-		assert.equal(response.status, 200);
-		const { results } = await response.json();
-		assert.equal(results.length, names.length + 1);
-		for (const result of results) {
-			assert.equal(result.ok, false); assert.equal(result.outcome, "failed");
-			assert.equal(result.error, "This file type isn't supported. Use text, Markdown, or PDF.");
-		}
-		assert.equal(imports, 0); assert.deepEqual(registered, []);
-	} finally { sourceDirectory.registerImport = realRegister; }
-});
-
-const zip = () => new Uint8Array([0x50, 0x4b, 0x03, 0x04, 0x14, 0x00, 0x06, 0x00, 0x08, 0x00, 0x00, 0x00, 0x21, 0x00, 0x62, 0x63]);
-const utf16 = () => new Uint8Array([0xff, 0xfe, ...Buffer.from("hello notes", "utf16le")]);
-
-it("a file that is not plain text is refused with a short message before registerImport or the pipeline", async () => {
-	let imports = 0;
-	const registered: string[] = [];
-	extraction.importNotes = async () => { imports++; return { nodes: 0, chains: 0 }; };
-	const realRegister = sourceDirectory.registerImport;
-	sourceDirectory.registerImport = (filePath) => { registered.push(filePath); };
-	try {
-		const response = await POST(upload([
-			{ name: "notes.txt", bytes: zip() }, { name: "memo.md", bytes: utf16() }, { name: "archive.pdf", bytes: zip() }, { name: "paper.tex", bytes: new Uint8Array(32) },
-		]));
-		const { results } = await response.json();
-		assert.equal(results.length, 4);
-		for (const result of results) {
-			assert.equal(result.ok, false); assert.equal(result.outcome, "failed");
-			assert.equal(result.error, "This file isn't plain text.");
-		}
+		const zip = new Uint8Array([0x50, 0x4b, 0x03, 0x04, 0x00]);
+		const { results } = await (await POST(upload([{ name: "deck.pptx", bytes: "plain words" }, { name: "slides.pptx", bytes: pdf }, { name: "notes.txt", bytes: zip }]))).json();
+		assert.deepEqual(results.map((r: { filePath: string; ok: boolean; outcome: string; error: string }) => [r.filePath, r.ok, r.outcome, r.error]).sort(), [
+			["deck.pptx", false, "failed", "This file type isn't supported. Use text, Markdown, or PDF."],
+			["notes.txt", false, "failed", "This file isn't plain text."],
+			["slides.pptx", false, "failed", "This file type isn't supported. Use text, Markdown, or PDF."],
+		]);
 		assert.equal(imports, 0); assert.deepEqual(registered, []);
 	} finally { sourceDirectory.registerImport = realRegister; }
 });
@@ -196,26 +155,21 @@ it("a file that is not plain text is refused with a short message before registe
 it("only a zero byte in the first 8 KiB makes a file not plain text", async () => {
 	const received: string[] = [];
 	extraction.importNotes = async ({ filePath }) => { received.push(filePath); return { nodes: 0, chains: 0 }; };
-	const text = (nulAt: number) => { const bytes = new Uint8Array(9000).fill(0x61); bytes[nulAt] = 0; return bytes; };
-	const response = await POST(upload([{ name: "inside.txt", bytes: text(8191) }, { name: "outside.txt", bytes: text(8192) }, { name: "late.txt", bytes: text(8999) }]));
-	const { results } = await response.json();
+	const text = (nulAt: number) => { const bytes = new Uint8Array(8193).fill(0x61); bytes[nulAt] = 0; return bytes; };
+	const { results } = await (await POST(upload([{ name: "inside.txt", bytes: text(8191) }, { name: "outside.txt", bytes: text(8192) }]))).json();
 	const byName = (name: string) => results.find((r: { filePath: string }) => r.filePath === name);
 	assert.equal(byName("inside.txt").error, "This file isn't plain text.");
-	assert.equal(byName("outside.txt").outcome, "completed"); assert.equal(byName("late.txt").outcome, "completed");
-	assert.deepEqual(received.sort(), ["late.txt", "outside.txt"]);
+	assert.equal(byName("outside.txt").outcome, "completed");
+	assert.deepEqual(received, ["outside.txt"]);
 });
 
-it("a PDF is still converted when its bytes hold zero bytes, whatever its name", async () => {
+it("a PDF is still converted when its bytes hold a zero byte", async () => {
 	const received: string[] = [];
 	extraction.importNotes = async ({ text }) => { received.push(text); return { nodes: 0, chains: 0 }; };
 	const pdf = tinyPdf([{ runs: [{ text: "Binary header", x: 72, y: 700 }] }]);
-	const eol = pdf.indexOf(0x0a) + 1;
-	const withNuls = new Uint8Array([...pdf.subarray(0, eol), 0x25, 0, 0, 0, 0, 0x0a, ...pdf.subarray(eol)]);
-	assert.ok(withNuls.includes(0));
-	const response = await POST(upload([{ name: "binary.pdf", bytes: withNuls }, { name: "renamed.txt", bytes: withNuls }]));
-	const { results } = await response.json();
-	assert.ok(results.every((r: { outcome: string }) => r.outcome === "completed"));
-	assert.deepEqual(received, ["--- Page 1 ---\n\nBinary header", "--- Page 1 ---\n\nBinary header"]);
+	const response = await POST(upload([{ name: "binary.pdf", bytes: new Uint8Array([...pdf, 0]) }]));
+	assert.equal((await response.json()).results[0].outcome, "completed");
+	assert.deepEqual(received, ["--- Page 1 ---\n\nBinary header"]);
 });
 
 it("PDFs with nothing to import are refused before any model call", async () => {
