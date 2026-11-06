@@ -396,7 +396,8 @@ test("download shows progress from the poll, Cancel keeps the partial, Use sets 
 	await click(within(row(), `local-model-${model.id}-cancel`)!);
 	assert.deepEqual(f.posts.at(-1)!.body, { action: "cancel" });
 	assert.equal(row().getAttribute("data-phase"), "idle");
-	assert.match(within(row(), `local-model-${model.id}-download`)!.textContent!, /^Resume \(\d+ MiB left\)$/);
+	assert.equal(within(row(), `local-model-${model.id}-download`)!.textContent, "Resume");
+	assert.match(within(row(), `local-model-${model.id}-left`)!.textContent!, /^\d+ MiB left$/);
 	const afterCancel = f.lists;
 	await act(async () => { mock.timers.tick(5000); });
 	assert.equal(f.lists, afterCancel, "nothing is polled once no download runs");
@@ -687,8 +688,10 @@ test("the rows lock while a dictation run is live, but a download can still be c
 	const f = fixture({ dictation: local({ localPreferredLanguages: ["zh"], localModel: model.id }), installed: [model.id] });
 	f.statuses.set("whisper-large-v3", { ...idle("whisper-large-v3"), download: { state: "downloading", bytes: 10, total: 100 } });
 	await mount(<Rows />);
+	for (const id of ["row-local-languages", "row-local-language", "row-local-chinese"]) assert.doesNotMatch(must(id).className, /opacity-40/, `${id} is not dimmed while idle`);
 	await act(async () => { setDictationActive(true); });
 	await settle();
+	for (const id of ["row-local-languages", "row-local-language", "row-local-chinese"]) assert.match(must(id).className, /opacity-40/, `${id} dims with the engine row`);
 	assert.equal((must("local-languages-toggle") as HTMLButtonElement).disabled, true);
 	assert.equal(select("select-local-chinese").disabled, true);
 	assert.equal(select("select-local-language").disabled, true);

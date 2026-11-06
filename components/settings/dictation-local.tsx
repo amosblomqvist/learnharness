@@ -134,7 +134,7 @@ type LocalModels = ReturnType<typeof useLocalModels>;
 
 const FOCUS_RING = "outline-none focus-visible:border-ring focus-visible:ring-1 focus-visible:ring-ring";
 const BUTTON = cn(
-	"h-7 shrink-0 rounded-sm border border-border bg-background px-2 font-ui text-xs text-foreground transition-colors",
+	"h-7 max-w-full shrink-0 rounded-sm border border-border bg-background px-2 font-ui text-xs text-foreground transition-colors",
 	"hover:border-muted-foreground/50 disabled:cursor-not-allowed disabled:text-muted-foreground/40", FOCUS_RING,
 );
 const LINK = "underline underline-offset-2 hover:text-foreground";
@@ -165,9 +165,11 @@ function SpeedMeter({ level, steps, waitSeconds, tier }: { level: number; steps:
 
 // ── preferred languages ─────────────────────────────────────────────────────
 
-function PreferredLanguagesRow({ selected, disabled, onChange }: {
+function PreferredLanguagesRow({ selected, disabled, dimmed, onChange }: {
 	selected: readonly string[];
 	disabled: boolean;
+	/** A dictation run is live (not just a save in flight): the whole row dims, as the engine row does. */
+	dimmed: boolean;
 	onChange: (next: string[]) => void;
 }) {
 	const [open, setOpen] = useState(false);
@@ -186,7 +188,7 @@ function PreferredLanguagesRow({ selected, disabled, onChange }: {
 	};
 
 	return <>
-		<SettingsRow label="Preferred languages" hint="Used to recommend models" testid="row-local-languages" dimmed={disabled} wrap>
+		<SettingsRow label="Preferred languages" hint="Used to recommend models" testid="row-local-languages" dimmed={dimmed} wrap>
 			<SettingsMenuTrigger
 				ref={triggerRef}
 				value={summarizeLanguages(selected)}
@@ -300,9 +302,11 @@ function DownloadControls({ name, size, status, busy, onAction, onIntent, testid
 		</>;
 	}
 	const label = download?.state === "error" ? "Retry" : status.partialBytes > 0 ? "Resume" : "Download";
-	return <button type="button" data-testid={`${testid}-download`} data-focus="primary" disabled={busy} onClick={() => act("download")} className={BUTTON}>
-		{label}{label === "Resume" && <span className="text-muted-foreground"> ({formatBinarySize(Math.max(0, size - status.partialBytes))} left)</span>}
-	</button>;
+	return <>
+		<button type="button" data-testid={`${testid}-download`} data-focus="primary" disabled={busy} onClick={() => act("download")} className={BUTTON}>{label}</button>
+		{/* Beside the button, not inside it: a button that cannot wrap would overflow a narrow dialog. */}
+		{status.partialBytes > 0 && <span data-testid={`${testid}-left`} className="text-[11px] text-muted-foreground">{formatBinarySize(Math.max(0, size - status.partialBytes))} left</span>}
+	</>;
 }
 
 const phaseOf = (status: LocalModelStatus, inUse: boolean, confirming: boolean): Phase =>
@@ -433,7 +437,7 @@ function RatingsHelp({ tier }: { tier: MachineTier }) {
 		{open && <div id={panelId} data-testid="local-ratings-help" className="flex flex-col gap-2 rounded-sm border border-border/60 p-2 text-[11px] leading-relaxed text-muted-foreground">
 			<div>
 				<p className="font-ui text-xs text-foreground">Accuracy</p>
-				<p>You don't always need the most accurate model: a coding assistant can often understand you even when a few words are wrong.</p>
+				<p>You don't always need the most accurate model: the assistant can often understand you even when a few words are wrong.</p>
 				<ul className="mt-1 flex flex-col gap-0.5">
 					{(Object.keys(ACCURACY_GRADE_HELP) as (keyof typeof ACCURACY_GRADE_HELP)[]).map((letter) => <li key={letter}><span className="font-mono text-foreground">{letter}</span> {ACCURACY_GRADE_HELP[letter]}</li>)}
 				</ul>
@@ -577,6 +581,7 @@ export function DictationLocalSettings() {
 		<PreferredLanguagesRow
 			selected={preferred}
 			disabled={locked}
+			dimmed={active}
 			onChange={(next) => void save({
 				localPreferredLanguages: next,
 				// Auto and the chosen language only make sense for these preferences.
@@ -589,11 +594,12 @@ export function DictationLocalSettings() {
 			preferred={preferred}
 			value={chosenLanguage}
 			disabled={locked}
+			dimmed={active}
 			models={models}
 			onChange={(next) => void save({ localLanguage: next })}
 		/>}
 
-		{showsChineseOutput(preferred, chosenLanguage) && <SettingsRow label="Chinese output" hint="Character style for Chinese text" testid="row-local-chinese" dimmed={locked && active} wrap>
+		{showsChineseOutput(preferred, chosenLanguage) && <SettingsRow label="Chinese output" hint="Character style for Chinese text" testid="row-local-chinese" dimmed={active} wrap>
 			<ThinSelect
 				value={chineseOutput}
 				ariaLabel="Chinese output"
@@ -623,11 +629,12 @@ export function DictationLocalSettings() {
 	</>;
 }
 
-function TranscriptionLanguageRow({ model, preferred, value, disabled, models, onChange }: {
+function TranscriptionLanguageRow({ model, preferred, value, disabled, dimmed, models, onChange }: {
 	model: CatalogModel;
 	preferred: readonly string[];
 	value: string;
 	disabled: boolean;
+	dimmed: boolean;
 	models: LocalModels;
 	onChange: (next: string) => void;
 }) {
@@ -643,7 +650,7 @@ function TranscriptionLanguageRow({ model, preferred, value, disabled, models, o
 	const detectorError = detector && (models.actionErrors[detector.id] ?? (detector.download?.state === "error" ? detector.download.message ?? "The download failed. Try again." : undefined));
 
 	return <>
-		<SettingsRow label="Transcription language" hint={hint} testid="row-local-language" dimmed={disabled} wrap>
+		<SettingsRow label="Transcription language" hint={hint} testid="row-local-language" dimmed={dimmed} wrap>
 			<ThinSelect value={shown} ariaLabel="Transcription language" testid="select-local-language" disabled={disabled} onChange={onChange}>
 				{choices.map((choice) => <option key={choice.value} value={choice.value}>{choice.label}</option>)}
 			</ThinSelect>
