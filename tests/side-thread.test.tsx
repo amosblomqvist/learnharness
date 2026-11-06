@@ -1,111 +1,80 @@
-import React from "react";
-(globalThis as Record<string, unknown>).React = React;
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { parseHTML } from "linkedom";
-import { noteStatus, parseBtw, SideThreadBody, sideThreadPlaceholder, createSideQuestionActions } from "../components/side-thread.tsx";
+import { createSideQuestionActions, parseBtw, SideThreadBody, sideThreadPlaceholder, type SideThreadHandlers } from "../components/side-thread.tsx";
 import type { SideThreadState } from "../components/use-side-thread.ts";
-import { CitationActionsContext } from "../components/citation-chip.tsx";
 
-const noop = () => {};
-const handlers = { onAsk: noop, onSetTell: noop, onExpand: noop, onClose: noop };
-const base: SideThreadState = { threadId: "side_1", pairs: [], draft: null, learnerTell: null, mode: "popover", anchor: { kind: "composer" } };
-const answered: SideThreadState = { ...base, pairs: [{ question: "Why multiply?", answer: "The rates compose.", passage: "the derivatives multiply", tell: true, note: "Already clarified: chain rule." }] };
+const state: SideThreadState = { threadId: "side_lesson", segmentId: "lesson", messages: [
+	{ id: "question", role: "user", text: "Why?", quotes: ["Selected words"], at: "2026-11-05T00:00:01Z" },
+	{ id: "answer", role: "assistant", text: "Because it is continuous.", at: "2026-11-05T00:00:02Z" },
+], answering: false, streamText: "", contextFrozen: false, mode: "popover", anchor: { kind: "composer" } };
+const handlers = { onAsk: async () => true, onStop() {}, onExpand() {}, onFloat() {}, onClose() {} };
+const render = (s = state, dictation?: SideThreadHandlers["dictation"]) => parseHTML(`<html><body>${renderToStaticMarkup(<SideThreadBody state={s} dictation={dictation} {...handlers} />)}</body></html>`).document;
 
-function documentFor(state: SideThreadState) {
-	return parseHTML(`<html><body>${renderToStaticMarkup(<SideThreadBody state={state} {...handlers} />)}</body></html>`).document;
-}
+describe("floating/docked raw side conversation", () => {
+	it("shows raw questions and replies, with no summary, tutor toggle, or delete action", () => {
+		const doc = render();
+		assert.equal(doc.querySelector('[data-testid="side-learner-message"]')!.textContent, "Selected wordsWhy?");
+		assert.match(doc.querySelector('[data-testid="side-helper-message"]')!.textContent!, /Because it is continuous/);
+		assert.equal(doc.querySelector('[data-testid="side-context-status"]'), null);
+		assert.ok(doc.querySelector('[data-testid="side-learner-message"]')!.classList.contains("max-w-[70%]"));
+		assert.ok(doc.querySelector('[data-testid="side-learner-message"]')!.classList.contains("ml-auto"));
+		assert.equal(doc.querySelector('[data-testid="side-helper-message"]')!.classList.contains("bg-muted"), false);
+		assert.ok(doc.querySelector('[aria-label="Send side question"]')!.classList.contains("bg-primary"));
+		assert.ok(doc.querySelector('[title="Pin to side"] svg.lucide-pin'));
+		assert.ok(doc.querySelector('[aria-label="Close side conversation"]'));
+		assert.ok(doc.querySelector('[aria-label="Dock side conversation"]'));
+		assert.equal(doc.querySelector('[data-testid="side-note"]'), null);
+		assert.doesNotMatch(doc.body.textContent!, /Tell tutor|Send to tutor|Delete/);
+	});
+	it("keeps an old conversation editable without adding a context-status line", () => {
+		const doc = render({ ...state, contextFrozen: true });
+		assert.equal(doc.querySelector('[data-testid="side-context-status"]'), null);
+		assert.equal(doc.querySelector('textarea')!.hasAttribute("disabled"), false);
+	});
+	it("offers Stop while streaming, never blocks the main answer, and preserves draft editing", () => {
+		const doc = render({ ...state, answering: true, streamText: "Partial helper reply" });
+		assert.match(doc.querySelector('[data-testid="side-streaming-answer"]')!.textContent!, /Partial helper reply/);
+		assert.ok(doc.querySelector('[aria-label="Stop side answer"]'));
+		assert.equal(doc.querySelector('textarea')!.hasAttribute("disabled"), false);
+	});
+	it("can return a docked conversation to its floating window", () => {
+		const doc = render({ ...state, mode: "panel" });
+		assert.ok(doc.querySelector('[aria-label="Float side conversation"]'));
+		assert.ok(doc.querySelector('[title="Unpin to float"] svg.lucide-pin-off'));
+	});
+	it("places the side microphone inside the input and makes its recording state red", () => {
+		const dictation = { phase: "idle" as const, active: false, blocked: false, error: null, toggle() {}, finish: async () => {} };
+		const idle = render(state, dictation);
+		assert.ok(idle.querySelector("textarea")!.parentElement!.querySelector('[aria-label="Start side dictation"]'));
+		const active = render(state, { ...dictation, phase: "recording", active: true });
+		assert.equal(active.querySelector('[data-testid="side-dictation-toggle"]')!.getAttribute("aria-pressed"), "true");
+		assert.ok(active.querySelector('[data-testid="side-dictation-toggle"]')!.classList.contains("text-red-500"));
+	});
+	it("keeps failed partial replies and offers an explicit retry", () => {
+		const doc = render({ ...state, messages: [...state.messages, { id: "failed", role: "assistant", text: "Partial…", error: "Request failed", at: "" }] });
+		assert.match(doc.body.textContent!, /Partial…/);
+		assert.match(doc.querySelector('[role="alert"]')!.textContent!, /Request failed/);
+		assert.ok(Array.from(doc.querySelectorAll("button")).some((button) => button.textContent === "Retry answer"));
+	});
+	it("uses short contextual placeholders without a create-new-thread limit", () => {
+		assert.equal(sideThreadPlaceholder({ ...state, messages: [] }), "Ask a side question…");
+		assert.equal(sideThreadPlaceholder(state), "Ask a follow-up…");
+		assert.equal(sideThreadPlaceholder({ ...state, pendingPassage: { text: "Quote", sourceMessageId: "lesson" } }), "Ask about this passage…");
+	});
+});
 
-describe("parseBtw", () => {
-	it("recognizes the command and its question", () => {
-		assert.deepEqual(parseBtw("/btw why multiply?"), { question: "why multiply?" });
-		assert.deepEqual(parseBtw("  /btw   spaced  "), { question: "spaced" });
+describe("side entry points", () => {
+	it("keeps /btw as a distinct command", () => {
+		assert.deepEqual(parseBtw("/btw why?"), { question: "why?" });
 		assert.deepEqual(parseBtw("/btw"), { question: "" });
-		assert.deepEqual(parseBtw("/btw\nmultiline\nquestion"), { question: "multiline\nquestion" });
-		assert.equal(parseBtw("/btwx"), null);
-		assert.equal(parseBtw("by the way /btw"), null);
+		assert.equal(parseBtw("/btween"), null);
 	});
-});
-
-describe("SideThreadBody", () => {
-	it("shows the header, the pair, the note and what happens to it", () => {
-		const document = documentFor(answered);
-		assert.match(document.body.textContent!, /Side question/);
-		assert.match(document.body.textContent!, /Why multiply\?/);
-		assert.match(document.body.textContent!, /the derivatives multiply/);
-		assert.match(document.body.textContent!, /Already clarified: chain rule\./);
-		assert.equal(document.querySelector('[data-testid="side-note-status"]')!.textContent, "Sent to the tutor when you close·Don't send");
-		assert.equal(document.querySelector('[role="switch"]'), null);
-		assert.deepEqual([...document.querySelectorAll("button[aria-label]")].map((b) => b.getAttribute("aria-label")), ["Expand", "Close"]);
-	});
-
-	it("follows the learner's choice and hides Expand in the panel", () => {
-		const document = documentFor({ ...answered, learnerTell: false, mode: "panel" });
-		assert.equal(document.querySelector('[data-testid="side-note-status"]')!.textContent, "Kept private·Send to tutor");
-		assert.equal(document.querySelector('button[aria-label="Expand"]'), null);
-	});
-
-	it("clamps a long note to two lines with Show more", () => {
-		const long = { ...answered, pairs: [{ ...answered.pairs[0]!, note: "word ".repeat(60) }] };
-		const document = documentFor(long);
-		assert.match(document.querySelector('[data-testid="side-note"] p')!.getAttribute("class")!, /line-clamp-2/);
-		assert.ok([...document.querySelectorAll("button")].some((b) => b.textContent === "Show more"));
-		assert.ok(![...documentFor(answered).querySelectorAll("button")].some((b) => b.textContent === "Show more"), "a short note has no link");
-	});
-
-	it("reopened read-only: you can ask a follow-up, and a private thread can still be told", () => {
-		const readOnly = { ...answered, readOnly: { thread: [{ question: "Why multiply?", answer: "x" }], note: "n", toldTutor: false } };
-		const document = parseHTML(`<html><body>${renderToStaticMarkup(<SideThreadBody state={readOnly} {...handlers} onTellTutor={noop} />)}</body></html>`).document;
-		assert.equal(document.querySelector('[data-testid="side-thread-input"]')!.getAttribute("placeholder"), "Ask a follow-up…");
-		assert.equal(document.querySelector('[data-testid="side-note-status"]')!.textContent, "Kept private·Tell tutor");
-		assert.deepEqual(noteStatus({ ...readOnly, readOnly: { ...readOnly.readOnly, toldTutor: true } }), { text: "Told the tutor" });
-	});
-
-	it("makes the header a drag handle only in the popover", () => {
-		const html = (drag: boolean) => parseHTML(`<html><body>${renderToStaticMarkup(<SideThreadBody state={answered} {...handlers} {...(drag ? { onDragStart: noop } : {})} />)}</body></html>`).document;
-		assert.match(html(true).querySelector('[data-testid="side-thread-header"]')!.getAttribute("class")!, /cursor-grab/);
-		assert.doesNotMatch(html(false).querySelector('[data-testid="side-thread-header"]')!.getAttribute("class")!, /cursor-grab/);
-	});
-
-	it("links a quote back to the tutor text when its source is known", () => {
-		const selector = { start: 4, end: 28, prefix: "and ", suffix: " here" };
-		const linked = { ...answered, pairs: [{ ...answered.pairs[0]!, sourceMessageId: "msg_1", selector }] };
-		const html = (state: SideThreadState) => parseHTML(`<html><body>${renderToStaticMarkup(
-			<CitationActionsContext.Provider value={{ openSource: noop }}>
-				<SideThreadBody state={state} chatId="chat_1" {...handlers} />
-			</CitationActionsContext.Provider>,
-		)}</body></html>`).document;
-		assert.match(html(linked).querySelector('[data-testid="side-passage-link"]')!.textContent!, /the derivatives multiply/);
-		const textOnly = { ...answered, pairs: [{ ...answered.pairs[0]!, sourceMessageId: "msg_1" }] };
-		assert.ok(html(textOnly).querySelector('[data-testid="side-passage-link"]'), "older threads link by text");
-		assert.equal(html(answered).querySelector('[data-testid="side-passage-link"]'), null, "no source message, plain quote");
-	});
-
-	it("shows the answer streaming in", () => {
-		const document = documentFor({ ...base, draft: { question: "q?", answer: "", activity: "read notes.md" } });
-		assert.match(document.body.textContent!, /read notes\.md/);
-	});
-});
-
-describe("sideThreadPlaceholder", () => {
-	it("follows the thread's state", () => {
-		assert.equal(sideThreadPlaceholder(base), "Ask a side question…");
-		assert.equal(sideThreadPlaceholder({ ...base, pendingPassage: { text: "p", sourceMessageId: "m" } }), "Ask about this passage…");
-		assert.equal(sideThreadPlaceholder(answered), "Ask a follow-up…");
-		assert.equal(sideThreadPlaceholder({ ...base, pairs: Array.from({ length: 20 }, () => answered.pairs[0]!) }), "This side thread is full. Close it to start a new one.");
-	});
-});
-
-describe("createSideQuestionActions", () => {
-	it("offers Ask with no thread open, and New question / Add to question with one", () => {
-		let open = false;
-		const actions = createSideQuestionActions({ threadOpen: () => open, open: noop, addPassage: noop });
-		const capture = { messageId: "m", range: {} as Range, selector: { text: "x", start: 0, end: 1, prefix: "", suffix: "" } };
-		assert.deepEqual(actions.filter((a) => a.visible(capture)).map((a) => a.label), ["Ask"]);
-		open = true;
-		assert.deepEqual(actions.filter((a) => a.visible(capture)).map((a) => a.label), ["New question", "Add to question"]);
-		const long = { ...capture, selector: { ...capture.selector, text: "x".repeat(8_001) } };
-		assert.equal(actions[0]!.disabledLabel!(long), "Shorten selection");
+	it("has one quiet selection Ask action, independent of whether a companion is already open", () => {
+		const actions = createSideQuestionActions({ open() {} });
+		assert.deepEqual(actions.map((action) => action.label), ["Ask"]);
+		assert.equal(actions[0]!.visible({ messageId: "lesson", range: render().createRange(), selector: { text: "Words", start: 0, end: 5, prefix: "", suffix: "" } }), true);
 	});
 });

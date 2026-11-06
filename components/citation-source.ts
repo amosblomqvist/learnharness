@@ -60,12 +60,13 @@ export function citationSourceHref({ chatId, messageId }: Pick<TutorCitation, "c
 
 let stopPulse: (() => void) | null = null;
 
-/** Two quick pulses, a hold, then gone (one steady hold under reduced motion). */
+/** Exactly two quick pulses, then gone (one short steady hold under reduced motion). */
+export function citationPulseSteps(reducedMotion: boolean): ReadonlyArray<readonly [on: boolean, at: number]> {
+	return reducedMotion ? [[true, 0], [false, 750]] : [[true, 0], [false, 250], [true, 500], [false, 750]];
+}
 function pulse(range: Range, reducedMotion: boolean): void {
 	stopPulse?.();
-	const steps: Array<[on: boolean, at: number]> = reducedMotion
-		? [[true, 0], [false, 1_800]]
-		: [[true, 0], [false, 325], [true, 650], [false, 975], [true, 1_300], [false, 2_900]];
+	const steps = citationPulseSteps(reducedMotion);
 	let clear: () => void = () => {};
 	const timers = steps.map(([on, at]) => window.setTimeout(() => {
 		clear();

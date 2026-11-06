@@ -1,12 +1,11 @@
 /**
- * SIDE QUESTIONS (inline clarification threads, owner design 2026-11-02).
+ * SIDE QUESTIONS: #487's durable threads and quoted visible-lesson model
+ * context, combined with #451's shared floating companion and selection.
  *
- * The learner opens side threads on paragraph-level blocks of teacher
- * prose (every Ask is its own thread; a block may carry several); a
- * separate, tool-less call on the session's own model answers them.
- * The thread lives in `ChatRecord.sideChats` — never in `messages` — so the
- * teaching/practice agents, extraction, coverage and compaction never see
- * it ("don't pollute the main flow").
+ * One explanation and its associated question share a tool-less helper
+ * conversation. UI history lives in `ChatRecord.sideChats`; main submission
+ * freezes its raw exchange into an attributed custom message. Later side
+ * activity stays durable and interactable, but cannot alter teacher context.
  *
  * This module is the pure half: input validation, thread lookup, and the
  * side model's view of the lesson. The lesson is handed over as a QUOTED
@@ -23,8 +22,9 @@
  */
 
 import type { AssistantMessage, ToolResultMessage } from "@earendil-works/pi-ai";
-import type { SideChatAnchor, SideChatMessage, SideChatThread } from "./contracts/chat.ts";
+import type { ChatRecord, SideChatAnchor, SideChatMessage, SideChatThread } from "./contracts/chat.ts";
 import type { LhMarkerMessage, LhMessage } from "./native-messages.ts";
+import type { LhViewMessage, LhViewPart } from "./view.ts";
 import {
 	activeProblemOf,
 	failedOutputCallIds,
@@ -37,9 +37,85 @@ import {
 	userFacingTextOf,
 } from "./native-messages.ts";
 import { activeCompactionOf, keptIndexFor } from "./compaction.ts";
+import { citationsToReadableText } from "./citations.ts";
 import { messageMarkdown } from "./session-markdown.ts";
-import { normalizeOptions, type QuestionAnswerData } from "./question-core.ts";
-import { QUESTION_TOOLS } from "./pending.ts";
+import { normalizeOptions, seededRandom, shuffleOptions, type QuestionAnswerData } from "./question-core.ts";
+import { QUESTION_TOOLS, toolQuestionKind } from "./pending.ts";
+
+// ─── shared segment identity and main-agent history ──────────────────────────
+
+/** One explanation and its check share a thread. Native assistant steps and
+ * tool traffic do not create new segments; a real learner input does. Side
+ * conversation markers are neutral and never split their own source segment. */
+function scanSideSegments(messages: readonly LhMessage[]) {
+	let segment: string | null = null;
+	const byMessage = new Map<string, string | null>();
+	for (const message of messages) {
+		if (message.role === "user" || (message.role === "toolResult" &&
+			(QUESTION_TOOLS as readonly string[]).includes(message.toolName) && !message.isError) ||
+			(message.role === "custom" && ["practice-thinking", "practice-next"].includes(message.customType))) {
+			segment = null;
+		} else if (message.role === "assistant") {
+			segment ??= message.id;
+		}
+		byMessage.set(message.id, segment);
+	}
+	return { byMessage, current: segment };
+}
+export function sideSegmentId(messages: readonly LhMessage[], sourceMessageId?: string): string | null {
+	const segments = scanSideSegments(messages);
+	return sourceMessageId ? segments.byMessage.get(sourceMessageId) ?? null : segments.current;
+}
+
+/** Native answer results do not break the continuous assistant view group.
+ * Put one quiet entry at each segment boundary within that group, not merely
+ * one at the group's end. The final entry is keyed by parts.length. */
+export function sideEntryPoints(messages: readonly LhMessage[], view: readonly LhViewMessage[]): ReadonlyMap<string, ReadonlyMap<number, string>> {
+	const { byMessage } = scanSideSegments(messages);
+	const forParts = (parts: readonly LhViewPart[]) => {
+		const entries = new Map<number, string>();
+		let source: string | null = null;
+		let visible = false;
+		for (const [index, part] of parts.entries()) {
+			if (part.type === "step-start") {
+				const next = byMessage.get(part.sourceMessageId ?? "") ?? null;
+				if (next !== source) {
+					if (source && visible && !source.startsWith("c_")) entries.set(index, source);
+					source = next; visible = false;
+				}
+			}
+			visible ||= (part.type === "text" && !!part.text?.trim()) || part.type === "tool-problem" ||
+				(part.type.startsWith("tool-") && (QUESTION_TOOLS as readonly string[]).includes(part.type.slice(5)));
+		}
+		if (source && visible && !source.startsWith("c_")) entries.set(parts.length, source);
+		return entries;
+	};
+	return new Map(view.filter((message) => message.role === "assistant").map((message) => [message.id, forParts(message.parts)]));
+}
+
+/** A frozen snapshot enters the native transcript exactly once. Later side
+ * activity cannot alter it or append more teacher context for this segment. */
+export function sideConversationEntries(record: Pick<ChatRecord, "messages" | "sideChats">, after: readonly LhMessage[] = record.messages): LhMarkerMessage[] {
+	const present = new Set(after.map((message) => message.id));
+	return (record.sideChats ?? []).flatMap<LhMarkerMessage>((thread) => {
+		const id = `exchange_${thread.id}`;
+		const snapshot = thread.contextSnapshot;
+		if (!snapshot?.length || present.has(id)) return [];
+		const exchange = snapshot.map((message) => {
+			const quoted = (message.quotes ?? []).map((quote) => `Quoted tutor passage:\n${quote}`).join("\n\n");
+			const status = message.pending ? "\n[This helper reply was still generating when the learner submitted or dismissed this step.]" :
+				message.stopped ? "\n[The learner stopped this helper reply; it is incomplete.]" :
+				message.error ? "\n[This helper reply failed; any text above is incomplete.]" : "";
+			return `${quoted ? `${quoted}\n\n` : ""}${message.role === "user" ? "Learner" : "Helper"}:\n${message.text}${status}`;
+		}).join("\n\n");
+		return [{
+			id, role: "custom", customType: "side-question",
+			content: `Recorded learner–helper conversation\nTeaching segment: ${thread.anchor.messageId}\nConversation: ${thread.id}\n\n${exchange}\n\nEnd of recorded learner–helper conversation.`,
+			details: { threadId: thread.id, segmentMessageId: thread.anchor.messageId, snapshot },
+			display: false, timestamp: Date.parse(snapshot.at(-1)!.at),
+		}];
+	});
+}
 
 // ─── limits ──────────────────────────────────────────────────────────────────
 
@@ -63,6 +139,10 @@ export interface SideAskInput {
 	text: string;
 	quotes: string[];
 	retry?: boolean;
+	/** Stable across an uncertain POST retry: never generate twice for one ask. */
+	requestId?: string;
+	/** Current unsubmitted working; reference context, not a submitted answer. */
+	working?: string;
 }
 
 const ID_RE = /^[A-Za-z0-9_-]{1,128}$/;
@@ -94,9 +174,12 @@ export function parseSideAnchor(raw: unknown): SideChatAnchor {
 export function parseSideAskInput(raw: unknown): SideAskInput {
 	if (!raw || typeof raw !== "object") throw new SideChatInputError("body must be an object");
 	const body = raw as Record<string, unknown>;
+	if (body.requestId !== undefined && (typeof body.requestId !== "string" || !ID_RE.test(body.requestId))) throw new SideChatInputError("requestId is invalid");
+	if (body.working !== undefined && (typeof body.working !== "string" || body.working.length > SIDE_QUESTION_MAX_CHARS)) throw new SideChatInputError("working is invalid or too long");
+	const extra = { ...(typeof body.requestId === "string" ? { requestId: body.requestId } : {}), ...(typeof body.working === "string" ? { working: body.working } : {}) };
 	if (body.retry === true) {
 		if (typeof body.threadId !== "string" || !ID_RE.test(body.threadId)) throw new SideChatInputError("retry needs a valid threadId");
-		return { threadId: body.threadId, text: "", quotes: [], retry: true };
+		return { threadId: body.threadId, text: "", quotes: [], retry: true, ...extra };
 	}
 	const text = typeof body.text === "string" ? body.text.trim() : "";
 	if (!text) throw new SideChatInputError("text must be a non-empty string");
@@ -110,10 +193,10 @@ export function parseSideAskInput(raw: unknown): SideAskInput {
 	const threadId = body.threadId;
 	if (threadId !== undefined) {
 		if (typeof threadId !== "string" || !ID_RE.test(threadId)) throw new SideChatInputError("threadId is invalid");
-		return { threadId, text, quotes: quotes.map((q) => clip(q, SIDE_QUOTE_MAX_CHARS)) };
+		return { threadId, text, quotes: quotes.map((q) => clip(q, SIDE_QUOTE_MAX_CHARS)), ...extra };
 	}
 	if (body.anchor === undefined) throw new SideChatInputError("either threadId or anchor is required");
-	return { anchor: parseSideAnchor(body.anchor), text, quotes: quotes.map((q) => clip(q, SIDE_QUOTE_MAX_CHARS)) };
+	return { anchor: parseSideAnchor(body.anchor), text, quotes: quotes.map((q) => clip(q, SIDE_QUOTE_MAX_CHARS)), ...extra };
 }
 
 /** Parse the window-state body ({open: boolean}). */
@@ -130,7 +213,7 @@ export function newSideThreadId(): string {
 }
 
 export function newSideThread(anchor: SideChatAnchor, at = new Date().toISOString()): SideChatThread {
-	return { id: newSideThreadId(), anchor, open: true, createdAt: at, messages: [] };
+	return { id: `side_${anchor.messageId}`, anchor, open: true, createdAt: at, messages: [] };
 }
 
 export function newSideQuestion(text: string, quotes: readonly string[], at = new Date().toISOString()): SideChatMessage {
@@ -219,7 +302,7 @@ function answeredQuestionMarkdown(result: ToolResultMessage, input: Record<strin
 }
 
 /** An OPEN question: the learner-visible half only — never the key. */
-function openQuestionMarkdown(tool: string, input: unknown): string | null {
+function openQuestionMarkdown(tool: string, input: unknown, toolCallId: string): string | null {
 	if (!input || typeof input !== "object") return null;
 	const args = input as Record<string, unknown>;
 	const question = typeof args.question === "string" ? args.question.trim() : "";
@@ -228,8 +311,9 @@ function openQuestionMarkdown(tool: string, input: unknown): string | null {
 	const details = typeof args.details === "string" ? args.details.trim() : "";
 	if (details) lines.push(details);
 	if (tool !== "explain" && tool !== "recall") {
-		const options = normalizeOptions(args.options as Parameters<typeof normalizeOptions>[0]);
-		if (options.length > 0) lines.push(options.map((o) => `- ${o.label}`).join("\n"));
+		const rawOptions = normalizeOptions(args.options as Parameters<typeof normalizeOptions>[0]);
+		const options = toolQuestionKind(tool) === "quiz" ? shuffleOptions(rawOptions, seededRandom(toolCallId)) : rawOptions;
+		if (options.length > 0) lines.push(options.map((o, index) => `${index + 1}. ${o.label}`).join("\n"));
 	}
 	return lines.join("\n\n");
 }
@@ -245,8 +329,8 @@ function problemMarkdown(args: Record<string, unknown> | undefined, open: boolea
 
 /**
  * The lesson as one markdown document for the side model. Honors the
- * active compaction cut (summary, then the kept tail) exactly as the
- * teacher's own context does. Teacher prose, learner text, practice
+ * active compaction cut (retained tail, never its private summary).
+ * An open assessment is preserved even before the cut. Teacher prose, learner text, practice
  * thinking, answered/open questions and practice problems render; other
  * tool traffic and scaffolding markers do not.
  */
@@ -258,7 +342,8 @@ export function sideChatLessonDocument(messages: readonly LhMessage[]): string {
 		const kept = keptIndexFor(messages, marker);
 		if (kept >= 0) {
 			start = kept;
-			blocks.push(`### Summary of the earlier part of the session\n\n${marker.content}`);
+			// A model-private summary may contain the open assessment's key.
+			blocks.push("### Earlier session history\n\nEarlier history is omitted after compaction; its private summary is not supplied to the helper.");
 		}
 	}
 	const calls = new Map<string, { name: string; args: Record<string, unknown> | undefined }>();
@@ -271,6 +356,20 @@ export function sideChatLessonDocument(messages: readonly LhMessage[]): string {
 	const openQuestions = new Set(questionCallsOf(messages).filter((c) => c.status === "answerable").map((c) => c.toolCallId));
 	const activeProblem = activeProblemOf(messages)?.toolCallId ?? null;
 	const failedOutputs = failedOutputCallIds(messages);
+	// An assessment can outlive the retained tail: keep its visible question
+	// or statement without recovering the private summary or answer key.
+	for (const m of messages.slice(0, start)) {
+		if (m.role === "assistant") for (const block of m.content) {
+			if (block.type === "toolCall" && openQuestions.has(block.id)) {
+				const open = openQuestionMarkdown(block.name, block.arguments, block.id);
+				if (open) blocks.push(open);
+			}
+		}
+		if (m.role === "toolResult" && m.toolCallId === activeProblem && !m.isError) {
+			const problem = problemMarkdown(calls.get(m.toolCallId)?.args, true);
+			if (problem) blocks.push(problem);
+		}
+	}
 
 	for (const m of messages.slice(start)) {
 		if (m.role === "user") {
@@ -280,7 +379,7 @@ export function sideChatLessonDocument(messages: readonly LhMessage[]): string {
 			for (const text of userFacingTextOf(assistant.content, failedOutputs)) blocks.push(`### Teacher\n\n${text.trim()}`);
 			for (const block of assistant.content) {
 				if (block.type === "toolCall" && openQuestions.has(block.id)) {
-					const open = openQuestionMarkdown(block.name, block.arguments);
+					const open = openQuestionMarkdown(block.name, block.arguments, block.id);
 					if (open) blocks.push(open);
 				}
 			}
@@ -306,7 +405,7 @@ export function sideChatLessonDocument(messages: readonly LhMessage[]): string {
 			}
 		}
 	}
-	return blocks.join("\n\n");
+	return citationsToReadableText(blocks.join("\n\n"));
 }
 
 // ─── the model turns ─────────────────────────────────────────────────────────

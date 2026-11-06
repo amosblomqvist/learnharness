@@ -136,18 +136,6 @@ export function projectView(messages: readonly LhMessage[], live?: LiveTurnState
 		}
 	}
 
-	// Threads told after they closed (#16): their chips show as told.
-	// …and threads a later one continues give way to it (one chip, at the
-	// conversation's latest point).
-	const toldLater = new Set<string>();
-	const continued = new Set<string>();
-	for (const message of messages) {
-		if (message.role !== "custom") continue;
-		if (message.customType === "side-question-told") toldLater.add((message.details as { threadId: string }).threadId);
-		const continues = message.customType === "side-question" ? (message.details as { continues?: unknown }).continues : undefined;
-		if (typeof continues === "string") continued.add(continues);
-	}
-
 	const lastAssistant = (): LhViewMessage | undefined => {
 		const last = out[out.length - 1];
 		return last && last.role === "assistant" ? last : undefined;
@@ -204,7 +192,7 @@ export function projectView(messages: readonly LhMessage[], live?: LiveTurnState
 		}
 
 		if (role === "custom") {
-			projectMarker(m as LhMarkerMessage, out, toldLater, continued);
+			projectMarker(m as LhMarkerMessage, out);
 			continue;
 		}
 
@@ -292,9 +280,9 @@ export function projectView(messages: readonly LhMessage[], live?: LiveTurnState
 			const group = lastAssistant();
 			if (group) {
 				// Same group: the step separator renders between the steps.
-				group.parts.push({ type: "step-start" }, ...parts);
+				group.parts.push({ type: "step-start", sourceMessageId: m.id }, ...parts);
 			} else {
-				out.push({ id: m.id, role: "assistant", parts: [{ type: "step-start" }, ...parts] });
+				out.push({ id: m.id, role: "assistant", parts: [{ type: "step-start", sourceMessageId: m.id }, ...parts] });
 			}
 			continue;
 		}
@@ -387,7 +375,7 @@ function applyResultTo(part: LhViewPart | undefined, result: ToolResultMessage):
 }
 
 /** A marker's projected message (handoff/steers) or splice (plan block). */
-function projectMarker(marker: LhMarkerMessage, out: LhViewMessage[], toldLater: ReadonlySet<string>, continued: ReadonlySet<string>): void {
+function projectMarker(marker: LhMarkerMessage, out: LhViewMessage[]): void {
 	switch (marker.customType) {
 		case "graph-context": {
 			// The session's map context (owner, 2026-10-04): user-side —
@@ -464,24 +452,12 @@ function projectMarker(marker: LhMarkerMessage, out: LhViewMessage[], toldLater:
 			});
 			return;
 		}
-		case "side-question": {
-			if (continued.has(marker.id)) return; // a later thread continues it
-			// A closed side thread (#16): a compact chip at its position;
-			// clicking reopens the thread read-only. Told or not, the chip
-			// shows — the details carry the whole thread.
-			out.push({
-				id: marker.id,
-				role: "user",
-				parts: [{
-					type: "data-side-question",
-					id: `sq_${marker.id}`,
-					data: toldLater.has(marker.id) ? { ...(marker.details as object), toldTutor: true } : marker.details,
-				}],
-			});
-			return;
-		}
+		case "side-question":
 		case "side-question-told":
-			return; // folded into its thread's chip
+			// Raw context entries do not split the teaching segment or render
+			// loud transcript pills. Its quiet speech-bubble reopens the saved
+			// conversation in the floating/docked companion.
+			return;
 		case "problem-dismissed":
 			// UI-only (the ask-style dismissal): the synthesized conclude
 			// pair — which rides the NEXT input — carries the record's face.

@@ -54,11 +54,9 @@ export interface ChatRecord {
 	extractions?: ExtractionRunUsage[];
 	/** Per-chat model/thinking overrides for the conversation agents. */
 	settings?: ChatSettings;
-	/** Side questions (inline clarification threads, 2026-11-02): learner
-	 *  questions anchored to a teacher-prose block, answered by a separate
-	 *  tool-less call on the session's model. DELIBERATELY outside
-	 *  `messages`: the teaching/practice agents, extraction, coverage and
-	 *  compaction never read this field. Absent = none. */
+	/** Durable clarification threads. Each explanation and associated check
+	 * shares one thread. Main submission freezes an attributed raw snapshot;
+	 * later activity remains UI-only and never rewrites teacher history. */
 	sideChats?: SideChatThread[];
 	/** SCHEMA STAMP (schema-versioning wave, owner 2026-10-10): LAZY v1 —
 	 *  existing records stay unstamped (absence reads as v1); every write
@@ -69,7 +67,7 @@ export interface ChatRecord {
 }
 
 /** The chat record format this build writes and understands. */
-export const CURRENT_CHAT_VERSION = 1;
+export const CURRENT_CHAT_VERSION = 2;
 
 /** The conversation agents' runtime model choice (model-control wave,
  *  2026-09-12): a per-chat override of config.ts's pinned prober/teacher
@@ -152,14 +150,18 @@ export interface SideChatMessage {
 	at: string;
 	/** assistant only: provider-qualified model ("provider:id"). */
 	model?: string;
+	/** Idempotency identity of the ask/retry producing this reply. */
+	requestId?: string;
 	/** assistant only: the learner stopped the answer; `text` is partial. */
 	stopped?: boolean;
+	/** Snapshot only: this reply was still generating at main submission. */
+	pending?: boolean;
 	/** assistant only: the call failed; `text` is whatever arrived. */
 	error?: string;
 }
 
-/** One side thread = one inline window. A block may carry several,
- *  stacked in creation order. */
+/** One side thread per explanation and associated question, displayed in
+ * the shared floating/docked companion rather than inline windows. */
 export interface SideChatThread {
 	id: string;
 	anchor: SideChatAnchor;
@@ -167,6 +169,9 @@ export interface SideChatThread {
 	open: boolean;
 	createdAt: string;
 	messages: SideChatMessage[];
+	/** Immutable teacher-context cutoff. Undefined = segment still open;
+	 * [] = frozen before any exchange. Later side messages are UI-only. */
+	contextSnapshot?: SideChatMessage[];
 }
 
 /** One model call's token accounting — the SDK's LanguageModelUsage

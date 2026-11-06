@@ -1,112 +1,73 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { displayedTell, sideCloseBody, sideThreadReducer, type SideThreadAction, type SideThreadState } from "../components/use-side-thread.ts";
+import { sideThreadReducer as reduce, type SideThreadState } from "../components/use-side-thread.ts";
+import type { SideChatThread } from "../src/core/contracts/chat.ts";
 
-const run = (...actions: SideThreadAction[]): SideThreadState | null =>
-	actions.reduce<SideThreadState | null>((s, a) => sideThreadReducer(s, a), null);
-const open: SideThreadAction = { type: "open", threadId: "side_1", anchor: { kind: "composer" } };
-const passage = { text: "the derivatives multiply", sourceMessageId: "msg_1" };
+const anchor = { kind: "composer" as const };
+const thread: SideChatThread = { id: "side_lesson", anchor: { messageId: "lesson", partId: "lesson-t0", blockIndex: 0, blockText: "Explanation" },
+	open: true, createdAt: "2026-11-05T00:00:00Z", messages: [{ id: "ask", role: "user", text: "Why?", at: "2026-11-05T00:00:01Z" }] };
+const open = (): SideThreadState => reduce(null, { type: "open", segmentId: "lesson", anchor, thread })!;
 
-describe("sideThreadReducer", () => {
-	it("accumulates streamed text and completes the pair on the note frame", () => {
-		const s = run(open, { type: "ask", question: " Why? " }, { type: "tool", name: "read", label: "notes.md" }, { type: "text", delta: "Be" }, { type: "text", delta: "cause." })!;
-		assert.deepEqual(s.draft, { question: "Why?", answer: "Because." });
-		const done = sideThreadReducer(s, { type: "note", tell: true, note: "n" })!;
-		assert.equal(done.draft, null);
-		assert.deepEqual(done.pairs, [{ question: "Why?", answer: "Because.", tell: true, note: "n" }]);
+describe("one durable side companion", () => {
+	it("opens the existing segment conversation, never a new selection-specific thread", () => {
+		const first = open();
+		assert.equal(first.threadId, "side_lesson");
+		assert.equal(first.messages.length, 1);
+		const docked = reduce(first, { type: "mode", mode: "panel" });
+		const quoted = reduce(docked, { type: "open", segmentId: "lesson", anchor, passage: { text: "Selected words", sourceMessageId: "lesson" } })!;
+		assert.equal(quoted.threadId, first.threadId);
+		assert.equal(quoted.mode, "panel");
+		assert.equal(quoted.messages, first.messages);
+		assert.equal(quoted.pendingPassage?.text, "Selected words");
 	});
-
-	it("shows the tool activity until text arrives", () => {
-		const s = run(open, { type: "ask", question: "q" }, { type: "tool", name: "grep", label: "chain" })!;
-		assert.equal(s.draft?.activity, "grep chain");
-		assert.equal(sideThreadReducer(s, { type: "text", delta: "x" })!.draft?.activity, undefined);
+	it("keeps a newly selected passage through reconnects until that question is accepted", () => {
+		const passage = { text: "For the next question", sourceMessageId: "lesson" };
+		let state = reduce(open(), { type: "open", segmentId: "lesson", anchor, passage });
+		state = reduce(state, { type: "snapshot", thread, answering: true, text: "An earlier answer" });
+		state = reduce(state, { type: "text", threadId: thread.id, text: "An earlier answer continues" });
+		assert.deepEqual(state?.pendingPassage, passage);
+		state = reduce(state, { type: "accepted", threadId: thread.id });
+		assert.equal(state?.pendingPassage, undefined);
 	});
-
-	it("moves the toggle to each new recommendation until the learner flips it", () => {
-		const one = run(open, { type: "ask", question: "a" }, { type: "note", tell: false, note: "n1" })!;
-		assert.equal(displayedTell(one), false);
-		const two = run(open, { type: "ask", question: "a" }, { type: "note", tell: false, note: "n1" }, { type: "ask", question: "b" }, { type: "note", tell: true, note: "n2" })!;
-		assert.equal(displayedTell(two), true);
-		const flipped = sideThreadReducer(sideThreadReducer(two, { type: "set-tell", tell: false }), { type: "ask", question: "c" })!;
-		const three = sideThreadReducer(flipped, { type: "note", tell: true, note: "n3" })!;
-		assert.equal(displayedTell(three), false, "the learner's setting wins");
-		assert.equal(three.learnerTell, false);
+	it("marks a first-time old-step conversation UI-only before an ask exists", () => {
+		assert.equal(reduce(null, { type: "open", segmentId: "old", anchor, contextFrozen: true })?.contextFrozen, true);
 	});
-
-	it("keeps a failed question for retry and restores its passage", () => {
-		const s = run({ ...open, passage }, { type: "ask", question: "Why?" }, { type: "error", error: "boom" })!;
-		assert.equal(s.draft, null);
-		assert.deepEqual(s.failed, { question: "Why?", error: "boom" });
-		assert.deepEqual(s.pendingPassage, passage);
-		const retried = sideThreadReducer(s, { type: "ask", question: "Why?" })!;
-		assert.equal(retried.failed, undefined);
-		assert.equal(retried.draft?.passage, passage.text);
+	it("uses replacement text snapshots, not appended duplicate deltas", () => {
+		let state = reduce(open(), { type: "start", threadId: thread.id });
+		state = reduce(state, { type: "text", threadId: thread.id, text: "One" });
+		state = reduce(state, { type: "text", threadId: thread.id, text: "One sentence." });
+		assert.equal(state?.streamText, "One sentence.");
+		assert.equal(state?.answering, true);
 	});
-
-	it("carries a passage's selector into the question and the close body", () => {
-		const selector = { start: 0, end: 5, prefix: "", suffix: " x" };
-		const s = run(open, { type: "add-passage", passage: { ...passage, selector } }, { type: "ask", question: "q" })!;
-		assert.deepEqual(s.draft?.selector, selector);
-		assert.deepEqual(sideCloseBody(s).pending, { question: "q", passage: passage.text, sourceMessageId: "msg_1", selector });
+	it("never lets a detached stream overwrite the newly opened thread", () => {
+		const next = reduce(open(), { type: "open", segmentId: "next", anchor });
+		assert.equal(reduce(next, { type: "text", threadId: thread.id, text: "STALE" }), next);
+		assert.equal(reduce(next, { type: "done", thread }), next);
+		assert.equal(reduce(next, { type: "error", threadId: thread.id, error: "STALE" }), next);
 	});
-
-	it("attaches an added passage to the next question only", () => {
-		const s = run(open, { type: "ask", question: "a" }, { type: "note", tell: false, note: "n" }, { type: "add-passage", passage }, { type: "ask", question: "b" })!;
-		assert.deepEqual(s.draft, { question: "b", answer: "", passage: passage.text, sourceMessageId: "msg_1" });
-		assert.equal(s.pendingPassage, undefined);
+	it("closing only drops the view; reopening still has its durable history", () => {
+		assert.equal(reduce(open(), { type: "close" }), null);
+		assert.deepEqual(open().messages, thread.messages);
 	});
-
-	it("asks one question at a time and ignores blank ones", () => {
-		const s = run(open, { type: "ask", question: "a" })!;
-		assert.equal(sideThreadReducer(s, { type: "ask", question: "b" }), s);
-		const idle = run(open)!;
-		assert.equal(sideThreadReducer(idle, { type: "ask", question: "   " }), idle);
+	it("can float again after docking, without discarding the conversation", () => {
+		const state = reduce(reduce(open(), { type: "mode", mode: "panel" }), { type: "mode", mode: "popover" });
+		assert.deepEqual(state?.messages, thread.messages);
+		assert.equal(state?.mode, "popover");
 	});
-
-	it("a read-only thread ignores asks and the toggle", () => {
-		const details = { thread: [{ question: "q", answer: "a" }], note: "n", toldTutor: true };
-		const s = run({ type: "open-read-only", threadId: "side_9", details, anchor: { kind: "composer" } })!;
-		assert.equal(sideThreadReducer(s, { type: "ask", question: "more" }), s);
-		assert.equal(sideThreadReducer(s, { type: "set-tell", tell: false }), s);
-		assert.equal(displayedTell(s), true);
+	it("shows the immutable cutoff while later messages remain fully usable", () => {
+		const frozen = { ...thread, contextSnapshot: thread.messages, messages: [...thread.messages, {
+			id: "reply", role: "assistant" as const, text: "A late answer.", at: "2026-11-05T00:00:02Z",
+		}] };
+		const state = reduce(open(), { type: "done", thread: frozen })!;
+		assert.equal(state.contextFrozen, true);
+		assert.equal(state.messages.length, 2);
+		assert.equal(state.answering, false);
+		assert.equal(reduce(state, { type: "snapshot", thread })?.contextFrozen, true, "an older reconnect frame cannot reopen teacher context");
 	});
-
-	it("marks a reopened private thread as told", () => {
-		const details = { thread: [{ question: "q", answer: "a" }], note: "n", toldTutor: false };
-		const s = run({ type: "open-read-only", threadId: "side_9", details, anchor: { kind: "composer" } })!;
-		assert.equal(displayedTell(s), false);
-		assert.equal(displayedTell(sideThreadReducer(s, { type: "told", threadId: "side_9" })!), true);
-		assert.equal(sideThreadReducer(s, { type: "told", threadId: "other" }), s);
-	});
-
-	it("continues a reopened thread under a new id, carrying the old pairs and note", () => {
-		const details = { thread: [{ question: "q", answer: "a" }], note: "old note", toldTutor: true };
-		const reopened = run({ type: "open-read-only", threadId: "side_9", details, anchor: { kind: "composer" } })!;
-		const s = sideThreadReducer(sideThreadReducer(reopened, { type: "continue", threadId: "side_10" }), { type: "ask", question: "more?" })!;
-		assert.equal(s.threadId, "side_10");
-		assert.equal(s.continues, "side_9");
-		assert.equal(s.readOnly, undefined);
-		assert.equal(s.learnerTell, null);
-		assert.deepEqual(s.pairs, [{ question: "q", answer: "a", tell: true, note: "old note" }]);
-		assert.equal(s.draft?.question, "more?");
-		assert.equal(sideCloseBody(s).continues, "side_9");
-		assert.equal(sideThreadReducer(s, { type: "continue", threadId: "x" }), s, "a live thread doesn't continue");
-	});
-
-	it("expands into the panel and closes to nothing", () => {
-		assert.equal(run(open, { type: "expand" })!.mode, "panel");
-		assert.equal(run(open, { type: "close" }), null);
-	});
-});
-
-describe("sideCloseBody", () => {
-	it("sends the pairs, the learner's toggle and the question still streaming", () => {
-		const s = run({ ...open, passage }, { type: "ask", question: "a" }, { type: "note", tell: true, note: "n" }, { type: "set-tell", tell: false }, { type: "add-passage", passage }, { type: "ask", question: "b" })!;
-		assert.deepEqual(sideCloseBody(s), {
-			threadId: "side_1",
-			thread: [{ question: "a", answer: "", passage: passage.text, sourceMessageId: "msg_1", tell: true, note: "n" }],
-			learnerTell: false,
-			pending: { question: "b", passage: passage.text, sourceMessageId: "msg_1" },
-		});
+	it("keeps a refused initial /btw question available rather than silently losing it", () => {
+		const failed = reduce(open(), { type: "error", threadId: thread.id, error: "No model", question: "Why?" });
+		assert.equal(failed?.failedQuestion, "Why?");
+		assert.equal(failed?.answering, false);
+		assert.equal(reduce(failed, { type: "start", threadId: thread.id })?.error, undefined);
 	});
 });

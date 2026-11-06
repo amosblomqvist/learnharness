@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { citationSourceHref, revealPlan } from "../components/citation-source.ts";
+import { citationPulseSteps, citationSourceHref, revealPlan } from "../components/citation-source.ts";
 
 describe("revealPlan", () => {
 	it("navigates to a citation from another chat", () => {
@@ -14,6 +14,15 @@ describe("revealPlan", () => {
 	});
 	it("does nothing when the message is gone", () => {
 		assert.equal(revealPlan({ citationChatId: "a", currentChatId: "a", rangeFound: false, messageFound: false }), "missing");
+	});
+});
+
+describe("compact citation reveal", () => {
+	it("uses exactly two quick pulses and no prolonged final hold", () => {
+		assert.deepEqual(citationPulseSteps(false), [[true, 0], [false, 250], [true, 500], [false, 750]]);
+	});
+	it("respects reduced motion with one short steady highlight", () => {
+		assert.deepEqual(citationPulseSteps(true), [[true, 0], [false, 750]]);
 	});
 });
 

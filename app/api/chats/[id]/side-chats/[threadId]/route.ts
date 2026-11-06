@@ -1,8 +1,6 @@
 /**
- * One side thread (inline side questions, 2026-11-02).
- *
- * PATCH  { open: boolean } → the window state (open window / closed bar).
- * DELETE → removes the thread for good (a running answer is stopped first).
+ * One durable side conversation. GET attaches to its current answer (also
+ * after reload); PATCH changes window visibility. Closing never deletes it.
  */
 import { parseSideOpenInput, SideChatInputError } from "@/src/core";
 import { sideChats } from "@/src/server";
@@ -24,10 +22,7 @@ export async function PATCH(request: Request, ctx: Ctx): Promise<Response> {
 	return Response.json({ thread: result });
 }
 
-export async function DELETE(_req: Request, ctx: Ctx): Promise<Response> {
+export async function GET(_req: Request, ctx: Ctx): Promise<Response> {
 	const { id, threadId } = await ctx.params;
-	const result = sideChats.remove(id, threadId);
-	if (result === "unknown-chat") return Response.json({ error: "Unknown chat" }, { status: 404 });
-	if (result === "unknown-thread") return Response.json({ error: "Unknown side thread" }, { status: 404 });
-	return Response.json({ ok: true });
+	return sideChats.watch(id, threadId);
 }

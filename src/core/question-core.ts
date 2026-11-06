@@ -19,6 +19,7 @@
 
 import { Type, type Static } from "typebox";
 import { stripModelValueDebris } from "./value-debris.ts";
+import { expandCitationsForModel } from "./citations.ts";
 
 // ─── shared types ───────────────────────────────────────────────────────────
 
@@ -784,8 +785,8 @@ export function compactAnswerForModel(ad: QuestionAnswerData): Record<string, un
 	// fixtures, foreign records) — degrade to omission, never crash.
 	if (Array.isArray(ad.answers) && ad.answers.length > 0)
 		out.answers = ad.answers.map((a) => ({ index: a.index, label: a.label }));
-	if (ad.text) out.text = ad.text;
-	if (ad.other) out.other = ad.other;
+	if (ad.text) out.text = expandCitationsForModel(ad.text);
+	if (ad.other) out.other = expandCitationsForModel(ad.other);
 	// The verdict + stated confidence are the learner's PERFORMANCE — new
 	// information the model needs for its next move. (dontKnow implies
 	// incorrect and carries no confidence: both stay implicit.)
@@ -796,7 +797,7 @@ export function compactAnswerForModel(ad: QuestionAnswerData): Record<string, un
 	// thinking while reading the teaching. `note` is the pre-rename key —
 	// old records replay through here too, so both feed `thinking`.
 	const thinking = ad.thinking ?? ad.note;
-	if (thinking) out.thinking = thinking;
-	if (ad.readingThinking) out.thinkingWhileReading = ad.readingThinking;
+	if (thinking) out.thinking = expandCitationsForModel(thinking);
+	if (ad.readingThinking) out.thinkingWhileReading = expandCitationsForModel(ad.readingThinking);
 	return out;
 }

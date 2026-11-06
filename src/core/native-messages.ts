@@ -649,7 +649,7 @@ export function toLlmMessages(messages: readonly AgentMessage[]): Message[] {
 			const marker = m as LhMarkerMessage;
 			// UI-only markers: plan blocks, and problem dismissals (the
 			// synthesized conclude pair carries the model's face).
-			// Side questions the learner kept from the tutor are UI-only too.
+			// Empty side markers carry no model-facing exchange.
 			if (marker.customType === "plan-block" || marker.customType === "problem-dismissed") continue;
 			if (marker.customType === "side-question" && !marker.content) continue;
 			// The head supersedes every compaction marker, not only its own
@@ -658,8 +658,8 @@ export function toLlmMessages(messages: readonly AgentMessage[]): Message[] {
 			if (marker.customType === "compaction" && head !== null) continue;
 			out.push({
 				role: "user",
-				content: [{ type: "text", text: marker.content }],
-			timestamp: marker.timestamp,
+				content: [{ type: "text", text: marker.customType === "practice-thinking" || marker.customType === "side-question" ? expandCitationsForModel(marker.content) : marker.content }],
+				timestamp: marker.timestamp,
 			});
 			continue;
 		}

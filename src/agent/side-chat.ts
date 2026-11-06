@@ -1,7 +1,6 @@
 /**
- * The SIDE-QUESTION model call (inline side questions, owner design
- * 2026-11-02): one tool-less streamed generation on the session's own
- * engine. No agent loop, no tools, no session identity — a Claude Code
+ * The SIDE-QUESTION model call: #487's tool-less streamed generation,
+ * using the lesson model unless the #451 sideQuestion role is overridden. No agent loop, no tools, no session identity — a Claude Code
  * call without a session id never retains or reuses the lesson's live
  * CLI process (docs/claude-code.md "Questions, reuse, and cancellation").
  *
@@ -15,7 +14,10 @@
 
 import fs from "node:fs";
 import path from "node:path";
+import { randomUUID } from "node:crypto";
 import { normalizeContext, type AssistantMessage, type Message, type Usage } from "@earendil-works/pi-ai";
+import { backgroundCaptureStream, createBackgroundCapture } from "./background-capture.ts";
+import { providerEventObserver } from "./provider-events.ts";
 import { PATHS } from "../../config.ts";
 import type { SideModelTurn } from "../core/side-chat.ts";
 import type { PiEngine } from "./models.ts";
@@ -78,6 +80,9 @@ export async function streamSideAnswer(opts: {
 	turns: readonly SideModelTurn[];
 	signal?: AbortSignal;
 	onText?: (text: string) => void;
+	/** Existing opt-in diagnostic identity, NOT a reusable provider session. */
+	chatId?: string;
+	runId?: string;
 }): Promise<SideAnswerResult> {
 	const now = Date.now();
 	const messages: Message[] = opts.turns.map((turn) =>
@@ -95,10 +100,15 @@ export async function streamSideAnswer(opts: {
 				} as AssistantMessage),
 	);
 	let text = "";
+	let failure: unknown;
+	const capture = createBackgroundCapture({ role: "sideQuestion", runId: opts.runId ?? randomUUID(), sourceId: opts.chatId });
+	const providerEvents = opts.chatId ? providerEventObserver(opts.chatId, "sideQuestion") : undefined;
 	try {
-		const stream = opts.engine.streamFn(opts.engine.model, normalizeContext({ systemPrompt: opts.instructions, messages, tools: [] }), {
+		const stream = backgroundCaptureStream(opts.engine.streamFn, capture)(opts.engine.model, normalizeContext({ systemPrompt: opts.instructions, messages, tools: [] }), {
 			signal: opts.signal,
-		} as never);
+			reasoning: opts.engine.level === "off" ? undefined : opts.engine.level,
+			...(providerEvents ? { onProviderStreamEvent: providerEvents } : {}),
+		});
 		for await (const event of stream) {
 			if (event.type === "text_delta" || event.type === "text_end") {
 				const next = textOf(event.partial);
@@ -107,16 +117,23 @@ export async function streamSideAnswer(opts: {
 					opts.onText?.(text);
 				}
 			} else if (event.type === "done") {
+				capture?.reply(event.message);
 				return { text: textOf(event.message) || text, usage: event.message.usage, outcome: "done" };
 			} else if (event.type === "error") {
+				capture?.reply(event.error);
+				failure = new Error(event.error.errorMessage ?? event.reason);
 				const partial = textOf(event.error) || text;
 				if (event.reason === "aborted") return { text: partial, usage: event.error.usage, outcome: "aborted" };
 				return { text: partial, usage: event.error.usage, outcome: "error", errorMessage: event.error.errorMessage ?? "The model call failed." };
 			}
 		}
-		return { text, outcome: "error", errorMessage: "The model stream ended without a result." };
+		failure = new Error("The model stream ended without a result.");
+		return { text, outcome: "error", errorMessage: (failure as Error).message };
 	} catch (err) {
+		failure = err;
 		if (opts.signal?.aborted) return { text, outcome: "aborted" };
 		return { text, outcome: "error", errorMessage: err instanceof Error ? err.message : String(err) };
+	} finally {
+		capture?.finish(failure);
 	}
 }

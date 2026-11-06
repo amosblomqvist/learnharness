@@ -1,347 +1,219 @@
 "use client";
 
-/**
- * THE OPEN SIDE THREAD (#16) on the client. The server is stateless: the
- * thread lives here until it closes, and every question sends the thread
- * so far. Closing (button, Esc, a new thread, leaving the chat, the page
- * hiding) posts it to the close route, which commits one marker. Nothing
- * reaches the tutor while the thread is open.
- */
+/** #451's single floating/docked companion, backed by #487's durable service.
+ * Closing detaches a view; messages are already saved, and returning can
+ * subscribe to a still-running answer. No close-time commits or tutor notes. */
+import { useCallback, useEffect, useReducer, useRef, useState } from "react";
+import { sideSegmentId, type LhMessage, type TextSelector, type SideChatMessage, type SideChatThread } from "@/src/core";
+import { useServerEvent, useServerResync } from "./server-events";
 
-import { useCallback, useEffect, useReducer, useRef } from "react";
-import {
-	SIDE_THREAD_MAX_PAIRS,
-	SIDE_WORKING_MAX_CHARS,
-	type PassageSelector,
-	type SideNote,
-	type SidePair,
-	type SideQuestionDetails,
-} from "@/src/core";
-import { sseEvents } from "./session-core";
-
-/** Where the popover sits: the selected passage (a live Range), the chip
- *  a closed thread reopens from, or just above the composer (/btw). */
 export type SideThreadAnchor = { kind: "range"; range: Range } | { kind: "element"; element: HTMLElement } | { kind: "composer" };
-
-/** A quoted tutor passage and where it sits (its quote links back there). */
-export interface SidePassage {
-	text: string;
-	sourceMessageId: string;
-	selector?: PassageSelector;
-}
-
-export interface SideDraft {
-	question: string;
-	passage?: string;
-	sourceMessageId?: string;
-	selector?: PassageSelector;
-	answer: string;
-	/** The file tool running now ("read notes.md"). */
-	activity?: string;
-}
-
-export interface SideThreadState {
-	threadId: string;
-	pairs: Array<SidePair & SideNote>;
-	/** The question being answered now (one at a time). */
-	draft: SideDraft | null;
-	/** The passage the next question quotes. */
-	pendingPassage?: SidePassage;
-	/** The learner's last hand-set toggle; null = never flipped (F10). */
-	learnerTell: boolean | null;
-	mode: "popover" | "panel";
-	anchor: SideThreadAnchor;
-	/** A failed question, kept so the learner can ask it again. */
-	failed?: { question: string; error: string };
-	/** A closed thread reopened from its chip. */
-	readOnly?: SideQuestionDetails;
-	/** A reopened thread the learner asked more in: the thread it continues. */
-	continues?: string;
-	/** The thread was opened from the question waiting for the learner (its
-	 *  tool call id): the side agent nudges instead of answering. */
-	questionCallId?: string;
-}
-
-export type SideThreadAction =
-	| { type: "open"; threadId: string; anchor: SideThreadAnchor; passage?: SidePassage; questionCallId?: string }
-	| { type: "open-read-only"; threadId: string; details: SideQuestionDetails; anchor: SideThreadAnchor }
-	| { type: "told"; threadId: string }
-	| { type: "continue"; threadId: string }
-	| { type: "add-passage"; passage: SidePassage }
-	| { type: "ask"; question: string }
-	| { type: "text"; delta: string }
-	| { type: "tool"; name: string; label: string }
-	| { type: "note"; tell: boolean; note: string }
-	| { type: "error"; error: string }
-	| { type: "set-tell"; tell: boolean }
-	| { type: "expand" }
-	| { type: "close" };
-
-export function sideThreadReducer(state: SideThreadState | null, action: SideThreadAction): SideThreadState | null {
-	if (action.type === "open") {
-		return {
-			threadId: action.threadId, pairs: [], draft: null, learnerTell: null, mode: "popover", anchor: action.anchor,
-			...(action.passage ? { pendingPassage: action.passage } : {}),
-			// A thread on the waiting question opens beside the lesson, so the
-			// question stays in view (a popover would cover the dock).
-			...(action.questionCallId ? { questionCallId: action.questionCallId, mode: "panel" as const } : {}),
-		};
-	}
-	if (action.type === "open-read-only") {
-		const { details } = action;
-		return {
-			threadId: action.threadId, draft: null, learnerTell: details.toldTutor, mode: "popover", anchor: action.anchor, readOnly: details,
-			pairs: details.thread.map((pair) => ({ ...pair, tell: details.toldTutor, note: details.note })),
-		};
-	}
-	if (!state) return null;
-	switch (action.type) {
-		case "continue": {
-			// A follow-up in a reopened thread: it lives again under a new id
-			// and, on close, saves the whole thread in place of the old chip.
-			if (!state.readOnly) return state;
-			const { readOnly: _readOnly, ...rest } = state;
-			return { ...rest, threadId: action.threadId, continues: state.threadId, learnerTell: null };
-		}
-		case "told":
-			return state.readOnly && state.threadId === action.threadId
-				? { ...state, learnerTell: true, readOnly: { ...state.readOnly, toldTutor: true } }
-				: state;
-		case "close":
-			return null;
-		case "expand":
-			return { ...state, mode: "panel" };
-		case "set-tell":
-			return state.readOnly ? state : { ...state, learnerTell: action.tell };
-		case "add-passage":
-			return state.readOnly ? state : { ...state, pendingPassage: action.passage };
-		case "ask": {
-			const question = action.question.trim();
-			if (state.readOnly || state.draft || !question || state.pairs.length >= SIDE_THREAD_MAX_PAIRS) return state;
-			const { pendingPassage, failed: _failed, ...rest } = state;
-			return {
-				...rest,
-				draft: {
-					question,
-					answer: "",
-					...(pendingPassage ? {
-						passage: pendingPassage.text,
-						sourceMessageId: pendingPassage.sourceMessageId,
-						...(pendingPassage.selector ? { selector: pendingPassage.selector } : {}),
-					} : {}),
-				},
-			};
-		}
-		case "text": {
-			if (!state.draft) return state;
-			const { activity: _activity, ...draft } = state.draft;
-			return { ...state, draft: { ...draft, answer: draft.answer + action.delta } };
-		}
-		case "tool":
-			return state.draft ? { ...state, draft: { ...state.draft, activity: `${action.name} ${action.label}`.trim() } } : state;
-		case "note": {
-			if (!state.draft) return state;
-			const { activity: _activity, ...draft } = state.draft;
-			return { ...state, draft: null, pairs: [...state.pairs, { ...draft, tell: action.tell, note: action.note }] };
-		}
-		case "error": {
-			if (!state.draft) return state;
-			const { question, passage, sourceMessageId, selector } = state.draft;
-			return {
-				...state,
-				draft: null,
-				failed: { question, error: action.error },
-				...(passage && sourceMessageId ? { pendingPassage: { text: passage, sourceMessageId, ...(selector ? { selector } : {}) } } : {}),
-			};
-		}
-	}
-	return state;
-}
-
-/** The toggle as shown (F2): the learner's setting, else the newest recommendation. */
-export function displayedTell(state: SideThreadState): boolean {
-	if (state.readOnly) return state.readOnly.toldTutor;
-	return state.learnerTell ?? state.pairs[state.pairs.length - 1]?.tell ?? false;
-}
-
-/** The close route's body. */
-export function sideCloseBody(state: SideThreadState) {
-	return {
-		threadId: state.threadId,
-		thread: state.pairs,
-		learnerTell: state.learnerTell,
-		...(state.continues ? { continues: state.continues } : {}),
-		...(state.draft ? {
-			pending: {
-				question: state.draft.question,
-				...(state.draft.passage !== undefined ? { passage: state.draft.passage } : {}),
-				...(state.draft.sourceMessageId !== undefined ? { sourceMessageId: state.draft.sourceMessageId } : {}),
-				...(state.draft.selector !== undefined ? { selector: state.draft.selector } : {}),
-			},
-		} : {}),
-	};
-}
-
-function newThreadId(): string {
-	return `side_${Date.now().toString(36)}_${crypto.randomUUID().slice(0, 8)}`;
-}
-
-/** Keepalive requests are capped at 64 KiB; a longer thread uses a plain
- *  request (it still completes on an in-app navigation). */
-const KEEPALIVE_MAX_BYTES = 60_000;
-
-function postClose(chatId: string, state: SideThreadState): Promise<void> {
-	const body = JSON.stringify(sideCloseBody(state));
-	const keepalive = new TextEncoder().encode(body).length <= KEEPALIVE_MAX_BYTES;
-	return fetch(`/api/chats/${encodeURIComponent(chatId)}/side-question/close`, { method: "POST", body, keepalive })
-		.then(() => undefined)
-		.catch((err) => console.error("side thread close failed:", err));
-}
-
-/** How long an answer submit waits for the close to reach the server. */
-const CLOSE_BEFORE_ANSWER_MS = 1_200;
-
+export interface SidePassage { text: string; sourceMessageId: string; selector?: Omit<TextSelector, "text"> }
 export interface SideThreadOpenArgs {
 	anchor: SideThreadAnchor;
 	passage?: SidePassage;
-	question?: string;
-	/** Open from the question waiting for the learner (its tool call id). */
+	sourceMessageId?: string;
 	questionCallId?: string;
+	question?: string;
+}
+export interface SideThreadState {
+	threadId: string;
+	segmentId: string;
+	messages: SideChatMessage[];
+	answering: boolean;
+	streamText: string;
+	pendingPassage?: SidePassage;
+	contextFrozen: boolean;
+	mode: "popover" | "panel";
+	anchor: SideThreadAnchor;
+	error?: string;
+	failedQuestion?: string;
+}
+export type SideThreadAction =
+	| { type: "open"; segmentId: string; anchor: SideThreadAnchor; passage?: SidePassage; thread?: SideChatThread; contextFrozen?: boolean }
+	| { type: "snapshot"; thread: SideChatThread; answering?: boolean; text?: string }
+	| { type: "start"; threadId: string }
+	| { type: "accepted"; threadId: string }
+	| { type: "text"; threadId: string; text: string }
+	| { type: "error"; threadId: string; error: string; question?: string }
+	| { type: "done"; thread: SideChatThread }
+	| { type: "mode"; mode: "popover" | "panel" }
+	| { type: "close" };
+export function sideThreadReducer(state: SideThreadState | null, action: SideThreadAction): SideThreadState | null {
+	if (action.type === "close") return null;
+	if (action.type === "open") {
+		const threadId = action.thread?.id ?? `side_${action.segmentId}`;
+		if (state?.threadId === threadId) return { ...state, ...(action.passage ? { pendingPassage: action.passage } : {}) };
+		return { threadId, segmentId: action.segmentId, messages: action.thread?.messages ?? [], answering: false, streamText: "",
+			contextFrozen: action.contextFrozen ?? (action.thread?.contextSnapshot !== undefined), mode: "popover", anchor: action.anchor, pendingPassage: action.passage };
+	}
+	if (!state) return state;
+	if (action.type === "mode") return { ...state, mode: action.mode };
+	const threadId = "thread" in action ? action.thread.id : action.threadId;
+	if (threadId !== state.threadId) return state;
+	if (action.type === "snapshot" || action.type === "done") return {
+		...state, messages: action.thread.messages, contextFrozen: state.contextFrozen || action.thread.contextSnapshot !== undefined,
+		...(action.type === "done" || (action.type === "snapshot" && action.answering === false && action.thread.messages.at(-1)?.role === "assistant") ? { error: undefined } : {}),
+		...(action.type === "done" ? { answering: false, streamText: "" } : {
+			...(action.answering !== undefined ? { answering: action.answering } : {}),
+			...(action.text !== undefined ? { streamText: action.text } : {}),
+		}),
+	};
+	if (action.type === "start") return { ...state, answering: true, streamText: "", error: undefined, failedQuestion: undefined };
+	if (action.type === "accepted") return { ...state, pendingPassage: undefined };
+	if (action.type === "text") return { ...state, answering: true, streamText: action.text };
+	return { ...state, answering: false, error: action.error, failedQuestion: action.question };
 }
 
-export function useSideThread(chatId: string, getWorking?: () => string) {
+export function useSideThread(chatId: string, messages: readonly LhMessage[], getWorking?: () => string) {
 	const [state, dispatch] = useReducer(sideThreadReducer, null);
-	// The ref is truth for the callbacks (a close right after a toggle or a
-	// frame must send it): every change goes through apply, which updates
-	// the ref at once; the pure reducer gives React the same result.
-	const stateRef = useRef(state);
-	const apply = useCallback((action: SideThreadAction) => {
-		stateRef.current = sideThreadReducer(stateRef.current, action);
-		dispatch(action);
+	const [threads, setThreads] = useState<SideChatThread[]>([]);
+	const stateRef = useRef(state); stateRef.current = state;
+	const messagesRef = useRef(messages); messagesRef.current = messages;
+	const threadsRef = useRef(threads); threadsRef.current = threads;
+	const workingRef = useRef(getWorking); workingRef.current = getWorking;
+	const connection = useRef<{ controller: AbortController; token: number } | null>(null);
+	const serial = useRef(0);
+	const revision = useRef(0);
+	const refreshSerial = useRef(0);
+	const uncertain = useRef<{ segmentId: string; text: string; quote?: string; requestId: string } | null>(null);
+	const initialQuestion = useRef<string | null>(null);
+	const drafts = useRef(new Map<string, string>());
+	const [, syncExternalDraft] = useState(0);
+	const draftFor = useCallback((threadId: string) => drafts.current.get(threadId) ?? "", []);
+	const saveDraft = useCallback((threadId: string, text: string, notify = false) => {
+		drafts.current.set(threadId, text);
+		if (notify) syncExternalDraft((revision) => revision + 1);
 	}, []);
-	// The reader of the answer streaming now; closing stops reading only —
-	// the server finishes the answer and the close waits for it (F9).
-	const readerRef = useRef<ReadableStreamDefaultReader<Uint8Array> | null>(null);
-
-	const stopReading = useCallback(() => {
-		void readerRef.current?.cancel().catch(() => undefined);
-		readerRef.current = null;
+	const adopt = useCallback((thread: SideChatThread) => {
+		revision.current++;
+		setThreads((current) => current.some((entry) => entry.id === thread.id)
+			? current.map((entry) => entry.id === thread.id ? thread : entry) : [...current, thread]);
 	}, []);
+	const refresh = useCallback(async () => {
+		const request = ++refreshSerial.current;
+		const before = revision.current;
+		try {
+			const response = await fetch(`/api/chats/${chatId}/side-chats`, { cache: "no-store" });
+			if (!response.ok) return;
+			const payload = await response.json() as { threads: SideChatThread[]; answering: Record<string, string> };
+			if (request !== refreshSerial.current || before !== revision.current) return;
+			setThreads(payload.threads);
+			const current = stateRef.current;
+			const thread = current && payload.threads.find((entry) => entry.id === current.threadId);
+			if (thread) dispatch({ type: "snapshot", thread,
+				answering: Object.hasOwn(payload.answering, thread.id), text: payload.answering[thread.id] ?? "" });
+		} catch { /* a later change/resync retries a detached view's read */ }
+	}, [chatId]);
+	useEffect(() => { void refresh(); return () => { refreshSerial.current++; connection.current?.controller.abort(); }; }, [refresh]);
+	useServerEvent("side-chats-changed", (event) => { if (event.chatId === chatId) void refresh(); });
+	useServerEvent("record-changed", (event) => { if (event.chatId === chatId) void refresh(); });
+	useServerResync(() => { void refresh(); });
 
-	const getWorkingRef = useRef(getWorking);
-	getWorkingRef.current = getWorking;
-
-	const close = useCallback((): Promise<void> => {
-		const current = stateRef.current;
-		if (!current) return Promise.resolve();
-		stopReading();
-		const posted = !current.readOnly && (current.pairs.length || current.draft) ? postClose(chatId, current) : Promise.resolve();
-		apply({ type: "close" });
-		return posted;
-	}, [apply, chatId, stopReading]);
-
-	/** Commit the open thread and wait (briefly) for the server to have it:
-	 *  a thread closed before an answer parks behind the waiting question and
-	 *  lands right after the answer's result, where the tutor's reaction
-	 *  reads its note. */
-	const closeBeforeAnswer = useCallback(
-		() => Promise.race([close(), new Promise<void>((resolve) => setTimeout(resolve, CLOSE_BEFORE_ANSWER_MS))]),
-		[close],
-	);
-
-	const ask = useCallback((question: string) => {
-		if (stateRef.current?.readOnly && question.trim()) apply({ type: "continue", threadId: newThreadId() });
-		const current = stateRef.current;
-		if (!current) return;
-		apply({ type: "ask", question });
-		const next = stateRef.current;
-		if (next === current || !next?.draft) return;
-		const draft = next.draft;
-		const threadId = current.threadId;
-		const live = () => stateRef.current?.threadId === threadId;
-		void (async () => {
-			try {
-				const res = await fetch(`/api/chats/${encodeURIComponent(chatId)}/side-question`, {
-					method: "POST",
-					headers: { "Content-Type": "application/json" },
-					body: JSON.stringify({
-						threadId,
-						thread: current.pairs.map(({ tell: _tell, note: _note, ...pair }) => pair),
-						question: draft.question,
-						...(draft.passage !== undefined ? { passage: draft.passage } : {}),
-						...(draft.sourceMessageId !== undefined ? { sourceMessageId: draft.sourceMessageId } : {}),
-						...(draft.selector !== undefined ? { selector: draft.selector } : {}),
-						// F10: the next note rewrites this one to cover the whole thread.
-						...(current.pairs.length ? { note: current.pairs[current.pairs.length - 1]!.note } : {}),
-						...(current.questionCallId ? { questionCallId: current.questionCallId } : {}),
-						...(current.questionCallId && getWorkingRef.current?.().trim() ? { working: getWorkingRef.current!().trim().slice(0, SIDE_WORKING_MAX_CHARS) } : {}),
-					}),
-				});
-				if (!res.ok || !res.body) {
-					const body = (await res.json().catch(() => null)) as { error?: string } | null;
-					if (live()) apply({ type: "error", error: body?.error ?? "The side question failed. Try asking again." });
-					return;
-				}
-				const reader = res.body.getReader();
-				readerRef.current = reader;
-				for await (const frame of sseEvents(reader)) {
-					if (!live()) return;
-					if (frame.type === "text" && typeof frame.delta === "string") apply({ type: "text", delta: frame.delta });
-					else if (frame.type === "tool") apply({ type: "tool", name: String(frame.name ?? ""), label: String(frame.label ?? "") });
-					else if (frame.type === "note") apply({ type: "note", tell: frame.tell === true, note: String(frame.note ?? "") });
-					else if (frame.type === "error") apply({ type: "error", error: String(frame.errorText ?? "The side question failed.") });
-				}
-			} catch {
-				if (live()) apply({ type: "error", error: "The connection dropped. Try asking again." });
-			} finally {
-				if (live()) readerRef.current = null;
+	const consume = useCallback(async (response: Response, threadId: string, token: number) => {
+		if (token !== connection.current?.token) { await response.body?.cancel(); return; }
+		if (!response.ok) {
+			const body = await response.json().catch(() => null) as { error?: string | { message?: string } } | null;
+			throw new Error(typeof body?.error === "string" ? body.error : body?.error?.message ?? "The side conversation could not be reached.");
+		}
+		const reader = response.body?.getReader();
+		if (!reader) throw new Error("The side answer had no response stream.");
+		const decoder = new TextDecoder(); let buffer = ""; let terminal = false;
+		const apply = (line: string) => {
+			if (!line.trim() || token !== connection.current?.token) return;
+			const event = JSON.parse(line) as { type: string; thread?: SideChatThread; text?: string; error?: string };
+			if (event.type === "done" || event.type === "error") terminal = true;
+			if (event.thread) {
+				adopt(event.thread);
+				dispatch({ type: event.type === "done" ? "done" : "snapshot", thread: event.thread });
+				uncertain.current = null;
+			} else if (event.type === "text") dispatch({ type: "text", threadId, text: event.text ?? "" });
+			else if (event.type === "error") throw new Error(event.error ?? "The side answer failed.");
+		};
+		try {
+			for (;;) {
+				const { value, done } = await reader.read();
+				if (done) { buffer += decoder.decode(); if (buffer.trim()) apply(buffer); break; }
+				buffer += decoder.decode(value, { stream: true });
+				let newline: number;
+				while ((newline = buffer.indexOf("\n")) >= 0) { apply(buffer.slice(0, newline)); buffer = buffer.slice(newline + 1); }
 			}
-		})();
-	}, [apply, chatId]);
+			if (!terminal && token === connection.current?.token) throw new Error("The side answer disconnected. Reopen the conversation to reconnect.");
+		} finally { reader.releaseLock(); }
+	}, [adopt]);
 
-	/** Open a new thread; an open one closes (and commits) first (F7). */
-	const open = useCallback((args: SideThreadOpenArgs) => {
-		close();
-		const action: SideThreadAction = {
-			type: "open",
-			threadId: newThreadId(),
-			anchor: args.anchor,
-			...(args.passage ? { passage: args.passage } : {}),
-			...(args.questionCallId ? { questionCallId: args.questionCallId } : {}),
-		};
-		apply(action);
-		if (args.question?.trim()) ask(args.question);
-	}, [apply, ask, close]);
-
-	const reopenReadOnly = useCallback((threadId: string, details: SideQuestionDetails, anchor: SideThreadAnchor) => {
-		close();
-		const action: SideThreadAction = { type: "open-read-only", threadId, details, anchor };
-		apply(action);
-	}, [apply, close]);
-
-	const addPassage = useCallback((passage: SidePassage) => apply({ type: "add-passage", passage }), [apply]);
-	const setTell = useCallback((tell: boolean) => apply({ type: "set-tell", tell }), [apply]);
-	const expand = useCallback(() => apply({ type: "expand" }), [apply]);
-	/** "Tell tutor" on a closed thread (its chip or its read-only reopen). */
-	const tellTutor = useCallback(async (threadId: string): Promise<boolean> => {
-		const res = await fetch(`/api/chats/${encodeURIComponent(chatId)}/side-question/tell`, {
-			method: "POST",
-			headers: { "Content-Type": "application/json" },
-			body: JSON.stringify({ threadId }),
-		}).catch(() => null);
-		if (!res?.ok) return false;
-		apply({ type: "told", threadId });
-		return true;
-	}, [apply, chatId]);
-
-	// F6: leaving the chat or hiding the page commits the open thread.
+	const attach = useCallback((thread: SideChatThread) => {
+		connection.current?.controller.abort();
+		const controller = new AbortController(); const token = ++serial.current;
+		connection.current = { controller, token };
+		void fetch(`/api/chats/${chatId}/side-chats/${thread.id}`, { cache: "no-store", signal: controller.signal })
+			.then((response) => consume(response, thread.id, token))
+			.catch((error) => { if (!controller.signal.aborted && token === connection.current?.token) dispatch({ type: "error", threadId: thread.id, error: String(error.message ?? error) }); });
+	}, [chatId, consume]);
+	const open = useCallback(({ anchor, passage, sourceMessageId, questionCallId, question }: SideThreadOpenArgs) => {
+		const source = sourceMessageId ?? passage?.sourceMessageId ?? (questionCallId ? messagesRef.current.find((message) => message.role === "assistant" &&
+			message.content.some((block) => block.type === "toolCall" && block.id === questionCallId))?.id : undefined);
+		const segmentId = sideSegmentId(messagesRef.current, source);
+		if (!segmentId) return;
+		const thread = threadsRef.current.find((entry) => entry.anchor.messageId === segmentId);
+		initialQuestion.current = question?.trim() || null;
+		dispatch({ type: "open", segmentId, anchor, passage, thread, contextFrozen: thread?.contextSnapshot !== undefined || segmentId !== sideSegmentId(messagesRef.current) });
+		if (thread) attach(thread);
+	}, [attach]);
+	const close = useCallback((expectedThreadId?: string) => {
+		if (expectedThreadId && stateRef.current?.threadId !== expectedThreadId) return;
+		connection.current?.controller.abort(); connection.current = null;
+		dispatch({ type: "close" });
+	}, []);
+	const ask = useCallback(async (text: string, retry = false, expectedThreadId?: string): Promise<boolean> => {
+		const current = stateRef.current;
+		if (!current || (expectedThreadId && expectedThreadId !== current.threadId) || current.answering || (!text.trim() && !retry)) return false;
+		const previous = uncertain.current;
+		const requestId = previous?.segmentId === current.segmentId && previous.text === text && previous.quote === current.pendingPassage?.text
+			? previous.requestId : `ask_${crypto.randomUUID().replaceAll("-", "")}`;
+		uncertain.current = { segmentId: current.segmentId, text, quote: current.pendingPassage?.text, requestId };
+		connection.current?.controller.abort();
+		const controller = new AbortController(); const token = ++serial.current;
+		connection.current = { controller, token };
+		dispatch({ type: "start", threadId: current.threadId });
+		try {
+			const existing = threadsRef.current.some((thread) => thread.id === current.threadId);
+			const working = current.segmentId === sideSegmentId(messagesRef.current) ? workingRef.current?.() : undefined;
+			const response = await fetch(`/api/chats/${chatId}/side-chats`, {
+				method: "POST", headers: { "Content-Type": "application/json" }, signal: controller.signal,
+				body: JSON.stringify({ ...(existing ? { threadId: current.threadId } : { anchor: {
+					messageId: current.segmentId, partId: `${current.segmentId}-t0`, blockIndex: 0, blockText: "This teaching segment and its question.",
+				} }), text, quotes: current.pendingPassage ? [current.pendingPassage.text] : [], requestId, ...(retry ? { retry: true, threadId: current.threadId } : {}), ...(working ? { working } : {}) }),
+			});
+			if (!response.ok) { await consume(response, current.threadId, token); return false; }
+			// Accepted and durable before streaming: the UI can clear its draft.
+			dispatch({ type: "accepted", threadId: current.threadId });
+			void consume(response, current.threadId, token).catch((error) => {
+				if (!controller.signal.aborted && token === connection.current?.token) {
+					dispatch({ type: "error", threadId: current.threadId, error: String(error.message ?? error) }); void refresh();
+				}
+			});
+			return true;
+		} catch (error) {
+			if (!controller.signal.aborted && token === connection.current?.token) dispatch({ type: "error", threadId: current.threadId, error: String((error as Error).message ?? error), question: text });
+			return false;
+		}
+	}, [chatId, consume, refresh]);
 	useEffect(() => {
-		window.addEventListener("pagehide", close);
-		return () => {
-			window.removeEventListener("pagehide", close);
-			close();
-		};
-	}, [close]);
-
-	return { state, open, ask, addPassage, setTell, expand, close, closeBeforeAnswer, reopenReadOnly, tellTutor };
+		if (!state || !initialQuestion.current || state.answering) return;
+		const question = initialQuestion.current; initialQuestion.current = null;
+		void ask(question);
+	}, [state, ask]);
+	const stop = useCallback(() => {
+		const current = stateRef.current;
+		if (current) void fetch(`/api/chats/${chatId}/side-chats/${current.threadId}/stop`, { method: "POST" }).catch(() => {});
+	}, [chatId]);
+	return { state, threads, open, close, ask, stop, draftFor, saveDraft,
+		expand: () => dispatch({ type: "mode", mode: "panel" }),
+		float: () => dispatch({ type: "mode", mode: "popover" }),
+		hasHistory: (sourceMessageId: string) => {
+			const segmentId = sideSegmentId(messages, sourceMessageId);
+			return threads.some((thread) => thread.anchor.messageId === segmentId && thread.messages.length > 0);
+		},
+	};
 }

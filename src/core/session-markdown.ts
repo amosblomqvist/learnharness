@@ -178,7 +178,7 @@ export function messageMarkdown(
 		const result = message as ToolResultMessage;
 		if (result.isError || result.toolName === SEND_TO_USER_TOOL) return null; // retry context or output ack, not learning evidence
 		const { heading, body } = toolResultBody(result, ctx);
-		parts.push(`### ${heading}${anchor}\n\n${body.join("\n\n")}`);
+		parts.push(`### ${heading}${anchor}\n\n${citationsToReadableText(body.join("\n\n"))}`);
 	}
 
 	// custom markers are invisible, same as the extraction view.

@@ -147,7 +147,7 @@ describe("side lesson document", () => {
 		]);
 		assert.match(doc, /OPEN question/);
 		assert.match(doc, /Which limit defines the derivative\?/);
-		assert.match(doc, /- Difference quotient as h→0/);
+		assert.match(doc, /\d\. Difference quotient as h→0/);
 		assert.match(doc, /Explain the slope\./);
 		assert.doesNotMatch(doc, /SECRET-EXPLANATION/);
 		assert.doesNotMatch(doc, /SECRET-COMMITTED/);
@@ -175,12 +175,13 @@ describe("side lesson document", () => {
 		assert.match(concluded, /REVEALED x\^2\/2/);
 	});
 
-	it("honors the active compaction cut: summary, then the kept tail only", () => {
+	it("honors the active compaction cut without disclosing a model-private summary", () => {
 		const old = newUserMessage("OLD-CONTENT");
 		const kept = newUserMessage("KEPT-CONTENT");
 		const marker = newCompactionMarker("SUMMARY-TEXT", { firstKeptMessageId: kept.id, tokensBefore: 1, at: new Date().toISOString() });
 		const doc = sideChatLessonDocument([old, kept, marker]);
-		assert.match(doc, /SUMMARY-TEXT/);
+		assert.match(doc, /private summary is not supplied/);
+		assert.doesNotMatch(doc, /SUMMARY-TEXT/);
 		assert.match(doc, /KEPT-CONTENT/);
 		assert.doesNotMatch(doc, /OLD-CONTENT/);
 	});
@@ -318,7 +319,9 @@ describe("side chat service", () => {
 		assert.deepEqual(record.messages, before, "the teaching record never changes");
 		const thread = record.sideChats![0]!;
 		assert.equal(thread.open, true);
-		assert.deepEqual(thread.anchor, anchor);
+		assert.equal(thread.anchor.messageId, anchor.messageId);
+		assert.equal(thread.anchor.blockIndex, 0);
+		assert.equal(thread.anchor.blockText, "First paragraph.\n\nSecond paragraph.");
 		assert.deepEqual(thread.messages.map((m) => m.role), ["user", "assistant"]);
 		assert.deepEqual(thread.messages[0]!.quotes, ["the limit"]);
 		assert.ok(record.turns?.some((t) => t.messageId === thread.messages[1]!.id), "usage keyed to the side answer");
@@ -337,29 +340,26 @@ describe("side chat service", () => {
 		assert.equal(service.list(chatId)!.threads.length, 1);
 	});
 
-	it("every first question at an anchor opens its own thread; follow-ups continue by id", async () => {
+	it("two selections and follow-ups in the same teaching segment share one conversation", async () => {
 		const { service, chatId, anchor, answer, contexts } = setup();
 		answer("one");
 		const first = (await readAll(await service.ask(chatId, { anchor, text: "q1", quotes: ["first selection"] }))).at(-1)!.thread!;
 		answer("two");
 		const second = (await readAll(await service.ask(chatId, { anchor, text: "q2", quotes: ["second selection"] }))).at(-1)!.thread!;
-		assert.notEqual(second.id, first.id, "same block, second window");
+		assert.equal(second.id, first.id, "same segment, same conversation");
 		answer("three");
 		await readAll(await service.ask(chatId, { threadId: first.id, text: "q3", quotes: [] }));
 		const threads = chatStore.getChat(chatId)!.sideChats!;
-		assert.deepEqual(threads.map((t) => t.id), [first.id, second.id], "creation order");
-		assert.deepEqual(threads.map((t) => t.anchor.blockIndex), [anchor.blockIndex, anchor.blockIndex]);
-		assert.deepEqual(threads[0]!.messages.map((m) => m.text), ["q1", "one", "q3", "three"]);
-		assert.deepEqual(threads[1]!.messages.map((m) => m.text), ["q2", "two"]);
-		// Each thread is its own conversation: the follow-up replays only its thread.
-		// (The transcript context folds the instructions into a leading system message.)
-		assert.deepEqual(contexts.at(-1)!.messages.map((m) => m.role), ["system", "user", "assistant", "user"]);
-		assert.doesNotMatch(JSON.stringify(contexts.at(-1)!.messages), /second selection/);
+		assert.deepEqual(threads.map((t) => t.id), [first.id]);
+		assert.deepEqual(threads[0]!.messages.map((m) => m.text), ["q1", "one", "q2", "two", "q3", "three"]);
+		assert.deepEqual(contexts.at(-1)!.messages.map((m) => m.role), ["system", "user", "assistant", "user", "assistant", "user"]);
+		assert.match(JSON.stringify(contexts.at(-1)!.messages), /first selection/);
+		assert.match(JSON.stringify(contexts.at(-1)!.messages), /second selection/);
 	});
 
 	it("refuses bad anchors, unknown threads and a busy thread; refusals save nothing", async () => {
 		const { service, chatId, anchor, answer, refuse, faux } = setup();
-		assert.equal((await service.ask(chatId, { anchor: { ...anchor, partId: `${anchor.messageId}-t5` }, text: "q", quotes: [] })).status, 400);
+		assert.equal((await service.ask(chatId, { anchor: { ...anchor, messageId: "msg_missing", partId: "msg_missing-t0" }, text: "q", quotes: [] })).status, 400);
 		assert.equal((await service.ask(chatId, { threadId: "side_nope", text: "q", quotes: [] })).status, 404);
 		assert.equal((await service.ask("chat_nope", { anchor, text: "q", quotes: [] })).status, 404);
 
@@ -390,7 +390,7 @@ describe("side chat service", () => {
 		const reader = res.body!.getReader();
 		const decoder = new TextDecoder();
 		let seen = "";
-		while (!seen.includes('"type":"text"')) seen += decoder.decode((await reader.read()).value);
+		while (!seen.includes('word')) seen += decoder.decode((await reader.read()).value);
 		assert.equal(service.stop(chatId, threadId), true);
 		await service.settled(chatId, threadId);
 		const last = chatStore.getChat(chatId)!.sideChats![0]!.messages.at(-1)!;
@@ -411,11 +411,11 @@ describe("side chat service", () => {
 		answer("recovered");
 		await readAll(await service.ask(chatId, { threadId: thread.id, text: "", quotes: [], retry: true }));
 		thread = chatStore.getChat(chatId)!.sideChats![0]!;
-		assert.deepEqual(thread.messages.map((m) => [m.role, m.text, m.error]), [["user", "q", undefined], ["assistant", "recovered", undefined]]);
+		assert.deepEqual(thread.messages.map((m) => [m.role, m.text, m.error]), [["user", "q", undefined], ["assistant", "", "upstream 500"], ["assistant", "recovered", undefined]]);
 		assert.equal((await service.ask(chatId, { threadId: thread.id, text: "", quotes: [], retry: true })).status, 409, "nothing to retry");
 	});
 
-	it("opens/closes and deletes threads; deleting mid-answer or the session never resurrects one", async () => {
+	it("closing keeps messages and generation; deleting the whole session never resurrects it", async () => {
 		const { service, chatId, anchor, answer, faux } = setup();
 		answer("a");
 		const thread = (await readAll(await service.ask(chatId, { anchor, text: "q", quotes: [] }))).at(-1)!.thread!;
@@ -433,12 +433,12 @@ describe("side chat service", () => {
 		const gate = new Promise<void>((r) => (release = r));
 		faux.appendResponses([async () => (await gate, fauxAssistantMessage("late"))]);
 		const res = await service.ask(chatId, { threadId: thread.id, text: "q3", quotes: [] });
-		assert.equal(service.remove(chatId, thread.id), "ok");
+		service.setOpen(chatId, thread.id, false);
 		release();
 		await readAll(res);
 		await service.settled(chatId, thread.id);
-		assert.equal(chatStore.getChat(chatId)!.sideChats, undefined, "a deleted thread stays deleted");
-		assert.equal(service.remove(chatId, thread.id), "unknown-thread");
+		assert.equal(chatStore.getChat(chatId)!.sideChats![0]!.messages.at(-1)!.text, "late");
+		assert.equal(chatStore.getChat(chatId)!.sideChats![0]!.open, false);
 
 		// Session deleted while answering: the settle has nowhere to land.
 		answer("x");

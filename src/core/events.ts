@@ -52,10 +52,9 @@ export interface ServerEvents {
 	 *  the chat; the client mirrors it by disabling the composer/dock
 	 *  submit. */
 	"compaction-changed": { chatId: string; running: boolean };
-	/** A side-question thread changed for the chat (2026-11-02): a
-	 *  question saved, an answer settled, a window opened/closed, a thread
-	 *  deleted. Notify-then-fetch: open views refetch GET
-	 *  /api/chats/:id/side-chats. Never touches the teaching record. */
+	/** A side conversation changed: a question saved, an answer settled,
+	 *  or its main-context cutoff froze. Notify-then-fetch: open views
+	 *  refetch GET /api/chats/:id/side-chats. Closing never deletes it. */
 	"side-chats-changed": { chatId: string };
 }
 

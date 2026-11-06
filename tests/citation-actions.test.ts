@@ -21,7 +21,7 @@ describe("createCiteAction", () => {
 		const opened: unknown[] = [];
 		const action = createCiteAction({ chatId: "c1", composer: () => composer, openEditor: (target) => opened.push(target) });
 		assert.equal(action.label, "Cite");
-		assert.equal(action.ariaLabel, "Cite selection in composer");
+		assert.equal(action.ariaLabel, "Cite selection in your input");
 		assert.equal(action.onSelect(capture("the chain")), true);
 		assert.deepEqual(seen, [{ version: 1, chatId: "c1", messageId: "m9", text: "the chain", start: 0, end: 9, prefix: "", suffix: "" }]);
 		assert.equal((opened[0] as { fresh: { start: number } }).fresh.start, 3);

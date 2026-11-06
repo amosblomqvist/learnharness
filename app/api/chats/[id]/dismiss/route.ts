@@ -19,8 +19,8 @@
  * ESC-discard now doubles as the turn abort's bookkeeper (the client
  * fires both).
  */
-import { ChatInputError, dismissAppends, emit, parseDismissInput } from "@/src/core";
-import { flushParkedSideQuestions, getChat, isTurnRunning, parkDismissal, stores } from "@/src/server";
+import { ChatInputError, dismissAppends, emit, hasUnresolvedQuestion, parseDismissInput, sideConversationEntries } from "@/src/core";
+import { getChat, isTurnRunning, parkDismissal, sideChats, stores } from "@/src/server";
 
 export async function POST(req: Request, ctx: { params: Promise<{ id: string }> }): Promise<Response> {
 	const { id } = await ctx.params;
@@ -58,10 +58,10 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
 	}
 
 	// Write-ahead, turn-less: the record is the only state that moves.
-	const merged = [...chat.messages, ...appends];
-	stores.chatStore.saveMessages(id, merged);
+	const after = [...chat.messages, ...appends];
+	const snapshots = sideChats.snapshot(id);
+	const entries = hasUnresolvedQuestion(after) ? [] : sideConversationEntries({ messages: after, sideChats: snapshots });
+	stores.chatStore.saveMessages(id, [...after, ...entries], snapshots);
 	emit("record-changed", { chatId: id });
-	// Side threads held behind the dismissed question land after it (#16).
-	flushParkedSideQuestions(stores.chatStore, id);
 	return Response.json({ ok: true });
 }

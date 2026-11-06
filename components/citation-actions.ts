@@ -10,6 +10,8 @@ export interface CitationEditTarget {
 	link: string;
 	start: number;
 	host?: HTMLElement;
+	/** Exact editable host: also supports reading/question/practice thinking. */
+	input?: HTMLElement;
 	fresh?: CitationInsertedRange;
 }
 
@@ -17,14 +19,14 @@ export interface CitationEditTarget {
  *  open the comment editor on the new chip. */
 export function createCiteAction({ chatId, composer, openEditor }: {
 	chatId: string;
-	/** The composer's editable root; null while a question or problem dock replaces it. */
+	/** The intended editable root: composer or the active thinking field. */
 	composer: () => HTMLElement | null;
 	openEditor: (target: CitationEditTarget) => void;
 }): SelectionAction {
 	return {
 		id: "cite",
 		label: "Cite",
-		ariaLabel: "Cite selection in composer",
+		ariaLabel: "Cite selection in your input",
 		icon: Quote,
 		disabledLabel: (capture) => (capture.selector.text.length > CITATION_MAX_TEXT_LENGTH ? "Shorten selection" : null),
 		visible: () => composer() !== null,
@@ -35,7 +37,7 @@ export function createCiteAction({ chatId, composer, openEditor }: {
 			const link = serializeCitation(citation);
 			const detail: InsertCitationDetail = {
 				link,
-				onInserted: (fresh) => openEditor({ citation, link, start: fresh.start, fresh }),
+				onInserted: (fresh) => openEditor({ citation, link, start: fresh.start, fresh, input: root }),
 			};
 			const View = root.ownerDocument.defaultView;
 			root.dispatchEvent(new (View?.CustomEvent ?? CustomEvent)(INSERT_CITATION_EVENT, { detail }));
