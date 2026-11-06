@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { encodePcm16Wav, looksLikeWav, WAV_HEADER_BYTES } from "../src/core/wav.ts";
+import { decodePcm16Wav, encodePcm16Wav, looksLikeWav, WAV_HEADER_BYTES } from "../src/core/wav.ts";
 
 const ascii = (bytes: Uint8Array, offset: number, length = 4) => String.fromCharCode(...bytes.subarray(offset, offset + length));
 
@@ -54,5 +54,29 @@ describe("PCM16 WAV encoder", () => {
 		assert.equal(looksLikeWav(new TextEncoder().encode("RIFF....WAVE" + "x".repeat(40))), true, "header tags only");
 		assert.equal(looksLikeWav(new TextEncoder().encode("RIFF....AVI " + "x".repeat(40))), false, "RIFF but not WAVE");
 		assert.equal(looksLikeWav(new TextEncoder().encode("RIFF....WAVE")), false, "shorter than a header");
+	});
+});
+
+describe("PCM16 WAV decoder", () => {
+	it("round-trips what the encoder writes, even from an unaligned view", () => {
+		const pcm = new Int16Array([0, 1, -1, 32767, -32768, 256]);
+		assert.deepEqual([...decodePcm16Wav(encodePcm16Wav(pcm, 16000), 16000)!], [...pcm]);
+		const wav = encodePcm16Wav(pcm, 16000);
+		const shifted = new Uint8Array(wav.length + 1);
+		shifted.set(wav, 1);
+		assert.deepEqual([...decodePcm16Wav(shifted.subarray(1), 16000)!], [...pcm]);
+		assert.equal(decodePcm16Wav(encodePcm16Wav(new Int16Array(0), 16000), 16000)!.length, 0);
+	});
+
+	it("refuses anything but 16-bit mono PCM at the asked rate, or a ragged data chunk", () => {
+		const wav = encodePcm16Wav(new Int16Array(10), 16000);
+		assert.equal(decodePcm16Wav(wav, 44100), undefined);
+		assert.equal(decodePcm16Wav(wav.subarray(0, wav.length - 1), 16000), undefined, "odd byte count");
+		assert.equal(decodePcm16Wav(new Uint8Array(100), 16000), undefined);
+		for (const [offset, value] of [[20, 3], [22, 2], [34, 8]] as const) {
+			const bad = wav.slice();
+			new DataView(bad.buffer).setUint16(offset, value, true);
+			assert.equal(decodePcm16Wav(bad, 16000), undefined, `offset ${offset}`);
+		}
 	});
 });

@@ -30,3 +30,21 @@ export function looksLikeWav(bytes: Uint8Array): boolean {
 	const tag = (offset: number) => String.fromCharCode(...bytes.subarray(offset, offset + 4));
 	return bytes.byteLength >= WAV_HEADER_BYTES && tag(0) === "RIFF" && tag(8) === "WAVE";
 }
+
+/** The samples of a 16-bit mono WAV at `sampleRate` in the canonical layout encodePcm16Wav
+ * writes (44-byte header, data chunk last), or undefined when it is anything else.
+ * A data length that disagrees with the file is not trusted: the file's own size wins. */
+export function decodePcm16Wav(bytes: Uint8Array, sampleRate: number): Int16Array | undefined {
+	if (!looksLikeWav(bytes)) return undefined;
+	const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+	const tag = (offset: number) => String.fromCharCode(...bytes.subarray(offset, offset + 4));
+	const canonical = tag(12) === "fmt " && view.getUint32(16, true) === 16 && view.getUint16(20, true) === 1 && view.getUint16(22, true) === 1
+		&& view.getUint32(24, true) === sampleRate && view.getUint16(34, true) === 16 && tag(36) === "data";
+	if (!canonical) return undefined;
+	const dataBytes = bytes.byteLength - WAV_HEADER_BYTES;
+	if (dataBytes % 2 !== 0) return undefined;
+	// Copy: the view's offset need not be 2-aligned, and the caller owns the result.
+	const copy = new Uint8Array(dataBytes);
+	copy.set(bytes.subarray(WAV_HEADER_BYTES));
+	return new Int16Array(copy.buffer);
+}
