@@ -91,6 +91,15 @@ const nextConfig: NextConfig = {
 			// Wave E stage 2: resvg rasterizes visual-maker SVGs natively; same
 			// per-platform-binary story as the canvas above (one per build).
 			"node_modules/@resvg/resvg-js-*/**/*",
+			// On-device dictation (2026-11): transcribe-cpp loads its native library
+			// (@transcribe-cpp/<platform>-<backend>, with sibling ggml CPU/GPU modules it
+			// dlopens by name) and koffi's binary (@koromix/koffi-<platform>) through
+			// runtime-resolved paths the tracer cannot see. Builds run per-OS and npm
+			// installs only the current platform's packages, so each glob resolves to one
+			// package. The bundled Silero VAD is read from disk by path.
+			"node_modules/@transcribe-cpp/*/**/*",
+			"node_modules/@koromix/koffi-*/**/*",
+			"src/server/local-stt/silero-vad-v6.2-F32.gguf",
 			"node_modules/@earendil-works/pi-ai/dist/providers/data/**/*",
 			// Public native OAuth factories load these flows through variable imports.
 			// Electron main uses the same standalone SDK; the offline runtime gate
@@ -118,6 +127,8 @@ const nextConfig: NextConfig = {
 		"@napi-rs/canvas", // native binding — bundling breaks the .node require
 		"@silvia-odwyer/photon-node", // CJS loads its adjacent WASM from disk
 		"@resvg/resvg-js", // native binding — same
+		"transcribe-cpp", // locates its native library relative to itself; imported lazily
+		"koffi", // FFI loader that resolves its platform binary at runtime
 	],
 };
 

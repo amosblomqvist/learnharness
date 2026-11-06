@@ -89,4 +89,29 @@ for (const asset of [
 	}
 }
 
+// 4) Sanity: on-device dictation loads these by runtime-resolved paths the tracer cannot
+//    see (next.config.ts outputFileTracingIncludes), so nothing fails until first use.
+//    The bundled Silero VAD, transcribe-cpp, koffi, and one platform package each of the
+//    native engine (@transcribe-cpp/*) and its FFI loader (@koromix/koffi-*).
+const requiredEntries = [
+	[path.join("src", "server", "local-stt", "silero-vad-v6.2-F32.gguf"), "the bundled Silero VAD model"],
+	[path.join("node_modules", "transcribe-cpp", "package.json"), "transcribe-cpp"],
+	[path.join("node_modules", "koffi", "package.json"), "koffi"],
+];
+for (const [entry, what] of requiredEntries) {
+	if (!exists(path.join(STANDALONE, entry))) {
+		console.error(`[build-server] ${what} missing from the trace: ${entry}`);
+		process.exit(1);
+	}
+}
+for (const [scope, prefix, what] of [["@transcribe-cpp", "", "native engine"], ["@koromix", "koffi-", "koffi binary"]]) {
+	const dir = path.join(STANDALONE, "node_modules", scope);
+	const found = exists(dir) ? fs.readdirSync(dir).filter((name) => name.startsWith(prefix)) : [];
+	if (found.length === 0) {
+		console.error(`[build-server] no ${scope}/* ${what} package in the standalone — local dictation would fail on first use.`);
+		console.error("             Check outputFileTracingIncludes in next.config.ts.");
+		process.exit(1);
+	}
+}
+
 console.log("[build-server] server payload ready:", STANDALONE);
