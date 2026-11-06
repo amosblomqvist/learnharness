@@ -26,6 +26,9 @@ export interface ModelCatalogEntry {
 	/** Null for native CLI aliases whose effective limits are session-specific. */
 	contextWindow: number | null;
 	maxTokens: number | null;
+	/** ChatGPT-account models only: the Fast (priority) service tier the
+	 * account catalog offers, with OpenAI's own description. Absent = no Fast. */
+	fast?: { description: string };
 }
 
 /** The conversation agents' resolved default (BYOK, owner 2026-09-22): the

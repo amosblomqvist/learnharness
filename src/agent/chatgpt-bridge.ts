@@ -5,11 +5,11 @@ import type { AdmissionScope, NoDispatchKind } from "./chatgpt-request-cycle.ts"
 export type { ChatGPTStatus } from "../core/contracts/chatgpt.ts";
 export interface Stamp { epoch: number; authorityRevision: number; revision: number }
 interface StatusValue extends Stamp { status: ChatGPTStatus }
-interface ModelsValue extends StatusValue { accountId: string | null; models: { id: string; name: string }[] }
+interface ModelsValue extends StatusValue { accountId: string | null; models: { id: string; name: string; fast?: { description: string } }[] }
 interface LeaseValue extends Stamp { accessToken: string; accountId: string }
 interface Pending { op: string; resolve: (v: unknown) => void; reject: (e: Error) => void; timer: ReturnType<typeof setTimeout> }
 interface BridgeState {
- status: ChatGPTStatus; stamp: Stamp; models: Model<"openai-responses">[]; catalogAccount: string | null;
+ status: ChatGPTStatus; stamp: Stamp; models: Model<"openai-responses">[]; fast: Map<string, { description: string }>; catalogAccount: string | null;
  pending: Map<string, Pending>; controllers: Map<AbortController, boolean>; listeners: Set<() => void>; counter: number; catalogRequest: number;
 }
 const key = Symbol.for("lh.chatgpt.bridge");
@@ -25,7 +25,7 @@ function runtimeConnected(): boolean { return desktopIPCConnected() || webSubscr
 function bridge(): BridgeState {
  const global = globalThis as typeof globalThis & { [key]?: BridgeState };
  if (!global[key]) {
-  const state: BridgeState = { status: unavailable(), stamp: { epoch: 0, authorityRevision: 0, revision: 0 }, models: [], catalogAccount: null, pending: new Map(), controllers: new Map(), listeners: new Set(), counter: 0, catalogRequest: 0 };
+  const state: BridgeState = { status: unavailable(), stamp: { epoch: 0, authorityRevision: 0, revision: 0 }, models: [], fast: new Map(), catalogAccount: null, pending: new Map(), controllers: new Map(), listeners: new Set(), counter: 0, catalogRequest: 0 };
   global[key] = state;
   const receive = (raw: unknown) => {
    const m = raw as { channel?: string; kind?: string; id?: string; op?: string; ok?: boolean; value?: unknown; stamp: Stamp; status: ChatGPTStatus; invalidate?: string; error?: string };
@@ -59,7 +59,7 @@ function bridge(): BridgeState {
  }
  return global[key];
 }
-function clearCatalog(state: BridgeState) { state.models = []; state.catalogAccount = null; }
+function clearCatalog(state: BridgeState) { state.models = []; state.fast = new Map(); state.catalogAccount = null; }
 function acceptStatus(state: BridgeState, value: StatusValue) {
  if (!validStamp(value) || value.revision < state.stamp.revision) return;
  if (value.epoch !== state.stamp.epoch || value.authorityRevision !== state.stamp.authorityRevision || value.status.activeId !== state.status.activeId) clearCatalog(state);
@@ -85,6 +85,8 @@ export function chatGPTBackgroundAllowed(): boolean { const s = chatGPTStatus();
 export function onChatGPTChange(listener: () => void): () => void { bridge().listeners.add(listener); return () => { bridge().listeners.delete(listener); }; }
 export function chatGPTModels(): Model<"openai-responses">[] { return bridge().models; }
 export function chatGPTModel(id: string): Model<"openai-responses"> | undefined { return chatGPTModels().find((m) => m.id === id); }
+/** The Fast (priority) service tier the account catalog offers for a supported model, if any. */
+export function chatGPTFastTier(id: string): { description: string } | undefined { return chatGPTModel(id) ? bridge().fast.get(id) : undefined; }
 export function chatGPTScope(selectedModelId: string): AdmissionScope {
  const state = bridge();
  if (!chatGPTConnected() || !state.catalogAccount || state.catalogAccount !== state.status.activeId || !chatGPTModel(selectedModelId)) throw new Error("ChatGPT account model catalog is unavailable");
@@ -122,6 +124,7 @@ export async function refreshChatGPTModels(supported: Model<"openai-responses">[
   acceptStatus(state, value);
   if (value.epoch !== state.stamp.epoch || value.authorityRevision !== state.stamp.authorityRevision || value.accountId !== state.status.activeId || !chatGPTConnected()) return;
   state.catalogAccount = value.accountId;
+  state.fast = new Map(value.models.flatMap((entry) => entry.fast && typeof entry.fast.description === "string" ? [[entry.id, { description: entry.fast.description }] as const] : []));
   state.models = value.models.flatMap((entry) => {
    const known = supported.find((m) => m.id === entry.id && m.api === "openai-responses");
    return known ? [{ ...known, provider: "chatgpt", name: entry.name, headers: undefined, samplingParams: undefined, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } }] : [];

@@ -21,7 +21,7 @@ import { clampThinkingLevel, getSupportedThinkingLevels, type Api, type Model } 
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import { piModels } from "../agent/models.ts";
 import { customProviderAvailable } from "./custom-provider.ts";
-import { chatGPTConnected, chatGPTModel, chatGPTModels, refreshChatGPTModels } from "../agent/chatgpt-bridge.ts";
+import { chatGPTConnected, chatGPTFastTier, chatGPTModel, chatGPTModels, refreshChatGPTModels } from "../agent/chatgpt-bridge.ts";
 import { NATIVE_SUBSCRIPTIONS } from "../core/contracts/subscriptions.ts";
 import { nativeSubscriptionId, nativeSubscriptionConnected, nativeSubscriptionModel, nativeSubscriptionModels, refreshSubscriptionModels } from "../agent/subscription-bridge.ts";
 
@@ -188,6 +188,7 @@ export function toModelDto(model: Model<Api>): ModelDto {
 		},
 		contextWindow: model.provider === CLAUDE_CODE_PROVIDER ? null : model.contextWindow,
 		maxTokens: model.provider === CLAUDE_CODE_PROVIDER ? null : model.maxTokens,
+		...(model.provider === "chatgpt" && chatGPTFastTier(model.id) ? { fast: chatGPTFastTier(model.id) } : {}),
 	};
 }
 
