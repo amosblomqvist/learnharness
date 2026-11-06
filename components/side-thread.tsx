@@ -258,7 +258,7 @@ export function SideThreadPopover({ state, chatId, composer, ...handlers }: { st
 	const style: React.CSSProperties = frame && placement ? { left: frame.x, top: frame.y, width: placement.style.width, height: frame.height }
 		: placement ? { ...placement.style, maxHeight: placement.maxHeight } : { left: 0, top: 0, visibility: "hidden" };
 	return createPortal(<div ref={boxRef} role="dialog" aria-label="Side question" data-testid="side-thread-popover"
-		style={{ position: "fixed", zIndex: 60, ...style }} className="lh-no-drag flex flex-col overflow-hidden rounded-xl border bg-background/70 p-3 text-sm shadow-xl backdrop-blur-[24px]">
+		style={{ position: "fixed", zIndex: 60, ...style }} className="lh-no-drag flex flex-col overflow-hidden rounded-xl border bg-background/50 p-3 text-sm shadow-xl backdrop-blur-[18px]">
 		<SideThreadBody state={state} chatId={chatId} {...handlers} onDragStart={startDrag} />
 		<div aria-hidden="true" data-testid="side-thread-resize" className="absolute inset-x-3 bottom-0 h-2 cursor-ns-resize touch-none" onPointerDown={startResize} />
 	</div>, document.body);
