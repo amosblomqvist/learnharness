@@ -119,12 +119,13 @@ export function resolveConversationSpec(
 ): EffectiveModelSpec | null {
 	const model = chat?.model ?? (strong ? { provider: strong.provider, id: strong.id } : undefined);
 	if (!model) return null;
-	const fast = chat?.model ? chat.fast : strong?.fast;
+	// Exactly true: chat records have no read-side sanitizer.
+	const fast = (chat?.model ? chat.fast : strong?.fast) === true;
 	return {
 		provider: model.provider,
 		id: model.id,
 		thinkingLevel: chat?.thinkingLevel ?? strong?.thinkingLevel,
-		...(fast ? { fast } : {}),
+		...(fast ? { fast: true as const } : {}),
 	};
 }
 

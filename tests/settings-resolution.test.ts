@@ -208,6 +208,12 @@ describe("the slot tier (BYOK, owner 2026-09-22)", () => {
 });
 
 describe("resolveConversationSpec (the turn gate's chain)", () => {
+	it("a chat record's fast counts only when exactly true (hand-edited junk never sends priority)", () => {
+		const model = { provider: "chatgpt", id: "gpt-5.5" };
+		assert.equal("fast" in resolveConversationSpec({ model, fast: "yes" } as never, null)!, false);
+		assert.equal("fast" in resolveConversationSpec({ model, fast: 1 } as never, null)!, false);
+		assert.equal(resolveConversationSpec({ model, fast: true }, null)!.fast, true);
+	});
 	it("chat.model over the strong slot; null when both empty", () => {
 		assert.equal(resolveConversationSpec(undefined, null), null);
 		assert.deepEqual(

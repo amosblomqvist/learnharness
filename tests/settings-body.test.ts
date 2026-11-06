@@ -350,3 +350,10 @@ describe("Fast pins in the settings bodies (OpenAI Fast mode, S6/S9)", () => {
 		});
 	});
 });
+
+it("fast:false parses exactly like an absent fast (S9)", () => {
+	const m = { provider: "chatgpt", id: "gpt-5.5" };
+	assert.deepEqual(parseSettingsBody({ model: m, thinkingLevel: "high", fast: false }), parseSettingsBody({ model: m, thinkingLevel: "high" }));
+	assert.deepEqual(parseModelsSettingsBody({ strong: { model: m, fast: false } }), parseModelsSettingsBody({ strong: { model: m } }));
+	assert.deepEqual(parseAgentSettingsBody({ models: { researcher: { model: m, fast: false } } }), parseAgentSettingsBody({ models: { researcher: { model: m } } }));
+});
