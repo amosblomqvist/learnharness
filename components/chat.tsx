@@ -70,6 +70,7 @@ import { QuestionDock } from "@/components/question-dock";
 import { PluginQuestionDock } from "./plugin-question-dock";
 import { PluginQuestionPart } from "./plugin-question-part";
 import { pluginQuestionKeySuppressed, composingQuestionKey } from "./plugin-question-keys";
+import { capturePluginQuestionDismissal, confirmPluginQuestionDismissal, type PluginQuestionDismissalTarget } from "./plugin-question-dismissal";
 import { pendingPluginQuestionOf, pluginQuestionCallsOf } from "@/src/core";
 import { pluginQuestionOccurrenceKey, type PluginQuestionSnapshot } from "@/src/core";
 import type { PluginQuestionDraft } from "./session-core";
@@ -426,19 +427,24 @@ export function Chat({
 	const [abortAsk, setAbortAsk] = useState<AbortMode | null>(null);
 	const abortAskRef = useRef<AbortMode | null>(null);
 	abortAskRef.current = abortAsk;
+	const pluginAbortTarget = useRef<PluginQuestionDismissalTarget | null>(null);
+	const pluginDismissal = useRef({ canonicalMessages, reconciliation, stop, dismissPluginQuestion });
+	pluginDismissal.current = { canonicalMessages, reconciliation, stop, dismissPluginQuestion };
+	const closeAbortAsk = useCallback(() => { pluginAbortTarget.current = null; setAbortAsk(null); }, []);
 	useEffect(() => {
 		const onAbort = () => {
 			if (!isInteractionScopeEligible(sessionFindScopeRef.current, controller)) return;
+			const pluginQuestion = capturePluginQuestionDismissal(pluginDismissal.current.canonicalMessages);
 			const target = escAbortTarget({
 				abortAsk: abortAskRef.current !== null,
 				mermaidFocus: mermaidFocusRef.current !== null || figureFocusRef.current !== null,
 				planOpen: planOpenRef.current,
 				setupOpen: setupOpenRef.current,
-				pending: pendingRef.current !== null,
+				pending: pendingRef.current !== null || pluginQuestion !== null,
 				problem: activeProblemRef.current !== null,
 				busy: busyRef.current,
 			});
-			if (target === "question") setAbortAsk("question");
+			if (target === "question") { pluginAbortTarget.current = pluginQuestion; setAbortAsk("question"); }
 			else if (target === "problem") setAbortAsk("problem");
 			else if (target === "turn") setAbortAsk("turn");
 			else if (target === "mermaid") setMermaidFocus(null);
@@ -450,7 +456,12 @@ export function Chat({
 	}, [controller]);
 	const confirmAbort = useCallback(
 		(mode: AbortMode) => {
-			setAbortAsk(null);
+			const pluginQuestion = pluginAbortTarget.current;
+			closeAbortAsk();
+			if (mode === "question" && pluginQuestion) {
+				confirmPluginQuestionDismissal(pluginQuestion, pluginDismissal.current);
+				return;
+			}
 			if (mode === "turn") {
 				abortInFlightTurn();
 				return;
@@ -485,7 +496,7 @@ export function Chat({
 				if (busyRef.current) abortInFlightTurn();
 			}
 		},
-		[abortInFlightTurn, dismissQuestion, dismissProblem],
+		[abortInFlightTurn, dismissQuestion, dismissProblem, closeAbortAsk],
 	);
 	// Mount continuation: if the stored transcript ends with a fulfilled tool
 	// (a job result landed while no client was open), resume the lesson — the
@@ -1929,7 +1940,7 @@ export function Chat({
 				)}
 				{planOpen && <PlanPopup messages={messages} onClose={() => setPlanOpen(false)} />}
 				</SurfaceRegion>
-				<AbortTurnDialog mode={abortAsk} onClose={() => setAbortAsk(null)} onConfirm={confirmAbort} busy={busy} />
+				<AbortTurnDialog mode={abortAsk} onClose={closeAbortAsk} onConfirm={confirmAbort} busy={busy} />
 				</div>
 			</div>
 		</div>

@@ -4,7 +4,7 @@
   "name": "Coding questions",
   "version": "0.1.0",
   "minAppVersion": "0.4.1",
-  "description": "Teacher coding questions with a syntax-colored editor and optional starter code. Teacher review only; no code execution.",
+  "description": "Teacher coding questions with syntax highlighting and automatic tests using your installed tools. Runs local code with your user permissions; not sandboxed.",
   "main": "main.js",
   "backend": "backend.cjs",
   "styles": "styles.css"

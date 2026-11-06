@@ -33,7 +33,7 @@ const imageSrc = (value: ReturnType<typeof image>) => `data:${value.mimeType};ba
 
 let cleanup: (() => Promise<void>) | undefined;
 afterEach(async () => { await cleanup?.(); cleanup = undefined; });
-async function mount(answer: PluginQuestionAnswer, registration?: QuestionRendererRegistration) {
+async function mount(answer: PluginQuestionAnswer, registration?: QuestionRendererRegistration, posed: PluginQuestionSnapshot = snapshot) {
 	const dom = parseHTML("<html><body><div id='root'></div></body></html>");
 	const previous = new Map<string, PropertyDescriptor | undefined>();
 	for (const [key, value] of Object.entries({ window: dom.window, document: dom.document, Node: dom.window.Node, HTMLElement: dom.window.HTMLElement, IS_REACT_ACT_ENVIRONMENT: true })) {
@@ -49,7 +49,7 @@ async function mount(answer: PluginQuestionAnswer, registration?: QuestionRender
 			else delete (globalThis as Record<string, unknown>)[key];
 		} }
 	};
-	await act(async () => { root.render(<PluginQuestionAnswered snapshot={snapshot} answer={answer} chatId="chat" registration={registration} />); });
+	await act(async () => { root.render(<PluginQuestionAnswered snapshot={posed} answer={answer} chatId="chat" registration={registration} />); });
 	return dom.document;
 }
 async function expandAnswer(document: Document) {
@@ -163,6 +163,41 @@ test("custom answered code owns only its slot; native thinking and images remain
 	assert.match(document.querySelector('[data-testid="your-thinking"]')?.textContent ?? "", /host thinking/);
 	assert.equal(document.querySelectorAll("img").length, 2, "plugin slot replacement cannot erase host thinking images");
 	await cleanup!(); cleanup = undefined; assert.equal(disposed, 1);
+});
+
+for (const grading of [{ result: false }, { result: null }, { result: { tests: [false, null] } }, { error: "Runner failed" }]) test(`answered renderer receives owned frozen grading ${JSON.stringify(grading)} without freezing its signal`, async () => {
+	const posed: PluginQuestionSnapshot = { ...snapshot, protocolVersion: 2, requiresGrading: true };
+	const persisted = { ...savedAnswer(), grading };
+	let contextSeen = false;
+	let signal!: AbortSignal;
+	const registration: QuestionRendererRegistration = { pluginId: "fixture", renderer: {
+		id: "code", supportedContractVersions: [1], mountAnswerEditor() { throw new Error("not an editor"); },
+		mountAnswered(container, context) {
+			contextSeen = true; signal = context.signal;
+			assert.deepEqual(context.grading, grading);
+			assert.notEqual(context.grading, grading);
+			assert.ok(Object.isFrozen(context)); assert.ok(Object.isFrozen(context.grading));
+			if (context.grading && "result" in context.grading && typeof context.grading.result === "object" && context.grading.result !== null) assert.ok(Object.isFrozen(context.grading.result));
+			assert.equal(Object.isFrozen(context.signal), false);
+			container.textContent = "Plugin answer only";
+		},
+	} };
+	const document = await mount(persisted, registration, posed);
+	assert.ok(contextSeen); assert.equal(Object.isFrozen(grading), false);
+	assert.equal(document.querySelector('[data-testid="plugin-question-answered"]')?.textContent, "CodePlugin answer only");
+	await cleanup!(); cleanup = undefined;
+	assert.equal(signal.aborted, true);
+});
+
+test("historical answered renderer never receives unexpected v1 grading", async () => {
+	const persisted = { ...savedAnswer(), grading: { result: "stray" } };
+	const answer = readPluginQuestionAnswer(persisted, snapshot)!;
+	const registration: QuestionRendererRegistration = { pluginId: "fixture", renderer: {
+		id: "code", supportedContractVersions: [1], mountAnswerEditor() { throw new Error("not an editor"); },
+		mountAnswered(_container, context) { assert.equal(Object.hasOwn(context, "grading"), false); },
+	} };
+	await mount(answer, registration);
+	assert.deepEqual(persisted.grading, { result: "stray" });
 });
 
 test("SourcePart delegates thinking once and preserves answer images outside the host card", () => {

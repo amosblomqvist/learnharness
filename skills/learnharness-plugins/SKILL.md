@@ -1,6 +1,6 @@
 ---
 name: learnharness-plugins
-description: Build, inspect, or debug a trusted-local LearnHarness plugin using the public plugin API. Use for host UI widgets, explicit action placements, plugin settings, custom views, native teaching tools/instructions, bounded native question formats, native submission interception/images, page-body surfaces, content renderers, validated background workers, interactive agents, learning-data readers, or plugin lifecycle problems.
+description: Build, inspect, or debug a trusted-local LearnHarness plugin using the public plugin API. Use for host UI widgets, explicit action placements, plugin settings, custom views, native teaching tools/instructions, bounded native question formats and optional generic grading, native submission interception/images, page-body surfaces, content renderers, validated background workers, interactive agents, learning-data readers, or plugin lifecycle problems.
 ---
 
 # LearnHarness plugin authoring
@@ -378,10 +378,50 @@ is implied. No grading, data, blank filtering, API-shape or `ctx.ui` changes are
   thenables. Finite JSON/verbatim strings and schema-allowed 0/false/null/empty values stay
   exact, without coercion/trim/clean. Historical saved schemas and required same-contract
   answer refinement govern acceptance; newly added refinements do not change old rules.
+- Optional generic grading is an approved additive **API v1** contract, not covered by
+  historical question/defaults verification. Definition
+  `gradeAnswer?: (context: PluginQuestionGradingContext<Q, A>) => JsonValue | Promise<JsonValue>`
+  runs only after saved-schema and synchronous answer validation. The context extends
+  answer validation (`chatId`, `questionId`, `variant`, `contractVersion`, historical
+  `input`, accepted `answer`) with `readonly signal: AbortSignal`. Use schema-inferred
+  types, matching `src/core/plugin-questions.ts`; never turn validation into async grading.
+  Return any finite JSON, including false/null/0/empty values; invalid JSON, throws and
+  rejection produce a saved accepted answer with `grading.error`, not answer rejection.
+  Host-owned `PluginQuestionGradingOutcome` is exactly `{ result: JsonValue } | { error: string }`;
+  optional `PluginQuestionAnswer.grading` reaches `mountAnswered` and model-facing answer
+  text. The callback returns the result, not the outcome envelope. No correctness/status
+  enum, grading schema, scoring, rendering semantics or automatic UI is imposed. Plugins
+  own display; badges remain generic primitives. Saved outcomes are reused, never rerun
+  on projection, remount, continuation or model retry.
+  Pose-frozen graded snapshots use local protocol v2 with `requiresGrading: true`;
+  historical v1 stays ungraded even if a grader is later added. Ignore unexpected grading
+  paired with v1 in projection without rewriting disk. Missing required exact-contract
+  grader means unavailable/pending, not ungraded acceptance. Older hosts may durably
+  cancel unknown bound v2 as unreadable protocol; accepted downgrade behavior, no manifest
+  API bump. Inline answer POST awaits grading and canonical save, privately using existing
+  turn owner/waiting handle, no new jobs/queue/extra LLM pass. HTTP connection occupancy/
+  contention is accepted. Navigation, HTTP disconnect and view detach do not cancel work.
+  An admitted submission retains its captured model/provider through grading and continuation;
+  changed model settings apply to the next request. Stop, plugin disable or question-type
+  unregistration aborts the signal and prevents answer save; await actual underlying
+  settlement rather than abort-race release. Cancellation is cooperative; no forced
+  termination/host hard timeout, so products own any timeout and cleanup. Only plugin-answer
+  POST loses automatic 409 retry; other submission retry policy stays unchanged. Explicit
+  retry after pre-save failure may rerun grading; no exactly-once guarantee across crashes
+  or uncertain persistence. Reconcile canonical state, never infer no-save from lost HTTP
+  acknowledgment. Read the [full authoring contract](../../docs/plugin-authoring.md#optional-generic-answer-grading--approved-contract).
+  This permits one grading callback, not assessment agents, a node-assessment API or a
+  general backend assessment/hook pipeline. No final runtime/packaging/release claim is
+  established by these documentation and portable SDK type checks.
 - Renderer slots are `id`, `supportedContractVersions`, optional `mountQuestion` (host
   Markdown fallback), required `mountAnswerEditor`, optional `mountAnswered` (readable
-  answer fallback). Host ThinkingBlocks remain outside custom answered content: reading
-  thinking above the submitted card (native label/default-open), answer thinking inside
+  answer fallback; receives answer and optional readonly `grading` outcome). Only answered
+  mounts additionally receive optional readonly `headerContainer?: HTMLElement`, a
+  generation-owned inline suffix after the host label. Mount a public badge there (or
+  body fallback if absent) using the same signal/cleanup; failure/replacement/unmount
+  removes both body/header children. Keep the live DOM/signal unfrozen and do not alter
+  the host heading or reuse another generation's container. No grading semantics. Host
+  ThinkingBlocks remain outside custom answered content: reading thinking above the submitted card (native label/default-open), answer thinking inside
   (`inCard`); each keeps its own text/images, including defined blank/whitespace channels.
   Pending thinking has the native framed background; Dismiss is recovery-only for a
   confirmed unavailable/missing/failed renderer, not a healthy working question or an
@@ -395,8 +435,15 @@ is implied. No grading, data, blank filtering, API-shape or `ctx.ui` changes are
   appendTranscript. Host defaults are now Enter-submit/Shift+Enter-newline in
   both the answer editor and host Thinking. An explicit optional key override is allowed;
   `"pass"`/no hook uses host Enter-submit. Host shortcuts/Shift+Tab/reserved Mod+Enter/IME229
-  and scope guards keep precedence; passed Tab uses private field cycling. No public
-  generic key/field SDK.
+  and scope guards keep precedence; passed Tab uses private field cycling. An unhandled
+  eligible editor Escape moves directly to the next host field; editor-only chains blur
+  instead. Claim the same Escape so it cannot also open discard/abort. No app-wide Tab
+  redesign or public generic key/field SDK. Outside editor/leaf/dictation/layer ownership,
+  plugin questions use the native confirmation: Cancel/Escape preserves drafts, Confirm
+  is bound to the captured canonical occurrence/question, stale closes with no action.
+  Busy plugin confirmation uses existing local detach then silent server validation,
+  adjacent park+Stop, and actual-cleanup settlement; idle writes the existing cancellation.
+  No extra model wake, new discard queue or healthy-question Dismiss button; builtins unchanged.
   Honor async mount aborts, dispose late handles and fence stale callbacks/keys/focus/speech.
   Preserve mounts on fold; drafts live in the existing in-memory session model across
   remount/adoption, not model-destroying navigation/reload/restart. Durable posed questions
@@ -412,12 +459,13 @@ is implied. No grading, data, blank filtering, API-shape or `ctx.ui` changes are
   schemas, single-submit and legacy/stale guards prevent bypass/duplicate continuation.
   Exact contractVersion only: compatible updates retain it; explicitly incompatible
   versions permit quiet host cancellation, unknown version/package changes alone do not.
-  Missing/disabled backend, required refinement or supported renderer stays unavailable/
-  pending with safe host fallback/dismissal. No frontend incompatibility or chat migration.
-  **Teacher review only**: no assessment/node hook, grading schema/stage, execution service
-  or new worker lifecycle; use separate ordinary tools if needed. Builtins stay unchanged.
-  No generic pending-input/forms, new UI catalogue/source metadata/installer extension;
-  both product implementations remain paused. The historical 3,681-test Markdown result
+  Missing/disabled backend, required refinement/grader or supported renderer stays
+  unavailable/pending with safe host fallback/dismissal. No frontend incompatibility or chat migration.
+  Ungraded questions remain ordinary teacher review; optional generic grading above adds
+  no assessment agent/node API, general backend hook pipeline, execution service or new
+  worker lifecycle. Builtins stay unchanged. No generic pending-input/forms, new UI
+  catalogue/source metadata/installer extension is authorized. Product behavior requires
+  its own approved design. The historical 3,681-test Markdown result
   remains separate from the current question verification. Actual OS microphone/IME is
   not browser-verified; focused causal tests cover final-STT/IME/replacement ownership.
 - Native session extensions follow the approved contract, not inferred private APIs.

@@ -101,11 +101,12 @@ export function PluginQuestionDockContent({ snapshot, chatId, draft, expanded, r
 	const latestSubmit = useRef(submit); latestSubmit.current = submit;
 	useEnterSubmits(() => { void latestSubmit.current(); }, root);
 	useEffect(() => ownPluginQuestionKeys({
-		eligible: () => current.current.expanded && !current.current.reveal && current.current.reconciliation === "ready" && current.current.ready && isInteractionScopeEligible(root.current, controller),
+		eligible: key => current.current.expanded && !current.current.reveal && current.current.reconciliation === "ready" && current.current.ready && isInteractionScopeEligible(root.current, controller)
+			&& (key !== "Escape" || (current.current.available && !current.current.failed && !!current.current.registration && leaseRegistration.current === current.current.registration && leaseKey.current === keyOf(current.current.snapshot) && !!lease.current?.mounted && isInteractionScopeEligible(editor.current, controller))),
 		contains: target => target instanceof Node && !!editor.current?.contains(target),
 		key: key => current.current.registration && leaseRegistration.current === current.current.registration && leaseKey.current === keyOf(current.current.snapshot) ? lease.current?.key(key) ?? "pass" : "pass",
 		submit: () => { void latestSubmit.current(); },
-		cycle: () => {
+		cycle: key => {
 			const active = document.activeElement;
 			const hasReading = current.current.snapshot.variant === "teach" && current.current.snapshot.input.type === "check";
 			const chain = [
@@ -114,6 +115,9 @@ export function PluginQuestionDockContent({ snapshot, chatId, draft, expanded, r
 				...(current.current.snapshot.showThinking && thinking.current ? [{ contains: () => thinking.current === active || !!thinking.current?.contains(active), focus: () => thinking.current?.focus() }] : []),
 			];
 			if (!chain.length) return;
+			// Escape leaves the focused editor on this event. A one-field
+			// chain must blur instead of wrapping straight back into the editor.
+			if (key === "Escape" && chain.length === 1) { if (active instanceof HTMLElement) active.blur(); return; }
 			const index = chain.findIndex(field => field.contains()); chain[(index + 1) % chain.length]!.focus();
 		},
 	}), [controller, readingRef]);

@@ -32,7 +32,7 @@ import { collectToolCallIds } from "./pi/call-ids.ts";
 import { providerEventNote } from "../agent/provider-events.ts";
 import { effectiveSettings, stores } from "./stores.ts";
 import { getPluginAgentContributions, getPluginHost } from "./plugins.ts";
-import { preparePluginQuestionAnswer, reconcilePluginQuestionCompatibility, type QuestionTypeResolver } from "./plugin-questions.ts";
+import { preparePluginQuestionSubmission, reconcilePluginQuestionCompatibility, type QuestionTypeResolver } from "./plugin-questions.ts";
 import { searchAvailable, searchProvider } from "./search.ts";
 import { prepareSubmissionImages, prepareSubmissionImageChannels, submissionImagePolicyKey } from "./submission-images.ts";
 import { providerKeyPresent } from "./keys.ts";
@@ -45,13 +45,14 @@ import {
 } from "../core/settings-resolution.ts";
 import { modelsNotConfigured, providerKeyMissing as providerKeyMissingEnvelope, ROLE_SLOT, type ModelSlotName, type ProviderKeyMissing } from "../core/settings.ts";
 import { beginTurn, endTurn, isTurnRunning } from "./turn-liveness.ts";
+import { claimPreparingTurn, type TurnPreparation } from "./turn-preparation.ts";
 import { applyParkedDismissal } from "./dismissal-park.ts";
 import { registerTurn, rememberTurnFailure, unregisterTurn } from "./turn-runs.ts";
 import { persistTurn, triggerExtraction, TurnPersistenceError } from "./turn-service.ts";
 import { hasProbeDone, hasUnresolvedQuestion, pendingPluginQuestionOf } from "../core/native-messages.ts";
 import { samePluginQuestionOccurrence } from "../core/plugin-questions.ts";
 import { composeInstructions } from "../agent/teacher-agent.ts";
-import { ensureCompacted, kickCompaction, effectiveThresholdTokens } from "./compaction.ts";
+import { ensureCompacted, kickCompaction, effectiveThresholdTokens, compactionInFlight } from "./compaction.ts";
 import { catalogContextLimits, refreshConnectionCatalog } from "./model-catalog.ts";
 import { emit } from "../core/events.ts";
 import { settledTurnResponse } from "./turn-runs.ts";
@@ -203,10 +204,11 @@ export async function handleChatInput(
 	buildAgent?: (opts: AgentBuildOptions & { teaching: boolean }) => TeachingAgent,
 ): Promise<Response> {
 	await reconcilePluginQuestionCompatibility(stores.chatStore, chatId);
-	let record = stores.chatStore.getChat(chatId);
-	if (!record) {
+	const initialRecord = stores.chatStore.getChat(chatId);
+	if (!initialRecord) {
 		return Response.json({ error: "Unknown chat" }, { status: 404 });
 	}
+	let record = initialRecord;
 
 	const capturedSession = { createdAt: record.createdAt, kind: record.kind };
 	const freshSubmission = input.type === "text" || input.type === "thinking" || input.type === "answer" || input.type === "plugin-question-answer";
@@ -361,21 +363,26 @@ export async function handleChatInput(
 	// the SAME conversation chain, never a parallel role catalog. No await
 	// may intervene before the save-only write or beginTurn/write below.
 	const staleSubmission = () => Response.json({ code: "submission-stale", error: "The submission target or selected model changed. Your input has been kept." }, { status: 412 });
-	if (freshSubmission) {
-		if (record.createdAt !== capturedSession.createdAt || record.kind !== capturedSession.kind) return staleSubmission();
+	const submissionIsCurrent = (checkModel = true) => {
+		if (!freshSubmission) return true;
+		if (record.createdAt !== capturedSession.createdAt || record.kind !== capturedSession.kind) return false;
 		try {
-			const spec = resolveConversationSpec(record.settings, effectiveSettings().models.strong);
-			if (!spec || JSON.stringify(spec) !== capturedConversation) return staleSubmission();
-			const checked = piEngineForSpec(spec, () => callPurpose.background, lifecycle, retentionForSlot("strong"));
-			if (submissionImagePolicyKey(checked) !== capturedPolicy || checked.level !== conversationEngine.level) return staleSubmission();
+			if (checkModel) {
+				const spec = resolveConversationSpec(record.settings, effectiveSettings().models.strong);
+				if (!spec || JSON.stringify(spec) !== capturedConversation) return false;
+				const checked = piEngineForSpec(spec, () => callPurpose.background, lifecycle, retentionForSlot("strong"));
+				if (submissionImagePolicyKey(checked) !== capturedPolicy || checked.level !== conversationEngine.level) return false;
+			}
 			assertPluginQuestionInputAllowed(record.messages, input);
 			if (input.type !== "steers") assertNativeSubmissionTarget(record.messages, input);
 			if (input.type === "plugin-question-answer") {
 				const pending = pendingPluginQuestionOf(record.messages);
-				if (!pending || pending.questionId !== input.questionId || !samePluginQuestionOccurrence(pending.occurrence, input.occurrence)) return staleSubmission();
+				if (!pending || pending.questionId !== input.questionId || !samePluginQuestionOccurrence(pending.occurrence, input.occurrence)) return false;
 			}
-		} catch { return staleSubmission(); }
-	}
+		} catch { return false; }
+		return true;
+	};
+	if (!submissionIsCurrent()) return staleSubmission();
 	// Recompute Retry eligibility on current truth, still before beginTurn.
 	// A compaction marker or another writer may have landed during awaits.
 	// These omissions affect ONLY the agent context, never the saved record.
@@ -396,16 +403,48 @@ export async function handleChatInput(
 	// re-fire of an already-landed one) - with claimSteers gone, this wake
 	// input is the only steer appender; in-run delivery rides pi's own
 	// follow-up queue and never builds an input event at all.
+	let preparation: TurnPreparation | undefined;
+	let turnClaimed = false;
+	let handedOff = false;
+	let inputSaved = false;
+	const releaseOwnership = () => {
+		if (preparation) preparation.finish();
+		else { endTurn(chatId); unregisterTurn(chatId); }
+	};
+	// The entire owned region includes grading, persistence and construction.
+	// Every pre-handoff exit closes waiting views and releases its own claim.
+	try {
 	let appends;
 	try {
 		assertPluginQuestionInputAllowed(record.messages, input);
+		// A competing preflight can start compaction during the contribution
+		// await above. No await separates this structural check from ownership
+		// or the save-only sibling branch below.
+		if (compactionInFlight(chatId))
+			return Response.json({ error: "A turn is already running for this session" }, { status: 409 });
 		if (input.type === "plugin-question-answer" && isTurnRunning(chatId))
 			return Response.json({ error: "A turn is already running for this session" }, { status: 409 });
-		appends = input.type === "plugin-question-answer"
-			? preparePluginQuestionAnswer({ id: chatId, messages: record.messages }, input, questionResolver!)
-			: input.type === "steers"
-				? input.steers.filter((s) => !steerDelivered(record.messages, s.id))
-				: inputAppends(record, input);
+		if (input.type === "plugin-question-answer") {
+			const submission = preparePluginQuestionSubmission({ id: chatId, messages: record.messages }, input, questionResolver!);
+			if (submission.grade) {
+				const claim = claimPreparingTurn(chatId);
+				if (!claim) return Response.json({ error: "A turn is already running for this session" }, { status: 409 });
+				preparation = claim;
+				turnClaimed = true;
+				const grading = await submission.grade(preparation.signal);
+				// No captured history may be written after an asynchronous grader.
+				const current = stores.chatStore.getChat(chatId);
+				if (!current || !preparation.isCurrent()) return staleSubmission();
+				record = current;
+				// Admission pins this submission's model/provider. Later picker
+				// changes apply to the next request, not to this accepted work.
+				if (!submissionIsCurrent(false)) return staleSubmission();
+				preparation.signal.throwIfAborted();
+				appends = submission.finish({ id: chatId, messages: record.messages }, grading);
+			} else appends = submission.finish({ id: chatId, messages: record.messages });
+		} else appends = input.type === "steers"
+			? input.steers.filter((s) => !steerDelivered(record.messages, s.id))
+			: inputAppends(record, input);
 	} catch (err) {
 		if (err instanceof ChatInputError) {
 			return Response.json({ error: err.message }, { status: 400 });
@@ -425,7 +464,7 @@ export async function handleChatInput(
 	// the composer gates), so adjacency holds by construction.
 	if ((input.type === "answer" || input.type === "plugin-question-answer") && hasUnresolvedQuestion([...record.messages, ...appends])) {
 		const merged = [...record.messages, ...appends];
-		try { stores.chatStore.saveMessages(chatId, merged); }
+		try { stores.chatStore.saveMessages(chatId, merged); inputSaved = true; }
 		catch (err) {
 			console.error(`[chat ${chatId}] write-ahead persist failed:`, err);
 			return new Response("Your input could not be saved. Please try again.", { status: 500 });
@@ -437,10 +476,12 @@ export async function handleChatInput(
 	// One turn per chat, ever. A second request while a turn runs means a
 	// stale/remounted client raced a live one — letting it through would
 	// double-run the teacher and clobber the first turn's persist.
-	if (!beginTurn(chatId)) {
+	if (!preparation && !beginTurn(chatId)) {
 		console.info(`[chat ${chatId}] turn already in flight — request rejected`);
 		return Response.json({ error: "A turn is already running for this session" }, { status: 409 });
 	}
+
+	turnClaimed = true;
 
 	// Write-ahead persistence: the input's native appends go on disk BEFORE
 	// the turn starts - the learner's answer is durable the instant the
@@ -457,10 +498,12 @@ export async function handleChatInput(
 	const stagedAutomatic = isSubscriptionProvider(conversation.provider) && input.type === "steers";
 	let persistBaseCount = stagedAutomatic ? record.messages.length : agentMessages.length;
 	try {
-		if (!stagedAutomatic) stores.chatStore.saveMessages(chatId, merged);
+		if (!stagedAutomatic) {
+			stores.chatStore.saveMessages(chatId, merged);
+			inputSaved = true;
+		}
 	} catch (err) {
 		console.error(`[chat ${chatId}] write-ahead persist failed:`, err);
-		endTurn(chatId);
 		return new Response("Your input could not be saved. Please try again.", { status: 500 });
 	}
 	// Visibility bookkeeping is not the canonical save. Its failure must
@@ -652,12 +695,13 @@ export async function handleChatInput(
 			},
 			onSettleError: settlementErrorText,
 			onSettleFailure: (error, reportedErrorText) => {
+				if (preparation && !preparation.isCurrent()) return;
 				// POST only acknowledges acceptance; the submitter may attach
 				// after this turn has already failed and left the registry.
 				rememberTurnFailure(chatId, reportedErrorText ?? settlementErrorText(error));
-				endTurn(chatId);
-				unregisterTurn(chatId);
-				unregisterLiveAgent(chatId);
+				try { applyParkedDismissal(stores.chatStore, chatId); }
+				catch (dismissalError) { console.error(`[chat ${chatId}] parked dismissal failed:`, dismissalError); }
+				finally { releaseOwnership(); unregisterLiveAgent(chatId); }
 				// The canonical save may have succeeded before later bookkeeping
 				// threw. Reconcile against actual durability, never replay input
 				// merely because usage/extraction/other settlement work failed.
@@ -666,6 +710,7 @@ export async function handleChatInput(
 				settleSteers(chatId, persisted, true, constructed);
 			},
 			onFinish: (turnMessages, isAborted) => {
+				if (preparation && !preparation.isCurrent()) return;
 				// Wave B: append only messages past the temporary agent prefix.
 				// Retry's saved record still includes its earlier failed attempts.
 				const stamped = persistTurn(stores.chatStore, chatId, persistBaseCount, turnMessages, isAborted);
@@ -703,12 +748,7 @@ export async function handleChatInput(
 				applyParkedDismissal(stores.chatStore, chatId);
 				// LAST: a poller that sees not-in-flight must read an already-persisted
 				// record — endTurn only after persistTurn has done its job.
-				endTurn(chatId);
-				// And only then does the turn stop being a running object
-				// (background-turn wave, 2026-09-25): a reattach that finds
-				// nothing must find the persisted record current — the same
-				// ordering rule as endTurn.
-				unregisterTurn(chatId);
+				releaseOwnership();
 				// Wave C steer settlement: the live agent is dead (no more
 				// followUp handoffs) - reconcile the steer registry against
 				// what this run actually persisted (in-run injections
@@ -759,26 +799,55 @@ export async function handleChatInput(
 		// (POST /api/activity/abort, kind "turn"). Registration after the
 		// runPiTurn call is race-free: the agent loop only ticks in later
 		// microtasks, so settle (and thus unregister) cannot beat us here.
-		registerTurn(chatId, handle);
+		if (preparation) preparation.handoff(handle);
+		else registerTurn(chatId, handle);
+		handedOff = true;
 		// CONNECTION DIET B (owner, 2026-10-10 — the parallel-session freeze
 		// postmortem): the POST no longer holds the turn's SSE stream open for
 		// its whole duration. It acknowledges acceptance and CLOSES; the
 		// submitter attaches through GET /api/chats/[id]/stream — the same
 		// universal reattach wire a returning visitor uses. The browser's
-		// 6-connections-per-origin pool is the scarce resource: a submission
-		// must cost zero permanently-held slots beyond the one live view. The
+		// 6-connections-per-origin pool is the scarce resource. A graded
+		// submission is the explicit exception: its POST stays open through
+		// grading and the canonical save, then closes before teacher output. The
 		// turn itself is a server-side process (ruling 2026-09-25) — it never
 		// needed this connection, only a view did.
 		if (stagedAutomatic && requestCycle && !(await requestCycle.admission)) return Response.json({ error: "Automatic follow-up remains deferred in its queue." }, { status: 403 });
 		return Response.json({ ok: true });
 	} catch (err) {
-		// The stream never started, so no onFinish will fire — clear the registry
-		// or a malformed request would lock the chat until the TTL eviction.
-		endTurn(chatId);
-		// Wave C: the live-agent registration (if it happened) dies with the
-		// turn here too - nothing was handed (the loop never ticked).
-		unregisterLiveAgent(chatId);
 		console.error(`[chat ${chatId}] turn failed to start:`, err);
+		if (preparation && inputSaved) {
+			// The answer and outcome are already durable. Report the later
+			// teacher failure through the existing retained stream notice.
+			rememberTurnFailure(chatId, "Failed to start the turn");
+			return Response.json({ ok: true });
+		}
 		return Response.json({ error: "Failed to start the turn" }, { status: 500 });
+	}
+	} catch (err) {
+		if (preparation && inputSaved) {
+			console.error(`[chat ${chatId}] accepted answer continuation failed:`, err);
+			rememberTurnFailure(chatId, "Failed to start the turn");
+			return Response.json({ ok: true });
+		}
+		if (err instanceof ChatInputError) return Response.json({ error: err.message }, { status: 400 });
+		if (preparation?.signal.aborted) {
+			return Response.json({ error: preparation.signal.reason instanceof Error ? preparation.signal.reason.message : "Question unavailable" }, { status: 409 });
+		}
+		if (turnClaimed) {
+			console.error(`[chat ${chatId}] turn failed to start:`, err);
+			return Response.json({ error: "Failed to start the turn" }, { status: 500 });
+		}
+		throw err;
+	} finally {
+		if (turnClaimed && !handedOff) {
+			try {
+				if (!preparation || preparation.isCurrent()) applyParkedDismissal(stores.chatStore, chatId);
+			} catch (err) { console.error(`[chat ${chatId}] parked dismissal failed:`, err); }
+			finally {
+				if (!preparation || preparation.isCurrent()) unregisterLiveAgent(chatId);
+				releaseOwnership();
+			}
+		}
 	}
 }

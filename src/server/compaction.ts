@@ -48,6 +48,7 @@ import { emit } from "../core/events.ts";
 import type { ChatStore } from "../core/ports.ts";
 import type { PiEngine } from "../agent/models.ts";
 import { runSubagent } from "../agent/subagents/pi-run.ts";
+import { isTurnRunning } from "./turn-liveness.ts";
 
 /** The summarizer's system prompt — server-owned operational framing,
  *  not model-facing doctrine (buildCompactionPrompt carries the shape). */
@@ -176,6 +177,12 @@ export function projectedContextTokens(messages: readonly LhMessage[], systemPro
  *  appends the marker, records usage, notifies. Never throws upward
  *  past the registry cleanup. */
 async function compact(deps: CompactionDeps, chatId: string): Promise<void> {
+	// The actual start seam, shared by preflight, background, and manual
+	// callers. An earlier request check is insufficient: a competing answer
+	// may claim ownership while ensureCompacted awaits the structural gate.
+	// There is no await between this check and starting the summary; an
+	// already-running compaction is still awaited by every preflight.
+	if (isTurnRunning(chatId)) return;
 	const record = deps.chatStore.getChat(chatId);
 	if (!record) return;
 	const messages = record.messages;
@@ -285,17 +292,29 @@ export async function ensureCompacted(deps: CompactionDeps, chatId: string): Pro
 	// injected summarizer.
 	if (process.env.NODE_ENV === "test" && !deps.summarize) return;
 	await awaitCompaction(chatId);
+	// Another fresh preflight may have started a summary after our initial
+	// structural check. Join it BEFORE any eligibility/threshold early exit:
+	// those checks govern new runs, never permission to bypass a live one.
+	const concurrent = state().inFlight.get(chatId);
+	if (concurrent) {
+		await concurrent;
+		return;
+	}
 	if (deps.canStart?.() === false) return;
 	const record = deps.chatStore.getChat(chatId);
 	if (!record) return;
 	if (projectedContextTokens(record.messages, deps.systemPromptTokens) <= deps.thresholdTokens) return;
-	if (state().inFlight.has(chatId)) return; // a concurrent caller started it while we awaited
+	const admitted = state().inFlight.get(chatId);
+	if (admitted) {
+		await admitted;
+		return;
+	}
 	const run = compact(deps, chatId);
 	state().inFlight.set(chatId, run);
 	try {
 		await run;
 	} finally {
-		state().inFlight.delete(chatId);
+		if (state().inFlight.get(chatId) === run) state().inFlight.delete(chatId);
 	}
 }
 
@@ -316,5 +335,7 @@ export function kickCompaction(buildDeps: () => CompactionDeps | null, chatId: s
 	if (projectedContextTokens(record.messages, deps.systemPromptTokens) <= deps.thresholdTokens) return;
 	const run = compact(deps, chatId);
 	state().inFlight.set(chatId, run);
-	void run.finally(() => state().inFlight.delete(chatId));
+	void run.finally(() => {
+		if (state().inFlight.get(chatId) === run) state().inFlight.delete(chatId);
+	});
 }

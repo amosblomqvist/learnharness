@@ -3,9 +3,9 @@ import { ChatInputError } from "../core/input-events.ts";
 import { newMessageId, nativeAnswerContent, pendingPluginQuestionOf, pluginQuestionCallsOf, type LhMessage } from "../core/native-messages.ts";
 import { validatePluginSubmissionImages, type PluginSubmissionImages } from "../core/plugin-submissions.ts";
 import {
-	samePluginQuestionOccurrence, validatePluginQuestionAnswer,
+	samePluginQuestionOccurrence, validatePluginQuestionAnswer, clonePluginQuestionJson, freezePluginQuestionValue,
 	type PluginQuestionAnswer, type PluginQuestionCancellation, type PluginQuestionOccurrence,
-	type PluginQuestionSnapshot,
+	type PluginQuestionSnapshot, type PluginQuestionGradingOutcome,
 } from "../core/plugin-questions.ts";
 import type { NativePluginQuestionDefinition } from "../agent/plugin-question-tools.ts";
 import type { ChatStore } from "../core/ports.ts";
@@ -46,13 +46,49 @@ function requireCurrent(messages: readonly LhMessage[], input: { questionId?: st
 	return pending;
 }
 
-/** Host validation only. The caller owns the existing single write-ahead and turn claim. */
-export function preparePluginQuestionAnswer(record: { id: string; messages: LhMessage[] }, input: PluginQuestionAnswerInput, resolve: QuestionTypeResolver): LhMessage[] {
+function requiresGrading(snapshot: PluginQuestionSnapshot): boolean {
+	return snapshot.protocolVersion === 2 && snapshot.requiresGrading === true;
+}
+function hasRequiredGrader(snapshot: PluginQuestionSnapshot, definition: NativePluginQuestionDefinition): boolean {
+	return !requiresGrading(snapshot) || (definition.id === snapshot.typeId && definition.contractVersion === snapshot.contractVersion && typeof definition.gradeAnswer === "function");
+}
+function gradingOutcome(value: unknown): PluginQuestionGradingOutcome {
+	let copy;
+	try { copy = clonePluginQuestionJson(value); }
+	catch { throw new ChatInputError("Invalid question grading outcome"); }
+	if (!copy || typeof copy !== "object" || Array.isArray(copy) || Object.keys(copy).length !== 1 ||
+		!(Object.hasOwn(copy, "result") || (Object.hasOwn(copy, "error") && typeof copy.error === "string")))
+		throw new ChatInputError("Invalid question grading outcome");
+	return freezePluginQuestionValue(copy) as PluginQuestionGradingOutcome;
+}
+function gradingError(error: unknown): string {
+	// A plugin may throw any value, including an object with a throwing message getter.
+	try { if (error instanceof Error && typeof error.message === "string") return error.message; } catch { /* safe generic below */ }
+	return "An error occurred.";
+}
+
+export interface PreparedPluginQuestionSubmission {
+	snapshot: PluginQuestionSnapshot;
+	signal: AbortSignal;
+	grade?: (signal: AbortSignal) => Promise<PluginQuestionGradingOutcome>;
+	finish(record: { id: string; messages: LhMessage[] }, grading?: PluginQuestionGradingOutcome): LhMessage[];
+}
+
+/** Synchronous validation/capture only. The caller owns session exclusion and the single write-ahead. */
+export function preparePluginQuestionSubmission(record: { id: string; messages: LhMessage[] }, input: PluginQuestionAnswerInput, resolve: QuestionTypeResolver): PreparedPluginQuestionSubmission {
 	const snapshot = requireCurrent(record.messages, input);
+	const savedContract = JSON.stringify(snapshot), chatId = record.id;
 	const resolution = resolve(snapshot.pluginId, snapshot.typeId, snapshot.contractVersion);
-	if (resolution.status !== "available") throw new ChatInputError("Question unavailable");
-	resolution.requireActive();
-	if (resolution.signal.aborted) throw new ChatInputError("Question unavailable");
+	if (resolution.status !== "available" || !hasRequiredGrader(snapshot, resolution.definition)) throw new ChatInputError("Question unavailable");
+	const { signal: activationSignal, requireActive } = resolution;
+	const gradeAnswer = resolution.definition.gradeAnswer;
+	const requireAuthority = (signal?: AbortSignal) => {
+		// This exact captured closure proves activation AND registration identity, even after re-registration.
+		try { requireActive.call(resolution); }
+		catch { throw new ChatInputError("Question unavailable"); }
+		if (activationSignal.aborted || signal?.aborted) throw new ChatInputError("Question unavailable");
+	};
+	requireAuthority();
 	const readingApplicable = snapshot.variant === "teach" && snapshot.input.type === "check";
 	let images: PluginSubmissionImages | undefined;
 	try { images = input.images === undefined ? undefined : validatePluginSubmissionImages(input.images); }
@@ -67,8 +103,8 @@ export function preparePluginQuestionAnswer(record: { id: string; messages: LhMe
 		throw new ChatInputError("Reading thinking images are not applicable to this question");
 	const answer = validatePluginQuestionAnswer(snapshot, { chatId: record.id, answer: input.answer }, resolution.definition);
 	if (!answer.ok) throw new ChatInputError(answer.problems.join("\n"));
-	resolution.requireActive();
-	const envelope: PluginQuestionAnswer = {
+	requireAuthority();
+	const accepted: Omit<PluginQuestionAnswer, "answeredAt" | "grading"> = {
 		kind: "plugin-question", questionId: snapshot.questionId, pluginId: snapshot.pluginId,
 		typeId: snapshot.typeId, contractVersion: snapshot.contractVersion, answer: answer.value,
 		...(snapshot.showThinking ? { thinking: input.thinking ?? "" } : {}),
@@ -78,9 +114,53 @@ export function preparePluginQuestionAnswer(record: { id: string; messages: LhMe
 			...(snapshot.showThinking && images.thinking?.length ? { thinking: images.thinking } : {}),
 			...(readingApplicable && images.readingThinking?.length ? { readingThinking: images.readingThinking } : {}),
 		} } : {}),
-		answeredAt: new Date().toISOString(),
 	};
-	return [nativeResult(snapshot.occurrence, envelope, JSON.stringify({ ...envelope, images: undefined }))];
+	let gradingSignal: AbortSignal | undefined;
+	let gradingSettled = false;
+	return {
+		snapshot, signal: activationSignal,
+		...(requiresGrading(snapshot) ? { grade: async (signal: AbortSignal): Promise<PluginQuestionGradingOutcome> => {
+			const combined = AbortSignal.any([signal, activationSignal]);
+			gradingSignal = combined;
+			gradingSettled = false;
+			requireAuthority(combined);
+			let outcome: PluginQuestionGradingOutcome;
+			try {
+				// Freeze only our owned JSON. Deep freezing this context would freeze a LIVE AbortSignal.
+				const context = Object.freeze({ chatId, questionId: snapshot.questionId, variant: snapshot.variant,
+					contractVersion: snapshot.contractVersion, input: snapshot.input, answer: answer.value, signal: combined });
+				// Do not race cancellation: ownership must remain held until the underlying callback settles.
+				const result = await gradeAnswer!(context);
+				requireAuthority(combined);
+				outcome = { result: freezePluginQuestionValue(clonePluginQuestionJson(result)) };
+			} catch (error) {
+				// Only our signal/authority determines cancellation, never a callback error's name.
+				requireAuthority(combined);
+				outcome = { error: gradingError(error) };
+			}
+			requireAuthority(combined);
+			gradingSettled = true;
+			return Object.freeze(outcome);
+		} } : {}),
+		finish(current, grading) {
+			requireAuthority(gradingSignal);
+			const pending = requireCurrent(current.messages, snapshot);
+			if (current.id !== chatId || JSON.stringify(pending) !== savedContract)
+				throw new ChatInputError("This question changed. Sync the saved session before trying again.");
+			if (requiresGrading(snapshot) && !gradingSettled) throw new ChatInputError("Question grading has not completed");
+			const outcome = requiresGrading(snapshot) ? gradingOutcome(grading) : undefined;
+			const envelope: PluginQuestionAnswer = { ...accepted,
+				...(outcome ? { grading: outcome } : {}), answeredAt: new Date().toISOString() };
+			return [nativeResult(snapshot.occurrence, envelope, JSON.stringify({ ...envelope, images: undefined }))];
+		},
+	};
+}
+
+/** Historical synchronous callers can only submit saved ungraded questions. */
+export function preparePluginQuestionAnswer(record: { id: string; messages: LhMessage[] }, input: PluginQuestionAnswerInput, resolve: QuestionTypeResolver): LhMessage[] {
+	const prepared = preparePluginQuestionSubmission(record, input, resolve);
+	if (prepared.grade) throw new ChatInputError("This question requires grading before acceptance");
+	return prepared.finish(record);
 }
 
 function cancellation(occurrence: PluginQuestionOccurrence, questionId: string | undefined, reason: PluginQuestionCancellation["reason"]): LhMessage {
@@ -126,7 +206,7 @@ export function pluginQuestionAvailabilityOf(record: { messages: LhMessage[] }, 
 	let available = false;
 	try {
 		const current = resolve?.(pending.pluginId, pending.typeId, pending.contractVersion);
-		if (current?.status === "available" && !current.signal.aborted && (!pending.requiresAnswerRefinement || typeof current.definition.validateAnswer === "function")) {
+		if (current?.status === "available" && !current.signal.aborted && (!pending.requiresAnswerRefinement || typeof current.definition.validateAnswer === "function") && hasRequiredGrader(pending, current.definition)) {
 			current.requireActive();
 			available = true;
 		}

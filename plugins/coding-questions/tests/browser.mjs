@@ -11,10 +11,19 @@ const built = path.join(root, "dist");
 const chrome = process.env.CHROME_PATH ?? ["/Applications/Google Chrome.app/Contents/MacOS/Google Chrome", "/usr/bin/google-chrome", "/usr/bin/chromium"].find(file => fs.existsSync(file));
 if (!chrome) throw new Error("Set CHROME_PATH to a local Chrome/Chromium executable.");
 const evidence = fs.mkdtempSync(path.join(os.tmpdir(), "lh-coding-browser-"));
-const html = `<!doctype html><html><head><link rel="stylesheet" href="/styles.css"><style>body{margin:30px;background:#141414;color:#e6e6e6}#editor,#answered{max-width:800px;margin-bottom:20px}</style></head><body><div id="editor"></div><div id="answered"></div><script type="module">
+const html = `<!doctype html><html><head><link rel="stylesheet" href="/styles.css"><style>body{margin:30px;background:#141414;color:#e6e6e6;font-family:system-ui,sans-serif}#editor,#answered-card{max-width:800px;margin-bottom:20px}#answered-heading{display:flex;align-items:center;gap:8px;font-size:12px;margin-bottom:8px}#answered-header{display:inline-flex}</style></head><body><div id="editor"></div><section id="answered-card"><div id="answered-heading"><span>Coding question</span><span id="answered-header"></span></div><div id="answered"></div></section><script type="module">
 import {activate} from '/main.js';
-let renderer;
-const cleanup = activate({registerQuestionRenderer(value){renderer=value; return ()=>{window.host.unmount();renderer=null}}});
+let renderer,activeBadges=0;
+Object.defineProperty(window,'activeBadgeCount',{get:()=>activeBadges});
+const ui={mountBadge(container,props,{signal}){
+ const node=document.createElement('span');node.dataset.fixtureBadge='';let disposed=false;activeBadges++;
+ const update=next=>{node.textContent=next.text;node.style.color=next.color??'';node.dataset.color=next.color??''};
+ update(props);container.append(node);
+ const dispose=()=>{if(disposed)return;disposed=true;activeBadges--;signal.removeEventListener('abort',dispose);node.remove()};
+ if(signal.aborted)dispose();else signal.addEventListener('abort',dispose,{once:true});
+ return {update,dispose};
+}};
+const cleanup = activate({ui,registerQuestionRenderer(value){renderer=value; return ()=>{window.host.unmount();renderer=null}}});
 window.host={answer:{status:'empty'},active:true,publications:[],handle:null,controller:null,submits:0,reserved:[],
 mount({language='python',starterCode,answer={status:'empty'}}={}){
  this.unmount(); this.answer=answer; this.active=true; this.publications=[]; this.controller=new AbortController();
@@ -23,7 +32,7 @@ mount({language='python',starterCode,answer={status:'empty'}}={}){
  this.props=props; this.handle=renderer.mountAnswerEditor(document.querySelector('#editor'),props);this.handle.update({answer:this.answer,active:this.active});return this.answer;
 },update(answer=this.answer,active=this.active){this.answer=answer;this.active=active;this.handle.update({answer,active})},
 unmount(){this.controller?.abort();this.handle?.dispose();this.handle?.dispose();this.handle=null},
-showAnswered(code,language='python'){this.answeredCleanup?.();this.answeredController?.abort();this.answeredController=new AbortController();this.answeredCleanup=renderer.mountAnswered(document.querySelector('#answered'),{...this.props,input:{...this.props.input,payload:{language}},signal:this.answeredController.signal,answer:code})},
+showAnswered(code,language='python',grading,withHeader=true){this.answeredCleanup?.();this.answeredController?.abort();this.answeredController=new AbortController();this.answeredCleanup=renderer.mountAnswered(document.querySelector('#answered'),{...this.props,input:{...this.props.input,payload:{language}},signal:this.answeredController.signal,answer:code,...(withHeader?{headerContainer:document.querySelector('#answered-header')}:{}),...(grading===undefined?{}:{grading})})},
 disable(){cleanup();this.answeredCleanup?.();this.answeredController?.abort()}};
 document.addEventListener('keydown',event=>{
  const h=window.host;if(!h.active||!h.handle||!document.querySelector('#editor').contains(event.target)||event.isComposing||event.keyCode===229)return;
@@ -149,6 +158,74 @@ try {
   assert.equal(await page.$$eval('#answered [contenteditable="true"]',nodes=>nodes.length),0);
   assert.equal(await page.$$eval('#answered .cm-line',nodes=>nodes.map(node=>node.textContent).join('\n')),savedCode);
   await page.screenshot({path:path.join(evidence,'editor-and-saved-answer.png')});
+  assert.equal(await page.$$eval('#answered .lh-coding-test-result',nodes=>nodes.length),0,'Historical ungraded answers have no invented result');
+  const passResult={status:'passed',exitCode:0,stdout:'<script>literal output</script>  \n',stderr:'',stdoutTruncated:false,stderrTruncated:false};
+  for(const [grading,label,color] of [
+    [{result:passResult},'Tests passed','var(--color-green-500, #22c55e)'],
+    [{result:{...passResult,status:'failed',exitCode:1,stderr:'Assertion failed',stdoutTruncated:true,stderrTruncated:true}},'Tests failed','var(--color-red-500, #ef4444)'],
+    [{result:{...passResult,status:'error',exitCode:null,message:'Missing installed runtime'}},'Could not run tests',''],
+    [{error:'Grading callback failed'},'Could not run tests',''],
+    [{result:false},'Could not run tests',''],
+  ]) {
+    await page.evaluate(({grading,savedCode})=>window.host.showAnswered(savedCode,'JavaScript',grading),{grading,savedCode});
+    assert.equal(await page.$eval('#answered-header [data-fixture-badge]',node=>node.textContent),label);
+    assert.equal(await page.$eval('#answered-header [data-fixture-badge]',node=>node.dataset.color),color);
+    assert.equal(await page.$$eval('#answered [data-fixture-badge]',nodes=>nodes.length),0,'Badge is in the supplied header slot, not the answer body');
+    const aligned=await page.$eval('#answered-heading',node=>{const label=node.firstElementChild.getBoundingClientRect(),badge=node.querySelector('[data-fixture-badge]').getBoundingClientRect();return {labelTop:label.top,labelBottom:label.bottom,badgeTop:badge.top,badgeBottom:badge.bottom,badgeLeft:badge.left,labelRight:label.right}});
+    assert.ok(Math.abs((aligned.labelTop+aligned.labelBottom)-(aligned.badgeTop+aligned.badgeBottom))<1,'Badge shares the heading row');
+    assert.ok(aligned.badgeLeft>=aligned.labelRight,'Badge follows the heading');
+    assert.equal(await page.$eval('#answered details',node=>node.open),false);
+    assert.equal(await page.$eval('#answered',node=>node.firstElementChild.className),'lh-coding-test-result');
+    assert.equal(await page.$$eval('#answered script',nodes=>nodes.length),0,'Process output is never interpreted as HTML');
+    const chevron='#answered .lh-coding-test-result__chevron';
+    assert.equal(await page.$eval(chevron,node=>node.getAttribute('aria-hidden')),'true');
+    await page.hover('#answered summary');
+    await page.waitForFunction(()=>getComputedStyle(document.querySelector('#answered summary')).backgroundColor==='rgb(38, 38, 38)');
+    await page.locator('#answered summary').click();
+    await page.waitForFunction(()=>document.querySelector('#answered details').open);
+    await page.waitForFunction(()=>new DOMMatrix(getComputedStyle(document.querySelector('#answered .lh-coding-test-result__chevron')).transform).a < -0.99);
+    await page.focus('#answered summary');
+    await page.keyboard.press('Enter');
+    await page.waitForFunction(()=>!document.querySelector('#answered details').open);
+    await page.keyboard.press('Space');
+    await page.waitForFunction(()=>document.querySelector('#answered details').open);
+    assert.equal(await page.$eval('#answered summary',node=>getComputedStyle(node).outlineStyle),'solid','Focused disclosure has visible keyboard focus');
+    const framed=await page.$eval('#answered',node=>{
+      const keys=['backgroundColor','borderTopColor','borderTopWidth','borderRadius'];
+      const style=element=>Object.fromEntries(keys.map(key=>[key,getComputedStyle(element)[key]]));
+      return {answer:style(node.querySelector(':scope > .lh-coding-question')),outputs:[...node.querySelectorAll('details > .lh-coding-question')].map(style),labels:[...node.querySelectorAll('details .lh-coding-question__header')].map(element=>element.textContent),codeEditors:node.querySelectorAll('details .cm-editor').length};
+    });
+    assert.deepEqual(framed.outputs,[framed.answer,framed.answer],'Both output streams reuse the code-block frame styling');
+    assert.deepEqual(framed.labels,['Stdout','Stderr']);
+    assert.equal(framed.codeEditors,0,'Output needs plain text, not extra editors');
+    if(grading.result&&typeof grading.result==='object') {
+      assert.equal(await page.$eval('#answered pre',node=>node.textContent),grading.result.stdout);
+      if(grading.result.stdoutTruncated) {
+        assert.ok(await page.$eval('#answered details',node=>node.textContent.includes('Stdout truncated at 64 KiB.')&&node.textContent.includes('Stderr truncated at 64 KiB.')));
+        await page.screenshot({path:path.join(evidence,'failed-tests-and-output.png')});
+      }
+    } else {
+      assert.ok(await page.$eval('#answered details',node=>node.textContent.includes('Grading callback failed')||node.textContent.includes('Saved test result is unavailable.')));
+    }
+    assert.equal(await page.evaluate(()=>window.activeBadgeCount),1);
+  }
+  await page.evaluate(({savedCode,passResult})=>window.host.showAnswered(savedCode,'JavaScript',{result:{...passResult,stdout:'captured line\n'.repeat(3000)}}),{savedCode,passResult});
+  await page.locator('#answered summary').click();
+  const outputSize=await page.$eval('#answered pre',node=>({maxHeight:parseFloat(getComputedStyle(node).maxHeight),rootFont:parseFloat(getComputedStyle(document.documentElement).fontSize),scrollHeight:node.scrollHeight,clientHeight:node.clientHeight}));
+  assert.equal(outputSize.maxHeight,16*outputSize.rootFont,'Keep the 16rem output height cap');
+  assert.ok(outputSize.scrollHeight>outputSize.clientHeight,'Large output scrolls inside its code frame');
+  await page.evaluate(({savedCode,passResult})=>window.host.showAnswered(savedCode,'JavaScript',{result:passResult},false),{savedCode,passResult});
+  assert.equal(await page.$$eval('#answered-header .lh-coding-test-result__badge',nodes=>nodes.length),0);
+  assert.equal(await page.$$eval('#answered [data-fixture-badge]',nodes=>nodes.length),1,'Older hosts without a header slot keep the body fallback');
+  await page.evaluate(({savedCode,passResult})=>{
+    const sentinel=document.createElement('i');sentinel.textContent='host-owned sentinel';document.querySelector('#answered-header').append(sentinel);
+    window.host.showAnswered(savedCode,'JavaScript',{result:passResult});
+    window.host.answeredController.abort();
+  },{savedCode,passResult});
+  assert.equal(await page.evaluate(()=>window.activeBadgeCount),0,'Abort disposes a badge outside the body slot');
+  assert.equal(await page.$eval('#answered-header',node=>node.textContent),'host-owned sentinel','Cleanup removes only its own header child');
+  await page.evaluate(()=>{document.querySelector('#answered-header').textContent='';window.host.showAnswered('historical code','unbundled-language')});
+  assert.equal(await page.evaluate(()=>window.activeBadgeCount),0,'Replacing a saved slot disposes its badge');
 
   for (const language of ['HTML', 'XML', 'JSX']) {
     await page.evaluate(language => window.host.mount({language}), language);
@@ -279,10 +356,11 @@ try {
   await page.evaluate(() => {document.querySelector('#editor').textContent='';window.host.mount({language:'C++',starterCode:'int main() {}'});window.host.disable()});
   await page.waitForNetworkIdle();
   assert.equal(await page.$$eval('.cm-editor',nodes=>nodes.length),0);
+  assert.equal(await page.evaluate(()=>window.activeBadgeCount),0);
   assert.ok(requests.every(url=>url.startsWith(base + '/') || url.startsWith('data:image/svg+xml,')),"Only local assets and inline CodeMirror diagnostic SVGs may load");
   assert.deepEqual(errors,[]);
   fs.writeFileSync(path.join(evidence,'result.json'),JSON.stringify({passed:true,requests,errors,diagnosticLanguages:diagnosticExamples.map(([name])=>name),diagnosticDelay},null,2));
-  console.log(`PASS: built editor, whitespace, highlighting, readiness, keyboard/history, controlled selection/fold, plain fallback, saved read-only code, nine-language diagnostics/hover/debounce/advisory submission, late-load/unload cleanup. Evidence: ${evidence}`);
+  console.log(`PASS: built editor, whitespace, highlighting, readiness, keyboard/history, controlled selection/fold, plain fallback, saved read-only code, nine-language diagnostics/hover/debounce/advisory submission, test-result badges/output/history, late-load/unload cleanup. Evidence: ${evidence}`);
 } finally {
   if(browser)await browser.close();
   server.closeAllConnections();await new Promise(resolve=>server.close(resolve));

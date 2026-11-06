@@ -2,10 +2,13 @@ import React, { act, useRef, useState } from "react";
 import assert from "node:assert/strict";
 import { afterEach, test } from "node:test";
 import { parseHTML } from "linkedom";
+import { AppRouterContext } from "next/dist/shared/lib/app-router-context.shared-runtime.js";
+import { KeyboardShortcuts } from "../components/keyboard-shortcuts.tsx";
+import { createInteractionLayers } from "../components/interaction-layers.tsx";
 import { PluginQuestionDockContent } from "../components/plugin-question-dock.tsx";
 import { ReadingThinkingField } from "../components/reading-thinking.tsx";
 import { DictationBar, useDictation, type Dictation } from "../components/dictation.tsx";
-import { capturePluginQuestionKey } from "../components/plugin-question-keys.ts";
+import { capturePluginQuestionKey, pluginQuestionKeySuppressed } from "../components/plugin-question-keys.ts";
 import type { PluginQuestionDraft } from "../components/session-core.ts";
 import type { QuestionRendererRegistration } from "../components/plugin-manager.ts";
 import type { ChatInput } from "../src/core/index.ts";
@@ -28,11 +31,12 @@ let cleanup: (() => Promise<void>) | undefined;
 let restore: (() => void) | undefined;
 afterEach(async () => { await cleanup?.(); restore?.(); cleanup = undefined; restore = undefined; });
 
-async function fixture(options: { thinking?: boolean; check?: boolean; missing?: boolean; available?: boolean; append?: boolean; asyncMount?: boolean; deferPublication?: boolean; ready?: boolean; reconciliation?: "ready" | "syncing" | "failed"; editorFails?: boolean; handleKeyDown?: PluginQuestionEditorHandle["handleKeyDown"]; question?: PluginQuestionRenderer["mountQuestion"] } = {}) {
+async function fixture(options: { keyboard?: boolean; thinking?: boolean; check?: boolean; missing?: boolean; available?: boolean; append?: boolean; asyncMount?: boolean; deferPublication?: boolean; ready?: boolean; reconciliation?: "ready" | "syncing" | "failed"; editorFails?: boolean; handleKeyDown?: PluginQuestionEditorHandle["handleKeyDown"]; question?: PluginQuestionRenderer["mountQuestion"] } = {}) {
 	const dom = parseHTML("<html><body><div id='root'></div></body></html>");
 	let active: Element = dom.document.body;
 	Object.defineProperty(dom.document, "activeElement", { get: () => active });
 	dom.window.HTMLElement.prototype.focus = function () { active = this; };
+	dom.window.HTMLElement.prototype.blur = function () { if (active === this) active = dom.document.body; };
 	const previous = new Map<string, PropertyDescriptor | undefined>();
 	for (const [key, value] of Object.entries({ React, window: dom.window, document: dom.document, Node: dom.window.Node, HTMLElement: dom.window.HTMLElement, CustomEvent: dom.window.CustomEvent, IS_REACT_ACT_ENVIRONMENT: true, ResizeObserver: class { observe() {} disconnect() {} },
 		navigator: { userAgent: "", platform: "", mediaDevices: { getUserMedia: async () => ({ getTracks: () => [{ stop() {} }] }) } }, WebSocket: Socket, AudioContext: AudioGraph, AudioWorkletNode: Worklet,
@@ -63,6 +67,7 @@ async function fixture(options: { thinking?: boolean; check?: boolean; missing?:
 			<PluginQuestionDockContent snapshot={state.snapshot} chatId="chat" draft={draft} expanded={state.expanded} reveal={state.reveal} ready={state.ready} reconciliation={state.reconciliation} available={state.available} registration={registration} readingRef={reading} onMicAvailable={setMic}
 				onExpand={() => { state.reveal = false; state.expanded = true; }} send={async input => { state.sent.push(input); return true; }} dismiss={async () => { state.dismissed++; }} />
 			<DictationBar dictation={dictation} disabled={!mic} />
+			{options.keyboard && <AppRouterContext.Provider value={{ bfcacheId: "plugin-question-fixture", back() {}, forward() {}, refresh() {}, push() {}, replace() {}, prefetch() {} }}><KeyboardShortcuts /></AppRouterContext.Provider>}
 		</>;
 	}
 	const { createRoot } = await import("react-dom/client"); const root = createRoot(document.getElementById("root")!);
@@ -173,6 +178,113 @@ for (const hook of ["absent", "pass", "handled"] as const) test(`${hook} editor 
 	await act(async () => { capturePluginQuestionKey({ key: "Enter", target: document.getElementById("plugin-editor"), preventDefault() { prevented++; } } as unknown as KeyboardEvent); });
 	assert.equal(prevented, 1); assert.equal(f.state.sent.length, hook === "handled" ? 0 : 1);
 	assert.deepEqual(calls, hook === "absent" ? [] : ["Enter"]);
+});
+
+async function pressQuestionKey(key: string, extra = {}) {
+	const target = document.activeElement!;
+	const event = Object.assign(new window.Event("keydown", { bubbles: true, cancelable: true }), { key, ...extra });
+	Object.defineProperty(event, "target", { configurable: true, value: target });
+	await act(async () => { capturePluginQuestionKey(event as unknown as KeyboardEvent); target.dispatchEvent(event); });
+	return event;
+}
+
+for (const hook of ["absent", "pass"] as const) for (const field of ["thinking", "reading", "none"] as const) test(`${hook} editor Escape moves directly to ${field}, claims that event and preserves the following host Enter`, async () => {
+	const calls: string[] = [];
+	const f = await fixture({ keyboard: true, thinking: field === "thinking", check: field === "reading", ...(hook === "pass" ? { handleKeyDown(key) { calls.push(key); return "pass"; } } : {}) });
+	if (field === "reading") { f.state.reveal = false; f.state.expanded = true; await f.render(); }
+	const editor = document.getElementById("plugin-editor")!;
+	editor.focus();
+	const next = field === "none" ? document.body : document.querySelector<HTMLElement>(`[data-testid="${field === "thinking" ? "thinking-field" : "reading-thinking-field"}"] [data-file-path-input]`)!;
+	assert.ok(next);
+	let aborts = 0;
+	const onAbort = () => { aborts++; };
+	window.addEventListener("lh:kbd-abort-turn", onAbort);
+	let escape: Event;
+	try { escape = await pressQuestionKey("Escape"); } finally { window.removeEventListener("lh:kbd-abort-turn", onAbort); }
+	assert.equal(escape.defaultPrevented, true); assert.equal(pluginQuestionKeySuppressed(escape), true);
+	assert.equal(aborts, 0); assert.equal(f.state.sent.length, 0);
+	assert.equal(document.activeElement, next, "one Escape leaves the plugin without an intermediate unfocused state when a local host field exists");
+	assert.deepEqual(calls, hook === "pass" ? ["Escape"] : []);
+	if (field !== "none") Object.defineProperty(next, "isContentEditable", { configurable: true, value: true });
+	await pressQuestionKey("Enter");
+	assert.equal(f.state.sent.length, field === "reading" ? 0 : 1, "the next Enter preserves the existing host field default (reading keeps its newline)");
+	if (field === "reading") { await pressQuestionKey("Enter", { ctrlKey: true }); assert.equal(f.state.sent.length, 1, "the reserved host chord still submits from reading"); }
+	assert.deepEqual(calls, hook === "pass" ? ["Escape"] : []);
+	if (field === "none") {
+		await pressQuestionKey("Tab"); assert.equal(document.activeElement, editor, "Tab re-enters the existing local editor chain");
+	}
+});
+
+test("Escape chooses Your thinking before reading in the existing local chain", async () => {
+	const f = await fixture({ thinking: true, check: true });
+	f.state.reveal = false; f.state.expanded = true; await f.render();
+	document.getElementById("plugin-editor")!.focus(); await pressQuestionKey("Escape");
+	assert.equal(document.activeElement, document.querySelector('[data-testid="thinking-field"] [data-file-path-input]'));
+	assert.equal(f.state.sent.length, 0);
+});
+
+test("an editor-claimed Escape keeps focus and performs no host navigation or submission; Tab indentation remains editor-owned", async () => {
+	const calls: string[] = [];
+	const f = await fixture({ thinking: true, handleKeyDown(key) { calls.push(key); return "handled"; } });
+	const editor = document.getElementById("plugin-editor")!; editor.focus();
+	for (const key of ["Escape", "Tab"]) {
+		const event = await pressQuestionKey(key);
+		assert.equal(event.defaultPrevented, true); assert.equal(pluginQuestionKeySuppressed(event), true);
+		assert.equal(document.activeElement, editor); assert.equal(f.state.sent.length, 0);
+	}
+	assert.deepEqual(calls, ["Escape", "Tab"]);
+});
+
+test("editor Escape ignores modifiers and IME/229, inactive and hidden docks, and covered foreground layers", async () => {
+	const calls: string[] = [];
+	const f = await fixture({ thinking: true, handleKeyDown(key) { calls.push(key); return "pass"; } });
+	const editor = document.getElementById("plugin-editor")!; editor.focus();
+	const untouched = async (extra = {}) => {
+		const event = await pressQuestionKey("Escape", extra);
+		assert.equal(event.defaultPrevented, false); assert.equal(document.activeElement, editor);
+		assert.equal(f.state.sent.length, 0); assert.deepEqual(calls, []);
+	};
+	for (const extra of [{ shiftKey: true }, { ctrlKey: true }, { metaKey: true }, { altKey: true }, { isComposing: true }, { keyCode: 229 }]) await untouched(extra);
+	f.state.expanded = false; await f.render(); await untouched();
+	f.state.expanded = true; f.state.ready = false; await f.render(); await untouched();
+	f.state.ready = true; f.state.reconciliation = "syncing"; await f.render(); await untouched();
+	f.state.reconciliation = "failed"; await f.render(); await untouched();
+	f.state.reconciliation = "ready"; await f.render();
+	const root = document.querySelector<HTMLElement>('[data-testid="plugin-question-dock"]')!;
+	root.hidden = true; await untouched(); root.hidden = false;
+	const modal = document.createElement("div"); modal.setAttribute("role", "dialog"); document.body.append(modal);
+	await untouched(); modal.remove();
+	await pressQuestionKey("Escape"); assert.deepEqual(calls, ["Escape"]);
+	assert.equal(document.activeElement, document.querySelector('[data-testid="thinking-field"] [data-file-path-input]'));
+});
+
+test("the same editor Escape claim suppresses the snapshotted layer close as well as the global fallback", async () => {
+	const f = await fixture({ keyboard: true, thinking: true });
+	const layers = createInteractionLayers(); let closes = 0, aborts = 0;
+	const remove = layers.register({ id: "question-view", kind: "view", rootRef: { current: document.querySelector<HTMLElement>('[data-testid="plugin-question-dock"]') }, onClose() { closes++; return "closed"; } });
+	const onAbort = () => { aborts++; }; window.addEventListener("lh:kbd-abort-turn", onAbort);
+	try {
+		const editor = document.getElementById("plugin-editor")!; editor.focus();
+		const event = Object.assign(new window.Event("keydown", { bubbles: true, cancelable: true }), { key: "Escape" });
+		Object.defineProperty(event, "target", { configurable: true, value: editor });
+		await act(async () => {
+			layers.captureKeyDown(event as unknown as KeyboardEvent);
+			editor.dispatchEvent(event);
+			assert.equal(layers.dispatchEscape(event as unknown as KeyboardEvent), null);
+		});
+		assert.equal(event.defaultPrevented, true); assert.equal(pluginQuestionKeySuppressed(event), true);
+		assert.equal(closes, 0); assert.equal(aborts, 0); assert.equal(f.state.sent.length, 0);
+		assert.equal(document.activeElement, document.querySelector('[data-testid="thinking-field"] [data-file-path-input]'));
+	} finally { remove(); window.removeEventListener("lh:kbd-abort-turn", onAbort); }
+});
+
+test("a pending unadopted editor cannot claim Escape or move focus", async () => {
+	const calls: string[] = [];
+	await fixture({ thinking: true, asyncMount: true, handleKeyDown(key) { calls.push(key); return "pass"; } });
+	const editor = document.getElementById("plugin-editor")!; editor.focus();
+	const event = await pressQuestionKey("Escape");
+	assert.equal(event.defaultPrevented, false); assert.equal(pluginQuestionKeySuppressed(event), false);
+	assert.equal(document.activeElement, editor); assert.deepEqual(calls, []);
 });
 
 test("folding/canonical replacement preserve editor generation, active updates and ready-state drafts", async () => {

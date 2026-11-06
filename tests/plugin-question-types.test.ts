@@ -19,7 +19,7 @@ it("packaged question SDK contracts support strict consumers without exposing ho
 		const consumer = path.join(home, "consumer.mts");
 		fs.writeFileSync(consumer, `
 import { Type } from "typebox";
-import type { PluginBackendContext, PluginFrontendContext, PluginQuestionAnswerState, PluginQuestionEditorHandle, PluginQuestionRenderer, PluginQuestionTypeDefinition } from "./api/index.d.ts";
+import type { PluginBackendContext, PluginFrontendContext, PluginQuestionAnswerState, PluginQuestionEditorHandle, PluginQuestionRenderer, PluginQuestionTypeDefinition, PluginQuestionGradingContext, PluginQuestionGradingOutcome } from "./api/index.d.ts";
 declare const backend: PluginBackendContext;
 declare const frontend: PluginFrontendContext;
 const payload = Type.Object({ source: Type.String() });
@@ -29,7 +29,16 @@ const typed: PluginQuestionTypeDefinition<typeof payload, typeof answer> = {
   questionSchema: payload, answerSchema: answer,
   probe: { toolName: "example_probe", description: "Ask an example" },
   validateQuestion(context) { const source: string = context.input.payload.source; void source; return undefined; },
-  validateAnswer(context) { const value: string | null | boolean | number = context.answer; void value; return []; }
+  validateAnswer(context) { const value: string | null | boolean | number = context.answer; void value; return []; },
+  async gradeAnswer(context) {
+    const source: string = context.input.payload.source;
+    const value: string | null | boolean | number = context.answer;
+    const signal: AbortSignal = context.signal;
+    const base: PluginQuestionGradingContext<{source:string}, string | null | boolean | number> = context;
+    // @ts-expect-error Grading cancellation signal is readonly.
+    context.signal = new AbortController().signal;
+    void [source, value, signal, base]; return false;
+  }
 };
 backend.registerQuestionType(typed);
 backend.registerQuestionType({
@@ -39,7 +48,12 @@ backend.registerQuestionType({
   validateQuestion(context) { void [context.chatId, context.variant, context.contractVersion, context.input]; return []; },
   validateAnswer(context) { void [context.questionId, context.answer]; return undefined; }
 });
-// @ts-expect-error No plugin grading/execution hook exists on question definitions.
+const syncGrading: PluginQuestionTypeDefinition<typeof payload, typeof answer> = { ...typed, gradeAnswer(context) { return {source:context.input.payload.source, answer:context.answer}; } };
+const gradingResult: PluginQuestionGradingOutcome = {result:null};
+const gradingError: PluginQuestionGradingOutcome = {error:"Runner failed"};
+// @ts-expect-error Grading must return JSON, not undefined.
+const invalidGrading: PluginQuestionTypeDefinition = { ...typed, gradeAnswer: async () => undefined };
+// @ts-expect-error Grading uses gradeAnswer; no separate assess hook exists on question definitions.
 const grading: PluginQuestionTypeDefinition = { ...typed, assess: () => true };
 // @ts-expect-error Refinements must be synchronous, not async grading stages.
 const asynchronous: PluginQuestionTypeDefinition = { ...typed, validateAnswer: async () => undefined };
@@ -61,7 +75,12 @@ const renderer: PluginQuestionRenderer = {
     return handle;
   },
   mountQuestion(container, props) { container.textContent = props.input.question; return () => container.replaceChildren(); },
-  mountAnswered(container, props) { container.textContent = JSON.stringify(props.answer); return async () => container.replaceChildren(); }
+  mountAnswered(container, props) {
+    const grading: PluginQuestionGradingOutcome | undefined = props.grading;
+    // @ts-expect-error Saved grading context is readonly.
+    props.grading = {result:false};
+    container.textContent = JSON.stringify([props.answer, grading]); return async () => container.replaceChildren();
+  }
 };
 frontend.registerQuestionRenderer(renderer);
 // @ts-expect-error Every renderer explicitly lists supported historical versions.
@@ -72,7 +91,7 @@ const empty: PluginQuestionAnswerState = {status:"empty", value:"draft"};
 const ready: PluginQuestionAnswerState = {status:"ready"};
 // @ts-expect-error The SDK has no frontend assessment registration surface.
 frontend.registerQuestionAssessment({id:"example"});
-void [typed, grading, asynchronous, empty, ready];
+void [typed, grading, asynchronous, empty, ready, syncGrading, gradingResult, gradingError, invalidGrading];
 `);
 		const tsc = createRequire(import.meta.url).resolve("typescript/bin/tsc");
 		const check = spawnSync(process.execPath, [tsc, "--noEmit", "--strict", "--skipLibCheck", "--allowImportingTsExtensions", "--target", "ES2022", "--module", "ESNext", "--moduleResolution", "bundler", consumer], { cwd: home, encoding: "utf8", timeout: 30_000 });

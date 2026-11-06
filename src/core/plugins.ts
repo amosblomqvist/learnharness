@@ -118,7 +118,7 @@ export interface PluginBackendContext {
 	registerInstructions(contribution: PluginInstructions): () => void;
 	registerTools(contribution: PluginTools): () => void;
 	/** Host-owned native probe/teach question tools; no plugin execution/grading hook. */
-	registerQuestionType(definition: PluginQuestionTypeDefinition): () => void;
+	registerQuestionType<Q extends TSchema, A extends TSchema>(definition: PluginQuestionTypeDefinition<Q, A>): () => void;
 	/** JSON-compatible operation results, not arbitrary HTTP endpoints. */
 	handle(name: string, handler: (input: unknown) => unknown | Promise<unknown>): () => void;
 	events: {

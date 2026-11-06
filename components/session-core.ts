@@ -500,7 +500,7 @@ export class SessionModel {
 	async dismissPluginQuestion(occurrence: PluginQuestionOccurrence, questionId?: string): Promise<void> {
 		if (!this.readyRef) return;
 		const current = pluginQuestionCallsOf(this.base).find(call => (call.status === "answerable" || call.status === "unreadable") && samePluginQuestionOccurrence(call.occurrence, occurrence));
-		if (!current || (current.snapshot ? current.snapshot.questionId !== questionId : current.annotation.status !== "unreadable" || (questionId !== undefined && current.annotation.identity?.questionId !== questionId))) return;
+		if (!current || (current.snapshot ? current.snapshot.questionId !== questionId : current.annotation.status !== "unreadable" || (questionId !== undefined && (current.annotation.binding?.questionId ?? current.annotation.identity?.questionId) !== questionId))) return;
 		this.setStatus("submitted");
 		try {
 			const response = await this.fetch(`/api/chats/${encodeURIComponent(this.chatId)}/dismiss`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ input: { type: "dismiss-plugin-question", occurrence, ...(questionId ? { questionId } : {}) } }) });
@@ -514,7 +514,9 @@ export class SessionModel {
 
 	/** The 409 identity-retry fetch (the Wave B contract): the event was
 	 *  never persisted (write-ahead happens only on acceptance), so the
-	 *  retry waits out the running turn and re-POSTs the SAME body. */
+	 *  retry waits out the running turn and re-POSTs the SAME body. Plugin
+	 *  question answers are excluded: a busy refusal needs explicit retry,
+	 *  never an automatic second grading attempt. */
 	async postInputEvent(input: ChatInput, signal?: AbortSignal, onPostPending?: (pending: boolean) => void): Promise<Response> {
 		const body = JSON.stringify({ chatId: this.chatId, input });
 		const init: RequestInit = {
@@ -529,6 +531,7 @@ export class SessionModel {
 			finally { onPostPending?.(false); }
 		};
 		let response = await post();
+		if (input.type === "plugin-question-answer") return response;
 		let waited = 0;
 		while (response.status === 409) {
 			await response.body?.cancel().catch(() => {});
@@ -903,8 +906,9 @@ export class SessionModel {
 			// the page's sentInitial guard had already flipped), leaving the
 			// session dead until a second message, which then persisted
 			// WITHOUT the first — the optimistic tail rode a record that never
-			// contained it. The POST is a ~100ms ack since Diet B; it cannot
-			// starve the connection pool, so it needs no teardown guard. The
+			// contained it. Usually the POST is a short Diet B ack. A graded
+			// plugin answer instead awaits grading and save (accepted connection
+			// contention), but still must not inherit view teardown. The
 			// STREAM consume stays on the controller — releasing that held
 			// connection is Diet A's whole job.
 			const res = await this.postInputEvent(input, undefined, imageBearing ? pending => this.imagePostPending(controller, pending) : undefined);

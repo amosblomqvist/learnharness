@@ -179,6 +179,15 @@ describe("postInputEvent (the 409 identity-retry)", { skip: process.env.NO_SLOW 
 		assert.deepEqual(JSON.parse(calls[0]!.body!), { chatId: "chat_x", input: { type: "text", text: "hi" } });
 	});
 
+	it("plugin answers return a readable busy refusal without polling or automatically invoking grading again", async () => {
+		const calls = installFetch({ chatPOST: (_c, n) => n === 1 ? Response.json({ error: "A turn is already running for this session" }, { status: 409 }) : Response.json({ ok: true }) });
+		const m = model({ pollMs: 1, waitMaxMs: 10 });
+		const response = await m.postInputEvent({ type: "plugin-question-answer", questionId: "question", occurrence: { messageId: "assistant", contentIndex: 0, toolCallId: "call", toolName: "plugin_code" }, answer: "code" });
+		assert.equal(response.status, 409);
+		assert.deepEqual(await response.json(), { error: "A turn is already running for this session" });
+		assert.equal(calls.length, 1, "no automatic busy polling or repost for plugin answers");
+	});
+
 	it("waits out the turn, then re-POSTs the SAME event body (identity retry)", async () => {
 		const event: ChatInput = { type: "text", text: "my question while the wake turn ran" };
 		const calls = installFetch({

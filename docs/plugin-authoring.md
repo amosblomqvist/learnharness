@@ -834,7 +834,7 @@ fall back to readable source/results rather than hiding saved lesson content. Us
 normal distributable assets if needed. These hooks do not introduce a new pending
 learner-answer type into the question dock.
 
-## Native plugin questions — bounded v1
+## Native plugin questions — bounded API v1
 
 The [approved question contract](plugin-question-contract.md) is authoritative; exact
 public names live in `src/core/plugin-questions.ts` and `src/core/plugins.ts`.
@@ -857,13 +857,15 @@ public API shape or `ctx.ui` change is included. See the separate
 not the historical section 13 card-placement checkpoint.
 
 This adds question formats to teaching conversations, not a generic pending-input/forms
-SDK. Builtin question behavior and grading stay unchanged. V1 is **teacher-review only**:
-the host saves a valid answer and returns it to the ordinary teacher, without inferring
-correctness. There is no assessment hook/schema/result, node-assessment hook, async grading
-stage or execution service. A plugin that needs separate grading/execution can contribute
-ordinary existing tools; that is not part of question submission. General field-scope,
-extra form/button/dialog-layout catalogues, source metadata and installer extensions remain
-outside this scope. No builtin migration, global chat-format bump or chat migration is added.
+SDK. Builtin question behavior and grading stay unchanged. Ungraded questions save a valid
+answer for ordinary teacher review; the approved optional `gradeAnswer` callback below
+adds generic plugin-owned grading before that save. This is an additive **API v1** contract,
+not a node-assessment API, assessment agent, general backend hook pipeline or new execution
+service. General field-scope, extra form/button/dialog-layout catalogues, source metadata
+and installer extensions remain outside scope. No builtin migration, global chat-format
+bump or chat migration is added. Historical verification checkpoints above do not verify
+the grading increment; its approved contract is documented here without a final runtime,
+packaging or release-readiness claim.
 
 ### Backend registration and native arguments
 
@@ -880,6 +882,9 @@ outside this scope. No builtin migration, global chat-format bump or chat migrat
 - Optional synchronous, side-effect-free `validateQuestion` and `validateAnswer` refinements.
   Return `undefined` or `[]` to accept, otherwise readable problem strings. Async/thenable
   validation is rejected. Wrong-but-schema-valid answers are not validation failures.
+- Optional `gradeAnswer(context): JsonValue | Promise<JsonValue>`, separate from validation.
+  `PluginQuestionGradingContext<Q, A>` extends the existing answer-validation context with
+  `readonly signal: AbortSignal`; schema types infer payload and answer types.
 
 The host constructs native question tools—there is no question `execute` callback:
 
@@ -918,6 +923,64 @@ or RegExp objects, non-JSON extensions and unsupported formats are rejected. Do 
 coerce, trim, clean or truthiness-filter answers. Finite JSON preserves raw strings and
 values such as `0`, `false`, `null`, `""` and arrays exactly when the schema allows them.
 
+### Optional generic answer grading — approved contract
+
+```ts
+import type { JsonValue, PluginQuestionGradingContext, PluginQuestionGradingOutcome } from "learnharness-plugin-api";
+
+// Assign this callback to gradeAnswer on a matching typed question definition.
+function gradeAnswer(context: PluginQuestionGradingContext<{ expected: number }, number>): JsonValue {
+  context.signal.throwIfAborted();
+  return { matched: context.answer === context.input.payload.expected };
+}
+// The host wraps returned JSON; the callback does not return this envelope.
+const exampleOutcome: PluginQuestionGradingOutcome = { result: false };
+```
+
+The host first applies saved-schema validation and any required synchronous answer
+refinement. Only then may the optional grader run, with immutable historical input and
+accepted answer plus host cancellation signal. Return any **finite JSON**, including
+`false`, `null`, `0`, empty strings/arrays or a plugin-defined object. Nonfinite numbers,
+cycles, functions, `undefined` and other non-JSON values are failures. TypeScript cannot
+prove numeric finiteness; the host checks returned values at runtime. The host imposes
+no result schema, correctness/status enum, scoring, rendering semantics or automatic UI.
+
+`PluginQuestionAnswer.grading?` is `PluginQuestionGradingOutcome`, exactly
+`{ result: JsonValue } | { error: string }`. A thrown/rejected grader or invalid result
+saves the accepted learner answer **with `grading.error`**, rather than converting it to
+an invalid answer. Successful grading saves `grading.result`, including falsy/null values.
+The saved outcome reaches `mountAnswered` and the model-facing answer text. Plugins own
+any result presentation; badges remain generic display primitives. Reopening, projection,
+model continuation/retry and renderer remount do not rerun grading on a saved answer.
+
+Grading requirement is **frozen at pose time**. New graded snapshots use local question
+protocol **v2** with `requiresGrading: true`; historical v1 questions remain ungraded even
+if a callback is later added. Unexpected grading paired with a historical v1 snapshot is
+ignored in projection, without rewriting the stored history. A required grader must be
+available under the exact saved contract, like a required answer refinement; if missing,
+the question remains unavailable/pending, not silently accepted without grading. An older
+host that cannot read v2 may durably cancel the bound occurrence as unreadable protocol;
+this downgrade behavior is accepted. Manifest `apiVersion` remains **1**.
+
+Submission stays in the inline answer POST until grading and canonical save finish, then
+ordinary continuation begins. The host privately uses the existing turn owner/waiting
+handle; this adds no jobs, queue, worker lifecycle or extra LLM pass. Long grading can
+occupy an HTTP connection and cause connection contention; that tradeoff is accepted.
+Navigation, HTTP disconnect and view detachment do **not** cancel server-owned grading.
+Once admitted, the submission keeps its captured conversation model/provider through
+grading and continuation; changing the selected model applies to the next request.
+Explicit Stop, plugin disable or question-type unregistration aborts its signal and fences the result:
+**no learner answer is saved** for that attempt. Cancellation is cooperative; the host
+awaits the underlying callback's settlement, not just an abort-race wrapper. There is no
+host hard timeout or forced process termination; a product needing a deadline must own
+its timeout and cooperative cleanup.
+
+The plugin-answer POST has **no automatic 409 retry**; other submission retry behavior is
+unchanged. After a failure before save, a fresh explicit submission may rerun the grader.
+There is no exactly-once guarantee across a crash or uncertain persistence, and arbitrary
+external grader side effects cannot be undone. Reconcile canonical state rather than
+assuming a lost HTTP acknowledgment means the answer was not saved.
+
 ### Owner-scoped question/editor slots
 
 Frontend `ctx.registerQuestionRenderer(renderer): () => void` accepts
@@ -940,7 +1003,15 @@ question-defaults/navigation checkpoint. Cancellation always has host fallback p
 
 Every slot receives immutable `input`, `chatId`, stable `questionId`, historical
 `contractVersion`, `variant` and `signal`. `mountAnswered` additionally receives accepted
-plugin `answer`; `mountAnswerEditor` receives `PluginQuestionEditorProps` with `active`,
+plugin `answer` and optional saved `grading: PluginQuestionGradingOutcome` (a readonly
+property). Only `mountAnswered` also receives optional readonly `headerContainer?: HTMLElement`:
+an isolated, generation-owned suffix inline after the host's question label. Use the
+existing `ctx.ui.mountBadge(headerContainer ?? container, props, { signal })` for an
+inline outcome, with body fallback for hosts without the slot. Body and header share
+one mount, signal and cleanup; failure, replacement or unmount removes both generation
+children. Do not retain the header across mounts or alter the host heading. It is live
+DOM, not frozen JSON, and carries no grading semantics. `mountAnswerEditor` receives
+`PluginQuestionEditorProps` with `active`,
 controlled `answer` and synchronous `onChange(state)`. Its atomic
 `PluginQuestionAnswerState` is exactly:
 
@@ -1016,8 +1087,23 @@ thinking. An optional editor `handleKeyDown` may explicitly override an offered 
 key. Returning `"pass"`, or omitting the hook, uses the host defaults: unclaimed plain
 Enter submits, rather than silently becoming an editing newline. Handled keys are claimed
 once; passed plain Tab enters the private host field chain, never native Tab navigation.
-The coding plugin now omits a plain-Enter override while retaining Tab indentation
-and Shift+Enter newline indentation, inheriting host Enter-submit.
+An unhandled plain Escape inside an eligible current editor moves directly to the next
+host field (for example, Your thinking). If the editor is the only field, Escape blurs
+it instead of wrapping back. That same event is claimed: it does not also open discard
+confirmation or abort a turn. An editor-handled Escape, IME/composition, modified keys
+and foreground-layer ownership retain precedence. This is field navigation only—not
+native Tab traversal or an app-wide keyboard redesign. Editors may still override Enter
+for multiline editing; leaving the editor makes the host field's Enter-submit available.
+
+Outside the editor and after existing focused-field/dictation/layer Escape handling,
+pending plugin questions use the same native question-dismissal confirmation. Cancel or
+the dialog's own Escape preserves drafts. Confirmation captures the exact canonical
+occurrence/question identity; a stale target closes without action, never retargeting a
+successor. An idle confirmation saves the existing cancellation without a teacher wake.
+During grading, the existing silent route validates current state after parsing the
+request, parks dismissal and requests Stop together; ownership remains held through actual
+grader cleanup before the parked cancellation lands. No ordinary Dismiss button is added
+to healthy questions, and builtin question/problem behavior is unchanged.
 
 The native footer hint is **↵ submits · ⇧↵ newline**, with **Submit answer** on the button.
 The human explicitly chose a compact **40px minimum Thinking height for every plugin
@@ -1070,8 +1156,8 @@ The host validates finite JSON and **saved historical schemas** on submission. A
 required answer refinement needs an available same-contract implementation; newly adding a
 refinement cannot alter old acceptance. Plugins publish only their answer value. The host
 constructs `PluginQuestionAnswer` (`kind: "plugin-question"`, canonical question/plugin/type
-identity, contract version, `answer`, applicable `thinking`/`readingThinking`, `answeredAt`),
-saves the genuine native result before continuation, and enforces single-submit and
+identity, contract version, `answer`, optional `grading`, applicable
+`thinking`/`readingThinking`, `answeredAt`), saves the genuine native result before continuation, and enforces single-submit and
 sibling-question discipline. Normal text/continue/retry and legacy answer routes cannot
 bypass a pending plugin question. Dismissal is a host cancellation, not a fabricated answer
 or an automatic teacher run.
@@ -1082,8 +1168,8 @@ a question. `incompatibleContractVersions` explicitly authorizes quiet cancellat
 old incompatible contract through the host, without rewriting history or auto-running the
 teacher. A genuinely unreadable host protocol may also be quietly cancelled only with
 sufficient exact occurrence binding—never a guessed target. Missing/disabled backend,
-unknown version, missing required refinement, unsupported/missing/failing renderer keep
-the question unavailable/pending with saved fallback and host **Dismiss question**.
+unknown version, missing required refinement or grader, unsupported/missing/failing renderer
+keep the question unavailable/pending with saved fallback and host **Dismiss question**.
 Frontend failure cannot declare incompatibility. No version ranges, automatic upgrades
 or plugin migrations over chat records are added.
 

@@ -16,6 +16,7 @@ const record = [{ id: "a1", role: "assistant", content: [{ type: "toolCall", id:
 const deferred = <T>() => { let resolve!: (value: T) => void; const promise = new Promise<T>(yes => { resolve = yes; }); return { promise, resolve }; };
 const tick = async () => { for (let i = 0; i < 15; i++) await Promise.resolve(); };
 const handle = (dispose = () => {}): PluginQuestionEditorHandle => ({ update() {}, focus() {}, dispose });
+const keyEvent = (key: string, extra = {}) => ({ key, shiftKey: false, ctrlKey: false, metaKey: false, altKey: false, isComposing: false, keyCode: 0, target: null, defaultPrevented: false, preventDefault(this: { defaultPrevented: boolean }) { this.defaultPrevented = true; }, ...extra }) as unknown as KeyboardEvent;
 const props = (): PluginQuestionEditorProps => ({ input: snapshot.input, chatId: "chat", questionId: "q1", contractVersion: 1, variant: "probe", signal: new AbortController().signal, answer: { status: "empty" }, active: true, onChange() {} });
 
 describe("bounded plugin question frontend", () => {
@@ -89,6 +90,38 @@ describe("bounded plugin question frontend", () => {
 		try {
 			const enter = event(); capturePluginQuestionKey(enter); assert.equal(enter.defaultPrevented, true); assert.equal(submits, 0); assert.deepEqual(calls, ["Enter"]);
 			const chord = event({ metaKey: true }); capturePluginQuestionKey(chord); assert.equal(chord.defaultPrevented, true); assert.equal(submits, 1); assert.deepEqual(calls, ["Enter"]);
+		} finally { off(); }
+	});
+	for (const hook of ["absent", "pass"] as const) it(`${hook} Escape hook yields the same event to local host navigation, not submit or global abort`, () => {
+		const calls: string[] = []; let cycles = 0, submits = 0;
+		const lease = createQuestionEditorLease({ props: props(), publish() {}, changed() {}, failed() { assert.fail("unexpected failure"); } });
+		lease.adopt({ ...handle(), ...(hook === "pass" ? { handleKeyDown(key) { calls.push(key); return "pass" as const; } } : {}) });
+		const off = ownPluginQuestionKeys({ eligible: () => true, contains: () => true, key: key => lease.key(key), cycle() { cycles++; }, submit() { submits++; } });
+		try {
+			const escape = keyEvent("Escape"); capturePluginQuestionKey(escape);
+			assert.equal(escape.defaultPrevented, true);
+			assert.equal(pluginQuestionKeySuppressed(escape), true);
+			assert.equal(pluginQuestionKeySuppressed({ nativeEvent: escape }), true, "React and global listeners see the same claim");
+			assert.equal(cycles, 1); assert.equal(submits, 0);
+			assert.deepEqual(calls, hook === "pass" ? ["Escape"] : []);
+		} finally { off(); lease.dispose(); }
+	});
+	it("handled Escape stays with the editor; modified, composing, ineligible and non-editor Escape never navigate", () => {
+		const calls: string[] = []; let cycles = 0, eligible = true, inside = true;
+		const off = ownPluginQuestionKeys({ eligible: () => eligible, contains: () => inside, key(key) { calls.push(key); return "handled"; }, cycle() { cycles++; }, submit() { assert.fail("Escape must not submit"); } });
+		try {
+			const escape = keyEvent("Escape"); capturePluginQuestionKey(escape);
+			assert.equal(escape.defaultPrevented, true); assert.equal(pluginQuestionKeySuppressed(escape), true);
+			for (const extra of [{ shiftKey: true }, { ctrlKey: true }, { metaKey: true }, { altKey: true }, { isComposing: true }, { keyCode: 229 }]) {
+				const untouched = keyEvent("Escape", extra); capturePluginQuestionKey(untouched);
+				assert.equal(untouched.defaultPrevented, false);
+				assert.equal(pluginQuestionKeySuppressed(untouched), "isComposing" in extra || "keyCode" in extra);
+			}
+			eligible = false; const inactive = keyEvent("Escape"); capturePluginQuestionKey(inactive);
+			assert.equal(inactive.defaultPrevented, false); assert.equal(pluginQuestionKeySuppressed(inactive), false);
+			eligible = true; inside = false; const outside = keyEvent("Escape"); capturePluginQuestionKey(outside);
+			assert.equal(outside.defaultPrevented, false); assert.equal(pluginQuestionKeySuppressed(outside), false);
+			assert.deepEqual(calls, ["Escape"]); assert.equal(cycles, 0);
 		} finally { off(); }
 	});
 	it("terminal readiness waits explicit GET adoption even without any global settlement event", async () => {

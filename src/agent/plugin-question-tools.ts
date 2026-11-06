@@ -3,15 +3,17 @@ import {
 	createPluginQuestionParameters, validatePluginQuestionInput, freezePluginQuestionValue,
 	type PluginQuestionTypeDefinition, type PluginQuestionVariant, type PluginQuestionAttempt,
 	type PluginQuestionSnapshot, type PluginQuestionInput, type PluginQuestionValidationContext, type PluginQuestionAnswerValidationContext,
+	type PluginQuestionGradingContext, type JsonValue,
 } from "../core/plugin-questions.ts";
 import { newMessageId } from "../core/native-messages.ts";
 import { invalidInputResult, questionResult } from "./tool-execute.ts";
 
 /** Heterogeneous host registry: schemas are validated dynamically before these callbacks run.
  * TypeBox's Static<any> is unknown, so erase the callback payload explicitly, not the public SDK generic. */
-export type NativePluginQuestionDefinition = Omit<PluginQuestionTypeDefinition, "validateQuestion" | "validateAnswer"> & {
+export type NativePluginQuestionDefinition = Omit<PluginQuestionTypeDefinition, "validateQuestion" | "validateAnswer" | "gradeAnswer"> & {
 	validateQuestion?: (context: PluginQuestionValidationContext<any>) => undefined | string[];
 	validateAnswer?: (context: PluginQuestionAnswerValidationContext<any, any>) => undefined | string[];
+	gradeAnswer?: (context: PluginQuestionGradingContext<any, any>) => JsonValue | Promise<JsonValue>;
 };
 
 /** The accepted, single-invocation contribution snapshot; never reconstruct it. */
@@ -108,7 +110,7 @@ export class PluginQuestionLedger {
 			const contribution = this.definitions.get(call.name);
 			if (!contribution) return;
 			const { definition, pluginId, variant } = contribution;
-			const attempt: PluginQuestionAttempt = { protocolVersion: 1, pluginId, typeId: definition.id, label: definition.label, variant };
+			const attempt: PluginQuestionAttempt = { ...(definition.gradeAnswer ? { protocolVersion: 2 as const, requiresGrading: true as const } : { protocolVersion: 1 as const }), pluginId, typeId: definition.id, label: definition.label, variant };
 			const pose = canonical ? epoch?.poses.get(index) : undefined;
 			annotations[String(index)] = freezePluginQuestionValue(pose ? {
 				...attempt, questionId: pose.questionId,

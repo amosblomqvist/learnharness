@@ -122,6 +122,8 @@ test("unregister affects future turns, disable invalidates accepted descriptors,
 	const resolved = f.host.resolveQuestionType("example", "format", 1);
 	assert.equal(resolved.status, "available");
 	off(); off();
+	assert.equal(accepted.signal.aborted, false, "accepted pose tools remain activation-owned after unregister");
+	if (resolved.status === "available") assert.ok(resolved.signal.aborted, "unregister cancels captured resolution work");
 	accepted.requireActive();
 	assert.deepEqual(f.host.agentContributions(turn(), []), { instructions: [], tools: [] });
 	if (resolved.status === "available") assert.throws(() => resolved.requireActive(), /unavailable/);
@@ -133,6 +135,46 @@ test("unregister affects future turns, disable invalidates accepted descriptors,
 	assert.throws(() => accepted.requireActive(), /disabled or unavailable/);
 	assert.equal(f.host.resolveQuestionType("example", "format", 1).status, "unavailable");
 	assert.throws(() => ctx.registerQuestionType(definition()), /no longer active/);
+});
+
+test("unregister aborts cooperative graders on captured registration signals without cancelling replacements", async t => {
+	const f = fixture(t); f.plugin(); const ctx = await f.context();
+	let aborted = 0;
+	const authored = definition({ gradeAnswer: ({ signal }) => new Promise(resolve => {
+		signal.addEventListener("abort", () => { aborted++; resolve(null); }, { once: true });
+	}) });
+	const off = ctx.registerQuestionType(authored);
+	const contribution = f.host.agentContributions(turn(), []).questionTypes![0]!;
+	const resolved = f.host.resolveQuestionType("example", "format", 1);
+	assert.ok(resolved.status === "available");
+	assert.equal(contribution.signal.aborted, false); assert.equal(resolved.signal.aborted, false);
+	const context = { chatId: "chat", questionId: "question", variant: "teach" as const, contractVersion: 1,
+		input: { question: "Question?", payload: { instruction: "instruction" } }, answer: "answer" };
+	const job = resolved.definition.gradeAnswer!({ ...context, signal: resolved.signal });
+	off();
+	assert.equal(contribution.signal.aborted, false, "accepted pose tools survive unregister");
+	contribution.requireActive();
+	assert.ok(resolved.signal.aborted);
+	assert.equal(aborted, 1, "the resolved cooperative grader receives cancellation synchronously");
+	assert.equal(await job, null);
+	assert.equal(ctx.signal.aborted, false, "unregister does not abort the activation");
+	assert.throws(() => resolved.requireActive(), /unavailable/);
+
+	ctx.registerQuestionType(authored);
+	const replacement = f.host.resolveQuestionType("example", "format", 1);
+	assert.ok(replacement.status === "available");
+	const replacementContribution = f.host.agentContributions(turn(), []).questionTypes![0]!;
+	assert.notEqual(replacement.definition, resolved.definition);
+	assert.equal(replacement.signal.aborted, false); assert.equal(replacementContribution.signal.aborted, false);
+	off();
+	assert.equal(replacement.signal.aborted, false, "old cleanup cannot cancel a re-registration");
+	assert.equal(replacementContribution.signal.aborted, false);
+	assert.ok(resolved.signal.aborted); assert.equal(contribution.signal.aborted, false);
+	assert.throws(() => resolved.requireActive(), /unavailable/);
+	replacement.requireActive();
+	await f.host.setEnabled("example", false);
+	assert.ok(replacement.signal.aborted); assert.ok(replacementContribution.signal.aborted);
+	assert.ok(contribution.signal.aborted, "activation disable still aborts accepted pose tools");
 });
 
 test("contract numbers alone preserve unavailable pending semantics; only explicit active-owner incompatibility authorizes cancellation", async t => {

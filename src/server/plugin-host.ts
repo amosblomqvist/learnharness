@@ -6,7 +6,8 @@ import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { PLUGIN_ID_PATTERN, parsePluginManifest } from "../core/plugins.ts";
 import { validatePluginSchema } from "../core/plugin-validation.ts";
 import { createPluginQuestionParameters, preparePluginQuestionType } from "../core/plugin-questions.ts";
-import type { PluginQuestionTypeDefinition, PluginQuestionVariant } from "../core/plugin-questions.ts";
+import type { PluginQuestionVariant } from "../core/plugin-questions.ts";
+import type { NativePluginQuestionDefinition } from "../agent/plugin-question-tools.ts";
 import type { PluginAgentKind, PluginBackendContext, PluginBackendModule, PluginCleanup, PluginFrontendContext, PluginInfo, PluginInference, PluginInstructions, PluginLearningData, PluginManifest, PluginNotification, PluginToolContext, PluginTools } from "../core/plugins.ts";
 import type { PluginAgentService } from "../core/plugin-agents.ts";
 import type { PluginWorkerService } from "../core/plugin-workers.ts";
@@ -48,7 +49,7 @@ export interface PluginHostDependencies {
 }
 interface Instructions { agents: Set<PluginAgentKind>; text: string }
 interface Tools { agents: Set<PluginAgentKind>; create: PluginTools["create"] }
-type QuestionDefinition = PluginQuestionTypeDefinition<any, any>;
+type QuestionDefinition = NativePluginQuestionDefinition;
 /** Frozen per-turn provenance, admitted atomically with ordinary package contributions. */
 export interface PluginQuestionContribution {
 	pluginId: string;
@@ -173,6 +174,7 @@ export function createPluginHost(deps: PluginHostDependencies) {
 	const directory = path.resolve(/* turbopackIgnore: true */ deps.directory);
 	const stateFile = path.resolve(/* turbopackIgnore: true */ directory, "..", "plugins-state.json");
 	const packages = new Map<string, Package>();
+	const questionControllers = new WeakMap<QuestionDefinition, AbortController>();
 	let initialized = false, disposed = false;
 	let serial: Promise<unknown> = Promise.resolve();
 	let disposing: Promise<void> | undefined;
@@ -247,11 +249,14 @@ export function createPluginHost(deps: PluginHostDependencies) {
 						requireLive();
 						const registered = preparePluginQuestionType(definition);
 						if (activation.questions.has(registered.id)) throw new Error(`Duplicate plugin question type: ${registered.id}`);
+						const controller = new AbortController();
+						questionControllers.set(registered, controller);
 						activation.questions.set(registered.id, registered);
 						if (activation.ready) change();
 						return () => {
 							if (activation.questions.get(registered.id) !== registered) return;
 							activation.questions.delete(registered.id);
+							controller.abort();
 							if (activation.ready && live(pkg, activation)) change();
 						};
 					},
@@ -464,7 +469,7 @@ export function createPluginHost(deps: PluginHostDependencies) {
 			if (!definition) return { status: "unavailable" };
 			if (definition.incompatibleContractVersions?.includes(contractVersion)) return { status: "incompatible" };
 			if (definition.contractVersion !== contractVersion) return { status: "unavailable" };
-			return { status: "available", definition, signal: activation.controller.signal,
+			return { status: "available", definition, signal: AbortSignal.any([activation.controller.signal, questionControllers.get(definition)!.signal]),
 				requireActive() {
 					if (!live(pkg, activation) || activation.questions.get(typeId) !== definition) throw new PluginHostError(409, `Plugin ${pkg.info.id} is disabled or unavailable`);
 				} };

@@ -4,11 +4,11 @@ import type { PluginQuestionEditorKey } from "../src/core/index.ts";
 const claimed = new WeakSet<object>();
 const composing = new WeakSet<object>();
 interface EditorKeyOwner {
-	eligible(): boolean;
+	eligible(key: string): boolean;
 	contains(target: EventTarget | null): boolean;
 	key(key: PluginQuestionEditorKey): "handled" | "pass";
 	submit(): void;
-	cycle(): void;
+	cycle(key: "Tab" | "Escape"): void;
 }
 let owner: EditorKeyOwner | null = null;
 export function ownPluginQuestionKeys(next: EditorKeyOwner): () => void {
@@ -27,19 +27,19 @@ export function composingQuestionKey(event: { isComposing?: boolean; keyCode?: n
 export function capturePluginQuestionKey(event: KeyboardEvent): void {
 	if (composingQuestionKey(event)) { composing.add(event); return; }
 	const current = owner;
-	if (!current?.eligible()) return;
+	if (!current?.eligible(event.key)) return;
 	const claim = () => { claimed.add(event); event.preventDefault(); };
 	// Reserved host submit works even in an arbitrary plugin editor subtree.
 	if (event.key === "Enter" && (event.metaKey || event.ctrlKey) && !event.altKey) { claim(); current.submit(); return; }
 	if (!current.contains(event.target)) {
-		if (event.key === "Tab" && !event.shiftKey && !event.metaKey && !event.ctrlKey && !event.altKey) { claim(); current.cycle(); }
+		if (event.key === "Tab" && !event.shiftKey && !event.metaKey && !event.ctrlKey && !event.altKey) { claim(); current.cycle("Tab"); }
 		return;
 	}
-	if (event.metaKey || event.ctrlKey || event.altKey || (event.key === "Tab" && event.shiftKey)) return;
+	if (event.metaKey || event.ctrlKey || event.altKey || (event.shiftKey && (event.key === "Tab" || event.key === "Escape"))) return;
 	const key = event.key === "Enter" && event.shiftKey ? "Shift+Enter" : event.key;
 	if (key !== "Tab" && key !== "Enter" && key !== "Shift+Enter" && key !== "Escape") return;
 	if (current.key(key) === "handled") { claim(); return; }
-	if (key === "Tab") { claim(); current.cycle(); }
+	if (key === "Tab" || key === "Escape") { claim(); current.cycle(key); }
 	// A missing hook or "pass" delegates to native host defaults: Enter
 	// submits, Shift+Enter keeps native editing without a second host submit.
 	if (key === "Enter") { claim(); current.submit(); }

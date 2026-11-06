@@ -16,16 +16,17 @@
  * dismissal). A RUNNING turn no longer refuses (owner, 2026-10-04 — the
  * GLM practice-loop incident): the dismissal is PARKED server-side and
  * the turn's settle path applies it against the persisted record, so
- * ESC-discard now doubles as the turn abort's bookkeeper (the client
- * fires both).
+ * ESC-discard now doubles as the turn abort's bookkeeper. Builtin
+ * dismissals retain the client-abort contract; plugin dismissals validate
+ * the current saved occurrence, then park and abort the owner here.
  */
 import { assertPluginQuestionInputAllowed, ChatInputError, dismissAppends, emit, parseDismissInput } from "@/src/core";
-import { getChat, isTurnRunning, parkDismissal, stores, preparePluginQuestionDismissal, reconcilePluginQuestionCompatibility } from "@/src/server";
+import { abortTurn, getChat, isTurnRunning, parkDismissal, stores, preparePluginQuestionDismissal, reconcilePluginQuestionCompatibility } from "@/src/server";
 
 export async function POST(req: Request, ctx: { params: Promise<{ id: string }> }): Promise<Response> {
 	const { id } = await ctx.params;
 	await reconcilePluginQuestionCompatibility(stores.chatStore, id);
-	const chat = getChat(id);
+	let chat = getChat(id);
 	if (!chat) return Response.json({ error: "Unknown chat" }, { status: 404 });
 
 	let input;
@@ -39,27 +40,36 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
 		throw err;
 	}
 
-	try { assertPluginQuestionInputAllowed(chat.messages, input); }
-	catch (err) {
-		if (err instanceof ChatInputError) return Response.json({ error: err.message }, { status: 400 });
-		throw err;
-	}
-
-	// A running turn owns the chat's record (its messages persist at
-	// settle) — the dismissal cannot validate against stale truth, so it
-	// is PARKED (owner, 2026-10-04): onFinish applies it to the settled
-	// record if the dismissed question/problem really is pending there.
-	// The dismissing client has also aborted the turn — this 202 is the
-	// "noted, will land" contract.
-	if (isTurnRunning(id)) {
-		parkDismissal(id, input);
-		return Response.json({ ok: true, parked: true }, { status: 202 });
+	// Native dismissals keep their existing read/park contract. A plugin
+	// target, however, must still be current AFTER the body await: the old
+	// question may have been answered, replaced, or deleted in the meantime.
+	if (input.type === "dismiss-plugin-question") {
+		chat = getChat(id);
+		if (!chat) return Response.json({ error: "Unknown chat" }, { status: 404 });
 	}
 
 	let appends;
 	try {
-		appends = input.type === "dismiss-plugin-question"
-			? preparePluginQuestionDismissal(chat, input) : dismissAppends(chat, input);
+		assertPluginQuestionInputAllowed(chat.messages, input);
+		if (input.type === "dismiss-plugin-question") appends = preparePluginQuestionDismissal(chat, input);
+	} catch (err) {
+		if (err instanceof ChatInputError) return Response.json({ error: err.message }, { status: 400 });
+		throw err;
+	}
+
+	// A running turn owns persistence. Native targets can still materialize
+	// at settle, so retain their park-only behavior. Plugin targets were
+	// validated above: no await separates that check, the park, and abort.
+	// Preparation keeps ownership until its actual callback cleanup; the
+	// existing settle/finally path applies the parked cancellation.
+	if (isTurnRunning(id)) {
+		parkDismissal(id, input);
+		if (input.type === "dismiss-plugin-question") abortTurn(id);
+		return Response.json({ ok: true, parked: true }, { status: 202 });
+	}
+
+	try {
+		appends ??= dismissAppends(chat, input);
 	} catch (err) {
 		if (err instanceof ChatInputError) return Response.json({ error: err.message }, { status: 400 });
 		throw err;

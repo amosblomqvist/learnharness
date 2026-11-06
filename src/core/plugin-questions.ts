@@ -1,4 +1,4 @@
-/** Bounded plugin-question v1 contracts and browser-safe saved-authority helpers. */
+/** Bounded plugin-question contracts and browser-safe saved-authority helpers. */
 import type { Static, TSchema } from "typebox";
 import type { PluginCleanup } from "./plugins.ts";
 import { validatePluginSchema } from "./plugin-validation.ts";
@@ -21,6 +21,10 @@ export interface PluginQuestionAnswerValidationContext<Q = JsonValue, A = JsonVa
 	readonly questionId: string;
 	readonly answer: A;
 }
+export interface PluginQuestionGradingContext<Q = JsonValue, A = JsonValue> extends PluginQuestionAnswerValidationContext<Q, A> {
+	readonly signal: AbortSignal;
+}
+export type PluginQuestionGradingOutcome = { result: JsonValue } | { error: string };
 export interface PluginQuestionTypeDefinition<Q extends TSchema = TSchema, A extends TSchema = TSchema> {
 	id: string;
 	label: string;
@@ -33,6 +37,7 @@ export interface PluginQuestionTypeDefinition<Q extends TSchema = TSchema, A ext
 	teach?: { toolName: string; description: string };
 	validateQuestion?: (context: PluginQuestionValidationContext<Static<Q>>) => undefined | string[];
 	validateAnswer?: (context: PluginQuestionAnswerValidationContext<Static<Q>, Static<A>>) => undefined | string[];
+	gradeAnswer?: (context: PluginQuestionGradingContext<Static<Q>, Static<A>>) => JsonValue | Promise<JsonValue>;
 }
 export type PluginQuestionAnswerState = { status: "empty" } | { status: "unready" | "ready"; value: JsonValue };
 export interface PluginQuestionMountContext<Q = JsonValue> {
@@ -55,6 +60,7 @@ export interface PluginQuestionEditorHandle {
 	focus(): void;
 	/** Optional editing override. Omission or "pass" uses host defaults:
 	 * Enter submits, Shift+Enter keeps native newline editing, Tab cycles fields.
+	 * Unhandled Escape moves to the next host field, or blurs an editor-only chain.
 	 * Meta/Ctrl+Enter remains reserved host submission. */
 	handleKeyDown?(key: PluginQuestionEditorKey): "handled" | "pass";
 	appendTranscript?(text: string): void | Promise<void>;
@@ -65,7 +71,7 @@ export interface PluginQuestionRenderer<Q = JsonValue, A = JsonValue> {
 	supportedContractVersions: number[];
 	mountQuestion?(container: HTMLElement, context: PluginQuestionMountContext<Q>): void | PluginCleanup | Promise<void | PluginCleanup>;
 	mountAnswerEditor(container: HTMLElement, context: PluginQuestionEditorProps<Q>): PluginQuestionEditorHandle | Promise<PluginQuestionEditorHandle>;
-	mountAnswered?(container: HTMLElement, context: PluginQuestionMountContext<Q> & { readonly answer: A }): void | PluginCleanup | Promise<void | PluginCleanup>;
+	mountAnswered?(container: HTMLElement, context: PluginQuestionMountContext<Q> & { readonly answer: A; readonly grading?: PluginQuestionGradingOutcome; readonly headerContainer?: HTMLElement }): void | PluginCleanup | Promise<void | PluginCleanup>;
 }
 export interface PluginQuestionOccurrence {
 	messageId: string;
@@ -75,7 +81,9 @@ export interface PluginQuestionOccurrence {
 }
 /** Visibility only: an unsuccessful attempt never grants pending authority. */
 export interface PluginQuestionAttempt {
-	protocolVersion: 1;
+	protocolVersion: 1 | 2;
+	/** Protocol v2 freezes grading at pose time; historical v1 omits this field. */
+	requiresGrading?: true;
 	pluginId: string;
 	typeId: string;
 	label: string;
@@ -99,6 +107,7 @@ export interface PluginQuestionAnswer {
 	typeId: string;
 	contractVersion: number;
 	answer: JsonValue;
+	grading?: PluginQuestionGradingOutcome;
 	thinking?: string;
 	readingThinking?: string;
 	images?: PluginSubmissionImages;
@@ -213,7 +222,9 @@ export function isPluginQuestionJson(value: unknown): value is JsonValue {
 }
 /** Freeze owned copies, never plugin-owned input objects. */
 export function freezePluginQuestionValue<T>(value: T): T {
-	if (value !== null && typeof value === "object" && !Object.isFrozen(value)) {
+	// Contexts can contain runtime capabilities such as AbortSignal. Freeze only
+	// owned JSON containers and the plain context itself, never those capabilities.
+	if ((Array.isArray(value) || record(value)) && !Object.isFrozen(value)) {
 		for (const child of Object.values(value)) freezePluginQuestionValue(child);
 		Object.freeze(value);
 	}
@@ -312,6 +323,7 @@ function prepareDefinition<Q extends TSchema, A extends TSchema>(definition: Plu
 		const callback = definition[key];
 		if (callback !== undefined && (typeof callback !== "function" || ["[object AsyncFunction]", "[object GeneratorFunction]", "[object AsyncGeneratorFunction]"].includes(Object.prototype.toString.call(callback)))) throw new Error(`Plugin question ${key} must be synchronous`);
 	}
+	if (definition.gradeAnswer !== undefined && typeof definition.gradeAnswer !== "function") throw new Error("Plugin question gradeAnswer must be a function");
 	return freezePluginQuestionValue({
 		id: definition.id, label: definition.label, contractVersion: definition.contractVersion,
 		showThinking: definition.showThinking,
@@ -321,6 +333,7 @@ function prepareDefinition<Q extends TSchema, A extends TSchema>(definition: Plu
 		...(incompatible !== undefined ? { incompatibleContractVersions: [...new Set(incompatible)] } : {}),
 		...(definition.validateQuestion ? { validateQuestion: definition.validateQuestion } : {}),
 		...(definition.validateAnswer ? { validateAnswer: definition.validateAnswer } : {}),
+		...(definition.gradeAnswer ? { gradeAnswer: definition.gradeAnswer } : {}),
 	});
 }
 function parametersFor(definition: PluginQuestionTypeDefinition, variant: PluginQuestionVariant): TSchema {
@@ -405,8 +418,9 @@ function readAnnotation(value: unknown, expected?: PluginQuestionOccurrence): Pl
 			for (const key of ["questionSchema", "answerSchema"]) if (own(value, key)) walkSchema(value[key], node => { brandingNodes.add(node); });
 		}
 		const saved = cloneJson(value, brandingNodes);
-		if (!record(saved) || saved.protocolVersion !== 1 || typeof saved.pluginId !== "string" || !pluginId.test(saved.pluginId) || typeof saved.typeId !== "string" || !localId.test(saved.typeId) || !text(saved.label) || !variantOf(saved.variant)) return unreadable();
-		const attempt: PluginQuestionAttempt = { protocolVersion: 1, pluginId: saved.pluginId, typeId: saved.typeId, label: saved.label, variant: saved.variant };
+		if (!record(saved) || (saved.protocolVersion !== 1 && saved.protocolVersion !== 2) || typeof saved.pluginId !== "string" || !pluginId.test(saved.pluginId) || typeof saved.typeId !== "string" || !localId.test(saved.typeId) || !text(saved.label) || !variantOf(saved.variant)) return unreadable();
+		if (saved.protocolVersion === 2 ? saved.requiresGrading !== true : own(saved, "requiresGrading")) return unreadable();
+		const attempt: PluginQuestionAttempt = { protocolVersion: saved.protocolVersion, ...(saved.protocolVersion === 2 ? { requiresGrading: true as const } : {}), pluginId: saved.pluginId, typeId: saved.typeId, label: saved.label, variant: saved.variant };
 		if (!snapshotFields.some(key => own(saved, key))) return { status: "attempt", attempt: freezePluginQuestionValue(attempt) };
 		if (!identity || typeof saved.showThinking !== "boolean" || typeof saved.requiresAnswerRefinement !== "boolean") return unreadable();
 		const questionSchema = preparePluginQuestionSchema(saved.questionSchema);
@@ -439,9 +453,17 @@ function readAnswer(value: unknown, snapshot?: PluginQuestionSnapshot): PluginQu
 		if (!record(saved) || saved.kind !== "plugin-question" || !text(saved.questionId) || typeof saved.pluginId !== "string" || !pluginId.test(saved.pluginId) || typeof saved.typeId !== "string" || !localId.test(saved.typeId) || !version(saved.contractVersion) || !own(saved, "answer") || !text(saved.answeredAt) || !Number.isFinite(Date.parse(saved.answeredAt))) return null;
 		for (const key of ["thinking", "readingThinking"] as const) if (own(saved, key) && typeof saved[key] !== "string") return null;
 		const images = own(saved, "images") ? validatePluginSubmissionImages(saved.images) : undefined;
-		if (snapshot) {
-			const canonical = readPluginQuestionSnapshot(snapshot);
-			if (!canonical || saved.questionId !== canonical.questionId || saved.pluginId !== canonical.pluginId || saved.typeId !== canonical.typeId || saved.contractVersion !== canonical.contractVersion) return null;
+		const canonical = snapshot ? readPluginQuestionSnapshot(snapshot) : undefined;
+		if (snapshot && !canonical) return null;
+		// Historical answers stay ungraded in projections, without mutating saved data.
+		if (canonical?.protocolVersion === 1) delete saved.grading;
+		else {
+			if (canonical?.requiresGrading && !own(saved, "grading")) return null;
+			if (own(saved, "grading") && (!record(saved.grading) || Object.keys(saved.grading).length !== 1 ||
+				!(own(saved.grading, "result") || (own(saved.grading, "error") && typeof saved.grading.error === "string")))) return null;
+		}
+		if (canonical) {
+			if (saved.questionId !== canonical.questionId || saved.pluginId !== canonical.pluginId || saved.typeId !== canonical.typeId || saved.contractVersion !== canonical.contractVersion) return null;
 			if (own(saved, "thinking") && !canonical.showThinking) return null;
 			if (own(saved, "readingThinking") && (canonical.variant !== "teach" || canonical.input.type !== "check")) return null;
 			if (images?.thinking?.length && !canonical.showThinking) return null;
