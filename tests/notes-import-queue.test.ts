@@ -85,6 +85,16 @@ it("individual file picks still import hidden notes and report unsupported dotfi
 	assert.deepEqual(queue.getSnapshot().errors, ["Skipped 1 file that isn't text, Markdown, or PDF (no extension)."]);
 });
 
+it("the queue uploads every accepted extension, including the expanded text types in uppercase", async () => {
+	const sent: string[] = [];
+	const queue = createNotesImportQueue(async ([f]) => { sent.push(f!.name); return [success(f!.name)]; });
+	const names = ["notes.TXT", "notes.MD", "notes.MARKDOWN", "notes.RST", "notes.ORG", "notes.ADOC", "notes.TEX", "notes.PDF"];
+	queue.append(names.map((name) => file(name)));
+	await tick();
+	assert.deepEqual(sent, names);
+	assert.deepEqual(queue.getSnapshot(), { importing: false, errors: [], notices: [], completion: 1 });
+});
+
 it("the file type check comes before the size check", () => {
 	const queue = createNotesImportQueue(async ([f]) => [success(f!.name)]);
 	const huge = file("huge.docx"); Object.defineProperty(huge, "size", { value: Number.MAX_SAFE_INTEGER });

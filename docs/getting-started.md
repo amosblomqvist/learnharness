@@ -43,10 +43,11 @@ File tools are read-only but have broad filesystem access under the server's use
 
 ## Extract into the graph
 
-For lessons, attach material to a session instead. Use the graph's **Extract files… → Files** or **Folder** picker for Markdown, plain text, or PDFs. This is a separate import flow, not the session's path attachments. Extract files accepts `.txt`, `.md`, `.markdown`, `.rst`, `.org`, `.adoc`, `.tex` and `.pdf` (any letter case); any other file, or one that is not plain text (such as a Word file renamed to `.txt`), is turned away with a short message. Each supported file is uploaded for processing; folders organize imported sources.
+For lessons, attach material to a session instead. Use the graph's **Extract files… → Files** or **Folder** picker for Markdown, plain text, or PDFs. This is a separate import flow, not the session's path attachments. Extract files accepts `.txt`, `.md`, `.markdown`, `.rst`, `.org`, `.adoc`, `.tex` and `.pdf` (any letter case); other extensions are turned away with a short message. Each supported file is uploaded for processing; folders organize imported sources.
 
 - Files are limited to **25 MiB each**. Imports queue independently, with up to three files in flight.
-- PDF conversion is local text extraction, not OCR. Image-only pages are skipped and counted; scanner text can be inaccurate. Check the import's notices.
+- Within the accepted extensions, PDFs are recognized by their `%PDF-` header and converted locally, without OCR. Image-only pages are skipped and counted; scanner text can be inaccurate. Check the import's notices.
+- Other files are read as UTF-8. A zero byte in the first 8 KiB causes rejection before source registration or model calls. This catches many binary files renamed to `.txt`, but is not complete binary detection; UTF-16 text is not decoded correctly and is often rejected. Save text as UTF-8.
 - Imported text then goes through model-based proposition/chain extraction. Local PDF conversion does not make the whole import offline.
 - Completed chunks survive later failures. Retry is explicit and reprocesses the file; unchanged content is not automatically skipped. The file queue does not survive a page reload.
 

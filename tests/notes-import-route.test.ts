@@ -133,6 +133,20 @@ it("PDFs are known by their bytes, not their names", async () => {
 	assert.deepEqual(received.sort(), ["--- Page 1 ---\n\nInside a misnamed file", "just text"]);
 });
 
+it("all accepted text extensions preserve ordinary multilingual UTF-8 notes, including uppercase names", async () => {
+	const received = new Map<string, string>();
+	extraction.importNotes = async ({ filePath, text }) => { received.set(filePath, text); return { nodes: 0, chains: 0 }; };
+	const text = "# Notes — café, Ελληνικά, 中文, 日本語 📚\r\n\t$\\alpha + \\beta$\n";
+	const names = ["notes.TXT", "notes.MD", "notes.MARKDOWN", "notes.RST", "notes.ORG", "notes.ADOC", "notes.TEX"];
+	const response = await POST(upload(names.map((name) => ({ name, bytes: text }))));
+	assert.equal(response.status, 200);
+	const { results } = await response.json();
+	assert.equal(results.length, names.length);
+	assert.ok(results.every((r: { ok: boolean; outcome: string }) => r.ok && r.outcome === "completed"));
+	assert.equal(received.size, names.length);
+	for (const name of names) assert.equal(received.get(name), text, name);
+});
+
 it("an off-list type and a non-text file are refused with a short message before registerImport or the pipeline", async () => {
 	let imports = 0;
 	const registered: string[] = [];

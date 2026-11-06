@@ -2,18 +2,17 @@
  * POST /api/graph/import — the format-agnostic front door's transport
  * (vision §1, 2026-09-13): raw personal-notes files in, one extraction run
  * per file through the SAME pipeline the sessions use. Multipart form data
- * (field "files"); the
- * pipeline mints a deterministic source id per file path, persists the
- * source record (the file's provenance + the run's usage), and runs
+ * (field "files"); the pipeline mints a deterministic source id per file
+ * path, persists the source record (the file's provenance + the run's usage),
+ * and runs
  * extractor → auditor → merger over the raw text.
  *
- * Only the types listed in lib/notes-import-limits.ts are taken; any other
- * type, or a file with a zero byte in its first 8 KiB, is refused before any
- * source record or model call.
- *
- * A PDF (spotted by its %PDF- header, not its name) is converted to
- * Markdown first. A PDF with nothing to extract is refused before any
- * model call or source record.
+ * Only filename extensions listed in lib/notes-import-limits.ts are taken.
+ * Among those files, a PDF (spotted by its %PDF- header) is converted to
+ * Markdown first. Other files are decoded as UTF-8 unless a zero byte in
+ * their first 8 KiB causes refusal. This is a binary-file heuristic, not
+ * complete text or encoding validation. These refusals, and PDFs with
+ * nothing to extract, occur before any source record or model call.
  *
  * Small concurrency cap: the model calls are the slow part, and a burst of
  * 25 simultaneous runs would trip provider rate limits — a 3-wide worker
