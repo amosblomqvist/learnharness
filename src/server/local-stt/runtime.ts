@@ -13,6 +13,9 @@
  * delete waits its turn in the ASR queue, so it can never free a model that is
  * decoding. State lives on globalThis because Next compiles each route into its
  * own module instance.
+ *
+ * Memory: after IDLE_UNLOAD_MS with no transcribe request, the ASR model and the
+ * detector are freed (the next request reloads them). Silero is 1.2 MB and stays.
  */
 import path from "node:path";
 import type { BackendInfo, LangIdResult, TranscribeModel } from "transcribe-cpp";
@@ -84,8 +87,16 @@ export type LocalSttRuntime = {
 	dispose(): Promise<void>;
 };
 
+/** How long the ASR model and the language detector stay loaded with no transcribe request. */
+export const IDLE_UNLOAD_MS = 10 * 60 * 1000;
+
 export type RuntimeDeps = {
 	store?: ModelStore;
+	/** Idle time before the ASR model and detector are unloaded. */
+	idleUnloadMs?: number;
+	/** Injectable for tests; default setTimeout, unref'd so it never keeps the process alive. */
+	setTimer?: (callback: () => void, ms: number) => unknown;
+	clearTimer?: (handle: unknown) => void;
 	/** Injectable for tests; defaults to a dynamic import of transcribe-cpp. */
 	loadEngine?: () => Promise<Engine>;
 	sileroPath?: string;
@@ -142,6 +153,13 @@ export function createLocalSttRuntime(deps: RuntimeDeps = {}): LocalSttRuntime {
 	const store = deps.store ?? localModelStore();
 	const sileroPath = deps.sileroPath ?? defaultSileroPath();
 	const loadEngine = deps.loadEngine ?? (() => import("transcribe-cpp"));
+	const idleMs = deps.idleUnloadMs ?? IDLE_UNLOAD_MS;
+	const setTimer = deps.setTimer ?? ((callback, ms) => {
+		const handle = setTimeout(callback, ms);
+		handle.unref();
+		return handle;
+	});
+	const clearTimer = deps.clearTimer ?? ((handle) => clearTimeout(handle as NodeJS.Timeout));
 
 	const asrQueue = new Queue();
 	const vadQueue = new Queue();
@@ -150,6 +168,30 @@ export function createLocalSttRuntime(deps: RuntimeDeps = {}): LocalSttRuntime {
 	let detector: TranscribeModel | undefined;
 	let silero: Promise<TranscribeModel> | undefined;
 	let disposed = false;
+	/** Transcribe requests queued or running; the idle clock only runs at zero. */
+	let pending = 0;
+	let idleTimer: unknown;
+
+	function stopIdleClock(): void {
+		if (idleTimer !== undefined) clearTimer(idleTimer);
+		idleTimer = undefined;
+	}
+
+	function startIdleClock(): void {
+		stopIdleClock();
+		if (disposed || (!asr && !detector)) return;
+		idleTimer = setTimer(() => {
+			idleTimer = undefined;
+			// Through the queue, so a decode that began since cannot lose its model.
+			void asrQueue.run(async () => {
+				if (pending > 0) return;
+				asr?.model.dispose();
+				asr = undefined;
+				detector?.dispose();
+				detector = undefined;
+			}).catch(() => undefined);
+		}, idleMs);
+	}
 
 	function engineReady(): Promise<Engine> {
 		engine ??= loadEngine().then(
@@ -263,6 +305,8 @@ export function createLocalSttRuntime(deps: RuntimeDeps = {}): LocalSttRuntime {
 		}
 		const policy = localLanguagePolicy(model.id, requested, options.preferredLanguages);
 
+		pending++;
+		stopIdleClock();
 		return asrQueue.run(async () => {
 			signal?.throwIfAborted();
 			if (disposed) throw new LocalSttError("Dictation is shutting down.", "engine_unavailable", 503);
@@ -313,6 +357,9 @@ export function createLocalSttRuntime(deps: RuntimeDeps = {}): LocalSttRuntime {
 				...(finalLanguage ? { language: finalLanguage } : {}),
 				...(warning ? { warning } : {}),
 			};
+		}).finally(() => {
+			// The last request out starts the clock; loading counted as use, so a failed load still arms it.
+			if (--pending === 0) startIdleClock();
 		});
 	}
 
@@ -357,6 +404,7 @@ export function createLocalSttRuntime(deps: RuntimeDeps = {}): LocalSttRuntime {
 		},
 		async dispose() {
 			disposed = true;
+			stopIdleClock();
 			await asrQueue.run(async () => {
 				asr?.model.dispose();
 				asr = undefined;

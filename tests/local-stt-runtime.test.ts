@@ -11,7 +11,7 @@ import path from "node:path";
 import { after, afterEach, beforeEach, describe, it } from "node:test";
 import { LANGUAGE_DETECTION_MODEL, getCatalogModel } from "../src/core/local-stt-catalog.ts";
 import { createModelStore, type ModelStore } from "../src/server/local-stt/model-store.ts";
-import { LocalSttError, createLocalSttRuntime, defaultSileroPath, type LocalSttRuntime } from "../src/server/local-stt/runtime.ts";
+import { IDLE_UNLOAD_MS, LocalSttError, createLocalSttRuntime, defaultSileroPath, type LocalSttRuntime } from "../src/server/local-stt/runtime.ts";
 
 class Fail extends Error {}
 class OutOfMemory extends Fail {}
@@ -371,6 +371,129 @@ describe("Chinese output", () => {
 		assert.equal((await runtime.transcribeChunk(pcm(1), { ...base, modelId: "whisper-small", language: "ja", preferredLanguages: ["ja", "zh"] })).text, "学習する図書館");
 		make(fakeEngine({ decode: () => ({ text: "學習 and 語音", language: "en" }) }));
 		assert.equal((await runtime.transcribeChunk(pcm(1), { ...base, modelId: "whisper-small", language: "en", preferredLanguages: ["en"] })).text, "學習 and 語音");
+	});
+});
+
+describe("idle unload", () => {
+	/** A fake clock: timers fire only when the test says so. */
+	function clock() {
+		const timers = new Map<number, { callback: () => void; ms: number }>();
+		let next = 1;
+		return {
+			timers,
+			deps: {
+				setTimer: (callback: () => void, ms: number) => { timers.set(next, { callback, ms }); return next++; },
+				clearTimer: (handle: unknown) => { timers.delete(handle as number); },
+			},
+			fire: () => { const [first] = [...timers.entries()]; if (first) { timers.delete(first[0]); first[1].callback(); } },
+		};
+	}
+	const makeIdle = (fake: ReturnType<typeof fakeEngine>, c: ReturnType<typeof clock>) =>
+		(runtime = createLocalSttRuntime({ store, loadEngine: async () => fake.engine, ...c.deps }));
+
+	it("waits ten minutes by default", () => {
+		assert.equal(IDLE_UNLOAD_MS, 10 * 60 * 1000);
+	});
+
+	it("unloads the ASR model and the detector after the idle time, and the next request reloads", async () => {
+		await install("canary-180m-flash");
+		await install(LANGUAGE_DETECTION_MODEL.id);
+		const fake = fakeEngine();
+		const c = clock();
+		makeIdle(fake, c);
+		const request = { ...base, modelId: "canary-180m-flash", preferredLanguages: ["en", "de"] };
+		await runtime.transcribeChunk(pcm(2), request);
+		assert.deepEqual([...c.timers.values()].map((t) => t.ms), [IDLE_UNLOAD_MS], "one clock, started when the request finished");
+		assert.deepEqual(fake.log.disposed, []);
+		c.fire();
+		await runtime.unload("nothing-loaded");
+		assert.deepEqual(fake.log.disposed.sort(), [`${LANGUAGE_DETECTION_MODEL.id}.gguf`, "canary-180m-flash.gguf"].sort());
+		await runtime.transcribeChunk(pcm(2), request);
+		assert.equal(fake.log.loads.filter((name) => name === "canary-180m-flash.gguf").length, 2, "reloaded as normal");
+	});
+
+	it("restarts the clock on every request, so a busy dictation never unloads", async () => {
+		await install("whisper-small");
+		const fake = fakeEngine();
+		const c = clock();
+		makeIdle(fake, c);
+		await runtime.transcribeChunk(pcm(1), { ...base, modelId: "whisper-small" });
+		await runtime.transcribeChunk(pcm(1), { ...base, modelId: "whisper-small" });
+		assert.equal(c.timers.size, 1, "the earlier clock was cleared");
+		assert.deepEqual(fake.log.disposed, []);
+	});
+
+	it("does not unload while a request is running or queued, and rearms afterwards", async () => {
+		await install("whisper-small");
+		let release!: () => void;
+		const gate = new Promise<void>((resolve) => { release = resolve; });
+		let first = false;
+		const fake = fakeEngine({ decode: async () => { if (first) { first = false; await gate; } return { text: "x", language: "en" }; } });
+		const c = clock();
+		makeIdle(fake, c);
+		await runtime.transcribeChunk(pcm(1), { ...base, modelId: "whisper-small" }); // loads, arms the clock
+		first = true;
+		const running = runtime.transcribeChunk(pcm(1), { ...base, modelId: "whisper-small" });
+		assert.equal(c.timers.size, 0, "a request in flight stops the clock");
+		const queued = runtime.transcribeChunk(pcm(1), { ...base, modelId: "whisper-small" });
+		release();
+		await Promise.all([running, queued]);
+		assert.deepEqual(fake.log.disposed, []);
+		assert.equal(c.timers.size, 1, "the last request out rearms it");
+	});
+
+	it("a timer that fires after a request has joined the queue skips the unload", async () => {
+		await install("whisper-small");
+		const fake = fakeEngine();
+		const c = clock();
+		makeIdle(fake, c);
+		await runtime.transcribeChunk(pcm(1), { ...base, modelId: "whisper-small" });
+		const [armed] = [...c.timers.values()];
+		// The timer fires, but a request lands before its queued job runs.
+		armed!.callback();
+		const request = runtime.transcribeChunk(pcm(1), { ...base, modelId: "whisper-small" });
+		await request;
+		assert.deepEqual(fake.log.disposed, []);
+		assert.equal(fake.log.loads.length, 1, "no reload");
+	});
+
+	it("starts no clock when nothing is loaded, and disposing cancels it", async () => {
+		await install("whisper-small");
+		const fake = fakeEngine({ loadError: () => new ModelLoadError("bad") });
+		const c = clock();
+		makeIdle(fake, c);
+		await assert.rejects(runtime.transcribeChunk(pcm(1), { ...base, modelId: "whisper-small" }));
+		assert.equal(c.timers.size, 0);
+		const ok = fakeEngine();
+		const c2 = clock();
+		makeIdle(ok, c2);
+		await runtime.transcribeChunk(pcm(1), { ...base, modelId: "whisper-small" });
+		assert.equal(c2.timers.size, 1);
+		await runtime.dispose();
+		assert.equal(c2.timers.size, 0);
+	});
+
+	it("leaves Silero loaded", async () => {
+		await install("whisper-small");
+		const fake = fakeEngine();
+		const c = clock();
+		makeIdle(fake, c);
+		await runtime.scoreVad(new Int16Array(1024));
+		await runtime.transcribeChunk(pcm(1), { ...base, modelId: "whisper-small" });
+		c.fire();
+		await runtime.unload("nothing-loaded");
+		assert.deepEqual(fake.log.disposed, ["whisper-small.gguf"]);
+		await runtime.scoreVad(new Int16Array(1024));
+		assert.equal(fake.log.loads.filter((name) => name.startsWith("silero")).length, 1);
+	});
+
+	it("uses an unref'd real timer by default, so it never keeps the process alive", async () => {
+		await install("whisper-small");
+		const fake = fakeEngine();
+		runtime = createLocalSttRuntime({ store, loadEngine: async () => fake.engine, idleUnloadMs: 60_000 });
+		await runtime.transcribeChunk(pcm(1), { ...base, modelId: "whisper-small" });
+		// The test process would hang for a minute at exit if the timer held it; dispose clears it.
+		await runtime.dispose();
 	});
 });
 
