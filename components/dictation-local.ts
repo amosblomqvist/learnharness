@@ -1,5 +1,5 @@
 import {
-	GROQ_DICTATION_HEADER, joinTranscripts, LOCAL_STT_MODELS_URL, LOCAL_STT_TRANSCRIBE_URL, NO_LOCAL_MODEL,
+	GROQ_DICTATION_HEADER, joinTranscripts, LOCAL_STT_MODELS_URL, LOCAL_STT_TRANSCRIBE_URL, LOCAL_STT_WARM_URL, NO_LOCAL_MODEL,
 	type LocalChineseOutput, type LocalModelsResponse, type LocalSttErrorBody, type LocalTranscribeResponse,
 } from "@/src/core";
 import { TranscribeRequestError, type ChunkTransport } from "@/components/dictation-chunk-session";
@@ -55,6 +55,18 @@ export async function checkLocalReady(model: string, request: typeof fetch = fet
 	const status = await res.json() as Partial<LocalModelsResponse>;
 	if (status.engineAvailable === false) throw new Error(status.engineError || "On-device dictation can't run on this computer.");
 	if (!status.models?.some((entry) => entry.id === model && entry.installed)) throw new Error(LOCAL_DICTATION_NO_MODEL);
+}
+
+/** Ask the server to load `model` now, so the load overlaps the user's speech instead of
+ * delaying the first chunk (a large model takes tens of seconds). Fire and forget: the
+ * answer is ignored and a failure changes nothing, because the first chunk meets any real
+ * problem itself and shows it. */
+export function warmLocalModel(model: string, request: typeof fetch = fetch): void {
+	try {
+		void request(LOCAL_STT_WARM_URL, {
+			method: "POST", headers: { ...headers, "Content-Type": "application/json" }, body: JSON.stringify({ model }),
+		}).then((res) => res.body?.cancel(), () => {});
+	} catch {}
 }
 
 /** Local as a chunk session's transport: each chunk goes to /api/stt/local/transcribe.

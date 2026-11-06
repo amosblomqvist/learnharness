@@ -11,7 +11,7 @@ import {
 import { useDictationLanguage } from "@/components/dictation-preference";
 import { checkGroqReady, groqTransport, GROQ_DICTATION_KEYLESS, GROQ_DICTATION_ROW } from "@/components/dictation-groq";
 import {
-	checkLocalReady, localTransport, LOCAL_DICTATION_NO_MODEL, LOCAL_DICTATION_SETTINGS_SECTION,
+	checkLocalReady, localTransport, warmLocalModel, LOCAL_DICTATION_NO_MODEL, LOCAL_DICTATION_SETTINGS_SECTION,
 } from "@/components/dictation-local";
 import { scoreVad } from "@/components/dictation-vad";
 import { createChunkSession, STOPPED_MESSAGE, type ChunkSession } from "@/components/dictation-chunk-session";
@@ -553,7 +553,8 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 		// first use. Groq and Local have no token: their readiness checks (is a key
 		// set? is the model installed?) play the same concurrent role.
 		const tokenPromise: Promise<string> = engine === "groq" ? checkGroqReady().then(() => "")
-			: engine === "local" ? checkLocalReady(local.model).then(() => "")
+			// A ready model is loaded now, while the user speaks, not at the first chunk.
+			: engine === "local" ? checkLocalReady(local.model).then(() => { warmLocalModel(local.model); return ""; })
 			: warmTokens.mint();
 		tokenPromise.catch(() => {}); // surfaced below; no unhandled rejection
 		const micPromise = navigator.mediaDevices.getUserMedia({

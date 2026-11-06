@@ -8,7 +8,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { createChunkSession, STOPPED_MESSAGE, TranscribeRequestError } from "../components/dictation-chunk-session.ts";
 import {
-	checkLocalReady, LOCAL_DICTATION_NO_MODEL, LocalRequestError, localTransport,
+	checkLocalReady, LOCAL_DICTATION_NO_MODEL, LocalRequestError, localTransport, warmLocalModel,
 } from "../components/dictation-local.ts";
 import { GROQ_DICTATION_HEADER } from "../src/core/dictation.ts";
 import { energyVad } from "./helpers/dictation-vad.ts";
@@ -78,6 +78,24 @@ describe("checkLocalReady", () => {
 		await assert.rejects(checkLocalReady("whisper-small", script([failure(403, "Dictation requests must come from the LearnHarness window.", false)]).request), /must come from the LearnHarness window/);
 		await assert.rejects(checkLocalReady("whisper-small", script([new Response("<html>", { status: 500 })]).request), /Local dictation failed \(500\)/);
 		await assert.rejects(checkLocalReady("whisper-small", script([new TypeError("offline")]).request), /Could not reach/);
+	});
+});
+
+describe("warmLocalModel", () => {
+	it("posts the model id as JSON to the warm route with the dictation header, and returns at once", () => {
+		const { calls, request } = script([Response.json({ model: "whisper-small" })]);
+		assert.equal(warmLocalModel("whisper-small", request), undefined);
+		assert.equal(calls[0]!.url, "/api/stt/local/warm");
+		assert.equal(calls[0]!.init.method, "POST");
+		assert.deepEqual(calls[0]!.init.headers, { [GROQ_DICTATION_HEADER]: "1", "Content-Type": "application/json" });
+		assert.deepEqual(JSON.parse(calls[0]!.init.body as string), { model: "whisper-small" });
+	});
+
+	it("swallows a network failure, a refusal and a fetch that throws at once", async () => {
+		warmLocalModel("whisper-small", script([new TypeError("offline")]).request);
+		warmLocalModel("whisper-small", script([failure(409, "no", false, "model_not_installed")]).request);
+		warmLocalModel("whisper-small", (() => { throw new Error("sync"); }) as unknown as typeof fetch);
+		await tick();
 	});
 });
 

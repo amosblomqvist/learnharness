@@ -959,6 +959,59 @@ const localNumbered = (f: Awaited<ReturnType<typeof fixture>>, first: Record<str
 	f.state.localAnswer = () => Promise.resolve(Response.json({ text: `local${++n}`, ...(n === 1 ? first : {}) }));
 };
 
+test("Local starts loading the chosen model as recording starts, once, and only after the readiness check", async () => {
+	const f = await fixture(LOCAL);
+	await f.start();
+	assert.equal(f.dictation.phase, "recording");
+	assert.equal(f.state.warmPosts.length, 1);
+	const { init, form } = f.state.warmPosts[0]!;
+	assert.equal(init.method, "POST");
+	assert.deepEqual(init.headers, { [GROQ_DICTATION_HEADER]: "1", "Content-Type": "application/json" });
+	assert.deepEqual(JSON.parse(init.body as string), { model: "whisper-small" });
+	assert.equal(form, init.body, "a JSON body, not audio");
+	assert.equal(f.state.localPosts.length, 0, "no chunk was needed to start the load");
+	await f.speak(4);
+	await act(async () => { f.dictation.stop(); });
+	assert.equal(f.state.warmPosts.length, 1, "not repeated per chunk");
+});
+
+test("a warm-up that fails, is refused or never answers neither blocks nor fails the recording", async () => {
+	for (const warm of [
+		() => Promise.reject(new TypeError("offline")),
+		() => Promise.resolve(Response.json({ message: "That model isn't downloaded.", retryable: false, code: "model_not_installed" }, { status: 409 })),
+		() => new Promise<Response>(() => {}),
+	]) {
+		const f = await fixture(LOCAL);
+		localNumbered(f);
+		f.state.warm = warm;
+		await f.start();
+		assert.equal(f.dictation.phase, "recording");
+		assert.equal(f.dictation.error, null);
+		await f.speak(4);
+		await act(async () => { f.dictation.stop(); });
+		assert.deepEqual(f.state.appends, ["local1"], "the take is transcribed as usual");
+		assert.equal(f.dictation.error, null);
+		await f.unmount();
+		restore?.(); restore = undefined;
+	}
+});
+
+test("no warm-up for Deepgram or Groq, nor when Local has no model or the model is not installed", async () => {
+	const cases: [UserSettings["dictation"], string][] = [
+		[{ provider: "groq", language: "pl" }, "Groq"],
+		[{ provider: "deepgram", language: "en" }, "Deepgram"],
+		[{ provider: "local", language: "en" }, "Local with no model chosen"],
+		[{ ...LOCAL, localModel: "parakeet-tdt-0.6b-v3" }, "Local with a model that is not installed"],
+	];
+	for (const [dictation, name] of cases) {
+		const f = await fixture(dictation);
+		await f.start();
+		assert.equal(f.state.warmPosts.length, 0, name);
+		await f.unmount();
+		restore?.(); restore = undefined;
+	}
+});
+
 test("Local with no model chosen refuses before the mic opens and says where to go", async () => {
 	const f = await fixture({ provider: "local", language: "en" });
 	await f.start();
