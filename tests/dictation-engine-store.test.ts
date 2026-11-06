@@ -31,7 +31,12 @@ test("old records load as Deepgram + turbo; saved engine choices load as written
 		await store.load();
 		assert.equal(store.getSnapshot().provider, provider);
 		assert.equal(store.getSnapshot().groqModel, groqModel);
-		assert.deepEqual(await store.getPreference(), { language: dictation?.language ?? "en", provider, groqModel });
+		const language = dictation?.language ?? "en";
+		// The Local engine's settings ride along, at their defaults here.
+		assert.deepEqual(await store.getPreference(), {
+			language, provider, groqModel,
+			localModel: "", localPreferredLanguages: [language], localLanguage: "auto", localChineseOutput: "simplified",
+		});
 	}
 });
 
@@ -45,7 +50,43 @@ test("choosing Groq writes the whole section, so a later language change cannot 
 	assert.deepEqual(state.puts.at(-1), { language: "fr", provider: "groq" }, "the language PUT carries the engine");
 	assert.equal(await store.saveEngine({ groqModel: "whisper-large-v3" }), true);
 	assert.deepEqual(state.puts.at(-1), { language: "fr", provider: "groq", groqModel: "whisper-large-v3" });
-	assert.deepEqual(await store.getPreference(), { language: "fr", provider: "groq", groqModel: "whisper-large-v3" });
+	assert.deepEqual(await store.getPreference(), {
+		language: "fr", provider: "groq", groqModel: "whisper-large-v3",
+		localModel: "", localPreferredLanguages: ["fr"], localLanguage: "auto", localChineseOutput: "simplified",
+	});
+});
+
+test("every write carries the Local settings, so choosing Groq or a language cannot erase them", async () => {
+	const local = { localModel: "whisper-large-v3-turbo", localPreferredLanguages: ["en", "de"], localLanguage: "de", localChineseOutput: "traditional" as const };
+	const { state, request } = server({ language: "en", provider: "local", ...local });
+	const store = createDictationLanguageStore(request);
+	await store.load();
+	assert.equal(store.getSnapshot().provider, "local");
+	assert.deepEqual(await store.getPreference(), { language: "en", provider: "local", groqModel: "whisper-large-v3-turbo", ...local });
+	assert.equal(await store.saveEngine({ provider: "groq" }), true);
+	assert.deepEqual(state.puts.at(-1), { language: "en", provider: "groq", ...local });
+	assert.equal(await store.save("fr"), true);
+	assert.deepEqual(state.puts.at(-1), { language: "fr", provider: "groq", ...local });
+	assert.equal(await store.saveEngine({ localModel: "parakeet-tdt-0.6b-v3", localLanguage: "auto" }), true);
+	const { localLanguage: _auto, ...rest } = local;
+	assert.deepEqual(state.puts.at(-1), { language: "fr", provider: "groq", ...rest, localModel: "parakeet-tdt-0.6b-v3" }, "Auto is the default, so it is not written");
+	assert.equal((await store.getPreference()).localModel, "parakeet-tdt-0.6b-v3");
+});
+
+test("preferred languages that follow the dictation language keep following it, explicit ones stay", async () => {
+	const unset = server({ language: "en" });
+	const following = createDictationLanguageStore(unset.request);
+	await following.load();
+	assert.deepEqual(following.getSnapshot().localPreferredLanguages, ["en"]);
+	await following.save("de");
+	assert.deepEqual(unset.state.puts.at(-1), { language: "de" }, "not frozen to the old language's default");
+	assert.deepEqual((await following.getPreference()).localPreferredLanguages, ["de"]);
+
+	const explicit = server({ language: "en", localPreferredLanguages: ["en", "fr"] });
+	const chosen = createDictationLanguageStore(explicit.request);
+	await chosen.load();
+	await chosen.save("de");
+	assert.deepEqual(explicit.state.puts.at(-1), { language: "de", localPreferredLanguages: ["en", "fr"] });
 });
 
 test("a Deepgram user's record stays exactly { language }, including after switching back", async () => {

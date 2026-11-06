@@ -5,12 +5,16 @@ import { Loader2Icon, MicIcon, RotateCcwIcon, XIcon } from "lucide-react";
 import { useSettingsDialog } from "@/components/settings/settings-dialog";
 import { Hint } from "@/components/ui/hint";
 import {
-	deepgramListenUrl, GROQ_MAX_RECORDING_SECONDS,
-	type DictationLanguage, type DictationProvider, type GroqWhisperModel,
+	deepgramListenUrl, GROQ_MAX_RECORDING_SECONDS, NO_LOCAL_MODEL,
+	type DictationLanguage, type DictationProvider, type GroqWhisperModel, type LocalChineseOutput,
 } from "@/src/core";
 import { useDictationLanguage } from "@/components/dictation-preference";
-import { checkGroqReady, GROQ_DICTATION_KEYLESS, GROQ_DICTATION_ROW } from "@/components/dictation-groq";
-import { createChunkSession, STOPPED_MESSAGE, type ChunkSession } from "@/components/dictation-groq-chunks";
+import { checkGroqReady, groqTransport, GROQ_DICTATION_KEYLESS, GROQ_DICTATION_ROW } from "@/components/dictation-groq";
+import {
+	checkLocalReady, localTransport, LOCAL_DICTATION_NO_MODEL, LOCAL_DICTATION_SETTINGS_SECTION,
+} from "@/components/dictation-local";
+import { scoreVad } from "@/components/dictation-vad";
+import { createChunkSession, STOPPED_MESSAGE, type ChunkSession } from "@/components/dictation-chunk-session";
 import { setDictationActive, setDictationRetained } from "@/components/dictation-state";
 export { isDictationActive, isDictationRetained } from "@/components/dictation-state";
 
@@ -89,17 +93,22 @@ export { isDictationActive, isDictationRetained } from "@/components/dictation-s
  *   - The honest floor stays: getUserMedia can't be pre-warmed (the mic
  *     indicator would stay lit) — hence the owner's optimistic meter.
  *
- * Groq engine (Settings → Providers → Dictation → Engine; Deepgram stays the
- * default and the paths above are untouched by it): the same worklet capture
- * graph feeds a chunk session (dictation-groq-chunks.ts) instead of a socket.
- * Chunks go to /api/stt/transcribe while recording continues, and NOTHING shows
- * until the user stops; then the whole transcript lands once, through the same
- * deferred flush. A recording caps at GROQ_MAX_RECORDING_SECONDS: reaching it
- * stops and transcribes, never discards. A failed chunk does NOT lose the
- * speech: the audio stays in memory for Retry (see finishGroqRun), no partial
- * transcript is inserted, and finish() resolves false so a submit path keeps its
- * draft instead of sending it without what was said.
+ * Groq and Local engines (Settings → Providers → Dictation → Engine; Deepgram
+ * stays the default and the paths above are untouched by them): the same worklet
+ * capture graph feeds a chunk session (dictation-chunk-session.ts) instead of a
+ * socket. Chunks go to /api/stt/transcribe (Groq) or /api/stt/local/transcribe
+ * (Local, a model on this machine) while recording continues, cut at the pauses
+ * Silero VAD finds (src/core/dictation-chunks.ts), and NOTHING shows until the
+ * user stops; then the whole transcript lands once, through the same deferred
+ * flush. A recording caps at GROQ_MAX_RECORDING_SECONDS: reaching it stops and
+ * transcribes, never discards. A failed chunk does NOT lose the speech: the audio
+ * stays in memory for Retry (see finishChunkedRun), no partial transcript is
+ * inserted, and finish() resolves false so a submit path keeps its draft instead
+ * of sending it without what was said.
  */
+
+/** The engines whose recording is cut into chunks (a chunk session), not streamed. */
+const isChunked = (engine: DictationProvider | null): boolean => engine === "groq" || engine === "local";
 
 /*
  * Deepgram streaming params (the owner's live-tuned dictate config): nova-3,
@@ -265,15 +274,20 @@ export type Dictation = {
 	phase: DictationPhase;
 	/** Terminal-state explanation, shown inside the wide button (cleared on the next start). */
 	error: string | null;
+	/** A finished run's non-fatal note (Local: the language detector is missing, so the
+	 *  take used the first preferred language). The transcript was inserted; the idle
+	 *  button shows this where it shows an error, and a screen reader hears it. Cleared
+	 *  on the next start or by clearError(). */
+	notice: string | null;
 	/** Latest observed RMS, 0..1 — sampled by the meter's own tick, never reset. */
 	levelRef: { current: number };
 	/** Not idle — from the click until the stop completes (the optimistic window). */
 	active: boolean;
-	/** Groq only: the recording has ended and the run waits for its last chunks
+	/** Chunked engines only: the recording has ended and the run waits for its last chunks
 	 *  (phase is "stopping"). The bar swaps the meter for "Finishing transcription…". */
 	transcribing: boolean;
-	/** Groq only: a chunk failed and the recording is kept in memory (the bar
-	 *  offers Retry). Cleared by a successful retry, clearError(), a new
+	/** Groq and Local only: a chunk failed and the recording is kept in memory (the
+	 *  bar offers Retry). Cleared by a successful retry, clearError(), a new
 	 *  recording or unmount. Always false for Deepgram. */
 	retryable: boolean;
 	/** Send the failed chunks again. No-op when no recording is kept or a
@@ -317,6 +331,7 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 	const { getPreference } = useDictationLanguage();
 	const [phase, setPhase] = useState<DictationPhase>("idle");
 	const [error, setError] = useState<string | null>(null);
+	const [notice, setNotice] = useState<string | null>(null);
 	const [transcribing, setTranscribing] = useState(false);
 	/** Latest RMS from the worklet — the meter samples this (dictate pattern). */
 	const levelRef = useRef(0);
@@ -356,9 +371,9 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 	/** Which engine this run uses (null until its preference is read). Set once
 	 *  per run, in start(). */
 	const engineRef = useRef<DictationProvider | null>(null);
-	/** Groq: the chunk session of the run in progress (recording, finishing or being retried). */
+	/** Groq or Local: the chunk session of the run in progress (recording, finishing or being retried). */
 	const sessionRef = useRef<ChunkSession | null>(null);
-	/** Groq: the session with a failed chunk, kept in memory for Retry. Only
+	/** Groq or Local: the session with a failed chunk, kept in memory for Retry. Only
 	 *  success, dismissal, a new recording or unmount drop it — cleanup() leaves
 	 *  it alone (it runs at the end of the failed run itself). */
 	const retainedRef = useRef<ChunkSession | null>(null);
@@ -415,13 +430,13 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 		setPhase("idle");
 		// The finish() waiters ride until NOW — post-flush, post-teardown:
 		// a submit path resuming after `await finishDictation()` reads the
-		// target field with the dictated tail already in it. A kept Groq
+		// target field with the dictated tail already in it. A kept chunked
 		// recording means speech is still unsent: they learn it as `false`.
 		const unsent = retainedRef.current !== null;
 		for (const w of waitersRef.current.splice(0)) w(!unsent);
 		// Pre-mint for the next run (mitigation D) — best-effort; a keyless
-		// page just doesn't warm. A Groq run has no Deepgram token to warm.
-		if (warmNext && engineRef.current !== "groq") warmTokens.refresh();
+		// page just doesn't warm. A chunked run has no Deepgram token to warm.
+		if (warmNext && !isChunked(engineRef.current)) warmTokens.refresh();
 	}, []);
 
 	/** Open the Deepgram socket and wire its messages. `gen` guards staleness. */
@@ -492,6 +507,7 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 	const start = useCallback(async () => {
 		setDictationActive(true);
 		setError(null);
+		setNotice(null);
 		setPhase("connecting");
 		reconnectsRef.current = 0;
 		bufferRef.current = []; // fresh run, fresh buffer (round 2)
@@ -504,8 +520,14 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 		let language: DictationLanguage;
 		let engine: DictationProvider;
 		let groqModel: GroqWhisperModel;
+		let local: { model: string; language: string; preferredLanguages: string[]; chineseOutput: LocalChineseOutput };
 		try {
-			({ language, provider: engine, groqModel } = await getPreference());
+			const preference = await getPreference();
+			({ language, provider: engine, groqModel } = preference);
+			local = {
+				model: preference.localModel, language: preference.localLanguage,
+				preferredLanguages: preference.localPreferredLanguages, chineseOutput: preference.localChineseOutput,
+			};
 		} catch (e) {
 			if (gen !== genRef.current) return;
 			setError(e instanceof Error ? e.message : "Dictation language unavailable");
@@ -514,16 +536,25 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 		}
 		if (gen !== genRef.current) return;
 		engineRef.current = engine;
-		const groq = engine === "groq";
+		const chunked = isChunked(engine);
+		// No model chosen: nothing to record for. Refused before the mic opens, with the
+		// line that takes the click to Settings (the installed check below needs a request).
+		if (engine === "local" && local.model === NO_LOCAL_MODEL) {
+			setError(LOCAL_DICTATION_NO_MODEL);
+			cleanup();
+			return;
+		}
 
 		// Mitigation D: the warm token (pre-minted at mount / after the last
 		// run) resolves ~instantly; a cold/keyless mint surfaces below. The
 		// mic is the long pole (macOS HAL + APM init) and gates everything —
 		// the token runs concurrently with it. 127.0.0.1 is a secure
 		// context, so getUserMedia works without TLS; macOS TCC prompts on
-		// first use. Groq has no token: its readiness check (is a key set?)
-		// plays the same concurrent role.
-		const tokenPromise: Promise<string> = groq ? checkGroqReady().then(() => "") : warmTokens.mint();
+		// first use. Groq and Local have no token: their readiness checks (is a key
+		// set? is the model installed?) play the same concurrent role.
+		const tokenPromise: Promise<string> = engine === "groq" ? checkGroqReady().then(() => "")
+			: engine === "local" ? checkLocalReady(local.model).then(() => "")
+			: warmTokens.mint();
 		tokenPromise.catch(() => {}); // surfaced below; no unhandled rejection
 		const micPromise = navigator.mediaDevices.getUserMedia({
 			audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true },
@@ -550,8 +581,8 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 				const msg = e.data as { type: string; rms?: number; buffer?: Int16Array };
 				if (msg.type === "level") {
 					levelRef.current = msg.rms ?? 0; // never reset to zero (dictate pattern)
-				} else if (msg.type === "audio" && groq) {
-					// Groq: feed the chunk session, don't stream. The cap stops the
+				} else if (msg.type === "audio" && chunked) {
+					// Groq or Local: feed the chunk session, don't stream. The cap stops the
 					// run; audio that trails it is dropped (a stopped session ignores
 					// pushes) and the stop still transcribes the rest.
 					const session = sessionRef.current;
@@ -569,9 +600,12 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 					}
 				}
 			};
-			if (groq) {
+			if (chunked) {
+				const request: typeof fetch = (...args) => fetch(...args);
 				sessionRef.current = createChunkSession({
-					request: (...args) => fetch(...args), model: groqModel, language, sampleRate: ctx.sampleRate,
+					transport: engine === "local" ? localTransport(request, local) : groqTransport(request, { model: groqModel, language }),
+					vad: (pcm, signal) => scoreVad(request, pcm, ctx.sampleRate, signal),
+					sampleRate: ctx.sampleRate,
 				});
 			}
 			const source = ctx.createMediaStreamSource(stream);
@@ -603,9 +637,9 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 			return;
 		}
 		if (gen !== genRef.current) return;
-		// Groq has no socket: a ready key means recording is under way — unless
-		// the user already pressed stop while the check was in flight.
-		if (groq) {
+		// Groq and Local have no socket: a ready engine means recording is under way —
+		// unless the user already pressed stop while the check was in flight.
+		if (chunked) {
 			setPhase((p) => (p === "connecting" ? "recording" : p));
 			return;
 		}
@@ -614,17 +648,18 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 		openSocket(gen, token, language);
 	}, [openSocket, cleanup, getPreference, keepRecording]);
 
-	/** Wait for a Groq run's chunks and buffer the whole transcript for the one
+	/** Wait for a chunked run's chunks and buffer the whole transcript for the one
 	 *  deferred flush (`resume` re-sends the failed chunks instead of ending the
 	 *  recording). Success drops the session; failure keeps it, with the error,
 	 *  for Retry. A stale `gen` (cancel, unmount) means cleanup already ran and
 	 *  nothing here may touch the run. */
-	const finishGroqRun = useCallback(async (gen: number, session: ChunkSession, resume: boolean) => {
+	const finishChunkedRun = useCallback(async (gen: number, session: ChunkSession, resume: boolean) => {
 		sessionRef.current = session;
 		setTranscribing(true);
 		const result = await (resume ? session.retry() : session.stop());
 		if (gen !== genRef.current) return;
 		sessionRef.current = null;
+		setNotice(session.warning);
 		if (result.status === "done") {
 			keepRecording(null);
 			setError(null);
@@ -643,10 +678,9 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 		if (!session || sessionRef.current) return;
 		setDictationActive(true);
 		setPhase("stopping");
-		engineRef.current = "groq";
 		bufferRef.current = [];
-		void finishGroqRun(++genRef.current, session, true);
-	}, [finishGroqRun]);
+		void finishChunkedRun(++genRef.current, session, true);
+	}, [finishChunkedRun]);
 
 	const stop = useCallback(() => {
 		const gen = genRef.current;
@@ -662,9 +696,9 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 		workletRef.current?.disconnect();
 		workletRef.current = null;
 
-		if (engineRef.current === "groq") {
+		if (isChunked(engineRef.current)) {
 			const session = sessionRef.current;
-			if (session) void finishGroqRun(gen, session, false);
+			if (session) void finishChunkedRun(gen, session, false);
 			else cleanup(); // stopped before the capture graph existed: nothing was recorded
 			return;
 		}
@@ -685,7 +719,7 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 		} else {
 			cleanup();
 		}
-	}, [phase, cleanup, finishGroqRun]);
+	}, [phase, cleanup, finishChunkedRun]);
 	stopRef.current = stop;
 
 	const cancel = useCallback(() => {
@@ -696,7 +730,7 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 		bufferRef.current = [];
 		const session = sessionRef.current;
 		if (session && phase === "stopping") {
-			// A Groq run the user already ended is not theirs to throw away: Esc
+			// A chunked run the user already ended is not theirs to throw away: Esc
 			// only stops the waiting. What had not been transcribed stays kept,
 			// with Retry, until it succeeds, is dismissed or a new recording starts.
 			session.cancel();
@@ -744,11 +778,11 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 	// page owns ONE hook instance, and only the mounted page's listener is
 	// attached.
 	useEffect(() => {
-		// Pre-mint at mount (mitigation D) — silent if keyless. A Groq user has no
-		// use for a Deepgram token; the preference read is one local GET.
+		// Pre-mint at mount (mitigation D) — silent if keyless. A Groq or Local user
+		// has no use for a Deepgram token; the preference read is one local GET.
 		let mounted = true;
 		void getPreference().then(
-			({ provider }) => { if (mounted && provider !== "groq") warmTokens.refresh(); },
+			({ provider }) => { if (mounted && !isChunked(provider)) warmTokens.refresh(); },
 			() => { if (mounted) warmTokens.refresh(); },
 		);
 		return () => {
@@ -773,6 +807,7 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 	return {
 		phase,
 		error,
+		notice,
 		levelRef,
 		active: phase !== "idle",
 		transcribing,
@@ -785,6 +820,7 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 		clearError: () => {
 			keepRecording(null);
 			setError(null);
+			setNotice(null);
 		},
 	};
 }
@@ -813,11 +849,11 @@ export function DictationBar({ dictation }: { dictation: Dictation }) {
 /** What a screen reader hears. The two regions are always mounted, so a change
  *  in their text is announced: waiting for the transcript is a polite status,
  *  a failure is an alert. Visually hidden; the visible bar says the same. */
-function DictationAnnouncer({ dictation: { active, transcribing, error } }: { dictation: Dictation }) {
+function DictationAnnouncer({ dictation: { active, transcribing, error, notice } }: { dictation: Dictation }) {
 	return (
 		<>
 			<div role="status" aria-live="polite" className="sr-only" data-testid="dictation-status">
-				{transcribing ? "Finishing transcription…" : ""}
+				{transcribing ? "Finishing transcription…" : !active && notice ? notice : ""}
 			</div>
 			<div role="alert" className="sr-only" data-testid="dictation-alert">
 				{!active && error ? error : ""}
@@ -827,14 +863,18 @@ function DictationAnnouncer({ dictation: { active, transcribing, error } }: { di
 }
 
 function DictationBarView({ dictation }: { dictation: Dictation }) {
-	const { phase, error, levelRef, toggle, active, clearError, transcribing, retryable, retry } = dictation;
+	const { phase, error, notice, levelRef, toggle, active, clearError, transcribing, retryable, retry } = dictation;
 	const { open: openSettings } = useSettingsDialog();
 	/** The keyless click (zero-keys wave, owner dictation trio): the errored
 	 *  idle button deep-links Settings → Keys → the Deepgram row (or, for the
-	 *  Groq engine, the Dictation group's Groq row) and clears the error — the
-	 *  surface is clean when the user returns. Any other error keeps the old
-	 *  behavior (click = retry, which clears). */
-	const keylessRow = error === DICTATION_KEYLESS ? DEEPGRAM_KEY_ID : error === GROQ_DICTATION_KEYLESS ? GROQ_DICTATION_ROW : null;
+	 *  Groq engine, the Dictation group's Groq row; for Local with no model, the
+	 *  Dictation group) and clears the error — the surface is clean when the user
+	 *  returns. Any other error keeps the old behavior (click = retry, which clears). */
+	const settingsTarget: [section: string, row?: string] | null =
+		error === DICTATION_KEYLESS ? ["keys", DEEPGRAM_KEY_ID]
+			: error === GROQ_DICTATION_KEYLESS ? ["keys", GROQ_DICTATION_ROW]
+				: error === LOCAL_DICTATION_NO_MODEL ? [LOCAL_DICTATION_SETTINGS_SECTION]
+					: null;
 	const [levels, setLevels] = useState<number[]>(() => new Array(METER_CELLS).fill(0));
 	/** Adaptive cell count (owner round 2): derived from the meter's
 	 *  measured width — narrow rows show fewer bars instead of
@@ -881,37 +921,37 @@ function DictationBarView({ dictation }: { dictation: Dictation }) {
 			<Hint
 				// The error wraps in the button, so all of it shows. While a recording is
 				// kept, clicking starts a new one, which drops the kept one.
-				label={error && retryable ? `${error} Dictating again discards the saved recording.` : (error ?? "Dictate")}
+				label={error && retryable ? `${error} Dictating again discards the saved recording.` : (error ?? notice ?? "Dictate")}
 				action={error ? undefined : "toggle-dictation"}
 				side="top"
 			>
 				<button
 					type="button"
 					onClick={() => {
-						if (keylessRow) {
+						if (settingsTarget) {
 							// A kept recording survives the trip: the key can be fixed in
 							// Settings and the same audio sent with Retry.
 							if (!retryable) clearError();
-							openSettings("keys", keylessRow);
+							openSettings(...settingsTarget);
 						} else {
 							toggle();
 						}
 					}}
 					aria-label={error ? `Dictation failed: ${error}` : "Start dictation"}
 					data-testid="dictation-toggle"
-					className={error
+					className={error || notice
 						? "flex min-h-7 w-full min-w-0 items-center justify-center gap-1.5 rounded-md border border-border/50 bg-card/50 px-2 py-1 text-xs text-muted-foreground/70 shadow-lg backdrop-blur transition-colors hover:border-border hover:text-muted-foreground"
 						: "flex h-7 w-full min-w-0 items-center justify-center gap-1.5 rounded-md border border-border/50 bg-card/50 text-xs text-muted-foreground/70 shadow-lg backdrop-blur transition-colors hover:border-border hover:text-muted-foreground"}
 				>
 					<MicIcon className="size-3.5 shrink-0" />
-					{error
-						? <span className="min-w-0 whitespace-normal break-words text-left leading-snug">{error}</span>
+					{error || notice
+						? <span className="min-w-0 whitespace-normal break-words text-left leading-snug">{error || notice}</span>
 						: <span className="max-w-full truncate">Dictate</span>}
 				</button>
 			</Hint>
 		);
 		if (!retryable) return wide;
-		// A failed Groq chunk kept the recording: offer to send what failed again,
+		// A failed chunk kept the recording: offer to send what failed again,
 		// or to let it go. Nothing here submits anything.
 		return (
 			<div className="flex w-full min-w-0 items-center gap-1.5" data-testid="dictation-retry-bar">
@@ -944,7 +984,7 @@ function DictationBarView({ dictation }: { dictation: Dictation }) {
 		);
 	}
 
-	// Groq is finishing the last chunks: nothing is live, so no meter and no Stop
+	// A chunked engine is finishing the last chunks: nothing is live, so no meter and no Stop
 	// (Esc stops the waiting; what is not transcribed yet stays kept for Retry).
 	if (transcribing) {
 		return (

@@ -1,4 +1,5 @@
 import { GROQ_DICTATION_HEADER, GROQ_KEY_ID, type AuthKeyStatus, type DictationLanguage, type GroqWhisperModel } from "@/src/core";
+import { TranscribeRequestError, type ChunkTransport } from "@/components/dictation-chunk-session";
 
 /**
  * The renderer's side of Groq (Whisper) dictation: a key check against
@@ -19,12 +20,10 @@ export const GROQ_DICTATION_ROW = "dictation:GROQ_API_KEY";
 const ENDPOINT = "/api/stt/transcribe";
 const headers = { [GROQ_DICTATION_HEADER]: "1" };
 
-/** A failed chunk request: `message` is fit to show the user, `retryable` says
- * whether sending the same chunk again may work, `retryAfterMs` is the wait the
- * server asked for. */
-export class GroqRequestError extends Error {
-	constructor(message: string, readonly retryable: boolean, readonly retryAfterMs?: number) {
-		super(message);
+/** A failed Groq chunk request (see TranscribeRequestError). */
+export class GroqRequestError extends TranscribeRequestError {
+	constructor(message: string, retryable: boolean, retryAfterMs?: number) {
+		super(message, retryable, retryAfterMs);
 		this.name = "GroqRequestError";
 	}
 }
@@ -83,4 +82,31 @@ export async function transcribeGroq(request: typeof fetch, args: {
 	const body = await res.json().catch(() => ({})) as { text?: unknown };
 	if (typeof body.text !== "string") throw new GroqRequestError("Groq dictation returned no transcript.", false);
 	return body.text.trim();
+}
+
+export const PROMPT_TAIL_CHARS = 100;
+/** Chunks shorter than this get no prompt: Whisper tends to echo a prompt back
+ * when there is almost no audio to transcribe. */
+const PROMPT_MIN_SECONDS = 2;
+
+/** The last PROMPT_TAIL_CHARS characters of `text`, starting at a word. */
+export function promptTail(text: string): string {
+	const chars = [...text.trim()];
+	if (chars.length <= PROMPT_TAIL_CHARS) return chars.join("");
+	const tail = chars.slice(-PROMPT_TAIL_CHARS).join("");
+	// The cut usually lands inside a word: drop its fragment.
+	return /\s/.test(chars[chars.length - PROMPT_TAIL_CHARS - 1]!) ? tail : tail.replace(/^\S*\s+/, "");
+}
+
+/** Groq as a chunk session's transport: each chunk goes to /api/stt/transcribe
+ * with the end of the previous transcript as Whisper's prompt. */
+export function groqTransport(request: typeof fetch, args: { model: GroqWhisperModel; language: DictationLanguage }): ChunkTransport {
+	return {
+		failure: "Groq transcription failed",
+		join: (texts) => texts.join(" "),
+		async transcribe({ wav, seconds, previousText, signal }) {
+			const prompt = seconds >= PROMPT_MIN_SECONDS && previousText ? promptTail(previousText) : undefined;
+			return { text: await transcribeGroq(request, { wav, model: args.model, language: args.language, prompt, signal }) };
+		},
+	};
 }

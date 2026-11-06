@@ -13,6 +13,7 @@ import { DictationEngineSettings, DictationSetupHint } from "../components/dicta
 import { DictationLanguageSetting } from "../components/dictation-language.tsx";
 import { DictationBar, DICTATION_KEYLESS, type Dictation } from "../components/dictation.tsx";
 import { GROQ_DICTATION_KEYLESS, GROQ_DICTATION_ROW } from "../components/dictation-groq.ts";
+import { LOCAL_DICTATION_NO_MODEL } from "../components/dictation-local.ts";
 import { SettingsDialogProvider } from "../components/settings/settings-dialog.tsx";
 import { setDictationActive } from "../components/dictation-state.ts";
 import { notifySettingsSaved } from "../components/settings-signal.ts";
@@ -223,7 +224,7 @@ test("opening a present Groq key from Model API keys does not also open the dict
 });
 
 const idleWithError = (error: string): Dictation => ({
-	phase: "idle", error, levelRef: { current: 0 }, active: false, transcribing: false,
+	phase: "idle", error, notice: null, levelRef: { current: 0 }, active: false, transcribing: false,
 	retryable: false, retry() {}, toggle() {}, stop() {}, finish: async () => true, cancel() {}, clearError() {},
 });
 
@@ -241,6 +242,17 @@ for (const [name, error, row, other] of [
 		assert.equal(byTest(other), null);
 	});
 }
+
+test("the Local no-model button opens Settings on the Dictation group, with no key row unfolded", async () => {
+	await fixture({ keys: [status("GROQ_API_KEY", false)] });
+	await mount(<SettingsDialogProvider><DictationBar dictation={idleWithError(LOCAL_DICTATION_NO_MODEL)} /></SettingsDialogProvider>);
+	assert.equal(byTest("group-dictation"), null, "Settings is closed before the click");
+	await act(async () => { byTest("dictation-toggle")!.click(); });
+	await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+	assert.ok(byTest("group-dictation"), "the Dictation group is on screen");
+	assert.equal(byTest("key-dictation-groq-input"), null);
+	assert.equal(byTest("key-deepgram_api_key-input"), null);
+});
 
 test("the Dictation rows fit a narrow dialog and the selects show keyboard focus", async () => {
 	await fixture({ dictation: { language: "en", provider: "groq" } });

@@ -1,10 +1,12 @@
 /**
- * The Groq dictation path of useDictation: capture frames, send them to
- * /api/stt/transcribe in chunks while recording, flush the whole transcript
- * once on stop. fetch, the microphone and the audio graph are fakes; no
- * network, no real key. Chunk cutting, ordering, backoff and Retry are tested
- * on their own in dictation-chunks.test.ts and dictation-groq-chunks.test.ts;
- * this file covers how the hook wires them to the UI and the submit paths.
+ * The Groq and Local dictation paths of useDictation: capture frames, send them to
+ * /api/stt/transcribe (Groq) or /api/stt/local/transcribe (Local) in chunks while
+ * recording, flush the whole transcript once on stop. fetch, the microphone and the
+ * audio graph are fakes; no network, no real key, no model. POST /api/stt/vad is a fake too: by default it hears speech in
+ * every frame (the synthetic capture is a constant tone), and a test sets `vad` to make
+ * it hear silence or fail. Chunk cutting, ordering, backoff and Retry are tested on
+ * their own in dictation-chunks.test.ts and dictation-chunk-session.test.ts; this file
+ * covers how the hook wires them to the UI and the submit paths.
  */
 import React, { act } from "react";
 import assert from "node:assert/strict";
@@ -15,9 +17,10 @@ import { DictationBar, useDictation, type Dictation } from "../components/dictat
 import { DraftShell } from "../components/new-session.tsx";
 import { QuestionDock } from "../components/question-dock.tsx";
 import { GROQ_DICTATION_KEYLESS } from "../components/dictation-groq.ts";
+import { LOCAL_DICTATION_NO_MODEL } from "../components/dictation-local.ts";
 import { notifySettingsSaved } from "../components/settings-signal.ts";
 import { isDictationActive, isDictationRetained } from "../components/dictation-state.ts";
-import { STOPPED_MESSAGE } from "../components/dictation-groq-chunks.ts";
+import { STOPPED_MESSAGE } from "../components/dictation-chunk-session.ts";
 import { GROQ_DICTATION_HEADER, GROQ_MAX_RECORDING_SECONDS, type QuizToolInput, type UserSettings } from "../src/core/index.ts";
 
 function deferred<T>() {
@@ -57,6 +60,14 @@ class Worklet {
 const frame = () => new Int16Array(2048).fill(1000);
 
 interface Post { init: RequestInit; form: FormData }
+/** GET /api/stt/local/models with whisper-small installed and a working engine. */
+const localModels = (over: Record<string, unknown> = {}) => ({
+	hardwareTier: "cpu", engineAvailable: true, languageDetector: { id: "voxlingua107-ecapa-q8", installed: false, partialBytes: 0, download: null },
+	models: [{ id: "whisper-small", installed: true, partialBytes: 0, download: null }, { id: "parakeet-tdt-0.6b-v3", installed: false, partialBytes: 0, download: null }],
+	...over,
+});
+/** What /api/stt/vad answers for `frames` Silero frames when nothing says otherwise: speech throughout. */
+const speechEverywhere = (frames: number) => Response.json({ probs: new Array(frames).fill(0.95), frameSamples: 512 });
 /** What GET /api/keys says about the Groq key (the readiness check reads it). */
 const keysResponse = (present: boolean) => Response.json({ keys: [{ id: "GROQ_API_KEY", info: null, present }] });
 const globals = globalThis as Record<string, unknown>;
@@ -77,6 +88,15 @@ async function fixture(
 		readyInits: [] as (RequestInit | undefined)[],
 		answer: ((_post: Post) => Promise.resolve(Response.json({ text: "hello world" }))) as (post: Post) => Promise<Response>,
 		posts: [] as Post[],
+		/** GET /api/stt/local/models: what the Local readiness check reads. */
+		models: (() => Promise.resolve(Response.json(localModels()))) as () => Promise<Response>,
+		modelInits: [] as (RequestInit | undefined)[],
+		/** POST /api/stt/local/transcribe. */
+		localAnswer: ((_post: Post) => Promise.resolve(Response.json({ text: "hello local", language: "en" }))) as (post: Post) => Promise<Response>,
+		localPosts: [] as Post[],
+		mics: 0,
+		vad: speechEverywhere as (frames: number, post: Post) => Response | Promise<Response>,
+		vadPosts: [] as Post[],
 		stops: 0,
 		appends: [] as string[],
 	};
@@ -85,7 +105,7 @@ async function fixture(
 	const previous = new Map<string, PropertyDescriptor | undefined>();
 	for (const [key, value] of Object.entries({
 		React, window: dom.window, document: dom.document, CustomEvent: dom.window.CustomEvent, HTMLElement: dom.window.HTMLElement,
-		navigator: { userAgent: "", platform: "", mediaDevices: { getUserMedia: async () => ({ getTracks: () => [{ stop() { state.stops++; } }] }) } },
+		navigator: { userAgent: "", platform: "", mediaDevices: { getUserMedia: async () => { state.mics++; return { getTracks: () => [{ stop() { state.stops++; } }] }; } } },
 		WebSocket: Socket, AudioContext: AudioGraph, AudioWorkletNode: Worklet,
 		// DraftShell's conversation pane measures itself; linkedom has neither.
 		ResizeObserver: class { observe() {} unobserve() {} disconnect() {} },
@@ -95,8 +115,15 @@ async function fixture(
 			if (url === "/api/stt/token") { state.tokenCalls++; return Response.json({ token: "test-token" }); }
 			if (url === "/api/settings") return Response.json({ settings: state.record });
 			if (url === "/api/keys") { state.readyInits.push(init); return state.ready(); }
-			assert.equal(url, "/api/stt/transcribe");
+			if (url === "/api/stt/local/models") { state.modelInits.push(init); return state.models(); }
 			const post = { init: init!, form: init!.body as FormData };
+			if (url === "/api/stt/local/transcribe") { state.localPosts.push(post); return state.localAnswer(post); }
+			if (url === "/api/stt/vad") {
+				state.vadPosts.push(post);
+				// File.size is synchronous: a 44-byte header, then 2 bytes a sample.
+				return state.vad(Math.ceil(((post.form.get("audio") as File).size - 44) / 2 / 512), post);
+			}
+			assert.equal(url, "/api/stt/transcribe");
 			state.posts.push(post);
 			return state.answer(post);
 		},
@@ -351,17 +378,20 @@ test("reaching the recording cap stops and transcribes what was captured, droppi
 	});
 	assert.equal(f.dictation.error, null);
 	assert.equal(f.dictation.phase, "idle");
-	assert.equal(f.state.posts.length, GROQ_MAX_RECORDING_SECONDS / 15, "twenty minutes in fifteen-second chunks");
+	// Speech throughout has no pause to cut at, so every cut is hard, at 18 s.
+	const chunks = Math.ceil(GROQ_MAX_RECORDING_SECONDS / 18);
+	assert.equal(f.state.posts.length, chunks, "twenty minutes in eighteen-second chunks");
+	assert.equal(f.state.vadPosts.length, chunks, "one scoring request for each");
 	assert.equal(f.state.stops, 1, "the cap stopped the run");
 	assert.equal(f.state.appends.length, 1, "one insertion for the whole run");
-	assert.equal(f.state.appends[0]!.split(" ").length, GROQ_MAX_RECORDING_SECONDS / 15);
+	assert.equal(f.state.appends[0]!.split(" ").length, chunks);
 	assert.match(f.state.appends[0]!, /^part1 part2 /);
 	const sent = f.state.posts.reduce((total, p) => total + (p.form.get("audio") as File).size - 44, 0);
 	assert.equal(sent, capBytes, "everything up to the cap was sent, and nothing after it");
 });
 
 const barOf = (over: Partial<Dictation>): Dictation => ({
-	phase: "idle", error: null, levelRef: { current: 0 }, active: false, transcribing: false,
+	phase: "idle", error: null, notice: null, levelRef: { current: 0 }, active: false, transcribing: false,
 	retryable: false, retry() {}, toggle() {}, stop() {}, finish: async () => true, cancel() {}, clearError() {},
 	...over,
 });
@@ -670,7 +700,7 @@ test("chunks are sent while recording continues; nothing shows until the stop, t
 	assert.equal(f.dictation.error, null);
 	assert.equal(f.state.posts[0]!.form.get("prompt"), null, "the first chunk has nothing to continue from");
 
-	await f.speak(framesFor(21.9)); // about 40 s: the second chunk at ~33 s
+	await f.speak(framesFor(21.9)); // about 40 s: the second chunk is cut at 36 s
 	assert.equal(f.state.posts.length, 2);
 	assert.equal(f.dictation.phase, "recording");
 	assert.deepEqual(f.state.appends, [], "still nothing in the composer");
@@ -836,4 +866,344 @@ test("screen readers are told about waiting for the transcript (polite) and abou
 	const retrying = renderToStaticMarkup(<DictationBar dictation={barOf({ error: LONG_ERROR, retryable: true, phase: "stopping", active: true, transcribing: true })} />);
 	assert.equal(region(retrying, "alert"), "", "the old error is not read out again while a retry runs");
 	assert.equal(region(retrying, "status"), "Finishing transcription…");
+});
+
+// ---------------------------------------------------------------------------
+// Silero (POST /api/stt/vad) decides where chunks are cut and which are skipped.
+// ---------------------------------------------------------------------------
+
+/** Silero's answer for `frames` frames: speech, except for the given pauses (seconds). */
+const withPauses = (pauses: [number, number][]) => (frames: number) => Response.json({
+	probs: Array.from({ length: frames }, (_, i) => (pauses.some(([from, to]) => (i * 512) / 16000 >= from && (i * 512) / 16000 < to) ? 0.01 : 0.95)),
+	frameSamples: 512,
+});
+const seconds = async (post: Post) => ((await audioBytes(post)).length - 44) / 2 / 16000;
+
+test("Silero sets the cut: the first chunk ends in the pause it found, and the request is the 18 s window with the dictation header", async () => {
+	const f = await fixture();
+	numbered(f);
+	f.state.vad = withPauses([[14.5, 15.5]]);
+	await f.start();
+	await f.speak(framesFor(18.1));
+	assert.equal(f.state.vadPosts.length, 1);
+	assert.deepEqual(f.state.vadPosts[0]!.init.headers, { [GROQ_DICTATION_HEADER]: "1" });
+	assert.equal(f.state.vadPosts[0]!.init.method, "POST");
+	assert.equal((await seconds(f.state.vadPosts[0]!)), 18, "Silero hears the 18 s window, in one request");
+	assert.equal(f.state.posts.length, 1);
+	const first = await seconds(f.state.posts[0]!);
+	assert.ok(first > 14.5 && first < 15.5, `cut at ${first} s, in the pause`);
+});
+
+test("Silero hearing only silence: nothing is sent and nothing is inserted, and the run ends cleanly", async () => {
+	const f = await fixture();
+	f.state.vad = withPauses([[0, 1000]]);
+	await f.start();
+	await f.speak(framesFor(2));
+	await act(async () => { f.dictation.stop(); });
+	assert.equal(f.state.vadPosts.length, 1, "the last chunk was checked");
+	assert.equal(f.state.posts.length, 0, "and judged silent: nothing for Groq to invent words for");
+	assert.deepEqual(f.state.appends, []);
+	assert.equal(f.dictation.phase, "idle");
+	assert.equal(f.dictation.error, null);
+	assert.equal(f.dictation.retryable, false);
+});
+
+test("a failed VAD request loses no audio: chunks are cut at 18 s and sent, silent or not, and no error is shown", async () => {
+	const f = await fixture();
+	numbered(f);
+	f.state.vad = () => Response.json({ message: "Voice activity detection couldn't start", retryable: false, code: "engine_unavailable" }, { status: 503 });
+	await f.start();
+	await f.speak(framesFor(40));
+	assert.equal(f.state.posts.length, 2, "two full chunks went out while recording");
+	assert.equal(await seconds(f.state.posts[0]!), 18, "no pause is known, so the cut is hard");
+	assert.equal(f.dictation.error, null, "a VAD failure is not the learner's problem");
+	await act(async () => { f.dictation.stop(); });
+	assert.equal(f.state.posts.length, 3);
+	assert.deepEqual(f.state.appends, ["chunk1 chunk2 chunk3"]);
+	const sent = (await Promise.all(f.state.posts.map(seconds))).reduce((a, b) => a + b, 0);
+	assert.ok(Math.abs(sent - framesFor(40) * 0.128) < 0.001, "every captured second was sent");
+});
+
+test("Esc while the last chunk is still being scored keeps the recording for Retry and aborts the scoring request", async () => {
+	const f = await fixture();
+	numbered(f);
+	const hold = deferred<Response>();
+	f.state.vad = () => hold.promise;
+	await f.start();
+	await f.speak(framesFor(2));
+	await act(async () => { f.dictation.stop(); });
+	assert.equal(f.dictation.transcribing, true, "waiting for the last scoring");
+	await act(async () => { f.dictation.cancel(); });
+	assert.equal(f.dictation.phase, "idle");
+	assert.equal(f.dictation.retryable, true, "Esc keeps what was recorded");
+	assert.equal(f.dictation.error, STOPPED_MESSAGE);
+	assert.equal(f.state.vadPosts[0]!.init.signal!.aborted, true, "the scoring request was aborted");
+	await act(async () => { hold.resolve(Response.json({ message: "late" }, { status: 503 })); });
+	assert.equal(f.state.posts.length, 0, "nothing is sent after the Esc");
+	await act(async () => { f.dictation.retry(); });
+	assert.deepEqual(f.state.appends, ["chunk1"], "Retry sends the kept audio");
+});
+
+// ---------------------------------------------------------------------------
+// The Local engine: the same session over /api/stt/local/transcribe.
+// ---------------------------------------------------------------------------
+
+const LOCAL = { provider: "local", language: "en", localModel: "whisper-small" } as const;
+/** Answer each Local request with "local<n>" in call order, reporting `language` from the first. */
+const localNumbered = (f: Awaited<ReturnType<typeof fixture>>, first: Record<string, unknown> = {}) => {
+	let n = 0;
+	f.state.localAnswer = () => Promise.resolve(Response.json({ text: `local${++n}`, ...(n === 1 ? first : {}) }));
+};
+
+test("Local with no model chosen refuses before the mic opens and says where to go", async () => {
+	const f = await fixture({ provider: "local", language: "en" });
+	await f.start();
+	assert.equal(f.dictation.error, LOCAL_DICTATION_NO_MODEL);
+	assert.equal(LOCAL_DICTATION_NO_MODEL, "Choose a local model in Settings → Dictation first.");
+	assert.equal(f.dictation.phase, "idle");
+	assert.equal(f.state.mics, 0, "the microphone was never opened");
+	assert.equal(f.state.modelInits.length, 0, "no request was needed to know");
+	assert.equal(f.state.tokenCalls, 0);
+	assert.equal(isDictationActive(), false);
+	assert.equal(f.dictation.retryable, false);
+});
+
+test("Local with a chosen model that is not installed refuses with the same line and releases the mic", async () => {
+	const f = await fixture({ ...LOCAL, localModel: "parakeet-tdt-0.6b-v3" });
+	await f.start();
+	assert.equal(f.dictation.error, LOCAL_DICTATION_NO_MODEL);
+	assert.equal(f.state.modelInits.length, 1, "the installed check ran once, beside the mic");
+	assert.deepEqual(f.state.modelInits[0]!.headers, { [GROQ_DICTATION_HEADER]: "1" });
+	assert.equal(f.dictation.phase, "idle");
+	assert.equal(f.state.stops, 1, "the mic is released");
+	assert.equal(f.state.localPosts.length, 0);
+	assert.equal(isDictationActive(), false);
+});
+
+test("Local on a machine whose engine cannot load says why instead of recording", async () => {
+	const f = await fixture(LOCAL);
+	f.state.models = () => Promise.resolve(Response.json(localModels({ engineAvailable: false, engineError: "The speech engine could not start on this computer." })));
+	await f.start();
+	assert.equal(f.dictation.error, "The speech engine could not start on this computer.");
+	assert.equal(f.dictation.phase, "idle");
+});
+
+test("the no-model line is clean on the next click: errored button, then a successful start once a model is chosen", async () => {
+	const f = await fixture({ provider: "local", language: "en" });
+	await f.start();
+	assert.equal(f.dictation.error, LOCAL_DICTATION_NO_MODEL);
+	f.state.record = { version: 1, dictation: LOCAL } as UserSettings;
+	await act(async () => { notifySettingsSaved("dictation"); });
+	await f.start();
+	assert.equal(f.dictation.error, null);
+	assert.equal(f.dictation.phase, "recording");
+});
+
+test("Local records without a socket, a Deepgram token or a Groq key, sends the take to the local route and inserts it once", async () => {
+	const f = await fixture(LOCAL);
+	localNumbered(f);
+	await f.start();
+	assert.equal(f.dictation.phase, "recording");
+	assert.equal(f.state.tokenCalls, 0);
+	assert.equal(f.state.readyInits.length, 0, "no Groq key check");
+	assert.equal(Socket.all.length, 0);
+	assert.equal(f.state.modelInits.length, 1, "the model is checked once, before the user has spoken");
+	await f.speak(4);
+	assert.equal(f.state.localPosts.length, 0, "nothing is sent while dictating a short take");
+	await act(async () => { f.dictation.stop(); });
+	assert.equal(f.state.posts.length, 0, "the Groq route is never called");
+	assert.equal(f.state.localPosts.length, 1);
+	const { init, form } = f.state.localPosts[0]!;
+	assert.deepEqual(init.headers, { [GROQ_DICTATION_HEADER]: "1" });
+	assert.equal(form.get("model"), "whisper-small");
+	assert.equal(form.get("language"), "auto");
+	assert.equal(form.get("chineseOutput"), "simplified");
+	assert.deepEqual(JSON.parse(form.get("preferredLanguages") as string), ["en"]);
+	const audio = form.get("audio") as File;
+	assert.equal(audio.type, "audio/wav");
+	assert.equal(audio.size, 44 + 4 * 4096);
+	assert.deepEqual(f.state.appends, ["local1"]);
+	assert.equal(f.dictation.phase, "idle");
+	assert.equal(f.dictation.error, null);
+	assert.equal(f.dictation.notice, null);
+	assert.equal(f.state.tokenCalls, 0, "ending a Local run does not warm a Deepgram token");
+});
+
+test("Local passes the take's language setting, the preferred languages and the Chinese output", async () => {
+	const f = await fixture({ ...LOCAL, localLanguage: "zh", localPreferredLanguages: ["zh", "en"], localChineseOutput: "traditional" });
+	localNumbered(f);
+	await f.start();
+	await f.speak(4);
+	await act(async () => { f.dictation.stop(); });
+	const { form } = f.state.localPosts[0]!;
+	assert.equal(form.get("language"), "zh");
+	assert.deepEqual(JSON.parse(form.get("preferredLanguages") as string), ["zh", "en"]);
+	assert.equal(form.get("chineseOutput"), "traditional");
+});
+
+test("Local pins the language the first chunk reports for the rest of the take", async () => {
+	const f = await fixture(LOCAL);
+	localNumbered(f, { language: "de" });
+	await f.start();
+	await f.speak(framesFor(40));
+	await act(async () => { f.dictation.stop(); });
+	assert.deepEqual(f.state.localPosts.map((p) => p.form.get("language")), ["auto", "de", "de"]);
+	assert.deepEqual(f.state.appends, ["local1 local2 local3"]);
+});
+
+test("a fixed Local language is sent unchanged for every chunk, whatever the answers say", async () => {
+	const f = await fixture({ ...LOCAL, localLanguage: "fr" });
+	let n = 0;
+	f.state.localAnswer = () => Promise.resolve(Response.json({ text: `local${++n}`, language: "de" }));
+	await f.start();
+	await f.speak(framesFor(40));
+	await act(async () => { f.dictation.stop(); });
+	assert.deepEqual(f.state.localPosts.map((p) => p.form.get("language")), ["fr", "fr", "fr"]);
+});
+
+test("a warning from the engine shows once the take is inserted, is announced, and clears on the next recording", async () => {
+	const f = await fixture({ provider: "local", language: "en", localModel: "whisper-small" }, { standalone: <Composing draft={() => ""} changes={[]} sent={[]} /> });
+	const WARNING = "The language detector isn't downloaded. Transcribed as English. Download it in Settings → Dictation to use Auto detect.";
+	localNumbered(f, { language: "en", warning: WARNING });
+	await act(async () => { f.host.querySelector<HTMLButtonElement>('[data-testid="dictation-toggle"]')!.click(); });
+	await f.speak(4);
+	await act(async () => { f.host.querySelector<HTMLButtonElement>('[data-testid="dictation-toggle"]')!.click(); });
+	assert.match(f.host.textContent!, new RegExp(WARNING.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")), "the idle button says it");
+	assert.equal(f.host.querySelector('[data-testid="dictation-toggle"]')!.getAttribute("aria-label"), "Start dictation", "it is a note, not a failure");
+	assert.equal(f.host.querySelector('[data-testid="dictation-status"]')!.textContent, WARNING, "screen readers hear it politely");
+	assert.equal(f.host.querySelector('[data-testid="dictation-alert"]')!.textContent, "", "it is not an alert");
+	await act(async () => { f.host.querySelector<HTMLButtonElement>('[data-testid="dictation-toggle"]')!.click(); });
+	assert.doesNotMatch(f.host.textContent!, /detector isn't downloaded/, "gone once the next recording starts");
+});
+
+test("a warning is shown once per take even when several chunks carry one", async () => {
+	const f = await fixture(LOCAL);
+	let n = 0;
+	f.state.localAnswer = () => Promise.resolve(Response.json({ text: `local${++n}`, language: "en", warning: `note ${n}` }));
+	await f.start();
+	await f.speak(framesFor(40));
+	await act(async () => { f.dictation.stop(); });
+	assert.equal(f.dictation.notice, "note 1");
+});
+
+test("a failed Local chunk keeps the recording; Retry re-sends only it, keeps the pinned language and inserts everything in order", async () => {
+	const f = await fixture(LOCAL);
+	const replies = [
+		Promise.resolve(Response.json({ text: "one", language: "es" })),
+		refused("The speech model could not decode this audio."),
+		Promise.resolve(Response.json({ text: "three" })),
+	];
+	f.state.localAnswer = () => replies.shift() ?? Promise.reject(new Error("unexpected request"));
+	await f.start();
+	await f.speak(framesFor(40));
+	await act(async () => { f.dictation.stop(); });
+	assert.equal(f.state.localPosts.length, 3);
+	assert.equal(f.dictation.error, "The speech model could not decode this audio.");
+	assert.equal(f.dictation.retryable, true);
+	assert.deepEqual(f.state.appends, []);
+	assert.equal(isDictationRetained(), true);
+	let finished: boolean | undefined;
+	await act(async () => { void f.dictation.finish().then((ok) => { finished = ok; }); });
+	assert.equal(finished, false, "a submit path keeps its draft");
+
+	const failedAudio = await audioBytes(f.state.localPosts[1]!);
+	f.state.localAnswer = () => Promise.resolve(Response.json({ text: "two" }));
+	await act(async () => { f.dictation.retry(); });
+	assert.equal(f.state.localPosts.length, 4, "exactly one more request");
+	assert.deepEqual(await audioBytes(f.state.localPosts[3]!), failedAudio);
+	assert.equal(f.state.localPosts[3]!.form.get("language"), "es", "the retry keeps the take's language");
+	assert.deepEqual(f.state.appends, ["one two three"]);
+	assert.equal(f.dictation.retryable, false);
+	assert.equal(isDictationRetained(), false);
+});
+
+test("a transient Local failure is retried with backoff and never shows an error", async () => {
+	const f = await fixture(LOCAL);
+	await f.start();
+	await f.speak();
+	let calls = 0;
+	f.state.localAnswer = () => Promise.resolve(++calls === 1
+		? Response.json({ message: "The speech model hit a snag.", retryable: true, code: "transcription_failed" }, { status: 500 })
+		: Response.json({ text: "second go" }));
+	mock.timers.enable({ apis: ["setTimeout"] });
+	try {
+		await act(async () => { f.dictation.stop(); });
+		await act(async () => { mock.timers.tick(1000); });
+	} finally {
+		mock.timers.reset();
+	}
+	assert.deepEqual(f.state.appends, ["second go"]);
+	assert.equal(f.dictation.error, null);
+});
+
+test("Local keeps no recording when the model says nothing was said, and inserts nothing", async () => {
+	const f = await fixture(LOCAL);
+	f.state.localAnswer = () => Promise.resolve(Response.json({ text: "" }));
+	await f.start();
+	await f.speak();
+	await act(async () => { f.dictation.stop(); });
+	assert.deepEqual(f.state.appends, []);
+	assert.equal(f.dictation.error, null);
+	assert.equal(f.dictation.retryable, false);
+});
+
+test("the recording cap applies to Local: it stops and transcribes what was captured", async () => {
+	const f = await fixture(LOCAL);
+	localNumbered(f);
+	await f.start();
+	await act(async () => {
+		const worklet = f.worklet();
+		worklet.audio(new Int16Array(GROQ_MAX_RECORDING_SECONDS * 16000).fill(1000)); // the whole allowance at once
+		worklet.audio(frame());
+	});
+	assert.equal(f.dictation.phase, "idle");
+	assert.equal(f.state.stops, 1, "the cap stopped the run");
+	assert.equal(f.state.localPosts.length, Math.ceil(GROQ_MAX_RECORDING_SECONDS / 18), "every 18 s window, nothing after the cap");
+	assert.equal(f.state.appends.length, 1);
+});
+
+test("Esc while Local is finishing keeps the audio for Retry, as for Groq", async () => {
+	const f = await fixture(LOCAL);
+	await f.start();
+	await f.speak();
+	const reply = deferred<Response>();
+	f.state.localAnswer = () => reply.promise;
+	await act(async () => { f.dictation.stop(); });
+	await act(async () => { f.dictation.cancel(); });
+	assert.equal(f.dictation.phase, "idle");
+	assert.equal(f.dictation.retryable, true);
+	assert.equal(f.dictation.error, STOPPED_MESSAGE);
+	await act(async () => { reply.resolve(Response.json({ text: "too late" })); });
+	assert.deepEqual(f.state.appends, []);
+	f.state.localAnswer = () => Promise.resolve(Response.json({ text: "after esc" }));
+	await act(async () => { f.dictation.retry(); });
+	assert.deepEqual(f.state.appends, ["after esc"]);
+});
+
+test("Local with a failing VAD still transcribes: the audio is kept and cut blind", async () => {
+	const f = await fixture(LOCAL);
+	localNumbered(f);
+	f.state.vad = () => Promise.reject(new TypeError("offline"));
+	await f.start();
+	await f.speak(framesFor(20));
+	assert.equal(f.state.localPosts.length, 1);
+	await act(async () => { f.dictation.stop(); });
+	assert.deepEqual(f.state.appends, ["local1 local2"]);
+	assert.equal(f.dictation.error, null);
+});
+
+test("the Local no-model line is shown whole in the bar and announced as an alert", () => {
+	const html = renderToStaticMarkup(<DictationBar dictation={barOf({ error: LOCAL_DICTATION_NO_MODEL })} />);
+	assert.match(html, /Choose a local model in Settings →/);
+	assert.equal(region(html, "alert"), LOCAL_DICTATION_NO_MODEL);
+});
+
+test("a note shows in the idle button without calling it a failure", () => {
+	const html = renderToStaticMarkup(<DictationBar dictation={barOf({ notice: "Transcribed as English." })} />);
+	assert.match(html, /<span class="min-w-0 whitespace-normal[^"]*">Transcribed as English\.<\/span>/);
+	assert.match(html, /aria-label="Start dictation"/);
+	assert.equal(region(html, "status"), "Transcribed as English.");
+	assert.equal(region(html, "alert"), "");
+	const recording = renderToStaticMarkup(<DictationBar dictation={barOf({ notice: "x", phase: "recording", active: true })} />);
+	assert.doesNotMatch(recording, />x</, "no note while a run is live");
 });

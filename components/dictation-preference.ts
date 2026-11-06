@@ -2,27 +2,42 @@
 
 import { useSyncExternalStore } from "react";
 import {
-	dictationSettingsBody, isDictationLanguage, resolveSettings, sanitizeUserSettings,
-	type DictationLanguage, type DictationProvider, type DictationSettings, type GroqWhisperModel, type UserSettings,
+	defaultLocalPreferredLanguages, dictationSettingsBody, isDictationLanguage, resolveSettings, sanitizeUserSettings,
+	type DictationLanguage, type DictationProvider, type DictationSettings, type GroqWhisperModel, type LocalChineseOutput,
+	type UserSettings,
 } from "@/src/core";
 import { notifySettingsSaved, onSettingsSaved } from "@/components/settings-signal";
 
 const INITIAL = {
 	language: undefined as DictationLanguage | undefined,
-	/** The engine and its Whisper model travel with the language: the settings
-	 * section is replaced whole, so every write must describe all three. */
+	/** The engine, its Whisper model and the Local engine's settings travel with
+	 * the language: the settings section is replaced whole, so every write must
+	 * describe all of them. */
 	provider: undefined as DictationProvider | undefined,
 	groqModel: undefined as GroqWhisperModel | undefined,
+	/** "" (NO_LOCAL_MODEL) until a model is chosen. */
+	localModel: undefined as string | undefined,
+	localPreferredLanguages: undefined as string[] | undefined,
+	/** "auto" or a language code. */
+	localLanguage: undefined as string | undefined,
+	localChineseOutput: undefined as LocalChineseOutput | undefined,
 	saving: false,
 	error: null as string | null,
 };
 
-export type DictationEnginePatch = { provider?: DictationProvider; groqModel?: GroqWhisperModel };
+export type DictationEnginePatch = {
+	provider?: DictationProvider;
+	groqModel?: GroqWhisperModel;
+	localModel?: string;
+	localPreferredLanguages?: string[];
+	localLanguage?: string;
+	localChineseOutput?: LocalChineseOutput;
+};
 
 /** One confirmed preference and one write in flight, shared by every surface.
  * The factory keeps transport tests isolated without a second persistence path.
- * Besides the language it carries the dictation engine (Deepgram or Groq) and
- * the Groq model; the language contract (load/save/getLanguage) is unchanged.
+ * Besides the language it carries the dictation engine (Deepgram, Groq or Local),
+ * the Groq model and the Local settings; the language contract (load/save/getLanguage) is unchanged.
  */
 export function createDictationLanguageStore(request: typeof fetch, saved: () => void = () => {}) {
 	let snapshot = INITIAL;
@@ -79,7 +94,19 @@ export function createDictationLanguageStore(request: typeof fetch, saved: () =>
 	function write(patch: DictationEnginePatch & { language?: DictationLanguage }, failure: string): Promise<boolean> {
 		// A different selection must never inherit the previous write's success.
 		if (writing || snapshot.language === undefined) return Promise.resolve(false);
-		const next = { language: snapshot.language, provider: snapshot.provider, groqModel: snapshot.groqModel, ...patch };
+		// The resolved preferred languages equal the dictation language's default when the
+		// record leaves them unset, and unset means "follow the dictation language": send
+		// them as unset again, or a language change would freeze the old language's default.
+		const languages = snapshot.localPreferredLanguages;
+		const defaults = defaultLocalPreferredLanguages(snapshot.language);
+		const followsLanguage = languages !== undefined && languages.length === defaults.length
+			&& languages.every((code, i) => code === defaults[i]);
+		const next = {
+			language: snapshot.language, provider: snapshot.provider, groqModel: snapshot.groqModel,
+			localModel: snapshot.localModel, localPreferredLanguages: followsLanguage ? undefined : languages,
+			localLanguage: snapshot.localLanguage, localChineseOutput: snapshot.localChineseOutput,
+			...patch,
+		};
 		revision++;
 		reading = null;
 		writing = Promise.resolve().then(async () => {
@@ -123,8 +150,8 @@ export function createDictationLanguageStore(request: typeof fetch, saved: () =>
 
 	/** What a run needs, read from one settled snapshot (never half old, half new). */
 	async function getPreference() {
-		const { language, provider, groqModel } = await settled();
-		return { language, provider, groqModel };
+		const { language, provider, groqModel, localModel, localPreferredLanguages, localLanguage, localChineseOutput } = await settled();
+		return { language, provider, groqModel, localModel, localPreferredLanguages, localLanguage, localChineseOutput };
 	}
 
 	return {

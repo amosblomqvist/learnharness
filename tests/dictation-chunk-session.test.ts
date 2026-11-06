@@ -1,16 +1,19 @@
 /**
- * One chunked Groq dictation run: ordering, the background pump, prompts,
- * retries with backoff, Retry sending only what failed, and cancelling.
- * fetch and the clock are fakes; no network, no key.
+ * One chunked dictation run, over the Groq transport: ordering, the background
+ * pump, prompts, retries with backoff, Retry sending only what failed, cancelling,
+ * and what the run does when voice activity detection fails. fetch, the clock and
+ * Silero are fakes; no network, no key. The Local transport runs through the same
+ * session in dictation-local.test.ts.
  */
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
-	createChunkSession, PROMPT_TAIL_CHARS, promptTail, STOPPED_MESSAGE,
-	type ChunkSession,
-} from "../components/dictation-groq-chunks.ts";
-import { GROQ_DICTATION_KEYLESS } from "../components/dictation-groq.ts";
+	createChunkSession, STOPPED_MESSAGE, TranscribeRequestError,
+	type ChunkSession, type ChunkTransport,
+} from "../components/dictation-chunk-session.ts";
+import { GROQ_DICTATION_KEYLESS, groqTransport, PROMPT_TAIL_CHARS, promptTail } from "../components/dictation-groq.ts";
 import { GROQ_DICTATION_HEADER } from "../src/core/dictation.ts";
+import { energyVad } from "./helpers/dictation-vad.ts";
 
 const RATE = 16000;
 const loud = (seconds: number) => {
@@ -35,7 +38,7 @@ const failure = (status: number, message: string, retryable: boolean, headers?: 
 	Response.json({ message, retryable }, { status, headers });
 
 /** A fake fetch answering from a script, one entry per call, in call order. */
-function harness(script: Reply[], options: { holdSleep?: boolean } = {}) {
+function harness(script: Reply[], options: { holdSleep?: boolean; vad?: (pcm: Int16Array, signal: AbortSignal) => Promise<readonly number[]> } = {}) {
 	const calls: Call[] = [];
 	const sleeps: number[] = [];
 	const queue = [...script];
@@ -50,7 +53,9 @@ function harness(script: Reply[], options: { holdSleep?: boolean } = {}) {
 		return typeof next === "function" ? next(call) : next;
 	}) as unknown as typeof fetch;
 	const session = createChunkSession({
-		request, model: "whisper-large-v3-turbo", language: "en", sampleRate: RATE,
+		transport: groqTransport(request, { model: "whisper-large-v3-turbo", language: "en" }),
+		vad: options.vad ?? energyVad,
+		sampleRate: RATE,
 		sleep: (ms, signal) => new Promise<void>((resolve, reject) => {
 			sleeps.push(ms);
 			if (signal.aborted) return reject(signal.reason);
@@ -73,7 +78,7 @@ describe("while recording", () => {
 		assert.deepEqual(session.chunks.map((c) => c.status), ["done"]);
 		session.push(SPEECH.slice(18 * RATE));
 		await tick();
-		assert.equal(calls.length, 2, "and the second at ~33 s");
+		assert.equal(calls.length, 2, "and the second as soon as 18 s more were buffered");
 		assert.equal(session.chunks.at(-1)!.text, "two");
 		const result = await session.stop();
 		assert.equal(calls.length, 3, "stop sends the last, partial chunk");
@@ -404,6 +409,115 @@ describe("cancel", () => {
 		assert.deepEqual(await retried, { status: "done", text: "one two three" });
 		assert.equal((await waiting).status, "done", "the original stop settles with the final outcome too");
 		assert.equal(calls.length, 4, "the finished chunk was not sent again");
+	});
+});
+
+describe("when voice activity detection fails", () => {
+	const unavailable = async () => { throw new Error("Voice activity detection failed (503)"); };
+
+	it("loses no audio: every chunk is cut at the maximum and sent, silence included", async () => {
+		const { session, calls } = harness([ok("a"), ok("b"), ok("c")], { vad: unavailable });
+		const audio = join(loud(16), quiet(0.5), loud(1), quiet(22.5));
+		session.push(audio);
+		assert.deepEqual(await session.stop(), { status: "done", text: "a b c" });
+		assert.deepEqual(session.chunks.map((chunk) => chunk.seconds), [18, 18, 4]);
+		const sent = calls.reduce((total, call) => total + call.bytes - 44, 0);
+		assert.equal(sent, audio.length * 2, "every sample was sent, even the silent tail");
+	});
+
+	it("asks again for the next chunk and uses the answer when the server is back", async () => {
+		let asked = 0;
+		const { session, calls } = harness([ok("a"), ok("b"), ok("c")], {
+			vad: (pcm, signal) => (asked++ === 0 ? unavailable() : energyVad(pcm)),
+		});
+		session.push(join(loud(30), quiet(10)));
+		await session.stop();
+		assert.equal(asked >= 3, true, "each chunk asked");
+		assert.equal(calls.length, 2, "the silent last chunk was judged silent this time");
+	});
+
+	it("scores with the run's signal, so cancel() aborts a request that is out", async () => {
+		let signal: AbortSignal | undefined;
+		const { session } = harness([ok("a")], {
+			vad: (_pcm, given) => { signal = given; return new Promise<number[]>((_resolve, reject) => given.addEventListener("abort", () => reject(given.reason), { once: true })); },
+		});
+		session.push(loud(20));
+		await tick();
+		assert.equal(signal?.aborted, false);
+		session.cancel();
+		assert.equal(signal?.aborted, true);
+		await tick();
+		assert.equal(session.chunks.length, 1, "the audio that was being scored is kept, as a chunk to retry");
+		assert.deepEqual(session.chunks.map((chunk) => chunk.status), ["failed"]);
+		assert.equal(session.chunks[0]!.error, STOPPED_MESSAGE);
+	});
+
+	it("Esc during the last scoring keeps the recording: the audio still counts as unsent", async () => {
+		let release!: (probs: number[]) => void;
+		const { session, calls } = harness([ok("late")], { vad: () => new Promise<number[]>((resolve) => { release = resolve; }) });
+		session.push(loud(5));
+		const waiting = session.stop();
+		await tick();
+		session.cancel();
+		assert.equal(session.unsent, 1, "the chunk is not made yet, but it is not lost");
+		release(await energyVad(loud(5)));
+		assert.deepEqual(await waiting, { status: "failed", error: STOPPED_MESSAGE });
+		assert.equal(calls.length, 0, "nothing is sent after the cancel");
+		assert.deepEqual(await session.retry(), { status: "done", text: "late" });
+	});
+});
+
+describe("a transport's warning", () => {
+	/** A transport that answers from a script and records the language-free request. */
+	function scripted(answers: { text: string; warning?: string }[]): ChunkTransport & { seen: number } {
+		const queue = [...answers];
+		const transport = {
+			seen: 0,
+			failure: "Scripted transcription failed",
+			join: (texts: readonly string[]) => texts.join("|"),
+			async transcribe() { transport.seen++; return queue.shift()!; },
+		};
+		return transport;
+	}
+
+	it("is kept once, from the first chunk that has one, and the transport joins the texts", async () => {
+		const transport = scripted([{ text: "one" }, { text: "two", warning: "first note" }, { text: "three", warning: "second note" }]);
+		const session = createChunkSession({ transport, vad: energyVad, sampleRate: RATE });
+		assert.equal(session.warning, null);
+		session.push(SPEECH);
+		assert.deepEqual(await session.stop(), { status: "done", text: "one|two|three" });
+		assert.equal(session.warning, "first note");
+	});
+
+	it("an error that is not a TranscribeRequestError fails the chunk with the transport's own line, without a retry", async () => {
+		let calls = 0;
+		const transport: ChunkTransport = {
+			failure: "Scripted transcription failed", join: (texts) => texts.join(" "),
+			async transcribe() { calls++; throw new Error(""); },
+		};
+		const session = createChunkSession({ transport, vad: energyVad, sampleRate: RATE });
+		session.push(loud(5));
+		assert.deepEqual(await session.stop(), { status: "failed", error: "Scripted transcription failed" });
+		assert.equal(calls, 1);
+	});
+
+	it("a retryable TranscribeRequestError is repeated with the session's backoff", async () => {
+		let calls = 0;
+		const sleeps: number[] = [];
+		const transport: ChunkTransport = {
+			failure: "x", join: (texts) => texts.join(" "),
+			async transcribe() {
+				if (++calls === 1) throw new TranscribeRequestError("busy", true);
+				return { text: "ok" };
+			},
+		};
+		const session = createChunkSession({
+			transport, vad: energyVad, sampleRate: RATE,
+			sleep: async (ms) => { sleeps.push(ms); },
+		});
+		session.push(loud(5));
+		assert.deepEqual(await session.stop(), { status: "done", text: "ok" });
+		assert.deepEqual(sleeps, [1000]);
 	});
 });
 

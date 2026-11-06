@@ -1,18 +1,21 @@
-import { createChunker, encodePcm16Wav, type DictationLanguage, type GroqWhisperModel, type PcmChunk } from "@/src/core";
-import { GroqRequestError, transcribeGroq } from "@/components/dictation-groq";
+import { createChunker, encodePcm16Wav, type PcmChunk } from "@/src/core";
 
 /**
- * One Groq dictation run, from the first captured frame to the finished
- * transcript. Audio is cut into chunks while the user is still talking
- * (src/core/dictation-chunks.ts), each chunk is sent to /api/stt/transcribe in
- * the background, and its text waits at its place in the order. stop() sends the
- * last chunk and resolves with the whole transcript.
+ * One chunked dictation run (Groq or Local), from the first captured frame to the
+ * finished transcript. Audio is cut into chunks while the user is still talking
+ * (src/core/dictation-chunks.ts, which asks `vad` where the pauses are), each
+ * chunk is sent through the engine's transport in the background, and its text
+ * waits at its place in the order. stop() sends the last chunk and resolves with
+ * the whole transcript. What differs per engine is only the transport: how one
+ * chunk's WAV becomes text (dictation-groq.ts, dictation-local.ts).
  *
  * Chunks go ONE AT A TIME, in order: a chunk takes a second or two and the next
  * is ready 15 s later, so one request in flight keeps up. Each carries the end of
- * the previous transcript as Whisper's `prompt`, so a sentence across a boundary
- * keeps its spelling and punctuation (parallel requests cannot do that), and a
- * rate limit is met with one request, not a burst.
+ * the previous transcript to the transport (Groq sends it as Whisper's `prompt`,
+ * so a sentence across a boundary keeps its spelling and punctuation; parallel
+ * requests cannot do that), and a rate limit is met with one request, not a burst.
+ * Local's server decodes one chunk at a time anyway, and its language is pinned
+ * from the first answer, which needs that answer before the next chunk goes.
  *
  * The audio of EVERY chunk is kept until the caller drops the run (transcript
  * inserted, dismissal, a new recording). A chunk that still fails after its
@@ -28,10 +31,6 @@ const BACKOFF_MS = 1000;
 /** A Retry-After longer than this is not waited out: the chunk fails at once, its
  * message says how long to wait, and Retry picks it up later. */
 const MAX_RETRY_WAIT_MS = 20_000;
-export const PROMPT_TAIL_CHARS = 100;
-/** Chunks shorter than this get no prompt: Whisper tends to echo a prompt back
- * when there is almost no audio to transcribe. */
-const PROMPT_MIN_SECONDS = 2;
 /** What a chunk interrupted by cancel() reports. */
 export const STOPPED_MESSAGE = "Transcription stopped before it finished. Retry to finish it.";
 
@@ -40,6 +39,41 @@ export type SessionResult =
 	| { status: "failed"; error: string };
 
 export type ChunkStatus = "queued" | "sending" | "done" | "failed";
+
+/** A failed chunk request: `message` is fit to show the user, `retryable` says
+ * whether sending the same chunk again may work, `retryAfterMs` is the wait the
+ * server asked for. Each engine's transport throws its own subclass. */
+export class TranscribeRequestError extends Error {
+	constructor(message: string, readonly retryable: boolean, readonly retryAfterMs?: number) {
+		super(message);
+		this.name = "TranscribeRequestError";
+	}
+}
+
+export type ChunkRequest = {
+	wav: Uint8Array<ArrayBuffer>;
+	seconds: number;
+	/** The transcript of the chunk before this one, when that chunk is done and has text. */
+	previousText: string | undefined;
+	signal: AbortSignal;
+};
+
+export type ChunkTranscript = {
+	text: string;
+	/** A limitation of this take worth showing once (Local's missing language detector). */
+	warning?: string;
+};
+
+/** One engine's way from a chunk's audio to its text. */
+export type ChunkTransport = {
+	/** Rejects with a TranscribeRequestError whose message is fit to show the user; a
+	 * request aborted through `signal` may reject any way, the session checks the signal first. */
+	transcribe(chunk: ChunkRequest): Promise<ChunkTranscript>;
+	/** What a failure with no message of its own says, e.g. "Groq transcription failed". */
+	failure: string;
+	/** The whole transcript from the finished chunks' texts, in order, none of them empty. */
+	join(texts: readonly string[]): string;
+};
 
 type ChunkState = {
 	seconds: number;
@@ -69,14 +103,16 @@ export type ChunkSession = {
 	cancel(): void;
 	/** Chunks that still have no transcript: queued, in flight or failed. */
 	readonly unsent: number;
+	/** The first warning a transport reported for this take (shown once), or null. */
+	readonly warning: string | null;
 	/** The chunks' states in order, for tests and diagnostics. */
 	readonly chunks: readonly Readonly<{ seconds: number; status: ChunkStatus; text: string; error: string | null }>[];
 };
 
 export type ChunkSessionOptions = {
-	request: typeof fetch;
-	model: GroqWhisperModel;
-	language: DictationLanguage;
+	transport: ChunkTransport;
+	/** Silero's probabilities for a clip, which is how the chunker finds pauses and silence. */
+	vad: (pcm: Int16Array, signal: AbortSignal) => Promise<readonly number[]>;
 	sampleRate: number;
 	/** Wait for `ms`; rejects when `signal` aborts. Replaceable so tests need no real time. */
 	sleep?: (ms: number, signal: AbortSignal) => Promise<void>;
@@ -89,19 +125,9 @@ const realSleep = (ms: number, signal: AbortSignal) => new Promise<void>((resolv
 	signal.addEventListener("abort", onAbort, { once: true });
 });
 
-/** The last PROMPT_TAIL_CHARS characters of `text`, starting at a word. */
-export function promptTail(text: string): string {
-	const chars = [...text.trim()];
-	if (chars.length <= PROMPT_TAIL_CHARS) return chars.join("");
-	const tail = chars.slice(-PROMPT_TAIL_CHARS).join("");
-	// The cut usually lands inside a word: drop its fragment.
-	return /\s/.test(chars[chars.length - PROMPT_TAIL_CHARS - 1]!) ? tail : tail.replace(/^\S*\s+/, "");
-}
-
 export function createChunkSession(options: ChunkSessionOptions): ChunkSession {
-	const { request, model, language, sampleRate } = options;
+	const { transport, sampleRate } = options;
 	const sleep = options.sleep ?? realSleep;
-	const chunker = createChunker(sampleRate);
 	const chunks: ChunkState[] = [];
 	/** Aborted by cancel(); replaced when retry() starts afresh. */
 	let controller = new AbortController();
@@ -109,6 +135,9 @@ export function createChunkSession(options: ChunkSessionOptions): ChunkSession {
 	let running = false;
 	let stopped: Promise<SessionResult> | null = null;
 	let idleWaiters: (() => void)[] = [];
+	let warning: string | null = null;
+	/** stop() is waiting for the chunker's last cut: audio that is not a chunk yet. */
+	let finishing: Promise<PcmChunk | null> | null = null;
 
 	const enqueue = (chunk: PcmChunk) => {
 		chunks.push({
@@ -122,13 +151,12 @@ export function createChunkSession(options: ChunkSessionOptions): ChunkSession {
 	};
 
 	/** The text to continue from: the previous chunk's transcript, if that chunk is done. */
-	const promptFor = (at: number): string | undefined => {
-		if (chunks[at]!.seconds < PROMPT_MIN_SECONDS) return undefined;
+	const previousTextFor = (at: number): string | undefined => {
 		const previous = chunks[at - 1];
-		return previous?.status === "done" && previous.text ? promptTail(previous.text) : undefined;
+		return previous?.status === "done" && previous.text ? previous.text : undefined;
 	};
 
-	const waitFor = (error: GroqRequestError, attempt: number): number | undefined => {
+	const waitFor = (error: TranscribeRequestError, attempt: number): number | undefined => {
 		if (attempt >= MAX_ATTEMPTS || !error.retryable) return undefined;
 		if (error.retryAfterMs !== undefined) return error.retryAfterMs <= MAX_RETRY_WAIT_MS ? error.retryAfterMs : undefined;
 		return BACKOFF_MS * 2 ** (attempt - 1);
@@ -140,14 +168,16 @@ export function createChunkSession(options: ChunkSessionOptions): ChunkSession {
 		const run = ++chunk.run;
 		const fail = (message: string) => { if (chunk.run === run) { chunk.status = "failed"; chunk.error = message; } };
 		chunk.status = "sending";
+		// A chunk cut after cancel() (its scoring was in flight) is kept, not sent.
+		if (signal.aborted) return fail(STOPPED_MESSAGE);
 		for (let attempt = 1; ; attempt++) {
 			try {
-				const text = await transcribeGroq(request, { wav: chunk.wav, model, language, prompt: promptFor(at), signal });
-				if (chunk.run === run) { chunk.text = text; chunk.status = "done"; chunk.error = null; }
+				const { text, warning: notice } = await transport.transcribe({ wav: chunk.wav, seconds: chunk.seconds, previousText: previousTextFor(at), signal });
+				if (chunk.run === run) { chunk.text = text; chunk.status = "done"; chunk.error = null; warning ??= notice || null; }
 				return;
 			} catch (err) {
 				if (signal.aborted) return fail(STOPPED_MESSAGE);
-				const error = err instanceof GroqRequestError ? err : new GroqRequestError(err instanceof Error ? err.message : "Groq transcription failed", false);
+				const error = err instanceof TranscribeRequestError ? err : new TranscribeRequestError(err instanceof Error && err.message ? err.message : transport.failure, false);
 				const wait = waitFor(error, attempt);
 				if (wait === undefined) return fail(error.message);
 				try { await sleep(wait, signal); } catch { return fail(STOPPED_MESSAGE); }
@@ -184,22 +214,31 @@ export function createChunkSession(options: ChunkSessionOptions): ChunkSession {
 		// Anything not transcribed counts as failed, so a chunk can never be
 		// dropped from the transcript without the user knowing.
 		const failed = chunks.find((chunk) => chunk.status !== "done");
-		if (failed) return { status: "failed", error: failed.error ?? "Groq transcription failed" };
-		const text = chunks.filter((chunk) => chunk.text).map((chunk) => chunk.text).join(" ");
-		return { status: "done", text };
+		if (failed) return { status: "failed", error: failed.error ?? transport.failure };
+		return { status: "done", text: transport.join(chunks.filter((chunk) => chunk.text).map((chunk) => chunk.text)) };
 	};
+
+	// A scoring request dies with the run, so cancel() cannot leave one behind. A failed
+	// one is the chunker's to absorb: it keeps the audio.
+	const chunker = createChunker({
+		sampleRate,
+		score: (pcm) => options.vad(pcm, controller.signal),
+		onChunk(chunk) { enqueue(chunk); kick(); },
+	});
 
 	return {
 		push(audio) {
 			if (closed) return;
-			for (const chunk of chunker.push(audio)) enqueue(chunk);
-			kick();
+			chunker.push(audio);
 		},
 		get seconds() { return chunker.samples / sampleRate; },
 		stop() {
 			stopped ??= (async () => {
 				closed = true;
-				const last = chunker.finish();
+				// Waits for a cut in progress, so the last chunk follows the ones before it.
+				finishing = chunker.finish();
+				const last = await finishing;
+				finishing = null;
 				if (last) enqueue(last);
 				kick();
 				await idle();
@@ -209,6 +248,8 @@ export function createChunkSession(options: ChunkSessionOptions): ChunkSession {
 		},
 		async retry() {
 			closed = true;
+			// An Esc during the last scoring leaves that chunk still to arrive.
+			if (finishing) await finishing;
 			if (controller.signal.aborted) controller = new AbortController();
 			for (const chunk of chunks) {
 				// Bumping `run` retires any attempt of a cancelled run still unwinding.
@@ -225,7 +266,9 @@ export function createChunkSession(options: ChunkSessionOptions): ChunkSession {
 				if (chunk.status === "queued" || chunk.status === "sending") { chunk.status = "failed"; chunk.error = STOPPED_MESSAGE; chunk.run++; }
 			}
 		},
-		get unsent() { return chunks.filter((chunk) => chunk.status !== "done").length; },
+		// The audio still being scored counts: Esc then must keep the recording, not drop it.
+		get unsent() { return chunks.filter((chunk) => chunk.status !== "done").length + (finishing ? 1 : 0); },
+		get warning() { return warning; },
 		get chunks() { return chunks; },
 	};
 }
