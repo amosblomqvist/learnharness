@@ -43,10 +43,10 @@ it("errors/notices keep selection order across appends even when requests settle
 it("unsupported-only directories are never sent; picker .DS_Store is ignored and eligible siblings proceed", async () => {
 	const paths: string[] = [];
 	const queue = createNotesImportQueue(async ([f]) => { const path = f!.webkitRelativePath || f!.name; paths.push(path); return [success(path)]; });
-	queue.append([file(".DS_Store", "Root/.DS_Store"), file("a.png", "Root/Images/a.png"), file("notes.md", "Root/Sub/notes.md"), file("bad.txt", "../bad.txt")]);
+	queue.append([file(".DS_Store", "Root/.DS_Store"), file("a.png", "Root/Images/a.png"), file("notes.md", "Root/Sub/notes.md"), file("bad.pptx", "../bad.pptx")]);
 	await tick();
 	assert.deepEqual(paths, ["Root/Sub/notes.md"]);
-	assert.deepEqual(queue.getSnapshot().errors, ["Root/Images/a.png: Unsupported format or unsafe relative path.", "../bad.txt: Unsupported format or unsafe relative path."]);
+	assert.deepEqual(queue.getSnapshot().errors, ["Root/Images/a.png: This file type isn't supported. Use text, Markdown, or PDF.", "../bad.pptx: Unsafe relative path."]);
 });
 
 it("folder picks skip dot-directories such as .obsidian/ silently, even when the chosen root itself is hidden", async () => {
@@ -81,7 +81,14 @@ it("individual file picks still import hidden notes and report unsupported dotfi
 	queue.append([file(".draft.md"), file(".summary.txt"), file(".DS_Store")]);
 	await tick();
 	assert.deepEqual(paths, [".draft.md", ".summary.txt"]);
-	assert.deepEqual(queue.getSnapshot().errors, [".DS_Store: Unsupported format or unsafe relative path."]);
+	assert.deepEqual(queue.getSnapshot().errors, [".DS_Store: This file type isn't supported. Use text, Markdown, or PDF."]);
+});
+
+it("the file type check comes before the size check", () => {
+	const queue = createNotesImportQueue(async ([f]) => [success(f!.name)]);
+	const huge = file("huge.docx"); Object.defineProperty(huge, "size", { value: Number.MAX_SAFE_INTEGER });
+	queue.append([huge]);
+	assert.deepEqual(queue.getSnapshot().errors, ["huge.docx: This file type isn't supported. Use text, Markdown, or PDF."]);
 });
 
 it("an all-skipped selection publishes completion without validation errors or uploads and allows later work", async () => {
