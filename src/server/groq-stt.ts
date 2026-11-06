@@ -26,6 +26,7 @@ import {
 } from "../core/dictation.ts";
 import { looksLikeWav, WAV_HEADER_BYTES } from "../core/wav.ts";
 import { keyValue } from "./keys.ts";
+import { BodyTooLargeError, readUploadForm } from "./stt-upload.ts";
 import { sameOriginIntent } from "./web-subscription-http.ts";
 
 const GROQ_TRANSCRIPTIONS_URL = "https://api.groq.com/openai/v1/audio/transcriptions";
@@ -40,36 +41,6 @@ function fail(status: number, message: string, options: { retryable?: boolean; h
 
 const forbidden = () => fail(403, "Dictation requests must come from the LearnHarness window.");
 const keyless = () => fail(503, `No ${GROQ_KEY_ID} — add it to auth.json (desktop) or .env.local (dev).`);
-
-class BodyTooLargeError extends Error {}
-
-/** Bound actual body bytes (Content-Length can be absent or wrong) before
- * multipart parsing, as the notes import does. */
-async function readForm(request: Request): Promise<FormData> {
-	if (Number(request.headers.get("content-length")) > GROQ_MAX_BODY_BYTES) {
-		void request.body?.cancel().catch(() => undefined);
-		throw new BodyTooLargeError();
-	}
-	const reader = request.body?.getReader();
-	if (!reader) throw new SyntaxError("Missing body");
-	const chunks: Uint8Array[] = [];
-	let bytes = 0;
-	try {
-		for (;;) {
-			const { done, value } = await reader.read();
-			if (done) break;
-			bytes += value.byteLength;
-			if (bytes > GROQ_MAX_BODY_BYTES) throw new BodyTooLargeError();
-			chunks.push(value);
-		}
-		return await new Response(new Blob(chunks as BlobPart[]), {
-			headers: { "Content-Type": request.headers.get("content-type") ?? "" },
-		}).formData();
-	} finally {
-		void reader.cancel().catch(() => undefined);
-		reader.releaseLock();
-	}
-}
 
 /** Groq's error body is OpenAI-shaped: { error: { message } }. It is shown to
  * the learner, so the key is scrubbed from it first (defence in depth). */
@@ -125,7 +96,7 @@ export async function groqTranscribeResponse(request: Request): Promise<Response
 
 	let form: FormData;
 	try {
-		form = await readForm(request);
+		form = await readUploadForm(request, GROQ_MAX_BODY_BYTES);
 	} catch (err) {
 		return err instanceof BodyTooLargeError ? fail(413, TOO_LARGE) : fail(400, "Could not read the upload.");
 	}
