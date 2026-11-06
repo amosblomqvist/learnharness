@@ -39,6 +39,10 @@ import {
 	DEFAULT_DICTATION_PROVIDER, DEFAULT_GROQ_WHISPER_MODEL, isDictationLanguage, isDictationProvider, isGroqWhisperModel,
 	type DictationLanguage, type DictationProvider, type GroqWhisperModel,
 } from "./dictation.ts";
+import { isCatalogLanguage, isCatalogModelId } from "./local-stt-catalog.ts";
+import { DEFAULT_LOCAL_CHINESE_OUTPUT, isLocalChineseOutput, type LocalChineseOutput } from "./local-stt-chinese.ts";
+import { LOCAL_AUTO_LANGUAGE } from "./local-stt-language-policy.ts";
+import { NO_LOCAL_MODEL, normalizeLocalPreferredLanguages } from "./local-stt.ts";
 import { parseFileAccessSettings, type FileAccessSettings } from "./file-access.ts";
 
 /** The schema version this code understands. Bump ONLY for breaking shape
@@ -347,6 +351,14 @@ export interface DictationSettings {
 	provider?: DictationProvider;
 	/** Whisper model when provider is groq. Absent = whisper-large-v3-turbo. */
 	groqModel?: GroqWhisperModel;
+	/** Catalog id of the on-device model when provider is local. Absent = none chosen yet. */
+	localModel?: string;
+	/** Languages the learner speaks, as identities in their order. Absent = the dictation language. */
+	localPreferredLanguages?: string[];
+	/** "auto" (the default) or one language code the chosen model supports. */
+	localLanguage?: string;
+	/** Script for Chinese transcripts. Absent = simplified. */
+	localChineseOutput?: LocalChineseOutput;
 }
 
 /** Agent settings — everything about the non-conversation machinery. */
@@ -522,7 +534,15 @@ export interface FactorySettings {
 export const FACTORY_SETTINGS: FactorySettings = {
 	version: CURRENT_SETTINGS_VERSION,
 	general: { autoUpdate: true },
-	dictation: { language: "en", provider: DEFAULT_DICTATION_PROVIDER, groqModel: DEFAULT_GROQ_WHISPER_MODEL },
+	dictation: {
+		language: "en",
+		provider: DEFAULT_DICTATION_PROVIDER,
+		groqModel: DEFAULT_GROQ_WHISPER_MODEL,
+		localModel: NO_LOCAL_MODEL,
+		localPreferredLanguages: ["en"],
+		localLanguage: LOCAL_AUTO_LANGUAGE,
+		localChineseOutput: DEFAULT_LOCAL_CHINESE_OUTPUT,
+	},
 	appearance: {
 		mode: "dark",
 		background: null, // the dark default (#141414) lives in the mode's derivation curve
@@ -830,10 +850,15 @@ export function sanitizeUserSettings(raw: unknown): UserSettings | null {
 	if (r.dictation !== undefined) {
 		const raw = r.dictation;
 		const d = raw !== null && typeof raw === "object" && !Array.isArray(raw) ? raw as Record<string, unknown> : {};
+		const localPreferredLanguages = normalizeLocalPreferredLanguages(d.localPreferredLanguages);
 		out.dictation = {
 			...(isDictationLanguage(d.language) ? { language: d.language } : {}),
 			...(isDictationProvider(d.provider) ? { provider: d.provider } : {}),
 			...(isGroqWhisperModel(d.groqModel) ? { groqModel: d.groqModel } : {}),
+			...(isCatalogModelId(d.localModel) ? { localModel: d.localModel } : {}),
+			...(localPreferredLanguages ? { localPreferredLanguages } : {}),
+			...(d.localLanguage === LOCAL_AUTO_LANGUAGE || isCatalogLanguage(d.localLanguage) ? { localLanguage: d.localLanguage as string } : {}),
+			...(isLocalChineseOutput(d.localChineseOutput) ? { localChineseOutput: d.localChineseOutput } : {}),
 		};
 	}
 	if (r.claudeCode !== undefined) {

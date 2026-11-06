@@ -1,3 +1,7 @@
+import { DEFAULT_LOCAL_CHINESE_OUTPUT, type LocalChineseOutput } from "./local-stt-chinese.ts";
+import { LOCAL_AUTO_LANGUAGE } from "./local-stt-language-policy.ts";
+import { defaultLocalPreferredLanguages, NO_LOCAL_MODEL } from "./local-stt.ts";
+
 /** Nova-3 monolingual language codes, including documented locale aliases.
  * Source: https://developers.deepgram.com/docs/models-languages-overview
  * Multilingual is a separate mode; its supported language set differs.
@@ -90,8 +94,9 @@ export function deepgramListenUrl(language: DictationLanguage): string {
 }
 
 /** Dictation engines. Deepgram streams over a browser WebSocket and stays the
- * default; Groq sends chunks of the recording to Whisper through our server. */
-export const DICTATION_PROVIDERS = ["deepgram", "groq"] as const;
+ * default; Groq sends chunks of the recording to Whisper through our server; Local
+ * runs a downloaded model on this machine (see local-stt.ts). */
+export const DICTATION_PROVIDERS = ["deepgram", "groq", "local"] as const;
 export type DictationProvider = (typeof DICTATION_PROVIDERS)[number];
 export const DEFAULT_DICTATION_PROVIDER: DictationProvider = "deepgram";
 
@@ -161,16 +166,38 @@ export function whisperLanguage(language: DictationLanguage): string | undefined
 }
 
 /** The PUT body for the dictation section. The section is replaced whole, and
- * default provider/model are left out so a Deepgram user's record stays exactly
- * `{ language }` as before. */
+ * default provider/model and default Local settings are left out so a Deepgram
+ * user's record stays exactly `{ language }` as before. Callers pass every field
+ * they have: one they leave out is erased. */
 export function dictationSettingsBody(pref: {
 	language: DictationLanguage;
 	provider?: DictationProvider;
 	groqModel?: GroqWhisperModel;
-}): { language: DictationLanguage; provider?: DictationProvider; groqModel?: GroqWhisperModel } {
+	localModel?: string;
+	localPreferredLanguages?: readonly string[];
+	localLanguage?: string;
+	localChineseOutput?: LocalChineseOutput;
+}): {
+	language: DictationLanguage;
+	provider?: DictationProvider;
+	groqModel?: GroqWhisperModel;
+	localModel?: string;
+	localPreferredLanguages?: string[];
+	localLanguage?: string;
+	localChineseOutput?: LocalChineseOutput;
+} {
+	const defaultLanguages = defaultLocalPreferredLanguages(pref.language);
+	const languages = pref.localPreferredLanguages;
 	return {
 		language: pref.language,
 		...(pref.provider && pref.provider !== DEFAULT_DICTATION_PROVIDER ? { provider: pref.provider } : {}),
 		...(pref.groqModel && pref.groqModel !== DEFAULT_GROQ_WHISPER_MODEL ? { groqModel: pref.groqModel } : {}),
+		...(pref.localModel && pref.localModel !== NO_LOCAL_MODEL ? { localModel: pref.localModel } : {}),
+		// Unset follows the dictation language, so a list equal to that default is not stored.
+		...(languages && !(languages.length === defaultLanguages.length && languages.every((code, i) => code === defaultLanguages[i]))
+			? { localPreferredLanguages: [...languages] } : {}),
+		...(pref.localLanguage && pref.localLanguage !== LOCAL_AUTO_LANGUAGE ? { localLanguage: pref.localLanguage } : {}),
+		...(pref.localChineseOutput && pref.localChineseOutput !== DEFAULT_LOCAL_CHINESE_OUTPUT
+			? { localChineseOutput: pref.localChineseOutput } : {}),
 	};
 }

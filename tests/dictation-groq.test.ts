@@ -15,7 +15,7 @@ import { MAX_IMPORT_BODY_BYTES } from "../lib/notes-import-limits.ts";
 
 describe("Groq dictation provider and models", () => {
 	it("Deepgram stays the default engine; turbo is the default Whisper model", () => {
-		assert.deepEqual([...DICTATION_PROVIDERS], ["deepgram", "groq"]);
+		assert.deepEqual([...DICTATION_PROVIDERS], ["deepgram", "groq", "local"]);
 		assert.equal(DEFAULT_DICTATION_PROVIDER, "deepgram");
 		assert.equal(DEFAULT_GROQ_WHISPER_MODEL, "whisper-large-v3-turbo");
 		assert.deepEqual(GROQ_WHISPER_MODELS.map((m) => m.id), ["whisper-large-v3-turbo", "whisper-large-v3"]);
@@ -90,11 +90,13 @@ describe("dictation provider settings: sanitize, resolve, parse", () => {
 		}
 		assert.deepEqual(sanitizeUserSettings({ version: 1, dictation: { language: "pl" } })?.dictation, { language: "pl" });
 		assert.equal(resolveSettings({ version: 1, dictation: { language: "pl" } }).dictation.language, "pl");
+		// The Local fields resolve to their defaults and never leak into a Groq record.
+		const localDefaults = { localModel: "", localLanguage: "auto", localChineseOutput: "simplified" };
 		assert.deepEqual(resolveSettings({ version: 1, dictation: { provider: "groq" } }).dictation, {
-			language: "en", provider: "groq", groqModel: "whisper-large-v3-turbo",
+			language: "en", provider: "groq", groqModel: "whisper-large-v3-turbo", localPreferredLanguages: ["en"], ...localDefaults,
 		});
 		assert.deepEqual(resolveSettings({ version: 1, dictation: { language: "de", provider: "groq", groqModel: "whisper-large-v3" } }).dictation, {
-			language: "de", provider: "groq", groqModel: "whisper-large-v3",
+			language: "de", provider: "groq", groqModel: "whisper-large-v3", localPreferredLanguages: ["de"], ...localDefaults,
 		});
 	});
 

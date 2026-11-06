@@ -31,6 +31,10 @@ import { BACKGROUND_MODEL_ROLES, CACHE_RETENTIONS, COMPACTION_THRESHOLD_FLOOR, C
 import { WRITABLE_TOOL_KEYS } from "../core/pending.ts";
 import { isSearchEngineId, SEARCH_ENGINES } from "../core/search.ts";
 import { isDictationLanguage, isDictationProvider, isGroqWhisperModel } from "../core/dictation.ts";
+import { isCatalogLanguage, isCatalogModelId } from "../core/local-stt-catalog.ts";
+import { isLocalChineseOutput } from "../core/local-stt-chinese.ts";
+import { LOCAL_AUTO_LANGUAGE } from "../core/local-stt-language-policy.ts";
+import { normalizeLocalPreferredLanguages } from "../core/local-stt.ts";
 import { parseFileAccessSettings } from "../core/file-access.ts";
 
 /** Parsed-or-rejected — `ok: false` carries the 400's error message. */
@@ -408,7 +412,10 @@ export function parseCompactionSettingsBody(body: unknown): SettingsBodyResult<C
 }
 
 /** dictation: { language?: one of Nova-3's supported language codes,
- *  provider?: "deepgram" | "groq", groqModel?: a Groq Whisper model id } */
+ *  provider?: "deepgram" | "groq" | "local", groqModel?: a Groq Whisper model id,
+ *  localModel?: a local catalog model id, localPreferredLanguages?: a non-empty list of
+ *  languages some local model transcribes, localLanguage?: "auto" or one such language,
+ *  localChineseOutput?: "simplified" | "traditional" } */
 export function parseDictationSettingsBody(body: unknown): SettingsBodyResult<DictationSettings> {
 	const raw = asRecord(body);
 	if (!raw) return { ok: false, error: "Invalid JSON body" };
@@ -424,6 +431,30 @@ export function parseDictationSettingsBody(body: unknown): SettingsBodyResult<Di
 	if (raw.groqModel !== undefined) {
 		if (!isGroqWhisperModel(raw.groqModel)) return { ok: false, error: "Unsupported Groq dictation model" };
 		settings.groqModel = raw.groqModel;
+	}
+	if (raw.localModel !== undefined) {
+		if (!isCatalogModelId(raw.localModel)) return { ok: false, error: "Unsupported local dictation model" };
+		settings.localModel = raw.localModel;
+	}
+	if (raw.localPreferredLanguages !== undefined) {
+		// Strict like every body field: one unknown language refuses the list, it is not trimmed.
+		const given = raw.localPreferredLanguages;
+		if (!Array.isArray(given) || !given.every(isCatalogLanguage)) {
+			return { ok: false, error: "Unsupported local dictation languages" };
+		}
+		const languages = normalizeLocalPreferredLanguages(given);
+		if (!languages) return { ok: false, error: "Choose at least one local dictation language" };
+		settings.localPreferredLanguages = languages;
+	}
+	if (raw.localLanguage !== undefined) {
+		if (raw.localLanguage !== LOCAL_AUTO_LANGUAGE && !isCatalogLanguage(raw.localLanguage)) {
+			return { ok: false, error: "Unsupported local dictation language" };
+		}
+		settings.localLanguage = raw.localLanguage as string;
+	}
+	if (raw.localChineseOutput !== undefined) {
+		if (!isLocalChineseOutput(raw.localChineseOutput)) return { ok: false, error: "Unsupported Chinese output" };
+		settings.localChineseOutput = raw.localChineseOutput;
 	}
 	return { ok: true, settings };
 }
