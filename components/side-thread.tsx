@@ -2,7 +2,7 @@
 
 import { useContext, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { CornerDownLeft, GripVertical, MessageCircleQuestion, Mic, Pin, PinOff, Square, X } from "lucide-react";
+import { ArrowRight, CornerDownLeft, GripVertical, MessageCircleQuestion, Mic, Pin, PinOff, Square, X } from "lucide-react";
 import { actionForBinding, collectCitations, eventBinding, SIDE_QUOTE_MAX_CHARS, SIDE_QUESTION_MAX_CHARS, type TextSelector, type TutorCitation } from "@/src/core";
 import { rmsToMeter, type DictationPhase } from "./dictation";
 import { CitationActionsContext } from "./citation-chip";
@@ -10,7 +10,7 @@ import { MessageResponse } from "./ai-elements/message";
 import { BrailleSpinner } from "./braille-spinner";
 import { Button } from "./ui/button";
 import { Textarea } from "./ui/textarea";
-import { fitSideThreadFrame, placeSideThread, resizedHeight, type SideThreadPlacement, type SideThreadViewport } from "./side-thread-float";
+import { fitResizableSideThreadFrame, placeSideThread, resizeSideThread, type SideThreadFrame, type SideThreadResizeEdge, type SideThreadPlacement, type SideThreadViewport } from "./side-thread-float";
 import type { SelectionAction } from "./selection-toolbar";
 import type { SideThreadAnchor, SideThreadOpenArgs, SideThreadState } from "./use-side-thread";
 
@@ -47,6 +47,7 @@ export interface SideThreadHandlers {
 	onExpand: () => void;
 	onFloat: () => void;
 	onClose: () => void;
+	onCurrentStep?: () => void;
 }
 function Passage({ text, chatId, sourceMessageId, selector, citation: savedCitation }: { text: string; chatId?: string; sourceMessageId?: string; selector?: Omit<TextSelector, "text">; citation?: TutorCitation }) {
 	const actions = useContext(CitationActionsContext);
@@ -73,7 +74,7 @@ function SideInputMeter({ levelRef }: { levelRef?: { current: number } }) {
 
 /** #451's companion body, rendering the durable raw messages supplied by
  * #487's service. There is no sharing toggle, generated note, or deletion. */
-export function SideThreadBody({ state, chatId, draft, readDraft, dictation, onDraftChange, onAsk, onStop, onExpand, onFloat, onClose, onDragStart }: {
+export function SideThreadBody({ state, chatId, draft, readDraft, dictation, onDraftChange, onAsk, onStop, onExpand, onFloat, onClose, onCurrentStep, onDragStart }: {
 	state: SideThreadState; chatId?: string; onDragStart?: (event: React.PointerEvent<HTMLElement>) => void;
 } & SideThreadHandlers) {
 	const [question, setQuestion] = useState(draft || state.failedQuestion || "");
@@ -144,6 +145,9 @@ export function SideThreadBody({ state, chatId, draft, readDraft, dictation, onD
 				)}
 			</div>
 			<div className="flex flex-col gap-1.5 font-prose">
+				{onCurrentStep && <button type="button" data-testid="side-current-step" className="flex items-center gap-1.5 self-start font-ui text-xs text-muted-foreground hover:text-foreground" onClick={onCurrentStep}>
+					Go to current step <ArrowRight aria-hidden="true" className="size-3.5" />
+				</button>}
 				{state.pendingPassage && <Passage text={state.pendingPassage.text} chatId={chatId} sourceMessageId={state.pendingPassage.sourceMessageId} selector={state.pendingPassage.selector} />}
 				{dictation?.error && <p role="alert" className="font-ui text-xs text-destructive">{dictation.error}</p>}
 				<div className="flex items-end gap-1.5">
@@ -198,11 +202,23 @@ function sideThreadViewport(): SideThreadViewport {
 	return viewport;
 }
 
-/** Retains #451's anchored placement, draggable header and resize handle. */
+const RESIZE_HANDLES: { edge: SideThreadResizeEdge; className: string }[] = [
+	{ edge: "n", className: "inset-x-3 top-0 h-2 cursor-ns-resize" },
+	{ edge: "s", className: "inset-x-3 bottom-0 h-2 cursor-ns-resize" },
+	{ edge: "w", className: "inset-y-3 left-0 w-2 cursor-ew-resize" },
+	{ edge: "e", className: "inset-y-3 right-0 w-2 cursor-ew-resize" },
+	{ edge: "nw", className: "left-0 top-0 size-3 cursor-nwse-resize" },
+	{ edge: "ne", className: "right-0 top-0 size-3 cursor-nesw-resize" },
+	{ edge: "sw", className: "bottom-0 left-0 size-3 cursor-nesw-resize" },
+	{ edge: "se", className: "bottom-0 right-0 size-3 cursor-nwse-resize" },
+];
+
+/** Retains #451's anchored placement and draggable header; all eight
+ * borders/corners resize the floating window without changing the dock. */
 export function SideThreadPopover({ state, chatId, composer, ...handlers }: { state: SideThreadState; chatId: string; composer: () => HTMLElement | null } & SideThreadHandlers) {
 	const boxRef = useRef<HTMLDivElement>(null);
 	const [placement, setPlacement] = useState<SideThreadPlacement | null>(null);
-	const [frame, setFrame] = useState<{ x: number; y: number; height: number } | null>(null);
+	const [frame, setFrame] = useState<SideThreadFrame | null>(null);
 	const frameRef = useRef(frame); frameRef.current = frame;
 	const stateRef = useRef(state); stateRef.current = state;
 	useLayoutEffect(() => {
@@ -213,10 +229,8 @@ export function SideThreadPopover({ state, chatId, composer, ...handlers }: { st
 			const viewport = sideThreadViewport();
 			const frame = frameRef.current;
 			if (frame) {
-				const width = Math.min(box.getBoundingClientRect().width, Math.max(0, viewport.width - 16));
-				setPlacement((current) => current && current.style.width !== width ? { ...current, style: { ...current.style, width } } : current);
-				const next = fitSideThreadFrame(frame, width, viewport);
-				if (next.x !== frame.x || next.y !== frame.y || next.height !== frame.height) setFrame(next);
+				const next = fitResizableSideThreadFrame(frame, viewport);
+				if (next.x !== frame.x || next.y !== frame.y || next.width !== frame.width || next.height !== frame.height) setFrame(next);
 				return;
 			}
 			const current = stateRef.current;
@@ -243,24 +257,26 @@ export function SideThreadPopover({ state, chatId, composer, ...handlers }: { st
 		const end = () => { handle.removeEventListener("pointermove", onMove); handle.removeEventListener("pointerup", end); handle.removeEventListener("pointercancel", end); };
 		handle.addEventListener("pointermove", onMove); handle.addEventListener("pointerup", end); handle.addEventListener("pointercancel", end);
 	};
-	const currentFrame = () => { const rect = boxRef.current!.getBoundingClientRect(); return frameRef.current ?? { x: rect.left, y: rect.top, height: rect.height }; };
+	const currentFrame = (): SideThreadFrame => { const rect = boxRef.current!.getBoundingClientRect(); return frameRef.current ?? { x: rect.left, y: rect.top, width: rect.width, height: rect.height }; };
 	const startDrag = (event: React.PointerEvent<HTMLElement>) => {
 		if (event.button !== 0 || (event.target as Element).closest("button") || !boxRef.current) return;
-		event.preventDefault(); const start = currentFrame(); const width = boxRef.current.getBoundingClientRect().width;
+		event.preventDefault(); const start = currentFrame();
 		const dx = event.clientX - start.x; const dy = event.clientY - start.y; setFrame(start);
-		track(event, (move) => setFrame(fitSideThreadFrame({ x: move.clientX - dx, y: move.clientY - dy, height: start.height }, width, sideThreadViewport())));
+		track(event, (move) => setFrame(fitResizableSideThreadFrame({ ...start, x: move.clientX - dx, y: move.clientY - dy }, sideThreadViewport())));
 	};
-	const startResize = (event: React.PointerEvent<HTMLElement>) => {
+	const startResize = (event: React.PointerEvent<HTMLElement>, edge: SideThreadResizeEdge) => {
 		if (event.button !== 0 || !boxRef.current) return;
-		event.preventDefault(); const start = currentFrame(); const originY = event.clientY; setFrame(start);
-		track(event, (move) => setFrame(fitSideThreadFrame({ ...start, height: resizedHeight(start.height, move.clientY - originY, start.y, window.innerHeight) }, boxRef.current!.getBoundingClientRect().width, sideThreadViewport())));
+		event.preventDefault(); const start = currentFrame(); const origin = { x: event.clientX, y: event.clientY }; setFrame(start);
+		track(event, (move) => setFrame(resizeSideThread(start, edge, { x: move.clientX - origin.x, y: move.clientY - origin.y }, sideThreadViewport())));
 	};
-	const style: React.CSSProperties = frame && placement ? { left: frame.x, top: frame.y, width: placement.style.width, height: frame.height }
+	const style: React.CSSProperties = frame ? { left: frame.x, top: frame.y, width: frame.width, height: frame.height }
 		: placement ? { ...placement.style, maxHeight: placement.maxHeight } : { left: 0, top: 0, visibility: "hidden" };
 	return createPortal(<div ref={boxRef} role="dialog" aria-label="Side question" data-testid="side-thread-popover"
 		style={{ position: "fixed", zIndex: 60, ...style }} className="lh-no-drag flex flex-col overflow-hidden rounded-xl border bg-background/50 p-3 text-sm shadow-xl backdrop-blur-[18px]">
-		<SideThreadBody state={state} chatId={chatId} {...handlers} onDragStart={startDrag} />
-		<div aria-hidden="true" data-testid="side-thread-resize" className="absolute inset-x-3 bottom-0 h-2 cursor-ns-resize touch-none" onPointerDown={startResize} />
+		<SideThreadBody key={state.threadId} state={state} chatId={chatId} {...handlers} onDragStart={startDrag} />
+		{RESIZE_HANDLES.map(({ edge, className }) => <div key={edge} aria-hidden="true" data-side-resize={edge}
+			data-testid={edge === "s" ? "side-thread-resize" : `side-thread-resize-${edge}`} className={`absolute touch-none ${className}`}
+			onPointerDown={(event) => startResize(event, edge)} />)}
 	</div>, document.body);
 }
 export function SideThreadPanel({ children }: { children: ReactNode }) {

@@ -50,6 +50,16 @@ test("a delayed GET cannot rewind newer streamed text; selected quote retains it
 		await act(async () => frame({ type: "text", text: "New streamed tail" }));
 		await act(async () => release(Response.json({ threads: [thread], answering: { side_work: "Older partial" } })));
 		assert.equal(side.state!.streamText, "New streamed tail"); assert.equal(side.state!.answering, true);
+		side.saveDraft(thread.id, "Saved old-step draft");
+		messages.push({ id: "answer", role: "user", content: "Main answer", timestamp: 2 }, { ...fauxAssistantMessage("A new explanation"), id: "next" });
+		await act(async () => side.expand());
+		assert.equal(side.currentSegmentId, "next");
+		assert.equal(side.state!.threadId, thread.id, "lesson progression never silently switches the open conversation");
+		await act(async () => side.open({ sourceMessageId: side.currentSegmentId!, anchor: { kind: "composer" } }));
+		assert.equal(side.state!.threadId, "side_next"); assert.equal(side.state!.mode, "panel");
+		assert.equal(side.draftFor(thread.id), "Saved old-step draft"); assert.equal(side.draftFor("side_next"), "");
+		await act(async () => frame({ type: "text", text: "OLD THREAD AFTER NAVIGATION" }));
+		assert.equal(side.state!.streamText, ""); assert.deepEqual(side.state!.messages, []);
 		await act(async () => { frame({ type: "done", thread }); writer.close(); });
 	} finally {
 		await act(async () => root.unmount());

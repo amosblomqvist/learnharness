@@ -55,8 +55,8 @@ export interface ChatRecord {
 	/** Per-chat model/thinking overrides for the conversation agents. */
 	settings?: ChatSettings;
 	/** Durable clarification threads. Each explanation and associated check
-	 * shares one thread. Main submission freezes an attributed raw snapshot;
-	 * later activity remains UI-only and never rewrites teacher history. */
+	 * shares one thread. Every main request appends new raw exchanges across
+	 * all threads; already-recorded teacher history is never rewritten. */
 	sideChats?: SideChatThread[];
 	/** SCHEMA STAMP (schema-versioning wave, owner 2026-10-10): LAZY v1 —
 	 *  existing records stay unstamped (absence reads as v1); every write
@@ -158,7 +158,7 @@ export interface SideChatMessage {
 	requestId?: string;
 	/** assistant only: the learner stopped the answer; `text` is partial. */
 	stopped?: boolean;
-	/** Snapshot only: this reply was still generating at main submission. */
+	/** Delivery snapshot only: this reply was still generating at capture. */
 	pending?: boolean;
 	/** assistant only: the call failed; `text` is whatever arrived. */
 	error?: string;
@@ -173,8 +173,8 @@ export interface SideChatThread {
 	open: boolean;
 	createdAt: string;
 	messages: SideChatMessage[];
-	/** Immutable teacher-context cutoff. Undefined = segment still open;
-	 * [] = frozen before any exchange. Later side messages are UI-only. */
+	/** Legacy one-shot cutoff, retained when reading earlier development
+	 * records. New delivery uses immutable native update entries instead. */
 	contextSnapshot?: SideChatMessage[];
 }
 

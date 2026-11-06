@@ -763,7 +763,7 @@ export function Chat({
 		[chatId, citeInput],
 	);
 	// One durable companion per explanation/check, in teaching AND practice.
-	// Main submission freezes its raw snapshot; closing only hides the UI.
+	// Main requests append new raw exchanges from every thread; closing only hides the UI.
 	const workingRef = useRef("");
 	const sideThread = useSideThread(chatId, nativeMessages, () => workingRef.current);
 	const sideNavigation = useRef(0);
@@ -786,6 +786,8 @@ export function Chat({
 			});
 		} else sideThread.open(args);
 	}, [nativeMessages, recording.active, recording.destinationId, recording.finishFor, sideThread.open, sideThread.state]);
+	const goToCurrentSideStep = sideThread.state && sideThread.currentSegmentId && sideThread.state.segmentId !== sideThread.currentSegmentId
+		? () => openSideThread({ sourceMessageId: sideThread.currentSegmentId!, anchor: sideThread.state!.anchor }) : undefined;
 	const sideDictationFor = (id: string) => {
 		const destinationId = `side:${id}`;
 		const owns = recording.destinationId === destinationId;
@@ -1908,8 +1910,8 @@ export function Chat({
 						// The pending-id effect clears this only when the question
 						// actually leaves. An offline preflight keeps the draft visible.
 						const send = () => submitAnswer(pending.tool, pending.toolCallId, reading ? { ...output, readingThinking: reading } : output, pending.key);
-						// Never wait for the helper. The server atomically freezes the
-						// current raw side snapshot with this main answer.
+						// Never wait for the helper. The server atomically appends new
+						// raw side updates with this main answer.
 						send();
 					}}
 				/>
@@ -1929,6 +1931,7 @@ export function Chat({
 							onExpand={sideThread.expand}
 							onFloat={sideThread.float}
 							onClose={closeSideThread}
+							onCurrentStep={goToCurrentSideStep}
 						/>
 					</SideThreadPanel>
 				)}
@@ -1951,7 +1954,6 @@ export function Chat({
 				<SelectionToolbar viewport={transcriptElement} actions={selectionActions} />
 				{sideThread.state?.mode === "popover" && (
 					<SideThreadPopover
-						key={sideThread.state.threadId}
 						state={sideThread.state}
 						chatId={chatId}
 						draft={sideThread.draftFor(sideThread.state.threadId)}
@@ -1964,6 +1966,7 @@ export function Chat({
 						onExpand={sideThread.expand}
 						onFloat={sideThread.float}
 						onClose={closeSideThread}
+						onCurrentStep={goToCurrentSideStep}
 					/>
 				)}
 				{citationEdit && (

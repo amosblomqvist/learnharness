@@ -1,7 +1,7 @@
 /** Combined side-question service: #487's durable, server-owned lifecycle
  * behind #451's floating companion. One thread per explanation/check segment.
- * Main submission freezes a separate raw context snapshot; later side activity
- * stays usable in the UI and cannot change that snapshot. */
+ * Every main request captures new raw activity across all threads. Delivery
+ * is append-only; a live helper never delays the teacher. */
 import { emit } from "../core/events.ts";
 import type { ChatRecord, SideChatMessage, SideChatThread } from "../core/contracts.ts";
 import type { ChatStore } from "../core/ports.ts";
@@ -40,7 +40,7 @@ interface SideRun {
 	text: string;
 	answerId: string;
 	model: string;
-	at: string;
+	updatedAt: string;
 	operationId?: string;
 	listeners: Set<(event: SideStreamEvent) => void>;
 	settled: Promise<void>;
@@ -49,8 +49,8 @@ export interface SideChatService {
 	list(chatId: string): { threads: SideChatThread[]; answering: Record<string, string> } | null;
 	ask(chatId: string, input: SideAskInput): Promise<Response>;
 	watch(chatId: string, threadId: string): Response;
-	/** Pure snapshot, including current streamed text. Saved atomically with
-	 * the main input, never before it; no waiting for a provider. */
+	/** Pure snapshot, including current streamed text. The caller publishes
+	 * new deltas at model-request boundaries, without waiting for a helper. */
 	snapshot(chatId: string): SideChatThread[];
 	setOpen(chatId: string, threadId: string, open: boolean): SideChatThread | "unknown-chat" | "unknown-thread";
 	stop(chatId: string, threadId: string): boolean;
@@ -137,8 +137,6 @@ export function createSideChatService(deps: SideChatDeps): SideChatService {
 				// The client chooses a segment, not what the tutor allegedly said.
 				blockText: userFacingTextOf(record.messages.find((message) => message.id === segment && message.role === "assistant")?.content ?? [], failedOutputCallIds(record.messages)).join("\n\n").slice(0, 4_000) || "This teaching segment and its associated question.",
 			});
-			// First opening an old segment must not introduce new teacher context.
-			if (!threads.includes(target) && segment !== sideSegmentId(record.messages)) target = { ...target, contextSnapshot: [] };
 		}
 		if (!target) return Response.json({ error: "A teaching segment or threadId is required" }, { status: 400 });
 		if (input.quoteCitations) {
@@ -186,7 +184,7 @@ export function createSideChatService(deps: SideChatDeps): SideChatService {
 			? current.map((entry) => entry.id === thread.id ? thread : entry) : [...current, thread]);
 		if (!stored) return Response.json({ error: "Unknown chat" }, { status: 404 });
 		const run: SideRun = {
-			controller: new AbortController(), text: "", answerId: newMessageId(), at: new Date().toISOString(),
+			controller: new AbortController(), text: "", answerId: newMessageId(), updatedAt: new Date().toISOString(),
 			model: `${engine.model.provider}:${engine.model.id}`, operationId: input.requestId,
 			listeners: new Set(), settled: Promise.resolve(),
 		};
@@ -199,7 +197,7 @@ export function createSideChatService(deps: SideChatDeps): SideChatService {
 			let settledThread: SideChatThread | undefined;
 			try {
 				const result = await streamSideAnswer({ engine, instructions, turns, signal: run.controller.signal, chatId, runId: run.answerId,
-					onText: (text) => { run.text = text; broadcast({ type: "text", text }); },
+					onText: (text) => { run.text = text; run.updatedAt = new Date().toISOString(); broadcast({ type: "text", text }); },
 				});
 				const at = new Date().toISOString();
 				const answer: SideChatMessage = {
@@ -237,12 +235,11 @@ export function createSideChatService(deps: SideChatDeps): SideChatService {
 
 	function snapshot(chatId: string): SideChatThread[] {
 		return (deps.chatStore.getChat(chatId)?.sideChats ?? []).map((thread) => {
-			if (thread.contextSnapshot !== undefined) return thread;
 			const run = runs.get(runKey(chatId, thread.id));
 			const messages = run ? [...thread.messages, {
-				id: run.answerId, role: "assistant" as const, text: run.text, at: run.at, model: run.model, pending: true,
+				id: run.answerId, role: "assistant" as const, text: run.text, at: run.updatedAt, model: run.model, pending: true,
 			}] : [...thread.messages];
-			return { ...thread, contextSnapshot: messages };
+			return { ...thread, messages };
 		});
 	}
 	function setOpen(chatId: string, threadId: string, open: boolean) {

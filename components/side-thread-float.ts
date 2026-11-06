@@ -87,11 +87,29 @@ export function placeSideThread({ kind, rect, viewport, contentHeight }: {
 	}, contentHeight, viewport);
 }
 
-/** The smallest height the bottom-edge resize allows when it fits. */
+/** The smallest height vertical resizing allows when it fits. */
 export const SIDE_THREAD_MIN_HEIGHT = 160;
 
-/** Keep the resize handle in view, including windows smaller than the
- * preferred minimum. The caller also applies native-corner clearance. */
-export function resizedHeight(startHeight: number, travel: number, top: number, viewportHeight: number): number {
-	return Math.min(Math.max(0, viewportHeight - top - EDGE), Math.max(SIDE_THREAD_MIN_HEIGHT, startHeight + travel));
+export type SideThreadFrame = { x: number; y: number; width: number; height: number };
+export type SideThreadResizeEdge = "n" | "ne" | "e" | "se" | "s" | "sw" | "w" | "nw";
+
+/** Viewport bounds win over the preferred minimum in small windows. */
+export function fitResizableSideThreadFrame(frame: SideThreadFrame, viewport: SideThreadViewport): SideThreadFrame {
+	const width = Math.min(Math.max(0, viewport.width - 2 * EDGE), Math.max(SIDE_THREAD_WIDTH, frame.width));
+	return { ...fitSideThreadFrame(frame, width, viewport), width };
+}
+
+/** Each handle keeps its opposite edge fixed, except when window/native
+ * control clearance makes that impossible. Pure horizontal resizing leaves
+ * the current height alone; vertical resizing retains the 160px minimum. */
+export function resizeSideThread(frame: SideThreadFrame, edge: SideThreadResizeEdge, travel: { x: number; y: number }, viewport: SideThreadViewport): SideThreadFrame {
+	const start = fitResizableSideThreadFrame(frame, viewport);
+	const minWidth = Math.min(SIDE_THREAD_WIDTH, Math.max(0, viewport.width - 2 * EDGE));
+	const minHeight = Math.min(SIDE_THREAD_MIN_HEIGHT, Math.max(0, viewport.height - 2 * EDGE));
+	let left = start.x, right = start.x + start.width, top = start.y, bottom = start.y + start.height;
+	if (edge.includes("w")) left = Math.max(EDGE, Math.min(right - minWidth, left + travel.x));
+	if (edge.includes("e")) right = Math.min(viewport.width - EDGE, Math.max(left + minWidth, right + travel.x));
+	if (edge.includes("n")) top = Math.max(EDGE, Math.min(bottom - minHeight, top + travel.y));
+	if (edge.includes("s")) bottom = Math.min(viewport.height - EDGE, Math.max(top + minHeight, bottom + travel.y));
+	return fitResizableSideThreadFrame({ x: left, y: top, width: Math.max(0, right - left), height: Math.max(0, bottom - top) }, viewport);
 }

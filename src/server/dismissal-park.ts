@@ -73,7 +73,7 @@ export function applyParkedDismissal(chatStore: ChatStore, chatId: string, sideC
 		const appends = dismissAppends(record, input as Parameters<typeof dismissAppends>[1]);
 		const after = [...record.messages, ...appends];
 		const entries = hasUnresolvedQuestion(after) ? [] : sideConversationEntries({ messages: after, sideChats: sideContextSnapshots ? [...sideContextSnapshots] : record.sideChats });
-		chatStore.saveMessages(chatId, [...after, ...entries], sideContextSnapshots);
+		chatStore.saveMessages(chatId, [...after, ...entries]);
 		emit("record-changed", { chatId });
 	} catch (err) {
 		if (err instanceof ChatInputError) return; // never materialized — drop

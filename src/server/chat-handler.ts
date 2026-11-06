@@ -45,7 +45,6 @@ import {
 import { modelsNotConfigured, providerKeyMissing as providerKeyMissingEnvelope, ROLE_SLOT, type ModelSlotName, type ProviderKeyMissing } from "../core/settings.ts";
 import { beginTurn, endTurn } from "./turn-liveness.ts";
 import { applyParkedDismissal } from "./dismissal-park.ts";
-import { flushSideContextSnapshots } from "./side-questions.ts";
 import { sideConversationEntries } from "../core/side-chat.ts";
 import { sideChats, type SideChatService } from "./side-chat.ts";
 import { registerTurn, rememberTurnFailure, unregisterTurn } from "./turn-runs.ts";
@@ -56,7 +55,8 @@ import { ensureCompacted, kickCompaction, effectiveThresholdTokens } from "./com
 import { catalogContextLimits, refreshConnectionCatalog } from "./model-catalog.ts";
 import { emit } from "../core/events.ts";
 import { settledTurnResponse } from "./turn-runs.ts";
-import { asAgentMessages } from "../core/native-messages.ts";
+import { asAgentMessages, type LhMessage } from "../core/native-messages.ts";
+import { QUESTION_TOOLS } from "../core/pending.ts";
 import {
 	ChatInputError,
 	inputAppends,
@@ -351,8 +351,7 @@ export async function handleChatInput(
 	// the composer gates), so adjacency holds by construction.
 	if (input.type === "answer" && hasUnresolvedQuestion([...record.messages, ...appends])) {
 		const merged = [...record.messages, ...appends];
-		const snapshots = sideContext.snapshot(chatId);
-		try { stores.chatStore.saveMessages(chatId, merged, snapshots); }
+		try { stores.chatStore.saveMessages(chatId, merged); }
 		catch (err) {
 			console.error(`[chat ${chatId}] write-ahead persist failed:`, err);
 			return new Response("Your input could not be saved. Please try again.", { status: 500 });
@@ -375,16 +374,15 @@ export async function handleChatInput(
 	// truth instead of the pre-answer record. (Wave C: the wake's markers
 	// ride this same write-ahead - the pump de-queued them at fire, so this
 	// is the ONLY copy ever appended.)
-	// Freeze the side companion at this main submission, without waiting
-	// for a running helper. The raw snapshot follows the question result
-	// (preserving tool adjacency), or precedes a new main text input. Later
-	// helper activity is durable UI history only, never a new context entry.
-	const sideContextSnapshots = ["text", "answer", "thinking", "next"].includes(input.type) ? sideContext.snapshot(chatId) : undefined;
+	// Append only previously unrecorded exchanges from ALL side threads.
+	// A live helper contributes its current text, never a completion wait.
+	// Older entries and their delivery watermarks remain unchanged.
+	const sideContextSnapshots = sideContext.snapshot(chatId);
 	const afterInput = [...record.messages, ...appends];
 	const sideQuestions = hasUnresolvedQuestion(afterInput) ? [] : sideConversationEntries({
-		messages: record.messages, sideChats: sideContextSnapshots ?? record.sideChats,
+		messages: record.messages, sideChats: sideContextSnapshots,
 	}, afterInput);
-	if (sideQuestions.length) appends = input.type === "answer" ? [...appends, ...sideQuestions] : [...sideQuestions, ...appends];
+	if (sideQuestions.length) appends = input.type === "answer" || input.type === "retry-question" ? [...appends, ...sideQuestions] : [...sideQuestions, ...appends];
 	const merged = [...record.messages, ...appends];
 	// Retry preserves every persisted attempt. Pi needs a non-assistant
 	// tail to start continue(), so its temporary history omits the trailing
@@ -394,13 +392,12 @@ export async function handleChatInput(
 	const stagedAutomatic = isSubscriptionProvider(conversation.provider) && input.type === "steers";
 	let persistBaseCount = stagedAutomatic ? record.messages.length : agentMessages.length;
 	try {
-		if (!stagedAutomatic) stores.chatStore.saveMessages(chatId, merged, sideContextSnapshots);
+		if (!stagedAutomatic) stores.chatStore.saveMessages(chatId, merged);
 	} catch (err) {
 		console.error(`[chat ${chatId}] write-ahead persist failed:`, err);
 		endTurn(chatId);
 		return new Response("Your input could not be saved. Please try again.", { status: 500 });
 	}
-	if (sideContextSnapshots?.length) emit("side-chats-changed", { chatId });
 	// Visibility bookkeeping is not the canonical save. Its failure must
 	// neither misreport a saved input as lost nor prevent the turn running.
 	try {
@@ -468,6 +465,21 @@ export async function handleChatInput(
 		callPurpose,
 		requestCycle,
 		messages: asAgentMessages(agentMessages),
+		contextUpdates: (messages) => {
+			const current = stores.chatStore.getChat(chatId);
+			if (!current) return [];
+			const saved = new Set(current.messages.map((message) => message.id));
+			// Only unsaved null-detail SDK acknowledgements are placeholders;
+			// real graded answers and legacy saved null results still resolve.
+			const live = messages.filter((message) => message.role !== "toolResult" || message.isError || message.details !== null ||
+				saved.has((message as LhMessage).id) || !(QUESTION_TOOLS as readonly string[]).includes(message.toolName)) as LhMessage[];
+			if (hasUnresolvedQuestion(live)) return [];
+			// Include the loop's already-injected entries, but don't fold saved
+			// suffixes twice. Full disk history keeps the pre-compaction ledger.
+			const pending = live.filter((message) => message.role === "custom" && message.customType === "side-question" && !saved.has(message.id));
+			const history = [...current.messages, ...pending];
+			return asAgentMessages(sideConversationEntries({ messages: history, sideChats: sideContext.snapshot(chatId) }));
+		},
 		onUsage: collectUsage,
 		toolToggles: effective.agent.tools,
 		// Debug (owner, 2026-10-04): teacher/prober raw provider events under
@@ -567,6 +579,12 @@ export async function handleChatInput(
 		const handle = runPiTurn({
 			agent: constructed,
 			requestCycle,
+			// The next-turn SDK hook covers internal calls. The steering poll
+			// supplies the same fresh cargo on the first/recovery call, with
+			// normal lifecycle events and no extra provider request.
+			beforeCycle: () => {
+				for (const message of agentOpts.contextUpdates!(constructed.state.messages)) constructed.steer(message);
+			},
 			// The coalescing window seam (COMPACTION LAW, 2026-10-09): tests
 			// tighten it via LH_UPDATE_FLUSH_MS; production rides the 100ms
 			// default in ui-stream.
@@ -592,10 +610,6 @@ export async function handleChatInput(
 				// POST only acknowledges acceptance; the submitter may attach
 				// after this turn has already failed and left the registry.
 				rememberTurnFailure(chatId, reportedErrorText ?? settlementErrorText(error));
-				// Side threads closed during the failed turn land now (Retry
-				// looks past them), unless a question still waits.
-				try { flushSideContextSnapshots(stores.chatStore, chatId); }
-				catch (err) { console.error(`[chat ${chatId}] parked side questions failed to save:`, err); }
 				endTurn(chatId);
 				unregisterTurn(chatId);
 				unregisterLiveAgent(chatId);
@@ -642,11 +656,8 @@ export async function handleChatInput(
 				// subsequent fetch reads the dismissal already in the record
 				// (the same ordering law as persistTurn itself).
 				applyParkedDismissal(stores.chatStore, chatId, sideContext.snapshot(chatId));
-				// PARKED SIDE QUESTIONS (#16): threads closed during the turn
-				// land after its messages (and after a parked dismissal), with
-				// the same ordering law — unless the turn ended on a question,
-				// whose answer they then follow.
-				flushSideContextSnapshots(stores.chatStore, chatId);
+				// Any helper activity after the last model call stays pending;
+				// settlement never injects it behind the agent's context.
 				// LAST: a poller that sees not-in-flight must read an already-persisted
 				// record — endTurn only after persistTurn has done its job.
 				endTurn(chatId);

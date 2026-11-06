@@ -9,9 +9,9 @@ import type { SideThreadState } from "../components/use-side-thread.ts";
 const state: SideThreadState = { threadId: "side_lesson", segmentId: "lesson", messages: [
 	{ id: "question", role: "user", text: "Why?", quotes: ["Selected words"], at: "2026-11-05T00:00:01Z" },
 	{ id: "answer", role: "assistant", text: "Because it is continuous.", at: "2026-11-05T00:00:02Z" },
-], answering: false, streamText: "", contextFrozen: false, mode: "popover", anchor: { kind: "composer" } };
+], answering: false, streamText: "", mode: "popover", anchor: { kind: "composer" } };
 const handlers = { onAsk: async () => true, onStop() {}, onExpand() {}, onFloat() {}, onClose() {} };
-const render = (s = state, dictation?: SideThreadHandlers["dictation"]) => parseHTML(`<html><body>${renderToStaticMarkup(<SideThreadBody state={s} dictation={dictation} {...handlers} />)}</body></html>`).document;
+const render = (s = state, dictation?: SideThreadHandlers["dictation"], onCurrentStep?: () => void) => parseHTML(`<html><body>${renderToStaticMarkup(<SideThreadBody state={s} dictation={dictation} onCurrentStep={onCurrentStep} {...handlers} />)}</body></html>`).document;
 
 describe("floating/docked raw side conversation", () => {
 	it("shows raw questions and replies, with no summary, tutor toggle, or delete action", () => {
@@ -30,9 +30,11 @@ describe("floating/docked raw side conversation", () => {
 		assert.doesNotMatch(doc.body.textContent!, /Tell tutor|Send to tutor|Delete/);
 	});
 	it("keeps an old conversation editable without adding a context-status line", () => {
-		const doc = render({ ...state, contextFrozen: true });
+		const doc = render(state, undefined, () => {});
 		assert.equal(doc.querySelector('[data-testid="side-context-status"]'), null);
 		assert.equal(doc.querySelector('textarea')!.hasAttribute("disabled"), false);
+		assert.equal(doc.querySelector('[data-testid="side-current-step"]')!.textContent?.trim(), "Go to current step");
+		assert.equal(render().querySelector('[data-testid="side-current-step"]'), null, "current conversations need no navigation row");
 	});
 	it("offers Stop while streaming, never blocks the main answer, and preserves draft editing", () => {
 		const doc = render({ ...state, answering: true, streamText: "Partial helper reply" });

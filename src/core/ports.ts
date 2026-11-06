@@ -43,7 +43,7 @@ export interface ChatStore {
 	listChats(): ChatSummary[];
 	/** Persist the full native message list (the record IS the agent
 	 * state — Wave B, owner-approved 2026-09-26). */
-	saveMessages(id: string, messages: LhMessage[], sideContextSnapshots?: readonly SideChatThread[]): void;
+	saveMessages(id: string, messages: LhMessage[]): void;
 	/** Save a processed picture once, without changing conversation activity/order. */
 	saveImageSnapshot(id: string, snapshotId: string, image: ImageSnapshot): void;
 	/** Persist the session plan tree (plan tools call this in execute). */

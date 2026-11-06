@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { clampDragged, fitSideThreadFrame, placeSideThread, resizedHeight, SIDE_THREAD_MIN_HEIGHT, SIDE_THREAD_WIDTH } from "../components/side-thread-float.ts";
+import { clampDragged, fitSideThreadFrame, fitResizableSideThreadFrame, placeSideThread, resizeSideThread, SIDE_THREAD_MIN_HEIGHT, SIDE_THREAD_WIDTH, type SideThreadResizeEdge } from "../components/side-thread-float.ts";
 
 const viewport = { width: 1400, height: 900 };
 
@@ -60,11 +60,43 @@ describe("native traffic-light corner", () => {
 	});
 });
 
-describe("resizedHeight", () => {
-	it("follows the pointer between the minimum and the window bottom", () => {
-		assert.equal(resizedHeight(300, 120, 100, 900), 420);
-		assert.equal(resizedHeight(300, -250, 100, 900), SIDE_THREAD_MIN_HEIGHT);
-		assert.equal(resizedHeight(300, 900, 100, 900), 900 - 100 - 8);
-		assert.equal(resizedHeight(300, 0, 100, 200), 92, "viewport bounds win over the preferred minimum");
+describe("eight-edge/corner resizing", () => {
+	const frame = { x: 400, y: 300, width: 600, height: 300 };
+	it("keeps the opposite edge fixed for every handle", () => {
+		for (const edge of ["n", "ne", "e", "se", "s", "sw", "w", "nw"] as SideThreadResizeEdge[]) {
+			const next = resizeSideThread(frame, edge, { x: 40, y: 30 }, viewport);
+			assert.equal(next.x, edge.includes("w") ? 440 : 400, edge);
+			assert.equal(next.y, edge.includes("n") ? 330 : 300, edge);
+			assert.equal(next.width, edge.includes("w") ? 560 : edge.includes("e") ? 640 : 600, edge);
+			assert.equal(next.height, edge.includes("n") ? 270 : edge.includes("s") ? 330 : 300, edge);
+		}
+	});
+	it("retains the default width and vertical minimum, with viewport bounds winning", () => {
+		assert.equal(resizeSideThread(frame, "e", { x: -2000, y: 0 }, viewport).width, SIDE_THREAD_WIDTH);
+		const west = resizeSideThread(frame, "w", { x: 2000, y: 0 }, viewport);
+		assert.equal(west.width, SIDE_THREAD_WIDTH); assert.equal(west.x + west.width, frame.x + frame.width);
+		assert.equal(resizeSideThread(frame, "s", { x: 0, y: -2000 }, viewport).height, SIDE_THREAD_MIN_HEIGHT);
+		assert.equal(resizeSideThread(frame, "s", { x: 0, y: 2000 }, viewport).height, 900 - 300 - 8);
+		assert.equal(resizeSideThread(frame, "n", { x: 0, y: 2000 }, viewport).height, SIDE_THREAD_MIN_HEIGHT);
+		assert.equal(resizeSideThread({ ...frame, height: 100 }, "e", { x: 100, y: 0 }, viewport).height, 100, "horizontal changes don't force a taller composer");
+		const tiny = fitResizableSideThreadFrame(frame, { width: 300, height: 100 });
+		assert.equal(tiny.width, 284); assert.equal(tiny.height, 84);
+	});
+	it("bounds all eight handles at extreme pointer positions and native zooms", () => {
+		for (const zoom of [0.5, 0.8, 1, 1.5, 2]) for (const windowWidth of [300, 800, 1400]) {
+			const vp = { width: windowWidth, height: 300, trafficLights: { width: 92 / zoom, height: 60 / zoom } };
+			for (const edge of ["n", "ne", "e", "se", "s", "sw", "w", "nw"] as SideThreadResizeEdge[]) for (const travel of [{ x: -5000, y: -5000 }, { x: 5000, y: 5000 }]) {
+				const next = resizeSideThread(frame, edge, travel, vp);
+				assert.ok(next.width >= Math.min(SIDE_THREAD_WIDTH, vp.width - 16));
+				assert.ok(next.x >= 8 && next.y >= 8);
+				assert.ok(next.x + next.width <= vp.width - 8); assert.ok(next.y + next.height <= vp.height - 8);
+				assert.ok(next.x >= vp.trafficLights.width || next.y >= vp.trafficLights.height);
+			}
+		}
+	});
+	it("keeps a chosen width on subsequent drag/fit operations", () => {
+		const wide = resizeSideThread(frame, "w", { x: -250, y: 0 }, viewport);
+		assert.equal(wide.width, 850);
+		assert.equal(fitResizableSideThreadFrame({ ...wide, x: 700 }, viewport).width, 850);
 	});
 });

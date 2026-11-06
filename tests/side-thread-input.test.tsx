@@ -26,7 +26,7 @@ async function fixture(recording: boolean, mode: "popover" | "panel" = "popover"
 	let saved = ""; let toggles = 0; let finishes = 0; let mainSubmits = 0;
 	const levelRef = { current: 0 };
 	const state: SideThreadState = { threadId: "side_lesson", segmentId: "lesson", messages: [], answering: false,
-		streamText: "", contextFrozen: false, mode, anchor: { kind: "composer" } };
+		streamText: "", mode, anchor: { kind: "composer" } };
 	function Harness() {
 		useEnterSubmits(() => { mainSubmits++; });
 		const [draft, setDraft] = useState(saved);

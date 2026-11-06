@@ -29,8 +29,11 @@ describe("one durable side companion", () => {
 		state = reduce(state, { type: "accepted", threadId: thread.id });
 		assert.equal(state?.pendingPassage, undefined);
 	});
-	it("marks a first-time old-step conversation UI-only before an ask exists", () => {
-		assert.equal(reduce(null, { type: "open", segmentId: "old", anchor, contextFrozen: true })?.contextFrozen, true);
+	it("keeps docking when switching to the current step, with separate histories", () => {
+		const docked = reduce(open(), { type: "mode", mode: "panel" });
+		const next = reduce(docked, { type: "open", segmentId: "next", anchor })!;
+		assert.equal(next.mode, "panel"); assert.equal(next.threadId, "side_next"); assert.deepEqual(next.messages, []);
+		assert.equal(docked?.messages, thread.messages);
 	});
 	it("uses replacement text snapshots, not appended duplicate deltas", () => {
 		let state = reduce(open(), { type: "start", threadId: thread.id });
@@ -54,15 +57,14 @@ describe("one durable side companion", () => {
 		assert.deepEqual(state?.messages, thread.messages);
 		assert.equal(state?.mode, "popover");
 	});
-	it("shows the immutable cutoff while later messages remain fully usable", () => {
-		const frozen = { ...thread, contextSnapshot: thread.messages, messages: [...thread.messages, {
+	it("does not let an obsolete cutoff hide new answers in an older thread", () => {
+		const updated = { ...thread, contextSnapshot: thread.messages, messages: [...thread.messages, {
 			id: "reply", role: "assistant" as const, text: "A late answer.", at: "2026-11-05T00:00:02Z",
 		}] };
-		const state = reduce(open(), { type: "done", thread: frozen })!;
-		assert.equal(state.contextFrozen, true);
+		const state = reduce(open(), { type: "done", thread: updated })!;
 		assert.equal(state.messages.length, 2);
 		assert.equal(state.answering, false);
-		assert.equal(reduce(state, { type: "snapshot", thread })?.contextFrozen, true, "an older reconnect frame cannot reopen teacher context");
+		assert.equal(Object.hasOwn(state, "contextFrozen"), false);
 	});
 	it("keeps a refused initial /btw question available rather than silently losing it", () => {
 		const failed = reduce(open(), { type: "error", threadId: thread.id, error: "No model", question: "Why?" });

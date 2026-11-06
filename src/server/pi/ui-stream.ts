@@ -70,6 +70,9 @@ export type TurnWireEvent =
 	| { type: "error"; errorText: string };
 
 export interface PiTurnSpec {
+	/** Fresh reference cargo for an already-selected native run, including
+	 * an admission-recovery run. This hook never schedules a run itself. */
+	beforeCycle?: () => void;
 	requestCycle?: ChatGPTRequestCycle;
 	/** The per-turn agent (stateless engine — built from the record). */
 	agent: Agent;
@@ -268,6 +271,7 @@ export function runPiTurn(spec: PiTurnSpec): PiTurnHandle {
 	void (async () => {
 		try {
 			do {
+				spec.beforeCycle?.();
 				await agent.continue();
 				if (!requestCycle) break;
 				const denied = requestCycle.deniedBeforeDispatch;

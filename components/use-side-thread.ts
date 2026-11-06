@@ -23,14 +23,13 @@ export interface SideThreadState {
 	answering: boolean;
 	streamText: string;
 	pendingPassage?: SidePassage;
-	contextFrozen: boolean;
 	mode: "popover" | "panel";
 	anchor: SideThreadAnchor;
 	error?: string;
 	failedQuestion?: string;
 }
 export type SideThreadAction =
-	| { type: "open"; segmentId: string; anchor: SideThreadAnchor; passage?: SidePassage; thread?: SideChatThread; contextFrozen?: boolean }
+	| { type: "open"; segmentId: string; anchor: SideThreadAnchor; passage?: SidePassage; thread?: SideChatThread }
 	| { type: "snapshot"; thread: SideChatThread; answering?: boolean; text?: string }
 	| { type: "start"; threadId: string }
 	| { type: "accepted"; threadId: string }
@@ -45,14 +44,14 @@ export function sideThreadReducer(state: SideThreadState | null, action: SideThr
 		const threadId = action.thread?.id ?? `side_${action.segmentId}`;
 		if (state?.threadId === threadId) return { ...state, ...(action.passage ? { pendingPassage: action.passage } : {}) };
 		return { threadId, segmentId: action.segmentId, messages: action.thread?.messages ?? [], answering: false, streamText: "",
-			contextFrozen: action.contextFrozen ?? (action.thread?.contextSnapshot !== undefined), mode: "popover", anchor: action.anchor, pendingPassage: action.passage };
+			mode: state?.mode ?? "popover", anchor: action.anchor, pendingPassage: action.passage };
 	}
 	if (!state) return state;
 	if (action.type === "mode") return { ...state, mode: action.mode };
 	const threadId = "thread" in action ? action.thread.id : action.threadId;
 	if (threadId !== state.threadId) return state;
 	if (action.type === "snapshot" || action.type === "done") return {
-		...state, messages: action.thread.messages, contextFrozen: state.contextFrozen || action.thread.contextSnapshot !== undefined,
+		...state, messages: action.thread.messages,
 		...(action.type === "done" || (action.type === "snapshot" && action.answering === false && action.thread.messages.at(-1)?.role === "assistant") ? { error: undefined } : {}),
 		...(action.type === "done" ? { answering: false, streamText: "" } : {
 			...(action.answering !== undefined ? { answering: action.answering } : {}),
@@ -160,8 +159,9 @@ export function useSideThread(chatId: string, messages: readonly LhMessage[], ge
 		if (!segmentId) return;
 		const thread = threadsRef.current.find((entry) => entry.anchor.messageId === segmentId);
 		initialQuestion.current = question?.trim() || null;
-		dispatch({ type: "open", segmentId, anchor, passage, thread, contextFrozen: thread?.contextSnapshot !== undefined || segmentId !== sideSegmentId(messagesRef.current) });
+		dispatch({ type: "open", segmentId, anchor, passage, thread });
 		if (thread) attach(thread);
+		else { connection.current?.controller.abort(); connection.current = null; }
 	}, [attach]);
 	const close = useCallback((expectedThreadId?: string) => {
 		if (expectedThreadId && stateRef.current?.threadId !== expectedThreadId) return;
@@ -215,7 +215,7 @@ export function useSideThread(chatId: string, messages: readonly LhMessage[], ge
 		const current = stateRef.current;
 		if (current) void fetch(`/api/chats/${chatId}/side-chats/${current.threadId}/stop`, { method: "POST" }).catch(() => {});
 	}, [chatId]);
-	return { state, threads, open, close, ask, stop, draftFor, saveDraft,
+	return { state, threads, open, close, ask, stop, draftFor, saveDraft, currentSegmentId: sideSegmentId(messages),
 		expand: () => dispatch({ type: "mode", mode: "panel" }),
 		float: () => dispatch({ type: "mode", mode: "popover" }),
 		hasHistory: (sourceMessageId: string) => {

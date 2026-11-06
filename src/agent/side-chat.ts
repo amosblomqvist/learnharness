@@ -1,6 +1,7 @@
 /**
  * The SIDE-QUESTION model call: #487's tool-less streamed generation,
- * using the lesson model unless the #451 sideQuestion role is overridden. No agent loop, no tools, no session identity — a Claude Code
+ * using the session's conversation model. No agent loop, no tools, no
+ * session identity — a Claude Code
  * call without a session id never retains or reuses the lesson's live
  * CLI process (docs/claude-code.md "Questions, reuse, and cancellation").
  *
@@ -9,7 +10,8 @@
  * across every learner-facing agent; the LaTeX/markdown contract matters
  * because answers render through the same markdown pipeline). Shared
  * fragments honor the learner's enabled overrides, by the same key the
- * other agents use; the side base itself is not an editable segment.
+ * other agents use. A final side-only style fragment keeps replies brief
+ * after the shared appendix; neither side-specific fragment is editable.
  */
 
 import fs from "node:fs";
@@ -25,6 +27,7 @@ import { readPromptOverride } from "./prompt-segments.ts";
 
 const PROMPTS_DIR = path.join(PATHS.root, "src", "agent", "prompts");
 const SIDE_BASE = path.join(PROMPTS_DIR, "side-chat", "00-base.md");
+const SIDE_STYLE = path.join(PROMPTS_DIR, "side-chat", "90-style.md");
 /** The shared appendix, in composition order (keys = override paths). */
 const SIDE_SHARED_FRAGMENTS = ["shared/10-voice.md", "shared/15-accuracy.md", "shared/40-formatting.md"];
 
@@ -44,6 +47,7 @@ export function composeSideChatInstructions(switches: Record<string, boolean> = 
 		const override = switches[key] === true ? readPromptOverride(key) : null;
 		segments.push(override ?? readSource(path.join(PROMPTS_DIR, ...key.split("/"))));
 	}
+	segments.push(readSource(SIDE_STYLE));
 	return segments
 		.map((s) => s.trim())
 		.filter(Boolean)

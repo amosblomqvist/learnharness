@@ -3,9 +3,9 @@
  * context, combined with #451's shared floating companion and selection.
  *
  * One explanation and its associated question share a tool-less helper
- * conversation. UI history lives in `ChatRecord.sideChats`; main submission
- * freezes its raw exchange into an attributed custom message. Later side
- * activity stays durable and interactable, but cannot alter teacher context.
+ * conversation. UI history lives in `ChatRecord.sideChats`; main requests
+ * append every thread's newly observed exchanges to native history. Published
+ * text never changes; later replies and continuations arrive as new entries.
  *
  * This module is the pure half: input validation, thread lookup, and the
  * side model's view of the lesson. The lesson is handed over as a QUOTED
@@ -93,27 +93,79 @@ export function sideEntryPoints(messages: readonly LhMessage[], view: readonly L
 	return new Map(view.filter((message) => message.role === "assistant").map((message) => [message.id, forParts(message.parts)]));
 }
 
-/** A frozen snapshot enters the native transcript exactly once. Later side
- * activity cannot alter it or append more teacher context for this segment. */
+function replyState(message: SideChatMessage): string {
+	return message.pending ? "pending" : message.stopped ? "stopped" : message.error !== undefined ? "failed" : "complete";
+}
+
+/** Delivery watermarks live IN immutable native entries, not in a mutable
+ * UI-thread cutoff. Recording text and its watermark is therefore one atomic
+ * write. Full native history survives compaction, so these stay recoverable.
+ * Legacy one-shot markers seed the same ledger without rewriting them. */
+function sideDeliveryLedger(messages: readonly LhMessage[]) {
+	const delivered = new Map<string, Map<string, SideChatMessage>>();
+	const revisions = new Map<string, number>();
+	for (const message of messages) {
+		if (message.role !== "custom" || message.customType !== "side-question" || !message.details || typeof message.details !== "object") continue;
+		const details = message.details as { threadId?: unknown; updates?: unknown; snapshot?: unknown };
+		if (typeof details.threadId !== "string") continue;
+		const updates = details.updates ?? details.snapshot;
+		if (!Array.isArray(updates)) continue;
+		const thread = delivered.get(details.threadId) ?? new Map<string, SideChatMessage>();
+		for (const update of updates) {
+			if (!update || typeof update.id !== "string" || typeof update.text !== "string" || !["user", "assistant"].includes(update.role)) continue;
+			const { append, ...entry } = update as SideChatMessage & { append?: boolean };
+			thread.set(entry.id, { ...entry, text: append ? (thread.get(entry.id)?.text ?? "") + entry.text : entry.text });
+		}
+		delivered.set(details.threadId, thread);
+		revisions.set(details.threadId, (revisions.get(details.threadId) ?? 0) + 1);
+	}
+	return { delivered, revisions };
+}
+
+/** Capture only new raw text/status from ALL side conversations. The caller
+ * supplies current helper snapshots, including in-flight text, at a main
+ * model-request or dismissal boundary. No helper completion waits and no changes to prior entries.
+ * `after` includes newly appended tool results, keeping their adjacency. */
 export function sideConversationEntries(record: Pick<ChatRecord, "messages" | "sideChats">, after: readonly LhMessage[] = record.messages): LhMarkerMessage[] {
+	const { delivered, revisions } = sideDeliveryLedger(after);
 	const present = new Set(after.map((message) => message.id));
-	return (record.sideChats ?? []).flatMap<LhMarkerMessage>((thread) => {
-		const id = `exchange_${thread.id}`;
-		const snapshot = thread.contextSnapshot;
-		if (!snapshot?.length || present.has(id)) return [];
-		const exchange = snapshot.map((message) => {
-			const quoted = (message.quotes ?? []).map((quote) => `Quoted tutor passage:\n${quote}`).join("\n\n");
-			const status = message.pending ? "\n[This helper reply was still generating when the learner submitted or dismissed this step.]" :
-				message.stopped ? "\n[The learner stopped this helper reply; it is incomplete.]" :
-				message.error ? "\n[This helper reply failed; any text above is incomplete.]" : "";
-			return `${quoted ? `${quoted}\n\n` : ""}${message.role === "user" ? "Learner" : "Helper"}:\n${message.text}${status}`;
-		}).join("\n\n");
-		return [{
+	const changes: { threadId: string; message: SideChatMessage; previous?: SideChatMessage }[] = [];
+	for (const thread of record.sideChats ?? []) {
+		const previous = delivered.get(thread.id);
+		const current = new Set(thread.messages.map((message) => message.id));
+		for (const message of thread.messages) {
+			const old = previous?.get(message.id);
+			if (!old || old.text !== message.text || replyState(old) !== replyState(message)) changes.push({ threadId: thread.id, message, previous: old });
+		}
+		// An already-published partial may outlive its ephemeral run after a
+		// restart/save failure. Mark it incomplete once; never silently drop it.
+		for (const old of previous?.values() ?? []) {
+			if (old.pending && !current.has(old.id)) changes.push({ threadId: thread.id, previous: old,
+				message: { ...old, pending: false, error: "Reply interrupted before completion", at: new Date().toISOString() } });
+		}
+	}
+	changes.sort((a, b) => (Date.parse(a.message.at) || 0) - (Date.parse(b.message.at) || 0));
+	return changes.map(({ threadId, message, previous }) => {
+		let revision = (revisions.get(threadId) ?? 0) + 1;
+		let id = `exchange_${threadId}_update_${revision}`;
+		while (present.has(id)) id = `exchange_${threadId}_update_${++revision}`;
+		present.add(id); revisions.set(threadId, revision);
+		const extendsPrevious = previous && message.text.startsWith(previous.text);
+		const text = !previous ? message.text : extendsPrevious ? message.text.slice(previous.text.length) : message.text;
+		const label = message.role === "user" ? "Learner" : "Helper";
+		const kind = !previous ? "" : previous.text === message.text ? " (reply status update)" : extendsPrevious ? " (continued reply)" : " (updated wording of the earlier reply)";
+		const quoted = !previous ? (message.quotes ?? []).map((quote) => `Quoted tutor passage:\n${quote}`).join("\n\n") : "";
+		const status = message.pending ? "\n[This helper reply is still generating; later text will arrive in a subsequent update.]" :
+			message.stopped ? "\n[The learner stopped this helper reply; it is incomplete.]" :
+			message.error !== undefined ? "\n[This helper reply failed or was interrupted; any recorded text is incomplete.]" :
+			previous?.pending ? "\n[This helper reply is now complete.]" : "";
+		return {
 			id, role: "custom", customType: "side-question",
-			content: `Recorded learner–helper conversation\nTeaching segment: ${thread.anchor.messageId}\nConversation: ${thread.id}\n\n${exchange}\n\nEnd of recorded learner–helper conversation.`,
-			details: { threadId: thread.id, segmentMessageId: thread.anchor.messageId, snapshot },
-			display: false, timestamp: Date.parse(snapshot.at(-1)!.at),
-		}];
+			content: `Recorded learner–helper conversation update\nConversation: ${threadId}\n\n${quoted ? `${quoted}\n\n` : ""}${label}${kind}:\n${text}${status}\n\nEnd of recorded learner–helper conversation update.`,
+			// Store only the new suffix in the ledger too, not a growing full
+			// reply copy on every request. Old snapshot entries still decode.
+			details: { threadId, updates: [{ ...message, text, append: extendsPrevious === true }] }, display: false, timestamp: Date.parse(message.at) || 0,
+		};
 	});
 }
 

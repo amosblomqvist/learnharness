@@ -129,16 +129,11 @@ function listChats(): ChatSummary[] {
 /** Persist the full native message list (the record IS the agent state —
  *  Wave B: replay is state.messages = record.messages). SILENT by the
  *  events law — see the SILENCE LAW comment at createChat. */
-function saveMessages(id: string, messages: LhMessage[], sideContextSnapshots?: readonly SideChatThread[]): void {
+function saveMessages(id: string, messages: LhMessage[]): void {
 	const record = getChat(id);
 	if (!record) throw new Error(`Chat not found: ${id}`);
-	if (sideContextSnapshots && record.sideChats) {
-		// Same atomic write as main submission. Never overwrite a previous
-		// cutoff or the live UI history that can keep growing afterwards.
-		const snapshots = new Map(sideContextSnapshots.map((thread) => [thread.id, thread.contextSnapshot]));
-		record.sideChats = record.sideChats.map((thread) => thread.contextSnapshot !== undefined || !snapshots.has(thread.id)
-			? thread : { ...thread, contextSnapshot: snapshots.get(thread.id) ?? [] });
-	}
+	// Side-delivery watermarks are part of the appended native entries,
+	// so input + updates commit together without mutating thread history.
 	record.messages = messages;
 	record.updatedAt = new Date().toISOString();
 	writeChat(record);

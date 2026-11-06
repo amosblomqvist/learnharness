@@ -230,7 +230,24 @@ describe("side instructions", () => {
 		assert.match(prompt, /## Voice/);
 		assert.match(prompt, /## Accuracy/);
 		assert.match(prompt, /## Formatting/);
+		assert.match(prompt, /normally one or two short sentences in plain prose/);
+		assert.ok(prompt.indexOf("## Side-answer brevity") > prompt.indexOf("## Formatting"), "side-specific brevity wins over the shared appendix");
+		assert.match(prompt, /Use the supplied context; don't claim to have inspected files or images that weren't provided/);
+		assert.doesNotMatch(prompt, /one to three|You have no tools/);
 		assert.doesNotMatch(prompt, /probe_done|plan_init/, "no teaching base or tool doctrine");
+	});
+	it("keeps side brevity last while still honoring enabled shared overrides", async () => {
+		const { PROMPTS_OVERRIDE_DIR } = await import("../config.ts");
+		assert.ok(PROMPTS_OVERRIDE_DIR.startsWith(TMP_DATA + path.sep));
+		const file = path.join(PROMPTS_OVERRIDE_DIR, "shared", "10-voice.md");
+		fs.mkdirSync(path.dirname(file), { recursive: true });
+		fs.writeFileSync(file, "OVERRIDE VOICE: a deliberately lengthy style.");
+		try {
+			const prompt = composeSideChatInstructions({ "shared/10-voice.md": true });
+			assert.match(prompt, /OVERRIDE VOICE/);
+			assert.ok(prompt.indexOf("## Side-answer brevity") > prompt.indexOf("OVERRIDE VOICE"));
+			assert.doesNotMatch(composeSideChatInstructions(), /OVERRIDE VOICE/);
+		} finally { fs.rmSync(file); }
 	});
 });
 
