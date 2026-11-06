@@ -56,6 +56,8 @@ export interface EffectiveSlot {
 	provider: string;
 	id: string;
 	thinkingLevel?: ThinkingLevel;
+	/** OpenAI Fast — saved with this slot's model. */
+	fast?: true;
 }
 
 /** A fully-resolved model pin for one role — same shape/level semantics
@@ -65,6 +67,9 @@ export interface EffectiveModelSpec {
 	provider: string;
 	id: string;
 	thinkingLevel?: ThinkingLevel;
+	/** OpenAI Fast — follows the model it was saved with, never borrowed
+	 *  onto another chain link's model. */
+	fast?: true;
 }
 
 /** The concrete appearance view — same shape as the factory's. */
@@ -114,10 +119,12 @@ export function resolveConversationSpec(
 ): EffectiveModelSpec | null {
 	const model = chat?.model ?? (strong ? { provider: strong.provider, id: strong.id } : undefined);
 	if (!model) return null;
+	const fast = chat?.model ? chat.fast : strong?.fast;
 	return {
 		provider: model.provider,
 		id: model.id,
 		thinkingLevel: chat?.thinkingLevel ?? strong?.thinkingLevel,
+		...(fast ? { fast } : {}),
 	};
 }
 
@@ -141,6 +148,7 @@ export function resolveSlot(slot: ModelSlot | undefined): EffectiveSlot | null {
 	if (!slot?.model) return null;
 	return {
 		provider: slot.model.provider, id: slot.model.id, thinkingLevel: slot.thinkingLevel,
+		...(slot.fast ? { fast: slot.fast } : {}),
 		...(slot.cacheRetention !== undefined ? { cacheRetention: slot.cacheRetention } : {}),
 	};
 }
@@ -160,10 +168,12 @@ export function resolveModelSpec(
 	const slot = slotName ? slots?.[slotName] : undefined;
 	const model = override?.model ?? slot?.model;
 	if (!model) return undefined;
+	const fast = override?.model ? override.fast : slot?.fast;
 	return {
 		provider: model.provider,
 		id: model.id,
 		thinkingLevel: override?.thinkingLevel ?? slot?.thinkingLevel,
+		...(fast ? { fast } : {}),
 	};
 }
 

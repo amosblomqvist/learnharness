@@ -38,6 +38,8 @@ export interface ModelCatalogEntry {
 export interface CatalogDefaults {
 	model: { provider: string; id: string };
 	thinkingLevel?: ThinkingLevel;
+	/** ChatGPT Fast pin (service_tier "priority"); follows the model. */
+	fast?: true;
 }
 
 /** One background role's RESOLVED pin (BYOK, owner 2026-09-22): what that
@@ -46,7 +48,7 @@ export interface CatalogDefaults {
  *  settings UI shows "not configured" from it. */
 export type RolePins = Record<
 	BackgroundModelRole,
-	{ model: { provider: string; id: string }; thinkingLevel?: ThinkingLevel } | null
+	{ model: { provider: string; id: string }; thinkingLevel?: ThinkingLevel; fast?: true } | null
 >;
 
 /** One slot tier's RESOLVED pin (BYOK, owner 2026-09-22): NULL = the tier

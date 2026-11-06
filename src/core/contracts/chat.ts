@@ -80,6 +80,9 @@ export interface ChatSettings {
 	/** pi thinking level — must be in the chosen model's supported list
 	 *  (getSupportedThinkingLevels; enforced by the settings route). */
 	thinkingLevel?: ThinkingLevel;
+	/** OpenAI Fast (service_tier "priority") for a ChatGPT-account model —
+	 *  rides `model` (enforced by the settings route); absent = standard. */
+	fast?: true;
 }
 
 

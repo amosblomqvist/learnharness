@@ -268,3 +268,35 @@ describe("the graph channel gates (the wave's seam honoring)", () => {
 		assert.deepEqual(off.agent.graphTools, { enabled: false });
 	});
 });
+describe("Fast follows the model it was saved with (OpenAI Fast mode, S6/S9)", () => {
+	const sol = { provider: "chatgpt", id: "gpt-6.1-sol" };
+	const mini = { provider: "chatgpt", id: "gpt-6.1-mini" };
+
+	it("resolveSlot carries a slot's fast", () => {
+		assert.deepEqual(resolveSlot({ model: sol, fast: true }), { provider: "chatgpt", id: "gpt-6.1-sol", thinkingLevel: undefined, fast: true });
+	});
+
+	it("conversation chain: the chat's model brings its own fast; no chat model borrows the strong slot's", () => {
+		const strong = resolveSlot({ model: sol, fast: true });
+		assert.equal(resolveConversationSpec({ model: mini }, strong)?.fast, undefined);
+		assert.equal(resolveConversationSpec({ model: mini, fast: true }, resolveSlot({ model: sol }))?.fast, true);
+		assert.equal(resolveConversationSpec({ thinkingLevel: "low" }, strong)?.fast, true);
+		assert.equal(resolveConversationSpec(undefined, strong)?.fast, true);
+	});
+
+	it("role chain: the override's model brings its own fast; a model-less override borrows the slot's", () => {
+		const slots = { cheap: { model: sol, fast: true as const } };
+		assert.equal(resolveModelSpec("researcher", { model: mini }, slots)?.fast, undefined);
+		assert.equal(resolveModelSpec("researcher", { model: mini, fast: true }, { cheap: { model: sol } })?.fast, true);
+		assert.equal(resolveModelSpec("researcher", { thinkingLevel: "low" }, slots)?.fast, true);
+		assert.equal(resolveRoleSpec("auditor", { version: 1, models: slots })?.fast, true);
+		assert.equal(resolveSettings({ version: 1, models: slots }).agent.models.extractor?.fast, true);
+	});
+
+	it("specs without fast carry no fast key (S9)", () => {
+		const slots = { strong: { model: sol }, cheap: { model: sol } };
+		assert.equal("fast" in resolveSlot(slots.strong)!, false);
+		assert.equal("fast" in resolveConversationSpec({ model: mini }, resolveSlot(slots.strong))!, false);
+		assert.equal("fast" in resolveModelSpec("researcher", undefined, slots)!, false);
+	});
+});
