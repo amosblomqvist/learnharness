@@ -24,6 +24,7 @@ import type {
 	Position,
 	CoverageEntry,
 	SessionCheckpoint,
+	SideChatThread,
 	TurnUsage,
 	NotesSource,
 } from "./contracts.ts";
@@ -69,6 +70,14 @@ export interface ChatStore {
 	 *  job cleanup are the caller's choreography (core/graph-deletion.ts +
 	 *  the DELETE route), not the store's. */
 	deleteChat(id: string): boolean;
+	/** Read-modify-write the record's side-question threads (inline
+	 *  clarification threads, 2026-11-02) in one synchronous section — the
+	 *  same per-field discipline as the usage logs, so it never clobbers a
+	 *  concurrent turn's messages. Returns the stored threads, or null when
+	 *  the chat is unknown (deleted mid-answer is not an error). Silent: the
+	 *  side-chat service announces its own changes. Not conversation
+	 *  activity — updatedAt stays put. */
+	updateSideChats(id: string, update: (threads: SideChatThread[]) => SideChatThread[]): SideChatThread[] | null;
 }
 
 // ─── GraphStore — the append-only evidence ledgers (data/graph) ──────────────
