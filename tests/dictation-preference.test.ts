@@ -108,3 +108,59 @@ test("capture also waits for a write initiated as a pending read publishes its r
 	assert.equal(await store.getLanguage(), "multi");
 	off();
 });
+
+
+test("cloud language writes preserve confirmed local provider configuration", async () => {
+	const local = { server: "llama.cpp", url: "http://localhost:8080/v1/audio/transcriptions", model: "lfm3" };
+	let written: unknown;
+	const store = createDictationLanguageStore(async (_url, init) => {
+		if (init?.method === "PUT") {
+			written = JSON.parse(init.body as string);
+			return Response.json({ settings: { version: 1, dictation: written } });
+		}
+		return Response.json({ settings: { version: 1, dictation: { language: "en", provider: "local", local } } });
+	});
+	await store.load();
+	await store.save("pl");
+	assert.deepEqual(written, { language: "pl", provider: "local", local });
+	assert.deepEqual(await store.getSettings(), written);
+});
+
+
+test("deleting local settings shares the write gate, updates cached readers, and keeps active selection", async () => {
+	let release!: (response: Response) => void;
+	const pending = new Promise<Response>((resolve) => { release = resolve; });
+	const local = { server: "whisper.cpp", url: "http://localhost:8081/inference" };
+	let reads = 0;
+	const store = createDictationLanguageStore(async (url, init) => {
+		if (init?.method === "DELETE") {
+			assert.equal(url, "/api/stt/local");
+			assert.deepEqual(JSON.parse(init.body as string), { local });
+			return pending;
+		}
+		reads++;
+		return Response.json({ settings: { version: 1, dictation: { provider: "local", language: "pl", local } } });
+	});
+	await store.load();
+	const deleting = store.deleteLocal();
+	assert(store.getSnapshot().saving);
+	assert.equal(await store.save("en"), false);
+	let resolved = false;
+	const ready = store.getSettings().then((settings) => { resolved = true; return settings; });
+	await Promise.resolve(); assert.equal(resolved, false);
+	release(Response.json({ settings: { version: 1, dictation: { provider: "local", language: "pl" } } }));
+	assert.equal(await deleting, true);
+	assert.deepEqual(await ready, { provider: "local", language: "pl" });
+	assert.equal(reads, 1, "confirmed deletion needs no extra settings fetch");
+	assert.equal(await store.deleteLocal(), false);
+});
+
+test("a failed delete retains the previous confirmed local configuration", async () => {
+	const dictation = { provider: "local", language: "en", local: { server: "llama.cpp", url: "http://localhost:8080/v1/audio/transcriptions" } };
+	const store = createDictationLanguageStore(async (_url, init) => init?.method === "DELETE"
+		? Response.json({ error: "disk unavailable" }, { status: 500 })
+		: Response.json({ settings: { version: 1, dictation } }));
+	await store.load();
+	assert.equal(await store.deleteLocal(), false);
+	assert.deepEqual(await store.getSettings(), dictation);
+});
