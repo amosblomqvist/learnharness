@@ -33,9 +33,12 @@ Nonsecret settings are deltas in `<data root>/settings.json`; absent values reso
 | `TAVILY_API_KEY`, `BRAVE_API_KEY`, `EXA_API_KEY`, `FIRECRAWL_API_KEY`, `OLLAMA_API_KEY` | Optional search adapters. Without a Settings pin, the first keyed engine wins: Tavily → Brave → Exa → Firecrawl → Ollama. A pinned engine requires its own key; no silent fallback. Ollama search is hosted at ollama.com, not a local model server. Page fetching is independent; research can fetch known URLs without a search key. |
 | `DEEPGRAM_API_KEY` | Optional dictation token minting (the default dictation engine). |
 | `GROQ_API_KEY` | The Groq model-provider key. Also used by Groq dictation (`POST /api/stt/transcribe`) when Settings → Dictation → Engine is Groq; no separate dictation key. |
+| `LH_STT_DEBUG` | Set to `1` to print the on-device engine's own log lines on the server console while debugging Local dictation. Warnings and errors always print. |
 | `CHROME_PATH` | Chrome/Chromium executable fallback for demo verification; Electron's browser helper is primary. No extra Chromium is downloaded. |
 
 Ordinary Next development can read `.env.local`. Real environment keys take precedence over saved keys. Saved auth is restrictive-permission plaintext, not an encrypted vault. Packaged Electron sets separate data/auth locations under `userData`; it does not use the repo development profile.
+
+Local (on-device) dictation stores downloaded models in `<LH_DATA_DIR>/stt-models/` and needs no key. Its native engine (`transcribe-cpp`, `koffi`) loads only when Local or the voice-pause check is first used; the Silero VAD model is bundled in `src/server/local-stt/`. Model downloads need `huggingface.co`; nothing else does. Tests fake the engine and the downloads; only Silero runs for real. User docs: [Dictation](getting-started.md#dictation); notices: [`local-stt-licenses.md`](local-stt-licenses.md).
 
 Provider-specific setup and limitations: [Claude Code](claude-code.md), [custom endpoints](custom-providers.md), [context/cost accounting](compaction-accounting.md).
 
@@ -101,6 +104,7 @@ Additional runtime gates have prerequisites:
 | --- | --- |
 | `node scripts/smoke-provider-runtime.mjs` | Fresh build; traced provider payload/runtime paths with fixtures. Also used during packaging. |
 | `node scripts/smoke-web-subscriptions.mjs` | Build, no dev server running; isolated synthetic connection checks, external traffic blocked. Briefly changes/restores a source mtime to exercise reload. |
+| `node scripts/smoke-local-stt-runtime.mjs` | Run after `build-server.mjs`; it also runs inside `smoke-server.mjs`. Checks the standalone payload loads `transcribe-cpp` from inside itself and runs the bundled Silero VAD. Accepts `--standalone <dir>` and `--runtime <binary>`. |
 | Other `scripts/smoke-*.mjs` | Standalone/native renderers, image workers, demo helper, compression, file paths, opening. Read each script and the [release guide](desktop-release.md) before running. |
 
 Run checks proportionate to the change. Offline gates prove exercised contracts, not live entitlements or model-authored lesson quality.
