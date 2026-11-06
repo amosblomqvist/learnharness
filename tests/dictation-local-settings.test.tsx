@@ -16,7 +16,7 @@ import { formatWait, licenseInfo, matchesModelSearch, showsChineseOutput } from 
 import { setDictationActive } from "../components/dictation-state.ts";
 import { notifySettingsSaved } from "../components/settings-signal.ts";
 import {
-	CATALOG_MODELS, GROQ_DICTATION_HEADER, LANGUAGE_DETECTION_MODEL, autoLanguagePolicy, getCatalogModel, languageAccuracyGrade,
+	CATALOG_MODELS, GROQ_DICTATION_HEADER, LANGUAGE_DETECTION_MODEL, autoLanguagePolicy, getCatalogModel, languageAccuracyGrade, languageForModel,
 	modelMatchesLanguage, modelWaitSeconds, recommendModels, requiresLanguageDetector, speedMeterLevel,
 	type LocalModelStatus, type MachineTier, type UserSettings,
 } from "../src/core/index.ts";
@@ -197,6 +197,52 @@ test("the engine select offers Local, and the Local rows show only for Local", a
 	assert.equal(byTest("row-dictation-language"), null, "Local replaces the single Language row with its own rows");
 	assert.equal(byTest("dictation-setup-hint")!.getAttribute("data-engine"), "local");
 	assert.equal(f.lists >= 1, true);
+});
+
+test("Local's note sits directly under the Engine select, before the language rows and the model list, and shows once", async () => {
+	fixture({ dictation: local() });
+	await mount(<Rows />);
+	const hints = document.querySelectorAll('[data-testid="dictation-setup-hint"]');
+	assert.equal(hints.length, 1);
+	const hint = hints[0]!;
+	assert.equal(hint.getAttribute("data-engine"), "local");
+	assert.equal(must("row-dictation-engine").nextElementSibling, hint, "right after the Engine row");
+	const FOLLOWING = 4; // DOCUMENT_POSITION_FOLLOWING
+	assert.ok(hint.compareDocumentPosition(must("row-local-languages")) & FOLLOWING);
+	assert.ok(hint.compareDocumentPosition(must("local-models")) & FOLLOWING);
+	assert.equal(must("row-local-languages").compareDocumentPosition(hint) & FOLLOWING, 0, "and not the other way round");
+});
+
+test("a model with one language gets no transcription language row, and its language still works end to end", async () => {
+	const english = getCatalogModel("parakeet-unified-en-0.6b")!;
+	assert.deepEqual([...new Set(english.languages)], ["en"]);
+	assert.equal(autoLanguagePolicy(english, ["en"]).kind, "unsupported", "Auto is not offered for one language");
+	assert.equal(languageForModel("auto", english, ["de"]), "en", "so the language resolves to the model's own");
+
+	const f = fixture({ dictation: local({ localPreferredLanguages: ["de"] }), installed: [english.id] });
+	await mount(<Rows />);
+	await typeInto("local-model-filter", english.id);
+	await click(within(rowOf(english.id), `local-model-${english.id}-use`)!);
+	assert.deepEqual(f.puts.at(-1), { language: "en", provider: "local", localPreferredLanguages: ["de"], localModel: english.id, localLanguage: "en" },
+		"Use stores the one language instead of Auto");
+	assert.equal(byTest("row-local-language"), null, "nothing to choose, so no row");
+	assert.equal(rowOf(english.id).getAttribute("data-phase"), "in-use");
+
+	// A record that still says Auto (from before the model was chosen) shows the same and is not an error.
+	await act(async () => { root!.unmount(); });
+	host!.remove();
+	fixture({ dictation: local({ localModel: english.id, localLanguage: "auto" }), installed: [english.id] });
+	await mount(<Rows />);
+	assert.equal(byTest("row-local-language"), null);
+	assert.equal(byTest("dictation-local-error"), null);
+
+	// A model with several languages still gets the row.
+	const turbo = getCatalogModel("whisper-small")!;
+	await act(async () => { root!.unmount(); });
+	host!.remove();
+	fixture({ dictation: local({ localModel: turbo.id }), installed: [turbo.id] });
+	await mount(<Rows />);
+	assert.ok(byTest("row-local-language"));
 });
 
 test("the preferred languages follow the dictation language until changed, and Multilingual starts at English", async () => {

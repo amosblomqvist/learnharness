@@ -559,6 +559,17 @@ export function DictationLanguageRows() {
 	return provider === "local" ? <DictationLocalSettings /> : <DictationLanguageSetting />;
 }
 
+/** The setup note for Local. It shows right under the Engine select, ahead of the rows below it. */
+function LocalSetupHint() {
+	return (
+		<p data-testid="dictation-setup-hint" data-engine="local" className="px-1 text-[11px] leading-relaxed text-muted-foreground/70">
+			Local transcribes on this computer with a speech model you download once, so your audio never leaves
+			it and no key or internet connection is needed to dictate. The first dictation after choosing a model
+			takes a little longer while it loads.
+		</p>
+	);
+}
+
 export function DictationLocalSettings() {
 	const preference = useDictationLanguage();
 	const active = useDictationActive();
@@ -578,6 +589,7 @@ export function DictationLocalSettings() {
 	const save = async (patch: Parameters<typeof saveLocal>[0]) => { const ok = await saveLocal(patch); setFailed(!ok); return ok; };
 
 	return <>
+		<LocalSetupHint />
 		<PreferredLanguagesRow
 			selected={preferred}
 			disabled={locked}
@@ -589,7 +601,8 @@ export function DictationLocalSettings() {
 			})}
 		/>
 
-		{model && <TranscriptionLanguageRow
+		{/* A model with one language has nothing to choose. Use stores that language (languageForModel), and a stored "auto" resolves to it on the server. */}
+		{model && transcriptionChoices(model, preferred).choices.length > 1 && <TranscriptionLanguageRow
 			model={model}
 			preferred={preferred}
 			value={chosenLanguage}

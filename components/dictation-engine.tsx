@@ -78,15 +78,9 @@ export function DictationSetupHint() {
 			</p>
 		);
 	}
-	if (provider === "local") {
-		return (
-			<p data-testid="dictation-setup-hint" data-engine="local" className={className}>
-				Local transcribes on this computer with a speech model you download once, so your audio never leaves
-				it and no key or internet connection is needed to dictate. The first dictation after choosing a model
-				takes a little longer while it loads.
-			</p>
-		);
-	}
+	// Local's note sits directly under the Engine select, before its rows and model list, so
+	// settings/dictation-local.tsx renders it there instead.
+	if (provider === "local") return null;
 	return (
 		<p data-testid="dictation-setup-hint" className={className}>
 			Create a <a
