@@ -381,3 +381,99 @@ test("expected transport errors are typed; arbitrary handler failures remain ser
 	await assert.rejects(f.host.call("example", "missing"), status(404));
 	await assert.rejects(f.host.call("example", "../bad"), status(400));
 });
+
+const documentResult = { name: "lesson.txt", markdown: "A local fact.", notices: [] as string[] };
+const documentRequest = (signal?: AbortSignal) => {
+	const form = new FormData(); form.append("file", new File([documentResult.markdown], documentResult.name));
+	return new Request("http://localhost/api/plugins/example/documents/markdown", { method: "POST", body: form, signal });
+};
+function deferredDocument() {
+	let resolve!: (value: typeof documentResult) => void;
+	const promise = new Promise<typeof documentResult>(yes => { resolve = yes; });
+	return { promise, resolve };
+}
+
+test("document conversion requires a live plugin before consuming the upload and does not require a backend", async t => {
+	const f = fixture(t);
+	const code = f.plugin("example", { backend: undefined, main: "main.js" });
+	fs.writeFileSync(path.join(code, "main.js"), "export function activate() {}");
+	let calls = 0;
+	f.deps.convertDocument = async (request, signal) => {
+		calls++; assert.equal(signal.aborted, false);
+		const form = await request.formData(); assert.ok(form.get("file") instanceof File);
+		return documentResult;
+	};
+	await f.host.initialize();
+	for (const [id, expected] of [["missing", 404], ["example", 409]] as const) {
+		const request = documentRequest();
+		await assert.rejects(f.host.convertDocument(id, request), status(expected));
+		assert.equal(request.bodyUsed, false);
+	}
+	assert.equal(calls, 0);
+	await f.host.setEnabled("example", true);
+	assert.deepEqual(await f.host.convertDocument("example", documentRequest()), documentResult);
+	assert.equal(calls, 1);
+	assert.equal(f.servicesCreated(), 0, "pure conversion never constructs model/graph/backend services");
+	assert.equal(fs.existsSync(path.join(path.dirname(code), "data")), false, "conversion does not create plugin storage");
+	assert.equal(isPluginHostError(new PluginHostError(413, "Too large")), true);
+});
+
+test("document conversion refuses failed activation and an unavailable converter without reading a body", async t => {
+	const f = fixture(t); f.plugin("example", {}, "exports.activate = () => { throw Error('broken'); };");
+	await f.host.initialize(); await f.host.setEnabled("example", true);
+	const request = documentRequest();
+	await assert.rejects(f.host.convertDocument("example", request), status(409));
+	assert.equal(request.bodyUsed, false);
+	f.plugin("frontend", { backend: undefined, main: "main.js" });
+	fs.writeFileSync(path.join(f.directory, "frontend", "dist", "main.js"), "export function activate() {}");
+	await f.host.refresh(); await f.host.setEnabled("frontend", true);
+	const other = documentRequest();
+	await assert.rejects(f.host.convertDocument("frontend", other), status(503));
+	assert.equal(other.bodyUsed, false);
+});
+
+test("document conversion captures activation ownership and rejects stale success after disable/re-enable", async t => {
+	const f = fixture(t); f.plugin();
+	await f.host.initialize(); await f.host.setEnabled("example", true);
+	const pending = deferredDocument();
+	let captured!: AbortSignal;
+	f.deps.convertDocument = async (_request, signal) => { captured = signal; return pending.promise; };
+	const rejected = assert.rejects(f.host.convertDocument("example", documentRequest()), status(409));
+	assert.equal(captured.aborted, false);
+	await f.host.setEnabled("example", false);
+	assert.equal(captured.aborted, true);
+	await f.host.setEnabled("example", true);
+	pending.resolve(documentResult); await rejected;
+	f.deps.convertDocument = async () => documentResult;
+	assert.deepEqual(await f.host.convertDocument("example", documentRequest()), documentResult);
+});
+
+test("document conversion combines request abort with activation lifetime and rejects late results", async t => {
+	const f = fixture(t); f.plugin();
+	await f.host.initialize(); await f.host.setEnabled("example", true);
+	const caller = new AbortController(), pending = deferredDocument();
+	let captured!: AbortSignal;
+	f.deps.convertDocument = async (_request, signal) => { captured = signal; return pending.promise; };
+	const rejected = assert.rejects(f.host.convertDocument("example", documentRequest(caller.signal)), status(409));
+	caller.abort(); assert.equal(captured.aborted, true);
+	pending.resolve(documentResult); await rejected;
+	assert.equal(f.host.list()[0]!.status, "active");
+	let called = false;
+	f.deps.convertDocument = async () => { called = true; return documentResult; };
+	const request = documentRequest(caller.signal);
+	await assert.rejects(f.host.convertDocument("example", request), status(409));
+	assert.equal(called, false); assert.equal(request.bodyUsed, false);
+});
+
+test("document conversion preserves ordinary conversion errors and host disposal invalidates in-flight work", async t => {
+	const f = fixture(t); f.plugin();
+	await f.host.initialize(); await f.host.setEnabled("example", true);
+	const error = new PluginHostError(413, "Converted Markdown exceeds 2 MiB.");
+	f.deps.convertDocument = async () => { throw error; };
+	await assert.rejects(f.host.convertDocument("example", documentRequest()), e => e === error);
+	const pending = deferredDocument(); let captured!: AbortSignal;
+	f.deps.convertDocument = async (_request, signal) => { captured = signal; return pending.promise; };
+	const rejected = assert.rejects(f.host.convertDocument("example", documentRequest()), status(503));
+	await f.host.dispose(); assert.equal(captured.aborted, true);
+	pending.resolve(documentResult); await rejected;
+});

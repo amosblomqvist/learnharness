@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { ConfidenceRail } from "@/components/confidence-rail";
 import { GlyphMark } from "@/components/ui/glyph-mark";
+import { StatusBadge } from "@/components/ui/status-badge";
 import { SubmittedImages } from "./submitted-images";
 import { ThinkingBlock } from "@/components/thinking-block";
 import { PathText } from "@/components/file-path-chip";
@@ -81,11 +82,11 @@ export function AnsweredCard({ answer: savedAnswer, input }: { answer: QuestionA
 											: "Question"}
 				{isQuiz &&
 					(answer.dontKnow ? (
-						<span className="rounded bg-muted px-1.5 py-0.5">didn't know</span>
+						<StatusBadge text="didn't know" />
 					) : answer.correct ? (
-						<span className="rounded bg-green-500/15 px-1.5 py-0.5 text-green-500">correct</span>
+						<StatusBadge text="correct" color="var(--color-green-500)" />
 					) : (
-						<span className="rounded bg-red-500/15 px-1.5 py-0.5 text-red-500">incorrect</span>
+						<StatusBadge text="incorrect" color="var(--color-red-500)" />
 					))}
 			</div>
 			<div className="mb-3 font-medium">

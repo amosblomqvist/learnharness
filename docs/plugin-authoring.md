@@ -218,7 +218,7 @@ handle with `update(partialProps)` and idempotent `dispose()`. Updates shallow-m
 props; for a preset, supply a complete replacement for any nested props you change.
 Aborting the mount signal or disabling the plugin disposes its widgets and overlays.
 Callbacks may return Promises; errors are surfaced rather than treated as success.
-The API has 14 methods, including the implemented and verified `mountTree` increment.
+The API has 15 methods, including `mountTree` and the generic `mountBadge` primitive.
 
 | Method | Controlled inputs and callbacks |
 | --- | --- |
@@ -229,6 +229,7 @@ The API has 14 methods, including the implemented and verified `mountTree` incre
 | `mountDictation(container, props, options)` | `onTranscript(text)`, optional `disabled`; handle also has `toggle()`, `finish(): Promise<void>`, `cancel()` |
 | `mountStandardComposer(container, props, options)` | `{ composer, model, thinking, dictation }`, using the independent controls' props |
 | `mountButton(container, props, options)` | `label`, `onClick`; optional `icon` (trusted SVG string), `iconOnly`, `disabled`, `variant` (including `custom`), `colors`, `size`, `title` |
+| `mountBadge(container, props, options)` | `text: string`; optional `color` supplies text color and a 15% background tint; omitted color is neutral |
 | `mountSettingsRows(container, schema, options)` | `{ rows }`, as below |
 | `mountWorkerResult(container, props, options)` | `label`, terminal `status`, `text`, optional `content`, `presentation` |
 | `mountMarkdown(container, props, options)` | `text: string`; static complete Markdown through the actual host pipeline, built-ins only |
@@ -372,6 +373,38 @@ No arbitrary CSS properties, selectors, geometry, opacity or keyboard overrides 
 exposed. The host implements the colors on the actual native Button; do not style its
 private descendants or depend on private host CSS-variable names. This additive API v1
 extension adds no UI method or dependency and leaves existing variants unchanged.
+
+### Generic badges
+
+Use `ctx.ui.mountBadge(container, { text, color? }, { signal })` for the same badge
+component used by native correct/incorrect and practice-outcome labels. It returns
+`PluginWidgetHandle<PluginBadgeProps>` with the usual shallow `update` and `dispose`
+methods. Native compact uppercase typography, padding and rounded shape are
+self-contained; plugin surroundings do not need to reproduce the header styles.
+
+```js
+const badge = ctx.ui.mountBadge(container, {
+  text: "Tests passed",
+  color: "#22c55e"
+}, { signal });
+badge.update({ text: "Any outcome", color: "var(--plugin-accent)" });
+badge.update({ color: undefined }); // Keep the text; restore the neutral treatment.
+```
+
+`text` is required plain text, not Markdown, HTML or a renderer. `color` is one
+nonblank CSS color, including CSS variables, `currentColor` and color expressions;
+it sets the text color and the background uses `color-mix(in oklab, color 15%, transparent)`.
+Omit it for native muted text/background. Invalid text types or color syntax reject
+live mount/update atomically. CSS-wide property keywords such as `inherit` are not
+color-mix operands and are refused. Syntax validation does not check variable
+resolution or contrast; the plugin owns those decisions.
+
+This is a generic noninteractive display primitive: no grade/status enum, scoring,
+automatic placement, click handler or live announcement. It does not interpret a
+grading result or persist anything. Plugins decide what text and color to display,
+and where to mount it; it is not restricted to question renderers. The Buttons
+family in UI Showcase includes neutral and colored examples. This additive API v1
+method needs no new dependency or version bump.
 
 ### Static Markdown
 
@@ -619,6 +652,73 @@ const registration = ctx.registerSettings({ rows: rows(saved.enabled) });
 A custom settings mount can likewise retain a `mountSettingsRows` handle and update
 accepted rows. Do not assume mutating a schema object creates a reactive store or
 that a failed write changed the saved value.
+
+## Convert an uploaded document
+
+Frontend-only `ctx.documents.toMarkdown(file, options?)` accepts a browser `File` and
+returns `Promise<{ name: string; markdown: string; notices: string[] }>`. The
+`documents` context member is readonly. `options` supports only optional
+`signal: AbortSignal`; activation cancellation is automatic, and a caller signal can
+add a shorter lifetime such as a view mount. There is no backend `documents` member,
+named public document DTO/service/error type, error code, or discriminated outcome.
+Refusals and conversion failures reject the Promise with an `Error`. Caller cancellation
+honors the supplied `AbortSignal.reason` (normally an `AbortError`, but a caller may
+choose a different reason).
+
+Use a native file input, for example inside `mount(container, signal)` with `ctx` from
+activation (this does not assume a host file-picker API):
+
+```js
+const input = document.createElement("input");
+input.type = "file";
+input.setAttribute("aria-label", "Document to convert");
+const status = document.createElement("p");
+const output = document.createElement("pre");
+input.addEventListener("change", async () => {
+  const file = input.files?.[0]; // Browser File, not a path or URL.
+  if (!file) return;
+  try {
+    const result = await ctx.documents.toMarkdown(file, { signal });
+    if (signal.aborted) return;
+    output.textContent = result.markdown;
+    status.textContent = [result.name, ...result.notices].join("\n");
+  } catch (error) {
+    if (!signal.aborted) status.textContent = error instanceof Error ? error.message : "Conversion failed";
+  }
+}, { signal });
+container.append(input, status, output);
+```
+
+Omit the second argument when activation lifetime is sufficient. The host uses an
+internal multipart route, **not** the JSON `ctx.call` bridge; do not pass a `File`
+through `ctx.call` or construct a private route request. Disk paths, URLs, upload
+tokens and storage references are not inputs.
+
+Conversion is generic and deterministic:
+
+- A leading `%PDF-` signature **or** a `.pdf` filename suffix selects PDF parsing.
+  Invalid PDFs never fall back to text. PDFs use the exact native deterministic
+  `convertPdf` / `PdfPage` / `joinPages` engine and its page markers, not a second converter.
+  Mixed PDFs skip image-only pages with notices; an all-image PDF is refused because
+  OCR is unavailable, distinctly from a blank PDF.
+- Everything else is strict UTF-8 text, regardless of filename suffix or MIME type;
+  there is no text-extension whitelist. Binary, disallowed control content and empty
+  input are refused. Tab, LF and CR are allowed; other C0, DEL and C1 control
+  characters are refused. Text is returned as text, not converted from HTML or DOCX.
+- Limits are **25 MiB per file**, **26 MiB for the actual multipart body including
+  headers**, **1,000 PDF pages** (checked after the document opens), and **2 MiB of
+  final UTF-8 Markdown including page markers**. Oversize input/results are refused,
+  never truncated. The result cap is not a peak-memory bound.
+- Only **one conversion globally across plugins** is admitted; competing requests
+  fail fast with a busy message asking the caller to retry. There is no queue. The
+  slot is admitted before body buffering and remains held through underlying work
+  and document-destruction settlement, even after request cancellation.
+
+Cancellation is cooperative only. PDF fake-worker execution may parse synchronously;
+this helper promises no hard deadline, CPU bound, peak-memory bound or process
+isolation. It performs no OCR, model/provider calls, learning-graph changes, storage
+or temporary persistence. Conversion itself stores nothing; the user can subsequently
+choose to persist the returned text through the plugin's own backend.
 
 ## Backend and operation bridge
 

@@ -127,6 +127,16 @@ export function mountGallery(container: HTMLElement, ctx: PluginFrontendContext,
       const slot = example(sizes, `button-size-${size}`, size);
       life.widget(ui.mountButton(slot, { label: icon ? "+" : size, title: icon ? `Add example (${size})` : `${size} size`, size, variant: "outline", onClick() { clicks++; lastCallback = `size: ${size}`; render(); } }, { signal: life.signal }));
     }
+    note(body, "Badges use plugin-supplied text and a single color with a 15% background tint. These are static examples, not grading results.");
+    const badges = row(body);
+    for (const [id, props] of [
+      ["neutral", { text: "Neutral" }],
+      ["green", { text: "Tests passed", color: "#22c55e" }],
+      ["red", { text: "Tests failed", color: "#ef4444" }],
+      ["amber", { text: "With hints", color: "#f59e0b" }],
+    ] as const) {
+      life.widget(ui.mountBadge(example(badges, `badge-${id}`), props, { signal: life.signal }));
+    }
     button(ui, body, life, "button-disabled", { label: "Disabled", disabled: true, onClick() { throw new Error("Disabled example must not run"); } });
     const actions = row(body);
     button(ui, actions, life, "button-async", { label: "Start async example", onClick() {

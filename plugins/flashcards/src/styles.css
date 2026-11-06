@@ -2,6 +2,9 @@
 .fc-library { padding: 16px; max-width: 1100px; margin: 0 auto; }
 .fc-root .fc-toolbar, .fc-root .fc-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
 .fc-root .fc-toolbar { margin-bottom: 12px; }
+.fc-root .fc-file-status { margin: 0 0 12px; }
+.fc-root .fc-file-status:empty { display: none; }
+.fc-root .fc-file-name { overflow-wrap: anywhere; }
 .fc-root [hidden] { display: none !important; }
 .fc-root .fc-button, .fc-root .fc-picker { display: inline-flex; }
 .fc-root .fc-input { display: block; width: 100%; border: 1px solid var(--border, #8886); border-radius: 6px; padding: 7px 10px; background: var(--background, transparent); color: inherit; font: inherit; }

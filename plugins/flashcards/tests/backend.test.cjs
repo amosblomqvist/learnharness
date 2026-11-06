@@ -17,22 +17,22 @@ const result = (...rows) => ({ propositions: rows });
 // persistent tasks, explicit accepted-result validation, and no model execution.
 function workerService() {
   const tasks = new Map(), subscriptions = new Map(), waiters = new Map();
-  let definition, starts = 0;
+  const definitions = new Map(); let starts = 0;
   const terminal = task => ['succeeded', 'failed', 'cancelled', 'interrupted'].includes(task.status);
   const emit = task => {
     for (const listener of subscriptions.get(task.id) ?? []) listener(structuredClone(task));
     if (terminal(task)) for (const done of [...(waiters.get(task.id) ?? [])]) done();
   };
   const service = {
-    register(value) { definition = value; return () => {}; },
+    register(value) { definitions.set(value.id, value); return () => {}; },
     start(workerId, options) {
-      assert.equal(workerId, definition.id);
+      assert.ok(definitions.has(workerId));
       assert.equal(options.purpose, 'user');
       assert.ok(options.requestId);
       const prior = [...tasks.values()].find(task => task.requestId === options.requestId);
       if (prior) return structuredClone(prior);
       starts++;
-      const task = { id: randomUUID(), requestId: options.requestId, input: structuredClone(options.input), status: 'running', turns: 0, activity: 'waiting' };
+      const task = { id: randomUUID(), workerId, requestId: options.requestId, input: structuredClone(options.input), status: 'running', turns: 0, activity: 'waiting' };
       tasks.set(task.id, task);
       return structuredClone(task);
     },
@@ -60,12 +60,12 @@ function workerService() {
     service, tasks, get starts() { return starts; },
     stage(id, value) {
       const task = tasks.get(id);
-      definition.validateResult(value, { input: task.input });
+      definitions.get(task.workerId).validateResult(value, { input: task.input });
       task.result = structuredClone(value); emit(task);
     },
     complete(id, value, status = 'succeeded') {
       const task = tasks.get(id);
-      if (status === 'succeeded') definition.validateResult(value, { input: task.input });
+      if (status === 'succeeded') definitions.get(task.workerId).validateResult(value, { input: task.input });
       task.status = status;
       if (status === 'succeeded') task.result = structuredClone(value);
       else task.error = { message: 'Synthetic worker failure' };
@@ -77,7 +77,7 @@ function workerService() {
 function harness(t, initialGraph = graph('p1')) {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'flashcards-test-'));
   const workers = workerService();
-  const h = { graph: initialGraph, workers, directory, catalog: {
+  const h = { graph: initialGraph, workers, directory, catalogReads: 0, catalog: {
     slots: { cheap: { model: { provider: 'mock', id: 'cheap' }, thinkingLevel: 'off' } },
     models: [{ provider: 'mock', id: 'cheap', name: 'Mock cheap', supportedLevels: ['off', 'low'], contextWindow: 100000, maxTokens: 8192 }],
   } };
@@ -87,7 +87,7 @@ function harness(t, initialGraph = graph('p1')) {
     h.dispose(); handlers = new Map(); controller = new AbortController();
     activate({ dataDirectory: directory, signal: controller.signal,
       workers: workers.service, learning: { graph: () => structuredClone(h.graph) },
-      inference: { catalog: async () => structuredClone(h.catalog) },
+      inference: { catalog: async () => { h.catalogReads++; return h.resolveCatalog ? h.resolveCatalog() : structuredClone(h.catalog); } },
       events: { emit() {} }, handle: (name, handler) => handlers.set(name, handler),
       cleanup: fn => { assert.equal(typeof fn, 'function'); cleanups.push(fn); },
     });
@@ -101,6 +101,11 @@ function harness(t, initialGraph = graph('p1')) {
     await flush();
     const batch = h.state().batch;
     return batch.chunks.map(chunk => workers.service.list().find(task => task.requestId === chunk.requestId));
+  };
+  h.startFile = async (input, requestId = randomUUID()) => {
+    const plan = await h.call('preflight-file', input);
+    await h.call('start-generation', { preflightId: plan.id, requestId }); await flush();
+    return { plan, batch: h.state().batch, tasks: h.state().batch.chunks.map(c => workers.service.list().find(t => t.requestId === c.requestId)) };
   };
   h.complete = async (task, value, status) => { workers.complete(task.id, value, status); await flush(); };
   h.generate = async (...rows) => {
@@ -119,6 +124,244 @@ function harness(t, initialGraph = graph('p1')) {
   t.after(() => { h.dispose(); fs.rmSync(directory, { recursive: true, force: true }); });
   return h;
 }
+
+const fileFact = (name, statement, ...questions) => ({ name, statement, cards: questions.map(question => ({ question, answer: `Answer: ${question}` })) });
+const fileResult = (...facts) => ({ facts });
+const fileInput = () => ({ name: 'lesson.notes.md', markdown: 'UNIQUE SOURCE MARKDOWN\n\nThe original converted notes are retained separately.' });
+const chunkedFile = () => ({ name: 'notes.md', markdown: Array.from({ length: 4 }, (_, i) => `Section ${i}\n${'Text '.repeat(100)}\n\n`).join('') });
+
+test('file preflight is temporary and validates inputs before catalog access; confirmation creates one private source and deck even for zero facts', async t => {
+  const h = harness(t, graph());
+  for (const input of [{}, { name: '', markdown: 'x' }, { name: 'notes.md', markdown: '' }, { name: 'notes.md', markdown: 'a'.repeat(2 * 1024 * 1024 + 1) }, { name: 'notes.md', markdown: 123 }]) await assert.rejects(h.call('preflight-file', input));
+  assert.equal(h.catalogReads, 0); assert.deepEqual(fs.readdirSync(h.directory), []);
+  const input = fileInput(), graphBefore = structuredClone(h.graph), plan = await h.call('preflight-file', input);
+  assert.equal(plan.kind, 'file'); assert.equal(plan.name, input.name); assert.equal(plan.chunkCount, 1); assert.ok(plan.estimatedTokens > 0);
+  assert.deepEqual(fs.readdirSync(h.directory), []); assert.equal(h.workers.starts, 0); assert.equal(h.state().decks.length, 0);
+  const request = { preflightId: plan.id, requestId: 'confirmed-file' };
+  await h.call('start-generation', request); await flush();
+  const batch = h.state().batch, source = h.disk().fileSources[batch.sourceId];
+  assert.equal(batch.kind, 'file'); assert.equal(batch.name, input.name); assert.equal(batch.deckId, source.deckId);
+  assert.equal(h.state().decks.length, 1); assert.equal(h.state().decks[0].name, input.name);
+  const filename = path.join(h.directory, 'sources', `${source.id}.md`);
+  assert.equal(fs.readFileSync(filename, 'utf8'), input.markdown); assert.equal(fs.statSync(filename).mode & 0o777, 0o600);
+  assert.equal(fs.statSync(path.dirname(filename)).mode & 0o777, 0o700);
+  const ledger = fs.readFileSync(path.join(h.directory, 'flashcards.json'), 'utf8');
+  assert.equal(ledger.includes('UNIQUE SOURCE MARKDOWN'), false); assert.equal(ledger.includes('markdown'), false);
+  const task = h.workers.service.list()[0];
+  assert.equal(task.workerId, 'generate-file-facts-v1'); assert.equal(task.input.sourceId, source.id); assert.equal(task.input.markdown, input.markdown);
+  assert.throws(() => h.workers.stage(task.id, { facts: [{ name: 'Invalid', statement: 'No cue', cards: [] }] }), /at least one card/);
+  h.workers.stage(task.id, fileResult(fileFact('Unaccepted', 'Nonterminal results do not apply', 'Staged cue'))); await flush();
+  assert.equal(h.state().propositions.length, 0);
+  await h.call('start-generation', request); assert.equal(h.workers.starts, 1);
+  await assert.rejects(h.call('start-generation', { ...request, preflightId: 'another' }), /different work/);
+  await h.complete(task, fileResult());
+  assert.equal(h.state().batch.status, 'completed'); assert.equal(h.state().decks.length, 1); assert.equal(h.state().propositions.length, 0);
+  assert.deepEqual(h.graph, graphBefore);
+});
+
+test('file preflight rechecks duplicates after a deferred catalog resolves and cannot regenerate a concurrently confirmed file', async t => {
+  const h = harness(t, graph()), input = fileInput();
+  let release;
+  const deferred = new Promise(resolve => { release = resolve; });
+  h.resolveCatalog = () => h.catalogReads === 1 ? deferred : structuredClone(h.catalog);
+  const pending = h.call('preflight-file', input);
+  assert.equal(h.catalogReads, 1, 'first preflight is paused inside catalog resolution');
+  const confirmed = await h.startFile(input);
+  await h.complete(confirmed.tasks[0], fileResult(fileFact('Concurrent fact', 'Confirmed while catalog was pending', 'Concurrent cue')));
+  const before = h.disk(); assert.equal(h.state().batch.status, 'completed');
+  release(structuredClone(h.catalog));
+  const resumed = await pending;
+  assert.deepEqual(resumed, { existingSourceId: confirmed.batch.sourceId, deckId: confirmed.batch.deckId, name: input.name });
+  assert.equal(resumed.id, undefined, 'no second generation plan is offered');
+  assert.deepEqual(h.disk(), before); assert.equal(h.workers.starts, 1);
+  assert.equal(h.state().decks.length, 1); assert.equal(Object.keys(h.disk().fileSources).length, 1);
+  assert.equal(fs.readdirSync(path.join(h.directory, 'sources')).length, 1);
+  const reads = h.catalogReads;
+  assert.deepEqual(await h.call('preflight-file', input), resumed);
+  assert.equal(h.catalogReads, reads, 'normal duplicate reopening still bypasses model resolution');
+});
+
+test('file preflight rechecks active batches after a deferred catalog resolves', async t => {
+  const h = harness(t, graph());
+  let release;
+  const deferred = new Promise(resolve => { release = resolve; });
+  h.resolveCatalog = () => h.catalogReads === 1 ? deferred : structuredClone(h.catalog);
+  const pending = h.call('preflight-file', fileInput());
+  assert.equal(h.catalogReads, 1);
+  await h.startFile({ name: 'other.md', markdown: 'A different file confirmed during the pending catalog request.' });
+  const before = h.disk(); assert.equal(h.state().batch.status, 'running');
+  release(structuredClone(h.catalog));
+  await assert.rejects(pending, /generation batch is already active/);
+  assert.deepEqual(h.disk(), before); assert.equal(h.workers.starts, 1);
+  assert.equal(h.state().decks.length, 1); assert.equal(Object.keys(h.disk().fileSources).length, 1);
+});
+
+test('file facts stay live in empty graphs for filtered review, limits, shared schedules, ordering and statistics', async t => {
+  let now = +new Date(2026, 0, 2, 12); t.mock.method(Date, 'now', () => now);
+  const h = harness(t, graph()), { tasks } = await h.startFile(fileInput());
+  await h.complete(tasks[0], fileResult(fileFact('Fact one', 'First local statement', 'First cue', 'Alternate'), fileFact('Fact two', 'Second local statement', 'Second cue')));
+  const [one, two] = h.state().propositions, sourceDeck = h.state().decks[0];
+  assert.equal(one.origin, 'file'); assert.equal(one.sourceId, h.state().batch.sourceId); assert.equal(one.archived, false);
+  assert.deepEqual(h.state().statistics.states, { new: 2, learning: 0, review: 0, relearning: 0 });
+  await h.call('reorder', { kind: 'proposition', deckId: sourceDeck.id, id: two.id, direction: -1 });
+  assert.deepEqual(h.state().decks[0].propositionIds, [two.id, one.id]);
+  await h.call('save-deck', { id: sourceDeck.id, newLimit: 1 });
+  await h.call('create-deck', { name: 'Shared local facts' });
+  const shared = h.state().decks[1];
+  await h.call('set-memberships', { propositionId: one.id, deckIds: [sourceDeck.id, shared.id] });
+  const first = await h.grade({ cueIds: [one.cues[1].id] }, 1);
+  assert.equal(first.propositionId, one.id); assert.deepEqual(h.state().decks.map(d => d.newToday), [1, 1]);
+  assert.equal((await h.call('next-review', { deckIds: [sourceDeck.id] })).ticket, null);
+  assert.deepEqual(h.state().statistics.states, { new: 1, learning: 1, review: 0, relearning: 0 });
+  assert.equal(h.state().statistics.due[1].count, 1); assert.equal(h.state().statistics.activity.at(-1).count, 1);
+  now += 60000;
+  assert.equal((await h.grade({ deckIds: [sourceDeck.id], cueIds: [one.cues[1].id] }, 4)).cueId, first.cueId, 'due repetitions are uncapped and retain the pin');
+  h.activate();
+  assert.equal(h.state().propositions.find(p => p.id === one.id).archived, false);
+  assert.equal(h.state().propositions.find(p => p.id === one.id).schedule.reps, 2);
+  assert.equal(h.disk().reviews.filter(r => r.introduced).length, 1);
+  assert.deepEqual(h.graph, graph());
+});
+
+test('identical files reopen renamed decks without catalog access; missing collections restore facts without resetting review progress', async t => {
+  const h = harness(t, graph()), input = { name: '../../original.notes.md', markdown: 'Same converted source.' };
+  const { tasks } = await h.startFile(input);
+  await h.complete(tasks[0], fileResult(fileFact('Local', 'Local statement', 'Local cue')));
+  const source = Object.values(h.disk().fileSources)[0], p = h.state().propositions[0];
+  await h.grade({ propositionIds: [p.id] });
+  await h.call('save-deck', { id: source.deckId, name: 'My renamed collection', newLimit: 7 });
+  const before = h.disk(), reads = h.catalogReads; h.catalog.slots = {};
+  assert.deepEqual(await h.call('preflight-file', input), { existingSourceId: source.id, deckId: source.deckId, name: input.name });
+  assert.equal(h.catalogReads, reads); assert.deepEqual(h.disk(), before);
+  const opened = await h.call('open-file-deck', { sourceId: source.id });
+  assert.equal(opened.deckId, source.deckId); assert.equal(opened.state.decks[0].name, 'My renamed collection');
+  await h.call('create-deck', { name: 'Replacement' });
+  const replacement = h.state().decks.find(d => d.name === 'Replacement');
+  await h.call('delete-deck', { id: source.deckId, replacementDeckId: replacement.id });
+  assert.deepEqual(await h.call('preflight-file', input), { existingSourceId: source.id, name: input.name });
+  const progress = h.state().propositions[0].schedule, reviews = h.disk().reviews;
+  const restored = await h.call('open-file-deck', { sourceId: source.id });
+  const deck = restored.state.decks.find(d => d.id === source.deckId);
+  assert.equal(deck.name, 'My renamed collection'); assert.equal(deck.newLimit, 7); assert.deepEqual(deck.propositionIds, [p.id]);
+  assert.deepEqual(restored.state.propositions[0].schedule, progress); assert.deepEqual(h.disk().reviews, reviews); assert.equal(h.workers.starts, 1);
+  assert.deepEqual(fs.readdirSync(path.join(h.directory, 'sources')), [`${source.id}.md`], 'no user filename becomes a path');
+});
+
+test('same-source exact statements and questions collapse across chunks, preserving edits, tombstones and one schedule; changed content is a new source', async t => {
+  const h = harness(t, graph()), input = chunkedFile();
+  await h.call('save-settings', { chunkBudget: 1400 });
+  const { tasks } = await h.startFile(input); assert.ok(tasks.length > 1);
+  await h.complete(tasks[0], fileResult(fileFact('Original name', '  Shared statement  ', 'Original cue', 'Deleted cue')));
+  let p = h.state().propositions[0];
+  await h.call('save-cue', { propositionId: p.id, cueId: p.cues[0].id, question: 'Manual cue', answer: 'Manual answer', version: p.version });
+  p = h.state().propositions[0]; await h.call('delete-cue', { propositionId: p.id, cueId: p.cues[1].id, version: p.version });
+  await h.grade({ propositionIds: [p.id] });
+  const before = h.state().propositions[0], history = h.disk().reviews;
+  for (const task of tasks.slice(1)) await h.complete(task, fileResult(fileFact('Do not rename', 'Shared statement', 'Manual cue', 'Deleted cue', 'New cue')));
+  assert.equal(h.state().propositions.length, 1);
+  p = h.state().propositions[0]; assert.equal(p.name, 'Original name'); assert.deepEqual(p.schedule, before.schedule); assert.deepEqual(p.cues.slice(0, 2), before.cues);
+  assert.equal(p.cues.length, 3); assert.deepEqual(h.disk().reviews, history);
+  const changed = await h.startFile({ ...input, markdown: input.markdown + 'Changed.' });
+  for (const task of changed.tasks) await h.complete(task, fileResult(fileFact('Independent', 'Shared statement', 'Other-source cue')));
+  assert.equal(Object.keys(h.disk().fileSources).length, 2); assert.equal(h.state().decks.length, 2); assert.equal(h.state().propositions.length, 2);
+  assert.notEqual(h.state().propositions[0].sourceId, h.state().propositions[1].sourceId);
+});
+
+test('file retries cover only failed source spans with current settings and cannot replay spans applied by any retry', async t => {
+  const h = harness(t, graph()), input = chunkedFile();
+  await h.call('save-settings', { chunkBudget: 1400 });
+  const { tasks, batch } = await h.startFile(input); assert.equal(tasks.length, 2);
+  await h.complete(tasks[0], null, 'failed');
+  await h.complete(tasks[1], fileResult(fileFact('Accepted', 'Accepted original fact', 'Keep this cue')));
+  assert.equal(h.state().batch.status, 'partial'); assert.deepEqual(h.state().batch.failedChunkIds, [batch.chunks[0].id]); assert.deepEqual(h.state().batch.failedTargetIds, []);
+  const accepted = h.state().propositions[0]; await h.grade({ propositionIds: [accepted.id] });
+  const progress = h.state().propositions[0].schedule;
+  await h.call('save-settings', { chunkBudget: 1200, thinkingOverride: 'low' });
+  const retry = await h.call('preflight-file-retry', { batchId: batch.id }); assert.equal(retry.kind, 'file'); assert.ok(retry.chunkCount > 1);
+  await h.call('start-generation', { preflightId: retry.id, requestId: 'retry-failed-file' }); await flush();
+  const retried = h.state().batch; assert.equal(retried.sourceId, batch.sourceId); assert.equal(retried.deckId, batch.deckId);
+  for (const [index, chunk] of retried.chunks.entries()) {
+    assert.ok(chunk.start >= batch.chunks[0].start && chunk.end <= batch.chunks[0].end);
+    const task = h.workers.service.list().find(t => t.requestId === chunk.requestId);
+    assert.equal(task.input.markdown, input.markdown.slice(chunk.start, chunk.end));
+    if (index === 0) await h.complete(task, fileResult(fileFact('Retried', 'Retried fact', 'Accepted retry cue')));
+    else await h.complete(task, null, 'failed');
+  }
+  assert.equal(h.state().batch.status, 'partial');
+  const finalPlan = await h.call('preflight-file-retry', { batchId: batch.id });
+  await h.call('start-generation', { preflightId: finalPlan.id, requestId: 'retry-old-batch-unapplied-only' }); await flush();
+  for (const chunk of h.state().batch.chunks) {
+    assert.ok(chunk.start >= retried.chunks[0].end && chunk.end <= batch.chunks[0].end, 'old batch retry subtracts successful retry subspans');
+    const task = h.workers.service.list().find(t => t.requestId === chunk.requestId);
+    await h.complete(task, fileResult(fileFact('Retried', 'Retried fact', `Final cue ${chunk.start}`)));
+  }
+  assert.equal(h.state().batch.status, 'completed'); assert.equal(h.state().decks.length, 1);
+  assert.deepEqual(h.state().propositions.find(p => p.id === accepted.id).schedule, progress);
+  const starts = h.workers.starts;
+  await assert.rejects(h.call('preflight-file-retry', { batchId: batch.id }), /No failed file chunks/);
+  assert.equal(h.workers.starts, starts); assert.equal(h.disk().reviews.length, 1);
+  assert.equal(fs.readFileSync(path.join(h.directory, 'flashcards.json'), 'utf8').includes('Section 0'), false);
+});
+
+test('file cancellation fences late results, retains the source/deck, and retries cancelled spans after restart', async t => {
+  const h = harness(t, graph()), { tasks, batch } = await h.startFile(fileInput());
+  await h.call('cancel-generation', { batchId: batch.id });
+  await h.complete(tasks[0], fileResult(fileFact('Late', 'Should not apply', 'Late cue')));
+  assert.equal(h.state().batch.status, 'cancelled'); assert.equal(h.state().propositions.length, 0); assert.equal(h.state().decks.length, 1);
+  h.activate();
+  const retry = await h.call('preflight-file-retry', { batchId: batch.id });
+  await h.call('start-generation', { preflightId: retry.id, requestId: 'retry-cancelled' }); await flush();
+  const task = h.workers.service.list().find(t => t.requestId === h.state().batch.chunks[0].requestId);
+  await h.complete(task, fileResult(fileFact('Accepted', 'Retry supported fact', 'Retry cue')));
+  assert.equal(h.state().propositions.length, 1); assert.equal(h.state().decks.length, 1); assert.equal(h.state().batch.sourceId, batch.sourceId);
+});
+
+test('accepted file results reconcile once after restart or atomic save failure without running another worker', async t => {
+  const h = harness(t, graph()), { tasks } = await h.startFile(fileInput());
+  const before = h.disk(), rename = t.mock.method(fs, 'renameSync', () => { throw new Error('Synthetic file result-save failure'); });
+  try {
+    await h.complete(tasks[0], fileResult(fileFact('Recoverable', 'Durable local statement', 'Durable cue')));
+    assert.deepEqual(h.disk(), before); assert.equal(h.state().propositions.length, 0); assert.match(h.state().batch.error, /result-save failure/);
+  } finally { rename.mock.restore(); }
+  h.activate(); await flush(); assert.equal(h.state().propositions.length, 1); assert.equal(h.workers.starts, 1);
+  const progress = h.state().propositions[0]; h.activate(); await flush(); assert.deepEqual(h.state().propositions[0], progress);
+  const second = await h.startFile({ name: 'second.md', markdown: 'A different source.' });
+  h.dispose(); h.workers.complete(second.tasks[0].id, fileResult(fileFact('Restart', 'Saved while inactive', 'Restart cue')));
+  h.activate(); await flush(); assert.equal(h.state().propositions.length, 2); assert.equal(h.workers.starts, 2);
+  assert.deepEqual(fs.readdirSync(path.join(h.directory, 'sources')).filter(name => name.endsWith('.tmp')), []);
+});
+
+test('confirmation failures do not retain unaccepted file metadata; stale plans and unreadable retry sources fail explicitly', async t => {
+  const h = harness(t, graph()), input = fileInput(), plan = await h.call('preflight-file', input);
+  const originalRename = fs.renameSync;
+  const rename = t.mock.method(fs, 'renameSync', (from, to) => { if (path.basename(to) === 'flashcards.json') throw new Error('Ledger unavailable'); return originalRename(from, to); });
+  try { await assert.rejects(h.call('start-generation', { preflightId: plan.id, requestId: 'save-failed' }), /Ledger unavailable/); }
+  finally { rename.mock.restore(); }
+  assert.equal(h.state().batch, null); assert.equal(h.state().decks.length, 0); assert.equal(h.workers.starts, 0);
+  assert.deepEqual(fs.readdirSync(path.join(h.directory, 'sources')), []);
+  await h.call('start-generation', { preflightId: plan.id, requestId: 'save-failed' }); await flush();
+  const batch = h.state().batch, task = h.workers.service.list()[0]; await h.complete(task, null, 'failed');
+  fs.unlinkSync(path.join(h.directory, 'sources', `${batch.sourceId}.md`));
+  await assert.rejects(h.call('preflight-file-retry', { batchId: batch.id }), /ENOENT/);
+  const changed = await h.call('preflight-file', { name: 'changed.md', markdown: 'Changed text.' });
+  await h.call('save-settings', { thinkingOverride: 'low' });
+  await assert.rejects(h.call('start-generation', { preflightId: changed.id, requestId: 'stale-file-plan' }), /changed/);
+  assert.equal(h.workers.starts, 1);
+});
+
+test('legacy graph records lacking origin or batch kind retain progress, graph archive semantics and normal generation after file support is enabled', async t => {
+  const h = harness(t);
+  await h.generate(cards('p1', 'Graph cue')); await h.grade({});
+  const legacy = h.disk(); delete legacy.propositions.p1.origin; delete legacy.batches[0].kind; delete legacy.fileSources;
+  fs.writeFileSync(path.join(h.directory, 'flashcards.json'), JSON.stringify(legacy)); h.activate();
+  assert.deepEqual(h.disk(), legacy); assert.equal(h.state().batch.kind, 'graph');
+  assert.deepEqual(h.state().propositions[0].schedule, legacy.propositions.p1.schedule); assert.deepEqual(h.disk().reviews, legacy.reviews);
+  h.graph = graph(); assert.equal(h.state().propositions[0].archived, true); assert.equal((await h.call('next-review')).ticket, null);
+  const local = await h.startFile(fileInput()); await h.complete(local.tasks[0], fileResult(fileFact('Local', 'Local statement', 'Local cue')));
+  assert.equal(h.state().propositions.find(p => p.origin === 'file').archived, false);
+  assert.equal(h.state().propositions.find(p => p.id === 'p1').archived, true);
+  assert.deepEqual(h.disk().propositions.p1.schedule, legacy.propositions.p1.schedule);
+});
 
 test('clearing overrides follows cheap configuration and unrelated generation settings do not stale reviews', async t => {
   const h = harness(t);

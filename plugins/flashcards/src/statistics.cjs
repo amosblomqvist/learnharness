@@ -17,7 +17,7 @@ function statistics(state, live, now) {
   const dueDays = new Map(due.slice(1).map(row => [row.day, row]));
   const activityDays = new Map(activity.map(row => [row.day, row]));
   for (const p of Object.values(state.propositions)) {
-    if (!live.has(p.id) || !p.cues.some(c => !c.deleted)) continue;
+    if ((p.origin !== 'file' && !live.has(p.id)) || !p.cues.some(c => !c.deleted)) continue;
     const schedule = p.schedule;
     states[names[schedule.state]]++;
     if (schedule.state === 0) continue;

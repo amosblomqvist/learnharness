@@ -10,6 +10,7 @@ function fixture() {
 		list: () => [], refresh: async () => { calls.push("refresh"); },
 		setEnabled: async (id, enabled) => { calls.push({ id, enabled }); },
 		call: async (id, operation, input) => { calls.push({ id, operation, input }); return input; },
+		convertDocument: async (id, request) => { calls.push({ id, request }); return { name: "fixture.txt", markdown: "Text", notices: [] }; },
 		asset: () => ({ bytes: new TextEncoder().encode("export const value = 1;"), contentType: "text/javascript" }),
 	};
 	return { host, calls, transport: createPluginTransport({ getHost: async () => host, directory: "/temporary/plugins" }) };
@@ -22,6 +23,28 @@ it("plugin HTTP adapter preserves list, explicit toggles and JSON operation resu
 	const call = await transport.call("example", request({ operation: "snapshot", input: { id: 1 } }));
 	assert.deepEqual(await call.json(), { result: { id: 1 } });
 	assert.deepEqual(calls, [{ id: "example", enabled: false }, "refresh", { id: "example", operation: "snapshot", input: { id: 1 } }]);
+});
+it("plugin document transport forwards the untouched binary request and returns the exact uncached DTO", async () => {
+	const { transport, calls, host } = fixture();
+	const form = new FormData(); form.append("file", new File(["Text"], "fixture.txt"));
+	const upload = new Request("http://localhost/api/plugins/example/documents/markdown", { method: "POST", body: form });
+	host.convertDocument = async (id, request) => {
+		calls.push({ id, request });
+		assert.equal(request, upload); assert.equal(request.bodyUsed, false);
+		const file = (await request.formData()).get("file"); assert.ok(file instanceof File);
+		assert.equal(await file.text(), "Text");
+		return { name: "fixture.txt", markdown: "Text", notices: ["Example notice"] };
+	};
+	const converted = await transport.convertDocument("example", upload);
+	assert.deepEqual(await converted.json(), { name: "fixture.txt", markdown: "Text", notices: ["Example notice"] });
+	assert.equal(converted.headers.get("Cache-Control"), "no-store");
+	assert.equal(calls.length, 1);
+	host.convertDocument = async () => { throw new PluginHostError(413, "Converted Markdown is too large. Max 2 MiB."); };
+	const refused = await transport.convertDocument("example", upload);
+	assert.equal(refused.status, 413);
+	assert.deepEqual(await refused.json(), { error: "Converted Markdown is too large. Max 2 MiB." });
+	host.convertDocument = async () => { throw new PluginHostError(409, "Document conversion is busy. Please retry."); };
+	assert.equal((await transport.convertDocument("example", upload)).status, 409);
 });
 it("plugin HTTP adapter rejects malformed input before invoking a plugin", async () => {
 	const { transport, calls } = fixture();

@@ -176,7 +176,7 @@ export function mountLibraryTree({ ctx, container, signal, button, onReview, onP
     }
     tree.update({ rows });
     for (const [key, refresh] of mounted) if (seen.has(key)) refresh();
-    empty.textContent = rows.length ? '' : query ? 'No matching flashcards.' : 'No flashcards yet. Pick knowledge above to generate your first cues.';
+    empty.textContent = rows.length ? '' : query ? 'No matching flashcards.' : 'No flashcards yet. Pick knowledge or upload a file above to generate your first cues.';
     empty.hidden = !!rows.length;
     onSelection(selection());
   }
@@ -186,6 +186,16 @@ export function mountLibraryTree({ ctx, container, signal, button, onReview, onP
     update(next, search = '') { if (!live()) return; const q = search.toLocaleLowerCase().trim(); if (q !== query) searchFolds.clear(); query = q; state = next; render(); },
     selection,
     clearSelection() { if (!live()) return; selected.clear(); render(); },
+    revealDeck(id) {
+      if (!live() || !state?.decks.some(deck => deck.id === id)) return false;
+      query = ''; searchFolds.clear(); expanded.add(`deck:${id}`); render();
+      // Only scroll plugin-owned content while focus remains in this library.
+      if (container.closest('.fc-root')?.contains(document.activeElement)) {
+        const node = [...inner.querySelectorAll('[data-fc-occurrence]')].find(node => node.dataset.fcOccurrence === `deck:${id}`);
+        node?.scrollIntoView?.({ block: 'nearest' });
+      }
+      return true;
+    },
     dispose,
   };
 }

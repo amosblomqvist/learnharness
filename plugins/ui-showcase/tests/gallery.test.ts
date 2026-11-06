@@ -12,14 +12,14 @@ function mounted() {
   return { ...f, dispose };
 }
 
-test("single gallery, twelve families cover fourteen public APIs without backend/app/storage calls", () => {
+test("single gallery, twelve families cover fifteen public APIs without backend/app/storage calls", () => {
   const f = mounted();
   try {
     assert.deepEqual([...FAMILY_IDS], families);
     assert.equal(f.root.querySelectorAll('[data-showcase="gallery"]').length, 1);
     assert.deepEqual([...f.root.querySelectorAll("[data-family]")].map(node => (node as HTMLElement).dataset.family), families);
     for (const family of families) { f.find(`reset-${family}`, "mountButton"); assert.ok(f.root.querySelector(`[data-state="${family}"]`)); }
-    for (const method of ["mountModelPicker", "mountThinkingPicker", "mountKnowledgePicker", "mountComposer", "mountDictation", "mountStandardComposer", "mountButton", "mountSettingsRows", "mountMarkdown", "mountTree", "mountWorkerResult"]) assert.ok(f.records.some(entry => entry.method === method), method);
+    for (const method of ["mountModelPicker", "mountThinkingPicker", "mountKnowledgePicker", "mountComposer", "mountDictation", "mountStandardComposer", "mountButton", "mountBadge", "mountSettingsRows", "mountMarkdown", "mountTree", "mountWorkerResult"]) assert.ok(f.records.some(entry => entry.method === method), method);
     assert.deepEqual(f.calls, []);
     assert.equal(f.records.filter(entry => entry.method === "openSurface").length, 0, "Gallery surfaces open only after an explicit click");
     assert.equal(f.find("open-surface").props.label, "Open surface");
@@ -139,6 +139,27 @@ test("buttons expose every variant/size; manual async completes and pending rese
     await f.find("reset-buttons").props.onClick(); await resetPending;
     assert.equal(f.state("buttons").pending, false); assert.equal(f.state("buttons").clicks, 0);
     const disposePending = f.find("button-async").props.onClick(); f.dispose(); await disposePending;
+  } finally { f.restore(); }
+});
+
+test("buttons family also demonstrates neutral and colored generic badges using only public props", async () => {
+  const f = mounted();
+  try {
+    for (const [id, props] of [
+      ["neutral", { text: "Neutral" }],
+      ["green", { text: "Tests passed", color: "#22c55e" }],
+      ["red", { text: "Tests failed", color: "#ef4444" }],
+      ["amber", { text: "With hints", color: "#f59e0b" }],
+    ] as const) {
+      const badge = f.find(`badge-${id}`, "mountBadge");
+      assert.deepEqual(badge.props, props);
+      assert.ok(badge.container.closest('[data-family="buttons"]'));
+    }
+    const old = f.records.filter(record => record.method === "mountBadge");
+    await f.find("reset-buttons").props.onClick();
+    assert.ok(old.every(record => record.disposed === 1 && record.signal.aborted));
+    assert.equal(f.records.filter(record => record.method === "mountBadge" && !record.disposed).length, 4);
+    assert.deepEqual(f.calls, []);
   } finally { f.restore(); }
 });
 

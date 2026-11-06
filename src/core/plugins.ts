@@ -205,6 +205,11 @@ export interface PluginFrontendContext {
 	/** Owner-scoped slots inside the host question card. */
 	registerQuestionRenderer(renderer: PluginQuestionRenderer): () => void;
 	call<T = unknown>(operation: string, input?: unknown): Promise<T>;
+	/** Pure, in-memory PDF/UTF-8 conversion; no learning/model/storage side effects.
+	 * Automatically activation-scoped; caller cancellation is optional and cooperative. */
+	readonly documents: {
+		toMarkdown(file: File, options?: { signal?: AbortSignal }): Promise<{ name: string; markdown: string; notices: string[] }>;
+	};
 	/** Live-only notifications. Re-read state on resync; no implied durable replay. */
 	onNotification(listener: (event: PluginNotification) => void): () => void;
 	onAppEvent(listener: (event: ServerEvent) => void): () => void;

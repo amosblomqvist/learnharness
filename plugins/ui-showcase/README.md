@@ -1,13 +1,13 @@
 # UI Showcase
 
-A frontend-only LearnHarness plugin demonstrating **all 14 public `ctx.ui` methods** across **12 families** in one scrollable, host-themed gallery, including page-body and explicit native-target surface demos. No backend, runtime dependencies, storage, workers or model generation are used.
+A frontend-only LearnHarness plugin demonstrating **all 15 public `ctx.ui` methods** across **12 families** in one scrollable, host-themed gallery, including page-body and explicit native-target surface demos. No backend, runtime dependencies, storage, workers or model generation are used.
 
 **Current generalized-surface increment: implemented and verified, uncommitted above `8dd7409` on `feature/plugin-architecture`; not installed or released.** The gallery now supports direct page-body surface invocation; its own checkpoint below is separate from historical Directory/tree and UI-polish proofs.
 
 ## Requirements
 
 - The current **`feature/plugin-architecture`** LearnHarness checkout with the public Tree, Markdown, knowledge-picker and surface APIs, including the targetless `openSurface(surface, { signal })` overload. These additive API v1 capabilities are not a released-version compatibility promise.
-- Manifest: API version **1**, minimum app version **0.4.1**. The version number alone does not prove these feature-branch methods exist. Activation checks all 14 UI methods (including `mountTree`) and required registrations and fails with an explicit missing-capability error; there is no copied or hand-rolled fallback. The presence of `openSurface` alone does not prove that its targetless overload exists in an older host.
+- Manifest: API version **1**, minimum app version **0.4.1**. The version number alone does not prove these feature-branch methods exist. Activation checks all 15 UI methods (including `mountTree` and `mountBadge`) and required registrations and fails with an explicit missing-capability error; there is no copied or hand-rolled fallback. The presence of `openSurface` alone does not prove that its targetless overload exists in an older host.
 - Node/npm for development only. LearnHarness does not run npm when loading the built plugin.
 
 ## Build
@@ -34,6 +34,7 @@ To install a distribution, copy the **contents of `dist/`** into `<learning data
 - Pick real catalog models or knowledge nodes. The model and thinking controls are linked only within their own family. Their triggers use the same compact UI typography as native controls. The standard composer's model, thinking and draft are independent of the standalone examples. Changing a local model clears its local thinking choice.
 - The standalone composer is the intentionally bare input row. The standard preset adds the native-style bordered text frame, with dictation/model/thinking controls **below and outside** that border. Explanatory text follows the configured reading font/size; family headings use compact settings-section styling.
 - Send enters a **local simulation** and retains your draft. While busy with a nonempty draft, the host keeps Send available for steering. Clear the draft to expose **Stop**, or use **Complete simulation**, which is available throughout the busy state. This applies to both composer examples; nothing is submitted to a native conversation or model.
+- The **Buttons** family also includes neutral, green, red and amber badges using `mountBadge`. Text and one CSS color are plugin-controlled; the host supplies the native shape/typography and 15% background tint. These static examples do not run grading or tests.
 - **Start async example** returns an actually pending callback Promise. **Complete async example** resolves it. The host button currently does not automatically show a pending or disabled style while that Promise awaits; the pending readout and completion control are local to this demo. Reset, navigation or plugin disable also releases the pending Promise; no timer is used.
 - In **Surfaces**, choose **Open surface** to call `ctx.ui.openSurface(surface, { signal })` directly from the gallery. This captures its active page boundary once; no native-session target is required or invented. The approved overload also supports native chat, Home and New Draft. Leaving/hiding the owning page aborts the surface; returning creates a new boundary, not a restored surface.
 - The existing explicit native demo remains: in an actual teaching or practice session, choose **UI Showcase surface** in its native top bar. It passes the actual opaque `context.surfaceTarget` to `openSurface(target, surface, { signal })`. Nested surfaces, retained parent text and menu/dialog examples remain in place. Dialog/surface titles are accessible names, not automatic visible heading rows. The quiet X floats above scrolling content without consuming layout space; plugins own headings and bottom actions. The host still owns Escape routing and focus behavior.
@@ -64,7 +65,7 @@ All widgets use per-mount abort signals. Reset/abort disposes owned widgets, ove
 | Composer | `mountComposer`; draft callbacks, local Send/Stop/busy/completion |
 | Dictation | `mountDictation`; explicit toggle, finish, cancel, transcript readout |
 | Standard composer | `mountStandardComposer`; independent state, linked local model/thinking, real optional dictation |
-| Buttons | `mountButton`; all 6 variants, all 8 sizes, descriptive icon titles, disabled, manually completable async callback with local pending readout |
+| Buttons | `mountButton`; all 6 non-custom variants, all 8 sizes, descriptive icon titles, disabled, manually completable async callback with local pending readout; `mountBadge` with neutral and three custom colors |
 | Settings rows | `mountSettingsRows`; toggle, text, dropdown, number, slider; descriptions, text/integer/range validation, disabled example |
 | Markdown | `mountMarkdown`; prose/list, TypeScript code, table, inline/display math, Mermaid |
 | Directory / tree | `mountTree`; synthetic folders, repeated logical item with unique occurrence keys, optional independent controlled selection, host arrow/row navigation, rich draft lifecycle, Kind/State metadata and caller-owned horizontal scrolling |

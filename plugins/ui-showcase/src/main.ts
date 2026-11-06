@@ -5,7 +5,7 @@ import { openSurfaceDemo } from "./surfaces.ts";
 
 export const REQUIRED_UI_METHODS = [
   "mountModelPicker", "mountThinkingPicker", "mountKnowledgePicker", "mountComposer",
-  "mountDictation", "mountStandardComposer", "mountButton", "mountSettingsRows",
+  "mountDictation", "mountStandardComposer", "mountButton", "mountBadge", "mountSettingsRows",
   "mountMarkdown", "mountTree", "mountWorkerResult", "openMenu", "openDialog", "openSurface",
 ] as const satisfies readonly (keyof PluginUi)[];
 

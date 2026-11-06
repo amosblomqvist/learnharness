@@ -1,0 +1,23 @@
+@import url("./assets/fonts/fonts.css");
+
+.rich-code-blocks {
+  min-width: 0;
+  max-width: 100%;
+}
+.rich-code-blocks > pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.rich-code-blocks--rendered {
+  background: #fff;
+  color: #000;
+  padding: 12px;
+  overflow: auto;
+}
+.rich-code-blocks--rendered > svg {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  margin: 0 auto;
+  color: #000;
+}

@@ -37,6 +37,21 @@ test('current states count unique live propositions with active cues, regardless
   assert.equal(JSON.stringify(result).includes('second-cue'), false);
 });
 
+test('file-origin facts are live without graph membership while legacy graph facts still archive normally', () => {
+  const state = fixture(
+    { ...proposition('local-new', 0, at(2)), origin: 'file', sourceId: 'source' },
+    { ...proposition('local-review', 2, at(2)), origin: 'file', sourceId: 'source' },
+    proposition('legacy-graph', 2, at(2)),
+    { ...proposition('explicit-graph', 1, at(2)), origin: 'graph' },
+  );
+  state.propositions['local-review'].cues.push({ id: 'second-local-cue' });
+  const result = statistics(state, new Set(), at(2));
+  assert.deepEqual(result.states, { new: 1, learning: 0, review: 1, relearning: 0 });
+  assert.equal(result.due[1].count, 1);
+  state.propositions['local-review'].cues.forEach(c => { c.deleted = true; });
+  assert.deepEqual(statistics(state, new Set(), at(2)).states, { new: 1, learning: 0, review: 0, relearning: 0 });
+});
+
 test('due buckets use canonical review dueDay, civil-day overdue boundaries, and epoch fallback for learning/relearning/older reviews', () => {
   const state = fixture(
     proposition('new', 0, at(1)),

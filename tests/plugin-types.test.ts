@@ -20,7 +20,7 @@ it("generated plugin API declarations are portable and usable as type-only impor
 		fs.symlinkSync(path.join(root, "node_modules"), path.join(home, "node_modules"), "dir");
 		const consumer = path.join(home, "consumer.mts");
 		fs.writeFileSync(consumer, `
-import type { PluginBackendContext, PluginFrontendContext, PluginAgentTool, PluginMarkdownProps, GraphNode, GraphSnapshot } from "./api/index.d.ts";
+import type { PluginBackendContext, PluginFrontendContext, PluginAgentTool, PluginMarkdownProps, PluginBadgeProps, GraphNode, GraphSnapshot } from "./api/index.d.ts";
 declare const backend: PluginBackendContext;
 declare const frontend: PluginFrontendContext;
 declare const container: HTMLElement;
@@ -34,6 +34,22 @@ frontend.ui.mountMarkdown(container, { text: 123 }, { signal: frontend.signal })
 frontend.ui.mountMarkdown(container, markdownProps);
 // @ts-expect-error Static rendering exposes no streaming or interactive-control options.
 markdown.update({ streaming: true });
+const badgeProps: PluginBadgeProps = { text: "Tests passed", color: "var(--plugin-accent)" };
+const badge = frontend.ui.mountBadge(container, badgeProps, { signal: frontend.signal });
+badge.update({ text: "Anything", color: "#123456" });
+badge.update({ color: undefined });
+badge.dispose();
+frontend.ui.mountBadge(container, { text: "Neutral" }, { signal: frontend.signal });
+// @ts-expect-error Badge text is required.
+frontend.ui.mountBadge(container, { color: "red" }, { signal: frontend.signal });
+// @ts-expect-error Badge content is plain text.
+badge.update({ text: document.createElement("span") });
+// @ts-expect-error A badge has one color with an automatic tint, not separate background control.
+badge.update({ background: "red" });
+// @ts-expect-error Badges do not interpret grades or statuses.
+badge.update({ status: "correct" });
+// @ts-expect-error Widget mounts require a lifetime.
+frontend.ui.mountBadge(container, { text: "Missing lifetime" });
 const stop = backend.handle("test", async () => backend.learning.listSessions());
 backend.registerInstructions({ agents: ["teacher", "practice"], text: "Use the example tool when asked." });
 backend.registerTools({ agents: ["teacher"], create: context => [{

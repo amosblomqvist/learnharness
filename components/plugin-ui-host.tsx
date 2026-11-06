@@ -2,13 +2,14 @@
 
 import { Component, useEffect, useLayoutEffect, useRef, useSyncExternalStore, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import type { PluginButtonProps, PluginDialogProps, PluginMenuProps, PluginSurfaceProps, PluginSurfaceTarget, PluginUi, PluginWidgetHandle, PluginWidgetOptions } from "@/src/core";
+import type { PluginBadgeProps, PluginButtonProps, PluginDialogProps, PluginMenuProps, PluginSurfaceProps, PluginSurfaceTarget, PluginUi, PluginWidgetHandle, PluginWidgetOptions } from "@/src/core";
 import type { Dictation } from "@/components/dictation";
 import { PluginComposer, PluginDictation, PluginStandardComposer } from "@/components/plugin-composer";
 import { PluginModelPicker, PluginThinkingPicker } from "@/components/plugin-model-picker";
 import { PluginKnowledgePicker } from "@/components/plugin-knowledge-picker";
 import { PluginSettingsRows } from "@/components/plugin-settings-rows";
 import { Button } from "@/components/ui/button";
+import { StatusBadge } from "@/components/ui/status-badge";
 import { PluginWorkerResultSurface } from "@/components/plugin-worker-result";
 import { HostMarkdown } from "@/components/host-markdown";
 import { PluginTree, validatePluginTree } from "@/components/plugin-tree";
@@ -67,6 +68,15 @@ function validateButton({ icon, iconOnly, label, colors }: PluginButtonProps) {
 		throw new TypeError("Icon-only buttons require a nonblank label and icon.");
 	}
 	validateButtonColors(colors);
+}
+
+function validateBadge({ text, color }: PluginBadgeProps) {
+	if (typeof text !== "string") throw new TypeError("Badge text must be a string.");
+	if (color !== undefined && (typeof color !== "string" || !color.trim() ||
+		!globalThis.CSS?.supports("color", color) ||
+		!globalThis.CSS.supports("background-color", `color-mix(in oklab, ${color} 15%, transparent)`))) {
+		throw new TypeError("Badge color must be a valid CSS color supporting a background tint.");
+	}
 }
 
 function validateSurfaceBackground({ background }: PluginSurfaceProps) {
@@ -190,6 +200,7 @@ export function createPluginUiStore() {
 					{props.icon && <span data-slot="button-icon" aria-hidden="true" className="inline-flex shrink-0 items-center justify-center" dangerouslySetInnerHTML={{ __html: props.icon }} />}
 					{!props.iconOnly && props.label}
 				</Button>, undefined, false, validateButton),
+				mountBadge: (target, props, options) => mount(target, props, options, props => <StatusBadge {...props} />, undefined, false, validateBadge),
 				mountSettingsRows: (target, props, options) => mount(target, props, options, (schema, runtime) => <PluginSettingsRows schema={schema} onError={runtime.report} />),
 				mountMarkdown: (target, props, options) => mount(target, props, options, props => <HostMarkdown text={props.text} />),
 				mountTree: (target, tree, options) => mount(target, tree, options, (tree, runtime) => <PluginTree {...tree} signal={runtime.signal} onError={runtime.report}

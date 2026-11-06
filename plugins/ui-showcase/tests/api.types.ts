@@ -1,7 +1,7 @@
 /** Compile-only public SDK contract checks; included by strict typecheck.
  * No host implementation imports and no runtime test or provider calls. */
 import type {
-  PluginButtonColors, PluginButtonColorState, PluginButtonProps, PluginFrontendContext, PluginKnowledgePickerProps, PluginSettingsRow,
+  PluginBackendContext, PluginBadgeProps, PluginButtonColors, PluginButtonColorState, PluginButtonProps, PluginFrontendContext, PluginKnowledgePickerProps, PluginSettingsRow,
   PluginStandardComposerProps, PluginSurfaceProps, PluginSurfaceTarget, PluginTreeProps, PluginUi, PluginWidgetHandle, PluginWidgetOptions,
 } from "learnharness-plugin-api";
 import type { mountGallery } from "../src/gallery.ts";
@@ -29,12 +29,46 @@ export type ButtonIconsUseTrustedSvgStrings = Assert<Equal<PluginButtonProps["ic
 export type ButtonIconOnlyIsExplicit = Assert<Equal<PluginButtonProps["iconOnly"], boolean | undefined>>;
 export type ButtonLabelStaysRequired = Assert<Equal<{} extends Pick<PluginButtonProps, "label"> ? true : false, false>>;
 export type ButtonUpdatesRemainControlled = Assert<Equal<Parameters<ReturnType<PluginUi["mountButton"]>["update"]>[0], Partial<PluginButtonProps>>>;
+export type BadgeHasOnlyTextAndColor = Assert<Equal<keyof PluginBadgeProps, "text" | "color">>;
+export type BadgeTextStaysRequired = Assert<Equal<{} extends Pick<PluginBadgeProps, "text"> ? true : false, false>>;
+export type BadgeColorIsOptional = Assert<Equal<PluginBadgeProps["color"], string | undefined>>;
+export type BadgeUpdatesRemainControlled = Assert<Equal<Parameters<ReturnType<PluginUi["mountBadge"]>["update"]>[0], Partial<PluginBadgeProps>>>;
 export type KnowledgeSelectionUsesStableIds = Assert<Equal<PluginKnowledgePickerProps["value"], readonly string[]>>;
 export type KnowledgeContextRemainsHostOwned = Assert<Equal<keyof PluginKnowledgePickerProps, "value" | "onChange" | "disabled">>;
 export type SettingsCoverFiveTypes = Assert<Equal<PluginSettingsRow["type"], "toggle" | "text" | "dropdown" | "number" | "slider">>;
 export type PresetReadinessRemainsOptional = Assert<Equal<PluginStandardComposerProps["composer"]["canSend"], boolean | undefined>>;
 export type TreeMountConsumesPublicProps = Assert<Equal<Parameters<PluginUi["mountTree"]>[1], PluginTreeProps>>;
 export type TreeUpdatesRemainControlled = Assert<Equal<Parameters<ReturnType<PluginUi["mountTree"]>["update"]>[0], Partial<PluginTreeProps>>>;
+
+export type DocumentsHaveOnlyTheApprovedHelper = Assert<Equal<keyof PluginFrontendContext["documents"], "toMarkdown">>;
+export type DocumentConversionHasExactAsyncShape = Assert<Equal<PluginFrontendContext["documents"]["toMarkdown"],
+  (file: File, options?: { signal?: AbortSignal }) => Promise<{ name: string; markdown: string; notices: string[] }>>>;
+export type DocumentsAreFrontendOnly = Assert<Equal<"documents" extends keyof PluginBackendContext ? true : false, false>>;
+
+// File and optional caller cancellation only; no host implementation imports.
+export function publicDocumentExamples(frontend: PluginFrontendContext, backend: PluginBackendContext, file: File, signal: AbortSignal): void {
+  void frontend.documents.toMarkdown(file);
+  void frontend.documents.toMarkdown(file, {});
+  void frontend.documents.toMarkdown(file, { signal });
+  // @ts-expect-error The documents context member is readonly.
+  frontend.documents = frontend.documents;
+  // @ts-expect-error A disk path is not a browser File.
+  void frontend.documents.toMarkdown("/tmp/document.txt");
+  // @ts-expect-error A Blob lacks the required File identity.
+  void frontend.documents.toMarkdown(new Blob(["text"]));
+  // @ts-expect-error URLs are not uploaded Files.
+  void frontend.documents.toMarkdown(new URL("https://example.invalid/document.txt"));
+  // @ts-expect-error No path option or filesystem access.
+  void frontend.documents.toMarkdown(file, { path: "/tmp/document.txt" });
+  // @ts-expect-error No URL-fetch option.
+  void frontend.documents.toMarkdown(file, { url: "https://example.invalid/document.txt" });
+  // @ts-expect-error Caller cancellation must be an AbortSignal.
+  void frontend.documents.toMarkdown(file, { signal: "abort" });
+  // @ts-expect-error Conversion has no model selection or inference options.
+  void frontend.documents.toMarkdown(file, { model: { provider: "fixture", id: "fixture" } });
+  // @ts-expect-error Conversion is not exposed to plugin backends.
+  void backend.documents;
+}
 
 // No host implementation imports: icon markup is data, never a renderer or DOM node.
 export function publicButtonExamples(ui: PluginUi, container: HTMLElement, signal: AbortSignal): void {
@@ -76,6 +110,25 @@ export function publicButtonExamples(ui: PluginUi, container: HTMLElement, signa
   gear.update({ icon: document.createElement("span") });
   // @ts-expect-error Icon-only presentation is a boolean, not a size or label.
   gear.update({ iconOnly: "icon" });
+}
+
+// Generic display only: no status enum, grading result, event or background override.
+export function publicBadgeExamples(ui: PluginUi, container: HTMLElement, signal: AbortSignal): void {
+  const badge = ui.mountBadge(container, { text: "Tests passed", color: "var(--plugin-accent)" }, { signal });
+  badge.update({ text: "Any outcome", color: "#123456" });
+  badge.update({ color: undefined });
+  badge.dispose();
+  ui.mountBadge(container, { text: "Neutral" }, { signal });
+  // @ts-expect-error Text is required, not inferred from a grade.
+  ui.mountBadge(container, { color: "green" }, { signal });
+  // @ts-expect-error Badge content is plain text, not rich content.
+  badge.update({ text: document.createElement("span") });
+  // @ts-expect-error One CSS color, not an independent background override.
+  badge.update({ background: "red" });
+  // @ts-expect-error No grading semantics or mandatory status vocabulary.
+  badge.update({ status: "correct" });
+  // @ts-expect-error Every widget has an explicit mount lifetime.
+  ui.mountBadge(container, { text: "Missing lifetime" });
 }
 
 // Positive SDK-only fixture: strings, rich content, hierarchy, metadata and

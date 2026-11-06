@@ -7,7 +7,7 @@ import { PLUGIN_ID_PATTERN, parsePluginManifest } from "../core/plugins.ts";
 import { validatePluginSchema } from "../core/plugin-validation.ts";
 import { createPluginQuestionParameters, preparePluginQuestionType } from "../core/plugin-questions.ts";
 import type { PluginQuestionTypeDefinition, PluginQuestionVariant } from "../core/plugin-questions.ts";
-import type { PluginAgentKind, PluginBackendContext, PluginBackendModule, PluginCleanup, PluginInfo, PluginInference, PluginInstructions, PluginLearningData, PluginManifest, PluginNotification, PluginToolContext, PluginTools } from "../core/plugins.ts";
+import type { PluginAgentKind, PluginBackendContext, PluginBackendModule, PluginCleanup, PluginFrontendContext, PluginInfo, PluginInference, PluginInstructions, PluginLearningData, PluginManifest, PluginNotification, PluginToolContext, PluginTools } from "../core/plugins.ts";
 import type { PluginAgentService } from "../core/plugin-agents.ts";
 import type { PluginWorkerService } from "../core/plugin-workers.ts";
 import type { ServerEvent } from "../core/events.ts";
@@ -27,7 +27,7 @@ export function isPluginHostError(error: unknown): error is { status: number; me
 		const value = error as Record<string | symbol, unknown>;
 		return value[Symbol.for("learnharness.plugin-host-error")] === true &&
 			typeof value.message === "string" && typeof value.status === "number" &&
-			[400, 404, 409, 500, 503].includes(value.status);
+			[400, 404, 409, 413, 500, 503].includes(value.status);
 	} catch { return false; }
 }
 
@@ -38,6 +38,8 @@ export interface PluginHostDependencies {
 		learning: PluginLearningData; inference: PluginInference; agents: PluginAgentService; workers: PluginWorkerService;
 		createBackgroundTool: PluginBackendContext["createBackgroundTool"];
 	};
+	/** One process-wide pure converter; no backend services are needed for uploads. */
+	convertDocument?: (request: Request, signal: AbortSignal) => ReturnType<PluginFrontendContext["documents"]["toMarkdown"]>;
 	onChange?: () => void;
 	onNotification?: (notification: PluginNotification) => void;
 	subscribeEvents?: (listener: (event: ServerEvent) => void) => () => void;
@@ -507,6 +509,24 @@ export function createPluginHost(deps: PluginHostDependencies) {
 			const handler = activation.handlers.get(operation);
 			if (!handler) throw new PluginHostError(404, `Unknown plugin operation: ${operation}`);
 			return handler(input);
+		},
+		async convertDocument(id: string, request: Request): ReturnType<PluginFrontendContext["documents"]["toMarkdown"]> {
+			assertOpen();
+			const pkg = get(id), activation = pkg.activation;
+			if (!pkg.info.enabled || !activation?.ready || !live(pkg, activation)) throw new PluginHostError(409, "Plugin is disabled or unavailable");
+			const requireCurrent = () => {
+				assertOpen();
+				if (!pkg.info.enabled || !activation.ready || !live(pkg, activation)) throw new PluginHostError(409, "Plugin is disabled or unavailable");
+				if (request.signal.aborted) throw new PluginHostError(409, "Document conversion was cancelled");
+			};
+			requireCurrent();
+			if (!deps.convertDocument) throw new PluginHostError(503, "Document conversion is unavailable");
+			const signal = AbortSignal.any([activation.controller.signal, request.signal]);
+			try {
+				const result = await deps.convertDocument(request, signal);
+				requireCurrent();
+				return result;
+			} catch (error) { requireCurrent(); throw error; }
 		},
 		asset(id: string, segments: string[]): { bytes: Uint8Array; contentType: string } {
 			assertOpen();

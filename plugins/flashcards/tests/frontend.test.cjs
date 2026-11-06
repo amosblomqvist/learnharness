@@ -2,6 +2,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
+const { File } = require('node:buffer');
 const { buildSync } = require('esbuild');
 const { fixture, flush, deferred, createDocument } = require('./ui-fixture.cjs');
 const source = buildSync({ entryPoints: [path.join(__dirname, '../src/main.js')], bundle: true, platform: 'browser', format: 'esm', write: false }).outputFiles[0].text;
@@ -46,6 +47,20 @@ function settingsRow(h, key) {
 }
 const picker = (h, kind) => h.handles.findLast(handle => handle.kind === kind && !handle.disposed);
 const savedSettings = h => h.calls.filter(([operation]) => operation === 'save-settings');
+const fileButtonLabel = 'Generate from file…';
+const buttonNamed = (root, label) => [...root.querySelectorAll('button')].find(button => (button.getAttribute('aria-label') || button.textContent) === label);
+function fileInput(h) { const input = h.app.querySelector('input[type=file]'); assert.ok(input, 'library owns a file chooser'); return input; }
+function chooseFiles(h, files) {
+  const input = fileInput(h);
+  Object.defineProperty(input, 'files', { configurable: true, value: files });
+  input.dispatchEvent(new document.defaultView.Event('change', { bubbles: true }));
+}
+const uploadedFile = (name = 'Lecture.pdf') => new File(['test document'], name, { type: 'application/pdf' });
+const operationCalls = (h, operation) => h.calls.filter(([name]) => name === operation);
+function fileBatch(h, patch = {}) {
+  h.state.batch = { id: 'file-batch', kind: 'file', sourceId: 'file-source', deckId: 'file-deck', name: 'Lecture.pdf', status: 'completed', chunks: [{ id: 'file-chunk', status: 'applied' }], added: 0, completed: 1, total: 1, failedChunkIds: [], ...patch };
+  h.state.revision++; h.notify();
+}
 function assertModelRows(h, hidden) {
   const overrides = h.settings.querySelector('.fc-model-overrides'); assert.ok(overrides); assert.equal(overrides.hidden, hidden);
   for (const name of ['fc-model-row', 'fc-thinking-row']) {
@@ -114,7 +129,7 @@ test('deck panel groups search, Create deck, selection and tree separately from 
   try {
     const toolbar = h.app.querySelector('.fc-toolbar'), panel = h.app.querySelector('section.fc-deck-panel');
     assert.ok(panel);
-    assert.deepEqual([...toolbar.querySelectorAll('button')].map(button => button.textContent), ['Pick nodes', 'Generate']);
+    assert.deepEqual([...toolbar.querySelectorAll('button')].map(button => button.textContent).sort(), ['Pick nodes', 'Generate', fileButtonLabel].sort());
     assert.equal(toolbar.querySelector('input[type=search]'), null);
     const deckToolbar = panel.querySelector('.fc-deck-toolbar'); assert.ok(deckToolbar);
     assert.equal(deckToolbar.querySelector('input[type=search]'), h.app.querySelector('input[type=search]'));
@@ -123,6 +138,158 @@ test('deck panel groups search, Create deck, selection and tree separately from 
     assert.ok(panel.contains(tree(h).container));
     assert.equal(panel.contains(toolbar), false);
   } finally { h.dispose(); }
+});
+
+test('file chooser is independent of graph selection, single-file unrestricted and cancellation never starts conversion', async () => {
+  const h = await setup();
+  try {
+    const button = buttonNamed(h.app, fileButtonLabel); assert.ok(button); assert.equal(button.disabled, false);
+    assert.equal(buttonNamed(h.app, 'Generate').disabled, true);
+    const input = fileInput(h); assert.ok(input.hidden || input.closest('[hidden]'));
+    assert.equal(input.hasAttribute('multiple'), false); assert.equal(input.getAttribute('accept') || '', '');
+    let openings = 0; input.addEventListener('click', () => openings++);
+    click(h, fileButtonLabel); assert.equal(openings, 1);
+    input.dispatchEvent(new document.defaultView.Event('cancel')); chooseFiles(h, []); await flush();
+    assert.equal(h.conversions.length, 0); assert.equal(operationCalls(h, 'preflight-file').length, 0);
+    assert.equal(operationCalls(h, 'start-generation').length, 0); assert.equal(button.disabled, false);
+    click(h, fileButtonLabel); assert.equal(openings, 2, 'cancelled chooser can be reopened immediately');
+  } finally { h.dispose(); }
+});
+
+test('older hosts disable file conversion with an update hint but keep graph generation and review available', async () => {
+  const h = await setup(h => { delete h.ctx.documents; });
+  try {
+    const fileButton = buttonNamed(h.app, fileButtonLabel); assert.ok(fileButton); assert.ok(fileButton.disabled);
+    assert.match(`${fileButton.title} ${h.app.textContent}`, /update LearnHarness/i);
+    click(h, 'Pick nodes'); click(h, 'Generate'); await flush();
+    assert.equal(operationCalls(h, 'preflight').length, 1); assert.equal(operationCalls(h, 'preflight-file').length, 0);
+    click(h, 'Cancel', document.querySelector('[role=dialog]'));
+    click(h, 'Review', rowNode(h, 'deck:d1')); await flush();
+    assert.equal(operationCalls(h, 'next-review').length, 1);
+  } finally { h.dispose(); }
+});
+
+test('file loading disables both generation routes through refreshes, then recovers from conversion errors without agent work', async () => {
+  const wait = deferred(), h = await setup(h => { h.overrides.toMarkdown = () => wait.promise; });
+  try {
+    const file = uploadedFile(); chooseFiles(h, [file]); await flush();
+    assert.equal(h.conversions.length, 1); assert.equal(h.conversions[0].file, file);
+    assert.ok(h.conversions[0].signal instanceof AbortSignal); assert.equal(h.conversions[0].signal.aborted, false);
+    click(h, 'Pick nodes'); h.notify(); await flush();
+    assert.ok(buttonNamed(h.app, fileButtonLabel).disabled); assert.ok(buttonNamed(h.app, 'Generate').disabled);
+    wait.reject(new Error('This document format is not supported')); await flush();
+    assert.ok(h.app.querySelector('[role=alert]').textContent.includes('This document format is not supported'));
+    assert.equal(buttonNamed(h.app, fileButtonLabel).disabled, false); assert.equal(buttonNamed(h.app, 'Generate').disabled, false);
+    assert.equal(operationCalls(h, 'preflight-file').length, 0); assert.equal(operationCalls(h, 'start-generation').length, 0);
+    assert.equal(document.querySelector('[role=dialog]'), null);
+  } finally { h.dispose(); }
+});
+
+test('file conversion rejects multiple files before host conversion and remains reusable', async () => {
+  const h = await setup();
+  try {
+    chooseFiles(h, [uploadedFile('One.pdf'), uploadedFile('Two.pdf')]); await flush();
+    assert.equal(h.conversions.length, 0); assert.equal(operationCalls(h, 'preflight-file').length, 0);
+    assert.match(h.app.querySelector('[role=alert]').textContent, /one|single|1.*file/i);
+    assert.equal(buttonNamed(h.app, fileButtonLabel).disabled, false);
+    chooseFiles(h, [uploadedFile()]); await flush(); assert.equal(h.conversions.length, 1);
+  } finally { h.dispose(); }
+});
+
+test('file confirmation uses exact converted Markdown, filename, notices and tokens; generation starts only after explicit confirmation', async () => {
+  const markdown = '# Exact converted Markdown\r\n\r\nA local fact.\n';
+  const notices = ['Some images could not be extracted.', '<img src=x onerror=alert(1)>'];
+  const h = await setup(h => { h.overrides.toMarkdown = async file => ({ name: file.name, markdown, notices }); });
+  try {
+    const file = uploadedFile(); chooseFiles(h, [file]); await flush();
+    assert.deepEqual(operationCalls(h, 'preflight-file').map(([, input]) => input), [{ name: file.name, markdown }]);
+    assert.equal(operationCalls(h, 'preflight').length, 0); assert.equal(operationCalls(h, 'start-generation').length, 0);
+    const confirmation = document.querySelector('[role=dialog]'); assert.ok(confirmation);
+    assert.equal(confirmation.getAttribute('aria-label'), 'Generate flashcards');
+    assert.ok(confirmation.textContent.includes(file.name)); assert.ok(confirmation.textContent.includes('321 input tokens'));
+    for (const notice of notices) assert.ok(confirmation.textContent.includes(notice));
+    assert.equal(confirmation.querySelector('img'), null, 'conversion notices are plain text');
+    assert.equal(/propositions|chunks|Test file model/.test(confirmation.textContent), false);
+    assert.ok(confirmation.textContent.includes('Generation makes model calls and may incur costs.'));
+    click(h, 'Start', confirmation); await flush();
+    const starts = operationCalls(h, 'start-generation'); assert.equal(starts.length, 1);
+    assert.equal(starts[0][1].preflightId, 'pf-file'); assert.match(starts[0][1].requestId, /\S+/);
+    assert.equal(Object.keys(starts[0][1]).sort().join(','), 'preflightId,requestId');
+    assert.ok(h.app.textContent.includes('Lecture.pdf'), 'accepted file deck is published even before workers produce cards');
+    assert.equal(h.conversions.length, 1);
+  } finally { h.dispose(); }
+});
+
+test('cancelled file confirmation performs no generation and permits selecting the same file again', async () => {
+  const h = await setup();
+  try {
+    const file = uploadedFile(); chooseFiles(h, [file]); await flush();
+    click(h, 'Cancel', document.querySelector('[role=dialog]')); await flush();
+    assert.equal(operationCalls(h, 'start-generation').length, 0);
+    assert.equal(fileInput(h).value, '');
+    chooseFiles(h, [file]); await flush();
+    assert.equal(h.conversions.length, 2); assert.equal(operationCalls(h, 'preflight-file').length, 2);
+    assert.ok(document.querySelector('[role=dialog]'));
+  } finally { h.dispose(); }
+});
+
+test('duplicate files reopen and reveal the existing deck, clearing search without confirmation or regeneration', async () => {
+  const h = await setup(h => {
+    Object.assign(h.state.decks[1], { sourceId: 'file-source', name: 'Lecture.pdf', propositionIds: ['p1'] });
+    h.state.propositions[0].memberships.push('d2');
+    h.overrides['preflight-file'] = async () => ({ existingSourceId: 'file-source', name: 'Lecture.pdf' });
+  });
+  try {
+    const search = h.app.querySelector('input[type=search]'); change(search, 'No matching deck');
+    chooseFiles(h, [uploadedFile()]); await flush();
+    assert.deepEqual(operationCalls(h, 'open-file-deck').map(([, input]) => input), [{ sourceId: 'file-source' }]);
+    assert.equal(search.value, ''); assert.equal(row(h, 'deck:d2').disclosure.expanded, true);
+    assert.ok(rowNode(h, 'deck:d2:p:p1'));
+    assert.equal(operationCalls(h, 'start-generation').length, 0); assert.equal(document.querySelector('[role=dialog]'), null);
+  } finally { h.dispose(); }
+});
+
+test('file chunk failures use file retry preflight, with zero-card feedback distinct from successful and graph completions', async () => {
+  const h = await setup();
+  try {
+    fileBatch(h, { status: 'partial', chunks: [{ id: 'file-chunk', status: 'failed', error: 'Chunk failed' }], failedChunkIds: ['file-chunk'] }); await flush();
+    click(h, 'Retry failed…'); await flush();
+    assert.deepEqual(operationCalls(h, 'preflight-file-retry').map(([, input]) => input), [{ batchId: 'file-batch' }]);
+    assert.equal(operationCalls(h, 'preflight').length, 0); assert.equal(h.conversions.length, 0);
+    const confirmation = document.querySelector('[role=dialog]'); assert.ok(confirmation.textContent.includes('Lecture.pdf'));
+    click(h, 'Start', confirmation); await flush();
+    assert.equal(operationCalls(h, 'start-generation').at(-1)[1].preflightId, 'pf-file-retry');
+    fileBatch(h); await flush();
+    const zero = h.app.querySelector('.fc-batch'); assert.ok(zero, 'completed zero-card file keeps a clear result panel');
+    assert.match(zero.textContent, /no (?:new )?(?:flashcards|cards|cues)|(?:zero|0) (?:flashcards|cards|cues) (?:were )?generated/i);
+    assert.ok(h.app.textContent.includes('Lecture.pdf'));
+    fileBatch(h, { added: 2 }); await flush(); assert.equal(h.app.querySelector('.fc-batch'), null);
+    fileBatch(h, { kind: 'graph', failedTargetIds: [] }); await flush(); assert.equal(h.app.querySelector('.fc-batch'), null);
+  } finally { h.dispose(); }
+});
+
+test('file lifecycle aborts conversion and suppresses late conversion/preflight/start results without cancelling accepted work', async () => {
+  for (const boundary of ['conversion', 'preflight', 'start']) {
+    const wait = deferred();
+    const h = await setup(h => {
+      if (boundary === 'conversion') h.overrides.toMarkdown = () => wait.promise;
+      else h.overrides[boundary === 'preflight' ? 'preflight-file' : 'start-generation'] = () => wait.promise;
+    });
+    try {
+      chooseFiles(h, [uploadedFile()]); await flush();
+      if (boundary === 'start') { click(h, 'Start', document.querySelector('[role=dialog]')); await flush(); }
+      const conversionSignal = h.conversions[0].signal; h.unmount(); assert.equal(conversionSignal.aborted, true);
+      if (boundary === 'conversion') wait.resolve({ name: 'Late.pdf', markdown: 'LATE MARKDOWN', notices: [] });
+      else if (boundary === 'preflight') wait.resolve({ id: 'late-pf', kind: 'file', name: 'Late.pdf', estimatedTokens: 999 });
+      else { const late = structuredClone(h.state); late.revision += 100; late.decks[0].name = 'LATE ACCEPTED'; wait.resolve(late); }
+      await flush();
+      assert.equal(document.querySelector('[role=dialog]'), null); assert.equal(h.app.querySelector('input[type=file]'), null);
+      assert.equal(operationCalls(h, 'cancel-generation').length, 0);
+      if (boundary === 'conversion') assert.equal(operationCalls(h, 'preflight-file').length, 0);
+      if (boundary !== 'start') assert.equal(operationCalls(h, 'start-generation').length, 0);
+      h.mount(); await flush(); assert.equal(h.app.textContent.includes('LATE ACCEPTED'), false);
+    } finally { h.dispose(); }
+  }
 });
 
 test('context actions stay visible with stable handles, switch between all/selected, and group count plus Clear on the right', async () => {

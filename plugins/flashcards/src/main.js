@@ -113,6 +113,20 @@ export function activate(ctx) {
       });
     } catch (error) { if (!signal.aborted) showError(message(error)); }
   }
+  function confirmFileGeneration(preflight, notices, signal, onStarted) {
+    const requestId = uuid();
+    dialog('Generate flashcards', signal, ({ root, actions, signal: ds, run, close }) => {
+      root.append(el('p', 'fc-file-name', preflight.name));
+      root.append(el('p', '', `Approximately ${preflight.estimatedTokens.toLocaleString()} input tokens`));
+      for (const notice of notices) root.append(el('p', 'fc-muted', notice));
+      root.append(el('p', 'fc-muted', 'Generation makes model calls and may incur costs.'));
+      button(actions, 'Start', run(async () => {
+        const state = await ctx.call('start-generation', { preflightId: preflight.id, requestId });
+        if (ds.aborted) return;
+        publish(state); close(); onStarted(state);
+      }), ds, { variant: 'default' });
+    });
+  }
   function editCue(proposition, cue, signal) {
     dialog('Edit cue', signal, ({ root, actions, signal: ds, run, close }) => {
       const question = field(root, 'Question (Markdown)', cue.question, 'textarea'), answer = field(root, 'Answer (Markdown)', cue.answer, 'textarea');
@@ -188,12 +202,23 @@ export function activate(ctx) {
     const guarded = action => async () => { try { await action(); } catch (cause) { showError(message(cause)); } };
     const review = createReviewController({ ctx, signal, button, markdown, onRated: () => { void refresh(); } });
     const practice = scope => review.openPractice(buildPracticeCards(snapshot, scope));
-    const pickerSlot = el('div', 'fc-picker'); let generationIds = [], generationButton;
+    const pickerSlot = el('div', 'fc-picker'), fileInput = el('input'), fileStatus = el('p', 'fc-muted fc-file-status');
+    const canConvertFiles = typeof ctx.documents?.toMarkdown === 'function';
+    fileInput.type = 'file'; fileInput.multiple = false; fileInput.hidden = true; fileInput.setAttribute('aria-label', 'Choose a file for flashcards');
+    fileStatus.setAttribute('role', 'status');
+    let generationIds = [], generationButton, fileButton, filePreparing = false;
+    function updateGenerationButtons() {
+      const busy = filePreparing || !!activeBatch(snapshot?.batch);
+      generationButton?.update({ disabled: !generationIds.length || busy });
+      fileButton?.update({ disabled: !canConvertFiles || busy });
+    }
     const picker = widget(ctx.ui.mountKnowledgePicker(pickerSlot, { value: generationIds, onChange: ids => {
-      generationIds = [...ids]; picker.update({ value: generationIds }); generationButton.update({ disabled: !generationIds.length || !!activeBatch(snapshot?.batch) });
+      generationIds = [...ids]; picker.update({ value: generationIds }); updateGenerationButtons();
     } }, { signal }), signal);
     toolbar.append(pickerSlot);
     generationButton = button(toolbar, 'Generate', () => confirmGeneration(generationIds, signal, showError), signal, { disabled: true, variant: 'default' });
+    fileButton = button(toolbar, 'Generate from file…', () => fileInput.click(), signal, { disabled: !canConvertFiles, title: canConvertFiles ? undefined : 'Update LearnHarness to generate flashcards from files.' });
+    toolbar.append(fileInput);
     const deckPanel = el('section', 'fc-deck-panel'), deckToolbar = el('div', 'fc-deck-toolbar');
     deckPanel.setAttribute('aria-label', 'Decks');
     const searchLabel = el('label', 'fc-search'), search = el('input', 'fc-input');
@@ -218,7 +243,7 @@ export function activate(ctx) {
     button(deckToolbar, 'Create deck', () => editDeck(null, snapshot, signal), signal);
     deckPanel.append(deckToolbar, selectionActions, treeSlot);
     const dashboardSlot = el('div', 'fc-dashboard-slot');
-    root.append(toolbar, error, batchArea, deckPanel, dashboardSlot); container.append(root);
+    root.append(toolbar, fileStatus, error, batchArea, deckPanel, dashboardSlot); container.append(root);
     const dashboard = mountDashboard({ container: dashboardSlot, signal });
     tree = mountLibraryTree({ ctx, container: treeSlot, signal, button,
       onReview: scope => review.open(scope), onPractice: practice, onPreview: (p, cue, archive) => previewCue(p, cue, archive, signal),
@@ -227,23 +252,55 @@ export function activate(ctx) {
       onReorder: input => mutate('reorder', input, signal), onRename: (id, name) => mutate('save-deck', { id, name }, signal),
       onSelection: value => { selection = value; updateSelection(); }, onError: showError,
     });
+    const revealFileDeck = id => {
+      if (signal.aborted || !id) return;
+      search.value = ''; tree.update(snapshot, ''); tree.revealDeck(id);
+    };
+    fileInput.addEventListener('change', async () => {
+      const files = [...(fileInput.files || [])]; fileInput.value = '';
+      if (signal.aborted || !canConvertFiles || filePreparing || activeBatch(snapshot?.batch) || !files.length) return;
+      if (files.length !== 1) { showError('Choose one file at a time.'); return; }
+      filePreparing = true; error.textContent = ''; fileStatus.textContent = 'Converting file…'; updateGenerationButtons();
+      try {
+        const converted = await ctx.documents.toMarkdown(files[0], { signal });
+        if (signal.aborted) return;
+        fileStatus.textContent = 'Preparing generation…';
+        const preflight = await ctx.call('preflight-file', { name: converted.name, markdown: converted.markdown });
+        if (signal.aborted) return;
+        if (preflight.existingSourceId) {
+          const opened = await ctx.call('open-file-deck', { sourceId: preflight.existingSourceId });
+          if (signal.aborted) return;
+          publish(opened.state); revealFileDeck(opened.deckId);
+        } else confirmFileGeneration(preflight, converted.notices, signal, state => revealFileDeck(state.batch?.deckId));
+      } catch (cause) { if (!signal.aborted) showError(message(cause)); }
+      finally { if (!signal.aborted) { filePreparing = false; fileStatus.textContent = ''; updateGenerationButtons(); } }
+    }, { signal });
+    const retryFileGeneration = async batchId => {
+      try {
+        const preflight = await ctx.call('preflight-file-retry', { batchId });
+        if (!signal.aborted) confirmFileGeneration(preflight, [], signal, state => revealFileDeck(state.batch?.deckId));
+      } catch (cause) { if (!signal.aborted) showError(message(cause)); }
+    };
     let batchScope = lifetime(signal);
     function renderBatch(batch) {
       batchScope.abort(); batchScope = lifetime(signal); batchArea.replaceChildren();
-      if (!batch || (batch.status === 'completed' && !batch.error && !batch.chunks.some(chunk => chunk.error))) return;
+      const emptyFileResult = batch?.kind === 'file' && batch.status === 'completed' && batch.added === 0;
+      if (!batch || (batch.status === 'completed' && !batch.error && !batch.chunks.some(chunk => chunk.error) && !emptyFileResult)) return;
       const bs = batchScope.signal, panel = el('section', 'fc-batch'); batchArea.append(panel);
+      if (batch.kind === 'file') panel.append(el('p', 'fc-muted fc-file-name', batch.name));
       panel.append(el('p', '', `Generation: ${batch.status} · ${batch.completed}/${batch.total} chunks · ${batch.added} cues added`));
+      if (emptyFileResult) panel.append(el('p', '', 'No flashcards were generated from this file.'));
       for (const chunk of batch.chunks.filter(chunk => chunk.error)) panel.append(el('p', 'fc-error', `Chunk ${chunk.id}: ${chunk.error}`));
       if (batch.error) panel.append(el('p', 'fc-error', batch.error));
       const controls = el('div', 'fc-actions'); panel.append(controls);
       if (activeBatch(batch)) button(controls, 'Cancel generation', guarded(() => mutate('cancel-generation', { batchId: batch.id }, signal)), bs);
-      if (!activeBatch(batch) && batch.failedTargetIds?.length) button(controls, 'Retry failed…', () => confirmGeneration(batch.failedTargetIds, signal, showError), bs);
+      if (!activeBatch(batch) && (batch.kind === 'file' ? batch.failedChunkIds?.length : batch.failedTargetIds?.length)) button(controls, 'Retry failed…', () => batch.kind === 'file' ? retryFileGeneration(batch.id) : confirmGeneration(batch.failedTargetIds, signal, showError), bs);
       if (batch.error) button(controls, 'Retry saving', guarded(() => mutate('resume-results', {}, signal)), bs);
     }
     search.addEventListener('input', () => { if (snapshot) tree.update(snapshot, search.value); }, { signal });
     observe((state, loadError) => {
       if (signal.aborted) return; if (loadError) { showError(loadError); return; }
-      generationButton.update({ disabled: !generationIds.length || !!activeBatch(state.batch) }); renderBatch(state.batch); tree.update(state, search.value);
+      updateGenerationButtons(); renderBatch(state.batch); tree.update(state, search.value);
       hasPracticeCards = state.propositions.some(p => !p.archived && p.cues.some(c => !c.deleted)); updateSelection();
       dashboard.update(state.statistics);
     }, signal);

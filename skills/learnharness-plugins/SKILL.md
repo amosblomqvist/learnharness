@@ -129,7 +129,7 @@ is implied. No grading, data, blank filtering, API-shape or `ctx.ui` changes are
   after dynamic enabled-state changes. The host handles async busy/repeat prevention.
 - Use `ctx.ui` controlled helpers rather than private host component imports:
   `mountComposer`, `mountDictation`, `mountModelPicker`, `mountThinkingPicker`,
-  `mountKnowledgePicker`, `mountStandardComposer`, `mountButton`, `mountSettingsRows`,
+  `mountKnowledgePicker`, `mountStandardComposer`, `mountButton`, `mountBadge`, `mountSettingsRows`,
   `mountWorkerResult`, `mountMarkdown`, `mountTree`,
   `openMenu`, and `openDialog`. Every call takes final `options: { signal }` and
   returns `update(partialProps)`/`dispose()`; updates are shallow, so replace whole
@@ -167,6 +167,15 @@ is implied. No grading, data, blank filtering, API-shape or `ctx.ui` changes are
   not deep-merge it. Color syntax validation cannot ensure variable resolution,
   contrast or visible focus; the plugin owns those choices. Use the public props,
   never native-button descendant styling or private host color variables.
+- Use `ctx.ui.mountBadge(container, { text, color? }, { signal })` for a generic
+  native-style badge, shared with native question/practice outcomes. Required `text`
+  is plain text; optional `color` is a CSS color/variable used for text and a 15%
+  oklab background tint. Omit color, or update with `color: undefined`, for neutral
+  muted styling. Typography/spacing/shape are self-contained and host-owned. Invalid
+  text types or color syntax reject mount/update atomically; CSS-wide keywords such
+  as `inherit` are not mixable colors. Plugins own variable resolution and contrast.
+  This has no grading semantics, status enum, automatic placement, storage, events
+  or live announcement. Use standard update/dispose and mount-lifetime cleanup.
 - Use additive API v1 `ctx.ui.mountMarkdown(container, { text }, { signal })`
   for complete static content, with `PluginMarkdownProps { text: string }`. It returns
   `PluginWidgetHandle<PluginMarkdownProps>` with standard update/dispose and per-mount cleanup.
@@ -315,6 +324,31 @@ is implied. No grading, data, blank filtering, API-shape or `ctx.ui` changes are
   slider node through five value samples with zero disabled mutations.
   Custom mounts may also use `mountSettingsRows`, but are not required for live updates.
   Do not invent a host settings store or mutate core settings files.
+- Frontend-only `ctx.documents.toMarkdown(file, options?)` is a pure upload converter:
+  browser `File` in, `Promise<{ name: string; markdown: string; notices: string[] }>` out.
+  The context member is readonly; `options` is only `{ signal?: AbortSignal }`.
+  Activation scoping is automatic; optionally add a caller/view signal. Caller
+  cancellation honors `AbortSignal.reason`. Refusals and failures reject with `Error`,
+  not public codes or discriminated outcomes; no new
+  public named DTO/service/error types or backend `documents` member. Use a native
+  file input's `input.files?.[0]`, not an invented host file picker, path, URL,
+  upload token or storage reference. The helper uses internal multipart transport,
+  not the JSON `ctx.call` bridge. See the [file-input example and full policy](../../docs/plugin-authoring.md#convert-an-uploaded-document).
+  Leading `%PDF-` or `.pdf` suffix selects the exact native deterministic
+  `convertPdf` / `PdfPage` / `joinPages` engine; invalid PDFs never fall back to text.
+  Mixed PDFs skip image-only pages with notices; all-image OCR refusal differs from
+  blank-PDF refusal. Otherwise accept strict UTF-8 text with any suffix/MIME (no
+  extension whitelist), refusing binary/control/empty content; return text as text,
+  not an HTML/DOCX conversion. Refuse, never truncate: 25 MiB file, 26 MiB actual
+  multipart body including headers, 1,000 PDF pages checked after opening, 2 MiB
+  final UTF-8 Markdown including page markers. Only one conversion globally across
+  plugins; fail-fast busy means retry, never queue. Admission precedes body buffering;
+  hold the slot through underlying work and destruction settlement even if cancelled.
+  Cancellation is cooperative: fake-worker PDF parsing may be synchronous. No hard
+  deadline, CPU/peak-memory bound or isolation guarantee; result cap is not peak-memory
+  protection. No learning-graph/model/provider/OCR/storage/temporary persistence work.
+  Conversion stores nothing; subsequent persistence is the user's choice through the
+  plugin's own backend. Do not use this helper to invent a document workflow/product.
 - Auth and transport stay host-owned. Select an available configured model explicitly.
   Automatic work uses background purpose and existing subscription consent. Do not
   extract credentials, refresh accounts implicitly, or bypass a refusal with fallbacks.

@@ -420,6 +420,25 @@ export class PluginFrontendManager {
 				if (!this.current(life)) throw new Error("Plugin is no longer active");
 				return body.result;
 			},
+			documents: {
+				toMarkdown: async (file, options) => {
+					const signal = options?.signal ? AbortSignal.any([life.controller.signal, options.signal]) : life.controller.signal;
+					const requireCurrent = () => {
+						if (!this.current(life)) throw new Error("Plugin is no longer active");
+						signal.throwIfAborted();
+					};
+					requireCurrent();
+					if (!(file instanceof File)) throw new TypeError("Document conversion requires a File");
+					const form = new FormData(); form.append("file", file);
+					try {
+						const result = await this.json(`/api/plugins/${encodeURIComponent(info.id)}/documents/markdown`, {
+							method: "POST", body: form, signal,
+						}) as Awaited<ReturnType<PluginFrontendContext["documents"]["toMarkdown"]>>;
+						requireCurrent();
+						return result;
+					} catch (error) { requireCurrent(); throw error; }
+				},
+			},
 			onNotification: listener => listen(life.notifications, listener),
 			onAppEvent: listener => listen(life.events, listener),
 			onResync: listener => listen(life.resyncs, listener),

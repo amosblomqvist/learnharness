@@ -1,5 +1,6 @@
 import { isPluginHostError } from "./plugin-host.ts";
-import type { PluginInfo } from "../core/plugins.ts";
+import { desktopAPIAuthorized } from "./desktop-access.ts";
+import type { PluginFrontendContext, PluginInfo } from "../core/plugins.ts";
 
 /** Thin HTTP adapter, separately injectable so its tests never boot plugins. */
 export interface PluginTransportHost {
@@ -7,6 +8,7 @@ export interface PluginTransportHost {
 	refresh(): Promise<void>;
 	setEnabled(id: string, enabled: boolean): Promise<void>;
 	call(id: string, operation: string, input: unknown): Promise<unknown>;
+	convertDocument(id: string, request: Request): ReturnType<PluginFrontendContext["documents"]["toMarkdown"]>;
 	asset(id: string, segments: string[]): { bytes: Uint8Array; contentType: string };
 }
 class InputError extends Error {}
@@ -47,9 +49,29 @@ export function createPluginTransport(deps: { getHost(): Promise<PluginTransport
 			const host = await deps.getHost();
 			return json({ result: (await host.call(id, body.operation, body.input)) ?? null });
 		}),
+		convertDocument: (id: string, request: Request) => guarded(async () => json(await (await deps.getHost()).convertDocument(id, request))),
 		asset: (id: string, segments: string[]) => guarded(async () => {
 			const { bytes, contentType } = (await deps.getHost()).asset(id, segments);
 			return new Response(new Uint8Array(bytes), { headers: { "Content-Type": contentType, "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff" } });
 		}),
+	};
+}
+
+/** This one streamed route must avoid Proxy's silently truncated body clone.
+ * Preserve the identical desktop capability check before ANY params/body/host
+ * work, including unsupported methods and framework-style OPTIONS responses. */
+export function createPluginDocumentRoute(transport: Pick<ReturnType<typeof createPluginTransport>, "convertDocument">) {
+	const refusal = (request: Request) => desktopAPIAuthorized(request.headers) ? undefined : json({
+		error: "Desktop API access requires the trusted LearnHarness window.",
+	}, 403);
+	const unsupported = (request: Request) => refusal(request) ?? new Response(null, { status: 405 });
+	return {
+		async POST(request: Request, context: { params: Promise<{ id: string }> }) {
+			const denied = refusal(request);
+			if (denied) return denied;
+			return transport.convertDocument((await context.params).id, request);
+		},
+		OPTIONS: (request: Request) => refusal(request) ?? new Response(null, { status: 204, headers: { Allow: "OPTIONS, POST" } }),
+		GET: unsupported, HEAD: unsupported, PUT: unsupported, PATCH: unsupported, DELETE: unsupported,
 	};
 }

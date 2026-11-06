@@ -5,7 +5,7 @@ function fixture(document) {
   const app = document.createElement('main'); document.body.append(app);
   const settings = document.createElement('aside'); document.body.append(settings);
   const controller = new AbortController();
-  const calls = [], markdowns = [], registrations = [], handles = [], cleanups = [];
+  const calls = [], conversions = [], markdowns = [], registrations = [], handles = [], cleanups = [];
   const listeners = new Set(), resync = new Set(), appEvents = new Set();
   let view, settingsMount;
   const day = offset => {
@@ -24,6 +24,7 @@ function fixture(document) {
     propositions: [{ id: 'p1', name: 'Fact one', statement: 'A useful statement', memberships: ['d1'], cues: [{ id: 'c1', question: 'Question **one**?', answer: 'SECRET ANSWER' }], schedule: {}, archived: false, version: 1 }], batch: null,
   };
   const overrides = {};
+  let filePreflight;
   const catalog = { slots: { cheap: { model: { provider: 'test', id: 'cheap' }, thinkingLevel: 'low' } } };
   const clone = value => JSON.parse(JSON.stringify(value));
   function handle(kind, container, props, signal, render, cleanup) {
@@ -62,12 +63,28 @@ function fixture(document) {
     onNotification(fn) { listeners.add(fn); return () => listeners.delete(fn); },
     onResync(fn) { resync.add(fn); return () => resync.delete(fn); },
     onAppEvent(fn) { appEvents.add(fn); return () => appEvents.delete(fn); },
+    documents: {
+      async toMarkdown(file, options = {}) {
+        conversions.push({ file, signal: options.signal });
+        if (overrides.toMarkdown) return overrides.toMarkdown(file, options);
+        return { name: file.name, markdown: '# Imported\n\nUseful fact.', notices: [] };
+      },
+    },
     async call(operation, input) {
       calls.push([operation, input]);
       if (overrides[operation]) return overrides[operation](input);
       if (operation === 'get-state' || operation === 'resume-results') return clone(state);
       if (operation === 'get-catalog') return clone(catalog);
       if (operation === 'preflight') return { id: 'pf', propositionCount: input.propositionIds.length, chunkCount: 1, estimatedTokens: 123, modelLabel: 'Test model' };
+      if (operation === 'preflight-file' || operation === 'preflight-file-retry') {
+        filePreflight = { id: operation === 'preflight-file' ? 'pf-file' : 'pf-file-retry', kind: 'file', name: input.name || state.batch.name, chunkCount: 1, estimatedTokens: 321, modelLabel: 'Test file model' };
+        return clone(filePreflight);
+      }
+      if (operation === 'open-file-deck') {
+        const deck = state.decks.find(deck => deck.sourceId === input.sourceId);
+        if (!deck) throw new Error('File source not found');
+        return { state: clone(state), deckId: deck.id };
+      }
       if (operation === 'next-review') return { ticket: { id: 't1', propositionId: 'p1', cueId: 'c1', question: 'Question **one**?', propositionName: 'Fact one' }, remaining: 1 };
       if (operation === 'reveal-review') return { answer: 'SECRET ANSWER', intervals: { 1: 60000, 2: 300000, 3: 600000, 4: 86400000 } };
       if (operation === 'rate-review') return { ok: true };
@@ -81,7 +98,13 @@ function fixture(document) {
         const index = list.findIndex(item => (typeof item === 'string' ? item : item.id) === input.id);
         const other = index + input.direction; [list[index], list[other]] = [list[other], list[index]];
       }
-      if (operation === 'start-generation') state.batch = { id: 'b1', status: 'running', chunks: [{ id: 'chunk1', status: 'running', targetIds: ['p1'] }], added: 0, completed: 0, total: 1, failedTargetIds: [] };
+      if (operation === 'start-generation') {
+        state.batch = { id: 'b1', status: 'running', chunks: [{ id: 'chunk1', status: 'running', targetIds: ['p1'] }], added: 0, completed: 0, total: 1, failedTargetIds: [] };
+        if (filePreflight?.id === input.preflightId) {
+          if (!state.decks.some(deck => deck.id === 'file-deck')) state.decks.push({ id: 'file-deck', sourceId: 'file-source', name: filePreflight.name, propositionIds: [], newLimit: 20, newToday: 0, due: 0 });
+          Object.assign(state.batch, { kind: 'file', sourceId: 'file-source', deckId: 'file-deck', name: filePreflight.name, failedChunkIds: [] });
+        }
+      }
       state.revision++; return clone(state);
     },
     ui: {
@@ -165,7 +188,7 @@ function fixture(document) {
   };
   let viewController, viewCleanup, settingsController, settingsCleanup;
   return {
-    ctx, app, settings, calls, markdowns, handles, registrations, overrides, catalog,
+    ctx, app, settings, calls, conversions, markdowns, handles, registrations, overrides, catalog,
     get state() { return state; },
     mount() { viewController = new AbortController(); viewCleanup = view.mount(app, viewController.signal); },
     unmount() { viewController?.abort(); viewCleanup?.(); },

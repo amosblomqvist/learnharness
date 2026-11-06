@@ -17,6 +17,7 @@ import { registerPluginWorkerActivity } from "./plugin-worker-activity.ts";
 import { deliverJobResult, setPluginJobRecovery } from "./jobs.ts";
 import { createPluginHost } from "./plugin-host.ts";
 import { createPluginTransport } from "./plugin-transport.ts";
+import { createPluginDocumentConverter } from "./plugin-documents.ts";
 import type { AgentBuildOptions } from "../agent/teacher-agent.ts";
 import { stores } from "./stores.ts";
 import { isTurnRunning } from "./turn-liveness.ts";
@@ -44,6 +45,9 @@ function runtime(): Runtime {
 	const installationErrors: Record<string, string> = Object.create(null);
 	const host = createPluginHost({
 		directory: pluginDirectory, appVersion: packageJson.version, installationErrors,
+		// The process-global runtime owns one admission slot across all plugins
+		// and every separately compiled Next route module.
+		convertDocument: createPluginDocumentConverter().convert,
 		createServices({ manifest, dataDirectory, signal }) {
 			const inference = createPluginInference({ signal, dataDirectory });
 			const agents = createPluginAgentService({
