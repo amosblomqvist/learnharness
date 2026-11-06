@@ -12,7 +12,8 @@ licence (from its model card), which is the licence that governs that model.
 The model catalog (`src/core/local-stt-catalog.json`), the benchmark figures
 (`src/core/local-stt-recommendations.json`), and the language, recommendation,
 chunk-transcription, voice-activity and Chinese-output logic in `src/core/local-stt-*.ts`
-and `src/server/local-stt/` are ported or adapted from
+and `src/server/local-stt/`, and the Silero-based chunk cutting, speech test and transcript
+joining in `src/core/dictation-chunks.ts`, are ported or adapted from
 [pi-voice](https://github.com/earendil-works/pi-voice).
 
 MIT License

@@ -382,7 +382,7 @@ function QuestionDockForm({
 		 * forgotten stop. The field values below come from the REF mirrors
 		 * because the flush lands via setState after an await.
 		 *
-		 * A Groq upload that failed keeps its recording for Retry: finish
+		 * A Groq or Local upload that failed keeps its recording for Retry: finish
 		 * resolves false (and a recording already kept counts as unsent), so
 		 * the submit ABORTS and the draft stays, rather than sending the
 		 * answer without the spoken part. */

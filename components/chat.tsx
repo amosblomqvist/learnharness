@@ -1204,7 +1204,7 @@ export function Chat({
 		/* FINISH DICTATION FIRST (owner, 2026-10-01): a learner who keeps
 		 * talking right through Enter must not lose the tail — stop the run,
 		 * let the last finals land in the composer, then send the REF value
-		 * (the flush lands via setState, invisible to this closure). A Groq
+		 * (the flush lands via setState, invisible to this closure). A Groq or Local
 		 * upload that failed keeps its recording for Retry and finish resolves
 		 * false: nothing is sent and the draft stays. */
 		if (!dictation.active && !dictation.retryable) {

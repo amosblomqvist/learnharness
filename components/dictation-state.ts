@@ -9,7 +9,7 @@ const listeners = new Set<() => void>();
 
 export function isDictationActive(): boolean { return active; }
 
-// A Groq recording whose upload failed is kept for Retry (see useDictation).
+// A Groq or Local recording whose upload failed is kept for Retry (see useDictation).
 // Submit paths far from the hook ask this so they do not send a draft that is
 // still missing the learner's speech.
 let retained = false;

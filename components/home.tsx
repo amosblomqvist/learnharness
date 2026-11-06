@@ -108,7 +108,7 @@ export function Home({
 			void begin();
 			return;
 		}
-		// A failed Groq upload keeps its recording for Retry: finish resolves
+		// A failed Groq or Local upload keeps its recording for Retry: finish resolves
 		// false, so nothing starts and the topic stays.
 		void dictation.finish().then((ok) => {
 			if (ok) void begin();

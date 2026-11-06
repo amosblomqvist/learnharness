@@ -12,13 +12,14 @@ import { useDictationLanguage } from "@/components/dictation-preference";
 const ENGINES: readonly { id: DictationProvider; label: string }[] = [
 	{ id: "deepgram", label: "Deepgram" },
 	{ id: "groq", label: "Groq (Whisper)" },
+	{ id: "local", label: "Local (this computer)" },
 ];
 
 const LINK = "underline underline-offset-2 hover:text-foreground";
 
 /**
  * Settings → Providers → Dictation: which engine transcribes, and for Groq,
- * which Whisper model. Deepgram stays the default. Like the language picker it
+ * which Whisper model (the Local engine's model and language controls are separate). Deepgram stays the default. Like the language picker it
  * locks while a run is live, and a write failure keeps the previous choice.
  */
 export function DictationEngineSettings() {
@@ -62,7 +63,8 @@ export function DictationEngineSettings() {
 
 /** The setup note under the Dictation group, for the selected engine. Deepgram's
  * wording is unchanged; Groq's says plainly that audio passes through this app's
- * server and that the key is the one already used for Groq models. */
+ * server and that the key is the one already used for Groq models; Local's says
+ * that nothing leaves this computer. */
 export function DictationSetupHint() {
 	const { provider } = useDictationLanguage();
 	const className = "px-1 text-[11px] leading-relaxed text-muted-foreground/70";
@@ -73,6 +75,15 @@ export function DictationSetupHint() {
 				and the text appears when you stop (up to {GROQ_MAX_RECORDING_SECONDS / 60} minutes at a time).
 				It uses your <a href="https://console.groq.com/keys" target="_blank" rel="noreferrer" className={LINK}>Groq API key</a>,
 				the same one as the Groq model provider. Multilingual lets Whisper detect the language.
+			</p>
+		);
+	}
+	if (provider === "local") {
+		return (
+			<p data-testid="dictation-setup-hint" data-engine="local" className={className}>
+				Local transcribes on this computer with a model you download and choose here, so your speech never
+				leaves it. It is processed in short pieces while you talk, and the text appears when you stop
+				(up to {GROQ_MAX_RECORDING_SECONDS / 60} minutes at a time).
 			</p>
 		);
 	}
