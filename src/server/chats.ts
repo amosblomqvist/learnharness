@@ -23,6 +23,16 @@ import { discardChatDeliveries } from "./jobs.ts";
 
 export const { createChat, getChat, listChats } = stores.chatStore;
 export { titleFromPrompt };
+
+export function saveChatNotes(chatId: string, text: string): boolean {
+	return stores.chatStore.saveNotes(chatId, text);
+}
+
+/** The saved notes ("" when none); null when the chat is unknown. */
+export function readChatNotes(chatId: string): string | null {
+	const chat = stores.chatStore.getChat(chatId);
+	return chat ? (chat.notes ?? "") : null;
+}
 export type { ChatDeleteMode, ChatDeletionStats } from "../core/graph-deletion.ts";
 
 /** How long the wind-down wait may take before the caller gets a retryable
