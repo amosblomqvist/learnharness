@@ -90,6 +90,11 @@ export function createDictationLanguageStore(request: typeof fetch, saved: () =>
 		return write(patch, "Could not save dictation engine. Try again.");
 	}
 
+	/** The on-device settings screen's write: one or more Local fields, all in one PUT. */
+	function saveLocal(patch: DictationEnginePatch): Promise<boolean> {
+		return write(patch, "Could not save on-device dictation settings. Try again.");
+	}
+
 	/** Replace the whole dictation section with the confirmed values plus `patch`. */
 	function write(patch: DictationEnginePatch & { language?: DictationLanguage }, failure: string): Promise<boolean> {
 		// A different selection must never inherit the previous write's success.
@@ -155,7 +160,7 @@ export function createDictationLanguageStore(request: typeof fetch, saved: () =>
 	}
 
 	return {
-		load, save, saveEngine, getLanguage, getPreference,
+		load, save, saveEngine, saveLocal, getLanguage, getPreference,
 		getSnapshot: () => snapshot,
 		getServerSnapshot: () => INITIAL,
 		subscribe(listener: () => void) { listeners.add(listener); return () => { listeners.delete(listener); }; },
@@ -188,7 +193,7 @@ function subscribe(listener: () => void) {
 export function useDictationLanguage() {
 	const snapshot = useSyncExternalStore(subscribe, store.getSnapshot, store.getServerSnapshot);
 	return {
-		...snapshot, load: store.load, save: store.save, saveEngine: store.saveEngine,
+		...snapshot, load: store.load, save: store.save, saveEngine: store.saveEngine, saveLocal: store.saveLocal,
 		getLanguage: store.getLanguage, getPreference: store.getPreference,
 	};
 }

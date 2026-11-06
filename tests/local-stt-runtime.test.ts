@@ -346,6 +346,18 @@ describe("language", () => {
 		assert.deepEqual(fake.log.calls[0]!.options, { language: "fr" });
 		assert.deepEqual(fake.log.detections, []);
 	});
+
+	it("Auto on a model with one language is that language, whatever the preferences say (Settings hides the language row for it)", async () => {
+		await install("parakeet-unified-en-0.6b");
+		const fake = fakeEngine({ languages: () => ["en"] });
+		make(fake);
+		for (const preferredLanguages of [["en"], ["de"], ["de", "fr"]]) {
+			const result = await runtime.transcribeChunk(pcm(1), { ...base, modelId: "parakeet-unified-en-0.6b", preferredLanguages });
+			assert.equal(result.language, "en", preferredLanguages.join());
+		}
+		assert.deepEqual(fake.log.calls.map((call) => call.options), [{ language: "en" }, { language: "en" }, { language: "en" }]);
+		assert.deepEqual(fake.log.detections, []);
+	});
 });
 
 describe("Chinese output", () => {

@@ -41,7 +41,7 @@ import { ClaudeCodeInstallationStatus } from "./claude-code-status.tsx";
 import { ProviderMenuList } from "./model-menu.tsx";
 import { MenuShell } from "@/components/menu-shell";
 import { notifySettingsSaved } from "@/components/settings-signal";
-import { DictationLanguageSetting } from "@/components/dictation-language";
+import { DictationLanguageRows } from "@/components/settings/dictation-local";
 import { DictationEngineSettings, DictationSetupHint } from "@/components/dictation-engine";
 import { GROQ_DICTATION_ROW } from "@/components/dictation-groq";
 
@@ -621,7 +621,7 @@ export function KeysSection({
 						testid="key-dictation-groq"
 					/>
 					<DictationEngineSettings />
-					<DictationLanguageSetting />
+					<DictationLanguageRows />
 					<DictationSetupHint />
 				</>}
 			</SettingsGroup>)}

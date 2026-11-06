@@ -18,9 +18,10 @@ const ENGINES: readonly { id: DictationProvider; label: string }[] = [
 const LINK = "underline underline-offset-2 hover:text-foreground";
 
 /**
- * Settings → Providers → Dictation: which engine transcribes, and for Groq,
- * which Whisper model (the Local engine's model and language controls are separate). Deepgram stays the default. Like the language picker it
- * locks while a run is live, and a write failure keeps the previous choice.
+ * Settings → Providers → Dictation: which engine transcribes (Deepgram, Groq or Local),
+ * and for Groq, which Whisper model. Local's own rows live in settings/dictation-local.tsx.
+ * Deepgram stays the default. Like the language picker it locks while a run is live,
+ * and a write failure keeps the previous choice.
  */
 export function DictationEngineSettings() {
 	const { provider, groqModel, saving, error, saveEngine } = useDictationLanguage();
@@ -78,15 +79,9 @@ export function DictationSetupHint() {
 			</p>
 		);
 	}
-	if (provider === "local") {
-		return (
-			<p data-testid="dictation-setup-hint" data-engine="local" className={className}>
-				Local transcribes on this computer with a model you download and choose here, so your speech never
-				leaves it. It is processed in short pieces while you talk, and the text appears when you stop
-				(up to {GROQ_MAX_RECORDING_SECONDS / 60} minutes at a time).
-			</p>
-		);
-	}
+	// Local's note sits directly under the Engine select, before its rows and model list, so
+	// settings/dictation-local.tsx renders it there instead.
+	if (provider === "local") return null;
 	return (
 		<p data-testid="dictation-setup-hint" className={className}>
 			Create a <a

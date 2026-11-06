@@ -126,18 +126,16 @@ test("choosing Groq saves it with the language, shows the model row (turbo by de
 	assert.equal(hint.querySelector("a")!.getAttribute("href"), "https://console.groq.com/keys");
 });
 
-test("choosing Local saves it, hides the Groq model row and says nothing leaves this device", async () => {
+test("choosing Local saves it, hides the Groq model row and leaves its note to the Local rows", async () => {
 	const f = await fixture({ dictation: { language: "pl" } });
 	await mount(<Picker />);
 	await choose("select-dictation-engine", "local");
 	assert.deepEqual(f.puts, [{ language: "pl", provider: "local" }]);
 	assert.equal(select("select-dictation-engine").value, "local");
 	assert.equal(byTest("row-dictation-groq-model"), null);
-	const hint = byTest("dictation-setup-hint")!;
-	assert.equal(hint.getAttribute("data-engine"), "local");
-	assert.match(hint.textContent!.replace(/\s+/g, " "), /on this computer with a model you download and choose here, so your speech never leaves it/);
-	assert.match(hint.textContent!, /up to 20 minutes at a time/);
-	assert.equal(hint.querySelector("a"), null, "no key to link to");
+	// Local's note sits under the Engine select inside settings/dictation-local.tsx
+	// (tests/dictation-local-settings.test.tsx), so the shared hint renders nothing.
+	assert.equal(byTest("dictation-setup-hint"), null);
 });
 
 test("choosing a model keeps the engine and language, and a later language change keeps both", async () => {
