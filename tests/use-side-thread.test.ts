@@ -66,7 +66,7 @@ describe("one durable side companion", () => {
 		assert.equal(state.answering, false);
 		assert.equal(Object.hasOwn(state, "contextFrozen"), false);
 	});
-	it("keeps a refused initial /btw question available rather than silently losing it", () => {
+	it("keeps a failed manually submitted question available rather than silently losing it", () => {
 		const failed = reduce(open(), { type: "error", threadId: thread.id, error: "No model", question: "Why?" });
 		assert.equal(failed?.failedQuestion, "Why?");
 		assert.equal(failed?.answering, false);

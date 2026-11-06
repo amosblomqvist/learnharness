@@ -5,7 +5,7 @@ import { clampDragged, fitSideThreadFrame, fitResizableSideThreadFrame, placeSid
 const viewport = { width: 1400, height: 900 };
 
 describe("placeSideThread", () => {
-	it("sits right above the composer at its exact width (/btw)", () => {
+	it("sits right above a composer anchor at its exact width", () => {
 		const p = placeSideThread({ kind: "composer", rect: { left: 492, right: 1196, top: 790, bottom: 845 }, viewport, contentHeight: 300 });
 		assert.deepEqual(p.style, { left: 492, width: 704, bottom: 900 - 790 + 8 });
 		assert.equal(p.maxHeight, Math.min(0.6 * 900, 790 - 8 - 8));

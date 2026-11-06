@@ -14,11 +14,6 @@ import { fitResizableSideThreadFrame, placeSideThread, resizeSideThread, type Si
 import type { SelectionAction } from "./selection-toolbar";
 import type { SideThreadAnchor, SideThreadOpenArgs, SideThreadState } from "./use-side-thread";
 
-export function parseBtw(text: string): { question: string } | null {
-	const match = /^\s*\/btw(?:\s+([\s\S]*))?$/.exec(text);
-	return match ? { question: (match[1] ?? "").trim() } : null;
-}
-
 /** Ask always opens the selected teaching segment's ONE conversation. Cite
  * is an independent action that inserts a chip into the main/thinking field. */
 export function createSideQuestionActions({ open }: { open: (args: SideThreadOpenArgs) => void }): SelectionAction[] {

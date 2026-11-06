@@ -14,7 +14,6 @@ export interface SideThreadOpenArgs {
 	passage?: SidePassage;
 	sourceMessageId?: string;
 	questionCallId?: string;
-	question?: string;
 }
 export interface SideThreadState {
 	threadId: string;
@@ -76,7 +75,6 @@ export function useSideThread(chatId: string, messages: readonly LhMessage[], ge
 	const revision = useRef(0);
 	const refreshSerial = useRef(0);
 	const uncertain = useRef<{ segmentId: string; text: string; quote?: string; requestId: string } | null>(null);
-	const initialQuestion = useRef<string | null>(null);
 	const drafts = useRef(new Map<string, string>());
 	const [, syncExternalDraft] = useState(0);
 	const draftFor = useCallback((threadId: string) => drafts.current.get(threadId) ?? "", []);
@@ -152,13 +150,12 @@ export function useSideThread(chatId: string, messages: readonly LhMessage[], ge
 			.then((response) => consume(response, thread.id, token))
 			.catch((error) => { if (!controller.signal.aborted && token === connection.current?.token) dispatch({ type: "error", threadId: thread.id, error: String(error.message ?? error) }); });
 	}, [chatId, consume]);
-	const open = useCallback(({ anchor, passage, sourceMessageId, questionCallId, question }: SideThreadOpenArgs) => {
+	const open = useCallback(({ anchor, passage, sourceMessageId, questionCallId }: SideThreadOpenArgs) => {
 		const source = sourceMessageId ?? passage?.sourceMessageId ?? (questionCallId ? messagesRef.current.find((message) => message.role === "assistant" &&
 			message.content.some((block) => block.type === "toolCall" && block.id === questionCallId))?.id : undefined);
 		const segmentId = sideSegmentId(messagesRef.current, source);
 		if (!segmentId) return;
 		const thread = threadsRef.current.find((entry) => entry.anchor.messageId === segmentId);
-		initialQuestion.current = question?.trim() || null;
 		dispatch({ type: "open", segmentId, anchor, passage, thread });
 		if (thread) attach(thread);
 		else { connection.current?.controller.abort(); connection.current = null; }
@@ -206,11 +203,6 @@ export function useSideThread(chatId: string, messages: readonly LhMessage[], ge
 			return false;
 		}
 	}, [chatId, consume, refresh]);
-	useEffect(() => {
-		if (!state || !initialQuestion.current || state.answering) return;
-		const question = initialQuestion.current; initialQuestion.current = null;
-		void ask(question);
-	}, [state, ask]);
 	const stop = useCallback(() => {
 		const current = stateRef.current;
 		if (current) void fetch(`/api/chats/${chatId}/side-chats/${current.threadId}/stop`, { method: "POST" }).catch(() => {});

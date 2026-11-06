@@ -65,7 +65,7 @@ import { createCiteAction, type CitationEditTarget } from "@/components/citation
 import { CitationActionsContext, type CitationActions } from "@/components/citation-chip";
 import { CitationCommentPopover } from "@/components/citation-comment-popover";
 import { revealCitationSource } from "@/components/citation-source";
-import { createSideQuestionActions, parseBtw, SideThreadBody, SideThreadPanel, SideThreadPopover } from "@/components/side-thread";
+import { createSideQuestionActions, SideThreadBody, SideThreadPanel, SideThreadPopover } from "@/components/side-thread";
 import { useSideThread, type SideThreadOpenArgs } from "@/components/use-side-thread";
 import { useRouter } from "next/navigation";
 import { PracticeDock } from "@/components/practice-dock";
@@ -1369,15 +1369,6 @@ export function Chat({
 		if (pending || compacting) return;
 		const t = textRef.current.trim();
 		if (!t) return;
-		// /btw <question> (#16): a side question, never sent to the tutor —
-		// before both steer and send. A source-less opening leaves the draft intact.
-		const btw = parseBtw(t);
-		if (btw) {
-			if (!sideSegmentId(nativeMessages)) return;
-			applyText("");
-			openSideThread({ anchor: { kind: "composer" }, question: btw.question });
-			return;
-		}
 		if (busy) {
 			applyText("");
 			void steer(t);

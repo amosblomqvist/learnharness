@@ -3,7 +3,7 @@ import { describe, it } from "node:test";
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { parseHTML } from "linkedom";
-import { createSideQuestionActions, parseBtw, SideThreadBody, sideThreadPlaceholder, type SideThreadHandlers } from "../components/side-thread.tsx";
+import { createSideQuestionActions, SideThreadBody, sideThreadPlaceholder, type SideThreadHandlers } from "../components/side-thread.tsx";
 import type { SideThreadState } from "../components/use-side-thread.ts";
 
 const state: SideThreadState = { threadId: "side_lesson", segmentId: "lesson", messages: [
@@ -69,11 +69,6 @@ describe("floating/docked raw side conversation", () => {
 });
 
 describe("side entry points", () => {
-	it("keeps /btw as a distinct command", () => {
-		assert.deepEqual(parseBtw("/btw why?"), { question: "why?" });
-		assert.deepEqual(parseBtw("/btw"), { question: "" });
-		assert.equal(parseBtw("/btween"), null);
-	});
 	it("has one quiet selection Ask action, independent of whether a companion is already open", () => {
 		const actions = createSideQuestionActions({ open() {} });
 		assert.deepEqual(actions.map((action) => action.label), ["Ask"]);
