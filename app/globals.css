@@ -536,11 +536,16 @@ body {
 .lh-electron {
 	--lh-zoom: 1;
 }
+.lh-electron[data-lh-platform="darwin"] {
+	/* Shared with floating-panel clearance; physical dimensions, before zoom. */
+	--lh-traffic-lights-width: 92px;
+	--lh-traffic-lights-height: 60px;
+}
 .lh-electron[data-lh-platform="darwin"] .lh-lights-gutter {
-	padding-left: calc(92px / var(--lh-zoom));
+	padding-left: calc(var(--lh-traffic-lights-width) / var(--lh-zoom));
 }
 .lh-electron[data-lh-platform="darwin"] .lh-closed-toggle {
-	margin-left: calc(92px / var(--lh-zoom));
+	margin-left: calc(var(--lh-traffic-lights-width) / var(--lh-zoom));
 }
 
 /* Windows/Linux Window Controls Overlay: Chromium publishes the usable

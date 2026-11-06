@@ -146,6 +146,10 @@ export interface SideChatMessage {
 	text: string;
 	/** user only: the passages the learner attached to this question. */
 	quotes?: string[];
+	/** Matching canonical Tutor quote links retain each passage's actual
+	 * native source and exact-text selector, independent of segment identity.
+	 * Legacy string-only quotes remain readable without a guessed target. */
+	quoteCitations?: string[];
 	/** ISO time the message was saved. */
 	at: string;
 	/** assistant only: provider-qualified model ("provider:id"). */

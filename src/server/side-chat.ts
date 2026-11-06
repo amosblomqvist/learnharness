@@ -10,6 +10,7 @@ import {
 	newSideQuestion, newSideThread, sideSegmentId, sideChatLessonDocument,
 	sideChatModelTurns, sideThreadAwaitsAnswer, type SideAskInput,
 } from "../core/side-chat.ts";
+import { collectCitations } from "../core/citations.ts";
 import { COMPACTION_RESERVE_TOKENS } from "../core/compaction.ts";
 import { resolveSideQuestionSpec } from "../core/settings-resolution.ts";
 import { modelsNotConfigured, providerKeyMissing as providerKeyMissingEnvelope } from "../core/settings.ts";
@@ -140,6 +141,17 @@ export function createSideChatService(deps: SideChatDeps): SideChatService {
 			if (!threads.includes(target) && segment !== sideSegmentId(record.messages)) target = { ...target, contextSnapshot: [] };
 		}
 		if (!target) return Response.json({ error: "A teaching segment or threadId is required" }, { status: 400 });
+		if (input.quoteCitations) {
+			if (input.quoteCitations.length !== input.quotes.length) return Response.json({ error: "Quote sources do not match the passages" }, { status: 400 });
+			for (const [index, link] of input.quoteCitations.entries()) {
+				const citations = collectCitations(link);
+				const citation = citations[0]?.citation;
+				const source = citation && record.messages.find((message) => message.id === citation.messageId && message.role === "assistant");
+				if (citations.length !== 1 || citations[0]!.source !== link || !citation || citation.chatId !== chatId || citation.text.trim() !== input.quotes[index] || !source || sideSegmentId(record.messages, source.id) !== target.anchor.messageId) {
+					return Response.json({ error: "The quoted source is not in this teaching segment" }, { status: 400 });
+				}
+			}
+		}
 		const key = runKey(chatId, target.id);
 		const active = runs.get(key);
 		if (input.requestId && (active?.operationId === input.requestId || target.messages.some((message) => message.id === input.requestId || message.requestId === input.requestId))) {
@@ -157,6 +169,7 @@ export function createSideChatService(deps: SideChatDeps): SideChatService {
 			} else if (!sideThreadAwaitsAnswer(target)) return Response.json({ error: "Nothing to retry" }, { status: 409 });
 		} else {
 			const question = newSideQuestion(input.text, input.quotes);
+			if (input.quoteCitations?.length) question.quoteCitations = [...input.quoteCitations];
 			if (input.requestId) question.id = input.requestId;
 			thread = { ...target, open: true, messages: [...target.messages, question] };
 			modelThread = thread;

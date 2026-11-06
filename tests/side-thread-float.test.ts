@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { clampDragged, placeSideThread, resizedHeight, SIDE_THREAD_MIN_HEIGHT, SIDE_THREAD_WIDTH } from "../components/side-thread-float.ts";
+import { clampDragged, fitSideThreadFrame, placeSideThread, resizedHeight, SIDE_THREAD_MIN_HEIGHT, SIDE_THREAD_WIDTH } from "../components/side-thread-float.ts";
 
 const viewport = { width: 1400, height: 900 };
 
@@ -35,10 +35,36 @@ describe("clampDragged", () => {
 	});
 });
 
+describe("native traffic-light corner", () => {
+	const desktop = { ...viewport, trafficLights: { width: 92, height: 60 } };
+	it("excludes only the corner, using the closest available edge", () => {
+		assert.deepEqual(clampDragged({ x: 80, y: 10 }, { width: 416, height: 300 }, desktop), { x: 92, y: 10 });
+		assert.deepEqual(clampDragged({ x: 8, y: 50 }, { width: 416, height: 300 }, desktop), { x: 8, y: 60 });
+		assert.deepEqual(clampDragged({ x: 200, y: 8 }, { width: 416, height: 300 }, desktop), { x: 200, y: 8 });
+	});
+	it("also protects anchored openings, not just dragged windows", () => {
+		const placed = placeSideThread({ kind: "rect", rect: { left: 8, right: 40, top: 12, bottom: 28 }, viewport: desktop, contentHeight: 300 });
+		assert.ok(placed.style.left >= 92 || (placed.style.top ?? 0) >= 60);
+	});
+	it("fits resized/full-width frames below the corner across native zoom factors", () => {
+		for (const zoom of [0.8, 1, 1.5, 2]) {
+			const vp = { width: 350, height: 300, trafficLights: { width: 92 / zoom, height: 60 / zoom } };
+			for (const width of [200, 334]) for (const height of [160, 900]) for (const x of [-50, 8, 80, 300]) for (const y of [-10, 8, 50, 280]) {
+				const frame = fitSideThreadFrame({ x, y, height }, width, vp);
+				assert.ok(frame.x >= 8 && frame.y >= 8);
+				assert.ok(frame.x + width <= vp.width - 8);
+				assert.ok(frame.y + frame.height <= vp.height - 8);
+				assert.ok(frame.x >= vp.trafficLights.width || frame.y >= vp.trafficLights.height);
+			}
+		}
+	});
+});
+
 describe("resizedHeight", () => {
 	it("follows the pointer between the minimum and the window bottom", () => {
 		assert.equal(resizedHeight(300, 120, 100, 900), 420);
 		assert.equal(resizedHeight(300, -250, 100, 900), SIDE_THREAD_MIN_HEIGHT);
 		assert.equal(resizedHeight(300, 900, 100, 900), 900 - 100 - 8);
+		assert.equal(resizedHeight(300, 0, 100, 200), 92, "viewport bounds win over the preferred minimum");
 	});
 });

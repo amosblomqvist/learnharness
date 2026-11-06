@@ -37,7 +37,7 @@ import {
 	userFacingTextOf,
 } from "./native-messages.ts";
 import { activeCompactionOf, keptIndexFor } from "./compaction.ts";
-import { citationsToReadableText } from "./citations.ts";
+import { citationsToReadableText, collectCitations } from "./citations.ts";
 import { messageMarkdown } from "./session-markdown.ts";
 import { normalizeOptions, seededRandom, shuffleOptions, type QuestionAnswerData } from "./question-core.ts";
 import { QUESTION_TOOLS, toolQuestionKind } from "./pending.ts";
@@ -138,6 +138,7 @@ export interface SideAskInput {
 	anchor?: SideChatAnchor;
 	text: string;
 	quotes: string[];
+	quoteCitations?: string[];
 	retry?: boolean;
 	/** Stable across an uncertain POST retry: never generate twice for one ask. */
 	requestId?: string;
@@ -190,13 +191,22 @@ export function parseSideAskInput(raw: unknown): SideAskInput {
 	}
 	const quotes = (quotesRaw as string[]).map((q) => q.trim()).filter(Boolean);
 	if (quotes.length > SIDE_QUOTES_MAX) throw new SideChatInputError(`at most ${SIDE_QUOTES_MAX} quotes per question`);
+	const quoteCitations = body.quoteCitations;
+	if (quoteCitations !== undefined) {
+		if (!Array.isArray(quoteCitations) || quoteCitations.length !== quotes.length || quotes.length !== quotesRaw.length) throw new SideChatInputError("quoteCitations must match the quotes");
+		for (const [index, value] of quoteCitations.entries()) {
+			const citation = typeof value === "string" && value.length <= 128_000 ? collectCitations(value) : [];
+			if (citation.length !== 1 || citation[0]!.source !== value || citation[0]!.citation.text.trim() !== clip(quotes[index]!, SIDE_QUOTE_MAX_CHARS)) throw new SideChatInputError("quote citation is invalid or does not match its passage");
+		}
+	}
+	const references = quoteCitations === undefined ? {} : { quoteCitations: quoteCitations as string[] };
 	const threadId = body.threadId;
 	if (threadId !== undefined) {
 		if (typeof threadId !== "string" || !ID_RE.test(threadId)) throw new SideChatInputError("threadId is invalid");
-		return { threadId, text, quotes: quotes.map((q) => clip(q, SIDE_QUOTE_MAX_CHARS)), ...extra };
+		return { threadId, text, quotes: quotes.map((q) => clip(q, SIDE_QUOTE_MAX_CHARS)), ...extra, ...references };
 	}
 	if (body.anchor === undefined) throw new SideChatInputError("either threadId or anchor is required");
-	return { anchor: parseSideAnchor(body.anchor), text, quotes: quotes.map((q) => clip(q, SIDE_QUOTE_MAX_CHARS)), ...extra };
+	return { anchor: parseSideAnchor(body.anchor), text, quotes: quotes.map((q) => clip(q, SIDE_QUOTE_MAX_CHARS)), ...extra, ...references };
 }
 
 /** Parse the window-state body ({open: boolean}). */

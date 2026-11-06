@@ -25,6 +25,8 @@ const { runningTurn } = await import("../src/server/turn-runs.ts");
 const { buildAnswer, normalizeOptions, resolveCorrect } = await import("../src/core/question-core.ts");
 const { sideConversationEntries, sideSegmentId } = await import("../src/core/side-chat.ts");
 const { newUserMessage } = await import("../src/core/native-messages.ts");
+const { collectCitations, serializeCitation } = await import("../src/core/citations.ts");
+const { parseSideAskInput, SideChatInputError } = await import("../src/core/side-chat.ts");
 const { markUnadmittedUsage } = await import("../src/agent/subscription-request-cycle.ts");
 const { POST: dismissRoute } = await import("../app/api/chats/[id]/dismiss/route.ts");
 const { applyParkedDismissal, parkDismissal } = await import("../src/server/dismissal-park.ts");
@@ -117,6 +119,25 @@ describe("main submission cutoff", () => {
 		const next = await mainInput(f.chatId, { type: "text", text: "Continue the main lesson" }, f.service);
 		assert.equal(next.response.status, 200);
 		assert.doesNotMatch(JSON.stringify(next.contexts), /LATE FOLLOW-UP|LATE COMPLETION/);
+	});
+
+	it("persists the selected prose source independently of a tool-only segment head", async () => {
+		const f = fixture(); const record = chatStore.getChat(f.chatId)!;
+		chatStore.saveMessages(f.chatId, [record.messages[0]!, { ...fauxAssistantMessage([fauxToolCall("read", { path: "synthetic.md" }, { id: "read_work" })], { stopReason: "toolUse" }), id: "work" },
+			{ id: "read_result", role: "toolResult", toolCallId: "read_work", toolName: "read", content: [{ type: "text", text: "Synthetic" }], isError: false, timestamp: 1 }, ...record.messages.slice(1)]);
+		const link = serializeCitation({ version: 1, chatId: f.chatId, messageId: "explanation", text: "Selected prose", start: 0, end: 14, prefix: "", suffix: "" });
+		const input = parseSideAskInput({ anchor: f.anchor, text: "Clarify", quotes: ["Selected prose"], quoteCitations: [link] });
+		const response = await f.service.ask(f.chatId, input); const reader = await seenPartial(response);
+		const thread = chatStore.getChat(f.chatId)!.sideChats![0]!;
+		assert.equal(thread.id, "side_work");
+		assert.equal(collectCitations(thread.messages[0]!.quoteCitations![0]!)[0]!.citation.messageId, "explanation");
+		f.finish(); await f.service.settled(f.chatId, thread.id); await reader.cancel();
+		for (const messageId of ["missing", record.messages[0]!.id]) {
+			const wrong = serializeCitation({ version: 1, chatId: f.chatId, messageId, text: "Selected prose", start: 0, end: 14, prefix: "", suffix: "" });
+			assert.equal((await f.service.ask(f.chatId, { ...input, threadId: thread.id, quoteCitations: [wrong] })).status, 400);
+		}
+		assert.throws(() => parseSideAskInput({ anchor: f.anchor, text: "Clarify", quotes: ["Different prose"], quoteCitations: [link] }), SideChatInputError);
+		assert.throws(() => parseSideAskInput({ anchor: f.anchor, text: "Clarify", quotes: [], quoteCitations: [link] }), SideChatInputError);
 	});
 
 	it("freezes a side exchange when idle dismissal is saved without making a teacher request", async () => {

@@ -790,7 +790,7 @@ export function Chat({
 		const destinationId = `side:${id}`;
 		const owns = recording.destinationId === destinationId;
 		return { phase: owns ? recording.phase : "idle" as const, active: owns && recording.active,
-			blocked: !owns && recording.active, error: owns ? recording.error : null,
+			blocked: !owns && recording.active, error: owns ? recording.error : null, levelRef: recording.levelRef,
 			toggle: () => recording.toggleFor({ id: destinationId, append: (text) => sideThread.saveDraft(id, joinDictation(sideThread.draftFor(id), text), true) }),
 			finish: () => recording.finishFor(destinationId) };
 	};
@@ -1368,9 +1368,10 @@ export function Chat({
 		const t = textRef.current.trim();
 		if (!t) return;
 		// /btw <question> (#16): a side question, never sent to the tutor —
-		// before both steer and send. Practice sends it as ordinary text.
+		// before both steer and send. A source-less opening leaves the draft intact.
 		const btw = parseBtw(t);
 		if (btw) {
+			if (!sideSegmentId(nativeMessages)) return;
 			applyText("");
 			openSideThread({ anchor: { kind: "composer" }, question: btw.question });
 			return;

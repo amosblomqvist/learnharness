@@ -3,12 +3,13 @@ import assert from "node:assert/strict";
 import { afterEach, test } from "node:test";
 import { parseHTML } from "linkedom";
 import { SideThreadBody } from "../components/side-thread.tsx";
+import { useEnterSubmits } from "../components/enter-submits.ts";
 import type { SideThreadState } from "../components/use-side-thread.ts";
 
 let dispose: (() => Promise<void>) | undefined;
 afterEach(async () => { await dispose?.(); dispose = undefined; });
 
-async function fixture(recording: boolean) {
+async function fixture(recording: boolean, mode: "popover" | "panel" = "popover") {
 	const dom = parseHTML("<html><body><div id='root'></div></body></html>");
 	// Linkedom has no native oninput property; advertise modern input
 	// support so React does not select its legacy IE value-change polyfill.
@@ -22,15 +23,17 @@ async function fixture(recording: boolean) {
 	const { createRoot } = await import("react-dom/client");
 	const root = createRoot(document.getElementById("root")!);
 	const sent: string[] = [];
-	let saved = ""; let toggles = 0; let finishes = 0;
+	let saved = ""; let toggles = 0; let finishes = 0; let mainSubmits = 0;
+	const levelRef = { current: 0 };
 	const state: SideThreadState = { threadId: "side_lesson", segmentId: "lesson", messages: [], answering: false,
-		streamText: "", contextFrozen: false, mode: "popover", anchor: { kind: "composer" } };
+		streamText: "", contextFrozen: false, mode, anchor: { kind: "composer" } };
 	function Harness() {
+		useEnterSubmits(() => { mainSubmits++; });
 		const [draft, setDraft] = useState(saved);
 		const [active, setActive] = useState(recording);
 		return <SideThreadBody state={state} draft={draft} readDraft={() => saved}
 			onDraftChange={(text) => { saved = text; }}
-			dictation={{ active, phase: active ? "recording" : "idle", blocked: false, error: null,
+			dictation={{ active, phase: active ? "recording" : "idle", blocked: false, error: null, levelRef,
 				toggle: () => { toggles++; }, finish: async () => {
 					finishes++; saved = "Dictated clarification"; setDraft(saved); setActive(false);
 				} }}
@@ -44,7 +47,7 @@ async function fixture(recording: boolean) {
 		}
 	};
 	await act(async () => root.render(<Harness />));
-	return { dom, sent, saved: () => saved, finishes: () => finishes, toggles: () => toggles };
+	return { dom, sent, saved: () => saved, finishes: () => finishes, toggles: () => toggles, levelRef, mainSubmits: () => mainSubmits };
 }
 
 test("side Send finishes speech before reading the authoritative draft, even before React commits", async () => {
@@ -68,4 +71,31 @@ test("the dictate chord in the side composer is consumed locally, not also sent 
 	assert.equal(f.toggles(), 1);
 	assert.equal(chord.defaultPrevented, true);
 	assert.equal(reachedWindow, 0);
+});
+
+test("docked side-control Enter stays native and cannot submit the main question", async () => {
+	const f = await fixture(false, "panel");
+	const button = document.querySelector<HTMLButtonElement>('[data-testid="side-dictation-toggle"]')!;
+	const enter = Object.assign(new f.dom.window.Event("keydown", { bubbles: true, cancelable: true }), { key: "Enter" });
+	await act(async () => { button.dispatchEvent(enter); });
+	assert.equal(f.mainSubmits(), 0);
+	assert.equal(enter.defaultPrevented, false, "the browser still owns native button activation");
+	await act(async () => button.click());
+	assert.equal(f.toggles(), 1);
+});
+
+test("side input bars follow actual microphone level, not a decorative animation", async (t) => {
+	t.mock.timers.enable({ apis: ["setInterval"] });
+	const f = await fixture(true);
+	const meter = () => document.querySelector('[data-testid="side-input-meter"]')!;
+	assert.equal(meter().getAttribute("aria-valuenow"), "0");
+	f.levelRef.current = 0.5;
+	await act(async () => t.mock.timers.tick(60));
+	assert.equal(meter().getAttribute("aria-valuenow"), "100");
+	const loud = meter().children[1]!.getAttribute("style");
+	f.levelRef.current = 0;
+	await act(async () => t.mock.timers.tick(60));
+	assert.equal(meter().getAttribute("aria-valuenow"), "0");
+	assert.notEqual(meter().children[1]!.getAttribute("style"), loud);
+	assert.equal(f.mainSubmits(), 0); assert.deepEqual(f.sent, []);
 });

@@ -4,7 +4,7 @@
  * Closing detaches a view; messages are already saved, and returning can
  * subscribe to a still-running answer. No close-time commits or tutor notes. */
 import { useCallback, useEffect, useReducer, useRef, useState } from "react";
-import { sideSegmentId, type LhMessage, type TextSelector, type SideChatMessage, type SideChatThread } from "@/src/core";
+import { serializeCitation, sideSegmentId, type LhMessage, type TextSelector, type SideChatMessage, type SideChatThread } from "@/src/core";
 import { useServerEvent, useServerResync } from "./server-events";
 
 export type SideThreadAnchor = { kind: "range"; range: Range } | { kind: "element"; element: HTMLElement } | { kind: "composer" };
@@ -127,7 +127,10 @@ export function useSideThread(chatId: string, messages: readonly LhMessage[], ge
 				adopt(event.thread);
 				dispatch({ type: event.type === "done" ? "done" : "snapshot", thread: event.thread });
 				uncertain.current = null;
-			} else if (event.type === "text") dispatch({ type: "text", threadId, text: event.text ?? "" });
+			} else if (event.type === "text") {
+				revision.current++; // an older GET must not rewind a newer stream tail
+				dispatch({ type: "text", threadId, text: event.text ?? "" });
+			}
 			else if (event.type === "error") throw new Error(event.error ?? "The side answer failed.");
 		};
 		try {
@@ -168,13 +171,17 @@ export function useSideThread(chatId: string, messages: readonly LhMessage[], ge
 	const ask = useCallback(async (text: string, retry = false, expectedThreadId?: string): Promise<boolean> => {
 		const current = stateRef.current;
 		if (!current || (expectedThreadId && expectedThreadId !== current.threadId) || current.answering || (!text.trim() && !retry)) return false;
+		const passage = current.pendingPassage;
+		const quote = passage ? serializeCitation({ version: 1, chatId, messageId: passage.sourceMessageId, text: passage.text,
+			...(passage.selector ?? { start: 0, end: passage.text.length, prefix: "", suffix: "" }) }) : undefined;
 		const previous = uncertain.current;
-		const requestId = previous?.segmentId === current.segmentId && previous.text === text && previous.quote === current.pendingPassage?.text
+		const requestId = previous?.segmentId === current.segmentId && previous.text === text && previous.quote === quote
 			? previous.requestId : `ask_${crypto.randomUUID().replaceAll("-", "")}`;
-		uncertain.current = { segmentId: current.segmentId, text, quote: current.pendingPassage?.text, requestId };
+		uncertain.current = { segmentId: current.segmentId, text, quote, requestId };
 		connection.current?.controller.abort();
 		const controller = new AbortController(); const token = ++serial.current;
 		connection.current = { controller, token };
+		revision.current++;
 		dispatch({ type: "start", threadId: current.threadId });
 		try {
 			const existing = threadsRef.current.some((thread) => thread.id === current.threadId);
@@ -183,7 +190,7 @@ export function useSideThread(chatId: string, messages: readonly LhMessage[], ge
 				method: "POST", headers: { "Content-Type": "application/json" }, signal: controller.signal,
 				body: JSON.stringify({ ...(existing ? { threadId: current.threadId } : { anchor: {
 					messageId: current.segmentId, partId: `${current.segmentId}-t0`, blockIndex: 0, blockText: "This teaching segment and its question.",
-				} }), text, quotes: current.pendingPassage ? [current.pendingPassage.text] : [], requestId, ...(retry ? { retry: true, threadId: current.threadId } : {}), ...(working ? { working } : {}) }),
+				} }), text, quotes: passage ? [passage.text] : [], ...(quote ? { quoteCitations: [quote] } : {}), requestId, ...(retry ? { retry: true, threadId: current.threadId } : {}), ...(working ? { working } : {}) }),
 			});
 			if (!response.ok) { await consume(response, current.threadId, token); return false; }
 			// Accepted and durable before streaming: the UI can clear its draft.
