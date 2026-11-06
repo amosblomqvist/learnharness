@@ -2,8 +2,9 @@
 
 import { useSyncExternalStore } from "react";
 import {
-	dictationSettingsBody, isDictationLanguage, resolveSettings, sanitizeUserSettings,
-	type DictationLanguage, type DictationProvider, type DictationSettings, type GroqWhisperModel, type UserSettings,
+	defaultLocalPreferredLanguages, dictationSettingsBody, isDictationLanguage, resolveSettings, sanitizeUserSettings,
+	type DictationLanguage, type DictationProvider, type DictationSettings, type GroqWhisperModel, type LocalChineseOutput,
+	type UserSettings,
 } from "@/src/core";
 import { notifySettingsSaved, onSettingsSaved } from "@/components/settings-signal";
 
@@ -13,11 +14,24 @@ const INITIAL = {
 	 * section is replaced whole, so every write must describe all three. */
 	provider: undefined as DictationProvider | undefined,
 	groqModel: undefined as GroqWhisperModel | undefined,
+	/** The on-device engine's choices ride along for the same reason: a write that
+	 * left them out would erase them (a language change must not forget the model). */
+	localModel: undefined as string | undefined,
+	localPreferredLanguages: undefined as string[] | undefined,
+	localLanguage: undefined as string | undefined,
+	localChineseOutput: undefined as LocalChineseOutput | undefined,
 	saving: false,
 	error: null as string | null,
 };
 
-export type DictationEnginePatch = { provider?: DictationProvider; groqModel?: GroqWhisperModel };
+export type DictationEnginePatch = {
+	provider?: DictationProvider;
+	groqModel?: GroqWhisperModel;
+	localModel?: string;
+	localPreferredLanguages?: string[];
+	localLanguage?: string;
+	localChineseOutput?: LocalChineseOutput;
+};
 
 /** One confirmed preference and one write in flight, shared by every surface.
  * The factory keeps transport tests isolated without a second persistence path.
@@ -75,11 +89,29 @@ export function createDictationLanguageStore(request: typeof fetch, saved: () =>
 		return write(patch, "Could not save dictation engine. Try again.");
 	}
 
+	/** The on-device settings screen's write: one or more Local fields, all in one PUT. */
+	function saveLocal(patch: DictationEnginePatch): Promise<boolean> {
+		return write(patch, "Could not save on-device dictation settings. Try again.");
+	}
+
 	/** Replace the whole dictation section with the confirmed values plus `patch`. */
 	function write(patch: DictationEnginePatch & { language?: DictationLanguage }, failure: string): Promise<boolean> {
 		// A different selection must never inherit the previous write's success.
 		if (writing || snapshot.language === undefined) return Promise.resolve(false);
-		const next = { language: snapshot.language, provider: snapshot.provider, groqModel: snapshot.groqModel, ...patch };
+		// An unset preferred list follows the dictation language. The snapshot holds its
+		// resolved value, so a language change must re-resolve it or the old language
+		// would be written back as if the learner had chosen it.
+		const preferred = snapshot.localPreferredLanguages;
+		const defaultPreferred = defaultLocalPreferredLanguages(snapshot.language);
+		const following = preferred === undefined
+			|| (preferred.length === defaultPreferred.length && preferred.every((code, i) => code === defaultPreferred[i]));
+		const next = {
+			language: snapshot.language, provider: snapshot.provider, groqModel: snapshot.groqModel,
+			localModel: snapshot.localModel,
+			localPreferredLanguages: following && patch.language ? defaultLocalPreferredLanguages(patch.language) : preferred,
+			localLanguage: snapshot.localLanguage, localChineseOutput: snapshot.localChineseOutput,
+			...patch,
+		};
 		revision++;
 		reading = null;
 		writing = Promise.resolve().then(async () => {
@@ -128,7 +160,7 @@ export function createDictationLanguageStore(request: typeof fetch, saved: () =>
 	}
 
 	return {
-		load, save, saveEngine, getLanguage, getPreference,
+		load, save, saveEngine, saveLocal, getLanguage, getPreference,
 		getSnapshot: () => snapshot,
 		getServerSnapshot: () => INITIAL,
 		subscribe(listener: () => void) { listeners.add(listener); return () => { listeners.delete(listener); }; },
@@ -161,7 +193,7 @@ function subscribe(listener: () => void) {
 export function useDictationLanguage() {
 	const snapshot = useSyncExternalStore(subscribe, store.getSnapshot, store.getServerSnapshot);
 	return {
-		...snapshot, load: store.load, save: store.save, saveEngine: store.saveEngine,
+		...snapshot, load: store.load, save: store.save, saveEngine: store.saveEngine, saveLocal: store.saveLocal,
 		getLanguage: store.getLanguage, getPreference: store.getPreference,
 	};
 }
