@@ -37,6 +37,7 @@ import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { AssistantMessage, ImageContent, Message, TextContent, ToolResultMessage, UserMessage } from "@earendil-works/pi-ai";
 import type { PluginSubmissionImages, PluginSubmissionOccurrence } from "./plugin-submissions.ts";
 import { QUESTION_TOOLS, type PendingQuestion } from "./pending.ts";
+import { pluginProblemForCall, readPluginProblemSubmission, type PluginProblemSnapshot } from "./plugin-problems.ts";
 import { CLAUDE_CODE_PROVIDER } from "./contracts/claude-code.ts";
 import {
 	CONCLUDE_ACK_TEXT,
@@ -76,6 +77,7 @@ export interface LhMarkerMessage {
 		| "subagent-abort"
 		| "plan-block"
 		| "practice-thinking"
+		| "plugin-problem-submission"
 		| "practice-next"
 		| "problem-dismissed"
 		| "compaction";
@@ -451,12 +453,19 @@ function cleanToolCallIds(messages: readonly LhMessage[]): Set<string> {
 	return ids;
 }
 
-/** The conclusion's reveal (owner round, 2026-10-05): the hero of a
- *  conclude card is the modelSolution committed at POSE time — the newest
- *  cleanly-posed problem BEFORE this conclude call. The reveal is never
- *  re-authored (the slim schema dropped solutionReveal); legacy conclude
- *  inputs that still carry their own solutionReveal fall back to it at the
- *  card. Undefined when the pose carries no string solution. */
+/** Common practice pose recognition, independent of the currently enabled plugins. */
+export function practiceProblemForCall(messages: readonly LhMessage[], occurrence: PluginSubmissionOccurrence): { input: unknown; pluginProblem?: PluginProblemSnapshot } | null {
+	const owner = messages.find(message => message.id === occurrence.messageId && message.role === "assistant") as (AssistantMessage & { id: string }) | undefined;
+	const call = owner?.content[occurrence.contentIndex];
+	if (call?.type !== "toolCall" || call.id !== occurrence.toolCallId || call.name !== occurrence.toolName) return null;
+	if (call.name === PRACTICE_PROBLEM_TOOL) return { input: call.arguments };
+	const pluginProblem = pluginProblemForCall(messages, occurrence);
+	return pluginProblem ? { input: pluginProblem.input, pluginProblem } : null;
+}
+
+/** The conclusion reveals the solution committed by the newest clean pose
+ * BEFORE this physical conclude call, never a later pose in the same batch.
+ * Legacy conclude-only solutionReveal fallback remains owned by the card. */
 export function modelSolutionForConclude(
 	messages: readonly LhMessage[],
 	concludeCallId: string,
@@ -483,16 +492,21 @@ export function problemInputForConclude(
 			),
 	);
 	if (mi < 0) return undefined;
+	const concludeMessageIndex = mi;
 	const clean = cleanToolCallIds(messages);
 	for (; mi >= 0; mi--) {
 		const m = messages[mi]!;
 		if ((m as { role?: string }).role !== "assistant") continue;
 		const assistant = m as AssistantMessage;
-		for (let bi = assistant.content.length - 1; bi >= 0; bi--) {
+		const lastIndex = mi === concludeMessageIndex
+			? assistant.content.findIndex(block => block.type === "toolCall" && block.id === concludeCallId) - 1
+			: assistant.content.length - 1;
+		for (let bi = lastIndex; bi >= 0; bi--) {
 			const block = assistant.content[bi]!;
-			if (block.type !== "toolCall" || block.name !== PRACTICE_PROBLEM_TOOL) continue;
-			if (!clean.has(block.id)) continue; // a refused pose revealed nothing
-			return (block.arguments ?? undefined) as
+			if (block.type !== "toolCall" || !clean.has(block.id)) continue;
+			const problem = practiceProblemForCall(messages, { messageId: m.id, contentIndex: bi, toolCallId: block.id, toolName: block.name });
+			if (!problem) continue;
+			return (problem.input ?? undefined) as
 				| { statement?: unknown; mode?: unknown; target?: unknown; modelSolution?: unknown }
 				| undefined;
 		}
@@ -502,9 +516,9 @@ export function problemInputForConclude(
 
 export function activeProblemOf(
 	messages: readonly LhMessage[],
-): { toolCallId: string; input: unknown } | null {
+): { toolCallId: string; input: unknown; pluginProblem?: PluginProblemSnapshot } | null {
 	const active = activeProblemCallOf(messages);
-	return active ? { toolCallId: active.occurrence.toolCallId, input: active.input } : null;
+	return active ? { toolCallId: active.occurrence.toolCallId, input: active.input, ...(active.pluginProblem ? { pluginProblem: active.pluginProblem } : {}) } : null;
 }
 
 /** Exact source of the same clean activation selected by activeProblemOf. */
@@ -512,7 +526,7 @@ export function activeProblemOccurrenceOf(messages: readonly LhMessage[]): Plugi
 	return activeProblemCallOf(messages)?.occurrence ?? null;
 }
 
-function activeProblemCallOf(messages: readonly LhMessage[]): { occurrence: PluginSubmissionOccurrence; input: unknown } | null {
+function activeProblemCallOf(messages: readonly LhMessage[]): { occurrence: PluginSubmissionOccurrence; input: unknown; pluginProblem?: PluginProblemSnapshot } | null {
 	// HONEST ACTIVATION (owner ruling, 2026-10-05 — the BKT incident):
 	// calls count only through their RESULTS — a problem activates on its
 	// clean ack, a conclude frees on its clean ack; errored and dangling
@@ -535,10 +549,9 @@ function activeProblemCallOf(messages: readonly LhMessage[]): { occurrence: Plug
 					if (cleanCallIds.has(block.id)) return null; // a CLEAN conclude frees
 					continue; // errored/dangling conclude: the free never happened
 				}
-				if (block.name !== PRACTICE_PROBLEM_TOOL) continue;
-				if (cleanCallIds.has(block.id)) return {
-					occurrence: { messageId: m.id, contentIndex: bi, toolCallId: block.id, toolName: block.name }, input: block.arguments,
-				};
+				const occurrence = { messageId: m.id, contentIndex: bi, toolCallId: block.id, toolName: block.name };
+				const problem = practiceProblemForCall(messages, occurrence);
+				if (problem && cleanCallIds.has(block.id)) return { occurrence, ...problem };
 				// errored/dangling pose — it did not go through; keep scanning
 			}
 			continue;
@@ -572,10 +585,9 @@ export function pendingProblemDismissalOf(messages: readonly LhMessage[]): strin
 					if (cleanCallIds.has(block.id)) return null; // a CLEAN conclude settles it
 					continue; // errored/dangling: it never happened
 				}
-				if (block.type === "toolCall" && block.name === PRACTICE_PROBLEM_TOOL) {
-					if (cleanCallIds.has(block.id)) return null; // a CLEAN pose supersedes it
-					continue;
-				}
+				if (block.type === "toolCall" && cleanCallIds.has(block.id) && practiceProblemForCall(messages, {
+					messageId: m.id, contentIndex: bi, toolCallId: block.id, toolName: block.name,
+				})) return null; // any CLEAN native/plugin pose supersedes it
 			}
 			continue;
 		}
@@ -665,11 +677,12 @@ export function toLlmMessages(messages: readonly AgentMessage[]): Message[] {
 			// stored position. Without a resolved head, preserve the existing
 			// full-history fallback, including the summary text.
 			if (marker.customType === "compaction" && head !== null) continue;
+			const problemSubmission = marker.customType === "plugin-problem-submission" ? readPluginProblemSubmission(marker.details) : null;
 			out.push({
 				role: "user",
-				content: [{ type: "text", text: marker.content }, ...(marker.customType === "practice-thinking"
-					? (marker.details as { images?: ImageContent[] } | null)?.images ?? []
-					: [])],
+				content: problemSubmission ? nativeAnswerContent(marker.content, { answer: problemSubmission.images?.submission, thinking: problemSubmission.images?.thinking })
+					: [{ type: "text", text: marker.content }, ...(marker.customType === "practice-thinking"
+						? (marker.details as { images?: ImageContent[] } | null)?.images ?? [] : [])],
 				timestamp: marker.timestamp,
 			});
 			continue;
@@ -940,7 +953,7 @@ export function nativeInputCause(message: AgentMessage, history: readonly AgentM
 	if (message.role === "system" || message.role === "assistant") return "neutral";
 	if (message.role === "custom") {
 		if (["probe-handoff", "subagent-steer", "subagent-abort"].includes(message.customType)) return "automatic";
-		if (["practice-thinking", "practice-next"].includes(message.customType)) return "learner";
+		if (["practice-thinking", "plugin-problem-submission", "practice-next"].includes(message.customType)) return "learner";
 		return ["graph-context", "plan-block", "problem-dismissed", "compaction"].includes(message.customType) ? "neutral" : "unrecognizable";
 	}
 	if (message.role === "toolResult") {
@@ -1026,7 +1039,9 @@ export function needsContinuation(messages: readonly LhMessage[]): boolean {
 	// "Problem posed" result later). Without this fold a reload after a
 	// pose would wake a phantom continuation turn.
 	const posedProblem = results.some(
-		(m) => m.toolName === PRACTICE_PROBLEM_TOOL && !m.isError && m.details == null,
+		(m) => !m.isError && ((m.toolName === PRACTICE_PROBLEM_TOOL && m.details == null) ||
+			(content as AssistantMessage["content"]).some((call, contentIndex) => call.type === "toolCall" && call.id === m.toolCallId && call.name === m.toolName &&
+				!!pluginProblemForCall(messages, { messageId: owner.id, contentIndex, toolCallId: call.id, toolName: call.name }))),
 	);
 	if (posedProblem) return false;
 	const answered = new Set(results.map((m) => m.toolCallId));

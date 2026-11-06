@@ -14,7 +14,8 @@ import {
 	type ProberToolContext,
 	type TeacherToolContext,
 } from "./tools.ts";
-import { practiceTools, type PracticeToolContext } from "./tools/practice.ts";
+import { practiceTools, createPracticeGate, type PracticeGate, type PracticeToolContext } from "./tools/practice.ts";
+import { pluginProblemTools, isPluginProblemPoseAcknowledgment, type NativePluginProblemContribution } from "./plugin-problem-tools.ts";
 import { healToolRecord, withArgumentHeal } from "./tools/heal.ts";
 import { sendToUserTool } from "./tools/send-to-user.ts";
 import { createReadTool, readTool } from "./tools/read.ts";
@@ -126,6 +127,7 @@ export interface AgentBuildOptions {
 		instructions: readonly string[];
 		tools: readonly AgentTool<any>[];
 		questionTypes?: readonly NativePluginQuestionContribution[];
+		problemTypes?: readonly NativePluginProblemContribution[];
 	};
 	/** The resolved per-user tool toggles (core/pending EnabledTools — the
 	 *  2026-09-19 P2 bridge: Platform's chat-handler passes
@@ -192,7 +194,8 @@ function makeQuestionStopper(kind: AgentKind) {
 	};
 }
 
-function baseAgentOptions(kind: AgentKind, opts: AgentBuildOptions, tools: AgentTool<any, any>[], nodeExists?: (nodeId: string) => boolean) {
+function baseAgentOptions(kind: AgentKind, opts: AgentBuildOptions, tools: AgentTool<any, any>[], nodeExists?: (nodeId: string) => boolean,
+	practice?: { gate: PracticeGate; graphNodes: PracticeToolContext["graphNodes"] }) {
 	// Practice never reaches the role fallback (the handler ALWAYS injects
 	// the session's conversation engine — practice rides the same
 	// conversation-spec resolution as teaching); the cast keeps AgentKind
@@ -217,6 +220,8 @@ function baseAgentOptions(kind: AgentKind, opts: AgentBuildOptions, tools: Agent
 		: undefined;
 	const questionLedger = contributions?.questionTypes?.length && opts.chatId
 		? new PluginQuestionLedger(contributions.questionTypes, opts.chatId, nodeExists) : undefined;
+	const problemTools = kind === "practice" && practice && opts.chatId
+		? pluginProblemTools(contributions?.problemTypes ?? [], opts.chatId, practice.gate, practice.graphNodes) : [];
 	// Never replace the builtin prompt or tools, or mutate an already-running Agent.
 	const systemPrompt = contributions?.instructions.length
 		? [builtinPrompt, ...contributions.instructions].join("\n\n---\n\n")
@@ -233,7 +238,7 @@ function baseAgentOptions(kind: AgentKind, opts: AgentBuildOptions, tools: Agent
 			systemPrompt,
 			model: engine.model,
 			thinkingLevel: engine.level,
-			tools: contributions ? [...builtinTools, ...contributions.tools, ...(questionLedger?.tools ?? [])] : builtinTools,
+			tools: contributions ? [...builtinTools, ...contributions.tools, ...(questionLedger?.tools ?? []), ...problemTools] : builtinTools,
 			messages: opts.messages ?? [],
 		},
 		streamFn: engine.streamFn,
@@ -244,7 +249,7 @@ function baseAgentOptions(kind: AgentKind, opts: AgentBuildOptions, tools: Agent
 		// exits BEFORE the steering poll — the parked-marker stranding our
 		// Wave C registerLiveAgent-before-runPiTurn design depends on.
 		// undefined preserves normal scheduling (the old boolean false).
-		finishTurn: (turn) => (turn.toolResults.some(result => questionLedger?.isAcknowledgment(result)) || stopper(turn) ? { action: "end" } : undefined),
+		finishTurn: (turn) => (turn.toolResults.some(result => questionLedger?.isAcknowledgment(result) || (kind === "practice" && isPluginProblemPoseAcknowledgment(result))) || stopper(turn) ? { action: "end" } : undefined),
 		// Wave C (2026-09-26, owner correction same day): markers handed to a
 		// live run drain from pi's STEERING queue — the lesson loop is one
 		// continuous teach→quiz→teach run, so delivery must inject at turn
@@ -364,8 +369,10 @@ export function bareQuestionTools(): Record<string, AgentTool<any>> {
  * for a mixed batch (for example, send_to_user + problem).
  */
 export function createPracticeAgent(ctx: PracticeToolContext, opts: AgentBuildOptions = {}) {
-	const tools = opts.tools ?? practiceTools(ctx);
-	return baseAgentOptions("practice", opts, Object.values(tools));
+	// Explicit test registries bypass all builtin construction and contributions.
+	if (opts.tools !== undefined) return baseAgentOptions("practice", opts, Object.values(opts.tools));
+	const gate = createPracticeGate(ctx);
+	return baseAgentOptions("practice", opts, Object.values(practiceTools(ctx, gate)), undefined, { gate, graphNodes: ctx.graphNodes });
 }
 
 export type ProberAgent = ReturnType<typeof createProberAgent>;

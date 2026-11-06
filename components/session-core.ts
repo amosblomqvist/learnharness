@@ -17,6 +17,8 @@ import type { AgentEvent } from "@earendil-works/pi-agent-core";
 import type { ToolResultMessage } from "@earendil-works/pi-ai";
 import {
 	needsContinuation,
+	activeProblemOf,
+	activeProblemOccurrenceOf,
 	pendingQuestionOf,
 	failedResponseAtEnd,
 	measuredContextTokens,
@@ -40,8 +42,13 @@ import {
 import { pendingPluginQuestionOf, pluginQuestionCallsOf } from "../src/core/index.ts";
 import { pluginQuestionOccurrenceKey, samePluginQuestionOccurrence, type PluginQuestionAnswerState, type PluginQuestionSnapshot, type PluginQuestionOccurrence } from "../src/core/index.ts";
 
+import type { PluginProblemSnapshot, PluginProblemSubmissionState } from "../src/core/index.ts";
+
+export interface PluginProblemAvailability { problemId: string; status: "available" | "unavailable" }
+export interface PluginProblemDraft { submission: PluginProblemSubmissionState; thinking: string }
 export interface PluginQuestionAvailability { questionId: string; status: "available" | "unavailable" }
 export interface SessionRecordSnapshot {
+	pluginProblemAvailability?: PluginProblemAvailability;
 	messages: LhMessage[];
 	turnError?: string;
 	pluginQuestionAvailability?: PluginQuestionAvailability;
@@ -205,6 +212,7 @@ function sameDetails(a: unknown, b: unknown): boolean {
 }
 
 export interface SessionState {
+	pluginProblemAvailability?: PluginProblemAvailability;
 	messages: LhViewMessage[];
 	nativeMessages: LhMessage[];
 	canonicalMessages: LhMessage[];
@@ -272,6 +280,8 @@ export class SessionModel {
 	private tail: LhMessage[] = [];
 	private questionDrafts = new Map<string, QuestionDraft>();
 	private pluginQuestionDrafts = new Map<string, PluginQuestionDraft>();
+	private pluginProblemDrafts = new Map<string, PluginProblemDraft>();
+	private pluginProblemAvailability?: PluginProblemAvailability;
 	private reconciliationValue: SessionState["reconciliation"] = "ready";
 	private pluginQuestionAvailability?: PluginQuestionAvailability;
 	private reconciliationTask: Promise<boolean> | null = null;
@@ -361,6 +371,7 @@ export class SessionModel {
 			status: this.statusValue,
 			reconciliation: this.reconciliationValue,
 			pluginQuestionAvailability: this.pluginQuestionAvailability,
+			pluginProblemAvailability: this.pluginProblemAvailability,
 			error: this.errorValue ?? providerError,
 			steerQueue: this.steerQueueValue,
 		};
@@ -437,11 +448,11 @@ export class SessionModel {
 		if (mode !== "none" && this.imagePostOwner) return undefined;
 		if (mode === "replace" && !options.allowInFlight && (this.statusValue === "submitted" || this.statusValue === "streaming")) return undefined;
 		if (mode === "append") {
-			if (!this.appendMessages(record.messages, record.pluginQuestionAvailability, true)) return undefined;
+			if (!this.appendMessages(record.messages, record.pluginQuestionAvailability, true, record.pluginProblemAvailability)) return undefined;
 			this.canonicalAcknowledged = Math.max(this.canonicalAcknowledged, ticket);
 		} else if (mode === "replace") {
 			this.canonicalAcknowledged = Math.max(this.canonicalAcknowledged, ticket);
-			this.replaceMessages(record.messages, record.turnError, record.pluginQuestionAvailability);
+			this.replaceMessages(record.messages, record.turnError, record.pluginQuestionAvailability, record.pluginProblemAvailability);
 		}
 		return record;
 	}
@@ -490,6 +501,12 @@ export class SessionModel {
 		return task;
 	}
 
+	pluginProblemDraft(snapshot: PluginProblemSnapshot): PluginProblemDraft {
+		let draft = this.pluginProblemDrafts.get(snapshot.problemId);
+		if (!draft) { draft = { submission: { status: "empty" }, thinking: "" }; this.pluginProblemDrafts.set(snapshot.problemId, draft); }
+		return draft;
+	}
+
 	pluginQuestionDraft(snapshot: PluginQuestionSnapshot): PluginQuestionDraft {
 		const key = pluginQuestionOccurrenceKey(snapshot.occurrence);
 		let draft = this.pluginQuestionDrafts.get(key);
@@ -531,7 +548,7 @@ export class SessionModel {
 			finally { onPostPending?.(false); }
 		};
 		let response = await post();
-		if (input.type === "plugin-question-answer") return response;
+		if (input.type === "plugin-question-answer" || input.type === "plugin-problem-submission") return response;
 		let waited = 0;
 		while (response.status === 409) {
 			await response.body?.cancel().catch(() => {});
@@ -828,6 +845,12 @@ export class SessionModel {
 			if (this.pluginQuestionAvailability?.questionId !== pluginPending.questionId || this.pluginQuestionAvailability.status !== "available") return refused();
 			if (input.type !== "plugin-question-answer" || input.questionId !== pluginPending.questionId || !samePluginQuestionOccurrence(input.occurrence, pluginPending.occurrence)) return refused();
 		} else if (input.type === "plugin-question-answer") return refused();
+		if (input.type === "plugin-problem-submission") {
+			const active = activeProblemOf(this.base)?.pluginProblem, occurrence = activeProblemOccurrenceOf(this.base);
+			if (!active || active.problemId !== input.problemId || !occurrence || !samePluginQuestionOccurrence(occurrence, input.occurrence) ||
+				this.pluginProblemAvailability?.problemId !== active.problemId || this.pluginProblemAvailability.status !== "available") return refused();
+		}
+		if (input.type === "thinking" && activeProblemOf(this.base)?.pluginProblem) return refused();
 		const subject = input.type === "answer" ? pendingQuestionOf([...this.base, ...this.tail]) : null;
 		// A render-scoped answer must not move to another occurrence sharing
 		// its id. This identity is local only; the server's wire is unchanged.
@@ -836,7 +859,7 @@ export class SessionModel {
 		const expectedKey = questionKey ?? (input.type === "answer" && subject?.toolCallId === input.toolCallId ? subject.key : undefined);
 		const imageBearing = input.type === "text" || input.type === "thinking" ? !!input.images?.length
 			: input.type === "answer" ? Object.values(input.answer.images ?? {}).some(images => images?.length)
-				: input.type === "plugin-question-answer" && Object.values(input.images ?? {}).some(images => images?.length);
+				: (input.type === "plugin-question-answer" || input.type === "plugin-problem-submission") && Object.values(input.images ?? {}).some(images => images?.length);
 		this.retireImagePreview(this.imagePreview?.owner ?? null);
 		this.releaseImagePost(this.imagePostOwner);
 		this.consumeAbort?.abort();
@@ -1128,16 +1151,19 @@ export class SessionModel {
 	}
 
 	/** Full snapshot swap (the idle settle sync — server canon). */
-	setMessages(record: LhMessage[], turnError?: string, availability?: PluginQuestionAvailability): void {
+	setMessages(record: LhMessage[], turnError?: string, availability?: PluginQuestionAvailability, problemAvailability?: PluginProblemAvailability): void {
 		this.invalidateCanonicalReads();
-		this.replaceMessages(record, turnError, availability);
+		this.replaceMessages(record, turnError, availability, problemAvailability);
 	}
 
-	private replaceMessages(record: LhMessage[], turnError?: string, availability?: PluginQuestionAvailability): void {
+	private replaceMessages(record: LhMessage[], turnError?: string, availability?: PluginQuestionAvailability, problemAvailability?: PluginProblemAvailability): void {
 		if (this.imagePostOwner) return;
 		this.mutate(() => {
 			this.base = record;
 			this.pluginQuestionAvailability = availability;
+			this.pluginProblemAvailability = problemAvailability;
+			const problemId = activeProblemOf(record)?.pluginProblem?.problemId;
+			for (const key of this.pluginProblemDrafts.keys()) if (key !== problemId) this.pluginProblemDrafts.delete(key);
 			if (turnError !== undefined) {
 				this.errorValue = { message: turnError };
 				this.automaticContinuationBlocked = true;
@@ -1164,14 +1190,14 @@ export class SessionModel {
 		this.appendMessages(record);
 	}
 
-	private appendMessages(record: LhMessage[], availability?: PluginQuestionAvailability, updateAvailability = false): boolean {
+	private appendMessages(record: LhMessage[], availability?: PluginQuestionAvailability, updateAvailability = false, problemAvailability?: PluginProblemAvailability): boolean {
 		if (this.imagePostOwner) return false;
 		const recordIds = new Set(record.map((m) => (m as { id?: string }).id));
 		const baseAbsorbed = this.base.some((m) => !recordIds.has((m as { id?: string }).id));
 		if (baseAbsorbed) return false; // not a pure append — the idle full sync is the net
 		this.mutate(() => {
 			this.base = record;
-			if (updateAvailability) this.pluginQuestionAvailability = availability;
+			if (updateAvailability) { this.pluginQuestionAvailability = availability; this.pluginProblemAvailability = problemAvailability; }
 			this.forgetResolvedDrafts(record);
 			this.tail = this.tail.filter((m) => !absorbed(m, record));
 		});

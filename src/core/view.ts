@@ -36,6 +36,7 @@ import type { AssistantMessage, ImageContent, ToolResultMessage } from "@earendi
 import type { LhMarkerMessage, LhMessage } from "./native-messages.ts";
 import { modelSolutionForConclude, PRACTICE_CONCLUDE_TOOL, problemInputForConclude, SEND_TO_USER_TOOL, sendToUserText, pluginQuestionResultMatches } from "./native-messages.ts";
 import { readPluginQuestionMessageAnnotation, readPluginQuestionCancellation, type PluginQuestionAnnotationRead } from "./plugin-questions.ts";
+import { pluginProblemForCall, type PluginProblemSnapshot } from "./plugin-problems.ts";
 import { activeCompactionOf, type CompactionDetails } from "./compaction.ts";
 import { QUESTION_TOOLS } from "./pending.ts";
 import type { SubagentArtifactData, SubagentResultMeta } from "./contracts/jobs.ts";
@@ -58,6 +59,7 @@ export interface LhViewPart extends Record<string, unknown> {
 	sourceContentIndex?: number;
 	/** Must be selected before any generic tool renderer; never a raw trace. */
 	pluginQuestion?: Exclude<PluginQuestionAnnotationRead, { status: "absent" }>;
+	pluginProblem?: PluginProblemSnapshot;
 	input?: unknown;
 	output?: unknown;
 	rawInput?: unknown;
@@ -258,6 +260,8 @@ export function projectView(messages: readonly LhMessage[], live?: LiveTurnState
 						continue;
 					}
 					const part = toolPartOf(block, live, streamingMessage);
+					const pluginProblem = pluginProblemForCall(messages, { messageId: m.id, contentIndex, toolCallId: block.id, toolName: block.name });
+					if (pluginProblem) { part.pluginProblem = pluginProblem; part.input = pluginProblem.input; }
 					if ((QUESTION_TOOLS as readonly string[]).includes(block.name)) {
 						part.sourceMessageId = m.id;
 						part.sourceContentIndex = contentIndex;
@@ -387,7 +391,7 @@ function applyResultTo(part: LhViewPart | undefined, result: ToolResultMessage):
 		// AnsweredCard a null and crash the render (the live crash, 2026-09-26).
 		const tool = part.type.startsWith("tool-") ? part.type.slice("tool-".length) : part.type;
 		const isQuestion = isPlaceholderResultTool(tool);
-		if (isQuestion && !result.isError && result.details == null) {
+		if (!result.isError && ((isQuestion && result.details == null) || part.pluginProblem)) {
 			// The placeholder fork (fork 2) stands: the clean pose/ask ack carries
 			// no card data — NEVER output-available. But the call IS settled
 			// (the practice bug, 2026-10-05: this early-return left the part on
@@ -456,6 +460,10 @@ function projectMarker(marker: LhMarkerMessage, out: LhViewMessage[]): void {
 				metadata: { subagentResult: meta },
 				parts: [textPart(marker.content), { type: "data-subagent-aborted", id: `sa_${marker.id}`, data: meta }],
 			});
+			return;
+		}
+		case "plugin-problem-submission": {
+			out.push({ id: marker.id, role: "user", parts: [{ type: "data-plugin-problem-submission", id: `ps_${marker.id}`, data: marker.details }] });
 			return;
 		}
 		case "practice-thinking": {

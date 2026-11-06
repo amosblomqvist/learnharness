@@ -3,6 +3,7 @@ import type { PiEngine } from "../agent/models.ts";
 import { detectSupportedImageMimeType, processImage } from "../agent/image-processing/index.ts";
 import { validatePluginSubmissionImageArray, validatePluginSubmissionImages, type PluginSubmissionImages } from "../core/plugin-submissions.ts";
 import { ChatInputError } from "../core/input-events.ts";
+import { preparePluginProblemSubmissionImages, type PluginProblemSubmissionImages } from "../core/plugin-submissions.ts";
 
 type ImageEngine = Pick<PiEngine, "model">;
 
@@ -51,6 +52,14 @@ export async function prepareSubmissionImages(
 		}
 	}
 	return prepared;
+}
+
+export async function prepareProblemSubmissionImageChannels(images: PluginProblemSubmissionImages | undefined, engine: ImageEngine): Promise<PluginProblemSubmissionImages | undefined> {
+	if (images === undefined) return undefined;
+	try { images = preparePluginProblemSubmissionImages(images); }
+	catch { throw new ChatInputError("Invalid problem submission images"); }
+	const [submission, thinking] = await Promise.all([prepareSubmissionImages(images.submission, engine), prepareSubmissionImages(images.thinking, engine)]);
+	return submission || thinking ? { ...(submission ? { submission } : {}), ...(thinking ? { thinking } : {}) } : undefined;
 }
 
 export async function prepareSubmissionImageChannels(

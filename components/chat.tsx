@@ -5,7 +5,7 @@ import { usePathname } from "next/navigation";
 import { useChatSession } from "@/components/session";
 import { usePlugins } from "./plugins";
 import { PluginSubmissionRunner, SubmissionModelEpoch, type SubmissionAttempt } from "./plugin-submission-runner";
-import { submissionImages, type BuiltinSubmissionCapture, type PrepareBuiltinSubmission, type PrepareThinkingSubmission, type PreparePluginQuestionSubmission } from "./plugin-submission-adapters";
+import { submissionImages, type BuiltinSubmissionCapture, type PrepareBuiltinSubmission, type PrepareThinkingSubmission, type PreparePluginQuestionSubmission, type PreparePluginProblemSubmission } from "./plugin-submission-adapters";
 import { SubmittedImages } from "./submitted-images";
 import { usePageSurfaceBoundary, SurfaceRegion } from "./plugin-surfaces";
 import { findSurfaceBoundary } from "./plugin-surface-targets";
@@ -77,7 +77,11 @@ import type { PluginQuestionDraft } from "./session-core";
 import { SessionFind } from "@/components/session-find";
 import { SessionMessageNavigation } from "@/components/session-navigation";
 import { PracticeDock } from "@/components/practice-dock";
-import { ThinkingCard, type PracticeThinkingData } from "@/components/practice-cards";
+import { PluginProblemDock, type PluginProblemDockProps } from "./plugin-problem-dock";
+import { practiceProblemForCall } from "@/src/core";
+import { PluginProblemSubmitted } from "./plugin-problem-submitted";
+import { readPluginProblemSubmission, pluginProblemById } from "@/src/core";
+import { ThinkingCard, ProblemCard, type PracticeThinkingData } from "@/components/practice-cards";
 import { GraphContextCard, type GraphContextData } from "@/components/graph-context-card";
 import { TopBar } from "@/components/top-bar";
 import { PluginTopBarActions } from "@/components/plugin-chrome";
@@ -277,7 +281,7 @@ export function Chat({
 	// (core/view.ts projectView); sends are ONE explicit input event each
 	// ({chatId, input} — the stash indirection died with the SDK), and the
 	// turn stream is the VERBATIM AgentEvent passthrough the server emits.
-	const { canonicalMessages, reconciliation, reconcile, pluginQuestionAvailability, pluginQuestionDraft, dismissPluginQuestion, readRecord, messages, nativeMessages, hasConfirmedConversation, contextTokens, send, continueIfOwed, steer, steerQueue, submitAnswer, dismissQuestion, dismissProblem, questionDraft, saveQuestionDraft, status, error, stop, clearError, resumeStream, setReattachSettled } =
+	const { canonicalMessages, reconciliation, reconcile, pluginQuestionAvailability, pluginQuestionDraft, pluginProblemAvailability, pluginProblemDraft, dismissPluginQuestion, readRecord, messages, nativeMessages, hasConfirmedConversation, contextTokens, send, continueIfOwed, steer, steerQueue, submitAnswer, dismissQuestion, dismissProblem, questionDraft, saveQuestionDraft, status, error, stop, clearError, resumeStream, setReattachSettled } =
 		useChatSession({ chatId, initialMessages, initialError, initiallyInFlight });
 
 	const controller = useOptionalInteractionLayers();
@@ -517,14 +521,15 @@ export function Chat({
 	const unreadablePlugin = pluginQuestionCallsOf(canonicalMessages).find(call => call.status === "unreadable");
 	const pluginOwnsDock = !!pendingPlugin || !!unreadablePlugin;
 	const [pluginMicAvailable, setPluginMicAvailable] = useState(false);
-	const pluginCanonicalIdentity = pendingPlugin?.questionId ?? (unreadablePlugin ? pluginQuestionOccurrenceKey(unreadablePlugin.occurrence) : null);
+	const pluginProblemIdentity = activeProblemOf(canonicalMessages)?.pluginProblem?.problemId;
+	const pluginCanonicalIdentity = pendingPlugin?.questionId ?? (unreadablePlugin ? pluginQuestionOccurrenceKey(unreadablePlugin.occurrence) : pluginProblemIdentity ?? null);
 	useEffect(() => {
 		// Effect reconnection (including StrictMode replay) must renew the
 		// canonical read; a retained identity ref cannot certify a connection.
 		if (pluginCanonicalIdentity) void reconcile();
 	}, [pluginCanonicalIdentity, reconcile]);
 	useServerEvent("plugins-changed", () => {
-		if (pluginOwnsDock && status !== "submitted" && status !== "streaming") void reconcile();
+		if ((pluginOwnsDock || pluginProblemIdentity) && status !== "submitted" && status !== "streaming") void reconcile();
 	});
 	const pending = findPendingToolCall(messages, pendingQuestionOf(nativeMessages));
 	const malformedQuestions = malformedQuestionsOf(nativeMessages);
@@ -538,6 +543,7 @@ export function Chat({
 	// replaces the composer. Computed from the NATIVE record (the fold is
 	// the gate the tools themselves read), not the projected view.
 	const activeProblem = activeProblemOf(nativeMessages);
+	const activeProblemOccurrence = activeProblemOccurrenceOf(nativeMessages);
 	const activeProblemRef = useRef(activeProblem);
 	activeProblemRef.current = activeProblem;
 
@@ -704,7 +710,7 @@ export function Chat({
 	};
 	const thinkingTarget = (): Extract<PluginSubmissionTarget, { type: "thinking" }> | undefined => {
 		const occurrence = activeProblemOccurrenceOf(nativeMessages);
-		if (!surfaceTarget || !activeProblem || !occurrence) return;
+		if (!surfaceTarget || !activeProblem || activeProblem.pluginProblem || !occurrence) return;
 		return { type: "thinking", sessionId: chatId, sessionKind: kind === "practice" ? "practice" : "teaching", surfaceTarget, channels: ["content"], problem: { occurrence, statement: (activeProblem.input as { statement: string }).statement } };
 	};
 	const prepareThinking: PrepareThinkingSubmission = (capture, clear) => {
@@ -716,6 +722,23 @@ export function Chat({
 			if (!prepared.content.text.trim() && !prepared.content.images.length) throw new Error("Thinking text or images are required. Your input has been kept.");
 			attempt.deliver();
 			return send({ type: "thinking", problemCallId: target.problem.occurrence.toolCallId, occurrence: target.problem.occurrence, text: prepared.content.text, ...(prepared.content.images.length ? { images: prepared.content.images.map(image => ({ ...image })) } : {}) }, () => { clear(captured); attempt.accepted(); }, undefined, attempt.refused);
+		});
+	};
+	const preparePluginProblem: PreparePluginProblemSubmission = (capture, isCurrent, onAccepted) => {
+		const original = activeProblem?.pluginProblem, occurrence = activeProblemOccurrence;
+		if (!surfaceTarget || !original || !occurrence || busyRef.current || compacting) return Promise.resolve(false);
+		const target: Extract<PluginSubmissionTarget, { type: "plugin-problem-submission" }> = { type: "plugin-problem-submission", sessionId: chatId, sessionKind: "practice", surfaceTarget,
+			channels: ["submission", "thinking"], problem: { problemId: original.problemId, occurrence, pluginId: original.pluginId, typeId: original.typeId, contractVersion: original.contractVersion, label: original.label, statement: original.input.statement } };
+		return runSubmission(target, () => {
+			const raw = capture();
+			return { type: "plugin-problem-submission", submission: raw.submission, submissionImages: [], thinking: { text: raw.thinking ?? "", images: [] } };
+		}, () => isCurrent() && !busyRef.current && activeProblemOf(submissionLive.current.nativeMessages)?.pluginProblem?.problemId === original.problemId, async (prepared, attempt) => {
+			if (prepared.type !== "plugin-problem-submission") return false;
+			const images = { ...(prepared.submissionImages.length ? { submission: prepared.submissionImages } : {}), ...(prepared.thinking.images.length ? { thinking: prepared.thinking.images } : {}) };
+			attempt.deliver();
+			return send({ type: "plugin-problem-submission", problemId: original.problemId, occurrence, submission: prepared.submission as Extract<ChatInput, { type: "plugin-problem-submission" }>["submission"],
+				thinking: prepared.thinking.text, ...(Object.keys(images).length ? { images } : {}),
+			}, () => { onAccepted(); attempt.accepted(); }, undefined, attempt.refused);
 		});
 	};
 	const preparePluginQuestion: PreparePluginQuestionSubmission = (capture, isCurrent) => {
@@ -944,10 +967,8 @@ export function Chat({
 		!compacting &&
 		!busy &&
 		nativeMessages.some(
-			(m) => (m as { role?: string }).role === "assistant" &&
-				Array.isArray((m as { content?: unknown[] }).content) &&
-				(m as { content: Array<{ type?: string; name?: string }> }).content.some(
-					(b) => b.type === "toolCall" && b.name === "problem",
+			(m) => m.role === "assistant" && m.content.some(
+					(b, contentIndex) => b.type === "toolCall" && !!practiceProblemForCall(nativeMessages, { messageId: m.id, contentIndex, toolCallId: b.id, toolName: b.name }),
 				),
 		);
 	const sendNext = useCallback(() => {
@@ -1581,6 +1602,10 @@ export function Chat({
 												return <CompactionMomentDivider key={pi} data={part.data as CompactionDividerData} />;
 											case "data-compaction-cut":
 												return <CompactionCutDivider key={pi} data={part.data as CompactionDividerData} />;
+											case "data-plugin-problem-submission": {
+												const submitted = readPluginProblemSubmission(part.data);
+												return <PluginProblemSubmitted key={pi} data={part.data} snapshot={submitted ? pluginProblemById(nativeMessages, submitted.problemId) : null} chatId={chatId} />;
+											}
 											case "data-practice-thinking":
 												return <ThinkingCard key={pi} data={part.data as PracticeThinkingData} />;
 											case "data-practice-next":
@@ -1662,6 +1687,7 @@ export function Chat({
 									<Message from="assistant" className="max-w-full">
 									<MessageContent className="w-full">
 											{m.parts.map((part, pi) => {
+												if (part.pluginProblem) return <ProblemCard key={pi} part={{ ...part, state: part.state ?? "input-available", toolCallId: part.toolCallId ?? "" }} />;
 												if (part.pluginQuestion) return <PluginQuestionPart key={pi} part={part} chatId={chatId} />;
 												const isLastPart = mi === messages.length - 1 && pi === m.parts.length - 1;
 												// The step boundary where teaching begins (round 8): when
@@ -1842,6 +1868,12 @@ export function Chat({
 					initialQuestionDraft={pending ? questionDraft(pending.key)?.form : undefined}
 					onSaveQuestionDraft={(form) => { if (pending) saveQuestionDraft(pending.key, { form }); }}
 					practice={activeProblem}
+					pluginPractice={activeProblem?.pluginProblem && activeProblemOccurrence ? {
+						snapshot: activeProblem.pluginProblem, occurrence: activeProblemOccurrence, chatId, draft: pluginProblemDraft(activeProblem.pluginProblem),
+						available: pluginProblemAvailability?.problemId === activeProblem.pluginProblem.problemId && pluginProblemAvailability.status === "available",
+						ready: !busy && !compacting && reconciliation === "ready", reconciliation: activeProblemOf(canonicalMessages)?.pluginProblem?.problemId === activeProblem.pluginProblem.problemId ? reconciliation : "syncing",
+						prepareSubmission: preparePluginProblem, send, preparing: submissionRunner.occupied, compactionRunning: compacting, onEscape: dictation.cancel,
+					} : undefined}
 					compactionRunning={compacting}
 					onSubmitThinking={submitThinking}
 					chatId={chatId}
@@ -2080,7 +2112,7 @@ function DockOverlay({
 	pluginQuestion, pluginDraft, pluginAvailable, pluginReady, onPluginMicAvailable, onPluginSend, onPluginDismiss, unreadablePlugin, reconciliation, onRetrySync,
 	initialQuestionDraft,
 	onSaveQuestionDraft,
-	practice,
+	practice, pluginPractice,
 	compactionRunning,
 	onSubmitThinking,
 	requiresReveal,
@@ -2131,6 +2163,7 @@ function DockOverlay({
 	 *  {toolCallId, input} — dock ownership exactly like a pending
 	 *  question (the composer is replaced); null in teaching sessions. */
 	practice: { toolCallId: string; input: unknown } | null;
+	pluginPractice?: Omit<PluginProblemDockProps, "expanded" | "onExpand">;
 	/** (commit, text) — the practice dock's two submit lanes. */
 	onSubmitThinking: (text: string) => void;
 	/** Teach-phase pending question: arrives collapsed behind the reveal button (W5). */
@@ -2257,7 +2290,7 @@ function DockOverlay({
 	const mode = pluginQuestion ? `plugin-question:${pendingId}` : unreadablePlugin ? "unreadable-plugin-question" : pending
 		? `question:${pending.key}`
 		: practice
-			? `practice:${practice.toolCallId}`
+			? `practice:${pluginPractice?.snapshot.problemId ?? practice.toolCallId}`
 			: "chat";
 
 	// The plan marginalia's flank width (owner, plan-placement round): from
@@ -2576,6 +2609,8 @@ function DockOverlay({
 									dictationClaim={!revealPending}
 									compactionRunning={compactionRunning}
 								/>
+							) : pluginPractice ? (
+								<PluginProblemDock {...pluginPractice} expanded={expanded} onExpand={() => { setExpanded(true); void suppressFoldDuringReveal(); }} />
 							) : practice ? (
 								<PracticeDock
 									problemCallId={practice.toolCallId}

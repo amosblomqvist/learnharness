@@ -416,6 +416,33 @@ usage anchor. The current trigger prefers `usage.totalTokens` whereas the visibl
 meter sums input/output/cache-read/cache-write. This increment does not align those paths or
 promise exact pre-request context sizing for arbitrary contributions.
 
+## Plugin-defined practice problems
+
+The [practice-problem contract](plugin-problem-contract.md) adds backend
+`registerProblemType` and owner-scoped frontend `registerProblemRenderer`, on API v1.
+`src/core/practice-problems.ts` holds the unchanged native pose fields/descriptions;
+plugin poses add schema-validated payload and a saved submission contract. The shared
+native/plugin gate admits one active problem; the existing `conclude` closes either
+kind and reveals the original committed model solution. No plugin conclusion tool or
+second practice state machine is introduced.
+
+`src/agent/plugin-problem-tools.ts` creates practice-only posing tools. The genuine,
+clean pose ACK persists `details.pluginProblem` (identity, common input, schemas,
+contract version, frozen refinement/processing requirements). Core history folds recognize
+that saved ACK without a live plugin. Missing/disabled/incompatible implementations keep
+the problem active but unavailable. Native text-practice behavior remains unchanged.
+
+`src/server/plugin-problems.ts` owns validate → optional `processSubmission` → save,
+using the existing turn-preparation owner before the normal practice continuation.
+Each learner marker keeps structured value, thinking, images and optional
+`processing: {result}|{error}` separate. Processing records observations, not assessment;
+multiple submissions are allowed and no processing result auto-concludes a problem.
+Host/editor leases, native practice chrome, submission interceptors, image admission,
+canonical readiness and captured model/provider semantics are reused. The editor value
+survives acceptance; only unchanged thinking clears. Projection never reruns processing.
+
+This is a host-only unreleased source increment, not a plugin product/app install.
+
 ## Bounded native plugin questions
 
 The [human-approved question contract](plugin-question-contract.md) defines bounded v1;

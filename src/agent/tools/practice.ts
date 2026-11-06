@@ -15,6 +15,7 @@
  */
 
 import { Type, type Static } from "typebox";
+import { practiceProblemInputSchema } from "../../core/practice-problems.ts";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { resolveTargetId } from "../../core/chains.ts";
 import { readTool } from "./read.ts";
@@ -69,28 +70,7 @@ export function createPracticeGate(ctx: PracticeToolContext): PracticeGate {
 
 // ─── problem: the pose ───────────────────────────────────────────────────────
 
-export const problemInputObject = Type.Object({
-	statement: Type.String({
-		description:
-			"REQUIRED — the problem as the learner sees it (markdown + LaTeX). Must be self-contained and " +
-			"solvable from the session's material. NEVER announces the target proposition.",
-	}),
-	mode: Type.Union([Type.Literal("recall"), Type.Literal("discrimination"), Type.Literal("composition")], {
-		description: "REQUIRED — the demand mode: recall, discrimination, or composition (bare words, no quotes).",
-	}),
-	target: Type.Optional(
-		Type.Array(Type.String(), {
-			minItems: 1,
-			description:
-				"The proposition id(s) this problem exercises, from the session context's [id] list — include when " +
-				"the material is in the map; OMIT entirely when it is not (a topic session poses untagged problems). " +
-				"Names are normalized to ids at the seam; an unknown proposition is rejected.",
-		}),
-	),
-	modelSolution: Type.String({
-		description: "REQUIRED — the full solution, moves in order, committed BEFORE the learner sees the problem. This IS the reveal — conclude shows it verbatim; never re-author it.",
-	}),
-});
+export const problemInputObject = practiceProblemInputSchema;
 
 export type ProblemInput = Static<typeof problemInputObject>;
 
@@ -134,30 +114,21 @@ export function problemTool(
 			return { ...(healed as Record<string, unknown>), target: normalized } as never;
 		},
 		execute: async (_toolCallId, input) => {
-			if (gate.problemActive) {
-				return invalidInputResult("problem", [
-					"a problem is already active — call conclude on it before posing the next one",
-				]);
-			}
-			// TARGET VALIDATION (owner round 9, round 12): against the WHOLE
-			// graph, and ONLY when targets are present — absent means an
-			// untagged problem (topic sessions, owner round 12), which poses
-			// freely. A one-line rejection — the proposition list already
-			// sits in the agent's context (the [id] marker); no re-listing.
-			// The message teaches the exit: omitting always works.
-			if (graphNodes && input.target && input.target.length > 0) {
-				const list = graphNodes();
-				const unknown = input.target.filter((t) => resolveTargetId(t, list) === null);
-				if (unknown.length > 0) {
-					return invalidInputResult("problem", [
-						`target ${JSON.stringify(unknown)} is not a known proposition — targets must be proposition ids from the session context; if the material is not in the map, omit target entirely`,
-					]);
-				}
-			}
-			gate.problemActive = true;
-			return problemResult();
+			return admitPracticeProblem(gate, input, graphNodes) ?? problemResult();
 		},
 	};
+}
+
+/** One synchronous admission for native AND plugin poses; no await can split the gate. */
+export function admitPracticeProblem(gate: PracticeGate, input: { target?: string[] }, graphNodes?: PracticeToolContext["graphNodes"], toolName = "problem") {
+	if (gate.problemActive) return invalidInputResult(toolName, ["a problem is already active — call conclude on it before posing the next one"]);
+	if (graphNodes && input.target?.length) {
+		const list = graphNodes();
+		const unknown = input.target.filter(target => resolveTargetId(target, list) === null);
+		if (unknown.length) return invalidInputResult(toolName, [`target ${JSON.stringify(unknown)} is not a known proposition — targets must be proposition ids from the session context; if the material is not in the map, omit target entirely`]);
+	}
+	gate.problemActive = true;
+	return undefined;
 }
 
 // ─── conclude: the end of a problem ──────────────────────────────────────────
@@ -220,9 +191,8 @@ export function concludeTool(gate: PracticeGate): AgentTool<typeof concludeInput
 }
 
 /** The practice toolset (the practice agent's whole registry). */
-export function practiceTools(ctx: PracticeToolContext): Record<string, AgentTool<any>> {
-	// ONE gate per turn, shared by both tools — the intra-turn truth.
-	const gate = createPracticeGate(ctx);
+export function practiceTools(ctx: PracticeToolContext, gate: PracticeGate = createPracticeGate(ctx)): Record<string, AgentTool<any>> {
+	// ONE gate per turn, shared by native/plugin poses and conclude.
 	// THE RARELY-NEEDED SET (owner round 10): read/ls/find/grep over the
 	// learner's files (always — the same read-only set the teacher and
 	// prober carry), the research + pdf jobs (available without search

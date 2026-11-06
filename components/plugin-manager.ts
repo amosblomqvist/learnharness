@@ -15,6 +15,7 @@ export interface PluginRendererRegistration<T> {
 export type CodeBlockRegistration = PluginRendererRegistration<PluginCodeBlockRenderer>;
 export type ToolRendererRegistration = PluginRendererRegistration<PluginToolRenderer>;
 export type QuestionRendererRegistration = PluginRendererRegistration<import("@/src/core").PluginQuestionRenderer>;
+export type ProblemRendererRegistration = PluginRendererRegistration<import("@/src/core").PluginProblemRenderer>;
 export interface FrontendPlugin {
 	info: PluginInfo;
 	phase: "disabled" | "loading" | "active" | "error";
@@ -31,6 +32,7 @@ export interface PluginSnapshot {
 	readonly codeBlocks: readonly CodeBlockRegistration[];
 	readonly toolRenderers: readonly ToolRendererRegistration[];
 	readonly questionRenderers?: readonly QuestionRendererRegistration[];
+	readonly problemRenderers?: readonly ProblemRendererRegistration[];
 	directory: string;
 	loading: boolean;
 	refreshing: boolean;
@@ -52,6 +54,7 @@ interface Lifecycle {
 	codeBlocks: Map<string, CodeBlockRegistration>;
 	toolRenderers: Map<string, ToolRendererRegistration>;
 	questionRenderers: Map<string, QuestionRendererRegistration>;
+	problemRenderers: Map<string, ProblemRendererRegistration>;
 	submissionInterceptors: Map<string, SubmissionInterceptorRegistration>;
 	settings?: PluginSettingsRegistration;
 	notifications: Set<(event: PluginNotification) => void>;
@@ -137,6 +140,7 @@ export class PluginFrontendManager {
 			codeBlocks: Object.freeze([...this.lives.values()].flatMap(life => [...life.codeBlocks.values()])),
 			toolRenderers: Object.freeze([...this.lives.values()].flatMap(life => [...life.toolRenderers.values()])),
 			questionRenderers: Object.freeze([...this.lives.values()].flatMap(life => [...life.questionRenderers.values()])),
+			problemRenderers: Object.freeze([...this.lives.values()].flatMap(life => [...life.problemRenderers.values()])),
 			plugins: this.infos.map(info => {
 			const life = this.lives.get(info.id);
 			return {
@@ -194,7 +198,7 @@ export class PluginFrontendManager {
 		if (life.teardown) return life.teardown;
 		life.controller.abort();
 		life.views.clear(); life.actions.clear(); life.placements.clear(); life.actionBusy.clear(); life.settings = undefined;
-		life.codeBlocks.clear(); life.toolRenderers.clear(); life.questionRenderers.clear(); life.submissionInterceptors.clear();
+		life.codeBlocks.clear(); life.toolRenderers.clear(); life.questionRenderers.clear(); life.problemRenderers.clear(); life.submissionInterceptors.clear();
 		life.notifications.clear(); life.events.clear(); life.resyncs.clear();
 		const cleanups = [...life.cleanups].reverse();
 		life.cleanups.clear();
@@ -244,7 +248,7 @@ export class PluginFrontendManager {
 			const life: Lifecycle = {
 				id: info.id, revision: info.revision, controller: new AbortController(), cleanups: new Set(),
 				activation: Promise.resolve(), tasks: new Set(),
-				views: new Map(), actions: new Map(), placements: new Map(), actionBusy: new Set(), codeBlocks: new Map(), toolRenderers: new Map(), questionRenderers: new Map(), submissionInterceptors: new Map(),
+				views: new Map(), actions: new Map(), placements: new Map(), actionBusy: new Set(), codeBlocks: new Map(), toolRenderers: new Map(), questionRenderers: new Map(), problemRenderers: new Map(), submissionInterceptors: new Map(),
 				notifications: new Set(), events: new Set(), resyncs: new Set(), phase: "loading",
 			};
 			this.cleanupErrors.delete(info.id);
@@ -409,6 +413,17 @@ export class PluginFrontendManager {
 				const registration = Object.freeze({ pluginId: life.id, renderer: owned });
 				life.questionRenderers.set(owned.id, registration); this.publish();
 				return () => { if (life.questionRenderers.get(owned.id) === registration) { life.questionRenderers.delete(owned.id); this.publish(); } };
+			},
+			registerProblemRenderer: renderer => {
+				if (!this.current(life)) return () => {};
+				if (!renderer || typeof renderer.id !== "string" || !/^[A-Za-z0-9_-]{1,128}$/.test(renderer.id)) rejectRenderer("Invalid problem renderer id");
+				if (!Array.isArray(renderer.supportedContractVersions) || !renderer.supportedContractVersions.length || renderer.supportedContractVersions.some(v => !Number.isSafeInteger(v) || v < 1) || new Set(renderer.supportedContractVersions).size !== renderer.supportedContractVersions.length) rejectRenderer("Invalid problem renderer contract versions");
+				if (typeof renderer.mountSubmissionEditor !== "function" || (renderer.mountSubmitted !== undefined && typeof renderer.mountSubmitted !== "function")) rejectRenderer("Invalid problem renderer mount");
+				if (life.problemRenderers.has(renderer.id)) rejectRenderer(`Duplicate problem renderer: ${renderer.id}`);
+				const owned = Object.freeze({ id: renderer.id, supportedContractVersions: Object.freeze([...renderer.supportedContractVersions]) as unknown as number[], mountSubmissionEditor: renderer.mountSubmissionEditor.bind(renderer), ...(renderer.mountSubmitted ? { mountSubmitted: renderer.mountSubmitted.bind(renderer) } : {}) });
+				const registration = Object.freeze({ pluginId: life.id, renderer: owned });
+				life.problemRenderers.set(owned.id, registration); this.publish();
+				return () => { if (life.problemRenderers.get(owned.id) === registration) { life.problemRenderers.delete(owned.id); this.publish(); } };
 			},
 			registerSettings,
 			call: async <T>(operation: string, input?: unknown) => {

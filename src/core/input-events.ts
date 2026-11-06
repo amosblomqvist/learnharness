@@ -49,13 +49,16 @@ import {
 } from "./native-messages.ts";
 import { QUESTION_TOOLS, toolQuestionKind } from "./pending.ts";
 import { isPluginQuestionJson, type JsonValue, type PluginQuestionOccurrence } from "./plugin-questions.ts";
+import { preparePluginProblemSubmissionImages, type PluginProblemSubmissionImages } from "./plugin-submissions.ts";
 
 export type PluginQuestionAnswerInput = { type: "plugin-question-answer"; questionId: string; occurrence: PluginQuestionOccurrence; answer: JsonValue; thinking?: string; readingThinking?: string; images?: PluginSubmissionImages };
+export type PluginProblemSubmissionInput = { type: "plugin-problem-submission"; problemId: string; occurrence: PluginSubmissionOccurrence; submission: JsonValue; thinking?: string; images?: PluginProblemSubmissionImages };
 export type DismissPluginQuestionInput = { type: "dismiss-plugin-question"; questionId?: string; occurrence: PluginQuestionOccurrence };
 
 /** One client-originated input event (the POST body's `input`). */
 export type ChatInput =
 	| PluginQuestionAnswerInput
+	| PluginProblemSubmissionInput
 	| { type: "text"; text: string; images?: ImageContent[] }
 	| { type: "answer"; toolCallId: string; answer: QuestionAnswerData; occurrence?: PluginSubmissionOccurrence }
 	| { type: "continue" }
@@ -219,6 +222,15 @@ export function parseChatInput(input: unknown): ChatInput {
 	if (typeof input !== "object" || input === null) throw new ChatInputError("input must be an object");
 	const i = input as Record<string, unknown>;
 	switch (i.type) {
+		case "plugin-problem-submission": {
+			if (typeof i.problemId !== "string" || !i.problemId) throw new ChatInputError("plugin-problem-submission requires problemId");
+			if (!isPluginQuestionJson(i.submission)) throw new ChatInputError("plugin-problem-submission requires finite JSON submission");
+			if (i.thinking !== undefined && typeof i.thinking !== "string") throw new ChatInputError("Problem thinking must be text");
+			let images;
+			try { images = i.images === undefined ? undefined : preparePluginProblemSubmissionImages(i.images); }
+			catch { throw new ChatInputError("Invalid problem submission images"); }
+			return { type: "plugin-problem-submission", problemId: i.problemId, occurrence: parsePluginQuestionOccurrence(i.occurrence), submission: i.submission, ...(i.thinking !== undefined ? { thinking: i.thinking as string } : {}), ...(images ? { images } : {}) };
+		}
 		case "plugin-question-answer": {
 			if (typeof i.questionId !== "string" || !i.questionId) throw new ChatInputError("plugin-question-answer requires questionId");
 			if (!isPluginQuestionJson(i.answer)) throw new ChatInputError("plugin-question-answer requires finite JSON answer");
@@ -290,6 +302,8 @@ export function inputAppends(
 	assertPluginQuestionInputAllowed(record.messages, input);
 	assertNativeSubmissionTarget(record.messages, input);
 	switch (input.type) {
+		case "plugin-problem-submission":
+			throw new ChatInputError("Plugin problem submissions require canonical server validation");
 		case "plugin-question-answer":
 			throw new ChatInputError("Plugin question answers require canonical server validation");
 		case "text":
@@ -314,6 +328,7 @@ export function inputAppends(
 			if (!active || active.toolCallId !== input.problemCallId) {
 				throw new ChatInputError("thinking input targets no active problem");
 			}
+			if (active.pluginProblem) throw new ChatInputError("This problem requires its registered submission editor");
 			return [...dismissalConclusion(record), newThinkingMessage(input.problemCallId, input.text, input.images)];
 		}
 		case "next": {

@@ -8,6 +8,8 @@ import { validatePluginSchema } from "../core/plugin-validation.ts";
 import { createPluginQuestionParameters, preparePluginQuestionType } from "../core/plugin-questions.ts";
 import type { PluginQuestionVariant } from "../core/plugin-questions.ts";
 import type { NativePluginQuestionDefinition } from "../agent/plugin-question-tools.ts";
+import { preparePluginProblemType, createPluginProblemParameters, type NativePluginProblemDefinition } from "../core/plugin-problems.ts";
+import type { NativePluginProblemContribution } from "../agent/plugin-problem-tools.ts";
 import type { PluginAgentKind, PluginBackendContext, PluginBackendModule, PluginCleanup, PluginFrontendContext, PluginInfo, PluginInference, PluginInstructions, PluginLearningData, PluginManifest, PluginNotification, PluginToolContext, PluginTools } from "../core/plugins.ts";
 import type { PluginAgentService } from "../core/plugin-agents.ts";
 import type { PluginWorkerService } from "../core/plugin-workers.ts";
@@ -62,7 +64,10 @@ export type PluginQuestionResolution =
 	| { status: "available"; definition: QuestionDefinition; signal: AbortSignal; requireActive(): void }
 	| { status: "incompatible" }
 	| { status: "unavailable" };
-export interface PluginAgentContributions { instructions: string[]; tools: AgentTool<any>[]; questionTypes?: PluginQuestionContribution[] }
+export type PluginProblemResolution =
+	| { status: "available"; definition: NativePluginProblemDefinition; signal: AbortSignal; requireActive(): void }
+	| { status: "incompatible" | "unavailable" };
+export interface PluginAgentContributions { instructions: string[]; tools: AgentTool<any>[]; questionTypes?: PluginQuestionContribution[]; problemTypes?: NativePluginProblemContribution[] }
 interface Activation {
 	controller: AbortController;
 	cleanups: PluginCleanup[];
@@ -70,6 +75,7 @@ interface Activation {
 	instructions: Set<Instructions>;
 	tools: Set<Tools>;
 	questions: Map<string, QuestionDefinition>;
+	problems: Map<string, NativePluginProblemDefinition>;
 	ready: boolean;
 }
 interface Package {
@@ -175,6 +181,7 @@ export function createPluginHost(deps: PluginHostDependencies) {
 	const stateFile = path.resolve(/* turbopackIgnore: true */ directory, "..", "plugins-state.json");
 	const packages = new Map<string, Package>();
 	const questionControllers = new WeakMap<QuestionDefinition, AbortController>();
+	const problemControllers = new WeakMap<NativePluginProblemDefinition, AbortController>();
 	let initialized = false, disposed = false;
 	let serial: Promise<unknown> = Promise.resolve();
 	let disposing: Promise<void> | undefined;
@@ -195,6 +202,7 @@ export function createPluginHost(deps: PluginHostDependencies) {
 		activation.instructions.clear();
 		activation.tools.clear();
 		activation.questions.clear();
+		activation.problems.clear();
 		activation.controller.abort();
 		const failures: string[] = [];
 		for (const cleanup of activation.cleanups.splice(0).reverse()) {
@@ -209,7 +217,7 @@ export function createPluginHost(deps: PluginHostDependencies) {
 			return;
 		}
 		const manifest = pkg.info.manifest;
-		const activation: Activation = { controller: new AbortController(), cleanups: [], handlers: new Map(), instructions: new Set(), tools: new Set(), questions: new Map(), ready: false };
+		const activation: Activation = { controller: new AbortController(), cleanups: [], handlers: new Map(), instructions: new Set(), tools: new Set(), questions: new Map(), problems: new Map(), ready: false };
 		pkg.activation = activation;
 		const requireLive = () => { if (!live(pkg, activation)) throw new Error("Plugin activation is no longer active"); };
 		const cleanup = (fn: PluginCleanup) => {
@@ -256,6 +264,21 @@ export function createPluginHost(deps: PluginHostDependencies) {
 						return () => {
 							if (activation.questions.get(registered.id) !== registered) return;
 							activation.questions.delete(registered.id);
+							controller.abort();
+							if (activation.ready && live(pkg, activation)) change();
+						};
+					},
+					registerProblemType(definition) {
+						requireLive();
+						const registered = preparePluginProblemType(definition);
+						if (activation.problems.has(registered.id)) throw new Error(`Duplicate plugin problem type: ${registered.id}`);
+						const controller = new AbortController();
+						problemControllers.set(registered, controller);
+						activation.problems.set(registered.id, registered);
+						if (activation.ready) change();
+						return () => {
+							if (activation.problems.get(registered.id) !== registered) return;
+							activation.problems.delete(registered.id);
 							controller.abort();
 							if (activation.ready && live(pkg, activation)) change();
 						};
@@ -374,10 +397,10 @@ export function createPluginHost(deps: PluginHostDependencies) {
 		const contributions = [...packages.keys()].sort().flatMap(id => {
 			const pkg = packages.get(id)!, activation = pkg.activation;
 			return pkg.info.enabled && activation?.ready && live(pkg, activation)
-				? [{ pkg, activation, instructions: [...activation.instructions], factories: [...activation.tools], questions: [...activation.questions.values()] }]
+				? [{ pkg, activation, instructions: [...activation.instructions], factories: [...activation.tools], questions: [...activation.questions.values()], problems: [...activation.problems.values()] }]
 				: [];
 		});
-		for (const { pkg, activation, instructions, factories, questions } of contributions) {
+		for (const { pkg, activation, instructions, factories, questions, problems } of contributions) {
 			try {
 				const texts = instructions.filter(item => item.agents.has(turn.agent)).map(item => item.text);
 				const tools: AgentTool<any>[] = [];
@@ -433,11 +456,24 @@ export function createPluginHost(deps: PluginHostDependencies) {
 						requireActive() { if (!live(pkg, activation)) throw new PluginHostError(409, `Plugin ${pkg.info.id} is disabled or unavailable`); },
 					}));
 				}
+				const problemTypes: NativePluginProblemContribution[] = [];
+				if (turn.agent === "practice") for (const definition of problems) {
+					const tool = definition.tool;
+					if (names.has(tool.toolName) || packageNames.has(tool.toolName)) throw new Error(`Plugin tool name collision: ${tool.toolName}`);
+					validatePluginSchema(createPluginProblemParameters(definition));
+					packageNames.add(tool.toolName);
+					problemTypes.push(Object.freeze({ pluginId: pkg.info.id, definition,
+						signal: AbortSignal.any([activation.controller.signal, problemControllers.get(definition)!.signal]),
+						requireActive() {
+							if (!live(pkg, activation) || activation.problems.get(definition.id) !== definition) throw new PluginHostError(409, `Plugin ${pkg.info.id} is disabled or unavailable`);
+						} }));
+				}
 				if (!live(pkg, activation)) continue;
 				for (const name of packageNames) names.add(name);
 				result.instructions.push(...texts);
 				result.tools.push(...tools);
 				if (questionTypes.length) (result.questionTypes ??= []).push(...questionTypes);
+				if (problemTypes.length) (result.problemTypes ??= []).push(...problemTypes);
 				if (pkg.contributionWarning !== undefined) {
 					delete pkg.contributionWarning;
 					if (pkg.restart) pkg.info.error = pkg.restart;
@@ -472,6 +508,20 @@ export function createPluginHost(deps: PluginHostDependencies) {
 			return { status: "available", definition, signal: AbortSignal.any([activation.controller.signal, questionControllers.get(definition)!.signal]),
 				requireActive() {
 					if (!live(pkg, activation) || activation.questions.get(typeId) !== definition) throw new PluginHostError(409, `Plugin ${pkg.info.id} is disabled or unavailable`);
+				} };
+		},
+		resolveProblemType(pluginId: string, typeId: string, contractVersion: number): PluginProblemResolution {
+			assertOpen();
+			if (!initialized) throw new PluginHostError(503, "Plugin host is not initialized");
+			const pkg = packages.get(pluginId), activation = pkg?.activation;
+			if (!pkg || !pkg.info.enabled || !activation?.ready || !live(pkg, activation)) return { status: "unavailable" };
+			const definition = activation.problems.get(typeId);
+			if (!definition) return { status: "unavailable" };
+			if (definition.incompatibleContractVersions?.includes(contractVersion)) return { status: "incompatible" };
+			if (definition.contractVersion !== contractVersion) return { status: "unavailable" };
+			return { status: "available", definition, signal: AbortSignal.any([activation.controller.signal, problemControllers.get(definition)!.signal]),
+				requireActive() {
+					if (!live(pkg, activation) || activation.problems.get(typeId) !== definition) throw new PluginHostError(409, `Plugin ${pkg.info.id} is disabled or unavailable`);
 				} };
 		},
 		list(): PluginInfo[] {

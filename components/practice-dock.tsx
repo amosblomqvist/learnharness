@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useRef, useState, type ReactNode } from "react";
 import { ChevronRightIcon } from "lucide-react";
 import { ToolContentResponse } from "@/components/ai-elements/message";
 import { Button } from "@/components/ui/button";
@@ -44,6 +44,14 @@ export interface PracticeDockProps {
 	/** text — POST {type:"thinking"} (one lane; the register is read from the text). */
 	onSubmit: (text: string) => void;
 	onPrepareSubmission?: PrepareThinkingSubmission;
+	/** Host-owned alternative editor. The native statement/thinking/controls stay shared. */
+	customInput?: {
+		editor: ReactNode;
+		thinking: string;
+		onThinkingChange(value: string): void;
+		ready: boolean;
+		prepare: PrepareThinkingSubmission;
+	};
 	hasPendingInput?: boolean;
 	preparing?: boolean;
 	/** Escape in the thinking field stops dictation (threaded from the page). */
@@ -55,14 +63,17 @@ export interface PracticeDockProps {
 	compactionRunning?: boolean;
 }
 
-export function PracticeDock({ problemCallId, input, expanded, onExpand, onSubmit, onPrepareSubmission, hasPendingInput = false, preparing = false, onEscape, compactionRunning = false }: PracticeDockProps) {
+export function PracticeDock({ problemCallId, input, expanded, onExpand, onSubmit, onPrepareSubmission, customInput, hasPendingInput = false, preparing = false, onEscape, compactionRunning = false }: PracticeDockProps) {
 	const controller = useOptionalInteractionLayers();
 	const rootRef = useRef<HTMLElement>(null);
-	const [thinking, setThinking] = useState("");
+	const [nativeThinking, setNativeThinking] = useState("");
+	const custom = useRef(customInput); custom.current = customInput;
+	const thinking = customInput ? customInput.thinking : nativeThinking;
+	const setThinking = (value: string) => { if (custom.current) custom.current.onThinkingChange(value); else setNativeThinking(value); };
 	// Ref MIRRORS the field ("nothing gets lost", the question-dock
 	// discipline): a submit resuming after `await finishDictation()` reads
 	// the tail, never a stale closure.
-	const thinkingRef = useRef("");
+	const thinkingRef = useRef(thinking); thinkingRef.current = thinking;
 	const editRevision = useRef(0);
 
 	useDictationTarget(
@@ -79,11 +90,12 @@ export function PracticeDock({ problemCallId, input, expanded, onExpand, onSubmi
 
 	const submit = () => {
 		if (compactionRunning || preparing) return;
-		if (onPrepareSubmission) {
-			if (!thinkingRef.current.trim() && !hasPendingInput) return;
+		const prepare = customInput?.prepare ?? onPrepareSubmission;
+		if (prepare) {
+			if (customInput ? !customInput.ready : (!thinkingRef.current.trim() && !hasPendingInput)) return;
 			let capturedRevision = editRevision.current;
-			onPrepareSubmission(() => { capturedRevision = editRevision.current; return thinkingRef.current.trim(); }, captured => {
-				if (editRevision.current === capturedRevision && thinkingRef.current.trim() === captured) { thinkingRef.current = ""; setThinking(""); }
+			prepare(() => { capturedRevision = editRevision.current; return customInput ? thinkingRef.current : thinkingRef.current.trim(); }, captured => {
+				if (editRevision.current === capturedRevision && (customInput ? thinkingRef.current : thinkingRef.current.trim()) === captured) { thinkingRef.current = ""; setThinking(""); }
 			});
 			return;
 		}
@@ -101,10 +113,9 @@ export function PracticeDock({ problemCallId, input, expanded, onExpand, onSubmi
 	useEnterSubmits(submit, rootRef);
 
 	/* ── the collapsed bar ── */
-	if (!expanded) {
-		return (
+	const bar = (
 			<button
-				ref={element => { rootRef.current = element; }}
+				ref={element => { if (!customInput) rootRef.current = element; }}
 				type="button"
 				data-testid="practice-dock-bar"
 				onClick={onExpand}
@@ -115,11 +126,13 @@ export function PracticeDock({ problemCallId, input, expanded, onExpand, onSubmi
 				<span className="min-w-0 flex-1 truncate">{input.statement}</span>
 			</button>
 		);
-	}
+	if (!expanded && !customInput) return bar;
 
 	/* ── the expanded form ── */
 	return (
 		<div ref={element => { rootRef.current = element; }} data-testid="practice-dock" data-problem={problemCallId}>
+			{!expanded && bar}
+			<div hidden={!expanded}>
 			{/* The agent's half: the 'Problem' eyebrow (mirroring the quiz
 			    cards' label row — owner round, 2026-10-05) + the statement,
 			    markdown + LaTeX rendered, capped by the measured column
@@ -130,6 +143,8 @@ export function PracticeDock({ problemCallId, input, expanded, onExpand, onSubmi
 					<ToolContentResponse>{input.statement}</ToolContentResponse>
 				</div>
 			</div>
+
+			{customInput?.editor}
 
 			{/* The learner's half: Enter SENDS (owner round 2, 2026-10-05);
 			    Shift+Enter makes a newline — less to decide about. */}
@@ -180,13 +195,14 @@ export function PracticeDock({ problemCallId, input, expanded, onExpand, onSubmi
 					<Button
 						type="button"
 						data-testid="practice-send"
-						disabled={(!thinking.trim() && !hasPendingInput) || compactionRunning || preparing}
+						disabled={(customInput ? !customInput.ready : (!thinking.trim() && !hasPendingInput)) || compactionRunning || preparing}
 						onClick={() => submit()}
 						className="ml-auto h-9 rounded-[6px] px-3.5 text-sm font-medium"
 					>
-						Submit thinking
+						{customInput ? "Submit" : "Submit thinking"}
 					</Button>
 				</div>
+			</div>
 			</div>
 		</div>
 	);

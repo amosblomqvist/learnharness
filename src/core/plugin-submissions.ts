@@ -2,6 +2,7 @@
 import type { ImageContent } from "@earendil-works/pi-ai";
 import type { LhMessage } from "./native-messages.ts";
 import type { PluginQuestionOccurrence, PluginQuestionSnapshot } from "./plugin-questions.ts";
+import type { PluginProblemSnapshot } from "./plugin-problems.ts";
 import type { AnswerRequest, ClientQuestion, QuestionData, QuizQuestionType } from "./question-core.ts";
 import { clonePluginQuestionJson } from "./plugin-questions.ts";
 import type { PluginSurfaceTarget } from "./plugin-ui.ts";
@@ -13,7 +14,7 @@ interface ImmutableJsonObject { readonly [key: string]: ImmutableJson }
 
 /** Exact native tool occurrence, never merely a potentially reused tool-call ID. */
 export type PluginSubmissionOccurrence = Readonly<PluginQuestionOccurrence>;
-export type PluginSubmissionChannel = "content" | "answer" | "thinking" | "readingThinking";
+export type PluginSubmissionChannel = "content" | "answer" | "submission" | "thinking" | "readingThinking";
 export interface PluginSubmissionContent {
 	readonly text: string;
 	readonly images: readonly Readonly<ImageContent>[];
@@ -23,6 +24,10 @@ export interface PluginSubmissionImages {
 	readonly answer?: readonly Readonly<ImageContent>[];
 	readonly thinking?: readonly Readonly<ImageContent>[];
 	readonly readingThinking?: readonly Readonly<ImageContent>[];
+}
+export interface PluginProblemSubmissionImages {
+	readonly submission?: readonly Readonly<ImageContent>[];
+	readonly thinking?: readonly Readonly<ImageContent>[];
 }
 export interface PluginBuiltinSubmissionAnswer {
 	readonly dontKnow?: boolean;
@@ -36,6 +41,7 @@ export type PluginSubmission =
 	| { readonly type: "text"; readonly content: PluginSubmissionContent }
 	| { readonly type: "thinking"; readonly content: PluginSubmissionContent }
 	| { readonly type: "answer"; readonly answer: PluginBuiltinSubmissionAnswer; readonly thinking: PluginSubmissionContent; readonly readingThinking: PluginSubmissionContent }
+	| { readonly type: "plugin-problem-submission"; readonly submission: ImmutableJson; readonly submissionImages: readonly Readonly<ImageContent>[]; readonly thinking: PluginSubmissionContent }
 	| { readonly type: "plugin-question-answer"; readonly answer: ImmutableJson; readonly answerImages: readonly Readonly<ImageContent>[]; readonly thinking: PluginSubmissionContent; readonly readingThinking: PluginSubmissionContent };
 
 type SubmissionTargetBase = {
@@ -47,6 +53,7 @@ export type PluginSubmissionTarget = SubmissionTargetBase & (
 	| { readonly type: "text"; readonly channels: readonly ["content"] }
 	| { readonly type: "thinking"; readonly channels: readonly ["content"]; readonly problem: { readonly occurrence: PluginSubmissionOccurrence; readonly statement: string } }
 	| { readonly type: "answer"; readonly channels: readonly PluginSubmissionChannel[]; readonly question: Immutable<ClientQuestion & { occurrence: PluginSubmissionOccurrence; questionType?: QuizQuestionType }> }
+	| { readonly type: "plugin-problem-submission"; readonly channels: readonly ["submission", "thinking"]; readonly problem: Immutable<Pick<PluginProblemSnapshot, "problemId" | "pluginId" | "typeId" | "contractVersion" | "label"> & { occurrence: PluginSubmissionOccurrence; statement: string }> }
 	| { readonly type: "plugin-question-answer"; readonly channels: readonly PluginSubmissionChannel[]; readonly question: Immutable<Pick<PluginQuestionSnapshot, "questionId" | "occurrence" | "pluginId" | "typeId" | "contractVersion" | "label" | "variant" | "showThinking">> }
 );
 export type PluginSubmissionContext = PluginSubmissionTarget & {
@@ -120,6 +127,16 @@ export function preparePluginSubmissionImages(value: unknown): PluginSubmissionI
 	}
 	return freeze(result);
 }
+export function preparePluginProblemSubmissionImages(value: unknown): PluginProblemSubmissionImages {
+	const item = object(clonePluginQuestionJson(value));
+	keys(item, ["submission", "thinking"], []);
+	const result: Record<string, readonly Readonly<ImageContent>[]> = {};
+	for (const key of ["submission", "thinking"] as const) if (Object.hasOwn(item, key)) {
+		const images = imageList(item[key]);
+		if (images.length) result[key] = images;
+	}
+	return freeze(result);
+}
 function builtinAnswer(value: unknown): PluginBuiltinSubmissionAnswer {
 	const item = object(value);
 	keys(item, ["dontKnow", "values", "other", "text", "confidence", "images"], ["images"]);
@@ -137,6 +154,10 @@ export function preparePluginSubmission(input: unknown, target: PluginSubmission
 	if (item.type === "text" || item.type === "thinking") {
 		keys(item, ["type", "content"]);
 		return freeze({ type: item.type, content: content(item.content) });
+	}
+	if (item.type === "plugin-problem-submission") {
+		keys(item, ["type", "submission", "submissionImages", "thinking"]);
+		return freeze({ type: "plugin-problem-submission", submission: item.submission as ImmutableJson, submissionImages: imageList(item.submissionImages), thinking: content(item.thinking) });
 	}
 	keys(item, item.type === "answer" ? ["type", "answer", "thinking", "readingThinking"] : ["type", "answer", "answerImages", "thinking", "readingThinking"]);
 	const thinking = content(item.thinking), readingThinking = content(item.readingThinking);

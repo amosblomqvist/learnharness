@@ -14,6 +14,8 @@ import type { PluginBackgroundMeta, PluginBackgroundTool, PluginWorkerService } 
 export type * from "./plugin-workers.ts";
 import type { PluginQuestionRenderer, PluginQuestionTypeDefinition } from "./plugin-questions.ts";
 export type * from "./plugin-questions.ts";
+import type { PluginProblemTypeDefinition, PluginProblemRenderer } from "./plugin-problems.ts";
+export type * from "./plugin-problems.ts";
 import type { PluginSubmissionInterceptor } from "./plugin-submissions.ts";
 export type * from "./plugin-submissions.ts";
 
@@ -119,6 +121,8 @@ export interface PluginBackendContext {
 	registerTools(contribution: PluginTools): () => void;
 	/** Host-owned native probe/teach question tools; no plugin execution/grading hook. */
 	registerQuestionType<Q extends TSchema, A extends TSchema>(definition: PluginQuestionTypeDefinition<Q, A>): () => void;
+	/** Alternative practice poses share the native active-problem/conclude lifecycle. */
+	registerProblemType<Q extends TSchema, S extends TSchema>(definition: PluginProblemTypeDefinition<Q, S>): () => void;
 	/** JSON-compatible operation results, not arbitrary HTTP endpoints. */
 	handle(name: string, handler: (input: unknown) => unknown | Promise<unknown>): () => void;
 	events: {
@@ -204,6 +208,7 @@ export interface PluginFrontendContext {
 	registerToolRenderer(renderer: PluginToolRenderer): () => void;
 	/** Owner-scoped slots inside the host question card. */
 	registerQuestionRenderer(renderer: PluginQuestionRenderer): () => void;
+	registerProblemRenderer(renderer: PluginProblemRenderer): () => void;
 	call<T = unknown>(operation: string, input?: unknown): Promise<T>;
 	/** Pure, in-memory PDF/UTF-8 conversion; no learning/model/storage side effects.
 	 * Automatically activation-scoped; caller cancellation is optional and cooperative. */

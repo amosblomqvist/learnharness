@@ -361,6 +361,19 @@ is implied. No grading, data, blank filtering, API-shape or `ctx.ui` changes are
   task/source identity. A plain final model response or idle snapshot is not success.
   Keep semantic validators side-effect free. All unfinished tasks become interrupted
   on restart/disable; a new attempt requires a new explicit request identity.
+- For **practice** alternative inputs, use backend `registerProblemType` and owner-scoped
+  frontend `registerProblemRenderer`; see `docs/plugin-problem-contract.md` and
+  `src/core/plugin-problems.ts`. Native and plugin poses share one active-problem gate
+  and the existing `conclude` tool; `modelSolution` is always required. Register explicit
+  `tool`, `problemSchema` and `submissionSchema`; optional synchronous refinements and
+  awaited `processSubmission` record observations under `processing`, never assessment.
+  `mountSubmissionEditor` supplies a controlled finite-JSON value; optional `mountSubmitted`
+  owns saved-value/observation presentation, not the native conclusion. The dock is statement,
+  editor, Your thinking and one Submit. Keep the editor value after acceptance, clearing only
+  unchanged thinking. Disabled/missing/incompatible implementations stay active/unavailable;
+  do not fall back to a native text submission. Interceptors use `plugin-problem-submission`,
+  `submission`/`submissionImages`, thinking content and channels `["submission", "thinking"]`.
+  Hook cancellation/409 semantics mirror inline question grading without a new job queue.
 - Bounded native plugin questions are implemented and passed the 3,778-test/560-suite,
   strict SDK, isolated packaging/privacy and exercised browser checkpoint recorded in
   `docs/plugin-architecture.md`; the increment is implemented and verified on
@@ -405,8 +418,8 @@ is implied. No grading, data, blank filtering, API-shape or `ctx.ui` changes are
   changed model settings apply to the next request. Stop, plugin disable or question-type
   unregistration aborts the signal and prevents answer save; await actual underlying
   settlement rather than abort-race release. Cancellation is cooperative; no forced
-  termination/host hard timeout, so products own any timeout and cleanup. Only plugin-answer
-  POST loses automatic 409 retry; other submission retry policy stays unchanged. Explicit
+  termination/host hard timeout, so products own any timeout and cleanup. Plugin-question-answer
+  and plugin-problem-submission POSTs have no automatic 409 retry; other submission retry policy stays unchanged. Explicit
   retry after pre-save failure may rerun grading; no exactly-once guarantee across crashes
   or uncertain persistence. Reconcile canonical state, never infer no-save from lost HTTP
   acknowledgment. Read the [full authoring contract](../../docs/plugin-authoring.md#optional-generic-answer-grading--approved-contract).

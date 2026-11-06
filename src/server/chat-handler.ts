@@ -34,7 +34,8 @@ import { effectiveSettings, stores } from "./stores.ts";
 import { getPluginAgentContributions, getPluginHost } from "./plugins.ts";
 import { preparePluginQuestionSubmission, reconcilePluginQuestionCompatibility, type QuestionTypeResolver } from "./plugin-questions.ts";
 import { searchAvailable, searchProvider } from "./search.ts";
-import { prepareSubmissionImages, prepareSubmissionImageChannels, submissionImagePolicyKey } from "./submission-images.ts";
+import { prepareSubmissionImages, prepareSubmissionImageChannels, prepareProblemSubmissionImageChannels, submissionImagePolicyKey } from "./submission-images.ts";
+import { preparePluginProblemSubmission, requirePluginProblemTarget, type ProblemTypeResolver } from "./plugin-problems.ts";
 import { providerKeyPresent } from "./keys.ts";
 import { CLAUDE_CODE_PROVIDER } from "../core/contracts/claude-code.ts";
 import {
@@ -211,10 +212,11 @@ export async function handleChatInput(
 	let record = initialRecord;
 
 	const capturedSession = { createdAt: record.createdAt, kind: record.kind };
-	const freshSubmission = input.type === "text" || input.type === "thinking" || input.type === "answer" || input.type === "plugin-question-answer";
+	const freshSubmission = input.type === "text" || input.type === "thinking" || input.type === "answer" || input.type === "plugin-question-answer" || input.type === "plugin-problem-submission";
 	try {
 		assertPluginQuestionInputAllowed(record.messages, input);
 		if (input.type !== "steers") assertNativeSubmissionTarget(record.messages, input);
+		if (input.type === "plugin-problem-submission") requirePluginProblemTarget(record, input);
 		if (input.type === "plugin-question-answer") {
 			const pending = pendingPluginQuestionOf(record.messages);
 			if (!pending || pending.questionId !== input.questionId || !samePluginQuestionOccurrence(pending.occurrence, input.occurrence))
@@ -225,9 +227,16 @@ export async function handleChatInput(
 		if (err instanceof ChatInputError) return Response.json({ error: err.message }, { status: 400 });
 		throw err;
 	}
-	if (input.type === "plugin-question-answer" && isTurnRunning(chatId))
+	if ((input.type === "plugin-question-answer" || input.type === "plugin-problem-submission") && isTurnRunning(chatId))
 		return Response.json({ error: "A turn is already running for this session" }, { status: 409 });
 	let questionResolver: QuestionTypeResolver | undefined;
+	let problemResolver: ProblemTypeResolver | undefined;
+	if (input.type === "plugin-problem-submission") {
+		try {
+			const host = await getPluginHost();
+			problemResolver = (pluginId, typeId, version) => host.resolveProblemType(pluginId, typeId, version);
+		} catch { return Response.json({ error: "Problem unavailable" }, { status: 400 }); }
+	}
 	if (input.type === "plugin-question-answer") {
 		try {
 			const host = await getPluginHost();
@@ -324,6 +333,9 @@ export async function handleChatInput(
 			case "answer":
 				input = { ...input, answer: { ...input.answer, images: await prepareSubmissionImageChannels(input.answer.images, conversationEngine) } };
 				break;
+			case "plugin-problem-submission":
+				input = { ...input, images: await prepareProblemSubmissionImageChannels(input.images, conversationEngine) };
+				break;
 			case "plugin-question-answer":
 				input = { ...input, images: await prepareSubmissionImageChannels(input.images, conversationEngine) };
 				break;
@@ -375,6 +387,7 @@ export async function handleChatInput(
 			}
 			assertPluginQuestionInputAllowed(record.messages, input);
 			if (input.type !== "steers") assertNativeSubmissionTarget(record.messages, input);
+			if (input.type === "plugin-problem-submission") requirePluginProblemTarget(record, input);
 			if (input.type === "plugin-question-answer") {
 				const pending = pendingPluginQuestionOf(record.messages);
 				if (!pending || pending.questionId !== input.questionId || !samePluginQuestionOccurrence(pending.occurrence, input.occurrence)) return false;
@@ -422,17 +435,20 @@ export async function handleChatInput(
 		// or the save-only sibling branch below.
 		if (compactionInFlight(chatId))
 			return Response.json({ error: "A turn is already running for this session" }, { status: 409 });
-		if (input.type === "plugin-question-answer" && isTurnRunning(chatId))
+		if ((input.type === "plugin-question-answer" || input.type === "plugin-problem-submission") && isTurnRunning(chatId))
 			return Response.json({ error: "A turn is already running for this session" }, { status: 409 });
-		if (input.type === "plugin-question-answer") {
-			const submission = preparePluginQuestionSubmission({ id: chatId, messages: record.messages }, input, questionResolver!);
-			if (submission.grade) {
+		if (input.type === "plugin-question-answer" || input.type === "plugin-problem-submission") {
+			const questionSubmission = input.type === "plugin-question-answer" ? preparePluginQuestionSubmission({ id: chatId, messages: record.messages }, input, questionResolver!) : undefined;
+			const problemSubmission = input.type === "plugin-problem-submission" ? preparePluginProblemSubmission(record, input, problemResolver!) : undefined;
+			const submission = questionSubmission ?? problemSubmission!;
+			const work = questionSubmission?.grade ?? problemSubmission?.process;
+			if (work) {
 				const claim = claimPreparingTurn(chatId);
 				if (!claim) return Response.json({ error: "A turn is already running for this session" }, { status: 409 });
 				preparation = claim;
 				turnClaimed = true;
-				const grading = await submission.grade(preparation.signal);
-				// No captured history may be written after an asynchronous grader.
+				const outcome = await work(preparation.signal);
+				// No captured history may be written after asynchronous plugin processing.
 				const current = stores.chatStore.getChat(chatId);
 				if (!current || !preparation.isCurrent()) return staleSubmission();
 				record = current;
@@ -440,8 +456,8 @@ export async function handleChatInput(
 				// changes apply to the next request, not to this accepted work.
 				if (!submissionIsCurrent(false)) return staleSubmission();
 				preparation.signal.throwIfAborted();
-				appends = submission.finish({ id: chatId, messages: record.messages }, grading);
-			} else appends = submission.finish({ id: chatId, messages: record.messages });
+				appends = submission.finish({ id: chatId, kind: record.kind, messages: record.messages }, outcome);
+			} else appends = submission.finish({ id: chatId, kind: record.kind, messages: record.messages });
 		} else appends = input.type === "steers"
 			? input.steers.filter((s) => !steerDelivered(record.messages, s.id))
 			: inputAppends(record, input);

@@ -120,9 +120,10 @@ export function useChatSession({ chatId, initialMessages, initialError, initiall
 	);
 	const questionDraft = useCallback((questionKey: string) => model.questionDraft(questionKey), [model]);
 	const saveQuestionDraft = useCallback((questionKey: string, draft: Parameters<SessionModel["saveQuestionDraft"]>[1]) => model.saveQuestionDraft(questionKey, draft), [model]);
-	const setMessages = useCallback((record: LhMessage[], turnError?: string, availability?: Parameters<SessionModel["setMessages"]>[2]) => model.setMessages(record, turnError, availability), [model]);
+	const setMessages = useCallback((record: LhMessage[], turnError?: string, availability?: Parameters<SessionModel["setMessages"]>[2], problemAvailability?: Parameters<SessionModel["setMessages"]>[3]) => model.setMessages(record, turnError, availability, problemAvailability), [model]);
 	const reconcile = useCallback(() => model.reconcile(), [model]);
 	const readRecord = useCallback((options?: Parameters<SessionModel["readRecord"]>[0]) => model.readRecord(options), [model]);
+	const pluginProblemDraft = useCallback((snapshot: Parameters<SessionModel["pluginProblemDraft"]>[0]) => model.pluginProblemDraft(snapshot), [model]);
 	const pluginQuestionDraft = useCallback((snapshot: Parameters<SessionModel["pluginQuestionDraft"]>[0]) => model.pluginQuestionDraft(snapshot), [model]);
 	const dismissPluginQuestion = useCallback((occurrence: Parameters<SessionModel["dismissPluginQuestion"]>[0], questionId?: string) => model.dismissPluginQuestion(occurrence, questionId), [model]);
 	const adoptRecord = useCallback((record: LhMessage[]) => model.adoptRecord(record), [model]);
@@ -138,6 +139,8 @@ export function useChatSession({ chatId, initialMessages, initialError, initiall
 		reconcile,
 		readRecord,
 		pluginQuestionAvailability: state.pluginQuestionAvailability,
+		pluginProblemAvailability: state.pluginProblemAvailability,
+		pluginProblemDraft,
 		pluginQuestionDraft,
 		dismissPluginQuestion,
 		hasConfirmedConversation: state.hasConfirmedConversation,

@@ -834,6 +834,25 @@ fall back to readable source/results rather than hiding saved lesson content. Us
 normal distributable assets if needed. These hooks do not introduce a new pending
 learner-answer type into the question dock.
 
+## Plugin-defined practice problems — API v1
+
+Use backend `ctx.registerProblemType(...)` and frontend
+`ctx.registerProblemRenderer(...)` to contribute a practice posing tool and its structured
+submission editor. This is separate from teaching questions: native and plugin problems
+share one active-problem gate and the existing `conclude` tool. Every pose commits a
+required `modelSolution`. Each submission keeps its value and thinking separate and may
+await `processSubmission` for saved observations, never an automatic verdict.
+
+The dock keeps the statement, plugin editor, Your thinking, and one Submit button.
+Accepted submissions retain the editor value for iteration and clear only unchanged
+thinking. Disabled/missing/incompatible plugins leave the problem active but submission
+unavailable; no native-editor fallback. Image/interceptor support uses
+`"plugin-problem-submission"` with `"submission"` and `"thinking"` channels.
+
+See [the complete practice-problem contract](plugin-problem-contract.md) for schemas,
+controlled editor handles, processing/cancellation, images, and portable type examples.
+Implemented on `feature/plugin-architecture`; no release/install is implied.
+
 ## Native plugin questions — bounded API v1
 
 The [approved question contract](plugin-question-contract.md) is authoritative; exact
@@ -1222,6 +1241,7 @@ hook registration or user-facing ordering setting.
 | `"thinking"` | `content` for the captured active practice problem |
 | `"answer"` | `answer: PluginBuiltinSubmissionAnswer`, separate `thinking` and `readingThinking` content |
 | `"plugin-question-answer"` | finite JSON `answer`, `answerImages`, separate `thinking` and `readingThinking` content |
+| `"plugin-problem-submission"` | finite JSON `submission`, `submissionImages`, separate `thinking` content |
 
 `PluginSubmissionContent` is `{ text: string, images: readonly ImageContent[] }`:
 text followed by images, not arbitrary interleaving. Builtin answer fields are optional
@@ -1239,6 +1259,9 @@ labels/stable values, not grading keys. Plugin `question` supplies `questionId`,
 `occurrence`, `pluginId`, `typeId`, `contractVersion`, `label`, `variant`, `showThinking`.
 `PluginSubmissionOccurrence` is `{ messageId, contentIndex, toolCallId, toolName }`.
 Applicable answer channels are `"answer"`, `"thinking"`, `"readingThinking"`.
+Plugin-problem targets instead supply `channels: ["submission", "thinking"]` and
+`problem: { problemId, occurrence, pluginId, typeId, contractVersion, label, statement }`.
+See [plugin practice submissions](plugin-problem-contract.md#images-and-submission-interceptors).
 
 Context adds `messages`, `signal` and `onAccepted(callback)`. Input, context data and
 history are detached, recursively readonly and deeply frozen. `messages` is the
@@ -1251,8 +1274,8 @@ opaque host references: do not JSON-clone or persist them.
 it is not final answer validity. Call `refreshSubmissions()` after state changes.
 Predicate exceptions report a plugin error and contribute no readiness. Pending input
 can enable builtin preparation before an initial native selection/text exists, but the
-final transformed answer must satisfy the captured question. Plugin questions still
-require a current ready editor and retained answer state **before** preparation; pending
+final transformed answer must satisfy the captured question. Plugin questions and plugin problems still
+require a current ready editor and retained answer/submission state **before** preparation; pending
 material cannot bypass that requirement or missing-renderer fallback authority.
 
 ### Strict validation, preparation and acceptance

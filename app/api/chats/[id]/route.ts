@@ -1,5 +1,5 @@
-import { compactionInFlight, deleteChatSession, getChat, isTurnRunning, sessionCoverage, sessionCost, stores, turnFailure, type ChatDeleteMode, pluginQuestionAvailabilityOf, reconcilePluginQuestionCompatibility, type QuestionTypeResolver, getPluginQuestionTypeResolver } from "@/src/server";
-import { pendingPluginQuestionOf } from "@/src/core";
+import { compactionInFlight, deleteChatSession, getChat, isTurnRunning, sessionCoverage, sessionCost, stores, turnFailure, type ChatDeleteMode, pluginQuestionAvailabilityOf, reconcilePluginQuestionCompatibility, type QuestionTypeResolver, getPluginQuestionTypeResolver, getPluginHost, pluginProblemAvailabilityOf, type ProblemTypeResolver } from "@/src/server";
+import { pendingPluginQuestionOf, activeProblemOf } from "@/src/core";
 
 export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
 	const { id } = await params;
@@ -10,6 +10,12 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
 	if (pendingPluginQuestionOf(chat.messages)) {
 		try { questionResolver = await getPluginQuestionTypeResolver(); } catch { /* unavailable fallback */ }
 		// No awaited plugin startup may separate this read from the response projection.
+		chat = getChat(id);
+		if (!chat) return Response.json({ error: "Not found" }, { status: 404 });
+	}
+	let problemResolver: ProblemTypeResolver | undefined;
+	if (activeProblemOf(chat.messages)?.pluginProblem) {
+		try { problemResolver = (await getPluginHost()).resolveProblemType; } catch { /* unavailable fallback */ }
 		chat = getChat(id);
 		if (!chat) return Response.json({ error: "Not found" }, { status: 404 });
 	}
@@ -27,6 +33,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
 		...chat,
 		messages: chat.messages,
 		pluginQuestionAvailability: pluginQuestionAvailabilityOf(chat, questionResolver),
+		pluginProblemAvailability: pluginProblemAvailabilityOf(chat, problemResolver),
 		pricing: sessionCost(chat),
 		turnInFlight: isTurnRunning(id),
 		// Also reaches idle views that missed the failing turn's stream.
