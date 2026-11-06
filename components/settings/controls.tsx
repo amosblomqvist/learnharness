@@ -61,6 +61,7 @@ export function SettingsRow({
 	children,
 	testid,
 	dimmed,
+	align = "between",
 }: {
 	label: string;
 	hint?: ReactNode;
@@ -69,9 +70,10 @@ export function SettingsRow({
 	/** Dependency graying, graph-view style: the whole row dims when the
 	 *  control is inert (parent off, no file yet, …). */
 	dimmed?: boolean;
+	align?: "between" | "start";
 }) {
 	return (
-		<div data-testid={testid} className={cn("flex items-center justify-between gap-4 py-1", dimmed && "opacity-40")}>
+		<div data-testid={testid} className={cn("flex items-center gap-4 py-1", align === "start" ? "justify-start" : "justify-between", dimmed && "opacity-40")}>
 			<span className="min-w-0">
 				<span className="block font-prose text-(length:--lh-prose-size)">{label}</span>
 				{hint && <span className="block text-xs text-muted-foreground/70">{hint}</span>}

@@ -87,7 +87,8 @@ test("Providers has five ordered sections including External CLI; unknown variab
  const headings = [...document.querySelectorAll('[data-testid^="group-"] > p')].map((el) => el.textContent);
  assert.deepEqual(headings, ["Model API keys", "Subscriptions", "External CLI", "Dictation", "Search"]);
  assert(byTest("claude-code-installation").closest('[data-testid="group-external-cli"]'));
- assert(byTest("key-deepgram_api_key").closest('[data-testid="group-dictation"]'));
+ assert(byTest("dictation-add-provider").closest('[data-testid="group-dictation"]'));
+	assert.equal(document.querySelector('[data-testid="dictation-deepgram-row"]'), null, "unconfigured dictation providers live in the Add menu");
  assert(byTest("key-tavily_api_key").closest('[data-testid="group-search"]'));
  assert(byTest("key-brave_api_key").closest('[data-testid="group-search"]'));
  assert(byTest("key-exa_api_key").closest('[data-testid="group-search"]'));

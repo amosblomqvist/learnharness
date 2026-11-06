@@ -1,3 +1,4 @@
+import { LOCAL_DICTATION_AUTH } from "../core/local-dictation.ts";
 /**
  * The auth/keys composition (auth-keys wave, 2026-09-19): the server-side
  * key manager behind GET/PUT/DELETE /api/keys.
@@ -66,7 +67,7 @@ import { authEnvRecord as boot } from "../core/auth-env.ts";
 /** Ordinary writable key names. Custom auth writes must use the atomic
  * endpoint-binding seam, never the generic single-key API. */
 export function isWritableAuthKey(id: string): boolean {
-	return id !== CUSTOM_AUTH_BINDING && id !== CUSTOM_PROVIDER.envVar && (isKnownAuthKey(id) || isProviderEnvVar(id));
+	return id !== LOCAL_DICTATION_AUTH && id !== CUSTOM_AUTH_BINDING && id !== CUSTOM_PROVIDER.envVar && (isKnownAuthKey(id) || isProviderEnvVar(id));
 }
 
 /** The settings page's provider dropdown: every pi-ai provider that takes
@@ -92,7 +93,7 @@ export function envKeysIgnored(): boolean {
  */
 export function initAuthEnv(): void {
 	const record = boot();
-	const fileVars = Object.fromEntries(Object.entries(authStore.authVars()).filter(([name]) => name !== CUSTOM_AUTH_BINDING));
+	const fileVars = Object.fromEntries(Object.entries(authStore.authVars()).filter(([name]) => name !== LOCAL_DICTATION_AUTH && name !== CUSTOM_AUTH_BINDING));
 	const managed = new Set<string>([
 		...Object.keys(fileVars),
 		...AUTH_KEYS.map((k) => k.id),
@@ -128,7 +129,7 @@ export function initAuthEnv(): void {
 /** Is this env-var name one the keys system manages (curated, provider,
  *  or held in the file)? */
 function isManagedName(name: string): boolean {
-	return name !== CUSTOM_AUTH_BINDING && (isWritableAuthKey(name) || name in authStore.authVars());
+	return name !== LOCAL_DICTATION_AUTH && name !== CUSTOM_AUTH_BINDING && (isWritableAuthKey(name) || name in authStore.authVars());
 }
 
 /**
@@ -150,7 +151,7 @@ export function resolveKeyStatuses(
 	}
 	const rows: AuthKeyStatus[] = [];
 	for (const id of ids) {
-		if (id === CUSTOM_AUTH_BINDING) continue;
+		if ((id === LOCAL_DICTATION_AUTH || id === CUSTOM_AUTH_BINDING)) continue;
 		const envValue = env[id];
 		const fileValue = fileVars[id];
 		const isRealEnv = realEnv.has(id);
@@ -182,7 +183,7 @@ export function keyStatuses(): AuthKeyStatus[] {
  *  STT route was the one cold-boot hole: a first-ever request to it would
  *  otherwise read env before any fill-gap ran). */
 export function keyValue(id: string): string | undefined {
-	if (id === CUSTOM_AUTH_BINDING) return undefined;
+	if ((id === LOCAL_DICTATION_AUTH || id === CUSTOM_AUTH_BINDING)) return undefined;
 	// The fresh-user switch: ONLY the file store counts (belt-and-
 	// suspenders — the boot deletion already emptied the env; this guards
 	// any env key reintroduced after boot).
@@ -213,7 +214,7 @@ export function providerKeyPresent(provider: string): boolean {
  * reports shadowedByEnv so the page can explain it).
  */
 export function saveKey(id: string, value: string): { ok: true; status: AuthKeyStatus } | { ok: false; error: string } {
-	if (id === CUSTOM_PROVIDER.envVar || id === CUSTOM_AUTH_BINDING) return { ok: false, error: "Use the custom endpoint editor" };
+	if (id === CUSTOM_PROVIDER.envVar || (id === LOCAL_DICTATION_AUTH || id === CUSTOM_AUTH_BINDING)) return { ok: false, error: "Use the custom endpoint editor" };
 	const shape = isProviderEnvVar(id) ? genericProviderKeyGuard(id, value) : validateKeyShape(id, value);
 	if (!shape.ok) return { ok: false, error: shape.error };
 	const trimmed = value.trim();
@@ -233,7 +234,7 @@ export function saveKey(id: string, value: string): { ok: true; status: AuthKeyS
  * wins) and the status shows the key still present from env.
  */
 export function deleteKey(id: string): AuthKeyStatus {
-	if (id === CUSTOM_PROVIDER.envVar || id === CUSTOM_AUTH_BINDING) throw new Error("Use the custom endpoint editor");
+	if (id === CUSTOM_PROVIDER.envVar || (id === LOCAL_DICTATION_AUTH || id === CUSTOM_AUTH_BINDING)) throw new Error("Use the custom endpoint editor");
 	authStore.deleteAuthVar(id);
 	const record = boot();
 	if (record.fillGap.has(id) && !record.realEnv.has(id)) {

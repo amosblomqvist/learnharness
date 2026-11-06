@@ -27,6 +27,16 @@ class PcmCaptureProcessor extends AudioWorkletProcessor {
 		super();
 		this.frame = new Int16Array(2048);
 		this.count = 0;
+		this.port.onmessage = (event) => {
+			if (event.data?.type !== "flush") return;
+			if (this.count > 0) {
+				const tail = this.frame.slice(0, this.count);
+				this.port.postMessage({ type: "audio", buffer: tail.buffer }, [tail.buffer]);
+				this.frame = new Int16Array(2048);
+				this.count = 0;
+			}
+			this.port.postMessage({ type: "flushed" });
+		};
 	}
 
 	process(inputs) {
@@ -43,7 +53,7 @@ class PcmCaptureProcessor extends AudioWorkletProcessor {
 			const s = Math.max(-1, Math.min(1, channel[i]));
 			this.frame[this.count++] = s < 0 ? s * 0x8000 : s * 0x7fff;
 			if (this.count === this.frame.length) {
-				this.port.postMessage({ type: "audio", buffer: this.frame }, [this.frame.buffer]);
+				this.port.postMessage({ type: "audio", buffer: this.frame.buffer }, [this.frame.buffer]);
 				this.frame = new Int16Array(2048);
 				this.count = 0;
 			}
