@@ -60,6 +60,18 @@ describe("POST /api/chats — the birth stamp", () => {
 		});
 	});
 
+	it("stamps the strong slot's Fast pin next to the model", async () => {
+		writeSettings({ version: 1, models: { strong: { model: { provider: "chatgpt", id: "gpt-5.5" }, thinkingLevel: "high", fast: true } } });
+		const { id } = (await (await post()).json()) as { id: string };
+		assert.deepEqual(chatStore.getChat(id)?.settings, { model: { provider: "chatgpt", id: "gpt-5.5" }, thinkingLevel: "high", fast: true });
+	});
+
+	it("a strong slot without Fast stamps no fast key (S9)", async () => {
+		writeSettings({ version: 1, models: { strong: { model: { provider: "openai", id: "gpt-5" }, thinkingLevel: "low" } } });
+		const { id } = (await (await post()).json()) as { id: string };
+		assert.equal("fast" in (chatStore.getChat(id)?.settings ?? {}), false);
+	});
+
 	it("no strong slot configured (fresh BYOK boot) → NO stamp; the turn gate refuses downstream", async () => {
 		fs.rmSync(path.join(TMP_DATA, "settings.json"), { force: true });
 		assert.equal(readSettings(), null);

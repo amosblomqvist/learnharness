@@ -16,6 +16,7 @@ import {
 	parseGeneralSettingsBody,
 	parseCompactionSettingsBody,
 	parseGraphSettingsBody,
+	parseSettingsBody,
 	SETTINGS_SECTIONS,
 } from "../src/server/settings-body.ts";
 
@@ -301,4 +302,58 @@ describe("parseModelsSettingsBody (model slots wave, 2026-09-20)", () => {
 		assert.equal(parseModelsSettingsBody({ vision: { thinkingLevel: 7 } }).ok, false);
 		assert.equal(parseModelsSettingsBody("nope").ok, false);
 	});
+});
+
+describe("Fast pins in the settings bodies (OpenAI Fast mode, S6/S9)", () => {
+	const sol = { provider: "chatgpt", id: "gpt-6.1-sol" };
+
+	it("parseSettingsBody: fast true rides the model; false is stored as absent", () => {
+		assert.deepEqual(parseSettingsBody({ model: sol, thinkingLevel: "high", fast: true }), {
+			ok: true,
+			settings: { model: sol, thinkingLevel: "high", fast: true },
+		});
+		assert.deepEqual(parseSettingsBody({ model: sol, fast: false }), { ok: true, settings: { model: sol } });
+	});
+
+	it("parseSettingsBody: a non-boolean fast and a model-less fast are rejected", () => {
+		assert.deepEqual(parseSettingsBody({ model: sol, fast: "yes" }), { ok: false, error: "fast must be a boolean" });
+		assert.deepEqual(parseSettingsBody({ thinkingLevel: "high", fast: true }), { ok: false, error: "fast requires a model" });
+	});
+
+	it("parseModelsSettingsBody: fast rides a slot's model, prefixed errors otherwise", () => {
+		assert.deepEqual(parseModelsSettingsBody({ strong: { model: sol, fast: true }, cheap: { model: sol, fast: false } }), {
+			ok: true,
+			settings: { strong: { model: sol, fast: true }, cheap: { model: sol } },
+		});
+		assert.deepEqual(parseModelsSettingsBody({ strong: { model: sol, fast: 1 } }), { ok: false, error: "strong.fast must be a boolean" });
+		assert.deepEqual(parseModelsSettingsBody({ vision: { fast: true } }), { ok: false, error: "vision.fast requires a model" });
+	});
+
+	it("parseAgentSettingsBody: role overrides take fast with the same rules", () => {
+		assert.deepEqual(parseAgentSettingsBody({ models: { researcher: { model: sol, fast: true }, auditor: { model: sol, fast: false } } }), {
+			ok: true,
+			settings: { models: { researcher: { model: sol, fast: true }, auditor: { model: sol } } },
+		});
+		assert.deepEqual(parseAgentSettingsBody({ models: { researcher: { model: sol, fast: null } } }), { ok: false, error: "researcher.fast must be a boolean" });
+		assert.deepEqual(parseAgentSettingsBody({ models: { extractor: { thinkingLevel: "low", fast: true } } }), { ok: false, error: "extractor.fast requires a model" });
+	});
+
+	it("bodies without fast parse exactly as before (S9)", () => {
+		assert.deepEqual(parseSettingsBody({ model: sol, thinkingLevel: "low" }), { ok: true, settings: { model: sol, thinkingLevel: "low" } });
+		assert.deepEqual(parseModelsSettingsBody({ strong: { model: sol, thinkingLevel: "low", cacheRetention: "long" } }), {
+			ok: true,
+			settings: { strong: { model: sol, thinkingLevel: "low", cacheRetention: "long" } },
+		});
+		assert.deepEqual(parseAgentSettingsBody({ models: { researcher: { thinkingLevel: "low" } } }), {
+			ok: true,
+			settings: { models: { researcher: { thinkingLevel: "low" } } },
+		});
+	});
+});
+
+it("fast:false parses exactly like an absent fast (S9)", () => {
+	const m = { provider: "chatgpt", id: "gpt-5.5" };
+	assert.deepEqual(parseSettingsBody({ model: m, thinkingLevel: "high", fast: false }), parseSettingsBody({ model: m, thinkingLevel: "high" }));
+	assert.deepEqual(parseModelsSettingsBody({ strong: { model: m, fast: false } }), parseModelsSettingsBody({ strong: { model: m } }));
+	assert.deepEqual(parseAgentSettingsBody({ models: { researcher: { model: m, fast: false } } }), parseAgentSettingsBody({ models: { researcher: { model: m } } }));
 });

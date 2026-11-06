@@ -85,10 +85,12 @@ export function SettingsRow({
  * `unavailable` preserves callers that gate clicks without native disabling;
  * `disabled` retains native button semantics where the caller requires them. */
 export function SettingsMenuTrigger({
-	value, unavailable, disabled, className, ...props
+	value, unavailable, disabled, className, icon, ...props
 }: Omit<ComponentPropsWithRef<"button">, "value" | "children"> & {
 	value: string;
 	unavailable?: boolean;
+	/** A mark right after the value (e.g. the model trigger's Fast bolt). */
+	icon?: ReactNode;
 }) {
 	return <button
 		type="button"
@@ -101,6 +103,7 @@ export function SettingsMenuTrigger({
 		)}
 	>
 		<span className="min-w-0 flex-1 truncate">{value}</span>
+		{icon}
 		<span aria-hidden className="text-muted-foreground">▾</span>
 	</button>;
 }

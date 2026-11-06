@@ -7,7 +7,7 @@ import { fuzzyScore } from "@/src/core";
  * Models and dictation languages supply only their catalog and row content.
  * The caller owns the shared MenuShell and dismissal behavior. */
 export function SearchMenuList<T>({
-	items, itemKey, searchTerms, compare, prioritize, isSelected, onPick, renderItem,
+	items, itemKey, searchTerms, compare, prioritize, follows, isSelected, onPick, renderItem,
 	searchTestid, listTestid, optionTestid, placeholder, ariaLabel, loading, empty,
 	disabled = false,
 }: {
@@ -19,6 +19,9 @@ export function SearchMenuList<T>({
 	 *  rest, fuzzy rank still deciding within each group (a stable partition,
 	 *  never a filter — nothing is hidden). */
 	prioritize?: (item: T) => boolean;
+	/** Optional pairing: the itemKey of the row this one sits directly under
+	 *  whenever that row is in the results (ranking never separates them). */
+	follows?: (item: T) => string | undefined;
 	isSelected: (item: T) => boolean;
 	onPick: (item: T) => void;
 	renderItem: (item: T) => ReactNode;
@@ -42,7 +45,7 @@ export function SearchMenuList<T>({
 		listRef.current?.querySelector(`[data-idx="${menuIdx}"]`)?.scrollIntoView({ block: "nearest" });
 	}, [menuIdx]);
 
-	const results = (items ?? [])
+	const ranked = (items ?? [])
 		.map((item) => ({ item, score: fuzzyScore(query, ...searchTerms(item)) }))
 		.filter((result) => result.score !== null)
 		.sort(
@@ -52,6 +55,7 @@ export function SearchMenuList<T>({
 				(compare?.(a.item, b.item) ?? 0),
 		)
 		.map(({ item }) => item);
+	const results = follows ? attachFollowers(ranked, itemKey, follows) : ranked;
 
 	return <>
 		<input
@@ -99,4 +103,20 @@ export function SearchMenuList<T>({
 			</li>)}
 		</ul>
 	</>;
+}
+
+/** Moves each follower directly under its leader when the leader is ranked;
+ *  a follower whose leader was filtered out keeps its own rank. */
+function attachFollowers<T>(ranked: T[], itemKey: (item: T) => string, follows: (item: T) => string | undefined): T[] {
+	const keys = new Set(ranked.map(itemKey));
+	const under = new Map<string, T[]>();
+	for (const item of ranked) {
+		const leader = follows(item);
+		if (leader !== undefined && keys.has(leader)) under.set(leader, [...(under.get(leader) ?? []), item]);
+	}
+	return ranked.flatMap((item) => {
+		const leader = follows(item);
+		if (leader !== undefined && keys.has(leader)) return [];
+		return [item, ...(under.get(itemKey(item)) ?? [])];
+	});
 }

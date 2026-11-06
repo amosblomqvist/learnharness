@@ -21,7 +21,7 @@ import { clampThinkingLevel, getSupportedThinkingLevels, type Api, type Model } 
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import { piModels } from "../agent/models.ts";
 import { customProviderAvailable } from "./custom-provider.ts";
-import { chatGPTConnected, chatGPTModel, chatGPTModels, refreshChatGPTModels } from "../agent/chatgpt-bridge.ts";
+import { chatGPTConnected, chatGPTFastTier, chatGPTModel, chatGPTModels, refreshChatGPTModels } from "../agent/chatgpt-bridge.ts";
 import { NATIVE_SUBSCRIPTIONS } from "../core/contracts/subscriptions.ts";
 import { nativeSubscriptionId, nativeSubscriptionConnected, nativeSubscriptionModel, nativeSubscriptionModels, refreshSubscriptionModels } from "../agent/subscription-bridge.ts";
 
@@ -56,9 +56,11 @@ import {
 	BACKGROUND_MODEL_ROLES,
 	MODEL_SLOTS,
 	customProviderUsable,
+	type AgentSettings,
 	type BackgroundModelRole,
 	type ModelSlotName,
 	type ModelsSettings,
+	type RoleModelOverride,
 } from "../core/settings.ts";
 
 /** The picker's client-safe model entry (contract: core/contracts/models.ts). */
@@ -85,6 +87,7 @@ export function catalogDefaultsFor(
 	return {
 		model,
 		...(level !== undefined ? { thinkingLevel: level } : {}),
+		...(strong?.fast ? { fast: strong.fast } : {}),
 	};
 }
 
@@ -108,6 +111,7 @@ export function rolePinsFor(
 			? {
 					model: { provider: spec.provider, id: spec.id },
 					...(spec.thinkingLevel !== undefined ? { thinkingLevel: spec.thinkingLevel } : {}),
+					...(spec.fast ? { fast: spec.fast } : {}),
 				}
 			: null;
 	}
@@ -135,6 +139,7 @@ export function catalogSlots(): SlotPins {
 			? {
 					model: { provider: slot.provider, id: slot.id },
 					...(slot.thinkingLevel !== undefined ? { thinkingLevel: slot.thinkingLevel } : {}),
+					...(slot.fast ? { fast: slot.fast } : {}),
 					...(slot.cacheRetention !== undefined ? { cacheRetention: slot.cacheRetention } : {}),
 				}
 			: null;
@@ -188,6 +193,7 @@ export function toModelDto(model: Model<Api>): ModelDto {
 		},
 		contextWindow: model.provider === CLAUDE_CODE_PROVIDER ? null : model.contextWindow,
 		maxTokens: model.provider === CLAUDE_CODE_PROVIDER ? null : model.maxTokens,
+		...(model.provider === "chatgpt" && chatGPTFastTier(model.id) ? { fast: chatGPTFastTier(model.id) } : {}),
 	};
 }
 
@@ -245,7 +251,7 @@ export type SettingsValidation =
  *  - thinkingLevel: must be in the resolved model's supported list —
  *    the model the picker writes against (settings.model, else config's
  *    prober/teacher pin; one controller, so the two specs share it). */
-export function validateChatSettings(settings: ChatSettings): SettingsValidation {
+export function validateChatSettings(settings: ChatSettings, stored?: ChatSettings): SettingsValidation {
 	const providers = connectionProviderIds();
 	if (settings.model) {
 		const { provider, id } = settings.model;
@@ -256,6 +262,10 @@ export function validateChatSettings(settings: ChatSettings): SettingsValidation
 			return { ok: false, error: `No model "${id}" in the ${provider} catalog` };
 		}
 	}
+	// An unchanged stored Fast pin re-saves even after the catalog drops Fast
+	// (the engine then runs the standard tier); a new Fast choice is checked.
+	const fastError = unchangedFastPin(settings, stored) ? undefined : fastTierError(settings);
+	if (fastError) return fastError;
 	// BYOK interlude (owner, 2026-09-22): thinking levels NEVER reject a
 	// write — a model swap with a pinned level JUST WORKS. The WRITE clamps
 	// the pin to the new model's nearest supported level (clampChatLevel
@@ -275,14 +285,43 @@ export function validateModelsSettings(settings: ModelsSettings, stored?: Models
 		const slot = settings[name];
 		if (!slot) continue;
 		const previous = stored?.[name]?.model;
-		if (slot.model && previous && slot.model.provider === previous.provider && slot.model.id === previous.id) continue;
+		if (slot.model && previous && slot.model.provider === previous.provider && slot.model.id === previous.id) {
+			// An unchanged Fast pin survives the catalog dropping Fast (S5);
+			// turning Fast on for the same model is a new choice and is checked.
+			const fastError = stored?.[name]?.fast ? undefined : fastTierError(slot);
+			if (fastError) return fastError;
+			continue;
+		}
 		const verdict = validateSlotSpec(name, slot);
 		if (!verdict.ok) return verdict;
 	}
 	return { ok: true };
 }
 
-function validateSlotSpec(name: ModelSlotName, slot: { model?: { provider: string; id: string }; thinkingLevel?: ThinkingLevel }): SettingsValidation {
+/** S8: a Fast pin needs a ChatGPT-account model whose live catalog entry
+ *  offers the priority tier (the parsers already require the model). */
+function unchangedFastPin(pin: { model?: { provider: string; id: string }; fast?: true }, stored?: { model?: { provider: string; id: string }; fast?: true }): boolean {
+	return !!pin.fast && !!pin.model && !!stored?.fast && stored.model?.provider === pin.model.provider && stored.model.id === pin.model.id;
+}
+
+/** Background role overrides (agent section): the same Fast gate as slots,
+ *  with the same unchanged-stored-pin pass. */
+export function validateRoleOverridesFast(models: AgentSettings["models"], stored?: AgentSettings["models"]): SettingsValidation {
+	for (const [role, override] of Object.entries(models ?? {}) as [BackgroundModelRole, RoleModelOverride | undefined][]) {
+		if (!override || unchangedFastPin(override, stored?.[role])) continue;
+		const error = fastTierError(override);
+		if (error) return error;
+	}
+	return { ok: true };
+}
+
+function fastTierError(pin: { model?: { provider: string; id: string }; fast?: true }): SettingsValidation | undefined {
+	if (!pin.fast || !pin.model) return undefined;
+	const { provider, id } = pin.model;
+	return provider === "chatgpt" && chatGPTFastTier(id) ? undefined : { ok: false, error: `No Fast tier for model "${id}"` };
+}
+
+function validateSlotSpec(name: ModelSlotName, slot: { model?: { provider: string; id: string }; thinkingLevel?: ThinkingLevel; fast?: true }): SettingsValidation {
 	const providers = connectionProviderIds();
 	if (slot.model) {
 		const { provider, id } = slot.model;
@@ -293,6 +332,8 @@ function validateSlotSpec(name: ModelSlotName, slot: { model?: { provider: strin
 			return { ok: false, error: `No model "${id}" in the ${provider} catalog` };
 		}
 	}
+	const fastError = fastTierError(slot);
+	if (fastError) return fastError;
 	// BYOK interlude (owner, 2026-09-22): the supported-level verdict is
 	// DEAD — a slot write with a pinned level never rejects; the WRITE
 	// clamps the level to the model's nearest supported (clampModelsLevels

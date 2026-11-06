@@ -77,7 +77,7 @@ import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import { prettyModel } from "@/components/usage-format";
 import { cn } from "@/lib/utils";
 import { SettingsGroup, SettingsRow, SettingsMenuTrigger, Toggle, CommitInput } from "./controls.tsx";
-import { ModelMenuList, ThinkingMenuList } from "./model-menu";
+import { FastBolt, ModelMenuList, ThinkingMenuList } from "./model-menu";
 import { ChatGPTBackgroundAccess } from "./chatgpt-connection";
 import { NativeSubscriptionBackgroundAccess } from "./subscription-connections";
 
@@ -157,13 +157,16 @@ export function composeGraphTools(agent: AgentSettings | undefined, on: boolean)
 /** Compose: one slot's model/thinking override. Empty model = absent
  *  override (Default — falls to the factory pin); empty thinking = the
  *  tier keeps its resolved thinking budget. Per-field independence, same
- *  as the schema's ModelSlot. Pure — exported for tests. */
+ *  as the schema's ModelSlot. `fast` is the pin's OpenAI Fast as the
+ *  caller means it (a thinking edit passes the stored one); it is kept
+ *  only with a model. Pure — exported for tests. */
 export function composeSlotModel(
 	models: ModelsSettings | undefined,
 	slot: ModelSlotName,
 	provider: string,
 	id: string,
 	thinking: string,
+	fast = false,
 ): ModelsSettings {
 	const prev = models?.[slot];
 	const next = { ...models };
@@ -175,6 +178,7 @@ export function composeSlotModel(
 		...(prev?.cacheRetention !== undefined ? { cacheRetention: prev.cacheRetention } : {}),
 		...(provider && id ? { model: { provider, id } } : prev?.model ? { model: prev.model } : {}),
 		...(thinking ? { thinkingLevel: thinking as ThinkingLevel } : {}),
+		...(fast && ((provider && id) || prev?.model) ? { fast: true as const } : {}),
 	};
 	return next;
 }
@@ -269,9 +273,12 @@ function MenuTrigger({
 	widthClass,
 	disabled,
 	hint,
+	icon,
 }: {
 	value: string;
 	hint?: string;
+	/** A mark after the value (the model trigger's Fast bolt). */
+	icon?: React.ReactNode;
 	/** What the trigger shows when there is no override ("Default"). */
 	emptyLabel: string;
 	ariaLabel: string;
@@ -289,6 +296,7 @@ function MenuTrigger({
 	const button = (
 		<SettingsMenuTrigger
 			value={value || emptyLabel}
+			icon={icon}
 			aria-label={ariaLabel}
 			aria-expanded={open}
 			data-testid={testid}
@@ -640,6 +648,7 @@ export function AgentSection({
 					const modelId = override?.model?.id ?? "";
 					const provider = override?.model?.provider ?? "";
 					const thinking = override?.thinkingLevel ?? "";
+					const fast = override?.fast === true;
 					// The tier's resolved pin is machinery only now (owner, fix
 					// wave): the UI never names the factory fallback — the hint
 					// carries the roster, the triggers read "—" when unpicked — but
@@ -652,6 +661,8 @@ export function AgentSection({
 					const coord = override?.model ?? pin?.model;
 					const chosen = coord ? catalog?.find((m) => m.id === coord.id && m.provider === coord.provider) : undefined;
 					const levels = chosen ? chosen.supportedLevels : THINKING_LEVELS;
+					// ⚡ only while the catalog still offers Fast (S5: it then runs standard).
+					const fastShown = fast && override?.model !== undefined && chosen?.fast !== undefined;
 					const thisMenuOpen = openMenu?.target === slot ? openMenu.kind : null;
 					return (
 						<SettingsRow
@@ -675,7 +686,8 @@ export function AgentSection({
 								{slot !== "strong" && <><ChatGPTBackgroundAccess provider={coord?.provider} /><NativeSubscriptionBackgroundAccess provider={coord?.provider} /></>}
 								<MenuTrigger
 									value={modelId ? prettyModel(modelId) : ""}
-									hint={modelId ? `${provider}:${modelId}` : undefined}
+									icon={fastShown ? <FastBolt /> : undefined}
+									hint={modelId ? `${provider}:${modelId}${fastShown ? " · Fast" : ""}` : undefined}
 									emptyLabel="—"
 									ariaLabel={`${SLOT_META[slot].label} model`}
 									testid={`slot-model-${slot}`}
@@ -727,13 +739,14 @@ export function AgentSection({
 											models={catalog ?? undefined}
 											effectiveId={modelId}
 											effectiveProvider={provider}
+											effectiveFast={fastShown}
 											vision={slot === "vision"}
-											onPick={(entry) => {
+											onPick={(entry, pickedFast) => {
 												// Auto-populate (chunk 2, owner: "populate everywhere"): the
 												// fresh pick writes a level — the stored one rides as-is
 												// (the write clamps server-side), else the ordering's level.
 												const next = populateLevel(thinking || undefined, entry.supportedLevels);
-												onModelsChange(composeSlotModel(models, slot, entry.provider, entry.id, next));
+												onModelsChange(composeSlotModel(models, slot, entry.provider, entry.id, next, pickedFast));
 												setOpenMenu(null);
 											}}
 											footer={
@@ -757,7 +770,7 @@ export function AgentSection({
 											// the same one the trigger shows.
 											effectiveLevel={thinking || (chosen ? defaultOrderLevel(levels) : undefined)}
 											onPick={(level) => {
-												onModelsChange(composeSlotModel(models, slot, provider, modelId, level));
+												onModelsChange(composeSlotModel(models, slot, provider, modelId, level, fast));
 												setOpenMenu(null);
 											}}
 										/>

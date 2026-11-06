@@ -20,6 +20,7 @@
  */
 
 import { useEffect, useRef, useState } from "react";
+import { ZapIcon } from "lucide-react";
 import type { ModelCatalogEntry } from "@/src/core";
 import { CLAUDE_CODE_PROVIDER, CUSTOM_PROVIDER, fuzzyScore, subscriptionLabel } from "@/src/core";
 import { formatTokens } from "@/components/usage-format";
@@ -31,6 +32,18 @@ function priceLabel(cost: ModelCatalogEntry["cost"]): string {
 	return `${fmt(cost.input)}/${fmt(cost.output)}`;
 }
 
+/** The OpenAI Fast mark (⚡): the menu's Fast tag, the pill and the slot
+ *  trigger all draw the same decorative bolt. */
+export function FastBolt() {
+	return <ZapIcon aria-hidden className="size-2.5 shrink-0 fill-current" />;
+}
+
+/** One menu row: a catalog entry, or its Fast twin (OpenAI fast mode,
+ *  2026-11-06: each Fast-capable model gets a second row right under it). */
+type ModelRow = { entry: ModelCatalogEntry; fast: boolean };
+
+const rowKey = (m: ModelCatalogEntry) => `${m.provider}/${m.id}`;
+
 /** The model dropdown body — fuzzy search + ranked list. `models ===
  *  undefined` is the catalog-loading state; an empty result list gets
  *  its own quiet line. */
@@ -38,6 +51,7 @@ export function ModelMenuList({
 	models,
 	effectiveId,
 	effectiveProvider,
+	effectiveFast = false,
 	onPick,
 	footer,
 	vision,
@@ -51,8 +65,10 @@ export function ModelMenuList({
 	 *  the highlight must match BOTH coordinates or it lands on the
 	 *  wrong row). */
 	effectiveProvider?: string;
-	/** Receives the chosen entry. */
-	onPick: (entry: ModelCatalogEntry) => void;
+	/** The effective pin runs Fast: the highlight moves to the Fast row. */
+	effectiveFast?: boolean;
+	/** Receives the chosen entry, and whether its Fast row was picked. */
+	onPick: (entry: ModelCatalogEntry, fast: boolean) => void;
 	/** Quiet footer note under the list (context-specific). */
 	footer?: string;
 	/** Vision slot: only image-capable models are selectable — plus every
@@ -66,31 +82,40 @@ export function ModelMenuList({
 	const visionItems = vision
 		? models?.filter((m) => m.input.includes("image") || m.provider === CUSTOM_PROVIDER.id)
 		: models;
+	// Only Fast rows carry the word "fast", so searching it lists just them;
+	// `follows` keeps each one directly under its base row whatever the rank.
+	const rows = visionItems?.flatMap((entry): ModelRow[] =>
+		entry.fast ? [{ entry, fast: false }, { entry, fast: true }] : [{ entry, fast: false }],
+	);
 	return (
 		<>
 			<SearchMenuList
-				items={visionItems}
-				itemKey={(m) => `${m.provider}/${m.id}`}
-				searchTerms={(m) => [m.provider, m.id, m.name]}
-				compare={(a, b) => a.id.localeCompare(b.id)}
-				prioritize={vision ? (m) => m.input.includes("image") : undefined}
-				isSelected={(m) => m.id === effectiveId && m.provider === (effectiveProvider ?? m.provider)}
-				onPick={onPick}
+				items={rows}
+				itemKey={({ entry: m, fast }) => `${rowKey(m)}${fast ? "#fast" : ""}`}
+				searchTerms={({ entry: m, fast }) => fast ? [m.provider, m.id, m.name, "fast"] : [m.provider, m.id, m.name]}
+				compare={(a, b) => a.entry.id.localeCompare(b.entry.id) || Number(a.fast) - Number(b.fast)}
+				prioritize={vision ? ({ entry: m }) => m.input.includes("image") : undefined}
+				follows={({ entry: m, fast }) => fast ? rowKey(m) : undefined}
+				isSelected={({ entry: m, fast }) => m.id === effectiveId && m.provider === (effectiveProvider ?? m.provider) && fast === effectiveFast}
+				onPick={({ entry, fast }) => onPick(entry, fast)}
 				searchTestid="model-search"
 				listTestid="model-list"
-				optionTestid={(m) => `model-option-${m.id.replace(/[^a-z0-9-]/gi, "_")}`}
+				optionTestid={({ entry: m, fast }) => `model-option-${m.id.replace(/[^a-z0-9-]/gi, "_")}${fast ? "-fast" : ""}`}
 				placeholder="Search models…"
 				loading="Loading models…"
 				empty="No models match."
-				renderItem={(m) => <>
+				renderItem={({ entry: m, fast }) => <>
 					<span className="flex items-center justify-between gap-2">
-						<span className="truncate text-card-foreground">{m.name}</span>
+						<span className="flex min-w-0 items-center gap-1.5">
+							<span className="truncate text-card-foreground">{m.name}</span>
+							{fast && <span className="inline-flex shrink-0 items-center gap-1 rounded-sm border px-1 text-xs text-card-foreground"><FastBolt />Fast</span>}
+						</span>
 						<span className="shrink-0 tabular-nums text-muted-foreground" title={m.provider === CLAUDE_CODE_PROVIDER ? "Billing is determined by your Claude Code configuration; LearnHarness does not estimate it." : subscriptionLabel(`${m.provider}:${m.id}`) ? "Subscription connection" : m.cost ? "USD per 1M tokens in/out" : "Price unavailable"}>
 							{m.provider === CLAUDE_CODE_PROVIDER ? "CLI billing" : subscriptionLabel(`${m.provider}:${m.id}`) ?? priceLabel(m.cost)}
 						</span>
 					</span>
 					<span className="flex items-center justify-between gap-2 text-muted-foreground">
-						<span className="truncate">{subscriptionLabel(`${m.provider}:${m.id}`) ? `${subscriptionLabel(`${m.provider}:${m.id}`)} (subscription)` : m.provider} · {m.id}</span>
+						<span className="truncate">{subscriptionLabel(`${m.provider}:${m.id}`) ? `${subscriptionLabel(`${m.provider}:${m.id}`)} (subscription)` : m.provider} · {m.id}{fast && m.fast?.description ? ` · ${m.fast.description}` : ""}</span>
 						<span className="shrink-0 tabular-nums">{m.contextWindow === null ? "—" : formatTokens(m.contextWindow)}</span>
 					</span>
 				</>}
