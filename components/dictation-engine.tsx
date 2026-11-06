@@ -12,7 +12,7 @@ import { useDictationLanguage } from "@/components/dictation-preference";
 const ENGINES: readonly { id: DictationProvider; label: string }[] = [
 	{ id: "deepgram", label: "Deepgram" },
 	{ id: "groq", label: "Groq (Whisper)" },
-	{ id: "local", label: "Local (this computer)" },
+	{ id: "local", label: "Local (on this device)" },
 ];
 
 const LINK = "underline underline-offset-2 hover:text-foreground";

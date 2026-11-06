@@ -106,7 +106,7 @@ test("Deepgram is the default engine and there is no Groq model row", async () =
 	await fixture({ dictation: { language: "pl" } });
 	await mount(<Picker />);
 	assert.equal(select("select-dictation-engine").value, "deepgram");
-	assert.deepEqual([...select("select-dictation-engine").options].map((o) => [o.value, o.textContent]), [["deepgram", "Deepgram"], ["groq", "Groq (Whisper)"], ["local", "Local (this computer)"]]);
+	assert.deepEqual([...select("select-dictation-engine").options].map((o) => [o.value, o.textContent]), [["deepgram", "Deepgram"], ["groq", "Groq (Whisper)"], ["local", "Local (on this device)"]]);
 	assert.equal(byTest("row-dictation-groq-model"), null);
 });
 
@@ -126,7 +126,7 @@ test("choosing Groq saves it with the language, shows the model row (turbo by de
 	assert.equal(hint.querySelector("a")!.getAttribute("href"), "https://console.groq.com/keys");
 });
 
-test("choosing Local saves it, hides the Groq model row and says nothing leaves this computer", async () => {
+test("choosing Local saves it, hides the Groq model row and says nothing leaves this device", async () => {
 	const f = await fixture({ dictation: { language: "pl" } });
 	await mount(<Picker />);
 	await choose("select-dictation-engine", "local");
