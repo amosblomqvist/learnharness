@@ -16,6 +16,8 @@ import path from "node:path";
 import { after, afterEach, describe, it } from "node:test";
 import { SETTINGS_FILE } from "../config.ts";
 import { readSettings, writeSettings } from "../src/store/settings.ts";
+import { resolveSettings } from "../src/core/settings-resolution.ts";
+import { parseCompactionSettingsBody } from "../src/server/settings-body.ts";
 
 // Snapshot any pre-existing record; restore in after() so the worktree's
 // own dev state survives a test run.
@@ -47,6 +49,22 @@ describe("the settings store", () => {
 		const out = readSettings();
 		assert.ok(out);
 		assert.deepEqual(out.graph, { enabled: false });
+	});
+
+	it("reasoning estimation defaults off and explicit choices survive parsing, storage, and resolution", () => {
+		assert.equal(resolveSettings(null).compaction.includeReasoning, false);
+		writeSettings({ version: 1, compaction: { thresholdTokens: 120_000 } });
+		assert.equal(resolveSettings(readSettings()).compaction.includeReasoning, false, "older records stay on the original estimator");
+		for (const includeReasoning of [true, false]) {
+			const parsed = parseCompactionSettingsBody({ thresholdTokens: 120_000, includeReasoning });
+			assert.ok(parsed.ok);
+			writeSettings({ version: 1, compaction: parsed.settings });
+			assert.deepEqual(readSettings()?.compaction, { thresholdTokens: 120_000, includeReasoning });
+			assert.equal(resolveSettings(readSettings()).compaction.includeReasoning, includeReasoning);
+		}
+		writeSettings({ version: 1, compaction: { thresholdTokens: 120_000, includeReasoning: "true" } });
+		assert.deepEqual(readSettings()?.compaction, { thresholdTokens: 120_000 }, "invalid disk values are dropped");
+		assert.equal(resolveSettings(readSettings()).compaction.includeReasoning, false);
 	});
 
 	it("a chat section on disk is IGNORED — the field died with per-session models (owner, 2026-09-28)", () => {

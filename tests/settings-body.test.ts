@@ -218,6 +218,13 @@ describe("parseGraphSettingsBody", () => {
 });
 
 describe("parseCompactionSettingsBody (owner round 14)", () => {
+	it("rejects non-boolean reasoning choices rather than silently changing the estimator", () => {
+		for (const includeReasoning of ["true", "false", 0, 1, null, [], {}]) {
+			const result = parseCompactionSettingsBody({ includeReasoning });
+			assert.ok(!result.ok);
+			assert.match(result.error, /includeReasoning must be true or false/);
+		}
+	});
 	it("parses a threshold; absent = the empty section (factory default at resolution)", () => {
 		const r = parseCompactionSettingsBody({ thresholdTokens: 120000 });
 		assert.ok(r.ok);

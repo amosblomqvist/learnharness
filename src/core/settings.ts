@@ -452,7 +452,7 @@ export interface GraphSettings {
 
 /**
  * COMPACTION (owner round 14, 2026-10-05): the context-fitting mechanic's
- * user-facing knob. One number — the trigger threshold in context tokens.
+ * user-facing controls: the trigger threshold and opt-in reasoning accounting.
  * The effective trigger is min(this, model contextWindow − 16k reserve)
  * (owner ruling: on big models the setting rules; on small ones the
  * window rules before the provider overflows).
@@ -466,6 +466,9 @@ export interface GraphSettings {
  */
 export interface CompactionSettings {
 	thresholdTokens?: number;
+	/** Use saved output usage for replayable same-model Responses reasoning.
+	 *  Absent = false: preserve the original readable-content heuristic. */
+	includeReasoning?: boolean;
 }
 
 /** THE record. Every section optional (delta); unknown top-level keys are
@@ -525,7 +528,7 @@ export const FACTORY_SETTINGS: FactorySettings = {
 		mdRendering: { headingWeight: 900, boldColor: null, italicColor: null },
 	},
 	graph: { enabled: true, rendering: true, extractionChunkTokens: 4096 },
-	compaction: { thresholdTokens: 150_000 },
+	compaction: { thresholdTokens: 150_000, includeReasoning: false },
 };
 
 /** The chunk budget's validated floor (GraphSettings.extractionChunkTokens
@@ -798,6 +801,8 @@ export const COMPACTION_THRESHOLD_FLOOR = 32_000;
 
 function sanitizeCompaction(raw: Record<string, unknown>): CompactionSettings {
 	const out: CompactionSettings = {};
+	const includeReasoning = boolOrDrop(raw.includeReasoning);
+	if (includeReasoning !== undefined) out.includeReasoning = includeReasoning;
 	const rawTokens = raw.thresholdTokens;
 	if (typeof rawTokens === "number" && Number.isFinite(rawTokens) && rawTokens > 0) {
 		out.thresholdTokens = Math.max(COMPACTION_THRESHOLD_FLOOR, Math.floor(rawTokens));
@@ -848,9 +853,9 @@ export function sanitizeUserSettings(raw: unknown): UserSettings | null {
 	}
 	if (r.graph !== null && typeof r.graph === "object" && !Array.isArray(r.graph)) {
 		out.graph = sanitizeGraph(r.graph as Record<string, unknown>);
-		if (r.compaction !== undefined && r.compaction !== null && typeof r.compaction === "object") {
-			out.compaction = sanitizeCompaction(r.compaction as Record<string, unknown>);
-		}
+	}
+	if (r.compaction !== undefined && r.compaction !== null && typeof r.compaction === "object") {
+		out.compaction = sanitizeCompaction(r.compaction as Record<string, unknown>);
 	}
 	// Unknown top-level keys ride along untouched (forward-compat). One
 	// known-DEAD key is stripped instead of riding: `chat` (the old

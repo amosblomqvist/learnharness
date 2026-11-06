@@ -76,6 +76,51 @@ const depsOf = (chatId: string, thresholdTokens: number): CompactionDeps => ({
 // ── the laws ────────────────────────────────────────────────────────────────
 
 describe("the compaction service", () => {
+	it("both entrypoints use reasoning-aware cuts and post-marker estimates only when enabled", async () => {
+		const model = { provider: "chatgpt", api: "openai-responses", id: "reasoning-fixture" };
+		for (const entrypoint of ["gate", "kick"]) {
+			for (const postMarker of [false, true]) {
+				for (const includeReasoning of [undefined, false, true]) {
+					const label = `${entrypoint}, post-marker=${postMarker}, includeReasoning=${includeReasoning}`;
+					const chat = chatStore.createChat(label);
+					const messages = Array.from({ length: 6 }, (_, i) => ({
+						id: `signed-${i}`, role: "assistant", provider: model.provider, api: model.api, model: model.id,
+						content: [
+							{ type: "thinking", thinking: "", thinkingSignature: "opaque-fixture" },
+							{ type: "text", text: "answer" },
+						],
+						stopReason: "stop",
+						usage: { input: 50_000, output: 10_000, cacheRead: 0, cacheWrite: 0, totalTokens: 60_000 },
+						timestamp: i,
+					}) as LhMessage);
+					const prior = postMarker ? newCompactionMarker("Prior summary", {
+						firstKeptMessageId: messages[0]!.id, tokensBefore: 100_000, at: "fixture",
+					}) : null;
+					if (prior) messages.push(prior);
+					chatStore.saveMessages(chat.id, messages);
+					const deps = {
+						...depsOf(chat.id, 32_000), engine: { model } as CompactionDeps["engine"], includeReasoning,
+					};
+					if (entrypoint === "gate") await ensureCompacted(deps, chat.id);
+					else {
+						kickCompaction(() => deps, chat.id);
+						await awaitCompaction(chat.id);
+					}
+					const after = chatStore.getChat(chat.id)!.messages;
+					const marker = activeCompactionOf(after);
+					if (includeReasoning) {
+						assert.ok(marker, label);
+						assert.notEqual(marker.id, prior?.id, label);
+						assert.equal(marker.details.firstKeptMessageId, "signed-4", label);
+						assert.ok(marker.details.tokensBefore >= 60_000, label);
+						assert.deepEqual(after.slice(0, -1), messages, "stored reasoning and history stay intact");
+					} else {
+						assert.deepEqual(after, messages, `${label}: original estimator cannot advance this cut`);
+					}
+				}
+			}
+		}
+	});
 	it("background eligibility skips both entrypoints without writes, but still awaits an existing structural run", async () => {
 		const chatId = overThresholdChat("compact: consent off");
 		const before = summarizeCalls;
