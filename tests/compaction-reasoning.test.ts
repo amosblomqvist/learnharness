@@ -57,7 +57,7 @@ describe("reasoning-aware compaction estimates", () => {
 	});
 
 	it("does not use missing, invalid, aborted, or errored output readings", () => {
-		for (const output of [undefined, 0, -1, 0.5, NaN, Infinity, "8000"]) {
+		for (const output of [undefined, 0, -1, 0.5, NaN, Infinity, Number.MAX_SAFE_INTEGER + 1, "8000"]) {
 			const message = { ...signed("invalid"), usage: { output } } as unknown as LhMessage;
 			assert.equal(estimateMessageTokens(message, model), 2);
 		}

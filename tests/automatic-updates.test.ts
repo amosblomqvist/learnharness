@@ -87,6 +87,12 @@ function fixture({ packaged = true, updaterMissing = false } = {}) {
 	const context = createContext({
 		require: (id: string) => {
 			if (id === "electron") return electron;
+			// main() now waits for the dev server before installing updater wiring.
+			// Keep this shell fixture entirely offline, with an already-ready server.
+			if (id === "node:http") return { get: (_url: string, respond: (response: { statusCode: number; resume(): void }) => void) => {
+				respond({ statusCode: 200, resume() {} });
+				return { on() {} };
+			} };
 			if (id === "electron-updater") {
 				if (updaterMissing) throw new Error("missing updater");
 				return { autoUpdater: updater };

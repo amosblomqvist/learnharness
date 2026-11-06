@@ -76,6 +76,72 @@ const depsOf = (chatId: string, thresholdTokens: number): CompactionDeps => ({
 // ── the laws ────────────────────────────────────────────────────────────────
 
 describe("the compaction service", () => {
+	it("compares identical pre-compaction snapshots with reasoning accounting off and on", async (t) => {
+		// A controlled comparison, not a claim about actual provider input tokens.
+		// Both modes compact; the snapshot, model, threshold and summary are fixed.
+		for (const provider of ["chatgpt", "openai"]) {
+			const model = { provider, api: "openai-responses", id: "reasoning-comparison" };
+			const snapshot = [{
+				id: "initial", role: "user", content: "u".repeat(80_000), timestamp: 1,
+			}, ...Array.from({ length: 30 }, (_, i) => ({
+				id: `response-${i}`, role: "assistant", provider, api: model.api, model: model.id,
+				content: [
+					{ type: "thinking", thinking: "", thinkingSignature: JSON.stringify({
+						type: "reasoning", id: `rs_${i}`, summary: [], encrypted_content: "synthetic-opaque-content",
+					}) },
+					{ type: "text", text: "a".repeat(4_000) },
+				],
+				stopReason: "stop", timestamp: i + 2,
+				usage: { input: 20_100 + i * 5_000, output: 5_000, reasoning: 4_000,
+					cacheRead: 0, cacheWrite: 0, totalTokens: 25_100 + i * 5_000 },
+			}))] as LhMessage[];
+			const frozenSnapshot = JSON.stringify(snapshot);
+			for (const entrypoint of ["gate", "kick"]) {
+				const outcomes = [];
+				for (const includeReasoning of [undefined, false, true]) {
+					const chat = chatStore.createChat("identical snapshot comparison");
+					chatStore.saveMessages(chat.id, JSON.parse(frozenSnapshot));
+					assert.deepEqual(chatStore.getChat(chat.id)!.messages, snapshot);
+					let calls = 0;
+					const summary = "The learner knows the earlier material.";
+					const deps: CompactionDeps = {
+						...depsOf(chat.id, 150_000), engine: { model } as CompactionDeps["engine"],
+						modelId: `${provider}:${model.id}`, includeReasoning,
+						summarize: async () => {
+							calls++;
+							return { summary, usage: { input: 1_000, output: 100, cacheRead: 0, cacheWrite: 0, totalTokens: 1_100,
+								cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } } };
+						},
+					};
+					const requestModel = deps.engine.model;
+					assert.equal(projectedContextTokens(snapshot, 100, includeReasoning ? requestModel : undefined), 170_100,
+						"the same provider usage triggers both modes; reasoning is already in output");
+					if (entrypoint === "gate") await ensureCompacted(deps, chat.id);
+					else { kickCompaction(() => deps, chat.id); await awaitCompaction(chat.id); }
+					const after = chatStore.getChat(chat.id)!.messages;
+					const marker = activeCompactionOf(after)!;
+					assert.equal(calls, 1);
+					assert.equal(marker.details.tokensBefore, 170_100);
+					assert.equal(marker.details.firstKeptMessageId, includeReasoning ? "response-26" : "response-10");
+					assert.equal(marker.content, `${COMPACTED_HISTORY_HEADER}\n\n${summary}`);
+					assert.deepEqual(after.slice(0, -1), snapshot, "all original history and reasoning stay stored");
+					const retained = toLlmMessages(after).filter((message) => message.role === "assistant");
+					assert.equal(retained.length, includeReasoning ? 4 : 20);
+					const retainedOutput = retained.reduce((sum, message) => sum + message.usage.output, 0);
+					assert.equal(retainedOutput, includeReasoning ? 20_000 : 100_000);
+					const projectionProxy = projectedContextTokens(after, 100, requestModel);
+					assert.equal(projectionProxy, projectedContextTokens(after, 100) + retainedOutput - retained.length * 1_000,
+						"a common output-usage proxy compares the retained tails without claiming provider measurement");
+					assert.equal(measuredContextTokens(after), null, "compaction does not fabricate a new conversation measurement");
+					outcomes.push({ retained: retained.length, retainedOutput, projectionProxy });
+				}
+				assert.deepEqual(outcomes[0], outcomes[1], "absent setting preserves off behavior");
+				assert.equal(outcomes[1]!.projectionProxy - outcomes[2]!.projectionProxy, 80_000);
+				t.diagnostic(`${provider}/${entrypoint}: off=${JSON.stringify(outcomes[1])}; on=${JSON.stringify(outcomes[2])}`);
+			}
+			assert.equal(JSON.stringify(snapshot), frozenSnapshot, "the common source snapshot stays unchanged");
+		}
+	});
 	it("both entrypoints use reasoning-aware cuts and post-marker estimates only when enabled", async () => {
 		const model = { provider: "chatgpt", api: "openai-responses", id: "reasoning-fixture" };
 		for (const entrypoint of ["gate", "kick"]) {

@@ -124,6 +124,8 @@ describe("AgentSection (thin SSR)", () => {
 			assert.ok(toggle.includes('aria-label="Include reasoning in token estimates (OpenAI Responses only)"'));
 			assert.ok(context.includes(">Include reasoning in token estimates (OpenAI Responses only)</span>"));
 			assert.ok(context.includes("Off uses the original text-based estimate."));
+			assert.ok(context.indexOf('data-testid="compaction-row-threshold"') < context.indexOf('data-testid="compaction-row-reasoning"'),
+				"the opt-in sits below the threshold within Context");
 		}
 	});
 	it("renders the three model SLOT rows (slots-only, fix wave: unpicked reads —, no Default option)", () => {
