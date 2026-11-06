@@ -56,6 +56,35 @@ test("all-off startup is nonwriting; only accepted toggles contribute exact teac
   } finally { fs.rmSync(temporary, { recursive: true, force: true }); }
 });
 
+test("legacy settings are read without writes; ink saves preserve toggles and agent instructions", () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "lh-rich-ink-"));
+  try {
+    const file = path.join(directory, "settings.json");
+    const { inkColor: _inkColor, ...legacy } = { ...DEFAULT_SETTINGS, revision: 4, technicalDiagrams: true };
+    const original = JSON.stringify(legacy) + "\n";
+    fs.writeFileSync(file, original);
+    const host = fixture(directory); const dispose = host.activate();
+    assert.equal(parseSettings(host.call("get-settings")).inkColor, "white");
+    assert.equal(fs.readFileSync(file, "utf8"), original, "Reading legacy settings must not rewrite them.");
+    const instructions = [...host.instructions];
+    const next = parseSettings(host.call("set-ink-color", { inkColor: "black" }));
+    assert.deepEqual(next, { ...legacy, revision: 5, inkColor: "black" });
+    assert.deepEqual([...host.instructions], instructions);
+    assert.equal([...host.instructions][0], instructions[0], "Ink changes do not replace agent instructions.");
+    assert.deepEqual(JSON.parse(fs.readFileSync(file, "utf8")), next);
+    assert.deepEqual(host.events, [{ topic: "settings-changed", data: next }]);
+    host.call("set-ink-color", { inkColor: "black" }); assert.equal(host.events.length, 1);
+    assert.throws(() => host.call("set-ink-color", { inkColor: "auto" }));
+    assert.equal(host.events.length, 1);
+    const family = parseSettings(host.call("set-family", { family: "chemicalStructures", enabled: true }));
+    assert.equal(family.inkColor, "black"); assert.equal(family.technicalDiagrams, true);
+    host.controller.abort(); assert.throws(() => host.call("set-ink-color", { inkColor: "white" }));
+    dispose(); assert.equal(host.handlers.size, 0);
+    const restarted = fixture(directory); const off = restarted.activate();
+    assert.equal(parseSettings(restarted.call("get-settings")).inkColor, "black"); off();
+  } finally { fs.rmSync(directory, { recursive: true, force: true }); }
+});
+
 test("malformed/newer settings are refused without overwriting; failed atomic save publishes no accepted state", () => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "lh-rich-invalid-"));
   try {
@@ -68,6 +97,7 @@ test("malformed/newer settings are refused without overwriting; failed atomic sa
     const host = fixture(directory); const dispose = host.activate();
     fs.mkdirSync(file); // rename cannot replace a directory
     assert.throws(() => host.call("set-family", { family: "technicalDiagrams", enabled: true }));
+    assert.throws(() => host.call("set-ink-color", { inkColor: "black" }));
     assert.deepEqual(host.call("get-settings"), DEFAULT_SETTINGS);
     assert.equal(host.instructions.size, 0); assert.equal(host.events.length, 0);
     assert.deepEqual(fs.readdirSync(directory), ["settings.json"]);

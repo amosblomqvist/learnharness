@@ -1,4 +1,5 @@
-import { SVG_LIMIT, checkSvgSize } from "./contract.ts";
+import { SVG_LIMIT, checkSvgSize, type Language } from "./contract.ts";
+import { prepareInk } from "./appearance.ts";
 
 const NS = "http://www.w3.org/2000/svg";
 const ELEMENTS = new Set(["svg", "g", "defs", "path", "rect", "circle", "ellipse", "line", "polyline", "polygon", "text", "tspan", "title", "desc", "clipPath", "mask", "linearGradient", "radialGradient", "stop", "marker", "pattern", "use"]);
@@ -33,7 +34,7 @@ function viewBox(value: string): string | undefined {
  * No HTML, CSS rules, event handlers, animations, external references or arbitrary
  * attribute names survive. This is deliberately stricter than a generic SVG sanitizer.
  */
-export function sanitizeSvg(source: string, label: string): SVGSVGElement {
+export function sanitizeSvg(source: string, label: string, language?: Language): SVGSVGElement {
   checkSvgSize(source);
   if (/<!DOCTYPE|<!ENTITY/i.test(source)) throw new Error("SVG document declarations are not supported.");
   const parsed = new DOMParser().parseFromString(source, "image/svg+xml");
@@ -138,6 +139,9 @@ export function sanitizeSvg(source: string, label: string): SVGSVGElement {
   svg.removeAttribute("height");
   svg.setAttribute("role", "img"); svg.setAttribute("aria-label", label);
   svg.setAttribute("preserveAspectRatio", "xMidYMid meet");
+  // Only plugin-owned appearance declarations are added, after rebuilding the
+  // untrusted tree and before the final use-expanded resource admission check.
+  if (language) prepareInk(svg, language);
   checkReferenceBudget(svg);
   return svg;
 }

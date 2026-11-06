@@ -9,8 +9,8 @@
   overflow-wrap: anywhere;
 }
 .rich-code-blocks--rendered {
-  background: #fff;
-  color: #000;
+  background: transparent;
+  color: var(--rich-code-blocks-black, #fff);
   padding: 12px;
   overflow: auto;
 }
@@ -19,5 +19,4 @@
   max-width: 100%;
   height: auto;
   margin: 0 auto;
-  color: #000;
 }

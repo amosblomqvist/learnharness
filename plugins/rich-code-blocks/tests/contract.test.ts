@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { CACHE_BYTES, CACHE_ENTRIES, DEFAULT_SETTINGS, INSTRUCTIONS, SOURCE_LIMITS, SVG_LIMIT, checkSource, checkSvgSize, parseChange, parseSettings } from "../src/contract.ts";
+import { CACHE_BYTES, CACHE_ENTRIES, DEFAULT_SETTINGS, INSTRUCTIONS, SOURCE_LIMITS, SVG_LIMIT, checkSource, checkSvgSize, parseChange, parseInkChange, parseSettings } from "../src/contract.ts";
 import { RenderCache } from "../src/render.ts";
 
 test("strict versioned settings/change contracts retain false and reject unknown or malformed fields", () => {
@@ -8,7 +8,32 @@ test("strict versioned settings/change contracts retain false and reject unknown
   for (const invalid of [null, [], {}, { ...DEFAULT_SETTINGS, version: 2 }, { ...DEFAULT_SETTINGS, revision: -1 }, { ...DEFAULT_SETTINGS, revision: 0.5 }, { ...DEFAULT_SETTINGS, musicalNotation: "false" }, { ...DEFAULT_SETTINGS, extra: true }]) assert.throws(() => parseSettings(invalid));
   assert.deepEqual(parseChange({ family: "technicalDiagrams", enabled: false }), { family: "technicalDiagrams", enabled: false });
   for (const invalid of [null, {}, { family: "tikz", enabled: true }, { family: "musicalNotation", enabled: 0 }, { family: "musicalNotation", enabled: true, extra: false }]) assert.throws(() => parseChange(invalid));
-  assert.match(INSTRUCTIONS.technicalDiagrams, /circuitikz.*tikz-cd.*pgfplots/);
+});
+
+test("ink settings accept existing v1 files and strictly validate the new choice", () => {
+  const { inkColor: _inkColor, ...legacy } = DEFAULT_SETTINGS;
+  assert.deepEqual(parseSettings(legacy), DEFAULT_SETTINGS);
+  assert.equal(parseSettings({ ...legacy, inkColor: "black" }).inkColor, "black");
+  for (const inkColor of [null, undefined, true, "auto", "White", "", 0]) {
+    assert.throws(() => parseSettings({ ...legacy, inkColor }));
+    assert.throws(() => parseInkChange({ inkColor }));
+  }
+  assert.equal(parseInkChange({ inkColor: "white" }), "white");
+  assert.equal(parseInkChange({ inkColor: "black" }), "black");
+  for (const input of [null, [], {}, "white", { inkColor: "white", enabled: true }]) assert.throws(() => parseInkChange(input));
+});
+
+test("technical-diagram instructions cover the observed TeX authoring failures", () => {
+  const instructions = INSTRUCTIONS.technicalDiagrams;
+  assert.match(instructions, /self-contained TeX with \\begin\{document\} and \\end\{document\}/);
+  assert.match(instructions, /already supplies the standalone document class: never include \\documentclass or \\documentstyle/);
+  assert.match(instructions, /Before \\begin\{document\}, explicitly load all packages/);
+  for (const name of ["tikz", "circuitikz", "tikz-cd", "pgfplots", "amsmath"]) {
+    assert.ok(instructions.includes(`\\usepackage{${name}}`), `Missing explicit package declaration: ${name}`);
+  }
+  assert.match(instructions, /\\text\{\.\.\.\} or aligned equations, also load \\usepackage\{amsmath\}/);
+  assert.match(instructions, /\\usetikzlibrary in that same preamble/);
+  assert.match(instructions, /available, not automatically loaded; do not rely on declarations from another block/);
 });
 
 test("UTF-8 source/output bounds are enforced without trimming valid payloads", () => {

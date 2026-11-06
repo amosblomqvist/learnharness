@@ -16,6 +16,24 @@ code fences. Prompt changes apply to future turns, not an already-running model
 request. There are no subarea toggles, per-family prompt editors, simulations,
 interactive circuits, playback, raw-SVG input or custom drawing toolbars.
 
+## Transparent appearance
+
+Rendered SVGs have no plugin background: the transcript shows through. The shared
+**Ink color** dropdown offers **White** (default, for dark backgrounds) and
+**Black** (for light backgrounds). It applies to neutral text and linework in all
+three families, including the chemistry renderer's neutral carbon/hydrogen ink.
+Colored atoms and explicitly colored diagram elements remain colored. Intentional
+white fills, authored gradients/patterns and functional masks are preserved, not
+blanket-erased or inverted. A background deliberately drawn inside a TikZ diagram
+is still part of that diagram; the plugin does not guess which shapes to delete.
+No blend modes or inversion filters are used.
+
+Changing ink updates mounted SVGs immediately without replacing them, compiling
+TeX again, or clearing the compiled SVG cache. The setting synchronizes between
+windows like the format toggles. Existing v1 settings without `inkColor` use White
+without rewriting the saved file on startup; the next accepted change persists
+the complete settings. Existing family choices remain unchanged.
+
 ## Source/build/install layout
 
 This repository's authoring project is **`plugins/rich-code-blocks/`**. Build here:
@@ -125,9 +143,14 @@ Analytic function plots:
 ```
 ````
 
-The bundled engine supplies a standalone document class; do not add another
-`\documentclass`. Load needed packages and TikZ libraries in the preamble and
-include `\begin{document}` / `\end{document}`. Upstream also includes supporting
+The bundled engine supplies a standalone document class; do not add
+`\documentclass` or `\documentstyle`. Each block must be self-contained: explicitly
+load its needed packages and TikZ libraries before `\begin{document}`, then close
+with `\end{document}`. Bundled packages are available, not automatically loaded;
+declarations in another block do not carry over. In particular, load
+`\usepackage{amsmath}` for math labels using `\text{...}` or aligned equations.
+These requirements are also included in the teacher/practice system instructions
+when technical diagrams are enabled. Upstream also includes supporting
 math/array/3D/chemfig packages, but those are not additional advertised families.
 No raw SVG/HTML/JS, shell, remote resource, uploaded data-file or audio input path
 is provided by this plugin.
@@ -159,11 +182,13 @@ is provided by this plugin.
   mounting, preventing small acyclic reference-amplification payloads. Text/font/
   style admission is restricted; only bundled TeX fonts or ordinary system families
   are selected. Never insert raw model HTML.
-- Rendered drawings use a white background for black notation in either app theme,
-  preserving aspect ratio and fitting available width. No raw generated tree or
-  interaction listener is mounted. Abort/disposal fences late results.
+- Rendered drawings are transparent with selectable White/Black neutral ink,
+  preserving aspect ratio and fitting available width. Plugin-owned paint variables
+  are applied only after sanitization and before the final expanded-output budget
+  check. Mask luminance and intentional colors/fills are retained. No raw generated
+  tree or interaction listener is mounted. Abort/disposal fences late results.
 - Settings are versioned, validated and atomically written in plugin-owned
-  `data/settings.json`. Only a changed family is sent to the backend; unrelated
+  `data/settings.json`. Only a changed family or ink choice is sent to the backend; unrelated
   concurrent-window changes are retained. Accepted revisions synchronize live and
   reconnect reads cannot overwrite a newer accepted revision. Malformed/newer
   settings fail explicitly without rewriting the file. Disabling never deletes it.
@@ -183,7 +208,7 @@ See `THIRD-PARTY.md` for pinned libraries and explicit static-browser adaptation
 
 ### Focused local checkpoint
 
-Strict plugin TypeScript checking, **12 unit tests**, direct `dist/` build and the
+Strict plugin TypeScript checking, **16 unit tests**, direct `dist/` build and the
 real-Chrome disposable fixture passed. All six pictured examples rendered: SMILES,
 ABC, basic TikZ/free-body geometry, CircuitikZ, tikz-cd and a PGFPlots function.
 On this machine the small examples measured roughly **14 ms / 18 ms / 77–555 ms**
@@ -198,7 +223,11 @@ labels, TeX ampersand/less-than labels, and actual TeX-authored script/image and
 reference-amplification attempts. The amplified reference graph was refused before
 mounting. SVG root/self cycles were also refused. Four bundled font files actually
 loaded, and the run had **zero page errors or off-origin requests**. Both dark/light
-fixture screenshots were captured; the dark screenshot was visually inspected.
+fixture screenshots were captured and visually inspected with White ink on dark
+and Black ink on light. Browser checks also proved transparent backgrounds for all
+six examples, stable mounted SVG identities and no TeX work/cache eviction on ink
+changes, preserved atom/TikZ colors and white fills, and actual raster alpha for
+shared-definition and gradient masks under both ink choices.
 
 The build also preserves complete GPLv3 and Apache-2.0 texts and the relevant
 PyDvi/ColorBrewer notices alongside the other upstream licenses. This checkpoint

@@ -1,7 +1,8 @@
 import type { PluginCodeBlockProps } from "learnharness-plugin-api";
-import { CACHE_BYTES, CACHE_ENTRIES, LABELS, checkSource, checkSvgSize, type Language } from "./contract.ts";
+import { CACHE_BYTES, CACHE_ENTRIES, LABELS, checkSource, checkSvgSize, type InkColor, type Language } from "./contract.ts";
 import { sanitizeSvg } from "./svg.ts";
 import { TexRunner } from "./tex-runner.ts";
+import { setInkColor } from "./appearance.ts";
 
 export class RenderCache {
   private entries = new Map<string, { svg: string; bytes: number }>();
@@ -69,6 +70,13 @@ export class RenderService {
   private tex?: TexRunner;
   private disposed = false;
   private readonly lifetimes = new Set<() => void>();
+  private readonly roots = new Set<HTMLElement>();
+  private inkColor: InkColor = "white";
+
+  setInkColor(inkColor: InkColor): void {
+    this.inkColor = inkColor;
+    for (const root of this.roots) setInkColor(root, inkColor);
+  }
 
   stopTex(): void { this.tex?.dispose(); this.tex = undefined; }
   clearCache(): void { this.cache.clear(); }
@@ -82,13 +90,14 @@ export class RenderService {
     const code = document.createElement("code");
     code.textContent = block.source; raw.append(code); root.append(raw);
     const dispose = () => {
-      controller.abort(); this.lifetimes.delete(dispose);
+      controller.abort(); this.lifetimes.delete(dispose); this.roots.delete(root);
       block.signal.removeEventListener("abort", abort); root.remove();
     };
     if (this.disposed || block.signal.aborted) { dispose(); return dispose; }
-    this.lifetimes.add(dispose);
+    this.lifetimes.add(dispose); this.roots.add(root);
+    setInkColor(root, this.inkColor);
     block.signal.addEventListener("abort", abort, { once: true });
-    controller.signal.addEventListener("abort", () => root.remove(), { once: true });
+    controller.signal.addEventListener("abort", () => { this.roots.delete(root); root.remove(); }, { once: true });
     container.append(root);
     if (block.incomplete) return dispose;
     try {
@@ -107,7 +116,7 @@ export class RenderService {
       if (this.disposed || controller.signal.aborted) { dispose(); return dispose; }
       checkSvgSize(output);
       const label = language === "smiles" ? LABELS.chemicalStructures : language === "abc" ? LABELS.musicalNotation : LABELS.technicalDiagrams;
-      const safe = sanitizeSvg(output, label);
+      const safe = sanitizeSvg(output, label, language);
       this.cache.set(key, output);
       root.classList.add("rich-code-blocks--rendered");
       root.replaceChildren(safe);
