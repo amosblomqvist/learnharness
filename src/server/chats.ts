@@ -8,6 +8,7 @@ import { stores } from "./stores.ts";
 import { isTurnRunning } from "./turn-liveness.ts";
 import { clearTurnFailure } from "./turn-runs.ts";
 import { discardChatDeliveries } from "./jobs.ts";
+import { sideChats } from "./side-chat.ts";
 
 /**
  * Server-side chat entries for the transport layer (app/api/chats*,
@@ -23,6 +24,16 @@ import { discardChatDeliveries } from "./jobs.ts";
 
 export const { createChat, getChat, listChats } = stores.chatStore;
 export { titleFromPrompt };
+
+export function saveChatNotes(chatId: string, text: string): boolean {
+	return stores.chatStore.saveNotes(chatId, text);
+}
+
+/** The saved notes ("" when none); null when the chat is unknown. */
+export function readChatNotes(chatId: string): string | null {
+	const chat = stores.chatStore.getChat(chatId);
+	return chat ? (chat.notes ?? "") : null;
+}
 export type { ChatDeleteMode, ChatDeletionStats } from "../core/graph-deletion.ts";
 
 /** How long the wind-down wait may take before the caller gets a retryable
@@ -152,6 +163,7 @@ function finishChatRecordDeletion(chatId: string): number {
 	if (stores.chatStore.deleteChat(chatId)) {
 		discardChatDeliveries(chatId);
 		clearTurnFailure(chatId);
+		sideChats.stopAll(chatId); // a running side answer has nowhere left to land
 	}
 	return jobsRemoved;
 }

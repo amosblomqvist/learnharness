@@ -55,6 +55,18 @@ Disconnecting a browser detaches a view, not the agent. Explicit abort is separa
 
 Question drafts survive optimistic unmount in memory. Uncertain submissions reconcile the saved record and running state before resending, scoped to the same question occurrence. Provider-response retry is explicit: it preserves failed attempts on disk while omitting the eligible failed tail from temporary model context. It is not mount-time replay or automatic retry of arbitrary failures.
 
+### Notes
+
+Each session has one learner notes page, stored as `ChatRecord.notes`: Markdown with `$…$`/`$$…$$` math, where `>` lines are the tutor's words. The field is absent when the text is empty. [`notes-state.tsx`](../components/notes-state.tsx) debounces edits into `PUT /api/chats/:id/notes` and flushes on `pagehide`. On mount it re-reads `GET /api/chats/:id/notes`, because Back/Forward can replay a stale page payload; local edits win. A save does not change `updatedAt` and emits no server event. [`notes-panel.tsx`](../components/notes-panel.tsx) sits right of the transcript, toggled by the top bar's Notes chip. It stays mounted while folded, so the CodeMirror [editor](../components/notes-editor.tsx) keeps its undo history; math renders with KaTeX except where the selection touches it. Notes never enter `messages`, agent context, extraction, coverage, or compaction.
+
+### Side questions
+
+A learner can ask about any paragraph-level block of teacher prose, in teaching and practice sessions: a hover question-mark icon in the block's corner, or **Ask about this** on a text selection. Each Ask opens a new thread in an inline window right after that block; the window collapses to a one-line bar in place, and a block's windows stack in opening order. Blocks are Streamdown's own markdown split, reached through its `BlockComponent` seam for teacher prose only ([`side-chat.tsx`](../components/side-chat.tsx)). An anchor is `(text-part id, block index)`, stable because settled prose never changes.
+
+A side answer is **not an application turn**. [`server/side-chat.ts`](../src/server/side-chat.ts) runs one tool-less streamed call on the session's own model, with a turn's readiness gates (configured model, provider key) but no turn liveness, so it works while a check is pending, a problem is active, or a turn runs. Threads live in `ChatRecord.sideChats`, written through the per-field `updateSideChats`, never in `messages`: the teaching/practice agents, extraction, coverage, and compaction never see them. The side model receives the lesson as a quoted document in its first user turn ([`core/side-chat.ts`](../src/core/side-chat.ts), honoring the active compaction cut). The open check and the active problem appear without their answer key, explanation, committed answer, or solution; answered checks and concluded problems appear in full. The run is server-owned: a closed view detaches and the answer still saves; Stop keeps the partial answer. Usage lands in `turns` keyed to the side answer's id, so the cost meter counts it and the context meter, which reads messages, does not. Changes announce on `side-chats-changed`; routes live under `app/api/chats/[id]/side-chats/`.
+
+A **note review** is a side thread with a `review` marker: the highlighted notes text and its offset when Review was clicked. It opens only as a new thread at a prose anchor and otherwise reuses everything above: storage, service, routes, live updates, the spoiler-safe lesson document, isolation from the tutor. Its first user turn carries the lesson, the whole notes page and the highlighted part ([`core/note-review.ts`](../src/core/note-review.ts)); later turns are the learner's text alone. The service picks the instructions per thread: a review gets [`note-review/00-base.md`](../src/agent/prompts/note-review/00-base.md) plus the side questions' shared appendix. The notes are read only for a review's model call; they still never reach `messages` or the tutor. **Rewrite note** is applied client-side: `POST /api/chats/:id/side-chats/:threadId/rewrite` only returns the smallest fix, and the browser puts it in place of the highlighted text as one undoable editor edit.
+
 ## Teaching and practice
 
 [`teacher-agent.ts`](../src/agent/teacher-agent.ts) and the [tool registry](../src/agent/tools.ts) compose different agents over the same teaching history:
@@ -134,7 +146,7 @@ Extraction is the construction writer, not the only mutation: source/session/nod
 
 | Data | Files |
 | --- | --- |
-| Conversations, plans, usage, image snapshots | `chats/*.json` |
+| Conversations, plans, usage, image snapshots, side questions, notes | `chats/*.json` |
 | Worker computation and delivery obligations | `jobs/*.json` |
 | Propositions, chains, checkpoints, coverage | `graph/{nodes,chains,sessions,coverage}.jsonl` |
 | Sources, organization, positions, render preferences | JSON maps under `graph/` |

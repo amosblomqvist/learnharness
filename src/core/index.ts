@@ -18,6 +18,7 @@
 export * from "./contracts.ts";
 export { embedLearnerImage } from "./learner-image-svg.ts";
 export * from "./ports.ts";
+export * from "./notes.ts";
 export * from "./chains.ts";
 export * from "./source-organization.ts";
 export * from "./source-selection.ts";
@@ -89,3 +90,9 @@ export * from "./coverage.ts";
 // ONE session→markdown formatter — the extractor's view and the user-facing
 // export share it. Pure, browser-safe.
 export * from "./session-markdown.ts";
+// side-chat.ts (inline side questions, 2026-11-02): ask-input validation,
+// thread lookup and the side model's lesson document. Pure, browser-safe.
+export * from "./side-chat.ts";
+// note-review.ts: a side thread about the learner's notes (review marker,
+// the reviewer's opening context). Pure, browser-safe.
+export * from "./note-review.ts";
