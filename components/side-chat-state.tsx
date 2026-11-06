@@ -23,8 +23,9 @@
  */
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useSyncExternalStore, type ReactNode } from "react";
-import type { SideChatAnchor, SideChatThread } from "@/src/core";
+import { SIDE_REVIEW_REQUEST, type NoteReviewTarget, type SideChatAnchor, type SideChatThread } from "@/src/core";
 import { useServerEvent, useServerResync } from "@/components/server-events";
+import type { RewriteUndo } from "@/components/notes-state";
 
 /** One prose block: `${partId}#${blockIndex}` — the windows stack after it. */
 export function sideBlockKey(partId: string, blockIndex: number): string {
@@ -43,6 +44,8 @@ export interface SideWindowView {
 	anchor: SideChatAnchor;
 	/** The saved thread — absent for a draft window (never asked). */
 	thread?: SideChatThread;
+	/** Set for a note review window. */
+	review?: NoteReviewTarget;
 	open: boolean;
 	/** Quotes waiting to ride the next question. */
 	quotes: readonly string[];
@@ -60,6 +63,8 @@ export interface SideCanonical {
 	threads: readonly SideChatThread[];
 	/** draftId → anchor, in opening order. */
 	drafts: ReadonlyMap<string, SideChatAnchor>;
+	/** draftId → the note review it will open. */
+	draftReviews: ReadonlyMap<string, NoteReviewTarget>;
 	/** window key → quotes for the next question. */
 	quotes: ReadonlyMap<string, readonly string[]>;
 	/** threadId → answer text so far. */
@@ -75,6 +80,7 @@ export function emptySideCanonical(): SideCanonical {
 	return {
 		threads: [],
 		drafts: new Map(),
+		draftReviews: new Map(),
 		quotes: new Map(),
 		answering: new Map(),
 		sending: new Set(),
@@ -91,6 +97,7 @@ function sameView(a: SideWindowView, b: SideWindowView): boolean {
 		a.renderKey === b.renderKey &&
 		a.anchor === b.anchor &&
 		a.thread === b.thread &&
+		a.review === b.review &&
 		a.open === b.open &&
 		a.quotes === b.quotes &&
 		a.answering === b.answering &&
@@ -125,6 +132,7 @@ export function deriveSideWindows(
 			blockKey: sideBlockKey(thread.anchor.partId, thread.anchor.blockIndex),
 			anchor: thread.anchor,
 			thread,
+			review: thread.review,
 			open: thread.open,
 			quotes: c.quotes.get(thread.id) ?? EMPTY_QUOTES,
 			answering: live !== undefined,
@@ -139,6 +147,7 @@ export function deriveSideWindows(
 			renderKey: key,
 			blockKey: sideBlockKey(anchor.partId, anchor.blockIndex),
 			anchor,
+			review: c.draftReviews.get(key),
 			open: true,
 			quotes: c.quotes.get(key) ?? EMPTY_QUOTES,
 			answering: false,
@@ -169,6 +178,7 @@ type StreamEvent =
 	| { type: "error"; error: string };
 
 let draftSeq = 0;
+const newDraftKey = () => `draft_${Date.now().toString(36)}_${(draftSeq++).toString(36)}`;
 
 class SideChatStore {
 	private canonical: SideCanonical = emptySideCanonical();
@@ -180,6 +190,9 @@ class SideChatStore {
 	readonly composerText = new Map<string, string>();
 	/** Rendered prose blocks, for the selection popover's anchor lookup. */
 	readonly blocks = new Map<string, SideChatAnchor>();
+	/** Rewrite state by thread id: where the highlight is now, and the last
+	 *  rewrite's undo. Outlives the window's Rewrite button (fold, follow-up). */
+	readonly rewrites = new Map<string, { current: NoteReviewTarget; undo: RewriteUndo | null }>();
 
 	constructor(readonly chatId: string) {}
 
@@ -230,6 +243,13 @@ class SideChatStore {
 		return this.pendingFocus.delete(key);
 	}
 
+	/** Review windows to scroll into view once, when they mount. */
+	private pendingReveal = new Set<string>();
+
+	consumeReveal(key: string): boolean {
+		return this.pendingReveal.delete(key);
+	}
+
 	/** Adopt the server list (refetch on mount, notification, resync). */
 	async refresh(): Promise<void> {
 		let body: { threads?: SideChatThread[]; answering?: Record<string, string> };
@@ -255,7 +275,7 @@ class SideChatStore {
 	/** Open a NEW window after the anchor's block (every Ask is its own
 	 *  window), optionally with a quote attached to its first question. */
 	openAt(anchor: SideChatAnchor, quote?: string): string {
-		const key = `draft_${Date.now().toString(36)}_${(draftSeq++).toString(36)}`;
+		const key = newDraftKey();
 		const drafts = new Map(this.canonical.drafts);
 		drafts.set(key, anchor);
 		const patch: Partial<SideCanonical> = { drafts };
@@ -270,6 +290,40 @@ class SideChatStore {
 		return key;
 	}
 
+	/** Open a review window at `anchor` and send the review request (no
+	 *  quotes: the highlight travels in `review`). It takes no focus. */
+	async openReview(anchor: SideChatAnchor, review: NoteReviewTarget): Promise<boolean> {
+		const key = newDraftKey();
+		const drafts = new Map(this.canonical.drafts);
+		drafts.set(key, anchor);
+		const draftReviews = new Map(this.canonical.draftReviews);
+		draftReviews.set(key, review);
+		this.composerText.set(key, SIDE_REVIEW_REQUEST);
+		this.pendingReveal.add(key);
+		this.set({ drafts, draftReviews });
+		return this.ask(key);
+	}
+
+	/** The last side-enabled prose block in DOM order (where a review opens). */
+	lastProseAnchor(root: ParentNode = document): SideChatAnchor | null {
+		const blocks = root.querySelectorAll("[data-side-enabled][data-side-block]");
+		const last = blocks[blocks.length - 1];
+		return (last && this.blocks.get(last.getAttribute("data-side-block") ?? "")) ?? null;
+	}
+
+	/** The smallest fix of a review's highlight; the caller applies it. */
+	async rewrite(key: string): Promise<{ replacement: string } | { error: string }> {
+		let res: Response;
+		try {
+			res = await fetch(`${this.base()}/${encodeURIComponent(key)}/rewrite`, { method: "POST" });
+		} catch {
+			return { error: "Could not reach the app server." };
+		}
+		const body = (await res.json().catch(() => null)) as { replacement?: unknown; error?: unknown } | null;
+		if (res.ok && typeof body?.replacement === "string") return { replacement: body.replacement };
+		return { error: typeof body?.error === "string" ? body.error : `The rewrite failed (${res.status}).` };
+	}
+
 	removeQuote(key: string, index: number): void {
 		const current = this.canonical.quotes.get(key) ?? EMPTY_QUOTES;
 		const quotes = new Map(this.canonical.quotes);
@@ -280,13 +334,16 @@ class SideChatStore {
 	private discardDraft(key: string): void {
 		const drafts = new Map(this.canonical.drafts);
 		drafts.delete(key);
+		const draftReviews = new Map(this.canonical.draftReviews);
+		draftReviews.delete(key);
 		const quotes = new Map(this.canonical.quotes);
 		quotes.delete(key);
 		const errors = new Map(this.canonical.errors);
 		errors.delete(key);
 		this.composerText.delete(key);
 		this.pendingFocus.delete(key);
-		this.set({ drafts, quotes, errors });
+		this.pendingReveal.delete(key);
+		this.set({ drafts, draftReviews, quotes, errors });
 	}
 
 	setOpen(key: string, open: boolean): void {
@@ -313,6 +370,7 @@ class SideChatStore {
 		const quotes = new Map(this.canonical.quotes);
 		quotes.delete(key);
 		this.composerText.delete(key);
+		this.rewrites.delete(thread.id);
 		this.set({ threads: this.canonical.threads.filter((t) => t !== thread), quotes });
 		try {
 			await fetch(`${this.base()}/${encodeURIComponent(thread.id)}`, { method: "DELETE" });
@@ -340,11 +398,12 @@ class SideChatStore {
 		const quotes = this.canonical.quotes.get(key) ?? EMPTY_QUOTES;
 		if (!opts.retry && !text) return false;
 		if (opts.retry && !thread) return false;
+		const review = this.canonical.draftReviews.get(key);
 		const body = opts.retry
 			? { threadId: thread!.id, retry: true }
 			: thread
 				? { threadId: thread.id, text, quotes }
-				: { anchor, text, quotes };
+				: { anchor, text, quotes, ...(review ? { review } : {}) };
 		const sending = new Set(this.canonical.sending);
 		sending.add(key);
 		this.set({ sending });
@@ -391,6 +450,8 @@ class SideChatStore {
 	private promoteDraft(draftKey: string, thread: SideChatThread): void {
 		const drafts = new Map(this.canonical.drafts);
 		drafts.delete(draftKey);
+		const draftReviews = new Map(this.canonical.draftReviews);
+		draftReviews.delete(draftKey);
 		const aliases = new Map(this.canonical.aliases);
 		aliases.set(thread.id, draftKey);
 		const sending = new Set(this.canonical.sending);
@@ -398,6 +459,7 @@ class SideChatStore {
 		const others = this.canonical.threads.filter((t) => t.id !== thread.id);
 		this.set({
 			drafts,
+			draftReviews,
 			aliases,
 			sending,
 			threads: [...others, thread].sort((a, b) => a.createdAt.localeCompare(b.createdAt)),

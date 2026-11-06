@@ -74,7 +74,7 @@ export function NotesPanel() {
 						<PanelRightCloseIcon className="size-4" />
 					</Button>
 				</div>
-				<div className="min-h-0 flex-1">
+				<div className="relative min-h-0 flex-1">
 					<NotesEditor controller={controller} />
 				</div>
 			</div>

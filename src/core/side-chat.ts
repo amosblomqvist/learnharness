@@ -23,8 +23,9 @@
  */
 
 import type { AssistantMessage, ToolResultMessage } from "@earendil-works/pi-ai";
-import type { SideChatAnchor, SideChatMessage, SideChatThread } from "./contracts/chat.ts";
+import type { NoteReviewTarget, SideChatAnchor, SideChatMessage, SideChatThread } from "./contracts/chat.ts";
 import type { LhMarkerMessage, LhMessage } from "./native-messages.ts";
+import { noteReviewOpening, parseNoteReviewTarget } from "./note-review.ts";
 import {
 	activeProblemOf,
 	failedOutputCallIds,
@@ -63,6 +64,8 @@ export interface SideAskInput {
 	text: string;
 	quotes: string[];
 	retry?: boolean;
+	/** Opens a note review (anchor only). */
+	review?: NoteReviewTarget;
 }
 
 const ID_RE = /^[A-Za-z0-9_-]{1,128}$/;
@@ -94,6 +97,7 @@ export function parseSideAnchor(raw: unknown): SideChatAnchor {
 export function parseSideAskInput(raw: unknown): SideAskInput {
 	if (!raw || typeof raw !== "object") throw new SideChatInputError("body must be an object");
 	const body = raw as Record<string, unknown>;
+	if (body.review !== undefined && body.threadId !== undefined) throw new SideChatInputError("review is only valid when opening a thread");
 	if (body.retry === true) {
 		if (typeof body.threadId !== "string" || !ID_RE.test(body.threadId)) throw new SideChatInputError("retry needs a valid threadId");
 		return { threadId: body.threadId, text: "", quotes: [], retry: true };
@@ -113,7 +117,21 @@ export function parseSideAskInput(raw: unknown): SideAskInput {
 		return { threadId, text, quotes: quotes.map((q) => clip(q, SIDE_QUOTE_MAX_CHARS)) };
 	}
 	if (body.anchor === undefined) throw new SideChatInputError("either threadId or anchor is required");
-	return { anchor: parseSideAnchor(body.anchor), text, quotes: quotes.map((q) => clip(q, SIDE_QUOTE_MAX_CHARS)) };
+	return {
+		anchor: parseSideAnchor(body.anchor),
+		text,
+		quotes: quotes.map((q) => clip(q, SIDE_QUOTE_MAX_CHARS)),
+		...(body.review !== undefined ? { review: parseReview(body.review) } : {}),
+	};
+}
+
+/** note-review.ts can't import SideChatInputError (an import cycle), so its errors are mapped here. */
+function parseReview(raw: unknown): NoteReviewTarget {
+	try {
+		return parseNoteReviewTarget(raw);
+	} catch (err) {
+		throw new SideChatInputError(err instanceof Error ? err.message : String(err));
+	}
 }
 
 /** Parse the window-state body ({open: boolean}). */
@@ -129,8 +147,8 @@ export function newSideThreadId(): string {
 	return `side_${Date.now().toString(36)}_${crypto.randomUUID().slice(0, 8)}`;
 }
 
-export function newSideThread(anchor: SideChatAnchor, at = new Date().toISOString()): SideChatThread {
-	return { id: newSideThreadId(), anchor, open: true, createdAt: at, messages: [] };
+export function newSideThread(anchor: SideChatAnchor, at = new Date().toISOString(), review?: NoteReviewTarget): SideChatThread {
+	return { id: newSideThreadId(), anchor, ...(review ? { review } : {}), open: true, createdAt: at, messages: [] };
 }
 
 export function newSideQuestion(text: string, quotes: readonly string[], at = new Date().toISOString()): SideChatMessage {
@@ -327,11 +345,16 @@ function quoteBlocks(quotes: readonly string[] | undefined): string {
  * message. The lesson document and the anchor passage ride the first
  * user turn; earlier answers replay as assistant turns (a failed or
  * stopped answer keeps its partial text plus a note, so roles alternate).
+ * A note review's first turn carries the notes page and the highlight
+ * instead of the passage (noteReviewOpening); `notes` is read only then.
  */
-export function sideChatModelTurns(thread: SideChatThread, lessonDocument: string): SideModelTurn[] {
+export function sideChatModelTurns(thread: SideChatThread, lessonDocument: string, notes = ""): SideModelTurn[] {
 	const turns: SideModelTurn[] = [];
 	thread.messages.forEach((message, i) => {
-		if (message.role === "user") {
+		if (message.role === "user" && thread.review) {
+			const learner = `Learner: ${message.text}`;
+			turns.push({ role: "user", text: i === 0 ? `${noteReviewOpening(thread.review, lessonDocument, notes)}\n\n${learner}` : learner });
+		} else if (message.role === "user") {
 			const parts: string[] = [];
 			if (i === 0) {
 				parts.push(

@@ -160,11 +160,22 @@ export interface SideChatMessage {
 	error?: string;
 }
 
+/** The part of the notes page a note review is about, as it was when
+ *  Review was clicked. */
+export interface NoteReviewTarget {
+	/** The highlighted notes text. */
+	highlight: string;
+	/** Its character offset in the notes page. */
+	from: number;
+}
+
 /** One side thread = one inline window. A block may carry several,
  *  stacked in creation order. */
 export interface SideChatThread {
 	id: string;
 	anchor: SideChatAnchor;
+	/** Present on a note review (a side thread about the learner's notes). */
+	review?: NoteReviewTarget;
 	/** Window state (open window vs. the one-line closed bar). */
 	open: boolean;
 	createdAt: string;

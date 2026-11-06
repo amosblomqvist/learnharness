@@ -21,12 +21,12 @@ import type { SideModelTurn } from "../core/side-chat.ts";
 import type { PiEngine } from "./models.ts";
 import { readPromptOverride } from "./prompt-segments.ts";
 
-const PROMPTS_DIR = path.join(PATHS.root, "src", "agent", "prompts");
-const SIDE_BASE = path.join(PROMPTS_DIR, "side-chat", "00-base.md");
+export const PROMPTS_DIR = path.join(PATHS.root, "src", "agent", "prompts");
+export const SIDE_CHAT_BASE = "side-chat/00-base.md";
 /** The shared appendix, in composition order (keys = override paths). */
 const SIDE_SHARED_FRAGMENTS = ["shared/10-voice.md", "shared/15-accuracy.md", "shared/40-formatting.md"];
 
-function readSource(file: string): string {
+export function readSource(file: string): string {
 	try {
 		return fs.readFileSync(file, "utf-8");
 	} catch {
@@ -36,8 +36,8 @@ function readSource(file: string): string {
 
 /** The side model's system prompt, composed fresh per call (an override
  *  switched on between questions lands on the next one). */
-export function composeSideChatInstructions(switches: Record<string, boolean> = {}): string {
-	const segments = [readSource(SIDE_BASE)];
+export function composeSideChatInstructions(switches: Record<string, boolean> = {}, base = SIDE_CHAT_BASE): string {
+	const segments = [readSource(path.join(PROMPTS_DIR, ...base.split("/")))];
 	for (const key of SIDE_SHARED_FRAGMENTS) {
 		const override = switches[key] === true ? readPromptOverride(key) : null;
 		segments.push(override ?? readSource(path.join(PROMPTS_DIR, ...key.split("/"))));
@@ -57,6 +57,8 @@ export interface SideAnswerResult {
 	outcome: "done" | "aborted" | "error";
 	/** The provider's failure text (outcome "error"). */
 	errorMessage?: string;
+	/** Why a finished call stopped ("length": cut off at the output limit). */
+	stopReason?: AssistantMessage["stopReason"];
 }
 
 function textOf(message: AssistantMessage): string {
@@ -107,7 +109,7 @@ export async function streamSideAnswer(opts: {
 					opts.onText?.(text);
 				}
 			} else if (event.type === "done") {
-				return { text: textOf(event.message) || text, usage: event.message.usage, outcome: "done" };
+				return { text: textOf(event.message) || text, usage: event.message.usage, outcome: "done", stopReason: event.message.stopReason };
 			} else if (event.type === "error") {
 				const partial = textOf(event.error) || text;
 				if (event.reason === "aborted") return { text: partial, usage: event.error.usage, outcome: "aborted" };

@@ -33,7 +33,7 @@ globalThis.fetch = (async (url: string, init: RequestInit) => {
 
 function resetSpy() {
 	const resets: string[] = [];
-	const port = { append() {}, reset: (t: string) => void resets.push(t) };
+	const port = { replace() {}, append() {}, reset: (t: string) => void resets.push(t) };
 	return { port, resets };
 }
 
@@ -207,7 +207,7 @@ describe("NotesController", () => {
 	it("appendQuote with an editor attached delegates to the port; blank quotes do nothing", () => {
 		const c = new NotesController("c1", "mine", { saveDelayMs: 60_000, storage: memoryStorage() });
 		const blocks: string[] = [];
-		c.attach({ append: (b) => void blocks.push(b), reset() {} });
+		c.attach({ replace() {}, append: (b) => void blocks.push(b), reset() {} });
 		c.appendQuote("  \n ");
 		assert.deepEqual(blocks, []);
 		assert.equal(c.getSnapshot().open, false);
@@ -215,6 +215,48 @@ describe("NotesController", () => {
 		assert.deepEqual(blocks, ["> a\n> b"]);
 		assert.equal(c.getSnapshot().open, true);
 		assert.equal(c.text(), "mine");
+		c.dispose();
+	});
+	it("replaceHighlight without an editor edits the nearest occurrence and saves it", async () => {
+		const c = new NotesController("c1", "x ok? y ok? z", { saveDelayMs: 0, storage: memoryStorage() });
+		const undo = c.replaceHighlight("ok?", 7, "fine");
+		assert.deepEqual(undo, { from: 8, before: "ok?", after: "fine" });
+		assert.equal(c.text(), "x ok? y fine z");
+		await c.flush();
+		assert.equal(JSON.parse(calls.at(-1)!.body).text, "x ok? y fine z");
+		c.onEdit("typed first x ok? y fine z");
+		assert.equal(c.undoRewrite(undo!), true, "found again after text moved");
+		assert.equal(c.text(), "typed first x ok? y ok? z");
+		assert.equal(c.undoRewrite(undo!), false, "the replacement is gone");
+		c.dispose();
+	});
+	it("undoRewrite after the editor already undid it changes nothing", () => {
+		const c = new NotesController("c1", "x ok? y fine z", { saveDelayMs: 60_000, storage: memoryStorage() });
+		const undo = c.replaceHighlight("ok?", 0, "fine")!;
+		assert.equal(c.text(), "x fine y fine z");
+		c.onEdit("x ok? y fine z"); // Cmd+Z in the editor
+		assert.equal(c.undoRewrite(undo), true);
+		assert.equal(c.text(), "x ok? y fine z", "the other copy of the replacement is untouched");
+		c.dispose();
+	});
+	it("undoRewrite of a rewrite that extends the highlight still restores it", () => {
+		const c = new NotesController("c1", "A fixed? end", { saveDelayMs: 60_000, storage: memoryStorage() });
+		const grow = c.replaceHighlight("A fixed?", 0, "A fixed? No, A moves")!;
+		assert.equal(c.undoRewrite(grow), true);
+		assert.equal(c.text(), "A fixed? end");
+		const shrink = c.replaceHighlight("A fixed? end", 0, "A fixed?")!;
+		c.onEdit("A fixed? end"); // Cmd+Z in the editor
+		assert.equal(c.undoRewrite(shrink), true);
+		assert.equal(c.text(), "A fixed? end");
+		c.dispose();
+	});
+	it("replaceHighlight with an editor attached goes through the port", () => {
+		const c = new NotesController("c1", "keep A? keep", { saveDelayMs: 60_000, storage: memoryStorage() });
+		const edits: [number, number, string][] = [];
+		c.attach({ replace: (from, to, insert) => void edits.push([from, to, insert]), append() {}, reset() {} });
+		assert.deepEqual(c.replaceHighlight("A?", 0, "A moves"), { from: 5, before: "A?", after: "A moves" });
+		assert.deepEqual(edits, [[5, 7, "A moves"]]);
+		assert.equal(c.text(), "keep A? keep", "the editor reports the edit back");
 		c.dispose();
 	});
 });

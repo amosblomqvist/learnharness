@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import katex from "katex";
 import { defaultKeymap, history, historyKeymap, simplifySelection } from "@codemirror/commands";
 import { HighlightStyle, syntaxHighlighting, syntaxTree } from "@codemirror/language";
@@ -11,6 +11,7 @@ import { Decoration, EditorView, WidgetType, keymap, placeholder, type Decoratio
 import { appendBlockText } from "@/src/core";
 import { mathRanges, quoteLineStarts } from "@/components/notes-markdown";
 import type { NotesController, NotesEditorPort } from "@/components/notes-state";
+import { useSideChatStore } from "@/components/side-chat-state";
 
 class MathWidget extends WidgetType {
 	constructor(
@@ -106,10 +107,39 @@ const notesHighlight = HighlightStyle.define([
 	{ tag: tags.link, textDecoration: "underline" },
 ]);
 
+/** The selection Review would send, and where its button sits in the panel. */
+interface ReviewTarget {
+	from: number;
+	text: string;
+	top: number;
+	left: number;
+}
+
+const REVIEW_BOX_WIDTH = 224;
+
 export function NotesEditor({ controller }: { controller: NotesController }) {
 	const hostRef = useRef<HTMLDivElement>(null);
+	const sideStore = useSideChatStore();
+	const [target, setTarget] = useState<ReviewTarget | null>(null);
+	const [noProse, setNoProse] = useState(false);
 
 	useEffect(() => {
+		// Reads the selection at measure time, so a stale request never revives the button.
+		const place = (view: EditorView) =>
+			view.requestMeasure({
+				key: "lh-notes-review",
+				read: () => {
+					const { from, to } = view.state.selection.main;
+					const text = view.state.sliceDoc(from, to);
+					if (!text.trim()) return null;
+					const end = view.coordsAtPos(to);
+					const box = hostRef.current?.getBoundingClientRect();
+					if (!end || !box || end.bottom < box.top || end.bottom > box.bottom) return null;
+					const left = Math.max(8, Math.min(end.left - box.left, box.width - REVIEW_BOX_WIDTH - 8));
+					return { from, text, top: end.bottom - box.top + 4, left };
+				},
+				write: (next) => setTarget(next),
+			});
 		const view = new EditorView({
 			parent: hostRef.current!,
 			state: EditorState.create({
@@ -125,13 +155,17 @@ export function NotesEditor({ controller }: { controller: NotesController }) {
 					placeholder("Jot down keywords, formulas, quotes…"),
 					EditorView.updateListener.of((u) => {
 						if (u.docChanged && !u.transactions.some((tr) => tr.annotation(fromServer))) controller.onEdit(u.state.doc.toString());
+						if (u.selectionSet || u.docChanged) setNoProse(false);
+						if (u.selectionSet || u.docChanged || u.geometryChanged) place(u.view);
 					}),
+					EditorView.domEventHandlers({ scroll: (_e, v) => place(v) }),
 					notesDecorations,
 					notesTheme,
 				],
 			}),
 		});
 		const port: NotesEditorPort = {
+			replace: (from, to, insert) => view.dispatch({ changes: { from, to, insert } }),
 			append: (block) => {
 				const doc = view.state.doc.toString();
 				const next = appendBlockText(doc, block);
@@ -154,5 +188,38 @@ export function NotesEditor({ controller }: { controller: NotesController }) {
 		};
 	}, [controller]);
 
-	return <div ref={hostRef} className="h-full" />;
+	const review = async () => {
+		if (!target) return;
+		await controller.flush();
+		const anchor = sideStore?.lastProseAnchor() ?? null;
+		if (!sideStore || !anchor) return setNoProse(true);
+		void sideStore.openReview(anchor, { highlight: target.text, from: target.from });
+		setTarget(null);
+	};
+
+	return (
+		<>
+			<div ref={hostRef} className="h-full" />
+			{target && (
+				<div style={{ top: target.top, left: target.left }} className="absolute z-20 flex flex-col items-start gap-1">
+					<button
+						type="button"
+						data-testid="notes-review"
+						// Keep the editor's selection and focus through the press.
+						onPointerDown={(e) => e.preventDefault()}
+						onMouseDown={(e) => e.preventDefault()}
+						onClick={() => void review()}
+						className="flex h-7 items-center rounded-md border bg-popover px-2.5 font-ui text-xs font-medium text-popover-foreground shadow-md transition-colors hover:bg-accent"
+					>
+						Review
+					</button>
+					{noProse && (
+						<p role="status" style={{ width: REVIEW_BOX_WIDTH }} className="rounded-md border bg-popover px-2 py-1 font-ui text-xs text-muted-foreground shadow-md">
+							Review works once the tutor has written something.
+						</p>
+					)}
+				</div>
+			)}
+		</>
+	);
 }

@@ -25,3 +25,18 @@ export function quoteAsMarkdown(quote: string): string {
 export function appendBlockText(notes: string, block: string): string {
 	return notes.trim() ? `${notes.trimEnd()}\n\n${block}\n` : `${block}\n`;
 }
+
+export interface NoteRange {
+	from: number;
+	to: number;
+}
+
+/** The occurrence of `highlight` whose start is nearest to `from` (ties: the earlier). */
+export function locateHighlight(notes: string, highlight: string, from: number): NoteRange | null {
+	if (!highlight) return null;
+	let best: NoteRange | null = null;
+	for (let i = notes.indexOf(highlight); i !== -1; i = notes.indexOf(highlight, i + 1)) {
+		if (!best || Math.abs(i - from) < Math.abs(best.from - from)) best = { from: i, to: i + highlight.length };
+	}
+	return best;
+}

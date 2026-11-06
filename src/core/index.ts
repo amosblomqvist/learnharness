@@ -93,3 +93,6 @@ export * from "./session-markdown.ts";
 // side-chat.ts (inline side questions, 2026-11-02): ask-input validation,
 // thread lookup and the side model's lesson document. Pure, browser-safe.
 export * from "./side-chat.ts";
+// note-review.ts: a side thread about the learner's notes (review marker,
+// the reviewer's opening context). Pure, browser-safe.
+export * from "./note-review.ts";

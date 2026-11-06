@@ -46,6 +46,7 @@ import { modelsNotConfigured, providerKeyMissing as providerKeyMissingEnvelope }
 import { piEngineForSpec, type PiEngine } from "../agent/models.ts";
 import { isSubscriptionProvider } from "../agent/subscription-connections.ts";
 import { composeSideChatInstructions, streamSideAnswer } from "../agent/side-chat.ts";
+import { composeNoteReviewInstructions } from "../agent/note-review.ts";
 import { effectiveSettings, stores } from "./stores.ts";
 import { providerKeyPresent } from "./keys.ts";
 import { refreshConnectionCatalog } from "./model-catalog.ts";
@@ -60,8 +61,8 @@ export interface SideChatDeps {
 	chatStore: ChatStore;
 	/** The session's engine through the turn gates, or the refusal response. */
 	engineFor: (record: ChatRecord) => Promise<PiEngine | Response>;
-	/** The side model's system prompt (composed fresh per ask). */
-	instructions: () => string;
+	/** The side model's system prompt for this thread (composed fresh per ask). */
+	instructions: (thread: SideChatThread) => string;
 }
 
 interface SideRun {
@@ -129,7 +130,7 @@ export function createSideChatService(deps: SideChatDeps): SideChatService {
 			}
 			// Every first question at an anchor is its own thread (window) —
 			// a block may carry several (owner, 2026-11-02 follow-up).
-			target = newSideThread(input.anchor);
+			target = newSideThread(input.anchor, undefined, input.review);
 		}
 		if (!target) return Response.json({ error: "either threadId or anchor is required" }, { status: 400 });
 		const key = runKey(chatId, target.id);
@@ -169,13 +170,13 @@ export function createSideChatService(deps: SideChatDeps): SideChatService {
 		announce(chatId);
 
 		const modelId = `${engine.model.provider}:${engine.model.id}`;
-		const turns = sideChatModelTurns(thread, sideChatLessonDocument(record.messages));
+		const turns = sideChatModelTurns(thread, sideChatLessonDocument(record.messages), record.notes ?? "");
 		run.settled = (async () => {
 			let settledThread: SideChatThread | undefined;
 			try {
 				const result = await streamSideAnswer({
 					engine,
-					instructions: deps.instructions(),
+					instructions: deps.instructions(thread),
 					turns,
 					signal: controller.signal,
 					onText: (text) => {
@@ -343,7 +344,7 @@ function strongRetention() {
 
 /** The production engine resolution: the turn's own gate sequence for the
  *  conversation chain (chat override → strong slot), as a FOREGROUND call. */
-async function productionEngineFor(record: ChatRecord): Promise<PiEngine | Response> {
+export async function productionEngineFor(record: ChatRecord): Promise<PiEngine | Response> {
 	const effective = effectiveSettings();
 	const conversation = resolveConversationSpec(record.settings, effective.models.strong);
 	if (!conversation) return Response.json(modelsNotConfigured(["strong"]), { status: 503 });
@@ -368,5 +369,8 @@ export const sideChats: SideChatService = ((globalThis as typeof globalThis & Si
 	createSideChatService({
 		chatStore: stores.chatStore,
 		engineFor: productionEngineFor,
-		instructions: () => composeSideChatInstructions(effectiveSettings().agent.prompts),
+		instructions: (thread) => {
+			const switches = effectiveSettings().agent.prompts;
+			return thread.review ? composeNoteReviewInstructions(switches) : composeSideChatInstructions(switches);
+		},
 	}));

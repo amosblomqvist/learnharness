@@ -1,7 +1,7 @@
 "use client";
 
 import { clampNotesWidth, NOTES_AUTOFOLD_BELOW, NOTES_DEFAULT_WIDTH, NOTES_WIDTH_KEY } from "@/components/notes-layout";
-import { appendBlockText, quoteAsMarkdown } from "@/src/core";
+import { appendBlockText, locateHighlight, quoteAsMarkdown } from "@/src/core";
 import { createContext, useContext, useEffect, useSyncExternalStore, type ReactNode } from "react";
 
 export const NOTES_OPEN_KEY = "lh-notes-open";
@@ -10,9 +10,17 @@ const SAVE_ERROR = "Notes not saved";
 const KEEPALIVE_MAX_BYTES = 60_000;
 
 export interface NotesEditorPort {
+	replace(from: number, to: number, insert: string): void;
 	append(block: string): void;
 	/** Replace the whole doc without undo history or an edit. */
 	reset(text: string): void;
+}
+
+/** A rewrite as applied, so Undo can find it again. */
+export interface RewriteUndo {
+	from: number;
+	before: string;
+	after: string;
 }
 
 export interface NotesSnapshot {
@@ -111,6 +119,30 @@ export class NotesController {
 		this.setOpen(true);
 		if (this.port) this.port.append(block);
 		else this.onEdit(appendBlockText(this.current, block));
+	}
+
+	/** Replace the occurrence of `highlight` nearest `from`; null when it is gone. */
+	replaceHighlight(highlight: string, from: number, replacement: string): RewriteUndo | null {
+		const range = locateHighlight(this.current, highlight, from);
+		if (!range) return null;
+		this.edit(range.from, range.to, replacement);
+		return { from: range.from, before: highlight, after: replacement };
+	}
+
+	/** Put `before` back where `after` sits; true when already undone, false when `after` is gone. */
+	undoRewrite(undo: RewriteUndo): boolean {
+		const at = (text: string) => this.current.startsWith(text, undo.from);
+		// Undone in the editor (Cmd+Z). One text may prefix the other, so the longer one decides.
+		if (at(undo.before) && (undo.before.length >= undo.after.length || !at(undo.after))) return true;
+		const range = locateHighlight(this.current, undo.after, undo.from);
+		if (!range) return false;
+		this.edit(range.from, range.to, undo.before);
+		return true;
+	}
+
+	private edit(from: number, to: number, insert: string): void {
+		if (this.port) this.port.replace(from, to, insert);
+		else this.onEdit(this.current.slice(0, from) + insert + this.current.slice(to));
 	}
 
 	onEdit(text: string): void {

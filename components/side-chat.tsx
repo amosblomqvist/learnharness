@@ -20,13 +20,13 @@
 import { createContext, memo, useContext, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { Block, type BlockProps } from "streamdown";
-import { ChevronDownIcon, ChevronRightIcon, ChevronUpIcon, CornerDownLeftIcon, MessageCircleQuestionIcon, MessageCircleReplyIcon, NotebookPenIcon, RotateCcwIcon, SquareIcon, Trash2Icon, XIcon } from "lucide-react";
-import type { SideChatAnchor, SideChatMessage } from "@/src/core";
+import { ChevronDownIcon, ChevronRightIcon, ChevronUpIcon, CornerDownLeftIcon, MessageCircleQuestionIcon, MessageCircleReplyIcon, NotebookPenIcon, RotateCcwIcon, SquareIcon, Trash2Icon, Undo2Icon, WandSparklesIcon, XIcon } from "lucide-react";
+import { locateHighlight, type NoteReviewTarget, type SideChatAnchor, type SideChatMessage } from "@/src/core";
 import { MessageResponse } from "@/components/ai-elements/message";
 import { Shimmer } from "@/components/ai-elements/shimmer";
 import { BrailleSpinner } from "@/components/braille-spinner";
 import { Button } from "@/components/ui/button";
-import { useNotesController } from "@/components/notes-state";
+import { useNotesController, type RewriteUndo } from "@/components/notes-state";
 import { blurAfterPointerClick } from "@/components/focus-hygiene";
 import { cn } from "@/lib/utils";
 import { sideBlockKey, useSideChatStore, useSideWindows, type SideChatStore, type SideWindowView } from "@/components/side-chat-state";
@@ -122,11 +122,16 @@ export function sideExcerpt(text: string, max = 80): string {
 	return flat.length > max ? `${flat.slice(0, max - 1)}…` : flat;
 }
 
+/** What a window's labels call it: a note review is not a side question. */
+function windowName(view: SideWindowView): string {
+	return view.review ? "note review" : "side question";
+}
+
 export const SideChatWindow = memo(function SideChatWindow({ view, store }: { view: SideWindowView; store: SideChatStore }) {
 	const messages = view.thread?.messages ?? [];
 	const questions = messages.filter((m) => m.role === "user").length;
 	const firstQuote = messages.find((m) => m.role === "user")?.quotes?.[0] ?? view.quotes[0];
-	const excerpt = sideExcerpt(firstQuote ?? view.anchor.blockText);
+	const excerpt = sideExcerpt(view.review?.highlight ?? firstQuote ?? view.anchor.blockText);
 
 	if (!view.open) {
 		return (
@@ -135,7 +140,7 @@ export const SideChatWindow = memo(function SideChatWindow({ view, store }: { vi
 				data-testid="side-chat-bar"
 				data-side-window={view.renderKey}
 				aria-expanded={false}
-				aria-label={`Open side question: ${excerpt}`}
+				aria-label={`Open ${windowName(view)}: ${excerpt}`}
 				onClick={(e) => {
 					blurAfterPointerClick(e);
 					store.setOpen(view.key, true);
@@ -143,7 +148,7 @@ export const SideChatWindow = memo(function SideChatWindow({ view, store }: { vi
 				className="flex w-full min-w-0 items-center gap-2 rounded-lg border bg-card px-3 py-1.5 text-left font-ui text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
 			>
 				<ChevronRightIcon className="size-3 shrink-0" />
-				<MessageCircleQuestionIcon className="size-3 shrink-0" />
+				{view.review ? <NotebookPenIcon className="size-3 shrink-0" /> : <MessageCircleQuestionIcon className="size-3 shrink-0" />}
 				<span className="min-w-0 truncate">“{excerpt}”</span>
 				<span className="ml-auto flex shrink-0 items-center gap-1.5 tabular-nums">
 					{view.answering && <BrailleSpinner label="Answering" />}
@@ -158,13 +163,20 @@ export const SideChatWindow = memo(function SideChatWindow({ view, store }: { vi
 function OpenWindow({ view, store, messages, excerpt }: { view: SideWindowView; store: SideChatStore; messages: readonly SideChatMessage[]; excerpt: string }) {
 	const [confirming, setConfirming] = useState(false);
 	const composerRef = useRef<HTMLTextAreaElement>(null);
+	const sectionRef = useRef<HTMLElement>(null);
 	const last = messages.at(-1);
 	const busy = view.answering || view.sending;
+	const canRewrite = view.review !== undefined && !view.answering && last?.role === "assistant" && last.error === undefined;
+	// A new review window comes into view once; side questions never scroll.
+	useEffect(() => {
+		if (store.consumeReveal(view.renderKey)) sectionRef.current?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+	}, [store, view.renderKey]);
 	return (
 		<section
+			ref={sectionRef}
 			data-testid="side-chat-window"
 			data-side-window={view.renderKey}
-			aria-label="Side question"
+			aria-label={view.review ? "Note review" : "Side question"}
 			className="overflow-hidden rounded-xl border bg-card text-card-foreground"
 		>
 			{/* THE WHOLE BAR TOGGLES (owner, 2026-11-02): the header is the
@@ -179,7 +191,7 @@ function OpenWindow({ view, store, messages, excerpt }: { view: SideWindowView; 
 						data-side-toggle=""
 						data-testid="side-chat-toggle"
 						aria-expanded
-						aria-label="Collapse side question"
+						aria-label={`Collapse ${windowName(view)}`}
 						onClick={(e) => {
 							blurAfterPointerClick(e);
 							store.setOpen(view.key, false);
@@ -187,17 +199,17 @@ function OpenWindow({ view, store, messages, excerpt }: { view: SideWindowView; 
 						className="flex min-w-0 flex-1 items-center gap-2 py-1.5 pl-3 pr-2 text-left"
 					>
 						<ChevronDownIcon className="size-3 shrink-0 text-muted-foreground" />
-						<SideHeaderTitle excerpt={excerpt} />
+						<SideHeaderTitle excerpt={excerpt} review={view.review !== undefined} />
 					</button>
 				) : (
 					<div className="flex min-w-0 flex-1 items-center gap-2 py-1.5 pl-3 pr-2">
-						<SideHeaderTitle excerpt={excerpt} />
+						<SideHeaderTitle excerpt={excerpt} review={view.review !== undefined} />
 					</div>
 				)}
 				<div className="flex shrink-0 items-center gap-1 pr-3">
 					{confirming ? (
 						<>
-							<span className="font-ui text-xs text-muted-foreground">Delete this side question?</span>
+							<span className="font-ui text-xs text-muted-foreground">{view.review ? "Delete this review?" : "Delete this side question?"}</span>
 							<Button
 								size="xs"
 								variant="destructive"
@@ -241,7 +253,7 @@ function OpenWindow({ view, store, messages, excerpt }: { view: SideWindowView; 
 									size="icon-xs"
 									variant="ghost"
 									data-testid="side-chat-delete"
-									aria-label="Delete side question"
+									aria-label={`Delete ${windowName(view)}`}
 									onClick={(e) => {
 										blurAfterPointerClick(e);
 										setConfirming(true);
@@ -257,7 +269,7 @@ function OpenWindow({ view, store, messages, excerpt }: { view: SideWindowView; 
 									size="icon-xs"
 									variant="ghost"
 									data-testid="side-chat-close"
-									aria-label="Discard side question"
+									aria-label={`Discard ${windowName(view)}`}
 									onClick={(e) => {
 										blurAfterPointerClick(e);
 										store.setOpen(view.key, false);
@@ -317,6 +329,7 @@ function OpenWindow({ view, store, messages, excerpt }: { view: SideWindowView; 
 				hasMessages={messages.length > 0}
 				lastIsQuestion={last?.role === "user"}
 				inputRef={composerRef}
+				action={canRewrite ? <RewriteNoteButton view={view} store={store} /> : undefined}
 				onCollapse={
 					view.thread
 						? () => {
@@ -334,12 +347,12 @@ function OpenWindow({ view, store, messages, excerpt }: { view: SideWindowView; 
 	);
 }
 
-function SideHeaderTitle({ excerpt }: { excerpt: string }) {
+function SideHeaderTitle({ excerpt, review }: { excerpt: string; review: boolean }) {
 	return (
 		<>
 			{/* The icon IS the label (owner, 2026-11-02); screen readers get
 			    the window's aria-label. */}
-			<MessageCircleQuestionIcon className="size-3.5 shrink-0 text-muted-foreground" />
+			{review ? <NotebookPenIcon className="size-3.5 shrink-0 text-muted-foreground" /> : <MessageCircleQuestionIcon className="size-3.5 shrink-0 text-muted-foreground" />}
 			<span className="min-w-0 truncate font-ui text-xs text-muted-foreground">“{excerpt}”</span>
 		</>
 	);
@@ -384,12 +397,81 @@ function SideAnswer({ message, onRetry }: { message: SideChatMessage; onRetry?: 
 	);
 }
 
+const STALE_NOTE = "This part of your notes changed. Highlight it again and click Review.";
+
+/** Replaces the reviewed highlight in the notes with the model's smallest fix. */
+function RewriteNoteButton({ view, store }: { view: SideWindowView; store: SideChatStore }) {
+	const notes = useNotesController();
+	// Kept in the store: this button unmounts on fold and during a follow-up.
+	const [{ current, undo }, setState] = useState(() => store.rewrites.get(view.key) ?? { current: view.review!, undo: null });
+	const [busy, setBusy] = useState(false);
+	const [message, setMessage] = useState<string | null>(null);
+	const save = (next: { current: NoteReviewTarget; undo: RewriteUndo | null }) => {
+		store.rewrites.set(view.key, next);
+		setState(next);
+	};
+	const rewrite = async () => {
+		setBusy(true);
+		setMessage(null);
+		// The server reads the saved notes; a highlight edited away costs no model call.
+		await notes?.flush();
+		if (!notes || !locateHighlight(notes.text(), current.highlight, current.from)) {
+			setBusy(false);
+			return setMessage(STALE_NOTE);
+		}
+		const out = await store.rewrite(view.key);
+		setBusy(false);
+		if ("error" in out) return setMessage(out.error);
+		const applied = notes.replaceHighlight(current.highlight, current.from, out.replacement);
+		if (!applied) return setMessage(STALE_NOTE);
+		notes.setOpen(true);
+		save({ current: { highlight: out.replacement, from: applied.from }, undo: applied });
+	};
+	const revert = () => {
+		if (!undo) return;
+		if (notes?.undoRewrite(undo)) save({ current: { highlight: undo.before, from: undo.from }, undo: null });
+		else {
+			save({ current, undo: null });
+			setMessage(STALE_NOTE);
+		}
+	};
+	return (
+		<>
+			<Button
+				size="icon-xs"
+				variant="ghost"
+				data-testid="note-rewrite"
+				aria-label="Rewrite note"
+				title="Rewrite note"
+				disabled={busy}
+				onClick={(e) => {
+					blurAfterPointerClick(e);
+					void rewrite();
+				}}
+			>
+				{busy ? <BrailleSpinner label="Rewriting" /> : <WandSparklesIcon />}
+			</Button>
+			{undo && (
+				<Button size="icon-xs" variant="ghost" data-testid="note-rewrite-undo" aria-label="Undo rewrite" title="Undo rewrite" onClick={revert}>
+					<Undo2Icon />
+				</Button>
+			)}
+			{message && (
+				<p role="alert" className="order-last basis-full font-ui text-xs text-destructive">
+					{message}
+				</p>
+			)}
+		</>
+	);
+}
+
 function SideComposer({
 	view,
 	store,
 	hasMessages,
 	lastIsQuestion,
 	inputRef,
+	action,
 	onCollapse,
 }: {
 	view: SideWindowView;
@@ -397,10 +479,13 @@ function SideComposer({
 	hasMessages: boolean;
 	lastIsQuestion: boolean;
 	inputRef: React.RefObject<HTMLTextAreaElement | null>;
+	/** Rendered right after the bottom collapse, left of the box. */
+	action?: ReactNode;
 	/** Saved windows only: collapse from the bottom (a draft's only close discards). */
 	onCollapse?: () => void;
 }) {
-	const [text, setText] = useState(() => store.composerText.get(view.key) ?? "");
+	// A question already in flight (a review's request) is not a draft to show.
+	const [text, setText] = useState(() => (view.sending ? "" : (store.composerText.get(view.key) ?? "")));
 	// A NEW window takes the cursor, without scrolling: the page stays where
 	// the learner is reading (owner, 2026-11-02). Reopened windows never do.
 	useEffect(() => {
@@ -449,7 +534,7 @@ function SideComposer({
 					))}
 				</div>
 			)}
-			<div className="flex items-center gap-1">
+			<div className="flex flex-wrap items-center gap-1">
 			{onCollapse && (
 				// OUTSIDE the follow-up box (owner, 2026-11-02): it acts on the
 				// window, not on the question — the bottom twin of the top
@@ -460,7 +545,7 @@ function SideComposer({
 					variant="ghost"
 					className="-ml-1.5"
 					data-testid="side-chat-collapse-bottom"
-					aria-label="Collapse side question"
+					aria-label={`Collapse ${windowName(view)}`}
 					title="Collapse"
 					onClick={(e) => {
 						blurAfterPointerClick(e);
@@ -470,6 +555,7 @@ function SideComposer({
 					<ChevronUpIcon />
 				</Button>
 			)}
+			{action}
 			<form
 				className="flex min-w-0 flex-1 items-end gap-1.5 rounded-lg border bg-background p-1"
 				onSubmit={(e) => {
@@ -487,7 +573,7 @@ function SideComposer({
 						store.composerText.set(view.key, e.target.value);
 					}}
 					onKeyDown={onKeyDown}
-					placeholder={hasMessages ? "Ask a follow-up…" : "Ask about this paragraph…"}
+					placeholder={hasMessages || view.review ? "Ask a follow-up…" : "Ask about this paragraph…"}
 					className="field-sizing-content lh-input max-h-40 min-h-8 flex-1 resize-none bg-transparent px-2 py-1.5 font-prose text-sm outline-none placeholder:text-muted-foreground"
 				/>
 				{view.answering ? (
@@ -504,7 +590,7 @@ function SideComposer({
 					<button
 						type="submit"
 						data-testid="side-chat-send"
-						aria-label="Send side question"
+						aria-label={view.review ? "Send follow-up" : "Send side question"}
 						disabled={!canSend}
 						className="flex size-8 shrink-0 items-center justify-center rounded-md bg-primary text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-40"
 					>

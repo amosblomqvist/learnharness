@@ -10,10 +10,12 @@ The runtime composes prompts for **prober**, **teacher** and **practice** agents
 | Teacher | `system-prompt.md` → sorted `teacher/` fragments → sorted `shared/` fragments |
 | Practice | sorted `practice/` fragments → the curated shared appendix below; **no teaching base** |
 | Side questions | [`side-chat/00-base.md`](side-chat/00-base.md) → shared `10-voice.md`, `15-accuracy.md`, `40-formatting.md`; composed by [`src/agent/side-chat.ts`](../side-chat.ts), not by the segment loader |
+| Note review | [`note-review/00-base.md`](note-review/00-base.md) → the same shared appendix as side questions; composed by [`src/agent/note-review.ts`](../note-review.ts) |
+| Note rewrite | [`note-rewrite/00-base.md`](note-rewrite/00-base.md) alone, no shared appendix; composed by [`src/agent/note-review.ts`](../note-review.ts) |
 
 Directory discovery accepts only filenames matching `^\d+-[\w.-]+\.md$` and sorts them lexicographically by filename. Keep numeric prefixes consistently padded when order matters. The teaching base supplies the agent's purpose/philosophy; voice, accuracy, mental-model, question, confidence, file and formatting guidance are separate shared fragments. The teacher's method and planning/teaching doctrine live in its own directory; probing doctrine lives in `prober/`.
 
-The side-question base is not an editable segment (it is not listed in Settings); its shared appendix honors enabled overrides by the same keys the other agents use.
+The side-question, note-review and note-rewrite bases are not editable segments (they are not listed in Settings). The side-question and note-review shared appendix honors enabled overrides by the same keys the other agents use; note rewrite has no shared appendix, so overrides never reach it.
 
 Practice has its own base and doctrine. Its shared appendix is explicitly allowlisted in the loader: `10-voice.md`, `15-accuracy.md`, `16-mental-model.md` and `40-formatting.md`, in sorted order. Other shared fragments do **not** automatically enter practice. Adding a new shared fragment includes it in prober/teacher composition, but not practice unless the allowlist changes.
 

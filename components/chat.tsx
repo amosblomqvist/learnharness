@@ -1262,6 +1262,7 @@ export function Chat({
 
 	return (
 		<NotesProvider controller={notes}>
+		<SideChatProvider chatId={chatId}>
 		<ChatActionsContext.Provider
 			value={{
 				chatId,
@@ -1407,7 +1408,6 @@ export function Chat({
 				</TopBar>
 
 				<SessionFind scopeRef={sessionFindScopeRef} scrollContextRef={scrollContextRef} />
-				<SideChatProvider chatId={chatId}>
 				<SideSelectionAsk />
 				<div ref={sessionFindScopeRef} className="relative flex min-h-0 flex-1">
 				<Conversation className="h-full min-w-0 flex-1" initial="instant" contextRef={scrollContextRef}>
@@ -1813,7 +1813,6 @@ export function Chat({
 				{planOpen && <PlanPopup messages={messages} onClose={() => setPlanOpen(false)} />}
 				<AbortTurnDialog mode={abortAsk} onClose={() => setAbortAsk(null)} onConfirm={confirmAbort} busy={busy} />
 				</div>
-				</SideChatProvider>
 			</div>
 			<NotesPanel />
 		</div>
@@ -1835,6 +1834,7 @@ export function Chat({
 			}}
 		/>
 		</ChatActionsContext.Provider>
+		</SideChatProvider>
 		</NotesProvider>
 	);
 }
