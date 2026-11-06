@@ -105,7 +105,7 @@ test("Deepgram is the default engine and there is no Groq model row", async () =
 	await fixture({ dictation: { language: "pl" } });
 	await mount(<Picker />);
 	assert.equal(select("select-dictation-engine").value, "deepgram");
-	assert.deepEqual([...select("select-dictation-engine").options].map((o) => [o.value, o.textContent]), [["deepgram", "Deepgram"], ["groq", "Groq (Whisper)"]]);
+	assert.deepEqual([...select("select-dictation-engine").options].map((o) => [o.value, o.textContent]), [["deepgram", "Deepgram"], ["groq", "Groq (Whisper)"], ["local", "Local (on this device)"]]);
 	assert.equal(byTest("row-dictation-groq-model"), null);
 });
 

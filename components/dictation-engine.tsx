@@ -12,14 +12,16 @@ import { useDictationLanguage } from "@/components/dictation-preference";
 const ENGINES: readonly { id: DictationProvider; label: string }[] = [
 	{ id: "deepgram", label: "Deepgram" },
 	{ id: "groq", label: "Groq (Whisper)" },
+	{ id: "local", label: "Local (on this device)" },
 ];
 
 const LINK = "underline underline-offset-2 hover:text-foreground";
 
 /**
- * Settings → Providers → Dictation: which engine transcribes, and for Groq,
- * which Whisper model. Deepgram stays the default. Like the language picker it
- * locks while a run is live, and a write failure keeps the previous choice.
+ * Settings → Providers → Dictation: which engine transcribes (Deepgram, Groq or Local),
+ * and for Groq, which Whisper model. Local's own rows live in settings/dictation-local.tsx.
+ * Deepgram stays the default. Like the language picker it locks while a run is live,
+ * and a write failure keeps the previous choice.
  */
 export function DictationEngineSettings() {
 	const { provider, groqModel, saving, error, saveEngine } = useDictationLanguage();
@@ -73,6 +75,15 @@ export function DictationSetupHint() {
 				and the text appears when you stop (up to {GROQ_MAX_RECORDING_SECONDS / 60} minutes at a time).
 				It uses your <a href="https://console.groq.com/keys" target="_blank" rel="noreferrer" className={LINK}>Groq API key</a>,
 				the same one as the Groq model provider. Multilingual lets Whisper detect the language.
+			</p>
+		);
+	}
+	if (provider === "local") {
+		return (
+			<p data-testid="dictation-setup-hint" data-engine="local" className={className}>
+				Local transcribes on this computer with a speech model you download once, so your audio never leaves
+				it and no key or internet connection is needed to dictate. The first dictation after choosing a model
+				takes a little longer while it loads.
 			</p>
 		);
 	}
