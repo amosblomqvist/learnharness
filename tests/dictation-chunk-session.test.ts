@@ -78,7 +78,7 @@ describe("while recording", () => {
 		assert.deepEqual(session.chunks.map((c) => c.status), ["done"]);
 		session.push(SPEECH.slice(18 * RATE));
 		await tick();
-		assert.equal(calls.length, 2, "and the second as soon as 18 s more were buffered");
+		assert.equal(calls.length, 2, "and the second as soon as 18 s were buffered again");
 		assert.equal(session.chunks.at(-1)!.text, "two");
 		const result = await session.stop();
 		assert.equal(calls.length, 3, "stop sends the last, partial chunk");
@@ -415,12 +415,12 @@ describe("cancel", () => {
 describe("when voice activity detection fails", () => {
 	const unavailable = async () => { throw new Error("Voice activity detection failed (503)"); };
 
-	it("loses no audio: every chunk is cut at the maximum and sent, silence included", async () => {
+	it("loses no audio: every chunk is cut at the 15 s target and sent, silence included", async () => {
 		const { session, calls } = harness([ok("a"), ok("b"), ok("c")], { vad: unavailable });
 		const audio = join(loud(16), quiet(0.5), loud(1), quiet(22.5));
 		session.push(audio);
 		assert.deepEqual(await session.stop(), { status: "done", text: "a b c" });
-		assert.deepEqual(session.chunks.map((chunk) => chunk.seconds), [18, 18, 4]);
+		assert.deepEqual(session.chunks.map((chunk) => chunk.seconds), [15, 15, 10]);
 		const sent = calls.reduce((total, call) => total + call.bytes - 44, 0);
 		assert.equal(sent, audio.length * 2, "every sample was sent, even the silent tail");
 	});
@@ -464,6 +464,26 @@ describe("when voice activity detection fails", () => {
 		assert.deepEqual(await waiting, { status: "failed", error: STOPPED_MESSAGE });
 		assert.equal(calls.length, 0, "nothing is sent after the cancel");
 		assert.deepEqual(await session.retry(), { status: "done", text: "late" });
+	});
+});
+
+describe("joining the transcript", () => {
+	it("leaves English chunks joined by one space, as before", async () => {
+		const { session } = harness([ok("  Hello there. "), ok("General Kenobi."), ok("")]);
+		session.push(loud(40));
+		assert.deepEqual(await session.stop(), { status: "done", text: "Hello there. General Kenobi." });
+	});
+
+	it("joins Chinese and Japanese chunks without a space, and keeps one between spaced scripts", async () => {
+		const chinese = harness([ok("今天天气很好。"), ok("我们去公园吧。"), ok("好的。")]);
+		chinese.session.push(loud(40));
+		assert.deepEqual(await chinese.session.stop(), { status: "done", text: "今天天气很好。我们去公园吧。好的。" });
+		const japanese = harness([ok("今日は"), ok("いい天気です。"), ok("行きましょう。")]);
+		japanese.session.push(loud(40));
+		assert.deepEqual(await japanese.session.stop(), { status: "done", text: "今日はいい天気です。行きましょう。" });
+		const korean = harness([ok("안녕하세요."), ok("반갑습니다."), ok("")]);
+		korean.session.push(loud(40));
+		assert.deepEqual(await korean.session.stop(), { status: "done", text: "안녕하세요. 반갑습니다." });
 	});
 });
 

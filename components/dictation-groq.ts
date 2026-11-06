@@ -1,4 +1,4 @@
-import { GROQ_DICTATION_HEADER, GROQ_KEY_ID, type AuthKeyStatus, type DictationLanguage, type GroqWhisperModel } from "@/src/core";
+import { GROQ_DICTATION_HEADER, GROQ_KEY_ID, joinTranscripts, type AuthKeyStatus, type DictationLanguage, type GroqWhisperModel } from "@/src/core";
 import { TranscribeRequestError, type ChunkTransport } from "@/components/dictation-chunk-session";
 
 /**
@@ -103,7 +103,7 @@ export function promptTail(text: string): string {
 export function groqTransport(request: typeof fetch, args: { model: GroqWhisperModel; language: DictationLanguage }): ChunkTransport {
 	return {
 		failure: "Groq transcription failed",
-		join: (texts) => texts.join(" "),
+		join: joinTranscripts,
 		async transcribe({ wav, seconds, previousText, signal }) {
 			const prompt = seconds >= PROMPT_MIN_SECONDS && previousText ? promptTail(previousText) : undefined;
 			return { text: await transcribeGroq(request, { wav, model: args.model, language: args.language, prompt, signal }) };

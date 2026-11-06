@@ -18,15 +18,15 @@
  * it hears them as one continuous clip, not as fragments), and the cut goes in the
  * best pause between 12 s and 18 s: long pauses beat short ones,
  * then closeness to 15 s decides. Without a pause in the window, the cut is hard,
- * at 18 s, so a chunk is never longer than that.
+ * at the 15 s target, so a chunk is never longer than 18 s.
  *
  * Whisper-style models invent text ("Thank you.") for silence, so a chunk in which
  * Silero hears no speech is dropped, and so is a final chunk under 0.3 s (a stray
  * click or the moment before the stop button). The caller only sees chunks worth
  * sending.
  *
- * A failed score never loses audio: the chunk is cut at the maximum and kept, as if
- * it held speech. The scorer is asked again for the next chunk.
+ * A failed score never loses audio: the chunk is cut at the target, as it would be
+ * without a pause, and kept as if it held speech. The scorer is asked again for the next chunk.
  */
 import {
 	GROQ_CHUNK_MAX_SECONDS,
@@ -126,8 +126,8 @@ export function cutCandidates(segments: readonly SpeechSegment[], samples: numbe
 
 /**
  * The sample to cut the first `samples` of a recording at: the best-scoring pause
- * between GROQ_CHUNK_MIN_SECONDS and GROQ_CHUNK_MAX_SECONDS, or the maximum when
- * there is none. pi-voice's score: a pause counts for its length up to 1 s (so
+ * between GROQ_CHUNK_MIN_SECONDS and GROQ_CHUNK_MAX_SECONDS, or the target
+ * (GROQ_CHUNK_TARGET_SECONDS) when there is none. pi-voice's score: a pause counts for its length up to 1 s (so
  * every pause of a second or more ties), less a penalty for the distance from the
  * target, 0.05 per second before it and 0.1 per second after, since a late cut
  * makes a longer upload. `samples` must be at least the maximum.
@@ -135,7 +135,7 @@ export function cutCandidates(segments: readonly SpeechSegment[], samples: numbe
 export function planCut(probs: ArrayLike<number>, samples: number, sampleRate: number): number {
 	const minAt = Math.round(GROQ_CHUNK_MIN_SECONDS * sampleRate);
 	const maxAt = Math.round(GROQ_CHUNK_MAX_SECONDS * sampleRate);
-	let best = maxAt;
+	let best = Math.round(GROQ_CHUNK_TARGET_SECONDS * sampleRate);
 	let bestScore = -Infinity;
 	for (const { gapSeconds, from, to } of cutCandidates(speechSegments(probs, samples, sampleRate), samples, sampleRate)) {
 		// A pause that straddles an edge of the window is still a pause inside it: take
@@ -213,6 +213,7 @@ export type Chunker = {
 
 export function createChunker({ sampleRate, score, onChunk }: ChunkerOptions): Chunker {
 	const maxAt = Math.round(GROQ_CHUNK_MAX_SECONDS * sampleRate);
+	const targetAt = Math.round(GROQ_CHUNK_TARGET_SECONDS * sampleRate);
 	const shortest = GROQ_MIN_PCM_BYTES / 2;
 	let parts: Int16Array[] = [];
 	let buffered = 0;
@@ -252,7 +253,7 @@ export function createChunker({ sampleRate, score, onChunk }: ChunkerOptions): C
 			// Only the window a cut can fall in is scored, so a request is never over 18 s
 			// however far a slow one let the buffer grow.
 			const probs = await probsFor(all.subarray(0, maxAt));
-			const cut = probs ? planCut(probs, maxAt, sampleRate) : maxAt;
+			const cut = probs ? planCut(probs, maxAt, sampleRate) : targetAt;
 			const chunk = make(all.slice(0, cut), probs);
 			// The buffer may have grown during the request: drop only what was cut.
 			const rest = joined().slice(cut);

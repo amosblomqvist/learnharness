@@ -8,7 +8,7 @@ import { encodePcm16Wav, GROQ_DICTATION_HEADER, STT_VAD_URL, VAD_FRAME_SAMPLES, 
  */
 
 /** A request that takes longer than this counts as failed, so a stuck server cannot
- * stall the cut while audio keeps arriving; the chunker then cuts at the maximum. The
+ * stall the cut while audio keeps arriving; the chunker then cuts at the target. The
  * first request also loads the native engine (about a second). */
 const VAD_TIMEOUT_MS = 15_000;
 const headers = { [GROQ_DICTATION_HEADER]: "1" };

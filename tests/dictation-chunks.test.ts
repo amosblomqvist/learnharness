@@ -82,12 +82,12 @@ describe("planning a cut", () => {
 		assert.ok(cut > 14.6 && cut < 14.9, `cut ${cut} s`);
 	});
 
-	it("ignores a pause before the window, and cuts hard at the maximum without another", () => {
-		assert.equal(cutAt(18, [[8, 8.5]]), GROQ_CHUNK_MAX_SECONDS);
+	it("ignores a pause before the window, and cuts at the 15 s target without another", () => {
+		assert.equal(cutAt(18, [[8, 8.5]]), GROQ_CHUNK_TARGET_SECONDS);
 	});
 
-	it("cuts hard at the maximum when the speaker never pauses", () => {
-		assert.equal(cutAt(18, []), GROQ_CHUNK_MAX_SECONDS);
+	it("cuts at the 15 s target when the speaker never pauses", () => {
+		assert.equal(cutAt(18, []), GROQ_CHUNK_TARGET_SECONDS);
 	});
 
 	it("cuts a window that is all silence at its earliest allowed point", () => {
@@ -212,7 +212,7 @@ describe("where the chunker cuts", () => {
 			assert.ok(chunk.seconds >= GROQ_CHUNK_MIN_SECONDS && chunk.seconds <= GROQ_CHUNK_MAX_SECONDS, `${chunk.seconds} s`);
 		}
 		assert.ok(chunks.at(-1)!.seconds <= GROQ_CHUNK_MAX_SECONDS);
-		assert.equal(chunks[0]!.seconds, GROQ_CHUNK_MAX_SECONDS, "with no pause the cut is hard, at the maximum");
+		assert.equal(chunks[0]!.seconds, GROQ_CHUNK_TARGET_SECONDS, "with no pause the cut is hard, at the target");
 	});
 
 	it("loses and repeats no audio: the chunks joined are the recording", async () => {
@@ -358,11 +358,11 @@ describe("what it will not send", () => {
 describe("when voice activity detection fails", () => {
 	const failing: VadScore = async () => { throw new Error("Voice activity detection failed (503)"); };
 
-	it("keeps the chunk and cuts it at the maximum, pause or not, silent or not", async () => {
+	it("keeps the chunk and cuts it at the target, pause or not, silent or not", async () => {
 		const { scorer, calls } = spy(failing);
 		const audio = join(speech(18, [[16, 0.4]]), quiet(20));
 		const chunks = await chunkAll(audio, scorer);
-		assert.equal(chunks[0]!.seconds, GROQ_CHUNK_MAX_SECONDS, "no pause is known, so the cut is hard");
+		assert.equal(chunks[0]!.seconds, GROQ_CHUNK_TARGET_SECONDS, "no pause is known, so the cut is at the target, as it would be without one");
 		assert.ok(chunks.length >= 2, "the silent part is kept too: nothing can be judged silent");
 		assert.deepEqual(join(...chunks.map((c) => c.pcm)), audio, "no audio lost");
 		assert.ok(calls.length >= 2, "each chunk asks again");
@@ -376,7 +376,7 @@ describe("when voice activity detection fails", () => {
 
 	it("treats an answer of the wrong length as a failure", async () => {
 		const chunks = await chunkAll(join(quiet(20), loud(3)), async () => [0.9, 0.9, 0.9]);
-		assert.equal(chunks[0]!.seconds, GROQ_CHUNK_MAX_SECONDS);
+		assert.equal(chunks[0]!.seconds, GROQ_CHUNK_TARGET_SECONDS);
 		assert.equal(chunks.length, 2);
 	});
 
@@ -385,7 +385,7 @@ describe("when voice activity detection fails", () => {
 		const flaky: VadScore = (pcm) => (asked++ === 0 ? failing(pcm) : energyVad(pcm));
 		const audio = speech(40, [[30, 0.4]]);
 		const chunks = await chunkAll(audio, flaky);
-		assert.equal(chunks[0]!.seconds, GROQ_CHUNK_MAX_SECONDS, "the first chunk was cut blind");
+		assert.equal(chunks[0]!.seconds, GROQ_CHUNK_TARGET_SECONDS, "the first chunk was cut blind");
 		assert.ok(chunks[1]!.seconds > 12 && chunks[1]!.seconds <= GROQ_CHUNK_MAX_SECONDS);
 		assert.deepEqual(join(...chunks.map((c) => c.pcm)), audio);
 	});

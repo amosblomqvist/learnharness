@@ -134,9 +134,9 @@ export const DICTATION_SAMPLE_RATE = 16_000;
  * cap) until the transcript is inserted; its roughly 80 requests also stay well
  * inside Groq's free-tier limits. */
 export const GROQ_MAX_RECORDING_SECONDS = 1200;
-/** Chunk lengths for Groq dictation (see dictation-chunks.ts): the cut goes at the
- * quietest point between MIN and MAX, preferring one near TARGET; MAX is also the
- * longest a chunk can be. */
+/** Chunk lengths for Groq and Local dictation (see dictation-chunks.ts): the cut goes
+ * in the best pause between MIN and MAX, preferring a long one near TARGET, and at
+ * TARGET when there is no pause; MAX is the longest a chunk can be. */
 export const GROQ_CHUNK_TARGET_SECONDS = 15;
 export const GROQ_CHUNK_MIN_SECONDS = 12;
 export const GROQ_CHUNK_MAX_SECONDS = 18;

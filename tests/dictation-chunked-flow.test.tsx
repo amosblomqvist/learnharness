@@ -91,6 +91,9 @@ async function fixture(
 		/** GET /api/stt/local/models: what the Local readiness check reads. */
 		models: (() => Promise.resolve(Response.json(localModels()))) as () => Promise<Response>,
 		modelInits: [] as (RequestInit | undefined)[],
+		/** POST /api/stt/local/warm: the fire-and-forget model load. */
+		warm: (() => Promise.resolve(Response.json({ model: "whisper-small" }))) as (post: Post) => Promise<Response>,
+		warmPosts: [] as Post[],
 		/** POST /api/stt/local/transcribe. */
 		localAnswer: ((_post: Post) => Promise.resolve(Response.json({ text: "hello local", language: "en" }))) as (post: Post) => Promise<Response>,
 		localPosts: [] as Post[],
@@ -117,6 +120,7 @@ async function fixture(
 			if (url === "/api/keys") { state.readyInits.push(init); return state.ready(); }
 			if (url === "/api/stt/local/models") { state.modelInits.push(init); return state.models(); }
 			const post = { init: init!, form: init!.body as FormData };
+			if (url === "/api/stt/local/warm") { state.warmPosts.push(post); return state.warm(post); }
 			if (url === "/api/stt/local/transcribe") { state.localPosts.push(post); return state.localAnswer(post); }
 			if (url === "/api/stt/vad") {
 				state.vadPosts.push(post);
@@ -378,9 +382,9 @@ test("reaching the recording cap stops and transcribes what was captured, droppi
 	});
 	assert.equal(f.dictation.error, null);
 	assert.equal(f.dictation.phase, "idle");
-	// Speech throughout has no pause to cut at, so every cut is hard, at 18 s.
-	const chunks = Math.ceil(GROQ_MAX_RECORDING_SECONDS / 18);
-	assert.equal(f.state.posts.length, chunks, "twenty minutes in eighteen-second chunks");
+	// Speech throughout has no pause to cut at, so every cut is at the 15 s target.
+	const chunks = GROQ_MAX_RECORDING_SECONDS / 15;
+	assert.equal(f.state.posts.length, chunks, "twenty minutes in fifteen-second chunks");
 	assert.equal(f.state.vadPosts.length, chunks, "one scoring request for each");
 	assert.equal(f.state.stops, 1, "the cap stopped the run");
 	assert.equal(f.state.appends.length, 1, "one insertion for the whole run");
@@ -908,14 +912,14 @@ test("Silero hearing only silence: nothing is sent and nothing is inserted, and 
 	assert.equal(f.dictation.retryable, false);
 });
 
-test("a failed VAD request loses no audio: chunks are cut at 18 s and sent, silent or not, and no error is shown", async () => {
+test("a failed VAD request loses no audio: chunks are cut at 15 s and sent, silent or not, and no error is shown", async () => {
 	const f = await fixture();
 	numbered(f);
 	f.state.vad = () => Response.json({ message: "Voice activity detection couldn't start", retryable: false, code: "engine_unavailable" }, { status: 503 });
 	await f.start();
 	await f.speak(framesFor(40));
 	assert.equal(f.state.posts.length, 2, "two full chunks went out while recording");
-	assert.equal(await seconds(f.state.posts[0]!), 18, "no pause is known, so the cut is hard");
+	assert.equal(await seconds(f.state.posts[0]!), 15, "no pause is known, so the cut is at the target");
 	assert.equal(f.dictation.error, null, "a VAD failure is not the learner's problem");
 	await act(async () => { f.dictation.stop(); });
 	assert.equal(f.state.posts.length, 3);
@@ -1158,7 +1162,7 @@ test("the recording cap applies to Local: it stops and transcribes what was capt
 	});
 	assert.equal(f.dictation.phase, "idle");
 	assert.equal(f.state.stops, 1, "the cap stopped the run");
-	assert.equal(f.state.localPosts.length, Math.ceil(GROQ_MAX_RECORDING_SECONDS / 18), "every 18 s window, nothing after the cap");
+	assert.equal(f.state.localPosts.length, GROQ_MAX_RECORDING_SECONDS / 15, "fifteen-second chunks, nothing after the cap");
 	assert.equal(f.state.appends.length, 1);
 });
 
