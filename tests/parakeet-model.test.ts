@@ -7,8 +7,9 @@ import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { after, before, describe, it } from "node:test";
-import { createParakeetModel } from "../src/server/parakeet-model.ts";
+import { createParakeetModel, tarCommand } from "../src/server/parakeet-model.ts";
 
+const WINDOWS = process.platform === "win32";
 const REQUIRED = ["encoder.int8.onnx", "decoder.int8.onnx", "joiner.int8.onnx", "tokens.txt"];
 const root = mkdtempSync(path.join(tmpdir(), "lh-parakeet-model-"));
 let server: Server;
@@ -28,7 +29,7 @@ function makeArchive(name: string, files: string[], symlink = false): Buffer {
 	for (const file of files) writeFileSync(path.join(top, file), `fixture:${file}`);
 	if (symlink) symlinkSync("/etc/hostname", path.join(top, "link.txt"));
 	const out = path.join(root, `${name}.tar.bz2`);
-	execFileSync("tar", ["-cjf", out, "-C", src, "parakeet-fixture"]);
+	execFileSync(tarCommand(), ["-cjf", out, "-C", src, "parakeet-fixture"]);
 	return readFileSync(out);
 }
 
@@ -36,7 +37,8 @@ before(async () => {
 	archive = makeArchive("good", [...REQUIRED, "test_wavs.txt"]);
 	archiveSha = createHash("sha256").update(archive).digest("hex");
 	brokenArchive = makeArchive("broken", REQUIRED.slice(1));
-	linkedArchive = makeArchive("linked", REQUIRED, true);
+	// Creating a symlink on Windows needs Developer Mode or elevation.
+	if (!WINDOWS) linkedArchive = makeArchive("linked", REQUIRED, true);
 	server = createServer((req, res) => {
 		hits++;
 		if (req.url === "/broken.tar.bz2") return void res.end(brokenArchive);
@@ -181,7 +183,15 @@ describe("Parakeet model manager", () => {
 		assert.equal(model.files(), null);
 	});
 
-	it("cancel during extraction aborts tar and ends missing with nothing left behind", async () => {
+	it("uses Windows' own tar by absolute path, and plain tar elsewhere", () => {
+		assert.equal(tarCommand("win32", "D:\\Win"), "D:\\Win\\System32\\tar.exe");
+		assert.equal(tarCommand("win32", ""), "C:\\Windows\\System32\\tar.exe");
+		assert.equal(tarCommand("linux", "D:\\Win"), "tar");
+		assert.equal(tarCommand("darwin"), "tar");
+	});
+
+	// The fake tar is a shell script found through PATH; Windows runs an absolute path.
+	it("cancel during extraction aborts tar and ends missing with nothing left behind", { skip: WINDOWS }, async () => {
 		const { model, dir, leftovers } = fresh();
 		const bin = path.join(root, `bin-${n}`);
 		const entered = path.join(root, `entered-${n}`);
@@ -208,7 +218,7 @@ describe("Parakeet model manager", () => {
 		}
 	});
 
-	it("refuses an archive that unpacks a symbolic link and cleans up", async () => {
+	it("refuses an archive that unpacks a symbolic link and cleans up", { skip: WINDOWS }, async () => {
 		const sha = createHash("sha256").update(linkedArchive).digest("hex");
 		const { model, dir, leftovers } = fresh({ url: `${base}/linked.tar.bz2`, sha256: sha, sizeBytes: linkedArchive.length });
 		await assert.rejects(model.download(), /symbolic link/i);

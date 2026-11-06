@@ -53,13 +53,27 @@ interface ActiveDownload {
 	promise: Promise<void>;
 }
 
+/**
+ * The tar to run. Windows must use its own bsdtar by absolute path: a bare
+ * `tar` can resolve to Git's GNU tar, which reads the `C:` in an archive path
+ * as a remote host and fails after the whole download has finished.
+ */
+export function tarCommand(platform: NodeJS.Platform = process.platform, systemRoot = process.env.SystemRoot): string {
+	if (platform !== "win32") return "tar";
+	return path.win32.join(systemRoot || "C:\\Windows", "System32", "tar.exe");
+}
+
 function extractArchive(archive: string, dest: string, signal: AbortSignal): Promise<void> {
 	return new Promise((resolve, reject) => {
 		fs.mkdirSync(dest, { recursive: true });
-		const child = spawn("tar", ["-xjf", archive, "-C", dest, "--strip-components=1"], { stdio: ["ignore", "ignore", "pipe"], signal });
+		const tar = tarCommand();
+		const child = spawn(tar, ["-xjf", archive, "-C", dest, "--strip-components=1"], { stdio: ["ignore", "ignore", "pipe"], signal });
 		let stderr = "";
 		child.stderr.on("data", (chunk: Buffer) => { stderr += chunk.toString(); });
-		child.on("error", (error) => reject(new Error(`Could not run tar to unpack the model: ${error.message}`)));
+		child.on("error", (error: NodeJS.ErrnoException) => {
+			if (error.code === "ENOENT" && process.platform === "win32") reject(new Error(`Windows' built-in tar was not found at ${tar}, so the model cannot be unpacked`));
+			else reject(new Error(`Could not run tar to unpack the model: ${error.message}`));
+		});
 		child.on("close", (code) => {
 			if (code === 0) resolve();
 			else reject(new Error(`Unpacking the model failed (tar exit ${code}): ${stderr.trim().slice(0, 200)}`));
