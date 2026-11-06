@@ -99,6 +99,16 @@ describe("notes editor", () => {
 		assert.equal(await controller.flush(), true);
 		assert.deepEqual(puts, []);
 	});
+	it("rendered display math in a quote covers the line's marker, so no bare `>` row is left", async () => {
+		const text = "> Then\n>\n> $$x = 1$$\n> One draw.\n";
+		const { view } = await mount(text);
+		const line = () => [...view.contentDOM.querySelectorAll(".cm-line")][2]!;
+		assert.ok(line().querySelector(".lh-note-display-math > .katex-display"), "the formula renders in its inline-block wrapper");
+		assert.ok(!line().textContent!.startsWith(">"), "no marker in front of the formula");
+		assert.ok(line().classList.contains("lh-note-quote"), "still styled as a quote");
+		view.dispatch({ selection: { anchor: text.indexOf("> $$") } });
+		assert.equal(line().textContent, "> $$x = 1$$", "the caret on the marker shows the source");
+	});
 	it("styles Markdown and keeps its marks visible", async () => {
 		const { view } = await mount("**bold** text");
 		const strong = highlightingFor(view.state, [tags.strong]);

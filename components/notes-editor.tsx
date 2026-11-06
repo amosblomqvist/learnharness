@@ -25,6 +25,7 @@ class MathWidget extends WidgetType {
 
 	toDOM(): HTMLElement {
 		const el = document.createElement("span");
+		if (this.display) el.className = "lh-note-display-math";
 		katex.render(this.tex, el, { displayMode: this.display, throwOnError: false });
 		return el;
 	}
@@ -57,7 +58,13 @@ function buildDecorations(state: EditorState): DecorationSet {
 	const text = state.doc.toString();
 	const sel = state.selection.ranges;
 	const decos: Range<Decoration>[] = quoteLineStarts(text).map((pos) => quoteLine.range(pos));
-	for (const { from, to, tex, display } of mathRanges(text)) {
+	for (const { from: start, to, tex, display } of mathRanges(text)) {
+		let from = start;
+		// Display math draws as a block, which would strand the line's quote marker on a row of its own.
+		if (display) {
+			const lineStart = state.doc.lineAt(from).from;
+			if (/^ {0,3}(?:> ?)+$/.test(text.slice(lineStart, from))) from = lineStart;
+		}
 		if (sel.some((r) => r.from <= to && r.to >= from)) continue;
 		decos.push(Decoration.replace({ widget: new MathWidget(tex, display) }).range(from, to));
 	}
@@ -78,6 +85,9 @@ const notesTheme = EditorView.theme({
 	// Shrink to the panel, so a wide formula scrolls by itself instead of widening every line.
 	".cm-content": { padding: "0.75rem", caretColor: "currentColor", minWidth: 0 },
 	".cm-placeholder": { color: "var(--muted-foreground)" },
+	// Inline-block, or the block formula leaves an empty text row above and below it.
+	".lh-note-display-math": { display: "inline-block", width: "100%", verticalAlign: "top" },
+	".katex-display": { margin: "0.25em 0" },
 	".lh-note-quote": {
 		borderLeft: "3px solid var(--border)",
 		paddingLeft: ".5rem",
