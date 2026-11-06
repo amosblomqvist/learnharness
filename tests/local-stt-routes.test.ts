@@ -20,6 +20,7 @@ const modelsRoute = await import("../app/api/stt/local/models/route.ts");
 const modelRoute = await import("../app/api/stt/local/models/[id]/route.ts");
 const transcribeRoute = await import("../app/api/stt/local/transcribe/route.ts");
 const vadRoute = await import("../app/api/stt/vad/route.ts");
+const warmRoute = await import("../app/api/stt/local/warm/route.ts");
 
 const BASE = "http://localhost/api/stt";
 const ID = "whisper-small";
@@ -28,6 +29,8 @@ let dir: string;
 let store: ModelStore;
 let transcribed: { samples: number; options: Omit<TranscribeChunkOptions, "signal"> & { aborted: boolean } }[];
 let scored: number[];
+let warmed: string[];
+let warmImpl: () => Promise<void>;
 let unloaded: string[];
 let transcribeImpl: () => Promise<{ text: string; language?: string; warning?: string }>;
 let vadImpl: () => Promise<number[]>;
@@ -43,7 +46,8 @@ beforeEach(async () => {
 		throw new Error("unreachable");
 	}) as typeof fetch });
 	setLocalModelStore(store);
-	transcribed = []; scored = []; unloaded = [];
+	transcribed = []; scored = []; unloaded = []; warmed = [];
+	warmImpl = async () => {};
 	transcribeImpl = async () => ({ text: "hello", language: "en" });
 	vadImpl = async () => [0.1, 0.9];
 	hardware = { tier: "cpu", available: true };
@@ -51,6 +55,7 @@ beforeEach(async () => {
 		hardware: async () => hardware,
 		transcribeChunk: async (pcm, { signal, ...options }) => { transcribed.push({ samples: pcm.length, options: { ...options, aborted: signal?.aborted ?? false } }); return transcribeImpl(); },
 		scoreVad: async (pcm) => { scored.push(pcm.length); return vadImpl(); },
+		warm: async (id) => { warmed.push(id); return warmImpl(); },
 		unload: async (id) => { unloaded.push(id); },
 		dispose: async () => {},
 	});
@@ -96,7 +101,8 @@ describe("same-origin protection", () => {
 			assert.equal((await modelRoute.DELETE(new Request(`${BASE}/local/models/${ID}`, { method: "DELETE", headers }), params(ID))).status, 403);
 			assert.equal((await transcribeRoute.POST(new Request(`${BASE}/local/transcribe`, { method: "POST", body: form(), headers }))).status, 403);
 			assert.equal((await vadRoute.POST(new Request(`${BASE}/vad`, { method: "POST", body: form(), headers }))).status, 403);
-			assert.deepEqual([transcribed, scored, unloaded], [[], [], []]);
+			assert.equal((await warmRoute.POST(new Request(`${BASE}/local/warm`, { method: "POST", body: JSON.stringify({ model: ID }), headers }))).status, 403);
+			assert.deepEqual([transcribed, scored, unloaded, warmed], [[], [], [], []]);
 			assert.equal((await store.status(ID)).download, null, "no download started");
 		});
 	}
@@ -279,6 +285,36 @@ describe("POST /api/stt/local/transcribe", () => {
 		transcribeImpl = async () => { controller.abort(); throw new Error("aborted"); };
 		const res = await transcribeRoute.POST(new Request(`${BASE}/local/transcribe`, { method: "POST", body: form(), headers: intent, signal: controller.signal }));
 		assert.equal(res.status, 499);
+	});
+});
+
+describe("POST /api/stt/local/warm", () => {
+	const warm = (body: BodyInit | null, headers: Record<string, string> = {}) => warmRoute.POST(post(`${BASE}/local/warm`, body, headers));
+
+	it("loads the named model through the runtime and answers once it is loaded", async () => {
+		const res = await warm(JSON.stringify({ model: ID }));
+		assert.equal(res.status, 200);
+		assert.deepEqual(await res.json(), { model: ID });
+		assert.deepEqual(warmed, [ID]);
+		assert.equal(res.headers.get("cache-control"), "no-store");
+		assert.deepEqual(transcribed, [], "nothing is transcribed");
+	});
+
+	it("rejects a bad body or a model that is not in the catalog, without touching the runtime", async () => {
+		assert.equal((await warm("not json")).status, 400);
+		assert.equal((await warm("")).status, 400);
+		assert.equal((await warm(JSON.stringify({}))).status, 400);
+		assert.equal((await warm(JSON.stringify({ model: "voxlingua107-ecapa-q8" }))).status, 400, "the detector is not a model to warm");
+		assert.equal((await warm(JSON.stringify({ model: "../etc/passwd" }))).status, 400);
+		assert.equal((await warm(JSON.stringify({ model: ID, pad: "x".repeat(2000) }))).status, 413);
+		assert.deepEqual(warmed, []);
+	});
+
+	it("answers a load failure in the shared shape", async () => {
+		warmImpl = async () => { throw new LocalSttError("That model isn't downloaded.", "model_not_installed", 409); };
+		const res = await warm(JSON.stringify({ model: ID }));
+		assert.equal(res.status, 409);
+		assert.deepEqual(await res.json(), { message: "That model isn't downloaded.", retryable: false, code: "model_not_installed" });
 	});
 });
 

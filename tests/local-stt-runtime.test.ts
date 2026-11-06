@@ -412,6 +412,46 @@ describe("idle unload", () => {
 		assert.equal(fake.log.loads.filter((name) => name === "canary-180m-flash.gguf").length, 2, "reloaded as normal");
 	});
 
+	it("a warm-up loads the model without transcribing, and counts as use: it arms the clock and cancels an earlier one", async () => {
+		await install("whisper-small");
+		const fake = fakeEngine();
+		const c = clock();
+		makeIdle(fake, c);
+		await runtime.warm("whisper-small");
+		assert.deepEqual(fake.log.loads, ["whisper-small.gguf"]);
+		assert.deepEqual(fake.log.calls, [], "nothing was decoded");
+		assert.deepEqual([...c.timers.values()].map((t) => t.ms), [IDLE_UNLOAD_MS]);
+		await runtime.warm("whisper-small");
+		assert.equal(c.timers.size, 1, "the earlier clock was cleared, not stacked");
+		assert.equal(fake.log.loads.length, 1, "already loaded");
+		await runtime.transcribeChunk(pcm(1), { ...base, modelId: "whisper-small" });
+		assert.equal(fake.log.loads.length, 1, "the first chunk finds the model ready");
+		assert.deepEqual(fake.log.disposed, []);
+	});
+
+	it("a warm-up that has not finished stops the clock, and an unload that fires meanwhile skips", async () => {
+		await install("whisper-small");
+		const fake = fakeEngine();
+		const c = clock();
+		makeIdle(fake, c);
+		await runtime.transcribeChunk(pcm(1), { ...base, modelId: "whisper-small" });
+		const [armed] = [...c.timers.values()];
+		armed!.callback(); // the timer fires, its job queued
+		await runtime.warm("whisper-small");
+		assert.deepEqual(fake.log.disposed, []);
+		assert.equal(fake.log.loads.length, 1);
+	});
+
+	it("a warm-up refuses what a chunk would: an unknown or a not downloaded model", async () => {
+		const fake = fakeEngine();
+		const c = clock();
+		makeIdle(fake, c);
+		await assert.rejects(runtime.warm("nope"), (e: unknown) => e instanceof LocalSttError && e.status === 400);
+		await assert.rejects(runtime.warm("whisper-small"), (e: unknown) => e instanceof LocalSttError && e.code === "model_not_installed");
+		assert.equal(c.timers.size, 0, "nothing loaded, no clock");
+		assert.deepEqual(fake.log.loads, []);
+	});
+
 	it("restarts the clock on every request, so a busy dictation never unloads", async () => {
 		await install("whisper-small");
 		const fake = fakeEngine();

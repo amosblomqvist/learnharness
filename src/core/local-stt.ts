@@ -13,6 +13,7 @@ import type { MachineTier } from "./local-stt-recommendations.ts";
 
 export const LOCAL_STT_MODELS_URL = "/api/stt/local/models";
 export const LOCAL_STT_TRANSCRIBE_URL = "/api/stt/local/transcribe";
+export const LOCAL_STT_WARM_URL = "/api/stt/local/warm";
 export const STT_VAD_URL = "/api/stt/vad";
 
 /** Silero VAD scores one frame per 512 samples: 32 ms at 16 kHz. */

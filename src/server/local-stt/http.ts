@@ -4,6 +4,7 @@
  *   GET    /api/stt/local/models        what is installed and downloading, plus the hardware tier
  *   POST   /api/stt/local/models/[id]   start or resume a download (JSON `{ action: "cancel" }` stops one)
  *   DELETE /api/stt/local/models/[id]   remove the file and any partial download
+ *   POST   /api/stt/local/warm          load a model ahead of its first chunk, JSON `{ model }`
  *   POST   /api/stt/local/transcribe    one PCM16 16 kHz WAV chunk in, `{ text, language?, warning? }` out
  *   POST   /api/stt/vad                 one PCM16 16 kHz WAV in, Silero's `{ probs, frameSamples }` out
  *
@@ -155,6 +156,28 @@ export async function localTranscribeResponse(request: Request): Promise<Respons
 			signal: request.signal,
 		});
 		return ok(result);
+	} catch (error) {
+		return failureResponse(error, request);
+	}
+}
+
+/** JSON `{ model }` (a catalog id): load that installed model now, without transcribing, so the first
+ * chunk of a recording does not wait for it. The client fires this when a Local recording starts and
+ * ignores the answer; any real problem surfaces on the first chunk. */
+export async function localWarmResponse(request: Request): Promise<Response> {
+	if (!sameOriginIntent(request, GROQ_DICTATION_HEADER)) return forbidden();
+	let model: unknown;
+	try {
+		const text = (await request.text()).slice(0, MAX_ACTION_BODY_BYTES + 1);
+		if (text.length > MAX_ACTION_BODY_BYTES) return fail(413, "Request too large.");
+		model = (JSON.parse(text) as { model?: unknown }).model;
+	} catch {
+		return fail(400, "Expected JSON.");
+	}
+	if (!isCatalogModelId(model)) return fail(400, "Unsupported local dictation model.");
+	try {
+		await localSttRuntime().warm(model);
+		return ok({ model });
 	} catch (error) {
 		return failureResponse(error, request);
 	}

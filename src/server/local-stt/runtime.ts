@@ -80,6 +80,8 @@ export type LocalSttRuntime = {
 	hardware(): Promise<LocalSttHardware>;
 	/** Transcribe one PCM16 16 kHz chunk with an installed model. */
 	transcribeChunk(pcm16: Int16Array, options: TranscribeChunkOptions): Promise<LocalTranscribeResponse>;
+	/** Load an installed model ahead of its first chunk (counts as use for the idle clock). */
+	warm(modelId: string): Promise<void>;
 	/** Silero's speech probability for each 512-sample frame of the clip (the last zero padded). */
 	scoreVad(pcm16: Int16Array, signal?: AbortSignal): Promise<number[]>;
 	/** Free a model if it is the loaded one (call before deleting its file). */
@@ -363,6 +365,21 @@ export function createLocalSttRuntime(deps: RuntimeDeps = {}): LocalSttRuntime {
 		});
 	}
 
+	/** Load the model (and the engine) without transcribing, so a recording's first chunk does not wait for it. */
+	async function warm(modelId: string): Promise<void> {
+		const model = getCatalogModel(modelId);
+		if (!model) throw new LocalSttError("Unknown dictation model.", "model_not_installed", 400);
+		// Counts as a request: the idle clock stops while it queues and loads, and restarts after.
+		pending++;
+		stopIdleClock();
+		return asrQueue.run(async () => {
+			if (disposed) throw new LocalSttError("Dictation is shutting down.", "engine_unavailable", 503);
+			await asrModel(await engineReady(), model);
+		}).finally(() => {
+			if (--pending === 0) startIdleClock();
+		});
+	}
+
 	async function scoreVad(pcm16: Int16Array, signal?: AbortSignal): Promise<number[]> {
 		if (pcm16.length === 0) return [];
 		const pcm = pcmToFloat(pcm16);
@@ -395,6 +412,7 @@ export function createLocalSttRuntime(deps: RuntimeDeps = {}): LocalSttRuntime {
 			}
 		},
 		transcribeChunk,
+		warm,
 		scoreVad,
 		unload(id) {
 			return asrQueue.run(async () => {
