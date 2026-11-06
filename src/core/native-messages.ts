@@ -135,8 +135,18 @@ export function sendToUserText(block: unknown): string | undefined {
 	return typeof message === "string" && message.trim() ? message : undefined;
 }
 
+/** Comparison form of a prose block. Models sometimes repeat a send_to_user
+ * message as ordinary text, occasionally ending it with a typed
+ * `[tool call: ...]` line copied from replayed history, or losing a LaTeX
+ * backslash; all of those are one message. */
+export function proseKey(text: string): string {
+	return text.replace(/\s*\[tool call: [^\]\n]*\]\s*$/, "").replace(/\\/g, "").replace(/\s+/g, " ").trim();
+}
+
 /** Learner-facing prose, in content order. Only the explicit output tool
  * joins ordinary text here — thinking and all other tool inputs stay out.
+ * A block repeating an earlier one in this message counts once, and the
+ * send_to_user copy wins because it is the clean one.
  * Shared by coverage/extraction and Markdown; native history stays intact. */
 export function userFacingTextOf(content: unknown, failedOutputCalls?: ReadonlySet<string>): string[] {
 	if (typeof content === "string") return content.trim() ? [content] : [];
@@ -146,7 +156,10 @@ export function userFacingTextOf(content: unknown, failedOutputCalls?: ReadonlyS
 		if (!block || typeof block !== "object") continue;
 		if (block.type === "toolCall" && failedOutputCalls?.has(block.id)) continue;
 		const text = block.type === "text" ? block.text : sendToUserText(block);
-		if (typeof text === "string" && text.trim()) out.push(text);
+		if (typeof text !== "string" || !text.trim()) continue;
+		const repeated = out.findIndex((seen) => proseKey(seen) === proseKey(text));
+		if (repeated === -1) out.push(text);
+		else if (block.type === "toolCall") out[repeated] = text;
 	}
 	return out;
 }

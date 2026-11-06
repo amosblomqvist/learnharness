@@ -34,7 +34,7 @@
 
 import type { AssistantMessage, ToolResultMessage } from "@earendil-works/pi-ai";
 import type { LhMarkerMessage, LhMessage } from "./native-messages.ts";
-import { modelSolutionForConclude, PRACTICE_CONCLUDE_TOOL, problemInputForConclude, SEND_TO_USER_TOOL, sendToUserText } from "./native-messages.ts";
+import { modelSolutionForConclude, PRACTICE_CONCLUDE_TOOL, problemInputForConclude, proseKey, SEND_TO_USER_TOOL, sendToUserText } from "./native-messages.ts";
 import { activeCompactionOf, type CompactionDetails } from "./compaction.ts";
 import { QUESTION_TOOLS } from "./pending.ts";
 import type { SubagentArtifactData, SubagentResultMeta } from "./contracts/jobs.ts";
@@ -222,8 +222,16 @@ export function projectView(messages: readonly LhMessage[], live?: LiveTurnState
 			// back to a spinner mid-transcript; live cards belong at the
 			// bottom, and this gate is what puts them there by construction).
 			const streamingMessage = live?.streamingIds.has(m.id) === true;
+			// The same prose as text and send_to_user is one message. Prefix
+			// matching keeps a still-streaming copy from flashing up beside it.
+			const proseEchoedBy = (text: string) => {
+				const key = proseKey(text);
+				if (!key) return undefined;
+				return rest.find((part) => part.type === "text" && proseKey(part.text ?? "").startsWith(key));
+			};
 			for (const [contentIndex, block] of assistant.content.entries()) {
 				if (block.type === "text") {
+					if (proseEchoedBy(block.text)) continue;
 					rest.push({ type: "text", id: `${m.id}-t${textN++}`, text: block.text, state: "done" });
 				} else if (block.type === "thinking") {
 					reasoning.push({ type: "reasoning", id: `${m.id}-r${reasoningN++}`, text: block.thinking, state: "done" });
@@ -243,7 +251,10 @@ export function projectView(messages: readonly LhMessage[], live?: LiveTurnState
 							rest.push(part);
 						} else {
 							const text = sendToUserText(block);
-							if (text !== undefined) {
+							const echoed = text === undefined ? undefined : proseEchoedBy(text);
+							if (echoed) {
+								if (proseKey(echoed.text ?? "") === proseKey(text!)) echoed.text = text!;
+							} else if (text !== undefined) {
 								rest.push({ type: "text", id: `${m.id}-t${textN++}`, text, state: "done" });
 							}
 						}

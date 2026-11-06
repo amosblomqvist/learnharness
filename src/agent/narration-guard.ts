@@ -24,8 +24,14 @@ export function narrationGuardApplies(
 	return kind === "teacher" && sendToUserApplies(kind, model, toolsOverridden);
 }
 
-export function isNarrationBlock(block: { type: string; thinkingSignature?: string }): boolean {
-	if (block.type !== "thinking" || typeof block.thinkingSignature !== "string") return false;
+/** The Claude Code CLI path stores no signatures, so the marker below can never
+ * match there. On that path reasoning arrives with empty text, while prose
+ * converted to narration keeps its non-empty summary: the text is the signal. */
+export function isNarrationBlock(block: { type: string; thinking?: string; thinkingSignature?: string }, provider?: string): boolean {
+	if (block.type !== "thinking") return false;
+	if (typeof block.thinkingSignature !== "string") {
+		return provider === "claude-code" && typeof block.thinking === "string" && block.thinking.trim().length > 0;
+	}
 	try {
 		return Buffer.from(block.thinkingSignature, "base64").subarray(0, 60).includes("narration");
 	} catch {
@@ -35,7 +41,7 @@ export function isNarrationBlock(block: { type: string; thinkingSignature?: stri
 
 export function questionLacksDeliveredProse(message: AssistantMessage, toolName: string, delivered = false): boolean {
 	if (!(QUESTION_TOOLS as readonly string[]).includes(toolName)) return false;
-	if (!message.content.some(isNarrationBlock as (b: AssistantMessage["content"][number]) => boolean)) return false;
+	if (!message.content.some((b) => isNarrationBlock(b, message.provider))) return false;
 	return !delivered && !message.content.some((b) => b.type === "text" && b.text.trim().length > 0);
 }
 
