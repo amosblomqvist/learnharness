@@ -13,9 +13,11 @@
  * System against the OS before first paint, and this provider owns every
  * live switch after that (a settings write, an OS flip under System).
  *
- * The provider is mounted at the ROOT LAYOUT level (like ActivityProvider):
- * every page picks appearance up on load. The settings page writes a
- * section, hands the new appearance here, and the vars move immediately.
+ * The provider is mounted at the ROOT LAYOUT level (like ActivityProvider),
+ * seeded with the record's appearance slice the layout already read — no
+ * client fetch, so the first render carries the stored mode and background.
+ * The settings page writes a section, hands the new appearance here, and
+ * the vars move immediately.
  *
  * (The open-settings keyboard chord lives in components/keyboard-shortcuts.tsx
  * with the other navigations — mod+, pushes /settings from anywhere.)
@@ -36,7 +38,6 @@ import {
 	FACTORY_SETTINGS,
 	resolveRenderedMode,
 	variantPalette,
-	type AppearanceMode,
 	type AppearanceSettings,
 	type RenderedMode,
 } from "@/src/core";
@@ -123,7 +124,7 @@ export function staleVarNames(
 }
 
 interface AppearanceContextValue {
-	/** Resolved appearance; factory until the record arrives. */
+	/** Resolved appearance (delta + factory). */
 	appearance: ReturnType<typeof resolveAppearance>;
 	/** The variant actually on screen — System resolved against the OS. */
 	resolvedMode: RenderedMode;
@@ -158,36 +159,37 @@ export function useAppearance() {
 
 export function AppearanceProvider({
 	children,
-	initialMode,
+	initialAppearance,
 }: {
 	children: React.ReactNode;
-	/** The mode the layout server-rendered — holds until the record arrives. */
-	initialMode: AppearanceMode;
+	/** The record's appearance delta as the layout read it (absent =
+	 *  factory) — the same sanitized slice /api/settings serves. */
+	initialAppearance: AppearanceSettings | undefined;
 }) {
-	const [delta, setDelta] = useState<AppearanceSettings | undefined>(undefined);
-	// The record has arrived (or a write replaced it): until then only the
-	// mode is known (server-rendered), not the custom backgrounds.
-	const [recordLoaded, setRecordLoaded] = useState(false);
+	const [delta, setDelta] = useState<AppearanceSettings | undefined>(initialAppearance);
 	const appliedRef = useRef<string>("");
 	const prefersDark = usePrefersDark();
-	const mode: AppearanceMode = delta?.mode ?? initialMode;
+	const { mode, background } = resolveAppearance(delta);
 	const resolvedMode = resolveRenderedMode(mode, prefersDark);
+	// The mode the layout rendered into <html className>. A string, so it
+	// only changes when the server's render does.
+	const serverMode = resolveAppearance(initialAppearance).mode;
 
-	// The mode lives on <html>: data-lh-mode for the pre-paint script on the
-	// next load, the class for every `.dark`/`.light` rule and variant.
+	// The class on <html> drives every `.dark`/`.light` rule and variant.
 	// System reads the OS here, not resolvedMode: during hydration that still
 	// holds the server snapshot (dark) and would undo the head script's class
-	// for a commit. resolvedMode stays a dep so an OS flip re-runs this. A
-	// LAYOUT effect (like the vars below): descendants' passive effects run
-	// after it, so anything reading computed tokens (the graph canvas) sees
-	// the new mode, and the swap lands before paint.
+	// for a commit. resolvedMode stays a dep so an OS flip re-runs this, and
+	// serverMode so a server re-render of the layout (HMR, a refresh) that
+	// rewrites className is corrected in the same commit. A LAYOUT effect
+	// (like the vars below): descendants' passive effects run after it, so
+	// anything reading computed tokens (the graph canvas) sees the new mode,
+	// and the swap lands before paint.
 	useLayoutEffect(() => {
 		const root = document.documentElement;
 		const dark = mode === "system" ? window.matchMedia(DARK_QUERY).matches : mode === "dark";
-		root.dataset.lhMode = mode;
 		root.classList.toggle("dark", dark);
 		root.classList.toggle("light", !dark);
-	}, [mode, resolvedMode]);
+	}, [mode, resolvedMode, serverMode]);
 
 	// The vars apply on every change — stringified as the change signal.
 	const vars = useMemo(() => appearanceVars(resolveAppearance(delta), resolvedMode), [delta, resolvedMode]);
@@ -214,42 +216,12 @@ export function AppearanceProvider({
 	}, [key, vars]);
 
 	// The desktop shell's native chrome (window background, Windows/Linux
-	// control overlay) follows the mode and backgrounds — absent in a browser.
-	// Held until the record loads: main read the same settings file at
-	// launch, and the factory background would briefly undo a custom one.
-	const { background } = resolveAppearance(delta);
+	// control overlay) follows the mode and background — absent in a browser.
 	useEffect(() => {
-		if (!recordLoaded) return;
 		window.lh?.setAppearance?.({ mode, background });
-	}, [recordLoaded, mode, background]);
+	}, [mode, background]);
 
-	// One fetch per app load: the record (sanitized server-side) carries the
-	// delta; resolution happens here against the compiled factory.
-	useEffect(() => {
-		let alive = true;
-		fetch("/api/settings")
-			.then((r) => r.json())
-			.then((body: { settings?: Record<string, unknown> }) => {
-				if (!alive) return;
-				// The record arrives sanitized server-side; the appearance
-				// slice is unknown-shaped here, so it goes through the same
-				// resolve (absent/invalid fields = factory anyway).
-				const appearance = body.settings?.appearance;
-				setDelta(
-					appearance && typeof appearance === "object" ? (appearance as AppearanceSettings) : undefined,
-				);
-				setRecordLoaded(true);
-			})
-			.catch(() => {/* settings stay factory — not worth a crash */});
-		return () => {
-			alive = false;
-		};
-	}, []);
-
-	const onAppearanceChange = useCallback((next: AppearanceSettings | undefined) => {
-		setDelta(next);
-		setRecordLoaded(true);
-	}, []);
+	const onAppearanceChange = useCallback((next: AppearanceSettings | undefined) => setDelta(next), []);
 
 	const value = useMemo(
 		() => ({ appearance: resolveAppearance(delta), resolvedMode, onAppearanceChange }),

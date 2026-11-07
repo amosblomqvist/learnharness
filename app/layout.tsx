@@ -26,7 +26,8 @@ export default async function RootLayout({ children }: { children: React.ReactNo
 	// frame. connection(): the record is per-machine disk state — without it
 	// a prerendered route (settings) would bake the BUILD machine's record.
 	await connection();
-	const mode = resolveSettings(readSettingsRecord() ?? null).appearance.mode;
+	const record = readSettingsRecord() ?? null;
+	const mode = resolveSettings(record).appearance.mode;
 	const initial = mode === "light" ? "light" : "dark"; // system: the head script corrects it
 	return (
 		<html
@@ -42,7 +43,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
 			{/* The notification channel rides OUTSIDE everything: sidebar, dock,
 				 and pages all subscribe as the polls retire (push S3, 2026-10-02). */}
 			<ServerEventsProvider>
-				<AppearanceProvider initialMode={mode}>
+				<AppearanceProvider initialAppearance={record?.appearance}>
 					<SidebarProvider>
 						<ActivityProvider>
 							<AppShell>{children}</AppShell>
