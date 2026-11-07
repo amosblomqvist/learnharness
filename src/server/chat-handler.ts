@@ -43,15 +43,17 @@ import {
 	resolveRoleSpec,
 } from "../core/settings-resolution.ts";
 import { modelsNotConfigured, providerKeyMissing as providerKeyMissingEnvelope, ROLE_SLOT, type ModelSlotName, type ProviderKeyMissing } from "../core/settings.ts";
-import { beginTurn, endTurn } from "./turn-liveness.ts";
+import { beginTurn, endTurn, isTurnRunning } from "./turn-liveness.ts";
 import { applyParkedDismissal } from "./dismissal-park.ts";
 import { sideConversationEntries } from "../core/side-chat.ts";
 import { sideChats, type SideChatService } from "./side-chat.ts";
+import { SIDE_CONTEXT_BUDGET_ERROR, sideBudgetRetryDrops } from "./side-context-budget.ts";
 import { registerTurn, rememberTurnFailure, unregisterTurn } from "./turn-runs.ts";
 import { persistTurn, triggerExtraction, TurnPersistenceError } from "./turn-service.ts";
 import { hasProbeDone, hasUnresolvedQuestion } from "../core/native-messages.ts";
 import { composeInstructions } from "../agent/teacher-agent.ts";
-import { ensureCompacted, kickCompaction, effectiveThresholdTokens } from "./compaction.ts";
+import { ensureCompacted, kickCompaction, effectiveThresholdTokens, projectedContextTokens } from "./compaction.ts";
+import { COMPACTION_RESERVE_TOKENS } from "../core/compaction.ts";
 import { catalogContextLimits, refreshConnectionCatalog } from "./model-catalog.ts";
 import { emit } from "../core/events.ts";
 import { settledTurnResponse } from "./turn-runs.ts";
@@ -288,18 +290,39 @@ export async function handleChatInput(
 	try { conversationEngine = piEngineForSpec(conversation, () => callPurpose.background, lifecycle, retentionForSlot("strong")); }
 	catch { return Response.json({ error: conversation.provider === "chatgpt" ? chatGPTStreamError("model catalog") : isSubscriptionProvider(conversation.provider) ? nativeSubscriptionError(conversation.provider, "model catalog") : "The selected model is unavailable." }, { status: 503 }); }
 	const modelIdForCompaction = `${conversationEngine.model.provider}:${conversationEngine.model.id}`;
+	const contextWindow = catalogContextLimits().get(modelIdForCompaction);
+	const thresholdTokens = effectiveThresholdTokens(effective.compaction?.thresholdTokens, contextWindow);
+	const systemPromptTokens = Math.ceil(composeInstructions(record.kind === "practice" ? "practice" : "teacher").length / 4);
+	// The configured threshold triggers compaction, not a smaller-model cap.
+	// Unknown windows use that configured budget, never an invented window.
+	const contextBudget = contextWindow === undefined ? thresholdTokens : Math.max(1, contextWindow - Math.min(COMPACTION_RESERVE_TOKENS, conversationEngine.model.maxTokens));
+	const fitsSideContext = (messages: readonly LhMessage[]) => projectedContextTokens(messages.filter((message) => (message as { role: string }).role !== "system"), systemPromptTokens) <= contextBudget;
+	const sideBudgetError = () => new Error(SIDE_CONTEXT_BUDGET_ERROR);
+	const beforeCompaction = record.messages;
 	await ensureCompacted(
 		{
 			chatStore: stores.chatStore,
 			engine: piEngineForSpec(conversation, true, undefined, retentionForSlot("strong")),
-			canStart: () => connectionBackgroundAllowed(conversation.provider),
+			canStart: () => !isTurnRunning(chatId) && connectionBackgroundAllowed(conversation.provider),
 			modelId: modelIdForCompaction,
 			kind: record.kind === "practice" ? "practice" : hasProbeDone(record.messages) ? "teach" : "probe",
-			thresholdTokens: effectiveThresholdTokens(
-				effective.compaction?.thresholdTokens,
-				catalogContextLimits().get(modelIdForCompaction),
-			),
-			systemPromptTokens: Math.ceil(composeInstructions(record.kind === "practice" ? "practice" : "teacher").length / 4),
+			thresholdTokens,
+			systemPromptTokens,
+			projectMessages: (current) => {
+				try {
+					const next = input.type === "steers" ? input.steers.filter((entry) => !steerDelivered(current.messages, entry.id)) : inputAppends(current, input);
+					const after = [...current.messages, ...next];
+					if (hasUnresolvedQuestion(after)) return current.messages;
+					const updates = sideConversationEntries({ messages: current.messages, sideChats: sideContext.snapshot(chatId) }, after);
+					if (!updates.length) return current.messages;
+					const projected = [...current.messages, ...(input.type === "answer" || input.type === "retry-question" ? [...next, ...updates] : [...updates, ...next])];
+					const omitted = input.type === "retry" ? retryDrops(current.messages) : new Set<string>();
+					return projected.filter((message) => !omitted.has(message.id));
+				} catch (error) {
+					if (error instanceof ChatInputError) return current.messages; // normal input validation follows the gate
+					throw error;
+				}
+			},
 		},
 		chatId,
 	);
@@ -312,7 +335,7 @@ export async function handleChatInput(
 	let retryOmissions = new Set<string>();
 	if (input.type === "retry") {
 		try {
-			retryOmissions = retryDrops(record.messages);
+			retryOmissions = sideBudgetRetryDrops(beforeCompaction, record.messages) ?? retryDrops(record.messages);
 		} catch (err) {
 			if (err instanceof ChatInputError) return Response.json({ error: err.message }, { status: 400 });
 			throw err;
@@ -382,7 +405,16 @@ export async function handleChatInput(
 	const sideQuestions = hasUnresolvedQuestion(afterInput) ? [] : sideConversationEntries({
 		messages: record.messages, sideChats: sideContextSnapshots,
 	}, afterInput);
-	if (sideQuestions.length) appends = input.type === "answer" || input.type === "retry-question" ? [...appends, ...sideQuestions] : [...sideQuestions, ...appends];
+	const withSideQuestions = input.type === "answer" || input.type === "retry-question" ? [...appends, ...sideQuestions] : [...sideQuestions, ...appends];
+	const prospective = [...record.messages, ...withSideQuestions].filter((message) => !retryOmissions.has(message.id));
+	const sideContextBlocked = sideQuestions.length > 0 && !fitsSideContext(prospective);
+	// An automatic batch has not been admitted; refuse it without persisting
+	// its markers. Its existing caller retains/restores the queued work.
+	if (sideContextBlocked && isSubscriptionProvider(conversation.provider) && input.type === "steers") {
+		endTurn(chatId);
+		return new Response(sideBudgetError().message, { status: 400 });
+	}
+	if (!sideContextBlocked) appends = withSideQuestions;
 	const merged = [...record.messages, ...appends];
 	// Retry preserves every persisted attempt. Pi needs a non-assistant
 	// tail to start continue(), so its temporary history omits the trailing
@@ -460,12 +492,15 @@ export async function handleChatInput(
 		},
 		restoreAutomatic: (automaticIds, retainedIds) => restoreUncommittedAutomatic(chatId, constructed, automaticIds, retainedIds),
 	});
+	let pendingSideBudgetError: Error | undefined;
 	const agentOpts: AgentBuildOptions = {
 		engine,
 		callPurpose,
 		requestCycle,
 		messages: asAgentMessages(agentMessages),
+		validateContext: () => { if (pendingSideBudgetError) throw pendingSideBudgetError; },
 		contextUpdates: (messages) => {
+			pendingSideBudgetError = undefined;
 			const current = stores.chatStore.getChat(chatId);
 			if (!current) return [];
 			const saved = new Set(current.messages.map((message) => message.id));
@@ -478,7 +513,12 @@ export async function handleChatInput(
 			// suffixes twice. Full disk history keeps the pre-compaction ledger.
 			const pending = live.filter((message) => message.role === "custom" && message.customType === "side-question" && !saved.has(message.id));
 			const history = [...current.messages, ...pending];
-			return asAgentMessages(sideConversationEntries({ messages: history, sideChats: sideContext.snapshot(chatId) }));
+			const updates = sideConversationEntries({ messages: history, sideChats: sideContext.snapshot(chatId) });
+			if (updates.length && !fitsSideContext([...live, ...updates])) {
+				pendingSideBudgetError = sideBudgetError();
+				return []; // no delivery watermark for exchanges the model cannot receive
+			}
+			return asAgentMessages(updates);
 		},
 		onUsage: collectUsage,
 		toolToggles: effective.agent.tools,
@@ -655,7 +695,7 @@ export async function handleChatInput(
 				// real truth — BEFORE endTurn, so "turn-settled" guarantees a
 				// subsequent fetch reads the dismissal already in the record
 				// (the same ordering law as persistTurn itself).
-				applyParkedDismissal(stores.chatStore, chatId, sideContext.snapshot(chatId));
+				applyParkedDismissal(stores.chatStore, chatId);
 				// Any helper activity after the last model call stays pending;
 				// settlement never injects it behind the agent's context.
 				// LAST: a poller that sees not-in-flight must read an already-persisted
@@ -686,7 +726,7 @@ export async function handleChatInput(
 				// beneath-threshold record is a silent no-op. Skipped under
 				// tests (the extraction precedent — scripted chats are
 				// fixtures; the service itself is pinned directly).
-				if (process.env.NODE_ENV !== "test" && (!requestCycle || requestCycle.dispatched))
+				if (process.env.NODE_ENV !== "test" && !pendingSideBudgetError && (!requestCycle || requestCycle.dispatched))
 					kickCompaction(() => {
 						const fresh = effectiveSettings();
 						const spec = resolveConversationSpec(stores.chatStore.getChat(chatId)?.settings, fresh.models.strong);
@@ -699,7 +739,7 @@ export async function handleChatInput(
 						return {
 							chatStore: stores.chatStore,
 							engine: kickEngine,
-							canStart: () => connectionBackgroundAllowed(spec.provider),
+							canStart: () => !isTurnRunning(chatId) && connectionBackgroundAllowed(spec.provider),
 							modelId: kickModelId,
 							kind: freshRecord.kind === "practice" ? "practice" : hasProbeDone(freshRecord.messages) ? "teach" : "probe",
 							thresholdTokens: effectiveThresholdTokens(

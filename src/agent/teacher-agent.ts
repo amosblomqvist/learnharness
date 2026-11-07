@@ -111,6 +111,9 @@ export interface AgentBuildOptions {
 	/** Append-only reference updates before each already-scheduled internal
 	 * model call. Does not schedule an extra call or interrupt live output. */
 	contextUpdates?: (messages: readonly AgentMessage[]) => AgentMessage[];
+	/** Local validation before dispatch; throws through the SDK's normal
+	 * failed-response lifecycle, never through the conversion seam. */
+	validateContext?: () => void;
 	/** Tests may pass a bare tool registry to drive deterministic flows.
 	 *  An explicit registry is NEVER toggle-filtered — the caller owns it. */
 	tools?: Record<string, AgentTool<any>>;
@@ -264,6 +267,11 @@ function baseAgentOptions(kind: AgentKind, opts: AgentBuildOptions, tools: Agent
 				else if (learner) opts.callPurpose.background = false;
 			}
 			opts.requestCycle?.prepare(request);
+			try { opts.validateContext?.(); }
+			catch (error) {
+				opts.requestCycle?.rejectLocalRequest();
+				throw error;
+			}
 		},
 	});
 	if (opts.onUsage) {

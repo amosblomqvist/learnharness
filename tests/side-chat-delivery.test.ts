@@ -25,6 +25,10 @@ const { runningTurn } = await import("../src/server/turn-runs.ts");
 const { buildAnswer, normalizeOptions, resolveCorrect } = await import("../src/core/question-core.ts");
 const { sideConversationEntries, sideSegmentId } = await import("../src/core/side-chat.ts");
 const { newUserMessage } = await import("../src/core/native-messages.ts");
+const { catalogContextLimits } = await import("../src/server/model-catalog.ts");
+const { retryDrops } = await import("../src/core/input-events.ts");
+const { SIDE_CONTEXT_BUDGET_ERROR, sideBudgetRetryDrops } = await import("../src/server/side-context-budget.ts");
+const { newCompactionMarker } = await import("../src/core/compaction.ts");
 const { collectCitations, serializeCitation } = await import("../src/core/citations.ts");
 const { parseSideAskInput, SideChatInputError } = await import("../src/core/side-chat.ts");
 const { markUnadmittedUsage } = await import("../src/agent/subscription-request-cycle.ts");
@@ -54,6 +58,16 @@ function fixture() {
 	const finish = (text = "Partial helper text AND LATE COMPLETION") => stream!.push({ type: "done", reason: "stop", message: fauxAssistantMessage(text) });
 	return { service, chatId: chat.id, anchor, finish, contexts, calls: () => calls };
 }
+function aggregate(f: ReturnType<typeof fixture>) {
+	const window = catalogContextLimits().get("openrouter:z-ai/glm-5.3-flash") ?? 150_000;
+	const count = Math.ceil(window / 3500) + 4;
+	const threads: SideChatThread[] = Array.from({ length: count }, (_, index) => ({
+		id: `side_older_${index}`, anchor: { messageId: `older_${index}`, partId: `older_${index}-t0`, blockIndex: 0, blockText: "Older lesson" }, open: true, createdAt: at,
+		messages: [{ id: `q_${index}`, role: "user", text: "Q".repeat(8000), at }, { id: `a_${index}`, role: "assistant", text: "A".repeat(8000), at }],
+	}));
+	chatStore.updateSideChats(f.chatId, () => threads);
+	return threads;
+}
 async function seenPartial(response: Response) {
 	const reader = response.body!.getReader(); const decoder = new TextDecoder(); let text = "";
 	while (!text.includes('"text":"Partial helper text"')) {
@@ -78,6 +92,21 @@ async function mainInput(chatId: string, input: unknown, service: ReturnType<typ
 }
 
 describe("append-only main-request delivery", () => {
+	it("keeps a local budget Retry eligible across only its own preflight compaction, without changing ordinary retry policy", () => {
+		const user = newUserMessage("Saved input");
+		const failure = { ...fauxAssistantMessage("", { stopReason: "error" }), id: "budget_failure", errorMessage: SIDE_CONTEXT_BUDGET_ERROR };
+		const before = [user, failure];
+		const marker = newCompactionMarker("Older history summary", { firstKeptMessageId: user.id, tokensBefore: 200_000, model: "faux:test", at });
+		const after = [...before, marker];
+		assert.throws(() => retryDrops(after), /after compaction/);
+		assert.deepEqual([...sideBudgetRetryDrops(before, after)!], [failure.id]);
+		assert.equal(sideBudgetRetryDrops(after, after), undefined, "pre-existing compaction still blocks Retry");
+		assert.equal(sideBudgetRetryDrops(before, [...after, newUserMessage("An intervening input")]), undefined);
+		const ordinary = [user, { ...failure, errorMessage: "Unrelated provider error" }];
+		assert.equal(sideBudgetRetryDrops(ordinary, [...ordinary, marker]), undefined);
+		const laterTransportFailure = [...before, { ...failure, id: "later_error", errorMessage: "Unrelated provider error" }];
+		assert.equal(sideBudgetRetryDrops(laterTransportFailure, [...laterTransportFailure, marker]), undefined, "an older budget failure cannot widen a later transport Retry");
+	});
 	it("submits immediately and appends completion/follow-ups on later requests without revising any prior context", async () => {
 		const f = fixture();
 		const response = await f.service.ask(f.chatId, { anchor: f.anchor, text: "Why?", quotes: [], requestId: "ask_first" });
@@ -142,7 +171,7 @@ describe("append-only main-request delivery", () => {
 		assert.throws(() => parseSideAskInput({ anchor: f.anchor, text: "Clarify", quotes: [], quoteCitations: [link] }), SideChatInputError);
 	});
 
-	it("records an idle dismissal atomically, with later side activity queued for the next teacher request", async () => {
+	it("records an idle dismissal without pre-publishing side exchanges before the next budget-checked teacher request", async () => {
 		const f = fixture();
 		const response = await f.service.ask(f.chatId, { anchor: f.anchor, text: "Before dismissal", quotes: [] });
 		const reader = await seenPartial(response); f.finish("Saved helper reply");
@@ -153,9 +182,8 @@ describe("append-only main-request delivery", () => {
 		const saved = chatStore.getChat(f.chatId)!;
 		assert.equal(runningTurn(f.chatId), undefined);
 		assert.equal(saved.sideChats![0]!.contextSnapshot, undefined);
-		assert.match(JSON.stringify(saved.messages.at(-1)), /Saved helper reply/);
-		assert.equal(saved.messages.at(-1)!.role, "custom");
-		assert.match(JSON.stringify(saved.messages.at(-1)), /Recorded learner–helper conversation/);
+		assert.equal(saved.messages.at(-1)!.role, "toolResult");
+		assert.equal(saved.messages.filter((message) => message.role === "custom" && message.customType === "side-question").length, 0);
 		const later = await f.service.ask(f.chatId, { threadId: "side_explanation", text: "After dismissal", quotes: [] });
 		const laterReader = await seenPartial(later); f.finish("LATE DISMISSAL REPLY");
 		await f.service.settled(f.chatId, "side_explanation"); await laterReader.cancel();
@@ -165,16 +193,17 @@ describe("append-only main-request delivery", () => {
 		assert.deepEqual(chatStore.getChat(f.chatId)!.messages.slice(0, saved.messages.length), saved.messages);
 	});
 
-	it("records a parked dismissal's partial reply, then appends its remaining text on the next request", async () => {
+	it("keeps a parked dismissal's partial side reply pending until the next budget-checked request", async () => {
 		const f = fixture();
 		const response = await f.service.ask(f.chatId, { anchor: f.anchor, text: "Before parked dismissal", quotes: [] });
 		const reader = await seenPartial(response);
 		parkDismissal(f.chatId, { type: "dismiss", toolCallId: "check", answer: { ...gradedAnswer(), dismissed: true } });
-		applyParkedDismissal(chatStore, f.chatId, f.service.snapshot(f.chatId));
+		applyParkedDismissal(chatStore, f.chatId);
 		const saved = chatStore.getChat(f.chatId)!;
 		assert.equal(saved.sideChats![0]!.contextSnapshot, undefined);
-		assert.match(JSON.stringify(saved.messages.at(-1)), /still generating/);
-		assert.match(JSON.stringify(saved.messages.at(-1)), /Partial helper text/);
+		assert.equal(saved.messages.at(-1)!.role, "toolResult");
+		assert.equal(saved.messages.filter((message) => message.role === "custom" && message.customType === "side-question").length, 0);
+		assert.doesNotMatch(JSON.stringify(saved.messages), /Partial helper text/);
 		f.finish(); await f.service.settled(f.chatId, "side_explanation"); await reader.cancel();
 		assert.deepEqual(chatStore.getChat(f.chatId)!.messages, saved.messages);
 		const next = await mainInput(f.chatId, { type: "text", text: "After parked dismissal" }, f.service);
@@ -334,6 +363,49 @@ describe("append-only main-request delivery", () => {
 		const next = await mainInput(f.chatId, { type: "text", text: "Continue" }, f.service);
 		assert.match(JSON.stringify(next.contexts), /AFTER LAST REQUEST/);
 		f.finish(); await f.service.settled(f.chatId, "side_explanation"); await lastReader!.cancel();
+	});
+
+	it("refuses aggregate all-thread overflow before the first provider call, retaining the input and every undelivered raw exchange", async () => {
+		const f = fixture(); const threads = aggregate(f); const original = chatStore.getChat(f.chatId)!.messages;
+		const result = await mainInput(f.chatId, { type: "answer", toolCallId: "check", answer: gradedAnswer() }, f.service);
+		assert.equal(result.response.status, 200); assert.equal(result.contexts.length, 0);
+		const saved = chatStore.getChat(f.chatId)!;
+		assert.deepEqual(saved.messages.slice(0, original.length), original);
+		assert.deepEqual(saved.sideChats, threads);
+		assert.equal(saved.messages.filter((message) => message.role === "custom" && message.customType === "side-question").length, 0);
+		assert.equal(saved.messages.filter((message) => message.role === "toolResult" && message.toolCallId === "check").length, 1);
+		const failure = saved.messages.at(-1)!;
+		assert.equal(failure.role, "assistant"); if (failure.role === "assistant") assert.match(failure.errorMessage!, /context budget.*Retry.*larger context window/);
+		assert.equal(retryDrops(saved.messages).size, 1);
+		assert.equal(sideConversationEntries(saved).length, threads.length * 2, "refusal consumes no delivery watermarks");
+	});
+
+	it("stops an internal oversized request without replaying completed tools, then delivers all raw exchanges on a larger-model retry", async () => {
+		const f = fixture(); const main = createFauxCore({}); const contexts: TranscriptContext[] = []; let reads = 0;
+		main.appendResponses([(context) => { contexts.push(context); return fauxAssistantMessage([fauxToolCall("offline_read", {}, { id: "read_before_overflow" })], { stopReason: "toolUse" }); }]);
+		const engine: PiEngine = { model: main.getModel(), streamFn: main.streamSimple };
+		const response = await handleChatRequest(new Request("http://offline.test/api/chat", { method: "POST", headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({ chatId: f.chatId, input: { type: "answer", toolCallId: "check", answer: gradedAnswer() } }) }),
+			(opts) => createTeacherAgent(undefined, { ...opts, engine, tools: { offline_read: {
+				name: "offline_read", label: "Offline read", description: "Synthetic tool", parameters: Type.Object({}),
+				execute: async () => { reads++; aggregate(f); return { content: [{ type: "text", text: "COMPLETED TOOL WORK" }], details: null }; },
+			} } }), f.service);
+		assert.equal(response.status, 200); const turn = runningTurn(f.chatId); if (turn) await new Response(turn.subscribe()).text();
+		assert.equal(contexts.length, 1); assert.equal(reads, 1);
+		const stopped = chatStore.getChat(f.chatId)!;
+		assert.ok(stopped.messages.some((message) => message.role === "toolResult" && message.toolCallId === "read_before_overflow"));
+		assert.equal(retryDrops(stopped.messages).size, 1);
+		assert.equal(stopped.messages.filter((message) => message.role === "custom" && message.customType === "side-question").length, 0);
+		const rawCount = sideConversationEntries(stopped).length;
+		const larger = [...catalogContextLimits()].filter(([key]) => key.startsWith("openrouter:")).sort((a, b) => b[1] - a[1])[0]!;
+		assert.ok(larger[1] > (catalogContextLimits().get("openrouter:z-ai/glm-5.3-flash") ?? 150_000) * 1.5);
+		chatStore.saveSettings(f.chatId, { model: { provider: "openrouter", id: larger[0].slice("openrouter:".length) } });
+		const retried = await mainInput(f.chatId, { type: "retry" }, f.service);
+		assert.equal(retried.contexts.length, 1); assert.equal(reads, 1, "completed tool is not replayed");
+		const saved = chatStore.getChat(f.chatId)!;
+		assert.deepEqual(saved.messages.slice(0, stopped.messages.length), stopped.messages);
+		assert.equal(saved.messages.filter((message) => message.role === "custom" && message.customType === "side-question").length, rawCount);
+		assert.deepEqual(sideConversationEntries(saved), []);
 	});
 
 	it("does not charge usage marked as never admitted", async () => {

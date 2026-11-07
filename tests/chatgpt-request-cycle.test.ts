@@ -69,7 +69,7 @@ after(() => {
  if (originalConnected) Object.defineProperty(process, "connected", originalConnected); else delete (process as { connected?: boolean }).connected;
 });
 const automatic = (id = "auto") => ({ id, role: "custom" as const, customType: "subagent-steer" as const, content: "Automatic result", details: { jobId: "dummy-job" }, display: true, timestamp: 2 });
-async function nativeRun(where: typeof cut, staged: boolean, withLearner = true, commitThrows = false, lateAutomatic = false, withTool = false) {
+async function nativeRun(where: typeof cut, staged: boolean, withLearner = true, commitThrows = false, lateAutomatic = false, withTool = false, localBudget?: "first" | "internal") {
  epoch++; revision++; background = true; cut = where; leases = []; fetches = 0; toolFirst = withTool;
  await refreshChatGPTModels([model]);
  const seed = newUserMessage("Initial learner"); const marker = automatic(); const learner = { ...newUserMessage("New learner"), id: "learner-late" };
@@ -84,7 +84,7 @@ async function nativeRun(where: typeof cut, staged: boolean, withLearner = true,
  });
  const raw = piEngineForSpec({ provider: "chatgpt", id: model.id }, () => purpose.background, cycle);
  const engine = { ...raw, streamFn: (m: any, context: any, opts: any) => raw.streamFn(m, context, { ...opts, onPayload: async (payload: unknown) => { if (lateAutomatic && !handedLate) { handedLate = true; agent.steer(marker); } if (cut === "payload") { cut = "none"; await Promise.resolve(); revoke(); } return payload; } }) };
- const agent = createTeacherAgent(undefined, { engine, messages, chatId: "scratch-native-session", tools: withTool ? { again: { name: "again", label: "again", description: "scratch", parameters: Type.Object({}), execute: async () => { executed++; return { content: [{ type: "text" as const, text: "Done" }], details: {} }; } } } : {}, callPurpose: purpose, requestCycle: cycle, onUsage: () => usage++ });
+ const agent = createTeacherAgent(undefined, { validateContext: () => { if (localBudget === "first" || (localBudget === "internal" && executed > 0)) throw new Error("Side-chat context budget exceeded; Retry or select a larger model."); }, engine, messages, chatId: "scratch-native-session", tools: withTool ? { again: { name: "again", label: "again", description: "scratch", parameters: Type.Object({}), execute: async () => { executed++; return { content: [{ type: "text" as const, text: "Done" }], details: {} }; } } } : {}, callPurpose: purpose, requestCycle: cycle, onUsage: () => usage++ });
  if (!staged && !lateAutomatic) agent.steer(marker);
  if (withLearner) agent.steer(learner);
  const handle = runPiTurn({ agent, requestCycle: cycle, onFinish: (m) => { settled++; final = m; resolve(); } });
@@ -136,6 +136,20 @@ test("unfinished foreground ordinary-tool chain recovers without rerunning the c
  const r = await nativeRun("lease", false, false, false, true, true);
  assert.equal(r.fetches, 2); assert.equal(r.executed, 1); assert.equal(r.usage, 2); assert.deepEqual(r.leases, [false, true, false]);
  assert.equal(r.final.filter((m) => m.role === "toolResult").length, 1);
+ assert(!r.wire.includes('"id":"auto"'));
+});
+
+test("local first-call context refusal restores unadmitted automatic input and retains an actionable SDK error without a lease or retry", async () => {
+ const r = await nativeRun("none", true, true, false, false, false, "first");
+ assert.equal(r.fetches, 0); assert.deepEqual(r.leases, []); assert.equal(r.usage, 0); assert.equal(r.committed, 0); assert.equal(r.restored, 1);
+ assert.equal(await r.cycle.admission, false); assert(!r.wire.includes('"id":"auto"')); assert.match(r.wire, /Side-chat context budget exceeded/);
+ assert.equal(r.final.filter((m) => m.role === "assistant" && m.stopReason === "error").length, 1);
+ assert.equal(r.final.filter((m) => (m as { id?: string }).id === "learner-late").length, 1);
+});
+test("local internal context refusal keeps completed tools and restores new automatic input without another lease or foreground recovery", async () => {
+ const r = await nativeRun("none", false, false, false, true, true, "internal");
+ assert.equal(r.fetches, 1); assert.equal(r.executed, 1); assert.deepEqual(r.leases, [false]); assert.equal(r.usage, 1); assert.equal(r.restored, 1);
+ assert.equal(r.final.filter((m) => m.role === "toolResult").length, 1); assert.match(r.wire, /Side-chat context budget exceeded/);
  assert(!r.wire.includes('"id":"auto"'));
 });
 

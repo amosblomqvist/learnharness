@@ -275,8 +275,9 @@ export function runPiTurn(spec: PiTurnSpec): PiTurnHandle {
 				await agent.continue();
 				if (!requestCycle) break;
 				const denied = requestCycle.deniedBeforeDispatch;
-				const outcome = requestCycle.finishNativeCycle();
-				if (denied) agent.state.messages = outcome.messages;
+				const locallyRejected = requestCycle.locallyRejected;
+				const outcome = requestCycle.finishNativeCycle(agent.state.messages);
+				if (denied || locallyRejected) agent.state.messages = outcome.messages;
 				if (outcome.action !== "resumeForeground") {
 					handle({ type: "agent_end", messages: [...agent.state.messages] });
 					break;

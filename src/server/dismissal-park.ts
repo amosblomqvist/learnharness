@@ -25,7 +25,7 @@
  * dismissal per chat (last write wins — there is one dock, one discard).
  */
 
-import { ChatInputError, dismissAppends, emit, hasUnresolvedQuestion, sideConversationEntries, type SideChatThread } from "../core";
+import { ChatInputError, dismissAppends, emit } from "../core";
 import type { ChatStore } from "../core/ports.ts";
 
 /** The parked dismissal body — exactly the parsed input the dismiss route
@@ -64,16 +64,16 @@ export function takeParkedDismissal(chatId: string): ParkedDismissal | null {
  *  ChatInputError means the dismissed thing never materialized — the park
  *  is dropped, silence is the correct outcome. Emits "record-changed"
  *  exactly when something was written. */
-export function applyParkedDismissal(chatStore: ChatStore, chatId: string, sideContextSnapshots?: readonly SideChatThread[]): void {
+export function applyParkedDismissal(chatStore: ChatStore, chatId: string): void {
 	const input = takeParkedDismissal(chatId);
 	if (input === null) return;
 	const record = chatStore.getChat(chatId);
 	if (!record) return;
 	try {
 		const appends = dismissAppends(record, input as Parameters<typeof dismissAppends>[1]);
-		const after = [...record.messages, ...appends];
-		const entries = hasUnresolvedQuestion(after) ? [] : sideConversationEntries({ messages: after, sideChats: sideContextSnapshots ? [...sideContextSnapshots] : record.sideChats });
-		chatStore.saveMessages(chatId, [...after, ...entries]);
+		// Settlement/dismissal does not run another model call. Keep new
+		// side exchanges pending until that call's context-budget gate.
+		chatStore.saveMessages(chatId, [...record.messages, ...appends]);
 		emit("record-changed", { chatId });
 	} catch (err) {
 		if (err instanceof ChatInputError) return; // never materialized — drop

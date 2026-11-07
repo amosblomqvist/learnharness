@@ -126,12 +126,46 @@ describe("the compaction service", () => {
 		assert.equal(activeCompactionOf(chatStore.getChat(chatId)!.messages), null);
 	});
 
+	it("includes prospective side cargo in the trigger but never records or summarizes that undelivered cargo", async () => {
+		const chat = chatStore.createChat("compact: prospective side exchanges");
+		chatStore.saveMessages(chat.id, [big("old lesson 1", 40), big("old lesson 2", 40), big("old lesson 3", 40), newUserMessage("recent lesson")]);
+		const original = chatStore.getChat(chat.id)!.messages;
+		const cargo = newUserMessage(`UNDELIVERED SIDE EXCHANGES ${"s".repeat(90 * 1024)}`);
+		const deps = depsOf(chat.id, 45_000);
+		assert.ok(projectedContextTokens(original, deps.systemPromptTokens) < deps.thresholdTokens);
+		let summarized = "";
+		await ensureCompacted({ ...deps,
+			projectMessages: (record) => [...record.messages, cargo],
+			summarize: async (prompt, engine) => { summarized = prompt; return deps.summarize!(prompt, engine); },
+		}, chat.id);
+		const saved = chatStore.getChat(chat.id)!.messages;
+		assert.deepEqual(saved.slice(0, original.length), original);
+		assert.ok(activeCompactionOf(saved)); assert.doesNotMatch(summarized, /UNDELIVERED SIDE EXCHANGES/);
+		assert.ok(!saved.some((message) => message.id === cargo.id));
+		assert.ok(projectedContextTokens([...saved, cargo], deps.systemPromptTokens) < deps.thresholdTokens);
+	});
+
 	it("the registry is a mutex: concurrent ensureCompacted → ONE summary", async () => {
 		const chatId = overThresholdChat("compact: mutex");
 		const before = summarizeCalls;
 		const deps = depsOf(chatId, 40_000);
 		await Promise.all([ensureCompacted(deps, chatId), ensureCompacted(deps, chatId), ensureCompacted(deps, chatId)]);
 		assert.equal(summarizeCalls, before + 1, "exactly one summary however many gates race");
+	});
+
+	it("concurrent prospective gates both await the same summary rather than releasing a teacher early", async () => {
+		const chatId = overThresholdChat("compact: concurrent gate wait");
+		let release!: () => void, entered!: () => void;
+		const gate = new Promise<void>((done) => { release = done; });
+		const started = new Promise<void>((done) => { entered = done; });
+		const base = depsOf(chatId, 40_000);
+		const deps = { ...base, summarize: async (prompt: string) => { entered(); await gate; return base.summarize!(prompt, base.engine); } };
+		let firstDone = false, secondDone = false;
+		const first = ensureCompacted(deps, chatId).then(() => { firstDone = true; });
+		const second = ensureCompacted(deps, chatId).then(() => { secondDone = true; });
+		await started; await Promise.resolve(); await Promise.resolve();
+		assert.equal(firstDone, false); assert.equal(secondDone, false);
+		release(); await Promise.all([first, second]);
 	});
 
 	it("awaitCompaction: a later call rides the in-flight one (the structural gate)", async () => {
