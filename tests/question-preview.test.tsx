@@ -18,7 +18,7 @@ const annotations = (root: ParentNode) => [...root.querySelectorAll('annotation[
 async function withGeometry(run: (fixture: {
 	host: HTMLElement;
 	render: (source: string) => Promise<void>;
-	metrics: { budget: number; tall: number };
+	metrics: { budget: number; tall: number; width: number; contentWidth: number; mathWidth: number };
 	resize: () => void;
 	fontsLoaded: () => void;
 }) => Promise<void>, initialBudget = 20) {
@@ -33,12 +33,17 @@ async function withGeometry(run: (fixture: {
 	const previous = Object.getOwnPropertyDescriptors(globalThis);
 	const prototype = window.HTMLElement.prototype;
 	const previousRect = Object.getOwnPropertyDescriptor(prototype, "getBoundingClientRect");
-	const metrics = { budget: initialBudget, tall: 40 };
+	const previousScroll = Object.getOwnPropertyDescriptor(prototype, "scrollWidth");
+	const metrics = { budget: initialBudget, tall: 40, width: 280, contentWidth: 100, mathWidth: 12 };
 	Object.defineProperty(prototype, "getBoundingClientRect", { configurable: true, value(this: HTMLElement) {
 		let height = 0;
 		if (this.hasAttribute("data-question-preview")) height = metrics.budget;
 		else if (this.matches(".katex, .katex-error")) height = this.querySelector("annotation")?.textContent?.includes("\\begin") ? metrics.tall : 12;
-		return { x: 0, y: 0, top: 0, left: 0, width: 280, height, right: 280, bottom: height };
+		const width = this.matches(".katex, .katex-error") ? 12 : metrics.width;
+		return { x: 0, y: 0, top: 0, left: 0, width, height, right: width, bottom: height };
+	} });
+	Object.defineProperty(prototype, "scrollWidth", { configurable: true, get(this: HTMLElement) {
+		return this.matches(".lh-prose") ? metrics.contentWidth : this.matches(".katex, .katex-error") ? metrics.mathWidth : 0;
 	} });
 	const fonts = document.createElement("div");
 	Object.defineProperty(document, "fonts", { value: fonts });
@@ -56,6 +61,8 @@ async function withGeometry(run: (fixture: {
 		await act(async () => root.unmount()); host.remove();
 		if (previousRect) Object.defineProperty(prototype, "getBoundingClientRect", previousRect);
 		else Reflect.deleteProperty(prototype, "getBoundingClientRect");
+		if (previousScroll) Object.defineProperty(prototype, "scrollWidth", previousScroll);
+		else Reflect.deleteProperty(prototype, "scrollWidth");
 		for (const key of Object.keys(globals)) {
 			if (previous[key]) Object.defineProperty(globalThis, key, previous[key]);
 			else Reflect.deleteProperty(globalThis, key);
@@ -99,6 +106,7 @@ describe("collapsed question inline preview", () => {
 		assert.ok(!document.body.textContent.includes("BLOCK_SENTINEL"));
 		assert.ok(!document.body.textContent.includes("AFTER_SENTINEL"));
 		assert.equal(document.querySelectorAll("pre, button, .katex-display").length, 0);
+		assert.ok(document.querySelector('[data-preview-cut="true"]'), "the parsed cut is carried through the renderer to the continuation marker");
 	});
 
 	it("leaves code mentions of display delimiters literal and flattens paragraph/line breaks", () => {
@@ -118,9 +126,11 @@ describe("collapsed question inline preview", () => {
 		assert.equal(document.querySelectorAll("h1, ul, li, table, input, button").length, 0);
 	});
 
-	it("has an empty teaser when the first content is a block; no new placeholder copy", () => {
+	it("records a cut even when the first content is a block", () => {
 		for (const source of ["$$\nx=1\n$$\n\nTAIL", "```text\ncode\n```\n\nTAIL"]) {
-			assert.equal(preview(source).body.textContent, "");
+			const document = preview(source);
+			assert.equal(document.body.textContent, "", "SSR stays hidden until measured");
+			assert.ok(document.querySelector('[data-preview-cut="true"]'));
 		}
 	});
 
@@ -148,8 +158,11 @@ describe("collapsed question inline preview", () => {
 		const slot = document.querySelector("[data-question-preview]")!;
 		assert.ok(slot.classList.contains("h-[1.6em]"));
 		assert.equal(slot.getAttribute("data-ready"), "false", "SSR does not expose unmeasured, potentially cropped math");
+		const line = document.querySelector("[data-preview-line]")!;
+		for (const css of ["absolute", "top-1/2", "-translate-y-1/2"]) assert.ok(line.classList.contains(css));
 		const renderer = document.querySelector(".lh-prose")!;
-		for (const css of ["absolute", "top-1/2", "-translate-y-1/2", "[&_.katex]:align-middle", "[&_.katex]:leading-[0]!"]) assert.ok(renderer.classList.contains(css));
+		for (const css of ["[&_.katex]:align-middle", "[&_.katex]:leading-[0]!"]) assert.ok(renderer.classList.contains(css));
+		assert.ok(!renderer.classList.contains("text-ellipsis"), "only the explicit marker owns dots; CSS must not add another ellipsis");
 		for (const css of ["inline-block", "align-middle", "leading-none"]) assert.ok(document.querySelector("code")!.classList.contains(css), "padded inline code also fits the slot");
 	});
 
@@ -165,8 +178,67 @@ describe("collapsed question inline preview", () => {
 			assert.deepEqual(annotations(host), ["y", "z"]);
 			assert.ok(host.textContent.includes("AFTER_SMALL"));
 			await render(String.raw`$\begin{matrix}a\\b\end{matrix}$ AFTER_FIRST_TALL`);
-			assert.equal(host.textContent, "", "a first tall formula leaves the fixed teaser slot empty, without new copy");
+			assert.equal(host.textContent, "...", "a first tall formula now leaves just the requested continuation marker");
 			assert.ok(source.includes("AFTER_TALL"), "the source, unlike its presentation, is unchanged");
+		});
+	});
+
+	it("marks every semantic cut exactly once, even if the remaining prefix also overflows", async () => {
+		await withGeometry(async ({ host, render, metrics }) => {
+			metrics.contentWidth = 600;
+			for (const block of ["```js\nBLOCK\n```", "$$\nx=1\n$$", String.raw`$\begin{matrix}a\\b\end{matrix}$`]) {
+				await render(`Before **$x$**.\n\n${block}\n\nAFTER_CUT`);
+				assert.equal(host.querySelectorAll("[data-preview-ellipsis]").length, 1);
+				assert.equal(host.querySelector("[data-preview-ellipsis]")?.textContent, "...");
+				assert.ok(host.textContent.endsWith("..."));
+				assert.ok(!host.textContent.includes("AFTER_CUT"));
+			}
+		});
+	});
+
+	it("adds dots for width-only clipping and removes them when the same source fits after resizing", async () => {
+		await withGeometry(async ({ host, render, metrics, resize, fontsLoaded }) => {
+			const source = "A complete question with no omitted blocks.";
+			metrics.contentWidth = 600;
+			await render(source);
+			assert.equal(host.querySelectorAll("[data-preview-ellipsis]").length, 1);
+			await act(async () => { metrics.width = 700; resize(); });
+			assert.equal(host.querySelectorAll("[data-preview-ellipsis]").length, 0);
+			assert.equal(host.textContent.trim(), source);
+			await act(async () => { metrics.width = 280.4; metrics.contentWidth = 281; resize(); });
+			assert.equal(host.querySelectorAll("[data-preview-ellipsis]").length, 0, "fractional box rounding alone is not a cut");
+			await act(async () => { metrics.contentWidth = 600; fontsLoaded(); });
+			assert.equal(host.querySelectorAll("[data-preview-ellipsis]").length, 1);
+			await render("Short new question.");
+			// This controlled width remains narrow; reset the synthetic content
+			// measurement and verify source changes do not retain an old marker.
+			await act(async () => { metrics.contentWidth = 100; fontsLoaded(); });
+			assert.equal(host.querySelectorAll("[data-preview-ellipsis]").length, 0);
+		});
+	});
+
+	it("detects math overflow hidden from the line, without treating intrinsic font overhang as a width cut in a roomy slot", async () => {
+		await withGeometry(async ({ host, render, metrics, fontsLoaded, resize }) => {
+			metrics.mathWidth = 13; // One pixel beyond the controlled 12px math box.
+			await render("Before $x+1$.");
+			assert.equal(host.querySelectorAll("[data-preview-ellipsis]").length, 0);
+			await act(async () => { metrics.mathWidth = 300; fontsLoaded(); });
+			assert.deepEqual(annotations(host), ["x+1"]);
+			assert.equal(host.querySelectorAll("[data-preview-ellipsis]").length, 1);
+			await act(async () => { metrics.width = 700; resize(); });
+			assert.equal(host.querySelectorAll("[data-preview-ellipsis]").length, 0);
+		});
+	});
+
+	it("shows only three dots when the first content is an omitted block, and none for complete short text", async () => {
+		await withGeometry(async ({ host, render }) => {
+			for (const source of ["$$\nx=1\n$$", "```js\ncode\n```", String.raw`$\begin{matrix}a\\b\end{matrix}$`]) {
+				await render(source);
+				assert.equal(host.textContent, "...");
+				assert.equal(host.querySelectorAll("[data-preview-ellipsis]").length, 1);
+			}
+			await render("Complete `code` and $x$.");
+			assert.equal(host.querySelectorAll("[data-preview-ellipsis]").length, 0);
 		});
 	});
 
@@ -238,6 +310,72 @@ describe("collapsed question inline preview", () => {
 });
 
 describe("probe conclusion Markdown", () => {
+	it("starts collapsed with the same card/icon, a quiet count without a center dot, and the existing chevron/hover idiom", () => {
+		for (const count of [1, 3]) {
+			const document = dom(<ProbeDoneCard part={{ state: "output-available", input: { assessment: {
+				strands: Array.from({ length: count }, (_, i) => ({ strand: `Topic ${i}`, assessment: "ASSESSMENT_BODY" })),
+				summary: "SUMMARY_BODY",
+			} }, output: { ok: true } }} />);
+			const card = document.querySelector('[data-testid="probe-done-card"]')!;
+			assert.equal(card.tagName.toLowerCase(), "details");
+			assert.ok(!card.hasAttribute("open"));
+			for (const css of ["my-3", "rounded-xl", "border", "bg-card/60"]) assert.ok(card.classList.contains(css));
+			const summary = card.querySelector("summary")!;
+			assert.match(summary.textContent, /Probe assessment/);
+			assert.ok(summary.textContent.includes(`${count} strand${count === 1 ? "" : "s"}`));
+			assert.ok(!summary.textContent.includes("·") && !summary.textContent.includes("BODY"));
+			assert.ok(summary.classList.contains("hover:bg-accent/40"));
+			assert.ok(summary.querySelector(".lucide-clipboard-check")?.classList.contains("text-primary"));
+			assert.ok(summary.querySelector(".lucide-chevron-right")?.classList.contains("group-open:rotate-90"));
+			assert.equal(summary.querySelectorAll("button, a, input").length, 0);
+			assert.ok(card.textContent.includes("ASSESSMENT_BODY") && card.textContent.includes("SUMMARY_BODY"));
+		}
+	});
+
+	it("retains local native expansion while the mounted assessment updates, but not across remounts", async () => {
+		const { window, document } = parseHTML("<html><body></body></html>");
+		const globals = { window, document, IS_REACT_ACT_ENVIRONMENT: true };
+		const previous = Object.getOwnPropertyDescriptors(globalThis);
+		Object.assign(globalThis, globals);
+		const host = document.createElement("div"); document.body.append(host);
+		const root = createRoot(host);
+		const input = { assessment: { strands: [{ strand: "First", assessment: "First assessment" }] } };
+		try {
+			await act(async () => root.render(<ProbeDoneCard part={{ state: "input-available", input }} />));
+			const card = host.querySelector("details")!;
+			assert.ok(!card.hasAttribute("open"));
+			card.setAttribute("open", ""); // Native disclosure action, not React state.
+			await act(async () => root.render(<ProbeDoneCard part={{ state: "output-available", input: { assessment: {
+				strands: [...input.assessment.strands, { strand: "Second $x$", assessment: "Second assessment" }],
+			} }, output: { ok: true } }} />));
+			assert.equal(host.querySelector("details"), card);
+			assert.ok(card.hasAttribute("open"));
+			assert.ok(card.querySelector("summary")?.textContent.includes("2 strands"));
+			assert.ok(card.textContent.includes("Second assessment"));
+			await act(async () => root.render(<ProbeDoneCard key="new-mount" part={{ state: "output-available", input, output: { ok: true } }} />));
+			assert.ok(!host.querySelector("details")!.hasAttribute("open"));
+		} finally {
+			await act(async () => root.unmount()); host.remove();
+			for (const key of Object.keys(globals)) {
+				if (previous[key]) Object.defineProperty(globalThis, key, previous[key]);
+				else Reflect.deleteProperty(globalThis, key);
+			}
+		}
+	});
+
+	it("never puts refusal, rejected-input or partial-input notes behind a disclosure", () => {
+		const rejected = { assessment: { strands: [{ strand: "REJECTED_INPUT", assessment: "REJECTED_INPUT" }] } };
+		for (const part of [
+			{ state: "output-available", input: rejected, output: { ok: false, error: "Retry `literal`" } },
+			{ state: "output-error", input: rejected },
+			{ state: "input-streaming", input: { assessment: { summary: "PARTIAL_INPUT" } } },
+		]) {
+			const document = dom(<ProbeDoneCard part={part} />);
+			assert.equal(document.querySelectorAll("details, summary").length, 0);
+			assert.ok(document.querySelector('[data-testid="probe-done-card"] > p'));
+			assert.ok(!document.body.textContent.includes("REJECTED_INPUT") && !document.body.textContent.includes("PARTIAL_INPUT"));
+		}
+	});
 	it("renders inline code and formatting in all assessment slots without rewriting the input", () => {
 		const input = Object.freeze({ assessment: Object.freeze({
 			strands: Object.freeze([Object.freeze({ strand: "**Arrays** and `map`", assessment: "Understands `$x$` and *iteration*." })]),

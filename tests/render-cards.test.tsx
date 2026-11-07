@@ -467,7 +467,7 @@ changed and the final volume must be calculated from the combined gas law.`,
 		assert.ok(bar.includes('class="katex"'), "math in the teaser renders through KaTeX");
 		assert.ok(!bar.includes("textL") && !bar.includes("textatm"), "LaTeX commands are not shown as plain text");
 		assert.ok(bar.includes("whitespace-nowrap"), "the teaser prevents rendered text from wrapping");
-		assert.ok(bar.includes("text-ellipsis"), "the teaser trails off when it exceeds one line");
+		assert.ok(bar.includes("data-preview-line") && !bar.includes("text-ellipsis"), "the measured line uses one explicit continuation marker, not a second CSS ellipsis");
 		assert.ok(!bar.includes("<br"), "source newlines are flattened rather than rendered as forced line breaks");
 	});
 
