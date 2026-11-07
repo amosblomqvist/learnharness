@@ -52,7 +52,7 @@ import { PlanBlock, PlanPopup, latestTree } from "@/components/plan-block";
 import { PlanMarginalia, planExists } from "@/components/plan-window";
 import { MermaidOverlay, SessionMermaidContext } from "@/components/session-overlay";
 import { AbortTurnDialog, type AbortMode } from "@/components/abort-turn-dialog";
-import { ArrowRightIcon, DumbbellIcon, WaypointsIcon } from "lucide-react";
+import { ArrowRightIcon, BookOpenIcon, DumbbellIcon, TagsIcon, WaypointsIcon } from "lucide-react";
 import type { PlanBlockData } from "@/src/core";
 import { QuestionDock } from "@/components/question-dock";
 import { SessionFind } from "@/components/session-find";
@@ -98,6 +98,7 @@ import { currentUserThinkingOpen, setAllUserThinkingOpen } from "@/components/th
  */
 const COLUMN = "mx-auto w-full max-w-none px-6";
 const DOCK = "mx-auto w-full max-w-[46rem] px-4";
+const SESSION_HEADER_BUTTON = "lh-no-drag flex shrink-0 cursor-pointer items-center gap-1.5 rounded-full border border-border/80 px-2 py-0.5 text-xs font-medium uppercase tracking-wide text-muted-foreground transition-colors hover:border-border hover:text-foreground";
 // The DOCK container's fixed width (46rem) and the plan marginalia's
 // geometry (owner, plan-placement round): the bare diagram sits in the
 // dock band's RIGHT flank — MARGIN_GAP from the DOCK container's edge and
@@ -1369,9 +1370,23 @@ export function Chat({
 							<div className="min-w-4 flex-1" aria-hidden="true" />
 					</>
 					)}
-					<button type="button" className="rounded-full border px-2 py-0.5 text-xs hover:bg-accent" onClick={() => setTagging(true)}>Tags</button>
-					<button type="button" aria-expanded={!!noteLocation} className="rounded-full border px-2 py-0.5 text-xs hover:bg-accent"
-						onClick={() => setNoteLocation(noteLocation ? null : { mode: notes.view.final || !notes.view.liveEnabled ? "final" : "live" })}>Notes</button>
+					<button
+						type="button"
+						className={SESSION_HEADER_BUTTON}
+						onClick={() => setTagging(true)}
+					>
+						<TagsIcon className="size-3.5 text-primary" aria-hidden />
+						Tags
+					</button>
+					<button
+						type="button"
+						aria-expanded={!!noteLocation}
+						className={SESSION_HEADER_BUTTON}
+						onClick={() => setNoteLocation(noteLocation ? null : { mode: notes.view.final || !notes.view.liveEnabled ? "final" : "live" })}
+					>
+						<BookOpenIcon className="size-3.5 text-primary" aria-hidden />
+						Notes
+					</button>
 					{/* The plan chip (owner, plan-placement round): session-level
 					    structure beside the phase chip — access to the full-DAG popup
 					    at every width; the marginalia is the wide-screen glance view. */}
@@ -1384,7 +1399,7 @@ export function Chat({
 								blurAfterPointerClick(e);
 								setPlanOpen(true);
 							}}
-							className="lh-no-drag flex shrink-0 cursor-pointer items-center gap-1.5 rounded-full border border-border/80 px-2 py-0.5 text-xs font-medium uppercase tracking-wide text-muted-foreground transition-colors hover:border-border hover:text-foreground"
+							className={SESSION_HEADER_BUTTON}
 						>
 							<WaypointsIcon className="size-3.5 text-primary" aria-hidden />
 							Plan
