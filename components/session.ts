@@ -146,6 +146,7 @@ export function useChatSession({ chatId, initialMessages, initialError, initiall
 		hasConfirmedConversation: state.hasConfirmedConversation,
 		contextTokens: state.contextTokens,
 		status: state.status,
+		evaluating: state.evaluating,
 		error: state.error,
 		steerQueue: state.steerQueue,
 		send,

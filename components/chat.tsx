@@ -225,6 +225,17 @@ function SystemLine({ children, testId }: { children: React.ReactNode; testId?: 
 	);
 }
 
+/** One immediate optimistic placeholder; only its wording changes during
+ * host-managed submission evaluation. The spinner keeps its identity. */
+export function PendingTurnIndicator({ evaluating }: { evaluating: boolean }) {
+	return (
+		<span className="flex items-center gap-2 font-ui text-xs font-medium uppercase tracking-wide text-muted-foreground">
+			<BrailleSpinner label={evaluating ? "Evaluating" : "Thinking"} />
+			<Shimmer duration={1}>{evaluating ? "EVALUATING…" : "THINKING…"}</Shimmer>
+		</span>
+	);
+}
+
 function isSubagentSteer(m: LhViewMessage): boolean {
 	return (m.metadata as { subagentResult?: unknown } | undefined)?.subagentResult != null;
 }
@@ -283,7 +294,7 @@ export function Chat({
 	// (core/view.ts projectView); sends are ONE explicit input event each
 	// ({chatId, input} — the stash indirection died with the SDK), and the
 	// turn stream is the VERBATIM AgentEvent passthrough the server emits.
-	const { canonicalMessages, reconciliation, reconcile, pluginQuestionAvailability, pluginQuestionDraft, pluginProblemAvailability, pluginProblemDraft, dismissPluginQuestion, readRecord, messages, nativeMessages, hasConfirmedConversation, contextTokens, send, continueIfOwed, steer, steerQueue, submitAnswer, dismissQuestion, dismissProblem, questionDraft, saveQuestionDraft, status, error, stop, clearError, resumeStream, setReattachSettled } =
+	const { canonicalMessages, reconciliation, reconcile, pluginQuestionAvailability, pluginQuestionDraft, pluginProblemAvailability, pluginProblemDraft, dismissPluginQuestion, readRecord, messages, nativeMessages, hasConfirmedConversation, contextTokens, send, continueIfOwed, steer, steerQueue, submitAnswer, dismissQuestion, dismissProblem, questionDraft, saveQuestionDraft, status, evaluating, error, stop, clearError, resumeStream, setReattachSettled } =
 		useChatSession({ chatId, initialMessages, initialError, initiallyInFlight });
 
 	const controller = useOptionalInteractionLayers();
@@ -1838,7 +1849,10 @@ export function Chat({
 							    rendered row, mutually exclusive by construction.
 							    Protocol events (agent_start) apply nothing and release
 							    nothing — the placeholder covers the whole
-							    provider-connect gap. turnInFlight: the same state
+							    provider-connect gap. Optional plugin grading/processing
+							    uses EVALUATING… until its POST acknowledges; this changes
+							    only the wording, never the action or stream gates.
+							    turnInFlight: the same state
 							    entered by external discovery (wake) / the poll
 							    fallback. Never collapsible itself. */}
 							{/* Compaction (owner round 15): the same register as the
@@ -1853,12 +1867,7 @@ export function Chat({
 								</span>
 							)}
 							{(status === "submitted" || turnInFlight) && (
-								<span className="flex items-center gap-2 font-ui text-xs font-medium uppercase tracking-wide text-muted-foreground">
-									<BrailleSpinner label="Thinking" />
-									<Shimmer duration={1}>
-										THINKING…
-									</Shimmer>
-								</span>
+								<PendingTurnIndicator evaluating={evaluating} />
 							)}
 							{openingError && <p role="alert" className="text-sm text-destructive">{OPENING_PROMPT_FAILURE}</p>}
 							{error && (

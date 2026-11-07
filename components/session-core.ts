@@ -221,6 +221,8 @@ export interface SessionState {
 	/** Completed conversation usage; null after compaction or before first usage. */
 	contextTokens: number | null;
 	status: SessionStatus;
+	/** Local submission with optional grading/processing, awaiting its POST response. */
+	evaluating: boolean;
 	reconciliation: "ready" | "syncing" | "failed";
 	pluginQuestionAvailability?: PluginQuestionAvailability;
 	error: { message: string } | null;
@@ -310,6 +312,8 @@ export class SessionModel {
 	/** The in-flight assistant message's client id (see applyWireEvent). */
 	private streamingMessageId: string | null = null;
 	private statusValue: SessionStatus = "ready";
+	/** Presentation only; never changes admission, persistence or turn ownership. */
+	private evaluationOwner: AbortController | null = null;
 	/** Request/loop failures are transient; provider failures derive from messages. */
 	private errorValue: { message: string } | null = null;
 	/** Dismissing a banner must not authorize an automatic replacement turn. */
@@ -369,6 +373,7 @@ export class SessionModel {
 			hasConfirmedConversation: this.base.some(m => m.role === "user" || m.role === "assistant"),
 			contextTokens: measuredContextTokens(messages, this.incompleteUsageIds),
 			status: this.statusValue,
+			evaluating: this.statusValue === "submitted" && this.evaluationOwner !== null && this.evaluationOwner === this.consumeAbort,
 			reconciliation: this.reconciliationValue,
 			pluginQuestionAvailability: this.pluginQuestionAvailability,
 			pluginProblemAvailability: this.pluginProblemAvailability,
@@ -866,6 +871,8 @@ export class SessionModel {
 		const controller = new AbortController();
 		this.consumeAbort = controller;
 		this.latestRequest = controller;
+		this.evaluationOwner = (input.type === "plugin-question-answer" && pluginPending?.requiresGrading) ||
+			(input.type === "plugin-problem-submission" && activeProblemOf(this.base)?.pluginProblem?.requiresProcessing) ? controller : null;
 		this.setError(null);
 		this.setStatus("submitted");
 		if (recovering && input.type === "answer") {
@@ -934,7 +941,14 @@ export class SessionModel {
 			// contention), but still must not inherit view teardown. The
 			// STREAM consume stays on the controller — releasing that held
 			// connection is Diet A's whole job.
-			const res = await this.postInputEvent(input, undefined, imageBearing ? pending => this.imagePostPending(controller, pending) : undefined);
+			let res: Response;
+			try {
+				res = await this.postInputEvent(input, undefined, imageBearing ? pending => this.imagePostPending(controller, pending) : undefined);
+			} finally {
+				// The response follows optional processing and save. A detached or
+				// superseded request must never clear its successor's label.
+				if (this.evaluationOwner === controller) this.mutate(() => { this.evaluationOwner = null; });
+			}
 			if (res.status === 409) {
 				settleDelivery();
 				throw new Error("A turn is already running — try again in a moment.");
