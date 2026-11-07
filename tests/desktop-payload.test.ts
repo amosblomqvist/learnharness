@@ -64,6 +64,18 @@ describe("desktop standalone payload", () => {
 		});
 	});
 
+	it("places sherpa-onnx's native package where a flattened hashed copy looks for it", () => {
+		withPayload(({ root, write, run }) => {
+			write(path.join(STANDALONE, "node_modules", "sherpa-onnx-node", "addon.js"));
+			write(path.join(STANDALONE, "node_modules", "sherpa-onnx-win-x64", "sherpa-onnx.node"));
+			const result = run();
+			assert.equal(result.status, 0, String(result.stderr));
+			const hashed = path.join(root, STANDALONE, ".next", "node_modules");
+			assert.ok(fs.existsSync(path.join(hashed, "sherpa-onnx-win-x64", "sherpa-onnx.node")));
+			assert.equal(fs.existsSync(path.join(hashed, "sherpa-onnx-node")), false);
+		});
+	});
+
 	it("accepts a clean payload and is idempotent", () => {
 		withPayload(({ run }) => {
 			for (let i = 0; i < 2; i++) {
