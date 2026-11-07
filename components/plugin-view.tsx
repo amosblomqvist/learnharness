@@ -36,7 +36,7 @@ export function PluginViewScreen({ pluginId, viewId }: { pluginId: string; viewI
 			</Hint>
 		</TopBar>
 		<div ref={bodyRef} className="relative flex min-h-0 min-w-0 flex-1 flex-col">
-			<div className="contents">
+			<div data-plugin-view-scroll="" className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto">
 				{snapshot.error && <p role="alert" className="px-5 py-3 text-xs text-destructive">{snapshot.error}</p>}
 				{plugin?.error && <p role="alert" className="px-5 py-3 text-xs text-destructive">{plugin.error}</p>}
 				{loading ? <p role="status" className="px-5 py-4 text-xs text-muted-foreground">Loading plugin…</p>

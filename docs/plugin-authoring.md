@@ -139,6 +139,12 @@ not only the longer activation signal. Unmount React roots and release events/ti
 Use scoped CSS/theme variables (`--foreground`, `--background`, `--border`) and safe text
 insertion; shared-page CSS is not sandboxed.
 
+The view body scrolls in a bounded, full-width host viewport **below the top bar**,
+with its scrollbar flush to the main pane's right edge. Long content must not move
+the document, top bar or sidebar. Plugins may still provide their own bounded
+scrollers; content that fits does not create a second host scrollbar. Page-body
+surfaces are separate overlay siblings, not children of the background scroll viewport.
+
 `ctx.app` exposes `pathname()`, `openSession(id)`, `openHome()`, `openView(id)` and
 `openSettings()`; the latter two target this plugin. It exposes no private React context
 or graph-selection internals.
