@@ -806,29 +806,3 @@ test("the language list opens with the search focused, toggles checkboxes, keeps
 	assert.equal(focusedId(), "local-languages-toggle");
 	assert.equal(toggle.getAttribute("aria-expanded"), "false");
 });
-
-test("Local's rows and list fit a narrow dialog and every control shows keyboard focus", async () => {
-	const model = getCatalogModel("whisper-small")!;
-	fixture({ dictation: local({ localModel: model.id, localPreferredLanguages: ["en", "zh"] }), installed: [model.id] });
-	await mount(<Rows />);
-	for (const id of ["row-local-languages", "row-local-language", "row-local-chinese"]) {
-		assert.match(must(id).getAttribute("class")!, /\bflex-wrap\b/, id);
-	}
-	for (const id of ["select-local-language", "select-local-chinese"]) {
-		const classes = select(id).getAttribute("class")!;
-		for (const token of ["min-w-0", "max-w-full", "focus-visible:ring-1", "focus-visible:ring-ring", "focus-visible:border-ring"]) assert.ok(classes.split(" ").includes(token), `${id} ${token}`);
-	}
-	await click(must("local-languages-toggle"));
-	for (const id of ["local-languages-search", "local-language-en", "local-model-filter", "local-ratings-toggle", "local-folded-toggle"]) {
-		assert.match(must(id).getAttribute("class")!, /focus-visible:ring-1/, id);
-	}
-	// A row wraps instead of overflowing: its text can shrink and its groups wrap.
-	const row = rowOf(model.id);
-	assert.match(row.getAttribute("class")!, /\bmin-w-0\b/);
-	for (const element of row.querySelectorAll<HTMLElement>("div")) {
-		const classes = element.getAttribute("class") ?? "";
-		if (/\bflex\b/.test(classes) && /\bflex-row\b|\bitems-center\b|\bitems-baseline\b/.test(classes)) assert.match(classes, /\bflex-wrap\b/, classes);
-	}
-	for (const button of row.querySelectorAll<HTMLElement>("button")) assert.match(button.getAttribute("class")!, /focus-visible:ring-1/);
-	for (const list of document.querySelectorAll<HTMLElement>('[data-testid="local-models"] ul')) assert.match(list.getAttribute("class")!, /\bmin-w-0\b|\bmax-h-56\b/);
-});

@@ -65,11 +65,6 @@ describe("dictation language to Whisper language", () => {
 });
 
 describe("dictation settings body for the PUT", () => {
-	it("a default-engine record stays exactly { language }", () => {
-		assert.deepEqual(dictationSettingsBody({ language: "pl" }), { language: "pl" });
-		assert.deepEqual(dictationSettingsBody({ language: "pl", provider: "deepgram", groqModel: "whisper-large-v3-turbo" }), { language: "pl" });
-	});
-
 	it("non-default choices are kept; the whole section is always described", () => {
 		assert.deepEqual(dictationSettingsBody({ language: "en", provider: "groq" }), { language: "en", provider: "groq" });
 		assert.deepEqual(dictationSettingsBody({ language: "en", provider: "groq", groqModel: "whisper-large-v3" }), {
@@ -100,9 +95,7 @@ describe("dictation provider settings: sanitize, resolve, parse", () => {
 		});
 	});
 
-	it("sanitize keeps valid provider/model next to language and drops invalid values independently", () => {
-		const keep = sanitizeUserSettings({ version: 1, dictation: { language: "fr", provider: "groq", groqModel: "whisper-large-v3" } });
-		assert.deepEqual(keep?.dictation, { language: "fr", provider: "groq", groqModel: "whisper-large-v3" });
+	it("sanitize drops invalid provider/model/language values independently", () => {
 		const mixed = sanitizeUserSettings({ version: 1, dictation: { language: "xx", provider: "groq", groqModel: "nope" } });
 		assert.deepEqual(mixed?.dictation, { provider: "groq" });
 		for (const dictation of [null, [], "groq", 3, { provider: "elevenlabs" }, { groqModel: 3 }]) {

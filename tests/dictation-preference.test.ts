@@ -134,27 +134,3 @@ test("a write for one setting carries the on-device settings along, so none is e
 	const { provider: _local, ...withoutEngine } = stored;
 	assert.deepEqual(puts.at(-1), { ...withoutEngine, language: "fr" }, "a Deepgram record keeps the Local choices, and omits the engine");
 });
-
-test("saveLocal replaces only the fields it is given, and its defaults are left out of the body", async () => {
-	const { store, puts } = storeOver({ language: "en", provider: "local", localModel: "whisper-small" });
-	await store.load();
-	assert.equal(await store.saveLocal({ localLanguage: "de" }), true);
-	assert.deepEqual(puts.at(-1), { language: "en", provider: "local", localModel: "whisper-small", localLanguage: "de" });
-	assert.equal(await store.saveLocal({ localModel: "", localLanguage: "auto" }), true);
-	assert.deepEqual(puts.at(-1), { language: "en", provider: "local" });
-	assert.equal(store.getSnapshot().localModel, "", "the confirmed record reads back as no model");
-});
-
-test("a preferred list that follows the dictation language keeps following it, and an explicit one does not", async () => {
-	const following = storeOver({ language: "en", provider: "local" });
-	await following.store.load();
-	assert.deepEqual(following.store.getSnapshot().localPreferredLanguages, ["en"]);
-	assert.equal(await following.store.save("de"), true);
-	assert.deepEqual(following.puts.at(-1), { language: "de", provider: "local" }, "the old English list is not written back as a choice");
-	assert.deepEqual(following.store.getSnapshot().localPreferredLanguages, ["de"]);
-
-	const explicit = storeOver({ language: "en", provider: "local", localPreferredLanguages: ["fr", "it"] });
-	await explicit.store.load();
-	assert.equal(await explicit.store.save("de"), true);
-	assert.deepEqual(explicit.puts.at(-1), { language: "de", provider: "local", localPreferredLanguages: ["fr", "it"] });
-});

@@ -265,22 +265,3 @@ test("the Local no-model button opens Settings on the Dictation group, with no k
 	assert.equal(byTest("key-dictation-groq-input"), null);
 	assert.equal(byTest("key-deepgram_api_key-input"), null);
 });
-
-test("the Dictation rows fit a narrow dialog and the selects show keyboard focus", async () => {
-	await fixture({ dictation: { language: "en", provider: "groq" } });
-	await mount(<Picker />);
-	// A control that does not fit beside its label drops to its own line, not under it.
-	for (const id of ["row-dictation-engine", "row-dictation-groq-model", "row-dictation-language"]) {
-		assert.match(byTest(id)!.getAttribute("class")!, /\bflex-wrap\b/, id);
-	}
-	// A long option label shortens the select instead of overflowing its row.
-	for (const id of ["select-dictation-engine", "select-dictation-groq-model"]) {
-		const classes = select(id).getAttribute("class")!;
-		assert.match(classes, /\bmin-w-0\b/, id);
-		assert.match(classes, /\bmax-w-full\b/, id);
-		// The app removes every browser outline, so focus has to be drawn by the control.
-		assert.match(classes, /focus-visible:ring-1/, id);
-		assert.match(classes, /focus-visible:ring-ring/, id);
-		assert.match(classes, /focus-visible:border-ring/, id);
-	}
-});

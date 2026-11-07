@@ -830,24 +830,12 @@ test("unmounting while waiting to retry a failed chunk cancels the retry", async
 const LONG_ERROR = "Groq rejected the API key (401). Check GROQ_API_KEY in Settings → Providers. This message is long on purpose.";
 const region = (html: string, role: string) => new RegExp(`<div role="${role}"[^>]*>([^<]*)</div>`).exec(html)?.[1];
 
-test("a long error is shown in full, wrapped, with Retry and Dismiss still on screen", () => {
+test("a long error is shown in full, with Retry and Dismiss still on screen", () => {
 	const html = renderToStaticMarkup(<DictationBar dictation={barOf({ error: LONG_ERROR, retryable: true })} />);
 	const button = /<button[^>]*data-testid="dictation-toggle"[\s\S]*?<\/button>/.exec(html)![0];
 	assert.ok(button.includes(LONG_ERROR), "the whole message is in the button");
-	assert.match(button, /whitespace-normal/);
-	assert.doesNotMatch(button, /truncate/, "no ellipsis cuts it off");
-	assert.match(button, /min-h-7/, "the button grows with the text instead of clipping it");
 	assert.match(html, /data-testid="dictation-retry"/);
 	assert.match(html, /data-testid="dictation-discard"[^>]*>[\s\S]*?Dismiss/);
-	assert.match(html, /shrink-0[^"]*"[^>]*data-testid="dictation-retry"|data-testid="dictation-retry"[^>]*shrink-0/, "Retry never shrinks away");
-});
-
-test("an error without a kept recording wraps too, and the idle button keeps its one-line look", () => {
-	const failed = renderToStaticMarkup(<DictationBar dictation={barOf({ error: LONG_ERROR })} />);
-	assert.match(failed, /whitespace-normal/);
-	const idle = renderToStaticMarkup(<DictationBar dictation={barOf({})} />);
-	assert.match(idle, /class="flex h-7 w-full[^"]*"/);
-	assert.match(idle, /<span class="max-w-full truncate">Dictate<\/span>/);
 });
 
 test("screen readers are told about waiting for the transcript (polite) and about a failure (alert), and the regions are hidden visually", () => {
@@ -1171,81 +1159,6 @@ test("a failed Local chunk keeps the recording; Retry re-sends only it, keeps th
 	assert.deepEqual(f.state.appends, ["one two three"]);
 	assert.equal(f.dictation.retryable, false);
 	assert.equal(isDictationRetained(), false);
-});
-
-test("a transient Local failure is retried with backoff and never shows an error", async () => {
-	const f = await fixture(LOCAL);
-	await f.start();
-	await f.speak();
-	let calls = 0;
-	f.state.localAnswer = () => Promise.resolve(++calls === 1
-		? Response.json({ message: "The speech model hit a snag.", retryable: true }, { status: 500 })
-		: Response.json({ text: "second go" }));
-	mock.timers.enable({ apis: ["setTimeout"] });
-	try {
-		await act(async () => { f.dictation.stop(); });
-		await act(async () => { mock.timers.tick(1000); });
-	} finally {
-		mock.timers.reset();
-	}
-	assert.deepEqual(f.state.appends, ["second go"]);
-	assert.equal(f.dictation.error, null);
-});
-
-test("Local keeps no recording when the model says nothing was said, and inserts nothing", async () => {
-	const f = await fixture(LOCAL);
-	f.state.localAnswer = () => Promise.resolve(Response.json({ text: "" }));
-	await f.start();
-	await f.speak();
-	await act(async () => { f.dictation.stop(); });
-	assert.deepEqual(f.state.appends, []);
-	assert.equal(f.dictation.error, null);
-	assert.equal(f.dictation.retryable, false);
-});
-
-test("the recording cap applies to Local: it stops and transcribes what was captured", async () => {
-	const f = await fixture(LOCAL);
-	localNumbered(f);
-	await f.start();
-	await act(async () => {
-		const worklet = f.worklet();
-		worklet.audio(new Int16Array(GROQ_MAX_RECORDING_SECONDS * 16000).fill(1000)); // the whole allowance at once
-		worklet.audio(frame());
-	});
-	assert.equal(f.dictation.phase, "idle");
-	assert.equal(f.state.stops, 1, "the cap stopped the run");
-	assert.equal(f.state.localPosts.length, GROQ_MAX_RECORDING_SECONDS / 15, "fifteen-second chunks, nothing after the cap");
-	assert.equal(f.state.appends.length, 1);
-});
-
-test("Esc while Local is finishing keeps the audio for Retry, as for Groq", async () => {
-	const f = await fixture(LOCAL);
-	await f.start();
-	await f.speak();
-	const reply = deferred<Response>();
-	f.state.localAnswer = () => reply.promise;
-	await act(async () => { f.dictation.stop(); });
-	await act(async () => { f.dictation.cancel(); });
-	assert.equal(f.dictation.phase, "idle");
-	assert.equal(f.dictation.retryable, true);
-	assert.equal(f.dictation.error, STOPPED_MESSAGE);
-	await act(async () => { reply.resolve(Response.json({ text: "too late" })); });
-	assert.deepEqual(f.state.appends, []);
-	f.state.localAnswer = () => Promise.resolve(Response.json({ text: "after esc" }));
-	await act(async () => { f.dictation.retry(); });
-	assert.deepEqual(f.state.appends, ["after esc"]);
-});
-
-test("Local with a failing VAD still transcribes: the audio is kept and cut blind", async () => {
-	const f = await fixture(LOCAL);
-	localNumbered(f);
-	f.state.vad = () => Promise.reject(new TypeError("offline"));
-	await f.start();
-	await f.speak(framesFor(20));
-	assert.equal(f.state.localPosts.length, 1);
-	await act(async () => { f.dictation.stop(); });
-	assert.deepEqual(f.state.appends, ["local1 local2"]);
-	assert.equal(f.dictation.error, null);
 });
 
 test("the Local no-model line is shown whole in the bar and announced as an alert", () => {

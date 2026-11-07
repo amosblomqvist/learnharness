@@ -1,6 +1,7 @@
 import { DEFAULT_LOCAL_CHINESE_OUTPUT, type LocalChineseOutput } from "./local-stt-chinese.ts";
 import { LOCAL_AUTO_LANGUAGE } from "./local-stt-language-policy.ts";
 import { defaultLocalPreferredLanguages, NO_LOCAL_MODEL } from "./local-stt.ts";
+import type { DictationSettings } from "./settings.ts";
 
 /** Nova-3 monolingual language codes, including documented locale aliases.
  * Source: https://developers.deepgram.com/docs/models-languages-overview
@@ -168,23 +169,9 @@ export function whisperLanguage(language: DictationLanguage): string | undefined
  * default provider/model and default Local settings are left out so a Deepgram
  * user's record stays exactly `{ language }` as before. Callers pass every field
  * they have: one they leave out is erased. */
-export function dictationSettingsBody(pref: {
-	language: DictationLanguage;
-	provider?: DictationProvider;
-	groqModel?: GroqWhisperModel;
-	localModel?: string;
-	localPreferredLanguages?: readonly string[];
-	localLanguage?: string;
-	localChineseOutput?: LocalChineseOutput;
-}): {
-	language: DictationLanguage;
-	provider?: DictationProvider;
-	groqModel?: GroqWhisperModel;
-	localModel?: string;
-	localPreferredLanguages?: string[];
-	localLanguage?: string;
-	localChineseOutput?: LocalChineseOutput;
-} {
+export function dictationSettingsBody(
+	pref: DictationSettings & { language: DictationLanguage },
+): DictationSettings & { language: DictationLanguage } {
 	const defaultLanguages = defaultLocalPreferredLanguages(pref.language);
 	const languages = pref.localPreferredLanguages;
 	return {
