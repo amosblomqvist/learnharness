@@ -85,6 +85,8 @@ import { ThinkingCard, ProblemCard, type PracticeThinkingData } from "@/componen
 import { GraphContextCard, type GraphContextData } from "@/components/graph-context-card";
 import { TopBar } from "@/components/top-bar";
 import { PluginTopBarActions } from "@/components/plugin-chrome";
+import { createPluginSessionActionContext, type PluginSessionViewInput } from "@/src/core";
+import type { SessionInputViewReader, SessionViewTargets, NativeQuestionViewState, ViewReaderRef } from "./session-view-readers";
 import type { JobRecord, Phase3, QuestionAnswerData, QuestionFormDraft, TurnUsage, SessionPricing } from "@/src/core";
 import type { LhViewMessage } from "@/src/core";
 import { PhaseChip, PhaseDivider } from "@/components/phase-divider";
@@ -296,6 +298,10 @@ export function Chat({
 	const submissionMounted = useRef(true);
 	useEffect(() => { submissionMounted.current = true; return () => { submissionMounted.current = false; submissionRunner.dispose(); }; }, [submissionRunner]);
 	useEffect(() => () => submissionRunner.dispose(), [surfaceTarget, submissionRunner]);
+	const inputViewReader = useRef<(() => PluginSessionViewInput) | null>(null) as SessionInputViewReader;
+	const [, refreshViewContext] = useState(0);
+	const notifyViewChanged = useCallback(() => { if (submissionMounted.current) refreshViewContext(value => value + 1); }, []);
+	inputViewReader.changed = notifyViewChanged;
 	const submissionLive = useRef({ nativeMessages, surfaceTarget, ready: true });
 	submissionLive.current = { nativeMessages, surfaceTarget, ready: true };
 	const runSubmission = async (target: PluginSubmissionTarget, capture: () => PluginSubmission | Promise<PluginSubmission>, current: () => boolean, deliver: (prepared: PluginSubmission, attempt: SubmissionAttempt) => Promise<boolean>): Promise<boolean> => {
@@ -724,11 +730,15 @@ export function Chat({
 			return send({ type: "thinking", problemCallId: target.problem.occurrence.toolCallId, occurrence: target.problem.occurrence, text: prepared.content.text, ...(prepared.content.images.length ? { images: prepared.content.images.map(image => ({ ...image })) } : {}) }, () => { clear(captured); attempt.accepted(); }, undefined, attempt.refused);
 		});
 	};
-	const preparePluginProblem: PreparePluginProblemSubmission = (capture, isCurrent, onAccepted) => {
+	const pluginProblemTarget = (): Extract<PluginSubmissionTarget, { type: "plugin-problem-submission" }> | undefined => {
 		const original = activeProblem?.pluginProblem, occurrence = activeProblemOccurrence;
-		if (!surfaceTarget || !original || !occurrence || busyRef.current || compacting) return Promise.resolve(false);
-		const target: Extract<PluginSubmissionTarget, { type: "plugin-problem-submission" }> = { type: "plugin-problem-submission", sessionId: chatId, sessionKind: "practice", surfaceTarget,
+		if (!surfaceTarget || !original || !occurrence) return;
+		return { type: "plugin-problem-submission", sessionId: chatId, sessionKind: "practice", surfaceTarget,
 			channels: ["submission", "thinking"], problem: { problemId: original.problemId, occurrence, pluginId: original.pluginId, typeId: original.typeId, contractVersion: original.contractVersion, label: original.label, statement: original.input.statement } };
+	};
+	const preparePluginProblem: PreparePluginProblemSubmission = (capture, isCurrent, onAccepted) => {
+		const original = activeProblem?.pluginProblem, occurrence = activeProblemOccurrence, target = pluginProblemTarget();
+		if (!target || !original || !occurrence || busyRef.current || compacting) return Promise.resolve(false);
 		return runSubmission(target, () => {
 			const raw = capture();
 			return { type: "plugin-problem-submission", submission: raw.submission, submissionImages: [], thinking: { text: raw.thinking ?? "", images: [] } };
@@ -741,13 +751,18 @@ export function Chat({
 			}, () => { onAccepted(); attempt.accepted(); }, undefined, attempt.refused);
 		});
 	};
-	const preparePluginQuestion: PreparePluginQuestionSubmission = (capture, isCurrent) => {
-		if (!surfaceTarget || !pendingPlugin || busyRef.current || compacting) return Promise.resolve(false);
+	const pluginQuestionTarget = (): Extract<PluginSubmissionTarget, { type: "plugin-question-answer" }> | undefined => {
+		if (!surfaceTarget || !pendingPlugin) return;
 		const original = pendingPlugin;
-		const target: Extract<PluginSubmissionTarget, { type: "plugin-question-answer" }> = { type: "plugin-question-answer", sessionId: chatId, sessionKind: kind === "practice" ? "practice" : "teaching", surfaceTarget,
+		return { type: "plugin-question-answer", sessionId: chatId, sessionKind: kind === "practice" ? "practice" : "teaching", surfaceTarget,
 			channels: ["answer", ...(original.showThinking ? ["thinking" as const] : []), ...(requiresReveal ? ["readingThinking" as const] : [])],
 			question: { questionId: original.questionId, occurrence: original.occurrence, pluginId: original.pluginId, typeId: original.typeId, contractVersion: original.contractVersion, label: original.label, variant: original.variant, showThinking: original.showThinking },
 		};
+	};
+	const preparePluginQuestion: PreparePluginQuestionSubmission = (capture, isCurrent) => {
+		const target = pluginQuestionTarget();
+		if (!target || !pendingPlugin || busyRef.current || compacting) return Promise.resolve(false);
+		const original = pendingPlugin;
 		return runSubmission(target, () => {
 			const raw = capture();
 			return { type: "plugin-question-answer", answer: raw.answer, answerImages: [], thinking: { text: raw.thinking ?? "", images: [] }, readingThinking: { text: raw.readingThinking ?? "", images: [] } };
@@ -1406,6 +1421,33 @@ export function Chat({
 	 * time the send's POST resolved, so the steer lands. Idle takes the
 	 * plain send; a raced settle 409s and falls back to exactly that. */
 
+	const readViewInput = (): PluginSessionViewInput => {
+		const expected = pendingPlugin?.occurrence ?? unreadablePlugin?.occurrence
+			?? (pending ? { messageId: pending.messageId, contentIndex: pending.contentIndex, toolCallId: pending.toolCallId, toolName: pending.tool } : undefined) ?? activeProblemOccurrence;
+		if (!expected && !unreadablePlugin) return textTarget()!;
+		const current = inputViewReader.current?.();
+		const occurrence = current?.type === "answer" || current?.type === "plugin-question-answer" ? current.question.occurrence
+			: current?.type === "thinking" || current?.type === "plugin-problem-submission" ? current.problem.occurrence : current?.type === "unavailable" ? current.occurrence : undefined;
+		if (current && current.type !== "text" && expected && occurrence && pluginQuestionOccurrenceKey(expected) === pluginQuestionOccurrenceKey(occurrence)) return current;
+		return { type: "unavailable", ...(expected ? { occurrence: expected } : {}), expanded: false, revealed: false };
+	};
+	const actionContext = () => surfaceTarget ? createPluginSessionActionContext({ placement: "top-bar", surface: "session", sessionId: chatId, kind: kind === "practice" ? "practice" : "teaching", surfaceTarget }, () => {
+		if (!submissionMounted.current || submissionLive.current.surfaceTarget !== surfaceTarget) throw new Error("This session view is no longer active.");
+		return {
+			sessionId: chatId, kind: kind === "practice" ? "practice" : "teaching", title: titleText,
+			messages: nativeMessages, transcript: messages, status, reconciliation, busy, compacting,
+			phase: kind === "practice" ? "practice" : phases.at(-1) ?? "probe", contextTokens,
+			queuedSteers: visibleQueuedSteers(steerQueue, nativeMessages), composer: { text: textRef.current },
+			input: readViewInput(),
+		};
+	}) : undefined;
+	const renderedActionContext = actionContext();
+	const captureActionContext = () => {
+		if (!submissionMounted.current || !surfaceTarget || !findSurfaceBoundary(surfaceTarget)) return;
+		const captured = actionContext();
+		if (captured) void captured.view; // Detach once at invocation, not after plugin awaits.
+		return captured;
+	};
 
 	return (
 		<ChatActionsContext.Provider
@@ -1551,7 +1593,7 @@ export function Chat({
 					) : (
 						<PhaseChip phase={phases.at(-1) ?? "probe"} />
 					)}
-					{surfaceTarget && <PluginTopBarActions context={{ placement: "top-bar", surface: "session", sessionId: chatId, kind: kind === "practice" ? "practice" : "teaching", surfaceTarget }} />}
+					{renderedActionContext && <PluginTopBarActions context={renderedActionContext} captureContext={captureActionContext} />}
 				</TopBar>
 
 				<SessionFind scopeRef={sessionFindScopeRef} scrollContextRef={scrollContextRef} />
@@ -1844,6 +1886,8 @@ export function Chat({
 				    height morph (typing, a question growing the band, the
 				    fold) and NEVER overlaps the composer. */}
 				<DockOverlay
+					viewReader={inputViewReader}
+					viewTargets={surfaceTarget ? { text: textTarget()!, answer: builtinTarget, thinking: thinkingTarget(), pluginQuestion: pluginQuestionTarget(), pluginProblem: pluginProblemTarget() } : undefined}
 					pending={pending}
 					onPrepareBuiltin={prepareBuiltin}
 					onBuiltinPendingInput={question => { const target = builtinTarget(question); return !!target && !!pluginManager?.hasPendingSubmissionInput(target); }}
@@ -1863,6 +1907,7 @@ export function Chat({
 					onPluginSend={send}
 					onPluginDismiss={() => pendingPlugin ? dismissPluginQuestion(pendingPlugin.occurrence, pendingPlugin.questionId) : unreadablePlugin ? dismissPluginQuestion(unreadablePlugin.occurrence, unreadablePlugin.annotation.status === "unreadable" ? unreadablePlugin.annotation.identity?.questionId : undefined) : Promise.resolve()}
 					unreadablePlugin={!!unreadablePlugin}
+					unavailableOccurrence={unreadablePlugin?.occurrence}
 					reconciliation={reconciliation}
 					onRetrySync={() => { void reconcile(); }}
 					initialQuestionDraft={pending ? questionDraft(pending.key)?.form : undefined}
@@ -2106,7 +2151,9 @@ export function shouldStampGeometryMute(nextH: number, prevH: number, pending: b
 	return pending && nextH > prevH + 1;
 }
 
-function DockOverlay({
+/** Host-only composition/test seam; never part of the plugin SDK. */
+export function DockOverlay({
+	viewReader, viewTargets, unavailableOccurrence,
 	pending,
 	onPrepareBuiltin, onBuiltinPendingInput, onPrepareThinking, pendingThinkingInput, onPreparePluginQuestion, preparing, preparationStatus,
 	pluginQuestion, pluginDraft, pluginAvailable, pluginReady, onPluginMicAvailable, onPluginSend, onPluginDismiss, unreadablePlugin, reconciliation, onRetrySync,
@@ -2136,6 +2183,9 @@ function DockOverlay({
 	setupCta,
 	queuedSteers,
 }: {
+	viewReader?: SessionInputViewReader;
+	viewTargets?: SessionViewTargets;
+	unavailableOccurrence?: import("@/src/core").PluginSubmissionOccurrence;
 	pending: ReturnType<typeof pendingQuestionOf>;
 	onPrepareBuiltin: PrepareBuiltinSubmission;
 	onBuiltinPendingInput: (question: QuestionData) => boolean;
@@ -2227,6 +2277,10 @@ function DockOverlay({
 	const readingInputRef = useRef<HTMLDivElement>(null);
 	const ownsDock = !!pending || !!pluginQuestion || unreadablePlugin || !!practice;
 	const initialPendingRef = useRef(pendingId);
+	const nativeViewReader = useRef<(() => NativeQuestionViewState) | null>(null) as ViewReaderRef<NativeQuestionViewState>;
+	const practiceViewReader = useRef<(() => string) | null>(null) as ViewReaderRef<string>;
+	const customViewReader = useRef<(() => { available: boolean }) | null>(null) as ViewReaderRef<{ available: boolean }>;
+	nativeViewReader.changed = practiceViewReader.changed = customViewReader.changed = viewReader?.changed;
 
 	// Teach-question ARRIVAL state, applied during render — BEFORE the
 	// first paint (owner, scroll-honesty round 2026-09-25). Until now the
@@ -2292,6 +2346,29 @@ function DockOverlay({
 		: practice
 			? `practice:${pluginPractice?.snapshot.problemId ?? practice.toolCallId}`
 			: "chat";
+
+	useLayoutEffect(() => {
+		if (!viewReader || !viewTargets) return;
+		const read = (): PluginSessionViewInput => {
+			if (pluginQuestion && pluginDraft && viewTargets.pluginQuestion) return { ...viewTargets.pluginQuestion, input: pluginQuestion.input, expanded, revealed: !revealPending,
+				available: customViewReader.current?.().available ?? false, draft: pluginDraft };
+			if (unreadablePlugin) return { type: "unavailable", ...(unavailableOccurrence ? { occurrence: unavailableOccurrence } : {}), expanded, revealed: !revealPending };
+			if (pending) {
+				const state = nativeViewReader.current?.();
+				const target = state && state.question.id === pending.toolCallId ? viewTargets.answer(state.question) : undefined;
+				return target && state ? { ...target, expanded, revealed: !revealPending, available: true, draft: { ...state.draft, readingThinking } }
+					: { type: "unavailable", occurrence: { messageId: pending.messageId, contentIndex: pending.contentIndex, toolCallId: pending.toolCallId, toolName: pending.tool }, expanded, revealed: !revealPending };
+			}
+			if (pluginPractice && viewTargets.pluginProblem) return { ...viewTargets.pluginProblem, input: pluginPractice.snapshot.input, expanded,
+				available: customViewReader.current?.().available ?? false, draft: pluginPractice.draft };
+			if (practice && viewTargets.thinking) return { ...viewTargets.thinking, expanded, draft: { thinking: practiceViewReader.current?.() ?? "" } };
+			return viewTargets.text;
+		};
+		viewReader.current = read;
+		return () => { if (viewReader.current === read) viewReader.current = null; };
+	});
+	const unavailableViewKey = unavailableOccurrence ? pluginQuestionOccurrenceKey(unavailableOccurrence) : "";
+	useLayoutEffect(() => { viewReader?.changed?.(); }, [viewReader, mode, expanded, revealPending, readingThinking, unavailableViewKey]);
 
 	// The plan marginalia's flank width (owner, plan-placement round): from
 	// the DOCK container's right edge to the block's right edge — the bare
@@ -2584,7 +2661,7 @@ function DockOverlay({
 							className={mode === initialModeRef.current ? "flow-root" : "flow-root dock-variant"}
 						>
 							{pluginQuestion && pluginDraft ? (
-								<PluginQuestionDock snapshot={pluginQuestion} chatId={chatId} draft={pluginDraft} expanded={expanded} reveal={revealPending} onExpand={expandAndReveal} ready={pluginReady} available={pluginAvailable} reconciliation={reconciliation} readingRef={readingInputRef} onMicAvailable={onPluginMicAvailable} send={onPluginSend} dismiss={onPluginDismiss} prepareSubmission={onPreparePluginQuestion} />
+								<PluginQuestionDock viewReader={customViewReader} snapshot={pluginQuestion} chatId={chatId} draft={pluginDraft} expanded={expanded} reveal={revealPending} onExpand={expandAndReveal} ready={pluginReady} available={pluginAvailable} reconciliation={reconciliation} readingRef={readingInputRef} onMicAvailable={onPluginMicAvailable} send={onPluginSend} dismiss={onPluginDismiss} prepareSubmission={onPreparePluginQuestion} />
 							) : unreadablePlugin ? (
 								<div className="px-4 py-3">
 									{reconciliation === "syncing" && <p role="status" className="text-sm text-muted-foreground">Preparing question…</p>}
@@ -2592,6 +2669,7 @@ function DockOverlay({
 								</div>
 							) : pending ? (
 								<QuestionDock
+									viewReader={nativeViewReader}
 									toolName={pending.tool as "quiz" | "probe" | "ask_user_question" | "explain" | "recall"}
 									toolCallId={pending.toolCallId}
 									input={pending.input as never}
@@ -2610,9 +2688,10 @@ function DockOverlay({
 									compactionRunning={compactionRunning}
 								/>
 							) : pluginPractice ? (
-								<PluginProblemDock {...pluginPractice} expanded={expanded} onExpand={() => { setExpanded(true); void suppressFoldDuringReveal(); }} />
+								<PluginProblemDock {...pluginPractice} viewReader={customViewReader} expanded={expanded} onExpand={() => { setExpanded(true); void suppressFoldDuringReveal(); }} />
 							) : practice ? (
 								<PracticeDock
+									viewReader={practiceViewReader}
 									problemCallId={practice.toolCallId}
 									input={practice.input as { statement: string }}
 									expanded={expanded}

@@ -139,8 +139,11 @@ export interface PluginView {
 	/** The host owns the shell. Abort scopes any UI mounted inside this view. */
 	mount(container: HTMLElement, signal: AbortSignal): void | PluginCleanup | Promise<void | PluginCleanup>;
 }
+export type * from "./plugin-view-context.ts";
 export type PluginActionContext =
-	| { placement: "top-bar"; surface: "session"; sessionId: string; kind: "teaching" | "practice"; surfaceTarget: import("./plugin-ui.ts").PluginSurfaceTarget }
+	| { placement: "top-bar"; surface: "session"; sessionId: string; kind: "teaching" | "practice"; surfaceTarget: import("./plugin-ui.ts").PluginSurfaceTarget;
+		/** Detached whole-session view, captured once before action invocation. */
+		readonly view: import("./plugin-view-context.ts").PluginSessionViewContext }
 	| { placement: "top-bar"; surface: "plugin-view"; pluginId: string; viewId: string }
 	| { placement: "sidebar"; surface: "sidebar" }
 	| { placement: "graph"; surface: "graph" };

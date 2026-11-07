@@ -17,11 +17,11 @@ try {
 		"--target", "ES2022", "--lib", "ES2023,DOM,DOM.Iterable", "--module", "ESNext", "--moduleResolution", "bundler",
 		"--strict", "--noUncheckedIndexedAccess", "--verbatimModuleSyntax", "--skipLibCheck", "--allowImportingTsExtensions",
 		"--esModuleInterop", "--resolveJsonModule", "--types", "node", "--rootDir", ROOT, "--outDir", stage,
-		path.join(ROOT, "src", "core", "plugins.ts"), path.join(ROOT, "src", "core", "plugin-agents.ts"), path.join(ROOT, "src", "core", "plugin-ui.ts"), path.join(ROOT, "src", "core", "plugin-questions.ts"), path.join(ROOT, "src", "core", "plugin-submissions.ts"), path.join(ROOT, "src", "core", "plugin-problems.ts"),
+		path.join(ROOT, "src", "core", "plugins.ts"), path.join(ROOT, "src", "core", "plugin-agents.ts"), path.join(ROOT, "src", "core", "plugin-ui.ts"), path.join(ROOT, "src", "core", "plugin-questions.ts"), path.join(ROOT, "src", "core", "plugin-submissions.ts"), path.join(ROOT, "src", "core", "plugin-problems.ts"), path.join(ROOT, "src", "core", "plugin-view-context.ts"),
 	], { cwd: ROOT, stdio: "inherit" });
 	if (result.error) throw result.error;
 	if (result.status !== 0) throw new Error(`Plugin API declaration emission failed (${result.status})`);
-	fs.writeFileSync(path.join(stage, "index.d.ts"), 'export type * from "./src/core/plugins.ts";\nexport type * from "./src/core/plugin-agents.ts";\nexport type * from "./src/core/plugin-ui.ts";\nexport type * from "./src/core/plugin-tree.ts";\nexport type * from "./src/core/plugin-questions.ts";\nexport type * from "./src/core/plugin-submissions.ts";\nexport type * from "./src/core/plugin-problems.ts";\n');
+	fs.writeFileSync(path.join(stage, "index.d.ts"), 'export type * from "./src/core/plugins.ts";\nexport type * from "./src/core/plugin-agents.ts";\nexport type * from "./src/core/plugin-ui.ts";\nexport type * from "./src/core/plugin-tree.ts";\nexport type * from "./src/core/plugin-questions.ts";\nexport type * from "./src/core/plugin-submissions.ts";\nexport type * from "./src/core/plugin-problems.ts";\nexport type * from "./src/core/plugin-view-context.ts";\n');
 	const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, "package.json"), "utf8"));
 	fs.writeFileSync(path.join(stage, "package.json"), JSON.stringify({
 		name: "learnharness-plugin-api", version: "1.0.0", private: true, type: "module", types: "./index.d.ts",

@@ -127,6 +127,16 @@ is implied. No grading, data, blank filtering, API-shape or `ctx.ui` changes are
   view IDs). Sidebar placements share the core action area. Use typed action context,
   optional SVG icon and `disabled` boolean/predicate; call `ctx.refreshActions()`
   after dynamic enabled-state changes. The host handles async busy/repeat prevention.
+- Session top-bar `context.view: PluginSessionViewContext` is a fresh read-only whole-view
+  snapshot: full current native `messages`, host `transcript`, session/status metadata,
+  retained composer and host-selected native/custom input with actual option order and
+  exact unsent drafts/published editor values. Use it instead of parsing saved history,
+  inspecting private DOM or reconstructing host question state. It remains detached and
+  bound to the original session/occurrence across awaits; opaque targets keep normal
+  lifetime rules. Reads do not flush dictation, save, process or submit. Respect supplied
+  reveal/availability flags when deciding what a learner reference may display; full
+  history is not artificially filtered to learner-facing fields. Plugin-owned-view action
+  contexts are unchanged. Read `docs/plugin-view-context.md` for the exact contract.
 - Use `ctx.ui` controlled helpers rather than private host component imports:
   `mountComposer`, `mountDictation`, `mountModelPicker`, `mountThinkingPicker`,
   `mountKnowledgePicker`, `mountStandardComposer`, `mountButton`, `mountBadge`, `mountSettingsRows`,

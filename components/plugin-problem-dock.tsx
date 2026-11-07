@@ -19,6 +19,7 @@ export function problemMountContext(snapshot: PluginProblemSnapshot, chatId: str
     input: freezePluginQuestionValue(clonePluginQuestionJson(snapshot.input)) as unknown as PluginProblemSnapshot["input"], signal });
 }
 export interface PluginProblemDockProps {
+  viewReader?: import("./session-view-readers").ViewReaderRef<{ available: boolean }>;
   snapshot: PluginProblemSnapshot; occurrence: PluginSubmissionOccurrence; chatId: string; draft: PluginProblemDraft;
   expanded: boolean; onExpand(): void; ready: boolean; available: boolean;
   reconciliation: "ready" | "syncing" | "failed";
@@ -42,6 +43,13 @@ export function PluginProblemDockContent(props: PluginProblemDockProps & { regis
   const [failed, setFailed] = useState(false), [submitting, setSubmitting] = useState(false);
   const [, render] = useReducer(value => value + 1, 0);
   const latch = useRef(false), thinkingRevision = useRef(0);
+  useLayoutEffect(() => {
+    if (!props.viewReader) return;
+    const owner = props.viewReader, read = () => ({ available: current.current.available && !!current.current.registration && !failed });
+    owner.current = read;
+    return () => { if (owner.current === read) owner.current = null; };
+  });
+  useLayoutEffect(() => { props.viewReader?.changed?.(); }, [props.viewReader, draft.submission, draft.thinking, failed, available, registration]);
   const sameLease = !!lease.current && !!registration && owner.current === registration && ownerKey.current === key;
   const mountRegistration = ((reconciliation === "ready" && ready && available) || (sameLease && (reconciliation !== "ready" || available))) ? registration : undefined;
   useEffect(() => {

@@ -114,8 +114,18 @@ placing plugin's view IDs) targets. Sidebar actions share the core teaching/prac
 action area; there is **no dedicated plugin sidebar section**. Graph actions occupy
 the host graph strip. Placement and registration have separate unregister handles.
 
-Actions receive typed surface context: session ID/kind on session top bars, plugin/view
-IDs on plugin top bars, or the sidebar/graph surface discriminator. Plugins supply
+Actions receive typed surface context: session ID/kind and readonly whole-view `view`
+on session top bars, plugin/view IDs on plugin top bars, or the sidebar/graph surface
+discriminator. `PluginSessionViewContext` includes the existing native browser history,
+host-projected transcript, session/status metadata, retained composer and host-selected
+native/custom input with its presentation and unsent drafts. The action captures once
+at invocation, detached/frozen except existing opaque surface capabilities, and never
+retargets after await. Dynamic disabled predicates receive the same shape; a click captures
+afresh. Private view-local readers bridge actual input owners without a new parser,
+global store, polling, public subscriptions or read-time submission/dictation side effects.
+See [Whole-session view context](plugin-view-context.md),
+`src/core/plugin-view-context.ts`, and `components/session-view-readers.ts`.
+Plugins supply
 name, optional trusted SVG icon, disabled boolean/predicate, and `run(context)`.
 `ctx.refreshActions()` explicitly asks the host to re-evaluate enabled state after
 plugin state changes. The host owns surrounding buttons and async busy state, prevents

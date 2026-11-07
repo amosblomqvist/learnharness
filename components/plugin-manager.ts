@@ -537,13 +537,14 @@ export class PluginFrontendManager {
 			}
 		}
 	}
-	async runAction(id: string, action: PluginAction, context: PluginActionContext) {
+	async runAction(id: string, action: PluginAction, context: PluginActionContext | (() => PluginActionContext | undefined)) {
 		const life = this.lives.get(id);
 		if (!life || !this.current(life) || life.actions.get(action.id) !== action || life.actionBusy.has(action.id)) return;
 		try {
-			if (typeof action.disabled === "function" ? action.disabled(context) : action.disabled) return;
+			const captured = typeof context === "function" ? context() : context;
+			if (!captured || (typeof action.disabled === "function" ? action.disabled(captured) : action.disabled)) return;
 			life.actionBusy.add(action.id); this.publish();
-			await action.run(context);
+			await action.run(captured);
 		} catch (error) { this.report(life, error); }
 		finally { if (life.actionBusy.delete(action.id) && this.current(life)) this.publish(); }
 	}

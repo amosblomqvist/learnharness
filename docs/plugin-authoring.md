@@ -201,10 +201,26 @@ sessions: ["teaching"], views: ["library"] })`.
 
 | Placement/surface | Additional fields |
 | --- | --- |
-| `"top-bar"` / `"session"` | `sessionId`, `kind: "teaching" \| "practice"`, opaque `surfaceTarget` |
+| `"top-bar"` / `"session"` | `sessionId`, `kind: "teaching" \| "practice"`, opaque `surfaceTarget`, readonly `view: PluginSessionViewContext` |
 | `"top-bar"` / `"plugin-view"` | `pluginId`, `viewId` |
 | `"sidebar"` / `"sidebar"` | none |
 | `"graph"` / `"graph"` | none |
+
+Session top-bar actions receive a fresh whole-view snapshot at invocation, not just the
+current question/submission. `context.view` includes full current browser `messages`,
+the host-projected `transcript`, session/title/status/phase/context usage and visible
+queued steers, retained `composer.text`, and the host-selected `input`. Input variants
+cover ordinary text, native questions/practice, custom questions/problems, and unavailable
+input; applicable variants include current presentation and exact unsent drafts/published
+editor values. Native question options use the actual displayed/shuffled order.
+
+The snapshot is detached/recursively readonly and stays tied to that session/occurrence
+across awaits. Existing opaque targets retain their normal live lifetime. A read never
+flushes dictation, saves, processes, submits, or calls a model. Dynamic disabled predicates
+get the same read-only shape; clicks capture anew. Plugin-owned-view action contexts are
+unchanged. Full history has submission-context visibility, not artificial question-only
+filtering. See [Whole-session view context](plugin-view-context.md) for the field contract,
+reveal/availability semantics, and snapshot lifetime.
 
 `ctx.app` exposes `pathname()`, `openSession(id)`, `openHome()`, `openView(id)` (this
 plugin's view), and `openSettings()` (this plugin's dedicated page), not private React

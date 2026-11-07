@@ -46,9 +46,10 @@ function ActionIcon({ action }: { action: PluginAction }) {
 		: <PuzzleIcon aria-hidden="true" className="size-4 shrink-0" />;
 }
 
-function ActionButton({ item, context, className, iconOnly = false, menuItem = false, onRun }: {
+function ActionButton({ item, context, captureContext, className, iconOnly = false, menuItem = false, onRun }: {
 	item: PlacedPluginAction;
 	context: PluginActionContext;
+	captureContext?: () => PluginActionContext | undefined;
 	className: string;
 	iconOnly?: boolean;
 	menuItem?: boolean;
@@ -59,7 +60,7 @@ function ActionButton({ item, context, className, iconOnly = false, menuItem = f
 		<button type="button" role={menuItem ? "menuitem" : undefined} data-plugin-action={item.key} title={item.action.name} aria-label={item.action.name}
 			disabled={item.busy || pluginActionDisabled(item.action, context)} aria-busy={item.busy || undefined}
 			className={`${className} disabled:pointer-events-none disabled:opacity-40`}
-			onClick={() => { onRun?.(); void manager?.runAction(item.pluginId, item.action, context); }}>
+			onClick={() => { void manager?.runAction(item.pluginId, item.action, () => { const captured = captureContext ? captureContext() : context; if (captured) onRun?.(); return captured; }); }}>
 			<ActionIcon action={item.action} />
 			{!iconOnly && <span className="min-w-0 truncate">{item.action.name}</span>}
 		</button>
@@ -108,7 +109,7 @@ export function fitPluginTopBarActions(widths: readonly number[], available: num
 	return count;
 }
 
-export function PluginTopBarActions({ context }: { context: Extract<PluginActionContext, { placement: "top-bar" }> }) {
+export function PluginTopBarActions({ context, captureContext }: { context: Extract<PluginActionContext, { placement: "top-bar" }>; captureContext?: () => PluginActionContext | undefined }) {
 	const { snapshot } = usePlugins();
 	const actions = placedPluginActions(snapshot.plugins, context);
 	const root = useRef<HTMLDivElement>(null);
@@ -175,14 +176,14 @@ export function PluginTopBarActions({ context }: { context: Extract<PluginAction
 		<div ref={probes} aria-hidden="true" className="pointer-events-none invisible fixed left-0 top-0 flex w-max gap-1">
 			{actions.map(item => <span key={item.key} className={TOP_BUTTON}><ActionIcon action={item.action} /><span className="min-w-0 truncate">{item.action.name}</span></span>)}
 		</div>
-		{actions.slice(0, count).map(item => <ActionButton key={item.key} item={item} context={context} className={TOP_BUTTON} />)}
+		{actions.slice(0, count).map(item => <ActionButton key={item.key} item={item} context={context} captureContext={captureContext} className={TOP_BUTTON} />)}
 		{excess.length > 0 && <Hint label="More plugin actions" side="bottom"><button ref={trigger} type="button" title="More plugin actions" aria-label="More plugin actions"
 			aria-haspopup="menu" aria-expanded={menuOpen} onClick={() => setMenuOpen(open => !open)}
 			className="flex size-9 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"><EllipsisIcon className="size-4" /></button></Hint>}
 		{menuOpen && excess.length > 0 && <MenuShell anchorRef={trigger} testid="plugin-top-bar-menu" onClose={(reason) => { setMenuOpen(false); if (reason === "escape") trigger.current?.focus(); return "closed"; }} preferredSide="down" align="right"
 			menuClass="lh-no-drag w-64 rounded-xl border border-border bg-popover p-1 shadow-lg">
 			<div role="menu" aria-label="More plugin actions">
-			{excess.map(item => <ActionButton key={item.key} item={item} context={context} menuItem onRun={() => setMenuOpen(false)}
+			{excess.map(item => <ActionButton key={item.key} item={item} context={context} captureContext={captureContext} menuItem onRun={() => setMenuOpen(false)}
 				className="flex w-full min-w-0 items-center gap-2 rounded-md px-2 py-2 text-left text-xs text-muted-foreground hover:bg-accent hover:text-foreground" />)}
 			</div>
 		</MenuShell>}

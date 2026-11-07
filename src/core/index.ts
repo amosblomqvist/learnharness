@@ -90,6 +90,7 @@ export * from "./session-markdown.ts";
 export * from "./plugins.ts";
 export * from "./plugin-questions.ts";
 export * from "./plugin-problems.ts";
+export * from "./plugin-view-context.ts";
 export * from "./plugin-submissions.ts";
 export type * from "./plugin-ui.ts";
 export type * from "./plugin-tree.ts";

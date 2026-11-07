@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import type { ViewReaderRef, NativeQuestionViewState } from "./session-view-readers";
 import { ArrowDownIcon, ChevronRightIcon, PlayIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { finishDictation, isDictationActive, joinDictation, useDictationTarget } from "@/components/dictation";
@@ -13,6 +14,7 @@ import { ToolContentResponse } from "@/components/ai-elements/message";
 import { cn } from "@/lib/utils";
 import {
 	buildAnswer,
+	toClientQuestion,
 	repairMathForDisplay,
 	normalizeQuizType,
 	CONFIDENCE_STOPS,
@@ -64,6 +66,8 @@ import { CONFIDENCE_COLORS, confidenceRailStyle } from "@/components/confidence-
  */
 
 export interface QuestionDockProps {
+	/** Private click-time view read: no draft save or dictation flush. */
+	viewReader?: ViewReaderRef<NativeQuestionViewState>;
 	toolName: "quiz" | "probe" | "ask_user_question" | "explain" | "recall";
 	toolCallId: string;
 	input: QuizToolInput | AskToolInput | ExplainToolInput;
@@ -106,6 +110,7 @@ export interface QuestionDockProps {
 }
 
 export function QuestionDock({
+	viewReader,
 	toolName,
 	toolCallId,
 	input,
@@ -163,6 +168,7 @@ export function QuestionDock({
 			)}
 			<div className={expanded ? "dock-variant" : "invisible h-0 overflow-hidden"}>
 				<QuestionDockForm
+					viewReader={viewReader}
 					toolName={toolName}
 					toolCallId={toolCallId}
 					input={parsed}
@@ -263,6 +269,7 @@ export function QuestionDockBar({
 
 /** The expanded question: label, question, options, and the unified bottom row. */
 function QuestionDockForm({
+	viewReader,
 	toolName,
 	toolCallId,
 	input,
@@ -395,6 +402,20 @@ function QuestionDockForm({
 	const mounted = useRef(true);
 	useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
 	const formValues = useRef({ sel, other, confIdx }); formValues.current = { sel, other, confIdx };
+	useLayoutEffect(() => {
+		if (!viewReader) return;
+		const read = (): NativeQuestionViewState => {
+			const { sel, other, confIdx } = formValues.current;
+			return { question: qd, draft: { dontKnow: sel.dontKnow,
+				values: [...sel.selected].flatMap(index => qd.options[index] ? [qd.options[index]!.value] : []),
+				otherSelected: sel.otherSelected, other, text: answerTextRef.current, thinking: thinkingTextRef.current,
+				...(kind === "quiz" ? { confidence: CONFIDENCE_STOPS[confIdx] } : {}) } };
+		};
+		viewReader.current = read;
+		return () => { if (viewReader.current === read) viewReader.current = null; };
+	}, [viewReader, qd, kind]);
+	const viewPresentationKey = JSON.stringify({ ...toClientQuestion(qd), questionType: qd.questionType });
+	useLayoutEffect(() => { viewReader?.changed?.(); }, [viewReader, sel, other, text, thinking, confIdx, viewPresentationKey]);
 	const submit = () => {
 		if (!canSubmit || compactionRunning || preparing) return;
 		if (onPrepareSubmission) {

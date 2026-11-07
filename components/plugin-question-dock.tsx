@@ -21,6 +21,7 @@ import { Button } from "./ui/button";
 const keyOf = (snapshot: PluginQuestionSnapshot) => pluginQuestionOccurrenceKey(snapshot.occurrence);
 
 interface PluginQuestionDockProps {
+	viewReader?: import("./session-view-readers").ViewReaderRef<{ available: boolean }>;
 	snapshot: PluginQuestionSnapshot; chatId: string; draft: PluginQuestionDraft; expanded: boolean; reveal: boolean; onExpand(): void;
 	prepareSubmission?: PreparePluginQuestionSubmission;
 	ready: boolean; reconciliation: "ready" | "syncing" | "failed"; available: boolean; readingRef: RefObject<HTMLDivElement | null>;
@@ -33,7 +34,7 @@ export function PluginQuestionDock(props: PluginQuestionDockProps) {
 }
 
 /** Host-only component seam for deterministic DOM/capture fixtures, not SDK. */
-export function PluginQuestionDockContent({ snapshot, chatId, draft, expanded, reveal, onExpand, ready, reconciliation, available, readingRef, onMicAvailable, send, dismiss, registration, prepareSubmission }: PluginQuestionDockProps & { registration?: QuestionRendererRegistration }) {
+export function PluginQuestionDockContent({ viewReader, snapshot, chatId, draft, expanded, reveal, onExpand, ready, reconciliation, available, readingRef, onMicAvailable, send, dismiss, registration, prepareSubmission }: PluginQuestionDockProps & { registration?: QuestionRendererRegistration }) {
 	const controller = useOptionalInteractionLayers();
 	const root = useRef<HTMLDivElement>(null);
 	const editor = useRef<HTMLDivElement>(null);
@@ -47,6 +48,13 @@ export function PluginQuestionDockContent({ snapshot, chatId, draft, expanded, r
 	const latch = useRef(false);
 	const current = useRef({ snapshot, draft, expanded, reveal, ready, reconciliation, available, registration, failed });
 	current.current = { snapshot, draft, expanded, reveal, ready, reconciliation, available, registration, failed };
+	useLayoutEffect(() => {
+		if (!viewReader) return;
+		const read = () => { const now = current.current; return { available: now.available && !!now.registration && !now.failed }; };
+		viewReader.current = read;
+		return () => { if (viewReader.current === read) viewReader.current = null; };
+	}, [viewReader]);
+	useLayoutEffect(() => { viewReader?.changed?.(); }, [viewReader, draft.answer, draft.thinking, draft.readingThinking, failed, available, registration]);
 	const key = pluginQuestionOccurrenceKey(snapshot.occurrence);
 	const canonicalReady = reconciliation === "ready";
 	// Unknown availability during reconciliation is not revocation. Retain

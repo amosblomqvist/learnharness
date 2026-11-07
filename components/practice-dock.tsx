@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useRef, useState, type ReactNode } from "react";
+import { useCallback, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import type { ViewReaderRef } from "./session-view-readers";
 import { ChevronRightIcon } from "lucide-react";
 import { ToolContentResponse } from "@/components/ai-elements/message";
 import { Button } from "@/components/ui/button";
@@ -33,6 +34,7 @@ import { cn } from "@/lib/utils";
  */
 
 export interface PracticeDockProps {
+	viewReader?: ViewReaderRef<string>;
 	/** The active problem's tool-call id (submissions target it). */
 	problemCallId: string;
 	/** The pose's arguments — only the statement is the learner's (the
@@ -63,7 +65,7 @@ export interface PracticeDockProps {
 	compactionRunning?: boolean;
 }
 
-export function PracticeDock({ problemCallId, input, expanded, onExpand, onSubmit, onPrepareSubmission, customInput, hasPendingInput = false, preparing = false, onEscape, compactionRunning = false }: PracticeDockProps) {
+export function PracticeDock({ viewReader, problemCallId, input, expanded, onExpand, onSubmit, onPrepareSubmission, customInput, hasPendingInput = false, preparing = false, onEscape, compactionRunning = false }: PracticeDockProps) {
 	const controller = useOptionalInteractionLayers();
 	const rootRef = useRef<HTMLElement>(null);
 	const [nativeThinking, setNativeThinking] = useState("");
@@ -75,6 +77,12 @@ export function PracticeDock({ problemCallId, input, expanded, onExpand, onSubmi
 	// the tail, never a stale closure.
 	const thinkingRef = useRef(thinking); thinkingRef.current = thinking;
 	const editRevision = useRef(0);
+	useLayoutEffect(() => {
+		if (!viewReader) return;
+		const read = () => thinkingRef.current;
+		viewReader.current = read;
+		return () => { if (viewReader.current === read) viewReader.current = null; };
+	}, [viewReader]);
 
 	useDictationTarget(
 		useCallback(
@@ -88,6 +96,7 @@ export function PracticeDock({ problemCallId, input, expanded, onExpand, onSubmi
 		true,
 	);
 
+	useLayoutEffect(() => { viewReader?.changed?.(); }, [viewReader, thinking]);
 	const submit = () => {
 		if (compactionRunning || preparing) return;
 		const prepare = customInput?.prepare ?? onPrepareSubmission;
