@@ -24,11 +24,8 @@ export type CatalogModel = {
 	readonly parameters: string | null;
 	readonly languages: readonly string[];
 	readonly capabilities: {
-		readonly streaming: boolean;
-		readonly translate: boolean;
 		readonly languageDetection: boolean;
 	};
-	readonly quant: string;
 	readonly filename: string;
 	/** Exact file size in bytes. */
 	readonly size: number;
