@@ -32,6 +32,8 @@ Build **on each target OS**. Next traces native binaries for its build machine; 
 6. `node scripts/smoke-server.mjs --electron` — check renderer/demo dependencies, providers, gzip backpressure, and isolated standalone HTTP boot under Electron's Node.
 7. Package with Electron Builder using the appropriate local/release policy below.
 
+The standalone payload also carries the on-device dictation engine: the bundled Silero VAD file, `transcribe-cpp`, `koffi`, and one `@transcribe-cpp/*` and one `@koromix/koffi-*` package for the target OS (about 66 MB on Linux; other systems not measured). The server smoke loads them from inside the payload (`smoke-local-stt-runtime.mjs`), so a payload missing any of them fails there. Speech models are not bundled; users download them. Notices ship as `licenses/local-stt.md` (from [`local-stt-licenses.md`](local-stt-licenses.md)).
+
 The shell/updater ships in `app.asar`; the server/native renderers ship unpacked as `extraResources`. Pi/PDF/canvas/resvg/Photon dynamic assets are explicitly traced in [`next.config.ts`](../next.config.ts). Keep trace exclusions narrow: broad `dist/**` or `data/**` patterns can remove dependency assets. Curation guards are not a substitute for inspecting a changed payload.
 
 The release workflow also checks providers from the **packaged** payload under host Node and packaged Electron, then exercises the demo helper using the app's Electron (Xvfb on Linux). HTTP boot or catalog output alone does not test these lazy paths.

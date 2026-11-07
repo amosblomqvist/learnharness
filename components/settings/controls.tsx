@@ -61,6 +61,7 @@ export function SettingsRow({
 	children,
 	testid,
 	dimmed,
+	wrap,
 }: {
 	label: string;
 	hint?: ReactNode;
@@ -69,9 +70,12 @@ export function SettingsRow({
 	/** Dependency graying, graph-view style: the whole row dims when the
 	 *  control is inert (parent off, no file yet, …). */
 	dimmed?: boolean;
+	/** For a control that cannot shrink: it drops under the label when the dialog is too
+	 *  narrow, and the row becomes a size container so the control can pick compact labels. */
+	wrap?: boolean;
 }) {
 	return (
-		<div data-testid={testid} className={cn("flex items-center justify-between gap-4 py-1", dimmed && "opacity-40")}>
+		<div data-testid={testid} className={cn("flex items-center justify-between gap-4 py-1", wrap && "@container flex-wrap", dimmed && "opacity-40")}>
 			<span className="min-w-0">
 				<span className="block font-prose text-(length:--lh-prose-size)">{label}</span>
 				{hint && <span className="block text-xs text-muted-foreground/70">{hint}</span>}
@@ -193,7 +197,9 @@ export function ThinSelect({
 			disabled={disabled}
 			onChange={(e) => onChange(e.target.value)}
 			className={cn(
-				"h-7 rounded-sm border border-border bg-background px-1.5 font-ui text-xs text-foreground outline-none",
+				// min-w-0/max-w-full: a long option label shortens the select instead of overflowing
+				// a narrow row. The ring shows keyboard focus (the global rule removes the outline).
+				"h-7 min-w-0 max-w-full text-ellipsis rounded-sm border border-border bg-background px-1.5 font-ui text-xs text-foreground outline-none focus-visible:border-ring focus-visible:ring-1 focus-visible:ring-ring",
 				disabled && "cursor-not-allowed",
 			)}
 		>

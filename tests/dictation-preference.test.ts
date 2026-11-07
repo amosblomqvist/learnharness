@@ -108,3 +108,29 @@ test("capture also waits for a write initiated as a pending read publishes its r
 	assert.equal(await store.getLanguage(), "multi");
 	off();
 });
+
+/** A store over an in-memory record, keeping every PUT body. */
+function storeOver(dictation: Record<string, unknown>) {
+	const puts: Record<string, unknown>[] = [];
+	const store = createDictationLanguageStore(async (_url, init) => {
+		if (init?.method === "PUT") {
+			puts.push(JSON.parse(init.body as string));
+			return Response.json({ settings: { version: 1, dictation: puts.at(-1) } });
+		}
+		return Response.json({ settings: { version: 1, dictation } });
+	});
+	return { store, puts };
+}
+
+test("a write for one setting carries the on-device settings along, so none is erased", async () => {
+	const stored = { language: "en", provider: "local", localModel: "whisper-small", localPreferredLanguages: ["en", "fr"], localLanguage: "fr", localChineseOutput: "traditional" };
+	const { store, puts } = storeOver(stored);
+	await store.load();
+	assert.equal(await store.saveEngine({ provider: "groq" }), true);
+	assert.deepEqual(puts.at(-1), { ...stored, provider: "groq" });
+	assert.equal(await store.save("fr"), true);
+	assert.deepEqual(puts.at(-1), { ...stored, provider: "groq", language: "fr" });
+	assert.equal(await store.saveEngine({ provider: "deepgram" }), true);
+	const { provider: _local, ...withoutEngine } = stored;
+	assert.deepEqual(puts.at(-1), { ...withoutEngine, language: "fr" }, "a Deepgram record keeps the Local choices, and omits the engine");
+});
