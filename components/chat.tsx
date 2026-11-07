@@ -2581,15 +2581,10 @@ function DockOverlay({
 					    overlay is none by default. The isAtBottom/scrollToBottom
 					    context still reaches it — DockOverlay is a Conversation
 					    child. */}
-					<ConversationScrollButton
-						className={
-							// Side mode: the panel spans the full column, so "above the
-							// block" is off-screen — park the disc just left of it.
-							side
-								? "pointer-events-auto bottom-5 left-0 -ml-3 translate-x-[-100%]"
-								: "pointer-events-auto bottom-full mb-2"
-						}
-					/>
+					{/* Side mode renders NO disc (owner request 2026-11-07): the
+					    reading zone means the learner scrolls freely; a floating
+					    ↓ beside the panel was just noise. */}
+					{!side && <ConversationScrollButton className="pointer-events-auto bottom-full mb-2" />}
 				</div>
 				{/* The plan marginalia (owner, plan-placement round): the bare
 				    diagram in the band's right flank — boundaless, meet-fitted, part
