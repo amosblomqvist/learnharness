@@ -34,7 +34,7 @@ function shift(hex: string, add: number): string {
 /** The fixed inks per variant (only the surfaces derive from the background). */
 const INKS: Record<RenderedMode, { fg: string; mutedFg: string; destructive: string; lineStrong: string }> = {
 	dark: { fg: "#e6e6e6", mutedFg: "#8d8d8d", destructive: "oklch(0.704 0.191 22.216)", lineStrong: "#ffffff" },
-	light: { fg: "#1a1a1a", mutedFg: "#6b6b68", destructive: "oklch(0.577 0.245 27.325)", lineStrong: "#1a1a1a" },
+	light: { fg: "#1a1a1a", mutedFg: "#62625f", destructive: "oklch(0.54 0.23 27)", lineStrong: "#1a1a1a" },
 };
 
 /** The full token map one variant implies for a background (null = the

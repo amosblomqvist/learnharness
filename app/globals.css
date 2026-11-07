@@ -90,13 +90,13 @@
 	--secondary: #ffffff;
 	--secondary-foreground: #1a1a1a;
 	--muted: #ffffff;
-	--muted-foreground: #6b6b68;
+	--muted-foreground: #62625f;
 	--accent: #e8e8e6;
 	--accent-foreground: #1a1a1a;
-	--destructive: oklch(0.577 0.245 27.325);
+	--destructive: oklch(0.54 0.23 27);
 	--border: #d4d4d2;
 	--input: #d4d4d2;
-	--ring: #6b6b68;
+	--ring: #62625f;
 	--lh-line-strong: var(--foreground);
 	--lh-ink-strong: var(--foreground);
 	--lh-ink-italic: var(--foreground);
