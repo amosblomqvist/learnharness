@@ -67,10 +67,10 @@ export function createNotesImportQueue(post: (files: readonly File[]) => Promise
 		getSnapshot: () => snapshot,
 		subscribe(listener: () => void) { listeners.add(listener); return () => { listeners.delete(listener); }; },
 		append(files: readonly File[]) {
-			if (files.length === 0) return;
-			if (!snapshot.importing) { failures.clear(); notices.clear(); sequence = 0; }
 			// Unsafe names and unsupported types are summed up per pick; each summary sits where its first file was.
 			const unsafe: number[] = [], unsupported: { index: number; extension: string }[] = [];
+			if (files.length === 0) return;
+			if (!snapshot.importing) { failures.clear(); notices.clear(); sequence = 0; }
 			for (const file of files) {
 				const index = sequence++;
 				const path = notesPath(file);
