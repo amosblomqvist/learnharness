@@ -143,22 +143,26 @@ function Notice({ children, testid, tone = "muted" }: { children: ReactNode; tes
 	return <p data-testid={testid} className={cn("break-words px-1 text-[11px] leading-relaxed", tone === "warning" ? "text-foreground/80" : "text-muted-foreground/70")}>{children}</p>;
 }
 
-/** Five bars, fuller the quicker. The label carries the number for anyone not seeing the bars. */
+/** "Speed: ▮▮▮▮▮ ~1.2 s wait per 30 s of speech". Five bars, fuller the quicker, then the number
+ * they stand for: the benchmark time to transcribe 30 seconds of speech on the machine's tier.
+ * The label and the bars never part, nor do the bars and the time, so a narrow dialog wraps only
+ * before the closing words. Read aloud it is the same sentence the eye sees. */
 function SpeedMeter({ level, steps, waitSeconds, tier }: { level: number; steps: number; waitSeconds: number; tier: MachineTier }) {
 	const wait = formatWait(waitSeconds);
 	return (
 		<span
-			role="img"
 			data-testid="local-model-speed"
 			data-level={level}
-			aria-label={`Speed: ${level} of ${steps}, ${wait} for 30 seconds of audio`}
-			title={`${wait} to transcribe 30 seconds of audio, measured on a reference laptop ${tier === "accelerated" ? "using its graphics hardware" : "using only its processor"}`}
-			className="inline-flex items-center gap-1"
+			title={`Estimated time to transcribe 30 seconds of speech, from a benchmark on a reference laptop ${tier === "accelerated" ? "using its graphics hardware" : "using only its processor"}. Your computer may be faster or slower.`}
 		>
-			<span aria-hidden className="inline-flex items-end gap-px">
-				{Array.from({ length: steps }, (_, i) => <i key={i} className={cn("block h-2.5 w-1 rounded-[1px]", i < level ? "bg-foreground" : "bg-border")} />)}
+			<span className="inline-flex items-center gap-1 whitespace-nowrap">
+				<span>Speed:</span>
+				<span role="img" aria-label={`${level} of ${steps} bars`} className="inline-flex items-end gap-px">
+					{Array.from({ length: steps }, (_, i) => <i key={i} aria-hidden className={cn("block h-2.5 w-1 rounded-[1px]", i < level ? "bg-foreground" : "bg-border")} />)}
+				</span>
+				<span>{wait}</span>
 			</span>
-			<span aria-hidden className="text-muted-foreground">{wait}</span>
+			{" "}wait per 30 s of speech
 		</span>
 	);
 }
@@ -365,27 +369,33 @@ function ModelRow({ model, status, listing, tier, roles, caveat, inUse, models, 
 			</div>
 			<p className="break-words text-[11px] leading-relaxed text-muted-foreground">{model.description}</p>
 
-			<div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
-				{info.grades.map((grade) => (
-					<span
-						key={grade.language}
-						data-testid="local-model-grade"
-						data-letter={grade.letter}
-						title={`${grade.name}: ${grade.help}`}
-						aria-label={`${grade.name} accuracy ${grade.label}. ${grade.help}`}
-					>
-						{info.grades.length > 1 && <>{grade.name} </>}
-						<span aria-hidden className={cn("font-mono text-xs", grade.letter === "D" || grade.letter === "F" ? "text-destructive" : "text-foreground")}>{grade.label}</span>
+			{(info.grades.length > 0 || info.speed) && <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
+				{info.grades.length > 0 && (
+					<span data-testid="local-model-accuracy" className="break-words">
+						{/* The no-break space keeps the label with its value. With several languages each grade is
+						    tagged by its language code (the codes in the preferred-languages list): a full name
+						    would not fit beside the label in a narrow dialog. The name is there for screen readers. */}
+						Accuracy:{"\u00a0"}
+						{info.grades.map((grade, index) => (
+							<span key={grade.language} data-testid="local-model-grade" data-letter={grade.letter} title={`${grade.name}: ${grade.help}`}>
+								{index > 0 && " "}
+								{info.grades.length > 1 && <><span aria-hidden>{grade.language}</span><span className="sr-only">{grade.name}</span>{"\u00a0"}</>}
+								<span className={cn("font-mono text-xs", grade.letter === "D" || grade.letter === "F" ? "text-destructive" : "text-foreground")}>{grade.label}</span>
+							</span>
+						))}
 					</span>
-				))}
+				)}
 				{info.speed && <SpeedMeter {...info.speed} tier={tier} />}
+			</div>}
+			<p className="min-w-0 break-words text-[11px] text-muted-foreground">
 				<span data-testid="local-model-size">{formatBinarySize(model.size)}</span>
+				{" · "}
 				<span data-testid="local-model-license">
 					{license.href
 						? <a href={license.href} target="_blank" rel="noreferrer" className={LINK}>{license.label}</a>
 						: license.label}
 				</span>
-			</div>
+			</p>
 
 			{caveat && <Notice tone="warning">{caveat}</Notice>}
 			{info.missing.length > 0 && <Notice tone="warning" testid="local-model-missing">Doesn't cover {new Intl.ListFormat("en", { type: "conjunction" }).format(info.missing)}.</Notice>}
@@ -424,7 +434,7 @@ function RatingsHelp({ tier }: { tier: MachineTier }) {
 	const panelId = useId();
 	return <div className="flex min-w-0 flex-col gap-1.5 px-1">
 		<p className="break-words text-[11px] leading-relaxed text-muted-foreground/70">
-			Grades show how few mistakes a model made on a benchmark in your languages. The bars show how quickly it transcribed.{" "}
+			Accuracy is a grade for how few mistakes a model made on a benchmark in your languages. Speed is the estimated wait for 30 seconds of speech.{" "}
 			<button
 				type="button"
 				data-testid="local-ratings-toggle"

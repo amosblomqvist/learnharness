@@ -47,3 +47,11 @@ test("a list of languages reads as a sentence, and a long one is counted", () =>
 	assert.equal(summarizeLanguages(["en", "de", "fr"]), "English, German, and French");
 	assert.equal(summarizeLanguages(["en", "de", "fr", "es"]), "English, German and 2 more");
 });
+
+test("a model with no measurement for a language or machine carries no grade and no speed, so the row has no empty label", () => {
+	const turbo = getCatalogModel("whisper-large-v3-turbo")!;
+	const info = modelRowInfo({ ...turbo, id: "not-in-the-benchmark" }, ["en"], "cpu");
+	assert.deepEqual(info.grades, []);
+	assert.equal(info.speed, undefined);
+	assert.deepEqual(info.missing, []);
+});

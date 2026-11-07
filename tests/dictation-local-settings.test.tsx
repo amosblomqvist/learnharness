@@ -305,7 +305,10 @@ test("the speed meter shows the wait for the machine's tier", async () => {
 		const meter = within(rowOf(model.id), "local-model-speed")!;
 		const wait = modelWaitSeconds(model, tier)!;
 		assert.equal(meter.getAttribute("data-level"), String(speedMeterLevel(wait)), tier);
-		assert.match(meter.getAttribute("aria-label")!, new RegExp(`${formatWait(wait).replace(/[~.]/g, "\\$&")} for 30 seconds`));
+		// Label, bars, time and the meaning of the time, in the order they are read.
+		assert.equal(meter.textContent, `Speed:${formatWait(wait)} wait per 30 s of speech`, tier);
+		assert.equal(meter.querySelector('[role="img"]')!.getAttribute("aria-label"), `${speedMeterLevel(wait)} of 5 bars`, tier);
+		assert.match(meter.getAttribute("title")!, new RegExp(tier === "accelerated" ? "graphics hardware" : "only its processor"));
 		await act(async () => { root!.unmount(); });
 		host!.remove();
 	}
@@ -352,9 +355,13 @@ test("a row shows the grade, speed, size and licence, and none of them where the
 	const row = rowOf(model.id);
 	const grade = languageAccuracyGrade(model, "en")!;
 	assert.equal(within(row, "local-model-grade")!.getAttribute("data-letter"), grade.letter);
-	assert.match(within(row, "local-model-grade")!.getAttribute("aria-label")!, new RegExp(`English accuracy ${grade.label}`));
-	assert.ok(within(row, "local-model-speed"));
+	// One label, then the grade (no language name while there is one language).
+	assert.equal(within(row, "local-model-accuracy")!.textContent, `Accuracy:\u00a0${grade.label}`);
+	assert.ok(within(row, "local-model-speed")!.textContent!.startsWith("Speed:"));
 	assert.match(within(row, "local-model-size")!.textContent!, /^\d+(\.\d)? (MiB|GiB)$/);
+	// Size and licence share the next line, joined by a middle dot.
+	assert.match(within(row, "local-model-size")!.parentElement!.textContent!, /^\d+(\.\d)? (MiB|GiB) · Apache 2\.0$/);
+	assert.equal(within(row, "local-model-size")!.parentElement, within(row, "local-model-license")!.parentElement);
 	assert.equal(within(row, "local-model-license")!.textContent, "Apache 2.0");
 	assert.equal(within(row, "local-model-license")!.querySelector("a"), null);
 	assert.match(row.textContent!, new RegExp(model.description.slice(0, 20)));
@@ -368,7 +375,33 @@ test("a row shows the grade, speed, size and licence, and none of them where the
 	await mount(<Rows />);
 	await typeInto("local-model-filter", unmeasured.id);
 	assert.equal(within(rowOf(unmeasured.id), "local-model-grade"), null);
+	assert.equal(within(rowOf(unmeasured.id), "local-model-accuracy"), null, "no empty \"Accuracy:\" label");
+	assert.doesNotMatch(rowOf(unmeasured.id).textContent!, /Accuracy:/);
+	assert.ok(within(rowOf(unmeasured.id), "local-model-speed"), "the speed is still shown");
 	assert.ok(within(rowOf(unmeasured.id), "local-model-size"), "size and licence still show");
+});
+
+test("with several languages the one Accuracy label is followed by a grade per language, and the label stays with its value", async () => {
+	fixture({ dictation: local({ localPreferredLanguages: ["en", "zh"] }) });
+	await mount(<Rows />);
+	const model = getCatalogModel("Qwen3-ASR-1.7B")!;
+	await typeInto("local-model-filter", model.id);
+	const accuracy = within(rowOf(model.id), "local-model-accuracy")!;
+	const en = languageAccuracyGrade(model, "en")!;
+	const zh = languageAccuracyGrade(model, "zh")!;
+	// Codes on screen (they fit beside the label at 390 px), full names for screen readers.
+	assert.equal(accuracy.textContent, `Accuracy:\u00a0enEnglish\u00a0${en.label} zhMandarin (Chinese)\u00a0${zh.label}`);
+	assert.deepEqual([...accuracy.querySelectorAll('[aria-hidden="true"]')].map((el) => el.textContent), ["en", "zh"]);
+	assert.deepEqual([...accuracy.querySelectorAll(".sr-only")].map((el) => el.textContent), ["English", "Mandarin (Chinese)"]);
+	assert.match(accuracy.getAttribute("class")!, /\bbreak-words\b/, "a chain that cannot fit still wraps instead of overflowing");
+	assert.equal(accuracy.textContent!.match(/Accuracy:/g)!.length, 1);
+	// The label is joined to what follows it by a no-break space, and a grade to its language name.
+	assert.match(accuracy.textContent!, /^Accuracy:\u00a0\S/);
+	assert.equal(accuracy.querySelectorAll('[data-testid="local-model-grade"]').length, 2);
+	// The speed group holds its label, bars and time together on a no-wrap line; only the closing words may wrap.
+	const speed = within(rowOf(model.id), "local-model-speed")!;
+	assert.match(speed.querySelector("span")!.getAttribute("class")!, /\bwhitespace-nowrap\b/);
+	assert.match(speed.querySelector("span")!.getAttribute("class")!, /\binline-flex\b/);
 });
 
 test("licences read as names, and a custom one links to the model's page in a new tab", async () => {
