@@ -13,8 +13,11 @@ function catalogModel(id: string) {
 	const colon = id.indexOf(":");
 	// Native CLI routing determines billing. Adapter zero-rate placeholders
 	// must never become an apparent $0 estimate or subscription classification.
-	if (colon < 0 || isSubscriptionModel(id) || [CLAUDE_CODE_PROVIDER, CUSTOM_PROVIDER.id].includes(id.slice(0, colon))) return undefined;
-	return piModels().getModel(id.slice(0, colon), id.slice(colon + 1));
+	if (colon < 0 || isSubscriptionModel(id) || id.slice(0, colon) === CLAUDE_CODE_PROVIDER) return undefined;
+	const model = piModels().getModel(id.slice(0, colon), id.slice(colon + 1));
+	// A custom model is priced only by an explicit user rate pin.
+	if (id.slice(0, colon) === CUSTOM_PROVIDER.id && !(model && (model.cost.input > 0 || model.cost.output > 0))) return undefined;
+	return model;
 }
 
 export function callCost(call: Partial<CallUsage>, modelId: string): number | null {

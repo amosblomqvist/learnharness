@@ -102,6 +102,12 @@ export async function customProviderMutation(request: Request): Promise<Response
 			if (!parsed.ok) return failure(parsed.error);
 			if (!before.cp?.baseUrl) return failure("No custom endpoint configured", 409);
 			const overrides = sanitizeCustomModelOverrides(parsed.settings, before.cp.models?.map((m) => m.id));
+			// The limits editor replaces whole pins and has no rate fields.
+			for (const [id, pin] of Object.entries(before.cp.overrides ?? {})) {
+				if (pin.cost && !overrides[id]?.cost && before.cp.models?.some((m) => m.id === id)) {
+					Object.defineProperty(overrides, id, { value: { ...overrides[id], cost: pin.cost }, enumerable: true, configurable: true, writable: true });
+				}
+			}
 			commit({ ...before.cp, overrides });
 			return response({ ok: true, overrides });
 		}

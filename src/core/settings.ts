@@ -250,10 +250,20 @@ export interface CustomModel {
  *  often wrong or absent). Absent field = no pin. `reasoning` is tri-state:
  *  true declares reasoning support, false removes that declaration, absent
  *  uses discovery. This is NOT a backend execution/disable switch. */
+export interface CustomModelCost {
+	/** USD per million tokens. */
+	input: number;
+	output: number;
+	cacheRead: number;
+	cacheWrite: number;
+}
+
 export interface CustomModelOverride {
 	context?: number;
 	maxTokens?: number;
 	reasoning?: boolean;
+	/** Explicit rate pin. Absent stays unknown/unpriced, never $0. */
+	cost?: CustomModelCost;
 }
 
 /** The single custom endpoint's stored config (delta section). */
@@ -617,6 +627,16 @@ function positiveInt(value: unknown): number | undefined {
 	return typeof value === "number" && Number.isInteger(value) && value > 0 ? value : undefined;
 }
 
+/** A usable rate pin: four finite non-negative rates, and a billable one. */
+export function sanitizeCustomModelCost(raw: unknown): CustomModelCost | undefined {
+	if (raw === null || typeof raw !== "object" || Array.isArray(raw)) return undefined;
+	const rec = raw as Record<string, unknown>;
+	const { input, output, cacheRead, cacheWrite } = rec;
+	const rate = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v) && v >= 0;
+	if (!rate(input) || !rate(output) || !rate(cacheRead) || !rate(cacheWrite)) return undefined;
+	return input > 0 || output > 0 ? { input, output, cacheRead, cacheWrite } : undefined;
+}
+
 /** One pin, clamped up to the floor (clamp-never-reject on read). */
 function sanitizeCustomModelOverride(raw: unknown): CustomModelOverride | undefined {
 	if (raw === null || typeof raw !== "object" || Array.isArray(raw)) return undefined;
@@ -627,6 +647,8 @@ function sanitizeCustomModelOverride(raw: unknown): CustomModelOverride | undefi
 	const maxTokens = positiveInt(rec.maxTokens);
 	if (maxTokens) out.maxTokens = Math.max(CUSTOM_MODEL_PIN_FLOOR, maxTokens);
 	if (typeof rec.reasoning === "boolean") out.reasoning = rec.reasoning;
+	const cost = sanitizeCustomModelCost(rec.cost);
+	if (cost) out.cost = cost;
 	return Object.keys(out).length ? out : undefined;
 }
 

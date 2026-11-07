@@ -48,7 +48,7 @@ Discovery limits are **15 seconds**, **8 MiB**, and **10,000 models**; configura
 
 ## Pricing and older development configurations
 
-Prices are **unknown/unpriced**, not $0—even for a local server. Internal zero rates are Pi-required placeholders; there is no rate editor. See [accounting](compaction-accounting.md).
+Prices are **unknown/unpriced**, not $0—even for a local server. Internal zero rates are Pi-required placeholders. A model can carry an optional `cost` pin (`input`, `output`, `cacheRead`, `cacheWrite`, USD per million tokens) through `PATCH /api/custom-provider`; only pinned models get a dollar estimate. There is no rate editor in Settings, and saving limits there keeps an existing `cost` pin. See [accounting](compaction-accounting.md).
 
 The earlier unshipped `models.json` configuration is not read or migrated. Existing early development profiles need explicit endpoint configuration/reconnect and model reselection; files/history are not deleted or silently remapped.
 
