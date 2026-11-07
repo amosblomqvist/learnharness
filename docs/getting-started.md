@@ -60,6 +60,8 @@ In **Live notes**, **Resume live notes** starts automatic summaries as topics or
 
 Open **Tags** in the sidebar to organize sessions and imported files into courses or subjects. Tags can have a color, a symbol, or just a name. Select several items to tag them together, or use **Tags** in a session or **Edit tags** in its sidebar menu. Searching a tag or folder also finds passages inside generated notes. When importing files, set tags for the batch and use **Edit** beside any file to adjust its tags before importing.
 
+If you delete a session while keeping its graph, its remaining concepts appear in Tags as **Saved graph material**. Select that item and use **Move** to organize it or empty its old folder without deleting the concepts.
+
 ## Data, privacy, and usage
 
 Chats, graph records, settings, and credentials live on your machine. Packaged desktop data normally lives under:

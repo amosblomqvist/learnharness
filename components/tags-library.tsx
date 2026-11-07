@@ -62,7 +62,7 @@ export function TagsLibrary() {
 			if (token !== version.current) return;
 			setLibrary(data);
 			setFailure("");
-			setSelected(ids => ids.filter(id => data.sources.some(s => s.id === id && s.kind !== "missing")));
+			setSelected(ids => ids.filter(id => data.sources.some(s => s.id === id)));
 		} catch (e) {
 			if (token === version.current) setFailure((e as Error).message);
 		}
@@ -174,6 +174,7 @@ export function TagsLibrary() {
 		);
 	}
 	const single = selected.length === 1 ? library?.sources.find(s => s.id === selected[0]) : undefined;
+	const canTagSelection = selected.length > 0 && selected.every(id => library?.sources.some(s => s.id === id && s.kind !== "missing"));
 	return (
 		<div className="flex h-dvh flex-col bg-background">
 			<TopBar>
@@ -263,7 +264,7 @@ export function TagsLibrary() {
 									/>
 									{selected.length ? `${selected.length} selected` : "Select all"}
 								</label>
-								{selected.length > 0 && (
+								{canTagSelection && (
 									<button className={tagControl} onClick={() => setTagging(true)}>
 										Edit tags
 									</button>
@@ -278,12 +279,14 @@ export function TagsLibrary() {
 										>
 											Move
 										</button>
-										<button
-											className={tagControl}
-											onClick={() => begin({ kind: "rename", id: single.id }, single.label ?? "")}
-										>
-											Rename
-										</button>
+										{single.kind !== "missing" && (
+											<button
+												className={tagControl}
+												onClick={() => begin({ kind: "rename", id: single.id }, single.label ?? "")}
+											>
+												Rename
+											</button>
+										)}
 									</>
 								)}
 							</div>
@@ -298,13 +301,13 @@ export function TagsLibrary() {
 							)
 						)}
 						<ul className="divide-y border-t">
-							{rows.map(({ source, labels, notes, matches }) => (
+							{rows.map(({ source, label, labels, notes, matches }) => (
 								<li key={source.id} className="py-3">
 									<div className="flex items-start gap-3">
 										<input
 											className="mt-1.5"
 											type="checkbox"
-											aria-label={`Select ${source.label}`}
+											aria-label={`Select ${label}${source.kind === "missing" ? ` (${source.id})` : ""}`}
 											checked={selected.includes(source.id)}
 											onChange={e =>
 												setSelected(ids =>
@@ -315,18 +318,20 @@ export function TagsLibrary() {
 										<div className="min-w-0 flex-1">
 											{source.kind === "chat" ? (
 												<Link className="font-medium hover:underline" href={`/chat/${encodeURIComponent(source.id)}`}>
-													{source.label}
+													{label}
 												</Link>
 											) : (
-												<span className="font-medium">{source.label}</span>
+												<span className="font-medium" title={source.kind === "missing" ? source.id : undefined}>{label}</span>
 											)}
 											<div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
 												<span>
-													{source.kind === "notes"
-														? "Imported file"
-														: source.chatKind === "practice"
-															? "Practice"
-															: "Teaching"}
+													{source.kind === "missing"
+														? "Original source unavailable"
+														: source.kind === "notes"
+															? "Imported file"
+															: source.chatKind === "practice"
+																? "Practice"
+																: "Teaching"}
 												</span>
 												{labels.map(t => (
 													<button

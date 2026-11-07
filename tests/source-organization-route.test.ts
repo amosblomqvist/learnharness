@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { createHash } from "node:crypto";
 import { after, it } from "node:test";
+import { libraryRows } from "../src/core/tag-library.ts";
 
 const root = fs.mkdtempSync(path.join(os.tmpdir(), "lh-source-organization-"));
 process.env.LH_DATA_DIR = root;
@@ -86,6 +87,31 @@ it("server validates cycles, stale sources/parents and nonempty folders, includi
 	assert.equal((await change({ action: "delete-folder", id: folder.id })).status, 400);
 	assert.equal((await change({ action: "move", kind: "source", id: sourceId("Root/empty.md"), parentId: null })).status, 200);
 	assert.equal((await change({ action: "delete-folder", id: folder.id })).status, 200);
+});
+
+it("keeps a deleted session's retained graph source visible and movable so its folder can be emptied", async () => {
+	const { deleteChatSession } = await import("../src/server/chats.ts");
+	const chat = stores.chatStore.createChat("Synthetic retained lesson");
+	stores.graphStore.appendNode({ id: "n_retained_folder", name: "Retained concept", statement: "A saved concept survives its conversation.", aliases: [], createdAt: "2026-11-07", provenance: [{ chatId: chat.id, messageId: "m1" }] });
+	const parent = (await (await change({ action: "create-folder", name: "Retained course", parentId: null })).json()).createdFolderId;
+	const folder = (await (await change({ action: "create-folder", name: "Retained lesson", parentId: parent })).json()).createdFolderId;
+	assert.equal((await change({ action: "move", kind: "source", id: chat.id, parentId: folder })).status, 200);
+	assert.equal((await deleteChatSession(chat.id, "preserve-graph")).ok, true);
+	assert.equal(stores.chatStore.getChat(chat.id), null);
+	const retainedGraph = stores.graphStore.readNodes();
+	assert.ok(retainedGraph.some(node => node.id === "n_retained_folder"));
+	const library = await (await GET(new Request("http://localhost/api/graph/sources?include=notes"))).json();
+	assert.equal(library.sources.find((source: { id: string }) => source.id === chat.id)?.kind, "missing");
+	for (const id of [parent, folder]) {
+		assert.deepEqual(libraryRows(library, { kind: "folder", id }, "").map(row => row.source.id), [chat.id]);
+	}
+	assert.deepEqual(libraryRows(library, { kind: "all" }, chat.id).map(row => row.source.id), [chat.id]);
+	assert.equal((await change({ action: "delete-folder", id: folder })).status, 400, "the visible retained source still occupies the folder");
+	assert.equal((await change({ action: "move", kind: "source", id: chat.id, parentId: null })).status, 200);
+	assert.equal((await change({ action: "delete-folder", id: folder })).status, 200);
+	assert.equal((await change({ action: "delete-folder", id: parent })).status, 200);
+	assert.deepEqual(stores.graphStore.readNodes(), retainedGraph, "organizing retained material never deletes its graph");
+	assert.equal(stores.chatStore.getChat(chat.id), null, "moving does not recreate the deleted session");
 });
 
 it("malformed, oversized and failed streams refuse before metadata writes", async () => {

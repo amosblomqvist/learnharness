@@ -27,7 +27,7 @@ export function libraryRows(
 	const q = query.trim();
 	return library.sources
 		.flatMap(source => {
-			if (source.kind === "missing") return [];
+			const label = source.label ?? (source.kind === "missing" ? "Saved graph material" : source.id);
 			const placement = placementOf(organization, source.id);
 			const labels = (placement?.tagIds ?? []).flatMap(id => tags.get(id) ?? []);
 			if (scope.kind === "tag" && !labels.some(t => t.id === scope.id)) return [];
@@ -37,10 +37,10 @@ export function libraryRows(
 			if (
 				q &&
 				!matches.length &&
-				fuzzyScore(q, source.label ?? "", source.filePath ?? "", ...labels.map(t => t.name)) === null
+				fuzzyScore(q, label, source.kind === "missing" ? source.id : "", source.filePath ?? "", ...labels.map(t => t.name)) === null
 			)
 				return [];
-			return [{ source, labels, notes, matches }];
+			return [{ source, label, labels, notes, matches }];
 		})
 		.sort(
 			(a, b) =>
