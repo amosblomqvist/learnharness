@@ -33,7 +33,6 @@ Nonsecret settings are deltas in `<data root>/settings.json`; absent values reso
 | `TAVILY_API_KEY`, `BRAVE_API_KEY`, `EXA_API_KEY`, `FIRECRAWL_API_KEY`, `OLLAMA_API_KEY` | Optional search adapters. Without a Settings pin, the first keyed engine wins: Tavily → Brave → Exa → Firecrawl → Ollama. A pinned engine requires its own key; no silent fallback. Ollama search is hosted at ollama.com, not a local model server. Page fetching is independent; research can fetch known URLs without a search key. |
 | `DEEPGRAM_API_KEY` | Optional dictation token minting (the default dictation engine). |
 | `GROQ_API_KEY` | The Groq model-provider key. Also used by Groq dictation (`POST /api/stt/transcribe`) when Settings → Dictation → Engine is Groq; no separate dictation key. |
-| `LH_STT_DEBUG` | Set to `1` to print the on-device engine's own log lines on the server console while debugging Local dictation. Warnings and errors always print. |
 | `CHROME_PATH` | Chrome/Chromium executable fallback for demo verification; Electron's browser helper is primary. No extra Chromium is downloaded. |
 
 Ordinary Next development can read `.env.local`. Real environment keys take precedence over saved keys. Saved auth is restrictive-permission plaintext, not an encrypted vault. Packaged Electron sets separate data/auth locations under `userData`; it does not use the repo development profile.

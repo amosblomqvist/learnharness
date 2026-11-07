@@ -18,7 +18,6 @@ class OutOfMemory extends Fail {}
 class ModelLoadError extends Fail {}
 class ModelFileNotFound extends Fail {}
 class InputTooShort extends Fail {}
-class InputTooLong extends Fail {}
 class UnsupportedRequest extends Fail {}
 class InvalidArgument extends Fail {}
 class OutputTruncated extends Fail { partialResult?: { text: string; language: string } }
@@ -69,7 +68,7 @@ function fakeEngine(options: {
 		TranscribeModel: { load },
 		getAvailableBackendsAsync: async () => options.backends ?? [{ deviceType: "cpu" }],
 		setLogHandler() {},
-		OutOfMemory, ModelLoadError, ModelFileNotFound, InputTooShort, InputTooLong, UnsupportedRequest, InvalidArgument, OutputTruncated,
+		OutOfMemory, ModelLoadError, ModelFileNotFound, InputTooShort, UnsupportedRequest, InvalidArgument, OutputTruncated,
 	};
 	return { engine: engine as never, raw: engine, log, maxRunning: () => maxRunning };
 }
@@ -111,7 +110,7 @@ describe("hardware", () => {
 		assert.equal(hardware.available, false);
 		assert.equal(hardware.tier, "cpu");
 		assert.match(hardware.error ?? "", /no platform package/);
-		await assert.rejects(runtime.transcribeChunk(pcm(1), { ...base, modelId: "whisper-small" }), (e: unknown) => e instanceof LocalSttError && e.code === "engine_unavailable" && e.status === 503);
+		await assert.rejects(runtime.transcribeChunk(pcm(1), { ...base, modelId: "whisper-small" }), (e: unknown) => e instanceof LocalSttError && e.status === 503 && /can't run on this computer/.test(e.message));
 	});
 
 	it("does not load the engine until something needs it", async () => {
@@ -130,7 +129,7 @@ describe("transcribing a chunk", () => {
 		const fake = fakeEngine();
 		make(fake);
 		await assert.rejects(runtime.transcribeChunk(pcm(1), { ...base, modelId: "whisper-small" }), (e: unknown) =>
-			e instanceof LocalSttError && e.code === "model_not_installed" && e.status === 409 && /Choose a model in Settings/.test(e.message));
+			e instanceof LocalSttError && e.status === 409 && /Choose a model in Settings/.test(e.message));
 		assert.deepEqual(fake.log.loads, []);
 	});
 
@@ -220,28 +219,13 @@ describe("errors in plain words", () => {
 		await install("whisper-small");
 		make(fakeEngine({ loadError: () => new OutOfMemory("oom") }));
 		await assert.rejects(runtime.transcribeChunk(pcm(1), { ...base, modelId: "whisper-small" }), (e: unknown) =>
-			e instanceof LocalSttError && e.code === "out_of_memory" && /smaller model/.test(e.message) && !e.retryable);
+			e instanceof LocalSttError && /Not enough memory to load .*smaller model/.test(e.message) && !e.retryable);
 		make(fakeEngine({ loadError: () => new ModelLoadError("bad gguf") }));
 		await assert.rejects(runtime.transcribeChunk(pcm(1), { ...base, modelId: "whisper-small" }), (e: unknown) =>
-			e instanceof LocalSttError && e.code === "model_load_failed" && /download it again/.test(e.message));
+			e instanceof LocalSttError && /download it again/.test(e.message));
 		make(fakeEngine({ loadError: () => new ModelFileNotFound("gone") }));
 		await assert.rejects(runtime.transcribeChunk(pcm(1), { ...base, modelId: "whisper-small" }), (e: unknown) =>
-			e instanceof LocalSttError && e.code === "model_load_failed");
-	});
-
-	it("falls back to the CPU when an accelerator runs out of memory loading", async () => {
-		await install("whisper-small");
-		let attempts = 0;
-		const fake = fakeEngine({ backends: [{ deviceType: "cpu" }, { deviceType: "gpu" }] });
-		const original = fake.raw.TranscribeModel.load;
-		fake.raw.TranscribeModel.load = async (file: string, opts?: unknown) => {
-			attempts++;
-			if (!opts) throw new OutOfMemory("gpu full");
-			return original(file);
-		};
-		make(fake);
-		assert.equal((await runtime.transcribeChunk(pcm(1), { ...base, modelId: "whisper-small" })).text, "text from whisper-small.gguf");
-		assert.equal(attempts, 2);
+			e instanceof LocalSttError && /could not be loaded/.test(e.message));
 	});
 
 	it("retries a failed load on the next request", async () => {
@@ -255,16 +239,15 @@ describe("errors in plain words", () => {
 
 	it("maps decode failures", async () => {
 		await install("whisper-small");
-		const cases: [Error, string, number, boolean][] = [
-			[new OutOfMemory("x"), "out_of_memory", 500, false],
-			[new InputTooLong("x"), "transcription_failed", 500, false],
-			[new UnsupportedRequest("x"), "unsupported_language", 400, false],
-			[new Error("native exploded"), "transcription_failed", 500, true],
+		const cases: [Error, RegExp, number, boolean][] = [
+			[new OutOfMemory("x"), /Not enough memory to transcribe/, 500, false],
+			[new UnsupportedRequest("x"), /can't transcribe in that language/, 400, false],
+			[new Error("native exploded"), /Transcription failed: native exploded/, 500, true],
 		];
-		for (const [error, code, status, retryable] of cases) {
+		for (const [error, message, status, retryable] of cases) {
 			make(fakeEngine({ decode: () => { throw error; } }));
 			await assert.rejects(runtime.transcribeChunk(pcm(1), { ...base, modelId: "whisper-small" }), (e: unknown) =>
-				e instanceof LocalSttError && e.code === code && e.status === status && e.retryable === retryable, code);
+				e instanceof LocalSttError && message.test(e.message) && e.status === status && e.retryable === retryable, String(message));
 			await runtime.dispose();
 		}
 	});
@@ -293,20 +276,13 @@ describe("language", () => {
 		await install("parakeet-tdt-0.6b-v2");
 		make(fakeEngine());
 		await assert.rejects(runtime.transcribeChunk(pcm(1), { ...base, modelId: "parakeet-tdt-0.6b-v2", language: "de" }), (e: unknown) =>
-			e instanceof LocalSttError && e.code === "unsupported_language" && e.status === 400);
-	});
-
-	it("also refuses when the loaded model's own capabilities lack the language", async () => {
-		await install("canary-180m-flash");
-		make(fakeEngine({ languages: () => ["en"] }));
-		await assert.rejects(runtime.transcribeChunk(pcm(1), { ...base, modelId: "canary-180m-flash", language: "de" }), (e: unknown) =>
-			e instanceof LocalSttError && e.code === "unsupported_language");
+			e instanceof LocalSttError && e.status === 400 && /doesn't support that language/.test(e.message));
 	});
 
 	it("Auto on a model without native detection uses the detector on the first 7 s, among the preferred languages", async () => {
 		await install("canary-180m-flash");
 		await install(LANGUAGE_DETECTION_MODEL.id);
-		const fake = fakeEngine({ detect: () => ({ code: "de", allowedMass: 0.9, candidates: [{ code: "de", p: 0.9 }, { code: "en", p: 0.1 }] }) });
+		const fake = fakeEngine({ detect: () => ({ code: "de", candidates: [{ code: "de", p: 0.9 }, { code: "en", p: 0.1 }] }) });
 		make(fake);
 		const result = await runtime.transcribeChunk(pcm(12), { ...base, modelId: "canary-180m-flash", preferredLanguages: ["en", "de"] });
 		assert.deepEqual(fake.log.detections, [{ allowed: ["en", "de"], pcmLength: 7 * 16000 }]);
@@ -459,7 +435,7 @@ describe("idle unload", () => {
 		const c = clock();
 		makeIdle(fake, c);
 		await assert.rejects(runtime.warm("nope"), (e: unknown) => e instanceof LocalSttError && e.status === 400);
-		await assert.rejects(runtime.warm("whisper-small"), (e: unknown) => e instanceof LocalSttError && e.code === "model_not_installed");
+		await assert.rejects(runtime.warm("whisper-small"), (e: unknown) => e instanceof LocalSttError && e.status === 409);
 		assert.equal(c.timers.size, 0, "nothing loaded, no clock");
 		assert.deepEqual(fake.log.loads, []);
 	});
@@ -578,7 +554,7 @@ describe("voice activity", () => {
 			return load(file);
 		};
 		make(flaky);
-		await assert.rejects(runtime.scoreVad(new Int16Array(1024)), (e: unknown) => e instanceof LocalSttError && e.code === "engine_unavailable");
+		await assert.rejects(runtime.scoreVad(new Int16Array(1024)), (e: unknown) => e instanceof LocalSttError && e.status === 503);
 		fail = false;
 		assert.equal((await runtime.scoreVad(new Int16Array(1024))).length, 2);
 	});

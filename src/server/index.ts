@@ -52,7 +52,7 @@ export { subscriptionControlsResponse, subscriptionBrowserResponse } from "./web
 export { sessionCost } from "./pricing.ts";
 export { claudeCodeInstallationResponse } from "./claude-code.ts";
 export { groqTranscribeResponse } from "./groq-stt.ts";
-export { localModelActionResponse, localModelsResponse, localTranscribeResponse, localWarmResponse, vadResponse } from "./local-stt/http.ts";
+export { localModelActionResponse, localModelsResponse, localTranscribeResponse, vadResponse } from "./local-stt/http.ts";
 // The custom endpoint module (registers into piModels() + probes for models).
 // No import side effects; the boot sync lives in stores.ts.
 export * from "./custom-provider.ts";

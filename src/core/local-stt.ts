@@ -13,19 +13,10 @@ import type { MachineTier } from "./local-stt-recommendations.ts";
 
 export const LOCAL_STT_MODELS_URL = "/api/stt/local/models";
 export const LOCAL_STT_TRANSCRIBE_URL = "/api/stt/local/transcribe";
-export const LOCAL_STT_WARM_URL = "/api/stt/local/warm";
 export const STT_VAD_URL = "/api/stt/vad";
 
 /** Silero VAD scores one frame per 512 samples: 32 ms at 16 kHz. */
 export const VAD_FRAME_SAMPLES = 512;
-/** The longest clip either audio route accepts: 2 minutes of 16 kHz PCM16. Dictation
- * chunks are 12 to 18 s, so this is only a ceiling. */
-export const LOCAL_STT_MAX_AUDIO_SECONDS = 120;
-export const LOCAL_STT_MAX_AUDIO_BYTES = LOCAL_STT_MAX_AUDIO_SECONDS * 16_000 * 2 + 44;
-/** Request-body ceiling: the WAV plus multipart framing. It must stay inside
- * next.config.ts's proxyClientMaxBodySize, or Next hands the route a truncated body. */
-export const LOCAL_STT_MAX_BODY_BYTES = LOCAL_STT_MAX_AUDIO_BYTES + 64 * 1024;
-
 /** No model chosen: the resolved `localModel` is this until the learner picks one. */
 export const NO_LOCAL_MODEL = "";
 
@@ -89,16 +80,4 @@ export type LocalTranscribeResponse = {
 export type VadResponse = {
 	/** Speech probability (0 to 1) for each 512-sample frame, in order. The last frame is zero padded. */
 	probs: number[];
-	frameSamples: typeof VAD_FRAME_SAMPLES;
 };
-
-export type LocalSttErrorCode =
-	| "model_not_installed"
-	| "unsupported_language"
-	| "engine_unavailable"
-	| "out_of_memory"
-	| "model_load_failed"
-	| "transcription_failed";
-
-/** The error body of every local STT route: the Groq route's shape plus an optional code. */
-export type LocalSttErrorBody = { message: string; retryable: boolean; code?: LocalSttErrorCode };

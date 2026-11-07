@@ -18,7 +18,7 @@
  * detector are freed (the next request reloads them). Silero is 1.2 MB and stays.
  */
 import path from "node:path";
-import type { BackendInfo, LangIdResult, TranscribeModel } from "transcribe-cpp";
+import type { LangIdResult, TranscribeModel } from "transcribe-cpp";
 import { PATHS } from "../../../config.ts";
 import {
 	LANGUAGE_DETECTION_MODEL,
@@ -40,7 +40,7 @@ import {
 } from "../../core/local-stt-language-policy.ts";
 import type { MachineTier } from "../../core/local-stt-recommendations.ts";
 import { DICTATION_SAMPLE_RATE } from "../../core/dictation.ts";
-import type { LocalSttErrorCode, LocalTranscribeResponse } from "../../core/local-stt.ts";
+import type { LocalTranscribeResponse } from "../../core/local-stt.ts";
 import { convertChineseOutput } from "./chinese.ts";
 import { localModelStore, type ModelStore } from "./model-store.ts";
 
@@ -56,7 +56,6 @@ export function defaultSileroPath(): string {
 export class LocalSttError extends Error {
 	constructor(
 		message: string,
-		readonly code: LocalSttErrorCode,
 		readonly status = 500,
 		readonly retryable = false,
 	) {
@@ -120,31 +119,26 @@ const pcmToFloat = (pcm: Int16Array): Float32Array => {
 	return out;
 };
 
-// transcribe-cpp's log levels. Its info is a screenful of GPU setup on every model
-// load, so only warnings and errors are shown; the rest needs LH_STT_DEBUG=1.
-type LogLevel = "debug" | "warn" | "error";
-const NATIVE_LEVELS: Record<number, LogLevel> = { 1: "debug", 2: "warn", 3: "error", 4: "debug" };
-const NATIVE_CONTINUATION = 5;
-let lastNativeLevel: LogLevel = "debug";
+// transcribe-cpp log levels: 2 is a warning, 3 an error, 5 continues the line before it.
+// Everything else (its info is a screenful of GPU setup on every load) is dropped.
+let lastNativeLevel = 0;
 
 function routeNativeLog(engine: Engine): void {
 	engine.setLogHandler((level, message) => {
-		if (level !== NATIVE_CONTINUATION) lastNativeLevel = NATIVE_LEVELS[level] ?? "debug";
-		if (lastNativeLevel === "debug") {
-			if (process.env.LH_STT_DEBUG) console.debug(`[stt] ${message.trimEnd()}`);
-		} else console[lastNativeLevel](`[stt] ${message.trimEnd()}`);
+		if (level !== 5) lastNativeLevel = level;
+		if (lastNativeLevel === 2 || lastNativeLevel === 3) console[lastNativeLevel === 2 ? "warn" : "error"](`[stt] ${message.trimEnd()}`);
 	});
 }
 
 /** A model load failure the learner can act on. */
 function loadFailure(engine: Engine, model: CatalogModel, error: unknown): LocalSttError {
 	if (error instanceof engine.OutOfMemory) {
-		return new LocalSttError(`Not enough memory to load ${model.name}. Choose a smaller model in Settings.`, "out_of_memory");
+		return new LocalSttError(`Not enough memory to load ${model.name}. Choose a smaller model in Settings.`);
 	}
 	if (error instanceof engine.ModelFileNotFound || error instanceof engine.ModelLoadError) {
-		return new LocalSttError(`${model.name} could not be loaded. Delete it in Settings and download it again.`, "model_load_failed");
+		return new LocalSttError(`${model.name} could not be loaded. Delete it in Settings and download it again.`);
 	}
-	return new LocalSttError(`${model.name} could not be loaded: ${describe(error)}`, "model_load_failed");
+	return new LocalSttError(`${model.name} could not be loaded: ${describe(error)}`);
 }
 
 function describe(error: unknown): string {
@@ -174,6 +168,14 @@ export function createLocalSttRuntime(deps: RuntimeDeps = {}): LocalSttRuntime {
 	let pending = 0;
 	let idleTimer: unknown;
 
+	/** Free the ASR model and the detector. Only call inside asrQueue. */
+	function freeModels(): void {
+		asr?.model.dispose();
+		asr = undefined;
+		detector?.dispose();
+		detector = undefined;
+	}
+
 	function stopIdleClock(): void {
 		if (idleTimer !== undefined) clearTimer(idleTimer);
 		idleTimer = undefined;
@@ -186,13 +188,19 @@ export function createLocalSttRuntime(deps: RuntimeDeps = {}): LocalSttRuntime {
 			idleTimer = undefined;
 			// Through the queue, so a decode that began since cannot lose its model.
 			void asrQueue.run(async () => {
-				if (pending > 0) return;
-				asr?.model.dispose();
-				asr = undefined;
-				detector?.dispose();
-				detector = undefined;
+				if (pending === 0) freeModels();
 			}).catch(() => undefined);
 		}, idleMs);
+	}
+
+	/** Run a job in the ASR queue as a use of the models. The idle clock stops while it waits and
+	 * runs, and the last job out starts it again, even after a failed load. */
+	function withIdleClock<T>(job: () => Promise<T>): Promise<T> {
+		pending++;
+		stopIdleClock();
+		return asrQueue.run(job).finally(() => {
+			if (--pending === 0) startIdleClock();
+		});
 	}
 
 	function engineReady(): Promise<Engine> {
@@ -201,30 +209,11 @@ export function createLocalSttRuntime(deps: RuntimeDeps = {}): LocalSttRuntime {
 			(error: unknown) => {
 				engine = undefined; // a later request retries
 				throw new LocalSttError(
-					`On-device dictation can't run on this computer (${describe(error)}).`, "engine_unavailable", 503,
+					`On-device dictation can't run on this computer (${describe(error)}).`, 503,
 				);
 			},
 		);
 		return engine;
-	}
-
-	/** Best-effort: load failures don't report their device, so any non-CPU device is assumed to have been used. */
-	async function cpuFallback(loaded: Engine): Promise<BackendInfo | undefined> {
-		const devices = await loaded.getAvailableBackendsAsync();
-		return devices.some((device) => device.deviceType !== "cpu") ? devices.find((device) => device.deviceType === "cpu") : undefined;
-	}
-
-	/** Load a model, retrying on the CPU when an accelerator runs out of memory. */
-	async function loadModel(loaded: Engine, file: string): Promise<TranscribeModel> {
-		try {
-			return await loaded.TranscribeModel.load(file);
-		} catch (error) {
-			if (!(error instanceof loaded.OutOfMemory)) throw error;
-			const cpu = await cpuFallback(loaded);
-			if (!cpu) throw error;
-			console.warn(`[stt] accelerator ran out of memory loading ${path.basename(file)}; retrying on the CPU`);
-			return loaded.TranscribeModel.load(file, { device: cpu });
-		}
 	}
 
 	/** The loaded ASR model, switching if another is loaded. Only call inside asrQueue. */
@@ -232,13 +221,13 @@ export function createLocalSttRuntime(deps: RuntimeDeps = {}): LocalSttRuntime {
 		if (asr?.id === model.id) return asr.model;
 		const file = await store.installedPath(model.id);
 		if (!file) {
-			throw new LocalSttError(`${model.name} isn't downloaded. Choose a model in Settings → Dictation.`, "model_not_installed", 409);
+			throw new LocalSttError(`${model.name} isn't downloaded. Choose a model in Settings → Dictation.`, 409);
 		}
 		// One ASR model at a time: free the old one before the new one takes its memory.
 		asr?.model.dispose();
 		asr = undefined;
 		try {
-			asr = { id: model.id, model: await loadModel(loaded, file) };
+			asr = { id: model.id, model: await loaded.TranscribeModel.load(file) };
 		} catch (error) {
 			throw loadFailure(loaded, model, error);
 		}
@@ -250,7 +239,7 @@ export function createLocalSttRuntime(deps: RuntimeDeps = {}): LocalSttRuntime {
 		const file = await store.installedPath(LANGUAGE_DETECTION_MODEL.id);
 		if (!file) return undefined;
 		try {
-			return (detector = await loadModel(loaded, file));
+			return (detector = await loaded.TranscribeModel.load(file));
 		} catch (error) {
 			throw loadFailure(loaded, LANGUAGE_DETECTION_MODEL, error);
 		}
@@ -267,7 +256,6 @@ export function createLocalSttRuntime(deps: RuntimeDeps = {}): LocalSttRuntime {
 		try {
 			const result: LangIdResult = await session.run(head, { allowed: policy.allowed, signal });
 			const picked = pickDetectedLanguage(policy, result);
-			if (process.env.LH_STT_DEBUG) console.debug(`[stt] language detection: ${picked.summary}`);
 			return picked.warning ? { language: picked.language, warning: picked.warning } : { language: picked.language };
 		} catch (error) {
 			signal?.throwIfAborted();
@@ -281,20 +269,17 @@ export function createLocalSttRuntime(deps: RuntimeDeps = {}): LocalSttRuntime {
 	/** Decode failures the learner should see in plain words. */
 	function decodeFailure(loaded: Engine, model: CatalogModel, error: unknown): LocalSttError {
 		if (error instanceof loaded.OutOfMemory) {
-			return new LocalSttError(`Not enough memory to transcribe with ${model.name}. Choose a smaller model in Settings.`, "out_of_memory");
-		}
-		if (error instanceof loaded.InputTooLong) {
-			return new LocalSttError(`That recording is too long for ${model.name}.`, "transcription_failed");
+			return new LocalSttError(`Not enough memory to transcribe with ${model.name}. Choose a smaller model in Settings.`);
 		}
 		if (error instanceof loaded.UnsupportedRequest || error instanceof loaded.InvalidArgument) {
-			return new LocalSttError(`${model.name} can't transcribe in that language. Choose another language or model in Settings.`, "unsupported_language", 400);
+			return new LocalSttError(`${model.name} can't transcribe in that language. Choose another language or model in Settings.`, 400);
 		}
-		return new LocalSttError(`Transcription failed: ${describe(error)}`, "transcription_failed", 500, true);
+		return new LocalSttError(`Transcription failed: ${describe(error)}`, 500, true);
 	}
 
 	async function transcribeChunk(pcm16: Int16Array, options: TranscribeChunkOptions): Promise<LocalTranscribeResponse> {
 		const model = getCatalogModel(options.modelId);
-		if (!model) throw new LocalSttError("Unknown dictation model.", "model_not_installed", 400);
+		if (!model) throw new LocalSttError("Unknown dictation model.", 400);
 		if (pcm16.length === 0) return { text: "" };
 		const { signal } = options;
 		const pcm = pcmToFloat(pcm16);
@@ -303,15 +288,13 @@ export function createLocalSttRuntime(deps: RuntimeDeps = {}): LocalSttRuntime {
 			? languageForModel(LOCAL_AUTO_LANGUAGE, model, options.preferredLanguages)
 			: options.language;
 		if (requested !== LOCAL_AUTO_LANGUAGE && resolveModelLanguage(model, requested) === undefined) {
-			throw new LocalSttError(`${model.name} doesn't support that language. Choose another language or model in Settings.`, "unsupported_language", 400);
+			throw new LocalSttError(`${model.name} doesn't support that language. Choose another language or model in Settings.`, 400);
 		}
 		const policy = localLanguagePolicy(model.id, requested, options.preferredLanguages);
 
-		pending++;
-		stopIdleClock();
-		return asrQueue.run(async () => {
+		return withIdleClock(async () => {
 			signal?.throwIfAborted();
-			if (disposed) throw new LocalSttError("Dictation is shutting down.", "engine_unavailable", 503);
+			if (disposed) throw new LocalSttError("Dictation is shutting down.", 503);
 			const loaded = await engineReady();
 			const native = await asrModel(loaded, model);
 			signal?.throwIfAborted();
@@ -325,9 +308,6 @@ export function createLocalSttRuntime(deps: RuntimeDeps = {}): LocalSttRuntime {
 			}
 			// native: the model detects. unsupported cannot happen here: languageForModel resolved it.
 			signal?.throwIfAborted();
-			if (language && !native.capabilities.languages.includes(language)) {
-				throw new LocalSttError(`${model.name} doesn't support that language. Choose another language or model in Settings.`, "unsupported_language", 400);
-			}
 
 			let text: string;
 			let spoken: string;
@@ -359,24 +339,16 @@ export function createLocalSttRuntime(deps: RuntimeDeps = {}): LocalSttRuntime {
 				...(finalLanguage ? { language: finalLanguage } : {}),
 				...(warning ? { warning } : {}),
 			};
-		}).finally(() => {
-			// The last request out starts the clock; loading counted as use, so a failed load still arms it.
-			if (--pending === 0) startIdleClock();
 		});
 	}
 
 	/** Load the model (and the engine) without transcribing, so a recording's first chunk does not wait for it. */
 	async function warm(modelId: string): Promise<void> {
 		const model = getCatalogModel(modelId);
-		if (!model) throw new LocalSttError("Unknown dictation model.", "model_not_installed", 400);
-		// Counts as a request: the idle clock stops while it queues and loads, and restarts after.
-		pending++;
-		stopIdleClock();
-		return asrQueue.run(async () => {
-			if (disposed) throw new LocalSttError("Dictation is shutting down.", "engine_unavailable", 503);
+		if (!model) throw new LocalSttError("Unknown dictation model.", 400);
+		return withIdleClock(async () => {
+			if (disposed) throw new LocalSttError("Dictation is shutting down.", 503);
 			await asrModel(await engineReady(), model);
-		}).finally(() => {
-			if (--pending === 0) startIdleClock();
 		});
 	}
 
@@ -385,12 +357,12 @@ export function createLocalSttRuntime(deps: RuntimeDeps = {}): LocalSttRuntime {
 		const pcm = pcmToFloat(pcm16);
 		return vadQueue.run(async () => {
 			signal?.throwIfAborted();
-			if (disposed) throw new LocalSttError("Dictation is shutting down.", "engine_unavailable", 503);
+			if (disposed) throw new LocalSttError("Dictation is shutting down.", 503);
 			const loaded = await engineReady();
 			// A failed load is retried by the next request.
 			const model = await (silero ??= loaded.TranscribeModel.load(sileroPath).catch((error: unknown) => {
 				silero = undefined;
-				throw new LocalSttError(`Voice activity detection couldn't start: ${describe(error)}`, "engine_unavailable", 503);
+				throw new LocalSttError(`Voice activity detection couldn't start: ${describe(error)}`, 503);
 			}));
 			const session = model.createVadSession();
 			try {
@@ -423,12 +395,7 @@ export function createLocalSttRuntime(deps: RuntimeDeps = {}): LocalSttRuntime {
 		async dispose() {
 			disposed = true;
 			stopIdleClock();
-			await asrQueue.run(async () => {
-				asr?.model.dispose();
-				asr = undefined;
-				detector?.dispose();
-				detector = undefined;
-			});
+			await asrQueue.run(async () => freeModels());
 			await vadQueue.run(async () => {
 				const model = await silero?.catch(() => undefined);
 				silero = undefined;

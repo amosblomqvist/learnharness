@@ -8,7 +8,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { createChunkSession, STOPPED_MESSAGE, TranscribeRequestError } from "../components/dictation-chunk-session.ts";
 import {
-	checkLocalReady, LOCAL_DICTATION_NO_MODEL, LocalRequestError, localTransport, warmLocalModel,
+	checkLocalReady, LOCAL_DICTATION_NO_MODEL, localTransport, warmLocalModel,
 } from "../components/dictation-local.ts";
 import { GROQ_DICTATION_HEADER } from "../src/core/dictation.ts";
 import { energyVad } from "./helpers/dictation-vad.ts";
@@ -41,7 +41,7 @@ function script(replies: Reply[]) {
 }
 
 const ok = (text: string, extra: Record<string, unknown> = {}) => Response.json({ text, ...extra });
-const failure = (status: number, message: string, retryable: boolean, code?: string) => Response.json({ message, retryable, code }, { status });
+const failure = (status: number, message: string, retryable: boolean) => Response.json({ message, retryable }, { status });
 const OPTIONS = { model: "whisper-small", language: "auto", preferredLanguages: ["en", "de"], chineseOutput: "simplified" } as const;
 
 const models = (over: Record<string, unknown> = {}) => ({
@@ -82,18 +82,18 @@ describe("checkLocalReady", () => {
 });
 
 describe("warmLocalModel", () => {
-	it("posts the model id as JSON to the warm route with the dictation header, and returns at once", () => {
+	it("posts the warm action as JSON to the model route with the dictation header, and returns at once", () => {
 		const { calls, request } = script([Response.json({ model: "whisper-small" })]);
 		assert.equal(warmLocalModel("whisper-small", request), undefined);
-		assert.equal(calls[0]!.url, "/api/stt/local/warm");
+		assert.equal(calls[0]!.url, "/api/stt/local/models/whisper-small");
 		assert.equal(calls[0]!.init.method, "POST");
 		assert.deepEqual(calls[0]!.init.headers, { [GROQ_DICTATION_HEADER]: "1", "Content-Type": "application/json" });
-		assert.deepEqual(JSON.parse(calls[0]!.init.body as string), { model: "whisper-small" });
+		assert.deepEqual(JSON.parse(calls[0]!.init.body as string), { action: "warm" });
 	});
 
 	it("swallows a network failure, a refusal and a fetch that throws at once", async () => {
 		warmLocalModel("whisper-small", script([new TypeError("offline")]).request);
-		warmLocalModel("whisper-small", script([failure(409, "no", false, "model_not_installed")]).request);
+		warmLocalModel("whisper-small", script([failure(409, "no", false)]).request);
 		warmLocalModel("whisper-small", (() => { throw new Error("sync"); }) as unknown as typeof fetch);
 		await tick();
 	});
@@ -121,26 +121,26 @@ describe("the transcribe transport", () => {
 	});
 
 	it("maps the route's refusals: a missing model is final, a decode failure is retryable as the server says", async () => {
-		const missing = await transcribe(script([failure(409, "That model isn't downloaded. Choose it in Settings → Dictation.", false, "model_not_installed")]).request).catch((e: unknown) => e);
-		assert.ok(missing instanceof LocalRequestError && missing instanceof TranscribeRequestError);
-		assert.equal((missing as LocalRequestError).message, "That model isn't downloaded. Choose it in Settings → Dictation.");
-		assert.equal((missing as LocalRequestError).retryable, false);
-		const decode = await transcribe(script([failure(500, "The speech model could not decode this audio.", true, "transcription_failed")]).request).catch((e: unknown) => e);
-		assert.equal((decode as LocalRequestError).retryable, true);
+		const missing = await transcribe(script([failure(409, "That model isn't downloaded. Choose it in Settings → Dictation.", false)]).request).catch((e: unknown) => e);
+		assert.ok(missing instanceof TranscribeRequestError);
+		assert.equal((missing as TranscribeRequestError).message, "That model isn't downloaded. Choose it in Settings → Dictation.");
+		assert.equal((missing as TranscribeRequestError).retryable, false);
+		const decode = await transcribe(script([failure(500, "The speech model could not decode this audio.", true)]).request).catch((e: unknown) => e);
+		assert.equal((decode as TranscribeRequestError).retryable, true);
 		const bare = await transcribe(script([new Response("<html>", { status: 502 })]).request).catch((e: unknown) => e);
-		assert.equal((bare as LocalRequestError).message, "Local dictation failed (502)");
-		assert.equal((bare as LocalRequestError).retryable, true, "a gateway error is worth repeating");
+		assert.equal((bare as TranscribeRequestError).message, "Local dictation failed (502)");
+		assert.equal((bare as TranscribeRequestError).retryable, true, "a gateway error is worth repeating");
 		const invalid = await transcribe(script([new Response("<html>", { status: 400 })]).request).catch((e: unknown) => e);
-		assert.equal((invalid as LocalRequestError).retryable, false);
+		assert.equal((invalid as TranscribeRequestError).retryable, false);
 	});
 
 	it("treats a dropped connection as transient and an answer without text as final", async () => {
 		const dropped = await transcribe(script([new TypeError("fetch failed")]).request).catch((e: unknown) => e);
-		assert.match((dropped as LocalRequestError).message, /Could not send the recording/);
-		assert.equal((dropped as LocalRequestError).retryable, true);
+		assert.match((dropped as TranscribeRequestError).message, /Could not send the recording/);
+		assert.equal((dropped as TranscribeRequestError).retryable, true);
 		const empty = await transcribe(script([Response.json({ nope: 1 })]).request).catch((e: unknown) => e);
-		assert.match((empty as LocalRequestError).message, /no transcript/);
-		assert.equal((empty as LocalRequestError).retryable, false);
+		assert.match((empty as TranscribeRequestError).message, /no transcript/);
+		assert.equal((empty as TranscribeRequestError).retryable, false);
 	});
 
 	it("pins the language the first answer with words reports, and sends it from then on", async () => {
@@ -178,12 +178,6 @@ describe("the transcribe transport", () => {
 		assert.equal(withWarning.warning, "No detector.");
 		assert.equal((await transcribe(script([ok("hi", { warning: "" })]).request)).warning, undefined);
 	});
-
-	it("joins chunk texts without spaces inside unspaced scripts", () => {
-		const { join } = localTransport(script([]).request, OPTIONS);
-		assert.equal(join(["Hello there.", "General Kenobi."]), "Hello there. General Kenobi.");
-		assert.equal(join(["今天天气很好。", "我们去公园吧。"]), "今天天气很好。我们去公园吧。");
-	});
 });
 
 describe("a Local chunk session", () => {
@@ -210,7 +204,7 @@ describe("a Local chunk session", () => {
 
 	it("repeats a transient failure with the session's backoff, and waits for the pin before the next chunk", async () => {
 		const { session: s, calls, sleeps } = session([
-			failure(500, "The speech model hit a snag.", true, "transcription_failed"), ok("one", { language: "pl" }), ok("two"), ok("three"),
+			failure(500, "The speech model hit a snag.", true), ok("one", { language: "pl" }), ok("two"), ok("three"),
 		]);
 		s.push(loud(40));
 		assert.deepEqual(await s.stop(), { status: "done", text: "one two three" });
@@ -220,7 +214,7 @@ describe("a Local chunk session", () => {
 
 	it("does not repeat a refusal that cannot help, keeps going, and Retry re-sends only the failed chunk in the pinned language", async () => {
 		const { session: s, calls } = session([
-			ok("one", { language: "it" }), failure(409, "Choose a model.", false, "model_not_installed"), ok("three"),
+			ok("one", { language: "it" }), failure(409, "Choose a model.", false), ok("three"),
 			ok("two"),
 		]);
 		s.push(loud(40));
@@ -253,11 +247,5 @@ describe("a Local chunk session", () => {
 		s.push(loud(40));
 		await s.stop();
 		assert.equal(s.warning, "first");
-	});
-
-	it("joins a Chinese take without spaces", async () => {
-		const { session: s } = session([ok("今天天气很好。", { language: "zh" }), ok("我们去公园吧。"), ok("好的。")], { language: "zh" });
-		s.push(loud(40));
-		assert.deepEqual(await s.stop(), { status: "done", text: "今天天气很好。我们去公园吧。好的。" });
 	});
 });

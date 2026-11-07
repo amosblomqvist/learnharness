@@ -4,7 +4,7 @@ import { vadResponse } from "@/src/server";
  * Used for Groq and Local dictation. Logic and trust model: src/server/local-stt/http.ts. */
 export const dynamic = "force-dynamic";
 
-/** Multipart `audio` (WAV) in, `{ probs, frameSamples }` out. */
+/** Multipart `audio` (WAV) in, `{ probs }` out. */
 export async function POST(request: Request) {
 	return vadResponse(request);
 }

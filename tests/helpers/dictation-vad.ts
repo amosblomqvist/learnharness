@@ -29,5 +29,5 @@ export async function vadAnswer(form: FormData): Promise<Response> {
 	const bytes = new Uint8Array(await (form.get("audio") as File).arrayBuffer());
 	const pcm = decodePcm16Wav(bytes, 16000);
 	if (!pcm) return Response.json({ message: "bad wav", retryable: false }, { status: 400 });
-	return Response.json({ probs: energyProbs(pcm), frameSamples: FRAME });
+	return Response.json({ probs: energyProbs(pcm) });
 }

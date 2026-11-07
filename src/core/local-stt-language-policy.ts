@@ -117,33 +117,25 @@ export function languageForModel(value: unknown, model: LanguageModel, preferred
 export const DETECTION_WINDOW_SECONDS = 7;
 export const DETECTION_MIN_SECONDS = 0.5;
 
-/** The detector's ranking of one clip: the shape of transcribe-cpp's LangIdResult. */
+/** The detector's ranking of one clip: the part of transcribe-cpp's LangIdResult that is read. */
 export type LanguageIdentification = {
 	candidates: readonly { code: string; p: number }[];
 	code: string | null;
-	allowedMass: number;
 };
-
-// Log a pick as uncertain when it is less than 1.5x as likely as the runner-up
-// (with two languages: p < 0.6). The pick is used either way.
-const UNSURE_RATIO = 1.5;
 
 /** Read a detector result: the top candidate wins. A result with no usable top candidate
  * falls back to the first preferred language, with a warning. */
 export function pickDetectedLanguage(
 	policy: DetectPolicy,
 	result: LanguageIdentification,
-): { language: string; warning?: string; summary: string } {
-	const fallback = policy.languages[0]!;
-	const [first, second] = result.candidates;
+): { language: string; warning?: string } {
 	const language = policy.languages[policy.allowed.indexOf(result.code ?? "")];
-	const scores = result.candidates.map((c) => `${c.code} ${(c.p * 100).toFixed(1)}%`).join(", ");
-	const unsure = first && second && first.p < UNSURE_RATIO * second.p ? ", uncertain" : "";
-	const summary = `${language ?? "none"} (${scores}; allowed mass ${(result.allowedMass * 100).toFixed(1)}%${unsure})`;
+	const first = result.candidates[0];
 	if (!language || !first || !Number.isFinite(first.p)) {
-		return { language: fallback, warning: `Couldn't detect the language. Transcribed as ${displayLanguage(fallback)}.`, summary };
+		const fallback = policy.languages[0]!;
+		return { language: fallback, warning: `Couldn't detect the language. Transcribed as ${displayLanguage(fallback)}.` };
 	}
-	return { language, summary };
+	return { language };
 }
 
 /** Shown when Auto needs the language detector and it is not downloaded. */

@@ -121,13 +121,12 @@ export const GROQ_KEY_ID = "GROQ_API_KEY";
 /** Same-origin intent header the dictation client sends to /api/stt/transcribe. */
 export const GROQ_DICTATION_HEADER = "x-learnharness-dictation";
 
-/** Groq's documented upload limit on the free tier. The docs do not say MB or
- * MiB, so the decimal figure is used. A chunk is at most 576 KB, so the limit is
- * far away; the route still enforces it. */
-export const GROQ_MAX_UPLOAD_BYTES = 25_000_000;
-/** Request-body ceiling: the file plus multipart framing. It must stay inside
+/** The longest clip either audio route accepts: 2 minutes of 16 kHz PCM16. Chunks are
+ * at most 576 KB, so this is only a ceiling. */
+export const STT_MAX_AUDIO_BYTES = 120 * 16_000 * 2 + 44;
+/** Request-body ceiling: the WAV plus multipart framing. It must stay inside
  * next.config.ts's proxyClientMaxBodySize, or Next hands the route a truncated body. */
-export const GROQ_MAX_BODY_BYTES = GROQ_MAX_UPLOAD_BYTES + 64 * 1024;
+export const STT_MAX_BODY_BYTES = STT_MAX_AUDIO_BYTES + 64 * 1024;
 export const DICTATION_SAMPLE_RATE = 16_000;
 /** The longest single dictation: 20 minutes, after which it stops and transcribes
  * what it has. A run keeps every chunk's audio (32 KB per second, 38.4 MB at the

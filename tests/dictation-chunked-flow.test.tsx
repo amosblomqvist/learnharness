@@ -67,7 +67,7 @@ const localModels = (over: Record<string, unknown> = {}) => ({
 	...over,
 });
 /** What /api/stt/vad answers for `frames` Silero frames when nothing says otherwise: speech throughout. */
-const speechEverywhere = (frames: number) => Response.json({ probs: new Array(frames).fill(0.95), frameSamples: 512 });
+const speechEverywhere = (frames: number) => Response.json({ probs: new Array(frames).fill(0.95) });
 /** What GET /api/keys says about the Groq key (the readiness check reads it). */
 const keysResponse = (present: boolean) => Response.json({ keys: [{ id: "GROQ_API_KEY", info: null, present }] });
 const globals = globalThis as Record<string, unknown>;
@@ -91,7 +91,7 @@ async function fixture(
 		/** GET /api/stt/local/models: what the Local readiness check reads. */
 		models: (() => Promise.resolve(Response.json(localModels()))) as () => Promise<Response>,
 		modelInits: [] as (RequestInit | undefined)[],
-		/** POST /api/stt/local/warm: the fire-and-forget model load. */
+		/** POST /api/stt/local/models/<id> with { action: "warm" }: the fire-and-forget model load. */
 		warm: (() => Promise.resolve(Response.json({ model: "whisper-small" }))) as (post: Post) => Promise<Response>,
 		warmPosts: [] as Post[],
 		/** POST /api/stt/local/transcribe. */
@@ -120,7 +120,7 @@ async function fixture(
 			if (url === "/api/keys") { state.readyInits.push(init); return state.ready(); }
 			if (url === "/api/stt/local/models") { state.modelInits.push(init); return state.models(); }
 			const post = { init: init!, form: init!.body as FormData };
-			if (url === "/api/stt/local/warm") { state.warmPosts.push(post); return state.warm(post); }
+			if (url === "/api/stt/local/models/whisper-small") { state.warmPosts.push(post); return state.warm(post); }
 			if (url === "/api/stt/local/transcribe") { state.localPosts.push(post); return state.localAnswer(post); }
 			if (url === "/api/stt/vad") {
 				state.vadPosts.push(post);
@@ -879,7 +879,6 @@ test("screen readers are told about waiting for the transcript (polite) and abou
 /** Silero's answer for `frames` frames: speech, except for the given pauses (seconds). */
 const withPauses = (pauses: [number, number][]) => (frames: number) => Response.json({
 	probs: Array.from({ length: frames }, (_, i) => (pauses.some(([from, to]) => (i * 512) / 16000 >= from && (i * 512) / 16000 < to) ? 0.01 : 0.95)),
-	frameSamples: 512,
 });
 const seconds = async (post: Post) => ((await audioBytes(post)).length - 44) / 2 / 16000;
 
@@ -915,7 +914,7 @@ test("Silero hearing only silence: nothing is sent and nothing is inserted, and 
 test("a failed VAD request loses no audio: chunks are cut at 15 s and sent, silent or not, and no error is shown", async () => {
 	const f = await fixture();
 	numbered(f);
-	f.state.vad = () => Response.json({ message: "Voice activity detection couldn't start", retryable: false, code: "engine_unavailable" }, { status: 503 });
+	f.state.vad = () => Response.json({ message: "Voice activity detection couldn't start", retryable: false }, { status: 503 });
 	await f.start();
 	await f.speak(framesFor(40));
 	assert.equal(f.state.posts.length, 2, "two full chunks went out while recording");
@@ -967,7 +966,7 @@ test("Local starts loading the chosen model as recording starts, once, and only 
 	const { init, form } = f.state.warmPosts[0]!;
 	assert.equal(init.method, "POST");
 	assert.deepEqual(init.headers, { [GROQ_DICTATION_HEADER]: "1", "Content-Type": "application/json" });
-	assert.deepEqual(JSON.parse(init.body as string), { model: "whisper-small" });
+	assert.deepEqual(JSON.parse(init.body as string), { action: "warm" });
 	assert.equal(form, init.body, "a JSON body, not audio");
 	assert.equal(f.state.localPosts.length, 0, "no chunk was needed to start the load");
 	await f.speak(4);
@@ -978,7 +977,7 @@ test("Local starts loading the chosen model as recording starts, once, and only 
 test("a warm-up that fails, is refused or never answers neither blocks nor fails the recording", async () => {
 	for (const warm of [
 		() => Promise.reject(new TypeError("offline")),
-		() => Promise.resolve(Response.json({ message: "That model isn't downloaded.", retryable: false, code: "model_not_installed" }, { status: 409 })),
+		() => Promise.resolve(Response.json({ message: "That model isn't downloaded.", retryable: false }, { status: 409 })),
 		() => new Promise<Response>(() => {}),
 	]) {
 		const f = await fixture(LOCAL);
@@ -1180,7 +1179,7 @@ test("a transient Local failure is retried with backoff and never shows an error
 	await f.speak();
 	let calls = 0;
 	f.state.localAnswer = () => Promise.resolve(++calls === 1
-		? Response.json({ message: "The speech model hit a snag.", retryable: true, code: "transcription_failed" }, { status: 500 })
+		? Response.json({ message: "The speech model hit a snag.", retryable: true }, { status: 500 })
 		: Response.json({ text: "second go" }));
 	mock.timers.enable({ apis: ["setTimeout"] });
 	try {

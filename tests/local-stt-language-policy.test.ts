@@ -94,7 +94,7 @@ describe("the policy a take runs with", () => {
 describe("reading the detector", () => {
 	const policy: DetectPolicy = { kind: "detect", languages: ["en", "de"], allowed: ["en", "de"] };
 	const result = (code: string | null, first = 0.9, second = 0.1): LanguageIdentification => ({
-		code, allowedMass: 0.95,
+		code,
 		candidates: [{ code: code ?? "en", p: first }, { code: code === "en" ? "de" : "en", p: second }],
 	});
 
@@ -109,12 +109,6 @@ describe("reading the detector", () => {
 			assert.equal(picked.language, "en");
 			assert.match(picked.warning ?? "", /Couldn't detect the language. Transcribed as English/);
 		}
-	});
-
-	it("marks a close call as uncertain in its summary but still uses it", () => {
-		const picked = pickDetectedLanguage(policy, result("de", 0.55, 0.45));
-		assert.equal(picked.language, "de");
-		assert.match(picked.summary, /uncertain/);
 	});
 
 	it("says what to do when the detector is not downloaded", () => {

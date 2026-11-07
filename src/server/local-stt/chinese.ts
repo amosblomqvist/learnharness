@@ -14,22 +14,15 @@ type Converter = (text: string) => string;
 
 const converters = new Map<LocalChineseOutput, Promise<Converter>>();
 
-async function createConverter(output: LocalChineseOutput): Promise<Converter> {
-	const { default: OpenCC } = await import("opencc-js");
-	return output === "simplified"
-		? OpenCC.Converter({ from: "t", to: "cn" })
-		: OpenCC.Converter({ from: "cn", to: "tw" });
-}
-
+/** One converter per output, built on first use. */
 function converterFor(output: LocalChineseOutput): Promise<Converter> {
-	const existing = converters.get(output);
-	if (existing) return existing;
-	const loading = createConverter(output);
-	converters.set(output, loading);
-	void loading.catch(() => {
-		if (converters.get(output) === loading) converters.delete(output);
-	});
-	return loading;
+	let converter = converters.get(output);
+	if (!converter) {
+		converter = import("opencc-js").then(({ default: OpenCC }) =>
+			output === "simplified" ? OpenCC.Converter({ from: "t", to: "cn" }) : OpenCC.Converter({ from: "cn", to: "tw" }));
+		converters.set(output, converter);
+	}
+	return converter;
 }
 
 export async function convertChineseOutput(text: string, output: LocalChineseOutput): Promise<string> {

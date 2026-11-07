@@ -1,8 +1,8 @@
 import {
-	GROQ_DICTATION_HEADER, joinTranscripts, LOCAL_STT_MODELS_URL, LOCAL_STT_TRANSCRIBE_URL, LOCAL_STT_WARM_URL, NO_LOCAL_MODEL,
-	type LocalChineseOutput, type LocalModelsResponse, type LocalSttErrorBody, type LocalTranscribeResponse,
+	GROQ_DICTATION_HEADER, LOCAL_STT_MODELS_URL, LOCAL_STT_TRANSCRIBE_URL, NO_LOCAL_MODEL,
+	type LocalChineseOutput, type LocalModelsResponse, type LocalTranscribeResponse,
 } from "@/src/core";
-import { TranscribeRequestError, type ChunkTransport } from "@/components/dictation-chunk-session";
+import { postChunk, routeFailure, TranscribeRequestError, type ChunkTransport } from "@/components/dictation-chunk-session";
 
 /**
  * The renderer's side of Local (on-device) dictation: a readiness check against
@@ -20,25 +20,6 @@ export const LOCAL_DICTATION_SETTINGS_SECTION = "keys";
 
 const headers = { [GROQ_DICTATION_HEADER]: "1" };
 
-/** A failed Local chunk request (see TranscribeRequestError). */
-export class LocalRequestError extends TranscribeRequestError {
-	constructor(message: string, retryable: boolean) {
-		super(message, retryable);
-		this.name = "LocalRequestError";
-	}
-}
-
-async function routeFailure(res: Response): Promise<LocalRequestError> {
-	let message = `Local dictation failed (${res.status})`;
-	let retryable = res.status >= 500;
-	try {
-		const body = await res.json() as Partial<LocalSttErrorBody>;
-		if (typeof body.message === "string" && body.message) message = body.message;
-		if (typeof body.retryable === "boolean") retryable = body.retryable;
-	} catch {}
-	return new LocalRequestError(message, retryable);
-}
-
 /** Can the chosen model run? Resolves when it is installed and the engine loads;
  * rejects with a line fit to show the user when not, so a run can refuse before the
  * user has spoken. An unchosen model is refused without any request. A model that was
@@ -51,7 +32,7 @@ export async function checkLocalReady(model: string, request: typeof fetch = fet
 	} catch {
 		throw new Error("Could not reach LearnHarness to check the local model.");
 	}
-	if (!res.ok) throw new Error((await routeFailure(res)).message);
+	if (!res.ok) throw new Error((await routeFailure(res, "Local")).message);
 	const status = await res.json() as Partial<LocalModelsResponse>;
 	if (status.engineAvailable === false) throw new Error(status.engineError || "On-device dictation can't run on this computer.");
 	if (!status.models?.some((entry) => entry.id === model && entry.installed)) throw new Error(LOCAL_DICTATION_NO_MODEL);
@@ -63,8 +44,8 @@ export async function checkLocalReady(model: string, request: typeof fetch = fet
  * problem itself and shows it. */
 export function warmLocalModel(model: string, request: typeof fetch = fetch): void {
 	try {
-		void request(LOCAL_STT_WARM_URL, {
-			method: "POST", headers: { ...headers, "Content-Type": "application/json" }, body: JSON.stringify({ model }),
+		void request(`${LOCAL_STT_MODELS_URL}/${encodeURIComponent(model)}`, {
+			method: "POST", headers: { ...headers, "Content-Type": "application/json" }, body: JSON.stringify({ action: "warm" }),
 		}).then((res) => res.body?.cancel(), () => {});
 	} catch {}
 }
@@ -85,7 +66,6 @@ export function localTransport(request: typeof fetch, args: {
 	let pinned: string | undefined;
 	return {
 		failure: "Local transcription failed",
-		join: joinTranscripts,
 		async transcribe({ wav, signal }) {
 			const form = new FormData();
 			form.set("audio", new Blob([wav], { type: "audio/wav" }), "dictation.wav");
@@ -93,15 +73,10 @@ export function localTransport(request: typeof fetch, args: {
 			form.set("preferredLanguages", JSON.stringify(args.preferredLanguages));
 			form.set("language", pinned ?? args.language);
 			form.set("chineseOutput", args.chineseOutput);
-			let res: Response;
-			try {
-				res = await request(LOCAL_STT_TRANSCRIBE_URL, { method: "POST", headers, body: form, signal });
-			} catch {
-				throw new LocalRequestError("Could not send the recording for transcription. Check that LearnHarness is running.", true);
-			}
-			if (!res.ok) throw await routeFailure(res);
+			const res = await postChunk(request, LOCAL_STT_TRANSCRIBE_URL, form, signal);
+			if (!res.ok) throw await routeFailure(res, "Local");
 			const body = await res.json().catch(() => ({})) as Partial<LocalTranscribeResponse>;
-			if (typeof body.text !== "string") throw new LocalRequestError("Local dictation returned no transcript.", false);
+			if (typeof body.text !== "string") throw new TranscribeRequestError("Local dictation returned no transcript.", false);
 			const text = body.text.trim();
 			// A chunk with no words says nothing about the language: its detection ran on noise.
 			if (!pinned && args.language === "auto" && text && typeof body.language === "string" && body.language) pinned = body.language;

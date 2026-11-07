@@ -1,4 +1,4 @@
-import { encodePcm16Wav, GROQ_DICTATION_HEADER, STT_VAD_URL, VAD_FRAME_SAMPLES, type VadResponse } from "@/src/core";
+import { encodePcm16Wav, GROQ_DICTATION_HEADER, STT_VAD_URL, type VadResponse } from "@/src/core";
 
 /**
  * The renderer's side of Silero VAD for the chunker (src/core/dictation-chunks.ts):
@@ -24,7 +24,7 @@ export async function scoreVad(request: typeof fetch, pcm: Int16Array, sampleRat
 	});
 	if (!res.ok) throw new Error(`Voice activity detection failed (${res.status})`);
 	const body = await res.json() as Partial<VadResponse>;
-	if (body.frameSamples !== VAD_FRAME_SAMPLES || !Array.isArray(body.probs) || !body.probs.every((p) => typeof p === "number")) {
+	if (!Array.isArray(body.probs) || !body.probs.every((p) => typeof p === "number")) {
 		throw new Error("Voice activity detection returned an unexpected answer.");
 	}
 	return body.probs;

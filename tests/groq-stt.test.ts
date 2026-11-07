@@ -8,7 +8,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { after, afterEach, beforeEach, describe, it } from "node:test";
-import { GROQ_DICTATION_HEADER, GROQ_MAX_BODY_BYTES, GROQ_MAX_UPLOAD_BYTES } from "../src/core/dictation.ts";
+import { GROQ_DICTATION_HEADER, STT_MAX_AUDIO_BYTES, STT_MAX_BODY_BYTES } from "../src/core/dictation.ts";
 import { encodePcm16Wav } from "../src/core/wav.ts";
 
 const dir = mkdtempSync(path.join(tmpdir(), "lh-groq-stt-"));
@@ -118,7 +118,7 @@ describe("input validation", () => {
 	});
 
 	it("oversize: a declared Content-Length over the body limit is refused as 413", async () => {
-		const res = await post(form(), { "content-length": String(GROQ_MAX_BODY_BYTES + 1) });
+		const res = await post(form(), { "content-length": String(STT_MAX_BODY_BYTES + 1) });
 		assert.equal(res.status, 413);
 		assert.match(await message(res), /too large/);
 		assert.equal(calls.length, 0);
@@ -129,7 +129,7 @@ describe("input validation", () => {
 		const chunk = new Uint8Array(1024 * 1024);
 		const body = new ReadableStream<Uint8Array>({
 			pull(controller) {
-				if (sent > GROQ_MAX_BODY_BYTES + chunk.byteLength) return controller.close();
+				if (sent > STT_MAX_BODY_BYTES + chunk.byteLength) return controller.close();
 				sent += chunk.byteLength;
 				controller.enqueue(chunk);
 			},
@@ -139,12 +139,12 @@ describe("input validation", () => {
 			headers: { [GROQ_DICTATION_HEADER]: "1", origin: "http://localhost", "content-type": "multipart/form-data; boundary=x" },
 		} as RequestInit & { duplex: "half" }));
 		assert.equal(res.status, 413);
-		assert.ok(sent < GROQ_MAX_BODY_BYTES + 3 * chunk.byteLength, "the reader stopped pulling soon after the limit");
+		assert.ok(sent < STT_MAX_BODY_BYTES + 3 * chunk.byteLength, "the reader stopped pulling soon after the limit");
 		assert.equal(calls.length, 0);
 	});
 
-	it("oversize: an audio part over Groq's upload limit is refused even inside the body allowance", async () => {
-		const big = new Uint8Array(GROQ_MAX_UPLOAD_BYTES + 1);
+	it("oversize: an audio part over the upload limit is refused even inside the body allowance", async () => {
+		const big = new Uint8Array(STT_MAX_AUDIO_BYTES + 1);
 		big.set(encodePcm16Wav(new Int16Array(0), 16000));
 		const res = await post(form({ audio: new File([big], "dictation.wav", { type: "audio/wav" }) }));
 		assert.equal(res.status, 413);

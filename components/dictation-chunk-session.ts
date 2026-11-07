@@ -1,4 +1,4 @@
-import { createChunker, encodePcm16Wav, type PcmChunk } from "@/src/core";
+import { createChunker, encodePcm16Wav, GROQ_DICTATION_HEADER, joinTranscripts, type PcmChunk } from "@/src/core";
 
 /**
  * One chunked dictation run (Groq or Local), from the first captured frame to the
@@ -42,11 +42,33 @@ export type ChunkStatus = "queued" | "sending" | "done" | "failed";
 
 /** A failed chunk request: `message` is fit to show the user, `retryable` says
  * whether sending the same chunk again may work, `retryAfterMs` is the wait the
- * server asked for. Each engine's transport throws its own subclass. */
+ * server asked for. */
 export class TranscribeRequestError extends Error {
 	constructor(message: string, readonly retryable: boolean, readonly retryAfterMs?: number) {
 		super(message);
 		this.name = "TranscribeRequestError";
+	}
+}
+
+/** The error for a failed route answer. `label` starts the message when the body has none. */
+export async function routeFailure(res: Response, label: string): Promise<TranscribeRequestError> {
+	let message = `${label} dictation failed (${res.status})`;
+	let retryable = res.status === 429 || res.status >= 500;
+	try {
+		const body = await res.json() as { message?: unknown; retryable?: unknown };
+		if (typeof body.message === "string" && body.message) message = body.message;
+		if (typeof body.retryable === "boolean") retryable = body.retryable;
+	} catch {}
+	const seconds = Number(res.headers.get("retry-after"));
+	return new TranscribeRequestError(message, retryable, Number.isFinite(seconds) && seconds > 0 ? Math.ceil(seconds * 1000) : undefined);
+}
+
+/** POST one chunk's form to a dictation route. Rejects when the request cannot be sent. */
+export async function postChunk(request: typeof fetch, url: string, form: FormData, signal?: AbortSignal): Promise<Response> {
+	try {
+		return await request(url, { method: "POST", headers: { [GROQ_DICTATION_HEADER]: "1" }, body: form, signal });
+	} catch {
+		throw new TranscribeRequestError("Could not send the recording for transcription. Check that LearnHarness is running.", true);
 	}
 }
 
@@ -71,8 +93,9 @@ export type ChunkTransport = {
 	transcribe(chunk: ChunkRequest): Promise<ChunkTranscript>;
 	/** What a failure with no message of its own says, e.g. "Groq transcription failed". */
 	failure: string;
-	/** The whole transcript from the finished chunks' texts, in order, none of them empty. */
-	join(texts: readonly string[]): string;
+	/** The whole transcript from the finished chunks' texts, in order, none of them empty.
+	 * Defaults to joinTranscripts. */
+	join?(texts: readonly string[]): string;
 };
 
 type ChunkState = {
@@ -215,7 +238,7 @@ export function createChunkSession(options: ChunkSessionOptions): ChunkSession {
 		// dropped from the transcript without the user knowing.
 		const failed = chunks.find((chunk) => chunk.status !== "done");
 		if (failed) return { status: "failed", error: failed.error ?? transport.failure };
-		return { status: "done", text: transport.join(chunks.filter((chunk) => chunk.text).map((chunk) => chunk.text)) };
+		return { status: "done", text: (transport.join ?? joinTranscripts)(chunks.filter((chunk) => chunk.text).map((chunk) => chunk.text)) };
 	};
 
 	// A scoring request dies with the run, so cancel() cannot leave one behind. A failed

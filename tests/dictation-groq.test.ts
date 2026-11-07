@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { after, describe, it } from "node:test";
 import {
-	DEFAULT_DICTATION_PROVIDER, DEFAULT_GROQ_WHISPER_MODEL, DICTATION_LANGUAGES, DICTATION_PROVIDERS, GROQ_MAX_BODY_BYTES,
+	DEFAULT_DICTATION_PROVIDER, DEFAULT_GROQ_WHISPER_MODEL, DICTATION_LANGUAGES, DICTATION_PROVIDERS, STT_MAX_BODY_BYTES,
 	GROQ_MAX_RECORDING_SECONDS, GROQ_WHISPER_MODELS,
 	dictationSettingsBody, isDictationProvider, isGroqWhisperModel, whisperLanguage,
 } from "../src/core/dictation.ts";
@@ -34,7 +34,7 @@ describe("Groq dictation provider and models", () => {
 		assert.equal(GROQ_MAX_RECORDING_SECONDS, 1200);
 		// next.config.ts sets proxyClientMaxBodySize to MAX_IMPORT_BODY_BYTES; a larger
 		// request would reach the route truncated and fail as an unreadable upload.
-		assert.ok(GROQ_MAX_BODY_BYTES <= MAX_IMPORT_BODY_BYTES);
+		assert.ok(STT_MAX_BODY_BYTES <= MAX_IMPORT_BODY_BYTES);
 	});
 });
 

@@ -9,9 +9,9 @@ import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
-import { GROQ_DICTATION_HEADER } from "../src/core/dictation.ts";
+import { GROQ_DICTATION_HEADER, STT_MAX_AUDIO_BYTES, STT_MAX_BODY_BYTES } from "../src/core/dictation.ts";
 import { LANGUAGE_DETECTION_MODEL, getCatalogModel } from "../src/core/local-stt-catalog.ts";
-import { LOCAL_STT_MAX_AUDIO_BYTES, LOCAL_STT_MAX_BODY_BYTES, type LocalModelsResponse, type LocalSttErrorBody } from "../src/core/local-stt.ts";
+import type { LocalModelsResponse } from "../src/core/local-stt.ts";
 import { encodePcm16Wav } from "../src/core/wav.ts";
 import { createModelStore, setLocalModelStore, type ModelStore } from "../src/server/local-stt/model-store.ts";
 import { LocalSttError, setLocalSttRuntime, type LocalSttRuntime, type TranscribeChunkOptions } from "../src/server/local-stt/runtime.ts";
@@ -20,7 +20,6 @@ const modelsRoute = await import("../app/api/stt/local/models/route.ts");
 const modelRoute = await import("../app/api/stt/local/models/[id]/route.ts");
 const transcribeRoute = await import("../app/api/stt/local/transcribe/route.ts");
 const vadRoute = await import("../app/api/stt/vad/route.ts");
-const warmRoute = await import("../app/api/stt/local/warm/route.ts");
 
 const BASE = "http://localhost/api/stt";
 const ID = "whisper-small";
@@ -82,7 +81,7 @@ function form(parts: Record<string, string | Blob | undefined> = {}) {
 	return body;
 }
 const transcribe = (body: BodyInit | null, headers?: Record<string, string>) => transcribeRoute.POST(post(`${BASE}/local/transcribe`, body, headers));
-const error = async (res: Response) => (await res.json()) as LocalSttErrorBody;
+const error = async (res: Response) => (await res.json()) as { message: string; retryable: boolean };
 const params = (id: string) => ({ params: Promise.resolve({ id }) });
 const act = (method: "POST" | "DELETE", id: string, body?: string, headers: Record<string, string> = intent) =>
 	(method === "POST" ? modelRoute.POST : modelRoute.DELETE)(new Request(`${BASE}/local/models/${id}`, { method, body, headers }), params(id));
@@ -101,7 +100,7 @@ describe("same-origin protection", () => {
 			assert.equal((await modelRoute.DELETE(new Request(`${BASE}/local/models/${ID}`, { method: "DELETE", headers }), params(ID))).status, 403);
 			assert.equal((await transcribeRoute.POST(new Request(`${BASE}/local/transcribe`, { method: "POST", body: form(), headers }))).status, 403);
 			assert.equal((await vadRoute.POST(new Request(`${BASE}/vad`, { method: "POST", body: form(), headers }))).status, 403);
-			assert.equal((await warmRoute.POST(new Request(`${BASE}/local/warm`, { method: "POST", body: JSON.stringify({ model: ID }), headers }))).status, 403);
+			assert.equal((await modelRoute.POST(new Request(`${BASE}/local/models/${ID}`, { method: "POST", body: JSON.stringify({ action: "warm" }), headers }), params(ID))).status, 403);
 			assert.deepEqual([transcribed, scored, unloaded, warmed], [[], [], [], []]);
 			assert.equal((await store.status(ID)).download, null, "no download started");
 		});
@@ -243,10 +242,10 @@ describe("POST /api/stt/local/transcribe", () => {
 	});
 
 	it("refuses an oversized upload", async () => {
-		const huge = new File([new Uint8Array(LOCAL_STT_MAX_AUDIO_BYTES + 2)], "a.wav", { type: "audio/wav" });
+		const huge = new File([new Uint8Array(STT_MAX_AUDIO_BYTES + 2)], "a.wav", { type: "audio/wav" });
 		assert.equal((await transcribe(form({ audio: huge }))).status, 413);
 		const declared = new Request(`${BASE}/local/transcribe`, {
-			method: "POST", body: form(), headers: { ...intent, "content-length": String(LOCAL_STT_MAX_BODY_BYTES + 1) },
+			method: "POST", body: form(), headers: { ...intent, "content-length": String(STT_MAX_BODY_BYTES + 1) },
 		});
 		assert.equal((await transcribeRoute.POST(declared)).status, 413);
 		assert.deepEqual(transcribed, []);
@@ -254,16 +253,16 @@ describe("POST /api/stt/local/transcribe", () => {
 
 	it("keeps the body ceiling inside the proxy buffer next.config.ts sets", async () => {
 		const { MAX_IMPORT_BODY_BYTES } = await import("../lib/notes-import-limits.ts");
-		assert.ok(LOCAL_STT_MAX_BODY_BYTES < MAX_IMPORT_BODY_BYTES);
+		assert.ok(STT_MAX_BODY_BYTES < MAX_IMPORT_BODY_BYTES);
 	});
 
-	it("answers a runtime failure in the shared shape, with its code and status", async () => {
-		transcribeImpl = async () => { throw new LocalSttError("Pick a model in Settings.", "model_not_installed", 409); };
+	it("answers a runtime failure in the shared shape, with its status", async () => {
+		transcribeImpl = async () => { throw new LocalSttError("Pick a model in Settings.", 409); };
 		const res = await transcribe(form());
 		assert.equal(res.status, 409);
-		assert.deepEqual(await res.json(), { message: "Pick a model in Settings.", retryable: false, code: "model_not_installed" });
+		assert.deepEqual(await res.json(), { message: "Pick a model in Settings.", retryable: false });
 
-		transcribeImpl = async () => { throw new LocalSttError("Transcription failed: x", "transcription_failed", 500, true); };
+		transcribeImpl = async () => { throw new LocalSttError("Transcription failed: x", 500, true); };
 		assert.equal((await error(await transcribe(form()))).retryable, true);
 	});
 
@@ -288,11 +287,12 @@ describe("POST /api/stt/local/transcribe", () => {
 	});
 });
 
-describe("POST /api/stt/local/warm", () => {
-	const warm = (body: BodyInit | null, headers: Record<string, string> = {}) => warmRoute.POST(post(`${BASE}/local/warm`, body, headers));
+describe("POST /api/stt/local/models/[id] with the warm action", () => {
+	const warm = (body: string, id = ID) => act("POST", id, body);
+	const action = JSON.stringify({ action: "warm" });
 
 	it("loads the named model through the runtime and answers once it is loaded", async () => {
-		const res = await warm(JSON.stringify({ model: ID }));
+		const res = await warm(action);
 		assert.equal(res.status, 200);
 		assert.deepEqual(await res.json(), { model: ID });
 		assert.deepEqual(warmed, [ID]);
@@ -300,29 +300,27 @@ describe("POST /api/stt/local/warm", () => {
 		assert.deepEqual(transcribed, [], "nothing is transcribed");
 	});
 
-	it("rejects a bad body or a model that is not in the catalog, without touching the runtime", async () => {
+	it("rejects a bad body or an id that is not a catalog model, without touching the runtime", async () => {
 		assert.equal((await warm("not json")).status, 400);
-		assert.equal((await warm("")).status, 400);
-		assert.equal((await warm(JSON.stringify({}))).status, 400);
-		assert.equal((await warm(JSON.stringify({ model: "voxlingua107-ecapa-q8" }))).status, 400, "the detector is not a model to warm");
-		assert.equal((await warm(JSON.stringify({ model: "../etc/passwd" }))).status, 400);
-		assert.equal((await warm(JSON.stringify({ model: ID, pad: "x".repeat(2000) }))).status, 413);
+		assert.equal((await warm(action, "voxlingua107-ecapa-q8")).status, 400, "the detector is not a model to warm");
+		assert.equal((await warm(action, "no-such-model")).status, 404);
+		assert.equal((await warm(JSON.stringify({ action: "warm", pad: "x".repeat(2000) }))).status, 413);
 		assert.deepEqual(warmed, []);
 	});
 
 	it("answers a load failure in the shared shape", async () => {
-		warmImpl = async () => { throw new LocalSttError("That model isn't downloaded.", "model_not_installed", 409); };
-		const res = await warm(JSON.stringify({ model: ID }));
+		warmImpl = async () => { throw new LocalSttError("That model isn't downloaded.", 409); };
+		const res = await warm(action);
 		assert.equal(res.status, 409);
-		assert.deepEqual(await res.json(), { message: "That model isn't downloaded.", retryable: false, code: "model_not_installed" });
+		assert.deepEqual(await res.json(), { message: "That model isn't downloaded.", retryable: false });
 	});
 });
 
 describe("POST /api/stt/vad", () => {
-	it("answers the per-frame probabilities and the frame size", async () => {
+	it("answers the per-frame probabilities", async () => {
 		const res = await vadRoute.POST(post(`${BASE}/vad`, form({ audio: wav(1024) })));
 		assert.equal(res.status, 200);
-		assert.deepEqual(await res.json(), { probs: [0.1, 0.9], frameSamples: 512 });
+		assert.deepEqual(await res.json(), { probs: [0.1, 0.9] });
 		assert.deepEqual(scored, [1024]);
 	});
 
@@ -339,9 +337,9 @@ describe("POST /api/stt/vad", () => {
 	});
 
 	it("answers a scoring failure in the shared shape", async () => {
-		vadImpl = async () => { throw new LocalSttError("Voice activity detection couldn't start.", "engine_unavailable", 503); };
+		vadImpl = async () => { throw new LocalSttError("Voice activity detection couldn't start.", 503); };
 		const res = await vadRoute.POST(post(`${BASE}/vad`, form()));
 		assert.equal(res.status, 503);
-		assert.equal((await error(res)).code, "engine_unavailable");
+		assert.match((await error(res)).message, /couldn't start/);
 	});
 });

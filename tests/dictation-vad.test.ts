@@ -18,7 +18,7 @@ function fake(answer: () => Response | Promise<Response>) {
 
 describe("scoreVad", () => {
 	it("posts the clip as a 16 kHz WAV to the VAD route with the dictation header, and returns the probabilities", async () => {
-		const { seen, request } = fake(() => Response.json({ probs: [0.1, 0.9, 0.5], frameSamples: 512 }));
+		const { seen, request } = fake(() => Response.json({ probs: [0.1, 0.9, 0.5] }));
 		assert.deepEqual(await scoreVad(request, pcm, 16000), [0.1, 0.9, 0.5]);
 		assert.equal(seen[0]!.url, "/api/stt/vad");
 		assert.equal(seen[0]!.init.method, "POST");
@@ -28,13 +28,12 @@ describe("scoreVad", () => {
 		assert.deepEqual(decodePcm16Wav(new Uint8Array(await audio.arrayBuffer()), 16000), pcm);
 	});
 
-	it("rejects on a refusal, a server error, an answer that is not probabilities, or a frame size it does not know", async () => {
+	it("rejects on a refusal, a server error, or an answer that is not probabilities", async () => {
 		const rejects = (response: () => Response) => assert.rejects(scoreVad(fake(response).request, pcm, 16000));
 		await rejects(() => Response.json({ message: "no", retryable: false }, { status: 403 }));
-		await rejects(() => Response.json({ message: "engine", retryable: false, code: "engine_unavailable" }, { status: 503 }));
-		await rejects(() => Response.json({ frameSamples: 512 }));
-		await rejects(() => Response.json({ probs: ["x"], frameSamples: 512 }));
-		await rejects(() => Response.json({ probs: [0.1], frameSamples: 256 }));
+		await rejects(() => Response.json({ message: "engine", retryable: false }, { status: 503 }));
+		await rejects(() => Response.json({}));
+		await rejects(() => Response.json({ probs: ["x"] }));
 		await rejects(() => new Response("<html>", { status: 502 }));
 		await assert.rejects(scoreVad((async () => { throw new TypeError("offline"); }) as typeof fetch, pcm, 16000));
 	});
@@ -45,7 +44,7 @@ describe("scoreVad", () => {
 		const pending = scoreVad(stuck as unknown as typeof fetch, pcm, 16000, controller.signal);
 		controller.abort(new Error("cancelled"));
 		await assert.rejects(pending, /cancelled/);
-		const { seen, request } = fake(() => Response.json({ probs: [], frameSamples: 512 }));
+		const { seen, request } = fake(() => Response.json({ probs: [] }));
 		await scoreVad(request, pcm, 16000);
 		const signal = seen[0]!.init.signal!;
 		assert.equal(signal.aborted, false);
