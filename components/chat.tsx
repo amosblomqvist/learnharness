@@ -2216,12 +2216,13 @@ function DockOverlay({
 	const offer = useCallback((blockH: number) => {
 		// Side mode covers no transcript tail, but the READING ZONE needs
 		// one (owner request 2026-11-07): with a zero spacer the last line
-		// glued to the viewport's bottom edge — reserve ~40% of the column
-		// so the passage being read can always be pulled up into the
-		// mid-screen reading zone, like an editor's scroll-beyond-last-line.
+		// glued to the viewport's bottom edge — reserve ~20% of the column
+		// (owner tuned down from 40%, 2026-11-07) so the passage being read
+		// can be pulled up toward the mid-screen reading zone, like an
+		// editor's scroll-beyond-last-line.
 		if (sideRef.current) {
 			const col = scrollRef.current;
-			const next = col ? Math.round(col.clientHeight * 0.4) : 0;
+			const next = col ? Math.round(col.clientHeight * 0.2) : 0;
 			if (Math.abs(next - reserveRef.current) > 1) {
 				reserveRef.current = next;
 				onReserve(next);
