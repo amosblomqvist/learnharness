@@ -28,6 +28,7 @@ const { app, BrowserWindow, Menu, ipcMain, nativeTheme, session, shell, dialog }
 const { pickAttachmentPath } = require("./attachment-picker.cjs");
 const { createChatGPT, fileStore } = require("./chatgpt.cjs");
 const { attachChatGPTChild, trustedSender, chatGPTControl } = require("./chatgpt-ipc.cjs");
+const { normalizeAppearance, themeSourceFor, chromeColors, serverDataDir } = require("./appearance-chrome.cjs");
 const { createSubscriptions, loadSubscriptionSDK } = require("./subscriptions.cjs");
 const { attachSubscriptionChild, subscriptionControl } = require("./subscription-ipc.cjs");
 const { desktopAPIHeaders } = require("./desktop-api.cjs");
@@ -55,30 +56,21 @@ app.setName(PRODUCT_NAME);
 const AUTH_FILE = () => path.join(app.getPath("userData"), "auth.json");
 const DATA_DIR = () => path.join(app.getPath("userData"), "data");
 
-// NATIVE CHROME FOLLOWS THE MODE (light-mode wave, 2026-10-29): the window's
-// own background (resize lag, first paint) and the Windows/Linux control
-// overlay paint the rendered variant. Defaults mirror the app's palettes
-// (src/core/appearance-palette.ts MODE_DEFAULT_BACKGROUND).
-const WINDOW_CHROME = {
-	dark: { background: "#141414", symbol: "#e5e5e5" },
-	light: { background: "#f5f5f3", symbol: "#1a1a1a" },
-};
-const HEX = /^#[0-9a-f]{3}([0-9a-f]{3})?$/i;
+// NATIVE CHROME FOLLOWS THE MODE (light-mode wave, 2026-10-29) — the pure
+// half lives in ./appearance-chrome.cjs.
 
-/** The appearance slice the renderer reports (or settings.json holds),
- *  reduced to what the chrome needs. Anything unknown → the dark factory. */
-function normalizeAppearance(a) {
-	return {
-		mode: a?.mode === "light" || a?.mode === "system" ? a.mode : "dark",
-		background: typeof a?.background === "string" && HEX.test(a.background) ? a.background : null,
-	};
-}
-
-/** The appearance slice of the SAME settings file the server reads.
+/** The appearance slice of the SAME settings file the server reads (in
+ *  dev, the one `next dev` writes — not this shell's -dev userData).
  *  Absent/corrupt → dark, the factory default. */
 function readAppearance() {
+	const dir = serverDataDir({
+		devUrl: process.env.LH_DEV_URL,
+		env: process.env,
+		packagedDataDir: DATA_DIR(),
+		repoRoot: path.join(__dirname, ".."),
+	});
 	try {
-		return normalizeAppearance(JSON.parse(fs.readFileSync(path.join(DATA_DIR(), "settings.json"), "utf8"))?.appearance);
+		return normalizeAppearance(JSON.parse(fs.readFileSync(path.join(dir, "settings.json"), "utf8"))?.appearance);
 	} catch {
 		return normalizeAppearance(null);
 	}
@@ -86,16 +78,11 @@ function readAppearance() {
 let appearance = normalizeAppearance(null);
 
 /** Native colors for the rendered variant (nativeTheme resolves System). */
-function chromeColors() {
-	const mode = nativeTheme.shouldUseDarkColors ? "dark" : "light";
-	// The custom background is the dark variant's; light is always the paper.
-	const custom = mode === "dark" ? appearance.background : null;
-	return { color: custom ?? WINDOW_CHROME[mode].background, symbolColor: WINDOW_CHROME[mode].symbol };
-}
+const currentChromeColors = () => chromeColors(appearance, nativeTheme.shouldUseDarkColors);
 
 function applyChrome(win) {
 	if (win.isDestroyed()) return;
-	const colors = chromeColors();
+	const colors = currentChromeColors();
 	win.setBackgroundColor(colors.color);
 	if (process.platform !== "darwin") win.setTitleBarOverlay(colors);
 }
@@ -354,7 +341,7 @@ function createWindow(url) {
 				// height. Do not force the zoom-invariant native overlay to match
 				// the renderer's 60 CSS px bar: zooming out would cover its border.
 				// The renderer reserves the actual width via env(titlebar-area-*).
-				titleBarOverlay: chromeColors(),
+				titleBarOverlay: currentChromeColors(),
 				// Keep the custom bar alone; Alt reveals the native menu.
 				autoHideMenuBar: true,
 			}),
@@ -370,10 +357,10 @@ function createWindow(url) {
 		// has a frame at the new size, and the gap shows the window's NATIVE
 		// background — Electron's default is white, glaring on a dark app.
 		// The app's background for the rendered mode fills the lag instead
-		// (chromeColors). `show: false` + ready-to-show is the same treatment
+		// (currentChromeColors). `show: false` + ready-to-show is the same treatment
 		// for first paint: the window appears only once the page has
 		// actually rendered.
-		backgroundColor: chromeColors().color,
+		backgroundColor: currentChromeColors().color,
 		show: false,
 		// Narrow-window behavior (owner, 2026-09-17): 640px is the floor —
 		// below it even a wrapped chrome row gets cramped and the chat header
@@ -693,11 +680,12 @@ async function main() {
 
 	await app.whenReady();
 
-	// The mode before the first window: themeSource takes the settings'
-	// "dark" | "light" | "system" verbatim, and nativeTheme then resolves
-	// System for chromeColors. Under System an OS flip recolors every window.
+	// The mode before the first window. themeSource: Dark keeps "system"
+	// (as before light mode), Light pins "light" (themeSourceFor); nativeTheme
+	// resolves System for the chrome. Under System an OS flip recolors every
+	// window.
 	appearance = readAppearance();
-	nativeTheme.themeSource = appearance.mode;
+	nativeTheme.themeSource = themeSourceFor(appearance.mode);
 	nativeTheme.on("updated", () => {
 		for (const win of BrowserWindow.getAllWindows()) applyChrome(win);
 	});
@@ -804,9 +792,9 @@ async function main() {
 	// The renderer reports every appearance write (and the record on load):
 	// the chrome follows without a restart.
 	ipcMain.on("lh:appearance", (event, next) => {
-		if (!trustedAppWindows.has(BrowserWindow.fromWebContents(event.sender))) return;
+		if (!trustedAppWindows.has(BrowserWindow.fromWebContents(event.sender)) || !trustedSender(event, new URL(url).origin, BrowserWindow)) return;
 		appearance = normalizeAppearance(next);
-		nativeTheme.themeSource = appearance.mode;
+		nativeTheme.themeSource = themeSourceFor(appearance.mode);
 		for (const win of BrowserWindow.getAllWindows()) applyChrome(win);
 	});
 	reopenWindow = () => { chatgpt?.resume(); subscriptions?.resume(); return createWindow(url); };

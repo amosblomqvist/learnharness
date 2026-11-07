@@ -15,7 +15,7 @@ const mainRequire = createRequire(mainFile);
 /** Decline the single-instance lock so normal boot never spawns a server.
  * Then call the REAL createWindow with a stub Electron API and inspect its
  * constructor options. No rewritten copy of the production logic. */
-function windowOptions(platform: string, env: Record<string, string> = {}, osDark = true) {
+function windowOptions(platform: string, env: Record<string, string> = {}, osDark = true, appearance?: { mode: string; background: string | null }) {
 	class FakeWindow {
 		constructor(readonly options: unknown) {}
 		webContents = { on() {}, setWindowOpenHandler() {} };
@@ -34,6 +34,9 @@ function windowOptions(platform: string, env: Record<string, string> = {}, osDar
 		__dirname: dirname(mainFile),
 	};
 	runInNewContext(mainSource, context, { filename: mainFile });
+	// main() reads settings.json after whenReady, which this harness never
+	// reaches: set the shell's appearance the way that read would.
+	if (appearance) runInNewContext(`appearance = ${JSON.stringify(appearance)}`, context);
 	const win = runInNewContext('createWindow("http://127.0.0.1:9000")', context) as FakeWindow;
 	// The options originate in a VM realm; normalize prototypes for assertions.
 	return JSON.parse(JSON.stringify(win.options));
@@ -62,13 +65,16 @@ describe("desktop window chrome", () => {
 		});
 	}
 
-	it("the native chrome paints the rendered variant: dark by default, light under a light OS", () => {
-		const dark = windowOptions("win32");
-		assert.equal(dark.backgroundColor, "#141414");
-		const light = windowOptions("win32", {}, false);
+	it("the native chrome paints the rendered variant: Dark (the default) stays dark under a light OS", () => {
+		assert.equal(windowOptions("win32").backgroundColor, "#141414");
+		assert.equal(windowOptions("win32", {}, false).backgroundColor, "#141414");
+		const system = { mode: "system", background: null };
+		const light = windowOptions("win32", {}, false, system);
 		assert.deepEqual(light.titleBarOverlay, { color: "#f5f5f3", symbolColor: "#1a1a1a" });
 		assert.equal(light.backgroundColor, "#f5f5f3");
-		assert.equal(windowOptions("darwin", {}, false).backgroundColor, "#f5f5f3");
+		assert.equal(windowOptions("darwin", {}, false, system).backgroundColor, "#f5f5f3");
+		assert.equal(windowOptions("darwin", {}, true, { mode: "light", background: null }).backgroundColor, "#f5f5f3");
+		assert.equal(windowOptions("darwin", {}, true, { mode: "dark", background: "#202020" }).backgroundColor, "#202020");
 	});
 
 	it("only the external dev shell receives the web subscription transport marker", () => {
