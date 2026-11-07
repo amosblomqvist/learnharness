@@ -1,3 +1,5 @@
+import type { CallUsage } from "./contracts/chat.ts";
+
 export const noteBlockKinds = ["paragraph", "key idea", "definition", "theorem", "method", "example"] as const;
 export type NoteBlockKind = (typeof noteBlockKinds)[number];
 export interface NoteBlock {
@@ -25,6 +27,16 @@ export interface NoteEdition {
 	document: NoteDocument;
 }
 export type NoteMode = "live" | "final";
+export interface SessionNotesRecord {
+	liveEnabled: boolean;
+	live: NoteEdition | null;
+	final: NoteEdition | null;
+	pending?: NoteEdition;
+	topics: Record<string, string>;
+	error: Partial<Record<NoteMode, string>>;
+	failedLive?: string;
+	usage: { at: string; mode: NoteMode; model: string; step: CallUsage }[];
+}
 export interface NotesView {
 	liveEnabled: boolean;
 	live: NoteEdition | null;

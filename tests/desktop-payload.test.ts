@@ -27,8 +27,7 @@ function withPayload(test: (fixture: {
 		write(path.join(".next", "static", "runtime.js"));
 		write(path.join("public", "asset.txt"));
 		write(path.join(STANDALONE, PROMPT));
-		write(path.join("public", "session-notes.css"));
-		write(path.join(STANDALONE, "skills", "learnharness-notes", "SKILL.md"));
+		write(path.join(STANDALONE, "app", "session-notes.css"));
 		write(path.join(STANDALONE, "node_modules", "katex", "dist", "fonts", "KaTeX_Main-Regular.woff2"));
 		write(path.join(STANDALONE, "src", "agent", "prompts", "teacher", "20-teaching.md"));
 		test({ root, write, run: () => spawnSync(process.execPath, [path.join(root, "scripts", "build-server.mjs")], {

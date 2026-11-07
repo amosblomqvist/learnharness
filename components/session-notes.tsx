@@ -212,7 +212,7 @@ export function GraphNotesLinks({ nodeId }: { nodeId: string }) {
 	const [links, setLinks] = useState<NoteIndexEntry[]>([]);
 	const refresh = useCallback(
 		async (signal?: AbortSignal) => {
-			const r = await fetch("/api/notes/library?node=" + encodeURIComponent(nodeId), { signal, cache: "no-store" });
+			const r = await fetch(`/api/graph/nodes/${encodeURIComponent(nodeId)}/notes`, { signal, cache: "no-store" });
 			if (r.ok) {
 				const data = await r.json();
 				if (!signal?.aborted) setLinks(data);

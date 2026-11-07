@@ -28,6 +28,7 @@ import type {
 	NotesSource,
 } from "./contracts.ts";
 import type { UserSettings } from "./settings.ts";
+import type { NoteEdition, SessionNotesRecord } from "./session-notes.ts";
 
 // ─── ChatStore — the session record's home (data/chats) ─────────────────────
 
@@ -66,6 +67,15 @@ export interface ChatStore {
 	 *  job cleanup are the caller's choreography (core/graph-deletion.ts +
 	 *  the DELETE route), not the store's. */
 	deleteChat(id: string): boolean;
+}
+
+/** Session handouts are published with their PDF after generation finishes. */
+export interface SessionNotesStore {
+	read(chatId: string): SessionNotesRecord;
+	change(chatId: string, edit: (record: SessionNotesRecord) => void): void;
+	savePdf(chatId: string, edition: NoteEdition, bytes: Uint8Array): void;
+	pdf(chatId: string): Uint8Array | null;
+	delete(chatId: string): void;
 }
 
 // ─── GraphStore — the append-only evidence ledgers (data/graph) ──────────────

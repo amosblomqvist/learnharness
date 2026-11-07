@@ -14,7 +14,7 @@ function styles() {
 		const bytes = fs.readFileSync(path.join(path.dirname(file), font));
 		return `src:url(data:font/woff2;base64,${bytes.toString("base64")}) format("woff2")`;
 	});
-	printStyles = math + fs.readFileSync(path.join(PATHS.root, "public", "session-notes.css"), "utf8");
+	printStyles = math + fs.readFileSync(path.join(PATHS.root, "app", "session-notes.css"), "utf8");
 	return printStyles;
 }
 export function renderNotesPdf(document: NoteDocument): Promise<Uint8Array> {

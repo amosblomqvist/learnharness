@@ -2,21 +2,13 @@ import fs from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { PATHS } from "../../config.ts";
-import type { NoteEdition, NoteMode } from "../core/session-notes.ts";
+import type { SessionNotesRecord } from "../core/session-notes.ts";
+import type { SessionNotesStore } from "../core/ports.ts";
 import { writeFileAtomicSync } from "./atomic-write.ts";
-import type { CallUsage } from "../core/contracts/chat.ts";
 
-export interface StoredNotes {
+interface StoredNotes extends SessionNotesRecord {
 	version: 1;
-	liveEnabled: boolean;
-	live: NoteEdition | null;
-	final: NoteEdition | null;
 	pdfFile?: string;
-	pending?: NoteEdition;
-	topics: Record<string, string>;
-	error: Partial<Record<NoteMode, string>>;
-	failedLive?: string;
-	usage: { at: string; mode: NoteMode; model: string; step: CallUsage }[];
 }
 function folder(id: string) {
 	if (!/^[A-Za-z0-9_-]+$/.test(id)) throw new Error("Invalid session ID.");
@@ -44,10 +36,10 @@ function pdfPath(id: string, file: string) {
 	if (!/^[a-f0-9-]{36}\.pdf$/.test(file)) throw new Error("Invalid handout file.");
 	return path.join(folder(id), file);
 }
-export const notesStore = {
+export const notesStore: SessionNotesStore = {
 	read,
 	change,
-	savePdf(id: string, edition: NoteEdition, bytes: Uint8Array) {
+	savePdf(id, edition, bytes) {
 		const file = randomUUID() + ".pdf";
 		fs.mkdirSync(folder(id), { recursive: true });
 		fs.writeFileSync(pdfPath(id, file), bytes, { flag: "wx" });

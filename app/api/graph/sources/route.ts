@@ -1,10 +1,13 @@
-import { deleteSources, readOrganizationAction, sourceDirectory, SourceDeletionError, SourceOrganizationInputError } from "@/src/server";
+import { deleteSources, readOrganizationAction, readTagsLibrary, sourceDirectory, SourceDeletionError, SourceOrganizationInputError } from "@/src/server";
 import { emit } from "@/src/core";
 
 export const dynamic = "force-dynamic";
 
-export async function GET() {
-	try { return Response.json(sourceDirectory.read()); }
+export async function GET(request?: Request) {
+	try {
+		const includeNotes = request && new URL(request.url).searchParams.get("include") === "notes";
+		return Response.json(includeNotes ? readTagsLibrary() : sourceDirectory.read());
+	}
 	catch { return Response.json({ error: "Could not read source organization." }, { status: 500 }); }
 }
 

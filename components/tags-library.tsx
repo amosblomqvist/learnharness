@@ -54,7 +54,7 @@ export function TagsLibrary() {
 	const refresh = useCallback(async () => {
 		const token = ++version.current;
 		try {
-			const r = await fetch("/api/notes/library", { cache: "no-store" });
+			const r = await fetch("/api/graph/sources?include=notes", { cache: "no-store" });
 			if (!r.ok) throw new Error("Could not load the library.");
 			const data: Library = await r.json();
 			if (token !== version.current) return;

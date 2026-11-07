@@ -5,7 +5,7 @@ import { sumSteps } from "../core/prices.ts";
 import type { NoteEdition, NoteMode, NotePassage, NotesView } from "../core/session-notes.ts";
 import { resolveConversationSpec } from "../core/settings-resolution.ts";
 import type { ChatRecord } from "../core/contracts/chat.ts";
-import type { ChatStore } from "../core/ports.ts";
+import type { ChatStore, SessionNotesStore } from "../core/ports.ts";
 import { piEngineForSpec, type PiEngine } from "../agent/models.ts";
 import { connectionBackgroundAllowed } from "../agent/subscription-connections.ts";
 import { writeSessionNotes } from "../agent/subagents/notes-writer.ts";
@@ -46,7 +46,7 @@ function notesEngine(record: ChatRecord, mode: NoteMode): PiEngine {
 
 interface NotesDependencies {
 	chatStore: Pick<ChatStore, "getChat">;
-	notesStore: typeof stores.notesStore;
+	notesStore: SessionNotesStore;
 	engineFor: typeof notesEngine;
 	writeNotes: typeof writeSessionNotes;
 	printPdf: typeof renderNotesPdf;

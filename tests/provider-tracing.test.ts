@@ -41,8 +41,7 @@ describe("standalone JavaScript tracing exclusions and native workaround policy"
 	});
 	it("retains exactly the narrow native-Turbopack closure workaround and existing runtime includes", () => {
 		assert.deepEqual(nextConfig.outputFileTracingIncludes!["*"], [
-			"skills/learnharness-notes/SKILL.md",
-			"public/session-notes.css",
+			"app/session-notes.css",
 			"node_modules/katex/dist/katex.min.css",
 			"node_modules/katex/dist/fonts/*.woff2",
 			"node_modules/@puppeteer/browsers/lib/browser-data/**/*.js",

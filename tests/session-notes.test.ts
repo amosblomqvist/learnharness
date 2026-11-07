@@ -9,7 +9,7 @@ import { noteEvidence } from "../src/core/note-evidence.ts";
 import { noteDocumentHtml, noteTextHtml } from "../src/core/note-render.ts";
 import type { ChatRecord } from "../src/core/contracts/chat.ts";
 import type { LhMessage } from "../src/core/native-messages.ts";
-import type { NoteDocument, NoteMode } from "../src/core/session-notes.ts";
+import type { NoteDocument, NoteIndexEntry, NoteMode } from "../src/core/session-notes.ts";
 
 const root = fs.mkdtempSync(path.join(os.tmpdir(), "lh-session-notes-"));
 process.env.LH_DATA_DIR = root;
@@ -34,7 +34,7 @@ const atTopic = (id: string, topic: string, text: string) =>
 const result = (id: string, toolCallId: string, toolName: string, details: unknown) =>
 	({ id, role: "toolResult", toolCallId, toolName, details, isError: false }) as LhMessage;
 const sample: NoteDocument = JSON.parse(
-	fs.readFileSync(new URL("./fixtures/session-notes/diagonalization.json", import.meta.url), "utf8"),
+	fs.readFileSync(new URL("./fixtures/session-notes-diagonalization.json", import.meta.url), "utf8"),
 );
 
 it("closes a topic at the transition, includes revealed explanations, and never exports unposed answer keys or diagnostics", () => {
@@ -139,6 +139,8 @@ it("renders typeset math and escapes supplied markup in shared print and screen 
 
 it("resolves sections after later graph extraction and removes attachments and tag membership on session deletion", async () => {
 	const { stores, sourceDirectory, noteIndex, deleteChatSession } = await import("../src/server/index.ts");
+	const { GET: getSources } = await import("../app/api/graph/sources/route.ts");
+	const { GET: getNodeNotes } = await import("../app/api/graph/nodes/[id]/notes/route.ts");
 	const session = stores.chatStore.createChat("A previous teaching session");
 	const practice = stores.chatStore.createChat("Practice session", "practice");
 	const edition = { document: sample, fingerprint: "test", writtenAt: "now" };
@@ -157,7 +159,10 @@ it("resolves sections after later graph extraction and removes attachments and t
 		createdAt: "now",
 		provenance: [{ chatId: session.id, messageId: "m1" }],
 	});
-	const links = noteIndex("n_method");
+	const nodeNotes = await getNodeNotes(new Request("http://localhost/api/graph/nodes/n_method/notes"), {
+		params: Promise.resolve({ id: "n_method" }),
+	});
+	const links: NoteIndexEntry[] = await nodeNotes.json();
 	assert.deepEqual(
 		links.map(n => [n.chatId, n.sectionId]),
 		[
@@ -165,6 +170,12 @@ it("resolves sections after later graph extraction and removes attachments and t
 			[practice.id, "diagonalize"],
 		],
 	);
+	const sources = "http://localhost/api/graph/sources";
+	const directory = await (await getSources(new Request(sources))).json();
+	const library = await (await getSources(new Request(sources + "?include=notes"))).json();
+	assert.deepEqual(library.sources, directory.sources);
+	assert.equal(Object.hasOwn(directory, "notes"), false);
+	assert.deepEqual(new Set(library.notes.map((n: NoteIndexEntry) => n.chatId)), new Set([session.id, practice.id]));
 	const tag = sourceDirectory.change({ action: "create-tag", name: "Linear algebra", parentId: null }).createdTagId!;
 	sourceDirectory.change({ action: "tag-sources", sourceIds: [session.id, practice.id], add: [tag], remove: [] });
 	const outcome = await deleteChatSession(session.id, "preserve-graph");
@@ -304,7 +315,7 @@ it("keeps the published handout during regeneration, retries just the PDF, and d
 	api.changeSessionNotes(chat.id, { action: "retry-pdf" });
 	await idle();
 	assert.equal(api.sessionNotes(chat.id).outdated, false);
-	assert.equal(api.sessionNotesPdf(chat.id).toString(), "%PDF-fixture");
+	assert.equal(new TextDecoder().decode(api.sessionNotesPdf(chat.id)), "%PDF-fixture");
 	assert.deepEqual(modes, ["live", "final", "live", "final"]);
 	pausePrint = true;
 	api.changeSessionNotes(chat.id, { action: "generate" });
