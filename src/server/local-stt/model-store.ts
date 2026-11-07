@@ -228,25 +228,25 @@ export function createModelStore(options: ModelStoreOptions): ModelStore {
 		return status(id);
 	}
 
-	async function cancel(id: string): Promise<LocalModelStatus> {
-		modelFor(id);
+	/** Stop a running download, wait for it to settle, and forget its failure. */
+	async function stopDownload(id: string): Promise<void> {
 		const run = active.get(id);
 		if (run) {
 			run.controller.abort();
 			await run.done;
 		}
 		failures.delete(id);
+	}
+
+	async function cancel(id: string): Promise<LocalModelStatus> {
+		modelFor(id);
+		await stopDownload(id);
 		return status(id);
 	}
 
 	async function remove(id: string): Promise<LocalModelStatus> {
 		const model = modelFor(id);
-		const run = active.get(id);
-		if (run) {
-			run.controller.abort();
-			await run.done;
-		}
-		failures.delete(id);
+		await stopDownload(id);
 		await rm(path.join(dir, finalName(model)), { force: true });
 		await rm(path.join(dir, partialName(model)), { force: true });
 		return status(id);
