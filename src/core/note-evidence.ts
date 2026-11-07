@@ -79,7 +79,7 @@ function practiceEvidence(messages: readonly LhMessage[], failed: ReadonlySet<st
 	return { all: completed, closed: completed };
 }
 
-/** Live consumes closed spans. Final also sees the current, partially taught topic. */
+/** Automatic updates use closed spans as triggers. Handouts and manual live refreshes also see the current topic. */
 export function noteEvidence(
 	messages: readonly LhMessage[],
 	kind: ChatKind = "teach",

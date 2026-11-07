@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { BookOpenIcon, DownloadIcon, Maximize2Icon, Minimize2Icon, XIcon } from "lucide-react";
+import { BookOpenIcon, DownloadIcon, Maximize2Icon, Minimize2Icon, RefreshCwIcon, XIcon } from "lucide-react";
 import {
 	emptyNotesView,
 	noteDocumentHtml,
@@ -15,10 +15,15 @@ import { useServerEvent, useServerResync } from "./server-events";
 
 const control =
 	"inline-flex items-center justify-center gap-1.5 rounded-md border px-2.5 py-1.5 text-xs hover:bg-accent disabled:opacity-45";
+const actionRow = "flex flex-wrap items-center justify-between gap-x-4 gap-y-1 text-xs";
+const textControl =
+	"inline-flex shrink-0 cursor-pointer items-center gap-1.5 rounded-sm py-1 text-xs underline-offset-2 hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring disabled:cursor-not-allowed disabled:opacity-45 disabled:no-underline";
+const secondaryControl = textControl + " ml-auto text-muted-foreground hover:text-foreground";
 export function useSessionNotes(chatId: string) {
 	const [view, setView] = useState<NotesView>(emptyNotesView);
 	const [error, setError] = useState(""),
 		[sending, setSending] = useState(false);
+	const [actionErrors, setActionErrors] = useState<Partial<Record<NoteMode, string>>>({});
 	const sequence = useRef(0);
 	const url = `/api/chats/${encodeURIComponent(chatId)}/notes`;
 	const refresh = useCallback(async () => {
@@ -49,9 +54,11 @@ export function useSessionNotes(chatId: string) {
 	useServerEvent("turn-settled", e => {
 		if (e.chatId === chatId) void refresh();
 	});
-	async function action(input: { action: "generate" | "retry-pdf" } | { action: "set-live"; enabled: boolean }) {
+	async function action(input: { action: "generate" | "retry-pdf" | "update-live" } | { action: "set-live"; enabled: boolean }) {
+		const mode = input.action === "set-live" || input.action === "update-live" ? "live" : "final";
 		setSending(true);
 		setError("");
+		setActionErrors(previous => ({ ...previous, [mode]: undefined }));
 		try {
 			const r = await fetch(url, {
 				method: "POST",
@@ -61,12 +68,12 @@ export function useSessionNotes(chatId: string) {
 			if (!r.ok) throw new Error((await r.json()).error);
 			await refresh();
 		} catch (e) {
-			setError((e as Error).message);
+			setActionErrors(previous => ({ ...previous, [mode]: (e as Error).message }));
 		} finally {
 			setSending(false);
 		}
 	}
-	return { view, error, sending, action };
+	return { view, error, actionErrors, sending, action };
 }
 export interface NoteLocation {
 	mode: NoteMode;
@@ -89,6 +96,9 @@ export function NotesPanel({
 	const [expanded, setExpanded] = useState(false);
 	const article = useRef<HTMLDivElement>(null);
 	const edition = view[location.mode];
+	const running = view.running.includes(location.mode);
+	const error = notes.error || notes.actionErrors[location.mode] || (!running && view.error[location.mode]);
+	const usage = view.usage.find(u => u.mode === location.mode);
 	const html = useMemo(() => (edition ? noteDocumentHtml(edition.document) : ""), [edition]);
 	useEffect(() => {
 		const target = location.sectionId && article.current?.ownerDocument.getElementById("notes-" + location.sectionId);
@@ -128,45 +138,65 @@ export function NotesPanel({
 				>
 					Live notes
 				</button>
-				<label className="ml-auto flex items-center gap-1.5 text-xs">
-					<input
-						type="checkbox"
-						checked={view.liveEnabled}
-						disabled={notes.sending}
-						onChange={e => {
-							void notes.action({ action: "set-live", enabled: e.target.checked });
-							if (e.target.checked) navigate({ mode: "live" });
-						}}
-					/>
-					Live updates
-				</label>
 			</div>
-			<div className="flex flex-wrap items-center gap-2 px-3 pt-3">
-				<button
-					className={control}
-					disabled={notes.sending || view.running.includes("final") || !view.eligible}
-					onClick={() => {
-						navigate({ mode: "final" });
-						void notes.action({ action: "generate" });
-					}}
-				>
-					{view.final ? "Regenerate notes" : "Generate notes"}
-				</button>
-				{view.final && (
-					<a className={control} href={`/api/chats/${encodeURIComponent(chatId)}/notes/pdf`} download>
-						<DownloadIcon size={13} />
-						Download PDF
-					</a>
-				)}
-				{view.pdfPending && !view.running.includes("final") && (
-					<button className={control} onClick={() => void notes.action({ action: "retry-pdf" })}>
-						Retry PDF
-					</button>
-				)}
-			</div>
-			{view.running.length > 0 && (
+			{location.mode === "final" ? (
+				<div className="space-y-2 px-3 pt-3">
+					<div className={actionRow}>
+						<div className="flex flex-wrap items-center gap-x-4 gap-y-1">
+							<button
+								type="button"
+								className={textControl + " text-foreground"}
+								disabled={notes.sending || running || !view.eligible}
+								onClick={() => void notes.action({ action: "generate" })}
+							>
+								{view.final ? "Regenerate handout" : "Generate handout"}
+							</button>
+							{view.pdfPending && !running && (
+								<button type="button" className={textControl + " text-foreground"} disabled={notes.sending} onClick={() => void notes.action({ action: "retry-pdf" })}>
+									Retry handout PDF
+								</button>
+							)}
+						</div>
+						{view.final && (
+							<a className={secondaryControl} href={`/api/chats/${encodeURIComponent(chatId)}/notes/pdf`} download>
+								<DownloadIcon size={13} aria-hidden="true" />
+								Download handout PDF
+							</a>
+						)}
+					</div>
+					<p className="text-xs text-muted-foreground">A printable snapshot of the session.</p>
+				</div>
+			) : (
+				<div className="space-y-2 px-3 pt-3">
+					<div className={actionRow}>
+						<div className="flex items-center gap-2">
+							<span className="text-muted-foreground">{view.liveEnabled ? "Active" : "Paused"}</span>
+							<span aria-hidden="true" className="text-muted-foreground">·</span>
+							<button
+								type="button"
+								className={textControl + " text-foreground"}
+								disabled={notes.sending}
+								onClick={() => void notes.action({ action: "set-live", enabled: !view.liveEnabled })}
+							>
+								{view.liveEnabled ? "Pause live notes" : "Resume live notes"}
+							</button>
+						</div>
+						<button
+							type="button"
+							className={secondaryControl}
+							disabled={notes.sending || running || !view.eligible}
+							onClick={() => void notes.action({ action: "update-live" })}
+						>
+							<RefreshCwIcon size={13} aria-hidden="true" />
+							Update now
+						</button>
+					</div>
+					<p className="text-xs text-muted-foreground">Update now includes everything taught so far, even while paused.</p>
+				</div>
+			)}
+			{running && (
 				<p role="status" className="px-3 pt-2 text-xs text-muted-foreground">
-					{view.running.includes("final") ? "Composing handout…" : "Updating live notes…"}
+					{location.mode === "final" ? "Composing handout…" : "Updating live notes…"}
 				</p>
 			)}
 			{view.outdated && location.mode === "final" && (
@@ -174,9 +204,9 @@ export function NotesPanel({
 					The session has new material. Regenerate to include it.
 				</p>
 			)}
-			{(notes.error || view.error[location.mode]) && (
+			{error && (
 				<p role="alert" className="px-3 pt-2 text-sm text-destructive">
-					{notes.error || view.error[location.mode]}
+					{error}
 				</p>
 			)}
 			<div className="min-h-0 flex-1 overflow-auto" ref={article}>
@@ -184,25 +214,21 @@ export function NotesPanel({
 					<div dangerouslySetInnerHTML={{ __html: html }} />
 				) : (
 					<p className="p-5 text-sm text-muted-foreground">
-						{location.mode === "final"
-							? view.eligible
+						{!view.eligible
+							? "Notes become available after teaching or a completed practice problem."
+							: location.mode === "final"
 								? "Generate a handout from the material covered so far."
-								: "Notes become available after teaching or a completed practice problem."
-							: view.liveEnabled
-								? "The first summary appears when the lesson changes topic or a practice problem finishes."
-								: "Turn on live updates to collect topic summaries as you study."}
+								: "No live notes yet."}
 					</p>
 				)}
 			</div>
-			{view.usage.length > 0 && (
+			{usage && (
 				<details className="border-t px-3 py-2 text-xs text-muted-foreground">
-					<summary className="cursor-pointer">Notes generation usage</summary>
-					{view.usage.map(u => (
-						<p key={u.mode} className="mt-1">
-							{u.mode === "final" ? "Handouts" : "Live updates"} · {u.calls} model {u.calls === 1 ? "call" : "calls"}
-							{u.tokens !== undefined && ` · ${u.tokens.toLocaleString()} tokens`}
-						</p>
-					))}
+					<summary className="cursor-pointer">{location.mode === "final" ? "Handout generation usage" : "Live notes usage"}</summary>
+					<p className="mt-1">
+						{usage.calls} model {usage.calls === 1 ? "call" : "calls"}
+						{usage.tokens !== undefined && ` · ${usage.tokens.toLocaleString()} tokens`}
+					</p>
 				</details>
 			)}
 		</aside>

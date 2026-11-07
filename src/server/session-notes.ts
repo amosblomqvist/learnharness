@@ -16,7 +16,8 @@ import { renderNotesPdf } from "./notes-pdf.ts";
 
 interface Work extends NotesRun {
 	abort: AbortController;
-	again: boolean;
+	again: false | "automatic" | "manual";
+	manual: boolean;
 	fingerprint: string;
 }
 const host = globalThis as typeof globalThis & { __lhNoteWork?: Map<string, Work> };
@@ -25,6 +26,14 @@ const modes: NoteMode[] = ["live", "final"];
 const poke = (chatId: string) => emit("notes-changed", { chatId });
 const hash = (value: unknown) => createHash("sha256").update(JSON.stringify(value)).digest("hex");
 const fingerprint = (title: string, passages: NotePassage[]) => hash([title, passages]);
+function fingerprintTopics(passages: NotePassage[]) {
+	const topics = new Map<string, NotePassage[]>();
+	for (const passage of passages) {
+		if (!topics.has(passage.topic)) topics.set(passage.topic, []);
+		topics.get(passage.topic)!.push(passage);
+	}
+	return Object.fromEntries([...topics].map(([topic, parts]) => [topic, hash(parts)]));
+}
 export class NotesRequestError extends Error {
 	constructor(
 		message: string,
@@ -33,7 +42,7 @@ export class NotesRequestError extends Error {
 		super(message);
 	}
 }
-export type NotesAction = { action: "generate" | "retry-pdf" } | { action: "set-live"; enabled: boolean };
+export type NotesAction = { action: "generate" | "retry-pdf" | "update-live" } | { action: "set-live"; enabled: boolean };
 
 function notesEngine(record: ChatRecord, mode: NoteMode): PiEngine {
 	const settings = effectiveSettings();
@@ -99,9 +108,15 @@ export function createSessionNotesService(deps: NotesDependencies, work = new Ma
 				delete s.error.live;
 			});
 			if (enabled) scheduleNotes(id, "live");
-			else work.get("live" + id)?.abort.abort();
+			else {
+				const active = work.get("live" + id);
+				// Pausing automatic work does not cancel an explicitly requested one-time refresh.
+				if (active && !active.manual) active.abort.abort();
+			}
+		} else if (req?.action === "update-live") {
+			scheduleNotes(id, "live", { manual: true });
 		} else if (req?.action === "generate" || req?.action === "retry-pdf") {
-			scheduleNotes(id, "final", req.action === "retry-pdf");
+			scheduleNotes(id, "final", { retryPdf: req.action === "retry-pdf" });
 		} else throw new NotesRequestError("Unknown session notes action.");
 		poke(id);
 		return sessionNotes(id);
@@ -153,30 +168,28 @@ export function createSessionNotesService(deps: NotesDependencies, work = new Ma
 		}
 	}
 
-	function scheduleNotes(id: string, mode: NoteMode, retryPdf = false) {
+	function scheduleNotes(id: string, mode: NoteMode, { retryPdf = false, manual = false } = {}) {
 		const key = mode + id;
 		const active = work.get(key);
 		if (active) {
-			if (mode === "live") active.again = true;
+			if (mode === "live") {
+				if (manual && !active.manual) active.again = "manual";
+				else if (!manual && active.again !== "manual") active.again = "automatic";
+			}
 			return;
 		}
 		const record = chat(id),
 			state = deps.notesStore.read(id);
 		const evidence = noteEvidence(record.messages, record.kind);
-		const passages = mode === "live" ? evidence.closed : evidence.all;
+		const passages = mode === "live" && !manual ? evidence.closed : evidence.all;
 		if (!passages.length && !retryPdf) {
-			if (mode === "live") return;
+			if (mode === "live" && !manual) return;
 			throw new NotesRequestError("There is no taught material to summarize yet.", 409);
 		}
 		const revision = fingerprint(record.title, passages);
-		const topics = new Map<string, NotePassage[]>();
-		for (const passage of passages) {
-			if (!topics.has(passage.topic)) topics.set(passage.topic, []);
-			topics.get(passage.topic)!.push(passage);
-		}
-		const topicHashes = Object.fromEntries([...topics].map(([topic, parts]) => [topic, hash(parts)]));
-		const changed = new Set([...topics.keys()].filter(topic => topicHashes[topic] !== state.topics[topic]));
-		if (mode === "live" && (!state.liveEnabled || !changed.size || state.failedLive === revision)) return;
+		const topicHashes = fingerprintTopics(passages);
+		const changed = new Set(Object.keys(topicHashes).filter(topic => manual || topicHashes[topic] !== state.topics[topic]));
+		if (mode === "live" && !manual && (!state.liveEnabled || !changed.size || state.failedLive === revision)) return;
 		const pending =
 			mode === "final" && (retryPdf || state.pending?.fingerprint === revision) ? state.pending : undefined;
 		if (retryPdf && !pending) throw new NotesRequestError("There is no PDF awaiting a retry.", 409);
@@ -189,7 +202,9 @@ export function createSessionNotesService(deps: NotesDependencies, work = new Ma
 			activity: mode === "live" ? "Updating live notes" : "Composing handout",
 			abort: new AbortController(),
 			again: false,
-			fingerprint: revision,
+			manual,
+			// Stopping or failing a manual refresh must also suppress automatic retries of its closed topics.
+			fingerprint: mode === "live" && manual ? fingerprint(record.title, evidence.closed) : revision,
 		};
 		work.set(key, task);
 		const signal = task.abort.signal;
@@ -208,7 +223,8 @@ export function createSessionNotesService(deps: NotesDependencies, work = new Ma
 					signal,
 					engine,
 					promptSwitches: effectiveSettings().agent.prompts,
-					passages: mode === "live" ? passages.filter(p => changed.has(p.topic)) : passages,
+					// A boundary triggers automatic work, but its topic may also have newer material from a manual refresh.
+					passages: mode === "live" ? evidence.all.filter(p => changed.has(p.topic)) : passages,
 					onUsage: (u, model) => {
 						if (!signal.aborted && deps.chatStore.getChat(id)) {
 							task.usage = accumulateJobUsage(task.usage, model, piUsageToStep(u));
@@ -235,10 +251,10 @@ export function createSessionNotesService(deps: NotesDependencies, work = new Ma
 				chat(id);
 				edition = { document, fingerprint: revision, writtenAt: new Date().toISOString() };
 				if (mode === "live") {
-					const topicOf = new Map(passages.map(p => [p.messageId, p.topic]));
-					const kept =
+					const topicOf = new Map(evidence.all.map(p => [p.messageId, p.topic]));
+					const kept = manual ? [] :
 						state.live?.document.sections.filter(s => !changed.has(topicOf.get(s.sourceIds[0]!) ?? "")) ?? [];
-					const order = new Map([...topics.keys()].map((topic, i) => [topic, i]));
+					const order = new Map([...new Set(evidence.all.map(p => p.topic))].map((topic, i) => [topic, i]));
 					document.sections = [...kept, ...document.sections].sort(
 						(a, b) =>
 							(order.get(topicOf.get(a.sourceIds[0]!)!) ?? 0) - (order.get(topicOf.get(b.sourceIds[0]!)!) ?? 0),
@@ -247,7 +263,8 @@ export function createSessionNotesService(deps: NotesDependencies, work = new Ma
 					document.overview = "";
 					deps.notesStore.change(id, s => {
 						s.live = edition;
-						s.topics = topicHashes;
+						// Remember automatic boundaries separately from a manual refresh's current-topic content.
+						s.topics = manual ? fingerprintTopics(evidence.closed) : topicHashes;
 						delete s.error.live;
 						delete s.failedLive;
 					});
@@ -270,13 +287,16 @@ export function createSessionNotesService(deps: NotesDependencies, work = new Ma
 				if (signal.aborted || !deps.chatStore.getChat(id)) return;
 				deps.notesStore.change(id, s => {
 					s.error[mode] = error instanceof Error ? error.message : "Could not generate notes.";
-					if (mode === "live") s.failedLive = revision;
+					if (mode === "live") s.failedLive = task.fingerprint;
 				});
 			})
 			.finally(() => {
 				work.delete(key);
 				poke(id);
-				if (task.again && deps.chatStore.getChat(id)) updateLiveNotes(id);
+				if (task.again && deps.chatStore.getChat(id)) {
+					if (task.again === "manual") scheduleNotes(id, "live", { manual: true });
+					else updateLiveNotes(id);
+				}
 			})
 			.catch(error => console.error("Could not save notes status", error));
 	}

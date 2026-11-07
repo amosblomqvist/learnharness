@@ -9,7 +9,7 @@ import { noteEvidence } from "../src/core/note-evidence.ts";
 import { noteDocumentHtml, noteTextHtml } from "../src/core/note-render.ts";
 import type { ChatRecord } from "../src/core/contracts/chat.ts";
 import type { LhMessage } from "../src/core/native-messages.ts";
-import { noteSectionHeading, type NoteDocument, type NoteIndexEntry, type NoteMode } from "../src/core/session-notes.ts";
+import { noteSectionHeading, type NoteDocument, type NoteIndexEntry, type NoteMode, type NotePassage } from "../src/core/session-notes.ts";
 
 const root = fs.mkdtempSync(path.join(os.tmpdir(), "lh-session-notes-"));
 process.env.LH_DATA_DIR = root;
@@ -36,6 +36,19 @@ const result = (id: string, toolCallId: string, toolName: string, details: unkno
 const sample: NoteDocument = JSON.parse(
 	fs.readFileSync(new URL("./fixtures/session-notes-diagonalization.json", import.meta.url), "utf8"),
 );
+function passageNotes(passages: NotePassage[]): NoteDocument {
+	return {
+		...sample,
+		sections: passages.map(p => ({
+			id: p.messageId, heading: p.topic, nodeIds: [p.topic], sourceIds: [p.messageId],
+			blocks: [{ kind: "paragraph", text: p.text }],
+		})),
+	};
+}
+async function notesIdle(api: ReturnType<typeof createSessionNotesService>, id: string) {
+	for (let i = 0; i < 100 && api.sessionNotes(id).running.length; i++) await delay(2);
+	assert.deepEqual(api.sessionNotes(id).running, []);
+}
 
 it("closes a topic at the transition, includes revealed explanations, and never exports unposed answer keys or diagnostics", () => {
 	const messages = [
@@ -436,6 +449,193 @@ it("keeps the published handout during regeneration, retries just the PDF, and d
 	hold();
 	await delay(5);
 	assert.equal(fs.existsSync(path.join(root, "notes", chat.id)), false);
+});
+
+it("manually refreshes the current topic while paused, retries unchanged material, and leaves the handout and PDF intact", async () => {
+	const chat: ChatRecord = {
+		id: "manual_live", title: "Current topic", createdAt: "now", updatedAt: "now",
+		messages: [atTopic("a", "A", "First explanation"), atTopic("a2", "A", "Current explanation")],
+	};
+	const published = { document: sample, fingerprint: "saved", writtenAt: "before" };
+	notesStore.savePdf(chat.id, published, Buffer.from("%PDF-saved"));
+	const faux = createFauxCore({});
+	let calls = 0, fail = false;
+	const api = createSessionNotesService({
+		chatStore: { getChat: () => chat }, notesStore,
+		engineFor: () => ({ model: faux.getModel(), streamFn: faux.streamSimple }),
+		writeNotes: async opts => {
+			calls++;
+			assert.equal(opts.mode, "live");
+			assert.deepEqual(opts.passages.map(p => p.messageId), ["a", "a2"]);
+			if (fail) throw new Error("Live writer failed");
+			return passageNotes(opts.passages);
+		},
+		printPdf: async () => { throw new Error("A live refresh must not print a PDF"); },
+	});
+	assert.deepEqual(api.sessionNotes(chat.id, true).running, []);
+	assert.equal(calls, 0);
+	api.changeSessionNotes(chat.id, { action: "update-live" });
+	await notesIdle(api, chat.id);
+	const firstLive = api.sessionNotes(chat.id).live;
+	assert.deepEqual(firstLive?.document.sections.map(s => s.sourceIds[0]), ["a", "a2"]);
+	assert.equal(api.sessionNotes(chat.id).liveEnabled, false);
+	api.changeSessionNotes(chat.id, { action: "update-live" });
+	await notesIdle(api, chat.id);
+	assert.equal(calls, 2, "Update now forces a refresh even when the lesson has not changed");
+	fail = true;
+	api.changeSessionNotes(chat.id, { action: "update-live" });
+	await notesIdle(api, chat.id);
+	assert.equal(api.sessionNotes(chat.id).error.live, "Live writer failed");
+	assert.deepEqual(api.sessionNotes(chat.id).live?.document, firstLive?.document);
+	fail = false;
+	api.changeSessionNotes(chat.id, { action: "update-live" });
+	await notesIdle(api, chat.id);
+	assert.equal(calls, 4, "a failed revision can be retried explicitly");
+	assert.equal(api.sessionNotes(chat.id).error.live, undefined);
+	assert.equal(api.sessionNotes(chat.id, true).liveEnabled, false);
+	api.updateLiveNotes(chat.id);
+	await notesIdle(api, chat.id);
+	assert.equal(calls, 4);
+	assert.deepEqual(api.sessionNotes(chat.id).final, published);
+	assert.equal(new TextDecoder().decode(await api.sessionNotesPdf(chat.id)), "%PDF-saved");
+});
+
+it("resumes automatic summaries without dropping current-topic material captured by Update now", async () => {
+	const chat: ChatRecord = {
+		id: "manual_then_auto", title: "Revisiting topics", createdAt: "now", updatedAt: "now",
+		messages: [atTopic("a", "A", "First"), atTopic("b", "B", "Second"), atTopic("a2", "A", "Revisited A")],
+	};
+	const faux = createFauxCore({});
+	let calls = 0;
+	const api = createSessionNotesService({
+		chatStore: { getChat: () => chat }, notesStore,
+		engineFor: () => ({ model: faux.getModel(), streamFn: faux.streamSimple }),
+		writeNotes: async opts => { calls++; return passageNotes(opts.passages); },
+		printPdf: async () => { throw new Error("No PDF for live notes"); },
+	});
+	api.changeSessionNotes(chat.id, { action: "update-live" });
+	await notesIdle(api, chat.id);
+	api.changeSessionNotes(chat.id, { action: "set-live", enabled: true });
+	api.sessionNotes(chat.id, true);
+	await notesIdle(api, chat.id);
+	assert.equal(calls, 1, "resuming does not replace the manual refresh with an older closed-topic summary");
+	chat.messages.push(result("late", "a-q", "quiz", { explanation: "A delayed explanation from the earlier visit" }));
+	api.updateLiveNotes(chat.id);
+	await notesIdle(api, chat.id);
+	assert.equal(calls, 2);
+	assert.deepEqual(api.sessionNotes(chat.id).live?.document.sections.map(s => s.sourceIds[0]), ["a", "a2", "late", "b"]);
+	chat.messages.push(atTopic("c", "C", "Third topic"));
+	api.updateLiveNotes(chat.id);
+	await notesIdle(api, chat.id);
+	assert.equal(calls, 3);
+	assert.deepEqual(api.sessionNotes(chat.id).live?.document.sections.map(s => s.sourceIds[0]), ["a", "a2", "late", "b"]);
+});
+
+it("retains a requested manual refresh across an automatic run and pause, without duplicating it", async () => {
+	const chat: ChatRecord = {
+		id: "queued_manual", title: "Concurrent notes", createdAt: "now", updatedAt: "now",
+		messages: [atTopic("a", "A", "First"), atTopic("b", "B", "Second")],
+	};
+	const faux = createFauxCore({});
+	const releases: (() => void)[] = [];
+	const api = createSessionNotesService({
+		chatStore: { getChat: () => chat }, notesStore,
+		engineFor: () => ({ model: faux.getModel(), streamFn: faux.streamSimple }),
+		writeNotes: async opts => {
+			await new Promise<void>(resolve => releases.push(resolve));
+			opts.signal.throwIfAborted();
+			return passageNotes(opts.passages);
+		},
+		printPdf: async () => { throw new Error("No PDF for live notes"); },
+	});
+	api.changeSessionNotes(chat.id, { action: "set-live", enabled: true });
+	await delay(5);
+	assert.equal(releases.length, 1);
+	api.changeSessionNotes(chat.id, { action: "update-live" });
+	api.changeSessionNotes(chat.id, { action: "update-live" });
+	api.changeSessionNotes(chat.id, { action: "set-live", enabled: false });
+	chat.messages.push(atTopic("b2", "B", "More current material"));
+	releases[0]!();
+	await delay(5);
+	assert.equal(releases.length, 2);
+	api.changeSessionNotes(chat.id, { action: "update-live" });
+	api.changeSessionNotes(chat.id, { action: "set-live", enabled: false });
+	releases[1]!();
+	await notesIdle(api, chat.id);
+	assert.equal(releases.length, 2, "concurrent requests share the same manual refresh");
+	assert.equal(api.sessionNotes(chat.id).liveEnabled, false);
+	assert.deepEqual(api.sessionNotes(chat.id).live?.document.sections.map(s => s.sourceIds[0]), ["a", "b", "b2"]);
+});
+
+it("does not immediately restart automatic work after a manual refresh is stopped or fails", async () => {
+	const chat: ChatRecord = {
+		id: "stopped_manual", title: "Stop live work", createdAt: "now", updatedAt: "now",
+		messages: [atTopic("a", "A", "First"), atTopic("b", "B", "Second")],
+	};
+	notesStore.change(chat.id, state => { state.liveEnabled = true; });
+	const faux = createFauxCore({});
+	let release: (() => void) | undefined, calls = 0;
+	const api = createSessionNotesService({
+		chatStore: { getChat: () => chat }, notesStore,
+		engineFor: () => ({ model: faux.getModel(), streamFn: faux.streamSimple }),
+		writeNotes: async opts => {
+			calls++;
+			if (calls === 1) await new Promise<void>(resolve => { release = resolve; });
+			opts.signal.throwIfAborted();
+			if (calls === 2) throw new Error("Writer failed");
+			return passageNotes(opts.passages);
+		},
+		printPdf: async () => { throw new Error("No PDF for live notes"); },
+	});
+	api.changeSessionNotes(chat.id, { action: "update-live" });
+	await delay(5);
+	assert.ok(release);
+	assert.deepEqual(api.abortSessionNotes("live" + chat.id), { ok: true });
+	release();
+	await notesIdle(api, chat.id);
+	assert.deepEqual(api.sessionNotes(chat.id, true).running, []);
+	api.updateLiveNotes(chat.id);
+	assert.equal(calls, 1);
+	api.changeSessionNotes(chat.id, { action: "update-live" });
+	await notesIdle(api, chat.id);
+	assert.equal(api.sessionNotes(chat.id, true).error.live, "Writer failed");
+	assert.deepEqual(api.sessionNotes(chat.id, true).running, []);
+	api.updateLiveNotes(chat.id);
+	assert.equal(calls, 2);
+	api.changeSessionNotes(chat.id, { action: "update-live" });
+	await notesIdle(api, chat.id);
+	assert.equal(calls, 3, "Update now can explicitly retry both stopped and failed work");
+	assert.ok(api.sessionNotes(chat.id).live);
+});
+
+it("refuses a manual practice refresh until a problem is completed and excludes the next unsolved problem", async () => {
+	const chat: ChatRecord = {
+		id: "manual_practice", kind: "practice", title: "Practice", createdAt: "now", updatedAt: "now",
+		messages: [
+			said("p", "", { id: "p1", name: "problem", arguments: { statement: "Solve this", modelSolution: "Completed solution" } }),
+			result("pr", "p1", "problem", {}),
+		],
+	};
+	const faux = createFauxCore({});
+	let written: NotePassage[] = [];
+	const api = createSessionNotesService({
+		chatStore: { getChat: () => chat }, notesStore,
+		engineFor: () => ({ model: faux.getModel(), streamFn: faux.streamSimple }),
+		writeNotes: async opts => { written = opts.passages; return passageNotes(opts.passages); },
+		printPdf: async () => { throw new Error("No PDF for live notes"); },
+	});
+	assert.throws(() => api.changeSessionNotes(chat.id, { action: "update-live" }), { status: 409 });
+	assert.deepEqual(written, []);
+	chat.messages.push(
+		said("end", "Solved", { id: "end1", name: "conclude", arguments: { outcome: "solved" } }),
+		result("ended", "end1", "conclude", {}),
+		said("next", "", { id: "p2", name: "problem", arguments: { statement: "Next problem", modelSolution: "Unrevealed solution" } }),
+		result("next-result", "p2", "problem", {}),
+	);
+	api.changeSessionNotes(chat.id, { action: "update-live" });
+	await notesIdle(api, chat.id);
+	assert.match(JSON.stringify(written), /Completed solution/);
+	assert.doesNotMatch(JSON.stringify(written), /Next problem|Unrevealed solution/);
 });
 
 it("publishes live and final writers in the activity feed and stops each through the dock endpoint", async () => {

@@ -54,9 +54,9 @@ The graph stores propositions and reasoning chains with source provenance, **not
 
 ## Review a lesson and organize a course
 
-Open **Notes** in a session to read beside the conversation. Use **Generate notes** inside the panel after a lesson has covered material or a practice problem has concluded. The Strong model composes a printable handout from the saved lesson. Download its PDF or regenerate it after studying further. [Sample handout on diagonalizing a matrix (PDF)](assets/session-notes-sample.pdf)
+Open **Notes** in a session to read beside the conversation. In **Handout**, use **Generate handout** after a lesson has covered material or a practice problem has concluded. The Strong model composes a printable snapshot of the saved lesson. Use **Download handout PDF** to save it or **Regenerate handout** to include new material. [Sample handout on diagonalizing a matrix (PDF)](assets/session-notes-sample.pdf)
 
-Turn on **Live updates** to have a separate writer summarize earlier topics and add to the draft as the lesson changes plan steps. It uses the session’s teaching model. Finished handouts and live drafts belong to their session and are removed when the session is deleted.
+In **Live notes**, **Resume live notes** starts automatic summaries as topics or practice problems finish; **Pause live notes** pauses those updates. **Update now** refreshes the live notes from everything taught so far, including the current teaching topic, and works while paused without resuming automatic updates. Practice notes only include completed problems. Opening the tab does not start or pause generation, and live actions do not change the handout or its PDF. Live notes use the session’s teaching model. Finished handouts and live drafts belong to their session and are removed when the session is deleted.
 
 Open **Tags** in the sidebar to organize sessions and imported files into courses or subjects. Tags can have a color, a symbol, or just a name. Select several items to tag them together, or use **Tags** in a session or **Edit tags** in its sidebar menu. Searching a tag or folder also finds passages inside generated notes. When importing files, set tags for the batch and use **Edit** beside any file to adjust its tags before importing.
 
