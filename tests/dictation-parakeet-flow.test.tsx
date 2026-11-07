@@ -236,6 +236,33 @@ test("Esc discards the audio and aborts an in-flight transcription", async () =>
 	assert.deepEqual(f.state.appends, []);
 });
 
+test("a 4xx shows the server's reason, a 409 the missing-model line, and both keep the audio for Retry", async () => {
+	const f = await fixture("parakeet");
+	const failWith = async (res: () => Response) => {
+		f.state.transcribe = res;
+		await act(async () => { f.dictation.retry(); await new Promise((r) => setTimeout(r, 0)); });
+	};
+	await f.record();
+	await f.frame(bytes(5, 6));
+	f.state.transcribe = () => Response.json({ message: "Recording is too long to transcribe" }, { status: 413 });
+	await act(async () => { f.dictation.stop(); await new Promise((r) => setTimeout(r, 0)); });
+	assert.equal(f.dictation.error, "Recording is too long to transcribe");
+	assert.equal(f.dictation.canRetry, true);
+	await failWith(() => Response.json({ message: "Could not read the recording" }, { status: 400 }));
+	assert.equal(f.dictation.error, "Could not read the recording");
+	await failWith(() => Response.json({ code: "not-ready", message: "The Parakeet model is not installed" }, { status: 409 }));
+	assert.equal(f.dictation.error, DICTATION_MODEL_MISSING);
+	assert.equal(f.dictation.canRetry, true);
+	await failWith(() => new Response("not json", { status: 400 }));
+	assert.equal(f.dictation.error, "Transcription failed", "a 4xx without a reason stays generic");
+	await failWith(() => Response.json({ message: "Failed to load external module sherpa-onnx-node" }, { status: 500 }));
+	assert.equal(f.dictation.error, "Transcription failed", "a 500's raw exception never reaches the UI");
+	assert.equal(f.dictation.canRetry, true);
+	assert.equal(f.state.posts.length, 5);
+	assert.deepEqual([...f.state.posts[4]!.body], [5, 6]);
+	assert.deepEqual(f.state.appends, []);
+});
+
 test("cancelling while recording sends nothing, and cancel after a failure drops the retained audio", async () => {
 	const f = await fixture("parakeet");
 	await f.record();

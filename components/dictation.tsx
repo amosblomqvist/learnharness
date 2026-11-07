@@ -120,6 +120,19 @@ export const DICTATION_MODEL_MISSING = "Dictation needs the local model";
 /** The line shown when the local transcription fails (the audio is kept). */
 export const DICTATION_TRANSCRIPTION_FAILED = "Transcription failed";
 
+/** The line for a failed transcribe response. A 4xx carries a short reason
+ *  meant for the user (409 is the missing model, with its Settings
+ *  deep-link); a 500's message is a raw exception, so the surface stays
+ *  generic and the server logs the reason. */
+async function transcriptionFailure(res: Response): Promise<string> {
+	if (res.status === 409) return DICTATION_MODEL_MISSING;
+	if (res.status >= 400 && res.status < 500) {
+		const data = (await res.json().catch(() => null)) as { message?: unknown } | null;
+		if (typeof data?.message === "string" && data.message) return data.message;
+	}
+	return DICTATION_TRANSCRIPTION_FAILED;
+}
+
 /** The server's cap on one Parakeet recording (PARAKEET_MAX_AUDIO_BYTES):
  *  10 minutes of 16 kHz mono 16-bit PCM. */
 export const PARAKEET_MAX_AUDIO_BYTES = 10 * 60 * 16_000 * 2;
@@ -439,6 +452,7 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 		abortRef.current = controller;
 		setRetainedPcm(pcm);
 		let text: string;
+		let failure = DICTATION_TRANSCRIPTION_FAILED;
 		try {
 			const res = await fetch("/api/stt/parakeet/transcribe", {
 				method: "POST",
@@ -446,11 +460,14 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 				body: pcm as BodyInit,
 				signal: controller.signal,
 			});
-			if (!res.ok) throw new Error(`transcribe ${res.status}`);
+			if (!res.ok) {
+				failure = await transcriptionFailure(res);
+				throw new Error(`transcribe ${res.status}`);
+			}
 			text = ((await res.json()) as { text?: string }).text ?? "";
 		} catch {
 			if (gen !== genRef.current) return;
-			setError(DICTATION_TRANSCRIPTION_FAILED);
+			setError(failure);
 			setCanRetry(true);
 			cleanup();
 			return;
