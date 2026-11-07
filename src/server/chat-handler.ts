@@ -281,9 +281,13 @@ export async function handleChatInput(
 	// because compaction appends the marker.
 	const callPurpose = { background: input.type === "steers" || (input.type === "continue" && reconstructRequestCause(record.messages) !== "foreground") };
 	let requestCycle: SubscriptionRequestCycle | undefined;
+	const tentativeSideIds = new Set<string>();
+	const admittedSideIds = new Set<string>();
+	let preparedSideIds = new Set<string>();
+	const admitSideContext = () => { for (const id of preparedSideIds) admittedSideIds.add(id); };
 	const lifecycle: SubscriptionDispatchLifecycle = {
 		captured: (scope) => requestCycle?.captured(scope),
-		beforeDispatch: (scope) => requestCycle?.beforeDispatch(scope),
+		beforeDispatch: (scope) => { requestCycle?.beforeDispatch(scope); admitSideContext(); },
 		noDispatch: (kind) => requestCycle?.noDispatch(kind),
 	};
 	let conversationEngine: PiEngine;
@@ -397,9 +401,9 @@ export async function handleChatInput(
 	// truth instead of the pre-answer record. (Wave C: the wake's markers
 	// ride this same write-ahead - the pump de-queued them at fire, so this
 	// is the ONLY copy ever appended.)
-	// Append only previously unrecorded exchanges from ALL side threads.
-	// A live helper contributes its current text, never a completion wait.
-	// Older entries and their delivery watermarks remain unchanged.
+	// Prospectively check new exchanges from ALL threads for early automatic
+	// refusal. This snapshot does not authorize the final assembled request;
+	// SDK preparation re-collects live text and validates queued steering too.
 	const sideContextSnapshots = sideContext.snapshot(chatId);
 	const afterInput = [...record.messages, ...appends];
 	const sideQuestions = hasUnresolvedQuestion(afterInput) ? [] : sideConversationEntries({
@@ -414,7 +418,9 @@ export async function handleChatInput(
 		endTurn(chatId);
 		return new Response(sideBudgetError().message, { status: 400 });
 	}
-	if (!sideContextBlocked) appends = withSideQuestions;
+	// Only the learner/automatic input is write-ahead. Raw exchanges are
+	// already durable in sideChats; their delivery entries join the SDK
+	// request at its preparation boundary, and publish only if admitted.
 	const merged = [...record.messages, ...appends];
 	// Retry preserves every persisted attempt. Pi needs a non-assistant
 	// tail to start continue(), so its temporary history omits the trailing
@@ -498,7 +504,22 @@ export async function handleChatInput(
 		callPurpose,
 		requestCycle,
 		messages: asAgentMessages(agentMessages),
-		validateContext: () => { if (pendingSideBudgetError) throw pendingSideBudgetError; },
+		validateContext: (messages) => {
+			// This is the SDK's ACTUAL request, after both prepared references
+			// and already-drained steering have joined it. A pre-queue estimate
+			// cannot authorize this combined payload.
+			preparedSideIds = new Set(messages.map((message) => (message as LhMessage).id).filter((id) => tentativeSideIds.has(id)));
+			if (pendingSideBudgetError || (preparedSideIds.size > 0 && !fitsSideContext(messages as readonly LhMessage[]))) {
+				pendingSideBudgetError = sideBudgetError();
+				const rejected = new Set([...tentativeSideIds].filter((id) => !admittedSideIds.has(id)));
+				// Only unadmitted reference entries are withdrawn from transient
+				// loop state. No saved prefix, learner steer or completed tool is removed.
+				constructed.state.messages = constructed.state.messages.filter((message) => !rejected.has((message as LhMessage).id));
+				requestCycle?.rejectLocalRequest(rejected);
+				throw pendingSideBudgetError;
+			}
+			if (!requestCycle) admitSideContext(); // BYOK has no subscription admission gate
+		},
 		contextUpdates: (messages) => {
 			pendingSideBudgetError = undefined;
 			const current = stores.chatStore.getChat(chatId);
@@ -518,6 +539,7 @@ export async function handleChatInput(
 				pendingSideBudgetError = sideBudgetError();
 				return []; // no delivery watermark for exchanges the model cannot receive
 			}
+			for (const update of updates) tentativeSideIds.add(update.id);
 			return asAgentMessages(updates);
 		},
 		onUsage: collectUsage,
@@ -663,7 +685,10 @@ export async function handleChatInput(
 			onFinish: (turnMessages, isAborted) => {
 				// Wave B: append only messages past the temporary agent prefix.
 				// Retry's saved record still includes its earlier failed attempts.
-				const stamped = persistTurn(stores.chatStore, chatId, persistBaseCount, turnMessages, isAborted);
+				// Unadmitted reference entries cannot become delivery watermarks
+				// merely because a local/provider refusal settled the running turn.
+				const admittedMessages = turnMessages.filter((message) => !tentativeSideIds.has((message as LhMessage).id) || admittedSideIds.has((message as LhMessage).id));
+				const stamped = persistTurn(stores.chatStore, chatId, persistBaseCount, admittedMessages, isAborted);
 				noteSteersDurable(chatId, stores.chatStore.getChat(chatId)?.messages ?? stamped);
 				// usage log append (idempotent per turn id) — the stats bar
 				// refolds this on the client after the turn settles. The

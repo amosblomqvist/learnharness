@@ -1,5 +1,5 @@
 /** Offline regressions: new raw side exchanges enter main history once,
- * atomically with write-ahead, without waiting for helper completion or
+ * after selected-request admission, without waiting for helper completion or
  * changing earlier context. Late activity stays queued for the next request. */
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -20,7 +20,8 @@ fs.writeFileSync(process.env.LH_AUTH_FILE, "{}");
 const { chatStore } = await import("../src/store/chats.ts");
 const { createSideChatService } = await import("../src/server/side-chat.ts");
 const { handleChatRequest } = await import("../src/server/chat-handler.ts");
-const { createTeacherAgent } = await import("../src/agent/teacher-agent.ts");
+const { createTeacherAgent, composeInstructions } = await import("../src/agent/teacher-agent.ts");
+const { projectedContextTokens } = await import("../src/server/compaction.ts");
 const { runningTurn } = await import("../src/server/turn-runs.ts");
 const { buildAnswer, normalizeOptions, resolveCorrect } = await import("../src/core/question-core.ts");
 const { sideConversationEntries, sideSegmentId } = await import("../src/core/side-chat.ts");
@@ -248,7 +249,7 @@ describe("append-only main-request delivery", () => {
 		assert.deepEqual(sideConversationEntries(chatStore.getChat(f.chatId)!), []);
 	});
 
-	it("commits delivery watermarks with native input, while later thread writes preserve that native prefix", () => {
+	it("keeps saved delivery watermarks immutable while later thread writes preserve that native prefix", () => {
 		const f = fixture();
 		const thread: SideChatThread = { id: "side_explanation", anchor: f.anchor, open: true, createdAt: at, messages: [{ id: "q", role: "user", text: "Before request", at }] };
 		chatStore.updateSideChats(f.chatId, () => [thread]);
@@ -405,6 +406,81 @@ describe("append-only main-request delivery", () => {
 		const saved = chatStore.getChat(f.chatId)!;
 		assert.deepEqual(saved.messages.slice(0, stopped.messages.length), stopped.messages);
 		assert.equal(saved.messages.filter((message) => message.role === "custom" && message.customType === "side-question").length, rawCount);
+		assert.deepEqual(sideConversationEntries(saved), []);
+	});
+
+	for (const phase of ["first", "internal"] as const) it(`refuses ${phase}-call side cargo plus queued learner steering that fit separately, without consuming either or replaying tools`, async () => {
+		const f = fixture();
+		const selected = [...catalogContextLimits()].filter(([key, window]) => key.startsWith("openrouter:") && window >= 128_000)
+			.sort((a, b) => a[1] - b[1] || a[0].localeCompare(b[0]))[0]!;
+		chatStore.saveSettings(f.chatId, { model: { provider: "openrouter", id: selected[0].slice("openrouter:".length) } });
+		const brief: SideChatThread = { id: "side_brief", anchor: f.anchor, open: true, createdAt: at, messages: [
+			{ id: "brief_q", role: "user", text: "ALREADY SHARED QUESTION", at }, { id: "brief_a", role: "assistant", text: "ALREADY SHARED REPLY", at },
+		] };
+		const batch: SideChatThread[] = Array.from({ length: Math.ceil(selected[1] * 0.45 / 4000) }, (_, index) => ({
+			id: `side_combined_${index}`, anchor: f.anchor, open: true, createdAt: at, messages: [
+				{ id: `q_${index}`, role: "user", text: "Q".repeat(8000), at }, { id: `a_${index}`, role: "assistant", text: "A".repeat(8000), at },
+			],
+		}));
+		chatStore.updateSideChats(f.chatId, () => phase === "first" ? batch : [brief]);
+		const original = chatStore.getChat(f.chatId)!.messages;
+		const learner = { ...newUserMessage(`QUEUED LEARNER STEER ${"L".repeat(Math.ceil(selected[1] * 0.65 * 4))}`), id: "combined_learner" };
+		const main = createFauxCore({}); const contexts: TranscriptContext[] = []; let reads = 0; let budget = 0;
+		let agent: ReturnType<typeof createTeacherAgent>;
+		const prompt = Math.ceil(composeInstructions("teacher").length / 4);
+		const queueCombined = () => {
+			const live = agent.state.messages.filter((message) => (message as { role: string }).role !== "system") as LhMessage[];
+			const updates = sideConversationEntries({ messages: live, sideChats: f.service.snapshot(f.chatId) });
+			assert.ok(projectedContextTokens([...live, ...updates], prompt) < budget, "side-only request fits");
+			assert.ok(projectedContextTokens([...live, learner], prompt) < budget, "steer-only request fits");
+			assert.ok(projectedContextTokens([...live, ...updates, learner], prompt) > selected[1], "combined request exceeds even the whole window");
+			agent.steer(learner);
+		};
+		main.appendResponses([
+			(context) => { contexts.push(structuredClone(context)); return phase === "internal"
+				? fauxAssistantMessage([fauxToolCall("offline_read", {}, { id: "combined_read" })], { stopReason: "toolUse" })
+				: fauxAssistantMessage("Oversized first call must not dispatch"); },
+			(context) => { contexts.push(structuredClone(context)); return fauxAssistantMessage("Oversized internal call must not dispatch"); },
+		]);
+		const engine: PiEngine = { model: main.getModel(), streamFn: main.streamSimple };
+		const response = await handleChatRequest(new Request("http://offline.test/api/chat", { method: "POST", headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({ chatId: f.chatId, input: { type: "answer", toolCallId: "check", answer: gradedAnswer() } }) }), (opts) => {
+			budget = selected[1] - Math.min(16_384, opts.engine!.model.maxTokens);
+			assert.equal(chatStore.getChat(f.chatId)!.messages.filter((message) => message.role === "custom" && message.customType === "side-question").length, 0,
+				"write-ahead saves the input, not unadmitted side watermarks");
+			agent = createTeacherAgent(undefined, { ...opts, engine, tools: { offline_read: {
+				name: "offline_read", label: "Synthetic read", description: "Offline fixture", parameters: Type.Object({}), execute: async () => {
+					reads++; chatStore.updateSideChats(f.chatId, () => [brief, ...batch]); queueCombined();
+					return { content: [{ type: "text", text: "COMPLETED COMBINED TOOL WORK" }], details: {} };
+				},
+			} } });
+			if (phase === "first") queueCombined();
+			return agent;
+		}, f.service);
+		assert.equal(response.status, 200); const turn = runningTurn(f.chatId); if (turn) await new Response(turn.subscribe()).text();
+		assert.equal(contexts.length, phase === "first" ? 0 : 1); assert.equal(reads, phase === "first" ? 0 : 1);
+		const stopped = chatStore.getChat(f.chatId)!;
+		assert.deepEqual(stopped.messages.slice(0, original.length), original);
+		assert.deepEqual(stopped.sideChats, phase === "first" ? batch : [brief, ...batch]);
+		assert.equal(stopped.messages.filter((message) => message.id === learner.id).length, 1, "queued learner input is durable once");
+		assert.equal(stopped.messages.filter((message) => message.role === "toolResult" && message.toolCallId === "check").length, 1);
+		assert.equal(stopped.messages.filter((message) => message.role === "custom" && message.customType === "side-question").length, phase === "first" ? 0 : 2,
+			"only previously admitted side entries publish; this refusal consumes none of the new ones");
+		assert.equal(sideConversationEntries(stopped).length, batch.length * 2);
+		const failure = stopped.messages.at(-1)!; assert.equal(failure.role, "assistant");
+		if (failure.role === "assistant") assert.equal(failure.errorMessage, SIDE_CONTEXT_BUDGET_ERROR);
+		if (phase === "internal") assert.match(JSON.stringify(contexts[0]), /ALREADY SHARED REPLY/);
+		const larger = [...catalogContextLimits()].filter(([key]) => key.startsWith("openrouter:")).sort((a, b) => b[1] - a[1])[0]!;
+		assert.ok(larger[1] > selected[1] * 1.5);
+		chatStore.saveSettings(f.chatId, { model: { provider: "openrouter", id: larger[0].slice("openrouter:".length) } });
+		const retried = await mainInput(f.chatId, { type: "retry" }, f.service);
+		assert.equal(retried.contexts.length, 1); assert.equal(reads, phase === "first" ? 0 : 1, "no completed tool replay");
+		const saved = chatStore.getChat(f.chatId)!;
+		assert.deepEqual(saved.messages.slice(0, stopped.messages.length), stopped.messages);
+		assert.equal(saved.messages.filter((message) => message.id === learner.id).length, 1);
+		assert.equal(JSON.stringify(retried.contexts).split("QUEUED LEARNER STEER").length - 1, 1);
+		assert.equal(saved.messages.filter((message) => message.role === "custom" && message.customType === "side-question").length,
+			batch.length * 2 + (phase === "first" ? 0 : 2));
 		assert.deepEqual(sideConversationEntries(saved), []);
 	});
 
