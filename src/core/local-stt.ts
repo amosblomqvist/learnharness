@@ -44,20 +44,6 @@ export function normalizeLocalPreferredLanguages(value: unknown): string[] | und
 	return languages.length > 0 ? languages : undefined;
 }
 
-/**
- * Models or families that window or chunk long audio themselves. Dictation never
- * sends them a clip over 18 s, so this only tells a list which models would cope
- * with a longer recording. Ported from pi-voice src/chunking.ts.
- */
-const HANDLES_LONG_AUDIO: ReadonlyArray<{ family: string } | { id: string }> = [
-	{ family: "whisper" },
-	{ id: "parakeet-ultra" }, // Other Parakeets don't.
-];
-
-export function handlesLongAudio(model: Pick<CatalogModel, "id" | "family">): boolean {
-	return HANDLES_LONG_AUDIO.some((entry) => ("family" in entry ? entry.family === model.family : entry.id === model.id));
-}
-
 // ── wire shapes ──────────────────────────────────────────────────────────────
 
 /** A download in progress, or one that failed. A finished or cancelled download has no entry. */

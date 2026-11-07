@@ -34,7 +34,7 @@ const detectorCodes = new Map<string, string>(
 );
 
 /** The detector's own label (iw/jw/tl/no included), or undefined when it cannot identify the language. */
-export function detectorLanguageCode(language: string): string | undefined {
+function detectorLanguageCode(language: string): string | undefined {
 	return detectorCodes.get(languageIdentity(language));
 }
 

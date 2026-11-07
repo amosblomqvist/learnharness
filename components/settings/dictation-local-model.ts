@@ -13,7 +13,7 @@ import {
 	ACCURACY_GRADE_HELP, CATALOG_MODELS, LOCAL_AUTO_LANGUAGE, SPEED_METER_STEPS,
 	autoLanguagePolicy, benchmarkModels, canonicalLanguage, catalogModelSearchText, displayLanguage,
 	getPreferredRecommendationLanguages, isChineseLanguage, languageAccuracyGrade, languageIdentity,
-	modelMatchesLanguage, modelWaitSeconds, rankCatalogModels, recommendModels, requiresLanguageDetector,
+	modelMatchesLanguage, modelWaitSeconds, rankCatalogModels, recommendModels,
 	speedMeterLevel, undetectablePreferences,
 	type AccuracyLetter, type CatalogModel, type MachineTier, type ModelBenchmark, type ModelRecommendation,
 	type RecommendationRole, type RecommendationStatus,
@@ -70,8 +70,6 @@ export type ModelRowInfo = {
 	missing: string[];
 	/** The speed meter: filled bars out of SPEED_METER_STEPS, with the wait it stands for. */
 	speed?: { level: number; steps: number; waitSeconds: number };
-	/** Native detection, or the shared detector, so the learner knows Auto is a possibility. */
-	autoDetect: boolean;
 	/** Why Auto is off for these preferences (a language the detector cannot identify). */
 	autoNotice?: string;
 	/** Auto will not work for this set of languages, so the language must be fixed. */
@@ -97,7 +95,6 @@ export function modelRowInfo(
 		grades,
 		missing,
 		speed: wait === undefined ? undefined : { level: speedMeterLevel(wait), steps: SPEED_METER_STEPS, waitSeconds: wait },
-		autoDetect: model.capabilities.languageDetection || requiresLanguageDetector(model),
 		autoNotice: skipped.length
 			? `Auto detect is unavailable for your preferred languages because it can't detect ${new Intl.ListFormat("en", { type: "disjunction" }).format(skipped)}.`
 			: undefined,

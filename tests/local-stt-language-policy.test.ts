@@ -7,7 +7,6 @@ import { describe, it } from "node:test";
 import { CATALOG_MODELS, LANGUAGE_DETECTION_MODEL, getCatalogModel } from "../src/core/local-stt-catalog.ts";
 import {
 	autoLanguagePolicy,
-	detectorLanguageCode,
 	languageForModel,
 	localLanguagePolicy,
 	missingDetectorWarning,
@@ -34,9 +33,9 @@ describe("which models need the detector", () => {
 
 	it("maps preferred languages onto the detector's own labels, aliases included", () => {
 		assert.ok(LANGUAGE_DETECTION_MODEL.languages.includes("iw"));
-		assert.equal(detectorLanguageCode("he"), "iw");
-		assert.equal(detectorLanguageCode("en-GB"), "en");
-		assert.equal(detectorLanguageCode("zz"), undefined);
+		const model = { ...canary, languages: ["he", "en-GB", "zz"] };
+		assert.deepEqual(autoLanguagePolicy(model, ["he", "en-GB"]), { kind: "detect", languages: ["he", "en-GB"], allowed: ["iw", "en"] });
+		assert.deepEqual(undetectablePreferences(model, ["he", "en-GB", "zz"]), ["zz"]);
 	});
 });
 

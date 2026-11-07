@@ -31,18 +31,8 @@ export type ModelRecommendation = {
 	model: CatalogModel;
 	roles: RecommendationRole[];
 	status: RecommendationStatus;
-	/** Geometric mean of the per-language error, in percent. */
-	error?: number;
-	/** Seconds after the dictation on the benchmark GPU. */
-	waitSeconds?: number;
-	/** Whether this model meets the Fast role's wait target on the benchmark CPU. */
-	withinFastWaitTarget?: boolean;
 	/** The chosen language this model handles worst. */
 	worstLanguage?: string;
-	/** Its measured word or character error, in percent. */
-	worstError?: number;
-	/** True when even the worst language is over the usability floor. */
-	overFloor?: boolean;
 	/** Usable, but close enough to the floor that the list says so. */
 	nearFloor?: boolean;
 };
@@ -94,8 +84,6 @@ type RecommendationData = {
 };
 
 const DATA: RecommendationData = recommendationData;
-
-export const EXPERIMENTAL_MAX_ERROR_PERCENT = DATA.methodology.experimentalMaxErrorPercent;
 
 export type AccuracyLetter = "A" | "B" | "C" | "D" | "F";
 
@@ -152,7 +140,7 @@ export function modelWaitSeconds(
 
 // Display-only reference and bands; changing recommendation wait budgets must
 // not silently redefine the meter. SPEED_METER_HELP explains it to the reader.
-export const BENCHMARK_DICTATION_SECONDS = 30;
+const BENCHMARK_DICTATION_SECONDS = 30;
 const SPEED_CUTOFF_SECONDS = [1.5, 3, 5, 10, 20] as const;
 export const SPEED_METER_STEPS = SPEED_CUTOFF_SECONDS.length;
 /** The reader's key to the speed bars (from pi-voice's model-ratings-help.md). */
@@ -177,14 +165,6 @@ export function languageAccuracyGrade(
 	const cell = DATA.models[model.id]?.accuracy[recommendationLanguage(language)];
 	return cell ? accuracyGrade(cell.error) : undefined;
 }
-
-/**
- * The speed the overall pick was chosen for: a dictation of
- * `dictationSeconds` back within `overallMaxWaitSeconds`. A model measured
- * below this on someone's machine misses the budget it was recommended by.
- */
-export const COMFORTABLE_REAL_TIME_FACTOR =
-	DATA.methodology.dictationSeconds / DATA.methodology.overallMaxWaitSeconds;
 
 type ScoredModel = {
 	model: CatalogModel;
@@ -247,8 +227,6 @@ function scoreModels(
 export type ModelBenchmark = {
 	/** Geometric mean of the per-language error, in percent. */
 	error: number;
-	/** Seconds after the benchmark dictation on the benchmark GPU. */
-	waitSeconds: number;
 	/** Every chosen language is under the usability floor. */
 	usable: boolean;
 	/** Needs the language set by hand for this set of languages. */
@@ -269,34 +247,10 @@ export function benchmarkModels(
 			candidate.model.id,
 			{
 				error: candidate.error,
-				waitSeconds: candidate.waitSeconds,
 				usable: candidate.worstError < floor,
 				manual: candidate.manual,
 			},
 		]),
-	);
-}
-
-/**
- * The usable models on the speed/accuracy frontier: nothing usable is both
- * quicker and more accurate. Equal models both stay, so a tie never hides one.
- */
-export function frontierModelIds(
-	benchmarks: ReadonlyMap<string, ModelBenchmark>,
-): Set<string> {
-	const usable = [...benchmarks]
-		.filter(([, benchmark]) => benchmark.usable)
-		.map(([id, benchmark]) => ({ id, error: benchmark.error, wait: benchmark.waitSeconds }));
-	return new Set(
-		usable
-			.filter((candidate) =>
-				!usable.some((other) =>
-					other.error <= candidate.error &&
-					other.wait <= candidate.wait &&
-					(other.error < candidate.error || other.wait < candidate.wait),
-				),
-			)
-			.map((candidate) => candidate.id),
 	);
 }
 
@@ -406,14 +360,7 @@ export function recommendModels(
 							(candidate.worstCiLower !== undefined && candidate.worstCiLower <= method.experimentalMaxErrorPercent)
 						? "experimental"
 						: "unsupported",
-				error: candidate.error,
-				waitSeconds: candidate.waitSeconds,
-				withinFastWaitTarget:
-					candidate.cpuWaitSeconds !== undefined &&
-					candidate.cpuWaitSeconds <= method.fastCpuMaxWaitSeconds,
 				worstLanguage: candidate.worstLanguage,
-				worstError: candidate.worstError,
-				overFloor: candidate.worstError >= method.maxLanguageErrorPercent,
 				nearFloor:
 					candidate.worstError >= method.noteMinErrorPercent &&
 					candidate.worstError < method.maxLanguageErrorPercent,

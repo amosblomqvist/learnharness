@@ -25,19 +25,19 @@ import {
 } from "../src/core/local-stt-catalog.ts";
 import {
 	ACCURACY_GRADE_HELP,
-	EXPERIMENTAL_MAX_ERROR_PERCENT,
 	accuracyGrade,
 	benchmarkModels,
-	frontierModelIds,
 	getPreferredRecommendationLanguages,
 	languageAccuracyGrade,
 	modelWaitSeconds,
 	recommendModels,
 	speedMeterLevel,
 } from "../src/core/local-stt-recommendations.ts";
-import { handlesLongAudio } from "../src/core/local-stt.ts";
 
 const ALL_ROLES = ["accurate", "best", "fast"];
+/** The measured error of the language a pick handles worst. */
+const worstError = (pick: { model: { id: string }; worstLanguage?: string }) =>
+	(benchmark.models as Record<string, { accuracy: Record<string, { error: number }> }>)[pick.model.id]!.accuracy[pick.worstLanguage!]!.error;
 const languages = [...new Set(CATALOG_MODELS.flatMap((model) => model.languages.map(languageIdentity)))];
 
 describe("catalog data", () => {
@@ -129,12 +129,6 @@ describe("catalog helpers", () => {
 		assert.equal(formatBinarySize(1.5 * 1024 ** 3), "1.5 GiB");
 		assert.equal(formatBinarySize(11 * 1024 ** 3), "11 GiB");
 	});
-
-	it("knows the models that handle long audio themselves: Whisper and parakeet-ultra", () => {
-		assert.equal(handlesLongAudio(getCatalogModel("whisper-small")!), true);
-		assert.equal(handlesLongAudio(getCatalogModel("parakeet-ultra")!), true);
-		assert.equal(handlesLongAudio(getCatalogModel("parakeet-tdt-0.6b-v3")!), false);
-	});
 });
 
 describe("recommendations", () => {
@@ -144,8 +138,8 @@ describe("recommendations", () => {
 				const picks = recommendModels(CATALOG_MODELS, wanted);
 				assert.deepEqual(picks.flatMap((pick) => pick.roles).sort(), ALL_ROLES, wanted.join("+"));
 				if (picks.some((pick) => pick.status === "eligible")) {
-					assert.ok(picks.every((pick) => pick.status === "eligible" && !pick.overFloor));
-					assert.ok(picks.every((pick) => pick.worstError! < benchmark.methodology.maxLanguageErrorPercent));
+					assert.ok(picks.every((pick) => pick.status === "eligible"));
+					assert.ok(picks.every((pick) => worstError(pick) < benchmark.methodology.maxLanguageErrorPercent));
 				} else {
 					assert.equal(picks.length, 1, "fallbacks carry all roles");
 				}
@@ -164,11 +158,11 @@ describe("recommendations", () => {
 		const preferred = new Set(getPreferredRecommendationLanguages(CATALOG_MODELS));
 		for (const language of languages) {
 			const pick = recommendModels(CATALOG_MODELS, [language])[0]!;
-			if (pick.error === undefined) assert.equal(pick.status, "unbenchmarked");
-			else if (pick.overFloor) {
-				const lower = models[pick.model.id]?.accuracy[pick.worstLanguage!]?.ciLower;
-				const experimental = pick.worstError! < EXPERIMENTAL_MAX_ERROR_PERCENT ||
-					(lower !== undefined && lower <= EXPERIMENTAL_MAX_ERROR_PERCENT);
+			if (pick.worstLanguage === undefined) assert.equal(pick.status, "unbenchmarked");
+			else if (worstError(pick) >= benchmark.methodology.maxLanguageErrorPercent) {
+				const lower = models[pick.model.id]?.accuracy[pick.worstLanguage]?.ciLower;
+				const max = benchmark.methodology.experimentalMaxErrorPercent;
+				const experimental = worstError(pick) < max || (lower !== undefined && lower <= max);
 				assert.equal(pick.status, experimental ? "experimental" : "unsupported");
 			}
 			assert.equal(preferred.has(language), ["eligible", "experimental"].includes(pick.status));
@@ -184,12 +178,10 @@ describe("recommendations", () => {
 		assert.ok(choices.length > 10);
 	});
 
-	it("benchmarks models on every chosen language and keeps the speed/accuracy frontier", () => {
+	it("benchmarks models on every chosen language", () => {
 		const marks = benchmarkModels(CATALOG_MODELS, ["en"]);
 		assert.ok(marks.size > 5);
-		const frontier = frontierModelIds(marks);
-		assert.ok(frontier.size >= 1);
-		for (const id of frontier) assert.equal(marks.get(id)!.usable, true);
+		assert.ok([...marks.values()].some((mark) => mark.usable));
 	});
 });
 
