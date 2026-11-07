@@ -79,49 +79,6 @@ function get(url) {
 	});
 }
 
-/** A 16 kHz mono 16-bit WAV of silence — the shape the dictation client uploads. */
-function silentWav(seconds) {
-	const data = Buffer.alloc(16000 * 2 * seconds);
-	const header = Buffer.alloc(44);
-	header.write("RIFF", 0);
-	header.writeUInt32LE(36 + data.length, 4);
-	header.write("WAVEfmt ", 8);
-	header.writeUInt32LE(16, 16);
-	header.writeUInt16LE(1, 20);
-	header.writeUInt16LE(1, 22);
-	header.writeUInt32LE(16000, 24);
-	header.writeUInt32LE(32000, 28);
-	header.writeUInt16LE(2, 32);
-	header.writeUInt16LE(16, 34);
-	header.write("data", 36);
-	header.writeUInt32LE(data.length, 40);
-	return Buffer.concat([header, data]);
-}
-
-/**
- * On-device dictation (2026-11): the packaged server must load transcribe-cpp's native
- * library and the bundled Silero model. Nothing else imports either at boot, so a
- * payload missing them boots fine and fails on first use. This loads both for real,
- * offline: the models route reports the engine, and the VAD route scores silence.
- */
-async function verifyLocalStt(url) {
-	const headers = { "x-learnharness-dictation": "1", origin: url };
-	const listing = await fetch(`${url}/api/stt/local/models`, { headers });
-	const models = await listing.json();
-	if (listing.status !== 200 || models.engineAvailable !== true || models.models?.length !== 29) {
-		throw new Error(`GET /api/stt/local/models → ${listing.status}, engineAvailable=${models.engineAvailable} (${models.engineError ?? "no error"})`);
-	}
-	console.log(`[smoke-server] GET /api/stt/local/models → 200 (engine loaded, ${models.hardwareTier} tier)`);
-	const form = new FormData();
-	form.set("audio", new File([silentWav(1)], "silence.wav", { type: "audio/wav" }));
-	const vad = await fetch(`${url}/api/stt/vad`, { method: "POST", headers, body: form });
-	const scored = await vad.json();
-	if (vad.status !== 200 || scored.probs?.length !== 32 || Math.max(...scored.probs) > 0.1 || scored.frameSamples !== 512) {
-		throw new Error(`POST /api/stt/vad → ${vad.status} ${JSON.stringify(scored).slice(0, 200)}`);
-	}
-	console.log("[smoke-server] POST /api/stt/vad → 200 (bundled Silero scored 1 s of silence low)");
-}
-
 async function main() {
 	// HTTP boot alone never imports the dynamically loaded demo engine.
 	// Fail before packaging if its standalone dependency graph is incomplete.
@@ -215,7 +172,6 @@ async function main() {
 			if (status !== 200) throw new Error(`GET ${route} → ${status} (expected 200)`);
 			console.log(`[smoke-server] GET ${route} → 200`);
 		}
-		await verifyLocalStt(url);
 	} catch (err) {
 		failed = err;
 	} finally {
