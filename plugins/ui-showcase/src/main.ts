@@ -1,4 +1,4 @@
-import type { PluginFrontendContext, PluginUi } from "learnharness-plugin-api";
+import type { PluginFrontendContext, PluginSurfaceTarget, PluginUi } from "learnharness-plugin-api";
 import { Scope } from "./dom.ts";
 import { mountGallery } from "./gallery.ts";
 import { openSurfaceDemo } from "./surfaces.ts";
@@ -17,6 +17,8 @@ export function activate(ctx: PluginFrontendContext): () => void {
   if (missing.length) missingCapabilities(missing.map(method => `ui.${method}`).join(", "));
   const scope = new Scope(ctx.signal);
   if (scope.signal.aborted) return scope.dispose;
+  // Targets identify mounted page lifetimes. Retired pages must not be retained.
+  const surfaces = new WeakMap<PluginSurfaceTarget, ReturnType<typeof openSurfaceDemo>>();
   scope.own(ctx.registerView({ id: "gallery", name: "UI Showcase", mount: (root, signal) => mountGallery(root, ctx, signal) }));
   scope.own(ctx.registerAction({ id: "open-gallery", name: "UI Showcase", run: () => ctx.app.openView("gallery") }));
   scope.own(ctx.placeAction({ id: "gallery-sidebar", actionId: "open-gallery", location: "sidebar" }));
@@ -26,7 +28,19 @@ export function activate(ctx: PluginFrontendContext): () => void {
       if (context.placement !== "top-bar" || context.surface !== "session") {
         throw new Error("UI Showcase surface requires a native session top-bar context.");
       }
-      scope.widget(openSurfaceDemo(ctx.ui, context.surfaceTarget, scope.signal));
+      if (scope.signal.aborted) return;
+      const target = context.surfaceTarget, existing = surfaces.get(target);
+      if (existing) {
+        surfaces.delete(target);
+        existing.dispose();
+        return;
+      }
+      const handle = openSurfaceDemo(ctx.ui, target, scope.signal, () => {
+        if (surfaces.get(target) === handle) surfaces.delete(target);
+      });
+      // The host owns disposal on target retirement and scope abort; no strong
+      // activation-wide handle list is needed for these page-owned surfaces.
+      surfaces.set(target, handle);
     },
   }));
   scope.own(ctx.placeAction({ id: "surface-topbar", actionId: "open-surface", location: "top-bar", sessions: ["teaching", "practice"] }));

@@ -1,7 +1,12 @@
 import React from "react";
 import { createRoot } from "react-dom/client";
+import { KeyboardSection } from "../../../components/settings/keyboard-section.tsx";
 import { HostMarkdown } from "../../../components/host-markdown.tsx";
-import { InteractionLayersProvider } from "../../../components/interaction-layers.tsx";
+import { InteractionLayersProvider, createInteractionLayers } from "../../../components/interaction-layers.tsx";
+import { PluginFrontendManager } from "../../../components/plugin-manager.ts";
+import { dispatchPluginActionShortcut } from "../../../components/plugin-shortcuts.tsx";
+import { registerSurfaceBoundary } from "../../../components/plugin-surface-targets.ts";
+import { createPluginSessionActionContext, saveOverrides, loadOverrides, eventBinding } from "../../../src/core/index.ts";
 import { activate } from "../src/main.ts";
 import { acceptedPoseKeys } from "../src/poses.ts";
 import { referenceFontCSS } from "../src/fonts.ts";
@@ -29,7 +34,13 @@ HTMLImageElement.prototype.decode = function () {
 };
 const topButton = document.querySelector("#draw");
 const clone = value => structuredClone(value);
-const target = {};
+const layers = createInteractionLayers();
+const region = document.createElement("div"), mounts = document.createElement("div");
+region.setAttribute("data-session-surface-region", ""); mounts.setAttribute("data-session-surface-mounts", "");
+region.append(mounts); document.body.append(region);
+const target = registerSurfaceBoundary(document.body, controller.signal, layers).target;
+let manager, shortcutPageOff, settingsLayerOff, blockerOff, keyboardOff;
+const bindPage = () => { shortcutPageOff?.(); shortcutPageOff = manager.registerShortcutPage(pathname, () => viewContext()); };
 function refresh() { if (action) topButton.textContent = action.name; }
 function handleButton(container, initial) {
   let props = initial;
@@ -46,6 +57,7 @@ function handleButton(container, initial) {
 }
 function showSettings() {
   const panel = document.querySelector("#settings"), field = document.querySelector("#ink");
+  if (panel.hidden) settingsLayerOff = layers.register({ id: "settings", kind: "modal", rootRef: { current: panel } });
   panel.hidden = false; field.value = settingsSchema.rows[0].value; document.querySelector("#image-scale").value = settingsSchema.rows[1].value; field.focus();
 }
 function updateSettings(schema) {
@@ -108,7 +120,9 @@ const ctx = {
       const section = document.createElement("section"); section.id = "pad";
       section.setAttribute("aria-label", props.title);
       const button = document.createElement("button"); button.id = "close-pad"; button.textContent = "×";
-      section.append(button); document.body.append(section);
+      section.setAttribute("data-plugin-shortcut-owner", "drawing-pad");
+      section.append(button); mounts.append(section);
+      const removeLayer = layers.register({ id: "drawing-pad-surface", kind: "view", rootRef: { current: section } });
       let disposed = false, contentMount;
       const mountContent = () => {
         const owner = new AbortController(), host = document.createElement("div");
@@ -125,7 +139,7 @@ const ctx = {
         }).catch(error => errors.push(String(error)));
       };
       const dispose = () => {
-        if (disposed) return; disposed = true; contentMount?.dispose(); section.remove();
+        if (disposed) return; disposed = true; contentMount?.dispose(); removeLayer(); section.remove();
         options.signal.removeEventListener("abort", dispose); if (surface?.section === section) surface = undefined;
       };
       options.signal.addEventListener("abort", dispose, { once: true });
@@ -145,10 +159,10 @@ function fullInput() {
       input.type === "plugin-problem-submission" ? ["submission", "thinking"] : ["content"], ...clone(input) };
 }
 function viewContext() {
-  return { placement: "top-bar", surface: "session", sessionId: currentSession, kind: currentKind, surfaceTarget: target,
-    view: { sessionId: currentSession, kind: currentKind, input: fullInput(), messages: clone(histories.get(currentSession) ?? []),
+  return createPluginSessionActionContext({ placement: "top-bar", surface: "session", sessionId: currentSession, kind: currentKind, surfaceTarget: target },
+    () => ({ sessionId: currentSession, kind: currentKind, input: fullInput(), messages: clone(histories.get(currentSession) ?? []),
       title: "Fixture", transcript: [], status: "ready", reconciliation: "ready", busy: false, compacting: false, phase: currentKind === "practice" ? "practice" : "teach",
-      contextTokens: null, queuedSteers: [], composer: { text: "" } } };
+      contextTokens: null, queuedSteers: [], composer: { text: "" } }));
 }
 const empty = () => ({ text: "", images: [] });
 function submissionFor() {
@@ -171,8 +185,33 @@ window.fixture = {
   holdDecode: false,
   pendingDecodes() { return heldDecodes.length; },
   releaseDecodes() { for (const finish of heldDecodes.splice(0)) finish(); },
-  async ready() { off = await activate(ctx); refresh(); },
-  navigate(session, kind, nextInput = { type: "text" }) { surface?.dispose(); currentSession = session; currentKind = kind; input = clone(nextInput); pathname = `/opaque/${session}`; refresh(); },
+  async ready() {
+    const info = { id: "drawing-pad", enabled: true, status: "active", revision: "fixture", manifest: { apiVersion: 1, id: "drawing-pad", name: "Drawing Pad", version: "0.1.0", minAppVersion: "0.4.1", main: "main.js" } };
+    manager = new PluginFrontendManager({ pathname: () => pathname, navigate() {},
+      fetch: async () => Response.json({ plugins: [info], directory: "/disposable-fixture" }),
+      importModule: async () => ({ async activate(actual) {
+        off = await activate({ ...ctx, registerAction: actual.registerAction,
+          refreshActions() { actual.refreshActions(); refresh(); } });
+        return off;
+      } }),
+    });
+    manager.subscribe(() => {
+      const plugin = manager.getSnapshot().plugins.find(plugin => plugin.info.id === "drawing-pad");
+      action = plugin?.actions.find(action => action.id === "draw");
+      if (plugin?.error && !errors.includes(plugin.error)) errors.push(plugin.error);
+      refresh();
+    });
+    bindPage();
+    await new Promise((resolve, reject) => {
+      const stop = manager.subscribe(() => {
+        const plugin = manager.getSnapshot().plugins.find(plugin => plugin.info.id === "drawing-pad");
+        if (plugin?.phase === "active") { stop(); resolve(); }
+        else if (plugin?.phase === "error") { stop(); reject(new Error(plugin.error)); }
+      });
+      manager.start();
+    });
+  },
+  navigate(session, kind, nextInput = { type: "text" }) { surface?.dispose(); currentSession = session; currentKind = kind; input = clone(nextInput); pathname = `/opaque/${session}`; bindPage(); refresh(); },
   setInput(nextInput) { input = clone(nextInput); },
   setHistory(session, messages) { histories.set(session, clone(messages)); },
   event(type, session = currentSession) { for (const fn of events) fn({ type, chatId: session }); },
@@ -194,9 +233,36 @@ window.fixture = {
   ack() { for (const fn of holdExportAck.splice(0)) fn(); refresh(); },
   showSettings,
   saved() { return clone(savedSettings); },
-  dispose() { off?.(); for (const fn of cleanup.splice(0)) fn(); controller.abort(); },
+  actionManager() { return manager; },
+  showKeyboard() {
+    keyboardOff?.(); const panel = document.createElement("section"); panel.id = "keyboard-panel"; panel.setAttribute("role", "dialog");
+    panel.style.cssText = "position:fixed;inset:60px 30px 30px 260px;overflow:auto;background:#222;padding:24px;z-index:100";
+    document.body.append(panel); const root = createRoot(panel);
+    const unregister = layers.register({ id: "fixture-keyboard", kind: "modal", rootRef: { current: panel } });
+    root.render(React.createElement(KeyboardSection));
+    keyboardOff = () => { root.unmount(); unregister(); panel.remove(); keyboardOff = undefined; };
+  },
+  hideKeyboard() { keyboardOff?.(); },
+  actions() { return manager.getSnapshot().plugins.flatMap(plugin => plugin.actions.map(action => ({ id: action.id, shortcut: action.shortcut }))); },
+  rebind(actionId, binding) { saveOverrides({ ...loadOverrides(), [`plugin:drawing-pad:${actionId}`]: binding }); },
+  resetBindings() { saveOverrides({}); },
+  blockShortcut(kind) {
+    blockerOff?.(); const root = document.createElement("div"); root.textContent = "Fixture foreground blocker";
+    root.style.cssText = "position:fixed;top:100px;left:400px;width:250px;height:80px;background:#222;z-index:100";
+    root.setAttribute("data-plugin-shortcut-owner", "foreign-plugin"); mounts.append(root);
+    const unregister = layers.register({ id: "fixture-blocker", kind, rootRef: { current: root } });
+    blockerOff = () => { unregister(); root.remove(); blockerOff = undefined; };
+  },
+  unblockShortcut() { blockerOff?.(); },
+  keyEvents: [],
+  dispose() { off?.(); for (const fn of cleanup.splice(0)) fn(); shortcutPageOff?.(); blockerOff?.(); keyboardOff?.(); controller.abort(); return manager.dispose(); },
 };
-topButton.onclick = () => { try { action.run(viewContext()); } catch (error) { errors.push(String(error)); } };
+topButton.onclick = () => { void manager.runAction("drawing-pad", action, () => viewContext()); };
+window.addEventListener("keydown", event => { layers.getEventOwner(event); }, { capture: true, signal: controller.signal });
+window.addEventListener("keydown", event => {
+  const invoked = dispatchPluginActionShortcut(event, manager, layers);
+  window.fixture.keyEvents.push({ binding: eventBinding(event), invoked, prevented: event.defaultPrevented });
+}, { signal: controller.signal });
 document.querySelector("#settings-open").onclick = showSettings;
 for (const [index, selector] of [[0, "#ink"], [1, "#image-scale"]]) document.querySelector(selector).onblur = async event => {
   if (!settingsSchema) return;
@@ -209,7 +275,7 @@ for (const [index, selector] of [[0, "#ink"], [1, "#image-scale"]]) document.que
 document.addEventListener("keydown", event => {
   if (event.key !== "Escape" || event.defaultPrevented) return;
   const settings = document.querySelector("#settings");
-  if (!settings.hidden) { event.preventDefault(); settings.hidden = true; return; }
+  if (!settings.hidden) { event.preventDefault(); settings.hidden = true; settingsLayerOff?.(); settingsLayerOff = undefined; return; }
   if (surface) { event.preventDefault(); surface.close(); }
 });
 await window.fixture.ready();

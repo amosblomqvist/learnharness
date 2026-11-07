@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { it } from "node:test";
-import type { PluginAction, PluginFrontendContext, PluginNotification, PluginSettingsSchema, PluginSurfaceProps } from "learnharness-plugin-api";
+import type { PluginAction, PluginActionContext, PluginFrontendContext, PluginNotification, PluginSettingsSchema, PluginSurfaceProps } from "learnharness-plugin-api";
 import { activate } from "../src/main.ts";
 function fixture() {
   const signal = new AbortController(), notifications = new Set<(event: PluginNotification) => void>(), events = new Set<(event: unknown) => void>(), resyncs = new Set<() => void>();
@@ -45,6 +45,29 @@ it("older settings notifications/reads cannot replace a newer accepted value", a
     f.setRead(() => ({ revision: 0, inkColor: "#facc15" }));
     for (const fn of f.resyncs) fn(); await new Promise<void>(resolve => queueMicrotask(resolve));
     assert.equal(f.schema()!.rows[0]!.value, "#ffffff"); assert.equal(f.schema()!.rows[1]!.value, 25);
+  } finally { off(); }
+});
+it("Draw declares the approved session shortcut and keyboard invocation toggles the same surface", async () => {
+  const f = fixture(), off = await activate(f.ctx);
+  try {
+    const draw = f.actions.get("draw")!, undo = f.actions.get("undo")!, toggle = f.actions.get("toggle-pen-eraser")!;
+    assert.deepEqual(draw.shortcut, { scope: { sessions: ["teaching", "practice"] }, defaultBinding: "mod+shift+d" });
+    assert.deepEqual(undo.shortcut, { scope: { sessions: ["teaching", "practice"] }, defaultBinding: "mod+z" });
+    assert.deepEqual(toggle.shortcut, { scope: { sessions: ["teaching", "practice"] }, defaultBinding: "mod+shift+e" });
+    const hand = f.actions.get("hand")!;
+    assert.deepEqual(hand.shortcut, { scope: { sessions: ["teaching", "practice"] }, defaultBinding: "mod+shift+h" });
+    const context = { placement: "keyboard", surface: "session", sessionId: "a", kind: "teaching", surfaceTarget: {},
+      view: { messages: [], input: { type: "unavailable" } } } as unknown as PluginActionContext;
+    const disabled = undo.disabled as (context: PluginActionContext) => boolean;
+    assert.equal((toggle.disabled as (context: PluginActionContext) => boolean)(context), true);
+    await toggle.run(context);
+    assert.equal((hand.disabled as (context: PluginActionContext) => boolean)(context), true); await hand.run(context);
+    assert.equal(disabled(context), true); await undo.run(context); assert.equal(f.surface(), undefined);
+    await draw.run(context); assert.equal(f.surface()?.title, "Drawing pad");
+    assert.equal(disabled(context), true, "an unmounted/not-ready surface cannot claim drawing Undo");
+    await draw.run(context); assert.equal(f.surface(), undefined); assert.equal(f.closes(), 1);
+    assert.equal(disabled({ placement: "keyboard", surface: "app", pathname: "/" }), true);
+    assert.equal((hand.disabled as (context: PluginActionContext) => boolean)({ placement: "keyboard", surface: "app", pathname: "/" }), true);
   } finally { off(); }
 });
 it("disposal removes registrations/listeners exactly once", async () => {

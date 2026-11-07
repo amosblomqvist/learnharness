@@ -136,6 +136,13 @@ export function sanitizeSvg(source: string, label: string, language?: Language):
   const naturalWidth = (parsed.documentElement as unknown as SVGElement).style?.width || parsed.documentElement.getAttribute("width");
   if (naturalWidth && LENGTH.test(naturalWidth) && Number.isFinite(parseFloat(naturalWidth)) && parseFloat(naturalWidth) > 0) svg.setAttribute("width", naturalWidth);
   else svg.setAttribute("width", svg.viewBox.baseVal.width.toString());
+  if (language === "tikz") {
+    // The pinned TeX engine's normal font is 10 viewBox units. Chat KaTeX uses
+    // 1.21em, so scale the entire diagram to that same text-relative font size.
+    // em units track surrounding text changes without JS observers or TeX work;
+    // authored relative font sizes, geometry and the tight viewBox stay intact.
+    svg.setAttribute("width", `${svg.viewBox.baseVal.width * (1.21 / 10)}em`);
+  }
   svg.removeAttribute("height");
   svg.setAttribute("role", "img"); svg.setAttribute("aria-label", label);
   svg.setAttribute("preserveAspectRatio", "xMidYMid meet");

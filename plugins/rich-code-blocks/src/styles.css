@@ -20,3 +20,8 @@
   height: auto;
   margin: 0 auto;
 }
+/* Keep TikZ labels at the surrounding math size. The existing overflow:auto
+   wrapper scrolls wide diagrams rather than shrinking their text. */
+.rich-code-blocks--rendered[data-language="tikz"] > svg {
+  max-width: none;
+}

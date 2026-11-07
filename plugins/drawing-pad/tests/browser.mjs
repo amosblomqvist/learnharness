@@ -19,6 +19,12 @@ try {
     define: { "process.env.NODE_ENV": '"production"' }, logLevel: "warning",
     banner: { js: 'globalThis.process ??= { env: { NODE_ENV: "production" } };' },
     plugins: [{ name: "discard-unused-node-only-barrel-import", setup(builder) {
+      // Inject only the React hook's manager context; keep the actual host
+      // dispatcher, shortcut resolver and Keyboard settings component intact.
+      builder.onResolve({ filter: /^\.\/plugins$/ }, args => args.importer === path.join(repo, "components/plugin-shortcuts.tsx")
+        ? { path: path.join(root, "tests/keyboard-context.mjs") } : undefined);
+      if (process.argv.includes("--built")) builder.onResolve({ filter: /^\.\.\/src\/main\.ts$/ }, args =>
+        args.importer === path.join(root, "tests/browser-fixture.mjs") ? { path: path.join(root, "dist/main.js") } : undefined);
       builder.onResolve({ filter: /^node:crypto$/ }, args => ({ path: args.path, external: true, sideEffects: false }));
     } }] });
   assert.doesNotMatch(fs.readFileSync(path.join(evidence, "fixture.js"), "utf8"), /(?:from\s*|import\s*)["']node:/, "the fixture must not retain any Node runtime import");
@@ -86,6 +92,11 @@ try {
     await page.mouse.move(box.x + box.width * .5, box.y + box.height * (.75 + offset), { steps: 8 }); await page.mouse.up();
   };
   const label = () => run(() => document.querySelector("#draw").textContent);
+  const selectedTool = () => run(() => document.querySelector('.drawing-pad-tools button[data-variant="secondary"]')?.getAttribute("aria-label"));
+  const chord = async (key, shift = false, modifier = "Meta", commands) => {
+    await page.keyboard.down(modifier); if (shift) await page.keyboard.down("Shift");
+    await page.keyboard.press(key, commands ? { commands } : {}); if (shift) await page.keyboard.up("Shift"); await page.keyboard.up(modifier);
+  };
   const setScale = async value => {
     await call("showSettings"); await page.$eval("#image-scale", field => { field.focus(); field.select(); });
     await page.keyboard.type(String(value)); await page.click("#blur-target");
@@ -100,6 +111,8 @@ try {
     question: { id: "q", kind: "quiz", question: "Find $x^2$ when $x=3$.", context: "A **read-only** reference.", mode: "single-select",
       options: [{ value: "b", label: "$9$" }, { value: "a", label: "$6$" }], occurrence: { messageId: "mq", contentIndex: 0, toolCallId: "q", toolName: "quiz" } },
     draft: { text: "NEVER CAPTURE LEARNER DRAFT", values: ["a"], thinking: "private thinking" } };
+  assert.deepEqual((await call("actions")).map(action => [action.id, action.shortcut?.defaultBinding]),
+    [["draw", "mod+shift+d"], ["undo", "mod+z"], ["toggle-pen-eraser", "mod+shift+e"], ["hand", "mod+shift+h"]]);
   assert.deepEqual(await run(() => window.fixture.placement.sessions), ["teaching", "practice"]); assert.equal(await label(), "Draw");
   assert.equal(await run(() => window.fixture.saved().imageScale), 50);
   await setScale(100);
@@ -143,6 +156,25 @@ try {
   for (const name of ["Pen", "Eraser", "Hand", "Undo"]) assert.deepEqual(iconButtons.find(button => button.name === name), { name, title: name, text: "", svg: true });
   assert.equal(await run(() => [...document.querySelectorAll(".drawing-pad-tools button")].find(button => button.textContent === "Clear")?.querySelector("svg") === null), true);
   group("Pen/Eraser/Hand/Undo are accessible icon-only controls; Clear remains text");
+
+  const toolbarLayout = await run(() => {
+    const root = document.querySelector(".drawing-pad-root").getBoundingClientRect(), tools = document.querySelector(".drawing-pad-tools").getBoundingClientRect(), canvas = document.querySelector(".drawing-pad-ink"), rect = canvas.getBoundingClientRect();
+    return { root: [root.x, root.y, root.width, root.height], canvas: [rect.x, rect.y, rect.width, rect.height], toolsWidth: tools.width,
+      topFree: document.elementFromPoint(rect.right - 100, rect.top + 16) === canvas,
+      paddingFree: document.elementFromPoint(tools.left + 2, tools.top + 2) === canvas };
+  });
+  assert.deepEqual(toolbarLayout.canvas, toolbarLayout.root); assert.ok(toolbarLayout.toolsWidth < toolbarLayout.canvas[2] / 2);
+  assert.equal(toolbarLayout.topFree, true); assert.equal(toolbarLayout.paddingFree, true);
+  const topCanvas = await (await page.$(".drawing-pad-ink")).boundingBox();
+  await page.mouse.move(topCanvas.x + topCanvas.width - 220, topCanvas.y + 16); await page.mouse.down();
+  await page.mouse.move(topCanvas.x + topCanvas.width - 100, topCanvas.y + 16, { steps: 6 }); await page.mouse.up();
+  assert.ok(await ink() > 100, "the top strip outside the controls is drawable");
+  await page.click('.drawing-pad-tools button[aria-label="Undo"]'); assert.equal(await ink(), 0);
+  await page.mouse.click(topCanvas.x + 2, topCanvas.y + 2); assert.ok(await ink() > 0, "transparent toolbar padding passes pointer input through");
+  await page.click('.drawing-pad-tools button[aria-label="Undo"]'); assert.equal(await ink(), 0);
+  await page.click('.drawing-pad-tools button[aria-label="Hand"]'); assert.equal(await run(() => document.querySelector('.drawing-pad-tools button[aria-label="Hand"]').dataset.variant), "secondary");
+  assert.equal(await ink(), 0, "clicking a tool does not also draw beneath it"); await page.click('.drawing-pad-tools button[aria-label="Pen"]');
+  group("compact top-left controls reserve no row: full-surface top strip/padding draw while buttons remain clickable");
 
   await stroke(); const inkBefore = await ink(); assert.ok(inkBefore > 100); assert.equal(await label(), "Draw (unsent)");
   await close(); assert.equal(await page.$("#pad"), null); assert.equal(await run(() => window.fixture.attempts.length), 0);
@@ -195,7 +227,7 @@ try {
   await cdp.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: box.x + 350, y: box.y + 350, buttons: 1, pointerType: "pen", force: .8 });
   await cdp.send("Input.dispatchMouseEvent", { type: "mouseReleased", x: box.x + 350, y: box.y + 350, button: "left", pointerType: "pen", force: 0 });
   assert.ok(await ink() > beforeTouch); await cdp.detach();
-  group("touch/right-click ignored and browser-generated pressure-pen input draws");
+  group("touch and stationary right-click add no ink; browser-generated pressure-pen input draws");
 
   await button("Clear"); await stroke(); const originalPen = await ink();
   await run(() => document.querySelector(".drawing-pad-ink").addEventListener("pointerdown", event => { window.fixture.lastPenId = event.pointerId; }, { once: true }));
@@ -370,10 +402,11 @@ try {
 
   await call("navigate", "unbounded-world", "teaching", question); await open(); await stroke();
   const initialWorldImage = images(await call("submit", { accept: false }))[0].data;
-  const panBy = async (dx, dy) => {
+  const panBy = async (dx, dy, mouseButton = "left") => {
     const box = await (await page.$(".drawing-pad-ink")).boundingBox();
     const x = box.x + box.width / 2, y = box.y + box.height / 2;
-    await page.mouse.move(x, y); await page.mouse.down(); await page.mouse.move(x + dx, y + dy, { steps: 6 }); await page.mouse.up();
+    await page.mouse.move(x, y); await page.mouse.down({ button: mouseButton });
+    await page.mouse.move(x + dx, y + dy, { steps: 6 }); await page.mouse.up({ button: mouseButton });
   };
   const refPosition = () => run(() => { const r = document.querySelector(".drawing-pad-background").getBoundingClientRect(); return [r.x, r.y, r.width, r.height]; });
   const worldReference = await refPosition(); await button("Hand"); await panBy(200, -100);
@@ -437,6 +470,155 @@ try {
   assert.equal(await run(() => window.fixture.saved().imageScale), 50); assert.match(await run(() => document.querySelector("#setting-error").textContent), /greater than 0/);
   await page.keyboard.press("Escape"); await setScale(100);
   group("scale preference changes only PNG resolution, validates percentages, and never resends unchanged practice ink");
+
+  await call("navigate", "right-pan", "teaching", question); await open(); await stroke();
+  const rightPanImage = images(await call("submit", { accept: false }))[0].data, rightPanInk = await ink();
+  for (const tool of ["Pen", "Eraser", "Hand"]) {
+    await button(tool); const before = await refPosition(); await panBy(120, -60, "right");
+    assert.deepEqual(await refPosition(), [before[0] + 120, before[1] - 60, before[2], before[3]]);
+    assert.equal(await selectedTool(), tool); assert.equal(images(await call("submit", { accept: false }))[0].data, rightPanImage);
+    await panBy(-120, 60, "right"); assert.deepEqual(await refPosition(), before); assert.equal(await ink(), rightPanInk);
+    assert.equal(await run(() => document.querySelector(".drawing-pad-ink").style.cursor), tool === "Hand" ? "grab" : "default");
+  }
+  await button("Undo"); assert.equal(await ink(), 0); assert.equal(await label(), "Draw");
+  group("right-mouse drag pans with Pen/Eraser/Hand without changing tools, PNG content, or Undo history");
+
+  await button("Pen"); await stroke(); const capturedRightImage = images(await call("submit", { accept: false }))[0].data;
+  const rightBox = await (await page.$(".drawing-pad-ink")).boundingBox();
+  const rightDown = async (x, y) => {
+    await run(() => document.querySelector(".drawing-pad-ink").addEventListener("pointerdown", event => { window.fixture.rightPanId = event.pointerId; }, { once: true }));
+    await page.mouse.move(x, y); await page.mouse.down({ button: "right" });
+  };
+  const beforeOutsidePan = await refPosition(); await rightDown(rightBox.x + 50, rightBox.y + 250);
+  assert.equal(await run(() => document.querySelector(".drawing-pad-ink").style.cursor), "grabbing");
+  await chord("z"); await chord("h", true); assert.equal(await selectedTool(), "Pen");
+  assert.equal(await run(() => window.fixture.keyEvents.filter(event => event.binding === "mod+z").at(-1).invoked), false);
+  await page.mouse.move(rightBox.x - 50, rightBox.y + 290, { steps: 5 }); await page.mouse.up({ button: "right" });
+  assert.deepEqual(await refPosition(), [beforeOutsidePan[0] - 100, beforeOutsidePan[1] + 40, beforeOutsidePan[2], beforeOutsidePan[3]]);
+  await panBy(100, -40, "right"); assert.deepEqual(await refPosition(), beforeOutsidePan);
+  const centerX = rightBox.x + rightBox.width / 2, centerY = rightBox.y + rightBox.height / 2;
+  await rightDown(centerX, centerY); await page.mouse.move(centerX + 70, centerY + 30);
+  await page.mouse.down({ button: "left" }); await page.mouse.up({ button: "right" }); const releasedReference = await refPosition();
+  await page.mouse.move(centerX + 150, centerY + 70); await page.mouse.up({ button: "left" });
+  assert.deepEqual(await refPosition(), releasedReference); assert.equal(await selectedTool(), "Pen");
+  await panBy(-70, -30, "right"); assert.deepEqual(await refPosition(), beforeOutsidePan);
+  assert.equal(images(await call("submit", { accept: false }))[0].data, capturedRightImage);
+  group("right-pan captures outside-canvas release, blocks editing commands, and stops when Right releases even with Left held");
+
+  for (const mode of ["cancel", "lost-capture"]) {
+    const before = await refPosition(); await rightDown(centerX, centerY); await page.mouse.move(centerX + 60, centerY - 25);
+    const atCancellation = await refPosition();
+    await page.evaluate(mode => {
+      const canvas = document.querySelector(".drawing-pad-ink"), pointerId = window.fixture.rightPanId;
+      if (mode === "cancel") canvas.dispatchEvent(new PointerEvent("pointercancel", { bubbles: true, pointerId, pointerType: "mouse", button: 2, buttons: 0 }));
+      else canvas.releasePointerCapture(pointerId);
+    }, mode);
+    await page.mouse.move(centerX + 100, centerY + 20); await page.mouse.up({ button: "right" });
+    assert.deepEqual(await refPosition(), atCancellation); assert.equal(await selectedTool(), "Pen");
+    assert.equal(await run(() => document.querySelector(".drawing-pad-ink").style.cursor), "default");
+    await panBy(-60, 25, "right"); assert.deepEqual(await refPosition(), before);
+  }
+  const beforePanReplay = await refPosition(); await rightDown(centerX, centerY); await page.mouse.move(centerX + 40, centerY + 20);
+  await call("replayContent"); await page.mouse.up({ button: "right" }); await waitForSheet();
+  assert.deepEqual(await refPosition(), [beforePanReplay[0] + 40, beforePanReplay[1] + 20, beforePanReplay[2], beforePanReplay[3]]);
+  await panBy(-40, -20, "right"); assert.equal(await selectedTool(), "Pen");
+  assert.equal(images(await call("submit", { accept: false }))[0].data, capturedRightImage);
+  await button("Undo"); assert.equal(await ink(), 0);
+  group("right-pan cancellation, lost pointer capture, and development remount end the gesture without ink or Undo entries");
+
+  await stroke(); await call("submit", { defer: true }); await panBy(80, 50, "right"); await call("ack");
+  assert.equal(await ink(), 0); assert.equal(await label(), "Draw");
+  await panBy(-80, -50, "right"); assert.equal(images(await call("submit", { accept: false })).length, 0);
+  group("right-pan is camera-only: pending teaching acceptance still clears ink and empty pans send no image");
+
+  await call("navigate", "shortcut-proof", "teaching", question);
+  await chord("d", true); await waitForSheet(); await stroke(); const shortcutInk = await ink();
+  await chord("d", true); await page.waitForFunction(() => !document.querySelector("#pad"));
+  await chord("d", true, "Control"); await waitForSheet(); assert.equal(await ink(), shortcutInk);
+  group("real host action registry/dispatcher opens and toggles Draw with Cmd/Ctrl+Shift+D while retaining ink");
+
+  assert.equal(await selectedTool(), "Pen"); await chord("e", true); assert.equal(await selectedTool(), "Eraser");
+  assert.equal(await ink(), shortcutInk); await chord("e", true, "Control"); assert.equal(await selectedTool(), "Pen");
+  await button("Hand"); await chord("e", true); assert.equal(await selectedTool(), "Pen"); assert.equal(await ink(), shortcutInk);
+  group("Cmd/Ctrl+Shift+E toggles Pen/Eraser, switches Hand to Pen, and never changes drawing content");
+
+  await chord("h", true); assert.equal(await selectedTool(), "Hand");
+  await chord("h", true, "Control"); assert.equal(await selectedTool(), "Hand"); assert.equal(await ink(), shortcutInk);
+  await chord("e", true); assert.equal(await selectedTool(), "Pen");
+  await chord("e", true); assert.equal(await selectedTool(), "Eraser");
+  await chord("h", true); assert.equal(await selectedTool(), "Hand");
+  await chord("e", true); assert.equal(await selectedTool(), "Pen"); assert.equal(await ink(), shortcutInk);
+  group("Cmd/Ctrl+Shift+H selects Hand without toggling off or changing ink; Pen/Eraser binding remains unchanged");
+
+  await call("showKeyboard");
+  for (const [id, name] of [["draw", "Draw"], ["undo", "Undo drawing"], ["toggle-pen-eraser", "Toggle pen/eraser"], ["hand", "Hand"]]) {
+    const selector = `[data-testid="kbd-row-plugin:drawing-pad:${id}"]`;
+    await page.waitForSelector(selector); assert.ok((await page.$eval(selector, row => row.textContent)).includes(name));
+  }
+  await page.click('[data-testid="kbd-rebind-plugin:drawing-pad:toggle-pen-eraser"]'); await chord("p", true);
+  await page.waitForSelector('[data-testid="kbd-reset-plugin:drawing-pad:toggle-pen-eraser"]');
+  await call("hideKeyboard"); await page.focus(".drawing-pad-viewport"); await chord("e", true); assert.equal(await selectedTool(), "Pen");
+  await chord("p", true); assert.equal(await selectedTool(), "Eraser");
+  await call("showKeyboard"); await page.waitForSelector('[data-testid="kbd-reset-plugin:drawing-pad:toggle-pen-eraser"]');
+  await page.click('[data-testid="kbd-reset-plugin:drawing-pad:toggle-pen-eraser"]'); await call("hideKeyboard");
+  await page.focus(".drawing-pad-viewport"); await chord("e", true); assert.equal(await selectedTool(), "Pen");
+  group("all four Drawing Pad actions appear in real host Keyboard Settings and its Rebind/Reset controls work");
+  await call("showKeyboard"); await page.waitForSelector('[data-testid="kbd-rebind-plugin:drawing-pad:hand"]');
+  await page.click('[data-testid="kbd-rebind-plugin:drawing-pad:hand"]'); await chord("j", true);
+  await page.waitForSelector('[data-testid="kbd-reset-plugin:drawing-pad:hand"]'); await call("hideKeyboard");
+  await page.focus(".drawing-pad-viewport"); await chord("h", true); assert.equal(await selectedTool(), "Pen");
+  await chord("j", true); assert.equal(await selectedTool(), "Hand");
+  await call("showKeyboard"); await page.waitForSelector('[data-testid="kbd-clear-plugin:drawing-pad:hand"]');
+  await page.click('[data-testid="kbd-clear-plugin:drawing-pad:hand"]'); await call("hideKeyboard");
+  await button("Pen"); await chord("j", true); assert.equal(await selectedTool(), "Pen");
+  await call("showKeyboard"); await page.waitForSelector('[data-testid="kbd-reset-plugin:drawing-pad:hand"]');
+  await page.click('[data-testid="kbd-reset-plugin:drawing-pad:hand"]'); await call("hideKeyboard");
+  await page.focus(".drawing-pad-viewport"); await chord("h", true); assert.equal(await selectedTool(), "Hand");
+  await chord("e", true); assert.equal(await selectedTool(), "Pen");
+  group("Hand obeys actual Keyboard Settings Rebind/Clear/Reset and restores its default shortcut");
+
+  for (const [tag, inside] of [["input", true], ["textarea", false], ["div", true]]) {
+    await page.evaluate(({ tag, inside }) => {
+      const field = document.createElement(tag); field.id = "shortcut-editor";
+      if (tag === "div") field.contentEditable = "true";
+      field.style.cssText = "position:fixed;top:150px;left:500px;width:200px;height:40px;z-index:200;background:#333;color:white";
+      (inside ? document.querySelector(".drawing-pad-root") : document.body).append(field);
+    }, { tag, inside });
+    await page.focus("#shortcut-editor"); await page.keyboard.type("native typing");
+    const textBefore = await run(() => document.querySelector("#shortcut-editor").value ?? document.querySelector("#shortcut-editor").textContent);
+    await chord("h", true); await chord("e", true); assert.equal(await selectedTool(), "Pen");
+    // Headless Chrome has no OS Edit menu accelerator: attach Blink's native
+    // Undo command to the real key event. preventDefault would still block it.
+    await chord("z", false, "Meta", ["Undo"]);
+    assert.notEqual(await run(() => document.querySelector("#shortcut-editor").value ?? document.querySelector("#shortcut-editor").textContent), textBefore);
+    assert.equal(await ink(), shortcutInk); assert.equal(await run(() => window.fixture.keyEvents.filter(event => event.binding === "mod+z").at(-1).invoked), false);
+    await run(() => document.querySelector("#shortcut-editor").remove());
+  }
+  await page.focus(".drawing-pad-viewport"); await chord("z"); assert.equal(await ink(), 0);
+  group("Cmd+Z leaves real input/textarea/contenteditable Undo intact and undoes ink only with drawing focus");
+
+  await stroke(); await call("rebind", "undo", "mod+shift+u"); await chord("z"); assert.ok(await ink() > 0);
+  await chord("u", true); assert.equal(await ink(), 0);
+  await stroke(); await call("rebind", "undo", ""); await chord("z"); assert.ok(await ink() > 0);
+  await call("resetBindings"); await chord("z", false, "Control"); assert.equal(await ink(), 0);
+  group("Undo obeys host rebind/clear/reset with no leftover hard-coded canvas shortcut");
+
+  await stroke(); const blockedInk = await ink();
+  for (const kind of ["modal", "popup", "view"]) {
+    await call("blockShortcut", kind); await chord("z"); await chord("d", true); await chord("e", true); await chord("h", true);
+    assert.equal(await selectedTool(), "Pen"); assert.ok(await page.$("#pad")); assert.equal(await ink(), blockedInk); await call("unblockShortcut");
+  }
+  await page.focus(".drawing-pad-viewport");
+  const dragBox = await (await page.$(".drawing-pad-ink")).boundingBox();
+  await page.mouse.move(dragBox.x + dragBox.width * .8, dragBox.y + dragBox.height * .4); await page.mouse.down();
+  await chord("z"); assert.equal(await run(() => window.fixture.keyEvents.filter(event => event.binding === "mod+z").at(-1).invoked), false);
+  await chord("e", true); await chord("h", true); assert.equal(await selectedTool(), "Pen");
+  await page.mouse.up(); await chord("z"); assert.equal(await ink(), blockedInk);
+  await chord("z"); assert.equal(await ink(), 0);
+  await chord("d", true); await page.waitForFunction(() => !document.querySelector("#pad"));
+  await chord("z"); assert.equal(await run(() => window.fixture.keyEvents.filter(event => event.binding === "mod+z").at(-1).invoked), false);
+  await chord("h", true); assert.equal(await run(() => window.fixture.keyEvents.filter(event => event.binding === "mod+shift+h").at(-1).invoked), false);
+  group("editing shortcuts fail closed during gestures, with a closed pad, and behind modal/popup/foreign surfaces");
 
   await call("navigate", "font-response-failure", "teaching", question); await run(() => { window.fixture.fontFetchMode = "html"; });
   await page.click("#draw"); await page.waitForFunction(() => document.querySelector('.drawing-pad-status[role="alert"]'));
