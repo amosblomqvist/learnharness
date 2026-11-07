@@ -27,7 +27,10 @@ export interface NoteEdition {
 	writtenAt: string;
 	document: NoteDocument;
 }
-export type NoteMode = "live" | "final";
+export type NoteMode = "handout" | "liveNotes";
+export type NotesAction =
+	| { action: "generate-handout" | "retry-handout-pdf" | "update-live-notes" }
+	| { action: "set-live-notes-enabled"; enabled: boolean };
 export interface NotesRun {
 	id: string;
 	chatId: string;
@@ -38,35 +41,35 @@ export interface NotesRun {
 	usage?: JobUsage;
 }
 export interface SessionNotesRecord {
-	liveEnabled: boolean;
-	live: NoteEdition | null;
-	final: NoteEdition | null;
-	pending?: NoteEdition;
+	liveNotesEnabled: boolean;
+	liveNotes: NoteEdition | null;
+	handout: NoteEdition | null;
+	pendingHandout?: NoteEdition;
 	topics: Record<string, string>;
 	error: Partial<Record<NoteMode, string>>;
-	failedLive?: string;
+	failedLiveNotes?: string;
 	usage: { at: string; mode: NoteMode; model: string; step: CallUsage }[];
 }
 export interface NotesView {
-	liveEnabled: boolean;
-	live: NoteEdition | null;
-	final: NoteEdition | null;
+	liveNotesEnabled: boolean;
+	liveNotes: NoteEdition | null;
+	handout: NoteEdition | null;
 	eligible: boolean;
-	outdated: boolean;
+	handoutOutdated: boolean;
 	running: NoteMode[];
 	error: Partial<Record<NoteMode, string>>;
-	pdfPending: boolean;
+	handoutPdfPending: boolean;
 	usage: { mode: NoteMode; calls: number; tokens?: number }[];
 }
 export const emptyNotesView = (): NotesView => ({
-	liveEnabled: false,
-	live: null,
-	final: null,
+	liveNotesEnabled: false,
+	liveNotes: null,
+	handout: null,
 	eligible: false,
-	outdated: false,
+	handoutOutdated: false,
 	running: [],
 	error: {},
-	pdfPending: false,
+	handoutPdfPending: false,
 	usage: [],
 });
 export interface NotePassage {
@@ -84,6 +87,12 @@ export function noteSectionText(section: WrittenSection): string {
 }
 export function noteHref(chatId: string, mode: NoteMode, sectionId?: string): string {
 	return `/chat/${encodeURIComponent(chatId)}?notes=${mode}${sectionId ? `&section=${encodeURIComponent(sectionId)}` : ""}`;
+}
+/** Accept older links at the navigation boundary; the rest of the app uses the tab names. */
+export function noteModeFromQuery(value: unknown): NoteMode | undefined {
+	if (value === "handout" || value === "final") return "handout";
+	if (value === "liveNotes" || value === "live") return "liveNotes";
+	return undefined;
 }
 export interface NoteIndexEntry {
 	chatId: string;

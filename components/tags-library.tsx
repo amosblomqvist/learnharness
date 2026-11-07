@@ -11,7 +11,6 @@ import {
 	matchingPassage,
 	noteHref,
 	noteTextHtml,
-	placementOf,
 	type LibraryScope,
 	type NoteIndexEntry,
 	type OrganizationAction,
@@ -37,7 +36,7 @@ type Library = SourceDirectory & { notes: NoteIndexEntry[] };
 type Editor =
 	| { kind: "tag"; tag?: SourceTag }
 	| { kind: "folder"; folder?: SourceFolder }
-	| { kind: "move" | "rename"; id: string }
+	| { kind: "rename"; id: string }
 	| { kind: "delete"; item: SourceTag | SourceFolder; type: "tag" | "folder" };
 export function TagsLibrary() {
 	const [library, setLibrary] = useState<Library>(),
@@ -62,7 +61,7 @@ export function TagsLibrary() {
 			if (token !== version.current) return;
 			setLibrary(data);
 			setFailure("");
-			setSelected(ids => ids.filter(id => data.sources.some(s => s.id === id)));
+			setSelected(ids => ids.filter(id => data.sources.some(s => s.id === id && s.kind !== "missing")));
 		} catch (e) {
 			if (token === version.current) setFailure((e as Error).message);
 		}
@@ -104,8 +103,6 @@ export function TagsLibrary() {
 			} else {
 				if (editor.kind === "folder") action = { action: "create-folder", name, parentId: parent || null };
 				else if (editor.kind === "rename") action = { action: "rename-source", id: editor.id, name };
-				else if (editor.kind === "move")
-					action = { action: "move", kind: "source", id: editor.id, parentId: parent || null };
 				else if (editor.kind === "delete")
 					action = { action: editor.type === "tag" ? "delete-tag" : "delete-folder", id: editor.item.id };
 				else return;
@@ -214,13 +211,16 @@ export function TagsLibrary() {
 					<button className={navClass(scope.kind === "all") + " w-full"} onClick={() => select({ kind: "all" })}>
 						All material
 					</button>
+					<button className={navClass(scope.kind === "untagged") + " w-full"} onClick={() => select({ kind: "untagged" })}>
+						Untagged
+					</button>
 					{branch(null)}
 				</nav>
 				<main className="min-w-0 overflow-auto p-4 md:p-7">
 					<div className="mx-auto max-w-5xl">
 						<div className="mb-4 flex flex-wrap items-center gap-2">
 							<h1 className="mr-auto text-xl font-semibold">
-								{tag ? <TagMark tag={tag} /> : (folder?.name ?? "All material")}
+								{tag ? <TagMark tag={tag} /> : (folder?.name ?? (scope.kind === "untagged" ? "Untagged" : "All material"))}
 							</h1>
 							{(tag || folder) && (
 								<>
@@ -270,24 +270,9 @@ export function TagsLibrary() {
 									</button>
 								)}
 								{single && (
-									<>
-										<button
-											className={tagControl}
-											onClick={() =>
-												begin({ kind: "move", id: single.id }, "", placementOf(org!, single.id)?.folderId)
-											}
-										>
-											Move
-										</button>
-										{single.kind !== "missing" && (
-											<button
-												className={tagControl}
-												onClick={() => begin({ kind: "rename", id: single.id }, single.label ?? "")}
-											>
-												Rename
-											</button>
-										)}
-									</>
+									<button className={tagControl} onClick={() => begin({ kind: "rename", id: single.id }, single.label ?? "")}>
+										Rename
+									</button>
 								)}
 							</div>
 						)}
@@ -307,7 +292,7 @@ export function TagsLibrary() {
 										<input
 											className="mt-1.5"
 											type="checkbox"
-											aria-label={`Select ${label}${source.kind === "missing" ? ` (${source.id})` : ""}`}
+											aria-label={`Select ${label}`}
 											checked={selected.includes(source.id)}
 											onChange={e =>
 												setSelected(ids =>
@@ -321,13 +306,11 @@ export function TagsLibrary() {
 													{label}
 												</Link>
 											) : (
-												<span className="font-medium" title={source.kind === "missing" ? source.id : undefined}>{label}</span>
+												<span className="font-medium">{label}</span>
 											)}
 											<div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
 												<span>
-													{source.kind === "missing"
-														? "Original source unavailable"
-														: source.kind === "notes"
+													{source.kind === "notes"
 															? "Imported file"
 															: source.chatKind === "practice"
 																? "Practice"
@@ -346,7 +329,7 @@ export function TagsLibrary() {
 										</div>
 										{notes[0] && (
 											<Link className={tagControl} href={noteHref(source.id, notes[0].mode)}>
-												{notes[0].mode === "final" ? "Open handout" : "Live notes"}
+												{notes[0].mode === "handout" ? "Open handout" : "Live notes"}
 											</Link>
 										)}
 									</div>
@@ -383,9 +366,7 @@ export function TagsLibrary() {
 									: "Create folder"
 								: editor.kind === "delete"
 									? `Remove ${editor.item.name}?`
-									: editor.kind === "rename"
-										? "Rename item"
-										: "Move item"
+									: "Rename item"
 					}
 					close={() => setEditor(undefined)}
 				>
@@ -421,7 +402,7 @@ export function TagsLibrary() {
 									/>
 								</label>
 							)}
-							{(editor.kind === "move" || editor.kind === "folder") && (
+							{editor.kind === "folder" && (
 								<label className="grid gap-1.5 text-xs text-muted-foreground">
 									Parent folder
 									<FolderSelect
@@ -442,7 +423,7 @@ export function TagsLibrary() {
 								<p className="text-sm">
 									{editor.type === "tag"
 										? "Remove this label from all tagged items."
-										: "Only empty folders can be removed."}
+										: "Only folders without tags or subfolders can be removed."}
 								</p>
 							)}
 							{editError && <p role="alert">{editError}</p>}

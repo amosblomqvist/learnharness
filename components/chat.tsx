@@ -53,7 +53,7 @@ import { PlanMarginalia, planExists } from "@/components/plan-window";
 import { MermaidOverlay, SessionMermaidContext } from "@/components/session-overlay";
 import { AbortTurnDialog, type AbortMode } from "@/components/abort-turn-dialog";
 import { ArrowRightIcon, BookOpenIcon, DumbbellIcon, TagsIcon, WaypointsIcon } from "lucide-react";
-import type { PlanBlockData } from "@/src/core";
+import type { NoteMode, PlanBlockData } from "@/src/core";
 import { QuestionDock } from "@/components/question-dock";
 import { SessionFind } from "@/components/session-find";
 import { SessionMessageNavigation } from "@/components/session-navigation";
@@ -228,7 +228,7 @@ export function Chat({
 }: {
 	chatId: string;
 	title: string;
-	requestedNotes?: "live" | "final";
+	requestedNotes?: NoteMode;
 	requestedSection?: string;
 	initialMessages: LhMessage[];
 	/** Memory-only settlement notice supplied on reopening. */
@@ -258,7 +258,7 @@ export function Chat({
 		if (requestedNotes) setNoteLocation({ mode: requestedNotes, sectionId: requestedSection });
 	}, [requestedNotes, requestedSection]);
 	const planNotes = new Map<string, NoteLocation>();
-	for (const mode of ["live", "final"] as const) {
+	for (const mode of ["liveNotes", "handout"] as const) {
 		for (const section of notes.view[mode]?.document.sections ?? []) {
 			for (const id of section.nodeIds) planNotes.set(id, { mode, sectionId: section.id });
 		}
@@ -1382,7 +1382,7 @@ export function Chat({
 						type="button"
 						aria-expanded={!!noteLocation}
 						className={SESSION_HEADER_BUTTON}
-						onClick={() => setNoteLocation(noteLocation ? null : { mode: notes.view.final || !notes.view.liveEnabled ? "final" : "live" })}
+						onClick={() => setNoteLocation(noteLocation ? null : { mode: notes.view.handout || !notes.view.liveNotesEnabled ? "handout" : "liveNotes" })}
 					>
 						<BookOpenIcon className="size-3.5 text-primary" aria-hidden />
 						Notes

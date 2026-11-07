@@ -9,7 +9,7 @@ import { emptyNotesView, type NotesView } from "../src/core/session-notes.ts";
 
 function savedNotes(): NotesView {
 	const edition = (title: string) => ({ document: { title, overview: "", sections: [] }, fingerprint: title, writtenAt: "now" });
-	return { ...emptyNotesView(), eligible: true, final: edition("Saved handout"), live: edition("Live draft") };
+	return { ...emptyNotesView(), eligible: true, handout: edition("Saved handout"), liveNotes: edition("Live draft") };
 }
 
 async function withPanel(fetcher: typeof fetch, check: () => Promise<void>) {
@@ -23,7 +23,7 @@ async function withPanel(fetcher: typeof fetch, check: () => Promise<void>) {
 	const root = createRoot(document.getElementById("app")!);
 	function Harness() {
 		const notes = useSessionNotes("lesson");
-		const [location, navigate] = useState<NoteLocation>({ mode: "final" });
+		const [location, navigate] = useState<NoteLocation>({ mode: "handout" });
 		return <NotesPanel chatId="lesson" notes={notes} location={location} navigate={navigate} close={() => {}} />;
 	}
 	try {
@@ -50,14 +50,14 @@ async function click(label: string) {
 	await act(async () => element.click());
 }
 
-it("keeps navigation read-only and sends live controls only to live actions, with PDF actions only in Handout", async () => {
+it("keeps navigation read-only and scopes live notes controls to live notes actions, with PDF actions only in Handout", async () => {
 	const view = savedNotes();
 	const writes: unknown[] = [];
 	await withPanel(async (_url, init) => {
 		if (init?.method === "POST") {
 			const action = JSON.parse(init.body as string);
 			writes.push(action);
-			if (action.action === "set-live") view.liveEnabled = action.enabled;
+			if (action.action === "set-live-notes-enabled") view.liveNotesEnabled = action.enabled;
 		}
 		return Response.json(view);
 	}, async () => {
@@ -71,7 +71,7 @@ it("keeps navigation read-only and sends live controls only to live actions, wit
 		assert.equal(button("Regenerate handout"), undefined);
 		assert.match(document.body.textContent!, /Paused/);
 		await click("Update now");
-		assert.deepEqual(writes, [{ action: "update-live" }]);
+		assert.deepEqual(writes, [{ action: "update-live-notes" }]);
 		assert.match(document.body.textContent!, /Live draft/);
 		assert.ok(button("Resume live notes"), "a manual refresh leaves automatic updates paused");
 		await click("Resume live notes");
@@ -80,10 +80,10 @@ it("keeps navigation read-only and sends live controls only to live actions, wit
 		await click("Handout");
 		await click("Regenerate handout");
 		assert.deepEqual(writes, [
-			{ action: "update-live" },
-			{ action: "set-live", enabled: true },
-			{ action: "set-live", enabled: false },
-			{ action: "generate" },
+			{ action: "update-live-notes" },
+			{ action: "set-live-notes-enabled", enabled: true },
+			{ action: "set-live-notes-enabled", enabled: false },
+			{ action: "generate-handout" },
 		]);
 		assert.equal(document.querySelector("a[download]")?.getAttribute("href"), "/api/chats/lesson/notes/pdf");
 	});
@@ -91,9 +91,9 @@ it("keeps navigation read-only and sends live controls only to live actions, wit
 
 it("shows generation progress, PDF retries, and request failures only with their own edition", async () => {
 	const view = savedNotes();
-	view.running = ["final"];
-	view.pdfPending = true;
-	view.error.live = "Earlier live failure";
+	view.running = ["handout"];
+	view.handoutPdfPending = true;
+	view.error.liveNotes = "Earlier live failure";
 	await withPanel(async (_url, init) => init?.method === "POST"
 		? Response.json({ error: "Live refresh refused" }, { status: 409 })
 		: Response.json(view), async () => {

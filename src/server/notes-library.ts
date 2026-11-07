@@ -23,7 +23,7 @@ export function noteIndex(nodeId?: string, sessionIds?: string[]): NoteIndexEntr
 	for (const chatId of ids) {
 		const state = stores.notesStore.read(chatId);
 		const seen = new Set<string>();
-		for (const mode of ["final", "live"] as NoteMode[]) {
+		for (const mode of ["handout", "liveNotes"] as NoteMode[]) {
 			const edition = state[mode];
 			if (!edition) continue;
 			for (const [i, section] of edition.document.sections.entries()) {

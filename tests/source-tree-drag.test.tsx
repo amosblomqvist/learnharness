@@ -1,89 +1,71 @@
-import React, { act } from "react";
+import React, { act, useState } from "react";
 (globalThis as Record<string, unknown>).React = React;
 import assert from "node:assert/strict";
 import { afterEach, it } from "node:test";
 import { createRoot, type Root } from "react-dom/client";
 import { parseHTML } from "linkedom";
 import { ChainTableBody } from "../components/chain-table.tsx";
-import type { OrganizationAction, SourceDirectory } from "../src/core/index.ts";
+import { toggleSourceEntries, type SourceDirectory, type SourceEntrySelection } from "../src/core/index.ts";
 const dom = parseHTML("<html><body></body></html>");
-Object.assign(globalThis, {
-	window: dom.window, document: dom.document, Element: dom.window.Element, IS_REACT_ACT_ENVIRONMENT: true,
-	getComputedStyle: () => ({ fontFamily: "monospace" }),
-	requestAnimationFrame: (cb: FrameRequestCallback) => { queueMicrotask(() => cb(0)); return 1; },
-});
-dom.window.HTMLInputElement.prototype.select = function () {};
+Object.assign(globalThis, { window: dom.window, self: dom.window, document: dom.document, Element: dom.window.Element, IS_REACT_ACT_ENVIRONMENT: true });
 const directory: SourceDirectory = {
-	organization: { version: 1, folders: [
-		{ id: "f1", name: "Outer", parentId: null, createdAt: "2026-10-30" },
-		{ id: "f2", name: "Inner", parentId: "f1", createdAt: "2026-10-30" },
-	], placements: { a: { folderId: "f2" }, b: { folderId: null } } },
-	sources: [{ id: "a", kind: "notes", label: "Source A", createdAt: "2026-10-30" }, { id: "b", kind: "notes", label: "Source B", createdAt: "2026-10-30" }],
+	organization: { version: 2, folders: [
+		{ id: "f1", name: "School", parentId: null, createdAt: "2026-10-30" },
+		{ id: "f2", name: "Semester", parentId: "f1", createdAt: "2026-10-30" },
+	], tags: [{ id: "course", name: "Course", parentId: "f2" }, { id: "review", name: "Review", parentId: "f2" }],
+	placements: { a: { tagIds: ["course", "review"] }, b: { tagIds: ["review"] } } },
+	sources: ["a", "b"].map(id => ({ id, kind: "notes", label: `Source ${id}`, createdAt: "2026-10-30" })),
 };
 let root: Root | undefined, host: HTMLDivElement | undefined;
-let actions: OrganizationAction[];
-async function mount() {
-	actions = []; host = document.createElement("div"); document.body.appendChild(host); root = createRoot(host);
-	await act(async () => { root!.render(<ChainTableBody directory={directory} onOrganizationChange={async (a) => { actions.push(a); }}
-		nodes={[{ id: "n1", name: "Node", statement: "Statement", aliases: [], provenance: [{ chatId: "a", messageId: "m1" }], createdAt: "2026-10-30" }]}
-		chains={[]} sessions={{}} fileSources={{}} query="" onQuery={() => {}} sort={{ col: "name", dir: 1 }} onSort={() => {}} selection={new Set()}
-		expandedClusters={new Set(["f1", "f2", "a"])} expandedChains={new Set(["n1"])} onToggleCluster={() => {}} onToggleChain={() => {}}
-		onToggleNodes={() => {}} onClear={() => {}} onDelete={() => {}} onClose={() => {}} />); });
+let selectedNodes: string[] = [];
+async function mount(selectMode = false) {
+	host = document.createElement("div"); document.body.appendChild(host); root = createRoot(host); selectedNodes = [];
+	function Harness() {
+		const [entries, setEntries] = useState<SourceEntrySelection>({ sources: new Set(), folders: new Set() });
+		const toggle = (kind: "folder" | "tag" | "source", id: string, next: boolean) => setEntries(p => toggleSourceEntries(directory, p, kind, id, next));
+		return <ChainTableBody directory={directory} selectMode={selectMode}
+			nodes={["a", "b"].map(id => ({ id: `n_${id}`, name: id, statement: id, aliases: [], provenance: [{ chatId: id, messageId: "m" }], createdAt: "2026-10-30" }))}
+			chains={[]} sessions={{}} fileSources={{}} query="" onQuery={() => {}} sort={{ col: "name", dir: 1 }} onSort={() => {}} selection={new Set()}
+			expandedClusters={new Set(["f1", "f2", JSON.stringify(["tag", "course"]), JSON.stringify(["tag", "review"]), JSON.stringify(["tag", "course", "source", "a"]), JSON.stringify(["tag", "review", "source", "a"])])}
+			expandedChains={new Set(["n_a"])} onToggleCluster={() => {}} onToggleChain={() => {}}
+			selectedSources={entries.sources} selectedFolders={entries.folders} onToggleSource={(id, next) => toggle("source", id, next)}
+			onToggleFolder={(id, next) => toggle("folder", id, next)} onToggleTag={(id, next) => toggle("tag", id, next)}
+			onToggleNodes={ids => { selectedNodes = ids; }} onClear={() => {}} onDelete={() => {}} onClose={() => {}} />;
+	}
+	await act(async () => root!.render(<Harness />));
 }
-afterEach(async () => { await act(async () => { root?.unmount(); }); root = undefined; host?.remove(); });
-function transfer() {
-	const data = new Map<string, string>();
-	return { types: [] as string[], effectAllowed: "", dropEffect: "", preview: undefined as HTMLElement | undefined,
-		setData(type: string, value: string) { data.set(type, value); this.types.push(type); }, getData(type: string) { return data.get(type) ?? ""; },
-		setDragImage(element: HTMLElement) { this.preview = element; } };
+afterEach(async () => { await act(async () => root?.unmount()); root = undefined; host?.remove(); });
+async function check(id: string) {
+	const checkbox = document.querySelector<HTMLInputElement>(`[data-testid="${id}"]`)!;
+	assert.ok(checkbox); checkbox.checked = !checkbox.checked;
+	await act(async () => checkbox.dispatchEvent(new dom.window.Event("click", { bubbles: true })));
 }
-async function fire(selector: string, type: string, data: ReturnType<typeof transfer>) {
-	const target = document.querySelector(selector); assert.ok(target, selector);
-	const event = new dom.window.Event(type, { bubbles: true, cancelable: true }); Object.defineProperty(event, "dataTransfer", { value: data });
-	Object.defineProperty(event, "clientX", { value: 100 }); Object.defineProperty(event, "clientY", { value: 100 });
-	await act(async () => { target.dispatchEvent(event); }); return event;
-}
-
-it("dragging the name moves the item with an icon/name-only preview, not the whole row", async () => {
-	await mount(); const data = transfer();
-	await fire('[data-source-drag-row="b"] button[title="Rename"]', "dragstart", data);
-	assert.deepEqual(JSON.parse(data.getData("application/x-learnharness-source")), { kind: "source", id: "b" });
-	assert.equal(data.effectAllowed, "move"); assert.equal(data.preview?.textContent, "Source B");
-	assert.equal(data.preview?.querySelectorAll("svg").length, 1); assert.equal(data.preview?.querySelectorAll("input,button").length, 0);
-	assert.equal(document.querySelector('[data-testid="source-name-input"]'), null, "a drag does not enter rename mode");
+it("provides no drag/drop path that can silently move material into a folder", async () => {
+	await mount();
+	assert.equal(document.querySelector('[draggable="true"]'), null);
+	assert.equal(document.querySelector('[data-source-drag-row]'), null);
+	assert.equal(document.querySelector('[data-testid="add-source-folder"]'), null);
+	const before = structuredClone(directory);
+	const event = new dom.window.Event("drop", { bubbles: true, cancelable: true });
+	Object.defineProperty(event, "dataTransfer", { value: { getData: () => JSON.stringify({ kind: "source", id: "b" }) } });
+	await act(async () => document.querySelector('[data-testid="folder-row-f1"]')!.dispatchEvent(event));
+	assert.equal(event.defaultPrevented, false);
+	assert.deepEqual(directory, before);
+	assert.equal(document.querySelector('a[href="/tags"]')?.textContent, "Organize in Tags");
 });
-
-it("folder contents, including expanded propositions, drop into their containing folder with stable background feedback", async () => {
-	await mount(); const data = transfer();
-	await fire('[data-source-drag-row="b"]', "dragstart", data);
-	await fire('[data-testid="prop-row-n1"]', "dragover", data);
-	assert.equal(document.querySelector('[data-testid="folder-row-f2"]')?.getAttribute("data-drop-active"), "true");
-	assert.equal(document.querySelector('[data-testid="folder-row-f1"]')?.getAttribute("data-drop-active"), "false");
-	await fire('[data-testid="prop-row-n1"]', "drop", data);
-	assert.deepEqual(actions, [{ action: "move", kind: "source", id: "b", parentId: "f2" }]);
-	assert.equal(document.querySelector('[data-drop-active="true"]'), null);
+it("shares selection across tag appearances and gives every visible navigation row a unique key", async () => {
+	await mount();
+	assert.equal(document.querySelectorAll('[data-testid="cluster-checkbox-a"]').length, 2);
+	const keys = [...document.querySelectorAll<HTMLElement>('[data-chain-nav-row]')].map(e => e.dataset.chainNavRow);
+	assert.equal(new Set(keys).size, keys.length);
+	await check("tag-checkbox-course");
+	for (const checkbox of document.querySelectorAll<HTMLInputElement>('[data-testid="cluster-checkbox-a"]')) assert.equal(checkbox.checked, true);
+	await check("tag-checkbox-review");
+	assert.match(document.querySelector('[data-testid="chain-selected-summary"]')!.textContent!, /2 sources/);
 });
-
-it("folder headers and unlabelled blank space below the tree accept folder/root placement", async () => {
-	await mount(); const data = transfer(); await fire('[data-source-drag-row="b"]', "dragstart", data);
-	await fire('[data-testid="folder-row-f1"]', "drop", data);
-	await fire('[data-testid="source-root-drop"]', "drop", data);
-	assert.deepEqual(actions, [{ action: "move", kind: "source", id: "b", parentId: "f1" }, { action: "move", kind: "source", id: "b", parentId: null }]);
-	assert.equal(document.querySelector('[data-testid="source-root-drop"]')?.textContent, "");
-});
-
-it("dragging a folder onto its descendants neither highlights nor performs an invalid move", async () => {
-	await mount(); const data = transfer(); await fire('[data-source-drag-row="f1"]', "dragstart", data);
-	await fire('[data-testid="prop-row-n1"]', "dragover", data);
-	assert.equal(data.dropEffect, "none"); assert.equal(document.querySelector('[data-drop-active="true"]'), null);
-	await fire('[data-testid="prop-row-n1"]', "drop", data); assert.deepEqual(actions, []);
-});
-
-it("rename mode removes the drag surface and input chrome, retaining native text-selection gestures", async () => {
-	await mount(); await act(async () => { (document.querySelector('[data-source-drag-row="b"] button[title="Rename"]') as HTMLElement).click(); });
-	const row = document.querySelector('[data-source-drag-row="b"]')!;
-	assert.equal(row.getAttribute("draggable"), "false");
-	const input = row.querySelector('[data-testid="source-name-input"]')!; assert.match(input.className, /border-0 bg-transparent p-0/); assert.doesNotMatch(input.className, /rounded|focus:border/);
-	const data = transfer(); const event = await fire('[data-testid="source-name-input"]', "dragstart", data);
-	assert.equal(event.defaultPrevented, true); assert.equal(data.types.length, 0); assert.equal(data.preview, undefined);
+it("practice folder selection deduplicates nodes shared by multiple tags", async () => {
+	await mount(true);
+	await check("folder-checkbox-f1");
+	assert.deepEqual(new Set(selectedNodes), new Set(["n_a", "n_b"]));
+	assert.equal(selectedNodes.length, 2);
 });

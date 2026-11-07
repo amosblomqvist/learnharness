@@ -1,6 +1,6 @@
 import { notFound } from "next/navigation";
 import { Chat } from "@/components/chat";
-import { slotsConfigured } from "@/src/core";
+import { noteModeFromQuery, slotsConfigured } from "@/src/core";
 import { compactionInFlight, getChat, isTurnRunning, readSettingsRecord, turnFailure } from "@/src/server";
 
 export const dynamic = "force-dynamic";
@@ -32,7 +32,7 @@ export default async function ChatPage({
 			initialError={turnFailure(chat.id)}
 			initialConfigured={slotsConfigured(record?.models)}
 			initialPrompt={prompt}
-			requestedNotes={notes === "live" || notes === "final" ? notes : undefined}
+			requestedNotes={noteModeFromQuery(notes)}
 			requestedSection={typeof section === "string" ? section : undefined}
 			// A teacher turn that outlived its client: the remounted view must
 			// attach (busy shimmer + poll), never resurrect the stale record.

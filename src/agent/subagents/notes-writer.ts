@@ -81,7 +81,7 @@ export async function writeSessionNotes(opts: {
 		opts.passages.filter(p => p.graphNodeIds?.length).map(p => [p.topic, p.graphNodeIds!]),
 	);
 	const limit = Math.max(1200, Math.min(96_000, Math.floor((engine.model.contextWindow - 2000) * 1.4)));
-	const live = mode === "live";
+	const isLiveNotes = mode === "liveNotes";
 	const submit = (lines: EvidenceLine[], instruction: string) => {
 		const allowed = new Set(lines.flatMap(line => line.ids));
 		return withBgLlmSlot(signal, () =>
@@ -96,15 +96,15 @@ export async function writeSessionNotes(opts: {
 				toolDescription: "Submit the overview and supported lecture-note sections.",
 				parameters: schema,
 				fill: input => input,
-				neverSubmitted: "The notes writer did not submit a handout.",
+				neverSubmitted: "The notes writer did not submit notes.",
 				onStep: (usage, model) => opts.onUsage(usage, model),
 				validate: draft => {
 					for (const s of draft.sections) {
 						if (s.sourceIds.some(id => !allowed.has(id))) return "Use only supplied source IDs.";
-						if (live && new Set(s.sourceIds.map(id => topics.get(id))).size !== 1)
-							return "Keep each live section within one source topic.";
+						if (isLiveNotes && new Set(s.sourceIds.map(id => topics.get(id))).size !== 1)
+							return "Keep each live notes section within one source topic.";
 					}
-					if (live) {
+					if (isLiveNotes) {
 						const covered = new Set(draft.sections.flatMap(s => s.sourceIds.map(id => topics.get(id))));
 						if ([...allowed].some(id => !covered.has(topics.get(id)))) return "Include each supplied topic.";
 					}
@@ -124,7 +124,7 @@ export async function writeSessionNotes(opts: {
 	};
 	let sources: EvidenceLine[] = opts.passages.map(p => ({ ids: [p.messageId], topic: p.topic, text: p.text }));
 	let groups = batches(sources, limit);
-	// Map long original transcripts, then reduce across them. No provider compaction cut or live draft enters a final handout.
+	// Map long original transcripts, then reduce across them. No provider compaction cut or live notes draft enters a handout.
 	for (let level = 0; groups.length > 1; level++) {
 		if (level >= 8) throw new Error("The lesson could not be condensed within this model’s context window.");
 		sources = [];
@@ -137,7 +137,7 @@ export async function writeSessionNotes(opts: {
 			for (const section of digest.sections)
 				sources.push({
 					ids: section.sourceIds,
-					topic: live ? topics.get(section.sourceIds[0]!) : undefined,
+					topic: isLiveNotes ? topics.get(section.sourceIds[0]!) : undefined,
 					text: noteSectionText(section),
 				});
 		}
@@ -146,8 +146,8 @@ export async function writeSessionNotes(opts: {
 	signal.throwIfAborted();
 	const written = await submit(
 		sources,
-		live
-			? "Write concise live sections, one per supplied topic."
+		isLiveNotes
+			? "Write concise live notes sections, one per supplied topic."
 			: "Compose one finished handout. Choose its logical order, combine revisited concepts, and write an overview of the whole lesson.",
 	);
 	const used = new Set<string>();

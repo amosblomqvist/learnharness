@@ -9,6 +9,7 @@ import {
 	noteHref,
 	type NoteIndexEntry,
 	type NoteMode,
+	type NotesAction,
 	type NotesView,
 } from "@/src/core";
 import { useServerEvent, useServerResync } from "./server-events";
@@ -54,8 +55,8 @@ export function useSessionNotes(chatId: string) {
 	useServerEvent("turn-settled", e => {
 		if (e.chatId === chatId) void refresh();
 	});
-	async function action(input: { action: "generate" | "retry-pdf" | "update-live" } | { action: "set-live"; enabled: boolean }) {
-		const mode = input.action === "set-live" || input.action === "update-live" ? "live" : "final";
+	async function action(input: NotesAction) {
+		const mode = input.action === "set-live-notes-enabled" || input.action === "update-live-notes" ? "liveNotes" : "handout";
 		setSending(true);
 		setError("");
 		setActionErrors(previous => ({ ...previous, [mode]: undefined }));
@@ -126,20 +127,20 @@ export function NotesPanel({
 			<div className="flex flex-wrap items-center gap-2 border-b p-3">
 				<button
 					className={control}
-					aria-pressed={location.mode === "final"}
-					onClick={() => navigate({ mode: "final" })}
+					aria-pressed={location.mode === "handout"}
+					onClick={() => navigate({ mode: "handout" })}
 				>
 					Handout
 				</button>
 				<button
 					className={control}
-					aria-pressed={location.mode === "live"}
-					onClick={() => navigate({ mode: "live" })}
+					aria-pressed={location.mode === "liveNotes"}
+					onClick={() => navigate({ mode: "liveNotes" })}
 				>
 					Live notes
 				</button>
 			</div>
-			{location.mode === "final" ? (
+			{location.mode === "handout" ? (
 				<div className="space-y-2 px-3 pt-3">
 					<div className={actionRow}>
 						<div className="flex flex-wrap items-center gap-x-4 gap-y-1">
@@ -147,17 +148,17 @@ export function NotesPanel({
 								type="button"
 								className={textControl + " text-foreground"}
 								disabled={notes.sending || running || !view.eligible}
-								onClick={() => void notes.action({ action: "generate" })}
+								onClick={() => void notes.action({ action: "generate-handout" })}
 							>
-								{view.final ? "Regenerate handout" : "Generate handout"}
+								{view.handout ? "Regenerate handout" : "Generate handout"}
 							</button>
-							{view.pdfPending && !running && (
-								<button type="button" className={textControl + " text-foreground"} disabled={notes.sending} onClick={() => void notes.action({ action: "retry-pdf" })}>
+							{view.handoutPdfPending && !running && (
+								<button type="button" className={textControl + " text-foreground"} disabled={notes.sending} onClick={() => void notes.action({ action: "retry-handout-pdf" })}>
 									Retry handout PDF
 								</button>
 							)}
 						</div>
-						{view.final && (
+						{view.handout && (
 							<a className={secondaryControl} href={`/api/chats/${encodeURIComponent(chatId)}/notes/pdf`} download>
 								<DownloadIcon size={13} aria-hidden="true" />
 								Download handout PDF
@@ -170,22 +171,22 @@ export function NotesPanel({
 				<div className="space-y-2 px-3 pt-3">
 					<div className={actionRow}>
 						<div className="flex items-center gap-2">
-							<span className="text-muted-foreground">{view.liveEnabled ? "Active" : "Paused"}</span>
+							<span className="text-muted-foreground">{view.liveNotesEnabled ? "Active" : "Paused"}</span>
 							<span aria-hidden="true" className="text-muted-foreground">·</span>
 							<button
 								type="button"
 								className={textControl + " text-foreground"}
 								disabled={notes.sending}
-								onClick={() => void notes.action({ action: "set-live", enabled: !view.liveEnabled })}
+								onClick={() => void notes.action({ action: "set-live-notes-enabled", enabled: !view.liveNotesEnabled })}
 							>
-								{view.liveEnabled ? "Pause live notes" : "Resume live notes"}
+								{view.liveNotesEnabled ? "Pause live notes" : "Resume live notes"}
 							</button>
 						</div>
 						<button
 							type="button"
 							className={secondaryControl}
 							disabled={notes.sending || running || !view.eligible}
-							onClick={() => void notes.action({ action: "update-live" })}
+							onClick={() => void notes.action({ action: "update-live-notes" })}
 						>
 							<RefreshCwIcon size={13} aria-hidden="true" />
 							Update now
@@ -196,10 +197,10 @@ export function NotesPanel({
 			)}
 			{running && (
 				<p role="status" className="px-3 pt-2 text-xs text-muted-foreground">
-					{location.mode === "final" ? "Composing handout…" : "Updating live notes…"}
+					{location.mode === "handout" ? "Composing handout…" : "Updating live notes…"}
 				</p>
 			)}
-			{view.outdated && location.mode === "final" && (
+			{view.handoutOutdated && location.mode === "handout" && (
 				<p className="px-3 pt-2 text-xs text-muted-foreground">
 					The session has new material. Regenerate to include it.
 				</p>
@@ -216,7 +217,7 @@ export function NotesPanel({
 					<p className="p-5 text-sm text-muted-foreground">
 						{!view.eligible
 							? "Notes become available after teaching or a completed practice problem."
-							: location.mode === "final"
+							: location.mode === "handout"
 								? "Generate a handout from the material covered so far."
 								: "No live notes yet."}
 					</p>
@@ -224,7 +225,7 @@ export function NotesPanel({
 			</div>
 			{usage && (
 				<details className="border-t px-3 py-2 text-xs text-muted-foreground">
-					<summary className="cursor-pointer">{location.mode === "final" ? "Handout generation usage" : "Live notes usage"}</summary>
+					<summary className="cursor-pointer">{location.mode === "handout" ? "Handout generation usage" : "Live notes usage"}</summary>
 					<p className="mt-1">
 						{usage.calls} model {usage.calls === 1 ? "call" : "calls"}
 						{usage.tokens !== undefined && ` · ${usage.tokens.toLocaleString()} tokens`}

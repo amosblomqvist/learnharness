@@ -49,16 +49,14 @@ export function deleteSources(raw: unknown): SourceDirectory & { graphRevision: 
 	}
 	const state = structuredClone(directory.organization);
 	state.placements = Object.fromEntries(Object.entries(state.placements).filter(([id]) => !removed.has(id)));
-	const remainingSources = new Set(sourceDirectory.read().sources.map((s) => s.id));
 	// Bottom-up fixed point: remove selected empty descendants, then their
-	// emptied ancestors. Kept conversations and unselected entries block removal.
+	// emptied ancestors. Tags and unselected subfolders block removal.
 	let changed = true;
 	while (changed) {
 		changed = false;
 		for (const id of request.folderIds) {
-			if (state.folders.some((f) => f.id === id) && folderIsEmpty(state, id, remainingSources)) {
+			if (state.folders.some((f) => f.id === id) && folderIsEmpty(state, id)) {
 				state.folders = state.folders.filter((f) => f.id !== id);
-				state.placements = Object.fromEntries(Object.entries(state.placements).filter(([, p]) => p.folderId !== id));
 				changed = true;
 			}
 		}

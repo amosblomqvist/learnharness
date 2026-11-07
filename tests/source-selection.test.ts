@@ -2,11 +2,11 @@ import assert from "node:assert/strict";
 import { it } from "node:test";
 import { folderEntries, folderEntryCheck, toggleSourceEntries, type SourceDirectory, type SourceEntrySelection } from "../src/core/index.ts";
 const directory: SourceDirectory = {
-	organization: { version: 1, folders: [
+	organization: { version: 2, folders: [
 		{ id: "outer", name: "Outer", parentId: null, createdAt: "now" },
 		{ id: "inner", name: "Inner", parentId: "outer", createdAt: "now" },
 		{ id: "empty", name: "Empty", parentId: "outer", createdAt: "now" },
-	], placements: { a: { folderId: "inner" }, b: { folderId: "inner" } } },
+	], tags: [{ id: "course", name: "Course", parentId: "inner" }, { id: "review", name: "Review", parentId: "outer" }], placements: { a: { tagIds: ["course", "review"] }, b: { tagIds: ["course"] } } },
 	sources: ["a", "b", "outside"].map((id) => ({ id, kind: "notes", label: id, createdAt: "now" })),
 };
 const none = (): SourceEntrySelection => ({ sources: new Set(), folders: new Set() });
@@ -36,4 +36,14 @@ it("a folder containing only another empty folder is fully selectable", () => {
 	const selected = toggleSourceEntries(emptyTree, none(), "folder", "outer", true);
 	assert.equal(folderEntryCheck(emptyTree, "outer", selected).checked, true);
 	assert.equal(selected.folders.size, 3);
+});
+
+it("multiple tags share one selection and Untagged selects only material with no labels", () => {
+	let selected = toggleSourceEntries(directory, none(), "tag", "course", true);
+	selected = toggleSourceEntries(directory, selected, "tag", "review", true);
+	assert.deepEqual([...selected.sources], ["a", "b"]);
+	selected = toggleSourceEntries(directory, selected, "tag", "review", false);
+	assert.deepEqual([...selected.sources], ["b"]);
+	selected = toggleSourceEntries(directory, selected, "untagged", "", true);
+	assert.deepEqual([...selected.sources], ["b", "outside"]);
 });

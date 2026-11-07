@@ -43,7 +43,7 @@ File tools are read-only but have broad filesystem access under the server's use
 
 ## Extract into the graph
 
-For lessons, attach material to a session instead. Use the graph's **Extract files… → Files** or **Folder** picker for Markdown, plain text, or PDFs. This is a separate import flow, not the session's path attachments. Each supported file is uploaded for processing; folders organize imported sources.
+For lessons, attach material to a session instead. Use the graph's **Extract files… → Files** or **Folder** picker for Markdown, plain text, or PDFs. This is a separate import flow, not the session's path attachments. Each supported file is uploaded for processing. Choose tags in the import dialog; file paths do not create organizational folders.
 
 - Files are limited to **25 MiB each**. Imports queue independently, with up to three files in flight.
 - PDF conversion is local text extraction, not OCR. Image-only pages are skipped and counted; scanner text can be inaccurate. Check the import's notices.
@@ -56,11 +56,13 @@ The graph stores propositions and reasoning chains with source provenance, **not
 
 Open **Notes** in a session to read beside the conversation. In **Handout**, use **Generate handout** after a lesson has covered material or a practice problem has concluded. The Strong model composes a printable snapshot of the saved lesson. Use **Download handout PDF** to save it or **Regenerate handout** to include new material. [Sample handout on diagonalizing a matrix (PDF)](assets/session-notes-sample.pdf)
 
-In **Live notes**, **Resume live notes** starts automatic summaries as topics or practice problems finish; **Pause live notes** pauses those updates. **Update now** refreshes the live notes from everything taught so far, including the current teaching topic, and works while paused without resuming automatic updates. Practice notes only include completed problems. Opening the tab does not start or pause generation, and live actions do not change the handout or its PDF. Live notes use the session’s teaching model. Finished handouts and live drafts belong to their session and are removed when the session is deleted.
+In **Live notes**, **Resume live notes** starts automatic summaries as topics or practice problems finish; **Pause live notes** pauses those updates. **Update now** refreshes the live notes from everything taught so far, including the current teaching topic, and works while paused without resuming automatic updates. Practice notes only include completed problems. Opening the tab does not start or pause generation, and live notes actions do not change the handout or its PDF. Live notes use the session’s teaching model. Handouts and live notes belong to their session and are removed when the session is deleted.
 
-Open **Tags** in the sidebar to organize sessions and imported files into courses or subjects. Tags can have a color, a symbol, or just a name. Select several items to tag them together, or use **Tags** in a session or **Edit tags** in its sidebar menu. Searching a tag or folder also finds passages inside generated notes. When importing files, set tags for the batch and use **Edit** beside any file to adjust its tags before importing.
+Open **Tags** in the sidebar to organize sessions and imported files into courses or subjects. Tags can have a color, a symbol, or just a name. Select several items to tag them together, or use **Tags** in a session or **Edit tags** in its sidebar menu. Folders contain tags and subfolders, such as **School → Year 2 → Semester 1 → MATH286**, where MATH286 is a tag. A session or file can have several tags; items with none appear in **Untagged**. Selecting a folder shows all material tagged beneath it, once per item. Searching a tag or folder also finds passages inside generated notes. When importing files, set tags for the batch and use **Edit** beside any file to adjust its tags before importing.
 
-If you delete a session while keeping its graph, its remaining concepts appear in Tags as **Saved graph material**. Select that item and use **Move** to organize it or empty its old folder without deleting the concepts.
+The graph browser and practice picker use the same tag hierarchy. Shared material is counted and selected once, even if it has several tags. Removing a tag removes its labels, not its material; folders can be removed when they contain no tags or subfolders.
+
+If you delete a session while keeping its graph, the session disappears from Tags, while its concepts keep their tags and session title in the graph. Older material filed directly in a folder is preserved under a **General** tag inside that folder. Sessions and files no longer have a separate folder location.
 
 ## Data, privacy, and usage
 

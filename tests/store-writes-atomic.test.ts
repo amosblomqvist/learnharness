@@ -87,8 +87,8 @@ describe("failed saves leave the old file whole", () => {
 
 	it("source organization", (t) => {
 		assertAllOrNothing(t, config.SOURCE_ORGANIZATION_FILE,
-			() => sourceOrganizationStore.write({ version: 1, folders: [], placements: {} }),
-			() => sourceOrganizationStore.write({ version: 1, folders: [{ id: "fld_a", name: "A", parentId: null, createdAt: "2026-10-31T00:00:00.000Z" }], placements: {} }));
+			() => sourceOrganizationStore.write({ version: 2, folders: [], placements: {} }),
+			() => sourceOrganizationStore.write({ version: 2, folders: [{ id: "fld_a", name: "A", parentId: null, createdAt: "2026-10-31T00:00:00.000Z" }], placements: {} }));
 	});
 
 	it("prompt edit", (t) => {
@@ -125,7 +125,7 @@ describe("Windows sharing violations: per-writer compatibility policy (modeled)"
 		{ name: "source deletion", fallback: false, prepare: () => ({ file: config.SOURCES_FILE, save: () => graphStore.deleteSources(new Set(["src_policy"])) }) },
 		{ name: "ledger rewrite", fallback: false, prepare: () => ({ file: config.LEDGER_FILES.chains, save: () => graphStore.rewriteLedgers({ chains: [] }) }) },
 		{ name: "positions", fallback: false, prepare: () => ({ file: config.POSITIONS_FILE, save: () => graphStore.writePositions({ policy: { x: 3, y: 4 } }) }) },
-		{ name: "source organization", fallback: false, prepare: () => ({ file: config.SOURCE_ORGANIZATION_FILE, save: () => sourceOrganizationStore.write({ version: 1, folders: [], placements: {} }) }) },
+		{ name: "source organization", fallback: false, prepare: () => ({ file: config.SOURCE_ORGANIZATION_FILE, save: () => sourceOrganizationStore.write({ version: 2, folders: [], placements: {} }) }) },
 	];
 	for (const { name, fallback, prepare } of cases) {
 		it(`${name}: ${fallback ? "retains" : "does not acquire"} in-place fallback`, (t) => {

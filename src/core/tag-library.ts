@@ -1,24 +1,17 @@
 import { fuzzyScore } from "./fuzzy.ts";
 import { readContentSpans } from "./content-reader.ts";
-import { placementOf, type SourceDirectory } from "./source-organization.ts";
+import { folderTagIds, placementOf, type SourceDirectory } from "./source-organization.ts";
 import type { NoteIndexEntry } from "./session-notes.ts";
 
-export type LibraryScope = { kind: "all" } | { kind: "folder" | "tag"; id: string };
+export type LibraryScope = { kind: "all" | "untagged" } | { kind: "folder" | "tag"; id: string };
 export function libraryRows(
 	library: SourceDirectory & { notes: NoteIndexEntry[] },
 	scope: LibraryScope,
 	query: string,
 ) {
 	const { organization } = library;
-	const parents = new Map(organization.folders.map(f => [f.id, f.parentId]));
 	const tags = new Map(organization.tags?.map(t => [t.id, t]));
-	const under = (id: string | null | undefined) => {
-		while (id) {
-			if (scope.kind === "folder" && id === scope.id) return true;
-			id = parents.get(id);
-		}
-		return false;
-	};
+	const scopedTags = scope.kind === "folder" ? folderTagIds(organization, scope.id) : undefined;
 	const bySource = new Map<string, NoteIndexEntry[]>();
 	for (const note of library.notes) {
 		if (!bySource.has(note.chatId)) bySource.set(note.chatId, []);
@@ -27,17 +20,19 @@ export function libraryRows(
 	const q = query.trim();
 	return library.sources
 		.flatMap(source => {
-			const label = source.label ?? (source.kind === "missing" ? "Saved graph material" : source.id);
+			if (source.kind === "missing") return [];
+			const label = source.label ?? source.id;
 			const placement = placementOf(organization, source.id);
 			const labels = (placement?.tagIds ?? []).flatMap(id => tags.get(id) ?? []);
 			if (scope.kind === "tag" && !labels.some(t => t.id === scope.id)) return [];
-			if (scope.kind === "folder" && !under(placement?.folderId) && !labels.some(t => under(t.parentId))) return [];
+			if (scope.kind === "untagged" && labels.length) return [];
+			if (scopedTags && !labels.some(t => scopedTags.has(t.id))) return [];
 			const notes = bySource.get(source.id) ?? [];
 			const matches = q ? notes.filter(n => fuzzyScore(q, n.heading, n.text) !== null) : [];
 			if (
 				q &&
 				!matches.length &&
-				fuzzyScore(q, label, source.kind === "missing" ? source.id : "", source.filePath ?? "", ...labels.map(t => t.name)) === null
+				fuzzyScore(q, label, source.filePath ?? "", ...labels.map(t => t.name)) === null
 			)
 				return [];
 			return [{ source, label, labels, notes, matches }];

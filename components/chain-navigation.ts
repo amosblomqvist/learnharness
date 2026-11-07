@@ -85,7 +85,7 @@ export function useChainNavigation(rootRef: RefObject<HTMLDivElement | null>, se
 		const onPointerDown = (event: PointerEvent) => {
 			const row = event.target instanceof Element ? event.target.closest<HTMLElement>("[data-chain-nav-row]") : null;
 			if (row) highlight(row.dataset.chainNavRow!);
-			else if (event.target instanceof Element && event.target.closest('[data-testid="source-root-drop"]')) {
+			else if (event.target instanceof Element && event.target.closest('[data-testid="chain-table-blank-space"]')) {
 				event.preventDefault(); // do not refocus the tabindex=-1 table after blur
 				pendingEnter.current = null; pendingFocus.current = null; highlight(null);
 				const focused = document.activeElement;

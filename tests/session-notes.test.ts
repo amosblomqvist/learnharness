@@ -9,7 +9,7 @@ import { noteEvidence } from "../src/core/note-evidence.ts";
 import { noteDocumentHtml, noteTextHtml } from "../src/core/note-render.ts";
 import type { ChatRecord } from "../src/core/contracts/chat.ts";
 import type { LhMessage } from "../src/core/native-messages.ts";
-import { noteSectionHeading, type NoteDocument, type NoteIndexEntry, type NoteMode, type NotePassage } from "../src/core/session-notes.ts";
+import { noteHref, noteModeFromQuery, noteSectionHeading, type NoteDocument, type NoteIndexEntry, type NoteMode, type NotePassage } from "../src/core/session-notes.ts";
 
 const root = fs.mkdtempSync(path.join(os.tmpdir(), "lh-session-notes-"));
 process.env.LH_DATA_DIR = root;
@@ -49,6 +49,68 @@ async function notesIdle(api: ReturnType<typeof createSessionNotesService>, id: 
 	for (let i = 0; i < 100 && api.sessionNotes(id).running.length; i++) await delay(2);
 	assert.deepEqual(api.sessionNotes(id).running, []);
 }
+
+it("preserves v1 notes and PDF bytes while exposing app terminology and writing the same disk format", () => {
+	const id = "legacy_notes", directory = path.join(root, "notes", id);
+	const recordPath = path.join(directory, "record.json");
+	const edition = (fingerprint: string) => ({ document: sample, fingerprint, writtenAt: "now" });
+	const legacy = {
+		version: 1, liveEnabled: true, live: edition("live revision"), final: edition("handout revision"),
+		pending: edition("pending handout"), failedLive: "failed revision", topics: { matrices: "topic revision" },
+		error: { live: "Live notes failed", final: "Handout PDF failed" },
+		usage: ["live", "final"].map(mode => ({ at: "now", mode, model: "fixture", step: { inputTokens: 3, outputTokens: 5 } })),
+		pdfFile: "00000000-0000-4000-8000-000000000001.pdf",
+	};
+	const json = JSON.stringify(legacy, null, 2), pdf = Buffer.from("%PDF-existing-handout");
+	fs.mkdirSync(directory, { recursive: true });
+	fs.writeFileSync(recordPath, json);
+	fs.writeFileSync(path.join(directory, legacy.pdfFile), pdf);
+	try {
+		const state = notesStore.read(id);
+		assert.deepEqual(state, {
+			liveNotesEnabled: true, liveNotes: legacy.live, handout: legacy.final,
+			pendingHandout: legacy.pending, failedLiveNotes: legacy.failedLive, topics: legacy.topics,
+			error: { liveNotes: legacy.error.live, handout: legacy.error.final },
+			usage: legacy.usage.map((entry, i) => ({ ...entry, mode: i === 0 ? "liveNotes" : "handout" })),
+			pdfFile: legacy.pdfFile,
+		});
+		assert.deepEqual(notesStore.handoutPdf(id), pdf);
+		assert.equal(fs.readFileSync(recordPath, "utf8"), json, "reading existing notes never rewrites them");
+		const updatedLiveNotes = edition("updated live notes");
+		const step = { inputTokens: 2, outputTokens: 7, cacheReadTokens: 0, cacheWriteTokens: 0, reasoningTokens: 0 };
+		notesStore.change(id, record => {
+			record.liveNotesEnabled = false;
+			record.liveNotes = updatedLiveNotes;
+			record.error.liveNotes = "Retry live notes";
+			record.usage.push({ at: "later", mode: "handout", model: "fixture", step });
+		});
+		assert.deepEqual(JSON.parse(fs.readFileSync(recordPath, "utf8")), {
+			...legacy, liveEnabled: false, live: updatedLiveNotes,
+			error: { ...legacy.error, live: "Retry live notes" },
+			usage: [...legacy.usage, { at: "later", mode: "final", model: "fixture", step }],
+		});
+		assert.deepEqual(notesStore.read(id), {
+			...state, liveNotesEnabled: false, liveNotes: updatedLiveNotes,
+			error: { ...state.error, liveNotes: "Retry live notes" },
+			usage: [...state.usage, { at: "later", mode: "handout", model: "fixture", step }],
+		});
+		assert.deepEqual(notesStore.handoutPdf(id), pdf);
+	} finally {
+		notesStore.delete(id);
+	}
+});
+
+it("creates links with app terminology and still opens older handout and live notes links", () => {
+	for (const mode of ["handout", "liveNotes"] as const) {
+		const href = noteHref("lesson 1", mode, "topic/2");
+		assert.equal(href, `/chat/lesson%201?notes=${mode}&section=topic%2F2`);
+		assert.equal(noteModeFromQuery(new URL(href, "http://localhost").searchParams.get("notes")), mode);
+	}
+	assert.equal(noteModeFromQuery("final"), "handout");
+	assert.equal(noteModeFromQuery("live"), "liveNotes");
+	for (const value of [undefined, null, "unknown", ["handout", "liveNotes"]])
+		assert.equal(noteModeFromQuery(value), undefined);
+});
 
 it("closes a topic at the transition, includes revealed explanations, and never exports unposed answer keys or diagnostics", () => {
 	const messages = [
@@ -163,7 +225,7 @@ it("downloads PDFs using the current session title, including Unicode and safe h
 	const { stores } = await import("../src/server/index.ts");
 	const { GET } = await import("../app/api/chats/[id]/notes/pdf/route.ts");
 	const chat = stores.chatStore.createChat("Original title");
-	notesStore.savePdf(chat.id, { document: sample, fingerprint: "fixture", writtenAt: "now" }, Buffer.from("%PDF-title"));
+	notesStore.saveHandoutPdf(chat.id, { document: sample, fingerprint: "fixture", writtenAt: "now" }, Buffer.from("%PDF-title"));
 	try {
 		for (const [title, expected] of [
 			["Eigenvalues and eigenvectors", "Eigenvalues and eigenvectors.pdf"],
@@ -189,8 +251,8 @@ it("repairs a legacy PDF from its saved text without another model run or changi
 	const chat: ChatRecord = { id: "legacy_pdf", title: "Existing notes", createdAt: "now", updatedAt: "now", messages: [] };
 	const document = { ...sample, sections: [{ ...sample.sections[0]!, heading: "8. Eigenvectors" }] };
 	const edition = { document, fingerprint: "old", writtenAt: "before" };
-	notesStore.savePdf(chat.id, edition, Buffer.from("%PDF-old"));
-	notesStore.change(chat.id, state => { state.pending = { ...edition, fingerprint: "pending" }; });
+	notesStore.saveHandoutPdf(chat.id, edition, Buffer.from("%PDF-old"));
+	notesStore.change(chat.id, state => { state.pendingHandout = { ...edition, fingerprint: "pending" }; });
 	let printed = 0;
 	const api = createSessionNotesService({
 		chatStore: { getChat: () => chat }, notesStore,
@@ -204,19 +266,19 @@ it("repairs a legacy PDF from its saved text without another model run or changi
 	});
 	assert.equal(new TextDecoder().decode(await api.sessionNotesPdf(chat.id)), "%PDF-corrected");
 	assert.equal(printed, 1);
-	assert.equal(notesStore.read(chat.id).pending?.fingerprint, "pending");
-	assert.equal(notesStore.read(chat.id).final?.fingerprint, "old");
+	assert.equal(notesStore.read(chat.id).pendingHandout?.fingerprint, "pending");
+	assert.equal(notesStore.read(chat.id).handout?.fingerprint, "old");
 });
 
-it("resolves sections after later graph extraction and removes attachments and tag membership on session deletion", async () => {
+it("resolves sections after later graph extraction and removes notes attachments but preserves retained graph tags on session deletion", async () => {
 	const { stores, sourceDirectory, noteIndex, deleteChatSession } = await import("../src/server/index.ts");
 	const { GET: getSources } = await import("../app/api/graph/sources/route.ts");
 	const { GET: getNodeNotes } = await import("../app/api/graph/nodes/[id]/notes/route.ts");
 	const session = stores.chatStore.createChat("A previous teaching session");
 	const practice = stores.chatStore.createChat("Practice session", "practice");
 	const edition = { document: sample, fingerprint: "test", writtenAt: "now" };
-	notesStore.savePdf(session.id, edition, Buffer.from("%PDF-test"));
-	notesStore.savePdf(
+	notesStore.saveHandoutPdf(session.id, edition, Buffer.from("%PDF-test"));
+	notesStore.saveHandoutPdf(
 		practice.id,
 		{ ...edition, document: { ...sample, sections: [{ ...sample.sections[1]!, graphNodeIds: ["n_method"] }] } },
 		Buffer.from("%PDF-practice"),
@@ -257,7 +319,7 @@ it("resolves sections after later graph extraction and removes attachments and t
 	const outcome = await deleteChatSession(session.id, "preserve-graph");
 	assert.equal(outcome.ok, true);
 	assert.equal(fs.existsSync(path.join(root, "notes", session.id)), false);
-	assert.ok(!sourceDirectory.read().organization.placements[session.id]?.tagIds?.length);
+	assert.deepEqual(sourceDirectory.read().organization.placements[session.id]?.tagIds, [tag]);
 	assert.deepEqual(
 		noteIndex("n_method").map(n => n.chatId),
 		[practice.id],
@@ -303,7 +365,7 @@ it("composes a long lesson from all original passages through bounded calls, wit
 	const doc = await writeSessionNotes({
 		chatId: "test_long",
 		title: "Long lesson",
-		mode: "final",
+		mode: "handout",
 		practice: false,
 		passages,
 		engine: { model: { ...faux.getModel(), contextWindow: 4000 }, streamFn: faux.streamSimple },
@@ -348,7 +410,7 @@ it("loads the notes prompt edited in Settings into the real writer and respects 
 				})], { stopReason: "toolUse" });
 			}]);
 			const doc = await writeSessionNotes({
-				chatId: "prompt_test", title: "Eigenvectors", mode: "final", practice: false,
+				chatId: "prompt_test", title: "Eigenvectors", mode: "handout", practice: false,
 				passages: [{ messageId: "m1", topic: "basis", text: "An eigenvector preserves its direction." }],
 				engine: { model: faux.getModel(), streamFn: faux.streamSimple },
 				signal: new AbortController().signal,
@@ -407,20 +469,20 @@ it("keeps the published handout during regeneration, retries just the PDF, and d
 		for (let i = 0; i < 100 && api.sessionNotes(chat.id).running.length; i++) await delay(2);
 		assert.deepEqual(api.sessionNotes(chat.id).running, []);
 	}
-	api.changeSessionNotes(chat.id, { action: "set-live", enabled: true });
+	api.changeSessionNotes(chat.id, { action: "set-live-notes-enabled", enabled: true });
 	await idle();
 	assert.deepEqual(
-		api.sessionNotes(chat.id).live?.document.sections.map(s => s.sourceIds[0]),
+		api.sessionNotes(chat.id).liveNotes?.document.sections.map(s => s.sourceIds[0]),
 		["a"],
 	);
 	chat.messages.push(atTopic("b2", "B", "Still B"));
 	api.updateLiveNotes(chat.id);
 	await idle();
-	assert.deepEqual(modes, ["live"]);
-	api.changeSessionNotes(chat.id, { action: "generate" });
-	api.changeSessionNotes(chat.id, { action: "generate" });
+	assert.deepEqual(modes, ["liveNotes"]);
+	api.changeSessionNotes(chat.id, { action: "generate-handout" });
+	api.changeSessionNotes(chat.id, { action: "generate-handout" });
 	await idle();
-	const first = api.sessionNotes(chat.id).final!;
+	const first = api.sessionNotes(chat.id).handout!;
 	assert.deepEqual(
 		first.document.sections.map(s => s.sourceIds[0]),
 		["a", "b", "b2"],
@@ -428,20 +490,20 @@ it("keeps the published handout during regeneration, retries just the PDF, and d
 	chat.messages.push(atTopic("c", "A", "Revisit A"));
 	api.sessionNotes(chat.id, true); // Reopening catches a boundary previously saved while the worker was offline.
 	await idle();
-	assert.equal(api.sessionNotes(chat.id).outdated, true);
+	assert.equal(api.sessionNotes(chat.id).handoutOutdated, true);
 	failPrint = true;
-	api.changeSessionNotes(chat.id, { action: "generate" });
+	api.changeSessionNotes(chat.id, { action: "generate-handout" });
 	await idle();
-	assert.equal(api.sessionNotes(chat.id).final?.fingerprint, first.fingerprint);
-	assert.equal(api.sessionNotes(chat.id).pdfPending, true);
+	assert.equal(api.sessionNotes(chat.id).handout?.fingerprint, first.fingerprint);
+	assert.equal(api.sessionNotes(chat.id).handoutPdfPending, true);
 	failPrint = false;
-	api.changeSessionNotes(chat.id, { action: "retry-pdf" });
+	api.changeSessionNotes(chat.id, { action: "retry-handout-pdf" });
 	await idle();
-	assert.equal(api.sessionNotes(chat.id).outdated, false);
+	assert.equal(api.sessionNotes(chat.id).handoutOutdated, false);
 	assert.equal(new TextDecoder().decode(await api.sessionNotesPdf(chat.id)), "%PDF-fixture");
-	assert.deepEqual(modes, ["live", "final", "live", "final"]);
+	assert.deepEqual(modes, ["liveNotes", "handout", "liveNotes", "handout"]);
 	pausePrint = true;
-	api.changeSessionNotes(chat.id, { action: "generate" });
+	api.changeSessionNotes(chat.id, { action: "generate-handout" });
 	await delay(5);
 	assert.ok(hold);
 	deleted = true;
@@ -457,7 +519,7 @@ it("manually refreshes the current topic while paused, retries unchanged materia
 		messages: [atTopic("a", "A", "First explanation"), atTopic("a2", "A", "Current explanation")],
 	};
 	const published = { document: sample, fingerprint: "saved", writtenAt: "before" };
-	notesStore.savePdf(chat.id, published, Buffer.from("%PDF-saved"));
+	notesStore.saveHandoutPdf(chat.id, published, Buffer.from("%PDF-saved"));
 	const faux = createFauxCore({});
 	let calls = 0, fail = false;
 	const api = createSessionNotesService({
@@ -465,7 +527,7 @@ it("manually refreshes the current topic while paused, retries unchanged materia
 		engineFor: () => ({ model: faux.getModel(), streamFn: faux.streamSimple }),
 		writeNotes: async opts => {
 			calls++;
-			assert.equal(opts.mode, "live");
+			assert.equal(opts.mode, "liveNotes");
 			assert.deepEqual(opts.passages.map(p => p.messageId), ["a", "a2"]);
 			if (fail) throw new Error("Live writer failed");
 			return passageNotes(opts.passages);
@@ -474,29 +536,29 @@ it("manually refreshes the current topic while paused, retries unchanged materia
 	});
 	assert.deepEqual(api.sessionNotes(chat.id, true).running, []);
 	assert.equal(calls, 0);
-	api.changeSessionNotes(chat.id, { action: "update-live" });
+	api.changeSessionNotes(chat.id, { action: "update-live-notes" });
 	await notesIdle(api, chat.id);
-	const firstLive = api.sessionNotes(chat.id).live;
-	assert.deepEqual(firstLive?.document.sections.map(s => s.sourceIds[0]), ["a", "a2"]);
-	assert.equal(api.sessionNotes(chat.id).liveEnabled, false);
-	api.changeSessionNotes(chat.id, { action: "update-live" });
+	const firstLiveNotes = api.sessionNotes(chat.id).liveNotes;
+	assert.deepEqual(firstLiveNotes?.document.sections.map(s => s.sourceIds[0]), ["a", "a2"]);
+	assert.equal(api.sessionNotes(chat.id).liveNotesEnabled, false);
+	api.changeSessionNotes(chat.id, { action: "update-live-notes" });
 	await notesIdle(api, chat.id);
 	assert.equal(calls, 2, "Update now forces a refresh even when the lesson has not changed");
 	fail = true;
-	api.changeSessionNotes(chat.id, { action: "update-live" });
+	api.changeSessionNotes(chat.id, { action: "update-live-notes" });
 	await notesIdle(api, chat.id);
-	assert.equal(api.sessionNotes(chat.id).error.live, "Live writer failed");
-	assert.deepEqual(api.sessionNotes(chat.id).live?.document, firstLive?.document);
+	assert.equal(api.sessionNotes(chat.id).error.liveNotes, "Live writer failed");
+	assert.deepEqual(api.sessionNotes(chat.id).liveNotes?.document, firstLiveNotes?.document);
 	fail = false;
-	api.changeSessionNotes(chat.id, { action: "update-live" });
+	api.changeSessionNotes(chat.id, { action: "update-live-notes" });
 	await notesIdle(api, chat.id);
 	assert.equal(calls, 4, "a failed revision can be retried explicitly");
-	assert.equal(api.sessionNotes(chat.id).error.live, undefined);
-	assert.equal(api.sessionNotes(chat.id, true).liveEnabled, false);
+	assert.equal(api.sessionNotes(chat.id).error.liveNotes, undefined);
+	assert.equal(api.sessionNotes(chat.id, true).liveNotesEnabled, false);
 	api.updateLiveNotes(chat.id);
 	await notesIdle(api, chat.id);
 	assert.equal(calls, 4);
-	assert.deepEqual(api.sessionNotes(chat.id).final, published);
+	assert.deepEqual(api.sessionNotes(chat.id).handout, published);
 	assert.equal(new TextDecoder().decode(await api.sessionNotesPdf(chat.id)), "%PDF-saved");
 });
 
@@ -513,9 +575,9 @@ it("resumes automatic summaries without dropping current-topic material captured
 		writeNotes: async opts => { calls++; return passageNotes(opts.passages); },
 		printPdf: async () => { throw new Error("No PDF for live notes"); },
 	});
-	api.changeSessionNotes(chat.id, { action: "update-live" });
+	api.changeSessionNotes(chat.id, { action: "update-live-notes" });
 	await notesIdle(api, chat.id);
-	api.changeSessionNotes(chat.id, { action: "set-live", enabled: true });
+	api.changeSessionNotes(chat.id, { action: "set-live-notes-enabled", enabled: true });
 	api.sessionNotes(chat.id, true);
 	await notesIdle(api, chat.id);
 	assert.equal(calls, 1, "resuming does not replace the manual refresh with an older closed-topic summary");
@@ -523,12 +585,12 @@ it("resumes automatic summaries without dropping current-topic material captured
 	api.updateLiveNotes(chat.id);
 	await notesIdle(api, chat.id);
 	assert.equal(calls, 2);
-	assert.deepEqual(api.sessionNotes(chat.id).live?.document.sections.map(s => s.sourceIds[0]), ["a", "a2", "late", "b"]);
+	assert.deepEqual(api.sessionNotes(chat.id).liveNotes?.document.sections.map(s => s.sourceIds[0]), ["a", "a2", "late", "b"]);
 	chat.messages.push(atTopic("c", "C", "Third topic"));
 	api.updateLiveNotes(chat.id);
 	await notesIdle(api, chat.id);
 	assert.equal(calls, 3);
-	assert.deepEqual(api.sessionNotes(chat.id).live?.document.sections.map(s => s.sourceIds[0]), ["a", "a2", "late", "b"]);
+	assert.deepEqual(api.sessionNotes(chat.id).liveNotes?.document.sections.map(s => s.sourceIds[0]), ["a", "a2", "late", "b"]);
 });
 
 it("retains a requested manual refresh across an automatic run and pause, without duplicating it", async () => {
@@ -548,23 +610,23 @@ it("retains a requested manual refresh across an automatic run and pause, withou
 		},
 		printPdf: async () => { throw new Error("No PDF for live notes"); },
 	});
-	api.changeSessionNotes(chat.id, { action: "set-live", enabled: true });
+	api.changeSessionNotes(chat.id, { action: "set-live-notes-enabled", enabled: true });
 	await delay(5);
 	assert.equal(releases.length, 1);
-	api.changeSessionNotes(chat.id, { action: "update-live" });
-	api.changeSessionNotes(chat.id, { action: "update-live" });
-	api.changeSessionNotes(chat.id, { action: "set-live", enabled: false });
+	api.changeSessionNotes(chat.id, { action: "update-live-notes" });
+	api.changeSessionNotes(chat.id, { action: "update-live-notes" });
+	api.changeSessionNotes(chat.id, { action: "set-live-notes-enabled", enabled: false });
 	chat.messages.push(atTopic("b2", "B", "More current material"));
 	releases[0]!();
 	await delay(5);
 	assert.equal(releases.length, 2);
-	api.changeSessionNotes(chat.id, { action: "update-live" });
-	api.changeSessionNotes(chat.id, { action: "set-live", enabled: false });
+	api.changeSessionNotes(chat.id, { action: "update-live-notes" });
+	api.changeSessionNotes(chat.id, { action: "set-live-notes-enabled", enabled: false });
 	releases[1]!();
 	await notesIdle(api, chat.id);
 	assert.equal(releases.length, 2, "concurrent requests share the same manual refresh");
-	assert.equal(api.sessionNotes(chat.id).liveEnabled, false);
-	assert.deepEqual(api.sessionNotes(chat.id).live?.document.sections.map(s => s.sourceIds[0]), ["a", "b", "b2"]);
+	assert.equal(api.sessionNotes(chat.id).liveNotesEnabled, false);
+	assert.deepEqual(api.sessionNotes(chat.id).liveNotes?.document.sections.map(s => s.sourceIds[0]), ["a", "b", "b2"]);
 });
 
 it("does not immediately restart automatic work after a manual refresh is stopped or fails", async () => {
@@ -572,7 +634,7 @@ it("does not immediately restart automatic work after a manual refresh is stoppe
 		id: "stopped_manual", title: "Stop live work", createdAt: "now", updatedAt: "now",
 		messages: [atTopic("a", "A", "First"), atTopic("b", "B", "Second")],
 	};
-	notesStore.change(chat.id, state => { state.liveEnabled = true; });
+	notesStore.change(chat.id, state => { state.liveNotesEnabled = true; });
 	const faux = createFauxCore({});
 	let release: (() => void) | undefined, calls = 0;
 	const api = createSessionNotesService({
@@ -587,25 +649,25 @@ it("does not immediately restart automatic work after a manual refresh is stoppe
 		},
 		printPdf: async () => { throw new Error("No PDF for live notes"); },
 	});
-	api.changeSessionNotes(chat.id, { action: "update-live" });
+	api.changeSessionNotes(chat.id, { action: "update-live-notes" });
 	await delay(5);
 	assert.ok(release);
-	assert.deepEqual(api.abortSessionNotes("live" + chat.id), { ok: true });
+	assert.deepEqual(api.abortSessionNotes("liveNotes" + chat.id), { ok: true });
 	release();
 	await notesIdle(api, chat.id);
 	assert.deepEqual(api.sessionNotes(chat.id, true).running, []);
 	api.updateLiveNotes(chat.id);
 	assert.equal(calls, 1);
-	api.changeSessionNotes(chat.id, { action: "update-live" });
+	api.changeSessionNotes(chat.id, { action: "update-live-notes" });
 	await notesIdle(api, chat.id);
-	assert.equal(api.sessionNotes(chat.id, true).error.live, "Writer failed");
+	assert.equal(api.sessionNotes(chat.id, true).error.liveNotes, "Writer failed");
 	assert.deepEqual(api.sessionNotes(chat.id, true).running, []);
 	api.updateLiveNotes(chat.id);
 	assert.equal(calls, 2);
-	api.changeSessionNotes(chat.id, { action: "update-live" });
+	api.changeSessionNotes(chat.id, { action: "update-live-notes" });
 	await notesIdle(api, chat.id);
 	assert.equal(calls, 3, "Update now can explicitly retry both stopped and failed work");
-	assert.ok(api.sessionNotes(chat.id).live);
+	assert.ok(api.sessionNotes(chat.id).liveNotes);
 });
 
 it("refuses a manual practice refresh until a problem is completed and excludes the next unsolved problem", async () => {
@@ -624,7 +686,7 @@ it("refuses a manual practice refresh until a problem is completed and excludes 
 		writeNotes: async opts => { written = opts.passages; return passageNotes(opts.passages); },
 		printPdf: async () => { throw new Error("No PDF for live notes"); },
 	});
-	assert.throws(() => api.changeSessionNotes(chat.id, { action: "update-live" }), { status: 409 });
+	assert.throws(() => api.changeSessionNotes(chat.id, { action: "update-live-notes" }), { status: 409 });
 	assert.deepEqual(written, []);
 	chat.messages.push(
 		said("end", "Solved", { id: "end1", name: "conclude", arguments: { outcome: "solved" } }),
@@ -632,13 +694,13 @@ it("refuses a manual practice refresh until a problem is completed and excludes 
 		said("next", "", { id: "p2", name: "problem", arguments: { statement: "Next problem", modelSolution: "Unrevealed solution" } }),
 		result("next-result", "p2", "problem", {}),
 	);
-	api.changeSessionNotes(chat.id, { action: "update-live" });
+	api.changeSessionNotes(chat.id, { action: "update-live-notes" });
 	await notesIdle(api, chat.id);
 	assert.match(JSON.stringify(written), /Completed solution/);
 	assert.doesNotMatch(JSON.stringify(written), /Next problem|Unrevealed solution/);
 });
 
-it("publishes live and final writers in the activity feed and stops each through the dock endpoint", async () => {
+it("publishes live notes and handout writers in the activity feed and stops each through the dock endpoint", async () => {
 	const { stores } = await import("../src/server/index.ts");
 	const { GET: getActivity } = await import("../app/api/activity/route.ts");
 	const { POST: abortActivity } = await import("../app/api/activity/abort/route.ts");
@@ -649,7 +711,7 @@ it("publishes live and final writers in the activity feed and stops each through
 	const chat = stores.chatStore.createChat("Notes activity");
 	stores.chatStore.saveMessages(chat.id, [atTopic("a", "A", "First"), atTopic("b", "B", "Second")]);
 	const published = { document: sample, fingerprint: "published", writtenAt: "before" };
-	notesStore.savePdf(chat.id, published, Buffer.from("%PDF-published"));
+	notesStore.saveHandoutPdf(chat.id, published, Buffer.from("%PDF-published"));
 	const release = new Map<NoteMode, () => void>();
 	const faux = createFauxCore({});
 	let events = 0;
@@ -666,12 +728,12 @@ it("publishes live and final writers in the activity feed and stops each through
 		printPdf: async () => Buffer.from("%PDF-new"),
 	}, sharedWork);
 	try {
-		api.changeSessionNotes(chat.id, { action: "generate" });
-		api.changeSessionNotes(chat.id, { action: "set-live", enabled: true });
+		api.changeSessionNotes(chat.id, { action: "generate-handout" });
+		api.changeSessionNotes(chat.id, { action: "set-live-notes-enabled", enabled: true });
 		await delay(5);
 		const feed = await (await getActivity()).json();
 		const runs = feed.notes.filter((run: { chatId: string }) => run.chatId === chat.id);
-		assert.deepEqual(new Set(runs.map((run: { mode: string }) => run.mode)), new Set(["live", "final"]));
+		assert.deepEqual(new Set(runs.map((run: { mode: string }) => run.mode)), new Set(["liveNotes", "handout"]));
 		assert.ok(runs.every((run: { title: string; usage: { steps: number } }) => run.title === chat.title && run.usage.steps === 1));
 		assert.ok(events >= 4, "admission and usage both notify the activity reader");
 		for (const run of runs) {
@@ -685,7 +747,7 @@ it("publishes live and final writers in the activity feed and stops each through
 		await delay(5);
 		assert.equal(api.runningSessionNotes().length, 0);
 		assert.deepEqual(api.sessionNotes(chat.id, true).running, [], "a refresh does not restart the stopped live revision");
-		assert.equal(notesStore.read(chat.id).final?.fingerprint, "published");
+		assert.equal(notesStore.read(chat.id).handout?.fingerprint, "published");
 		assert.deepEqual((await (await getActivity()).json()).notes, []);
 		const stoppedAgain = await abortActivity(new Request("http://test/api/activity/abort", {
 			method: "POST", headers: { "Content-Type": "application/json" },

@@ -32,86 +32,99 @@ it("GET is a non-writing read and inventories all sessions, imported records and
 	assert.equal(sources.find((s: { id: string }) => s.id === "gone").kind, "missing");
 });
 
-it("GET projects practice kind without removing or rewriting sessions, historical graph contributions or folder placements", async () => {
+it("GET projects practice kind without rewriting sessions, graph contributions or tags", async () => {
 	const practice = stores.chatStore.createChat("Practice source", "practice");
 	stores.graphStore.appendNode({ id: "n_practice", name: "Historical", statement: "Historical practice contribution.", aliases: [], createdAt: "2026-10-30", provenance: [{ chatId: practice.id, messageId: "m" }] });
-	const created = await (await change({ action: "create-folder", name: "Practice folder", parentId: null })).json();
-	assert.equal((await change({ action: "move", kind: "source", id: practice.id, parentId: created.createdFolderId })).status, 200);
-	const bytes = () => Object.fromEntries(fs.readdirSync(root, { recursive: true, withFileTypes: true }).filter((entry) => entry.isFile()).map((entry) => {
+	const folder = sourceDirectory.change({ action: "create-folder", name: "Practice folder", parentId: null }).createdFolderId!;
+	const tag = sourceDirectory.change({ action: "create-tag", name: "Course", parentId: folder }).createdTagId!;
+	sourceDirectory.change({ action: "tag-sources", sourceIds: [practice.id], add: [tag], remove: [] });
+	const bytes = () => Object.fromEntries(fs.readdirSync(root, { recursive: true, withFileTypes: true }).filter(entry => entry.isFile()).map(entry => {
 		const file = path.join(entry.parentPath, entry.name); return [file, fs.readFileSync(file).toString("hex")];
 	}));
-	const before = bytes();
-	const directory = await (await GET()).json();
+	const before = bytes(), directory = await (await GET()).json();
 	assert.deepEqual(directory.sources.find((s: { id: string }) => s.id === practice.id), { id: practice.id, kind: "chat", chatKind: "practice", label: practice.title, createdAt: practice.createdAt });
-	assert.equal(directory.organization.placements[practice.id].folderId, created.createdFolderId);
+	assert.deepEqual(directory.organization.placements[practice.id].tagIds, [tag]);
 	assert.deepEqual(bytes(), before);
 });
 
-it("rename/move operations persist independently without changing source IDs, paths, graph ledgers or usage", async () => {
+it("tag organization and renaming leave source IDs, original paths, graph ledgers and usage intact", async () => {
 	const filePath = "Course/Sub/My_Notes.v2.pdf", id = sourceId(filePath);
-	sourceDirectory.registerImport(filePath);
 	stores.graphStore.upsertSource({ id, filePath, importedAt: "2026-10-30T00:00:00Z", extractions: [] });
-	const before = { nodes: stores.graphStore.readNodes(), chains: stores.graphStore.readChains(), source: stores.graphStore.readSources().find((s) => s.id === id) };
-	let directory = await (await GET()).json();
-	const sub = directory.organization.folders.find((f: { importPath?: string }) => f.importPath === "Course/Sub");
-	for (const action of [{ action: "rename-folder", id: sub.id, name: "Renamed directory" }, { action: "move", kind: "folder", id: sub.id, parentId: null }, { action: "rename-source", id, name: "Renamed book" }]) assert.equal((await change(action)).status, 200);
-	sourceDirectory.registerImport(filePath);
-	sourceDirectory.registerImport("Course/Sub/new.txt");
-	directory = await (await GET()).json();
+	const before = { nodes: stores.graphStore.readNodes(), chains: stores.graphStore.readChains(), source: stores.graphStore.readSources().find(s => s.id === id) };
+	const folder = sourceDirectory.change({ action: "create-folder", name: "Library", parentId: null }).createdFolderId!;
+	const tag = sourceDirectory.change({ action: "create-tag", name: "Course", parentId: folder }).createdTagId!;
+	for (const action of [
+		{ action: "tag-sources", sourceIds: [id], add: [tag], remove: [] },
+		{ action: "update-tag", id: tag, name: "Course", parentId: null },
+		{ action: "rename-source", id, name: "Renamed book" },
+	]) assert.equal((await change(action)).status, 200);
+	const directory = await (await GET()).json();
 	assert.equal(directory.sources.find((s: { id: string }) => s.id === id).label, "Renamed book");
-	assert.equal(directory.organization.placements[sourceId("Course/Sub/new.txt")].folderId, sub.id);
-	assert.equal(directory.organization.folders.find((f: { id: string }) => f.id === sub.id).parentId, null);
+	assert.deepEqual(directory.organization.placements[id], { tagIds: [tag], name: "Renamed book" });
 	assert.deepEqual(stores.graphStore.readNodes(), before.nodes); assert.deepEqual(stores.graphStore.readChains(), before.chains);
-	assert.deepEqual(stores.graphStore.readSources().find((s) => s.id === id), before.source);
-	assert.ok(fs.existsSync(SOURCE_ORGANIZATION_FILE));
+	assert.deepEqual(stores.graphStore.readSources().find(s => s.id === id), before.source);
 });
 
-it("session rename uses its existing title without activity churn; existing root source placement survives reimport", async () => {
+it("session rename uses its existing title without activity churn", async () => {
 	const chat = stores.chatStore.createChat("Original session");
-	const response = await change({ action: "rename-source", id: chat.id, name: "Edited session" }); assert.equal(response.status, 200);
+	assert.equal((await change({ action: "rename-source", id: chat.id, name: "Edited session" })).status, 200);
 	assert.equal(stores.chatStore.getChat(chat.id)?.title, "Edited session");
 	assert.equal(stores.chatStore.getChat(chat.id)?.updatedAt, chat.updatedAt);
-	const id = sourceId("Root/empty.md");
-	sourceDirectory.registerImport("Root/empty.md");
-	assert.equal(stores.sourceOrganizationStore.read().placements[id]?.folderId, null);
-	assert.ok(!stores.sourceOrganizationStore.read().folders.some((f) => f.importPath === "Root"));
 });
 
-it("server validates cycles, stale sources/parents and nonempty folders, including zero-node files", async () => {
-	const created = await (await change({ action: "create-folder", name: "Empty", parentId: null })).json();
-	const folder = created.organization.folders.find((f: { name: string }) => f.name === "Empty");
-	assert.equal(created.createdFolderId, folder.id, "creation identifies the exact new row, even with duplicate folder names");
-	assert.equal((await change({ action: "move", kind: "folder", id: folder.id, parentId: folder.id })).status, 400);
-	assert.equal((await change({ action: "move", kind: "source", id: "unknown", parentId: folder.id })).status, 400);
-	assert.equal((await change({ action: "move", kind: "source", id: sourceId("Root/empty.md"), parentId: folder.id })).status, 200);
-	assert.equal((await change({ action: "delete-folder", id: folder.id })).status, 400);
-	assert.equal((await change({ action: "move", kind: "source", id: sourceId("Root/empty.md"), parentId: null })).status, 200);
-	assert.equal((await change({ action: "delete-folder", id: folder.id })).status, 200);
+it("refuses direct source moves and folder cycles; folder deletion depends only on tags and subfolders", async () => {
+	const folder = sourceDirectory.change({ action: "create-folder", name: "Empty", parentId: null }).createdFolderId!;
+	assert.equal((await change({ action: "move", kind: "folder", id: folder, parentId: folder })).status, 400);
+	assert.equal((await change({ action: "move", kind: "source", id: sourceId("Root/empty.md"), parentId: folder })).status, 400);
+	const tag = sourceDirectory.change({ action: "create-tag", name: "Empty tag", parentId: folder }).createdTagId!;
+	assert.equal((await change({ action: "delete-folder", id: folder })).status, 400);
+	assert.equal((await change({ action: "update-tag", id: tag, name: "Empty tag", parentId: null })).status, 200);
+	assert.equal((await change({ action: "delete-folder", id: folder })).status, 200);
 });
 
-it("keeps a deleted session's retained graph source visible and movable so its folder can be emptied", async () => {
+it("retained concepts keep their title and tags in the graph without leaving an invisible folder occupant", async () => {
 	const { deleteChatSession } = await import("../src/server/chats.ts");
+	const { folderEntries } = await import("../src/core/source-selection.ts");
 	const chat = stores.chatStore.createChat("Synthetic retained lesson");
 	stores.graphStore.appendNode({ id: "n_retained_folder", name: "Retained concept", statement: "A saved concept survives its conversation.", aliases: [], createdAt: "2026-11-07", provenance: [{ chatId: chat.id, messageId: "m1" }] });
-	const parent = (await (await change({ action: "create-folder", name: "Retained course", parentId: null })).json()).createdFolderId;
-	const folder = (await (await change({ action: "create-folder", name: "Retained lesson", parentId: parent })).json()).createdFolderId;
-	assert.equal((await change({ action: "move", kind: "source", id: chat.id, parentId: folder })).status, 200);
+	const parent = sourceDirectory.change({ action: "create-folder", name: "School", parentId: null }).createdFolderId!;
+	const folder = sourceDirectory.change({ action: "create-folder", name: "Semester", parentId: parent }).createdFolderId!;
+	const tag = sourceDirectory.change({ action: "create-tag", name: "Course", parentId: folder }).createdTagId!;
+	sourceDirectory.change({ action: "tag-sources", sourceIds: [chat.id], add: [tag], remove: [] });
 	assert.equal((await deleteChatSession(chat.id, "preserve-graph")).ok, true);
-	assert.equal(stores.chatStore.getChat(chat.id), null);
 	const retainedGraph = stores.graphStore.readNodes();
 	assert.ok(retainedGraph.some(node => node.id === "n_retained_folder"));
 	const library = await (await GET(new Request("http://localhost/api/graph/sources?include=notes"))).json();
-	assert.equal(library.sources.find((source: { id: string }) => source.id === chat.id)?.kind, "missing");
-	for (const id of [parent, folder]) {
-		assert.deepEqual(libraryRows(library, { kind: "folder", id }, "").map(row => row.source.id), [chat.id]);
-	}
-	assert.deepEqual(libraryRows(library, { kind: "all" }, chat.id).map(row => row.source.id), [chat.id]);
-	assert.equal((await change({ action: "delete-folder", id: folder })).status, 400, "the visible retained source still occupies the folder");
-	assert.equal((await change({ action: "move", kind: "source", id: chat.id, parentId: null })).status, 200);
+	assert.deepEqual(library.sources.find((source: { id: string }) => source.id === chat.id), { id: chat.id, kind: "missing", label: chat.title, createdAt: null });
+	assert.deepEqual(library.organization.placements[chat.id].tagIds, [tag]);
+	assert.deepEqual(folderEntries(library, folder).sources, [chat.id], "graph browsing still finds retained concepts through their tags");
+	for (const scope of [{ kind: "all" }, { kind: "untagged" }, { kind: "folder", id: folder }, { kind: "tag", id: tag }] as const)
+		assert.ok(!libraryRows(library, scope, "").some(row => row.source.id === chat.id), "deleted sessions are absent from Tags");
+	assert.equal((await change({ action: "delete-folder", id: folder })).status, 400, "the visible Course tag is still in the folder");
+	assert.equal((await change({ action: "delete-tag", id: tag })).status, 200);
 	assert.equal((await change({ action: "delete-folder", id: folder })).status, 200);
 	assert.equal((await change({ action: "delete-folder", id: parent })).status, 200);
-	assert.deepEqual(stores.graphStore.readNodes(), retainedGraph, "organizing retained material never deletes its graph");
-	assert.equal(stores.chatStore.getChat(chat.id), null, "moving does not recreate the deleted session");
+	assert.deepEqual(stores.graphStore.readNodes(), retainedGraph, "removing tags and folders never deletes concepts");
+	assert.equal(stores.chatStore.getChat(chat.id), null);
+});
+
+it("reads legacy direct placements without writing and persists the tag conversion on the next edit", async () => {
+	const saved = fs.readFileSync(SOURCE_ORGANIZATION_FILE, "utf8");
+	const legacy = JSON.stringify({ version: 1, folders: [{ id: "old", name: "Old folder", parentId: null, createdAt: "now" }], placements: { gone: { folderId: "old" } } });
+	try {
+		fs.writeFileSync(SOURCE_ORGANIZATION_FILE, legacy);
+		const first = await (await GET()).json(), second = await (await GET()).json();
+		assert.deepEqual(first.organization, second.organization);
+		assert.equal(fs.readFileSync(SOURCE_ORGANIZATION_FILE, "utf8"), legacy);
+		assert.equal(first.organization.version, 2);
+		const general = first.organization.tags.find((tag: { name: string }) => tag.name === "General");
+		assert.equal(general.parentId, "old");
+		assert.deepEqual(first.organization.placements.gone.tagIds, [general.id]);
+		assert.equal((await change({ action: "rename-folder", id: "old", name: "Renamed" })).status, 200);
+		const written = fs.readFileSync(SOURCE_ORGANIZATION_FILE, "utf8");
+		assert.equal(JSON.parse(written).version, 2);
+		assert.doesNotMatch(written, /folderId/);
+	} finally { fs.writeFileSync(SOURCE_ORGANIZATION_FILE, saved); }
 });
 
 it("malformed, oversized and failed streams refuse before metadata writes", async () => {
@@ -123,7 +136,7 @@ it("malformed, oversized and failed streams refuse before metadata writes", asyn
 it("newer/corrupt data refuses reads and writes without overwriting its bytes", async () => {
 	const before = fs.readFileSync(SOURCE_ORGANIZATION_FILE, "utf8");
 	try {
-		for (const value of ["{", '{"version":2,"folders":[],"placements":{}}']) {
+		for (const value of ["{", '{"version":3,"folders":[],"placements":{}}']) {
 			fs.writeFileSync(SOURCE_ORGANIZATION_FILE, value);
 			assert.equal((await GET()).status, 500);
 			assert.equal((await change({ action: "create-folder", name: "Do not overwrite", parentId: null })).status, 500);
@@ -154,11 +167,13 @@ it("applies each file’s tag edits after successful extraction and preserves ta
 		}
 		return importFiles(new Request("http://localhost/api/graph/import", { method: "POST", body: form }));
 	}
+	const foldersBefore = sourceDirectory.read().organization.folders;
 	const selected = () => files.map(file => sourceDirectory.read().organization.placements[sourceId(file)]?.tagIds ?? []);
 	try {
 		const initial = await upload([{ add: [tag, extra], remove: [] }, { add: [tag], remove: [] }]);
 		assert.ok((await initial.json()).results.every((r: { ok: boolean }) => r.ok));
 		assert.deepEqual(selected(), [[tag, extra], [tag]]);
+		assert.deepEqual(sourceDirectory.read().organization.folders, foldersBefore, "import paths do not silently create a parallel folder hierarchy");
 		failPath = files[1];
 		const reimport = await upload([{ add: [], remove: [tag] }, { add: [], remove: [tag] }]);
 		assert.equal((await reimport.json()).results.filter((r: { ok: boolean }) => r.ok).length, 1);

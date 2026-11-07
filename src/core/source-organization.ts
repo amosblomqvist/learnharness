@@ -1,13 +1,13 @@
 import type { ChatKind } from "./contracts/chat.ts";
 
 /** Source organization is presentation metadata, never graph/extraction identity.
- * A source has one parent; folders have stable IDs independent of names/paths. */
+ * Folders contain tags and folders; material is organized only through tags. */
 export interface SourceFolder {
 	id: string;
 	name: string;
 	parentId: string | null;
 	createdAt: string;
-	/** Original picker-relative directory, retained through renames/moves. */
+	/** Legacy import metadata; new imports use explicitly selected tags. */
 	importPath?: string;
 }
 export interface SourceTag {
@@ -19,15 +19,18 @@ export interface SourceTag {
 }
 export interface SourcePlacement {
 	tagIds?: string[];
-	folderId: string | null;
-	/** Imported-file display override only; chat titles live in ChatStore. */
+	/** Imported-file or retained-source title; active chat titles live in ChatStore. */
 	name?: string;
 }
 export interface SourceOrganization {
-	version: 1;
+	version: 2;
 	folders: SourceFolder[];
 	tags?: SourceTag[];
 	placements: Record<string, SourcePlacement>;
+}
+interface LegacySourceOrganization extends Omit<SourceOrganization, "version" | "placements"> {
+	version: 1;
+	placements: Record<string, SourcePlacement & { folderId: string | null }>;
 }
 export interface SourceEntry {
 	id: string;
@@ -59,16 +62,32 @@ export type OrganizationAction = TagAction
 	| { action: "edit-folder"; id: string; name: string; parentId: string | null }
 	| { action: "rename-folder"; id: string; name: string }
 	| { action: "rename-source"; id: string; name: string }
-	| { action: "move"; kind: "source" | "folder"; id: string; parentId: string | null }
+	| { action: "move"; kind: "folder"; id: string; parentId: string | null }
 	| { action: "delete-folder"; id: string };
 
-export const emptySourceOrganization = (): SourceOrganization => ({ version: 1, folders: [], placements: {} });
+export const emptySourceOrganization = (): SourceOrganization => ({ version: 2, folders: [], tags: [], placements: {} });
 export const placementOf = (state: SourceOrganization, id: string): SourcePlacement | undefined =>
 	Object.hasOwn(state.placements, id) ? state.placements[id] : undefined;
 
-export function folderIsEmpty(state: SourceOrganization, id: string, sourceIds: ReadonlySet<string>): boolean {
-	return !state.tags?.some(tag => tag.parentId === id) && !state.folders.some((f) => f.parentId === id)
-		&& ![...sourceIds].some((sourceId) => placementOf(state, sourceId)?.folderId === id);
+export function folderIsEmpty(state: SourceOrganization, id: string): boolean {
+	return !state.tags?.some(tag => tag.parentId === id) && !state.folders.some(f => f.parentId === id);
+}
+
+export function descendantFolderIds(state: SourceOrganization, id: string): Set<string> {
+	const ids = new Set([id]);
+	for (const folder of state.folders) {
+		const seen = new Set<string>();
+		for (let parent = folder.parentId; parent !== null && !seen.has(parent);) {
+			if (parent === id) { ids.add(folder.id); break; }
+			seen.add(parent);
+			parent = state.folders.find(f => f.id === parent)?.parentId ?? null;
+		}
+	}
+	return ids;
+}
+export function folderTagIds(state: SourceOrganization, id: string): Set<string> {
+	const folders = descendantFolderIds(state, id);
+	return new Set(state.tags?.filter(tag => tag.parentId !== null && folders.has(tag.parentId)).map(tag => tag.id));
 }
 
 /** Also used to validate drops server-side, including stale/crafted clients. */
@@ -88,8 +107,8 @@ export function canMoveFolder(state: SourceOrganization, id: string, parentId: s
 export function parseSourceOrganization(raw: unknown): SourceOrganization {
 	const fail = (): never => { throw new Error("Could not read source organization. Its data is invalid or newer than this app."); };
 	if (!raw || typeof raw !== "object") return fail();
-	const r = raw as Partial<SourceOrganization>;
-	if (r.version !== 1 || !Array.isArray(r.folders) || !r.placements || typeof r.placements !== "object" || Array.isArray(r.placements)) return fail();
+	const r = raw as Partial<Omit<SourceOrganization, "version">> & { version?: number };
+	if ((r.version !== 1 && r.version !== 2) || !Array.isArray(r.folders) || !r.placements || typeof r.placements !== "object" || Array.isArray(r.placements)) return fail();
 	const ids = new Set<string>();
 	for (const f of r.folders) {
 		if (!f || typeof f.id !== "string" || !f.id || ids.has(f.id) || typeof f.name !== "string" || !f.name.trim()
@@ -108,9 +127,37 @@ export function parseSourceOrganization(raw: unknown): SourceOrganization {
 		tagIds.add(tag.id);
 	}
 	for (const p of Object.values(state.placements)) {
-		if (!p || typeof p !== "object" || (p.folderId !== null && !ids.has(p.folderId))
+		if (!p || typeof p !== "object" || Array.isArray(p)
 			|| (p.tagIds !== undefined && (!Array.isArray(p.tagIds) || p.tagIds.some(t => !tagIds.has(t))))
 			|| (p.name !== undefined && (typeof p.name !== "string" || !p.name.trim()))) return fail();
+		if (r.version === 1) {
+			const folderId = (p as { folderId?: unknown }).folderId;
+			if (folderId !== null && (typeof folderId !== "string" || !ids.has(folderId))) return fail();
+		} else if ("folderId" in p) return fail();
+	}
+	return r.version === 1 ? migrateFolderPlacements(r as LegacySourceOrganization) : state;
+}
+
+/** Pure v1 compatibility: preserve direct filing as explicit General-tag membership.
+ * Stable IDs make repeated reads identical; only the store's next write persists v2. */
+function migrateFolderPlacements(legacy: LegacySourceOrganization): SourceOrganization {
+	const { placements, ...organization } = structuredClone(legacy);
+	const state: SourceOrganization = { ...organization, version: 2, placements: {} };
+	const tags = state.tags ??= [];
+	for (const [id, placement] of Object.entries(placements)) {
+		const { folderId, ...rest } = placement;
+		if (folderId !== null) {
+			let tag = tags.find(t => t.parentId === folderId && t.name === "General");
+			if (!tag) {
+				const base = `tag_folder_${folderId}`;
+				let tagId = base;
+				for (let n = 2; tags.some(t => t.id === tagId); n++) tagId = `${base}_${n}`;
+				tag = { id: tagId, name: "General", parentId: folderId };
+				tags.push(tag);
+			}
+			rest.tagIds = [...new Set([...(rest.tagIds ?? []), tag.id])];
+		}
+		state.placements[id] = rest;
 	}
 	return state;
 }
@@ -143,7 +190,7 @@ export function parseOrganizationAction(raw: unknown): OrganizationAction {
 		case "rename-folder": case "rename-source": return { action: r.action, id: id(), name: name() };
 		case "delete-folder": return { action: r.action, id: id() };
 		case "move":
-			if (r.kind !== "source" && r.kind !== "folder") throw new Error("Invalid move kind.");
+			if (r.kind !== "folder") throw new Error("Invalid move kind.");
 			return { action: r.action, id: id(), kind: r.kind, parentId: parent() };
 		default: throw new Error("Unknown source organization action.");
 	}
@@ -177,7 +224,7 @@ export function applyOrganizationAction(state: SourceOrganization, action: Exclu
 		const placements = new Map(Object.entries(next.placements));
 		for (const id of action.sourceIds) {
 			if (!sourceIds.has(id)) throw new Error("Source no longer exists.");
-			const p = placementOf(next, id) ?? { folderId: null };
+			const p = placementOf(next, id) ?? {};
 			const membership = new Set(p.tagIds);
 			for (const tag of action.add) membership.add(tag);
 			for (const tag of action.remove) membership.delete(tag);
@@ -190,11 +237,6 @@ export function applyOrganizationAction(state: SourceOrganization, action: Exclu
 		next.folders.push({ ...newFolder, name: action.name, parentId: action.parentId });
 		return next;
 	}
-	if (action.action === "move" && action.kind === "source") {
-		if (!sourceIds.has(action.id)) throw new Error("Source no longer exists.");
-		next.placements = { ...next.placements, [action.id]: { ...placementOf(next, action.id), folderId: action.parentId } };
-		return next;
-	}
 	const folder = next.folders.find((f) => f.id === action.id);
 	if (!folder) throw new Error("Folder no longer exists.");
 	if (action.action === "rename-folder") folder.name = action.name;
@@ -203,33 +245,8 @@ export function applyOrganizationAction(state: SourceOrganization, action: Exclu
 		folder.parentId = action.parentId;
 		if (action.action === "edit-folder") folder.name = action.name;
 	} else {
-		if (!folderIsEmpty(next, action.id, sourceIds)) throw new Error("Only empty folders can be removed. Move their entries out first.");
+		if (!folderIsEmpty(next, action.id)) throw new Error("Only empty folders can be removed. Move or remove their tags and subfolders first.");
 		next.folders = next.folders.filter((f) => f.id !== action.id);
-		for (const [id, p] of Object.entries(next.placements)) if (p.folderId === action.id) next.placements[id] = { ...p, folderId: null };
 	}
-	return next;
-}
-
-/** Reconstruct only directories needed by eligible files. Associations follow
- * stable folder IDs, not current names/parents; existing placements always win. */
-export function placeImportedSource(state: SourceOrganization, sourceId: string, filePath: string,
-	makeFolder: () => { id: string; createdAt: string }): SourceOrganization {
-	if (placementOf(state, sourceId)) return state;
-	const next = structuredClone(state);
-	const directories = filePath.split("/").slice(0, -1);
-	let parentId: string | null = null;
-	let start = 0;
-	// Reuse the deepest association first. Its original ancestors might have
-	// been moved/deleted; do not recreate now-unused empty ancestors.
-	for (let i = directories.length - 1; i >= 0; i--) {
-		const existing = next.folders.find((f) => f.importPath === directories.slice(0, i + 1).join("/"));
-		if (existing) { parentId = existing.id; start = i + 1; break; }
-	}
-	for (let i = start; i < directories.length; i++) {
-		const folder: SourceFolder = { ...makeFolder(), name: directories[i]!, parentId, importPath: directories.slice(0, i + 1).join("/") };
-		next.folders.push(folder);
-		parentId = folder.id;
-	}
-	next.placements = { ...next.placements, [sourceId]: { folderId: parentId } };
 	return next;
 }

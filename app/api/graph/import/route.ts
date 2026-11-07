@@ -166,7 +166,6 @@ export async function POST(request: Request) {
 					results.push({ filePath, requestIndex, outcome: "failed", ok: false, error: notes.error });
 					continue;
 				}
-				sourceDirectory.registerImport(filePath);
 				const stats = await extraction.importNotes({ filePath, text: notes.text });
 				const changes = assignments[requestIndex];
 				if (changes && (changes.add.length || changes.remove.length)) {

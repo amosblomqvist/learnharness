@@ -7,7 +7,7 @@ import {
 	type OrganizationAction,
 } from "../src/core/source-organization.ts";
 import { libraryRows } from "../src/core/tag-library.ts";
-it("uses existing placements and descendant tag memberships together, deduplicating search results", () => {
+it("uses only descendant tag memberships, deduplicates material, and exposes Untagged", () => {
 	const ids = new Set(["one", "two", "import"]);
 	let state = emptySourceOrganization();
 	const change = (a: Exclude<OrganizationAction, { action: "rename-source" }>, id = "unused") => {
@@ -15,7 +15,6 @@ it("uses existing placements and descendant tag memberships together, deduplicat
 	};
 	change({ action: "create-folder", name: "School", parentId: null }, "school");
 	change({ action: "create-folder", name: "Semester 1", parentId: "school" }, "sem");
-	change({ action: "move", kind: "source", id: "one", parentId: "sem" });
 	change({ action: "create-tag", name: "MATH286", parentId: "sem", color: "#114488" }, "course");
 	change({ action: "tag-sources", sourceIds: ["one", "two", "import"], add: ["course"], remove: [] });
 	const sources = [...ids].map(id => ({
@@ -28,7 +27,7 @@ it("uses existing placements and descendant tag memberships together, deduplicat
 		{
 			chatId: "one",
 			sessionTitle: "One",
-			mode: "final" as const,
+			mode: "handout" as const,
 			sectionId: "basis",
 			heading: "Diagonalization",
 			text: "An eigenbasis exists.",
@@ -44,7 +43,8 @@ it("uses existing placements and descendant tag memberships together, deduplicat
 	assert.throws(() => change({ action: "tag-sources", sourceIds: ["one", "missing"], remove: ["course"], add: [] }));
 	assert.deepEqual(state.placements.one?.tagIds, ["course"]);
 	change({ action: "update-tag", id: "course", name: "Math", parentId: null });
-	assert.equal(libraryRows(library(), { kind: "folder", id: "school" }, "").length, 1);
+	assert.equal(libraryRows(library(), { kind: "folder", id: "school" }, "").length, 0);
 	change({ action: "delete-tag", id: "course" });
-	assert.deepEqual(parseSourceOrganization(state).placements.one, { folderId: "sem", tagIds: [] });
+	assert.equal(libraryRows(library(), { kind: "untagged" }, "").length, 3);
+	assert.deepEqual(parseSourceOrganization(state).placements.one, { tagIds: [] });
 });

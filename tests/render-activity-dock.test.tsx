@@ -38,7 +38,7 @@ describe("activity dock pure layer", () => {
 		const feed: ActivityFeed = {
 			jobs: [], extractions: [],
 			notes: [{
-				id: "finalc1", chatId: "c1", mode: "final", title: "Notes lesson", startedAt: NOW - 5000,
+				id: "handoutc1", chatId: "c1", mode: "handout", title: "Notes lesson", startedAt: NOW - 5000,
 				activity: "Composing handout", costUsd: 0.02, contextLimit: 64000,
 				usage: {
 					...step(100, 20), model: "faux:notes", steps: 1,
@@ -48,7 +48,7 @@ describe("activity dock pure layer", () => {
 		};
 		const [blob] = toBlobs(feed);
 		assert.equal(blob?.process, "notes");
-		assert.equal(blob?.id, "finalc1");
+		assert.equal(blob?.id, "handoutc1");
 		assert.equal(blob?.cost, 0.02);
 		assert.deepEqual(blob?.context, { used: 150, limit: 64000 });
 		const html = renderToStaticMarkup(<ActivitySection feed={feed} />);

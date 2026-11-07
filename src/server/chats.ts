@@ -150,12 +150,17 @@ function finishChatDeletion(chatId: string, mode: ChatDeleteMode): Extract<ChatD
 
 function finishChatRecordDeletion(chatId: string): number {
 	const jobsRemoved = stores.jobStore.deleteJobsForChat(chatId);
+	const title = stores.chatStore.getChat(chatId)?.title;
 	if (stores.chatStore.deleteChat(chatId)) {
 		discardSessionNotes(chatId);
 		const org = stores.sourceOrganizationStore.read();
 		const placement = Object.hasOwn(org.placements, chatId) ? org.placements[chatId] : undefined;
-		if (placement?.tagIds?.length) {
-			delete placement.tagIds;
+		const retained = stores.graphStore.readNodes().some(node => node.provenance.some(p => p.chatId === chatId));
+		if (retained && title) {
+			org.placements[chatId] = { ...placement, name: title };
+			stores.sourceOrganizationStore.write(org);
+		} else if (!retained && placement) {
+			delete org.placements[chatId];
 			stores.sourceOrganizationStore.write(org);
 		}
 		discardChatDeliveries(chatId);

@@ -73,8 +73,8 @@ export interface ChatStore {
 export interface SessionNotesStore {
 	read(chatId: string): SessionNotesRecord;
 	change(chatId: string, edit: (record: SessionNotesRecord) => void): void;
-	savePdf(chatId: string, edition: NoteEdition, bytes: Uint8Array): void;
-	pdf(chatId: string): Uint8Array | null;
+	saveHandoutPdf(chatId: string, edition: NoteEdition, bytes: Uint8Array): void;
+	handoutPdf(chatId: string): Uint8Array | null;
 	delete(chatId: string): void;
 }
 

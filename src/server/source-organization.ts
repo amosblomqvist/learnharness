@@ -4,7 +4,7 @@ import type { ChatStore, GraphStore, SourceOrganizationStore } from "../core/por
 import { getGraph } from "../core/graph.ts";
 import { sourceFileLabel } from "../core/source-label.ts";
 import {
-	applyOrganizationAction, parseOrganizationAction, placeImportedSource, placementOf,
+	applyOrganizationAction, parseOrganizationAction, placementOf,
 	type SourceDirectory, type SourceEntry,
 } from "../core/source-organization.ts";
 
@@ -26,7 +26,7 @@ export function createSourceDirectory(deps: { chatStore: ChatStore; graphStore: 
 		});
 		// Preserve graph groups whose naming record is gone; do not resurrect a chat.
 		for (const node of getGraph(deps.graphStore).nodes) for (const p of node.provenance) {
-			if (!entries.has(p.chatId)) entries.set(p.chatId, { id: p.chatId, kind: "missing", label: null, createdAt: null });
+			if (!entries.has(p.chatId)) entries.set(p.chatId, { id: p.chatId, kind: "missing", label: placementOf(organization, p.chatId)?.name ?? null, createdAt: null });
 		}
 		return { organization, sources: [...entries.values()] };
 	}
@@ -43,37 +43,21 @@ export function createSourceDirectory(deps: { chatStore: ChatStore; graphStore: 
 			if (entry.kind === "chat") deps.chatStore.renameChat(entry.id, action.name);
 			else {
 				const state = directory.organization;
-				state.placements = { ...state.placements, [entry.id]: { folderId: null, ...placementOf(state, entry.id), name: action.name } };
+				state.placements = { ...state.placements, [entry.id]: { ...placementOf(state, entry.id), name: action.name } };
 				deps.sourceOrganizationStore.write(state);
 			}
 		} else {
 			let next;
 			const fresh = freshFolder();
 			if (action.action === "create-tag") fresh.id = createdTagId = "tag_" + randomUUID();
-			const sources = action.action === "tag-sources" ? directory.sources.filter(s => s.kind !== "missing") : directory.sources;
-			try { next = applyOrganizationAction(directory.organization, action, new Set(sources.map(s => s.id)), fresh); }
+			try { next = applyOrganizationAction(directory.organization, action, new Set(directory.sources.map(s => s.id)), fresh); }
 			catch (error) { throw new SourceOrganizationInputError((error as Error).message); }
 			deps.sourceOrganizationStore.write(next);
 			if (action.action === "create-folder") createdFolderId = fresh.id;
 		}
 		return { ...read(), ...(createdFolderId ? { createdFolderId } : {}), ...(createdTagId ? { createdTagId } : {}) };
 	}
-	/** Before starting the file's existing extraction pipeline. The source key
-	 * is the pipeline's unchanged path hash; no source text is stored here. */
-	function registerImport(filePath: string): void {
-		const id = importedSourceId(filePath);
-		const state = deps.sourceOrganizationStore.read();
-		// Legacy imports with no organization record already live at root.
-		// Explicitly preserve that placement on re-import too.
-		if (!placementOf(state, id) && deps.graphStore.readSources().some((s) => s.id === id)) {
-			state.placements = { ...state.placements, [id]: { folderId: null } };
-			deps.sourceOrganizationStore.write(state);
-			return;
-		}
-		const next = placeImportedSource(state, id, filePath, freshFolder);
-		if (next !== state) deps.sourceOrganizationStore.write(next);
-	}
-	return { read, change, registerImport };
+	return { read, change };
 }
 
 export const sourceDirectory = createSourceDirectory(stores);
