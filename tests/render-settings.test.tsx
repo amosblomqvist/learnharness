@@ -287,27 +287,19 @@ describe("KeysSection (thin SSR)", () => {
 });
 
 describe("AppearanceSection (thin SSR)", () => {
-	it("Mode is three preview cards; the stored mode is pressed", () => {
+	it("Mode is an enabled Dark | Light | System select showing the stored mode", () => {
 		const html = renderToStaticMarkup(<AppearanceSection appearance={{ mode: "light" }} onSectionChange={() => {}} />);
-		for (const id of ["dark", "light", "system"]) assert.ok(html.includes(`data-testid="mode-card-${id}"`), id);
-		assert.ok(tagOf(html, "mode-card-light").includes('aria-pressed="true"'));
-		assert.ok(tagOf(html, "mode-card-dark").includes('aria-pressed="false"'));
-		assert.ok(tagOf(html, "mode-card-system").includes('aria-pressed="false"'));
-		assert.equal((html.match(/lucide-check/g) ?? []).length, 1, "one check, on the selected card");
+		const select = tagOf(html, "select-mode");
+		assert.ok(!select.includes("disabled"), "mode select enabled");
+		for (const v of ["dark", "light", "system"]) assert.ok(html.includes(`<option value="${v}"`), v);
+		assert.match(html, /<option value="light" selected="">/);
+		assert.ok(!tagOf(html, "row-mode").includes("opacity-40"), "mode row not dimmed");
 		assert.ok(!html.includes("Coming soon"));
 	});
 
-	it("absent mode = the factory dark card pressed", () => {
+	it("absent mode = the factory dark option selected", () => {
 		const html = renderToStaticMarkup(<AppearanceSection appearance={undefined} onSectionChange={() => {}} />);
-		assert.ok(tagOf(html, "mode-card-dark").includes('aria-pressed="true"'));
-	});
-
-	it("previews show swatches of the effective palette (a custom background included)", () => {
-		const html = renderToStaticMarkup(<AppearanceSection appearance={{ background: "#202020" }} onSectionChange={() => {}} />);
-		assert.match(html, /202020/);
-		assert.match(html, /f5f5f3/);
-		// Five per variant card; System adopts those two and lists none.
-		assert.equal((html.match(/data-testid="mode-swatch"/g) ?? []).length, 10);
+		assert.match(html, /<option value="dark" selected="">/);
 	});
 
 	it("the Background row edits the dark background in every mode", () => {

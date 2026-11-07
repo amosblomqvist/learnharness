@@ -1,8 +1,7 @@
 /**
  * APPEARANCE MODE + PALETTES (light-mode wave, 2026-10-29): which variant
  * renders, and the per-variant derivation curves over a background hex.
- * Pure, browser-safe — the provider, the Settings preview cards and the
- * tests share it.
+ * Pure, browser-safe — the provider and the tests share it.
  */
 
 export type AppearanceMode = "dark" | "light" | "system";

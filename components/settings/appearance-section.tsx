@@ -7,8 +7,9 @@
  * variables move IMMEDIATELY (the section's whole point — it must DO
  * something). Hex inputs commit on blur/Enter; the background derives the
  * raised/accent/edge palette in code (components/settings/appearance.tsx).
- * Mode (light-mode wave, 2026-10-29) is picked from three preview cards
- * (./mode-cards.tsx). The Background row is the dark variant's only:
+ * Mode (light-mode wave, 2026-10-29): Dark | Light | System (follows the
+ * OS), from the select that sat disabled until a light palette existed.
+ * The Background row is the dark variant's only:
  * light always renders the factory paper.
  *
  * Graph graying (owner, 2026-09-20) follows the graph viewer's render-panel
@@ -35,6 +36,7 @@ import {
 	EXTRACTION_CHUNK_TOKENS_FLOOR,
 	MODE_DEFAULT_BACKGROUND,
 	resolveSettings,
+	type AppearanceMode,
 	type AppearanceSettings,
 	type GraphSettings,
 } from "@/src/core";
@@ -42,8 +44,7 @@ import { MenuShell } from "@/components/menu-shell";
 import { Hint } from "@/components/ui/hint";
 import { useAppearance } from "./appearance.tsx";
 import { FontMenuList } from "./model-menu";
-import { ModeCards } from "./mode-cards.tsx";
-import { CommitInput, SettingsMenuTrigger, SettingsRow, Toggle } from "./controls.tsx";
+import { CommitInput, SettingsMenuTrigger, SettingsRow, ThinSelect, Toggle } from "./controls.tsx";
 
 /** The factory reading family — the DEFAULT row's identity (unset =
  *  this). Exported for tests. */
@@ -189,14 +190,18 @@ export function AppearanceSection({
 
 	return (
 		<>
-			<div data-testid="row-mode" className="flex flex-col gap-2 py-1">
-				<span className="block font-prose text-(length:--lh-prose-size)">Mode</span>
-				<ModeCards
+			<SettingsRow label="Mode" testid="row-mode">
+				<ThinSelect
 					value={mode}
-					background={appearance?.background ?? null}
-					onSelect={(next) => onSectionChange({ ...appearance, mode: next })}
-				/>
-			</div>
+					ariaLabel="mode"
+					testid="select-mode"
+					onChange={(next) => onSectionChange({ ...appearance, mode: next as AppearanceMode })}
+				>
+					<option value="dark">Dark</option>
+					<option value="light">Light</option>
+					<option value="system">System</option>
+				</ThinSelect>
+			</SettingsRow>
 			{/* The dark variant's background only — light always renders the
 			    factory paper. Editable in either mode, so a dark color can be
 			    set ahead of a switch. */}
