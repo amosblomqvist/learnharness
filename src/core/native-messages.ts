@@ -36,6 +36,7 @@
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { AssistantMessage, ImageContent, Message, TextContent, ToolResultMessage, UserMessage } from "@earendil-works/pi-ai";
 import type { PluginSubmissionImages, PluginSubmissionOccurrence } from "./plugin-submissions.ts";
+import { ImmutableReadCache } from "./immutable-data.ts";
 import { QUESTION_TOOLS, type PendingQuestion } from "./pending.ts";
 import { pluginProblemForCall, readPluginProblemSubmission, type PluginProblemSnapshot } from "./plugin-problems.ts";
 import { CLAUDE_CODE_PROVIDER } from "./contracts/claude-code.ts";
@@ -748,7 +749,11 @@ export interface PluginQuestionCall {
  * first and siblings in source order. Answered/cancelled occurrences are
  * omitted. Attempts (including failed ones) NEVER grant pending authority.
  * Unlike builtin history, saved plugin authority survives later assistants. */
+const pluginQuestionHistory = new ImmutableReadCache<PluginQuestionCall[]>();
 export function pluginQuestionCallsOf(messages: readonly LhMessage[]): PluginQuestionCall[] {
+	return pluginQuestionHistory.read(messages, undefined, () => scanPluginQuestionCalls(messages));
+}
+function scanPluginQuestionCalls(messages: readonly LhMessage[]): PluginQuestionCall[] {
 	const calls: PluginQuestionCall[] = [];
 	for (let mi = messages.length - 1; mi >= 0; mi--) {
 		const message = messages[mi]!;
