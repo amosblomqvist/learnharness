@@ -33,6 +33,7 @@ import type { LhMessage } from "./native-messages.ts";
 import {
 	activeProblemOf,
 	concludedByDismissalPair,
+	isSideQuestionMarker,
 	danglingQuestionOf,
 	newAnswerResult,
 	newNextMessage,
@@ -280,7 +281,7 @@ export function questionRecoveryAppends(
 export function failedResponseAtEnd(messages: readonly LhMessage[]): Extract<LhMessage, { role: "assistant" }> | undefined {
 	for (let i = messages.length - 1; i >= 0; i--) {
 		const m = messages[i]!;
-		if (m.role === "custom" && (m.customType === "plan-block" || m.customType === "compaction")) continue;
+		if (m.role === "custom" && (m.customType === "plan-block" || m.customType === "compaction" || isSideQuestionMarker(m))) continue;
 		return m.role === "assistant" && m.stopReason === "error" ? m : undefined;
 	}
 	return undefined;
@@ -324,7 +325,7 @@ function failedTail(messages: readonly LhMessage[]): { ids: Set<string>; before:
 	for (; i >= 0; i--) {
 		const m = messages[i]!;
 		if (m.role === "assistant" && m.stopReason === "error") ids.add(m.id);
-		else if (!(m.role === "custom" && m.customType === "plan-block")) break;
+		else if (!(m.role === "custom" && (m.customType === "plan-block" || isSideQuestionMarker(m)))) break;
 	}
 	return { ids, before: messages[i] };
 }

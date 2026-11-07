@@ -54,6 +54,10 @@ export interface ChatRecord {
 	extractions?: ExtractionRunUsage[];
 	/** Per-chat model/thinking overrides for the conversation agents. */
 	settings?: ChatSettings;
+	/** Durable clarification threads. Each explanation and associated check
+	 * shares one thread. Every main request appends new raw exchanges across
+	 * all threads; already-recorded teacher history is never rewritten. */
+	sideChats?: SideChatThread[];
 	/** SCHEMA STAMP (schema-versioning wave, owner 2026-10-10): LAZY v1 —
 	 *  existing records stay unstamped (absence reads as v1); every write
 	 *  stamps the current version. A record stamped NEWER than this build
@@ -63,7 +67,7 @@ export interface ChatRecord {
 }
 
 /** The chat record format this build writes and understands. */
-export const CURRENT_CHAT_VERSION = 1;
+export const CURRENT_CHAT_VERSION = 2;
 
 /** The conversation agents' runtime model choice (model-control wave,
  *  2026-09-12): a per-chat override of config.ts's pinned prober/teacher
@@ -115,6 +119,64 @@ export interface ExtractionRunUsage {
 }
 
 // ─── Usage accounting (the money channel) ─────────────────────────────────────
+
+// ─── Side questions (inline clarification threads, 2026-11-02) ──────────────
+
+/** Where a side thread sits in the transcript: after one paragraph-level
+ *  block (Streamdown's markdown block split) of one teacher prose part.
+ *  Settled teacher prose never changes, so (partId, blockIndex) is stable. */
+export interface SideChatAnchor {
+	/** The native assistant message carrying the prose. */
+	messageId: string;
+	/** projectView's text-part identity (`<messageId>-t<n>`). */
+	partId: string;
+	/** 0-based block index inside that part's rendered markdown. */
+	blockIndex: number;
+	/** The block's markdown source when the thread was opened — the
+	 *  default quote, and the anchor's text if the record is ever re-split. */
+	blockText: string;
+}
+
+/** One message in a side thread. Plain text, never native pi history: the
+ *  thread is replayed to the side model as user/assistant text turns. */
+export interface SideChatMessage {
+	id: string;
+	role: "user" | "assistant";
+	/** The learner's question, or the side answer (markdown). */
+	text: string;
+	/** user only: the passages the learner attached to this question. */
+	quotes?: string[];
+	/** Matching canonical Tutor quote links retain each passage's actual
+	 * native source and exact-text selector, independent of segment identity.
+	 * Legacy string-only quotes remain readable without a guessed target. */
+	quoteCitations?: string[];
+	/** ISO time the message was saved. */
+	at: string;
+	/** assistant only: provider-qualified model ("provider:id"). */
+	model?: string;
+	/** Idempotency identity of the ask/retry producing this reply. */
+	requestId?: string;
+	/** assistant only: the learner stopped the answer; `text` is partial. */
+	stopped?: boolean;
+	/** Delivery snapshot only: this reply was still generating at capture. */
+	pending?: boolean;
+	/** assistant only: the call failed; `text` is whatever arrived. */
+	error?: string;
+}
+
+/** One side thread per explanation and associated question, displayed in
+ * the shared floating/docked companion rather than inline windows. */
+export interface SideChatThread {
+	id: string;
+	anchor: SideChatAnchor;
+	/** Window state (open window vs. the one-line closed bar). */
+	open: boolean;
+	createdAt: string;
+	messages: SideChatMessage[];
+	/** Legacy one-shot cutoff, retained when reading earlier development
+	 * records. New delivery uses immutable native update entries instead. */
+	contextSnapshot?: SideChatMessage[];
+}
 
 /** One model call's token accounting — the SDK's LanguageModelUsage
  * flattened to the fields we persist (undefined = provider didn't report;

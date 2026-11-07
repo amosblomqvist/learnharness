@@ -20,6 +20,7 @@
  * learning evidence); custom markers are invisible, same as the view.
  */
 
+import { citationsToReadableText } from "./citations.ts";
 import type { LhMessage } from "./native-messages.ts";
 import {
 	failedOutputCallIds,
@@ -167,7 +168,7 @@ export function messageMarkdown(
 
 	if (role === "user") {
 		for (const text of userFacingTextOf((message as { content: unknown }).content)) {
-			parts.push(`### Learner${anchor}\n\n${text.trim()}`);
+			parts.push(`### Learner${anchor}\n\n${citationsToReadableText(text).trim()}`);
 		}
 	} else if (role === "assistant") {
 		for (const text of userFacingTextOf((message as { content: unknown }).content, ctx?.failedOutputCalls ?? failedOutputCallIds([message]))) {
@@ -177,7 +178,7 @@ export function messageMarkdown(
 		const result = message as ToolResultMessage;
 		if (result.isError || result.toolName === SEND_TO_USER_TOOL) return null; // retry context or output ack, not learning evidence
 		const { heading, body } = toolResultBody(result, ctx);
-		parts.push(`### ${heading}${anchor}\n\n${body.join("\n\n")}`);
+		parts.push(`### ${heading}${anchor}\n\n${citationsToReadableText(body.join("\n\n"))}`);
 	}
 
 	// custom markers are invisible, same as the extraction view.

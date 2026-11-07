@@ -70,6 +70,9 @@ export type TurnWireEvent =
 	| { type: "error"; errorText: string };
 
 export interface PiTurnSpec {
+	/** Fresh reference cargo for an already-selected native run, including
+	 * an admission-recovery run. This hook never schedules a run itself. */
+	beforeCycle?: () => void;
 	requestCycle?: ChatGPTRequestCycle;
 	/** The per-turn agent (stateless engine — built from the record). */
 	agent: Agent;
@@ -268,11 +271,13 @@ export function runPiTurn(spec: PiTurnSpec): PiTurnHandle {
 	void (async () => {
 		try {
 			do {
+				spec.beforeCycle?.();
 				await agent.continue();
 				if (!requestCycle) break;
 				const denied = requestCycle.deniedBeforeDispatch;
-				const outcome = requestCycle.finishNativeCycle();
-				if (denied) agent.state.messages = outcome.messages;
+				const locallyRejected = requestCycle.locallyRejected;
+				const outcome = requestCycle.finishNativeCycle(agent.state.messages);
+				if (denied || locallyRejected) agent.state.messages = outcome.messages;
 				if (outcome.action !== "resumeForeground") {
 					handle({ type: "agent_end", messages: [...agent.state.messages] });
 					break;

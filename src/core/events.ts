@@ -52,6 +52,10 @@ export interface ServerEvents {
 	 *  the chat; the client mirrors it by disabling the composer/dock
 	 *  submit. */
 	"compaction-changed": { chatId: string; running: boolean };
+	/** A side conversation changed: a question saved, an answer settled,
+	 *  or its main-context cutoff froze. Notify-then-fetch: open views
+	 *  refetch GET /api/chats/:id/side-chats. Closing never deletes it. */
+	"side-chats-changed": { chatId: string };
 }
 
 export type ServerEventType = keyof ServerEvents;
@@ -69,6 +73,7 @@ export const SERVER_EVENT_TYPES = [
 	"subscriptions-changed",
 	"record-changed",
 	"compaction-changed",
+	"side-chats-changed",
 ] as const satisfies readonly ServerEventType[];
 
 /** One notification: the type discriminates the payload. */

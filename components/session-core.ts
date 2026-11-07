@@ -91,7 +91,7 @@ class StreamReadError extends Error {
 }
 
 /** Wire events; return true ONLY for the explicit completion marker. */
-async function* sseEvents(reader: ReadableStreamDefaultReader<Uint8Array>): AsyncGenerator<Record<string, unknown>, boolean> {
+export async function* sseEvents(reader: ReadableStreamDefaultReader<Uint8Array>): AsyncGenerator<Record<string, unknown>, boolean> {
 	const decoder = new TextDecoder();
 	let buf = "";
 	for (;;) {

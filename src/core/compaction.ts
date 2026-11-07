@@ -33,6 +33,7 @@
  * model can continue mid-thought.
  */
 
+import { citationsToReadableText } from "./citations.ts";
 import type { PlanTree } from "./contracts/plan.ts";
 import { derivePlanStatusesLh, derivedNodeStatus } from "./contracts/plan.ts";
 import { COMPACTED_HISTORY_HEADER } from "./contracts/chat.ts";
@@ -214,6 +215,7 @@ export function estimateTokens(messages: readonly (LhMessage | AgentMessage)[], 
 function cutMessage(message: LhMessage): LhMessage | null {
 	if (message.role !== "custom") return message;
 	if (["compaction", "plan-block", "problem-dismissed"].includes(message.customType)) return null;
+	if (message.customType === "side-question" && !message.content) return null; // an empty marker has no model-visible text
 	return message;
 }
 
@@ -330,7 +332,7 @@ export function serializeForSummary(messages: readonly LhMessage[]): string {
 	for (const m of messages) {
 		const role = (m as { role?: string }).role;
 		if (role === "user") {
-			lines.push(`[LEARNER] ${(m as { content: string }).content}`);
+			lines.push(`[LEARNER] ${citationsToReadableText((m as { content: string }).content)}`);
 		} else if (role === "assistant") {
 			const assistant = m as AssistantMessage;
 			const blocks: string[] = [];
@@ -354,7 +356,9 @@ export function serializeForSummary(messages: readonly LhMessage[]): string {
 		} else if (role === "custom") {
 			const marker = m as LhMarkerMessage;
 			if (marker.customType === "plan-block") continue; // UI-only
-			lines.push(`[SYSTEM NOTE] ${marker.content}`);
+			if (marker.customType === "side-question" && !marker.content) continue;
+			if (marker.customType === "side-question") lines.push(`[LEARNER–HELPER CONVERSATION] ${citationsToReadableText(marker.content)}`);
+			else lines.push(`[SYSTEM NOTE] ${marker.customType === "practice-thinking" ? citationsToReadableText(marker.content) : marker.content}`);
 		}
 	}
 	return lines.join("\n\n");

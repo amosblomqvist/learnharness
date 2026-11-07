@@ -280,9 +280,9 @@ export function projectView(messages: readonly LhMessage[], live?: LiveTurnState
 			const group = lastAssistant();
 			if (group) {
 				// Same group: the step separator renders between the steps.
-				group.parts.push({ type: "step-start" }, ...parts);
+				group.parts.push({ type: "step-start", sourceMessageId: m.id }, ...parts);
 			} else {
-				out.push({ id: m.id, role: "assistant", parts: [{ type: "step-start" }, ...parts] });
+				out.push({ id: m.id, role: "assistant", parts: [{ type: "step-start", sourceMessageId: m.id }, ...parts] });
 			}
 			continue;
 		}
@@ -452,6 +452,12 @@ function projectMarker(marker: LhMarkerMessage, out: LhViewMessage[]): void {
 			});
 			return;
 		}
+		case "side-question":
+		case "side-question-told":
+			// Raw context entries do not split the teaching segment or render
+			// loud transcript pills. Its quiet speech-bubble reopens the saved
+			// conversation in the floating/docked companion.
+			return;
 		case "problem-dismissed":
 			// UI-only (the ask-style dismissal): the synthesized conclude
 			// pair — which rides the NEXT input — carries the record's face.

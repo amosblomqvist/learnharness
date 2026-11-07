@@ -41,6 +41,7 @@ import {
 	serializeForSummary,
 	toLlmMessages,
 	type CompactionDetails,
+	type ChatRecord,
 	type LhMessage,
 	type LhMarkerMessage,
 } from "../core/index.ts";
@@ -114,6 +115,9 @@ export interface CompactionDeps {
 	/** The composed system prompt's token estimate (chars/4) — the
 	 *  projection the provider actually receives starts with it. */
 	systemPromptTokens: number;
+	/** Trigger against a prospective request without recording/summarizing
+	 * its new cargo. The cut and summary still use only saved history. */
+	projectMessages?: (record: ChatRecord) => readonly LhMessage[];
 	/** Injectable summarizer (tests); default = the sub-agent one-shot. */
 	summarize?: Summarizer;
 }
@@ -181,7 +185,7 @@ async function compact(deps: CompactionDeps, chatId: string): Promise<void> {
 	if (!record) return;
 	const messages = record.messages;
 	const model = deps.includeReasoning ? deps.engine.model : undefined;
-	const tokensBefore = projectedContextTokens(messages, deps.systemPromptTokens, model);
+	const tokensBefore = projectedContextTokens(deps.projectMessages?.(record) ?? messages, deps.systemPromptTokens, model);
 	if (tokensBefore <= deps.thresholdTokens) return; // settled beneath while we waited
 
 	const cut = compactionCutIndex(messages, undefined, model);
@@ -290,8 +294,10 @@ export async function ensureCompacted(deps: CompactionDeps, chatId: string): Pro
 	if (deps.canStart?.() === false) return;
 	const record = deps.chatStore.getChat(chatId);
 	if (!record) return;
-	if (projectedContextTokens(record.messages, deps.systemPromptTokens, deps.includeReasoning ? deps.engine.model : undefined) <= deps.thresholdTokens) return;
-	if (state().inFlight.has(chatId)) return; // a concurrent caller started it while we awaited
+	const model = deps.includeReasoning ? deps.engine.model : undefined;
+	if (projectedContextTokens(deps.projectMessages?.(record) ?? record.messages, deps.systemPromptTokens, model) <= deps.thresholdTokens) return;
+	const concurrent = state().inFlight.get(chatId);
+	if (concurrent) { await concurrent; return; } // a concurrent gate started it while we awaited
 	const run = compact(deps, chatId);
 	state().inFlight.set(chatId, run);
 	try {

@@ -48,6 +48,9 @@ export * from "./compaction.ts";
 export * from "./input-events.ts";
 export { parseFilePaths, quoteFilePath, filePathLabel, isDirectoryReference, directoryReferencePath } from "./file-paths.ts";
 export type { FilePathPart } from "./file-paths.ts";
+export * from "./citations.ts";
+export { parseComposerTokens } from "./composer-tokens.ts";
+export type { ComposerToken } from "./composer-tokens.ts";
 // Wave D (owner-approved 2026-09-26): the client view model — the grouping
 // canon (one continuous assistant document, step separators) ported from
 // the deleted server projection to the client side. Pure, browser-safe.
@@ -89,3 +92,6 @@ export * from "./coverage.ts";
 // ONE session→markdown formatter — the extractor's view and the user-facing
 // export share it. Pure, browser-safe.
 export * from "./session-markdown.ts";
+// side-chat.ts (shared side conversations): ask-input validation,
+// thread lookup and the side model's lesson document. Pure, browser-safe.
+export * from "./side-chat.ts";

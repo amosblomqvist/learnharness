@@ -244,8 +244,15 @@ export function useDictationTarget(append: (text: string) => void, claimed: bool
 
 export type DictationPhase = "idle" | "connecting" | "recording" | "stopping";
 
+export interface DictationDestination { id: string; append: (text: string) => void }
+
 export type Dictation = {
 	phase: DictationPhase;
+	/** One shared recorder; an explicit side destination never claims the main input. */
+	destinationId: string;
+	blocked?: boolean;
+	toggleFor: (destination: DictationDestination) => void;
+	finishFor: (destinationId: string) => Promise<void>;
 	/** Terminal-state explanation, shown inside the wide button (cleared on the next start). */
 	error: string | null;
 	/** Latest observed RMS, 0..1 — sampled by the meter's own tick, never reset. */
@@ -279,16 +286,20 @@ export type Dictation = {
 /**
  * One dictation instance per composer-bearing page. `append` is the
  * composer fallback; the mounted question form's claim wins while a
- * question waits.
+ * question waits. Each run captures its starting destination. A side
+ * composer supplies an explicit destination without taking the main claim.
  */
 export function useDictation({ append }: { append: (text: string) => void }): Dictation {
 	const { getLanguage } = useDictationLanguage();
-	const [phase, setPhase] = useState<DictationPhase>("idle");
+	const [phase, renderPhase] = useState<DictationPhase>("idle");
+	const phaseRef = useRef<DictationPhase>("idle");
+	const setPhase = useCallback((next: DictationPhase) => { phaseRef.current = next; renderPhase(next); }, []);
+	const [destinationId, setDestinationId] = useState("main");
+	const destinationRef = useRef<DictationDestination | null>(null);
 	const [error, setError] = useState<string | null>(null);
 	/** Latest RMS from the worklet — the meter samples this (dictate pattern). */
 	const levelRef = useRef(0);
-	/** The page's fallback append — kept fresh per render so a mid-recording
-	 *  retarget (composer↔question) is honored on the very next final. */
+	/** Fresh fallback for the next start; a live run retains its own target. */
 	const appendRef = useRef(append);
 	appendRef.current = append;
 	useEffect(() => {
@@ -321,14 +332,13 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 	 *  2026-10-01): released by cleanup() — every terminal path runs it. */
 	const waitersRef = useRef<Array<() => void>>([]);
 
-	/** Flush the buffered transcript into the primary input — question claim
-	 *  first, composer fallback. Called exactly once per run, at cleanup; the
+	/** Flush into this run's fixed destination. Called exactly once at cleanup; the
 	 *  buffer clears itself so double-cleanup is a no-op. */
 	const flush = useCallback(() => {
 		if (bufferRef.current.length === 0) return;
 		const text = bufferRef.current.join(" ");
 		bufferRef.current = [];
-		(questionTarget ?? appendRef.current)(text);
+		(destinationRef.current?.append ?? appendRef.current)(text);
 	}, []);
 
 	/** Full teardown of one run's machinery. Idempotent; generation-guarded by callers. */
@@ -430,7 +440,11 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 		[cleanup],
 	);
 
-	const start = useCallback(async () => {
+	const start = useCallback(async (destination?: DictationDestination) => {
+		if (phaseRef.current !== "idle") return;
+		const target = destination ?? { id: "main", append: questionTarget ?? appendRef.current };
+		destinationRef.current = target;
+		setDestinationId(target.id);
 		setDictationActive(true);
 		setError(null);
 		setPhase("connecting");
@@ -529,7 +543,7 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 
 	const stop = useCallback(() => {
 		const gen = genRef.current;
-		if (phase !== "recording" && phase !== "connecting") return;
+		if (phaseRef.current !== "recording" && phaseRef.current !== "connecting") return;
 		setPhase("stopping");
 
 		// Mic dies FIRST — no more audio enqueues (dictate pattern). The
@@ -557,28 +571,31 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 		} else {
 			cleanup();
 		}
-	}, [phase, cleanup]);
+	}, [cleanup]);
 
 	const cancel = useCallback(() => {
-		if (phase === "idle") return;
+		if (phaseRef.current === "idle") return;
 		// Discard first, teardown second — cleanup() flushes, and the now-empty
 		// buffer makes that flush a no-op. Also kills a "stopping" run: the
 		// flush already underway is abandoned (its timer is cleared inside).
 		bufferRef.current = [];
 		cleanup();
-	}, [phase, cleanup]);
+	}, [cleanup]);
 
-	const finish = useCallback((): Promise<void> => {
+	const finishCurrent = useCallback((): Promise<void> => {
 		return new Promise((resolve) => {
-			if (phase === "idle") {
+			if (phaseRef.current === "idle") {
 				resolve();
 				return;
 			}
 			waitersRef.current.push(resolve);
 			// "stopping" is already ending — the waiter just rides to cleanup.
-			if (phase === "recording" || phase === "connecting") stop();
+			if (phaseRef.current === "recording" || phaseRef.current === "connecting") stop();
 		});
-	}, [phase, stop]);
+	}, [stop]);
+	const finishFor = useCallback((id: string) => destinationRef.current?.id === id ? finishCurrent() : Promise.resolve(), [finishCurrent]);
+	// A main submission must not stop or wait for side-input recording.
+	const finish = useCallback(() => finishFor("main"), [finishFor]);
 
 	// Publish finish() for the sibling subtrees (the pending question's
 	// dock) — registered for as long as this page owns the hook.
@@ -589,11 +606,13 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 		};
 	}, [finish]);
 
-	const toggle = useCallback(() => {
-		if (phase === "idle") void start();
-		else if (phase === "recording" || phase === "connecting") stop();
-		// "stopping" presses are ignored — the flush is in flight.
-	}, [phase, start, stop]);
+	const toggleFor = useCallback((destination?: DictationDestination) => {
+		if (phaseRef.current === "idle") void start(destination);
+		else if (phaseRef.current === "recording" || phaseRef.current === "connecting") stop();
+		// Focus chooses where to START. An active run always stops into its
+		// original destination, even after focus moves to a different field.
+	}, [start, stop]);
+	const toggle = useCallback(() => toggleFor(), [toggleFor]);
 
 	// Shortcut seams (keyboard wave A): ⌘D toggles from anywhere on the
 	// page; the Esc chain lands here as a CANCEL (owner, round 3). Each
@@ -619,6 +638,9 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 
 	return {
 		phase,
+		destinationId,
+		toggleFor,
+		finishFor,
 		error,
 		levelRef,
 		active: phase !== "idle",
@@ -643,7 +665,7 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
  *             (full text in the tooltip), cleared on the next click.
  */
 export function DictationBar({ dictation }: { dictation: Dictation }) {
-	const { phase, error, levelRef, toggle, active, clearError } = dictation;
+	const { phase, error, levelRef, toggle, active, clearError, blocked } = dictation;
 	const { open: openSettings } = useSettingsDialog();
 	/** The keyless click (zero-keys wave, owner dictation trio): the errored
 	 *  idle button deep-links Settings → Keys → the Deepgram row and clears
@@ -710,6 +732,7 @@ export function DictationBar({ dictation }: { dictation: Dictation }) {
 						}
 					}}
 					aria-label={error ? `Dictation failed: ${error}` : "Start dictation"}
+					disabled={blocked}
 					data-testid="dictation-toggle"
 					className="flex h-7 w-full items-center justify-center gap-1.5 rounded-md border border-border/50 bg-card/50 text-xs text-muted-foreground/70 shadow-lg backdrop-blur transition-colors hover:border-border hover:text-muted-foreground"
 				>
