@@ -2,15 +2,12 @@
  * The on-device model store: which catalog models are on disk, and downloading,
  * cancelling and deleting them. Models live in `<data dir>/stt-models/<id>.gguf`.
  *
- * A download goes to `<id>.partial` first, resumes with an HTTP Range request,
- * streams the SHA-256 as it writes, and only a file that matches the catalog's
- * size and hash is renamed into place, so a half-written or corrupt model is
- * never listed as installed. The resume and verification logic is adapted from
- * pi-voice src/models.ts (MIT, Copyright (c) 2026 Earendil Works contributors):
- * https://github.com/earendil-works/pi-voice
+ * A download goes to `<id>.partial`, resumes with an HTTP Range request, and is renamed
+ * into place only if its size and SHA-256 match the catalog. The resume and verification
+ * logic is adapted from pi-voice src/models.ts (MIT, Copyright (c) 2026 Earendil Works
+ * contributors): https://github.com/earendil-works/pi-voice
  *
- * Only a URL built from the catalog entry (catalogModelUrl) is ever fetched; no
- * request supplies one. Progress is polled by the client (GET /api/stt/local/models).
+ * Only a URL built from the catalog entry (catalogModelUrl) is ever fetched.
  */
 import { createHash } from "node:crypto";
 import { createReadStream } from "node:fs";

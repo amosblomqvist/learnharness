@@ -1,27 +1,18 @@
 import { createChunker, encodePcm16Wav, GROQ_DICTATION_HEADER, joinTranscripts, type PcmChunk } from "@/src/core";
 
 /**
- * One chunked dictation run (Groq or Local), from the first captured frame to the
- * finished transcript. Audio is cut into chunks while the user is still talking
- * (src/core/dictation-chunks.ts, which asks `vad` where the pauses are), each
- * chunk is sent through the engine's transport in the background, and its text
- * waits at its place in the order. stop() sends the last chunk and resolves with
- * the whole transcript. What differs per engine is only the transport: how one
- * chunk's WAV becomes text (dictation-groq.ts, dictation-local.ts).
+ * One chunked dictation run (Groq or Local). Audio is cut into chunks while the user
+ * talks (src/core/dictation-chunks.ts), each chunk goes through the engine's transport,
+ * and its text waits at its place in the order. Only the transport differs per engine.
  *
- * Chunks go ONE AT A TIME, in order: a chunk takes a second or two and the next
- * is ready 15 s later, so one request in flight keeps up. Each carries the end of
- * the previous transcript to the transport (Groq sends it as Whisper's `prompt`,
- * so a sentence across a boundary keeps its spelling and punctuation; parallel
- * requests cannot do that), and a rate limit is met with one request, not a burst.
- * Local's server decodes one chunk at a time anyway, and its language is pinned
- * from the first answer, which needs that answer before the next chunk goes.
+ * Chunks go one at a time, in order. Each carries the end of the previous transcript
+ * (Groq sends it as Whisper's `prompt`), a rate limit meets one request instead of a
+ * burst, and Local pins its language from the first answer.
  *
- * The audio of EVERY chunk is kept until the caller drops the run (transcript
- * inserted, dismissal, a new recording). A chunk that still fails after its
- * automatic retries is marked failed and later chunks carry on; stop() then
- * reports the failure instead of a partial transcript, and retry() re-sends only
- * the failed ones. Memory is bounded by the session limit: 32 KB per second.
+ * The audio of every chunk is kept until the caller drops the run. A chunk that still
+ * fails after its retries is marked failed and later chunks carry on; stop() then
+ * reports the failure and retry() re-sends only the failed ones. Memory is bounded by
+ * the session limit: 32 KB per second.
  */
 
 /** Tries per chunk, the first included: the request is repeated at most twice. */

@@ -8,11 +8,10 @@
  * previous chunk's transcript). Answers `{ text }`, or `{ message, retryable }`
  * where `retryable` says whether sending the same request again may work.
  *
- * Trust: a multipart POST is a CORS "simple request", so a page on another
- * origin could fire one and spend the user's quota. Like the subscription
- * controls, this demands same-origin browser intent (sameOriginIntent). That is
- * not user authentication and no defence against DNS rebinding. If the browser
- * goes away mid-request the call to Groq is aborted too.
+ * Trust: a multipart POST is a CORS "simple request", so another origin could fire one
+ * and spend the user's quota. The route demands same-origin browser intent
+ * (sameOriginIntent), which is not user authentication. If the browser goes away
+ * mid-request the call to Groq is aborted too.
  */
 import {
 	DEFAULT_GROQ_WHISPER_MODEL,

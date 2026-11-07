@@ -1,9 +1,7 @@
 /**
- * Cuts a live PCM16 recording into chunks of about 15 s for the engines that
- * transcribe whole files (Groq's Whisper and the on-device Local engine), using
- * Silero VAD to find the pauses. Pure: no timers, no audio APIs, no network. The
- * speech probabilities come from an injected `score`, which the app backs with
- * POST /api/stt/vad (components/dictation-vad.ts).
+ * Cuts a live PCM16 recording into chunks of about 15 s for Groq and Local, using
+ * Silero VAD to find the pauses. Pure: the speech probabilities come from an injected
+ * `score` (POST /api/stt/vad, components/dictation-vad.ts).
  *
  * The segmentation (speechSegments, cutCandidates, the cut scoring), the speech
  * test (hasSpeech) and joinTranscripts are adapted from pi-voice, src/chunking.ts and src/vad.ts,
@@ -14,19 +12,13 @@
  * seconds around GROQ_CHUNK_TARGET, and the probabilities arrive a window at a
  * time from the server instead of a frame at a time from a local session.
  *
- * Once 18 s are buffered, those 18 s are scored in ONE request (Silero is stateful, so
- * it hears them as one continuous clip, not as fragments), and the cut goes in the
- * best pause between 12 s and 18 s: long pauses beat short ones,
- * then closeness to 15 s decides. Without a pause in the window, the cut is hard,
- * at the 15 s target, so a chunk is never longer than 18 s.
+ * Once 18 s are buffered they are scored in ONE request (Silero is stateful), and the
+ * cut goes in the best pause between 12 s and 18 s: long pauses beat short ones, then
+ * closeness to 15 s. With no pause the cut is at 15 s, so a chunk is never over 18 s.
  *
- * Whisper-style models invent text ("Thank you.") for silence, so a chunk in which
- * Silero hears no speech is dropped, and so is a final chunk under 0.3 s (a stray
- * click or the moment before the stop button). The caller only sees chunks worth
- * sending.
- *
- * A failed score never loses audio: the chunk is cut at the target, as it would be
- * without a pause, and kept as if it held speech. The scorer is asked again for the next chunk.
+ * Whisper-style models invent text for silence, so a chunk with no speech is dropped,
+ * and so is a final chunk under 0.3 s. If scoring fails, no audio is lost: the chunk
+ * is cut at the target and kept as if it held speech.
  */
 import {
 	GROQ_CHUNK_MAX_SECONDS,

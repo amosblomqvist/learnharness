@@ -8,14 +8,10 @@
  *   POST   /api/stt/local/transcribe    one PCM16 16 kHz WAV chunk in, `{ text, language?, warning? }` out
  *   POST   /api/stt/vad                 one PCM16 16 kHz WAV in, Silero's `{ probs }` out
  *
- * Errors are `{ message, retryable }`, the Groq route's shape. The audio routes
- * take multipart/form-data like it does.
- *
- * Trust: as for Groq (groq-stt.ts), every request must show same-origin browser intent
- * (sameOriginIntent with GROQ_DICTATION_HEADER): a cross-origin page could otherwise
- * make this machine download gigabytes or burn its CPU. That is not user authentication
- * and no defence against DNS rebinding. Downloads only ever fetch catalog URLs; the
- * request names a catalog id, never a URL.
+ * Errors are `{ message, retryable }`, the Groq route's shape. Every request must show
+ * same-origin browser intent (sameOriginIntent), as for Groq (groq-stt.ts): otherwise a
+ * cross-origin page could make this machine download gigabytes or burn its CPU. Downloads
+ * only fetch catalog URLs; a request names a catalog id, never a URL.
  */
 import { DICTATION_SAMPLE_RATE, GROQ_DICTATION_HEADER } from "../../core/dictation.ts";
 import { isCatalogLanguage, isCatalogModelId, isDownloadableModelId } from "../../core/local-stt-catalog.ts";

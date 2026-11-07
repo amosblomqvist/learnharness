@@ -1,21 +1,16 @@
 /**
- * The on-device dictation runtime: transcribe.cpp (loaded lazily, never unless Local
- * is used), one loaded ASR model at a time, the bundled Silero VAD, and the
- * VoxLingua detector for Auto on models that cannot detect language themselves.
+ * The on-device dictation runtime: transcribe.cpp (loaded lazily), one loaded ASR model
+ * at a time, the bundled Silero VAD, and the VoxLingua detector for Auto on models that
+ * cannot detect language themselves.
  * Ported from pi-voice src/transcription.ts, transcription-service.ts and vad.ts
  * (MIT, Copyright (c) 2026 Earendil Works contributors):
  * https://github.com/earendil-works/pi-voice
  *
- * Concurrency: transcribe.cpp allows at most one run in flight per native model,
- * across all its sessions (a second one throws Busy). Work on the ASR model (and
- * the detector, which a chunk uses before its own decode) therefore goes through
- * one queue, and Silero, a separate model, through another. A model switch or
- * delete waits its turn in the ASR queue, so it can never free a model that is
- * decoding. State lives on globalThis because Next compiles each route into its
- * own module instance.
- *
- * Memory: after IDLE_UNLOAD_MS with no transcribe request, the ASR model and the
- * detector are freed (the next request reloads them). Silero is 1.2 MB and stays.
+ * transcribe.cpp throws Busy on a second run in flight, so ASR and detector work go
+ * through one queue and Silero through another. A model switch or delete waits in the
+ * ASR queue. State lives on globalThis because Next compiles each route into its own
+ * module instance. After IDLE_UNLOAD_MS with no request the ASR model and the detector
+ * are freed; Silero (1.2 MB) stays.
  */
 import path from "node:path";
 import type { LangIdResult, TranscribeModel } from "transcribe-cpp";

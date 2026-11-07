@@ -57,12 +57,10 @@ Local transcribes on this computer with a speech model you download once. The au
 Good to know:
 
 - **Where models live.** In `stt-models/` inside the data folder (see [Data, privacy, and usage](#data-privacy-and-usage)). Models range from tens of megabytes to several gigabytes. Downloads run on the server and carry on if you close Settings.
-- **Licences.** Each model has its own licence, shown in its row. **Custom licence** links to the model's page on Hugging Face. LearnHarness ships none of these models; it bundles only the small Silero voice detector. The notices for the code and data it builds on are in [on-device dictation licences](local-stt-licenses.md).
-- **Transcription language.** **Auto detect** works out the language of each take from your preferred languages. Some models detect it themselves. For the others, Auto needs a 27 MB language detector, which Settings offers to download beside the row. Without it, Local transcribes in your first preferred language and says so. Pick a fixed language instead if you always dictate in one. A model that supports only one language has no such row.
-- **Chinese output.** When Chinese is a preferred language, **Chinese output** chooses **Simplified** or **Traditional (Taiwan)** characters. Text containing kana (Japanese) is left alone.
-- **Warm-up.** When recording starts, LearnHarness loads the model in the background, so a large model's load time overlaps your speech. The first dictation after a while can still take a moment to finish.
-- **Memory.** The model stays loaded for ten idle minutes, then is unloaded. The next dictation loads it again.
-- **No model chosen.** The bar says **Choose a local model in Settings → Dictation first.** Click it to open Settings.
+- **Licences.** Each model's licence is shown in its row; **Custom licence** links to its page on Hugging Face. LearnHarness ships none of these models; it bundles only the small Silero voice detector. Notices for the code and data it builds on: [on-device dictation licences](local-stt-licenses.md).
+- **Transcription language.** **Auto detect** works out the language of each take from your preferred languages. Models that cannot detect it themselves need a 27 MB language detector, which Settings offers beside the row. Without it, Local transcribes in your first preferred language and says so.
+- **Chinese output.** Applies when Chinese is a preferred language. Text containing kana (Japanese) is left alone.
+- **Loading.** The model loads in the background when recording starts, so a large model's load time overlaps your speech. It is unloaded after ten idle minutes and loads again on the next dictation.
 - Local uses the same chunking, 20-minute limit, retry, **Retry**, **Dismiss**, and Esc behavior as Groq, described next.
 
 **Chunked dictation (Groq and Local)**
