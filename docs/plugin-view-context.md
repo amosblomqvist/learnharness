@@ -1,8 +1,9 @@
 # Whole-session view context for actions — API v1
 
-Implemented on `feature/plugin-architecture`, not released. This is general host
-infrastructure, not a Drawing Pad-specific capability or a current-question-only API.
-Public types live in `src/core/plugin-view-context.ts` and the type-only SDK.
+Whole-session read-only context is general infrastructure, not a Drawing Pad-specific
+or current-question-only API. This describes the current checkout, including additions
+beyond released 0.4.1. Public types live in `src/core/plugin-view-context.ts` and the
+matching type-only SDK.
 
 ## Public entry point
 

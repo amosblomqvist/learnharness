@@ -1,90 +1,77 @@
-# Native session extensions: images, submission interception and surfaces
+# Session extensions: submissions, images and page-body surfaces
 
-> **Commit closeout — 2026-11-04:** The verified UI-polish, question-card, native-default/reconnection and opening-animation changes are included in this feature-branch commit, together with Coding Questions and UI Showcase. “Uncommitted” notices below retain their original verification-time status; this note supersedes them for the current Git state. No push or release is implied.
+Current API v1 contract; use documentation/types matching the target app. This checkout
+includes additions beyond released 0.4.1. Exact types live in `src/core/plugin-submissions.ts`
+and `plugin-ui.ts`. Custom practice submissions additionally follow the
+[problem contract](plugin-problem-contract.md).
 
-**Status: human-approved contract, implemented and verified. The human approved this plan and authorized implementation in this session. Original verification evidence is recorded in section 10. The human subsequently authorized committing that checkpoint on `feature/plugin-architecture`; it is not released. Section 11 records the later approved UI-polish amendment, implemented and verified but uncommitted.**
+## 1. Boundary
 
-**Current additive increment — above `8dd7409`: generalized page-body surfaces are implemented and verified, uncommitted and not installed or released.** Section 8 gives the amended normative contract; section 12 records its own 4,045-test / 15-browser-group checkpoint. Prior native-session and UI-polish proofs remain historical. The previously verified worker-header scroll regression is preserved in the new browser proof.
+Frontend interceptors prepare actual learner content; they do not provide native send/
+steer methods, mutable agents, backend hook registration or generic model-context events.
+Existing action placements launch UI. Only explicit native image data is an image: paths
+retain their ordinary text/attachment behavior. There is no image store, native file-picker/
+clipboard/drop importer, editable drawing format or new export-asset service.
 
-This original increment extends native teaching/practice sessions through three primitives. Existing verified Markdown/question work and peer plugin work must be preserved and are included in the separately authorized feature-branch checkpoint. No push or release is implied.
+The host owns routing, exact occurrences, derived builtin grading, acceptance and model
+capability. Plugins own external input, intentional transformations, UI and persistence.
+Surfaces cover page bodies, not arbitrary regions; no transcript-only coverage or navigation
+suspension/restoration is provided.
 
-## 1. Human-settled decisions
+## 2. Learner content
 
-- Use existing toolbar action placements. No new message/card/composer contribution points in this increment; broader UI integration needs its own design.
-- Only explicit typed image data is an image. Attached paths retain existing behavior, even when their extensions are image-like. No automatic file reading or image inference from paths.
-- Ordinary images have host baseline transcript rendering, including inside thinking/answer containers. Aim for the existing embedded, centered figure presentation.
-- Reuse native inline image blocks: `{type:"image", data:<base64>, mimeType:<string>}`. No image asset store, upload/reference service or drawing-specific format.
-- Interceptors register in the frontend first. They may await existing plugin backend operations.
-- Interceptors may transform actual learner answers, including quiz selections and plugin JSON. Identity and derived grading remain host-owned.
-- Interceptor failure stops submission, reports the failure and retains learner input.
-- Support image-only messages and practice thinking. Pending plugin input may also enable builtin question preparation before the native answer is filled; validate the final transformed answer afterward. Question requirements still apply.
-- Interceptors receive read-only native history and current session/question/problem context.
-- Model retries reuse already-accepted transformed input. Fresh submission attempts run interception. Steer-to-send fallback reuses prepared input without a second interception.
-- Surfaces initially cover the whole session body, including its input area, but not the session top bar or sidebar.
-- Surfaces stack and preserve mounted covered surfaces. Transcript-only coverage is a desirable later extension of the same abstraction, not another interface and not implemented now.
-
-The remaining sections are the approved concrete implementation plan.
-
-## 2. Scope and preservation
-
-Included: frontend public contracts/runtime; typed learner image transport; native persisted/UI/model projections; strictly required form/dictation/grading/admission integration; session-body surfaces; SDK/docs/tests/package proof.
-
-Excluded:
-
-- Generic native send/steer methods, mutable agents or a general agent-event/context-hook catalogue.
-- Backend submission hook registration.
-- New card/message/composer action slots or generic transcript renderer registration. Existing tool/question renderers remain available; broader rich transcript contributions belong to the deferred UI design.
-- A native file picker, clipboard-image import or drag/drop image importer. Plugins supply explicit image data through interception.
-- Image assets/references, editable drawing storage, image expansion/download/inversion controls or a new Markdown-export asset format. Existing text export is not redesigned.
-- In the original increment, additional coverage regions and graph/plugin-route boundaries were excluded. Section 12 subsequently approves targetless page-body surfaces; transcript-only coverage, navigation suspension/restoration and migration of existing diagram/plan/Chains views remain excluded.
-- A rewrite of existing builtin HTTP grading authority, worker admission, question protocol or provider adapters.
-
-## 3. Public submission contracts
-
-Add `src/core/plugin-submissions.ts`, re-exported through the existing core and type-only plugin SDK entrypoints.
-
-### Content and learner input
-
-`PluginSubmissionContent` has `text: string` and `images: readonly ImageContent[]`. `ImageContent` is Pi's native image type. Content means text followed by its images; this contract does not promise arbitrary text/image interleaving.
+`PluginSubmissionContent` is `{text: string, images: readonly ImageContent[]}`. Images
+are Pi native `{type:"image",data:<base64>,mimeType:<string>}` blocks. Text precedes images;
+arbitrary interleaving is not promised.
 
 `PluginSubmission` is a readonly discriminated union:
 
-- `{type:"text", content: PluginSubmissionContent}` — a normal learner message; send versus steer is host delivery, not something a hook may select.
-- `{type:"thinking", content: PluginSubmissionContent}` — thinking on the captured active practice problem.
-- `{type:"answer", answer: PluginBuiltinSubmissionAnswer, thinking: PluginSubmissionContent, readingThinking: PluginSubmissionContent}`.
-- `{type:"plugin-question-answer", answer: JsonValue, answerImages: readonly ImageContent[], thinking: PluginSubmissionContent, readingThinking: PluginSubmissionContent}`.
+| `type` | Mutable learner channels |
+| --- | --- |
+| `text` | `content` (send vs steer is host delivery) |
+| `thinking` | `content` on a captured native practice problem |
+| `answer` | `answer: PluginBuiltinSubmissionAnswer`, `thinking`, `readingThinking` |
+| `plugin-question-answer` | JSON `answer`, `answerImages`, `thinking`, `readingThinking` |
+| `plugin-problem-submission` | JSON `submission`, `submissionImages`, `thinking` |
 
-`PluginBuiltinSubmissionAnswer` contains only learner fields: optional `dontKnow`, `values` (stable option values, not display indices), `other`, `text`, `confidence`, plus `images: readonly ImageContent[]`. Thinking lives in the separate content channels, not duplicated inside this object. No correctness, committed answer, question snapshot, timestamp, routing identity or tool result is mutable input.
+`PluginBuiltinSubmissionAnswer` contains optional `dontKnow`, stable option `values`
+(not display indices), `other`, `text`, `confidence`, plus `images`. Thinking stays
+separate. Correctness, commitments, timestamps, identities, question snapshots and native
+result envelopes are never mutable learner input. Preserve finite JSON/raw strings without
+coercion, trimming or truthiness filtering.
 
-### Targets and context
+## 3. Targets and context
 
-`PluginSubmissionTarget` is a host-produced readonly discriminated context containing:
+`PluginSubmissionTarget` is the host-produced readonly target, sharing the input's `type`:
+`sessionId`, `sessionKind`, applicable `channels`, opaque `surfaceTarget` and variant data:
 
-- `sessionId`, `sessionKind: "teaching" | "practice"`, and the submission `type`.
-- For builtin/plugin answers: the exact captured tool occurrence; plugin questions additionally have question ID, plugin ID, type ID and contract version.
-- For practice thinking: the captured active problem occurrence.
-- Applicable content channel names.
-- Current learner-facing question/problem presentation; builtin options include stable values and displayed labels, not grading keys. Plugin presentation context includes label/type/variant/applicability, not an additional promise of a sanitized generic representation of arbitrary plugin input.
-- A host-minted `surfaceTarget` for the owning native view instance.
+| Target | Additional data |
+| --- | --- |
+| `text` | `channels:["content"]` |
+| `thinking` | `problem:{occurrence,statement}`, `channels:["content"]` |
+| `answer` | Learner-facing `ClientQuestion` plus `occurrence`, optional `questionType`, actual displayed options/stable values; applicable answer/thinking/reading channels |
+| `plugin-question-answer` | `question:{questionId,occurrence,pluginId,typeId,contractVersion,label,variant,showThinking}`; applicable answer/thinking/reading channels |
+| `plugin-problem-submission` | `problem:{problemId,occurrence,pluginId,typeId,contractVersion,label,statement}`; `channels:["submission","thinking"]` |
 
-Exact public naming: `PluginSubmissionOccurrence` aliases the existing four-field occurrence shape (`messageId`, `contentIndex`, `toolCallId`, `toolName`). `PluginSubmissionChannel` is `"content" | "answer" | "thinking" | "readingThinking"`. Every target has `sessionId`, `sessionKind`, `type`, `channels` and `surfaceTarget`. The variants add:
+`PluginSubmissionOccurrence` is exactly `{messageId,contentIndex,toolCallId,toolName}`.
+`PluginSubmissionChannel` includes content, answer, submission, thinking and readingThinking.
+Learner-facing builtin presentation has no grading keys. Plugin presentation is not a
+promise of generic sanitization of arbitrary plugin payloads.
 
-- `type:"text"`: no additional target fields; `channels:["content"]`.
-- `type:"thinking"`: `problem: {occurrence: PluginSubmissionOccurrence, statement: string}`; `channels:["content"]`.
-- `type:"answer"`: `question` is the existing learner-facing `ClientQuestion` shape plus `occurrence` and optional `questionType`, with the actual displayed options/stable values. `channels` lists applicable answer/thinking/reading channels.
-- `type:"plugin-question-answer"`: `question: {questionId, occurrence, pluginId, typeId, contractVersion, label, variant, showThinking}` using the existing snapshot field types. `channels` lists applicable answer/thinking/reading channels.
+`PluginSubmissionContext` adds detached/deeply readonly/frozen `messages`, preparation
+`signal`, and `onAccepted(callback)`. Messages are complete current browser-native history,
+including potentially streamed/not-yet-durable content, not rendered text or a canonical
+persistence guarantee. Full history is trusted-plugin visibility, not a secrecy boundary.
+Signals/opaque targets are live host references, not JSON to persist/clone.
 
-Target/context and input share the same discriminant. All nested context/input/history values are typed recursively readonly as well as runtime-frozen; a private mapped readonly type may implement this without adding another public capability.
+`onAccepted` observes this attempt's acknowledged API acceptance, independent of later
+model success. It is live/best-effort, not durable replay or exactly-once delivery. Lost
+acknowledgment never fires it or authorizes clearing external input. Callback errors report
+a plugin error, not failure of an accepted submission. Snapshot eligible callbacks before
+delivery, invoke without blocking native stream consumption on async observers, and continue
+after individual observer failure. Late registrations/canceled-owner callbacks do not run.
 
-`PluginSubmissionContext` combines that target with:
-
-- `messages`: a recursively readonly, detached native-message snapshot. This is the browser's current native history, potentially including streamed, not-yet-durable content while a turn runs. It is neither rendered transcript text nor a promise of canonical persisted history.
-- `signal`: preparation cancellation; not authority to cancel an accepted POST.
-- `onAccepted(callback)`: register a per-attempt notification on acknowledged API acceptance, useful for consuming only the captured pending plugin input. It is live/best-effort, not a durable event/replay or exactly-once guarantee. Lost acknowledgment does not fire it or authorize clearing plugin input. Callback failure reports a plugin error, never changes an accepted submission into a failed one.
-
-All mutable learner input and history objects handed to hooks are detached and deeply frozen. Identity is outside the returned input. Opaque surface targets and signals are host references, not JSON to clone or persist. Hooks may read full history already readable through the trusted backend learning API; the learner-facing presentation is a convenience, not a new data-security sandbox.
-
-### Registration and ordering
+## 4. Registration and ordering
 
 ```ts
 interface PluginSubmissionInterceptor {
@@ -92,280 +79,190 @@ interface PluginSubmissionInterceptor {
   priority?: number;
   hasPendingInput?(target: PluginSubmissionTarget): boolean;
   intercept(input: PluginSubmission, context: PluginSubmissionContext):
-    PluginSubmission | null | void |
-    Promise<PluginSubmission | null | void>;
+    PluginSubmission | null | void | Promise<PluginSubmission | null | void>;
 }
-
-// New PluginFrontendContext methods:
+// Frontend context:
 registerSubmissionInterceptor(definition: PluginSubmissionInterceptor): () => void;
 refreshSubmissions(): void;
 ```
 
-- IDs use the existing lowercase-hyphen identifier convention and are unique per plugin activation.
-- Priority is a finite integer, default `0`; higher runs first. Ties sort by plugin ID, then interceptor ID. No user-facing ordering settings.
-- Capture the active ordered hook set once per attempt. Later hooks see earlier output.
-- `undefined` means pass through; a replacement must have the same submission type; `null` intentionally cancels without sending and retains drafts. Thrown/rejected/invalid output fails closed.
-- Clone, validate and freeze returned learner input before passing it onward. Late mutation cannot change an accepted payload.
-- `hasPendingInput` is synchronous and side-effect-free. Plugins call `refreshSubmissions()` after their external input state changes. A true result advertises external input that can initiate preparation, not proof that a final answer is valid. For builtin questions this may enable preparation before an initial selection/text answer exists; final validation still applies. Context-only attachments need not advertise pending readiness for a question that still requires native learner input. This never bypasses question identity/schema/choice validity or missing-renderer fallback authority.
-- A predicate exception is reported as a plugin error and contributes no readiness; never interpret a failed predicate as available input.
-- Plugin unregister/unload invalidates its captured participation and cancels preparation rather than silently omitting its contribution. New registrations join the next attempt.
+IDs are lowercase-hyphen identifiers unique per activation. Priority is a finite integer,
+default 0; higher first, then plugin ID/interceptor ID. Capture the ordered hook set once
+per attempt; later hooks see earlier output. `undefined` passes through, same-type replacement
+transforms, `null` cancels without sending. Throws/rejection/invalid output fail closed.
+Validate/clone/freeze replacements before proceeding; late mutation cannot alter payloads.
 
-## 4. Preparation and acceptance lifecycle
+`hasPendingInput` is synchronous and side-effect-free. Call `refreshSubmissions()` when
+external state changes. True enables preparation, not final validity: builtin answers may
+prepare before native selection/text exists, but custom questions/problems still require
+a current ready editor value. Context-only attachments need not advertise native readiness.
+Predicate exceptions report errors and contribute no readiness. Captured unregister/unload
+cancels preparation, not silent omission; new registrations join the next attempt.
 
-One shared runner covers normal/contextual/opening messages, busy composer steers, builtin/plugin question answers and practice thinking.
+## 5. Preparation, acceptance and retries
 
-1. Capture the originating native-view/target occurrence and reserve the session's submission attempt **before any await**, preventing duplicate clicks while dictation is finalizing. Snapshot the ordered hook set once.
-2. Finish existing dictation/editor finalization against that original target. Recheck its identity, then capture final learner input, form draft and readonly history/context; never switch to a newly current question merely because finalization awaited.
-3. Maintain a distinct preparation state, preserving the visible draft and preventing a duplicate submission from that native session. Cancellation must not discard final dictated text that belongs in the retained draft.
-4. Run asynchronous interceptors serially and validate output.
-5. Recheck session instance, pending occurrence/problem, readiness and plugin ownership after awaits. Never silently retarget.
-6. Rebuild builtin derived answer data through existing host grading; preserve exact plugin JSON/string answers apart from deliberate hook transformations.
-7. Make the optimistic entry from prepared input, then use existing POST/admission/steer delivery.
-8. Acceptance notification fires once for the acknowledged attempt, independently of whether model execution later succeeds. It must not fire for a refused request or twice for the steer fallback. Snapshot callbacks before delivery; registrations after an invocation finishes or its preparation is canceled are ignored. Invoke eligible callbacks without waiting for their asynchronous completion before consuming the native stream; report individual failures and continue notifying other live owners.
-9. Release the preparation/delivery lease on acknowledgment or refusal, not at the end of model streaming. Preserve ordinary busy composer steering: the next fresh learner steer may prepare while the earlier accepted turn is still running. Do not wrap the entire streaming send promise in a submission lock.
+One runner covers normal/contextual/opening messages, busy steers, builtin/custom answers
+and native/custom practice submissions:
 
-UI proposals:
+1. Capture the native view/occurrence and reserve one attempt **before any await**.
+2. Finish original-target dictation/editor publication. Recheck identity; capture final
+   learner input, form draft and readonly history. Never switch targets after an await.
+3. Keep preparation distinct from delivery; preserve visible drafts and prevent duplicates.
+4. Run ordered interceptors serially, validating each output.
+5. Recheck instance/occurrence/readiness/plugin ownership. Rebuild builtin derived answers
+   through native grading using captured rendered question data, not plugin-supplied fields.
+6. Create optimism from prepared content; use existing POST/admission/steer delivery.
+7. Notify acknowledged acceptance once, including internal steer fallback; release the
+   preparation/delivery lease on acknowledgment/refusal, **not** model-stream completion.
+   Fresh busy steers may prepare while earlier accepted work streams.
 
-- While preparing, show `Preparing submission…` with a `Cancel` action using existing button/error styling. Cancellation aborts only pre-POST preparation, retains draft and ignores late plugin results, even if a plugin ignores its signal.
-- Interceptor failure uses the native input's error area: `Could not prepare submission ({plugin name}): {message}. Your input has been kept.` No silent skip.
-- Cancel ceases to be a preparation action once POST delivery starts. Preserve existing non-abortable accepted-POST behavior and native turn abort/detach semantics.
-- Draft clearing follows confirmed preparation/acceptance boundaries, never happens merely because an async hook started, and must not erase newer edits. Plugin-owned pending content is never host-cleared; acceptance callbacks let its owner consume the captured revision.
+Preparing UI shows `Preparing submission…` / Cancel. Pre-POST cancellation ignores late hook
+results, retains drafts/final dictated text, and works even if a hook ignores its signal.
+Failure uses `Could not prepare submission ({plugin name}): {message}. Your input has been kept.`
+Once POST starts, preserve native accepted-delivery/turn-abort semantics; Cancel is no longer
+preparation cancellation. Clear only captured draft revisions at confirmed boundaries;
+newer edits remain. Host never clears plugin-private material: its acceptance observer does.
 
-Delivery/retry rules:
+- Model Retry/Continue, malformed-question retry, control-only Next and silent dismissal
+  do not intercept content. Submit of a restored unaccepted form is a fresh attempt.
+- Busy-refusal resend / steer-to-send fallback reuse prepared content and observers.
+- Lost acknowledgment requires canonical reconciliation/exact-question guards, not guessed
+  clearing or automatic invention of another submission. A later explicit submission is
+  fresh; no global deduplication/exactly-once transaction is added.
+- Between problems, empty text with pending plugin content is a submission, not control-only Next.
 
-- Model failure retry, Continue, malformed-question retry, control-only Next and silent dismissals do not run content interception.
-- Retrying a restored, unaccepted form via Submit runs a fresh attempt.
-- A normal send repeated internally after a busy refusal or a steer-to-send fallback reuses its prepared payload and acceptance observers.
-- On acknowledgment loss, preserve existing canonical reconciliation and exact-question guards; do not fire acceptance callbacks or clear plugin pending material based on a guess. Do not automatically invent a new content submission from an uncertain result. An explicit later submission is a fresh attempt; this increment does not introduce global request deduplication or exactly-once transactions.
-- In the between-problems composer, empty text with pending plugin material is a content submission, not the control-only Next action.
+## 6. Validation and host authority
 
-## 5. Answer transformation without a second grader
+Capture native `QuestionData` privately with its actual shuffle/resolved grading. Combine
+final dictation/reading fields before hooks; afterward validate types, finite confidence,
+known unique values, cardinality/combinations, meaningful content and channel applicability.
+Reject unknown/duplicate selections rather than dropping them. Preserve legitimate existing
+confidence rounding/clamping. Build derived answers through existing `buildAnswer` against
+that same captured question. This is frontend recomputation, not a builtin HTTP grading migration.
 
-Builtin dock submission crosses preparation as raw learner input rather than pregraded `QuestionAnswerData`.
+Builtin text answers need text or answer images; thinking/reading images do not satisfy it.
+Select answers need valid final selection/Other/dontKnow (possibly supplied by a hook).
+Plugin JSON follows canonical saved-schema/refinement/availability/occurrence checks.
 
-- Capture the actual rendered `QuestionData` privately, including deterministic shuffle and resolved grading; do not expose it as mutable hook data.
-- Combine reading-thinking and final dictated fields before interception.
-- Validate transformed learner fields against the captured kind/mode/options: correct types, finite confidence, known unique option values, selection cardinality, valid combinations, meaningful content and channel applicability. Do not silently drop unknown/duplicate selections. Preserve legitimate existing form payloads and current confidence rounding/clamping semantics.
-- A private host callback calls existing `buildAnswer` with that same rendered question. Do not spread plugin-returned fields into the derived record.
-- Recheck the original pending render key/exact occurrence after async preparation.
-- Keep current builtin HTTP derived-answer contract; this is safe host recomputation around the frontend interceptor, not a general server-authoritative grading migration.
+Builtin answer/thinking applicability follows native fields; reading follows existing reveal/
+phase policy. Plugin questions always have answer content, thinking only with `showThinking`,
+reading only on teach checks. Public DTOs have empty inapplicable channels; nonempty injected
+text/images reject. Transport/envelopes omit inapplicable channels, preserving absence versus
+presence. Practice custom submissions have submission/thinking, not reading-thinking.
 
-Plugin JSON still goes through existing canonical server schema/refinement/availability/occurrence checks. Host image channels sit alongside JSON, never become mandatory keys inside arbitrary plugin answer schemas. `showThinking` and reading applicability remain enforced.
+## 7. Images, transport and model admission
 
-For builtin questions, pending interceptor input may enable preparation even with no initial native selection or text. After interception, text-mode answer readiness requires nonempty answer text or answer-channel images; thinking/reading images alone do not satisfy it. Select-mode answers still require a valid final selection/Other/dontKnow state, which the hook may supply or transform. Reject incompatible dontKnow/selection combinations, duplicate/unknown values and mode-inapplicable fields, while preserving legitimate existing native payloads and confidence normalization. Plugin questions retain existing editor readiness and answer-state requirements before preparation; pending material cannot bypass them, though hooks may transform an already-ready JSON answer subject to final server validation.
+Use additive optional native image fields beside existing strings; old records replay without
+migration. Text/steer/native-thinking inputs carry optional `images`; builtin/plugin answers
+carry channelled images; custom practice carries submission/thinking images. Empty arrays omit
+on write. Strings remain each channel's sole text authority. New builtin/thinking UI requests
+include exact occurrence; fresh image-bearing requests require that binding, while old
+non-image callers remain compatible. Recheck canonical target after server awaits.
 
-Builtin answer and question-thinking channels are available across builtin kinds, consistent with existing AnswerRequest/buildAnswer fields; reading-thinking applicability follows the existing questionNeedsReveal/phase policy. Plugin questions always have answer content; thinking requires snapshot.showThinking, and reading-thinking follows the existing `variant === "teach" && input.type === "check"` policy. Public DTOs contain empty content values for inapplicable channels. Hooks must leave those channels empty: nonempty text/images there fail preparation rather than being silently discarded. Host adapters omit inapplicable thinking/readingThinking properties and image channels entirely from transport and persisted envelopes, preserving the current absent-versus-present plugin protocol.
+Require nonempty base64 native image blocks, not File/Blob/URLs/path strings. Accept PNG,
+JPEG, WebP, GIF only, sniffing bytes against MIME. Reuse actual model resize policy (existing
+defaults: 2000×2000 bounding box and 4.5 MiB processed base64 payload per image). Persist
+normalized accepted bytes for history and model; originals/editable drawings remain plugin-owned.
+No new arbitrary image-count setting/store is added. Processor failure refuses submission,
+not image-omitted success or synthetic learner hints.
 
-## 6. Image transport, storage and projections
+Optimistic previews remain immediate. Defer canonical adoption while their image-bearing
+POST is unresolved to avoid duplicate normalized/original previews. On delivery settlement,
+discard deferred snapshots and reconcile afresh, including refusal/lost acknowledgment.
+Retire only that attempt's provisional entries; preserve drafts/external input and never
+infer acceptance from reconciliation.
 
-Use optional additive image fields alongside existing string fields so old records still replay without migration. New interceptor DTOs are adapted into the existing event-specific transport rather than posted as arbitrary native messages.
-
-Exact additions:
-
-- Text and steer inputs: optional `images: ImageContent[]` alongside `text`.
-- Practice-thinking input and marker details: optional `images` alongside `text`.
-- Builtin answer and practice-thinking inputs additionally carry the host-captured optional `occurrence: PluginSubmissionOccurrence`. New UI submissions always include it; old non-image callers remain compatible. Validate it against the canonical pending call/active problem after server awaits, rather than trusting only a potentially reused tool-call ID. Fresh image-bearing builtin/thinking submissions require the occurrence binding. This is strictly required async-target protection, not a builtin grading-authority migration.
-- Builtin `QuestionAnswerData`, plugin answer input and canonical plugin answer details: optional `images: PluginSubmissionImages`.
-- `PluginSubmissionImages` has optional `answer`, `thinking`, `readingThinking` image arrays. Channel absence means no images, and empty image arrays are omitted on write.
-
-Each content channel's existing string remains its sole text authority. An image has no attached-path interpretation. Preserve plugin question envelope binding and all existing grading/question metadata.
-
-Validation/preparation:
-
-- Require native image blocks with nonempty base64 data, not Blob/File/object URLs/data URLs or path strings.
-- Accept PNG, JPEG, WebP and GIF; sniff explicit bytes to verify the declared format. Reject malformed/unsupported blocks before persistence.
-- Reuse the existing image processor and actual model resize policy. Existing defaults are a 2000×2000 bounding box and 4.5 MiB base64 payload per processed image; model-specific overrides still apply. No new arbitrary image-count settings or image-store service.
-- Persist the successfully prepared/normalized image bytes; these are the accepted image representation rendered in history and sent to the model. Editable/original drawing data stays plugin-owned.
-- Keep instant optimistic image previews. While the owning image-bearing POST is unresolved, defer transcript adoption so normalized canonical bytes cannot duplicate the original preview. Discard deferred snapshots and reconcile through a fresh canonical read when delivery resolves, including refusal or a lost acknowledgment. Retire only that attempt's provisional image entries on failure or ownership loss; preserve native drafts and plugin pending input, and never infer an acceptance notification from the reconciliation. This bounded reconciliation policy was explicitly approved by the human during implementation.
-- Processing failure is a submission refusal, not a tool-style image-omitted text fallback. Do not inject processor hints as if the learner typed them.
-
-Saved/UI/model placement:
-
-| Submission channel | Durable/UI placement | Model placement |
+| Channel | Saved/UI placement | Model placement |
 | --- | --- | --- |
-| Message/steer | Native user image blocks in the user container | Native user images |
-| Practice thinking | Thinking marker details/images | Existing marker projection emits labelled text plus images |
-| Builtin/plugin answer images | Answer container | Existing native answer tool result content |
-| Question thinking images | Question-thinking container | Labelled thinking section in native tool result content |
-| Reading-thinking images | Reading-thinking container | Separately labelled reading section in native tool result content |
+| Message/steer | Native user image blocks | Native user images |
+| Native practice thinking | Marker details / thinking block | Labelled text + native images |
+| Builtin/custom question answer | Host answer container | Native answer tool result |
+| Question thinking / reading | Separate host thinking containers | Separately labelled sections in tool result |
+| Custom practice submission / thinking | Marker details / submitted card and thinking | Labelled submission/thinking + native images |
 
-Keep the host-owned answer envelope and compact answer text; add native text/image blocks in channel order: answer, thinking, reading-thinking. Labels distinguish image-only thinking channels. Metadata-only images would be a bug: they must reach both UI and model projections.
+Model bytes must be native image content, never metadata-only or base64 inside answer JSON.
+Question result channel order is answer, thinking, reading-thinking. Shared submitted images
+are centered thumbnails bounded in both dimensions by five lines of configured session prose,
+without cropping/upscaling or dimming with thinking text. Clicking opens the same accepted
+bytes in the existing session figure viewer with fit/pan/zoom and Escape/X close; without a
+session viewer, the preview remains noninteractive. Thinking images remain inside their
+thinking disclosure. Image-only channels stay visible, labelled `Submitted image`; text uses
+normal PathText/Markdown. Host images remain outside plugin-owned renderer slots.
 
-Host rendering:
+Resolve the **actual effective dispatch engine**, not a parallel provider resolver. New-turn/
+save-only admission rechecks canonical target and effective model/resize policy after awaited
+preflight; no await intervenes before acceptance write/claim. Agent construction uses that
+checked engine. Busy steers capture live-agent identity/model, not future session settings,
+and synchronously verify it at handoff. Settled-run fallback prepares against the next engine
+without re-intercepting; changed/replaced targets refuse stale rather than silently retarget.
 
-- One shared submitted-image component, centered at natural width, constrained to its container, maintaining aspect ratio, with the existing figure-like embedded presentation and no new image toolbar.
-- Available in user messages, answer presentation, ThinkingBlock/practice thinking, reading-thinking and host plugin-question fallback/answered rendering as applicable.
-- Do not dim image pixels with thinking text styling.
-- Image-only containers remain visible even without text. Text continues through existing PathText/Markdown behavior; `.png` paths stay path chips/text.
-- Baseline accessible image label: `Submitted image`.
-- Host-owned image channels render outside plugin-owned question/answer slots, so ordinary images remain visible even when a custom renderer renders only its existing question/answer data. This increment does not add image metadata to the existing question-renderer callbacks or introduce a second generic transcript/image-renderer registration.
-
-## 7. Actual model capability and async races
-
-Do not implement a parallel provider resolver. Use the actual effective engine the host will dispatch.
-
-- New-turn/save-only answer admission uses the handler's existing conversation engine resolution. Reuse its actual image capability and resize policy. After all awaited image/preflight work, recheck canonical target and effective model/resize policy before save-only persistence or turn claim. No await may intervene between that final check and the corresponding synchronous acceptance write/claim. Agent construction receives the checked engine.
-- Busy steers capture the private live-agent identity/model, prepare against its policy and synchronously verify that same target before the existing registry handoff. Future chat settings are not the live agent's model.
-- If the captured live run simply settled, retain the existing busy-steer refusal/fallback; new-send admission prepares against its next-turn target without re-running frontend hooks.
-- If a session/question/model or replacement live-agent target changed during preparation, refuse as stale and retain input rather than silently delivering to a replacement. Distinguish this from ordinary busy/settle refusal so automatic retries do not swallow it.
-- Refuse fresh image-bearing input to an explicitly text-only effective engine. Custom endpoints retain the host's current policy of attempting image transport; remote rejection is still an ordinary provider failure.
-- Existing historical-image behavior when later switching models remains Pi's current policy, including omission placeholders for text-only models. No broad history/model-switch behavior change in this increment.
-- Existing ChatGPT, native subscription and Claude CLI image transports are reused. Claude CLI's existing text-before-images replay ordering is not redesigned.
-- Preserve current memory-only parked-steer tradeoff; do not claim every acknowledged steer is already durably written or introduce a new durable steering queue. A successful steer acknowledgment may fire onAccepted, but does not promise durable history; later failure/restart does not replay that notification.
+Text-only engines refuse fresh images. Custom endpoints retain current attempt-transport
+policy; remote refusal is provider failure. Historical model-switch omission placeholders,
+ChatGPT/subscription/Claude CLI transport and CLI text-before-images ordering remain native.
+Parked steers retain existing memory-only tradeoffs: acknowledged acceptance can notify,
+but is not guaranteed durable history or a replayable notification.
 
 ## 8. Public surface contract
 
-The following includes the human-approved generalized-page amendment, **implemented and verified, uncommitted above `8dd7409` on `feature/plugin-architecture`**. Explicit native targets remain compatible; the targetless overload does not extend native submission interception/context beyond native chat.
-
 ```ts
-// Opaque host-created identity for one mounted host page body.
-interface PluginSurfaceTarget { /* private unique-symbol brand */ }
-
 interface PluginSurfaceProps {
-  title: string; // Required accessible name; not a host-rendered heading.
-  background?: "dimmed" | "opaque"; // Default: dimmed (Chains-like tint + blur).
+  title: string; // Accessible name, not a visible host heading.
+  background?: "dimmed" | "opaque";
   content: PluginUiContent;
   onClose?: () => void | Promise<void>;
 }
-
-// Capture the active page boundary once, synchronously at invocation:
-openSurface(
-  props: PluginSurfaceProps,
-  options: PluginWidgetOptions,
-): PluginWidgetHandle<PluginSurfaceProps>;
-
-// Existing precise native-view target remains supported:
-openSurface(
-  target: PluginSurfaceTarget,
-  props: PluginSurfaceProps,
-  options: PluginWidgetOptions,
-): PluginWidgetHandle<PluginSurfaceProps>;
+openSurface(props: PluginSurfaceProps, options: PluginWidgetOptions): PluginWidgetHandle<PluginSurfaceProps>;
+openSurface(target: PluginSurfaceTarget, props: PluginSurfaceProps, options: PluginWidgetOptions): PluginWidgetHandle<PluginSurfaceProps>;
 ```
 
-- Existing session top-bar `PluginActionContext` gains `surfaceTarget`; submission target/context includes the same target. It is not an HTMLElement, selector, session ID to persist or backend-serializable token.
-- Targetless `openSurface(surface, { signal })` captures the active page boundary **once when invoked**, supporting plugin views and native chat, Home and New Draft. No public target is required or manufactured. Async work never retargets the surface to a later page. Without a live boundary, throw synchronously: `Surface target is no longer active`. Already-aborted signals return an inert disposed handle **before boundary resolution**, following existing widget convention.
-- Explicit native targets still identify one mounted teaching/practice view. Unknown/expired live targets throw the same error; returning to the same session ID never revives a token. Both overloads recheck lifetime at mount commit; late expiry disposes/reports rather than resurrecting content. No arbitrary DOM-parent injection, persisted target or global current-session guessing is added.
-- Coverage is the owning **page body only**. Native/plugin top bars and sidebar remain usable. Home/New Draft have no top bar: preserve only the floating sidebar toggle and window chrome; graph controls and composer are covered/inactive but remain mounted. No transcript-only or alternate-region selector is added.
-- Parent page stays mounted. New surfaces stack; covered surfaces remain mounted and painted, with only the eligible foreground content receiving covered-body interaction. Ordinary stack entries are visual siblings, not automatically each other's lifetime owners; disposing one plugin's lower surface must not dispose another plugin's foreground surface. Explicit caller signals may intentionally bind content lifetimes.
-- Scope teardown on leaving or hiding the owning page, plugin unload, caller abort or explicit dispose. Re-entry creates a new boundary; it does not revive the departed boundary or its surfaces. Plugin-owned data may persist independently; surfaces themselves are not suspended/restored across navigation.
-- Reuse PluginUiContent mounting, controlled update/dispose handles, async cleanup, error reporting and abort lifetimes. Content wrappers fill available width/height; replacing content cleans up exactly once, including late async cleanup.
-- Use existing `view` interaction layers and explicit owner propagation; no body-modal semantics, app-wide background hiding, viewport scroll lock or second overlay registry.
-- Keep logical ordering and painted stacking in agreement, using the shared controller/view layers. Dialogs and Settings **always remain in front**, including when a surface is requested while a dialog is open. The surface belongs to the page, not the modal opener; it cannot gain focus eligibility or Escape ownership through that opener. If the dialog closes and the caller signal remains live, the underlying surface can be revealed. Preserve existing menu ownership and one-Escape rules; never dispatch submit/Tab/dictation actions into covered page inputs.
-- Focus entry reuses the existing initial-focus preference: honor eligible focus already explicitly placed inside the new foreground surface; otherwise focus its first eligible editable text/number field or textarea, then an eligible plugin-content heading. With neither, focus the painted, labelled surface frame (`tabIndex=-1`), not the floating close action or a non-rendering semantic wrapper. Do not steal focus when a delayed mount finishes under a newer foreground layer.
-- On foreground close, restore its captured opener if still eligible and uncovered, including exposed app chrome. Otherwise use the surviving foreground region's remembered eligible focus or its entry policy. With no plugin surface remaining, apply that policy within the owning page body. Never focus covered/detached controls.
-- Disposing a covered surface does not steal foreground focus. Page-boundary expiry never restores into the departed view. These entry/return rules do not trap focus or disable the exposed top bar/sidebar.
-- Leaving/disabling an owning plugin closes only owned surfaces. Global Settings is not lifetime-owned by a plugin surface merely because it is painted above it.
-- `onClose` follows existing dialog notification semantics, not a new asynchronous close veto. Programmatic disposal/abort retain existing handle cleanup semantics.
+`PluginSurfaceTarget` is opaque host identity, not DOM, a persisted session ID or backend
+serializable token. Native action/submission context exposes it. Targetless invocation
+captures the active page boundary **once synchronously** (plugin views, chat, Home, New Draft),
+not a later page after awaits. Explicit targets identify one mounted native teaching/practice
+view. Missing/expired live boundaries throw `Surface target is no longer active`; returning
+to the same session never revives a token. Already-aborted signals return inert handles before
+boundary resolution. Recheck expiry at mount commit; late expiry disposes/reports.
 
-**Historical native-session visual amendment — implemented and verified, uncommitted at verification time:** retain the exact session-body bounds but remove the host title/header row and inset frame padding. The required `title` is the region's accessible name, not an automatic visible heading. A quiet muted X floats above content without consuming a row and stays pinned while content scrolls; the content mount fills the body, reaches the session top bar and outer right edge, and does not inset its scrollbar. Plugins own visible headings and bottom action rows. `background` accepts only `"dimmed"` or `"opaque"`, validated on mount/update: omitted/`"dimmed"` uses the existing Chains-like background/80 and blur; `"opaque"` uses solid background without blur. The public widget update/lifetime contract is unchanged. Plugin dialogs receive the same headerless/floating-X treatment while retaining their existing modal frame bounds, backdrop and mechanics. No broader core-overlay redesign is included. Section 10 records the original visible-title presentation; section 11 verifies this amendment.
+Coverage is only the page body. Top bars/sidebar remain usable; Home/New Draft preserve
+floating sidebar toggle/window chrome while body graph/composer stay mounted but inactive.
+Surfaces stack, retaining covered DOM/state/paint. Only eligible foreground content receives
+body interaction. Ordinary siblings do not own one another's lifetime: removing a lower
+plugin surface must not remove another plugin's foreground surface. Caller signals may
+intentionally bind lifetimes.
 
-## 9. Implementation sequence and verification
+Leave/hide of the owning page, unload, caller abort or dispose tears down the scope; re-entry
+creates a new boundary. No suspension/restoration or arbitrary DOM-parent injection. Content
+fills available width/height; controlled replacement disposes each old mount exactly once,
+including late async cleanup. Existing view layers own ordering/paint and covered-input
+routing, not another modal/overlay registry or viewport scroll lock.
 
-Implemented and verified in this sequence:
+Dialogs/Settings always remain in front, even if a surface opens from their content. That
+surface belongs to the page, not the modal opener; it cannot inherit modal focus/Escape
+eligibility. If the dialog closes and the signal remains live, the surface can emerge.
+Do not dispatch submit/Tab/dictation into covered inputs. Closing/unloading a plugin removes
+only its surfaces; global Settings is not lifetime-owned merely by being painted above one.
 
-1. Shared image/submission/surface types, strict validators, immutable preparation helpers, SDK declarations and contract tests.
-2. Native image DTO/persistence/UI/model projection and actual-engine admission, with exact-target/async-race tests. Preserve existing question/privacy gates and provider/subscription semantics.
-3. Frontend registry/ordered preparation, form/dictation/raw-grading integration, pending-input availability, draft/cancellation/acceptance handling.
-4. Session-body surface boundary/stack using existing UI store and interaction infrastructure.
-5. Documentation, public external fixtures and independent P1/P2 review. Only fix causal findings and add permanent regressions.
-6. Full tests/typecheck/lint/diff checks; strict generated SDK consumer; isolated production/standalone build; payload tracing/private-root/source byte audit; packaged Electron/Chrome smoke with loopback mock, no paid providers or real learner data.
+Entry preserves eligible existing/remembered focus, then a synchronously mounted visible
+focusable `data-plugin-initial-focus` marker, then editable fields/headings/frame. No async
+retry or autofocus-on-update. Without content targets, focus the painted labelled frame,
+not its floating X/nonrendering wrapper. Late mounts cannot steal focus from newer layers.
+On close restore eligible uncovered opener, otherwise the surviving region's remembered/
+entry target. Covered disposal/page expiry cannot steal focus or restore into departed DOM.
+No focus trap across the exposed top bar/sidebar is added.
 
-Required causal proofs include: path-not-image; image-only user/thinking/answer rendering; distinct thinking/reading placement; native model bytes, not metadata-only images; explicit unsupported-model refusal; raw-answer regrading after deterministic shuffle; invalid hook output; priority/composition; pending readiness refresh; failure/cancel retains drafts; final dictation before capture; stale occurrence/model/plugin/view; hooks that ignore abort; single interception across busy retries/fallback; model retry reuses accepted content; no acceptance callback on refusal; stacked mounted surfaces, correct bounds, one Escape, focus return, no covered-input actions, nested Settings, owner-scoped unload/navigation and late cleanup.
+Titles are accessible only. A quiet pinned X floats over content without a header row or
+inset scrollbar padding. Plugins own visible headings/actions. `dimmed` (default) uses native
+tint/blur; `opaque` is solid background without blur; invalid values reject on mount/update.
+Dialogs share headerless/X presentation within their modal bounds. `onClose` is notification,
+not an async veto. Abort/programmatic disposal follows normal handle cleanup. Shared
+Escape/focus ownership follows the [interaction contract](dialog-overlay-contract.md).
 
-Implementation approval alone did not authorize staging or committing. The human subsequently authorized committing the feature-branch checkpoint; no push or release is authorized here.
+## 9. Verification
 
-## 10. Implementation verification
-
-This increment is implemented and verified alongside the existing Markdown and bounded-question work on the feature branch. Historical verification counts for those earlier increments are separate checkpoints.
-
-### Final gates
-
-- Full offline suite: **3,869 tests across 564 suites**, with no failures, cancellations or skips.
-- Whole-project TypeScript: passed.
-- Whole-project ESLint: no errors; only the pre-existing `tests/source-name-ui.test.tsx` `<head>` warning.
-- Diff whitespace check: passed.
-- Fresh isolated Next.js production and curated standalone build: passed.
-- Strict external consumer of the freshly emitted SDK: passed with `skipLibCheck: false`, physical isolated dependencies, positive interceptor/image/surface usage and negative readonly/protected-field/backend-pipeline checks.
-- Payload audit: **96 tracing manifests, 277,077 entries, zero private-root hits**. All **410 production files** match byte-for-byte from the working tree to the isolated source and raw standalone payload, with no missing or mismatched files.
-- Independent read-only P1/P2 reviews covered the shared contracts/projections, native server admission, frontend lifecycle/raw grading, surfaces and final normalization/opening deltas. No remaining confirmed P1/P2 finding was reported.
-
-### Causal proofs
-
-Permanent offline regressions cover structural and byte validation, effective-model/resize-policy refusal, exact occurrence and live-agent races, native persistence/UI/model projection, raw builtin regrading against the displayed shuffled question, pending material supplying the initial selection, immutable ordered hooks, final dictation capture, cancellation and newer edits, known-model changes, callback isolation, real busy-steer 409 fallback with one interception, and StrictMode-safe one-shot opening setup.
-
-During integration, a real pre-acknowledgment normalization race was reproduced: append-only canonical adoption could duplicate an original optimistic image preview when the server resized it. The human selected the bounded deferral policy in section 6. Its implementation has **11 permanent regressions**, including refused/lost acknowledgments, failed reconciliation and delayed old ACK/GET races; the final delta review found no confirmed P1/P2 issue.
-
-The fresh packaged Electron + Chrome smoke passed **23 assertion groups** across existing and new runtime behavior, with zero page errors, blocked external requests or unexpected HTTP failures. New checks used an ordinary external plugin and genuine native actions—not seeded answers/results or private host imports—to prove:
-
-- Canvas PNG bytes are saved and reach actual loopback OpenAI-compatible `image_url` requests.
-- Failed interception preserves the native draft, makes no POST (count **3 → 3**) and notifies no acceptance.
-- Pending-input refresh enables an empty native composer to submit an image-only interaction.
-- A verbatim plugin JSON-string/code answer can be transformed while answer, thinking and reading-thinking images remain distinct host-owned channels in history and model requests.
-- A deliberate model failure followed by native Retry reuses accepted images without interception (**hook count 6 → 6**) or acceptance replay.
-- A genuinely generated native practice problem accepts image-only thinking, persists its native marker and sends the image bytes to the model.
-- A `.png` path remains text/path presentation, never an inferred image.
-- Surfaces fill the actual painted session-body bounds, retain nested DOM state, expose title/X, sit below Global Settings, obey natural one-Escape ordering and expire opaque targets on native navigation.
-
-### Evidence and boundaries
-
-- Isolated source and payload: `/tmp/lh-session-isolated-package-0Vu03a/source`.
-- Full tests: `/tmp/lh-session-full-tests-final.log`.
-- Production/standalone build: `/tmp/lh-session-build-final.log`.
-- Strict SDK and payload audit: `/tmp/lh-session-isolated-package-0Vu03a/final-sdk.log` and `final-payload-audit.json`.
-- Passing packaged run: `/tmp/lh-session-browser-7.log`.
-- Browser JSON and screenshots: `/var/folders/3x/m0pk52v160jcprrhcb6qkd340000gn/T/lh-plugin-browser-evidence-8jOHFr/` (`plugin-browser-evidence.json`).
-
-Verification used isolated temporary storage and loopback fixtures, not paid providers or real learner data. The earlier wheel-over-transcript-prose follow-up is not claimed fixed by this increment. Broader UI placements, a native send/steer API, model-context hooks and additional surface coverage regions remain deferred. Nothing is staged, committed, pushed or released by this verification.
-
-## 11. Subsequent UI-polish verification — 2026-11-03
-
-The human-approved presentation amendment is implemented and verified on `feature/plugin-architecture`, **uncommitted and not released**. It does not change submission interception, grading, image projection or native question authority.
-
-- Full offline suite: **3,908 tests / 564 suites**, zero failures, cancellations or skips. Whole-project TypeScript, ESLint (only the existing test-fixture `<head>` warning) and whitespace checks passed.
-- UI Showcase: **17 tests**, strict public-SDK type checks and a frontend-only **18,421-byte** bundle passed. A separate consumer compiled against the freshly curated SDK with `skipLibCheck: false`, including both background presets and negative checks for invented targets, arbitrary opacity and plugin-selected knowledge-picker origins.
-- Fresh isolated production build and standalone curation passed. **96 tracing manifests / 277,329 entries / zero private-root hits**; all **410 production files** matched the working tree, isolated source and raw payload byte-for-byte.
-- Expanded packaged Electron-Node/Chrome proof passed with **223 requests / 217 responses**, zero off-origin, generation, microphone, WebSocket or page-error events. Only `GET /v1/models` reached the loopback catalog; settings, synthetic knowledge and the approved host payload remained unchanged. One canceled source read was narrowly expected.
-
-Native proofs include accessible-only overlay titles, pinned floating X controls, outer-edge scrolling, transparent showcase content, dimmed **0.8 alpha / 8px blur** versus opaque **1 alpha / no blur**, nested surfaces/menus/dialogs/Settings, focus return and disable cleanup. They also cover self-contained 11px model controls, configured reading typography, the native standard-composer layout, continuous slider dragging (**52 → 44 → 36 → 26 → 16**, same enabled node, no disabled mutations), and all twelve worker status/presentation combinations with application Hint tooltips.
-
-The unchanged knowledge-picker API now uses actual invocation ownership: page/session-surface origins get a main-pane view with interactive sidebar; modal origins retain a full-viewport modal. Eleven native origin/geometry cases cover sidebar configurations, native-control clearance simulations and route expiry. A global-modal picker belongs to its actual owner/widget, **not an unrelated background route**; a causal review finding here was fixed with pending/open regressions and independently re-reviewed. Covered-source retention is proved by hit-testing, unchanged DOM/draft/owner and trusted Tab/Shift+Tab/Find isolation—not by assuming that every cross-region view sets DOM `inert`. Existing modal and session-surface inertness policies remain intact. Reverse programmatic surface-over-picker ordering is a host-integration proof, not a claimed visible browser flow.
-
-Evidence: `/tmp/lh-ui-polish-isolated-package-rPMHuU/source`, `/tmp/lh-ui-polish-tests-final.log`, `/tmp/lh-ui-polish-build.log`, `/tmp/lh-ui-polish-sdk-strict.log`, and `/private/tmp/lh-ui-showcase-native-ssfmL3/result.json` with nine viewport screenshots. Independent source/delta audits reported no remaining confirmed P1/P2. Windows/Linux checks simulate CSS window-control geometry; physical OS chrome, real microphone capture, OS IME, signed installers, paid providers and real-profile installation are not claimed. The separate proposed coding-question UI changes are not part of this checkpoint.
-
-## 12. Generalized page-body surfaces — implemented and verified
-
-**Implemented and verified, uncommitted above `8dd7409` on `feature/plugin-architecture`; not installed or released.** The amended section 8 adds `ctx.ui.openSurface(surface, { signal })` while retaining `openSurface(target, surface, { signal })` for precise native submission/action targeting. No new method or props are added: the UI API remains **14 methods**.
-
-Capture the active page boundary once at invocation: plugin views, native chat, Home and New Draft. Page-body coverage, mounted covered content, page-hide/leave expiry, always-foreground dialogs/Settings and page—not modal-opener—ownership are normative in section 8. Existing headerless floating-X presentation, backgrounds, stacked-content lifecycle and interaction controller/view layers are reused. Private implementation names are `plugin-surface-targets.ts`, `plugin-surfaces.tsx` and `plugin-surface-shell.tsx`; they are not public imports. No new overlay/window manager, global clipping rule or persistence is introduced. Native submission capture, hooks and token exposure remain limited to their existing native chat scope.
-
-UI Showcase's **Surfaces** family now has a direct **Open surface** gallery button using the targetless overload; the explicit native top-bar action, nesting, background, menu and dialog demonstrations remain. The gallery stays **14 methods / 12 families**. This checkpoint is separate from earlier tree/session/UI-polish proofs and includes the previously verified worker-header scroll regression.
-
-### Final gates — 2026-11-04
-
-- **4,045 host tests / 568 suites**, zero failures; **78 plugin tests** (47 Flashcards, 5 Coding Questions, 26 UI Showcase).
-- Whole-project TypeScript, ESLint and whitespace checks passed; ESLint retains only the pre-existing test-fixture `<head>` warning.
-- Fresh isolated production/standalone build and strict generated-SDK consumer passed, including both overloads and negative invented routing/modal/missing-signal checks.
-- Payload audit: **96 tracing manifests / 278,337 entries / zero private-root hits**; **415 production files** match source and payload with no missing or mismatched files.
-- Independent final read-only review reported no remaining confirmed P1/P2. Permanent regressions cover immediate view-mount opening, stable coverage across plugin loading/error/unavailable branches, and a genuinely later native Draft picker. The latter stays inside the shared region with locally restored pointer events, without a new layout box or global Chains changes.
-
-### Packaged browser proof
-
-The literal `npm run test:native` entrypoint exited **0** at `/private/tmp/lh-ui-showcase-native-knRqpm`, passing **15 assertion groups** with **29 screenshots**:
-
-- Direct gallery invocation and the existing explicit native-target demo; retained nested/background/menu/dialog behavior, covered drafts and focus return.
-- Seven page variants: Home graph/minimal, teaching/practice Drafts, settled native teaching/practice sessions and plugin route. Exact body bounds, covered controls, usable sidebar/floating chrome or native/plugin top bar, navigation abort, once-only late cleanup and inert expired callbacks/updates.
-- Native Draft picker search/disclosure/X use trusted clicks and actual hit tests, both alone and asynchronously above an older Surface.
-- Real visible ordinary-dialog and public plugin-Settings controls open later page-owned Surfaces. Existing modals remain painted and focused above them; both hidden field/button points hit the modal/backdrop, and real Tab/Shift+Tab remain modal. This proves the unchanged host default-prevention policy and containment, **not native Tab traversal**. Modal background protection uses the existing ARIA-hiding/backdrop/focus contract, not a new `inert`-attribute requirement.
-
-Final safety: zero page errors, off-origin requests, microphone requests, WebSockets, generation/chat POSTs or browser graph writes. Settings were restored exactly and the seeded graph hash remained unchanged. One expected canceled picker source read was recorded; there were **zero canceled prefetches**. Existing permitted responses were one favicon 404 and 33 idle STT-token 503s. Verification used disposable synthetic data and a separately fingerprinted public-API test plugin, never a real profile or paid provider.
-
-Prior complete runs `CMWNKt` and `Bh11JN` also passed all 15 UI groups but exited 1 on a canceled Next prefetch in the new native-practice/native-teach matrix stages. Those failures remain preserved. The human approved adding **only those two observed stages** to the existing classifier, retaining same-origin non-API GET/fetch, positive RSC/prefetch headers, matching same-stage HTTP 200 and `ERR_ABORTED` requirements. The actual classifier passed **25 positive/negative checks**; the successful browser run had no canceled prefetch and therefore did **not** exercise the added branches. No API/provider or arbitrary-stage failure is ignored.
-
-### Evidence, bytes and limits
-
-- Native artifacts: `knRqpm/{result.json,proof-summary.json,final-byte-comparison.json}` and screenshots; consolidated report `/tmp/lh-page-surfaces-bounded-guard-evidence.json`.
-- Host build: `/tmp/lh-page-surfaces-isolated-package-dRJrno/source/.next/standalone`; gate logs `/tmp/lh-page-surfaces-final-{build,tests,types,lint}.log`; payload audit `/tmp/lh-page-surfaces-final-payload-audit.json`.
-- Native-tested host digest: `5405def55db9712c5a5c8bf9eadb52540da6943dbe52dcaabb19307ac2668c33`; product digest: `a4493b43fa2883d9db7d4bbbe3fdaf630591e1adb1f37a07fcdbb03822bbb132`; test-fixture digest: `69ef0efb5eaacb4b2d87402c77743323bdb25131a561bac606f5884bc759a4b3`.
-- All **5,547 host files / 5 product files** matched before/after the browser run with zero missing, extra or mismatched entries. These digests identify the native-tested snapshots; subsequent documentation-only curation must preserve tested runtime bytes.
-
-Physical Electron window chrome, real microphone/OS IME, and loading/error/unavailable plugin-page transitions were not exercised in this browser proof; branch transitions have offline causal regressions. No installation changes, real-profile installation, staging, commit, push or release are authorized or performed by this checkpoint.
+Cover ordering/immutable transforms, readiness, final speech publication, stale occurrence/
+model/view/registration, cancellation retaining drafts, busy fallback once-only interception,
+acknowledgment uncertainty, native image bytes/UI/model channels and unsupported engines.
+Surface checks include exact bounds, retained covered state, one-Escape ownership, focus return,
+page expiry, modal ordering, owner-scoped cleanup and late mounts. Packaged checks need isolated
+storage/providers; component fixtures alone are not release proof. Original test counts and
+browser evidence are preserved in the [implementation archive](archive/plugin-implementation-history.md#session-extension-checkpoints).

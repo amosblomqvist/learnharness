@@ -89,7 +89,7 @@ The test harness is kept in `tests/`. Native verification requires `LH_POLISH_BU
 
 ### Verified generalized-surface checkpoint — 2026-11-04
 
-The [contract, section 12](../../docs/plugin-session-extension-contract.md#12-generalized-page-body-surfaces--implemented-and-verified) adds the targetless overload, not a fifteenth method or thirteenth family. The gallery's **Surfaces / Open surface** path and existing native-target action share the retained nested/background/menu/dialog UI.
+The [surface contract](../../docs/plugin-session-extension-contract.md#8-public-surface-contract) adds the targetless overload, not a fifteenth method or thirteenth family. The gallery's **Surfaces / Open surface** path and existing native-target action share the retained nested/background/menu/dialog UI.
 
 All **26 plugin tests**, strict TypeScript and the frontend-only **21,728-byte** bundle passed. Host gates passed **4,045 tests / 568 suites**, TypeScript, lint (only its pre-existing test-fixture warning), fresh isolated build, strict external SDK consumer and payload privacy/source-byte audit.
 

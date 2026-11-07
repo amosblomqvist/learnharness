@@ -1,16 +1,8 @@
 # Shared tree presentation — plugin API v1
 
-> **Commit closeout — 2026-11-04:** the verified shared-tree foundation is included
-> in its feature-branch commit. “Uncommitted” notices below record verification-time
-> status. This does not imply a push, installation or release.
-
-**Status — 2026-11-04: implemented and verified, uncommitted on
-`feature/plugin-architecture`, above commit `bdd0666`; not released or installed.**
-This presentation-only increment has its own [verification checkpoint](#verification-checkpoint--2026-11-04).
-Earlier checkpoints remain historical; no product-plugin migration, staging, commit,
-push or release is implied.
-Exact public types are in `src/core/plugin-tree.ts`, with `mountTree` in
-`src/core/plugin-ui.ts`. Use matching type-only SDK declarations, not private runtime imports.
+Current API v1 contract. Exact public types are in `src/core/plugin-tree.ts`, with
+`mountTree` in `src/core/plugin-ui.ts`. Use documentation and type-only SDK declarations
+matching the target app, not private runtime imports.
 
 ## Boundary
 
@@ -186,44 +178,10 @@ return () => {
 };
 ```
 
-## Verification checkpoint — 2026-11-04
+## Verification
 
-Implemented and verified, **uncommitted on `feature/plugin-architecture` above `bdd0666`,
-not released or installed**. This is separate from all earlier checkpoints.
-
-- **4,021 root tests / 568 suites / zero failures**; typecheck, lint, fresh isolated
-  production build and strict packaged-SDK checks passed. Separately, **69 product tests**
-  passed: 47 Flashcards, 5 coding, 17 showcase; this is not a product migration.
-- Privacy audit: **96 NFT manifests / 278,169 entries**, zero private-root hits;
-  **415 production files**, zero missing files or mismatches.
-- Final native proof: `/private/tmp/lh-tree-proof-native-4Z9LS1`, including
-  `proof-summary.json` and `result.json`; baseline:
-  `/private/tmp/lh-tree-proof-native-YZurqn`. All **eight native states** had exact
-  geometry and computed-style equality, without tolerances; native arrows and Space
-  passed. Four screenshots were pixel-identical. Other raster variance also occurred
-  between repeats of the old payload: **universal pixel identity is not claimed**.
-- Public page, caller-owned container and dialog mounts passed; controlled controls and
-  occurrence-key isolation did not cascade selection. Stable `onDetails`/`onChange`
-  content retained DOM/drafts after label updates and column reordering. Collapse/abort,
-  including late async cleanup, cleaned up exactly once per mount. Arrows, deferred focus,
-  editable isolation, plugin-button Space, nested roots and unchanged global Tab passed.
-- Column x/left/right boundaries were exact at every visible depth for wide and
-  **valid 600px narrow** fixtures. Relative widths matched between headers/bodies:
-  `10em` = 110px, `10ch` = 66px, `calc(8rem + 1px)` = 129px; percentage widths stayed
-  stable. Primary labels were 12.5px/500, metadata 11px/400. This is not a promise that
-  plugin content matches every native line height.
-- The **460px overconstrained fixture shifted 27px**: this demonstrates the explicitly
-  approved caller-width limit, **not an alignment pass**. Authors still own sufficient
-  width/minimum width, scrolling or fewer/narrower columns; no responsive engine was added.
-- The pre-document-curation payload digest was
-  `75999544d91cb67ce6e68a69bfc0bda6b8dabdefdc7126b48361da139124894d`, unchanged across
-  proof; all **5,545 runtime files** matched their source copy with zero differences.
-  The baseline's 5,537 runtime files also had zero differences from its own source copy.
-  This records the exercised payload, not a later document-curated artifact digest.
-- Safety: zero page errors, off-origin requests, microphone attempts, model-generation
-  calls or WebSockets; settings and fixture graph unchanged.
-
-Not exercised: actual session-surface mounting, microphone recording, real-profile
-installation, or native rename/drag UI in the browser (rename/drag unit regressions passed).
-This is scoped proof, not a whole-app manual UX claim. No product plugin was migrated;
-no install, staging, commit, push or release follows from verification.
+Test controlled controls/occurrence keys, content retention across updates, collapse/remount,
+late cleanup, editable/nested-widget keyboard isolation, native Chains regressions and
+fitting-width header/body alignment. Underconstrained layouts remain the caller's
+responsibility, not an alignment guarantee. Historical geometry/browser evidence and
+its scope are preserved in the [implementation archive](archive/plugin-implementation-history.md#shared-tree-checkpoint).

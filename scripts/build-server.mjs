@@ -80,7 +80,11 @@ if (exists(path.join(ROOT, "bundled-plugins"))) {
 // Ship authoring material and generated API types, not the application source or
 // development toolchain. The examples have no credentials or populated data/.
 const authoring = path.join(STANDALONE, "plugin-authoring");
-for (const file of ["plugin-authoring.md", "plugin-architecture.md", "plugin-question-contract.md", "plugin-session-extension-contract.md", "plugin-tree-contract.md"]) {
+for (const file of [
+	"plugin-authoring.md", "plugin-architecture.md", "plugin-question-contract.md",
+	"plugin-problem-contract.md", "plugin-session-extension-contract.md", "plugin-tree-contract.md",
+	"plugin-view-context.md", "dialog-overlay-contract.md", "archive/plugin-implementation-history.md",
+]) {
 	copyTree(path.join(ROOT, "docs", file), path.join(authoring, "docs", file));
 }
 copyTree(path.join(ROOT, "examples", "plugins"), path.join(authoring, "examples", "plugins"));

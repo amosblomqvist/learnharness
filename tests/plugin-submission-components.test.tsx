@@ -16,10 +16,12 @@ const image = { type: "image" as const, data: "iVBORw0KGgo=", mimeType: "image/p
 const qd: QuestionData = { id: "call", kind: "explain", question: "Question?", mode: "text", options: [], createdAt: "now" };
 const answer = buildAnswer(qd, { text: "" });
 
-test("submitted images use explicit bytes, centered natural-width figures, and no image controls", () => {
+test("submitted images use explicit bytes, prose-sized previews, and no extra toolbar", () => {
 	const html = renderToStaticMarkup(<SubmittedImages images={[image]} />);
 	assert.match(html, /<figure[^>]*mx-auto[^>]*w-fit/); assert.match(html, /alt="Submitted image"/); assert.match(html, /data:image\/png;base64,iVBORw0KGgo=/);
-	assert.match(html, /max-w-full opacity-100/); assert.doesNotMatch(html, /<button|download|invert/);
+	assert.match(html, /opacity-100/); assert.match(html, /--lh-prose-size/); assert.match(html, /--lh-prose-leading/);
+	assert.match(html, /max-height:calc\([^;]*\* 5\)/); assert.match(html, /max-width:min\(100%, calc\(/);
+	assert.doesNotMatch(html, /60vh|download|invert/);
 	assert.equal(renderToStaticMarkup(<SubmittedImages />), "");
 });
 

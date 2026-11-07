@@ -11,6 +11,11 @@ import { createPluginSmokeFixture } from "../scripts/smoke-plugin-runtime.mjs";
 const source = fs.readFileSync(new URL("../scripts/build-server.mjs", import.meta.url), "utf8");
 const STANDALONE = path.join(".next", "standalone");
 const PROMPT = path.join("src", "agent", "system-prompt.md");
+const AUTHORING_DOCS = [
+	"plugin-authoring.md", "plugin-architecture.md", "plugin-question-contract.md",
+	"plugin-problem-contract.md", "plugin-session-extension-contract.md", "plugin-tree-contract.md",
+	"plugin-view-context.md", "dialog-overlay-contract.md", "archive/plugin-implementation-history.md",
+];
 
 function withPayload(test: (fixture: {
 	root: string;
@@ -30,14 +35,12 @@ function withPayload(test: (fixture: {
 		// curation, not the TypeScript compiler or the full application sources.
 		write(path.join("scripts", "build-plugin-types.mjs"), `import fs from 'node:fs'; import path from 'node:path'; fs.mkdirSync(process.argv[2], {recursive:true}); fs.writeFileSync(path.join(process.argv[2], 'index.d.ts'), 'export interface Example {}');`);
 		write(path.join("public", "plugin-loader.js"), "export {};\n");
-		write(path.join("docs", "plugin-authoring.md"));
-		write(path.join("docs", "plugin-architecture.md"));
-		write(path.join("docs", "plugin-question-contract.md"));
-		write(path.join("docs", "plugin-session-extension-contract.md"));
-		write(path.join("docs", "plugin-tree-contract.md"));
+		for (const file of AUTHORING_DOCS) {
+			write(path.join("docs", file), fs.readFileSync(new URL(`../docs/${file}`, import.meta.url), "utf8"));
+		}
 		write(path.join("examples", "plugins", "hello-plugin", "dist", "manifest.json"));
 		write(path.join("examples", "plugins", "hello-plugin", "dist", "main.js"));
-		write(path.join("skills", "learnharness-plugins", "SKILL.md"));
+		write(path.join("skills", "learnharness-plugins", "SKILL.md"), fs.readFileSync(new URL("../skills/learnharness-plugins/SKILL.md", import.meta.url), "utf8"));
 		write(path.join(STANDALONE, "server.js"));
 		write(path.join(".next", "static", "runtime.js"));
 		write(path.join("public", "asset.txt"));
@@ -107,6 +110,39 @@ describe("desktop standalone payload", () => {
 			assert.ok(fs.existsSync(path.join(root, STANDALONE, "public", "asset.txt")));
 			for (const asset of ["scripts/plugin-loader.cjs", "public/plugin-loader.js", "plugin-authoring/docs/plugin-authoring.md", "plugin-authoring/docs/plugin-question-contract.md", "plugin-authoring/docs/plugin-session-extension-contract.md", "plugin-authoring/docs/plugin-tree-contract.md", "plugin-authoring/types/index.d.ts", "plugin-authoring/examples/plugins/hello-plugin/dist/manifest.json", "plugin-authoring/examples/plugins/hello-plugin/dist/main.js", "plugin-authoring/skills/learnharness-plugins/SKILL.md"]) {
 				assert.ok(fs.existsSync(path.join(root, STANDALONE, asset)), asset);
+			}
+		});
+	});
+
+	it("ships complete authoring docs with self-contained relative links and heading anchors", () => {
+		withPayload(({ root, run }) => {
+			const result = run();
+			assert.equal(result.status, 0, String(result.stderr));
+			const authoring = path.join(root, STANDALONE, "plugin-authoring");
+			const files = [...AUTHORING_DOCS.map(file => `docs/${file}`), "skills/learnharness-plugins/SKILL.md"];
+			const headings = (text: string) => {
+				const seen = new Map<string, number>();
+				return [...text.matchAll(/^#{1,6} (.+)$/gm)].map(([, heading]) => {
+					assert.ok(heading);
+					const slug = heading.toLowerCase().replace(/[^\p{L}\p{N}\p{M}_\- ]/gu, "").replace(/ /g, "-");
+					const count = seen.get(slug) ?? 0;
+					seen.set(slug, count + 1);
+					return count ? `${slug}-${count}` : slug;
+				});
+			};
+			for (const file of files) {
+				const from = path.join(authoring, file);
+				assert.ok(fs.existsSync(from), `missing authoring document: ${file}`);
+				const text = fs.readFileSync(from, "utf8");
+				for (const [, href] of text.matchAll(/\[[^\]]+\]\(([^)]+)\)/g)) {
+					assert.ok(href);
+					if (/^[a-z][a-z\d+.-]*:/i.test(href)) continue;
+					const [relative, fragment] = href.split("#");
+					const target = relative ? path.resolve(path.dirname(from), relative) : from;
+					assert.ok(!path.relative(authoring, target).startsWith(".."), `${file}: link escapes authoring bundle: ${href}`);
+					assert.ok(fs.existsSync(target), `${file}: missing link target: ${href}`);
+					if (fragment) assert.ok(headings(fs.readFileSync(target, "utf8")).includes(decodeURIComponent(fragment)), `${file}: missing heading: ${href}`);
+				}
 			}
 		});
 	});

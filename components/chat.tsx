@@ -62,7 +62,7 @@ import {
 } from "@/src/core";
 import { PlanBlock, PlanPopup, latestTree } from "@/components/plan-block";
 import { PlanMarginalia, planExists } from "@/components/plan-window";
-import { MermaidOverlay, SessionMermaidContext } from "@/components/session-overlay";
+import { MermaidOverlay, SessionMermaidContext, type SessionImage } from "@/components/session-overlay";
 import { AbortTurnDialog, type AbortMode } from "@/components/abort-turn-dialog";
 import { ArrowRightIcon, DumbbellIcon, WaypointsIcon } from "lucide-react";
 import type { PlanBlockData } from "@/src/core";
@@ -1106,7 +1106,7 @@ export function Chat({
 	// Figure focus (2026-10-07): the figure card's fullscreen button — same
 	// overlay shell as mermaid, but carrying the raw svg + the card's invert
 	// state so the fullscreen view stays faithful to the toggled card.
-	const [figureFocus, setFigureFocus] = useState<{ svg: string; inverted: boolean } | null>(null);
+	const [figureFocus, setFigureFocus] = useState<{ svg: string; inverted: boolean } | { image: SessionImage } | null>(null);
 
 	// Overlay mirrors for the layered-Esc gate (owner 2026-10-04): the
 	// lh:kbd-abort-turn handler reads these at EVENT time — declared here
@@ -1462,6 +1462,7 @@ export function Chat({
 			value={{
 				openMermaid: setMermaidFocus,
 				openFigure: (svg, inverted) => setFigureFocus({ svg, inverted }),
+				openImage: image => setFigureFocus({ image }),
 			}}
 		>
 		<JobsContext.Provider value={jobs}>
@@ -2010,8 +2011,7 @@ export function Chat({
 				)}
 				{figureFocus !== null && (
 					<MermaidOverlay
-						svg={figureFocus.svg}
-						inverted={figureFocus.inverted}
+						{...figureFocus}
 						onClose={() => setFigureFocus(null)}
 					/>
 				)}

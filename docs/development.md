@@ -63,7 +63,7 @@ This is a **trusted local/shared developer-server mode**, not multi-user hosting
 | Native input/record/UI projection | `src/core/input-events.ts`, `native-messages.ts`, `view.ts`; `components/session-core.ts` |
 | Agent prompts and tool registries | `src/agent/teacher-agent.ts`, `prompt-segments.ts`, `tools.ts`, `tools/practice.ts` |
 | Async workers and result delivery | `src/agent/subagents/runner.ts`, `src/server/jobs.ts` |
-| Trusted local plugins | `src/server/plugins.ts`, [plugin architecture](plugin-architecture.md), [authoring guide](plugin-authoring.md), [`examples/plugins/`](../examples/plugins/) |
+| Trusted local plugins | [Authoring/capability map](plugin-authoring.md), [host source map and verification](plugin-architecture.md), [`examples/plugins/`](../examples/plugins/) templates, [`plugins/`](../plugins/) feature sources |
 | Graph extraction, coverage and derivation | `src/agent/subagents/extraction.ts`, `src/core/coverage.ts`, `graph.ts` |
 | Notes/PDF import and local conversion | `components/notes-import.tsx`, `app/api/graph/import/route.ts`, `src/agent/subagents/pdf-markdown.ts` |
 | Stores and resolved settings | `src/server/stores.ts`, `src/store/`, `src/core/settings-resolution.ts` |

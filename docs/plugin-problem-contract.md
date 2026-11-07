@@ -1,8 +1,8 @@
 # Plugin-defined practice problems — host API v1
 
-This host-only increment is implemented on `feature/plugin-architecture`, not released.
-It adds alternative **practice problem types**, not teaching questions, a second practice
-lifecycle, a separate conclusion tool, or a new assessment system. Public types live in
+Custom **practice problem types** share the native practice lifecycle, not teaching
+questions, a second lifecycle, a separate conclusion tool or a new assessment system.
+This describes the current checkout, including additions beyond released 0.4.1. Public types live in
 `src/core/plugin-problems.ts` and the type-only `learnharness-plugin-api` SDK.
 
 ## Shared lifecycle
@@ -202,11 +202,10 @@ is not applicable. Images go through existing structural, byte/MIME, model-capab
 and resize admission. Actual native image blocks reach the model alongside labeled text;
 base64 is not stuffed into the structured submission or model-facing JSON string.
 
-## Scope and verification
+## Verification
 
-No plugin product is implemented/modified by this host increment. It does not install
-plugins or the application, publish/release, or change native text-practice behavior.
-Tests cover saved contracts, shared lifecycle/gate/conclusion, registration revocation,
-processing ownership/cancellation/repeat submissions, images/interceptors, controlled
-dock cleanup/drafts, and portable SDK inference. Browser diagnostics exercise actual
-host components with simulated HTTP; they are not a packaged-app or real-provider proof.
+Cover saved contracts, the shared native/plugin lifecycle/gate/conclusion, registration
+revocation, processing ownership/cancellation/repeat submissions, images/interceptors,
+controlled dock cleanup/drafts, renderer slots and portable SDK inference. Browser
+component diagnostics with simulated HTTP do not establish packaged-app, real-provider
+or plugin-product release readiness. Native text-practice behavior remains independent.
