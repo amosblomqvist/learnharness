@@ -70,12 +70,12 @@ export function SettingsRow({
 	/** Dependency graying, graph-view style: the whole row dims when the
 	 *  control is inert (parent off, no file yet, …). */
 	dimmed?: boolean;
-	/** When the control does not fit beside the label (a narrow dialog), drop it
-	 *  to its own line instead of squeezing the label. */
+	/** For a control that cannot shrink: it drops under the label when the dialog is too
+	 *  narrow, and the row becomes a size container so the control can pick compact labels. */
 	wrap?: boolean;
 }) {
 	return (
-		<div data-testid={testid} className={cn("flex items-center justify-between gap-4 py-1", wrap && "flex-wrap gap-y-1", dimmed && "opacity-40")}>
+		<div data-testid={testid} className={cn("flex items-center justify-between gap-4 py-1", wrap && "@container flex-wrap", dimmed && "opacity-40")}>
 			<span className="min-w-0">
 				<span className="block font-prose text-(length:--lh-prose-size)">{label}</span>
 				{hint && <span className="block text-xs text-muted-foreground/70">{hint}</span>}
