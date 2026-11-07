@@ -29,7 +29,9 @@ const { newUserMessage } = await import("../src/core/native-messages.ts");
 const { catalogContextLimits } = await import("../src/server/model-catalog.ts");
 const { retryDrops } = await import("../src/core/input-events.ts");
 const { SIDE_CONTEXT_BUDGET_ERROR, sideBudgetRetryDrops } = await import("../src/server/side-context-budget.ts");
-const { newCompactionMarker } = await import("../src/core/compaction.ts");
+const { newCompactionMarker, estimateContextTokens, compactionCutIndex } = await import("../src/core/compaction.ts");
+const { piModels } = await import("../src/agent/models.ts");
+const { readSettings, writeSettings } = await import("../src/store/settings.ts");
 const { collectCitations, serializeCitation } = await import("../src/core/citations.ts");
 const { parseSideAskInput, SideChatInputError } = await import("../src/core/side-chat.ts");
 const { markUnadmittedUsage } = await import("../src/agent/subscription-request-cycle.ts");
@@ -91,6 +93,152 @@ async function mainInput(chatId: string, input: unknown, service: ReturnType<typ
 	if (response.ok) { const turn = runningTurn(chatId); if (turn) await new Response(turn.subscribe()).text(); }
 	return { response, contexts };
 }
+
+describe("reasoning option × side-request composition", () => {
+	const phases = ["initial", "internal", "first-assembled", "internal-assembled"] as const;
+	type Phase = typeof phases[number];
+	type Identity = "matching" | "wrong-provider" | "wrong-model" | "wrong-api" | "openrouter";
+	async function exercise(phase: Phase, includeReasoning: boolean | undefined, identity: Identity = "matching") {
+		const previousSettings = readSettings(), previousKey = process.env.OPENAI_API_KEY;
+		process.env.OPENAI_API_KEY = "offline-test-presence-only";
+		writeSettings({ compaction: includeReasoning === undefined ? {} : { includeReasoning }, graph: { enabled: false } });
+		assert.equal(readSettings()!.compaction?.includeReasoning, includeReasoning, "omitted flag really remains absent in the persisted fixture");
+		try {
+			const f = fixture();
+			const spec = identity === "openrouter" ? { provider: "openrouter", id: "z-ai/glm-5.3-flash" } : { provider: "openai", id: "gpt-5" };
+			const requestModel = piModels().getModel(spec.provider, spec.id)!;
+			assert.ok(requestModel);
+			if (identity !== "openrouter") assert.equal(requestModel.api, "openai-responses");
+			chatStore.saveSettings(f.chatId, { model: spec });
+			const window = catalogContextLimits().get(`${spec.provider}:${spec.id}`)!;
+			const budget = window - Math.min(16_384, requestModel.maxTokens);
+			const floor = Math.floor(Math.min(requestModel.maxTokens, budget / 2));
+			assert.ok(floor > 20_000, "the single retained signed response protects the prior kept boundary");
+			const base = chatStore.getChat(f.chatId)!.messages;
+			const signed = { ...fauxAssistantMessage("A short retained explanation."), id: "explanation", provider: requestModel.provider,
+				api: requestModel.api, model: requestModel.id,
+				content: [{ type: "thinking", thinking: "", thinkingSignature: "opaque-fixture-not-a-token-count" }, { type: "text", text: "A short retained explanation." }],
+				usage: { input: 80_000, output: floor, reasoning: floor - 1, cacheRead: 0, cacheWrite: 0, totalTokens: 80_000 + floor },
+			} as LhMessage;
+			if (signed.role !== "assistant") throw new Error("fixture assistant missing");
+			if (identity === "wrong-provider") signed.provider = "a-foreign-provider";
+			if (identity === "wrong-model") signed.model = "a-foreign-model";
+			if (identity === "wrong-api") signed.api = "openai-completions";
+			const prior = newCompactionMarker("Earlier lesson summary", { firstKeptMessageId: signed.id, tokensBefore: 150_000, at });
+			const original = [base[0]!, signed, prior, base.at(-1)!];
+			chatStore.saveMessages(f.chatId, original);
+			assert.equal(estimateContextTokens(original, requestModel).lastUsageIndex, null, "this comparison MUST exercise the post-marker floor, not an already-counted anchor");
+			if (identity === "matching") assert.equal(compactionCutIndex(original, undefined, requestModel), 1, "reasoning tail cannot advance past the prior kept boundary");
+			const assembled = phase.endsWith("assembled"), internal = phase.startsWith("internal");
+			const sideTokens = assembled ? (budget - floor) * 0.4 : budget - floor + 3000;
+			const threads: SideChatThread[] = Array.from({ length: Math.ceil(sideTokens / 4000) }, (_, index) => ({
+				id: `side_reasoning_${index}`, anchor: f.anchor, open: true, createdAt: at, messages: [
+					{ id: `q_${index}`, role: "user", text: "Q".repeat(8000), at }, { id: `a_${index}`, role: "assistant", text: "A".repeat(8000), at },
+				],
+			}));
+			const learner = { ...newUserMessage(`REASONING QUEUED STEER ${"L".repeat(Math.floor((budget - floor) * 0.7 * 4))}`), id: "reasoning_learner" };
+			chatStore.updateSideChats(f.chatId, () => internal ? [] : threads);
+			const prompt = Math.ceil(composeInstructions("teacher").length / 4);
+			const expectedRefusal = identity === "matching" && includeReasoning === true;
+			const expectedCalls = internal ? expectedRefusal ? 1 : 2 : expectedRefusal ? 0 : 1;
+			let reads = 0; let agent: ReturnType<typeof createTeacherAgent>;
+			const validations: Array<{ hasLearner: boolean; references: number; off: number; on: number }> = [];
+			const contexts: TranscriptContext[] = [];
+			// FauxCore synthesizes nonzero prompt usage even when a response asks
+			// for zero. Use a genuinely zero-usage synthetic stream here so an
+			// internal tool call cannot hide the retained post-marker reasoning
+			// behind a newer usage anchor and accidentally make ON/OFF identical.
+			const streamFn: PiEngine["streamFn"] = (_model, context) => {
+				contexts.push(structuredClone(context));
+				const stream = createAssistantMessageEventStream();
+				const reply = internal && contexts.length === 1
+					? fauxAssistantMessage([fauxToolCall("offline_read", {}, { id: "reasoning_read" })], { stopReason: "toolUse" })
+					: fauxAssistantMessage("Teacher continued.");
+				const message = { ...reply, provider: requestModel.provider, api: requestModel.api, model: requestModel.id };
+				queueMicrotask(() => { stream.push({ type: "done", reason: message.stopReason as "stop" | "toolUse", message }); stream.end(message); });
+				return stream;
+			};
+			const checkConstituents = () => {
+				const live = agent.state.messages.filter((message) => (message as { role: string }).role !== "system") as LhMessage[];
+				assert.equal(estimateContextTokens(live, requestModel).lastUsageIndex, null, "zero-usage synthetic work must not mask retained reasoning with a new anchor");
+				const updates = sideConversationEntries({ messages: live, sideChats: threads });
+				const combined = [...live, ...updates, ...(assembled ? [learner] : [])];
+				assert.ok(projectedContextTokens(combined, prompt) < budget, "original heuristic admits this identical payload");
+				const on = projectedContextTokens(combined, prompt, requestModel);
+				assert.equal(on > budget, identity === "matching", "only matching Responses replay changes the assembled estimate");
+				if (identity !== "matching") assert.equal(on, projectedContextTokens(combined, prompt));
+				if (assembled) {
+					assert.ok(projectedContextTokens([...live, ...updates], prompt, requestModel) < budget, "pre-queue side request fits even ON");
+					assert.ok(projectedContextTokens([...live, learner], prompt, requestModel) < budget, "steering alone fits even ON");
+					agent.steer(learner);
+				}
+			};
+			const response = await handleChatRequest(new Request("http://offline.test/api/chat", { method: "POST", headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({ chatId: f.chatId, input: { type: "answer", toolCallId: "check", answer: gradedAnswer() } }) }), (opts) => {
+				agent = createTeacherAgent(undefined, { ...opts, engine: { ...opts.engine!, streamFn },
+					validateContext: (messages) => {
+						const live = messages.filter((message) => (message as { role: string }).role !== "system") as LhMessage[];
+						assert.equal(estimateContextTokens(live, requestModel).lastUsageIndex, null);
+						validations.push({ hasLearner: live.some((message) => message.id === learner.id), references: live.filter((message) => message.role === "custom" && message.customType === "side-question").length,
+							off: projectedContextTokens(live, prompt), on: projectedContextTokens(live, prompt, requestModel) });
+						opts.validateContext!(messages);
+					},
+					tools: { offline_read: { name: "offline_read", label: "Synthetic read", description: "Offline composition fixture", parameters: Type.Object({}), execute: async () => {
+						reads++; chatStore.updateSideChats(f.chatId, () => threads); checkConstituents();
+						return { content: [{ type: "text", text: "COMPLETED REASONING TOOL WORK" }], details: {} };
+					} } },
+				});
+				if (!internal) checkConstituents();
+				return agent;
+			}, f.service);
+			assert.equal(response.status, 200); const turn = runningTurn(f.chatId); if (turn) await new Response(turn.subscribe()).text();
+			assert.equal(contexts.length, expectedCalls); assert.equal(reads, internal ? 1 : 0);
+			assert.equal(validations.at(-1)!.references, expectedRefusal && !assembled ? 0 : threads.length * 2,
+				"initial/internal preparation itself honors the flag, while assembled cases must reach final validation");
+			if (assembled) {
+				const actual = validations.at(-1)!;
+				assert.equal(actual.hasLearner, true); assert.ok(actual.off < budget);
+				assert.equal(actual.on > budget, identity === "matching", "FINAL post-steering guard sees the reasoning-sensitive assembled payload");
+			}
+			const stopped = chatStore.getChat(f.chatId)!;
+			const expectedEntries = sideConversationEntries({ messages: original, sideChats: threads });
+			const assertRawWire = (context: TranscriptContext) => {
+				const wire = JSON.stringify(context.messages);
+				for (const entry of expectedEntries) assert.ok(wire.includes(JSON.stringify(entry.content)), "every full raw exchange reaches the selected provider context");
+			};
+			if (!expectedRefusal) assertRawWire(contexts.at(-1)!);
+			assert.deepEqual(stopped.messages.slice(0, original.length), original); assert.deepEqual(stopped.sideChats, threads);
+			assert.equal(stopped.messages.filter((message) => message.id === learner.id).length, assembled ? 1 : 0);
+			assert.equal(stopped.messages.filter((message) => message.role === "toolResult" && message.toolCallId === "check").length, 1);
+			assert.equal(stopped.messages.filter((message) => message.role === "custom" && message.customType === "side-question").length, expectedRefusal ? 0 : threads.length * 2);
+			assert.equal(sideConversationEntries(stopped).length, expectedRefusal ? threads.length * 2 : 0);
+			if (expectedRefusal) {
+				const failure = stopped.messages.at(-1)!; assert.equal(failure.role, "assistant");
+				if (failure.role === "assistant") assert.equal(failure.errorMessage, SIDE_CONTEXT_BUDGET_ERROR);
+				const larger = piModels().getModels("openai").filter((model) => model.contextWindow > window * 1.5).sort((a, b) => b.contextWindow - a.contextWindow)[0]!;
+				assert.ok(larger); chatStore.saveSettings(f.chatId, { model: { provider: "openai", id: larger.id } });
+				const retried = await mainInput(f.chatId, { type: "retry" }, f.service);
+				assert.equal(retried.contexts.length, 1); assertRawWire(retried.contexts[0]!);
+				assert.equal(reads, internal ? 1 : 0, "Retry never replays completed tools");
+				const saved = chatStore.getChat(f.chatId)!;
+				assert.deepEqual(saved.messages.slice(0, stopped.messages.length), stopped.messages);
+				assert.equal(saved.messages.filter((message) => message.role === "custom" && message.customType === "side-question").length, threads.length * 2);
+				assert.equal(saved.messages.filter((message) => message.id === learner.id).length, assembled ? 1 : 0);
+				assert.deepEqual(sideConversationEntries(saved), []);
+			}
+		} finally {
+			writeSettings(previousSettings ?? {});
+			if (previousKey === undefined) delete process.env.OPENAI_API_KEY;
+			else process.env.OPENAI_API_KEY = previousKey;
+		}
+	}
+	for (const phase of phases) for (const enabled of [undefined, false, true]) {
+		it(`${phase}: protected matching Responses floor with includeReasoning=${enabled}`, () => exercise(phase, enabled));
+	}
+	for (const identity of ["wrong-provider", "wrong-model", "wrong-api", "openrouter"] as const) {
+		it(`ON preserves the original side-admission heuristic for ${identity}`, () => exercise("initial", true, identity));
+	}
+});
 
 describe("append-only main-request delivery", () => {
 	it("keeps a local budget Retry eligible across only its own preflight compaction, without changing ordinary retry policy", () => {

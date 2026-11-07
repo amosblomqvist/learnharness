@@ -256,6 +256,63 @@ describe("the compaction service", () => {
 		assert.ok(projectedContextTokens([...saved, cargo], deps.systemPromptTokens) < deps.thresholdTokens);
 	});
 
+	it("composes reasoning options with prospective side cargo without cutting or summarizing the undelivered exchanges", async () => {
+		const responses = { provider: "openai", api: "openai-responses", id: "side-reasoning-fixture" };
+		for (const identity of ["matching", "wrong-provider", "wrong-model", "wrong-api", "openrouter"] as const) {
+			const target = identity === "wrong-provider" ? { ...responses, provider: "another-provider" }
+				: identity === "wrong-model" ? { ...responses, id: "another-model" }
+				: identity === "wrong-api" ? { ...responses, api: "openai-completions" }
+				: identity === "openrouter" ? { ...responses, provider: "openrouter", api: "openai-completions" } : responses;
+			const stored = identity === "openrouter" ? target : responses;
+			for (const includeReasoning of [undefined, false, true]) {
+				const label = `${identity}, includeReasoning=${includeReasoning}`;
+				const chat = chatStore.createChat(label);
+				const history = Array.from({ length: 6 }, (_, index) => ({
+					...fauxAssistantMessage("a".repeat(400)), id: `signed-${index}`, provider: stored.provider, api: stored.api, model: stored.id,
+					content: [{ type: "thinking", thinking: "", thinkingSignature: "opaque-only-not-a-token-count" }, { type: "text", text: "a".repeat(400) }],
+					usage: { input: 50_000, output: 10_000, reasoning: 9_000, cacheRead: 0, cacheWrite: 0, totalTokens: 60_000 },
+				}) as LhMessage);
+				const prior = newCompactionMarker("Prior summary", { firstKeptMessageId: history[0]!.id, tokensBefore: 100_000, at: "fixture" });
+				const original = [...history, prior]; chatStore.saveMessages(chat.id, original);
+				const cargo = newUserMessage(`UNDELIVERED SIDE EXCHANGES ${"s".repeat(40_000)}`);
+				const deps: CompactionDeps = { ...depsOf(chat.id, 65_000), engine: { model: target } as CompactionDeps["engine"], includeReasoning };
+				const estimateModel = includeReasoning ? deps.engine.model : undefined;
+				assert.ok(projectedContextTokens(original, 100, estimateModel) < deps.thresholdTokens, label);
+				const projected = projectedContextTokens([...original, cargo], 100, estimateModel);
+				const shouldCompact = includeReasoning === true && identity === "matching";
+				assert.equal(projected > deps.thresholdTokens, shouldCompact, "the post-marker reasoning floor plus new cargo—not a usage anchor—triggers this gate");
+				let summaries = 0, summaryInput = "";
+				await ensureCompacted({ ...deps, projectMessages: (record) => [...record.messages, cargo], summarize: async (prompt, engine) => {
+					summaries++; summaryInput = prompt; return deps.summarize!(prompt, engine);
+				} }, chat.id);
+				const after = chatStore.getChat(chat.id)!.messages;
+				assert.deepEqual(after.slice(0, original.length), original, label);
+				assert.equal(summaries, shouldCompact ? 1 : 0, label);
+				assert.ok(!after.some((message) => message.id === cargo.id));
+				assert.doesNotMatch(summaryInput, /UNDELIVERED SIDE EXCHANGES/);
+				if (shouldCompact) {
+					const marker = activeCompactionOf(after)!;
+					assert.equal(marker.details.tokensBefore, projected);
+					assert.equal(marker.details.firstKeptMessageId, "signed-4", "cut uses saved history and its selected-model floor, never cargo");
+					assert.ok(projectedContextTokens([...after, cargo], 100, estimateModel) < deps.thresholdTokens);
+				} else assert.deepEqual(after, original, label);
+			}
+		}
+	});
+
+	it("adds prospective side cargo once to a valid usage anchor regardless of reasoning opt-in", () => {
+		const model = { provider: "openai", api: "openai-responses", id: "anchored-side" } as CompactionDeps["engine"]["model"];
+		const assistant = { ...fauxAssistantMessage("answer"), id: "anchor", provider: model.provider, api: model.api, model: model.id,
+			content: [{ type: "thinking", thinking: "", thinkingSignature: "opaque" }, { type: "text", text: "answer" }],
+			usage: { input: 50_000, output: 10_000, reasoning: 9_000, cacheRead: 0, cacheWrite: 0, totalTokens: 60_000 },
+		} as LhMessage;
+		const cargo = newUserMessage("s".repeat(40_000));
+		for (const estimateModel of [undefined, model]) {
+			assert.equal(projectedContextTokens([assistant], 100, estimateModel), 60_000);
+			assert.equal(projectedContextTokens([assistant, cargo], 100, estimateModel), 70_000, "do not add output/reasoning/ciphertext again to already-counted usage");
+		}
+	});
+
 	it("the registry is a mutex: concurrent ensureCompacted → ONE summary", async () => {
 		const chatId = overThresholdChat("compact: mutex");
 		const before = summarizeCalls;
