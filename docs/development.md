@@ -9,7 +9,8 @@ Start here for local work. The [architecture reference](architecture.md) describ
 Use a current Node.js/npm installation compatible with the lockfile and native dependencies. CI and release builds use **Node 26**. From the repository root:
 
 ```bash
-npm ci                 # install the locked dependencies
+npm ci                 # install the locked host dependencies
+npm run plugins:setup  # generate local SDKs and install locked source-plugin dependencies
 npm run dev            # Next development server, normally http://localhost:3000
 
 npm run build          # production Next build, including standalone output
@@ -17,6 +18,10 @@ npm start              # serve the production build with Next
 
 npm run desktop:dev    # Next dev + Electron pointed at localhost:3000
 ```
+
+`plugins:setup` prepares each source package under `plugins/`: it generates its ignored `.sdk/` when needed, then runs `npm ci`. Run it after a fresh checkout and again after public API or plugin lockfile changes. Root typecheck/build includes plugin sources, so CI uses the same preparation. It does not build plugin bundles, install/enable plugins in your learning-data directory, or populate `bundled-plugins/`.
+
+For testing a plugin in the app, run `npm run build` in that plugin’s source directory and follow its README plus the [installation guide](plugin-authoring.md#package-and-installation). Generated `dist/`, `.sdk/` and `node_modules/` stay out of Git. Bundled-plugin distribution is not part of this source-testing checkpoint.
 
 No API key is required just to start the UI. Configure a provider/connection and the strong, cheap and vision model slots in Settings before model-driven use. There are no factory model choices. OpenRouter is one supported API provider, **not a required gateway for all calls**. Existing sessions keep their explicit conversation model; background roles use their own settings resolution.
 

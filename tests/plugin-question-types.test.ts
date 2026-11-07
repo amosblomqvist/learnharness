@@ -65,6 +65,8 @@ const renderer: PluginQuestionRenderer = {
     const state: PluginQuestionAnswerState = {status:"ready", value:false};
     props.onChange(state);
     void [props.input.question, props.chatId, props.questionId, props.contractVersion, props.variant, props.signal];
+    // @ts-expect-error Footer capability is answered-only.
+    void props.footerContainer;
     const handle: PluginQuestionEditorHandle = {
       update({answer, active}) { void [answer, active]; },
       focus() { container.focus(); },
@@ -77,6 +79,10 @@ const renderer: PluginQuestionRenderer = {
   mountQuestion(container, props) { container.textContent = props.input.question; return () => container.replaceChildren(); },
   mountAnswered(container, props) {
     const grading: PluginQuestionGradingOutcome | undefined = props.grading;
+    const footer: HTMLElement | undefined = props.footerContainer;
+    // @ts-expect-error The generation-owned footer reference is readonly, not its DOM content.
+    props.footerContainer = container;
+    void footer;
     // @ts-expect-error Saved grading context is readonly.
     props.grading = {result:false};
     container.textContent = JSON.stringify([props.answer, grading]); return async () => container.replaceChildren();

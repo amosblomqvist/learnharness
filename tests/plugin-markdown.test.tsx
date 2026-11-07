@@ -8,6 +8,8 @@ import { createPluginUiStore, PluginUiHost } from "../components/plugin-ui-host.
 import { InteractionLayersProvider } from "../components/interaction-layers.tsx";
 import { installModalDom } from "./modal-dom.ts";
 import type { PluginUi } from "../src/core/plugin-ui.ts";
+import { mountModelSolution } from "../plugins/coding-questions/src/solution-view.ts";
+import { mountSavedQuestion } from "../plugins/coding-questions/src/question-view.ts";
 
 async function withHost(run: (fixture: {
 	ui: PluginUi;
@@ -57,6 +59,54 @@ it("public Markdown mount uses host formatting, updates in place and disposes on
 	assert.equal(widget.querySelector("strong"), null);
 	assert.equal(widget.querySelector("a")?.getAttribute("href"), "https://example.invalid/");
 	await act(async () => { handle.dispose(); handle.dispose(); handle.update({ text: "Too late" }); });
+	assert.equal(store.getSnapshot().length, 0);
+	assert.equal(target.textContent, "Keep me");
+}));
+
+it("saved coding question immediately renders host Markdown, math and fenced code and cleans up without touching siblings", async () => withHost(async ({ ui, store, target }) => {
+	const scope = new AbortController();
+	const question = "Implement **square** for $x^2$.\n\n```js\nfunction square(x) {}\n```";
+	let dispose!: () => void;
+	await act(async () => { dispose = mountSavedQuestion(target, ui, question, scope.signal); });
+	const prompt = target.querySelector(".lh-coding-prompt")!;
+	assert.equal(prompt.querySelector("strong")?.textContent, "square");
+	assert.ok(prompt.querySelector(".katex"));
+	assert.match(prompt.querySelector("[data-streamdown='code-block-body']")!.textContent!, /function square\(x\) \{\}/);
+	assert.equal(store.getSnapshot().length, 1);
+	await act(async () => { scope.abort(); dispose(); dispose(); });
+	assert.equal(store.getSnapshot().length, 0);
+	assert.equal(target.textContent, "Keep me");
+	await act(async () => { mountSavedQuestion(target, ui, question, scope.signal)(); });
+	assert.equal(store.getSnapshot().length, 0, "pre-aborted mounts never attach content");
+	assert.equal(target.textContent, "Keep me");
+}));
+
+it("saved coding question removes its wrapper when the Markdown mount fails", async () => withHost(async ({ target }) => {
+	assert.throws(() => mountSavedQuestion(target, { mountMarkdown() { throw new Error("fixture mount failed"); } }, "Original question", new AbortController().signal), /fixture mount failed/);
+	assert.equal(target.textContent, "Keep me");
+	assert.equal(target.querySelector(".lh-coding-prompt"), null);
+}));
+
+it("coding model solution lazily uses real host Markdown for fenced code and explanation, then disposes on close and abort", async () => withHost(async ({ ui, store, target }) => {
+	const scope = new AbortController();
+	const solution = "```js\nfunction square(x) { return x * x; }\n```\n\n**Why:** Multiply the value by itself.";
+	let dispose!: () => void;
+	await act(async () => { dispose = mountModelSolution(target, ui, solution, scope.signal); });
+	const toggle = target.querySelector("button")!;
+	assert.equal(toggle.textContent, "Model solution");
+	assert.equal(toggle.getAttribute("aria-expanded"), "false");
+	assert.equal(store.getSnapshot().length, 0);
+	await act(async () => { toggle.click(); });
+	assert.equal(toggle.textContent, "Hide model solution");
+	assert.equal(store.getSnapshot().length, 1);
+	const widget = target.querySelector("[data-plugin-ui-widget]")!;
+	assert.match(widget.querySelector("[data-streamdown='code-block-body']")!.textContent!, /function square\(x\) \{ return x \* x; \}/);
+	assert.equal(widget.querySelector("strong")?.textContent, "Why:");
+	assert.equal(widget.querySelector("[data-testid='md-copy'], [data-streamdown='code-block-actions']"), null);
+	await act(async () => { toggle.click(); });
+	assert.equal(store.getSnapshot().length, 0);
+	assert.equal(target.querySelector("[data-plugin-ui-widget]"), null);
+	await act(async () => { toggle.click(); scope.abort(); dispose(); dispose(); });
 	assert.equal(store.getSnapshot().length, 0);
 	assert.equal(target.textContent, "Keep me");
 }));

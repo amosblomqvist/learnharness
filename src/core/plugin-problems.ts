@@ -70,6 +70,8 @@ export interface PluginProblemRenderer<Q = JsonValue, S = JsonValue> {
     readonly submission: S;
     readonly processing?: PluginProblemProcessingOutcome;
     readonly headerContainer?: HTMLElement;
+    /** Generation-owned block after host submission images/thinking. */
+    readonly footerContainer?: HTMLElement;
   }): void | PluginCleanup | Promise<void | PluginCleanup>;
 }
 /** The host persists this in the genuine pose acknowledgment, never model arguments. */

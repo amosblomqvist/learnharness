@@ -1,8 +1,8 @@
 /** Product-only packaged-host proof. Never builds or imports host implementation.
  * Run: LH_STANDALONE=/absolute/verified/.next/standalone node plugins/coding-questions/tests/native.mjs
  * All runtime writes are confined to a disposable /tmp copy; evidence is retained.
- * Requires a freshly approved host payload with grading, answered header suffix,
- * public mountBadge, and question Escape/confirmation support.
+ * Requires an existing matching host payload with grading, answered header/footer slots,
+ * public mountBadge/mountMarkdown, and question Escape/confirmation support.
  * Syntax checking this file does not launch the host, browser, or test programs.
  */
 import assert from "node:assert/strict";
@@ -32,6 +32,7 @@ const chatId = "chat_coding_native_smoke", model = "coding-native-fixture", rout
 assert.equal(process.versions.electron, undefined, "Launch this harness with installed Node; the host itself still runs under Electron.");
 const testNode = fs.realpathSync(process.execPath);
 const starter = "function example() {\n    return 0;  \n}\n";
+const modelSolution = "```javascript\nfunction example() { return 42; }\n```\n\n**Why:** Return the requested value.";
 const exactAnswer = "  // verbatim learner code\n\tfunction example() { return 42; }  \n\n";
 const checkAnswer = "  // exact TEACH CHECK code\n\tfunction example() { return 41; }  \n\n";
 const errorAnswer = "  // accepted despite unavailable test program\n\tfunction example() { return 42; }  \n\n";
@@ -143,7 +144,7 @@ const mock = http.createServer((req, res) => {
         pending.set(res, () => {
           if (review) { chunk({ content: reviewText }); chunk({}, "stop"); }
           else {
-            chunk({ tool_calls: [{ index: 0, id: toolCallId, type: "function", function: { name: "coding_question", arguments: JSON.stringify({ type: check ? "check" : "predict", nodeId: "coding_node", question: check ? "Read the coding check, then reveal and edit the function." : "Predict by editing this JavaScript function.", payload: { language: "javascript", starterCode: starter, tests: runError ? errorTests : check ? checkTests : predictTests } }) } }] }); chunk({}, "tool_calls");
+            chunk({ tool_calls: [{ index: 0, id: toolCallId, type: "function", function: { name: "coding_question", arguments: JSON.stringify({ type: check ? "check" : "predict", nodeId: "coding_node", question: check ? "Read the coding check, then reveal and edit the function." : "Predict by editing this JavaScript function.", payload: { language: "javascript", starterCode: starter, tests: runError ? errorTests : check ? checkTests : predictTests, modelSolution } }) } }] }); chunk({}, "tool_calls");
           }
           res.end("data: [DONE]\n\n");
         });
@@ -415,6 +416,8 @@ try {
     const card = cards[index], output = await card.$(`.lh-coding-test-result[data-test-status="${result.status}"]`);
     assert.ok(output, "Saved answered mount receives the canonical grading observation");
     assert.equal(await card.$$eval(".lh-coding-test-result", nodes => nodes.length), 1);
+    assert.equal(await card.$$eval(".lh-coding-prompt", nodes => nodes.length), 1);
+    assert.equal(await card.$eval(".lh-coding-prompt", node => node.textContent), index === 0 ? "Predict by editing this JavaScript function." : "Read the coding check, then reveal and edit the function.", "Answered history keeps the original saved prompt visible");
     const label = result.status === "passed" ? "Tests passed" : result.status === "failed" ? "Tests failed" : "Could not run tests";
     const presentation = await output.evaluate((root, label) => {
       const card = root.closest('[data-testid="plugin-question-answered"]');
@@ -439,66 +442,73 @@ try {
     if (result.status === "passed") assert.equal(presentation.color, presentation.green);
     else if (result.status === "failed") assert.equal(presentation.color, presentation.red);
     else { assert.notEqual(presentation.color, presentation.green); assert.notEqual(presentation.color, presentation.red); }
-    const details = await output.$("details"), summary = await details.$("summary");
-    assert.equal(await summary.evaluate(node => node.textContent), "Test output");
-    assert.equal(await details.evaluate(node => node.open), false, "Test output starts collapsed");
-    // Chromium may retain layout rectangles for a closed disclosure's
-    // content-visibility subtree. Test paint visibility, not cached geometry.
-    assert.equal(await details.$$eval("pre", nodes => nodes.some(node => node.checkVisibility({ visibilityProperty: true, contentVisibilityAuto: true }))), false);
-    await page.mouse.move(0, 0);
-    const disclosure = await summary.evaluate(node => {
-      const chevron = node.querySelector(".lh-coding-test-result__chevron"), css = getComputedStyle(node);
-      return { cursor: css.cursor, radius: css.borderRadius, listStyle: css.listStyleType, fontWeight: css.fontWeight, textTransform: css.textTransform,
-        chevron: chevron && { tag: chevron.tagName.toLowerCase(), ariaHidden: chevron.getAttribute("aria-hidden"), focusable: chevron.getAttribute("focusable"), tabIndex: chevron.tabIndex,
-          role: chevron.getAttribute("role"), width: getComputedStyle(chevron).width, height: getComputedStyle(chevron).height, transform: getComputedStyle(chevron).transform } };
+    const toggle = await output.$(".lh-coding-test-output > button");
+    assert.equal(await toggle.evaluate(node => node.textContent), "Test output");
+    assert.equal(await toggle.evaluate(node => node.getAttribute("aria-expanded")), "false", "Test output starts collapsed");
+    assert.equal(await output.$$eval("pre", nodes => nodes.length), 0);
+    const disclosure = await toggle.evaluate(node => {
+      const css = getComputedStyle(node);
+      return { cursor: css.cursor, fontSize: css.fontSize, fontWeight: css.fontWeight, textTransform: css.textTransform,
+        background: css.backgroundColor, chevrons: node.querySelectorAll("svg").length, width: node.getBoundingClientRect().width, rowWidth: node.parentElement.getBoundingClientRect().width };
     });
-    assert.equal(disclosure.cursor, "pointer"); assert.equal(disclosure.radius, "6px"); assert.equal(disclosure.listStyle, "none");
-    assert.equal(disclosure.fontWeight, "500"); assert.equal(disclosure.textTransform, "uppercase");
-    assert.deepEqual({ ...disclosure.chevron, transform: "measured" }, { tag: "svg", ariaHidden: "true", focusable: "false", tabIndex: -1, role: null, width: "16px", height: "16px", transform: "measured" });
-    // Native transcript follow-scroll can still move this row after the
-    // thinking disclosure opens. Reacquire a real settled pointer hover.
+    assert.equal(disclosure.cursor, "pointer"); assert.equal(disclosure.fontSize, "11px");
+    assert.equal(disclosure.fontWeight, "500"); assert.equal(disclosure.textTransform, "none");
+    assert.equal(disclosure.background, "rgba(0, 0, 0, 0)"); assert.equal(disclosure.chevrons, 0);
+    assert.ok(disclosure.width < disclosure.rowWidth / 2, "Quiet control hugs its text");
     await until(async () => {
-      await summary.hover(); await delay(200);
-      return summary.evaluate(node => node.matches(":hover"));
-    }, "pointer remains over the output disclosure after follow-scroll");
-    const hover = await summary.evaluate(node => {
-      const colorFor = (property, value) => { const probe = document.createElement("span"); probe.style[property] = value; node.append(probe); const color = getComputedStyle(probe)[property]; probe.remove(); return color; };
-      return { color: getComputedStyle(node).color, background: getComputedStyle(node).backgroundColor,
-        expectedColor: colorFor("color", "var(--foreground, #e6e6e6)"), expectedBackground: colorFor("backgroundColor", "var(--accent, #262626)") };
+      await toggle.hover(); await delay(200);
+      return toggle.evaluate(node => node.matches(":hover"));
+    }, "pointer remains over the output control after follow-scroll");
+    const hover = await toggle.evaluate(node => {
+      const probe = document.createElement("span"); probe.style.color = "var(--foreground, #e6e6e6)"; node.append(probe);
+      const expectedColor = getComputedStyle(probe).color; probe.remove();
+      return { color: getComputedStyle(node).color, background: getComputedStyle(node).backgroundColor, expectedColor };
     });
-    assert.equal(hover.color, hover.expectedColor); assert.equal(hover.background, hover.expectedBackground);
-    // This is a focus-style probe, not a claim of global Tab access to buttons.
-    // The app's existing Tab command intentionally cycles its local fields.
-    await page.keyboard.press("Shift"); await summary.focus(); await delay(200);
-    const focus = await summary.evaluate(node => ({ visible: node.matches(":focus-visible"), outlineWidth: getComputedStyle(node).outlineWidth, outlineStyle: getComputedStyle(node).outlineStyle, outlineOffset: getComputedStyle(node).outlineOffset }));
+    assert.equal(hover.color, hover.expectedColor); assert.equal(hover.background, "rgba(0, 0, 0, 0)");
+    // Focus-style probe, not a claim of app-wide Tab access to buttons.
+    await page.keyboard.press("Shift"); await toggle.focus(); await delay(200);
+    const focus = await toggle.evaluate(node => ({ visible: node.matches(":focus-visible"), outlineWidth: getComputedStyle(node).outlineWidth, outlineStyle: getComputedStyle(node).outlineStyle, outlineOffset: getComputedStyle(node).outlineOffset }));
     assert.deepEqual(focus, { visible: true, outlineWidth: "2px", outlineStyle: "solid", outlineOffset: "2px" });
-    await summary.click();
-    assert.equal(await details.evaluate(node => node.open), true);
-    await delay(200);
-    const openTransform = await summary.$eval(".lh-coding-test-result__chevron", node => getComputedStyle(node).transform);
-    assert.notEqual(openTransform, disclosure.chevron.transform, "The noninteractive chevron reflects disclosure expansion");
+    await toggle.click();
+    assert.equal(await toggle.evaluate(node => node.getAttribute("aria-expanded")), "true");
+    assert.equal(await toggle.evaluate(node => node.textContent), "Hide test output");
     const frames = await output.evaluate(root => {
       const answerFrame = root.closest('[data-testid="plugin-question-answered"]').querySelector('[aria-label="Submitted code"]').closest(".lh-coding-question");
       const frameKeys = ["backgroundColor", "color", "borderTopColor", "borderTopWidth", "borderTopStyle", "borderRadius", "overflow"];
       const headerKeys = ["color", "fontFamily", "fontSize", "paddingTop", "paddingRight", "paddingBottom", "paddingLeft", "borderBottomWidth", "borderBottomStyle", "borderBottomColor"];
       const style = (node, keys) => Object.fromEntries(keys.map(key => [key, getComputedStyle(node)[key]]));
       return { answer: style(answerFrame, frameKeys), answerHeader: style(answerFrame.querySelector(".lh-coding-question__header"), headerKeys),
-        outputs: [...root.querySelectorAll("details > .lh-coding-question")].map(frame => ({ frame: style(frame, frameKeys), header: style(frame.querySelector(".lh-coding-question__header"), headerKeys),
+        outputs: [...root.querySelectorAll(".lh-coding-disclosure__body > .lh-coding-question")].map(frame => ({ frame: style(frame, frameKeys), header: style(frame.querySelector(".lh-coding-question__header"), headerKeys),
           label: frame.querySelector(".lh-coding-question__header").textContent, tag: frame.lastElementChild.tagName, editable: frame.lastElementChild.isContentEditable,
           preWrap: getComputedStyle(frame.lastElementChild).whiteSpace, codeEditors: frame.querySelectorAll(".cm-editor").length })) };
     });
-    assert.equal(frames.outputs.length, 2); assert.deepEqual(frames.outputs.map(output => output.label), ["Stdout", "Stderr"]);
+    assert.deepEqual(frames.outputs.map(output => output.label), [...(result.stdout !== "" ? ["Stdout"] : []), ...(result.stderr !== "" ? ["Stderr"] : [])]);
     for (const output of frames.outputs) {
       assert.deepEqual(output.frame, frames.answer); assert.deepEqual(output.header, frames.answerHeader);
       assert.equal(output.tag, "PRE"); assert.equal(output.editable, false); assert.equal(output.preWrap, "pre-wrap"); assert.equal(output.codeEditors, 0);
     }
-    assert.deepEqual(await details.$$eval("pre", nodes => nodes.map(node => node.textContent)), [result.stdout, result.stderr], "Expanded stdout/stderr remain exact plain text in the same native-looking code frames, including literal HTML");
+    assert.deepEqual(await output.$$eval("pre", nodes => nodes.map(node => node.textContent)), [result.stdout, result.stderr].filter(text => text !== ""), "Nonempty streams remain exact escaped text; empty streams have no boxes");
     assert.equal(await output.$$eval("script, [data-native-output]", nodes => nodes.length), 0, "Output must be escaped text, not HTML");
-    if (result.message !== undefined) assert.ok((await details.evaluate(node => node.textContent)).includes(result.message));
+    if (result.message !== undefined) assert.ok((await output.evaluate(node => node.textContent)).includes(result.message));
     const submitted = await card.$('[aria-label="Submitted code"]');
     assert.equal(await submitted.evaluate(node => node.getAttribute("contenteditable")), "false");
     assert.equal(await submitted.$$eval(".cm-line", lines => lines.map(line => line.textContent).join("\n")), answer);
-    (evidence.testPresentations ??= []).push({ index, label, result, ...presentation, disclosure, hover, focus, openTransform, frames, initiallyCollapsed: true, expandedExactOutput: true });
+    const model = await card.$(".lh-coding-model-solution"), modelToggle = await model.$("button");
+    assert.equal(await modelToggle.evaluate(node => node.textContent), "Model solution");
+    assert.equal(await modelToggle.evaluate(node => node.getAttribute("aria-expanded")), "false");
+    const order = await card.evaluate(card => {
+      const question = card.querySelector('.lh-coding-prompt'), code = card.querySelector('[aria-label="Submitted code"]'), output = card.querySelector('.lh-coding-test-result'), thinking = card.querySelector('[data-testid="your-thinking"]'), model = card.querySelector('.lh-coding-model-solution');
+      const before = (a, b) => !!(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING);
+      return [before(question, code), before(code, thinking), before(thinking, output), before(output, model)];
+    });
+    assert.deepEqual(order, [true, true, true, true], "Transcript order: saved question, code, thinking, output, model solution");
+    await modelToggle.click();
+    await until(async () => !!(await model.$('[data-streamdown="code-block-body"]')), "model solution uses real host fenced-code Markdown");
+    assert.match(await model.$eval('[data-streamdown="code-block-body"]', node => node.textContent), /return 42/);
+    assert.equal(await model.$eval('strong', node => node.textContent), "Why:");
+    await modelToggle.click();
+    assert.equal(await model.$$eval('[data-plugin-ui-widget]', nodes => nodes.length), 0);
+    (evidence.testPresentations ??= []).push({ index, label, result, ...presentation, disclosure, hover, focus, frames, order, initiallyCollapsed: true, expandedExactOutput: true, modelSolutionMarkdown: true });
   }
 
   evidence.stage = "predict";
@@ -509,7 +519,7 @@ try {
   assert.equal(predict.pluginId, manifest.id); assert.equal(predict.typeId, "code"); assert.equal(predict.contractVersion, 1);
   assert.equal(predict.protocolVersion, 2); assert.equal(predict.requiresGrading, true);
   assert.equal(predict.input.type, "predict"); assert.equal(predict.input.nodeId, "coding_node");
-  assert.deepEqual(predict.input.payload, { language: "javascript", starterCode: starter, tests: predictTests }); assert.equal(predict.showThinking, true);
+  assert.deepEqual(predict.input.payload, { language: "javascript", starterCode: starter, tests: predictTests, modelSolution }); assert.equal(predict.showThinking, true);
   assert.equal(predictRecord.messages.some(message => message.role === "toolResult" && message.toolCallId === predict.occurrence.toolCallId), false, "No fake execution result or temporary pose acknowledgment");
   assert.equal(await code(dock), starter, "Built CodeMirror editor receives starterCode");
   assert.equal(await page.$eval(editor, node => !!node.closest("form")), false);
@@ -595,7 +605,7 @@ try {
   await assertAnsweredThinking(0, thinkingText);
   await assertAnsweredTests(0, predictTestResult, exactAnswer);
   evidence.predict = { snapshot: predict, submitted, result: answers[0], modelResult };
-  evidence.assertions.push("Native graded protocol-v2 predict snapshot; no pose result; starterCode; real Tab indentation and Enter/Shift+Enter auto-indented JavaScript newlines without submission; natural fold retains editor/draft/selection. Cmd/Ctrl+Enter runs installed Node with literal args, unchanged driver stdin, inherited disposable environment/PATH, and byte-exact answer.txt. Semantic function tests pass; the accepted canonical result and actual next teacher request preserve code, separate thinking, and the genuine grading.result. Green Tests passed badge occupies the host heading suffix after Coding question, outside the result body; Test output starts collapsed and expands to escaped exact text in stdout/stderr frames matching the saved-code frame, with hover/focus styling and a noninteractive rotating chevron. Synthetic composing/229 Enter guard probes do not submit.");
+  evidence.assertions.push("Native graded protocol-v2 predict snapshot; no pose result; starterCode; real Tab indentation and Enter/Shift+Enter auto-indented JavaScript newlines without submission; natural fold retains editor/draft/selection. Cmd/Ctrl+Enter runs installed Node with literal args, unchanged driver stdin, inherited disposable environment/PATH, and byte-exact answer.txt. Semantic function tests pass; the accepted canonical result and actual next teacher request preserve code, separate thinking, and the genuine grading.result. Green Tests passed badge occupies the host heading suffix after Coding question, outside the result body; Test output starts collapsed and expands to escaped exact text in stdout/stderr frames matching the saved-code frame, with quiet 11px text-only hover/focus controls below host thinking and above Model solution. A separate initially-closed Model solution at the card bottom renders the preserved fenced code and explanation through the real host Markdown helper. Synthetic composing/229 Enter guard probes do not submit.");
   await screenshot("predict-reviewed");
 
   evidence.stage = "check";
@@ -623,7 +633,7 @@ try {
   const check = snapshots(await read()).at(-1);
   assert.equal(check.input.type, "check"); assert.equal(check.variant, "teach"); assert.notEqual(check.questionId, predict.questionId);
   assert.equal(check.protocolVersion, 2); assert.equal(check.requiresGrading, true);
-  assert.deepEqual(check.input.payload, { language: "javascript", starterCode: starter, tests: checkTests });
+  assert.deepEqual(check.input.payload, { language: "javascript", starterCode: starter, tests: checkTests, modelSolution });
   assert.notEqual(check.occurrence.toolCallId, predict.occurrence.toolCallId);
   await screenshot("check-revealed");
   await assertKeyboardRecovery(check, checkAnswer, checkThinking, readingText, "check");
@@ -675,7 +685,7 @@ try {
   await assertHealthyFrame("run-error check");
   const errorCheck = snapshots(await read()).at(-1);
   assert.equal(errorCheck.input.type, "check"); assert.equal(errorCheck.protocolVersion, 2); assert.equal(errorCheck.requiresGrading, true);
-  assert.deepEqual(errorCheck.input.payload, { language: "javascript", starterCode: starter, tests: errorTests });
+  assert.deepEqual(errorCheck.input.payload, { language: "javascript", starterCode: starter, tests: errorTests, modelSolution });
   assert.notEqual(errorCheck.questionId, check.questionId); assert.notEqual(errorCheck.occurrence.toolCallId, check.occurrence.toolCallId);
   assert.equal(fs.existsSync(missingProgram), false, "The fresh absolute executable path really does not exist");
   await fillCode(errorAnswer); await page.locator(thinking).fill(errorThinking);
@@ -708,7 +718,7 @@ try {
   assert.equal(priorAnswers.length, 3);
   assert.deepEqual(priorAnswers.slice(0, 2), twoAnswers); assert.deepEqual(priorAnswers[2], errorResult);
   evidence.runError = { snapshot: errorCheck, submitted: errorSubmitted, result: errorResult, modelResult: errorModelResult };
-  evidence.assertions.push("A fresh unique native check uses a definitely-missing absolute executable: its launch error is saved as product grading.result status error, exitCode null, rather than blocking/rejecting the answer. All three learner channels and the actual error observation reach the next teacher request. Neutral Could not run tests badge remains in the host heading suffix above read-only accepted code; collapsed Test output expands to the exact launch message and empty-stream code frames. Both earlier answers remain byte-for-byte unchanged.");
+  evidence.assertions.push("A fresh unique native check uses a definitely-missing absolute executable: its launch error is saved as product grading.result status error, exitCode null, rather than blocking/rejecting the answer. All three learner channels and the actual error observation reach the next teacher request. Neutral Could not run tests badge remains in the host heading suffix above read-only accepted code; collapsed Test output expands to the exact launch message without empty-stream boxes. Model solution remains at the bottom below host thinking. Both earlier answers remain byte-for-byte unchanged.");
   await screenshot("run-error-reviewed");
   await assertNoMic();
 

@@ -172,8 +172,14 @@ practice discard-confirmation precedence. The host still owns thinking dictation
 `mountSubmitted` is optional and receives the exact accepted `submission` plus optional
 `processing`; thinking/images stay host-owned presentation channels. Its optional readonly
 `headerContainer` is a generation-owned inline suffix after the host label, sharing its
-signal and cleanup lifetime. Never replace the host heading. If absent, mount in the
-body. Failure/missing renderers use readable saved-value/observation fallback; they do
+signal and cleanup lifetime. Optional readonly `footerContainer?: HTMLElement` is a
+generation-owned block at the bottom of the submission card, after host submission images
+and thinking. It shares that same signal/cleanup lifetime. Use it for output that belongs
+below thinking; it is not available to `mountSubmissionEditor`. Never replace the host
+heading or thinking, move surrounding DOM, or retain either slot across mount generations.
+If either optional slot is absent, mount its content in the body. Sync/async mount failure,
+replacement, StrictMode replay and unmount remove all three generation-owned slots.
+Failure/missing renderers use readable saved-value/observation fallback; they do
 not erase history or invent success/correctness badges.
 
 ## Images and submission interceptors

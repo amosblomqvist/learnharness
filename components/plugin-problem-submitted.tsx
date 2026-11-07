@@ -21,23 +21,23 @@ export function PluginProblemSubmittedContent({ data, snapshot, chatId, registra
   return submitted ? <SubmittedBody submitted={submitted} snapshot={snapshot} chatId={chatId} registration={registration} /> : <p role="status">Problem unavailable</p>;
 }
 function SubmittedBody({ submitted, snapshot, chatId, registration }: { submitted: PluginProblemSubmission; snapshot?: PluginProblemSnapshot | null; chatId: string; registration?: ProblemRendererRegistration }) {
-  const root = useRef<HTMLDivElement>(null), header = useRef<HTMLSpanElement>(null);
+  const root = useRef<HTMLDivElement>(null), header = useRef<HTMLSpanElement>(null), footer = useRef<HTMLDivElement>(null);
   const [failed, setFailed] = useState(false);
   const bound = snapshot?.problemId === submitted.problemId && snapshot.pluginId === submitted.pluginId && snapshot.typeId === submitted.typeId && snapshot.contractVersion === submitted.contractVersion;
   const mount = bound ? registration?.renderer.mountSubmitted : undefined;
   useEffect(() => {
     setFailed(false);
     if (!mount || !snapshot || !root.current) return;
-    const controller = new AbortController(), container = root.current.ownerDocument.createElement("div"), suffix = root.current.ownerDocument.createElement("span");
-    suffix.className = "inline-flex items-center"; root.current.append(container); header.current?.append(suffix);
+    const controller = new AbortController(), container = root.current.ownerDocument.createElement("div"), suffix = root.current.ownerDocument.createElement("span"), footerContainer = root.current.ownerDocument.createElement("div");
+    suffix.className = "inline-flex items-center"; root.current.append(container); header.current?.append(suffix); footer.current?.append(footerContainer);
     let cleanup: void | PluginCleanup;
     const dispose = (fn: void | PluginCleanup) => { try { if (fn) void Promise.resolve(fn()).catch(() => {}); } catch {} };
-    const release = () => { controller.abort(); const fn = cleanup; cleanup = undefined; dispose(fn); container.remove(); suffix.remove(); };
+    const release = () => { controller.abort(); const fn = cleanup; cleanup = undefined; dispose(fn); container.remove(); suffix.remove(); footerContainer.remove(); };
     const fail = () => { if (!controller.signal.aborted) { release(); setFailed(true); } };
     try {
       Promise.resolve(mount(container, Object.freeze({ ...problemMountContext(snapshot, chatId, controller.signal),
         submission: freezePluginQuestionValue(clonePluginQuestionJson(submitted.submission)),
-        ...(snapshot.requiresProcessing && submitted.processing ? { processing: freezePluginQuestionValue(clonePluginQuestionJson(submitted.processing)) as PluginProblemSubmission["processing"] } : {}), headerContainer: suffix,
+        ...(snapshot.requiresProcessing && submitted.processing ? { processing: freezePluginQuestionValue(clonePluginQuestionJson(submitted.processing)) as PluginProblemSubmission["processing"] } : {}), headerContainer: suffix, footerContainer,
       }))).then(value => { if (controller.signal.aborted) dispose(value); else cleanup = value; }, fail);
     } catch { fail(); }
     return release;
@@ -50,5 +50,6 @@ function SubmittedBody({ submitted, snapshot, chatId, registration }: { submitte
     </div>}
     <SubmittedImages images={submitted.images?.submission} />
     {(submitted.thinking !== "" || !!submitted.images?.thinking?.length) && <ThinkingBlock label="YOUR THINKING" text={submitted.thinking} images={submitted.images?.thinking} inCard />}
+    <div ref={footer} />
   </div>;
 }

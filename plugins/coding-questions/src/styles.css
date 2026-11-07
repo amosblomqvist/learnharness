@@ -1,3 +1,4 @@
+.lh-coding-prompt { margin-bottom: 0.75rem; }
 .lh-coding-question {
   overflow: hidden;
   border: 1px solid var(--border, #434343);
@@ -12,8 +13,9 @@
   padding: 0.4rem 0.75rem;
   border-bottom: 1px solid var(--border, #434343);
   color: var(--muted-foreground, #8d8d8d);
-  font-family: var(--font-mono, monospace);
-  font-size: 0.75rem;
+  font-family: var(--font-mono, var(--font-ui, monospace));
+  font-size: 11px;
+  line-height: 1.4;
   overflow-wrap: anywhere;
 }
 .lh-coding-question .cm-editor {
@@ -27,7 +29,7 @@
   min-height: 8em;
   max-height: min(24em, 40vh);
   overflow: auto;
-  font-family: var(--font-mono, monospace);
+  font-family: var(--font-mono, var(--font-ui, monospace));
   line-height: 1.6;
 }
 .lh-coding-question .cm-content { padding: 0.5rem 0; caret-color: var(--foreground, #e6e6e6); }
@@ -47,49 +49,43 @@
   border: 1px solid var(--border, #434343);
   background: var(--popover, var(--background, #141414));
   color: var(--popover-foreground, var(--foreground, #e6e6e6));
-  font-family: var(--font-mono, monospace);
+  font-family: var(--font-mono, var(--font-ui, monospace));
   font-size: 0.75rem;
 }
-.lh-coding-test-result { margin-bottom: 0.75rem; }
 .lh-coding-test-result__badge { display: inline-flex; }
-.lh-coding-test-result details {
-  margin-top: 0.5rem;
+.lh-coding-disclosure { margin-top: 0.5rem; }
+/* The native quiz Why button: text-xs/11px, font-medium, text-only hover. */
+.lh-coding-disclosure > button {
+  display: inline-block;
+  width: auto;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
   color: var(--muted-foreground, #8d8d8d);
-  font-size: 0.75rem;
-}
-.lh-coding-test-result summary {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  padding: 0.375rem 0.5rem;
-  border-radius: 0.375rem;
-  list-style: none;
-  cursor: pointer;
+  font-family: inherit;
+  font-size: 11px;
+  line-height: 1.4;
   font-weight: 500;
-  text-transform: uppercase;
-  letter-spacing: 0.025em;
-  transition: color 160ms, background-color 160ms;
+  letter-spacing: normal;
+  text-transform: none;
+  cursor: pointer;
+  transition: color 150ms;
 }
-.lh-coding-test-result summary::-webkit-details-marker { display: none; }
-.lh-coding-test-result summary:hover,
-.lh-coding-test-result summary:focus-visible {
-  color: var(--foreground, #e6e6e6);
-  background: var(--accent, #262626);
-}
-.lh-coding-test-result summary:focus-visible {
+.lh-coding-disclosure > button:hover { color: var(--foreground, #e6e6e6); }
+.lh-coding-disclosure > button:focus-visible {
   outline: 2px solid var(--ring, #8d8d8d);
   outline-offset: 2px;
 }
-.lh-coding-test-result__chevron {
-  width: 1rem;
-  height: 1rem;
-  flex-shrink: 0;
-  transition: transform 160ms;
+.lh-coding-disclosure__body { margin-top: 0.375rem; }
+.lh-coding-test-output > .lh-coding-disclosure__body {
+  color: var(--muted-foreground, #8d8d8d);
+  font-size: 12.5px;
+  line-height: 1.4;
 }
-.lh-coding-test-result details[open] .lh-coding-test-result__chevron { transform: rotate(180deg); }
-.lh-coding-test-result details > .lh-coding-question { margin-top: 0.5rem; }
-.lh-coding-test-result details > p { margin: 0.5rem 0; }
-.lh-coding-test-result pre {
+.lh-coding-test-output .lh-coding-disclosure__body > * + * { margin-top: 0.5rem; }
+.lh-coding-test-output p { margin: 0; }
+.lh-coding-test-output pre {
   max-height: 16rem;
   margin: 0;
   padding: 0.5rem 0.75rem;
@@ -97,11 +93,16 @@
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   color: var(--foreground, #e6e6e6);
-  font-family: var(--font-mono, monospace);
+  font-family: var(--font-mono, var(--font-ui, monospace));
   font-size: 0.875rem;
   line-height: 1.6;
 }
+.lh-coding-model-solution > .lh-coding-disclosure__body {
+  border-radius: 0.5rem;
+  background: var(--muted, #262626);
+  padding: 0.5rem 0;
+  color: color-mix(in srgb, var(--foreground, #e6e6e6) 50%, transparent);
+}
 @media (prefers-reduced-motion: reduce) {
-  .lh-coding-test-result summary,
-  .lh-coding-test-result__chevron { transition: none; }
+  .lh-coding-disclosure > button { transition: none; }
 }

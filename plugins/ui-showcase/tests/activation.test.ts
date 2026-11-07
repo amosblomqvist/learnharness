@@ -35,7 +35,14 @@ test("activation explicitly registers gallery sidebar and teaching/practice-only
     assert.equal(fixture.records.length, 0, "Rejected contexts must not call openSurface");
     const target = Object.freeze({}) as Extract<Parameters<PluginAction["run"]>[0], { surface: "session" }>["surfaceTarget"];
     for (const kind of ["teaching", "practice"] as const) {
-      await surface.run({ placement: "top-bar", surface: "session", sessionId: "synthetic", kind, surfaceTarget: target });
+      const view = Object.freeze({
+        sessionId: "synthetic", kind, title: "Synthetic session", messages: [], transcript: [],
+        status: "ready" as const, reconciliation: "ready" as const, busy: false, compacting: false,
+        phase: kind === "practice" ? "practice" as const : "teach" as const,
+        contextTokens: null, queuedSteers: [], composer: { text: "" },
+        input: { type: "unavailable" as const, expanded: false, revealed: false },
+      });
+      await surface.run({ placement: "top-bar", surface: "session", sessionId: "synthetic", kind, surfaceTarget: target, view });
       assert.equal(fixture.records.findLast(record => record.method === "openSurface")!.target, target);
     }
     assert.equal(fixture.records.filter(record => record.method === "openSurface").length, 2);

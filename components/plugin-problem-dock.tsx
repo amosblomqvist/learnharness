@@ -76,10 +76,12 @@ export function PluginProblemDockContent(props: PluginProblemDockProps & { regis
     const valid = () => {
       const now = current.current;
       return now.key === before.key && lease.current === handle && !!handle?.ready && owner.current === now.registration && ownerKey.current === now.key &&
-        now.ready && now.available && now.reconciliation === "ready" && now.expanded && !now.compactionRunning && !now.preparing && !!now.registration && !failed &&
+        now.ready && now.available && now.reconciliation === "ready" && now.expanded && !now.compactionRunning && !!now.registration && !failed &&
         now.draft.submission.status === "ready" && isInteractionScopeEligible(root.current, controller);
     };
-    if (latch.current || !valid()) return;
+    // Preparation blocks admission, not the attempt that just reserved it.
+    // The shared runner sets props.preparing before asynchronous capture resumes.
+    if (latch.current || before.preparing || !valid()) return;
     latch.current = true; setSubmitting(true);
     let captured = "", revision = 0;
     const capture = (): Extract<ChatInput, { type: "plugin-problem-submission" }> => {

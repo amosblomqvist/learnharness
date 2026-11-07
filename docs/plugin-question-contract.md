@@ -187,11 +187,11 @@ saved learner data. These slots are not ordinary tool renderers or cross-plugin 
 
 Mounts receive immutable normalized input, chat/question ID, historical contract version,
 variant and signal. `mountAnswered` adds accepted answer, optional grading and optional
-readonly `headerContainer` (inline after host label). This live DOM slot shares the
-body's generation/signal/cleanup, confers no ownership of the host heading/thinking,
-and disappears on failure/replacement/unmount. If absent, use body fallback; never
-query/move surrounding host DOM or retain it across generations. Question/editor mounts
-receive no header slot. Host thinking/images stay outside plugin bodies.
+readonly `headerContainer` (inline after host label) / `footerContainer` (after host answer
+thinking). These live DOM slots share the body's generation/signal/cleanup, confer no
+ownership of host heading/thinking, and disappear on failure/replacement/unmount. If absent,
+use body fallback; never query/move surrounding host DOM or retain slots across generations.
+Question/editor mounts receive neither slot. Host thinking/images stay outside plugin bodies.
 
 The editor receives `active`, controlled `answer` and synchronous `onChange(state)`:
 `{status:"empty"}` or `{status:"unready"|"ready",value:JsonValue}`. Ready requires a current

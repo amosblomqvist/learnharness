@@ -71,7 +71,7 @@ export interface PluginQuestionRenderer<Q = JsonValue, A = JsonValue> {
 	supportedContractVersions: number[];
 	mountQuestion?(container: HTMLElement, context: PluginQuestionMountContext<Q>): void | PluginCleanup | Promise<void | PluginCleanup>;
 	mountAnswerEditor(container: HTMLElement, context: PluginQuestionEditorProps<Q>): PluginQuestionEditorHandle | Promise<PluginQuestionEditorHandle>;
-	mountAnswered?(container: HTMLElement, context: PluginQuestionMountContext<Q> & { readonly answer: A; readonly grading?: PluginQuestionGradingOutcome; readonly headerContainer?: HTMLElement }): void | PluginCleanup | Promise<void | PluginCleanup>;
+	mountAnswered?(container: HTMLElement, context: PluginQuestionMountContext<Q> & { readonly answer: A; readonly grading?: PluginQuestionGradingOutcome; readonly headerContainer?: HTMLElement; readonly footerContainer?: HTMLElement }): void | PluginCleanup | Promise<void | PluginCleanup>;
 }
 export interface PluginQuestionOccurrence {
 	messageId: string;

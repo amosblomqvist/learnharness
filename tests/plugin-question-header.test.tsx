@@ -61,6 +61,8 @@ function paint(body: HTMLElement, context: AnsweredContext, text: string) {
 	body.textContent = `body ${text}`;
 	assert.ok(context.headerContainer, "answered host supplies the optional header suffix");
 	context.headerContainer.textContent = `badge ${text}`;
+	assert.ok(context.footerContainer, "answered host supplies the optional footer");
+	context.footerContainer.textContent = `footer ${text}`;
 }
 
 test("answered header is an isolated inline suffix after the untouched host label; JSON stays frozen and capabilities stay live", async () => {
@@ -86,11 +88,15 @@ test("answered header is an isolated inline suffix after the untouched host labe
 	assert.ok(Object.isFrozen(context.grading));
 	assert.notEqual(context.answer, answer.answer); assert.notEqual(context.grading, answer.grading);
 	assert.equal(Object.isFrozen(context.signal), false); assert.equal(Object.isFrozen(context.headerContainer), false);
+	assert.equal(Object.isFrozen(context.footerContainer), false);
+	assert.equal(body.contains(context.footerContainer!), false);
+	assert.notEqual(context.footerContainer, body.parentElement?.parentElement, "plugin gets an isolated child, not the host card");
 	context.headerContainer!.replaceChildren(h.document.createTextNode("replacement badge"));
 	assert.equal(heading.firstChild!.textContent, "Code", "replacing the suffix cannot erase the host label");
 	await h.close();
 	assert.equal(context.signal.aborted, true); assert.equal(aborted, 1); assert.equal(disposed, 1);
 	assert.equal(context.headerContainer!.isConnected, false); assert.equal(body.isConnected, false);
+	assert.equal(context.footerContainer!.isConnected, false);
 });
 
 test("StrictMode replay gives body and header fresh isolated generations and disposes late replay cleanup once", async () => {
@@ -108,7 +114,9 @@ test("StrictMode replay gives body and header fresh isolated generations and dis
 	assert.equal(seen[0]!.context.signal.aborted, true); assert.equal(seen[1]!.context.signal.aborted, false);
 	assert.notEqual(seen[0]!.body, seen[1]!.body);
 	assert.notEqual(seen[0]!.context.headerContainer, seen[1]!.context.headerContainer);
+	assert.notEqual(seen[0]!.context.footerContainer, seen[1]!.context.footerContainer);
 	assert.equal(seen[0]!.context.headerContainer!.isConnected, false);
+	assert.equal(seen[0]!.context.footerContainer!.isConnected, false);
 	await act(async () => {
 		paint(seen[0]!.body, seen[0]!.context, "stale deferred callback");
 		pending.resolve(() => { cleaned.push(0); seen[0]!.context.headerContainer!.replaceChildren(); seen[0]!.body.replaceChildren(); });
@@ -135,6 +143,7 @@ for (const asynchronous of [false, true]) test(`${asynchronous ? "async" : "sync
 	assert.ok(context, "renderer ran before failing");
 	assert.equal(context.signal.aborted, true); assert.equal(activeResources, 0);
 	assert.equal(body.isConnected, false); assert.equal(context.headerContainer!.isConnected, false);
+	assert.equal(context.footerContainer!.isConnected, false);
 	assert.equal(hostHeading(h.document).textContent, "Code");
 	assert.match(h.document.body.textContent!, /saved code/); assert.doesNotMatch(h.document.body.textContent!, /partial/);
 	paint(body, context, "late failed callback");
@@ -142,6 +151,7 @@ for (const asynchronous of [false, true]) test(`${asynchronous ? "async" : "sync
 	let replacementContext!: AnsweredContext;
 	await h.render(card(registration((container, props) => { replacementContext = props; paint(container, props, "recovered"); })));
 	assert.notEqual(replacementContext.headerContainer, context.headerContainer);
+	assert.notEqual(replacementContext.footerContainer, context.footerContainer);
 	assert.equal(replacementContext.signal.aborted, false);
 	assert.equal(hostHeading(h.document).textContent, "Codebadge recovered");
 	assert.match(h.document.body.textContent!, /body recovered/); assert.doesNotMatch(h.document.body.textContent!, /saved code/);
@@ -166,6 +176,7 @@ test("renderer replacement isolates stale callbacks, deferred cleanup and stale 
 	assert.equal(oldContext.signal.aborted, true); assert.equal(rejectedContext.signal.aborted, true);
 	assert.equal(liveContext.signal.aborted, false); assert.equal(heading.firstChild, label);
 	assert.equal(oldContext.headerContainer!.isConnected, false); assert.equal(rejectedContext.headerContainer!.isConnected, false);
+	assert.equal(oldContext.footerContainer!.isConnected, false); assert.equal(rejectedContext.footerContainer!.isConnected, false);
 	await act(async () => {
 		paint(oldBody, oldContext, "stale callback");
 		oldMount.resolve(async () => { cleaned++; await oldCleanup.promise; oldBody.replaceChildren(); oldContext.headerContainer!.replaceChildren(); });
@@ -189,6 +200,7 @@ test("deferred completion after unmount cannot reattach its header and still dis
 	await h.render(card(registration((container, props) => { body = container; context = props; paint(container, props, "mounted"); return pending.promise; })));
 	await h.render(<div>another surface</div>);
 	assert.equal(context.signal.aborted, true); assert.equal(context.headerContainer!.isConnected, false);
+	assert.equal(context.footerContainer!.isConnected, false);
 	await act(async () => {
 		paint(body, context, "late unmounted callback");
 		pending.resolve(() => { disposed++; });
@@ -201,11 +213,35 @@ test("question context has no header capability; direct answered slots may omit 
 	let questionSeen = false, answeredSeen = false;
 	const renderer: QuestionRendererRegistration = { pluginId: "fixture", renderer: {
 		id: "code", supportedContractVersions: [1], mountAnswerEditor() { throw new Error("not an editor"); },
-		mountQuestion(body, context) { questionSeen = true; assert.equal(Object.hasOwn(context, "headerContainer"), false); body.textContent = "question body"; },
-		mountAnswered(body, context) { answeredSeen = true; assert.equal(Object.hasOwn(context, "headerContainer"), false); (context.headerContainer ?? body).textContent = "body fallback badge"; },
+		mountQuestion(body, context) { questionSeen = true; assert.equal(Object.hasOwn(context, "headerContainer"), false); assert.equal(Object.hasOwn(context, "footerContainer"), false); body.textContent = "question body"; },
+		mountAnswered(body, context) { answeredSeen = true; assert.equal(Object.hasOwn(context, "headerContainer"), false); assert.equal(Object.hasOwn(context, "footerContainer"), false); (context.headerContainer ?? body).textContent = "body fallback badge"; },
 	} };
 	await h.render(<PluginQuestionPresentation snapshot={snapshot} chatId="chat" registration={renderer} />);
 	assert.ok(questionSeen); assert.equal(h.document.body.textContent, "question body");
 	await h.render(<PluginQuestionPresentation snapshot={snapshot} answer={answer} chatId="chat" registration={renderer} />);
 	assert.ok(answeredSeen); assert.equal(h.document.body.textContent, "body fallback badge");
+});
+
+
+test("footer is after host thinking, stays generation-owned on adoption, and cannot overwrite thinking", async () => {
+	const h = await harness();
+	let context!: AnsweredContext;
+	let mounts = 0;
+	const renderer = registration((body, props) => { context = props; mounts++; paint(body, props, "solution"); });
+	const thinkingAnswer = { ...answer, thinking: "Learner reasoning" };
+	await h.render(<PluginQuestionAnswered snapshot={snapshot} answer={thinkingAnswer} chatId="chat" registration={renderer} />);
+	const card = h.document.querySelector('[data-testid="plugin-question-answered"]')!;
+	const thinking = card.querySelector('[data-testid="your-thinking"]')!;
+	assert.equal(thinking.nextElementSibling, context.footerContainer!.parentElement);
+	assert.equal(card.lastElementChild, context.footerContainer!.parentElement);
+	assert.equal(context.footerContainer!.contains(thinking), false);
+	const original = context.footerContainer;
+	await h.render(<PluginQuestionAnswered snapshot={{ ...snapshot }} answer={{ ...thinkingAnswer }} chatId="chat" registration={renderer} />);
+	assert.equal(mounts, 1, "canonical adoption does not remount any slot");
+	assert.equal(context.footerContainer, original);
+	context.footerContainer!.replaceChildren(h.document.createTextNode("replacement model solution"));
+	assert.equal(thinking.querySelector("button")!.textContent, "YOUR THINKING");
+	assert.match(card.textContent!, /replacement model solution/);
+	await h.close();
+	assert.equal(original!.isConnected, false);
 });

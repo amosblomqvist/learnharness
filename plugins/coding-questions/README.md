@@ -1,8 +1,10 @@
 # Coding questions
 
-A teacher-only LearnHarness plugin with a syntax-colored code editor, optional starter
-code, and teacher-written tests that run automatically on submission. The teacher then
-reviews the exact answer, separate thinking, and recorded test outcome.
+A LearnHarness plugin for **teaching questions and coding practice**, with a syntax-colored
+code editor, optional starter code, committed Markdown model solutions, and agent-written
+tests that run automatically on submission. The agent reviews the exact code, separate
+thinking, and recorded test observations. Practice allows repeated attempts; only the
+native **conclude** tool assesses and closes the problem.
 
 **Local code execution is not sandboxed.** Teacher test code and learner code run with
 LearnHarness's user permissions and inherited environment: they can access files,
@@ -12,8 +14,12 @@ limits are operational safeguards, not security isolation. Use only with code yo
 ## Requirements and installation
 
 Requires a matching LearnHarness build with the public native-question grading API
-(`registerQuestionType` with `gradeAnswer`), `registerQuestionRenderer`, and
-`ctx.ui.mountBadge`. The manifest's `minAppVersion: 0.4.1` is only the numeric baseline:
+(`registerQuestionType` with `gradeAnswer`), `registerQuestionRenderer`, the practice APIs
+`registerProblemType` with `processSubmission` and `registerProblemRenderer`, and
+`ctx.ui.mountBadge`/`ctx.ui.mountMarkdown`. Both registrations are required for this version.
+Exact placement of Test output and teaching Model solution uses the optional answered/
+submitted `footerContainer` slots; compatible hosts without these slots keep a readable
+body fallback. The manifest's `minAppVersion: 0.4.1` is only the numeric baseline:
 the released 0.4.1 app does **not** provide these newer APIs.
 
 Runtimes, compilers, shells, and any required libraries must already be installed on
@@ -38,13 +44,14 @@ is a separate host packaging step.
 ## Question and test contract
 
 The plugin contributes `coding_question` only to the **teacher**, not the prober or
-practice agent. The native tool receives the host's `question`, `type`
+practice agent. Practice agents separately receive `coding_problem` (see below). The native tool receives the host's `question`, `type`
 (`predict`/`check`), `nodeId`, and this payload:
 
 ```ts
 {
   language: string;
   starterCode?: string;
+  modelSolution: string; // Markdown with fenced solution code and optional explanation
   tests: {
     program: string;
     args: string[];
@@ -53,8 +60,13 @@ practice agent. The native tool receives the host's `question`, `type`
 }
 ```
 
-Every **new** question requires tests. A missing/empty starter starts blank; the
-learner submits their full code, not a diff. Unchanged starter code is allowed.
+Every **new** question requires tests and a nonblank Markdown **modelSolution**, authored
+in the original question call. The solution contains fenced model code and may include
+an explanation; it is preserved with the question, hidden in the pending UI, and shown
+only after submission. It is not executed or automatically tested. Existing questions
+without it keep their original data and have no Model solution toggle.
+
+A missing/empty starter starts blank; the learner submits their full code, not a diff. Unchanged starter code is allowed.
 Readiness requires non-whitespace code, not passing syntax checks or passing tests.
 Editor line endings become LF; other whitespace is preserved.
 
@@ -79,6 +91,7 @@ Python tests can be supplied in the original tool call as:
 {
   "language": "Python",
   "starterCode": "def square(x):\n    pass\n",
+  "modelSolution": "```python\ndef square(x):\n    return x * x\n```\n\nMultiply the value by itself.",
   "tests": {
     "program": "python3",
     "args": ["-"],
@@ -124,12 +137,24 @@ native question result. The optional public `mountAnswered` `headerContainer` sl
 owned by that mount's host generation; older hosts without it retain body-position
 fallback. No surrounding host DOM is queried or modified.
 
-The initially closed **Test output** disclosure has native-looking hover/focus feedback
-and a rotating chevron. It retains native `<details>/<summary>` expansion and keyboard
-activation semantics. Stdout and stderr use the same read-only code-block frames as
-submitted code, with plain text, error messages, and explicit truncation notices. Each
-stream retains its 16rem scrolling height cap. Output is never interpreted as HTML.
-There is no rerun control or automatic regrading.
+Inside an answered card the order is **original question → submitted code → Your thinking →
+Test output → Model solution**. The original saved `input.question` is always rendered
+above the code through the public host Markdown renderer, including in existing history;
+no new storage, migration, or question regeneration is needed. Both disclosures start closed and use quiet, content-width text buttons
+matching the native quiz's **Why** control: inherited UI font, 11px text, and text-only
+hover feedback. There is no chevron, uppercase styling, or full-row background. Expanded
+labels are **Hide test output** and **Hide model solution**; native button Enter/Space
+activation and visible keyboard focus are retained.
+
+Test output appears only for captured text, an error message, or a truncation notice.
+Nonempty stdout/stderr use matching code-block frames and code typography, with a 16rem
+scrolling cap per stream; whitespace is preserved and empty streams do not get boxes.
+Output is never interpreted as HTML. Model solution uses the public host Markdown
+renderer, including fenced code and explanation, mounted only while open. Both disclosures
+share the optional public `footerContainer`, a generation-owned block below host thinking;
+without that
+slot the plugin retains readable body fallback rather than moving or querying host DOM.
+There is no rerun control, automatic regrading, or reference-solution execution.
 
 The host owns submission admission, persistence, and continuation. Stop, plugin
 disable, and lost submission authority cancel grading without saving an answer;
@@ -152,6 +177,62 @@ are not retroactively executed or rewritten. New graded snapshots use the host's
 protocol 2, while this plugin's compatible question contract remains version 1.
 **Do not downgrade the host with graded questions pending:** an older host can cancel
 an unreadable protocol-2 question rather than merely displaying it as unavailable.
+
+## Coding practice
+
+Practice agents receive the **coding_problem** posing tool, registered separately as
+problem type `code`, label **Coding problem**, contract version 1. The plugin/package name
+remains **Coding questions**. Teacher tooling and existing teaching history are unchanged.
+The host supplies the common fields:
+
+```ts
+{
+  statement: string;
+  mode: "recall" | "discrimination" | "composition";
+  target?: string[];
+  modelSolution: string; // committed Markdown solution, revealed only by conclusion
+  payload: {
+    language: string;
+    starterCode?: string;
+    tests: { program: string; args: string[]; code: string };
+  };
+}
+```
+
+Language and tests are required. The model solution is a **host common field**, never
+repeated inside the plugin payload. It is committed at pose time and never executed.
+The statement remains in the host's durable problem card; it is not duplicated on every
+submission. The dock uses the same editor, diagnostics and editing keys, followed by
+host **Your thinking** and one **Submit** button. There is no reading/reveal stage.
+
+Each nonblank submission runs the same recipe against `answer.txt`, with the same
+limits, permissions and cleanup described above. Its fresh attempt directory is grouped
+under `data/test-runs/<problemId>/`. The exact submitted code, separate thinking and
+`processing: {result: CodingTestResult} | {error: string}` are saved by the host before
+one ordinary practice continuation. Test failures and run errors are observations on
+accepted attempts, not admission rejections or a final correctness assessment.
+
+The learner can revise and submit repeatedly on the same active problem. Acceptance
+retains the editor value/undo state for iteration; only captured thinking that has not
+changed is cleared by the host. Native/plugin problems share one active-problem gate.
+**Only the existing conclude tool** assesses/closes the problem and reveals the original
+committed model solution in the native conclusion card. Passing tests never auto-concludes,
+and individual attempts have no Model solution toggle.
+
+Each saved attempt shows read-only code and its Tests passed/Tests failed/Could not run
+tests heading badge. The order is **submitted code → Your thinking → Test output**.
+Test output uses the same quiet, initially closed disclosure and hidden-empty-output
+policy as teaching. It uses the public `mountSubmitted` `footerContainer` below host
+images/thinking and `headerContainer` for the badge; either missing slot has body fallback.
+Older attempts are never overwritten or reprocessed when a later revision is submitted.
+Processing absent from a saved record does not invent a badge or run tests retroactively.
+
+Cancellation follows the host processing signal and existing runner cleanup; no late
+result may save after authority is lost. Navigation/disconnection alone does not cancel
+accepted work. Explicit retry may execute tests again. Missing/disabled/incompatible
+plugins keep an active problem unavailable rather than substituting a native text editor;
+the learner can use native practice dismissal. Escape in code leaves for thinking;
+Escape outside uses the native practice confirmation/layer precedence.
 
 ## Editor and native question behavior
 
@@ -193,7 +274,7 @@ load highlighting on demand; unknown languages or failed loads remain usable as 
 text. There are no highlighting downloads, language settings, or language restrictions.
 CodeMirror One Dark colors sit inside a host-themed monospace frame.
 
-Pending questions and submitted answers are durable host records. Unsubmitted code
+Pending questions/problems and submitted answers/attempts are durable host records. Unsubmitted code
 and thinking use **host in-memory drafts**: folding/remounting while the session model
 lives retains drafts, but model destruction, reload, and app restart need not. The
 plugin has no custom durable answer store, backend RPCs, views, or settings.
@@ -217,49 +298,68 @@ emits ESM frontend/CommonJS backend and local `assets/` chunks, and includes thi
 license notices. No host package/configuration changes or runtime installs are required.
 
 Browser tests use `CHROME_PATH` or the usual macOS/Linux Chrome paths. A packaged-native
-smoke requires `LH_STANDALONE` pointing to a **matching grading-capable verified host**;
+smoke requires `LH_STANDALONE` pointing to an **existing matching verified host with
+question grading, practice registrations and answered header/footer slots**;
 it copies that payload to disposable storage without rebuilding or mutating the source:
 
 ```sh
 LH_STANDALONE=/path/to/verified/standalone npm run test:native
 ```
 
-All verification uses temporary learner/auth directories and loopback model fixtures,
-never real learner data/accounts or paid provider calls. Earlier nongrading host
-payloads are not sufficient proof for this feature.
+All verification uses temporary learner/auth directories and loopback or faux model fixtures,
+never real learner data/accounts or paid provider calls. Earlier nongrading or pre-practice-API
+host payloads are not compatible verification targets for this version.
 
 Coverage includes contract/catalog and nine-language parser diagnostics; exact answer
 and stdin bytes; literal arguments and inherited environment; fresh workspace cleanup;
 launch failures; nonzero exits; output caps/Unicode boundaries; timeout/abort, inherited
 pipes, and escaped-session settlement; public grader registration; result parsing;
 editor keyboard/readiness/selection/fold behavior; heading-slot badge alignment and
-older-host fallback; output disclosure hover/focus/chevron and Enter/Space activation;
-matching code-block frames and scrolling; saved history and mount/abort cleanup. The native harness covers genuine teacher prediction/check
+older-host fallback; Why-matched typography, text-only hover, quiet Enter/Space toggles,
+silent-run hiding and whitespace/truncation preservation; matching code-block frames and
+scrolling; required model-solution schema, hidden pending solution, exact public Markdown
+arguments, preserved visible question before code in historical and graded answers,
+independent open/close, saved history, footer ordering and mount/abort cleanup. Practice
+coverage additionally exercises separate public registration and schemas, real repeated
+runner observations and cancellation, controlled submission props without question-only
+fields, retained editor state, independent saved attempts, hidden committed solution,
+footer ordering, body fallback and per-attempt abort isolation. Host practice tests cover
+processing/save/continuation and native conclusion, including footer replay/failure cleanup.
+An isolated actual-host/faux-agent integration also activates the real coding backend,
+poses through coding_problem, runs real installed Node tests for three accepted attempts,
+checks one continuation per attempt and no auto-conclusion on passing tests, then verifies
+native conclude reveals the original committed solution.
+These browser checks use a disposable host fixture; they are not a packaged-app or
+real-provider proof of coding practice.
+Focused host tests cover slot-generation isolation, readonly SDK capabilities and actual
+host Markdown rendering of model code plus explanation. The native harness covers genuine teacher prediction/check
 turns, passing and failing semantic tests using installed Node, a missing-program run
 error, canonical/model-facing grading, separate thinking channels, read-only code,
 collapsed escaped output, and disabled-plugin occurrence-bound dismissal. No real
 microphone, OS IME, paid provider, real-model correctness, signed installer, full Electron
 window, or Windows/Linux runtime behavior is claimed.
 
-The fresh packaged-native check passed under Electron's Node runtime and real Chrome:
-all eight expected streams reached `[DONE]`; genuine passing, failing, and missing-program
-outcomes reached saved answers and the next teacher request; badges appeared in the
-host heading; closed output expanded into escaped code-block frames; trusted Escape/Tab
-navigation, Cancel/dialog Escape draft preservation, healthy confirmed skip, and disabled
-recovery dismissal passed without extra teacher turns. There were no page errors,
-off-origin requests, or media attempts, and the verified source payload stayed unchanged.
-The slow-run busy-dismiss and stale-confirmation safety paths have focused host coverage,
-not an additional slow-run scenario in this product-native harness. Local evidence:
-`/private/tmp/lh-coding-native-9Lecpr/evidence.json`.
+The teaching packaged-native harness has been updated for the quiet controls and model
+solution, but has **not been run for this UI/practice increment** against a new matching
+host payload. It does not exercise coding-practice turns.
+Earlier grading/header native proof does not establish this increment's native runtime
+proof. No application build, packaging, notarization, or installation is part of this
+plugin change. Development verification uses focused host tests and the built-plugin
+browser fixture; the fixture's Markdown spy is complemented by a real host Markdown
+integration test. Slow-run busy-dismiss and stale-confirmation paths retain their existing
+focused host coverage.
 
 ## API boundary
 
 Only type-only `learnharness-plugin-api` imports and public registration/UI contracts
-are used. Backend execution uses Node built-ins, not private host imports. The optional
-public `gradeAnswer` hook supplies the host-owned await/save lifecycle, and the optional
-answered-only `headerContainer` supplies a bounded heading suffix mount; the plugin adds
-no submission interceptor, worker, separate agent, or custom question lifecycle. The
-answer stays a string; grading is separate metadata. Unavailable/disabled behavior and
+are used. Backend execution uses Node built-ins, not private host imports. The public
+`gradeAnswer`/`processSubmission` hooks supply host-owned await/save lifecycles. Optional
+answered/submitted `headerContainer` and `footerContainer` supply bounded mounts beside
+the heading and below host thinking. Public `mountMarkdown` renders saved questions and
+teaching model solutions; native practice conclusion reveals its committed solution.
+The plugin adds no submission interceptor, worker, separate agent, custom question/problem
+lifecycle, or conclusion tool. Answers/submissions stay strings; grading/processing remain
+separate metadata. Unavailable/disabled behavior and
 safe dismissal remain host-owned. If the API cannot support a required behavior, stop
 and request an explicit host fix.
 

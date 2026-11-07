@@ -4,8 +4,8 @@ import { standardKeymap, history, historyKeymap, indentMore, insertNewlineAndInd
 import { bracketMatching, indentUnit, LanguageDescription, syntaxHighlighting } from "@codemirror/language";
 import { languages } from "@codemirror/language-data";
 import { oneDarkHighlightStyle } from "@codemirror/theme-one-dark";
-import type { PluginQuestionAnswerState, PluginQuestionEditorHandle, PluginQuestionEditorProps, PluginQuestionMountContext } from "learnharness-plugin-api";
-import { isReady, normalizeLineEndings, type CodingQuestionPayload } from "./contract.ts";
+import type { PluginQuestionAnswerState, PluginQuestionEditorHandle, PluginQuestionEditorProps, PluginProblemEditorHandle, PluginProblemEditorProps } from "learnharness-plugin-api";
+import { isReady, normalizeLineEndings, type CodingPayload, type CodingQuestionPayload } from "./contract.ts";
 import { supportsSyntaxDiagnostics, syntaxDiagnosticsExtension } from "./diagnostics.ts";
 
 export function findLanguage(name: string): LanguageDescription | null {
@@ -105,7 +105,11 @@ function createCodeView(container: HTMLElement, language: string, code: string, 
   };
 }
 
-export function mountAnswerEditor(container: HTMLElement, props: PluginQuestionEditorProps<CodingQuestionPayload>): PluginQuestionEditorHandle {
+type CodeEditorProps = Pick<PluginQuestionEditorProps, "answer" | "active" | "signal" | "onChange"> & {
+  readonly input: { payload: Pick<CodingPayload, "language" | "starterCode"> };
+};
+
+function mountCodeEditor(container: HTMLElement, props: CodeEditorProps): PluginQuestionEditorHandle {
   let disposed = false;
   let active = props.active;
   const initialCode = props.answer.status === "empty" ? normalizeLineEndings(props.input.payload.starterCode ?? "") : codeFromAnswer(props.answer);
@@ -143,7 +147,27 @@ export function mountAnswerEditor(container: HTMLElement, props: PluginQuestionE
   };
 }
 
-export function mountAnswered(container: HTMLElement, props: PluginQuestionMountContext<CodingQuestionPayload> & { readonly answer: string }): () => void {
+export function mountAnswerEditor(container: HTMLElement, props: PluginQuestionEditorProps<CodingQuestionPayload>): PluginQuestionEditorHandle {
+  return mountCodeEditor(container, props);
+}
+
+/** Adapt only the public controlled-state vocabulary; no fabricated question identity. */
+export function mountSubmissionEditor(container: HTMLElement, props: PluginProblemEditorProps<CodingPayload>): PluginProblemEditorHandle {
+  const handle = mountCodeEditor(container, {
+    input: props.input, signal: props.signal, active: props.active,
+    answer: props.submission, onChange: props.onChange,
+  });
+  return {
+    ...handle,
+    update(next) { handle.update({ answer: next.submission, active: next.active }); },
+  };
+}
+
+export function mountAnswered(container: HTMLElement, props: {
+  readonly input: { payload: Pick<CodingPayload, "language"> };
+  readonly signal: AbortSignal;
+  readonly answer: string;
+}): () => void {
   const editor = createCodeView(container, props.input.payload.language, props.answer, false);
   const dispose = () => {
     props.signal.removeEventListener("abort", dispose);

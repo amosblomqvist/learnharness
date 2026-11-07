@@ -57,6 +57,8 @@ const renderer:PluginProblemRenderer<{starter:string},string>={id:"code",support
     context.onChange({status:"ready",value:starter});
     // @ts-expect-error Header slots are submitted-presentation capabilities only.
     context.headerContainer;
+    // @ts-expect-error Footer slots are submitted-presentation capabilities only.
+    context.footerContainer;
     return {update(props){const active:boolean=props.active;void active;},focus(){container.focus();},dispose(){}};
   },
   mountSubmitted(container,context){
@@ -65,6 +67,10 @@ const renderer:PluginProblemRenderer<{starter:string},string>={id:"code",support
     const header:HTMLElement=context.headerContainer??container;
     // @ts-expect-error The host-owned submitted header reference is readonly.
     context.headerContainer=container;
+    const footer:HTMLElement=context.footerContainer??container;
+    // @ts-expect-error The host-owned submitted footer reference is readonly.
+    context.footerContainer=container;
+    footer.textContent="Observations";
     // @ts-expect-error No grading/correctness vocabulary is supplied.
     context.grading;
     header.textContent=value;void observations;
