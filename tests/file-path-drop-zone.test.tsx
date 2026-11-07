@@ -142,7 +142,7 @@ test("unfocused drop uses the dictation target registry, not the last focused ed
 	const f = await fixture();
 	f.focusEditor(4);
 	f.doc.querySelector<HTMLElement>('[data-testid="elsewhere"]')!.focus();
-	const paths = ["~/notes one.pdf", "/tmp/notes`final`"];
+	const paths = ["~/notes one.pdf", "/tmp/notes`final`.md"];
 	await f.event("drop", f.transfer(paths.map((path) => f.file("not-a-physical-path.pdf", path))));
 	assert.deepEqual(f.appends, [paths.map(quoteFilePath).join(" ")]);
 	assert.equal(f.value, "readthis", "saved editor caret must not override current default target");
@@ -196,13 +196,58 @@ test("an empty folder attaches once with durable directory syntax, without enume
 	f.assertPathOnly();
 });
 
-test("only known directories gain markers: extensionless files and unavailable metadata are never guessed", async () => {
+test("only known directories gain markers: unavailable metadata is never guessed, and extensionless files are left out", async () => {
 	const f = await fixture();
-	const files = [f.file("README", "/course/README"), f.file("folder.pdf", "/course/folder.pdf"), f.file("unknown", "/course/unknown")];
+	const files = [f.file("README", "/course/README"), f.file("folder.pdf", "/course/folder.pdf"), f.file("unknown", "/course/unknown"), f.file("notes.txt", "/course/notes.txt")];
 	const transfer = f.transfer(files, [1]);
 	transfer.items[2]!.webkitGetAsEntry = () => { throw new Error("No metadata"); };
+	transfer.items[3]!.webkitGetAsEntry = () => { throw new Error("No metadata"); };
 	await f.event("drop", transfer);
-	assert.deepEqual(f.appends, ["`/course/README` `/course/folder.pdf/` `/course/unknown`"]);
+	assert.deepEqual(f.appends, ["`/course/folder.pdf/` `/course/notes.txt`"]);
+	assert.equal(f.status, "Not attached: README, unknown. Only text, Markdown, PDF, and image files are supported.");
+	f.assertPathOnly();
+});
+
+test("a .pptx drop is left out with a notice and stages nothing", async () => {
+	const f = await fixture();
+	f.focusEditor(4);
+	const dropped = await f.event("drop", f.transfer([f.file("deck.pptx", "/course/deck.pptx")]));
+	assert.equal(dropped.defaultPrevented, true);
+	assert.equal(f.status, "Not attached: deck.pptx. Only text, Markdown, PDF, and image files are supported.");
+	assert.equal(f.value, "readthis");
+	assert.deepEqual(f.appends, []);
+	f.assertPathOnly();
+});
+
+test("a mixed drop attaches the supported files; unsupported ones are typed by their resolved path, named as base names in drop order", async () => {
+	const f = await fixture();
+	const files = [
+		f.file("looks-fine.pdf", "/course/deck.pptx"), f.file("a.md", "/course/a.md"), f.file("b.pdf", "C:\\course\\report.docx"),
+		f.file("c.png", "/photos/PHOTO.JPG"), f.file("d.txt", "/course/archive.zip"),
+	];
+	await f.event("drop", f.transfer(files));
+	assert.deepEqual(f.appends, ["`/course/a.md` `/photos/PHOTO.JPG`"]);
+	assert.equal(f.status, "Not attached: deck.pptx, report.docx, archive.zip. Only text, Markdown, PDF, and image files are supported.");
+	f.assertPathOnly();
+});
+
+test("a dropped folder still attaches whatever its name looks like", async () => {
+	const f = await fixture();
+	await f.event("drop", f.transfer([f.file("Talk.key", "/course/Talk.key"), f.file("data", "/course/data")], [0, 1]));
+	assert.deepEqual(f.appends, ["`/course/Talk.key/` `/course/data/`"]);
+	assert.equal(f.status, "");
+	f.assertPathOnly();
+});
+
+test("a drop with both an unsupported file and an item with no path says so in one notice, unsupported first", async () => {
+	const f = await fixture();
+	const sentence = "Not attached: deck.pptx. Only text, Markdown, PDF, and image files are supported. Some dropped items had no available file path.";
+	await f.event("drop", f.transfer([f.file("deck.pptx", "/course/deck.pptx"), f.file("virtual.pdf"), f.file("notes.md", "/course/notes.md")]));
+	assert.deepEqual(f.appends, ["`/course/notes.md`"]);
+	assert.equal(f.status, sentence);
+	await f.event("drop", f.transfer([f.file("deck.pptx", "/course/deck.pptx"), f.file("virtual.pdf")]));
+	assert.equal(f.status, sentence, "the same notice when nothing at all was attached");
+	assert.deepEqual(f.appends, ["`/course/notes.md`"]);
 	f.assertPathOnly();
 });
 

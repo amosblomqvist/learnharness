@@ -2,11 +2,13 @@
 
 import { useEffect, useRef, useState } from "react";
 import { FileSymlinkIcon, XIcon } from "lucide-react";
-import { directoryReferencePath, quoteFilePath } from "@/src/core";
+import { directoryReferencePath, filePathLabel, quoteFilePath } from "@/src/core";
+import { ATTACH_EXTENSIONS } from "@/lib/notes-import-limits";
 import { appendToPrimaryInput } from "@/components/dictation";
 import { INSERT_FILE_PATHS_EVENT } from "@/components/path-input";
 
 export const BROWSER_NOTICE = "Local file paths can only be attached in the desktop app. You can paste a full path instead.";
+export const notAttachedNotice = (names: string[]) => `Not attached: ${names.join(", ")}. Only text, Markdown, PDF, and image files are supported.`;
 
 /** The content area only: the sidebar is deliberately outside this zone.
  * Existing files stay where they are; only quoted path strings enter drafts. */
@@ -65,6 +67,7 @@ export function FilePathDropZone({ children, className }: { children: React.Reac
 				// Positively known directories get a durable trailing separator.
 				const entries = Array.from(event.dataTransfer.items).filter((item) => item.kind === "file");
 				const paths: string[] = [];
+				const unsupported: string[] = [];
 				let skipped = 0;
 				for (const [index, file] of Array.from(event.dataTransfer.files).entries()) {
 					try {
@@ -74,11 +77,14 @@ export function FilePathDropZone({ children, className }: { children: React.Reac
 						const original = resolve(file);
 						const path = directory ? directoryReferencePath(original) : original;
 						quoteFilePath(path); // Same rooted-path validity rule as typed chips.
+						// Folders attach as before; files are typed by the path that would be attached.
+						if (!directory && !ATTACH_EXTENSIONS.test(path)) { unsupported.push(filePathLabel(path)); continue; }
 						paths.push(path);
 					} catch { skipped++; }
 				}
+				const dropNotice = [unsupported.length ? notAttachedNotice(unsupported) : "", skipped ? "Some dropped items had no available file path." : ""].filter(Boolean).join(" ");
 				if (paths.length === 0) {
-					setNotice("No local file paths were available. Drop existing files or folders from your computer.");
+					setNotice(unsupported.length ? dropNotice : "No local file paths were available. Drop existing files or folders from your computer.");
 					return;
 				}
 				const focused = document.activeElement?.closest<HTMLElement>("[data-file-path-input]");
@@ -88,7 +94,7 @@ export function FilePathDropZone({ children, className }: { children: React.Reac
 					setNotice("Open a chat to attach file paths.");
 					return;
 				}
-				setNotice(skipped ? "Some dropped items had no available file path." : "");
+				setNotice(dropNotice);
 			}}
 		>
 			{children}
