@@ -100,6 +100,13 @@ describe("appearanceVars — the mapping the provider applies", () => {
 		assert.equal(vars["--lh-ink-italic"], "#00ff00");
 	});
 
+	it("the custom background is dark-only: it never leaks into light", () => {
+		const a = resolveAppearance({ background: "#202020" });
+		assert.equal(appearanceVars(a, "dark")["--background"], "#202020");
+		const light = appearanceVars(a, "light");
+		for (const token of ["--background", "--card", "--accent", "--border"]) assert.equal(light[token], undefined, token);
+	});
+
 	it("sessionNameSerif false alone: titles move, nothing else does", () => {
 		const vars = appearanceVars(resolveAppearance({ sessionNameSerif: false }));
 		assert.equal(vars["--font-title"], "var(--font-prose)");

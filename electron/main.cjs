@@ -24,10 +24,11 @@
  *     would shadow every settings-page key change until restart.
  */
 
-const { app, BrowserWindow, Menu, ipcMain, session, shell, dialog } = require("electron");
+const { app, BrowserWindow, Menu, ipcMain, nativeTheme, session, shell, dialog } = require("electron");
 const { pickAttachmentPath } = require("./attachment-picker.cjs");
 const { createChatGPT, fileStore } = require("./chatgpt.cjs");
 const { attachChatGPTChild, trustedSender, chatGPTControl } = require("./chatgpt-ipc.cjs");
+const { normalizeAppearance, themeSourceFor, chromeColors, serverDataDir } = require("./appearance-chrome.cjs");
 const { createSubscriptions, loadSubscriptionSDK } = require("./subscriptions.cjs");
 const { attachSubscriptionChild, subscriptionControl } = require("./subscription-ipc.cjs");
 const { desktopAPIHeaders } = require("./desktop-api.cjs");
@@ -54,6 +55,37 @@ const PRODUCT_NAME = "LearnHarness";
 app.setName(PRODUCT_NAME);
 const AUTH_FILE = () => path.join(app.getPath("userData"), "auth.json");
 const DATA_DIR = () => path.join(app.getPath("userData"), "data");
+
+// NATIVE CHROME FOLLOWS THE MODE (light-mode wave, 2026-10-29) — the pure
+// half lives in ./appearance-chrome.cjs.
+
+/** The appearance slice of the SAME settings file the server reads (in
+ *  dev, the one `next dev` writes — not this shell's -dev userData).
+ *  Absent/corrupt → dark, the factory default. */
+function readAppearance() {
+	const dir = serverDataDir({
+		devUrl: process.env.LH_DEV_URL,
+		env: process.env,
+		packagedDataDir: DATA_DIR(),
+		repoRoot: path.join(__dirname, ".."),
+	});
+	try {
+		return normalizeAppearance(JSON.parse(fs.readFileSync(path.join(dir, "settings.json"), "utf8"))?.appearance);
+	} catch {
+		return normalizeAppearance(null);
+	}
+}
+let appearance = normalizeAppearance(null);
+
+/** Native colors for the rendered variant (nativeTheme resolves System). */
+const currentChromeColors = () => chromeColors(appearance, nativeTheme.shouldUseDarkColors);
+
+function applyChrome(win) {
+	if (win.isDestroyed()) return;
+	const colors = currentChromeColors();
+	win.setBackgroundColor(colors.color);
+	if (process.platform !== "darwin") win.setTitleBarOverlay(colors);
+}
 
 /** The packaged standalone server (extraResources → Resources/server).
  *  In dev LH_DEV_URL short-circuits everything: no spawn, no packaging —
@@ -309,7 +341,7 @@ function createWindow(url) {
 				// height. Do not force the zoom-invariant native overlay to match
 				// the renderer's 60 CSS px bar: zooming out would cover its border.
 				// The renderer reserves the actual width via env(titlebar-area-*).
-				titleBarOverlay: { color: "#141414", symbolColor: "#e5e5e5" },
+				titleBarOverlay: currentChromeColors(),
 				// Keep the custom bar alone; Alt reveals the native menu.
 				autoHideMenuBar: true,
 			}),
@@ -324,10 +356,11 @@ function createWindow(url) {
 		// the native window surface changes size before Chromium's compositor
 		// has a frame at the new size, and the gap shows the window's NATIVE
 		// background — Electron's default is white, glaring on a dark app.
-		// The app background (#141414) fills the lag instead. `show: false` +
-		// ready-to-show is the same treatment for first paint: the window
-		// appears only once the page has actually rendered.
-		backgroundColor: "#141414",
+		// The app's background for the rendered mode fills the lag instead
+		// (currentChromeColors). `show: false` + ready-to-show is the same treatment
+		// for first paint: the window appears only once the page has
+		// actually rendered.
+		backgroundColor: currentChromeColors().color,
 		show: false,
 		// Narrow-window behavior (owner, 2026-09-17): 640px is the floor —
 		// below it even a wrapped chrome row gets cramped and the chat header
@@ -647,6 +680,16 @@ async function main() {
 
 	await app.whenReady();
 
+	// The mode before the first window. themeSource: Dark keeps "system"
+	// (as before light mode), Light pins "light" (themeSourceFor); nativeTheme
+	// resolves System for the chrome. Under System an OS flip recolors every
+	// window.
+	appearance = readAppearance();
+	nativeTheme.themeSource = themeSourceFor(appearance.mode);
+	nativeTheme.on("updated", () => {
+		for (const win of BrowserWindow.getAllWindows()) applyChrome(win);
+	});
+
 	// Dev mode: point at a running `next dev` server (LH_DEV_URL) — no
 	// spawn, no packaging, full HMR. The rest of this shell still applies
 	// (guards, menu, single instance).
@@ -745,6 +788,14 @@ async function main() {
 		const { x, y, width, height } = win.getBounds();
 		const target = SIDEBAR_AUTOCLOSE;
 		if (width < target) win.setBounds({ x, y, width: target, height });
+	});
+	// The renderer reports every appearance write (and the record on load):
+	// the chrome follows without a restart.
+	ipcMain.on("lh:appearance", (event, next) => {
+		if (!trustedAppWindows.has(BrowserWindow.fromWebContents(event.sender)) || !trustedSender(event, new URL(url).origin, BrowserWindow)) return;
+		appearance = normalizeAppearance(next);
+		nativeTheme.themeSource = themeSourceFor(appearance.mode);
+		for (const win of BrowserWindow.getAllWindows()) applyChrome(win);
 	});
 	reopenWindow = () => { chatgpt?.resume(); subscriptions?.resume(); return createWindow(url); };
 	app.on("activate", () => {

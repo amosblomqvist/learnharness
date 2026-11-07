@@ -238,8 +238,8 @@ export function parseAppearanceSettingsBody(body: unknown): SettingsBodyResult<A
 	if (!raw) return { ok: false, error: "Invalid JSON body" };
 	const settings: AppearanceSettings = {};
 	if (raw.mode !== undefined) {
-		if (raw.mode !== "dark" && raw.mode !== "light") {
-			return { ok: false, error: "mode must be \"dark\" or \"light\"" };
+		if (raw.mode !== "dark" && raw.mode !== "light" && raw.mode !== "system") {
+			return { ok: false, error: "mode must be \"dark\", \"light\" or \"system\"" };
 		}
 		settings.mode = raw.mode;
 	}

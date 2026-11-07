@@ -149,6 +149,15 @@ describe("sanitizeUserSettings", () => {
 		assert.equal(out.appearance?.mdRendering?.italicColor, null);
 	});
 
+	it("appearance: system mode survives; junk modes drop", () => {
+		const out = sanitizeUserSettings({ appearance: { mode: "system" } });
+		assert.ok(out);
+		assert.equal(out.appearance?.mode, "system");
+		const junk = sanitizeUserSettings({ appearance: { mode: "sepia" } });
+		assert.ok(junk);
+		assert.equal(junk.appearance?.mode, undefined);
+	});
+
 	it("empty strings/whitespace fontFamily → null (Source Sans 3); wrong-type → null too (the default)", () => {
 		for (const bad of ["", "   ", 12, { name: "x" }]) {
 			const out = sanitizeUserSettings({ appearance: { fontFamily: bad } });

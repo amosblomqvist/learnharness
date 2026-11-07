@@ -155,6 +155,15 @@ describe("parseAppearanceSettingsBody", () => {
 		assert.ok(parseAppearanceSettingsBody({ background: null, fontFamily: null }));
 	});
 
+	it("accepts system, rejects other modes", () => {
+		const ok = parseAppearanceSettingsBody({ mode: "system" });
+		assert.ok(ok.ok);
+		assert.deepEqual(ok.ok && ok.settings, { mode: "system" });
+		const bad = parseAppearanceSettingsBody({ mode: "sepia" });
+		assert.equal(bad.ok, false);
+		assert.match(!bad.ok ? bad.error : "", /"dark", "light" or "system"/);
+	});
+
 	it("rejects non-object bodies and non-object mdRendering", () => {
 		assert.equal(parseAppearanceSettingsBody([1]).ok, false);
 		assert.equal(parseAppearanceSettingsBody({ mdRendering: "big" }).ok, false);

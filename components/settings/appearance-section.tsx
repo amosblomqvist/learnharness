@@ -7,9 +7,10 @@
  * variables move IMMEDIATELY (the section's whole point — it must DO
  * something). Hex inputs commit on blur/Enter; the background derives the
  * raised/accent/edge palette in code (components/settings/appearance.tsx).
- * Mode is dark-only this wave: control rendered DISABLED with a note — the
- * light palette is the design wave's work, and a lying control is worse
- * than an honest disabled one.
+ * Mode (light-mode wave, 2026-10-29): Dark | Light | System (follows the
+ * OS), from the select that sat disabled until a light palette existed.
+ * The Background row is the dark variant's only:
+ * light always renders the factory paper.
  *
  * Graph graying (owner, 2026-09-20) follows the graph viewer's render-panel
  * convention: the whole row dims when a parent is off (stored values
@@ -33,7 +34,9 @@
 import { useEffect, useRef, useState } from "react";
 import {
 	EXTRACTION_CHUNK_TOKENS_FLOOR,
+	MODE_DEFAULT_BACKGROUND,
 	resolveSettings,
+	type AppearanceMode,
 	type AppearanceSettings,
 	type GraphSettings,
 } from "@/src/core";
@@ -99,6 +102,7 @@ export function AppearanceSection({
 }) {
 	const { appearance: resolved } = useAppearance();
 	const md = appearance?.mdRendering;
+	const mode = appearance?.mode ?? "dark";
 
 	// The font dropdown's open state + its enumeration cache. undefined =
 	// not enumerated yet (desktop: click-bound queryLocalFonts pending);
@@ -186,19 +190,29 @@ export function AppearanceSection({
 
 	return (
 		<>
-			<SettingsRow label="Mode" hint="Coming soon" testid="row-mode" dimmed>
-				<ThinSelect value="dark" ariaLabel="mode" onChange={() => {}} testid="select-mode" disabled>
+			<SettingsRow label="Mode" testid="row-mode">
+				<ThinSelect
+					value={mode}
+					ariaLabel="mode"
+					testid="select-mode"
+					onChange={(next) => onSectionChange({ ...appearance, mode: next as AppearanceMode })}
+				>
 					<option value="dark">Dark</option>
+					<option value="light">Light</option>
+					<option value="system">System</option>
 				</ThinSelect>
 			</SettingsRow>
+			{/* The dark variant's background only — light always renders the
+			    factory paper. Editable in either mode, so a dark color can be
+			    set ahead of a switch. */}
 			<SettingsRow
 				label="Background"
-				hint={`Empty = ${resolved.background ?? "#141414"}`}
+				hint={`Dark mode only. Empty = ${MODE_DEFAULT_BACKGROUND.dark}`}
 				testid="row-background"
 			>
 				<CommitInput
 					value={appearance?.background ?? ""}
-					placeholder="#141414"
+					placeholder={MODE_DEFAULT_BACKGROUND.dark}
 					ariaLabel="background hex"
 					testid="input-background"
 					onCommit={(v) => onSectionChange({ ...appearance, background: v === "" ? null : v })}

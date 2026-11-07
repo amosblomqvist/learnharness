@@ -287,12 +287,29 @@ describe("KeysSection (thin SSR)", () => {
 });
 
 describe("AppearanceSection (thin SSR)", () => {
-	it("mode is rendered DISABLED — dark-only this wave, no lying control", () => {
+	it("Mode is an enabled Dark | Light | System select showing the stored mode", () => {
+		const html = renderToStaticMarkup(<AppearanceSection appearance={{ mode: "light" }} onSectionChange={() => {}} />);
+		const select = tagOf(html, "select-mode");
+		assert.ok(!select.includes("disabled"), "mode select enabled");
+		for (const v of ["dark", "light", "system"]) assert.ok(html.includes(`<option value="${v}"`), v);
+		assert.match(html, /<option value="light" selected="">/);
+		assert.ok(!tagOf(html, "row-mode").includes("opacity-40"), "mode row not dimmed");
+		assert.ok(!html.includes("Coming soon"));
+	});
+
+	it("absent mode = the factory dark option selected", () => {
 		const html = renderToStaticMarkup(<AppearanceSection appearance={undefined} onSectionChange={() => {}} />);
-		assert.ok(tagOf(html, "select-mode").includes("disabled"), "mode select disabled");
-		assert.ok(html.includes("Coming soon"));
-		// The whole row dims, graph-view style (the control never adds its own).
-		assert.ok(tagOf(html, "row-mode").includes("opacity-40"), "mode row dims whole");
+		assert.match(html, /<option value="dark" selected="">/);
+	});
+
+	it("the Background row edits the dark background in every mode", () => {
+		for (const mode of ["dark", "light", "system"] as const) {
+			const html = renderToStaticMarkup(
+				<AppearanceSection appearance={{ mode, background: "#202020" }} onSectionChange={() => {}} />,
+			);
+			assert.match(html, /Dark mode only\. Empty = #141414/);
+			assert.ok(tagOf(html, "input-background").includes('value="#202020"'), mode);
+		}
 	});
 
 	it("hex inputs carry the factory placeholders; prose size resolves against the factory", () => {
