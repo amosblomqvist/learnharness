@@ -1,10 +1,10 @@
 import type {
 	PluginAction, PluginCleanup, PluginFrontendContext, PluginFrontendModule, PluginInfo,
 	PluginNotification, PluginView, ServerEvent, PluginCodeBlockRenderer, PluginToolRenderer,
-	PluginActionContext, PluginActionPlacement, PluginSettingsRegistration,
+	PluginActionContext, PluginActionPlacement, PluginSettingsRegistration, PluginPageActionContext, PluginActionShortcut,
 } from "@/src/core";
 
-import { copyPluginSubmissionTarget, preparePluginSubmissionInterceptor, type PluginSubmissionInterceptor, type PluginSubmissionTarget } from "../src/core/index.ts";
+import { preparePluginShortcut, copyPluginSubmissionTarget, preparePluginSubmissionInterceptor, type PluginSubmissionInterceptor, type PluginSubmissionTarget } from "../src/core/index.ts";
 import { orderSubmissionInterceptors, type SubmissionInterceptorRegistration } from "./plugin-submission-runner.ts";
 
 export type PluginMount = (container: HTMLElement, signal: AbortSignal) => ReturnType<PluginView["mount"]>;
@@ -22,6 +22,7 @@ export interface FrontendPlugin {
 	error?: string;
 	views: PluginView[];
 	actions: PluginAction[];
+	shortcuts?: readonly { actionId: string; shortcut: PluginActionShortcut }[];
 	placements: PluginActionPlacement[];
 	actionBusy: string[];
 	settings?: PluginSettingsRegistration;
@@ -49,6 +50,7 @@ interface Lifecycle {
 	teardown?: Promise<void>;
 	views: Map<string, PluginView>;
 	actions: Map<string, PluginAction>;
+	shortcuts: Map<string, PluginActionShortcut>;
 	placements: Map<string, PluginActionPlacement>;
 	actionBusy: Set<string>;
 	codeBlocks: Map<string, CodeBlockRegistration>;
@@ -72,7 +74,7 @@ export interface PluginHost {
 	pathname(): string;
 	navigate(path: string): void;
 	openSettings?(pluginId: string): void;
-	createUi?(options: { signal: AbortSignal; onError: (error: unknown) => void }): import("@/src/core/plugin-ui").PluginUi;
+	createUi?(options: { signal: AbortSignal; pluginId?: string; onError: (error: unknown) => void }): import("@/src/core/plugin-ui").PluginUi;
 	style?(url: string, onError: () => void): PluginCleanup;
 }
 
@@ -127,6 +129,7 @@ export class PluginFrontendManager {
 	private mutations = 0;
 	private disposed = false;
 	private started = false;
+	private shortcutPages = new Map<string, { read: () => PluginPageActionContext | undefined }>();
 	private snapshot: PluginSnapshot = { plugins: [], codeBlocks: [], toolRenderers: [], directory: "", loading: true, refreshing: false };
 	constructor(private host: PluginHost) {}
 	getSnapshot = () => this.snapshot;
@@ -146,7 +149,7 @@ export class PluginFrontendManager {
 			return {
 				info, phase: life?.phase ?? (info.enabled ? (info.status === "error" ? "error" : "active") : "disabled"),
 				error: life?.error ?? this.cleanupErrors.get(info.id) ?? info.error, views: [...(life?.views.values() ?? [])],
-				actions: [...(life?.actions.values() ?? [])], placements: [...(life?.placements.values() ?? [])],
+				actions: [...(life?.actions.values() ?? [])], shortcuts: [...(life?.shortcuts ?? [])].map(([actionId, shortcut]) => ({ actionId, shortcut })), placements: [...(life?.placements.values() ?? [])],
 				actionBusy: [...(life?.actionBusy ?? [])], settings: life?.settings, busy: this.pending.has(info.id),
 			};
 		}) };
@@ -248,7 +251,7 @@ export class PluginFrontendManager {
 			const life: Lifecycle = {
 				id: info.id, revision: info.revision, controller: new AbortController(), cleanups: new Set(),
 				activation: Promise.resolve(), tasks: new Set(),
-				views: new Map(), actions: new Map(), placements: new Map(), actionBusy: new Set(), codeBlocks: new Map(), toolRenderers: new Map(), questionRenderers: new Map(), problemRenderers: new Map(), submissionInterceptors: new Map(),
+				views: new Map(), actions: new Map(), shortcuts: new Map(), placements: new Map(), actionBusy: new Set(), codeBlocks: new Map(), toolRenderers: new Map(), questionRenderers: new Map(), problemRenderers: new Map(), submissionInterceptors: new Map(),
 				notifications: new Set(), events: new Set(), resyncs: new Set(), phase: "loading",
 			};
 			this.cleanupErrors.delete(info.id);
@@ -280,12 +283,13 @@ export class PluginFrontendManager {
 				if (action.disabled !== undefined && typeof action.disabled !== "boolean" && typeof action.disabled !== "function") throw new Error("Plugin action disabled must be boolean or a predicate");
 			}
 			if (map.has(item.id)) throw new Error(`Duplicate plugin registration: ${item.id}`);
+			if (callback === "run" && (item as PluginAction).shortcut !== undefined) life.shortcuts.set(item.id, preparePluginShortcut((item as PluginAction).shortcut));
 			map.set(item.id, item); this.publish();
 			let registered = true;
 			return () => {
 				if (!registered) return;
 				registered = false;
-				if (map.get(item.id) === item) { map.delete(item.id); this.publish(); }
+				if (map.get(item.id) === item) { map.delete(item.id); if (callback === "run") life.shortcuts.delete(item.id); this.publish(); }
 			};
 		};
 		const rejectRenderer = (text: string): never => {
@@ -397,7 +401,7 @@ export class PluginFrontendManager {
 			get ui() {
 				if (!ui) {
 					if (!thisManager.host.createUi) throw new Error("Plugin UI host is unavailable");
-					ui = thisManager.host.createUi({ signal: life.controller.signal, onError: error => thisManager.report(life, error) });
+					ui = thisManager.host.createUi({ signal: life.controller.signal, pluginId: life.id, onError: error => thisManager.report(life, error) });
 				}
 				return ui;
 			},
@@ -537,16 +541,40 @@ export class PluginFrontendManager {
 			}
 		}
 	}
+	/** Route-keyed readers cannot expose retained/hidden pages or stale cleanup. */
+	registerShortcutPage(pathname: string, read: () => PluginPageActionContext | undefined) {
+		const entry = { read };
+		this.shortcutPages.set(pathname, entry);
+		return () => { if (this.shortcutPages.get(pathname) === entry) this.shortcutPages.delete(pathname); };
+	}
+	shortcutPageContext(): PluginPageActionContext | undefined {
+		if (this.disposed) return;
+		const pathname = this.host.pathname(), page = this.shortcutPages.get(pathname);
+		if (page) return page.read();
+		// A session/plugin page must supply its actual context, never a guessed one.
+		if (/^\/(chat|plugins)\//.test(pathname) && pathname !== "/chat/new") return;
+		return { surface: "app", pathname };
+	}
 	async runAction(id: string, action: PluginAction, context: PluginActionContext | (() => PluginActionContext | undefined)) {
+		await this.startAction(id, action, context);
+	}
+	/** Synchronous admission lets the keyboard claim only an invoked action. */
+	tryRunAction(id: string, action: PluginAction, context: () => PluginActionContext | undefined): boolean {
+		return this.startAction(id, action, context) !== undefined;
+	}
+	private startAction(id: string, action: PluginAction, context: PluginActionContext | (() => PluginActionContext | undefined)): Promise<void> | undefined {
 		const life = this.lives.get(id);
 		if (!life || !this.current(life) || life.actions.get(action.id) !== action || life.actionBusy.has(action.id)) return;
 		try {
 			const captured = typeof context === "function" ? context() : context;
 			if (!captured || (typeof action.disabled === "function" ? action.disabled(captured) : action.disabled)) return;
-			life.actionBusy.add(action.id); this.publish();
-			await action.run(captured);
+			life.actionBusy.add(action.id);
+			return (async () => {
+				try { this.publish(); await action.run(captured); }
+				catch (error) { this.report(life, error); }
+				finally { if (life.actionBusy.delete(action.id) && this.current(life)) this.publish(); }
+			})();
 		} catch (error) { this.report(life, error); }
-		finally { if (life.actionBusy.delete(action.id) && this.current(life)) this.publish(); }
 	}
 	captureSubmissionInterceptors(): readonly SubmissionInterceptorRegistration[] {
 		return Object.freeze([...this.lives.values()].filter(life => this.current(life)).flatMap(life => [...life.submissionInterceptors.values()]).sort(orderSubmissionInterceptors));
@@ -628,6 +656,7 @@ export class PluginFrontendManager {
 	dispose(): Promise<void> {
 		if (!this.disposed) {
 			this.disposed = true; this.requestGeneration++;
+			this.shortcutPages.clear();
 			for (const life of [...this.lives.values()]) this.stop(life);
 			this.listeners.clear();
 		}

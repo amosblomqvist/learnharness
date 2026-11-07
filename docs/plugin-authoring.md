@@ -146,7 +146,7 @@ or graph-selection internals.
 ### Actions
 
 Register an action **before** placing it. An action has `id`, `name`, optional trusted
-SVG `icon`, optional `disabled` boolean/context predicate, and `run(context)` (sync or
+SVG `icon`, optional declarative `shortcut`, optional `disabled` boolean/context predicate, and `run(context)` (sync or
 async). The host supplies button/tooltip, busy/repeat prevention and error reporting.
 Use `ctx.refreshActions()` when plugin state changes a dynamic predicate.
 
@@ -161,6 +161,9 @@ requires explicit `sessions: ["teaching", "practice"]` (either subset) and/or `v
 | `top-bar` / `plugin-view` | `pluginId`, `viewId` |
 | `sidebar` / `sidebar` | None |
 | `graph` / `graph` | None |
+| `keyboard` / `session` | Same session fields, including a fresh readonly `view` |
+| `keyboard` / `plugin-view` | `pluginId`, `viewId` |
+| `keyboard` / `app` | Current `pathname` (other app pages) |
 
 Session `context.view` is a fresh detached/frozen snapshot: full browser-native
 `messages`, host-projected `transcript`, metadata/status, queued steers, retained
@@ -170,6 +173,61 @@ awaits. Reads never reveal input, flush dictation, save, process or submit. Disa
 predicates receive the same read-only shape; clicks capture anew. Respect supplied
 reveal/availability flags when choosing learner-facing references: full history is
 inspectable, not sanitized to currently painted prose. See the [view-context contract](plugin-view-context.md).
+
+### Action shortcuts
+
+Opt an existing action into Keyboard Settings and the shortcut cheat sheet:
+
+```ts
+ctx.registerAction({
+  id: "open-board", name: "Open board",
+  shortcut: {
+    scope: { sessions: ["teaching", "practice"], views: ["board"] },
+    defaultBinding: "mod+shift+d", // illustrative; omit to start unbound
+  },
+  run(context) {
+    if (context.surface === "session") {
+      // Keyboard and top-bar invocations both receive context.view.
+    }
+  },
+});
+```
+
+`scope: "app"` explicitly enables an action across pages. Otherwise provide a nonempty
+`sessions` and/or `views` scope; view IDs always belong to this plugin. Registration
+captures a detached/frozen scope/default. Unregister/re-register to change them;
+`refreshActions()` remains for dynamic enabled state, not shortcut metadata changes.
+A shortcut requires no button placement, and actions without `shortcut` are unchanged.
+Existing actions opting in must accept `placement: "keyboard"`, not assume `top-bar`.
+App-wide actions still receive actual session/plugin-view context on those pages.
+
+Bindings use the existing canonical `mod`, `alt`, `shift`, key order: `mod+shift+d`,
+`alt+x`, `f8`, etc. `mod` accepts Ctrl or Cmd. Only single Mod/Alt chords and function
+keys F1–F24 are supported. Escape/Tab/Enter combinations, bare typing/navigation keys,
+sequences and OS-wide hotkeys are not supported. Existing typing-surface guards apply;
+leaf editors get first refusal. Repeats, handled events and composition do not invoke
+plugin actions. Invocation uses the existing disabled/busy/error-handled action runner.
+
+App-wide means across pages, not through blocking UI. Dialogs, menus, native expanded
+viewers and another plugin's foreground surface block shortcuts. An action remains
+eligible over its own plugin's page-body surface, allowing a toggle to close it. Scope
+still refers to the underlying active page. Navigation/retention never invokes an old
+page's reader; session snapshots detach before the action runs and remain immutable
+across awaits. One physical key cannot fall through a foreground closed by that key.
+
+Settings lists registered shortcuts under plugin names, including unbound/conflicting
+entries. Rebind assigns one chord; Clear saves unbound; Reset restores the optional
+plugin default. Overrides share `lh:keymap` under `plugin:<pluginId>:<actionId>` and
+survive disable/re-enable or temporary absence. Reset all also removes these overrides.
+Only enabled/active registrations participate in dispatch/conflicts.
+
+Core effective bindings always take precedence. Scope-overlapping competing plugin
+defaults remain inactive with no load-order winner. Explicit plugin assignments beat
+plugin defaults; Settings refuses core collisions and collisions with other explicit
+plugin assignments without changing saved bindings. Conflicts use declared scope overlap,
+not transient disabled/busy/focus state. Nonoverlapping scopes may share a chord. If
+saved assignments conflict after scope changes or manual storage edits, affected
+bindings fail closed and Settings explains the conflict. Clickable actions still work.
 
 ### Controlled host UI
 
@@ -512,6 +570,6 @@ See [host architecture and verification seams](plugin-architecture.md#verificati
 ## Deliberate limits
 
 No marketplace/community updater, sandbox/per-plugin process, hot replacement,
-programmable core-data writes, general UI/forms/shortcuts framework, or automatic replay
+programmable core-data writes, general UI/forms or raw keyboard-event framework, or automatic replay
 of interrupted arbitrary tools. The platform supplies mechanisms, not feature prompts,
 algorithms, defaults or deletion policy; product decisions belong to the human.

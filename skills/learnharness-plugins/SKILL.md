@@ -57,11 +57,15 @@ Model-using examples may incur cost when explicitly run.
   subscriptions, fence late awaits/publications and avoid top-level side effects.
 - Host view shells own top bar/title/gear. Register actions before explicit placements;
   registration creates no automatic chrome. Top bars require explicit sessions/own-view
-  targets. Use `refreshActions()` for plugin-owned dynamic predicates.
+  targets. Optional action `shortcut` metadata explicitly scopes app-wide/session/own-view
+  invocation and an optional default chord; the existing Keyboard page handles rebinding.
+  Accept `placement: "keyboard"` when opting in. Use `refreshActions()` for plugin-owned
+  dynamic predicates; shortcut scope/default are captured at registration.
 - Use controlled `ctx.ui` helpers, not private imports or DOM-dependent styling. Feed
   accepted values back through shallow handle updates; replace whole nested props.
   Model/thinking controls do not write core settings. Keep host keyboard/IME/focus,
-  dictation ownership and one-Escape rules; no public shortcut framework is implied.
+  dictation ownership and one-Escape rules. Declarative action shortcuts do not expose
+  raw events, bypass foreground dialogs/editors, or register OS-wide hotkeys.
 - Session top-bar `context.view` is a fresh detached/frozen whole-session snapshot,
   including current messages/transcript, presentation and unsent published drafts.
   Use it instead of a second history parser/shuffle or private DOM inspection. Reads

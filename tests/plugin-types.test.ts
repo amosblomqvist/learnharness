@@ -20,7 +20,7 @@ it("generated plugin API declarations are portable and usable as type-only impor
 		fs.symlinkSync(path.join(root, "node_modules"), path.join(home, "node_modules"), "dir");
 		const consumer = path.join(home, "consumer.mts");
 		fs.writeFileSync(consumer, `
-import type { PluginBackendContext, PluginFrontendContext, PluginAgentTool, PluginMarkdownProps, PluginBadgeProps, GraphNode, GraphSnapshot } from "./api/index.d.ts";
+import type { PluginBackendContext, PluginFrontendContext, PluginActionShortcut, PluginAgentTool, PluginMarkdownProps, PluginBadgeProps, GraphNode, GraphSnapshot } from "./api/index.d.ts";
 declare const backend: PluginBackendContext;
 declare const frontend: PluginFrontendContext;
 declare const container: HTMLElement;
@@ -78,6 +78,29 @@ const node: GraphNode | undefined = backend.learning.readGraphFile("nodes.jsonl"
 const wrong: number = node?.statement;
 void [snapshot, node, wrong];
 frontend.registerView({ id: "view", name: "View", mount: (el) => { el.textContent = "Plugin"; return () => el.replaceChildren(); } });
+const shortcut: PluginActionShortcut = { scope: { sessions: ["teaching", "practice"], views: ["board"] }, defaultBinding: "mod+shift+d" };
+frontend.registerAction({ id:"draw", name:"Draw", shortcut, run(context) {
+  if (context.placement === "keyboard") {
+    if (context.surface === "session") {
+      const draft: string = context.view.composer.text;
+      // @ts-expect-error Session view data stays readonly through keyboard invocation.
+      context.view.composer.text = "mutated";
+      void [draft, context.surfaceTarget, context.kind];
+    } else if (context.surface === "plugin-view") void [context.pluginId, context.viewId];
+    else {
+      const pathname: string = context.pathname;
+      // @ts-expect-error Other-page keyboard context must not fabricate a session.
+      context.sessionId;
+      void pathname;
+    }
+  }
+} });
+frontend.registerAction({ id:"global", name:"Global", shortcut: { scope:"app" }, run() {} });
+// @ts-expect-error No implicit global scope.
+const missingScope: PluginActionShortcut = { defaultBinding:"mod+j" };
+// @ts-expect-error Only native session kinds are accepted.
+const wrongScope: PluginActionShortcut = { scope:{ sessions:["quiz"] } };
+void [missingScope, wrongScope];
 const input: PluginAgentTool = { kind: "input", name: "ask", description: "Ask", parameters: {type:"string"} };
 // @ts-expect-error Input tools must not silently ignore an execute callback.
 const invalid: PluginAgentTool = { kind: "input", name: "ask", description: "Ask", parameters: {type:"string"}, execute: async () => ({content:[], details:null}) };

@@ -105,8 +105,16 @@ controller; callers own hierarchy/selection, sufficient width and scrolling.
 Dialogs, menus, pickers and page-body surfaces use the shared interaction controller;
 see [dialog/overlay rules](dialog-overlay-contract.md). One Escape has one owner,
 covered content cannot receive native submit/dictation actions, and eligible focus is
-restored without focusing detached/covered controls. No new browser Tab navigation or
-plugin shortcut registry is supplied.
+restored without focusing detached/covered controls. Browser Tab navigation remains
+unchanged. Declarative action shortcuts use `src/core/plugin-shortcuts.ts` for validation,
+static scope-overlap/conflict resolution, and `components/plugin-shortcuts.tsx` for
+route-keyed page readers and eligible dispatch through the existing action runner.
+Shortcut metadata is captured at registration; dynamic disabled state stays live.
+The existing `lh:keymap` store, Keyboard Settings and cheat sheet include plugin actions.
+The interaction controller snapshots original foreground ownership at key capture;
+only the same owner's page-body surfaces allow a plugin action through. UI factories
+receive host-supplied plugin identity for this check, never author-supplied surface props.
+See [action shortcuts](plugin-authoring.md#action-shortcuts) for the public contract.
 
 Knowledge pickers capture opening origin. Page/surface origins use a main-pane view;
 modal/Settings origins use a full-viewport modal with the parent still painted/inert.
@@ -249,6 +257,6 @@ platform has been verified for release.
 ## Non-goals
 
 No sandbox/per-plugin process, marketplace/community updater, hot replacement,
-programmable core-data writes, generic forms/UI/shortcuts framework, persistent arbitrary
+programmable core-data writes, generic forms/UI or raw keyboard-event framework, persistent arbitrary
 editor drafts, or automatic replay/exactly-once external effects. Host infrastructure
 must not choose plugin product prompts, algorithms, defaults or deletion policy.

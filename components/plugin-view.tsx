@@ -8,6 +8,7 @@ import { PluginMountPoint, usePlugins } from "@/components/plugins";
 import { SettingsIcon } from "lucide-react";
 import { TopBar } from "@/components/top-bar";
 import { PluginTopBarActions } from "@/components/plugin-chrome";
+import { usePluginShortcutPage } from "@/components/plugin-shortcuts";
 import { Hint } from "@/components/ui/hint";
 import { useSettingsDialog } from "@/components/settings/settings-dialog";
 import { Button } from "@/components/ui/button";
@@ -22,6 +23,8 @@ export function PluginViewScreen({ pluginId, viewId }: { pluginId: string; viewI
 	const plugin = snapshot.plugins.find(item => item.info.id === pluginId);
 	const view = plugin?.views.find(item => item.id === viewId);
 	const loading = snapshot.loading || plugin?.phase === "loading";
+	usePluginShortcutPage(viewPath, () => view && plugin?.info.enabled && pathname === viewPath
+		? { surface: "plugin-view", pluginId, viewId } : undefined);
 	const unavailable = !plugin ? "Plugin is not installed." : !plugin.info.enabled ? "This plugin is disabled." : "This plugin view is not available.";
 	return <div className="flex h-dvh min-w-0 flex-col">
 		<TopBar>
