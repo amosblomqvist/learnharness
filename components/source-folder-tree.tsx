@@ -59,8 +59,8 @@ export function sourceNameMatches(directory: SourceDirectory | undefined, id: st
 
 /** Same Enter/blur commit and Escape cancel interaction as session titles.
  * The in-flight guard prevents Enter followed by blur from double-writing. */
-export function EditableSourceName({ name, onSave, onCancel, initiallyEditing = false }: {
-	name: string; onSave: (name: string) => Promise<unknown>; onCancel?: () => void; initiallyEditing?: boolean;
+export function EditableSourceName({ name, onSave, onCancel, initiallyEditing = false, muted = false }: {
+	name: string; onSave: (name: string) => Promise<unknown>; onCancel?: () => void; initiallyEditing?: boolean; muted?: boolean;
 }) {
 	const [editing, setEditing] = useState(initiallyEditing);
 	const [draft, setDraft] = useState(name);
@@ -89,7 +89,7 @@ export function EditableSourceName({ name, onSave, onCancel, initiallyEditing = 
 				if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); cancelled.current = true; setEditing(false); setFailure(""); onCancel?.(); }
 				if (e.key === "Enter") { e.preventDefault(); e.stopPropagation(); void commit(); }
 			}} onDragStart={(e) => { e.preventDefault(); e.stopPropagation(); }} />
-			: <button type="button" className="block max-w-full truncate rounded-sm text-start text-sm font-medium leading-5 transition-colors hover:bg-accent" title="Rename"
+			: <button type="button" className={`block max-w-full truncate rounded-sm text-start text-sm font-medium leading-5 transition-colors hover:bg-accent${muted ? " text-muted-foreground/60" : ""}`} title="Rename"
 				dir={rtlDir(name)} onClick={() => { cancelled.current = false; setDraft(name); setEditing(true); }}>{name}</button>}
 		{failure && <span role="alert" className="block text-xs text-red-400">{failure}</span>}
 	</span>;

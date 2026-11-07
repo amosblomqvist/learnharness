@@ -67,7 +67,7 @@ import { PATHS } from "../config.ts";
 
 const createdChats: string[] = [];
 
-/** A scripted pi engine (faux provider, docs/pi-engine-swap.md §7): the
+/** A scripted pi engine (faux provider, docs/archive/pi-engine-swap.md §7): the
  *  response queue replaces the old doGenerate turn counter. Usage is
  *  ESTIMATED by faux from the prompt/response text (deterministic, > 0) —
  *  the tests assert structure and positivity, not flat mock numbers. */
