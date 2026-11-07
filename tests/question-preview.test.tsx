@@ -319,7 +319,8 @@ describe("probe conclusion Markdown", () => {
 			const card = document.querySelector('[data-testid="probe-done-card"]')!;
 			assert.equal(card.tagName.toLowerCase(), "details");
 			assert.ok(!card.hasAttribute("open"));
-			for (const css of ["my-3", "rounded-xl", "border", "bg-card/60"]) assert.ok(card.classList.contains(css));
+			for (const css of ["my-3", "overflow-hidden", "rounded-xl", "border", "bg-card/60"]) assert.ok(card.classList.contains(css));
+			assert.ok(!card.classList.contains("bg-background/60"), "keep the original card color, not the page background");
 			const summary = card.querySelector("summary")!;
 			assert.match(summary.textContent, /Probe assessment/);
 			assert.ok(summary.textContent.includes(`${count} strand${count === 1 ? "" : "s"}`));
@@ -329,6 +330,30 @@ describe("probe conclusion Markdown", () => {
 			assert.ok(summary.querySelector(".lucide-chevron-right")?.classList.contains("group-open:rotate-90"));
 			assert.equal(summary.querySelectorAll("button, a, input").length, 0);
 			assert.ok(card.textContent.includes("ASSESSMENT_BODY") && card.textContent.includes("SUMMARY_BODY"));
+		}
+	});
+
+	it("uses a flat card with an open-header divider and full-width dividers between strands and the optional summary", () => {
+		for (const includeSummary of [false, true]) {
+			const document = dom(<ProbeDoneCard part={{ state: "output-available", input: { assessment: {
+				strands: [{ strand: "First", assessment: "First assessment" }, { strand: "Second", assessment: "Second assessment" }],
+				...(includeSummary ? { summary: "Final summary" } : {}),
+			} }, output: { ok: true } }} />);
+			const card = document.querySelector("details")!;
+			const header = card.querySelector("summary")!;
+			assert.ok(header.classList.contains("group-open:border-b"));
+			assert.ok(!header.classList.contains("group-open:pb-2"));
+			const body = card.lastElementChild!;
+			assert.ok(body.classList.contains("divide-y"));
+			assert.equal(body.className, "divide-y", "no body inset or gap may shorten the separators");
+			assert.equal(body.children.length, includeSummary ? 3 : 2);
+			for (const section of [...body.children]) {
+				assert.equal(section.className, "px-3 py-2", "only internal text padding, no individual background or rounded container");
+			}
+			assert.ok(body.children[0]!.textContent.includes("First assessment"));
+			assert.ok(body.children[1]!.textContent.includes("Second assessment"));
+			assert.equal(body.textContent.includes("Final summary"), includeSummary);
+			if (includeSummary) assert.equal(body.lastElementChild!.textContent.trim(), "Final summary");
 		}
 	});
 

@@ -60,23 +60,25 @@ export function ProbeDoneCard({ part }: { part: { input?: unknown; output?: unkn
 	);
 
 	return (
-		<details data-testid="probe-done-card" className="group my-3 rounded-xl border bg-card/60">
-			<summary className="flex cursor-pointer list-none items-center gap-2 rounded-xl p-3 text-xs font-medium uppercase tracking-wide text-muted-foreground transition-colors hover:bg-accent/40 group-open:rounded-b-none group-open:pb-2 [&::-webkit-details-marker]:hidden">
+		<details data-testid="probe-done-card" className="group my-3 overflow-hidden rounded-xl border bg-card/60">
+			<summary className="flex cursor-pointer list-none items-center gap-2 rounded-xl p-3 text-xs font-medium uppercase tracking-wide text-muted-foreground transition-colors hover:bg-accent/40 group-open:rounded-b-none group-open:border-b [&::-webkit-details-marker]:hidden">
 				{heading}
 				<span className="ml-auto shrink-0 font-normal normal-case tracking-normal text-muted-foreground/70">
 					{strands.length} strand{strands.length === 1 ? "" : "s"}
 				</span>
 				<ChevronRightIcon className="size-3 shrink-0 opacity-50 transition-transform group-open:rotate-90" />
 			</summary>
-			<div className="space-y-2 px-3 pb-3">
+			<div className="divide-y">
 				{strands.map((s, i) => (
-					<div key={i} className="rounded-lg bg-background/60 px-3 py-2">
+					<div key={i} className="px-3 py-2">
 						<ToolContentResponse className="text-sm font-medium">{s.strand}</ToolContentResponse>
 						<ToolContentResponse className="mt-0.5 text-sm text-muted-foreground">{s.assessment}</ToolContentResponse>
 					</div>
 				))}
 				{assessment?.summary && (
-					<ToolContentResponse className="px-1 text-sm text-muted-foreground">{assessment.summary}</ToolContentResponse>
+					<div className="px-3 py-2">
+						<ToolContentResponse className="text-sm text-muted-foreground">{assessment.summary}</ToolContentResponse>
+					</div>
 				)}
 			</div>
 		</details>
