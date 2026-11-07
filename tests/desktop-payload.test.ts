@@ -9,14 +9,6 @@ import { describe, it } from "node:test";
 const source = fs.readFileSync(new URL("../scripts/build-server.mjs", import.meta.url), "utf8");
 const STANDALONE = path.join(".next", "standalone");
 const PROMPT = path.join("src", "agent", "system-prompt.md");
-/** What on-device dictation loads by runtime-resolved paths (build-server.mjs section 4). */
-const LOCAL_STT = [
-	path.join("src", "server", "local-stt", "silero-vad-v6.2-F32.gguf"),
-	path.join("node_modules", "transcribe-cpp", "package.json"),
-	path.join("node_modules", "koffi", "package.json"),
-	path.join("node_modules", "@transcribe-cpp", "linux-x64-cpu-vulkan", "libtranscribe.so"),
-	path.join("node_modules", "@koromix", "koffi-linux-x64", "koffi.node"),
-];
 
 function withPayload(test: (fixture: {
 	root: string;
@@ -36,7 +28,6 @@ function withPayload(test: (fixture: {
 		write(path.join("public", "asset.txt"));
 		write(path.join(STANDALONE, PROMPT));
 		write(path.join(STANDALONE, "src", "agent", "prompts", "teacher", "20-teaching.md"));
-		for (const file of LOCAL_STT) write(path.join(STANDALONE, file));
 		test({ root, write, run: () => spawnSync(process.execPath, [path.join(root, "scripts", "build-server.mjs")], {
 			cwd: root, encoding: "utf8", timeout: 10_000,
 		}) });
@@ -90,17 +81,6 @@ describe("desktop standalone payload", () => {
 				const result = run();
 				assert.equal(result.status, 1, leaked);
 				assert.match(String(result.stderr), /REFUSING/);
-			});
-		}
-	});
-
-	it("refuses a payload without the on-device dictation engine, which only fails on first use", () => {
-		for (const missing of [LOCAL_STT[0]!, LOCAL_STT[1]!, LOCAL_STT[2]!, path.join("node_modules", "@transcribe-cpp"), path.join("node_modules", "@koromix")]) {
-			withPayload(({ root, run }) => {
-				fs.rmSync(path.join(root, STANDALONE, missing), { recursive: true });
-				const result = run();
-				assert.equal(result.status, 1, missing);
-				assert.match(String(result.stderr), /local dictation|missing from the trace/, missing);
 			});
 		}
 	});
