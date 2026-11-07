@@ -231,8 +231,8 @@ function parseHexOrNull(value: unknown, field: string): { color?: string | null;
 	return { color: value };
 }
 
-/** appearance: { mode?, background?, lightBackground?, fontFamily?,
- *  proseFontSize?, sessionNameSerif?, mdRendering? } */
+/** appearance: { mode?, background?, fontFamily?, proseFontSize?,
+ *  sessionNameSerif?, mdRendering? } */
 export function parseAppearanceSettingsBody(body: unknown): SettingsBodyResult<AppearanceSettings> {
 	const raw = asRecord(body);
 	if (!raw) return { ok: false, error: "Invalid JSON body" };
@@ -247,11 +247,6 @@ export function parseAppearanceSettingsBody(body: unknown): SettingsBodyResult<A
 		const parsed = parseHexOrNull(raw.background, "background");
 		if (parsed.error) return { ok: false, error: parsed.error };
 		settings.background = parsed.color ?? null;
-	}
-	if (raw.lightBackground !== undefined) {
-		const parsed = parseHexOrNull(raw.lightBackground, "lightBackground");
-		if (parsed.error) return { ok: false, error: parsed.error };
-		settings.lightBackground = parsed.color ?? null;
 	}
 	if (raw.fontFamily !== undefined) {
 		if (raw.fontFamily !== null && (typeof raw.fontFamily !== "string" || !raw.fontFamily.trim())) {

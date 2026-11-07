@@ -391,11 +391,10 @@ export interface MdRenderingSettings {
 export interface AppearanceSettings {
 	/** "dark" | "light" | "system" (follow the OS; default dark). */
 	mode?: "dark" | "light" | "system";
-	/** The one user-chosen color; everything else derives per-mode in code.
-	 *  null = the mode's default background. */
+	/** The one user-chosen color: the DARK variant's background (light
+	 *  always renders the factory paper, #f5f5f3); everything else derives
+	 *  in code. null = the dark default (#141414). */
 	background?: string | null;
-	/** The light variant's background; null = its default (#f5f5f3). `background` is the dark one. */
-	lightBackground?: string | null;
 	/** The main reading font (everything that is Source Sans 3 today), by
 	 *  name — user-chosen from installed fonts. null = Source Sans 3. */
 	fontFamily?: string | null;
@@ -501,7 +500,6 @@ export interface FactorySettings {
 	appearance: {
 		mode: "dark" | "light" | "system";
 		background: string | null;
-		lightBackground: string | null;
 		fontFamily: string | null;
 		proseFontSize: number;
 		sessionNameSerif: boolean;
@@ -522,7 +520,6 @@ export const FACTORY_SETTINGS: FactorySettings = {
 	appearance: {
 		mode: "dark",
 		background: null, // the dark default (#141414) lives in the mode's derivation curve
-		lightBackground: null, // the light default (#f5f5f3) lives in the light curve
 		fontFamily: null, // Source Sans 3
 		proseFontSize: 16,
 		sessionNameSerif: true,
@@ -756,7 +753,6 @@ function sanitizeAppearance(raw: Record<string, unknown>): AppearanceSettings {
 	const out: AppearanceSettings = {};
 	if (raw.mode === "dark" || raw.mode === "light" || raw.mode === "system") out.mode = raw.mode;
 	if (raw.background !== undefined) out.background = sanitizeHexOrNull(raw.background);
-	if (raw.lightBackground !== undefined) out.lightBackground = sanitizeHexOrNull(raw.lightBackground);
 	if (raw.fontFamily !== undefined) {
 		out.fontFamily = typeof raw.fontFamily === "string" && raw.fontFamily.trim() ? raw.fontFamily : null;
 	}

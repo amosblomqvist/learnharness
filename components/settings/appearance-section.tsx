@@ -8,9 +8,8 @@
  * something). Hex inputs commit on blur/Enter; the background derives the
  * raised/accent/edge palette in code (components/settings/appearance.tsx).
  * Mode (light-mode wave, 2026-10-29) is picked from three preview cards
- * (./mode-cards.tsx). The Background row follows the RENDERED mode: it
- * edits `background` while dark is on screen and `lightBackground` while
- * light is — under System, whichever the OS picked.
+ * (./mode-cards.tsx). The Background row is the dark variant's only:
+ * light always renders the factory paper.
  *
  * Graph graying (owner, 2026-09-20) follows the graph viewer's render-panel
  * convention: the whole row dims when a parent is off (stored values
@@ -100,12 +99,9 @@ export function AppearanceSection({
 	/** PUT the whole appearance section; the page re-applies on success. */
 	onSectionChange: (next: AppearanceSettings) => void;
 }) {
-	const { appearance: resolved, resolvedMode } = useAppearance();
+	const { appearance: resolved } = useAppearance();
 	const md = appearance?.mdRendering;
 	const mode = appearance?.mode ?? "dark";
-	// One Background row, two stored fields: whichever variant is on screen.
-	const backgroundField = resolvedMode === "dark" ? "background" : "lightBackground";
-	const backgroundDefault = MODE_DEFAULT_BACKGROUND[resolvedMode];
 
 	// The font dropdown's open state + its enumeration cache. undefined =
 	// not enumerated yet (desktop: click-bound queryLocalFonts pending);
@@ -198,21 +194,23 @@ export function AppearanceSection({
 				<ModeCards
 					value={mode}
 					background={appearance?.background ?? null}
-					lightBackground={appearance?.lightBackground ?? null}
 					onSelect={(next) => onSectionChange({ ...appearance, mode: next })}
 				/>
 			</div>
+			{/* The dark variant's background only — light always renders the
+			    factory paper. Editable in either mode, so a dark color can be
+			    set ahead of a switch. */}
 			<SettingsRow
 				label="Background"
-				hint={`Empty = ${backgroundDefault}${mode === "system" ? " (from system)" : ""}`}
+				hint={`Dark mode only. Empty = ${MODE_DEFAULT_BACKGROUND.dark}`}
 				testid="row-background"
 			>
 				<CommitInput
-					value={appearance?.[backgroundField] ?? ""}
-					placeholder={backgroundDefault}
+					value={appearance?.background ?? ""}
+					placeholder={MODE_DEFAULT_BACKGROUND.dark}
 					ariaLabel="background hex"
 					testid="input-background"
-					onCommit={(v) => onSectionChange({ ...appearance, [backgroundField]: v === "" ? null : v })}
+					onCommit={(v) => onSectionChange({ ...appearance, background: v === "" ? null : v })}
 				/>
 			</SettingsRow>
 			<SettingsRow

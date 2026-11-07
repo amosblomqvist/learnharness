@@ -109,7 +109,7 @@ describe("desktop window chrome", () => {
 		assert.deepEqual(Object.keys(bridge).sort(), [
 			"chatgpt", "checkForUpdates", "chooseAttachmentFolder", "expandWindow", "getPathForFile", "getUpdateState", "getZoom", "installUpdate", "onOpenSettings", "onUpdateStatus", "onZoom", "platform", "setAppearance", "subscriptions",
 		]);
-		const appearance = { mode: "system", background: null, lightBackground: "#eeeeee" };
+		const appearance = { mode: "system", background: "#202020" };
 		(bridge.setAppearance as (a: unknown) => void)(appearance);
 		assert.deepEqual(sent, [["lh:appearance", appearance]]);
 		assert.deepEqual(Object.keys(bridge.subscriptions as object).sort(), ["cancel", "consent", "disconnect", "login", "onChange", "open", "respond", "retry", "status"]);

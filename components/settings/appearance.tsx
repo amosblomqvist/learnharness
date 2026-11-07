@@ -47,7 +47,6 @@ export function resolveAppearance(delta: AppearanceSettings | undefined) {
 	return {
 		mode: delta?.mode ?? f.mode,
 		background: delta?.background ?? f.background,
-		lightBackground: delta?.lightBackground ?? f.lightBackground,
 		fontFamily: delta?.fontFamily ?? f.fontFamily,
 		proseFontSize: delta?.proseFontSize ?? f.proseFontSize,
 		sessionNameSerif: delta?.sessionNameSerif ?? f.sessionNameSerif,
@@ -83,17 +82,16 @@ export function derivedPalette(background: string, mode: RenderedMode = "dark"):
 }
 
 /** THE mapping: resolved appearance → the CSS variables to set on <html>.
- *  Absent entries = leave the factory stylesheet value in place. Each
- *  variant derives from its OWN background (dark `background`, light
- *  `lightBackground`), so a dark custom palette never survives a switch to
+ *  Absent entries = leave the factory stylesheet value in place. The
+ *  custom background is the DARK variant's: light always renders the
+ *  stylesheet's paper, so a dark custom palette never survives a switch to
  *  light. Pure — exported for tests. */
 export function appearanceVars(
 	a: ReturnType<typeof resolveAppearance>,
 	mode: RenderedMode = "dark",
 ): Record<string, string> {
 	const vars: Record<string, string> = {};
-	const bg = mode === "dark" ? a.background : a.lightBackground;
-	if (bg !== null) Object.assign(vars, derivedPalette(bg, mode));
+	if (mode === "dark" && a.background !== null) Object.assign(vars, derivedPalette(a.background, "dark"));
 	if (a.fontFamily !== null) {
 		vars["--font-prose"] = `"${a.fontFamily}", var(--font-sans3), ui-sans-serif, system-ui, sans-serif`;
 	}
@@ -218,12 +216,12 @@ export function AppearanceProvider({
 	// The desktop shell's native chrome (window background, Windows/Linux
 	// control overlay) follows the mode and backgrounds — absent in a browser.
 	// Held until the record loads: main read the same settings file at
-	// launch, and the factory backgrounds would briefly undo a custom one.
-	const { background, lightBackground } = resolveAppearance(delta);
+	// launch, and the factory background would briefly undo a custom one.
+	const { background } = resolveAppearance(delta);
 	useEffect(() => {
 		if (!recordLoaded) return;
-		window.lh?.setAppearance?.({ mode, background, lightBackground });
-	}, [recordLoaded, mode, background, lightBackground]);
+		window.lh?.setAppearance?.({ mode, background });
+	}, [recordLoaded, mode, background]);
 
 	// One fetch per app load: the record (sanitized server-side) carries the
 	// delta; resolution happens here against the compiled factory.

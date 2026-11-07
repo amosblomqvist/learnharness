@@ -108,19 +108,17 @@ function Swatches({ palette }: { palette: Record<string, string> }) {
 export function ModeCards({
 	value,
 	background,
-	lightBackground,
 	onSelect,
 }: {
 	/** The stored mode — its card is pressed. */
 	value: AppearanceMode;
-	/** The custom backgrounds (null = the variant's default), so each
-	 *  preview shows the EFFECTIVE palette. */
+	/** The custom dark background (null = the default), so the dark
+	 *  preview shows the EFFECTIVE palette. Light is always the paper. */
 	background: string | null;
-	lightBackground: string | null;
 	onSelect: (mode: AppearanceMode) => void;
 }) {
 	const dark = variantPalette("dark", background);
-	const light = variantPalette("light", lightBackground);
+	const light = variantPalette("light", null);
 	const cards: Array<{ mode: AppearanceMode; label: string; preview: React.ReactNode; swatches?: React.ReactNode }> = [
 		{ mode: "dark", label: "Dark", preview: <MiniApp palette={dark} />, swatches: <Swatches palette={dark} /> },
 		{ mode: "light", label: "Light", preview: <MiniApp palette={light} />, swatches: <Swatches palette={light} /> },

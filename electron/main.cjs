@@ -71,7 +71,6 @@ function normalizeAppearance(a) {
 	return {
 		mode: a?.mode === "light" || a?.mode === "system" ? a.mode : "dark",
 		background: typeof a?.background === "string" && HEX.test(a.background) ? a.background : null,
-		lightBackground: typeof a?.lightBackground === "string" && HEX.test(a.lightBackground) ? a.lightBackground : null,
 	};
 }
 
@@ -89,7 +88,8 @@ let appearance = normalizeAppearance(null);
 /** Native colors for the rendered variant (nativeTheme resolves System). */
 function chromeColors() {
 	const mode = nativeTheme.shouldUseDarkColors ? "dark" : "light";
-	const custom = mode === "dark" ? appearance.background : appearance.lightBackground;
+	// The custom background is the dark variant's; light is always the paper.
+	const custom = mode === "dark" ? appearance.background : null;
 	return { color: custom ?? WINDOW_CHROME[mode].background, symbolColor: WINDOW_CHROME[mode].symbol };
 }
 

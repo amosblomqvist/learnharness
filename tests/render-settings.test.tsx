@@ -310,15 +310,14 @@ describe("AppearanceSection (thin SSR)", () => {
 		assert.equal((html.match(/data-testid="mode-swatch"/g) ?? []).length, 10);
 	});
 
-	it("the Background row edits the rendered mode's field", () => {
-		// SSR context default resolvedMode = dark → the dark field and hint
-		const html = renderToStaticMarkup(
-			<AppearanceSection appearance={{ background: "#202020", lightBackground: "#eeeeee" }} onSectionChange={() => {}} />,
-		);
-		assert.match(html, /Empty = #141414/);
-		assert.ok(tagOf(html, "input-background").includes('value="#202020"'));
-		const system = renderToStaticMarkup(<AppearanceSection appearance={{ mode: "system" }} onSectionChange={() => {}} />);
-		assert.match(system, /Empty = #141414 \(from system\)/);
+	it("the Background row edits the dark background in every mode", () => {
+		for (const mode of ["dark", "light", "system"] as const) {
+			const html = renderToStaticMarkup(
+				<AppearanceSection appearance={{ mode, background: "#202020" }} onSectionChange={() => {}} />,
+			);
+			assert.match(html, /Dark mode only\. Empty = #141414/);
+			assert.ok(tagOf(html, "input-background").includes('value="#202020"'), mode);
+		}
 	});
 
 	it("hex inputs carry the factory placeholders; prose size resolves against the factory", () => {

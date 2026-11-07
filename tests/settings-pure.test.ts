@@ -28,7 +28,6 @@ describe("resolveAppearance — delta over factory", () => {
 		const a = resolveAppearance(undefined);
 		assert.equal(a.mode, "dark");
 		assert.equal(a.background, null);
-		assert.equal(a.lightBackground, null);
 		assert.equal(a.fontFamily, null);
 		assert.equal(a.proseFontSize, 16);
 		assert.equal(a.sessionNameSerif, true);
@@ -101,14 +100,11 @@ describe("appearanceVars — the mapping the provider applies", () => {
 		assert.equal(vars["--lh-ink-italic"], "#00ff00");
 	});
 
-	it("each mode derives from its own background; a dark custom never leaks into light", () => {
-		const a = resolveAppearance({ background: "#202020", lightBackground: null });
+	it("the custom background is dark-only: it never leaks into light", () => {
+		const a = resolveAppearance({ background: "#202020" });
 		assert.equal(appearanceVars(a, "dark")["--background"], "#202020");
-		assert.equal(appearanceVars(a, "light")["--background"], undefined);
-		const light = appearanceVars(resolveAppearance({ lightBackground: "#eeeeee" }), "light");
-		assert.equal(light["--background"], "#eeeeee");
-		assert.equal(light["--card"], "#ffffff", "light raised surfaces stay white");
-		assert.equal(light["--border"], "#cdcdcd", "edges darken: 238 − 33");
+		const light = appearanceVars(a, "light");
+		for (const token of ["--background", "--card", "--accent", "--border"]) assert.equal(light[token], undefined, token);
 	});
 
 	it("sessionNameSerif false alone: titles move, nothing else does", () => {
