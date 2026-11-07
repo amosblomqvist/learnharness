@@ -60,6 +60,8 @@ import { SessionMessageNavigation } from "@/components/session-navigation";
 import { PracticeDock } from "@/components/practice-dock";
 import { ThinkingCard, type PracticeThinkingData } from "@/components/practice-cards";
 import { GraphContextCard, type GraphContextData } from "@/components/graph-context-card";
+import { NotesPanel, useSessionNotes, type NoteLocation } from "./session-notes";
+import { SourceTagDialog } from "./tag-picker";
 import { TopBar } from "@/components/top-bar";
 import type { ArtifactPartProps, JobRecord, Phase3, QuestionAnswerData, QuestionFormDraft, TurnUsage, SessionPricing } from "@/src/core";
 import type { LhViewMessage } from "@/src/core";
@@ -213,7 +215,7 @@ function isSubagentSteer(m: LhViewMessage): boolean {
  * and DockOverlay animates its height on variant changes.
  */
 export function Chat({
-	chatId,
+	chatId, requestedNotes, requestedSection,
 	title,
 	initialMessages,
 	initialError,
@@ -225,6 +227,8 @@ export function Chat({
 }: {
 	chatId: string;
 	title: string;
+	requestedNotes?: "live" | "final";
+	requestedSection?: string;
 	initialMessages: LhMessage[];
 	/** Memory-only settlement notice supplied on reopening. */
 	initialError?: string;
@@ -246,6 +250,18 @@ export function Chat({
 	 *  only decides whether the pill rides the composer. */
 	initialConfigured?: boolean;
 }) {
+	const notes = useSessionNotes(chatId);
+	const [noteLocation, setNoteLocation] = useState<NoteLocation | null>(requestedNotes ? { mode: requestedNotes, sectionId: requestedSection } : null);
+	const [tagging, setTagging] = useState(false);
+	useEffect(() => {
+		if (requestedNotes) setNoteLocation({ mode: requestedNotes, sectionId: requestedSection });
+	}, [requestedNotes, requestedSection]);
+	const planNotes = new Map<string, NoteLocation>();
+	for (const mode of ["live", "final"] as const) {
+		for (const section of notes.view[mode]?.document.sections ?? []) {
+			for (const id of section.nodeIds) planNotes.set(id, { mode, sectionId: section.id });
+		}
+	}
 	// Reattach plumbing (background-turn runner wave): the hook holds the
 	// settled terminal's callback — a stable ref assigned below, once
 	// syncFromServer exists (refs, not closures: no stale capture).
@@ -1353,6 +1369,9 @@ export function Chat({
 							<div className="min-w-4 flex-1" aria-hidden="true" />
 					</>
 					)}
+					<button type="button" className="rounded-full border px-2 py-0.5 text-xs hover:bg-accent" onClick={() => setTagging(true)}>Tags</button>
+					<button type="button" aria-expanded={!!noteLocation} className="rounded-full border px-2 py-0.5 text-xs hover:bg-accent"
+						onClick={() => setNoteLocation(noteLocation ? null : { mode: notes.view.final || !notes.view.liveEnabled ? "final" : "live" })}>Notes</button>
 					{/* The plan chip (owner, plan-placement round): session-level
 					    structure beside the phase chip — access to the full-DAG popup
 					    at every width; the marginalia is the wide-screen glance view. */}
@@ -1398,8 +1417,8 @@ export function Chat({
 				</TopBar>
 
 				<SessionFind scopeRef={sessionFindScopeRef} scrollContextRef={scrollContextRef} />
-				<div ref={sessionFindScopeRef} className="relative flex min-h-0 flex-1">
-				<Conversation className="h-full min-w-0 flex-1" initial="instant" contextRef={scrollContextRef}>
+				<div ref={sessionFindScopeRef} className="lh-session-body relative flex min-h-0 flex-1">
+				<Conversation className="notes-conversation h-full min-w-0 flex-1" initial="instant" contextRef={scrollContextRef}>
 					<SessionMessageNavigation />
 					<ConversationContent className="min-h-full gap-0 p-0">
 						<div data-session-find-root="" className={`${COLUMN} flex flex-1 flex-col gap-4 pt-4`}>
@@ -1657,6 +1676,9 @@ export function Chat({
 									<Shimmer duration={1}>COMPACTING CONTEXT…</Shimmer>
 								</span>
 							)}
+							{notes.view.eligible && !busy && <button className="self-start rounded-md border px-3 py-1.5 text-sm hover:bg-accent disabled:opacity-50"
+								disabled={notes.sending || notes.view.running.includes("final")}
+								onClick={() => { setNoteLocation({ mode: "final" }); void notes.action({ action: "generate" }); }}>{notes.view.final ? "Regenerate notes" : "Generate notes"}</button>}
 							{(status === "submitted" || turnInFlight) && (
 								<span className="flex items-center gap-2 font-ui text-xs font-medium uppercase tracking-wide text-muted-foreground">
 									<BrailleSpinner label="Thinking" />
@@ -1775,6 +1797,8 @@ export function Chat({
 					}}
 				/>
 				</Conversation>
+				{noteLocation && <NotesPanel chatId={chatId} notes={notes} location={noteLocation} navigate={setNoteLocation} close={() => setNoteLocation(null)} />}
+				{tagging && <SourceTagDialog ids={[chatId]} close={() => setTagging(false)} />}
 
 				{/* The session-scoped focuses (chrome-melt wave, 2026-09-19): mounted
 				    INSIDE the session area — absolute inset-0 siblings of the scroller,
@@ -1790,7 +1814,7 @@ export function Chat({
 						onClose={() => setFigureFocus(null)}
 					/>
 				)}
-				{planOpen && <PlanPopup messages={messages} onClose={() => setPlanOpen(false)} />}
+				{planOpen && <PlanPopup messages={messages} onClose={() => setPlanOpen(false)} noteNodes={planNotes} onNote={id => { setNoteLocation(planNotes.get(id) ?? null); setPlanOpen(false); }} />}
 				<AbortTurnDialog mode={abortAsk} onClose={() => setAbortAsk(null)} onConfirm={confirmAbort} busy={busy} />
 				</div>
 			</div>

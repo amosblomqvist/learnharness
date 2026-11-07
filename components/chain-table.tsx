@@ -70,6 +70,7 @@ import {
 } from "lucide-react";
 import { chainsForSelection, chainSourceDirectory, folderEntryCheck, toggleSourceEntries, formatChainLine, fuzzyScore, sourceFileLabel } from "@/src/core";
 import type { GraphChain, GraphNode, SourceDirectory, SourceEntry, SourceFolder, SourceEntrySelection } from "@/src/core";
+import Link from "next/link";
 import { EditableSourceName, SourceDragRow, sourceNameMatches, SourceFolderTree, type OrganizationChange } from "./source-folder-tree";
 import { chainRow, useChainNavigation } from "./chain-navigation";
 import { useServerEvent, useServerResync } from "./server-events";
@@ -318,6 +319,7 @@ export function ChainTableBody({
 				<span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">
 					{chains.length} {chains.length === 1 ? "chain" : "chains"} · {nodes.length} {nodes.length === 1 ? "node" : "nodes"}
 				</span>
+				{!selectMode && !onOrganizationChange && <Link href="/tags" className="rounded px-2 py-1 text-xs hover:bg-accent">Organize in Tags</Link>}
 				{onOrganizationChange && <button type="button" aria-label="Add folder" data-testid="add-source-folder"
 					onClick={() => setCreatingFolder(true)} className="lh-no-drag rounded-lg p-2 text-muted-foreground hover:bg-accent"><FolderPlusIcon className="size-4" /></button>}
 				<div className="relative shrink-0">
@@ -758,28 +760,6 @@ export function ChainTableOverlay({
 	useServerEvent("sources-changed", () => { if (open) void readDirectory(); });
 	useServerEvent("chats-changed", () => { if (open) void readDirectory(); });
 	useServerResync(() => { if (open) void readDirectory(); });
-	const changeOrganization: OrganizationChange = (action) => {
-		const opening = directoryOpening.current;
-		// Serialize this page's edits, and invalidate older notify-then-fetch reads.
-		const operation = mutationTail.current.catch(() => {}).then(async () => {
-			try {
-				const response = await fetch("/api/graph/sources", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(action) });
-				const body = await response.json();
-				if (!response.ok) throw new Error(typeof body.error === "string" ? body.error : "Could not save source organization.");
-				if (opening === directoryOpening.current) {
-					requestVersion.current++;
-					setDirectory(body as SourceDirectory); setDirectoryPending(false); setDirectoryFailure("");
-				}
-				if (action.action === "rename-source") {
-					const entry = (body as SourceDirectory).sources.find((s) => s.id === action.id);
-					window.dispatchEvent(new CustomEvent(entry?.kind === "chat" ? "lh:chat-renamed" : "lh:source-renamed", { detail: { id: action.id, title: action.name } }));
-				}
-				return typeof body.createdFolderId === "string" ? body.createdFolderId : undefined;
-			} catch (error) { setDirectoryFailure(error instanceof Error ? error.message : String(error)); throw error; }
-		});
-		mutationTail.current = operation;
-		return operation;
-	};
 	const selectedSources = new Set([...entrySelection.sources].filter((id) => visibleDirectory?.sources.some((s) => s.id === id)));
 	const selectedFolders = new Set([...entrySelection.folders].filter((id) => directory?.organization.folders.some((f) => f.id === id)));
 	const fullySelectedFolders = new Set([...selectedFolders].filter((id) => visibleDirectory && folderEntryCheck(visibleDirectory, id, { sources: selectedSources, folders: selectedFolders }).checked));
@@ -843,7 +823,6 @@ export function ChainTableOverlay({
 				<ChainTableBody
 					keyboardActive={!deleteOpen}
 					directory={directory}
-					onOrganizationChange={directory ? changeOrganization : undefined}
 					selectedFolders={selectedFolders}
 					selectedSources={selectedSources}
 					onToggleSource={(id, next) => toggleEntries("source", id, next)}

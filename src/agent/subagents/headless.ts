@@ -161,15 +161,21 @@ export function browserServiceBinary(): string | null {
 
 const BROWSER_SERVICE_TIMEOUT_MS = 15_000;
 let browserServiceProc: import("node:child_process").ChildProcess | null = null;
+let startingPort: Promise<number | null> | undefined;
 
-async function connectBrowserService(): Promise<import("puppeteer-core").Browser | null> {
+async function connectBrowserService() {
 	const puppeteer = (await import("puppeteer-core")).default;
 	const { spawn } = await import("node:child_process");
 	let port: number | null = null;
+	let owner = browserServiceProc;
 
-	if (browserServiceProc && browserServiceProc.exitCode === null) {
+	if (browserServiceProc?.connected && browserServiceProc.exitCode === null) {
 		// Helper alive from a previous run — reuse its endpoint.
 		port = (browserServiceProc as { __cdpPort?: number }).__cdpPort ?? null;
+		if (port === null && startingPort) {
+			port = await startingPort;
+			if (port === null) return null;
+		}
 	}
 	if (port === null) {
 		const binary = browserServiceBinary();
@@ -189,7 +195,8 @@ async function connectBrowserService(): Promise<import("puppeteer-core").Browser
 			stdio: ["ignore", "pipe", "pipe", "ipc"] as const,
 		});
 		browserServiceProc = proc;
-		port = await new Promise<number | null>((resolve) => {
+		owner = proc;
+		startingPort = new Promise<number | null>((resolve) => {
 			let buf = "";
 			const timer = setTimeout(() => {
 				proc.kill();
@@ -200,15 +207,19 @@ async function connectBrowserService(): Promise<import("puppeteer-core").Browser
 				const line = buf.split("\n").find((l) => parseBrowserServiceLine(l) !== null);
 				if (line !== undefined) {
 					clearTimeout(timer);
+					proc.stdout!.off("data", onData);
 					resolve(parseBrowserServiceLine(line));
 				}
 			};
 			proc.stdout!.on("data", onData);
+			proc.once("error", () => { clearTimeout(timer); resolve(null); });
 			proc.once("exit", () => {
 				clearTimeout(timer);
 				resolve(null);
 			});
 		});
+		port = await startingPort;
+		startingPort = undefined;
 		if (port === null) {
 			browserServiceProc = null;
 			return null;
@@ -222,10 +233,11 @@ async function connectBrowserService(): Promise<import("puppeteer-core").Browser
 		if (!info.webSocketDebuggerUrl) return null;
 		// connect ≠ launch: browser.close() below merely disconnects — the
 		// helper stays resident for the next job (IPC-owned lifetime).
-		return await puppeteer.connect({
+		const browser = await puppeteer.connect({
 			browserWSEndpoint: info.webSocketDebuggerUrl,
 			defaultViewport: null,
 		});
+		return { browser, owner };
 	} catch {
 		return null;
 	}
@@ -236,20 +248,21 @@ async function connectBrowserService(): Promise<import("puppeteer-core").Browser
  *  so concurrent jobs queue here instead of fighting over one webContents. */
 let helperPageChain: Promise<unknown> = Promise.resolve();
 
-async function withBrowserPage<T>(fn: (page: import("puppeteer-core").Page) => Promise<T>): Promise<T> {
+async function withBrowserPage<T>(fn: (page: import("puppeteer-core").Page, owner?: import("node:child_process").ChildProcess | null) => Promise<T>): Promise<T> {
 	// Helper first (owner ruling 2026-10-10: the app's own Chromium primary,
 	// system Chrome fallback) — deterministic across users, zero install.
 	const helper = await connectBrowserService();
 	if (helper) {
 		const run = async (): Promise<T> => {
-			const pages = await helper.pages();
+			const pages = await helper.browser.pages();
 			const page = pages.find((p) => p.target().type() === "page");
 			if (!page) throw new Error("browser service: no page target");
 			try {
-				return await fn(page);
+				return await fn(page, helper.owner);
 			} finally {
 				// Drop all page state (JS heap, listeners) between jobs.
 				await page.goto("about:blank").catch(() => {});
+				await helper.browser.disconnect();
 			}
 		};
 		const next = helperPageChain.then(run, run);
@@ -273,6 +286,38 @@ async function withBrowserPage<T>(fn: (page: import("puppeteer-core").Page) => P
 	} finally {
 		await browser.close().catch(() => {});
 	}
+}
+
+/** Electron exposes printing through webContents in the owning main process. */
+function printHelperPage(proc: import("node:child_process").ChildProcess): Promise<Uint8Array> {
+	return new Promise((resolve, reject) => {
+		const requestId = crypto.randomUUID();
+		const finish = (error?: Error, data?: string) => {
+			clearTimeout(timer);
+			proc.off("message", onMessage);
+			proc.off("disconnect", disconnected);
+			if (error || !data) reject(error ?? new Error("PDF rendering failed."));
+			else resolve(Buffer.from(data, "base64"));
+		};
+		const disconnected = () => finish(new Error("PDF helper disconnected."));
+		const onMessage = (message: unknown) => {
+			const reply = message as { requestId?: string; pdf?: string; error?: string } | null;
+			if (reply?.requestId === requestId) finish(reply.error ? new Error(reply.error) : undefined, reply.pdf);
+		};
+		const timer = setTimeout(() => finish(new Error("PDF printing timed out.")), 60_000);
+		proc.on("message", onMessage);
+		proc.once("disconnect", disconnected);
+		proc.send({ type: "print-session-notes", requestId }, error => { if (error) finish(error); });
+	});
+}
+
+export async function printNotesPage(html: string): Promise<Uint8Array> {
+	return withBrowserPage(async (page, owner) => {
+		await page.setContent(html, { waitUntil: "load" });
+		await page.evaluate(() => document.fonts.ready.then(() => true));
+		if (owner) return printHelperPage(owner);
+		return page.pdf({ format: "letter", printBackground: true, preferCSSPageSize: true });
+	});
 }
 
 /** A temp dir per invocation; removed in finally. */

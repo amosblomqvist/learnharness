@@ -6,6 +6,7 @@
  * file (and the adapter implementations in src/store/).
  */
 
+import { notesStore } from "../store/session-notes.ts";
 import { chatStore } from "../store/chats.ts";
 import { graphStore } from "../store/graph.ts";
 import { sourceOrganizationStore } from "../store/source-organization.ts";
@@ -15,6 +16,7 @@ import { resolveSettings, type EffectiveSettings } from "../core/settings-resolu
 import { syncCustomProvider } from "./custom-provider.ts";
 /** The wired adapters. Satisfies core/graph.ts's GraphDeps structurally. */
 export const stores = {
+	notesStore,
 	chatStore,
 	graphStore,
 	sourceOrganizationStore,

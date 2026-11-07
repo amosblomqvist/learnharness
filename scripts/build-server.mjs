@@ -81,6 +81,9 @@ for (const extra of ["dist", path.join("node_modules", "electron")]) {
 //    agent reads them from disk at request time).
 for (const asset of [
 	path.join("src", "agent", "system-prompt.md"),
+	path.join("skills", "learnharness-notes", "SKILL.md"),
+	path.join("public", "session-notes.css"),
+	path.join("node_modules", "katex", "dist", "fonts", "KaTeX_Main-Regular.woff2"),
 	path.join("src", "agent", "prompts", "teacher", "20-teaching.md"),
 ]) {
 	if (!exists(path.join(STANDALONE, asset))) {

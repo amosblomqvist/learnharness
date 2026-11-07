@@ -1,0 +1,17 @@
+.lecture-notes { box-sizing: border-box; max-width: 46rem; margin: 0 auto; padding: clamp(1.15rem,4%,3.1rem); font: 1rem/1.56 Georgia, "Times New Roman", serif; overflow-wrap: anywhere; text-align: left; }
+.lecture-notes h1 { margin: 0 0 .65em; font: bold 2.15em/1.13 Georgia, "Times New Roman", serif; letter-spacing: -.035em; }
+.lecture-notes h2 { margin: 1.3em 0 .5em; font: bold 1.35em/1.22 Georgia, "Times New Roman", serif; letter-spacing: -.02em; break-after: avoid; }
+.lecture-notes h2 span { margin-right: .2em; }
+.lecture-notes p { margin: .6em 0; }
+.lecture-notes .note-overview { border-bottom: 1px solid currentColor; padding-bottom: 1em; }
+.lecture-notes .note-box { margin: .8em 0; padding: .6em .9em; border: 1px solid currentColor; break-inside: avoid; }
+.lecture-notes .note-example { margin: .8em 0; }
+.lecture-notes .note-example strong { font-style: italic; }
+.lecture-notes .katex-display { margin: .5em 0; max-width: 100%; overflow-x: auto; overflow-y: hidden; }
+@page { margin: .75in .85in; }
+@media print {
+  .lecture-notes { background: white; color: #171717; padding: 0; max-width: none; font-size: 11pt; }
+  .lecture-notes h1 { font-size: 25pt; }
+  .lecture-notes p { orphans: 3; widows: 3; }
+  .lecture-notes .katex-display { overflow: visible; }
+}

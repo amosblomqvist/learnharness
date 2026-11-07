@@ -99,6 +99,17 @@ if (process.argv.includes("--browser-service")) {
 			// platform (no window-all-closed handler is installed here).
 			const win = new BrowserWindow({ show: false });
 			await win.loadURL("about:blank");
+			process.on("message", async (request) => {
+				if (request?.type !== "print-session-notes" || typeof request.requestId !== "string") return;
+				let reply;
+				try {
+					const pdf = await win.webContents.printToPDF({ pageSize: "Letter", printBackground: true, preferCSSPageSize: true });
+					reply = { pdf: pdf.toString("base64") };
+				} catch (error) {
+					reply = { error: error.message || "Could not print the handout." };
+				}
+				if (process.connected) process.send({ requestId: request.requestId, ...reply }, () => {});
+			});
 			// Window load is not a DevTools HTTP readiness barrier. Confirm the
 			// endpoint before both production and smoke clients see the handshake.
 			await waitForBrowserService(port, { signal: lifetime.signal });

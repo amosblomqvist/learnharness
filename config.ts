@@ -50,6 +50,7 @@ export type ModelRole =
 	| "researcher"
 	| "demoBuilder"
 	| "visualMaker"
+	| "notesWriter"
 	| "pdfReader"
 	| "extractor"
 	| "auditor";

@@ -23,7 +23,7 @@ export function DeleteSourceBody({ sources, folders, deleteSessions, onDeleteSes
 			<input type="checkbox" data-testid="delete-source-sessions" checked={deleteSessions} disabled={busy}
 				onChange={(e) => onDeleteSessions(e.target.checked)} className="mt-0.5 size-4 shrink-0 accent-primary" />
 			<span className="min-w-0"><span className="block text-sm">Also delete the {chats.length} selected {chats.length === 1 ? "session" : "sessions"}</span>
-				<span className="mt-1 block text-xs text-muted-foreground">Unchecked, conversations stay in their current folders and can be extracted again. Either way, their graph contributions and extraction coverage are cleared. Checking this also permanently deletes their messages and background jobs.</span>
+				<span className="mt-1 block text-xs text-muted-foreground">Unchecked, conversations stay in their current folders and can be extracted again. Either way, their graph contributions and extraction coverage are cleared. Checking this also permanently deletes their messages, session notes, PDFs, and background jobs.</span>
 			</span>
 		</label>}
 		{failure && <p role="alert" data-testid="source-delete-failure" className="mt-3 text-xs text-foreground">{failure}</p>}

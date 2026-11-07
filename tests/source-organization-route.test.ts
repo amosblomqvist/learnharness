@@ -105,3 +105,39 @@ it("newer/corrupt data refuses reads and writes without overwriting its bytes", 
 		}
 	} finally { fs.writeFileSync(SOURCE_ORGANIZATION_FILE, before); }
 });
+
+it("applies each file’s tag edits after successful extraction and preserves tags when reimport fails", async () => {
+	const { POST: importFiles } = await import("../app/api/graph/import/route.ts");
+	const { extraction } = await import("../src/server/index.ts");
+	const original = extraction.importNotes;
+	const tag = sourceDirectory.change({ action: "create-tag", name: "Course", parentId: null }).createdTagId!;
+	const extra = sourceDirectory.change({ action: "create-tag", name: "Revision", parentId: null }).createdTagId!;
+	const files = ["Unit/a.md", "Unit/b.md"];
+	let failPath: string | undefined;
+	extraction.importNotes = async ({ filePath }) => {
+		if (filePath === failPath) throw new Error("Fixture extraction failure");
+		stores.graphStore.upsertSource({ id: sourceId(filePath), filePath, importedAt: "now", extractions: [] });
+		return { nodes: 0, chains: 0 };
+	};
+	async function upload(edits: { add: string[]; remove: string[] }[]) {
+		const form = new FormData();
+		for (const [i, file] of files.entries()) {
+			form.append("files", new File(["Course material."], path.basename(file)));
+			form.append("paths", file);
+			form.append("tagChanges", JSON.stringify(edits[i]));
+		}
+		return importFiles(new Request("http://localhost/api/graph/import", { method: "POST", body: form }));
+	}
+	const selected = () => files.map(file => sourceDirectory.read().organization.placements[sourceId(file)]?.tagIds ?? []);
+	try {
+		const initial = await upload([{ add: [tag, extra], remove: [] }, { add: [tag], remove: [] }]);
+		assert.ok((await initial.json()).results.every((r: { ok: boolean }) => r.ok));
+		assert.deepEqual(selected(), [[tag, extra], [tag]]);
+		failPath = files[1];
+		const reimport = await upload([{ add: [], remove: [tag] }, { add: [], remove: [tag] }]);
+		assert.equal((await reimport.json()).results.filter((r: { ok: boolean }) => r.ok).length, 1);
+		assert.deepEqual(selected(), [[extra], [tag]]);
+		assert.equal((await upload([{ add: ["deleted"], remove: [] }, { add: [], remove: [] }])).status, 400);
+		assert.deepEqual(selected(), [[extra], [tag]]);
+	} finally { extraction.importNotes = original; }
+});

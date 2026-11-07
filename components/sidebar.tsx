@@ -3,6 +3,8 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
+import { SourceTagDialog } from "./tag-picker";
+import { TagsIcon } from "lucide-react";
 import { MenuShell } from "@/components/menu-shell";
 import { DeleteSessionDialog } from "@/components/delete-session-dialog";
 import type { ChatDeleteMode } from "@/src/core";
@@ -548,6 +550,7 @@ function SessionsSidebar() {
 	   affordance at the bottom). The anchor is the row that was
 	   right-clicked — assigned into a ref before the state flip so the
 	   shell measures it on its first (hidden) pass. */
+	const [tagSession, setTagSession] = useState<string | null>(null);
 	const [ctxChatId, setCtxChatId] = useState<string | null>(null);
 	const ctxAnchorRef = useRef<HTMLElement | null>(null);
 	const [renamingId, setRenamingId] = useState<string | null>(null);
@@ -699,6 +702,9 @@ function SessionsSidebar() {
 				    labels room; teaching keeps the original draft route,
 				    practice carries its mode. */}
 				<div className="mx-3 mb-2 flex flex-col gap-1.5">
+					<Link href="/tags" aria-current={pathname === "/tags" ? "page" : undefined}
+						onClick={() => { if (open && window.matchMedia("(max-width: 48rem)").matches) toggle(); }}
+						className="flex items-center gap-1.5 rounded-md px-2 py-1.5 text-xs uppercase tracking-wider hover:bg-accent"><TagsIcon size={15} />Tags</Link>
 					<button
 						type="button"
 						data-testid="new-session"
@@ -894,6 +900,7 @@ function SessionsSidebar() {
 						>
 							Rename
 						</button>
+						<button type="button" className="rounded-lg px-2.5 py-1.5 text-left hover:bg-accent" onClick={() => { setTagSession(ctxChatId); setCtxChatId(null); }}>Edit tags…</button>
 						{/* Export as Markdown (owner, release polish 2026-10-06): the
 					    session-markdown engine's user-facing debut — same-origin
 						    anchor download; the route's Content-Disposition names the
@@ -935,6 +942,7 @@ function SessionsSidebar() {
 
 				{/* The two-option delete dialog (wave 6) — portaled to body
 				    by the component itself, lives here for state locality. */}
+				{tagSession && <SourceTagDialog ids={[tagSession]} close={() => setTagSession(null)} />}
 				<DeleteSessionDialog
 					chat={deleting}
 					onClose={() => setDeleting(null)}

@@ -9,7 +9,7 @@ import { MinimalHome } from "../components/minimal-home.tsx";
 import { ServerEventsProvider } from "../components/server-events.tsx";
 import type { GraphNode, SourceDirectory } from "../src/core/index.ts";
 const dom = parseHTML("<html><body></body></html>");
-Object.assign(globalThis, { window: dom.window, document: dom.document, Element: dom.window.Element, CustomEvent: dom.window.CustomEvent, IS_REACT_ACT_ENVIRONMENT: true });
+Object.assign(globalThis, { window: dom.window, self: dom.window, document: dom.document, Element: dom.window.Element, CustomEvent: dom.window.CustomEvent, IS_REACT_ACT_ENVIRONMENT: true });
 // linkedom does not implement native checkbox activation. Preserve click
 // dispatch while supplying the browser's pre-click checked-state transition.
 const nativeClick = dom.window.HTMLInputElement.prototype.click;

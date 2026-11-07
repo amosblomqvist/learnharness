@@ -1,3 +1,4 @@
+import { discardSessionNotes } from "./session-notes.ts";
 import { abortExtraction, extractionStatuses } from "../agent/subagents/extraction.ts";
 import { isJobLive } from "../agent/subagents/aborts.ts";
 import { coverageOf } from "../core/coverage.ts";
@@ -150,6 +151,13 @@ function finishChatDeletion(chatId: string, mode: ChatDeleteMode): Extract<ChatD
 function finishChatRecordDeletion(chatId: string): number {
 	const jobsRemoved = stores.jobStore.deleteJobsForChat(chatId);
 	if (stores.chatStore.deleteChat(chatId)) {
+		discardSessionNotes(chatId);
+		const org = stores.sourceOrganizationStore.read();
+		const placement = Object.hasOwn(org.placements, chatId) ? org.placements[chatId] : undefined;
+		if (placement?.tagIds?.length) {
+			delete placement.tagIds;
+			stores.sourceOrganizationStore.write(org);
+		}
 		discardChatDeliveries(chatId);
 		clearTurnFailure(chatId);
 	}

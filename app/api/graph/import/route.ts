@@ -17,10 +17,10 @@
  * healthy. The dock's chips + graph refetch track progress live through
  * /api/graph/status, as with session runs.
  */
-import { convertPdf, extraction, joinPages, NotesImportError, sourceDirectory } from "@/src/server";
+import { convertPdf, extraction, joinPages, NotesImportError, sourceDirectory, importedSourceId } from "@/src/server";
 import { MAX_IMPORT_BODY_BYTES, MAX_IMPORT_BYTES, validNotesPath } from "@/lib/notes-import-limits.ts";
 import {
-	emit,
+	emit, parseTagIds, type TagChanges,
 	ModelsNotConfiguredError,
 	PROVIDER_KEY_MISSING_CODE,
 	ProviderKeyMissingError,
@@ -137,6 +137,22 @@ export async function POST(request: Request) {
 	if (files.some((file, i) => !validNotesPath(paths[i]!, file.name))) {
 		return Response.json({ results: [], error: "Import contains an unsafe or mismatched relative path" }, { status: 400 });
 	}
+	// Positional metadata travels with the existing request index and validated relative path.
+	const tagFields = form.getAll("tagChanges");
+	let assignments: TagChanges[] = [];
+	if (tagFields.length) {
+		try {
+			if (tagFields.length !== files.length) throw new Error();
+			const known = new Set(sourceDirectory.read().organization.tags?.map(t => t.id));
+			assignments = tagFields.map(value => {
+				if (typeof value !== "string") throw new Error();
+				const parsed = JSON.parse(value);
+				const add = parseTagIds(parsed.add), remove = parseTagIds(parsed.remove);
+				if ([...add, ...remove].some(id => !known.has(id))) throw new Error();
+				return { add, remove };
+			});
+		} catch { return Response.json({ results: [], error: "Invalid or deleted import tags." }, { status: 400 }); }
+	}
 	const results: ImportResult[] = [];
 	const queue = files.map((file, requestIndex) => ({ file, requestIndex, filePath: paths[requestIndex]! }));
 	const workers = Array.from({ length: Math.min(3, files.length) }, async () => {
@@ -152,6 +168,15 @@ export async function POST(request: Request) {
 				}
 				sourceDirectory.registerImport(filePath);
 				const stats = await extraction.importNotes({ filePath, text: notes.text });
+				const changes = assignments[requestIndex];
+				if (changes && (changes.add.length || changes.remove.length)) {
+					try {
+						sourceDirectory.change({ action: "tag-sources", sourceIds: [importedSourceId(filePath)], ...changes });
+					} catch {
+						results.push({ filePath, requestIndex, outcome: "partial", ok: false, stats, error: "File imported, but its tags could not be applied. Edit its tags in the Tags tab." });
+						continue;
+					}
+				}
 				results.push({ filePath, requestIndex, outcome: "completed", ok: true, stats, ...(notes.notice ? { notice: notes.notice } : {}) });
 			} catch (err) {
 				if (err instanceof ModelsNotConfiguredError) {

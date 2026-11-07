@@ -72,6 +72,10 @@ const nextConfig: NextConfig = {
 	// caught it; unit tests run unbundled and never see it.
 	outputFileTracingIncludes: {
 		"*": [
+			"skills/learnharness-notes/SKILL.md",
+			"public/session-notes.css",
+			"node_modules/katex/dist/katex.min.css",
+			"node_modules/katex/dist/fonts/*.woff2",
 			// The standalone trace omitted this entire runtime-imported directory
 			// in 0.3.0, so importing puppeteer-core failed before browser startup.
 			"node_modules/@puppeteer/browsers/lib/browser-data/**/*.js",

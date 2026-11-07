@@ -602,3 +602,19 @@ body {
 	outline: 1px solid var(--border);
 	border-radius: 0.25rem;
 }
+
+.lh-session-body { container-type: inline-size; }
+.notes-panel { position: absolute; inset: 0; z-index: 30; }
+.notes-panel [aria-pressed="true"] { background: var(--accent); font-weight: 600; }
+.notes-expand-control { display: none; }
+.notes-conversation:has(~ .notes-panel) { visibility: hidden; }
+@container (min-width: 54rem) {
+  .notes-conversation:has(~ .notes-panel:not(.notes-expanded)) { visibility: visible; }
+  .notes-panel:not(.notes-expanded) { position: relative; inset: auto; width: clamp(21rem, 37%, 34rem); z-index: 1; }
+  .notes-expand-control { display: inline-flex; }
+}
+/* A browser sidebar can stay open at phone widths. Give the handout the full viewport. */
+@media (max-width: 48rem) {
+  html:not(.lh-electron) .lh-session-body:has(> .notes-panel) { container-type: normal; }
+  html:not(.lh-electron) .lh-session-body > .notes-panel { position: fixed; inset: 0; z-index: 60; }
+}
