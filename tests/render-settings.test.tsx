@@ -287,19 +287,28 @@ describe("KeysSection (thin SSR)", () => {
 });
 
 describe("AppearanceSection (thin SSR)", () => {
-	it("Mode is an enabled Dark | Light | System select showing the stored mode", () => {
+	it("Mode is three preview cards; the stored mode is pressed", () => {
 		const html = renderToStaticMarkup(<AppearanceSection appearance={{ mode: "light" }} onSectionChange={() => {}} />);
-		const select = tagOf(html, "select-mode");
-		assert.ok(!select.includes("disabled"), "mode select enabled");
-		for (const v of ["dark", "light", "system"]) assert.ok(html.includes(`<option value="${v}"`), v);
-		assert.match(html, /<option value="light" selected="">/);
-		assert.ok(!tagOf(html, "row-mode").includes("opacity-40"), "mode row not dimmed");
-		assert.ok(!html.includes("Coming soon"));
+		for (const id of ["dark", "light", "system"]) assert.ok(html.includes(`data-testid="mode-card-${id}"`), id);
+		assert.ok(tagOf(html, "mode-card-light").includes('aria-pressed="true"'));
+		assert.ok(tagOf(html, "mode-card-dark").includes('aria-pressed="false"'));
+		assert.ok(tagOf(html, "mode-card-system").includes('aria-pressed="false"'));
+		assert.equal((html.match(/lucide-check/g) ?? []).length, 1, "one check, on the selected card");
+		assert.ok(!html.includes("select-mode"), "the select is gone");
 	});
 
-	it("absent mode = the factory dark option selected", () => {
+	it("absent mode = the factory dark card pressed", () => {
 		const html = renderToStaticMarkup(<AppearanceSection appearance={undefined} onSectionChange={() => {}} />);
-		assert.match(html, /<option value="dark" selected="">/);
+		assert.ok(tagOf(html, "mode-card-dark").includes('aria-pressed="true"'));
+	});
+
+	it("previews draw the effective palette (a custom dark background included); no nested controls", () => {
+		const html = renderToStaticMarkup(<AppearanceSection appearance={{ background: "#202020" }} onSectionChange={() => {}} />);
+		assert.match(html, /--background:#202020/);
+		assert.match(html, /--background:#f5f5f3/);
+		const card = html.slice(html.indexOf('data-testid="mode-card-dark"'));
+		const inner = card.slice(card.indexOf(">") + 1, card.indexOf("</button>"));
+		assert.ok(!/<(button|input|select|a)\b/.test(inner) && !inner.includes("onClick"), "the card is one control");
 	});
 
 	it("the Background row edits the dark background in every mode", () => {
