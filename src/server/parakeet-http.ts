@@ -12,7 +12,10 @@ export interface ParakeetHandlerDeps {
 		download(): Promise<void>;
 		remove(): Promise<void>;
 	};
-	transcriber: { transcribe(pcm: Uint8Array): Promise<string> };
+	transcriber: {
+		transcribe(pcm: Uint8Array): Promise<string>;
+		unload<T>(task: () => Promise<T>): Promise<T>;
+	};
 	maxAudioBytes: number;
 }
 
@@ -67,7 +70,8 @@ export function createParakeetHandlers({ model, transcriber, maxAudioBytes }: Pa
 
 		async remove(req: Request) {
 			if (crossSite(req)) return forbidden();
-			await model.remove();
+			// Unload first: Windows can refuse to delete files a loaded model holds.
+			await transcriber.unload(() => model.remove());
 			return json(model.status());
 		},
 
@@ -87,6 +91,8 @@ export function createParakeetHandlers({ model, transcriber, maxAudioBytes }: Pa
 					return json({ code: "not-ready", message: error.message }, 409);
 				}
 				if (error instanceof RangeError) return json({ message: error.message }, 400);
+				// The client shows a generic line for a 500; the reason lands in the log.
+				console.error("[parakeet] transcription failed:", error);
 				return json({ message: error instanceof Error ? error.message : "Transcription failed" }, 500);
 			}
 		},

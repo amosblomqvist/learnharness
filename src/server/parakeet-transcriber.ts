@@ -88,12 +88,27 @@ export function createParakeetTranscriber(options: ParakeetTranscriberOptions) {
 		}
 	}
 
+	function enqueue<T>(job: () => Promise<T>): Promise<T> {
+		const run = queue.then(job);
+		queue = run.catch(() => {});
+		return run;
+	}
+
 	return {
 		/** `pcm`: mono 16 kHz signed 16-bit little-endian samples. */
 		transcribe(pcm: Uint8Array): Promise<string> {
-			const run = queue.then(() => decode(pcm));
-			queue = run.catch(() => {});
-			return run;
+			return enqueue(() => decode(pcm));
+		},
+		/** Wait for the decode in flight, drop the recognizer (its native memory
+		 *  goes with the next GC) and run `task` before any later decode, so
+		 *  the model files can be removed while nothing is reading them. */
+		unload<T>(task: () => Promise<T>): Promise<T> {
+			return enqueue(() => {
+				if (idleTimer) clearTimeout(idleTimer);
+				idleTimer = null;
+				recognizer = null;
+				return task();
+			});
 		},
 	};
 }

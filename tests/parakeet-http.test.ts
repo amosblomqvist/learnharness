@@ -13,7 +13,10 @@ function setup(initial: ParakeetModelStatus = { state: "missing" }) {
 		remove: async () => { calls.push("remove"); status = { state: "missing" }; },
 	};
 	let transcribe: (pcm: Uint8Array) => Promise<string> = async () => "hola mundo";
-	const transcriber = { transcribe: (pcm: Uint8Array) => { calls.push("transcribe"); return transcribe(pcm); } };
+	const transcriber = {
+		transcribe: (pcm: Uint8Array) => { calls.push("transcribe"); return transcribe(pcm); },
+		unload: async <T>(task: () => Promise<T>) => { calls.push("unload"); return task(); },
+	};
 	const handlers = createParakeetHandlers({ model, transcriber, maxAudioBytes: 8 });
 	return { handlers, calls, setTranscribe: (fn: typeof transcribe) => { transcribe = fn; } };
 }
@@ -41,7 +44,7 @@ describe("Parakeet HTTP handlers", () => {
 		const { handlers } = setup();
 		const failing = createParakeetHandlers({
 			model: { status: () => ({ state: "missing" }), download: () => Promise.reject(new Error("boom")), remove: async () => {} },
-			transcriber: { transcribe: async () => "" },
+			transcriber: { transcribe: async () => "", unload: (task) => task() },
 			maxAudioBytes: 8,
 		});
 		const res = await failing.startDownload(post());
@@ -50,12 +53,12 @@ describe("Parakeet HTTP handlers", () => {
 		assert.ok(handlers);
 	});
 
-	it("removes the model (cancelling a download) and answers with the new status", async () => {
+	it("removes the model (cancelling a download) through the transcriber's unload and answers with the new status", async () => {
 		const { handlers, calls } = setup({ state: "ready", diskBytes: 5 });
 		const res = await handlers.remove(new Request("http://127.0.0.1/api/stt/parakeet", { method: "DELETE" }));
 		assert.equal(res.status, 200);
 		assert.deepEqual(await res.json(), { state: "missing" });
-		assert.deepEqual(calls, ["remove"]);
+		assert.deepEqual(calls, ["unload", "remove"]);
 	});
 
 	it("refuses cross-site requests that change state", async () => {
@@ -101,6 +104,21 @@ describe("Parakeet HTTP handlers", () => {
 		const res = await handlers.transcribe(post(new Uint8Array(4)));
 		assert.equal(res.status, 500);
 		assert.match(((await res.json()) as { message: string }).message, /decode exploded/);
+	});
+
+	it("logs the reason of a 500, and only of a 500", async (t) => {
+		const logged = t.mock.method(console, "error", () => {});
+		const { handlers, setTranscribe } = setup({ state: "ready", diskBytes: 5 });
+		setTranscribe(async () => { throw new RangeError("Audio must be 16-bit PCM samples"); });
+		assert.equal((await handlers.transcribe(post(new Uint8Array(4)))).status, 400);
+		setTranscribe(async () => { throw new ParakeetNotReadyError(); });
+		assert.equal((await handlers.transcribe(post(new Uint8Array(4)))).status, 409);
+		assert.equal(logged.mock.callCount(), 0);
+		const error = new Error("Could not find sherpa-onnx-node");
+		setTranscribe(async () => { throw error; });
+		assert.equal((await handlers.transcribe(post(new Uint8Array(4)))).status, 500);
+		assert.equal(logged.mock.callCount(), 1);
+		assert.deepEqual(logged.mock.calls[0]!.arguments, ["[parakeet] transcription failed:", error]);
 	});
 
 	it("stops reading a chunked body as soon as the limit is crossed, with no Content-Length", async () => {

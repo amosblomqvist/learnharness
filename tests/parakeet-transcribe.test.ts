@@ -83,6 +83,38 @@ describe("Parakeet transcriber", () => {
 		assert.equal(loads, 2);
 	});
 
+	it("unload waits for the decode in flight, frees the recognizer and runs its task before the next decode", async () => {
+		const order: string[] = [];
+		let loads = 0;
+		let finishDecode!: () => void;
+		const gate = new Promise<void>((r) => { finishDecode = r; });
+		const transcriber = createParakeetTranscriber({
+			files: () => FILES,
+			load: async () => {
+				loads++;
+				return fakeRecognizer("ok", async () => { order.push("decode"); if (loads === 1) await gate; }).recognizer;
+			},
+		});
+		const first = transcriber.transcribe(pcm(1));
+		await new Promise((r) => setTimeout(r, 0));
+		const unloaded = transcriber.unload(async () => { order.push("task"); return "removed"; });
+		const next = transcriber.transcribe(pcm(2));
+		await new Promise((r) => setTimeout(r, 10));
+		assert.deepEqual(order, ["decode"], "the task waits for the decode in flight");
+		finishDecode();
+		assert.equal(await first, "ok");
+		assert.equal(await unloaded, "removed");
+		assert.equal(await next, "ok");
+		assert.deepEqual(order, ["decode", "task", "decode"]);
+		assert.equal(loads, 2, "the next decode loads a fresh recognizer");
+	});
+
+	it("unload passes a failing task's error through and keeps serving afterwards", async () => {
+		const transcriber = createParakeetTranscriber({ files: () => FILES, load: async () => fakeRecognizer().recognizer });
+		await assert.rejects(transcriber.unload(async () => { throw new Error("EBUSY"); }), /EBUSY/);
+		assert.equal(await transcriber.transcribe(pcm(1)), "hello world");
+	});
+
 	it("does not cache a failed load", async () => {
 		let loads = 0;
 		const transcriber = createParakeetTranscriber({
