@@ -3,7 +3,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { SourceTagDialog } from "./tag-picker";
+import { SourceTagDialog, TagMark } from "./tag-picker";
 import { TagsIcon } from "lucide-react";
 import { MenuShell } from "@/components/menu-shell";
 import { DeleteSessionDialog } from "@/components/delete-session-dialog";
@@ -325,6 +325,21 @@ export function SessionRow({
 				    rule, finally applied to the picker too (owner, typography
 				    round): mono = chrome, Source Sans = human words. */}
 				<span className="block truncate font-prose text-(length:--lh-prose-size)">{chat.title}</span>
+				{!!chat.tags?.length && (
+					<span className="my-0.5 flex min-w-0 items-center gap-1 text-[10px] leading-4 text-muted-foreground" aria-label="Session tags">
+						{chat.tags.slice(0, 2).map(tag => (
+							<span key={tag.id} title={tag.name} className="min-w-0 max-w-[6.5rem] rounded border border-border/60 px-1">
+								<TagMark tag={tag} />
+							</span>
+						))}
+						{chat.tags.length > 2 && (
+							<span className="shrink-0" title={chat.tags.slice(2).map(tag => tag.name).join(", ")}
+								aria-label={`${chat.tags.length - 2} more tags: ${chat.tags.slice(2).map(tag => tag.name).join(", ")}`}>
+								+{chat.tags.length - 2}
+							</span>
+						)}
+					</span>
+				)}
 				<span className="block text-xs text-muted-foreground">{sessionMeta(chat)}</span>
 			</span>
 			{/* The dumbbell rides the FAR RIGHT (owner round 6, 2026-10-05) —
@@ -517,6 +532,7 @@ function SessionsSidebar() {
 		}, 250);
 	};
 	useServerEvent("chats-changed", scheduleEventRefresh);
+	useServerEvent("sources-changed", scheduleEventRefresh);
 	useServerEvent("turn-started", scheduleEventRefresh);
 	useServerEvent("turn-settled", scheduleEventRefresh);
 	useServerEvent("compaction-changed", scheduleEventRefresh);

@@ -3,7 +3,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { ActivityIcon, BotIcon, FileTextIcon, PenToolIcon, PlayIcon, SearchIcon, SquareIcon, WaypointsIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
-import type { CallUsage, JobKind, JobRecord } from "@/src/core";
+import type { CallUsage, JobKind, JobRecord, NotesRun } from "@/src/core";
 import { isModelsRefusal, isProviderKeyRefusal, subscriptionLabel, subscriptionLabels } from "@/src/core";
 import { formatTokens, planCostLabel } from "@/components/usage-format";
 import { useServerEvent, useServerResync } from "@/components/server-events";
@@ -70,6 +70,7 @@ export interface FeedExtraction {
 export interface ActivityFeed {
 	jobs: FeedJob[];
 	extractions: FeedExtraction[];
+	notes?: (NotesRun & { costUsd: number | null; contextLimit: number | null })[];
 }
 
 const EMPTY_FEED: ActivityFeed = { jobs: [], extractions: [] };
@@ -109,7 +110,7 @@ export function ActivityProvider({ children }: { children: React.ReactNode }) {
 				if (res.ok) {
 					const data = (await res.json()) as Partial<ActivityFeed>;
 					if (alive)
-						setFeed({ jobs: data.jobs ?? [], extractions: data.extractions ?? [] });
+						setFeed({ jobs: data.jobs ?? [], extractions: data.extractions ?? [], notes: data.notes ?? [] });
 				}
 			} catch {
 				// transport blip: keep the last feed, announce again next event
@@ -130,6 +131,7 @@ export function ActivityProvider({ children }: { children: React.ReactNode }) {
 	};
 	useServerEvent("activity-changed", scheduleAnnouncedFetch);
 	useServerEvent("jobs-changed", scheduleAnnouncedFetch);
+	useServerEvent("notes-changed", scheduleAnnouncedFetch);
 	// Reconnect catch-up: events missed while the channel was down.
 	useServerResync(() => refreshRef.current());
 
@@ -169,7 +171,7 @@ export interface ActivityBlob {
 	/** job.id, or the extraction job's row id (source id, or "src#i" for
 	 *  chunk jobs — unique per row, per-chunk jobs owner 2026-09-28). */
 	id: string;
-	process: "job" | "extraction";
+	process: "job" | "extraction" | "notes";
 	/** Sub-agent kind for jobs (extraction blobs have none). */
 	jobKind?: JobKind;
 	/** Extraction phase (extracting/auditing/merging/embedding); jobs carry none. */
@@ -190,31 +192,21 @@ export interface ActivityBlob {
 	steps?: number;
 }
 
+function lastCallContext(usage: FeedUsage | undefined, limit: number | null): ActivityBlob["context"] {
+	const lastStep = usage?.lastStep;
+	if (!lastStep || limit === null || lastStep.inputTokens === undefined) return null;
+	// Provider input excludes cached tokens. Use all four buckets, as in the session meter.
+	return {
+		used: lastStep.inputTokens + (lastStep.outputTokens ?? 0) +
+			(lastStep.cacheReadTokens ?? 0) + (lastStep.cacheWriteTokens ?? 0),
+		limit,
+	};
+}
+
 /** Merge the feed into one oldest-first blob list (the stable blob order). */
 export function toBlobs(feed: ActivityFeed): ActivityBlob[] {
 	const blobs: ActivityBlob[] = feed.jobs.map((job) => {
 		const usage = job.usage;
-		let context: ActivityBlob["context"] = null;
-		const lastStep = usage?.lastStep;
-		// Context-meter amendment (owner 2026-09-23): the limit comes off
-		// the FEED (server-joined from pi's live catalog) — no client-side
-		// table. Null limit = no context line (usage-only render is the
-		// blob shape's call — here the line simply hides).
-		const limit = job.contextLimit;
-		if (usage && lastStep && limit !== null && lastStep.inputTokens !== undefined) {
-			// Same metric as the session meter (four normalized buckets — the
-			// context-meter audit, owner 2026-09-23): all four directions.
-			// Provider "input" EXCLUDES cacheRead/cacheWrite, so input+output
-			// alone reads wildly low on cache-heavy jobs.
-			context = {
-				used:
-					lastStep.inputTokens +
-					(lastStep.outputTokens ?? 0) +
-					(lastStep.cacheReadTokens ?? 0) +
-					(lastStep.cacheWriteTokens ?? 0),
-				limit,
-			};
-		}
 		return {
 			id: job.id,
 			process: "job",
@@ -223,7 +215,7 @@ export function toBlobs(feed: ActivityFeed): ActivityBlob[] {
 			chatId: job.chatId,
 			startedAt: Date.parse(job.createdAt) || 0,
 			cost: job.costUsd ?? null,
-			context,
+			context: lastCallContext(usage, job.contextLimit),
 			// BYOK (owner, 2026-09-22): a refusal is info, not failure —
 			// the honest line the runner left ("failed") reads as setup
 			// needed, matching the dispatch card's quiet tone. The
@@ -250,6 +242,20 @@ export function toBlobs(feed: ActivityFeed): ActivityBlob[] {
 			cost: null, // extraction runs don't ride the money channel (v1)
 			context: null,
 			activity: "",
+		});
+	}
+	for (const run of feed.notes ?? []) {
+		blobs.push({
+			id: run.id,
+			process: "notes",
+			title: run.title,
+			chatId: run.chatId,
+			startedAt: run.startedAt,
+			cost: run.costUsd,
+			context: lastCallContext(run.usage, run.contextLimit),
+			activity: run.activity,
+			model: run.usage?.model,
+			steps: run.usage?.steps,
 		});
 	}
 	blobs.sort((a, b) => a.startedAt - b.startedAt);
@@ -389,9 +395,11 @@ function ActivityBlobRow({
 	abortState: AbortState | undefined;
 	onAbort: () => void;
 }) {
-	const Icon = blob.process === "extraction" ? WaypointsIcon : (blob.jobKind && KIND_ICON[blob.jobKind]) || BotIcon;
+	const Icon = blob.process === "extraction" ? WaypointsIcon : blob.process === "notes" ? FileTextIcon : (blob.jobKind && KIND_ICON[blob.jobKind]) || BotIcon;
 	const label =
-		blob.process === "extraction"
+		blob.process === "notes"
+			? "Notes writer"
+			: blob.process === "extraction"
 			? `Extraction — ${blob.phase ?? "running"}`
 			: blob.jobKind === "research"
 				? "Researcher"

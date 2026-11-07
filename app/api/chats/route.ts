@@ -1,4 +1,4 @@
-import { chainsForSelection, formatChainLine } from "@/src/core";
+import { chainsForSelection, formatChainLine, placementOf } from "@/src/core";
 import { newGraphContextMessage, type GraphContextPick } from "@/src/core";
 import { compactionInFlight, createChat, isTurnRunning, listChats, readSettingsRecord, stores, titleFromPrompt } from "@/src/server";
 import type { ChatListItem } from "@/src/core";
@@ -11,10 +11,16 @@ import type { ChatListItem } from "@/src/core";
  *  (a running spinner per row would double-signal them), so busy means
  *  exactly "a teach turn is in flight". */
 export async function GET() {
+	const organization = stores.sourceOrganizationStore.read();
+	const tags = new Map(organization.tags?.map(tag => [tag.id, tag]));
 	const chats: ChatListItem[] = listChats().map((c) => ({
 		...c,
 		busy: isTurnRunning(c.id),
 		compacting: compactionInFlight(c.id),
+		tags: (placementOf(organization, c.id)?.tagIds ?? []).flatMap(id => {
+			const tag = tags.get(id);
+			return tag ? [tag] : [];
+		}),
 	}));
 	return Response.json({ chats });
 }

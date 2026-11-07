@@ -26,5 +26,6 @@ export async function GET() {
 		prober: effectivePromptSegments("prober", switches),
 		teacher: effectivePromptSegments("teacher", switches),
 		practice: effectivePromptSegments("practice", switches),
+		notes: effectivePromptSegments("notes", switches),
 	});
 }

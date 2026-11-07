@@ -1,5 +1,5 @@
 import { getGraph } from "../core/graph.ts";
-import { noteSectionText, type NoteIndexEntry, type NoteMode } from "../core/session-notes.ts";
+import { noteSectionHeading, noteSectionText, type NoteIndexEntry, type NoteMode } from "../core/session-notes.ts";
 import { stores } from "./stores.ts";
 import { sourceDirectory } from "./source-organization.ts";
 
@@ -37,7 +37,7 @@ export function noteIndex(nodeId?: string, sessionIds?: string[]): NoteIndexEntr
 					sessionTitle: edition.document.title,
 					mode,
 					sectionId: section.id,
-					heading: section.heading,
+					heading: noteSectionHeading(section.heading),
 					text: nodeId
 						? ""
 						: [i === 0 ? edition.document.overview : "", noteSectionText(section)].filter(Boolean).join("\n"),

@@ -1676,9 +1676,6 @@ export function Chat({
 									<Shimmer duration={1}>COMPACTING CONTEXT…</Shimmer>
 								</span>
 							)}
-							{notes.view.eligible && !busy && <button className="self-start rounded-md border px-3 py-1.5 text-sm hover:bg-accent disabled:opacity-50"
-								disabled={notes.sending || notes.view.running.includes("final")}
-								onClick={() => { setNoteLocation({ mode: "final" }); void notes.action({ action: "generate" }); }}>{notes.view.final ? "Regenerate notes" : "Generate notes"}</button>}
 							{(status === "submitted" || turnInFlight) && (
 								<span className="flex items-center gap-2 font-ui text-xs font-medium uppercase tracking-wide text-muted-foreground">
 									<BrailleSpinner label="Thinking" />

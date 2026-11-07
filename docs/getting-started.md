@@ -54,7 +54,7 @@ The graph stores propositions and reasoning chains with source provenance, **not
 
 ## Review a lesson and organize a course
 
-Open **Notes** in a session to read beside the conversation. **Generate notes** also appears below the latest exchange after a lesson has covered material or a practice problem has concluded. The Strong model composes a printable handout from the saved lesson. Download its PDF or regenerate it after studying further. [Sample handout on diagonalizing a matrix (PDF)](assets/session-notes-sample.pdf)
+Open **Notes** in a session to read beside the conversation. Use **Generate notes** inside the panel after a lesson has covered material or a practice problem has concluded. The Strong model composes a printable handout from the saved lesson. Download its PDF or regenerate it after studying further. [Sample handout on diagonalizing a matrix (PDF)](assets/session-notes-sample.pdf)
 
 Turn on **Live updates** to have a separate writer summarize earlier topics and add to the draft as the lesson changes plan steps. It uses the session’s teaching model. Finished handouts and live drafts belong to their session and are removed when the session is deleted.
 

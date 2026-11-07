@@ -1,7 +1,7 @@
 import katex from "katex";
 import { readContentSpans } from "./content-reader.ts";
 import { restoreMathEscapes } from "./math-delims.ts";
-import type { NoteDocument } from "./session-notes.ts";
+import { noteSectionHeading, type NoteDocument } from "./session-notes.ts";
 
 const entities: Record<string, string> = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };
 const escapeHtml = (s: string) => s.replace(/[&<>"']/g, c => entities[c]!);
@@ -31,7 +31,7 @@ export function noteDocumentHtml(doc: NoteDocument): string {
 					return `<div class="note-${block.kind === "example" ? "example" : "box"}"><strong>${escapeHtml(label)}</strong><div>${noteTextHtml(block.text)}</div></div>`;
 				})
 				.join("");
-			return `<section id="notes-${escapeHtml(section.id)}"><h2><span>${index + 1}.</span> ${noteTextHtml(section.heading)}</h2>${blocks}</section>`;
+			return `<section id="notes-${escapeHtml(section.id)}"><h2><span>${index + 1}.</span> ${noteTextHtml(noteSectionHeading(section.heading))}</h2>${blocks}</section>`;
 		})
 		.join("");
 	return `<article class="lecture-notes"><h1>${noteTextHtml(doc.title)}</h1>${doc.overview ? `<p class="note-overview">${noteTextHtml(doc.overview)}</p>` : ""}${sections}</article>`;

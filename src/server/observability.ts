@@ -25,6 +25,8 @@ import { graphRevision } from "./graph.ts";
 import { catalogContextLimits } from "./model-catalog.ts";
 import { listJobs } from "./jobs.ts";
 import { jobCost } from "./pricing.ts";
+import { runningSessionNotes } from "./session-notes.ts";
+import type { NotesRun } from "../core/session-notes.ts";
 import type { JobRecord } from "../core/contracts.ts";
 
 export { abortExtraction, extractionStatuses, type ExtractionPhase, type RunningExtraction } from "../agent/subagents/extraction.ts";
@@ -56,6 +58,11 @@ export interface ActivityExtraction {
 	startedAt: number;
 }
 
+export interface ActivityNotes extends NotesRun {
+	costUsd: number | null;
+	contextLimit: number | null;
+}
+
 /** The dock's whole world in one payload: every running process, every view.
  *  Jobs are RUNNING-ONLY — finished jobs belong to their chat's transcript;
  *  the blob disappears when the process ends. Costs are joined here through
@@ -69,6 +76,7 @@ export interface ActivityExtraction {
 export function activityFeed(): {
 	jobs: ActivityJob[];
 	extractions: ActivityExtraction[];
+	notes: ActivityNotes[];
 	graphRevision: number;
 } {
 	const chats = chatStore.listChats();
@@ -104,6 +112,11 @@ export function activityFeed(): {
 	return {
 		jobs,
 		extractions: extractions.sort((a, b) => a.startedAt - b.startedAt),
+		notes: runningSessionNotes().map(run => ({
+			...run,
+			costUsd: jobCost(run),
+			contextLimit: run.usage ? (limits.get(run.usage.model) ?? null) : null,
+		})),
 		graphRevision: graphRevision(),
 	};
 }

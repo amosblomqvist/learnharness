@@ -45,7 +45,7 @@ it("sends organization edits to Tags and lets a folder dialog be cancelled witho
 		assert.equal(document.querySelector('a[href="/tags"]')?.textContent, "Organize in Tags");
 		assert.equal(document.querySelector('[data-testid="add-source-folder"]'), null);
 		await render(<TagsLibrary />);
-		const newFolder = [...document.querySelectorAll("button")].find(b => b.textContent === "New folder");
+		const newFolder = document.querySelector<HTMLButtonElement>('button[aria-label="New folder"]');
 		assert.ok(newFolder);
 		await act(async () => {
 			newFolder.click();

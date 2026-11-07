@@ -2,7 +2,9 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ChevronDownIcon, ChevronRightIcon, FolderIcon, TagsIcon } from "lucide-react";
+import { ChevronDownIcon, ChevronRightIcon, FolderIcon, FolderPlusIcon, TagIcon, TagsIcon } from "lucide-react";
+import { Button } from "./ui/button";
+import { Input } from "./ui/input";
 import {
 	canMoveFolder,
 	libraryRows,
@@ -19,7 +21,7 @@ import {
 } from "@/src/core";
 import {
 	directoryRequest,
-	FolderOptions,
+	FolderSelect,
 	LibraryDialog,
 	SourceTagDialog,
 	TagEditor,
@@ -175,9 +177,24 @@ export function TagsLibrary() {
 	return (
 		<div className="flex h-dvh flex-col bg-background">
 			<TopBar>
-				<TagsIcon size={17} />
-				<span className="font-medium">Tags</span>
-				<div className="ml-auto">
+				<div className="flex shrink-0 items-center gap-2">
+					<TagsIcon size={17} />
+					<span className="font-medium">Tags</span>
+				</div>
+				<div className="ml-auto flex shrink-0 items-center gap-2">
+					<Button type="button" variant="outline" aria-label="New folder" disabled={!library}
+						className="bg-accent/70 text-foreground hover:bg-accent dark:bg-accent/70 dark:hover:bg-accent"
+						onClick={() => begin({ kind: "folder" })}>
+						<FolderPlusIcon className="size-4" aria-hidden="true" />
+						New folder
+					</Button>
+					<Button type="button" variant="outline" aria-label="New tag" disabled={!library}
+						className="bg-accent/70 text-foreground hover:bg-accent dark:bg-accent/70 dark:hover:bg-accent"
+						onClick={() => begin({ kind: "tag" })}>
+						<TagIcon className="size-4" aria-hidden="true" />
+						New tag
+					</Button>
+					<span aria-hidden="true" className="mx-1 h-7 w-px bg-border" />
 					<NotesImportControl importing={imports.importing} onImportFiles={imports.onImportFiles} />
 				</div>
 			</TopBar>
@@ -197,14 +214,6 @@ export function TagsLibrary() {
 						All material
 					</button>
 					{branch(null)}
-					<div className="mt-5 flex flex-wrap gap-2">
-						<button disabled={!library} className={tagControl} onClick={() => begin({ kind: "tag" })}>
-							New tag
-						</button>
-						<button disabled={!library} className={tagControl} onClick={() => begin({ kind: "folder" })}>
-							New folder
-						</button>
-					</div>
 				</nav>
 				<main className="min-w-0 overflow-auto p-4 md:p-7">
 					<div className="mx-auto max-w-5xl">
@@ -396,32 +405,32 @@ export function TagsLibrary() {
 							}}
 						>
 							{(editor.kind === "rename" || editor.kind === "folder") && (
-								<label>
+								<label className="grid gap-1.5 text-xs text-muted-foreground">
 									Name
-									<input
+									<Input
 										required
 										autoFocus
-										className={tagInput}
+										className={tagInput + " h-8 shadow-none dark:bg-background"}
 										value={name}
 										onChange={e => setName(e.target.value)}
 									/>
 								</label>
 							)}
 							{(editor.kind === "move" || editor.kind === "folder") && (
-								<label>
+								<label className="grid gap-1.5 text-xs text-muted-foreground">
 									Parent folder
-									<select className={tagInput} value={parent} onChange={e => setParent(e.target.value)}>
-										<FolderOptions
-											state={library.organization}
-											exclude={
-												editor.kind === "folder" && editor.folder
-													? library.organization.folders
-															.filter(f => !canMoveFolder(library.organization, editor.folder!.id, f.id))
-															.map(f => f.id)
-													: []
-											}
-										/>
-									</select>
+									<FolderSelect
+										state={library.organization}
+										value={parent}
+										onChange={setParent}
+										exclude={
+											editor.kind === "folder" && editor.folder
+												? library.organization.folders
+														.filter(f => !canMoveFolder(library.organization, editor.folder!.id, f.id))
+														.map(f => f.id)
+												: []
+										}
+									/>
 								</label>
 							)}
 							{editor.kind === "delete" && (
@@ -432,9 +441,14 @@ export function TagsLibrary() {
 								</p>
 							)}
 							{editError && <p role="alert">{editError}</p>}
-							<button className={tagControl} disabled={busy}>
-								{editor.kind === "delete" ? "Remove" : "Save"}
-							</button>
+							<div className="mt-1 flex justify-end gap-2">
+								<Button type="button" variant="ghost" size="sm" className="text-xs text-muted-foreground hover:text-foreground" onClick={() => setEditor(undefined)}>
+									Cancel
+								</Button>
+								<Button type="submit" variant="outline" size="sm" className="text-xs" disabled={busy}>
+									{editor.kind === "delete" ? "Remove" : "Save"}
+								</Button>
+							</div>
 						</form>
 					)}
 				</LibraryDialog>

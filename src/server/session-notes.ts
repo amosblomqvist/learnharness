@@ -2,7 +2,8 @@ import { createHash } from "node:crypto";
 import { noteEvidence } from "../core/note-evidence.ts";
 import { emit } from "../core/events.ts";
 import { sumSteps } from "../core/prices.ts";
-import type { NoteEdition, NoteMode, NotePassage, NotesView } from "../core/session-notes.ts";
+import { noteSectionHeading, type NoteEdition, type NoteMode, type NotePassage, type NotesRun, type NotesView } from "../core/session-notes.ts";
+import { accumulateJobUsage, piUsageToStep } from "../core/contracts/jobs.ts";
 import { resolveConversationSpec } from "../core/settings-resolution.ts";
 import type { ChatRecord } from "../core/contracts/chat.ts";
 import type { ChatStore, SessionNotesStore } from "../core/ports.ts";
@@ -13,9 +14,10 @@ import { providerKeyPresent } from "./keys.ts";
 import { stores, effectiveSettings } from "./stores.ts";
 import { renderNotesPdf } from "./notes-pdf.ts";
 
-interface Work {
+interface Work extends NotesRun {
 	abort: AbortController;
 	again: boolean;
+	fingerprint: string;
 }
 const host = globalThis as typeof globalThis & { __lhNoteWork?: Map<string, Work> };
 const work = (host.__lhNoteWork ??= new Map());
@@ -104,16 +106,43 @@ export function createSessionNotesService(deps: NotesDependencies, work = new Ma
 		poke(id);
 		return sessionNotes(id);
 	}
-	function sessionNotesPdf(id: string) {
+	async function sessionNotesPdf(id: string) {
 		chat(id);
 		const bytes = deps.notesStore.pdf(id);
 		if (!bytes) throw new NotesRequestError("This session has no finished PDF yet.", 404);
+		const document = deps.notesStore.read(id).final?.document;
+		// Older PDFs already contain the duplicate numbers. Render their saved text locally.
+		if (document?.sections.some(section => noteSectionHeading(section.heading) !== section.heading))
+			return deps.printPdf(document);
 		return bytes;
 	}
 	function discardSessionNotes(id: string) {
 		for (const mode of modes) work.get(mode + id)?.abort.abort();
 		deps.notesStore.delete(id);
 		poke(id);
+	}
+	function runningSessionNotes(): NotesRun[] {
+		return [...work.values()].map(task => ({
+			id: task.id,
+			chatId: task.chatId,
+			title: deps.chatStore.getChat(task.chatId)?.title ?? task.title,
+			mode: task.mode,
+			startedAt: task.startedAt,
+			activity: task.activity,
+			usage: task.usage,
+		}));
+	}
+	function abortSessionNotes(id: string) {
+		const task = work.get(id);
+		if (!task || task.abort.signal.aborted) return { ok: false, reason: "not_running" } as const;
+		task.again = false;
+		if (task.mode === "live" && deps.chatStore.getChat(task.chatId)) {
+			// A refresh must not immediately restart the revision the learner just stopped.
+			deps.notesStore.change(task.chatId, state => { state.failedLive = task.fingerprint; });
+		}
+		task.abort.abort();
+		poke(task.chatId);
+		return { ok: true } as const;
 	}
 	/** Called after a durable turn. A notes error must never fail teaching settlement. */
 	function updateLiveNotes(id: string) {
@@ -151,7 +180,17 @@ export function createSessionNotesService(deps: NotesDependencies, work = new Ma
 		const pending =
 			mode === "final" && (retryPdf || state.pending?.fingerprint === revision) ? state.pending : undefined;
 		if (retryPdf && !pending) throw new NotesRequestError("There is no PDF awaiting a retry.", 409);
-		const task = { abort: new AbortController(), again: false };
+		const task: Work = {
+			id: key,
+			chatId: id,
+			title: record.title,
+			mode,
+			startedAt: Date.now(),
+			activity: mode === "live" ? "Updating live notes" : "Composing handout",
+			abort: new AbortController(),
+			again: false,
+			fingerprint: revision,
+		};
 		work.set(key, task);
 		const signal = task.abort.signal;
 		const run = async () => {
@@ -168,9 +207,11 @@ export function createSessionNotesService(deps: NotesDependencies, work = new Ma
 					practice: record.kind === "practice",
 					signal,
 					engine,
+					promptSwitches: effectiveSettings().agent.prompts,
 					passages: mode === "live" ? passages.filter(p => changed.has(p.topic)) : passages,
 					onUsage: (u, model) => {
-						if (!signal.aborted && deps.chatStore.getChat(id))
+						if (!signal.aborted && deps.chatStore.getChat(id)) {
+							task.usage = accumulateJobUsage(task.usage, model, piUsageToStep(u));
 							deps.notesStore.change(id, s =>
 								s.usage.push({
 									at: new Date().toISOString(),
@@ -186,6 +227,8 @@ export function createSessionNotesService(deps: NotesDependencies, work = new Ma
 									},
 								}),
 							);
+							poke(id);
+						}
 					},
 				});
 				signal.throwIfAborted();
@@ -214,6 +257,8 @@ export function createSessionNotesService(deps: NotesDependencies, work = new Ma
 					s.pending = edition;
 				});
 			}
+			task.activity = "Preparing PDF";
+			poke(id);
 			const bytes = await deps.printPdf(edition.document);
 			signal.throwIfAborted();
 			chat(id);
@@ -235,9 +280,9 @@ export function createSessionNotesService(deps: NotesDependencies, work = new Ma
 			})
 			.catch(error => console.error("Could not save notes status", error));
 	}
-	return { sessionNotes, changeSessionNotes, sessionNotesPdf, discardSessionNotes, updateLiveNotes };
+	return { sessionNotes, changeSessionNotes, sessionNotesPdf, discardSessionNotes, updateLiveNotes, runningSessionNotes, abortSessionNotes };
 }
-export const { sessionNotes, changeSessionNotes, sessionNotesPdf, discardSessionNotes, updateLiveNotes } =
+export const { sessionNotes, changeSessionNotes, sessionNotesPdf, discardSessionNotes, updateLiveNotes, runningSessionNotes, abortSessionNotes } =
 	createSessionNotesService(
 		{ ...stores, engineFor: notesEngine, writeNotes: writeSessionNotes, printPdf: renderNotesPdf },
 		work,

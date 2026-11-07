@@ -84,6 +84,7 @@ for (const asset of [
 	path.join("app", "session-notes.css"),
 	path.join("node_modules", "katex", "dist", "fonts", "KaTeX_Main-Regular.woff2"),
 	path.join("src", "agent", "prompts", "teacher", "20-teaching.md"),
+	path.join("src", "agent", "prompts", "notes", "00-base.md"),
 ]) {
 	if (!exists(path.join(STANDALONE, asset))) {
 		console.error(`[build-server] prompt asset missing from the trace: ${asset}`);

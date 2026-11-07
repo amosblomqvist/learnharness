@@ -9,7 +9,7 @@ import { noteEvidence } from "../src/core/note-evidence.ts";
 import { noteDocumentHtml, noteTextHtml } from "../src/core/note-render.ts";
 import type { ChatRecord } from "../src/core/contracts/chat.ts";
 import type { LhMessage } from "../src/core/native-messages.ts";
-import type { NoteDocument, NoteIndexEntry, NoteMode } from "../src/core/session-notes.ts";
+import { noteSectionHeading, type NoteDocument, type NoteIndexEntry, type NoteMode } from "../src/core/session-notes.ts";
 
 const root = fs.mkdtempSync(path.join(os.tmpdir(), "lh-session-notes-"));
 process.env.LH_DATA_DIR = root;
@@ -137,6 +137,64 @@ it("renders typeset math and escapes supplied markup in shared print and screen 
 	assert.match(html, /<strong>Theorem<\/strong>/);
 });
 
+it("numbers saved model headings once and preserves numbers that are part of the heading", () => {
+	for (const heading of ["8. Eigenvectors", "8) Eigenvectors", "8. 8. Eigenvectors", "8.2. Eigenvectors"]) {
+		const html = noteDocumentHtml({ ...sample, sections: [{ ...sample.sections[0]!, heading }] });
+		assert.match(html, /<h2><span>1\.<\/span> Eigenvectors<\/h2>/);
+	}
+	for (const heading of ["2D rotations", "3.14 as an approximation", "$2^n$ powers"])
+		assert.equal(noteSectionHeading(heading), heading);
+});
+
+it("downloads PDFs using the current session title, including Unicode and safe header characters", async () => {
+	const { stores } = await import("../src/server/index.ts");
+	const { GET } = await import("../app/api/chats/[id]/notes/pdf/route.ts");
+	const chat = stores.chatStore.createChat("Original title");
+	notesStore.savePdf(chat.id, { document: sample, fingerprint: "fixture", writtenAt: "now" }, Buffer.from("%PDF-title"));
+	try {
+		for (const [title, expected] of [
+			["Eigenvalues and eigenvectors", "Eigenvalues and eigenvectors.pdf"],
+			["Étude de λ", "Étude de λ.pdf"],
+			['A/B: "quoted"\r\nlesson', 'A-B- -quoted-lesson.pdf'],
+		]) {
+			stores.chatStore.renameChat(chat.id, title!);
+			const response = await GET(new Request("http://localhost/notes/pdf"), { params: Promise.resolve({ id: chat.id }) });
+			assert.equal(response.status, 200);
+			const disposition = response.headers.get("content-disposition")!;
+			assert.equal(decodeURIComponent(disposition.split("filename*=UTF-8''")[1]!), expected);
+			assert.doesNotMatch(disposition, /[\r\n]/);
+			assert.ok(!disposition.includes(chat.id));
+			assert.equal(await response.text(), "%PDF-title");
+		}
+	} finally {
+		notesStore.delete(chat.id);
+		fs.unlinkSync(path.join(root, "chats", chat.id + ".json"));
+	}
+});
+
+it("repairs a legacy PDF from its saved text without another model run or changing a pending handout", async () => {
+	const chat: ChatRecord = { id: "legacy_pdf", title: "Existing notes", createdAt: "now", updatedAt: "now", messages: [] };
+	const document = { ...sample, sections: [{ ...sample.sections[0]!, heading: "8. Eigenvectors" }] };
+	const edition = { document, fingerprint: "old", writtenAt: "before" };
+	notesStore.savePdf(chat.id, edition, Buffer.from("%PDF-old"));
+	notesStore.change(chat.id, state => { state.pending = { ...edition, fingerprint: "pending" }; });
+	let printed = 0;
+	const api = createSessionNotesService({
+		chatStore: { getChat: () => chat }, notesStore,
+		engineFor: () => { throw new Error("No model is needed"); },
+		writeNotes: async () => { throw new Error("Use the existing handout"); },
+		printPdf: async doc => {
+			printed++;
+			assert.match(noteDocumentHtml(doc), /<h2><span>1\.<\/span> Eigenvectors<\/h2>/);
+			return Buffer.from("%PDF-corrected");
+		},
+	});
+	assert.equal(new TextDecoder().decode(await api.sessionNotesPdf(chat.id)), "%PDF-corrected");
+	assert.equal(printed, 1);
+	assert.equal(notesStore.read(chat.id).pending?.fingerprint, "pending");
+	assert.equal(notesStore.read(chat.id).final?.fingerprint, "old");
+});
+
 it("resolves sections after later graph extraction and removes attachments and tag membership on session deletion", async () => {
 	const { stores, sourceDirectory, noteIndex, deleteChatSession } = await import("../src/server/index.ts");
 	const { GET: getSources } = await import("../app/api/graph/sources/route.ts");
@@ -178,6 +236,11 @@ it("resolves sections after later graph extraction and removes attachments and t
 	assert.deepEqual(new Set(library.notes.map((n: NoteIndexEntry) => n.chatId)), new Set([session.id, practice.id]));
 	const tag = sourceDirectory.change({ action: "create-tag", name: "Linear algebra", parentId: null }).createdTagId!;
 	sourceDirectory.change({ action: "tag-sources", sourceIds: [session.id, practice.id], add: [tag], remove: [] });
+	const { GET: getChats } = await import("../app/api/chats/route.ts");
+	const listed = await (await getChats()).json();
+	for (const id of [session.id, practice.id]) {
+		assert.deepEqual(listed.chats.find((chat: { id: string }) => chat.id === id).tags.map((tag: { name: string }) => tag.name), ["Linear algebra"]);
+	}
 	const outcome = await deleteChatSession(session.id, "preserve-graph");
 	assert.equal(outcome.ok, true);
 	assert.equal(fs.existsSync(path.join(root, "notes", session.id)), false);
@@ -237,6 +300,53 @@ it("composes a long lesson from all original passages through bounded calls, wit
 	assert.ok(calls > 1);
 	assert.deepEqual([...seen], ["first", "middle", "last"]);
 	assert.deepEqual(doc.sections[0]?.sourceIds, ["first", "middle", "last"]);
+});
+
+it("loads the notes prompt edited in Settings into the real writer and respects its switch", async () => {
+	const { GET: getPrompts } = await import("../app/api/settings/prompts/route.ts");
+	const { PUT: putPrompt, DELETE: deletePrompt } = await import("../app/api/settings/prompts/[...segment]/route.ts");
+	const { PUT: putSettings } = await import("../app/api/settings/[section]/route.ts");
+	const { readSettingsRecord } = await import("../src/server/index.ts");
+	const segment = "notes/00-base.md";
+	const context = { params: Promise.resolve({ segment: segment.split("/") }) };
+	const override = "SYNTHETIC NOTES INSTRUCTIONS";
+	const saved = await putPrompt(new Request("http://test/api/settings/prompts", {
+		method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text: override }),
+	}), context);
+	assert.equal(saved.status, 200);
+	try {
+		for (const enabled of [false, true, false]) {
+			const switched = await putSettings(new Request("http://test/api/settings/agent", {
+				method: "PUT", headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({ prompts: enabled ? { [segment]: true } : {} }),
+			}), { params: Promise.resolve({ section: "agent" }) });
+			assert.equal(switched.status, 200);
+			const view = await (await getPrompts()).json();
+			assert.deepEqual(view.notes.map((row: { path: string }) => row.path), [segment]);
+			assert.equal(view.notes[0].enabled, enabled);
+			const faux = createFauxCore({});
+			faux.setResponses([ctx => {
+				assert.equal(ctx.messages.find(message => message.role === "system")?.content,
+					enabled ? override : view.notes[0].sourceText.trim());
+				return fauxAssistantMessage([fauxToolCall("submit_notes", {
+					overview: "An overview.", sections: [{
+						heading: "1. Eigenvectors", sourceIds: ["m1"], blocks: [{ kind: "definition", text: "A direction preserved." }],
+					}],
+				})], { stopReason: "toolUse" });
+			}]);
+			const doc = await writeSessionNotes({
+				chatId: "prompt_test", title: "Eigenvectors", mode: "final", practice: false,
+				passages: [{ messageId: "m1", topic: "basis", text: "An eigenvector preserves its direction." }],
+				engine: { model: faux.getModel(), streamFn: faux.streamSimple },
+				signal: new AbortController().signal,
+				promptSwitches: readSettingsRecord()?.agent?.prompts,
+				onUsage() {},
+			});
+			assert.equal(doc.sections[0]?.heading, "Eigenvectors");
+		}
+	} finally {
+		await deletePrompt(new Request("http://test/api/settings/prompts", { method: "DELETE" }), context);
+	}
 });
 
 it("keeps the published handout during regeneration, retries just the PDF, and discards in-flight output on deletion", async () => {
@@ -315,7 +425,7 @@ it("keeps the published handout during regeneration, retries just the PDF, and d
 	api.changeSessionNotes(chat.id, { action: "retry-pdf" });
 	await idle();
 	assert.equal(api.sessionNotes(chat.id).outdated, false);
-	assert.equal(new TextDecoder().decode(api.sessionNotesPdf(chat.id)), "%PDF-fixture");
+	assert.equal(new TextDecoder().decode(await api.sessionNotesPdf(chat.id)), "%PDF-fixture");
 	assert.deepEqual(modes, ["live", "final", "live", "final"]);
 	pausePrint = true;
 	api.changeSessionNotes(chat.id, { action: "generate" });
@@ -326,4 +436,68 @@ it("keeps the published handout during regeneration, retries just the PDF, and d
 	hold();
 	await delay(5);
 	assert.equal(fs.existsSync(path.join(root, "notes", chat.id)), false);
+});
+
+it("publishes live and final writers in the activity feed and stops each through the dock endpoint", async () => {
+	const { stores } = await import("../src/server/index.ts");
+	const { GET: getActivity } = await import("../app/api/activity/route.ts");
+	const { POST: abortActivity } = await import("../app/api/activity/abort/route.ts");
+	const { subscribe } = await import("../src/core/events.ts");
+	const sharedWork = (globalThis as typeof globalThis & {
+		__lhNoteWork: NonNullable<Parameters<typeof createSessionNotesService>[1]>;
+	}).__lhNoteWork;
+	const chat = stores.chatStore.createChat("Notes activity");
+	stores.chatStore.saveMessages(chat.id, [atTopic("a", "A", "First"), atTopic("b", "B", "Second")]);
+	const published = { document: sample, fingerprint: "published", writtenAt: "before" };
+	notesStore.savePdf(chat.id, published, Buffer.from("%PDF-published"));
+	const release = new Map<NoteMode, () => void>();
+	const faux = createFauxCore({});
+	let events = 0;
+	const stopEvents = subscribe(event => { if (event.type === "notes-changed" && event.chatId === chat.id) events++; });
+	const api = createSessionNotesService({
+		chatStore: stores.chatStore, notesStore,
+		engineFor: () => ({ model: faux.getModel(), streamFn: faux.streamSimple }),
+		writeNotes: async opts => {
+			opts.onUsage({ ...fauxAssistantMessage("fixture").usage, input: 12, output: 5 }, "faux:notes");
+			await new Promise<void>(resolve => { release.set(opts.mode, resolve); });
+			opts.signal.throwIfAborted();
+			return sample;
+		},
+		printPdf: async () => Buffer.from("%PDF-new"),
+	}, sharedWork);
+	try {
+		api.changeSessionNotes(chat.id, { action: "generate" });
+		api.changeSessionNotes(chat.id, { action: "set-live", enabled: true });
+		await delay(5);
+		const feed = await (await getActivity()).json();
+		const runs = feed.notes.filter((run: { chatId: string }) => run.chatId === chat.id);
+		assert.deepEqual(new Set(runs.map((run: { mode: string }) => run.mode)), new Set(["live", "final"]));
+		assert.ok(runs.every((run: { title: string; usage: { steps: number } }) => run.title === chat.title && run.usage.steps === 1));
+		assert.ok(events >= 4, "admission and usage both notify the activity reader");
+		for (const run of runs) {
+			const response = await abortActivity(new Request("http://test/api/activity/abort", {
+				method: "POST", headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({ kind: "notes", id: run.id }),
+			}));
+			assert.equal(response.status, 200);
+			release.get(run.mode)!();
+		}
+		await delay(5);
+		assert.equal(api.runningSessionNotes().length, 0);
+		assert.deepEqual(api.sessionNotes(chat.id, true).running, [], "a refresh does not restart the stopped live revision");
+		assert.equal(notesStore.read(chat.id).final?.fingerprint, "published");
+		assert.deepEqual((await (await getActivity()).json()).notes, []);
+		const stoppedAgain = await abortActivity(new Request("http://test/api/activity/abort", {
+			method: "POST", headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({ kind: "notes", id: runs[0].id }),
+		}));
+		assert.equal(stoppedAgain.status, 409);
+	} finally {
+		for (const run of api.runningSessionNotes()) api.abortSessionNotes(run.id);
+		for (const resume of release.values()) resume();
+		await delay(5);
+		stopEvents();
+		notesStore.delete(chat.id);
+		fs.unlinkSync(path.join(root, "chats", chat.id + ".json"));
+	}
 });

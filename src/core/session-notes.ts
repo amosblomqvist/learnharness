@@ -1,4 +1,5 @@
 import type { CallUsage } from "./contracts/chat.ts";
+import type { JobUsage } from "./contracts/jobs.ts";
 
 export const noteBlockKinds = ["paragraph", "key idea", "definition", "theorem", "method", "example"] as const;
 export type NoteBlockKind = (typeof noteBlockKinds)[number];
@@ -27,6 +28,15 @@ export interface NoteEdition {
 	document: NoteDocument;
 }
 export type NoteMode = "live" | "final";
+export interface NotesRun {
+	id: string;
+	chatId: string;
+	title: string;
+	mode: NoteMode;
+	startedAt: number;
+	activity: string;
+	usage?: JobUsage;
+}
 export interface SessionNotesRecord {
 	liveEnabled: boolean;
 	live: NoteEdition | null;
@@ -65,8 +75,12 @@ export interface NotePassage {
 	text: string;
 	graphNodeIds?: string[];
 }
+/** Section numbers belong to the renderer, including for previously saved notes. */
+export function noteSectionHeading(heading: string): string {
+	return heading.trim().replace(/^(?:\d+(?:\.\d+)*[.)]\s+)+(?=\S)/, "");
+}
 export function noteSectionText(section: WrittenSection): string {
-	return [section.heading, ...section.blocks.map(b => b.text)].join("\n");
+	return [noteSectionHeading(section.heading), ...section.blocks.map(b => b.text)].join("\n");
 }
 export function noteHref(chatId: string, mode: NoteMode, sectionId?: string): string {
 	return `/chat/${encodeURIComponent(chatId)}?notes=${mode}${sectionId ? `&section=${encodeURIComponent(sectionId)}` : ""}`;
