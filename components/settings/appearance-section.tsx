@@ -36,6 +36,7 @@ import {
 	resolveSettings,
 	type AppearanceSettings,
 	type GraphSettings,
+	type QuestionLayout,
 } from "@/src/core";
 import { MenuShell } from "@/components/menu-shell";
 import { Hint } from "@/components/ui/hint";
@@ -189,6 +190,30 @@ export function AppearanceSection({
 			<SettingsRow label="Mode" hint="Coming soon" testid="row-mode" dimmed>
 				<ThinSelect value="dark" ariaLabel="mode" onChange={() => {}} testid="select-mode" disabled>
 					<option value="dark">Dark</option>
+				</ThinSelect>
+			</SettingsRow>
+			{/* The question-dock placement (layout setting, owner request
+			    2026-11-07): auto = side panel on wide windows, bottom dock on
+			    narrow; the explicit picks pin one or the other. */}
+			<SettingsRow
+				label="Question layout"
+				hint="Where a pending question docks"
+				testid="row-question-layout"
+			>
+				<ThinSelect
+					value={appearance?.questionLayout ?? "auto"}
+					ariaLabel="question layout"
+					testid="select-question-layout"
+					onChange={(v) =>
+						onSectionChange({
+							...appearance,
+							questionLayout: v === "auto" ? undefined : (v as QuestionLayout),
+						})
+					}
+				>
+					<option value="auto">Auto — side when wide</option>
+					<option value="side">Side panel</option>
+					<option value="bottom">Bottom dock</option>
 				</ThinSelect>
 			</SettingsRow>
 			<SettingsRow

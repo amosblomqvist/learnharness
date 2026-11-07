@@ -387,10 +387,19 @@ export interface MdRenderingSettings {
 	italicColor?: string | null;
 }
 
-/** Appearance settings — mode, colors, type, markdown emphasis. */
+/** Question-dock placement (layout setting, owner request 2026-11-07):
+ *  "auto" = side panel on wide viewports, bottom dock otherwise (the
+ *  default); "side" = always the right panel; "bottom" = always the
+ *  bottom dock. */
+export const QUESTION_LAYOUTS = ["auto", "side", "bottom"] as const;
+export type QuestionLayout = (typeof QUESTION_LAYOUTS)[number];
+
+/** Appearance settings — mode, colors, type, markdown emphasis, layout. */
 export interface AppearanceSettings {
 	/** "dark" | "light" (default dark). */
 	mode?: "dark" | "light";
+	/** Where a pending question docks (default "auto"). */
+	questionLayout?: QuestionLayout;
 	/** The one user-chosen color; everything else derives per-mode in code.
 	 *  null = the mode's default background. */
 	background?: string | null;
@@ -498,6 +507,7 @@ export interface FactorySettings {
 	dictation: Required<DictationSettings>;
 	appearance: {
 		mode: "dark" | "light";
+		questionLayout: QuestionLayout;
 		background: string | null;
 		fontFamily: string | null;
 		proseFontSize: number;
@@ -518,6 +528,7 @@ export const FACTORY_SETTINGS: FactorySettings = {
 	dictation: { language: "en" },
 	appearance: {
 		mode: "dark",
+		questionLayout: "auto",
 		background: null, // the dark default (#141414) lives in the mode's derivation curve
 		fontFamily: null, // Source Sans 3
 		proseFontSize: 16,
@@ -751,6 +762,9 @@ function sanitizeMdRendering(raw: unknown): MdRenderingSettings {
 function sanitizeAppearance(raw: Record<string, unknown>): AppearanceSettings {
 	const out: AppearanceSettings = {};
 	if (raw.mode === "dark" || raw.mode === "light") out.mode = raw.mode;
+	if (QUESTION_LAYOUTS.includes(raw.questionLayout as QuestionLayout)) {
+		out.questionLayout = raw.questionLayout as QuestionLayout;
+	}
 	if (raw.background !== undefined) out.background = sanitizeHexOrNull(raw.background);
 	if (raw.fontFamily !== undefined) {
 		out.fontFamily = typeof raw.fontFamily === "string" && raw.fontFamily.trim() ? raw.fontFamily : null;

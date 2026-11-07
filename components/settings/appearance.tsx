@@ -27,6 +27,7 @@ export function resolveAppearance(delta: AppearanceSettings | undefined) {
 	const f = FACTORY_SETTINGS.appearance;
 	return {
 		mode: delta?.mode ?? f.mode,
+		questionLayout: delta?.questionLayout ?? f.questionLayout,
 		background: delta?.background ?? f.background,
 		fontFamily: delta?.fontFamily ?? f.fontFamily,
 		proseFontSize: delta?.proseFontSize ?? f.proseFontSize,

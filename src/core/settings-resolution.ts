@@ -204,6 +204,7 @@ export function resolveSettings(record: UserSettings | null): EffectiveSettings 
 		},
 		appearance: {
 			mode: appearance.mode ?? factoryAppearance.mode,
+			questionLayout: appearance.questionLayout ?? factoryAppearance.questionLayout,
 			background: appearance.background ?? factoryAppearance.background,
 			fontFamily: appearance.fontFamily ?? factoryAppearance.fontFamily,
 			proseFontSize: appearance.proseFontSize ?? factoryAppearance.proseFontSize,

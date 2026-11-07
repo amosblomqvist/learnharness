@@ -72,6 +72,7 @@ describe("sanitizeUserSettings", () => {
 			},
 			appearance: {
 				mode: "light",
+				questionLayout: "bottom",
 				background: "#ffffff",
 				fontFamily: "Some Font",
 				proseFontSize: 18,
@@ -101,7 +102,7 @@ describe("sanitizeUserSettings", () => {
 		const out = sanitizeUserSettings({
 			general: { autoUpdate: "yes" },
 			agent: { tools: { research: "no" }, prompts: { "system-prompt.md": 1 }, models: { researcher: "fast" } },
-			appearance: { mode: "sepia", sessionNameSerif: "true" },
+			appearance: { mode: "sepia", questionLayout: "left", sessionNameSerif: "true" },
 			graph: { enabled: 0 },
 		});
 		assert.ok(out);
