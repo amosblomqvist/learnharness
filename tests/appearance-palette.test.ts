@@ -7,6 +7,7 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import { describe, it } from "node:test";
+import { runInNewContext } from "node:vm";
 import {
 	MODE_DEFAULT_BACKGROUND,
 	resolveRenderedMode,
@@ -23,10 +24,36 @@ describe("appearance mode resolution", () => {
 		assert.equal(resolveRenderedMode("system", false), "light");
 	});
 
-	it("the pre-paint script only acts on data-lh-mode=system", () => {
-		assert.match(SYSTEM_MODE_SCRIPT, /lhMode/);
-		assert.match(SYSTEM_MODE_SCRIPT, /prefers-color-scheme: dark/);
-		assert.ok(!SYSTEM_MODE_SCRIPT.includes("localStorage"), "settings live on disk, not in storage");
+	/** Run the real pre-paint script against a fake <html> (server-rendered
+	 *  class + data-lh-mode) and OS preference; returns the classes after. */
+	function prePaint(lhMode: string, serverClass: string, osDark: boolean): string[] {
+		const classes = new Set([serverClass]);
+		const documentElement = {
+			dataset: { lhMode },
+			classList: { toggle: (name: string, on: boolean) => void (on ? classes.add(name) : classes.delete(name)) },
+		};
+		runInNewContext(SYSTEM_MODE_SCRIPT, {
+			document: { documentElement },
+			matchMedia: (q: string) => ({ matches: q === "(prefers-color-scheme: dark)" && osDark }),
+		});
+		return [...classes].sort();
+	}
+
+	it("the pre-paint script resolves System against the OS", () => {
+		assert.deepEqual(prePaint("system", "dark", false), ["light"]);
+		assert.deepEqual(prePaint("system", "dark", true), ["dark"]);
+	});
+
+	it("the pre-paint script leaves pinned modes as the server rendered them", () => {
+		assert.deepEqual(prePaint("dark", "dark", false), ["dark"]);
+		assert.deepEqual(prePaint("light", "light", true), ["light"]);
+	});
+
+	it("the pre-paint script never throws (a missing matchMedia leaves the server class)", () => {
+		const classes = new Set(["dark"]);
+		const documentElement = { dataset: { lhMode: "system" }, classList: { toggle: () => classes.clear() } };
+		runInNewContext(SYSTEM_MODE_SCRIPT, { document: { documentElement } });
+		assert.deepEqual([...classes], ["dark"]);
 	});
 });
 
