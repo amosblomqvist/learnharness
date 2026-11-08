@@ -50,7 +50,13 @@ export function nativeSubscriptionStream(provider: Provider, background: () => b
 				if (Object.keys(options?.headers ?? {}).some((key) => authKeys.has(key.toLowerCase()))) throw new Error("Authorization override forbidden");
 				const nativeModel = provider.getModels().find((model) => model.id === logicalModel.id && model.api === logicalModel.api);
 				if (!nativeModel) throw new Error("Native model unavailable");
-				const transport = { ...nativeModel, ...(auth.baseUrl ? { baseUrl: auth.baseUrl } : {}) };
+				const transport = {
+					...nativeModel,
+					...(auth.baseUrl ? { baseUrl: auth.baseUrl } : {}),
+					// Codex expects an originator on every request; keep it aligned
+					// with Pi's other identity headers instead of Pi's default "pi".
+					...(nativeId === "openai-codex" ? { headers: { ...nativeModel.headers, originator: "learnharness" } } : {}),
+				};
 				const fetch = options?.fetch ?? globalThis.fetch;
 				const source = provider.streamSimple(transport, subscriptionHistory(normalizeContext(context), logicalModel, nativeId), {
 					...options, apiKey: auth.apiKey, headers: { ...options?.headers, ...auth.headers }, signal, maxRetries: 0,
