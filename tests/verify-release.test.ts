@@ -3,8 +3,9 @@
  * plus CLI end-to-end runs, all offline against fixtures. The expected asset
  * names asserted here are the ones verified against the INSTALLED
  * app-builder-lib 26.15.3 (see the script header for the derivation):
- * 11 assets — 4 installers (dmg / NSIS exe / AppImage / deb), the mac
- * updater ZIP, its/exe/dmg blockmaps, and the three latest*.yml feeds.
+ * 14 assets — 6 installers (dmg / NSIS exe / AppImage + deb for Linux x64
+ * and arm64), the mac updater ZIP, its/exe/dmg blockmaps, and the four
+ * latest*.yml feeds.
  */
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
@@ -34,7 +35,7 @@ function asset(id: number, name: string, overrides: Partial<ReleaseAsset> = {}):
 	return { id, name, size: 5000, state: "uploaded", ...overrides };
 }
 
-/** The complete, healthy 11-asset draft for a version. */
+/** The complete, healthy 14-asset draft for a version. */
 function healthyRelease(version: string, tagForm: "v" | "bare" = "v"): ReleaseRecord {
 	const e = expectedAssets(version);
 	return {
@@ -45,7 +46,7 @@ function healthyRelease(version: string, tagForm: "v" | "bare" = "v"): ReleaseRe
 	};
 }
 
-/** The three update feeds exactly as app-builder-lib writes them. */
+/** The four update feeds exactly as app-builder-lib writes them. */
 function healthyFeeds(version: string, release: ReleaseRecord): Record<string, string> {
 	const byName = new Map(release.assets.map((entry) => [entry.name, entry]));
 	const feeds: Record<string, string> = {};
@@ -64,19 +65,22 @@ function healthyFeeds(version: string, release: ReleaseRecord): Record<string, s
 }
 
 describe("release gate — expected asset inventory", () => {
-	it("is exactly the 11 verified builder outputs for the version", () => {
+	it("is exactly the 14 verified builder outputs for the version", () => {
 		assert.deepEqual(expectedAssets(VERSION).files, [
 			"LearnHarness-0.2.0-arm64.dmg",
 			"LearnHarness-0.2.0-arm64-mac.zip",
 			"LearnHarness-0.2.0-x64-setup.exe",
 			"LearnHarness-0.2.0-x86_64.AppImage",
 			"LearnHarness-0.2.0-amd64.deb",
+			"LearnHarness-0.2.0-arm64.AppImage",
+			"LearnHarness-0.2.0-arm64.deb",
 			"LearnHarness-0.2.0-arm64.dmg.blockmap",
 			"LearnHarness-0.2.0-arm64-mac.zip.blockmap",
 			"LearnHarness-0.2.0-x64-setup.exe.blockmap",
 			"latest-mac.yml",
 			"latest.yml",
 			"latest-linux.yml",
+			"latest-linux-arm64.yml",
 		]);
 	});
 
@@ -219,28 +223,32 @@ describe("release gate — update feeds", () => {
 		assert.ok(verdict.ok, JSON.stringify(verdict, null, 2));
 	});
 
-	it("accepts either AppImage/deb order in latest-linux.yml (builder order is not deterministic)", () => {
-		const release = healthyRelease(VERSION);
-		const e = expectedAssets(VERSION);
-		const feeds = healthyFeeds(VERSION, release);
-		// Same content, deb entry first (writeUpdateInfoFiles keeps whichever
-		// target finished first; the gate must accept both).
-		feeds["latest-linux.yml"] = [
-			`version: ${VERSION}`,
-			"files:",
-			`  - url: ${e.linux.deb}`,
-			`    sha512: ${sha512(e.linux.deb)}`,
-			"    size: 5000",
-			`  - url: ${e.linux.appImage}`,
-			`    sha512: ${sha512(e.linux.appImage)}`,
-			"    size: 5000",
-			`path: ${e.linux.deb}`,
-			`sha512: ${sha512(e.linux.deb)}`,
-			"releaseDate: '2026-10-13T09:37:13.265Z'",
-		].join("\n") + "\n";
-		const verdict = verifyMetadataFiles(feeds, release, expectedAssets(VERSION));
-		assert.ok(verdict.ok, JSON.stringify(verdict, null, 2));
-	});
+	for (const arch of ["x64", "arm64"] as const) {
+		const linux = expectedAssets(VERSION).linux[arch];
+		it(`accepts either AppImage/deb order in ${linux.feed} (builder order is not deterministic)`, () => {
+			const release = healthyRelease(VERSION);
+			const feeds = healthyFeeds(VERSION, release);
+			// Same content, deb entry first (writeUpdateInfoFiles keeps whichever
+			// target finished first; the gate must accept both).
+			feeds[linux.feed] = [
+				`version: ${VERSION}`,
+				"files:",
+				`  - url: ${linux.deb}`,
+				`    sha512: ${sha512(linux.deb)}`,
+				"    size: 5000",
+				`  - url: ${linux.appImage}`,
+				`    sha512: ${sha512(linux.appImage)}`,
+				"    size: 5000",
+				`path: ${linux.deb}`,
+				`sha512: ${sha512(linux.deb)}`,
+				"releaseDate: '2026-10-13T09:37:13.265Z'",
+			].join("\n") + "\n";
+
+			const verdict = verifyMetadataFiles(feeds, release, expectedAssets(VERSION));
+
+			assert.ok(verdict.ok, JSON.stringify(verdict, null, 2));
+		});
+	}
 
 	type Mutation = (feeds: Record<string, string>, release: ReleaseRecord) => void;
 	const mutations: Array<[string, Mutation, RegExp]> = [
@@ -278,11 +286,16 @@ describe("release gate — update feeds", () => {
 			feeds["latest-mac.yml"] = feeds["latest-mac.yml"]!.replace(`sha512: ${sha512("LearnHarness-0.2.0-arm64-mac.zip")}\nreleaseDate`, `sha512: ${sha512("tampered")}\nreleaseDate`);
 		}, /top-level sha512 does not match/],
 		["missing deb entry in latest-linux.yml", (feeds) => {
-			const e = expectedAssets(VERSION);
+			const linux = expectedAssets(VERSION).linux.x64;
 			feeds["latest-linux.yml"] = feeds["latest-linux.yml"]!.replace(
-				`  - url: ${e.linux.deb}\n    sha512: ${sha512(e.linux.deb)}\n    size: 5000\n`, "",
-			).replace(`path: ${e.linux.appImage}`, `path: ${e.linux.appImage}`);
+				`  - url: ${linux.deb}\n    sha512: ${sha512(linux.deb)}\n    size: 5000\n`, "",
+			).replace(`path: ${linux.appImage}`, `path: ${linux.appImage}`);
 		}, /must reference exactly/],
+		["x64 installer listed in latest-linux-arm64.yml", (feeds) => {
+			const linux = expectedAssets(VERSION).linux;
+			feeds["latest-linux-arm64.yml"] = feeds["latest-linux-arm64.yml"]!
+				.replaceAll(linux.arm64.deb, linux.x64.deb);
+		}, /latest-linux-arm64\.yml: references .* but must reference exactly/],
 		["extra entry in latest.yml", (feeds) => {
 			const e = expectedAssets(VERSION);
 			feeds["latest.yml"] = feeds["latest.yml"]!.replace("path:", `  - url: ${e.mac.zip}\n    sha512: ${sha512(e.mac.zip)}\n    size: 5000\npath:`);
@@ -294,6 +307,7 @@ describe("release gate — update feeds", () => {
 		["unparseable feed", (feeds) => { feeds["latest.yml"] = "\tversion: [unclosed"; }, /does not parse as YAML/],
 		["non-mapping feed", (feeds) => { feeds["latest.yml"] = "- just\n- a\n- list\n"; }, /top level is not a mapping/],
 		["feed not downloaded", (feeds) => { delete feeds["latest-linux.yml"]; }, /not downloaded/],
+		["arm64 feed not downloaded", (feeds) => { delete feeds["latest-linux-arm64.yml"]; }, /latest-linux-arm64\.yml: not downloaded/],
 	];
 	for (const [label, mutate, pattern] of mutations) {
 		it(`fails on ${label}`, () => {
@@ -322,7 +336,7 @@ describe("release gate — workflow wiring", () => {
 	});
 
 	it("exposes the elevated token only to the two API-reading steps", () => {
-		const readers = ["List every release, drafts included", "Download the three update feeds"];
+		const readers = ["List every release, drafts included", "Download the four update feeds"];
 		for (const step of verify.steps) {
 			if (readers.includes(step.name)) assert.equal(step.env?.GH_TOKEN, "${{ github.token }}");
 			else assert.equal(step.env?.GH_TOKEN, undefined, String(step.name ?? step.uses));
@@ -354,10 +368,11 @@ describe("release gate — workflow wiring", () => {
 		}
 	});
 
-	it("download step fetches exactly the three update feeds from the selected draft", () => {
-		const download = verify.steps.find((step: any) => step.name === "Download the three update feeds");
+	it("download step fetches exactly the four update feeds from the selected draft", () => {
+		const download = verify.steps.find((step: any) => step.name === "Download the four update feeds");
 		assert.ok(download);
-		for (const feed of ["latest-mac.yml", "latest.yml", "latest-linux.yml"]) assert.ok(download.run.includes(feed));
+		const feeds = ["latest-mac.yml", "latest.yml", "latest-linux.yml", "latest-linux-arm64.yml"];
+		for (const feed of feeds) assert.ok(download.run.includes(feed));
 		assert.match(download.run, /releases\/assets\/\$id/);
 	});
 });
@@ -408,7 +423,7 @@ describe("release gate — CLI (offline, repo config)", () => {
 		try {
 			const result = run(["verify", path.join(root, "releases.json"), path.join(root, "metadata"), "--tag", TAG]);
 			assert.equal(result.status, 0, String(result.stderr));
-			assert.match(result.stdout, /11\/11 expected files present/);
+			assert.match(result.stdout, /14\/14 expected files present/);
 			assert.ok(result.stdout.includes(`OK: draft for ${TAG} is complete`));
 		} finally {
 			fs.rmSync(root, { recursive: true, force: true });
