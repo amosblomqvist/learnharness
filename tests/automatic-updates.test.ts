@@ -19,6 +19,7 @@ function fixture({ packaged = true, updaterMissing = false } = {}) {
 	const order: string[] = [];
 	const intervals: { callback: () => void; delay: number }[] = [];
 	const handles = new Map<string, (event: unknown) => unknown>();
+	const listeners = new Map<string, (event: unknown) => void>();
 	const windows: FakeWindow[] = [];
 	let enumerationFails = false;
 	let userData = "/fixture/custom-user-data";
@@ -81,7 +82,7 @@ function fixture({ packaged = true, updaterMissing = false } = {}) {
 	const electron = {
 		app, BrowserWindow: FakeWindow,
 		Menu: { buildFromTemplate: (value: typeof menu) => value, setApplicationMenu: (value: typeof menu) => { menu = value; } },
-		ipcMain: { on() {}, handle: (channel: string, fn: (event: unknown) => unknown) => handles.set(channel, fn) },
+		ipcMain: { on: (channel: string, fn: (event: unknown) => void) => listeners.set(channel, fn), handle: (channel: string, fn: (event: unknown) => unknown) => handles.set(channel, fn) },
 		session: { defaultSession: { setPermissionRequestHandler() {}, setPermissionCheckHandler() {} } },
 	};
 	const context = createContext({
@@ -109,7 +110,7 @@ function fixture({ packaged = true, updaterMissing = false } = {}) {
 	runInContext(mainSource, context, { filename: mainFile });
 	const run = (code: string) => runInContext(code, context);
 	return {
-		run, updater, windows, intervals, handles, settingsReads, order, app,
+		run, updater, windows, intervals, handles, listeners, settingsReads, order, app,
 		setSettings: (value: unknown) => { settings = JSON.stringify(value); },
 		setSettingsFailure: (value: string | Error) => { settings = value; },
 		setEnumerationFailure: (value: boolean) => { enumerationFails = value; },
@@ -268,6 +269,23 @@ describe("startup, timer, trusted IPC and menu wiring", () => {
 		sender.mainFrame.url = "https://untrusted.invalid/";
 		assert.throws(() => check(event), /Untrusted/);
 		assert.equal(f.updater.checks, 1);
+	});
+
+	it("restart-to-install IPC accepts only an owned main frame", async () => {
+		const f = fixture(); await f.run("main()");
+		const sender = f.windows[0]!.webContents;
+		const install = f.listeners.get("lh:update-install")!;
+		for (const bad of [
+			{ sender: {}, senderFrame: sender.mainFrame },
+			{ sender, senderFrame: { url: sender.mainFrame.url } },
+		]) install(bad);
+		const ownFrame = sender.mainFrame;
+		sender.mainFrame = { url: "https://untrusted.invalid/" };
+		install({ sender, senderFrame: sender.mainFrame });
+		assert.deepEqual(f.order, [], "untrusted senders never reach quit-and-install");
+		sender.mainFrame = ownFrame;
+		install({ sender, senderFrame: sender.mainFrame });
+		assert.deepEqual(f.order, ["install"]);
 	});
 
 	it("menu restores/focuses a minimized window, opens General, and manually checks while OFF", async () => {

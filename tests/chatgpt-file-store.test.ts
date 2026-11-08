@@ -100,6 +100,23 @@ for (const phase of ["sync", "rename"] as const) {
 	});
 }
 
+// Same rule as subscription-store.cjs. Symlink creation and POSIX modes are
+// not portable to Windows test hosts, where the mode check is skipped anyway.
+test("reads refuse symlinks and credentials readable by group/other", { skip: process.platform === "win32" }, async () => {
+	const dir = await fs.mkdtemp(path.join(os.tmpdir(), "lh-chatgpt-mode-"));
+	const file = path.join(dir, "chatgpt-credentials.json");
+	try {
+		await fileStore(file).write(initial());
+		assert.equal((await fs.stat(file)).mode & 0o777, 0o600);
+		assert.deepEqual(await fileStore(file).read(), initial(), "the store's own 0600 file reads normally");
+		const link = path.join(dir, "linked-credentials.json");
+		await fs.symlink(file, link);
+		await assert.rejects(fileStore(link).read(), /^Error: storage$/, "a symlink is not a regular credentials file");
+		await fs.chmod(file, 0o644);
+		await assert.rejects(fileStore(file).read(), /^Error: storage$/, "group/other-readable credentials are refused");
+	} finally { await fs.rm(dir, { recursive: true, force: true }); }
+});
+
 test("file read/write failures are sanitized and cannot leak credential or path details", async () => {
 	const dir = await fs.mkdtemp(path.join(os.tmpdir(), "lh-chatgpt-io-"));
 	try {
