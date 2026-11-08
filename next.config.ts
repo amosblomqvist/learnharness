@@ -91,6 +91,10 @@ const nextConfig: NextConfig = {
 			// Wave E stage 2: resvg rasterizes visual-maker SVGs natively; same
 			// per-platform-binary story as the canvas above (one per build).
 			"node_modules/@resvg/resvg-js-*/**/*",
+			// Local dictation (sherpa-onnx): the per-platform package holds the addon
+			// AND the shared libraries it dlopens (onnxruntime, the C API) beside it,
+			// which the tracer cannot see; one platform package is installed per build.
+			"node_modules/sherpa-onnx-*/**/*",
 			"node_modules/@earendil-works/pi-ai/dist/providers/data/**/*",
 			// Public native OAuth factories load these flows through variable imports.
 			// Electron main uses the same standalone SDK; the offline runtime gate
@@ -118,6 +122,7 @@ const nextConfig: NextConfig = {
 		"@napi-rs/canvas", // native binding — bundling breaks the .node require
 		"@silvia-odwyer/photon-node", // CJS loads its adjacent WASM from disk
 		"@resvg/resvg-js", // native binding — same
+		"sherpa-onnx-node", // native addon — bundling breaks the .node require
 	],
 };
 

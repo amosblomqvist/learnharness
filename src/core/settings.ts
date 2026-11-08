@@ -35,7 +35,7 @@ import { CLAUDE_CODE_PROVIDER } from "./contracts/claude-code.ts";
 import type { ModelRole } from "../../config.ts";
 import type { ChatSettings } from "./contracts/chat.ts";
 import { isSearchEngineId, type SearchEngineId } from "./search.ts";
-import { isDictationLanguage, type DictationLanguage } from "./dictation.ts";
+import { isDictationLanguage, isDictationProvider, type DictationLanguage, type DictationProvider } from "./dictation.ts";
 import { parseFileAccessSettings, type FileAccessSettings } from "./file-access.ts";
 
 /** The schema version this code understands. Bump ONLY for breaking shape
@@ -340,6 +340,7 @@ export interface GeneralSettings {
 /** One app-wide dictation preference, shared by every composer. */
 export interface DictationSettings {
 	language?: DictationLanguage;
+	provider?: DictationProvider;
 }
 
 /** Agent settings — everything about the non-conversation machinery. */
@@ -515,7 +516,7 @@ export interface FactorySettings {
 export const FACTORY_SETTINGS: FactorySettings = {
 	version: CURRENT_SETTINGS_VERSION,
 	general: { autoUpdate: true },
-	dictation: { language: "en" },
+	dictation: { language: "en", provider: "deepgram" },
 	appearance: {
 		mode: "dark",
 		background: null, // the dark default (#141414) lives in the mode's derivation curve
@@ -822,10 +823,13 @@ export function sanitizeUserSettings(raw: unknown): UserSettings | null {
 	}
 	if (r.dictation !== undefined) {
 		const raw = r.dictation;
-		out.dictation = raw !== null && typeof raw === "object" && !Array.isArray(raw) &&
-			isDictationLanguage((raw as Record<string, unknown>).language)
-			? { language: (raw as DictationSettings).language }
-			: {};
+		const dictation: DictationSettings = {};
+		if (raw !== null && typeof raw === "object" && !Array.isArray(raw)) {
+			const { language, provider } = raw as Record<string, unknown>;
+			if (isDictationLanguage(language)) dictation.language = language;
+			if (isDictationProvider(provider)) dictation.provider = provider;
+		}
+		out.dictation = dictation;
 	}
 	if (r.claudeCode !== undefined) {
 		const raw = r.claudeCode;
