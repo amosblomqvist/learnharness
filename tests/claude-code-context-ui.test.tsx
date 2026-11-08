@@ -4,7 +4,9 @@ import assert from "node:assert/strict";
 import { afterEach, test } from "node:test";
 import { createRoot, type Root } from "react-dom/client";
 import { parseHTML } from "linkedom";
-import { StatsBar } from "../components/stats-bar.tsx";
+import { StatsBar as StatsBarBase } from "../components/stats-bar.tsx";
+import { InteractionLayersProvider } from "../components/interaction-layers.tsx";
+function StatsBar(props: React.ComponentProps<typeof StatsBarBase>) { return <InteractionLayersProvider><StatsBarBase {...props} /></InteractionLayersProvider>; }
 import { CLAUDE_CODE_MODELS } from "../src/agent/claude-code/provider.ts";
 import { toModelDto } from "../src/server/model-catalog.ts";
 import type { ModelCatalogResponse, TurnUsage } from "../src/core/index.ts";

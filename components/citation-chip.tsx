@@ -4,6 +4,8 @@ import React, { createContext, useContext, useEffect, useRef, useState } from "r
 import { ArrowUpRight, Pencil, Quote } from "lucide-react";
 import { MenuShell } from "./menu-shell";
 import { citationLabel, type TutorCitation } from "@/src/core";
+import { useOptionalInteractionLayers } from "./interaction-layers";
+import { isInteractionScopeEligible } from "./plugin-input-focus";
 
 /** Where a composer chip's link sits in the draft (for comment edits). */
 export type ComposerCitationSource = { start: number; end: number; link: string; host: HTMLElement };
@@ -40,6 +42,7 @@ export function CitationQuoteCard({ citation, onOpenSource }: { citation: TutorC
 
 export function CitationChip({ citation, variant, contentEditable, source }: CitationChipProps) {
 	const actions = useContext(CitationActionsContext);
+	const controller = useOptionalInteractionLayers();
 	const label = citationLabel(citation);
 	const [cardOpen, setCardOpen] = useState(false);
 	const labelRef = useRef<HTMLButtonElement>(null);
@@ -47,15 +50,14 @@ export function CitationChip({ citation, variant, contentEditable, source }: Cit
 	useEffect(() => {
 		if (!cardOpen) return;
 		const inside = (node: EventTarget | null) => node instanceof Node && (!!labelRef.current?.contains(node) || !!cardRef.current?.contains(node));
-		const onPointerDown = (event: PointerEvent) => { if (!inside(event.target)) setCardOpen(false); };
-		const onKeyDown = (event: KeyboardEvent) => { if (event.key === "Escape") { event.stopPropagation(); setCardOpen(false); } };
+		const onPointerDown = (event: PointerEvent) => {
+			if (isInteractionScopeEligible(cardRef.current, controller) && !inside(event.target)) setCardOpen(false);
+		};
 		document.addEventListener("pointerdown", onPointerDown);
-		document.addEventListener("keydown", onKeyDown);
 		return () => {
 			document.removeEventListener("pointerdown", onPointerDown);
-			document.removeEventListener("keydown", onKeyDown);
 		};
-	}, [cardOpen]);
+	}, [cardOpen, controller]);
 	const openSource = (anchor: HTMLElement) => actions?.openSource?.(citation, anchor);
 	return (
 		<span
@@ -88,7 +90,7 @@ export function CitationChip({ citation, variant, contentEditable, source }: Cit
 				</button>
 			) : null}
 			{cardOpen ? (
-				<MenuShell anchorRef={labelRef} testid="citation-quote-card" preferredSide="up" align="left" menuClass="w-80 rounded-xl border bg-popover p-3 text-sm shadow-xl">
+				<MenuShell anchorRef={labelRef} onClose={() => { setCardOpen(false); return "closed"; }} testid="citation-quote-card" preferredSide="up" align="left" menuClass="w-80 rounded-xl border bg-popover p-3 text-sm shadow-xl">
 					<div ref={cardRef}>
 						<CitationQuoteCard citation={citation} onOpenSource={() => { setCardOpen(false); if (labelRef.current) openSource(labelRef.current); }} />
 					</div>

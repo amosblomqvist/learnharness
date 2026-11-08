@@ -36,6 +36,8 @@ import { createFauxCore, fauxAssistantMessage } from "@earendil-works/pi-ai";
 const { subscribe } = await import("../src/core/events.ts");
 const { activeCompactionOf, newCompactionMarker, newUserMessage, measuredContextTokens, toLlmMessages, COMPACTED_HISTORY_HEADER } = await import("../src/core/index.ts");
 import type { LhMessage } from "../src/core/index.ts";
+const { claimPreparingTurn } = await import("../src/server/turn-preparation.ts");
+const { beginTurn, endTurn } = await import("../src/server/turn-liveness.ts");
 
 after(() => {
 	fs.rmSync(TMP_DATA, { recursive: true, force: true });
@@ -187,6 +189,103 @@ describe("the compaction service", () => {
 			}
 		}
 	});
+
+	it("all compaction entrypoints refuse to start while a preparation or teacher owns the session", async () => {
+		for (const ownerKind of ["preparation", "teacher"] as const) {
+			const chatId = overThresholdChat(`compact: live ${ownerKind}`);
+			const prep = ownerKind === "preparation" ? claimPreparingTurn(chatId)! : null;
+			if (!prep) assert.equal(beginTurn(chatId), true);
+			const before = summarizeCalls;
+			const original = chatStore.getChat(chatId)!.messages;
+			try {
+				await ensureCompacted(depsOf(chatId, 40_000), chatId);
+				kickCompaction(() => depsOf(chatId, 40_000), chatId);
+				await awaitCompaction(chatId);
+				assert.equal(summarizeCalls, before);
+				assert.deepEqual(chatStore.getChat(chatId)!.messages, original);
+				assert.equal(compactionInFlight(chatId), false);
+			} finally { if (prep) prep.finish(); else endTurn(chatId); }
+		}
+	});
+
+	it("a stalled competing preflight rechecks ownership at actual compaction start after its await", async () => {
+		const chatId = overThresholdChat("compact: late competing preflight");
+		const deps = depsOf(chatId, 40_000);
+		const before = summarizeCalls;
+		// Both requests passed their earlier request-level checks. The losing
+		// preflight is parked at ensureCompacted's structural await, while the
+		// accepted answer claims ownership and saves durable grading output.
+		const competingPreflight = ensureCompacted(deps, chatId);
+		const prep = claimPreparingTurn(chatId)!;
+		assert.ok(prep);
+		const accepted = [...chatStore.getChat(chatId)!.messages, newUserMessage("accepted grade/teacher output")];
+		chatStore.saveMessages(chatId, accepted);
+		try {
+			await competingPreflight;
+			assert.equal(summarizeCalls, before, "stale preflight cannot launch a summary behind the accepted answer");
+			assert.deepEqual(chatStore.getChat(chatId)!.messages, accepted);
+			assert.equal(activeCompactionOf(chatStore.getChat(chatId)!.messages), null);
+		} finally { prep.finish(); }
+		await ensureCompacted(deps, chatId);
+		assert.equal(summarizeCalls, before + 1, "compaction remains eligible after the owner settles");
+	});
+
+	it("a competing preflight waiting for an existing compaction cannot restart it behind the winning owner", async () => {
+		const chatId = overThresholdChat("compact: competing structural wait");
+		const deps = depsOf(chatId, 40_000);
+		const before = summarizeCalls;
+		let release!: () => void;
+		let entered!: () => void;
+		const gate = new Promise<void>((resolve) => { release = resolve; });
+		const started = new Promise<void>((resolve) => { entered = resolve; });
+		const initial = ensureCompacted({ ...deps, summarize: async (prompt, engine) => {
+			entered();
+			await gate;
+			return { ...await deps.summarize!(prompt, engine), summary: "" };
+		} }, chatId);
+		await started;
+		const owner: { prep: ReturnType<typeof claimPreparingTurn> } = { prep: null };
+		let accepted: LhMessage[] = [];
+		// The winning preflight finishes its structural wait first, claims the
+		// existing turn gate, and saves its grade before the loser resumes.
+		const winner = (async () => {
+			await awaitCompaction(chatId);
+			owner.prep = claimPreparingTurn(chatId);
+			assert.ok(owner.prep);
+			accepted = [...chatStore.getChat(chatId)!.messages, newUserMessage("accepted answer grading")];
+			chatStore.saveMessages(chatId, accepted);
+		})();
+		let competingDone = false;
+		const competitor = ensureCompacted(deps, chatId).then(() => { competingDone = true; });
+		try {
+			await Promise.resolve();
+			assert.equal(competingDone, false, "existing in-flight compaction is still structurally awaited");
+			release();
+			await winner;
+			await competitor;
+			await initial;
+			assert.equal(summarizeCalls, before + 1, "only the already-running summary was admitted");
+			assert.deepEqual(chatStore.getChat(chatId)!.messages, accepted);
+			assert.equal(activeCompactionOf(accepted), null);
+		} finally { release(); await initial; owner.prep?.finish(); }
+	});
+
+	it("ownership is rechecked after synchronous start hooks as well as awaits", async () => {
+		for (const entrypoint of ["preflight", "background"] as const) {
+			const chatId = overThresholdChat(`compact: start seam ${entrypoint}`);
+			const owner: { prep: ReturnType<typeof claimPreparingTurn> } = { prep: null };
+			const deps = { ...depsOf(chatId, 40_000), canStart: () => { owner.prep ??= claimPreparingTurn(chatId); return true; } };
+			const before = summarizeCalls;
+			try {
+				if (entrypoint === "preflight") await ensureCompacted(deps, chatId);
+				else kickCompaction(() => deps, chatId);
+				await awaitCompaction(chatId);
+				assert.equal(summarizeCalls, before);
+				assert.equal(activeCompactionOf(chatStore.getChat(chatId)!.messages), null);
+			} finally { owner.prep?.finish(); }
+		}
+	});
+
 	it("background eligibility skips both entrypoints without writes, but still awaits an existing structural run", async () => {
 		const chatId = overThresholdChat("compact: consent off");
 		const before = summarizeCalls;
@@ -312,6 +411,43 @@ describe("the compaction service", () => {
 			assert.equal(projectedContextTokens([assistant, cargo], 100, estimateModel), 70_000, "do not add output/reasoning/ciphertext again to already-counted usage");
 		}
 	});
+
+	for (const eligibility of ["eligible", "background disabled", "under threshold"] as const) {
+	it(`a concurrent fresh preflight (${eligibility}) waits for the summary started after its initial structural check`, async () => {
+		const chatId = overThresholdChat(`compact: fresh preflight wait race ${eligibility}`);
+		const deps = depsOf(chatId, 40_000);
+		let release!: () => void;
+		let entered!: () => void;
+		const gate = new Promise<void>((resolve) => { release = resolve; });
+		const started = new Promise<void>((resolve) => { entered = resolve; });
+		const first = ensureCompacted({ ...deps, summarize: async (prompt, engine) => {
+			entered();
+			await gate;
+			return deps.summarize!(prompt, engine);
+		} }, chatId);
+		// Both calls see no running compaction at the first structural check.
+		// Their await continuations resume in order: first starts the stalled
+		// summary; second must join it, not return to grading admission.
+		let secondReturned = false;
+		const secondDeps = {
+			...deps,
+			canStart: () => eligibility !== "background disabled",
+			thresholdTokens: eligibility === "under threshold" ? 10_000_000 : deps.thresholdTokens,
+		};
+		const second = ensureCompacted(secondDeps, chatId).then(() => { secondReturned = true; });
+		try {
+			await started;
+			await Promise.resolve();
+			assert.equal(compactionInFlight(chatId), true);
+			assert.equal(secondReturned, false, "competing ensureCompacted returned during the newly started summary");
+		} finally {
+			release();
+			await Promise.all([first, second]);
+		}
+		assert.equal(secondReturned, true);
+		assert.equal(compactionInFlight(chatId), false);
+	});
+	}
 
 	it("the registry is a mutex: concurrent ensureCompacted → ONE summary", async () => {
 		const chatId = overThresholdChat("compact: mutex");

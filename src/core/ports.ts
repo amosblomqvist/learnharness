@@ -10,6 +10,8 @@
  */
 
 import type { LhMessage } from "./native-messages.ts";
+import type { PluginAgentRecord } from "./plugin-agents.ts";
+import type { PluginTaskRecord } from "./plugin-workers.ts";
 import type {
 	ChatRecord,
 	ImageSnapshot,
@@ -19,6 +21,7 @@ import type {
 	GraphNode,
 	JobKind,
 	JobRecord,
+	PluginJobMetadata,
 	ExtractionRunUsage,
 	PlanTree,
 	Position,
@@ -29,6 +32,22 @@ import type {
 	NotesSource,
 } from "./contracts.ts";
 import type { UserSettings } from "./settings.ts";
+
+// ─── Plugin sessions — plugin-owned data, separate from core chats ──────────
+
+/** One writer per plugin directory. Failed atomic replacements must throw. */
+export interface PluginAgentRecordStore {
+	list(): PluginAgentRecord[];
+	get(id: string): PluginAgentRecord | null;
+	save(record: PluginAgentRecord): void;
+}
+
+/** One writer per plugin task directory; accepted results require an atomic save. */
+export interface PluginTaskRecordStore {
+	list(): PluginTaskRecord[];
+	get(id: string): PluginTaskRecord | null;
+	save(record: PluginTaskRecord): void;
+}
 
 // ─── ChatStore — the session record's home (data/chats) ─────────────────────
 
@@ -156,6 +175,8 @@ export interface CreateJobInit {
 	toolCallId: string;
 	/** First activity line (defaults to "starting"). */
 	activity?: string;
+	/** Host-owned plugin worker linkage, not model-selected routing. */
+	plugin?: PluginJobMetadata;
 	/** Saved on the job before its worker is spawned. */
 	input?: unknown;
 }

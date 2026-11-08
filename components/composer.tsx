@@ -5,6 +5,8 @@ import { ArrowRightIcon, CornerDownLeftIcon, SquareIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { PathInput } from "@/components/path-input";
 import { AttachFilesButton } from "@/components/attach-files-button";
+import { useOptionalInteractionLayers } from "./interaction-layers";
+import { isInteractionScopeEligible } from "./plugin-input-focus";
 
 /**
  * The chat composer — content row ONLY (the persistent rounded shell lives in
@@ -58,6 +60,7 @@ export function ChatSessionComposer({
 	placeholder,
 	nextProblem,
 	onNext,
+	pendingInput = false,
 }: {
 	busy: boolean;
 	value: string;
@@ -73,10 +76,11 @@ export function ChatSessionComposer({
 	placeholder?: string;
 	nextProblem?: boolean;
 	onNext?: () => void;
+	pendingInput?: boolean;
 }) {
 	const [draft, setDraft] = useState(value);
 	useLayoutEffect(() => { setDraft(value); }, [revision, value]);
-	const canSend = sendAllowed && (draft.trim().length > 0 || dictationActive);
+	const canSend = sendAllowed && (draft.trim().length > 0 || dictationActive || pendingInput);
 	const applyDraft = useCallback((next: string) => {
 		setDraft(next);
 		onChange(next);
@@ -113,6 +117,8 @@ export function Composer({
 	placeholder = "Ask, answer, or steer the lesson…",
 	nextProblem = false,
 	onNext,
+	defaultDropTarget = true,
+	fileInsertion = true,
 }: {
 	busy: boolean;
 	value: string;
@@ -138,7 +144,11 @@ export function Composer({
 	/** The signal's dispatcher (send({type:"next"})) — the chip and the
 	 *  empty-Enter share it. */
 	onNext?: () => void;
+	/** Neutral plugin composers opt out without changing core defaults. */
+	defaultDropTarget?: boolean;
+	fileInsertion?: boolean;
 }) {
+	const controller = useOptionalInteractionLayers();
 	const act = () => {
 		const action = enterAction({ busy, canSend, nextProblem });
 		if (action === "stop") onStop();
@@ -160,13 +170,16 @@ export function Composer({
 				ref={editorRef}
 				value={value}
 				onValueChange={onChange}
-				defaultDropTarget
+				defaultDropTarget={defaultDropTarget}
+				fileInsertion={fileInsertion}
 				onKeyDown={(e) => {
+					if (!isInteractionScopeEligible(e.currentTarget, controller)) return;
 					// Esc ends dictation before anything else Esc might someday mean
 					// here (the dictate decisions: click-again or Esc to stop).
 					// stopPropagation claims the Esc (keyboard wave A): the
 					// window-level chain must not also abort a turn under us.
 					if (e.key === "Escape" && onEscape) {
+						controller?.claimEscape(e);
 						e.preventDefault();
 						e.stopPropagation();
 						onEscape();

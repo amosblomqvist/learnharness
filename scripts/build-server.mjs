@@ -6,12 +6,14 @@
  * outside that the docs require us to copy: public/ and .next/static/.
  * This script finishes the job and sanity-checks the result — including
  * the exclusion that keeps the repo's real data/ OUT of the bundle
- * (see next.config.ts outputFileTracingExcludes). It also removes two
- * exact build-only paths the tracer sweeps in: old installers and the
- * development Electron runtime. Broad trace exclusions break externals.
+ * (see next.config.ts outputFileTracingExcludes). It also removes exact
+ * build-only paths the tracer sweeps in: plugin authoring projects,
+ * old installers and the development Electron runtime. Broad trace exclusions break externals.
  */
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { spawnSync } from "node:child_process";
+import { validateCorePackages } from "./build-core-plugins.mjs";
 
 const ROOT = path.resolve(import.meta.dirname, "..");
 const STANDALONE = path.join(ROOT, ".next", "standalone");
@@ -61,15 +63,49 @@ for (const secret of ["auth.json", ...subscriptionSecrets, ".env", ".env.local"]
 	}
 }
 
+// Assemble plugin assets only after refusing unsafe traced data/credentials.
+// Runtime native plugin loader is deliberately outside Next's module graph.
+// Copy it explicitly: external plugin entries must be loaded by native Node,
+// not interpreted as build-time imports by webpack/Turbopack.
+copyTree(path.join(ROOT, "scripts", "plugin-loader.cjs"), path.join(STANDALONE, "scripts", "plugin-loader.cjs"));
+try {
+	const core = path.join(ROOT, "core-plugins"), packagedCore = path.join(STANDALONE, "core-plugins");
+	validateCorePackages(ROOT, core);
+	fs.rmSync(packagedCore, { recursive: true, force: true });
+	copyTree(core, packagedCore);
+	validateCorePackages(ROOT, packagedCore);
+} catch (error) {
+	console.error("[build-server] REFUSING: Core plugin payload is missing or unsafe. Run npm run plugins:build-core.", error);
+	process.exit(1);
+}
+
+// Ship authoring material and generated API types, not the application source or
+// development toolchain. The examples have no credentials or populated data/.
+const authoring = path.join(STANDALONE, "plugin-authoring");
+for (const file of [
+	"plugin-authoring.md", "plugin-architecture.md", "plugin-question-contract.md",
+	"plugin-problem-contract.md", "plugin-session-extension-contract.md", "plugin-tree-contract.md",
+	"plugin-view-context.md", "dialog-overlay-contract.md", "archive/plugin-implementation-history.md",
+]) {
+	copyTree(path.join(ROOT, "docs", file), path.join(authoring, "docs", file));
+}
+copyTree(path.join(ROOT, "examples", "plugins"), path.join(authoring, "examples", "plugins"));
+copyTree(path.join(ROOT, "skills", "learnharness-plugins"), path.join(authoring, "skills", "learnharness-plugins"));
+const types = spawnSync(process.execPath, [path.join(ROOT, "scripts", "build-plugin-types.mjs"), path.join(authoring, "types")], { cwd: ROOT, stdio: "inherit" });
+if (types.error || types.status !== 0) {
+	console.error("[build-server] plugin API declaration emission failed", types.error ?? types.status);
+	process.exit(1);
+}
+
 // 2c) Payload curation (2026-10-11): the trace sweep can copy repo-root
-// dist/ (previous installers, recursively) and the development Electron
+// plugins/ (authoring sources/tests), dist/ (previous installers), and the development Electron
 // runtime (the demo helper's dev-only require). Neither belongs in the
 // server: packaged helpers use process.execPath, the app's own binary.
 // Remove ONLY these standalone-root paths AFTER tracing — excluding a
 // generic dist/** earlier broke pi-ai / pi-agent-core's runtime dist/.
 // Never touch ROOT/dist or ROOT/node_modules/electron (the running app
 // and the build runtime); native canvas/resvg packages stay untouched.
-for (const extra of ["dist", path.join("node_modules", "electron")]) {
+for (const extra of ["plugins", "dist", path.join("node_modules", "electron")]) {
 	const target = path.join(STANDALONE, extra);
 	if (exists(target)) {
 		fs.rmSync(target, { recursive: true, force: true });
@@ -80,6 +116,8 @@ for (const extra of ["dist", path.join("node_modules", "electron")]) {
 // 3) Sanity: the runtime-read prompt assets must be present (the teacher
 //    agent reads them from disk at request time).
 for (const asset of [
+	path.join("scripts", "plugin-loader.cjs"),
+	path.join("public", "plugin-loader.js"),
 	path.join("src", "agent", "system-prompt.md"),
 	path.join("src", "agent", "prompts", "teacher", "20-teaching.md"),
 	path.join("src", "agent", "prompts", "side-chat", "00-base.md"),

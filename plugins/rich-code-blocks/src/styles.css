@@ -1,0 +1,27 @@
+@import url("./assets/fonts/fonts.css");
+
+.rich-code-blocks {
+  min-width: 0;
+  max-width: 100%;
+}
+.rich-code-blocks > pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.rich-code-blocks--rendered {
+  background: transparent;
+  color: var(--rich-code-blocks-black, #fff);
+  padding: 12px;
+  overflow: auto;
+}
+.rich-code-blocks--rendered > svg {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  margin: 0 auto;
+}
+/* Keep TikZ labels at the surrounding math size. The existing overflow:auto
+   wrapper scrolls wide diagrams rather than shrinking their text. */
+.rich-code-blocks--rendered[data-language="tikz"] > svg {
+  max-width: none;
+}

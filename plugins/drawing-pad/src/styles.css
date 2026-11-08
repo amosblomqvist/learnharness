@@ -1,0 +1,28 @@
+.drawing-pad-root {
+  position: absolute; inset: 0;
+  overflow: hidden; background: #141414; color: inherit;
+}
+.drawing-pad-tools {
+  position: absolute; top: 0; left: 0; z-index: 1;
+  display: flex; width: max-content; max-width: calc(100% - 52px); gap: 6px; align-items: center;
+  min-height: 48px; padding: 8px 12px; overflow-x: auto; pointer-events: none;
+}
+.drawing-pad-tools > span { flex: 0 0 auto; pointer-events: auto; }
+.drawing-pad-viewport { position: absolute; inset: 0; min-width: 0; min-height: 0; overflow: hidden; }
+.drawing-pad-paper { position: absolute; inset: 0; overflow: hidden; }
+.drawing-pad-background { position: absolute; max-width: none; max-height: none; pointer-events: none; user-select: none; }
+.drawing-pad-background[hidden] { display: none; }
+.drawing-pad-ink { position: absolute; inset: 0; width: 100%; height: 100%; touch-action: none; user-select: none; cursor: default; }
+.drawing-pad-status { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; padding: 24px; font-size: 13px; }
+.drawing-pad-status[hidden], .drawing-pad-paper[hidden] { display: none; }
+/* Native dock: 46rem column - 2rem outer padding - 2px shell borders
+   - 2rem question padding. Match its normal content width, never the window. */
+.drawing-pad-reference { position: absolute; left: -100000px; top: 0; width: calc(42rem - 2px); box-sizing: border-box; color: inherit; }
+.drawing-pad-reference-label { margin-bottom: 4px; font-size: 11px; font-weight: 500; text-transform: uppercase; letter-spacing: .025em; color: #8d8d8d; }
+.drawing-pad-reference-question { margin-bottom: 12px; font-weight: 500; }
+.drawing-pad-reference-context { margin-bottom: 12px; font-size: 13px; color: #8d8d8d; }
+.drawing-pad-reference-option { display: flex; align-items: flex-start; gap: 12px; border: 1px solid #434343; border-radius: 8px; margin-top: 8px; padding: 8px 12px; font-size: 13px; }
+.drawing-pad-reference-mark { flex: 0 0 16px; width: 16px; height: 16px; margin-top: 2px; border: 1px solid #8d8d8d; border-radius: 50%; box-sizing: border-box; }
+.drawing-pad-reference-mark[data-multiple="true"] { border-radius: 2px; }
+.drawing-pad-reference-description { font-size: 11px; color: #8d8d8d; }
+.drawing-pad-reference-extra { border-style: dashed; color: #8d8d8d; }

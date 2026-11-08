@@ -81,7 +81,7 @@ A matching successful `probe_done` result selects the teacher and queues a fresh
 
 Practice uses the same turn/persistence/recovery path, not a separate problem-set service. [`tools/practice.ts`](../src/agent/tools/practice.ts) commits a statement and solution with `problem`; `conclude` records the outcome and reveals that solution. A turn-scoped gate enforces one active problem. The post-conclusion pause is doctrine, not a terminating `conclude` result. Next adds an explicit marker. Practice outcomes are session evidence, not graph mastery; ordinary practice settlement skips extraction.
 
-[Prompt composition](../src/agent/prompts/README.md) and [tool-content display recovery](tool-content-recovery.md) have separate references.
+[Prompt composition](../src/agent/prompts/README.md) and [tool-content display recovery](tool-content-recovery.md) have separate references. Plugins can add bounded question/problem types without replacing builtins; see [Trusted local plugins](#trusted-local-plugins-api-v1).
 
 ## Background work
 
@@ -89,9 +89,15 @@ Research, PDF, demo, and visual tools persist jobs, acknowledge dispatch, and st
 
 Worker completion and session delivery are separate. The worker saves its outcome and pending-delivery metadata before queueing a marker. [`server/jobs.ts`](../src/server/jobs.ts) delivers by steering a live agent at a native boundary or waking an idle, eligible session. Pending questions, pause, consent, or admission races can hold delivery. Only computing workers are abortable.
 
-A marker in the **saved conversation** acknowledges delivery—not HTTP acceptance or visibility in a stream. Reconciliation avoids replaying saved results; restart recovery restores known pending obligations and can respawn unfinished workers. Legacy terminal jobs without delivery metadata are not guessed into replay. Deleting a session discards its obligations.
+A marker in the **saved conversation** acknowledges delivery—not HTTP acceptance or visibility in a stream. Reconciliation avoids replaying saved results; restart recovery restores known pending obligations and can respawn unfinished builtin workers. Plugin jobs recover from canonical task records without replaying plugin code. Legacy terminal jobs without delivery metadata are not guessed into replay. Deleting a session discards its obligations.
 
 This is single-process coordination over JSON files, not a transactional queue or exactly-once provider execution. In-memory composer steers do not have the same durability as job delivery.
+
+### Shared worker-request admission
+
+One process-global FIFO gate limits background **model request streams**, releasing each permit when the request ends, before tools or child waits—not after a whole agent finishes. Settings → Agent → Models → **Concurrent worker requests** (`agent.workerRequestConcurrency`) defaults to **8**, including when unset. Any positive safely representable whole integer is accepted without an arbitrary cap; invalid values are rejected, not clamped. A live increase drains queued requests immediately up to the limit; a decrease lets active requests finish and admits another only when the active count is below the new limit. Queued cancellation prevents provider dispatch.
+
+Core extractor/auditor/research/demo/visual/PDF requests and all detached `ctx.workers` tasks share the pool, even user-initiated tasks. Direct teacher/prober/practice requests and their compaction, interactive plugin-managed conversations and standalone raw plugin inference are excluded. `purpose` governs subscription consent, not worker classification. Routes and windows share a pool within one app-server process, never across independent server processes. Source-serial extraction chunks, the audit-through-merge consistency lock and the frontend three-file upload queue remain independent of this gate. See the [plugin host work/recovery map](plugin-architecture.md#inference-persistent-work-and-recovery).
 
 ### Learner-image snapshots
 
@@ -114,7 +120,7 @@ flowchart LR
 
 [`coverage.ts`](../src/core/coverage.ts) fingerprints teacher prose, including successful `send_to_user` text, by actual message ID. Learner text, thinking, questions, other tool results, and markers do not count. Automatic extraction is gated by `graph.enabled` and an uncovered-token threshold (default **4096**, minimum **500**). Rendering is a separate switch. Manual extraction/import routes do not themselves check the automatic-extraction switch.
 
-The pipeline batches oldest uncovered messages without splitting one message. Trigger and batch budgets are distinct: current app wiring does not inject the configurable trigger value as the batch budget. Each source's batches run serially; cross-source work can overlap under a background-LLM semaphore. A process-wide FIFO lock serializes audit through merge. These registries survive module entries through `globalThis`, not separate server processes.
+The pipeline batches oldest uncovered messages without splitting one message. Trigger and batch budgets are distinct: current app wiring does not inject the configurable trigger value as the batch budget. Each source's batches run serially; cross-source work can overlap under the shared request-level admission gate. A process-wide FIFO lock serializes audit through merge. These registries survive module entries through `globalThis`, not separate server processes.
 
 The [extractor](../src/agent/subagents/extraction.ts) reads source text and proposes anchored propositions/chains. The auditor sees propositions and the current graph, not source passages or chains, and submits identity links. The deterministic merger resolves identities/endpoints, unions provenance, deduplicates arguments, simplifies redundant chains, and checkpoints coverage after graph writes. Failed stages leave material uncovered; completed chunks and usage survive later failure/abort. Ordered ledger operations are not an atomic multi-file transaction.
 
@@ -147,6 +153,8 @@ Extraction is the construction writer, not the only mutation: source/session/nod
 | Propositions, chains, checkpoints, coverage | `graph/{nodes,chains,sessions,coverage}.jsonl` |
 | Sources, organization, positions, render preferences | JSON maps under `graph/` |
 | Preferences and prompt overrides | `settings.json`, `prompts/` |
+| Core plugin writable records | `core-plugin-data/<id>/` |
+| Community plugin code and writable records | `plugins/<id>/{dist,data}/` |
 | Keys and custom-endpoint binding | Separate `auth.json`, selected by `LH_AUTH_FILE` |
 
 Adapters use synchronous filesystem operations. JSONL reads skip corrupt/invalid lines; graph derivation merges repeated assertions. Some replacements use temp-file rename, but ordinary whole-file writes are not database transactions. Same-event-loop serialization is not cross-process locking or crash atomicity. Use **one server owner per data/auth profile**.
@@ -171,6 +179,24 @@ The **sensitive-path guard** refuses known private home locations, `.env` files,
 
 File/PDF/visual images share image postprocessing. Search supports Tavily, Brave, Exa, Firecrawl, and hosted Ollama adapters; page fetching is independent and does not need a search key. Dictation mints short-lived tokens server-side and streams audio browser → Deepgram. These external effects are not isolated by a scratch data directory alone.
 
+## Trusted local plugins (API v1)
+
+The [plugin architecture](plugin-architecture.md) specifies the runtime and [authoring guide](plugin-authoring.md) documents its public contract. Plugins are optional, disabled by default, and trusted like other local programs: no sandbox or permission fiction. Core and community packages use the same context API. The app loads its four catalog-selected core packages directly from app `core-plugins/<id>/`; writable core records live in `<learning data>/core-plugin-data/<id>/`. Community workspaces under `<learning data>/plugins/<id>/` load their manifest, browser module, Node backend and CSS/assets from fixed `dist/`, with optional source and persistent sibling `data/`. Core IDs are reserved: conflicting community copies are skipped with a visible diagnostic, not loaded or deleted. Existing explicit enable/disable choices survive app updates; startup never copies core code into user data or migrates old development records. The backend runs inside the existing Next Node server; disable is cooperative.
+
+`instrumentation.ts` starts the server singleton in `src/server/plugins.ts`. Its `globalThis` anchor survives Next's separately compiled route modules. The native `scripts/plugin-loader.cjs` sidecar loads external CommonJS backends without asking Next to bundle user-installed code. The HTTP adapter exposes list/enable/call and allowlisted frontend assets; private plugin data and backend modules are never asset responses. LearnHarness's existing desktop-API origin protection still covers those routes. Branded host errors retain their HTTP meaning across separately compiled module instances.
+
+`PluginsProvider` owns one frontend lifecycle per window. The external loader uses native dynamic import, not eval. Explicitly placed actions open plugin views in the main content area; Settings → Core plugins / Community plugins controls enablement and links to individual plugin settings. Registrations, subscriptions, mounts, CSS, and async teardown follow plugin lifetime. Re-enabling awaits that plugin's previous frontend cleanup; other plugins are independent. `plugins-changed` announces host availability changes; `plugin-message` carries plugin-scoped, non-durable JSON notifications. Reconnect/resync rereads host availability and lets plugin views reread their authoritative backend state.
+
+Supported services include read-only learning records, configured/authenticated model calls, plugin-local managed agent sessions, detached workers, bounded document conversion, host-owned UI widgets, and fenced-block/tool-result renderers. Backend contributions append per-turn instructions and native Pi tools without replacing builtin prompts/tools. Builtin presentations retain precedence; missing/failing renderers leave readable fallbacks. These are trusted presentation and lifecycle boundaries, not a sandbox.
+
+The [bounded question contract](plugin-question-contract.md) and [practice problem contract](plugin-problem-contract.md) preserve saved-schema/version and exact occurrence authority. Renderers own controlled editors and optional presentation, not routing identity or host chrome. Optional backend grading/processing runs before genuine accepted results are saved and ordinary continuation proceeds. Unknown or failed canonical sync retains readable saved content and Retry, rather than fabricating unavailability. Host Thinking, native keyboard ownership, pending siblings and stale/duplicate rejection remain authoritative.
+
+The [session-extension contract](plugin-session-extension-contract.md) specifies frontend submission interception, explicit learner images, whole-view snapshots and surfaces. Preparation reserves the original target before awaits, finalizes dictation only for that target, and rechecks ownership without retargeting. Cancellation/failure retains drafts and pending plugin material. Acknowledgment callbacks are live best-effort API acceptance, not durable delivery or model success. Surfaces cover the whole page body including inputs, not top bar/sidebar; covered bodies remain mounted. See the [host input/source map](plugin-architecture.md#submission-preparation-images-and-view-snapshots) for implementation and verification seams.
+
+## Shared dialog and interaction foundation
+
+Native and plugin dialogs, anchored popups and page surfaces share [`interaction-layers.tsx`](../components/interaction-layers.tsx). Escape belongs to one eligible topmost owner; covered scopes cannot submit, dictate, or steal focus. Dialogs use the shared host frame, while plugins mount content through controlled HTMLElement/cleanup contracts. Settings has a single host-owned instance. Focus entry/return respects newer owners; visual stacking alone does not make one plugin the lifetime owner of another plugin's surface. See [plugin UI contracts](plugin-authoring.md#controlled-host-ui) and [plugin architecture](plugin-architecture.md).
+
 ## Verification starting points
 
-Tests use injected engines/ports, fake transports, and renderer seams. Start with `chat-flow`, `session-core`, `turn-recovery`, `job-delivery-recovery`, `extraction`, `notes-import-route`, `practice-flow`, `prompt-overrides`, and `golden-fixtures` under `tests/`. Fixture checks establish their exercised contracts, not live account entitlements, teaching quality, or cross-process durability. Commands and runtime prerequisites belong in [Development](development.md#checks).
+Tests use injected engines/ports, fake transports, and renderer seams. Start with `chat-flow`, `session-core`, `turn-recovery`, `job-delivery-recovery`, `extraction`, `notes-import-route`, `practice-flow`, `prompt-overrides`, `golden-fixtures`, and `plugin-*` under `tests/`. Fixture checks establish their exercised contracts, not live account entitlements, teaching quality, or cross-process durability. Commands and runtime prerequisites belong in [Development](development.md#checks). Historical plugin verification records live in the [archive](archive/plugin-implementation-history.md), not the current runtime contract.

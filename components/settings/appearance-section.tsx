@@ -38,6 +38,7 @@ import {
 	type GraphSettings,
 } from "@/src/core";
 import { MenuShell } from "@/components/menu-shell";
+import { useInteractionLayers } from "@/components/interaction-layers";
 import { Hint } from "@/components/ui/hint";
 import { useAppearance } from "./appearance.tsx";
 import { FontMenuList } from "./model-menu";
@@ -95,7 +96,7 @@ export function AppearanceSection({
 	/** The record's appearance delta (absent = factory). */
 	appearance: AppearanceSettings | undefined;
 	/** PUT the whole appearance section; the page re-applies on success. */
-	onSectionChange: (next: AppearanceSettings) => void;
+	onSectionChange: (next: AppearanceSettings) => boolean | Promise<boolean>;
 }) {
 	const { appearance: resolved } = useAppearance();
 	const md = appearance?.mdRendering;
@@ -111,6 +112,7 @@ export function AppearanceSection({
 	const [localFonts, setLocalFonts] = useState<string[] | null | undefined>(undefined);
 	const [enumEmpty, setEnumEmpty] = useState(false);
 	const menuAnchorRef = useRef<HTMLSpanElement>(null);
+	const interactions = useInteractionLayers();
 
 	// The enumeration runs INSIDE the trigger click — queryLocalFonts
 	// requires user activation, so it cannot be a mount effect. First
@@ -162,6 +164,7 @@ export function AppearanceSection({
 	useEffect(() => {
 		if (!fontMenuOpen) return;
 		const onPointerDown = (e: PointerEvent) => {
+			if (!interactions.isElementEligible(document.querySelector<HTMLElement>('[data-testid="font-menu"]'))) return;
 			const target = e.target as Node;
 			if (menuAnchorRef.current?.contains(target)) return;
 			if (target instanceof Element && target.closest("[data-lh-menu]")) return;
@@ -170,19 +173,9 @@ export function AppearanceSection({
 			}
 			// else: outside the dialog — the dialog's own close handles it.
 		};
-		const onKeyDown = (e: KeyboardEvent) => {
-			if (e.key === "Escape") {
-				e.stopPropagation();
-				setFontMenuOpen(false);
-			}
-		};
 		document.addEventListener("pointerdown", onPointerDown);
-		document.addEventListener("keydown", onKeyDown);
-		return () => {
-			document.removeEventListener("pointerdown", onPointerDown);
-			document.removeEventListener("keydown", onKeyDown);
-		};
-	}, [fontMenuOpen]);
+		return () => document.removeEventListener("pointerdown", onPointerDown);
+	}, [fontMenuOpen, interactions]);
 
 	return (
 		<>
@@ -240,6 +233,7 @@ export function AppearanceSection({
 							preferredSide="down"
 							anchorTestid="font-trigger"
 							testid="font-menu"
+							onClose={() => { setFontMenuOpen(false); return "closed"; }}
 							menuClass="flex w-[18rem] flex-col gap-0.5 rounded-xl border border-border bg-card p-2 text-xs shadow-xl"
 						>
 							<FontMenuList
@@ -272,12 +266,11 @@ export function AppearanceSection({
 						// UNSETS and the field stays empty (absence, not null, is the
 						// unset for numbers). Number("") is 0, so the old clamp wrote 12.
 						if (v === "") {
-							onSectionChange({ ...appearance, proseFontSize: undefined });
-							return;
+							return onSectionChange({ ...appearance, proseFontSize: undefined });
 						}
 						const n = Number(v);
-						if (!Number.isFinite(n)) return; // bad input: no write, factory stays
-						onSectionChange({ ...appearance, proseFontSize: Math.min(24, Math.max(12, Math.round(n))) });
+						if (!Number.isFinite(n)) return false; // bad input: no write, factory stays
+						return onSectionChange({ ...appearance, proseFontSize: Math.min(24, Math.max(12, Math.round(n))) });
 					}}
 				/>
 			</SettingsRow>
@@ -299,12 +292,11 @@ export function AppearanceSection({
 						// Empty = factory default (owner, fix wave): Number("") is 0, so
 						// Absence is the unset representation — the old clamp wrote 100.
 						if (v === "") {
-							onSectionChange({ ...appearance, mdRendering: { ...md, headingWeight: undefined } });
-							return;
+							return onSectionChange({ ...appearance, mdRendering: { ...md, headingWeight: undefined } });
 						}
 						const n = Number(v);
-						if (!Number.isFinite(n)) return;
-						onSectionChange({
+						if (!Number.isFinite(n)) return false;
+						return onSectionChange({
 							...appearance,
 							mdRendering: { ...md, headingWeight: Math.min(900, Math.max(100, Math.round(n))) },
 						});
@@ -341,7 +333,7 @@ export function GraphSection({
 	onSectionChange,
 }: {
 	graph: GraphSettings | undefined;
-	onSectionChange: (next: GraphSettings) => void;
+	onSectionChange: (next: GraphSettings) => boolean | Promise<boolean>;
 }) {
 	// Wave 7 collapse (owner ruling 2026-09-23): the section is the MASTER
 	// SWITCH — the embedding/clustering/labeling rungs are gone; clustering
@@ -402,14 +394,13 @@ export function GraphSection({
 						// the unset for numbers — Number("") is 0, so clamping would
 						// write the floor instead of unsetting.
 						if (v === "") {
-							onSectionChange({ ...graph, extractionChunkTokens: undefined });
-							return;
+							return onSectionChange({ ...graph, extractionChunkTokens: undefined });
 						}
 						const n = Number(v);
-						if (!Number.isFinite(n) || n <= 0) return; // bad input: no write
+						if (!Number.isFinite(n) || n <= 0) return false; // bad input: no write
 						// Mirror the server sanitize exactly: floor only (cost
 						// protection), no ceiling — a big budget is the user's call.
-						onSectionChange({
+						return onSectionChange({
 							...graph,
 							extractionChunkTokens: Math.max(EXTRACTION_CHUNK_TOKENS_FLOOR, Math.round(n)),
 						});

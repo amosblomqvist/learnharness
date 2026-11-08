@@ -1,7 +1,6 @@
 "use client";
 
 import { useContext, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
-import { createPortal } from "react-dom";
 import { ArrowRight, CornerDownLeft, GripVertical, MessageCircleQuestion, Mic, Pin, PinOff, Square, X } from "lucide-react";
 import { actionForBinding, collectCitations, eventBinding, SIDE_QUOTE_MAX_CHARS, SIDE_QUESTION_MAX_CHARS, type TextSelector, type TutorCitation } from "@/src/core";
 import { rmsToMeter, type DictationPhase } from "./dictation";
@@ -13,6 +12,8 @@ import { Textarea } from "./ui/textarea";
 import { fitResizableSideThreadFrame, placeSideThread, resizeSideThread, type SideThreadFrame, type SideThreadResizeEdge, type SideThreadPlacement, type SideThreadViewport } from "./side-thread-float";
 import type { SelectionAction } from "./selection-toolbar";
 import type { SideThreadAnchor, SideThreadOpenArgs, SideThreadState } from "./use-side-thread";
+import { useOptionalInteractionLayers } from "./interaction-layers";
+import { isInteractionScopeEligible } from "./plugin-input-focus";
 
 /** Ask always opens the selected teaching segment's ONE conversation. Cite
  * is an independent action that inserts a chip into the main/thinking field. */
@@ -72,6 +73,7 @@ function SideInputMeter({ levelRef }: { levelRef?: { current: number } }) {
 export function SideThreadBody({ state, chatId, draft, readDraft, dictation, onDraftChange, onAsk, onStop, onExpand, onFloat, onClose, onCurrentStep, onDragStart }: {
 	state: SideThreadState; chatId?: string; onDragStart?: (event: React.PointerEvent<HTMLElement>) => void;
 } & SideThreadHandlers) {
+	const controller = useOptionalInteractionLayers();
 	const [question, setQuestion] = useState(draft || state.failedQuestion || "");
 	const draftRef = useRef(question);
 	const draftWriter = useRef(onDraftChange); draftWriter.current = onDraftChange;
@@ -86,14 +88,15 @@ export function SideThreadBody({ state, chatId, draft, readDraft, dictation, onD
 	}, [draft]);
 	const inputRef = useRef<HTMLTextAreaElement>(null);
 	const scrollRef = useRef<HTMLDivElement>(null);
-	useEffect(() => { inputRef.current?.focus({ preventScroll: true }); }, [state.mode]);
+	useEffect(() => { if (isInteractionScopeEligible(inputRef.current, controller)) inputRef.current?.focus({ preventScroll: true }); }, [state.mode, controller]);
 	useEffect(() => {
 		const scroll = scrollRef.current;
 		if (scroll && scroll.scrollHeight - scroll.scrollTop - scroll.clientHeight < 160) scroll.scrollTop = scroll.scrollHeight;
 	}, [state.messages, state.streamText]);
 	const submit = async () => {
-		if (state.answering) return;
+		if (state.answering || !isInteractionScopeEligible(inputRef.current, controller)) return;
 		if (dictation?.active) await dictation.finish();
+		if (!isInteractionScopeEligible(inputRef.current, controller)) return;
 		// A dictation flush updates the saved draft synchronously, before
 		// React commits its new prop. Never submit the pre-flush local text.
 		const sent = readDraft?.() ?? draftRef.current;
@@ -103,6 +106,7 @@ export function SideThreadBody({ state, chatId, draft, readDraft, dictation, onD
 	const last = state.messages.at(-1);
 	return (
 		<div className="flex min-h-0 flex-1 flex-col gap-3" data-testid="side-thread" onKeyDown={(event) => {
+				if (!isInteractionScopeEligible(event.currentTarget, controller)) return;
 				if (dictation && actionForBinding(eventBinding(event.nativeEvent)) === "toggle-dictation") {
 					event.preventDefault(); event.stopPropagation(); dictation.toggle();
 				} else if (event.key === "Enter") {
@@ -150,7 +154,7 @@ export function SideThreadBody({ state, chatId, draft, readDraft, dictation, onD
 					<Textarea ref={inputRef} aria-label="Side question" data-testid="side-thread-input" className="min-h-9 resize-none border-0 bg-transparent pr-14 font-prose text-sm shadow-none focus-visible:ring-0 dark:bg-transparent" rows={1}
 						value={question} maxLength={SIDE_QUESTION_MAX_CHARS} placeholder={sideThreadPlaceholder(state)} onChange={(event) => changeDraft(event.target.value)}
 						onKeyDown={(event) => {
-							if (event.nativeEvent.isComposing) return;
+							if (event.nativeEvent.isComposing || !isInteractionScopeEligible(inputRef.current, controller)) return;
 							if (event.key === "Enter" && (!event.shiftKey || event.metaKey || event.ctrlKey)) { event.preventDefault(); event.stopPropagation(); void submit(); }
 							else if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); onClose(); }
 						}} />
@@ -209,8 +213,11 @@ const RESIZE_HANDLES: { edge: SideThreadResizeEdge; className: string }[] = [
 ];
 
 /** Retains #451's anchored placement and draggable header; all eight
- * borders/corners resize the floating window without changing the dock. */
+ * borders/corners resize the floating window without changing the dock.
+ * Render as native session content, not a body portal: whole-session surfaces
+ * must cover/inactivate this companion without closing it or losing its draft. */
 export function SideThreadPopover({ state, chatId, composer, ...handlers }: { state: SideThreadState; chatId: string; composer: () => HTMLElement | null } & SideThreadHandlers) {
+	const controller = useOptionalInteractionLayers();
 	const boxRef = useRef<HTMLDivElement>(null);
 	const [placement, setPlacement] = useState<SideThreadPlacement | null>(null);
 	const [frame, setFrame] = useState<SideThreadFrame | null>(null);
@@ -246,7 +253,9 @@ export function SideThreadPopover({ state, chatId, composer, ...handlers }: { st
 		return () => { cancelAnimationFrame(raf); observer.disconnect(); chromeObserver.disconnect(); window.removeEventListener("scroll", rePlace, true); window.removeEventListener("resize", rePlace); };
 	}, [composer]);
 	const placed = placement !== null;
-	useEffect(() => { if (placed) boxRef.current?.querySelector<HTMLElement>('[data-testid="side-thread-input"]')?.focus({ preventScroll: true }); }, [placed]);
+	useEffect(() => {
+		if (placed && isInteractionScopeEligible(boxRef.current, controller)) boxRef.current?.querySelector<HTMLElement>('[data-testid="side-thread-input"]')?.focus({ preventScroll: true });
+	}, [placed, controller]);
 	const track = (event: React.PointerEvent<HTMLElement>, onMove: (event: PointerEvent) => void) => {
 		const handle = event.currentTarget; handle.setPointerCapture(event.pointerId);
 		const end = () => { handle.removeEventListener("pointermove", onMove); handle.removeEventListener("pointerup", end); handle.removeEventListener("pointercancel", end); };
@@ -266,13 +275,13 @@ export function SideThreadPopover({ state, chatId, composer, ...handlers }: { st
 	};
 	const style: React.CSSProperties = frame ? { left: frame.x, top: frame.y, width: frame.width, height: frame.height }
 		: placement ? { ...placement.style, maxHeight: placement.maxHeight } : { left: 0, top: 0, visibility: "hidden" };
-	return createPortal(<div ref={boxRef} role="dialog" aria-label="Side question" data-testid="side-thread-popover"
+	return <div ref={boxRef} role="dialog" aria-label="Side question" data-testid="side-thread-popover"
 		style={{ position: "fixed", zIndex: 60, ...style }} className="lh-no-drag flex flex-col overflow-hidden rounded-xl border bg-background/50 p-3 text-sm shadow-xl backdrop-blur-[18px]">
 		<SideThreadBody key={state.threadId} state={state} chatId={chatId} {...handlers} onDragStart={startDrag} />
 		{RESIZE_HANDLES.map(({ edge, className }) => <div key={edge} aria-hidden="true" data-side-resize={edge}
 			data-testid={edge === "s" ? "side-thread-resize" : `side-thread-resize-${edge}`} className={`absolute touch-none ${className}`}
 			onPointerDown={(event) => startResize(event, edge)} />)}
-	</div>, document.body);
+	</div>;
 }
 export function SideThreadPanel({ children }: { children: ReactNode }) {
 	return <aside aria-label="Side question" data-testid="side-thread-panel" className="flex w-[22rem] shrink-0 flex-col border-l border-border bg-background p-3">{children}</aside>;

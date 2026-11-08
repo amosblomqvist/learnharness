@@ -4,6 +4,8 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { LucideIcon } from "lucide-react";
 import { Button } from "./ui/button";
+import { useOptionalInteractionLayers } from "./interaction-layers";
+import { isInteractionScopeEligible } from "./plugin-input-focus";
 import { captureSelection, type CapturedSelection } from "./selection-text";
 import {
 	isSelectionRectVisible, observeSelectionActions, resolveSelectionActionPosition,
@@ -102,6 +104,7 @@ function selectionVisible(range: Range, viewport: HTMLElement): boolean {
 
 /** The floating toolbar over a tutor-text selection inside `viewport`. */
 export function SelectionToolbar({ viewport, actions }: { viewport: HTMLElement | null; actions: readonly SelectionAction[] }) {
+	const controller = useOptionalInteractionLayers();
 	const [state, setState] = useState<{ capture: CapturedSelection; position: SelectionActionPoint } | null>(null);
 	const toolbarRef = useRef<HTMLDivElement>(null);
 	const observerRef = useRef<ReturnType<typeof observeSelectionActions> | null>(null);
@@ -120,7 +123,10 @@ export function SelectionToolbar({ viewport, actions }: { viewport: HTMLElement 
 	useEffect(() => {
 		if (!viewport) return;
 		const clear = () => setState(null);
+		const eligible = () => isInteractionScopeEligible(viewport, controller);
+		const unsubscribe = controller?.subscribe(() => { if (!eligible()) clear(); });
 		const update = (pointer: SelectionActionPoint | null) => {
+			if (!eligible()) { clear(); return; }
 			const capture = captureSelection(viewport, window.getSelection());
 			if (!capture || !actionsRef.current.some((action) => action.visible(capture))) { clear(); return; }
 			const viewportRect = viewport.getBoundingClientRect();
@@ -150,7 +156,7 @@ export function SelectionToolbar({ viewport, actions }: { viewport: HTMLElement 
 		const focusToolbar = (event: KeyboardEvent) => {
 			const toolbar = toolbarRef.current;
 			if (event.key !== "Tab" || event.shiftKey || event.altKey || event.ctrlKey || event.metaKey || event.isComposing || event.defaultPrevented) return;
-			if (!toolbar || toolbar.contains(event.target as Node)) return;
+			if (!toolbar || !eligible() || toolbar.contains(event.target as Node)) return;
 			const first = toolbar.querySelector<HTMLButtonElement>("button:not([disabled])");
 			if (!first) return;
 			event.preventDefault();
@@ -160,12 +166,13 @@ export function SelectionToolbar({ viewport, actions }: { viewport: HTMLElement 
 		document.addEventListener("keydown", focusToolbar, true);
 		document.addEventListener("selectionchange", observer.selectionChanged);
 		return () => {
+			unsubscribe?.();
 			document.removeEventListener("keydown", focusToolbar, true);
 			document.removeEventListener("selectionchange", observer.selectionChanged);
 			observer.dispose();
 			observerRef.current = null;
 		};
-	}, [viewport]);
+	}, [viewport, controller]);
 
 	if (!state) return null;
 	const done = () => {
@@ -190,7 +197,10 @@ export function SelectionToolbar({ viewport, actions }: { viewport: HTMLElement 
 				}
 			}}
 		>
-			<SelectionToolbarButtons capture={state.capture} actions={actions} onDone={done} />
+			<SelectionToolbarButtons capture={state.capture} actions={actions.map(action => ({
+				...action,
+				onSelect: capture => isInteractionScopeEligible(viewport, controller) && action.onSelect(capture),
+			}))} onDone={done} />
 		</div>,
 		document.body,
 	);

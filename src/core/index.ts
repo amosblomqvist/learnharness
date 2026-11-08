@@ -44,6 +44,7 @@ export * from "./math-delims.ts";
 // and the input-events contract — all
 // pure logic, browser-safe.
 export * from "./native-messages.ts";
+export { copyImmutableData } from "./immutable-data.ts";
 export * from "./compaction.ts";
 export * from "./input-events.ts";
 export { parseFilePaths, quoteFilePath, filePathLabel, isDirectoryReference, directoryReferencePath } from "./file-paths.ts";
@@ -87,6 +88,7 @@ export * from "./session-navigation.ts";
 export * from "./auth-keys.ts";
 // keyboard.ts: the shortcut registry + binding normalization (pure, browser-safe).
 export * from "./keyboard.ts";
+export * from "./plugin-shortcuts.ts";
 export * from "./coverage.ts";
 // session-markdown.ts (2026-09-27 engine; first consumer 2026-10-06): the
 // ONE session→markdown formatter — the extractor's view and the user-facing
@@ -95,3 +97,11 @@ export * from "./session-markdown.ts";
 // side-chat.ts (shared side conversations): ask-input validation,
 // thread lookup and the side model's lesson document. Pure, browser-safe.
 export * from "./side-chat.ts";
+export * from "./plugins.ts";
+export * from "./plugin-questions.ts";
+export * from "./plugin-problems.ts";
+export * from "./plugin-view-context.ts";
+export * from "./plugin-submissions.ts";
+export type * from "./plugin-ui.ts";
+export type * from "./plugin-tree.ts";
+export * from "./plugin-agents.ts";

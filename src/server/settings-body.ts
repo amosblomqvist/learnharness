@@ -147,13 +147,19 @@ function parseBooleanMap(value: unknown, field: string): { map?: Record<string, 
 	return { map: out };
 }
 
-/** agent: { models?, tools?, prompts? } — model/thinking validity against
+/** agent: { workerRequestConcurrency?, models?, tools?, prompts? } — model/thinking validity against
  *  the catalog is checked by the route (validateChatSettings discipline);
  *  prompt switch-on membership is checked by the route (needs the store). */
 export function parseAgentSettingsBody(body: unknown): SettingsBodyResult<AgentSettings> {
 	const raw = asRecord(body);
 	if (!raw) return { ok: false, error: "Invalid JSON body" };
 	const settings: AgentSettings = {};
+	if (raw.workerRequestConcurrency !== undefined) {
+		if (typeof raw.workerRequestConcurrency !== "number" || !Number.isSafeInteger(raw.workerRequestConcurrency) || raw.workerRequestConcurrency <= 0) {
+			return { ok: false, error: "workerRequestConcurrency must be a positive, safely representable whole number" };
+		}
+		settings.workerRequestConcurrency = raw.workerRequestConcurrency;
+	}
 	if (raw.models !== undefined) {
 		const models = asRecord(raw.models);
 		if (!models) return { ok: false, error: "models must be an object" };

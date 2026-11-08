@@ -32,6 +32,7 @@ import {
 	PRACTICE_CONCLUDE_TOOL,
 	PRACTICE_PROBLEM_TOOL,
 	questionCallsOf,
+	pluginQuestionResultMatches,
 	SEND_TO_USER_TOOL,
 	sendToUserText,
 	userFacingTextOf,
@@ -41,17 +42,46 @@ import { citationsToReadableText, collectCitations } from "./citations.ts";
 import { messageMarkdown } from "./session-markdown.ts";
 import { normalizeOptions, seededRandom, shuffleOptions, type QuestionAnswerData } from "./question-core.ts";
 import { QUESTION_TOOLS, toolQuestionKind } from "./pending.ts";
+import { readPluginQuestionMessageAnnotation, readPluginQuestionAnswer, readPluginQuestionCancellation } from "./plugin-questions.ts";
+import { pluginProblemForCall, readPluginProblemSubmission } from "./plugin-problems.ts";
 
 // ─── shared segment identity and main-agent history ──────────────────────────
 
 /** One explanation and its check share a thread. Native assistant steps and
  * tool traffic do not create new segments; a real learner input does. Side
  * conversation markers are neutral and never split their own source segment. */
+/** Saved occurrence authority, never a current plugin/tool-name guess. This
+ * also prevents reused native IDs and unauthenticated results from splitting
+ * the helper conversation or supplying another question's Thinking. */
+function sidePluginQuestions(messages: readonly LhMessage[]) {
+	return messages.flatMap((message, messageIndex) => message.role !== "assistant" ? [] : message.content.flatMap((block, contentIndex) => {
+		if (block.type !== "toolCall") return [];
+		const annotation = readPluginQuestionMessageAnnotation(message, contentIndex);
+		if (annotation.status === "absent") return [];
+		const occurrence = { messageId: message.id, contentIndex, toolCallId: block.id, toolName: block.name };
+		const result = messages.slice(messageIndex + 1).find(result => pluginQuestionResultMatches(result, occurrence, annotation));
+		return [{ annotation, occurrence, result }];
+	}));
+}
+
+/** Only a submission of the then-active saved plugin problem supplies common
+ * Thinking. Opaque payload/submission/processing data is never rendered. */
+function sidePluginSubmission(messages: readonly LhMessage[], index: number) {
+	const message = messages[index]!;
+	if (message.role !== "custom" || message.customType !== "plugin-problem-submission") return null;
+	const submission = readPluginProblemSubmission(message.details);
+	if (!submission) return null;
+	const problem = activeProblemOf(messages.slice(0, index))?.pluginProblem;
+	return problem && submission.problemId === problem.problemId && submission.pluginId === problem.pluginId &&
+		submission.typeId === problem.typeId && submission.contractVersion === problem.contractVersion ? submission : null;
+}
+
 function scanSideSegments(messages: readonly LhMessage[]) {
+	const pluginResults = new Set(sidePluginQuestions(messages).flatMap(question => question.result ? [question.result] : []));
 	let segment: string | null = null;
 	const byMessage = new Map<string, string | null>();
-	for (const message of messages) {
-		if (message.role === "user" || (message.role === "toolResult" &&
+	for (const [index, message] of messages.entries()) {
+		if (message.role === "user" || pluginResults.has(message) || sidePluginSubmission(messages, index) || (message.role === "toolResult" &&
 			(QUESTION_TOOLS as readonly string[]).includes(message.toolName) && !message.isError) ||
 			(message.role === "custom" && ["practice-thinking", "practice-next"].includes(message.customType))) {
 			segment = null;
@@ -84,7 +114,7 @@ export function sideEntryPoints(messages: readonly LhMessage[], view: readonly L
 					source = next; visible = false;
 				}
 			}
-			visible ||= (part.type === "text" && !!part.text?.trim()) || part.type === "tool-problem" ||
+			visible ||= (part.type === "text" && !!part.text?.trim()) || !!part.pluginQuestion || !!part.pluginProblem || part.type === "tool-problem" ||
 				(part.type.startsWith("tool-") && (QUESTION_TOOLS as readonly string[]).includes(part.type.slice(5)));
 		}
 		if (source && visible && !source.startsWith("c_")) entries.set(parts.length, source);
@@ -380,8 +410,25 @@ function openQuestionMarkdown(tool: string, input: unknown, toolCallId: string):
 	return lines.join("\n\n");
 }
 
+/** The plugin renderer's answer and grading are opaque, even after submission.
+ * The helper gets only the host's common prompt and plain-text Thinking. */
+function sidePluginQuestionMarkdown(question: ReturnType<typeof sidePluginQuestions>[number]): string | null {
+	if (question.annotation.status !== "posed") return null;
+	const snapshot = question.annotation.snapshot;
+	if (!question.result) return openQuestionMarkdown("recall", { question: snapshot.input.question }, question.occurrence.toolCallId);
+	const lines = ["### Question (answered)", `**Q:** ${snapshot.input.question}`];
+	if (readPluginQuestionCancellation(question.result.role === "toolResult" ? question.result.details : undefined, snapshot)) {
+		lines.push("The learner skipped this question.");
+	} else {
+		const answer = readPluginQuestionAnswer(question.result.role === "toolResult" ? question.result.details : undefined, snapshot);
+		if (answer?.readingThinking?.trim()) lines.push(`*The learner's notes while reading, before this question:* ${answer.readingThinking.trim()}`);
+		if (answer?.thinking?.trim()) lines.push(`*The learner's thinking:* ${answer.thinking.trim()}`);
+	}
+	return lines.join("\n\n");
+}
+
 /** The practice pose: statement only. Open ⇔ it is the active problem. */
-function problemMarkdown(args: Record<string, unknown> | undefined, open: boolean): string | null {
+function problemMarkdown(args: { statement?: unknown } | undefined, open: boolean): string | null {
 	const statement = typeof args?.statement === "string" ? args.statement.trim() : "";
 	if (!statement) return null;
 	return open
@@ -415,11 +462,28 @@ export function sideChatLessonDocument(messages: readonly LhMessage[]): string {
 			if (block.type === "toolCall") calls.set(block.id, { name: block.name, args: block.arguments as Record<string, unknown> | undefined });
 		}
 	}
+	const pluginQuestions = sidePluginQuestions(messages);
+	const pluginResults = new Map(pluginQuestions.flatMap(question => question.result ? [[question.result, question] as const] : []));
+	const pluginProblems = new Map(messages.flatMap((message, messageIndex) => message.role !== "assistant" ? [] : message.content.flatMap((block, contentIndex) => {
+		if (block.type !== "toolCall") return [];
+		const snapshot = pluginProblemForCall(messages, { messageId: message.id, contentIndex, toolCallId: block.id, toolName: block.name });
+		if (!snapshot) return [];
+		const tail = messages.slice(messageIndex + 1);
+		const nextAssistant = tail.findIndex(result => result.role === "assistant");
+		const result = (nextAssistant < 0 ? tail : tail.slice(0, nextAssistant)).find(result => result.role === "toolResult" && !result.isError && result.toolCallId === block.id && result.toolName === block.name);
+		return result ? [[result, snapshot] as const] : [];
+	})));
 	const openQuestions = new Set(questionCallsOf(messages).filter((c) => c.status === "answerable").map((c) => c.toolCallId));
 	const activeProblem = activeProblemOf(messages)?.toolCallId ?? null;
 	const failedOutputs = failedOutputCallIds(messages);
 	// An assessment can outlive the retained tail: keep its visible question
 	// or statement without recovering the private summary or answer key.
+	for (const question of pluginQuestions) {
+		if (!question.result && messages.slice(0, start).some(message => message.id === question.occurrence.messageId)) {
+			const md = sidePluginQuestionMarkdown(question);
+			if (md) blocks.push(md);
+		}
+	}
 	for (const m of messages.slice(0, start)) {
 		if (m.role === "assistant") for (const block of m.content) {
 			if (block.type === "toolCall" && openQuestions.has(block.id)) {
@@ -428,17 +492,21 @@ export function sideChatLessonDocument(messages: readonly LhMessage[]): string {
 			}
 		}
 		if (m.role === "toolResult" && m.toolCallId === activeProblem && !m.isError) {
-			const problem = problemMarkdown(calls.get(m.toolCallId)?.args, true);
+			const problem = problemMarkdown(pluginProblems.get(m)?.input ?? calls.get(m.toolCallId)?.args, true);
 			if (problem) blocks.push(problem);
 		}
 	}
 
-	for (const m of messages.slice(start)) {
+	for (const [offset, m] of messages.slice(start).entries()) {
 		if (m.role === "user") {
 			for (const text of userFacingTextOf(m.content)) blocks.push(`### Learner\n\n${text.trim()}`);
 		} else if (m.role === "assistant") {
 			const assistant = m as AssistantMessage;
 			for (const text of userFacingTextOf(assistant.content, failedOutputs)) blocks.push(`### Teacher\n\n${text.trim()}`);
+			for (const question of pluginQuestions.filter(question => question.occurrence.messageId === m.id && !question.result)) {
+				const md = sidePluginQuestionMarkdown(question);
+				if (md) blocks.push(md);
+			}
 			for (const block of assistant.content) {
 				if (block.type === "toolCall" && openQuestions.has(block.id)) {
 					const open = openQuestionMarkdown(block.name, block.arguments, block.id);
@@ -448,7 +516,15 @@ export function sideChatLessonDocument(messages: readonly LhMessage[]): string {
 		} else if (m.role === "toolResult") {
 			const result = m as ToolResultMessage;
 			if (result.isError) continue;
-			if ((QUESTION_TOOLS as readonly string[]).includes(result.toolName)) {
+			const pluginQuestion = pluginResults.get(m);
+			const pluginProblem = pluginProblems.get(m);
+			if (pluginQuestion) {
+				const md = sidePluginQuestionMarkdown(pluginQuestion);
+				if (md) blocks.push(md);
+			} else if (pluginProblem) {
+				const md = problemMarkdown(pluginProblem.input, result.toolCallId === activeProblem);
+				if (md) blocks.push(md);
+			} else if ((QUESTION_TOOLS as readonly string[]).includes(result.toolName)) {
 				const md = answeredQuestionMarkdown(result, calls.get(result.toolCallId)?.args);
 				if (md) blocks.push(md);
 			} else if (result.toolName === PRACTICE_PROBLEM_TOOL) {
@@ -461,7 +537,10 @@ export function sideChatLessonDocument(messages: readonly LhMessage[]): string {
 			}
 		} else if (m.role === "custom") {
 			const marker = m as LhMarkerMessage;
-			if (marker.customType === "practice-thinking") {
+			if (marker.customType === "plugin-problem-submission") {
+				const submission = sidePluginSubmission(messages, start + offset);
+				if (submission?.thinking.trim()) blocks.push(`### Learner (thinking on the problem)\n\n${submission.thinking.trim()}`);
+			} else if (marker.customType === "practice-thinking") {
 				const text = (marker.details as { text?: unknown } | null)?.text;
 				if (typeof text === "string" && text.trim()) blocks.push(`### Learner (thinking on the problem)\n\n${text.trim()}`);
 			}

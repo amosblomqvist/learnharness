@@ -1,4 +1,7 @@
-import { renderToStaticMarkup } from "react-dom/server";
+import { renderToStaticMarkup as renderMarkup } from "react-dom/server";
+import type { ReactNode } from "react";
+import { InteractionLayersProvider } from "../components/interaction-layers.tsx";
+const renderToStaticMarkup = (node: ReactNode) => renderMarkup(<InteractionLayersProvider>{node}</InteractionLayersProvider>);
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
@@ -272,7 +275,7 @@ describe("plan popup (live derivation)", () => {
 		// Exactly one gray edge (x→y, gray origin) and one white edge (y→z,
 		// both ends white): count the head markers, one per edge.
 		const dimHeads = (html.match(/marker-end="url\(#.*-dim\)"/g) ?? []).length;
-		const whiteHeads = (html.match(/marker-end="url\(#(?:R\d+|[a-z0-9-]+)\)"/g) ?? []).length;
+		const whiteHeads = (html.match(/marker-end="url\(#(?:R\d+(?:H\d+)?|[a-z0-9-]+)\)"/g) ?? []).length;
 		assert.equal(dimHeads, 1, "the gray-origin edge dims");
 		assert.equal(whiteHeads, 1, "the both-white edge stays white");
 		assert.match(html, /<path[^>]*class="fill-none stroke-border"/);

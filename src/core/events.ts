@@ -6,9 +6,10 @@
  * adapters emit job/chat mutations, the agent layer's background
  * registries (extraction) emit activity changes — and
  * GET /api/events turns every emission into an SSE frame for any open
- * window. The events carry the FACT, never the data: consumers fetch
- * truth on receipt (push the poke, pull the data), so payloads stay
- * tiny, schemaless, and idempotent — a reconnect heals by refetching.
+ * window. Core events carry the FACT, never the data: consumers fetch
+ * truth on receipt (push the poke, pull the data). The plugin-message
+ * extension additionally carries plugin-scoped live JSON notifications;
+ * these have no durable replay guarantee. Reconnect heals by refetching.
  *
  * WHY globalThis (the turn-liveness discipline, same rationale): Next
  * dev compiles each route as its own module entry, so a module-level
@@ -22,7 +23,7 @@
  * server, store, and agent may all depend on.
  */
 
-/** The full event vocabulary — fixed from day one (slice plan, 2026-10-02). */
+/** The core event vocabulary plus the namespaced plugin extension channel. */
 export interface ServerEvents {
 	/** A teach turn began server-side (beginTurn) — client-initiated sends,
 	 *  wake turns, other-tab turns: every origin rides the same event. */
@@ -52,10 +53,13 @@ export interface ServerEvents {
 	 *  the chat; the client mirrors it by disabling the composer/dock
 	 *  submit. */
 	"compaction-changed": { chatId: string; running: boolean };
-	/** A side conversation changed: a question saved, an answer settled,
-	 *  or its main-context cutoff froze. Notify-then-fetch: open views
-	 *  refetch GET /api/chats/:id/side-chats. Closing never deletes it. */
+	/** A side conversation changed. Notify-then-fetch: open views refetch
+	 *  GET /api/chats/:id/side-chats. Closing never deletes it. */
 	"side-chats-changed": { chatId: string };
+	/** Plugin availability/lifecycle changed; refetch installed packages. */
+	"plugins-changed": Record<string, never>;
+	/** Live-only, plugin-scoped notifications. Reconnect requires snapshot resync. */
+	"plugin-message": { pluginId: string; topic: string; data?: unknown };
 }
 
 export type ServerEventType = keyof ServerEvents;
@@ -74,12 +78,15 @@ export const SERVER_EVENT_TYPES = [
 	"record-changed",
 	"compaction-changed",
 	"side-chats-changed",
+	"plugins-changed",
+	"plugin-message",
 ] as const satisfies readonly ServerEventType[];
 
-/** One notification: the type discriminates the payload. */
+/** One notification: distribute over the vocabulary so narrowing `type`
+ * actually narrows its payload (including plugin-scoped messages). */
 export type ServerEvent<K extends ServerEventType = ServerEventType> = {
-	type: K;
-} & ServerEvents[K];
+	[T in K]: { type: T } & ServerEvents[T];
+}[K];
 
 export type ServerEventListener = (event: ServerEvent) => void;
 

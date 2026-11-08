@@ -32,9 +32,11 @@
  * Pure and deterministic: client-safe (no node deps), same input → same view.
  */
 
-import type { AssistantMessage, ToolResultMessage } from "@earendil-works/pi-ai";
+import type { AssistantMessage, ImageContent, ToolResultMessage } from "@earendil-works/pi-ai";
 import type { LhMarkerMessage, LhMessage } from "./native-messages.ts";
-import { modelSolutionForConclude, PRACTICE_CONCLUDE_TOOL, problemInputForConclude, SEND_TO_USER_TOOL, sendToUserText } from "./native-messages.ts";
+import { modelSolutionForConclude, PRACTICE_CONCLUDE_TOOL, problemInputForConclude, SEND_TO_USER_TOOL, sendToUserText, pluginQuestionResultMatches } from "./native-messages.ts";
+import { readPluginQuestionMessageAnnotation, readPluginQuestionCancellation, type PluginQuestionAnnotationRead } from "./plugin-questions.ts";
+import { pluginProblemForCall, type PluginProblemSnapshot } from "./plugin-problems.ts";
 import { activeCompactionOf, type CompactionDetails } from "./compaction.ts";
 import { QUESTION_TOOLS } from "./pending.ts";
 import type { SubagentArtifactData, SubagentResultMeta } from "./contracts/jobs.ts";
@@ -55,10 +57,15 @@ export interface LhViewPart extends Record<string, unknown> {
 	/** Native location, retained across display grouping (client-only). */
 	sourceMessageId?: string;
 	sourceContentIndex?: number;
+	/** Must be selected before any generic tool renderer; never a raw trace. */
+	pluginQuestion?: Exclude<PluginQuestionAnnotationRead, { status: "absent" }>;
+	pluginProblem?: PluginProblemSnapshot;
 	input?: unknown;
 	output?: unknown;
 	rawInput?: unknown;
 	errorText?: string;
+	/** Native result retained for public plugin renderers and readable fallbacks. */
+	result?: Pick<ToolResultMessage, "content" | "details" | "isError">;
 	data?: unknown;
 }
 
@@ -78,6 +85,7 @@ export interface LiveExecution {
 	output?: unknown;
 	/** The failure text (output-error parts). */
 	errorText?: string;
+	result?: Pick<ToolResultMessage, "content" | "details" | "isError">;
 }
 
 /** The live turn's execution layer, maintained by the session hook. */
@@ -101,6 +109,14 @@ function textPart(text: string): LhViewPart {
 
 /** The result a tool part should show, from a native toolResult. */
 function applyResult(part: LhViewPart, result: ToolResultMessage): void {
+	if (part.pluginQuestion) {
+		// Authored payload/error prose must never escape through generic trace.
+		if (result.isError) { part.state = "output-error"; return; }
+		part.state = "output-available";
+		part.output = result.details;
+		return;
+	}
+	part.result = { content: result.content, details: result.details, isError: result.isError };
 	if (result.isError) {
 		part.state = "output-error";
 		part.rawInput = part.input;
@@ -140,7 +156,7 @@ export function projectView(messages: readonly LhMessage[], live?: LiveTurnState
 		const last = out[out.length - 1];
 		return last && last.role === "assistant" ? last : undefined;
 	};
-	const findToolPart = (toolCallId: string): LhViewPart | undefined => {
+	const findToolPart = (result: LhMessage & ToolResultMessage): LhViewPart | undefined => {
 		for (let i = out.length - 1; i >= 0; i--) {
 			// NEWEST-FIRST part scan within a group (the Lacan heal, 2026-10-04):
 			// a result pairs with the most RECENT call carrying its id. Unique
@@ -151,7 +167,13 @@ export function projectView(messages: readonly LhMessage[], live?: LiveTurnState
 			const parts = out[i]!.parts;
 			for (let p = parts.length - 1; p >= 0; p--) {
 				const part = parts[p]!;
-				if (part.type.startsWith("tool-") && part.toolCallId === toolCallId) return part;
+				if (!part.type.startsWith("tool-") || part.toolCallId !== result.toolCallId) continue;
+				if (part.pluginQuestion) {
+					const occurrence = { messageId: part.sourceMessageId!, contentIndex: part.sourceContentIndex!, toolCallId: part.toolCallId!, toolName: part.type.slice(5) };
+					if (pluginQuestionResultMatches(result, occurrence, part.pluginQuestion) || (result.isError && part.pluginQuestion.status !== "posed")) return part;
+					continue;
+				}
+				if (!result.lhQuestionOccurrence && !readPluginQuestionCancellation(result.details)) return part;
 			}
 		}
 		return undefined;
@@ -183,11 +205,12 @@ export function projectView(messages: readonly LhMessage[], live?: LiveTurnState
 
 		if (role === "user") {
 			const content = m.content as string | Array<{ type: string; text?: string }>;
-			const texts =
-				typeof content === "string"
-					? [content]
-					: content.filter((c) => c.type === "text").map((c) => (c as { text: string }).text);
-			out.push({ id: m.id, role: "user", parts: texts.map(textPart) });
+			const parts = typeof content === "string" ? [textPart(content)] : content.flatMap((block): LhViewPart[] => {
+				if (block.type === "text") return [textPart(block.text as string)];
+				if (block.type === "image") return [{ ...block as ImageContent }];
+				return [];
+			});
+			out.push({ id: m.id, role: "user", parts });
 			continue;
 		}
 
@@ -197,7 +220,7 @@ export function projectView(messages: readonly LhMessage[], live?: LiveTurnState
 		}
 
 		if (role === "toolResult") {
-			applyResultTo(findToolPart((m as ToolResultMessage).toolCallId), m as ToolResultMessage);
+			applyResultTo(findToolPart(m as LhMessage & ToolResultMessage), m as ToolResultMessage);
 			continue;
 		}
 
@@ -228,7 +251,17 @@ export function projectView(messages: readonly LhMessage[], live?: LiveTurnState
 				} else if (block.type === "thinking") {
 					reasoning.push({ type: "reasoning", id: `${m.id}-r${reasoningN++}`, text: block.thinking, state: "done" });
 				} else if (block.type === "toolCall") {
+					const annotation = readPluginQuestionMessageAnnotation(m, contentIndex);
+					if (annotation.status !== "absent") {
+						// Source position, not reasoning-partitioned/grouped view index.
+						rest.push({ type: `tool-${block.name}`, toolCallId: block.id,
+							sourceMessageId: m.id, sourceContentIndex: contentIndex, pluginQuestion: annotation,
+							state: annotation.status === "posed" ? "input-available" : streamingMessage ? "input-streaming" : "output-error" });
+						continue;
+					}
 					const part = toolPartOf(block, live, streamingMessage);
+					const pluginProblem = pluginProblemForCall(messages, { messageId: m.id, contentIndex, toolCallId: block.id, toolName: block.name });
+					if (pluginProblem) { part.pluginProblem = pluginProblem; part.input = pluginProblem.input; }
 					if ((QUESTION_TOOLS as readonly string[]).includes(block.name)) {
 						part.sourceMessageId = m.id;
 						part.sourceContentIndex = contentIndex;
@@ -321,6 +354,7 @@ function toolPartOf(
 	const exec = live?.executions.get(block.id);
 	const isQuestion = isPlaceholderResultTool(block.name);
 	if (exec) {
+		if (exec.result) part.result = exec.result;
 		if (exec.isError) {
 			// An invalid call NEVER becomes input-available — the dock's mount
 			// gate keys on the clean execution end (the live modal-realism
@@ -357,7 +391,7 @@ function applyResultTo(part: LhViewPart | undefined, result: ToolResultMessage):
 		// AnsweredCard a null and crash the render (the live crash, 2026-09-26).
 		const tool = part.type.startsWith("tool-") ? part.type.slice("tool-".length) : part.type;
 		const isQuestion = isPlaceholderResultTool(tool);
-		if (isQuestion && !result.isError && result.details == null) {
+		if (!result.isError && ((isQuestion && result.details == null) || part.pluginProblem)) {
 			// The placeholder fork (fork 2) stands: the clean pose/ask ack carries
 			// no card data — NEVER output-available. But the call IS settled
 			// (the practice bug, 2026-10-05: this early-return left the part on
@@ -426,6 +460,10 @@ function projectMarker(marker: LhMarkerMessage, out: LhViewMessage[]): void {
 				metadata: { subagentResult: meta },
 				parts: [textPart(marker.content), { type: "data-subagent-aborted", id: `sa_${marker.id}`, data: meta }],
 			});
+			return;
+		}
+		case "plugin-problem-submission": {
+			out.push({ id: marker.id, role: "user", parts: [{ type: "data-plugin-problem-submission", id: `ps_${marker.id}`, data: marker.details }] });
 			return;
 		}
 		case "practice-thinking": {

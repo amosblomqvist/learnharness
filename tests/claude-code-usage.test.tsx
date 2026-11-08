@@ -2,7 +2,7 @@ import React from "react";
 (globalThis as Record<string, unknown>).React = React;
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { renderToStaticMarkup } from "react-dom/server";
+import { renderWithInteractionLayers as renderToStaticMarkup } from "./interaction-layer-render.tsx";
 import { CLAUDE_CODE_MODELS } from "../src/agent/claude-code/provider.ts";
 import { isSubscriptionModel, sumSteps, type TurnUsage } from "../src/core/index.ts";
 import { graphCostSummary } from "../src/core/cost-summary.ts";

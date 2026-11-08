@@ -20,6 +20,7 @@
 import { Type, type Static } from "typebox";
 import { stripModelValueDebris } from "./value-debris.ts";
 import { expandCitationsForModel } from "./citations.ts";
+import type { PluginSubmissionImages } from "./plugin-submissions.ts";
 
 // ─── shared types ───────────────────────────────────────────────────────────
 
@@ -463,6 +464,8 @@ export interface QuestionAnswerData {
 	 *  2026-10-03) — a separate channel from `thinking`, captured by the
 	 *  reading field and riding the check answer. Absent when empty. */
 	readingThinking?: string;
+	/** Host-owned explicit image channels; never inferred from text or paths. */
+	images?: PluginSubmissionImages;
 	confidence?: number; // quiz only: the learner's stated probability (0-100, raw) that his selected answer is correct — never sent on "I don't know" (owner, 2026-10-01)
 	correct?: boolean; // quiz only
 	correctIndices?: number[]; // quiz only (rendering)

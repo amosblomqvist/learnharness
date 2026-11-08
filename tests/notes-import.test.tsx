@@ -1,15 +1,19 @@
 import React, { act } from "react";
 (globalThis as Record<string, unknown>).React = React;
 import assert from "node:assert/strict";
-import { afterEach, it } from "node:test";
+import { after, afterEach, it } from "node:test";
 import { createRoot, type Root } from "react-dom/client";
-import { renderToStaticMarkup } from "react-dom/server";
+import { renderWithInteractionLayers as renderToStaticMarkup } from "./interaction-layer-render.tsx";
 import { parseHTML } from "linkedom";
+import { InteractionLayersProvider } from "../components/interaction-layers.tsx";
+import { installModalDom } from "./modal-dom.ts";
 import { IMPORT_EXTENSIONS } from "../lib/notes-import-limits.ts";
 import { MAX_IMPORT_BYTES, NotesImportControl, NotesImportErrors, NotesImportNotices, parseNotesImportResults, postNotesImport, useNotesImport, type NotesImportResult } from "../components/notes-import.tsx";
 
 const dom = parseHTML("<html><body></body></html>");
-Object.assign(globalThis, { window: dom.window, document: dom.document, IS_REACT_ACT_ENVIRONMENT: true });
+Object.assign(globalThis, { window: dom.window, document: dom.document, HTMLElement: dom.window.HTMLElement, Element: dom.window.Element, IS_REACT_ACT_ENVIRONMENT: true });
+const restoreModalDom = installModalDom(dom);
+after(restoreModalDom);
 const originalFetch = globalThis.fetch;
 let root: Root | undefined, host: HTMLDivElement | undefined;
 let current: ReturnType<typeof useNotesImport>;
@@ -152,7 +156,7 @@ it("the Files picker's accept lists only types the queue takes, in any letter ca
 it("graph menu clearly distinguishes extraction from lesson material, above unchanged Files/Folder choices", async () => {
 	const selected: unknown[] = [];
 	host = document.createElement("div"); document.body.appendChild(host); root = createRoot(host);
-	await act(async () => { root!.render(<NotesImportControl importing={false} onImportFiles={(files) => selected.push(files)} />); });
+	await act(async () => { root!.render(<InteractionLayersProvider><NotesImportControl importing={false} onImportFiles={(files) => selected.push(files)} /></InteractionLayersProvider>); });
 	const trigger = host.querySelector<HTMLButtonElement>('[data-testid="import-notes"]')!;
 	assert.equal(trigger.textContent, "Extract files…");
 	assert.ok(trigger.querySelector(".lucide-waypoints"));

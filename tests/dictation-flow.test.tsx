@@ -136,7 +136,7 @@ afterEach(async () => { await dispose?.(); restore?.(); dispose = undefined; res
 test("side recording has a fixed destination, and main finish never waits for or stops it", async () => {
 	const f = await fixture(); await f.mount();
 	const side: string[] = []; const other: string[] = [];
-	await act(async () => { f.dictation.toggleFor({ id: "side:first", append: (text) => side.push(text) }); });
+	await act(async () => { f.dictation.toggleFor({ id: "side:first", append: (text) => { side.push(text); } }); });
 	const socket = Socket.all[0]!;
 	await act(async () => { socket.open(); socket.final("Side words"); });
 	assert.equal(f.dictation.destinationId, "side:first");
@@ -144,7 +144,7 @@ test("side recording has a fixed destination, and main finish never waits for or
 	assert.equal(f.dictation.phase, "recording");
 	assert.deepEqual(side, []);
 	// A shortcut at another focused input stops the current run, not a second capture.
-	await act(async () => { f.dictation.toggleFor({ id: "side:another", append: (text) => other.push(text) }); });
+	await act(async () => { f.dictation.toggleFor({ id: "side:another", append: (text) => { other.push(text); } }); });
 	assert.equal(f.dictation.phase, "stopping"); assert.equal(f.state.captures, 1);
 	await act(async () => { socket.final("final tail"); socket.end(); });
 	assert.deepEqual(side, ["Side words final tail"]); assert.deepEqual(other, []); assert.deepEqual(f.state.appends, []);
@@ -152,7 +152,7 @@ test("side recording has a fixed destination, and main finish never waits for or
 
 test("side finish waits for final speech and flushes once into its original saved draft", async () => {
 	const f = await fixture(); await f.mount(); const side: string[] = [];
-	await act(async () => { f.dictation.toggleFor({ id: "side:thread", append: (text) => side.push(text) }); });
+	await act(async () => { f.dictation.toggleFor({ id: "side:thread", append: (text) => { side.push(text); } }); });
 	const socket = Socket.all[0]!; await act(async () => { socket.open(); socket.final("Closing"); });
 	let finished = false; let done!: Promise<void>;
 	await act(async () => { done = f.dictation.finishFor("side:thread").then(() => { finished = true; }); });
@@ -166,7 +166,7 @@ test("side finish waits for final speech and flushes once into its original save
 test("closing side recording during microphone setup cannot leave a late live capture", async () => {
 	const f = await fixture(); const mic = deferred<{ getTracks: () => { stop: () => void }[] }>();
 	f.state.nextMic = mic.promise; await f.mount();
-	await act(async () => { f.dictation.toggleFor({ id: "side:connecting", append: (text) => f.state.appends.push(text) }); });
+	await act(async () => { f.dictation.toggleFor({ id: "side:connecting", append: (text) => { f.state.appends.push(text); } }); });
 	assert.equal(f.dictation.phase, "connecting");
 	await act(async () => { await f.dictation.finishFor("side:connecting"); });
 	assert.equal(f.dictation.phase, "idle");

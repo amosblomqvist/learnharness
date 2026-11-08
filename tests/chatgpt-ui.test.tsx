@@ -10,6 +10,7 @@ import { notifySettingsSaved } from "../components/settings-signal.ts";
 import { SidebarProvider } from "../components/sidebar.tsx";
 import { ChatGPTConnection, ChatGPTUIProvider } from "../components/settings/chatgpt-connection.tsx";
 import { GraphCostControl } from "../components/graph-view.tsx";
+import { InteractionLayersProvider } from "../components/interaction-layers.tsx";
 import { graphCostSummary as foldGraphCostSummary, type CostSummaryInput } from "../src/core/cost-summary.ts";
 const graphCostSummary = (input: CostSummaryInput) => foldGraphCostSummary(input, () => null);
 import type { ModelCatalogResponse, ChatGPTStatus } from "../src/core/index.ts";
@@ -27,7 +28,7 @@ function Reader({ id }: { id: string }) {
  snapshots[id] = { catalog, zero: useZeroKeys(), strong: useStrongKeyless() };
  return <span data-testid={id}>{catalog ? [...catalogLimits(catalog).keys()].join(",") : "unavailable"}</span>;
 }
-async function mount(children: React.ReactNode) { host = document.createElement("div"); document.body.append(host); root = createRoot(host); await act(async () => root!.render(children)); }
+async function mount(children: React.ReactNode) { host = document.createElement("div"); document.body.append(host); root = createRoot(host); await act(async () => root!.render(<InteractionLayersProvider>{children}</InteractionLayersProvider>)); }
 afterEach(async () => { await act(async () => root?.unmount()); host?.remove(); root = undefined; host = undefined; globalThis.fetch = originalFetch; delete window.lh; snapshots = {}; });
 
 test("shared ChatGPT-only readiness admits without API keys; connection invalidation clears every reader and fences old success/error", async () => {
@@ -72,12 +73,12 @@ test("root-lifetime safe bridge publishes with Connections unmounted; commands/p
  const before = fetches;
  await act(async () => { for (const callback of pushes) callback(); });
  assert.equal(fetches, before + 1);
- await act(async () => root!.render(<SidebarProvider><Reader id="root" /><ChatGPTUIProvider><ChatGPTConnection /></ChatGPTUIProvider></SidebarProvider>));
+ await act(async () => root!.render(<InteractionLayersProvider><SidebarProvider><Reader id="root" /><ChatGPTUIProvider><ChatGPTConnection /></ChatGPTUIProvider></SidebarProvider></InteractionLayersProvider>));
  assert.equal(subscriptions, 2);
  const mounted = fetches;
  await act(async () => { for (const callback of pushes) callback(); });
  assert.equal(fetches, mounted + 1, "one global publisher even when panel also reads pushed status");
- await act(async () => root!.render(<SidebarProvider><Reader id="root" /></SidebarProvider>));
+ await act(async () => root!.render(<InteractionLayersProvider><SidebarProvider><Reader id="root" /></SidebarProvider></InteractionLayersProvider>));
  assert.equal(unsubscriptions, 1);
  await act(async () => { for (const callback of pushes) callback(); });
  assert.equal(fetches, mounted + 2);

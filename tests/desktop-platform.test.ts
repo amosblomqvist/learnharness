@@ -42,7 +42,7 @@ describe("desktop development startup", () => {
 	it("does not open the window until the development server responds", async () => {
 		const devUrl = "http://localhost:3000";
 		const loaded: string[] = [];
-		let respond: ((response: { statusCode: number; resume(): void }) => void) | undefined;
+		let respond: (() => void) | undefined;
 		class FakeWindow {
 			static getAllWindows() { return []; }
 			webContents = { on() {}, setWindowOpenHandler() {} };
@@ -52,7 +52,7 @@ describe("desktop development startup", () => {
 		const electron = {
 			app: {
 				setName() {}, getPath: () => "/fixture/LearnHarness", setPath() {},
-				requestSingleInstanceLock: () => false, quit() {}, on() {}, whenReady: async () => {},
+				requestSingleInstanceLock: () => false, quit() {}, on() {}, once() {}, removeListener() {}, whenReady: async () => {},
 			},
 			BrowserWindow: FakeWindow,
 			Menu: { buildFromTemplate() {}, setApplicationMenu() {} },
@@ -63,14 +63,15 @@ describe("desktop development startup", () => {
 			require: (id: string) => {
 				if (id === "electron") return electron;
 				if (id === "node:fs") return { mkdirSync() {}, appendFileSync() {} };
-				if (id === "node:http") return { get: (url: string, callback: typeof respond) => {
+				if (id === "./dev-server-readiness.cjs") return { waitForDevServer: (url: string, options: { signal: AbortSignal }) => {
 					assert.equal(url, devUrl);
-					respond = callback;
-					return { on() {} };
+					assert.equal(options.signal.aborted, false);
+					return new Promise<void>(resolve => { respond = resolve; });
 				} };
 				return mainRequire(id);
 			},
 			process: { platform: "linux", argv: [], env: { LH_DEV_URL: devUrl }, on() {} },
+			AbortController,
 			__dirname: dirname(mainFile),
 		};
 		runInNewContext(mainSource, context, { filename: mainFile });
@@ -78,7 +79,7 @@ describe("desktop development startup", () => {
 		await new Promise<void>(resolve => setImmediate(resolve));
 		assert.deepEqual(loaded, [], "a slow server must not leave a failed navigation in the window");
 		assert.ok(respond, "startup probes the configured development server");
-		respond({ statusCode: 200, resume() {} });
+		respond();
 		await boot;
 		assert.deepEqual(loaded, [devUrl], "the window navigates once the server responds");
 	});

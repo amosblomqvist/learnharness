@@ -28,6 +28,8 @@ export type PathInputProps = Omit<React.HTMLAttributes<HTMLDivElement>, "childre
 	placeholder?: string;
 	autoFocus?: boolean;
 	defaultDropTarget?: boolean;
+	/** Opt out of host file insertion and drop routing; normal text editing remains. */
+	fileInsertion?: boolean;
 	/** Native text-input semantics: strip CR/LF and leave Enter to the caller. */
 	singleLine?: boolean;
 };
@@ -42,13 +44,13 @@ type Controller = {
  * views of it. React never reconciles the editable DOM after a native mutation.
  */
 export const PathInput = React.forwardRef<HTMLDivElement, PathInputProps>(function PathInput({
-	value, onValueChange, placeholder, autoFocus, defaultDropTarget = false, singleLine = false, className,
+	value, onValueChange, placeholder, autoFocus, defaultDropTarget = false, fileInsertion = true, singleLine = false, className,
 	onKeyDown, onFocus, onBlur, onInput, onPaste, onCopy, onCut,
 	onCompositionStart, onCompositionEnd, ...props
 }, forwardedRef) {
 	const rootRef = React.useRef<HTMLDivElement>(null);
 	const controllerRef = React.useRef<Controller | null>(null);
-	const callbacks = React.useRef({ onValueChange, singleLine });
+	const callbacks = React.useRef({ onValueChange, singleLine, fileInsertion });
 	const composing = React.useRef(false);
 	const [chips, setChips] = React.useState<ChipHost[]>([]);
 	// Keep this text child immutable: SSR/hydration gets the complete draft,
@@ -56,7 +58,7 @@ export const PathInput = React.forwardRef<HTMLDivElement, PathInputProps>(functi
 	const initial = React.useRef({ value: normalizePathInputValue(value, singleLine), autoFocus, singleLine });
 
 	React.useImperativeHandle(forwardedRef, () => rootRef.current!, []);
-	React.useLayoutEffect(() => { callbacks.current = { onValueChange, singleLine }; }, [onValueChange, singleLine]);
+	React.useLayoutEffect(() => { callbacks.current = { onValueChange, singleLine, fileInsertion }; }, [onValueChange, singleLine, fileInsertion]);
 
 	React.useLayoutEffect(() => {
 		const root = rootRef.current!;
@@ -143,6 +145,7 @@ export const PathInput = React.forwardRef<HTMLDivElement, PathInputProps>(functi
 			change({ value, selection: { anchor: Math.min(caret, value.length), focus: Math.min(caret, value.length) } });
 		}
 		function insertEvent(event: Event) {
+			if (!callbacks.current.fileInsertion) return;
 			const paths: unknown = (event as CustomEvent<unknown>).detail;
 			if (Array.isArray(paths) && paths.every((path) => typeof path === "string")) stage(paths);
 		}
@@ -324,9 +327,9 @@ export const PathInput = React.forwardRef<HTMLDivElement, PathInputProps>(functi
 			aria-placeholder={placeholder}
 			contentEditable
 			suppressContentEditableWarning
-			data-file-path-input=""
+			data-file-path-input={fileInsertion ? "" : undefined}
 			data-empty={initial.current.value.length === 0 ? "true" : "false"}
-			data-file-path-default={defaultDropTarget ? "" : undefined}
+			data-file-path-default={fileInsertion && defaultDropTarget ? "" : undefined}
 			data-placeholder={placeholder}
 			className={cn("block w-full min-w-0 outline-none data-[empty=true]:before:pointer-events-none data-[empty=true]:before:text-muted-foreground data-[empty=true]:before:content-[attr(data-placeholder)]", singleLine ? "whitespace-pre break-normal overflow-x-auto overflow-y-hidden" : "whitespace-pre-wrap break-words overflow-y-auto", className)}
 			onKeyDown={(event) => {

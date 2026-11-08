@@ -683,8 +683,24 @@ async function main() {
 		await waitUntilUp(url);
 		log(`server up: ${url}`);
 	} else {
-		log(`dev mode: ${devUrl}`);
-		await waitUntilUp(devUrl);
+		log(`dev mode: ${devUrl} — waiting for server`);
+		const { waitForDevServer } = require("./dev-server-readiness.cjs");
+		const startup = new AbortController();
+		const cancelStartup = () => startup.abort(new Error("Development startup cancelled by application quit"));
+		app.once("before-quit", cancelStartup);
+		try {
+			await waitForDevServer(devUrl, { signal: startup.signal });
+			if (startup.signal.aborted) return;
+			log(`dev server ready: ${devUrl}`);
+		} catch (error) {
+			if (!startup.signal.aborted) {
+				log(`dev server startup failed: ${error?.message ?? error}`);
+				app.exit(1);
+			}
+			return;
+		} finally {
+			app.removeListener("before-quit", cancelStartup);
+		}
 	}
 
 	// Renderer controls contain no token/URL/code operation. The separate server

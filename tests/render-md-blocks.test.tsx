@@ -13,7 +13,9 @@ import React from "react";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
-import { renderToStaticMarkup } from "react-dom/server";
+import { renderToStaticMarkup as renderMarkup } from "react-dom/server";
+import { InteractionLayersProvider } from "../components/interaction-layers.tsx";
+const renderToStaticMarkup = (node: React.ReactNode) => renderMarkup(<InteractionLayersProvider>{node}</InteractionLayersProvider>);
 import { MessageResponse } from "../components/ai-elements/message.tsx";
 import { ThinkingBlock, setAllUserThinkingOpen } from "@/components/thinking-block";
 import { MermaidOverlay, SessionMermaidContext, chartSize } from "../components/session-overlay.tsx";
@@ -126,18 +128,25 @@ describe("md-blocks — codeSource (pure)", () => {
 describe("session-scoped overlays (chrome-melt wave, 2026-09-19)", () => {
 	it("mermaid overlay mounts inside the session area — absolute (not fixed), 80% + blur, closeable", () => {
 		const html = renderToStaticMarkup(<MermaidOverlay chart="graph TD\nA --> B" onClose={() => {}} />);
-		assert.match(html, /class="absolute inset-0[^"]*z-40/, "absolute inset-0 z-40 — scoped, not fullscreen");
+		assert.match(html, /class="[^"]*absolute inset-0[^"]*z-40/, "absolute inset-0 — scoped, not fullscreen");
+		assert.match(html, /style="z-index:100"/, "native view participates in the shared ordered local paint stack");
+		assert.ok(html.includes("pointer-events-auto"), "the frame opts into hit testing inside the transparent stack");
 		assert.ok(html.includes("bg-background/80"), "80% background: the transcript ghosts through");
 		assert.ok(html.includes("backdrop-blur"), "blur surface");
 		assert.ok(!html.includes("fixed inset-0"), "never fixed — the drag bar stays uncovered");
 		assert.ok(html.includes('data-testid="mermaid-overlay-close"'), "the close X is present");
-		assert.match(html, /role="dialog"/, "dialog semantics for Esc/aria");
+		assert.match(html, /role="region"/, "nonmodal content-area semantics");
+		assert.ok(!html.includes("aria-modal"), "does not claim viewport-modal isolation");
 	});
 
 	it("the plan popup is session-scoped the same way, and its chart is hidden until the first fit (no top-left flash)", () => {
 		const html = renderToStaticMarkup(<PlanPopup messages={[]} onClose={() => {}} />);
 		assert.match(html, /data-testid="plan-popup"/);
-		assert.match(html, /class="absolute inset-0[^"]*z-40/, "absolute inset-0 z-40 — scoped, not fullscreen");
+		assert.match(html, /role="region"/);
+		assert.ok(!html.includes("aria-modal"));
+		assert.match(html, /class="[^"]*absolute inset-0[^"]*z-40/, "absolute inset-0 — scoped, not fullscreen");
+		assert.match(html, /style="z-index:100"/, "plan views share the ordered local paint stack");
+		assert.ok(html.includes("pointer-events-auto"), "the frame remains interactive inside the transparent stack");
 		assert.ok(html.includes("bg-background/80"), "80% background");
 		assert.ok(html.includes("backdrop-blur"), "blur surface");
 		assert.ok(!html.includes("fixed inset-0"), "never fixed — the drag bar stays uncovered");

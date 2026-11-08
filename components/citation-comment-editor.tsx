@@ -3,6 +3,8 @@
 import { useEffect, useRef, useState } from "react";
 import { CITATION_MAX_COMMENT_LENGTH } from "@/src/core";
 import { Button } from "./ui/button";
+import { useOptionalInteractionLayers } from "./interaction-layers";
+import { isInteractionScopeEligible } from "./plugin-input-focus";
 
 /**
  * THE CITATION COMMENT EDITOR (2026-10-31; behaviour follows T3 Code's
@@ -40,10 +42,11 @@ export function CitationCommentEditor({ initial, onDraftChange, onSave, onCancel
 	onSave: (comment: string, andSend: boolean) => void;
 	onCancel: () => void;
 }) {
+	const controller = useOptionalInteractionLayers();
 	const [draft, setDraft] = useState(initial ?? "");
 	const areaRef = useRef<HTMLTextAreaElement>(null);
 	const tooLong = draft.length > CITATION_MAX_COMMENT_LENGTH;
-	useEffect(() => { areaRef.current?.focus(); }, []);
+	useEffect(() => { if (isInteractionScopeEligible(areaRef.current, controller)) areaRef.current?.focus(); }, [controller]);
 	return (
 		<div className="flex flex-col gap-2">
 			<textarea
@@ -56,6 +59,7 @@ export function CitationCommentEditor({ initial, onDraftChange, onSave, onCancel
 				className="field-sizing-content max-h-40 min-h-16 w-full resize-none rounded-md border bg-background px-2 py-1.5 text-sm outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
 				onChange={(event) => { setDraft(event.target.value); onDraftChange(event.target.value); }}
 				onKeyDown={(event) => {
+					if (!isInteractionScopeEligible(areaRef.current, controller)) return;
 					const action = commentKeyAction({ ...event, isComposing: event.nativeEvent.isComposing || event.keyCode === 229 });
 					if (action === null) return;
 					event.preventDefault();

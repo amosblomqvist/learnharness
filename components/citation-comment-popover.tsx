@@ -3,6 +3,8 @@
 import { useEffect, useRef } from "react";
 import { serializeCitation, withCitationComment } from "@/src/core";
 import { MenuShell } from "./menu-shell";
+import { useInteractionLayers, type CloseOutcome } from "./interaction-layers";
+import { isInteractionScopeEligible } from "./plugin-input-focus";
 import { CitationCommentEditor, commentDismissalOutcome, type CommentDismissal } from "./citation-comment-editor";
 import type { CitationEditTarget } from "./citation-actions";
 import { highlightRange } from "./citation-source";
@@ -21,12 +23,15 @@ export function CitationCommentPopover({ target, transcript, composer, onClose, 
 	onSend: () => void;
 }) {
 	const rootRef = useRef<HTMLDivElement>(null);
+	const anchorRef = useRef<HTMLElement | null>(null);
+	const controller = useInteractionLayers();
 	const draftRef = useRef<string | null>(null);
 	const { citation } = target;
 
 	const sourceRange = () => (transcript ? resolveCitationRange(transcript, citation.messageId, citation) : null);
 	const chipHost = () => target.host?.isConnected ? target.host
 		: Array.from(composer()?.querySelectorAll<HTMLElement>(`[${PATH_SOURCE_ATTRIBUTE}]`) ?? []).find((host) => host.getAttribute(PATH_SOURCE_ATTRIBUTE) === target.link) ?? null;
+	anchorRef.current = chipHost() ?? composer();
 
 	const update = (source: string | null) => {
 		const root = composer();
@@ -51,12 +56,13 @@ export function CitationCommentPopover({ target, transcript, composer, onClose, 
 		if (target.fresh) update(null); // a just-cited chip leaves with its spaces
 		onClose();
 	};
-	const dismiss = (reason: CommentDismissal) => {
+	const dismiss = (reason: CommentDismissal): CloseOutcome => {
 		const outcome = commentDismissalOutcome({ reason, draft: draftRef.current, saved: citation.comment });
-		if (outcome === "keep-open") return;
+		if (outcome === "keep-open") return "handled-without-close";
 		if (outcome === "commit") save(draftRef.current!, false);
 		else if (reason === "escape") cancel();
 		else onClose();
+		return "closed";
 	};
 	const dismissRef = useRef(dismiss);
 	dismissRef.current = dismiss;
@@ -69,24 +75,17 @@ export function CitationCommentPopover({ target, transcript, composer, onClose, 
 
 	useEffect(() => {
 		const inside = (node: EventTarget | null) => node instanceof Node && !!rootRef.current?.contains(node);
-		const onPointerDown = (event: PointerEvent) => { if (!inside(event.target)) dismissRef.current("outside"); };
-		const onKeyDown = (event: KeyboardEvent) => {
-			if (event.key !== "Escape") return;
-			// Claim Esc: the window-level chain must not also abort a turn.
-			event.stopPropagation();
-			dismissRef.current("escape");
-		};
-		const onFocusOut = (event: FocusEvent) => { if (event.relatedTarget && !inside(event.relatedTarget)) dismissRef.current("focus-out"); };
+		const eligible = () => isInteractionScopeEligible(rootRef.current, controller);
+		const onPointerDown = (event: PointerEvent) => { if (eligible() && !inside(event.target)) dismissRef.current("outside"); };
+		const onFocusOut = (event: FocusEvent) => { if (eligible() && event.relatedTarget && !inside(event.relatedTarget)) dismissRef.current("focus-out"); };
 		const root = rootRef.current;
 		document.addEventListener("pointerdown", onPointerDown);
-		document.addEventListener("keydown", onKeyDown);
 		root?.addEventListener("focusout", onFocusOut);
 		return () => {
 			document.removeEventListener("pointerdown", onPointerDown);
-			document.removeEventListener("keydown", onKeyDown);
 			root?.removeEventListener("focusout", onFocusOut);
 		};
-	}, []);
+	}, [controller]);
 
 	const getAnchorRect = () => {
 		const lines = sourceRange()?.getClientRects();
@@ -95,7 +94,8 @@ export function CitationCommentPopover({ target, transcript, composer, onClose, 
 	};
 
 	return (
-		<MenuShell testid="citation-comment-popover" getAnchorRect={getAnchorRect} preferredSide="down" align="right" menuClass="w-80 rounded-xl border bg-popover p-2 text-sm shadow-xl">
+		<MenuShell testid="citation-comment-popover" anchorRef={anchorRef} getAnchorRect={getAnchorRect} preferredSide="down" align="right" menuClass="w-80 rounded-xl border bg-popover p-2 text-sm shadow-xl"
+			onClose={(reason) => dismissRef.current(reason === "escape" ? "escape" : "outside")}>
 			<div ref={rootRef} role="dialog" aria-label="Edit citation comment">
 				<CitationCommentEditor
 					initial={citation.comment}
