@@ -340,6 +340,7 @@ export interface GeneralSettings {
 /** One app-wide dictation preference, shared by every composer. */
 export interface DictationSettings {
 	language?: DictationLanguage;
+	provider?: "deepgram" | "codex";
 }
 
 /** Agent settings — everything about the non-conversation machinery. */
@@ -515,7 +516,7 @@ export interface FactorySettings {
 export const FACTORY_SETTINGS: FactorySettings = {
 	version: CURRENT_SETTINGS_VERSION,
 	general: { autoUpdate: true },
-	dictation: { language: "en" },
+	dictation: { language: "en", provider: "deepgram" },
 	appearance: {
 		mode: "dark",
 		background: null, // the dark default (#141414) lives in the mode's derivation curve
@@ -822,10 +823,10 @@ export function sanitizeUserSettings(raw: unknown): UserSettings | null {
 	}
 	if (r.dictation !== undefined) {
 		const raw = r.dictation;
-		out.dictation = raw !== null && typeof raw === "object" && !Array.isArray(raw) &&
-			isDictationLanguage((raw as Record<string, unknown>).language)
-			? { language: (raw as DictationSettings).language }
-			: {};
+		const value = raw !== null && typeof raw === "object" && !Array.isArray(raw) ? raw as Record<string, unknown> : {};
+		out.dictation = {};
+		if (isDictationLanguage(value.language)) out.dictation.language = value.language;
+		if (value.provider === "deepgram" || value.provider === "codex") out.dictation.provider = value.provider;
 	}
 	if (r.claudeCode !== undefined) {
 		const raw = r.claudeCode;

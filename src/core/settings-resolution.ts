@@ -189,6 +189,7 @@ export function resolveSettings(record: UserSettings | null): EffectiveSettings 
 		},
 		dictation: {
 			language: record?.dictation?.language ?? FACTORY_SETTINGS.dictation.language,
+			provider: record?.dictation?.provider ?? FACTORY_SETTINGS.dictation.provider,
 		},
 		agent: {
 			models,
