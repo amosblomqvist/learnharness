@@ -321,6 +321,16 @@ describe("desktop release workflow", () => {
 		});
 	}
 
+	it("builds and boots linux-arm64 natively in ordinary CI", () => {
+		const ciUrl = new URL("../.github/workflows/ci.yml", import.meta.url);
+		const ci = yaml.load(readFileSync(ciUrl, "utf8"));
+
+		const ciArm = ci.jobs.standalone?.strategy?.matrix.include
+			.find(entry => entry.platform === "linux-arm64");
+
+		assert.equal(ciArm?.os, "ubuntu-24.04-arm", "Next traces native binaries for the build host's arch");
+	});
+
 	it("creates exactly one unpublished draft when none matches", async () => {
 		assert.deepEqual(await prepareDraft([{ id: 9, tag_name: "v0.2.0", draft: false }]), [{
 			owner: "test-owner", repo: "test-repo", tag_name: "v0.3.0", name: "0.3.0", draft: true,
