@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useChatSession } from "@/components/session";
 import { visibleQueuedSteers } from "@/components/session-core";
 import { SetupDialog } from "@/components/setup-dialog";
@@ -117,22 +117,8 @@ const GRADIENT_H = 96;
 const COLLAPSE_DIST = 96;
 const EXPAND_DIST = 16;
 
-/**
- * Server-sync channel for artifact renderers: the CENTRAL jobs poll in Chat
- * calls syncFromServer() when a background job settles — the wake turn's
- * steer + response are already persisted by then, so fresh messages replace
- * local state in one pull. sendText feeds the demo error-fix loop.
- * (contracts.ts "THE ASYNC PROTOCOL" §4.)
- */
-export const ChatActionsContext = createContext<{
-	chatId: string;
-	syncFromServer: () => Promise<void>;
-	/** Send a user message into the session (demo error-fix loop, W6). */
-	sendText: (text: string) => void;
-	/** Opens the model setup dialog (BYOK, 2026-09-22): refused job cards
-	 *  deep-link into the same SetupDialog the send interception uses. */
-	openSetup: () => void;
-} | null>(null);
+import { ChatActionsContext } from "@/components/chat-actions";
+export { ChatActionsContext };
 
 /** The BYOK refusal envelope from the transport's error text: the
  *  DefaultChatTransport throws the 503 body VERBATIM as the error message,

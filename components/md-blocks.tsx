@@ -42,6 +42,7 @@ import { MermaidError } from "@/components/mermaid-error";
 import { blurAfterPointerClick } from "@/components/focus-hygiene";
 import { chartSize, useSessionMermaid } from "@/components/session-overlay";
 import { Hint } from "@/components/ui/hint";
+import { DemoFrame } from "@/components/artifacts/demo-card";
 
 // ─── The one affordance: the hover-reveal corner copy ────────────────────────
 
@@ -226,6 +227,44 @@ function MermaidInline({ chart }: { chart: string }) {
 	);
 }
 
+// ─── Inline animations (the teacher's ```animation fences) ──────────────────
+
+/** The caption for an ```animation fence: the fence meta's title="…" (or
+ *  title='…'), else the document's <title>, else "Animation". Pure. */
+export function animationTitle(meta: string, source: string): string {
+	const fromMeta = /\btitle=(?:"([^"]*)"|'([^']*)')/.exec(meta);
+	const metaTitle = (fromMeta?.[1] ?? fromMeta?.[2] ?? "").trim();
+	if (metaTitle) return metaTitle;
+	const docTitle = /<title[^>]*>([^<]*)<\/title>/i.exec(source)?.[1]?.trim();
+	return docTitle || "Animation";
+}
+
+/** An ```animation fence: a self-contained HTML document the teacher wrote
+ *  inline, run in the SAME sandboxed frame as tool-built demos
+ *  (sandbox="allow-scripts" only — no app storage, cookies or DOM; the
+ *  auto-size + error bridge injected). While the fence still streams, a
+ *  quiet placeholder instead of a half-written document. */
+function AnimationInline({ source, meta }: { source: string; meta: string }) {
+	const incomplete = useIsCodeFenceIncomplete();
+	if (incomplete || !source.trim()) {
+		return (
+			<div
+				data-testid="md-animation"
+				className="my-4 flex items-center justify-center gap-2 rounded-xl border p-6 text-sm text-muted-foreground"
+				aria-busy="true"
+			>
+				<span className="inline-block size-4 animate-spin rounded-full border border-current border-b-2" />
+				Drawing animation…
+			</div>
+		);
+	}
+	return (
+		<div data-testid="md-animation" className="my-4">
+			<DemoFrame title={animationTitle(meta, source)} html={source} label="animation" replayable />
+		</div>
+	);
+}
+
 /** The Streamdown `code` override: inline code passes through with the
  *  house inline classes; block fences split — mermaid renders as the bare
  *  chart above, everything else delegates to streamdown's exported
@@ -251,6 +290,7 @@ export function MarkdownCode(props: ComponentProps<"code"> & ExtraProps) {
 	const source = codeSource(children);
 
 	if (language === "mermaid") return <MermaidInline chart={source} />;
+	if (language === "animation") return <AnimationInline source={source} meta={meta} />;
 
 	const startMatch = /startLine=(\d+)/.exec(meta);
 	const startLine = startMatch ? Number.parseInt(startMatch[1]!, 10) : undefined;
