@@ -11,7 +11,7 @@
 
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { resolveSearchEngineFor, tavilyProvider, braveProvider, exaProvider, firecrawlProvider, ollamaProvider } from "../src/server/search.ts";
+import { resolveSearchEngineFor, tavilyProvider, braveProvider, exaProvider, firecrawlProvider, ollamaProvider, parallelProvider } from "../src/server/search.ts";
 import { SEARCH_ENGINES, isSearchEngineId, type SearchEngineId } from "../src/core/search.ts";
 
 describe("resolveSearchEngineFor (the auto-detect decision)", () => {
@@ -285,9 +285,50 @@ describe("ollamaProvider (hosted search only)", () => {
 	});
 });
 
-describe("five-engine catalog and resolution", () => {
+// The wire shape below was verified against a live api.parallel.ai call on
+// 2026-11-08 — endpoint, x-api-key header, request body keys and the
+// results/excerpts response.
+describe("parallelProvider", () => {
+	it("POSTs api.parallel.ai/v1/search with x-api-key and normalizes excerpts", async () => {
+		const provider = parallelProvider("parallel-fake-key-123456", stubFetch({ results: [
+			{ title: "Pythagoras", url: "https://example.com/p", excerpts: ["first part", "second part"] },
+			{ url: "https://example.org/q", excerpts: ["x".repeat(600)] },
+			{ url: "file:///etc/passwd", excerpts: ["nope"] },
+			{ title: "no excerpts", url: "https://example.net/r" },
+			null,
+		] }, (url, init) => {
+			assert.equal(url, "https://api.parallel.ai/v1/search");
+			assert.equal(init.method, "POST");
+			assert.equal((init.headers as Record<string, string>)["x-api-key"], "parallel-fake-key-123456");
+			assert.deepEqual(JSON.parse(init.body as string), {
+				search_queries: ["test query"],
+				objective: "test query",
+				max_chars_total: 2500,
+			});
+			assert.ok(init.signal);
+		}));
+		assert.deepEqual(await provider.search("test query", 5), [
+			{ title: "Pythagoras", url: "https://example.com/p", snippet: "first part second part" },
+			{ title: "https://example.org/q", url: "https://example.org/q", snippet: "x".repeat(500) },
+			{ title: "no excerpts", url: "https://example.net/r", snippet: "" },
+		]);
+	});
+
+	it("slices to the requested count — the API has no result-count parameter", async () => {
+		const rows = Array.from({ length: 8 }, (_, i) => ({ title: `t${i}`, url: `https://example.com/${i}`, excerpts: [`e${i}`] }));
+		const provider = parallelProvider("parallel-fake-key-123456", stubFetch({ results: rows }, () => {}));
+		assert.equal((await provider.search("q", 3)).length, 3);
+	});
+
+	it("refuses a malformed response instead of returning empty results", async () => {
+		const provider = parallelProvider("parallel-fake-key-123456", stubFetch({ results: "not a list" }, () => {}));
+		await assert.rejects(() => provider.search("q", 5), /invalid response/);
+	});
+});
+
+describe("six-engine catalog and resolution", () => {
 	it("pins the approved Automatic order independently of table-driven tests", () => {
-		assert.deepEqual(SEARCH_ENGINES.map(({ id }) => id), ["tavily", "brave", "exa", "firecrawl", "ollama"]);
+		assert.deepEqual(SEARCH_ENGINES.map(({ id }) => id), ["tavily", "brave", "exa", "firecrawl", "ollama", "parallel"]);
 		assert.equal(isSearchEngineId("chatgpt"), false);
 		assert.equal(isSearchEngineId("deepseek"), false);
 		for (const value of [null, {}, 1, "", "toString"]) assert.equal(isSearchEngineId(value), false);

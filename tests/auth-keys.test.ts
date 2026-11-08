@@ -15,7 +15,8 @@ describe("the catalog", () => {
 	it("lists the curated app-service keys (provider keys live in the provider table)", () => {
 		assert.deepEqual(
 			AUTH_KEYS.map((k) => k.id),
-			["DEEPGRAM_API_KEY", "TAVILY_API_KEY", "BRAVE_API_KEY", "EXA_API_KEY", "FIRECRAWL_API_KEY", "OLLAMA_API_KEY"],
+			// PARALLEL_API_KEY is the sixth curated key.
+			["DEEPGRAM_API_KEY", "TAVILY_API_KEY", "BRAVE_API_KEY", "EXA_API_KEY", "FIRECRAWL_API_KEY", "PARALLEL_API_KEY", "OLLAMA_API_KEY"],
 		);
 		for (const k of AUTH_KEYS) {
 			assert.ok(k.label.length > 0, `${k.id} has a label`);
@@ -36,6 +37,9 @@ describe("the catalog", () => {
 		assert.ok(isKnownAuthKey("BRAVE_API_KEY"));
 		assert.ok(isKnownAuthKey("EXA_API_KEY"));
 		assert.ok(isKnownAuthKey("FIRECRAWL_API_KEY"));
+		assert.ok(isKnownAuthKey("PARALLEL_API_KEY"));
+		assert.ok(validateKeyShape("PARALLEL_API_KEY", "parallel-0123456789abcdef").ok);
+		assert.ok(!validateKeyShape("PARALLEL_API_KEY", "short").ok, "length floor still applies");
 		assert.ok(isKnownAuthKey("OLLAMA_API_KEY"));
 		assert.ok(!isKnownAuthKey("OPENROUTER_API_KEY"));
 		assert.ok(!isKnownAuthKey("OPENAI_API_KEY"), "provider vars are a separate surface");
