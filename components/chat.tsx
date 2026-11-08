@@ -58,9 +58,13 @@ import { QuestionDock } from "@/components/question-dock";
 import { SessionFind } from "@/components/session-find";
 import { SessionMessageNavigation } from "@/components/session-navigation";
 import { PracticeDock } from "@/components/practice-dock";
+import { SideChatProvider } from "@/components/side-chat-state";
+import { SideAskBlock, SidePassage, SideSelectionAsk } from "@/components/side-chat";
 import { ThinkingCard, type PracticeThinkingData } from "@/components/practice-cards";
 import { GraphContextCard, type GraphContextData } from "@/components/graph-context-card";
 import { TopBar } from "@/components/top-bar";
+import { NotesChip, NotesPanel } from "@/components/notes-panel";
+import { NotesController, NotesProvider } from "@/components/notes-state";
 import type { ArtifactPartProps, JobRecord, Phase3, QuestionAnswerData, QuestionFormDraft, TurnUsage, SessionPricing } from "@/src/core";
 import type { LhViewMessage } from "@/src/core";
 import { PhaseChip, PhaseDivider } from "@/components/phase-divider";
@@ -216,6 +220,7 @@ export function Chat({
 	chatId,
 	title,
 	initialMessages,
+	initialNotes,
 	initialError,
 	initialPrompt,
 	initiallyInFlight,
@@ -226,6 +231,7 @@ export function Chat({
 	chatId: string;
 	title: string;
 	initialMessages: LhMessage[];
+	initialNotes: string;
 	/** Memory-only settlement notice supplied on reopening. */
 	initialError?: string;
 	/** The session kind (practice sessions, owner 2026-10-04): practice
@@ -250,6 +256,7 @@ export function Chat({
 	// settled terminal's callback — a stable ref assigned below, once
 	// syncFromServer exists (refs, not closures: no stale capture).
 	const reattachSettledRef = useRef<() => void>(() => {});
+	const [notes] = useState(() => new NotesController(chatId, initialNotes));
 
 	// THE SESSION HOOK (Wave D, owner-approved 2026-09-26): the app-owned
 	// replacement for useChat + the AI-SDK transport. The record is native
@@ -1254,6 +1261,8 @@ export function Chat({
 	};
 
 	return (
+		<NotesProvider controller={notes}>
+		<SideChatProvider chatId={chatId}>
 		<ChatActionsContext.Provider
 			value={{
 				chatId,
@@ -1372,6 +1381,7 @@ export function Chat({
 						</button>
 </Hint>
 					)}
+					<NotesChip />
 					{/* The extraction ring (owner-locked redesign, 2026-09-24): fills
 					    with uncovered vs the chunk threshold, pulses while a run is in
 					    flight, vanishes when the graph is off. Click → the exact
@@ -1398,6 +1408,7 @@ export function Chat({
 				</TopBar>
 
 				<SessionFind scopeRef={sessionFindScopeRef} scrollContextRef={scrollContextRef} />
+				<SideSelectionAsk />
 				<div ref={sessionFindScopeRef} className="relative flex min-h-0 flex-1">
 				<Conversation className="h-full min-w-0 flex-1" initial="instant" contextRef={scrollContextRef}>
 					<SessionMessageNavigation />
@@ -1559,7 +1570,16 @@ export function Chat({
 														const anchor = sourceId && sourceTextParts.get(sourceId) === part.id ? messageAnchorId(sourceId) : undefined;
 														return (
 															<div key={part.id || pi} id={anchor} data-source-message-id={sourceId ?? undefined} className="lh-source-passage">
-																<MessageResponse>{part.text}</MessageResponse>
+																{sourceId && part.id ? (
+																	/* Side questions (2026-11-02): every markdown block of
+																	   teacher prose can carry an inline side window. Live
+																	   (c_) messages are not in the record yet — no asks. */
+																	<SidePassage messageId={sourceId} partId={part.id} enabled={!sourceId.startsWith("c_")}>
+																		<MessageResponse BlockComponent={SideAskBlock}>{part.text}</MessageResponse>
+																	</SidePassage>
+																) : (
+																	<MessageResponse>{part.text}</MessageResponse>
+																)}
 															</div>
 														);
 													}
@@ -1794,6 +1814,7 @@ export function Chat({
 				<AbortTurnDialog mode={abortAsk} onClose={() => setAbortAsk(null)} onConfirm={confirmAbort} busy={busy} />
 				</div>
 			</div>
+			<NotesPanel />
 		</div>
 		</JobsContext.Provider>
 		</SessionMermaidContext.Provider>
@@ -1813,6 +1834,8 @@ export function Chat({
 			}}
 		/>
 		</ChatActionsContext.Provider>
+		</SideChatProvider>
+		</NotesProvider>
 	);
 }
 
