@@ -24,7 +24,7 @@ import { BACKGROUND_MODEL_ROLES, type UserSettings } from "../src/core/settings.
 describe("resolveSettings", () => {
 	it("null record (first boot): non-model knobs land on factory defaults; every model view is EMPTY", () => {
 		const eff = resolveSettings(null);
-		assert.deepEqual(eff.general, { autoUpdate: true });
+		assert.deepEqual(eff.general, { autoUpdate: true, dictationProvider: "deepgram" });
 		assert.deepEqual(eff.agent.tools, {});
 		assert.deepEqual(eff.agent.prompts, {});
 		assert.deepEqual(eff.agent.search, {});
@@ -63,6 +63,8 @@ describe("resolveSettings", () => {
 		};
 		const eff = resolveSettings(record);
 		assert.equal(eff.general.autoUpdate, false);
+		assert.equal(eff.general.dictationProvider, "deepgram");
+		assert.equal(resolveSettings({ version: 1, general: { dictationProvider: "openai" } }).general.dictationProvider, "openai");
 		assert.deepEqual(eff.agent.models.researcher, {
 			provider: "openrouter",
 			id: "qwen/qwen3.8-flash",

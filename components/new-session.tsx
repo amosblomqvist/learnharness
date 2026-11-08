@@ -131,7 +131,7 @@ export function DraftShell({
 	 * re-render cannot eat the dictated tail. */
 	const handleSend = () => {
 		if (dictation.active) {
-			void dictation.finish().then(onSend);
+			void dictation.finish().then((ok) => { if (ok) onSend(); });
 			return;
 		}
 		onSend();

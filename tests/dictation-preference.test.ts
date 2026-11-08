@@ -108,3 +108,43 @@ test("capture also waits for a write initiated as a pending read publishes its r
 	assert.equal(await store.getLanguage(), "multi");
 	off();
 });
+
+test("a provider refresh arriving during a language save is not lost", async () => {
+	let finishWrite!: (response: Response) => void;
+	let reads = 0;
+	const store = createDictationLanguageStore(async (_url, init) => {
+		if (init?.method === "PUT") return new Promise<Response>((resolve) => { finishWrite = resolve; });
+		reads++;
+		return Response.json({ settings: { version: 1, general: { dictationProvider: reads === 1 ? "deepgram" : "openai" }, dictation: { language: reads === 1 ? "en" : "multi" } } });
+	});
+	assert.equal(await store.getProvider(), "deepgram");
+	const save = store.save("multi");
+	await Promise.resolve();
+	const refresh = store.load(true);
+	const provider = store.getProvider();
+	finishWrite(Response.json({ settings: { version: 1, general: { dictationProvider: "deepgram" }, dictation: { language: "multi" } } }));
+	assert.equal(await save, true);
+	assert.equal(await refresh, "multi");
+	assert.equal(await provider, "openai");
+	assert.equal(reads, 2);
+});
+
+
+test("a failed language save does not discard a provider refresh already in flight", async () => {
+	let finishOldRead!: (response: Response) => void;
+	let reads = 0;
+	const store = createDictationLanguageStore(async (_url, init) => {
+		if (init?.method === "PUT") return Response.json({}, { status: 500 });
+		reads++;
+		if (reads === 2) return new Promise<Response>((resolve) => { finishOldRead = resolve; });
+		return Response.json({ settings: { version: 1, general: { dictationProvider: reads === 1 ? "deepgram" : "openai" }, dictation: { language: "en" } } });
+	});
+	assert.equal(await store.getProvider(), "deepgram");
+	const oldRefresh = store.load(true);
+	await Promise.resolve();
+	assert.equal(await store.save("multi"), false);
+	finishOldRead(Response.json({ settings: { version: 1, general: { dictationProvider: "openai" }, dictation: { language: "en" } } }));
+	assert.equal(await oldRefresh, "en");
+	assert.equal(await store.getProvider(), "openai");
+	assert.equal(reads, 3, "a failed save must not make stale provider settings authoritative");
+});

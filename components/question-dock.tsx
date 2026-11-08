@@ -373,8 +373,16 @@ function QuestionDockForm({
 			? text.trim().length > 0
 			: sel.dontKnow || (sel.otherSelected && other.trim().length > 0) || sel.selected.size > 0;
 
+	const latestSubmitRef = useRef<() => void>(() => {});
+	const submitPendingRef = useRef(false);
+	const mountedRef = useRef(false);
+	useEffect(() => {
+		mountedRef.current = true;
+		return () => { mountedRef.current = false; };
+	}, []);
+
 	const submit = () => {
-		if (!canSubmit || compactionRunning) return;
+		if (!canSubmit || compactionRunning || submitPendingRef.current) return;
 		/* FINISH DICTATION FIRST (owner, 2026-10-01): Enter may arrive while
 		 * a run is live with reasoning still in Deepgram's hands. Stop the
 		 * run, let the last finals land in the target field, and only then
@@ -385,10 +393,14 @@ function QuestionDockForm({
 			doSubmit();
 			return;
 		}
-		void finishDictation().then(doSubmit);
+		submitPendingRef.current = true;
+		void finishDictation().then((ok) => {
+			submitPendingRef.current = false;
+			if (ok && mountedRef.current) latestSubmitRef.current();
+		}, () => { submitPendingRef.current = false; });
 	};
 	const doSubmit = () => {
-		if (!canSubmit) return;
+		if ((qd.mode === "text" ? !answerTextRef.current.trim() : !canSubmit) || compactionRunning) return;
 		const req: AnswerRequest = {
 			dontKnow: sel.dontKnow,
 			values: [...sel.selected].map((i) => qd.options[i]!.value),
@@ -410,6 +422,9 @@ function QuestionDockForm({
 		});
 		onSubmit(buildAnswer(qd, req, toolName));
 	};
+	// Uploads may take long enough for the learner to edit the visible answer.
+	// Continue with the latest form state after dictation, not the old closure.
+	latestSubmitRef.current = doSubmit;
 
 	/* ENTER SUBMITS FROM ANYWHERE (owner round 6, 2026-10-05): the same
 	 * law as the practice dock — dictated answers rarely focus the field.
