@@ -46,7 +46,7 @@ Web/dev writes `chatgpt-credentials.json`, `github-copilot-credentials.json`, an
 
 ChatGPT's callback listener is `127.0.0.1` on the **server's machine**; complete sign-in in a browser there. Copilot/Grok use device codes. Allow the initiating browser's sign-in tab if blocked; Electron dev opens provider pages in the system browser. Connected browsers share server credentials, background-use consent, keys, and learning data.
 
-This is **trusted local/shared development**, not multi-user hosting. Same-origin JSON/custom-header checks and short-lived, origin-bound, one-use browser-opening actions are not user authentication or DNS-rebinding protection. Do not expose the server to untrusted users/public Internet without an independent access/host gate. Per-user isolation, remote ChatGPT callback routing, and credential import are not implemented.
+This is **trusted local/shared development**, not multi-user hosting. Same-origin JSON/custom-header checks and short-lived, origin-bound, one-use browser-opening actions are not user authentication or DNS-rebinding protection. Do not expose the dev server to untrusted users/public Internet. The packaged desktop app's optional [LAN gateway](lan-access.md) is the independent gate (host allow-list, CSRF checks, optional password); it is for trusted networks only, not the public Internet. Per-user isolation, remote ChatGPT callback routing, and credential import are not implemented.
 
 ## Safe local work
 

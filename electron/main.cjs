@@ -38,6 +38,9 @@ const fs = require("node:fs");
 const http = require("node:http");
 const net = require("node:net");
 const path = require("node:path");
+const { createLanConfig } = require("./lan-config.cjs");
+const { createLanGateway } = require("./lan-gateway.cjs");
+const { createLanController } = require("./lan-controller.cjs");
 
 // Mirrors SIDEBAR_AUTOCLOSE in components/sidebar.tsx — keep in sync (the
 // renderer owns the number; this is the IPC widen target).
@@ -54,6 +57,8 @@ const PRODUCT_NAME = "LearnHarness";
 app.setName(PRODUCT_NAME);
 const AUTH_FILE = () => path.join(app.getPath("userData"), "auth.json");
 const DATA_DIR = () => path.join(app.getPath("userData"), "data");
+const LAN_FILE = () => path.join(app.getPath("userData"), "lan.json");
+let lan = null;
 
 /** The packaged standalone server (extraResources → Resources/server).
  *  In dev LH_DEV_URL short-circuits everything: no spawn, no packaging —
@@ -642,6 +647,7 @@ async function main() {
 
 	// The child must not outlive us — cover every quit path.
 	app.on("before-quit", killServer);
+	app.on("before-quit", () => void lan?.close().catch(() => {}));
 	process.on("exit", killServer);
 	process.on("SIGHUP", killServer);
 
@@ -709,6 +715,34 @@ async function main() {
 		if (!devUrl || !trustedAppWindows.has(BrowserWindow.fromWebContents(event.sender)) || !trustedSender(event, new URL(url).origin, BrowserWindow)) throw new Error("Untrusted development request.");
 		await openWebSubscriptionBrowser(action, new URL(url).origin, { openExternal: (target) => shell.openExternal(target) });
 	});
+
+	// LAN access (docs/lan-access.md): a gateway in front of the loopback server.
+	// Failures are log lines; they never block boot.
+	try {
+		lan = createLanController({
+			config: createLanConfig(LAN_FILE()),
+			createGateway: createLanGateway,
+			targetPort: Number(new URL(url).port),
+			getSecret: devUrl ? undefined : () => desktopAPISecret,
+		});
+		await lan.start();
+	} catch (err) {
+		log(`lan: start failed: ${err?.message ?? err}`);
+	}
+	const lanHandler = (channel, run) => ipcMain.handle(channel, async (event, arg) => {
+		if (!trustedAppWindows.has(BrowserWindow.fromWebContents(event.sender)) || !trustedSender(event, new URL(url).origin, BrowserWindow)) throw new Error("Untrusted desktop request.");
+		if (!lan) throw new Error("LAN access is unavailable.");
+		await run(lan, arg);
+		return lan.state();
+	});
+	ipcMain.handle("lh:lan:get", (event) => {
+		if (!trustedAppWindows.has(BrowserWindow.fromWebContents(event.sender)) || !trustedSender(event, new URL(url).origin, BrowserWindow)) throw new Error("Untrusted desktop request.");
+		if (!lan) throw new Error("LAN access is unavailable.");
+		return lan.state();
+	});
+	lanHandler("lh:lan:set-enabled", (c, enabled) => c.setEnabled(enabled === true));
+	lanHandler("lh:lan:set-port", (c, port) => c.setPort(port));
+	lanHandler("lh:lan:set-password", (c, password) => c.setPassword(password === null ? null : String(password)));
 
 	ipcMain.handle("lh:attachment:pick", (event, mode) => pickAttachmentPath(event, mode, {
 		BrowserWindow, dialog, trustedAppWindows, origin: new URL(url).origin,

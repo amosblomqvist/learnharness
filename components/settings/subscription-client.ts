@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useSyncExternalStore } from "react";
 import type { ChatGPTControlBridge, ChatGPTStatus, NativeSubscriptionControlBridge, NativeSubscriptionProviderId, NativeSubscriptionStatus } from "@/src/core";
 import { useNotifyHub, type createNotifyHub } from "@/components/server-events";
 
@@ -9,8 +9,20 @@ type Reply<T> = { value: T; browserAction?: string; error?: string };
 const PATH = "/api/subscriptions";
 const headers = { "Content-Type": "application/json", "x-learnharness-subscriptions": "1" };
 
+/** Packaged server (LH_DESKTOP_SERVER=1) answers 404 here: a browser on the
+ * LAN cannot manage sign-in. Client-only flag, false until the first 404. */
+let routeMissing = false;
+const routeListeners = new Set<() => void>();
+function setRouteMissing(value: boolean) { if (routeMissing !== value) { routeMissing = value; routeListeners.forEach((l) => l()); } }
+export function resetSubscriptionRouteMissing() { setRouteMissing(false); }
+export function useSubscriptionRouteMissing(): boolean {
+	const subscribe = (l: () => void) => { routeListeners.add(l); return () => { routeListeners.delete(l); }; };
+	return useSyncExternalStore(subscribe, () => routeMissing, () => false);
+}
+
 async function status() {
 	const response = await fetch(PATH, { headers, cache: "no-store" });
+	if (response.status === 404) setRouteMissing(true);
 	if (!response.ok) throw new Error("Subscription status is unavailable.");
 	return response.json() as Promise<{ chatgpt: ChatGPTStatus; native: NativeSubscriptionStatus[] }>;
 }

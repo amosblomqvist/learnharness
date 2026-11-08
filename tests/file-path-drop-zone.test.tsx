@@ -149,24 +149,34 @@ test("unfocused drop uses the dictation target registry, not the last focused ed
 	f.assertPathOnly();
 });
 
-test("browser drop prevents navigation, explains desktop-only local paths and never infers File.name", async () => {
+/** Browser build: a fetch stub that records uploads and answers with a host path. */
+function stubUpload(): { calls: { url: string; name: string }[] } {
+	const calls: { url: string; name: string }[] = [];
+	(globalThis as Record<string, unknown>).fetch = async (url: string, init: RequestInit) => {
+		const name = decodeURIComponent((init.headers as Record<string, string>)["x-file-name"] ?? "");
+		calls.push({ url, name });
+		return Response.json({ path: `/data/uploads/2026-11-05/abc-${name}` });
+	};
+	return { calls };
+}
+
+test("browser drop prevents navigation and uploads the files instead of inferring a path from File.name", async () => {
 	const f = await fixture({ desktop: false });
-	const transfer = f.transfer([f.file("/not/a/backing/path.pdf")]);
+	const upload = stubUpload();
+	const transfer = f.transfer([f.file("path.pdf")]);
 	const enter = await f.event("dragenter", transfer);
 	assert.equal(enter.defaultPrevented, true);
-	assert.match(f.doc.querySelector('[data-testid="file-path-drop-indicator"]')!.textContent!, /desktop app/);
+	assert.match(f.doc.querySelector('[data-testid="file-path-drop-indicator"]')!.textContent!, /upload/i);
 	const over = await f.event("dragover", transfer);
 	assert.equal(over.defaultPrevented, true);
 	assert.equal(transfer.dropEffect, "copy");
 	const drop = await f.event("drop", transfer);
 	assert.equal(drop.defaultPrevented, true);
-	assert.match(f.status, /Local file paths can only be attached in the desktop app/);
-	assert.match(f.status, /paste a full path instead/);
+	await act(async () => { await new Promise((r) => setTimeout(r, 10)); });
+	assert.deepEqual(upload.calls, [{ url: "/api/uploads", name: "path.pdf" }]);
+	assert.deepEqual(f.appends, ["`/data/uploads/2026-11-05/abc-path.pdf`"], "the returned host path, not File.name, enters the draft");
 	assert.equal(f.doc.querySelector('[data-testid="file-path-drop-indicator"]'), null);
-	assert.equal(f.value, "readthis");
-	assert.deepEqual(f.appends, []);
 	assert.deepEqual(f.resolved, []);
-	f.assertPathOnly();
 });
 
 test("mixed files and directories retain one original path each in drop order; invalid paths are skipped", async () => {
@@ -234,6 +244,9 @@ test("non-file drags stay native; sidebar file drops prevent navigation without 
 
 test("nested enter/leave depth keeps the drop overlay until the zone is left; notice is dismissible", async () => {
 	const f = await fixture({ desktop: false });
+	let release!: () => void;
+	const pending = new Promise<void>((resolve) => { release = resolve; });
+	(globalThis as Record<string, unknown>).fetch = async () => { await pending; return Response.json({ path: "/data/uploads/x-notes.pdf" }); };
 	const transfer = f.transfer([f.file("notes.pdf")]);
 	await f.event("dragenter", transfer);
 	await f.event("dragenter", transfer);
@@ -242,10 +255,11 @@ test("nested enter/leave depth keeps the drop overlay until the zone is left; no
 	await f.event("dragleave", transfer);
 	assert.equal(f.doc.querySelector('[data-testid="file-path-drop-indicator"]'), null);
 	await f.event("drop", transfer);
-	assert.notEqual(f.status, "");
+	assert.match(f.status, /Uploading 1 file/);
 	await act(async () => { f.doc.querySelector<HTMLElement>('[aria-label="Dismiss attachment notice"]')!.click(); });
 	assert.equal(f.status, "");
-	f.assertPathOnly();
+	release();
+	await act(async () => { await new Promise((r) => setTimeout(r, 10)); });
 });
 
 test("production AppShell places the sidebar outside its content-only drop zone", () => {

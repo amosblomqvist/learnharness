@@ -149,7 +149,7 @@ Chats and graph-family files have separate version guards; absent stamps read as
 
 ## Host and providers
 
-Packaged Electron launches a private standalone Next child on loopback, sets data/auth paths, and loads a sandboxed renderer. Its navigation/permission and credential transport guards are desktop boundaries, not web multi-user authentication. [Desktop releases](desktop-release.md) covers tracing/packaging checks.
+Packaged Electron launches a private standalone Next child on loopback, sets data/auth paths, and loads a sandboxed renderer. Its navigation/permission and credential transport guards are desktop boundaries, not web multi-user authentication. Other devices on a trusted network reach the app only through the optional [LAN gateway](lan-access.md) in Electron main, a proxy with its own host/CSRF guards and optional password; the loopback server and its desktop secret are unchanged. [Desktop releases](desktop-release.md) covers tracing/packaging checks.
 
 [`models.ts`](../src/agent/models.ts) composes Pi providers and app bridges. Strong/Cheap/Vision slots have no factory model pins. Sessions retain explicit choices; background roles resolve independently. Missing configuration/readiness refuses rather than silently choosing another provider.
 

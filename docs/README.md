@@ -4,6 +4,7 @@
 
 - [Getting started](getting-started.md) — connections, models, sessions, dictation, files, and notes imports.
 - [Keyboard shortcuts](keyboard.md) — defaults, rebinding, and navigation.
+- [LAN access](lan-access.md) — use the desktop app from a phone, tablet, or another computer on your network.
 - [Claude Code](claude-code.md) — use an installed CLI and troubleshoot its connection.
 - [Custom and local models](custom-providers.md) — configure an OpenAI-compatible endpoint.
 - [Context, caching, and costs](compaction-accounting.md) — understand the session meters and advanced cache preferences.

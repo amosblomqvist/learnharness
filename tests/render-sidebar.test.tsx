@@ -165,3 +165,12 @@ describe("SessionRow practice badge (practice sessions, 2026-10-04)", () => {
 		assert.match(html, /Problem waiting ·/);
 	});
 });
+
+describe("SessionRow touch menu (web-only)", () => {
+	it("desktop rows render no actions control; the browser one is gated by web-touch", () => {
+		assert.ok(!render(item({})).includes("session-menu"));
+		const html = renderToStaticMarkup(<SessionRow chat={item({})} active={false} onOpen={() => {}} onMenu={() => {}} />);
+		assert.ok(html.includes('data-testid="session-menu"'));
+		assert.ok(html.includes("hidden") && html.includes("web-touch:flex"), "hidden unless the web-touch variant matches");
+	});
+});

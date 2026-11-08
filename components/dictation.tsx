@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { Loader2Icon, MicIcon } from "lucide-react";
 import { useSettingsDialog } from "@/components/settings/settings-dialog";
 import { Hint } from "@/components/ui/hint";
@@ -642,7 +642,11 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
  *   error     the wide button again, label swapped for the failure reason
  *             (full text in the tooltip), cleared on the next click.
  */
+const noopSubscribe = () => () => {};
 export function DictationBar({ dictation }: { dictation: Dictation }) {
+	// Plain-HTTP LAN pages expose no microphone. Server snapshot stays true so
+	// the desktop window and localhost render exactly as before.
+	const secure = useSyncExternalStore(noopSubscribe, () => window.isSecureContext, () => true);
 	const { phase, error, levelRef, toggle, active, clearError } = dictation;
 	const { open: openSettings } = useSettingsDialog();
 	/** The keyless click (zero-keys wave, owner dictation trio): the errored
@@ -691,6 +695,7 @@ export function DictationBar({ dictation }: { dictation: Dictation }) {
 		return () => ro.disconnect();
 	}, [active]);
 
+	if (!secure) return null;
 	if (!active) {
 		return (
 			<Hint
