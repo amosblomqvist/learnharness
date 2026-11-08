@@ -6,7 +6,10 @@
  *
  * The seam is evaluated at MODULE LOAD, so the "set" case must set the env
  * BEFORE the first import of config.ts in this process (dynamic import,
- * below) and the "unset" case needs a fresh child process.
+ * below) and the "unset" case needs a fresh child process. Since the runner
+ * preflights LH_DATA_DIR into every test process (tests/preflight.mjs),
+ * the "unset" case must STRIP the seam from the child env explicitly —
+ * it can no longer rely on inheritance / not-running-under-the-script.
  */
 import assert from "node:assert/strict";
 import * as fs from "node:fs";
@@ -38,10 +41,13 @@ describe("LH_DATA_DIR seam", () => {
 	});
 
 	it("unset = the repo data/ exactly as before (fresh child process, no env)", () => {
+		// The preflight preloads LH_DATA_DIR into this runner process — the
+		// child must not inherit it (see tests/preflight.mjs, CHILD-SPAWN TRAP).
+		const { LH_DATA_DIR: _seam, LH_AUTH_FILE: _seamAuth, ...childEnv } = process.env;
 		const out = execFileSync(
 			process.execPath,
 			["--import", TSX_LOADER, "--eval", `const m = await import(${JSON.stringify(path.join(REPO_ROOT, "config.ts"))}); console.log(JSON.stringify({ data: m.PATHS.data, chats: m.PATHS.chats }));`],
-			{ cwd: REPO_ROOT, encoding: "utf-8" },
+			{ cwd: REPO_ROOT, encoding: "utf-8", env: childEnv },
 		);
 		const parsed = JSON.parse(out) as { data: string; chats: string | null };
 		assert.equal(parsed.data, path.join(REPO_ROOT, "data"));
