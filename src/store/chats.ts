@@ -86,7 +86,7 @@ function listChats(): ChatSummary[] {
 			.filter((f) => f.endsWith(".json"))
 			.map((f) => getChat(f.slice(0, -5)))
 			.filter((r): r is ChatRecord => r !== null)
-			.map(({ messages, tree, turns, extractions, imageSnapshots: _imageSnapshots, ...summary }) => {
+			.map(({ messages, tree, turns, extractions, imageSnapshots: _imageSnapshots, notes: _notes, ...summary }) => {
 				// Per-record isolation (Wave B): a record whose messages fail the
 				// projection (e.g. pre-Wave-B UIMessage-format scratch — the
 				// zero-back-compat wipe makes these "corrupt") must not blank the
@@ -187,6 +187,17 @@ function saveSettings(id: string, settings: ChatSettings): void {
 	writeChat(record);
 }
 
+/** Save the session notes; blank text deletes the field. Like saveSettings,
+ * no updatedAt bump and no event. False when the id is unknown. */
+function saveNotes(id: string, text: string): boolean {
+	const record = getChat(id);
+	if (!record) return false;
+	if (text.trim()) record.notes = text;
+	else delete record.notes;
+	writeChat(record);
+	return true;
+}
+
 /** Rename a session (the header's click-to-edit title, 2026-09-17). Like
  * saveSettings, a rename is NOT conversation activity: updatedAt stays put
  * so sidebar order never churns. Same fallback as createChat — the empty
@@ -235,6 +246,7 @@ export const chatStore: ChatStore = {
 	saveTree,
 	saveSettings,
 	renameChat,
+	saveNotes,
 	deleteChat,
 	appendTurnUsage,
 	appendExtractionUsage,

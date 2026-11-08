@@ -61,6 +61,8 @@ import { PracticeDock } from "@/components/practice-dock";
 import { ThinkingCard, type PracticeThinkingData } from "@/components/practice-cards";
 import { GraphContextCard, type GraphContextData } from "@/components/graph-context-card";
 import { TopBar } from "@/components/top-bar";
+import { NotesChip, NotesPanel } from "@/components/notes-panel";
+import { NotesController, NotesProvider } from "@/components/notes-state";
 import type { ArtifactPartProps, JobRecord, Phase3, QuestionAnswerData, QuestionFormDraft, TurnUsage, SessionPricing } from "@/src/core";
 import type { LhViewMessage } from "@/src/core";
 import { PhaseChip, PhaseDivider } from "@/components/phase-divider";
@@ -216,6 +218,7 @@ export function Chat({
 	chatId,
 	title,
 	initialMessages,
+	initialNotes,
 	initialError,
 	initialPrompt,
 	initiallyInFlight,
@@ -226,6 +229,7 @@ export function Chat({
 	chatId: string;
 	title: string;
 	initialMessages: LhMessage[];
+	initialNotes: string;
 	/** Memory-only settlement notice supplied on reopening. */
 	initialError?: string;
 	/** The session kind (practice sessions, owner 2026-10-04): practice
@@ -250,6 +254,7 @@ export function Chat({
 	// settled terminal's callback — a stable ref assigned below, once
 	// syncFromServer exists (refs, not closures: no stale capture).
 	const reattachSettledRef = useRef<() => void>(() => {});
+	const [notes] = useState(() => new NotesController(chatId, initialNotes));
 
 	// THE SESSION HOOK (Wave D, owner-approved 2026-09-26): the app-owned
 	// replacement for useChat + the AI-SDK transport. The record is native
@@ -1254,6 +1259,7 @@ export function Chat({
 	};
 
 	return (
+		<NotesProvider controller={notes}>
 		<ChatActionsContext.Provider
 			value={{
 				chatId,
@@ -1372,6 +1378,7 @@ export function Chat({
 						</button>
 </Hint>
 					)}
+					<NotesChip />
 					{/* The extraction ring (owner-locked redesign, 2026-09-24): fills
 					    with uncovered vs the chunk threshold, pulses while a run is in
 					    flight, vanishes when the graph is off. Click → the exact
@@ -1794,6 +1801,7 @@ export function Chat({
 				<AbortTurnDialog mode={abortAsk} onClose={() => setAbortAsk(null)} onConfirm={confirmAbort} busy={busy} />
 				</div>
 			</div>
+			<NotesPanel />
 		</div>
 		</JobsContext.Provider>
 		</SessionMermaidContext.Provider>
@@ -1813,6 +1821,7 @@ export function Chat({
 			}}
 		/>
 		</ChatActionsContext.Provider>
+		</NotesProvider>
 	);
 }
 

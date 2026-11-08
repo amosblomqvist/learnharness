@@ -55,6 +55,10 @@ Disconnecting a browser detaches a view, not the agent. Explicit abort is separa
 
 Question drafts survive optimistic unmount in memory. Uncertain submissions reconcile the saved record and running state before resending, scoped to the same question occurrence. Provider-response retry is explicit: it preserves failed attempts on disk while omitting the eligible failed tail from temporary model context. It is not mount-time replay or automatic retry of arbitrary failures.
 
+### Notes
+
+Each session has one learner notes page, stored as `ChatRecord.notes`: Markdown with `$…$`/`$$…$$` math, where `>` lines are the tutor's words. The field is absent when the text is empty. [`notes-state.tsx`](../components/notes-state.tsx) debounces edits into `PUT /api/chats/:id/notes` and flushes on `pagehide`. On mount it re-reads `GET /api/chats/:id/notes`, because Back/Forward can replay a stale page payload; local edits win. A save does not change `updatedAt` and emits no server event. [`notes-panel.tsx`](../components/notes-panel.tsx) sits right of the transcript, toggled by the top bar's Notes chip. It stays mounted while folded, so the CodeMirror [editor](../components/notes-editor.tsx) keeps its undo history; math renders with KaTeX except where the selection touches it. Notes never enter `messages`, agent context, extraction, coverage, or compaction.
+
 ## Teaching and practice
 
 [`teacher-agent.ts`](../src/agent/teacher-agent.ts) and the [tool registry](../src/agent/tools.ts) compose different agents over the same teaching history:
@@ -134,7 +138,7 @@ Extraction is the construction writer, not the only mutation: source/session/nod
 
 | Data | Files |
 | --- | --- |
-| Conversations, plans, usage, image snapshots | `chats/*.json` |
+| Conversations, plans, usage, image snapshots, notes | `chats/*.json` |
 | Worker computation and delivery obligations | `jobs/*.json` |
 | Propositions, chains, checkpoints, coverage | `graph/{nodes,chains,sessions,coverage}.jsonl` |
 | Sources, organization, positions, render preferences | JSON maps under `graph/` |
