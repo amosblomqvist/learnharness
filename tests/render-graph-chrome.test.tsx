@@ -32,6 +32,7 @@ const PROPS = {
 	settings: {} as GraphRenderSettings,
 	changeSettings: () => {},
 	onOpenChains: () => {},
+	onOpenStudy: () => {},
 };
 
 describe("GraphChromeRow — the empty-graph ruling (owner, 2026-09-25)", () => {
@@ -47,6 +48,7 @@ describe("GraphChromeRow — the empty-graph ruling (owner, 2026-09-25)", () => 
 		assert.ok(!html.includes("lucide-settings"), "settings is a lie on an empty graph");
 		assert.ok(html.includes('data-testid="open-chain-table"'), "source inventory includes chats/files without graph nodes");
 		assert.equal(html.split("graph-chrome-fade-in").length - 1, 1, "only the inventory button has the appearance animation");
+		assert.ok(html.includes('data-testid="open-study-time"'), "study time does not depend on the graph");
 	});
 
 	it("empty graph uses the same session-first lead and secondary material guidance as home", () => {
@@ -62,6 +64,7 @@ describe("GraphChromeRow — the empty-graph ruling (owner, 2026-09-25)", () => 
 		assert.ok(html.includes("Search nodes…"));
 		assert.ok(html.includes("lucide-settings"), "the settings gear renders");
 		assert.ok(html.includes('data-testid="open-chain-table"'), "the chains entry renders");
+		assert.ok(html.includes('data-testid="open-study-time"'), "the study time entry renders");
 		// the appear-once fade rides exactly the three gated controls, never Import Notes
 		assert.equal(html.split("graph-chrome-fade-in").length - 1, 3, "three fade carriers: search + chains + settings");
 	});

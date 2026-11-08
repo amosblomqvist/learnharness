@@ -7,6 +7,7 @@ import { InvertDiscIcon } from "@/components/artifacts/invert-disc";
 import { ChatActionsContext } from "@/components/chat";
 import { downloadFile, slugFilename } from "@/components/artifacts/download";
 import { DispatchCard } from "@/components/artifacts/dispatch-card";
+import { checkStudyFocus, noteStudyInput } from "@/components/study-tracker";
 import type { ArtifactPartProps, DemoResult } from "@/src/core";
 
 /**
@@ -42,6 +43,11 @@ if(typeof ResizeObserver!=="undefined"){new ResizeObserver(post).observe(documen
 window.addEventListener("resize",post);
 window.addEventListener("load",post);
 window.addEventListener("error",function(e){send({type:"demo-error",message:e.message||String(e)})});
+var lastIn=0,lx=null,ly=null;
+var note=function(){var n=Date.now();if(n-lastIn>=5000){lastIn=n;send({type:"demo-input"})}};
+["keydown","pointerdown","wheel","touchmove"].forEach(function(t){window.addEventListener(t,note,true)});
+window.addEventListener("pointermove",function(e){if(e.screenX!==lx||e.screenY!==ly){lx=e.screenX;ly=e.screenY;note()}},true);
+window.addEventListener("blur",function(){send({type:"demo-blur"})});
 setTimeout(post,50);
 setTimeout(post,400);
 })();</script>`;
@@ -163,6 +169,11 @@ function DemoFrame({
 			// Only messages from THIS demo's iframe (the sandbox gives it an
 			// opaque origin; the window reference still matches).
 			if (!iframeRef.current || event.source !== iframeRef.current.contentWindow) return;
+			// Study time (docs/designs/study-time.md): focus inside the sandboxed
+			// iframe never reaches the page's listeners, so the bridge forwards it.
+			const type = (event.data as { type?: unknown } | null)?.type;
+			if (type === "demo-input") noteStudyInput();
+			else if (type === "demo-blur") checkStudyFocus();
 			setState((prev) => reduceDemoBridgeState(prev, event.data));
 		};
 		window.addEventListener("message", onMessage);

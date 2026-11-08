@@ -268,3 +268,14 @@ describe("the graph channel gates (the wave's seam honoring)", () => {
 		assert.deepEqual(off.agent.graphTools, { enabled: false });
 	});
 });
+describe("studyTime resolution", () => {
+	it("absent record and absent fields resolve to the factory defaults", () => {
+		assert.deepEqual(resolveSettings(null).studyTime, { idleMinutes: 5, weekStart: "monday" });
+		assert.deepEqual(resolveSettings({ version: 1, studyTime: {} }).studyTime, { idleMinutes: 5, weekStart: "monday" });
+	});
+
+	it("explicit values win, each field independently", () => {
+		assert.deepEqual(resolveSettings({ version: 1, studyTime: { idleMinutes: 20 } }).studyTime, { idleMinutes: 20, weekStart: "monday" });
+		assert.deepEqual(resolveSettings({ version: 1, studyTime: { weekStart: "sunday" } }).studyTime, { idleMinutes: 5, weekStart: "sunday" });
+	});
+});
