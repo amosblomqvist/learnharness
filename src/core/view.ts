@@ -448,7 +448,7 @@ function projectMarker(marker: LhMarkerMessage, out: LhViewMessage[]): void {
 			out.push({
 				id: marker.id,
 				role: "user",
-				parts: [{ type: "data-practice-next", id: `pn_${marker.id}`, data: null }],
+				parts: [{ type: "data-practice-next", id: `pn_${marker.id}`, data: marker.details ?? null }],
 			});
 			return;
 		}

@@ -83,6 +83,7 @@ import {
 	teachStepIndex,
 	toolQuestionKind,
 	questionNeedsReveal,
+	teachPauseLive,
 } from "@/src/core";
 import { ReadingThinkingField } from "@/components/reading-thinking";
 import { currentUserThinkingOpen, setAllUserThinkingOpen } from "@/components/thinking-block";
@@ -758,7 +759,16 @@ export function Chat({
 	 * kind, nothing active, nothing in flight, and at least one problem
 	 * has ever been posed (the fresh session's opening turn is owed, not
 	 * the move-on). Enter-on-empty and the Next chip both key on it. */
-	const nextReady =
+	/* THE TEACHING PAUSE: after an answered quiz/explain the teacher
+	 * responds and stops; the composer is back for follow-ups, and the
+	 * same Next lane (button / Enter-on-empty) asks for the next question. */
+	const teachNextReady =
+		kind !== "practice" &&
+		!pending &&
+		!compacting &&
+		!busy &&
+		teachPauseLive(nativeMessages as LhMessage[]);
+	const nextReady = teachNextReady || (
 		kind === "practice" &&
 		!pending &&
 		!activeProblem &&
@@ -770,7 +780,7 @@ export function Chat({
 				(m as { content: Array<{ type?: string; name?: string }> }).content.some(
 					(b) => b.type === "toolCall" && b.name === "problem",
 				),
-		);
+		));
 	const sendNext = useCallback(() => {
 		if (!nextReady) return;
 		void send({ type: "next" });
@@ -1457,7 +1467,7 @@ export function Chat({
 														className="my-4 flex items-center justify-center gap-1.5 font-ui text-xs font-medium uppercase tracking-wide text-muted-foreground"
 													>
 														<ArrowRightIcon className="size-3" />
-														Next problem
+														{(part.data as { label?: string } | null)?.label ?? "Next problem"}
 													</div>
 												);
 											default:
@@ -1753,8 +1763,9 @@ export function Chat({
 							// IS the hint — empty state, exactly where Enter-on-empty
 							// applies.
 							nextProblem={nextReady}
+							nextLabel={teachNextReady ? "Next question" : undefined}
 							onNext={sendNext}
-							placeholder={nextReady ? "Ask anything, or press Enter for the next one." : undefined}
+							placeholder={teachNextReady ? "Ask a follow-up, or press Enter for the next question." : nextReady ? "Ask anything, or press Enter for the next one." : undefined}
 						/>
 					}
 					onSubmitAnswer={(output) => {

@@ -57,6 +57,7 @@ export function ChatSessionComposer({
 	onEscape,
 	placeholder,
 	nextProblem,
+	nextLabel,
 	onNext,
 }: {
 	busy: boolean;
@@ -72,6 +73,7 @@ export function ChatSessionComposer({
 	onEscape?: () => void;
 	placeholder?: string;
 	nextProblem?: boolean;
+	nextLabel?: string;
 	onNext?: () => void;
 }) {
 	const [draft, setDraft] = useState(value);
@@ -95,6 +97,7 @@ export function ChatSessionComposer({
 			onEscape={onEscape}
 			placeholder={placeholder}
 			nextProblem={nextProblem}
+			nextLabel={nextLabel}
 			onNext={onNext}
 		/>
 	);
@@ -112,6 +115,7 @@ export function Composer({
 	onEscape,
 	placeholder = "Ask, answer, or steer the lesson…",
 	nextProblem = false,
+	nextLabel = "Next problem",
 	onNext,
 }: {
 	busy: boolean;
@@ -135,6 +139,8 @@ export function Composer({
 	 *  composer fires the next-problem signal instead of doing nothing —
 	 *  the keyboard-first move-on. */
 	nextProblem?: boolean;
+	/** The Next button's label (the teaching pause says "Next question"). */
+	nextLabel?: string;
 	/** The signal's dispatcher (send({type:"next"})) — the chip and the
 	 *  empty-Enter share it. */
 	onNext?: () => void;
@@ -203,10 +209,10 @@ export function Composer({
 					<button
 						type="submit"
 						data-testid="next-problem-button"
-						aria-label="Next problem"
+						aria-label={nextLabel}
 						className="flex h-10 shrink-0 items-center justify-center gap-1.5 rounded-[10px] bg-green-600 px-4 font-ui text-xs font-medium uppercase tracking-wide text-white transition-colors hover:bg-green-500"
 					>
-						Next problem
+						{nextLabel}
 						<ArrowRightIcon className="size-4" />
 					</button>
 				) : (

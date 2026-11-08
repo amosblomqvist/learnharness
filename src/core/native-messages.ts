@@ -41,6 +41,8 @@ import {
 	CONCLUDE_ACK_TEXT,
 	HANDOFF_TEXT,
 	NEXT_PROBLEM_TEXT,
+	NEXT_QUESTION_TEXT,
+	TEACH_PAUSE_TEXT,
 	THINKING_LABEL,
 } from "./contracts/chat.ts";
 import { compactAnswerForModel, type QuestionAnswerData } from "./question-core.ts";
@@ -197,6 +199,15 @@ export function newUserSteer(text: string, id: string): LhMessage & UserMessage 
 	return { id, role: "user", content: text, timestamp: Date.now() };
 }
 
+/** The teaching tools whose answers open the follow-up pause. */
+const TEACH_PAUSE_TOOLS = ["quiz", "explain"];
+
+function answerForModel(toolName: string, answer: QuestionAnswerData): Record<string, unknown> {
+	const compact = compactAnswerForModel(answer);
+	const dismissed = (answer as { dismissed?: unknown } | null)?.dismissed === true;
+	return TEACH_PAUSE_TOOLS.includes(toolName) && !dismissed ? { ...compact, pause: TEACH_PAUSE_TEXT } : compact;
+}
+
 /** The learner's answer — the question call's tool result (fork 1).
  *  TWO AUDIENCES (owner, tool-result diet 2026-10-02): the MODEL sees the
  *  compact learner-only record (compactAnswerForModel — the call's own
@@ -213,7 +224,7 @@ export function newAnswerResult(
 		role: "toolResult",
 		toolCallId,
 		toolName,
-		content: [{ type: "text", text: JSON.stringify(compactAnswerForModel(answer as QuestionAnswerData)) }],
+		content: [{ type: "text", text: JSON.stringify(answerForModel(toolName, answer as QuestionAnswerData)) }],
 		// 0.87.1 narrowed ToolResultMessage.details to JsonRepresentation —
 		// our payloads are JSON-safe answer structures, so the cast is honest.
 		details: answer as ToolResultMessage["details"],
@@ -331,14 +342,14 @@ export function newThinkingMessage(problemCallId: string, text: string): LhMarke
  *  single-sourced NEXT_PROBLEM_TEXT — the model's unambiguous go-ahead;
  *  the transcript renders its own compact line off the marker (never
  *  the content). */
-export function newNextMessage(): LhMarkerMessage {
+export function newNextMessage(kind: "practice" | "teach" = "practice"): LhMarkerMessage {
 	return {
 		id: newMessageId(),
 		role: "custom",
 		customType: "practice-next",
-		content: NEXT_PROBLEM_TEXT,
+		content: kind === "teach" ? NEXT_QUESTION_TEXT : NEXT_PROBLEM_TEXT,
 		display: true,
-		details: {},
+		details: kind === "teach" ? { label: "Next question" } : {},
 		timestamp: Date.now(),
 	};
 }
@@ -739,6 +750,24 @@ export function questionCallsOf(messages: readonly LhMessage[]): QuestionCall[] 
 		return calls; // never revive older calls, even when this message has none
 	}
 	return [];
+}
+
+/** The teaching follow-up pause is live: the newest question call in the
+ *  record is a teaching quiz/explain that has been answered (nothing
+ *  pending). The learner can chat freely; Next asks for the next question. */
+export function teachPauseLive(messages: readonly LhMessage[]): boolean {
+	if (questionCallsOf(messages).length > 0) return false;
+	for (let mi = messages.length - 1; mi >= 0; mi--) {
+		const m = messages[mi]!;
+		if (m.role !== "assistant") continue;
+		for (let ci = m.content.length - 1; ci >= 0; ci--) {
+			const block = m.content[ci]!;
+			if (block.type === "toolCall" && (QUESTION_TOOLS as readonly string[]).includes(block.name)) {
+				return TEACH_PAUSE_TOOLS.includes(block.name);
+			}
+		}
+	}
+	return false;
 }
 
 /** Background wakes must still wait for an explicit learner action when a
