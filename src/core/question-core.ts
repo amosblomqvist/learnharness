@@ -151,6 +151,28 @@ export function quizInputProblems(input: {
 // tool-call boundary in execute — TypeBox carries the structure to the
 // model, the problems function carries the refinements.
 //
+/** The question figure cap — the SVG rides the call args, so it stays in
+ *  the model's context on every later turn. */
+export const FIGURE_MAX_CHARS = 20000;
+
+/** The optional stimulus figure, shared verbatim by the quiz and explain
+ *  bases (owner, 2026-10-27): LAST in the property order; parse-checked at
+ *  the call boundary (agent/subagents/headless.ts figureProblems). */
+const questionFigure = Type.Optional(
+	Type.String({
+		description:
+			"Optional figure shown beside the question: ONE complete <svg>…</svg> document with explicit width/height " +
+			"and a matching viewBox, a white background, dark strokes, and sans-serif labels. Where the learner answers it " +
+			// The dock's figure column caps near 327px (owner, 2026-10-31); answered cards keep natural size.
+			"is shown at most about 320 px wide (narrower on small screens), and a wider figure is scaled down with its " +
+			"text, so draw it at width 320 or less with text at least 12 px. It renders as a static image " +
+			"(no script, no interaction), and you never see it rendered, so plan the coordinates carefully. Prefer " +
+			"single-quoted attributes inside the JSON string. It is parsed at call time; malformed SVG, or more than " +
+			FIGURE_MAX_CHARS +
+			" characters, is returned to you to fix.",
+	}),
+);
+
 // Argument-order ruling (owner, 2026-09-25): the explanation is REASONING,
 // and reasoning happens BEFORE the answer is chosen — models emit tool
 // args in schema order, so explanation sits immediately BEFORE correctAnswer.
@@ -190,6 +212,7 @@ export const quizInputBase = Type.Object({
 	details: Type.Optional(
 		Type.String({ description: "Optional extra context or instructions shown under the question." }),
 	),
+	figure: questionFigure,
 });
 
 // The TEACH-side quiz object: the shared base + the plan-position field
@@ -315,6 +338,7 @@ export const explainInputBase = Type.Object({
 	details: Type.Optional(
 		Type.String({ description: "Optional extra context or instructions shown under the question." }),
 	),
+	figure: questionFigure,
 });
 
 /** The TEACH-side explain object: base + the plan-position field (same
