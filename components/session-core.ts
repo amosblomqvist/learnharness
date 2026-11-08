@@ -22,6 +22,7 @@ import {
 	measuredContextTokens,
 	newAnswerResult,
 	newNextMessage,
+	teachPauseLive,
 	newProblemDismissedMarker,
 	newThinkingMessage,
 	newUserMessage,
@@ -706,7 +707,9 @@ export class SessionModel {
 		} else if (input.type === "next") {
 			// The move-on signal (owner round 16): the NEXT PROBLEM line
 			// renders the instant the chip/Enter fires.
-			optimistic.push({ ...newNextMessage(), id: localId() });
+			// A teaching session's follow-up pause gets the teach marker.
+			const teach = teachPauseLive([...this.base, ...this.tail]);
+			optimistic.push({ ...newNextMessage(teach ? "teach" : "practice"), id: localId() });
 		} else if (input.type === "answer") {
 			const tool = pendingCallTool([...this.base, ...this.tail], input.toolCallId) ?? "quiz";
 			const result = { ...newAnswerResult(input.toolCallId, tool, input.answer), id: localId() };

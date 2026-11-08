@@ -27,6 +27,7 @@ import type { LhMessage } from "../src/core/native-messages.ts";
 import { newUserMessage, newAnswerResult, newThinkingMessage, needsContinuation, endsInDismissal, pendingQuestionOf } from "../src/core/native-messages.ts";
 import { endsInFailedTurn, newCompactionMarker, newPlanBlockMessage, projectView } from "../src/core/index.ts";
 import { buildProbeHandoffSteer, buildSubagentSteer } from "../src/core/contracts/jobs.ts";
+import { TEACH_PAUSE_TEXT } from "../src/core/contracts/chat.ts";
 import { dismissedAnswer } from "../src/core/question-core.ts";
 import { buildAnswer, type QuestionData } from "../src/core/question-core.ts";
 
@@ -1762,8 +1763,12 @@ describe("newAnswerResult two audiences", () => {
 			correct: true,
 			confidence: 70,
 			thinking: "guessed",
+			pause: TEACH_PAUSE_TEXT,
 		});
 		assert.equal(msg.details, full, "details is the full QuestionAnswerData verbatim");
+		// The teaching pause rides teaching quiz/explain answers only.
+		const probe = JSON.parse((newAnswerResult("call-2", "probe", full).content as { type: "text"; text: string }[])[0]!.text);
+		assert.equal(probe.pause, undefined);
 		assert.equal((msg.details as { questionText?: string }).questionText, "Which planet is closest to the Sun?");
 	});
 });

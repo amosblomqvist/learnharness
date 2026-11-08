@@ -222,6 +222,18 @@ export const CONCLUDE_ACK_TEXT =
 export const NEXT_PROBLEM_TEXT =
 	"[NEXT PROBLEM] — the learner's explicit go-ahead: pose the next problem now per the selection rules, or wrap the session in text if the arc is complete.";
 
+/** The teaching pause: the model-facing text of the next marker in a
+ *  teaching session (the learner's go-ahead after a check). */
+export const NEXT_QUESTION_TEXT =
+	"[NEXT QUESTION] — the learner's explicit go-ahead: continue the lesson now — teach the next step and pose its question (prediction or check), or repair first if the last answer showed a gap.";
+
+/** Rides every teaching quiz/explain answer the model reads: after
+ *  responding to an answer the turn ENDS, so the learner can ask
+ *  follow-ups in the chat box before the lesson moves on. Doctrine, like
+ *  the practice conclude pause — not a terminating tool result. */
+export const TEACH_PAUSE_TEXT =
+	"Respond to this answer (verdict, explanation, repair as needed), then END YOUR TURN — no further question tools. The next question waits for the learner: a [NEXT QUESTION] message, or their own follow-up words, which you answer before moving on.";
+
 /** The compaction marker's model-facing header (owner round 14,
  *  2026-10-05). The marker's content is this header + the summary — the
  *  single text the provider sees in place of the dropped span. Wording

@@ -28,7 +28,7 @@ import {
 } from "../src/core/native-messages.ts";
 import { CONCLUDE_ACK_TEXT } from "../src/core/contracts/chat.ts";
 import { dismissAppends, inputAppends, parseChatInput, parseDismissInput } from "../src/core/input-events.ts";
-import { modelSolutionForConclude } from "../src/core/native-messages.ts";
+import { modelSolutionForConclude, newAnswerResult, teachPauseLive } from "../src/core/native-messages.ts";
 import { projectView } from "../src/core/index.ts";
 
 // ── builders (native-shaped test fixtures) ───────────────────────────────────
@@ -248,9 +248,27 @@ describe("the next input", () => {
 		assert.match(marker.content, /\[NEXT PROBLEM\]/);
 	});
 
-	it("400s outside practice sessions (the affordance is practice-only)", () => {
-		assert.throws(() => inputAppends({ messages: [], kind: "teach" }, { type: "next" }), /practice-session/);
-		assert.throws(() => inputAppends({ messages: [] }, { type: "next" }), /practice-session/);
+	it("400s in teaching sessions outside the follow-up pause", () => {
+		assert.throws(() => inputAppends({ messages: [], kind: "teach" }, { type: "next" }), /teaching pause/);
+		assert.throws(() => inputAppends({ messages: [] }, { type: "next" }), /teaching pause/);
+	});
+
+	it("appends the teach marker during the pause after an answered quiz", () => {
+		const quiz = {
+			id: "a_quiz", role: "assistant", api: "x", provider: "x", model: "x",
+			usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
+			stopReason: "toolUse", timestamp: 0,
+			content: [{ type: "toolCall", id: "call_q", name: "quiz", arguments: {} }],
+		} as unknown as LhMessage;
+		const answered = [quiz, newAnswerResult("call_q", "quiz", { kind: "quiz", questionText: "q", dontKnow: false, answers: [], answeredAt: "t" })];
+		assert.equal(teachPauseLive([quiz]), false, "an unanswered quiz is still pending");
+		assert.equal(teachPauseLive(answered), true);
+		const appends = inputAppends({ messages: answered, kind: "teach" }, { type: "next" });
+		assert.equal(appends.length, 1);
+		const marker = appends[0] as { customType: string; content: string; details: { label?: string } };
+		assert.equal(marker.customType, "practice-next");
+		assert.match(marker.content, /\[NEXT QUESTION\]/);
+		assert.equal(marker.details.label, "Next question");
 	});
 
 	it("400s while a problem is active (mid-problem input rides the dock)", () => {

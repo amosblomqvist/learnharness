@@ -36,6 +36,7 @@ import {
 	danglingQuestionOf,
 	newAnswerResult,
 	newNextMessage,
+	teachPauseLive,
 	newProblemDismissedMarker,
 	newThinkingMessage,
 	newUserMessage,
@@ -245,8 +246,13 @@ export function inputAppends(
 			// between-problems affordance — practice sessions only, nothing
 			// active (mid-problem input rides the dock), and the client gates
 			// make violations unreachable in practice anyway.
+			// Teaching sessions get the same go-ahead during the follow-up
+			// pause after an answered quiz/explain.
 			if (record.kind !== "practice") {
-				throw new ChatInputError("next input is a practice-session affordance");
+				if (!teachPauseLive(record.messages)) {
+					throw new ChatInputError("next input requires the teaching pause after an answered question");
+				}
+				return [newNextMessage("teach")];
 			}
 			if (activeProblemOf(record.messages)) {
 				throw new ChatInputError("next input requires no active problem");
