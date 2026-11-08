@@ -5,7 +5,7 @@ import { Loader2Icon, MicIcon } from "lucide-react";
 import { useSettingsDialog } from "@/components/settings/settings-dialog";
 import { Hint } from "@/components/ui/hint";
 import { deepgramListenUrl, type DictationLanguage } from "@/src/core";
-import { useDictationLanguage } from "@/components/dictation-preference";
+import { useDictationLanguage, useDictationInputDevice } from "@/components/dictation-preference";
 import { setDictationActive } from "@/components/dictation-state";
 export { isDictationActive } from "@/components/dictation-state";
 
@@ -182,6 +182,35 @@ function ensureAudioGraph(): { ctx: AudioContext; module: Promise<void> } {
 	return { ctx: sharedCtx, module: workletModule };
 }
 
+/** The owner's tuned capture constraints (device aside). */
+const MIC_CONSTRAINTS = { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true } as const;
+
+/** getUserMedia errors that mean "the pinned device can't be opened" (gone,
+ *  busy, or unknown) — the only ones we swallow to fall back to the default.
+ *  Permission/other errors propagate to start()'s handler unchanged. */
+const DEVICE_UNAVAILABLE = new Set(["OverconstrainedError", "NotFoundError", "NotReadableError", "DevicesNotFoundError"]);
+
+/**
+ * Acquire the capture stream for the chosen input device.
+ *
+ * A pinned device needs `exact` to actually SWITCH — an `ideal` deviceId is a
+ * soft hint Chromium/Electron ignores, always handing back the system default
+ * (verified live 2026-11-03). `exact` throws when the device is gone, so the
+ * graceful fallback (owner decision) moves from the constraint into a catch:
+ * on a device-unavailable error we retry once UNCONSTRAINED, so a vanished pin
+ * degrades to the default instead of hard-failing. No pin = unconstrained.
+ */
+async function acquireMicStream(deviceId: string | undefined): Promise<MediaStream> {
+	if (!deviceId) return navigator.mediaDevices.getUserMedia({ audio: { ...MIC_CONSTRAINTS } });
+	try {
+		return await navigator.mediaDevices.getUserMedia({ audio: { ...MIC_CONSTRAINTS, deviceId: { exact: deviceId } } });
+	} catch (e) {
+		const name = e instanceof Error ? e.name : "";
+		if (DEVICE_UNAVAILABLE.has(name)) return navigator.mediaDevices.getUserMedia({ audio: { ...MIC_CONSTRAINTS } });
+		throw e;
+	}
+}
+
 /** RMS (0..1) → normalized 0..1 across the audible dB window. */
 export function rmsToMeter(rms: number): number {
 	if (rms <= 0) return 0;
@@ -283,6 +312,7 @@ export type Dictation = {
  */
 export function useDictation({ append }: { append: (text: string) => void }): Dictation {
 	const { getLanguage } = useDictationLanguage();
+	const { getInputDeviceId } = useDictationInputDevice();
 	const [phase, setPhase] = useState<DictationPhase>("idle");
 	const [error, setError] = useState<string | null>(null);
 	/** Latest RMS from the worklet — the meter samples this (dictate pattern). */
@@ -449,6 +479,18 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 		}
 		if (gen !== genRef.current) return;
 
+		// The pinned capture device (input-device selection wave). The section
+		// is already loaded (getLanguage above), so this resolves from the
+		// cached snapshot; a read failure is non-fatal — fall back to the
+		// system default rather than block dictation.
+		let inputDeviceId: string | undefined;
+		try {
+			inputDeviceId = await getInputDeviceId();
+		} catch {
+			inputDeviceId = undefined;
+		}
+		if (gen !== genRef.current) return;
+
 		// Mitigation D: the warm token (pre-minted at mount / after the last
 		// run) resolves ~instantly; a cold/keyless mint surfaces below. The
 		// mic is the long pole (macOS HAL + APM init) and gates everything —
@@ -457,9 +499,8 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 		// first use.
 		const tokenPromise = warmTokens.mint();
 		tokenPromise.catch(() => {}); // surfaced below; no unhandled rejection
-		const micPromise = navigator.mediaDevices.getUserMedia({
-			audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true },
-		});
+		// `exact` pin + graceful fallback on a missing device (see acquireMicStream).
+		const micPromise = acquireMicStream(inputDeviceId);
 		let stream: MediaStream;
 		try {
 			stream = await micPromise;
@@ -525,7 +566,7 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 		// Mitigation B: the handshake fires the moment the graph is live,
 		// overlapping any remaining token wait — mic-gated, never before it.
 		openSocket(gen, token, language);
-	}, [openSocket, cleanup, getLanguage]);
+	}, [openSocket, cleanup, getLanguage, getInputDeviceId]);
 
 	const stop = useCallback(() => {
 		const gen = genRef.current;
